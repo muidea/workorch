@@ -19,10 +19,12 @@ func main() {
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
 	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
 
 	workspaceManager := workspace.NewGoalDoDManager(workspaceRepo)
 	runtimeAdapter := legacy.NewMinimalRuntimeAdapter()
-	runtimeOrchestrator := orchestrator.NewRuntimeOrchestrator(runtimeAdapter, runRepo, stepRepo, workspaceRepo)
+	runtimeOrchestrator := orchestrator.NewRuntimeOrchestrator(runtimeAdapter, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 	runService := runsvc.NewService(runRepo, workspaceRepo, runtimeOrchestrator)
 
 	workspaceID := common.WorkspaceID("ws-phase1")

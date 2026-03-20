@@ -16,6 +16,10 @@ type CreateApprovalCommand struct {
 	Reason      string
 }
 
+type ResolveApprovalCommand struct {
+	ApprovalID common.ApprovalID
+}
+
 type Service struct {
 	approvals repository.ApprovalRepository
 }
@@ -38,4 +42,29 @@ func (s *Service) CreateApproval(ctx context.Context, cmd CreateApprovalCommand)
 		State:       common.ApprovalStatePending,
 	}
 	return s.approvals.Create(ctx, item)
+}
+
+func (s *Service) Approve(ctx context.Context, cmd ResolveApprovalCommand) error {
+	return s.resolve(ctx, cmd.ApprovalID, common.ApprovalStateApproved)
+}
+
+func (s *Service) Reject(ctx context.Context, cmd ResolveApprovalCommand) error {
+	return s.resolve(ctx, cmd.ApprovalID, common.ApprovalStateRejected)
+}
+
+func (s *Service) resolve(ctx context.Context, approvalID common.ApprovalID, target common.ApprovalState) error {
+	if approvalID == "" {
+		return common.ErrInvalidArgument
+	}
+
+	item, err := s.approvals.Get(ctx, approvalID)
+	if err != nil {
+		return err
+	}
+	if item.State != common.ApprovalStatePending {
+		return common.ErrConflict
+	}
+
+	item.State = target
+	return s.approvals.Update(ctx, item)
 }

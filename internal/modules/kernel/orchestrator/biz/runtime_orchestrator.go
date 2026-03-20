@@ -18,10 +18,26 @@ type RuntimeOrchestrator struct {
 	runs       repository.RunRepository
 	steps      repository.StepRepository
 	workspaces repository.WorkspaceRepository
+	tickets    repository.DecisionTicketRepository
+	approvals  repository.ApprovalRepository
 }
 
-func NewRuntimeOrchestrator(runtime RuntimeAdapter, runs repository.RunRepository, steps repository.StepRepository, workspaces repository.WorkspaceRepository) *RuntimeOrchestrator {
-	return &RuntimeOrchestrator{runtime: runtime, runs: runs, steps: steps, workspaces: workspaces}
+func NewRuntimeOrchestrator(
+	runtime RuntimeAdapter,
+	runs repository.RunRepository,
+	steps repository.StepRepository,
+	workspaces repository.WorkspaceRepository,
+	tickets repository.DecisionTicketRepository,
+	approvals repository.ApprovalRepository,
+) *RuntimeOrchestrator {
+	return &RuntimeOrchestrator{
+		runtime:    runtime,
+		runs:       runs,
+		steps:      steps,
+		workspaces: workspaces,
+		tickets:    tickets,
+		approvals:  approvals,
+	}
 }
 
 func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) error {
@@ -120,6 +136,8 @@ func (o *RuntimeOrchestrator) BlockOnDecision(ctx context.Context, runID common.
 		return err
 	}
 	r.State = common.RunStateBlockedOnDecision
+	r.BlockingTicketID = ticketID
+	r.BlockingApprovalID = ""
 	return o.runs.Update(ctx, r)
 }
 
@@ -132,6 +150,8 @@ func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.
 		return err
 	}
 	r.State = common.RunStateBlockedOnApproval
+	r.BlockingApprovalID = approvalID
+	r.BlockingTicketID = ""
 	return o.runs.Update(ctx, r)
 }
 
@@ -143,9 +163,36 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 	if err != nil {
 		return err
 	}
-	if r.State != common.RunStateBlockedOnDecision && r.State != common.RunStateBlockedOnApproval {
+
+	switch r.State {
+	case common.RunStateBlockedOnDecision:
+		if r.BlockingTicketID == "" || o.tickets == nil {
+			return common.ErrConflict
+		}
+		ticket, err := o.tickets.Get(ctx, r.BlockingTicketID)
+		if err != nil {
+			return err
+		}
+		if ticket.State != common.DecisionTicketStateResolved {
+			return common.ErrBlocked
+		}
+		r.BlockingTicketID = ""
+	case common.RunStateBlockedOnApproval:
+		if r.BlockingApprovalID == "" || o.approvals == nil {
+			return common.ErrConflict
+		}
+		approval, err := o.approvals.Get(ctx, r.BlockingApprovalID)
+		if err != nil {
+			return err
+		}
+		if approval.State != common.ApprovalStateApproved && approval.State != common.ApprovalStateRejected {
+			return common.ErrBlocked
+		}
+		r.BlockingApprovalID = ""
+	default:
 		return common.ErrConflict
 	}
+
 	r.State = common.RunStateRunning
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
@@ -162,6 +209,8 @@ func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunI
 		return err
 	}
 	r.State = common.RunStateCompleted
+	r.BlockingTicketID = ""
+	r.BlockingApprovalID = ""
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
@@ -186,6 +235,8 @@ func (o *RuntimeOrchestrator) FailRun(ctx context.Context, runID common.RunID, r
 		return err
 	}
 	r.State = common.RunStateFailed
+	r.BlockingTicketID = ""
+	r.BlockingApprovalID = ""
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}

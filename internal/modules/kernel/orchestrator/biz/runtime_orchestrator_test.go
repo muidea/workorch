@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -30,8 +32,10 @@ func TestRuntimeOrchestrator_StartRunToComplete_Mainline(t *testing.T) {
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
 	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
 	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "ok"}}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo)
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-1")
 	runID := common.RunID("run-1")
@@ -83,8 +87,10 @@ func TestRuntimeOrchestrator_StartRun_RuntimeFailureMarksRunAndStepFailed(t *tes
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
 	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
 	runtime := &stubRuntimeAdapter{err: errors.New("runtime exploded")}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo)
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-1")
 	runID := common.RunID("run-1")
@@ -124,5 +130,81 @@ func TestRuntimeOrchestrator_StartRun_RuntimeFailureMarksRunAndStepFailed(t *tes
 	}
 	if step.Output["reason"] != "runtime exploded" {
 		t.Fatalf("step output reason = %v, want runtime exploded", step.Output["reason"])
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeRunRequiresResolvedTicket(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "ok"}}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
+
+	workspaceID := common.WorkspaceID("ws-1")
+	runID := common.RunID("run-1")
+	ticketID := common.TicketID("ticket-1")
+	_ = workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID})
+	_ = runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateBlockedOnDecision, BlockingTicketID: ticketID})
+	_ = ticketRepo.Create(ctx, &decisionmodel.Ticket{ID: ticketID, WorkspaceID: workspaceID, RunID: runID, State: common.DecisionTicketStateOpen})
+
+	if err := orch.ResumeRun(ctx, runID); !errors.Is(err, common.ErrBlocked) {
+		t.Fatalf("resume blocked by open ticket err = %v, want blocked", err)
+	}
+
+	ticket, _ := ticketRepo.Get(ctx, ticketID)
+	ticket.State = common.DecisionTicketStateResolved
+	_ = ticketRepo.Update(ctx, ticket)
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume after ticket resolved: %v", err)
+	}
+
+	r, _ := runRepo.Get(ctx, runID)
+	if r.State != common.RunStateCompleted {
+		t.Fatalf("run state = %q, want completed", r.State)
+	}
+	if r.BlockingTicketID != "" {
+		t.Fatalf("blocking ticket = %q, want empty", r.BlockingTicketID)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeRunRequiresResolvedApproval(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "ok"}}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
+
+	workspaceID := common.WorkspaceID("ws-1")
+	runID := common.RunID("run-1")
+	approvalID := common.ApprovalID("approval-1")
+	_ = workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID})
+	_ = runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateBlockedOnApproval, BlockingApprovalID: approvalID})
+	_ = approvalRepo.Create(ctx, &approvalmodel.Approval{ID: approvalID, WorkspaceID: workspaceID, RunID: runID, State: common.ApprovalStatePending})
+
+	if err := orch.ResumeRun(ctx, runID); !errors.Is(err, common.ErrBlocked) {
+		t.Fatalf("resume blocked by pending approval err = %v, want blocked", err)
+	}
+
+	approval, _ := approvalRepo.Get(ctx, approvalID)
+	approval.State = common.ApprovalStateApproved
+	_ = approvalRepo.Update(ctx, approval)
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume after approval resolved: %v", err)
+	}
+
+	r, _ := runRepo.Get(ctx, runID)
+	if r.State != common.RunStateCompleted {
+		t.Fatalf("run state = %q, want completed", r.State)
+	}
+	if r.BlockingApprovalID != "" {
+		t.Fatalf("blocking approval = %q, want empty", r.BlockingApprovalID)
 	}
 }

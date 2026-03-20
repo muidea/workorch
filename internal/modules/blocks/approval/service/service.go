@@ -14,6 +14,12 @@ type CreateApprovalCommand struct {
 	Reason      string
 }
 
+type ResolveApprovalCommand struct {
+	ApprovalID common.ApprovalID
+}
+
 type Service interface {
 	CreateApproval(context.Context, CreateApprovalCommand) error
+	Approve(context.Context, ResolveApprovalCommand) error
+	Reject(context.Context, ResolveApprovalCommand) error
 }

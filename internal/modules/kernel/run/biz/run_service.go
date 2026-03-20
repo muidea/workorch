@@ -63,6 +63,15 @@ func (s *Service) ResumeRun(ctx context.Context, cmd contracts.ResumeRunCommand)
 	if s.orchestrator == nil {
 		return common.ErrInvalidArgument
 	}
+
+	r, err := s.runs.Get(ctx, cmd.RunID)
+	if err != nil {
+		return err
+	}
+	if r.State != common.RunStateBlockedOnDecision && r.State != common.RunStateBlockedOnApproval {
+		return common.ErrConflict
+	}
+
 	return s.orchestrator.ResumeRun(ctx, cmd.RunID)
 }
 
@@ -99,6 +108,8 @@ func (s *Service) CompleteRun(ctx context.Context, cmd contracts.CompleteRunComm
 		return err
 	}
 	r.State = common.RunStateCompleted
+	r.BlockingTicketID = ""
+	r.BlockingApprovalID = ""
 	return s.runs.Update(ctx, r)
 }
 
@@ -115,5 +126,7 @@ func (s *Service) FailRun(ctx context.Context, cmd contracts.FailRunCommand) err
 		return err
 	}
 	r.State = common.RunStateFailed
+	r.BlockingTicketID = ""
+	r.BlockingApprovalID = ""
 	return s.runs.Update(ctx, r)
 }

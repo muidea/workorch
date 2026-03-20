@@ -14,6 +14,14 @@ type CreateTicketCommand struct {
 	Reason      string
 }
 
+type ResolveTicketCommand struct {
+	ResolutionID common.ResolutionID
+	TicketID     common.TicketID
+	Type         string
+	Payload      map[string]any
+}
+
 type DecisionService interface {
 	CreateTicket(context.Context, CreateTicketCommand) error
+	ResolveTicket(context.Context, ResolveTicketCommand) error
 }

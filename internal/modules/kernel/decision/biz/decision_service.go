@@ -10,11 +10,12 @@ import (
 )
 
 type Service struct {
-	tickets repository.DecisionTicketRepository
+	tickets     repository.DecisionTicketRepository
+	resolutions repository.DecisionResolutionRepository
 }
 
-func NewService(tickets repository.DecisionTicketRepository) *Service {
-	return &Service{tickets: tickets}
+func NewService(tickets repository.DecisionTicketRepository, resolutions repository.DecisionResolutionRepository) *Service {
+	return &Service{tickets: tickets, resolutions: resolutions}
 }
 
 func (s *Service) CreateTicket(ctx context.Context, cmd contracts.CreateTicketCommand) error {
@@ -31,4 +32,31 @@ func (s *Service) CreateTicket(ctx context.Context, cmd contracts.CreateTicketCo
 		State:       common.DecisionTicketStateOpen,
 	}
 	return s.tickets.Create(ctx, item)
+}
+
+func (s *Service) ResolveTicket(ctx context.Context, cmd contracts.ResolveTicketCommand) error {
+	if cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
+		return common.ErrInvalidArgument
+	}
+
+	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
+	if err != nil {
+		return err
+	}
+	if ticket.State != common.DecisionTicketStateOpen {
+		return common.ErrConflict
+	}
+
+	resolution := &decisionModel.Resolution{
+		ID:       cmd.ResolutionID,
+		TicketID: cmd.TicketID,
+		Type:     cmd.Type,
+		Payload:  cmd.Payload,
+	}
+	if err := s.resolutions.Create(ctx, resolution); err != nil {
+		return err
+	}
+
+	ticket.State = common.DecisionTicketStateResolved
+	return s.tickets.Update(ctx, ticket)
 }
