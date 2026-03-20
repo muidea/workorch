@@ -1,0 +1,14 @@
+package repository
+
+import (
+	"context"
+
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
+)
+
+type DoDRepository interface {
+	Create(context.Context, *workspace.DoD) error
+	Get(context.Context, common.DoDID) (*workspace.DoD, error)
+	Update(context.Context, *workspace.DoD) error
+}
