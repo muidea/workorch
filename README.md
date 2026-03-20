@@ -15,3 +15,17 @@ Phase1 minimal skeleton, rectified to the go-multi-module-dev multi-module layou
 - kernel: `workspace`, `run`, `decision`, `orchestrator`
 - blocks: `approval`, `legacy`
 - shared contracts/events/repository moved under `internal/pkg`
+
+## Phase1 acceptance demo
+
+Run:
+
+```bash
+go run ./application/workorchd
+```
+
+Expected observable output:
+
+- `phase1 runnable slice`: shows workspace/run/step reaching `completed`
+- `phase1 blocked-resume slice`: shows a decision ticket being created, resolved, then the run resuming to `completed`
+- `observed`: emits minimal envelope-style JSON snapshots for workspace/run/step/blocking objects, only as acceptance output, not a full event bus
