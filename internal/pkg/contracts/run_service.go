@@ -14,6 +14,18 @@ type CreateRunCommand struct {
 }
 
 type StartRunCommand struct{ RunID common.RunID }
+type ResumeRunCommand struct{ RunID common.RunID }
+
+type BlockOnDecisionCommand struct {
+	RunID    common.RunID
+	TicketID common.TicketID
+}
+
+type BlockOnApprovalCommand struct {
+	RunID      common.RunID
+	ApprovalID common.ApprovalID
+}
+
 type CompleteRunCommand struct{ RunID common.RunID }
 type FailRunCommand struct {
 	RunID  common.RunID
@@ -23,6 +35,9 @@ type FailRunCommand struct {
 type RunService interface {
 	CreateRun(context.Context, CreateRunCommand) error
 	StartRun(context.Context, StartRunCommand) error
+	ResumeRun(context.Context, ResumeRunCommand) error
+	BlockOnDecision(context.Context, BlockOnDecisionCommand) error
+	BlockOnApproval(context.Context, BlockOnApprovalCommand) error
 	CompleteRun(context.Context, CompleteRunCommand) error
 	FailRun(context.Context, FailRunCommand) error
 }

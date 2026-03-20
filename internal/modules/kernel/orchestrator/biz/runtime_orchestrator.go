@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -64,17 +65,34 @@ func (o *RuntimeOrchestrator) DispatchNextStep(ctx context.Context, runID common
 		return err
 	}
 
-	step := &runModel.Step{
-		ID:    common.StepID(string(runID) + "/step-1"),
-		RunID: runID,
-		Kind:  "legacy/minimal",
-		State: common.StepStateDispatched,
-		Input: map[string]any{
-			"workspaceId": string(r.WorkspaceID),
-		},
-	}
-	if err := o.steps.Create(ctx, step); err != nil {
-		return err
+	stepID := common.StepID(fmt.Sprintf("%s/step-1", runID))
+	step, err := o.steps.Get(ctx, stepID)
+	if err != nil {
+		if err != common.ErrNotFound {
+			return err
+		}
+		step = &runModel.Step{
+			ID:    stepID,
+			RunID: runID,
+			Kind:  "legacy/minimal",
+			State: common.StepStateDispatched,
+			Input: map[string]any{
+				"workspaceId": string(r.WorkspaceID),
+			},
+		}
+		if err := o.steps.Create(ctx, step); err != nil {
+			return err
+		}
+	} else {
+		step.State = common.StepStateDispatched
+		if step.Input == nil {
+			step.Input = map[string]any{
+				"workspaceId": string(r.WorkspaceID),
+			}
+		}
+		if err := o.steps.Update(ctx, step); err != nil {
+			return err
+		}
 	}
 
 	output, err := o.runtime.ExecuteStep(ctx, runID, step.ID)
@@ -120,6 +138,17 @@ func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.
 func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID) error {
 	if runID == "" {
 		return common.ErrInvalidArgument
+	}
+	r, err := o.runs.Get(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if r.State != common.RunStateBlockedOnDecision && r.State != common.RunStateBlockedOnApproval {
+		return common.ErrConflict
+	}
+	r.State = common.RunStateRunning
+	if err := o.runs.Update(ctx, r); err != nil {
+		return err
 	}
 	return o.DispatchNextStep(ctx, runID)
 }

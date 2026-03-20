@@ -11,6 +11,9 @@ import (
 
 type Orchestrator interface {
 	StartRun(context.Context, common.RunID) error
+	BlockOnDecision(context.Context, common.RunID, common.TicketID) error
+	BlockOnApproval(context.Context, common.RunID, common.ApprovalID) error
+	ResumeRun(context.Context, common.RunID) error
 	CompleteRun(context.Context, common.RunID) error
 	FailRun(context.Context, common.RunID, string) error
 }
@@ -51,6 +54,36 @@ func (s *Service) StartRun(ctx context.Context, cmd contracts.StartRunCommand) e
 		return common.ErrInvalidArgument
 	}
 	return s.orchestrator.StartRun(ctx, cmd.RunID)
+}
+
+func (s *Service) ResumeRun(ctx context.Context, cmd contracts.ResumeRunCommand) error {
+	if cmd.RunID == "" {
+		return common.ErrInvalidArgument
+	}
+	if s.orchestrator == nil {
+		return common.ErrInvalidArgument
+	}
+	return s.orchestrator.ResumeRun(ctx, cmd.RunID)
+}
+
+func (s *Service) BlockOnDecision(ctx context.Context, cmd contracts.BlockOnDecisionCommand) error {
+	if cmd.RunID == "" || cmd.TicketID == "" {
+		return common.ErrInvalidArgument
+	}
+	if s.orchestrator == nil {
+		return common.ErrInvalidArgument
+	}
+	return s.orchestrator.BlockOnDecision(ctx, cmd.RunID, cmd.TicketID)
+}
+
+func (s *Service) BlockOnApproval(ctx context.Context, cmd contracts.BlockOnApprovalCommand) error {
+	if cmd.RunID == "" || cmd.ApprovalID == "" {
+		return common.ErrInvalidArgument
+	}
+	if s.orchestrator == nil {
+		return common.ErrInvalidArgument
+	}
+	return s.orchestrator.BlockOnApproval(ctx, cmd.RunID, cmd.ApprovalID)
 }
 
 func (s *Service) CompleteRun(ctx context.Context, cmd contracts.CompleteRunCommand) error {
