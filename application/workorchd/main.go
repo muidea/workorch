@@ -103,11 +103,17 @@ func main() {
 	}
 	printSnapshot("phase1 runnable slice", runnable)
 
-	blockedResume, err := runBlockedResumeSlice(ctx)
+	decisionBlockedResume, err := runDecisionBlockedResumeSlice(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
-	printSnapshot("phase1 blocked-resume slice", blockedResume)
+	printSnapshot("phase1 decision-blocked-resume slice", decisionBlockedResume)
+
+	approvalBlockedResume, err := runApprovalBlockedResumeSlice(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	printSnapshot("phase1 approval-blocked-resume slice", approvalBlockedResume)
 }
 
 func newRuntime() *runtime {
@@ -165,17 +171,17 @@ func runRunnableSlice(ctx context.Context, rt *runtime) (*snapshot, error) {
 	return rt.snapshot(ctx, "runnable", workspaceID, runID, stepID, nil)
 }
 
-func runBlockedResumeSlice(ctx context.Context) (*snapshot, error) {
+func runDecisionBlockedResumeSlice(ctx context.Context) (*snapshot, error) {
 	rt := newRuntime()
 
-	workspaceID := common.WorkspaceID("ws-phase1-blocked")
-	runID := common.RunID("run-phase1-blocked")
-	stepID := common.StepID("run-phase1-blocked/manual-gate")
-	ticketID := common.TicketID("ticket-phase1-blocked")
+	workspaceID := common.WorkspaceID("ws-phase1-blocked-decision")
+	runID := common.RunID("run-phase1-blocked-decision")
+	stepID := common.StepID("run-phase1-blocked-decision/manual-gate")
+	ticketID := common.TicketID("ticket-phase1-blocked-decision")
 
 	if err := rt.workspaceManager.CreateWorkspace(ctx, contracts.CreateWorkspaceCommand{
 		WorkspaceID: workspaceID,
-		Title:       "phase1-blocked-resume",
+		Title:       "phase1-decision-blocked-resume",
 	}); err != nil {
 		return nil, err
 	}
@@ -205,7 +211,7 @@ func runBlockedResumeSlice(ctx context.Context) (*snapshot, error) {
 	}
 
 	if err := rt.decisionService.ResolveTicket(ctx, contracts.ResolveTicketCommand{
-		ResolutionID: common.ResolutionID("resolution-phase1-blocked"),
+		ResolutionID: common.ResolutionID("resolution-phase1-blocked-decision"),
 		TicketID:     ticketID,
 		Type:         "approve_path",
 		Payload: map[string]any{
@@ -220,7 +226,58 @@ func runBlockedResumeSlice(ctx context.Context) (*snapshot, error) {
 	}
 
 	resumedStepID := common.StepID(fmt.Sprintf("%s/step-1", runID))
-	return rt.snapshot(ctx, "blocked_resume", workspaceID, runID, resumedStepID, &blockingRefs{ticketID: ticketID})
+	return rt.snapshot(ctx, "decision_blocked_resume", workspaceID, runID, resumedStepID, &blockingRefs{ticketID: ticketID})
+}
+
+func runApprovalBlockedResumeSlice(ctx context.Context) (*snapshot, error) {
+	rt := newRuntime()
+
+	workspaceID := common.WorkspaceID("ws-phase1-blocked-approval")
+	runID := common.RunID("run-phase1-blocked-approval")
+	stepID := common.StepID("run-phase1-blocked-approval/manual-approval")
+	approvalID := common.ApprovalID("approval-phase1-blocked-approval")
+
+	if err := rt.workspaceManager.CreateWorkspace(ctx, contracts.CreateWorkspaceCommand{
+		WorkspaceID: workspaceID,
+		Title:       "phase1-approval-blocked-resume",
+	}); err != nil {
+		return nil, err
+	}
+
+	if err := rt.runService.CreateRun(ctx, contracts.CreateRunCommand{
+		RunID:       runID,
+		WorkspaceID: workspaceID,
+	}); err != nil {
+		return nil, err
+	}
+
+	if err := rt.approvalService.CreateApproval(ctx, approvalbiz.CreateApprovalCommand{
+		ApprovalID:  approvalID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		Reason:      "phase1 manual approval gate",
+	}); err != nil {
+		return nil, err
+	}
+
+	if err := rt.runService.BlockOnApproval(ctx, contracts.BlockOnApprovalCommand{
+		RunID:      runID,
+		ApprovalID: approvalID,
+	}); err != nil {
+		return nil, err
+	}
+
+	if err := rt.approvalService.Approve(ctx, approvalbiz.ResolveApprovalCommand{ApprovalID: approvalID}); err != nil {
+		return nil, err
+	}
+
+	if err := rt.runService.ResumeRun(ctx, contracts.ResumeRunCommand{RunID: runID}); err != nil {
+		return nil, err
+	}
+
+	resumedStepID := common.StepID(fmt.Sprintf("%s/step-1", runID))
+	return rt.snapshot(ctx, "approval_blocked_resume", workspaceID, runID, resumedStepID, &blockingRefs{approvalID: approvalID})
 }
 
 func (rt *runtime) snapshot(ctx context.Context, slice string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, refs *blockingRefs) (*snapshot, error) {
@@ -309,7 +366,7 @@ type blockingRefs struct {
 
 func printBanner() {
 	fmt.Fprintln(os.Stdout, "== workorch phase1 observable demo ==")
-	fmt.Fprintln(os.Stdout, "acceptance target: runnable slice + blocked->resume slice")
+	fmt.Fprintln(os.Stdout, "acceptance target: runnable slice + decision/approval blocked->resume slices")
 }
 
 func printSnapshot(title string, data *snapshot) {
