@@ -2,12 +2,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"time"
 
+	"github.com/muidea/workorch/application/workorchd/presenter"
 	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	legacy "github.com/muidea/workorch/internal/modules/blocks/legacy/biz"
@@ -17,10 +16,8 @@ import (
 	runsvc "github.com/muidea/workorch/internal/modules/kernel/run/biz"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/biz"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/contracts"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -31,89 +28,41 @@ type runtime struct {
 	ticketRepo    *memory.DecisionTicketRepository
 	approvalRepo  *memory.ApprovalRepository
 
-	workspaceManager    *workspace.GoalDoDManager
-	decisionService     *decisionbiz.Service
-	approvalService     *approvalbiz.Service
-	runtimeOrchestrator *orchestrator.RuntimeOrchestrator
-	runService          *runsvc.Service
-}
-
-type snapshot struct {
-	Slice     string            `json:"slice"`
-	Workspace *workspaceView    `json:"workspace"`
-	Run       *runView          `json:"run"`
-	Step      *stepView         `json:"step,omitempty"`
-	Blocking  *blockingView     `json:"blocking,omitempty"`
-	Observed  []events.Envelope `json:"observed"`
-}
-
-type workspaceView struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	State       string `json:"state"`
-	ActiveRunID string `json:"activeRunId"`
-}
-
-type runView struct {
-	ID                 string `json:"id"`
-	WorkspaceID        string `json:"workspaceId"`
-	State              string `json:"state"`
-	BlockingTicketID   string `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID string `json:"blockingApprovalId,omitempty"`
-}
-
-type stepView struct {
-	ID     string         `json:"id"`
-	Kind   string         `json:"kind"`
-	State  string         `json:"state"`
-	Input  map[string]any `json:"input,omitempty"`
-	Output map[string]any `json:"output,omitempty"`
-}
-
-type blockingView struct {
-	DecisionTicket *decisionTicketView `json:"decisionTicket,omitempty"`
-	Approval       *approvalView       `json:"approval,omitempty"`
-}
-
-type decisionTicketView struct {
-	ID     string `json:"id"`
-	RunID  string `json:"runId"`
-	StepID string `json:"stepId"`
-	Reason string `json:"reason"`
-	State  string `json:"state"`
-}
-
-type approvalView struct {
-	ID     string `json:"id"`
-	RunID  string `json:"runId"`
-	StepID string `json:"stepId"`
-	Reason string `json:"reason"`
-	State  string `json:"state"`
+	workspaceManager *workspace.GoalDoDManager
+	decisionService  *decisionbiz.Service
+	approvalService  *approvalbiz.Service
+	runService       *runsvc.Service
 }
 
 func main() {
 	ctx := context.Background()
 	rt := newRuntime()
 
-	printBanner()
+	presenter.PrintBanner(os.Stdout)
 
 	runnable, err := runRunnableSlice(ctx, rt)
 	if err != nil {
 		log.Fatal(err)
 	}
-	printSnapshot("phase1 runnable slice", runnable)
+	if err := presenter.PrintSnapshot(os.Stdout, "phase1 runnable slice", runnable); err != nil {
+		log.Fatal(err)
+	}
 
 	decisionBlockedResume, err := runDecisionBlockedResumeSlice(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
-	printSnapshot("phase1 decision-blocked-resume slice", decisionBlockedResume)
+	if err := presenter.PrintSnapshot(os.Stdout, "phase1 decision-blocked-resume slice", decisionBlockedResume); err != nil {
+		log.Fatal(err)
+	}
 
 	approvalBlockedResume, err := runApprovalBlockedResumeSlice(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
-	printSnapshot("phase1 approval-blocked-resume slice", approvalBlockedResume)
+	if err := presenter.PrintSnapshot(os.Stdout, "phase1 approval-blocked-resume slice", approvalBlockedResume); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func newRuntime() *runtime {
@@ -132,20 +81,19 @@ func newRuntime() *runtime {
 	runService := runsvc.NewService(runRepo, workspaceRepo, runtimeOrchestrator)
 
 	return &runtime{
-		workspaceRepo:       workspaceRepo,
-		runRepo:             runRepo,
-		stepRepo:            stepRepo,
-		ticketRepo:          ticketRepo,
-		approvalRepo:        approvalRepo,
-		workspaceManager:    workspaceManager,
-		decisionService:     decisionService,
-		approvalService:     approvalService,
-		runtimeOrchestrator: runtimeOrchestrator,
-		runService:          runService,
+		workspaceRepo:    workspaceRepo,
+		runRepo:          runRepo,
+		stepRepo:         stepRepo,
+		ticketRepo:       ticketRepo,
+		approvalRepo:     approvalRepo,
+		workspaceManager: workspaceManager,
+		decisionService:  decisionService,
+		approvalService:  approvalService,
+		runService:       runService,
 	}
 }
 
-func runRunnableSlice(ctx context.Context, rt *runtime) (*snapshot, error) {
+func runRunnableSlice(ctx context.Context, rt *runtime) (*presenter.Snapshot, error) {
 	workspaceID := common.WorkspaceID("ws-phase1-runnable")
 	runID := common.RunID("run-phase1-runnable")
 	stepID := common.StepID(fmt.Sprintf("%s/step-1", runID))
@@ -168,10 +116,10 @@ func runRunnableSlice(ctx context.Context, rt *runtime) (*snapshot, error) {
 		return nil, err
 	}
 
-	return rt.snapshot(ctx, "runnable", workspaceID, runID, stepID, nil)
+	return rt.snapshot(ctx, "runnable", workspaceID, runID, stepID, presenter.BlockingRefs{})
 }
 
-func runDecisionBlockedResumeSlice(ctx context.Context) (*snapshot, error) {
+func runDecisionBlockedResumeSlice(ctx context.Context) (*presenter.Snapshot, error) {
 	rt := newRuntime()
 
 	workspaceID := common.WorkspaceID("ws-phase1-blocked-decision")
@@ -214,9 +162,7 @@ func runDecisionBlockedResumeSlice(ctx context.Context) (*snapshot, error) {
 		ResolutionID: common.ResolutionID("resolution-phase1-blocked-decision"),
 		TicketID:     ticketID,
 		Type:         "approve_path",
-		Payload: map[string]any{
-			"operator": "phase1-demo",
-		},
+		Payload:      map[string]any{"operator": "phase1-demo"},
 	}); err != nil {
 		return nil, err
 	}
@@ -226,10 +172,10 @@ func runDecisionBlockedResumeSlice(ctx context.Context) (*snapshot, error) {
 	}
 
 	resumedStepID := common.StepID(fmt.Sprintf("%s/step-1", runID))
-	return rt.snapshot(ctx, "decision_blocked_resume", workspaceID, runID, resumedStepID, &blockingRefs{ticketID: ticketID})
+	return rt.snapshot(ctx, "decision_blocked_resume", workspaceID, runID, resumedStepID, presenter.BlockingRefs{TicketID: ticketID})
 }
 
-func runApprovalBlockedResumeSlice(ctx context.Context) (*snapshot, error) {
+func runApprovalBlockedResumeSlice(ctx context.Context) (*presenter.Snapshot, error) {
 	rt := newRuntime()
 
 	workspaceID := common.WorkspaceID("ws-phase1-blocked-approval")
@@ -277,10 +223,10 @@ func runApprovalBlockedResumeSlice(ctx context.Context) (*snapshot, error) {
 	}
 
 	resumedStepID := common.StepID(fmt.Sprintf("%s/step-1", runID))
-	return rt.snapshot(ctx, "approval_blocked_resume", workspaceID, runID, resumedStepID, &blockingRefs{approvalID: approvalID})
+	return rt.snapshot(ctx, "approval_blocked_resume", workspaceID, runID, resumedStepID, presenter.BlockingRefs{ApprovalID: approvalID})
 }
 
-func (rt *runtime) snapshot(ctx context.Context, slice string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, refs *blockingRefs) (*snapshot, error) {
+func (rt *runtime) snapshot(ctx context.Context, slice string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, refs presenter.BlockingRefs) (*presenter.Snapshot, error) {
 	ws, err := rt.workspaceRepo.Get(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -298,162 +244,21 @@ func (rt *runtime) snapshot(ctx context.Context, slice string, workspaceID commo
 		}
 	}
 
-	blocking := &blockingView{}
-	if refs != nil && refs.ticketID != "" {
-		ticket, err := rt.ticketRepo.Get(ctx, refs.ticketID)
+	var ticket *decisionmodel.Ticket
+	if refs.TicketID != "" {
+		ticket, err = rt.ticketRepo.Get(ctx, refs.TicketID)
 		if err != nil {
 			return nil, err
 		}
-		blocking.DecisionTicket = mapTicket(ticket)
 	}
-	if refs != nil && refs.approvalID != "" {
-		approval, err := rt.approvalRepo.Get(ctx, refs.approvalID)
+
+	var approval *approvalmodel.Approval
+	if refs.ApprovalID != "" {
+		approval, err = rt.approvalRepo.Get(ctx, refs.ApprovalID)
 		if err != nil {
 			return nil, err
 		}
-		blocking.Approval = mapApproval(approval)
-	}
-	if blocking.DecisionTicket == nil && blocking.Approval == nil {
-		blocking = nil
 	}
 
-	observed := []events.Envelope{
-		newEnvelope("workspace.snapshot", "workspace", string(ws.ID), ws.ID, runID, "", map[string]any{
-			"state":       ws.State,
-			"activeRunId": ws.ActiveRunID,
-		}),
-		newEnvelope("run.snapshot", "run", string(r.ID), workspaceID, r.ID, "", map[string]any{
-			"state":              r.State,
-			"blockingTicketId":   r.BlockingTicketID,
-			"blockingApprovalId": r.BlockingApprovalID,
-		}),
-	}
-	if step != nil {
-		observed = append(observed, newEnvelope("step.snapshot", "step", string(step.ID), workspaceID, runID, step.ID, map[string]any{
-			"kind":   step.Kind,
-			"state":  step.State,
-			"input":  step.Input,
-			"output": step.Output,
-		}))
-	}
-	if blocking != nil && blocking.DecisionTicket != nil {
-		observed = append(observed, newEnvelope("decision.ticket.snapshot", "decision_ticket", blocking.DecisionTicket.ID, workspaceID, runID, common.StepID(blocking.DecisionTicket.StepID), map[string]any{
-			"reason": blocking.DecisionTicket.Reason,
-			"state":  blocking.DecisionTicket.State,
-		}))
-	}
-	if blocking != nil && blocking.Approval != nil {
-		observed = append(observed, newEnvelope("approval.snapshot", "approval", blocking.Approval.ID, workspaceID, runID, common.StepID(blocking.Approval.StepID), map[string]any{
-			"reason": blocking.Approval.Reason,
-			"state":  blocking.Approval.State,
-		}))
-	}
-
-	return &snapshot{
-		Slice:     slice,
-		Workspace: mapWorkspace(ws),
-		Run:       mapRun(r),
-		Step:      mapStep(step),
-		Blocking:  blocking,
-		Observed:  observed,
-	}, nil
-}
-
-type blockingRefs struct {
-	ticketID   common.TicketID
-	approvalID common.ApprovalID
-}
-
-func printBanner() {
-	fmt.Fprintln(os.Stdout, "== workorch phase1 observable demo ==")
-	fmt.Fprintln(os.Stdout, "acceptance target: runnable slice + decision/approval blocked->resume slices")
-}
-
-func printSnapshot(title string, data *snapshot) {
-	fmt.Fprintf(os.Stdout, "\n## %s\n", title)
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(data); err != nil {
-		log.Fatalf("encode snapshot: %v", err)
-	}
-}
-
-func mapWorkspace(item *workspacemodel.Workspace) *workspaceView {
-	if item == nil {
-		return nil
-	}
-	return &workspaceView{
-		ID:          string(item.ID),
-		Title:       item.Title,
-		State:       string(item.State),
-		ActiveRunID: string(item.ActiveRunID),
-	}
-}
-
-func mapRun(item *runmodel.Run) *runView {
-	if item == nil {
-		return nil
-	}
-	return &runView{
-		ID:                 string(item.ID),
-		WorkspaceID:        string(item.WorkspaceID),
-		State:              string(item.State),
-		BlockingTicketID:   string(item.BlockingTicketID),
-		BlockingApprovalID: string(item.BlockingApprovalID),
-	}
-}
-
-func mapStep(item *runmodel.Step) *stepView {
-	if item == nil {
-		return nil
-	}
-	return &stepView{
-		ID:     string(item.ID),
-		Kind:   item.Kind,
-		State:  string(item.State),
-		Input:  item.Input,
-		Output: item.Output,
-	}
-}
-
-func mapTicket(item *decisionmodel.Ticket) *decisionTicketView {
-	if item == nil {
-		return nil
-	}
-	return &decisionTicketView{
-		ID:     string(item.ID),
-		RunID:  string(item.RunID),
-		StepID: string(item.StepID),
-		Reason: item.Reason,
-		State:  string(item.State),
-	}
-}
-
-func mapApproval(item *approvalmodel.Approval) *approvalView {
-	if item == nil {
-		return nil
-	}
-	return &approvalView{
-		ID:     string(item.ID),
-		RunID:  string(item.RunID),
-		StepID: string(item.StepID),
-		Reason: item.Reason,
-		State:  string(item.State),
-	}
-}
-
-func newEnvelope(topic, subjectType, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, payload map[string]any) events.Envelope {
-	return events.Envelope{
-		ID:           fmt.Sprintf("%s:%s", topic, subjectID),
-		Version:      "phase1-demo.v1",
-		Topic:        topic,
-		OccurredAt:   time.Now().UTC().Format(time.RFC3339),
-		SourceModule: "application/workorchd",
-		SubjectType:  subjectType,
-		SubjectID:    subjectID,
-		WorkspaceID:  string(workspaceID),
-		RunID:        string(runID),
-		StepID:       string(stepID),
-		Payload:      payload,
-	}
+	return presenter.BuildSnapshot(slice, ws, r, step, ticket, approval), nil
 }
