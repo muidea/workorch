@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/contracts"
+	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
 func TestGoalDoDManager_CreateWorkspace(t *testing.T) {
