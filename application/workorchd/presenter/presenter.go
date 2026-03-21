@@ -106,18 +106,18 @@ func BuildSnapshot(
 	}
 
 	observed := []events.Envelope{
-		NewEnvelope("workspace.snapshot", "workspace", string(ws.ID), ws.ID, r.ID, "", map[string]any{
+		NewEnvelope("/workspace/snapshot", "workspace", string(ws.ID), ws.ID, r.ID, "", map[string]any{
 			"state":       ws.State,
 			"activeRunId": ws.ActiveRunID,
 		}),
-		NewEnvelope("run.snapshot", "run", string(r.ID), ws.ID, r.ID, "", map[string]any{
+		NewEnvelope("/run/snapshot", "run", string(r.ID), ws.ID, r.ID, "", map[string]any{
 			"state":              r.State,
 			"blockingTicketId":   r.BlockingTicketID,
 			"blockingApprovalId": r.BlockingApprovalID,
 		}),
 	}
 	if step != nil {
-		observed = append(observed, NewEnvelope("step.snapshot", "step", string(step.ID), ws.ID, r.ID, step.ID, map[string]any{
+		observed = append(observed, NewEnvelope("/step/snapshot", "step", string(step.ID), ws.ID, r.ID, step.ID, map[string]any{
 			"kind":   step.Kind,
 			"state":  step.State,
 			"input":  step.Input,
@@ -125,13 +125,13 @@ func BuildSnapshot(
 		}))
 	}
 	if ticket != nil {
-		observed = append(observed, NewEnvelope("decision.ticket.snapshot", "decision_ticket", string(ticket.ID), ws.ID, r.ID, ticket.StepID, map[string]any{
+		observed = append(observed, NewEnvelope("/decision/ticket/snapshot", "decision_ticket", string(ticket.ID), ws.ID, r.ID, ticket.StepID, map[string]any{
 			"reason": ticket.Reason,
 			"state":  ticket.State,
 		}))
 	}
 	if approval != nil {
-		observed = append(observed, NewEnvelope("approval.snapshot", "approval", string(approval.ID), ws.ID, r.ID, approval.StepID, map[string]any{
+		observed = append(observed, NewEnvelope("/approval/snapshot", "approval", string(approval.ID), ws.ID, r.ID, approval.StepID, map[string]any{
 			"reason": approval.Reason,
 			"state":  approval.State,
 		}))

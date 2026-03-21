@@ -77,6 +77,14 @@ Each snapshot includes minimal envelope-style observed objects for:
 - step
 - blocking ticket or approval when applicable
 
+Observed topic paths are frozen to slash-style demo output:
+
+- `/workspace/snapshot`
+- `/run/snapshot`
+- `/step/snapshot`
+- `/decision/ticket/snapshot`
+- `/approval/snapshot`
+
 ### Test baseline
 
 ```bash
@@ -92,6 +100,7 @@ Validated coverage currently includes:
 - blocked/resume semantics
 - decision ticket resolve conflict guard
 - approval resolve conflict guard
+- application-level smoke test for `workorchd`
 
 ## Explicit non-goals of current phase1
 
@@ -103,13 +112,9 @@ Not implemented yet:
 - external tool/runtime adapters beyond minimal legacy adapter
 - multi-run scheduling / queue semantics
 - observability pipeline beyond demo snapshots
-- reusable presenter extraction from `main.go`
-- application-level smoke test for `workorchd`
 
 ## Recommended next batch
 
-1. separate acceptance snapshot builder from `main.go` into reusable presenter code
-2. freeze event topic usage against slash-style topic paths only in app/demo output and future emitters
-3. add persistence contract tests shared by future repository adapters
-4. add application-level smoke test for `workorchd`
-5. decide whether approval rejection should diverge into a non-success terminal path in phase1.5
+1. add persistence contract tests shared by future repository adapters
+2. decide whether approval rejection should diverge into a non-success terminal path in phase1.5
+3. evaluate whether richer step/block graph semantics should start in phase1.5 or phase2

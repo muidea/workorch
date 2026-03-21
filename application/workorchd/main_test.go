@@ -20,11 +20,11 @@ func TestWorkorchdDemoOutputContainsAllPhase1Slices(t *testing.T) {
 		"phase1 runnable slice",
 		"phase1 decision-blocked-resume slice",
 		"phase1 approval-blocked-resume slice",
-		"workspace.snapshot",
-		"run.snapshot",
-		"step.snapshot",
-		"decision.ticket.snapshot",
-		"approval.snapshot",
+		"/workspace/snapshot",
+		"/run/snapshot",
+		"/step/snapshot",
+		"/decision/ticket/snapshot",
+		"/approval/snapshot",
 	}
 	for _, want := range checks {
 		if !strings.Contains(text, want) {
