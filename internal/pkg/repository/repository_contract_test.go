@@ -38,6 +38,12 @@ func TestDecisionTicketRepositoryContract_Memory(t *testing.T) {
 	})
 }
 
+func TestDecisionResolutionRepositoryContract_Memory(t *testing.T) {
+	testDecisionResolutionRepositoryContract(t, func() repository.DecisionResolutionRepository {
+		return memory.NewDecisionResolutionRepository()
+	})
+}
+
 func TestApprovalRepositoryContract_Memory(t *testing.T) {
 	testApprovalRepositoryContract(t, func() repository.ApprovalRepository {
 		return memory.NewApprovalRepository()
@@ -242,6 +248,46 @@ func testDecisionTicketRepositoryContract(t *testing.T, factory func() repositor
 	}
 	if err := repo.Update(ctx, &decisionmodel.Ticket{ID: common.TicketID("missing")}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing update err = %v, want not found", err)
+	}
+}
+
+func testDecisionResolutionRepositoryContract(t *testing.T, factory func() repository.DecisionResolutionRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &decisionmodel.Resolution{
+		ID:       common.ResolutionID("resolution-contract"),
+		TicketID: common.TicketID("ticket-contract"),
+		Type:     "approve_path",
+		Payload:  map[string]any{"operator": "contract-test"},
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create resolution: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate create err = %v, want conflict", err)
+	}
+
+	got, err := repo.GetByTicketID(ctx, item.TicketID)
+	if err != nil {
+		t.Fatalf("get resolution by ticket id: %v", err)
+	}
+	got.Type = "mutated"
+
+	fresh, err := repo.GetByTicketID(ctx, item.TicketID)
+	if err != nil {
+		t.Fatalf("get resolution by ticket id fresh: %v", err)
+	}
+	if fresh.Type != "approve_path" {
+		t.Fatalf("clone isolation failed, type = %q", fresh.Type)
+	}
+	if fresh.Payload["operator"] != "contract-test" {
+		t.Fatalf("payload operator = %v, want contract-test", fresh.Payload["operator"])
+	}
+
+	if _, err := repo.GetByTicketID(ctx, common.TicketID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing get err = %v, want not found", err)
 	}
 }
 
