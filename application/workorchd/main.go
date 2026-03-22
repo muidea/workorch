@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/muidea/workorch/application/workorchd/presenter"
 	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
@@ -18,15 +19,22 @@ import (
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/biz"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/contracts"
+	"github.com/muidea/workorch/internal/pkg/repository"
+	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
+const (
+	envBackend  = "WORKORCH_REPOSITORY_BACKEND"
+	envDataRoot = "WORKORCH_DATA_DIR"
+)
+
 type runtime struct {
-	workspaceRepo *memory.WorkspaceRepository
-	runRepo       *memory.RunRepository
-	stepRepo      *memory.StepRepository
-	ticketRepo    *memory.DecisionTicketRepository
-	approvalRepo  *memory.ApprovalRepository
+	workspaceRepo repository.WorkspaceRepository
+	runRepo       repository.RunRepository
+	stepRepo      repository.StepRepository
+	ticketRepo    repository.DecisionTicketRepository
+	approvalRepo  repository.ApprovalRepository
 
 	workspaceManager *workspace.GoalDoDManager
 	decisionService  *decisionbiz.Service
@@ -66,12 +74,11 @@ func main() {
 }
 
 func newRuntime() *runtime {
-	workspaceRepo := memory.NewWorkspaceRepository()
-	runRepo := memory.NewRunRepository()
-	stepRepo := memory.NewStepRepository()
-	ticketRepo := memory.NewDecisionTicketRepository()
-	resolutionRepo := memory.NewDecisionResolutionRepository()
-	approvalRepo := memory.NewApprovalRepository()
+	return newRuntimeWithBackend(os.Getenv(envBackend), os.Getenv(envDataRoot))
+}
+
+func newRuntimeWithBackend(backend string, dataRoot string) *runtime {
+	workspaceRepo, runRepo, stepRepo, ticketRepo, resolutionRepo, approvalRepo := buildRepositories(backend, dataRoot)
 
 	workspaceManager := workspace.NewGoalDoDManager(workspaceRepo)
 	decisionService := decisionbiz.NewService(ticketRepo, resolutionRepo)
@@ -90,6 +97,37 @@ func newRuntime() *runtime {
 		decisionService:  decisionService,
 		approvalService:  approvalService,
 		runService:       runService,
+	}
+}
+
+func buildRepositories(backend string, dataRoot string) (
+	repository.WorkspaceRepository,
+	repository.RunRepository,
+	repository.StepRepository,
+	repository.DecisionTicketRepository,
+	repository.DecisionResolutionRepository,
+	repository.ApprovalRepository,
+) {
+	switch backend {
+	case "", "memory":
+		return memory.NewWorkspaceRepository(),
+			memory.NewRunRepository(),
+			memory.NewStepRepository(),
+			memory.NewDecisionTicketRepository(),
+			memory.NewDecisionResolutionRepository(),
+			memory.NewApprovalRepository()
+	case "file":
+		if dataRoot == "" {
+			dataRoot = filepath.Join(os.TempDir(), "workorchd-data")
+		}
+		return fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json")),
+			fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json")),
+			fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json")),
+			fileRepo.NewDecisionTicketRepository(filepath.Join(dataRoot, "ticket.json")),
+			fileRepo.NewDecisionResolutionRepository(filepath.Join(dataRoot, "resolution.json")),
+			fileRepo.NewApprovalRepository(filepath.Join(dataRoot, "approval.json"))
+	default:
+		panic(fmt.Sprintf("unsupported repository backend: %s", backend))
 	}
 }
 

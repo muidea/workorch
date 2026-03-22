@@ -74,6 +74,12 @@ Implemented and runnable:
 go run ./application/workorchd
 ```
 
+Optional file-backed demo run:
+
+```bash
+WORKORCH_REPOSITORY_BACKEND=file WORKORCH_DATA_DIR=.workorch-data go run ./application/workorchd
+```
+
 ### Expected output
 
 Three observable snapshots are printed:
