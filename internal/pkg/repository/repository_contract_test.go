@@ -3,6 +3,7 @@ package repository_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -11,6 +12,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	file "github.com/muidea/workorch/internal/pkg/repository/file"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -20,9 +22,21 @@ func TestWorkspaceRepositoryContract_Memory(t *testing.T) {
 	})
 }
 
+func TestWorkspaceRepositoryContract_File(t *testing.T) {
+	testWorkspaceRepositoryContract(t, func() repository.WorkspaceRepository {
+		return file.NewWorkspaceRepository(filepath.Join(t.TempDir(), "workspace.json"))
+	})
+}
+
 func TestRunRepositoryContract_Memory(t *testing.T) {
 	testRunRepositoryContract(t, func() repository.RunRepository {
 		return memory.NewRunRepository()
+	})
+}
+
+func TestRunRepositoryContract_File(t *testing.T) {
+	testRunRepositoryContract(t, func() repository.RunRepository {
+		return file.NewRunRepository(filepath.Join(t.TempDir(), "run.json"))
 	})
 }
 
@@ -32,9 +46,21 @@ func TestStepRepositoryContract_Memory(t *testing.T) {
 	})
 }
 
+func TestStepRepositoryContract_File(t *testing.T) {
+	testStepRepositoryContract(t, func() repository.StepRepository {
+		return file.NewStepRepository(filepath.Join(t.TempDir(), "step.json"))
+	})
+}
+
 func TestDecisionTicketRepositoryContract_Memory(t *testing.T) {
 	testDecisionTicketRepositoryContract(t, func() repository.DecisionTicketRepository {
 		return memory.NewDecisionTicketRepository()
+	})
+}
+
+func TestDecisionTicketRepositoryContract_File(t *testing.T) {
+	testDecisionTicketRepositoryContract(t, func() repository.DecisionTicketRepository {
+		return file.NewDecisionTicketRepository(filepath.Join(t.TempDir(), "ticket.json"))
 	})
 }
 
@@ -44,9 +70,21 @@ func TestDecisionResolutionRepositoryContract_Memory(t *testing.T) {
 	})
 }
 
+func TestDecisionResolutionRepositoryContract_File(t *testing.T) {
+	testDecisionResolutionRepositoryContract(t, func() repository.DecisionResolutionRepository {
+		return file.NewDecisionResolutionRepository(filepath.Join(t.TempDir(), "resolution.json"))
+	})
+}
+
 func TestApprovalRepositoryContract_Memory(t *testing.T) {
 	testApprovalRepositoryContract(t, func() repository.ApprovalRepository {
 		return memory.NewApprovalRepository()
+	})
+}
+
+func TestApprovalRepositoryContract_File(t *testing.T) {
+	testApprovalRepositoryContract(t, func() repository.ApprovalRepository {
+		return file.NewApprovalRepository(filepath.Join(t.TempDir(), "approval.json"))
 	})
 }
 

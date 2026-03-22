@@ -109,6 +109,7 @@ Validated coverage currently includes:
 - run happy path
 - orchestrator happy path
 - repository memory path
+- repository file-backed path
 - blocked/resume semantics
 - decision ticket resolve conflict guard
 - approval resolve conflict guard
