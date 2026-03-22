@@ -208,3 +208,41 @@ func TestRuntimeOrchestrator_ResumeRunRequiresResolvedApproval(t *testing.T) {
 		t.Fatalf("blocking approval = %q, want empty", r.BlockingApprovalID)
 	}
 }
+
+func TestRuntimeOrchestrator_ResumeRunRejectedApprovalFailsRun(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "ok"}}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
+
+	workspaceID := common.WorkspaceID("ws-1")
+	runID := common.RunID("run-1")
+	approvalID := common.ApprovalID("approval-1")
+	_ = workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID})
+	_ = runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateBlockedOnApproval, BlockingApprovalID: approvalID})
+	_ = approvalRepo.Create(ctx, &approvalmodel.Approval{ID: approvalID, WorkspaceID: workspaceID, RunID: runID, State: common.ApprovalStateRejected})
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume after approval rejection should fail run in-repo, got err: %v", err)
+	}
+
+	r, _ := runRepo.Get(ctx, runID)
+	if r.State != common.RunStateFailed {
+		t.Fatalf("run state = %q, want failed", r.State)
+	}
+	if r.BlockingApprovalID != "" {
+		t.Fatalf("blocking approval = %q, want empty", r.BlockingApprovalID)
+	}
+
+	ws, _ := workspaceRepo.Get(ctx, workspaceID)
+	if ws.ActiveRunID != "" {
+		t.Fatalf("workspace active run id = %q, want empty", ws.ActiveRunID)
+	}
+	if len(runtime.calls) != 0 {
+		t.Fatalf("runtime calls = %#v, want no execution after rejection", runtime.calls)
+	}
+}

@@ -54,6 +54,18 @@ Implemented and runnable:
 7. runtime orchestrator runs minimal slice
 8. run reaches `completed`
 
+### Slice D: approval-rejection terminal path
+
+Implemented and runnable:
+
+1. create workspace
+2. create run
+3. create approval gate
+4. run transitions to blocked-on-approval state
+5. reject gate
+6. resume run
+7. run reaches `failed` without dispatching a runtime step
+
 ## Acceptance
 
 ### Command
@@ -100,6 +112,7 @@ Validated coverage currently includes:
 - blocked/resume semantics
 - decision ticket resolve conflict guard
 - approval resolve conflict guard
+- approval reject -> terminal failed path
 - application-level smoke test for `workorchd`
 
 ## Explicit non-goals of current phase1
@@ -116,5 +129,5 @@ Not implemented yet:
 ## Recommended next batch
 
 1. add persistence contract tests shared by future repository adapters
-2. decide whether approval rejection should diverge into a non-success terminal path in phase1.5
+2. add a file-backed repository adapter as the first non-memory persistence implementation
 3. evaluate whether richer step/block graph semantics should start in phase1.5 or phase2

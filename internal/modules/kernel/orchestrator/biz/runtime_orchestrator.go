@@ -185,10 +185,14 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 		if err != nil {
 			return err
 		}
-		if approval.State != common.ApprovalStateApproved && approval.State != common.ApprovalStateRejected {
+		switch approval.State {
+		case common.ApprovalStateApproved:
+			r.BlockingApprovalID = ""
+		case common.ApprovalStateRejected:
+			return o.FailRun(ctx, runID, fmt.Sprintf("approval %s rejected", approval.ID))
+		default:
 			return common.ErrBlocked
 		}
-		r.BlockingApprovalID = ""
 	default:
 		return common.ErrConflict
 	}
