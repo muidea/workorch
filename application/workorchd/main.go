@@ -71,6 +71,14 @@ func main() {
 	if err := presenter.PrintSnapshot(os.Stdout, "phase1 approval-blocked-resume slice", approvalBlockedResume); err != nil {
 		log.Fatal(err)
 	}
+
+	approvalRejectedTerminal, err := runApprovalRejectedTerminalSlice(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := presenter.PrintSnapshot(os.Stdout, "phase1 approval-rejected-terminal slice", approvalRejectedTerminal); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func newRuntime() *runtime {
@@ -262,6 +270,56 @@ func runApprovalBlockedResumeSlice(ctx context.Context) (*presenter.Snapshot, er
 
 	resumedStepID := common.StepID(fmt.Sprintf("%s/step-1", runID))
 	return rt.snapshot(ctx, "approval_blocked_resume", workspaceID, runID, resumedStepID, presenter.BlockingRefs{ApprovalID: approvalID})
+}
+
+func runApprovalRejectedTerminalSlice(ctx context.Context) (*presenter.Snapshot, error) {
+	rt := newRuntime()
+
+	workspaceID := common.WorkspaceID("ws-phase1-rejected-approval")
+	runID := common.RunID("run-phase1-rejected-approval")
+	stepID := common.StepID("run-phase1-rejected-approval/manual-approval")
+	approvalID := common.ApprovalID("approval-phase1-rejected-approval")
+
+	if err := rt.workspaceManager.CreateWorkspace(ctx, contracts.CreateWorkspaceCommand{
+		WorkspaceID: workspaceID,
+		Title:       "phase1-approval-rejected-terminal",
+	}); err != nil {
+		return nil, err
+	}
+
+	if err := rt.runService.CreateRun(ctx, contracts.CreateRunCommand{
+		RunID:       runID,
+		WorkspaceID: workspaceID,
+	}); err != nil {
+		return nil, err
+	}
+
+	if err := rt.approvalService.CreateApproval(ctx, approvalbiz.CreateApprovalCommand{
+		ApprovalID:  approvalID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		Reason:      "phase1 manual approval rejection gate",
+	}); err != nil {
+		return nil, err
+	}
+
+	if err := rt.runService.BlockOnApproval(ctx, contracts.BlockOnApprovalCommand{
+		RunID:      runID,
+		ApprovalID: approvalID,
+	}); err != nil {
+		return nil, err
+	}
+
+	if err := rt.approvalService.Reject(ctx, approvalbiz.ResolveApprovalCommand{ApprovalID: approvalID}); err != nil {
+		return nil, err
+	}
+
+	if err := rt.runService.ResumeRun(ctx, contracts.ResumeRunCommand{RunID: runID}); err != nil {
+		return nil, err
+	}
+
+	return rt.snapshot(ctx, "approval_rejected_terminal", workspaceID, runID, "", presenter.BlockingRefs{ApprovalID: approvalID})
 }
 
 func (rt *runtime) snapshot(ctx context.Context, slice string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, refs presenter.BlockingRefs) (*presenter.Snapshot, error) {

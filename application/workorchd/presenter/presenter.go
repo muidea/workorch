@@ -74,7 +74,7 @@ type BlockingRefs struct {
 
 func PrintBanner(w io.Writer) {
 	fmt.Fprintln(w, "== workorch phase1 observable demo ==")
-	fmt.Fprintln(w, "acceptance target: runnable slice + decision/approval blocked->resume slices")
+	fmt.Fprintln(w, "acceptance target: runnable slice + decision/approval blocked->resume slices + approval reject terminal slice")
 }
 
 func PrintSnapshot(w io.Writer, title string, data *Snapshot) error {

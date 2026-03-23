@@ -22,6 +22,7 @@ func TestWorkorchdDemoOutputContainsAllPhase1Slices(t *testing.T) {
 		"phase1 runnable slice",
 		"phase1 decision-blocked-resume slice",
 		"phase1 approval-blocked-resume slice",
+		"phase1 approval-rejected-terminal slice",
 		"/workspace/snapshot",
 		"/run/snapshot",
 		"/step/snapshot",
