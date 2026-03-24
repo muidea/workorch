@@ -127,14 +127,17 @@ Validated coverage currently includes:
 Not implemented yet:
 
 - real event bus integration
-- persistent storage adapter beyond in-memory repository
 - richer block execution graph
 - external tool/runtime adapters beyond minimal legacy adapter
 - multi-run scheduling / queue semantics
 - observability pipeline beyond demo snapshots
 
+Implemented in minimal form, but not yet expanded to phase2-grade persistence semantics:
+
+- file-backed repository adapter as the first non-memory persistence path
+
 ## Recommended next batch
 
-1. add persistence contract tests shared by future repository adapters
-2. add a file-backed repository adapter as the first non-memory persistence implementation
+1. add persistence contract tests shared by repository adapters
+2. define the minimal eventHub / real event bus integration path
 3. evaluate whether richer step/block graph semantics should start in phase1.5 or phase2
