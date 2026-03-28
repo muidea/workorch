@@ -28,11 +28,18 @@ make run
 go run ./application/workorchd
 ```
 
+Optional file-backed demo run:
+
+```bash
+WORKORCH_REPOSITORY_BACKEND=file WORKORCH_DATA_DIR=.workorch-data go run ./application/workorchd
+```
+
 Expected observable output:
 
 - `phase1 runnable slice`: shows workspace/run/step reaching `completed`
 - `phase1 decision-blocked-resume slice`: shows a decision ticket being created, resolved, then the run resuming to `completed`
 - `phase1 approval-blocked-resume slice`: shows an approval gate being created, approved, then the run resuming to `completed`
+- `phase1 approval-rejected-terminal slice`: shows an approval gate being rejected, then the run reaching `failed` without dispatching a runtime step
 - `observed`: emits minimal envelope-style JSON snapshots for workspace/run/step/blocking objects, only as acceptance output, not a full event bus
 
 ## Development targets

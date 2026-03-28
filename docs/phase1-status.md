@@ -82,17 +82,18 @@ WORKORCH_REPOSITORY_BACKEND=file WORKORCH_DATA_DIR=.workorch-data go run ./appli
 
 ### Expected output
 
-Three observable snapshots are printed:
+Four observable slices are printed:
 
 - `phase1 runnable slice`
 - `phase1 decision-blocked-resume slice`
 - `phase1 approval-blocked-resume slice`
+- `phase1 approval-rejected-terminal slice`
 
-Each snapshot includes minimal envelope-style observed objects for:
+Each slice includes minimal envelope-style observed objects for:
 
 - workspace
 - run
-- step
+- step when a runtime step is actually dispatched
 - blocking ticket or approval when applicable
 
 Observed topic paths are frozen to slash-style demo output:
@@ -102,6 +103,28 @@ Observed topic paths are frozen to slash-style demo output:
 - `/step/snapshot`
 - `/decision/ticket/snapshot`
 - `/approval/snapshot`
+
+### File-backed acceptance verification
+
+Verified with:
+
+```bash
+WORKORCH_REPOSITORY_BACKEND=file WORKORCH_DATA_DIR=.workorch-data go run ./application/workorchd
+```
+
+Observed persisted files:
+
+- `.workorch-data/workspace.json`
+- `.workorch-data/run.json`
+- `.workorch-data/step.json`
+- `.workorch-data/ticket.json`
+- `.workorch-data/approval.json`
+- `.workorch-data/resolution.json`
+
+Verified terminal states:
+
+- runnable / decision-blocked-resume / approval-blocked-resume runs persisted as `completed`
+- approval-rejected-terminal run persisted as `failed`
 
 ### Test baseline
 
