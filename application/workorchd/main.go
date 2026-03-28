@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -56,7 +57,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	decisionBlockedResume, err := runDecisionBlockedResumeSlice(ctx)
+	decisionBlockedResume, err := runDecisionBlockedResumeSlice(ctx, rt)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -64,7 +65,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	approvalBlockedResume, err := runApprovalBlockedResumeSlice(ctx)
+	approvalBlockedResume, err := runApprovalBlockedResumeSlice(ctx, rt)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -72,7 +73,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	approvalRejectedTerminal, err := runApprovalRejectedTerminalSlice(ctx)
+	approvalRejectedTerminal, err := runApprovalRejectedTerminalSlice(ctx, rt)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -144,182 +145,285 @@ func runRunnableSlice(ctx context.Context, rt *runtime) (*presenter.Snapshot, er
 	runID := common.RunID("run-phase1-runnable")
 	stepID := common.StepID(fmt.Sprintf("%s/step-1", runID))
 
-	if err := rt.workspaceManager.CreateWorkspace(ctx, contracts.CreateWorkspaceCommand{
-		WorkspaceID: workspaceID,
-		Title:       "phase1-runnable",
-	}); err != nil {
+	if err := ensureWorkspace(ctx, rt, workspaceID, "phase1-runnable"); err != nil {
 		return nil, err
 	}
-
-	if err := rt.runService.CreateRun(ctx, contracts.CreateRunCommand{
-		RunID:       runID,
-		WorkspaceID: workspaceID,
-	}); err != nil {
+	if err := ensureRun(ctx, rt, runID, workspaceID); err != nil {
 		return nil, err
 	}
-
-	if err := rt.runService.StartRun(ctx, contracts.StartRunCommand{RunID: runID}); err != nil {
+	if err := ensureRunStarted(ctx, rt, runID); err != nil {
 		return nil, err
 	}
 
 	return rt.snapshot(ctx, "runnable", workspaceID, runID, stepID, presenter.BlockingRefs{})
 }
 
-func runDecisionBlockedResumeSlice(ctx context.Context) (*presenter.Snapshot, error) {
-	rt := newRuntime()
-
+func runDecisionBlockedResumeSlice(ctx context.Context, rt *runtime) (*presenter.Snapshot, error) {
 	workspaceID := common.WorkspaceID("ws-phase1-blocked-decision")
 	runID := common.RunID("run-phase1-blocked-decision")
-	stepID := common.StepID("run-phase1-blocked-decision/manual-gate")
+	manualStepID := common.StepID("run-phase1-blocked-decision/manual-gate")
 	ticketID := common.TicketID("ticket-phase1-blocked-decision")
-
-	if err := rt.workspaceManager.CreateWorkspace(ctx, contracts.CreateWorkspaceCommand{
-		WorkspaceID: workspaceID,
-		Title:       "phase1-decision-blocked-resume",
-	}); err != nil {
-		return nil, err
-	}
-
-	if err := rt.runService.CreateRun(ctx, contracts.CreateRunCommand{
-		RunID:       runID,
-		WorkspaceID: workspaceID,
-	}); err != nil {
-		return nil, err
-	}
-
-	if err := rt.decisionService.CreateTicket(ctx, contracts.CreateTicketCommand{
-		TicketID:    ticketID,
-		WorkspaceID: workspaceID,
-		RunID:       runID,
-		StepID:      stepID,
-		Reason:      "phase1 manual decision gate",
-	}); err != nil {
-		return nil, err
-	}
-
-	if err := rt.runService.BlockOnDecision(ctx, contracts.BlockOnDecisionCommand{
-		RunID:    runID,
-		TicketID: ticketID,
-	}); err != nil {
-		return nil, err
-	}
-
-	if err := rt.decisionService.ResolveTicket(ctx, contracts.ResolveTicketCommand{
-		ResolutionID: common.ResolutionID("resolution-phase1-blocked-decision"),
-		TicketID:     ticketID,
-		Type:         "approve_path",
-		Payload:      map[string]any{"operator": "phase1-demo"},
-	}); err != nil {
-		return nil, err
-	}
-
-	if err := rt.runService.ResumeRun(ctx, contracts.ResumeRunCommand{RunID: runID}); err != nil {
-		return nil, err
-	}
-
 	resumedStepID := common.StepID(fmt.Sprintf("%s/step-1", runID))
+
+	if err := ensureWorkspace(ctx, rt, workspaceID, "phase1-decision-blocked-resume"); err != nil {
+		return nil, err
+	}
+	if err := ensureRun(ctx, rt, runID, workspaceID); err != nil {
+		return nil, err
+	}
+	if err := ensureDecisionTicket(ctx, rt, ticketID, workspaceID, runID, manualStepID, "phase1 manual decision gate"); err != nil {
+		return nil, err
+	}
+	if err := ensureRunBlockedOnDecision(ctx, rt, runID, ticketID); err != nil {
+		return nil, err
+	}
+	if err := ensureDecisionResolved(ctx, rt, ticketID); err != nil {
+		return nil, err
+	}
+	if err := ensureRunResumed(ctx, rt, runID); err != nil {
+		return nil, err
+	}
+
 	return rt.snapshot(ctx, "decision_blocked_resume", workspaceID, runID, resumedStepID, presenter.BlockingRefs{TicketID: ticketID})
 }
 
-func runApprovalBlockedResumeSlice(ctx context.Context) (*presenter.Snapshot, error) {
-	rt := newRuntime()
-
+func runApprovalBlockedResumeSlice(ctx context.Context, rt *runtime) (*presenter.Snapshot, error) {
 	workspaceID := common.WorkspaceID("ws-phase1-blocked-approval")
 	runID := common.RunID("run-phase1-blocked-approval")
-	stepID := common.StepID("run-phase1-blocked-approval/manual-approval")
+	manualStepID := common.StepID("run-phase1-blocked-approval/manual-approval")
 	approvalID := common.ApprovalID("approval-phase1-blocked-approval")
-
-	if err := rt.workspaceManager.CreateWorkspace(ctx, contracts.CreateWorkspaceCommand{
-		WorkspaceID: workspaceID,
-		Title:       "phase1-approval-blocked-resume",
-	}); err != nil {
-		return nil, err
-	}
-
-	if err := rt.runService.CreateRun(ctx, contracts.CreateRunCommand{
-		RunID:       runID,
-		WorkspaceID: workspaceID,
-	}); err != nil {
-		return nil, err
-	}
-
-	if err := rt.approvalService.CreateApproval(ctx, approvalbiz.CreateApprovalCommand{
-		ApprovalID:  approvalID,
-		WorkspaceID: workspaceID,
-		RunID:       runID,
-		StepID:      stepID,
-		Reason:      "phase1 manual approval gate",
-	}); err != nil {
-		return nil, err
-	}
-
-	if err := rt.runService.BlockOnApproval(ctx, contracts.BlockOnApprovalCommand{
-		RunID:      runID,
-		ApprovalID: approvalID,
-	}); err != nil {
-		return nil, err
-	}
-
-	if err := rt.approvalService.Approve(ctx, approvalbiz.ResolveApprovalCommand{ApprovalID: approvalID}); err != nil {
-		return nil, err
-	}
-
-	if err := rt.runService.ResumeRun(ctx, contracts.ResumeRunCommand{RunID: runID}); err != nil {
-		return nil, err
-	}
-
 	resumedStepID := common.StepID(fmt.Sprintf("%s/step-1", runID))
+
+	if err := ensureWorkspace(ctx, rt, workspaceID, "phase1-approval-blocked-resume"); err != nil {
+		return nil, err
+	}
+	if err := ensureRun(ctx, rt, runID, workspaceID); err != nil {
+		return nil, err
+	}
+	if err := ensureApproval(ctx, rt, approvalID, workspaceID, runID, manualStepID, "phase1 manual approval gate"); err != nil {
+		return nil, err
+	}
+	if err := ensureRunBlockedOnApproval(ctx, rt, runID, approvalID); err != nil {
+		return nil, err
+	}
+	if err := ensureApprovalApproved(ctx, rt, approvalID); err != nil {
+		return nil, err
+	}
+	if err := ensureRunResumed(ctx, rt, runID); err != nil {
+		return nil, err
+	}
+
 	return rt.snapshot(ctx, "approval_blocked_resume", workspaceID, runID, resumedStepID, presenter.BlockingRefs{ApprovalID: approvalID})
 }
 
-func runApprovalRejectedTerminalSlice(ctx context.Context) (*presenter.Snapshot, error) {
-	rt := newRuntime()
-
+func runApprovalRejectedTerminalSlice(ctx context.Context, rt *runtime) (*presenter.Snapshot, error) {
 	workspaceID := common.WorkspaceID("ws-phase1-rejected-approval")
 	runID := common.RunID("run-phase1-rejected-approval")
-	stepID := common.StepID("run-phase1-rejected-approval/manual-approval")
+	manualStepID := common.StepID("run-phase1-rejected-approval/manual-approval")
 	approvalID := common.ApprovalID("approval-phase1-rejected-approval")
 
-	if err := rt.workspaceManager.CreateWorkspace(ctx, contracts.CreateWorkspaceCommand{
-		WorkspaceID: workspaceID,
-		Title:       "phase1-approval-rejected-terminal",
-	}); err != nil {
+	if err := ensureWorkspace(ctx, rt, workspaceID, "phase1-approval-rejected-terminal"); err != nil {
 		return nil, err
 	}
-
-	if err := rt.runService.CreateRun(ctx, contracts.CreateRunCommand{
-		RunID:       runID,
-		WorkspaceID: workspaceID,
-	}); err != nil {
+	if err := ensureRun(ctx, rt, runID, workspaceID); err != nil {
 		return nil, err
 	}
-
-	if err := rt.approvalService.CreateApproval(ctx, approvalbiz.CreateApprovalCommand{
-		ApprovalID:  approvalID,
-		WorkspaceID: workspaceID,
-		RunID:       runID,
-		StepID:      stepID,
-		Reason:      "phase1 manual approval rejection gate",
-	}); err != nil {
+	if err := ensureApproval(ctx, rt, approvalID, workspaceID, runID, manualStepID, "phase1 manual approval rejection gate"); err != nil {
 		return nil, err
 	}
-
-	if err := rt.runService.BlockOnApproval(ctx, contracts.BlockOnApprovalCommand{
-		RunID:      runID,
-		ApprovalID: approvalID,
-	}); err != nil {
+	if err := ensureRunBlockedOnApproval(ctx, rt, runID, approvalID); err != nil {
 		return nil, err
 	}
-
-	if err := rt.approvalService.Reject(ctx, approvalbiz.ResolveApprovalCommand{ApprovalID: approvalID}); err != nil {
+	if err := ensureApprovalRejected(ctx, rt, approvalID); err != nil {
 		return nil, err
 	}
-
-	if err := rt.runService.ResumeRun(ctx, contracts.ResumeRunCommand{RunID: runID}); err != nil {
+	if err := ensureRunResumed(ctx, rt, runID); err != nil {
 		return nil, err
 	}
 
 	return rt.snapshot(ctx, "approval_rejected_terminal", workspaceID, runID, "", presenter.BlockingRefs{ApprovalID: approvalID})
+}
+
+func ensureWorkspace(ctx context.Context, rt *runtime, workspaceID common.WorkspaceID, title string) error {
+	item, err := rt.workspaceRepo.Get(ctx, workspaceID)
+	if err == nil {
+		if item.Title != title {
+			item.Title = title
+		}
+		if item.State != common.WorkspaceStateActive || item.ActiveRunID != "" {
+			item.State = common.WorkspaceStateActive
+			item.ActiveRunID = ""
+			return rt.workspaceRepo.Update(ctx, item)
+		}
+		return nil
+	}
+	if !errors.Is(err, common.ErrNotFound) {
+		return err
+	}
+	return rt.workspaceManager.CreateWorkspace(ctx, contracts.CreateWorkspaceCommand{
+		WorkspaceID: workspaceID,
+		Title:       title,
+	})
+}
+
+func ensureRun(ctx context.Context, rt *runtime, runID common.RunID, workspaceID common.WorkspaceID) error {
+	item, err := rt.runRepo.Get(ctx, runID)
+	if err == nil {
+		if item.WorkspaceID != workspaceID {
+			return common.ErrConflict
+		}
+		return nil
+	}
+	if !errors.Is(err, common.ErrNotFound) {
+		return err
+	}
+	return rt.runService.CreateRun(ctx, contracts.CreateRunCommand{
+		RunID:       runID,
+		WorkspaceID: workspaceID,
+	})
+}
+
+func ensureRunStarted(ctx context.Context, rt *runtime, runID common.RunID) error {
+	item, err := rt.runRepo.Get(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if item.State == common.RunStateCompleted {
+		return nil
+	}
+	if item.State == common.RunStateFailed {
+		return common.ErrConflict
+	}
+	if item.State == common.RunStateBlockedOnDecision || item.State == common.RunStateBlockedOnApproval {
+		return common.ErrConflict
+	}
+	return rt.runService.StartRun(ctx, contracts.StartRunCommand{RunID: runID})
+}
+
+func ensureDecisionTicket(ctx context.Context, rt *runtime, ticketID common.TicketID, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, reason string) error {
+	item, err := rt.ticketRepo.Get(ctx, ticketID)
+	if err == nil {
+		if item.WorkspaceID != workspaceID || item.RunID != runID || item.StepID != stepID {
+			return common.ErrConflict
+		}
+		return nil
+	}
+	if !errors.Is(err, common.ErrNotFound) {
+		return err
+	}
+	return rt.decisionService.CreateTicket(ctx, contracts.CreateTicketCommand{
+		TicketID:    ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		Reason:      reason,
+	})
+}
+
+func ensureRunBlockedOnDecision(ctx context.Context, rt *runtime, runID common.RunID, ticketID common.TicketID) error {
+	item, err := rt.runRepo.Get(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if item.State == common.RunStateBlockedOnDecision && item.BlockingTicketID == ticketID {
+		return nil
+	}
+	if item.State == common.RunStateCompleted || item.State == common.RunStateFailed {
+		return nil
+	}
+	return rt.runService.BlockOnDecision(ctx, contracts.BlockOnDecisionCommand{RunID: runID, TicketID: ticketID})
+}
+
+func ensureDecisionResolved(ctx context.Context, rt *runtime, ticketID common.TicketID) error {
+	item, err := rt.ticketRepo.Get(ctx, ticketID)
+	if err != nil {
+		return err
+	}
+	if item.State == common.DecisionTicketStateResolved {
+		return nil
+	}
+	return rt.decisionService.ResolveTicket(ctx, contracts.ResolveTicketCommand{
+		ResolutionID: common.ResolutionID("resolution-phase1-blocked-decision"),
+		TicketID:     ticketID,
+		Type:         "approve_path",
+		Payload:      map[string]any{"operator": "phase1-demo"},
+	})
+}
+
+func ensureApproval(ctx context.Context, rt *runtime, approvalID common.ApprovalID, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, reason string) error {
+	item, err := rt.approvalRepo.Get(ctx, approvalID)
+	if err == nil {
+		if item.WorkspaceID != workspaceID || item.RunID != runID || item.StepID != stepID {
+			return common.ErrConflict
+		}
+		return nil
+	}
+	if !errors.Is(err, common.ErrNotFound) {
+		return err
+	}
+	return rt.approvalService.CreateApproval(ctx, approvalbiz.CreateApprovalCommand{
+		ApprovalID:  approvalID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		Reason:      reason,
+	})
+}
+
+func ensureRunBlockedOnApproval(ctx context.Context, rt *runtime, runID common.RunID, approvalID common.ApprovalID) error {
+	item, err := rt.runRepo.Get(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if item.State == common.RunStateBlockedOnApproval && item.BlockingApprovalID == approvalID {
+		return nil
+	}
+	if item.State == common.RunStateCompleted || item.State == common.RunStateFailed {
+		return nil
+	}
+	return rt.runService.BlockOnApproval(ctx, contracts.BlockOnApprovalCommand{RunID: runID, ApprovalID: approvalID})
+}
+
+func ensureApprovalApproved(ctx context.Context, rt *runtime, approvalID common.ApprovalID) error {
+	item, err := rt.approvalRepo.Get(ctx, approvalID)
+	if err != nil {
+		return err
+	}
+	if item.State == common.ApprovalStateApproved {
+		return nil
+	}
+	if item.State == common.ApprovalStateRejected {
+		return common.ErrConflict
+	}
+	return rt.approvalService.Approve(ctx, approvalbiz.ResolveApprovalCommand{ApprovalID: approvalID})
+}
+
+func ensureApprovalRejected(ctx context.Context, rt *runtime, approvalID common.ApprovalID) error {
+	item, err := rt.approvalRepo.Get(ctx, approvalID)
+	if err != nil {
+		return err
+	}
+	if item.State == common.ApprovalStateRejected {
+		return nil
+	}
+	if item.State == common.ApprovalStateApproved {
+		return common.ErrConflict
+	}
+	return rt.approvalService.Reject(ctx, approvalbiz.ResolveApprovalCommand{ApprovalID: approvalID})
+}
+
+func ensureRunResumed(ctx context.Context, rt *runtime, runID common.RunID) error {
+	item, err := rt.runRepo.Get(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if item.State == common.RunStateCompleted || item.State == common.RunStateFailed {
+		return nil
+	}
+	if item.State != common.RunStateBlockedOnDecision && item.State != common.RunStateBlockedOnApproval {
+		return common.ErrConflict
+	}
+	return rt.runService.ResumeRun(ctx, contracts.ResumeRunCommand{RunID: runID})
 }
 
 func (rt *runtime) snapshot(ctx context.Context, slice string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, refs presenter.BlockingRefs) (*presenter.Snapshot, error) {

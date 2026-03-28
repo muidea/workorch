@@ -18,6 +18,29 @@ Phase1 minimal skeleton, rectified to the go-multi-module-dev multi-module layou
 - blocks: `approval`, `legacy`
 - shared contracts/events/repository moved under `internal/pkg`
 
+## Development workflow
+
+Common entrypoints:
+
+```bash
+make fmt
+make fmt-check
+make vet
+make test
+make test-race
+make build
+make run
+make run-file
+make ci
+```
+
+Notes:
+
+- `make build` writes the binary to `./bin/workorchd`
+- `make run-file` runs the demo with the file-backed repository backend
+- file-backed demo execution is now repeatable against the same data directory for the shipped phase1 demo IDs
+- `make ci` is the local equivalent of the GitHub Actions baseline
+
 ## Phase1 acceptance demo
 
 Run:
@@ -31,6 +54,8 @@ go run ./application/workorchd
 Optional file-backed demo run:
 
 ```bash
+make run-file
+# or
 WORKORCH_REPOSITORY_BACKEND=file WORKORCH_DATA_DIR=.workorch-data go run ./application/workorchd
 ```
 

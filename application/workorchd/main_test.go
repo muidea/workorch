@@ -39,22 +39,27 @@ func TestWorkorchdDemoOutputContainsAllPhase1Slices(t *testing.T) {
 func TestWorkorchdDemoSupportsFileRepositoryBackend(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "workorch-data")
 
-	cmd := exec.Command("go", "run", ".")
-	cmd.Dir = "."
-	cmd.Env = append(os.Environ(),
-		"WORKORCH_REPOSITORY_BACKEND=file",
-		"WORKORCH_DATA_DIR="+dataDir,
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("go run workorchd with file backend: %v\noutput:\n%s", err, string(out))
+	runDemo := func() string {
+		t.Helper()
+		cmd := exec.Command("go", "run", ".")
+		cmd.Dir = "."
+		cmd.Env = append(os.Environ(),
+			"WORKORCH_REPOSITORY_BACKEND=file",
+			"WORKORCH_DATA_DIR="+dataDir,
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("go run workorchd with file backend: %v\noutput:\n%s", err, string(out))
+		}
+		return string(out)
 	}
 
-	text := string(out)
+	text := runDemo()
 	checks := []string{
 		"phase1 runnable slice",
 		"phase1 decision-blocked-resume slice",
 		"phase1 approval-blocked-resume slice",
+		"phase1 approval-rejected-terminal slice",
 	}
 	for _, want := range checks {
 		if !strings.Contains(text, want) {
@@ -73,6 +78,13 @@ func TestWorkorchdDemoSupportsFileRepositoryBackend(t *testing.T) {
 	for _, name := range files {
 		if _, err := os.Stat(filepath.Join(dataDir, name)); err != nil {
 			t.Fatalf("expected persisted file %s: %v", name, err)
+		}
+	}
+
+	second := runDemo()
+	for _, want := range checks {
+		if !strings.Contains(second, want) {
+			t.Fatalf("second file backend demo output missing %q\noutput:\n%s", want, second)
 		}
 	}
 }

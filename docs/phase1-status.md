@@ -125,6 +125,7 @@ Verified terminal states:
 
 - runnable / decision-blocked-resume / approval-blocked-resume runs persisted as `completed`
 - approval-rejected-terminal run persisted as `failed`
+- repeated file-backed demo execution against the same data directory is now supported for the shipped phase1 demo IDs
 
 ### Test baseline
 
@@ -144,6 +145,7 @@ Validated coverage currently includes:
 - approval resolve conflict guard
 - approval reject -> terminal failed path
 - application-level smoke test for `workorchd`
+- repeatable file-backed demo execution against the same data directory
 
 ## Explicit non-goals of current phase1
 
