@@ -18,8 +18,8 @@ import (
 	runsvc "github.com/muidea/workorch/internal/modules/kernel/run/biz"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/biz"
-	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/contracts"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -93,7 +93,8 @@ func newRuntimeWithBackend(backend string, dataRoot string) *runtime {
 	decisionService := decisionbiz.NewService(ticketRepo, resolutionRepo)
 	approvalService := approvalbiz.NewService(approvalRepo)
 	runtimeAdapter := legacy.NewMinimalRuntimeAdapter()
-	runtimeOrchestrator := orchestrator.NewRuntimeOrchestrator(runtimeAdapter, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
+	eventHub := events.NewMemoryHub()
+	runtimeOrchestrator := orchestrator.NewRuntimeOrchestrator(runtimeAdapter, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, eventHub)
 	runService := runsvc.NewService(runRepo, workspaceRepo, runtimeOrchestrator)
 
 	return &runtime{

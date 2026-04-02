@@ -29,6 +29,7 @@ func TestService_CreateRunStartRunCompleteRun_Mainline(t *testing.T) {
 		workspaceRepo,
 		ticketRepo,
 		approvalRepo,
+		nil,
 	)
 	service := NewService(runRepo, workspaceRepo, orch)
 
@@ -146,6 +147,7 @@ func TestService_ResumeRun_FromBlockedStates_ReachesMinimalExecutionChain(t *tes
 				workspaceRepo,
 				ticketRepo,
 				approvalRepo,
+				nil,
 			)
 			service := NewService(runRepo, workspaceRepo, orch)
 
@@ -265,6 +267,7 @@ func TestService_ResumeRun_RejectsNonBlockedStates(t *testing.T) {
 		workspaceRepo,
 		ticketRepo,
 		approvalRepo,
+		nil,
 	)
 	service := NewService(runRepo, workspaceRepo, orch)
 

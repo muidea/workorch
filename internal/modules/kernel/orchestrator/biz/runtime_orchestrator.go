@@ -6,6 +6,7 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -20,23 +21,29 @@ type RuntimeOrchestrator struct {
 	workspaces repository.WorkspaceRepository
 	tickets    repository.DecisionTicketRepository
 	approvals  repository.ApprovalRepository
+	eventHub   events.Hub
 }
 
 func NewRuntimeOrchestrator(
 	runtime RuntimeAdapter,
-	runs repository.RunRepository,
-	steps repository.StepRepository,
-	workspaces repository.WorkspaceRepository,
-	tickets repository.DecisionTicketRepository,
-	approvals repository.ApprovalRepository,
+	runRepo repository.RunRepository,
+	stepRepo repository.StepRepository,
+	workspaceRepo repository.WorkspaceRepository,
+	ticketRepo repository.DecisionTicketRepository,
+	approvalRepo repository.ApprovalRepository,
+	eventHub events.Hub,
 ) *RuntimeOrchestrator {
+	if eventHub == nil {
+		eventHub = events.NewMemoryHub()
+	}
 	return &RuntimeOrchestrator{
 		runtime:    runtime,
-		runs:       runs,
-		steps:      steps,
-		workspaces: workspaces,
-		tickets:    tickets,
-		approvals:  approvals,
+		runs:       runRepo,
+		steps:      stepRepo,
+		workspaces: workspaceRepo,
+		tickets:    ticketRepo,
+		approvals:  approvalRepo,
+		eventHub:   eventHub,
 	}
 }
 
@@ -59,6 +66,9 @@ func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) 
 
 	r.State = common.RunStateRunning
 	if err := o.runs.Update(ctx, r); err != nil {
+		return err
+	}
+	if err := o.publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
 	ws.ActiveRunID = runID
@@ -110,18 +120,25 @@ func (o *RuntimeOrchestrator) DispatchNextStep(ctx context.Context, runID common
 			return err
 		}
 	}
+	if err := o.publishStepState(ctx, r, step, events.TopicStepDispatched); err != nil {
+		return err
+	}
 
 	output, err := o.runtime.ExecuteStep(ctx, runID, step.ID)
 	if err != nil {
 		step.State = common.StepStateFailed
 		step.Output = map[string]any{"reason": err.Error()}
 		_ = o.steps.Update(ctx, step)
+		_ = o.publishStepState(ctx, r, step, events.TopicStepStateChanged)
 		return o.FailRun(ctx, runID, err.Error())
 	}
 
 	step.State = common.StepStateCompleted
 	step.Output = output
 	if err := o.steps.Update(ctx, step); err != nil {
+		return err
+	}
+	if err := o.publishStepState(ctx, r, step, events.TopicStepStateChanged); err != nil {
 		return err
 	}
 	return o.CompleteRun(ctx, runID)
@@ -138,7 +155,10 @@ func (o *RuntimeOrchestrator) BlockOnDecision(ctx context.Context, runID common.
 	r.State = common.RunStateBlockedOnDecision
 	r.BlockingTicketID = ticketID
 	r.BlockingApprovalID = ""
-	return o.runs.Update(ctx, r)
+	if err := o.runs.Update(ctx, r); err != nil {
+		return err
+	}
+	return o.publishRunStateChanged(ctx, r)
 }
 
 func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.RunID, approvalID common.ApprovalID) error {
@@ -152,7 +172,10 @@ func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.
 	r.State = common.RunStateBlockedOnApproval
 	r.BlockingApprovalID = approvalID
 	r.BlockingTicketID = ""
-	return o.runs.Update(ctx, r)
+	if err := o.runs.Update(ctx, r); err != nil {
+		return err
+	}
+	return o.publishRunStateChanged(ctx, r)
 }
 
 func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID) error {
@@ -201,6 +224,9 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
+	if err := o.publishRunStateChanged(ctx, r); err != nil {
+		return err
+	}
 	return o.DispatchNextStep(ctx, runID)
 }
 
@@ -216,6 +242,9 @@ func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunI
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""
 	if err := o.runs.Update(ctx, r); err != nil {
+		return err
+	}
+	if err := o.publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
 
@@ -244,6 +273,9 @@ func (o *RuntimeOrchestrator) FailRun(ctx context.Context, runID common.RunID, r
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
+	if err := o.publishRunStateChanged(ctx, r); err != nil {
+		return err
+	}
 
 	ws, err := o.workspaces.Get(ctx, r.WorkspaceID)
 	if err != nil {
@@ -254,4 +286,49 @@ func (o *RuntimeOrchestrator) FailRun(ctx context.Context, runID common.RunID, r
 		return o.workspaces.Update(ctx, ws)
 	}
 	return nil
+}
+
+func (o *RuntimeOrchestrator) publishRunStateChanged(ctx context.Context, run *runModel.Run) error {
+	if o.eventHub == nil || run == nil {
+		return nil
+	}
+	return o.eventHub.Publish(ctx, events.Envelope{
+		Topic:        events.TopicRunStateChanged,
+		SourceModule: "kernel/orchestrator",
+		SubjectType:  "run",
+		SubjectID:    string(run.ID),
+		WorkspaceID:  string(run.WorkspaceID),
+		RunID:        string(run.ID),
+		Payload: map[string]any{
+			"state":              string(run.State),
+			"blockingTicketId":   string(run.BlockingTicketID),
+			"blockingApprovalId": string(run.BlockingApprovalID),
+		},
+	})
+}
+
+func (o *RuntimeOrchestrator) publishStepState(ctx context.Context, run *runModel.Run, step *runModel.Step, topic string) error {
+	if o.eventHub == nil || run == nil || step == nil {
+		return nil
+	}
+	payload := map[string]any{
+		"kind":  step.Kind,
+		"state": string(step.State),
+	}
+	if step.Input != nil {
+		payload["input"] = step.Input
+	}
+	if step.Output != nil {
+		payload["output"] = step.Output
+	}
+	return o.eventHub.Publish(ctx, events.Envelope{
+		Topic:        topic,
+		SourceModule: "kernel/orchestrator",
+		SubjectType:  "step",
+		SubjectID:    string(step.ID),
+		WorkspaceID:  string(run.WorkspaceID),
+		RunID:        string(run.ID),
+		StepID:       string(step.ID),
+		Payload:      payload,
+	})
 }
