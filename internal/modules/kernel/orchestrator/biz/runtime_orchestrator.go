@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -294,7 +295,7 @@ func (o *RuntimeOrchestrator) publishRunStateChanged(ctx context.Context, run *r
 	}
 	return o.eventHub.Publish(ctx, events.Envelope{
 		Topic:        events.TopicRunStateChanged,
-		SourceModule: "kernel/orchestrator",
+		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "run",
 		SubjectID:    string(run.ID),
 		WorkspaceID:  string(run.WorkspaceID),
@@ -323,7 +324,7 @@ func (o *RuntimeOrchestrator) publishStepState(ctx context.Context, run *runMode
 	}
 	return o.eventHub.Publish(ctx, events.Envelope{
 		Topic:        topic,
-		SourceModule: "kernel/orchestrator",
+		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "step",
 		SubjectID:    string(step.ID),
 		WorkspaceID:  string(run.WorkspaceID),

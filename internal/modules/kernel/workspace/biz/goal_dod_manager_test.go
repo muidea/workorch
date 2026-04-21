@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	workspaceservice "github.com/muidea/workorch/internal/modules/kernel/workspace/service"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/contracts"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -15,7 +15,7 @@ func TestGoalDoDManager_CreateWorkspace(t *testing.T) {
 	repo := memory.NewWorkspaceRepository()
 	manager := NewGoalDoDManager(repo)
 
-	cmd := contracts.CreateWorkspaceCommand{
+	cmd := workspaceservice.CreateWorkspaceCommand{
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		Title:       "phase1 workspace",
 	}
@@ -39,7 +39,7 @@ func TestGoalDoDManager_CreateWorkspace_ValidateArguments(t *testing.T) {
 	ctx := context.Background()
 	manager := NewGoalDoDManager(memory.NewWorkspaceRepository())
 
-	tests := []contracts.CreateWorkspaceCommand{
+	tests := []workspaceservice.CreateWorkspaceCommand{
 		{WorkspaceID: "", Title: "ok"},
 		{WorkspaceID: common.WorkspaceID("ws-1"), Title: ""},
 	}

@@ -4,8 +4,8 @@ import (
 	"context"
 
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	workspaceservice "github.com/muidea/workorch/internal/modules/kernel/workspace/service"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -17,7 +17,7 @@ func NewGoalDoDManager(workspaces repository.WorkspaceRepository) *GoalDoDManage
 	return &GoalDoDManager{workspaces: workspaces}
 }
 
-func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd contracts.CreateWorkspaceCommand) error {
+func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspaceservice.CreateWorkspaceCommand) error {
 	if cmd.WorkspaceID == "" || cmd.Title == "" {
 		return common.ErrInvalidArgument
 	}

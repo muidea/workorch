@@ -4,7 +4,7 @@
 
 - module: `github.com/muidea/workorch`
 - executable entry: `application/workorchd`
-- shared internal packages: `internal/pkg/{common,contracts,events,repository}`
+- shared internal runtime packages: `internal/pkg/{common,events,repository}`
 - kernel modules:
   - `internal/modules/kernel/workspace`
   - `internal/modules/kernel/run`

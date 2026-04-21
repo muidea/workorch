@@ -4,8 +4,8 @@ import (
 	"context"
 
 	decisionModel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -18,7 +18,7 @@ func NewService(tickets repository.DecisionTicketRepository, resolutions reposit
 	return &Service{tickets: tickets, resolutions: resolutions}
 }
 
-func (s *Service) CreateTicket(ctx context.Context, cmd contracts.CreateTicketCommand) error {
+func (s *Service) CreateTicket(ctx context.Context, cmd decisionservice.CreateTicketCommand) error {
 	if cmd.TicketID == "" || cmd.RunID == "" || cmd.Reason == "" {
 		return common.ErrInvalidArgument
 	}
@@ -34,7 +34,7 @@ func (s *Service) CreateTicket(ctx context.Context, cmd contracts.CreateTicketCo
 	return s.tickets.Create(ctx, item)
 }
 
-func (s *Service) ResolveTicket(ctx context.Context, cmd contracts.ResolveTicketCommand) error {
+func (s *Service) ResolveTicket(ctx context.Context, cmd decisionservice.ResolveTicketCommand) error {
 	if cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
 		return common.ErrInvalidArgument
 	}

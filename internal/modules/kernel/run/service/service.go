@@ -1,4 +1,4 @@
-package contracts
+package run
 
 import (
 	"context"
@@ -27,12 +27,13 @@ type BlockOnApprovalCommand struct {
 }
 
 type CompleteRunCommand struct{ RunID common.RunID }
+
 type FailRunCommand struct {
 	RunID  common.RunID
 	Reason string
 }
 
-type RunService interface {
+type Service interface {
 	CreateRun(context.Context, CreateRunCommand) error
 	StartRun(context.Context, StartRunCommand) error
 	ResumeRun(context.Context, ResumeRunCommand) error

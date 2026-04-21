@@ -1,24 +1,49 @@
 # workorch
 
-Phase1 minimal skeleton, rectified to the go-multi-module-dev multi-module layout.
+Phase1 minimal skeleton, rectified to the go-multi-module-dev module-oriented layout.
 
 ## Structure
 
 - `application/workorchd`: executable entry
+- `application/workorchd/bootstrap`: backend/runtime assembly and repository backend selection
+- `application/workorchd/demo`: phase1 runnable demo assembly and acceptance slices
 - `internal/modules/kernel/{workspace,run,decision,orchestrator}`: phase1 kernel modules
 - `internal/modules/blocks/{approval,legacy}`: reusable/block modules
-- `internal/pkg/{common,contracts,events,repository}`: shared internal contracts and primitives
+- `internal/pkg/{common,events,repository}`: shared internal primitives
 - `docs/`: repo docs
 - `.github/workflows/ci.yml`: GitHub Actions CI workflow
 - `Makefile`: local and CI entry targets
+
+Each module is now normalized around the go-multi-module-dev minimum shape:
+
+- `module.go`: module-level constructor/export entry
+- `biz/`: business logic
+- `service/`: module-facing contract layer or adapter-facing surface
+- `pkg/common`: module-local constants
+- `pkg/models`: module-local models when the module owns domain data
+
+The application layer is also split by responsibility:
+
+- `main.go`: process entry and output loop
+- `bootstrap/`: backend assembly, repository wiring, and runtime construction
+- `demo/`: phase1 acceptance scenarios and snapshot composition
+- `presenter/`: observable output rendering
+
+Inside `demo/`, responsibilities are further separated:
+
+- `demo.go`: scenario registration and top-level execution
+- `scenarios.go`: phase1 scenario flow
+- `snapshot.go`: snapshot loading/composition
 
 ## Phase1 semantics retained
 
 - kernel: `workspace`, `run`, `decision`, `orchestrator`
 - blocks: `approval`, `legacy`
-- shared contracts/events/repository moved under `internal/pkg`
+- shared common/events/repository primitives moved under `internal/pkg`
 
 ## Development workflow
+
+This repository is still a single `go.mod` codebase. Here, `go-multi-module-dev` means module-oriented directory organization and dependency boundaries inside one repository, not a split into multiple Go modules yet.
 
 Common entrypoints:
 

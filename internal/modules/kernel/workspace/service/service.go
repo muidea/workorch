@@ -1,4 +1,4 @@
-package contracts
+package workspace
 
 import (
 	"context"
@@ -11,6 +11,6 @@ type CreateWorkspaceCommand struct {
 	Title       string
 }
 
-type WorkspaceService interface {
+type Service interface {
 	CreateWorkspace(context.Context, CreateWorkspaceCommand) error
 }

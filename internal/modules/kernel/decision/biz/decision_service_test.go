@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/contracts"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -16,7 +16,7 @@ func TestService_CreateTicket_SeedsOpenState(t *testing.T) {
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	service := NewService(ticketRepo, resolutionRepo)
 
-	cmd := contracts.CreateTicketCommand{
+	cmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-1"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		RunID:       common.RunID("run-1"),
@@ -42,7 +42,7 @@ func TestService_ResolveTicket_OpenToResolvedAndPersistsResolution(t *testing.T)
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	service := NewService(ticketRepo, resolutionRepo)
 
-	createCmd := contracts.CreateTicketCommand{
+	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-1"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		RunID:       common.RunID("run-1"),
@@ -53,7 +53,7 @@ func TestService_ResolveTicket_OpenToResolvedAndPersistsResolution(t *testing.T)
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	resolveCmd := contracts.ResolveTicketCommand{
+	resolveCmd := decisionservice.ResolveTicketCommand{
 		ResolutionID: common.ResolutionID("resolution-1"),
 		TicketID:     createCmd.TicketID,
 		Type:         "approve-plan",
@@ -89,7 +89,7 @@ func TestService_ResolveTicket_RejectsSecondResolveOnResolvedTicket(t *testing.T
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	service := NewService(ticketRepo, resolutionRepo)
 
-	createCmd := contracts.CreateTicketCommand{
+	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-1"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		RunID:       common.RunID("run-1"),
@@ -100,7 +100,7 @@ func TestService_ResolveTicket_RejectsSecondResolveOnResolvedTicket(t *testing.T
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	first := contracts.ResolveTicketCommand{
+	first := decisionservice.ResolveTicketCommand{
 		ResolutionID: common.ResolutionID("resolution-1"),
 		TicketID:     createCmd.TicketID,
 		Type:         "approve-plan",
@@ -109,7 +109,7 @@ func TestService_ResolveTicket_RejectsSecondResolveOnResolvedTicket(t *testing.T
 		t.Fatalf("first resolve ticket: %v", err)
 	}
 
-	second := contracts.ResolveTicketCommand{
+	second := decisionservice.ResolveTicketCommand{
 		ResolutionID: common.ResolutionID("resolution-2"),
 		TicketID:     createCmd.TicketID,
 		Type:         "change-plan",

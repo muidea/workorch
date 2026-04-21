@@ -1,4 +1,4 @@
-package contracts
+package orchestrator
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-type RuntimeOrchestrator interface {
+type Service interface {
 	StartRun(context.Context, common.RunID) error
 	DispatchNextStep(context.Context, common.RunID) error
 	BlockOnDecision(context.Context, common.RunID, common.TicketID) error

@@ -1,0 +1,52 @@
+package bootstrap
+
+import (
+	"os"
+	"path/filepath"
+
+	"github.com/muidea/workorch/internal/pkg/repository"
+	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
+	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+)
+
+const (
+	envBackend  = "WORKORCH_REPOSITORY_BACKEND"
+	envDataRoot = "WORKORCH_DATA_DIR"
+)
+
+type repositorySet struct {
+	workspace  repository.WorkspaceRepository
+	run        repository.RunRepository
+	step       repository.StepRepository
+	ticket     repository.DecisionTicketRepository
+	resolution repository.DecisionResolutionRepository
+	approval   repository.ApprovalRepository
+}
+
+func buildRepositories(backend string, dataRoot string) repositorySet {
+	switch backend {
+	case "", "memory":
+		return repositorySet{
+			workspace:  memory.NewWorkspaceRepository(),
+			run:        memory.NewRunRepository(),
+			step:       memory.NewStepRepository(),
+			ticket:     memory.NewDecisionTicketRepository(),
+			resolution: memory.NewDecisionResolutionRepository(),
+			approval:   memory.NewApprovalRepository(),
+		}
+	case "file":
+		if dataRoot == "" {
+			dataRoot = filepath.Join(os.TempDir(), "workorchd-data")
+		}
+		return repositorySet{
+			workspace:  fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json")),
+			run:        fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json")),
+			step:       fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json")),
+			ticket:     fileRepo.NewDecisionTicketRepository(filepath.Join(dataRoot, "ticket.json")),
+			resolution: fileRepo.NewDecisionResolutionRepository(filepath.Join(dataRoot, "resolution.json")),
+			approval:   fileRepo.NewApprovalRepository(filepath.Join(dataRoot, "approval.json")),
+		}
+	default:
+		panic("unsupported repository backend: " + backend)
+	}
+}

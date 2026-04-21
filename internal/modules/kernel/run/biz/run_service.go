@@ -4,8 +4,8 @@ import (
 	"context"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -28,7 +28,7 @@ func NewService(runs repository.RunRepository, workspaces repository.WorkspaceRe
 	return &Service{runs: runs, workspaces: workspaces, orchestrator: orchestrator}
 }
 
-func (s *Service) CreateRun(ctx context.Context, cmd contracts.CreateRunCommand) error {
+func (s *Service) CreateRun(ctx context.Context, cmd runservice.CreateRunCommand) error {
 	if cmd.WorkspaceID == "" || cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -46,7 +46,7 @@ func (s *Service) CreateRun(ctx context.Context, cmd contracts.CreateRunCommand)
 	return s.runs.Create(ctx, run)
 }
 
-func (s *Service) StartRun(ctx context.Context, cmd contracts.StartRunCommand) error {
+func (s *Service) StartRun(ctx context.Context, cmd runservice.StartRunCommand) error {
 	if cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -56,7 +56,7 @@ func (s *Service) StartRun(ctx context.Context, cmd contracts.StartRunCommand) e
 	return s.orchestrator.StartRun(ctx, cmd.RunID)
 }
 
-func (s *Service) ResumeRun(ctx context.Context, cmd contracts.ResumeRunCommand) error {
+func (s *Service) ResumeRun(ctx context.Context, cmd runservice.ResumeRunCommand) error {
 	if cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -75,7 +75,7 @@ func (s *Service) ResumeRun(ctx context.Context, cmd contracts.ResumeRunCommand)
 	return s.orchestrator.ResumeRun(ctx, cmd.RunID)
 }
 
-func (s *Service) BlockOnDecision(ctx context.Context, cmd contracts.BlockOnDecisionCommand) error {
+func (s *Service) BlockOnDecision(ctx context.Context, cmd runservice.BlockOnDecisionCommand) error {
 	if cmd.RunID == "" || cmd.TicketID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -85,7 +85,7 @@ func (s *Service) BlockOnDecision(ctx context.Context, cmd contracts.BlockOnDeci
 	return s.orchestrator.BlockOnDecision(ctx, cmd.RunID, cmd.TicketID)
 }
 
-func (s *Service) BlockOnApproval(ctx context.Context, cmd contracts.BlockOnApprovalCommand) error {
+func (s *Service) BlockOnApproval(ctx context.Context, cmd runservice.BlockOnApprovalCommand) error {
 	if cmd.RunID == "" || cmd.ApprovalID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -95,7 +95,7 @@ func (s *Service) BlockOnApproval(ctx context.Context, cmd contracts.BlockOnAppr
 	return s.orchestrator.BlockOnApproval(ctx, cmd.RunID, cmd.ApprovalID)
 }
 
-func (s *Service) CompleteRun(ctx context.Context, cmd contracts.CompleteRunCommand) error {
+func (s *Service) CompleteRun(ctx context.Context, cmd runservice.CompleteRunCommand) error {
 	if cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -113,7 +113,7 @@ func (s *Service) CompleteRun(ctx context.Context, cmd contracts.CompleteRunComm
 	return s.runs.Update(ctx, r)
 }
 
-func (s *Service) FailRun(ctx context.Context, cmd contracts.FailRunCommand) error {
+func (s *Service) FailRun(ctx context.Context, cmd runservice.FailRunCommand) error {
 	if cmd.RunID == "" || cmd.Reason == "" {
 		return common.ErrInvalidArgument
 	}

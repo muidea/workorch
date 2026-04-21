@@ -1,4 +1,4 @@
-package contracts
+package decision
 
 import (
 	"context"
@@ -21,7 +21,7 @@ type ResolveTicketCommand struct {
 	Payload      map[string]any
 }
 
-type DecisionService interface {
+type Service interface {
 	CreateTicket(context.Context, CreateTicketCommand) error
 	ResolveTicket(context.Context, ResolveTicketCommand) error
 }
