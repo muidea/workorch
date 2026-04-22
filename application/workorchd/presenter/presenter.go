@@ -4,23 +4,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"time"
 
+	"github.com/muidea/workorch/application/workorchd/observed"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type Snapshot struct {
-	Slice     string            `json:"slice"`
-	Workspace *WorkspaceView    `json:"workspace"`
-	Run       *RunView          `json:"run"`
-	Step      *StepView         `json:"step,omitempty"`
-	Blocking  *BlockingView     `json:"blocking,omitempty"`
-	Observed  []events.Envelope `json:"observed"`
+	Slice     string         `json:"slice"`
+	Workspace *WorkspaceView `json:"workspace"`
+	Run       *RunView       `json:"run"`
+	Step      *StepView      `json:"step,omitempty"`
+	Blocking  *BlockingView  `json:"blocking,omitempty"`
+	Observed  []ObservedView `json:"observed"`
 }
 
 type WorkspaceView struct {
@@ -67,6 +66,20 @@ type ApprovalView struct {
 	State  string `json:"state"`
 }
 
+type ObservedView struct {
+	ID           string         `json:"id"`
+	Version      string         `json:"version"`
+	Topic        string         `json:"topic"`
+	OccurredAt   string         `json:"occurredAt"`
+	SourceModule string         `json:"sourceModule"`
+	SubjectType  string         `json:"subjectType"`
+	SubjectID    string         `json:"subjectId"`
+	WorkspaceID  string         `json:"workspaceId"`
+	RunID        string         `json:"runId"`
+	StepID       string         `json:"stepId"`
+	Payload      map[string]any `json:"payload"`
+}
+
 type BlockingRefs struct {
 	TicketID   common.TicketID
 	ApprovalID common.ApprovalID
@@ -93,6 +106,7 @@ func BuildSnapshot(
 	step *runmodel.Step,
 	ticket *decisionmodel.Ticket,
 	approval *approvalmodel.Approval,
+	observedItems []observed.SnapshotItem,
 ) *Snapshot {
 	blocking := &BlockingView{}
 	if ticket != nil {
@@ -105,45 +119,13 @@ func BuildSnapshot(
 		blocking = nil
 	}
 
-	observed := []events.Envelope{
-		NewEnvelope("/workspace/snapshot", "workspace", string(ws.ID), ws.ID, r.ID, "", map[string]any{
-			"state":       ws.State,
-			"activeRunId": ws.ActiveRunID,
-		}),
-		NewEnvelope("/run/snapshot", "run", string(r.ID), ws.ID, r.ID, "", map[string]any{
-			"state":              r.State,
-			"blockingTicketId":   r.BlockingTicketID,
-			"blockingApprovalId": r.BlockingApprovalID,
-		}),
-	}
-	if step != nil {
-		observed = append(observed, NewEnvelope("/step/snapshot", "step", string(step.ID), ws.ID, r.ID, step.ID, map[string]any{
-			"kind":   step.Kind,
-			"state":  step.State,
-			"input":  step.Input,
-			"output": step.Output,
-		}))
-	}
-	if ticket != nil {
-		observed = append(observed, NewEnvelope("/decision/ticket/snapshot", "decision_ticket", string(ticket.ID), ws.ID, r.ID, ticket.StepID, map[string]any{
-			"reason": ticket.Reason,
-			"state":  ticket.State,
-		}))
-	}
-	if approval != nil {
-		observed = append(observed, NewEnvelope("/approval/snapshot", "approval", string(approval.ID), ws.ID, r.ID, approval.StepID, map[string]any{
-			"reason": approval.Reason,
-			"state":  approval.State,
-		}))
-	}
-
 	return &Snapshot{
 		Slice:     slice,
 		Workspace: MapWorkspace(ws),
 		Run:       MapRun(r),
 		Step:      MapStep(step),
 		Blocking:  blocking,
-		Observed:  observed,
+		Observed:  MapObserved(observedItems),
 	}
 }
 
@@ -211,18 +193,26 @@ func MapApproval(item *approvalmodel.Approval) *ApprovalView {
 	}
 }
 
-func NewEnvelope(topic, subjectType, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, payload map[string]any) events.Envelope {
-	return events.Envelope{
-		ID:           fmt.Sprintf("%s:%s", topic, subjectID),
-		Version:      "phase1-demo.v1",
-		Topic:        topic,
-		OccurredAt:   time.Now().UTC().Format(time.RFC3339),
-		SourceModule: "application/workorchd",
-		SubjectType:  subjectType,
-		SubjectID:    subjectID,
-		WorkspaceID:  string(workspaceID),
-		RunID:        string(runID),
-		StepID:       string(stepID),
-		Payload:      payload,
+func MapObserved(items []observed.SnapshotItem) []ObservedView {
+	if len(items) == 0 {
+		return nil
 	}
+	out := make([]ObservedView, 0, len(items))
+	for _, item := range items {
+		envelope := item.Envelope()
+		out = append(out, ObservedView{
+			ID:           envelope.ID,
+			Version:      envelope.Version,
+			Topic:        envelope.Topic,
+			OccurredAt:   envelope.OccurredAt,
+			SourceModule: envelope.SourceModule,
+			SubjectType:  envelope.SubjectType,
+			SubjectID:    envelope.SubjectID,
+			WorkspaceID:  envelope.WorkspaceID,
+			RunID:        envelope.RunID,
+			StepID:       envelope.StepID,
+			Payload:      envelope.Payload,
+		})
+	}
+	return out
 }

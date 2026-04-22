@@ -6,7 +6,8 @@ Phase1 minimal skeleton, rectified to the go-multi-module-dev module-oriented la
 
 - `application/workorchd`: executable entry
 - `application/workorchd/bootstrap`: backend/runtime assembly and repository backend selection
-- `application/workorchd/demo`: phase1 runnable demo assembly and acceptance slices
+- `application/workorchd/appservice`: application-level phase1 orchestration, env-backed execution entry, and workflow helpers
+- `application/workorchd/demo`: thin compatibility shim over the phase1 appservice entry
 - `internal/modules/kernel/{workspace,run,decision,orchestrator}`: phase1 kernel modules
 - `internal/modules/blocks/{approval,legacy}`: reusable/block modules
 - `internal/pkg/{common,events,repository}`: shared internal primitives
@@ -24,16 +25,48 @@ Each module is now normalized around the go-multi-module-dev minimum shape:
 
 The application layer is also split by responsibility:
 
-- `main.go`: process entry and output loop
+- `main.go`: process entry and output loop that delegates phase1 execution to `appservice`
 - `bootstrap/`: backend assembly, repository wiring, and runtime construction
-- `demo/`: phase1 acceptance scenarios and snapshot composition
+- `appservice/`: application-level business orchestration, phase1 workflow assembly, env-backed execution entry, and phase1 runtime adapter
+- `observed/`: phase1 observed-envelope adapter for acceptance snapshots
+- `demo/`: compatibility export entry that forwards to `appservice`
 - `presenter/`: observable output rendering
 
-Inside `demo/`, responsibilities are further separated:
+Inside `demo/`, responsibilities are now intentionally thin:
 
-- `demo.go`: scenario registration and top-level execution
-- `scenarios.go`: phase1 scenario flow
-- `snapshot.go`: snapshot loading/composition
+- `demo.go`: compatibility shim that delegates to `appservice.RunAllPhase1FromEnv(...)` / `appservice.RunAllPhase1(...)`
+
+Current boundary:
+
+- `bootstrap.Runtime`: assembled capability export surface via `Exports()` plus lifecycle shutdown
+- `bootstrap.Runtime`: now stores a single assembled `Exports` bundle plus module lifecycle teardown, rather than scattering repo/service fields internally
+- `bootstrap.Exports`: now groups assembled capabilities into `Repositories`, `Services`, and `Infrastructure`
+- `appservice.Runtime`: phase1 application runtime contract
+- `appservice/runtime_adapter.go`: bridges grouped `bootstrap.Exports` into the phase1 runtime contract through grouped runtime dependencies
+- `appservice`: now keeps workspace write flows behind `workspace` module service instead of direct repository updates
+- `appservice`: now also uses explicit read-side vs action-side runtime faces inside phase1 orchestration
+- `appservice`: phase1 action-side is now further grouped by workspace/run/decision/approval business actions
+- `appservice`: phase1 read-side is now further grouped by guard checks vs snapshot assembly
+- `appservice/runtime_adapter.go`: now also groups its own dependencies into read-side and action-side capabilities instead of flat repo/service fields
+- `appservice/runtime_dependencies.go`: now centralizes `bootstrap.Exports` to grouped runtime dependency assembly in one place
+- `appservice/runtime_assembly.go`: now centralizes managed runtime adapter plus collector assembly in one place
+- `appservice/runtime_session.go`: now centralizes repeated bootstrap-plus-managed-runtime lifecycle handling in one place
+- `appservice/entry.go`: now centralizes repeated phase1 execution through `WithSession` and `WithBackend` helpers, with `demo` forwarding to the same path
+- `appservice/demo` tests: now centralize repeated session setup and backend run patterns through shared test helpers
+- `observed/`: owns phase1 acceptance `observed` envelope assembly
+- `bootstrap.Exports.Infrastructure`: now carries the application `EventHub`
+- `internal/pkg/events/phase1_payload.go`: now centralizes reusable phase1 event payload keys and builders
+- `internal/pkg/events/phase1_event.go`: now centralizes typed phase1 event envelope decoding, normalization, topic listing, and observer subscription helpers
+- `internal/pkg/events/phase1_version.go`: now centralizes strict phase1 event/snapshot version constants and topic-scoped contract lookup
+- `observed/phase1_contract.go`: now decodes and validates published phase1 payloads before turning them into acceptance snapshots
+- `observed/snapshot_contract.go`: now centralizes typed phase1 snapshot items while `presenter` handles the final JSON-compatible rendering shape
+- `workspace / decision / approval`: now publish create/resolve events into the shared `EventHub`
+- `orchestrator`: now also publishes `workspace` runtime state changes when `activeRunId` is bound or cleared
+- `observed/collector.go`: now subscribes to phase1 event topics and collects observed input without relying on `MemoryHub.Published()`
+- `appservice/runtime_managed.go`: now owns explicit collector lifecycle via `ManagedRuntime`
+- `appservice/runtime_adapter.go`: now acts as a pure business runtime adapter without collector ownership
+- `observed/`: now prefers subscribed/published `workspace / run / step / decision / approval` events when available, including workspace runtime `activeRunId` changes, falls back to state-derived envelopes only when an event source is still absent, and centralizes the phase1 event-to-snapshot mapper contract in one place
+- `presenter/`: owns snapshot view mapping and output only
 
 ## Phase1 semantics retained
 

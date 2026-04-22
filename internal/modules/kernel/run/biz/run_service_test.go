@@ -85,6 +85,94 @@ func TestService_CreateRun_ValidatesWorkspaceAndArguments(t *testing.T) {
 	}
 }
 
+func TestService_CreateRun_RejectsDuplicateRunID(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	service := NewService(runRepo, workspaceRepo, nil)
+
+	workspaceID := common.WorkspaceID("ws-dup")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	first := runservice.CreateRunCommand{
+		RunID:       common.RunID("run-dup"),
+		WorkspaceID: workspaceID,
+		GoalID:      common.GoalID("goal-1"),
+		DoDID:       common.DoDID("dod-1"),
+	}
+	if err := service.CreateRun(ctx, first); err != nil {
+		t.Fatalf("first create run: %v", err)
+	}
+
+	second := runservice.CreateRunCommand{
+		RunID:       first.RunID,
+		WorkspaceID: workspaceID,
+		GoalID:      common.GoalID("goal-2"),
+		DoDID:       common.DoDID("dod-2"),
+	}
+	if err := service.CreateRun(ctx, second); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("second create run err = %v, want conflict", err)
+	}
+
+	got, err := runRepo.Get(ctx, first.RunID)
+	if err != nil {
+		t.Fatalf("get run after duplicate create: %v", err)
+	}
+	if got.GoalID != first.GoalID || got.DoDID != first.DoDID {
+		t.Fatalf("run mutated after duplicate create: %+v", got)
+	}
+}
+
+func TestService_EnsureRun_IsIdempotentAndRejectsWorkspaceMismatch(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	service := NewService(runRepo, workspaceRepo, nil)
+
+	workspaceID := common.WorkspaceID("ws-ensure")
+	otherWorkspaceID := common.WorkspaceID("ws-ensure-other")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: otherWorkspaceID, Title: "ws-other", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed other workspace: %v", err)
+	}
+
+	cmd := runservice.CreateRunCommand{
+		RunID:       common.RunID("run-ensure"),
+		WorkspaceID: workspaceID,
+	}
+	if err := service.EnsureRun(ctx, cmd); err != nil {
+		t.Fatalf("first ensure run: %v", err)
+	}
+	if err := service.EnsureRun(ctx, cmd); err != nil {
+		t.Fatalf("second ensure run: %v", err)
+	}
+	if err := service.EnsureRun(ctx, runservice.CreateRunCommand{
+		RunID:       cmd.RunID,
+		WorkspaceID: otherWorkspaceID,
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("workspace mismatch err = %v, want conflict", err)
+	}
+}
+
+func TestService_StartRun_ValidateArgumentsAndRequireOrchestrator(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(memory.NewRunRepository(), memory.NewWorkspaceRepository(), nil)
+
+	if err := service.StartRun(ctx, runservice.StartRunCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("start empty err = %v, want invalid argument", err)
+	}
+	if err := service.StartRun(ctx, runservice.StartRunCommand{RunID: common.RunID("run-1")}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("start without orchestrator err = %v, want invalid argument", err)
+	}
+	if err := service.EnsureStarted(ctx, runservice.StartRunCommand{RunID: common.RunID("run-1")}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("ensure start without orchestrator err = %v, want invalid argument", err)
+	}
+}
+
 func TestService_ResumeBlockCommands_ValidateArgumentsAndRequireOrchestrator(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(memory.NewRunRepository(), memory.NewWorkspaceRepository(), nil)
@@ -95,6 +183,9 @@ func TestService_ResumeBlockCommands_ValidateArgumentsAndRequireOrchestrator(t *
 	if err := service.ResumeRun(ctx, runservice.ResumeRunCommand{RunID: common.RunID("run-1")}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("resume without orchestrator err = %v, want invalid argument", err)
 	}
+	if err := service.EnsureResumed(ctx, runservice.ResumeRunCommand{RunID: common.RunID("run-1")}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("ensure resume without orchestrator err = %v, want invalid argument", err)
+	}
 
 	if err := service.BlockOnDecision(ctx, runservice.BlockOnDecisionCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("block on decision empty err = %v, want invalid argument", err)
@@ -102,12 +193,81 @@ func TestService_ResumeBlockCommands_ValidateArgumentsAndRequireOrchestrator(t *
 	if err := service.BlockOnDecision(ctx, runservice.BlockOnDecisionCommand{RunID: common.RunID("run-1"), TicketID: common.TicketID("ticket-1")}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("block on decision without orchestrator err = %v, want invalid argument", err)
 	}
+	if err := service.EnsureBlockedOnDecision(ctx, runservice.BlockOnDecisionCommand{RunID: common.RunID("run-1"), TicketID: common.TicketID("ticket-1")}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("ensure block on decision without orchestrator err = %v, want invalid argument", err)
+	}
 
 	if err := service.BlockOnApproval(ctx, runservice.BlockOnApprovalCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("block on approval empty err = %v, want invalid argument", err)
 	}
 	if err := service.BlockOnApproval(ctx, runservice.BlockOnApprovalCommand{RunID: common.RunID("run-1"), ApprovalID: common.ApprovalID("approval-1")}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("block on approval without orchestrator err = %v, want invalid argument", err)
+	}
+	if err := service.EnsureBlockedOnApproval(ctx, runservice.BlockOnApprovalCommand{RunID: common.RunID("run-1"), ApprovalID: common.ApprovalID("approval-1")}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("ensure block on approval without orchestrator err = %v, want invalid argument", err)
+	}
+}
+
+func TestService_EnsureRunLifecycleHonorsIdempotentAndTerminalSemantics(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	orch := orchestratorbiz.NewRuntimeOrchestrator(
+		&serviceRuntimeAdapter{output: map[string]any{"status": "ok"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		approvalRepo,
+		nil,
+	)
+	service := NewService(runRepo, workspaceRepo, orch)
+
+	workspaceID := common.WorkspaceID("ws-ensure-lifecycle")
+	runID := common.RunID("run-ensure-lifecycle")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := service.EnsureRun(ctx, runservice.CreateRunCommand{RunID: runID, WorkspaceID: workspaceID}); err != nil {
+		t.Fatalf("ensure run: %v", err)
+	}
+	if err := service.EnsureStarted(ctx, runservice.StartRunCommand{RunID: runID}); err != nil {
+		t.Fatalf("ensure started: %v", err)
+	}
+	if err := service.EnsureStarted(ctx, runservice.StartRunCommand{RunID: runID}); err != nil {
+		t.Fatalf("ensure started after completion: %v", err)
+	}
+	if err := service.EnsureBlockedOnDecision(ctx, runservice.BlockOnDecisionCommand{
+		RunID:    runID,
+		TicketID: common.TicketID("ticket-after-complete"),
+	}); err != nil {
+		t.Fatalf("ensure blocked on decision after completion: %v", err)
+	}
+	if err := service.EnsureResumed(ctx, runservice.ResumeRunCommand{RunID: runID}); err != nil {
+		t.Fatalf("ensure resumed after completion: %v", err)
+	}
+
+	failedRunID := common.RunID("run-ensure-lifecycle-failed")
+	if err := service.EnsureRun(ctx, runservice.CreateRunCommand{RunID: failedRunID, WorkspaceID: workspaceID}); err != nil {
+		t.Fatalf("ensure failed run seed: %v", err)
+	}
+	if err := service.FailRun(ctx, runservice.FailRunCommand{RunID: failedRunID, Reason: "manual fail"}); err != nil {
+		t.Fatalf("fail run: %v", err)
+	}
+	if err := service.EnsureResumed(ctx, runservice.ResumeRunCommand{RunID: failedRunID}); err != nil {
+		t.Fatalf("ensure resumed after failure: %v", err)
+	}
+	if err := service.EnsureBlockedOnApproval(ctx, runservice.BlockOnApprovalCommand{
+		RunID:      failedRunID,
+		ApprovalID: common.ApprovalID("approval-after-fail"),
+	}); err != nil {
+		t.Fatalf("ensure blocked on approval after failure: %v", err)
+	}
+	if err := service.EnsureStarted(ctx, runservice.StartRunCommand{RunID: failedRunID}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("ensure started after failure err = %v, want conflict", err)
 	}
 }
 
@@ -323,6 +483,64 @@ func TestService_CompleteRun_WithoutOrchestrator(t *testing.T) {
 	}
 	if r.State != common.RunStateCompleted {
 		t.Fatalf("run state = %q, want completed", r.State)
+	}
+}
+
+func TestService_CompleteRunAndFailRun_ValidateArguments(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(memory.NewRunRepository(), memory.NewWorkspaceRepository(), nil)
+
+	if err := service.CompleteRun(ctx, runservice.CompleteRunCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("complete empty err = %v, want invalid argument", err)
+	}
+
+	if err := service.FailRun(ctx, runservice.FailRunCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("fail empty err = %v, want invalid argument", err)
+	}
+	if err := service.FailRun(ctx, runservice.FailRunCommand{RunID: common.RunID("run-1")}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("fail empty reason err = %v, want invalid argument", err)
+	}
+}
+
+func TestService_FailRun_WithoutOrchestrator(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	service := NewService(runRepo, workspaceRepo, nil)
+
+	workspaceID := common.WorkspaceID("ws-fail")
+	runID := common.RunID("run-fail")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := service.CreateRun(ctx, runservice.CreateRunCommand{RunID: runID, WorkspaceID: workspaceID}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	r, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run before fail: %v", err)
+	}
+	r.State = common.RunStateBlockedOnDecision
+	r.BlockingTicketID = common.TicketID("ticket-1")
+	r.BlockingApprovalID = common.ApprovalID("approval-1")
+	if err := runRepo.Update(ctx, r); err != nil {
+		t.Fatalf("prepare blocked run: %v", err)
+	}
+
+	if err := service.FailRun(ctx, runservice.FailRunCommand{RunID: runID, Reason: "manual fail"}); err != nil {
+		t.Fatalf("fail run: %v", err)
+	}
+
+	failed, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get failed run: %v", err)
+	}
+	if failed.State != common.RunStateFailed {
+		t.Fatalf("run state = %q, want failed", failed.State)
+	}
+	if failed.BlockingTicketID != "" || failed.BlockingApprovalID != "" {
+		t.Fatalf("blocking refs not cleared: ticket=%q approval=%q", failed.BlockingTicketID, failed.BlockingApprovalID)
 	}
 }
 

@@ -5,16 +5,18 @@ import (
 	"errors"
 	"testing"
 
+	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
 func TestService_CreateApproval_SeedsPendingState(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
-	service := NewService(repo)
+	service := NewService(repo, nil)
 
-	cmd := CreateApprovalCommand{
+	cmd := approvalservice.CreateApprovalCommand{
 		ApprovalID:  common.ApprovalID("approval-1"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		RunID:       common.RunID("run-1"),
@@ -34,12 +36,95 @@ func TestService_CreateApproval_SeedsPendingState(t *testing.T) {
 	}
 }
 
+func TestService_CreateApproval_ValidateArguments(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(memory.NewApprovalRepository(), nil)
+
+	tests := []approvalservice.CreateApprovalCommand{
+		{ApprovalID: "", RunID: common.RunID("run-1"), Reason: "need human approval"},
+		{ApprovalID: common.ApprovalID("approval-1"), RunID: "", Reason: "need human approval"},
+		{ApprovalID: common.ApprovalID("approval-1"), RunID: common.RunID("run-1"), Reason: ""},
+	}
+
+	for _, tt := range tests {
+		if err := service.CreateApproval(ctx, tt); !errors.Is(err, common.ErrInvalidArgument) {
+			t.Fatalf("cmd %#v err = %v, want invalid argument", tt, err)
+		}
+	}
+}
+
+func TestService_CreateApproval_RejectsDuplicateApprovalID(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewApprovalRepository()
+	service := NewService(repo, nil)
+
+	first := approvalservice.CreateApprovalCommand{
+		ApprovalID:  common.ApprovalID("approval-dup"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		RunID:       common.RunID("run-1"),
+		StepID:      common.StepID("run-1/step-1"),
+		Reason:      "need human approval",
+	}
+	if err := service.CreateApproval(ctx, first); err != nil {
+		t.Fatalf("first create approval: %v", err)
+	}
+
+	second := approvalservice.CreateApprovalCommand{
+		ApprovalID:  first.ApprovalID,
+		WorkspaceID: common.WorkspaceID("ws-2"),
+		RunID:       common.RunID("run-2"),
+		StepID:      common.StepID("run-2/step-1"),
+		Reason:      "other approval",
+	}
+	if err := service.CreateApproval(ctx, second); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("second create err = %v, want conflict", err)
+	}
+
+	got, err := repo.Get(ctx, first.ApprovalID)
+	if err != nil {
+		t.Fatalf("get approval after duplicate create: %v", err)
+	}
+	if got.RunID != first.RunID || got.Reason != first.Reason {
+		t.Fatalf("approval mutated after duplicate create: %+v", got)
+	}
+}
+
+func TestService_EnsureApproval_IsIdempotentAndRejectsBindingMismatch(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewApprovalRepository()
+	service := NewService(repo, nil)
+
+	cmd := approvalservice.CreateApprovalCommand{
+		ApprovalID:  common.ApprovalID("approval-ensure"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		RunID:       common.RunID("run-1"),
+		StepID:      common.StepID("run-1/step-1"),
+		Reason:      "need human approval",
+	}
+	if err := service.EnsureApproval(ctx, cmd); err != nil {
+		t.Fatalf("first ensure approval: %v", err)
+	}
+	if err := service.EnsureApproval(ctx, cmd); err != nil {
+		t.Fatalf("second ensure approval: %v", err)
+	}
+
+	if err := service.EnsureApproval(ctx, approvalservice.CreateApprovalCommand{
+		ApprovalID:  cmd.ApprovalID,
+		WorkspaceID: common.WorkspaceID("ws-2"),
+		RunID:       cmd.RunID,
+		StepID:      cmd.StepID,
+		Reason:      cmd.Reason,
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("binding mismatch err = %v, want conflict", err)
+	}
+}
+
 func TestService_ResolveApproval_PendingTransitions(t *testing.T) {
 	ctx := context.Background()
 
 	for _, tc := range []struct {
 		name      string
-		resolve   func(*Service, context.Context, ResolveApprovalCommand) error
+		resolve   func(*Service, context.Context, approvalservice.ResolveApprovalCommand) error
 		wantState common.ApprovalState
 	}{
 		{
@@ -55,9 +140,9 @@ func TestService_ResolveApproval_PendingTransitions(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := memory.NewApprovalRepository()
-			service := NewService(repo)
+			service := NewService(repo, nil)
 
-			cmd := CreateApprovalCommand{
+			cmd := approvalservice.CreateApprovalCommand{
 				ApprovalID:  common.ApprovalID("approval-" + tc.name),
 				WorkspaceID: common.WorkspaceID("ws-1"),
 				RunID:       common.RunID("run-1"),
@@ -68,7 +153,7 @@ func TestService_ResolveApproval_PendingTransitions(t *testing.T) {
 				t.Fatalf("create approval: %v", err)
 			}
 
-			if err := tc.resolve(service, ctx, ResolveApprovalCommand{ApprovalID: cmd.ApprovalID}); err != nil {
+			if err := tc.resolve(service, ctx, approvalservice.ResolveApprovalCommand{ApprovalID: cmd.ApprovalID}); err != nil {
 				t.Fatalf("resolve approval: %v", err)
 			}
 
@@ -88,8 +173,8 @@ func TestService_ResolveApproval_RejectsWhenAlreadyResolved(t *testing.T) {
 
 	for _, tc := range []struct {
 		name          string
-		firstResolve  func(*Service, context.Context, ResolveApprovalCommand) error
-		secondResolve func(*Service, context.Context, ResolveApprovalCommand) error
+		firstResolve  func(*Service, context.Context, approvalservice.ResolveApprovalCommand) error
+		secondResolve func(*Service, context.Context, approvalservice.ResolveApprovalCommand) error
 		wantState     common.ApprovalState
 	}{
 		{
@@ -107,10 +192,10 @@ func TestService_ResolveApproval_RejectsWhenAlreadyResolved(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := memory.NewApprovalRepository()
-			service := NewService(repo)
+			service := NewService(repo, nil)
 			approvalID := common.ApprovalID("approval-1")
 
-			if err := service.CreateApproval(ctx, CreateApprovalCommand{
+			if err := service.CreateApproval(ctx, approvalservice.CreateApprovalCommand{
 				ApprovalID:  approvalID,
 				WorkspaceID: common.WorkspaceID("ws-1"),
 				RunID:       common.RunID("run-1"),
@@ -120,10 +205,10 @@ func TestService_ResolveApproval_RejectsWhenAlreadyResolved(t *testing.T) {
 				t.Fatalf("create approval: %v", err)
 			}
 
-			if err := tc.firstResolve(service, ctx, ResolveApprovalCommand{ApprovalID: approvalID}); err != nil {
+			if err := tc.firstResolve(service, ctx, approvalservice.ResolveApprovalCommand{ApprovalID: approvalID}); err != nil {
 				t.Fatalf("first resolve: %v", err)
 			}
-			if err := tc.secondResolve(service, ctx, ResolveApprovalCommand{ApprovalID: approvalID}); !errors.Is(err, common.ErrConflict) {
+			if err := tc.secondResolve(service, ctx, approvalservice.ResolveApprovalCommand{ApprovalID: approvalID}); !errors.Is(err, common.ErrConflict) {
 				t.Fatalf("second resolve err = %v, want conflict", err)
 			}
 
@@ -135,5 +220,139 @@ func TestService_ResolveApproval_RejectsWhenAlreadyResolved(t *testing.T) {
 				t.Fatalf("approval state = %q, want %q", approval.State, tc.wantState)
 			}
 		})
+	}
+}
+
+func TestService_EnsureApprovalResolution_IsIdempotentAndRejectsOppositeTerminalState(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name         string
+		firstEnsure  func(*Service, context.Context, approvalservice.ResolveApprovalCommand) error
+		secondEnsure func(*Service, context.Context, approvalservice.ResolveApprovalCommand) error
+		wantState    common.ApprovalState
+		wantErr      error
+	}{
+		{
+			name:         "approved idempotent",
+			firstEnsure:  (*Service).EnsureApproved,
+			secondEnsure: (*Service).EnsureApproved,
+			wantState:    common.ApprovalStateApproved,
+			wantErr:      nil,
+		},
+		{
+			name:         "rejected idempotent",
+			firstEnsure:  (*Service).EnsureRejected,
+			secondEnsure: (*Service).EnsureRejected,
+			wantState:    common.ApprovalStateRejected,
+			wantErr:      nil,
+		},
+		{
+			name:         "approved cannot ensure rejected",
+			firstEnsure:  (*Service).EnsureApproved,
+			secondEnsure: (*Service).EnsureRejected,
+			wantState:    common.ApprovalStateApproved,
+			wantErr:      common.ErrConflict,
+		},
+		{
+			name:         "rejected cannot ensure approved",
+			firstEnsure:  (*Service).EnsureRejected,
+			secondEnsure: (*Service).EnsureApproved,
+			wantState:    common.ApprovalStateRejected,
+			wantErr:      common.ErrConflict,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := memory.NewApprovalRepository()
+			service := NewService(repo, nil)
+			approvalID := common.ApprovalID("approval-" + tc.name)
+
+			if err := service.CreateApproval(ctx, approvalservice.CreateApprovalCommand{
+				ApprovalID:  approvalID,
+				WorkspaceID: common.WorkspaceID("ws-1"),
+				RunID:       common.RunID("run-1"),
+				StepID:      common.StepID("run-1/step-1"),
+				Reason:      "need human approval",
+			}); err != nil {
+				t.Fatalf("create approval: %v", err)
+			}
+
+			cmd := approvalservice.ResolveApprovalCommand{ApprovalID: approvalID}
+			if err := tc.firstEnsure(service, ctx, cmd); err != nil {
+				t.Fatalf("first ensure resolve: %v", err)
+			}
+			err := tc.secondEnsure(service, ctx, cmd)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("second ensure resolve err = %v, want %v", err, tc.wantErr)
+			}
+
+			approval, err := repo.Get(ctx, approvalID)
+			if err != nil {
+				t.Fatalf("get approval: %v", err)
+			}
+			if approval.State != tc.wantState {
+				t.Fatalf("approval state = %q, want %q", approval.State, tc.wantState)
+			}
+		})
+	}
+}
+
+func TestService_ResolveApproval_ValidateArgumentsAndNotFound(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(memory.NewApprovalRepository(), nil)
+
+	for _, resolve := range []struct {
+		name string
+		fn   func(*Service, context.Context, approvalservice.ResolveApprovalCommand) error
+	}{
+		{name: "approve", fn: (*Service).Approve},
+		{name: "reject", fn: (*Service).Reject},
+	} {
+		t.Run(resolve.name, func(t *testing.T) {
+			if err := resolve.fn(service, ctx, approvalservice.ResolveApprovalCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("empty approval id err = %v, want invalid argument", err)
+			}
+			if err := resolve.fn(service, ctx, approvalservice.ResolveApprovalCommand{ApprovalID: common.ApprovalID("missing")}); !errors.Is(err, common.ErrNotFound) {
+				t.Fatalf("missing approval err = %v, want not found", err)
+			}
+		})
+	}
+}
+
+func TestService_CreateAndResolveApproval_PublishesEvents(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewApprovalRepository()
+	hub := events.NewMemoryHub()
+	service := NewService(repo, hub)
+
+	cmd := approvalservice.CreateApprovalCommand{
+		ApprovalID:  common.ApprovalID("approval-event"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		RunID:       common.RunID("run-1"),
+		StepID:      common.StepID("run-1/manual-approval"),
+		Reason:      "need human approval",
+	}
+	if err := service.CreateApproval(ctx, cmd); err != nil {
+		t.Fatalf("create approval: %v", err)
+	}
+	if err := service.Approve(ctx, approvalservice.ResolveApprovalCommand{ApprovalID: cmd.ApprovalID}); err != nil {
+		t.Fatalf("approve approval: %v", err)
+	}
+
+	published := hub.Published()
+	if len(published) != 2 {
+		t.Fatalf("len(published) = %d, want 2", len(published))
+	}
+	if published[0].Topic != events.TopicApprovalCreated {
+		t.Fatalf("first topic = %s, want %s", published[0].Topic, events.TopicApprovalCreated)
+	}
+	if published[0].Version != events.Phase1EventVersion || published[1].Version != events.Phase1EventVersion {
+		t.Fatalf("event versions = [%s %s], want both %s", published[0].Version, published[1].Version, events.Phase1EventVersion)
+	}
+	if published[1].Topic != events.TopicApprovalResolved {
+		t.Fatalf("second topic = %s, want %s", published[1].Topic, events.TopicApprovalResolved)
+	}
+	if published[1].Payload[events.PayloadKeyState] != string(common.ApprovalStateApproved) {
+		t.Fatalf("resolved state payload = %v, want approved", published[1].Payload[events.PayloadKeyState])
 	}
 }

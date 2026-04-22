@@ -6,6 +6,7 @@ import (
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -74,6 +75,9 @@ func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) 
 	}
 	ws.ActiveRunID = runID
 	if err := o.workspaces.Update(ctx, ws); err != nil {
+		return err
+	}
+	if err := o.publishWorkspaceStateChanged(ctx, ws, runID); err != nil {
 		return err
 	}
 	return o.DispatchNextStep(ctx, runID)
@@ -255,7 +259,10 @@ func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunI
 	}
 	if ws.ActiveRunID == runID {
 		ws.ActiveRunID = ""
-		return o.workspaces.Update(ctx, ws)
+		if err := o.workspaces.Update(ctx, ws); err != nil {
+			return err
+		}
+		return o.publishWorkspaceStateChanged(ctx, ws, runID)
 	}
 	return nil
 }
@@ -284,7 +291,10 @@ func (o *RuntimeOrchestrator) FailRun(ctx context.Context, runID common.RunID, r
 	}
 	if ws.ActiveRunID == runID {
 		ws.ActiveRunID = ""
-		return o.workspaces.Update(ctx, ws)
+		if err := o.workspaces.Update(ctx, ws); err != nil {
+			return err
+		}
+		return o.publishWorkspaceStateChanged(ctx, ws, runID)
 	}
 	return nil
 }
@@ -294,17 +304,30 @@ func (o *RuntimeOrchestrator) publishRunStateChanged(ctx context.Context, run *r
 		return nil
 	}
 	return o.eventHub.Publish(ctx, events.Envelope{
+		Version:      events.Phase1EventVersion,
 		Topic:        events.TopicRunStateChanged,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "run",
 		SubjectID:    string(run.ID),
 		WorkspaceID:  string(run.WorkspaceID),
 		RunID:        string(run.ID),
-		Payload: map[string]any{
-			"state":              string(run.State),
-			"blockingTicketId":   string(run.BlockingTicketID),
-			"blockingApprovalId": string(run.BlockingApprovalID),
-		},
+		Payload:      events.RunPayload(run.State, run.BlockingTicketID, run.BlockingApprovalID),
+	})
+}
+
+func (o *RuntimeOrchestrator) publishWorkspaceStateChanged(ctx context.Context, workspace *workspaceModel.Workspace, runID common.RunID) error {
+	if o.eventHub == nil || workspace == nil {
+		return nil
+	}
+	return o.eventHub.Publish(ctx, events.Envelope{
+		Version:      events.Phase1EventVersion,
+		Topic:        events.TopicWorkspaceStateChanged,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "workspace",
+		SubjectID:    string(workspace.ID),
+		WorkspaceID:  string(workspace.ID),
+		RunID:        string(runID),
+		Payload:      events.WorkspacePayload("", workspace.State, workspace.ActiveRunID),
 	})
 }
 
@@ -312,17 +335,8 @@ func (o *RuntimeOrchestrator) publishStepState(ctx context.Context, run *runMode
 	if o.eventHub == nil || run == nil || step == nil {
 		return nil
 	}
-	payload := map[string]any{
-		"kind":  step.Kind,
-		"state": string(step.State),
-	}
-	if step.Input != nil {
-		payload["input"] = step.Input
-	}
-	if step.Output != nil {
-		payload["output"] = step.Output
-	}
 	return o.eventHub.Publish(ctx, events.Envelope{
+		Version:      events.Phase1EventVersion,
 		Topic:        topic,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "step",
@@ -330,6 +344,6 @@ func (o *RuntimeOrchestrator) publishStepState(ctx context.Context, run *runMode
 		WorkspaceID:  string(run.WorkspaceID),
 		RunID:        string(run.ID),
 		StepID:       string(step.ID),
-		Payload:      payload,
+		Payload:      events.StepPayload(step.Kind, step.State, step.Input, step.Output),
 	})
 }

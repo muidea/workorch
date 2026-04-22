@@ -5,13 +5,13 @@ import (
 	"log"
 	"os"
 
-	"github.com/muidea/workorch/application/workorchd/demo"
+	"github.com/muidea/workorch/application/workorchd/appservice"
 	"github.com/muidea/workorch/application/workorchd/presenter"
 )
 
 func main() {
 	ctx := context.Background()
-	slices, err := demo.RunAllFromEnv(ctx)
+	slices, err := appservice.RunAllPhase1FromEnv(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -14,16 +15,16 @@ func TestNewWithBackendMemoryBuildsRuntime(t *testing.T) {
 	if rt == nil {
 		t.Fatal("expected runtime")
 	}
+	exports := rt.Exports()
 
-	if err := rt.CreateWorkspace(
-		context.Background(),
-		common.WorkspaceID("ws-bootstrap-memory"),
-		"bootstrap memory backend",
-	); err != nil {
+	if err := exports.Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
+		WorkspaceID: common.WorkspaceID("ws-bootstrap-memory"),
+		Title:       "bootstrap memory backend",
+	}); err != nil {
 		t.Fatalf("create workspace with memory backend: %v", err)
 	}
 
-	got, err := rt.GetWorkspaceByID(context.Background(), common.WorkspaceID("ws-bootstrap-memory"))
+	got, err := exports.Repositories.Workspaces.Get(context.Background(), common.WorkspaceID("ws-bootstrap-memory"))
 	if err != nil {
 		t.Fatalf("get workspace with memory backend: %v", err)
 	}
@@ -35,12 +36,12 @@ func TestNewWithBackendMemoryBuildsRuntime(t *testing.T) {
 func TestNewWithBackendFilePersistsWorkspaceData(t *testing.T) {
 	dataDir := t.TempDir()
 	rt := NewWithBackend("file", dataDir)
+	exports := rt.Exports()
 
-	err := rt.CreateWorkspace(
-		context.Background(),
-		common.WorkspaceID("ws-bootstrap-file"),
-		"bootstrap file backend",
-	)
+	err := exports.Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
+		WorkspaceID: common.WorkspaceID("ws-bootstrap-file"),
+		Title:       "bootstrap file backend",
+	})
 	if err != nil {
 		t.Fatalf("create workspace with file backend: %v", err)
 	}

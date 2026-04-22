@@ -1,21 +1,13 @@
 package demo
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/muidea/workorch/application/workorchd/bootstrap"
 )
 
 func TestRunAllWithMemoryRuntimeReturnsExpectedSlices(t *testing.T) {
-	rt := bootstrap.NewWithBackend("memory", "")
-
-	slices, err := runAll(context.Background(), rt)
-	if err != nil {
-		t.Fatalf("runAll memory: %v", err)
-	}
+	slices := mustRunAllWithBackend(t, "memory", "")
 
 	if len(slices) != 4 {
 		t.Fatalf("expected 4 slices, got %d", len(slices))
@@ -65,12 +57,7 @@ func TestRunAllWithMemoryRuntimeReturnsExpectedSlices(t *testing.T) {
 
 func TestRunAllWithFileRuntimePersistsExpectedFiles(t *testing.T) {
 	dataDir := t.TempDir()
-	rt := bootstrap.NewWithBackend("file", dataDir)
-
-	slices, err := runAll(context.Background(), rt)
-	if err != nil {
-		t.Fatalf("runAll file: %v", err)
-	}
+	slices := mustRunAllWithBackend(t, "file", dataDir)
 	if len(slices) != 4 {
 		t.Fatalf("expected 4 slices, got %d", len(slices))
 	}
