@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	approval "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -159,6 +160,30 @@ func (r *StepRepository) Get(_ context.Context, id common.StepID) (*run.Step, er
 		return nil, common.ErrNotFound
 	}
 	return cloneStep(&item), nil
+}
+
+func (r *StepRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.Step, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.StepID, run.Step](r.path)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*run.Step, 0, len(items))
+	for _, item := range items {
+		if item.RunID != runID {
+			continue
+		}
+		ret = append(ret, cloneStep(&item))
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		return string(ret[i].ID) < string(ret[j].ID)
+	})
+	if len(ret) == 0 {
+		return nil, nil
+	}
+	return ret, nil
 }
 
 func (r *StepRepository) Update(_ context.Context, item *run.Step) error {

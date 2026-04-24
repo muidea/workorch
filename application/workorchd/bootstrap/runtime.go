@@ -23,11 +23,12 @@ type Runtime struct {
 }
 
 type RepositoryExports struct {
-	Workspaces repository.WorkspaceRepository
-	Runs       repository.RunRepository
-	Steps      repository.StepRepository
-	Tickets    repository.DecisionTicketRepository
-	Approvals  repository.ApprovalRepository
+	Workspaces  repository.WorkspaceRepository
+	Runs        repository.RunRepository
+	Steps       repository.StepRepository
+	Tickets     repository.DecisionTicketRepository
+	Resolutions repository.DecisionResolutionRepository
+	Approvals   repository.ApprovalRepository
 }
 
 type ServiceExports struct {

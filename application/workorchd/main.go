@@ -11,7 +11,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	slices, err := appservice.RunAllPhase1FromEnv(ctx)
+	slices, err := appservice.RunAllWorkorchFromEnv(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}

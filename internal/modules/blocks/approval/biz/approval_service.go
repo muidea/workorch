@@ -41,7 +41,7 @@ func (s *Service) CreateApproval(ctx context.Context, cmd approvalservice.Create
 		return nil
 	}
 	return s.eventHub.Publish(ctx, events.Envelope{
-		Version:      events.Phase1EventVersion,
+		Version:      events.WorkorchEventVersion,
 		Topic:        events.TopicApprovalCreated,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "approval",
@@ -60,7 +60,7 @@ func (s *Service) EnsureApproval(ctx context.Context, cmd approvalservice.Create
 
 	item, err := s.approvals.Get(ctx, cmd.ApprovalID)
 	if err == nil {
-		if item.WorkspaceID != cmd.WorkspaceID || item.RunID != cmd.RunID || item.StepID != cmd.StepID {
+		if item.WorkspaceID != cmd.WorkspaceID || item.RunID != cmd.RunID || item.StepID != cmd.StepID || item.Reason != cmd.Reason {
 			return common.ErrConflict
 		}
 		return nil
@@ -136,7 +136,7 @@ func (s *Service) resolve(ctx context.Context, approvalID common.ApprovalID, tar
 		return nil
 	}
 	return s.eventHub.Publish(ctx, events.Envelope{
-		Version:      events.Phase1EventVersion,
+		Version:      events.WorkorchEventVersion,
 		Topic:        events.TopicApprovalResolved,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "approval",

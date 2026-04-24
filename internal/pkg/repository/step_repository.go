@@ -10,5 +10,6 @@ import (
 type StepRepository interface {
 	Create(context.Context, *run.Step) error
 	Get(context.Context, common.StepID) (*run.Step, error)
+	ListByRun(context.Context, common.RunID) ([]*run.Step, error)
 	Update(context.Context, *run.Step) error
 }

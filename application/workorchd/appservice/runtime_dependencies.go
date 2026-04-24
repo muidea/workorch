@@ -5,11 +5,12 @@ import "github.com/muidea/workorch/application/workorchd/bootstrap"
 func RuntimeDependenciesFromExports(exports bootstrap.Exports) RuntimeDependencies {
 	return RuntimeDependencies{
 		Snapshot: RuntimeSnapshotDependencies{
-			Workspaces: exports.Repositories.Workspaces,
-			Runs:       exports.Repositories.Runs,
-			Steps:      exports.Repositories.Steps,
-			Tickets:    exports.Repositories.Tickets,
-			Approvals:  exports.Repositories.Approvals,
+			Workspaces:  exports.Repositories.Workspaces,
+			Runs:        exports.Repositories.Runs,
+			Steps:       exports.Repositories.Steps,
+			Tickets:     exports.Repositories.Tickets,
+			Resolutions: exports.Repositories.Resolutions,
+			Approvals:   exports.Repositories.Approvals,
 		},
 		Actions: RuntimeActionDependencies{
 			Workspace: newWorkspaceActionPort(exports.Services.WorkspaceService),

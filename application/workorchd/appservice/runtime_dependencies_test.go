@@ -21,6 +21,9 @@ func TestRuntimeDependenciesFromExportsMapsGroupedCapabilities(t *testing.T) {
 	if deps.Snapshot.Steps != exports.Repositories.Steps {
 		t.Fatal("snapshot steps repository mismatch")
 	}
+	if deps.Snapshot.Resolutions != exports.Repositories.Resolutions {
+		t.Fatal("snapshot resolutions repository mismatch")
+	}
 	if deps.Actions.Workspace == nil {
 		t.Fatal("workspace action port is nil")
 	}
@@ -69,6 +72,15 @@ func TestRuntimeDependenciesFromExportsActionPortsDriveModuleServices(t *testing
 	}
 	if _, err := exports.Repositories.Tickets.Get(ctx, ticketID); err != nil {
 		t.Fatalf("get ticket from repository: %v", err)
+	}
+	if err := runtime.EnsureResolvedTicket(ctx, common.ResolutionID("resolution-runtime-deps-port"), ticketID, "approve_path", map[string]any{"operator": "runtime-deps"}); err != nil {
+		t.Fatalf("ensure resolved ticket: %v", err)
+	}
+	if _, err := runtime.GetResolutionByTicketID(ctx, ticketID); err != nil {
+		t.Fatalf("get resolution from runtime snapshot: %v", err)
+	}
+	if _, err := exports.Repositories.Resolutions.GetByTicketID(ctx, ticketID); err != nil {
+		t.Fatalf("get resolution from repository: %v", err)
 	}
 	if _, err := exports.Repositories.Approvals.Get(ctx, approvalID); err != nil {
 		t.Fatalf("get approval from repository: %v", err)

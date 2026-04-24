@@ -9,9 +9,9 @@ import (
 type Slice = appservice.Slice
 
 func RunAllFromEnv(ctx context.Context) ([]Slice, error) {
-	return appservice.RunAllPhase1FromEnv(ctx)
+	return appservice.RunAllWorkorchFromEnv(ctx)
 }
 
 func RunAllWithBackend(ctx context.Context, backend string, dataRoot string) ([]Slice, error) {
-	return appservice.RunAllPhase1WithBackend(ctx, backend, dataRoot)
+	return appservice.RunAllWorkorchWithBackend(ctx, backend, dataRoot)
 }

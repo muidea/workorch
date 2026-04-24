@@ -2,8 +2,11 @@ package appservice
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/muidea/workorch/application/workorchd/bootstrap"
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 type RuntimeSession struct {
@@ -21,12 +24,22 @@ func NewRuntimeSession(bootstrapRuntime *bootstrap.Runtime) *RuntimeSession {
 	}
 }
 
-func NewRuntimeSessionWithBackend(backend string, dataRoot string) *RuntimeSession {
-	return NewRuntimeSession(bootstrap.NewWithBackend(backend, dataRoot))
+func NewRuntimeSessionWithBackend(backend string, dataRoot string) (*RuntimeSession, error) {
+	bootstrapRuntime, err := buildBootstrapRuntime(func() *bootstrap.Runtime {
+		return bootstrap.NewWithBackend(backend, dataRoot)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return NewRuntimeSession(bootstrapRuntime), nil
 }
 
-func NewRuntimeSessionFromEnv() *RuntimeSession {
-	return NewRuntimeSession(bootstrap.NewFromEnv())
+func NewRuntimeSessionFromEnv() (*RuntimeSession, error) {
+	bootstrapRuntime, err := buildBootstrapRuntime(bootstrap.NewFromEnv)
+	if err != nil {
+		return nil, err
+	}
+	return NewRuntimeSession(bootstrapRuntime), nil
 }
 
 func (s *RuntimeSession) Close(ctx context.Context) error {
@@ -43,4 +56,19 @@ func (s *RuntimeSession) Close(ctx context.Context) error {
 	err := s.Bootstrap.Shutdown(ctx)
 	s.Bootstrap = nil
 	return err
+}
+
+func buildBootstrapRuntime(factory func() *bootstrap.Runtime) (runtime *bootstrap.Runtime, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			message := fmt.Sprint(recovered)
+			if strings.HasPrefix(message, "unsupported repository backend: ") {
+				err = fmt.Errorf("%w: %s", common.ErrInvalidArgument, message)
+				runtime = nil
+				return
+			}
+			panic(recovered)
+		}
+	}()
+	return factory(), nil
 }

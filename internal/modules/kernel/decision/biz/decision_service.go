@@ -3,6 +3,7 @@ package decision
 import (
 	"context"
 	"errors"
+	"reflect"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionModel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -42,7 +43,7 @@ func (s *Service) CreateTicket(ctx context.Context, cmd decisionservice.CreateTi
 		return nil
 	}
 	return s.eventHub.Publish(ctx, events.Envelope{
-		Version:      events.Phase1EventVersion,
+		Version:      events.WorkorchEventVersion,
 		Topic:        events.TopicTicketCreated,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "decision_ticket",
@@ -61,7 +62,7 @@ func (s *Service) EnsureTicket(ctx context.Context, cmd decisionservice.CreateTi
 
 	item, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err == nil {
-		if item.WorkspaceID != cmd.WorkspaceID || item.RunID != cmd.RunID || item.StepID != cmd.StepID {
+		if item.WorkspaceID != cmd.WorkspaceID || item.RunID != cmd.RunID || item.StepID != cmd.StepID || item.Reason != cmd.Reason {
 			return common.ErrConflict
 		}
 		return nil
@@ -103,7 +104,7 @@ func (s *Service) ResolveTicket(ctx context.Context, cmd decisionservice.Resolve
 		return nil
 	}
 	return s.eventHub.Publish(ctx, events.Envelope{
-		Version:      events.Phase1EventVersion,
+		Version:      events.WorkorchEventVersion,
 		Topic:        events.TopicTicketResolved,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "decision_ticket",
@@ -131,7 +132,21 @@ func (s *Service) EnsureResolvedTicket(ctx context.Context, cmd decisionservice.
 		return err
 	}
 	if ticket.State == common.DecisionTicketStateResolved {
+		resolution, err := s.resolutions.GetByTicketID(ctx, cmd.TicketID)
+		if err != nil {
+			return err
+		}
+		if resolution.ID != cmd.ResolutionID || resolution.Type != cmd.Type || !sameResolutionPayload(resolution.Payload, cmd.Payload) {
+			return common.ErrConflict
+		}
 		return nil
 	}
 	return s.ResolveTicket(ctx, cmd)
+}
+
+func sameResolutionPayload(left map[string]any, right map[string]any) bool {
+	if len(left) == 0 && len(right) == 0 {
+		return true
+	}
+	return reflect.DeepEqual(left, right)
 }

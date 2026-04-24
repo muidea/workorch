@@ -7,9 +7,9 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func TestDecodePhase1EventReturnsTypedRunEvent(t *testing.T) {
-	event, ok := DecodePhase1Event(Envelope{
-		Version: Phase1EventVersion,
+func TestDecodeWorkorchEventReturnsTypedRunEvent(t *testing.T) {
+	event, ok := DecodeWorkorchEvent(Envelope{
+		Version: WorkorchEventVersion,
 		Topic:   TopicRunStateChanged,
 		RunID:   "run-1",
 		Payload: map[string]any{
@@ -19,7 +19,7 @@ func TestDecodePhase1EventReturnsTypedRunEvent(t *testing.T) {
 		},
 	})
 	if !ok {
-		t.Fatalf("DecodePhase1Event returned !ok")
+		t.Fatalf("DecodeWorkorchEvent returned !ok")
 	}
 
 	runEvent, ok := event.(RunEvent)
@@ -29,30 +29,30 @@ func TestDecodePhase1EventReturnsTypedRunEvent(t *testing.T) {
 	if runEvent.Data.State != common.RunStateRunning {
 		t.Fatalf("run state = %s, want %s", runEvent.Data.State, common.RunStateRunning)
 	}
-	if runEvent.Envelope().Version != Phase1EventVersion {
-		t.Fatalf("normalized version = %s, want %s", runEvent.Envelope().Version, Phase1EventVersion)
+	if runEvent.Envelope().Version != WorkorchEventVersion {
+		t.Fatalf("normalized version = %s, want %s", runEvent.Envelope().Version, WorkorchEventVersion)
 	}
 	if runEvent.Envelope().Payload[PayloadKeyState] != string(common.RunStateRunning) {
 		t.Fatalf("normalized payload state = %v, want %s", runEvent.Envelope().Payload[PayloadKeyState], common.RunStateRunning)
 	}
 }
 
-func TestDecodePhase1EventRejectsIncompatibleVersion(t *testing.T) {
-	_, ok := DecodePhase1Event(Envelope{
-		Version: "phase1.event.v2",
+func TestDecodeWorkorchEventRejectsIncompatibleVersion(t *testing.T) {
+	_, ok := DecodeWorkorchEvent(Envelope{
+		Version: "workorch.event.v2",
 		Topic:   TopicRunStateChanged,
 		RunID:   "run-1",
 		Payload: RunPayload(common.RunStateRunning, "", ""),
 	})
 	if ok {
-		t.Fatalf("DecodePhase1Event should reject incompatible version")
+		t.Fatalf("DecodeWorkorchEvent should reject incompatible version")
 	}
 }
 
-func TestSubscribePhase1SkipsInvalidPayload(t *testing.T) {
+func TestSubscribeWorkorchSkipsInvalidPayload(t *testing.T) {
 	hub := NewMemoryHub()
 	var calls int
-	unsubscribers := SubscribePhase1(hub, func(_ context.Context, event Phase1Event) error {
+	unsubscribers := SubscribeWorkorch(hub, func(_ context.Context, event WorkorchEvent) error {
 		calls++
 		return nil
 	})
@@ -65,7 +65,7 @@ func TestSubscribePhase1SkipsInvalidPayload(t *testing.T) {
 	}()
 
 	if err := hub.Publish(context.Background(), Envelope{
-		Version: Phase1EventVersion,
+		Version: WorkorchEventVersion,
 		Topic:   TopicStepStateChanged,
 		StepID:  "run-1/step-1",
 		Payload: map[string]any{PayloadKeyState: "completed"},
@@ -73,7 +73,7 @@ func TestSubscribePhase1SkipsInvalidPayload(t *testing.T) {
 		t.Fatalf("publish invalid step event: %v", err)
 	}
 	if err := hub.Publish(context.Background(), Envelope{
-		Version:   Phase1EventVersion,
+		Version:   WorkorchEventVersion,
 		Topic:     TopicApprovalResolved,
 		RunID:     "run-1",
 		SubjectID: "approval-1",
@@ -87,23 +87,23 @@ func TestSubscribePhase1SkipsInvalidPayload(t *testing.T) {
 	}
 }
 
-func TestNormalizePhase1EnvelopeReturnsSanitizedCopy(t *testing.T) {
-	envelope, ok := NormalizePhase1Envelope(Envelope{
-		Version: Phase1EventVersion,
+func TestNormalizeWorkorchEnvelopeReturnsSanitizedCopy(t *testing.T) {
+	envelope, ok := NormalizeWorkorchEnvelope(Envelope{
+		Version: WorkorchEventVersion,
 		Topic:   TopicTicketResolved,
 		Payload: map[string]any{
 			PayloadKeyReason:       "manual gate",
 			PayloadKeyState:        string(common.DecisionTicketStateResolved),
 			PayloadKeyResolutionID: "resolution-1",
 			PayloadKeyType:         "approve-plan",
-			PayloadKeyPayload:      map[string]any{"operator": "phase1-demo"},
+			PayloadKeyPayload:      map[string]any{"operator": "workorch-demo"},
 		},
 	})
 	if !ok {
-		t.Fatalf("NormalizePhase1Envelope returned !ok")
+		t.Fatalf("NormalizeWorkorchEnvelope returned !ok")
 	}
-	if envelope.Version != Phase1EventVersion {
-		t.Fatalf("normalized version = %s, want %s", envelope.Version, Phase1EventVersion)
+	if envelope.Version != WorkorchEventVersion {
+		t.Fatalf("normalized version = %s, want %s", envelope.Version, WorkorchEventVersion)
 	}
 
 	payload, ok := envelope.Payload[PayloadKeyPayload].(map[string]any)
@@ -112,22 +112,22 @@ func TestNormalizePhase1EnvelopeReturnsSanitizedCopy(t *testing.T) {
 	}
 	payload["operator"] = "mutated"
 
-	envelope2, ok := NormalizePhase1Envelope(Envelope{
-		Version: Phase1EventVersion,
+	envelope2, ok := NormalizeWorkorchEnvelope(Envelope{
+		Version: WorkorchEventVersion,
 		Topic:   TopicTicketResolved,
 		Payload: map[string]any{
 			PayloadKeyReason:       "manual gate",
 			PayloadKeyState:        string(common.DecisionTicketStateResolved),
 			PayloadKeyResolutionID: "resolution-1",
 			PayloadKeyType:         "approve-plan",
-			PayloadKeyPayload:      map[string]any{"operator": "phase1-demo"},
+			PayloadKeyPayload:      map[string]any{"operator": "workorch-demo"},
 		},
 	})
 	if !ok {
-		t.Fatalf("second NormalizePhase1Envelope returned !ok")
+		t.Fatalf("second NormalizeWorkorchEnvelope returned !ok")
 	}
 	payload2 := envelope2.Payload[PayloadKeyPayload].(map[string]any)
-	if payload2["operator"] != "phase1-demo" {
-		t.Fatalf("sanitized payload operator = %v, want phase1-demo", payload2["operator"])
+	if payload2["operator"] != "workorch-demo" {
+		t.Fatalf("sanitized payload operator = %v, want workorch-demo", payload2["operator"])
 	}
 }

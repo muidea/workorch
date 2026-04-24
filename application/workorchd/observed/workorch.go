@@ -12,43 +12,57 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func BuildPhase1Snapshot(
+func BuildWorkorchSnapshot(
 	ws *workspacemodel.Workspace,
 	r *runmodel.Run,
-	step *runmodel.Step,
+	steps []*runmodel.Step,
 	ticket *decisionmodel.Ticket,
+	resolution *decisionmodel.Resolution,
 	approval *approvalmodel.Approval,
-	published []events.Phase1Event,
+	published []events.WorkorchEvent,
 ) []SnapshotItem {
 	observed := []SnapshotItem{}
-	if workspaceEnvelope, ok := latestPublishedSnapshot(phase1WorkspaceSnapshotContract, phase1SnapshotRef{
+	if workspaceEnvelope, ok := latestPublishedSnapshot(workorchWorkspaceSnapshotContract, workorchSnapshotRef{
 		subjectID:   string(ws.ID),
 		workspaceID: ws.ID,
 		runID:       r.ID,
+		title:       ws.Title,
 	}, published); ok {
 		observed = append(observed, workspaceEnvelope)
 	} else {
-		observed = append(observed, mustSnapshotItem(phase1WorkspaceSnapshotContract.fallback(phase1SnapshotRef{
+		observed = append(observed, workorchWorkspaceSnapshotContract.fallback(workorchSnapshotRef{
 			subjectID:   string(ws.ID),
 			workspaceID: ws.ID,
 			runID:       r.ID,
-		}, events.WorkspacePayload("", ws.State, ws.ActiveRunID))))
+			title:       ws.Title,
+		}, WorkspacePayload{
+			Title:       ws.Title,
+			State:       string(ws.State),
+			ActiveRunID: string(ws.ActiveRunID),
+		}))
 	}
-	if runEnvelope, ok := latestPublishedSnapshot(phase1RunSnapshotContract, phase1SnapshotRef{
+	if runEnvelope, ok := latestPublishedSnapshot(workorchRunSnapshotContract, workorchSnapshotRef{
 		subjectID:   string(r.ID),
 		workspaceID: ws.ID,
 		runID:       r.ID,
 	}, published); ok {
 		observed = append(observed, runEnvelope)
 	} else {
-		observed = append(observed, mustSnapshotItem(phase1RunSnapshotContract.fallback(phase1SnapshotRef{
+		observed = append(observed, workorchRunSnapshotContract.fallback(workorchSnapshotRef{
 			subjectID:   string(r.ID),
 			workspaceID: ws.ID,
 			runID:       r.ID,
-		}, events.RunPayload(r.State, r.BlockingTicketID, r.BlockingApprovalID))))
+		}, RunPayload{
+			State:              string(r.State),
+			BlockingTicketID:   string(r.BlockingTicketID),
+			BlockingApprovalID: string(r.BlockingApprovalID),
+		}))
 	}
-	if step != nil {
-		if stepEnvelope, ok := latestPublishedSnapshot(phase1StepSnapshotContract, phase1SnapshotRef{
+	for _, step := range steps {
+		if step == nil {
+			continue
+		}
+		if stepEnvelope, ok := latestPublishedSnapshot(workorchStepSnapshotContract, workorchSnapshotRef{
 			subjectID:   string(step.ID),
 			workspaceID: ws.ID,
 			runID:       r.ID,
@@ -56,16 +70,21 @@ func BuildPhase1Snapshot(
 		}, published); ok {
 			observed = append(observed, stepEnvelope)
 		} else {
-			observed = append(observed, mustSnapshotItem(phase1StepSnapshotContract.fallback(phase1SnapshotRef{
+			observed = append(observed, workorchStepSnapshotContract.fallback(workorchSnapshotRef{
 				subjectID:   string(step.ID),
 				workspaceID: ws.ID,
 				runID:       r.ID,
 				stepID:      step.ID,
-			}, events.StepPayload(step.Kind, step.State, step.Input, step.Output))))
+			}, StepPayload{
+				Kind:   step.Kind,
+				State:  string(step.State),
+				Input:  cloneMap(step.Input),
+				Output: cloneMap(step.Output),
+			}))
 		}
 	}
 	if ticket != nil {
-		if ticketEnvelope, ok := latestPublishedSnapshot(phase1TicketSnapshotContract, phase1SnapshotRef{
+		if ticketEnvelope, ok := latestPublishedSnapshot(workorchTicketSnapshotContract, workorchSnapshotRef{
 			subjectID:   string(ticket.ID),
 			workspaceID: ws.ID,
 			runID:       r.ID,
@@ -73,16 +92,25 @@ func BuildPhase1Snapshot(
 		}, published); ok {
 			observed = append(observed, ticketEnvelope)
 		} else {
-			observed = append(observed, mustSnapshotItem(phase1TicketSnapshotContract.fallback(phase1SnapshotRef{
+			ticketPayload := DecisionTicketPayload{
+				Reason: ticket.Reason,
+				State:  string(ticket.State),
+			}
+			if resolution != nil {
+				ticketPayload.ResolutionID = string(resolution.ID)
+				ticketPayload.ResolutionType = resolution.Type
+				ticketPayload.ResolutionPayload = cloneMap(resolution.Payload)
+			}
+			observed = append(observed, workorchTicketSnapshotContract.fallback(workorchSnapshotRef{
 				subjectID:   string(ticket.ID),
 				workspaceID: ws.ID,
 				runID:       r.ID,
 				stepID:      ticket.StepID,
-			}, events.DecisionTicketPayload(ticket.Reason, ticket.State))))
+			}, ticketPayload))
 		}
 	}
 	if approval != nil {
-		if approvalEnvelope, ok := latestPublishedSnapshot(phase1ApprovalSnapshotContract, phase1SnapshotRef{
+		if approvalEnvelope, ok := latestPublishedSnapshot(workorchApprovalSnapshotContract, workorchSnapshotRef{
 			subjectID:   string(approval.ID),
 			workspaceID: ws.ID,
 			runID:       r.ID,
@@ -90,29 +118,24 @@ func BuildPhase1Snapshot(
 		}, published); ok {
 			observed = append(observed, approvalEnvelope)
 		} else {
-			observed = append(observed, mustSnapshotItem(phase1ApprovalSnapshotContract.fallback(phase1SnapshotRef{
+			observed = append(observed, workorchApprovalSnapshotContract.fallback(workorchSnapshotRef{
 				subjectID:   string(approval.ID),
 				workspaceID: ws.ID,
 				runID:       r.ID,
 				stepID:      approval.StepID,
-			}, events.ApprovalPayload(approval.Reason, approval.State))))
+			}, ApprovalPayload{
+				Reason: approval.Reason,
+				State:  string(approval.State),
+			}))
 		}
 	}
 	return observed
 }
 
-func mustSnapshotItem(envelope events.Envelope) SnapshotItem {
-	item, ok := FromEnvelope(envelope)
-	if !ok {
-		panic(fmt.Sprintf("invalid phase1 snapshot envelope topic=%s", envelope.Topic))
-	}
-	return item
-}
-
-func newEnvelope(topic, subjectType, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, payload map[string]any) events.Envelope {
-	return events.Envelope{
+func newSnapshotItem(topic, subjectType, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, payload SnapshotPayload) SnapshotItem {
+	return SnapshotItem{
 		ID:           fmt.Sprintf("%s:%s", topic, subjectID),
-		Version:      events.Phase1SnapshotVersion,
+		Version:      events.WorkorchSnapshotVersion,
 		Topic:        topic,
 		OccurredAt:   time.Now().UTC().Format(time.RFC3339),
 		SourceModule: "application/workorchd",

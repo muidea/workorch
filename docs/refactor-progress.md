@@ -1,6 +1,6 @@
 # WorkOrch 整理进度跟踪
 
-> 最近更新：2026-04-22
+> 最近更新：2026-04-24
 
 > 说明：本文保留分阶段演进记录。较早阶段提到的 `application/workorchd/demo/scenarios.go`、`snapshot.go` 等中间态文件已在后续阶段删除，以第 16 节及之后的结构描述为当前有效状态。
 
@@ -1128,6 +1128,367 @@
   - collector -> managed runtime -> observed phase1 snapshot 这条链路当前已不再以裸 `events.Envelope` 作为内部主语义
   - phase1 observed 当前更接近“typed event -> typed snapshot -> presenter view”的最终目标
 
+### 56. typed snapshot 渲染链路收口第四十三轮
+
+- `application/workorchd/observed/phase1_contract.go`
+  - phase1 event normalize 当前已直接生成 `SnapshotItem`
+  - `fallback(...)` 当前也已直接返回 typed snapshot item
+- `application/workorchd/observed/phase1.go`
+  - phase1 fallback snapshot 当前不再走 `Envelope -> FromEnvelope(...)` 的中转路径
+  - 内部 `mustSnapshotItem(...)` 已删除
+- `application/workorchd/observed/snapshot_contract.go`
+  - 已新增 `SnapshotItem.PayloadMap()`
+- `application/workorchd/presenter/presenter.go`
+  - `MapObserved(...)` 当前已直接消费 `SnapshotItem` 字段与 payload map
+  - presenter 渲染阶段已不再把 typed snapshot item 重新回转成 `Envelope`
+- 本轮完成后，第 4 项遗留继续收窄
+  - phase1 observed 主链路当前已进一步收口为 `typed event -> typed snapshot -> presenter view`
+  - `Envelope` 当前主要保留在 contract 校验与边界转换，而不再作为内部渲染中转对象
+
+### 57. run blocking 引用冲突保护第四十四轮
+
+- `internal/modules/kernel/run/biz/run_service.go`
+  - `EnsureBlockedOnDecision(...)` 当前已补 “不同 decision ticket” 与 “已被 approval 阻塞” 的冲突保护
+  - `EnsureBlockedOnApproval(...)` 当前已补 “不同 approval” 与 “已被 decision 阻塞” 的冲突保护
+  - run 模块当前不再允许通过 ensure 语义静默覆盖既有 blocking 引用
+- `internal/modules/kernel/run/biz/run_service_test.go`
+  - 已新增 decision blocking 引用冲突回归
+  - 已新增 approval blocking 引用冲突回归
+- `application/workorchd/appservice/phase1_test.go`
+  - 已新增 appservice 层对 decision/approval blocking 引用冲突的回归
+  - 当前会校验冲突返回 `ErrConflict`，且底层 run 状态与 blocking 引用不被改写
+- 本轮完成后，第 1、3 项遗留继续收窄
+  - run 模块关于 blocking ensure 的单对象语义进一步下沉并稳定
+  - phase1 业务异常分支当前继续减少“静默覆盖状态”的风险
+
+### 58. appservice 恢复与缺失对象异常补测第四十五轮
+
+- `application/workorchd/appservice/phase1_test.go`
+  - 已新增 `approval pending` 下 `EnsureRunResumed(...)` 返回 `ErrBlocked` 的回归
+  - 已新增 `EnsureDecisionResolved(...)` 对缺失 ticket 返回 `ErrNotFound` 的回归
+  - 已新增 `EnsureApprovalApproved(...)` / `EnsureApprovalRejected(...)` 对缺失 approval 返回 `ErrNotFound` 的回归
+- 本轮完成后，第 3 项遗留继续收窄
+  - 应用层当前已把一组关键异常分支显式锁定到测试基线
+  - 模块层既有的 not-found / blocked 语义当前已在 `appservice` 层得到透传验证
+
+### 59. observed reload 稳定性与 resolved decision 回放第四十六轮
+
+- `application/workorchd/bootstrap/runtime.go`
+  - `RepositoryExports` 已补出 `Resolutions repository.DecisionResolutionRepository`
+- `application/workorchd/bootstrap/assembly.go`
+  - bootstrap exports 当前已把 `repos.resolution` 暴露给 application runtime
+- `application/workorchd/appservice/runtime_dependencies.go`
+  - snapshot 依赖当前已补齐 `Resolutions`
+- `application/workorchd/appservice/runtime_adapter.go`
+  - 已新增 `GetResolutionByTicketID(...)`
+- `application/workorchd/appservice/phase1.go`
+  - phase1 snapshot 读取当前在 `ticket.State == resolved` 时显式加载 resolution
+  - `observed.BuildPhase1Snapshot(...)` 已改为接收 `resolution` 对象态
+- `application/workorchd/observed/phase1.go`
+  - resolved ticket 在无 published event 的 fallback 路径下，当前也会输出 `resolutionId/type/payload`
+  - workspace published snapshot normalize 当前统一归一到 `application/workorchd` sourceModule，避免 reload 后来源字段漂移
+- `application/workorchd/observed/phase1_test.go`
+  - 已新增 fallback resolved ticket resolution 字段回归
+- `application/workorchd/appservice/runtime_dependencies_test.go`
+  - 已新增 resolutions 仓储映射与读取回归
+- `application/workorchd/demo/integration_test.go`
+  - 前一轮已提升 reload 稳定性断言强度；本轮在不放松断言的前提下补齐了真实语义缺口
+- 本轮完成后，第 3、4 项遗留继续收窄
+  - file backend reload 下的 observed payload 当前已可稳定重建 resolved decision 细节
+  - typed `event -> snapshot -> presenter` 主链路在 reload 场景下进一步闭合
+
+### 60. decision/approval ensure 语义防漂移第四十七轮
+
+- `internal/modules/kernel/decision/biz/decision_service.go`
+  - `EnsureTicket(...)` 当前已补 `reason` 一致性校验
+  - 同一 ticket ID 下若 `workspace/run/step` 相同但 `reason` 不同，当前会返回 `ErrConflict`
+  - `EnsureResolvedTicket(...)` 当前在 ticket 已 resolved 时，会继续校验已落库 resolution 的 `id/type/payload`
+  - 同一 ticket 的第二次 ensure resolve 若 resolution 语义不一致，当前不再静默返回成功，而是返回 `ErrConflict`
+- `internal/modules/blocks/approval/biz/approval_service.go`
+  - `EnsureApproval(...)` 当前已补 `reason` 一致性校验
+  - 同一 approval ID 下若绑定一致但 `reason` 不同，当前会返回 `ErrConflict`
+- `internal/modules/kernel/decision/biz/decision_service_test.go`
+  - 已新增 ticket `reason` 不一致冲突回归
+  - 已把 ensure resolved 回归扩展为 “相同 resolution 幂等、不同 resolution 冲突”
+- `internal/modules/blocks/approval/biz/approval_service_test.go`
+  - 已新增 approval `reason` 不一致冲突回归
+- `application/workorchd/appservice/phase1_test.go`
+  - 已新增 `EnsureDecisionResolved(...)` 对已 resolved 但 resolution 不一致时返回 `ErrConflict` 的回归
+  - 已新增 `EnsureDecisionTicket(...)` / `EnsureApproval(...)` 对 `reason` 不一致时返回 `ErrConflict` 的回归
+- 本轮完成后，第 1、3 项遗留继续收窄
+  - decision / approval 的 ensure 语义当前进一步对齐为“同 ID 同语义才幂等”
+  - phase1 应用层当前继续减少同类对象被静默错配或静默吞错的风险
+
+### 61. run ensure 语义防漂移第四十八轮
+
+- `internal/modules/kernel/run/biz/run_service.go`
+  - `EnsureRun(...)` 当前已从仅校验 `workspaceID`
+  - 继续收紧为同时校验 `workspaceID/goalID/doDID`
+  - 同一 `runID` 下若 `goalID` 或 `doDID` 漂移，当前会返回 `ErrConflict`
+- `internal/modules/kernel/run/biz/run_service_test.go`
+  - 已把 ensure run 回归从 “workspace mismatch” 扩展为 “semantic mismatch”
+  - 已新增 `goalID` 不一致冲突回归
+  - 已新增 `doDID` 不一致冲突回归
+- 本轮完成后，第 1 项遗留继续收窄
+  - run 模块当前也进一步对齐为“同 ID 同语义才幂等”
+  - `CreateRunCommand` 中已存在的领域字段当前不再在 ensure 路径被静默忽略
+
+### 62. orchestrator 原始动作状态约束第四十九轮
+
+- `internal/modules/kernel/orchestrator/biz/runtime_orchestrator.go`
+  - `StartRun(...)` 当前已补状态约束
+  - 当前只允许从 `created` 状态进入启动链路
+  - 对 `running/blocked/completed/failed` 等非创建态再次直接 `StartRun(...)`，当前会返回 `ErrConflict`
+  - `BlockOnDecision(...)` / `BlockOnApproval(...)` 当前也已补状态约束
+  - 当前仅允许对 `created/running` run 施加 blocking
+  - 对已 blocked 或 terminal run，不再允许通过原始动作面直接覆盖 blocking 状态
+- `internal/modules/kernel/orchestrator/biz/runtime_orchestrator_test.go`
+  - 已新增 `StartRun(...)` 对非 `created` run 返回 `ErrConflict` 的回归
+  - 已把 block 命令测试从“清空旧 opposite refs”收口为“正常设置 refs + 非法状态冲突”
+  - 已新增 blocked/terminal run 上直接 block 返回 `ErrConflict` 的回归
+- 本轮完成后，第 1 项遗留继续收窄
+  - orchestrator 底层动作面当前不再静默覆盖既有状态
+  - 上层 `run service ensure` 与底层 orchestrator 原始动作的状态边界当前更加一致
+
+### 63. appservice 入口空会话保护第五十轮
+
+- `application/workorchd/appservice/entry.go`
+  - `RunAllPhase1WithSession(...)` 当前已补 `nil session / nil managed runtime / nil inner runtime` 保护
+  - 以上入口级非法输入当前统一返回 `ErrInvalidArgument`
+  - 不再因空 session 直接 panic
+- `application/workorchd/appservice/runtime_managed.go`
+  - `NewRuntimeFromBootstrap(nil)` 当前返回 `nil`
+  - `NewManagedRuntime(nil, ...)` 当前也返回 `nil`
+  - runtime 构造入口当前不再因空依赖构造出“外层非 nil、内层不可用”的危险对象
+- `application/workorchd/appservice/entry_test.go`
+  - 已新增空 session/空 runtime 返回 `ErrInvalidArgument` 回归
+- `application/workorchd/appservice/runtime_adapter_test.go`
+  - 已新增 `NewManagedRuntime(nil, ...) == nil` 回归
+- `application/workorchd/appservice/runtime_session_test.go`
+  - 已新增 `NewRuntimeFromBootstrap(nil) == nil` 回归
+- 本轮完成后，第 3 项遗留继续收窄
+  - `appservice/demo` 入口链路当前已补齐一组直接的空输入保护
+  - phase1 顶层执行入口当前对明显非法装配态已能稳定失败，而不是 panic
+
+### 64. session/backend 非法配置收口第五十一轮
+
+- `application/workorchd/appservice/runtime_session.go`
+  - `NewRuntimeSessionWithBackend(...)` / `NewRuntimeSessionFromEnv(...)` 当前已改为返回 `(*RuntimeSession, error)`
+  - 当前会在 session 构造链路中显式拦截 `unsupported repository backend` 这类配置型 panic
+  - 对非法 backend 当前统一转换为 `ErrInvalidArgument`
+  - 对其他非配置类 panic 仍保持继续抛出，不吞内部装配 bug
+- `application/workorchd/appservice/entry.go`
+  - `RunAllPhase1WithBackend(...)` / `RunAllPhase1FromEnv(...)` 当前已显式处理 session 构造错误
+  - 非法 backend 当前不再通过 panic 终止顶层执行入口
+- `application/workorchd/appservice/test_helpers_test.go`
+  - 测试 helper 当前已对 session 构造错误显式失败，不再假设构造恒成功
+- `application/workorchd/appservice/runtime_session_test.go`
+  - 已新增 unsupported backend 返回 `ErrInvalidArgument` 回归
+- `application/workorchd/appservice/entry_test.go`
+  - 已新增 `RunAllPhase1WithBackend(...)` / `RunAllPhase1FromEnv(...)` 对 unsupported backend 返回 `ErrInvalidArgument` 回归
+- `application/workorchd/demo/demo_test.go`
+  - 已新增 demo 薄转发层对 unsupported backend 返回 `ErrInvalidArgument` 回归
+- 本轮完成后，第 3 项遗留继续收窄
+  - `appservice/demo` 顶层配置入口当前已补齐非法 backend 的稳定失败语义
+  - phase1 执行入口当前对这类用户配置错误已不再以 panic 形式暴露
+
+### 65. orchestrator 终态动作状态约束第五十二轮
+
+- `internal/modules/kernel/orchestrator/biz/runtime_orchestrator.go`
+  - `CompleteRun(...)` 当前已补状态约束
+  - 当前只允许从 `running` 进入 `completed`
+  - 对 `created/blocked/completed/failed` run 直接 `CompleteRun(...)`，当前会返回 `ErrConflict`
+  - `FailRun(...)` 当前也已补状态约束
+  - 当前允许从 `created/running/blockedOnDecision/blockedOnApproval` 进入 `failed`
+  - 对已 `completed/failed` run 直接 `FailRun(...)`，当前会返回 `ErrConflict`
+- `internal/modules/kernel/orchestrator/biz/runtime_orchestrator_test.go`
+  - 已新增 `CompleteRun(...)` 对非 `running` 状态返回 `ErrConflict` 的回归
+  - 已新增 `FailRun(...)` 对 terminal run 返回 `ErrConflict` 的回归
+  - 当前也会校验冲突时 run 对象不被改写
+- 本轮完成后，第 1 项遗留继续收窄
+  - orchestrator 原始终态动作当前不再静默覆写 terminal state
+  - 底层原始动作与上层 run service 的状态边界当前进一步一致
+
+### 66. demo/main 非法 backend 入口回归第五十三轮
+
+- `application/workorchd/appservice/runtime_session_test.go`
+  - 已新增 `NewRuntimeSessionFromEnv()` 对 unsupported backend 返回 `ErrInvalidArgument` 的回归
+- `application/workorchd/demo/demo_test.go`
+  - 已新增 `RunAllFromEnv(...)` 对 unsupported backend 返回 `ErrInvalidArgument` 的回归
+- `application/workorchd/main_test.go`
+  - 已新增 `go run ./application/workorchd` 在 unsupported backend 下失败的端到端回归
+  - 当前会校验输出中包含
+    - `invalid argument`
+    - `unsupported repository backend`
+- 本轮完成后，第 3 项遗留继续收窄
+  - 非法 backend 的失败语义当前已从 `appservice` 一直锁到 `demo` 与 `main` 进程入口
+  - 用户可见的顶层执行入口当前对该类配置错误具备稳定回归基线
+
+### 67. file backend 默认 dataRoot 回归第五十四轮
+
+- `application/workorchd/appservice/entry_test.go`
+  - 已新增 `RunAllPhase1FromEnv(...)` 在 `WORKORCH_REPOSITORY_BACKEND=file` 且 `WORKORCH_DATA_DIR` 为空时的回归
+  - 当前通过设置 `TMPDIR` 锁定默认落盘目录为 `${TMPDIR}/workorchd-data`
+  - 当前会校验六个持久化文件都会落到默认目录
+- `application/workorchd/demo/demo_test.go`
+  - 已新增 `RunAllFromEnv(...)` 对同一默认 dataRoot 行为的回归
+- `application/workorchd/main_test.go`
+  - 已新增 `go run ./application/workorchd` 在 file backend 且省略 data dir 时的端到端回归
+  - 当前会校验 demo 输出正常且默认目录下文件已生成
+- 本轮完成后，第 3 项遗留继续收窄
+  - file backend 当前不仅覆盖显式 dataRoot，也已覆盖默认 dataRoot 的顶层入口行为
+  - `appservice/demo/main` 三层入口对该配置边界当前都具备稳定回归
+
+### 68. appservice 顶层业务错误透传回归第五十五轮
+
+- `application/workorchd/appservice/entry_test.go`
+  - 已新增 `RunAllPhase1WithSession(...)` 顶层业务错误透传回归
+  - 当前通过 fake runtime 显式验证 `ErrBlocked / ErrConflict / ErrNotFound` 会从入口直接返回
+  - 当前也会校验首个业务错误发生后，不会继续进入后续 `EnsureRun(...)` 调用
+- 本轮完成后，第 3 项遗留继续收窄
+  - `appservice` 顶层执行入口当前已对关键业务错误类型具备显式透传基线
+  - 顶层入口对这组错误当前不会吞错、改写错误类型或继续推进后续 slice
+
+### 69. appservice 空依赖保护第五十六轮
+
+- 已新增 `application/workorchd/appservice/guard.go`
+  - 当前统一承接 `appservice` 内部对空依赖的最小保护
+  - 对 `nil` runtime / service / repository / action port 当前统一返回 `ErrInvalidArgument`
+- `application/workorchd/appservice/runtime_adapter.go`
+  - 当前已为 snapshot read 与 action-side 全部入口补空依赖保护
+  - `runtimeAdapter` 在依赖未装配完整时不再因空 repository 或空 action port 直接 panic
+- `application/workorchd/appservice/phase1.go`
+  - `RunAllPhase1(...)` 当前已对空 runtime 显式返回 `ErrInvalidArgument`
+  - `Phase1Service` 当前也已为 `snapshotReads / workspaceActions / runActions / decisionActions / approvalActions` 补统一保护
+  - 手工构造不完整 `Phase1Service` 时，当前会稳定失败而不是在 `snapshot` 或 action 调用中 panic
+- `application/workorchd/appservice/runtime_adapter_test.go`
+  - 已新增空依赖与 nil receiver 回归
+  - 当前会校验 `runtimeAdapter` 各 read/action 入口统一返回 `ErrInvalidArgument`
+- `application/workorchd/appservice/phase1_test.go`
+  - 已新增 `RunAllPhase1(nil)`、空 action 依赖与缺失 snapshot read 的回归
+  - 当前会校验 phase1 编排层对这类非法装配态稳定返回 `ErrInvalidArgument`
+- 本轮完成后，第 3 项遗留继续收窄
+  - `appservice` 入口之外，phase1 编排主体与 runtime adapter 当前也补齐了同类非法装配保护
+  - phase1 链路对“部分构造对象被误调用”的失败语义当前已更加一致
+
+### 70. file backend 默认 dataRoot 直连路径回归第五十七轮
+
+- `application/workorchd/bootstrap/runtime_test.go`
+  - 已新增 `NewWithBackend("file", "")` 的默认 dataRoot 回归
+  - 当前会通过 `TMPDIR` 锁定默认目录为 `${TMPDIR}/workorchd-data`
+  - bootstrap 直连 file backend 当前不再只依赖 env 链路间接覆盖
+- `application/workorchd/appservice/entry_test.go`
+  - 已新增 `RunAllPhase1WithBackend(ctx, "file", "")` 的默认 dataRoot 回归
+  - 当前会校验 6 个持久化文件都落到默认目录
+- `application/workorchd/demo/demo_test.go`
+  - 已新增 `RunAllWithBackend(ctx, "file", "")` 的默认 dataRoot 回归
+  - demo 薄包装层当前也已显式锁定与 `appservice` 一致的默认 file backend 语义
+- 本轮完成后，第 3 项遗留继续收窄
+  - file backend 的默认 dataRoot 当前不仅覆盖 `FromEnv(...)`，也覆盖了 `WithBackend(...)` 直连路径
+  - `bootstrap -> appservice -> demo` 三层在该行为上当前具备统一回归基线
+
+### 71. file backend 默认 dataRoot 重复执行回归第五十八轮
+
+- `application/workorchd/appservice/runtime_session_test.go`
+  - 已新增 `NewRuntimeSessionWithBackend("file", "")` 的默认 dataRoot 回归
+  - session 直连 file backend 当前也已显式锁定默认目录语义
+- `application/workorchd/appservice/entry_test.go`
+  - 已新增 `RunAllPhase1WithBackend(ctx, "file", "")` 在默认 dataRoot 下的重载稳定性回归
+  - 当前会校验同一默认目录上的两次执行返回稳定 phase1 snapshot
+- `application/workorchd/demo/demo_test.go`
+  - 已新增 `RunAllWithBackend(ctx, "file", "")` 在默认 dataRoot 下的重载稳定性回归
+  - demo 薄包装层当前也已显式锁定默认 file backend 的重复执行语义
+- `application/workorchd/main_test.go`
+  - 已把默认 data dir 的 `go run ./application/workorchd` 回归扩展为两次执行
+  - 进程入口当前不仅验证首轮可运行，也验证同一默认目录上重复执行仍稳定输出 4 条 slice
+- 本轮完成后，第 3 项遗留继续收窄
+  - file backend 的“默认 dataRoot + 重复执行”当前已从 session 直连路径一直锁到 main 进程入口
+  - phase1 对默认持久化目录的幂等/重载基线当前进一步完整
+
+### 72. appservice action port 契约回归第五十九轮
+
+- 已新增 `application/workorchd/appservice/runtime_action_ports_test.go`
+  - 当前独立覆盖 `workspace / run / decision / approval` 四组 action port
+  - 已显式锁定 nil service 时统一返回 `ErrInvalidArgument`
+- `runtime_action_ports`
+  - 当前已显式锁定 appservice 参数到模块 command DTO 的映射
+  - `run` action port 当前会继续保持 phase1 所需的最小 command 面
+    - `EnsureRun(...)` 当前明确只写入 `runID/workspaceID`
+    - `goalID/doDID` 在 phase1 adapter 中当前保持空值，不被意外漂移
+  - `decision/approval` action port 当前也已显式锁定 ticket/approval 绑定字段与 resolve payload 透传行为
+- 本轮完成后，第 1、3 项遗留继续收窄
+  - `appservice` 到模块 `service` 的 command adapter 边界当前已具备独立回归
+  - 后续若继续缩减 application 层或调整模块 command 结构，破坏面会更早在本层暴露
+
+### 73. appservice session 生命周期与 panic 语义回归第六十轮
+
+- `application/workorchd/appservice/entry_test.go`
+  - 已新增 `RunAllPhase1WithSession(...)` 成功路径后的 session 资源释放回归
+  - 已新增非法 runtime 路径下也会释放 `Bootstrap/Runtime` 的回归
+- `application/workorchd/appservice/runtime_session_test.go`
+  - 已新增 `buildBootstrapRuntime(...)` 对非配置型 panic 继续抛出的回归
+  - 当前只对 `unsupported repository backend` 做 `ErrInvalidArgument` 转换，其他 panic 不会被静默吞掉
+- 本轮完成后，第 3 项遗留继续收窄
+  - `appservice` 顶层 session 生命周期当前不仅覆盖正常执行，也覆盖了非法装配态的释放语义
+  - session 构造链路当前对“配置错误可转换、内部 bug 继续抛出”的边界也已有显式基线
+
+### 74. managed runtime 空 exports 收口第六十一轮
+
+- `application/workorchd/appservice/runtime_assembly.go`
+  - `managedRuntimeAssemblyFromExports(...)` 当前已显式校验 phase1 必需的 repository/service exports
+  - 缺关键 exports 时，当前不再继续构造半残的 runtime adapter 与 collector
+  - `newManagedRuntimeFromAssembly(...)` 当前在 assembly.runtime 为空时直接返回 `nil`
+- `application/workorchd/appservice/runtime_session_test.go`
+  - 已新增 `NewRuntimeFromExports(bootstrap.Exports{}) == nil` 回归
+- `application/workorchd/appservice/runtime_assembly_test.go`
+  - 已新增空 exports 返回空 assembly 的回归
+- 本轮完成后，第 1、3 项遗留继续收窄
+  - `NewRuntimeFromBootstrap(nil)` / `NewManagedRuntime(nil, ...)` / `NewRuntimeFromExports(empty)` 当前已统一为“不构造危险对象”
+  - managed runtime 构造层对非法装配态的失败语义当前进一步一致
+
+### 75. observed collector payload 深克隆第六十二轮
+
+- `application/workorchd/observed/collector.go`
+  - `cloneEnvelope(...)` 当前已从顶层浅拷贝提升为递归克隆 `map[string]any` / `[]any`
+  - collector 对外返回的 published phase1 event 当前不再把嵌套 payload 结构直接暴露给调用方
+- `application/workorchd/observed/collector_test.go`
+  - 已新增嵌套 `input/output/items` payload 的深克隆回归
+  - 当前会校验调用方修改首次读取结果后，不会污染后续 `PublishedPhase1Events()` 返回值
+- 本轮完成后，第 4 项遗留继续收窄
+  - observed collector 当前对 phase1 typed event 的只读语义更稳定
+  - 后续 `collector -> managed runtime -> observed snapshot` 链路当前更不容易被外部调用方的意外修改反向污染
+
+### 76. observed/presenter 只读边界补强第六十三轮
+
+- `application/workorchd/observed/snapshot_contract.go`
+  - `SnapshotItem.PayloadMap()` 与 `Envelope()` 当前已改为递归深克隆 `map[string]any` / `[]any`
+  - `StepPayload` 与 `DecisionTicketPayload` 的 payload encode/decode 当前不再把嵌套结构直接暴露给外部调用方
+- `application/workorchd/observed/snapshot_contract_test.go`
+  - 已新增嵌套 `input/output/items` payload 深克隆回归
+  - 当前会校验对首次导出 payload 与 envelope 的修改不会污染后续读取结果
+- `application/workorchd/presenter/presenter.go`
+  - `MapStep(...)` 当前已对 `Input/Output` 做递归深克隆
+  - `MapObserved(...)` 继续通过 `SnapshotItem.PayloadMap()` 维持只读输出边界
+- `application/workorchd/presenter/presenter_test.go`
+  - 已新增 `MapStep(...)` 与 `MapObserved(...)` 的嵌套 payload 深克隆回归
+  - 当前会校验 presenter 输出被调用方修改后，不会反向污染 run model 与 observed snapshot 源对象
+- 本轮完成后，第 4 项遗留继续收窄
+  - `collector -> observed snapshot -> presenter` 主链路当前已统一为只读导出语义
+  - phase1 观察输出更接近稳定快照，不会被调用方持有的 map/slice 嵌套引用反向污染
+
+### 77. phase1 入口关闭错误合并回归第六十四轮
+
+- `application/workorchd/appservice/runtime_session_test.go`
+  - 已新增 `RuntimeSession.Close()` 在 `Bootstrap.Shutdown(...)` 失败时的回归
+  - 当前会校验即使关闭失败，也会释放 `Runtime/Bootstrap` 持有引用，避免 session 进入半关闭态
+- `application/workorchd/appservice/entry_test.go`
+  - 已新增 phase1 成功完成后叠加 `session.Close(...)` 错误的回归
+  - 已新增顶层业务错误与关闭错误通过 `errors.Join(...)` 同时保留的回归
+  - 当前会校验 `RunAllPhase1WithSession(...)` 在异常组合路径下仍会释放 session 持有资源
+- 本轮完成后，第 1、3 项遗留继续收窄
+  - phase1 顶层入口当前对 “业务推进成功/失败 + 关闭失败” 的组合语义已具备显式测试约束
+  - `appservice -> demo/main` 上游依赖的入口错误面当前更稳定，不会因关闭期异常丢失主错误或遗留脏 session 状态
+
 ## 当前结构判断
 
 目前仓库已经达到以下状态：
@@ -1151,12 +1512,24 @@
 - `appservice` 当前写侧对模块能力的消费也已收口为本地 action port，不再在 application 编排主体直接拼装 module command DTO
 - `appservice` 当前对 `decision/approval` 的 module-local ensure 语义也已下沉回模块层
 - `appservice` 当前对 `run` 的 module-local ensure 语义也已下沉回模块层，application runtime 读侧已不再保留 guard capability
+- `appservice` 当前对 run blocking 引用冲突的保护也已回收到模块 `service/biz`
+- `appservice` 当前对 run 同 ID 下的 `goalID/doDID` 语义漂移也已由模块 `service/biz` 负责拦截
+- `appservice` 下游依赖的 orchestrator 原始动作面当前也已补齐最小状态约束，不再静默覆盖非创建态/非可阻塞态 run
+- `appservice` 下游依赖的 orchestrator 原始终态动作当前也已补齐状态约束，不再静默覆写 completed/failed run
+- `appservice` 当前对 decision/approval 同 ID 下的 reason / resolution 语义漂移也已回收到模块 `service/biz`
+- `appservice` 当前对 resume blocked 与缺失 decision/approval 对象的异常透传也已具备明确回归
 - `appservice` 当前 runtime dependencies 也已去掉空的 `Reads` 包装层，收口为直接 `Snapshot + Actions`
 - `appservice` 当前 exports -> runtime dependencies 的组装也已收拢到单点 helper
 - `appservice` 当前 managed runtime 的 runtime/collector 接线也已收拢到单点 assembly helper
 - `appservice` 当前同类 runtime 生命周期模式也已统一到 `RuntimeSession`
 - `appservice/demo` 当前同类 phase1 执行模式也已统一到 session/backend helper
 - `appservice/demo` 当前测试侧同类 setup/execute 模式也已统一到 test helper
+- `appservice` 当前 phase1 执行入口对空 session / 空 runtime 也已具备显式非法输入保护
+- `appservice` 当前 phase1 编排主体与 runtime adapter 也已对空 repository / 空 action port / 空 snapshot read 具备显式非法输入保护
+- `appservice` 当前 phase1 执行入口对非法 repository backend 配置也已具备显式错误返回，不再 panic
+- `appservice` 当前 phase1 顶层执行入口对关键业务错误类型也已具备显式透传回归
+- `demo` 与 `main` 当前也已对非法 repository backend 的最终失败语义具备显式回归
+- `demo` 与 `main` 当前也已对 file backend 默认 dataRoot 行为具备显式回归
 - `main` 当前直接依赖 `appservice`，`demo` 已进一步退化为兼容性 shim
 - phase1 所需的 runtime adapter 也已收回到 `appservice`，`bootstrap.Runtime` 不再直接承担 phase1 应用方法面
 - `bootstrap.Runtime` 当前也已从散列 getter 收敛为单一 `Exports()` 聚合导出
@@ -1175,8 +1548,10 @@
 - phase1 collector 与 observed normalize 当前也已统一复用 shared typed event helper，不再各自维护独立的 phase1 event 解码路径
 - phase1 collector -> appservice -> observed snapshot 当前也已统一直接传递 typed phase1 event，而不再在中途回落到裸 envelope
 - phase1 observed 输出当前也已具备 typed snapshot contract，不再把裸 `events.Envelope` 直接暴露给 `presenter`
+- phase1 observed fallback 组装与 presenter observed 渲染当前也已不再依赖 `Envelope` 作为内部中转
 - phase1 event / snapshot 当前也已具备显式最终版本常量与严格校验，合同行为进一步稳定
 - phase1 observed 输出当前也已改为最终 lower-camel-case 渲染形态，不再保留 envelope-style 输出兼容层
+- phase1 observed 在 file backend reload 下的 resolved decision payload 当前也已具备稳定回放语义
 - demo 逻辑现在已具备包级测试，不再只依赖应用级 smoke test
 - demo 已具备首轮跨模块业务集成测试，可直接校验 phase1 四条 slice 在 `memory/file` 双后端下的最终业务结果与观察输出
 - bootstrap 作为应用装配层已经开始暴露稳定方法面，而不是直接暴露 repo/service 字段

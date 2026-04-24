@@ -50,7 +50,7 @@ func TestDecisionResolutionPayloadIncludesResolutionFields(t *testing.T) {
 		common.DecisionTicketStateResolved,
 		common.ResolutionID("resolution-1"),
 		"approve-plan",
-		map[string]any{"operator": "phase1-demo"},
+		map[string]any{"operator": "workorch-demo"},
 	)
 
 	if payload[PayloadKeyReason] != "manual gate" {
@@ -69,8 +69,8 @@ func TestDecisionResolutionPayloadIncludesResolutionFields(t *testing.T) {
 	if !ok {
 		t.Fatalf("payload type = %T, want map[string]any", payload[PayloadKeyPayload])
 	}
-	if resolutionPayload["operator"] != "phase1-demo" {
-		t.Fatalf("resolution payload operator = %v, want phase1-demo", resolutionPayload["operator"])
+	if resolutionPayload["operator"] != "workorch-demo" {
+		t.Fatalf("resolution payload operator = %v, want workorch-demo", resolutionPayload["operator"])
 	}
 }
 
@@ -91,7 +91,7 @@ func TestDecodeDecisionResolutionPayloadRoundTrip(t *testing.T) {
 		common.DecisionTicketStateResolved,
 		common.ResolutionID("resolution-1"),
 		"approve-plan",
-		map[string]any{"operator": "phase1-demo"},
+		map[string]any{"operator": "workorch-demo"},
 	)
 
 	decoded, ok := DecodeDecisionResolutionPayload(payload)
@@ -110,7 +110,7 @@ func TestDecodeDecisionResolutionPayloadRoundTrip(t *testing.T) {
 	if decoded.Type != "approve-plan" {
 		t.Fatalf("type = %s, want approve-plan", decoded.Type)
 	}
-	if decoded.Payload["operator"] != "phase1-demo" {
-		t.Fatalf("payload operator = %v, want phase1-demo", decoded.Payload["operator"])
+	if decoded.Payload["operator"] != "workorch-demo" {
+		t.Fatalf("payload operator = %v, want workorch-demo", decoded.Payload["operator"])
 	}
 }

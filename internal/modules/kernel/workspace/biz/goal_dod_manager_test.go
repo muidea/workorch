@@ -19,7 +19,7 @@ func TestGoalDoDManager_CreateWorkspace(t *testing.T) {
 
 	cmd := workspaceservice.CreateWorkspaceCommand{
 		WorkspaceID: common.WorkspaceID("ws-1"),
-		Title:       "phase1 workspace",
+		Title:       "workorch workspace",
 	}
 	if err := manager.CreateWorkspace(ctx, cmd); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -59,7 +59,7 @@ func TestGoalDoDManager_CreateWorkspace_RejectsDuplicateWorkspaceID(t *testing.T
 
 	cmd := workspaceservice.CreateWorkspaceCommand{
 		WorkspaceID: common.WorkspaceID("ws-duplicate"),
-		Title:       "phase1 workspace",
+		Title:       "workorch workspace",
 	}
 	if err := manager.CreateWorkspace(ctx, cmd); err != nil {
 		t.Fatalf("first create workspace: %v", err)
@@ -67,7 +67,7 @@ func TestGoalDoDManager_CreateWorkspace_RejectsDuplicateWorkspaceID(t *testing.T
 
 	second := workspaceservice.CreateWorkspaceCommand{
 		WorkspaceID: cmd.WorkspaceID,
-		Title:       "phase1 workspace updated",
+		Title:       "workorch workspace updated",
 	}
 	if err := manager.CreateWorkspace(ctx, second); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("second create err = %v, want conflict", err)
@@ -90,7 +90,7 @@ func TestGoalDoDManager_CreateWorkspace_PublishesWorkspaceCreatedEvent(t *testin
 
 	cmd := workspaceservice.CreateWorkspaceCommand{
 		WorkspaceID: common.WorkspaceID("ws-event"),
-		Title:       "phase1 workspace",
+		Title:       "workorch workspace",
 	}
 	if err := manager.CreateWorkspace(ctx, cmd); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -103,8 +103,8 @@ func TestGoalDoDManager_CreateWorkspace_PublishesWorkspaceCreatedEvent(t *testin
 	if published[0].Topic != events.TopicWorkspaceCreated {
 		t.Fatalf("topic = %s, want %s", published[0].Topic, events.TopicWorkspaceCreated)
 	}
-	if published[0].Version != events.Phase1EventVersion {
-		t.Fatalf("version = %s, want %s", published[0].Version, events.Phase1EventVersion)
+	if published[0].Version != events.WorkorchEventVersion {
+		t.Fatalf("version = %s, want %s", published[0].Version, events.WorkorchEventVersion)
 	}
 	if published[0].Payload[events.PayloadKeyTitle] != cmd.Title {
 		t.Fatalf("title payload = %v, want %s", published[0].Payload[events.PayloadKeyTitle], cmd.Title)
@@ -121,7 +121,7 @@ func TestGoalDoDManager_EnsureWorkspaceCreatesMissingWorkspace(t *testing.T) {
 
 	cmd := workspaceservice.EnsureWorkspaceCommand{
 		WorkspaceID: common.WorkspaceID("ws-ensure-create"),
-		Title:       "phase1 ensure workspace",
+		Title:       "workorch ensure workspace",
 	}
 	if err := manager.EnsureWorkspace(ctx, cmd); err != nil {
 		t.Fatalf("ensure workspace: %v", err)
@@ -160,7 +160,7 @@ func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t
 
 	if err := manager.EnsureWorkspace(ctx, workspaceservice.EnsureWorkspaceCommand{
 		WorkspaceID: workspaceID,
-		Title:       "phase1 reset workspace",
+		Title:       "workorch reset workspace",
 	}); err != nil {
 		t.Fatalf("ensure workspace reset: %v", err)
 	}
@@ -169,8 +169,8 @@ func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t
 	if err != nil {
 		t.Fatalf("get reset workspace: %v", err)
 	}
-	if ws.Title != "phase1 reset workspace" {
-		t.Fatalf("title = %q, want phase1 reset workspace", ws.Title)
+	if ws.Title != "workorch reset workspace" {
+		t.Fatalf("title = %q, want workorch reset workspace", ws.Title)
 	}
 	if ws.State != common.WorkspaceStateActive {
 		t.Fatalf("state = %q, want active", ws.State)
@@ -186,8 +186,8 @@ func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t
 	if published[0].Topic != events.TopicWorkspaceStateChanged {
 		t.Fatalf("topic = %s, want %s", published[0].Topic, events.TopicWorkspaceStateChanged)
 	}
-	if published[0].Payload[events.PayloadKeyTitle] != "phase1 reset workspace" {
-		t.Fatalf("title payload = %v, want phase1 reset workspace", published[0].Payload[events.PayloadKeyTitle])
+	if published[0].Payload[events.PayloadKeyTitle] != "workorch reset workspace" {
+		t.Fatalf("title payload = %v, want workorch reset workspace", published[0].Payload[events.PayloadKeyTitle])
 	}
 	if published[0].Payload[events.PayloadKeyState] != string(common.WorkspaceStateActive) {
 		t.Fatalf("state payload = %v, want %s", published[0].Payload[events.PayloadKeyState], common.WorkspaceStateActive)

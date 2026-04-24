@@ -80,7 +80,7 @@ func (m *GoalDoDManager) publishWorkspaceEvent(ctx context.Context, topic string
 		return nil
 	}
 	return m.eventHub.Publish(ctx, events.Envelope{
-		Version:      events.Phase1EventVersion,
+		Version:      events.WorkorchEventVersion,
 		Topic:        topic,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "workspace",

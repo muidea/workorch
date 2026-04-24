@@ -1,4 +1,4 @@
-# WorkOrch Phase1 Status
+# workorch Status
 
 ## Current repository state
 
@@ -14,7 +14,7 @@
   - `internal/modules/blocks/approval`
   - `internal/modules/blocks/legacy`
 
-## Delivered in phase1
+## Delivered in workorch
 
 ### Slice A: normal completion chain
 
@@ -84,10 +84,10 @@ WORKORCH_REPOSITORY_BACKEND=file WORKORCH_DATA_DIR=.workorch-data go run ./appli
 
 Four observable slices are printed:
 
-- `phase1 runnable slice`
-- `phase1 decision-blocked-resume slice`
-- `phase1 approval-blocked-resume slice`
-- `phase1 approval-rejected-terminal slice`
+- `workorch runnable slice`
+- `workorch decision-blocked-resume slice`
+- `workorch approval-blocked-resume slice`
+- `workorch approval-rejected-terminal slice`
 
 Each slice includes minimal envelope-style observed objects for:
 
@@ -125,7 +125,7 @@ Verified terminal states:
 
 - runnable / decision-blocked-resume / approval-blocked-resume runs persisted as `completed`
 - approval-rejected-terminal run persisted as `failed`
-- repeated file-backed demo execution against the same data directory is now supported for the shipped phase1 demo IDs
+- repeated file-backed demo execution against the same data directory is now supported for the shipped workorch demo IDs
 
 ### Test baseline
 
@@ -147,7 +147,7 @@ Validated coverage currently includes:
 - application-level smoke test for `workorchd`
 - repeatable file-backed demo execution against the same data directory
 
-## Explicit non-goals of current phase1
+## Explicit non-goals of current workorch
 
 Not implemented yet:
 
@@ -165,4 +165,4 @@ Implemented in minimal form, but not yet expanded to phase2-grade persistence se
 
 1. add persistence contract tests shared by repository adapters
 2. define the minimal eventHub / real event bus integration path
-3. evaluate whether richer step/block graph semantics should start in phase1.5 or phase2
+3. evaluate whether richer step/block graph semantics should start in workorch.5 or phase2

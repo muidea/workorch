@@ -2,8 +2,10 @@ package appservice
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
@@ -32,13 +34,13 @@ func (h *testHub) Subscribe(topic string, handler events.Handler) func() {
 	return func() {}
 }
 
-func TestManagedRuntimePublishedPhase1EventsUsesCollectorRatherThanHubPublishedMethod(t *testing.T) {
+func TestManagedRuntimePublishedWorkorchEventsUsesCollectorRatherThanHubPublishedMethod(t *testing.T) {
 	hub := newTestHub()
 	runtime := NewManagedRuntime(NewRuntimeAdapter(RuntimeDependencies{}), hub)
 	defer runtime.Close()
 
 	if err := hub.Publish(context.Background(), events.Envelope{
-		Version:     events.Phase1EventVersion,
+		Version:     events.WorkorchEventVersion,
 		Topic:       events.TopicRunStateChanged,
 		SubjectType: "run",
 		SubjectID:   "run-1",
@@ -48,7 +50,7 @@ func TestManagedRuntimePublishedPhase1EventsUsesCollectorRatherThanHubPublishedM
 		t.Fatalf("publish run event: %v", err)
 	}
 
-	published := runtime.PublishedPhase1Events()
+	published := runtime.PublishedWorkorchEvents()
 	if len(published) != 1 {
 		t.Fatalf("len(published) = %d, want 1", len(published))
 	}
@@ -67,7 +69,7 @@ func TestManagedRuntimeCloseStopsFurtherCollection(t *testing.T) {
 	runtime.Close()
 
 	if err := hub.Publish(context.Background(), events.Envelope{
-		Version:     events.Phase1EventVersion,
+		Version:     events.WorkorchEventVersion,
 		Topic:       events.TopicApprovalCreated,
 		SubjectType: "approval",
 		SubjectID:   "approval-1",
@@ -76,7 +78,62 @@ func TestManagedRuntimeCloseStopsFurtherCollection(t *testing.T) {
 		t.Fatalf("publish approval event: %v", err)
 	}
 
-	if published := runtime.PublishedPhase1Events(); len(published) != 0 {
+	if published := runtime.PublishedWorkorchEvents(); len(published) != 0 {
 		t.Fatalf("len(published) = %d, want 0", len(published))
+	}
+}
+
+func TestNewManagedRuntimeReturnsNilWhenRuntimeMissing(t *testing.T) {
+	if runtime := NewManagedRuntime(nil, newTestHub()); runtime != nil {
+		t.Fatalf("runtime = %#v, want nil", runtime)
+	}
+}
+
+func TestRuntimeAdapterReturnsInvalidArgumentWhenDependenciesMissing(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewRuntimeAdapter(RuntimeDependencies{})
+
+	tests := []struct {
+		name string
+		run  func() error
+	}{
+		{name: "get workspace", run: func() error { _, err := runtime.GetWorkspaceByID(ctx, "ws"); return err }},
+		{name: "ensure workspace", run: func() error { return runtime.EnsureWorkspace(ctx, "ws", "title") }},
+		{name: "get run", run: func() error { _, err := runtime.GetRun(ctx, "run"); return err }},
+		{name: "ensure run", run: func() error { return runtime.EnsureRun(ctx, "run", "ws") }},
+		{name: "ensure run started", run: func() error { return runtime.EnsureRunStarted(ctx, "run") }},
+		{name: "ensure run blocked on decision", run: func() error { return runtime.EnsureRunBlockedOnDecision(ctx, "run", "ticket") }},
+		{name: "ensure run blocked on approval", run: func() error { return runtime.EnsureRunBlockedOnApproval(ctx, "run", "approval") }},
+		{name: "ensure run resumed", run: func() error { return runtime.EnsureRunResumed(ctx, "run") }},
+		{name: "get step", run: func() error { _, err := runtime.GetStep(ctx, "run/step-1"); return err }},
+		{name: "ensure ticket", run: func() error { return runtime.EnsureTicket(ctx, "ticket", "ws", "run", "run/manual-gate", "decision") }},
+		{name: "get ticket", run: func() error { _, err := runtime.GetTicket(ctx, "ticket"); return err }},
+		{name: "get resolution", run: func() error { _, err := runtime.GetResolutionByTicketID(ctx, "ticket"); return err }},
+		{name: "ensure resolved ticket", run: func() error { return runtime.EnsureResolvedTicket(ctx, "resolution", "ticket", "approve_path", nil) }},
+		{name: "ensure approval", run: func() error {
+			return runtime.EnsureApproval(ctx, "approval", "ws", "run", "run/manual-approval", "approval")
+		}},
+		{name: "get approval", run: func() error { _, err := runtime.GetApproval(ctx, "approval"); return err }},
+		{name: "ensure approval approved", run: func() error { return runtime.EnsureApprovalApproved(ctx, "approval") }},
+		{name: "ensure approval rejected", run: func() error { return runtime.EnsureApprovalRejected(ctx, "approval") }},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.run(); !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("err = %v, want invalid argument", err)
+			}
+		})
+	}
+}
+
+func TestRuntimeAdapterNilReceiverReturnsInvalidArgument(t *testing.T) {
+	var runtime *runtimeAdapter
+
+	if _, err := runtime.GetRun(context.Background(), "run"); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("get run err = %v, want invalid argument", err)
+	}
+	if err := runtime.EnsureRun(context.Background(), "run", "ws"); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("ensure run err = %v, want invalid argument", err)
 	}
 }

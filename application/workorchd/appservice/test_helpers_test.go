@@ -9,7 +9,10 @@ func newTestRuntimeSession(t *testing.T, backend string, dataRoot string) (*Runt
 	t.Helper()
 
 	ctx := context.Background()
-	session := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	if err != nil {
+		t.Fatalf("new runtime session: %v", err)
+	}
 	t.Cleanup(func() {
 		if err := session.Close(ctx); err != nil {
 			t.Errorf("close runtime session: %v", err)
@@ -18,9 +21,9 @@ func newTestRuntimeSession(t *testing.T, backend string, dataRoot string) (*Runt
 	return session, ctx
 }
 
-func newPhase1TestService(t *testing.T) (*Phase1Service, Runtime) {
+func newWorkorchTestService(t *testing.T) (*WorkorchService, Runtime) {
 	t.Helper()
 
 	session, _ := newTestRuntimeSession(t, "memory", "")
-	return NewPhase1Service(session.Runtime), session.Runtime
+	return NewWorkorchService(session.Runtime), session.Runtime
 }

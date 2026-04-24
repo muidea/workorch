@@ -54,7 +54,7 @@ func (s *Service) EnsureRun(ctx context.Context, cmd runservice.CreateRunCommand
 
 	run, err := s.runs.Get(ctx, cmd.RunID)
 	if err == nil {
-		if run.WorkspaceID != cmd.WorkspaceID {
+		if run.WorkspaceID != cmd.WorkspaceID || run.GoalID != cmd.GoalID || run.DoDID != cmd.DoDID {
 			return common.ErrConflict
 		}
 		return nil
@@ -161,6 +161,12 @@ func (s *Service) EnsureBlockedOnDecision(ctx context.Context, cmd runservice.Bl
 	if r.State == common.RunStateBlockedOnDecision && r.BlockingTicketID == cmd.TicketID {
 		return nil
 	}
+	if r.State == common.RunStateBlockedOnDecision && r.BlockingTicketID != "" && r.BlockingTicketID != cmd.TicketID {
+		return common.ErrConflict
+	}
+	if r.State == common.RunStateBlockedOnApproval && r.BlockingApprovalID != "" {
+		return common.ErrConflict
+	}
 	if r.State == common.RunStateCompleted || r.State == common.RunStateFailed {
 		return nil
 	}
@@ -191,6 +197,12 @@ func (s *Service) EnsureBlockedOnApproval(ctx context.Context, cmd runservice.Bl
 	}
 	if r.State == common.RunStateBlockedOnApproval && r.BlockingApprovalID == cmd.ApprovalID {
 		return nil
+	}
+	if r.State == common.RunStateBlockedOnApproval && r.BlockingApprovalID != "" && r.BlockingApprovalID != cmd.ApprovalID {
+		return common.ErrConflict
+	}
+	if r.State == common.RunStateBlockedOnDecision && r.BlockingTicketID != "" {
+		return common.ErrConflict
 	}
 	if r.State == common.RunStateCompleted || r.State == common.RunStateFailed {
 		return nil

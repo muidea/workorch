@@ -50,3 +50,24 @@ func TestNewWithBackendFilePersistsWorkspaceData(t *testing.T) {
 		t.Fatalf("expected workspace persistence file: %v", err)
 	}
 }
+
+func TestNewWithBackendFileUsesDefaultDataRootWhenUnset(t *testing.T) {
+	tempRoot := t.TempDir()
+	defaultDataDir := filepath.Join(tempRoot, "workorchd-data")
+	t.Setenv("TMPDIR", tempRoot)
+
+	rt := NewWithBackend("file", "")
+	exports := rt.Exports()
+
+	err := exports.Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
+		WorkspaceID: common.WorkspaceID("ws-bootstrap-file-default"),
+		Title:       "bootstrap file backend default data root",
+	})
+	if err != nil {
+		t.Fatalf("create workspace with default file backend: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(defaultDataDir, "workspace.json")); err != nil {
+		t.Fatalf("expected workspace persistence file in default data dir: %v", err)
+	}
+}

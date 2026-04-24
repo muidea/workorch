@@ -53,8 +53,8 @@ type ApprovalPayload struct {
 }
 
 func FromEnvelope(envelope events.Envelope) (SnapshotItem, bool) {
-	spec, ok := events.Phase1SnapshotContract(envelope.Topic)
-	if !ok || !events.ValidatePhase1SnapshotVersion(envelope.Topic, envelope.Version) {
+	spec, ok := events.WorkorchSnapshotContract(envelope.Topic)
+	if !ok || !events.ValidateWorkorchSnapshotVersion(envelope.Topic, envelope.Version) {
 		return SnapshotItem{}, false
 	}
 	payload, ok := decodeSnapshotPayload(envelope.Topic, envelope.Payload)
@@ -79,7 +79,7 @@ func FromEnvelope(envelope events.Envelope) (SnapshotItem, bool) {
 func (i SnapshotItem) Envelope() events.Envelope {
 	return events.Envelope{
 		ID:           i.ID,
-		Version:      events.Phase1SnapshotVersion,
+		Version:      events.WorkorchSnapshotVersion,
 		Topic:        i.Topic,
 		OccurredAt:   i.OccurredAt,
 		SourceModule: i.SourceModule,
@@ -90,6 +90,10 @@ func (i SnapshotItem) Envelope() events.Envelope {
 		StepID:       i.StepID,
 		Payload:      envelopePayload(i.Payload),
 	}
+}
+
+func (i SnapshotItem) PayloadMap() map[string]any {
+	return envelopePayload(i.Payload)
 }
 
 func (p WorkspacePayload) EnvelopePayload() map[string]any {
@@ -117,10 +121,10 @@ func (p StepPayload) EnvelopePayload() map[string]any {
 		events.PayloadKeyState: p.State,
 	}
 	if p.Input != nil {
-		payload[events.PayloadKeyInput] = cloneMap(p.Input)
+		payload[events.PayloadKeyInput] = cloneSnapshotMap(p.Input)
 	}
 	if p.Output != nil {
-		payload[events.PayloadKeyOutput] = cloneMap(p.Output)
+		payload[events.PayloadKeyOutput] = cloneSnapshotMap(p.Output)
 	}
 	return payload
 }
@@ -137,7 +141,7 @@ func (p DecisionTicketPayload) EnvelopePayload() map[string]any {
 		payload[events.PayloadKeyType] = p.ResolutionType
 	}
 	if p.ResolutionPayload != nil {
-		payload[events.PayloadKeyPayload] = cloneMap(p.ResolutionPayload)
+		payload[events.PayloadKeyPayload] = cloneSnapshotMap(p.ResolutionPayload)
 	}
 	return payload
 }
@@ -179,8 +183,8 @@ func decodeSnapshotPayload(topic string, payload map[string]any) (SnapshotPayloa
 		return StepPayload{
 			Kind:   item.Kind,
 			State:  string(item.State),
-			Input:  cloneMap(item.Input),
-			Output: cloneMap(item.Output),
+			Input:  cloneSnapshotMap(item.Input),
+			Output: cloneSnapshotMap(item.Output),
 		}, true
 	case topicDecisionTicketSnapshot:
 		if item, ok := events.DecodeDecisionResolutionPayload(payload); ok {
@@ -189,7 +193,7 @@ func decodeSnapshotPayload(topic string, payload map[string]any) (SnapshotPayloa
 				State:             string(item.State),
 				ResolutionID:      string(item.ResolutionID),
 				ResolutionType:    item.Type,
-				ResolutionPayload: cloneMap(item.Payload),
+				ResolutionPayload: cloneSnapshotMap(item.Payload),
 			}, true
 		}
 		item, ok := events.DecodeDecisionTicketPayload(payload)
@@ -221,13 +225,39 @@ func envelopePayload(payload SnapshotPayload) map[string]any {
 	return payload.EnvelopePayload()
 }
 
-func cloneMap(input map[string]any) map[string]any {
+func cloneSnapshotMap(input map[string]any) map[string]any {
 	if input == nil {
 		return nil
 	}
 	out := make(map[string]any, len(input))
 	for k, v := range input {
-		out[k] = v
+		out[k] = cloneSnapshotValue(v)
 	}
 	return out
+}
+
+func cloneSnapshotSlice(input []any) []any {
+	if input == nil {
+		return nil
+	}
+	out := make([]any, len(input))
+	for i, v := range input {
+		out[i] = cloneSnapshotValue(v)
+	}
+	return out
+}
+
+func cloneSnapshotValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneSnapshotMap(typed)
+	case []any:
+		return cloneSnapshotSlice(typed)
+	default:
+		return typed
+	}
+}
+
+func cloneMap(input map[string]any) map[string]any {
+	return cloneSnapshotMap(input)
 }

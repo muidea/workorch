@@ -18,6 +18,7 @@ type Snapshot struct {
 	Workspace *WorkspaceView `json:"workspace"`
 	Run       *RunView       `json:"run"`
 	Step      *StepView      `json:"step,omitempty"`
+	Steps     []StepView     `json:"steps,omitempty"`
 	Blocking  *BlockingView  `json:"blocking,omitempty"`
 	Observed  []ObservedView `json:"observed"`
 }
@@ -86,8 +87,8 @@ type BlockingRefs struct {
 }
 
 func PrintBanner(w io.Writer) {
-	fmt.Fprintln(w, "== workorch phase1 observable demo ==")
-	fmt.Fprintln(w, "acceptance target: runnable slice + decision/approval blocked->resume slices + approval reject terminal slice")
+	fmt.Fprintln(w, "== workorch workorch observable demo ==")
+	fmt.Fprintln(w, "acceptance target: runnable/runtime-failed/multi-step/branch/multi-gate/runtime-decision/runtime-approval/mixed-gate slices + decision/approval blocked->resume slices + decision/approval reject terminal slices")
 }
 
 func PrintSnapshot(w io.Writer, title string, data *Snapshot) error {
@@ -104,6 +105,7 @@ func BuildSnapshot(
 	ws *workspacemodel.Workspace,
 	r *runmodel.Run,
 	step *runmodel.Step,
+	steps []*runmodel.Step,
 	ticket *decisionmodel.Ticket,
 	approval *approvalmodel.Approval,
 	observedItems []observed.SnapshotItem,
@@ -124,6 +126,7 @@ func BuildSnapshot(
 		Workspace: MapWorkspace(ws),
 		Run:       MapRun(r),
 		Step:      MapStep(step),
+		Steps:     MapSteps(steps),
 		Blocking:  blocking,
 		Observed:  MapObserved(observedItems),
 	}
@@ -162,9 +165,27 @@ func MapStep(item *runmodel.Step) *StepView {
 		ID:     string(item.ID),
 		Kind:   item.Kind,
 		State:  string(item.State),
-		Input:  item.Input,
-		Output: item.Output,
+		Input:  clonePresenterMap(item.Input),
+		Output: clonePresenterMap(item.Output),
 	}
+}
+
+func MapSteps(items []*runmodel.Step) []StepView {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]StepView, 0, len(items))
+	for _, item := range items {
+		mapped := MapStep(item)
+		if mapped == nil {
+			continue
+		}
+		out = append(out, *mapped)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func MapTicket(item *decisionmodel.Ticket) *DecisionTicketView {
@@ -199,20 +220,52 @@ func MapObserved(items []observed.SnapshotItem) []ObservedView {
 	}
 	out := make([]ObservedView, 0, len(items))
 	for _, item := range items {
-		envelope := item.Envelope()
 		out = append(out, ObservedView{
-			ID:           envelope.ID,
-			Version:      envelope.Version,
-			Topic:        envelope.Topic,
-			OccurredAt:   envelope.OccurredAt,
-			SourceModule: envelope.SourceModule,
-			SubjectType:  envelope.SubjectType,
-			SubjectID:    envelope.SubjectID,
-			WorkspaceID:  envelope.WorkspaceID,
-			RunID:        envelope.RunID,
-			StepID:       envelope.StepID,
-			Payload:      envelope.Payload,
+			ID:           item.ID,
+			Version:      item.Version,
+			Topic:        item.Topic,
+			OccurredAt:   item.OccurredAt,
+			SourceModule: item.SourceModule,
+			SubjectType:  item.SubjectType,
+			SubjectID:    item.SubjectID,
+			WorkspaceID:  item.WorkspaceID,
+			RunID:        item.RunID,
+			StepID:       item.StepID,
+			Payload:      item.PayloadMap(),
 		})
 	}
 	return out
+}
+
+func clonePresenterMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	for k, v := range input {
+		out[k] = clonePresenterValue(v)
+	}
+	return out
+}
+
+func clonePresenterSlice(input []any) []any {
+	if input == nil {
+		return nil
+	}
+	out := make([]any, len(input))
+	for i, v := range input {
+		out[i] = clonePresenterValue(v)
+	}
+	return out
+}
+
+func clonePresenterValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return clonePresenterMap(typed)
+	case []any:
+		return clonePresenterSlice(typed)
+	default:
+		return typed
+	}
 }

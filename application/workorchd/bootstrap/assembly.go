@@ -44,13 +44,14 @@ func NewWithBackend(backend string, dataRoot string) *Runtime {
 
 	orchestratorModule := orchestratormodule.New()
 	mustSetup("orchestrator", orchestratorModule.Setup(orchestratormodule.Dependencies{
-		Runtime:    legacyModule.RuntimeAdapter(),
-		Runs:       repos.run,
-		Steps:      repos.step,
-		Workspaces: repos.workspace,
-		Tickets:    repos.ticket,
-		Approvals:  repos.approval,
-		EventHub:   eventHub,
+		Runtime:     legacyModule.RuntimeAdapter(),
+		Runs:        repos.run,
+		Steps:       repos.step,
+		Workspaces:  repos.workspace,
+		Tickets:     repos.ticket,
+		Resolutions: repos.resolution,
+		Approvals:   repos.approval,
+		EventHub:    eventHub,
 	}))
 
 	runModule := runmodule.New()
@@ -75,11 +76,12 @@ func NewWithBackend(backend string, dataRoot string) *Runtime {
 	return &Runtime{
 		exports: Exports{
 			Repositories: RepositoryExports{
-				Workspaces: repos.workspace,
-				Runs:       repos.run,
-				Steps:      repos.step,
-				Tickets:    repos.ticket,
-				Approvals:  repos.approval,
+				Workspaces:  repos.workspace,
+				Runs:        repos.run,
+				Steps:       repos.step,
+				Tickets:     repos.ticket,
+				Resolutions: repos.resolution,
+				Approvals:   repos.approval,
 			},
 			Services: ServiceExports{
 				WorkspaceService: workspaceModule.Service(),

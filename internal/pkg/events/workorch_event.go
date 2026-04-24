@@ -6,7 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-type Phase1Event interface {
+type WorkorchEvent interface {
 	Envelope() Envelope
 	Topic() string
 }
@@ -39,7 +39,7 @@ type ApprovalEvent struct {
 	Data     ApprovalPayloadData
 }
 
-var phase1Topics = []string{
+var workorchTopics = []string{
 	TopicWorkspaceCreated,
 	TopicWorkspaceStateChanged,
 	TopicRunStateChanged,
@@ -51,19 +51,19 @@ var phase1Topics = []string{
 	TopicApprovalResolved,
 }
 
-func Phase1Topics() []string {
-	return append([]string(nil), phase1Topics...)
+func WorkorchTopics() []string {
+	return append([]string(nil), workorchTopics...)
 }
 
-func SubscribePhase1(hub Hub, handler func(context.Context, Phase1Event) error) []func() {
+func SubscribeWorkorch(hub Hub, handler func(context.Context, WorkorchEvent) error) []func() {
 	if hub == nil || handler == nil {
 		return nil
 	}
 
-	unsubscribers := make([]func(), 0, len(phase1Topics))
-	for _, topic := range phase1Topics {
+	unsubscribers := make([]func(), 0, len(workorchTopics))
+	for _, topic := range workorchTopics {
 		unsubscribe := hub.Subscribe(topic, func(ctx context.Context, envelope Envelope) error {
-			event, ok := DecodePhase1Event(envelope)
+			event, ok := DecodeWorkorchEvent(envelope)
 			if !ok {
 				return nil
 			}
@@ -74,15 +74,15 @@ func SubscribePhase1(hub Hub, handler func(context.Context, Phase1Event) error) 
 	return unsubscribers
 }
 
-func NormalizePhase1Envelope(envelope Envelope) (Envelope, bool) {
-	event, ok := DecodePhase1Event(envelope)
+func NormalizeWorkorchEnvelope(envelope Envelope) (Envelope, bool) {
+	event, ok := DecodeWorkorchEvent(envelope)
 	if !ok {
 		return Envelope{}, false
 	}
 	return event.Envelope(), true
 }
 
-func DecodePhase1Event(envelope Envelope) (Phase1Event, bool) {
+func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 	switch envelope.Topic {
 	case TopicWorkspaceCreated, TopicWorkspaceStateChanged:
 		event, ok := DecodeWorkspaceEvent(envelope)
@@ -123,8 +123,8 @@ func DecodeWorkspaceEvent(envelope Envelope) (WorkspaceEvent, bool) {
 	if envelope.Topic != TopicWorkspaceCreated && envelope.Topic != TopicWorkspaceStateChanged {
 		return WorkspaceEvent{}, false
 	}
-	spec, ok := Phase1EventContract(envelope.Topic)
-	if !ok || !ValidatePhase1EventVersion(envelope.Topic, envelope.Version) {
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
 		return WorkspaceEvent{}, false
 	}
 	data, ok := DecodeWorkspacePayload(envelope.Payload)
@@ -141,8 +141,8 @@ func DecodeRunEvent(envelope Envelope) (RunEvent, bool) {
 	if envelope.Topic != TopicRunStateChanged {
 		return RunEvent{}, false
 	}
-	spec, ok := Phase1EventContract(envelope.Topic)
-	if !ok || !ValidatePhase1EventVersion(envelope.Topic, envelope.Version) {
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
 		return RunEvent{}, false
 	}
 	data, ok := DecodeRunPayload(envelope.Payload)
@@ -159,8 +159,8 @@ func DecodeStepEvent(envelope Envelope) (StepEvent, bool) {
 	if envelope.Topic != TopicStepDispatched && envelope.Topic != TopicStepStateChanged {
 		return StepEvent{}, false
 	}
-	spec, ok := Phase1EventContract(envelope.Topic)
-	if !ok || !ValidatePhase1EventVersion(envelope.Topic, envelope.Version) {
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
 		return StepEvent{}, false
 	}
 	data, ok := DecodeStepPayload(envelope.Payload)
@@ -174,8 +174,8 @@ func DecodeStepEvent(envelope Envelope) (StepEvent, bool) {
 }
 
 func DecodeDecisionTicketEvent(envelope Envelope) (DecisionTicketEvent, bool) {
-	spec, ok := Phase1EventContract(envelope.Topic)
-	if !ok || !ValidatePhase1EventVersion(envelope.Topic, envelope.Version) {
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
 		return DecisionTicketEvent{}, false
 	}
 	if envelope.Topic == TopicTicketResolved {
@@ -211,8 +211,8 @@ func DecodeApprovalEvent(envelope Envelope) (ApprovalEvent, bool) {
 	if envelope.Topic != TopicApprovalCreated && envelope.Topic != TopicApprovalResolved {
 		return ApprovalEvent{}, false
 	}
-	spec, ok := Phase1EventContract(envelope.Topic)
-	if !ok || !ValidatePhase1EventVersion(envelope.Topic, envelope.Version) {
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
 		return ApprovalEvent{}, false
 	}
 	data, ok := DecodeApprovalPayload(envelope.Payload)

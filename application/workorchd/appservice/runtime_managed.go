@@ -12,6 +12,9 @@ type ManagedRuntime struct {
 }
 
 func NewRuntimeFromBootstrap(runtime *bootstrap.Runtime) *ManagedRuntime {
+	if runtime == nil {
+		return nil
+	}
 	return NewRuntimeFromExports(runtime.Exports())
 }
 
@@ -20,14 +23,17 @@ func NewRuntimeFromExports(exports bootstrap.Exports) *ManagedRuntime {
 }
 
 func NewManagedRuntime(runtime Runtime, eventHub events.Hub) *ManagedRuntime {
+	if runtime == nil {
+		return nil
+	}
 	return newManagedRuntimeFromAssembly(managedRuntimeAssemblyFromEventHub(runtime, eventHub))
 }
 
-func (r *ManagedRuntime) PublishedPhase1Events() []events.Phase1Event {
+func (r *ManagedRuntime) PublishedWorkorchEvents() []events.WorkorchEvent {
 	if r == nil || r.collector == nil {
 		return nil
 	}
-	return r.collector.PublishedPhase1Events()
+	return r.collector.PublishedWorkorchEvents()
 }
 
 func (r *ManagedRuntime) Close() {

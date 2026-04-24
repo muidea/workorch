@@ -10,14 +10,14 @@ import (
 func TestFromEnvelopeDecisionTicketSnapshotPreservesResolutionFields(t *testing.T) {
 	item, ok := FromEnvelope(events.Envelope{
 		ID:      "/decision/ticket/snapshot:ticket-1",
-		Version: "phase1-demo.v1",
+		Version: "workorch-demo.v1",
 		Topic:   topicDecisionTicketSnapshot,
 		Payload: events.DecisionResolutionPayload(
 			"manual gate",
 			common.DecisionTicketStateResolved,
 			common.ResolutionID("resolution-1"),
 			"approve-plan",
-			map[string]any{"operator": "phase1-demo"},
+			map[string]any{"operator": "workorch-demo"},
 		),
 	})
 	if !ok {
@@ -34,16 +34,16 @@ func TestFromEnvelopeDecisionTicketSnapshotPreservesResolutionFields(t *testing.
 	if payload.ResolutionType != "approve-plan" {
 		t.Fatalf("resolutionType = %s, want approve-plan", payload.ResolutionType)
 	}
-	if payload.ResolutionPayload["operator"] != "phase1-demo" {
-		t.Fatalf("resolution payload operator = %v, want phase1-demo", payload.ResolutionPayload["operator"])
+	if payload.ResolutionPayload["operator"] != "workorch-demo" {
+		t.Fatalf("resolution payload operator = %v, want workorch-demo", payload.ResolutionPayload["operator"])
 	}
 
 	envelope := item.Envelope()
-	if item.Version != events.Phase1SnapshotVersion {
-		t.Fatalf("item version = %s, want %s", item.Version, events.Phase1SnapshotVersion)
+	if item.Version != events.WorkorchSnapshotVersion {
+		t.Fatalf("item version = %s, want %s", item.Version, events.WorkorchSnapshotVersion)
 	}
-	if envelope.Version != events.Phase1SnapshotVersion {
-		t.Fatalf("envelope version = %s, want %s", envelope.Version, events.Phase1SnapshotVersion)
+	if envelope.Version != events.WorkorchSnapshotVersion {
+		t.Fatalf("envelope version = %s, want %s", envelope.Version, events.WorkorchSnapshotVersion)
 	}
 	if envelope.Payload[events.PayloadKeyResolutionID] != "resolution-1" {
 		t.Fatalf("envelope resolutionId = %v, want resolution-1", envelope.Payload[events.PayloadKeyResolutionID])
@@ -64,7 +64,7 @@ func TestFromEnvelopeRejectsInvalidSnapshotPayload(t *testing.T) {
 
 func TestFromEnvelopeRejectsIncompatibleSnapshotVersion(t *testing.T) {
 	_, ok := FromEnvelope(events.Envelope{
-		Version: "phase1-demo.v2",
+		Version: "workorch-demo.v2",
 		Topic:   topicRunSnapshot,
 		Payload: map[string]any{
 			events.PayloadKeyState:              "completed",
@@ -74,5 +74,57 @@ func TestFromEnvelopeRejectsIncompatibleSnapshotVersion(t *testing.T) {
 	})
 	if ok {
 		t.Fatalf("FromEnvelope should reject incompatible snapshot version")
+	}
+}
+
+func TestSnapshotItemPayloadMapAndEnvelopeDeepCloneNestedPayloads(t *testing.T) {
+	item := SnapshotItem{
+		Topic: topicStepSnapshot,
+		Payload: StepPayload{
+			Kind:  "legacy/minimal",
+			State: "completed",
+			Input: map[string]any{
+				"workspaceId": "ws-1",
+				"items":       []any{"first", map[string]any{"nested": "original"}},
+			},
+			Output: map[string]any{
+				"status": "completed",
+			},
+		},
+	}
+
+	first := item.PayloadMap()
+	firstInput := first[events.PayloadKeyInput].(map[string]any)
+	firstInput["workspaceId"] = "mutated"
+	firstItems := firstInput["items"].([]any)
+	firstItems[0] = "changed"
+	firstItems[1].(map[string]any)["nested"] = "mutated"
+	firstOutput := first[events.PayloadKeyOutput].(map[string]any)
+	firstOutput["status"] = "failed"
+
+	second := item.PayloadMap()
+	secondInput := second[events.PayloadKeyInput].(map[string]any)
+	if secondInput["workspaceId"] != "ws-1" {
+		t.Fatalf("workspaceId = %v, want ws-1", secondInput["workspaceId"])
+	}
+	secondItems := secondInput["items"].([]any)
+	if secondItems[0] != "first" {
+		t.Fatalf("items[0] = %v, want first", secondItems[0])
+	}
+	if secondItems[1].(map[string]any)["nested"] != "original" {
+		t.Fatalf("nested = %v, want original", secondItems[1].(map[string]any)["nested"])
+	}
+	secondOutput := second[events.PayloadKeyOutput].(map[string]any)
+	if secondOutput["status"] != "completed" {
+		t.Fatalf("status = %v, want completed", secondOutput["status"])
+	}
+
+	envelope := item.Envelope()
+	envelopeInput := envelope.Payload[events.PayloadKeyInput].(map[string]any)
+	envelopeInput["workspaceId"] = "mutated-again"
+	third := item.PayloadMap()
+	thirdInput := third[events.PayloadKeyInput].(map[string]any)
+	if thirdInput["workspaceId"] != "ws-1" {
+		t.Fatalf("workspaceId after envelope mutation = %v, want ws-1", thirdInput["workspaceId"])
 	}
 }

@@ -117,6 +117,16 @@ func TestService_EnsureApproval_IsIdempotentAndRejectsBindingMismatch(t *testing
 	}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("binding mismatch err = %v, want conflict", err)
 	}
+
+	if err := service.EnsureApproval(ctx, approvalservice.CreateApprovalCommand{
+		ApprovalID:  cmd.ApprovalID,
+		WorkspaceID: cmd.WorkspaceID,
+		RunID:       cmd.RunID,
+		StepID:      cmd.StepID,
+		Reason:      "other approval reason",
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("reason mismatch err = %v, want conflict", err)
+	}
 }
 
 func TestService_ResolveApproval_PendingTransitions(t *testing.T) {
@@ -346,8 +356,8 @@ func TestService_CreateAndResolveApproval_PublishesEvents(t *testing.T) {
 	if published[0].Topic != events.TopicApprovalCreated {
 		t.Fatalf("first topic = %s, want %s", published[0].Topic, events.TopicApprovalCreated)
 	}
-	if published[0].Version != events.Phase1EventVersion || published[1].Version != events.Phase1EventVersion {
-		t.Fatalf("event versions = [%s %s], want both %s", published[0].Version, published[1].Version, events.Phase1EventVersion)
+	if published[0].Version != events.WorkorchEventVersion || published[1].Version != events.WorkorchEventVersion {
+		t.Fatalf("event versions = [%s %s], want both %s", published[0].Version, published[1].Version, events.WorkorchEventVersion)
 	}
 	if published[1].Topic != events.TopicApprovalResolved {
 		t.Fatalf("second topic = %s, want %s", published[1].Topic, events.TopicApprovalResolved)

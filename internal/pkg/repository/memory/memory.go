@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	approval "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -196,6 +197,26 @@ func (r *StepRepository) Get(_ context.Context, id common.StepID) (*run.Step, er
 		return nil, common.ErrNotFound
 	}
 	return cloneStep(item), nil
+}
+
+func (r *StepRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.Step, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var items []*run.Step
+	for _, item := range r.items {
+		if item.RunID != runID {
+			continue
+		}
+		items = append(items, cloneStep(item))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return string(items[i].ID) < string(items[j].ID)
+	})
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
 }
 
 func (r *StepRepository) Update(_ context.Context, item *run.Step) error {

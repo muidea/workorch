@@ -6,16 +6,16 @@ It remains a single `go.mod` repository. The current normalization target is mod
 
 ## Mapping
 
-- `application/workorchd/main.go` -> thin process entry and output loop, delegating phase1 execution to `appservice`
+- `application/workorchd/main.go` -> thin process entry and output loop, delegating workorch execution to `appservice`
 - `application/workorchd/bootstrap` -> repository/backend wiring, runtime assembly, and a thin `Runtime` shell around grouped `Exports()` plus module lifecycle teardown
-- `application/workorchd/appservice` -> application-level orchestration / workflow composition, env-backed phase1 entry, grouped runtime adapter, managed runtime wrapper, workspace writes kept behind module service, phase1 runtime usage split into guard/snapshot read faces plus workspace/run/decision/approval action faces, adapter dependencies grouped as reads/actions capabilities, exports-to-runtime mapping centralized in a single helper, managed runtime assembly centralized in a single helper, repeated runtime lifecycle handling unified through a session helper, repeated phase1 execution handling unified through session/backend helpers, and test-side setup/execute patterns unified through dedicated helpers
-- `application/workorchd/observed` -> phase1 acceptance observed adapter, explicit phase1 event-to-snapshot contract mapper, typed snapshot contract, and collector that now consumes typed/validated/final-version phase1 event helpers from `internal/pkg/events`
+- `application/workorchd/appservice` -> application-level orchestration / workflow composition, env-backed workorch entry, grouped runtime adapter, managed runtime wrapper, workspace writes kept behind module service, workorch runtime usage split into guard/snapshot read faces plus workspace/run/decision/approval action faces, adapter dependencies grouped as reads/actions capabilities, exports-to-runtime mapping centralized in a single helper, managed runtime assembly centralized in a single helper, repeated runtime lifecycle handling unified through a session helper, repeated workorch execution handling unified through session/backend helpers, and test-side setup/execute patterns unified through dedicated helpers
+- `application/workorchd/observed` -> workorch acceptance observed adapter, explicit workorch event-to-snapshot contract mapper, typed snapshot contract, and collector that now consumes typed/validated/final-version workorch event helpers from `internal/pkg/events`
 - `application/workorchd/demo` -> thin compatibility export over application-level orchestration
 - `application/workorchd/presenter` -> observable output rendering
 - old `application/*` service files -> `internal/modules/kernel/*/biz`
 - old `domain/*` -> module-local `pkg/models`
 - old `domain/shared` + `workorchcommon` -> `internal/pkg/common`
-- old `workorchevents` -> `internal/pkg/events` including shared phase1 event payload builders/keys, typed phase1 event helpers, strict phase1 version rules, and topic-scoped contract lookup
+- old `workorchevents` -> `internal/pkg/events` including shared workorch event payload builders/keys, typed workorch event helpers, strict workorch version rules, and topic-scoped contract lookup
 - old `repository` -> `internal/pkg/repository`
 - old `adapters/legacy` runtime/tool adapters -> `internal/modules/blocks/legacy/{biz,service}`
 - old `main.go` -> `application/workorchd/main.go`

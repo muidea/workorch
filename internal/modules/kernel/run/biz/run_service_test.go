@@ -125,7 +125,7 @@ func TestService_CreateRun_RejectsDuplicateRunID(t *testing.T) {
 	}
 }
 
-func TestService_EnsureRun_IsIdempotentAndRejectsWorkspaceMismatch(t *testing.T) {
+func TestService_EnsureRun_IsIdempotentAndRejectsSemanticMismatch(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -143,6 +143,8 @@ func TestService_EnsureRun_IsIdempotentAndRejectsWorkspaceMismatch(t *testing.T)
 	cmd := runservice.CreateRunCommand{
 		RunID:       common.RunID("run-ensure"),
 		WorkspaceID: workspaceID,
+		GoalID:      common.GoalID("goal-1"),
+		DoDID:       common.DoDID("dod-1"),
 	}
 	if err := service.EnsureRun(ctx, cmd); err != nil {
 		t.Fatalf("first ensure run: %v", err)
@@ -155,6 +157,22 @@ func TestService_EnsureRun_IsIdempotentAndRejectsWorkspaceMismatch(t *testing.T)
 		WorkspaceID: otherWorkspaceID,
 	}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("workspace mismatch err = %v, want conflict", err)
+	}
+	if err := service.EnsureRun(ctx, runservice.CreateRunCommand{
+		RunID:       cmd.RunID,
+		WorkspaceID: workspaceID,
+		GoalID:      common.GoalID("goal-2"),
+		DoDID:       cmd.DoDID,
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("goal mismatch err = %v, want conflict", err)
+	}
+	if err := service.EnsureRun(ctx, runservice.CreateRunCommand{
+		RunID:       cmd.RunID,
+		WorkspaceID: workspaceID,
+		GoalID:      cmd.GoalID,
+		DoDID:       common.DoDID("dod-2"),
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("dod mismatch err = %v, want conflict", err)
 	}
 }
 
@@ -271,6 +289,156 @@ func TestService_EnsureRunLifecycleHonorsIdempotentAndTerminalSemantics(t *testi
 	}
 }
 
+func TestService_EnsureBlockedOnDecision_ReturnsConflictWhenBlockedByDifferentReference(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	orch := orchestratorbiz.NewRuntimeOrchestrator(
+		&serviceRuntimeAdapter{output: map[string]any{"status": "ok"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		approvalRepo,
+		nil,
+	)
+	service := NewService(runRepo, workspaceRepo, orch)
+
+	workspaceID := common.WorkspaceID("ws-decision-block-conflict")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		run  *runmodel.Run
+		cmd  runservice.BlockOnDecisionCommand
+	}{
+		{
+			name: "different decision ticket",
+			run: &runmodel.Run{
+				ID:               common.RunID("run-decision-block-conflict-ticket"),
+				WorkspaceID:      workspaceID,
+				State:            common.RunStateBlockedOnDecision,
+				BlockingTicketID: common.TicketID("ticket-existing"),
+			},
+			cmd: runservice.BlockOnDecisionCommand{
+				RunID:    common.RunID("run-decision-block-conflict-ticket"),
+				TicketID: common.TicketID("ticket-other"),
+			},
+		},
+		{
+			name: "already blocked on approval",
+			run: &runmodel.Run{
+				ID:                 common.RunID("run-decision-block-conflict-approval"),
+				WorkspaceID:        workspaceID,
+				State:              common.RunStateBlockedOnApproval,
+				BlockingApprovalID: common.ApprovalID("approval-existing"),
+			},
+			cmd: runservice.BlockOnDecisionCommand{
+				RunID:    common.RunID("run-decision-block-conflict-approval"),
+				TicketID: common.TicketID("ticket-other"),
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := runRepo.Create(ctx, tc.run); err != nil {
+				t.Fatalf("seed run: %v", err)
+			}
+
+			if err := service.EnsureBlockedOnDecision(ctx, tc.cmd); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("ensure blocked on decision err = %v, want conflict", err)
+			}
+
+			got, err := runRepo.Get(ctx, tc.run.ID)
+			if err != nil {
+				t.Fatalf("get run after ensure: %v", err)
+			}
+			if got.State != tc.run.State || got.BlockingTicketID != tc.run.BlockingTicketID || got.BlockingApprovalID != tc.run.BlockingApprovalID {
+				t.Fatalf("run mutated after conflict: %+v", got)
+			}
+		})
+	}
+}
+
+func TestService_EnsureBlockedOnApproval_ReturnsConflictWhenBlockedByDifferentReference(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	orch := orchestratorbiz.NewRuntimeOrchestrator(
+		&serviceRuntimeAdapter{output: map[string]any{"status": "ok"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		approvalRepo,
+		nil,
+	)
+	service := NewService(runRepo, workspaceRepo, orch)
+
+	workspaceID := common.WorkspaceID("ws-approval-block-conflict")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		run  *runmodel.Run
+		cmd  runservice.BlockOnApprovalCommand
+	}{
+		{
+			name: "different approval id",
+			run: &runmodel.Run{
+				ID:                 common.RunID("run-approval-block-conflict-approval"),
+				WorkspaceID:        workspaceID,
+				State:              common.RunStateBlockedOnApproval,
+				BlockingApprovalID: common.ApprovalID("approval-existing"),
+			},
+			cmd: runservice.BlockOnApprovalCommand{
+				RunID:      common.RunID("run-approval-block-conflict-approval"),
+				ApprovalID: common.ApprovalID("approval-other"),
+			},
+		},
+		{
+			name: "already blocked on decision",
+			run: &runmodel.Run{
+				ID:               common.RunID("run-approval-block-conflict-ticket"),
+				WorkspaceID:      workspaceID,
+				State:            common.RunStateBlockedOnDecision,
+				BlockingTicketID: common.TicketID("ticket-existing"),
+			},
+			cmd: runservice.BlockOnApprovalCommand{
+				RunID:      common.RunID("run-approval-block-conflict-ticket"),
+				ApprovalID: common.ApprovalID("approval-other"),
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := runRepo.Create(ctx, tc.run); err != nil {
+				t.Fatalf("seed run: %v", err)
+			}
+
+			if err := service.EnsureBlockedOnApproval(ctx, tc.cmd); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("ensure blocked on approval err = %v, want conflict", err)
+			}
+
+			got, err := runRepo.Get(ctx, tc.run.ID)
+			if err != nil {
+				t.Fatalf("get run after ensure: %v", err)
+			}
+			if got.State != tc.run.State || got.BlockingTicketID != tc.run.BlockingTicketID || got.BlockingApprovalID != tc.run.BlockingApprovalID {
+				t.Fatalf("run mutated after conflict: %+v", got)
+			}
+		})
+	}
+}
+
 func TestService_ResumeRun_FromBlockedStates_ReachesMinimalExecutionChain(t *testing.T) {
 	ctx := context.Background()
 
@@ -319,24 +487,10 @@ func TestService_ResumeRun_FromBlockedStates_ReachesMinimalExecutionChain(t *tes
 			if err := service.CreateRun(ctx, runservice.CreateRunCommand{RunID: runID, WorkspaceID: workspaceID}); err != nil {
 				t.Fatalf("create run: %v", err)
 			}
-			if err := service.StartRun(ctx, runservice.StartRunCommand{RunID: runID}); err != nil {
-				t.Fatalf("start run: %v", err)
-			}
-
-			stepID := common.StepID(string(runID) + "/step-1")
-			step, err := stepRepo.Get(ctx, stepID)
-			if err != nil {
-				t.Fatalf("get initial step: %v", err)
-			}
-			step.State = common.StepStateFailed
-			step.Output = map[string]any{"stale": true}
-			if err := stepRepo.Update(ctx, step); err != nil {
-				t.Fatalf("prepare reusable step: %v", err)
-			}
 
 			r, err := runRepo.Get(ctx, runID)
 			if err != nil {
-				t.Fatalf("get completed run: %v", err)
+				t.Fatalf("get created run: %v", err)
 			}
 			r.State = common.RunStateRunning
 			if err := runRepo.Update(ctx, r); err != nil {
@@ -351,6 +505,7 @@ func TestService_ResumeRun_FromBlockedStates_ReachesMinimalExecutionChain(t *tes
 				t.Fatalf("set active run: %v", err)
 			}
 
+			stepID := common.StepID(string(runID) + "/step-1")
 			if err := tc.setupBlock(ctx, service, runID); err != nil {
 				t.Fatalf("setup block state: %v", err)
 			}

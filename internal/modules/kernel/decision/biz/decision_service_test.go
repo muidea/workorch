@@ -119,6 +119,16 @@ func TestService_EnsureTicket_IsIdempotentAndRejectsBindingMismatch(t *testing.T
 	}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("binding mismatch err = %v, want conflict", err)
 	}
+
+	if err := service.EnsureTicket(ctx, decisionservice.CreateTicketCommand{
+		TicketID:    cmd.TicketID,
+		WorkspaceID: cmd.WorkspaceID,
+		RunID:       cmd.RunID,
+		StepID:      cmd.StepID,
+		Reason:      "other reason",
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("reason mismatch err = %v, want conflict", err)
+	}
 }
 
 func TestService_ResolveTicket_OpenToResolvedAndPersistsResolution(t *testing.T) {
@@ -212,7 +222,7 @@ func TestService_ResolveTicket_RejectsSecondResolveOnResolvedTicket(t *testing.T
 	}
 }
 
-func TestService_EnsureResolvedTicket_IsIdempotent(t *testing.T) {
+func TestService_EnsureResolvedTicket_IsIdempotentAndRejectsResolutionMismatch(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
@@ -238,11 +248,34 @@ func TestService_EnsureResolvedTicket_IsIdempotent(t *testing.T) {
 		t.Fatalf("first ensure resolved ticket: %v", err)
 	}
 	if err := service.EnsureResolvedTicket(ctx, decisionservice.ResolveTicketCommand{
-		ResolutionID: common.ResolutionID("resolution-ensure-other"),
+		ResolutionID: cmd.ResolutionID,
 		TicketID:     createCmd.TicketID,
-		Type:         "change-plan",
+		Type:         cmd.Type,
+		Payload:      map[string]any{},
 	}); err != nil {
 		t.Fatalf("second ensure resolved ticket: %v", err)
+	}
+	if err := service.EnsureResolvedTicket(ctx, decisionservice.ResolveTicketCommand{
+		ResolutionID: common.ResolutionID("resolution-ensure-other"),
+		TicketID:     createCmd.TicketID,
+		Type:         cmd.Type,
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("resolution id mismatch err = %v, want conflict", err)
+	}
+	if err := service.EnsureResolvedTicket(ctx, decisionservice.ResolveTicketCommand{
+		ResolutionID: cmd.ResolutionID,
+		TicketID:     createCmd.TicketID,
+		Type:         "change-plan",
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("resolution type mismatch err = %v, want conflict", err)
+	}
+	if err := service.EnsureResolvedTicket(ctx, decisionservice.ResolveTicketCommand{
+		ResolutionID: cmd.ResolutionID,
+		TicketID:     createCmd.TicketID,
+		Type:         cmd.Type,
+		Payload:      map[string]any{"operator": "other"},
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("resolution payload mismatch err = %v, want conflict", err)
 	}
 
 	resolution, err := resolutionRepo.GetByTicketID(ctx, createCmd.TicketID)
@@ -300,7 +333,7 @@ func TestService_CreateAndResolveTicket_PublishesEvents(t *testing.T) {
 		ResolutionID: common.ResolutionID("resolution-event"),
 		TicketID:     createCmd.TicketID,
 		Type:         "approve-plan",
-		Payload:      map[string]any{"operator": "phase1-demo"},
+		Payload:      map[string]any{"operator": "workorch-demo"},
 	}); err != nil {
 		t.Fatalf("resolve ticket: %v", err)
 	}
@@ -312,8 +345,8 @@ func TestService_CreateAndResolveTicket_PublishesEvents(t *testing.T) {
 	if published[0].Topic != events.TopicTicketCreated {
 		t.Fatalf("first topic = %s, want %s", published[0].Topic, events.TopicTicketCreated)
 	}
-	if published[0].Version != events.Phase1EventVersion || published[1].Version != events.Phase1EventVersion {
-		t.Fatalf("event versions = [%s %s], want both %s", published[0].Version, published[1].Version, events.Phase1EventVersion)
+	if published[0].Version != events.WorkorchEventVersion || published[1].Version != events.WorkorchEventVersion {
+		t.Fatalf("event versions = [%s %s], want both %s", published[0].Version, published[1].Version, events.WorkorchEventVersion)
 	}
 	if published[1].Topic != events.TopicTicketResolved {
 		t.Fatalf("second topic = %s, want %s", published[1].Topic, events.TopicTicketResolved)

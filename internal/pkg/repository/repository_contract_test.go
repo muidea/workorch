@@ -236,6 +236,51 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 		t.Fatalf("output result = %v, want done", updated.Output["result"])
 	}
 
+	if err := repo.Create(ctx, &runmodel.Step{
+		ID:    common.StepID("run-contract/step-2"),
+		RunID: common.RunID("run-contract"),
+		Kind:  "legacy/minimal",
+		State: common.StepStateCompleted,
+		Input: map[string]any{"workspaceId": "ws-contract", "previousStepId": "run-contract/step-1"},
+	}); err != nil {
+		t.Fatalf("create second step: %v", err)
+	}
+	if err := repo.Create(ctx, &runmodel.Step{
+		ID:    common.StepID("run-other/step-1"),
+		RunID: common.RunID("run-other"),
+		Kind:  "legacy/minimal",
+		State: common.StepStateCompleted,
+	}); err != nil {
+		t.Fatalf("create other run step: %v", err)
+	}
+
+	steps, err := repo.ListByRun(ctx, common.RunID("run-contract"))
+	if err != nil {
+		t.Fatalf("list steps by run: %v", err)
+	}
+	if len(steps) != 2 {
+		t.Fatalf("list steps len = %d, want 2", len(steps))
+	}
+	if steps[0].ID != common.StepID("run-contract/step-1") || steps[1].ID != common.StepID("run-contract/step-2") {
+		t.Fatalf("listed step ids = [%s %s], want [run-contract/step-1 run-contract/step-2]", steps[0].ID, steps[1].ID)
+	}
+	steps[0].Output["result"] = "mutated"
+	refreshed, err := repo.Get(ctx, common.StepID("run-contract/step-1"))
+	if err != nil {
+		t.Fatalf("get refreshed step: %v", err)
+	}
+	if refreshed.Output["result"] != "done" {
+		t.Fatalf("refreshed output result = %v, want done", refreshed.Output["result"])
+	}
+
+	steps, err = repo.ListByRun(ctx, common.RunID("run-missing"))
+	if err != nil {
+		t.Fatalf("list missing run steps: %v", err)
+	}
+	if len(steps) != 0 {
+		t.Fatalf("missing run steps len = %d, want 0", len(steps))
+	}
+
 	if _, err := repo.Get(ctx, common.StepID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing get err = %v, want not found", err)
 	}
