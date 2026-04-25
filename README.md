@@ -5,9 +5,10 @@ workorch minimal skeleton, rectified to the go-multi-module-dev module-oriented 
 ## Structure
 
 - `application/workorchd`: executable entry
-- `application/workorchd/bootstrap`: backend/runtime assembly and repository backend selection
-- `application/workorchd/appservice`: application-level workorch orchestration, env-backed execution entry, and workflow helpers
-- `application/workorchd/demo`: thin compatibility shim over the workorch appservice entry
+- `internal/initiators/workorchruntime`: workorch runtime initiator that provides repository, event hub, and cross-module service wiring to plugin-loaded modules
+- `internal/modules/application/workorchd`: workorchd plugin module plus `biz` / `service` / `pkg` implementation packages
+- `web/workorch-console`: React/TypeScript management console source, built into `workorchd` assets
+- `internal/modules/application/workorchd/service/server/consoleassets`: embedded management console build output served by `workorchd`
 - `internal/modules/kernel/{workspace,run,decision,orchestrator}`: workorch kernel modules
 - `internal/modules/blocks/{approval,legacy}`: reusable/block modules
 - `internal/pkg/{common,events,repository}`: shared internal primitives
@@ -25,12 +26,14 @@ Each module is now normalized around the go-multi-module-dev minimum shape:
 
 The application layer is also split by responsibility:
 
-- `main.go`: process entry and output loop that delegates workorch execution to `appservice`
-- `bootstrap/`: backend assembly, repository wiring, and runtime construction
-- `appservice/`: application-level business orchestration, workorch workflow assembly, env-backed execution entry, and workorch runtime adapter
-- `observed/`: workorch observed-envelope adapter for acceptance snapshots
-- `demo/`: compatibility export entry that forwards to `appservice`
-- `presenter/`: observable output rendering
+- `application/workorchd/main.go`: thin process entry that starts the magicCommon default service and explicitly imports the selected `workorchruntime` initiator plus the required `kernel` and `blocks` modules
+- `internal/modules/application/workorchd`: plugin module registration plus `Setup` / `Run` / `Teardown` bridge for the workorchd HTTP service
+- `internal/initiators/workorchruntime`: application runtime dependency provider used by plugin-loaded modules
+- `internal/modules/application/workorchd/biz/bootstrap`: backend assembly, repository wiring, and runtime construction
+- `internal/modules/application/workorchd/biz/appservice`: application-level business orchestration, workorch workflow assembly, env-backed execution entry, and workorch runtime adapter
+- `internal/modules/application/workorchd/pkg/observed`: workorch observed-envelope adapter for acceptance snapshots
+- `internal/modules/application/workorchd/biz/demo`: compatibility export entry that forwards to `appservice`
+- `internal/modules/application/workorchd/pkg/presenter`: observable output rendering
 
 Inside `demo/`, responsibilities are now intentionally thin:
 
@@ -86,6 +89,7 @@ make fmt-check
 make vet
 make test
 make test-race
+make console-build
 make build
 make run
 make run-file
@@ -97,9 +101,11 @@ make ci
 Notes:
 
 - `make build` writes the binary to `./bin/workorchd`
+- `make console-build` rebuilds the embedded management console assets from `web/workorch-console`
 - `make verify-service` and `make verify-service-file` are the formal local acceptance checks for the HTTP service
 - `make verify-service-file` includes file-backed restart-read verification for persisted workspace / run / decision / approval state
 - `make run-file` runs the service with the file-backed repository backend
+- default memory-backed service state is shared within the running `workorchd` process; use `make run-file` for restart persistence
 - file-backed service execution is repeatable against the same data directory for the shipped workorch IDs
 - `make ci` is the local equivalent of the GitHub Actions baseline
 
@@ -164,6 +170,9 @@ When the concurrent run limit is reached, execution requests enter an in-process
 
 Available endpoints:
 
+- `GET /console`
+- `GET /console/`
+- `GET /console/*`
 - `GET /healthz`
 - `GET /readyz`
 - `GET /metrics`

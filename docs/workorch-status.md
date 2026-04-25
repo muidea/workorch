@@ -5,8 +5,9 @@
 - module: `github.com/muidea/workorch`
 - executable entry: `application/workorchd`
 - framework baseline:
-  - `application/workorchd/main.go` starts through `magicCommon/framework/application`
-  - `application/workorchd/server.Service` implements the `magicCommon/framework/service.Service` lifecycle
+  - `application/workorchd/main.go` starts through `magicCommon/framework/application` and explicitly imports the selected `workorchruntime`, `kernel`, and `blocks` units
+  - `internal/initiators/workorchruntime` provides repository, event hub, and cross-module service wiring for plugin-loaded modules
+  - `internal/modules/application/workorchd` attaches `internal/modules/application/workorchd/service/server.Service` to the `magicCommon/framework/plugin/module` lifecycle
   - HTTP requests pass through `magicEngine/http` `RouteRegistry` / `HTTPServer`; current acceptance API endpoints are registered as native routes without wildcard fallback dispatch
   - `/healthz`, `/readyz`, and `/metrics` are registered as native `magicEngine/http` routes
   - workspace / run read endpoints are registered as native `magicEngine/http` routes:
@@ -39,9 +40,9 @@
     `GET /api/v1/workorch/slices/{sliceId}/snapshot`,
     `GET /api/v1/workorch/slices/{sliceId}/status`,
     `POST /api/v1/workorch/slices/{sliceId}/runs`
-  - `application/workorchd/bootstrap` now uses a `magicCommon/event.Hub` backed workorch event adapter by default
+  - `internal/modules/application/workorchd/biz/bootstrap` now uses a `magicCommon/event.Hub` backed workorch event adapter by default
   - request-scoped `RuntimeSession` construction now reuses the application-injected EventHub when available
-  - `application/workorchd/bootstrap` now runs request-scoped runtime modules through a local magicCommon plugin manager lifecycle
+  - `internal/modules/application/workorchd/biz/bootstrap` now runs request-scoped runtime modules through a local magicCommon plugin manager lifecycle
 - shared internal runtime packages: `internal/pkg/{common,events,repository}`
 - kernel modules:
   - `internal/modules/kernel/workspace`
@@ -122,9 +123,9 @@ Current formal business events:
 Current internal event consumption boundary:
 
 - `internal/modules/...` publish formal workorch business events into the shared `EventHub`
-- `application/workorchd/observed/collector.go` subscribes only to the formal workorch topic set and stores normalized event input
-- `application/workorchd/observed/workorch_contract.go` maps published business events to `/workspace|run|step|decision|approval/snapshot` items
-- `application/workorchd/observed/workorch.go` only falls back to state-derived snapshot items when the current subject has no matching published event
+- `internal/modules/application/workorchd/pkg/observed/collector.go` subscribes only to the formal workorch topic set and stores normalized event input
+- `internal/modules/application/workorchd/pkg/observed/workorch_contract.go` maps published business events to `/workspace|run|step|decision|approval/snapshot` items
+- `internal/modules/application/workorchd/pkg/observed/workorch.go` only falls back to state-derived snapshot items when the current subject has no matching published event
 - Current default runtime `EventHub` is backed by `magicCommon/event.Hub` through `internal/pkg/events.MagicHub`.
 - The HTTP service injects the application-level EventHub into request contexts, and appservice backend sessions reuse that hub instead of always creating a per-request hub.
 - The business-facing `events.Hub` interface remains as a narrow workorch adapter boundary while module lifecycle is migrated.
@@ -301,7 +302,7 @@ Verified terminal states:
 - corrupt persisted `workspace.json` / `run.json` now has explicit repository test coverage and is not silently overwritten
 - formal `run` events now include `created` plus self-contained `goalId` / `doDId` / `failureReason` payload fields
 - formal `workspace state changed` events now include `title`, so event consumers do not need to reconstruct it from state
-- `workorchd` now starts and stops through `magicCommon/framework/application`, with the HTTP service attached as a framework `service.Service`
+- `workorchd` now starts and stops through `magicCommon/framework/application`, with HTTP attached through the workorchd plugin module and kernel/block units selected by application imports
 - HTTP dispatch now passes through `magicEngine/http`, and current acceptance API endpoints are registered as native routes without wildcard fallback dispatch
 - system endpoints `/healthz`, `/readyz`, and `/metrics` now use native `magicEngine/http` route registration
 - workspace / run / decision / approval read, write, and execution endpoints now use native `magicEngine/http` route registration
@@ -335,7 +336,7 @@ Validated coverage currently includes:
 - corrupt file-backed persisted JSON boundary returns explicit errors
 - workorch formal business event contract now covers `workspace / run / step / decision / approval`
 - run-created and enriched run/workspace event payloads are covered by `events` / `run` / `observed` tests
-- framework entry adaptation is covered by `application/workorchd` and `application/workorchd/server` tests plus `make verify-service-file`
+- framework entry adaptation is covered by `application/workorchd` and `internal/modules/application/workorchd/service/server` tests plus `make verify-service-file`
 - magicCommon-backed event adapter is covered by `internal/pkg/events` and appservice / observed integration tests
 - application-level EventHub injection is covered by appservice runtime-session tests and service-level verification
 - local plugin lifecycle integration is covered by bootstrap lifecycle tests
@@ -383,7 +384,7 @@ MVP 功能清单已收口，不再作为活跃待办清单使用。
 当前 framework 对齐进度：
 
 - completed: `application/workorchd` 通过 `magicCommon/framework/application` 启动
-- completed: `application/workorchd/server.Service` 接入 `magicCommon/framework/service.Service` 生命周期
+- completed: `internal/modules/application/workorchd/service/server.Service` 接入 `magicCommon/framework/service.Service` 生命周期
 - completed: 默认 runtime EventHub 接入 `magicCommon/event.Hub` backed adapter
 - completed: request-scoped runtime modules 接入本地 magicCommon plugin manager 生命周期
 - completed: HTTP dispatch 进入 `magicEngine/http` `RouteRegistry` / `HTTPServer`

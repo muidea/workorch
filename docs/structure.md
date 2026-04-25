@@ -6,12 +6,14 @@ It remains a single `go.mod` repository. The current normalization target is mod
 
 ## Mapping
 
-- `application/workorchd/main.go` -> thin process entry and output loop, delegating workorch execution to `appservice`
-- `application/workorchd/bootstrap` -> repository/backend wiring, runtime assembly, and a thin `Runtime` shell around grouped `Exports()` plus module lifecycle teardown
-- `application/workorchd/appservice` -> application-level orchestration / workflow composition, env-backed workorch entry, grouped runtime adapter, managed runtime wrapper, workspace writes kept behind module service, workorch runtime usage split into guard/snapshot read faces plus workspace/run/decision/approval action faces, adapter dependencies grouped as reads/actions capabilities, exports-to-runtime mapping centralized in a single helper, managed runtime assembly centralized in a single helper, repeated runtime lifecycle handling unified through a session helper, repeated workorch execution handling unified through session/backend helpers, and test-side setup/execute patterns unified through dedicated helpers
-- `application/workorchd/observed` -> workorch acceptance observed adapter, explicit workorch event-to-snapshot contract mapper, typed snapshot contract, and collector that now consumes typed/validated/final-version workorch event helpers from `internal/pkg/events`
-- `application/workorchd/demo` -> thin compatibility export over application-level orchestration
-- `application/workorchd/presenter` -> observable output rendering
+- `application/workorchd/main.go` -> thin process entry that starts `magicCommon/framework/service.DefaultService` and explicitly loads `workorchruntime`, `internal/modules/kernel/*`, and `internal/modules/blocks/*`
+- `internal/initiators/workorchruntime` -> magicCommon initiator that provides repository, event hub, and cross-module service wiring for plugin-loaded workorch modules
+- `internal/modules/application/workorchd` -> application plugin module loaded by the magicCommon module lifecycle
+- `internal/modules/application/workorchd/biz/bootstrap` -> repository/backend wiring, runtime assembly, and a thin `Runtime` shell around grouped `Exports()` plus module lifecycle teardown
+- `internal/modules/application/workorchd/biz/appservice` -> application-level orchestration / workflow composition, env-backed workorch entry, grouped runtime adapter, managed runtime wrapper, workspace writes kept behind module service, workorch runtime usage split into guard/snapshot read faces plus workspace/run/decision/approval action faces, adapter dependencies grouped as reads/actions capabilities, exports-to-runtime mapping centralized in a single helper, managed runtime assembly centralized in a single helper, repeated runtime lifecycle handling unified through a session helper, repeated workorch execution handling unified through session/backend helpers, and test-side setup/execute patterns unified through dedicated helpers
+- `internal/modules/application/workorchd/pkg/observed` -> workorch acceptance observed adapter, explicit workorch event-to-snapshot contract mapper, typed snapshot contract, and collector that now consumes typed/validated/final-version workorch event helpers from `internal/pkg/events`
+- `internal/modules/application/workorchd/biz/demo` -> thin compatibility export over application-level orchestration
+- `internal/modules/application/workorchd/pkg/presenter` -> observable output rendering
 - old `application/*` service files -> `internal/modules/kernel/*/biz`
 - old `domain/*` -> module-local `pkg/models`
 - old `domain/shared` + `workorchcommon` -> `internal/pkg/common`
@@ -33,7 +35,9 @@ Each module should converge on the minimum `go-multi-module-dev` shape:
 For `application/{app}`, prefer the same separation idea:
 
 - keep `main.go` as thin as possible
-- move assembly/bootstrap/appservice/demo flow into sibling packages under the app directory
+- let the application entry explicitly choose which initiators and modules are loaded through imports
+- move application-specific implementation to `internal/modules/application/<app>/{biz,service,pkg}`
+- expose lifecycle-bearing app runtime through `internal/modules/application/<app>/module.go`
 - let env-backed execution entry live in `appservice` when the flow itself is application business orchestration
 - let application-specific runtime adapters live in `appservice`, not in `bootstrap`
 - let `bootstrap` export grouped capabilities such as `Repositories` / `Services` / `Infrastructure`, rather than a flat field bag

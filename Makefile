@@ -1,13 +1,15 @@
 SHELL := /usr/bin/env bash
 
 GO ?= go
+NPM ?= npm
 APP := ./application/workorchd
 PKGS := ./...
 GOFMT ?= gofmt
 GOTEST_FLAGS ?=
 BUILD_OUT ?= ./bin/workorchd
+CONSOLE_WEB := ./web/workorch-console
 
-.PHONY: help fmt fmt-check test test-race vet build clean run run-file verify-service verify-service-file docker-build docker-run docker-run-file docker-verify docker-verify-file ci
+.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-service verify-service-file docker-build docker-run docker-run-file docker-verify docker-verify-file ci
 
 help:
 	@echo "Targets:"
@@ -16,6 +18,7 @@ help:
 	@echo "  test       - go test $(PKGS)"
 	@echo "  test-race  - go test -race $(PKGS)"
 	@echo "  vet        - go vet $(PKGS)"
+	@echo "  console-build - build the embedded workorch management console assets"
 	@echo "  build      - go build -o $(BUILD_OUT) $(APP)"
 	@echo "  clean      - remove build/demo artifacts"
 	@echo "  run        - go run $(APP) as HTTP service"
@@ -30,14 +33,14 @@ help:
 	@echo "  ci         - fmt-check + vet + test + build + file-backed service verification"
 
 fmt:
-	@files="$$(find . -type f -name '*.go' -not -path './.git/*')"; \
+	@files="$$(find . -type f -name '*.go' -not -path './.git/*' -not -path './vendor/*' -not -path './web/workorch-console/node_modules/*')"; \
 	if [[ -n "$$files" ]]; then \
 		$(GOFMT) -w $$files; \
 	fi
 	$(GO) fmt $(PKGS)
 
 fmt-check:
-	@files="$$(find . -type f -name '*.go' -not -path './.git/*')"; \
+	@files="$$(find . -type f -name '*.go' -not -path './.git/*' -not -path './vendor/*' -not -path './web/workorch-console/node_modules/*')"; \
 	if [[ -z "$$files" ]]; then \
 		exit 0; \
 	fi; \
@@ -57,7 +60,12 @@ test-race:
 vet:
 	$(GO) vet $(PKGS)
 
-build:
+console-build:
+	@cd $(CONSOLE_WEB) && \
+	if [[ ! -d node_modules ]]; then $(NPM) install; fi && \
+	$(NPM) run build
+
+build: console-build
 	@mkdir -p $(dir $(BUILD_OUT))
 	$(GO) build -o $(BUILD_OUT) $(APP)
 

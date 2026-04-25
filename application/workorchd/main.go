@@ -7,20 +7,23 @@ import (
 	"syscall"
 
 	"github.com/muidea/magicCommon/framework/application"
-	"github.com/muidea/workorch/application/workorchd/server"
+	"github.com/muidea/magicCommon/framework/service"
+	workorchdmodule "github.com/muidea/workorch/internal/modules/application/workorchd"
+
+	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
+	_ "github.com/muidea/workorch/internal/modules/blocks/approval"
+	_ "github.com/muidea/workorch/internal/modules/blocks/legacy"
+	_ "github.com/muidea/workorch/internal/modules/kernel/decision"
+	_ "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
+	_ "github.com/muidea/workorch/internal/modules/kernel/run"
+	_ "github.com/muidea/workorch/internal/modules/kernel/workspace"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	config, err := server.ConfigFromEnv()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	svc := server.NewService(config)
-	if err := application.Startup(svc); err != nil {
+	if err := application.Startup(service.DefaultService()); err != nil {
 		log.Fatal(err)
 	}
 	defer application.Shutdown()
@@ -31,7 +34,7 @@ func main() {
 	}
 
 	select {
-	case err, ok := <-svc.Done():
+	case err, ok := <-workorchdmodule.Done():
 		if ok && err != nil {
 			application.Shutdown()
 			log.Fatal(err)

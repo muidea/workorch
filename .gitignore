@@ -1,3 +1,4 @@
 /workorchd
 .workorch-data/
 /bin/
+/web/workorch-console/node_modules/

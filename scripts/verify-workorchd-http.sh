@@ -72,8 +72,19 @@ wait_ready
 curl -fsS "$BASE_URL/healthz" | grep '"status": "ok"' >/dev/null
 curl -fsS "$BASE_URL/readyz" | grep '"status": "ready"' >/dev/null
 curl -fsS "$BASE_URL/metrics" | grep 'workorch_http_requests_total' >/dev/null
+curl -fsS "$BASE_URL/console" | grep 'workorch Console' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.css" | grep 'workorch-section' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
   -d '{"workspaceId":"ws-verify","title":"verify workspace"}' | grep '"id": "ws-verify"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces" | grep '"id": "ws-verify"' >/dev/null
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/ws-verify/runs" -H 'Content-Type: application/json' \
+  -d '{"runId":"run-shared-verify","goalId":"goal-shared-verify","doDId":"dod-shared-verify"}' | grep '"id": "run-shared-verify"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs" | grep '"id": "run-shared-verify"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs?workspaceId=ws-verify" | grep '"id": "run-shared-verify"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/run-shared-verify" | grep '"workspaceId": "ws-verify"' >/dev/null
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-shared-verify/start" | grep '"state": "completed"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/run-shared-verify/status" | grep '"state": "completed"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/ws-verify/snapshot" | grep '"id": "run-shared-verify"' >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/slices" | grep '"id": "workorch-runnable"' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs" | grep '"title": "workorch runnable slice"' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/slices/workorch-runnable/runs" | grep '"id": "workorch-runnable"' >/dev/null
