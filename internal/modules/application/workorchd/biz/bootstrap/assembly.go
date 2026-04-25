@@ -52,14 +52,17 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 
 	orchestratorModule := orchestratormodule.New()
 	mustSetup("orchestrator", orchestratorModule.Setup(orchestratormodule.Dependencies{
-		Runtime:     legacyModule.RuntimeAdapter(),
-		Runs:        repos.run,
-		Steps:       repos.step,
-		Workspaces:  repos.workspace,
-		Tickets:     repos.ticket,
-		Resolutions: repos.resolution,
-		Approvals:   repos.approval,
-		EventHub:    eventHub,
+		Runtime:            legacyModule.RuntimeAdapter(),
+		Runs:               repos.run,
+		Steps:              repos.step,
+		Workspaces:         repos.workspace,
+		Tickets:            repos.ticket,
+		Resolutions:        repos.resolution,
+		Approvals:          repos.approval,
+		ToolCalls:          repos.toolCall,
+		ValidationResults:  repos.validationResult,
+		RuntimeCheckpoints: repos.runtimeCheckpoint,
+		EventHub:           eventHub,
 	}))
 
 	runModule := runmodule.New()

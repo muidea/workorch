@@ -268,9 +268,19 @@ func TestConsoleRoutesServeEmbeddedAssets(t *testing.T) {
 		t.Fatalf("console js status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Workspace Board", "Decision Queue", "Workspace Detail"} {
+	for _, want := range []string{"Workspace Overview", "Decision Queue", "Workspace Console", "Service Health"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("console js body does not contain %q", want)
+		}
+	}
+	for _, want := range []string{"Create workspace", "Define goal", "Define DoD", "Start execution", "Runtime Summary", "Latest Run"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("console js body does not contain required business action %q", want)
+		}
+	}
+	for _, forbidden := range []string{"workorch management overview", "Create run", "Run slice", "Available slice catalog"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("console js body exposes retired entry %q", forbidden)
 		}
 	}
 }

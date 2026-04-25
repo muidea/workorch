@@ -174,28 +174,36 @@ func buildRepositories(backend string, dataRoot string) (common.RepositorySet, e
 	switch backend {
 	case "", "memory":
 		return common.RepositorySet{
-			Workspaces:  memory.NewWorkspaceRepository(),
-			Goals:       memory.NewGoalRepository(),
-			DoDs:        memory.NewDoDRepository(),
-			Runs:        memory.NewRunRepository(),
-			Steps:       memory.NewStepRepository(),
-			Tickets:     memory.NewDecisionTicketRepository(),
-			Resolutions: memory.NewDecisionResolutionRepository(),
-			Approvals:   memory.NewApprovalRepository(),
+			Workspaces:         memory.NewWorkspaceRepository(),
+			Goals:              memory.NewGoalRepository(),
+			DoDs:               memory.NewDoDRepository(),
+			Runs:               memory.NewRunRepository(),
+			Steps:              memory.NewStepRepository(),
+			ToolCalls:          memory.NewToolCallRepository(),
+			Patches:            memory.NewPatchRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+			Tickets:            memory.NewDecisionTicketRepository(),
+			Resolutions:        memory.NewDecisionResolutionRepository(),
+			Approvals:          memory.NewApprovalRepository(),
 		}, nil
 	case "file":
 		if dataRoot == "" {
 			dataRoot = filepath.Join(os.TempDir(), "workorchd-data")
 		}
 		return common.RepositorySet{
-			Workspaces:  fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json")),
-			Goals:       fileRepo.NewGoalRepository(filepath.Join(dataRoot, "goal.json")),
-			DoDs:        fileRepo.NewDoDRepository(filepath.Join(dataRoot, "dod.json")),
-			Runs:        fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json")),
-			Steps:       fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json")),
-			Tickets:     fileRepo.NewDecisionTicketRepository(filepath.Join(dataRoot, "ticket.json")),
-			Resolutions: fileRepo.NewDecisionResolutionRepository(filepath.Join(dataRoot, "resolution.json")),
-			Approvals:   fileRepo.NewApprovalRepository(filepath.Join(dataRoot, "approval.json")),
+			Workspaces:         fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json")),
+			Goals:              fileRepo.NewGoalRepository(filepath.Join(dataRoot, "goal.json")),
+			DoDs:               fileRepo.NewDoDRepository(filepath.Join(dataRoot, "dod.json")),
+			Runs:               fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json")),
+			Steps:              fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json")),
+			ToolCalls:          fileRepo.NewToolCallRepository(filepath.Join(dataRoot, "tool_call.json")),
+			Patches:            fileRepo.NewPatchRepository(filepath.Join(dataRoot, "patch.json")),
+			ValidationResults:  fileRepo.NewValidationResultRepository(filepath.Join(dataRoot, "validation_result.json")),
+			RuntimeCheckpoints: fileRepo.NewRuntimeCheckpointRepository(filepath.Join(dataRoot, "runtime_checkpoint.json")),
+			Tickets:            fileRepo.NewDecisionTicketRepository(filepath.Join(dataRoot, "ticket.json")),
+			Resolutions:        fileRepo.NewDecisionResolutionRepository(filepath.Join(dataRoot, "resolution.json")),
+			Approvals:          fileRepo.NewApprovalRepository(filepath.Join(dataRoot, "approval.json")),
 		}, nil
 	default:
 		return common.RepositorySet{}, fmt.Errorf("unsupported repository backend: %s", backend)

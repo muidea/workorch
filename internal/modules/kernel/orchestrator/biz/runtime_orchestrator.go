@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"time"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
@@ -36,7 +37,14 @@ type RuntimeOrchestrator struct {
 	tickets     repository.DecisionTicketRepository
 	resolutions repository.DecisionResolutionRepository
 	approvals   repository.ApprovalRepository
+	evidence    RuntimeEvidenceRepositories
 	eventHub    events.Hub
+}
+
+type RuntimeEvidenceRepositories struct {
+	ToolCalls          repository.ToolCallRepository
+	ValidationResults  repository.ValidationResultRepository
+	RuntimeCheckpoints repository.RuntimeCheckpointRepository
 }
 
 func NewRuntimeOrchestrator(
@@ -61,6 +69,30 @@ func NewRuntimeOrchestratorWithResolutions(
 	approvalRepo repository.ApprovalRepository,
 	eventHub events.Hub,
 ) *RuntimeOrchestrator {
+	return NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		resolutionRepo,
+		approvalRepo,
+		RuntimeEvidenceRepositories{},
+		eventHub,
+	)
+}
+
+func NewRuntimeOrchestratorWithResolutionsAndEvidence(
+	runtime RuntimeAdapter,
+	runRepo repository.RunRepository,
+	stepRepo repository.StepRepository,
+	workspaceRepo repository.WorkspaceRepository,
+	ticketRepo repository.DecisionTicketRepository,
+	resolutionRepo repository.DecisionResolutionRepository,
+	approvalRepo repository.ApprovalRepository,
+	evidence RuntimeEvidenceRepositories,
+	eventHub events.Hub,
+) *RuntimeOrchestrator {
 	if eventHub == nil {
 		eventHub = events.NewMemoryHub()
 	}
@@ -72,6 +104,7 @@ func NewRuntimeOrchestratorWithResolutions(
 		tickets:     ticketRepo,
 		resolutions: resolutionRepo,
 		approvals:   approvalRepo,
+		evidence:    evidence,
 		eventHub:    eventHub,
 	}
 }
@@ -380,6 +413,9 @@ func canCloseRunAs(current common.RunState, target common.RunState) bool {
 }
 
 func (o *RuntimeOrchestrator) publishRunStateChanged(ctx context.Context, run *runModel.Run) error {
+	if err := o.recordRunCheckpoint(ctx, run); err != nil {
+		return err
+	}
 	if o.eventHub == nil || run == nil {
 		return nil
 	}
@@ -439,11 +475,21 @@ func (o *RuntimeOrchestrator) dispatchStep(
 	if err := o.publishStepState(ctx, run, step, events.TopicStepDispatched); err != nil {
 		return err
 	}
+	toolCall, err := o.recordToolCallStarted(ctx, run, step)
+	if err != nil {
+		return err
+	}
+	if err := o.recordStepCheckpoint(ctx, run, step, "step_dispatched"); err != nil {
+		return err
+	}
 
 	output, err := o.runtime.ExecuteStep(ctx, run.ID, step.ID)
 	if err != nil {
 		step.State = common.StepStateFailed
 		step.Output = map[string]any{"reason": err.Error()}
+		_ = o.recordToolCallFailed(ctx, toolCall, err)
+		_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, "runtime step failed", string(toolCall.ID), err.Error())
+		_ = o.recordStepCheckpoint(ctx, run, step, "step_failed")
 		_ = o.steps.Update(ctx, step)
 		_ = o.publishStepState(ctx, run, step, events.TopicStepStateChanged)
 		return o.FailRun(ctx, run.ID, err.Error())
@@ -451,10 +497,19 @@ func (o *RuntimeOrchestrator) dispatchStep(
 
 	step.State = common.StepStateCompleted
 	step.Output = output
+	if err := o.recordToolCallCompleted(ctx, toolCall, output); err != nil {
+		return err
+	}
+	if err := o.recordValidationResult(ctx, run, step, common.ValidationResultStatePassed, "runtime step completed", string(toolCall.ID), ""); err != nil {
+		return err
+	}
 	if err := o.steps.Update(ctx, step); err != nil {
 		return err
 	}
 	if err := o.publishStepState(ctx, run, step, events.TopicStepStateChanged); err != nil {
+		return err
+	}
+	if err := o.recordStepCheckpoint(ctx, run, step, "step_completed"); err != nil {
 		return err
 	}
 
@@ -490,6 +545,197 @@ func (o *RuntimeOrchestrator) dispatchStep(
 		return err
 	}
 	return o.CompleteRun(ctx, run.ID)
+}
+
+func (o *RuntimeOrchestrator) recordToolCallStarted(ctx context.Context, run *runModel.Run, step *runModel.Step) (*runModel.ToolCall, error) {
+	if run == nil || step == nil || o.evidence.ToolCalls == nil {
+		return &runModel.ToolCall{}, nil
+	}
+	now := runtimeEvidenceTimestamp()
+	toolCall := &runModel.ToolCall{
+		ID:          common.ToolCallID(fmt.Sprintf("%s/tool-call/runtime-execute", step.ID)),
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		StepID:      step.ID,
+		ToolName:    step.Kind,
+		Arguments:   cloneStepPayload(step.Input),
+		State:       common.ToolCallStateRunning,
+		StartedAt:   now,
+	}
+	if toolCall.ToolName == "" {
+		toolCall.ToolName = "workorch/runtime-step"
+	}
+	if err := o.evidence.ToolCalls.Create(ctx, toolCall); err != nil {
+		if err != common.ErrConflict {
+			return nil, err
+		}
+		existing, getErr := o.evidence.ToolCalls.Get(ctx, toolCall.ID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		existing.WorkspaceID = toolCall.WorkspaceID
+		existing.RunID = toolCall.RunID
+		existing.StepID = toolCall.StepID
+		existing.ToolName = toolCall.ToolName
+		existing.Arguments = toolCall.Arguments
+		existing.State = common.ToolCallStateRunning
+		existing.StartedAt = now
+		existing.EndedAt = ""
+		existing.ExitSummary = ""
+		existing.Output = nil
+		existing.Error = ""
+		if err := o.evidence.ToolCalls.Update(ctx, existing); err != nil {
+			return nil, err
+		}
+		return existing, nil
+	}
+	return toolCall, nil
+}
+
+func (o *RuntimeOrchestrator) recordToolCallCompleted(ctx context.Context, toolCall *runModel.ToolCall, output map[string]any) error {
+	if toolCall == nil || toolCall.ID == "" || o.evidence.ToolCalls == nil {
+		return nil
+	}
+	toolCall.State = common.ToolCallStateCompleted
+	toolCall.EndedAt = runtimeEvidenceTimestamp()
+	toolCall.ExitSummary = "runtime step completed"
+	toolCall.Output = cloneStepPayload(output)
+	toolCall.Error = ""
+	if err := o.evidence.ToolCalls.Update(ctx, toolCall); err != nil {
+		if err == common.ErrNotFound {
+			return o.evidence.ToolCalls.Create(ctx, toolCall)
+		}
+		return err
+	}
+	return nil
+}
+
+func (o *RuntimeOrchestrator) recordToolCallFailed(ctx context.Context, toolCall *runModel.ToolCall, execErr error) error {
+	if toolCall == nil || toolCall.ID == "" || o.evidence.ToolCalls == nil {
+		return nil
+	}
+	toolCall.State = common.ToolCallStateFailed
+	toolCall.EndedAt = runtimeEvidenceTimestamp()
+	toolCall.ExitSummary = "runtime step failed"
+	if execErr != nil {
+		toolCall.Error = execErr.Error()
+	}
+	if err := o.evidence.ToolCalls.Update(ctx, toolCall); err != nil {
+		if err == common.ErrNotFound {
+			return o.evidence.ToolCalls.Create(ctx, toolCall)
+		}
+		return err
+	}
+	return nil
+}
+
+func (o *RuntimeOrchestrator) recordValidationResult(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	state common.ValidationResultState,
+	summary string,
+	evidenceRef string,
+	errText string,
+) error {
+	if run == nil || step == nil || o.evidence.ValidationResults == nil {
+		return nil
+	}
+	now := runtimeEvidenceTimestamp()
+	item := &runModel.ValidationResult{
+		ID:             common.ValidationResultID(fmt.Sprintf("%s/validation/runtime-step", step.ID)),
+		WorkspaceID:    run.WorkspaceID,
+		RunID:          run.ID,
+		StepID:         step.ID,
+		ValidationKind: "runtime_step",
+		TargetRef:      string(step.ID),
+		State:          state,
+		Summary:        summary,
+		EvidenceRef:    evidenceRef,
+		StartedAt:      now,
+		EndedAt:        now,
+	}
+	if errText != "" {
+		item.Summary = fmt.Sprintf("%s: %s", summary, errText)
+	}
+	if err := o.evidence.ValidationResults.Create(ctx, item); err != nil {
+		if err != common.ErrConflict {
+			return err
+		}
+		return o.evidence.ValidationResults.Update(ctx, item)
+	}
+	return nil
+}
+
+func (o *RuntimeOrchestrator) recordRunCheckpoint(ctx context.Context, run *runModel.Run) error {
+	if run == nil || o.evidence.RuntimeCheckpoints == nil {
+		return nil
+	}
+	currentStepID := o.latestStepID(ctx, run.ID)
+	checkpointType := common.CheckpointTypeRunState
+	if run.BlockingTicketID != "" || run.BlockingApprovalID != "" {
+		checkpointType = common.CheckpointTypeBlocked
+	}
+	return o.createRuntimeCheckpoint(ctx, run, currentStepID, checkpointType, map[string]any{
+		"event": "run_state_changed",
+		"state": string(run.State),
+	})
+}
+
+func (o *RuntimeOrchestrator) recordStepCheckpoint(ctx context.Context, run *runModel.Run, step *runModel.Step, event string) error {
+	if run == nil || step == nil || o.evidence.RuntimeCheckpoints == nil {
+		return nil
+	}
+	return o.createRuntimeCheckpoint(ctx, run, step.ID, common.CheckpointTypeRunState, map[string]any{
+		"event":     event,
+		"stepState": string(step.State),
+		"stepKind":  step.Kind,
+	})
+}
+
+func (o *RuntimeOrchestrator) createRuntimeCheckpoint(
+	ctx context.Context,
+	run *runModel.Run,
+	currentStepID common.StepID,
+	checkpointType common.CheckpointType,
+	data map[string]any,
+) error {
+	now := runtimeEvidenceTimestamp()
+	item := &runModel.RuntimeCheckpoint{
+		ID:                 common.CheckpointID(fmt.Sprintf("%s/checkpoint/%d", run.ID, time.Now().UTC().UnixNano())),
+		WorkspaceID:        run.WorkspaceID,
+		RunID:              run.ID,
+		CheckpointType:     checkpointType,
+		CurrentStepID:      currentStepID,
+		RunStateSnapshot:   run.State,
+		BlockingTicketID:   run.BlockingTicketID,
+		BlockingApprovalID: run.BlockingApprovalID,
+		ThreadRef:          "main",
+		OccurredAt:         now,
+		Data:               data,
+	}
+	if err := o.evidence.RuntimeCheckpoints.Create(ctx, item); err != nil {
+		if err != common.ErrConflict {
+			return err
+		}
+		return o.evidence.RuntimeCheckpoints.Update(ctx, item)
+	}
+	return nil
+}
+
+func (o *RuntimeOrchestrator) latestStepID(ctx context.Context, runID common.RunID) common.StepID {
+	if o == nil || o.steps == nil || runID == "" {
+		return ""
+	}
+	steps, err := o.steps.ListByRun(ctx, runID)
+	if err != nil || len(steps) == 0 {
+		return ""
+	}
+	return steps[len(steps)-1].ID
+}
+
+func runtimeEvidenceTimestamp() string {
+	return time.Now().UTC().Format(time.RFC3339Nano)
 }
 
 func (o *RuntimeOrchestrator) nextDispatchSpec(

@@ -44,6 +44,10 @@ Target:
 - Extend Run snapshot to include execution evidence grouped by `runId` and `stepId`.
 - Keep `Step` as Run aggregate internal entity; evidence objects remain execution evidence, not primary business state.
 - Expose the evidence repositories through the workorch runtime assembly exports so appservice read models can consume them.
+- Record runtime execution evidence automatically from the orchestrator execution path:
+  `ToolCall` for step execution, `ValidationResult` for runtime step result, and
+  `RuntimeCheckpoint` for run/step state changes. `Patch` remains empty until a
+  real patch application capability exists.
 
 Acceptance:
 
@@ -51,6 +55,7 @@ Acceptance:
 - File backend persists each execution evidence object type into its own JSON file.
 - Mutating returned objects must not mutate repository state.
 - `GET /api/v1/workorch/runs/{runId}/snapshot` can return steps plus tool calls, patches, validation results, and checkpoints when present.
+- Starting a workspace execution through `workorchd` creates runtime evidence without tests or callers manually inserting evidence records.
 - File backend restart preserves and returns the same evidence view.
 
 ### N2. Run State Machine And Workspace Projection
@@ -111,6 +116,9 @@ Acceptance:
 ## Progress
 
 - completed: `N1 Execution Evidence And Run Snapshot`
+  Runtime execution now writes `ToolCall`, `ValidationResult`, and
+  `RuntimeCheckpoint` records automatically; `Patch` is intentionally reserved for
+  the future real patch application flow.
 - completed: `N2 Run State Machine And Workspace Projection`
 - completed: `N3 Decision Ticket Structure And Resolution Semantics`
 - completed: `N4 Control Plane MVP Views`

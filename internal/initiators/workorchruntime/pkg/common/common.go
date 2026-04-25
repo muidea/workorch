@@ -14,14 +14,18 @@ import (
 const InitiatorID = "workorch/runtime"
 
 type RepositorySet struct {
-	Workspaces  repository.WorkspaceRepository
-	Goals       repository.GoalRepository
-	DoDs        repository.DoDRepository
-	Runs        repository.RunRepository
-	Steps       repository.StepRepository
-	Tickets     repository.DecisionTicketRepository
-	Resolutions repository.DecisionResolutionRepository
-	Approvals   repository.ApprovalRepository
+	Workspaces         repository.WorkspaceRepository
+	Goals              repository.GoalRepository
+	DoDs               repository.DoDRepository
+	Runs               repository.RunRepository
+	Steps              repository.StepRepository
+	ToolCalls          repository.ToolCallRepository
+	Patches            repository.PatchRepository
+	ValidationResults  repository.ValidationResultRepository
+	RuntimeCheckpoints repository.RuntimeCheckpointRepository
+	Tickets            repository.DecisionTicketRepository
+	Resolutions        repository.DecisionResolutionRepository
+	Approvals          repository.ApprovalRepository
 }
 
 type Helper interface {

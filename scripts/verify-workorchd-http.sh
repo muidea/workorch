@@ -74,10 +74,20 @@ curl -fsS "$BASE_URL/readyz" | grep '"status": "ready"' >/dev/null
 curl -fsS "$BASE_URL/metrics" | grep 'workorch_http_requests_total' >/dev/null
 curl -fsS "$BASE_URL/console" | grep 'workorch Console' >/dev/null
 curl -fsS "$BASE_URL/console/assets/workorch-console.css" | grep 'workorch-section' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Workspace Board' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Workspace Overview' >/dev/null
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Decision Queue' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Workspace Detail' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Workspace Console' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Service Health' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Runtime Summary' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Latest Run' >/dev/null
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Start execution' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Create workspace' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Define goal' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Define DoD' >/dev/null
+if curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep -E 'workorch management overview|Create run|Run slice|Available slice catalog' >/dev/null; then
+  echo "console exposes retired web entries" >&2
+  exit 1
+fi
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
   -d '{"title":"verify workspace","description":"verify workspace description"}' >"$TMP_DIR/workspace.json"
 workspace_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/workspace.json" | head -n1)"

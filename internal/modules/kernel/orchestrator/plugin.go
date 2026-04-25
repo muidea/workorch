@@ -35,14 +35,17 @@ func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 	repos := runtime.Repositories()
 	p.module = New()
 	if setupErr := p.module.Setup(Dependencies{
-		Runtime:     runtime.LegacyRuntimeAdapter(),
-		Runs:        repos.Runs,
-		Steps:       repos.Steps,
-		Workspaces:  repos.Workspaces,
-		Tickets:     repos.Tickets,
-		Resolutions: repos.Resolutions,
-		Approvals:   repos.Approvals,
-		EventHub:    runtime.EventHub(),
+		Runtime:            runtime.LegacyRuntimeAdapter(),
+		Runs:               repos.Runs,
+		Steps:              repos.Steps,
+		Workspaces:         repos.Workspaces,
+		Tickets:            repos.Tickets,
+		Resolutions:        repos.Resolutions,
+		Approvals:          repos.Approvals,
+		ToolCalls:          repos.ToolCalls,
+		ValidationResults:  repos.ValidationResults,
+		RuntimeCheckpoints: repos.RuntimeCheckpoints,
+		EventHub:           runtime.EventHub(),
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}

@@ -45,6 +45,22 @@ func TestActivateWorkspaceExecutionWithBackendCreatesAndStartsRun(t *testing.T) 
 	if item.Snapshot.Workspace.ID != workspace.ID || len(item.Snapshot.Runs) != 1 {
 		t.Fatalf("activation snapshot = %+v, want workspace with one run", item.Snapshot)
 	}
+	runSnapshot, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, item.Run.ID)
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
+	}
+	if len(runSnapshot.ToolCalls) != 1 || runSnapshot.ToolCalls[0].State != "completed" {
+		t.Fatalf("toolCalls = %+v, want completed runtime evidence", runSnapshot.ToolCalls)
+	}
+	if len(runSnapshot.ValidationResults) != 1 || runSnapshot.ValidationResults[0].State != "passed" {
+		t.Fatalf("validationResults = %+v, want passed runtime evidence", runSnapshot.ValidationResults)
+	}
+	if len(runSnapshot.RuntimeCheckpoints) == 0 {
+		t.Fatalf("runtimeCheckpoints empty, want runtime checkpoints")
+	}
+	if len(runSnapshot.Patches) != 0 {
+		t.Fatalf("patches = %+v, want no patch evidence until a real patch is applied", runSnapshot.Patches)
+	}
 }
 
 func TestActivateWorkspaceExecutionWithBackendRequiresGoalAndDoD(t *testing.T) {

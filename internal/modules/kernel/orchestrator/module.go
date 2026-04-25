@@ -17,14 +17,17 @@ type Service = orchestratorservice.Service
 type RuntimeAdapter = orchestratorbiz.RuntimeAdapter
 
 type Dependencies struct {
-	Runtime     orchestratorbiz.RuntimeAdapter
-	Runs        repository.RunRepository
-	Steps       repository.StepRepository
-	Workspaces  repository.WorkspaceRepository
-	Tickets     repository.DecisionTicketRepository
-	Resolutions repository.DecisionResolutionRepository
-	Approvals   repository.ApprovalRepository
-	EventHub    events.Hub
+	Runtime            orchestratorbiz.RuntimeAdapter
+	Runs               repository.RunRepository
+	Steps              repository.StepRepository
+	Workspaces         repository.WorkspaceRepository
+	Tickets            repository.DecisionTicketRepository
+	Resolutions        repository.DecisionResolutionRepository
+	Approvals          repository.ApprovalRepository
+	ToolCalls          repository.ToolCallRepository
+	ValidationResults  repository.ValidationResultRepository
+	RuntimeCheckpoints repository.RuntimeCheckpointRepository
+	EventHub           events.Hub
 }
 
 type Module struct {
@@ -37,10 +40,19 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 func (m *Module) Setup(deps Dependencies) error {
-	if deps.Runtime == nil || deps.Runs == nil || deps.Steps == nil || deps.Workspaces == nil || deps.Tickets == nil || deps.Resolutions == nil || deps.Approvals == nil {
+	if deps.Runtime == nil ||
+		deps.Runs == nil ||
+		deps.Steps == nil ||
+		deps.Workspaces == nil ||
+		deps.Tickets == nil ||
+		deps.Resolutions == nil ||
+		deps.Approvals == nil ||
+		deps.ToolCalls == nil ||
+		deps.ValidationResults == nil ||
+		deps.RuntimeCheckpoints == nil {
 		return common.ErrInvalidArgument
 	}
-	m.bizPtr = orchestratorbiz.NewRuntimeOrchestratorWithResolutions(
+	m.bizPtr = orchestratorbiz.NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		deps.Runtime,
 		deps.Runs,
 		deps.Steps,
@@ -48,6 +60,11 @@ func (m *Module) Setup(deps Dependencies) error {
 		deps.Tickets,
 		deps.Resolutions,
 		deps.Approvals,
+		orchestratorbiz.RuntimeEvidenceRepositories{
+			ToolCalls:          deps.ToolCalls,
+			ValidationResults:  deps.ValidationResults,
+			RuntimeCheckpoints: deps.RuntimeCheckpoints,
+		},
 		deps.EventHub,
 	)
 	m.servicePtr = orchestratorservice.New(orchestratorservice.Dependencies{
