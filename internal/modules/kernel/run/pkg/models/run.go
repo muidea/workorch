@@ -10,4 +10,5 @@ type Run struct {
 	State              common.RunState
 	BlockingTicketID   common.TicketID
 	BlockingApprovalID common.ApprovalID
+	FailureReason      string
 }

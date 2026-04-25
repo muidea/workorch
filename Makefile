@@ -7,7 +7,7 @@ GOFMT ?= gofmt
 GOTEST_FLAGS ?=
 BUILD_OUT ?= ./bin/workorchd
 
-.PHONY: help fmt fmt-check test test-race vet build clean run run-file ci
+.PHONY: help fmt fmt-check test test-race vet build clean run run-file verify-service verify-service-file docker-build docker-run docker-run-file docker-verify docker-verify-file ci
 
 help:
 	@echo "Targets:"
@@ -18,9 +18,16 @@ help:
 	@echo "  vet        - go vet $(PKGS)"
 	@echo "  build      - go build -o $(BUILD_OUT) $(APP)"
 	@echo "  clean      - remove build/demo artifacts"
-	@echo "  run        - go run $(APP)"
-	@echo "  run-file   - clean demo data, then run $(APP) with file-backed repository"
-	@echo "  ci         - fmt-check + vet + test + build + file-backed acceptance"
+	@echo "  run        - go run $(APP) as HTTP service"
+	@echo "  run-file   - clean data, then run $(APP) as HTTP service with file-backed repository"
+	@echo "  verify-service      - build, start, and verify the HTTP service with memory repository"
+	@echo "  verify-service-file - build, start, and verify the HTTP service with file-backed repository"
+	@echo "  docker-build    - docker build local workorchd image"
+	@echo "  docker-run      - run workorchd container with in-memory repository"
+	@echo "  docker-run-file - run workorchd container with file-backed repository"
+	@echo "  docker-verify      - build image and verify the container with memory repository"
+	@echo "  docker-verify-file - build image and verify the container with file-backed repository"
+	@echo "  ci         - fmt-check + vet + test + build + file-backed service verification"
 
 fmt:
 	@files="$$(find . -type f -name '*.go' -not -path './.git/*')"; \
@@ -64,4 +71,31 @@ run-file:
 	rm -rf ./.workorch-data
 	WORKORCH_REPOSITORY_BACKEND=file WORKORCH_DATA_DIR=.workorch-data $(GO) run $(APP)
 
-ci: fmt-check vet test build run-file
+verify-service:
+	WORKORCH_VERIFY_ADDR=127.0.0.1:18080 ./scripts/verify-workorchd-http.sh
+
+verify-service-file:
+	WORKORCH_VERIFY_ADDR=127.0.0.1:18082 WORKORCH_VERIFY_BACKEND=file ./scripts/verify-workorchd-http.sh
+
+docker-build:
+	docker build -t workorchd:local .
+
+docker-run:
+	docker run --rm -p 8080:8080 workorchd:local
+
+docker-run-file:
+	mkdir -p ./.workorch-data
+	chmod 0777 ./.workorch-data
+	docker run --rm -p 8080:8080 \
+		-e WORKORCH_REPOSITORY_BACKEND=file \
+		-e WORKORCH_DATA_DIR=/var/lib/workorch \
+		-v $(CURDIR)/.workorch-data:/var/lib/workorch \
+		workorchd:local
+
+docker-verify:
+	WORKORCH_VERIFY_PORT=18081 ./scripts/verify-workorchd-container.sh
+
+docker-verify-file:
+	WORKORCH_VERIFY_PORT=18083 WORKORCH_VERIFY_BACKEND=file ./scripts/verify-workorchd-container.sh
+
+ci: fmt-check vet test build verify-service-file

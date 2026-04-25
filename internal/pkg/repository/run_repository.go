@@ -10,5 +10,6 @@ import (
 type RunRepository interface {
 	Create(context.Context, *run.Run) error
 	Get(context.Context, common.RunID) (*run.Run, error)
+	List(context.Context) ([]*run.Run, error)
 	Update(context.Context, *run.Run) error
 }

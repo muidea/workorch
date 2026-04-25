@@ -53,9 +53,12 @@ func BuildWorkorchSnapshot(
 			workspaceID: ws.ID,
 			runID:       r.ID,
 		}, RunPayload{
+			GoalID:             string(r.GoalID),
+			DoDID:              string(r.DoDID),
 			State:              string(r.State),
 			BlockingTicketID:   string(r.BlockingTicketID),
 			BlockingApprovalID: string(r.BlockingApprovalID),
+			FailureReason:      r.FailureReason,
 		}))
 	}
 	for _, step := range steps {

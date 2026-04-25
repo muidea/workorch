@@ -14,6 +14,7 @@ var (
 	workorchEventContracts = map[string]WorkorchContractSpec{
 		TopicWorkspaceCreated:      newWorkorchEventContract(TopicWorkspaceCreated),
 		TopicWorkspaceStateChanged: newWorkorchEventContract(TopicWorkspaceStateChanged),
+		TopicRunCreated:            newWorkorchEventContract(TopicRunCreated),
 		TopicRunStateChanged:       newWorkorchEventContract(TopicRunStateChanged),
 		TopicStepDispatched:        newWorkorchEventContract(TopicStepDispatched),
 		TopicStepStateChanged:      newWorkorchEventContract(TopicStepStateChanged),

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 
+	modulecommon "github.com/muidea/workorch/internal/modules/kernel/run/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -23,10 +25,11 @@ type Service struct {
 	runs         repository.RunRepository
 	workspaces   repository.WorkspaceRepository
 	orchestrator Orchestrator
+	eventHub     events.Hub
 }
 
-func NewService(runs repository.RunRepository, workspaces repository.WorkspaceRepository, orchestrator Orchestrator) *Service {
-	return &Service{runs: runs, workspaces: workspaces, orchestrator: orchestrator}
+func NewService(runs repository.RunRepository, workspaces repository.WorkspaceRepository, orchestrator Orchestrator, eventHub events.Hub) *Service {
+	return &Service{runs: runs, workspaces: workspaces, orchestrator: orchestrator, eventHub: eventHub}
 }
 
 func (s *Service) CreateRun(ctx context.Context, cmd runservice.CreateRunCommand) error {
@@ -38,13 +41,17 @@ func (s *Service) CreateRun(ctx context.Context, cmd runservice.CreateRunCommand
 	}
 
 	run := &runModel.Run{
-		ID:          cmd.RunID,
-		WorkspaceID: cmd.WorkspaceID,
-		GoalID:      cmd.GoalID,
-		DoDID:       cmd.DoDID,
-		State:       common.RunStateCreated,
+		ID:            cmd.RunID,
+		WorkspaceID:   cmd.WorkspaceID,
+		GoalID:        cmd.GoalID,
+		DoDID:         cmd.DoDID,
+		State:         common.RunStateCreated,
+		FailureReason: "",
 	}
-	return s.runs.Create(ctx, run)
+	if err := s.runs.Create(ctx, run); err != nil {
+		return err
+	}
+	return s.publishRunEvent(ctx, events.TopicRunCreated, run)
 }
 
 func (s *Service) EnsureRun(ctx context.Context, cmd runservice.CreateRunCommand) error {
@@ -225,7 +232,11 @@ func (s *Service) CompleteRun(ctx context.Context, cmd runservice.CompleteRunCom
 	r.State = common.RunStateCompleted
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""
-	return s.runs.Update(ctx, r)
+	r.FailureReason = ""
+	if err := s.runs.Update(ctx, r); err != nil {
+		return err
+	}
+	return s.publishRunEvent(ctx, events.TopicRunStateChanged, r)
 }
 
 func (s *Service) FailRun(ctx context.Context, cmd runservice.FailRunCommand) error {
@@ -243,5 +254,32 @@ func (s *Service) FailRun(ctx context.Context, cmd runservice.FailRunCommand) er
 	r.State = common.RunStateFailed
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""
-	return s.runs.Update(ctx, r)
+	r.FailureReason = cmd.Reason
+	if err := s.runs.Update(ctx, r); err != nil {
+		return err
+	}
+	return s.publishRunEvent(ctx, events.TopicRunStateChanged, r)
+}
+
+func (s *Service) publishRunEvent(ctx context.Context, topic string, run *runModel.Run) error {
+	if s.eventHub == nil || run == nil {
+		return nil
+	}
+	return s.eventHub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        topic,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "run",
+		SubjectID:    string(run.ID),
+		WorkspaceID:  string(run.WorkspaceID),
+		RunID:        string(run.ID),
+		Payload: events.RunPayload(
+			run.GoalID,
+			run.DoDID,
+			run.State,
+			run.BlockingTicketID,
+			run.BlockingApprovalID,
+			run.FailureReason,
+		),
+	})
 }

@@ -7,6 +7,7 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/run/pkg/common"
 	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -26,6 +27,7 @@ type Dependencies struct {
 	Runs         repository.RunRepository
 	Workspaces   repository.WorkspaceRepository
 	Orchestrator runbiz.Orchestrator
+	EventHub     events.Hub
 }
 
 type Module struct {
@@ -41,7 +43,7 @@ func (m *Module) Setup(deps Dependencies) error {
 	if deps.Runs == nil || deps.Workspaces == nil || deps.Orchestrator == nil {
 		return common.ErrInvalidArgument
 	}
-	m.bizPtr = runbiz.NewService(deps.Runs, deps.Workspaces, deps.Orchestrator)
+	m.bizPtr = runbiz.NewService(deps.Runs, deps.Workspaces, deps.Orchestrator, deps.EventHub)
 	m.servicePtr = runservice.New(runservice.Dependencies{
 		CreateRun:       m.bizPtr.CreateRun,
 		EnsureRun:       m.bizPtr.EnsureRun,

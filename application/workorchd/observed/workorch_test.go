@@ -131,6 +131,8 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunAndStepEvents(t *testing.T) {
 	run := &runmodel.Run{
 		ID:                 common.RunID("run-published"),
 		WorkspaceID:        ws.ID,
+		GoalID:             common.GoalID("goal-published"),
+		DoDID:              common.DoDID("dod-published"),
 		State:              common.RunStateCompleted,
 		BlockingTicketID:   common.TicketID("ticket-stale"),
 		BlockingApprovalID: common.ApprovalID("approval-stale"),
@@ -153,9 +155,11 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunAndStepEvents(t *testing.T) {
 			WorkspaceID:  string(ws.ID),
 			RunID:        string(run.ID),
 			Payload: map[string]any{
-				"state":              string(common.RunStateCompleted),
-				"blockingTicketId":   "",
-				"blockingApprovalId": "",
+				events.PayloadKeyGoalID: string(run.GoalID),
+				events.PayloadKeyDoDID:  string(run.DoDID),
+				"state":                 string(common.RunStateCompleted),
+				"blockingTicketId":      "",
+				"blockingApprovalId":    "",
 			},
 		}),
 		mustWorkorchEvent(t, events.Envelope{
@@ -184,6 +188,9 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunAndStepEvents(t *testing.T) {
 	if runPayload.BlockingTicketID != "" || runPayload.BlockingApprovalID != "" {
 		t.Fatalf("run payload should prefer published payload, got %+v", runPayload)
 	}
+	if runPayload.GoalID != "goal-published" || runPayload.DoDID != "dod-published" {
+		t.Fatalf("run payload goal/dod = %+v, want goal-published/dod-published", runPayload)
+	}
 	if runItem.OccurredAt != "2026-04-21T09:00:00Z" {
 		t.Fatalf("run item occurredAt = %s, want published timestamp", runItem.OccurredAt)
 	}
@@ -198,6 +205,74 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunAndStepEvents(t *testing.T) {
 	}
 	if stepItem.OccurredAt != "2026-04-21T09:00:01Z" {
 		t.Fatalf("step item occurredAt = %s, want published timestamp", stepItem.OccurredAt)
+	}
+}
+
+func TestBuildWorkorchSnapshotPrefersPublishedRunCreatedAndFailureReason(t *testing.T) {
+	ws := &workspacemodel.Workspace{
+		ID:    common.WorkspaceID("ws-published-created"),
+		State: common.WorkspaceStateActive,
+	}
+	run := &runmodel.Run{
+		ID:            common.RunID("run-published-created"),
+		WorkspaceID:   ws.ID,
+		GoalID:        common.GoalID("goal-created"),
+		DoDID:         common.DoDID("dod-created"),
+		State:         common.RunStateFailed,
+		FailureReason: "manual fail",
+	}
+
+	items := BuildWorkorchSnapshot(ws, run, nil, nil, nil, nil, []events.WorkorchEvent{
+		mustWorkorchEvent(t, events.Envelope{
+			Version:      events.WorkorchEventVersion,
+			Topic:        events.TopicRunCreated,
+			OccurredAt:   "2026-04-21T09:05:00Z",
+			SourceModule: "kernel/run",
+			SubjectType:  "run",
+			SubjectID:    string(run.ID),
+			WorkspaceID:  string(ws.ID),
+			RunID:        string(run.ID),
+			Payload: map[string]any{
+				events.PayloadKeyGoalID:             string(run.GoalID),
+				events.PayloadKeyDoDID:              string(run.DoDID),
+				events.PayloadKeyState:              string(common.RunStateCreated),
+				events.PayloadKeyBlockingTicketID:   "",
+				events.PayloadKeyBlockingApprovalID: "",
+			},
+		}),
+		mustWorkorchEvent(t, events.Envelope{
+			Version:      events.WorkorchEventVersion,
+			Topic:        events.TopicRunStateChanged,
+			OccurredAt:   "2026-04-21T09:05:01Z",
+			SourceModule: "kernel/orchestrator",
+			SubjectType:  "run",
+			SubjectID:    string(run.ID),
+			WorkspaceID:  string(ws.ID),
+			RunID:        string(run.ID),
+			Payload: map[string]any{
+				events.PayloadKeyGoalID:             string(run.GoalID),
+				events.PayloadKeyDoDID:              string(run.DoDID),
+				events.PayloadKeyState:              string(common.RunStateFailed),
+				events.PayloadKeyBlockingTicketID:   "",
+				events.PayloadKeyBlockingApprovalID: "",
+				events.PayloadKeyFailureReason:      run.FailureReason,
+			},
+		}),
+	})
+
+	runItem := topicItem(t, items, "/run/snapshot")
+	runPayload, ok := runItem.Payload.(RunPayload)
+	if !ok {
+		t.Fatalf("run payload type = %T, want RunPayload", runItem.Payload)
+	}
+	if runPayload.GoalID != "goal-created" || runPayload.DoDID != "dod-created" {
+		t.Fatalf("run payload goal/dod = %+v, want goal-created/dod-created", runPayload)
+	}
+	if runPayload.FailureReason != "manual fail" || runPayload.State != string(common.RunStateFailed) {
+		t.Fatalf("run payload = %+v, want failed/manual fail", runPayload)
+	}
+	if runItem.OccurredAt != "2026-04-21T09:05:01Z" {
+		t.Fatalf("run item occurredAt = %s, want latest run event timestamp", runItem.OccurredAt)
 	}
 }
 

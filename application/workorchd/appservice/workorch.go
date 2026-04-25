@@ -2,6 +2,7 @@ package appservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -74,8 +75,46 @@ type observedRuntime interface {
 }
 
 type Slice struct {
+	ID       string              `json:"id"`
+	Title    string              `json:"title"`
+	Snapshot *presenter.Snapshot `json:"snapshot"`
+}
+
+type SliceStatus struct {
+	ID                 string `json:"id"`
+	Title              string `json:"title"`
+	Slice              string `json:"slice"`
+	WorkspaceID        string `json:"workspaceId,omitempty"`
+	WorkspaceState     string `json:"workspaceState,omitempty"`
+	RunID              string `json:"runId,omitempty"`
+	RunState           string `json:"runState,omitempty"`
+	StepID             string `json:"stepId,omitempty"`
+	StepState          string `json:"stepState,omitempty"`
+	BlockingTicketID   string `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID string `json:"blockingApprovalId,omitempty"`
+	StepCount          int    `json:"stepCount"`
+	ObservedCount      int    `json:"observedCount"`
+}
+
+type SliceDescriptor struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+type sliceSnapshotLocator struct {
+	SliceName   string
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	StepID      common.StepID
+	StepIDs     []common.StepID
+	Refs        presenter.BlockingRefs
+}
+
+type sliceDefinition struct {
+	ID       string
 	Title    string
-	Snapshot *presenter.Snapshot
+	Run      func(*WorkorchService, context.Context) (*presenter.Snapshot, error)
+	Snapshot sliceSnapshotLocator
 }
 
 func NewWorkorchService(runtime Runtime) *WorkorchService {
@@ -88,46 +127,250 @@ func NewWorkorchService(runtime Runtime) *WorkorchService {
 	}
 }
 
+func workorchSliceDefinitions() []sliceDefinition {
+	return []sliceDefinition{
+		{ID: "workorch-runnable", Title: "workorch runnable slice", Run: (*WorkorchService).RunRunnableSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "runnable", WorkspaceID: "ws-workorch-runnable", RunID: "run-workorch-runnable", StepID: "run-workorch-runnable/step-1",
+		}},
+		{ID: "workorch-runtime-failed-terminal", Title: "workorch runtime-failed-terminal slice", Run: (*WorkorchService).RunRuntimeFailedTerminalSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "runtime_failed_terminal", WorkspaceID: "ws-workorch-runtime-failed", RunID: "run-workorch-runtime-failed", StepID: "run-workorch-runtime-failed/step-1",
+		}},
+		{ID: "workorch-multi-step-completed", Title: "workorch multi-step-completed slice", Run: (*WorkorchService).RunMultiStepCompletedSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "multi_step_completed", WorkspaceID: "ws-workorch-multi-step", RunID: "run-workorch-multi-step", StepID: "run-workorch-multi-step/step-2",
+			StepIDs: []common.StepID{"run-workorch-multi-step/step-1", "run-workorch-multi-step/step-2"},
+		}},
+		{ID: "workorch-conditional-branch-completed", Title: "workorch conditional-branch-completed slice", Run: (*WorkorchService).RunConditionalBranchCompletedSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "conditional_branch_completed", WorkspaceID: "ws-workorch-conditional-branch", RunID: "run-workorch-conditional-branch", StepID: "run-workorch-conditional-branch/step-fast",
+			StepIDs: []common.StepID{"run-workorch-conditional-branch/step-1", "run-workorch-conditional-branch/step-fast"},
+		}},
+		{ID: "workorch-conditional-branch-review-completed", Title: "workorch conditional-branch-review-completed slice", Run: (*WorkorchService).RunConditionalBranchReviewCompletedSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "conditional_branch_review_completed", WorkspaceID: "ws-workorch-conditional-branch-review", RunID: "run-workorch-conditional-branch-branch-slow", StepID: "run-workorch-conditional-branch-branch-slow/step-review",
+			StepIDs: []common.StepID{"run-workorch-conditional-branch-branch-slow/step-1", "run-workorch-conditional-branch-branch-slow/step-review"},
+		}},
+		{ID: "workorch-runtime-multi-decision-gate-completed", Title: "workorch runtime-multi-decision-gate-completed slice", Run: (*WorkorchService).RunRuntimeMultiDecisionGateCompletedSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "runtime_multi_decision_gate_completed", WorkspaceID: "ws-workorch-multi-decision-gate", RunID: "run-workorch-multi-decision-gate", StepID: "run-workorch-multi-decision-gate/step-3",
+			StepIDs: []common.StepID{"run-workorch-multi-decision-gate/step-1", "run-workorch-multi-decision-gate/step-2", "run-workorch-multi-decision-gate/step-3"},
+			Refs:    presenter.BlockingRefs{TicketID: "ticket-run-workorch-multi-decision-gate-gate-2"},
+		}},
+		{ID: "workorch-runtime-multi-decision-gate-second-gate-rejected-terminal", Title: "workorch runtime-multi-decision-gate-second-gate-rejected-terminal slice", Run: (*WorkorchService).RunRuntimeMultiDecisionGateSecondGateRejectedTerminalSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "runtime_multi_decision_gate_second_gate_rejected_terminal", WorkspaceID: "ws-workorch-multi-decision-gate-rejected", RunID: "run-workorch-multi-decision-gate-rejected",
+			StepIDs: []common.StepID{"run-workorch-multi-decision-gate-rejected/step-1", "run-workorch-multi-decision-gate-rejected/step-2"},
+			Refs:    presenter.BlockingRefs{TicketID: "ticket-run-workorch-multi-decision-gate-rejected-gate-2"},
+		}},
+		{ID: "workorch-runtime-decision-blocked-resume", Title: "workorch runtime-decision-blocked-resume slice", Run: (*WorkorchService).RunRuntimeDecisionBlockedResumeSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "runtime_decision_blocked_resume", WorkspaceID: "ws-workorch-runtime-decision", RunID: "run-workorch-runtime-decision-block", StepID: "run-workorch-runtime-decision-block/step-2",
+			StepIDs: []common.StepID{"run-workorch-runtime-decision-block/step-1", "run-workorch-runtime-decision-block/step-2"},
+			Refs:    presenter.BlockingRefs{TicketID: "ticket-run-workorch-runtime-decision-block-runtime-decision"},
+		}},
+		{ID: "workorch-runtime-decision-rejected-terminal", Title: "workorch runtime-decision-rejected-terminal slice", Run: (*WorkorchService).RunRuntimeDecisionRejectedTerminalSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "runtime_decision_rejected_terminal", WorkspaceID: "ws-workorch-runtime-decision-rejected", RunID: "run-workorch-runtime-decision-block-rejected",
+			StepIDs: []common.StepID{"run-workorch-runtime-decision-block-rejected/step-1"},
+			Refs:    presenter.BlockingRefs{TicketID: "ticket-run-workorch-runtime-decision-block-rejected-runtime-decision"},
+		}},
+		{ID: "workorch-runtime-approval-blocked-resume", Title: "workorch runtime-approval-blocked-resume slice", Run: (*WorkorchService).RunRuntimeApprovalBlockedResumeSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "runtime_approval_blocked_resume", WorkspaceID: "ws-workorch-runtime-approval", RunID: "run-workorch-runtime-approval-block", StepID: "run-workorch-runtime-approval-block/step-2",
+			StepIDs: []common.StepID{"run-workorch-runtime-approval-block/step-1", "run-workorch-runtime-approval-block/step-2"},
+			Refs:    presenter.BlockingRefs{ApprovalID: "approval-run-workorch-runtime-approval-block-runtime-approval"},
+		}},
+		{ID: "workorch-runtime-approval-rejected-terminal", Title: "workorch runtime-approval-rejected-terminal slice", Run: (*WorkorchService).RunRuntimeApprovalRejectedTerminalSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "runtime_approval_rejected_terminal", WorkspaceID: "ws-workorch-runtime-approval-rejected", RunID: "run-workorch-runtime-approval-block-rejected",
+			StepIDs: []common.StepID{"run-workorch-runtime-approval-block-rejected/step-1"},
+			Refs:    presenter.BlockingRefs{ApprovalID: "approval-run-workorch-runtime-approval-block-rejected-runtime-approval"},
+		}},
+		{ID: "workorch-runtime-mixed-decision-approval-completed", Title: "workorch runtime-mixed-decision-approval-completed slice", Run: (*WorkorchService).RunRuntimeMixedDecisionApprovalCompletedSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "runtime_mixed_decision_approval_completed", WorkspaceID: "ws-workorch-mixed-decision-approval", RunID: "run-workorch-mixed-decision-approval", StepID: "run-workorch-mixed-decision-approval/step-3",
+			StepIDs: []common.StepID{"run-workorch-mixed-decision-approval/step-1", "run-workorch-mixed-decision-approval/step-2", "run-workorch-mixed-decision-approval/step-3"},
+			Refs:    presenter.BlockingRefs{TicketID: "ticket-run-workorch-mixed-decision-approval-mixed-decision", ApprovalID: "approval-run-workorch-mixed-decision-approval-mixed-approval"},
+		}},
+		{ID: "workorch-runtime-mixed-decision-approval-rejected-terminal", Title: "workorch runtime-mixed-decision-approval-rejected-terminal slice", Run: (*WorkorchService).RunRuntimeMixedDecisionApprovalRejectedTerminalSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "runtime_mixed_decision_approval_rejected_terminal", WorkspaceID: "ws-workorch-mixed-decision-approval-rejected", RunID: "run-workorch-mixed-decision-approval-rejected",
+			StepIDs: []common.StepID{"run-workorch-mixed-decision-approval-rejected/step-1", "run-workorch-mixed-decision-approval-rejected/step-2"},
+			Refs:    presenter.BlockingRefs{TicketID: "ticket-run-workorch-mixed-decision-approval-rejected-mixed-decision", ApprovalID: "approval-run-workorch-mixed-decision-approval-rejected-mixed-approval"},
+		}},
+		{ID: "workorch-decision-blocked-resume", Title: "workorch decision-blocked-resume slice", Run: (*WorkorchService).RunDecisionBlockedResumeSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "decision_blocked_resume", WorkspaceID: "ws-workorch-blocked-decision", RunID: "run-workorch-blocked-decision", StepID: "run-workorch-blocked-decision/step-1",
+			Refs: presenter.BlockingRefs{TicketID: "ticket-workorch-blocked-decision"},
+		}},
+		{ID: "workorch-decision-rejected-terminal", Title: "workorch decision-rejected-terminal slice", Run: (*WorkorchService).RunDecisionRejectedTerminalSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "decision_rejected_terminal", WorkspaceID: "ws-workorch-rejected-decision", RunID: "run-workorch-rejected-decision",
+			Refs: presenter.BlockingRefs{TicketID: "ticket-workorch-rejected-decision"},
+		}},
+		{ID: "workorch-approval-blocked-resume", Title: "workorch approval-blocked-resume slice", Run: (*WorkorchService).RunApprovalBlockedResumeSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "approval_blocked_resume", WorkspaceID: "ws-workorch-blocked-approval", RunID: "run-workorch-blocked-approval", StepID: "run-workorch-blocked-approval/step-1",
+			Refs: presenter.BlockingRefs{ApprovalID: "approval-workorch-blocked-approval"},
+		}},
+		{ID: "workorch-approval-rejected-terminal", Title: "workorch approval-rejected-terminal slice", Run: (*WorkorchService).RunApprovalRejectedTerminalSlice, Snapshot: sliceSnapshotLocator{
+			SliceName: "approval_rejected_terminal", WorkspaceID: "ws-workorch-rejected-approval", RunID: "run-workorch-rejected-approval",
+			Refs: presenter.BlockingRefs{ApprovalID: "approval-workorch-rejected-approval"},
+		}},
+	}
+}
+
+func ListWorkorchSlices() []SliceDescriptor {
+	definitions := workorchSliceDefinitions()
+	ret := make([]SliceDescriptor, 0, len(definitions))
+	for _, item := range definitions {
+		ret = append(ret, SliceDescriptor{
+			ID:    item.ID,
+			Title: item.Title,
+		})
+	}
+	return ret
+}
+
+func findWorkorchSliceDefinition(sliceID string) (sliceDefinition, error) {
+	if sliceID == "" {
+		return sliceDefinition{}, common.ErrInvalidArgument
+	}
+	for _, item := range workorchSliceDefinitions() {
+		if item.ID == sliceID {
+			return item, nil
+		}
+	}
+	return sliceDefinition{}, fmt.Errorf("workorch slice %q: %w", sliceID, common.ErrNotFound)
+}
+
 func RunAllWorkorch(ctx context.Context, runtime Runtime) ([]Slice, error) {
 	if err := validateRequiredDependencies(runtime); err != nil {
 		return nil, err
 	}
 	service := NewWorkorchService(runtime)
-	slices := []struct {
-		title string
-		run   func(context.Context) (*presenter.Snapshot, error)
-	}{
-		{title: "workorch runnable slice", run: service.RunRunnableSlice},
-		{title: "workorch runtime-failed-terminal slice", run: service.RunRuntimeFailedTerminalSlice},
-		{title: "workorch multi-step-completed slice", run: service.RunMultiStepCompletedSlice},
-		{title: "workorch conditional-branch-completed slice", run: service.RunConditionalBranchCompletedSlice},
-		{title: "workorch conditional-branch-review-completed slice", run: service.RunConditionalBranchReviewCompletedSlice},
-		{title: "workorch runtime-multi-decision-gate-completed slice", run: service.RunRuntimeMultiDecisionGateCompletedSlice},
-		{title: "workorch runtime-multi-decision-gate-second-gate-rejected-terminal slice", run: service.RunRuntimeMultiDecisionGateSecondGateRejectedTerminalSlice},
-		{title: "workorch runtime-decision-blocked-resume slice", run: service.RunRuntimeDecisionBlockedResumeSlice},
-		{title: "workorch runtime-decision-rejected-terminal slice", run: service.RunRuntimeDecisionRejectedTerminalSlice},
-		{title: "workorch runtime-approval-blocked-resume slice", run: service.RunRuntimeApprovalBlockedResumeSlice},
-		{title: "workorch runtime-approval-rejected-terminal slice", run: service.RunRuntimeApprovalRejectedTerminalSlice},
-		{title: "workorch runtime-mixed-decision-approval-completed slice", run: service.RunRuntimeMixedDecisionApprovalCompletedSlice},
-		{title: "workorch runtime-mixed-decision-approval-rejected-terminal slice", run: service.RunRuntimeMixedDecisionApprovalRejectedTerminalSlice},
-		{title: "workorch decision-blocked-resume slice", run: service.RunDecisionBlockedResumeSlice},
-		{title: "workorch decision-rejected-terminal slice", run: service.RunDecisionRejectedTerminalSlice},
-		{title: "workorch approval-blocked-resume slice", run: service.RunApprovalBlockedResumeSlice},
-		{title: "workorch approval-rejected-terminal slice", run: service.RunApprovalRejectedTerminalSlice},
-	}
-
-	ret := make([]Slice, 0, len(slices))
-	for _, item := range slices {
-		snapshot, err := item.run(ctx)
+	definitions := workorchSliceDefinitions()
+	ret := make([]Slice, 0, len(definitions))
+	for _, item := range definitions {
+		snapshot, err := item.Run(service, ctx)
 		if err != nil {
 			return nil, err
 		}
 		ret = append(ret, Slice{
-			Title:    item.title,
+			ID:       item.ID,
+			Title:    item.Title,
 			Snapshot: snapshot,
 		})
 	}
 	return ret, nil
+}
+
+func RunWorkorchSlice(ctx context.Context, runtime Runtime, sliceID string) (Slice, error) {
+	if err := validateRequiredDependencies(runtime); err != nil {
+		return Slice{}, err
+	}
+	definition, err := findWorkorchSliceDefinition(sliceID)
+	if err != nil {
+		return Slice{}, err
+	}
+	service := NewWorkorchService(runtime)
+	snapshot, err := definition.Run(service, ctx)
+	if err != nil {
+		return Slice{}, err
+	}
+	return Slice{
+		ID:       definition.ID,
+		Title:    definition.Title,
+		Snapshot: snapshot,
+	}, nil
+}
+
+func ReadWorkorchSliceSnapshot(ctx context.Context, runtime Runtime, sliceID string) (Slice, error) {
+	if err := validateRequiredDependencies(runtime); err != nil {
+		return Slice{}, err
+	}
+	definition, err := findWorkorchSliceDefinition(sliceID)
+	if err != nil {
+		return Slice{}, err
+	}
+	service := NewWorkorchService(runtime)
+	snapshot, err := service.snapshotWithSteps(
+		ctx,
+		definition.Snapshot.SliceName,
+		definition.Snapshot.WorkspaceID,
+		definition.Snapshot.RunID,
+		definition.Snapshot.StepID,
+		definition.Snapshot.StepIDs,
+		definition.Snapshot.Refs,
+	)
+	if err != nil {
+		return Slice{}, err
+	}
+	return Slice{
+		ID:       definition.ID,
+		Title:    definition.Title,
+		Snapshot: snapshot,
+	}, nil
+}
+
+func SummarizeWorkorchSliceStatus(ctx context.Context, runtime Runtime, sliceID string) (SliceStatus, error) {
+	item, err := ReadWorkorchSliceSnapshot(ctx, runtime, sliceID)
+	if err != nil {
+		return SliceStatus{}, err
+	}
+	return summarizeSliceStatus(item), nil
+}
+
+func ListAvailableWorkorchSliceStatuses(ctx context.Context, runtime Runtime) ([]SliceStatus, error) {
+	if err := validateRequiredDependencies(runtime); err != nil {
+		return nil, err
+	}
+	definitions := workorchSliceDefinitions()
+	ret := make([]SliceStatus, 0, len(definitions))
+	for _, item := range definitions {
+		slice, err := ReadWorkorchSliceSnapshot(ctx, runtime, item.ID)
+		if err != nil {
+			if errors.Is(err, common.ErrNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		ret = append(ret, summarizeSliceStatus(slice))
+	}
+	return ret, nil
+}
+
+func ListAvailableWorkorchSliceSnapshots(ctx context.Context, runtime Runtime) ([]Slice, error) {
+	if err := validateRequiredDependencies(runtime); err != nil {
+		return nil, err
+	}
+	definitions := workorchSliceDefinitions()
+	ret := make([]Slice, 0, len(definitions))
+	for _, item := range definitions {
+		slice, err := ReadWorkorchSliceSnapshot(ctx, runtime, item.ID)
+		if err != nil {
+			if errors.Is(err, common.ErrNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		ret = append(ret, slice)
+	}
+	return ret, nil
+}
+
+func summarizeSliceStatus(item Slice) SliceStatus {
+	status := SliceStatus{
+		ID:    item.ID,
+		Title: item.Title,
+	}
+	if item.Snapshot == nil {
+		return status
+	}
+	status.Slice = item.Snapshot.Slice
+	status.StepCount = len(item.Snapshot.Steps)
+	status.ObservedCount = len(item.Snapshot.Observed)
+	if item.Snapshot.Workspace != nil {
+		status.WorkspaceID = item.Snapshot.Workspace.ID
+		status.WorkspaceState = item.Snapshot.Workspace.State
+	}
+	if item.Snapshot.Run != nil {
+		status.RunID = item.Snapshot.Run.ID
+		status.RunState = item.Snapshot.Run.State
+		status.BlockingTicketID = item.Snapshot.Run.BlockingTicketID
+		status.BlockingApprovalID = item.Snapshot.Run.BlockingApprovalID
+	}
+	if item.Snapshot.Step != nil {
+		status.StepID = item.Snapshot.Step.ID
+		status.StepState = item.Snapshot.Step.State
+	}
+	return status
 }
 
 func (s *WorkorchService) validateSnapshotReads() error {

@@ -45,6 +45,128 @@ func TestRunAllWorkorchReturnsInvalidArgumentWhenRuntimeMissing(t *testing.T) {
 	}
 }
 
+func TestListWorkorchSlicesReturnsStableCatalog(t *testing.T) {
+	slices := ListWorkorchSlices()
+	if len(slices) != 17 {
+		t.Fatalf("len(slices) = %d, want 17", len(slices))
+	}
+	if slices[0].ID != "workorch-runnable" || slices[0].Title != "workorch runnable slice" {
+		t.Fatalf("first slice = %+v, want workorch-runnable/workorch runnable slice", slices[0])
+	}
+	if slices[len(slices)-1].ID != "workorch-approval-rejected-terminal" {
+		t.Fatalf("last slice id = %q, want workorch-approval-rejected-terminal", slices[len(slices)-1].ID)
+	}
+}
+
+func TestRunWorkorchSliceReturnsInvalidArgumentWhenRuntimeMissing(t *testing.T) {
+	if _, err := RunWorkorchSlice(context.Background(), nil, "workorch-runnable"); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want invalid argument", err)
+	}
+}
+
+func TestRunWorkorchSliceReturnsNotFoundForUnknownSlice(t *testing.T) {
+	_, runtime := newWorkorchTestService(t)
+	if _, err := RunWorkorchSlice(context.Background(), runtime, "workorch-missing"); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("err = %v, want not found", err)
+	}
+}
+
+func TestRunWorkorchSliceReturnsSingleRequestedSlice(t *testing.T) {
+	_, runtime := newWorkorchTestService(t)
+	item, err := RunWorkorchSlice(context.Background(), runtime, "workorch-runnable")
+	if err != nil {
+		t.Fatalf("RunWorkorchSlice: %v", err)
+	}
+	if item.ID != "workorch-runnable" || item.Title != "workorch runnable slice" {
+		t.Fatalf("slice = %+v, want workorch-runnable/workorch runnable slice", item)
+	}
+	if item.Snapshot == nil || item.Snapshot.Slice != "runnable" {
+		t.Fatalf("snapshot = %+v, want runnable snapshot", item.Snapshot)
+	}
+}
+
+func TestReadWorkorchSliceSnapshotReturnsNotFoundBeforeExecution(t *testing.T) {
+	_, runtime := newWorkorchTestService(t)
+	if _, err := ReadWorkorchSliceSnapshot(context.Background(), runtime, "workorch-runnable"); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("err = %v, want not found", err)
+	}
+}
+
+func TestSummarizeWorkorchSliceStatusReturnsExpectedSummary(t *testing.T) {
+	_, runtime := newWorkorchTestService(t)
+	if _, err := RunWorkorchSlice(context.Background(), runtime, "workorch-runnable"); err != nil {
+		t.Fatalf("RunWorkorchSlice: %v", err)
+	}
+
+	status, err := SummarizeWorkorchSliceStatus(context.Background(), runtime, "workorch-runnable")
+	if err != nil {
+		t.Fatalf("SummarizeWorkorchSliceStatus: %v", err)
+	}
+	if status.ID != "workorch-runnable" || status.Title != "workorch runnable slice" || status.Slice != "runnable" {
+		t.Fatalf("status = %+v, want runnable summary", status)
+	}
+	if status.WorkspaceID != "ws-workorch-runnable" || status.RunID != "run-workorch-runnable" {
+		t.Fatalf("status ids = %+v, want runnable ids", status)
+	}
+	if status.RunState != "completed" || status.StepState != "completed" {
+		t.Fatalf("status states = %+v, want completed/completed", status)
+	}
+}
+
+func TestListAvailableWorkorchSliceStatusesReturnsOnlyExistingStates(t *testing.T) {
+	_, runtime := newWorkorchTestService(t)
+
+	statuses, err := ListAvailableWorkorchSliceStatuses(context.Background(), runtime)
+	if err != nil {
+		t.Fatalf("ListAvailableWorkorchSliceStatuses before run: %v", err)
+	}
+	if len(statuses) != 0 {
+		t.Fatalf("len(statuses) = %d, want 0 before run", len(statuses))
+	}
+
+	if _, err := RunWorkorchSlice(context.Background(), runtime, "workorch-runnable"); err != nil {
+		t.Fatalf("RunWorkorchSlice: %v", err)
+	}
+
+	statuses, err = ListAvailableWorkorchSliceStatuses(context.Background(), runtime)
+	if err != nil {
+		t.Fatalf("ListAvailableWorkorchSliceStatuses after run: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("len(statuses) = %d, want 1 after single run", len(statuses))
+	}
+	if statuses[0].ID != "workorch-runnable" || statuses[0].RunState != "completed" {
+		t.Fatalf("status = %+v, want completed runnable summary", statuses[0])
+	}
+}
+
+func TestListAvailableWorkorchSliceSnapshotsReturnsOnlyExistingStates(t *testing.T) {
+	_, runtime := newWorkorchTestService(t)
+
+	slices, err := ListAvailableWorkorchSliceSnapshots(context.Background(), runtime)
+	if err != nil {
+		t.Fatalf("ListAvailableWorkorchSliceSnapshots before run: %v", err)
+	}
+	if len(slices) != 0 {
+		t.Fatalf("len(slices) = %d, want 0 before run", len(slices))
+	}
+
+	if _, err := RunWorkorchSlice(context.Background(), runtime, "workorch-runnable"); err != nil {
+		t.Fatalf("RunWorkorchSlice: %v", err)
+	}
+
+	slices, err = ListAvailableWorkorchSliceSnapshots(context.Background(), runtime)
+	if err != nil {
+		t.Fatalf("ListAvailableWorkorchSliceSnapshots after run: %v", err)
+	}
+	if len(slices) != 1 {
+		t.Fatalf("len(slices) = %d, want 1 after single run", len(slices))
+	}
+	if slices[0].ID != "workorch-runnable" || slices[0].Snapshot == nil || slices[0].Snapshot.Slice != "runnable" {
+		t.Fatalf("slice = %+v, want runnable snapshot", slices[0])
+	}
+}
+
 func TestWorkorchServiceActionMethodsReturnInvalidArgumentWhenDependenciesMissing(t *testing.T) {
 	svc := NewWorkorchService(nil)
 

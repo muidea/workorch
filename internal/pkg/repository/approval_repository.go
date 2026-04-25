@@ -10,5 +10,6 @@ import (
 type ApprovalRepository interface {
 	Create(context.Context, *approval.Approval) error
 	Get(context.Context, common.ApprovalID) (*approval.Approval, error)
+	List(context.Context) ([]*approval.Approval, error)
 	Update(context.Context, *approval.Approval) error
 }

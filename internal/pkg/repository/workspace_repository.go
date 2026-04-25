@@ -10,5 +10,6 @@ import (
 type WorkspaceRepository interface {
 	Create(context.Context, *workspace.Workspace) error
 	Get(context.Context, common.WorkspaceID) (*workspace.Workspace, error)
+	List(context.Context) ([]*workspace.Workspace, error)
 	Update(context.Context, *workspace.Workspace) error
 }

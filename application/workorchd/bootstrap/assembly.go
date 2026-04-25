@@ -59,6 +59,7 @@ func NewWithBackend(backend string, dataRoot string) *Runtime {
 		Runs:         repos.run,
 		Workspaces:   repos.workspace,
 		Orchestrator: orchestratorModule.Service(),
+		EventHub:     eventHub,
 	}))
 
 	modules := []lifecycle{

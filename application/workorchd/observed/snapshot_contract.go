@@ -27,9 +27,12 @@ type WorkspacePayload struct {
 }
 
 type RunPayload struct {
+	GoalID             string
+	DoDID              string
 	State              string
 	BlockingTicketID   string
 	BlockingApprovalID string
+	FailureReason      string
 }
 
 type StepPayload struct {
@@ -108,11 +111,21 @@ func (p WorkspacePayload) EnvelopePayload() map[string]any {
 }
 
 func (p RunPayload) EnvelopePayload() map[string]any {
-	return map[string]any{
+	payload := map[string]any{
 		events.PayloadKeyState:              p.State,
 		events.PayloadKeyBlockingTicketID:   p.BlockingTicketID,
 		events.PayloadKeyBlockingApprovalID: p.BlockingApprovalID,
 	}
+	if p.GoalID != "" {
+		payload[events.PayloadKeyGoalID] = p.GoalID
+	}
+	if p.DoDID != "" {
+		payload[events.PayloadKeyDoDID] = p.DoDID
+	}
+	if p.FailureReason != "" {
+		payload[events.PayloadKeyFailureReason] = p.FailureReason
+	}
+	return payload
 }
 
 func (p StepPayload) EnvelopePayload() map[string]any {
@@ -171,9 +184,12 @@ func decodeSnapshotPayload(topic string, payload map[string]any) (SnapshotPayloa
 			return nil, false
 		}
 		return RunPayload{
+			GoalID:             string(item.GoalID),
+			DoDID:              string(item.DoDID),
 			State:              string(item.State),
 			BlockingTicketID:   string(item.BlockingTicketID),
 			BlockingApprovalID: string(item.BlockingApprovalID),
+			FailureReason:      item.FailureReason,
 		}, true
 	case topicStepSnapshot:
 		item, ok := events.DecodeStepPayload(payload)

@@ -42,6 +42,7 @@ type ApprovalEvent struct {
 var workorchTopics = []string{
 	TopicWorkspaceCreated,
 	TopicWorkspaceStateChanged,
+	TopicRunCreated,
 	TopicRunStateChanged,
 	TopicStepDispatched,
 	TopicStepStateChanged,
@@ -90,7 +91,7 @@ func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 			return nil, false
 		}
 		return event, true
-	case TopicRunStateChanged:
+	case TopicRunCreated, TopicRunStateChanged:
 		event, ok := DecodeRunEvent(envelope)
 		if !ok {
 			return nil, false
@@ -138,7 +139,7 @@ func DecodeWorkspaceEvent(envelope Envelope) (WorkspaceEvent, bool) {
 }
 
 func DecodeRunEvent(envelope Envelope) (RunEvent, bool) {
-	if envelope.Topic != TopicRunStateChanged {
+	if envelope.Topic != TopicRunCreated && envelope.Topic != TopicRunStateChanged {
 		return RunEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)
@@ -151,7 +152,14 @@ func DecodeRunEvent(envelope Envelope) (RunEvent, bool) {
 	}
 	envelope = cloneEnvelope(envelope)
 	envelope.Version = spec.CurrentVersion
-	envelope.Payload = RunPayload(data.State, data.BlockingTicketID, data.BlockingApprovalID)
+	envelope.Payload = RunPayload(
+		data.GoalID,
+		data.DoDID,
+		data.State,
+		data.BlockingTicketID,
+		data.BlockingApprovalID,
+		data.FailureReason,
+	)
 	return RunEvent{envelope: envelope, Data: data}, true
 }
 

@@ -12,6 +12,7 @@ import (
 	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -31,7 +32,7 @@ func TestService_CreateRunStartRunCompleteRun_Mainline(t *testing.T) {
 		approvalRepo,
 		nil,
 	)
-	service := NewService(runRepo, workspaceRepo, orch)
+	service := NewService(runRepo, workspaceRepo, orch, nil)
 
 	workspaceID := common.WorkspaceID("ws-1")
 	runID := common.RunID("run-1")
@@ -74,7 +75,7 @@ func TestService_CreateRunStartRunCompleteRun_Mainline(t *testing.T) {
 
 func TestService_CreateRun_ValidatesWorkspaceAndArguments(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewRunRepository(), memory.NewWorkspaceRepository(), nil)
+	service := NewService(memory.NewRunRepository(), memory.NewWorkspaceRepository(), nil, nil)
 
 	if err := service.CreateRun(ctx, runservice.CreateRunCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("empty create run err = %v, want invalid argument", err)
@@ -89,7 +90,7 @@ func TestService_CreateRun_RejectsDuplicateRunID(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
-	service := NewService(runRepo, workspaceRepo, nil)
+	service := NewService(runRepo, workspaceRepo, nil, nil)
 
 	workspaceID := common.WorkspaceID("ws-dup")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
@@ -125,11 +126,44 @@ func TestService_CreateRun_RejectsDuplicateRunID(t *testing.T) {
 	}
 }
 
+func TestService_CreateRun_PublishesRunCreatedEvent(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	hub := events.NewMemoryHub()
+	service := NewService(runRepo, workspaceRepo, nil, hub)
+
+	workspaceID := common.WorkspaceID("ws-created-event")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	if err := service.CreateRun(ctx, runservice.CreateRunCommand{
+		RunID:       common.RunID("run-created-event"),
+		WorkspaceID: workspaceID,
+		GoalID:      common.GoalID("goal-created-event"),
+		DoDID:       common.DoDID("dod-created-event"),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	published := hub.Published()
+	if len(published) != 1 {
+		t.Fatalf("published events = %d, want 1", len(published))
+	}
+	if published[0].Topic != events.TopicRunCreated {
+		t.Fatalf("topic = %s, want %s", published[0].Topic, events.TopicRunCreated)
+	}
+	if published[0].Payload[events.PayloadKeyGoalID] != "goal-created-event" || published[0].Payload[events.PayloadKeyDoDID] != "dod-created-event" {
+		t.Fatalf("payload = %#v, want goalId/doDId", published[0].Payload)
+	}
+}
+
 func TestService_EnsureRun_IsIdempotentAndRejectsSemanticMismatch(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
-	service := NewService(runRepo, workspaceRepo, nil)
+	service := NewService(runRepo, workspaceRepo, nil, nil)
 
 	workspaceID := common.WorkspaceID("ws-ensure")
 	otherWorkspaceID := common.WorkspaceID("ws-ensure-other")
@@ -178,7 +212,7 @@ func TestService_EnsureRun_IsIdempotentAndRejectsSemanticMismatch(t *testing.T) 
 
 func TestService_StartRun_ValidateArgumentsAndRequireOrchestrator(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewRunRepository(), memory.NewWorkspaceRepository(), nil)
+	service := NewService(memory.NewRunRepository(), memory.NewWorkspaceRepository(), nil, nil)
 
 	if err := service.StartRun(ctx, runservice.StartRunCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("start empty err = %v, want invalid argument", err)
@@ -193,7 +227,7 @@ func TestService_StartRun_ValidateArgumentsAndRequireOrchestrator(t *testing.T) 
 
 func TestService_ResumeBlockCommands_ValidateArgumentsAndRequireOrchestrator(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewRunRepository(), memory.NewWorkspaceRepository(), nil)
+	service := NewService(memory.NewRunRepository(), memory.NewWorkspaceRepository(), nil, nil)
 
 	if err := service.ResumeRun(ctx, runservice.ResumeRunCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("resume empty err = %v, want invalid argument", err)
@@ -242,7 +276,7 @@ func TestService_EnsureRunLifecycleHonorsIdempotentAndTerminalSemantics(t *testi
 		approvalRepo,
 		nil,
 	)
-	service := NewService(runRepo, workspaceRepo, orch)
+	service := NewService(runRepo, workspaceRepo, orch, nil)
 
 	workspaceID := common.WorkspaceID("ws-ensure-lifecycle")
 	runID := common.RunID("run-ensure-lifecycle")
@@ -305,7 +339,7 @@ func TestService_EnsureBlockedOnDecision_ReturnsConflictWhenBlockedByDifferentRe
 		approvalRepo,
 		nil,
 	)
-	service := NewService(runRepo, workspaceRepo, orch)
+	service := NewService(runRepo, workspaceRepo, orch, nil)
 
 	workspaceID := common.WorkspaceID("ws-decision-block-conflict")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
@@ -380,7 +414,7 @@ func TestService_EnsureBlockedOnApproval_ReturnsConflictWhenBlockedByDifferentRe
 		approvalRepo,
 		nil,
 	)
-	service := NewService(runRepo, workspaceRepo, orch)
+	service := NewService(runRepo, workspaceRepo, orch, nil)
 
 	workspaceID := common.WorkspaceID("ws-approval-block-conflict")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
@@ -477,7 +511,7 @@ func TestService_ResumeRun_FromBlockedStates_ReachesMinimalExecutionChain(t *tes
 				approvalRepo,
 				nil,
 			)
-			service := NewService(runRepo, workspaceRepo, orch)
+			service := NewService(runRepo, workspaceRepo, orch, nil)
 
 			workspaceID := common.WorkspaceID("ws-" + tc.name)
 			runID := common.RunID("run-" + tc.name)
@@ -584,7 +618,7 @@ func TestService_ResumeRun_RejectsNonBlockedStates(t *testing.T) {
 		approvalRepo,
 		nil,
 	)
-	service := NewService(runRepo, workspaceRepo, orch)
+	service := NewService(runRepo, workspaceRepo, orch, nil)
 
 	workspaceID := common.WorkspaceID("ws-1")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
@@ -617,7 +651,8 @@ func TestService_CompleteRun_WithoutOrchestrator(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
-	service := NewService(runRepo, workspaceRepo, nil)
+	hub := events.NewMemoryHub()
+	service := NewService(runRepo, workspaceRepo, nil, hub)
 
 	workspaceID := common.WorkspaceID("ws-1")
 	runID := common.RunID("run-1")
@@ -639,11 +674,20 @@ func TestService_CompleteRun_WithoutOrchestrator(t *testing.T) {
 	if r.State != common.RunStateCompleted {
 		t.Fatalf("run state = %q, want completed", r.State)
 	}
+
+	published := hub.Published()
+	if len(published) != 2 {
+		t.Fatalf("published events = %d, want 2", len(published))
+	}
+	last := published[len(published)-1]
+	if last.Topic != events.TopicRunStateChanged || last.Payload[events.PayloadKeyState] != string(common.RunStateCompleted) {
+		t.Fatalf("last event = %#v, want run completed", last)
+	}
 }
 
 func TestService_CompleteRunAndFailRun_ValidateArguments(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewRunRepository(), memory.NewWorkspaceRepository(), nil)
+	service := NewService(memory.NewRunRepository(), memory.NewWorkspaceRepository(), nil, nil)
 
 	if err := service.CompleteRun(ctx, runservice.CompleteRunCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("complete empty err = %v, want invalid argument", err)
@@ -661,7 +705,8 @@ func TestService_FailRun_WithoutOrchestrator(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
-	service := NewService(runRepo, workspaceRepo, nil)
+	hub := events.NewMemoryHub()
+	service := NewService(runRepo, workspaceRepo, nil, hub)
 
 	workspaceID := common.WorkspaceID("ws-fail")
 	runID := common.RunID("run-fail")
@@ -696,6 +741,18 @@ func TestService_FailRun_WithoutOrchestrator(t *testing.T) {
 	}
 	if failed.BlockingTicketID != "" || failed.BlockingApprovalID != "" {
 		t.Fatalf("blocking refs not cleared: ticket=%q approval=%q", failed.BlockingTicketID, failed.BlockingApprovalID)
+	}
+	if failed.FailureReason != "manual fail" {
+		t.Fatalf("failureReason = %q, want manual fail", failed.FailureReason)
+	}
+
+	published := hub.Published()
+	if len(published) != 2 {
+		t.Fatalf("published events = %d, want 2", len(published))
+	}
+	last := published[len(published)-1]
+	if last.Topic != events.TopicRunStateChanged || last.Payload[events.PayloadKeyFailureReason] != "manual fail" {
+		t.Fatalf("last event = %#v, want failure reason", last)
 	}
 }
 

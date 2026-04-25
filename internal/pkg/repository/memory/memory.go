@@ -43,6 +43,24 @@ func (r *WorkspaceRepository) Get(_ context.Context, id common.WorkspaceID) (*wo
 	return &cloned, nil
 }
 
+func (r *WorkspaceRepository) List(_ context.Context) ([]*workspace.Workspace, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := make([]string, 0, len(r.items))
+	for id := range r.items {
+		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+
+	ret := make([]*workspace.Workspace, 0, len(ids))
+	for _, id := range ids {
+		cloned := *r.items[common.WorkspaceID(id)]
+		ret = append(ret, &cloned)
+	}
+	return ret, nil
+}
+
 func (r *WorkspaceRepository) Update(_ context.Context, item *workspace.Workspace) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -158,6 +176,24 @@ func (r *RunRepository) Get(_ context.Context, id common.RunID) (*run.Run, error
 	return &cloned, nil
 }
 
+func (r *RunRepository) List(_ context.Context) ([]*run.Run, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := make([]string, 0, len(r.items))
+	for id := range r.items {
+		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+
+	ret := make([]*run.Run, 0, len(ids))
+	for _, id := range ids {
+		cloned := *r.items[common.RunID(id)]
+		ret = append(ret, &cloned)
+	}
+	return ret, nil
+}
+
 func (r *RunRepository) Update(_ context.Context, item *run.Run) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -260,6 +296,24 @@ func (r *DecisionTicketRepository) Get(_ context.Context, id common.TicketID) (*
 	return &cloned, nil
 }
 
+func (r *DecisionTicketRepository) List(_ context.Context) ([]*decision.Ticket, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := make([]string, 0, len(r.items))
+	for id := range r.items {
+		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+
+	ret := make([]*decision.Ticket, 0, len(ids))
+	for _, id := range ids {
+		cloned := *r.items[common.TicketID(id)]
+		ret = append(ret, &cloned)
+	}
+	return ret, nil
+}
+
 func (r *DecisionTicketRepository) Update(_ context.Context, item *decision.Ticket) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -331,6 +385,24 @@ func (r *ApprovalRepository) Get(_ context.Context, id common.ApprovalID) (*appr
 	}
 	cloned := *item
 	return &cloned, nil
+}
+
+func (r *ApprovalRepository) List(_ context.Context) ([]*approval.Approval, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := make([]string, 0, len(r.items))
+	for id := range r.items {
+		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+
+	ret := make([]*approval.Approval, 0, len(ids))
+	for _, id := range ids {
+		cloned := *r.items[common.ApprovalID(id)]
+		ret = append(ret, &cloned)
+	}
+	return ret, nil
 }
 
 func (r *ApprovalRepository) Update(_ context.Context, item *approval.Approval) error {

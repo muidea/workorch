@@ -97,6 +97,7 @@ func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) 
 	}
 
 	r.State = common.RunStateRunning
+	r.FailureReason = ""
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
@@ -146,6 +147,7 @@ func (o *RuntimeOrchestrator) BlockOnDecision(ctx context.Context, runID common.
 	r.State = common.RunStateBlockedOnDecision
 	r.BlockingTicketID = ticketID
 	r.BlockingApprovalID = ""
+	r.FailureReason = ""
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
@@ -166,6 +168,7 @@ func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.
 	r.State = common.RunStateBlockedOnApproval
 	r.BlockingApprovalID = approvalID
 	r.BlockingTicketID = ""
+	r.FailureReason = ""
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
@@ -224,6 +227,7 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 	}
 
 	r.State = common.RunStateRunning
+	r.FailureReason = ""
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
@@ -251,6 +255,7 @@ func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunI
 	r.State = common.RunStateCompleted
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""
+	r.FailureReason = ""
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
@@ -288,6 +293,7 @@ func (o *RuntimeOrchestrator) FailRun(ctx context.Context, runID common.RunID, r
 	r.State = common.RunStateFailed
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""
+	r.FailureReason = reason
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
@@ -321,7 +327,14 @@ func (o *RuntimeOrchestrator) publishRunStateChanged(ctx context.Context, run *r
 		SubjectID:    string(run.ID),
 		WorkspaceID:  string(run.WorkspaceID),
 		RunID:        string(run.ID),
-		Payload:      events.RunPayload(run.State, run.BlockingTicketID, run.BlockingApprovalID),
+		Payload: events.RunPayload(
+			run.GoalID,
+			run.DoDID,
+			run.State,
+			run.BlockingTicketID,
+			run.BlockingApprovalID,
+			run.FailureReason,
+		),
 	})
 }
 
@@ -584,7 +597,7 @@ func (o *RuntimeOrchestrator) publishWorkspaceStateChanged(ctx context.Context, 
 		SubjectID:    string(workspace.ID),
 		WorkspaceID:  string(workspace.ID),
 		RunID:        string(runID),
-		Payload:      events.WorkspacePayload("", workspace.State, workspace.ActiveRunID),
+		Payload:      events.WorkspacePayload(workspace.Title, workspace.State, workspace.ActiveRunID),
 	})
 }
 

@@ -10,9 +10,11 @@ import (
 func TestDecodeWorkorchEventReturnsTypedRunEvent(t *testing.T) {
 	event, ok := DecodeWorkorchEvent(Envelope{
 		Version: WorkorchEventVersion,
-		Topic:   TopicRunStateChanged,
+		Topic:   TopicRunCreated,
 		RunID:   "run-1",
 		Payload: map[string]any{
+			PayloadKeyGoalID:             "goal-1",
+			PayloadKeyDoDID:              "dod-1",
 			PayloadKeyState:              string(common.RunStateRunning),
 			PayloadKeyBlockingTicketID:   "",
 			PayloadKeyBlockingApprovalID: "",
@@ -29,6 +31,9 @@ func TestDecodeWorkorchEventReturnsTypedRunEvent(t *testing.T) {
 	if runEvent.Data.State != common.RunStateRunning {
 		t.Fatalf("run state = %s, want %s", runEvent.Data.State, common.RunStateRunning)
 	}
+	if runEvent.Data.GoalID != "goal-1" || runEvent.Data.DoDID != "dod-1" {
+		t.Fatalf("run goal/dod = %s/%s, want goal-1/dod-1", runEvent.Data.GoalID, runEvent.Data.DoDID)
+	}
 	if runEvent.Envelope().Version != WorkorchEventVersion {
 		t.Fatalf("normalized version = %s, want %s", runEvent.Envelope().Version, WorkorchEventVersion)
 	}
@@ -40,9 +45,9 @@ func TestDecodeWorkorchEventReturnsTypedRunEvent(t *testing.T) {
 func TestDecodeWorkorchEventRejectsIncompatibleVersion(t *testing.T) {
 	_, ok := DecodeWorkorchEvent(Envelope{
 		Version: "workorch.event.v2",
-		Topic:   TopicRunStateChanged,
+		Topic:   TopicRunCreated,
 		RunID:   "run-1",
-		Payload: RunPayload(common.RunStateRunning, "", ""),
+		Payload: RunPayload("goal-1", "dod-1", common.RunStateRunning, "", "", ""),
 	})
 	if ok {
 		t.Fatalf("DecodeWorkorchEvent should reject incompatible version")

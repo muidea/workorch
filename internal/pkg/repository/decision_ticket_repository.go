@@ -10,5 +10,6 @@ import (
 type DecisionTicketRepository interface {
 	Create(context.Context, *decision.Ticket) error
 	Get(context.Context, common.TicketID) (*decision.Ticket, error)
+	List(context.Context) ([]*decision.Ticket, error)
 	Update(context.Context, *decision.Ticket) error
 }

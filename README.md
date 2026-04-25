@@ -60,12 +60,12 @@ Current boundary:
 - `internal/pkg/events/workorch_version.go`: now centralizes strict workorch event/snapshot version constants and topic-scoped contract lookup
 - `observed/workorch_contract.go`: now decodes and validates published workorch payloads before turning them into acceptance snapshots
 - `observed/snapshot_contract.go`: now centralizes typed workorch snapshot items while `presenter` handles the final JSON-compatible rendering shape
-- `workspace / decision / approval`: now publish create/resolve events into the shared `EventHub`
+- `workspace / run / decision / approval`: now publish formal business events into the shared `EventHub`, and `run` now has both `created` and `state changed` events
 - `orchestrator`: now also publishes `workspace` runtime state changes when `activeRunId` is bound or cleared
 - `observed/collector.go`: now subscribes to workorch event topics and collects observed input without relying on `MemoryHub.Published()`
 - `appservice/runtime_managed.go`: now owns explicit collector lifecycle via `ManagedRuntime`
 - `appservice/runtime_adapter.go`: now acts as a pure business runtime adapter without collector ownership
-- `observed/`: now prefers subscribed/published `workspace / run / step / decision / approval` events when available, including workspace runtime `activeRunId` changes, falls back to state-derived envelopes only when an event source is still absent, and centralizes the workorch event-to-snapshot mapper contract in one place
+- `observed/`: now prefers subscribed/published `workspace / run / step / decision / approval` events when available, treats `observed` as an event-normalization layer rather than a business state source, and falls back to state-derived envelopes only when a matching formal event is absent
 - `presenter/`: owns snapshot view mapping and output only
 
 ## Workorch semantics retained
@@ -89,19 +89,22 @@ make test-race
 make build
 make run
 make run-file
+make verify-service
+make verify-service-file
 make ci
 ```
 
 Notes:
 
 - `make build` writes the binary to `./bin/workorchd`
-- `make run-file` runs the demo with the file-backed repository backend
-- file-backed demo execution is now repeatable against the same data directory for the shipped workorch demo IDs
+- `make verify-service` and `make verify-service-file` are the formal local acceptance checks for the HTTP service
+- `make run-file` runs the service with the file-backed repository backend
+- file-backed service execution is repeatable against the same data directory for the shipped workorch IDs
 - `make ci` is the local equivalent of the GitHub Actions baseline
 
-## Workorch acceptance demo
+## Workorch Service
 
-Run:
+Start the service:
 
 ```bash
 make run
@@ -109,7 +112,7 @@ make run
 go run ./application/workorchd
 ```
 
-Optional file-backed demo run:
+Optional file-backed service run:
 
 ```bash
 make run-file
@@ -117,13 +120,219 @@ make run-file
 WORKORCH_REPOSITORY_BACKEND=file WORKORCH_DATA_DIR=.workorch-data go run ./application/workorchd
 ```
 
-Expected observable output:
+Container build and run:
 
-- `workorch runnable slice`: shows workspace/run/step reaching `completed`
-- `workorch decision-blocked-resume slice`: shows a decision ticket being created, resolved, then the run resuming to `completed`
-- `workorch approval-blocked-resume slice`: shows an approval gate being created, approved, then the run resuming to `completed`
-- `workorch approval-rejected-terminal slice`: shows an approval gate being rejected, then the run reaching `failed` without dispatching a runtime step
-- `observed`: emits minimal envelope-style JSON snapshots for workspace/run/step/blocking objects, only as acceptance output, not a full event bus
+```bash
+docker build -t workorchd:local .
+docker run --rm -p 8080:8080 workorchd:local
+```
+
+Optional file-backed container run:
+
+```bash
+mkdir -p .workorch-data
+chmod 0777 .workorch-data
+docker run --rm \
+  -p 8080:8080 \
+  -e WORKORCH_REPOSITORY_BACKEND=file \
+  -e WORKORCH_DATA_DIR=/var/lib/workorch \
+  -v "$(pwd)/.workorch-data:/var/lib/workorch" \
+  workorchd:local
+```
+
+The mounted data directory must be writable by the non-root `workorch` user inside the container.
+
+Default listen address:
+
+```bash
+WORKORCH_SERVER_ADDR=:8080
+```
+
+Optional service runtime configuration:
+
+```bash
+WORKORCH_SERVER_READ_HEADER_TIMEOUT=5s
+WORKORCH_SERVER_READ_TIMEOUT=15s
+WORKORCH_SERVER_WRITE_TIMEOUT=30s
+WORKORCH_SERVER_IDLE_TIMEOUT=60s
+WORKORCH_SERVER_SHUTDOWN_TIMEOUT=5s
+WORKORCH_SERVER_MAX_CONCURRENT_RUNS=1
+```
+
+Available endpoints:
+
+- `GET /healthz`
+- `GET /readyz`
+- `GET /metrics`
+- `POST /api/v1/workorch/workspaces`
+- `GET /api/v1/workorch/workspaces`
+- `GET /api/v1/workorch/workspaces/{workspaceId}`
+- `GET /api/v1/workorch/workspaces/{workspaceId}/snapshot`
+- `POST /api/v1/workorch/workspaces/{workspaceId}/runs`
+- `GET /api/v1/workorch/runs`
+- `GET /api/v1/workorch/runs/{runId}`
+- `GET /api/v1/workorch/runs/{runId}/snapshot`
+- `GET /api/v1/workorch/runs/{runId}/status`
+- `POST /api/v1/workorch/runs/{runId}/start`
+- `POST /api/v1/workorch/runs/{runId}/resume`
+- `GET /api/v1/workorch/decisions`
+- `GET /api/v1/workorch/decisions/{ticketId}`
+- `POST /api/v1/workorch/decisions/{ticketId}/resolve`
+- `POST /api/v1/workorch/decisions/{ticketId}/reject`
+- `GET /api/v1/workorch/approvals`
+- `GET /api/v1/workorch/approvals/{approvalId}`
+- `POST /api/v1/workorch/approvals/{approvalId}/approve`
+- `POST /api/v1/workorch/approvals/{approvalId}/reject`
+- `GET /api/v1/workorch/slices`
+- `GET /api/v1/workorch/slices/snapshots`
+- `GET /api/v1/workorch/slices/statuses`
+- `GET /api/v1/workorch/slices/{sliceId}/status`
+- `GET /api/v1/workorch/slices/{sliceId}/snapshot`
+- `POST /api/v1/workorch/slices/{sliceId}/runs`
+- `POST /api/v1/workorch/runs`
+
+Minimal deployment verification:
+
+```bash
+WORKSPACE_ID="ws-demo-$(date +%s)"
+curl http://127.0.0.1:8080/healthz
+curl http://127.0.0.1:8080/readyz
+curl http://127.0.0.1:8080/metrics
+curl -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces \
+  -H 'Content-Type: application/json' \
+  -d "{\"workspaceId\":\"${WORKSPACE_ID}\",\"title\":\"demo workspace\"}"
+curl http://127.0.0.1:8080/api/v1/workorch/slices
+curl -X POST http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/runs
+curl -X POST http://127.0.0.1:8080/api/v1/workorch/runs
+```
+
+Persisted-state verification for the file-backed backend:
+
+```bash
+RUN_ID="run-demo-$(date +%s)"
+curl http://127.0.0.1:8080/api/v1/workorch/workspaces
+curl http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}
+curl http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/snapshot
+curl -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
+  -H 'Content-Type: application/json' \
+  -d "{\"runId\":\"${RUN_ID}\",\"goalId\":\"goal-demo\",\"doDId\":\"dod-demo\"}"
+curl -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}/start
+curl http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}/snapshot
+curl http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}/status
+BLOCKED_RUN_ID="run-runtime-decision-block-demo"
+curl -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
+  -H 'Content-Type: application/json' \
+  -d "{\"runId\":\"${BLOCKED_RUN_ID}\"}"
+curl -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${BLOCKED_RUN_ID}/start
+curl http://127.0.0.1:8080/api/v1/workorch/decisions
+curl "http://127.0.0.1:8080/api/v1/workorch/decisions?workspaceId=${WORKSPACE_ID}"
+curl "http://127.0.0.1:8080/api/v1/workorch/decisions?runId=${BLOCKED_RUN_ID}"
+TICKET_ID="ticket-run-runtime-decision-block-demo-runtime-decision"
+curl http://127.0.0.1:8080/api/v1/workorch/decisions/${TICKET_ID}
+curl -X POST http://127.0.0.1:8080/api/v1/workorch/decisions/${TICKET_ID}/resolve
+curl -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${BLOCKED_RUN_ID}/resume
+APPROVAL_RUN_ID="run-runtime-approval-block-demo"
+curl -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
+  -H 'Content-Type: application/json' \
+  -d "{\"runId\":\"${APPROVAL_RUN_ID}\"}"
+curl -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${APPROVAL_RUN_ID}/start
+curl http://127.0.0.1:8080/api/v1/workorch/approvals
+curl "http://127.0.0.1:8080/api/v1/workorch/approvals?workspaceId=${WORKSPACE_ID}"
+curl "http://127.0.0.1:8080/api/v1/workorch/approvals?runId=${APPROVAL_RUN_ID}"
+APPROVAL_ID="approval-run-runtime-approval-block-demo-runtime-approval"
+curl http://127.0.0.1:8080/api/v1/workorch/approvals/${APPROVAL_ID}
+curl -X POST http://127.0.0.1:8080/api/v1/workorch/approvals/${APPROVAL_ID}/approve
+curl -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${APPROVAL_RUN_ID}/resume
+curl http://127.0.0.1:8080/api/v1/workorch/runs
+curl "http://127.0.0.1:8080/api/v1/workorch/runs?workspaceId=${WORKSPACE_ID}"
+curl http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}
+curl http://127.0.0.1:8080/api/v1/workorch/slices/snapshots
+curl http://127.0.0.1:8080/api/v1/workorch/slices/statuses
+curl http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/status
+curl http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/snapshot
+```
+
+Deployment-oriented validation:
+
+```bash
+WORKORCH_SERVER_ADDR=:8080 \
+WORKORCH_SERVER_MAX_CONCURRENT_RUNS=1 \
+go run ./application/workorchd
+```
+
+Then verify:
+
+```bash
+WORKSPACE_ID="ws-demo-$(date +%s)"
+curl -f http://127.0.0.1:8080/healthz
+curl -f http://127.0.0.1:8080/readyz
+curl -f http://127.0.0.1:8080/metrics | grep workorch_http_requests_total
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces \
+  -H 'Content-Type: application/json' \
+  -d "{\"workspaceId\":\"${WORKSPACE_ID}\",\"title\":\"demo workspace\"}"
+curl -f http://127.0.0.1:8080/api/v1/workorch/slices
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/runs
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs
+```
+
+For file-backed verification, also run:
+
+```bash
+RUN_ID="run-demo-$(date +%s)"
+curl -f http://127.0.0.1:8080/api/v1/workorch/workspaces
+curl -f http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}
+curl -f http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/snapshot
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
+  -H 'Content-Type: application/json' \
+  -d "{\"runId\":\"${RUN_ID}\",\"goalId\":\"goal-demo\",\"doDId\":\"dod-demo\"}"
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}/start
+curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}/snapshot
+curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}/status
+BLOCKED_RUN_ID="run-runtime-decision-block-demo"
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
+  -H 'Content-Type: application/json' \
+  -d "{\"runId\":\"${BLOCKED_RUN_ID}\"}"
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${BLOCKED_RUN_ID}/start
+curl -f http://127.0.0.1:8080/api/v1/workorch/decisions
+curl -f "http://127.0.0.1:8080/api/v1/workorch/decisions?workspaceId=${WORKSPACE_ID}"
+curl -f "http://127.0.0.1:8080/api/v1/workorch/decisions?runId=${BLOCKED_RUN_ID}"
+TICKET_ID="ticket-run-runtime-decision-block-demo-runtime-decision"
+curl -f http://127.0.0.1:8080/api/v1/workorch/decisions/${TICKET_ID}
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/decisions/${TICKET_ID}/resolve
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${BLOCKED_RUN_ID}/resume
+APPROVAL_RUN_ID="run-runtime-approval-block-demo"
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
+  -H 'Content-Type: application/json' \
+  -d "{\"runId\":\"${APPROVAL_RUN_ID}\"}"
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${APPROVAL_RUN_ID}/start
+curl -f http://127.0.0.1:8080/api/v1/workorch/approvals
+curl -f "http://127.0.0.1:8080/api/v1/workorch/approvals?workspaceId=${WORKSPACE_ID}"
+curl -f "http://127.0.0.1:8080/api/v1/workorch/approvals?runId=${APPROVAL_RUN_ID}"
+APPROVAL_ID="approval-run-runtime-approval-block-demo-runtime-approval"
+curl -f http://127.0.0.1:8080/api/v1/workorch/approvals/${APPROVAL_ID}
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/approvals/${APPROVAL_ID}/approve
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${APPROVAL_RUN_ID}/resume
+curl -f http://127.0.0.1:8080/api/v1/workorch/runs
+curl -f "http://127.0.0.1:8080/api/v1/workorch/runs?workspaceId=${WORKSPACE_ID}"
+curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}
+curl -f http://127.0.0.1:8080/api/v1/workorch/slices/snapshots
+curl -f http://127.0.0.1:8080/api/v1/workorch/slices/statuses
+curl -f http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/status
+curl -f http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/snapshot
+```
+
+The workspace create endpoint creates one formal `workorch` workspace instance. The workspace list and single-workspace read endpoints are persisted read endpoints, so they are intended for the file-backed repository backend rather than the stateless per-request memory backend. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, and single-run read endpoints provide formal `workorch` run instance management; because create depends on an existing workspace and the service creates a fresh runtime session per request, the persisted run list and read endpoints are also mainly intended for the file-backed repository backend. The run snapshot and run status endpoints provide formal `runId`-based read models without requiring `sliceId`. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision list and single-ticket endpoints provide formal query paths for decision gate instances, and the resolve/reject endpoints complete the external decision gate closure for blocked runs. The approval list and single-approval endpoints provide the same formal query and processing path for approval gates, and the approve/reject endpoints now complete the external approval gate closure for blocked runs. The slice catalog endpoint returns the current executable `workorch` slice definitions with stable IDs. The batch slice-snapshots endpoint returns all currently available persisted slice snapshots. The batch slice-statuses endpoint returns all currently available persisted slice summaries. The single-slice run endpoint executes one requested `workorch` business slice. The single-slice status and snapshot endpoints read persisted state for one requested `workorch` slice, so the persisted read endpoints are intended for the file-backed repository backend rather than the stateless per-request memory backend. The bulk run endpoint returns the current 17 `workorch` slices as JSON, including workspace/run/step/blocking snapshots and observed items. When the configured concurrent run limit is exhausted, the service returns `429 Too Many Requests`.
+
+Container-oriented deployment details are in `docs/deployment.md`, and `.env.workorchd.example` provides the baseline runtime configuration template.
+
+Formal verification entrypoints:
+
+```bash
+make verify-service
+make verify-service-file
+make docker-verify
+make docker-verify-file
+```
 
 ## Development targets
 
@@ -139,3 +348,4 @@ make ci
 
 - `docs/structure.md`: layout normalization mapping
 - `docs/workorch-status.md`: delivered scope, acceptance baseline, and next batch boundary
+- `docs/mvp-backlog.md`: MVP remaining scope, ordered todo list, and closure criteria

@@ -4,10 +4,13 @@ import "github.com/muidea/workorch/internal/pkg/common"
 
 const (
 	PayloadKeyTitle              = "title"
+	PayloadKeyGoalID             = "goalId"
+	PayloadKeyDoDID              = "doDId"
 	PayloadKeyState              = "state"
 	PayloadKeyActiveRunID        = "activeRunId"
 	PayloadKeyBlockingTicketID   = "blockingTicketId"
 	PayloadKeyBlockingApprovalID = "blockingApprovalId"
+	PayloadKeyFailureReason      = "failureReason"
 	PayloadKeyKind               = "kind"
 	PayloadKeyInput              = "input"
 	PayloadKeyOutput             = "output"
@@ -24,9 +27,12 @@ type WorkspacePayloadData struct {
 }
 
 type RunPayloadData struct {
+	GoalID             common.GoalID
+	DoDID              common.DoDID
 	State              common.RunState
 	BlockingTicketID   common.TicketID
 	BlockingApprovalID common.ApprovalID
+	FailureReason      string
 }
 
 type StepPayloadData struct {
@@ -64,12 +70,29 @@ func WorkspacePayload(title string, state common.WorkspaceState, activeRunID com
 	return payload
 }
 
-func RunPayload(state common.RunState, blockingTicketID common.TicketID, blockingApprovalID common.ApprovalID) map[string]any {
-	return map[string]any{
+func RunPayload(
+	goalID common.GoalID,
+	dodID common.DoDID,
+	state common.RunState,
+	blockingTicketID common.TicketID,
+	blockingApprovalID common.ApprovalID,
+	failureReason string,
+) map[string]any {
+	payload := map[string]any{
 		PayloadKeyState:              string(state),
 		PayloadKeyBlockingTicketID:   string(blockingTicketID),
 		PayloadKeyBlockingApprovalID: string(blockingApprovalID),
 	}
+	if goalID != "" {
+		payload[PayloadKeyGoalID] = string(goalID)
+	}
+	if dodID != "" {
+		payload[PayloadKeyDoDID] = string(dodID)
+	}
+	if failureReason != "" {
+		payload[PayloadKeyFailureReason] = failureReason
+	}
+	return payload
 }
 
 func StepPayload(kind string, state common.StepState, input, output map[string]any) map[string]any {
@@ -144,12 +167,27 @@ func DecodeRunPayload(payload map[string]any) (RunPayloadData, bool) {
 	if !ok {
 		return RunPayloadData{}, false
 	}
+	goalID, ok := optionalStringField(payload, PayloadKeyGoalID)
+	if !ok {
+		return RunPayloadData{}, false
+	}
+	dodID, ok := optionalStringField(payload, PayloadKeyDoDID)
+	if !ok {
+		return RunPayloadData{}, false
+	}
 	blockingTicketID, _ := optionalStringField(payload, PayloadKeyBlockingTicketID)
 	blockingApprovalID, _ := optionalStringField(payload, PayloadKeyBlockingApprovalID)
+	failureReason, ok := optionalStringField(payload, PayloadKeyFailureReason)
+	if !ok {
+		return RunPayloadData{}, false
+	}
 	return RunPayloadData{
+		GoalID:             common.GoalID(goalID),
+		DoDID:              common.DoDID(dodID),
 		State:              common.RunState(state),
 		BlockingTicketID:   common.TicketID(blockingTicketID),
 		BlockingApprovalID: common.ApprovalID(blockingApprovalID),
+		FailureReason:      failureReason,
 	}, true
 }
 

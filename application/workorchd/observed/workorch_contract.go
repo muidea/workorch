@@ -44,8 +44,12 @@ var (
 			if !ok {
 				return SnapshotItem{}, false
 			}
+			title := event.Data.Title
+			if title == "" {
+				title = ref.title
+			}
 			normalized := normalizePublishedSnapshot(event.Envelope(), topicWorkspaceSnapshot, "workspace", WorkspacePayload{
-				Title:       ref.title,
+				Title:       title,
 				State:       string(event.Data.State),
 				ActiveRunID: string(event.Data.ActiveRunID),
 			})
@@ -59,7 +63,7 @@ var (
 	workorchRunSnapshotContract = workorchSnapshotContract{
 		snapshotTopic:   topicRunSnapshot,
 		subjectType:     "run",
-		publishedTopics: []string{events.TopicRunStateChanged},
+		publishedTopics: []string{events.TopicRunCreated, events.TopicRunStateChanged},
 		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
 			return item.Envelope().RunID == string(ref.runID)
 		},
@@ -69,9 +73,12 @@ var (
 				return SnapshotItem{}, false
 			}
 			normalized := normalizePublishedSnapshot(event.Envelope(), topicRunSnapshot, "run", RunPayload{
+				GoalID:             string(event.Data.GoalID),
+				DoDID:              string(event.Data.DoDID),
 				State:              string(event.Data.State),
 				BlockingTicketID:   string(event.Data.BlockingTicketID),
 				BlockingApprovalID: string(event.Data.BlockingApprovalID),
+				FailureReason:      event.Data.FailureReason,
 			})
 			normalized.StepID = ""
 			return normalized, true

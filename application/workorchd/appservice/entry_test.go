@@ -137,6 +137,45 @@ func TestRunAllWorkorchWithSessionClosesSessionAfterSuccess(t *testing.T) {
 	}
 }
 
+func TestRunWorkorchSliceWithSessionClosesSessionAfterSuccess(t *testing.T) {
+	session, err := NewRuntimeSessionWithBackend("memory", "")
+	if err != nil {
+		t.Fatalf("new runtime session: %v", err)
+	}
+
+	item, err := RunWorkorchSliceWithSession(context.Background(), session, "workorch-runnable")
+	if err != nil {
+		t.Fatalf("RunWorkorchSliceWithSession: %v", err)
+	}
+	if item.ID != "workorch-runnable" || item.Title != "workorch runnable slice" {
+		t.Fatalf("slice = %+v, want workorch-runnable/workorch runnable slice", item)
+	}
+	if session.Runtime != nil {
+		t.Fatalf("session runtime not released: %#v", session.Runtime)
+	}
+	if session.Bootstrap != nil {
+		t.Fatalf("session bootstrap not released: %#v", session.Bootstrap)
+	}
+}
+
+func TestListAvailableWorkorchSliceSnapshotsWithBackendReturnsPersistedSnapshots(t *testing.T) {
+	dataRoot := t.TempDir()
+	if _, err := RunWorkorchSliceWithBackend(context.Background(), "file", dataRoot, "workorch-runnable"); err != nil {
+		t.Fatalf("RunWorkorchSliceWithBackend: %v", err)
+	}
+
+	slices, err := ListAvailableWorkorchSliceSnapshotsWithBackend(context.Background(), "file", dataRoot)
+	if err != nil {
+		t.Fatalf("ListAvailableWorkorchSliceSnapshotsWithBackend: %v", err)
+	}
+	if len(slices) != 1 {
+		t.Fatalf("len(slices) = %d, want 1", len(slices))
+	}
+	if slices[0].ID != "workorch-runnable" || slices[0].Snapshot == nil || slices[0].Snapshot.Slice != "runnable" {
+		t.Fatalf("slice = %+v, want runnable snapshot", slices[0])
+	}
+}
+
 func TestRunAllWorkorchWithSessionClosesSessionWhenRuntimeInvalid(t *testing.T) {
 	session := NewRuntimeSession(bootstrap.NewWithBackend("memory", ""))
 	session.Runtime = nil
@@ -243,6 +282,74 @@ func TestRunAllWorkorchWithSessionJoinsTopLevelBusinessAndCloseErrors(t *testing
 func TestRunAllWorkorchWithBackendReturnsInvalidArgumentWhenBackendUnsupported(t *testing.T) {
 	if _, err := RunAllWorkorchWithBackend(context.Background(), "unsupported", ""); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("unsupported backend err = %v, want invalid argument", err)
+	}
+}
+
+func TestRunWorkorchSliceWithBackendReturnsNotFoundForUnknownSlice(t *testing.T) {
+	if _, err := RunWorkorchSliceWithBackend(context.Background(), "memory", "", "workorch-missing"); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("unknown slice err = %v, want not found", err)
+	}
+}
+
+func TestReadWorkorchSliceSnapshotWithBackendReadsPersistedSlice(t *testing.T) {
+	dataRoot := t.TempDir()
+
+	if _, err := RunWorkorchSliceWithBackend(context.Background(), "file", dataRoot, "workorch-runnable"); err != nil {
+		t.Fatalf("RunWorkorchSliceWithBackend: %v", err)
+	}
+
+	item, err := ReadWorkorchSliceSnapshotWithBackend(context.Background(), "file", dataRoot, "workorch-runnable")
+	if err != nil {
+		t.Fatalf("ReadWorkorchSliceSnapshotWithBackend: %v", err)
+	}
+	if item.ID != "workorch-runnable" || item.Title != "workorch runnable slice" {
+		t.Fatalf("slice = %+v, want workorch-runnable/workorch runnable slice", item)
+	}
+	if item.Snapshot == nil || item.Snapshot.Slice != "runnable" {
+		t.Fatalf("snapshot = %+v, want runnable snapshot", item.Snapshot)
+	}
+}
+
+func TestSummarizeWorkorchSliceStatusWithBackendReadsPersistedSummary(t *testing.T) {
+	dataRoot := t.TempDir()
+
+	if _, err := RunWorkorchSliceWithBackend(context.Background(), "file", dataRoot, "workorch-runnable"); err != nil {
+		t.Fatalf("RunWorkorchSliceWithBackend: %v", err)
+	}
+
+	status, err := SummarizeWorkorchSliceStatusWithBackend(context.Background(), "file", dataRoot, "workorch-runnable")
+	if err != nil {
+		t.Fatalf("SummarizeWorkorchSliceStatusWithBackend: %v", err)
+	}
+	if status.ID != "workorch-runnable" || status.RunState != "completed" || status.StepState != "completed" {
+		t.Fatalf("status = %+v, want completed runnable summary", status)
+	}
+}
+
+func TestListAvailableWorkorchSliceStatusesWithBackendReturnsPersistedStatuses(t *testing.T) {
+	dataRoot := t.TempDir()
+
+	statuses, err := ListAvailableWorkorchSliceStatusesWithBackend(context.Background(), "file", dataRoot)
+	if err != nil {
+		t.Fatalf("ListAvailableWorkorchSliceStatusesWithBackend before run: %v", err)
+	}
+	if len(statuses) != 0 {
+		t.Fatalf("len(statuses) = %d, want 0 before run", len(statuses))
+	}
+
+	if _, err := RunWorkorchSliceWithBackend(context.Background(), "file", dataRoot, "workorch-runnable"); err != nil {
+		t.Fatalf("RunWorkorchSliceWithBackend: %v", err)
+	}
+
+	statuses, err = ListAvailableWorkorchSliceStatusesWithBackend(context.Background(), "file", dataRoot)
+	if err != nil {
+		t.Fatalf("ListAvailableWorkorchSliceStatusesWithBackend after run: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("len(statuses) = %d, want 1 after single run", len(statuses))
+	}
+	if statuses[0].ID != "workorch-runnable" || statuses[0].RunState != "completed" {
+		t.Fatalf("status = %+v, want completed runnable summary", statuses[0])
 	}
 }
 
