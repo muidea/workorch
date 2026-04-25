@@ -6,6 +6,8 @@ func RuntimeDependenciesFromExports(exports bootstrap.Exports) RuntimeDependenci
 	return RuntimeDependencies{
 		Snapshot: RuntimeSnapshotDependencies{
 			Workspaces:  exports.Repositories.Workspaces,
+			Goals:       exports.Repositories.Goals,
+			DoDs:        exports.Repositories.DoDs,
 			Runs:        exports.Repositories.Runs,
 			Steps:       exports.Repositories.Steps,
 			Tickets:     exports.Repositories.Tickets,

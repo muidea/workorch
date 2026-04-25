@@ -180,6 +180,12 @@ Available endpoints:
 - `GET /api/v1/workorch/workspaces`
 - `GET /api/v1/workorch/workspaces/{workspaceId}`
 - `GET /api/v1/workorch/workspaces/{workspaceId}/snapshot`
+- `POST /api/v1/workorch/workspaces/{workspaceId}/goals`
+- `GET /api/v1/workorch/workspaces/{workspaceId}/goals`
+- `GET /api/v1/workorch/goals/{goalId}`
+- `POST /api/v1/workorch/workspaces/{workspaceId}/dods`
+- `GET /api/v1/workorch/workspaces/{workspaceId}/dods`
+- `GET /api/v1/workorch/dods/{dodId}`
 - `POST /api/v1/workorch/workspaces/{workspaceId}/runs`
 - `GET /api/v1/workorch/runs`
 - `GET /api/v1/workorch/runs/{runId}`
@@ -215,6 +221,17 @@ WORKSPACE_JSON="$(curl -sS -X POST http://127.0.0.1:8080/api/v1/workorch/workspa
 WORKSPACE_ID="$(printf '%s\n' "${WORKSPACE_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
 test -n "${WORKSPACE_ID}"
 curl http://127.0.0.1:8080/api/v1/workorch/slices
+GOAL_JSON="$(curl -sS -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/goals \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"deliver local MVP orchestration"}')"
+GOAL_ID="$(printf '%s\n' "${GOAL_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
+DOD_JSON="$(curl -sS -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/dods \
+  -H 'Content-Type: application/json' \
+  -d '{"items":["workspace created","run completed"]}')"
+DOD_ID="$(printf '%s\n' "${DOD_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
+curl -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
+  -H 'Content-Type: application/json' \
+  -d '{"runId":"run-local-verify","goalId":"'"${GOAL_ID}"'","doDId":"'"${DOD_ID}"'"}'
 curl -X POST http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/runs
 curl -X POST http://127.0.0.1:8080/api/v1/workorch/runs
 ```

@@ -12,6 +12,19 @@ export type Workspace = {
   activeRunId?: string;
 };
 
+export type Goal = {
+  id: string;
+  workspaceId: string;
+  text: string;
+};
+
+export type DoD = {
+  id: string;
+  workspaceId: string;
+  items: string[];
+  state: string;
+};
+
 export type Run = {
   id: string;
   workspaceId: string;

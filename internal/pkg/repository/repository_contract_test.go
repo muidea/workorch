@@ -28,6 +28,30 @@ func TestWorkspaceRepositoryContract_File(t *testing.T) {
 	})
 }
 
+func TestGoalRepositoryContract_Memory(t *testing.T) {
+	testGoalRepositoryContract(t, func() repository.GoalRepository {
+		return memory.NewGoalRepository()
+	})
+}
+
+func TestGoalRepositoryContract_File(t *testing.T) {
+	testGoalRepositoryContract(t, func() repository.GoalRepository {
+		return file.NewGoalRepository(filepath.Join(t.TempDir(), "goal.json"))
+	})
+}
+
+func TestDoDRepositoryContract_Memory(t *testing.T) {
+	testDoDRepositoryContract(t, func() repository.DoDRepository {
+		return memory.NewDoDRepository()
+	})
+}
+
+func TestDoDRepositoryContract_File(t *testing.T) {
+	testDoDRepositoryContract(t, func() repository.DoDRepository {
+		return file.NewDoDRepository(filepath.Join(t.TempDir(), "dod.json"))
+	})
+}
+
 func TestRunRepositoryContract_Memory(t *testing.T) {
 	testRunRepositoryContract(t, func() repository.RunRepository {
 		return memory.NewRunRepository()
@@ -91,6 +115,8 @@ func TestApprovalRepositoryContract_File(t *testing.T) {
 func TestRepositoryBundleContract_Memory(t *testing.T) {
 	bundle := repositoryBundle{
 		workspaces:  memory.NewWorkspaceRepository(),
+		goals:       memory.NewGoalRepository(),
+		dods:        memory.NewDoDRepository(),
 		runs:        memory.NewRunRepository(),
 		steps:       memory.NewStepRepository(),
 		tickets:     memory.NewDecisionTicketRepository(),
@@ -105,6 +131,8 @@ func TestRepositoryBundleContract_File(t *testing.T) {
 	build := func() repositoryBundle {
 		return repositoryBundle{
 			workspaces:  file.NewWorkspaceRepository(filepath.Join(dir, "workspace.json")),
+			goals:       file.NewGoalRepository(filepath.Join(dir, "goal.json")),
+			dods:        file.NewDoDRepository(filepath.Join(dir, "dod.json")),
 			runs:        file.NewRunRepository(filepath.Join(dir, "run.json")),
 			steps:       file.NewStepRepository(filepath.Join(dir, "step.json")),
 			tickets:     file.NewDecisionTicketRepository(filepath.Join(dir, "ticket.json")),
@@ -117,6 +145,8 @@ func TestRepositoryBundleContract_File(t *testing.T) {
 
 type repositoryBundle struct {
 	workspaces  repository.WorkspaceRepository
+	goals       repository.GoalRepository
+	dods        repository.DoDRepository
 	runs        repository.RunRepository
 	steps       repository.StepRepository
 	tickets     repository.DecisionTicketRepository
@@ -209,6 +239,118 @@ func testWorkspaceRepositoryContract(t *testing.T, factory func() repository.Wor
 		t.Fatalf("missing get err = %v, want not found", err)
 	}
 	if err := repo.Update(ctx, &workspacemodel.Workspace{ID: common.WorkspaceID("missing")}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing update err = %v, want not found", err)
+	}
+}
+
+func testGoalRepositoryContract(t *testing.T, factory func() repository.GoalRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &workspacemodel.Goal{
+		ID:          common.GoalID("goal-contract"),
+		WorkspaceID: common.WorkspaceID("ws-contract"),
+		Text:        "deliver contract goal",
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate create err = %v, want conflict", err)
+	}
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get goal: %v", err)
+	}
+	got.Text = "mutated"
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get fresh goal: %v", err)
+	}
+	if fresh.Text != item.Text {
+		t.Fatalf("goal text = %q, want %q", fresh.Text, item.Text)
+	}
+	second := &workspacemodel.Goal{
+		ID:          common.GoalID("goal-contract-2"),
+		WorkspaceID: item.WorkspaceID,
+		Text:        "deliver second contract goal",
+	}
+	if err := repo.Create(ctx, second); err != nil {
+		t.Fatalf("create second goal: %v", err)
+	}
+	listed, err := repo.ListByWorkspaceID(ctx, item.WorkspaceID)
+	if err != nil {
+		t.Fatalf("list goals: %v", err)
+	}
+	if len(listed) != 2 || listed[0].ID != item.ID || listed[1].ID != second.ID {
+		t.Fatalf("listed goals = %+v, want %q/%q", listed, item.ID, second.ID)
+	}
+	if _, err := repo.Get(ctx, common.GoalID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing get err = %v, want not found", err)
+	}
+}
+
+func testDoDRepositoryContract(t *testing.T, factory func() repository.DoDRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &workspacemodel.DoD{
+		ID:          common.DoDID("dod-contract"),
+		WorkspaceID: common.WorkspaceID("ws-contract"),
+		Items:       []string{"workspace created", "run completed"},
+		State:       common.DoDStateReady,
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create dod: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate create err = %v, want conflict", err)
+	}
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get dod: %v", err)
+	}
+	got.Items[0] = "mutated"
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get fresh dod: %v", err)
+	}
+	if fresh.Items[0] != "workspace created" {
+		t.Fatalf("dod clone isolation failed, first item = %q", fresh.Items[0])
+	}
+	fresh.State = common.DoDStateSatisfied
+	if err := repo.Update(ctx, fresh); err != nil {
+		t.Fatalf("update dod: %v", err)
+	}
+	updated, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get updated dod: %v", err)
+	}
+	if updated.State != common.DoDStateSatisfied {
+		t.Fatalf("dod state = %q, want satisfied", updated.State)
+	}
+	second := &workspacemodel.DoD{
+		ID:          common.DoDID("dod-contract-2"),
+		WorkspaceID: item.WorkspaceID,
+		Items:       []string{"second done"},
+		State:       common.DoDStateReady,
+	}
+	if err := repo.Create(ctx, second); err != nil {
+		t.Fatalf("create second dod: %v", err)
+	}
+	listed, err := repo.ListByWorkspaceID(ctx, item.WorkspaceID)
+	if err != nil {
+		t.Fatalf("list dods: %v", err)
+	}
+	if len(listed) != 2 || listed[0].ID != item.ID || listed[1].ID != second.ID {
+		t.Fatalf("listed dods = %+v, want %q/%q", listed, item.ID, second.ID)
+	}
+	if _, err := repo.Get(ctx, common.DoDID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing get err = %v, want not found", err)
+	}
+	if err := repo.Update(ctx, &workspacemodel.DoD{ID: common.DoDID("missing")}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing update err = %v, want not found", err)
 	}
 }
@@ -575,6 +717,8 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 
 	ctx := context.Background()
 	workspaceID := common.WorkspaceID("ws-bundle-contract")
+	goalID := common.GoalID("goal-bundle-contract")
+	dodID := common.DoDID("dod-bundle-contract")
 	runID := common.RunID("run-bundle-contract")
 	stepID := common.StepID("run-bundle-contract/step-1")
 	ticketID := common.TicketID("ticket-bundle-contract")
@@ -593,9 +737,36 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		t.Fatalf("duplicate workspace create err = %v, want conflict", err)
 	}
 
+	goal := &workspacemodel.Goal{
+		ID:          goalID,
+		WorkspaceID: workspaceID,
+		Text:        "bundle contract goal",
+	}
+	if err := bundle.goals.Create(ctx, goal); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+	if err := bundle.goals.Create(ctx, goal); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate goal create err = %v, want conflict", err)
+	}
+
+	dod := &workspacemodel.DoD{
+		ID:          dodID,
+		WorkspaceID: workspaceID,
+		Items:       []string{"bundle done"},
+		State:       common.DoDStateReady,
+	}
+	if err := bundle.dods.Create(ctx, dod); err != nil {
+		t.Fatalf("create dod: %v", err)
+	}
+	if err := bundle.dods.Create(ctx, dod); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate dod create err = %v, want conflict", err)
+	}
+
 	run := &runmodel.Run{
 		ID:                 runID,
 		WorkspaceID:        workspaceID,
+		GoalID:             goalID,
+		DoDID:              dodID,
 		State:              common.RunStateBlockedOnDecision,
 		BlockingTicketID:   ticketID,
 		BlockingApprovalID: approvalID,
@@ -698,6 +869,22 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		t.Fatalf("reloaded workspace activeRunID = %q, want %q", reloadedWorkspace.ActiveRunID, runID)
 	}
 
+	reloadedGoals, err := reloaded.goals.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("reload goals: %v", err)
+	}
+	if len(reloadedGoals) != 1 || reloadedGoals[0].ID != goalID || reloadedGoals[0].Text != "bundle contract goal" {
+		t.Fatalf("reloaded goals = %+v, want %q", reloadedGoals, goalID)
+	}
+
+	reloadedDoDs, err := reloaded.dods.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("reload dods: %v", err)
+	}
+	if len(reloadedDoDs) != 1 || reloadedDoDs[0].ID != dodID || reloadedDoDs[0].Items[0] != "bundle done" {
+		t.Fatalf("reloaded dods = %+v, want %q", reloadedDoDs, dodID)
+	}
+
 	reloadedRun, err := reloaded.runs.Get(ctx, runID)
 	if err != nil {
 		t.Fatalf("reload run: %v", err)
@@ -751,6 +938,12 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 
 	if _, err := reloaded.workspaces.Get(ctx, common.WorkspaceID("workspace-missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing workspace get err = %v, want not found", err)
+	}
+	if _, err := reloaded.goals.Get(ctx, common.GoalID("goal-missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing goal get err = %v, want not found", err)
+	}
+	if _, err := reloaded.dods.Get(ctx, common.DoDID("dod-missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing dod get err = %v, want not found", err)
 	}
 	if _, err := reloaded.runs.Get(ctx, common.RunID("run-missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing run get err = %v, want not found", err)

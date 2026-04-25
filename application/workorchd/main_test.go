@@ -49,6 +49,25 @@ type workorchWorkspacesResponse struct {
 	} `json:"workspaces"`
 }
 
+type workorchGoalResponse struct {
+	Service string `json:"service"`
+	Goal    struct {
+		ID          string `json:"id"`
+		WorkspaceID string `json:"workspaceId"`
+		Text        string `json:"text"`
+	} `json:"goal"`
+}
+
+type workorchDoDResponse struct {
+	Service string `json:"service"`
+	DoD     struct {
+		ID          string   `json:"id"`
+		WorkspaceID string   `json:"workspaceId"`
+		Items       []string `json:"items"`
+		State       string   `json:"state"`
+	} `json:"dod"`
+}
+
 type workorchRunInstanceResponse struct {
 	Service string `json:"service"`
 	Run     struct {
@@ -364,6 +383,8 @@ func TestWorkorchdServerSupportsFileRepositoryBackend(t *testing.T) {
 	}
 	for _, name := range []string{
 		"workspace.json",
+		"goal.json",
+		"dod.json",
 		"run.json",
 		"step.json",
 		"ticket.json",
@@ -704,6 +725,7 @@ func assertWorkspaceAvailable(t *testing.T, endpoint string, workspaceID string,
 func createRunInstance(t *testing.T, endpoint string, runID string, goalID string, dodID string) {
 	t.Helper()
 
+	goalID, dodID = defineGoalAndDoD(t, endpoint)
 	body := strings.NewReader(fmt.Sprintf(`{"runId":%q,"goalId":%q,"doDId":%q}`, runID, goalID, dodID))
 	resp, err := http.Post(endpoint, "application/json", body)
 	if err != nil {
@@ -720,6 +742,41 @@ func createRunInstance(t *testing.T, endpoint string, runID string, goalID strin
 	if payload.Run.ID != runID || payload.Run.State != "created" {
 		t.Fatalf("created run = %+v, want %s/created", payload.Run, runID)
 	}
+}
+
+func defineGoalAndDoD(t *testing.T, runEndpoint string) (string, string) {
+	t.Helper()
+
+	workspaceEndpoint := strings.TrimSuffix(runEndpoint, "/runs")
+	if workspaceEndpoint == runEndpoint {
+		t.Fatalf("run endpoint %q does not end with /runs", runEndpoint)
+	}
+	goalResp, err := http.Post(workspaceEndpoint+"/goals", "application/json", strings.NewReader(`{"text":"main test goal"}`))
+	if err != nil {
+		t.Fatalf("define goal: %v", err)
+	}
+	defer goalResp.Body.Close()
+	if goalResp.StatusCode != http.StatusCreated {
+		t.Fatalf("define goal status = %d, want 201", goalResp.StatusCode)
+	}
+	var goalBody workorchGoalResponse
+	if err := json.NewDecoder(goalResp.Body).Decode(&goalBody); err != nil {
+		t.Fatalf("decode goal response: %v", err)
+	}
+
+	dodResp, err := http.Post(workspaceEndpoint+"/dods", "application/json", strings.NewReader(`{"items":["main test completed"]}`))
+	if err != nil {
+		t.Fatalf("define dod: %v", err)
+	}
+	defer dodResp.Body.Close()
+	if dodResp.StatusCode != http.StatusCreated {
+		t.Fatalf("define dod status = %d, want 201", dodResp.StatusCode)
+	}
+	var dodBody workorchDoDResponse
+	if err := json.NewDecoder(dodResp.Body).Decode(&dodBody); err != nil {
+		t.Fatalf("decode dod response: %v", err)
+	}
+	return goalBody.Goal.ID, dodBody.DoD.ID
 }
 
 func assertRunListAvailable(t *testing.T, endpoint string, runID string) {

@@ -16,6 +16,8 @@ const (
 
 type repositorySet struct {
 	workspace  repository.WorkspaceRepository
+	goal       repository.GoalRepository
+	dod        repository.DoDRepository
 	run        repository.RunRepository
 	step       repository.StepRepository
 	ticket     repository.DecisionTicketRepository
@@ -28,6 +30,8 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 	case "", "memory":
 		return repositorySet{
 			workspace:  memory.NewWorkspaceRepository(),
+			goal:       memory.NewGoalRepository(),
+			dod:        memory.NewDoDRepository(),
 			run:        memory.NewRunRepository(),
 			step:       memory.NewStepRepository(),
 			ticket:     memory.NewDecisionTicketRepository(),
@@ -40,6 +44,8 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 		}
 		return repositorySet{
 			workspace:  fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json")),
+			goal:       fileRepo.NewGoalRepository(filepath.Join(dataRoot, "goal.json")),
+			dod:        fileRepo.NewDoDRepository(filepath.Join(dataRoot, "dod.json")),
 			run:        fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json")),
 			step:       fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json")),
 			ticket:     fileRepo.NewDecisionTicketRepository(filepath.Join(dataRoot, "ticket.json")),

@@ -1,4 +1,4 @@
-import type { Approval, Decision, Run, ServiceStatus, SliceDescriptor, SliceStatus, Workspace } from './types';
+import type { Approval, Decision, DoD, Goal, Run, ServiceStatus, SliceDescriptor, SliceStatus, Workspace } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -42,6 +42,28 @@ export const workorchApi = {
       body: JSON.stringify({ title, description, workingDirectory })
     });
     return body.workspace;
+  },
+  listGoals: async (workspaceId: string) => {
+    const body = await request<{ goals: Goal[] }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/goals`);
+    return body.goals ?? [];
+  },
+  defineGoal: async (workspaceId: string, text: string) => {
+    const body = await request<{ goal: Goal }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/goals`, {
+      method: 'POST',
+      body: JSON.stringify({ text })
+    });
+    return body.goal;
+  },
+  listDoDs: async (workspaceId: string) => {
+    const body = await request<{ dods: DoD[] }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/dods`);
+    return body.dods ?? [];
+  },
+  defineDoD: async (workspaceId: string, items: string[]) => {
+    const body = await request<{ dod: DoD }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/dods`, {
+      method: 'POST',
+      body: JSON.stringify({ items })
+    });
+    return body.dod;
   },
   listRuns: async () => {
     const body = await request<{ runs: Run[] }>(`${apiBase}/runs`);

@@ -10,5 +10,6 @@ import (
 type DoDRepository interface {
 	Create(context.Context, *workspace.DoD) error
 	Get(context.Context, common.DoDID) (*workspace.DoD, error)
+	ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*workspace.DoD, error)
 	Update(context.Context, *workspace.DoD) error
 }

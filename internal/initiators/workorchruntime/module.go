@@ -175,6 +175,8 @@ func buildRepositories(backend string, dataRoot string) (common.RepositorySet, e
 	case "", "memory":
 		return common.RepositorySet{
 			Workspaces:  memory.NewWorkspaceRepository(),
+			Goals:       memory.NewGoalRepository(),
+			DoDs:        memory.NewDoDRepository(),
 			Runs:        memory.NewRunRepository(),
 			Steps:       memory.NewStepRepository(),
 			Tickets:     memory.NewDecisionTicketRepository(),
@@ -187,6 +189,8 @@ func buildRepositories(backend string, dataRoot string) (common.RepositorySet, e
 		}
 		return common.RepositorySet{
 			Workspaces:  fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json")),
+			Goals:       fileRepo.NewGoalRepository(filepath.Join(dataRoot, "goal.json")),
+			DoDs:        fileRepo.NewDoDRepository(filepath.Join(dataRoot, "dod.json")),
 			Runs:        fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json")),
 			Steps:       fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json")),
 			Tickets:     fileRepo.NewDecisionTicketRepository(filepath.Join(dataRoot, "ticket.json")),

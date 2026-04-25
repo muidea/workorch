@@ -103,6 +103,27 @@ func (r *GoalRepository) Get(_ context.Context, id common.GoalID) (*workspace.Go
 	return &cloned, nil
 }
 
+func (r *GoalRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*workspace.Goal, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var items []*workspace.Goal
+	for _, item := range r.items {
+		if item.WorkspaceID != workspaceID {
+			continue
+		}
+		cloned := *item
+		items = append(items, &cloned)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return string(items[i].ID) < string(items[j].ID)
+	})
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
+}
+
 type DoDRepository struct {
 	mu    sync.RWMutex
 	items map[common.DoDID]*workspace.DoD
@@ -118,8 +139,7 @@ func (r *DoDRepository) Create(_ context.Context, item *workspace.DoD) error {
 	if _, ok := r.items[item.ID]; ok {
 		return common.ErrConflict
 	}
-	cloned := *item
-	r.items[item.ID] = &cloned
+	r.items[item.ID] = cloneDoD(item)
 	return nil
 }
 
@@ -130,8 +150,27 @@ func (r *DoDRepository) Get(_ context.Context, id common.DoDID) (*workspace.DoD,
 	if !ok {
 		return nil, common.ErrNotFound
 	}
-	cloned := *item
-	return &cloned, nil
+	return cloneDoD(item), nil
+}
+
+func (r *DoDRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*workspace.DoD, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var items []*workspace.DoD
+	for _, item := range r.items {
+		if item.WorkspaceID != workspaceID {
+			continue
+		}
+		items = append(items, cloneDoD(item))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return string(items[i].ID) < string(items[j].ID)
+	})
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
 }
 
 func (r *DoDRepository) Update(_ context.Context, item *workspace.DoD) error {
@@ -140,8 +179,7 @@ func (r *DoDRepository) Update(_ context.Context, item *workspace.DoD) error {
 	if _, ok := r.items[item.ID]; !ok {
 		return common.ErrNotFound
 	}
-	cloned := *item
-	r.items[item.ID] = &cloned
+	r.items[item.ID] = cloneDoD(item)
 	return nil
 }
 
@@ -429,6 +467,14 @@ func cloneStep(item *run.Step) *run.Step {
 		for k, v := range item.Output {
 			cloned.Output[k] = v
 		}
+	}
+	return &cloned
+}
+
+func cloneDoD(item *workspace.DoD) *workspace.DoD {
+	cloned := *item
+	if item.Items != nil {
+		cloned.Items = append([]string(nil), item.Items...)
 	}
 	return &cloned
 }

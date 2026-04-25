@@ -36,6 +36,8 @@ func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 	p.module = New()
 	if setupErr := p.module.Setup(Dependencies{
 		Workspaces: repos.Workspaces,
+		Goals:      repos.Goals,
+		DoDs:       repos.DoDs,
 		EventHub:   runtime.EventHub(),
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())

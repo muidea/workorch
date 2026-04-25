@@ -85,7 +85,8 @@ func TestMemoryBackendPersistsStateAcrossHTTPRequests(t *testing.T) {
 		t.Fatalf("list body = %s, want created workspace", listRec.Body.String())
 	}
 
-	createRunReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspaceID+"/runs", strings.NewReader(`{"runId":"run-memory-http","goalId":"goal-memory-http","doDId":"dod-memory-http"}`))
+	goalID, dodID := defineGoalAndDoDForHTTP(t, mux, workspaceID)
+	createRunReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspaceID+"/runs", strings.NewReader(`{"runId":"run-memory-http","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
 	createRunReq.Header.Set("Content-Type", "application/json")
 	createRunRec := httptest.NewRecorder()
 	mux.ServeHTTP(createRunRec, createRunReq)
@@ -166,6 +167,12 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/snapshot"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/goals/:goalId"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/dods/:dodId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs"},
@@ -663,8 +670,9 @@ func TestRunCreateEndpointReturnsCreatedRun(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspace := createWorkspaceForHTTP(t, handler, "run http workspace", "workspaces/run-http")
+	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
 
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-http","goalId":"goal-http","doDId":"dod-http"}`))
+	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-http","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
 	runReq.Header.Set("Content-Type", "application/json")
 	runRec := httptest.NewRecorder()
 	handler.ServeHTTP(runRec, runReq)
@@ -679,8 +687,8 @@ func TestRunCreateEndpointReturnsCreatedRun(t *testing.T) {
 	if body.Run.ID != "run-http" || body.Run.WorkspaceID != workspace.ID || body.Run.State != "created" {
 		t.Fatalf("created run = %+v, want run-http/%s/created", body.Run, workspace.ID)
 	}
-	if body.Run.GoalID != "goal-http" || body.Run.DoDID != "dod-http" {
-		t.Fatalf("created run goal/dod = %+v, want goal-http/dod-http", body.Run)
+	if body.Run.GoalID != goalID || body.Run.DoDID != dodID {
+		t.Fatalf("created run goal/dod = %+v, want %s/%s", body.Run, goalID, dodID)
 	}
 }
 
@@ -689,13 +697,15 @@ func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
 
 	workspaceA := createWorkspaceForHTTP(t, handler, "run workspace a", "workspaces/run-a")
 	workspaceB := createWorkspaceForHTTP(t, handler, "run workspace b", "workspaces/run-b")
+	goalA, dodA := defineGoalAndDoDForHTTP(t, handler, workspaceA.ID)
+	goalB, dodB := defineGoalAndDoDForHTTP(t, handler, workspaceB.ID)
 
 	for _, tc := range []struct {
 		path string
 		body string
 	}{
-		{path: "/api/v1/workorch/workspaces/" + workspaceB.ID + "/runs", body: `{"runId":"run-b"}`},
-		{path: "/api/v1/workorch/workspaces/" + workspaceA.ID + "/runs", body: `{"runId":"run-a"}`},
+		{path: "/api/v1/workorch/workspaces/" + workspaceB.ID + "/runs", body: `{"runId":"run-b","goalId":"` + goalB + `","doDId":"` + dodB + `"}`},
+		{path: "/api/v1/workorch/workspaces/" + workspaceA.ID + "/runs", body: `{"runId":"run-a","goalId":"` + goalA + `","doDId":"` + dodA + `"}`},
 	} {
 		req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
 		req.Header.Set("Content-Type", "application/json")
@@ -817,13 +827,14 @@ func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspace := createWorkspaceForHTTP(t, handler, "workspace snapshot http", "workspaces/workspace-snapshot-http")
+	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
 
 	for _, runID := range []string{
 		"run-workspace-snapshot-http-completed",
 		"run-" + legacycommon.RuntimeDecisionBlockRunToken + "-workspace-snapshot-http",
 		"run-" + legacycommon.RuntimeApprovalBlockRunToken + "-workspace-snapshot-http",
 	} {
-		runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"`+runID+`"}`))
+		runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"`+runID+`","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
 		runReq.Header.Set("Content-Type", "application/json")
 		runRec := httptest.NewRecorder()
 		handler.ServeHTTP(runRec, runReq)
@@ -880,9 +891,10 @@ func TestRunCreateEndpointReturnsConflictForDuplicateID(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspace := createWorkspaceForHTTP(t, handler, "run dup workspace", "workspaces/run-dup")
+	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
 
 	for idx := 0; idx < 2; idx++ {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-dup"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-dup","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -896,7 +908,7 @@ func TestRunCreateEndpointReturnsConflictForDuplicateID(t *testing.T) {
 }
 
 func TestRunCreateEndpointReturnsNotFoundWhenWorkspaceMissing(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-run-missing/runs", strings.NewReader(`{"runId":"run-missing"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-run-missing/runs", strings.NewReader(`{"runId":"run-missing","goalId":"goal-missing","doDId":"dod-missing"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -922,8 +934,9 @@ func TestRunStartEndpointReturnsCompletedRun(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspace := createWorkspaceForHTTP(t, handler, "run start http workspace", "workspaces/run-start-http")
+	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
 
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-start-http"}`))
+	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-start-http","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
 	runReq.Header.Set("Content-Type", "application/json")
 	runRec := httptest.NewRecorder()
 	handler.ServeHTTP(runRec, runReq)
@@ -1636,7 +1649,8 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
 
 	workspace := createWorkspaceForHTTP(t, handler, "metrics workspace", "workspaces/metrics")
-	runCreateReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-metrics"}`))
+	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
+	runCreateReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-metrics","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
 	runCreateReq.Header.Set("Content-Type", "application/json")
 	runCreateRec := httptest.NewRecorder()
 	handler.ServeHTTP(runCreateRec, runCreateReq)
@@ -1651,8 +1665,9 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 	}
 
 	blockedWorkspace := createWorkspaceForHTTP(t, handler, "metrics blocked workspace", "workspaces/metrics-blocked")
+	blockedGoalID, blockedDoDID := defineGoalAndDoDForHTTP(t, handler, blockedWorkspace.ID)
 	blockedRunID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-metrics"
-	blockedRunReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+blockedWorkspace.ID+"/runs", strings.NewReader(`{"runId":"`+blockedRunID+`"}`))
+	blockedRunReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+blockedWorkspace.ID+"/runs", strings.NewReader(`{"runId":"`+blockedRunID+`","goalId":"`+blockedGoalID+`","doDId":"`+blockedDoDID+`"}`))
 	blockedRunReq.Header.Set("Content-Type", "application/json")
 	blockedRunRec := httptest.NewRecorder()
 	handler.ServeHTTP(blockedRunRec, blockedRunReq)
@@ -1794,8 +1809,9 @@ func createWorkspaceAndRunForHTTP(t *testing.T, handler http.Handler, title stri
 	t.Helper()
 
 	workspace := createWorkspaceForHTTP(t, handler, title, "workspaces/"+runID)
+	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
 
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"`+runID+`"}`))
+	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"`+runID+`","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
 	runReq.Header.Set("Content-Type", "application/json")
 	runRec := httptest.NewRecorder()
 	handler.ServeHTTP(runRec, runReq)
@@ -1803,6 +1819,35 @@ func createWorkspaceAndRunForHTTP(t *testing.T, handler http.Handler, title stri
 		t.Fatalf("run create status = %d, want 201, body=%s", runRec.Code, runRec.Body.String())
 	}
 	return workspace
+}
+
+func defineGoalAndDoDForHTTP(t *testing.T, handler http.Handler, workspaceID string) (string, string) {
+	t.Helper()
+
+	goalReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspaceID+"/goals", strings.NewReader(`{"text":"verify run goal"}`))
+	goalReq.Header.Set("Content-Type", "application/json")
+	goalRec := httptest.NewRecorder()
+	handler.ServeHTTP(goalRec, goalReq)
+	if goalRec.Code != http.StatusCreated {
+		t.Fatalf("goal define status = %d, want 201, body=%s", goalRec.Code, goalRec.Body.String())
+	}
+	var goalBody goalResponse
+	if err := json.Unmarshal(goalRec.Body.Bytes(), &goalBody); err != nil {
+		t.Fatalf("unmarshal goal response: %v", err)
+	}
+
+	dodReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspaceID+"/dods", strings.NewReader(`{"items":["verify run completed"]}`))
+	dodReq.Header.Set("Content-Type", "application/json")
+	dodRec := httptest.NewRecorder()
+	handler.ServeHTTP(dodRec, dodReq)
+	if dodRec.Code != http.StatusCreated {
+		t.Fatalf("dod define status = %d, want 201, body=%s", dodRec.Code, dodRec.Body.String())
+	}
+	var dodBody dodResponse
+	if err := json.Unmarshal(dodRec.Body.Bytes(), &dodBody); err != nil {
+		t.Fatalf("unmarshal dod response: %v", err)
+	}
+	return goalBody.Goal.ID, dodBody.DoD.ID
 }
 
 func startRunForHTTP(t *testing.T, handler http.Handler, runID string) appservice.Run {

@@ -32,6 +32,8 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	workspaceModule := workspacemodule.New()
 	mustSetup("workspace", workspaceModule.Setup(workspacemodule.Dependencies{
 		Workspaces: repos.workspace,
+		Goals:      repos.goal,
+		DoDs:       repos.dod,
 		EventHub:   eventHub,
 	}))
 
@@ -84,6 +86,8 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 		exports: Exports{
 			Repositories: RepositoryExports{
 				Workspaces:  repos.workspace,
+				Goals:       repos.goal,
+				DoDs:        repos.dod,
 				Runs:        repos.run,
 				Steps:       repos.step,
 				Tickets:     repos.ticket,

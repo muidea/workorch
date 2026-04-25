@@ -32,6 +32,7 @@
 - completed: `B4 decision 工单查询与处理接口`
 - completed: `B5 approval 工单查询与处理接口`
 - completed: `B6 实例读模型补齐`
+- completed: `B7 Goal 和 DoD 定义流程`
 - completed: `S1 仓储后端共享契约测试`
 - completed: `S2 file 后端持久化语义补强`
 - completed: `S3 最小事件总线路径正式化`
@@ -237,6 +238,25 @@ Status: completed
 - 已固定 `run snapshot`、`run status`、`workspace snapshot` 的对外 JSON 读模型字段
 - 已补 `appservice`、HTTP、进程级 file 后端测试
 - 已补本地服务 / 容器验证脚本，验证 `runId` / `workspaceId` 维度的实例读模型查询
+
+### [x] B7. Goal 和 DoD 定义流程
+
+目标：创建 `run` 前必须先在 `workspace` 下定义正式业务目标和验收标准，避免运行实例只携带外部手填的 `goalId` / `doDId` 而没有可管理的业务定义来源。
+
+完成内容：
+
+- 增加 Goal / DoD 正式模型仓储，并支持 `memory` / `file` 后端
+- 增加 `workspace` kernel module 的 `DefineGoal` / `DefineDoD` 服务
+- 增加 Goal / DoD HTTP 创建、列表和详情接口
+- `POST /api/v1/workorch/workspaces/{workspaceId}/runs` 要求引用已定义的 `goalId` 和 `doDId`
+- Web 管理界面在 `Workspaces` 页面以 Workspace 为主体查看和维护 Goal / DoD，创建 Workspace 后继续通过向导定义 Goal / DoD，并在创建 Run 时按 Workspace 加载可选 Goal / DoD
+
+验收：
+
+- 能在一个 `workspace` 下创建并查询 Goal
+- 能在一个 `workspace` 下创建并查询 ready 状态 DoD
+- 创建 `run` 时使用已定义 Goal / DoD，并在 `file` 后端重启后仍可查询
+- `make verify-service` 和 `make verify-service-file` 覆盖该流程
 
 ## P1 Closed Stability Scope
 

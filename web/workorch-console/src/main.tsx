@@ -10,9 +10,9 @@ import {
   SafetyCertificateOutlined
 } from '@ant-design/icons';
 import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-components';
-import { App as AntApp, Button, ConfigProvider, Descriptions, Form, Input, Modal, Space, Statistic, Tag, theme } from 'antd';
+import { App as AntApp, Button, ConfigProvider, Descriptions, Form, Input, Modal, Space, Statistic, Steps, Tag, theme } from 'antd';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Decision, Run, SliceDescriptor, SliceStatus, Workspace } from './types';
+import type { Approval, Decision, DoD, Goal, Run, SliceDescriptor, SliceStatus, Workspace } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -95,46 +95,207 @@ function OverviewPage() {
 
 function WorkspacesPage() {
   const { message } = AntApp.useApp();
-  const actionRef = useRef<ActionType | undefined>(undefined);
+  const workspaceActionRef = useRef<ActionType | undefined>(undefined);
+  const goalActionRef = useRef<ActionType | undefined>(undefined);
+  const dodActionRef = useRef<ActionType | undefined>(undefined);
   const [modalOpen, setModalOpen] = useState(false);
+  const [goalModalOpen, setGoalModalOpen] = useState(false);
+  const [dodModalOpen, setDoDModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [form] = Form.useForm();
+  const [wizardStep, setWizardStep] = useState(0);
+  const [createdWorkspace, setCreatedWorkspace] = useState<Workspace | undefined>(undefined);
+  const [selectedWorkspace, setSelectedWorkspace] = useState<Workspace | undefined>(undefined);
+  const [workspaceGoals, setWorkspaceGoals] = useState<Goal[]>([]);
+  const [workspaceDoDs, setWorkspaceDoDs] = useState<DoD[]>([]);
+  const [definitionLoading, setDefinitionLoading] = useState(false);
+  const [workspaceForm] = Form.useForm();
+  const [wizardGoalForm] = Form.useForm();
+  const [wizardDoDForm] = Form.useForm();
+  const [goalForm] = Form.useForm();
+  const [dodForm] = Form.useForm();
+
+  const closeWorkspaceWizard = () => {
+    setModalOpen(false);
+    setWizardStep(0);
+    setCreatedWorkspace(undefined);
+    workspaceForm.resetFields();
+    wizardGoalForm.resetFields();
+    wizardDoDForm.resetFields();
+  };
+
+  const selectWorkspace = async (workspace?: Workspace) => {
+    setSelectedWorkspace(workspace);
+    if (!workspace) {
+      setWorkspaceGoals([]);
+      setWorkspaceDoDs([]);
+      return;
+    }
+    setDefinitionLoading(true);
+    try {
+      const [goals, dods] = await Promise.all([
+        workorchApi.listGoals(workspace.id),
+        workorchApi.listDoDs(workspace.id)
+      ]);
+      setWorkspaceGoals(goals);
+      setWorkspaceDoDs(dods);
+    } catch (error) {
+      setWorkspaceGoals([]);
+      setWorkspaceDoDs([]);
+      message.error(errorMessage(error));
+    } finally {
+      setDefinitionLoading(false);
+    }
+  };
+
+  const reloadWorkspaceDefinitions = () => {
+    void selectWorkspace(selectedWorkspace ?? createdWorkspace);
+  };
+
   const columns: ProColumns<Workspace>[] = [
     { title: 'Workspace ID', dataIndex: 'id', copyable: true },
     { title: 'Title', dataIndex: 'title' },
     { title: 'Description', dataIndex: 'description' },
     { title: 'Working Directory', dataIndex: 'workingDirectory', copyable: true },
     { title: 'State', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
-    { title: 'Active Run', dataIndex: 'activeRunId', copyable: true }
+    { title: 'Active Run', dataIndex: 'activeRunId', copyable: true },
+    {
+      title: 'Actions',
+      valueType: 'option',
+      render: (_, item) => (
+        <Button size="small" onClick={() => void selectWorkspace(item)}>
+          Manage
+        </Button>
+      )
+    }
+  ];
+  const goalColumns: ProColumns<Goal>[] = [
+    { title: 'Goal ID', dataIndex: 'id', copyable: true },
+    { title: 'Goal', dataIndex: 'text' }
+  ];
+  const dodColumns: ProColumns<DoD>[] = [
+    { title: 'DoD ID', dataIndex: 'id', copyable: true },
+    { title: 'State', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
+    { title: 'Items', dataIndex: 'items', render: (_, item) => item.items.join(' / ') }
   ];
 
   return (
-    <PageContainer title="Workspaces" extra={<Button type="primary" onClick={() => setModalOpen(true)}>Create workspace</Button>}>
+    <PageContainer
+      title="Workspaces"
+      subTitle="Manage each workspace with its Goal and Definition of Done"
+      extra={<Button type="primary" onClick={() => setModalOpen(true)}>Create workspace</Button>}
+    >
       <ProTable<Workspace>
-        actionRef={actionRef}
+        actionRef={workspaceActionRef}
         rowKey="id"
         search={false}
         columns={columns}
-        request={async () => tableResult(await workorchApi.listWorkspaces())}
+        request={async () => {
+          const items = await workorchApi.listWorkspaces();
+          if (!selectedWorkspace && items[0]) {
+            void selectWorkspace(items[0]);
+          }
+          return tableResult(items);
+        }}
+        rowSelection={{
+          type: 'radio',
+          selectedRowKeys: selectedWorkspace ? [selectedWorkspace.id] : [],
+          onChange: (_, rows) => {
+            void selectWorkspace(rows[0]);
+          }
+        }}
+        onRow={(item) => ({
+          onClick: () => void selectWorkspace(item)
+        })}
       />
+      <ProCard
+        title={selectedWorkspace ? `Workspace: ${selectedWorkspace.title}` : 'Workspace definitions'}
+        subTitle={selectedWorkspace?.id || 'Select a workspace to manage Goal and DoD'}
+        className="workorch-section"
+        extra={
+          <Space>
+            <Button disabled={!selectedWorkspace} onClick={() => setGoalModalOpen(true)}>Define goal</Button>
+            <Button type="primary" disabled={!selectedWorkspace} onClick={() => setDoDModalOpen(true)}>Define DoD</Button>
+          </Space>
+        }
+      >
+        {selectedWorkspace ? (
+          <>
+            <Descriptions
+              column={2}
+              items={[
+                { key: 'id', label: 'Workspace ID', children: selectedWorkspace.id },
+                { key: 'state', label: 'State', children: stateTag(selectedWorkspace.state) },
+                { key: 'description', label: 'Description', children: selectedWorkspace.description || '-' },
+                { key: 'workingDirectory', label: 'Working Directory', children: selectedWorkspace.workingDirectory }
+              ]}
+            />
+            <ProCard gutter={16} wrap className="workorch-section">
+              <ProCard title="Goals" colSpan="50%">
+                <ProTable<Goal>
+                  actionRef={goalActionRef}
+                  rowKey="id"
+                  search={false}
+                  columns={goalColumns}
+                  dataSource={workspaceGoals}
+                  loading={definitionLoading}
+                  pagination={false}
+                />
+              </ProCard>
+              <ProCard title="Definition of Done" colSpan="50%">
+                <ProTable<DoD>
+                  actionRef={dodActionRef}
+                  rowKey="id"
+                  search={false}
+                  columns={dodColumns}
+                  dataSource={workspaceDoDs}
+                  loading={definitionLoading}
+                  pagination={false}
+                />
+              </ProCard>
+            </ProCard>
+          </>
+        ) : (
+          <Tag>No workspace selected</Tag>
+        )}
+      </ProCard>
       <Modal
         title="Create workspace"
         open={modalOpen}
         confirmLoading={submitting}
-        onCancel={() => setModalOpen(false)}
-        onOk={() => form.submit()}
+        onCancel={closeWorkspaceWizard}
+        onOk={() => {
+          if (wizardStep === 0) {
+            workspaceForm.submit();
+          } else if (wizardStep === 1) {
+            wizardGoalForm.submit();
+          } else {
+            wizardDoDForm.submit();
+          }
+        }}
+        okText={wizardStep === 0 ? 'Create workspace' : wizardStep === 1 ? 'Define goal' : 'Define DoD'}
       >
+        <Steps
+          current={wizardStep}
+          className="workorch-section"
+          items={[
+            { title: 'Workspace' },
+            { title: 'Goal' },
+            { title: 'DoD' }
+          ]}
+        />
         <Form
-          form={form}
+          form={workspaceForm}
           layout="vertical"
+          style={{ display: wizardStep === 0 ? 'block' : 'none' }}
           onFinish={async (values: { title: string; description?: string; workingDirectory?: string }) => {
             setSubmitting(true);
             try {
-              await workorchApi.createWorkspace(values.title, values.description, values.workingDirectory);
-              message.success('Workspace created');
-              setModalOpen(false);
-              form.resetFields();
-              actionRef.current?.reload();
+              const workspace = await workorchApi.createWorkspace(values.title, values.description, values.workingDirectory);
+              message.success('Workspace created, continue defining Goal');
+              setCreatedWorkspace(workspace);
+              void selectWorkspace(workspace);
+              setWizardStep(1);
+              workspaceActionRef.current?.reload();
             } catch (error) {
               message.error(errorMessage(error));
             } finally {
@@ -152,6 +313,122 @@ function WorkspacesPage() {
             <Input placeholder="Leave empty to use service working path / workspaces / generated workspace ID" />
           </Form.Item>
         </Form>
+        <Form
+          form={wizardGoalForm}
+          layout="vertical"
+          style={{ display: wizardStep === 1 ? 'block' : 'none' }}
+          onFinish={async (values: { text: string }) => {
+            if (!createdWorkspace) {
+              message.error('Workspace is not created');
+              return;
+            }
+            setSubmitting(true);
+            try {
+              await workorchApi.defineGoal(createdWorkspace.id, values.text);
+              message.success('Goal defined, continue defining DoD');
+              setWizardStep(2);
+              void selectWorkspace(createdWorkspace);
+            } catch (error) {
+              message.error(errorMessage(error));
+            } finally {
+              setSubmitting(false);
+            }
+          }}
+        >
+          <Form.Item label="Workspace">
+            <Input value={createdWorkspace?.id || ''} disabled />
+          </Form.Item>
+          <Form.Item name="text" label="Goal" rules={[{ required: true }]}>
+            <Input.TextArea rows={4} placeholder="Describe the target outcome for this workspace" />
+          </Form.Item>
+        </Form>
+        <Form
+          form={wizardDoDForm}
+          layout="vertical"
+          style={{ display: wizardStep === 2 ? 'block' : 'none' }}
+          onFinish={async (values: { items: string }) => {
+            if (!createdWorkspace) {
+              message.error('Workspace is not created');
+              return;
+            }
+            setSubmitting(true);
+            try {
+              const items = values.items.split('\n').map((item) => item.trim()).filter(Boolean);
+              await workorchApi.defineDoD(createdWorkspace.id, items);
+              message.success('Workspace Goal and DoD are ready');
+              void selectWorkspace(createdWorkspace);
+              closeWorkspaceWizard();
+            } catch (error) {
+              message.error(errorMessage(error));
+            } finally {
+              setSubmitting(false);
+            }
+          }}
+        >
+          <Form.Item label="Workspace">
+            <Input value={createdWorkspace?.id || ''} disabled />
+          </Form.Item>
+          <Form.Item name="items" label="DoD Items" rules={[{ required: true }]}>
+            <Input.TextArea rows={5} placeholder={'One acceptance criterion per line\nExample: service deployed locally'} />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal title="Define goal" open={goalModalOpen} confirmLoading={submitting} onCancel={() => setGoalModalOpen(false)} onOk={() => goalForm.submit()}>
+        <Form
+          form={goalForm}
+          layout="vertical"
+          onFinish={async (values: { text: string }) => {
+            if (!selectedWorkspace) {
+              message.error('Select a workspace first');
+              return;
+            }
+            setSubmitting(true);
+            try {
+              await workorchApi.defineGoal(selectedWorkspace.id, values.text);
+              message.success('Goal defined');
+              setGoalModalOpen(false);
+              goalForm.resetFields();
+              reloadWorkspaceDefinitions();
+            } catch (error) {
+              message.error(errorMessage(error));
+            } finally {
+              setSubmitting(false);
+            }
+          }}
+        >
+          <Form.Item name="text" label="Goal" rules={[{ required: true }]}>
+            <Input.TextArea rows={4} placeholder="Describe the target outcome for this workspace" />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal title="Define DoD" open={dodModalOpen} confirmLoading={submitting} onCancel={() => setDoDModalOpen(false)} onOk={() => dodForm.submit()}>
+        <Form
+          form={dodForm}
+          layout="vertical"
+          onFinish={async (values: { items: string }) => {
+            if (!selectedWorkspace) {
+              message.error('Select a workspace first');
+              return;
+            }
+            setSubmitting(true);
+            try {
+              const items = values.items.split('\n').map((item) => item.trim()).filter(Boolean);
+              await workorchApi.defineDoD(selectedWorkspace.id, items);
+              message.success('DoD defined');
+              setDoDModalOpen(false);
+              dodForm.resetFields();
+              reloadWorkspaceDefinitions();
+            } catch (error) {
+              message.error(errorMessage(error));
+            } finally {
+              setSubmitting(false);
+            }
+          }}
+        >
+          <Form.Item name="items" label="DoD Items" rules={[{ required: true }]}>
+            <Input.TextArea rows={5} placeholder={'One acceptance criterion per line\nExample: service deployed locally'} />
+          </Form.Item>
+        </Form>
       </Modal>
     </PageContainer>
   );
@@ -161,6 +438,8 @@ function RunsPage() {
   const { message } = AntApp.useApp();
   const actionRef = useRef<ActionType | undefined>(undefined);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [dods, setDoDs] = useState<DoD[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
@@ -169,9 +448,25 @@ function RunsPage() {
     void workorchApi.listWorkspaces().then(setWorkspaces);
   }, []);
 
+  const loadDefinitions = async (workspaceId?: string) => {
+    if (!workspaceId) {
+      setGoals([]);
+      setDoDs([]);
+      return;
+    }
+    const [nextGoals, nextDoDs] = await Promise.all([
+      workorchApi.listGoals(workspaceId),
+      workorchApi.listDoDs(workspaceId)
+    ]);
+    setGoals(nextGoals);
+    setDoDs(nextDoDs);
+  };
+
   const columns: ProColumns<Run>[] = [
     { title: 'Run ID', dataIndex: 'id', copyable: true },
     { title: 'Workspace', dataIndex: 'workspaceId', copyable: true },
+    { title: 'Goal', dataIndex: 'goalId', copyable: true },
+    { title: 'DoD', dataIndex: 'doDId', copyable: true },
     { title: 'State', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
     { title: 'Blocking Ticket', dataIndex: 'blockingTicketId', copyable: true },
     { title: 'Blocking Approval', dataIndex: 'blockingApprovalId', copyable: true },
@@ -214,7 +509,13 @@ function RunsPage() {
   ];
 
   return (
-    <PageContainer title="Runs" extra={<Button type="primary" onClick={() => setModalOpen(true)}>Create run</Button>}>
+    <PageContainer
+      title="Runs"
+      extra={<Button type="primary" onClick={() => {
+        setModalOpen(true);
+        void loadDefinitions(workspaces[0]?.id);
+      }}>Create run</Button>}
+    >
       <ProTable<Run>
         actionRef={actionRef}
         rowKey="id"
@@ -226,6 +527,11 @@ function RunsPage() {
         <Form
           form={form}
           layout="vertical"
+          onValuesChange={(changed: { workspaceId?: string }) => {
+            if (changed.workspaceId !== undefined) {
+              void loadDefinitions(changed.workspaceId);
+            }
+          }}
           onFinish={async (values: { workspaceId: string; runId: string; goalId?: string; doDId?: string }) => {
             setSubmitting(true);
             try {
@@ -250,12 +556,18 @@ function RunsPage() {
           <Form.Item name="runId" label="Run ID" rules={[{ required: true }]}>
             <Input placeholder="run-local" />
           </Form.Item>
-          <Form.Item name="goalId" label="Goal ID">
-            <Input placeholder="goal-local" />
+          <Form.Item name="goalId" label="Goal ID" rules={[{ required: true }]}>
+            <Input list="goal-options" placeholder={goals[0]?.id || 'Define a goal first'} />
           </Form.Item>
-          <Form.Item name="doDId" label="DoD ID">
-            <Input placeholder="dod-local" />
+          <datalist id="goal-options">
+            {goals.map((item) => <option key={item.id} value={item.id}>{item.text}</option>)}
+          </datalist>
+          <Form.Item name="doDId" label="DoD ID" rules={[{ required: true }]}>
+            <Input list="dod-options" placeholder={dods[0]?.id || 'Define a DoD first'} />
           </Form.Item>
+          <datalist id="dod-options">
+            {dods.map((item) => <option key={item.id} value={item.id}>{item.items.join(' / ')}</option>)}
+          </datalist>
         </Form>
       </Modal>
     </PageContainer>

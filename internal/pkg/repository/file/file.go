@@ -92,6 +92,147 @@ func (r *WorkspaceRepository) Update(_ context.Context, item *workspace.Workspac
 	return saveMap(r.path, items)
 }
 
+type GoalRepository struct {
+	mu   sync.RWMutex
+	path string
+}
+
+func NewGoalRepository(path string) *GoalRepository {
+	return &GoalRepository{path: path}
+}
+
+func (r *GoalRepository) Create(_ context.Context, item *workspace.Goal) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[common.GoalID, workspace.Goal](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	items[item.ID] = *cloneGoal(item)
+	return saveMap(r.path, items)
+}
+
+func (r *GoalRepository) Get(_ context.Context, id common.GoalID) (*workspace.Goal, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.GoalID, workspace.Goal](r.path)
+	if err != nil {
+		return nil, err
+	}
+	item, ok := items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneGoal(&item), nil
+}
+
+func (r *GoalRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*workspace.Goal, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.GoalID, workspace.Goal](r.path)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*workspace.Goal, 0, len(items))
+	for _, item := range items {
+		if item.WorkspaceID != workspaceID {
+			continue
+		}
+		ret = append(ret, cloneGoal(&item))
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		return string(ret[i].ID) < string(ret[j].ID)
+	})
+	if len(ret) == 0 {
+		return nil, nil
+	}
+	return ret, nil
+}
+
+type DoDRepository struct {
+	mu   sync.RWMutex
+	path string
+}
+
+func NewDoDRepository(path string) *DoDRepository {
+	return &DoDRepository{path: path}
+}
+
+func (r *DoDRepository) Create(_ context.Context, item *workspace.DoD) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[common.DoDID, workspace.DoD](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	items[item.ID] = *cloneDoD(item)
+	return saveMap(r.path, items)
+}
+
+func (r *DoDRepository) Get(_ context.Context, id common.DoDID) (*workspace.DoD, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.DoDID, workspace.DoD](r.path)
+	if err != nil {
+		return nil, err
+	}
+	item, ok := items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneDoD(&item), nil
+}
+
+func (r *DoDRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*workspace.DoD, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.DoDID, workspace.DoD](r.path)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*workspace.DoD, 0, len(items))
+	for _, item := range items {
+		if item.WorkspaceID != workspaceID {
+			continue
+		}
+		ret = append(ret, cloneDoD(&item))
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		return string(ret[i].ID) < string(ret[j].ID)
+	})
+	if len(ret) == 0 {
+		return nil, nil
+	}
+	return ret, nil
+}
+
+func (r *DoDRepository) Update(_ context.Context, item *workspace.DoD) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[common.DoDID, workspace.DoD](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	items[item.ID] = *cloneDoD(item)
+	return saveMap(r.path, items)
+}
+
 type RunRepository struct {
 	mu   sync.RWMutex
 	path string
@@ -471,6 +612,19 @@ func saveMap[K comparable, V any](path string, items map[K]V) error {
 
 func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 	cloned := *item
+	return &cloned
+}
+
+func cloneGoal(item *workspace.Goal) *workspace.Goal {
+	cloned := *item
+	return &cloned
+}
+
+func cloneDoD(item *workspace.DoD) *workspace.DoD {
+	cloned := *item
+	if item.Items != nil {
+		cloned.Items = append([]string(nil), item.Items...)
+	}
 	return &cloned
 }
 

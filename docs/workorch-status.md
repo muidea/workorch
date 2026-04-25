@@ -14,6 +14,10 @@
     `GET /api/v1/workorch/workspaces`,
     `GET /api/v1/workorch/workspaces/{workspaceId}`,
     `GET /api/v1/workorch/workspaces/{workspaceId}/snapshot`,
+    `GET /api/v1/workorch/workspaces/{workspaceId}/goals`,
+    `GET /api/v1/workorch/goals/{goalId}`,
+    `GET /api/v1/workorch/workspaces/{workspaceId}/dods`,
+    `GET /api/v1/workorch/dods/{dodId}`,
     `GET /api/v1/workorch/workspaces/{workspaceId}/runs` for explicit `405 method not allowed`,
     `GET /api/v1/workorch/runs`,
     `GET /api/v1/workorch/runs/{runId}`,
@@ -25,6 +29,8 @@
     `GET /api/v1/workorch/approvals/{approvalId}`
   - workspace / run / decision / approval write and execution endpoints are registered as native `magicEngine/http` routes:
     `POST /api/v1/workorch/workspaces`,
+    `POST /api/v1/workorch/workspaces/{workspaceId}/goals`,
+    `POST /api/v1/workorch/workspaces/{workspaceId}/dods`,
     `POST /api/v1/workorch/workspaces/{workspaceId}/runs`,
     `POST /api/v1/workorch/runs`,
     `POST /api/v1/workorch/runs/{runId}/start`,
@@ -111,6 +117,8 @@ Current formal business events:
 
 - `/workspace/created`
 - `/workspace/state/changed`
+- `/goal/defined`
+- `/dod/defined`
 - `/run/created`
 - `/run/state/changed`
 - `/step/dispatched`
@@ -155,6 +163,12 @@ HTTP endpoints:
 - `GET /api/v1/workorch/workspaces`
 - `GET /api/v1/workorch/workspaces/{workspaceId}`
 - `GET /api/v1/workorch/workspaces/{workspaceId}/snapshot`
+- `POST /api/v1/workorch/workspaces/{workspaceId}/goals`
+- `GET /api/v1/workorch/workspaces/{workspaceId}/goals`
+- `GET /api/v1/workorch/goals/{goalId}`
+- `POST /api/v1/workorch/workspaces/{workspaceId}/dods`
+- `GET /api/v1/workorch/workspaces/{workspaceId}/dods`
+- `GET /api/v1/workorch/dods/{dodId}`
 - `POST /api/v1/workorch/workspaces/{workspaceId}/runs`
 - `GET /api/v1/workorch/runs`
 - `GET /api/v1/workorch/runs/{runId}`
@@ -191,6 +205,17 @@ WORKSPACE_JSON="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/workorch/worksp
 WORKSPACE_ID="$(printf '%s\n' "${WORKSPACE_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
 test -n "${WORKSPACE_ID}"
 curl -f http://127.0.0.1:8080/api/v1/workorch/slices
+GOAL_JSON="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/goals \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"deliver local MVP orchestration"}')"
+GOAL_ID="$(printf '%s\n' "${GOAL_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
+DOD_JSON="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/dods \
+  -H 'Content-Type: application/json' \
+  -d '{"items":["workspace created","run completed"]}')"
+DOD_ID="$(printf '%s\n' "${DOD_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
+  -H 'Content-Type: application/json' \
+  -d '{"runId":"run-local-verify","goalId":"'"${GOAL_ID}"'","doDId":"'"${DOD_ID}"'"}'
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/runs
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs
 ```

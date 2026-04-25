@@ -25,6 +25,8 @@ type Runtime struct {
 
 type RepositoryExports struct {
 	Workspaces  repository.WorkspaceRepository
+	Goals       repository.GoalRepository
+	DoDs        repository.DoDRepository
 	Runs        repository.RunRepository
 	Steps       repository.StepRepository
 	Tickets     repository.DecisionTicketRepository

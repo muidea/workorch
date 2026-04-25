@@ -86,6 +86,34 @@ type workspacesResponse struct {
 	Workspaces []appservice.Workspace `json:"workspaces"`
 }
 
+type goalResponse struct {
+	Service  string          `json:"service"`
+	Backend  string          `json:"backend,omitempty"`
+	DataRoot string          `json:"dataRoot,omitempty"`
+	Goal     appservice.Goal `json:"goal"`
+}
+
+type goalsResponse struct {
+	Service  string            `json:"service"`
+	Backend  string            `json:"backend,omitempty"`
+	DataRoot string            `json:"dataRoot,omitempty"`
+	Goals    []appservice.Goal `json:"goals"`
+}
+
+type dodResponse struct {
+	Service  string         `json:"service"`
+	Backend  string         `json:"backend,omitempty"`
+	DataRoot string         `json:"dataRoot,omitempty"`
+	DoD      appservice.DoD `json:"dod"`
+}
+
+type dodsResponse struct {
+	Service  string           `json:"service"`
+	Backend  string           `json:"backend,omitempty"`
+	DataRoot string           `json:"dataRoot,omitempty"`
+	DoDs     []appservice.DoD `json:"dods"`
+}
+
 type runInstanceResponse struct {
 	Service  string         `json:"service"`
 	Backend  string         `json:"backend,omitempty"`
@@ -162,6 +190,14 @@ type createRunRequest struct {
 	DoDID  string `json:"doDId,omitempty"`
 }
 
+type defineGoalRequest struct {
+	Text string `json:"text"`
+}
+
+type defineDoDRequest struct {
+	Items []string `json:"items"`
+}
+
 type sliceCatalogResponse struct {
 	Service string                       `json:"service"`
 	Slices  []appservice.SliceDescriptor `json:"slices"`
@@ -200,6 +236,12 @@ type createWorkspaceFunc func(context.Context, string, string, string, string, s
 type readWorkspaceFunc func(context.Context, string, string, string) (appservice.Workspace, error)
 type readWorkspaceSnapshotFunc func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error)
 type listWorkspacesFunc func(context.Context, string, string) ([]appservice.Workspace, error)
+type defineGoalFunc func(context.Context, string, string, string, string) (appservice.Goal, error)
+type readGoalFunc func(context.Context, string, string, string) (appservice.Goal, error)
+type listGoalsFunc func(context.Context, string, string, string) ([]appservice.Goal, error)
+type defineDoDFunc func(context.Context, string, string, string, []string) (appservice.DoD, error)
+type readDoDFunc func(context.Context, string, string, string) (appservice.DoD, error)
+type listDoDsFunc func(context.Context, string, string, string) ([]appservice.DoD, error)
 type createRunInstanceFunc func(context.Context, string, string, string, string, string, string) (appservice.Run, error)
 type readRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
 type readRunSnapshotFunc func(context.Context, string, string, string) (appservice.RunSnapshot, error)
@@ -232,6 +274,12 @@ type serverState struct {
 	readWorkspace         readWorkspaceFunc
 	readWorkspaceSnapshot readWorkspaceSnapshotFunc
 	listWorkspaces        listWorkspacesFunc
+	defineGoal            defineGoalFunc
+	readGoal              readGoalFunc
+	listGoals             listGoalsFunc
+	defineDoD             defineDoDFunc
+	readDoD               readDoDFunc
+	listDoDs              listDoDsFunc
 	createRun             createRunInstanceFunc
 	readRun               readRunInstanceFunc
 	readRunSnapshot       readRunSnapshotFunc
@@ -268,6 +316,12 @@ type serverMetrics struct {
 	workspaceListRequests       atomic.Uint64
 	workspaceGetRequests        atomic.Uint64
 	workspaceSnapshotRequests   atomic.Uint64
+	goalDefineRequests          atomic.Uint64
+	goalListRequests            atomic.Uint64
+	goalGetRequests             atomic.Uint64
+	dodDefineRequests           atomic.Uint64
+	dodListRequests             atomic.Uint64
+	dodGetRequests              atomic.Uint64
 	runCreateRequests           atomic.Uint64
 	runListRequests             atomic.Uint64
 	runGetRequests              atomic.Uint64
@@ -532,6 +586,86 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Snapshot: item,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "goals" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.goalListRequests.Add(1)
+		items, err := state.listGoals(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, goalsResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Goals:    items,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/goals/:goalId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		goalID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/goals/")
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.goalGetRequests.Add(1)
+		item, err := state.readGoal(r.Context(), state.config.Backend, state.config.DataRoot, goalID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, goalResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Goal:     item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/dods", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "dods" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.dodListRequests.Add(1)
+		items, err := state.listDoDs(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, dodsResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			DoDs:     items,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/dods/:dodId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		dodID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/dods/")
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.dodGetRequests.Add(1)
+		item, err := state.readDoD(r.Context(), state.config.Backend, state.config.DataRoot, dodID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, dodResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			DoD:      item,
+		})
+	})
 	router.AddHandler("/api/v1/workorch/runs/:runId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		runID, action, ok := runActionFromPath(r.URL.Path)
@@ -702,6 +836,10 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
 		}
+		if req.GoalID == "" || req.DoDID == "" {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "goalId and doDId must reference defined workspace goal and DoD"})
+			return
+		}
 		item, err := state.createRun(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, req.RunID, req.GoalID, req.DoDID)
 		if err != nil {
 			writeBusinessError(w, err)
@@ -712,6 +850,56 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			Backend:  state.config.Backend,
 			DataRoot: state.config.DataRoot,
 			Run:      item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "goals" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.goalDefineRequests.Add(1)
+		var req defineGoalRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.defineGoal(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, req.Text)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, goalResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Goal:     item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/dods", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "dods" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.dodDefineRequests.Add(1)
+		var req defineDoDRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.defineDoD(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, req.Items)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, dodResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			DoD:      item,
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs", http.MethodGet, func(_ context.Context, w http.ResponseWriter, _ *http.Request) {
@@ -1053,6 +1241,12 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		readWorkspace:         defaultReadWorkspace,
 		readWorkspaceSnapshot: defaultReadWorkspaceSnapshot,
 		listWorkspaces:        defaultListWorkspaces,
+		defineGoal:            defaultDefineGoal,
+		readGoal:              defaultReadGoal,
+		listGoals:             defaultListGoals,
+		defineDoD:             defaultDefineDoD,
+		readDoD:               defaultReadDoD,
+		listDoDs:              defaultListDoDs,
 		createRun:             defaultCreateRun,
 		readRun:               defaultReadRun,
 		readRunSnapshot:       defaultReadRunSnapshot,
@@ -1127,6 +1321,60 @@ func (s *serverState) configureSharedMemorySession() {
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ListWorkspacesWithSession(ctx, session)
+			return err
+		})
+		return ret, err
+	}
+	s.defineGoal = func(ctx context.Context, _, _, workspaceID, text string) (appservice.Goal, error) {
+		var ret appservice.Goal
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.DefineGoalWithSession(ctx, session, workspaceID, text)
+			return err
+		})
+		return ret, err
+	}
+	s.readGoal = func(ctx context.Context, _, _, goalID string) (appservice.Goal, error) {
+		var ret appservice.Goal
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadGoalWithSession(ctx, session, goalID)
+			return err
+		})
+		return ret, err
+	}
+	s.listGoals = func(ctx context.Context, _, _, workspaceID string) ([]appservice.Goal, error) {
+		var ret []appservice.Goal
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListGoalsWithSession(ctx, session, workspaceID)
+			return err
+		})
+		return ret, err
+	}
+	s.defineDoD = func(ctx context.Context, _, _, workspaceID string, items []string) (appservice.DoD, error) {
+		var ret appservice.DoD
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.DefineDoDWithSession(ctx, session, workspaceID, items)
+			return err
+		})
+		return ret, err
+	}
+	s.readDoD = func(ctx context.Context, _, _, dodID string) (appservice.DoD, error) {
+		var ret appservice.DoD
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadDoDWithSession(ctx, session, dodID)
+			return err
+		})
+		return ret, err
+	}
+	s.listDoDs = func(ctx context.Context, _, _, workspaceID string) ([]appservice.DoD, error) {
+		var ret []appservice.DoD
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListDoDsWithSession(ctx, session, workspaceID)
 			return err
 		})
 		return ret, err
@@ -1360,6 +1608,30 @@ func defaultCreateWorkspace(ctx context.Context, backend string, dataRoot string
 	return appservice.CreateWorkspaceWithBackend(ctx, backend, dataRoot, title, description, workingDirectory)
 }
 
+func defaultDefineGoal(ctx context.Context, backend string, dataRoot string, workspaceID string, text string) (appservice.Goal, error) {
+	return appservice.DefineGoalWithBackend(ctx, backend, dataRoot, workspaceID, text)
+}
+
+func defaultReadGoal(ctx context.Context, backend string, dataRoot string, goalID string) (appservice.Goal, error) {
+	return appservice.ReadGoalWithBackend(ctx, backend, dataRoot, goalID)
+}
+
+func defaultListGoals(ctx context.Context, backend string, dataRoot string, workspaceID string) ([]appservice.Goal, error) {
+	return appservice.ListGoalsWithBackend(ctx, backend, dataRoot, workspaceID)
+}
+
+func defaultDefineDoD(ctx context.Context, backend string, dataRoot string, workspaceID string, items []string) (appservice.DoD, error) {
+	return appservice.DefineDoDWithBackend(ctx, backend, dataRoot, workspaceID, items)
+}
+
+func defaultReadDoD(ctx context.Context, backend string, dataRoot string, dodID string) (appservice.DoD, error) {
+	return appservice.ReadDoDWithBackend(ctx, backend, dataRoot, dodID)
+}
+
+func defaultListDoDs(ctx context.Context, backend string, dataRoot string, workspaceID string) ([]appservice.DoD, error) {
+	return appservice.ListDoDsWithBackend(ctx, backend, dataRoot, workspaceID)
+}
+
 func defaultCreateRun(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string, goalID string, dodID string) (appservice.Run, error) {
 	return appservice.CreateRunWithBackend(ctx, backend, dataRoot, workspaceID, runID, goalID, dodID)
 }
@@ -1529,6 +1801,12 @@ func (m *serverMetrics) render(config Config) string {
 			"workorch_http_requests_total{endpoint=\"workspace_list\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"workspace_get\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"workspace_snapshot\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"goal_define\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"goal_list\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"goal_get\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"dod_define\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"dod_list\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"dod_get\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_create\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_list\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_get\"} %d\n"+
@@ -1571,6 +1849,12 @@ func (m *serverMetrics) render(config Config) string {
 		m.workspaceListRequests.Load(),
 		m.workspaceGetRequests.Load(),
 		m.workspaceSnapshotRequests.Load(),
+		m.goalDefineRequests.Load(),
+		m.goalListRequests.Load(),
+		m.goalGetRequests.Load(),
+		m.dodDefineRequests.Load(),
+		m.dodListRequests.Load(),
+		m.dodGetRequests.Load(),
 		m.runCreateRequests.Load(),
 		m.runListRequests.Load(),
 		m.runGetRequests.Load(),
@@ -1617,6 +1901,17 @@ func sliceActionFromPath(path string) (sliceID string, action string, ok bool) {
 		return "", "", false
 	}
 	return parts[0], parts[1], true
+}
+
+func resourceIDFromPath(path string, prefix string) (string, bool) {
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	trimmed := strings.TrimPrefix(path, prefix)
+	if trimmed == "" || strings.Contains(trimmed, "/") {
+		return "", false
+	}
+	return trimmed, true
 }
 
 func workspaceActionFromPath(path string) (workspaceID string, action string, ok bool) {

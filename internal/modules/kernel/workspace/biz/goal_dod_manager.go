@@ -14,11 +14,13 @@ import (
 
 type GoalDoDManager struct {
 	workspaces repository.WorkspaceRepository
+	goals      repository.GoalRepository
+	dods       repository.DoDRepository
 	eventHub   events.Hub
 }
 
-func NewGoalDoDManager(workspaces repository.WorkspaceRepository, eventHub events.Hub) *GoalDoDManager {
-	return &GoalDoDManager{workspaces: workspaces, eventHub: eventHub}
+func NewGoalDoDManager(workspaces repository.WorkspaceRepository, goals repository.GoalRepository, dods repository.DoDRepository, eventHub events.Hub) *GoalDoDManager {
+	return &GoalDoDManager{workspaces: workspaces, goals: goals, dods: dods, eventHub: eventHub}
 }
 
 func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspaceservice.CreateWorkspaceCommand) error {
@@ -87,6 +89,48 @@ func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspaceservi
 	return m.publishWorkspaceEvent(ctx, events.TopicWorkspaceStateChanged, workspace)
 }
 
+func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspaceservice.DefineGoalCommand) error {
+	if cmd.GoalID == "" || cmd.WorkspaceID == "" || cmd.Text == "" {
+		return common.ErrInvalidArgument
+	}
+	if _, err := m.workspaces.Get(ctx, cmd.WorkspaceID); err != nil {
+		return err
+	}
+	goal := &workspaceModel.Goal{
+		ID:          cmd.GoalID,
+		WorkspaceID: cmd.WorkspaceID,
+		Text:        cmd.Text,
+	}
+	if err := m.goals.Create(ctx, goal); err != nil {
+		return err
+	}
+	return m.publishGoalEvent(ctx, goal)
+}
+
+func (m *GoalDoDManager) DefineDoD(ctx context.Context, cmd workspaceservice.DefineDoDCommand) error {
+	if cmd.DoDID == "" || cmd.WorkspaceID == "" || len(cmd.Items) == 0 {
+		return common.ErrInvalidArgument
+	}
+	for _, item := range cmd.Items {
+		if item == "" {
+			return common.ErrInvalidArgument
+		}
+	}
+	if _, err := m.workspaces.Get(ctx, cmd.WorkspaceID); err != nil {
+		return err
+	}
+	dod := &workspaceModel.DoD{
+		ID:          cmd.DoDID,
+		WorkspaceID: cmd.WorkspaceID,
+		Items:       append([]string(nil), cmd.Items...),
+		State:       common.DoDStateReady,
+	}
+	if err := m.dods.Create(ctx, dod); err != nil {
+		return err
+	}
+	return m.publishDoDEvent(ctx, dod)
+}
+
 func (m *GoalDoDManager) publishWorkspaceEvent(ctx context.Context, topic string, workspace *workspaceModel.Workspace) error {
 	if m.eventHub == nil {
 		return nil
@@ -99,5 +143,35 @@ func (m *GoalDoDManager) publishWorkspaceEvent(ctx context.Context, topic string
 		SubjectID:    string(workspace.ID),
 		WorkspaceID:  string(workspace.ID),
 		Payload:      events.WorkspacePayload(workspace.Title, workspace.Description, workspace.WorkingDirectory, workspace.State, workspace.ActiveRunID),
+	})
+}
+
+func (m *GoalDoDManager) publishGoalEvent(ctx context.Context, goal *workspaceModel.Goal) error {
+	if m.eventHub == nil {
+		return nil
+	}
+	return m.eventHub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        events.TopicGoalDefined,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "goal",
+		SubjectID:    string(goal.ID),
+		WorkspaceID:  string(goal.WorkspaceID),
+		Payload:      events.GoalPayload(goal.Text),
+	})
+}
+
+func (m *GoalDoDManager) publishDoDEvent(ctx context.Context, dod *workspaceModel.DoD) error {
+	if m.eventHub == nil {
+		return nil
+	}
+	return m.eventHub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        events.TopicDoDDefined,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "dod",
+		SubjectID:    string(dod.ID),
+		WorkspaceID:  string(dod.WorkspaceID),
+		Payload:      events.DoDPayload(dod.Items, dod.State),
 	})
 }

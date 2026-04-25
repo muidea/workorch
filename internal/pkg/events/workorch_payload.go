@@ -8,6 +8,8 @@ const (
 	PayloadKeyWorkingDirectory   = "workingDirectory"
 	PayloadKeyGoalID             = "goalId"
 	PayloadKeyDoDID              = "doDId"
+	PayloadKeyText               = "text"
+	PayloadKeyItems              = "items"
 	PayloadKeyState              = "state"
 	PayloadKeyActiveRunID        = "activeRunId"
 	PayloadKeyBlockingTicketID   = "blockingTicketId"
@@ -37,6 +39,19 @@ type RunPayloadData struct {
 	BlockingTicketID   common.TicketID
 	BlockingApprovalID common.ApprovalID
 	FailureReason      string
+}
+
+func GoalPayload(text string) map[string]any {
+	return map[string]any{
+		PayloadKeyText: text,
+	}
+}
+
+func DoDPayload(items []string, state common.DoDState) map[string]any {
+	return map[string]any{
+		PayloadKeyItems: append([]string(nil), items...),
+		PayloadKeyState: string(state),
+	}
 }
 
 type StepPayloadData struct {

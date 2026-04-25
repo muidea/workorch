@@ -25,15 +25,23 @@ func TestCreateRunWithBackendReturnsCreatedRun(t *testing.T) {
 	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-created", "run created workspace", "", "workspaces/run created workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
+	goal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, "ws-run-created", "created goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, "ws-run-created", []string{"created dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
 
-	item, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-created", "run-created", "goal-created", "dod-created")
+	item, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-created", "run-created", goal.ID, dod.ID)
 	if err != nil {
 		t.Fatalf("CreateRunWithBackend: %v", err)
 	}
 	if item.ID != "run-created" || item.WorkspaceID != "ws-run-created" {
 		t.Fatalf("run = %+v, want created run", item)
 	}
-	if item.State != "created" || item.GoalID != "goal-created" || item.DoDID != "dod-created" {
+	if item.State != "created" || item.GoalID != goal.ID || item.DoDID != dod.ID {
 		t.Fatalf("run fields = %+v, want created state with goal/dod", item)
 	}
 }

@@ -15,7 +15,7 @@ import (
 func TestGoalDoDManager_CreateWorkspace(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewWorkspaceRepository()
-	manager := NewGoalDoDManager(repo, nil)
+	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), nil)
 
 	cmd := workspaceservice.CreateWorkspaceCommand{
 		WorkspaceID:      common.WorkspaceID("ws-1"),
@@ -47,7 +47,7 @@ func TestGoalDoDManager_CreateWorkspace(t *testing.T) {
 
 func TestGoalDoDManager_CreateWorkspace_ValidateArguments(t *testing.T) {
 	ctx := context.Background()
-	manager := NewGoalDoDManager(memory.NewWorkspaceRepository(), nil)
+	manager := NewGoalDoDManager(memory.NewWorkspaceRepository(), memory.NewGoalRepository(), memory.NewDoDRepository(), nil)
 
 	tests := []workspaceservice.CreateWorkspaceCommand{
 		{WorkspaceID: "", Title: "ok", WorkingDirectory: "/tmp/workorch/ws-1"},
@@ -64,7 +64,7 @@ func TestGoalDoDManager_CreateWorkspace_ValidateArguments(t *testing.T) {
 func TestGoalDoDManager_CreateWorkspace_RejectsDuplicateWorkspaceID(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewWorkspaceRepository()
-	manager := NewGoalDoDManager(repo, nil)
+	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), nil)
 
 	cmd := workspaceservice.CreateWorkspaceCommand{
 		WorkspaceID:      common.WorkspaceID("ws-duplicate"),
@@ -97,7 +97,7 @@ func TestGoalDoDManager_CreateWorkspace_PublishesWorkspaceCreatedEvent(t *testin
 	ctx := context.Background()
 	repo := memory.NewWorkspaceRepository()
 	hub := events.NewMemoryHub()
-	manager := NewGoalDoDManager(repo, hub)
+	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), hub)
 
 	cmd := workspaceservice.CreateWorkspaceCommand{
 		WorkspaceID:      common.WorkspaceID("ws-event"),
@@ -136,7 +136,7 @@ func TestGoalDoDManager_CreateWorkspace_PublishesWorkspaceCreatedEvent(t *testin
 func TestGoalDoDManager_EnsureWorkspaceCreatesMissingWorkspace(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewWorkspaceRepository()
-	manager := NewGoalDoDManager(repo, nil)
+	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), nil)
 
 	cmd := workspaceservice.EnsureWorkspaceCommand{
 		WorkspaceID:      common.WorkspaceID("ws-ensure-create"),
@@ -173,7 +173,7 @@ func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t
 	ctx := context.Background()
 	repo := memory.NewWorkspaceRepository()
 	hub := events.NewMemoryHub()
-	manager := NewGoalDoDManager(repo, hub)
+	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), hub)
 
 	workspaceID := common.WorkspaceID("ws-ensure-reset")
 	if err := repo.Create(ctx, &workspacemodel.Workspace{

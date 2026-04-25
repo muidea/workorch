@@ -27,6 +27,10 @@ func CreateRunWithSession(ctx context.Context, session *RuntimeSession, workspac
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
+	if err := validateRunDefinitions(ctx, session, workspaceID, goalID, dodID); err != nil {
+		return Run{}, err
+	}
+
 	id := common.RunID(runID)
 	if err := service.CreateRun(ctx, runmodule.CreateRunCommand{
 		RunID:       id,
@@ -206,6 +210,43 @@ func runDependenciesFromSession(session *RuntimeSession) (runmodule.Service, rep
 		return nil, nil, common.ErrInvalidArgument
 	}
 	return exports.Services.RunService, exports.Repositories.Runs, nil
+}
+
+func validateRunDefinitions(ctx context.Context, session *RuntimeSession, workspaceID string, goalID string, dodID string) error {
+	if goalID == "" && dodID == "" {
+		return nil
+	}
+	if goalID == "" || dodID == "" {
+		return common.ErrInvalidArgument
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		return err
+	}
+	if exports.Repositories.Workspaces == nil || exports.Repositories.Goals == nil || exports.Repositories.DoDs == nil {
+		return common.ErrInvalidArgument
+	}
+	if _, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspaceID)); err != nil {
+		return err
+	}
+	goal, err := exports.Repositories.Goals.Get(ctx, common.GoalID(goalID))
+	if err != nil {
+		return err
+	}
+	if goal.WorkspaceID != common.WorkspaceID(workspaceID) {
+		return common.ErrConflict
+	}
+	dod, err := exports.Repositories.DoDs.Get(ctx, common.DoDID(dodID))
+	if err != nil {
+		return err
+	}
+	if dod.WorkspaceID != common.WorkspaceID(workspaceID) {
+		return common.ErrConflict
+	}
+	if dod.State != common.DoDStateReady && dod.State != common.DoDStateSatisfied {
+		return common.ErrConflict
+	}
+	return nil
 }
 
 func mapRun(item *runmodel.Run) Run {
