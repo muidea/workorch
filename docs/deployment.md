@@ -105,6 +105,8 @@ make docker-verify
 make docker-verify-file
 ```
 
+For the file-backed backend, `make verify-service-file` and `make docker-verify-file` both include a restart-read verification pass on the same persisted data directory.
+
 ## Environment variables
 
 Use `.env.workorchd.example` as the baseline configuration template.
@@ -157,3 +159,4 @@ A deployable `workorchd` instance is acceptable when:
 - with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/slices/{sliceId}/status` returns the current `workorch` slice status summary when persisted state exists
 - with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/slices/{sliceId}/snapshot` returns the current persisted `workorch` slice snapshot when persisted state exists
 - with `WORKORCH_REPOSITORY_BACKEND=file`, repository state is persisted under the configured `WORKORCH_DATA_DIR`
+- with `WORKORCH_REPOSITORY_BACKEND=file`, restarting `workorchd` on the same `WORKORCH_DATA_DIR` preserves workspace / run / decision / approval terminal read paths

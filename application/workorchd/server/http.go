@@ -13,8 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/application/workorchd/appservice"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const (
@@ -216,6 +218,7 @@ type validateFunc func(context.Context, string, string) error
 
 type serverState struct {
 	config                Config
+	eventHub              events.Hub
 	metrics               *serverMetrics
 	validate              validateFunc
 	createWorkspace       createWorkspaceFunc
@@ -356,8 +359,12 @@ func normalizeConfig(config Config) Config {
 }
 
 func NewHTTPServer(config Config) *HTTPServer {
+	return NewHTTPServerWithEventHub(config, nil)
+}
+
+func NewHTTPServerWithEventHub(config Config, eventHub events.Hub) *HTTPServer {
 	config = normalizeConfig(config)
-	state := newServerState(config)
+	state := newServerState(config, eventHub)
 	handler := newMuxWithState(state)
 	return &HTTPServer{
 		config: config,
@@ -388,6 +395,7 @@ func (s *HTTPServer) Validate(ctx context.Context) error {
 	if s == nil {
 		return errors.New("http server is not configured")
 	}
+	ctx = appservice.ContextWithEventHub(ctx, s.state.eventHub)
 	return s.state.validate(ctx, s.config.Backend, s.config.DataRoot)
 }
 
@@ -399,10 +407,586 @@ func (s *HTTPServer) Shutdown(ctx context.Context) error {
 }
 
 func newMux(config Config) http.Handler {
-	return newMuxWithState(newServerState(normalizeConfig(config)))
+	return newMuxWithState(newServerState(normalizeConfig(config), nil))
 }
 
 func newMuxWithState(state *serverState) http.Handler {
+	router := engine.NewRouteRegistry()
+	registerSystemRoutes(router, state)
+	registerReadRoutes(router, state)
+	registerBusinessWriteRoutes(router, state)
+	registerSliceRoutes(router, state)
+	engineServer := engine.NewHTTPServer()
+	engineServer.Bind(router)
+	handler, ok := engineServer.(http.Handler)
+	if !ok {
+		return http.NotFoundHandler()
+	}
+	return handler
+}
+
+func registerSystemRoutes(router engine.RouteRegistry, state *serverState) {
+	router.AddHandler("/healthz", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		state.metrics.healthzRequests.Add(1)
+		writeJSON(w, http.StatusOK, statusResponse{
+			Service: "workorch",
+			Status:  "ok",
+		})
+	})
+	router.AddHandler("/readyz", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.readyzRequests.Add(1)
+		if err := state.validate(r.Context(), state.config.Backend, state.config.DataRoot); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, statusResponse{
+			Service: "workorch",
+			Status:  "ready",
+		})
+	})
+	router.AddHandler("/metrics", http.MethodGet, func(_ context.Context, w http.ResponseWriter, _ *http.Request) {
+		state.metrics.metricsRequests.Add(1)
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		_, _ = fmt.Fprint(w, state.metrics.render(state.config))
+	})
+}
+
+func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
+	router.AddHandler("/api/v1/workorch/workspaces", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.workspaceListRequests.Add(1)
+		items, err := state.listWorkspaces(r.Context(), state.config.Backend, state.config.DataRoot)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, workspacesResponse{
+			Service:    "workorch",
+			Backend:    state.config.Backend,
+			DataRoot:   state.config.DataRoot,
+			Workspaces: items,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.runListRequests.Add(1)
+		items, err := state.listRuns(r.Context(), state.config.Backend, state.config.DataRoot, r.URL.Query().Get("workspaceId"))
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runsResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Runs:     items,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.workspaceGetRequests.Add(1)
+		item, err := state.readWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, workspaceResponse{
+			Service:   "workorch",
+			Backend:   state.config.Backend,
+			DataRoot:  state.config.DataRoot,
+			Workspace: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/snapshot", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "snapshot" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.workspaceSnapshotRequests.Add(1)
+		item, err := state.readWorkspaceSnapshot(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, workspaceSnapshotResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Snapshot: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.runGetRequests.Add(1)
+		item, err := state.readRun(r.Context(), state.config.Backend, state.config.DataRoot, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runInstanceResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Run:      item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/snapshot", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "snapshot" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.runSnapshotRequests.Add(1)
+		item, err := state.readRunSnapshot(r.Context(), state.config.Backend, state.config.DataRoot, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runSnapshotResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Snapshot: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/status", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "status" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.runStatusRequests.Add(1)
+		item, err := state.readRunStatus(r.Context(), state.config.Backend, state.config.DataRoot, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runStatusResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Status:   item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/decisions", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.decisionListRequests.Add(1)
+		items, err := state.listDecisions(r.Context(), state.config.Backend, state.config.DataRoot, r.URL.Query().Get("workspaceId"), r.URL.Query().Get("runId"))
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, decisionsResponse{
+			Service:   "workorch",
+			Backend:   state.config.Backend,
+			DataRoot:  state.config.DataRoot,
+			Decisions: items,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/decisions/:ticketId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		ticketID, action, ok := decisionActionFromPath(r.URL.Path)
+		if !ok || action != "" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.decisionGetRequests.Add(1)
+		item, err := state.readDecision(r.Context(), state.config.Backend, state.config.DataRoot, ticketID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, decisionResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Decision: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/approvals", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.approvalListRequests.Add(1)
+		items, err := state.listApprovals(r.Context(), state.config.Backend, state.config.DataRoot, r.URL.Query().Get("workspaceId"), r.URL.Query().Get("runId"))
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, approvalsResponse{
+			Service:   "workorch",
+			Backend:   state.config.Backend,
+			DataRoot:  state.config.DataRoot,
+			Approvals: items,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/approvals/:approvalId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		approvalID, action, ok := approvalActionFromPath(r.URL.Path)
+		if !ok || action != "" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.approvalGetRequests.Add(1)
+		item, err := state.readApproval(r.Context(), state.config.Backend, state.config.DataRoot, approvalID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, approvalResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Approval: item,
+		})
+	})
+}
+
+func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState) {
+	router.AddHandler("/api/v1/workorch/workspaces", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.workspaceCreateRequests.Add(1)
+		var req createWorkspaceRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.createWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, req.WorkspaceID, req.Title)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, workspaceResponse{
+			Service:   "workorch",
+			Backend:   state.config.Backend,
+			DataRoot:  state.config.DataRoot,
+			Workspace: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "runs" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.runCreateRequests.Add(1)
+		var req createRunRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.createRun(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, req.RunID, req.GoalID, req.DoDID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, runInstanceResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Run:      item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs", http.MethodGet, func(_ context.Context, w http.ResponseWriter, _ *http.Request) {
+		writeMethodNotAllowed(w)
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/start", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "start" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.runStartRequests.Add(1)
+		release, err := state.acquireRunSlot(r.Context())
+		if err != nil {
+			state.metrics.runCanceled.Add(1)
+			writeRunQueueError(w, err)
+			return
+		}
+		defer release()
+		item, err := state.startRun(r.Context(), state.config.Backend, state.config.DataRoot, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		state.metrics.runSucceeded.Add(1)
+		writeJSON(w, http.StatusOK, runInstanceResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Run:      item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/resume", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "resume" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.runResumeRequests.Add(1)
+		release, err := state.acquireRunSlot(r.Context())
+		if err != nil {
+			state.metrics.runCanceled.Add(1)
+			writeRunQueueError(w, err)
+			return
+		}
+		defer release()
+		item, err := state.resumeRun(r.Context(), state.config.Backend, state.config.DataRoot, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		state.metrics.runSucceeded.Add(1)
+		writeJSON(w, http.StatusOK, runInstanceResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Run:      item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/decisions/:ticketId/resolve", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		ticketID, action, ok := decisionActionFromPath(r.URL.Path)
+		if !ok || action != "resolve" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.decisionResolveRequests.Add(1)
+		item, err := state.resolveDecision(r.Context(), state.config.Backend, state.config.DataRoot, ticketID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, decisionResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Decision: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/decisions/:ticketId/reject", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		ticketID, action, ok := decisionActionFromPath(r.URL.Path)
+		if !ok || action != "reject" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.decisionRejectRequests.Add(1)
+		item, err := state.rejectDecision(r.Context(), state.config.Backend, state.config.DataRoot, ticketID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, decisionResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Decision: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/approvals/:approvalId/approve", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		approvalID, action, ok := approvalActionFromPath(r.URL.Path)
+		if !ok || action != "approve" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.approvalApproveRequests.Add(1)
+		item, err := state.approveApproval(r.Context(), state.config.Backend, state.config.DataRoot, approvalID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, approvalResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Approval: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/approvals/:approvalId/reject", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		approvalID, action, ok := approvalActionFromPath(r.URL.Path)
+		if !ok || action != "reject" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.approvalRejectRequests.Add(1)
+		item, err := state.rejectApproval(r.Context(), state.config.Backend, state.config.DataRoot, approvalID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, approvalResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Approval: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.runRequests.Add(1)
+		release, err := state.acquireRunSlot(r.Context())
+		if err != nil {
+			state.metrics.runCanceled.Add(1)
+			writeRunQueueError(w, err)
+			return
+		}
+		defer release()
+
+		slices, err := state.run(r.Context(), state.config.Backend, state.config.DataRoot)
+		if err != nil {
+			state.metrics.runFailed.Add(1)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+			return
+		}
+		state.metrics.runSucceeded.Add(1)
+		writeJSON(w, http.StatusOK, runResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Slices:   slices,
+		})
+	})
+}
+
+func registerSliceRoutes(router engine.RouteRegistry, state *serverState) {
+	router.AddHandler("/api/v1/workorch/slices", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.sliceCatalogRequests.Add(1)
+		writeJSON(w, http.StatusOK, sliceCatalogResponse{
+			Service: "workorch",
+			Slices:  state.listSlices(),
+		})
+	})
+	router.AddHandler("/api/v1/workorch/slices/snapshots", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.sliceSnapshotsRequests.Add(1)
+		slices, err := state.listSnapshots(r.Context(), state.config.Backend, state.config.DataRoot)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, sliceSnapshotsResponse{
+			Service: "workorch",
+			Slices:  slices,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/slices/statuses", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.sliceStatusesRequests.Add(1)
+		statuses, err := state.listStatuses(r.Context(), state.config.Backend, state.config.DataRoot)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, sliceStatusesResponse{
+			Service:  "workorch",
+			Statuses: statuses,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/slices/:sliceId/status", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		sliceID, action, ok := sliceActionFromPath(r.URL.Path)
+		if !ok || action != "status" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.sliceStatusRequests.Add(1)
+		status, err := state.statusOne(r.Context(), state.config.Backend, state.config.DataRoot, sliceID)
+		if err != nil {
+			if errors.Is(err, common.ErrNotFound) {
+				writeJSON(w, http.StatusNotFound, errorResponse{Error: err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, sliceStatusResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Status:   status,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/slices/:sliceId/snapshot", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		sliceID, action, ok := sliceActionFromPath(r.URL.Path)
+		if !ok || action != "snapshot" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.singleSliceSnapshotRequests.Add(1)
+		slice, err := state.readOne(r.Context(), state.config.Backend, state.config.DataRoot, sliceID)
+		if err != nil {
+			if errors.Is(err, common.ErrNotFound) {
+				writeJSON(w, http.StatusNotFound, errorResponse{Error: err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, sliceRunResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Slice:    slice,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/slices/:sliceId/runs", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		sliceID, action, ok := sliceActionFromPath(r.URL.Path)
+		if !ok || action != "runs" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.singleRunRequests.Add(1)
+		release, err := state.acquireRunSlot(r.Context())
+		if err != nil {
+			state.metrics.runCanceled.Add(1)
+			writeRunQueueError(w, err)
+			return
+		}
+		defer release()
+
+		slice, err := state.runOne(r.Context(), state.config.Backend, state.config.DataRoot, sliceID)
+		if err != nil {
+			if errors.Is(err, common.ErrNotFound) {
+				writeJSON(w, http.StatusNotFound, errorResponse{Error: err.Error()})
+				return
+			}
+			state.metrics.runFailed.Add(1)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+			return
+		}
+		state.metrics.runSucceeded.Add(1)
+		writeJSON(w, http.StatusOK, sliceRunResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Slice:    slice,
+		})
+	})
+}
+
+func newLegacyMuxWithState(state *serverState) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -984,12 +1568,16 @@ func newMuxWithState(state *serverState) http.Handler {
 			writeMethodNotAllowed(w)
 		}
 	})
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		mux.ServeHTTP(w, r)
+	})
 }
 
-func newServerState(config Config) *serverState {
+func newServerState(config Config, eventHub events.Hub) *serverState {
 	return &serverState{
 		config:                config,
+		eventHub:              eventHub,
 		metrics:               &serverMetrics{},
 		validate:              defaultValidate,
 		createWorkspace:       defaultCreateWorkspace,

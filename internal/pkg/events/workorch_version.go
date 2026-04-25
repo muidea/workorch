@@ -2,7 +2,7 @@ package events
 
 const (
 	WorkorchEventVersion    = "workorch.event.v1"
-	WorkorchSnapshotVersion = "workorch-demo.v1"
+	WorkorchSnapshotVersion = "workorch.v1"
 )
 
 type WorkorchContractSpec struct {

@@ -2,7 +2,6 @@ package appservice
 
 import (
 	"context"
-	"errors"
 
 	"github.com/muidea/workorch/application/workorchd/observed"
 	"github.com/muidea/workorch/application/workorchd/presenter"
@@ -61,15 +60,13 @@ func ReadRunSnapshotWithSession(ctx context.Context, session *RuntimeSession, ru
 	if err != nil {
 		return RunSnapshot{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	return readRunSnapshot(ctx, deps, common.RunID(runID))
 }
 
 func ReadRunSnapshotWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (RunSnapshot, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return RunSnapshot{}, err
 	}
@@ -89,9 +86,7 @@ func ReadRunStatusWithSession(ctx context.Context, session *RuntimeSession, runI
 	if err != nil {
 		return RunStatus{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	snapshot, err := readRunSnapshot(ctx, deps, common.RunID(runID))
 	if err != nil {
@@ -101,7 +96,7 @@ func ReadRunStatusWithSession(ctx context.Context, session *RuntimeSession, runI
 }
 
 func ReadRunStatusWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (RunStatus, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return RunStatus{}, err
 	}
@@ -121,15 +116,13 @@ func ReadWorkspaceSnapshotWithSession(ctx context.Context, session *RuntimeSessi
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	return readWorkspaceSnapshot(ctx, deps, common.WorkspaceID(workspaceID))
 }
 
 func ReadWorkspaceSnapshotWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (WorkspaceSnapshot, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
@@ -145,10 +138,10 @@ func ReadWorkspaceSnapshotFromEnv(ctx context.Context, workspaceID string) (Work
 }
 
 func readModelDependenciesFromSession(session *RuntimeSession) (readModelDependencies, error) {
-	if session == nil || session.Bootstrap == nil {
-		return readModelDependencies{}, common.ErrInvalidArgument
+	exports, err := session.Exports()
+	if err != nil {
+		return readModelDependencies{}, err
 	}
-	exports := session.Bootstrap.Exports()
 	if exports.Repositories.Workspaces == nil ||
 		exports.Repositories.Runs == nil ||
 		exports.Repositories.Steps == nil ||

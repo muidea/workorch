@@ -18,8 +18,9 @@ type lifecycle interface {
 }
 
 type Runtime struct {
-	exports Exports
-	modules []lifecycle
+	exports         Exports
+	modules         []lifecycle
+	moduleLifecycle *modulePluginLifecycle
 }
 
 type RepositoryExports struct {
@@ -49,12 +50,22 @@ type Exports struct {
 }
 
 func (r *Runtime) Shutdown(ctx context.Context) error {
-	for idx := len(r.modules) - 1; idx >= 0; idx-- {
-		if err := r.modules[idx].Teardown(ctx); err != nil {
+	if r.moduleLifecycle != nil && len(r.modules) == len(r.moduleLifecycle.modules) {
+		if err := r.moduleLifecycle.Shutdown(ctx); err != nil {
 			return err
+		}
+		r.moduleLifecycle = nil
+	} else {
+		for idx := len(r.modules) - 1; idx >= 0; idx-- {
+			if err := r.modules[idx].Teardown(ctx); err != nil {
+				return err
+			}
 		}
 	}
 	r.modules = nil
+	if terminator, ok := r.exports.Infrastructure.EventHub.(interface{ Terminate() }); ok {
+		terminator.Terminate()
+	}
 	return nil
 }
 

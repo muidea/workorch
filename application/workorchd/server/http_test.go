@@ -11,12 +11,14 @@ import (
 	"testing"
 	"time"
 
+	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/application/workorchd/appservice"
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	legacycommon "github.com/muidea/workorch/internal/modules/blocks/legacy/pkg/common"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestHealthzReturnsOK(t *testing.T) {
@@ -45,6 +47,362 @@ func TestReadyzReturnsServiceUnavailableWhenBackendInvalid(t *testing.T) {
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}
+
+func TestReadyzNativeRouteInjectsEventHub(t *testing.T) {
+	hub := events.NewMemoryHub()
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	state.validate = func(ctx context.Context, _, _ string) error {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("event hub from context = %#v, want injected hub", got)
+		}
+		return nil
+	}
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+
+	newMuxWithState(state).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestAcceptedAPIRoutesAreRegisteredNatively(t *testing.T) {
+	router := engine.NewRouteRegistry()
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	registerSystemRoutes(router, state)
+	registerReadRoutes(router, state)
+	registerBusinessWriteRoutes(router, state)
+	registerSliceRoutes(router, state)
+
+	for _, route := range acceptedAPINativeRouteSpecs() {
+		if !router.ExistHandler(route.pattern, route.method) {
+			t.Fatalf("native route %s %s is not registered", route.method, route.pattern)
+		}
+	}
+	for _, method := range []string{
+		http.MethodGet,
+		http.MethodHead,
+		http.MethodPost,
+		http.MethodPut,
+		http.MethodPatch,
+		http.MethodDelete,
+		http.MethodOptions,
+		http.MethodConnect,
+		http.MethodTrace,
+	} {
+		if router.ExistHandler("/**", method) {
+			t.Fatalf("wildcard fallback route %s /** must not be registered", method)
+		}
+	}
+}
+
+type routeSpec struct {
+	method  string
+	pattern string
+}
+
+func acceptedAPINativeRouteSpecs() []routeSpec {
+	return []routeSpec{
+		{method: http.MethodGet, pattern: "/healthz"},
+		{method: http.MethodGet, pattern: "/readyz"},
+		{method: http.MethodGet, pattern: "/metrics"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/snapshot"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/runs"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/snapshot"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/status"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/runs/:runId/start"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/runs/:runId/resume"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/decisions"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/decisions/:ticketId"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/decisions/:ticketId/resolve"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/decisions/:ticketId/reject"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/approvals"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/approvals/:approvalId"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/approvals/:approvalId/approve"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/approvals/:approvalId/reject"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/slices"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/slices/snapshots"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/slices/statuses"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/slices/:sliceId/status"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/slices/:sliceId/snapshot"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/slices/:sliceId/runs"},
+	}
+}
+
+func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
+	hub := events.NewMemoryHub()
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	state.validate = func(context.Context, string, string) error { return nil }
+	state.listWorkspaces = func(ctx context.Context, _, _ string) ([]appservice.Workspace, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("workspace list event hub = %#v, want injected hub", got)
+		}
+		return []appservice.Workspace{{ID: "ws-native-read", Title: "native read"}}, nil
+	}
+	state.listRuns = func(ctx context.Context, _, _, workspaceID string) ([]appservice.Run, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run list event hub = %#v, want injected hub", got)
+		}
+		if workspaceID != "ws-native-read" {
+			t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
+		}
+		return []appservice.Run{{ID: "run-native-read", WorkspaceID: workspaceID, State: "created"}}, nil
+	}
+	state.readWorkspace = func(ctx context.Context, _, _, workspaceID string) (appservice.Workspace, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("workspace get event hub = %#v, want injected hub", got)
+		}
+		if workspaceID != "ws-native-read" {
+			t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
+		}
+		return appservice.Workspace{ID: workspaceID, Title: "native read", State: "active"}, nil
+	}
+	state.readWorkspaceSnapshot = func(ctx context.Context, _, _, workspaceID string) (appservice.WorkspaceSnapshot, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("workspace snapshot event hub = %#v, want injected hub", got)
+		}
+		if workspaceID != "ws-native-read" {
+			t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
+		}
+		return appservice.WorkspaceSnapshot{Workspace: appservice.Workspace{ID: workspaceID}}, nil
+	}
+	state.readRun = func(ctx context.Context, _, _, runID string) (appservice.Run, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run get event hub = %#v, want injected hub", got)
+		}
+		if runID != "run-native-read" {
+			t.Fatalf("runID = %q, want run-native-read", runID)
+		}
+		return appservice.Run{ID: runID, WorkspaceID: "ws-native-read", State: "created"}, nil
+	}
+	state.readRunSnapshot = func(ctx context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run snapshot event hub = %#v, want injected hub", got)
+		}
+		if runID != "run-native-read" {
+			t.Fatalf("runID = %q, want run-native-read", runID)
+		}
+		return appservice.RunSnapshot{Run: appservice.Run{ID: runID}}, nil
+	}
+	state.readRunStatus = func(ctx context.Context, _, _, runID string) (appservice.RunStatus, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run status event hub = %#v, want injected hub", got)
+		}
+		if runID != "run-native-read" {
+			t.Fatalf("runID = %q, want run-native-read", runID)
+		}
+		return appservice.RunStatus{ID: runID, WorkspaceID: "ws-native-read", State: "created"}, nil
+	}
+	state.listDecisions = func(ctx context.Context, _, _, workspaceID, runID string) ([]appservice.Decision, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("decision list event hub = %#v, want injected hub", got)
+		}
+		if workspaceID != "ws-native-read" || runID != "run-native-read" {
+			t.Fatalf("decision filters = %q/%q, want ws-native-read/run-native-read", workspaceID, runID)
+		}
+		return []appservice.Decision{{ID: "ticket-native-read", WorkspaceID: workspaceID, RunID: runID, State: "open"}}, nil
+	}
+	state.readDecision = func(ctx context.Context, _, _, ticketID string) (appservice.Decision, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("decision get event hub = %#v, want injected hub", got)
+		}
+		if ticketID != "ticket-native-read" {
+			t.Fatalf("ticketID = %q, want ticket-native-read", ticketID)
+		}
+		return appservice.Decision{ID: ticketID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "open"}, nil
+	}
+	state.listApprovals = func(ctx context.Context, _, _, workspaceID, runID string) ([]appservice.Approval, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("approval list event hub = %#v, want injected hub", got)
+		}
+		if workspaceID != "ws-native-read" || runID != "run-native-read" {
+			t.Fatalf("approval filters = %q/%q, want ws-native-read/run-native-read", workspaceID, runID)
+		}
+		return []appservice.Approval{{ID: "approval-native-read", WorkspaceID: workspaceID, RunID: runID, State: "pending"}}, nil
+	}
+	state.readApproval = func(ctx context.Context, _, _, approvalID string) (appservice.Approval, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("approval get event hub = %#v, want injected hub", got)
+		}
+		if approvalID != "approval-native-read" {
+			t.Fatalf("approvalID = %q, want approval-native-read", approvalID)
+		}
+		return appservice.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "pending"}, nil
+	}
+	state.createWorkspace = func(ctx context.Context, _, _, workspaceID, title string) (appservice.Workspace, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("workspace create event hub = %#v, want injected hub", got)
+		}
+		if workspaceID != "ws-native-write" || title != "native write" {
+			t.Fatalf("workspace create input = %q/%q, want ws-native-write/native write", workspaceID, title)
+		}
+		return appservice.Workspace{ID: workspaceID, Title: title, State: "active"}, nil
+	}
+	state.createRun = func(ctx context.Context, _, _, workspaceID, runID, goalID, dodID string) (appservice.Run, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run create event hub = %#v, want injected hub", got)
+		}
+		if workspaceID != "ws-native-read" || runID != "run-native-write" || goalID != "goal-native" || dodID != "dod-native" {
+			t.Fatalf("run create input = %q/%q/%q/%q, want ws-native-read/run-native-write/goal-native/dod-native", workspaceID, runID, goalID, dodID)
+		}
+		return appservice.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: "created"}, nil
+	}
+	state.startRun = func(ctx context.Context, _, _, runID string) (appservice.Run, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run start event hub = %#v, want injected hub", got)
+		}
+		if runID != "run-native-read" {
+			t.Fatalf("runID = %q, want run-native-read", runID)
+		}
+		return appservice.Run{ID: runID, WorkspaceID: "ws-native-read", State: "completed"}, nil
+	}
+	state.resumeRun = func(ctx context.Context, _, _, runID string) (appservice.Run, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run resume event hub = %#v, want injected hub", got)
+		}
+		if runID != "run-native-read" {
+			t.Fatalf("runID = %q, want run-native-read", runID)
+		}
+		return appservice.Run{ID: runID, WorkspaceID: "ws-native-read", State: "completed"}, nil
+	}
+	state.resolveDecision = func(ctx context.Context, _, _, ticketID string) (appservice.Decision, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("decision resolve event hub = %#v, want injected hub", got)
+		}
+		if ticketID != "ticket-native-read" {
+			t.Fatalf("ticketID = %q, want ticket-native-read", ticketID)
+		}
+		return appservice.Decision{ID: ticketID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "resolved"}, nil
+	}
+	state.rejectDecision = func(ctx context.Context, _, _, ticketID string) (appservice.Decision, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("decision reject event hub = %#v, want injected hub", got)
+		}
+		if ticketID != "ticket-native-read" {
+			t.Fatalf("ticketID = %q, want ticket-native-read", ticketID)
+		}
+		return appservice.Decision{ID: ticketID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "resolved"}, nil
+	}
+	state.approveApproval = func(ctx context.Context, _, _, approvalID string) (appservice.Approval, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("approval approve event hub = %#v, want injected hub", got)
+		}
+		if approvalID != "approval-native-read" {
+			t.Fatalf("approvalID = %q, want approval-native-read", approvalID)
+		}
+		return appservice.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "approved"}, nil
+	}
+	state.rejectApproval = func(ctx context.Context, _, _, approvalID string) (appservice.Approval, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("approval reject event hub = %#v, want injected hub", got)
+		}
+		if approvalID != "approval-native-read" {
+			t.Fatalf("approvalID = %q, want approval-native-read", approvalID)
+		}
+		return appservice.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "rejected"}, nil
+	}
+	state.run = func(ctx context.Context, _, _ string) ([]appservice.Slice, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("bulk run event hub = %#v, want injected hub", got)
+		}
+		return nil, nil
+	}
+	state.listSlices = func() []appservice.SliceDescriptor {
+		return []appservice.SliceDescriptor{{ID: "slice-native-read", Title: "native slice"}}
+	}
+	state.listSnapshots = func(ctx context.Context, _, _ string) ([]appservice.Slice, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("slice snapshots event hub = %#v, want injected hub", got)
+		}
+		return []appservice.Slice{{ID: "slice-native-read", Title: "native slice"}}, nil
+	}
+	state.listStatuses = func(ctx context.Context, _, _ string) ([]appservice.SliceStatus, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("slice statuses event hub = %#v, want injected hub", got)
+		}
+		return []appservice.SliceStatus{{ID: "slice-native-read", Title: "native slice"}}, nil
+	}
+	state.readOne = func(ctx context.Context, _, _, sliceID string) (appservice.Slice, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("slice snapshot event hub = %#v, want injected hub", got)
+		}
+		if sliceID != "slice-native-read" {
+			t.Fatalf("sliceID = %q, want slice-native-read", sliceID)
+		}
+		return appservice.Slice{ID: sliceID, Title: "native slice"}, nil
+	}
+	state.statusOne = func(ctx context.Context, _, _, sliceID string) (appservice.SliceStatus, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("slice status event hub = %#v, want injected hub", got)
+		}
+		if sliceID != "slice-native-read" {
+			t.Fatalf("sliceID = %q, want slice-native-read", sliceID)
+		}
+		return appservice.SliceStatus{ID: sliceID, Title: "native slice"}, nil
+	}
+	state.runOne = func(ctx context.Context, _, _, sliceID string) (appservice.Slice, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("single slice run event hub = %#v, want injected hub", got)
+		}
+		if sliceID != "slice-native-read" {
+			t.Fatalf("sliceID = %q, want slice-native-read", sliceID)
+		}
+		return appservice.Slice{ID: sliceID, Title: "native slice"}, nil
+	}
+	handler := newMuxWithState(state)
+
+	for _, tc := range []struct {
+		method string
+		path   string
+		body   string
+		status int
+	}{
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces", status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces", body: `{"workspaceId":"ws-native-write","title":"native write"}`, status: http.StatusCreated},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/snapshot", status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs", body: `{"runId":"run-native-write","goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusCreated},
+		{method: http.MethodGet, path: "/api/v1/workorch/runs?workspaceId=ws-native-read", status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/runs", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/snapshot", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/status", status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/start", status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/resume", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/decisions?workspaceId=ws-native-read&runId=run-native-read", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/decisions/ticket-native-read", status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/decisions/ticket-native-read/resolve", status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/decisions/ticket-native-read/reject", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/approvals?workspaceId=ws-native-read&runId=run-native-read", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/approvals/approval-native-read", status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/approvals/approval-native-read/approve", status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/approvals/approval-native-read/reject", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/slices", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/slices/snapshots", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/slices/statuses", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/slices/slice-native-read/snapshot", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/slices/slice-native-read/status", status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/slices/slice-native-read/runs", status: http.StatusOK},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		if tc.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != tc.status {
+			t.Fatalf("%s %s status = %d, want %d", tc.method, tc.path, rec.Code, tc.status)
+		}
 	}
 }
 
@@ -1469,7 +1827,7 @@ func TestRunEndpointWaitsWhenConcurrentRunLimitReached(t *testing.T) {
 	state := newServerState(normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
-	}))
+	}), nil)
 	state.validate = func(context.Context, string, string) error { return nil }
 	state.run = func(context.Context, string, string) ([]appservice.Slice, error) {
 		started <- struct{}{}
@@ -1548,7 +1906,7 @@ func TestRunStartEndpointWaitsForAvailableExecutionSlot(t *testing.T) {
 	state := newServerState(normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
-	}))
+	}), nil)
 	state.validate = func(context.Context, string, string) error { return nil }
 	state.startRun = func(ctx context.Context, backend string, dataRoot string, runID string) (appservice.Run, error) {
 		if runID == "run-1" {
@@ -1635,7 +1993,7 @@ func TestRunResumeEndpointReturnsRequestTimeoutWhenQueueWaitCanceled(t *testing.
 	state := newServerState(normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
-	}))
+	}), nil)
 	state.validate = func(context.Context, string, string) error { return nil }
 	state.resumeRun = func(ctx context.Context, backend string, dataRoot string, runID string) (appservice.Run, error) {
 		if runID == "run-held" {

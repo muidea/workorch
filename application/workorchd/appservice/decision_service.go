@@ -28,9 +28,7 @@ func ReadDecisionWithSession(ctx context.Context, session *RuntimeSession, ticke
 	if err != nil {
 		return Decision{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	item, err := tickets.Get(ctx, common.TicketID(ticketID))
 	if err != nil {
@@ -44,7 +42,7 @@ func ReadDecisionWithSession(ctx context.Context, session *RuntimeSession, ticke
 }
 
 func ReadDecisionWithBackend(ctx context.Context, backend string, dataRoot string, ticketID string) (Decision, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Decision{}, err
 	}
@@ -64,9 +62,7 @@ func ListDecisionsWithSession(ctx context.Context, session *RuntimeSession, work
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	items, err := tickets.List(ctx)
 	if err != nil {
@@ -90,7 +86,7 @@ func ListDecisionsWithSession(ctx context.Context, session *RuntimeSession, work
 }
 
 func ListDecisionsWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string) ([]Decision, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +106,7 @@ func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 }
 
 func ResolveDecisionWithBackend(ctx context.Context, backend string, dataRoot string, ticketID string) (Decision, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Decision{}, err
 	}
@@ -130,7 +126,7 @@ func RejectDecisionWithSession(ctx context.Context, session *RuntimeSession, tic
 }
 
 func RejectDecisionWithBackend(ctx context.Context, backend string, dataRoot string, ticketID string) (Decision, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Decision{}, err
 	}
@@ -150,9 +146,7 @@ func resolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 	if err != nil {
 		return Decision{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	typeName := decisioncommon.ResolutionTypeApprovePath
 	resolutionID := common.ResolutionID("resolution-" + ticketID)
@@ -181,10 +175,10 @@ func resolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 }
 
 func decisionDependenciesFromSession(session *RuntimeSession) (decisionmodule.Service, repository.DecisionTicketRepository, repository.DecisionResolutionRepository, error) {
-	if session == nil || session.Bootstrap == nil {
-		return nil, nil, nil, common.ErrInvalidArgument
+	exports, err := session.Exports()
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	exports := session.Bootstrap.Exports()
 	if exports.Services.DecisionService == nil || exports.Repositories.Tickets == nil || exports.Repositories.Resolutions == nil {
 		return nil, nil, nil, common.ErrInvalidArgument
 	}

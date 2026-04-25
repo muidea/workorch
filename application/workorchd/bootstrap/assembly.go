@@ -17,9 +17,15 @@ func NewFromEnv() *Runtime {
 }
 
 func NewWithBackend(backend string, dataRoot string) *Runtime {
+	return NewWithBackendAndEventHub(backend, dataRoot, nil)
+}
+
+func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.Hub) *Runtime {
 	repos := buildRepositories(backend, dataRoot)
 
-	eventHub := events.NewMemoryHub()
+	if eventHub == nil {
+		eventHub = events.NewMagicHub()
+	}
 	legacyModule := legacymodule.New()
 	mustSetup("legacy", legacyModule.Setup())
 
@@ -70,9 +76,9 @@ func NewWithBackend(backend string, dataRoot string) *Runtime {
 		orchestratorModule,
 		runModule,
 	}
-	for _, item := range modules {
-		mustSetup(item.ID(), item.Run())
-	}
+	moduleLifecycle, err := newModulePluginLifecycle(modules)
+	mustSetup("module-lifecycle", err)
+	mustSetup("module-lifecycle", moduleLifecycle.Run())
 
 	return &Runtime{
 		exports: Exports{
@@ -94,7 +100,8 @@ func NewWithBackend(backend string, dataRoot string) *Runtime {
 				EventHub: eventHub,
 			},
 		},
-		modules: modules,
+		modules:         modules,
+		moduleLifecycle: moduleLifecycle,
 	}
 }
 

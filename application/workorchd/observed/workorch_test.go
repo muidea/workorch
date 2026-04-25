@@ -102,7 +102,7 @@ func TestBuildWorkorchSnapshotFallbackIncludesResolvedTicketResolution(t *testin
 		ID:       common.ResolutionID("resolution-observed"),
 		TicketID: ticket.ID,
 		Type:     "approve_path",
-		Payload:  map[string]any{"operator": "workorch-demo"},
+		Payload:  map[string]any{"operator": "workorch"},
 	}
 
 	items := BuildWorkorchSnapshot(ws, run, nil, ticket, resolution, nil, nil)
@@ -118,8 +118,8 @@ func TestBuildWorkorchSnapshotFallbackIncludesResolvedTicketResolution(t *testin
 	if ticketPayload.ResolutionType != resolution.Type {
 		t.Fatalf("ticket resolutionType = %s, want %s", ticketPayload.ResolutionType, resolution.Type)
 	}
-	if ticketPayload.ResolutionPayload["operator"] != "workorch-demo" {
-		t.Fatalf("ticket resolution payload operator = %v, want workorch-demo", ticketPayload.ResolutionPayload["operator"])
+	if ticketPayload.ResolutionPayload["operator"] != "workorch" {
+		t.Fatalf("ticket resolution payload operator = %v, want workorch", ticketPayload.ResolutionPayload["operator"])
 	}
 }
 
@@ -333,7 +333,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedWorkspaceTicketAndApprovalEvents(t
 				events.PayloadKeyState:        string(common.DecisionTicketStateResolved),
 				events.PayloadKeyResolutionID: "resolution-published-aux",
 				events.PayloadKeyType:         "approve-plan",
-				events.PayloadKeyPayload:      map[string]any{"operator": "workorch-demo"},
+				events.PayloadKeyPayload:      map[string]any{"operator": "workorch"},
 			},
 		}),
 		mustWorkorchEvent(t, events.Envelope{

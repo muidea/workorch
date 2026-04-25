@@ -2,7 +2,6 @@ package appservice
 
 import (
 	"context"
-	"errors"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -11,9 +10,7 @@ func RunAllWorkorchWithSession(ctx context.Context, session *RuntimeSession) (re
 	if session == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 	if session.Runtime == nil || session.Runtime.Runtime == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -22,7 +19,7 @@ func RunAllWorkorchWithSession(ctx context.Context, session *RuntimeSession) (re
 }
 
 func RunAllWorkorchWithBackend(ctx context.Context, backend string, dataRoot string) ([]Slice, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -41,9 +38,7 @@ func RunWorkorchSliceWithSession(ctx context.Context, session *RuntimeSession, s
 	if session == nil {
 		return Slice{}, common.ErrInvalidArgument
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 	if session.Runtime == nil || session.Runtime.Runtime == nil {
 		return Slice{}, common.ErrInvalidArgument
 	}
@@ -52,7 +47,7 @@ func RunWorkorchSliceWithSession(ctx context.Context, session *RuntimeSession, s
 }
 
 func RunWorkorchSliceWithBackend(ctx context.Context, backend string, dataRoot string, sliceID string) (Slice, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Slice{}, err
 	}
@@ -71,9 +66,7 @@ func ReadWorkorchSliceSnapshotWithSession(ctx context.Context, session *RuntimeS
 	if session == nil {
 		return Slice{}, common.ErrInvalidArgument
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 	if session.Runtime == nil || session.Runtime.Runtime == nil {
 		return Slice{}, common.ErrInvalidArgument
 	}
@@ -82,7 +75,7 @@ func ReadWorkorchSliceSnapshotWithSession(ctx context.Context, session *RuntimeS
 }
 
 func ReadWorkorchSliceSnapshotWithBackend(ctx context.Context, backend string, dataRoot string, sliceID string) (Slice, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Slice{}, err
 	}
@@ -101,9 +94,7 @@ func SummarizeWorkorchSliceStatusWithSession(ctx context.Context, session *Runti
 	if session == nil {
 		return SliceStatus{}, common.ErrInvalidArgument
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 	if session.Runtime == nil || session.Runtime.Runtime == nil {
 		return SliceStatus{}, common.ErrInvalidArgument
 	}
@@ -112,7 +103,7 @@ func SummarizeWorkorchSliceStatusWithSession(ctx context.Context, session *Runti
 }
 
 func SummarizeWorkorchSliceStatusWithBackend(ctx context.Context, backend string, dataRoot string, sliceID string) (SliceStatus, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return SliceStatus{}, err
 	}
@@ -131,9 +122,7 @@ func ListAvailableWorkorchSliceStatusesWithSession(ctx context.Context, session 
 	if session == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 	if session.Runtime == nil || session.Runtime.Runtime == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -142,7 +131,7 @@ func ListAvailableWorkorchSliceStatusesWithSession(ctx context.Context, session 
 }
 
 func ListAvailableWorkorchSliceStatusesWithBackend(ctx context.Context, backend string, dataRoot string) ([]SliceStatus, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -161,9 +150,7 @@ func ListAvailableWorkorchSliceSnapshotsWithSession(ctx context.Context, session
 	if session == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 	if session.Runtime == nil || session.Runtime.Runtime == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -172,7 +159,7 @@ func ListAvailableWorkorchSliceSnapshotsWithSession(ctx context.Context, session
 }
 
 func ListAvailableWorkorchSliceSnapshotsWithBackend(ctx context.Context, backend string, dataRoot string) ([]Slice, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return nil, err
 	}

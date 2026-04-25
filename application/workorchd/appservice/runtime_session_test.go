@@ -12,6 +12,7 @@ import (
 	"github.com/muidea/workorch/application/workorchd/bootstrap"
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type runtimeSessionTestLifecycle struct {
@@ -36,6 +37,24 @@ func (l runtimeSessionTestLifecycle) Teardown(context.Context) error {
 		*l.teardownSeq = append(*l.teardownSeq, l.ID())
 	}
 	return l.teardownErr
+}
+
+func TestBackendSessionUsesEventHubFromContext(t *testing.T) {
+	hub := events.NewMemoryHub()
+	ctx := ContextWithEventHub(context.Background(), hub)
+
+	_, err := CreateWorkspaceWithBackend(ctx, "memory", "", "ws-context-hub", "context hub")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+
+	published := hub.Published()
+	if len(published) != 1 {
+		t.Fatalf("len(published) = %d, want 1", len(published))
+	}
+	if published[0].Topic != events.TopicWorkspaceCreated {
+		t.Fatalf("topic = %s, want %s", published[0].Topic, events.TopicWorkspaceCreated)
+	}
 }
 
 func bootstrapModulesField(t *testing.T, runtime *bootstrap.Runtime) reflect.Value {
@@ -98,6 +117,68 @@ func TestRuntimeSessionCloseReleasesManagedAndBootstrapRuntime(t *testing.T) {
 
 	if err := session.Close(context.Background()); err != nil {
 		t.Fatalf("second close runtime session: %v", err)
+	}
+}
+
+func TestRuntimeSessionCloseOnReturnJoinsOperationAndShutdownErrors(t *testing.T) {
+	errOperation := errors.New("operation failed")
+	errShutdown := errors.New("shutdown failed")
+	session := &RuntimeSession{
+		Bootstrap: &bootstrap.Runtime{},
+		Runtime:   &ManagedRuntime{},
+	}
+	setBootstrapRuntimeModules(t, session.Bootstrap, runtimeSessionTestLifecycle{
+		id:          "broken",
+		teardownErr: errShutdown,
+	})
+
+	err := errOperation
+	session.CloseOnReturn(context.Background(), &err)
+
+	if !errors.Is(err, errOperation) {
+		t.Fatalf("err = %v, want operation error", err)
+	}
+	if !errors.Is(err, errShutdown) {
+		t.Fatalf("err = %v, want shutdown error", err)
+	}
+}
+
+func TestRuntimeSessionExportsReturnsInvalidArgumentWhenBootstrapMissing(t *testing.T) {
+	exports, err := (*RuntimeSession)(nil).Exports()
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want invalid argument", err)
+	}
+	if exports.Services.WorkspaceService != nil {
+		t.Fatalf("exports = %#v, want zero exports", exports)
+	}
+
+	session := &RuntimeSession{}
+	exports, err = session.Exports()
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want invalid argument", err)
+	}
+	if exports.Services.WorkspaceService != nil {
+		t.Fatalf("exports = %#v, want zero exports", exports)
+	}
+}
+
+func TestRuntimeSessionExportsReturnsAssembledCapabilities(t *testing.T) {
+	session, err := NewRuntimeSessionWithBackend("memory", "")
+	if err != nil {
+		t.Fatalf("new runtime session: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := session.Close(context.Background()); err != nil {
+			t.Errorf("close runtime session: %v", err)
+		}
+	})
+
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+	if exports.Services.WorkspaceService == nil || exports.Repositories.Workspaces == nil || exports.Infrastructure.EventHub == nil {
+		t.Fatalf("exports missing assembled capabilities: %#v", exports)
 	}
 }
 

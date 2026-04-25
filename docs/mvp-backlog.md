@@ -1,4 +1,4 @@
-# workorch MVP Backlog
+# workorch MVP Closure Record
 
 ## Goal
 
@@ -12,11 +12,11 @@
 - `memory` / `file` 仓储后端
 - 健康检查、就绪检查、指标、并发保护
 
-后续 backlog 的重点，是把服务能力从“按预置 `slice` 使用”推进到“按真实业务实例使用”。
+本文件保留 MVP 功能收口记录，不再作为活跃待办清单使用。当前服务能力已从“按预置 `slice` 使用”推进到“按真实业务实例使用”。
 
-## Closure Rule
+## Closure Rule Used
 
-每个待办项收口时，至少同时满足：
+每个功能项收口时，均按以下规则验收：
 
 - 有正式业务接口，而不是只存在内部 helper 或 demo 路径
 - 有单元测试或集成测试覆盖主要成功 / 空结果 / 异常分支
@@ -25,6 +25,7 @@
 
 ## Progress
 
+- status: `closed`
 - completed: `B1 workspace 实例接口`
 - completed: `B2 run 实例接口`
 - completed: `B3 run 启动与恢复接口`
@@ -34,9 +35,9 @@
 - completed: `S1 仓储后端共享契约测试`
 - completed: `S2 file 后端持久化语义补强`
 - completed: `S3 最小事件总线路径正式化`
-- next: `当前 MVP backlog 已收口，后续仅剩 deferred 范围`
+- active todo: `none`
 
-## P0 Must Close
+## P0 Closed Scope
 
 ### [x] B1. workspace 实例接口
 
@@ -44,7 +45,7 @@ Status: completed
 
 目标：让外部可以直接创建和读取 `workspace`，而不是只能靠执行预置 `slice` 间接生成。
 
-待办：
+完成内容：
 
 - 增加 `workspace` 业务读写模型
 - 增加创建 `workspace` 接口
@@ -77,7 +78,7 @@ Status: completed
 
 目标：让外部围绕真实 `run` 实例使用编排能力，而不是只调用 `slice` 执行接口。
 
-待办：
+完成内容：
 
 - 增加创建 `run` 接口
 - 增加 `run` 单条查询接口
@@ -111,7 +112,7 @@ Status: completed
 
 目标：把当前预置 `slice` 内部完成的运行推进逻辑，转成正式服务接口。
 
-待办：
+完成内容：
 
 - 增加启动 `run` 接口
 - 增加恢复 `run` 接口
@@ -144,7 +145,7 @@ Status: completed
 
 目标：让 decision gate 从“slice 内部动作”变成“外部可操作的业务闭环”。
 
-待办：
+完成内容：
 
 - 增加 decision ticket 列表接口
 - 增加 decision ticket 详情接口
@@ -180,7 +181,7 @@ Status: completed
 
 目标：让 approval gate 也具备正式的人机协同处理路径。
 
-待办：
+完成内容：
 
 - 增加 approval 列表接口
 - 增加 approval 详情接口
@@ -216,7 +217,7 @@ Status: completed
 
 目标：把“按 `sliceId` 读取”之外的正式实例查询能力补齐，降低外部集成成本。
 
-待办：
+完成内容：
 
 - 增加按 `runId` 读取快照能力
 - 增加按 `runId` 读取状态能力
@@ -237,13 +238,13 @@ Status: completed
 - 已补 `appservice`、HTTP、进程级 file 后端测试
 - 已补本地服务 / 容器验证脚本，验证 `runId` / `workspaceId` 维度的实例读模型查询
 
-## P1 Stability
+## P1 Closed Stability Scope
 
 ### [x] S1. 仓储后端共享契约测试
 
 目标：保证 `memory` / `file` 两套后端在相同业务动作下表现一致。
 
-待办：
+完成内容：
 
 - 抽象共享仓储契约测试
 - 覆盖 workspace / run / step / ticket / approval / resolution 的基本读写
@@ -265,7 +266,7 @@ Status: completed
 
 目标：把 `file` 后端从“可用的第一版”补成稳定的本地服务持久化实现。
 
-待办：
+完成内容：
 
 - 补齐重复执行同一业务实例时的幂等验证
 - 补齐重复读取、重启后读取、终态读取的一致性验证
@@ -288,7 +289,7 @@ Status: completed
 
 目标：把当前事件采集和观察能力从演示式接线，推进到正式 runtime 边界。
 
-待办：
+完成内容：
 
 - 明确哪些事件是正式业务事件
 - 明确 `run` / `decision` / `approval` / `workspace` 的事件发布点
@@ -308,32 +309,6 @@ Status: completed
 - 已明确 `workorchd` 内部边界：`modules` 负责发布正式业务事件，`observed/collector` 负责订阅与归一，`observed/workorch_contract` 负责事件到 snapshot item 的合同映射，只有缺失匹配事件时才回退到状态兜底
 - 已补 `events`、`run` 模块、`observed` 的事件相关测试，并通过相关包回归、`go test ./...` 与 `make verify-service-file`
 
-## Deferred
+## Closed Scope Notes
 
-当前阶段不优先推进：
-
-- 更丰富的 block execution graph
-- 外部 runtime / tool adapter 扩展
-- 多运行调度 / 队列系统
-- demo snapshots 之外的完整 observability pipeline
-- 面向目标环境的部署清单
-
-## Recommended Closure Order
-
-按收口顺序建议：
-
-1. `B1 workspace 实例接口`
-2. `B2 run 实例接口`
-3. `B3 run 启动与恢复接口`
-4. `B4 decision 工单查询与处理接口`
-5. `B5 approval 工单查询与处理接口`
-6. `B6 实例读模型补齐`
-7. `S1 仓储后端共享契约测试`
-8. `S2 file 后端持久化语义补强`
-9. `S3 最小事件总线路径正式化`
-
-这条顺序的原则是：
-
-- 先补外部可直接使用的业务接口
-- 再补阻塞处理闭环
-- 最后补共享稳定性和演进基础
+MVP 范围内不再保留活跃待办项。更丰富的 block execution graph、外部 runtime / tool adapter、分布式调度系统、完整 observability pipeline、目标环境部署清单等内容不属于当前 MVP 收口范围；如后续启动，应以新的正式业务需求文档重新定义。

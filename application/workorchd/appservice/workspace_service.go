@@ -2,7 +2,6 @@ package appservice
 
 import (
 	"context"
-	"errors"
 
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -22,9 +21,7 @@ func CreateWorkspaceWithSession(ctx context.Context, session *RuntimeSession, wo
 	if err != nil {
 		return Workspace{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.WorkspaceID(workspaceID)
 	if err := service.CreateWorkspace(ctx, workspacemodule.CreateWorkspaceCommand{
@@ -42,7 +39,7 @@ func CreateWorkspaceWithSession(ctx context.Context, session *RuntimeSession, wo
 }
 
 func CreateWorkspaceWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, title string) (Workspace, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -62,9 +59,7 @@ func ReadWorkspaceWithSession(ctx context.Context, session *RuntimeSession, work
 	if err != nil {
 		return Workspace{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	item, err := repo.Get(ctx, common.WorkspaceID(workspaceID))
 	if err != nil {
@@ -74,7 +69,7 @@ func ReadWorkspaceWithSession(ctx context.Context, session *RuntimeSession, work
 }
 
 func ReadWorkspaceWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (Workspace, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -94,9 +89,7 @@ func ListWorkspacesWithSession(ctx context.Context, session *RuntimeSession) (re
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	items, err := repo.List(ctx)
 	if err != nil {
@@ -110,7 +103,7 @@ func ListWorkspacesWithSession(ctx context.Context, session *RuntimeSession) (re
 }
 
 func ListWorkspacesWithBackend(ctx context.Context, backend string, dataRoot string) ([]Workspace, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -126,10 +119,10 @@ func ListWorkspacesFromEnv(ctx context.Context) ([]Workspace, error) {
 }
 
 func workspaceDependenciesFromSession(session *RuntimeSession) (workspacemodule.Service, repository.WorkspaceRepository, error) {
-	if session == nil || session.Bootstrap == nil {
-		return nil, nil, common.ErrInvalidArgument
+	exports, err := session.Exports()
+	if err != nil {
+		return nil, nil, err
 	}
-	exports := session.Bootstrap.Exports()
 	if exports.Services.WorkspaceService == nil || exports.Repositories.Workspaces == nil {
 		return nil, nil, common.ErrInvalidArgument
 	}

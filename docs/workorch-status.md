@@ -4,6 +4,44 @@
 
 - module: `github.com/muidea/workorch`
 - executable entry: `application/workorchd`
+- framework baseline:
+  - `application/workorchd/main.go` starts through `magicCommon/framework/application`
+  - `application/workorchd/server.Service` implements the `magicCommon/framework/service.Service` lifecycle
+  - HTTP requests pass through `magicEngine/http` `RouteRegistry` / `HTTPServer`; current acceptance API endpoints are registered as native routes without wildcard fallback dispatch
+  - `/healthz`, `/readyz`, and `/metrics` are registered as native `magicEngine/http` routes
+  - workspace / run read endpoints are registered as native `magicEngine/http` routes:
+    `GET /api/v1/workorch/workspaces`,
+    `GET /api/v1/workorch/workspaces/{workspaceId}`,
+    `GET /api/v1/workorch/workspaces/{workspaceId}/snapshot`,
+    `GET /api/v1/workorch/workspaces/{workspaceId}/runs` for explicit `405 method not allowed`,
+    `GET /api/v1/workorch/runs`,
+    `GET /api/v1/workorch/runs/{runId}`,
+    `GET /api/v1/workorch/runs/{runId}/snapshot`,
+    `GET /api/v1/workorch/runs/{runId}/status`,
+    `GET /api/v1/workorch/decisions`,
+    `GET /api/v1/workorch/decisions/{ticketId}`,
+    `GET /api/v1/workorch/approvals`,
+    `GET /api/v1/workorch/approvals/{approvalId}`
+  - workspace / run / decision / approval write and execution endpoints are registered as native `magicEngine/http` routes:
+    `POST /api/v1/workorch/workspaces`,
+    `POST /api/v1/workorch/workspaces/{workspaceId}/runs`,
+    `POST /api/v1/workorch/runs`,
+    `POST /api/v1/workorch/runs/{runId}/start`,
+    `POST /api/v1/workorch/runs/{runId}/resume`,
+    `POST /api/v1/workorch/decisions/{ticketId}/resolve`,
+    `POST /api/v1/workorch/decisions/{ticketId}/reject`,
+    `POST /api/v1/workorch/approvals/{approvalId}/approve`,
+    `POST /api/v1/workorch/approvals/{approvalId}/reject`
+  - slice compatibility endpoints are registered as native `magicEngine/http` routes:
+    `GET /api/v1/workorch/slices`,
+    `GET /api/v1/workorch/slices/snapshots`,
+    `GET /api/v1/workorch/slices/statuses`,
+    `GET /api/v1/workorch/slices/{sliceId}/snapshot`,
+    `GET /api/v1/workorch/slices/{sliceId}/status`,
+    `POST /api/v1/workorch/slices/{sliceId}/runs`
+  - `application/workorchd/bootstrap` now uses a `magicCommon/event.Hub` backed workorch event adapter by default
+  - request-scoped `RuntimeSession` construction now reuses the application-injected EventHub when available
+  - `application/workorchd/bootstrap` now runs request-scoped runtime modules through a local magicCommon plugin manager lifecycle
 - shared internal runtime packages: `internal/pkg/{common,events,repository}`
 - kernel modules:
   - `internal/modules/kernel/workspace`
@@ -87,6 +125,9 @@ Current internal event consumption boundary:
 - `application/workorchd/observed/collector.go` subscribes only to the formal workorch topic set and stores normalized event input
 - `application/workorchd/observed/workorch_contract.go` maps published business events to `/workspace|run|step|decision|approval/snapshot` items
 - `application/workorchd/observed/workorch.go` only falls back to state-derived snapshot items when the current subject has no matching published event
+- Current default runtime `EventHub` is backed by `magicCommon/event.Hub` through `internal/pkg/events.MagicHub`.
+- The HTTP service injects the application-level EventHub into request contexts, and appservice backend sessions reuse that hub instead of always creating a per-request hub.
+- The business-facing `events.Hub` interface remains as a narrow workorch adapter boundary while module lifecycle is migrated.
 
 ## Acceptance
 
@@ -120,6 +161,7 @@ HTTP endpoints:
 - `GET /api/v1/workorch/runs/{runId}/status`
 - `POST /api/v1/workorch/runs/{runId}/start`
 - `POST /api/v1/workorch/runs/{runId}/resume`
+- all run execution entrypoints now share one in-process FIFO wait queue behind `WORKORCH_SERVER_MAX_CONCURRENT_RUNS`
 - `GET /api/v1/workorch/decisions`
 - `GET /api/v1/workorch/decisions/{ticketId}`
 - `POST /api/v1/workorch/decisions/{ticketId}/resolve`
@@ -230,6 +272,8 @@ make verify-service
 make verify-service-file
 ```
 
+`make verify-service-file` now includes a same-data-dir restart pass for persisted workspace / run / decision / approval reads.
+
 ### File-backed acceptance verification
 
 Verified with:
@@ -257,6 +301,14 @@ Verified terminal states:
 - corrupt persisted `workspace.json` / `run.json` now has explicit repository test coverage and is not silently overwritten
 - formal `run` events now include `created` plus self-contained `goalId` / `doDId` / `failureReason` payload fields
 - formal `workspace state changed` events now include `title`, so event consumers do not need to reconstruct it from state
+- `workorchd` now starts and stops through `magicCommon/framework/application`, with the HTTP service attached as a framework `service.Service`
+- HTTP dispatch now passes through `magicEngine/http`, and current acceptance API endpoints are registered as native routes without wildcard fallback dispatch
+- system endpoints `/healthz`, `/readyz`, and `/metrics` now use native `magicEngine/http` route registration
+- workspace / run / decision / approval read, write, and execution endpoints now use native `magicEngine/http` route registration
+- slice compatibility endpoints now use native `magicEngine/http` route registration
+- default runtime event dispatch now uses a `magicCommon/event.Hub` backed adapter and terminates it during `Runtime.Shutdown`
+- request-backed runtime sessions now reuse the `magicCommon/framework/application` EventHub injected during service startup
+- request-scoped runtime modules now register into a local magicCommon plugin manager for `Run` ordering, while shutdown preserves workorch's context-aware teardown error semantics
 
 ### Test baseline
 
@@ -277,34 +329,41 @@ Validated coverage currently includes:
 - approval resolve conflict guard
 - approval reject -> terminal failed path
 - application-level smoke test for `workorchd`
-- repeatable file-backed demo execution against the same data directory
+- repeatable file-backed service execution against the same data directory
 - file-backed terminal read models remain stable across reloads
 - file-backed `workorchd` restart preserves terminal run, decision, approval, and workspace snapshot reads
 - corrupt file-backed persisted JSON boundary returns explicit errors
 - workorch formal business event contract now covers `workspace / run / step / decision / approval`
 - run-created and enriched run/workspace event payloads are covered by `events` / `run` / `observed` tests
+- framework entry adaptation is covered by `application/workorchd` and `application/workorchd/server` tests plus `make verify-service-file`
+- magicCommon-backed event adapter is covered by `internal/pkg/events` and appservice / observed integration tests
+- application-level EventHub injection is covered by appservice runtime-session tests and service-level verification
+- local plugin lifecycle integration is covered by bootstrap lifecycle tests
+- native magicEngine system routes are covered by server tests and `make verify-service-file`
+- native magicEngine acceptance API routes are covered by server tests and `make verify-service-file`
+- accepted API native route registration is now guarded by a route registry test, and wildcard `/**` fallback registration is explicitly forbidden
 
-## Explicit non-goals of current workorch
+## Out Of Current Delivery Scope
 
-Not implemented yet:
+以下内容不是当前已完成的 MVP / framework alignment 交付范围内的活跃待办项；如后续启动，需要重新拆成正式业务需求：
 
-- real event bus integration
+- global `magicCommon/framework/plugin/module.Register` usage for long-lived workorch runtime units
 - richer block execution graph
 - external tool/runtime adapters beyond minimal legacy adapter
-- multi-run scheduling / queue semantics beyond the current max-concurrency guard
-- observability pipeline beyond demo snapshots
+- richer multi-run scheduling beyond the current in-process FIFO wait queue
+- observability pipeline beyond current acceptance snapshots
 
-Implemented in minimal form, but not yet expanded to fuller persistence semantics:
+当前已按 MVP 形式交付，后续如需增强应作为新需求处理：
 
 - file-backed repository adapter as the first non-memory persistence path
 
-## MVP backlog
+## MVP Closure Record
 
-当前遗留目标已经整理到正式待办清单：
+MVP 功能收口记录见：
 
 - `docs/mvp-backlog.md`
 
-后续推进以这份 backlog 为准，按实例接口、阻塞处理闭环、仓储契约测试、持久化语义和事件总线边界逐项收口。
+MVP 功能清单已收口，不再作为活跃待办清单使用。
 
 当前进度：
 
@@ -315,4 +374,24 @@ Implemented in minimal form, but not yet expanded to fuller persistence semantic
 - `B5 approval 工单查询与处理接口` 已完成
 - `B6 实例读模型补齐` 已完成
 - `S1 仓储后端共享契约测试` 已完成
-- 下一项：`S2 file 后端持久化语义补强`
+- `S2 file 后端持久化语义补强` 已完成
+- `S3 最小事件总线路径正式化` 已完成
+- 当前活跃待办项：无
+
+## Framework Alignment Closure Record
+
+当前 framework 对齐进度：
+
+- completed: `application/workorchd` 通过 `magicCommon/framework/application` 启动
+- completed: `application/workorchd/server.Service` 接入 `magicCommon/framework/service.Service` 生命周期
+- completed: 默认 runtime EventHub 接入 `magicCommon/event.Hub` backed adapter
+- completed: request-scoped runtime modules 接入本地 magicCommon plugin manager 生命周期
+- completed: HTTP dispatch 进入 `magicEngine/http` `RouteRegistry` / `HTTPServer`
+- completed: native system routes for `healthz` / `readyz` / `metrics`
+- completed: native workspace / run read routes
+- completed: native decision / approval read routes
+- completed: native workspace / run / decision / approval write and execution routes
+- completed: native slice compatibility routes
+- completed: native route registration guard for accepted API endpoints
+- completed: removed HTTP wildcard fallback dispatch from `workorchd`
+- active todo: none

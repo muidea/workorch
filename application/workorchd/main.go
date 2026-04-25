@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/muidea/magicCommon/framework/application"
 	"github.com/muidea/workorch/application/workorchd/server"
 )
 
@@ -18,31 +19,23 @@ func main() {
 		log.Fatal(err)
 	}
 
-	svc := server.NewHTTPServer(config)
-	if err := svc.Validate(context.Background()); err != nil {
+	svc := server.NewService(config)
+	if err := application.Startup(svc); err != nil {
+		log.Fatal(err)
+	}
+	defer application.Shutdown()
+
+	if err := application.Run(); err != nil {
+		application.Shutdown()
 		log.Fatal(err)
 	}
 
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- svc.Start()
-	}()
-
 	select {
-	case err := <-errCh:
-		if err != nil {
+	case err, ok := <-svc.Done():
+		if ok && err != nil {
+			application.Shutdown()
 			log.Fatal(err)
 		}
 	case <-ctx.Done():
-	}
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), config.ShutdownTimeout)
-	defer cancel()
-	if err := svc.Shutdown(shutdownCtx); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := <-errCh; err != nil {
-		log.Fatal(err)
 	}
 }

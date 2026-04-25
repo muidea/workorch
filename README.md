@@ -98,6 +98,7 @@ Notes:
 
 - `make build` writes the binary to `./bin/workorchd`
 - `make verify-service` and `make verify-service-file` are the formal local acceptance checks for the HTTP service
+- `make verify-service-file` includes file-backed restart-read verification for persisted workspace / run / decision / approval state
 - `make run-file` runs the service with the file-backed repository backend
 - file-backed service execution is repeatable against the same data directory for the shipped workorch IDs
 - `make ci` is the local equivalent of the GitHub Actions baseline
@@ -158,6 +159,8 @@ WORKORCH_SERVER_IDLE_TIMEOUT=60s
 WORKORCH_SERVER_SHUTDOWN_TIMEOUT=5s
 WORKORCH_SERVER_MAX_CONCURRENT_RUNS=1
 ```
+
+When the concurrent run limit is reached, execution requests enter an in-process FIFO wait queue and continue after a slot becomes available. If the caller cancels the request while waiting, the service returns `408 Request Timeout`.
 
 Available endpoints:
 
@@ -321,7 +324,7 @@ curl -f http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/status
 curl -f http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/snapshot
 ```
 
-The workspace create endpoint creates one formal `workorch` workspace instance. The workspace list and single-workspace read endpoints are persisted read endpoints, so they are intended for the file-backed repository backend rather than the stateless per-request memory backend. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, and single-run read endpoints provide formal `workorch` run instance management; because create depends on an existing workspace and the service creates a fresh runtime session per request, the persisted run list and read endpoints are also mainly intended for the file-backed repository backend. The run snapshot and run status endpoints provide formal `runId`-based read models without requiring `sliceId`. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision list and single-ticket endpoints provide formal query paths for decision gate instances, and the resolve/reject endpoints complete the external decision gate closure for blocked runs. The approval list and single-approval endpoints provide the same formal query and processing path for approval gates, and the approve/reject endpoints now complete the external approval gate closure for blocked runs. The slice catalog endpoint returns the current executable `workorch` slice definitions with stable IDs. The batch slice-snapshots endpoint returns all currently available persisted slice snapshots. The batch slice-statuses endpoint returns all currently available persisted slice summaries. The single-slice run endpoint executes one requested `workorch` business slice. The single-slice status and snapshot endpoints read persisted state for one requested `workorch` slice, so the persisted read endpoints are intended for the file-backed repository backend rather than the stateless per-request memory backend. The bulk run endpoint returns the current 17 `workorch` slices as JSON, including workspace/run/step/blocking snapshots and observed items. When the configured concurrent run limit is exhausted, the service returns `429 Too Many Requests`.
+The workspace create endpoint creates one formal `workorch` workspace instance. The workspace list and single-workspace read endpoints are persisted read endpoints, so they are intended for the file-backed repository backend rather than the stateless per-request memory backend. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, and single-run read endpoints provide formal `workorch` run instance management; because create depends on an existing workspace and the service creates a fresh runtime session per request, the persisted run list and read endpoints are also mainly intended for the file-backed repository backend. The run snapshot and run status endpoints provide formal `runId`-based read models without requiring `sliceId`. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision list and single-ticket endpoints provide formal query paths for decision gate instances, and the resolve/reject endpoints complete the external decision gate closure for blocked runs. The approval list and single-approval endpoints provide the same formal query and processing path for approval gates, and the approve/reject endpoints now complete the external approval gate closure for blocked runs. The slice catalog endpoint returns the current executable `workorch` slice definitions with stable IDs. The batch slice-snapshots endpoint returns all currently available persisted slice snapshots. The batch slice-statuses endpoint returns all currently available persisted slice summaries. The single-slice run endpoint executes one requested `workorch` business slice. The single-slice status and snapshot endpoints read persisted state for one requested `workorch` slice, so the persisted read endpoints are intended for the file-backed repository backend rather than the stateless per-request memory backend. The bulk run endpoint returns the current 17 `workorch` slices as JSON, including workspace/run/step/blocking snapshots and observed items. All run execution entrypoints now share one in-process FIFO wait queue behind `WORKORCH_SERVER_MAX_CONCURRENT_RUNS`, including formal `run start` and `run resume`.
 
 Container-oriented deployment details are in `docs/deployment.md`, and `.env.workorchd.example` provides the baseline runtime configuration template.
 
@@ -333,6 +336,8 @@ make verify-service-file
 make docker-verify
 make docker-verify-file
 ```
+
+`make verify-service-file` and `make docker-verify-file` both verify the full file-backed MVP closure, including service restart and persisted read-model continuity.
 
 ## Development targets
 
@@ -347,5 +352,5 @@ make ci
 ## Docs
 
 - `docs/structure.md`: layout normalization mapping
-- `docs/workorch-status.md`: delivered scope, acceptance baseline, and next batch boundary
-- `docs/mvp-backlog.md`: MVP remaining scope, ordered todo list, and closure criteria
+- `docs/workorch-status.md`: delivered scope, acceptance baseline, and current closure status
+- `docs/mvp-backlog.md`: closed MVP scope, completed items, and closure criteria used

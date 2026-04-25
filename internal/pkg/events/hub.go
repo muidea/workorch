@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -28,16 +27,7 @@ func NewMemoryHub() *MemoryHub {
 }
 
 func (h *MemoryHub) Publish(ctx context.Context, envelope Envelope) error {
-	envelope = cloneEnvelope(envelope)
-	if envelope.ID == "" {
-		envelope.ID = fmt.Sprintf("evt-%d", time.Now().UTC().UnixNano())
-	}
-	if envelope.Version == "" {
-		envelope.Version = "v1"
-	}
-	if envelope.OccurredAt == "" {
-		envelope.OccurredAt = time.Now().UTC().Format(time.RFC3339)
-	}
+	envelope = prepareEnvelope(envelope)
 	if envelope.Topic == "" {
 		return common.ErrInvalidArgument
 	}

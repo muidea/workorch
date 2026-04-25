@@ -1109,7 +1109,7 @@ func (s *WorkorchService) EnsureDecisionResolved(ctx context.Context, ticketID c
 		common.ResolutionID("resolution-workorch-blocked-decision"),
 		ticketID,
 		decisioncommon.ResolutionTypeApprovePath,
-		map[string]any{"operator": "workorch-demo"},
+		map[string]any{"operator": "workorch"},
 	)
 }
 
@@ -1119,7 +1119,7 @@ func (s *WorkorchService) EnsureDecisionRejected(ctx context.Context, ticketID c
 		common.ResolutionID("resolution-workorch-rejected-decision"),
 		ticketID,
 		decisioncommon.ResolutionTypeRejectPath,
-		map[string]any{"operator": "workorch-demo", "outcome": "reject"},
+		map[string]any{"operator": "workorch", "outcome": "reject"},
 	)
 }
 

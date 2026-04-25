@@ -21,12 +21,12 @@ help:
 	@echo "  run        - go run $(APP) as HTTP service"
 	@echo "  run-file   - clean data, then run $(APP) as HTTP service with file-backed repository"
 	@echo "  verify-service      - build, start, and verify the HTTP service with memory repository"
-	@echo "  verify-service-file - build, start, and verify the HTTP service with file-backed repository"
+	@echo "  verify-service-file - build, start, and verify the HTTP service with file-backed repository and restart-read validation"
 	@echo "  docker-build    - docker build local workorchd image"
 	@echo "  docker-run      - run workorchd container with in-memory repository"
 	@echo "  docker-run-file - run workorchd container with file-backed repository"
 	@echo "  docker-verify      - build image and verify the container with memory repository"
-	@echo "  docker-verify-file - build image and verify the container with file-backed repository"
+	@echo "  docker-verify-file - build image and verify the container with file-backed repository and restart-read validation"
 	@echo "  ci         - fmt-check + vet + test + build + file-backed service verification"
 
 fmt:

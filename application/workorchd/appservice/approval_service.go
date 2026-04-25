@@ -2,7 +2,6 @@ package appservice
 
 import (
 	"context"
-	"errors"
 
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -24,9 +23,7 @@ func ReadApprovalWithSession(ctx context.Context, session *RuntimeSession, appro
 	if err != nil {
 		return Approval{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	item, err := repo.Get(ctx, common.ApprovalID(approvalID))
 	if err != nil {
@@ -36,7 +33,7 @@ func ReadApprovalWithSession(ctx context.Context, session *RuntimeSession, appro
 }
 
 func ReadApprovalWithBackend(ctx context.Context, backend string, dataRoot string, approvalID string) (Approval, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Approval{}, err
 	}
@@ -56,9 +53,7 @@ func ListApprovalsWithSession(ctx context.Context, session *RuntimeSession, work
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	items, err := repo.List(ctx)
 	if err != nil {
@@ -78,7 +73,7 @@ func ListApprovalsWithSession(ctx context.Context, session *RuntimeSession, work
 }
 
 func ListApprovalsWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string) ([]Approval, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -98,9 +93,7 @@ func ApproveApprovalWithSession(ctx context.Context, session *RuntimeSession, ap
 	if err != nil {
 		return Approval{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.ApprovalID(approvalID)
 	if err := service.EnsureApproved(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id}); err != nil {
@@ -115,7 +108,7 @@ func ApproveApprovalWithSession(ctx context.Context, session *RuntimeSession, ap
 }
 
 func ApproveApprovalWithBackend(ctx context.Context, backend string, dataRoot string, approvalID string) (Approval, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Approval{}, err
 	}
@@ -135,9 +128,7 @@ func RejectApprovalWithSession(ctx context.Context, session *RuntimeSession, app
 	if err != nil {
 		return Approval{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.ApprovalID(approvalID)
 	if err := service.EnsureRejected(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id}); err != nil {
@@ -152,7 +143,7 @@ func RejectApprovalWithSession(ctx context.Context, session *RuntimeSession, app
 }
 
 func RejectApprovalWithBackend(ctx context.Context, backend string, dataRoot string, approvalID string) (Approval, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Approval{}, err
 	}
@@ -168,10 +159,10 @@ func RejectApprovalFromEnv(ctx context.Context, approvalID string) (Approval, er
 }
 
 func approvalDependenciesFromSession(session *RuntimeSession) (approvalmodule.Service, repository.ApprovalRepository, error) {
-	if session == nil || session.Bootstrap == nil {
-		return nil, nil, common.ErrInvalidArgument
+	exports, err := session.Exports()
+	if err != nil {
+		return nil, nil, err
 	}
-	exports := session.Bootstrap.Exports()
 	if exports.Services.ApprovalService == nil || exports.Repositories.Approvals == nil {
 		return nil, nil, common.ErrInvalidArgument
 	}

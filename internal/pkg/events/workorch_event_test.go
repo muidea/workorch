@@ -101,7 +101,7 @@ func TestNormalizeWorkorchEnvelopeReturnsSanitizedCopy(t *testing.T) {
 			PayloadKeyState:        string(common.DecisionTicketStateResolved),
 			PayloadKeyResolutionID: "resolution-1",
 			PayloadKeyType:         "approve-plan",
-			PayloadKeyPayload:      map[string]any{"operator": "workorch-demo"},
+			PayloadKeyPayload:      map[string]any{"operator": "workorch"},
 		},
 	})
 	if !ok {
@@ -125,14 +125,14 @@ func TestNormalizeWorkorchEnvelopeReturnsSanitizedCopy(t *testing.T) {
 			PayloadKeyState:        string(common.DecisionTicketStateResolved),
 			PayloadKeyResolutionID: "resolution-1",
 			PayloadKeyType:         "approve-plan",
-			PayloadKeyPayload:      map[string]any{"operator": "workorch-demo"},
+			PayloadKeyPayload:      map[string]any{"operator": "workorch"},
 		},
 	})
 	if !ok {
 		t.Fatalf("second NormalizeWorkorchEnvelope returned !ok")
 	}
 	payload2 := envelope2.Payload[PayloadKeyPayload].(map[string]any)
-	if payload2["operator"] != "workorch-demo" {
-		t.Fatalf("sanitized payload operator = %v, want workorch-demo", payload2["operator"])
+	if payload2["operator"] != "workorch" {
+		t.Fatalf("sanitized payload operator = %v, want workorch", payload2["operator"])
 	}
 }

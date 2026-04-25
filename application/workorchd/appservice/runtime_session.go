@@ -2,11 +2,13 @@ package appservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/muidea/workorch/application/workorchd/bootstrap"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type RuntimeSession struct {
@@ -27,6 +29,16 @@ func NewRuntimeSession(bootstrapRuntime *bootstrap.Runtime) *RuntimeSession {
 func NewRuntimeSessionWithBackend(backend string, dataRoot string) (*RuntimeSession, error) {
 	bootstrapRuntime, err := buildBootstrapRuntime(func() *bootstrap.Runtime {
 		return bootstrap.NewWithBackend(backend, dataRoot)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return NewRuntimeSession(bootstrapRuntime), nil
+}
+
+func NewRuntimeSessionWithBackendAndEventHub(backend string, dataRoot string, eventHub events.Hub) (*RuntimeSession, error) {
+	bootstrapRuntime, err := buildBootstrapRuntime(func() *bootstrap.Runtime {
+		return bootstrap.NewWithBackendAndEventHub(backend, dataRoot, eventHub)
 	})
 	if err != nil {
 		return nil, err
@@ -58,6 +70,20 @@ func (s *RuntimeSession) Close(ctx context.Context) error {
 	return err
 }
 
+func (s *RuntimeSession) CloseOnReturn(ctx context.Context, errp *error) {
+	if errp == nil {
+		return
+	}
+	*errp = errors.Join(*errp, s.Close(ctx))
+}
+
+func (s *RuntimeSession) Exports() (bootstrap.Exports, error) {
+	if s == nil || s.Bootstrap == nil {
+		return bootstrap.Exports{}, common.ErrInvalidArgument
+	}
+	return s.Bootstrap.Exports(), nil
+}
+
 func buildBootstrapRuntime(factory func() *bootstrap.Runtime) (runtime *bootstrap.Runtime, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -71,4 +97,28 @@ func buildBootstrapRuntime(factory func() *bootstrap.Runtime) (runtime *bootstra
 		}
 	}()
 	return factory(), nil
+}
+
+type eventHubContextKey struct{}
+
+func ContextWithEventHub(ctx context.Context, eventHub events.Hub) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if eventHub == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, eventHubContextKey{}, eventHub)
+}
+
+func EventHubFromContext(ctx context.Context) events.Hub {
+	if ctx == nil {
+		return nil
+	}
+	eventHub, _ := ctx.Value(eventHubContextKey{}).(events.Hub)
+	return eventHub
+}
+
+func newRuntimeSessionWithBackend(ctx context.Context, backend string, dataRoot string) (*RuntimeSession, error) {
+	return NewRuntimeSessionWithBackendAndEventHub(backend, dataRoot, EventHubFromContext(ctx))
 }

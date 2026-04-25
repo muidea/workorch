@@ -10,14 +10,14 @@ import (
 func TestFromEnvelopeDecisionTicketSnapshotPreservesResolutionFields(t *testing.T) {
 	item, ok := FromEnvelope(events.Envelope{
 		ID:      "/decision/ticket/snapshot:ticket-1",
-		Version: "workorch-demo.v1",
+		Version: "workorch.v1",
 		Topic:   topicDecisionTicketSnapshot,
 		Payload: events.DecisionResolutionPayload(
 			"manual gate",
 			common.DecisionTicketStateResolved,
 			common.ResolutionID("resolution-1"),
 			"approve-plan",
-			map[string]any{"operator": "workorch-demo"},
+			map[string]any{"operator": "workorch"},
 		),
 	})
 	if !ok {
@@ -34,8 +34,8 @@ func TestFromEnvelopeDecisionTicketSnapshotPreservesResolutionFields(t *testing.
 	if payload.ResolutionType != "approve-plan" {
 		t.Fatalf("resolutionType = %s, want approve-plan", payload.ResolutionType)
 	}
-	if payload.ResolutionPayload["operator"] != "workorch-demo" {
-		t.Fatalf("resolution payload operator = %v, want workorch-demo", payload.ResolutionPayload["operator"])
+	if payload.ResolutionPayload["operator"] != "workorch" {
+		t.Fatalf("resolution payload operator = %v, want workorch", payload.ResolutionPayload["operator"])
 	}
 
 	envelope := item.Envelope()
@@ -64,7 +64,7 @@ func TestFromEnvelopeRejectsInvalidSnapshotPayload(t *testing.T) {
 
 func TestFromEnvelopeRejectsIncompatibleSnapshotVersion(t *testing.T) {
 	_, ok := FromEnvelope(events.Envelope{
-		Version: "workorch-demo.v2",
+		Version: "workorch.v2",
 		Topic:   topicRunSnapshot,
 		Payload: map[string]any{
 			events.PayloadKeyState:              "completed",

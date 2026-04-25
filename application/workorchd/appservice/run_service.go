@@ -2,7 +2,6 @@ package appservice
 
 import (
 	"context"
-	"errors"
 
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -26,9 +25,7 @@ func CreateRunWithSession(ctx context.Context, session *RuntimeSession, workspac
 	if err != nil {
 		return Run{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.RunID(runID)
 	if err := service.CreateRun(ctx, runmodule.CreateRunCommand{
@@ -48,7 +45,7 @@ func CreateRunWithSession(ctx context.Context, session *RuntimeSession, workspac
 }
 
 func CreateRunWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string, goalID string, dodID string) (Run, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Run{}, err
 	}
@@ -68,9 +65,7 @@ func StartRunWithSession(ctx context.Context, session *RuntimeSession, runID str
 	if err != nil {
 		return Run{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.RunID(runID)
 	if err := service.EnsureStarted(ctx, runmodule.StartRunCommand{RunID: id}); err != nil {
@@ -85,7 +80,7 @@ func StartRunWithSession(ctx context.Context, session *RuntimeSession, runID str
 }
 
 func StartRunWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (Run, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Run{}, err
 	}
@@ -105,9 +100,7 @@ func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID st
 	if err != nil {
 		return Run{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.RunID(runID)
 	if err := service.EnsureResumed(ctx, runmodule.ResumeRunCommand{RunID: id}); err != nil {
@@ -122,7 +115,7 @@ func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID st
 }
 
 func ResumeRunWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (Run, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Run{}, err
 	}
@@ -142,9 +135,7 @@ func ReadRunWithSession(ctx context.Context, session *RuntimeSession, runID stri
 	if err != nil {
 		return Run{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	item, err := repo.Get(ctx, common.RunID(runID))
 	if err != nil {
@@ -154,7 +145,7 @@ func ReadRunWithSession(ctx context.Context, session *RuntimeSession, runID stri
 }
 
 func ReadRunWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (Run, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Run{}, err
 	}
@@ -174,9 +165,7 @@ func ListRunsWithSession(ctx context.Context, session *RuntimeSession, workspace
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		err = errors.Join(err, session.Close(ctx))
-	}()
+	defer session.CloseOnReturn(ctx, &err)
 
 	items, err := repo.List(ctx)
 	if err != nil {
@@ -193,7 +182,7 @@ func ListRunsWithSession(ctx context.Context, session *RuntimeSession, workspace
 }
 
 func ListRunsWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) ([]Run, error) {
-	session, err := NewRuntimeSessionWithBackend(backend, dataRoot)
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -209,10 +198,10 @@ func ListRunsFromEnv(ctx context.Context, workspaceID string) ([]Run, error) {
 }
 
 func runDependenciesFromSession(session *RuntimeSession) (runmodule.Service, repository.RunRepository, error) {
-	if session == nil || session.Bootstrap == nil {
-		return nil, nil, common.ErrInvalidArgument
+	exports, err := session.Exports()
+	if err != nil {
+		return nil, nil, err
 	}
-	exports := session.Bootstrap.Exports()
 	if exports.Services.RunService == nil || exports.Repositories.Runs == nil {
 		return nil, nil, common.ErrInvalidArgument
 	}

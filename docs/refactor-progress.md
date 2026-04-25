@@ -2,11 +2,11 @@
 
 > 最近更新：2026-04-24
 
-> 说明：本文保留分阶段演进记录。较早阶段提到的 `application/workorchd/demo/scenarios.go`、`snapshot.go` 等中间态文件已在后续阶段删除，以第 16 节及之后的结构描述为当前有效状态。
+> 说明：本文是历史归档记录，不作为当前活跃待办清单使用。较早阶段提到的 `phase1`、`application/workorchd/demo/scenarios.go`、`snapshot.go` 等中间态命名和文件已在后续阶段替换或删除；当前状态以 `docs/workorch-status.md` 为准。
 
-## 当前目标
+## 归档内容
 
-围绕 `go-multi-module-dev` 规则，持续收敛 `workorch` 的模块边界、应用层职责和代码落点，同时保持 phase1 demo 与测试基线稳定。
+围绕 `go-multi-module-dev` 规则，记录 `workorch` 模块边界、应用层职责和代码落点的历史收敛过程。
 
 ## 已完成
 
@@ -1558,43 +1558,9 @@
 - bootstrap 已从单文件装配继续收敛为 `backend`、`assembly`、`runtime` 三个职责文件
 - `approval` 模块已完成一轮 “biz 统一到 service 契约” 收口，并已扩展为多模块共用的 service adapter 模式模板
 
-## 当前未完成
+## 历史未完成项状态
 
-以下工作仍建议继续推进：
-
-1. 继续收口 `application/service` 语义
-   - 已先完成 application 写侧 action port 与 module command adapter 的解耦
-   - `decision/approval` 的单模块 ensure 语义也已下沉回模块 `service/biz`
-   - `run` 的 create/start/block/resume 单模块 ensure 语义也已下沉
-   - 后续继续评估是否还存在应下沉到模块层的单对象 guard / facade 语义
-   - 保留真正跨模块、跨对象聚合的流程在 `application/workorchd/appservice`
-2. 继续清理 `bootstrap.Runtime` 中偏应用编排的方法面
-   - 当前 env 入口、phase1 主流程、phase1 runtime adapter 都已下沉到 `appservice`
-   - 散列 getter 已收敛为 `Exports()`
-   - `Runtime` 内部也已收敛为 `Exports + lifecycle`
-   - `Exports()` 当前也已收敛为 `Repositories / Services / Infrastructure` capability group
-   - appservice 当前运行时读侧已收敛为 snapshot read，不再要求独立 guard capability
-   - appservice 当前内部依赖也已压到 `Snapshot + Actions`
-   - `Services` 当前已评估为最小稳定模块 façade 集合，除非模块边界变化，否则不再继续机械缩减
-   - 保持 `Runtime` 更接近装配后 façade，而不是长期积累业务流程
-3. 继续补 `appservice` / `demo` 中剩余异常分支与持久化重载回归测试
-   - 其他尚未覆盖的异常组合分支
-4. 继续收口 event / observed 语义
-   - presenter 手工拼装 envelope 的职责已移出
-   - `workspace / run / step / decision / approval` 已开始读取 `event.Hub` 发布结果
-   - `workspace.activeRunId` 等运行期状态变化的真实事件覆盖也已补齐
-   - observed 已改为订阅式 collector，不再读取 memory published 列表
-   - collector 已上升为 `ManagedRuntime` 持有的显式生命周期对象
-   - phase1 event-to-snapshot mapper contract 已集中到独立文件
-   - phase1 payload key/builder 契约也已集中到 shared events 包
-   - phase1 published payload decode/validate 已补齐
-   - phase1 typed event envelope / typed observer contract 也已补齐最小能力面
-   - collector -> managed runtime -> observed snapshot 主链路也已切换为 typed phase1 event
-   - phase1 observed snapshot 也已收敛为 typed snapshot contract
-   - phase1 event / snapshot 的显式最终版本校验也已补齐
-   - phase1 输出当前已进入最终形态收口，不再继续维护兼容路径
-   - 后续重点转向模块业务能力本身的进一步收口，而不是 compatibility 设计
-   - 为后续真实 eventHub / observed pipeline 过渡预留清晰边界
+本节原先记录的重构遗留项已经被后续 MVP 与 framework alignment 收口覆盖，不再作为活跃待办清单维护。当前有效状态以 `docs/workorch-status.md` 为准；如需继续扩展模块边界、运行时、事件观察或持久化能力，应重新拆成新的正式业务需求。
 
 ## 本轮基线
 

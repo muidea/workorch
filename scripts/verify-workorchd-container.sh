@@ -10,6 +10,19 @@ BACKEND="${WORKORCH_VERIFY_BACKEND:-memory}"
 TMP_DIR="$(mktemp -d)"
 DATA_DIR="$TMP_DIR/workorch-data"
 CID=""
+LOG_PATH="$TMP_DIR/container.log"
+
+report_failure() {
+  local status=$?
+  if [[ $status -eq 0 ]]; then
+    return
+  fi
+  echo "workorchd container verification failed for backend=$BACKEND" >&2
+  if [[ -n "$CID" ]]; then
+    echo "--- docker logs ---" >&2
+    docker logs "$CID" >&2 || true
+  fi
+}
 
 cleanup() {
   if [[ -n "$CID" ]]; then
@@ -19,6 +32,36 @@ cleanup() {
   rm -rf "$TMP_DIR"
 }
 
+start_container() {
+  local docker_args=(run -d -p "$ADDR_PORT:8080")
+  if [[ "$BACKEND" == "file" ]]; then
+    docker_args+=(
+      -e WORKORCH_REPOSITORY_BACKEND=file
+      -e WORKORCH_DATA_DIR=/var/lib/workorch
+      -v "$DATA_DIR:/var/lib/workorch"
+    )
+  fi
+  docker_args+=("$IMAGE_TAG")
+  CID="$(docker "${docker_args[@]}")"
+}
+
+restart_container() {
+  docker rm -f "$CID" >/dev/null
+  CID=""
+  start_container
+}
+
+wait_ready() {
+  for _ in $(seq 1 50); do
+    if curl -fsS "$BASE_URL/healthz" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  curl -fsS "$BASE_URL/healthz" >/dev/null
+}
+
+trap report_failure ERR
 trap cleanup EXIT
 
 cd "$ROOT_DIR"
@@ -27,24 +70,8 @@ docker build -t "$IMAGE_TAG" .
 mkdir -p "$DATA_DIR"
 chmod 0777 "$DATA_DIR"
 
-docker_args=(run -d -p "$ADDR_PORT:8080")
-if [[ "$BACKEND" == "file" ]]; then
-  docker_args+=(
-    -e WORKORCH_REPOSITORY_BACKEND=file
-    -e WORKORCH_DATA_DIR=/var/lib/workorch
-    -v "$DATA_DIR:/var/lib/workorch"
-  )
-fi
-docker_args+=("$IMAGE_TAG")
-
-CID="$(docker "${docker_args[@]}")"
-
-for _ in $(seq 1 50); do
-  if curl -fsS "$BASE_URL/healthz" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 0.2
-done
+start_container
+wait_ready
 
 curl -fsS "$BASE_URL/healthz" | grep '"status": "ok"' >/dev/null
 curl -fsS "$BASE_URL/readyz" | grep '"status": "ready"' >/dev/null
@@ -112,6 +139,22 @@ if [[ "$BACKEND" == "file" ]]; then
   for name in workspace.json run.json step.json ticket.json resolution.json approval.json; do
     [[ -f "$DATA_DIR/$name" ]]
   done
+
+  restart_container
+  wait_ready
+
+  curl -fsS "$BASE_URL/readyz" | grep '"status": "ready"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/ws-verify" | grep '"title": "verify workspace"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/ws-verify/snapshot" | grep '"id": "run-verify"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify" | grep '"state": "completed"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify/snapshot" | grep '"id": "run-verify"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify/status" | grep '"state": "completed"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-verify" | grep '"state": "completed"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-rejected-verify" | grep '"state": "failed"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_id" | grep '"state": "resolved"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$reject_ticket_id" | grep '"resolutionType": "reject_path"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_id" | grep '"state": "approved"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$reject_approval_id" | grep '"state": "rejected"' >/dev/null
 fi
 
 echo "workorchd container verification passed for backend=$BACKEND"

@@ -333,7 +333,7 @@ func TestService_CreateAndResolveTicket_PublishesEvents(t *testing.T) {
 		ResolutionID: common.ResolutionID("resolution-event"),
 		TicketID:     createCmd.TicketID,
 		Type:         "approve-plan",
-		Payload:      map[string]any{"operator": "workorch-demo"},
+		Payload:      map[string]any{"operator": "workorch"},
 	}); err != nil {
 		t.Fatalf("resolve ticket: %v", err)
 	}
