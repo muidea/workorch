@@ -182,13 +182,14 @@ HTTP endpoints:
 Minimal verification:
 
 ```bash
-WORKSPACE_ID="ws-demo-$(date +%s)"
 curl -f http://127.0.0.1:8080/healthz
 curl -f http://127.0.0.1:8080/readyz
 curl -f http://127.0.0.1:8080/metrics | grep workorch_http_requests_total
-curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces \
+WORKSPACE_JSON="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces \
   -H 'Content-Type: application/json' \
-  -d "{\"workspaceId\":\"${WORKSPACE_ID}\",\"title\":\"demo workspace\"}"
+  -d '{"title":"demo workspace","description":"demo workspace description"}')"
+WORKSPACE_ID="$(printf '%s\n' "${WORKSPACE_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
+test -n "${WORKSPACE_ID}"
 curl -f http://127.0.0.1:8080/api/v1/workorch/slices
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/runs
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs
@@ -240,7 +241,7 @@ curl -f http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/status
 curl -f http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/snapshot
 ```
 
-- the workspace create endpoint creates one formal `workorch` workspace instance
+- the workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `workingDirectory` to `<service-working-directory>/workspaces/<generated-workspace-id>` when omitted
 - with the file-backed backend, the run create endpoint creates one formal `workorch` run instance for the requested workspace
 - with the file-backed backend, the run list endpoint returns persisted `workorch` run instances and supports `workspaceId` filtering
 - with the file-backed backend, the single-run endpoint returns one persisted `workorch` run instance

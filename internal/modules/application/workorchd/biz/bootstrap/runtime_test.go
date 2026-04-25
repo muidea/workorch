@@ -44,8 +44,9 @@ func TestNewWithBackendMemoryBuildsRuntime(t *testing.T) {
 	exports := rt.Exports()
 
 	if err := exports.Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID: common.WorkspaceID("ws-bootstrap-memory"),
-		Title:       "bootstrap memory backend",
+		WorkspaceID:      common.WorkspaceID("ws-bootstrap-memory"),
+		Title:            "bootstrap memory backend",
+		WorkingDirectory: "workspaces/ws-bootstrap-memory",
 	}); err != nil {
 		t.Fatalf("create workspace with memory backend: %v", err)
 	}
@@ -65,8 +66,9 @@ func TestNewWithBackendFilePersistsWorkspaceData(t *testing.T) {
 	exports := rt.Exports()
 
 	err := exports.Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID: common.WorkspaceID("ws-bootstrap-file"),
-		Title:       "bootstrap file backend",
+		WorkspaceID:      common.WorkspaceID("ws-bootstrap-file"),
+		Title:            "bootstrap file backend",
+		WorkingDirectory: "workspaces/ws-bootstrap-file",
 	})
 	if err != nil {
 		t.Fatalf("create workspace with file backend: %v", err)
@@ -86,8 +88,9 @@ func TestNewWithBackendFileUsesDefaultDataRootWhenUnset(t *testing.T) {
 	exports := rt.Exports()
 
 	err := exports.Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID: common.WorkspaceID("ws-bootstrap-file-default"),
-		Title:       "bootstrap file backend default data root",
+		WorkspaceID:      common.WorkspaceID("ws-bootstrap-file-default"),
+		Title:            "bootstrap file backend default data root",
+		WorkingDirectory: "workspaces/ws-bootstrap-file-default",
 	})
 	if err != nil {
 		t.Fatalf("create workspace with default file backend: %v", err)

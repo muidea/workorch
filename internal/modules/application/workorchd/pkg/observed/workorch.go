@@ -24,22 +24,28 @@ func BuildWorkorchSnapshot(
 ) []SnapshotItem {
 	observed := []SnapshotItem{}
 	if workspaceEnvelope, ok := latestPublishedSnapshot(workorchWorkspaceSnapshotContract, workorchSnapshotRef{
-		subjectID:   string(ws.ID),
-		workspaceID: ws.ID,
-		runID:       r.ID,
-		title:       ws.Title,
+		subjectID:        string(ws.ID),
+		workspaceID:      ws.ID,
+		runID:            r.ID,
+		title:            ws.Title,
+		description:      ws.Description,
+		workingDirectory: ws.WorkingDirectory,
 	}, published); ok {
 		observed = append(observed, workspaceEnvelope)
 	} else {
 		observed = append(observed, workorchWorkspaceSnapshotContract.fallback(workorchSnapshotRef{
-			subjectID:   string(ws.ID),
-			workspaceID: ws.ID,
-			runID:       r.ID,
-			title:       ws.Title,
+			subjectID:        string(ws.ID),
+			workspaceID:      ws.ID,
+			runID:            r.ID,
+			title:            ws.Title,
+			description:      ws.Description,
+			workingDirectory: ws.WorkingDirectory,
 		}, WorkspacePayload{
-			Title:       ws.Title,
-			State:       string(ws.State),
-			ActiveRunID: string(ws.ActiveRunID),
+			Title:            ws.Title,
+			Description:      ws.Description,
+			WorkingDirectory: ws.WorkingDirectory,
+			State:            string(ws.State),
+			ActiveRunID:      string(ws.ActiveRunID),
 		}))
 	}
 	if runEnvelope, ok := latestPublishedSnapshot(workorchRunSnapshotContract, workorchSnapshotRef{

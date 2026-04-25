@@ -597,7 +597,7 @@ func (o *RuntimeOrchestrator) publishWorkspaceStateChanged(ctx context.Context, 
 		SubjectID:    string(workspace.ID),
 		WorkspaceID:  string(workspace.ID),
 		RunID:        string(runID),
-		Payload:      events.WorkspacePayload(workspace.Title, workspace.State, workspace.ActiveRunID),
+		Payload:      events.WorkspacePayload(workspace.Title, workspace.Description, workspace.WorkingDirectory, workspace.State, workspace.ActiveRunID),
 	})
 }
 

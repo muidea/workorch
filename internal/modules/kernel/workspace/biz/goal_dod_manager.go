@@ -22,14 +22,16 @@ func NewGoalDoDManager(workspaces repository.WorkspaceRepository, eventHub event
 }
 
 func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspaceservice.CreateWorkspaceCommand) error {
-	if cmd.WorkspaceID == "" || cmd.Title == "" {
+	if cmd.WorkspaceID == "" || cmd.Title == "" || cmd.WorkingDirectory == "" {
 		return common.ErrInvalidArgument
 	}
 
 	workspace := &workspaceModel.Workspace{
-		ID:    cmd.WorkspaceID,
-		Title: cmd.Title,
-		State: common.WorkspaceStateActive,
+		ID:               cmd.WorkspaceID,
+		Title:            cmd.Title,
+		Description:      cmd.Description,
+		WorkingDirectory: cmd.WorkingDirectory,
+		State:            common.WorkspaceStateActive,
 	}
 	if err := m.workspaces.Create(ctx, workspace); err != nil {
 		return err
@@ -38,7 +40,7 @@ func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspaceservi
 }
 
 func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspaceservice.EnsureWorkspaceCommand) error {
-	if cmd.WorkspaceID == "" || cmd.Title == "" {
+	if cmd.WorkspaceID == "" || cmd.Title == "" || cmd.WorkingDirectory == "" {
 		return common.ErrInvalidArgument
 	}
 
@@ -46,8 +48,10 @@ func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspaceservi
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
 			return m.CreateWorkspace(ctx, workspaceservice.CreateWorkspaceCommand{
-				WorkspaceID: cmd.WorkspaceID,
-				Title:       cmd.Title,
+				WorkspaceID:      cmd.WorkspaceID,
+				Title:            cmd.Title,
+				Description:      cmd.Description,
+				WorkingDirectory: cmd.WorkingDirectory,
 			})
 		}
 		return err
@@ -56,6 +60,14 @@ func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspaceservi
 	changed := false
 	if workspace.Title != cmd.Title {
 		workspace.Title = cmd.Title
+		changed = true
+	}
+	if workspace.Description != cmd.Description {
+		workspace.Description = cmd.Description
+		changed = true
+	}
+	if workspace.WorkingDirectory != cmd.WorkingDirectory {
+		workspace.WorkingDirectory = cmd.WorkingDirectory
 		changed = true
 	}
 	if workspace.State != common.WorkspaceStateActive {
@@ -86,6 +98,6 @@ func (m *GoalDoDManager) publishWorkspaceEvent(ctx context.Context, topic string
 		SubjectType:  "workspace",
 		SubjectID:    string(workspace.ID),
 		WorkspaceID:  string(workspace.ID),
-		Payload:      events.WorkspacePayload(workspace.Title, workspace.State, workspace.ActiveRunID),
+		Payload:      events.WorkspacePayload(workspace.Title, workspace.Description, workspace.WorkingDirectory, workspace.State, workspace.ActiveRunID),
 	})
 }

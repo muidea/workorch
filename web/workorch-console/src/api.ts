@@ -36,10 +36,10 @@ export const workorchApi = {
     const body = await request<{ workspaces: Workspace[] }>(`${apiBase}/workspaces`);
     return body.workspaces ?? [];
   },
-  createWorkspace: async (workspaceId: string, title: string) => {
+  createWorkspace: async (title: string, description?: string, workingDirectory?: string) => {
     const body = await request<{ workspace: Workspace }>(`${apiBase}/workspaces`, {
       method: 'POST',
-      body: JSON.stringify({ workspaceId, title })
+      body: JSON.stringify({ title, description, workingDirectory })
     });
     return body.workspace;
   },

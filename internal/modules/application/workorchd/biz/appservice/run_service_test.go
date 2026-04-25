@@ -22,7 +22,7 @@ func TestCreateRunWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing
 
 func TestCreateRunWithBackendReturnsCreatedRun(t *testing.T) {
 	dataRoot := t.TempDir()
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "ws-run-created", "run created workspace"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-created", "run created workspace", "", "workspaces/run created workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 
@@ -58,7 +58,7 @@ func TestCreateRunWithBackendReturnsNotFoundWhenWorkspaceMissing(t *testing.T) {
 
 func TestReadRunWithBackendReturnsPersistedRun(t *testing.T) {
 	dataRoot := t.TempDir()
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "ws-run-read", "run read workspace"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-read", "run read workspace", "", "workspaces/run read workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-read", "run-read", "", ""); err != nil {
@@ -76,10 +76,10 @@ func TestReadRunWithBackendReturnsPersistedRun(t *testing.T) {
 
 func TestListRunsWithBackendReturnsFilteredRuns(t *testing.T) {
 	dataRoot := t.TempDir()
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "ws-run-a", "run workspace a"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-a", "run workspace a", "", "workspaces/run workspace a"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend ws-run-a: %v", err)
 	}
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "ws-run-b", "run workspace b"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-b", "run workspace b", "", "workspaces/run workspace b"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend ws-run-b: %v", err)
 	}
 	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-b", "run-b", "", ""); err != nil {
@@ -111,7 +111,7 @@ func TestListRunsWithBackendReturnsFilteredRuns(t *testing.T) {
 
 func TestStartRunWithBackendReturnsCompletedRun(t *testing.T) {
 	dataRoot := t.TempDir()
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "ws-run-start", "run start workspace"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-start", "run start workspace", "", "workspaces/run start workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-start", "run-start", "", ""); err != nil {
@@ -132,7 +132,7 @@ func TestStartRunWithBackendReturnsCompletedRun(t *testing.T) {
 
 func TestStartRunWithBackendReturnsCompletedRunForCompletedRunAfterReload(t *testing.T) {
 	dataRoot := t.TempDir()
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "ws-run-start-restart", "run start restart workspace"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-start-restart", "run start restart workspace", "", "workspaces/run start restart workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-start-restart", "run-start-restart", "", ""); err != nil {
@@ -154,7 +154,7 @@ func TestStartRunWithBackendReturnsCompletedRunForCompletedRunAfterReload(t *tes
 func TestStartRunWithBackendReturnsBlockedDecisionRun(t *testing.T) {
 	dataRoot := t.TempDir()
 	runID := "run-" + legacycommon.RuntimeDecisionBlockRunToken
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "ws-run-start-blocked-decision", "run start blocked decision workspace"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-start-blocked-decision", "run start blocked decision workspace", "", "workspaces/run start blocked decision workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-start-blocked-decision", runID, "", ""); err != nil {
@@ -173,7 +173,7 @@ func TestStartRunWithBackendReturnsBlockedDecisionRun(t *testing.T) {
 func TestResumeRunWithBackendReturnsCompletedRunAfterDecisionResolved(t *testing.T) {
 	dataRoot := t.TempDir()
 	runID := "run-" + legacycommon.RuntimeDecisionBlockRunToken
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-decision", "run resume decision workspace"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-decision", "run resume decision workspace", "", "workspaces/run resume decision workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-decision", runID, "", ""); err != nil {
@@ -209,7 +209,7 @@ func TestResumeRunWithBackendReturnsCompletedRunAfterDecisionResolved(t *testing
 func TestResumeRunWithBackendReturnsCompletedRunAfterApprovalApproved(t *testing.T) {
 	dataRoot := t.TempDir()
 	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-approval", "run resume approval workspace"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-approval", "run resume approval workspace", "", "workspaces/run resume approval workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-approval", runID, "", ""); err != nil {
@@ -243,7 +243,7 @@ func TestResumeRunWithBackendReturnsCompletedRunAfterApprovalApproved(t *testing
 func TestResumeRunWithBackendReturnsCompletedRunForCompletedRunAfterReload(t *testing.T) {
 	dataRoot := t.TempDir()
 	runID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-resume-completed"
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-completed", "run resume completed workspace"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-completed", "run resume completed workspace", "", "workspaces/run resume completed workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-completed", runID, "", ""); err != nil {
@@ -273,7 +273,7 @@ func TestResumeRunWithBackendReturnsCompletedRunForCompletedRunAfterReload(t *te
 func TestResumeRunWithBackendReturnsFailedRunAfterApprovalRejected(t *testing.T) {
 	dataRoot := t.TempDir()
 	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-rejected"
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-approval-rejected", "run resume approval rejected workspace"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-approval-rejected", "run resume approval rejected workspace", "", "workspaces/run resume approval rejected workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-approval-rejected", runID, "", ""); err != nil {
@@ -307,7 +307,7 @@ func TestResumeRunWithBackendReturnsFailedRunAfterApprovalRejected(t *testing.T)
 func TestResumeRunWithBackendReturnsFailedRunForFailedRunAfterReload(t *testing.T) {
 	dataRoot := t.TempDir()
 	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-rejected-restart"
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-failed", "run resume failed workspace"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-failed", "run resume failed workspace", "", "workspaces/run resume failed workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-failed", runID, "", ""); err != nil {
@@ -337,7 +337,7 @@ func TestResumeRunWithBackendReturnsFailedRunForFailedRunAfterReload(t *testing.
 func TestStartRunWithBackendReturnsConflictForFailedRunAfterReload(t *testing.T) {
 	dataRoot := t.TempDir()
 	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-failed-start-conflict"
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "ws-run-start-failed", "run start failed workspace"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-start-failed", "run start failed workspace", "", "workspaces/run start failed workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-start-failed", runID, "", ""); err != nil {
@@ -363,7 +363,7 @@ func TestStartRunWithBackendReturnsConflictForFailedRunAfterReload(t *testing.T)
 func TestResumeRunWithBackendReturnsBlockedWhenDependencyPending(t *testing.T) {
 	dataRoot := t.TempDir()
 	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-pending"
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-pending", "run resume pending workspace"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-pending", "run resume pending workspace", "", "workspaces/run resume pending workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-pending", runID, "", ""); err != nil {
@@ -385,7 +385,7 @@ func TestResumeRunWithBackendReturnsBlockedWhenDependencyPending(t *testing.T) {
 
 func TestResumeRunWithBackendReturnsConflictForCreatedRun(t *testing.T) {
 	dataRoot := t.TempDir()
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-conflict", "run resume conflict workspace"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-conflict", "run resume conflict workspace", "", "workspaces/run resume conflict workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-conflict", "run-resume-conflict", "", ""); err != nil {
@@ -400,8 +400,9 @@ func TestResumeRunWithBackendReturnsConflictForCreatedRun(t *testing.T) {
 func TestReadRunWithSessionReturnsFailureReason(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
 	if err := session.Bootstrap.Exports().Services.WorkspaceService.CreateWorkspace(ctx, workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID: "ws-run-failure",
-		Title:       "run failure workspace",
+		WorkspaceID:      "ws-run-failure",
+		Title:            "run failure workspace",
+		WorkingDirectory: "workspaces/ws-run-failure",
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}

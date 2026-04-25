@@ -4,6 +4,8 @@ import "github.com/muidea/workorch/internal/pkg/common"
 
 const (
 	PayloadKeyTitle              = "title"
+	PayloadKeyDescription        = "description"
+	PayloadKeyWorkingDirectory   = "workingDirectory"
 	PayloadKeyGoalID             = "goalId"
 	PayloadKeyDoDID              = "doDId"
 	PayloadKeyState              = "state"
@@ -21,9 +23,11 @@ const (
 )
 
 type WorkspacePayloadData struct {
-	Title       string
-	State       common.WorkspaceState
-	ActiveRunID common.RunID
+	Title            string
+	Description      string
+	WorkingDirectory string
+	State            common.WorkspaceState
+	ActiveRunID      common.RunID
 }
 
 type RunPayloadData struct {
@@ -59,13 +63,19 @@ type ApprovalPayloadData struct {
 	State  common.ApprovalState
 }
 
-func WorkspacePayload(title string, state common.WorkspaceState, activeRunID common.RunID) map[string]any {
+func WorkspacePayload(title string, description string, workingDirectory string, state common.WorkspaceState, activeRunID common.RunID) map[string]any {
 	payload := map[string]any{
 		PayloadKeyState:       string(state),
 		PayloadKeyActiveRunID: string(activeRunID),
 	}
 	if title != "" {
 		payload[PayloadKeyTitle] = title
+	}
+	if description != "" {
+		payload[PayloadKeyDescription] = description
+	}
+	if workingDirectory != "" {
+		payload[PayloadKeyWorkingDirectory] = workingDirectory
 	}
 	return payload
 }
@@ -154,11 +164,15 @@ func DecodeWorkspacePayload(payload map[string]any) (WorkspacePayloadData, bool)
 		return WorkspacePayloadData{}, false
 	}
 	title, _ := optionalStringField(payload, PayloadKeyTitle)
+	description, _ := optionalStringField(payload, PayloadKeyDescription)
+	workingDirectory, _ := optionalStringField(payload, PayloadKeyWorkingDirectory)
 	activeRunID, _ := optionalStringField(payload, PayloadKeyActiveRunID)
 	return WorkspacePayloadData{
-		Title:       title,
-		State:       common.WorkspaceState(state),
-		ActiveRunID: common.RunID(activeRunID),
+		Title:            title,
+		Description:      description,
+		WorkingDirectory: workingDirectory,
+		State:            common.WorkspaceState(state),
+		ActiveRunID:      common.RunID(activeRunID),
 	}, true
 }
 

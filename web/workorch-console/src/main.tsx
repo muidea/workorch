@@ -102,6 +102,8 @@ function WorkspacesPage() {
   const columns: ProColumns<Workspace>[] = [
     { title: 'Workspace ID', dataIndex: 'id', copyable: true },
     { title: 'Title', dataIndex: 'title' },
+    { title: 'Description', dataIndex: 'description' },
+    { title: 'Working Directory', dataIndex: 'workingDirectory', copyable: true },
     { title: 'State', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
     { title: 'Active Run', dataIndex: 'activeRunId', copyable: true }
   ];
@@ -125,10 +127,10 @@ function WorkspacesPage() {
         <Form
           form={form}
           layout="vertical"
-          onFinish={async (values: { workspaceId: string; title: string }) => {
+          onFinish={async (values: { title: string; description?: string; workingDirectory?: string }) => {
             setSubmitting(true);
             try {
-              await workorchApi.createWorkspace(values.workspaceId, values.title);
+              await workorchApi.createWorkspace(values.title, values.description, values.workingDirectory);
               message.success('Workspace created');
               setModalOpen(false);
               form.resetFields();
@@ -140,11 +142,14 @@ function WorkspacesPage() {
             }
           }}
         >
-          <Form.Item name="workspaceId" label="Workspace ID" rules={[{ required: true }]}>
-            <Input placeholder="ws-local" />
-          </Form.Item>
           <Form.Item name="title" label="Title" rules={[{ required: true }]}>
             <Input placeholder="Local workorch workspace" />
+          </Form.Item>
+          <Form.Item name="description" label="Description">
+            <Input.TextArea rows={3} placeholder="Describe the workspace purpose, target scope, or current delivery expectation" />
+          </Form.Item>
+          <Form.Item name="workingDirectory" label="Working Directory">
+            <Input placeholder="Leave empty to use service working path / workspaces / generated workspace ID" />
           </Form.Item>
         </Form>
       </Modal>

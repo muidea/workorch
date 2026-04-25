@@ -72,13 +72,8 @@ func TestReadyzNativeRouteInjectsEventHub(t *testing.T) {
 func TestMemoryBackendPersistsStateAcrossHTTPRequests(t *testing.T) {
 	mux := newMux(Config{Backend: "memory"})
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"ws-memory-http","title":"memory http"}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	mux.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusCreated {
-		t.Fatalf("create status = %d, want 201, body = %s", createRec.Code, createRec.Body.String())
-	}
+	workspace := createWorkspaceForHTTP(t, mux, "memory http", "workspaces/ws-memory-http")
+	workspaceID := workspace.ID
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces", nil)
 	listRec := httptest.NewRecorder()
@@ -86,11 +81,11 @@ func TestMemoryBackendPersistsStateAcrossHTTPRequests(t *testing.T) {
 	if listRec.Code != http.StatusOK {
 		t.Fatalf("list status = %d, want 200, body = %s", listRec.Code, listRec.Body.String())
 	}
-	if !strings.Contains(listRec.Body.String(), `"id": "ws-memory-http"`) {
+	if !strings.Contains(listRec.Body.String(), `"id": "`+workspaceID+`"`) {
 		t.Fatalf("list body = %s, want created workspace", listRec.Body.String())
 	}
 
-	createRunReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-memory-http/runs", strings.NewReader(`{"runId":"run-memory-http","goalId":"goal-memory-http","doDId":"dod-memory-http"}`))
+	createRunReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspaceID+"/runs", strings.NewReader(`{"runId":"run-memory-http","goalId":"goal-memory-http","doDId":"dod-memory-http"}`))
 	createRunReq.Header.Set("Content-Type", "application/json")
 	createRunRec := httptest.NewRecorder()
 	mux.ServeHTTP(createRunRec, createRunReq)
@@ -98,7 +93,7 @@ func TestMemoryBackendPersistsStateAcrossHTTPRequests(t *testing.T) {
 		t.Fatalf("create run status = %d, want 201, body = %s", createRunRec.Code, createRunRec.Body.String())
 	}
 
-	listRunReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs?workspaceId=ws-memory-http", nil)
+	listRunReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs?workspaceId="+workspaceID, nil)
 	listRunRec := httptest.NewRecorder()
 	mux.ServeHTTP(listRunRec, listRunReq)
 	if listRunRec.Code != http.StatusOK {
@@ -328,14 +323,14 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}
 		return appservice.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "pending"}, nil
 	}
-	state.createWorkspace = func(ctx context.Context, _, _, workspaceID, title string) (appservice.Workspace, error) {
+	state.createWorkspace = func(ctx context.Context, _, _, title, description, workingDirectory string) (appservice.Workspace, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("workspace create event hub = %#v, want injected hub", got)
 		}
-		if workspaceID != "ws-native-write" || title != "native write" {
-			t.Fatalf("workspace create input = %q/%q, want ws-native-write/native write", workspaceID, title)
+		if title != "native write" || description != "native description" || workingDirectory != "workspaces/native-write" {
+			t.Fatalf("workspace create input = %q/%q/%q, want native write/native description/workspaces/native-write", title, description, workingDirectory)
 		}
-		return appservice.Workspace{ID: workspaceID, Title: title, State: "active"}, nil
+		return appservice.Workspace{ID: "ws-native-write", Title: title, Description: description, WorkingDirectory: workingDirectory, State: "active"}, nil
 	}
 	state.createRun = func(ctx context.Context, _, _, workspaceID, runID, goalID, dodID string) (appservice.Run, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
@@ -457,7 +452,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		status int
 	}{
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces", status: http.StatusOK},
-		{method: http.MethodPost, path: "/api/v1/workorch/workspaces", body: `{"workspaceId":"ws-native-write","title":"native write"}`, status: http.StatusCreated},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces", body: `{"title":"native write","description":"native description","workingDirectory":"workspaces/native-write"}`, status: http.StatusCreated},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/snapshot", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs", body: `{"runId":"run-native-write","goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusCreated},
@@ -546,7 +541,7 @@ func TestRunEndpointPersistsFilesWithFileBackend(t *testing.T) {
 func TestWorkspaceCreateEndpointReturnsCreatedWorkspace(t *testing.T) {
 	handler := newMux(Config{Backend: "memory"})
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"ws-http","title":"http workspace"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"http workspace","description":"http description","workingDirectory":"workspaces/ws-http"}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	handler.ServeHTTP(createRec, createReq)
@@ -558,22 +553,46 @@ func TestWorkspaceCreateEndpointReturnsCreatedWorkspace(t *testing.T) {
 	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("unmarshal created workspace: %v", err)
 	}
-	if created.Workspace.ID != "ws-http" || created.Workspace.Title != "http workspace" || created.Workspace.State != "active" {
-		t.Fatalf("created workspace = %+v, want ws-http/http workspace/active", created.Workspace)
+	if !strings.HasPrefix(created.Workspace.ID, "ws-") ||
+		created.Workspace.Title != "http workspace" ||
+		created.Workspace.Description != "http description" ||
+		created.Workspace.WorkingDirectory != "workspaces/ws-http" ||
+		created.Workspace.State != "active" {
+		t.Fatalf("created workspace = %+v, want ws-http/http workspace/workspaces/ws-http/active", created.Workspace)
+	}
+}
+
+func TestWorkspaceCreateEndpointDefaultsWorkingDirectory(t *testing.T) {
+	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"http default directory workspace"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201, body=%s", rec.Code, rec.Body.String())
+	}
+	var body workspaceResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal workspace: %v", err)
+	}
+	if body.Workspace.ID == "" {
+		t.Fatalf("workspace id is empty")
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	want := filepath.Join(wd, "workspaces", body.Workspace.ID)
+	if body.Workspace.WorkingDirectory != want {
+		t.Fatalf("workingDirectory = %q, want %q", body.Workspace.WorkingDirectory, want)
 	}
 }
 
 func TestWorkspaceListAndGetEndpointsReturnPersistedWorkspaces(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"ws-http","title":"http workspace"}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	handler.ServeHTTP(createRec, createReq)
-
-	if createRec.Code != http.StatusCreated {
-		t.Fatalf("create status = %d, want 201, body=%s", createRec.Code, createRec.Body.String())
-	}
+	workspace := createWorkspaceForHTTP(t, handler, "http workspace", "workspaces/ws-http")
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces", nil)
 	listRec := httptest.NewRecorder()
 	handler.ServeHTTP(listRec, listReq)
@@ -585,11 +604,11 @@ func TestWorkspaceListAndGetEndpointsReturnPersistedWorkspaces(t *testing.T) {
 	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil {
 		t.Fatalf("unmarshal listed workspaces: %v", err)
 	}
-	if len(listed.Workspaces) != 1 || listed.Workspaces[0].ID != "ws-http" {
-		t.Fatalf("listed workspaces = %+v, want ws-http", listed.Workspaces)
+	if len(listed.Workspaces) != 1 || listed.Workspaces[0].ID != workspace.ID {
+		t.Fatalf("listed workspaces = %+v, want %s", listed.Workspaces, workspace.ID)
 	}
 
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-http", nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID, nil)
 	getRec := httptest.NewRecorder()
 	handler.ServeHTTP(getRec, getReq)
 
@@ -600,24 +619,20 @@ func TestWorkspaceListAndGetEndpointsReturnPersistedWorkspaces(t *testing.T) {
 	if err := json.Unmarshal(getRec.Body.Bytes(), &fetched); err != nil {
 		t.Fatalf("unmarshal fetched workspace: %v", err)
 	}
-	if fetched.Workspace.ID != "ws-http" || fetched.Workspace.Title != "http workspace" {
-		t.Fatalf("fetched workspace = %+v, want ws-http/http workspace", fetched.Workspace)
+	if fetched.Workspace.ID != workspace.ID || fetched.Workspace.Title != "http workspace" || fetched.Workspace.WorkingDirectory != "workspaces/ws-http" {
+		t.Fatalf("fetched workspace = %+v, want %s/http workspace/workspaces/ws-http", fetched.Workspace, workspace.ID)
 	}
 }
 
-func TestWorkspaceCreateEndpointReturnsConflictForDuplicateID(t *testing.T) {
+func TestWorkspaceCreateEndpointRejectsClientWorkspaceID(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
-	for idx := 0; idx < 2; idx++ {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"ws-dup","title":"duplicate workspace"}`))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if idx == 0 && rec.Code != http.StatusCreated {
-			t.Fatalf("first create status = %d, want 201, body=%s", rec.Code, rec.Body.String())
-		}
-		if idx == 1 && rec.Code != http.StatusConflict {
-			t.Fatalf("second create status = %d, want 409, body=%s", rec.Code, rec.Body.String())
-		}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"ws-client","title":"client workspace","workingDirectory":"workspaces/ws-client"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -647,15 +662,9 @@ func TestWorkspaceGetEndpointReturnsNotFoundWhenMissing(t *testing.T) {
 func TestRunCreateEndpointReturnsCreatedRun(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 
-	workspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"ws-run-http","title":"run http workspace"}`))
-	workspaceReq.Header.Set("Content-Type", "application/json")
-	workspaceRec := httptest.NewRecorder()
-	handler.ServeHTTP(workspaceRec, workspaceReq)
-	if workspaceRec.Code != http.StatusCreated {
-		t.Fatalf("workspace create status = %d, want 201, body=%s", workspaceRec.Code, workspaceRec.Body.String())
-	}
+	workspace := createWorkspaceForHTTP(t, handler, "run http workspace", "workspaces/run-http")
 
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-run-http/runs", strings.NewReader(`{"runId":"run-http","goalId":"goal-http","doDId":"dod-http"}`))
+	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-http","goalId":"goal-http","doDId":"dod-http"}`))
 	runReq.Header.Set("Content-Type", "application/json")
 	runRec := httptest.NewRecorder()
 	handler.ServeHTTP(runRec, runReq)
@@ -667,8 +676,8 @@ func TestRunCreateEndpointReturnsCreatedRun(t *testing.T) {
 	if err := json.Unmarshal(runRec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal created run: %v", err)
 	}
-	if body.Run.ID != "run-http" || body.Run.WorkspaceID != "ws-run-http" || body.Run.State != "created" {
-		t.Fatalf("created run = %+v, want run-http/ws-run-http/created", body.Run)
+	if body.Run.ID != "run-http" || body.Run.WorkspaceID != workspace.ID || body.Run.State != "created" {
+		t.Fatalf("created run = %+v, want run-http/%s/created", body.Run, workspace.ID)
 	}
 	if body.Run.GoalID != "goal-http" || body.Run.DoDID != "dod-http" {
 		t.Fatalf("created run goal/dod = %+v, want goal-http/dod-http", body.Run)
@@ -678,25 +687,15 @@ func TestRunCreateEndpointReturnsCreatedRun(t *testing.T) {
 func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 
-	for _, payload := range []string{
-		`{"workspaceId":"ws-run-a","title":"run workspace a"}`,
-		`{"workspaceId":"ws-run-b","title":"run workspace b"}`,
-	} {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(payload))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusCreated {
-			t.Fatalf("workspace create status = %d, want 201, body=%s", rec.Code, rec.Body.String())
-		}
-	}
+	workspaceA := createWorkspaceForHTTP(t, handler, "run workspace a", "workspaces/run-a")
+	workspaceB := createWorkspaceForHTTP(t, handler, "run workspace b", "workspaces/run-b")
 
 	for _, tc := range []struct {
 		path string
 		body string
 	}{
-		{path: "/api/v1/workorch/workspaces/ws-run-b/runs", body: `{"runId":"run-b"}`},
-		{path: "/api/v1/workorch/workspaces/ws-run-a/runs", body: `{"runId":"run-a"}`},
+		{path: "/api/v1/workorch/workspaces/" + workspaceB.ID + "/runs", body: `{"runId":"run-b"}`},
+		{path: "/api/v1/workorch/workspaces/" + workspaceA.ID + "/runs", body: `{"runId":"run-a"}`},
 	} {
 		req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
 		req.Header.Set("Content-Type", "application/json")
@@ -721,7 +720,7 @@ func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
 		t.Fatalf("listed runs = %+v, want run-a/run-b", listed.Runs)
 	}
 
-	filteredReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs?workspaceId=ws-run-b", nil)
+	filteredReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs?workspaceId="+workspaceB.ID, nil)
 	filteredRec := httptest.NewRecorder()
 	handler.ServeHTTP(filteredRec, filteredReq)
 	if filteredRec.Code != http.StatusOK {
@@ -745,8 +744,8 @@ func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
 	if err := json.Unmarshal(getRec.Body.Bytes(), &fetched); err != nil {
 		t.Fatalf("unmarshal run get: %v", err)
 	}
-	if fetched.Run.ID != "run-a" || fetched.Run.WorkspaceID != "ws-run-a" {
-		t.Fatalf("fetched run = %+v, want run-a/ws-run-a", fetched.Run)
+	if fetched.Run.ID != "run-a" || fetched.Run.WorkspaceID != workspaceA.ID {
+		t.Fatalf("fetched run = %+v, want run-a/%s", fetched.Run, workspaceA.ID)
 	}
 }
 
@@ -754,7 +753,7 @@ func TestRunSnapshotEndpointReturnsPersistedRunSnapshot(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 	runID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-snapshot-http"
 
-	createWorkspaceAndRunForHTTP(t, handler, "ws-run-snapshot-http", "run snapshot http workspace", runID)
+	workspace := createWorkspaceAndRunForHTTP(t, handler, "run snapshot http workspace", runID)
 	started := startRunForHTTP(t, handler, runID)
 
 	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/"+runID+"/snapshot", nil)
@@ -768,8 +767,8 @@ func TestRunSnapshotEndpointReturnsPersistedRunSnapshot(t *testing.T) {
 	if err := json.Unmarshal(snapshotRec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal run snapshot: %v", err)
 	}
-	if body.Snapshot.Workspace.ID != "ws-run-snapshot-http" {
-		t.Fatalf("workspace = %+v, want ws-run-snapshot-http", body.Snapshot.Workspace)
+	if body.Snapshot.Workspace.ID != workspace.ID {
+		t.Fatalf("workspace = %+v, want %s", body.Snapshot.Workspace, workspace.ID)
 	}
 	if body.Snapshot.Run.ID != runID || body.Snapshot.Run.State != "blocked_on_decision" {
 		t.Fatalf("run = %+v, want blocked decision run", body.Snapshot.Run)
@@ -789,7 +788,7 @@ func TestRunStatusEndpointReturnsPersistedRunStatus(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-status-http"
 
-	createWorkspaceAndRunForHTTP(t, handler, "ws-run-status-http", "run status http workspace", runID)
+	workspace := createWorkspaceAndRunForHTTP(t, handler, "run status http workspace", runID)
 	started := startRunForHTTP(t, handler, runID)
 
 	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/"+runID+"/status", nil)
@@ -803,7 +802,7 @@ func TestRunStatusEndpointReturnsPersistedRunStatus(t *testing.T) {
 	if err := json.Unmarshal(statusRec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal run status: %v", err)
 	}
-	if body.Status.ID != runID || body.Status.WorkspaceID != "ws-run-status-http" || body.Status.State != "blocked_on_approval" {
+	if body.Status.ID != runID || body.Status.WorkspaceID != workspace.ID || body.Status.State != "blocked_on_approval" {
 		t.Fatalf("status = %+v, want blocked approval status", body.Status)
 	}
 	if body.Status.StepCount == 0 || body.Status.CurrentStepID == "" || body.Status.CurrentStepState == "" {
@@ -817,20 +816,14 @@ func TestRunStatusEndpointReturnsPersistedRunStatus(t *testing.T) {
 func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 
-	workspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"ws-workspace-snapshot-http","title":"workspace snapshot http"}`))
-	workspaceReq.Header.Set("Content-Type", "application/json")
-	workspaceRec := httptest.NewRecorder()
-	handler.ServeHTTP(workspaceRec, workspaceReq)
-	if workspaceRec.Code != http.StatusCreated {
-		t.Fatalf("workspace create status = %d, want 201, body=%s", workspaceRec.Code, workspaceRec.Body.String())
-	}
+	workspace := createWorkspaceForHTTP(t, handler, "workspace snapshot http", "workspaces/workspace-snapshot-http")
 
 	for _, runID := range []string{
 		"run-workspace-snapshot-http-completed",
 		"run-" + legacycommon.RuntimeDecisionBlockRunToken + "-workspace-snapshot-http",
 		"run-" + legacycommon.RuntimeApprovalBlockRunToken + "-workspace-snapshot-http",
 	} {
-		runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-workspace-snapshot-http/runs", strings.NewReader(`{"runId":"`+runID+`"}`))
+		runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"`+runID+`"}`))
 		runReq.Header.Set("Content-Type", "application/json")
 		runRec := httptest.NewRecorder()
 		handler.ServeHTTP(runRec, runReq)
@@ -858,7 +851,7 @@ func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.
 	}
 	approvalRun := startRunForHTTP(t, handler, "run-"+legacycommon.RuntimeApprovalBlockRunToken+"-workspace-snapshot-http")
 
-	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-workspace-snapshot-http/snapshot", nil)
+	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/snapshot", nil)
 	snapshotRec := httptest.NewRecorder()
 	handler.ServeHTTP(snapshotRec, snapshotReq)
 
@@ -869,8 +862,8 @@ func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.
 	if err := json.Unmarshal(snapshotRec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal workspace snapshot: %v", err)
 	}
-	if body.Snapshot.Workspace.ID != "ws-workspace-snapshot-http" {
-		t.Fatalf("workspace = %+v, want ws-workspace-snapshot-http", body.Snapshot.Workspace)
+	if body.Snapshot.Workspace.ID != workspace.ID {
+		t.Fatalf("workspace = %+v, want %s", body.Snapshot.Workspace, workspace.ID)
 	}
 	if len(body.Snapshot.Runs) != 3 {
 		t.Fatalf("runs = %+v, want 3 runs", body.Snapshot.Runs)
@@ -886,16 +879,10 @@ func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.
 func TestRunCreateEndpointReturnsConflictForDuplicateID(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 
-	workspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"ws-run-dup","title":"run dup workspace"}`))
-	workspaceReq.Header.Set("Content-Type", "application/json")
-	workspaceRec := httptest.NewRecorder()
-	handler.ServeHTTP(workspaceRec, workspaceReq)
-	if workspaceRec.Code != http.StatusCreated {
-		t.Fatalf("workspace create status = %d, want 201, body=%s", workspaceRec.Code, workspaceRec.Body.String())
-	}
+	workspace := createWorkspaceForHTTP(t, handler, "run dup workspace", "workspaces/run-dup")
 
 	for idx := 0; idx < 2; idx++ {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-run-dup/runs", strings.NewReader(`{"runId":"run-dup"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-dup"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -934,15 +921,9 @@ func TestRunGetEndpointReturnsNotFoundWhenMissing(t *testing.T) {
 func TestRunStartEndpointReturnsCompletedRun(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 
-	workspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"ws-run-start-http","title":"run start http workspace"}`))
-	workspaceReq.Header.Set("Content-Type", "application/json")
-	workspaceRec := httptest.NewRecorder()
-	handler.ServeHTTP(workspaceRec, workspaceReq)
-	if workspaceRec.Code != http.StatusCreated {
-		t.Fatalf("workspace create status = %d, want 201, body=%s", workspaceRec.Code, workspaceRec.Body.String())
-	}
+	workspace := createWorkspaceForHTTP(t, handler, "run start http workspace", "workspaces/run-start-http")
 
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-run-start-http/runs", strings.NewReader(`{"runId":"run-start-http"}`))
+	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-start-http"}`))
 	runReq.Header.Set("Content-Type", "application/json")
 	runRec := httptest.NewRecorder()
 	handler.ServeHTTP(runRec, runReq)
@@ -971,7 +952,7 @@ func TestRunStartEndpointReturnsBlockedDecisionRun(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-http"
 
-	createWorkspaceAndRunForHTTP(t, handler, "ws-run-start-blocked-http", "run start blocked http workspace", runID)
+	createWorkspaceAndRunForHTTP(t, handler, "run start blocked http workspace", runID)
 
 	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/"+runID+"/start", nil)
 	startRec := httptest.NewRecorder()
@@ -1001,7 +982,7 @@ func TestRunResumeEndpointReturnsCompletedRunAfterDecisionResolved(t *testing.T)
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-resume-http"
 
-	createWorkspaceAndRunForHTTP(t, handler, "ws-run-resume-decision-http", "run resume decision http workspace", runID)
+	createWorkspaceAndRunForHTTP(t, handler, "run resume decision http workspace", runID)
 	started := startRunForHTTP(t, handler, runID)
 	if started.State != "blocked_on_decision" || started.BlockingTicketID == "" {
 		t.Fatalf("started run = %+v, want blocked decision with ticket", started)
@@ -1030,7 +1011,7 @@ func TestRunResumeEndpointReturnsCompletedRunAfterApprovalApproved(t *testing.T)
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-resume-http"
 
-	createWorkspaceAndRunForHTTP(t, handler, "ws-run-resume-approval-http", "run resume approval http workspace", runID)
+	createWorkspaceAndRunForHTTP(t, handler, "run resume approval http workspace", runID)
 	started := startRunForHTTP(t, handler, runID)
 	if started.State != "blocked_on_approval" || started.BlockingApprovalID == "" {
 		t.Fatalf("started run = %+v, want blocked approval with approval id", started)
@@ -1059,7 +1040,7 @@ func TestRunResumeEndpointReturnsFailedRunAfterApprovalRejected(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-rejected-http"
 
-	createWorkspaceAndRunForHTTP(t, handler, "ws-run-resume-approval-rejected-http", "run resume approval rejected http workspace", runID)
+	createWorkspaceAndRunForHTTP(t, handler, "run resume approval rejected http workspace", runID)
 	started := startRunForHTTP(t, handler, runID)
 	if started.State != "blocked_on_approval" || started.BlockingApprovalID == "" {
 		t.Fatalf("started run = %+v, want blocked approval with approval id", started)
@@ -1087,7 +1068,7 @@ func TestRunResumeEndpointReturnsConflictWhenDependencyStillBlocked(t *testing.T
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-pending-http"
 
-	createWorkspaceAndRunForHTTP(t, handler, "ws-run-resume-pending-http", "run resume pending http workspace", runID)
+	createWorkspaceAndRunForHTTP(t, handler, "run resume pending http workspace", runID)
 	started := startRunForHTTP(t, handler, runID)
 	if started.State != "blocked_on_approval" || started.BlockingApprovalID == "" {
 		t.Fatalf("started run = %+v, want blocked approval with approval id", started)
@@ -1104,7 +1085,7 @@ func TestRunResumeEndpointReturnsConflictWhenDependencyStillBlocked(t *testing.T
 
 func TestRunResumeEndpointReturnsConflictForCreatedRun(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
-	createWorkspaceAndRunForHTTP(t, handler, "ws-run-resume-created-http", "run resume created http workspace", "run-resume-created-http")
+	createWorkspaceAndRunForHTTP(t, handler, "run resume created http workspace", "run-resume-created-http")
 
 	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/run-resume-created-http/resume", nil)
 	resumeRec := httptest.NewRecorder()
@@ -1120,9 +1101,9 @@ func TestDecisionListAndGetEndpointsReturnPersistedTickets(t *testing.T) {
 	runA := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-decision-list-a"
 	runB := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-decision-list-b"
 
-	createWorkspaceAndRunForHTTP(t, handler, "ws-decision-list-http-a", "decision list http workspace a", runA)
+	createWorkspaceAndRunForHTTP(t, handler, "decision list http workspace a", runA)
 	startedA := startRunForHTTP(t, handler, runA)
-	createWorkspaceAndRunForHTTP(t, handler, "ws-decision-list-http-b", "decision list http workspace b", runB)
+	workspaceB := createWorkspaceAndRunForHTTP(t, handler, "decision list http workspace b", runB)
 	startedB := startRunForHTTP(t, handler, runB)
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/decisions", nil)
@@ -1139,7 +1120,7 @@ func TestDecisionListAndGetEndpointsReturnPersistedTickets(t *testing.T) {
 		t.Fatalf("listed decisions = %+v, want sorted tickets", listed.Decisions)
 	}
 
-	filteredReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/decisions?workspaceId=ws-decision-list-http-b", nil)
+	filteredReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/decisions?workspaceId="+workspaceB.ID, nil)
 	filteredRec := httptest.NewRecorder()
 	handler.ServeHTTP(filteredRec, filteredReq)
 	if filteredRec.Code != http.StatusOK {
@@ -1172,7 +1153,7 @@ func TestDecisionResolveEndpointResolvesTicketAndAllowsRunResume(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 	runID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-decision-resolve-http"
 
-	createWorkspaceAndRunForHTTP(t, handler, "ws-decision-resolve-http", "decision resolve http workspace", runID)
+	createWorkspaceAndRunForHTTP(t, handler, "decision resolve http workspace", runID)
 	started := startRunForHTTP(t, handler, runID)
 
 	resolveReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/"+started.BlockingTicketID+"/resolve", nil)
@@ -1208,7 +1189,7 @@ func TestDecisionRejectEndpointRejectsTicketAndRunResumeFailsTerminally(t *testi
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 	runID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-decision-reject-http"
 
-	createWorkspaceAndRunForHTTP(t, handler, "ws-decision-reject-http", "decision reject http workspace", runID)
+	createWorkspaceAndRunForHTTP(t, handler, "decision reject http workspace", runID)
 	started := startRunForHTTP(t, handler, runID)
 
 	rejectReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/"+started.BlockingTicketID+"/reject", nil)
@@ -1244,7 +1225,7 @@ func TestDecisionResolveEndpointReturnsConflictForOppositeResolution(t *testing.
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 	runID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-decision-conflict-http"
 
-	createWorkspaceAndRunForHTTP(t, handler, "ws-decision-conflict-http", "decision conflict http workspace", runID)
+	createWorkspaceAndRunForHTTP(t, handler, "decision conflict http workspace", runID)
 	started := startRunForHTTP(t, handler, runID)
 	rejectDecisionViaHTTP(t, handler, started.BlockingTicketID)
 
@@ -1261,9 +1242,9 @@ func TestApprovalListAndGetEndpointsReturnPersistedApprovals(t *testing.T) {
 	runA := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-approval-list-a"
 	runB := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-approval-list-b"
 
-	createWorkspaceAndRunForHTTP(t, handler, "ws-approval-list-http-a", "approval list http workspace a", runA)
+	createWorkspaceAndRunForHTTP(t, handler, "approval list http workspace a", runA)
 	startedA := startRunForHTTP(t, handler, runA)
-	createWorkspaceAndRunForHTTP(t, handler, "ws-approval-list-http-b", "approval list http workspace b", runB)
+	workspaceB := createWorkspaceAndRunForHTTP(t, handler, "approval list http workspace b", runB)
 	startedB := startRunForHTTP(t, handler, runB)
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/approvals", nil)
@@ -1293,7 +1274,7 @@ func TestApprovalListAndGetEndpointsReturnPersistedApprovals(t *testing.T) {
 		t.Fatalf("listed approvals = %+v, want approvals %s and %s", listed.Approvals, startedA.BlockingApprovalID, startedB.BlockingApprovalID)
 	}
 
-	filteredReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/approvals?workspaceId=ws-approval-list-http-b", nil)
+	filteredReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/approvals?workspaceId="+workspaceB.ID, nil)
 	filteredRec := httptest.NewRecorder()
 	handler.ServeHTTP(filteredRec, filteredReq)
 	if filteredRec.Code != http.StatusOK {
@@ -1326,7 +1307,7 @@ func TestApprovalApproveEndpointApprovesApprovalAndAllowsRunResume(t *testing.T)
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-approval-approve-http"
 
-	createWorkspaceAndRunForHTTP(t, handler, "ws-approval-approve-http", "approval approve http workspace", runID)
+	createWorkspaceAndRunForHTTP(t, handler, "approval approve http workspace", runID)
 	started := startRunForHTTP(t, handler, runID)
 
 	approveReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/approvals/"+started.BlockingApprovalID+"/approve", nil)
@@ -1362,7 +1343,7 @@ func TestApprovalRejectEndpointRejectsApprovalAndRunResumeFailsTerminally(t *tes
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-approval-reject-http"
 
-	createWorkspaceAndRunForHTTP(t, handler, "ws-approval-reject-http", "approval reject http workspace", runID)
+	createWorkspaceAndRunForHTTP(t, handler, "approval reject http workspace", runID)
 	started := startRunForHTTP(t, handler, runID)
 
 	rejectReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/approvals/"+started.BlockingApprovalID+"/reject", nil)
@@ -1398,7 +1379,7 @@ func TestApprovalApproveEndpointReturnsConflictForOppositeResolution(t *testing.
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-approval-conflict-http"
 
-	createWorkspaceAndRunForHTTP(t, handler, "ws-approval-conflict-http", "approval conflict http workspace", runID)
+	createWorkspaceAndRunForHTTP(t, handler, "approval conflict http workspace", runID)
 	started := startRunForHTTP(t, handler, runID)
 
 	rejectReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/approvals/"+started.BlockingApprovalID+"/reject", nil)
@@ -1654,14 +1635,8 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 	dataRoot := t.TempDir()
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
 
-	workspaceCreateReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"ws-metrics","title":"metrics workspace"}`))
-	workspaceCreateReq.Header.Set("Content-Type", "application/json")
-	workspaceCreateRec := httptest.NewRecorder()
-	handler.ServeHTTP(workspaceCreateRec, workspaceCreateReq)
-	if workspaceCreateRec.Code != http.StatusCreated {
-		t.Fatalf("workspace create status = %d, want 201", workspaceCreateRec.Code)
-	}
-	runCreateReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-metrics/runs", strings.NewReader(`{"runId":"run-metrics"}`))
+	workspace := createWorkspaceForHTTP(t, handler, "metrics workspace", "workspaces/metrics")
+	runCreateReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-metrics"}`))
 	runCreateReq.Header.Set("Content-Type", "application/json")
 	runCreateRec := httptest.NewRecorder()
 	handler.ServeHTTP(runCreateRec, runCreateReq)
@@ -1675,15 +1650,9 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 		t.Fatalf("run start status = %d, want 200", startRec.Code)
 	}
 
-	workspaceBlockedReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"ws-metrics-blocked","title":"metrics blocked workspace"}`))
-	workspaceBlockedReq.Header.Set("Content-Type", "application/json")
-	workspaceBlockedRec := httptest.NewRecorder()
-	handler.ServeHTTP(workspaceBlockedRec, workspaceBlockedReq)
-	if workspaceBlockedRec.Code != http.StatusCreated {
-		t.Fatalf("blocked workspace create status = %d, want 201", workspaceBlockedRec.Code)
-	}
+	blockedWorkspace := createWorkspaceForHTTP(t, handler, "metrics blocked workspace", "workspaces/metrics-blocked")
 	blockedRunID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-metrics"
-	blockedRunReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-metrics-blocked/runs", strings.NewReader(`{"runId":"`+blockedRunID+`"}`))
+	blockedRunReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+blockedWorkspace.ID+"/runs", strings.NewReader(`{"runId":"`+blockedRunID+`"}`))
 	blockedRunReq.Header.Set("Content-Type", "application/json")
 	blockedRunRec := httptest.NewRecorder()
 	handler.ServeHTTP(blockedRunRec, blockedRunReq)
@@ -1713,7 +1682,7 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 		t.Fatalf("run resume status = %d, want 200", resumeRec.Code)
 	}
 
-	for _, path := range []string{"/healthz", "/readyz", "/api/v1/workorch/workspaces", "/api/v1/workorch/workspaces/ws-metrics", "/api/v1/workorch/runs", "/api/v1/workorch/runs/run-metrics", "/api/v1/workorch/slices", "/api/v1/workorch/slices/snapshots", "/api/v1/workorch/slices/statuses"} {
+	for _, path := range []string{"/healthz", "/readyz", "/api/v1/workorch/workspaces", "/api/v1/workorch/workspaces/" + workspace.ID, "/api/v1/workorch/runs", "/api/v1/workorch/runs/run-metrics", "/api/v1/workorch/slices", "/api/v1/workorch/slices/snapshots", "/api/v1/workorch/slices/statuses"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -1735,7 +1704,7 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 		t.Fatalf("single run status = %d, want 200", singleRunRec.Code)
 	}
 	for _, path := range []string{
-		"/api/v1/workorch/workspaces/ws-metrics/snapshot",
+		"/api/v1/workorch/workspaces/" + workspace.ID + "/snapshot",
 		"/api/v1/workorch/runs/run-metrics/snapshot",
 		"/api/v1/workorch/runs/run-metrics/status",
 	} {
@@ -1801,24 +1770,39 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 	}
 }
 
-func createWorkspaceAndRunForHTTP(t *testing.T, handler http.Handler, workspaceID string, title string, runID string) {
+func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, workingDirectory string) appservice.Workspace {
 	t.Helper()
 
-	workspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"`+workspaceID+`","title":"`+title+`"}`))
+	workspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"`+title+`","workingDirectory":"`+workingDirectory+`"}`))
 	workspaceReq.Header.Set("Content-Type", "application/json")
 	workspaceRec := httptest.NewRecorder()
 	handler.ServeHTTP(workspaceRec, workspaceReq)
 	if workspaceRec.Code != http.StatusCreated {
 		t.Fatalf("workspace create status = %d, want 201, body=%s", workspaceRec.Code, workspaceRec.Body.String())
 	}
+	var body workspaceResponse
+	if err := json.Unmarshal(workspaceRec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal workspace create response: %v", err)
+	}
+	if body.Workspace.ID == "" || body.Workspace.Title != title || body.Workspace.WorkingDirectory != workingDirectory || body.Workspace.State != "active" {
+		t.Fatalf("workspace = %+v, want generated/%s/%s/active", body.Workspace, title, workingDirectory)
+	}
+	return body.Workspace
+}
 
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspaceID+"/runs", strings.NewReader(`{"runId":"`+runID+`"}`))
+func createWorkspaceAndRunForHTTP(t *testing.T, handler http.Handler, title string, runID string) appservice.Workspace {
+	t.Helper()
+
+	workspace := createWorkspaceForHTTP(t, handler, title, "workspaces/"+runID)
+
+	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"`+runID+`"}`))
 	runReq.Header.Set("Content-Type", "application/json")
 	runRec := httptest.NewRecorder()
 	handler.ServeHTTP(runRec, runReq)
 	if runRec.Code != http.StatusCreated {
 		t.Fatalf("run create status = %d, want 201, body=%s", runRec.Code, runRec.Body.String())
 	}
+	return workspace
 }
 
 func startRunForHTTP(t *testing.T, handler http.Handler, runID string) appservice.Run {

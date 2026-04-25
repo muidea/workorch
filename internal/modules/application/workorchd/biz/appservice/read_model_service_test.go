@@ -68,7 +68,7 @@ func TestReadRunStatusWithBackendReturnsBlockedApprovalSummary(t *testing.T) {
 func TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems(t *testing.T) {
 	dataRoot := t.TempDir()
 	workspaceID := "ws-workspace-snapshot"
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, workspaceID, "workspace snapshot"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, workspaceID, "workspace snapshot", "", "workspaces/workspace snapshot"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 

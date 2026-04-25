@@ -24,10 +24,12 @@ type Snapshot struct {
 }
 
 type WorkspaceView struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	State       string `json:"state"`
-	ActiveRunID string `json:"activeRunId"`
+	ID               string `json:"id"`
+	Title            string `json:"title"`
+	Description      string `json:"description"`
+	WorkingDirectory string `json:"workingDirectory"`
+	State            string `json:"state"`
+	ActiveRunID      string `json:"activeRunId"`
 }
 
 type RunView struct {
@@ -137,10 +139,12 @@ func MapWorkspace(item *workspacemodel.Workspace) *WorkspaceView {
 		return nil
 	}
 	return &WorkspaceView{
-		ID:          string(item.ID),
-		Title:       item.Title,
-		State:       string(item.State),
-		ActiveRunID: string(item.ActiveRunID),
+		ID:               string(item.ID),
+		Title:            item.Title,
+		Description:      item.Description,
+		WorkingDirectory: item.WorkingDirectory,
+		State:            string(item.State),
+		ActiveRunID:      string(item.ActiveRunID),
 	}
 }
 

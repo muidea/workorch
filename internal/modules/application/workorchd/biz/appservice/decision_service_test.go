@@ -115,7 +115,7 @@ func TestRejectDecisionWithBackendReturnsConflictAfterApproveResolution(t *testi
 func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID string) Run {
 	t.Helper()
 
-	if _, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, workspaceID, workspaceID+" title"); err != nil {
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, workspaceID, workspaceID+" title", "", "workspaces/"+workspaceID); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, workspaceID, runID, "", ""); err != nil {

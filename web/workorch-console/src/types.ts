@@ -6,6 +6,8 @@ export type ServiceStatus = {
 export type Workspace = {
   id: string;
   title: string;
+  description?: string;
+  workingDirectory: string;
   state: string;
   activeRunId?: string;
 };

@@ -7,13 +7,17 @@ import (
 )
 
 type CreateWorkspaceCommand struct {
-	WorkspaceID common.WorkspaceID
-	Title       string
+	WorkspaceID      common.WorkspaceID
+	Title            string
+	Description      string
+	WorkingDirectory string
 }
 
 type EnsureWorkspaceCommand struct {
-	WorkspaceID common.WorkspaceID
-	Title       string
+	WorkspaceID      common.WorkspaceID
+	Title            string
+	Description      string
+	WorkingDirectory string
 }
 
 type Service interface {

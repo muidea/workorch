@@ -38,13 +38,14 @@ docker run --rm \
 After the container starts, verify the common service endpoints:
 
 ```bash
-WORKSPACE_ID="ws-demo-$(date +%s)"
 curl -f http://127.0.0.1:8080/healthz
 curl -f http://127.0.0.1:8080/readyz
 curl -f http://127.0.0.1:8080/metrics | grep workorch_http_requests_total
-curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces \
+WORKSPACE_JSON="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces \
   -H 'Content-Type: application/json' \
-  -d "{\"workspaceId\":\"${WORKSPACE_ID}\",\"title\":\"demo workspace\"}"
+  -d '{"title":"demo workspace","description":"demo workspace description"}')"
+WORKSPACE_ID="$(printf '%s\n' "${WORKSPACE_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
+test -n "${WORKSPACE_ID}"
 curl -f http://127.0.0.1:8080/api/v1/workorch/slices
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/runs
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs
@@ -131,7 +132,7 @@ A deployable `workorchd` instance is acceptable when:
 - `GET /healthz` returns `200`
 - `GET /readyz` returns `200`
 - `GET /metrics` returns service counters and gauges
-- `POST /api/v1/workorch/workspaces` creates one `workorch` workspace instance
+- `POST /api/v1/workorch/workspaces` creates one `workorch` workspace instance, accepts an optional `description`, defaults `workingDirectory` to `<service-working-directory>/workspaces/<generated-workspace-id>` when omitted, and returns the generated `workspace.id`
 - `GET /api/v1/workorch/slices` returns the executable `workorch` slice catalog
 - `POST /api/v1/workorch/slices/{sliceId}/runs` returns the requested single `workorch` slice
 - `POST /api/v1/workorch/runs` returns the current 17 `workorch` slices

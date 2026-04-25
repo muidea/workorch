@@ -17,11 +17,13 @@ const (
 )
 
 type workorchSnapshotRef struct {
-	subjectID   string
-	workspaceID common.WorkspaceID
-	runID       common.RunID
-	stepID      common.StepID
-	title       string
+	subjectID        string
+	workspaceID      common.WorkspaceID
+	runID            common.RunID
+	stepID           common.StepID
+	title            string
+	description      string
+	workingDirectory string
 }
 
 type workorchSnapshotContract struct {
@@ -49,10 +51,20 @@ var (
 			if title == "" {
 				title = ref.title
 			}
+			description := event.Data.Description
+			if description == "" {
+				description = ref.description
+			}
+			workingDirectory := event.Data.WorkingDirectory
+			if workingDirectory == "" {
+				workingDirectory = ref.workingDirectory
+			}
 			normalized := normalizePublishedSnapshot(event.Envelope(), topicWorkspaceSnapshot, "workspace", WorkspacePayload{
-				Title:       title,
-				State:       string(event.Data.State),
-				ActiveRunID: string(event.Data.ActiveRunID),
+				Title:            title,
+				Description:      description,
+				WorkingDirectory: workingDirectory,
+				State:            string(event.Data.State),
+				ActiveRunID:      string(event.Data.ActiveRunID),
 			})
 			normalized.StepID = ""
 			if normalized.RunID == "" {

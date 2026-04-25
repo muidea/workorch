@@ -206,13 +206,14 @@ Available endpoints:
 Minimal deployment verification:
 
 ```bash
-WORKSPACE_ID="ws-demo-$(date +%s)"
 curl http://127.0.0.1:8080/healthz
 curl http://127.0.0.1:8080/readyz
 curl http://127.0.0.1:8080/metrics
-curl -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces \
+WORKSPACE_JSON="$(curl -sS -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces \
   -H 'Content-Type: application/json' \
-  -d "{\"workspaceId\":\"${WORKSPACE_ID}\",\"title\":\"demo workspace\"}"
+  -d '{"title":"demo workspace","description":"demo workspace description"}')"
+WORKSPACE_ID="$(printf '%s\n' "${WORKSPACE_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
+test -n "${WORKSPACE_ID}"
 curl http://127.0.0.1:8080/api/v1/workorch/slices
 curl -X POST http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/runs
 curl -X POST http://127.0.0.1:8080/api/v1/workorch/runs
@@ -275,13 +276,14 @@ go run ./application/workorchd
 Then verify:
 
 ```bash
-WORKSPACE_ID="ws-demo-$(date +%s)"
 curl -f http://127.0.0.1:8080/healthz
 curl -f http://127.0.0.1:8080/readyz
 curl -f http://127.0.0.1:8080/metrics | grep workorch_http_requests_total
-curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces \
+WORKSPACE_JSON="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces \
   -H 'Content-Type: application/json' \
-  -d "{\"workspaceId\":\"${WORKSPACE_ID}\",\"title\":\"demo workspace\"}"
+  -d '{"title":"demo workspace","description":"demo workspace description"}')"
+WORKSPACE_ID="$(printf '%s\n' "${WORKSPACE_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
+test -n "${WORKSPACE_ID}"
 curl -f http://127.0.0.1:8080/api/v1/workorch/slices
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/runs
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs
@@ -333,7 +335,7 @@ curl -f http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/status
 curl -f http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/snapshot
 ```
 
-The workspace create endpoint creates one formal `workorch` workspace instance. The workspace list and single-workspace read endpoints are persisted read endpoints, so they are intended for the file-backed repository backend rather than the stateless per-request memory backend. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, and single-run read endpoints provide formal `workorch` run instance management; because create depends on an existing workspace and the service creates a fresh runtime session per request, the persisted run list and read endpoints are also mainly intended for the file-backed repository backend. The run snapshot and run status endpoints provide formal `runId`-based read models without requiring `sliceId`. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision list and single-ticket endpoints provide formal query paths for decision gate instances, and the resolve/reject endpoints complete the external decision gate closure for blocked runs. The approval list and single-approval endpoints provide the same formal query and processing path for approval gates, and the approve/reject endpoints now complete the external approval gate closure for blocked runs. The slice catalog endpoint returns the current executable `workorch` slice definitions with stable IDs. The batch slice-snapshots endpoint returns all currently available persisted slice snapshots. The batch slice-statuses endpoint returns all currently available persisted slice summaries. The single-slice run endpoint executes one requested `workorch` business slice. The single-slice status and snapshot endpoints read persisted state for one requested `workorch` slice, so the persisted read endpoints are intended for the file-backed repository backend rather than the stateless per-request memory backend. The bulk run endpoint returns the current 17 `workorch` slices as JSON, including workspace/run/step/blocking snapshots and observed items. All run execution entrypoints now share one in-process FIFO wait queue behind `WORKORCH_SERVER_MAX_CONCURRENT_RUNS`, including formal `run start` and `run resume`.
+The workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `workingDirectory` to `<service-working-directory>/workspaces/<generated-workspace-id>` when the client omits it. The workspace list and single-workspace read endpoints are persisted read endpoints, so they are intended for the file-backed repository backend rather than the stateless per-request memory backend. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, and single-run read endpoints provide formal `workorch` run instance management; because create depends on an existing workspace and the service creates a fresh runtime session per request, the persisted run list and read endpoints are also mainly intended for the file-backed repository backend. The run snapshot and run status endpoints provide formal `runId`-based read models without requiring `sliceId`. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision list and single-ticket endpoints provide formal query paths for decision gate instances, and the resolve/reject endpoints complete the external decision gate closure for blocked runs. The approval list and single-approval endpoints provide the same formal query and processing path for approval gates, and the approve/reject endpoints now complete the external approval gate closure for blocked runs. The slice catalog endpoint returns the current executable `workorch` slice definitions with stable IDs. The batch slice-snapshots endpoint returns all currently available persisted slice snapshots. The batch slice-statuses endpoint returns all currently available persisted slice summaries. The single-slice run endpoint executes one requested `workorch` business slice. The single-slice status and snapshot endpoints read persisted state for one requested `workorch` slice, so the persisted read endpoints are intended for the file-backed repository backend rather than the stateless per-request memory backend. The bulk run endpoint returns the current 17 `workorch` slices as JSON, including workspace/run/step/blocking snapshots and observed items. All run execution entrypoints now share one in-process FIFO wait queue behind `WORKORCH_SERVER_MAX_CONCURRENT_RUNS`, including formal `run start` and `run resume`.
 
 Container-oriented deployment details are in `docs/deployment.md`, and `.env.workorchd.example` provides the baseline runtime configuration template.
 

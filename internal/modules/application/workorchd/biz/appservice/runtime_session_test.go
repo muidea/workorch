@@ -43,7 +43,7 @@ func TestBackendSessionUsesEventHubFromContext(t *testing.T) {
 	hub := events.NewMemoryHub()
 	ctx := ContextWithEventHub(context.Background(), hub)
 
-	_, err := CreateWorkspaceWithBackend(ctx, "memory", "", "ws-context-hub", "context hub")
+	_, err := createWorkspaceWithIDWithBackend(ctx, "memory", "", "ws-context-hub", "context hub", "", "workspaces/context hub")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
@@ -286,8 +286,9 @@ func TestNewRuntimeSessionWithBackendFileUsesDefaultDataRootWhenUnset(t *testing
 	})
 
 	if err := session.Bootstrap.Exports().Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID: common.WorkspaceID("ws-runtime-session-default-file"),
-		Title:       "runtime session default file backend",
+		WorkspaceID:      common.WorkspaceID("ws-runtime-session-default-file"),
+		Title:            "runtime session default file backend",
+		WorkingDirectory: "workspaces/ws-runtime-session-default-file",
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
