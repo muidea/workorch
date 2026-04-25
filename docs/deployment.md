@@ -46,6 +46,14 @@ WORKSPACE_JSON="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/workorch/worksp
   -d '{"title":"demo workspace","description":"demo workspace description"}')"
 WORKSPACE_ID="$(printf '%s\n' "${WORKSPACE_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
 test -n "${WORKSPACE_ID}"
+GOAL_JSON="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/goals \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"deliver local MVP orchestration"}')"
+GOAL_ID="$(printf '%s\n' "${GOAL_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
+DOD_JSON="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/dods \
+  -H 'Content-Type: application/json' \
+  -d '{"items":["workspace created","run completed"]}')"
+DOD_ID="$(printf '%s\n' "${DOD_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
 curl -f http://127.0.0.1:8080/api/v1/workorch/slices
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/runs
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs
@@ -60,14 +68,14 @@ curl -f http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}
 curl -f http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/snapshot
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
   -H 'Content-Type: application/json' \
-  -d "{\"runId\":\"${RUN_ID}\",\"goalId\":\"goal-demo\",\"doDId\":\"dod-demo\"}"
+  -d "{\"runId\":\"${RUN_ID}\",\"goalId\":\"${GOAL_ID}\",\"doDId\":\"${DOD_ID}\"}"
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}/start
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}/snapshot
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}/status
 BLOCKED_RUN_ID="run-runtime-decision-block-demo"
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
   -H 'Content-Type: application/json' \
-  -d "{\"runId\":\"${BLOCKED_RUN_ID}\"}"
+  -d "{\"runId\":\"${BLOCKED_RUN_ID}\",\"goalId\":\"${GOAL_ID}\",\"doDId\":\"${DOD_ID}\"}"
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${BLOCKED_RUN_ID}/start
 curl -f http://127.0.0.1:8080/api/v1/workorch/decisions
 curl -f "http://127.0.0.1:8080/api/v1/workorch/decisions?workspaceId=${WORKSPACE_ID}"
@@ -79,7 +87,7 @@ curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${BLOCKED_RUN_ID}/res
 APPROVAL_RUN_ID="run-runtime-approval-block-demo"
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
   -H 'Content-Type: application/json' \
-  -d "{\"runId\":\"${APPROVAL_RUN_ID}\"}"
+  -d "{\"runId\":\"${APPROVAL_RUN_ID}\",\"goalId\":\"${GOAL_ID}\",\"doDId\":\"${DOD_ID}\"}"
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${APPROVAL_RUN_ID}/start
 curl -f http://127.0.0.1:8080/api/v1/workorch/approvals
 curl -f "http://127.0.0.1:8080/api/v1/workorch/approvals?workspaceId=${WORKSPACE_ID}"

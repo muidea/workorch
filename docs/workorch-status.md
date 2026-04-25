@@ -8,7 +8,7 @@
   - `application/workorchd/main.go` starts through `magicCommon/framework/application` and explicitly imports the selected `workorchruntime`, `kernel`, and `blocks` units
   - `internal/initiators/workorchruntime` provides repository, event hub, and cross-module service wiring for plugin-loaded modules
   - `internal/modules/application/workorchd` attaches `internal/modules/application/workorchd/service/server.Service` to the `magicCommon/framework/plugin/module` lifecycle
-  - HTTP requests pass through `magicEngine/http` `RouteRegistry` / `HTTPServer`; current acceptance API endpoints are registered as native routes without wildcard fallback dispatch
+  - HTTP requests pass through `magicEngine/http` `RouteRegistry` / `HTTPServer`; current acceptance API endpoints are registered as explicit native routes
   - `/healthz`, `/readyz`, and `/metrics` are registered as native `magicEngine/http` routes
   - workspace / run read endpoints are registered as native `magicEngine/http` routes:
     `GET /api/v1/workorch/workspaces`,
@@ -229,14 +229,14 @@ curl -f http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}
 curl -f http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/snapshot
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
   -H 'Content-Type: application/json' \
-  -d "{\"runId\":\"${RUN_ID}\",\"goalId\":\"goal-demo\",\"doDId\":\"dod-demo\"}"
+  -d "{\"runId\":\"${RUN_ID}\",\"goalId\":\"${GOAL_ID}\",\"doDId\":\"${DOD_ID}\"}"
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}/start
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}/snapshot
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}/status
 BLOCKED_RUN_ID="run-runtime-decision-block-demo"
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
   -H 'Content-Type: application/json' \
-  -d "{\"runId\":\"${BLOCKED_RUN_ID}\"}"
+  -d "{\"runId\":\"${BLOCKED_RUN_ID}\",\"goalId\":\"${GOAL_ID}\",\"doDId\":\"${DOD_ID}\"}"
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${BLOCKED_RUN_ID}/start
 curl -f http://127.0.0.1:8080/api/v1/workorch/decisions
 curl -f "http://127.0.0.1:8080/api/v1/workorch/decisions?workspaceId=${WORKSPACE_ID}"
@@ -248,7 +248,7 @@ curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${BLOCKED_RUN_ID}/res
 APPROVAL_RUN_ID="run-runtime-approval-block-demo"
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
   -H 'Content-Type: application/json' \
-  -d "{\"runId\":\"${APPROVAL_RUN_ID}\"}"
+  -d "{\"runId\":\"${APPROVAL_RUN_ID}\",\"goalId\":\"${GOAL_ID}\",\"doDId\":\"${DOD_ID}\"}"
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${APPROVAL_RUN_ID}/start
 curl -f http://127.0.0.1:8080/api/v1/workorch/approvals
 curl -f "http://127.0.0.1:8080/api/v1/workorch/approvals?workspaceId=${WORKSPACE_ID}"
@@ -329,7 +329,7 @@ Verified terminal states:
 - formal `run` events now include `created` plus self-contained `goalId` / `doDId` / `failureReason` payload fields
 - formal `workspace state changed` events now include `title`, so event consumers do not need to reconstruct it from state
 - `workorchd` now starts and stops through `magicCommon/framework/application`, with HTTP attached through the workorchd plugin module and kernel/block units selected by application imports
-- HTTP dispatch now passes through `magicEngine/http`, and current acceptance API endpoints are registered as native routes without wildcard fallback dispatch
+- HTTP dispatch now passes through `magicEngine/http`, and current acceptance API endpoints are registered as explicit native routes
 - system endpoints `/healthz`, `/readyz`, and `/metrics` now use native `magicEngine/http` route registration
 - workspace / run / decision / approval read, write, and execution endpoints now use native `magicEngine/http` route registration
 - slice compatibility endpoints now use native `magicEngine/http` route registration
@@ -420,5 +420,5 @@ MVP 功能清单已收口，不再作为活跃待办清单使用。
 - completed: native workspace / run / decision / approval write and execution routes
 - completed: native slice compatibility routes
 - completed: native route registration guard for accepted API endpoints
-- completed: removed HTTP wildcard fallback dispatch from `workorchd`
+- completed: guarded HTTP route registration so accepted API endpoints stay explicit native routes
 - active todo: none
