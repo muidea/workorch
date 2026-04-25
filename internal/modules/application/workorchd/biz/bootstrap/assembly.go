@@ -85,14 +85,18 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	return &Runtime{
 		exports: Exports{
 			Repositories: RepositoryExports{
-				Workspaces:  repos.workspace,
-				Goals:       repos.goal,
-				DoDs:        repos.dod,
-				Runs:        repos.run,
-				Steps:       repos.step,
-				Tickets:     repos.ticket,
-				Resolutions: repos.resolution,
-				Approvals:   repos.approval,
+				Workspaces:         repos.workspace,
+				Goals:              repos.goal,
+				DoDs:               repos.dod,
+				Runs:               repos.run,
+				Steps:              repos.step,
+				ToolCalls:          repos.toolCall,
+				Patches:            repos.patch,
+				ValidationResults:  repos.validationResult,
+				RuntimeCheckpoints: repos.runtimeCheckpoint,
+				Tickets:            repos.ticket,
+				Resolutions:        repos.resolution,
+				Approvals:          repos.approval,
 			},
 			Services: ServiceExports{
 				WorkspaceService: workspaceModule.Service(),

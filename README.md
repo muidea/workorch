@@ -195,8 +195,7 @@ Available endpoints:
 - `POST /api/v1/workorch/runs/{runId}/resume`
 - `GET /api/v1/workorch/decisions`
 - `GET /api/v1/workorch/decisions/{ticketId}`
-- `POST /api/v1/workorch/decisions/{ticketId}/resolve`
-- `POST /api/v1/workorch/decisions/{ticketId}/reject`
+- `POST /api/v1/workorch/decisions/{ticketId}/resolve` with `resolutionType`: `provide_missing_info`, `reject_current_path`, or `replan`
 - `GET /api/v1/workorch/approvals`
 - `GET /api/v1/workorch/approvals/{approvalId}`
 - `POST /api/v1/workorch/approvals/{approvalId}/approve`
@@ -382,3 +381,4 @@ make ci
 - `docs/structure.md`: layout normalization mapping
 - `docs/workorch-status.md`: delivered scope, acceptance baseline, and current closure status
 - `docs/mvp-backlog.md`: closed MVP scope, completed items, and closure criteria used
+- `docs/next-mvp-acceptance.md`: next MVP scope aligned with the WorkOrch product planning baseline

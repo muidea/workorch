@@ -20,7 +20,10 @@ type StartRunCommand = runservice.StartRunCommand
 type ResumeRunCommand = runservice.ResumeRunCommand
 type BlockOnDecisionCommand = runservice.BlockOnDecisionCommand
 type BlockOnApprovalCommand = runservice.BlockOnApprovalCommand
+type ValidateRunCommand = runservice.ValidateRunCommand
 type CompleteRunCommand = runservice.CompleteRunCommand
+type CancelRunCommand = runservice.CancelRunCommand
+type SupersedeRunCommand = runservice.SupersedeRunCommand
 type FailRunCommand = runservice.FailRunCommand
 
 type Dependencies struct {
@@ -55,7 +58,10 @@ func (m *Module) Setup(deps Dependencies) error {
 		EnsureDecision:  m.bizPtr.EnsureBlockedOnDecision,
 		BlockOnApproval: m.bizPtr.BlockOnApproval,
 		EnsureApproval:  m.bizPtr.EnsureBlockedOnApproval,
+		ValidateRun:     m.bizPtr.ValidateRun,
 		CompleteRun:     m.bizPtr.CompleteRun,
+		CancelRun:       m.bizPtr.CancelRun,
+		SupersedeRun:    m.bizPtr.SupersedeRun,
 		FailRun:         m.bizPtr.FailRun,
 	})
 	return nil

@@ -155,8 +155,7 @@ A deployable `workorchd` instance is acceptable when:
 - with `WORKORCH_REPOSITORY_BACKEND=file`, `POST /api/v1/workorch/runs/{runId}/start` advances one persisted `workorch` run instance and returns its updated state
 - with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/decisions` returns persisted decision tickets and supports `workspaceId` / `runId` filtering
 - with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/decisions/{ticketId}` returns one persisted decision ticket
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `POST /api/v1/workorch/decisions/{ticketId}/resolve` resolves one decision ticket
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `POST /api/v1/workorch/decisions/{ticketId}/reject` rejects one decision ticket
+- with `WORKORCH_REPOSITORY_BACKEND=file`, `POST /api/v1/workorch/decisions/{ticketId}/resolve` resolves one decision ticket with `provide_missing_info`, `reject_current_path`, or `replan`
 - with `WORKORCH_REPOSITORY_BACKEND=file`, `POST /api/v1/workorch/runs/{runId}/resume` can complete after decision resolve or fail terminally after decision reject
 - with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/approvals` returns persisted approval items and supports `workspaceId` / `runId` filtering
 - with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/approvals/{approvalId}` returns one persisted approval item

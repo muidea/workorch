@@ -5,14 +5,18 @@ import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/bo
 func RuntimeDependenciesFromExports(exports bootstrap.Exports) RuntimeDependencies {
 	return RuntimeDependencies{
 		Snapshot: RuntimeSnapshotDependencies{
-			Workspaces:  exports.Repositories.Workspaces,
-			Goals:       exports.Repositories.Goals,
-			DoDs:        exports.Repositories.DoDs,
-			Runs:        exports.Repositories.Runs,
-			Steps:       exports.Repositories.Steps,
-			Tickets:     exports.Repositories.Tickets,
-			Resolutions: exports.Repositories.Resolutions,
-			Approvals:   exports.Repositories.Approvals,
+			Workspaces:         exports.Repositories.Workspaces,
+			Goals:              exports.Repositories.Goals,
+			DoDs:               exports.Repositories.DoDs,
+			Runs:               exports.Repositories.Runs,
+			Steps:              exports.Repositories.Steps,
+			ToolCalls:          exports.Repositories.ToolCalls,
+			Patches:            exports.Repositories.Patches,
+			ValidationResults:  exports.Repositories.ValidationResults,
+			RuntimeCheckpoints: exports.Repositories.RuntimeCheckpoints,
+			Tickets:            exports.Repositories.Tickets,
+			Resolutions:        exports.Repositories.Resolutions,
+			Approvals:          exports.Repositories.Approvals,
 		},
 		Actions: RuntimeActionDependencies{
 			Workspace: newWorkspaceActionPort(exports.Services.WorkspaceService),

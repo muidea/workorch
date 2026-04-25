@@ -149,6 +149,13 @@ type workspaceSnapshotResponse struct {
 	Snapshot appservice.WorkspaceSnapshot `json:"snapshot"`
 }
 
+type workspaceExecutionActivationResponse struct {
+	Service    string                                  `json:"service"`
+	Backend    string                                  `json:"backend,omitempty"`
+	DataRoot   string                                  `json:"dataRoot,omitempty"`
+	Activation appservice.WorkspaceExecutionActivation `json:"activation"`
+}
+
 type decisionResponse struct {
 	Service  string              `json:"service"`
 	Backend  string              `json:"backend,omitempty"`
@@ -188,6 +195,16 @@ type createRunRequest struct {
 	RunID  string `json:"runId"`
 	GoalID string `json:"goalId,omitempty"`
 	DoDID  string `json:"doDId,omitempty"`
+}
+
+type activateWorkspaceExecutionRequest struct {
+	GoalID string `json:"goalId,omitempty"`
+	DoDID  string `json:"doDId,omitempty"`
+}
+
+type resolveDecisionRequest struct {
+	ResolutionType    string         `json:"resolutionType"`
+	ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
 }
 
 type defineGoalRequest struct {
@@ -249,10 +266,10 @@ type readRunStatusFunc func(context.Context, string, string, string) (appservice
 type listRunInstancesFunc func(context.Context, string, string, string) ([]appservice.Run, error)
 type startRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
 type resumeRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
+type activateWorkspaceExecutionFunc func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error)
 type listDecisionsFunc func(context.Context, string, string, string, string) ([]appservice.Decision, error)
 type readDecisionFunc func(context.Context, string, string, string) (appservice.Decision, error)
-type resolveDecisionFunc func(context.Context, string, string, string) (appservice.Decision, error)
-type rejectDecisionFunc func(context.Context, string, string, string) (appservice.Decision, error)
+type resolveDecisionFunc func(context.Context, string, string, string, appservice.ResolveDecisionCommand) (appservice.Decision, error)
 type listApprovalsFunc func(context.Context, string, string, string, string) ([]appservice.Approval, error)
 type readApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
 type approveApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
@@ -287,10 +304,10 @@ type serverState struct {
 	listRuns              listRunInstancesFunc
 	startRun              startRunInstanceFunc
 	resumeRun             resumeRunInstanceFunc
+	activateWorkspace     activateWorkspaceExecutionFunc
 	listDecisions         listDecisionsFunc
 	readDecision          readDecisionFunc
 	resolveDecision       resolveDecisionFunc
-	rejectDecision        rejectDecisionFunc
 	listApprovals         listApprovalsFunc
 	readApproval          readApprovalFunc
 	approveApproval       approveApprovalFunc
@@ -329,10 +346,10 @@ type serverMetrics struct {
 	runStatusRequests           atomic.Uint64
 	runStartRequests            atomic.Uint64
 	runResumeRequests           atomic.Uint64
+	workspaceActivationRequests atomic.Uint64
 	decisionListRequests        atomic.Uint64
 	decisionGetRequests         atomic.Uint64
 	decisionResolveRequests     atomic.Uint64
-	decisionRejectRequests      atomic.Uint64
 	approvalListRequests        atomic.Uint64
 	approvalGetRequests         atomic.Uint64
 	approvalApproveRequests     atomic.Uint64
@@ -852,6 +869,42 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			Run:      item,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/execution-activations", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "execution-activations" {
+			http.NotFound(w, r)
+			return
+		}
+		var req activateWorkspaceExecutionRequest
+		if err := decodeOptionalJSON(r, &req); err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		state.metrics.workspaceActivationRequests.Add(1)
+		release, err := state.acquireRunSlot(r.Context())
+		if err != nil {
+			state.metrics.runCanceled.Add(1)
+			writeRunQueueError(w, err)
+			return
+		}
+		defer release()
+		item, err := state.activateWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, appservice.ActivateWorkspaceExecutionCommand{
+			GoalID: req.GoalID,
+			DoDID:  req.DoDID,
+		})
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		state.metrics.runSucceeded.Add(1)
+		writeJSON(w, http.StatusOK, workspaceExecutionActivationResponse{
+			Service:    "workorch",
+			Backend:    state.config.Backend,
+			DataRoot:   state.config.DataRoot,
+			Activation: item,
+		})
+	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
@@ -968,28 +1021,16 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			http.NotFound(w, r)
 			return
 		}
-		state.metrics.decisionResolveRequests.Add(1)
-		item, err := state.resolveDecision(r.Context(), state.config.Backend, state.config.DataRoot, ticketID)
-		if err != nil {
+		var req resolveDecisionRequest
+		if err := decodeOptionalJSON(r, &req); err != nil {
 			writeBusinessError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, decisionResponse{
-			Service:  "workorch",
-			Backend:  state.config.Backend,
-			DataRoot: state.config.DataRoot,
-			Decision: item,
+		state.metrics.decisionResolveRequests.Add(1)
+		item, err := state.resolveDecision(r.Context(), state.config.Backend, state.config.DataRoot, ticketID, appservice.ResolveDecisionCommand{
+			ResolutionType:    req.ResolutionType,
+			ResolutionPayload: req.ResolutionPayload,
 		})
-	})
-	router.AddHandler("/api/v1/workorch/decisions/:ticketId/reject", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		ticketID, action, ok := decisionActionFromPath(r.URL.Path)
-		if !ok || action != "reject" {
-			http.NotFound(w, r)
-			return
-		}
-		state.metrics.decisionRejectRequests.Add(1)
-		item, err := state.rejectDecision(r.Context(), state.config.Backend, state.config.DataRoot, ticketID)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1254,10 +1295,10 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		listRuns:              defaultListRuns,
 		startRun:              defaultStartRun,
 		resumeRun:             defaultResumeRun,
+		activateWorkspace:     defaultActivateWorkspaceExecution,
 		listDecisions:         defaultListDecisions,
 		readDecision:          defaultReadDecision,
 		resolveDecision:       defaultResolveDecision,
-		rejectDecision:        defaultRejectDecision,
 		listApprovals:         defaultListApprovals,
 		readApproval:          defaultReadApproval,
 		approveApproval:       defaultApproveApproval,
@@ -1442,6 +1483,15 @@ func (s *serverState) configureSharedMemorySession() {
 		})
 		return ret, err
 	}
+	s.activateWorkspace = func(ctx context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		var ret appservice.WorkspaceExecutionActivation
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ActivateWorkspaceExecutionWithSession(ctx, session, workspaceID, cmd)
+			return err
+		})
+		return ret, err
+	}
 	s.listDecisions = func(ctx context.Context, _, _, workspaceID, runID string) ([]appservice.Decision, error) {
 		var ret []appservice.Decision
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
@@ -1460,20 +1510,11 @@ func (s *serverState) configureSharedMemorySession() {
 		})
 		return ret, err
 	}
-	s.resolveDecision = func(ctx context.Context, _, _, ticketID string) (appservice.Decision, error) {
+	s.resolveDecision = func(ctx context.Context, _, _, ticketID string, cmd appservice.ResolveDecisionCommand) (appservice.Decision, error) {
 		var ret appservice.Decision
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
-			ret, err = appservice.ResolveDecisionWithSession(ctx, session, ticketID)
-			return err
-		})
-		return ret, err
-	}
-	s.rejectDecision = func(ctx context.Context, _, _, ticketID string) (appservice.Decision, error) {
-		var ret appservice.Decision
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
-			var err error
-			ret, err = appservice.RejectDecisionWithSession(ctx, session, ticketID)
+			ret, err = appservice.ResolveDecisionWithSession(ctx, session, ticketID, cmd)
 			return err
 		})
 		return ret, err
@@ -1672,6 +1713,10 @@ func defaultResumeRun(ctx context.Context, backend string, dataRoot string, runI
 	return appservice.ResumeRunWithBackend(ctx, backend, dataRoot, runID)
 }
 
+func defaultActivateWorkspaceExecution(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+	return appservice.ActivateWorkspaceExecutionWithBackend(ctx, backend, dataRoot, workspaceID, cmd)
+}
+
 func defaultListDecisions(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string) ([]appservice.Decision, error) {
 	return appservice.ListDecisionsWithBackend(ctx, backend, dataRoot, workspaceID, runID)
 }
@@ -1680,12 +1725,8 @@ func defaultReadDecision(ctx context.Context, backend string, dataRoot string, t
 	return appservice.ReadDecisionWithBackend(ctx, backend, dataRoot, ticketID)
 }
 
-func defaultResolveDecision(ctx context.Context, backend string, dataRoot string, ticketID string) (appservice.Decision, error) {
-	return appservice.ResolveDecisionWithBackend(ctx, backend, dataRoot, ticketID)
-}
-
-func defaultRejectDecision(ctx context.Context, backend string, dataRoot string, ticketID string) (appservice.Decision, error) {
-	return appservice.RejectDecisionWithBackend(ctx, backend, dataRoot, ticketID)
+func defaultResolveDecision(ctx context.Context, backend string, dataRoot string, ticketID string, cmd appservice.ResolveDecisionCommand) (appservice.Decision, error) {
+	return appservice.ResolveDecisionWithBackend(ctx, backend, dataRoot, ticketID, cmd)
 }
 
 func defaultListApprovals(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string) ([]appservice.Approval, error) {
@@ -1814,10 +1855,10 @@ func (m *serverMetrics) render(config Config) string {
 			"workorch_http_requests_total{endpoint=\"run_status\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_start\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_resume\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"workspace_execution_activation\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"decision_list\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"decision_get\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"decision_resolve\"} %d\n"+
-			"workorch_http_requests_total{endpoint=\"decision_reject\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"approval_list\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"approval_get\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"approval_approve\"} %d\n"+
@@ -1862,10 +1903,10 @@ func (m *serverMetrics) render(config Config) string {
 		m.runStatusRequests.Load(),
 		m.runStartRequests.Load(),
 		m.runResumeRequests.Load(),
+		m.workspaceActivationRequests.Load(),
 		m.decisionListRequests.Load(),
 		m.decisionGetRequests.Load(),
 		m.decisionResolveRequests.Load(),
-		m.decisionRejectRequests.Load(),
 		m.approvalListRequests.Load(),
 		m.approvalGetRequests.Load(),
 		m.approvalApproveRequests.Load(),
@@ -2039,6 +2080,19 @@ func writeRunQueueError(w http.ResponseWriter, err error) {
 }
 
 func decodeJSON(r *http.Request, dst any) error {
+	defer r.Body.Close()
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return fmt.Errorf("invalid request body: %w", err)
+	}
+	return nil
+}
+
+func decodeOptionalJSON(r *http.Request, dst any) error {
+	if r.Body == nil || r.ContentLength == 0 {
+		return nil
+	}
 	defer r.Body.Close()
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()

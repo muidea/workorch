@@ -42,6 +42,10 @@ func hasWorkorchRuntimeExports(exports bootstrap.Exports) bool {
 	return exports.Repositories.Workspaces != nil &&
 		exports.Repositories.Runs != nil &&
 		exports.Repositories.Steps != nil &&
+		exports.Repositories.ToolCalls != nil &&
+		exports.Repositories.Patches != nil &&
+		exports.Repositories.ValidationResults != nil &&
+		exports.Repositories.RuntimeCheckpoints != nil &&
 		exports.Repositories.Tickets != nil &&
 		exports.Repositories.Resolutions != nil &&
 		exports.Repositories.Approvals != nil &&

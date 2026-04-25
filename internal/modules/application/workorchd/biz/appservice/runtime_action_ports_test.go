@@ -36,7 +36,7 @@ func TestRuntimeActionPortsReturnInvalidArgumentWhenServiceMissing(t *testing.T)
 			return newDecisionActionPort(nil).EnsureTicket(context.Background(), "ticket", "ws", "run", "run/manual-gate", "reason")
 		}},
 		{name: "decision resolved", run: func() error {
-			return newDecisionActionPort(nil).EnsureResolvedTicket(context.Background(), "resolution", "ticket", "approve_path", nil)
+			return newDecisionActionPort(nil).EnsureResolvedTicket(context.Background(), "resolution", "ticket", "provide_missing_info", nil)
 		}},
 		{name: "approval ensure", run: func() error {
 			return newApprovalActionPort(nil).EnsureApproval(context.Background(), "approval", "ws", "run", "run/manual-approval", "reason")
@@ -155,14 +155,14 @@ func TestDecisionActionPortMapsCommands(t *testing.T) {
 	if err := port.EnsureTicket(context.Background(), "ticket-action-port", "ws-action-port", "run-action-port", "run-action-port/manual-gate", "manual decision"); err != nil {
 		t.Fatalf("EnsureTicket: %v", err)
 	}
-	if err := port.EnsureResolvedTicket(context.Background(), "resolution-action-port", "ticket-action-port", "approve_path", payload); err != nil {
+	if err := port.EnsureResolvedTicket(context.Background(), "resolution-action-port", "ticket-action-port", "provide_missing_info", payload); err != nil {
 		t.Fatalf("EnsureResolvedTicket: %v", err)
 	}
 
 	if ticket.TicketID != "ticket-action-port" || ticket.WorkspaceID != "ws-action-port" || ticket.RunID != "run-action-port" || ticket.StepID != "run-action-port/manual-gate" || ticket.Reason != "manual decision" {
 		t.Fatalf("ticket command = %+v", ticket)
 	}
-	if resolution.ResolutionID != "resolution-action-port" || resolution.TicketID != "ticket-action-port" || resolution.Type != "approve_path" {
+	if resolution.ResolutionID != "resolution-action-port" || resolution.TicketID != "ticket-action-port" || resolution.Type != "provide_missing_info" {
 		t.Fatalf("resolution command = %+v", resolution)
 	}
 	if !reflect.DeepEqual(resolution.Payload, payload) {

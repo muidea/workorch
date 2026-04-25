@@ -328,13 +328,13 @@ func TestWorkorchdServerSupportsFileRepositoryBackend(t *testing.T) {
 	assertDecisionAvailable(t, "http://"+addr+"/api/v1/workorch/decisions/"+blockedDecision.Run.BlockingTicketID, blockedDecision.Run.BlockingTicketID, "open")
 	assertDecisionListAvailable(t, "http://"+addr+"/api/v1/workorch/decisions?workspaceId="+workspaceID, blockedDecision.Run.BlockingTicketID)
 	assertDecisionListAvailable(t, "http://"+addr+"/api/v1/workorch/decisions?runId="+decisionResolveRunID, blockedDecision.Run.BlockingTicketID)
-	assertDecisionResolveAvailable(t, "http://"+addr+"/api/v1/workorch/decisions/"+blockedDecision.Run.BlockingTicketID+"/resolve", blockedDecision.Run.BlockingTicketID, decisioncommon.ResolutionTypeApprovePath)
+	assertDecisionResolveAvailable(t, "http://"+addr+"/api/v1/workorch/decisions/"+blockedDecision.Run.BlockingTicketID+"/resolve", blockedDecision.Run.BlockingTicketID, decisioncommon.ResolutionTypeProvideMissingInfo)
 	assertRunResumeAvailable(t, "http://"+addr+"/api/v1/workorch/runs/"+decisionResolveRunID+"/resume", decisionResolveRunID, "completed")
 
 	decisionRejectRunID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-rejected-main-file"
 	createRunInstance(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", decisionRejectRunID, "", "")
 	rejectedDecision := assertRunStartAvailable(t, "http://"+addr+"/api/v1/workorch/runs/"+decisionRejectRunID+"/start", decisionRejectRunID, "blocked_on_decision")
-	assertDecisionRejectAvailable(t, "http://"+addr+"/api/v1/workorch/decisions/"+rejectedDecision.Run.BlockingTicketID+"/reject", rejectedDecision.Run.BlockingTicketID, decisioncommon.ResolutionTypeRejectPath)
+	assertDecisionRejectAvailable(t, "http://"+addr+"/api/v1/workorch/decisions/"+rejectedDecision.Run.BlockingTicketID+"/resolve", rejectedDecision.Run.BlockingTicketID, decisioncommon.ResolutionTypeRejectCurrentPath)
 	rejectedRun := assertRunResumeAvailable(t, "http://"+addr+"/api/v1/workorch/runs/"+decisionRejectRunID+"/resume", decisionRejectRunID, "failed")
 	if rejectedRun.Run.FailureReason == "" {
 		t.Fatalf("rejected run failureReason = %q, want non-empty", rejectedRun.Run.FailureReason)
@@ -417,7 +417,7 @@ func TestWorkorchdServerRetainsFileBackedTerminalStateAcrossRestart(t *testing.T
 	decisionRunID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-restart-completed"
 	createRunInstance(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", decisionRunID, "", "")
 	blockedDecision := assertRunStartAvailable(t, "http://"+firstAddr+"/api/v1/workorch/runs/"+decisionRunID+"/start", decisionRunID, "blocked_on_decision")
-	assertDecisionResolveAvailable(t, "http://"+firstAddr+"/api/v1/workorch/decisions/"+blockedDecision.Run.BlockingTicketID+"/resolve", blockedDecision.Run.BlockingTicketID, decisioncommon.ResolutionTypeApprovePath)
+	assertDecisionResolveAvailable(t, "http://"+firstAddr+"/api/v1/workorch/decisions/"+blockedDecision.Run.BlockingTicketID+"/resolve", blockedDecision.Run.BlockingTicketID, decisioncommon.ResolutionTypeProvideMissingInfo)
 	assertRunResumeAvailable(t, "http://"+firstAddr+"/api/v1/workorch/runs/"+decisionRunID+"/resume", decisionRunID, "completed")
 
 	approvalRunID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-restart-failed"
@@ -981,7 +981,8 @@ func assertDecisionAvailable(t *testing.T, endpoint string, ticketID string, exp
 func assertDecisionResolveAvailable(t *testing.T, endpoint string, ticketID string, resolutionType string) workorchDecisionResponse {
 	t.Helper()
 
-	resp, err := http.Post(endpoint, "application/json", nil)
+	requestBody := strings.NewReader(`{"resolutionType":"` + resolutionType + `"}`)
+	resp, err := http.Post(endpoint, "application/json", requestBody)
 	if err != nil {
 		t.Fatalf("post decision resolve: %v", err)
 	}
@@ -1327,6 +1328,6 @@ func TestWorkorchdServerReadyzReflectsConfiguration(t *testing.T) {
 }
 
 func Example_main() {
-	fmt.Println("workorchd serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/runs, /api/v1/workorch/runs/{runId}, /api/v1/workorch/runs/{runId}/snapshot, /api/v1/workorch/runs/{runId}/status, /api/v1/workorch/runs/{runId}/start, /api/v1/workorch/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/decisions/{ticketId}/reject, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject, /api/v1/workorch/slices, /api/v1/workorch/slices/snapshots, /api/v1/workorch/slices/statuses, /api/v1/workorch/slices/{sliceId}/status, /api/v1/workorch/slices/{sliceId}/snapshot, /api/v1/workorch/slices/{sliceId}/runs")
-	// Output: workorchd serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/runs, /api/v1/workorch/runs/{runId}, /api/v1/workorch/runs/{runId}/snapshot, /api/v1/workorch/runs/{runId}/status, /api/v1/workorch/runs/{runId}/start, /api/v1/workorch/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/decisions/{ticketId}/reject, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject, /api/v1/workorch/slices, /api/v1/workorch/slices/snapshots, /api/v1/workorch/slices/statuses, /api/v1/workorch/slices/{sliceId}/status, /api/v1/workorch/slices/{sliceId}/snapshot, /api/v1/workorch/slices/{sliceId}/runs
+	fmt.Println("workorchd serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/runs, /api/v1/workorch/runs/{runId}, /api/v1/workorch/runs/{runId}/snapshot, /api/v1/workorch/runs/{runId}/status, /api/v1/workorch/runs/{runId}/start, /api/v1/workorch/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject, /api/v1/workorch/slices, /api/v1/workorch/slices/snapshots, /api/v1/workorch/slices/statuses, /api/v1/workorch/slices/{sliceId}/status, /api/v1/workorch/slices/{sliceId}/snapshot, /api/v1/workorch/slices/{sliceId}/runs")
+	// Output: workorchd serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/runs, /api/v1/workorch/runs/{runId}, /api/v1/workorch/runs/{runId}/snapshot, /api/v1/workorch/runs/{runId}/status, /api/v1/workorch/runs/{runId}/start, /api/v1/workorch/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject, /api/v1/workorch/slices, /api/v1/workorch/slices/snapshots, /api/v1/workorch/slices/statuses, /api/v1/workorch/slices/{sliceId}/status, /api/v1/workorch/slices/{sliceId}/snapshot, /api/v1/workorch/slices/{sliceId}/runs
 }

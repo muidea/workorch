@@ -7,11 +7,14 @@ import (
 )
 
 type CreateTicketCommand struct {
-	TicketID    common.TicketID
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	StepID      common.StepID
-	Reason      string
+	TicketID     common.TicketID
+	WorkspaceID  common.WorkspaceID
+	RunID        common.RunID
+	StepID       common.StepID
+	Reason       string
+	DecisionKind string
+	Question     string
+	Context      map[string]any
 }
 
 type ResolveTicketCommand struct {

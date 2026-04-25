@@ -101,7 +101,7 @@ func TestBuildWorkorchSnapshotFallbackIncludesResolvedTicketResolution(t *testin
 	resolution := &decisionmodel.Resolution{
 		ID:       common.ResolutionID("resolution-observed"),
 		TicketID: ticket.ID,
-		Type:     "approve_path",
+		Type:     "provide_missing_info",
 		Payload:  map[string]any{"operator": "workorch"},
 	}
 

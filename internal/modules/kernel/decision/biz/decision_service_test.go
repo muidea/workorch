@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -151,7 +152,7 @@ func TestService_ResolveTicket_OpenToResolvedAndPersistsResolution(t *testing.T)
 	resolveCmd := decisionservice.ResolveTicketCommand{
 		ResolutionID: common.ResolutionID("resolution-1"),
 		TicketID:     createCmd.TicketID,
-		Type:         "approve-plan",
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
 		Payload:      map[string]any{"actor": "operator"},
 	}
 	if err := service.ResolveTicket(ctx, resolveCmd); err != nil {
@@ -198,7 +199,7 @@ func TestService_ResolveTicket_RejectsSecondResolveOnResolvedTicket(t *testing.T
 	first := decisionservice.ResolveTicketCommand{
 		ResolutionID: common.ResolutionID("resolution-1"),
 		TicketID:     createCmd.TicketID,
-		Type:         "approve-plan",
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
 	}
 	if err := service.ResolveTicket(ctx, first); err != nil {
 		t.Fatalf("first resolve ticket: %v", err)
@@ -207,7 +208,7 @@ func TestService_ResolveTicket_RejectsSecondResolveOnResolvedTicket(t *testing.T
 	second := decisionservice.ResolveTicketCommand{
 		ResolutionID: common.ResolutionID("resolution-2"),
 		TicketID:     createCmd.TicketID,
-		Type:         "change-plan",
+		Type:         decisioncommon.ResolutionTypeRejectCurrentPath,
 	}
 	if err := service.ResolveTicket(ctx, second); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("second resolve err = %v, want conflict", err)
@@ -242,7 +243,7 @@ func TestService_EnsureResolvedTicket_IsIdempotentAndRejectsResolutionMismatch(t
 	cmd := decisionservice.ResolveTicketCommand{
 		ResolutionID: common.ResolutionID("resolution-ensure"),
 		TicketID:     createCmd.TicketID,
-		Type:         "approve-plan",
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
 	}
 	if err := service.EnsureResolvedTicket(ctx, cmd); err != nil {
 		t.Fatalf("first ensure resolved ticket: %v", err)
@@ -265,7 +266,7 @@ func TestService_EnsureResolvedTicket_IsIdempotentAndRejectsResolutionMismatch(t
 	if err := service.EnsureResolvedTicket(ctx, decisionservice.ResolveTicketCommand{
 		ResolutionID: cmd.ResolutionID,
 		TicketID:     createCmd.TicketID,
-		Type:         "change-plan",
+		Type:         decisioncommon.ResolutionTypeRejectCurrentPath,
 	}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("resolution type mismatch err = %v, want conflict", err)
 	}
@@ -292,8 +293,8 @@ func TestService_ResolveTicket_ValidateArgumentsAndNotFound(t *testing.T) {
 	service := NewService(memory.NewDecisionTicketRepository(), memory.NewDecisionResolutionRepository(), nil)
 
 	tests := []decisionservice.ResolveTicketCommand{
-		{ResolutionID: "", TicketID: common.TicketID("ticket-1"), Type: "approve-plan"},
-		{ResolutionID: common.ResolutionID("resolution-1"), TicketID: "", Type: "approve-plan"},
+		{ResolutionID: "", TicketID: common.TicketID("ticket-1"), Type: decisioncommon.ResolutionTypeProvideMissingInfo},
+		{ResolutionID: common.ResolutionID("resolution-1"), TicketID: "", Type: decisioncommon.ResolutionTypeProvideMissingInfo},
 		{ResolutionID: common.ResolutionID("resolution-1"), TicketID: common.TicketID("ticket-1"), Type: ""},
 	}
 
@@ -306,7 +307,7 @@ func TestService_ResolveTicket_ValidateArgumentsAndNotFound(t *testing.T) {
 	if err := service.ResolveTicket(ctx, decisionservice.ResolveTicketCommand{
 		ResolutionID: common.ResolutionID("resolution-missing"),
 		TicketID:     common.TicketID("missing"),
-		Type:         "approve-plan",
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
 	}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing ticket err = %v, want not found", err)
 	}
@@ -332,7 +333,7 @@ func TestService_CreateAndResolveTicket_PublishesEvents(t *testing.T) {
 	if err := service.ResolveTicket(ctx, decisionservice.ResolveTicketCommand{
 		ResolutionID: common.ResolutionID("resolution-event"),
 		TicketID:     createCmd.TicketID,
-		Type:         "approve-plan",
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
 		Payload:      map[string]any{"operator": "workorch"},
 	}); err != nil {
 		t.Fatalf("resolve ticket: %v", err)
@@ -351,8 +352,8 @@ func TestService_CreateAndResolveTicket_PublishesEvents(t *testing.T) {
 	if published[1].Topic != events.TopicTicketResolved {
 		t.Fatalf("second topic = %s, want %s", published[1].Topic, events.TopicTicketResolved)
 	}
-	if published[1].Payload[events.PayloadKeyType] != "approve-plan" {
-		t.Fatalf("resolved type payload = %v, want approve-plan", published[1].Payload[events.PayloadKeyType])
+	if published[1].Payload[events.PayloadKeyType] != decisioncommon.ResolutionTypeProvideMissingInfo {
+		t.Fatalf("resolved type payload = %v, want %s", published[1].Payload[events.PayloadKeyType], decisioncommon.ResolutionTypeProvideMissingInfo)
 	}
 	if published[1].Payload[events.PayloadKeyState] != string(common.DecisionTicketStateResolved) {
 		t.Fatalf("resolved state payload = %v, want resolved", published[1].Payload[events.PayloadKeyState])

@@ -36,7 +36,6 @@
     `POST /api/v1/workorch/runs/{runId}/start`,
     `POST /api/v1/workorch/runs/{runId}/resume`,
     `POST /api/v1/workorch/decisions/{ticketId}/resolve`,
-    `POST /api/v1/workorch/decisions/{ticketId}/reject`,
     `POST /api/v1/workorch/approvals/{approvalId}/approve`,
     `POST /api/v1/workorch/approvals/{approvalId}/reject`
   - slice compatibility endpoints are registered as native `magicEngine/http` routes:
@@ -140,6 +139,8 @@ Current internal event consumption boundary:
 
 ## Acceptance
 
+The current service MVP is closed. The next product-aligned MVP acceptance scope is tracked in `docs/next-mvp-acceptance.md`.
+
 ### Command
 
 ```bash
@@ -180,7 +181,6 @@ HTTP endpoints:
 - `GET /api/v1/workorch/decisions`
 - `GET /api/v1/workorch/decisions/{ticketId}`
 - `POST /api/v1/workorch/decisions/{ticketId}/resolve`
-- `POST /api/v1/workorch/decisions/{ticketId}/reject`
 - `GET /api/v1/workorch/approvals`
 - `GET /api/v1/workorch/approvals/{approvalId}`
 - `POST /api/v1/workorch/approvals/{approvalId}/approve`

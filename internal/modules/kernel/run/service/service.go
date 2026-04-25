@@ -27,6 +27,9 @@ type BlockOnApprovalCommand struct {
 }
 
 type CompleteRunCommand struct{ RunID common.RunID }
+type ValidateRunCommand struct{ RunID common.RunID }
+type CancelRunCommand struct{ RunID common.RunID }
+type SupersedeRunCommand struct{ RunID common.RunID }
 
 type FailRunCommand struct {
 	RunID  common.RunID
@@ -44,7 +47,10 @@ type Service interface {
 	EnsureBlockedOnDecision(context.Context, BlockOnDecisionCommand) error
 	BlockOnApproval(context.Context, BlockOnApprovalCommand) error
 	EnsureBlockedOnApproval(context.Context, BlockOnApprovalCommand) error
+	ValidateRun(context.Context, ValidateRunCommand) error
 	CompleteRun(context.Context, CompleteRunCommand) error
+	CancelRun(context.Context, CancelRunCommand) error
+	SupersedeRun(context.Context, SupersedeRunCommand) error
 	FailRun(context.Context, FailRunCommand) error
 }
 
@@ -59,7 +65,10 @@ type Module struct {
 	ensureDecision  func(context.Context, BlockOnDecisionCommand) error
 	blockOnApproval func(context.Context, BlockOnApprovalCommand) error
 	ensureApproval  func(context.Context, BlockOnApprovalCommand) error
+	validateRun     func(context.Context, ValidateRunCommand) error
 	completeRun     func(context.Context, CompleteRunCommand) error
+	cancelRun       func(context.Context, CancelRunCommand) error
+	supersedeRun    func(context.Context, SupersedeRunCommand) error
 	failRun         func(context.Context, FailRunCommand) error
 }
 
@@ -74,7 +83,10 @@ type Dependencies struct {
 	EnsureDecision  func(context.Context, BlockOnDecisionCommand) error
 	BlockOnApproval func(context.Context, BlockOnApprovalCommand) error
 	EnsureApproval  func(context.Context, BlockOnApprovalCommand) error
+	ValidateRun     func(context.Context, ValidateRunCommand) error
 	CompleteRun     func(context.Context, CompleteRunCommand) error
+	CancelRun       func(context.Context, CancelRunCommand) error
+	SupersedeRun    func(context.Context, SupersedeRunCommand) error
 	FailRun         func(context.Context, FailRunCommand) error
 }
 
@@ -90,7 +102,10 @@ func New(deps Dependencies) *Module {
 		ensureDecision:  deps.EnsureDecision,
 		blockOnApproval: deps.BlockOnApproval,
 		ensureApproval:  deps.EnsureApproval,
+		validateRun:     deps.ValidateRun,
 		completeRun:     deps.CompleteRun,
+		cancelRun:       deps.CancelRun,
+		supersedeRun:    deps.SupersedeRun,
 		failRun:         deps.FailRun,
 	}
 }
@@ -170,6 +185,27 @@ func (m *Module) CompleteRun(ctx context.Context, cmd CompleteRunCommand) error 
 		return common.ErrInvalidArgument
 	}
 	return m.completeRun(ctx, cmd)
+}
+
+func (m *Module) ValidateRun(ctx context.Context, cmd ValidateRunCommand) error {
+	if m == nil || m.validateRun == nil {
+		return common.ErrInvalidArgument
+	}
+	return m.validateRun(ctx, cmd)
+}
+
+func (m *Module) CancelRun(ctx context.Context, cmd CancelRunCommand) error {
+	if m == nil || m.cancelRun == nil {
+		return common.ErrInvalidArgument
+	}
+	return m.cancelRun(ctx, cmd)
+}
+
+func (m *Module) SupersedeRun(ctx context.Context, cmd SupersedeRunCommand) error {
+	if m == nil || m.supersedeRun == nil {
+		return common.ErrInvalidArgument
+	}
+	return m.supersedeRun(ctx, cmd)
 }
 
 func (m *Module) FailRun(ctx context.Context, cmd FailRunCommand) error {

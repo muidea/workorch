@@ -1,4 +1,4 @@
-import type { Approval, Decision, DoD, Goal, Run, ServiceStatus, SliceDescriptor, SliceStatus, Workspace } from './types';
+import type { Approval, Decision, DoD, Goal, Run, RunSnapshot, ServiceStatus, SliceDescriptor, SliceStatus, Workspace, WorkspaceExecutionActivation, WorkspaceSnapshot } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -36,6 +36,10 @@ export const workorchApi = {
     const body = await request<{ workspaces: Workspace[] }>(`${apiBase}/workspaces`);
     return body.workspaces ?? [];
   },
+  readWorkspaceSnapshot: async (workspaceId: string) => {
+    const body = await request<{ snapshot: WorkspaceSnapshot }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/snapshot`);
+    return body.snapshot;
+  },
   createWorkspace: async (title: string, description?: string, workingDirectory?: string) => {
     const body = await request<{ workspace: Workspace }>(`${apiBase}/workspaces`, {
       method: 'POST',
@@ -69,6 +73,10 @@ export const workorchApi = {
     const body = await request<{ runs: Run[] }>(`${apiBase}/runs`);
     return body.runs ?? [];
   },
+  readRunSnapshot: async (runId: string) => {
+    const body = await request<{ snapshot: RunSnapshot }>(`${apiBase}/runs/${encodeURIComponent(runId)}/snapshot`);
+    return body.snapshot;
+  },
   createRun: async (workspaceId: string, runId: string, goalId?: string, doDId?: string) => {
     const body = await request<{ run: Run }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/runs`, {
       method: 'POST',
@@ -84,17 +92,26 @@ export const workorchApi = {
     const body = await request<{ run: Run }>(`${apiBase}/runs/${encodeURIComponent(runId)}/resume`, { method: 'POST' });
     return body.run;
   },
+  activateWorkspaceExecution: async (workspaceId: string, goalId?: string, doDId?: string) => {
+    const body = await request<{ activation: WorkspaceExecutionActivation }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/execution-activations`, {
+      method: 'POST',
+      body: JSON.stringify({ goalId, doDId })
+    });
+    return body.activation;
+  },
   listDecisions: async () => {
     const body = await request<{ decisions: Decision[] }>(`${apiBase}/decisions`);
     return body.decisions ?? [];
   },
-  resolveDecision: async (ticketId: string) => {
-    const body = await request<{ decision: Decision }>(`${apiBase}/decisions/${encodeURIComponent(ticketId)}/resolve`, { method: 'POST' });
+  resolveDecision: async (ticketId: string, resolutionType = 'provide_missing_info', resolutionPayload?: Record<string, unknown>) => {
+    const body = await request<{ decision: Decision }>(`${apiBase}/decisions/${encodeURIComponent(ticketId)}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ resolutionType, resolutionPayload })
+    });
     return body.decision;
   },
   rejectDecision: async (ticketId: string) => {
-    const body = await request<{ decision: Decision }>(`${apiBase}/decisions/${encodeURIComponent(ticketId)}/reject`, { method: 'POST' });
-    return body.decision;
+    return workorchApi.resolveDecision(ticketId, 'reject_current_path', { operator: 'console' });
   },
   listApprovals: async () => {
     const body = await request<{ approvals: Approval[] }>(`${apiBase}/approvals`);

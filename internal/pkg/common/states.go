@@ -11,10 +11,22 @@ type StepState string
 type DecisionTicketState string
 
 type ApprovalState string
+type ToolCallState string
+type PatchState string
+type ValidationResultState string
+type CheckpointType string
 
 const (
-	WorkspaceStateActive   WorkspaceState = "active"
-	WorkspaceStateArchived WorkspaceState = "archived"
+	WorkspaceStateActive          WorkspaceState = "active"
+	WorkspaceStateDraft           WorkspaceState = "draft"
+	WorkspaceStateReady           WorkspaceState = "ready"
+	WorkspaceStateRunning         WorkspaceState = "running"
+	WorkspaceStateWaitingDecision WorkspaceState = "waiting_decision"
+	WorkspaceStateBlocked         WorkspaceState = "blocked"
+	WorkspaceStateValidating      WorkspaceState = "validating"
+	WorkspaceStateCompleted       WorkspaceState = "completed"
+	WorkspaceStateFailed          WorkspaceState = "failed"
+	WorkspaceStateArchived        WorkspaceState = "archived"
 )
 
 const (
@@ -28,8 +40,11 @@ const (
 	RunStateRunning           RunState = "running"
 	RunStateBlockedOnDecision RunState = "blocked_on_decision"
 	RunStateBlockedOnApproval RunState = "blocked_on_approval"
+	RunStateValidating        RunState = "validating"
 	RunStateCompleted         RunState = "completed"
 	RunStateFailed            RunState = "failed"
+	RunStateCancelled         RunState = "cancelled"
+	RunStateSuperseded        RunState = "superseded"
 )
 
 const (
@@ -50,4 +65,29 @@ const (
 	ApprovalStateApproved ApprovalState = "approved"
 	ApprovalStateRejected ApprovalState = "rejected"
 	ApprovalStateResolved ApprovalState = "resolved"
+)
+
+const (
+	ToolCallStatePending   ToolCallState = "pending"
+	ToolCallStateRunning   ToolCallState = "running"
+	ToolCallStateCompleted ToolCallState = "completed"
+	ToolCallStateFailed    ToolCallState = "failed"
+)
+
+const (
+	PatchStateCreated PatchState = "created"
+	PatchStateApplied PatchState = "applied"
+	PatchStateFailed  PatchState = "failed"
+)
+
+const (
+	ValidationResultStatePassed  ValidationResultState = "passed"
+	ValidationResultStateFailed  ValidationResultState = "failed"
+	ValidationResultStateWarning ValidationResultState = "warning"
+)
+
+const (
+	CheckpointTypeRunState CheckpointType = "run_state"
+	CheckpointTypeBlocked  CheckpointType = "blocked"
+	CheckpointTypeRecovery CheckpointType = "recovery"
 )

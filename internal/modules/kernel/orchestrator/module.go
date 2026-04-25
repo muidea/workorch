@@ -56,7 +56,10 @@ func (m *Module) Setup(deps Dependencies) error {
 		BlockOnDecision:  m.bizPtr.BlockOnDecision,
 		BlockOnApproval:  m.bizPtr.BlockOnApproval,
 		ResumeRun:        m.bizPtr.ResumeRun,
+		ValidateRun:      m.bizPtr.ValidateRun,
 		CompleteRun:      m.bizPtr.CompleteRun,
+		CancelRun:        m.bizPtr.CancelRun,
+		SupersedeRun:     m.bizPtr.SupersedeRun,
 		FailRun:          m.bizPtr.FailRun,
 	})
 	return nil

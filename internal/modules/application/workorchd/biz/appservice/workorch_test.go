@@ -872,7 +872,7 @@ func TestEnsureRunResumedReturnsNilWhenRunAlreadyFailedByRejectedDecision(t *tes
 	if err := rt.EnsureRunBlockedOnDecision(ctx, runID, ticketID); err != nil {
 		t.Fatalf("block on decision: %v", err)
 	}
-	if err := rt.EnsureResolvedTicket(ctx, common.ResolutionID("resolution-failed-decision-run"), ticketID, decisioncommon.ResolutionTypeRejectPath, map[string]any{"operator": "workorch"}); err != nil {
+	if err := rt.EnsureResolvedTicket(ctx, common.ResolutionID("resolution-failed-decision-run"), ticketID, decisioncommon.ResolutionTypeRejectCurrentPath, map[string]any{"operator": "workorch"}); err != nil {
 		t.Fatalf("reject decision ticket: %v", err)
 	}
 	if err := rt.EnsureRunResumed(ctx, runID); err != nil {
@@ -941,7 +941,7 @@ func TestEnsureRunBlockedOnDecisionReturnsNilWhenAlreadyBlockedOrTerminal(t *tes
 	if err := svc.EnsureRunBlockedOnDecision(ctx, runID, ticketID); err != nil {
 		t.Fatalf("expected nil for same blocked decision, got %v", err)
 	}
-	if err := rt.EnsureResolvedTicket(ctx, common.ResolutionID("resolution-blocked-decision-repeat"), ticketID, "approve_path", map[string]any{"operator": "workorch"}); err != nil {
+	if err := rt.EnsureResolvedTicket(ctx, common.ResolutionID("resolution-blocked-decision-repeat"), ticketID, "provide_missing_info", map[string]any{"operator": "workorch"}); err != nil {
 		t.Fatalf("ensure resolved ticket: %v", err)
 	}
 	if err := rt.EnsureRunResumed(ctx, runID); err != nil {
@@ -1085,7 +1085,7 @@ func TestEnsureDecisionResolvedReturnsNilWhenTicketAlreadyResolved(t *testing.T)
 	if err := svc.EnsureDecisionTicket(ctx, ticketID, workspaceID, runID, stepID, "manual decision"); err != nil {
 		t.Fatalf("ensure decision ticket: %v", err)
 	}
-	if err := rt.EnsureResolvedTicket(ctx, common.ResolutionID("resolution-workorch-blocked-decision"), ticketID, "approve_path", map[string]any{"operator": "workorch"}); err != nil {
+	if err := rt.EnsureResolvedTicket(ctx, common.ResolutionID("resolution-workorch-blocked-decision"), ticketID, "provide_missing_info", map[string]any{"operator": "workorch"}); err != nil {
 		t.Fatalf("ensure resolved ticket: %v", err)
 	}
 
@@ -1112,7 +1112,7 @@ func TestEnsureDecisionResolvedReturnsConflictWhenResolutionMismatch(t *testing.
 	if err := svc.EnsureDecisionTicket(ctx, ticketID, workspaceID, runID, stepID, "manual decision"); err != nil {
 		t.Fatalf("ensure decision ticket: %v", err)
 	}
-	if err := rt.EnsureResolvedTicket(ctx, common.ResolutionID("resolution-decision-resolved-other"), ticketID, "reject_path", map[string]any{"operator": "other"}); err != nil {
+	if err := rt.EnsureResolvedTicket(ctx, common.ResolutionID("resolution-decision-resolved-other"), ticketID, "reject_current_path", map[string]any{"operator": "other"}); err != nil {
 		t.Fatalf("ensure resolved ticket: %v", err)
 	}
 
@@ -1150,7 +1150,7 @@ func TestEnsureDecisionRejectedReturnsNilWhenTicketAlreadyRejected(t *testing.T)
 	if err := svc.EnsureDecisionTicket(ctx, ticketID, workspaceID, runID, stepID, "manual decision"); err != nil {
 		t.Fatalf("ensure decision ticket: %v", err)
 	}
-	if err := rt.EnsureResolvedTicket(ctx, common.ResolutionID("resolution-workorch-rejected-decision"), ticketID, decisioncommon.ResolutionTypeRejectPath, map[string]any{"operator": "workorch", "outcome": "reject"}); err != nil {
+	if err := rt.EnsureResolvedTicket(ctx, common.ResolutionID("resolution-workorch-rejected-decision"), ticketID, decisioncommon.ResolutionTypeRejectCurrentPath, map[string]any{"operator": "workorch", "outcome": "reject"}); err != nil {
 		t.Fatalf("ensure rejected ticket: %v", err)
 	}
 

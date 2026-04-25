@@ -17,8 +17,11 @@ import (
 	legacycommon "github.com/muidea/workorch/internal/modules/blocks/legacy/pkg/common"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
 )
 
 func TestHealthzReturnsOK(t *testing.T) {
@@ -122,6 +125,35 @@ func TestMemoryBackendPersistsStateAcrossHTTPRequests(t *testing.T) {
 	}
 }
 
+func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
+	mux := newMux(Config{Backend: "memory"})
+
+	workspace := createWorkspaceForHTTP(t, mux, "activation http", "workspaces/ws-activation-http")
+	goalID, dodID := defineGoalAndDoDForHTTP(t, mux, workspace.ID)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("activation status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+	var body workspaceExecutionActivationResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal activation: %v", err)
+	}
+	if !strings.HasPrefix(body.Activation.Run.ID, "run-") ||
+		body.Activation.Run.WorkspaceID != workspace.ID ||
+		body.Activation.Run.GoalID != goalID ||
+		body.Activation.Run.DoDID != dodID ||
+		body.Activation.Run.State != "completed" {
+		t.Fatalf("activation run = %+v, want generated completed run with definitions", body.Activation.Run)
+	}
+	if len(body.Activation.Snapshot.Runs) != 1 || body.Activation.Snapshot.Runs[0].ID != body.Activation.Run.ID {
+		t.Fatalf("activation snapshot runs = %+v, want created run", body.Activation.Snapshot.Runs)
+	}
+}
+
 func TestAcceptedAPIRoutesAreRegisteredNatively(t *testing.T) {
 	router := engine.NewRouteRegistry()
 	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
@@ -175,6 +207,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/dods/:dodId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-activations"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId"},
@@ -185,7 +218,6 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/decisions"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/decisions/:ticketId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/decisions/:ticketId/resolve"},
-		{method: http.MethodPost, pattern: "/api/v1/workorch/decisions/:ticketId/reject"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/approvals"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/approvals/:approvalId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/approvals/:approvalId/approve"},
@@ -227,6 +259,19 @@ func TestConsoleRoutesServeEmbeddedAssets(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "workorch-section") {
 		t.Fatalf("asset body does not contain console css")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/console/assets/workorch-console.js", nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("console js status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"Workspace Board", "Decision Queue", "Workspace Detail"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("console js body does not contain %q", want)
+		}
 	}
 }
 
@@ -366,23 +411,27 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}
 		return appservice.Run{ID: runID, WorkspaceID: "ws-native-read", State: "completed"}, nil
 	}
-	state.resolveDecision = func(ctx context.Context, _, _, ticketID string) (appservice.Decision, error) {
+	state.activateWorkspace = func(ctx context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("workspace activation event hub = %#v, want injected hub", got)
+		}
+		if workspaceID != "ws-native-read" || cmd.GoalID != "goal-native" || cmd.DoDID != "dod-native" {
+			t.Fatalf("workspace activation input = %q/%q/%q, want ws-native-read/goal-native/dod-native", workspaceID, cmd.GoalID, cmd.DoDID)
+		}
+		return appservice.WorkspaceExecutionActivation{
+			Workspace: appservice.Workspace{ID: workspaceID, ActiveRunID: "run-native-activation"},
+			Run:       appservice.Run{ID: "run-native-activation", WorkspaceID: workspaceID, GoalID: cmd.GoalID, DoDID: cmd.DoDID, State: "completed"},
+			Snapshot:  appservice.WorkspaceSnapshot{Workspace: appservice.Workspace{ID: workspaceID}},
+		}, nil
+	}
+	state.resolveDecision = func(ctx context.Context, _, _, ticketID string, cmd appservice.ResolveDecisionCommand) (appservice.Decision, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("decision resolve event hub = %#v, want injected hub", got)
 		}
 		if ticketID != "ticket-native-read" {
 			t.Fatalf("ticketID = %q, want ticket-native-read", ticketID)
 		}
-		return appservice.Decision{ID: ticketID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "resolved"}, nil
-	}
-	state.rejectDecision = func(ctx context.Context, _, _, ticketID string) (appservice.Decision, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
-			t.Fatalf("decision reject event hub = %#v, want injected hub", got)
-		}
-		if ticketID != "ticket-native-read" {
-			t.Fatalf("ticketID = %q, want ticket-native-read", ticketID)
-		}
-		return appservice.Decision{ID: ticketID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "resolved"}, nil
+		return appservice.Decision{ID: ticketID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "resolved", ResolutionType: cmd.ResolutionType}, nil
 	}
 	state.approveApproval = func(ctx context.Context, _, _, approvalID string) (appservice.Approval, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
@@ -470,10 +519,10 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/status", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/start", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/resume", status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions?workspaceId=ws-native-read&runId=run-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions/ticket-native-read", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/decisions/ticket-native-read/resolve", status: http.StatusOK},
-		{method: http.MethodPost, path: "/api/v1/workorch/decisions/ticket-native-read/reject", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/approvals?workspaceId=ws-native-read&runId=run-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/approvals/approval-native-read", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/approvals/approval-native-read/approve", status: http.StatusOK},
@@ -794,6 +843,105 @@ func TestRunSnapshotEndpointReturnsPersistedRunSnapshot(t *testing.T) {
 	}
 }
 
+func TestRunSnapshotEndpointReturnsExecutionEvidence(t *testing.T) {
+	dataRoot := t.TempDir()
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-run-evidence-http")
+	runID := common.RunID("run-evidence-http")
+	stepID := common.StepID("run-evidence-http/step-1")
+	toolCallID := common.ToolCallID("tool-call-evidence-http")
+
+	if err := fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json")).Create(ctx, &workspacemodel.Workspace{
+		ID:    workspaceID,
+		Title: "run evidence http",
+		State: common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json")).Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateCompleted,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json")).Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "validation",
+		State: common.StepStateCompleted,
+	}); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	if err := fileRepo.NewToolCallRepository(filepath.Join(dataRoot, "tool_call.json")).Create(ctx, &runmodel.ToolCall{
+		ID:          toolCallID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		ToolName:    "shell",
+		State:       common.ToolCallStateCompleted,
+		Output:      map[string]any{"exitCode": 0},
+	}); err != nil {
+		t.Fatalf("create tool call: %v", err)
+	}
+	if err := fileRepo.NewPatchRepository(filepath.Join(dataRoot, "patch.json")).Create(ctx, &runmodel.Patch{
+		ID:          common.PatchID("patch-evidence-http"),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		ToolCallID:  toolCallID,
+		PatchType:   "unified_diff",
+		State:       common.PatchStateApplied,
+	}); err != nil {
+		t.Fatalf("create patch: %v", err)
+	}
+	if err := fileRepo.NewValidationResultRepository(filepath.Join(dataRoot, "validation_result.json")).Create(ctx, &runmodel.ValidationResult{
+		ID:             common.ValidationResultID("validation-evidence-http"),
+		WorkspaceID:    workspaceID,
+		RunID:          runID,
+		StepID:         stepID,
+		ValidationKind: "go_test",
+		State:          common.ValidationResultStatePassed,
+	}); err != nil {
+		t.Fatalf("create validation result: %v", err)
+	}
+	if err := fileRepo.NewRuntimeCheckpointRepository(filepath.Join(dataRoot, "runtime_checkpoint.json")).Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:               common.CheckpointID("checkpoint-evidence-http"),
+		WorkspaceID:      workspaceID,
+		RunID:            runID,
+		CheckpointType:   common.CheckpointTypeRunState,
+		CurrentStepID:    stepID,
+		RunStateSnapshot: common.RunStateCompleted,
+	}); err != nil {
+		t.Fatalf("create runtime checkpoint: %v", err)
+	}
+
+	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/"+string(runID)+"/snapshot", nil)
+	snapshotRec := httptest.NewRecorder()
+	handler.ServeHTTP(snapshotRec, snapshotReq)
+
+	if snapshotRec.Code != http.StatusOK {
+		t.Fatalf("snapshot status = %d, want 200, body=%s", snapshotRec.Code, snapshotRec.Body.String())
+	}
+	var body runSnapshotResponse
+	if err := json.Unmarshal(snapshotRec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal run snapshot: %v", err)
+	}
+	if len(body.Snapshot.ToolCalls) != 1 || body.Snapshot.ToolCalls[0].ID != string(toolCallID) {
+		t.Fatalf("toolCalls = %+v, want %s", body.Snapshot.ToolCalls, toolCallID)
+	}
+	if len(body.Snapshot.Patches) != 1 || body.Snapshot.Patches[0].ToolCallID != string(toolCallID) {
+		t.Fatalf("patches = %+v, want tool call ref %s", body.Snapshot.Patches, toolCallID)
+	}
+	if len(body.Snapshot.ValidationResults) != 1 || body.Snapshot.ValidationResults[0].State != "passed" {
+		t.Fatalf("validationResults = %+v, want passed", body.Snapshot.ValidationResults)
+	}
+	if len(body.Snapshot.RuntimeCheckpoints) != 1 || body.Snapshot.RuntimeCheckpoints[0].RunStateSnapshot != "completed" {
+		t.Fatalf("runtimeCheckpoints = %+v, want completed checkpoint", body.Snapshot.RuntimeCheckpoints)
+	}
+}
+
 func TestRunStatusEndpointReturnsPersistedRunStatus(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-status-http"
@@ -875,6 +1023,9 @@ func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.
 	}
 	if body.Snapshot.Workspace.ID != workspace.ID {
 		t.Fatalf("workspace = %+v, want %s", body.Snapshot.Workspace, workspace.ID)
+	}
+	if body.Snapshot.Workspace.State != "blocked" || body.Snapshot.Workspace.ActiveRunID != approvalRun.ID {
+		t.Fatalf("workspace projection = %+v, want blocked active run %s", body.Snapshot.Workspace, approvalRun.ID)
 	}
 	if len(body.Snapshot.Runs) != 3 {
 		t.Fatalf("runs = %+v, want 3 runs", body.Snapshot.Runs)
@@ -1179,8 +1330,8 @@ func TestDecisionResolveEndpointResolvesTicketAndAllowsRunResume(t *testing.T) {
 	if err := json.Unmarshal(resolveRec.Body.Bytes(), &resolved); err != nil {
 		t.Fatalf("unmarshal decision resolve: %v", err)
 	}
-	if resolved.Decision.State != "resolved" || resolved.Decision.ResolutionType != decisioncommon.ResolutionTypeApprovePath {
-		t.Fatalf("decision = %+v, want resolved approve_path", resolved.Decision)
+	if resolved.Decision.State != "resolved" || resolved.Decision.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
+		t.Fatalf("decision = %+v, want resolved provide_missing_info", resolved.Decision)
 	}
 
 	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/"+runID+"/resume", nil)
@@ -1198,25 +1349,29 @@ func TestDecisionResolveEndpointResolvesTicketAndAllowsRunResume(t *testing.T) {
 	}
 }
 
-func TestDecisionRejectEndpointRejectsTicketAndRunResumeFailsTerminally(t *testing.T) {
+func TestDecisionResolveEndpointRejectCurrentPathAndRunResumeFailsTerminally(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 	runID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-decision-reject-http"
 
 	createWorkspaceAndRunForHTTP(t, handler, "decision reject http workspace", runID)
 	started := startRunForHTTP(t, handler, runID)
 
-	rejectReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/"+started.BlockingTicketID+"/reject", nil)
+	rejectBody := strings.NewReader(`{"resolutionType":"reject_current_path","resolutionPayload":{"operator":"tester"}}`)
+	rejectReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/"+started.BlockingTicketID+"/resolve", rejectBody)
 	rejectRec := httptest.NewRecorder()
 	handler.ServeHTTP(rejectRec, rejectReq)
 	if rejectRec.Code != http.StatusOK {
-		t.Fatalf("decision reject status = %d, want 200, body=%s", rejectRec.Code, rejectRec.Body.String())
+		t.Fatalf("decision resolve status = %d, want 200, body=%s", rejectRec.Code, rejectRec.Body.String())
 	}
 	var rejected decisionResponse
 	if err := json.Unmarshal(rejectRec.Body.Bytes(), &rejected); err != nil {
-		t.Fatalf("unmarshal decision reject: %v", err)
+		t.Fatalf("unmarshal decision resolve: %v", err)
 	}
-	if rejected.Decision.State != "resolved" || rejected.Decision.ResolutionType != decisioncommon.ResolutionTypeRejectPath {
-		t.Fatalf("decision = %+v, want resolved reject_path", rejected.Decision)
+	if rejected.Decision.State != "resolved" || rejected.Decision.ResolutionType != decisioncommon.ResolutionTypeRejectCurrentPath {
+		t.Fatalf("decision = %+v, want resolved reject_current_path", rejected.Decision)
+	}
+	if rejected.Decision.ResolutionPayload["operator"] != "tester" {
+		t.Fatalf("resolution payload = %+v, want operator tester", rejected.Decision.ResolutionPayload)
 	}
 
 	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/"+runID+"/resume", nil)
@@ -1761,7 +1916,6 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 		`workorch_http_requests_total{endpoint="decision_list"} 0`,
 		`workorch_http_requests_total{endpoint="decision_get"} 0`,
 		`workorch_http_requests_total{endpoint="decision_resolve"} 1`,
-		`workorch_http_requests_total{endpoint="decision_reject"} 0`,
 		`workorch_http_requests_total{endpoint="approval_list"} 0`,
 		`workorch_http_requests_total{endpoint="approval_get"} 0`,
 		`workorch_http_requests_total{endpoint="approval_approve"} 0`,
@@ -1880,10 +2034,10 @@ func resolveDecisionForHTTP(t *testing.T, dataRoot string, ticketID string, reje
 		}
 	}()
 
-	resolutionType := decisioncommon.ResolutionTypeApprovePath
+	resolutionType := decisioncommon.ResolutionTypeProvideMissingInfo
 	resolutionID := "resolution-" + ticketID
 	if reject {
-		resolutionType = decisioncommon.ResolutionTypeRejectPath
+		resolutionType = decisioncommon.ResolutionTypeRejectCurrentPath
 		resolutionID += "-reject"
 	}
 	if err := session.Bootstrap.Exports().Services.DecisionService.EnsureResolvedTicket(ctx, decisionmodule.ResolveTicketCommand{
@@ -1898,7 +2052,7 @@ func resolveDecisionForHTTP(t *testing.T, dataRoot string, ticketID string, reje
 func rejectDecisionViaHTTP(t *testing.T, handler http.Handler, ticketID string) appservice.Decision {
 	t.Helper()
 
-	rejectReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/"+ticketID+"/reject", nil)
+	rejectReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/"+ticketID+"/resolve", strings.NewReader(`{"resolutionType":"reject_current_path"}`))
 	rejectRec := httptest.NewRecorder()
 	handler.ServeHTTP(rejectRec, rejectReq)
 	if rejectRec.Code != http.StatusOK {

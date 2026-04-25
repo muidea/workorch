@@ -29,12 +29,15 @@ func (s *Service) CreateTicket(ctx context.Context, cmd decisionservice.CreateTi
 	}
 
 	item := &decisionModel.Ticket{
-		ID:          cmd.TicketID,
-		WorkspaceID: cmd.WorkspaceID,
-		RunID:       cmd.RunID,
-		StepID:      cmd.StepID,
-		Reason:      cmd.Reason,
-		State:       common.DecisionTicketStateOpen,
+		ID:           cmd.TicketID,
+		WorkspaceID:  cmd.WorkspaceID,
+		RunID:        cmd.RunID,
+		StepID:       cmd.StepID,
+		Reason:       cmd.Reason,
+		DecisionKind: cmd.DecisionKind,
+		Question:     cmd.Question,
+		Context:      clonePayload(cmd.Context),
+		State:        common.DecisionTicketStateOpen,
 	}
 	if err := s.tickets.Create(ctx, item); err != nil {
 		return err
@@ -62,7 +65,13 @@ func (s *Service) EnsureTicket(ctx context.Context, cmd decisionservice.CreateTi
 
 	item, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err == nil {
-		if item.WorkspaceID != cmd.WorkspaceID || item.RunID != cmd.RunID || item.StepID != cmd.StepID || item.Reason != cmd.Reason {
+		if item.WorkspaceID != cmd.WorkspaceID ||
+			item.RunID != cmd.RunID ||
+			item.StepID != cmd.StepID ||
+			item.Reason != cmd.Reason ||
+			item.DecisionKind != cmd.DecisionKind ||
+			item.Question != cmd.Question ||
+			!sameResolutionPayload(item.Context, cmd.Context) {
 			return common.ErrConflict
 		}
 		return nil
@@ -75,6 +84,9 @@ func (s *Service) EnsureTicket(ctx context.Context, cmd decisionservice.CreateTi
 
 func (s *Service) ResolveTicket(ctx context.Context, cmd decisionservice.ResolveTicketCommand) error {
 	if cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
+		return common.ErrInvalidArgument
+	}
+	if !modulecommon.IsSupportedResolutionType(cmd.Type) {
 		return common.ErrInvalidArgument
 	}
 
@@ -90,7 +102,7 @@ func (s *Service) ResolveTicket(ctx context.Context, cmd decisionservice.Resolve
 		ID:       cmd.ResolutionID,
 		TicketID: cmd.TicketID,
 		Type:     cmd.Type,
-		Payload:  cmd.Payload,
+		Payload:  clonePayload(cmd.Payload),
 	}
 	if err := s.resolutions.Create(ctx, resolution); err != nil {
 		return err
@@ -126,6 +138,9 @@ func (s *Service) EnsureResolvedTicket(ctx context.Context, cmd decisionservice.
 	if cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
 		return common.ErrInvalidArgument
 	}
+	if !modulecommon.IsSupportedResolutionType(cmd.Type) {
+		return common.ErrInvalidArgument
+	}
 
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
@@ -149,4 +164,15 @@ func sameResolutionPayload(left map[string]any, right map[string]any) bool {
 		return true
 	}
 	return reflect.DeepEqual(left, right)
+}
+
+func clonePayload(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	for k, v := range input {
+		out[k] = v
+	}
+	return out
 }

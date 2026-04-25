@@ -6,19 +6,23 @@ import {
   DashboardOutlined,
   DeploymentUnitOutlined,
   ExceptionOutlined,
+  ProfileOutlined,
   PlayCircleOutlined,
   SafetyCertificateOutlined
 } from '@ant-design/icons';
 import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-components';
-import { App as AntApp, Button, ConfigProvider, Descriptions, Form, Input, Modal, Space, Statistic, Steps, Tag, theme } from 'antd';
+import { App as AntApp, Button, ConfigProvider, Descriptions, Empty, Form, Input, Modal, Select, Space, Statistic, Steps, Tag, Typography, theme } from 'antd';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Decision, DoD, Goal, Run, SliceDescriptor, SliceStatus, Workspace } from './types';
+import type { Approval, Decision, DoD, Goal, Run, RunSnapshot, SliceDescriptor, SliceStatus, Workspace, WorkspaceSnapshot } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
-type ViewKey = 'overview' | 'workspaces' | 'runs' | 'decisions' | 'approvals' | 'slices' | 'service';
+type ViewKey = 'board' | 'decisionQueue' | 'workspaceDetail' | 'overview' | 'workspaces' | 'runs' | 'decisions' | 'approvals' | 'slices' | 'service';
 
 const routes = [
+  { path: '/board', name: 'Workspace Board', icon: <DashboardOutlined /> },
+  { path: '/decisionQueue', name: 'Decision Queue', icon: <ExceptionOutlined /> },
+  { path: '/workspaceDetail', name: 'Workspace Detail', icon: <ProfileOutlined /> },
   { path: '/overview', name: 'Overview', icon: <DashboardOutlined /> },
   { path: '/workspaces', name: 'Workspaces', icon: <ApartmentOutlined /> },
   { path: '/runs', name: 'Runs', icon: <PlayCircleOutlined /> },
@@ -44,6 +48,20 @@ function tableResult<T>(data: T[]) {
     success: true,
     total: data.length
   };
+}
+
+function pendingCount(items?: Array<{ state: string }>) {
+  return (items ?? []).filter((item) => item.state === 'open' || item.state === 'pending').length;
+}
+
+function evidenceCount(snapshot?: RunSnapshot) {
+  if (!snapshot) {
+    return 0;
+  }
+  return (snapshot.toolCalls?.length ?? 0) +
+    (snapshot.patches?.length ?? 0) +
+    (snapshot.validationResults?.length ?? 0) +
+    (snapshot.runtimeCheckpoints?.length ?? 0);
 }
 
 function OverviewPage() {
@@ -89,6 +107,358 @@ function OverviewPage() {
           <Statistic value={approvals.filter((item) => item.state === 'pending').length} suffix={`/ ${approvals.length}`} />
         </ProCard>
       </ProCard>
+    </PageContainer>
+  );
+}
+
+type ControlPlaneProps = {
+  selectedWorkspaceId?: string;
+  onOpenWorkspace: (workspaceId: string) => void;
+};
+
+function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
+  const { message } = AntApp.useApp();
+  const [snapshots, setSnapshots] = useState<WorkspaceSnapshot[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const loadBoard = async () => {
+    setLoading(true);
+    try {
+      const workspaces = await workorchApi.listWorkspaces();
+      const nextSnapshots = await Promise.all(workspaces.map((item) => workorchApi.readWorkspaceSnapshot(item.id)));
+      setSnapshots(nextSnapshots);
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadBoard();
+  }, []);
+
+  const activateWorkspaceExecution = async (workspaceId: string) => {
+    try {
+      await workorchApi.activateWorkspaceExecution(workspaceId);
+      message.success('Workspace execution activated');
+      await loadBoard();
+    } catch (error) {
+      message.error(errorMessage(error));
+    }
+  };
+
+  return (
+    <PageContainer
+      title="Workspace Board"
+      subTitle="Current delivery state across workspaces"
+      extra={<Button onClick={() => void loadBoard()} loading={loading}>Refresh</Button>}
+    >
+      {snapshots.length === 0 && !loading ? (
+        <Empty description="No workspace yet" />
+      ) : (
+        <ProCard gutter={16} wrap loading={loading}>
+          {snapshots.map((snapshot) => {
+            const activeRun = snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId);
+            const pendingDecisions = pendingCount(snapshot.decisions);
+            const pendingApprovals = pendingCount(snapshot.approvals);
+            return (
+              <ProCard
+                key={snapshot.workspace.id}
+                title={snapshot.workspace.title || snapshot.workspace.id}
+                subTitle={snapshot.workspace.id}
+                colSpan={{ xs: 24, md: 12, xl: 8 }}
+                bordered
+                extra={stateTag(snapshot.workspace.state)}
+              >
+                <Descriptions
+                  column={1}
+                  items={[
+                    { key: 'workingDirectory', label: 'Working Directory', children: snapshot.workspace.workingDirectory },
+                    { key: 'activeRun', label: 'Active Run', children: activeRun ? `${activeRun.id} / ${activeRun.state}` : '-' },
+                    { key: 'runs', label: 'Runs', children: snapshot.runs?.length ?? 0 },
+                    { key: 'decisions', label: 'Open Decisions', children: pendingDecisions },
+                    { key: 'approvals', label: 'Pending Approvals', children: pendingApprovals }
+                  ]}
+                />
+                <Space className="workorch-section" wrap>
+                  <Button type="primary" onClick={() => onOpenWorkspace(snapshot.workspace.id)}>Open detail</Button>
+                  {!activeRun ? <Button onClick={() => void activateWorkspaceExecution(snapshot.workspace.id)}>Start execution</Button> : null}
+                  {activeRun ? <Button onClick={() => void workorchApi.resumeRun(activeRun.id).then(loadBoard).catch((error: unknown) => message.error(errorMessage(error)))}>Resume active run</Button> : null}
+                </Space>
+              </ProCard>
+            );
+          })}
+        </ProCard>
+      )}
+    </PageContainer>
+  );
+}
+
+function DecisionQueuePage() {
+  const { message } = AntApp.useApp();
+  const actionRef = useRef<ActionType | undefined>(undefined);
+
+  const resolve = async (item: Decision, resolutionType: string, payload?: Record<string, unknown>) => {
+    try {
+      await workorchApi.resolveDecision(item.id, resolutionType, payload);
+      message.success(`Decision resolved as ${resolutionType}`);
+      actionRef.current?.reload();
+    } catch (error) {
+      message.error(errorMessage(error));
+    }
+  };
+
+  const columns: ProColumns<Decision>[] = [
+    { title: 'Ticket ID', dataIndex: 'id', copyable: true },
+    { title: 'Workspace', dataIndex: 'workspaceId', copyable: true },
+    { title: 'Run', dataIndex: 'runId', copyable: true },
+    { title: 'Kind', dataIndex: 'decisionKind' },
+    { title: 'Question', dataIndex: 'question', ellipsis: true },
+    { title: 'Reason', dataIndex: 'reason', ellipsis: true },
+    { title: 'State', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
+    {
+      title: 'Actions',
+      valueType: 'option',
+      render: (_, item) => item.state === 'open' ? (
+        <Space wrap>
+          <Button size="small" type="primary" onClick={() => void resolve(item, 'provide_missing_info', { operator: 'console' })}>Provide info</Button>
+          <Button size="small" onClick={() => void resolve(item, 'replan', { operator: 'console' })}>Replan</Button>
+          <Button size="small" danger onClick={() => void resolve(item, 'reject_current_path', { operator: 'console' })}>Reject path</Button>
+        </Space>
+      ) : stateTag(item.resolutionType)
+    }
+  ];
+
+  return (
+    <PageContainer title="Decision Queue" subTitle="Process pending decision tickets with formal resolution types">
+      <ProTable<Decision>
+        actionRef={actionRef}
+        rowKey="id"
+        search={false}
+        columns={columns}
+        request={async () => {
+          const items = await workorchApi.listDecisions();
+          return tableResult(items.sort((left, right) => Number(left.state !== 'open') - Number(right.state !== 'open')));
+        }}
+      />
+    </PageContainer>
+  );
+}
+
+function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 'selectedWorkspaceId'>) {
+  const { message } = AntApp.useApp();
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [workspaceId, setWorkspaceId] = useState<string | undefined>(selectedWorkspaceId);
+  const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | undefined>(undefined);
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [dods, setDoDs] = useState<DoD[]>([]);
+  const [runSnapshot, setRunSnapshot] = useState<RunSnapshot | undefined>(undefined);
+  const [loading, setLoading] = useState(false);
+  const [activationOpen, setActivationOpen] = useState(false);
+  const [activationLoading, setActivationLoading] = useState(false);
+  const [activationForm] = Form.useForm();
+
+  useEffect(() => {
+    void workorchApi.listWorkspaces().then((items) => {
+      setWorkspaces(items);
+      if (!workspaceId && items[0]) {
+        setWorkspaceId(items[0].id);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (selectedWorkspaceId) {
+      setWorkspaceId(selectedWorkspaceId);
+    }
+  }, [selectedWorkspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      return;
+    }
+    setLoading(true);
+    void Promise.all([
+      workorchApi.readWorkspaceSnapshot(workspaceId),
+      workorchApi.listGoals(workspaceId),
+      workorchApi.listDoDs(workspaceId)
+    ]).then(([nextSnapshot, nextGoals, nextDoDs]) => {
+      setSnapshot(nextSnapshot);
+      setGoals(nextGoals);
+      setDoDs(nextDoDs);
+      setRunSnapshot(undefined);
+    }).catch((error: unknown) => {
+      message.error(errorMessage(error));
+    }).finally(() => setLoading(false));
+  }, [workspaceId]);
+
+  const readyDoDs = dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
+
+  const refreshWorkspace = async () => {
+    if (!workspaceId) {
+      return;
+    }
+    const nextSnapshot = await workorchApi.readWorkspaceSnapshot(workspaceId);
+    setSnapshot(nextSnapshot);
+    setRunSnapshot(undefined);
+  };
+
+  const activateWorkspaceExecution = async (goalId?: string, doDId?: string) => {
+    if (!workspaceId) {
+      return;
+    }
+    setActivationLoading(true);
+    try {
+      const activation = await workorchApi.activateWorkspaceExecution(workspaceId, goalId, doDId);
+      setSnapshot(activation.snapshot);
+      setRunSnapshot(undefined);
+      setActivationOpen(false);
+      activationForm.resetFields();
+      message.success('Workspace execution activated');
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setActivationLoading(false);
+    }
+  };
+
+  const requestWorkspaceActivation = () => {
+    if (goals.length === 1 && readyDoDs.length === 1) {
+      void activateWorkspaceExecution(goals[0].id, readyDoDs[0].id);
+      return;
+    }
+    activationForm.setFieldsValue({
+      goalId: goals[0]?.id,
+      doDId: readyDoDs[0]?.id
+    });
+    setActivationOpen(true);
+  };
+
+  const runColumns: ProColumns<Run>[] = [
+    { title: 'Run ID', dataIndex: 'id', copyable: true },
+    { title: 'Goal', dataIndex: 'goalId', copyable: true },
+    { title: 'DoD', dataIndex: 'doDId', copyable: true },
+    { title: 'State', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
+    { title: 'Blocking Ticket', dataIndex: 'blockingTicketId', copyable: true },
+    {
+      title: 'Actions',
+      valueType: 'option',
+      render: (_, item) => (
+        <Space>
+          <Button size="small" onClick={() => void workorchApi.readRunSnapshot(item.id).then(setRunSnapshot).catch((error: unknown) => message.error(errorMessage(error)))}>Evidence</Button>
+          <Button
+            size="small"
+            onClick={() => void workorchApi.resumeRun(item.id)
+              .then(refreshWorkspace)
+              .catch((error: unknown) => message.error(errorMessage(error)))}
+          >
+            Resume
+          </Button>
+        </Space>
+      )
+    }
+  ];
+
+  return (
+    <PageContainer
+      title="Workspace Detail"
+      subTitle="Goal, DoD, Run, Decision, Approval, and execution evidence context"
+      extra={
+        <Space wrap>
+          <Button type="primary" disabled={!workspaceId} onClick={requestWorkspaceActivation}>Start execution</Button>
+          <Select
+            style={{ width: 360 }}
+            placeholder="Select workspace"
+            value={workspaceId}
+            onChange={setWorkspaceId}
+            options={workspaces.map((item) => ({ value: item.id, label: `${item.title || item.id} (${item.id})` }))}
+          />
+        </Space>
+      }
+    >
+      {snapshot ? (
+        <>
+          <ProCard loading={loading} title={snapshot.workspace.title || snapshot.workspace.id} extra={stateTag(snapshot.workspace.state)}>
+            <Descriptions
+              column={2}
+              items={[
+                { key: 'id', label: 'Workspace ID', children: snapshot.workspace.id },
+                { key: 'activeRun', label: 'Active Run', children: snapshot.workspace.activeRunId || '-' },
+                { key: 'description', label: 'Description', children: snapshot.workspace.description || '-' },
+                { key: 'workingDirectory', label: 'Working Directory', children: snapshot.workspace.workingDirectory }
+              ]}
+            />
+          </ProCard>
+          <ProCard gutter={16} wrap className="workorch-section">
+            <ProCard title="Goal" colSpan="50%">
+              {goals.length ? goals.map((item) => <Typography.Paragraph key={item.id}>{item.text}</Typography.Paragraph>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No goal" />}
+            </ProCard>
+            <ProCard title="Definition of Done" colSpan="50%">
+              {dods.length ? dods.flatMap((item) => item.items).map((item) => <Tag key={item}>{item}</Tag>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No DoD" />}
+            </ProCard>
+          </ProCard>
+          <ProCard title="Runs" className="workorch-section">
+            <ProTable<Run> rowKey="id" search={false} pagination={false} columns={runColumns} dataSource={snapshot.runs ?? []} />
+          </ProCard>
+          <ProCard gutter={16} wrap className="workorch-section">
+            <ProCard title="Decisions" colSpan="50%">
+              <ProTable<Decision> rowKey="id" search={false} pagination={false} columns={[
+                { title: 'Ticket', dataIndex: 'id', copyable: true },
+                { title: 'State', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
+                { title: 'Resolution', dataIndex: 'resolutionType' }
+              ]} dataSource={snapshot.decisions ?? []} />
+            </ProCard>
+            <ProCard title="Approvals" colSpan="50%">
+              <ProTable<Approval> rowKey="id" search={false} pagination={false} columns={[
+                { title: 'Approval', dataIndex: 'id', copyable: true },
+                { title: 'State', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
+                { title: 'Reason', dataIndex: 'reason' }
+              ]} dataSource={snapshot.approvals ?? []} />
+            </ProCard>
+          </ProCard>
+          <ProCard title="Selected Run Evidence" className="workorch-section" extra={runSnapshot ? <Tag>{evidenceCount(runSnapshot)} evidence records</Tag> : null}>
+            {runSnapshot ? (
+              <Descriptions
+                column={2}
+                items={[
+                  { key: 'run', label: 'Run', children: `${runSnapshot.run.id} / ${runSnapshot.run.state}` },
+                  { key: 'steps', label: 'Steps', children: runSnapshot.steps?.length ?? 0 },
+                  { key: 'toolCalls', label: 'Tool Calls', children: runSnapshot.toolCalls?.length ?? 0 },
+                  { key: 'patches', label: 'Patches', children: runSnapshot.patches?.length ?? 0 },
+                  { key: 'validations', label: 'Validation Results', children: runSnapshot.validationResults?.length ?? 0 },
+                  { key: 'checkpoints', label: 'Runtime Checkpoints', children: runSnapshot.runtimeCheckpoints?.length ?? 0 }
+                ]}
+              />
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Select a run evidence view" />
+            )}
+          </ProCard>
+        </>
+      ) : (
+        <Empty description={loading ? 'Loading workspace detail' : 'No workspace selected'} />
+      )}
+      <Modal
+        title="Start workspace execution"
+        open={activationOpen}
+        confirmLoading={activationLoading}
+        onCancel={() => setActivationOpen(false)}
+        onOk={() => activationForm.submit()}
+        okText="Start execution"
+      >
+        <Form
+          form={activationForm}
+          layout="vertical"
+          onFinish={(values: { goalId: string; doDId: string }) => void activateWorkspaceExecution(values.goalId, values.doDId)}
+        >
+          <Form.Item name="goalId" label="Goal" rules={[{ required: true }]}>
+            <Select options={goals.map((item) => ({ value: item.id, label: `${item.text} (${item.id})` }))} />
+          </Form.Item>
+          <Form.Item name="doDId" label="Definition of Done" rules={[{ required: true }]}>
+            <Select options={readyDoDs.map((item) => ({ value: item.id, label: `${item.items.join(' / ')} (${item.id})` }))} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </PageContainer>
   );
 }
@@ -763,9 +1133,21 @@ function ServicePage() {
 }
 
 function ConsoleApp() {
-  const [view, setView] = useState<ViewKey>('overview');
+  const [view, setView] = useState<ViewKey>('board');
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | undefined>(undefined);
   const renderContent = () => {
     switch (view) {
+      case 'board':
+        return <WorkspaceBoardPage onOpenWorkspace={(workspaceId) => {
+          setSelectedWorkspaceId(workspaceId);
+          setView('workspaceDetail');
+        }} />;
+      case 'decisionQueue':
+        return <DecisionQueuePage />;
+      case 'workspaceDetail':
+        return <WorkspaceDetailPage selectedWorkspaceId={selectedWorkspaceId} />;
+      case 'overview':
+        return <OverviewPage />;
       case 'workspaces':
         return <WorkspacesPage />;
       case 'runs':
@@ -779,7 +1161,10 @@ function ConsoleApp() {
       case 'service':
         return <ServicePage />;
       default:
-        return <OverviewPage />;
+        return <WorkspaceBoardPage onOpenWorkspace={(workspaceId) => {
+          setSelectedWorkspaceId(workspaceId);
+          setView('workspaceDetail');
+        }} />;
     }
   };
 

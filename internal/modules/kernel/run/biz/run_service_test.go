@@ -662,6 +662,14 @@ func TestService_CompleteRun_WithoutOrchestrator(t *testing.T) {
 	if err := service.CreateRun(ctx, runservice.CreateRunCommand{RunID: runID, WorkspaceID: workspaceID}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
+	running, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run before complete: %v", err)
+	}
+	running.State = common.RunStateRunning
+	if err := runRepo.Update(ctx, running); err != nil {
+		t.Fatalf("set run running: %v", err)
+	}
 
 	if err := service.CompleteRun(ctx, runservice.CompleteRunCommand{RunID: runID}); err != nil {
 		t.Fatalf("complete run: %v", err)
@@ -689,8 +697,17 @@ func TestService_CompleteRunAndFailRun_ValidateArguments(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(memory.NewRunRepository(), memory.NewWorkspaceRepository(), nil, nil)
 
+	if err := service.ValidateRun(ctx, runservice.ValidateRunCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("validate empty err = %v, want invalid argument", err)
+	}
 	if err := service.CompleteRun(ctx, runservice.CompleteRunCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("complete empty err = %v, want invalid argument", err)
+	}
+	if err := service.CancelRun(ctx, runservice.CancelRunCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("cancel empty err = %v, want invalid argument", err)
+	}
+	if err := service.SupersedeRun(ctx, runservice.SupersedeRunCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("supersede empty err = %v, want invalid argument", err)
 	}
 
 	if err := service.FailRun(ctx, runservice.FailRunCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
@@ -698,6 +715,95 @@ func TestService_CompleteRunAndFailRun_ValidateArguments(t *testing.T) {
 	}
 	if err := service.FailRun(ctx, runservice.FailRunCommand{RunID: common.RunID("run-1")}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("fail empty reason err = %v, want invalid argument", err)
+	}
+}
+
+func TestService_RunStateMachineTransitionsWithoutOrchestrator(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	service := NewService(runRepo, workspaceRepo, nil, nil)
+
+	workspaceID := common.WorkspaceID("ws-state-machine")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	validatingRunID := common.RunID("run-state-validating")
+	if err := service.CreateRun(ctx, runservice.CreateRunCommand{RunID: validatingRunID, WorkspaceID: workspaceID}); err != nil {
+		t.Fatalf("create validating run: %v", err)
+	}
+	validatingRun, err := runRepo.Get(ctx, validatingRunID)
+	if err != nil {
+		t.Fatalf("get validating run: %v", err)
+	}
+	validatingRun.State = common.RunStateRunning
+	if err := runRepo.Update(ctx, validatingRun); err != nil {
+		t.Fatalf("set validating run running: %v", err)
+	}
+	if err := service.ValidateRun(ctx, runservice.ValidateRunCommand{RunID: validatingRunID}); err != nil {
+		t.Fatalf("validate run: %v", err)
+	}
+	validatingRun, err = runRepo.Get(ctx, validatingRunID)
+	if err != nil {
+		t.Fatalf("get validated run: %v", err)
+	}
+	if validatingRun.State != common.RunStateValidating {
+		t.Fatalf("state = %q, want validating", validatingRun.State)
+	}
+	if err := service.CompleteRun(ctx, runservice.CompleteRunCommand{RunID: validatingRunID}); err != nil {
+		t.Fatalf("complete validating run: %v", err)
+	}
+	if err := service.CancelRun(ctx, runservice.CancelRunCommand{RunID: validatingRunID}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("cancel completed run err = %v, want conflict", err)
+	}
+	if err := service.SupersedeRun(ctx, runservice.SupersedeRunCommand{RunID: validatingRunID}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("supersede completed run err = %v, want conflict", err)
+	}
+
+	cancelRunID := common.RunID("run-state-cancel")
+	if err := service.CreateRun(ctx, runservice.CreateRunCommand{RunID: cancelRunID, WorkspaceID: workspaceID}); err != nil {
+		t.Fatalf("create cancel run: %v", err)
+	}
+	if err := service.CancelRun(ctx, runservice.CancelRunCommand{RunID: cancelRunID}); err != nil {
+		t.Fatalf("cancel run: %v", err)
+	}
+	cancelled, err := runRepo.Get(ctx, cancelRunID)
+	if err != nil {
+		t.Fatalf("get cancelled run: %v", err)
+	}
+	if cancelled.State != common.RunStateCancelled {
+		t.Fatalf("cancelled state = %q, want cancelled", cancelled.State)
+	}
+	if err := service.FailRun(ctx, runservice.FailRunCommand{RunID: cancelRunID, Reason: "late fail"}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("fail cancelled run err = %v, want conflict", err)
+	}
+
+	supersedeRunID := common.RunID("run-state-supersede")
+	if err := service.CreateRun(ctx, runservice.CreateRunCommand{RunID: supersedeRunID, WorkspaceID: workspaceID}); err != nil {
+		t.Fatalf("create supersede run: %v", err)
+	}
+	if err := service.SupersedeRun(ctx, runservice.SupersedeRunCommand{RunID: supersedeRunID}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("supersede created run err = %v, want conflict", err)
+	}
+	superseded, err := runRepo.Get(ctx, supersedeRunID)
+	if err != nil {
+		t.Fatalf("get supersede run: %v", err)
+	}
+	superseded.State = common.RunStateBlockedOnDecision
+	superseded.BlockingTicketID = common.TicketID("ticket-state-supersede")
+	if err := runRepo.Update(ctx, superseded); err != nil {
+		t.Fatalf("set supersede run blocked: %v", err)
+	}
+	if err := service.SupersedeRun(ctx, runservice.SupersedeRunCommand{RunID: supersedeRunID}); err != nil {
+		t.Fatalf("supersede blocked run: %v", err)
+	}
+	superseded, err = runRepo.Get(ctx, supersedeRunID)
+	if err != nil {
+		t.Fatalf("get superseded run: %v", err)
+	}
+	if superseded.State != common.RunStateSuperseded || superseded.BlockingTicketID != "" {
+		t.Fatalf("superseded run = %+v, want superseded with cleared refs", superseded)
 	}
 }
 

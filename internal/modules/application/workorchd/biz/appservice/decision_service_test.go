@@ -52,7 +52,9 @@ func TestListDecisionsWithBackendReturnsFilteredTickets(t *testing.T) {
 func TestReadDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-read", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-read")
-	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID); err != nil {
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
 
@@ -63,8 +65,8 @@ func TestReadDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 	if item.ID != started.BlockingTicketID || item.State != "resolved" {
 		t.Fatalf("decision = %+v, want resolved decision", item)
 	}
-	if item.ResolutionType != decisioncommon.ResolutionTypeApprovePath {
-		t.Fatalf("resolutionType = %q, want approve_path", item.ResolutionType)
+	if item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
+		t.Fatalf("resolutionType = %q, want provide_missing_info", item.ResolutionType)
 	}
 }
 
@@ -72,43 +74,70 @@ func TestResolveDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-resolve", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-resolve")
 
-	item, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID)
+	item, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
+		ResolutionPayload: map[string]any{"operator": "tester"},
+	})
 	if err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
-	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeApprovePath {
-		t.Fatalf("decision = %+v, want resolved approve_path", item)
+	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
+		t.Fatalf("decision = %+v, want resolved provide_missing_info", item)
 	}
-	if item.ResolutionID != "resolution-"+started.BlockingTicketID {
-		t.Fatalf("resolutionID = %q, want resolution-%s", item.ResolutionID, started.BlockingTicketID)
+	if item.ResolutionID != "resolution-"+started.BlockingTicketID+"-"+decisioncommon.ResolutionTypeProvideMissingInfo {
+		t.Fatalf("resolutionID = %q, want resolution-%s-%s", item.ResolutionID, started.BlockingTicketID, decisioncommon.ResolutionTypeProvideMissingInfo)
+	}
+	if item.ResolutionPayload["operator"] != "tester" {
+		t.Fatalf("resolutionPayload = %+v, want operator tester", item.ResolutionPayload)
 	}
 }
 
-func TestRejectDecisionWithBackendReturnsResolvedRejectDecision(t *testing.T) {
+func TestResolveDecisionWithBackendSupportsRejectCurrentPath(t *testing.T) {
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-reject", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-reject")
 
-	item, err := RejectDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID)
+	item, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType:    decisioncommon.ResolutionTypeRejectCurrentPath,
+		ResolutionPayload: map[string]any{"operator": "tester", "reason": "not viable"},
+	})
 	if err != nil {
-		t.Fatalf("RejectDecisionWithBackend: %v", err)
+		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
-	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeRejectPath {
-		t.Fatalf("decision = %+v, want resolved reject_path", item)
+	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeRejectCurrentPath {
+		t.Fatalf("decision = %+v, want resolved reject_current_path", item)
 	}
-	if item.ResolutionID != "resolution-"+started.BlockingTicketID+"-reject" {
-		t.Fatalf("resolutionID = %q, want resolution-%s-reject", item.ResolutionID, started.BlockingTicketID)
+	if item.ResolutionID != "resolution-"+started.BlockingTicketID+"-"+decisioncommon.ResolutionTypeRejectCurrentPath {
+		t.Fatalf("resolutionID = %q, want formal reject resolution id", item.ResolutionID)
+	}
+	if item.ResolutionPayload["reason"] != "not viable" {
+		t.Fatalf("resolutionPayload = %+v, want reject reason", item.ResolutionPayload)
 	}
 }
 
-func TestRejectDecisionWithBackendReturnsConflictAfterApproveResolution(t *testing.T) {
+func TestResolveDecisionWithBackendReturnsConflictAfterResolution(t *testing.T) {
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-conflict", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-conflict")
-	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID); err != nil {
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
 
-	if _, err := RejectDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID); !errors.Is(err, common.ErrConflict) {
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType: decisioncommon.ResolutionTypeRejectCurrentPath,
+	}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("err = %v, want conflict", err)
+	}
+}
+
+func TestResolveDecisionWithBackendRejectsUnsupportedResolutionType(t *testing.T) {
+	dataRoot := t.TempDir()
+	started := prepareDecisionRun(t, dataRoot, "ws-decision-invalid", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-invalid")
+
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType: "unsupported_resolution",
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want invalid argument", err)
 	}
 }
 

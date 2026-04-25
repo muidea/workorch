@@ -21,6 +21,18 @@ func TestRuntimeDependenciesFromExportsMapsGroupedCapabilities(t *testing.T) {
 	if deps.Snapshot.Steps != exports.Repositories.Steps {
 		t.Fatal("snapshot steps repository mismatch")
 	}
+	if deps.Snapshot.ToolCalls != exports.Repositories.ToolCalls {
+		t.Fatal("snapshot tool calls repository mismatch")
+	}
+	if deps.Snapshot.Patches != exports.Repositories.Patches {
+		t.Fatal("snapshot patches repository mismatch")
+	}
+	if deps.Snapshot.ValidationResults != exports.Repositories.ValidationResults {
+		t.Fatal("snapshot validation results repository mismatch")
+	}
+	if deps.Snapshot.RuntimeCheckpoints != exports.Repositories.RuntimeCheckpoints {
+		t.Fatal("snapshot runtime checkpoints repository mismatch")
+	}
 	if deps.Snapshot.Resolutions != exports.Repositories.Resolutions {
 		t.Fatal("snapshot resolutions repository mismatch")
 	}
@@ -73,7 +85,7 @@ func TestRuntimeDependenciesFromExportsActionPortsDriveModuleServices(t *testing
 	if _, err := exports.Repositories.Tickets.Get(ctx, ticketID); err != nil {
 		t.Fatalf("get ticket from repository: %v", err)
 	}
-	if err := runtime.EnsureResolvedTicket(ctx, common.ResolutionID("resolution-runtime-deps-port"), ticketID, "approve_path", map[string]any{"operator": "runtime-deps"}); err != nil {
+	if err := runtime.EnsureResolvedTicket(ctx, common.ResolutionID("resolution-runtime-deps-port"), ticketID, "provide_missing_info", map[string]any{"operator": "runtime-deps"}); err != nil {
 		t.Fatalf("ensure resolved ticket: %v", err)
 	}
 	if _, err := runtime.GetResolutionByTicketID(ctx, ticketID); err != nil {

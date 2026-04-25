@@ -159,7 +159,6 @@ Status: completed
 - `GET /api/v1/workorch/decisions`
 - `GET /api/v1/workorch/decisions/{ticketId}`
 - `POST /api/v1/workorch/decisions/{ticketId}/resolve`
-- `POST /api/v1/workorch/decisions/{ticketId}/reject`
 
 验收：
 
@@ -172,7 +171,7 @@ Status: completed
 - 已提供 `GET /api/v1/workorch/decisions`
 - 已提供 `GET /api/v1/workorch/decisions/{ticketId}`
 - 已提供 `POST /api/v1/workorch/decisions/{ticketId}/resolve`
-- 已提供 `POST /api/v1/workorch/decisions/{ticketId}/reject`
+- 已支持正式 resolution 类型 `provide_missing_info`、`reject_current_path`、`replan`
 - 已支持按 `workspaceId` / `runId` 过滤 decision ticket
 - 已固定对外 decision 读模型，包括 `state`、`reason`、`runId`、`workspaceId`、resolution 字段
 - 已补 `appservice`、HTTP、进程级 file 后端测试

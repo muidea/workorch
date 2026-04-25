@@ -76,6 +76,11 @@ wait_ready
 curl -fsS "$BASE_URL/healthz" | grep '"status": "ok"' >/dev/null
 curl -fsS "$BASE_URL/readyz" | grep '"status": "ready"' >/dev/null
 curl -fsS "$BASE_URL/metrics" | grep 'workorch_http_requests_total' >/dev/null
+curl -fsS "$BASE_URL/console" | grep 'workorch Console' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.css" | grep 'workorch-section' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Workspace Board' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Decision Queue' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Workspace Detail' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
   -d '{"title":"verify workspace","description":"verify workspace description"}' >"$TMP_DIR/workspace.json"
 workspace_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/workspace.json" | head -n1)"
@@ -113,14 +118,16 @@ if [[ "$BACKEND" == "file" ]]; then
   curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_id" | grep '"state": "open"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/decisions?runId=run-runtime-decision-block-verify" | grep "\"id\": \"$ticket_id\"" >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_id/resolve" | grep '"resolutionType": "approve_path"' >/dev/null
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_id/resolve" -H 'Content-Type: application/json' \
+    -d '{"resolutionType":"provide_missing_info"}' | grep '"resolutionType": "provide_missing_info"' >/dev/null
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-verify/resume" | grep '"state": "completed"' >/dev/null
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" -H 'Content-Type: application/json' \
     -d '{"runId":"run-runtime-decision-block-rejected-verify","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'"}' | grep '"id": "run-runtime-decision-block-rejected-verify"' >/dev/null
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-rejected-verify/start" >"$TMP_DIR/run-runtime-decision-block-rejected-verify.json"
   reject_ticket_id="$(sed -n 's/.*"blockingTicketId": "\(.*\)".*/\1/p' "$TMP_DIR/run-runtime-decision-block-rejected-verify.json" | head -n1)"
   [[ -n "$reject_ticket_id" ]]
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$reject_ticket_id/reject" | grep '"resolutionType": "reject_path"' >/dev/null
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$reject_ticket_id/resolve" -H 'Content-Type: application/json' \
+    -d '{"resolutionType":"reject_current_path","resolutionPayload":{"operator":"verify"}}' | grep '"resolutionType": "reject_current_path"' >/dev/null
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-rejected-verify/resume" | grep '"state": "failed"' >/dev/null
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" -H 'Content-Type: application/json' \
     -d '{"runId":"run-runtime-approval-block-verify","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'"}' | grep '"id": "run-runtime-approval-block-verify"' >/dev/null
@@ -169,7 +176,7 @@ if [[ "$BACKEND" == "file" ]]; then
   curl -fsS "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-verify" | grep '"state": "completed"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-rejected-verify" | grep '"state": "failed"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_id" | grep '"state": "resolved"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$reject_ticket_id" | grep '"resolutionType": "reject_path"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$reject_ticket_id" | grep '"resolutionType": "reject_current_path"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_id" | grep '"state": "approved"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/approvals/$reject_approval_id" | grep '"state": "rejected"' >/dev/null
 fi

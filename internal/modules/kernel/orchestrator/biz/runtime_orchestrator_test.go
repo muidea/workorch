@@ -131,8 +131,11 @@ func TestRuntimeOrchestrator_StartRunPublishesRunAndStepEvents(t *testing.T) {
 	if published[3].Topic != events.TopicStepStateChanged || published[3].Payload[events.PayloadKeyState] != string(common.StepStateCompleted) {
 		t.Fatalf("fourth event = %#v, want step completed", published[3])
 	}
-	if published[4].Topic != events.TopicRunStateChanged || published[4].Payload[events.PayloadKeyState] != string(common.RunStateCompleted) {
-		t.Fatalf("fifth event = %#v, want run completed", published[4])
+	if published[4].Topic != events.TopicRunStateChanged || published[4].Payload[events.PayloadKeyState] != string(common.RunStateValidating) {
+		t.Fatalf("fifth event = %#v, want run validating", published[4])
+	}
+	if published[5].Topic != events.TopicRunStateChanged || published[5].Payload[events.PayloadKeyState] != string(common.RunStateCompleted) {
+		t.Fatalf("sixth event = %#v, want run completed", published[5])
 	}
 	last := published[len(published)-1]
 	if last.Topic != events.TopicWorkspaceStateChanged || last.Payload[events.PayloadKeyActiveRunID] != "" {
@@ -501,7 +504,7 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeDecisionR
 	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
 		ID:       common.ResolutionID("resolution-runtime-resume"),
 		TicketID: ticket.ID,
-		Type:     "approve_path",
+		Type:     "provide_missing_info",
 		Payload:  map[string]any{"operator": "tester"},
 	}); err != nil {
 		t.Fatalf("create resolution: %v", err)
@@ -585,7 +588,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsRuntimeDecisionWithoutDispatchingNe
 	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
 		ID:       common.ResolutionID("resolution-runtime-decision-reject"),
 		TicketID: ticket.ID,
-		Type:     "reject_path",
+		Type:     "reject_current_path",
 		Payload:  map[string]any{"operator": "tester", "outcome": "reject"},
 	}); err != nil {
 		t.Fatalf("create resolution: %v", err)
@@ -829,7 +832,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsMultipleDecisionGates(t *testing.T
 		if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
 			ID:       resolutionID,
 			TicketID: ticketID,
-			Type:     "approve_path",
+			Type:     "provide_missing_info",
 			Payload:  map[string]any{"operator": "tester"},
 		}); err != nil {
 			t.Fatalf("create resolution for %s: %v", ticketID, err)
@@ -936,7 +939,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsSecondDecisionGateWithoutDispatchin
 	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
 		ID:       common.ResolutionID("resolution-multi-gate-reject-1"),
 		TicketID: ticket1.ID,
-		Type:     "approve_path",
+		Type:     "provide_missing_info",
 		Payload:  map[string]any{"operator": "tester"},
 	}); err != nil {
 		t.Fatalf("create resolution1: %v", err)
@@ -957,7 +960,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsSecondDecisionGateWithoutDispatchin
 	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
 		ID:       common.ResolutionID("resolution-multi-gate-reject-2"),
 		TicketID: ticket2.ID,
-		Type:     "reject_path",
+		Type:     "reject_current_path",
 		Payload:  map[string]any{"operator": "tester"},
 	}); err != nil {
 		t.Fatalf("create resolution2: %v", err)
@@ -1049,7 +1052,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsDecisionThenApprovalGates(t *testi
 	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
 		ID:       common.ResolutionID("resolution-mixed-gate-1"),
 		TicketID: ticket.ID,
-		Type:     "approve_path",
+		Type:     "provide_missing_info",
 		Payload:  map[string]any{"operator": "tester"},
 	}); err != nil {
 		t.Fatalf("create resolution: %v", err)
@@ -1162,7 +1165,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsDecisionThenRejectedApproval(t *te
 	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
 		ID:       common.ResolutionID("resolution-mixed-gate-reject-1"),
 		TicketID: ticket.ID,
-		Type:     "approve_path",
+		Type:     "provide_missing_info",
 		Payload:  map[string]any{"operator": "tester"},
 	}); err != nil {
 		t.Fatalf("create resolution: %v", err)
@@ -1562,7 +1565,7 @@ func TestRuntimeOrchestrator_ResumeRunRequiresResolvedTicket(t *testing.T) {
 	_ = resolutionRepo.Create(ctx, &decisionmodel.Resolution{
 		ID:       common.ResolutionID("resolution-1"),
 		TicketID: ticketID,
-		Type:     "approve_path",
+		Type:     "provide_missing_info",
 		Payload:  map[string]any{"operator": "tester"},
 	})
 
@@ -1606,7 +1609,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsDecisionWithoutDispatchingStep(t *t
 	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
 		ID:       common.ResolutionID("resolution-decision-reject"),
 		TicketID: ticketID,
-		Type:     "reject_path",
+		Type:     "reject_current_path",
 		Payload:  map[string]any{"operator": "tester"},
 	}); err != nil {
 		t.Fatalf("seed resolution: %v", err)
@@ -1635,6 +1638,65 @@ func TestRuntimeOrchestrator_ResumeRunRejectsDecisionWithoutDispatchingStep(t *t
 	last := hub.Published()[len(hub.Published())-1]
 	if last.Topic != events.TopicWorkspaceStateChanged || last.Payload[events.PayloadKeyActiveRunID] != "" {
 		t.Fatalf("last event = %#v, want workspace release event", last)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeRunReplanSupersedesRun(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "ok"}}
+	hub := events.NewMemoryHub()
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, hub)
+
+	workspaceID := common.WorkspaceID("ws-decision-replan")
+	runID := common.RunID("run-decision-replan")
+	ticketID := common.TicketID("ticket-decision-replan")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateBlockedOnDecision, BlockingTicketID: ticketID}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{ID: ticketID, WorkspaceID: workspaceID, RunID: runID, State: common.DecisionTicketStateResolved}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       common.ResolutionID("resolution-decision-replan"),
+		TicketID: ticketID,
+		Type:     "replan",
+		Payload:  map[string]any{"operator": "tester"},
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume replan decision: %v", err)
+	}
+
+	r, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if r.State != common.RunStateSuperseded {
+		t.Fatalf("run state = %q, want superseded", r.State)
+	}
+	if r.BlockingTicketID != "" || r.BlockingApprovalID != "" {
+		t.Fatalf("blocking refs = ticket=%q approval=%q, want empty", r.BlockingTicketID, r.BlockingApprovalID)
+	}
+	ws, err := workspaceRepo.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if ws.ActiveRunID != "" {
+		t.Fatalf("workspace active run = %q, want empty", ws.ActiveRunID)
+	}
+	if len(runtime.calls) != 0 {
+		t.Fatalf("runtime calls = %#v, want none", runtime.calls)
 	}
 }
 

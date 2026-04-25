@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	legacycommon "github.com/muidea/workorch/internal/modules/blocks/legacy/pkg/common"
+	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -42,6 +45,115 @@ func TestReadRunSnapshotWithBackendReturnsBlockedDecisionReadModel(t *testing.T)
 	}
 	if len(item.Observed) == 0 {
 		t.Fatalf("observed = %+v, want non-empty", item.Observed)
+	}
+}
+
+func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-run-evidence-snapshot")
+	runID := common.RunID("run-evidence-snapshot")
+	stepID := common.StepID("run-evidence-snapshot/step-1")
+	toolCallID := common.ToolCallID("tool-call-evidence-snapshot")
+
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:    workspaceID,
+		Title: "run evidence snapshot",
+		State: common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateCompleted,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:     stepID,
+		RunID:  runID,
+		Kind:   "validation",
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"result": "done"},
+	}); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	if err := exports.Repositories.ToolCalls.Create(ctx, &runmodel.ToolCall{
+		ID:          toolCallID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		ToolName:    "shell",
+		Arguments:   map[string]any{"command": "go test ./..."},
+		State:       common.ToolCallStateCompleted,
+		Output:      map[string]any{"exitCode": 0},
+	}); err != nil {
+		t.Fatalf("create tool call: %v", err)
+	}
+	if err := exports.Repositories.Patches.Create(ctx, &runmodel.Patch{
+		ID:          common.PatchID("patch-evidence-snapshot"),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		ToolCallID:  toolCallID,
+		PatchType:   "unified_diff",
+		TargetRef:   "internal/example.go",
+		State:       common.PatchStateApplied,
+	}); err != nil {
+		t.Fatalf("create patch: %v", err)
+	}
+	if err := exports.Repositories.ValidationResults.Create(ctx, &runmodel.ValidationResult{
+		ID:             common.ValidationResultID("validation-evidence-snapshot"),
+		WorkspaceID:    workspaceID,
+		RunID:          runID,
+		StepID:         stepID,
+		ValidationKind: "go_test",
+		State:          common.ValidationResultStatePassed,
+		Summary:        "passed",
+	}); err != nil {
+		t.Fatalf("create validation result: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:               common.CheckpointID("checkpoint-evidence-snapshot"),
+		WorkspaceID:      workspaceID,
+		RunID:            runID,
+		CheckpointType:   common.CheckpointTypeRunState,
+		CurrentStepID:    stepID,
+		RunStateSnapshot: common.RunStateCompleted,
+		Data:             map[string]any{"thread": "main"},
+	}); err != nil {
+		t.Fatalf("create runtime checkpoint: %v", err)
+	}
+
+	first, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, string(runID))
+	if err != nil {
+		t.Fatalf("first ReadRunSnapshotWithBackend: %v", err)
+	}
+	second, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, string(runID))
+	if err != nil {
+		t.Fatalf("second ReadRunSnapshotWithBackend: %v", err)
+	}
+
+	if len(first.Steps) != 1 || first.Steps[0].ID != string(stepID) {
+		t.Fatalf("steps = %+v, want %s", first.Steps, stepID)
+	}
+	if len(first.ToolCalls) != 1 || first.ToolCalls[0].ID != string(toolCallID) {
+		t.Fatalf("toolCalls = %+v, want %s", first.ToolCalls, toolCallID)
+	}
+	if len(first.Patches) != 1 || first.Patches[0].ToolCallID != string(toolCallID) {
+		t.Fatalf("patches = %+v, want tool call ref %s", first.Patches, toolCallID)
+	}
+	if len(first.ValidationResults) != 1 || first.ValidationResults[0].State != "passed" {
+		t.Fatalf("validationResults = %+v, want passed", first.ValidationResults)
+	}
+	if len(first.RuntimeCheckpoints) != 1 || first.RuntimeCheckpoints[0].Data["thread"] != "main" {
+		t.Fatalf("runtimeCheckpoints = %+v, want checkpoint data", first.RuntimeCheckpoints)
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("snapshot mismatch after reload: first=%+v second=%+v", first, second)
 	}
 }
 
@@ -87,7 +199,9 @@ func TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems(t *t
 	if err != nil {
 		t.Fatalf("StartRunWithBackend decision: %v", err)
 	}
-	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, decisionRun.BlockingTicketID); err != nil {
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, decisionRun.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
 	if _, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, decisionRunID); err != nil {
@@ -110,6 +224,9 @@ func TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems(t *t
 	if item.Workspace.ID != workspaceID {
 		t.Fatalf("workspace = %+v, want %s", item.Workspace, workspaceID)
 	}
+	if item.Workspace.State != "blocked" || item.Workspace.ActiveRunID != approvalRunID {
+		t.Fatalf("workspace projection = %+v, want blocked active run %s", item.Workspace, approvalRunID)
+	}
 	if len(item.Runs) != 3 {
 		t.Fatalf("runs = %+v, want 3 runs", item.Runs)
 	}
@@ -118,6 +235,64 @@ func TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems(t *t
 	}
 	if len(item.Approvals) != 1 || item.Approvals[0].ID != approvalRun.BlockingApprovalID {
 		t.Fatalf("approvals = %+v, want approval %s", item.Approvals, approvalRun.BlockingApprovalID)
+	}
+}
+
+func TestReadWorkspaceSnapshotProjectsWorkspaceStateFromRun(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-projection")
+	runID := common.RunID("run-projection")
+	workspace := &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "projection",
+		State:       common.WorkspaceStateActive,
+		ActiveRunID: runID,
+	}
+	if err := exports.Repositories.Workspaces.Create(ctx, workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}
+	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	tests := []struct {
+		runState       common.RunState
+		workspaceState string
+	}{
+		{runState: common.RunStateRunning, workspaceState: "running"},
+		{runState: common.RunStateBlockedOnDecision, workspaceState: "waiting_decision"},
+		{runState: common.RunStateBlockedOnApproval, workspaceState: "blocked"},
+		{runState: common.RunStateValidating, workspaceState: "validating"},
+		{runState: common.RunStateCompleted, workspaceState: "completed"},
+		{runState: common.RunStateFailed, workspaceState: "failed"},
+		{runState: common.RunStateCancelled, workspaceState: "failed"},
+		{runState: common.RunStateSuperseded, workspaceState: "failed"},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.runState), func(t *testing.T) {
+			run.State = tc.runState
+			if err := exports.Repositories.Runs.Update(ctx, run); err != nil {
+				t.Fatalf("update run: %v", err)
+			}
+			snapshot, err := ReadWorkspaceSnapshotWithBackend(context.Background(), "file", dataRoot, string(workspaceID))
+			if err != nil {
+				t.Fatalf("ReadWorkspaceSnapshotWithBackend: %v", err)
+			}
+			if snapshot.Workspace.State != tc.workspaceState {
+				t.Fatalf("workspace state = %q, want %q", snapshot.Workspace.State, tc.workspaceState)
+			}
+			if snapshot.Workspace.ActiveRunID != string(runID) {
+				t.Fatalf("activeRunId = %q, want %s", snapshot.Workspace.ActiveRunID, runID)
+			}
+		})
 	}
 }
 

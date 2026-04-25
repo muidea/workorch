@@ -201,11 +201,19 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 			if err != nil {
 				return err
 			}
-			if resolution.Type == decisioncommon.ResolutionTypeRejectPath {
+			switch resolution.Type {
+			case decisioncommon.ResolutionTypeProvideMissingInfo:
+				r.BlockingTicketID = ""
+			case decisioncommon.ResolutionTypeRejectCurrentPath:
 				return o.FailRun(ctx, runID, fmt.Sprintf("decision ticket %s rejected", ticket.ID))
+			case decisioncommon.ResolutionTypeReplan:
+				return o.SupersedeRun(ctx, runID)
+			default:
+				return common.ErrInvalidArgument
 			}
+		} else {
+			r.BlockingTicketID = ""
 		}
-		r.BlockingTicketID = ""
 	case common.RunStateBlockedOnApproval:
 		if r.BlockingApprovalID == "" || o.approvals == nil {
 			return common.ErrConflict
@@ -249,7 +257,7 @@ func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunI
 	if err != nil {
 		return err
 	}
-	if r.State != common.RunStateRunning {
+	if r.State != common.RunStateRunning && r.State != common.RunStateValidating {
 		return common.ErrConflict
 	}
 	r.State = common.RunStateCompleted
@@ -277,20 +285,55 @@ func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunI
 	return nil
 }
 
-func (o *RuntimeOrchestrator) FailRun(ctx context.Context, runID common.RunID, reason string) error {
-	if runID == "" || reason == "" {
+func (o *RuntimeOrchestrator) ValidateRun(ctx context.Context, runID common.RunID) error {
+	if runID == "" {
 		return common.ErrInvalidArgument
 	}
 	r, err := o.runs.Get(ctx, runID)
 	if err != nil {
 		return err
 	}
-	switch r.State {
-	case common.RunStateCreated, common.RunStateRunning, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
-	default:
+	if r.State != common.RunStateRunning {
 		return common.ErrConflict
 	}
-	r.State = common.RunStateFailed
+	r.State = common.RunStateValidating
+	r.FailureReason = ""
+	if err := o.runs.Update(ctx, r); err != nil {
+		return err
+	}
+	return o.publishRunStateChanged(ctx, r)
+}
+
+func (o *RuntimeOrchestrator) CancelRun(ctx context.Context, runID common.RunID) error {
+	if runID == "" {
+		return common.ErrInvalidArgument
+	}
+	return o.closeRun(ctx, runID, common.RunStateCancelled, "")
+}
+
+func (o *RuntimeOrchestrator) SupersedeRun(ctx context.Context, runID common.RunID) error {
+	if runID == "" {
+		return common.ErrInvalidArgument
+	}
+	return o.closeRun(ctx, runID, common.RunStateSuperseded, "")
+}
+
+func (o *RuntimeOrchestrator) FailRun(ctx context.Context, runID common.RunID, reason string) error {
+	if runID == "" || reason == "" {
+		return common.ErrInvalidArgument
+	}
+	return o.closeRun(ctx, runID, common.RunStateFailed, reason)
+}
+
+func (o *RuntimeOrchestrator) closeRun(ctx context.Context, runID common.RunID, state common.RunState, reason string) error {
+	r, err := o.runs.Get(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !canCloseRunAs(r.State, state) {
+		return common.ErrConflict
+	}
+	r.State = state
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""
 	r.FailureReason = reason
@@ -313,6 +356,27 @@ func (o *RuntimeOrchestrator) FailRun(ctx context.Context, runID common.RunID, r
 		return o.publishWorkspaceStateChanged(ctx, ws, runID)
 	}
 	return nil
+}
+
+func canCloseRunAs(current common.RunState, target common.RunState) bool {
+	switch target {
+	case common.RunStateFailed:
+		switch current {
+		case common.RunStateCreated, common.RunStateRunning, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStateValidating:
+			return true
+		}
+	case common.RunStateCancelled:
+		switch current {
+		case common.RunStateCreated, common.RunStateRunning, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStateValidating:
+			return true
+		}
+	case common.RunStateSuperseded:
+		switch current {
+		case common.RunStateRunning, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStateValidating:
+			return true
+		}
+	}
+	return false
 }
 
 func (o *RuntimeOrchestrator) publishRunStateChanged(ctx context.Context, run *runModel.Run) error {
@@ -421,6 +485,9 @@ func (o *RuntimeOrchestrator) dispatchStep(
 	}
 	if nextStepID != "" {
 		return o.dispatchStep(ctx, run, nextStepID, nextKind, nextStepInput(run, step.ID))
+	}
+	if err := o.ValidateRun(ctx, run.ID); err != nil {
+		return err
 	}
 	return o.CompleteRun(ctx, run.ID)
 }

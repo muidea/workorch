@@ -17,9 +17,17 @@ type Decision struct {
 	RunID             string         `json:"runId"`
 	StepID            string         `json:"stepId,omitempty"`
 	Reason            string         `json:"reason"`
+	DecisionKind      string         `json:"decisionKind,omitempty"`
+	Question          string         `json:"question,omitempty"`
+	Context           map[string]any `json:"context,omitempty"`
 	State             string         `json:"state"`
 	ResolutionID      string         `json:"resolutionId,omitempty"`
 	ResolutionType    string         `json:"resolutionType,omitempty"`
+	ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
+}
+
+type ResolveDecisionCommand struct {
+	ResolutionType    string         `json:"resolutionType"`
 	ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
 }
 
@@ -101,64 +109,25 @@ func ListDecisionsFromEnv(ctx context.Context, workspaceID string, runID string)
 	return ListDecisionsWithSession(ctx, session, workspaceID, runID)
 }
 
-func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ticketID string) (ret Decision, err error) {
-	return resolveDecisionWithSession(ctx, session, ticketID, false)
-}
-
-func ResolveDecisionWithBackend(ctx context.Context, backend string, dataRoot string, ticketID string) (Decision, error) {
-	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
-	if err != nil {
-		return Decision{}, err
-	}
-	return ResolveDecisionWithSession(ctx, session, ticketID)
-}
-
-func ResolveDecisionFromEnv(ctx context.Context, ticketID string) (Decision, error) {
-	session, err := NewRuntimeSessionFromEnv()
-	if err != nil {
-		return Decision{}, err
-	}
-	return ResolveDecisionWithSession(ctx, session, ticketID)
-}
-
-func RejectDecisionWithSession(ctx context.Context, session *RuntimeSession, ticketID string) (ret Decision, err error) {
-	return resolveDecisionWithSession(ctx, session, ticketID, true)
-}
-
-func RejectDecisionWithBackend(ctx context.Context, backend string, dataRoot string, ticketID string) (Decision, error) {
-	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
-	if err != nil {
-		return Decision{}, err
-	}
-	return RejectDecisionWithSession(ctx, session, ticketID)
-}
-
-func RejectDecisionFromEnv(ctx context.Context, ticketID string) (Decision, error) {
-	session, err := NewRuntimeSessionFromEnv()
-	if err != nil {
-		return Decision{}, err
-	}
-	return RejectDecisionWithSession(ctx, session, ticketID)
-}
-
-func resolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ticketID string, reject bool) (ret Decision, err error) {
+func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ticketID string, cmd ResolveDecisionCommand) (ret Decision, err error) {
 	service, tickets, resolutions, err := decisionDependenciesFromSession(session)
 	if err != nil {
 		return Decision{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	typeName := decisioncommon.ResolutionTypeApprovePath
-	resolutionID := common.ResolutionID("resolution-" + ticketID)
-	if reject {
-		typeName = decisioncommon.ResolutionTypeRejectPath
-		resolutionID = common.ResolutionID("resolution-" + ticketID + "-reject")
+	if cmd.ResolutionType == "" {
+		cmd.ResolutionType = decisioncommon.ResolutionTypeProvideMissingInfo
+	}
+	if !decisioncommon.IsSupportedResolutionType(cmd.ResolutionType) {
+		return Decision{}, common.ErrInvalidArgument
 	}
 
 	if err := service.EnsureResolvedTicket(ctx, decisionmodule.ResolveTicketCommand{
-		ResolutionID: resolutionID,
+		ResolutionID: common.ResolutionID("resolution-" + ticketID + "-" + cmd.ResolutionType),
 		TicketID:     common.TicketID(ticketID),
-		Type:         typeName,
+		Type:         cmd.ResolutionType,
+		Payload:      cloneDecisionPayload(cmd.ResolutionPayload),
 	}); err != nil {
 		return Decision{}, err
 	}
@@ -172,6 +141,22 @@ func resolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 		return Decision{}, err
 	}
 	return mapDecision(item, resolution), nil
+}
+
+func ResolveDecisionWithBackend(ctx context.Context, backend string, dataRoot string, ticketID string, cmd ResolveDecisionCommand) (Decision, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return Decision{}, err
+	}
+	return ResolveDecisionWithSession(ctx, session, ticketID, cmd)
+}
+
+func ResolveDecisionFromEnv(ctx context.Context, ticketID string, cmd ResolveDecisionCommand) (Decision, error) {
+	session, err := NewRuntimeSessionFromEnv()
+	if err != nil {
+		return Decision{}, err
+	}
+	return ResolveDecisionWithSession(ctx, session, ticketID, cmd)
 }
 
 func decisionDependenciesFromSession(session *RuntimeSession) (decisionmodule.Service, repository.DecisionTicketRepository, repository.DecisionResolutionRepository, error) {
@@ -204,17 +189,31 @@ func mapDecision(item *decisionmodel.Ticket, resolution *decisionmodel.Resolutio
 		return Decision{}
 	}
 	ret := Decision{
-		ID:          string(item.ID),
-		WorkspaceID: string(item.WorkspaceID),
-		RunID:       string(item.RunID),
-		StepID:      string(item.StepID),
-		Reason:      item.Reason,
-		State:       string(item.State),
+		ID:           string(item.ID),
+		WorkspaceID:  string(item.WorkspaceID),
+		RunID:        string(item.RunID),
+		StepID:       string(item.StepID),
+		Reason:       item.Reason,
+		DecisionKind: item.DecisionKind,
+		Question:     item.Question,
+		Context:      cloneDecisionPayload(item.Context),
+		State:        string(item.State),
 	}
 	if resolution != nil {
 		ret.ResolutionID = string(resolution.ID)
 		ret.ResolutionType = resolution.Type
-		ret.ResolutionPayload = resolution.Payload
+		ret.ResolutionPayload = cloneDecisionPayload(resolution.Payload)
+	}
+	return ret
+}
+
+func cloneDecisionPayload(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for k, v := range input {
+		ret[k] = v
 	}
 	return ret
 }

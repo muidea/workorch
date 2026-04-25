@@ -17,7 +17,10 @@ type Orchestrator interface {
 	BlockOnDecision(context.Context, common.RunID, common.TicketID) error
 	BlockOnApproval(context.Context, common.RunID, common.ApprovalID) error
 	ResumeRun(context.Context, common.RunID) error
+	ValidateRun(context.Context, common.RunID) error
 	CompleteRun(context.Context, common.RunID) error
+	CancelRun(context.Context, common.RunID) error
+	SupersedeRun(context.Context, common.RunID) error
 	FailRun(context.Context, common.RunID, string) error
 }
 
@@ -97,7 +100,7 @@ func (s *Service) EnsureStarted(ctx context.Context, cmd runservice.StartRunComm
 	if r.State == common.RunStateCompleted {
 		return nil
 	}
-	if r.State == common.RunStateFailed || r.State == common.RunStateBlockedOnDecision || r.State == common.RunStateBlockedOnApproval {
+	if isTerminalRunState(r.State) || r.State == common.RunStateValidating || r.State == common.RunStateBlockedOnDecision || r.State == common.RunStateBlockedOnApproval {
 		return common.ErrConflict
 	}
 	return s.StartRun(ctx, cmd)
@@ -134,7 +137,7 @@ func (s *Service) EnsureResumed(ctx context.Context, cmd runservice.ResumeRunCom
 	if err != nil {
 		return err
 	}
-	if r.State == common.RunStateCompleted || r.State == common.RunStateFailed {
+	if isTerminalRunState(r.State) {
 		return nil
 	}
 	if r.State != common.RunStateBlockedOnDecision && r.State != common.RunStateBlockedOnApproval {
@@ -174,7 +177,7 @@ func (s *Service) EnsureBlockedOnDecision(ctx context.Context, cmd runservice.Bl
 	if r.State == common.RunStateBlockedOnApproval && r.BlockingApprovalID != "" {
 		return common.ErrConflict
 	}
-	if r.State == common.RunStateCompleted || r.State == common.RunStateFailed {
+	if isTerminalRunState(r.State) {
 		return nil
 	}
 	return s.BlockOnDecision(ctx, cmd)
@@ -211,10 +214,33 @@ func (s *Service) EnsureBlockedOnApproval(ctx context.Context, cmd runservice.Bl
 	if r.State == common.RunStateBlockedOnDecision && r.BlockingTicketID != "" {
 		return common.ErrConflict
 	}
-	if r.State == common.RunStateCompleted || r.State == common.RunStateFailed {
+	if isTerminalRunState(r.State) {
 		return nil
 	}
 	return s.BlockOnApproval(ctx, cmd)
+}
+
+func (s *Service) ValidateRun(ctx context.Context, cmd runservice.ValidateRunCommand) error {
+	if cmd.RunID == "" {
+		return common.ErrInvalidArgument
+	}
+	if s.orchestrator != nil {
+		return s.orchestrator.ValidateRun(ctx, cmd.RunID)
+	}
+
+	r, err := s.runs.Get(ctx, cmd.RunID)
+	if err != nil {
+		return err
+	}
+	if r.State != common.RunStateRunning {
+		return common.ErrConflict
+	}
+	r.State = common.RunStateValidating
+	r.FailureReason = ""
+	if err := s.runs.Update(ctx, r); err != nil {
+		return err
+	}
+	return s.publishRunEvent(ctx, events.TopicRunStateChanged, r)
 }
 
 func (s *Service) CompleteRun(ctx context.Context, cmd runservice.CompleteRunCommand) error {
@@ -229,7 +255,60 @@ func (s *Service) CompleteRun(ctx context.Context, cmd runservice.CompleteRunCom
 	if err != nil {
 		return err
 	}
+	if r.State != common.RunStateRunning && r.State != common.RunStateValidating {
+		return common.ErrConflict
+	}
 	r.State = common.RunStateCompleted
+	r.BlockingTicketID = ""
+	r.BlockingApprovalID = ""
+	r.FailureReason = ""
+	if err := s.runs.Update(ctx, r); err != nil {
+		return err
+	}
+	return s.publishRunEvent(ctx, events.TopicRunStateChanged, r)
+}
+
+func (s *Service) CancelRun(ctx context.Context, cmd runservice.CancelRunCommand) error {
+	if cmd.RunID == "" {
+		return common.ErrInvalidArgument
+	}
+	if s.orchestrator != nil {
+		return s.orchestrator.CancelRun(ctx, cmd.RunID)
+	}
+
+	r, err := s.runs.Get(ctx, cmd.RunID)
+	if err != nil {
+		return err
+	}
+	if !canCancelRun(r.State) {
+		return common.ErrConflict
+	}
+	r.State = common.RunStateCancelled
+	r.BlockingTicketID = ""
+	r.BlockingApprovalID = ""
+	r.FailureReason = ""
+	if err := s.runs.Update(ctx, r); err != nil {
+		return err
+	}
+	return s.publishRunEvent(ctx, events.TopicRunStateChanged, r)
+}
+
+func (s *Service) SupersedeRun(ctx context.Context, cmd runservice.SupersedeRunCommand) error {
+	if cmd.RunID == "" {
+		return common.ErrInvalidArgument
+	}
+	if s.orchestrator != nil {
+		return s.orchestrator.SupersedeRun(ctx, cmd.RunID)
+	}
+
+	r, err := s.runs.Get(ctx, cmd.RunID)
+	if err != nil {
+		return err
+	}
+	if !canSupersedeRun(r.State) {
+		return common.ErrConflict
+	}
+	r.State = common.RunStateSuperseded
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""
 	r.FailureReason = ""
@@ -251,6 +330,9 @@ func (s *Service) FailRun(ctx context.Context, cmd runservice.FailRunCommand) er
 	if err != nil {
 		return err
 	}
+	if !canFailRun(r.State) {
+		return common.ErrConflict
+	}
 	r.State = common.RunStateFailed
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""
@@ -259,6 +341,40 @@ func (s *Service) FailRun(ctx context.Context, cmd runservice.FailRunCommand) er
 		return err
 	}
 	return s.publishRunEvent(ctx, events.TopicRunStateChanged, r)
+}
+
+func isTerminalRunState(state common.RunState) bool {
+	return state == common.RunStateCompleted ||
+		state == common.RunStateFailed ||
+		state == common.RunStateCancelled ||
+		state == common.RunStateSuperseded
+}
+
+func canCancelRun(state common.RunState) bool {
+	switch state {
+	case common.RunStateCreated, common.RunStateRunning, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStateValidating:
+		return true
+	default:
+		return false
+	}
+}
+
+func canSupersedeRun(state common.RunState) bool {
+	switch state {
+	case common.RunStateRunning, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStateValidating:
+		return true
+	default:
+		return false
+	}
+}
+
+func canFailRun(state common.RunState) bool {
+	switch state {
+	case common.RunStateCreated, common.RunStateRunning, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStateValidating:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) publishRunEvent(ctx context.Context, topic string, run *runModel.Run) error {

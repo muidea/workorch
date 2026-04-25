@@ -9,3 +9,6 @@ type TicketID string
 type ResolutionID string
 type ApprovalID string
 type CheckpointID string
+type ToolCallID string
+type PatchID string
+type ValidationResultID string

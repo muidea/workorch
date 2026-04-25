@@ -200,7 +200,7 @@ func TestResumeRunWithBackendReturnsCompletedRunAfterDecisionResolved(t *testing
 	if err := session.Bootstrap.Exports().Services.DecisionService.EnsureResolvedTicket(ctx, decisionmodule.ResolveTicketCommand{
 		ResolutionID: "resolution-run-resume-decision",
 		TicketID:     common.TicketID(started.BlockingTicketID),
-		Type:         decisioncommon.ResolutionTypeApprovePath,
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
 	}); err != nil {
 		t.Fatalf("EnsureResolvedTicket: %v", err)
 	}
@@ -262,7 +262,9 @@ func TestResumeRunWithBackendReturnsCompletedRunForCompletedRunAfterReload(t *te
 	if err != nil {
 		t.Fatalf("StartRunWithBackend: %v", err)
 	}
-	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID); err != nil {
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
 	if _, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID); err != nil {

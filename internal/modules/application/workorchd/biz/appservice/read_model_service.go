@@ -8,19 +8,24 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 type RunSnapshot struct {
-	Workspace Workspace                `json:"workspace"`
-	Run       Run                      `json:"run"`
-	Step      *presenter.StepView      `json:"step,omitempty"`
-	Steps     []presenter.StepView     `json:"steps,omitempty"`
-	Decisions []Decision               `json:"decisions,omitempty"`
-	Approvals []Approval               `json:"approvals,omitempty"`
-	Observed  []presenter.ObservedView `json:"observed,omitempty"`
+	Workspace          Workspace                `json:"workspace"`
+	Run                Run                      `json:"run"`
+	Step               *presenter.StepView      `json:"step,omitempty"`
+	Steps              []presenter.StepView     `json:"steps,omitempty"`
+	ToolCalls          []ToolCall               `json:"toolCalls,omitempty"`
+	Patches            []Patch                  `json:"patches,omitempty"`
+	ValidationResults  []ValidationResult       `json:"validationResults,omitempty"`
+	RuntimeCheckpoints []RuntimeCheckpoint      `json:"runtimeCheckpoints,omitempty"`
+	Decisions          []Decision               `json:"decisions,omitempty"`
+	Approvals          []Approval               `json:"approvals,omitempty"`
+	Observed           []presenter.ObservedView `json:"observed,omitempty"`
 }
 
 type RunStatus struct {
@@ -38,6 +43,64 @@ type RunStatus struct {
 	FailureReason      string `json:"failureReason,omitempty"`
 }
 
+type ToolCall struct {
+	ID          string         `json:"id"`
+	WorkspaceID string         `json:"workspaceId"`
+	RunID       string         `json:"runId"`
+	StepID      string         `json:"stepId,omitempty"`
+	ToolName    string         `json:"toolName"`
+	Arguments   map[string]any `json:"arguments,omitempty"`
+	State       string         `json:"state"`
+	StartedAt   string         `json:"startedAt,omitempty"`
+	EndedAt     string         `json:"endedAt,omitempty"`
+	ExitSummary string         `json:"exitSummary,omitempty"`
+	Output      map[string]any `json:"output,omitempty"`
+	Error       string         `json:"error,omitempty"`
+}
+
+type Patch struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspaceId"`
+	RunID       string `json:"runId"`
+	StepID      string `json:"stepId,omitempty"`
+	ToolCallID  string `json:"toolCallId,omitempty"`
+	PatchType   string `json:"patchType"`
+	TargetRef   string `json:"targetRef,omitempty"`
+	Summary     string `json:"summary,omitempty"`
+	State       string `json:"state"`
+	CreatedAt   string `json:"createdAt,omitempty"`
+	AppliedAt   string `json:"appliedAt,omitempty"`
+}
+
+type ValidationResult struct {
+	ID             string `json:"id"`
+	WorkspaceID    string `json:"workspaceId"`
+	RunID          string `json:"runId"`
+	StepID         string `json:"stepId,omitempty"`
+	ValidationKind string `json:"validationKind"`
+	TargetRef      string `json:"targetRef,omitempty"`
+	State          string `json:"state"`
+	Summary        string `json:"summary,omitempty"`
+	EvidenceRef    string `json:"evidenceRef,omitempty"`
+	StartedAt      string `json:"startedAt,omitempty"`
+	EndedAt        string `json:"endedAt,omitempty"`
+}
+
+type RuntimeCheckpoint struct {
+	ID                 string         `json:"id"`
+	WorkspaceID        string         `json:"workspaceId"`
+	RunID              string         `json:"runId"`
+	CheckpointType     string         `json:"checkpointType"`
+	CurrentStepID      string         `json:"currentStepId,omitempty"`
+	RunStateSnapshot   string         `json:"runStateSnapshot"`
+	BlockingTicketID   string         `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID string         `json:"blockingApprovalId,omitempty"`
+	ThreadRef          string         `json:"threadRef,omitempty"`
+	OccurredAt         string         `json:"occurredAt,omitempty"`
+	RestorableUntil    string         `json:"restorableUntil,omitempty"`
+	Data               map[string]any `json:"data,omitempty"`
+}
+
 type WorkspaceSnapshot struct {
 	Workspace Workspace  `json:"workspace"`
 	Runs      []Run      `json:"runs,omitempty"`
@@ -49,6 +112,10 @@ type readModelDependencies struct {
 	workspaces  repository.WorkspaceRepository
 	runs        repository.RunRepository
 	steps       repository.StepRepository
+	toolCalls   repository.ToolCallRepository
+	patches     repository.PatchRepository
+	validations repository.ValidationResultRepository
+	checkpoints repository.RuntimeCheckpointRepository
 	tickets     repository.DecisionTicketRepository
 	resolutions repository.DecisionResolutionRepository
 	approvals   repository.ApprovalRepository
@@ -145,6 +212,10 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 	if exports.Repositories.Workspaces == nil ||
 		exports.Repositories.Runs == nil ||
 		exports.Repositories.Steps == nil ||
+		exports.Repositories.ToolCalls == nil ||
+		exports.Repositories.Patches == nil ||
+		exports.Repositories.ValidationResults == nil ||
+		exports.Repositories.RuntimeCheckpoints == nil ||
 		exports.Repositories.Tickets == nil ||
 		exports.Repositories.Resolutions == nil ||
 		exports.Repositories.Approvals == nil {
@@ -160,6 +231,10 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 		workspaces:  exports.Repositories.Workspaces,
 		runs:        exports.Repositories.Runs,
 		steps:       exports.Repositories.Steps,
+		toolCalls:   exports.Repositories.ToolCalls,
+		patches:     exports.Repositories.Patches,
+		validations: exports.Repositories.ValidationResults,
+		checkpoints: exports.Repositories.RuntimeCheckpoints,
 		tickets:     exports.Repositories.Tickets,
 		resolutions: exports.Repositories.Resolutions,
 		approvals:   exports.Repositories.Approvals,
@@ -180,6 +255,22 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 	if err != nil {
 		return RunSnapshot{}, err
 	}
+	toolCalls, err := deps.toolCalls.ListByRun(ctx, item.ID)
+	if err != nil {
+		return RunSnapshot{}, err
+	}
+	patches, err := deps.patches.ListByRun(ctx, item.ID)
+	if err != nil {
+		return RunSnapshot{}, err
+	}
+	validations, err := deps.validations.ListByRun(ctx, item.ID)
+	if err != nil {
+		return RunSnapshot{}, err
+	}
+	checkpoints, err := deps.checkpoints.ListByRun(ctx, item.ID)
+	if err != nil {
+		return RunSnapshot{}, err
+	}
 	decisions, selectedTicket, selectedResolution, err := decisionsForRun(ctx, deps, item)
 	if err != nil {
 		return RunSnapshot{}, err
@@ -193,13 +284,17 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 	observedItems := observed.BuildWorkorchSnapshot(workspace, item, steps, selectedTicket, selectedResolution, selectedApproval, deps.published)
 
 	return RunSnapshot{
-		Workspace: mapWorkspace(workspace),
-		Run:       mapRun(item),
-		Step:      presenter.MapStep(currentStep),
-		Steps:     presenter.MapSteps(steps),
-		Decisions: decisions,
-		Approvals: approvals,
-		Observed:  presenter.MapObserved(observedItems),
+		Workspace:          mapWorkspaceWithRunProjection(workspace, item),
+		Run:                mapRun(item),
+		Step:               presenter.MapStep(currentStep),
+		Steps:              presenter.MapSteps(steps),
+		ToolCalls:          mapToolCalls(toolCalls),
+		Patches:            mapPatches(patches),
+		ValidationResults:  mapValidationResults(validations),
+		RuntimeCheckpoints: mapRuntimeCheckpoints(checkpoints),
+		Decisions:          decisions,
+		Approvals:          approvals,
+		Observed:           presenter.MapObserved(observedItems),
 	}, nil
 }
 
@@ -214,6 +309,7 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		return WorkspaceSnapshot{}, err
 	}
 	runs := make([]Run, 0, len(runItems))
+	projectionRun := selectWorkspaceProjectionRun(item, runItems)
 	for _, runItem := range runItems {
 		if runItem.WorkspaceID != workspaceID {
 			continue
@@ -250,11 +346,63 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 	}
 
 	return WorkspaceSnapshot{
-		Workspace: mapWorkspace(item),
+		Workspace: mapWorkspaceWithRunProjection(item, projectionRun),
 		Runs:      runs,
 		Decisions: decisions,
 		Approvals: approvals,
 	}, nil
+}
+
+func selectWorkspaceProjectionRun(workspace *workspacemodel.Workspace, runs []*runmodel.Run) *runmodel.Run {
+	if workspace == nil || len(runs) == 0 {
+		return nil
+	}
+	var latest *runmodel.Run
+	for _, item := range runs {
+		if item == nil || item.WorkspaceID != workspace.ID {
+			continue
+		}
+		if workspace.ActiveRunID != "" && item.ID == workspace.ActiveRunID {
+			return item
+		}
+		if latest == nil || string(item.ID) > string(latest.ID) {
+			latest = item
+		}
+	}
+	return latest
+}
+
+func mapWorkspaceWithRunProjection(workspace *workspacemodel.Workspace, run *runmodel.Run) Workspace {
+	ret := mapWorkspace(workspace)
+	if run == nil {
+		return ret
+	}
+	ret.State = string(workspaceProjectionState(run.State))
+	if ret.ActiveRunID == "" {
+		ret.ActiveRunID = string(run.ID)
+	}
+	return ret
+}
+
+func workspaceProjectionState(runState common.RunState) common.WorkspaceState {
+	switch runState {
+	case common.RunStateCreated:
+		return common.WorkspaceStateReady
+	case common.RunStateRunning:
+		return common.WorkspaceStateRunning
+	case common.RunStateBlockedOnDecision:
+		return common.WorkspaceStateWaitingDecision
+	case common.RunStateBlockedOnApproval:
+		return common.WorkspaceStateBlocked
+	case common.RunStateValidating:
+		return common.WorkspaceStateValidating
+	case common.RunStateCompleted:
+		return common.WorkspaceStateCompleted
+	case common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return common.WorkspaceStateFailed
+	default:
+		return common.WorkspaceStateActive
+	}
 }
 
 func decisionsForRun(ctx context.Context, deps readModelDependencies, run *runmodel.Run) ([]Decision, *decisionmodel.Ticket, *decisionmodel.Resolution, error) {
@@ -317,6 +465,135 @@ func lastStep(steps []*runmodel.Step) *runmodel.Step {
 		return nil
 	}
 	return steps[len(steps)-1]
+}
+
+func mapToolCalls(items []*runmodel.ToolCall) []ToolCall {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]ToolCall, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		ret = append(ret, ToolCall{
+			ID:          string(item.ID),
+			WorkspaceID: string(item.WorkspaceID),
+			RunID:       string(item.RunID),
+			StepID:      string(item.StepID),
+			ToolName:    item.ToolName,
+			Arguments:   cloneReadModelMap(item.Arguments),
+			State:       string(item.State),
+			StartedAt:   item.StartedAt,
+			EndedAt:     item.EndedAt,
+			ExitSummary: item.ExitSummary,
+			Output:      cloneReadModelMap(item.Output),
+			Error:       item.Error,
+		})
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func mapPatches(items []*runmodel.Patch) []Patch {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]Patch, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		ret = append(ret, Patch{
+			ID:          string(item.ID),
+			WorkspaceID: string(item.WorkspaceID),
+			RunID:       string(item.RunID),
+			StepID:      string(item.StepID),
+			ToolCallID:  string(item.ToolCallID),
+			PatchType:   item.PatchType,
+			TargetRef:   item.TargetRef,
+			Summary:     item.Summary,
+			State:       string(item.State),
+			CreatedAt:   item.CreatedAt,
+			AppliedAt:   item.AppliedAt,
+		})
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func mapValidationResults(items []*runmodel.ValidationResult) []ValidationResult {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]ValidationResult, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		ret = append(ret, ValidationResult{
+			ID:             string(item.ID),
+			WorkspaceID:    string(item.WorkspaceID),
+			RunID:          string(item.RunID),
+			StepID:         string(item.StepID),
+			ValidationKind: item.ValidationKind,
+			TargetRef:      item.TargetRef,
+			State:          string(item.State),
+			Summary:        item.Summary,
+			EvidenceRef:    item.EvidenceRef,
+			StartedAt:      item.StartedAt,
+			EndedAt:        item.EndedAt,
+		})
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func mapRuntimeCheckpoints(items []*runmodel.RuntimeCheckpoint) []RuntimeCheckpoint {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeCheckpoint, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		ret = append(ret, RuntimeCheckpoint{
+			ID:                 string(item.ID),
+			WorkspaceID:        string(item.WorkspaceID),
+			RunID:              string(item.RunID),
+			CheckpointType:     string(item.CheckpointType),
+			CurrentStepID:      string(item.CurrentStepID),
+			RunStateSnapshot:   string(item.RunStateSnapshot),
+			BlockingTicketID:   string(item.BlockingTicketID),
+			BlockingApprovalID: string(item.BlockingApprovalID),
+			ThreadRef:          item.ThreadRef,
+			OccurredAt:         item.OccurredAt,
+			RestorableUntil:    item.RestorableUntil,
+			Data:               cloneReadModelMap(item.Data),
+		})
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func cloneReadModelMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	for k, v := range input {
+		out[k] = v
+	}
+	return out
 }
 
 func mapRunStatus(snapshot RunSnapshot) RunStatus {

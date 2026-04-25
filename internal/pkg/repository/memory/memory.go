@@ -303,6 +303,312 @@ func (r *StepRepository) Update(_ context.Context, item *run.Step) error {
 	return nil
 }
 
+type ToolCallRepository struct {
+	mu    sync.RWMutex
+	items map[common.ToolCallID]*run.ToolCall
+}
+
+func NewToolCallRepository() *ToolCallRepository {
+	return &ToolCallRepository{items: map[common.ToolCallID]*run.ToolCall{}}
+}
+
+func (r *ToolCallRepository) Create(_ context.Context, item *run.ToolCall) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	r.items[item.ID] = cloneToolCall(item)
+	return nil
+}
+
+func (r *ToolCallRepository) Get(_ context.Context, id common.ToolCallID) (*run.ToolCall, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneToolCall(item), nil
+}
+
+func (r *ToolCallRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.ToolCall, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]*run.ToolCall, 0)
+	for _, item := range r.items {
+		if item.RunID != runID {
+			continue
+		}
+		items = append(items, cloneToolCall(item))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return string(items[i].ID) < string(items[j].ID)
+	})
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
+}
+
+func (r *ToolCallRepository) ListByStep(_ context.Context, stepID common.StepID) ([]*run.ToolCall, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]*run.ToolCall, 0)
+	for _, item := range r.items {
+		if item.StepID != stepID {
+			continue
+		}
+		items = append(items, cloneToolCall(item))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return string(items[i].ID) < string(items[j].ID)
+	})
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
+}
+
+func (r *ToolCallRepository) Update(_ context.Context, item *run.ToolCall) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	r.items[item.ID] = cloneToolCall(item)
+	return nil
+}
+
+type PatchRepository struct {
+	mu    sync.RWMutex
+	items map[common.PatchID]*run.Patch
+}
+
+func NewPatchRepository() *PatchRepository {
+	return &PatchRepository{items: map[common.PatchID]*run.Patch{}}
+}
+
+func (r *PatchRepository) Create(_ context.Context, item *run.Patch) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	cloned := *item
+	r.items[item.ID] = &cloned
+	return nil
+}
+
+func (r *PatchRepository) Get(_ context.Context, id common.PatchID) (*run.Patch, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	cloned := *item
+	return &cloned, nil
+}
+
+func (r *PatchRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.Patch, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]*run.Patch, 0)
+	for _, item := range r.items {
+		if item.RunID != runID {
+			continue
+		}
+		cloned := *item
+		items = append(items, &cloned)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return string(items[i].ID) < string(items[j].ID)
+	})
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
+}
+
+func (r *PatchRepository) ListByStep(_ context.Context, stepID common.StepID) ([]*run.Patch, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]*run.Patch, 0)
+	for _, item := range r.items {
+		if item.StepID != stepID {
+			continue
+		}
+		cloned := *item
+		items = append(items, &cloned)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return string(items[i].ID) < string(items[j].ID)
+	})
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
+}
+
+func (r *PatchRepository) Update(_ context.Context, item *run.Patch) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	cloned := *item
+	r.items[item.ID] = &cloned
+	return nil
+}
+
+type ValidationResultRepository struct {
+	mu    sync.RWMutex
+	items map[common.ValidationResultID]*run.ValidationResult
+}
+
+func NewValidationResultRepository() *ValidationResultRepository {
+	return &ValidationResultRepository{items: map[common.ValidationResultID]*run.ValidationResult{}}
+}
+
+func (r *ValidationResultRepository) Create(_ context.Context, item *run.ValidationResult) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	cloned := *item
+	r.items[item.ID] = &cloned
+	return nil
+}
+
+func (r *ValidationResultRepository) Get(_ context.Context, id common.ValidationResultID) (*run.ValidationResult, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	cloned := *item
+	return &cloned, nil
+}
+
+func (r *ValidationResultRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.ValidationResult, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]*run.ValidationResult, 0)
+	for _, item := range r.items {
+		if item.RunID != runID {
+			continue
+		}
+		cloned := *item
+		items = append(items, &cloned)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return string(items[i].ID) < string(items[j].ID)
+	})
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
+}
+
+func (r *ValidationResultRepository) ListByStep(_ context.Context, stepID common.StepID) ([]*run.ValidationResult, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]*run.ValidationResult, 0)
+	for _, item := range r.items {
+		if item.StepID != stepID {
+			continue
+		}
+		cloned := *item
+		items = append(items, &cloned)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return string(items[i].ID) < string(items[j].ID)
+	})
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
+}
+
+func (r *ValidationResultRepository) Update(_ context.Context, item *run.ValidationResult) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	cloned := *item
+	r.items[item.ID] = &cloned
+	return nil
+}
+
+type RuntimeCheckpointRepository struct {
+	mu    sync.RWMutex
+	items map[common.CheckpointID]*run.RuntimeCheckpoint
+}
+
+func NewRuntimeCheckpointRepository() *RuntimeCheckpointRepository {
+	return &RuntimeCheckpointRepository{items: map[common.CheckpointID]*run.RuntimeCheckpoint{}}
+}
+
+func (r *RuntimeCheckpointRepository) Create(_ context.Context, item *run.RuntimeCheckpoint) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	r.items[item.ID] = cloneRuntimeCheckpoint(item)
+	return nil
+}
+
+func (r *RuntimeCheckpointRepository) Get(_ context.Context, id common.CheckpointID) (*run.RuntimeCheckpoint, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneRuntimeCheckpoint(item), nil
+}
+
+func (r *RuntimeCheckpointRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.RuntimeCheckpoint, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]*run.RuntimeCheckpoint, 0)
+	for _, item := range r.items {
+		if item.RunID != runID {
+			continue
+		}
+		items = append(items, cloneRuntimeCheckpoint(item))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return string(items[i].ID) < string(items[j].ID)
+	})
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
+}
+
+func (r *RuntimeCheckpointRepository) Update(_ context.Context, item *run.RuntimeCheckpoint) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	r.items[item.ID] = cloneRuntimeCheckpoint(item)
+	return nil
+}
+
 type DecisionTicketRepository struct {
 	mu    sync.RWMutex
 	items map[common.TicketID]*decision.Ticket
@@ -318,8 +624,7 @@ func (r *DecisionTicketRepository) Create(_ context.Context, item *decision.Tick
 	if _, ok := r.items[item.ID]; ok {
 		return common.ErrConflict
 	}
-	cloned := *item
-	r.items[item.ID] = &cloned
+	r.items[item.ID] = cloneDecisionTicket(item)
 	return nil
 }
 
@@ -330,8 +635,7 @@ func (r *DecisionTicketRepository) Get(_ context.Context, id common.TicketID) (*
 	if !ok {
 		return nil, common.ErrNotFound
 	}
-	cloned := *item
-	return &cloned, nil
+	return cloneDecisionTicket(item), nil
 }
 
 func (r *DecisionTicketRepository) List(_ context.Context) ([]*decision.Ticket, error) {
@@ -346,8 +650,7 @@ func (r *DecisionTicketRepository) List(_ context.Context) ([]*decision.Ticket, 
 
 	ret := make([]*decision.Ticket, 0, len(ids))
 	for _, id := range ids {
-		cloned := *r.items[common.TicketID(id)]
-		ret = append(ret, &cloned)
+		ret = append(ret, cloneDecisionTicket(r.items[common.TicketID(id)]))
 	}
 	return ret, nil
 }
@@ -358,8 +661,7 @@ func (r *DecisionTicketRepository) Update(_ context.Context, item *decision.Tick
 	if _, ok := r.items[item.ID]; !ok {
 		return common.ErrNotFound
 	}
-	cloned := *item
-	r.items[item.ID] = &cloned
+	r.items[item.ID] = cloneDecisionTicket(item)
 	return nil
 }
 
@@ -457,17 +759,30 @@ func (r *ApprovalRepository) Update(_ context.Context, item *approval.Approval) 
 func cloneStep(item *run.Step) *run.Step {
 	cloned := *item
 	if item.Input != nil {
-		cloned.Input = make(map[string]any, len(item.Input))
-		for k, v := range item.Input {
-			cloned.Input[k] = v
-		}
+		cloned.Input = cloneMap(item.Input)
 	}
 	if item.Output != nil {
-		cloned.Output = make(map[string]any, len(item.Output))
-		for k, v := range item.Output {
-			cloned.Output[k] = v
-		}
+		cloned.Output = cloneMap(item.Output)
 	}
+	return &cloned
+}
+
+func cloneToolCall(item *run.ToolCall) *run.ToolCall {
+	cloned := *item
+	cloned.Arguments = cloneMap(item.Arguments)
+	cloned.Output = cloneMap(item.Output)
+	return &cloned
+}
+
+func cloneRuntimeCheckpoint(item *run.RuntimeCheckpoint) *run.RuntimeCheckpoint {
+	cloned := *item
+	cloned.Data = cloneMap(item.Data)
+	return &cloned
+}
+
+func cloneDecisionTicket(item *decision.Ticket) *decision.Ticket {
+	cloned := *item
+	cloned.Context = cloneMap(item.Context)
 	return &cloned
 }
 
@@ -477,4 +792,15 @@ func cloneDoD(item *workspace.DoD) *workspace.DoD {
 		cloned.Items = append([]string(nil), item.Items...)
 	}
 	return &cloned
+}
+
+func cloneMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	for k, v := range input {
+		out[k] = v
+	}
+	return out
 }

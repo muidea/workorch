@@ -76,6 +76,54 @@ func TestStepRepositoryContract_File(t *testing.T) {
 	})
 }
 
+func TestToolCallRepositoryContract_Memory(t *testing.T) {
+	testToolCallRepositoryContract(t, func() repository.ToolCallRepository {
+		return memory.NewToolCallRepository()
+	})
+}
+
+func TestToolCallRepositoryContract_File(t *testing.T) {
+	testToolCallRepositoryContract(t, func() repository.ToolCallRepository {
+		return file.NewToolCallRepository(filepath.Join(t.TempDir(), "tool_call.json"))
+	})
+}
+
+func TestPatchRepositoryContract_Memory(t *testing.T) {
+	testPatchRepositoryContract(t, func() repository.PatchRepository {
+		return memory.NewPatchRepository()
+	})
+}
+
+func TestPatchRepositoryContract_File(t *testing.T) {
+	testPatchRepositoryContract(t, func() repository.PatchRepository {
+		return file.NewPatchRepository(filepath.Join(t.TempDir(), "patch.json"))
+	})
+}
+
+func TestValidationResultRepositoryContract_Memory(t *testing.T) {
+	testValidationResultRepositoryContract(t, func() repository.ValidationResultRepository {
+		return memory.NewValidationResultRepository()
+	})
+}
+
+func TestValidationResultRepositoryContract_File(t *testing.T) {
+	testValidationResultRepositoryContract(t, func() repository.ValidationResultRepository {
+		return file.NewValidationResultRepository(filepath.Join(t.TempDir(), "validation_result.json"))
+	})
+}
+
+func TestRuntimeCheckpointRepositoryContract_Memory(t *testing.T) {
+	testRuntimeCheckpointRepositoryContract(t, func() repository.RuntimeCheckpointRepository {
+		return memory.NewRuntimeCheckpointRepository()
+	})
+}
+
+func TestRuntimeCheckpointRepositoryContract_File(t *testing.T) {
+	testRuntimeCheckpointRepositoryContract(t, func() repository.RuntimeCheckpointRepository {
+		return file.NewRuntimeCheckpointRepository(filepath.Join(t.TempDir(), "runtime_checkpoint.json"))
+	})
+}
+
 func TestDecisionTicketRepositoryContract_Memory(t *testing.T) {
 	testDecisionTicketRepositoryContract(t, func() repository.DecisionTicketRepository {
 		return memory.NewDecisionTicketRepository()
@@ -114,14 +162,18 @@ func TestApprovalRepositoryContract_File(t *testing.T) {
 
 func TestRepositoryBundleContract_Memory(t *testing.T) {
 	bundle := repositoryBundle{
-		workspaces:  memory.NewWorkspaceRepository(),
-		goals:       memory.NewGoalRepository(),
-		dods:        memory.NewDoDRepository(),
-		runs:        memory.NewRunRepository(),
-		steps:       memory.NewStepRepository(),
-		tickets:     memory.NewDecisionTicketRepository(),
-		resolutions: memory.NewDecisionResolutionRepository(),
-		approvals:   memory.NewApprovalRepository(),
+		workspaces:         memory.NewWorkspaceRepository(),
+		goals:              memory.NewGoalRepository(),
+		dods:               memory.NewDoDRepository(),
+		runs:               memory.NewRunRepository(),
+		steps:              memory.NewStepRepository(),
+		toolCalls:          memory.NewToolCallRepository(),
+		patches:            memory.NewPatchRepository(),
+		validationResults:  memory.NewValidationResultRepository(),
+		runtimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		tickets:            memory.NewDecisionTicketRepository(),
+		resolutions:        memory.NewDecisionResolutionRepository(),
+		approvals:          memory.NewApprovalRepository(),
 	}
 	testRepositoryBundleContract(t, bundle, func() repositoryBundle { return bundle })
 }
@@ -130,28 +182,36 @@ func TestRepositoryBundleContract_File(t *testing.T) {
 	dir := t.TempDir()
 	build := func() repositoryBundle {
 		return repositoryBundle{
-			workspaces:  file.NewWorkspaceRepository(filepath.Join(dir, "workspace.json")),
-			goals:       file.NewGoalRepository(filepath.Join(dir, "goal.json")),
-			dods:        file.NewDoDRepository(filepath.Join(dir, "dod.json")),
-			runs:        file.NewRunRepository(filepath.Join(dir, "run.json")),
-			steps:       file.NewStepRepository(filepath.Join(dir, "step.json")),
-			tickets:     file.NewDecisionTicketRepository(filepath.Join(dir, "ticket.json")),
-			resolutions: file.NewDecisionResolutionRepository(filepath.Join(dir, "resolution.json")),
-			approvals:   file.NewApprovalRepository(filepath.Join(dir, "approval.json")),
+			workspaces:         file.NewWorkspaceRepository(filepath.Join(dir, "workspace.json")),
+			goals:              file.NewGoalRepository(filepath.Join(dir, "goal.json")),
+			dods:               file.NewDoDRepository(filepath.Join(dir, "dod.json")),
+			runs:               file.NewRunRepository(filepath.Join(dir, "run.json")),
+			steps:              file.NewStepRepository(filepath.Join(dir, "step.json")),
+			toolCalls:          file.NewToolCallRepository(filepath.Join(dir, "tool_call.json")),
+			patches:            file.NewPatchRepository(filepath.Join(dir, "patch.json")),
+			validationResults:  file.NewValidationResultRepository(filepath.Join(dir, "validation_result.json")),
+			runtimeCheckpoints: file.NewRuntimeCheckpointRepository(filepath.Join(dir, "runtime_checkpoint.json")),
+			tickets:            file.NewDecisionTicketRepository(filepath.Join(dir, "ticket.json")),
+			resolutions:        file.NewDecisionResolutionRepository(filepath.Join(dir, "resolution.json")),
+			approvals:          file.NewApprovalRepository(filepath.Join(dir, "approval.json")),
 		}
 	}
 	testRepositoryBundleContract(t, build(), build)
 }
 
 type repositoryBundle struct {
-	workspaces  repository.WorkspaceRepository
-	goals       repository.GoalRepository
-	dods        repository.DoDRepository
-	runs        repository.RunRepository
-	steps       repository.StepRepository
-	tickets     repository.DecisionTicketRepository
-	resolutions repository.DecisionResolutionRepository
-	approvals   repository.ApprovalRepository
+	workspaces         repository.WorkspaceRepository
+	goals              repository.GoalRepository
+	dods               repository.DoDRepository
+	runs               repository.RunRepository
+	steps              repository.StepRepository
+	toolCalls          repository.ToolCallRepository
+	patches            repository.PatchRepository
+	validationResults  repository.ValidationResultRepository
+	runtimeCheckpoints repository.RuntimeCheckpointRepository
+	tickets            repository.DecisionTicketRepository
+	resolutions        repository.DecisionResolutionRepository
+	approvals          repository.ApprovalRepository
 }
 
 func testWorkspaceRepositoryContract(t *testing.T, factory func() repository.WorkspaceRepository) {
@@ -536,6 +596,350 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 	}
 }
 
+func testToolCallRepositoryContract(t *testing.T, factory func() repository.ToolCallRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &runmodel.ToolCall{
+		ID:          common.ToolCallID("tool-call-contract-1"),
+		WorkspaceID: common.WorkspaceID("ws-contract"),
+		RunID:       common.RunID("run-contract"),
+		StepID:      common.StepID("run-contract/step-1"),
+		ToolName:    "shell",
+		Arguments:   map[string]any{"command": "go test ./..."},
+		State:       common.ToolCallStateRunning,
+		StartedAt:   "2026-04-25T00:00:00Z",
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create tool call: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate create err = %v, want conflict", err)
+	}
+
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get tool call: %v", err)
+	}
+	got.Arguments["command"] = "mutated"
+	got.State = common.ToolCallStateCompleted
+	got.Output = map[string]any{"exitCode": 0}
+	if err := repo.Update(ctx, got); err != nil {
+		t.Fatalf("update tool call: %v", err)
+	}
+
+	updated, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get updated tool call: %v", err)
+	}
+	if updated.Arguments["command"] != "mutated" || updated.Output["exitCode"] != float64(0) && updated.Output["exitCode"] != 0 {
+		t.Fatalf("updated tool call = %+v, want updated argument and output", updated)
+	}
+	updated.Output["exitCode"] = 1
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get fresh tool call: %v", err)
+	}
+	if fresh.Output["exitCode"] != float64(0) && fresh.Output["exitCode"] != 0 {
+		t.Fatalf("clone isolation failed, exitCode = %v", fresh.Output["exitCode"])
+	}
+
+	second := &runmodel.ToolCall{
+		ID:          common.ToolCallID("tool-call-contract-2"),
+		WorkspaceID: item.WorkspaceID,
+		RunID:       item.RunID,
+		StepID:      common.StepID("run-contract/step-2"),
+		ToolName:    "editor",
+		State:       common.ToolCallStateCompleted,
+	}
+	if err := repo.Create(ctx, second); err != nil {
+		t.Fatalf("create second tool call: %v", err)
+	}
+	other := &runmodel.ToolCall{
+		ID:          common.ToolCallID("tool-call-other-run"),
+		WorkspaceID: item.WorkspaceID,
+		RunID:       common.RunID("run-other"),
+		StepID:      common.StepID("run-other/step-1"),
+		ToolName:    "shell",
+		State:       common.ToolCallStateCompleted,
+	}
+	if err := repo.Create(ctx, other); err != nil {
+		t.Fatalf("create other run tool call: %v", err)
+	}
+
+	byRun, err := repo.ListByRun(ctx, item.RunID)
+	if err != nil {
+		t.Fatalf("list tool calls by run: %v", err)
+	}
+	if len(byRun) != 2 || byRun[0].ID != item.ID || byRun[1].ID != second.ID {
+		t.Fatalf("tool calls by run = %+v, want first two calls", byRun)
+	}
+	byStep, err := repo.ListByStep(ctx, item.StepID)
+	if err != nil {
+		t.Fatalf("list tool calls by step: %v", err)
+	}
+	if len(byStep) != 1 || byStep[0].ID != item.ID {
+		t.Fatalf("tool calls by step = %+v, want first call", byStep)
+	}
+	if _, err := repo.Get(ctx, common.ToolCallID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing get err = %v, want not found", err)
+	}
+	if err := repo.Update(ctx, &runmodel.ToolCall{ID: common.ToolCallID("missing")}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing update err = %v, want not found", err)
+	}
+}
+
+func testPatchRepositoryContract(t *testing.T, factory func() repository.PatchRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &runmodel.Patch{
+		ID:          common.PatchID("patch-contract-1"),
+		WorkspaceID: common.WorkspaceID("ws-contract"),
+		RunID:       common.RunID("run-contract"),
+		StepID:      common.StepID("run-contract/step-1"),
+		ToolCallID:  common.ToolCallID("tool-call-contract-1"),
+		PatchType:   "unified_diff",
+		TargetRef:   "internal/example.go",
+		Summary:     "initial patch",
+		State:       common.PatchStateCreated,
+		CreatedAt:   "2026-04-25T00:00:00Z",
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create patch: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate create err = %v, want conflict", err)
+	}
+
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get patch: %v", err)
+	}
+	got.State = common.PatchStateApplied
+	got.AppliedAt = "2026-04-25T00:01:00Z"
+	if err := repo.Update(ctx, got); err != nil {
+		t.Fatalf("update patch: %v", err)
+	}
+	updated, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get updated patch: %v", err)
+	}
+	if updated.State != common.PatchStateApplied || updated.AppliedAt == "" {
+		t.Fatalf("patch = %+v, want applied", updated)
+	}
+
+	second := &runmodel.Patch{
+		ID:          common.PatchID("patch-contract-2"),
+		WorkspaceID: item.WorkspaceID,
+		RunID:       item.RunID,
+		StepID:      common.StepID("run-contract/step-2"),
+		PatchType:   "file_replace",
+		State:       common.PatchStateCreated,
+	}
+	if err := repo.Create(ctx, second); err != nil {
+		t.Fatalf("create second patch: %v", err)
+	}
+	if err := repo.Create(ctx, &runmodel.Patch{
+		ID:          common.PatchID("patch-other-run"),
+		WorkspaceID: item.WorkspaceID,
+		RunID:       common.RunID("run-other"),
+		StepID:      common.StepID("run-other/step-1"),
+		PatchType:   "unified_diff",
+		State:       common.PatchStateCreated,
+	}); err != nil {
+		t.Fatalf("create other run patch: %v", err)
+	}
+
+	byRun, err := repo.ListByRun(ctx, item.RunID)
+	if err != nil {
+		t.Fatalf("list patches by run: %v", err)
+	}
+	if len(byRun) != 2 || byRun[0].ID != item.ID || byRun[1].ID != second.ID {
+		t.Fatalf("patches by run = %+v, want first two patches", byRun)
+	}
+	byStep, err := repo.ListByStep(ctx, item.StepID)
+	if err != nil {
+		t.Fatalf("list patches by step: %v", err)
+	}
+	if len(byStep) != 1 || byStep[0].ID != item.ID {
+		t.Fatalf("patches by step = %+v, want first patch", byStep)
+	}
+	if _, err := repo.Get(ctx, common.PatchID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing get err = %v, want not found", err)
+	}
+	if err := repo.Update(ctx, &runmodel.Patch{ID: common.PatchID("missing")}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing update err = %v, want not found", err)
+	}
+}
+
+func testValidationResultRepositoryContract(t *testing.T, factory func() repository.ValidationResultRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &runmodel.ValidationResult{
+		ID:             common.ValidationResultID("validation-contract-1"),
+		WorkspaceID:    common.WorkspaceID("ws-contract"),
+		RunID:          common.RunID("run-contract"),
+		StepID:         common.StepID("run-contract/step-1"),
+		ValidationKind: "go_test",
+		TargetRef:      "./...",
+		State:          common.ValidationResultStateFailed,
+		Summary:        "initial failure",
+		StartedAt:      "2026-04-25T00:00:00Z",
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create validation result: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate create err = %v, want conflict", err)
+	}
+
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get validation result: %v", err)
+	}
+	got.State = common.ValidationResultStatePassed
+	got.Summary = "passed"
+	if err := repo.Update(ctx, got); err != nil {
+		t.Fatalf("update validation result: %v", err)
+	}
+	updated, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get updated validation result: %v", err)
+	}
+	if updated.State != common.ValidationResultStatePassed || updated.Summary != "passed" {
+		t.Fatalf("validation result = %+v, want passed", updated)
+	}
+
+	second := &runmodel.ValidationResult{
+		ID:             common.ValidationResultID("validation-contract-2"),
+		WorkspaceID:    item.WorkspaceID,
+		RunID:          item.RunID,
+		StepID:         common.StepID("run-contract/step-2"),
+		ValidationKind: "lint",
+		State:          common.ValidationResultStateWarning,
+	}
+	if err := repo.Create(ctx, second); err != nil {
+		t.Fatalf("create second validation result: %v", err)
+	}
+	if err := repo.Create(ctx, &runmodel.ValidationResult{
+		ID:          common.ValidationResultID("validation-other-run"),
+		WorkspaceID: item.WorkspaceID,
+		RunID:       common.RunID("run-other"),
+		StepID:      common.StepID("run-other/step-1"),
+		State:       common.ValidationResultStatePassed,
+	}); err != nil {
+		t.Fatalf("create other run validation result: %v", err)
+	}
+
+	byRun, err := repo.ListByRun(ctx, item.RunID)
+	if err != nil {
+		t.Fatalf("list validation results by run: %v", err)
+	}
+	if len(byRun) != 2 || byRun[0].ID != item.ID || byRun[1].ID != second.ID {
+		t.Fatalf("validation results by run = %+v, want first two results", byRun)
+	}
+	byStep, err := repo.ListByStep(ctx, item.StepID)
+	if err != nil {
+		t.Fatalf("list validation results by step: %v", err)
+	}
+	if len(byStep) != 1 || byStep[0].ID != item.ID {
+		t.Fatalf("validation results by step = %+v, want first result", byStep)
+	}
+	if _, err := repo.Get(ctx, common.ValidationResultID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing get err = %v, want not found", err)
+	}
+	if err := repo.Update(ctx, &runmodel.ValidationResult{ID: common.ValidationResultID("missing")}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing update err = %v, want not found", err)
+	}
+}
+
+func testRuntimeCheckpointRepositoryContract(t *testing.T, factory func() repository.RuntimeCheckpointRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &runmodel.RuntimeCheckpoint{
+		ID:               common.CheckpointID("checkpoint-contract-1"),
+		WorkspaceID:      common.WorkspaceID("ws-contract"),
+		RunID:            common.RunID("run-contract"),
+		CheckpointType:   common.CheckpointTypeRunState,
+		CurrentStepID:    common.StepID("run-contract/step-1"),
+		RunStateSnapshot: common.RunStateRunning,
+		OccurredAt:       "2026-04-25T00:00:00Z",
+		Data:             map[string]any{"thread": "main"},
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create runtime checkpoint: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate create err = %v, want conflict", err)
+	}
+
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get runtime checkpoint: %v", err)
+	}
+	got.Data["thread"] = "mutated"
+	got.RunStateSnapshot = common.RunStateBlockedOnDecision
+	if err := repo.Update(ctx, got); err != nil {
+		t.Fatalf("update runtime checkpoint: %v", err)
+	}
+	updated, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get updated runtime checkpoint: %v", err)
+	}
+	if updated.Data["thread"] != "mutated" || updated.RunStateSnapshot != common.RunStateBlockedOnDecision {
+		t.Fatalf("runtime checkpoint = %+v, want updated", updated)
+	}
+	updated.Data["thread"] = "leak"
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get fresh runtime checkpoint: %v", err)
+	}
+	if fresh.Data["thread"] != "mutated" {
+		t.Fatalf("clone isolation failed, thread = %v", fresh.Data["thread"])
+	}
+
+	second := &runmodel.RuntimeCheckpoint{
+		ID:               common.CheckpointID("checkpoint-contract-2"),
+		WorkspaceID:      item.WorkspaceID,
+		RunID:            item.RunID,
+		CheckpointType:   common.CheckpointTypeBlocked,
+		RunStateSnapshot: common.RunStateBlockedOnApproval,
+	}
+	if err := repo.Create(ctx, second); err != nil {
+		t.Fatalf("create second runtime checkpoint: %v", err)
+	}
+	if err := repo.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:               common.CheckpointID("checkpoint-other-run"),
+		WorkspaceID:      item.WorkspaceID,
+		RunID:            common.RunID("run-other"),
+		CheckpointType:   common.CheckpointTypeRunState,
+		RunStateSnapshot: common.RunStateRunning,
+	}); err != nil {
+		t.Fatalf("create other run runtime checkpoint: %v", err)
+	}
+
+	byRun, err := repo.ListByRun(ctx, item.RunID)
+	if err != nil {
+		t.Fatalf("list runtime checkpoints by run: %v", err)
+	}
+	if len(byRun) != 2 || byRun[0].ID != item.ID || byRun[1].ID != second.ID {
+		t.Fatalf("runtime checkpoints by run = %+v, want first two checkpoints", byRun)
+	}
+	if _, err := repo.Get(ctx, common.CheckpointID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing get err = %v, want not found", err)
+	}
+	if err := repo.Update(ctx, &runmodel.RuntimeCheckpoint{ID: common.CheckpointID("missing")}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing update err = %v, want not found", err)
+	}
+}
+
 func testDecisionTicketRepositoryContract(t *testing.T, factory func() repository.DecisionTicketRepository) {
 	t.Helper()
 	ctx := context.Background()
@@ -612,7 +1016,7 @@ func testDecisionResolutionRepositoryContract(t *testing.T, factory func() repos
 	item := &decisionmodel.Resolution{
 		ID:       common.ResolutionID("resolution-contract"),
 		TicketID: common.TicketID("ticket-contract"),
-		Type:     "approve_path",
+		Type:     "provide_missing_info",
 		Payload:  map[string]any{"operator": "contract-test"},
 	}
 	if err := repo.Create(ctx, item); err != nil {
@@ -632,7 +1036,7 @@ func testDecisionResolutionRepositoryContract(t *testing.T, factory func() repos
 	if err != nil {
 		t.Fatalf("get resolution by ticket id fresh: %v", err)
 	}
-	if fresh.Type != "approve_path" {
+	if fresh.Type != "provide_missing_info" {
 		t.Fatalf("clone isolation failed, type = %q", fresh.Type)
 	}
 	if fresh.Payload["operator"] != "contract-test" {
@@ -721,6 +1125,10 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	dodID := common.DoDID("dod-bundle-contract")
 	runID := common.RunID("run-bundle-contract")
 	stepID := common.StepID("run-bundle-contract/step-1")
+	toolCallID := common.ToolCallID("tool-call-bundle-contract")
+	patchID := common.PatchID("patch-bundle-contract")
+	validationResultID := common.ValidationResultID("validation-bundle-contract")
+	checkpointID := common.CheckpointID("checkpoint-bundle-contract")
 	ticketID := common.TicketID("ticket-bundle-contract")
 	resolutionID := common.ResolutionID("resolution-bundle-contract")
 	approvalID := common.ApprovalID("approval-bundle-contract")
@@ -797,6 +1205,72 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		t.Fatalf("update step: %v", err)
 	}
 
+	toolCall := &runmodel.ToolCall{
+		ID:          toolCallID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		ToolName:    "shell",
+		Arguments:   map[string]any{"command": "go test ./..."},
+		State:       common.ToolCallStateCompleted,
+		Output:      map[string]any{"exitCode": 0},
+	}
+	if err := bundle.toolCalls.Create(ctx, toolCall); err != nil {
+		t.Fatalf("create tool call: %v", err)
+	}
+	if err := bundle.toolCalls.Create(ctx, toolCall); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate tool call create err = %v, want conflict", err)
+	}
+
+	patch := &runmodel.Patch{
+		ID:          patchID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		ToolCallID:  toolCallID,
+		PatchType:   "unified_diff",
+		TargetRef:   "internal/example.go",
+		State:       common.PatchStateApplied,
+	}
+	if err := bundle.patches.Create(ctx, patch); err != nil {
+		t.Fatalf("create patch: %v", err)
+	}
+	if err := bundle.patches.Create(ctx, patch); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate patch create err = %v, want conflict", err)
+	}
+
+	validationResult := &runmodel.ValidationResult{
+		ID:             validationResultID,
+		WorkspaceID:    workspaceID,
+		RunID:          runID,
+		StepID:         stepID,
+		ValidationKind: "go_test",
+		State:          common.ValidationResultStatePassed,
+		Summary:        "passed",
+	}
+	if err := bundle.validationResults.Create(ctx, validationResult); err != nil {
+		t.Fatalf("create validation result: %v", err)
+	}
+	if err := bundle.validationResults.Create(ctx, validationResult); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate validation result create err = %v, want conflict", err)
+	}
+
+	checkpoint := &runmodel.RuntimeCheckpoint{
+		ID:               checkpointID,
+		WorkspaceID:      workspaceID,
+		RunID:            runID,
+		CheckpointType:   common.CheckpointTypeRunState,
+		CurrentStepID:    stepID,
+		RunStateSnapshot: common.RunStateBlockedOnDecision,
+		Data:             map[string]any{"thread": "main"},
+	}
+	if err := bundle.runtimeCheckpoints.Create(ctx, checkpoint); err != nil {
+		t.Fatalf("create runtime checkpoint: %v", err)
+	}
+	if err := bundle.runtimeCheckpoints.Create(ctx, checkpoint); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate runtime checkpoint create err = %v, want conflict", err)
+	}
+
 	ticket := &decisionmodel.Ticket{
 		ID:          ticketID,
 		WorkspaceID: workspaceID,
@@ -819,7 +1293,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	resolution := &decisionmodel.Resolution{
 		ID:       resolutionID,
 		TicketID: ticketID,
-		Type:     "approve_path",
+		Type:     "provide_missing_info",
 		Payload:  map[string]any{"operator": "bundle-test"},
 	}
 	if err := bundle.resolutions.Create(ctx, resolution); err != nil {
@@ -912,6 +1386,38 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		t.Fatalf("step output status = %v, want completed", stepFresh.Output["status"])
 	}
 
+	reloadedToolCalls, err := reloaded.toolCalls.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("reload tool calls by run: %v", err)
+	}
+	if len(reloadedToolCalls) != 1 || reloadedToolCalls[0].ID != toolCallID || reloadedToolCalls[0].Output["exitCode"] == nil {
+		t.Fatalf("reloaded tool calls = %+v, want %q with output", reloadedToolCalls, toolCallID)
+	}
+
+	reloadedPatches, err := reloaded.patches.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("reload patches by run: %v", err)
+	}
+	if len(reloadedPatches) != 1 || reloadedPatches[0].ID != patchID || reloadedPatches[0].State != common.PatchStateApplied {
+		t.Fatalf("reloaded patches = %+v, want applied %q", reloadedPatches, patchID)
+	}
+
+	reloadedValidationResults, err := reloaded.validationResults.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("reload validation results by run: %v", err)
+	}
+	if len(reloadedValidationResults) != 1 || reloadedValidationResults[0].ID != validationResultID || reloadedValidationResults[0].State != common.ValidationResultStatePassed {
+		t.Fatalf("reloaded validation results = %+v, want passed %q", reloadedValidationResults, validationResultID)
+	}
+
+	reloadedCheckpoints, err := reloaded.runtimeCheckpoints.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("reload runtime checkpoints by run: %v", err)
+	}
+	if len(reloadedCheckpoints) != 1 || reloadedCheckpoints[0].ID != checkpointID || reloadedCheckpoints[0].Data["thread"] != "main" {
+		t.Fatalf("reloaded runtime checkpoints = %+v, want %q", reloadedCheckpoints, checkpointID)
+	}
+
 	reloadedTickets, err := reloaded.tickets.List(ctx)
 	if err != nil {
 		t.Fatalf("reload tickets: %v", err)
@@ -950,6 +1456,18 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	}
 	if _, err := reloaded.steps.Get(ctx, common.StepID("step-missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing step get err = %v, want not found", err)
+	}
+	if _, err := reloaded.toolCalls.Get(ctx, common.ToolCallID("tool-call-missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing tool call get err = %v, want not found", err)
+	}
+	if _, err := reloaded.patches.Get(ctx, common.PatchID("patch-missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing patch get err = %v, want not found", err)
+	}
+	if _, err := reloaded.validationResults.Get(ctx, common.ValidationResultID("validation-missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing validation result get err = %v, want not found", err)
+	}
+	if _, err := reloaded.runtimeCheckpoints.Get(ctx, common.CheckpointID("checkpoint-missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing runtime checkpoint get err = %v, want not found", err)
 	}
 	if _, err := reloaded.tickets.Get(ctx, common.TicketID("ticket-missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing ticket get err = %v, want not found", err)

@@ -874,7 +874,7 @@ func (s *WorkorchService) runtimeDecisionRejectedTerminalReached(
 	if err != nil {
 		return false, err
 	}
-	return resolution.Type == decisioncommon.ResolutionTypeRejectPath, nil
+	return resolution.Type == decisioncommon.ResolutionTypeRejectCurrentPath, nil
 }
 
 func (s *WorkorchService) runtimeMultiDecisionSecondGateRejectedTerminalReached(
@@ -927,7 +927,7 @@ func (s *WorkorchService) runtimeMultiDecisionSecondGateRejectedTerminalReached(
 	if err != nil {
 		return false, err
 	}
-	return resolution.Type == decisioncommon.ResolutionTypeRejectPath, nil
+	return resolution.Type == decisioncommon.ResolutionTypeRejectCurrentPath, nil
 }
 
 func (s *WorkorchService) runtimeMixedDecisionApprovalRejectedTerminalReached(
@@ -1108,7 +1108,7 @@ func (s *WorkorchService) EnsureDecisionResolved(ctx context.Context, ticketID c
 		ctx,
 		common.ResolutionID("resolution-workorch-blocked-decision"),
 		ticketID,
-		decisioncommon.ResolutionTypeApprovePath,
+		decisioncommon.ResolutionTypeProvideMissingInfo,
 		map[string]any{"operator": "workorch"},
 	)
 }
@@ -1118,7 +1118,7 @@ func (s *WorkorchService) EnsureDecisionRejected(ctx context.Context, ticketID c
 		ctx,
 		common.ResolutionID("resolution-workorch-rejected-decision"),
 		ticketID,
-		decisioncommon.ResolutionTypeRejectPath,
+		decisioncommon.ResolutionTypeRejectCurrentPath,
 		map[string]any{"operator": "workorch", "outcome": "reject"},
 	)
 }
