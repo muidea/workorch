@@ -135,6 +135,13 @@ type runStatusResponse struct {
 	Status   appservice.RunStatus `json:"status"`
 }
 
+type runObservabilityResponse struct {
+	Service       string                      `json:"service"`
+	Backend       string                      `json:"backend,omitempty"`
+	DataRoot      string                      `json:"dataRoot,omitempty"`
+	Observability appservice.RunObservability `json:"observability"`
+}
+
 type runsResponse struct {
 	Service  string           `json:"service"`
 	Backend  string           `json:"backend,omitempty"`
@@ -184,6 +191,69 @@ type approvalsResponse struct {
 	Approvals []appservice.Approval `json:"approvals"`
 }
 
+type soulResponse struct {
+	Service  string          `json:"service"`
+	Backend  string          `json:"backend,omitempty"`
+	DataRoot string          `json:"dataRoot,omitempty"`
+	Soul     appservice.Soul `json:"soul"`
+}
+
+type soulsResponse struct {
+	Service  string            `json:"service"`
+	Backend  string            `json:"backend,omitempty"`
+	DataRoot string            `json:"dataRoot,omitempty"`
+	Souls    []appservice.Soul `json:"souls"`
+}
+
+type skillResponse struct {
+	Service  string           `json:"service"`
+	Backend  string           `json:"backend,omitempty"`
+	DataRoot string           `json:"dataRoot,omitempty"`
+	Skill    appservice.Skill `json:"skill"`
+}
+
+type skillsResponse struct {
+	Service  string             `json:"service"`
+	Backend  string             `json:"backend,omitempty"`
+	DataRoot string             `json:"dataRoot,omitempty"`
+	Skills   []appservice.Skill `json:"skills"`
+}
+
+type mcpServerResponse struct {
+	Service  string               `json:"service"`
+	Backend  string               `json:"backend,omitempty"`
+	DataRoot string               `json:"dataRoot,omitempty"`
+	Server   appservice.MCPServer `json:"server"`
+}
+
+type mcpServersResponse struct {
+	Service  string                 `json:"service"`
+	Backend  string                 `json:"backend,omitempty"`
+	DataRoot string                 `json:"dataRoot,omitempty"`
+	Servers  []appservice.MCPServer `json:"servers"`
+}
+
+type mcpToolsResponse struct {
+	Service  string               `json:"service"`
+	Backend  string               `json:"backend,omitempty"`
+	DataRoot string               `json:"dataRoot,omitempty"`
+	Tools    []appservice.MCPTool `json:"tools"`
+}
+
+type memoryItemResponse struct {
+	Service  string                `json:"service"`
+	Backend  string                `json:"backend,omitempty"`
+	DataRoot string                `json:"dataRoot,omitempty"`
+	Memory   appservice.MemoryItem `json:"memory"`
+}
+
+type memoryItemsResponse struct {
+	Service  string                  `json:"service"`
+	Backend  string                  `json:"backend,omitempty"`
+	DataRoot string                  `json:"dataRoot,omitempty"`
+	Memory   []appservice.MemoryItem `json:"memory"`
+}
+
 type createWorkspaceRequest struct {
 	WorkspaceID      string `json:"workspaceId"`
 	Title            string `json:"title"`
@@ -201,6 +271,11 @@ type activateWorkspaceExecutionRequest struct {
 	GoalID string `json:"goalId,omitempty"`
 	DoDID  string `json:"doDId,omitempty"`
 }
+
+type createSoulRequest = appservice.CreateSoulCommand
+type createSkillRequest = appservice.CreateSkillCommand
+type createMCPServerRequest = appservice.CreateMCPServerCommand
+type createMemoryItemRequest = appservice.CreateMemoryItemCommand
 
 type resolveDecisionRequest struct {
 	ResolutionType    string         `json:"resolutionType"`
@@ -263,6 +338,7 @@ type createRunInstanceFunc func(context.Context, string, string, string, string,
 type readRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
 type readRunSnapshotFunc func(context.Context, string, string, string) (appservice.RunSnapshot, error)
 type readRunStatusFunc func(context.Context, string, string, string) (appservice.RunStatus, error)
+type readRunObservabilityFunc func(context.Context, string, string, string) (appservice.RunObservability, error)
 type listRunInstancesFunc func(context.Context, string, string, string) ([]appservice.Run, error)
 type startRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
 type resumeRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
@@ -274,6 +350,18 @@ type listApprovalsFunc func(context.Context, string, string, string, string) ([]
 type readApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
 type approveApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
 type rejectApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
+type createSoulFunc func(context.Context, string, string, appservice.CreateSoulCommand) (appservice.Soul, error)
+type readSoulFunc func(context.Context, string, string, string) (appservice.Soul, error)
+type listSoulsFunc func(context.Context, string, string) ([]appservice.Soul, error)
+type createSkillFunc func(context.Context, string, string, appservice.CreateSkillCommand) (appservice.Skill, error)
+type readSkillFunc func(context.Context, string, string, string) (appservice.Skill, error)
+type listSkillsFunc func(context.Context, string, string) ([]appservice.Skill, error)
+type createMCPServerFunc func(context.Context, string, string, appservice.CreateMCPServerCommand) (appservice.MCPServer, error)
+type readMCPServerFunc func(context.Context, string, string, string) (appservice.MCPServer, error)
+type listMCPServersFunc func(context.Context, string, string) ([]appservice.MCPServer, error)
+type listMCPServerToolsFunc func(context.Context, string, string, string) ([]appservice.MCPTool, error)
+type createMemoryItemFunc func(context.Context, string, string, string, appservice.CreateMemoryItemCommand) (appservice.MemoryItem, error)
+type listMemoryByWorkspaceFunc func(context.Context, string, string, string, string) ([]appservice.MemoryItem, error)
 type runOneFunc func(context.Context, string, string, string) (appservice.Slice, error)
 type readOneFunc func(context.Context, string, string, string) (appservice.Slice, error)
 type statusOneFunc func(context.Context, string, string, string) (appservice.SliceStatus, error)
@@ -301,6 +389,7 @@ type serverState struct {
 	readRun               readRunInstanceFunc
 	readRunSnapshot       readRunSnapshotFunc
 	readRunStatus         readRunStatusFunc
+	readRunObservability  readRunObservabilityFunc
 	listRuns              listRunInstancesFunc
 	startRun              startRunInstanceFunc
 	resumeRun             resumeRunInstanceFunc
@@ -312,6 +401,18 @@ type serverState struct {
 	readApproval          readApprovalFunc
 	approveApproval       approveApprovalFunc
 	rejectApproval        rejectApprovalFunc
+	createSoul            createSoulFunc
+	readSoul              readSoulFunc
+	listSouls             listSoulsFunc
+	createSkill           createSkillFunc
+	readSkill             readSkillFunc
+	listSkills            listSkillsFunc
+	createMCPServer       createMCPServerFunc
+	readMCPServer         readMCPServerFunc
+	listMCPServers        listMCPServersFunc
+	listMCPServerTools    listMCPServerToolsFunc
+	createMemoryItem      createMemoryItemFunc
+	listMemoryByWorkspace listMemoryByWorkspaceFunc
 	listSlices            listSlicesFunc
 	listSnapshots         listSnapshotsFunc
 	listStatuses          listStatusesFunc
@@ -344,6 +445,7 @@ type serverMetrics struct {
 	runGetRequests              atomic.Uint64
 	runSnapshotRequests         atomic.Uint64
 	runStatusRequests           atomic.Uint64
+	runObservabilityRequests    atomic.Uint64
 	runStartRequests            atomic.Uint64
 	runResumeRequests           atomic.Uint64
 	workspaceActivationRequests atomic.Uint64
@@ -354,6 +456,18 @@ type serverMetrics struct {
 	approvalGetRequests         atomic.Uint64
 	approvalApproveRequests     atomic.Uint64
 	approvalRejectRequests      atomic.Uint64
+	soulCreateRequests          atomic.Uint64
+	soulListRequests            atomic.Uint64
+	soulGetRequests             atomic.Uint64
+	skillCreateRequests         atomic.Uint64
+	skillListRequests           atomic.Uint64
+	skillGetRequests            atomic.Uint64
+	mcpServerCreateRequests     atomic.Uint64
+	mcpServerListRequests       atomic.Uint64
+	mcpServerGetRequests        atomic.Uint64
+	mcpToolListRequests         atomic.Uint64
+	memoryCreateRequests        atomic.Uint64
+	memoryListRequests          atomic.Uint64
 	sliceCatalogRequests        atomic.Uint64
 	sliceSnapshotsRequests      atomic.Uint64
 	sliceStatusesRequests       atomic.Uint64
@@ -743,6 +857,26 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Status:   item,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/observability", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "observability" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.runObservabilityRequests.Add(1)
+		item, err := state.readRunObservability(r.Context(), state.config.Backend, state.config.DataRoot, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runObservabilityResponse{
+			Service:       "workorch",
+			Backend:       state.config.Backend,
+			DataRoot:      state.config.DataRoot,
+			Observability: item,
+		})
+	})
 	router.AddHandler("/api/v1/workorch/decisions", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		state.metrics.decisionListRequests.Add(1)
@@ -811,6 +945,155 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Backend:  state.config.Backend,
 			DataRoot: state.config.DataRoot,
 			Approval: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/souls", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.soulListRequests.Add(1)
+		items, err := state.listSouls(r.Context(), state.config.Backend, state.config.DataRoot)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, soulsResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Souls:    items,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/souls/:soulId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		soulID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/souls/")
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.soulGetRequests.Add(1)
+		item, err := state.readSoul(r.Context(), state.config.Backend, state.config.DataRoot, soulID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, soulResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Soul:     item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/skills", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.skillListRequests.Add(1)
+		items, err := state.listSkills(r.Context(), state.config.Backend, state.config.DataRoot)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, skillsResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Skills:   items,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/skills/:skillId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		skillID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/skills/")
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.skillGetRequests.Add(1)
+		item, err := state.readSkill(r.Context(), state.config.Backend, state.config.DataRoot, skillID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, skillResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Skill:    item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/mcp/servers", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.mcpServerListRequests.Add(1)
+		items, err := state.listMCPServers(r.Context(), state.config.Backend, state.config.DataRoot)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, mcpServersResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Servers:  items,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/mcp/servers/:serverId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		serverID, action, ok := mcpServerActionFromPath(r.URL.Path)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if action != "" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.mcpServerGetRequests.Add(1)
+		item, err := state.readMCPServer(r.Context(), state.config.Backend, state.config.DataRoot, serverID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, mcpServerResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Server:   item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/mcp/servers/:serverId/tools", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		serverID, action, ok := mcpServerActionFromPath(r.URL.Path)
+		if !ok || action != "tools" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.mcpToolListRequests.Add(1)
+		items, err := state.listMCPServerTools(r.Context(), state.config.Backend, state.config.DataRoot, serverID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, mcpToolsResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Tools:    items,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/memory", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID := r.URL.Query().Get("workspaceId")
+		if workspaceID == "" {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "workspaceId is required"})
+			return
+		}
+		state.metrics.memoryListRequests.Add(1)
+		items, err := state.listMemoryByWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, r.URL.Query().Get("q"))
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, memoryItemsResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Memory:   items,
 		})
 	})
 }
@@ -953,6 +1236,91 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			Backend:  state.config.Backend,
 			DataRoot: state.config.DataRoot,
 			DoD:      item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/memory", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "memory" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.memoryCreateRequests.Add(1)
+		var req createMemoryItemRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.createMemoryItem(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, req)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, memoryItemResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Memory:   item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/souls", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.soulCreateRequests.Add(1)
+		var req createSoulRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.createSoul(r.Context(), state.config.Backend, state.config.DataRoot, req)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, soulResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Soul:     item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/skills", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.skillCreateRequests.Add(1)
+		var req createSkillRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.createSkill(r.Context(), state.config.Backend, state.config.DataRoot, req)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, skillResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Skill:    item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/mcp/servers", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.mcpServerCreateRequests.Add(1)
+		var req createMCPServerRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.createMCPServer(r.Context(), state.config.Backend, state.config.DataRoot, req)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, mcpServerResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Server:   item,
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs", http.MethodGet, func(_ context.Context, w http.ResponseWriter, _ *http.Request) {
@@ -1292,6 +1660,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		readRun:               defaultReadRun,
 		readRunSnapshot:       defaultReadRunSnapshot,
 		readRunStatus:         defaultReadRunStatus,
+		readRunObservability:  defaultReadRunObservability,
 		listRuns:              defaultListRuns,
 		startRun:              defaultStartRun,
 		resumeRun:             defaultResumeRun,
@@ -1303,6 +1672,18 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		readApproval:          defaultReadApproval,
 		approveApproval:       defaultApproveApproval,
 		rejectApproval:        defaultRejectApproval,
+		createSoul:            defaultCreateSoul,
+		readSoul:              defaultReadSoul,
+		listSouls:             defaultListSouls,
+		createSkill:           defaultCreateSkill,
+		readSkill:             defaultReadSkill,
+		listSkills:            defaultListSkills,
+		createMCPServer:       defaultCreateMCPServer,
+		readMCPServer:         defaultReadMCPServer,
+		listMCPServers:        defaultListMCPServers,
+		listMCPServerTools:    defaultListMCPServerTools,
+		createMemoryItem:      defaultCreateMemoryItem,
+		listMemoryByWorkspace: defaultListMemoryByWorkspace,
 		listSlices:            defaultListSlices,
 		listSnapshots:         defaultListSnapshots,
 		listStatuses:          defaultListStatuses,
@@ -1456,6 +1837,15 @@ func (s *serverState) configureSharedMemorySession() {
 		})
 		return ret, err
 	}
+	s.readRunObservability = func(ctx context.Context, _, _, runID string) (appservice.RunObservability, error) {
+		var ret appservice.RunObservability
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadRunObservabilityWithSession(ctx, session, runID)
+			return err
+		})
+		return ret, err
+	}
 	s.listRuns = func(ctx context.Context, _, _, workspaceID string) ([]appservice.Run, error) {
 		var ret []appservice.Run
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
@@ -1551,6 +1941,114 @@ func (s *serverState) configureSharedMemorySession() {
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.RejectApprovalWithSession(ctx, session, approvalID)
+			return err
+		})
+		return ret, err
+	}
+	s.createSoul = func(ctx context.Context, _, _ string, cmd appservice.CreateSoulCommand) (appservice.Soul, error) {
+		var ret appservice.Soul
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.CreateSoulWithSession(ctx, session, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.readSoul = func(ctx context.Context, _, _, soulID string) (appservice.Soul, error) {
+		var ret appservice.Soul
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadSoulWithSession(ctx, session, soulID)
+			return err
+		})
+		return ret, err
+	}
+	s.listSouls = func(ctx context.Context, _, _ string) ([]appservice.Soul, error) {
+		var ret []appservice.Soul
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListSoulsWithSession(ctx, session)
+			return err
+		})
+		return ret, err
+	}
+	s.createSkill = func(ctx context.Context, _, _ string, cmd appservice.CreateSkillCommand) (appservice.Skill, error) {
+		var ret appservice.Skill
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.CreateSkillWithSession(ctx, session, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.readSkill = func(ctx context.Context, _, _, skillID string) (appservice.Skill, error) {
+		var ret appservice.Skill
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadSkillWithSession(ctx, session, skillID)
+			return err
+		})
+		return ret, err
+	}
+	s.listSkills = func(ctx context.Context, _, _ string) ([]appservice.Skill, error) {
+		var ret []appservice.Skill
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListSkillsWithSession(ctx, session)
+			return err
+		})
+		return ret, err
+	}
+	s.createMCPServer = func(ctx context.Context, _, _ string, cmd appservice.CreateMCPServerCommand) (appservice.MCPServer, error) {
+		var ret appservice.MCPServer
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.CreateMCPServerWithSession(ctx, session, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.readMCPServer = func(ctx context.Context, _, _, serverID string) (appservice.MCPServer, error) {
+		var ret appservice.MCPServer
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadMCPServerWithSession(ctx, session, serverID)
+			return err
+		})
+		return ret, err
+	}
+	s.listMCPServers = func(ctx context.Context, _, _ string) ([]appservice.MCPServer, error) {
+		var ret []appservice.MCPServer
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListMCPServersWithSession(ctx, session)
+			return err
+		})
+		return ret, err
+	}
+	s.listMCPServerTools = func(ctx context.Context, _, _, serverID string) ([]appservice.MCPTool, error) {
+		var ret []appservice.MCPTool
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListMCPServerToolsWithSession(ctx, session, serverID)
+			return err
+		})
+		return ret, err
+	}
+	s.createMemoryItem = func(ctx context.Context, _, _, workspaceID string, cmd appservice.CreateMemoryItemCommand) (appservice.MemoryItem, error) {
+		var ret appservice.MemoryItem
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.CreateMemoryItemWithSession(ctx, session, workspaceID, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.listMemoryByWorkspace = func(ctx context.Context, _, _, workspaceID string, query string) ([]appservice.MemoryItem, error) {
+		var ret []appservice.MemoryItem
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListMemoryByWorkspaceWithSession(ctx, session, workspaceID, query)
 			return err
 		})
 		return ret, err
@@ -1697,6 +2195,10 @@ func defaultReadRunStatus(ctx context.Context, backend string, dataRoot string, 
 	return appservice.ReadRunStatusWithBackend(ctx, backend, dataRoot, runID)
 }
 
+func defaultReadRunObservability(ctx context.Context, backend string, dataRoot string, runID string) (appservice.RunObservability, error) {
+	return appservice.ReadRunObservabilityWithBackend(ctx, backend, dataRoot, runID)
+}
+
 func defaultListWorkspaces(ctx context.Context, backend string, dataRoot string) ([]appservice.Workspace, error) {
 	return appservice.ListWorkspacesWithBackend(ctx, backend, dataRoot)
 }
@@ -1743,6 +2245,54 @@ func defaultApproveApproval(ctx context.Context, backend string, dataRoot string
 
 func defaultRejectApproval(ctx context.Context, backend string, dataRoot string, approvalID string) (appservice.Approval, error) {
 	return appservice.RejectApprovalWithBackend(ctx, backend, dataRoot, approvalID)
+}
+
+func defaultCreateSoul(ctx context.Context, backend string, dataRoot string, cmd appservice.CreateSoulCommand) (appservice.Soul, error) {
+	return appservice.CreateSoulWithBackend(ctx, backend, dataRoot, cmd)
+}
+
+func defaultReadSoul(ctx context.Context, backend string, dataRoot string, soulID string) (appservice.Soul, error) {
+	return appservice.ReadSoulWithBackend(ctx, backend, dataRoot, soulID)
+}
+
+func defaultListSouls(ctx context.Context, backend string, dataRoot string) ([]appservice.Soul, error) {
+	return appservice.ListSoulsWithBackend(ctx, backend, dataRoot)
+}
+
+func defaultCreateSkill(ctx context.Context, backend string, dataRoot string, cmd appservice.CreateSkillCommand) (appservice.Skill, error) {
+	return appservice.CreateSkillWithBackend(ctx, backend, dataRoot, cmd)
+}
+
+func defaultReadSkill(ctx context.Context, backend string, dataRoot string, skillID string) (appservice.Skill, error) {
+	return appservice.ReadSkillWithBackend(ctx, backend, dataRoot, skillID)
+}
+
+func defaultListSkills(ctx context.Context, backend string, dataRoot string) ([]appservice.Skill, error) {
+	return appservice.ListSkillsWithBackend(ctx, backend, dataRoot)
+}
+
+func defaultCreateMCPServer(ctx context.Context, backend string, dataRoot string, cmd appservice.CreateMCPServerCommand) (appservice.MCPServer, error) {
+	return appservice.CreateMCPServerWithBackend(ctx, backend, dataRoot, cmd)
+}
+
+func defaultReadMCPServer(ctx context.Context, backend string, dataRoot string, serverID string) (appservice.MCPServer, error) {
+	return appservice.ReadMCPServerWithBackend(ctx, backend, dataRoot, serverID)
+}
+
+func defaultListMCPServers(ctx context.Context, backend string, dataRoot string) ([]appservice.MCPServer, error) {
+	return appservice.ListMCPServersWithBackend(ctx, backend, dataRoot)
+}
+
+func defaultListMCPServerTools(ctx context.Context, backend string, dataRoot string, serverID string) ([]appservice.MCPTool, error) {
+	return appservice.ListMCPServerToolsWithBackend(ctx, backend, dataRoot, serverID)
+}
+
+func defaultCreateMemoryItem(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd appservice.CreateMemoryItemCommand) (appservice.MemoryItem, error) {
+	return appservice.CreateMemoryItemWithBackend(ctx, backend, dataRoot, workspaceID, cmd)
+}
+
+func defaultListMemoryByWorkspace(ctx context.Context, backend string, dataRoot string, workspaceID string, query string) ([]appservice.MemoryItem, error) {
+	return appservice.ListMemoryByWorkspaceWithBackend(ctx, backend, dataRoot, workspaceID, query)
 }
 
 func defaultRunOne(ctx context.Context, backend string, dataRoot string, sliceID string) (appservice.Slice, error) {
@@ -1853,6 +2403,7 @@ func (m *serverMetrics) render(config Config) string {
 			"workorch_http_requests_total{endpoint=\"run_get\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_snapshot\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_status\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"run_observability\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_start\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_resume\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"workspace_execution_activation\"} %d\n"+
@@ -1901,6 +2452,7 @@ func (m *serverMetrics) render(config Config) string {
 		m.runGetRequests.Load(),
 		m.runSnapshotRequests.Load(),
 		m.runStatusRequests.Load(),
+		m.runObservabilityRequests.Load(),
 		m.runStartRequests.Load(),
 		m.runResumeRequests.Load(),
 		m.workspaceActivationRequests.Load(),
@@ -2014,6 +2566,24 @@ func approvalActionFromPath(path string) (approvalID string, action string, ok b
 		return "", "", false
 	}
 	trimmed := strings.TrimPrefix(path, "/api/v1/workorch/approvals/")
+	if trimmed == "" {
+		return "", "", false
+	}
+	parts := strings.Split(trimmed, "/")
+	if len(parts) == 1 && parts[0] != "" {
+		return parts[0], "", true
+	}
+	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+		return parts[0], parts[1], true
+	}
+	return "", "", false
+}
+
+func mcpServerActionFromPath(path string) (serverID string, action string, ok bool) {
+	if !strings.HasPrefix(path, "/api/v1/workorch/mcp/servers/") {
+		return "", "", false
+	}
+	trimmed := strings.TrimPrefix(path, "/api/v1/workorch/mcp/servers/")
 	if trimmed == "" {
 		return "", "", false
 	}

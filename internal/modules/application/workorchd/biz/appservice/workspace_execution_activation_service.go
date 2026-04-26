@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -179,10 +180,16 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 	for attempt := 0; attempt < 8; attempt++ {
 		runID := common.RunID(generateBusinessID("run"))
 		if err := exports.Services.RunService.CreateRun(ctx, runmodule.CreateRunCommand{
-			RunID:       runID,
-			WorkspaceID: workspaceID,
-			GoalID:      goalID,
-			DoDID:       dodID,
+			RunID:           runID,
+			WorkspaceID:     workspaceID,
+			GoalID:          goalID,
+			DoDID:           dodID,
+			InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+			ExecutionContext: map[string]any{
+				"activation": "workspace_execution",
+				"goalId":     string(goalID),
+				"doDId":      string(dodID),
+			},
 		}); err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				continue

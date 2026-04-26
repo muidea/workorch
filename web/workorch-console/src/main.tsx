@@ -9,7 +9,7 @@ import {
 import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-components';
 import { App as AntApp, Button, ConfigProvider, Descriptions, Empty, Form, Input, Modal, Select, Space, Steps, Tag, Typography, theme } from 'antd';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Decision, DoD, Goal, Run, RunSnapshot, Workspace, WorkspaceSnapshot } from './types';
+import type { Approval, Decision, DoD, Goal, Run, RunObservability, RunSnapshot, RuntimeTimelineItem, Workspace, WorkspaceSnapshot } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -80,6 +80,10 @@ function evidenceCount(snapshot?: RunSnapshot) {
     (snapshot.patches?.length ?? 0) +
     (snapshot.validationResults?.length ?? 0) +
     (snapshot.runtimeCheckpoints?.length ?? 0);
+}
+
+function timelineLabel(item: RuntimeTimelineItem) {
+  return item.topic || item.type || item.source;
 }
 
 type ControlPlaneProps = {
@@ -227,6 +231,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [goals, setGoals] = useState<Goal[]>([]);
   const [dods, setDoDs] = useState<DoD[]>([]);
   const [runSnapshot, setRunSnapshot] = useState<RunSnapshot | undefined>(undefined);
+  const [runObservability, setRunObservability] = useState<RunObservability | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [activationOpen, setActivationOpen] = useState(false);
   const [activationLoading, setActivationLoading] = useState(false);
@@ -290,6 +295,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     setGoals(nextGoals);
     setDoDs(nextDoDs);
     setRunSnapshot(undefined);
+    setRunObservability(undefined);
   }
 
   const refreshWorkspace = async () => {
@@ -317,6 +323,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       const activation = await workorchApi.activateWorkspaceExecution(workspaceId, goalId, doDId);
       setSnapshot(activation.snapshot);
       setRunSnapshot(undefined);
+      setRunObservability(undefined);
       setActivationOpen(false);
       activationForm.resetFields();
       message.success('Workspace execution activated');
@@ -350,7 +357,18 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       valueType: 'option',
       render: (_, item) => (
         <Space>
-          <Button size="small" onClick={() => void workorchApi.readRunSnapshot(item.id).then(setRunSnapshot).catch((error: unknown) => message.error(errorMessage(error)))}>Evidence</Button>
+          <Button
+            size="small"
+            onClick={() => void Promise.all([
+              workorchApi.readRunSnapshot(item.id),
+              workorchApi.readRunObservability(item.id)
+            ]).then(([nextSnapshot, nextObservability]) => {
+              setRunSnapshot(nextSnapshot);
+              setRunObservability(nextObservability);
+            }).catch((error: unknown) => message.error(errorMessage(error)))}
+          >
+            Observability
+          </Button>
           <Button
             size="small"
             onClick={() => void workorchApi.resumeRun(item.id)
@@ -442,21 +460,43 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
               ]} dataSource={snapshot.approvals ?? []} />
             </ProCard>
           </ProCard>
-          <ProCard title="Selected Run Evidence" className="workorch-section" extra={runSnapshot ? <Tag>{evidenceCount(runSnapshot)} evidence records</Tag> : null}>
+          <ProCard title="Selected Run Observability" className="workorch-section" extra={runSnapshot ? <Tag>{evidenceCount(runSnapshot)} evidence records</Tag> : null}>
             {runSnapshot ? (
-              <Descriptions
-                column={2}
-                items={[
-                  { key: 'run', label: 'Run', children: `${runSnapshot.run.id} / ${runSnapshot.run.state}` },
-                  { key: 'steps', label: 'Steps', children: runSnapshot.steps?.length ?? 0 },
-                  { key: 'toolCalls', label: 'Tool Calls', children: runSnapshot.toolCalls?.length ?? 0 },
-                  { key: 'patches', label: 'Patches', children: runSnapshot.patches?.length ?? 0 },
-                  { key: 'validations', label: 'Validation Results', children: runSnapshot.validationResults?.length ?? 0 },
-                  { key: 'checkpoints', label: 'Runtime Checkpoints', children: runSnapshot.runtimeCheckpoints?.length ?? 0 }
-                ]}
-              />
+              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                <Descriptions
+                  column={3}
+                  items={[
+                    { key: 'run', label: 'Run', children: `${runSnapshot.run.id} / ${runSnapshot.run.state}` },
+                    { key: 'currentStep', label: 'Current Step', children: runObservability?.progress.currentStepId || runSnapshot.steps?.at(-1)?.id || '-' },
+                    { key: 'terminal', label: 'Terminal', children: runObservability ? String(runObservability.progress.terminal) : '-' },
+                    { key: 'steps', label: 'Steps', children: `${runObservability?.progress.stepCompleted ?? 0}/${runObservability?.progress.stepTotal ?? runSnapshot.steps?.length ?? 0} completed` },
+                    { key: 'toolCalls', label: 'Tool Calls', children: `${runObservability?.evidence.toolCallCompleted ?? 0}/${runObservability?.evidence.toolCallTotal ?? runSnapshot.toolCalls?.length ?? 0} completed` },
+                    { key: 'patches', label: 'Patches', children: `${runObservability?.evidence.patchApplied ?? 0}/${runObservability?.evidence.patchTotal ?? runSnapshot.patches?.length ?? 0} applied` },
+                    { key: 'validations', label: 'Validation Results', children: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? runSnapshot.validationResults?.length ?? 0} passed` },
+                    { key: 'checkpoints', label: 'Runtime Checkpoints', children: runObservability?.evidence.runtimeCheckpointTotal ?? runSnapshot.runtimeCheckpoints?.length ?? 0 },
+                    { key: 'events', label: 'Events', children: runObservability?.evidence.eventTotal ?? 0 }
+                  ]}
+                />
+                {runObservability?.latestCheckpoint ? (
+                  <Tag color="blue">Latest checkpoint: {runObservability.latestCheckpoint.checkpointType} / {runObservability.latestCheckpoint.runStateSnapshot}</Tag>
+                ) : null}
+                <ProTable<RuntimeTimelineItem>
+                  rowKey={(item, index) => `${item.source}-${item.id || item.topic || index}-${index}`}
+                  search={false}
+                  pagination={{ pageSize: 5 }}
+                  size="small"
+                  columns={[
+                    { title: 'Source', dataIndex: 'source', width: 110 },
+                    { title: 'Event', render: (_, item) => timelineLabel(item), ellipsis: true },
+                    { title: 'Run State', dataIndex: 'runState', width: 130 },
+                    { title: 'Step', dataIndex: 'stepId', ellipsis: true },
+                    { title: 'Occurred At', dataIndex: 'occurredAt', width: 210 }
+                  ]}
+                  dataSource={runObservability?.timeline ?? []}
+                />
+              </Space>
             ) : (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Select a run evidence view" />
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Select a run observability view" />
             )}
           </ProCard>
         </>

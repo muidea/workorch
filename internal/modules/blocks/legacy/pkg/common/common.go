@@ -10,4 +10,5 @@ const (
 	MixedDecisionApprovalRunToken = "mixed-decision-approval"
 	RuntimeDecisionBlockRunToken  = "runtime-decision-block"
 	RuntimeApprovalBlockRunToken  = "runtime-approval-block"
+	RuntimePatchRunToken          = "runtime-patch"
 )

@@ -11,6 +11,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestReadRunSnapshotWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing.T) {
@@ -174,6 +175,100 @@ func TestReadRunStatusWithBackendReturnsBlockedApprovalSummary(t *testing.T) {
 	}
 	if item.ApprovalCount != 1 || item.BlockingApprovalID != started.BlockingApprovalID {
 		t.Fatalf("status = %+v, want approval count 1 and blocking approval %s", item, started.BlockingApprovalID)
+	}
+}
+
+func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "memory", dataRoot)
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-run-observability")
+	runID := common.RunID("run-observability")
+	stepID := common.StepID("run-observability/step-1")
+	toolCallID := common.ToolCallID("tool-call-observability")
+
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "observability", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "graph/mock", State: common.StepStateCompleted}); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	if err := exports.Repositories.ToolCalls.Create(ctx, &runmodel.ToolCall{
+		ID:          toolCallID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		ToolName:    "graph/mock",
+		State:       common.ToolCallStateCompleted,
+	}); err != nil {
+		t.Fatalf("create tool call: %v", err)
+	}
+	if err := exports.Repositories.Patches.Create(ctx, &runmodel.Patch{
+		ID:          common.PatchID("patch-observability"),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		ToolCallID:  toolCallID,
+		PatchType:   "unified_diff",
+		TargetRef:   "README.md",
+		State:       common.PatchStateApplied,
+	}); err != nil {
+		t.Fatalf("create patch: %v", err)
+	}
+	if err := exports.Repositories.ValidationResults.Create(ctx, &runmodel.ValidationResult{
+		ID:             common.ValidationResultID("validation-observability"),
+		WorkspaceID:    workspaceID,
+		RunID:          runID,
+		StepID:         stepID,
+		ValidationKind: "runtime_step",
+		State:          common.ValidationResultStatePassed,
+	}); err != nil {
+		t.Fatalf("create validation result: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:               common.CheckpointID("checkpoint-observability"),
+		WorkspaceID:      workspaceID,
+		RunID:            runID,
+		CheckpointType:   common.CheckpointTypeRunState,
+		CurrentStepID:    stepID,
+		RunStateSnapshot: common.RunStateCompleted,
+		OccurredAt:       "2026-04-25T10:00:00Z",
+		Data:             map[string]any{"event": "step_completed"},
+	}); err != nil {
+		t.Fatalf("create checkpoint: %v", err)
+	}
+	if err := exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        events.TopicRunStateChanged,
+		SourceModule: "test",
+		SubjectType:  "run",
+		SubjectID:    string(runID),
+		WorkspaceID:  string(workspaceID),
+		RunID:        string(runID),
+		Payload:      events.RunPayload("", "", common.RunStateCompleted, "", "", ""),
+	}); err != nil {
+		t.Fatalf("publish event: %v", err)
+	}
+
+	item, err := ReadRunObservabilityWithSession(ctx, session, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunObservabilityWithSession: %v", err)
+	}
+	if item.Progress.StepTotal != 1 || item.Progress.StepCompleted != 1 || !item.Progress.Terminal {
+		t.Fatalf("progress = %+v, want terminal completed progress", item.Progress)
+	}
+	if item.Evidence.ToolCallCompleted != 1 || item.Evidence.PatchApplied != 1 || item.Evidence.ValidationPassed != 1 || item.Evidence.RuntimeCheckpointTotal != 1 || item.Evidence.EventTotal == 0 {
+		t.Fatalf("evidence = %+v, want derived evidence counters", item.Evidence)
+	}
+	if item.LatestCheckpoint == nil || item.LatestCheckpoint.ID != "checkpoint-observability" {
+		t.Fatalf("latest checkpoint = %+v, want checkpoint-observability", item.LatestCheckpoint)
+	}
+	if len(item.Timeline) < 2 {
+		t.Fatalf("timeline = %+v, want checkpoint and events", item.Timeline)
 	}
 }
 

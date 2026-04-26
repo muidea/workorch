@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/legacy/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -15,27 +16,56 @@ type MinimalRuntimeAdapter struct{}
 func NewMinimalRuntimeAdapter() *MinimalRuntimeAdapter { return &MinimalRuntimeAdapter{} }
 
 func (a *MinimalRuntimeAdapter) ExecuteStep(ctx context.Context, runID common.RunID, stepID common.StepID) (map[string]any, error) {
+	result, err := a.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		RunID:  runID,
+		StepID: stepID,
+		Kind:   "legacy/minimal",
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Output, nil
+}
+
+func (a *MinimalRuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
 	_ = ctx
+	runID := request.RunID
+	stepID := request.StepID
 	if strings.Contains(string(runID), modulecommon.RuntimeFailureRunToken) {
-		return nil, fmt.Errorf("legacy runtime execution failed for %s", runID)
+		return runtimemodel.StepExecutionResult{}, fmt.Errorf("legacy runtime execution failed for %s", runID)
+	}
+	if strings.Contains(string(runID), modulecommon.RuntimePatchRunToken) {
+		return runtimemodel.StepExecutionResult{Output: map[string]any{
+			"runId":  string(runID),
+			"stepId": string(stepID),
+			"status": "completed",
+			"stage":  "apply-patch",
+			"patches": []map[string]any{
+				{
+					"targetRef": "workorch-runtime-output.txt",
+					"content":   fmt.Sprintf("run=%s\nstep=%s\n", runID, stepID),
+					"summary":   "write runtime output file",
+				},
+			},
+		}}, nil
 	}
 	if strings.Contains(string(runID), modulecommon.MultiStepRunToken) {
 		if path.Base(string(stepID)) == "step-1" {
-			return map[string]any{
+			return runtimemodel.StepExecutionResult{Output: map[string]any{
 				"runId":    string(runID),
 				"stepId":   string(stepID),
 				"status":   "completed",
 				"stage":    "prepare",
 				"nextStep": fmt.Sprintf("%s/step-2", runID),
 				"nextKind": "legacy/minimal",
-			}, nil
+			}}, nil
 		}
-		return map[string]any{
+		return runtimemodel.StepExecutionResult{Output: map[string]any{
 			"runId":  string(runID),
 			"stepId": string(stepID),
 			"status": "completed",
 			"stage":  "finalize",
-		}, nil
+		}}, nil
 	}
 	if strings.Contains(string(runID), modulecommon.ConditionalBranchRunToken) {
 		if path.Base(string(stepID)) == "step-1" {
@@ -45,7 +75,7 @@ func (a *MinimalRuntimeAdapter) ExecuteStep(ctx context.Context, runID common.Ru
 				branch = "review-path"
 				nextStep = fmt.Sprintf("%s/step-review", runID)
 			}
-			return map[string]any{
+			return runtimemodel.StepExecutionResult{Output: map[string]any{
 				"runId":    string(runID),
 				"stepId":   string(stepID),
 				"status":   "completed",
@@ -53,19 +83,19 @@ func (a *MinimalRuntimeAdapter) ExecuteStep(ctx context.Context, runID common.Ru
 				"branch":   branch,
 				"nextStep": nextStep,
 				"nextKind": "legacy/minimal",
-			}, nil
+			}}, nil
 		}
-		return map[string]any{
+		return runtimemodel.StepExecutionResult{Output: map[string]any{
 			"runId":  string(runID),
 			"stepId": string(stepID),
 			"status": "completed",
 			"stage":  "finalize",
-		}, nil
+		}}, nil
 	}
 	if strings.Contains(string(runID), modulecommon.MultiDecisionGateRunToken) {
 		switch path.Base(string(stepID)) {
 		case "step-1":
-			return map[string]any{
+			return runtimemodel.StepExecutionResult{Output: map[string]any{
 				"runId":                 string(runID),
 				"stepId":                string(stepID),
 				"status":                "completed",
@@ -74,9 +104,9 @@ func (a *MinimalRuntimeAdapter) ExecuteStep(ctx context.Context, runID common.Ru
 				"blockDecisionTicketId": fmt.Sprintf("ticket-%s-gate-1", runID),
 				"nextStep":              fmt.Sprintf("%s/step-2", runID),
 				"nextKind":              "legacy/minimal",
-			}, nil
+			}}, nil
 		case "step-2":
-			return map[string]any{
+			return runtimemodel.StepExecutionResult{Output: map[string]any{
 				"runId":                 string(runID),
 				"stepId":                string(stepID),
 				"status":                "completed",
@@ -85,20 +115,20 @@ func (a *MinimalRuntimeAdapter) ExecuteStep(ctx context.Context, runID common.Ru
 				"blockDecisionTicketId": fmt.Sprintf("ticket-%s-gate-2", runID),
 				"nextStep":              fmt.Sprintf("%s/step-3", runID),
 				"nextKind":              "legacy/minimal",
-			}, nil
+			}}, nil
 		default:
-			return map[string]any{
+			return runtimemodel.StepExecutionResult{Output: map[string]any{
 				"runId":  string(runID),
 				"stepId": string(stepID),
 				"status": "completed",
 				"stage":  "finalize",
-			}, nil
+			}}, nil
 		}
 	}
 	if strings.Contains(string(runID), modulecommon.MixedDecisionApprovalRunToken) {
 		switch path.Base(string(stepID)) {
 		case "step-1":
-			return map[string]any{
+			return runtimemodel.StepExecutionResult{Output: map[string]any{
 				"runId":                 string(runID),
 				"stepId":                string(stepID),
 				"status":                "completed",
@@ -107,9 +137,9 @@ func (a *MinimalRuntimeAdapter) ExecuteStep(ctx context.Context, runID common.Ru
 				"blockDecisionTicketId": fmt.Sprintf("ticket-%s-mixed-decision", runID),
 				"nextStep":              fmt.Sprintf("%s/step-2", runID),
 				"nextKind":              "legacy/minimal",
-			}, nil
+			}}, nil
 		case "step-2":
-			return map[string]any{
+			return runtimemodel.StepExecutionResult{Output: map[string]any{
 				"runId":               string(runID),
 				"stepId":              string(stepID),
 				"status":              "completed",
@@ -118,19 +148,19 @@ func (a *MinimalRuntimeAdapter) ExecuteStep(ctx context.Context, runID common.Ru
 				"blockApprovalId":     fmt.Sprintf("approval-%s-mixed-approval", runID),
 				"nextStep":            fmt.Sprintf("%s/step-3", runID),
 				"nextKind":            "legacy/minimal",
-			}, nil
+			}}, nil
 		default:
-			return map[string]any{
+			return runtimemodel.StepExecutionResult{Output: map[string]any{
 				"runId":  string(runID),
 				"stepId": string(stepID),
 				"status": "completed",
 				"stage":  "finalize",
-			}, nil
+			}}, nil
 		}
 	}
 	if strings.Contains(string(runID), modulecommon.RuntimeDecisionBlockRunToken) {
 		if path.Base(string(stepID)) == "step-1" {
-			return map[string]any{
+			return runtimemodel.StepExecutionResult{Output: map[string]any{
 				"runId":                 string(runID),
 				"stepId":                string(stepID),
 				"status":                "completed",
@@ -139,18 +169,18 @@ func (a *MinimalRuntimeAdapter) ExecuteStep(ctx context.Context, runID common.Ru
 				"blockDecisionTicketId": fmt.Sprintf("ticket-%s-runtime-decision", runID),
 				"nextStep":              fmt.Sprintf("%s/step-2", runID),
 				"nextKind":              "legacy/minimal",
-			}, nil
+			}}, nil
 		}
-		return map[string]any{
+		return runtimemodel.StepExecutionResult{Output: map[string]any{
 			"runId":  string(runID),
 			"stepId": string(stepID),
 			"status": "completed",
 			"stage":  "finalize",
-		}, nil
+		}}, nil
 	}
 	if strings.Contains(string(runID), modulecommon.RuntimeApprovalBlockRunToken) {
 		if path.Base(string(stepID)) == "step-1" {
-			return map[string]any{
+			return runtimemodel.StepExecutionResult{Output: map[string]any{
 				"runId":               string(runID),
 				"stepId":              string(stepID),
 				"status":              "completed",
@@ -159,18 +189,18 @@ func (a *MinimalRuntimeAdapter) ExecuteStep(ctx context.Context, runID common.Ru
 				"blockApprovalId":     fmt.Sprintf("approval-%s-runtime-approval", runID),
 				"nextStep":            fmt.Sprintf("%s/step-2", runID),
 				"nextKind":            "legacy/minimal",
-			}, nil
+			}}, nil
 		}
-		return map[string]any{
+		return runtimemodel.StepExecutionResult{Output: map[string]any{
 			"runId":  string(runID),
 			"stepId": string(stepID),
 			"status": "completed",
 			"stage":  "finalize",
-		}, nil
+		}}, nil
 	}
-	return map[string]any{
+	return runtimemodel.StepExecutionResult{Output: map[string]any{
 		"runId":  string(runID),
 		"stepId": string(stepID),
 		"status": "completed",
-	}, nil
+	}}, nil
 }

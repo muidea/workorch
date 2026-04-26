@@ -8,7 +8,11 @@ import (
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
+	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -19,6 +23,54 @@ import (
 func TestWorkspaceRepositoryContract_Memory(t *testing.T) {
 	testWorkspaceRepositoryContract(t, func() repository.WorkspaceRepository {
 		return memory.NewWorkspaceRepository()
+	})
+}
+
+func TestSoulRepositoryContract_Memory(t *testing.T) {
+	testSoulRepositoryContract(t, func() repository.SoulRepository {
+		return memory.NewSoulRepository()
+	})
+}
+
+func TestSoulRepositoryContract_File(t *testing.T) {
+	testSoulRepositoryContract(t, func() repository.SoulRepository {
+		return file.NewSoulRepository(filepath.Join(t.TempDir(), "soul.json"))
+	})
+}
+
+func TestMemoryItemRepositoryContract_Memory(t *testing.T) {
+	testMemoryItemRepositoryContract(t, func() repository.MemoryItemRepository {
+		return memory.NewMemoryItemRepository()
+	})
+}
+
+func TestMemoryItemRepositoryContract_File(t *testing.T) {
+	testMemoryItemRepositoryContract(t, func() repository.MemoryItemRepository {
+		return file.NewMemoryItemRepository(filepath.Join(t.TempDir(), "memory_item.json"))
+	})
+}
+
+func TestSkillRepositoryContract_Memory(t *testing.T) {
+	testSkillRepositoryContract(t, func() repository.SkillRepository {
+		return memory.NewSkillRepository()
+	})
+}
+
+func TestSkillRepositoryContract_File(t *testing.T) {
+	testSkillRepositoryContract(t, func() repository.SkillRepository {
+		return file.NewSkillRepository(filepath.Join(t.TempDir(), "skill.json"))
+	})
+}
+
+func TestMCPServerRepositoryContract_Memory(t *testing.T) {
+	testMCPServerRepositoryContract(t, func() repository.MCPServerRepository {
+		return memory.NewMCPServerRepository()
+	})
+}
+
+func TestMCPServerRepositoryContract_File(t *testing.T) {
+	testMCPServerRepositoryContract(t, func() repository.MCPServerRepository {
+		return file.NewMCPServerRepository(filepath.Join(t.TempDir(), "mcp_server.json"))
 	})
 }
 
@@ -162,6 +214,10 @@ func TestApprovalRepositoryContract_File(t *testing.T) {
 
 func TestRepositoryBundleContract_Memory(t *testing.T) {
 	bundle := repositoryBundle{
+		souls:              memory.NewSoulRepository(),
+		memoryItems:        memory.NewMemoryItemRepository(),
+		skills:             memory.NewSkillRepository(),
+		mcpServers:         memory.NewMCPServerRepository(),
 		workspaces:         memory.NewWorkspaceRepository(),
 		goals:              memory.NewGoalRepository(),
 		dods:               memory.NewDoDRepository(),
@@ -182,6 +238,10 @@ func TestRepositoryBundleContract_File(t *testing.T) {
 	dir := t.TempDir()
 	build := func() repositoryBundle {
 		return repositoryBundle{
+			souls:              file.NewSoulRepository(filepath.Join(dir, "soul.json")),
+			memoryItems:        file.NewMemoryItemRepository(filepath.Join(dir, "memory_item.json")),
+			skills:             file.NewSkillRepository(filepath.Join(dir, "skill.json")),
+			mcpServers:         file.NewMCPServerRepository(filepath.Join(dir, "mcp_server.json")),
 			workspaces:         file.NewWorkspaceRepository(filepath.Join(dir, "workspace.json")),
 			goals:              file.NewGoalRepository(filepath.Join(dir, "goal.json")),
 			dods:               file.NewDoDRepository(filepath.Join(dir, "dod.json")),
@@ -200,6 +260,10 @@ func TestRepositoryBundleContract_File(t *testing.T) {
 }
 
 type repositoryBundle struct {
+	souls              repository.SoulRepository
+	memoryItems        repository.MemoryItemRepository
+	skills             repository.SkillRepository
+	mcpServers         repository.MCPServerRepository
 	workspaces         repository.WorkspaceRepository
 	goals              repository.GoalRepository
 	dods               repository.DoDRepository
@@ -212,6 +276,250 @@ type repositoryBundle struct {
 	tickets            repository.DecisionTicketRepository
 	resolutions        repository.DecisionResolutionRepository
 	approvals          repository.ApprovalRepository
+}
+
+func testSkillRepositoryContract(t *testing.T, factory func() repository.SkillRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &skillmodel.Skill{
+		ID:                    common.SkillID("skill-contract"),
+		Name:                  "go service delivery",
+		Version:               "v1",
+		Description:           "deliver Go service changes",
+		TriggerRules:          []string{"go", "service"},
+		Instruction:           "Keep changes small and verified.",
+		ReferenceRefs:         []string{"docs/structure.md"},
+		RequiredToolKinds:     []string{"shell/command"},
+		RequiredMCPServerRefs: []string{"mcp-contract"},
+		Constraints:           []string{"cite evidence"},
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create skill: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate skill create err = %v, want conflict", err)
+	}
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get skill: %v", err)
+	}
+	got.TriggerRules[0] = "mutated"
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get skill fresh: %v", err)
+	}
+	if fresh.TriggerRules[0] != "go" {
+		t.Fatalf("skill clone isolation failed, triggerRules = %+v", fresh.TriggerRules)
+	}
+	fresh.Description = "updated skill"
+	if err := repo.Update(ctx, fresh); err != nil {
+		t.Fatalf("update skill: %v", err)
+	}
+	list, err := repo.List(ctx)
+	if err != nil {
+		t.Fatalf("list skills: %v", err)
+	}
+	if len(list) != 1 || list[0].Description != "updated skill" {
+		t.Fatalf("skills = %+v, want updated skill", list)
+	}
+	if _, err := repo.Get(ctx, common.SkillID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get missing skill err = %v, want not found", err)
+	}
+}
+
+func testMCPServerRepositoryContract(t *testing.T, factory func() repository.MCPServerRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &mcpmodel.Server{
+		ID:                    common.MCPServerID("mcp-contract"),
+		Name:                  "repo context",
+		Transport:             "stdio",
+		Endpoint:              "repo-context",
+		Enabled:               true,
+		AllowedTools:          []string{"repo.summary"},
+		AllowedResources:      []string{"repo://summary"},
+		DefaultApprovalPolicy: "manual_for_write",
+		TimeoutMillis:         30000,
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create mcp server: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate mcp server create err = %v, want conflict", err)
+	}
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get mcp server: %v", err)
+	}
+	got.AllowedTools[0] = "mutated"
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get mcp server fresh: %v", err)
+	}
+	if fresh.AllowedTools[0] != "repo.summary" {
+		t.Fatalf("mcp server clone isolation failed, tools = %+v", fresh.AllowedTools)
+	}
+	fresh.Enabled = false
+	if err := repo.Update(ctx, fresh); err != nil {
+		t.Fatalf("update mcp server: %v", err)
+	}
+	list, err := repo.List(ctx)
+	if err != nil {
+		t.Fatalf("list mcp servers: %v", err)
+	}
+	if len(list) != 1 || list[0].Enabled {
+		t.Fatalf("mcp servers = %+v, want disabled server", list)
+	}
+	if _, err := repo.Get(ctx, common.MCPServerID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get missing mcp server err = %v, want not found", err)
+	}
+}
+
+func testMemoryItemRepositoryContract(t *testing.T, factory func() repository.MemoryItemRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &memorymodel.MemoryItem{
+		ID:          common.MemoryID("memory-contract"),
+		WorkspaceID: common.WorkspaceID("ws-contract"),
+		RunID:       common.RunID("run-contract"),
+		SourceType:  "run",
+		SourceRef:   "run-contract",
+		MemoryType:  "run_summary",
+		Content:     "Local verification completed through workorchd APIs.",
+		Summary:     "workorchd local verification completed",
+		Tags:        []string{"local", "verification"},
+		Importance:  9,
+		Confidence:  8,
+		Visibility:  "workspace",
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create memory item: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate memory item create err = %v, want conflict", err)
+	}
+
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get memory item: %v", err)
+	}
+	got.Tags[0] = "mutated"
+
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get memory item fresh: %v", err)
+	}
+	if fresh.Tags[0] != "local" {
+		t.Fatalf("memory tags clone isolation failed, tags = %+v", fresh.Tags)
+	}
+
+	fresh.Summary = "updated local verification summary"
+	fresh.Importance = 10
+	if err := repo.Update(ctx, fresh); err != nil {
+		t.Fatalf("update memory item: %v", err)
+	}
+
+	list, err := repo.ListByWorkspaceID(ctx, item.WorkspaceID)
+	if err != nil {
+		t.Fatalf("list memory by workspace: %v", err)
+	}
+	if len(list) != 1 || list[0].Summary != "updated local verification summary" {
+		t.Fatalf("workspace memory = %+v, want updated item", list)
+	}
+
+	search, err := repo.Search(ctx, repository.MemorySearchQuery{
+		WorkspaceID: item.WorkspaceID,
+		Query:       "verification",
+		Tags:        []string{"local"},
+		Types:       []string{"run_summary"},
+		Limit:       1,
+	})
+	if err != nil {
+		t.Fatalf("search memory: %v", err)
+	}
+	if len(search) != 1 || search[0].ID != item.ID {
+		t.Fatalf("search memory = %+v, want %q", search, item.ID)
+	}
+
+	if _, err := repo.Get(ctx, common.MemoryID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get missing memory err = %v, want not found", err)
+	}
+	if err := repo.Update(ctx, &memorymodel.MemoryItem{ID: common.MemoryID("missing")}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("update missing memory err = %v, want not found", err)
+	}
+}
+
+func testSoulRepositoryContract(t *testing.T, factory func() repository.SoulRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &soulmodel.Soul{
+		ID:                   common.SoulID("soul-contract"),
+		Name:                 "engineering delivery",
+		Description:          "drives engineering delivery",
+		BusinessDomains:      []string{"engineering"},
+		SystemInstruction:    "Plan and verify before completion.",
+		PlanningPolicy:       "small_steps",
+		DecisionPolicy:       "ask_when_missing",
+		ApprovalPolicy:       "approve_risky_actions",
+		ValidationPolicy:     "evidence_required",
+		AllowedSkillRefs:     []string{"skill-go"},
+		AllowedMCPServerRefs: []string{"mcp-repo"},
+		AllowedToolKinds:     []string{"shell/command"},
+		OutputContract:       "LLMExecutionDecision",
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create soul: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate create err = %v, want conflict", err)
+	}
+
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get soul: %v", err)
+	}
+	got.Name = "mutated"
+	got.AllowedSkillRefs[0] = "mutated"
+
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get soul fresh: %v", err)
+	}
+	if fresh.Name != "engineering delivery" {
+		t.Fatalf("clone isolation failed, name = %q", fresh.Name)
+	}
+	if fresh.AllowedSkillRefs[0] != "skill-go" {
+		t.Fatalf("skill refs clone isolation failed, refs = %+v", fresh.AllowedSkillRefs)
+	}
+
+	fresh.Description = "updated description"
+	fresh.AllowedToolKinds = []string{"shell/command", "patch/apply"}
+	if err := repo.Update(ctx, fresh); err != nil {
+		t.Fatalf("update soul: %v", err)
+	}
+
+	list, err := repo.List(ctx)
+	if err != nil {
+		t.Fatalf("list soul: %v", err)
+	}
+	if len(list) != 1 || list[0].Description != "updated description" || len(list[0].AllowedToolKinds) != 2 {
+		t.Fatalf("list soul = %+v, want updated soul", list)
+	}
+
+	if _, err := repo.Get(ctx, common.SoulID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get missing soul err = %v, want not found", err)
+	}
+	if err := repo.Update(ctx, &soulmodel.Soul{ID: common.SoulID("missing")}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("update missing soul err = %v, want not found", err)
+	}
 }
 
 func testWorkspaceRepositoryContract(t *testing.T, factory func() repository.WorkspaceRepository) {
@@ -1132,6 +1440,72 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	ticketID := common.TicketID("ticket-bundle-contract")
 	resolutionID := common.ResolutionID("resolution-bundle-contract")
 	approvalID := common.ApprovalID("approval-bundle-contract")
+	soulID := common.SoulID("soul-bundle-contract")
+	memoryID := common.MemoryID("memory-bundle-contract")
+	skillID := common.SkillID("skill-bundle-contract")
+	mcpServerID := common.MCPServerID("mcp-bundle-contract")
+
+	soul := &soulmodel.Soul{
+		ID:                   soulID,
+		Name:                 "bundle soul",
+		SystemInstruction:    "Plan and cite evidence.",
+		AllowedSkillRefs:     []string{"skill-bundle"},
+		AllowedMCPServerRefs: []string{"mcp-bundle"},
+		AllowedToolKinds:     []string{"shell/command"},
+	}
+	if err := bundle.souls.Create(ctx, soul); err != nil {
+		t.Fatalf("create soul: %v", err)
+	}
+	if err := bundle.souls.Create(ctx, soul); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate soul create err = %v, want conflict", err)
+	}
+
+	memoryItem := &memorymodel.MemoryItem{
+		ID:          memoryID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		SourceType:  "run",
+		SourceRef:   string(runID),
+		MemoryType:  "run_summary",
+		Summary:     "bundle run summary",
+		Tags:        []string{"bundle"},
+		Importance:  5,
+	}
+	if err := bundle.memoryItems.Create(ctx, memoryItem); err != nil {
+		t.Fatalf("create memory item: %v", err)
+	}
+	if err := bundle.memoryItems.Create(ctx, memoryItem); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate memory item create err = %v, want conflict", err)
+	}
+
+	skill := &skillmodel.Skill{
+		ID:                    skillID,
+		Name:                  "bundle skill",
+		Version:               "v1",
+		Instruction:           "Use bundle skill.",
+		RequiredMCPServerRefs: []string{string(mcpServerID)},
+	}
+	if err := bundle.skills.Create(ctx, skill); err != nil {
+		t.Fatalf("create skill: %v", err)
+	}
+	if err := bundle.skills.Create(ctx, skill); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate skill create err = %v, want conflict", err)
+	}
+
+	mcpServer := &mcpmodel.Server{
+		ID:            mcpServerID,
+		Name:          "bundle mcp",
+		Transport:     "stdio",
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		TimeoutMillis: 1000,
+	}
+	if err := bundle.mcpServers.Create(ctx, mcpServer); err != nil {
+		t.Fatalf("create mcp server: %v", err)
+	}
+	if err := bundle.mcpServers.Create(ctx, mcpServer); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate mcp server create err = %v, want conflict", err)
+	}
 
 	workspace := &workspacemodel.Workspace{
 		ID:    workspaceID,
@@ -1335,6 +1709,43 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 
 	reloaded := reopen()
 
+	reloadedSoul, err := reloaded.souls.Get(ctx, soulID)
+	if err != nil {
+		t.Fatalf("reload soul: %v", err)
+	}
+	if reloadedSoul.Name != "bundle soul" || reloadedSoul.AllowedSkillRefs[0] != "skill-bundle" {
+		t.Fatalf("reloaded soul = %+v, want bundle soul", reloadedSoul)
+	}
+
+	reloadedMemory, err := reloaded.memoryItems.Search(ctx, repository.MemorySearchQuery{
+		WorkspaceID: workspaceID,
+		Query:       "summary",
+		Tags:        []string{"bundle"},
+		Types:       []string{"run_summary"},
+	})
+	if err != nil {
+		t.Fatalf("reload memory search: %v", err)
+	}
+	if len(reloadedMemory) != 1 || reloadedMemory[0].ID != memoryID {
+		t.Fatalf("reloaded memory = %+v, want %q", reloadedMemory, memoryID)
+	}
+
+	reloadedSkill, err := reloaded.skills.Get(ctx, skillID)
+	if err != nil {
+		t.Fatalf("reload skill: %v", err)
+	}
+	if reloadedSkill.Name != "bundle skill" || reloadedSkill.RequiredMCPServerRefs[0] != string(mcpServerID) {
+		t.Fatalf("reloaded skill = %+v, want bundle skill", reloadedSkill)
+	}
+
+	reloadedMCPServer, err := reloaded.mcpServers.Get(ctx, mcpServerID)
+	if err != nil {
+		t.Fatalf("reload mcp server: %v", err)
+	}
+	if reloadedMCPServer.Name != "bundle mcp" || reloadedMCPServer.AllowedTools[0] != "repo.summary" {
+		t.Fatalf("reloaded mcp server = %+v, want bundle mcp", reloadedMCPServer)
+	}
+
 	reloadedWorkspace, err := reloaded.workspaces.Get(ctx, workspaceID)
 	if err != nil {
 		t.Fatalf("reload workspace: %v", err)
@@ -1444,6 +1855,18 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 
 	if _, err := reloaded.workspaces.Get(ctx, common.WorkspaceID("workspace-missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing workspace get err = %v, want not found", err)
+	}
+	if _, err := reloaded.souls.Get(ctx, common.SoulID("soul-missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing soul get err = %v, want not found", err)
+	}
+	if _, err := reloaded.memoryItems.Get(ctx, common.MemoryID("memory-missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing memory get err = %v, want not found", err)
+	}
+	if _, err := reloaded.skills.Get(ctx, common.SkillID("skill-missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing skill get err = %v, want not found", err)
+	}
+	if _, err := reloaded.mcpServers.Get(ctx, common.MCPServerID("mcp-missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing mcp server get err = %v, want not found", err)
 	}
 	if _, err := reloaded.goals.Get(ctx, common.GoalID("goal-missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing goal get err = %v, want not found", err)

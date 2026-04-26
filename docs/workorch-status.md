@@ -26,18 +26,30 @@
     `GET /api/v1/workorch/decisions`,
     `GET /api/v1/workorch/decisions/{ticketId}`,
     `GET /api/v1/workorch/approvals`,
-    `GET /api/v1/workorch/approvals/{approvalId}`
+    `GET /api/v1/workorch/approvals/{approvalId}`,
+    `GET /api/v1/workorch/souls`,
+    `GET /api/v1/workorch/souls/{soulId}`,
+    `GET /api/v1/workorch/skills`,
+    `GET /api/v1/workorch/skills/{skillId}`,
+    `GET /api/v1/workorch/mcp/servers`,
+    `GET /api/v1/workorch/mcp/servers/{serverId}`,
+    `GET /api/v1/workorch/mcp/servers/{serverId}/tools`,
+    `GET /api/v1/workorch/memory?workspaceId={workspaceId}`
   - workspace / run / decision / approval write and execution endpoints are registered as native `magicEngine/http` routes:
     `POST /api/v1/workorch/workspaces`,
     `POST /api/v1/workorch/workspaces/{workspaceId}/goals`,
     `POST /api/v1/workorch/workspaces/{workspaceId}/dods`,
+    `POST /api/v1/workorch/workspaces/{workspaceId}/memory`,
     `POST /api/v1/workorch/workspaces/{workspaceId}/runs`,
     `POST /api/v1/workorch/runs`,
     `POST /api/v1/workorch/runs/{runId}/start`,
     `POST /api/v1/workorch/runs/{runId}/resume`,
     `POST /api/v1/workorch/decisions/{ticketId}/resolve`,
     `POST /api/v1/workorch/approvals/{approvalId}/approve`,
-    `POST /api/v1/workorch/approvals/{approvalId}/reject`
+    `POST /api/v1/workorch/approvals/{approvalId}/reject`,
+    `POST /api/v1/workorch/souls`,
+    `POST /api/v1/workorch/skills`,
+    `POST /api/v1/workorch/mcp/servers`
   - slice compatibility endpoints are registered as native `magicEngine/http` routes:
     `GET /api/v1/workorch/slices`,
     `GET /api/v1/workorch/slices/snapshots`,
@@ -54,9 +66,21 @@
   - `internal/modules/kernel/run`
   - `internal/modules/kernel/decision`
   - `internal/modules/kernel/orchestrator`
+  - `internal/modules/kernel/soul`
+  - `internal/modules/kernel/memory`
+  - `internal/modules/kernel/skill`
+  - `internal/modules/kernel/mcp`
 - block modules:
   - `internal/modules/blocks/approval`
   - `internal/modules/blocks/legacy`
+  - `internal/modules/blocks/llm`
+  - `internal/modules/blocks/shell`
+- Workspace execution activation now creates business Runs whose first Step is
+  `llm/workspace_execution`; `legacy/minimal` remains only as the default for
+  explicit legacy/manual run paths.
+- Missing or disabled LLM provider configuration fails the LLM Step and Run
+  with observable runtime evidence instead of silently completing through the
+  legacy adapter.
 
 ## Delivered in workorch
 
@@ -185,6 +209,18 @@ HTTP endpoints:
 - `GET /api/v1/workorch/approvals/{approvalId}`
 - `POST /api/v1/workorch/approvals/{approvalId}/approve`
 - `POST /api/v1/workorch/approvals/{approvalId}/reject`
+- `POST /api/v1/workorch/souls`
+- `GET /api/v1/workorch/souls`
+- `GET /api/v1/workorch/souls/{soulId}`
+- `POST /api/v1/workorch/skills`
+- `GET /api/v1/workorch/skills`
+- `GET /api/v1/workorch/skills/{skillId}`
+- `POST /api/v1/workorch/mcp/servers`
+- `GET /api/v1/workorch/mcp/servers`
+- `GET /api/v1/workorch/mcp/servers/{serverId}`
+- `GET /api/v1/workorch/mcp/servers/{serverId}/tools`
+- `POST /api/v1/workorch/workspaces/{workspaceId}/memory`
+- `GET /api/v1/workorch/memory?workspaceId={workspaceId}`
 - `GET /api/v1/workorch/slices`
 - `GET /api/v1/workorch/slices/snapshots`
 - `GET /api/v1/workorch/slices/statuses`
@@ -375,14 +411,78 @@ Validated coverage currently includes:
 以下内容不是当前已完成的 MVP / framework alignment 交付范围内的活跃待办项；如后续启动，需要重新拆成正式业务需求：
 
 - global `magicCommon/framework/plugin/module.Register` usage for long-lived workorch runtime units
-- richer block execution graph
-- external tool/runtime adapters beyond minimal legacy adapter
 - richer multi-run scheduling beyond the current in-process FIFO wait queue
-- observability pipeline beyond current acceptance snapshots
 
 当前已按 MVP 形式交付，后续如需增强应作为新需求处理：
 
 - file-backed repository adapter as the first non-memory persistence path
+
+## Runtime Expansion Scope
+
+runtime expansion 交付范围已完成，范围与验收记录见：
+
+- `docs/runtime-expansion-plan.md`
+
+当前活跃项：
+
+- active: none
+
+已完成：
+
+- completed: `R1 External Runtime And Tool Adapter Contract`
+- completed: `R2 Controlled Shell Sandbox`
+- completed: `R3 Generalized Diff Patch Apply Engine`
+- completed: `R4 Block Execution Graph`
+- completed: `R5 Observability Pipeline`
+
+## LLM Driven Workspace Execution Design
+
+LLM 驱动 Workspace 执行的设计文档已补齐，范围、边界与交互契约见：
+
+- `docs/llm-driven-workspace-execution-design.md`
+- `docs/llm-driven-development-plan.md`
+
+当前状态：
+
+- design: completed
+- development plan: completed
+- implementation: in progress
+- active tracking: `docs/llm-driven-development-plan.md`
+
+该设计明确后续实现边界：
+
+- Soul / Skill / MCP / Persistent Memory 是正式业务上下文，不是简单 prompt 拼接
+- LLM 只输出结构化 `LLMExecutionDecision`，不直接执行 shell、patch 或 MCP tool
+- Orchestrator 继续消费标准 Step output 并负责 Run 状态、Evidence、Decision、Approval
+- application/workorchd 只负责 HTTP/Web、执行激活和上下文装配，不承载 provider 或 MCP 协议实现
+- blocks/llm 只负责 provider request、provider call、schema parsing 和 normalized Step output
+- Web Console 只通过 HTTP API 交互，不暴露 provider secret 或低层 adapter 直接执行入口
+- 未配置 LLM provider 时，LLM-driven execution 必须明确失败，不能回落到 `legacy/minimal` 形成假完成
+
+该设计同步定义了后续实现验收的数据交互流程：
+
+- happy path: Goal/DoD/Soul/Skill/MCP/Memory 绑定后，通过 `llm/workspace_execution`、具体 block action、DoD assessment 和 Memory write 完成 Run
+- decision path: LLM 请求业务补充信息时创建 Decision Ticket，resolve 后 resume 并把 resolution 放入后续 planning context
+- approval path: 风险动作进入 Approval，reject 后不得产生对应 ToolCall 或 Patch
+- failure path: provider 缺失或 schema-invalid 时 Step 明确失败，不派发外部动作，不回落到 `legacy/minimal`
+- memory recall path: 第一轮 Run 生成 Memory，第二轮 Run 可召回并在 snapshot/observability 中可见
+
+当前细化开发项：
+
+- L1 Soul model and repository: completed
+- L2 Memory model and repository: completed
+- L3 Skill and MCP registry baseline: completed
+- L4 LLM provider configuration: completed
+- L5 `blocks/llm` runtime adapter skeleton: completed
+- L6 Workspace execution activation context: not_started
+- L7 Orchestrator LLM step integration: completed
+- L8 LLM decision to action mapping: not_started
+- L9 DoD assessment completion gate: not_started
+- L10 Memory write and recall loop: not_started
+- L11 API surface for Soul, Skill, MCP, Memory: completed
+- L12 Web console LLM execution views: not_started
+- L13 End-to-end acceptance scripts: not_started
+- L14 Status and operator documentation: not_started
 
 ## MVP Closure Record
 

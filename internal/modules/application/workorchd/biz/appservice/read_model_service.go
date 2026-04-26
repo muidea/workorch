@@ -2,6 +2,7 @@ package appservice
 
 import (
 	"context"
+	"sort"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
@@ -41,6 +42,56 @@ type RunStatus struct {
 	BlockingTicketID   string `json:"blockingTicketId,omitempty"`
 	BlockingApprovalID string `json:"blockingApprovalId,omitempty"`
 	FailureReason      string `json:"failureReason,omitempty"`
+}
+
+type RunObservability struct {
+	Run              Run                    `json:"run"`
+	Progress         RunProgress            `json:"progress"`
+	Evidence         RuntimeEvidenceSummary `json:"evidence"`
+	LatestCheckpoint *RuntimeCheckpoint     `json:"latestCheckpoint,omitempty"`
+	Timeline         []RuntimeTimelineItem  `json:"timeline,omitempty"`
+}
+
+type RunProgress struct {
+	State            string `json:"state"`
+	CurrentStepID    string `json:"currentStepId,omitempty"`
+	CurrentStepKind  string `json:"currentStepKind,omitempty"`
+	CurrentStepState string `json:"currentStepState,omitempty"`
+	StepTotal        int    `json:"stepTotal"`
+	StepDispatched   int    `json:"stepDispatched"`
+	StepCompleted    int    `json:"stepCompleted"`
+	StepFailed       int    `json:"stepFailed"`
+	Blocked          bool   `json:"blocked"`
+	Terminal         bool   `json:"terminal"`
+}
+
+type RuntimeEvidenceSummary struct {
+	ToolCallTotal          int `json:"toolCallTotal"`
+	ToolCallRunning        int `json:"toolCallRunning"`
+	ToolCallCompleted      int `json:"toolCallCompleted"`
+	ToolCallFailed         int `json:"toolCallFailed"`
+	PatchTotal             int `json:"patchTotal"`
+	PatchApplied           int `json:"patchApplied"`
+	PatchFailed            int `json:"patchFailed"`
+	ValidationTotal        int `json:"validationTotal"`
+	ValidationPassed       int `json:"validationPassed"`
+	ValidationFailed       int `json:"validationFailed"`
+	ValidationWarning      int `json:"validationWarning"`
+	RuntimeCheckpointTotal int `json:"runtimeCheckpointTotal"`
+	EventTotal             int `json:"eventTotal"`
+}
+
+type RuntimeTimelineItem struct {
+	Source     string         `json:"source"`
+	Type       string         `json:"type"`
+	ID         string         `json:"id,omitempty"`
+	Topic      string         `json:"topic,omitempty"`
+	RunState   string         `json:"runState,omitempty"`
+	StepID     string         `json:"stepId,omitempty"`
+	StepState  string         `json:"stepState,omitempty"`
+	Summary    string         `json:"summary,omitempty"`
+	OccurredAt string         `json:"occurredAt,omitempty"`
+	Data       map[string]any `json:"data,omitempty"`
 }
 
 type ToolCall struct {
@@ -176,6 +227,36 @@ func ReadRunStatusFromEnv(ctx context.Context, runID string) (RunStatus, error) 
 		return RunStatus{}, err
 	}
 	return ReadRunStatusWithSession(ctx, session, runID)
+}
+
+func ReadRunObservabilityWithSession(ctx context.Context, session *RuntimeSession, runID string) (ret RunObservability, err error) {
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		return RunObservability{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	snapshot, err := readRunSnapshot(ctx, deps, common.RunID(runID))
+	if err != nil {
+		return RunObservability{}, err
+	}
+	return mapRunObservability(snapshot), nil
+}
+
+func ReadRunObservabilityWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (RunObservability, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return RunObservability{}, err
+	}
+	return ReadRunObservabilityWithSession(ctx, session, runID)
+}
+
+func ReadRunObservabilityFromEnv(ctx context.Context, runID string) (RunObservability, error) {
+	session, err := NewRuntimeSessionFromEnv()
+	if err != nil {
+		return RunObservability{}, err
+	}
+	return ReadRunObservabilityWithSession(ctx, session, runID)
 }
 
 func ReadWorkspaceSnapshotWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret WorkspaceSnapshot, err error) {
@@ -614,4 +695,147 @@ func mapRunStatus(snapshot RunSnapshot) RunStatus {
 		ret.CurrentStepState = snapshot.Step.State
 	}
 	return ret
+}
+
+func mapRunObservability(snapshot RunSnapshot) RunObservability {
+	timeline := runtimeTimeline(snapshot)
+	return RunObservability{
+		Run:              snapshot.Run,
+		Progress:         runtimeProgress(snapshot),
+		Evidence:         runtimeEvidenceSummary(snapshot, len(timelineEvents(timeline))),
+		LatestCheckpoint: latestRuntimeCheckpoint(snapshot.RuntimeCheckpoints),
+		Timeline:         timeline,
+	}
+}
+
+func runtimeProgress(snapshot RunSnapshot) RunProgress {
+	ret := RunProgress{
+		State:     snapshot.Run.State,
+		StepTotal: len(snapshot.Steps),
+		Blocked:   snapshot.Run.BlockingTicketID != "" || snapshot.Run.BlockingApprovalID != "",
+		Terminal:  isTerminalRunState(snapshot.Run.State),
+	}
+	if snapshot.Step != nil {
+		ret.CurrentStepID = snapshot.Step.ID
+		ret.CurrentStepKind = snapshot.Step.Kind
+		ret.CurrentStepState = snapshot.Step.State
+	}
+	for _, step := range snapshot.Steps {
+		switch step.State {
+		case string(common.StepStateDispatched):
+			ret.StepDispatched++
+		case string(common.StepStateCompleted):
+			ret.StepCompleted++
+		case string(common.StepStateFailed):
+			ret.StepFailed++
+		}
+	}
+	return ret
+}
+
+func runtimeEvidenceSummary(snapshot RunSnapshot, eventTotal int) RuntimeEvidenceSummary {
+	ret := RuntimeEvidenceSummary{
+		ToolCallTotal:          len(snapshot.ToolCalls),
+		PatchTotal:             len(snapshot.Patches),
+		ValidationTotal:        len(snapshot.ValidationResults),
+		RuntimeCheckpointTotal: len(snapshot.RuntimeCheckpoints),
+		EventTotal:             eventTotal,
+	}
+	for _, item := range snapshot.ToolCalls {
+		switch item.State {
+		case string(common.ToolCallStateRunning):
+			ret.ToolCallRunning++
+		case string(common.ToolCallStateCompleted):
+			ret.ToolCallCompleted++
+		case string(common.ToolCallStateFailed):
+			ret.ToolCallFailed++
+		}
+	}
+	for _, item := range snapshot.Patches {
+		switch item.State {
+		case string(common.PatchStateApplied):
+			ret.PatchApplied++
+		case string(common.PatchStateFailed):
+			ret.PatchFailed++
+		}
+	}
+	for _, item := range snapshot.ValidationResults {
+		switch item.State {
+		case string(common.ValidationResultStatePassed):
+			ret.ValidationPassed++
+		case string(common.ValidationResultStateFailed):
+			ret.ValidationFailed++
+		case string(common.ValidationResultStateWarning):
+			ret.ValidationWarning++
+		}
+	}
+	return ret
+}
+
+func latestRuntimeCheckpoint(items []RuntimeCheckpoint) *RuntimeCheckpoint {
+	if len(items) == 0 {
+		return nil
+	}
+	latest := items[0]
+	for _, item := range items[1:] {
+		if item.OccurredAt > latest.OccurredAt {
+			latest = item
+		}
+	}
+	return &latest
+}
+
+func runtimeTimeline(snapshot RunSnapshot) []RuntimeTimelineItem {
+	items := make([]RuntimeTimelineItem, 0, len(snapshot.RuntimeCheckpoints)+len(snapshot.Observed))
+	for _, checkpoint := range snapshot.RuntimeCheckpoints {
+		items = append(items, RuntimeTimelineItem{
+			Source:     "checkpoint",
+			Type:       checkpoint.CheckpointType,
+			ID:         checkpoint.ID,
+			RunState:   checkpoint.RunStateSnapshot,
+			StepID:     checkpoint.CurrentStepID,
+			OccurredAt: checkpoint.OccurredAt,
+			Data:       cloneReadModelMap(checkpoint.Data),
+		})
+	}
+	for _, item := range snapshot.Observed {
+		if item.RunID != "" && item.RunID != snapshot.Run.ID {
+			continue
+		}
+		items = append(items, RuntimeTimelineItem{
+			Source:     "event",
+			Type:       item.SubjectType,
+			ID:         item.SubjectID,
+			Topic:      item.Topic,
+			StepID:     item.StepID,
+			OccurredAt: item.OccurredAt,
+			Data:       cloneReadModelMap(item.Payload),
+		})
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].OccurredAt == items[j].OccurredAt {
+			return items[i].Source < items[j].Source
+		}
+		return items[i].OccurredAt < items[j].OccurredAt
+	})
+	return items
+}
+
+func timelineEvents(items []RuntimeTimelineItem) []RuntimeTimelineItem {
+	ret := make([]RuntimeTimelineItem, 0, len(items))
+	for _, item := range items {
+		if item.Source == "event" {
+			ret = append(ret, item)
+		}
+	}
+	return ret
+}
+
+func isTerminalRunState(state string) bool {
+	switch common.RunState(state) {
+	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return true
+	default:
+		return false
+	}
 }

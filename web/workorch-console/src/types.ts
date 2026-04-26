@@ -87,6 +87,56 @@ export type RuntimeCheckpoint = {
   blockingApprovalId?: string;
 };
 
+export type RunProgress = {
+  state: string;
+  currentStepId?: string;
+  currentStepKind?: string;
+  currentStepState?: string;
+  stepTotal: number;
+  stepDispatched: number;
+  stepCompleted: number;
+  stepFailed: number;
+  blocked: boolean;
+  terminal: boolean;
+};
+
+export type RuntimeEvidenceSummary = {
+  toolCallTotal: number;
+  toolCallRunning: number;
+  toolCallCompleted: number;
+  toolCallFailed: number;
+  patchTotal: number;
+  patchApplied: number;
+  patchFailed: number;
+  validationTotal: number;
+  validationPassed: number;
+  validationFailed: number;
+  validationWarning: number;
+  runtimeCheckpointTotal: number;
+  eventTotal: number;
+};
+
+export type RuntimeTimelineItem = {
+  source: string;
+  type: string;
+  id?: string;
+  topic?: string;
+  runState?: string;
+  stepId?: string;
+  stepState?: string;
+  summary?: string;
+  occurredAt?: string;
+  data?: Record<string, unknown>;
+};
+
+export type RunObservability = {
+  run: Run;
+  progress: RunProgress;
+  evidence: RuntimeEvidenceSummary;
+  latestCheckpoint?: RuntimeCheckpoint;
+  timeline?: RuntimeTimelineItem[];
+};
+
 export type RunSnapshot = {
   workspace: Workspace;
   run: Run;

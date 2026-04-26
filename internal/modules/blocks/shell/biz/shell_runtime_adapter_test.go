@@ -1,0 +1,85 @@
+package shell
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
+)
+
+func TestRuntimeAdapter_ExecuteRuntimeStepRunsCommandInWorkspaceDirectory(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	workingDirectory := t.TempDir()
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceWorkingDirectory: workingDirectory,
+		Kind:                      "shell/command",
+		Input: map[string]any{
+			"command": "pwd",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v", err)
+	}
+	if result.Output["exitCode"] != 0 {
+		t.Fatalf("exitCode = %v, want 0", result.Output["exitCode"])
+	}
+	stdout, _ := result.Output["stdout"].(string)
+	if strings.TrimSpace(stdout) != workingDirectory {
+		t.Fatalf("stdout = %q, want working directory %q", stdout, workingDirectory)
+	}
+}
+
+func TestRuntimeAdapter_ExecuteRuntimeStepReturnsOutputForNonZeroExit(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	workingDirectory := t.TempDir()
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceWorkingDirectory: workingDirectory,
+		Kind:                      "shell/command",
+		Input: map[string]any{
+			"command": "sh",
+			"args":    []any{"-c", "echo shell-out; echo shell-err >&2; exit 7"},
+		},
+	})
+	if err == nil {
+		t.Fatal("ExecuteRuntimeStep err = nil, want non-zero exit error")
+	}
+	if result.Output["status"] != "failed" {
+		t.Fatalf("status = %v, want failed", result.Output["status"])
+	}
+	if result.Output["exitCode"] != 7 {
+		t.Fatalf("exitCode = %v, want 7", result.Output["exitCode"])
+	}
+	stdout, _ := result.Output["stdout"].(string)
+	stderr, _ := result.Output["stderr"].(string)
+	if !strings.Contains(stdout, "shell-out") || !strings.Contains(stderr, "shell-err") {
+		t.Fatalf("stdout/stderr = %q/%q, want captured command output", stdout, stderr)
+	}
+}
+
+func TestRuntimeAdapter_ExecuteRuntimeStepReturnsTimeoutOutput(t *testing.T) {
+	adapter := NewRuntimeAdapterWithTimeout(10 * time.Millisecond)
+	workingDirectory := t.TempDir()
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceWorkingDirectory: workingDirectory,
+		Kind:                      "shell/command",
+		Input: map[string]any{
+			"command": "sh",
+			"args":    []any{"-c", "sleep 1"},
+		},
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ExecuteRuntimeStep err = %v, want deadline exceeded", err)
+	}
+	if result.Output["status"] != "timeout" {
+		t.Fatalf("status = %v, want timeout", result.Output["status"])
+	}
+	if result.Output["workingDir"] != workingDirectory {
+		t.Fatalf("workingDir = %v, want %s", result.Output["workingDir"], workingDirectory)
+	}
+}

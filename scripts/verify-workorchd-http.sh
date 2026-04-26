@@ -115,6 +115,7 @@ curl -fsS "$BASE_URL/api/v1/workorch/runs?workspaceId=$workspace_id" | grep '"id
 curl -fsS "$BASE_URL/api/v1/workorch/runs/run-shared-verify" | grep "\"workspaceId\": \"$workspace_id\"" >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-shared-verify/start" | grep '"state": "completed"' >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/run-shared-verify/status" | grep '"state": "completed"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/run-shared-verify/observability" | grep '"runtimeCheckpointTotal"' >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" | grep '"id": "run-shared-verify"' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" -H 'Content-Type: application/json' \
   -d '{}' >"$TMP_DIR/workspace-activation.json"
@@ -122,6 +123,30 @@ grep '"activation"' "$TMP_DIR/workspace-activation.json" >/dev/null
 grep "\"goalId\": \"$goal_id\"" "$TMP_DIR/workspace-activation.json" >/dev/null
 grep "\"doDId\": \"$dod_id\"" "$TMP_DIR/workspace-activation.json" >/dev/null
 grep '"state": "completed"' "$TMP_DIR/workspace-activation.json" >/dev/null
+
+patch_work_dir="$TMP_DIR/runtime-patch-workspace"
+mkdir -p "$patch_work_dir"
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
+  -d '{"title":"verify runtime patch workspace","workingDirectory":"'"$patch_work_dir"'"}' >"$TMP_DIR/patch-workspace.json"
+patch_workspace_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/patch-workspace.json" | head -n1)"
+[[ -n "$patch_workspace_id" ]]
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$patch_workspace_id/goals" -H 'Content-Type: application/json' \
+  -d '{"text":"verify runtime patch"}' >"$TMP_DIR/patch-goal.json"
+patch_goal_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/patch-goal.json" | head -n1)"
+[[ -n "$patch_goal_id" ]]
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$patch_workspace_id/dods" -H 'Content-Type: application/json' \
+  -d '{"items":["runtime patch is applied"]}' >"$TMP_DIR/patch-dod.json"
+patch_dod_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/patch-dod.json" | head -n1)"
+[[ -n "$patch_dod_id" ]]
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$patch_workspace_id/runs" -H 'Content-Type: application/json' \
+  -d '{"runId":"run-runtime-patch-verify","goalId":"'"$patch_goal_id"'","doDId":"'"$patch_dod_id"'"}' | grep '"id": "run-runtime-patch-verify"' >/dev/null
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-runtime-patch-verify/start" | grep '"state": "completed"' >/dev/null
+[[ -f "$patch_work_dir/workorch-runtime-output.txt" ]]
+grep 'run=run-runtime-patch-verify' "$patch_work_dir/workorch-runtime-output.txt" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/run-runtime-patch-verify/snapshot" >"$TMP_DIR/run-runtime-patch-verify-snapshot.json"
+grep '"targetRef": "workorch-runtime-output.txt"' "$TMP_DIR/run-runtime-patch-verify-snapshot.json" >/dev/null
+grep '"state": "applied"' "$TMP_DIR/run-runtime-patch-verify-snapshot.json" >/dev/null
+
 curl -fsS "$BASE_URL/api/v1/workorch/slices" | grep '"id": "workorch-runnable"' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs" | grep '"title": "workorch runnable slice"' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/slices/workorch-runnable/runs" | grep '"id": "workorch-runnable"' >/dev/null
@@ -132,6 +157,7 @@ if [[ "$BACKEND" == "file" ]]; then
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-verify/start" | grep '"state": "completed"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify/snapshot" | grep '"id": "run-verify"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify/status" | grep '"state": "completed"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify/observability" | grep '"terminal": true' >/dev/null
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" -H 'Content-Type: application/json' \
     -d '{"runId":"run-runtime-decision-block-verify","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'"}' | grep '"id": "run-runtime-decision-block-verify"' >/dev/null
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-verify/start" >"$TMP_DIR/run-runtime-decision-block-verify.json"
@@ -182,7 +208,7 @@ if [[ "$BACKEND" == "file" ]]; then
   curl -fsS "$BASE_URL/api/v1/workorch/slices/statuses" | grep '"id": "workorch-runnable"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/slices/workorch-runnable/status" | grep '"runState": "completed"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/slices/workorch-runnable/snapshot" | grep '"id": "workorch-runnable"' >/dev/null
-  for name in workspace.json goal.json dod.json run.json step.json ticket.json resolution.json approval.json; do
+  for name in workspace.json goal.json dod.json run.json step.json tool_call.json patch.json validation_result.json runtime_checkpoint.json ticket.json resolution.json approval.json; do
     [[ -f "$DATA_DIR/$name" ]]
   done
 
@@ -198,6 +224,9 @@ if [[ "$BACKEND" == "file" ]]; then
   curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify" | grep '"state": "completed"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify/snapshot" | grep '"id": "run-verify"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify/status" | grep '"state": "completed"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify/observability" | grep '"runtimeCheckpointTotal"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-runtime-patch-verify/snapshot" | grep '"targetRef": "workorch-runtime-output.txt"' >/dev/null
+  [[ -f "$patch_work_dir/workorch-runtime-output.txt" ]]
   curl -fsS "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-verify" | grep '"state": "completed"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-rejected-verify" | grep '"state": "failed"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_id" | grep '"state": "resolved"' >/dev/null

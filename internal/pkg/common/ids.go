@@ -12,3 +12,7 @@ type CheckpointID string
 type ToolCallID string
 type PatchID string
 type ValidationResultID string
+type SoulID string
+type MemoryID string
+type SkillID string
+type MCPServerID string

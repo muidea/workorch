@@ -7,6 +7,8 @@ type Run struct {
 	WorkspaceID        common.WorkspaceID
 	GoalID             common.GoalID
 	DoDID              common.DoDID
+	InitialStepKind    string
+	ExecutionContext   map[string]any
 	State              common.RunState
 	BlockingTicketID   common.TicketID
 	BlockingApprovalID common.ApprovalID

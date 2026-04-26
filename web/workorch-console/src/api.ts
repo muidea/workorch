@@ -1,4 +1,4 @@
-import type { Approval, Decision, DoD, Goal, Run, RunSnapshot, ServiceStatus, SliceDescriptor, SliceStatus, Workspace, WorkspaceExecutionActivation, WorkspaceSnapshot } from './types';
+import type { Approval, Decision, DoD, Goal, Run, RunObservability, RunSnapshot, ServiceStatus, SliceDescriptor, SliceStatus, Workspace, WorkspaceExecutionActivation, WorkspaceSnapshot } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -76,6 +76,10 @@ export const workorchApi = {
   readRunSnapshot: async (runId: string) => {
     const body = await request<{ snapshot: RunSnapshot }>(`${apiBase}/runs/${encodeURIComponent(runId)}/snapshot`);
     return body.snapshot;
+  },
+  readRunObservability: async (runId: string) => {
+    const body = await request<{ observability: RunObservability }>(`${apiBase}/runs/${encodeURIComponent(runId)}/observability`);
+    return body.observability;
   },
   createRun: async (workspaceId: string, runId: string, goalId?: string, doDId?: string) => {
     const body = await request<{ run: Run }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/runs`, {

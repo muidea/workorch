@@ -15,6 +15,10 @@ const (
 )
 
 type repositorySet struct {
+	soul              repository.SoulRepository
+	memoryItem        repository.MemoryItemRepository
+	skill             repository.SkillRepository
+	mcpServer         repository.MCPServerRepository
 	workspace         repository.WorkspaceRepository
 	goal              repository.GoalRepository
 	dod               repository.DoDRepository
@@ -33,6 +37,10 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 	switch backend {
 	case "", "memory":
 		return repositorySet{
+			soul:              memory.NewSoulRepository(),
+			memoryItem:        memory.NewMemoryItemRepository(),
+			skill:             memory.NewSkillRepository(),
+			mcpServer:         memory.NewMCPServerRepository(),
 			workspace:         memory.NewWorkspaceRepository(),
 			goal:              memory.NewGoalRepository(),
 			dod:               memory.NewDoDRepository(),
@@ -51,6 +59,10 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 			dataRoot = filepath.Join(os.TempDir(), "workorchd-data")
 		}
 		return repositorySet{
+			soul:              fileRepo.NewSoulRepository(filepath.Join(dataRoot, "soul.json")),
+			memoryItem:        fileRepo.NewMemoryItemRepository(filepath.Join(dataRoot, "memory_item.json")),
+			skill:             fileRepo.NewSkillRepository(filepath.Join(dataRoot, "skill.json")),
+			mcpServer:         fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "mcp_server.json")),
 			workspace:         fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json")),
 			goal:              fileRepo.NewGoalRepository(filepath.Join(dataRoot, "goal.json")),
 			dod:               fileRepo.NewDoDRepository(filepath.Join(dataRoot, "dod.json")),

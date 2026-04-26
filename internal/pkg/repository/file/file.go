@@ -6,18 +6,361 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	approval "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decision "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	run "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
+	soul "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 type WorkspaceRepository struct {
 	mu   sync.RWMutex
 	path string
+}
+
+type SoulRepository struct {
+	mu   sync.RWMutex
+	path string
+}
+
+type MemoryItemRepository struct {
+	mu   sync.RWMutex
+	path string
+}
+
+type SkillRepository struct {
+	mu   sync.RWMutex
+	path string
+}
+
+type MCPServerRepository struct {
+	mu   sync.RWMutex
+	path string
+}
+
+func NewSoulRepository(path string) *SoulRepository {
+	return &SoulRepository{path: path}
+}
+
+func (r *SoulRepository) Create(_ context.Context, item *soul.Soul) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[common.SoulID, soul.Soul](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	items[item.ID] = *cloneSoul(item)
+	return saveMap(r.path, items)
+}
+
+func (r *SoulRepository) Get(_ context.Context, id common.SoulID) (*soul.Soul, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.SoulID, soul.Soul](r.path)
+	if err != nil {
+		return nil, err
+	}
+	item, ok := items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneSoul(&item), nil
+}
+
+func (r *SoulRepository) List(_ context.Context) ([]*soul.Soul, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.SoulID, soul.Soul](r.path)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]string, 0, len(items))
+	for id := range items {
+		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+
+	ret := make([]*soul.Soul, 0, len(ids))
+	for _, id := range ids {
+		item := items[common.SoulID(id)]
+		ret = append(ret, cloneSoul(&item))
+	}
+	return ret, nil
+}
+
+func (r *SoulRepository) Update(_ context.Context, item *soul.Soul) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[common.SoulID, soul.Soul](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	items[item.ID] = *cloneSoul(item)
+	return saveMap(r.path, items)
+}
+
+func NewMemoryItemRepository(path string) *MemoryItemRepository {
+	return &MemoryItemRepository{path: path}
+}
+
+func (r *MemoryItemRepository) Create(_ context.Context, item *memorymodel.MemoryItem) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[common.MemoryID, memorymodel.MemoryItem](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	items[item.ID] = *cloneMemoryItem(item)
+	return saveMap(r.path, items)
+}
+
+func (r *MemoryItemRepository) Get(_ context.Context, id common.MemoryID) (*memorymodel.MemoryItem, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.MemoryID, memorymodel.MemoryItem](r.path)
+	if err != nil {
+		return nil, err
+	}
+	item, ok := items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneMemoryItem(&item), nil
+}
+
+func (r *MemoryItemRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.MemoryID, memorymodel.MemoryItem](r.path)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*memorymodel.MemoryItem, 0, len(items))
+	for _, item := range items {
+		if item.WorkspaceID != workspaceID {
+			continue
+		}
+		ret = append(ret, cloneMemoryItem(&item))
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		return string(ret[i].ID) < string(ret[j].ID)
+	})
+	if len(ret) == 0 {
+		return nil, nil
+	}
+	return ret, nil
+}
+
+func (r *MemoryItemRepository) Search(_ context.Context, query repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.MemoryID, memorymodel.MemoryItem](r.path)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*memorymodel.MemoryItem, 0, len(items))
+	for _, item := range items {
+		if !memoryItemMatches(&item, query) {
+			continue
+		}
+		ret = append(ret, cloneMemoryItem(&item))
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		if ret[i].Importance != ret[j].Importance {
+			return ret[i].Importance > ret[j].Importance
+		}
+		return string(ret[i].ID) < string(ret[j].ID)
+	})
+	if query.Limit > 0 && len(ret) > query.Limit {
+		ret = ret[:query.Limit]
+	}
+	if len(ret) == 0 {
+		return nil, nil
+	}
+	return ret, nil
+}
+
+func (r *MemoryItemRepository) Update(_ context.Context, item *memorymodel.MemoryItem) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[common.MemoryID, memorymodel.MemoryItem](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	items[item.ID] = *cloneMemoryItem(item)
+	return saveMap(r.path, items)
+}
+
+func NewSkillRepository(path string) *SkillRepository {
+	return &SkillRepository{path: path}
+}
+
+func (r *SkillRepository) Create(_ context.Context, item *skillmodel.Skill) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[common.SkillID, skillmodel.Skill](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	items[item.ID] = *cloneSkill(item)
+	return saveMap(r.path, items)
+}
+
+func (r *SkillRepository) Get(_ context.Context, id common.SkillID) (*skillmodel.Skill, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.SkillID, skillmodel.Skill](r.path)
+	if err != nil {
+		return nil, err
+	}
+	item, ok := items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneSkill(&item), nil
+}
+
+func (r *SkillRepository) List(_ context.Context) ([]*skillmodel.Skill, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.SkillID, skillmodel.Skill](r.path)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(items))
+	for id := range items {
+		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+
+	ret := make([]*skillmodel.Skill, 0, len(ids))
+	for _, id := range ids {
+		item := items[common.SkillID(id)]
+		ret = append(ret, cloneSkill(&item))
+	}
+	return ret, nil
+}
+
+func (r *SkillRepository) Update(_ context.Context, item *skillmodel.Skill) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[common.SkillID, skillmodel.Skill](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	items[item.ID] = *cloneSkill(item)
+	return saveMap(r.path, items)
+}
+
+func NewMCPServerRepository(path string) *MCPServerRepository {
+	return &MCPServerRepository{path: path}
+}
+
+func (r *MCPServerRepository) Create(_ context.Context, item *mcpmodel.Server) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[common.MCPServerID, mcpmodel.Server](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	items[item.ID] = *cloneMCPServer(item)
+	return saveMap(r.path, items)
+}
+
+func (r *MCPServerRepository) Get(_ context.Context, id common.MCPServerID) (*mcpmodel.Server, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.MCPServerID, mcpmodel.Server](r.path)
+	if err != nil {
+		return nil, err
+	}
+	item, ok := items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneMCPServer(&item), nil
+}
+
+func (r *MCPServerRepository) List(_ context.Context) ([]*mcpmodel.Server, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.MCPServerID, mcpmodel.Server](r.path)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(items))
+	for id := range items {
+		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+
+	ret := make([]*mcpmodel.Server, 0, len(ids))
+	for _, id := range ids {
+		item := items[common.MCPServerID(id)]
+		ret = append(ret, cloneMCPServer(&item))
+	}
+	return ret, nil
+}
+
+func (r *MCPServerRepository) Update(_ context.Context, item *mcpmodel.Server) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[common.MCPServerID, mcpmodel.Server](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	items[item.ID] = *cloneMCPServer(item)
+	return saveMap(r.path, items)
 }
 
 func NewWorkspaceRepository(path string) *WorkspaceRepository {
@@ -1014,6 +1357,9 @@ func cloneDoD(item *workspace.DoD) *workspace.DoD {
 
 func cloneRun(item *run.Run) *run.Run {
 	cloned := *item
+	if item.ExecutionContext != nil {
+		cloned.ExecutionContext = cloneMap(item.ExecutionContext)
+	}
 	return &cloned
 }
 
@@ -1068,6 +1414,85 @@ func cloneDecisionResolution(item *decision.Resolution) *decision.Resolution {
 func cloneApproval(item *approval.Approval) *approval.Approval {
 	cloned := *item
 	return &cloned
+}
+
+func cloneSoul(item *soul.Soul) *soul.Soul {
+	cloned := *item
+	cloned.BusinessDomains = cloneStringSlice(item.BusinessDomains)
+	cloned.AllowedSkillRefs = cloneStringSlice(item.AllowedSkillRefs)
+	cloned.AllowedMCPServerRefs = cloneStringSlice(item.AllowedMCPServerRefs)
+	cloned.AllowedToolKinds = cloneStringSlice(item.AllowedToolKinds)
+	return &cloned
+}
+
+func cloneMemoryItem(item *memorymodel.MemoryItem) *memorymodel.MemoryItem {
+	cloned := *item
+	cloned.Tags = cloneStringSlice(item.Tags)
+	return &cloned
+}
+
+func cloneSkill(item *skillmodel.Skill) *skillmodel.Skill {
+	cloned := *item
+	cloned.TriggerRules = cloneStringSlice(item.TriggerRules)
+	cloned.ReferenceRefs = cloneStringSlice(item.ReferenceRefs)
+	cloned.RequiredToolKinds = cloneStringSlice(item.RequiredToolKinds)
+	cloned.RequiredMCPServerRefs = cloneStringSlice(item.RequiredMCPServerRefs)
+	cloned.Constraints = cloneStringSlice(item.Constraints)
+	return &cloned
+}
+
+func cloneMCPServer(item *mcpmodel.Server) *mcpmodel.Server {
+	cloned := *item
+	cloned.AllowedTools = cloneStringSlice(item.AllowedTools)
+	cloned.AllowedResources = cloneStringSlice(item.AllowedResources)
+	return &cloned
+}
+
+func memoryItemMatches(item *memorymodel.MemoryItem, query repository.MemorySearchQuery) bool {
+	if query.WorkspaceID != "" && item.WorkspaceID != query.WorkspaceID {
+		return false
+	}
+	if len(query.Types) > 0 && !stringIn(item.MemoryType, query.Types) {
+		return false
+	}
+	for _, tag := range query.Tags {
+		if !stringIn(tag, item.Tags) {
+			return false
+		}
+	}
+	if query.Query == "" {
+		return true
+	}
+	needle := strings.ToLower(query.Query)
+	return strings.Contains(strings.ToLower(item.Summary), needle) ||
+		strings.Contains(strings.ToLower(item.Content), needle) ||
+		strings.Contains(strings.ToLower(item.MemoryType), needle) ||
+		containsTagText(item.Tags, needle)
+}
+
+func containsTagText(tags []string, needle string) bool {
+	for _, tag := range tags {
+		if strings.Contains(strings.ToLower(tag), needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func stringIn(value string, values []string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneStringSlice(input []string) []string {
+	if input == nil {
+		return nil
+	}
+	return append([]string(nil), input...)
 }
 
 func cloneMap(input map[string]any) map[string]any {

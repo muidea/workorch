@@ -25,6 +25,7 @@ type Dependencies struct {
 	Resolutions        repository.DecisionResolutionRepository
 	Approvals          repository.ApprovalRepository
 	ToolCalls          repository.ToolCallRepository
+	Patches            repository.PatchRepository
 	ValidationResults  repository.ValidationResultRepository
 	RuntimeCheckpoints repository.RuntimeCheckpointRepository
 	EventHub           events.Hub
@@ -48,6 +49,7 @@ func (m *Module) Setup(deps Dependencies) error {
 		deps.Resolutions == nil ||
 		deps.Approvals == nil ||
 		deps.ToolCalls == nil ||
+		deps.Patches == nil ||
 		deps.ValidationResults == nil ||
 		deps.RuntimeCheckpoints == nil {
 		return common.ErrInvalidArgument
@@ -62,6 +64,7 @@ func (m *Module) Setup(deps Dependencies) error {
 		deps.Approvals,
 		orchestratorbiz.RuntimeEvidenceRepositories{
 			ToolCalls:          deps.ToolCalls,
+			Patches:            deps.Patches,
 			ValidationResults:  deps.ValidationResults,
 			RuntimeCheckpoints: deps.RuntimeCheckpoints,
 		},

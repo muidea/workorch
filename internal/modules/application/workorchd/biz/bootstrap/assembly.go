@@ -5,9 +5,16 @@ import (
 
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	legacymodule "github.com/muidea/workorch/internal/modules/blocks/legacy"
+	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
+	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
+	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp"
+	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory"
 	orchestratormodule "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
+	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
+	skillmodule "github.com/muidea/workorch/internal/modules/kernel/skill"
+	soulmodule "github.com/muidea/workorch/internal/modules/kernel/soul"
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -28,6 +35,30 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	}
 	legacyModule := legacymodule.New()
 	mustSetup("legacy", legacyModule.Setup())
+	shellModule := shellmodule.New()
+	mustSetup("shell", shellModule.Setup())
+	llmModule := llmmodule.New()
+	mustSetup("llm", llmModule.Setup())
+
+	soulModule := soulmodule.New()
+	mustSetup("soul", soulModule.Setup(soulmodule.Dependencies{
+		Souls: repos.soul,
+	}))
+
+	memoryModule := memorymodule.New()
+	mustSetup("memory", memoryModule.Setup(memorymodule.Dependencies{
+		MemoryItems: repos.memoryItem,
+	}))
+
+	skillModule := skillmodule.New()
+	mustSetup("skill", skillModule.Setup(skillmodule.Dependencies{
+		Skills: repos.skill,
+	}))
+
+	mcpModule := mcpmodule.New()
+	mustSetup("mcp", mcpModule.Setup(mcpmodule.Dependencies{
+		Servers: repos.mcpServer,
+	}))
 
 	workspaceModule := workspacemodule.New()
 	mustSetup("workspace", workspaceModule.Setup(workspacemodule.Dependencies{
@@ -51,8 +82,11 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	}))
 
 	orchestratorModule := orchestratormodule.New()
+	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry(legacyModule.RuntimeAdapter())
+	mustSetup("runtime-registry", runtimeRegistry.Register(shellmodule.StepKindCommand, shellModule.RuntimeAdapter()))
+	mustSetup("runtime-registry", runtimeRegistry.Register(llmmodule.StepKindWorkspaceExecution, llmModule.RuntimeAdapter()))
 	mustSetup("orchestrator", orchestratorModule.Setup(orchestratormodule.Dependencies{
-		Runtime:            legacyModule.RuntimeAdapter(),
+		Runtime:            runtimeRegistry,
 		Runs:               repos.run,
 		Steps:              repos.step,
 		Workspaces:         repos.workspace,
@@ -60,6 +94,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 		Resolutions:        repos.resolution,
 		Approvals:          repos.approval,
 		ToolCalls:          repos.toolCall,
+		Patches:            repos.patch,
 		ValidationResults:  repos.validationResult,
 		RuntimeCheckpoints: repos.runtimeCheckpoint,
 		EventHub:           eventHub,
@@ -75,6 +110,12 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 
 	modules := []lifecycle{
 		legacyModule,
+		shellModule,
+		llmModule,
+		soulModule,
+		memoryModule,
+		skillModule,
+		mcpModule,
 		workspaceModule,
 		decisionModule,
 		approvalModule,
@@ -88,6 +129,10 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	return &Runtime{
 		exports: Exports{
 			Repositories: RepositoryExports{
+				Souls:              repos.soul,
+				MemoryItems:        repos.memoryItem,
+				Skills:             repos.skill,
+				MCPServers:         repos.mcpServer,
 				Workspaces:         repos.workspace,
 				Goals:              repos.goal,
 				DoDs:               repos.dod,
@@ -103,6 +148,10 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 			},
 			Services: ServiceExports{
 				WorkspaceService: workspaceModule.Service(),
+				SoulService:      soulModule.Service(),
+				MemoryService:    memoryModule.Service(),
+				SkillService:     skillModule.Service(),
+				MCPService:       mcpModule.Service(),
 				DecisionService:  decisionModule.Service(),
 				ApprovalService:  approvalModule.Service(),
 				RunService:       runModule.Service(),

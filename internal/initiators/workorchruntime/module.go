@@ -11,10 +11,15 @@ import (
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
+	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
+	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
+	memoryservice "github.com/muidea/workorch/internal/modules/kernel/memory/service"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	orchestratorservice "github.com/muidea/workorch/internal/modules/kernel/orchestrator/service"
 	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
+	skillservice "github.com/muidea/workorch/internal/modules/kernel/skill/service"
+	soulservice "github.com/muidea/workorch/internal/modules/kernel/soul/service"
 	workspaceservice "github.com/muidea/workorch/internal/modules/kernel/workspace/service"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
@@ -34,6 +39,12 @@ type Runtime struct {
 	repositories         common.RepositorySet
 	eventHub             workorchevents.Hub
 	legacyRuntimeAdapter orchestratorbiz.RuntimeAdapter
+	shellRuntimeAdapter  orchestratorbiz.RuntimeAdapter
+	llmRuntimeAdapter    *llmbiz.RuntimeAdapter
+	soulService          soulservice.Service
+	memoryService        memoryservice.Service
+	skillService         skillservice.Service
+	mcpService           mcpservice.Service
 	workspaceService     workspaceservice.Service
 	decisionService      decisionservice.Service
 	approvalService      approvalservice.Service
@@ -71,6 +82,12 @@ func (r *Runtime) Teardown() {
 	r.repositories = common.RepositorySet{}
 	r.eventHub = nil
 	r.legacyRuntimeAdapter = nil
+	r.shellRuntimeAdapter = nil
+	r.llmRuntimeAdapter = nil
+	r.soulService = nil
+	r.memoryService = nil
+	r.skillService = nil
+	r.mcpService = nil
 	r.workspaceService = nil
 	r.decisionService = nil
 	r.approvalService = nil
@@ -102,6 +119,84 @@ func (r *Runtime) LegacyRuntimeAdapter() orchestratorbiz.RuntimeAdapter {
 func (r *Runtime) SetLegacyRuntimeAdapter(adapter orchestratorbiz.RuntimeAdapter) {
 	if r != nil {
 		r.legacyRuntimeAdapter = adapter
+	}
+}
+
+func (r *Runtime) ShellRuntimeAdapter() orchestratorbiz.RuntimeAdapter {
+	if r == nil {
+		return nil
+	}
+	return r.shellRuntimeAdapter
+}
+
+func (r *Runtime) SetShellRuntimeAdapter(adapter orchestratorbiz.RuntimeAdapter) {
+	if r != nil {
+		r.shellRuntimeAdapter = adapter
+	}
+}
+
+func (r *Runtime) LLMRuntimeAdapter() *llmbiz.RuntimeAdapter {
+	if r == nil {
+		return nil
+	}
+	return r.llmRuntimeAdapter
+}
+
+func (r *Runtime) SetLLMRuntimeAdapter(adapter *llmbiz.RuntimeAdapter) {
+	if r != nil {
+		r.llmRuntimeAdapter = adapter
+	}
+}
+
+func (r *Runtime) SoulService() soulservice.Service {
+	if r == nil {
+		return nil
+	}
+	return r.soulService
+}
+
+func (r *Runtime) SetSoulService(service soulservice.Service) {
+	if r != nil {
+		r.soulService = service
+	}
+}
+
+func (r *Runtime) MemoryService() memoryservice.Service {
+	if r == nil {
+		return nil
+	}
+	return r.memoryService
+}
+
+func (r *Runtime) SetMemoryService(service memoryservice.Service) {
+	if r != nil {
+		r.memoryService = service
+	}
+}
+
+func (r *Runtime) SkillService() skillservice.Service {
+	if r == nil {
+		return nil
+	}
+	return r.skillService
+}
+
+func (r *Runtime) SetSkillService(service skillservice.Service) {
+	if r != nil {
+		r.skillService = service
+	}
+}
+
+func (r *Runtime) MCPService() mcpservice.Service {
+	if r == nil {
+		return nil
+	}
+	return r.mcpService
+}
+
+func (r *Runtime) SetMCPService(service mcpservice.Service) {
+	if r != nil {
+		r.mcpService = service
 	}
 }
 
@@ -174,6 +269,10 @@ func buildRepositories(backend string, dataRoot string) (common.RepositorySet, e
 	switch backend {
 	case "", "memory":
 		return common.RepositorySet{
+			Souls:              memory.NewSoulRepository(),
+			MemoryItems:        memory.NewMemoryItemRepository(),
+			Skills:             memory.NewSkillRepository(),
+			MCPServers:         memory.NewMCPServerRepository(),
 			Workspaces:         memory.NewWorkspaceRepository(),
 			Goals:              memory.NewGoalRepository(),
 			DoDs:               memory.NewDoDRepository(),
@@ -192,6 +291,10 @@ func buildRepositories(backend string, dataRoot string) (common.RepositorySet, e
 			dataRoot = filepath.Join(os.TempDir(), "workorchd-data")
 		}
 		return common.RepositorySet{
+			Souls:              fileRepo.NewSoulRepository(filepath.Join(dataRoot, "soul.json")),
+			MemoryItems:        fileRepo.NewMemoryItemRepository(filepath.Join(dataRoot, "memory_item.json")),
+			Skills:             fileRepo.NewSkillRepository(filepath.Join(dataRoot, "skill.json")),
+			MCPServers:         fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "mcp_server.json")),
 			Workspaces:         fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json")),
 			Goals:              fileRepo.NewGoalRepository(filepath.Join(dataRoot, "goal.json")),
 			DoDs:               fileRepo.NewDoDRepository(filepath.Join(dataRoot, "dod.json")),

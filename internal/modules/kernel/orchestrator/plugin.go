@@ -9,6 +9,8 @@ import (
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
 	"github.com/muidea/magicCommon/task"
 	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 )
 
 func init() {
@@ -33,9 +35,20 @@ func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 		return err
 	}
 	repos := runtime.Repositories()
+	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry(runtime.LegacyRuntimeAdapter())
+	if runtime.ShellRuntimeAdapter() != nil {
+		if err := runtimeRegistry.Register("shell/command", runtime.ShellRuntimeAdapter()); err != nil {
+			return cd.NewError(cd.Unexpected, err.Error())
+		}
+	}
+	if runtime.LLMRuntimeAdapter() != nil {
+		if err := runtimeRegistry.Register(llmcommon.StepKindWorkspaceExecution, runtime.LLMRuntimeAdapter()); err != nil {
+			return cd.NewError(cd.Unexpected, err.Error())
+		}
+	}
 	p.module = New()
 	if setupErr := p.module.Setup(Dependencies{
-		Runtime:            runtime.LegacyRuntimeAdapter(),
+		Runtime:            runtimeRegistry,
 		Runs:               repos.Runs,
 		Steps:              repos.Steps,
 		Workspaces:         repos.Workspaces,
@@ -43,6 +56,7 @@ func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 		Resolutions:        repos.Resolutions,
 		Approvals:          repos.Approvals,
 		ToolCalls:          repos.ToolCalls,
+		Patches:            repos.Patches,
 		ValidationResults:  repos.ValidationResults,
 		RuntimeCheckpoints: repos.RuntimeCheckpoints,
 		EventHub:           runtime.EventHub(),

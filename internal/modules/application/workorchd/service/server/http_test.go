@@ -15,6 +15,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	legacycommon "github.com/muidea/workorch/internal/modules/blocks/legacy/pkg/common"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -123,9 +124,79 @@ func TestMemoryBackendPersistsStateAcrossHTTPRequests(t *testing.T) {
 	if !strings.Contains(statusRec.Body.String(), `"state": "completed"`) {
 		t.Fatalf("run status body = %s, want completed", statusRec.Body.String())
 	}
+
+	observabilityReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-memory-http/observability", nil)
+	observabilityRec := httptest.NewRecorder()
+	mux.ServeHTTP(observabilityRec, observabilityReq)
+	if observabilityRec.Code != http.StatusOK {
+		t.Fatalf("run observability code = %d, want 200, body = %s", observabilityRec.Code, observabilityRec.Body.String())
+	}
+	if !strings.Contains(observabilityRec.Body.String(), `"terminal": true`) || !strings.Contains(observabilityRec.Body.String(), `"runtimeCheckpointTotal"`) {
+		t.Fatalf("run observability body = %s, want terminal progress and evidence counters", observabilityRec.Body.String())
+	}
+}
+
+func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
+	mux := newMux(Config{Backend: "memory"})
+
+	workspace := createWorkspaceForHTTP(t, mux, "context registry http", "workspaces/ws-context-registry")
+
+	postAndExpect(t, mux, "/api/v1/workorch/souls", `{
+		"id":"soul-engineering-delivery",
+		"name":"engineering delivery",
+		"systemInstruction":"Plan and cite evidence.",
+		"allowedSkillRefs":["skill-local-go-service"],
+		"allowedMCPServerRefs":["mcp-local-context"],
+		"allowedToolKinds":["shell/command"]
+	}`, http.StatusCreated)
+	postAndExpect(t, mux, "/api/v1/workorch/skills", `{
+		"id":"skill-local-go-service",
+		"name":"local go service",
+		"version":"v1",
+		"instruction":"Use small verified steps.",
+		"requiredToolKinds":["shell/command"],
+		"requiredMCPServerRefs":["mcp-local-context"]
+	}`, http.StatusCreated)
+	postAndExpect(t, mux, "/api/v1/workorch/mcp/servers", `{
+		"id":"mcp-local-context",
+		"name":"local context",
+		"transport":"stdio",
+		"enabled":true,
+		"allowedTools":["repo.summary"]
+	}`, http.StatusCreated)
+	postAndExpect(t, mux, "/api/v1/workorch/workspaces/"+workspace.ID+"/memory", `{
+		"sourceType":"user",
+		"memoryType":"project_context",
+		"summary":"This workspace is verified through local workorchd HTTP APIs.",
+		"tags":["local","acceptance"]
+	}`, http.StatusCreated)
+
+	for _, spec := range []struct {
+		path string
+		want string
+	}{
+		{path: "/api/v1/workorch/souls", want: `"id": "soul-engineering-delivery"`},
+		{path: "/api/v1/workorch/souls/soul-engineering-delivery", want: `"allowedSkillRefs": [`},
+		{path: "/api/v1/workorch/skills", want: `"id": "skill-local-go-service"`},
+		{path: "/api/v1/workorch/skills/skill-local-go-service", want: `"requiredMCPServerRefs": [`},
+		{path: "/api/v1/workorch/mcp/servers", want: `"id": "mcp-local-context"`},
+		{path: "/api/v1/workorch/mcp/servers/mcp-local-context/tools", want: `"name": "repo.summary"`},
+		{path: "/api/v1/workorch/memory?workspaceId=" + workspace.ID + "&q=HTTP", want: `"memoryType": "project_context"`},
+	} {
+		req := httptest.NewRequest(http.MethodGet, spec.path, nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200, body = %s", spec.path, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), spec.want) {
+			t.Fatalf("%s body = %s, want %q", spec.path, rec.Body.String(), spec.want)
+		}
+	}
 }
 
 func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
+	useUnavailableLLMProvider(t)
 	mux := newMux(Config{Backend: "memory"})
 
 	workspace := createWorkspaceForHTTP(t, mux, "activation http", "workspaces/ws-activation-http")
@@ -146,12 +217,25 @@ func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
 		body.Activation.Run.WorkspaceID != workspace.ID ||
 		body.Activation.Run.GoalID != goalID ||
 		body.Activation.Run.DoDID != dodID ||
-		body.Activation.Run.State != "completed" {
-		t.Fatalf("activation run = %+v, want generated completed run with definitions", body.Activation.Run)
+		body.Activation.Run.State != "failed" {
+		t.Fatalf("activation run = %+v, want generated failed llm run with definitions", body.Activation.Run)
+	}
+	if !strings.Contains(body.Activation.Run.FailureReason, "llm provider is not configured") {
+		t.Fatalf("activation failure reason = %q, want llm provider configuration failure", body.Activation.Run.FailureReason)
 	}
 	if len(body.Activation.Snapshot.Runs) != 1 || body.Activation.Snapshot.Runs[0].ID != body.Activation.Run.ID {
 		t.Fatalf("activation snapshot runs = %+v, want created run", body.Activation.Snapshot.Runs)
 	}
+}
+
+func useUnavailableLLMProvider(t *testing.T) {
+	t.Helper()
+	t.Setenv(llmcommon.EnvProvider, "")
+	t.Setenv(llmcommon.EnvBaseURL, "")
+	t.Setenv(llmcommon.EnvAPIKey, "")
+	t.Setenv(llmcommon.EnvModel, "")
+	t.Setenv(llmcommon.EnvDisabled, "")
+	t.Setenv(llmcommon.EnvTimeout, "")
 }
 
 func TestAcceptedAPIRoutesAreRegisteredNatively(t *testing.T) {
@@ -213,6 +297,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/snapshot"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/status"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/observability"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/runs/:runId/start"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/runs/:runId/resume"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/decisions"},
@@ -222,6 +307,18 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/approvals/:approvalId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/approvals/:approvalId/approve"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/approvals/:approvalId/reject"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/souls"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/souls"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/souls/:soulId"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/skills"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/skills"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/skills/:skillId"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/mcp/servers"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers/:serverId"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers/:serverId/tools"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/memory"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/memory"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/slices"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/slices/snapshots"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/slices/statuses"},
@@ -348,6 +445,15 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 			t.Fatalf("runID = %q, want run-native-read", runID)
 		}
 		return appservice.RunStatus{ID: runID, WorkspaceID: "ws-native-read", State: "created"}, nil
+	}
+	state.readRunObservability = func(ctx context.Context, _, _, runID string) (appservice.RunObservability, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run observability event hub = %#v, want injected hub", got)
+		}
+		if runID != "run-native-read" {
+			t.Fatalf("runID = %q, want run-native-read", runID)
+		}
+		return appservice.RunObservability{Run: appservice.Run{ID: runID, WorkspaceID: "ws-native-read", State: "created"}}, nil
 	}
 	state.listDecisions = func(ctx context.Context, _, _, workspaceID, runID string) ([]appservice.Decision, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
@@ -527,6 +633,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/snapshot", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/status", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/observability", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/start", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/resume", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusOK},
@@ -1967,6 +2074,19 @@ func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, wo
 		t.Fatalf("workspace = %+v, want generated/%s/%s/active", body.Workspace, title, workingDirectory)
 	}
 	return body.Workspace
+}
+
+func postAndExpect(t *testing.T, handler http.Handler, path string, body string, wantStatus int) string {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != wantStatus {
+		t.Fatalf("%s status = %d, want %d, body = %s", path, rec.Code, wantStatus, rec.Body.String())
+	}
+	return rec.Body.String()
 }
 
 func createWorkspaceAndRunForHTTP(t *testing.T, handler http.Handler, title string, runID string) appservice.Workspace {

@@ -46,8 +46,8 @@ Target:
 - Expose the evidence repositories through the workorch runtime assembly exports so appservice read models can consume them.
 - Record runtime execution evidence automatically from the orchestrator execution path:
   `ToolCall` for step execution, `ValidationResult` for runtime step result, and
-  `RuntimeCheckpoint` for run/step state changes. `Patch` remains empty until a
-  real patch application capability exists.
+  `RuntimeCheckpoint` for run/step state changes. `Patch` is recorded when the
+  runtime emits a formal workspace file patch request.
 
 Acceptance:
 
@@ -110,15 +110,25 @@ Acceptance:
 
 - Any long-term product-planning deviation not explicitly listed in the four Next MVP scope items.
 - Full knowledge asset, retrieval, template marketplace, enterprise collaboration, multi-tenant governance, and Sub-Agent orchestration.
-- Real shell sandbox and patch application engine before execution evidence and Run snapshot exposure are stable.
+- Full shell sandbox and generalized diff patch application engine.
+  A minimal runtime-requested workspace file write path is now supported as
+  `Patch` evidence, but it is not a general shell/tool sandbox.
 - Batch decision handling before single-ticket resolution semantics are stable.
 
 ## Progress
 
 - completed: `N1 Execution Evidence And Run Snapshot`
   Runtime execution now writes `ToolCall`, `ValidationResult`, and
-  `RuntimeCheckpoint` records automatically; `Patch` is intentionally reserved for
-  the future real patch application flow.
+  `RuntimeCheckpoint` records automatically; `Patch` is recorded when runtime
+  output contains a formal workspace file patch request.
 - completed: `N2 Run State Machine And Workspace Projection`
 - completed: `N3 Decision Ticket Structure And Resolution Semantics`
 - completed: `N4 Control Plane MVP Views`
+
+## Post-Completion Feature Progress
+
+- completed: `Runtime Requested Workspace File Patch`
+  When runtime step output includes formal `patches` entries, the orchestrator
+  writes the target file under the Workspace working directory and records an
+  applied `Patch` linked to the runtime `ToolCall`. Invalid absolute or escaping
+  paths fail the Run and record failed Patch evidence.

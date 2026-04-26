@@ -8,6 +8,7 @@ import (
 	approvalModel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionModel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
+	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -867,9 +868,9 @@ type serviceRuntimeAdapter struct {
 	err    error
 }
 
-func (s *serviceRuntimeAdapter) ExecuteStep(_ context.Context, _ common.RunID, _ common.StepID) (map[string]any, error) {
+func (s *serviceRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, _ runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
 	if s.err != nil {
-		return nil, s.err
+		return runtimemodel.StepExecutionResult{}, s.err
 	}
-	return s.output, nil
+	return runtimemodel.StepExecutionResult{Output: s.output}, nil
 }

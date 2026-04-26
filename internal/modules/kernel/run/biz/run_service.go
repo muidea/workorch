@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"errors"
+	"reflect"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/run/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -44,12 +45,14 @@ func (s *Service) CreateRun(ctx context.Context, cmd runservice.CreateRunCommand
 	}
 
 	run := &runModel.Run{
-		ID:            cmd.RunID,
-		WorkspaceID:   cmd.WorkspaceID,
-		GoalID:        cmd.GoalID,
-		DoDID:         cmd.DoDID,
-		State:         common.RunStateCreated,
-		FailureReason: "",
+		ID:               cmd.RunID,
+		WorkspaceID:      cmd.WorkspaceID,
+		GoalID:           cmd.GoalID,
+		DoDID:            cmd.DoDID,
+		InitialStepKind:  cmd.InitialStepKind,
+		ExecutionContext: cloneExecutionContext(cmd.ExecutionContext),
+		State:            common.RunStateCreated,
+		FailureReason:    "",
 	}
 	if err := s.runs.Create(ctx, run); err != nil {
 		return err
@@ -64,7 +67,11 @@ func (s *Service) EnsureRun(ctx context.Context, cmd runservice.CreateRunCommand
 
 	run, err := s.runs.Get(ctx, cmd.RunID)
 	if err == nil {
-		if run.WorkspaceID != cmd.WorkspaceID || run.GoalID != cmd.GoalID || run.DoDID != cmd.DoDID {
+		if run.WorkspaceID != cmd.WorkspaceID ||
+			run.GoalID != cmd.GoalID ||
+			run.DoDID != cmd.DoDID ||
+			run.InitialStepKind != cmd.InitialStepKind ||
+			!reflect.DeepEqual(run.ExecutionContext, cmd.ExecutionContext) {
 			return common.ErrConflict
 		}
 		return nil
@@ -73,6 +80,17 @@ func (s *Service) EnsureRun(ctx context.Context, cmd runservice.CreateRunCommand
 		return err
 	}
 	return s.CreateRun(ctx, cmd)
+}
+
+func cloneExecutionContext(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
 }
 
 func (s *Service) StartRun(ctx context.Context, cmd runservice.StartRunCommand) error {

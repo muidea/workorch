@@ -3,6 +3,8 @@ package appservice
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
@@ -135,6 +137,43 @@ func TestStartRunWithBackendReturnsCompletedRun(t *testing.T) {
 	}
 	if item.BlockingTicketID != "" || item.BlockingApprovalID != "" || item.FailureReason != "" {
 		t.Fatalf("run blocking/failure = %+v, want empty", item)
+	}
+}
+
+func TestStartRunWithBackendAppliesRuntimePatch(t *testing.T) {
+	dataRoot := t.TempDir()
+	workingDirectory := t.TempDir()
+	runID := "run-" + legacycommon.RuntimePatchRunToken
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-patch", "run patch workspace", "", workingDirectory); err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-patch", runID, "", ""); err != nil {
+		t.Fatalf("CreateRunWithBackend: %v", err)
+	}
+
+	item, err := StartRunWithBackend(context.Background(), "file", dataRoot, runID)
+	if err != nil {
+		t.Fatalf("StartRunWithBackend: %v", err)
+	}
+	if item.State != "completed" {
+		t.Fatalf("run = %+v, want completed", item)
+	}
+	content, err := os.ReadFile(filepath.Join(workingDirectory, "workorch-runtime-output.txt"))
+	if err != nil {
+		t.Fatalf("read runtime patch output: %v", err)
+	}
+	if string(content) == "" {
+		t.Fatalf("runtime patch output is empty")
+	}
+	snapshot, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, runID)
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
+	}
+	if len(snapshot.Patches) != 1 || snapshot.Patches[0].State != "applied" || snapshot.Patches[0].TargetRef != "workorch-runtime-output.txt" {
+		t.Fatalf("patches = %+v, want applied runtime patch", snapshot.Patches)
+	}
+	if len(snapshot.ToolCalls) != 1 || snapshot.Patches[0].ToolCallID != snapshot.ToolCalls[0].ID {
+		t.Fatalf("patch/toolCall = %+v/%+v, want linked patch evidence", snapshot.Patches, snapshot.ToolCalls)
 	}
 }
 
