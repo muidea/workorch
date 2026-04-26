@@ -38,15 +38,15 @@ the item is explicitly marked as design-only.
 | L3 | Skill and MCP registry baseline | completed | Formal Skill metadata and MCP server registry baseline | Skill and MCP refs can be persisted/read; activation policy binding uses these services in L6 |
 | L4 | LLM provider configuration | completed | Provider config, disabled-provider behavior, redaction rules | Provider availability and redacted config are deterministic; runtime failure path is consumed in L5/L7 |
 | L5 | `blocks/llm` runtime adapter skeleton | completed | `llm/workspace_execution` adapter module, provider request boundary, schema parser | Adapter returns normalized Step output or schema/provider failure output |
-| L6 | Workspace execution activation context | not_started | Activation request accepts Goal, DoD, Soul, Skill, MCP selections and recalled Memory refs | Created Run snapshot exposes selected execution context refs |
+| L6 | Workspace execution activation context | completed | Activation request accepts Goal, DoD, Soul, Skill, MCP selections and recalled Memory refs | Created Run snapshot exposes selected execution context refs |
 | L7 | Orchestrator LLM step integration | completed | Runtime registry dispatches `llm/workspace_execution`; normalized output maps to state/evidence | First execution Step is LLM planning and does not use legacy completion |
-| L8 | LLM decision to action mapping | not_started | Shell, patch, MCP, Decision, Approval, Memory write requests map from `LLMExecutionDecision` | Continue, block, approval, patch, and tool-call paths create expected evidence |
-| L9 | DoD assessment completion gate | not_started | Run completion requires schema-valid DoD assessment with evidence refs | Run cannot complete without evidence-backed DoD assessment |
-| L10 | Memory write and recall loop | not_started | Run summary and decision-derived Memory writes; second Run recall | Second Run includes prior relevant Memory in LLM planning context |
+| L8 | LLM decision to action mapping | completed | Shell, patch, MCP, Decision, Approval, Memory write requests map from `LLMExecutionDecision` | Continue, block, approval, patch, and tool-call paths create expected evidence |
+| L9 | DoD assessment completion gate | completed | Run completion requires schema-valid DoD assessment with evidence refs | Run cannot complete without evidence-backed DoD assessment |
+| L10 | Memory write and recall loop | completed | Run summary and decision-derived Memory writes; second Run recall | Second Run includes prior relevant Memory in LLM planning context |
 | L11 | API surface for Soul, Skill, MCP, Memory | completed | HTTP endpoints for management and Workspace-scoped Memory | API supports the baseline acceptance dataset setup |
-| L12 | Web console LLM execution views | not_started | Workspace Board activation, Workspace Detail context/evidence, Decision Queue, Observability | Web can start and observe the same flow as API without low-level adapter controls |
-| L13 | End-to-end acceptance scripts | not_started | Local verification scripts for memory and file repository backends | Happy path, Decision, Approval, provider/schema failure, Memory recall are repeatable |
-| L14 | Status and operator documentation | not_started | Updated status, deployment, and acceptance documentation | Docs describe config, verification commands, known limits, and current status |
+| L12 | Web console LLM execution views | completed | Workspace Board activation, Workspace Detail context/evidence, Decision Queue, Observability | Web can start and observe the same flow as API without low-level adapter controls |
+| L13 | End-to-end acceptance scripts | completed | Local verification scripts for memory and file repository backends | Happy path, Decision, Approval, provider/schema failure, Memory recall are repeatable |
+| L14 | Status and operator documentation | completed | Updated status, deployment, and acceptance documentation | Docs describe config, verification commands, known limits, and current status |
 
 ## Detailed Work Items
 
@@ -208,11 +208,14 @@ Status:
 - provider boundary: `ProviderRequest`, `Provider`, `RuntimeAdapter`
 - schema boundary: `LLMExecutionDecision` with strict JSON parsing and
   `completionState` validation
+- real provider client: OpenAI-compatible Chat Completions HTTP client is
+  created by `NewRuntimeAdapterFromEnv` when provider config is ready
 - normalized output covers provider unavailable, provider error, schema invalid,
   shell plan, patch requests, MCP plan, Decision block, Approval block, Memory
   write requests, and DoD assessment output
-- current boundary: real provider HTTP call is not implemented yet; test
-  provider injection verifies schema and normalization behavior
+- current boundary: supported real protocol is OpenAI-compatible
+  `/chat/completions`; provider-specific streaming and non-chat APIs are not in
+  this MVP
 - verification:
   `go test ./internal/modules/blocks/llm/... ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/kernel/orchestrator/... ./application/workorchd -count 1`,
   `go test ./... -count 1`
@@ -232,6 +235,24 @@ Acceptance:
 - Run snapshot exposes selected Goal, DoD, Soul, Skills, MCP servers, and
   recalled Memory refs.
 - Missing required context returns a client-visible validation error.
+
+Status:
+
+- completed
+- activation command/API now accepts `goalId`, `doDId`, `soulId`, `skillIds`,
+  `mcpServerIds`, and `memoryIds`
+- selected Soul, Skills, MCP servers, and Memory are validated before Run
+  creation
+- selected Skill required MCP server refs must be present in the activation
+  selection
+- selected Soul capability policy validates selected Skill refs, MCP server
+  refs, and required tool kinds
+- when `memoryIds` is omitted, activation recalls the first Workspace Memory
+  items as planning context
+- Run snapshot and first LLM Step input expose the persisted execution context
+- verification:
+  `go test ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server -count 1`,
+  `npm run build`
 
 ### L7 Orchestrator LLM Step Integration
 
@@ -283,6 +304,30 @@ Acceptance:
 - Approval block creates Approval and enters `blocked_on_approval`.
 - Rejected Approval does not produce ToolCall or Patch for the rejected action.
 
+Status:
+
+- completed
+- `LLMExecutionDecision` now normalizes shell commands, MCP tool-call
+  requests, patch requests, Memory write requests, required Decision,
+  required Approval, completed DoD assessment, and failed LLM decisions into
+  stable runtime Step output.
+- Required Decision output carries `blockDecisionKind`,
+  `blockDecisionQuestion`, and `blockDecisionContext`; the orchestrator
+  persists these fields into the created Decision Ticket.
+- Failed LLM decisions now fail the Step and Run with `llm_failed` evidence
+  instead of being treated as a completed plan.
+- Unknown runtime kinds such as `mcp/tool_call` no longer fall back to
+  `legacy/minimal`; they fail with `runtime_adapter_unavailable` until a
+  formal adapter is registered.
+- Memory write requests require `memoryType` and `summary` at schema parsing
+  time.
+- current boundary: actual external MCP/tool adapter execution remains a later
+  block adapter item; this item completes the decision-to-runtime boundary and
+  fail-safe behavior.
+- verification:
+  `go test ./internal/modules/blocks/llm/... -count 1`,
+  `go test ./internal/modules/kernel/orchestrator/... -count 1`
+
 ### L9 DoD Assessment Completion Gate
 
 Scope:
@@ -296,6 +341,21 @@ Acceptance:
 - Run cannot complete without DoD assessment.
 - Satisfied DoD item without evidence refs is rejected.
 - Completed Run snapshot exposes DoD assessment and evidence refs.
+
+Status:
+
+- completed
+- `blocks/llm` now exposes completed `dodAssessment` as first-class Step
+  output while retaining the full raw `llmDecision` payload.
+- LLM-driven Runs with a `doDId` cannot transition to `completed` unless the
+  terminal Step output contains a satisfied DoD assessment.
+- Missing, unsatisfied, malformed, or evidence-free satisfied DoD assessment
+  items fail the Step and Run through the runtime completion gate.
+- The gate applies to non-legacy LLM-driven execution and does not change
+  explicit `legacy/minimal` manual or slice paths.
+- verification:
+  `go test ./internal/modules/blocks/llm/... -count 1`,
+  `go test ./internal/modules/kernel/orchestrator/... -count 1`
 
 ### L10 Memory Write And Recall Loop
 
@@ -311,6 +371,24 @@ Acceptance:
 - Completed Run writes summary Memory with source refs.
 - Decision resolution can create Memory when material.
 - Second Run in same Workspace recalls prior relevant Memory.
+
+Status:
+
+- completed
+- Orchestrator now persists normalized `memoryWrites` from runtime Step output
+  into Workspace Memory records with Run source refs.
+- Terminal LLM DoD assessment output with a summary also creates a
+  `run_summary` Memory item.
+- Created Memory IDs are written back to Step output as `memoryRefs` for Run
+  snapshot and observability.
+- Subsequent Workspace execution activation already recalls Workspace Memory
+  into the first LLM Step context when `memoryIds` is omitted.
+- current boundary: Decision resolution can create durable Memory through the
+  existing Memory API when material; automatic resolution-to-Memory synthesis
+  is not required for this MVP item.
+- verification:
+  `go test ./internal/modules/kernel/orchestrator/... -count 1`,
+  `go test ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/application/workorchd -count 1`
 
 ### L11 API Surface For Soul, Skill, MCP, Memory
 
@@ -368,6 +446,19 @@ Acceptance:
 - Web can resolve Decision and Approval without direct adapter controls.
 - Web exposes enough evidence to verify progress and failure cause.
 
+Status:
+
+- completed
+- Workspace Console activation now supports selecting Goal, DoD, Soul, Skills,
+  MCP servers, and Memory through HTTP APIs.
+- Decision Queue exposes structured Decision context and supported resolution
+  actions.
+- Run observability exposes execution context, Step output stage, next runtime
+  kind, Memory refs, and DoD assessment evidence.
+- Embedded console assets were rebuilt into `workorchd`.
+- verification:
+  `npm run build`
+
 ### L13 End-To-End Acceptance Scripts
 
 Scope:
@@ -383,6 +474,21 @@ Acceptance:
   fallback, missing Memory recall, or leaked provider secrets.
 - File backend restart preserves business objects and relationships.
 
+Status:
+
+- completed
+- Added `scripts/verify-llm-workspace-execution.sh`, which starts
+  `workorchd` and a local OpenAI-compatible mock provider.
+- Added `make verify-llm` and `make verify-llm-file`.
+- The script covers happy path, Decision resume, Approval rejection,
+  schema-invalid provider output, Memory write/recall, and file backend
+  restart-read verification.
+- LLM-created default Decision and Approval IDs are now URL-safe so HTTP
+  detail and resolution routes can operate on them directly.
+- verification:
+  `make verify-llm`,
+  `make verify-llm-file`
+
 ### L14 Status And Operator Documentation
 
 Scope:
@@ -396,6 +502,18 @@ Acceptance:
 - Status document reflects current completed and active item.
 - Local operator can configure provider and run acceptance checks from docs.
 - Documentation does not describe unfinished items as completed.
+
+Status:
+
+- completed
+- Updated `docs/workorch-status.md` and this plan to reflect completed
+  LLM-driven MVP work items.
+- Updated `docs/deployment.md` with LLM provider configuration, mock-provider
+  acceptance targets, supported variables, and MVP protocol boundary.
+- Updated `.env.workorchd.example` with LLM provider environment variables.
+- verification:
+  `make verify-llm`,
+  `make verify-llm-file`
 
 ## Recommended Development Rounds
 
@@ -464,13 +582,13 @@ Exit criteria:
 | L2 | completed | MemoryItem model, repository contracts, memory/file backends, deterministic Workspace search, source validation, module registration, and runtime injection completed. Run summary write and recall integration remain L10. |
 | L3 | completed | Skill and MCPServer models, repository contracts, memory/file backends, services, module registration, and runtime injection completed. Activation policy binding remains L6; MCP invocation remains later block work. |
 | L4 | completed | LLM provider env config, disabled/unavailable state, timeout validation, supported provider validation, and redaction helper completed. Runtime dispatch failure path remains L5/L7. |
-| L5 | completed | LLM runtime adapter skeleton, provider request boundary, strict decision parsing, normalized output, module registration, runtime helper injection, and bootstrap/orchestrator registration completed. Real provider call remains later provider implementation work. |
-| L6 | not_started |  |
+| L5 | completed | LLM runtime adapter, OpenAI-compatible HTTP provider client, provider request boundary, strict decision parsing, normalized output, module registration, runtime helper injection, and bootstrap/orchestrator registration completed. |
+| L6 | completed | Workspace execution activation now binds selected Soul, Skill, MCP server, and Memory context into Run execution context and first LLM Step input; disallowed or missing selections are rejected before Run creation. |
 | L7 | completed | LLM-driven activation dispatches `llm/workspace_execution` first, propagates execution context and `nextInput`, and fails visibly when provider config is unavailable instead of falling back to `legacy/minimal`. |
-| L8 | not_started |  |
-| L9 | not_started |  |
-| L10 | not_started |  |
+| L8 | completed | LLM decisions now map to shell, MCP boundary, patches, Memory write requests, structured Decision Tickets, Approval gates, DoD assessment, and explicit failed decisions; unregistered runtime kinds fail instead of using legacy fallback. |
+| L9 | completed | LLM-driven Runs with DoD now require a satisfied evidence-backed DoD assessment before completion; missing or invalid assessments fail the Step and Run. |
+| L10 | completed | Runtime `memoryWrites` and terminal run summaries now persist as Workspace Memory with Run source refs; created IDs are exposed as `memoryRefs`, and later activation can recall Workspace Memory into LLM context. |
 | L11 | completed | Minimal HTTP API surface for Soul, Skill, MCPServer, and Workspace Memory completed; baseline acceptance dataset can be created through workorchd APIs. |
-| L12 | not_started |  |
-| L13 | not_started |  |
-| L14 | not_started |  |
+| L12 | completed | Web can start LLM-driven execution with Goal/DoD/Soul/Skill/MCP/Memory context, inspect structured Decision context, and observe Step output including DoD assessment and Memory refs. |
+| L13 | completed | Added repeatable local LLM acceptance scripts for memory and file backends with a local OpenAI-compatible mock provider; covers happy path, Decision resume, Approval rejection, schema failure, Memory recall, and file restart-read. |
+| L14 | completed | Status, deployment, environment template, verification commands, provider config, and current LLM MVP boundaries are documented. |

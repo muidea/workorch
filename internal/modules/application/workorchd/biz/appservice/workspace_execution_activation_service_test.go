@@ -8,6 +8,7 @@ import (
 
 	legacycommon "github.com/muidea/workorch/internal/modules/blocks/legacy/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -118,6 +119,140 @@ func TestActivateWorkspaceExecutionWithBackendRequiresExplicitDefinitionWhenAmbi
 	}
 }
 
+func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-context", "activation context workspace", "", "workspaces/activation-context")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "activation context goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"activation context dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	if _, err := CreateMCPServerWithBackend(ctx, "file", dataRoot, CreateMCPServerCommand{
+		ID:           "mcp-activation-context",
+		Name:         "Activation Context MCP",
+		Transport:    "stdio",
+		Enabled:      true,
+		AllowedTools: []string{"repo.summary"},
+	}); err != nil {
+		t.Fatalf("CreateMCPServerWithBackend: %v", err)
+	}
+	if _, err := CreateSkillWithBackend(ctx, "file", dataRoot, CreateSkillCommand{
+		ID:                    "skill-activation-context",
+		Name:                  "Activation Context Skill",
+		Version:               "1.0.0",
+		Instruction:           "Use local repository evidence.",
+		RequiredToolKinds:     []string{"shell/command"},
+		RequiredMCPServerRefs: []string{"mcp-activation-context"},
+	}); err != nil {
+		t.Fatalf("CreateSkillWithBackend: %v", err)
+	}
+	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
+		ID:                   "soul-activation-context",
+		Name:                 "Activation Context Soul",
+		SystemInstruction:    "Execute workspace goals with evidence.",
+		AllowedSkillRefs:     []string{"skill-activation-context"},
+		AllowedMCPServerRefs: []string{"mcp-activation-context"},
+		AllowedToolKinds:     []string{"shell/command"},
+	}); err != nil {
+		t.Fatalf("CreateSoulWithBackend: %v", err)
+	}
+	memory, err := CreateMemoryItemWithBackend(ctx, "file", dataRoot, workspace.ID, CreateMemoryItemCommand{
+		MemoryID:   "memory-activation-context",
+		SourceType: memorycommon.MemorySourceUser,
+		MemoryType: memorycommon.MemoryTypeProjectContext,
+		Summary:    "workspace should use LLM activation context",
+		Content:    "Use selected soul, skill, MCP server, and memory as planning context.",
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryItemWithBackend: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID:       goal.ID,
+		DoDID:        dod.ID,
+		SoulID:       "soul-activation-context",
+		SkillIDs:     []string{"skill-activation-context"},
+		MCPServerIDs: []string{"mcp-activation-context"},
+		MemoryIDs:    []string{memory.ID},
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	executionContext := item.Run.ExecutionContext
+	if executionContext["soulId"] != "soul-activation-context" {
+		t.Fatalf("executionContext = %+v, want selected soul", executionContext)
+	}
+	if !contextStringSliceContains(executionContext["skillIds"], "skill-activation-context") {
+		t.Fatalf("skillIds = %+v, want selected skill", executionContext["skillIds"])
+	}
+	if !contextStringSliceContains(executionContext["mcpServerIds"], "mcp-activation-context") {
+		t.Fatalf("mcpServerIds = %+v, want selected MCP server", executionContext["mcpServerIds"])
+	}
+	if !contextStringSliceContains(executionContext["memoryIds"], memory.ID) {
+		t.Fatalf("memoryIds = %+v, want selected memory", executionContext["memoryIds"])
+	}
+
+	runSnapshot, err := ReadRunSnapshotWithBackend(ctx, "file", dataRoot, item.Run.ID)
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
+	}
+	stepContext, _ := runSnapshot.Steps[0].Input["executionContext"].(map[string]any)
+	if stepContext["soulId"] != "soul-activation-context" {
+		t.Fatalf("first step input = %+v, want execution context propagated", runSnapshot.Steps[0].Input)
+	}
+}
+
+func TestActivateWorkspaceExecutionWithBackendRejectsSoulDisallowedSkill(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-context-reject", "activation context reject workspace", "", "workspaces/activation-context-reject")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "activation context reject goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"activation context reject dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	if _, err := CreateSkillWithBackend(ctx, "file", dataRoot, CreateSkillCommand{
+		ID:          "skill-disallowed",
+		Name:        "Disallowed Skill",
+		Version:     "1.0.0",
+		Instruction: "Not allowed by selected soul.",
+	}); err != nil {
+		t.Fatalf("CreateSkillWithBackend: %v", err)
+	}
+	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
+		ID:                "soul-restrictive",
+		Name:              "Restrictive Soul",
+		SystemInstruction: "Only use explicitly allowed capabilities.",
+	}); err != nil {
+		t.Fatalf("CreateSoulWithBackend: %v", err)
+	}
+
+	_, err = ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID:   goal.ID,
+		DoDID:    dod.ID,
+		SoulID:   "soul-restrictive",
+		SkillIDs: []string{"skill-disallowed"},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want invalid argument for disallowed skill", err)
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendReturnsActiveRun(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
@@ -155,6 +290,24 @@ func TestActivateWorkspaceExecutionWithBackendReturnsActiveRun(t *testing.T) {
 	if len(item.Snapshot.Runs) != 1 || item.Snapshot.Workspace.ActiveRunID != activeRunID {
 		t.Fatalf("activation snapshot = %+v, want active run projection", item.Snapshot)
 	}
+}
+
+func contextStringSliceContains(value any, want string) bool {
+	switch typed := value.(type) {
+	case []string:
+		for _, item := range typed {
+			if item == want {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			if item == want {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func useUnavailableLLMProvider(t *testing.T) {

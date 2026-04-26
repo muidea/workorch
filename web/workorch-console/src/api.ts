@@ -1,4 +1,4 @@
-import type { Approval, Decision, DoD, Goal, Run, RunObservability, RunSnapshot, ServiceStatus, SliceDescriptor, SliceStatus, Workspace, WorkspaceExecutionActivation, WorkspaceSnapshot } from './types';
+import type { Approval, Decision, DoD, Goal, MCPServer, MemoryItem, Run, RunObservability, RunSnapshot, ServiceStatus, Skill, SliceDescriptor, SliceStatus, Soul, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -96,12 +96,35 @@ export const workorchApi = {
     const body = await request<{ run: Run }>(`${apiBase}/runs/${encodeURIComponent(runId)}/resume`, { method: 'POST' });
     return body.run;
   },
-  activateWorkspaceExecution: async (workspaceId: string, goalId?: string, doDId?: string) => {
+  activateWorkspaceExecution: async (workspaceId: string, goalIdOrRequest?: string | WorkspaceExecutionActivationRequest, doDId?: string) => {
+    const requestBody: WorkspaceExecutionActivationRequest = typeof goalIdOrRequest === 'object'
+      ? goalIdOrRequest
+      : { goalId: goalIdOrRequest, doDId };
     const body = await request<{ activation: WorkspaceExecutionActivation }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/execution-activations`, {
       method: 'POST',
-      body: JSON.stringify({ goalId, doDId })
+      body: JSON.stringify(requestBody)
     });
     return body.activation;
+  },
+  listSouls: async () => {
+    const body = await request<{ souls: Soul[] }>(`${apiBase}/souls`);
+    return body.souls ?? [];
+  },
+  listSkills: async () => {
+    const body = await request<{ skills: Skill[] }>(`${apiBase}/skills`);
+    return body.skills ?? [];
+  },
+  listMCPServers: async () => {
+    const body = await request<{ servers: MCPServer[] }>(`${apiBase}/mcp/servers`);
+    return body.servers ?? [];
+  },
+  listMemory: async (workspaceId: string, query?: string) => {
+    const search = new URLSearchParams({ workspaceId });
+    if (query) {
+      search.set('query', query);
+    }
+    const body = await request<{ memory: MemoryItem[] }>(`${apiBase}/memory?${search.toString()}`);
+    return body.memory ?? [];
   },
   listDecisions: async () => {
     const body = await request<{ decisions: Decision[] }>(`${apiBase}/decisions`);

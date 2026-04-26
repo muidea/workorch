@@ -97,6 +97,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 		Patches:            repos.patch,
 		ValidationResults:  repos.validationResult,
 		RuntimeCheckpoints: repos.runtimeCheckpoint,
+		MemoryItems:        repos.memoryItem,
 		EventHub:           eventHub,
 	}))
 

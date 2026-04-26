@@ -30,10 +30,56 @@ export type Run = {
   workspaceId: string;
   goalId?: string;
   doDId?: string;
+  initialStepKind?: string;
+  executionContext?: Record<string, unknown>;
   state: string;
   blockingTicketId?: string;
   blockingApprovalId?: string;
   failureReason?: string;
+};
+
+export type WorkspaceExecutionActivationRequest = {
+  goalId?: string;
+  doDId?: string;
+  soulId?: string;
+  skillIds?: string[];
+  mcpServerIds?: string[];
+  memoryIds?: string[];
+};
+
+export type Soul = {
+  id: string;
+  name: string;
+  description?: string;
+};
+
+export type Skill = {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  requiredMCPServerRefs?: string[];
+  requiredToolKinds?: string[];
+};
+
+export type MCPServer = {
+  id: string;
+  name: string;
+  transport: string;
+  endpoint?: string;
+  enabled: boolean;
+  allowedTools?: string[];
+};
+
+export type MemoryItem = {
+  id: string;
+  workspaceId: string;
+  runId?: string;
+  sourceType: string;
+  sourceRef?: string;
+  memoryType: string;
+  summary: string;
+  tags?: string[];
 };
 
 export type StepView = {
@@ -41,6 +87,8 @@ export type StepView = {
   runId: string;
   kind?: string;
   state: string;
+  input?: Record<string, unknown>;
+  output?: Record<string, unknown>;
 };
 
 export type ToolCall = {

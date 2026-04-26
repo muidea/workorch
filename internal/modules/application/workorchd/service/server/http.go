@@ -268,8 +268,12 @@ type createRunRequest struct {
 }
 
 type activateWorkspaceExecutionRequest struct {
-	GoalID string `json:"goalId,omitempty"`
-	DoDID  string `json:"doDId,omitempty"`
+	GoalID       string   `json:"goalId,omitempty"`
+	DoDID        string   `json:"doDId,omitempty"`
+	SoulID       string   `json:"soulId,omitempty"`
+	SkillIDs     []string `json:"skillIds,omitempty"`
+	MCPServerIDs []string `json:"mcpServerIds,omitempty"`
+	MemoryIDs    []string `json:"memoryIds,omitempty"`
 }
 
 type createSoulRequest = appservice.CreateSoulCommand
@@ -1173,8 +1177,12 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 		}
 		defer release()
 		item, err := state.activateWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, appservice.ActivateWorkspaceExecutionCommand{
-			GoalID: req.GoalID,
-			DoDID:  req.DoDID,
+			GoalID:       req.GoalID,
+			DoDID:        req.DoDID,
+			SoulID:       req.SoulID,
+			SkillIDs:     req.SkillIDs,
+			MCPServerIDs: req.MCPServerIDs,
+			MemoryIDs:    req.MemoryIDs,
 		})
 		if err != nil {
 			writeBusinessError(w, err)

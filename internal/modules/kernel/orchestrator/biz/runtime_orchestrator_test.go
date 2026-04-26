@@ -15,6 +15,7 @@ import (
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -158,6 +159,55 @@ func TestRuntimeAdapterRegistryDispatchesByStepKind(t *testing.T) {
 	}
 	if step.Output["status"] != "non-legacy" {
 		t.Fatalf("step output = %+v, want non-legacy", step.Output)
+	}
+}
+
+func TestRuntimeAdapterRegistryDoesNotFallbackForUnknownRuntimeKind(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	defaultRuntime := &requestCapturingRuntimeAdapter{output: map[string]any{"status": "default"}}
+	registry := NewRuntimeAdapterRegistry(defaultRuntime)
+	orch := NewRuntimeOrchestrator(registry, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-runtime-unknown")
+	runID := common.RunID("run-runtime-unknown")
+	stepID := common.StepID("run-runtime-unknown/step-1")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "mcp/tool_call", State: common.StepStateDispatched}); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+
+	if err := orch.DispatchNextStep(ctx, runID); err != nil {
+		t.Fatalf("dispatch unknown runtime should close as failed without returning error: %v", err)
+	}
+
+	if len(defaultRuntime.requests) != 0 {
+		t.Fatalf("default runtime requests = %d, want 0", len(defaultRuntime.requests))
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateFailed {
+		t.Fatalf("run state = %s, want failed", runItem.State)
+	}
+	step, err := stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if step.State != common.StepStateFailed ||
+		step.Output["stage"] != "runtime_adapter_unavailable" ||
+		step.Output["kind"] != "mcp/tool_call" {
+		t.Fatalf("step = %+v, want adapter unavailable failure", step)
 	}
 }
 
@@ -587,6 +637,80 @@ func TestRuntimeOrchestrator_StartRunAppliesRuntimePatchEvidence(t *testing.T) {
 	}
 	if len(patches) != 1 || patches[0].State != common.PatchStateApplied || patches[0].TargetRef != "docs/result.txt" || patches[0].ToolCallID == "" {
 		t.Fatalf("patches = %+v, want one applied patch linked to tool call", patches)
+	}
+}
+
+func TestRuntimeOrchestrator_StartRunPersistsRuntimeMemoryWrites(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	memoryRepo := memory.NewMemoryItemRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{
+		"status":  "completed",
+		"stage":   "llm_dod_assessment",
+		"summary": "Run completed with targeted tests",
+		"memoryWrites": []map[string]any{
+			{
+				"memoryType": "execution_lesson",
+				"summary":    "Prefer running targeted tests before full suite",
+				"content":    "Targeted tests made the feedback loop shorter.",
+				"tags":       []string{"testing", "workflow"},
+			},
+		},
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		resolutionRepo,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          memory.NewToolCallRepository(),
+			Patches:            memory.NewPatchRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+			MemoryItems:        memoryRepo,
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-memory-write")
+	runID := common.RunID("run-memory-write")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	items, err := memoryRepo.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("list memory items: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("memory items = %+v, want execution lesson and run summary", items)
+	}
+	if !hasMemoryItem(items, runID, "execution_lesson", "Prefer running targeted tests before full suite") ||
+		!hasMemoryItem(items, runID, "run_summary", "Run completed with targeted tests") {
+		t.Fatalf("memory items = %+v, want persisted execution lesson and run summary", items)
+	}
+	step, err := stepRepo.Get(ctx, common.StepID("run-memory-write/step-1"))
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	refs, ok := step.Output["memoryRefs"].([]string)
+	if !ok || len(refs) != 2 {
+		t.Fatalf("memoryRefs = %+v, want created memory ids", step.Output["memoryRefs"])
 	}
 }
 
@@ -1218,6 +1342,154 @@ func TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterDecision(
 	}
 	if reviewStep.State != common.StepStateCompleted || reviewStep.Input["graphPreviousNodeId"] != "prepare" {
 		t.Fatalf("review step = %+v, want resumed graph node after prepare", reviewStep)
+	}
+}
+
+func TestRuntimeOrchestrator_CreatesDecisionTicketWithStructuredFields(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{
+		"status":                "completed",
+		"blockDecisionReason":   "need implementation direction",
+		"blockDecisionKind":     "provide_missing_info",
+		"blockDecisionQuestion": "Should the run call an external MCP tool?",
+		"blockDecisionContext": map[string]any{
+			"candidate": "mcp/tool_call",
+		},
+		"nextStep": "run-decision-structured/llm-after-decision",
+		"nextKind": "llm/workspace_execution",
+	}}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-decision-structured")
+	runID := common.RunID("run-decision-structured")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateBlockedOnDecision || runItem.BlockingTicketID == "" {
+		t.Fatalf("run = %+v, want blocked on decision", runItem)
+	}
+	ticket, err := ticketRepo.Get(ctx, runItem.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("get ticket: %v", err)
+	}
+	if ticket.Reason != "need implementation direction" ||
+		ticket.DecisionKind != "provide_missing_info" ||
+		ticket.Question != "Should the run call an external MCP tool?" ||
+		ticket.Context["candidate"] != "mcp/tool_call" {
+		t.Fatalf("ticket = %+v, want structured decision fields", ticket)
+	}
+}
+
+func TestRuntimeOrchestrator_FailsLLMRunCompletionWithoutDoDAssessment(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "completed"}}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-dod-gate-missing")
+	runID := common.RunID("run-dod-gate-missing")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-1"),
+		State:           common.RunStateCreated,
+		InitialStepKind: "llm/workspace_execution",
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run should close as failed without returning error: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateFailed || !strings.Contains(runItem.FailureReason, "dodAssessment is required") {
+		t.Fatalf("run = %+v, want failed DoD assessment gate", runItem)
+	}
+	step, err := stepRepo.Get(ctx, common.StepID("run-dod-gate-missing/step-1"))
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if step.State != common.StepStateFailed || !strings.Contains(step.Output["error"].(string), "dodAssessment is required") {
+		t.Fatalf("step = %+v, want failed DoD assessment gate", step)
+	}
+}
+
+func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{
+		"status": "completed",
+		"dodAssessment": map[string]any{
+			"satisfied": true,
+			"items": []map[string]any{
+				{
+					"item":         "tests pass",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-dod-gate-complete/validation/runtime-step"},
+				},
+			},
+			"summary": "DoD satisfied",
+		},
+	}}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-dod-gate-complete")
+	runID := common.RunID("run-dod-gate-complete")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-1"),
+		State:           common.RunStateCreated,
+		InitialStepKind: "llm/workspace_execution",
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s, want completed", runItem.State)
 	}
 }
 
@@ -3050,6 +3322,20 @@ func hasCheckpointGraphBranch(items []*runmodel.RuntimeCheckpoint, branch string
 			continue
 		}
 		if item.Data["graphBranch"] == branch {
+			return true
+		}
+	}
+	return false
+}
+
+func hasMemoryItem(items []*memorymodel.MemoryItem, runID common.RunID, memoryType string, summary string) bool {
+	for _, item := range items {
+		if item != nil &&
+			item.RunID == runID &&
+			item.SourceType == "run" &&
+			item.SourceRef == string(runID) &&
+			item.MemoryType == memoryType &&
+			item.Summary == summary {
 			return true
 		}
 	}

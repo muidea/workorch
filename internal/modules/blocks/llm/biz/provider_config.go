@@ -13,6 +13,7 @@ import (
 )
 
 const defaultProviderTimeout = 60 * time.Second
+const defaultOpenAIBaseURL = "https://api.openai.com/v1"
 
 func LoadProviderConfigFromEnv() (llmmodels.ProviderConfig, error) {
 	return LoadProviderConfig(envMap(os.Environ()))
@@ -80,12 +81,18 @@ func withAvailability(cfg llmmodels.ProviderConfig) llmmodels.ProviderConfig {
 	case !isSupportedProvider(cfg.Provider):
 		cfg.Unavailable = true
 		cfg.UnavailableReason = "llm provider is unsupported"
+	case cfg.Provider == llmcommon.ProviderCompatible && cfg.BaseURL == "":
+		cfg.Unavailable = true
+		cfg.UnavailableReason = "llm compatible provider base url is not configured"
 	case cfg.Model == "":
 		cfg.Unavailable = true
 		cfg.UnavailableReason = "llm model is not configured"
 	case cfg.APIKey == "":
 		cfg.Unavailable = true
 		cfg.UnavailableReason = "llm api key is not configured"
+	}
+	if !cfg.Unavailable && cfg.Provider == llmcommon.ProviderOpenAI && cfg.BaseURL == "" {
+		cfg.BaseURL = defaultOpenAIBaseURL
 	}
 	return cfg
 }

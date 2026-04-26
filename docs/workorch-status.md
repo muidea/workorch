@@ -78,9 +78,35 @@
 - Workspace execution activation now creates business Runs whose first Step is
   `llm/workspace_execution`; `legacy/minimal` remains only as the default for
   explicit legacy/manual run paths.
+- Workspace execution activation accepts and persists selected Soul, Skill, MCP
+  server, and Memory context on Run execution context; the same context is
+  passed to the first LLM Step input.
 - Missing or disabled LLM provider configuration fails the LLM Step and Run
   with observable runtime evidence instead of silently completing through the
   legacy adapter.
+- Ready LLM provider configuration now creates a real OpenAI-compatible
+  Chat Completions HTTP client inside `blocks/llm`; `openai` defaults to
+  `https://api.openai.com/v1`, while `compatible` requires
+  `WORKORCH_LLM_BASE_URL`.
+- LLM decision output now maps to runtime actions and gates: shell command
+  dispatch, MCP tool-call dispatch boundary, patch evidence, Memory write
+  request evidence, structured Decision Ticket fields, Approval gates, DoD
+  assessment, and explicit failed LLM decisions.
+- Unregistered runtime kinds, including the current `mcp/tool_call` boundary
+  before a concrete adapter is implemented, fail with
+  `runtime_adapter_unavailable` instead of falling back to `legacy/minimal`.
+- LLM-driven Runs that bind a DoD now require a satisfied, evidence-backed
+  `dodAssessment` before completion; missing or invalid assessments fail the
+  terminal Step and Run.
+- Runtime `memoryWrites` and terminal LLM run summaries now persist as
+  Workspace Memory records with Run source refs; created Memory IDs are exposed
+  on Step output as `memoryRefs` for later snapshots and recall.
+- Embedded Web Console can start LLM-driven Workspace execution with
+  Goal/DoD/Soul/Skill/MCP/Memory context and observe execution context,
+  Decision context, Step output, DoD assessment, and Memory refs.
+- LLM-driven Workspace execution has repeatable local acceptance scripts:
+  `make verify-llm` and `make verify-llm-file`, backed by a local
+  OpenAI-compatible mock provider.
 
 ## Delivered in workorch
 
@@ -446,7 +472,7 @@ LLM 驱动 Workspace 执行的设计文档已补齐，范围、边界与交互�
 
 - design: completed
 - development plan: completed
-- implementation: in progress
+- implementation: completed
 - active tracking: `docs/llm-driven-development-plan.md`
 
 该设计明确后续实现边界：
@@ -474,15 +500,15 @@ LLM 驱动 Workspace 执行的设计文档已补齐，范围、边界与交互�
 - L3 Skill and MCP registry baseline: completed
 - L4 LLM provider configuration: completed
 - L5 `blocks/llm` runtime adapter skeleton: completed
-- L6 Workspace execution activation context: not_started
+- L6 Workspace execution activation context: completed
 - L7 Orchestrator LLM step integration: completed
-- L8 LLM decision to action mapping: not_started
-- L9 DoD assessment completion gate: not_started
-- L10 Memory write and recall loop: not_started
+- L8 LLM decision to action mapping: completed
+- L9 DoD assessment completion gate: completed
+- L10 Memory write and recall loop: completed
 - L11 API surface for Soul, Skill, MCP, Memory: completed
-- L12 Web console LLM execution views: not_started
-- L13 End-to-end acceptance scripts: not_started
-- L14 Status and operator documentation: not_started
+- L12 Web console LLM execution views: completed
+- L13 End-to-end acceptance scripts: completed
+- L14 Status and operator documentation: completed
 
 ## MVP Closure Record
 

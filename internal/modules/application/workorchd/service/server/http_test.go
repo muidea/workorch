@@ -531,8 +531,14 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("workspace activation event hub = %#v, want injected hub", got)
 		}
-		if workspaceID != "ws-native-read" || cmd.GoalID != "goal-native" || cmd.DoDID != "dod-native" {
-			t.Fatalf("workspace activation input = %q/%q/%q, want ws-native-read/goal-native/dod-native", workspaceID, cmd.GoalID, cmd.DoDID)
+		if workspaceID != "ws-native-read" ||
+			cmd.GoalID != "goal-native" ||
+			cmd.DoDID != "dod-native" ||
+			cmd.SoulID != "soul-native" ||
+			!stringSliceEqual(cmd.SkillIDs, []string{"skill-native"}) ||
+			!stringSliceEqual(cmd.MCPServerIDs, []string{"mcp-native"}) ||
+			!stringSliceEqual(cmd.MemoryIDs, []string{"memory-native"}) {
+			t.Fatalf("workspace activation input = %+v for workspace %q, want full context selection", cmd, workspaceID)
 		}
 		return appservice.WorkspaceExecutionActivation{
 			Workspace: appservice.Workspace{ID: workspaceID, ActiveRunID: "run-native-activation"},
@@ -636,7 +642,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/observability", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/start", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/resume", status: http.StatusOK},
-		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native","soulId":"soul-native","skillIds":["skill-native"],"mcpServerIds":["mcp-native"],"memoryIds":["memory-native"]}`, status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions?workspaceId=ws-native-read&runId=run-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions/ticket-native-read", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/decisions/ticket-native-read/resolve", status: http.StatusOK},
@@ -2470,4 +2476,16 @@ func TestConfigFromEnvReturnsErrorForInvalidConcurrentLimit(t *testing.T) {
 	if !strings.Contains(err.Error(), envServerMaxConcurrentRuns) {
 		t.Fatalf("error = %v, want env name %s", err, envServerMaxConcurrentRuns)
 	}
+}
+
+func stringSliceEqual(got []string, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for idx := range got {
+		if got[idx] != want[idx] {
+			return false
+		}
+	}
+	return true
 }

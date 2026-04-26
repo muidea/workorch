@@ -63,10 +63,105 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterNormalizesRequiredDecisionFields(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{
+		"thoughtSummary":"need product direction",
+		"completionState":"blocked_on_decision",
+		"requiredDecision":{
+			"reason":"missing implementation path",
+			"decisionKind":"provide_missing_info",
+			"question":"Should the run use the shell sandbox first?",
+			"context":{"topic":"execution"}
+		}
+	}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	if result.Output["stage"] != "llm_decision_required" ||
+		result.Output["blockDecisionReason"] != "missing implementation path" ||
+		result.Output["blockDecisionKind"] != "provide_missing_info" ||
+		result.Output["blockDecisionQuestion"] != "Should the run use the shell sandbox first?" {
+		t.Fatalf("output = %+v, want structured decision block", result.Output)
+	}
+	contextMap, ok := result.Output["blockDecisionContext"].(map[string]any)
+	if !ok || contextMap["topic"] != "execution" {
+		t.Fatalf("blockDecisionContext = %+v, want topic execution", result.Output["blockDecisionContext"])
+	}
+}
+
+func TestRuntimeAdapterReturnsErrorForFailedDecision(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{
+		"thoughtSummary":"DoD cannot be satisfied with current context",
+		"completionState":"failed"
+	}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("execute err = %v, want invalid argument", err)
+	}
+	if result.Output["status"] != "failed" ||
+		result.Output["stage"] != "llm_failed" ||
+		result.Output["error"] != "DoD cannot be satisfied with current context" {
+		t.Fatalf("output = %+v, want failed llm decision", result.Output)
+	}
+}
+
+func TestRuntimeAdapterExposesCompletedDoDAssessment(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{
+		"thoughtSummary":"DoD satisfied by validation",
+		"completionState":"completed",
+		"dodAssessment":{
+			"satisfied":true,
+			"summary":"all checks passed",
+			"items":[{"item":"tests pass","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}]
+		}
+	}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	assessment, ok := result.Output["dodAssessment"].(map[string]any)
+	if !ok || assessment["satisfied"] != true || assessment["summary"] != "all checks passed" {
+		t.Fatalf("dodAssessment = %+v, want satisfied assessment", result.Output["dodAssessment"])
+	}
+	items, ok := assessment["items"].([]map[string]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("dodAssessment items = %+v, want one item", assessment["items"])
+	}
+}
+
 func TestParseLLMExecutionDecisionRejectsSatisfiedDoDWithoutEvidence(t *testing.T) {
 	_, err := ParseLLMExecutionDecision([]byte(`{
 		"completionState":"completed",
 		"dodAssessment":{"satisfied":true,"items":[{"item":"done","state":"satisfied"}]}
+	}`))
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("parse err = %v, want invalid argument", err)
+	}
+}
+
+func TestParseLLMExecutionDecisionRejectsMemoryWriteWithoutSummary(t *testing.T) {
+	_, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"continue",
+		"memoryWrites":[{"memoryType":"workspace"}]
 	}`))
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("parse err = %v, want invalid argument", err)

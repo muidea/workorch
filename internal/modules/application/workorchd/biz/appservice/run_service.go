@@ -10,14 +10,16 @@ import (
 )
 
 type Run struct {
-	ID                 string `json:"id"`
-	WorkspaceID        string `json:"workspaceId"`
-	GoalID             string `json:"goalId,omitempty"`
-	DoDID              string `json:"doDId,omitempty"`
-	State              string `json:"state"`
-	BlockingTicketID   string `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID string `json:"blockingApprovalId,omitempty"`
-	FailureReason      string `json:"failureReason,omitempty"`
+	ID                 string         `json:"id"`
+	WorkspaceID        string         `json:"workspaceId"`
+	GoalID             string         `json:"goalId,omitempty"`
+	DoDID              string         `json:"doDId,omitempty"`
+	InitialStepKind    string         `json:"initialStepKind,omitempty"`
+	ExecutionContext   map[string]any `json:"executionContext,omitempty"`
+	State              string         `json:"state"`
+	BlockingTicketID   string         `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID string         `json:"blockingApprovalId,omitempty"`
+	FailureReason      string         `json:"failureReason,omitempty"`
 }
 
 func CreateRunWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, runID string, goalID string, dodID string) (ret Run, err error) {
@@ -249,6 +251,17 @@ func validateRunDefinitions(ctx context.Context, session *RuntimeSession, worksp
 	return nil
 }
 
+func cloneContextMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
+}
+
 func mapRun(item *runmodel.Run) Run {
 	if item == nil {
 		return Run{}
@@ -258,6 +271,8 @@ func mapRun(item *runmodel.Run) Run {
 		WorkspaceID:        string(item.WorkspaceID),
 		GoalID:             string(item.GoalID),
 		DoDID:              string(item.DoDID),
+		InitialStepKind:    item.InitialStepKind,
+		ExecutionContext:   cloneContextMap(item.ExecutionContext),
 		State:              string(item.State),
 		BlockingTicketID:   string(item.BlockingTicketID),
 		BlockingApprovalID: string(item.BlockingApprovalID),

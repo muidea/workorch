@@ -14,6 +14,8 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -32,6 +34,10 @@ const (
 	stepOutputKeyNextKind              = "nextKind"
 	stepOutputKeyNextInput             = "nextInput"
 	stepOutputKeyPatches               = "patches"
+	stepOutputKeyMemoryWrites          = "memoryWrites"
+	stepOutputKeyMemoryRefs            = "memoryRefs"
+	stepOutputKeyDoDAssessment         = "dodAssessment"
+	stepOutputKeyLLMDecision           = "llmDecision"
 	stepOutputKeyExecutionGraph        = "executionGraph"
 	stepOutputKeyGraphBranch           = "graphBranch"
 	stepInputKeyGraphNodeID            = "graphNodeId"
@@ -39,6 +45,9 @@ const (
 	stepInputKeyGraphCompletedNodes    = "graphCompletedNodes"
 	stepOutputKeyBlockDecisionReason   = "blockDecisionReason"
 	stepOutputKeyBlockDecisionTicketID = "blockDecisionTicketId"
+	stepOutputKeyBlockDecisionKind     = "blockDecisionKind"
+	stepOutputKeyBlockDecisionQuestion = "blockDecisionQuestion"
+	stepOutputKeyBlockDecisionContext  = "blockDecisionContext"
 	stepOutputKeyBlockApprovalReason   = "blockApprovalReason"
 	stepOutputKeyBlockApprovalID       = "blockApprovalId"
 	defaultInitialStepKind             = "legacy/minimal"
@@ -61,6 +70,7 @@ type RuntimeEvidenceRepositories struct {
 	Patches            repository.PatchRepository
 	ValidationResults  repository.ValidationResultRepository
 	RuntimeCheckpoints repository.RuntimeCheckpointRepository
+	MemoryItems        repository.MemoryItemRepository
 }
 
 func NewRuntimeOrchestrator(
@@ -532,6 +542,20 @@ func (o *RuntimeOrchestrator) dispatchStep(
 		_ = o.publishStepState(ctx, run, step, events.TopicStepStateChanged)
 		return o.FailRun(ctx, run.ID, err.Error())
 	}
+	memoryRefs, err := o.recordMemoryWrites(ctx, run, step, output)
+	if err != nil {
+		step.State = common.StepStateFailed
+		step.Output = runtimeFailureOutput(output, err)
+		_ = o.recordToolCallFailed(ctx, toolCall, err, step.Output)
+		_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, "runtime memory write failed", string(toolCall.ID), err.Error())
+		_ = o.recordStepCheckpoint(ctx, run, step, "step_failed")
+		_ = o.steps.Update(ctx, step)
+		_ = o.publishStepState(ctx, run, step, events.TopicStepStateChanged)
+		return o.FailRun(ctx, run.ID, err.Error())
+	}
+	if len(memoryRefs) > 0 {
+		output[stepOutputKeyMemoryRefs] = memoryRefs
+	}
 
 	step.State = common.StepStateCompleted
 	step.Output = output
@@ -552,14 +576,16 @@ func (o *RuntimeOrchestrator) dispatchStep(
 	}
 
 	nextStepID, nextKind := nextStepSpec(output)
-	if reason, ticketID := decisionBlockSpec(output); reason != "" {
+	if decisionSpec := decisionBlockSpec(output); decisionSpec.Reason != "" {
 		if nextStepID == "" && !o.hasGraphContinuation(ctx, run, step) {
 			return o.FailRun(ctx, run.ID, fmt.Sprintf("runtime step %s blocked without next step", step.ID))
 		}
+		ticketID := decisionSpec.TicketID
 		if ticketID == "" {
-			ticketID = common.TicketID(fmt.Sprintf("%s/decision", step.ID))
+			ticketID = common.TicketID(runtimeChildID(step.ID, "decision"))
 		}
-		if err := o.createDecisionTicket(ctx, run, step, ticketID, reason); err != nil {
+		decisionSpec.TicketID = ticketID
+		if err := o.createDecisionTicket(ctx, run, step, decisionSpec); err != nil {
 			return err
 		}
 		return o.BlockOnDecision(ctx, run.ID, ticketID)
@@ -569,7 +595,7 @@ func (o *RuntimeOrchestrator) dispatchStep(
 			return o.FailRun(ctx, run.ID, fmt.Sprintf("runtime step %s blocked without next step", step.ID))
 		}
 		if approvalID == "" {
-			approvalID = common.ApprovalID(fmt.Sprintf("%s/approval", step.ID))
+			approvalID = common.ApprovalID(runtimeChildID(step.ID, "approval"))
 		}
 		if err := o.createApproval(ctx, run, step, approvalID, reason); err != nil {
 			return err
@@ -581,6 +607,16 @@ func (o *RuntimeOrchestrator) dispatchStep(
 	}
 	if graphStepID, graphKind, graphInput, ok := o.nextGraphStepSpec(ctx, run, step); ok {
 		return o.dispatchStep(ctx, run, graphStepID, graphKind, graphInput)
+	}
+	if err := completionDoDAssessmentError(run, output); err != nil {
+		step.State = common.StepStateFailed
+		step.Output = runtimeFailureOutput(output, err)
+		_ = o.recordToolCallFailed(ctx, toolCall, err, step.Output)
+		_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, "runtime completion gate failed", string(toolCall.ID), err.Error())
+		_ = o.recordStepCheckpoint(ctx, run, step, "step_failed")
+		_ = o.steps.Update(ctx, step)
+		_ = o.publishStepState(ctx, run, step, events.TopicStepStateChanged)
+		return o.FailRun(ctx, run.ID, err.Error())
 	}
 	if err := o.ValidateRun(ctx, run.ID); err != nil {
 		return err
@@ -651,6 +687,144 @@ func (o *RuntimeOrchestrator) applyRuntimePatches(
 		}
 	}
 	return nil
+}
+
+type runtimeMemoryWriteRequest struct {
+	MemoryType string
+	Summary    string
+	Content    string
+	Tags       []string
+}
+
+func (o *RuntimeOrchestrator) recordMemoryWrites(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	output map[string]any,
+) ([]string, error) {
+	requests, err := runtimeMemoryWriteRequests(output)
+	if err != nil {
+		return nil, err
+	}
+	if len(requests) == 0 {
+		return nil, nil
+	}
+	if o.evidence.MemoryItems == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	refs := make([]string, 0, len(requests))
+	for idx, request := range requests {
+		memoryID := common.MemoryID(fmt.Sprintf("%s/memory/%d", step.ID, idx+1))
+		item := &memorymodel.MemoryItem{
+			ID:          memoryID,
+			WorkspaceID: run.WorkspaceID,
+			RunID:       run.ID,
+			SourceType:  memorycommon.MemorySourceRun,
+			SourceRef:   string(run.ID),
+			MemoryType:  request.MemoryType,
+			Content:     request.Content,
+			Summary:     request.Summary,
+			Tags:        append([]string(nil), request.Tags...),
+			Importance:  50,
+			Confidence:  50,
+			Visibility:  "workspace",
+		}
+		if err := o.evidence.MemoryItems.Create(ctx, item); err != nil {
+			if err != common.ErrConflict {
+				return nil, err
+			}
+			if err := o.evidence.MemoryItems.Update(ctx, item); err != nil {
+				return nil, err
+			}
+		}
+		refs = append(refs, string(memoryID))
+	}
+	return refs, nil
+}
+
+func runtimeMemoryWriteRequests(output map[string]any) ([]runtimeMemoryWriteRequest, error) {
+	if output == nil || output[stepOutputKeyMemoryWrites] == nil {
+		return runtimeRunSummaryMemoryWrite(output), nil
+	}
+	var ret []runtimeMemoryWriteRequest
+	switch items := output[stepOutputKeyMemoryWrites].(type) {
+	case []map[string]any:
+		ret = make([]runtimeMemoryWriteRequest, 0, len(items)+1)
+		for _, item := range items {
+			request, err := runtimeMemoryWriteRequestFromMap(item)
+			if err != nil {
+				return nil, err
+			}
+			ret = append(ret, request)
+		}
+	case []any:
+		ret = make([]runtimeMemoryWriteRequest, 0, len(items)+1)
+		for _, item := range items {
+			mapped, ok := item.(map[string]any)
+			if !ok {
+				return nil, common.ErrInvalidArgument
+			}
+			request, err := runtimeMemoryWriteRequestFromMap(mapped)
+			if err != nil {
+				return nil, err
+			}
+			ret = append(ret, request)
+		}
+	default:
+		return nil, common.ErrInvalidArgument
+	}
+	return appendRunSummaryMemoryWrite(ret, output), nil
+}
+
+func runtimeMemoryWriteRequestFromMap(item map[string]any) (runtimeMemoryWriteRequest, error) {
+	memoryType, _ := item["memoryType"].(string)
+	summary, _ := item["summary"].(string)
+	content, _ := item["content"].(string)
+	memoryType = strings.TrimSpace(memoryType)
+	summary = strings.TrimSpace(summary)
+	if memoryType == "" || summary == "" || !memorycommon.IsSupportedMemoryType(memoryType) {
+		return runtimeMemoryWriteRequest{}, common.ErrInvalidArgument
+	}
+	return runtimeMemoryWriteRequest{
+		MemoryType: memoryType,
+		Summary:    summary,
+		Content:    content,
+		Tags:       stringSliceFromValue(item["tags"]),
+	}, nil
+}
+
+func runtimeRunSummaryMemoryWrite(output map[string]any) []runtimeMemoryWriteRequest {
+	return appendRunSummaryMemoryWrite(nil, output)
+}
+
+func appendRunSummaryMemoryWrite(requests []runtimeMemoryWriteRequest, output map[string]any) []runtimeMemoryWriteRequest {
+	if output == nil {
+		return requests
+	}
+	stage, _ := output["stage"].(string)
+	if stage != "llm_dod_assessment" || hasRunSummaryMemoryWrite(requests) {
+		return requests
+	}
+	summary, _ := output["summary"].(string)
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return requests
+	}
+	return append(requests, runtimeMemoryWriteRequest{
+		MemoryType: memorycommon.MemoryTypeRunSummary,
+		Summary:    summary,
+		Content:    summary,
+		Tags:       []string{"run_summary"},
+	})
+}
+
+func hasRunSummaryMemoryWrite(requests []runtimeMemoryWriteRequest) bool {
+	for _, request := range requests {
+		if request.MemoryType == memorycommon.MemoryTypeRunSummary {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimePatchRequests(output map[string]any) ([]runtimePatchRequest, error) {
@@ -1501,13 +1675,29 @@ func nextStepInputFromOutput(run *runModel.Run, previousStep *runModel.Step) map
 	return input
 }
 
-func decisionBlockSpec(output map[string]any) (string, common.TicketID) {
+type runtimeDecisionBlockSpec struct {
+	Reason       string
+	TicketID     common.TicketID
+	DecisionKind string
+	Question     string
+	Context      map[string]any
+}
+
+func decisionBlockSpec(output map[string]any) runtimeDecisionBlockSpec {
 	if output == nil {
-		return "", ""
+		return runtimeDecisionBlockSpec{}
 	}
 	reason, _ := output[stepOutputKeyBlockDecisionReason].(string)
 	ticketID, _ := output[stepOutputKeyBlockDecisionTicketID].(string)
-	return reason, common.TicketID(ticketID)
+	decisionKind, _ := output[stepOutputKeyBlockDecisionKind].(string)
+	question, _ := output[stepOutputKeyBlockDecisionQuestion].(string)
+	return runtimeDecisionBlockSpec{
+		Reason:       reason,
+		TicketID:     common.TicketID(ticketID),
+		DecisionKind: decisionKind,
+		Question:     question,
+		Context:      mapFromValue(output[stepOutputKeyBlockDecisionContext]),
+	}
 }
 
 func approvalBlockSpec(output map[string]any) (string, common.ApprovalID) {
@@ -1517,6 +1707,123 @@ func approvalBlockSpec(output map[string]any) (string, common.ApprovalID) {
 	reason, _ := output[stepOutputKeyBlockApprovalReason].(string)
 	approvalID, _ := output[stepOutputKeyBlockApprovalID].(string)
 	return reason, common.ApprovalID(approvalID)
+}
+
+func runtimeChildID(parent common.StepID, suffix string) string {
+	base := strings.TrimSpace(string(parent))
+	base = strings.NewReplacer("/", "-", "\\", "-", ":", "-").Replace(base)
+	suffix = strings.TrimSpace(suffix)
+	if base == "" {
+		return suffix
+	}
+	if suffix == "" {
+		return base
+	}
+	return base + "-" + suffix
+}
+
+func completionDoDAssessmentError(run *runModel.Run, output map[string]any) error {
+	if !requiresDoDAssessmentCompletionGate(run) {
+		return nil
+	}
+	assessment := doDAssessmentFromOutput(output)
+	if assessment == nil {
+		return fmt.Errorf("%w: dodAssessment is required for llm-driven completion", common.ErrInvalidArgument)
+	}
+	satisfied, ok := assessment["satisfied"].(bool)
+	if !ok {
+		return fmt.Errorf("%w: dodAssessment.satisfied is required", common.ErrInvalidArgument)
+	}
+	if !satisfied {
+		return fmt.Errorf("%w: dodAssessment is not satisfied", common.ErrInvalidArgument)
+	}
+	if err := validateDoDAssessmentItems(assessment["items"]); err != nil {
+		return err
+	}
+	return nil
+}
+
+func requiresDoDAssessmentCompletionGate(run *runModel.Run) bool {
+	return run != nil && run.DoDID != "" && initialStepKind(run) != defaultInitialStepKind
+}
+
+func doDAssessmentFromOutput(output map[string]any) map[string]any {
+	if output == nil {
+		return nil
+	}
+	if assessment := mapFromValue(output[stepOutputKeyDoDAssessment]); assessment != nil {
+		return assessment
+	}
+	decision := mapFromValue(output[stepOutputKeyLLMDecision])
+	if decision == nil {
+		return nil
+	}
+	return mapFromValue(decision[stepOutputKeyDoDAssessment])
+}
+
+func validateDoDAssessmentItems(value any) error {
+	items, ok := doDAssessmentItemMaps(value)
+	if !ok || len(items) == 0 {
+		return fmt.Errorf("%w: dodAssessment.items are required", common.ErrInvalidArgument)
+	}
+	for _, item := range items {
+		name, _ := item["item"].(string)
+		state, _ := item["state"].(string)
+		name = strings.TrimSpace(name)
+		state = strings.TrimSpace(state)
+		if name == "" || state == "" {
+			return fmt.Errorf("%w: dodAssessment item and state are required", common.ErrInvalidArgument)
+		}
+		if state == "satisfied" && len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 {
+			return fmt.Errorf("%w: satisfied dodAssessment item requires evidenceRefs", common.ErrInvalidArgument)
+		}
+	}
+	return nil
+}
+
+func doDAssessmentItemMaps(value any) ([]map[string]any, bool) {
+	switch typed := value.(type) {
+	case []map[string]any:
+		ret := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			ret = append(ret, cloneStepPayload(item))
+		}
+		return ret, true
+	case []any:
+		ret := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			mapped, ok := item.(map[string]any)
+			if !ok {
+				return nil, false
+			}
+			ret = append(ret, cloneStepPayload(mapped))
+		}
+		return ret, true
+	default:
+		return nil, false
+	}
+}
+
+func evidenceRefsFromValue(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text, ok := item.(string)
+			if !ok {
+				return nil
+			}
+			text = strings.TrimSpace(text)
+			if text != "" {
+				ret = append(ret, text)
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
 }
 
 func nextStepInput(run *runModel.Run, previousStepID common.StepID) map[string]any {
@@ -1565,10 +1872,9 @@ func (o *RuntimeOrchestrator) createDecisionTicket(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
-	ticketID common.TicketID,
-	reason string,
+	spec runtimeDecisionBlockSpec,
 ) error {
-	if run == nil || step == nil || ticketID == "" || reason == "" {
+	if run == nil || step == nil || spec.TicketID == "" || spec.Reason == "" {
 		return common.ErrInvalidArgument
 	}
 	if o.tickets == nil {
@@ -1576,12 +1882,15 @@ func (o *RuntimeOrchestrator) createDecisionTicket(
 	}
 
 	ticket := &decisionmodel.Ticket{
-		ID:          ticketID,
-		WorkspaceID: run.WorkspaceID,
-		RunID:       run.ID,
-		StepID:      step.ID,
-		Reason:      reason,
-		State:       common.DecisionTicketStateOpen,
+		ID:           spec.TicketID,
+		WorkspaceID:  run.WorkspaceID,
+		RunID:        run.ID,
+		StepID:       step.ID,
+		Reason:       spec.Reason,
+		DecisionKind: spec.DecisionKind,
+		Question:     spec.Question,
+		Context:      cloneStepPayload(spec.Context),
+		State:        common.DecisionTicketStateOpen,
 	}
 	if err := o.tickets.Create(ctx, ticket); err != nil {
 		return err

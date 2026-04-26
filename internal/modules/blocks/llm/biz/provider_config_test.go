@@ -43,6 +43,34 @@ func TestLoadProviderConfigAcceptsCompatibleProvider(t *testing.T) {
 	}
 }
 
+func TestLoadProviderConfigRequiresCompatibleProviderBaseURL(t *testing.T) {
+	cfg, err := LoadProviderConfig(map[string]string{
+		llmcommon.EnvProvider: llmcommon.ProviderCompatible,
+		llmcommon.EnvAPIKey:   "test-secret-value",
+		llmcommon.EnvModel:    "local-model",
+	})
+	if err != nil {
+		t.Fatalf("load provider config: %v", err)
+	}
+	if !cfg.Unavailable || cfg.UnavailableReason != "llm compatible provider base url is not configured" {
+		t.Fatalf("config = %+v, want compatible base url unavailable", cfg)
+	}
+}
+
+func TestLoadProviderConfigDefaultsOpenAIBaseURL(t *testing.T) {
+	cfg, err := LoadProviderConfig(map[string]string{
+		llmcommon.EnvProvider: llmcommon.ProviderOpenAI,
+		llmcommon.EnvAPIKey:   "test-secret-value",
+		llmcommon.EnvModel:    "gpt-test",
+	})
+	if err != nil {
+		t.Fatalf("load provider config: %v", err)
+	}
+	if cfg.Unavailable || cfg.BaseURL != defaultOpenAIBaseURL {
+		t.Fatalf("config = %+v, want ready openai default base url", cfg)
+	}
+}
+
 func TestLoadProviderConfigRejectsInvalidTimeout(t *testing.T) {
 	_, err := LoadProviderConfig(map[string]string{
 		llmcommon.EnvTimeout: "bad",

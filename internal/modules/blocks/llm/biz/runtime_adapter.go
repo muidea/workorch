@@ -15,6 +15,14 @@ import (
 
 const decisionSchemaName = "workorch.llmExecutionDecision.v1"
 
+const (
+	outputKeyStatus                = "status"
+	outputKeyError                 = "error"
+	outputKeyBlockDecisionKind     = "blockDecisionKind"
+	outputKeyBlockDecisionQuestion = "blockDecisionQuestion"
+	outputKeyBlockDecisionContext  = "blockDecisionContext"
+)
+
 type Provider interface {
 	Complete(context.Context, llmmodels.ProviderRequest) ([]byte, error)
 }
@@ -33,7 +41,11 @@ func NewRuntimeAdapterFromEnv() (*RuntimeAdapter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewRuntimeAdapter(config, nil), nil
+	var provider Provider
+	if !config.Unavailable {
+		provider = NewHTTPProvider(config)
+	}
+	return NewRuntimeAdapter(config, provider), nil
 }
 
 func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
@@ -63,6 +75,13 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	if err != nil {
 		failure := failureOutput(request, "llm_decision_invalid", err.Error(), a.config)
 		return runtimemodel.StepExecutionResult{Output: failure}, err
+	}
+	if status, _ := output[outputKeyStatus].(string); status == "failed" {
+		reason, _ := output[outputKeyError].(string)
+		if strings.TrimSpace(reason) == "" {
+			reason = "llm decision reported failure"
+		}
+		return runtimemodel.StepExecutionResult{Output: output}, fmt.Errorf("%w: %s", common.ErrInvalidArgument, reason)
 	}
 	return runtimemodel.StepExecutionResult{Output: output}, nil
 }
@@ -104,9 +123,22 @@ func NormalizeDecisionOutput(request runtimemodel.StepExecutionRequest, decision
 	if len(decision.MemoryWrites) > 0 {
 		output["memoryWrites"] = memoryWriteOutput(decision.MemoryWrites)
 	}
+	if decision.CompletionState == "failed" {
+		reason := strings.TrimSpace(decision.ThoughtSummary)
+		if reason == "" {
+			reason = "llm decision reported failure"
+		}
+		output["status"] = "failed"
+		output["stage"] = "llm_failed"
+		output["error"] = reason
+		return output, nil
+	}
 	if decision.RequiredDecision != nil {
 		output["stage"] = "llm_decision_required"
 		output["blockDecisionReason"] = decision.RequiredDecision.Reason
+		output[outputKeyBlockDecisionKind] = decision.RequiredDecision.DecisionKind
+		output[outputKeyBlockDecisionQuestion] = decision.RequiredDecision.Question
+		output[outputKeyBlockDecisionContext] = cloneMap(decision.RequiredDecision.Context)
 		output["nextStep"] = fmt.Sprintf("%s/llm-after-decision", request.RunID)
 		output["nextKind"] = llmcommon.StepKindWorkspaceExecution
 		return output, nil
@@ -143,6 +175,7 @@ func NormalizeDecisionOutput(request runtimemodel.StepExecutionRequest, decision
 	}
 	if decision.CompletionState == "completed" {
 		output["stage"] = "llm_dod_assessment"
+		output["dodAssessment"] = doDAssessmentOutput(decision.DoDAssessment)
 		return output, nil
 	}
 	return output, nil
@@ -168,6 +201,11 @@ func validateDecision(decision llmmodels.LLMExecutionDecision) error {
 	for _, patch := range decision.PatchRequests {
 		if strings.TrimSpace(patch.TargetRef) == "" {
 			return fmt.Errorf("%w: patchRequests.targetRef is required", common.ErrInvalidArgument)
+		}
+	}
+	for _, write := range decision.MemoryWrites {
+		if strings.TrimSpace(write.MemoryType) == "" || strings.TrimSpace(write.Summary) == "" {
+			return fmt.Errorf("%w: memoryWrites memoryType and summary are required", common.ErrInvalidArgument)
 		}
 	}
 	for _, call := range decision.MCPToolCalls {
@@ -242,6 +280,25 @@ func memoryWriteOutput(requests []llmmodels.MemoryWriteRequest) []map[string]any
 		})
 	}
 	return ret
+}
+
+func doDAssessmentOutput(assessment *llmmodels.DoDAssessment) map[string]any {
+	if assessment == nil {
+		return nil
+	}
+	items := make([]map[string]any, 0, len(assessment.Items))
+	for _, item := range assessment.Items {
+		items = append(items, map[string]any{
+			"item":         item.Item,
+			"state":        item.State,
+			"evidenceRefs": append([]string(nil), item.EvidenceRefs...),
+		})
+	}
+	return map[string]any{
+		"satisfied": assessment.Satisfied,
+		"items":     items,
+		"summary":   assessment.Summary,
+	}
 }
 
 func decisionMap(decision llmmodels.LLMExecutionDecision) map[string]any {

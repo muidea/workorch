@@ -9,7 +9,7 @@ GOTEST_FLAGS ?=
 BUILD_OUT ?= ./bin/workorchd
 CONSOLE_WEB := ./web/workorch-console
 
-.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-service verify-service-file docker-build docker-run docker-run-file docker-verify docker-verify-file ci
+.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-service verify-service-file verify-llm verify-llm-file docker-build docker-run docker-run-file docker-verify docker-verify-file ci
 
 help:
 	@echo "Targets:"
@@ -25,6 +25,8 @@ help:
 	@echo "  run-file   - clean data, then run $(APP) as HTTP service with file-backed repository"
 	@echo "  verify-service      - build, start, and verify the HTTP service with memory repository"
 	@echo "  verify-service-file - build, start, and verify the HTTP service with file-backed repository and restart-read validation"
+	@echo "  verify-llm      - build, start, and verify LLM-driven workspace execution with a local mock provider"
+	@echo "  verify-llm-file - verify LLM-driven workspace execution with file-backed repository and restart-read validation"
 	@echo "  docker-build    - docker build local workorchd image"
 	@echo "  docker-run      - run workorchd container with in-memory repository"
 	@echo "  docker-run-file - run workorchd container with file-backed repository"
@@ -84,6 +86,12 @@ verify-service:
 
 verify-service-file:
 	WORKORCH_VERIFY_ADDR=127.0.0.1:18082 WORKORCH_VERIFY_BACKEND=file ./scripts/verify-workorchd-http.sh
+
+verify-llm:
+	WORKORCH_LLM_VERIFY_ADDR=127.0.0.1:18180 WORKORCH_LLM_VERIFY_MOCK_ADDR=127.0.0.1:18181 ./scripts/verify-llm-workspace-execution.sh
+
+verify-llm-file:
+	WORKORCH_LLM_VERIFY_ADDR=127.0.0.1:18182 WORKORCH_LLM_VERIFY_MOCK_ADDR=127.0.0.1:18183 WORKORCH_LLM_VERIFY_BACKEND=file ./scripts/verify-llm-workspace-execution.sh
 
 docker-build:
 	docker build -t workorchd:local .

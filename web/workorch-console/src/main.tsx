@@ -9,7 +9,7 @@ import {
 import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-components';
 import { App as AntApp, Button, ConfigProvider, Descriptions, Empty, Form, Input, Modal, Select, Space, Steps, Tag, Typography, theme } from 'antd';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Decision, DoD, Goal, Run, RunObservability, RunSnapshot, RuntimeTimelineItem, Workspace, WorkspaceSnapshot } from './types';
+import type { Approval, Decision, DoD, Goal, MCPServer, MemoryItem, Run, RunObservability, RunSnapshot, RuntimeTimelineItem, Skill, Soul, StepView, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -84,6 +84,21 @@ function evidenceCount(snapshot?: RunSnapshot) {
 
 function timelineLabel(item: RuntimeTimelineItem) {
   return item.topic || item.type || item.source;
+}
+
+function compactJSON(value: unknown) {
+  if (value === undefined || value === null) {
+    return '-';
+  }
+  return JSON.stringify(value, null, 2);
+}
+
+function outputText(output: Record<string, unknown> | undefined, key: string) {
+  const value = output?.[key];
+  if (value === undefined || value === null || value === '') {
+    return '-';
+  }
+  return typeof value === 'string' ? value : compactJSON(value);
 }
 
 type ControlPlaneProps = {
@@ -193,6 +208,7 @@ function DecisionQueuePage() {
     { title: 'Kind', dataIndex: 'decisionKind' },
     { title: 'Question', dataIndex: 'question', ellipsis: true },
     { title: 'Reason', dataIndex: 'reason', ellipsis: true },
+    { title: 'Context', dataIndex: 'context', render: (_, item) => <pre className="json-panel">{compactJSON(item.context)}</pre> },
     { title: 'State', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
     {
       title: 'Actions',
@@ -230,6 +246,10 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | undefined>(undefined);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [dods, setDoDs] = useState<DoD[]>([]);
+  const [souls, setSouls] = useState<Soul[]>([]);
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [mcpServers, setMCPServers] = useState<MCPServer[]>([]);
+  const [memoryItems, setMemoryItems] = useState<MemoryItem[]>([]);
   const [runSnapshot, setRunSnapshot] = useState<RunSnapshot | undefined>(undefined);
   const [runObservability, setRunObservability] = useState<RunObservability | undefined>(undefined);
   const [loading, setLoading] = useState(false);
@@ -286,14 +306,22 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   }
 
   async function loadWorkspaceContext(targetWorkspaceId: string) {
-    const [nextSnapshot, nextGoals, nextDoDs] = await Promise.all([
+    const [nextSnapshot, nextGoals, nextDoDs, nextSouls, nextSkills, nextMCPServers, nextMemoryItems] = await Promise.all([
       workorchApi.readWorkspaceSnapshot(targetWorkspaceId),
       workorchApi.listGoals(targetWorkspaceId),
-      workorchApi.listDoDs(targetWorkspaceId)
+      workorchApi.listDoDs(targetWorkspaceId),
+      workorchApi.listSouls(),
+      workorchApi.listSkills(),
+      workorchApi.listMCPServers(),
+      workorchApi.listMemory(targetWorkspaceId)
     ]);
     setSnapshot(nextSnapshot);
     setGoals(nextGoals);
     setDoDs(nextDoDs);
+    setSouls(nextSouls);
+    setSkills(nextSkills);
+    setMCPServers(nextMCPServers);
+    setMemoryItems(nextMemoryItems);
     setRunSnapshot(undefined);
     setRunObservability(undefined);
   }
@@ -314,13 +342,13 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     setupDoDForm.resetFields();
   };
 
-  const activateWorkspaceExecution = async (goalId?: string, doDId?: string) => {
+  const activateWorkspaceExecution = async (request: WorkspaceExecutionActivationRequest) => {
     if (!workspaceId) {
       return;
     }
     setActivationLoading(true);
     try {
-      const activation = await workorchApi.activateWorkspaceExecution(workspaceId, goalId, doDId);
+      const activation = await workorchApi.activateWorkspaceExecution(workspaceId, request);
       setSnapshot(activation.snapshot);
       setRunSnapshot(undefined);
       setRunObservability(undefined);
@@ -335,13 +363,13 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   };
 
   const requestWorkspaceActivation = () => {
-    if (goals.length === 1 && readyDoDs.length === 1) {
-      void activateWorkspaceExecution(goals[0].id, readyDoDs[0].id);
-      return;
-    }
     activationForm.setFieldsValue({
       goalId: goals[0]?.id,
-      doDId: readyDoDs[0]?.id
+      doDId: readyDoDs[0]?.id,
+      soulId: souls[0]?.id,
+      skillIds: [],
+      mcpServerIds: [],
+      memoryIds: []
     });
     setActivationOpen(true);
   };
@@ -473,8 +501,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     { key: 'toolCalls', label: 'Tool Calls', children: `${runObservability?.evidence.toolCallCompleted ?? 0}/${runObservability?.evidence.toolCallTotal ?? runSnapshot.toolCalls?.length ?? 0} completed` },
                     { key: 'patches', label: 'Patches', children: `${runObservability?.evidence.patchApplied ?? 0}/${runObservability?.evidence.patchTotal ?? runSnapshot.patches?.length ?? 0} applied` },
                     { key: 'validations', label: 'Validation Results', children: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? runSnapshot.validationResults?.length ?? 0} passed` },
-                    { key: 'checkpoints', label: 'Runtime Checkpoints', children: runObservability?.evidence.runtimeCheckpointTotal ?? runSnapshot.runtimeCheckpoints?.length ?? 0 },
-                    { key: 'events', label: 'Events', children: runObservability?.evidence.eventTotal ?? 0 }
+                { key: 'checkpoints', label: 'Runtime Checkpoints', children: runObservability?.evidence.runtimeCheckpointTotal ?? runSnapshot.runtimeCheckpoints?.length ?? 0 },
+                    { key: 'events', label: 'Events', children: runObservability?.evidence.eventTotal ?? 0 },
+                    { key: 'context', label: 'Execution Context', children: <pre className="json-panel">{compactJSON(runSnapshot.run.executionContext)}</pre> }
                   ]}
                 />
                 {runObservability?.latestCheckpoint ? (
@@ -493,6 +522,22 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     { title: 'Occurred At', dataIndex: 'occurredAt', width: 210 }
                   ]}
                   dataSource={runObservability?.timeline ?? []}
+                />
+                <ProTable<StepView>
+                  rowKey="id"
+                  search={false}
+                  pagination={{ pageSize: 5 }}
+                  size="small"
+                  columns={[
+                    { title: 'Step', dataIndex: 'id', copyable: true, ellipsis: true },
+                    { title: 'Kind', dataIndex: 'kind', width: 180 },
+                    { title: 'State', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+                    { title: 'Stage', render: (_, item) => outputText(item.output, 'stage'), ellipsis: true },
+                    { title: 'Next Kind', render: (_, item) => outputText(item.output, 'nextKind'), ellipsis: true },
+                    { title: 'Memory Refs', render: (_, item) => outputText(item.output, 'memoryRefs'), ellipsis: true },
+                    { title: 'DoD Assessment', render: (_, item) => outputText(item.output, 'dodAssessment'), ellipsis: true }
+                  ]}
+                  dataSource={runSnapshot.steps ?? []}
                 />
               </Space>
             ) : (
@@ -685,13 +730,47 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
         <Form
           form={activationForm}
           layout="vertical"
-          onFinish={(values: { goalId: string; doDId: string }) => void activateWorkspaceExecution(values.goalId, values.doDId)}
+          onFinish={(values: WorkspaceExecutionActivationRequest) => void activateWorkspaceExecution(values)}
         >
           <Form.Item name="goalId" label="Goal" rules={[{ required: true }]}>
             <Select options={goals.map((item) => ({ value: item.id, label: `${item.text} (${item.id})` }))} />
           </Form.Item>
           <Form.Item name="doDId" label="Definition of Done" rules={[{ required: true }]}>
             <Select options={readyDoDs.map((item) => ({ value: item.id, label: `${item.items.join(' / ')} (${item.id})` }))} />
+          </Form.Item>
+          <Form.Item name="soulId" label="Soul">
+            <Select allowClear options={souls.map((item) => ({ value: item.id, label: `${item.name || item.id} (${item.id})` }))} />
+          </Form.Item>
+          <Form.Item name="skillIds" label="Skills">
+            <Select
+              mode="multiple"
+              allowClear
+              options={skills.map((item) => ({
+                value: item.id,
+                label: `${item.name || item.id}${item.version ? `@${item.version}` : ''}`
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="mcpServerIds" label="MCP Servers">
+            <Select
+              mode="multiple"
+              allowClear
+              options={mcpServers.map((item) => ({
+                value: item.id,
+                label: `${item.name || item.id} / ${item.transport}${item.enabled ? '' : ' / disabled'}`
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="memoryIds" label="Memory">
+            <Select
+              mode="multiple"
+              allowClear
+              placeholder="Leave empty to let workorch recall workspace memory automatically"
+              options={memoryItems.map((item) => ({
+                value: item.id,
+                label: `${item.memoryType}: ${item.summary}`
+              }))}
+            />
           </Form.Item>
         </Form>
       </Modal>

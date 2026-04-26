@@ -2,11 +2,14 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
+
+const legacyRuntimeKind = "legacy/minimal"
 
 type RuntimeAdapterRegistry struct {
 	defaultAdapter RuntimeAdapter
@@ -32,11 +35,19 @@ func (r *RuntimeAdapterRegistry) ExecuteRuntimeStep(ctx context.Context, request
 	if r == nil {
 		return runtimemodel.StepExecutionResult{}, common.ErrInvalidArgument
 	}
-	if adapter := r.adapters[request.Kind]; adapter != nil {
+	kind := strings.TrimSpace(request.Kind)
+	if adapter := r.adapters[kind]; adapter != nil {
 		return adapter.ExecuteRuntimeStep(ctx, request)
 	}
-	if r.defaultAdapter != nil {
+	if kind == legacyRuntimeKind && r.defaultAdapter != nil {
 		return r.defaultAdapter.ExecuteRuntimeStep(ctx, request)
 	}
-	return runtimemodel.StepExecutionResult{}, common.ErrInvalidArgument
+	return runtimemodel.StepExecutionResult{
+		Output: map[string]any{
+			"status": "failed",
+			"stage":  "runtime_adapter_unavailable",
+			"kind":   kind,
+			"error":  fmt.Sprintf("runtime adapter is not registered for step kind %s", kind),
+		},
+	}, common.ErrInvalidArgument
 }

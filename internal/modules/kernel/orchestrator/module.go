@@ -28,6 +28,7 @@ type Dependencies struct {
 	Patches            repository.PatchRepository
 	ValidationResults  repository.ValidationResultRepository
 	RuntimeCheckpoints repository.RuntimeCheckpointRepository
+	MemoryItems        repository.MemoryItemRepository
 	EventHub           events.Hub
 }
 
@@ -51,7 +52,8 @@ func (m *Module) Setup(deps Dependencies) error {
 		deps.ToolCalls == nil ||
 		deps.Patches == nil ||
 		deps.ValidationResults == nil ||
-		deps.RuntimeCheckpoints == nil {
+		deps.RuntimeCheckpoints == nil ||
+		deps.MemoryItems == nil {
 		return common.ErrInvalidArgument
 	}
 	m.bizPtr = orchestratorbiz.NewRuntimeOrchestratorWithResolutionsAndEvidence(
@@ -67,6 +69,7 @@ func (m *Module) Setup(deps Dependencies) error {
 			Patches:            deps.Patches,
 			ValidationResults:  deps.ValidationResults,
 			RuntimeCheckpoints: deps.RuntimeCheckpoints,
+			MemoryItems:        deps.MemoryItems,
 		},
 		deps.EventHub,
 	)

@@ -110,11 +110,59 @@ Automated verification entrypoints:
 ```bash
 make verify-service
 make verify-service-file
+make verify-llm
+make verify-llm-file
 make docker-verify
 make docker-verify-file
 ```
 
 For the file-backed backend, `make verify-service-file` and `make docker-verify-file` both include a restart-read verification pass on the same persisted data directory.
+
+`make verify-llm` and `make verify-llm-file` start a local OpenAI-compatible mock
+provider and verify the LLM-driven Workspace execution loop. The file-backed
+variant also restarts `workorchd` on the same data directory and verifies
+persisted Run and Memory reads.
+
+## LLM provider configuration
+
+LLM-driven Workspace execution is enabled by configuring a provider before
+starting `workorchd`.
+
+OpenAI-compatible default:
+
+```bash
+WORKORCH_LLM_PROVIDER=openai \
+WORKORCH_LLM_API_KEY=... \
+WORKORCH_LLM_MODEL=... \
+go run ./application/workorchd
+```
+
+Custom OpenAI-compatible endpoint:
+
+```bash
+WORKORCH_LLM_PROVIDER=compatible \
+WORKORCH_LLM_BASE_URL=http://127.0.0.1:11434/v1 \
+WORKORCH_LLM_API_KEY=local-key \
+WORKORCH_LLM_MODEL=local-model \
+go run ./application/workorchd
+```
+
+Supported LLM variables:
+
+- `WORKORCH_LLM_PROVIDER`: `openai` or `compatible`
+- `WORKORCH_LLM_BASE_URL`: required for `compatible`; defaults to `https://api.openai.com/v1` for `openai`
+- `WORKORCH_LLM_API_KEY`: bearer token used only inside `blocks/llm`
+- `WORKORCH_LLM_MODEL`: model name sent to `/chat/completions`
+- `WORKORCH_LLM_TIMEOUT`: request timeout, default `60s`
+- `WORKORCH_LLM_DISABLED`: set to `true` to force explicit provider-unavailable failure
+
+Current MVP boundary:
+
+- The provider protocol is OpenAI-compatible `/chat/completions`.
+- Provider streaming and non-chat APIs are outside the current MVP.
+- LLM output must be one JSON object matching `LLMExecutionDecision`.
+- The LLM cannot execute shell, patch, or MCP directly; it can only request
+  those actions through structured decision output consumed by the orchestrator.
 
 ## Environment variables
 
@@ -132,6 +180,12 @@ Primary variables:
 - `WORKORCH_SERVER_IDLE_TIMEOUT`
 - `WORKORCH_SERVER_SHUTDOWN_TIMEOUT`
 - `WORKORCH_SERVER_MAX_CONCURRENT_RUNS`
+- `WORKORCH_LLM_PROVIDER`
+- `WORKORCH_LLM_BASE_URL`
+- `WORKORCH_LLM_API_KEY`
+- `WORKORCH_LLM_MODEL`
+- `WORKORCH_LLM_TIMEOUT`
+- `WORKORCH_LLM_DISABLED`
 
 ## Acceptance expectation
 
