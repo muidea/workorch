@@ -58,9 +58,10 @@ DOD_JSON="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/$
   -H 'Content-Type: application/json' \
   -d '{"items":["workspace created","run completed"]}')"
 DOD_ID="$(printf '%s\n' "${DOD_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
-curl -f http://127.0.0.1:8080/api/v1/workorch/slices
-curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/runs
-curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
+  -H 'Content-Type: application/json' \
+  -d "{\"runId\":\"run-local-verify\",\"goalId\":\"${GOAL_ID}\",\"doDId\":\"${DOD_ID}\"}"
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/run-local-verify/start
 ```
 
 For the file-backed backend, also verify persisted read endpoints:
@@ -103,10 +104,6 @@ curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${APPROVAL_RUN_ID}/re
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs
 curl -f "http://127.0.0.1:8080/api/v1/workorch/runs?workspaceId=${WORKSPACE_ID}"
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}
-curl -f http://127.0.0.1:8080/api/v1/workorch/slices/snapshots
-curl -f http://127.0.0.1:8080/api/v1/workorch/slices/statuses
-curl -f http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/status
-curl -f http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/snapshot
 ```
 
 Automated verification entrypoints:
@@ -116,6 +113,7 @@ make verify-service
 make verify-service-file
 make verify-llm
 make verify-llm-file
+make verify-real-llm
 make docker-verify
 make docker-verify-file
 ```
@@ -126,6 +124,33 @@ For the file-backed backend, `make verify-service-file` and `make docker-verify-
 provider and verify the LLM-driven Workspace execution loop. The file-backed
 variant also restarts `workorchd` on the same data directory and verifies
 persisted Run and Memory reads.
+
+`make verify-real-llm` verifies an already running `workorchd` service against
+its configured real LLM provider. By default it targets
+`http://127.0.0.1:8080`, reads the default ready provider from
+`/api/v1/workorch/configuration`, creates a new Workspace / Goal / DoD, and
+expects this execution chain:
+
+```text
+llm/workspace_execution
+-> executionGraph
+-> shell/command
+-> llm/workspace_execution graph follow-up
+-> evidence-backed dodAssessment
+-> Run completed
+```
+
+The target service and provider can be overridden:
+
+```bash
+WORKORCH_REAL_LLM_BASE_URL=http://127.0.0.1:8080 \
+WORKORCH_REAL_LLM_PROVIDER_ID=local \
+make verify-real-llm
+```
+
+The real-provider verification calls the configured model and may consume paid
+provider quota. It writes request / response artifacts to a temporary directory
+and prints that path on completion.
 
 ## Configuration file
 
@@ -202,8 +227,27 @@ Current MVP boundary:
 - The provider protocol is OpenAI-compatible `/chat/completions`.
 - Provider streaming and non-chat APIs are outside the current MVP.
 - LLM output must be one JSON object matching `LLMExecutionDecision`.
+- OpenAI-compatible calls use JSON object mode where supported.
+- Transport formatting drift is normalized only for markdown fences and first
+  JSON object extraction; business schema validation remains strict.
+- Schema-invalid output triggers one LLM repair retry and then either continues
+  with a valid decision or fails with parse / repair diagnostics.
 - The LLM cannot execute shell, patch, or MCP directly; it can only request
   those actions through structured decision output consumed by the orchestrator.
+- For multi-step work, the LLM should emit `executionGraph`; the orchestrator
+  owns graph traversal and dispatches a follow-up LLM step after graph leaf
+  completion when a DoD assessment is required.
+
+MCP runtime boundary:
+
+- `transport=http` and `transport=https` invoke the configured endpoint with a
+  governed HTTP POST.
+- `transport=stdio` starts the configured endpoint as a local command, exchanges
+  newline-delimited JSON-RPC over stdin/stdout, and performs `initialize`,
+  `notifications/initialized`, then `tools/call`.
+- `stdio` endpoint parsing is command plus whitespace-separated args. Shell
+  expansion is not applied by `workorchd`; use an explicit wrapper command when
+  complex environment setup is required.
 
 ## Acceptance expectation
 
@@ -212,10 +256,21 @@ A deployable `workorchd` instance is acceptable when:
 - `GET /healthz` returns `200`
 - `GET /readyz` returns `200`
 - `GET /metrics` returns service counters and gauges
+- `make verify-llm` and `make verify-llm-file` pass against local mock-provider
+  execution.
+- `make verify-mcp-stdio` and `make verify-mcp-stdio-file` pass, proving the
+  governed MCP `stdio` tool-call path through LLM graph execution and
+  file-backed restart-read continuity.
+- `make verify-mvp` and `make verify-mvp-file` pass as the grouped local MVP
+  verification bundles.
+- after deploying `workorchd`, `make verify-real-llm` and
+  `make verify-real-mcp-stdio` pass against the running service. The real MCP
+  stdio check temporarily appends a local mock provider through the
+  configuration API, restores provider config on exit, creates a governed MCP
+  `stdio` server, and verifies the deployed process can execute it.
+- `make verify-real-mvp` passes as the grouped verification entrypoint for an
+  already running deployed service.
 - `POST /api/v1/workorch/workspaces` creates one `workorch` workspace instance, accepts an optional `description`, defaults `workingDirectory` to `<service-working-directory>/workspaces/<generated-workspace-id>` when omitted, and returns the generated `workspace.id`
-- `GET /api/v1/workorch/slices` returns the executable `workorch` slice catalog
-- `POST /api/v1/workorch/slices/{sliceId}/runs` returns the requested single `workorch` slice
-- `POST /api/v1/workorch/runs` returns the current 17 `workorch` slices
 - with file-backed repository config, `GET /api/v1/workorch/workspaces` returns the current `workorch` workspace list
 - with file-backed repository config, `GET /api/v1/workorch/workspaces/{workspaceId}` returns one persisted `workorch` workspace instance
 - with file-backed repository config, `GET /api/v1/workorch/workspaces/{workspaceId}/snapshot` returns one aggregated `workorch` workspace read model
@@ -234,9 +289,8 @@ A deployable `workorchd` instance is acceptable when:
 - with file-backed repository config, `POST /api/v1/workorch/approvals/{approvalId}/approve` approves one approval item
 - with file-backed repository config, `POST /api/v1/workorch/approvals/{approvalId}/reject` rejects one approval item
 - with file-backed repository config, `POST /api/v1/workorch/runs/{runId}/resume` can complete after approval approve or fail terminally after approval reject
-- with file-backed repository config, `GET /api/v1/workorch/slices/snapshots` returns the currently available persisted `workorch` slice snapshots
-- with file-backed repository config, `GET /api/v1/workorch/slices/statuses` returns the currently available persisted `workorch` slice summaries
-- with file-backed repository config, `GET /api/v1/workorch/slices/{sliceId}/status` returns the current `workorch` slice status summary when persisted state exists
-- with file-backed repository config, `GET /api/v1/workorch/slices/{sliceId}/snapshot` returns the current persisted `workorch` slice snapshot when persisted state exists
 - with file-backed repository config, repository state is persisted under the configured `dataDir`
 - with file-backed repository config, restarting `workorchd` on the same `dataDir` preserves workspace / run / decision / approval terminal read paths
+- with configured real LLM provider, `make verify-real-llm` completes a
+  graph-backed Workspace execution with shell evidence and a satisfied
+  evidence-backed `dodAssessment`

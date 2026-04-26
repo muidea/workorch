@@ -89,8 +89,8 @@ type BlockingRefs struct {
 }
 
 func PrintBanner(w io.Writer) {
-	fmt.Fprintln(w, "== workorch workorch observable demo ==")
-	fmt.Fprintln(w, "acceptance target: runnable/runtime-failed/multi-step/branch/multi-gate/runtime-decision/runtime-approval/mixed-gate slices + decision/approval blocked->resume slices + decision/approval reject terminal slices")
+	fmt.Fprintln(w, "== workorch observable run snapshot ==")
+	fmt.Fprintln(w, "acceptance target: workspace/run execution, tool calls, patches, validation results, runtime checkpoints, decisions, and approvals")
 }
 
 func PrintSnapshot(w io.Writer, title string, data *Snapshot) error {

@@ -150,7 +150,8 @@ func systemPrompt() string {
 		"You are the workorch workspace execution planner.",
 		"Return only one JSON object matching schema workorch.llmExecutionDecision.v1.",
 		"Do not wrap the JSON in markdown.",
-		"Do not execute tools directly. Request shell, patch, MCP, Decision, Approval, Memory, or DoD assessment through the JSON fields only.",
+		"Do not execute tools directly. Request shell, patch, MCP, Decision, Approval, Memory, DoD assessment, or ExecutionGraph through the JSON fields only.",
+		"The word json is intentional because some providers require it when response_format is json_object.",
 	}, "\n")
 }
 
@@ -159,14 +160,37 @@ func userPrompt(request llmmodels.ProviderRequest) string {
 	if err != nil {
 		body = []byte("{}")
 	}
+	if request.Repair != nil {
+		return strings.Join([]string{
+			"Repair the invalid workorch.llmExecutionDecision.v1 json output.",
+			"Return only the corrected JSON object. Do not change the business intent except where required to satisfy the schema.",
+			decisionContractPrompt(),
+			"",
+			"Invalid provider request and repair context:",
+			string(body),
+		}, "\n")
+	}
 	return strings.Join([]string{
 		"Plan the next workspace execution step from this provider request.",
-		"Required output JSON fields use the LLMExecutionDecision contract:",
-		"- completionState: continue, blocked_on_decision, blocked_on_approval, completed, or failed.",
-		"- Use shellCommands, patchRequests, mcpToolCalls, requiredDecision, requiredApproval, memoryWrites, or dodAssessment as appropriate.",
-		"- For completed, include dodAssessment with evidenceRefs for every satisfied item.",
+		decisionContractPrompt(),
 		"",
 		string(body),
+	}, "\n")
+}
+
+func decisionContractPrompt() string {
+	return strings.Join([]string{
+		"Required output JSON fields use the LLMExecutionDecision contract:",
+		"- completionState must be one of: continue, blocked_on_decision, blocked_on_approval, completed, failed.",
+		"- Use executionGraph when the next work contains multiple blocks, dependencies, or future parallel-ready work.",
+		"- executionGraph.nodes items require id and kind; dependsOn is a list of node ids; input carries block input.",
+		"- Use shellCommands, patchRequests, mcpToolCalls, requiredDecision, requiredApproval, memoryWrites, or dodAssessment as appropriate.",
+		"- For completed, include dodAssessment with evidenceRefs for every satisfied item.",
+		"- Do not include workspaceId, runId, stepId, schema, traceRefs, config, or any unknown top-level field in the decision JSON.",
+		"Minimal examples:",
+		`{"completionState":"continue","executionGraph":{"nodes":[{"id":"inspect","kind":"shell/command","input":{"command":"ls","args":["-la"]}},{"id":"test","kind":"shell/command","dependsOn":["inspect"],"input":{"command":"go","args":["test","./..."]}}]}}`,
+		`{"completionState":"blocked_on_decision","requiredDecision":{"reason":"missing product choice","decisionKind":"provide_missing_info","question":"Which runtime adapter should be used?"}}`,
+		`{"completionState":"completed","dodAssessment":{"satisfied":true,"items":[{"item":"tests pass","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}]}}`,
 	}, "\n")
 }
 

@@ -26,13 +26,6 @@ func newTestRuntimeSession(t *testing.T, backend string, dataRoot string) (*Runt
 	return session, ctx
 }
 
-func newWorkorchTestService(t *testing.T) (*WorkorchService, Runtime) {
-	t.Helper()
-
-	session, _ := newTestRuntimeSession(t, "memory", "")
-	return NewWorkorchService(session.Runtime), session.Runtime
-}
-
 func useWorkorchTestConfig(t *testing.T, backend string, dataRoot string) {
 	t.Helper()
 

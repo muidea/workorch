@@ -199,6 +199,16 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 		"goalId":      string(goalID),
 		"doDId":       string(dodID),
 	}
+	goal, err := exports.Repositories.Goals.Get(ctx, goalID)
+	if err != nil {
+		return nil, err
+	}
+	dod, err := exports.Repositories.DoDs.Get(ctx, dodID)
+	if err != nil {
+		return nil, err
+	}
+	contextData["goal"] = goalContext(goal)
+	contextData["dod"] = dodContext(dod)
 	if llmProviderID := strings.TrimSpace(cmd.LLMProviderID); llmProviderID != "" {
 		contextData[llmcommon.ExecutionContextLLMProviderID] = llmProviderID
 	}
@@ -408,6 +418,29 @@ func memoryItemIDs(items []*memorymodel.MemoryItem) []string {
 		ret = append(ret, string(item.ID))
 	}
 	return ret
+}
+
+func goalContext(item *workspacemodel.Goal) map[string]any {
+	if item == nil {
+		return nil
+	}
+	return map[string]any{
+		"id":          string(item.ID),
+		"workspaceId": string(item.WorkspaceID),
+		"text":        item.Text,
+	}
+}
+
+func dodContext(item *workspacemodel.DoD) map[string]any {
+	if item == nil {
+		return nil
+	}
+	return map[string]any{
+		"id":          string(item.ID),
+		"workspaceId": string(item.WorkspaceID),
+		"items":       cloneStrings(item.Items),
+		"state":       string(item.State),
+	}
 }
 
 func soulContext(item *soulmodel.Soul) map[string]any {

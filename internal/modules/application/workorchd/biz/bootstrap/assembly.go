@@ -4,6 +4,7 @@ import (
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	legacymodule "github.com/muidea/workorch/internal/modules/blocks/legacy"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
+	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp"
@@ -62,6 +63,10 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	mustSetup("mcp", mcpModule.Setup(mcpmodule.Dependencies{
 		Servers: repos.mcpServer,
 	}))
+	mcpBlockModule := mcpblockmodule.New()
+	mustSetup("mcp-block", mcpBlockModule.Setup(mcpblockmodule.Dependencies{
+		MCPService: mcpModule.Service(),
+	}))
 
 	workspaceModule := workspacemodule.New()
 	mustSetup("workspace", workspaceModule.Setup(workspacemodule.Dependencies{
@@ -87,6 +92,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	orchestratorModule := orchestratormodule.New()
 	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry(legacyModule.RuntimeAdapter())
 	mustSetup("runtime-registry", runtimeRegistry.Register(shellmodule.StepKindCommand, shellModule.RuntimeAdapter()))
+	mustSetup("runtime-registry", runtimeRegistry.Register(mcpblockmodule.StepKindToolCall, mcpBlockModule.RuntimeAdapter()))
 	mustSetup("runtime-registry", runtimeRegistry.Register(llmmodule.StepKindWorkspaceExecution, llmModule.RuntimeAdapter()))
 	mustSetup("orchestrator", orchestratorModule.Setup(orchestratormodule.Dependencies{
 		Runtime:            runtimeRegistry,
@@ -120,6 +126,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 		memoryModule,
 		skillModule,
 		mcpModule,
+		mcpBlockModule,
 		workspaceModule,
 		decisionModule,
 		approvalModule,

@@ -47,6 +47,11 @@ the item is explicitly marked as design-only.
 | L12 | Web console LLM execution views | completed | Workspace Board activation, Workspace Detail context/evidence, Decision Queue, Observability | Web can start and observe the same flow as API without low-level adapter controls |
 | L13 | End-to-end acceptance scripts | completed | Local verification scripts for memory and file repository backends | Happy path, Decision, Approval, provider/schema failure, Memory recall are repeatable |
 | L14 | Status and operator documentation | completed | Updated status, deployment, and acceptance documentation | Docs describe config, verification commands, known limits, and current status |
+| L15 | LLM decision output stabilization and graph planning | completed | DeepSeek/OpenAI-compatible JSON output contract, one repair retry, formal `executionGraph` in `LLMExecutionDecision` | Schema-invalid provider output is repaired once or fails with diagnostics; graph plans become orchestrator-consumable Step output |
+| L16 | Runtime graph follow-up and workspace shell sandbox closure | completed | Graph leaf LLM follow-up dispatch and automatic shell working directory creation | Graph-based real provider Runs can return to LLM for DoD assessment after block execution |
+| L17 | MCP HTTP tool-call runtime adapter | completed | `blocks/mcp` runtime unit registered for `mcp/tool_call` with MCP server policy checks and HTTP endpoint invocation | Allowed HTTP tool calls produce Step output and ToolCall evidence; disabled, disallowed, or unsupported transports fail explicitly |
+| L18 | Concurrent ready-node graph dispatch | completed | Orchestrator dispatches all dependency-satisfied graph nodes in one scheduler batch | Independent ready nodes execute concurrently, dependent nodes wait for all required predecessors, and Run closure remains coordinator-owned |
+| L19 | MCP stdio protocol transport adapter | completed | `blocks/mcp` supports MCP stdio subprocess transport with JSON-RPC `initialize`, `notifications/initialized`, and `tools/call` | Allowed stdio tool calls produce decoded Step output and ToolCall evidence; invalid endpoint, protocol error, timeout, or unsupported transports fail explicitly |
 
 ## Detailed Work Items
 
@@ -209,12 +214,18 @@ Status:
 - provider boundary: `ProviderRequest`, `Provider`, `RuntimeAdapter`
 - schema boundary: `LLMExecutionDecision` with strict JSON parsing and
   `completionState` validation
+- response stabilization: provider content is normalized only for transport
+  formatting, including markdown fence removal and first JSON object extraction;
+  business schema validation remains strict with unknown fields rejected
+- repair boundary: schema-invalid provider output triggers exactly one LLM
+  repair retry with the raw output preview and parse error; failed repair keeps
+  the original parse failure as the Step failure and exposes repair diagnostics
 - real provider client: OpenAI-compatible Chat Completions HTTP client is
   created from magicCommon `framework/configuration` LLM section when provider
   config is ready
 - normalized output covers provider unavailable, provider error, schema invalid,
-  shell plan, patch requests, MCP plan, Decision block, Approval block, Memory
-  write requests, and DoD assessment output
+  execution graph plan, shell plan, patch requests, MCP plan, Decision block,
+  Approval block, Memory write requests, and DoD assessment output
 - current boundary: supported real protocol is OpenAI-compatible
   `/chat/completions`; provider-specific streaming and non-chat APIs are not in
   this MVP
@@ -294,7 +305,7 @@ Scope:
 
 - Map `shellCommands` to `shell/command`.
 - Map `patchRequests` to patch application evidence.
-- Map `mcpToolCalls` to future `mcp/tool_call` dispatch boundary.
+- Map `mcpToolCalls` to `mcp/tool_call`.
 - Map `requiredDecision` to Decision Ticket.
 - Map `requiredApproval` to Approval.
 - Map `memoryWrites` to Memory write requests.
@@ -318,14 +329,12 @@ Status:
   persists these fields into the created Decision Ticket.
 - Failed LLM decisions now fail the Step and Run with `llm_failed` evidence
   instead of being treated as a completed plan.
-- Unknown runtime kinds such as `mcp/tool_call` no longer fall back to
-  `legacy/minimal`; they fail with `runtime_adapter_unavailable` until a
-  formal adapter is registered.
+- Unknown runtime kinds no longer fall back to `legacy/minimal`; they fail with
+  `runtime_adapter_unavailable`.
 - Memory write requests require `memoryType` and `summary` at schema parsing
   time.
-- current boundary: actual external MCP/tool adapter execution remains a later
-  block adapter item; this item completes the decision-to-runtime boundary and
-  fail-safe behavior.
+- `mcp/tool_call` now has a concrete `blocks/mcp` runtime adapter in L17; this
+  item owns only the LLM decision-to-runtime mapping boundary.
 - verification:
   `go test ./internal/modules/blocks/llm/... -count 1`,
   `go test ./internal/modules/kernel/orchestrator/... -count 1`
@@ -489,7 +498,8 @@ Status:
   detail and resolution routes can operate on them directly.
 - verification:
   `make verify-llm`,
-  `make verify-llm-file`
+  `make verify-llm-file`,
+  `make verify-real-llm`
 
 ### L14 Status And Operator Documentation
 
@@ -517,7 +527,106 @@ Status:
   `.env.workorchd.example` with the current configuration entrypoints.
 - verification:
   `make verify-llm`,
-  `make verify-llm-file`
+  `make verify-llm-file`,
+  `make verify-real-llm`
+
+### L17 MCP HTTP Tool-Call Runtime Adapter
+
+Scope:
+
+- Add `internal/modules/blocks/mcp`.
+- Register runtime adapter kind `mcp/tool_call`.
+- Validate selected MCP server existence, enablement, and `allowedTools`.
+- Invoke HTTP/HTTPS MCP-style tool endpoints with workorch trace refs and tool
+  input.
+- Keep this item scoped to HTTP/HTTPS endpoint invocation; MCP `stdio` is
+  delivered separately in L19.
+
+Acceptance:
+
+- Allowed HTTP tool calls complete and expose decoded response payload in Step
+  output.
+- Disabled servers, disallowed tools, unsupported transports, invalid endpoint,
+  timeout, and non-2xx HTTP responses fail deterministically.
+- Orchestrator records the result through the existing ToolCall and
+  ValidationResult evidence path.
+
+Status:
+
+- completed
+- implementation: `internal/modules/blocks/mcp`
+- runtime loading: explicit `workorchd` import, `workorchruntime`
+  `MCPRuntimeAdapter` injection, and orchestrator runtime registry registration
+- current boundary for this item: supported invocation transport is HTTP/HTTPS
+  endpoint call; MCP `stdio` is tracked and completed in L19
+- verification:
+  `go test ./internal/modules/blocks/mcp/... ./internal/initiators/workorchruntime/... ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/kernel/orchestrator/... -count 1`
+
+### L18 Concurrent Ready-Node Graph Dispatch
+
+Scope:
+
+- Extend `kernel/orchestrator` graph traversal from single ready-node dispatch
+  to scheduler batches.
+- Dispatch all ready graph nodes whose dependencies are satisfied and branch
+  policy matches.
+- Prevent parallel graph nodes from independently advancing or closing the Run;
+  the coordinator decides the next batch, graph follow-up, or terminal state
+  after the batch completes.
+
+Acceptance:
+
+- Two independent graph nodes execute concurrently before a dependent merge
+  node.
+- The merge node sees both predecessor node IDs in `graphCompletedNodes`.
+- Existing graph branch, Decision, Approval, LLM follow-up, and DoD completion
+  paths remain valid.
+
+Status:
+
+- completed
+- implementation: `internal/modules/kernel/orchestrator/biz/runtime_orchestrator.go`
+- verification:
+  `go test ./internal/modules/kernel/orchestrator/... -count 1`
+
+### L19 MCP Stdio Protocol Transport Adapter
+
+Scope:
+
+- Extend `internal/modules/blocks/mcp` without changing `kernel/orchestrator`
+  or `kernel/mcp` ownership.
+- Start the configured `MCPServer.endpoint` command as a local stdio
+  subprocess when `transport=stdio`.
+- Exchange newline-delimited UTF-8 JSON-RPC messages over stdin/stdout.
+- Send `initialize`, then `notifications/initialized`, then `tools/call` with
+  `{name, arguments}`.
+- Preserve the existing MCP server enablement and `allowedTools` policy gate.
+
+Acceptance:
+
+- Allowed stdio tool calls complete and expose decoded JSON-RPC `result` in Step
+  output.
+- Invalid endpoint, subprocess launch failure, JSON-RPC error, timeout, and
+  unsupported transports fail deterministically.
+- Orchestrator records the result through the existing ToolCall and
+  ValidationResult evidence path.
+
+Status:
+
+- completed
+- implementation: `internal/modules/blocks/mcp/biz/mcp_runtime_adapter.go`
+- current boundary: implemented stdio scope is per-call subprocess
+  `initialize` + `tools/call`; MCP resources, prompts, streaming, session reuse,
+  and external runtime marketplace integration remain future work.
+- verification:
+  `go test ./internal/modules/blocks/mcp/... -count 1`,
+  `make verify-mcp-stdio`,
+  `make verify-mcp-stdio-file`,
+  `make verify-real-mcp-stdio`
+- grouped MVP verification:
+  `make verify-mvp`,
+  `make verify-mvp-file`,
+  `make verify-real-mvp`
 
 ## Recommended Development Rounds
 
@@ -578,13 +687,38 @@ Exit criteria:
 - Acceptance scripts cover memory and file backends.
 - Status document accurately tracks completed and remaining items.
 
+### Round 5: Real Provider Stabilization
+
+Target items:
+
+- L15 LLM decision output stabilization and graph planning.
+- L16 Runtime graph follow-up and workspace shell sandbox closure.
+- L17 MCP HTTP tool-call runtime adapter.
+- L18 Concurrent ready-node graph dispatch.
+
+Exit criteria:
+
+- DeepSeek/OpenAI-compatible JSON mode uses a strict decision contract.
+- Provider formatting drift is normalized only at the transport boundary.
+- Schema-invalid output triggers one repair retry and then either produces a
+  valid decision or fails with parse and repair diagnostics.
+- `executionGraph` plans are emitted as normalized Step output for the
+  orchestrator-owned runtime graph chain.
+- Graph leaf completion returns to LLM DoD assessment.
+- HTTP/HTTPS MCP tool calls are policy-checked and recorded as runtime
+  evidence.
+- Independent ready graph nodes run concurrently and dependent graph nodes wait
+  for all required predecessors.
+- MCP stdio tool calls are policy-checked, executed through the standard
+  newline-delimited JSON-RPC flow, and recorded as runtime evidence.
+
 ## Current Progress
 
 | ID | Status | Notes |
 | --- | --- | --- |
 | L1 | completed | Soul model, repository contracts, memory/file backends, service validation, module registration, and runtime injection completed. Activation binding remains L6. |
 | L2 | completed | MemoryItem model, repository contracts, memory/file backends, deterministic Workspace search, source validation, module registration, and runtime injection completed. Run summary write and recall integration remain L10. |
-| L3 | completed | Skill and MCPServer models, repository contracts, memory/file backends, services, module registration, and runtime injection completed. Activation policy binding remains L6; MCP invocation remains later block work. |
+| L3 | completed | Skill and MCPServer models, repository contracts, memory/file backends, services, module registration, and runtime injection completed. Activation policy binding is implemented in L6, HTTP/HTTPS MCP invocation in L17, and MCP stdio invocation in L19. |
 | L4 | completed | LLM provider env config, disabled/unavailable state, timeout validation, supported provider validation, and redaction helper completed. Runtime dispatch failure path remains L5/L7. |
 | L5 | completed | LLM runtime adapter, OpenAI-compatible HTTP provider client, provider request boundary, strict decision parsing, normalized output, module registration, runtime helper injection, and bootstrap/orchestrator registration completed. |
 | L6 | completed | Workspace execution activation now binds selected Soul, Skill, MCP server, and Memory context into Run execution context and first LLM Step input; disallowed or missing selections are rejected before Run creation. |
@@ -596,3 +730,8 @@ Exit criteria:
 | L12 | completed | Web can start LLM-driven execution with Goal/DoD/Soul/Skill/MCP/Memory context, inspect structured Decision context, and observe Step output including DoD assessment and Memory refs. |
 | L13 | completed | Added repeatable local LLM acceptance scripts for memory and file backends with a local OpenAI-compatible mock provider; covers happy path, Decision resume, Approval rejection, schema failure, Memory recall, and file restart-read. |
 | L14 | completed | Status, deployment, environment template, verification commands, provider config, and current LLM MVP boundaries are documented. |
+| L15 | completed | LLM output now supports markdown/JSON-object normalization, one provider repair retry, strict `executionGraph` validation, graph Step output, and repair diagnostics for real provider validation. |
+| L16 | completed | Runtime graph leaf completion now dispatches an LLM follow-up for DoD assessment, and shell sandbox creates missing Workspace working directories before command execution. |
+| L17 | completed | `blocks/mcp` now registers `mcp/tool_call`, validates MCP server policy, invokes HTTP/HTTPS tool endpoints, and fails unsupported transports explicitly. |
+| L18 | completed | Orchestrator now dispatches all currently ready graph nodes concurrently and advances the graph only after the batch completes. |
+| L19 | completed | `blocks/mcp` now supports MCP `stdio` subprocess transport with JSON-RPC `initialize`, `notifications/initialized`, and `tools/call`; advanced MCP resources, prompts, streaming, and session reuse remain outside MVP. |

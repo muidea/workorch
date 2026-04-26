@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"sort"
 	"strings"
+	"unicode"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -21,6 +24,8 @@ const (
 	outputKeyBlockDecisionKind     = "blockDecisionKind"
 	outputKeyBlockDecisionQuestion = "blockDecisionQuestion"
 	outputKeyBlockDecisionContext  = "blockDecisionContext"
+	outputKeyExecutionGraph        = "executionGraph"
+	maxLLMOutputPreviewBytes       = 4096
 )
 
 type Provider interface {
@@ -32,9 +37,12 @@ type ProviderRuntime struct {
 	Provider Provider
 }
 
+type ProviderConfigLoader func() (string, map[string]llmmodels.ProviderConfig, error)
+
 type RuntimeAdapter struct {
 	defaultProviderID string
 	providers         map[string]ProviderRuntime
+	configLoader      ProviderConfigLoader
 }
 
 func NewRuntimeAdapter(config llmmodels.ProviderConfig, provider Provider) *RuntimeAdapter {
@@ -80,6 +88,17 @@ func NewRuntimeAdapterFromConfig(config llmmodels.ProviderConfig) *RuntimeAdapte
 }
 
 func NewRuntimeAdapterFromConfigs(defaultProviderID string, configs map[string]llmmodels.ProviderConfig) *RuntimeAdapter {
+	return NewRuntimeAdapterWithProviders(defaultProviderID, providerRuntimesFromConfigs(configs))
+}
+
+func NewRuntimeAdapterFromConfigLoader(loader ProviderConfigLoader) *RuntimeAdapter {
+	return &RuntimeAdapter{
+		defaultProviderID: llmcommon.DefaultProviderID,
+		configLoader:      loader,
+	}
+}
+
+func providerRuntimesFromConfigs(configs map[string]llmmodels.ProviderConfig) map[string]ProviderRuntime {
 	providers := make(map[string]ProviderRuntime, len(configs))
 	for id, config := range configs {
 		id = strings.TrimSpace(id)
@@ -99,16 +118,16 @@ func NewRuntimeAdapterFromConfigs(defaultProviderID string, configs map[string]l
 			Provider: provider,
 		}
 	}
-	return NewRuntimeAdapterWithProviders(defaultProviderID, providers)
+	return providers
 }
 
 func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
 	if a == nil {
 		return runtimemodel.StepExecutionResult{}, common.ErrInvalidArgument
 	}
-	runtime, err := a.selectProviderRuntime(request)
+	runtime, providerID, err := a.selectProviderRuntime(request)
 	if err != nil {
-		cfg := llmmodels.ProviderConfig{ID: requestedProviderID(request.Input, a.defaultProviderID), Unavailable: true, UnavailableReason: err.Error()}
+		cfg := llmmodels.ProviderConfig{ID: providerID, Unavailable: true, UnavailableReason: err.Error()}
 		output := failureOutput(request, "llm_provider_unavailable", err.Error(), cfg)
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
@@ -121,20 +140,42 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		return runtimemodel.StepExecutionResult{Output: output}, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
 	}
 
-	payload, err := runtime.Provider.Complete(ctx, providerRequest(request, runtime.Config))
+	providerReq := providerRequest(request, runtime.Config)
+	payload, err := runtime.Provider.Complete(ctx, providerReq)
 	if err != nil {
 		output := failureOutput(request, "llm_provider_error", err.Error(), runtime.Config)
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 	decision, err := ParseLLMExecutionDecision(payload)
+	var repairMetadata map[string]any
 	if err != nil {
-		output := failureOutput(request, "llm_schema_invalid", err.Error(), runtime.Config)
-		return runtimemodel.StepExecutionResult{Output: output}, err
+		parseErr := err
+		repairedDecision, repairPayload, repairErr := repairLLMExecutionDecision(ctx, runtime.Provider, providerReq, payload, err)
+		if repairErr != nil {
+			output := failureOutput(request, "llm_schema_invalid", parseErr.Error(), runtime.Config)
+			output["repairAttempted"] = true
+			output["parseError"] = parseErr.Error()
+			output["repairError"] = repairErr.Error()
+			output["rawContentPreview"] = previewLLMOutput(payload)
+			if len(repairPayload) > 0 {
+				output["repairRawContentPreview"] = previewLLMOutput(repairPayload)
+			}
+			return runtimemodel.StepExecutionResult{Output: output}, parseErr
+		}
+		decision = repairedDecision
+		repairMetadata = map[string]any{
+			"attempted":  true,
+			"attempts":   1,
+			"parseError": parseErr.Error(),
+		}
 	}
 	output, err := NormalizeDecisionOutput(request, decision)
 	if err != nil {
 		failure := failureOutput(request, "llm_decision_invalid", err.Error(), runtime.Config)
 		return runtimemodel.StepExecutionResult{Output: failure}, err
+	}
+	if repairMetadata != nil {
+		output["llmRepair"] = repairMetadata
 	}
 	if status, _ := output[outputKeyStatus].(string); status == "failed" {
 		reason, _ := output[outputKeyError].(string)
@@ -146,16 +187,57 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	return runtimemodel.StepExecutionResult{Output: output}, nil
 }
 
-func (a *RuntimeAdapter) selectProviderRuntime(request runtimemodel.StepExecutionRequest) (ProviderRuntime, error) {
-	providerID := requestedProviderID(request.Input, a.defaultProviderID)
+func repairLLMExecutionDecision(
+	ctx context.Context,
+	provider Provider,
+	request llmmodels.ProviderRequest,
+	originalPayload []byte,
+	parseErr error,
+) (llmmodels.LLMExecutionDecision, []byte, error) {
+	if provider == nil || parseErr == nil {
+		return llmmodels.LLMExecutionDecision{}, nil, common.ErrInvalidArgument
+	}
+	repairReq := request
+	repairReq.Repair = &llmmodels.ProviderRepairRequest{
+		Attempt:        1,
+		OriginalOutput: previewLLMOutput(originalPayload),
+		ParseError:     parseErr.Error(),
+	}
+	payload, err := provider.Complete(ctx, repairReq)
+	if err != nil {
+		return llmmodels.LLMExecutionDecision{}, payload, err
+	}
+	decision, err := ParseLLMExecutionDecision(payload)
+	if err != nil {
+		return llmmodels.LLMExecutionDecision{}, payload, err
+	}
+	return decision, payload, nil
+}
+
+func (a *RuntimeAdapter) selectProviderRuntime(request runtimemodel.StepExecutionRequest) (ProviderRuntime, string, error) {
+	defaultProviderID := a.defaultProviderID
+	providers := a.providers
+	if a.configLoader != nil {
+		loadedDefaultProviderID, configs, err := a.configLoader()
+		if err != nil {
+			providerID := requestedProviderID(request.Input, defaultProviderID)
+			return ProviderRuntime{}, providerID, err
+		}
+		defaultProviderID = strings.TrimSpace(loadedDefaultProviderID)
+		if defaultProviderID == "" {
+			defaultProviderID = llmcommon.DefaultProviderID
+		}
+		providers = providerRuntimesFromConfigs(configs)
+	}
+	providerID := requestedProviderID(request.Input, defaultProviderID)
 	if providerID == "" {
-		return ProviderRuntime{}, fmt.Errorf("%w: llm provider is not configured", common.ErrInvalidArgument)
+		return ProviderRuntime{}, providerID, fmt.Errorf("%w: llm provider is not configured", common.ErrInvalidArgument)
 	}
-	runtime, ok := a.providers[providerID]
+	runtime, ok := providers[providerID]
 	if !ok {
-		return ProviderRuntime{}, fmt.Errorf("%w: llm provider %q is not configured", common.ErrInvalidArgument, providerID)
+		return ProviderRuntime{}, providerID, fmt.Errorf("%w: llm provider %q is not configured", common.ErrInvalidArgument, providerID)
 	}
-	return runtime, nil
+	return runtime, providerID, nil
 }
 
 func requestedProviderID(input map[string]any, defaultProviderID string) string {
@@ -180,7 +262,11 @@ func stringValue(value any) string {
 }
 
 func ParseLLMExecutionDecision(payload []byte) (llmmodels.LLMExecutionDecision, error) {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
+	normalized, err := NormalizeLLMDecisionPayload(payload)
+	if err != nil {
+		return llmmodels.LLMExecutionDecision{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(normalized))
 	decoder.DisallowUnknownFields()
 	var decision llmmodels.LLMExecutionDecision
 	if err := decoder.Decode(&decision); err != nil {
@@ -189,11 +275,85 @@ func ParseLLMExecutionDecision(payload []byte) (llmmodels.LLMExecutionDecision, 
 	var extra any
 	if err := decoder.Decode(&extra); err == nil {
 		return llmmodels.LLMExecutionDecision{}, fmt.Errorf("%w: invalid llm decision json: multiple json values", common.ErrInvalidArgument)
+	} else if err != io.EOF {
+		return llmmodels.LLMExecutionDecision{}, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
 	}
 	if err := validateDecision(decision); err != nil {
 		return llmmodels.LLMExecutionDecision{}, err
 	}
 	return decision, nil
+}
+
+func NormalizeLLMDecisionPayload(payload []byte) ([]byte, error) {
+	text := strings.TrimSpace(strings.TrimPrefix(string(payload), "\ufeff"))
+	if text == "" {
+		return nil, fmt.Errorf("%w: invalid llm decision json: empty payload", common.ErrInvalidArgument)
+	}
+	if strings.HasPrefix(text, "```") {
+		text = stripMarkdownFence(text)
+	}
+	jsonText, ok := extractFirstJSONObject(text)
+	if !ok {
+		return nil, fmt.Errorf("%w: invalid llm decision json: no json object found", common.ErrInvalidArgument)
+	}
+	return []byte(jsonText), nil
+}
+
+func stripMarkdownFence(text string) string {
+	lines := strings.Split(text, "\n")
+	if len(lines) < 2 || !strings.HasPrefix(strings.TrimSpace(lines[0]), "```") {
+		return text
+	}
+	if strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
+		return strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
+	}
+	return text
+}
+
+func extractFirstJSONObject(text string) (string, bool) {
+	start := strings.Index(text, "{")
+	if start < 0 {
+		return "", false
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for idx, r := range text[start:] {
+		pos := start + idx
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if r == '\\' {
+				escaped = true
+				continue
+			}
+			if r == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch r {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return strings.TrimSpace(text[start : pos+len(string(r))]), true
+			}
+			if depth < 0 {
+				return "", false
+			}
+		default:
+			if depth == 0 && !unicode.IsSpace(r) {
+				return "", false
+			}
+		}
+	}
+	return "", false
 }
 
 func NormalizeDecisionOutput(request runtimemodel.StepExecutionRequest, decision llmmodels.LLMExecutionDecision) (map[string]any, error) {
@@ -241,6 +401,11 @@ func NormalizeDecisionOutput(request runtimemodel.StepExecutionRequest, decision
 		output["blockApprovalReason"] = decision.RequiredApproval.Reason
 		output["nextStep"] = fmt.Sprintf("%s/llm-after-approval", request.RunID)
 		output["nextKind"] = llmcommon.StepKindWorkspaceExecution
+		return output, nil
+	}
+	if decision.ExecutionGraph != nil && len(decision.ExecutionGraph.Nodes) > 0 {
+		output["stage"] = "llm_execution_graph_plan"
+		output[outputKeyExecutionGraph] = executionGraphOutput(decision.ExecutionGraph)
 		return output, nil
 	}
 	if len(decision.ShellCommands) > 0 {
@@ -306,6 +471,11 @@ func validateDecision(decision llmmodels.LLMExecutionDecision) error {
 			return fmt.Errorf("%w: mcpToolCalls serverId and tool are required", common.ErrInvalidArgument)
 		}
 	}
+	if decision.ExecutionGraph != nil {
+		if err := validateExecutionGraph(*decision.ExecutionGraph); err != nil {
+			return err
+		}
+	}
 	if decision.CompletionState == "completed" {
 		if decision.DoDAssessment == nil {
 			return fmt.Errorf("%w: dodAssessment is required for completed decision", common.ErrInvalidArgument)
@@ -317,6 +487,83 @@ func validateDecision(decision llmmodels.LLMExecutionDecision) error {
 		}
 	}
 	return nil
+}
+
+func validateExecutionGraph(graph llmmodels.BlockExecutionGraph) error {
+	if len(graph.Nodes) == 0 {
+		return fmt.Errorf("%w: executionGraph.nodes is required", common.ErrInvalidArgument)
+	}
+	known := map[string]bool{}
+	for _, node := range graph.Nodes {
+		nodeID := strings.TrimSpace(node.ID)
+		if nodeID == "" || strings.TrimSpace(node.Kind) == "" {
+			return fmt.Errorf("%w: executionGraph node id and kind are required", common.ErrInvalidArgument)
+		}
+		if !isSafeGraphNodeID(nodeID) {
+			return fmt.Errorf("%w: executionGraph node id contains unsupported characters", common.ErrInvalidArgument)
+		}
+		if known[nodeID] {
+			return fmt.Errorf("%w: executionGraph node id must be unique", common.ErrInvalidArgument)
+		}
+		known[nodeID] = true
+	}
+	for _, node := range graph.Nodes {
+		nodeID := strings.TrimSpace(node.ID)
+		for _, dependency := range node.DependsOn {
+			dependency = strings.TrimSpace(dependency)
+			if dependency == "" || !known[dependency] || dependency == nodeID {
+				return fmt.Errorf("%w: executionGraph dependsOn references invalid node", common.ErrInvalidArgument)
+			}
+		}
+	}
+	if hasExecutionGraphCycle(graph) {
+		return fmt.Errorf("%w: executionGraph must be acyclic", common.ErrInvalidArgument)
+	}
+	return nil
+}
+
+func isSafeGraphNodeID(input string) bool {
+	for _, r := range input {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func hasExecutionGraphCycle(graph llmmodels.BlockExecutionGraph) bool {
+	dependencies := make(map[string][]string, len(graph.Nodes))
+	for _, node := range graph.Nodes {
+		nodeID := strings.TrimSpace(node.ID)
+		dependencies[nodeID] = append([]string(nil), node.DependsOn...)
+	}
+	visiting := map[string]bool{}
+	visited := map[string]bool{}
+	var visit func(string) bool
+	visit = func(nodeID string) bool {
+		if visiting[nodeID] {
+			return true
+		}
+		if visited[nodeID] {
+			return false
+		}
+		visiting[nodeID] = true
+		for _, dependency := range dependencies[nodeID] {
+			if visit(strings.TrimSpace(dependency)) {
+				return true
+			}
+		}
+		visiting[nodeID] = false
+		visited[nodeID] = true
+		return false
+	}
+	for nodeID := range dependencies {
+		if visit(nodeID) {
+			return true
+		}
+	}
+	return false
 }
 
 func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels.ProviderConfig) llmmodels.ProviderRequest {
@@ -394,6 +641,32 @@ func doDAssessmentOutput(assessment *llmmodels.DoDAssessment) map[string]any {
 	}
 }
 
+func executionGraphOutput(graph *llmmodels.BlockExecutionGraph) map[string]any {
+	if graph == nil {
+		return nil
+	}
+	nodes := make([]map[string]any, 0, len(graph.Nodes))
+	for _, node := range graph.Nodes {
+		item := map[string]any{
+			"id":   node.ID,
+			"kind": node.Kind,
+		}
+		if len(node.DependsOn) > 0 {
+			dependsOn := append([]string(nil), node.DependsOn...)
+			sort.Strings(dependsOn)
+			item["dependsOn"] = dependsOn
+		}
+		if strings.TrimSpace(node.Branch) != "" {
+			item["branch"] = strings.TrimSpace(node.Branch)
+		}
+		if node.Input != nil {
+			item["input"] = cloneMap(node.Input)
+		}
+		nodes = append(nodes, item)
+	}
+	return map[string]any{"nodes": nodes}
+}
+
 func decisionMap(decision llmmodels.LLMExecutionDecision) map[string]any {
 	data, err := json.Marshal(decision)
 	if err != nil {
@@ -415,4 +688,12 @@ func cloneMap(input map[string]any) map[string]any {
 		out[key] = value
 	}
 	return out
+}
+
+func previewLLMOutput(payload []byte) string {
+	text := strings.TrimSpace(string(payload))
+	if len(text) <= maxLLMOutputPreviewBytes {
+		return text
+	}
+	return text[:maxLLMOutputPreviewBytes]
 }

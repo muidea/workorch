@@ -18,14 +18,6 @@ import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 )
 
-type workorchRunResponse struct {
-	Service string `json:"service"`
-	Slices  []struct {
-		ID    string `json:"id"`
-		Title string `json:"title"`
-	} `json:"slices"`
-}
-
 type workorchWorkspaceResponse struct {
 	Service   string `json:"service"`
 	Workspace struct {
@@ -226,50 +218,6 @@ type workorchErrorResponse struct {
 	Error string `json:"error"`
 }
 
-type workorchSliceCatalogResponse struct {
-	Service string `json:"service"`
-	Slices  []struct {
-		ID    string `json:"id"`
-		Title string `json:"title"`
-	} `json:"slices"`
-}
-
-type workorchSliceSnapshotsResponse struct {
-	Service string `json:"service"`
-	Slices  []struct {
-		ID       string `json:"id"`
-		Title    string `json:"title"`
-		Snapshot struct {
-			Slice string `json:"slice"`
-		} `json:"snapshot"`
-	} `json:"slices"`
-}
-
-type workorchSliceStatusesResponse struct {
-	Service  string `json:"service"`
-	Statuses []struct {
-		ID       string `json:"id"`
-		RunState string `json:"runState"`
-	} `json:"statuses"`
-}
-
-type workorchSingleSliceRunResponse struct {
-	Service string `json:"service"`
-	Slice   struct {
-		ID    string `json:"id"`
-		Title string `json:"title"`
-	} `json:"slice"`
-}
-
-type workorchSliceStatusResponse struct {
-	Service string `json:"service"`
-	Status  struct {
-		ID        string `json:"id"`
-		RunState  string `json:"runState"`
-		StepState string `json:"stepState"`
-	} `json:"status"`
-}
-
 func TestWorkorchdServerServesHealthAndRunEndpoints(t *testing.T) {
 	addr := reserveLoopbackAddr(t)
 	bin := buildWorkorchdBinary(t)
@@ -279,22 +227,6 @@ func TestWorkorchdServerServesHealthAndRunEndpoints(t *testing.T) {
 	waitForHealthy(t, "http://"+addr+"/healthz")
 	assertMetricsAvailable(t, "http://"+addr+"/metrics")
 	createWorkspace(t, "http://"+addr+"/api/v1/workorch/workspaces", "main memory workspace")
-	assertSliceCatalogAvailable(t, "http://"+addr+"/api/v1/workorch/slices")
-
-	resp := postRunRequest(t, "http://"+addr+"/api/v1/workorch/runs")
-	if resp.Service != "workorch" {
-		t.Fatalf("service = %q, want workorch", resp.Service)
-	}
-	if len(resp.Slices) != 17 {
-		t.Fatalf("len(slices) = %d, want 17", len(resp.Slices))
-	}
-	if resp.Slices[0].Title != "workorch runnable slice" {
-		t.Fatalf("first title = %q, want workorch runnable slice", resp.Slices[0].Title)
-	}
-	single := postSingleSliceRunRequest(t, "http://"+addr+"/api/v1/workorch/slices/workorch-runnable/runs")
-	if single.Slice.ID != "workorch-runnable" || single.Slice.Title != "workorch runnable slice" {
-		t.Fatalf("single slice = %+v, want workorch-runnable/workorch runnable slice", single.Slice)
-	}
 }
 
 func TestWorkorchdServerSupportsFileRepositoryBackend(t *testing.T) {
@@ -367,20 +299,6 @@ func TestWorkorchdServerSupportsFileRepositoryBackend(t *testing.T) {
 		[]string{blockedApproval.Run.BlockingApprovalID, rejectedApproval.Run.BlockingApprovalID},
 	)
 
-	first := postRunRequest(t, "http://"+addr+"/api/v1/workorch/runs")
-	second := postRunRequest(t, "http://"+addr+"/api/v1/workorch/runs")
-	single := postSingleSliceRunRequest(t, "http://"+addr+"/api/v1/workorch/slices/workorch-runnable/runs")
-	assertSliceSnapshotsAvailable(t, "http://"+addr+"/api/v1/workorch/slices/snapshots")
-	assertSliceStatusesAvailable(t, "http://"+addr+"/api/v1/workorch/slices/statuses")
-	assertSingleSliceSnapshot(t, "http://"+addr+"/api/v1/workorch/slices/workorch-runnable/snapshot")
-	assertSingleSliceStatus(t, "http://"+addr+"/api/v1/workorch/slices/workorch-runnable/status")
-
-	if len(first.Slices) != 17 || len(second.Slices) != 17 {
-		t.Fatalf("run slices len = %d/%d, want 17/17", len(first.Slices), len(second.Slices))
-	}
-	if single.Slice.ID != "workorch-runnable" {
-		t.Fatalf("single slice id = %q, want workorch-runnable", single.Slice.ID)
-	}
 	for _, name := range []string{
 		"workspace.json",
 		"goal.json",
@@ -659,29 +577,6 @@ func assertMetricsAvailable(t *testing.T, metricsURL string) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("metrics body missing %q\nbody:\n%s", want, text)
 		}
-	}
-}
-
-func assertSliceCatalogAvailable(t *testing.T, endpoint string) {
-	t.Helper()
-
-	resp, err := http.Get(endpoint)
-	if err != nil {
-		t.Fatalf("get slice catalog: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("slice catalog status = %d, want 200", resp.StatusCode)
-	}
-	var body workorchSliceCatalogResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode slice catalog response: %v", err)
-	}
-	if len(body.Slices) != 17 {
-		t.Fatalf("len(slices) = %d, want 17", len(body.Slices))
-	}
-	if body.Slices[0].ID != "workorch-runnable" || body.Slices[0].Title != "workorch runnable slice" {
-		t.Fatalf("first slice = %+v, want workorch-runnable/workorch runnable slice", body.Slices[0])
 	}
 }
 
@@ -1181,134 +1076,6 @@ func assertWorkspaceSnapshotAvailable(t *testing.T, endpoint string, workspaceID
 	}
 }
 
-func assertSliceStatusesAvailable(t *testing.T, endpoint string) {
-	t.Helper()
-
-	resp, err := http.Get(endpoint)
-	if err != nil {
-		t.Fatalf("get slice statuses: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("slice statuses status = %d, want 200", resp.StatusCode)
-	}
-	var body workorchSliceStatusesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode slice statuses response: %v", err)
-	}
-	if len(body.Statuses) == 0 {
-		t.Fatal("expected at least one slice status")
-	}
-	if body.Statuses[0].ID != "workorch-runnable" || body.Statuses[0].RunState != "completed" {
-		t.Fatalf("first status = %+v, want completed workorch-runnable", body.Statuses[0])
-	}
-}
-
-func assertSliceSnapshotsAvailable(t *testing.T, endpoint string) {
-	t.Helper()
-
-	resp, err := http.Get(endpoint)
-	if err != nil {
-		t.Fatalf("get slice snapshots: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("slice snapshots status = %d, want 200", resp.StatusCode)
-	}
-	var body workorchSliceSnapshotsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode slice snapshots response: %v", err)
-	}
-	if len(body.Slices) == 0 {
-		t.Fatal("expected at least one slice snapshot")
-	}
-	if body.Slices[0].ID != "workorch-runnable" || body.Slices[0].Snapshot.Slice != "runnable" {
-		t.Fatalf("first snapshot = %+v, want runnable workorch-runnable", body.Slices[0])
-	}
-}
-
-func postRunRequest(t *testing.T, endpoint string) workorchRunResponse {
-	t.Helper()
-
-	resp, err := http.Post(endpoint, "application/json", nil)
-	if err != nil {
-		t.Fatalf("post run request: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("run request status = %d, want 200", resp.StatusCode)
-	}
-	var body workorchRunResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode run response: %v", err)
-	}
-	if body.Service == "" {
-		t.Fatalf("empty run response: %+v", body)
-	}
-	return body
-}
-
-func postSingleSliceRunRequest(t *testing.T, endpoint string) workorchSingleSliceRunResponse {
-	t.Helper()
-
-	resp, err := http.Post(endpoint, "application/json", nil)
-	if err != nil {
-		t.Fatalf("post single slice run request: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("single slice run request status = %d, want 200", resp.StatusCode)
-	}
-	var body workorchSingleSliceRunResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode single slice run response: %v", err)
-	}
-	if body.Service == "" {
-		t.Fatalf("empty single slice run response: %+v", body)
-	}
-	return body
-}
-
-func assertSingleSliceSnapshot(t *testing.T, endpoint string) {
-	t.Helper()
-
-	resp, err := http.Get(endpoint)
-	if err != nil {
-		t.Fatalf("get single slice snapshot: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("single slice snapshot status = %d, want 200", resp.StatusCode)
-	}
-	var body workorchSingleSliceRunResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode single slice snapshot response: %v", err)
-	}
-	if body.Slice.ID != "workorch-runnable" || body.Slice.Title != "workorch runnable slice" {
-		t.Fatalf("single slice snapshot = %+v, want workorch-runnable/workorch runnable slice", body.Slice)
-	}
-}
-
-func assertSingleSliceStatus(t *testing.T, endpoint string) {
-	t.Helper()
-
-	resp, err := http.Get(endpoint)
-	if err != nil {
-		t.Fatalf("get single slice status: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("single slice status status = %d, want 200", resp.StatusCode)
-	}
-	var body workorchSliceStatusResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode single slice status response: %v", err)
-	}
-	if body.Status.ID != "workorch-runnable" || body.Status.RunState != "completed" || body.Status.StepState != "completed" {
-		t.Fatalf("single slice status = %+v, want completed runnable status", body.Status)
-	}
-}
-
 func assertConflictAction(t *testing.T, endpoint string, expectedError string) {
 	t.Helper()
 
@@ -1369,6 +1136,6 @@ func TestWorkorchdServerReadyzReflectsConfiguration(t *testing.T) {
 }
 
 func Example_main() {
-	fmt.Println("workorchd serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/runs, /api/v1/workorch/runs/{runId}, /api/v1/workorch/runs/{runId}/snapshot, /api/v1/workorch/runs/{runId}/status, /api/v1/workorch/runs/{runId}/start, /api/v1/workorch/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject, /api/v1/workorch/slices, /api/v1/workorch/slices/snapshots, /api/v1/workorch/slices/statuses, /api/v1/workorch/slices/{sliceId}/status, /api/v1/workorch/slices/{sliceId}/snapshot, /api/v1/workorch/slices/{sliceId}/runs")
-	// Output: workorchd serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/runs, /api/v1/workorch/runs/{runId}, /api/v1/workorch/runs/{runId}/snapshot, /api/v1/workorch/runs/{runId}/status, /api/v1/workorch/runs/{runId}/start, /api/v1/workorch/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject, /api/v1/workorch/slices, /api/v1/workorch/slices/snapshots, /api/v1/workorch/slices/statuses, /api/v1/workorch/slices/{sliceId}/status, /api/v1/workorch/slices/{sliceId}/snapshot, /api/v1/workorch/slices/{sliceId}/runs
+	fmt.Println("workorchd serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/runs, /api/v1/workorch/runs/{runId}, /api/v1/workorch/runs/{runId}/snapshot, /api/v1/workorch/runs/{runId}/status, /api/v1/workorch/runs/{runId}/observability, /api/v1/workorch/runs/{runId}/start, /api/v1/workorch/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject")
+	// Output: workorchd serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/runs, /api/v1/workorch/runs/{runId}, /api/v1/workorch/runs/{runId}/snapshot, /api/v1/workorch/runs/{runId}/status, /api/v1/workorch/runs/{runId}/observability, /api/v1/workorch/runs/{runId}/start, /api/v1/workorch/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject
 }

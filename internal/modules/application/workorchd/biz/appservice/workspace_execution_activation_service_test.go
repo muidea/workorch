@@ -194,6 +194,14 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	if executionContext[llmcommon.ExecutionContextLLMProviderID] != "reasoning" {
 		t.Fatalf("executionContext = %+v, want selected llm provider", executionContext)
 	}
+	goalContext, _ := executionContext["goal"].(map[string]any)
+	if goalContext["text"] != "activation context goal" {
+		t.Fatalf("goal context = %+v, want goal text", executionContext["goal"])
+	}
+	dodContext, _ := executionContext["dod"].(map[string]any)
+	if !contextStringSliceContains(dodContext["items"], "activation context dod") {
+		t.Fatalf("dod context = %+v, want DoD items", executionContext["dod"])
+	}
 	if !contextStringSliceContains(executionContext["skillIds"], "skill-activation-context") {
 		t.Fatalf("skillIds = %+v, want selected skill", executionContext["skillIds"])
 	}

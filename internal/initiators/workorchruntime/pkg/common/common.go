@@ -44,6 +44,8 @@ type Helper interface {
 	SetLegacyRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
 	ShellRuntimeAdapter() orchestratorbiz.RuntimeAdapter
 	SetShellRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
+	MCPRuntimeAdapter() orchestratorbiz.RuntimeAdapter
+	SetMCPRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
 	LLMRuntimeAdapter() *llmbiz.RuntimeAdapter
 	SetLLMRuntimeAdapter(*llmbiz.RuntimeAdapter)
 	SoulService() soulservice.Service

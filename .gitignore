@@ -2,3 +2,4 @@
 .workorch-data/
 /bin/
 /web/workorch-console/node_modules/
+/config/application.toml

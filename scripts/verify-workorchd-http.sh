@@ -99,6 +99,7 @@ curl -fsS "$BASE_URL/console/assets/workorch-console.css" | grep 'workorch-secti
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Workspace Overview' >/dev/null
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Decision Queue' >/dev/null
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Workspace Console' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Configuration' >/dev/null
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Service Health' >/dev/null
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Runtime Summary' >/dev/null
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Latest Run' >/dev/null
@@ -106,6 +107,7 @@ curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Start execution
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Create workspace' >/dev/null
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Define goal' >/dev/null
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Define DoD' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/configuration" | grep '"defaultProviderId": "local"' >/dev/null
 if curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep -E 'workorch management overview|Create run|Run slice|Available slice catalog' >/dev/null; then
   echo "console exposes retired web entries" >&2
   exit 1
@@ -145,6 +147,15 @@ grep '"activation"' "$TMP_DIR/workspace-activation.json" >/dev/null
 grep "\"goalId\": \"$goal_id\"" "$TMP_DIR/workspace-activation.json" >/dev/null
 grep "\"doDId\": \"$dod_id\"" "$TMP_DIR/workspace-activation.json" >/dev/null
 grep '"state": "completed"' "$TMP_DIR/workspace-activation.json" >/dev/null
+curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type: application/json' \
+  -d '{"defaultProviderId":"local","providers":[{"id":"local","provider":"compatible","baseUrl":"http://127.0.0.1:11434/v1","apiKey":"verify-secret","model":"verify-model","timeout":"45s","disabled":false}]}' >"$TMP_DIR/configuration-llm.json"
+grep '"model": "verify-model"' "$TMP_DIR/configuration-llm.json" >/dev/null
+grep '"apiKeyConfigured": true' "$TMP_DIR/configuration-llm.json" >/dev/null
+if grep 'verify-secret' "$TMP_DIR/configuration-llm.json" >/dev/null; then
+  echo "configuration update leaked provider api key" >&2
+  exit 1
+fi
+curl -fsS "$BASE_URL/api/v1/workorch/configuration" | grep '"model": "verify-model"' >/dev/null
 
 patch_work_dir="$TMP_DIR/runtime-patch-workspace"
 mkdir -p "$patch_work_dir"
@@ -168,10 +179,6 @@ grep 'run=run-runtime-patch-verify' "$patch_work_dir/workorch-runtime-output.txt
 curl -fsS "$BASE_URL/api/v1/workorch/runs/run-runtime-patch-verify/snapshot" >"$TMP_DIR/run-runtime-patch-verify-snapshot.json"
 grep '"targetRef": "workorch-runtime-output.txt"' "$TMP_DIR/run-runtime-patch-verify-snapshot.json" >/dev/null
 grep '"state": "applied"' "$TMP_DIR/run-runtime-patch-verify-snapshot.json" >/dev/null
-
-curl -fsS "$BASE_URL/api/v1/workorch/slices" | grep '"id": "workorch-runnable"' >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs" | grep '"title": "workorch runnable slice"' >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/slices/workorch-runnable/runs" | grep '"id": "workorch-runnable"' >/dev/null
 
 if [[ "$BACKEND" == "file" ]]; then
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" -H 'Content-Type: application/json' \
@@ -226,10 +233,6 @@ if [[ "$BACKEND" == "file" ]]; then
   curl -fsS "$BASE_URL/api/v1/workorch/runs" | grep '"id": "run-verify"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/runs?workspaceId=$workspace_id" | grep '"id": "run-verify"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify" | grep "\"workspaceId\": \"$workspace_id\"" >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/slices/snapshots" | grep '"id": "workorch-runnable"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/slices/statuses" | grep '"id": "workorch-runnable"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/slices/workorch-runnable/status" | grep '"runState": "completed"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/slices/workorch-runnable/snapshot" | grep '"id": "workorch-runnable"' >/dev/null
   for name in workspace.json goal.json dod.json run.json step.json tool_call.json patch.json validation_result.json runtime_checkpoint.json ticket.json resolution.json approval.json; do
     [[ -f "$DATA_DIR/$name" ]]
   done

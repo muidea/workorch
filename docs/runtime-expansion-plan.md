@@ -85,6 +85,8 @@ Target:
 Acceptance:
 
 - A graph-backed Run can execute multiple dependent blocks.
+- Independent ready graph nodes are dispatched concurrently in the same
+  scheduler batch.
 - Branch selection is visible in snapshot/evidence.
 - Blocked decision/approval nodes resume from the correct graph position.
 
@@ -131,16 +133,23 @@ from the resulting formal execution events and evidence.
   Runtime execution now uses a formal `StepExecutionRequest` /
   `StepExecutionResult` contract and a step-kind based adapter registry. The
   legacy minimal runtime remains available through the same contract, and tests
-  cover dispatch to a registered non-legacy adapter.
+  cover dispatch to a registered non-legacy adapter. Registered concrete
+  adapters now include `shell/command`, `llm/workspace_execution`, and
+  `mcp/tool_call`; the current MCP adapter supports governed HTTP/HTTPS
+  endpoint invocation and MCP `stdio` JSON-RPC tool calls. Advanced MCP
+  resources, prompts, streaming, and external runtime marketplace integration
+  remain outside this runtime expansion scope.
 - completed: `R2 Controlled Shell Sandbox`
   The `blocks/shell` runtime unit now registers a `shell/command` adapter through
   the runtime adapter registry and can execute a non-interactive command in the
   Workspace working directory. It executes commands through `exec.CommandContext`
   with explicit command/args, an environment allowlist, timeout control, and
-  Workspace-rooted working directory. Successful execution, non-zero exit, and
-  timeout all preserve stdout, stderr, exit code, duration, and status in Step
-  output and `ToolCall` evidence. This is a controlled local command executor for
-  MVP validation, not an OS-level isolation boundary.
+  Workspace-rooted working directory. The adapter creates the Workspace working
+  directory when missing, so generated default Workspace paths are usable by
+  runtime blocks. Successful execution, non-zero exit, and timeout all preserve
+  stdout, stderr, exit code, duration, and status in Step output and `ToolCall`
+  evidence. This is a controlled local command executor for MVP validation, not
+  an OS-level isolation boundary.
 - completed: `R3 Generalized Diff Patch Apply Engine`
   Runtime patch requests now support both `file_write` and `unified_diff`
   `patchType` values. Unified diff application is constrained to an explicit
@@ -154,10 +163,15 @@ from the resulting formal execution events and evidence.
   block nodes, dependencies, branch selection, and graph metadata carried through
   Step input/output. The orchestrator keeps Run state as the external execution
   state, derives graph progress from existing Step records, and records graph
-  node/branch metadata into runtime checkpoints. Tests cover graph-backed
-  dependent block execution, branch selection without executing the inactive
-  branch, and correct resume position after both Decision Ticket and Approval
-  gates.
+  node/branch metadata into runtime checkpoints. Independent ready graph nodes
+  are dispatched concurrently in one scheduler batch; after the batch completes,
+  the coordinator advances to the next ready batch, graph follow-up, or terminal
+  completion. After a graph leaf completes, an LLM-driven Run that still
+  requires DoD evidence dispatches a follow-up `llm/workspace_execution` Step
+  for formal assessment. Tests cover concurrent ready-node dispatch,
+  graph-backed dependent block execution, branch selection without executing the
+  inactive branch, and correct resume position after both Decision Ticket and
+  Approval gates.
 - completed: `R5 Observability Pipeline`
   Runtime observability is now derived from existing events and evidence rather
   than separate mutable state. `RunObservability` exposes run progress, evidence

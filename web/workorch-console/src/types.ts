@@ -3,6 +3,60 @@ export type ServiceStatus = {
   status: string;
 };
 
+export type ServiceConfiguration = {
+  server: ServerConfiguration;
+  repository: RepositoryConfiguration;
+  llm: LLMConfiguration;
+};
+
+export type ServerConfiguration = {
+  addr?: string;
+  readHeaderTimeout?: string;
+  readTimeout?: string;
+  writeTimeout?: string;
+  idleTimeout?: string;
+  shutdownTimeout?: string;
+  maxConcurrentRuns?: number;
+};
+
+export type RepositoryConfiguration = {
+  backend?: string;
+  dataDir?: string;
+};
+
+export type LLMConfiguration = {
+  defaultProviderId?: string;
+  providers?: LLMProviderConfiguration[];
+};
+
+export type LLMProviderConfiguration = {
+  id: string;
+  provider?: string;
+  baseUrl?: string;
+  model?: string;
+  timeout?: string;
+  disabled: boolean;
+  ready: boolean;
+  reason?: string;
+  default: boolean;
+  apiKeyConfigured: boolean;
+};
+
+export type UpdateLLMConfigurationRequest = {
+  defaultProviderId?: string;
+  providers: UpdateLLMProviderConfiguration[];
+};
+
+export type UpdateLLMProviderConfiguration = {
+  id: string;
+  provider?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+  timeout?: string;
+  disabled?: boolean;
+};
+
 export type Workspace = {
   id: string;
   title: string;

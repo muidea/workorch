@@ -44,6 +44,9 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	if err != nil || workingDirectory == "" {
 		return runtimemodel.StepExecutionResult{}, common.ErrInvalidArgument
 	}
+	if err := os.MkdirAll(workingDirectory, 0o755); err != nil {
+		return runtimemodel.StepExecutionResult{}, err
+	}
 
 	timeout := a.timeout
 	if timeout <= 0 {

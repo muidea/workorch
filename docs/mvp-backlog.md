@@ -330,4 +330,16 @@ Status: completed
 
 ## Closed Scope Notes
 
-MVP 范围内不再保留活跃待办项。更丰富的 block execution graph、外部 runtime / tool adapter、分布式调度系统、完整 observability pipeline、目标环境部署清单等内容不属于当前 MVP 收口范围；如后续启动，应以新的正式业务需求文档重新定义。
+MVP 范围内不再保留活跃待办项。本文件只保留早期服务 MVP
+收口记录，不再承担后续功能范围跟踪职责。
+
+后续已经完成的 runtime expansion、LLM-driven Workspace execution、真实
+provider 验证入口分别由以下文档跟踪：
+
+- `docs/runtime-expansion-plan.md`
+- `docs/llm-driven-development-plan.md`
+- `docs/deployment.md`
+
+仍未进入当前收口范围的长期能力包括分布式调度、完整外部 runtime
+marketplace、多租户治理、知识资产/检索增强体系，以及 MCP resources、
+prompts、streaming、session reuse 等高级协议能力。

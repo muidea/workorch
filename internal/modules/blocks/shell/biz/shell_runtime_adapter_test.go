@@ -3,6 +3,8 @@ package shell
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +32,32 @@ func TestRuntimeAdapter_ExecuteRuntimeStepRunsCommandInWorkspaceDirectory(t *tes
 	stdout, _ := result.Output["stdout"].(string)
 	if strings.TrimSpace(stdout) != workingDirectory {
 		t.Fatalf("stdout = %q, want working directory %q", stdout, workingDirectory)
+	}
+}
+
+func TestRuntimeAdapter_ExecuteRuntimeStepCreatesMissingWorkspaceDirectory(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	workingDirectory := filepath.Join(t.TempDir(), "missing", "workspace")
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceWorkingDirectory: workingDirectory,
+		Kind:                      "shell/command",
+		Input: map[string]any{
+			"command": "pwd",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v", err)
+	}
+	if result.Output["exitCode"] != 0 {
+		t.Fatalf("exitCode = %v, want 0", result.Output["exitCode"])
+	}
+	info, err := os.Stat(workingDirectory)
+	if err != nil {
+		t.Fatalf("stat working directory: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("workingDirectory is not a directory")
 	}
 }
 

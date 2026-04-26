@@ -9,7 +9,7 @@ GOTEST_FLAGS ?=
 BUILD_OUT ?= ./bin/workorchd
 CONSOLE_WEB := ./web/workorch-console
 
-.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-service verify-service-file verify-llm verify-llm-file docker-build docker-run docker-run-file docker-verify docker-verify-file ci
+.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-service verify-service-file verify-llm verify-llm-file verify-mcp-stdio verify-mcp-stdio-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-mvp docker-build docker-run docker-run-file docker-verify docker-verify-file ci
 
 help:
 	@echo "Targets:"
@@ -27,6 +27,13 @@ help:
 	@echo "  verify-service-file - build, start, and verify the HTTP service with file-backed repository and restart-read validation"
 	@echo "  verify-llm      - build, start, and verify LLM-driven workspace execution with a local mock provider"
 	@echo "  verify-llm-file - verify LLM-driven workspace execution with file-backed repository and restart-read validation"
+	@echo "  verify-mcp-stdio      - verify MCP stdio tool-call execution through LLM graph with memory repository"
+	@echo "  verify-mcp-stdio-file - verify MCP stdio tool-call execution with file-backed restart-read validation"
+	@echo "  verify-mvp      - run local memory-backed service, LLM, and MCP stdio MVP verification"
+	@echo "  verify-mvp-file - run local file-backed service, LLM, and MCP stdio MVP verification"
+	@echo "  verify-real-llm - verify a running workorchd against its configured real LLM provider"
+	@echo "  verify-real-mcp-stdio - verify a running workorchd can execute MCP stdio through LLM graph"
+	@echo "  verify-real-mvp - verify a running workorchd with real LLM and MCP stdio checks"
 	@echo "  docker-build    - docker build local workorchd image"
 	@echo "  docker-run      - run workorchd container with in-memory repository"
 	@echo "  docker-run-file - run workorchd container with file-backed repository"
@@ -92,6 +99,24 @@ verify-llm:
 
 verify-llm-file:
 	WORKORCH_LLM_VERIFY_ADDR=127.0.0.1:18182 WORKORCH_LLM_VERIFY_MOCK_ADDR=127.0.0.1:18183 WORKORCH_LLM_VERIFY_BACKEND=file ./scripts/verify-llm-workspace-execution.sh
+
+verify-mcp-stdio:
+	WORKORCH_MCP_STDIO_VERIFY_ADDR=127.0.0.1:18184 WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR=127.0.0.1:18185 ./scripts/verify-mcp-stdio-workspace-execution.sh
+
+verify-mcp-stdio-file:
+	WORKORCH_MCP_STDIO_VERIFY_ADDR=127.0.0.1:18186 WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR=127.0.0.1:18187 WORKORCH_MCP_STDIO_VERIFY_BACKEND=file ./scripts/verify-mcp-stdio-workspace-execution.sh
+
+verify-mvp: verify-service verify-llm verify-mcp-stdio
+
+verify-mvp-file: verify-service-file verify-llm-file verify-mcp-stdio-file
+
+verify-real-llm:
+	./scripts/verify-real-llm-workspace-execution.sh
+
+verify-real-mcp-stdio:
+	./scripts/verify-real-mcp-stdio-workspace-execution.sh
+
+verify-real-mvp: verify-real-llm verify-real-mcp-stdio
 
 docker-build:
 	docker build -t workorchd:local .

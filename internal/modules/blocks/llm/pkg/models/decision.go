@@ -10,11 +10,19 @@ type ProviderRequest struct {
 	Schema      string                 `json:"schema"`
 	TraceRefs   map[string]string      `json:"traceRefs,omitempty"`
 	Config      RedactedProviderConfig `json:"config"`
+	Repair      *ProviderRepairRequest `json:"repair,omitempty"`
+}
+
+type ProviderRepairRequest struct {
+	Attempt        int    `json:"attempt"`
+	OriginalOutput string `json:"originalOutput"`
+	ParseError     string `json:"parseError"`
 }
 
 type LLMExecutionDecision struct {
 	ThoughtSummary   string               `json:"thoughtSummary,omitempty"`
 	Plan             []string             `json:"plan,omitempty"`
+	ExecutionGraph   *BlockExecutionGraph `json:"executionGraph,omitempty"`
 	NextAction       *LLMAction           `json:"nextAction,omitempty"`
 	RequiredDecision *RequiredDecision    `json:"requiredDecision,omitempty"`
 	RequiredApproval *RequiredApproval    `json:"requiredApproval,omitempty"`
@@ -24,6 +32,18 @@ type LLMExecutionDecision struct {
 	MemoryWrites     []MemoryWriteRequest `json:"memoryWrites,omitempty"`
 	DoDAssessment    *DoDAssessment       `json:"dodAssessment,omitempty"`
 	CompletionState  string               `json:"completionState"`
+}
+
+type BlockExecutionGraph struct {
+	Nodes []BlockExecutionNode `json:"nodes"`
+}
+
+type BlockExecutionNode struct {
+	ID        string         `json:"id"`
+	Kind      string         `json:"kind"`
+	DependsOn []string       `json:"dependsOn,omitempty"`
+	Branch    string         `json:"branch,omitempty"`
+	Input     map[string]any `json:"input,omitempty"`
 }
 
 type LLMAction struct {

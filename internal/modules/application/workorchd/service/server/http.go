@@ -65,11 +65,9 @@ type statusResponse struct {
 	Status  string `json:"status"`
 }
 
-type runResponse struct {
-	Service  string             `json:"service"`
-	Backend  string             `json:"backend,omitempty"`
-	DataRoot string             `json:"dataRoot,omitempty"`
-	Slices   []appservice.Slice `json:"slices"`
+type configurationResponse struct {
+	Service       string                          `json:"service"`
+	Configuration appservice.ServiceConfiguration `json:"configuration"`
 }
 
 type workspaceResponse struct {
@@ -295,40 +293,10 @@ type defineDoDRequest struct {
 	Items []string `json:"items"`
 }
 
-type sliceCatalogResponse struct {
-	Service string                       `json:"service"`
-	Slices  []appservice.SliceDescriptor `json:"slices"`
-}
-
-type sliceSnapshotsResponse struct {
-	Service string             `json:"service"`
-	Slices  []appservice.Slice `json:"slices"`
-}
-
-type sliceStatusesResponse struct {
-	Service  string                   `json:"service"`
-	Statuses []appservice.SliceStatus `json:"statuses"`
-}
-
-type sliceRunResponse struct {
-	Service  string           `json:"service"`
-	Backend  string           `json:"backend,omitempty"`
-	DataRoot string           `json:"dataRoot,omitempty"`
-	Slice    appservice.Slice `json:"slice"`
-}
-
-type sliceStatusResponse struct {
-	Service  string                 `json:"service"`
-	Backend  string                 `json:"backend,omitempty"`
-	DataRoot string                 `json:"dataRoot,omitempty"`
-	Status   appservice.SliceStatus `json:"status"`
-}
-
 type errorResponse struct {
 	Error string `json:"error"`
 }
 
-type runFunc func(context.Context, string, string) ([]appservice.Slice, error)
 type createWorkspaceFunc func(context.Context, string, string, string, string, string) (appservice.Workspace, error)
 type readWorkspaceFunc func(context.Context, string, string, string) (appservice.Workspace, error)
 type readWorkspaceSnapshotFunc func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error)
@@ -367,68 +335,59 @@ type listMCPServersFunc func(context.Context, string, string) ([]appservice.MCPS
 type listMCPServerToolsFunc func(context.Context, string, string, string) ([]appservice.MCPTool, error)
 type createMemoryItemFunc func(context.Context, string, string, string, appservice.CreateMemoryItemCommand) (appservice.MemoryItem, error)
 type listMemoryByWorkspaceFunc func(context.Context, string, string, string, string) ([]appservice.MemoryItem, error)
-type runOneFunc func(context.Context, string, string, string) (appservice.Slice, error)
-type readOneFunc func(context.Context, string, string, string) (appservice.Slice, error)
-type statusOneFunc func(context.Context, string, string, string) (appservice.SliceStatus, error)
-type listSnapshotsFunc func(context.Context, string, string) ([]appservice.Slice, error)
-type listStatusesFunc func(context.Context, string, string) ([]appservice.SliceStatus, error)
-type listSlicesFunc func() []appservice.SliceDescriptor
 type validateFunc func(context.Context, string, string) error
+type readConfigurationFunc func() (appservice.ServiceConfiguration, error)
+type updateLLMConfigurationFunc func(appservice.UpdateLLMConfigurationCommand) (appservice.ServiceConfiguration, error)
 
 type serverState struct {
-	config                Config
-	eventHub              events.Hub
-	metrics               *serverMetrics
-	validate              validateFunc
-	createWorkspace       createWorkspaceFunc
-	readWorkspace         readWorkspaceFunc
-	readWorkspaceSnapshot readWorkspaceSnapshotFunc
-	listWorkspaces        listWorkspacesFunc
-	defineGoal            defineGoalFunc
-	readGoal              readGoalFunc
-	listGoals             listGoalsFunc
-	defineDoD             defineDoDFunc
-	readDoD               readDoDFunc
-	listDoDs              listDoDsFunc
-	createRun             createRunInstanceFunc
-	readRun               readRunInstanceFunc
-	readRunSnapshot       readRunSnapshotFunc
-	readRunStatus         readRunStatusFunc
-	readRunObservability  readRunObservabilityFunc
-	listRuns              listRunInstancesFunc
-	startRun              startRunInstanceFunc
-	resumeRun             resumeRunInstanceFunc
-	activateWorkspace     activateWorkspaceExecutionFunc
-	listDecisions         listDecisionsFunc
-	readDecision          readDecisionFunc
-	resolveDecision       resolveDecisionFunc
-	listApprovals         listApprovalsFunc
-	readApproval          readApprovalFunc
-	approveApproval       approveApprovalFunc
-	rejectApproval        rejectApprovalFunc
-	createSoul            createSoulFunc
-	readSoul              readSoulFunc
-	listSouls             listSoulsFunc
-	createSkill           createSkillFunc
-	readSkill             readSkillFunc
-	listSkills            listSkillsFunc
-	createMCPServer       createMCPServerFunc
-	readMCPServer         readMCPServerFunc
-	listMCPServers        listMCPServersFunc
-	listMCPServerTools    listMCPServerToolsFunc
-	createMemoryItem      createMemoryItemFunc
-	listMemoryByWorkspace listMemoryByWorkspaceFunc
-	listSlices            listSlicesFunc
-	listSnapshots         listSnapshotsFunc
-	listStatuses          listStatusesFunc
-	run                   runFunc
-	runOne                runOneFunc
-	readOne               readOneFunc
-	statusOne             statusOneFunc
-	runQueueMu            sync.Mutex
-	runQueueWaiters       []chan struct{}
-	activeRunSlots        int64
-	sharedSession         *appservice.RuntimeSession
+	config                 Config
+	eventHub               events.Hub
+	metrics                *serverMetrics
+	validate               validateFunc
+	createWorkspace        createWorkspaceFunc
+	readWorkspace          readWorkspaceFunc
+	readWorkspaceSnapshot  readWorkspaceSnapshotFunc
+	listWorkspaces         listWorkspacesFunc
+	defineGoal             defineGoalFunc
+	readGoal               readGoalFunc
+	listGoals              listGoalsFunc
+	defineDoD              defineDoDFunc
+	readDoD                readDoDFunc
+	listDoDs               listDoDsFunc
+	createRun              createRunInstanceFunc
+	readRun                readRunInstanceFunc
+	readRunSnapshot        readRunSnapshotFunc
+	readRunStatus          readRunStatusFunc
+	readRunObservability   readRunObservabilityFunc
+	listRuns               listRunInstancesFunc
+	startRun               startRunInstanceFunc
+	resumeRun              resumeRunInstanceFunc
+	activateWorkspace      activateWorkspaceExecutionFunc
+	listDecisions          listDecisionsFunc
+	readDecision           readDecisionFunc
+	resolveDecision        resolveDecisionFunc
+	listApprovals          listApprovalsFunc
+	readApproval           readApprovalFunc
+	approveApproval        approveApprovalFunc
+	rejectApproval         rejectApprovalFunc
+	createSoul             createSoulFunc
+	readSoul               readSoulFunc
+	listSouls              listSoulsFunc
+	createSkill            createSkillFunc
+	readSkill              readSkillFunc
+	listSkills             listSkillsFunc
+	createMCPServer        createMCPServerFunc
+	readMCPServer          readMCPServerFunc
+	listMCPServers         listMCPServersFunc
+	listMCPServerTools     listMCPServerToolsFunc
+	createMemoryItem       createMemoryItemFunc
+	listMemoryByWorkspace  listMemoryByWorkspaceFunc
+	readConfiguration      readConfigurationFunc
+	updateLLMConfiguration updateLLMConfigurationFunc
+	runQueueMu             sync.Mutex
+	runQueueWaiters        []chan struct{}
+	activeRunSlots         int64
+	sharedSession          *appservice.RuntimeSession
 }
 
 type serverMetrics struct {
@@ -473,13 +432,8 @@ type serverMetrics struct {
 	mcpToolListRequests         atomic.Uint64
 	memoryCreateRequests        atomic.Uint64
 	memoryListRequests          atomic.Uint64
-	sliceCatalogRequests        atomic.Uint64
-	sliceSnapshotsRequests      atomic.Uint64
-	sliceStatusesRequests       atomic.Uint64
-	singleSliceSnapshotRequests atomic.Uint64
-	sliceStatusRequests         atomic.Uint64
-	runRequests                 atomic.Uint64
-	singleRunRequests           atomic.Uint64
+	configurationReadRequests   atomic.Uint64
+	configurationUpdateRequests atomic.Uint64
 	runSucceeded                atomic.Uint64
 	runFailed                   atomic.Uint64
 	runRejected                 atomic.Uint64
@@ -662,7 +616,6 @@ func newMuxWithState(state *serverState) http.Handler {
 	registerSystemRoutes(router, state)
 	registerReadRoutes(router, state)
 	registerBusinessWriteRoutes(router, state)
-	registerSliceRoutes(router, state)
 	registerConsoleRoutes(router)
 	engineServer := engine.NewHTTPServer()
 	engineServer.Bind(router)
@@ -697,6 +650,37 @@ func registerSystemRoutes(router engine.RouteRegistry, state *serverState) {
 		state.metrics.metricsRequests.Add(1)
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		_, _ = fmt.Fprint(w, state.metrics.render(state.config))
+	})
+	router.AddHandler("/api/v1/workorch/configuration", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.configurationReadRequests.Add(1)
+		item, err := state.readConfiguration()
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, configurationResponse{
+			Service:       "workorch",
+			Configuration: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/configuration/llm", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.configurationUpdateRequests.Add(1)
+		var req appservice.UpdateLLMConfigurationCommand
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.updateLLMConfiguration(req)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, configurationResponse{
+			Service:       "workorch",
+			Configuration: item,
+		})
 	})
 }
 
@@ -1509,150 +1493,6 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			Approval: item,
 		})
 	})
-	router.AddHandler("/api/v1/workorch/runs", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		state.metrics.runRequests.Add(1)
-		release, err := state.acquireRunSlot(r.Context())
-		if err != nil {
-			state.metrics.runCanceled.Add(1)
-			writeRunQueueError(w, err)
-			return
-		}
-		defer release()
-
-		slices, err := state.run(r.Context(), state.config.Backend, state.config.DataRoot)
-		if err != nil {
-			state.metrics.runFailed.Add(1)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
-			return
-		}
-		state.metrics.runSucceeded.Add(1)
-		writeJSON(w, http.StatusOK, runResponse{
-			Service:  "workorch",
-			Backend:  state.config.Backend,
-			DataRoot: state.config.DataRoot,
-			Slices:   slices,
-		})
-	})
-}
-
-func registerSliceRoutes(router engine.RouteRegistry, state *serverState) {
-	router.AddHandler("/api/v1/workorch/slices", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		state.metrics.sliceCatalogRequests.Add(1)
-		writeJSON(w, http.StatusOK, sliceCatalogResponse{
-			Service: "workorch",
-			Slices:  state.listSlices(),
-		})
-	})
-	router.AddHandler("/api/v1/workorch/slices/snapshots", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		state.metrics.sliceSnapshotsRequests.Add(1)
-		slices, err := state.listSnapshots(r.Context(), state.config.Backend, state.config.DataRoot)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, sliceSnapshotsResponse{
-			Service: "workorch",
-			Slices:  slices,
-		})
-	})
-	router.AddHandler("/api/v1/workorch/slices/statuses", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		state.metrics.sliceStatusesRequests.Add(1)
-		statuses, err := state.listStatuses(r.Context(), state.config.Backend, state.config.DataRoot)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, sliceStatusesResponse{
-			Service:  "workorch",
-			Statuses: statuses,
-		})
-	})
-	router.AddHandler("/api/v1/workorch/slices/:sliceId/status", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		sliceID, action, ok := sliceActionFromPath(r.URL.Path)
-		if !ok || action != "status" {
-			http.NotFound(w, r)
-			return
-		}
-		state.metrics.sliceStatusRequests.Add(1)
-		status, err := state.statusOne(r.Context(), state.config.Backend, state.config.DataRoot, sliceID)
-		if err != nil {
-			if errors.Is(err, common.ErrNotFound) {
-				writeJSON(w, http.StatusNotFound, errorResponse{Error: err.Error()})
-				return
-			}
-			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, sliceStatusResponse{
-			Service:  "workorch",
-			Backend:  state.config.Backend,
-			DataRoot: state.config.DataRoot,
-			Status:   status,
-		})
-	})
-	router.AddHandler("/api/v1/workorch/slices/:sliceId/snapshot", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		sliceID, action, ok := sliceActionFromPath(r.URL.Path)
-		if !ok || action != "snapshot" {
-			http.NotFound(w, r)
-			return
-		}
-		state.metrics.singleSliceSnapshotRequests.Add(1)
-		slice, err := state.readOne(r.Context(), state.config.Backend, state.config.DataRoot, sliceID)
-		if err != nil {
-			if errors.Is(err, common.ErrNotFound) {
-				writeJSON(w, http.StatusNotFound, errorResponse{Error: err.Error()})
-				return
-			}
-			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, sliceRunResponse{
-			Service:  "workorch",
-			Backend:  state.config.Backend,
-			DataRoot: state.config.DataRoot,
-			Slice:    slice,
-		})
-	})
-	router.AddHandler("/api/v1/workorch/slices/:sliceId/runs", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		sliceID, action, ok := sliceActionFromPath(r.URL.Path)
-		if !ok || action != "runs" {
-			http.NotFound(w, r)
-			return
-		}
-		state.metrics.singleRunRequests.Add(1)
-		release, err := state.acquireRunSlot(r.Context())
-		if err != nil {
-			state.metrics.runCanceled.Add(1)
-			writeRunQueueError(w, err)
-			return
-		}
-		defer release()
-
-		slice, err := state.runOne(r.Context(), state.config.Backend, state.config.DataRoot, sliceID)
-		if err != nil {
-			if errors.Is(err, common.ErrNotFound) {
-				writeJSON(w, http.StatusNotFound, errorResponse{Error: err.Error()})
-				return
-			}
-			state.metrics.runFailed.Add(1)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
-			return
-		}
-		state.metrics.runSucceeded.Add(1)
-		writeJSON(w, http.StatusOK, sliceRunResponse{
-			Service:  "workorch",
-			Backend:  state.config.Backend,
-			DataRoot: state.config.DataRoot,
-			Slice:    slice,
-		})
-	})
 }
 
 func registerConsoleRoutes(router engine.RouteRegistry) {
@@ -1701,55 +1541,50 @@ func serveConsoleFile(w http.ResponseWriter, r *http.Request, staticFS fs.FS, na
 
 func newServerState(config Config, eventHub events.Hub) *serverState {
 	state := &serverState{
-		config:                config,
-		eventHub:              eventHub,
-		metrics:               &serverMetrics{},
-		validate:              defaultValidate,
-		createWorkspace:       defaultCreateWorkspace,
-		readWorkspace:         defaultReadWorkspace,
-		readWorkspaceSnapshot: defaultReadWorkspaceSnapshot,
-		listWorkspaces:        defaultListWorkspaces,
-		defineGoal:            defaultDefineGoal,
-		readGoal:              defaultReadGoal,
-		listGoals:             defaultListGoals,
-		defineDoD:             defaultDefineDoD,
-		readDoD:               defaultReadDoD,
-		listDoDs:              defaultListDoDs,
-		createRun:             defaultCreateRun,
-		readRun:               defaultReadRun,
-		readRunSnapshot:       defaultReadRunSnapshot,
-		readRunStatus:         defaultReadRunStatus,
-		readRunObservability:  defaultReadRunObservability,
-		listRuns:              defaultListRuns,
-		startRun:              defaultStartRun,
-		resumeRun:             defaultResumeRun,
-		activateWorkspace:     defaultActivateWorkspaceExecution,
-		listDecisions:         defaultListDecisions,
-		readDecision:          defaultReadDecision,
-		resolveDecision:       defaultResolveDecision,
-		listApprovals:         defaultListApprovals,
-		readApproval:          defaultReadApproval,
-		approveApproval:       defaultApproveApproval,
-		rejectApproval:        defaultRejectApproval,
-		createSoul:            defaultCreateSoul,
-		readSoul:              defaultReadSoul,
-		listSouls:             defaultListSouls,
-		createSkill:           defaultCreateSkill,
-		readSkill:             defaultReadSkill,
-		listSkills:            defaultListSkills,
-		createMCPServer:       defaultCreateMCPServer,
-		readMCPServer:         defaultReadMCPServer,
-		listMCPServers:        defaultListMCPServers,
-		listMCPServerTools:    defaultListMCPServerTools,
-		createMemoryItem:      defaultCreateMemoryItem,
-		listMemoryByWorkspace: defaultListMemoryByWorkspace,
-		listSlices:            defaultListSlices,
-		listSnapshots:         defaultListSnapshots,
-		listStatuses:          defaultListStatuses,
-		run:                   defaultRun,
-		runOne:                defaultRunOne,
-		readOne:               defaultReadOne,
-		statusOne:             defaultStatusOne,
+		config:                 config,
+		eventHub:               eventHub,
+		metrics:                &serverMetrics{},
+		validate:               defaultValidate,
+		createWorkspace:        defaultCreateWorkspace,
+		readWorkspace:          defaultReadWorkspace,
+		readWorkspaceSnapshot:  defaultReadWorkspaceSnapshot,
+		listWorkspaces:         defaultListWorkspaces,
+		defineGoal:             defaultDefineGoal,
+		readGoal:               defaultReadGoal,
+		listGoals:              defaultListGoals,
+		defineDoD:              defaultDefineDoD,
+		readDoD:                defaultReadDoD,
+		listDoDs:               defaultListDoDs,
+		createRun:              defaultCreateRun,
+		readRun:                defaultReadRun,
+		readRunSnapshot:        defaultReadRunSnapshot,
+		readRunStatus:          defaultReadRunStatus,
+		readRunObservability:   defaultReadRunObservability,
+		listRuns:               defaultListRuns,
+		startRun:               defaultStartRun,
+		resumeRun:              defaultResumeRun,
+		activateWorkspace:      defaultActivateWorkspaceExecution,
+		listDecisions:          defaultListDecisions,
+		readDecision:           defaultReadDecision,
+		resolveDecision:        defaultResolveDecision,
+		listApprovals:          defaultListApprovals,
+		readApproval:           defaultReadApproval,
+		approveApproval:        defaultApproveApproval,
+		rejectApproval:         defaultRejectApproval,
+		createSoul:             defaultCreateSoul,
+		readSoul:               defaultReadSoul,
+		listSouls:              defaultListSouls,
+		createSkill:            defaultCreateSkill,
+		readSkill:              defaultReadSkill,
+		listSkills:             defaultListSkills,
+		createMCPServer:        defaultCreateMCPServer,
+		readMCPServer:          defaultReadMCPServer,
+		listMCPServers:         defaultListMCPServers,
+		listMCPServerTools:     defaultListMCPServerTools,
+		createMemoryItem:       defaultCreateMemoryItem,
+		listMemoryByWorkspace:  defaultListMemoryByWorkspace,
+		readConfiguration:      defaultReadConfiguration,
+		updateLLMConfiguration: appservice.UpdateLLMConfiguration,
 	}
 	state.configureSharedMemorySession()
 	return state
@@ -2112,60 +1947,6 @@ func (s *serverState) configureSharedMemorySession() {
 		})
 		return ret, err
 	}
-	s.run = func(ctx context.Context, _, _ string) ([]appservice.Slice, error) {
-		var ret []appservice.Slice
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
-			var err error
-			ret, err = appservice.RunAllWorkorchWithSession(ctx, session)
-			return err
-		})
-		return ret, err
-	}
-	s.runOne = func(ctx context.Context, _, _, sliceID string) (appservice.Slice, error) {
-		var ret appservice.Slice
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
-			var err error
-			ret, err = appservice.RunWorkorchSliceWithSession(ctx, session, sliceID)
-			return err
-		})
-		return ret, err
-	}
-	s.readOne = func(ctx context.Context, _, _, sliceID string) (appservice.Slice, error) {
-		var ret appservice.Slice
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
-			var err error
-			ret, err = appservice.ReadWorkorchSliceSnapshotWithSession(ctx, session, sliceID)
-			return err
-		})
-		return ret, err
-	}
-	s.statusOne = func(ctx context.Context, _, _, sliceID string) (appservice.SliceStatus, error) {
-		var ret appservice.SliceStatus
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
-			var err error
-			ret, err = appservice.SummarizeWorkorchSliceStatusWithSession(ctx, session, sliceID)
-			return err
-		})
-		return ret, err
-	}
-	s.listSnapshots = func(ctx context.Context, _, _ string) ([]appservice.Slice, error) {
-		var ret []appservice.Slice
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
-			var err error
-			ret, err = appservice.ListAvailableWorkorchSliceSnapshotsWithSession(ctx, session)
-			return err
-		})
-		return ret, err
-	}
-	s.listStatuses = func(ctx context.Context, _, _ string) ([]appservice.SliceStatus, error) {
-		var ret []appservice.SliceStatus
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
-			var err error
-			ret, err = appservice.ListAvailableWorkorchSliceStatusesWithSession(ctx, session)
-			return err
-		})
-		return ret, err
-	}
 }
 
 func isMemoryBackend(backend string) bool {
@@ -2196,10 +1977,6 @@ func defaultValidate(ctx context.Context, backend string, dataRoot string) error
 		return err
 	}
 	return session.Close(ctx)
-}
-
-func defaultRun(ctx context.Context, backend string, dataRoot string) ([]appservice.Slice, error) {
-	return appservice.RunAllWorkorchWithBackend(ctx, backend, dataRoot)
 }
 
 func defaultCreateWorkspace(ctx context.Context, backend string, dataRoot string, title string, description string, workingDirectory string) (appservice.Workspace, error) {
@@ -2354,28 +2131,8 @@ func defaultListMemoryByWorkspace(ctx context.Context, backend string, dataRoot 
 	return appservice.ListMemoryByWorkspaceWithBackend(ctx, backend, dataRoot, workspaceID, query)
 }
 
-func defaultRunOne(ctx context.Context, backend string, dataRoot string, sliceID string) (appservice.Slice, error) {
-	return appservice.RunWorkorchSliceWithBackend(ctx, backend, dataRoot, sliceID)
-}
-
-func defaultReadOne(ctx context.Context, backend string, dataRoot string, sliceID string) (appservice.Slice, error) {
-	return appservice.ReadWorkorchSliceSnapshotWithBackend(ctx, backend, dataRoot, sliceID)
-}
-
-func defaultStatusOne(ctx context.Context, backend string, dataRoot string, sliceID string) (appservice.SliceStatus, error) {
-	return appservice.SummarizeWorkorchSliceStatusWithBackend(ctx, backend, dataRoot, sliceID)
-}
-
-func defaultListSlices() []appservice.SliceDescriptor {
-	return appservice.ListWorkorchSlices()
-}
-
-func defaultListSnapshots(ctx context.Context, backend string, dataRoot string) ([]appservice.Slice, error) {
-	return appservice.ListAvailableWorkorchSliceSnapshotsWithBackend(ctx, backend, dataRoot)
-}
-
-func defaultListStatuses(ctx context.Context, backend string, dataRoot string) ([]appservice.SliceStatus, error) {
-	return appservice.ListAvailableWorkorchSliceStatusesWithBackend(ctx, backend, dataRoot)
+func defaultReadConfiguration() (appservice.ServiceConfiguration, error) {
+	return appservice.ReadServiceConfiguration()
 }
 
 func (s *serverState) acquireRunSlot(ctx context.Context) (func(), error) {
@@ -2473,13 +2230,8 @@ func (m *serverMetrics) render(config Config) string {
 			"workorch_http_requests_total{endpoint=\"approval_get\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"approval_approve\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"approval_reject\"} %d\n"+
-			"workorch_http_requests_total{endpoint=\"slices\"} %d\n"+
-			"workorch_http_requests_total{endpoint=\"slice_snapshots\"} %d\n"+
-			"workorch_http_requests_total{endpoint=\"slice_statuses\"} %d\n"+
-			"workorch_http_requests_total{endpoint=\"slice_snapshot\"} %d\n"+
-			"workorch_http_requests_total{endpoint=\"slice_status\"} %d\n"+
-			"workorch_http_requests_total{endpoint=\"runs\"} %d\n"+
-			"workorch_http_requests_total{endpoint=\"slice_runs\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"configuration_read\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"configuration_update\"} %d\n"+
 			"# TYPE workorch_run_requests_in_flight gauge\n"+
 			"workorch_run_requests_in_flight %d\n"+
 			"# TYPE workorch_run_queue_waiting gauge\n"+
@@ -2522,13 +2274,8 @@ func (m *serverMetrics) render(config Config) string {
 		m.approvalGetRequests.Load(),
 		m.approvalApproveRequests.Load(),
 		m.approvalRejectRequests.Load(),
-		m.sliceCatalogRequests.Load(),
-		m.sliceSnapshotsRequests.Load(),
-		m.sliceStatusesRequests.Load(),
-		m.singleSliceSnapshotRequests.Load(),
-		m.sliceStatusRequests.Load(),
-		m.runRequests.Load(),
-		m.singleRunRequests.Load(),
+		m.configurationReadRequests.Load(),
+		m.configurationUpdateRequests.Load(),
 		m.runInFlight.Load(),
 		m.runQueueWaiting.Load(),
 		m.runQueuedTotal.Load(),
@@ -2538,21 +2285,6 @@ func (m *serverMetrics) render(config Config) string {
 		m.runCanceled.Load(),
 		config.MaxConcurrentRuns,
 	)
-}
-
-func sliceActionFromPath(path string) (sliceID string, action string, ok bool) {
-	if !strings.HasPrefix(path, "/api/v1/workorch/slices/") {
-		return "", "", false
-	}
-	trimmed := strings.TrimPrefix(path, "/api/v1/workorch/slices/")
-	parts := strings.Split(trimmed, "/")
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	if parts[0] == "" || parts[1] == "" {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
 }
 
 func resourceIDFromPath(path string, prefix string) (string, bool) {

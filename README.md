@@ -1,6 +1,6 @@
 # workorch
 
-workorch minimal skeleton, rectified to the go-multi-module-dev module-oriented layout.
+workorch is a local-first workspace orchestration service for defining Goals and DoD, activating execution Runs, observing runtime progress, and managing LLM / MCP / memory context through a bundled web console.
 
 ## Structure
 
@@ -10,7 +10,7 @@ workorch minimal skeleton, rectified to the go-multi-module-dev module-oriented 
 - `web/workorch-console`: React/TypeScript management console source, built into `workorchd` assets
 - `internal/modules/application/workorchd/service/server/consoleassets`: embedded management console build output served by `workorchd`
 - `internal/modules/kernel/{workspace,run,decision,orchestrator}`: workorch kernel modules
-- `internal/modules/blocks/{approval,legacy}`: reusable/block modules
+- `internal/modules/blocks/{approval,legacy,llm,mcp,shell}`: reusable/block modules
 - `internal/pkg/{common,events,repository}`: shared internal primitives
 - `docs/`: repo docs
 - `.github/workflows/ci.yml`: GitHub Actions CI workflow
@@ -30,14 +30,9 @@ The application layer is also split by responsibility:
 - `internal/modules/application/workorchd`: plugin module registration plus `Setup` / `Run` / `Teardown` bridge for the workorchd HTTP service
 - `internal/initiators/workorchruntime`: application runtime dependency provider used by plugin-loaded modules
 - `internal/modules/application/workorchd/biz/bootstrap`: backend assembly, repository wiring, and runtime construction
-- `internal/modules/application/workorchd/biz/appservice`: application-level business orchestration, workorch workflow assembly, env-backed execution entry, and workorch runtime adapter
+- `internal/modules/application/workorchd/biz/appservice`: application-level business orchestration, service read/write flows, runtime activation, and runtime adapter
 - `internal/modules/application/workorchd/pkg/observed`: workorch observed-envelope adapter for acceptance snapshots
-- `internal/modules/application/workorchd/biz/demo`: compatibility export entry that forwards to `appservice`
 - `internal/modules/application/workorchd/pkg/presenter`: observable output rendering
-
-Inside `demo/`, responsibilities are now intentionally thin:
-
-- `demo.go`: compatibility shim that delegates to `appservice.RunAllWorkorchFromEnv(...)` / `appservice.RunAllWorkorch(...)`
 
 Current boundary:
 
@@ -47,15 +42,13 @@ Current boundary:
 - `appservice.Runtime`: workorch application runtime contract
 - `appservice/runtime_adapter.go`: bridges grouped `bootstrap.Exports` into the workorch runtime contract through grouped runtime dependencies
 - `appservice`: now keeps workspace write flows behind `workspace` module service instead of direct repository updates
-- `appservice`: now also uses explicit read-side vs action-side runtime faces inside workorch orchestration
-- `appservice`: workorch action-side is now further grouped by workspace/run/decision/approval business actions
+- `appservice`: uses explicit read-side vs action-side runtime faces inside workorch orchestration
+- `appservice`: action-side runtime ports are grouped by workspace/run/decision/approval business actions
 - `appservice`: workorch read-side is now further grouped by guard checks vs snapshot assembly
 - `appservice/runtime_adapter.go`: now also groups its own dependencies into read-side and action-side capabilities instead of flat repo/service fields
 - `appservice/runtime_dependencies.go`: now centralizes `bootstrap.Exports` to grouped runtime dependency assembly in one place
 - `appservice/runtime_assembly.go`: now centralizes managed runtime adapter plus collector assembly in one place
 - `appservice/runtime_session.go`: now centralizes repeated bootstrap-plus-managed-runtime lifecycle handling in one place
-- `appservice/entry.go`: now centralizes repeated workorch execution through `WithSession` and `WithBackend` helpers, with `demo` forwarding to the same path
-- `appservice/demo` tests: now centralize repeated session setup and backend run patterns through shared test helpers
 - `observed/`: owns workorch acceptance `observed` envelope assembly
 - `bootstrap.Exports.Infrastructure`: now carries the application `EventHub`
 - `internal/pkg/events/workorch_payload.go`: now centralizes reusable workorch event payload keys and builders
@@ -163,6 +156,17 @@ maxConcurrentRuns = 1
 [repository]
 backend = "memory"
 dataDir = "/var/lib/workorch"
+
+[llm]
+defaultProvider = "local"
+
+[llm.providers.local]
+provider = ""
+baseURL = ""
+apiKey = ""
+model = ""
+timeout = "60s"
+disabled = false
 ```
 
 When the concurrent run limit is reached, execution requests enter an in-process FIFO wait queue and continue after a slot becomes available. If the caller cancels the request while waiting, the service returns `408 Request Timeout`.
@@ -175,10 +179,13 @@ Available endpoints:
 - `GET /healthz`
 - `GET /readyz`
 - `GET /metrics`
+- `GET /api/v1/workorch/configuration`
+- `PUT /api/v1/workorch/configuration/llm`
 - `POST /api/v1/workorch/workspaces`
 - `GET /api/v1/workorch/workspaces`
 - `GET /api/v1/workorch/workspaces/{workspaceId}`
 - `GET /api/v1/workorch/workspaces/{workspaceId}/snapshot`
+- `POST /api/v1/workorch/workspaces/{workspaceId}/execution-activations`
 - `POST /api/v1/workorch/workspaces/{workspaceId}/goals`
 - `GET /api/v1/workorch/workspaces/{workspaceId}/goals`
 - `GET /api/v1/workorch/goals/{goalId}`
@@ -190,6 +197,7 @@ Available endpoints:
 - `GET /api/v1/workorch/runs/{runId}`
 - `GET /api/v1/workorch/runs/{runId}/snapshot`
 - `GET /api/v1/workorch/runs/{runId}/status`
+- `GET /api/v1/workorch/runs/{runId}/observability`
 - `POST /api/v1/workorch/runs/{runId}/start`
 - `POST /api/v1/workorch/runs/{runId}/resume`
 - `GET /api/v1/workorch/decisions`
@@ -199,13 +207,11 @@ Available endpoints:
 - `GET /api/v1/workorch/approvals/{approvalId}`
 - `POST /api/v1/workorch/approvals/{approvalId}/approve`
 - `POST /api/v1/workorch/approvals/{approvalId}/reject`
-- `GET /api/v1/workorch/slices`
-- `GET /api/v1/workorch/slices/snapshots`
-- `GET /api/v1/workorch/slices/statuses`
-- `GET /api/v1/workorch/slices/{sliceId}/status`
-- `GET /api/v1/workorch/slices/{sliceId}/snapshot`
-- `POST /api/v1/workorch/slices/{sliceId}/runs`
-- `POST /api/v1/workorch/runs`
+
+The Web Console Configuration page can update LLM providers. The service writes
+the change to `application.toml`, reloads magicCommon framework configuration,
+and the next LLM runtime step resolves providers from the latest config without
+restarting `workorchd`. Read responses redact provider API keys.
 
 Minimal deployment verification:
 
@@ -218,7 +224,6 @@ WORKSPACE_JSON="$(curl -sS -X POST http://127.0.0.1:8080/api/v1/workorch/workspa
   -d '{"title":"demo workspace","description":"demo workspace description"}')"
 WORKSPACE_ID="$(printf '%s\n' "${WORKSPACE_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
 test -n "${WORKSPACE_ID}"
-curl http://127.0.0.1:8080/api/v1/workorch/slices
 GOAL_JSON="$(curl -sS -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/goals \
   -H 'Content-Type: application/json' \
   -d '{"text":"deliver local MVP orchestration"}')"
@@ -230,8 +235,7 @@ DOD_ID="$(printf '%s\n' "${DOD_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | 
 curl -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
   -H 'Content-Type: application/json' \
   -d '{"runId":"run-local-verify","goalId":"'"${GOAL_ID}"'","doDId":"'"${DOD_ID}"'"}'
-curl -X POST http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/runs
-curl -X POST http://127.0.0.1:8080/api/v1/workorch/runs
+curl -X POST http://127.0.0.1:8080/api/v1/workorch/runs/run-local-verify/start
 ```
 
 Persisted-state verification for the file-backed backend:
@@ -274,10 +278,6 @@ curl -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${APPROVAL_RUN_ID}/resum
 curl http://127.0.0.1:8080/api/v1/workorch/runs
 curl "http://127.0.0.1:8080/api/v1/workorch/runs?workspaceId=${WORKSPACE_ID}"
 curl http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}
-curl http://127.0.0.1:8080/api/v1/workorch/slices/snapshots
-curl http://127.0.0.1:8080/api/v1/workorch/slices/statuses
-curl http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/status
-curl http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/snapshot
 ```
 
 Deployment-oriented validation:
@@ -297,9 +297,6 @@ WORKSPACE_JSON="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/workorch/worksp
   -d '{"title":"demo workspace","description":"demo workspace description"}')"
 WORKSPACE_ID="$(printf '%s\n' "${WORKSPACE_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
 test -n "${WORKSPACE_ID}"
-curl -f http://127.0.0.1:8080/api/v1/workorch/slices
-curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/runs
-curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs
 ```
 
 For file-backed verification, also run:
@@ -342,13 +339,9 @@ curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${APPROVAL_RUN_ID}/re
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs
 curl -f "http://127.0.0.1:8080/api/v1/workorch/runs?workspaceId=${WORKSPACE_ID}"
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}
-curl -f http://127.0.0.1:8080/api/v1/workorch/slices/snapshots
-curl -f http://127.0.0.1:8080/api/v1/workorch/slices/statuses
-curl -f http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/status
-curl -f http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/snapshot
 ```
 
-The workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `workingDirectory` to `<service-working-directory>/workspaces/<generated-workspace-id>` when the client omits it. The workspace list and single-workspace read endpoints are persisted read endpoints, so they are intended for the file-backed repository backend rather than the stateless per-request memory backend. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, and single-run read endpoints provide formal `workorch` run instance management; because create depends on an existing workspace and the service creates a fresh runtime session per request, the persisted run list and read endpoints are also mainly intended for the file-backed repository backend. The run snapshot and run status endpoints provide formal `runId`-based read models without requiring `sliceId`. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision list and single-ticket endpoints provide formal query paths for decision gate instances, and the resolve/reject endpoints complete the external decision gate closure for blocked runs. The approval list and single-approval endpoints provide the same formal query and processing path for approval gates, and the approve/reject endpoints now complete the external approval gate closure for blocked runs. The slice catalog endpoint returns the current executable `workorch` slice definitions with stable IDs. The batch slice-snapshots endpoint returns all currently available persisted slice snapshots. The batch slice-statuses endpoint returns all currently available persisted slice summaries. The single-slice run endpoint executes one requested `workorch` business slice. The single-slice status and snapshot endpoints read persisted state for one requested `workorch` slice, so the persisted read endpoints are intended for the file-backed repository backend rather than the stateless per-request memory backend. The bulk run endpoint returns the current 17 `workorch` slices as JSON, including workspace/run/step/blocking snapshots and observed items. All run execution entrypoints now share one in-process FIFO wait queue behind `server.maxConcurrentRuns`, including formal `run start` and `run resume`.
+The workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `workingDirectory` to `<service-working-directory>/workspaces/<generated-workspace-id>` when the client omits it. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, single-run, snapshot, status, and observability endpoints provide formal `workorch` run instance management. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision and approval endpoints provide formal query and processing paths for blocked runs. All run execution entrypoints share one in-process FIFO wait queue behind `server.maxConcurrentRuns`.
 
 Container-oriented deployment details are in `docs/deployment.md`, and `config/application.toml` provides the baseline runtime configuration template.
 
@@ -357,11 +350,20 @@ Formal verification entrypoints:
 ```bash
 make verify-service
 make verify-service-file
+make verify-llm
+make verify-llm-file
+make verify-mcp-stdio
+make verify-mcp-stdio-file
+make verify-mvp
+make verify-mvp-file
+make verify-real-llm
+make verify-real-mcp-stdio
+make verify-real-mvp
 make docker-verify
 make docker-verify-file
 ```
 
-`make verify-service-file` and `make docker-verify-file` both verify the full file-backed MVP closure, including service restart and persisted read-model continuity.
+`make verify-mvp` runs the local memory-backed MVP verification bundle. `make verify-mvp-file` runs the file-backed bundle with restart-read continuity. `make verify-real-mvp` targets an already running `workorchd`; it combines the configured real LLM check and the deployed MCP `stdio` runtime check.
 
 ## Development targets
 

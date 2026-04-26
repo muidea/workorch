@@ -11,20 +11,33 @@ structured execution decisions and the existing `Run`, `Step`, `ToolCall`,
 `Patch`, `ValidationResult`, `RuntimeCheckpoint`, `Decision Ticket`, and
 `Approval` chains remain the source of operational truth.
 
-## Current Gap
+## Implemented Coverage
 
 The current implementation can create Workspace, define Goal and DoD, activate a
 Run, execute runtime steps, persist evidence, block on Decision or Approval, and
 expose observability.
 
-The missing product capability is:
+The LLM-driven MVP implementation now covers:
 
-- `Goal` and `DoD` are not yet used as planning context for execution.
-- The first runtime step is selected by a fixed step kind, not by model planning.
-- The legacy runtime adapter returns deterministic payloads for verification.
-- Run completion does not yet depend on model-generated DoD assessment.
-- There is no LLM provider boundary, Soul selection, Skill loading, MCP tool
-  discovery, or persistent Memory recall in the execution loop.
+- `Goal` and `DoD` are included in Workspace execution planning context.
+- Workspace activation starts with `llm/workspace_execution` instead of
+  silently completing through `legacy/minimal`.
+- A configured OpenAI-compatible provider can return strict
+  `LLMExecutionDecision` JSON, including validated `executionGraph` plans.
+- Runtime graph leaf completion can dispatch an LLM follow-up for
+  evidence-backed DoD assessment.
+- Soul, Skill, MCP registry metadata, and persistent Memory are available as
+  first-class execution context.
+- `blocks/mcp` is registered for `mcp/tool_call` and supports governed
+  HTTP/HTTPS MCP-style endpoint invocation and MCP `stdio` JSON-RPC
+  `tools/call`.
+
+Remaining intentional boundaries:
+
+- Advanced MCP resources, prompts, streaming, and long-lived external runtime
+  adapters remain outside the current MVP.
+- Provider streaming, vector Memory search, distributed scheduling, and an
+  external runtime marketplace remain outside the current MVP.
 
 ## Design Inputs
 
@@ -106,8 +119,8 @@ The implementation must preserve these ownership boundaries.
 | `kernel/memory` | Memory CRUD, Workspace-scoped search, source citation, memory write policy | Run evidence refs, Decision/Approval resolution, ValidationResult summary | Replace evidence, checkpoint, or artifact persistence |
 | `kernel/mcp` | MCP server registry, tool/resource metadata, policy | Soul allow-list, activation selections | Invoke MCP tools directly from model output |
 | `blocks/llm` | Provider request assembly, provider call, schema parsing, provider error normalization | Execution context assembled by application/orchestrator | Mutate repositories, execute shell, apply patches, invoke MCP |
-| `blocks/mcp` | Approved MCP invocation and output normalization | Approved tool call request and server registry | Select tools from free-form LLM text or bypass Approval |
-| Future `blocks/shell` | Approved Workspace-rooted shell execution | Step input and workspace directory | Run outside Workspace policy or decide business state |
+| `blocks/mcp` | Approved HTTP/HTTPS MCP-style tool invocation, MCP stdio `tools/call`, and output normalization | Approved tool call request and server registry | Select tools from free-form LLM text, bypass Approval, or implement protocol transports in the orchestrator |
+| `blocks/shell` | Approved Workspace-rooted shell execution | Step input and workspace directory | Run outside Workspace policy or decide business state |
 
 Hard rules:
 
@@ -220,6 +233,36 @@ The LLM may ask for action, Decision, Approval, Memory write, or DoD assessment.
 It does not get direct access to repository handles, shell executors, patch
 engines, or MCP clients.
 
+Provider response handling follows a strict contract:
+
+- OpenAI-compatible providers, including DeepSeek-compatible endpoints, are
+  called through Chat Completions JSON object mode.
+- `blocks/llm` may normalize transport formatting only, such as markdown fences
+  or explanatory text around the first JSON object.
+- The final `LLMExecutionDecision` still rejects unknown fields, invalid enum
+  values, wrong JSON types, invalid DoD evidence, and invalid execution graphs.
+- Schema-invalid output triggers one repair retry with the original output
+  preview and parse error. If repair fails, the Step fails with both original
+  parse and repair diagnostics.
+- Tool calls must be executed by concrete runtime adapters such as
+  `blocks/shell` or `blocks/mcp`; Run planning remains a strict business
+  decision JSON contract.
+
+For multi-step or parallel-ready work, the model should return
+`LLMExecutionDecision.executionGraph` instead of directly emitting multiple tool
+calls. The graph is advisory until validated by `blocks/llm` and persisted as a
+Step output. `kernel/orchestrator` owns graph traversal, state transitions,
+checkpointing, cancellation, retry, and ready-node concurrent dispatch. All
+currently ready nodes with satisfied dependencies are dispatched in one
+scheduler batch; individual parallel steps record evidence, while the batch
+coordinator decides the next graph batch, graph follow-up, or terminal state.
+
+When a graph leaf finishes and the Run still requires DoD assessment,
+`kernel/orchestrator` dispatches a follow-up `llm/workspace_execution` Step with
+the graph metadata and previous Step output. This keeps tool execution and DoD
+judgement separate: blocks produce evidence, then the LLM evaluates whether the
+Goal and DoD are satisfied through the formal decision contract.
+
 ### Action Interaction
 
 Action requests always move through Orchestrator and block adapters.
@@ -228,7 +271,7 @@ Action requests always move through Orchestrator and block adapters.
 LLMExecutionDecision.shellCommands
 -> NormalizedRuntimeOutput.nextKind = shell/command
 -> kernel/orchestrator dispatches shell Step
--> shell block executes inside Workspace root
+-> shell block ensures the Workspace root exists and executes inside it
 -> kernel/orchestrator records ToolCall and ValidationResult evidence
 ```
 
@@ -244,7 +287,8 @@ LLMExecutionDecision.patchRequests
 LLMExecutionDecision.mcpToolCalls
 -> NormalizedRuntimeOutput.nextKind = mcp/tool_call
 -> kernel/orchestrator verifies policy and Approval need
--> blocks/mcp invokes approved MCP tool
+-> blocks/mcp validates MCP server enablement and allowedTools
+-> blocks/mcp invokes approved HTTP/HTTPS tool endpoint
 -> kernel/run records ToolCall evidence
 ```
 
@@ -436,7 +480,10 @@ MCPServer
 Boundary:
 
 - `kernel/mcp` owns registry, discovery metadata, and policy.
-- `blocks/mcp` owns concrete invocation and result normalization.
+- `blocks/mcp` owns concrete HTTP/HTTPS invocation, MCP `stdio` `tools/call`,
+  and result normalization.
+- Future protocol-specific MCP adapters own additional transports or advanced
+  MCP capabilities.
 - LLM may request an MCP call by structured action only.
 - MCP call result must be recorded as `ToolCall` evidence.
 
@@ -613,8 +660,9 @@ Not responsible for:
 
 Responsibilities:
 
-- Execute approved MCP tool calls.
-- Read approved MCP resources.
+- Execute approved HTTP/HTTPS MCP-style tool calls.
+- Execute approved MCP `stdio` JSON-RPC `tools/call` requests after
+  `initialize` and `notifications/initialized`.
 - Normalize MCP output into `ToolCall` evidence payloads.
 
 Not responsible for:
@@ -622,6 +670,8 @@ Not responsible for:
 - Tool selection by model.
 - Soul or Skill selection.
 - Persistent Memory policy.
+- Advanced MCP resources, prompts, streaming, or long-lived external runtime
+  sessions.
 
 ### `kernel/orchestrator`
 
@@ -725,7 +775,7 @@ If LLM requests MCP:
 ```text
 LLMExecutionDecision.mcpToolCalls
 -> Step output nextKind=mcp/tool_call
--> blocks/mcp invokes MCP tool
+-> blocks/mcp invokes HTTP/HTTPS endpoint or MCP stdio tools/call
 -> ToolCall evidence recorded
 ```
 
@@ -1240,7 +1290,7 @@ Recommended order:
 4. Add prompt assembly from Workspace, Goal, DoD, Soul, Skills, Memory, and MCP
    catalog.
 5. Add Memory write path for Run summary and Decision resolution.
-6. Add MCP registry and later `blocks/mcp` invocation.
+6. Add MCP registry and formal `blocks/mcp` HTTP/HTTPS invocation.
 7. Add Web controls for Soul selection, Memory visibility, and LLM execution
    observability.
 

@@ -4,21 +4,23 @@ import {
   CheckCircleOutlined,
   DashboardOutlined,
   ExceptionOutlined,
-  ProfileOutlined
+  ProfileOutlined,
+  SettingOutlined
 } from '@ant-design/icons';
 import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-components';
 import { App as AntApp, Button, ConfigProvider, Descriptions, Empty, Form, Input, Modal, Select, Space, Steps, Tag, Typography, theme } from 'antd';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Decision, DoD, Goal, MCPServer, MemoryItem, Run, RunObservability, RunSnapshot, RuntimeTimelineItem, Skill, Soul, StepView, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
+import type { Approval, Decision, DoD, Goal, MCPServer, MemoryItem, Run, RunObservability, RunSnapshot, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
-type ViewKey = 'board' | 'decisionQueue' | 'workspaceDetail' | 'service';
+type ViewKey = 'board' | 'decisionQueue' | 'workspaceDetail' | 'configuration' | 'service';
 
 const routes = [
   { path: '/board', name: 'Workspace Overview', icon: <DashboardOutlined /> },
   { path: '/decisionQueue', name: 'Decision Queue', icon: <ExceptionOutlined /> },
   { path: '/workspaceDetail', name: 'Workspace Console', icon: <ProfileOutlined /> },
+  { path: '/configuration', name: 'Configuration', icon: <SettingOutlined /> },
   { path: '/service', name: 'Service Health', icon: <CheckCircleOutlined /> }
 ];
 
@@ -99,6 +101,37 @@ function outputText(output: Record<string, unknown> | undefined, key: string) {
     return '-';
   }
   return typeof value === 'string' ? value : compactJSON(value);
+}
+
+function llmConfigurationFormValues(configuration: ServiceConfiguration): UpdateLLMConfigurationRequest {
+  return {
+    defaultProviderId: configuration.llm.defaultProviderId,
+    providers: (configuration.llm.providers ?? []).map((item) => ({
+      id: item.id,
+      provider: item.provider,
+      baseUrl: item.baseUrl,
+      apiKey: '',
+      model: item.model,
+      timeout: item.timeout,
+      disabled: item.disabled
+    }))
+  };
+}
+
+function nextProviderDraft(existing: UpdateLLMProviderConfiguration[]): UpdateLLMProviderConfiguration {
+  let index = existing.length + 1;
+  let id = `provider-${index}`;
+  const existingIDs = new Set(existing.map((item) => item.id));
+  while (existingIDs.has(id)) {
+    index += 1;
+    id = `provider-${index}`;
+  }
+  return {
+    id,
+    provider: 'compatible',
+    timeout: '60s',
+    disabled: false
+  };
 }
 
 type ControlPlaneProps = {
@@ -250,6 +283,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [skills, setSkills] = useState<Skill[]>([]);
   const [mcpServers, setMCPServers] = useState<MCPServer[]>([]);
   const [memoryItems, setMemoryItems] = useState<MemoryItem[]>([]);
+  const [configuration, setConfiguration] = useState<ServiceConfiguration | undefined>(undefined);
   const [runSnapshot, setRunSnapshot] = useState<RunSnapshot | undefined>(undefined);
   const [runObservability, setRunObservability] = useState<RunObservability | undefined>(undefined);
   const [loading, setLoading] = useState(false);
@@ -294,6 +328,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   }, [workspaceId]);
 
   const readyDoDs = dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
+  const llmProviders = configuration?.llm.providers ?? [];
 
   async function loadWorkspaceList(nextWorkspaceId?: string) {
     const items = await workorchApi.listWorkspaces();
@@ -306,14 +341,15 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   }
 
   async function loadWorkspaceContext(targetWorkspaceId: string) {
-    const [nextSnapshot, nextGoals, nextDoDs, nextSouls, nextSkills, nextMCPServers, nextMemoryItems] = await Promise.all([
+    const [nextSnapshot, nextGoals, nextDoDs, nextSouls, nextSkills, nextMCPServers, nextMemoryItems, nextConfiguration] = await Promise.all([
       workorchApi.readWorkspaceSnapshot(targetWorkspaceId),
       workorchApi.listGoals(targetWorkspaceId),
       workorchApi.listDoDs(targetWorkspaceId),
       workorchApi.listSouls(),
       workorchApi.listSkills(),
       workorchApi.listMCPServers(),
-      workorchApi.listMemory(targetWorkspaceId)
+      workorchApi.listMemory(targetWorkspaceId),
+      workorchApi.readConfiguration()
     ]);
     setSnapshot(nextSnapshot);
     setGoals(nextGoals);
@@ -322,6 +358,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     setSkills(nextSkills);
     setMCPServers(nextMCPServers);
     setMemoryItems(nextMemoryItems);
+    setConfiguration(nextConfiguration);
     setRunSnapshot(undefined);
     setRunObservability(undefined);
   }
@@ -366,7 +403,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     activationForm.setFieldsValue({
       goalId: goals[0]?.id,
       doDId: readyDoDs[0]?.id,
-      llmProviderId: undefined,
+      llmProviderId: configuration?.llm.defaultProviderId,
       soulId: souls[0]?.id,
       skillIds: [],
       mcpServerIds: [],
@@ -740,7 +777,14 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             <Select options={readyDoDs.map((item) => ({ value: item.id, label: `${item.items.join(' / ')} (${item.id})` }))} />
           </Form.Item>
           <Form.Item name="llmProviderId" label="LLM Provider ID">
-            <Input placeholder="Leave empty to use configured default provider" />
+            <Select
+              allowClear
+              placeholder="Use configured default provider"
+              options={llmProviders.map((item) => ({
+                value: item.id,
+                label: `${item.default ? '[default] ' : ''}${item.id} / ${item.model || item.provider || 'not configured'}${item.ready ? '' : ` / ${item.reason || 'unavailable'}`}`
+              }))}
+            />
           </Form.Item>
           <Form.Item name="soulId" label="Soul">
             <Select allowClear options={souls.map((item) => ({ value: item.id, label: `${item.name || item.id} (${item.id})` }))} />
@@ -778,6 +822,256 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           </Form.Item>
         </Form>
       </Modal>
+    </PageContainer>
+  );
+}
+
+function ConfigurationPage() {
+  const { message } = AntApp.useApp();
+  const [providerEditorForm] = Form.useForm<UpdateLLMProviderConfiguration>();
+  const [configuration, setConfiguration] = useState<ServiceConfiguration | undefined>(undefined);
+  const [defaultProviderId, setDefaultProviderId] = useState<string | undefined>(undefined);
+  const [providerDrafts, setProviderDrafts] = useState<UpdateLLMProviderConfiguration[]>([]);
+  const [selectedProviderIndex, setSelectedProviderIndex] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const loadConfiguration = async () => {
+    setLoading(true);
+    try {
+      const nextConfiguration = await workorchApi.readConfiguration();
+      const nextFormValues = llmConfigurationFormValues(nextConfiguration);
+      setConfiguration(nextConfiguration);
+      setDefaultProviderId(nextFormValues.defaultProviderId);
+      setProviderDrafts(nextFormValues.providers);
+      setSelectedProviderIndex(0);
+      providerEditorForm.setFieldsValue(nextFormValues.providers[0] ?? nextProviderDraft([]));
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadConfiguration();
+  }, []);
+
+  const saveLLMConfiguration = async () => {
+    setSaving(true);
+    try {
+      const nextConfiguration = await workorchApi.updateLLMConfiguration({
+        defaultProviderId,
+        providers: providerDrafts.map((item) => ({
+          id: item.id?.trim(),
+          provider: item.provider?.trim(),
+          baseUrl: item.baseUrl?.trim(),
+          apiKey: item.apiKey?.trim(),
+          model: item.model?.trim(),
+          timeout: item.timeout?.trim(),
+          disabled: item.disabled === true
+        }))
+      });
+      const nextFormValues = llmConfigurationFormValues(nextConfiguration);
+      setConfiguration(nextConfiguration);
+      setDefaultProviderId(nextFormValues.defaultProviderId);
+      setProviderDrafts(nextFormValues.providers);
+      setSelectedProviderIndex(0);
+      providerEditorForm.setFieldsValue(nextFormValues.providers[0] ?? nextProviderDraft([]));
+      message.success('LLM configuration updated');
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const selectProvider = (index: number) => {
+    const item = providerDrafts[index];
+    if (!item) {
+      return;
+    }
+    setSelectedProviderIndex(index);
+    providerEditorForm.setFieldsValue(item);
+  };
+
+  const addProvider = () => {
+    const draft = nextProviderDraft(providerDrafts);
+    setProviderDrafts((items) => [...items, draft]);
+    setSelectedProviderIndex(providerDrafts.length);
+    providerEditorForm.setFieldsValue(draft);
+    if (!defaultProviderId) {
+      setDefaultProviderId(draft.id);
+    }
+  };
+
+  const removeSelectedProvider = () => {
+    if (providerDrafts.length <= 1) {
+      return;
+    }
+    const nextDrafts = providerDrafts.filter((_, index) => index !== selectedProviderIndex);
+    const nextIndex = Math.min(selectedProviderIndex, nextDrafts.length - 1);
+    setProviderDrafts(nextDrafts);
+    setSelectedProviderIndex(nextIndex);
+    providerEditorForm.setFieldsValue(nextDrafts[nextIndex]);
+    if (!nextDrafts.some((item) => item.id === defaultProviderId)) {
+      setDefaultProviderId(nextDrafts[0]?.id);
+    }
+  };
+
+  const updateSelectedProvider = (_changedValues: Partial<UpdateLLMProviderConfiguration>, values: UpdateLLMProviderConfiguration) => {
+    setProviderDrafts((items) => {
+      const previousID = items[selectedProviderIndex]?.id;
+      const nextItems = [...items];
+      nextItems[selectedProviderIndex] = {
+        ...nextItems[selectedProviderIndex],
+        ...values
+      };
+      const nextID = values.id?.trim();
+      if (defaultProviderId === previousID && nextID && nextID !== previousID) {
+        setDefaultProviderId(nextID);
+      }
+      return nextItems;
+    });
+  };
+
+  const statusByProviderID = new Map((configuration?.llm.providers ?? []).map((item) => [item.id, item]));
+  const selectedProvider = providerDrafts[selectedProviderIndex];
+  const selectedProviderStatus = selectedProvider ? statusByProviderID.get(selectedProvider.id) : undefined;
+  return (
+    <PageContainer
+      title="Configuration"
+      extra={<Button onClick={() => void loadConfiguration()} loading={loading}>Refresh</Button>}
+    >
+      <ProCard gutter={16} wrap loading={loading}>
+        <ProCard title="Server" colSpan="50%">
+          <Descriptions
+            column={1}
+            items={[
+              { key: 'addr', label: 'Address', children: configuration?.server.addr || '-' },
+              { key: 'readHeaderTimeout', label: 'Read Header Timeout', children: configuration?.server.readHeaderTimeout || '-' },
+              { key: 'readTimeout', label: 'Read Timeout', children: configuration?.server.readTimeout || '-' },
+              { key: 'writeTimeout', label: 'Write Timeout', children: configuration?.server.writeTimeout || '-' },
+              { key: 'idleTimeout', label: 'Idle Timeout', children: configuration?.server.idleTimeout || '-' },
+              { key: 'shutdownTimeout', label: 'Shutdown Timeout', children: configuration?.server.shutdownTimeout || '-' },
+              { key: 'maxConcurrentRuns', label: 'Max Concurrent Runs', children: configuration?.server.maxConcurrentRuns ?? '-' }
+            ]}
+          />
+        </ProCard>
+        <ProCard title="Repository" colSpan="50%">
+          <Descriptions
+            column={1}
+            items={[
+              { key: 'backend', label: 'Backend', children: configuration?.repository.backend || '-' },
+              { key: 'dataDir', label: 'Data Directory', children: configuration?.repository.dataDir || '-' }
+            ]}
+          />
+        </ProCard>
+      </ProCard>
+      <ProCard
+        title="LLM Providers"
+        className="workorch-section"
+        extra={<Button type="primary" onClick={() => void providerEditorForm.validateFields().then(() => saveLLMConfiguration())} loading={saving}>Save LLM Providers</Button>}
+      >
+        <Typography.Paragraph type="secondary">
+          Provider API keys are intentionally redacted. Leave API Key empty to keep the existing secret. Saved provider changes are reloaded by workorchd and used by the next LLM runtime step.
+        </Typography.Paragraph>
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <ProCard
+            title="Provider List"
+            extra={<Button onClick={addProvider}>Add Provider</Button>}
+          >
+            <Form.Item label="Default Provider ID">
+              <Select
+                value={defaultProviderId}
+                onChange={setDefaultProviderId}
+                placeholder="Select the default LLM provider"
+                options={providerDrafts
+                  .map((item) => item.id?.trim())
+                  .filter(Boolean)
+                  .map((id) => ({ value: id, label: id }))}
+              />
+            </Form.Item>
+            <Space direction="vertical" size="small" className="llm-provider-list">
+              {providerDrafts.map((item, index) => {
+                const status = statusByProviderID.get(item.id);
+                const selected = index === selectedProviderIndex;
+                return (
+                  <button
+                    key={`${item.id || 'provider'}-${index}`}
+                    type="button"
+                    className={`llm-provider-list-item${selected ? ' llm-provider-list-item-selected' : ''}`}
+                    onClick={() => selectProvider(index)}
+                  >
+                    <span className="llm-provider-list-main">
+                      <Typography.Text strong>{item.id || 'new provider'}</Typography.Text>
+                      <Typography.Text type="secondary">{item.model || item.provider || 'model not configured'}</Typography.Text>
+                    </span>
+                    <span className="llm-provider-list-tags">
+                      {item.id === defaultProviderId ? <Tag color="blue">default</Tag> : null}
+                      {status?.apiKeyConfigured ? <Tag color="green">key</Tag> : <Tag color="red">key</Tag>}
+                      {status?.ready ? <Tag color="green">ready</Tag> : <Tag color="red">{status?.reason || 'unsaved'}</Tag>}
+                    </span>
+                  </button>
+                );
+              })}
+            </Space>
+          </ProCard>
+          <ProCard
+            title={selectedProvider ? `Edit Provider: ${selectedProvider.id || 'new provider'}` : 'Edit Provider'}
+            extra={<Button danger onClick={removeSelectedProvider} disabled={providerDrafts.length <= 1}>Remove</Button>}
+          >
+            {selectedProvider ? (
+              <Form
+                form={providerEditorForm}
+                layout="vertical"
+                onValuesChange={updateSelectedProvider}
+              >
+                <Form.Item name="id" label="Provider ID" rules={[{ required: true }]}>
+                  <Input placeholder="local" />
+                </Form.Item>
+                <Form.Item name="provider" label="Provider Type" rules={[{ required: true }]}>
+                  <Select
+                    options={[
+                      { value: 'compatible', label: 'compatible' },
+                      { value: 'openai', label: 'openai' }
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item name="model" label="Model" rules={[{ required: true }]}>
+                  <Input placeholder="gpt-4.1-mini" />
+                </Form.Item>
+                <Form.Item name="baseUrl" label="Base URL">
+                  <Input placeholder="https://api.openai.com/v1 or local compatible endpoint" />
+                </Form.Item>
+                <Form.Item name="timeout" label="Timeout">
+                  <Input placeholder="60s" />
+                </Form.Item>
+                <Form.Item name="disabled" label="Disabled">
+                  <Select
+                    options={[
+                      { value: false, label: 'false' },
+                      { value: true, label: 'true' }
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item name="apiKey" label="API Key">
+                  <Input.Password placeholder="Leave empty to keep existing API key" autoComplete="new-password" />
+                </Form.Item>
+                <Descriptions
+                  column={1}
+                  items={[
+                    { key: 'apiKey', label: 'Saved API Key', children: selectedProviderStatus?.apiKeyConfigured ? <Tag color="green">configured</Tag> : <Tag color="red">missing</Tag> },
+                    { key: 'status', label: 'Saved Status', children: selectedProviderStatus?.ready ? <Tag color="green">ready</Tag> : <Tag color="red">{selectedProviderStatus?.reason || 'unsaved'}</Tag> }
+                  ]}
+                />
+              </Form>
+            ) : (
+              <Empty description="Select or add an LLM provider" />
+            )}
+          </ProCard>
+        </Space>
+      </ProCard>
     </PageContainer>
   );
 }
@@ -824,6 +1118,8 @@ function ConsoleApp() {
         return <DecisionQueuePage />;
       case 'workspaceDetail':
         return <WorkspaceDetailPage selectedWorkspaceId={selectedWorkspaceId} />;
+      case 'configuration':
+        return <ConfigurationPage />;
       case 'service':
         return <ServicePage />;
       default:

@@ -2,46 +2,49 @@ package workorchconfig
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/muidea/magicCommon/framework/configuration"
+	"github.com/pelletier/go-toml/v2"
 )
 
 const EnvConfigDir = "CONFIG_PATH"
 
 type Config struct {
-	Server     ServerConfig     `json:"server"`
-	Repository RepositoryConfig `json:"repository"`
-	LLM        LLMConfig        `json:"llm"`
+	EndpointName string           `json:"endpointName" toml:"endpointName"`
+	Server       ServerConfig     `json:"server" toml:"server"`
+	Repository   RepositoryConfig `json:"repository" toml:"repository"`
+	LLM          LLMConfig        `json:"llm" toml:"llm"`
 }
 
 type ServerConfig struct {
-	Addr              string `json:"addr"`
-	ReadHeaderTimeout string `json:"readHeaderTimeout"`
-	ReadTimeout       string `json:"readTimeout"`
-	WriteTimeout      string `json:"writeTimeout"`
-	IdleTimeout       string `json:"idleTimeout"`
-	ShutdownTimeout   string `json:"shutdownTimeout"`
-	MaxConcurrentRuns int64  `json:"maxConcurrentRuns"`
+	Addr              string `json:"addr" toml:"addr"`
+	ReadHeaderTimeout string `json:"readHeaderTimeout" toml:"readHeaderTimeout"`
+	ReadTimeout       string `json:"readTimeout" toml:"readTimeout"`
+	WriteTimeout      string `json:"writeTimeout" toml:"writeTimeout"`
+	IdleTimeout       string `json:"idleTimeout" toml:"idleTimeout"`
+	ShutdownTimeout   string `json:"shutdownTimeout" toml:"shutdownTimeout"`
+	MaxConcurrentRuns int64  `json:"maxConcurrentRuns" toml:"maxConcurrentRuns"`
 }
 
 type RepositoryConfig struct {
-	Backend string `json:"backend"`
-	DataDir string `json:"dataDir"`
+	Backend string `json:"backend" toml:"backend"`
+	DataDir string `json:"dataDir" toml:"dataDir"`
 }
 
 type LLMConfig struct {
-	DefaultProvider string                       `json:"defaultProvider"`
-	Providers       map[string]LLMProviderConfig `json:"providers"`
+	DefaultProvider string                       `json:"defaultProvider" toml:"defaultProvider"`
+	Providers       map[string]LLMProviderConfig `json:"providers" toml:"providers"`
 }
 
 type LLMProviderConfig struct {
-	Provider string `json:"provider"`
-	BaseURL  string `json:"baseURL"`
-	APIKey   string `json:"apiKey"`
-	Model    string `json:"model"`
-	Timeout  string `json:"timeout"`
-	Disabled *bool  `json:"disabled"`
+	Provider string `json:"provider" toml:"provider"`
+	BaseURL  string `json:"baseURL" toml:"baseURL"`
+	APIKey   string `json:"apiKey" toml:"apiKey"`
+	Model    string `json:"model" toml:"model"`
+	Timeout  string `json:"timeout" toml:"timeout"`
+	Disabled *bool  `json:"disabled" toml:"disabled"`
 }
 
 func ConfigureDirectory(configDir string) {
@@ -59,6 +62,11 @@ func Current() (Config, error) {
 		}
 	}
 	var cfg Config
+	if endpointName, err := configuration.GetString("endpointName"); err == nil {
+		cfg.EndpointName = endpointName
+	} else if !isMissingSectionError(err) {
+		return Config{}, err
+	}
 	if err := loadSection("server", &cfg.Server); err != nil {
 		return Config{}, err
 	}
@@ -69,6 +77,46 @@ func Current() (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func ApplicationConfigPath() (string, error) {
+	configDir := strings.TrimSpace(os.Getenv(EnvConfigDir))
+	if configDir == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		configDir = filepath.Join(wd, "config")
+	}
+	return filepath.Join(configDir, "application.toml"), nil
+}
+
+func Save(next Config) error {
+	if strings.TrimSpace(next.EndpointName) == "" {
+		next.EndpointName = "workorchd"
+	}
+	if next.LLM.Providers == nil {
+		next.LLM.Providers = map[string]LLMProviderConfig{}
+	}
+	configPath, err := ApplicationConfigPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		return err
+	}
+	payload, err := toml.Marshal(next)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(configPath, payload, 0o600)
+}
+
+func Reload() error {
+	if !configuration.IsConfigManagerInitialized() {
+		return configuration.InitDefaultConfigManager("")
+	}
+	return configuration.ReloadConfig()
 }
 
 func (c Config) LLMProviderValues() map[string]string {

@@ -110,10 +110,9 @@ Acceptance:
 
 - Any long-term product-planning deviation not explicitly listed in the four Next MVP scope items.
 - Full knowledge asset, retrieval, template marketplace, enterprise collaboration, multi-tenant governance, and Sub-Agent orchestration.
-- Full shell sandbox and generalized diff patch application engine.
-  A minimal runtime-requested workspace file write path is now supported as
-  `Patch` evidence, but it is not a general shell/tool sandbox.
 - Batch decision handling before single-ticket resolution semantics are stable.
+- Distributed scheduling, external runtime marketplace, and advanced MCP
+  resources, prompts, streaming, or long-lived session reuse.
 
 ## Progress
 
@@ -132,3 +131,11 @@ Acceptance:
   writes the target file under the Workspace working directory and records an
   applied `Patch` linked to the runtime `ToolCall`. Invalid absolute or escaping
   paths fail the Run and record failed Patch evidence.
+- completed: `Runtime Expansion`
+  Controlled shell execution, generalized diff patch apply, formal block
+  execution graph, external runtime adapter contract, and runtime observability
+  are tracked as completed in `docs/runtime-expansion-plan.md`.
+- completed: `LLM Graph Closure`
+  Real-provider LLM decisions can emit validated `executionGraph` output; graph
+  leaf completion dispatches an LLM follow-up for evidence-backed DoD
+  assessment.

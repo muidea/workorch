@@ -73,6 +73,93 @@ func TestReadyzNativeRouteInjectsEventHub(t *testing.T) {
 	}
 }
 
+func TestConfigurationEndpointReturnsRedactedLLMProviders(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state.readConfiguration = func() (appservice.ServiceConfiguration, error) {
+		return appservice.ServiceConfiguration{
+			Server:     appservice.ServerConfiguration{Addr: ":8080", MaxConcurrentRuns: 1},
+			Repository: appservice.RepositoryConfiguration{Backend: "file", DataDir: ".workorch-data"},
+			LLM: appservice.LLMConfiguration{
+				DefaultProviderID: "local",
+				Providers: []appservice.LLMProviderConfiguration{{
+					ID:               "local",
+					Provider:         "compatible",
+					BaseURL:          "http://127.0.0.1:11434/v1",
+					Model:            "local-model",
+					Timeout:          "60s",
+					Ready:            true,
+					Default:          true,
+					APIKeyConfigured: true,
+				}},
+			},
+		}, nil
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/configuration", nil)
+	rec := httptest.NewRecorder()
+
+	newMuxWithState(state).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+	var body configurationResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal configuration: %v", err)
+	}
+	if body.Configuration.LLM.DefaultProviderID != "local" ||
+		len(body.Configuration.LLM.Providers) != 1 ||
+		!body.Configuration.LLM.Providers[0].APIKeyConfigured ||
+		strings.Contains(rec.Body.String(), "secret-value") {
+		t.Fatalf("body = %s, want redacted configuration response", rec.Body.String())
+	}
+}
+
+func TestUpdateLLMConfigurationEndpointReturnsRedactedConfiguration(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state.updateLLMConfiguration = func(cmd appservice.UpdateLLMConfigurationCommand) (appservice.ServiceConfiguration, error) {
+		if cmd.DefaultProviderID != "local" || len(cmd.Providers) != 1 || cmd.Providers[0].APIKey != "secret-value" {
+			t.Fatalf("update command = %+v, want local provider command", cmd)
+		}
+		return appservice.ServiceConfiguration{
+			LLM: appservice.LLMConfiguration{
+				DefaultProviderID: "local",
+				Providers: []appservice.LLMProviderConfiguration{{
+					ID:               "local",
+					Provider:         "compatible",
+					BaseURL:          "http://127.0.0.1:11434/v1",
+					Model:            "local-model",
+					Timeout:          "60s",
+					Ready:            true,
+					Default:          true,
+					APIKeyConfigured: true,
+				}},
+			},
+		}, nil
+	}
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/configuration/llm", strings.NewReader(`{
+		"defaultProviderId":"local",
+		"providers":[{
+			"id":"local",
+			"provider":"compatible",
+			"baseUrl":"http://127.0.0.1:11434/v1",
+			"apiKey":"secret-value",
+			"model":"local-model",
+			"timeout":"60s"
+		}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	newMuxWithState(state).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "secret-value") || !strings.Contains(rec.Body.String(), `"apiKeyConfigured": true`) {
+		t.Fatalf("body = %s, want redacted updated configuration", rec.Body.String())
+	}
+}
+
 func TestMemoryBackendPersistsStateAcrossHTTPRequests(t *testing.T) {
 	mux := newMux(Config{Backend: "memory"})
 
@@ -247,7 +334,6 @@ func TestAcceptedAPIRoutesAreRegisteredNatively(t *testing.T) {
 	registerSystemRoutes(router, state)
 	registerReadRoutes(router, state)
 	registerBusinessWriteRoutes(router, state)
-	registerSliceRoutes(router, state)
 	registerConsoleRoutes(router)
 
 	for _, route := range acceptedAPINativeRouteSpecs() {
@@ -282,6 +368,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/healthz"},
 		{method: http.MethodGet, pattern: "/readyz"},
 		{method: http.MethodGet, pattern: "/metrics"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/configuration"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId"},
@@ -296,7 +383,6 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-activations"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs"},
-		{method: http.MethodPost, pattern: "/api/v1/workorch/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/snapshot"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/status"},
@@ -322,12 +408,6 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers/:serverId/tools"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/memory"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/memory"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/slices"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/slices/snapshots"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/slices/statuses"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/slices/:sliceId/status"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/slices/:sliceId/snapshot"},
-		{method: http.MethodPost, pattern: "/api/v1/workorch/slices/:sliceId/runs"},
 		{method: http.MethodGet, pattern: "/console"},
 		{method: http.MethodGet, pattern: "/console/"},
 		{method: http.MethodGet, pattern: "/console/**"},
@@ -576,54 +656,6 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}
 		return appservice.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "rejected"}, nil
 	}
-	state.run = func(ctx context.Context, _, _ string) ([]appservice.Slice, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
-			t.Fatalf("bulk run event hub = %#v, want injected hub", got)
-		}
-		return nil, nil
-	}
-	state.listSlices = func() []appservice.SliceDescriptor {
-		return []appservice.SliceDescriptor{{ID: "slice-native-read", Title: "native slice"}}
-	}
-	state.listSnapshots = func(ctx context.Context, _, _ string) ([]appservice.Slice, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
-			t.Fatalf("slice snapshots event hub = %#v, want injected hub", got)
-		}
-		return []appservice.Slice{{ID: "slice-native-read", Title: "native slice"}}, nil
-	}
-	state.listStatuses = func(ctx context.Context, _, _ string) ([]appservice.SliceStatus, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
-			t.Fatalf("slice statuses event hub = %#v, want injected hub", got)
-		}
-		return []appservice.SliceStatus{{ID: "slice-native-read", Title: "native slice"}}, nil
-	}
-	state.readOne = func(ctx context.Context, _, _, sliceID string) (appservice.Slice, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
-			t.Fatalf("slice snapshot event hub = %#v, want injected hub", got)
-		}
-		if sliceID != "slice-native-read" {
-			t.Fatalf("sliceID = %q, want slice-native-read", sliceID)
-		}
-		return appservice.Slice{ID: sliceID, Title: "native slice"}, nil
-	}
-	state.statusOne = func(ctx context.Context, _, _, sliceID string) (appservice.SliceStatus, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
-			t.Fatalf("slice status event hub = %#v, want injected hub", got)
-		}
-		if sliceID != "slice-native-read" {
-			t.Fatalf("sliceID = %q, want slice-native-read", sliceID)
-		}
-		return appservice.SliceStatus{ID: sliceID, Title: "native slice"}, nil
-	}
-	state.runOne = func(ctx context.Context, _, _, sliceID string) (appservice.Slice, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
-			t.Fatalf("single slice run event hub = %#v, want injected hub", got)
-		}
-		if sliceID != "slice-native-read" {
-			t.Fatalf("sliceID = %q, want slice-native-read", sliceID)
-		}
-		return appservice.Slice{ID: sliceID, Title: "native slice"}, nil
-	}
 	handler := newMuxWithState(state)
 
 	for _, tc := range []struct {
@@ -638,7 +670,6 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/snapshot", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs", body: `{"runId":"run-native-write","goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusCreated},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs?workspaceId=ws-native-read", status: http.StatusOK},
-		{method: http.MethodPost, path: "/api/v1/workorch/runs", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/snapshot", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/status", status: http.StatusOK},
@@ -653,12 +684,6 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/workorch/approvals/approval-native-read", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/approvals/approval-native-read/approve", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/approvals/approval-native-read/reject", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/slices", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/slices/snapshots", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/slices/statuses", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/slices/slice-native-read/snapshot", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/slices/slice-native-read/status", status: http.StatusOK},
-		{method: http.MethodPost, path: "/api/v1/workorch/slices/slice-native-read/runs", status: http.StatusOK},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 		if tc.body != "" {
@@ -668,54 +693,6 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		handler.ServeHTTP(rec, req)
 		if rec.Code != tc.status {
 			t.Fatalf("%s %s status = %d, want %d", tc.method, tc.path, rec.Code, tc.status)
-		}
-	}
-}
-
-func TestRunEndpointReturnsSlicesWithMemoryBackend(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs", nil)
-	rec := httptest.NewRecorder()
-
-	newMux(Config{Backend: "memory"}).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
-	}
-	var body runResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal body: %v", err)
-	}
-	if body.Service != "workorch" {
-		t.Fatalf("service = %q, want workorch", body.Service)
-	}
-	if len(body.Slices) != 17 {
-		t.Fatalf("len(slices) = %d, want 17", len(body.Slices))
-	}
-	if body.Slices[0].Title != "workorch runnable slice" {
-		t.Fatalf("first title = %q, want workorch runnable slice", body.Slices[0].Title)
-	}
-}
-
-func TestRunEndpointPersistsFilesWithFileBackend(t *testing.T) {
-	dataRoot := t.TempDir()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs", nil)
-	rec := httptest.NewRecorder()
-
-	newMux(Config{Backend: "file", DataRoot: dataRoot}).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
-	}
-	for _, name := range []string{
-		"workspace.json",
-		"run.json",
-		"step.json",
-		"ticket.json",
-		"resolution.json",
-		"approval.json",
-	} {
-		if _, err := os.Stat(filepath.Join(dataRoot, name)); err != nil {
-			t.Fatalf("missing %s: %v", name, err)
 		}
 	}
 }
@@ -1691,240 +1668,6 @@ func TestApprovalApproveEndpointReturnsConflictForOppositeResolution(t *testing.
 	}
 }
 
-func TestSliceCatalogEndpointReturnsAvailableSlices(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/slices", nil)
-	rec := httptest.NewRecorder()
-
-	newMux(Config{Backend: "memory"}).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
-	}
-	var body sliceCatalogResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal body: %v", err)
-	}
-	if body.Service != "workorch" {
-		t.Fatalf("service = %q, want workorch", body.Service)
-	}
-	if len(body.Slices) != 17 {
-		t.Fatalf("len(slices) = %d, want 17", len(body.Slices))
-	}
-	if body.Slices[0].ID != "workorch-runnable" || body.Slices[0].Title != "workorch runnable slice" {
-		t.Fatalf("first slice = %+v, want workorch-runnable/workorch runnable slice", body.Slices[0])
-	}
-}
-
-func TestSliceStatusesEndpointReturnsPersistedStatuses(t *testing.T) {
-	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
-
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/slices/workorch-runnable/runs", nil)
-	runRec := httptest.NewRecorder()
-	handler.ServeHTTP(runRec, runReq)
-	if runRec.Code != http.StatusOK {
-		t.Fatalf("run status = %d, want 200, body=%s", runRec.Code, runRec.Body.String())
-	}
-
-	statusesReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/slices/statuses", nil)
-	statusesRec := httptest.NewRecorder()
-	handler.ServeHTTP(statusesRec, statusesReq)
-
-	if statusesRec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body=%s", statusesRec.Code, statusesRec.Body.String())
-	}
-	var body sliceStatusesResponse
-	if err := json.Unmarshal(statusesRec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal body: %v", err)
-	}
-	if len(body.Statuses) != 1 {
-		t.Fatalf("len(statuses) = %d, want 1", len(body.Statuses))
-	}
-	if body.Statuses[0].ID != "workorch-runnable" || body.Statuses[0].RunState != "completed" {
-		t.Fatalf("status = %+v, want completed runnable summary", body.Statuses[0])
-	}
-}
-
-func TestSliceSnapshotsEndpointReturnsPersistedSnapshots(t *testing.T) {
-	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
-
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/slices/workorch-runnable/runs", nil)
-	runRec := httptest.NewRecorder()
-	handler.ServeHTTP(runRec, runReq)
-	if runRec.Code != http.StatusOK {
-		t.Fatalf("run status = %d, want 200, body=%s", runRec.Code, runRec.Body.String())
-	}
-
-	snapshotsReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/slices/snapshots", nil)
-	snapshotsRec := httptest.NewRecorder()
-	handler.ServeHTTP(snapshotsRec, snapshotsReq)
-
-	if snapshotsRec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body=%s", snapshotsRec.Code, snapshotsRec.Body.String())
-	}
-	var body sliceSnapshotsResponse
-	if err := json.Unmarshal(snapshotsRec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal body: %v", err)
-	}
-	if len(body.Slices) != 1 {
-		t.Fatalf("len(slices) = %d, want 1", len(body.Slices))
-	}
-	if body.Slices[0].ID != "workorch-runnable" || body.Slices[0].Snapshot == nil || body.Slices[0].Snapshot.Slice != "runnable" {
-		t.Fatalf("slice = %+v, want runnable snapshot", body.Slices[0])
-	}
-}
-
-func TestSliceSnapshotsEndpointReturnsEmptyWhenNoPersistedSnapshots(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/slices/snapshots", nil)
-	rec := httptest.NewRecorder()
-
-	newMux(Config{Backend: "file", DataRoot: t.TempDir()}).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
-	}
-	var body sliceSnapshotsResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal body: %v", err)
-	}
-	if len(body.Slices) != 0 {
-		t.Fatalf("len(slices) = %d, want 0", len(body.Slices))
-	}
-}
-
-func TestSliceStatusesEndpointReturnsEmptyWhenNoPersistedStatuses(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/slices/statuses", nil)
-	rec := httptest.NewRecorder()
-
-	newMux(Config{Backend: "file", DataRoot: t.TempDir()}).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
-	}
-	var body sliceStatusesResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal body: %v", err)
-	}
-	if len(body.Statuses) != 0 {
-		t.Fatalf("len(statuses) = %d, want 0", len(body.Statuses))
-	}
-}
-
-func TestSingleSliceRunEndpointReturnsRequestedSlice(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/slices/workorch-runnable/runs", nil)
-	rec := httptest.NewRecorder()
-
-	newMux(Config{Backend: "memory"}).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
-	}
-	var body sliceRunResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal body: %v", err)
-	}
-	if body.Service != "workorch" {
-		t.Fatalf("service = %q, want workorch", body.Service)
-	}
-	if body.Slice.ID != "workorch-runnable" || body.Slice.Title != "workorch runnable slice" {
-		t.Fatalf("slice = %+v, want workorch-runnable/workorch runnable slice", body.Slice)
-	}
-	if body.Slice.Snapshot == nil || body.Slice.Snapshot.Slice != "runnable" {
-		t.Fatalf("snapshot = %+v, want runnable", body.Slice.Snapshot)
-	}
-}
-
-func TestSingleSliceSnapshotEndpointReturnsPersistedSlice(t *testing.T) {
-	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
-
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/slices/workorch-runnable/runs", nil)
-	runRec := httptest.NewRecorder()
-	handler.ServeHTTP(runRec, runReq)
-	if runRec.Code != http.StatusOK {
-		t.Fatalf("run status = %d, want 200, body=%s", runRec.Code, runRec.Body.String())
-	}
-
-	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/slices/workorch-runnable/snapshot", nil)
-	snapshotRec := httptest.NewRecorder()
-	handler.ServeHTTP(snapshotRec, snapshotReq)
-
-	if snapshotRec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body=%s", snapshotRec.Code, snapshotRec.Body.String())
-	}
-	var body sliceRunResponse
-	if err := json.Unmarshal(snapshotRec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal body: %v", err)
-	}
-	if body.Slice.ID != "workorch-runnable" || body.Slice.Title != "workorch runnable slice" {
-		t.Fatalf("slice = %+v, want workorch-runnable/workorch runnable slice", body.Slice)
-	}
-	if body.Slice.Snapshot == nil || body.Slice.Snapshot.Slice != "runnable" {
-		t.Fatalf("snapshot = %+v, want runnable", body.Slice.Snapshot)
-	}
-}
-
-func TestSingleSliceStatusEndpointReturnsPersistedSummary(t *testing.T) {
-	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
-
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/slices/workorch-runnable/runs", nil)
-	runRec := httptest.NewRecorder()
-	handler.ServeHTTP(runRec, runReq)
-	if runRec.Code != http.StatusOK {
-		t.Fatalf("run status = %d, want 200, body=%s", runRec.Code, runRec.Body.String())
-	}
-
-	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/slices/workorch-runnable/status", nil)
-	statusRec := httptest.NewRecorder()
-	handler.ServeHTTP(statusRec, statusReq)
-
-	if statusRec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body=%s", statusRec.Code, statusRec.Body.String())
-	}
-	var body sliceStatusResponse
-	if err := json.Unmarshal(statusRec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal body: %v", err)
-	}
-	if body.Status.ID != "workorch-runnable" || body.Status.RunState != "completed" || body.Status.StepState != "completed" {
-		t.Fatalf("status = %+v, want completed runnable summary", body.Status)
-	}
-}
-
-func TestSingleSliceSnapshotEndpointReturnsNotFoundWithoutPersistedState(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/slices/workorch-runnable/snapshot", nil)
-	rec := httptest.NewRecorder()
-
-	newMux(Config{Backend: "file", DataRoot: t.TempDir()}).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestSingleSliceStatusEndpointReturnsNotFoundWithoutPersistedState(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/slices/workorch-runnable/status", nil)
-	rec := httptest.NewRecorder()
-
-	newMux(Config{Backend: "file", DataRoot: t.TempDir()}).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestSingleSliceRunEndpointReturnsNotFoundForUnknownSlice(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/slices/workorch-missing/runs", nil)
-	rec := httptest.NewRecorder()
-
-	newMux(Config{Backend: "memory"}).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
-	}
-}
-
 func TestMetricsEndpointReportsCounters(t *testing.T) {
 	dataRoot := t.TempDir()
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
@@ -1978,7 +1721,7 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 		t.Fatalf("run resume status = %d, want 200", resumeRec.Code)
 	}
 
-	for _, path := range []string{"/healthz", "/readyz", "/api/v1/workorch/workspaces", "/api/v1/workorch/workspaces/" + workspace.ID, "/api/v1/workorch/runs", "/api/v1/workorch/runs/run-metrics", "/api/v1/workorch/slices", "/api/v1/workorch/slices/snapshots", "/api/v1/workorch/slices/statuses"} {
+	for _, path := range []string{"/healthz", "/readyz", "/api/v1/workorch/workspaces", "/api/v1/workorch/workspaces/" + workspace.ID, "/api/v1/workorch/runs", "/api/v1/workorch/runs/run-metrics"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -1987,18 +1730,6 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 		}
 	}
 
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs", nil)
-	runRec := httptest.NewRecorder()
-	handler.ServeHTTP(runRec, runReq)
-	if runRec.Code != http.StatusOK {
-		t.Fatalf("run status = %d, want 200", runRec.Code)
-	}
-	singleRunReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/slices/workorch-runnable/runs", nil)
-	singleRunRec := httptest.NewRecorder()
-	handler.ServeHTTP(singleRunRec, singleRunReq)
-	if singleRunRec.Code != http.StatusOK {
-		t.Fatalf("single run status = %d, want 200", singleRunRec.Code)
-	}
 	for _, path := range []string{
 		"/api/v1/workorch/workspaces/" + workspace.ID + "/snapshot",
 		"/api/v1/workorch/runs/run-metrics/snapshot",
@@ -2046,16 +1777,9 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 		`workorch_http_requests_total{endpoint="approval_get"} 0`,
 		`workorch_http_requests_total{endpoint="approval_approve"} 0`,
 		`workorch_http_requests_total{endpoint="approval_reject"} 0`,
-		`workorch_http_requests_total{endpoint="slices"} 1`,
-		`workorch_http_requests_total{endpoint="slice_snapshots"} 1`,
-		`workorch_http_requests_total{endpoint="slice_statuses"} 1`,
-		`workorch_http_requests_total{endpoint="slice_snapshot"} 0`,
-		`workorch_http_requests_total{endpoint="slice_status"} 0`,
-		`workorch_http_requests_total{endpoint="runs"} 1`,
-		`workorch_http_requests_total{endpoint="slice_runs"} 1`,
 		`workorch_run_queue_waiting 0`,
 		`workorch_run_queue_total 0`,
-		`workorch_run_outcomes_total{status="succeeded"} 5`,
+		`workorch_run_outcomes_total{status="succeeded"} 3`,
 		`workorch_run_outcomes_total{status="canceled"} 0`,
 		`workorch_server_max_concurrent_runs 1`,
 	} {
@@ -2230,7 +1954,7 @@ func resolveApprovalForHTTP(t *testing.T, dataRoot string, approvalID string, re
 	}
 }
 
-func TestRunEndpointWaitsWhenConcurrentRunLimitReached(t *testing.T) {
+func TestRunStartEndpointWaitsWhenConcurrentRunLimitReached(t *testing.T) {
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	done := make(chan struct{})
@@ -2240,17 +1964,17 @@ func TestRunEndpointWaitsWhenConcurrentRunLimitReached(t *testing.T) {
 		MaxConcurrentRuns: 1,
 	}), nil)
 	state.validate = func(context.Context, string, string) error { return nil }
-	state.run = func(context.Context, string, string) ([]appservice.Slice, error) {
+	state.startRun = func(_ context.Context, _, _, runID string) (appservice.Run, error) {
 		started <- struct{}{}
 		<-release
-		return []appservice.Slice{{Title: "held"}}, nil
+		return appservice.Run{ID: runID, State: "completed"}, nil
 	}
 
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
 
 	go func() {
-		req, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/workorch/runs", nil)
+		req, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/workorch/runs/run-held/start", nil)
 		if err != nil {
 			t.Errorf("new request: %v", err)
 			close(done)
@@ -2272,7 +1996,7 @@ func TestRunEndpointWaitsWhenConcurrentRunLimitReached(t *testing.T) {
 	<-started
 
 	go func() {
-		secondResp, err := http.Post(server.URL+"/api/v1/workorch/runs", "application/json", nil)
+		secondResp, err := http.Post(server.URL+"/api/v1/workorch/runs/run-second/start", "application/json", nil)
 		if err != nil {
 			t.Errorf("second run request: %v", err)
 			secondDone <- 0

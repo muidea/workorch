@@ -1,0 +1,143 @@
+package appservice
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+)
+
+func TestReadServiceConfigurationRedactsLLMProviders(t *testing.T) {
+	configDir := t.TempDir()
+	content := `
+endpointName = "workorchd"
+
+[server]
+addr = "127.0.0.1:18080"
+readHeaderTimeout = "5s"
+readTimeout = "15s"
+writeTimeout = "30s"
+idleTimeout = "60s"
+shutdownTimeout = "5s"
+maxConcurrentRuns = 2
+
+[repository]
+backend = "file"
+dataDir = ".workorch-data"
+
+[llm]
+defaultProvider = "local"
+
+[llm.providers.local]
+provider = "compatible"
+baseURL = "http://127.0.0.1:11434/v1"
+apiKey = "secret-value"
+model = "local-model"
+timeout = "60s"
+disabled = false
+`
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+
+	cfg, err := ReadServiceConfiguration()
+	if err != nil {
+		t.Fatalf("read service configuration: %v", err)
+	}
+	if cfg.Server.Addr != "127.0.0.1:18080" || cfg.Repository.Backend != "file" {
+		t.Fatalf("configuration = %+v, want server and repository config", cfg)
+	}
+	if cfg.LLM.DefaultProviderID != "local" || len(cfg.LLM.Providers) != 1 {
+		t.Fatalf("llm configuration = %+v, want local provider", cfg.LLM)
+	}
+	provider := cfg.LLM.Providers[0]
+	if !provider.Ready || !provider.Default || !provider.APIKeyConfigured || provider.Model != "local-model" {
+		t.Fatalf("provider = %+v, want ready redacted local provider", provider)
+	}
+}
+
+func TestUpdateLLMConfigurationPersistsAndReloadsProviders(t *testing.T) {
+	configDir := t.TempDir()
+	content := `
+endpointName = "workorchd"
+
+[server]
+addr = "127.0.0.1:18080"
+
+[repository]
+backend = "memory"
+
+[llm]
+defaultProvider = "local"
+
+[llm.providers.local]
+provider = "compatible"
+baseURL = "http://127.0.0.1:11434/v1"
+apiKey = "secret-value"
+model = "local-model"
+timeout = "60s"
+disabled = false
+`
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+
+	cfg, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
+		DefaultProviderID: "local",
+		Providers: []UpdateLLMProviderConfiguration{{
+			ID:       "local",
+			Provider: "compatible",
+			BaseURL:  "http://127.0.0.1:11434/v1",
+			Model:    "next-model",
+			Timeout:  "45s",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("update llm configuration: %v", err)
+	}
+	if cfg.LLM.DefaultProviderID != "local" || len(cfg.LLM.Providers) != 1 {
+		t.Fatalf("configuration = %+v, want local provider", cfg.LLM)
+	}
+	provider := cfg.LLM.Providers[0]
+	if provider.Model != "next-model" || !provider.APIKeyConfigured {
+		t.Fatalf("provider = %+v, want updated model and preserved api key", provider)
+	}
+
+	current, err := workorchconfig.Current()
+	if err != nil {
+		t.Fatalf("current config: %v", err)
+	}
+	if current.LLM.Providers["local"].Model != "next-model" || current.LLM.Providers["local"].APIKey != "secret-value" {
+		t.Fatalf("current llm config = %+v, want persisted provider update", current.LLM.Providers["local"])
+	}
+}
+
+func TestUpdateLLMConfigurationRejectsMissingDefaultProvider(t *testing.T) {
+	configDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`endpointName = "workorchd"`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+
+	_, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
+		DefaultProviderID: "missing",
+		Providers: []UpdateLLMProviderConfiguration{{
+			ID:       "local",
+			Provider: "compatible",
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("update err = %v, want invalid argument", err)
+	}
+}

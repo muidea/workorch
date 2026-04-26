@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -43,6 +45,7 @@ const (
 	stepInputKeyGraphNodeID            = "graphNodeId"
 	stepInputKeyGraphPreviousNodeID    = "graphPreviousNodeId"
 	stepInputKeyGraphCompletedNodes    = "graphCompletedNodes"
+	stepInputKeyGraphBatch             = "graphBatch"
 	stepOutputKeyBlockDecisionReason   = "blockDecisionReason"
 	stepOutputKeyBlockDecisionTicketID = "blockDecisionTicketId"
 	stepOutputKeyBlockDecisionKind     = "blockDecisionKind"
@@ -71,6 +74,12 @@ type RuntimeEvidenceRepositories struct {
 	ValidationResults  repository.ValidationResultRepository
 	RuntimeCheckpoints repository.RuntimeCheckpointRepository
 	MemoryItems        repository.MemoryItemRepository
+}
+
+type stepDispatchSpec struct {
+	ID    common.StepID
+	Kind  string
+	Input map[string]any
 }
 
 func NewRuntimeOrchestrator(
@@ -185,11 +194,11 @@ func (o *RuntimeOrchestrator) DispatchNextStep(ctx context.Context, runID common
 	if err != nil {
 		return err
 	}
-	stepID, kind, input, err := o.nextDispatchSpec(ctx, r)
+	specs, err := o.nextDispatchSpecs(ctx, r)
 	if err != nil {
 		return err
 	}
-	return o.dispatchStep(ctx, r, stepID, kind, input)
+	return o.dispatchStepSpecs(ctx, r, specs)
 }
 
 func (o *RuntimeOrchestrator) BlockOnDecision(ctx context.Context, runID common.RunID, ticketID common.TicketID) error {
@@ -301,11 +310,11 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 	if err := o.publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
-	stepID, kind, input, err := o.nextDispatchSpec(ctx, r)
+	specs, err := o.nextDispatchSpecs(ctx, r)
 	if err != nil {
 		return err
 	}
-	return o.dispatchStep(ctx, r, stepID, kind, input)
+	return o.dispatchStepSpecs(ctx, r, specs)
 }
 
 func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunID) error {
@@ -602,11 +611,17 @@ func (o *RuntimeOrchestrator) dispatchStep(
 		}
 		return o.BlockOnApproval(ctx, run.ID, approvalID)
 	}
+	if graphBatchStep(step) {
+		return nil
+	}
 	if nextStepID != "" {
 		return o.dispatchStep(ctx, run, nextStepID, nextKind, nextStepInputFromOutput(run, step))
 	}
-	if graphStepID, graphKind, graphInput, ok := o.nextGraphStepSpec(ctx, run, step); ok {
-		return o.dispatchStep(ctx, run, graphStepID, graphKind, graphInput)
+	if graphSpecs := o.readyGraphStepSpecs(ctx, run, step); len(graphSpecs) > 0 {
+		return o.dispatchGraphStepBatch(ctx, run, graphSpecs)
+	}
+	if shouldDispatchGraphFollowUp(run, step, output) {
+		return o.dispatchStep(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), graphFollowUpStepInput(run, step))
 	}
 	if err := completionDoDAssessmentError(run, output); err != nil {
 		step.State = common.StepStateFailed
@@ -1368,36 +1383,78 @@ func (o *RuntimeOrchestrator) nextDispatchSpec(
 	ctx context.Context,
 	run *runModel.Run,
 ) (common.StepID, string, map[string]any, error) {
-	if run == nil {
-		return "", "", nil, common.ErrInvalidArgument
-	}
-	steps, err := o.steps.ListByRun(ctx, run.ID)
+	specs, err := o.nextDispatchSpecs(ctx, run)
 	if err != nil {
 		return "", "", nil, err
 	}
+	if len(specs) == 0 {
+		return "", "", nil, common.ErrConflict
+	}
+	return specs[0].ID, specs[0].Kind, specs[0].Input, nil
+}
+
+func (o *RuntimeOrchestrator) nextDispatchSpecs(
+	ctx context.Context,
+	run *runModel.Run,
+) ([]stepDispatchSpec, error) {
+	if run == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil {
+		return nil, err
+	}
 	if len(steps) == 0 {
-		return common.StepID(fmt.Sprintf("%s/step-1", run.ID)), initialStepKind(run), initialStepInput(run), nil
+		return []stepDispatchSpec{{
+			ID:    common.StepID(fmt.Sprintf("%s/step-1", run.ID)),
+			Kind:  initialStepKind(run),
+			Input: initialStepInput(run),
+		}}, nil
 	}
 
 	last := steps[len(steps)-1]
 	if last.State == common.StepStateCompleted {
-		if stepID, kind, input, ok := o.nextGraphStepSpec(ctx, run, last); ok {
-			return stepID, kind, input, nil
+		if specs := o.readyGraphStepSpecs(ctx, run, last); len(specs) > 0 {
+			return specs, nil
 		}
 		nextStepID, nextKind := nextStepSpec(last.Output)
 		if nextStepID != "" {
-			return nextStepID, nextKind, nextStepInputFromOutput(run, last), nil
+			return []stepDispatchSpec{{
+				ID:    nextStepID,
+				Kind:  nextKind,
+				Input: nextStepInputFromOutput(run, last),
+			}}, nil
+		}
+		if shouldDispatchGraphFollowUp(run, last, last.Output) {
+			return []stepDispatchSpec{{
+				ID:    graphFollowUpStepID(run.ID, last),
+				Kind:  initialStepKind(run),
+				Input: graphFollowUpStepInput(run, last),
+			}}, nil
 		}
 	}
 	if last.State == common.StepStateDispatched {
-		return last.ID, last.Kind, cloneStepPayload(last.Input), nil
+		return []stepDispatchSpec{{
+			ID:    last.ID,
+			Kind:  last.Kind,
+			Input: cloneStepPayload(last.Input),
+		}}, nil
 	}
-	return "", "", nil, common.ErrConflict
+	return nil, common.ErrConflict
+}
+
+func (o *RuntimeOrchestrator) dispatchStepSpecs(ctx context.Context, run *runModel.Run, specs []stepDispatchSpec) error {
+	if len(specs) == 0 {
+		return common.ErrConflict
+	}
+	if len(specs) == 1 {
+		return o.dispatchStep(ctx, run, specs[0].ID, specs[0].Kind, specs[0].Input)
+	}
+	return o.dispatchGraphStepBatch(ctx, run, specs)
 }
 
 func (o *RuntimeOrchestrator) hasGraphContinuation(ctx context.Context, run *runModel.Run, step *runModel.Step) bool {
-	_, _, _, ok := o.nextGraphStepSpec(ctx, run, step)
-	return ok
+	return len(o.readyGraphStepSpecs(ctx, run, step)) > 0
 }
 
 func (o *RuntimeOrchestrator) nextGraphStepSpec(
@@ -1405,21 +1462,35 @@ func (o *RuntimeOrchestrator) nextGraphStepSpec(
 	run *runModel.Run,
 	last *runModel.Step,
 ) (common.StepID, string, map[string]any, bool) {
-	if o == nil || run == nil || last == nil {
+	specs := o.readyGraphStepSpecs(ctx, run, last)
+	if len(specs) == 0 {
 		return "", "", nil, false
+	}
+	return specs[0].ID, specs[0].Kind, specs[0].Input, true
+}
+
+func (o *RuntimeOrchestrator) readyGraphStepSpecs(
+	ctx context.Context,
+	run *runModel.Run,
+	last *runModel.Step,
+) []stepDispatchSpec {
+	if o == nil || run == nil || last == nil {
+		return nil
 	}
 	graph, ok := runtimeGraphSpecFromStep(last)
 	if !ok || len(graph.Nodes) == 0 {
-		return "", "", nil, false
+		return nil
 	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil {
-		return "", "", nil, false
+		return nil
 	}
 	completed := completedGraphNodes(steps)
+	started := startedGraphNodes(steps)
 	branch := selectedGraphBranch(steps)
+	ret := make([]stepDispatchSpec, 0, len(graph.Nodes))
 	for _, node := range graph.Nodes {
-		if node.ID == "" || completed[node.ID] {
+		if node.ID == "" || completed[node.ID] || started[node.ID] {
 			continue
 		}
 		if node.Branch != "" && node.Branch != branch {
@@ -1429,9 +1500,78 @@ func (o *RuntimeOrchestrator) nextGraphStepSpec(
 			continue
 		}
 		input := nextGraphStepInput(run, last, graph, node, completed, branch)
-		return graphStepID(run.ID, node.ID), node.Kind, input, true
+		ret = append(ret, stepDispatchSpec{
+			ID:    graphStepID(run.ID, node.ID),
+			Kind:  node.Kind,
+			Input: input,
+		})
 	}
-	return "", "", nil, false
+	return ret
+}
+
+func (o *RuntimeOrchestrator) dispatchGraphStepBatch(ctx context.Context, run *runModel.Run, specs []stepDispatchSpec) error {
+	if len(specs) == 0 {
+		return common.ErrConflict
+	}
+	if len(specs) == 1 {
+		return o.dispatchStep(ctx, run, specs[0].ID, specs[0].Kind, specs[0].Input)
+	}
+
+	errCh := make(chan error, len(specs))
+	var wg sync.WaitGroup
+	for _, spec := range specs {
+		spec := spec
+		spec.Input = cloneStepPayload(spec.Input)
+		if spec.Input == nil {
+			spec.Input = map[string]any{}
+		}
+		spec.Input[stepInputKeyGraphBatch] = true
+		runCopy := *run
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errCh <- o.dispatchStep(ctx, &runCopy, spec.ID, spec.Kind, spec.Input)
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil && !errors.Is(err, common.ErrConflict) {
+			return err
+		}
+	}
+
+	currentRun, err := o.runs.Get(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	if currentRun.State != common.RunStateRunning {
+		return nil
+	}
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	last := latestCompletedGraphStep(steps)
+	if last == nil {
+		return common.ErrConflict
+	}
+	if nextSpecs := o.readyGraphStepSpecs(ctx, currentRun, last); len(nextSpecs) > 0 {
+		return o.dispatchGraphStepBatch(ctx, currentRun, nextSpecs)
+	}
+	if shouldDispatchGraphFollowUp(currentRun, last, last.Output) {
+		return o.dispatchStep(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), graphFollowUpStepInput(currentRun, last))
+	}
+	if err := completionDoDAssessmentError(currentRun, last.Output); err != nil {
+		last.State = common.StepStateFailed
+		last.Output = runtimeFailureOutput(last.Output, err)
+		_ = o.steps.Update(ctx, last)
+		return o.FailRun(ctx, currentRun.ID, err.Error())
+	}
+	if err := o.ValidateRun(ctx, currentRun.ID); err != nil {
+		return err
+	}
+	return o.CompleteRun(ctx, currentRun.ID)
 }
 
 func runtimeGraphSpecFromStep(step *runModel.Step) (runtimemodel.BlockExecutionGraph, bool) {
@@ -1555,6 +1695,17 @@ func completedGraphNodes(steps []*runModel.Step) map[string]bool {
 	return ret
 }
 
+func startedGraphNodes(steps []*runModel.Step) map[string]bool {
+	ret := map[string]bool{}
+	for _, step := range steps {
+		nodeID := graphNodeID(step)
+		if nodeID != "" {
+			ret[nodeID] = true
+		}
+	}
+	return ret
+}
+
 func selectedGraphBranch(steps []*runModel.Step) string {
 	branch := ""
 	for _, step := range steps {
@@ -1633,6 +1784,24 @@ func graphCompletedNodesFromStep(step *runModel.Step) []string {
 	return stringSliceFromValue(step.Input[stepInputKeyGraphCompletedNodes])
 }
 
+func graphBatchStep(step *runModel.Step) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	value, _ := step.Input[stepInputKeyGraphBatch].(bool)
+	return value
+}
+
+func latestCompletedGraphStep(steps []*runModel.Step) *runModel.Step {
+	for idx := len(steps) - 1; idx >= 0; idx-- {
+		step := steps[idx]
+		if step != nil && step.State == common.StepStateCompleted && graphNodeID(step) != "" {
+			return step
+		}
+	}
+	return nil
+}
+
 func completedGraphNodeList(completed map[string]bool) []string {
 	ret := make([]string, 0, len(completed))
 	for nodeID := range completed {
@@ -1640,6 +1809,45 @@ func completedGraphNodeList(completed map[string]bool) []string {
 	}
 	sort.Strings(ret)
 	return ret
+}
+
+func shouldDispatchGraphFollowUp(run *runModel.Run, step *runModel.Step, output map[string]any) bool {
+	if !requiresDoDAssessmentCompletionGate(run) || step == nil || output == nil {
+		return false
+	}
+	if graphNodeID(step) == "" {
+		return false
+	}
+	return doDAssessmentFromOutput(output) == nil
+}
+
+func graphFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {
+	nodeID := runtimeChildID(common.StepID(graphNodeID(step)), "")
+	if nodeID == "" {
+		nodeID = runtimeChildID(step.ID, "graph")
+	}
+	return common.StepID(fmt.Sprintf("%s/zz-llm-after-graph-%s", runID, nodeID))
+}
+
+func graphFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]any {
+	input := nextStepInput(run, step.ID)
+	input["graphFollowUp"] = true
+	if nodeID := graphNodeID(step); nodeID != "" {
+		input[stepInputKeyGraphPreviousNodeID] = nodeID
+	}
+	if completed := graphCompletedNodesFromStep(step); len(completed) > 0 {
+		input[stepInputKeyGraphCompletedNodes] = completed
+	}
+	if branch := graphBranch(step); branch != "" {
+		input[stepOutputKeyGraphBranch] = branch
+	}
+	if graph, ok := runtimeGraphSpecFromStep(step); ok {
+		input[stepOutputKeyExecutionGraph] = graph
+	}
+	if step.Output != nil {
+		input["previousStepOutput"] = cloneStepPayload(step.Output)
+	}
+	return input
 }
 
 func nextStepSpec(output map[string]any) (common.StepID, string) {

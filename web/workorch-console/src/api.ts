@@ -1,4 +1,4 @@
-import type { Approval, Decision, DoD, Goal, MCPServer, MemoryItem, Run, RunObservability, RunSnapshot, ServiceStatus, Skill, SliceDescriptor, SliceStatus, Soul, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
+import type { Approval, Decision, DoD, Goal, MCPServer, MemoryItem, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, SliceDescriptor, SliceStatus, Soul, UpdateLLMConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -32,6 +32,17 @@ export const workorchApi = {
   healthz: () => request<ServiceStatus>('/healthz'),
   readyz: () => request<ServiceStatus>('/readyz'),
   metrics: () => request<string>('/metrics', { headers: { Accept: 'text/plain' } }),
+  readConfiguration: async () => {
+    const body = await request<{ configuration: ServiceConfiguration }>(`${apiBase}/configuration`);
+    return body.configuration;
+  },
+  updateLLMConfiguration: async (configuration: UpdateLLMConfigurationRequest) => {
+    const body = await request<{ configuration: ServiceConfiguration }>(`${apiBase}/configuration/llm`, {
+      method: 'PUT',
+      body: JSON.stringify(configuration)
+    });
+    return body.configuration;
+  },
   listWorkspaces: async () => {
     const body = await request<{ workspaces: Workspace[] }>(`${apiBase}/workspaces`);
     return body.workspaces ?? [];

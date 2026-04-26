@@ -2,19 +2,28 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	mcpblockbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
+	mcpblockcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	mcpbiz "github.com/muidea/workorch/internal/modules/kernel/mcp/biz"
+	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -26,15 +35,23 @@ import (
 )
 
 type stubRuntimeAdapter struct {
-	output map[string]any
-	err    error
-	calls  []common.StepID
-	fn     func(common.StepID) (map[string]any, error)
+	mu        sync.Mutex
+	output    map[string]any
+	err       error
+	calls     []common.StepID
+	fn        func(common.StepID) (map[string]any, error)
+	fnRequest func(runtimemodel.StepExecutionRequest) (map[string]any, error)
 }
 
 func (s *stubRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
 	stepID := request.StepID
+	s.mu.Lock()
 	s.calls = append(s.calls, stepID)
+	s.mu.Unlock()
+	if s.fnRequest != nil {
+		output, err := s.fnRequest(request)
+		return runtimemodel.StepExecutionResult{Output: output}, err
+	}
 	if s.fn != nil {
 		output, err := s.fn(stepID)
 		return runtimemodel.StepExecutionResult{Output: output}, err
@@ -265,6 +282,105 @@ func TestRuntimeOrchestrator_DispatchNextStepRunsShellCommandAdapter(t *testing.
 	}
 	if runItem.State != common.RunStateCompleted {
 		t.Fatalf("run state = %s, want completed", runItem.State)
+	}
+}
+
+func TestRuntimeOrchestrator_DispatchNextStepRunsMCPHTTPAdapter(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	toolCallRepo := memory.NewToolCallRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	checkpointRepo := memory.NewRuntimeCheckpointRepository()
+
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode mcp request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"summary": "mcp result"})
+	}))
+	defer server.Close()
+
+	mcpService := mcpbiz.NewService(memory.NewMCPServerRepository())
+	if err := mcpService.CreateServer(ctx, mcpservice.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-http"),
+		Name:          "http tool",
+		Transport:     "http",
+		Endpoint:      server.URL,
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		TimeoutMillis: 1000,
+	}); err != nil {
+		t.Fatalf("create mcp server: %v", err)
+	}
+
+	registry := NewRuntimeAdapterRegistry(&stubRuntimeAdapter{output: map[string]any{"status": "default"}})
+	if err := registry.Register(mcpblockcommon.StepKindToolCall, mcpblockbiz.NewRuntimeAdapter(mcpService)); err != nil {
+		t.Fatalf("register mcp runtime: %v", err)
+	}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		registry,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          toolCallRepo,
+			ValidationResults:  validationRepo,
+			RuntimeCheckpoints: checkpointRepo,
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-mcp")
+	runID := common.RunID("run-mcp")
+	stepID := common.StepID("run-mcp/step-1")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  mcpblockcommon.StepKindToolCall,
+		State: common.StepStateDispatched,
+		Input: map[string]any{
+			"serverId": "mcp-http",
+			"tool":     "repo.summary",
+			"input":    map[string]any{"path": "."},
+		},
+	}); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+
+	if err := orch.DispatchNextStep(ctx, runID); err != nil {
+		t.Fatalf("dispatch mcp step: %v", err)
+	}
+
+	step, err := stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if step.State != common.StepStateCompleted || step.Output["stage"] != "mcp_tool_call_completed" {
+		t.Fatalf("step = %+v, want completed mcp step", step)
+	}
+	if captured["workspaceId"] != "ws-mcp" || captured["tool"] != "repo.summary" {
+		t.Fatalf("captured = %+v, want workorch mcp payload", captured)
+	}
+	toolCall, err := toolCallRepo.Get(ctx, common.ToolCallID("run-mcp/step-1/tool-call/runtime-execute"))
+	if err != nil {
+		t.Fatalf("get tool call: %v", err)
+	}
+	if toolCall.State != common.ToolCallStateCompleted || toolCall.ToolName != mcpblockcommon.StepKindToolCall {
+		t.Fatalf("toolCall = %+v, want completed mcp evidence", toolCall)
 	}
 }
 
@@ -1231,6 +1347,81 @@ func TestRuntimeOrchestrator_StartRunExecutesBlockExecutionGraphBranch(t *testin
 	}
 }
 
+func TestRuntimeOrchestrator_StartRunDispatchesIndependentGraphNodesConcurrently(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "plan-a", Kind: "graph/mock"},
+		{ID: "plan-b", Kind: "graph/mock"},
+		{ID: "merge", Kind: "graph/mock", DependsOn: []string{"plan-a", "plan-b"}},
+	}}
+	var active atomic.Int32
+	var maxActive atomic.Int32
+	runtime := &stubRuntimeAdapter{
+		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			switch request.StepID {
+			case "run-graph-concurrent/step-1":
+				return map[string]any{
+					"status":         "completed",
+					"executionGraph": graph,
+				}, nil
+			case "run-graph-concurrent/block/plan-a", "run-graph-concurrent/block/plan-b":
+				current := active.Add(1)
+				for {
+					observed := maxActive.Load()
+					if current <= observed || maxActive.CompareAndSwap(observed, current) {
+						break
+					}
+				}
+				time.Sleep(50 * time.Millisecond)
+				active.Add(-1)
+				return map[string]any{"status": "completed"}, nil
+			case "run-graph-concurrent/block/merge":
+				return map[string]any{"status": "completed"}, nil
+			default:
+				return nil, errors.New("unexpected graph concurrent step")
+			}
+		},
+	}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-graph-concurrent")
+	runID := common.RunID("run-graph-concurrent")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated, InitialStepKind: "llm/workspace_execution"}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start graph run: %v", err)
+	}
+
+	if maxActive.Load() < 2 {
+		t.Fatalf("maxActive = %d, want at least 2 concurrent ready graph nodes", maxActive.Load())
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s, want completed", runItem.State)
+	}
+	mergeStep, err := stepRepo.Get(ctx, "run-graph-concurrent/block/merge")
+	if err != nil {
+		t.Fatalf("get merge step: %v", err)
+	}
+	completed, _ := mergeStep.Input["graphCompletedNodes"].([]string)
+	if !reflect.DeepEqual(completed, []string{"plan-a", "plan-b"}) {
+		t.Fatalf("merge completed nodes = %#v, want both parallel nodes", mergeStep.Input["graphCompletedNodes"])
+	}
+}
+
 func TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterDecision(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -1439,6 +1630,96 @@ func TestRuntimeOrchestrator_FailsLLMRunCompletionWithoutDoDAssessment(t *testin
 	}
 	if step.State != common.StepStateFailed || !strings.Contains(step.Output["error"].(string), "dodAssessment is required") {
 		t.Fatalf("step = %+v, want failed DoD assessment gate", step)
+	}
+}
+
+func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterExecutionGraphCompletes(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "inspect", Kind: "graph/mock"},
+	}}
+	var followUpInput map[string]any
+	runtime := &stubRuntimeAdapter{
+		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			switch request.StepID {
+			case "run-graph-follow-up/step-1":
+				return map[string]any{
+					"status":         "completed",
+					"executionGraph": graph,
+				}, nil
+			case "run-graph-follow-up/block/inspect":
+				return map[string]any{
+					"status": "completed",
+					"stdout": "workspace inspected",
+				}, nil
+			case "run-graph-follow-up/zz-llm-after-graph-inspect":
+				followUpInput = request.Input
+				return map[string]any{
+					"status": "completed",
+					"dodAssessment": map[string]any{
+						"satisfied": true,
+						"items": []map[string]any{
+							{
+								"item":         "graph completed",
+								"state":        "satisfied",
+								"evidenceRefs": []string{"run-graph-follow-up/block/inspect"},
+							},
+						},
+					},
+				}, nil
+			default:
+				return nil, errors.New("unexpected graph follow-up step")
+			}
+		},
+	}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-graph-follow-up")
+	runID := common.RunID("run-graph-follow-up")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-graph-follow-up"),
+		State:           common.RunStateCreated,
+		InitialStepKind: "llm/workspace_execution",
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s, want completed", runItem.State)
+	}
+	if !reflect.DeepEqual(runtime.calls, []common.StepID{
+		"run-graph-follow-up/step-1",
+		"run-graph-follow-up/block/inspect",
+		"run-graph-follow-up/zz-llm-after-graph-inspect",
+	}) {
+		t.Fatalf("runtime calls = %#v, want graph then llm follow-up", runtime.calls)
+	}
+	if followUpInput["graphFollowUp"] != true ||
+		followUpInput["graphPreviousNodeId"] != "inspect" ||
+		followUpInput["previousStepId"] != "run-graph-follow-up/block/inspect" {
+		t.Fatalf("followUpInput = %+v, want graph follow-up context", followUpInput)
+	}
+	previousOutput, ok := followUpInput["previousStepOutput"].(map[string]any)
+	if !ok || previousOutput["stdout"] != "workspace inspected" {
+		t.Fatalf("previousStepOutput = %+v, want graph node output", followUpInput["previousStepOutput"])
 	}
 }
 

@@ -41,7 +41,6 @@
     `POST /api/v1/workorch/workspaces/{workspaceId}/dods`,
     `POST /api/v1/workorch/workspaces/{workspaceId}/memory`,
     `POST /api/v1/workorch/workspaces/{workspaceId}/runs`,
-    `POST /api/v1/workorch/runs`,
     `POST /api/v1/workorch/runs/{runId}/start`,
     `POST /api/v1/workorch/runs/{runId}/resume`,
     `POST /api/v1/workorch/decisions/{ticketId}/resolve`,
@@ -50,13 +49,6 @@
     `POST /api/v1/workorch/souls`,
     `POST /api/v1/workorch/skills`,
     `POST /api/v1/workorch/mcp/servers`
-  - slice compatibility endpoints are registered as native `magicEngine/http` routes:
-    `GET /api/v1/workorch/slices`,
-    `GET /api/v1/workorch/slices/snapshots`,
-    `GET /api/v1/workorch/slices/statuses`,
-    `GET /api/v1/workorch/slices/{sliceId}/snapshot`,
-    `GET /api/v1/workorch/slices/{sliceId}/status`,
-    `POST /api/v1/workorch/slices/{sliceId}/runs`
   - `internal/modules/application/workorchd/biz/bootstrap` now uses a `magicCommon/event.Hub` backed workorch event adapter by default
   - request-scoped `RuntimeSession` construction now reuses the application-injected EventHub when available
   - `internal/modules/application/workorchd/biz/bootstrap` now runs request-scoped runtime modules through a local magicCommon plugin manager lifecycle
@@ -88,17 +80,41 @@
   Chat Completions HTTP client inside `blocks/llm`; `openai` defaults to
   `https://api.openai.com/v1`, while `compatible` requires
   `[llm.providers.<id>].baseURL`.
+- OpenAI-compatible LLM calls use JSON object mode and a strict
+  `workorch.llmExecutionDecision.v1` contract; provider formatting drift is
+  normalized only for markdown fences and first JSON object extraction.
+- Schema-invalid LLM output now triggers exactly one provider repair retry. A
+  successful repair exposes `llmRepair` metadata on Step output; a failed repair
+  keeps the original schema failure and exposes parse/repair diagnostics.
 - `workorchd` now loads runtime parameters through magicCommon
   `framework/configuration` via `workorchd -config-dir <dir>`;
   `config/application.toml` is the default local template and
   `config/file/application.toml` is the file-backed local template.
+- Web Console Configuration now updates LLM provider definitions through
+  `PUT /api/v1/workorch/configuration/llm`; `workorchd` persists the update to
+  `application.toml`, reloads framework configuration, redacts API keys in read
+  responses, and `blocks/llm` resolves provider settings at Step execution time.
 - LLM decision output now maps to runtime actions and gates: shell command
-  dispatch, MCP tool-call dispatch boundary, patch evidence, Memory write
-  request evidence, structured Decision Ticket fields, Approval gates, DoD
-  assessment, and explicit failed LLM decisions.
-- Unregistered runtime kinds, including the current `mcp/tool_call` boundary
-  before a concrete adapter is implemented, fail with
-  `runtime_adapter_unavailable` instead of falling back to `legacy/minimal`.
+  dispatch, MCP tool-call dispatch, execution graph planning, patch
+  evidence, Memory write request evidence, structured Decision Ticket fields,
+  Approval gates, DoD assessment, and explicit failed LLM decisions.
+- `LLMExecutionDecision.executionGraph` is now a formal strict model; valid
+  graph plans become orchestrator-consumable Step output while graph traversal
+  and ready-node concurrent execution are owned by `kernel/orchestrator`.
+- Block execution graph dispatch now runs all currently ready graph nodes
+  concurrently when their dependencies are satisfied; follow-up graph batches
+  are coordinated centrally so individual parallel steps do not race to close
+  or advance the Run.
+- Graph leaf completion now returns to `llm/workspace_execution` for final DoD
+  assessment when an LLM-driven Run still requires DoD evidence, instead of
+  failing immediately after the last tool block.
+- The shell block now creates the Workspace working directory before executing
+  a command, so default generated Workspace paths are usable by runtime blocks.
+- `blocks/mcp` now registers `mcp/tool_call` as a runtime adapter. It validates
+  MCP server enablement and `allowedTools`, invokes HTTP/HTTPS endpoints or
+  MCP `stdio` JSON-RPC tool calls, and records output through the standard Step
+  / ToolCall / ValidationResult evidence path. Unsupported transports still
+  fail explicitly instead of falling back to `legacy/minimal`.
 - LLM-driven Runs that bind a DoD now require a satisfied, evidence-backed
   `dodAssessment` before completion; missing or invalid assessments fail the
   terminal Step and Run.
@@ -110,7 +126,19 @@
   Decision context, Step output, DoD assessment, and Memory refs.
 - LLM-driven Workspace execution has repeatable local acceptance scripts:
   `make verify-llm` and `make verify-llm-file`, backed by a local
-  OpenAI-compatible mock provider.
+  OpenAI-compatible mock provider, plus `make verify-real-llm` for an already
+  running service with a configured real provider.
+- MCP `stdio` runtime execution has repeatable local acceptance scripts:
+  `make verify-mcp-stdio` and `make verify-mcp-stdio-file`, which create a
+  governed MCP server, invoke it through an LLM execution graph, and verify
+  restart-read continuity for the file backend.
+- `make verify-real-mcp-stdio` verifies an already running `workorchd` instance
+  by temporarily adding a local mock provider through the configuration API and
+  executing a governed MCP `stdio` tool call in the deployed process.
+- MVP verification is grouped by target:
+  `make verify-mvp` for local memory-backed checks,
+  `make verify-mvp-file` for file-backed restart-read checks, and
+  `make verify-real-mvp` for an already running deployed service.
 
 ## Delivered in workorch
 
@@ -214,10 +242,13 @@ HTTP endpoints:
 - `GET /healthz`
 - `GET /readyz`
 - `GET /metrics`
+- `GET /api/v1/workorch/configuration`
+- `PUT /api/v1/workorch/configuration/llm`
 - `POST /api/v1/workorch/workspaces`
 - `GET /api/v1/workorch/workspaces`
 - `GET /api/v1/workorch/workspaces/{workspaceId}`
 - `GET /api/v1/workorch/workspaces/{workspaceId}/snapshot`
+- `POST /api/v1/workorch/workspaces/{workspaceId}/execution-activations`
 - `POST /api/v1/workorch/workspaces/{workspaceId}/goals`
 - `GET /api/v1/workorch/workspaces/{workspaceId}/goals`
 - `GET /api/v1/workorch/goals/{goalId}`
@@ -229,6 +260,7 @@ HTTP endpoints:
 - `GET /api/v1/workorch/runs/{runId}`
 - `GET /api/v1/workorch/runs/{runId}/snapshot`
 - `GET /api/v1/workorch/runs/{runId}/status`
+- `GET /api/v1/workorch/runs/{runId}/observability`
 - `POST /api/v1/workorch/runs/{runId}/start`
 - `POST /api/v1/workorch/runs/{runId}/resume`
 - all run execution entrypoints now share one in-process FIFO wait queue behind `[server].maxConcurrentRuns`
@@ -251,13 +283,6 @@ HTTP endpoints:
 - `GET /api/v1/workorch/mcp/servers/{serverId}/tools`
 - `POST /api/v1/workorch/workspaces/{workspaceId}/memory`
 - `GET /api/v1/workorch/memory?workspaceId={workspaceId}`
-- `GET /api/v1/workorch/slices`
-- `GET /api/v1/workorch/slices/snapshots`
-- `GET /api/v1/workorch/slices/statuses`
-- `GET /api/v1/workorch/slices/{sliceId}/status`
-- `GET /api/v1/workorch/slices/{sliceId}/snapshot`
-- `POST /api/v1/workorch/slices/{sliceId}/runs`
-- `POST /api/v1/workorch/runs`
 
 Minimal verification:
 
@@ -270,7 +295,6 @@ WORKSPACE_JSON="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/workorch/worksp
   -d '{"title":"demo workspace","description":"demo workspace description"}')"
 WORKSPACE_ID="$(printf '%s\n' "${WORKSPACE_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
 test -n "${WORKSPACE_ID}"
-curl -f http://127.0.0.1:8080/api/v1/workorch/slices
 GOAL_JSON="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/goals \
   -H 'Content-Type: application/json' \
   -d '{"text":"deliver local MVP orchestration"}')"
@@ -282,8 +306,7 @@ DOD_ID="$(printf '%s\n' "${DOD_JSON}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | 
 curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/workspaces/${WORKSPACE_ID}/runs \
   -H 'Content-Type: application/json' \
   -d '{"runId":"run-local-verify","goalId":"'"${GOAL_ID}"'","doDId":"'"${DOD_ID}"'"}'
-curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/runs
-curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs
+curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/run-local-verify/start
 ```
 
 File-backed persisted-state verification:
@@ -326,10 +349,6 @@ curl -f -X POST http://127.0.0.1:8080/api/v1/workorch/runs/${APPROVAL_RUN_ID}/re
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs
 curl -f "http://127.0.0.1:8080/api/v1/workorch/runs?workspaceId=${WORKSPACE_ID}"
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}
-curl -f http://127.0.0.1:8080/api/v1/workorch/slices/snapshots
-curl -f http://127.0.0.1:8080/api/v1/workorch/slices/statuses
-curl -f http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/status
-curl -f http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/snapshot
 ```
 
 - the workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `workingDirectory` to `<service-working-directory>/workspaces/<generated-workspace-id>` when omitted
@@ -348,15 +367,8 @@ curl -f http://127.0.0.1:8080/api/v1/workorch/slices/workorch-runnable/snapshot
 - with the file-backed backend, the run snapshot endpoint returns one aggregated run read model keyed by `runId`
 - with the file-backed backend, the run status endpoint returns one summarized run status keyed by `runId`
 - with the file-backed backend, the workspace snapshot endpoint returns one aggregated workspace read model keyed by `workspaceId`
-- the slice catalog endpoint returns the executable `workorch` slice definitions
-- the single-slice run endpoint returns one requested `workorch` slice
-- the bulk run endpoint returns 17 current `workorch` slices as JSON
 - with the file-backed backend, the workspace list endpoint returns persisted `workorch` workspace instances
 - with the file-backed backend, the single-workspace endpoint returns one persisted `workorch` workspace instance
-- with the file-backed backend, the batch slice-snapshots endpoint returns all currently persisted `workorch` slice snapshots
-- with the file-backed backend, the batch slice-statuses endpoint returns all currently persisted `workorch` slice summaries
-- with the file-backed backend, the single-slice status endpoint returns one persisted `workorch` slice status summary when persisted state exists
-- with the file-backed backend, the single-slice snapshot endpoint returns one persisted `workorch` slice snapshot when persisted state exists
 
 Formal local verification:
 
@@ -398,7 +410,6 @@ Verified terminal states:
 - HTTP dispatch now passes through `magicEngine/http`, and current acceptance API endpoints are registered as explicit native routes
 - system endpoints `/healthz`, `/readyz`, and `/metrics` now use native `magicEngine/http` route registration
 - workspace / run / decision / approval read, write, and execution endpoints now use native `magicEngine/http` route registration
-- slice compatibility endpoints now use native `magicEngine/http` route registration
 - default runtime event dispatch now uses a `magicCommon/event.Hub` backed adapter and terminates it during `Runtime.Shutdown`
 - request-backed runtime sessions now reuse the `magicCommon/framework/application` EventHub injected during service startup
 - request-scoped runtime modules now register into a local magicCommon plugin manager for `Run` ordering, while shutdown preserves workorch's context-aware teardown error semantics
@@ -513,6 +524,11 @@ LLM 驱动 Workspace 执行的设计文档已补齐，范围、边界与交互�
 - L12 Web console LLM execution views: completed
 - L13 End-to-end acceptance scripts: completed
 - L14 Status and operator documentation: completed
+- L15 LLM decision output stabilization and graph planning: completed
+- L16 Runtime graph follow-up and workspace shell sandbox closure: completed
+- L17 MCP HTTP tool-call runtime adapter: completed
+- L18 Concurrent ready-node graph dispatch: completed
+- L19 MCP stdio protocol transport adapter: completed
 
 ## MVP Closure Record
 
@@ -548,7 +564,6 @@ MVP 功能清单已收口，不再作为活跃待办清单使用。
 - completed: native workspace / run read routes
 - completed: native decision / approval read routes
 - completed: native workspace / run / decision / approval write and execution routes
-- completed: native slice compatibility routes
 - completed: native route registration guard for accepted API endpoints
 - completed: guarded HTTP route registration so accepted API endpoints stay explicit native routes
 - active todo: none

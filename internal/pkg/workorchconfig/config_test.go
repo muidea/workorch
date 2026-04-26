@@ -32,8 +32,9 @@ baseURL = "http://127.0.0.1:11434/v1"
 apiKey = "local-key"
 model = "local-model"
 timeout = "60s"
-disabled = false
+	disabled = false
 	`)
+	_ = Close()
 	t.Setenv(EnvConfigDir, configDir)
 	t.Cleanup(func() { _ = Close() })
 
@@ -52,6 +53,62 @@ disabled = false
 	}
 	if cfg.LLM.Providers["local"].Disabled == nil || *cfg.LLM.Providers["local"].Disabled {
 		t.Fatalf("llm disabled = %+v, want false pointer", cfg.LLM.Providers["local"].Disabled)
+	}
+}
+
+func TestSaveWritesApplicationConfigAndReloadsFrameworkConfig(t *testing.T) {
+	configDir := writeApplicationConfig(t, `
+endpointName = "workorchd"
+
+[server]
+addr = "127.0.0.1:18080"
+
+[repository]
+backend = "memory"
+
+[llm]
+defaultProvider = "local"
+
+[llm.providers.local]
+provider = "compatible"
+baseURL = "http://127.0.0.1:11434/v1"
+apiKey = "local-key"
+model = "local-model"
+timeout = "60s"
+disabled = false
+	`)
+	_ = Close()
+	t.Setenv(EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = Close() })
+
+	cfg, err := Current()
+	if err != nil {
+		t.Fatalf("current config: %v", err)
+	}
+	disabled := false
+	cfg.LLM.DefaultProvider = "reasoning"
+	cfg.LLM.Providers = map[string]LLMProviderConfig{
+		"reasoning": {
+			Provider: "openai",
+			APIKey:   "reasoning-key",
+			Model:    "reasoning-model",
+			Timeout:  "45s",
+			Disabled: &disabled,
+		},
+	}
+	if err := Save(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	if err := Reload(); err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+
+	next, err := Current()
+	if err != nil {
+		t.Fatalf("current after reload: %v", err)
+	}
+	if next.LLM.DefaultProvider != "reasoning" || next.LLM.Providers["reasoning"].Model != "reasoning-model" {
+		t.Fatalf("next config = %+v, want saved llm provider", next.LLM)
 	}
 }
 

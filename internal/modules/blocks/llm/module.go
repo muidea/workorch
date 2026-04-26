@@ -5,6 +5,7 @@ import (
 
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
@@ -20,15 +21,7 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 func (m *Module) Setup() error {
-	cfg, err := workorchconfig.Current()
-	if err != nil {
-		return err
-	}
-	defaultProviderID, providerConfigs, err := llmbiz.LoadProviderConfigs(cfg.LLM.DefaultProvider, cfg.LLMProviderValueSets())
-	if err != nil {
-		return err
-	}
-	m.runtimeAdapter = llmbiz.NewRuntimeAdapterFromConfigs(defaultProviderID, providerConfigs)
+	m.runtimeAdapter = llmbiz.NewRuntimeAdapterFromConfigLoader(loadProviderConfigsFromWorkorchConfig)
 	return nil
 }
 
@@ -42,4 +35,12 @@ func (m *Module) Teardown(ctx context.Context) error {
 
 func (m *Module) RuntimeAdapter() *llmbiz.RuntimeAdapter {
 	return m.runtimeAdapter
+}
+
+func loadProviderConfigsFromWorkorchConfig() (string, map[string]llmmodels.ProviderConfig, error) {
+	cfg, err := workorchconfig.Current()
+	if err != nil {
+		return "", nil, err
+	}
+	return llmbiz.LoadProviderConfigs(cfg.LLM.DefaultProvider, cfg.LLMProviderValueSets())
 }
