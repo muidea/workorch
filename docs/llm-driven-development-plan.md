@@ -10,9 +10,15 @@ The source design is:
 
 - `docs/llm-driven-workspace-execution-design.md`
 
-The plan is intentionally scoped to the first locally deployable MVP. It does
-not include vector Memory search, distributed scheduling, multi-tenant
-authorization, or an external runtime marketplace.
+The plan originally scoped the first locally deployable LLM-driven MVP. That
+MVP is now completed, and later runtime expansion items are tracked in
+`docs/runtime-expansion-plan.md` and
+`docs/advanced-runtime-scheduling-plan.md`.
+
+Vector Memory search has been promoted into the completed P1 scope tracked in
+`docs/next-stage-p1-development-plan.md`. Still outside the completed local
+service delivery scope: distributed scheduling, multi-tenant authorization, and
+an external runtime marketplace.
 
 ## Tracking Rules
 
@@ -615,9 +621,11 @@ Status:
 
 - completed
 - implementation: `internal/modules/blocks/mcp/biz/mcp_runtime_adapter.go`
-- current boundary: implemented stdio scope is per-call subprocess
-  `initialize` + `tools/call`; MCP resources, prompts, streaming, session reuse,
-  and external runtime marketplace integration remain future work.
+- current boundary: initial stdio scope covered per-call subprocess
+  `initialize` + `tools/call`; later MCP resources, prompts, streaming evidence,
+  and long-lived stdio session reuse are completed in
+  `docs/advanced-runtime-scheduling-plan.md`. External runtime marketplace
+  integration remains future work.
 - verification:
   `go test ./internal/modules/blocks/mcp/... -count 1`,
   `make verify-mcp-stdio`,

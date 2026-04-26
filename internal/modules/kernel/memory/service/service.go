@@ -9,18 +9,22 @@ import (
 )
 
 type CreateMemoryItemCommand struct {
-	MemoryID    common.MemoryID
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	SourceType  string
-	SourceRef   string
-	MemoryType  string
-	Content     string
-	Summary     string
-	Tags        []string
-	Importance  int
-	Confidence  int
-	Visibility  string
+	MemoryID            common.MemoryID
+	WorkspaceID         common.WorkspaceID
+	RunID               common.RunID
+	SourceType          string
+	SourceRef           string
+	MemoryType          string
+	Content             string
+	Summary             string
+	Tags                []string
+	Importance          int
+	Confidence          int
+	Visibility          string
+	EmbeddingProviderID string
+	EmbeddingModel      string
+	EmbeddingText       string
+	Vector              []float64
 }
 
 type UpdateMemoryItemCommand = CreateMemoryItemCommand

@@ -15,11 +15,12 @@ import type { Approval, Decision, DoD, Goal, MCPPrompt, MCPResource, MCPServer, 
 import { workorchApi } from './api';
 import './styles.css';
 
-type ViewKey = 'board' | 'decisionQueue' | 'workspaceDetail' | 'runtimeControl' | 'configuration' | 'service';
+type ViewKey = 'board' | 'decisionQueue' | 'approvalQueue' | 'workspaceDetail' | 'runtimeControl' | 'configuration' | 'service';
 
 const routes = [
   { path: '/board', name: 'Workspace Overview', icon: <DashboardOutlined /> },
   { path: '/decisionQueue', name: 'Decision Queue', icon: <ExceptionOutlined /> },
+  { path: '/approvalQueue', name: 'Approval Queue', icon: <CheckCircleOutlined /> },
   { path: '/workspaceDetail', name: 'Workspace Console', icon: <ProfileOutlined /> },
   { path: '/runtimeControl', name: 'Runtime Control', icon: <ClusterOutlined /> },
   { path: '/configuration', name: 'Configuration', icon: <SettingOutlined /> },
@@ -148,6 +149,7 @@ function numericRunPriority(item: Run) {
 function llmConfigurationFormValues(configuration: ServiceConfiguration): UpdateLLMConfigurationRequest {
   return {
     defaultProviderId: configuration.llm.defaultProviderId,
+    defaultEmbeddingProviderId: configuration.llm.defaultEmbeddingProviderId,
     providers: (configuration.llm.providers ?? []).map((item) => ({
       id: item.id,
       provider: item.provider,
@@ -155,7 +157,10 @@ function llmConfigurationFormValues(configuration: ServiceConfiguration): Update
       apiKey: '',
       model: item.model,
       timeout: item.timeout,
-      disabled: item.disabled
+      disabled: item.disabled,
+      chatCompletions: item.chatCompletions,
+      streaming: item.streaming,
+      nonChatOperations: item.nonChatOperations ?? []
     }))
   };
 }
@@ -172,7 +177,10 @@ function nextProviderDraft(existing: UpdateLLMProviderConfiguration[]): UpdateLL
     id,
     provider: 'compatible',
     timeout: '60s',
-    disabled: false
+    disabled: false,
+    chatCompletions: true,
+    streaming: false,
+    nonChatOperations: []
   };
 }
 
@@ -340,6 +348,91 @@ function DecisionQueuePage() {
         request={async () => {
           const items = await workorchApi.listDecisions();
           return tableResult(items.sort((left, right) => Number(left.state !== 'open') - Number(right.state !== 'open')));
+        }}
+      />
+    </PageContainer>
+  );
+}
+
+function ApprovalQueuePage() {
+  const { message } = AntApp.useApp();
+  const actionRef = useRef<ActionType | undefined>(undefined);
+  const [selectedApprovalKeys, setSelectedApprovalKeys] = useState<React.Key[]>([]);
+  const actionLabel = (action: 'approve' | 'reject') => action === 'approve' ? 'approved' : 'rejected';
+
+  const resolve = async (item: Approval, action: 'approve' | 'reject') => {
+    try {
+      if (action === 'approve') {
+        await workorchApi.approveApproval(item.id);
+      } else {
+        await workorchApi.rejectApproval(item.id);
+      }
+      message.success(`Approval ${actionLabel(action)}`);
+      actionRef.current?.reload();
+    } catch (error) {
+      message.error(errorMessage(error));
+    }
+  };
+
+  const batchResolve = async (action: 'approve' | 'reject') => {
+    const approvalIds = selectedApprovalKeys.map(String);
+    if (approvalIds.length === 0) {
+      message.warning('Select pending approvals first');
+      return;
+    }
+    try {
+      await workorchApi.batchResolveApprovals(approvalIds, action);
+      message.success(`${approvalIds.length} approvals ${actionLabel(action)}`);
+      setSelectedApprovalKeys([]);
+      actionRef.current?.reload();
+    } catch (error) {
+      message.error(errorMessage(error));
+    }
+  };
+
+  const columns: ProColumns<Approval>[] = [
+    { title: 'Approval ID', dataIndex: 'id', copyable: true },
+    { title: 'Workspace', dataIndex: 'workspaceId', copyable: true },
+    { title: 'Run', dataIndex: 'runId', copyable: true },
+    { title: 'Step', dataIndex: 'stepId', copyable: true, ellipsis: true },
+    { title: 'Reason', dataIndex: 'reason', ellipsis: true },
+    { title: 'State', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
+    {
+      title: 'Actions',
+      valueType: 'option',
+      render: (_, item) => item.state === 'pending' ? (
+        <Space wrap>
+          <Button size="small" type="primary" onClick={() => void resolve(item, 'approve')}>Approve</Button>
+          <Button size="small" danger onClick={() => void resolve(item, 'reject')}>Reject</Button>
+        </Space>
+      ) : stateTag(item.state)
+    }
+  ];
+
+  return (
+    <PageContainer
+      title="Approval Queue"
+      subTitle="Process pending approvals before blocked runs can resume"
+      extra={(
+        <Space wrap>
+          <Button disabled={selectedApprovalKeys.length === 0} onClick={() => void batchResolve('approve')}>Batch approve</Button>
+          <Button danger disabled={selectedApprovalKeys.length === 0} onClick={() => void batchResolve('reject')}>Batch reject</Button>
+        </Space>
+      )}
+    >
+      <ProTable<Approval>
+        actionRef={actionRef}
+        rowKey="id"
+        search={false}
+        rowSelection={{
+          selectedRowKeys: selectedApprovalKeys,
+          onChange: setSelectedApprovalKeys,
+          getCheckboxProps: (record) => ({ disabled: record.state !== 'pending' })
+        }}
+        columns={columns}
+        request={async () => {
+          const items = await workorchApi.listApprovals();
+          return tableResult(items.sort((left, right) => Number(left.state !== 'pending') - Number(right.state !== 'pending')));
         }}
       />
     </PageContainer>
@@ -633,6 +726,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     { title: 'Event', render: (_, item) => timelineLabel(item), ellipsis: true },
                     { title: 'Run State', dataIndex: 'runState', width: 130 },
                     { title: 'Step', dataIndex: 'stepId', ellipsis: true },
+                    { title: 'Summary', dataIndex: 'summary', ellipsis: true },
+                    { title: 'Stream Events', render: (_, item) => outputText(item.output ?? item.data, 'streamEvents') !== '-' ? outputText(item.output ?? item.data, 'streamEvents') : outputText(item.data, 'delta'), ellipsis: true },
                     { title: 'Occurred At', dataIndex: 'occurredAt', width: 210 }
                   ]}
                   dataSource={runObservability?.timeline ?? []}
@@ -896,7 +991,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
               placeholder="Leave empty to let workorch recall workspace memory automatically"
               options={memoryItems.map((item) => ({
                 value: item.id,
-                label: `${item.memoryType}: ${item.summary}`
+                label: `${item.memoryType}: ${item.summary}${item.vectorReady ? ` / vector:${item.vectorDimension ?? 0}` : ''}`
               }))}
             />
           </Form.Item>
@@ -1224,6 +1319,7 @@ function ConfigurationPage() {
   const [providerEditorForm] = Form.useForm<UpdateLLMProviderConfiguration>();
   const [configuration, setConfiguration] = useState<ServiceConfiguration | undefined>(undefined);
   const [defaultProviderId, setDefaultProviderId] = useState<string | undefined>(undefined);
+  const [defaultEmbeddingProviderId, setDefaultEmbeddingProviderId] = useState<string | undefined>(undefined);
   const [providerDrafts, setProviderDrafts] = useState<UpdateLLMProviderConfiguration[]>([]);
   const [selectedProviderIndex, setSelectedProviderIndex] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -1236,6 +1332,7 @@ function ConfigurationPage() {
       const nextFormValues = llmConfigurationFormValues(nextConfiguration);
       setConfiguration(nextConfiguration);
       setDefaultProviderId(nextFormValues.defaultProviderId);
+      setDefaultEmbeddingProviderId(nextFormValues.defaultEmbeddingProviderId);
       setProviderDrafts(nextFormValues.providers);
       setSelectedProviderIndex(0);
       providerEditorForm.setFieldsValue(nextFormValues.providers[0] ?? nextProviderDraft([]));
@@ -1255,6 +1352,7 @@ function ConfigurationPage() {
     try {
       const nextConfiguration = await workorchApi.updateLLMConfiguration({
         defaultProviderId,
+        defaultEmbeddingProviderId,
         providers: providerDrafts.map((item) => ({
           id: item.id?.trim(),
           provider: item.provider?.trim(),
@@ -1262,12 +1360,16 @@ function ConfigurationPage() {
           apiKey: item.apiKey?.trim(),
           model: item.model?.trim(),
           timeout: item.timeout?.trim(),
-          disabled: item.disabled === true
+          disabled: item.disabled === true,
+          chatCompletions: item.chatCompletions !== false,
+          streaming: item.streaming === true,
+          nonChatOperations: item.nonChatOperations ?? []
         }))
       });
       const nextFormValues = llmConfigurationFormValues(nextConfiguration);
       setConfiguration(nextConfiguration);
       setDefaultProviderId(nextFormValues.defaultProviderId);
+      setDefaultEmbeddingProviderId(nextFormValues.defaultEmbeddingProviderId);
       setProviderDrafts(nextFormValues.providers);
       setSelectedProviderIndex(0);
       providerEditorForm.setFieldsValue(nextFormValues.providers[0] ?? nextProviderDraft([]));
@@ -1310,6 +1412,9 @@ function ConfigurationPage() {
     if (!nextDrafts.some((item) => item.id === defaultProviderId)) {
       setDefaultProviderId(nextDrafts[0]?.id);
     }
+    if (!nextDrafts.some((item) => item.id === defaultEmbeddingProviderId)) {
+      setDefaultEmbeddingProviderId(undefined);
+    }
   };
 
   const updateSelectedProvider = (_changedValues: Partial<UpdateLLMProviderConfiguration>, values: UpdateLLMProviderConfiguration) => {
@@ -1323,6 +1428,9 @@ function ConfigurationPage() {
       const nextID = values.id?.trim();
       if (defaultProviderId === previousID && nextID && nextID !== previousID) {
         setDefaultProviderId(nextID);
+      }
+      if (defaultEmbeddingProviderId === previousID && nextID && nextID !== previousID) {
+        setDefaultEmbeddingProviderId(nextID);
       }
       return nextItems;
     });
@@ -1385,6 +1493,19 @@ function ConfigurationPage() {
                   .map((id) => ({ value: id, label: id }))}
               />
             </Form.Item>
+            <Form.Item label="Default Embedding Provider ID">
+              <Select
+                allowClear
+                value={defaultEmbeddingProviderId}
+                onChange={setDefaultEmbeddingProviderId}
+                placeholder="Select the provider used for vector memory recall"
+                options={providerDrafts
+                  .filter((item) => (item.nonChatOperations ?? []).includes('embeddings'))
+                  .map((item) => item.id?.trim())
+                  .filter(Boolean)
+                  .map((id) => ({ value: id, label: id }))}
+              />
+            </Form.Item>
             <Space direction="vertical" size="small" className="llm-provider-list">
               {providerDrafts.map((item, index) => {
                 const status = statusByProviderID.get(item.id);
@@ -1402,6 +1523,7 @@ function ConfigurationPage() {
                     </span>
                     <span className="llm-provider-list-tags">
                       {item.id === defaultProviderId ? <Tag color="blue">default</Tag> : null}
+                      {item.id === defaultEmbeddingProviderId ? <Tag color="cyan">embedding</Tag> : null}
                       {status?.apiKeyConfigured ? <Tag color="green">key</Tag> : <Tag color="red">key</Tag>}
                       {status?.ready ? <Tag color="green">ready</Tag> : <Tag color="red">{status?.reason || 'unsaved'}</Tag>}
                     </span>
@@ -1448,6 +1570,25 @@ function ConfigurationPage() {
                     ]}
                   />
                 </Form.Item>
+                <Form.Item name="chatCompletions" label="Chat Completions">
+                  <Select
+                    options={[
+                      { value: true, label: 'enabled' },
+                      { value: false, label: 'disabled' }
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item name="streaming" label="Streaming">
+                  <Select
+                    options={[
+                      { value: false, label: 'disabled' },
+                      { value: true, label: 'enabled' }
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item name="nonChatOperations" label="Non-Chat Operations">
+                  <Select mode="tags" placeholder="embeddings, responses" options={[]} />
+                </Form.Item>
                 <Form.Item name="apiKey" label="API Key">
                   <Input.Password placeholder="Leave empty to keep existing API key" autoComplete="new-password" />
                 </Form.Item>
@@ -1455,7 +1596,8 @@ function ConfigurationPage() {
                   column={1}
                   items={[
                     { key: 'apiKey', label: 'Saved API Key', children: selectedProviderStatus?.apiKeyConfigured ? <Tag color="green">configured</Tag> : <Tag color="red">missing</Tag> },
-                    { key: 'status', label: 'Saved Status', children: selectedProviderStatus?.ready ? <Tag color="green">ready</Tag> : <Tag color="red">{selectedProviderStatus?.reason || 'unsaved'}</Tag> }
+                    { key: 'status', label: 'Saved Status', children: selectedProviderStatus?.ready ? <Tag color="green">ready</Tag> : <Tag color="red">{selectedProviderStatus?.reason || 'unsaved'}</Tag> },
+                    { key: 'capabilities', label: 'Saved Capabilities', children: <Space wrap>{selectedProviderStatus?.chatCompletions ? <Tag color="blue">chat</Tag> : null}{selectedProviderStatus?.streaming ? <Tag color="cyan">streaming</Tag> : null}{(selectedProviderStatus?.nonChatOperations ?? []).map((item) => <Tag key={item}>{item}</Tag>)}</Space> }
                   ]}
                 />
               </Form>
@@ -1509,6 +1651,8 @@ function ConsoleApp() {
         }} />;
       case 'decisionQueue':
         return <DecisionQueuePage />;
+      case 'approvalQueue':
+        return <ApprovalQueuePage />;
       case 'workspaceDetail':
         return <WorkspaceDetailPage selectedWorkspaceId={selectedWorkspaceId} />;
       case 'runtimeControl':

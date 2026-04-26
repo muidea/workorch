@@ -10,6 +10,8 @@ Current authoritative documents:
 - `docs/mvp-backlog.md`
 - `docs/structure.md`
 - `docs/deployment.md`
+- `docs/next-stage-p1-development-plan.md`
+- `docs/next-stage-demand-candidates.md`
 - `README.md`
 
 Current authoritative source layout:

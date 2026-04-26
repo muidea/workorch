@@ -42,6 +42,40 @@ func (p *sequenceProvider) Complete(_ context.Context, request llmmodels.Provide
 	return payload, nil
 }
 
+type streamingProvider struct {
+	payload []byte
+	events  []llmmodels.ProviderStreamEvent
+	err     error
+}
+
+func (p *streamingProvider) Complete(context.Context, llmmodels.ProviderRequest) ([]byte, error) {
+	return nil, common.ErrInvalidArgument
+}
+
+func (p *streamingProvider) StreamComplete(_ context.Context, _ llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) ([]byte, error) {
+	for _, event := range p.events {
+		if err := emit(event); err != nil {
+			return nil, err
+		}
+	}
+	return p.payload, p.err
+}
+
+type embeddingStaticProvider struct {
+	request llmmodels.ProviderEmbeddingRequest
+	result  llmmodels.ProviderEmbeddingResult
+	err     error
+}
+
+func (p *embeddingStaticProvider) Complete(context.Context, llmmodels.ProviderRequest) ([]byte, error) {
+	return nil, common.ErrInvalidArgument
+}
+
+func (p *embeddingStaticProvider) Embed(_ context.Context, request llmmodels.ProviderEmbeddingRequest) (llmmodels.ProviderEmbeddingResult, error) {
+	p.request = request
+	return p.result, p.err
+}
+
 func TestRuntimeAdapterFailsClearlyWhenProviderUnavailable(t *testing.T) {
 	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
 		Unavailable:       true,
@@ -159,6 +193,136 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 		result.Output["stage"] != "llm_shell_plan" ||
 		result.Output["nextKind"] != "shell/command" {
 		t.Fatalf("output = %+v, want shell plan", result.Output)
+	}
+}
+
+func TestRuntimeAdapterUsesStreamingProviderWhenCapabilityDeclared(t *testing.T) {
+	provider := &streamingProvider{
+		payload: []byte(`{"completionState":"continue","shellCommands":[{"command":"echo","args":["stream"]}]}`),
+		events: []llmmodels.ProviderStreamEvent{
+			{Type: "delta", Delta: `{"completionState":"continue"`},
+			{Type: "delta", Delta: `,"shellCommands":[{"command":"echo","args":["stream"]}]}`},
+		},
+	}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Capabilities: llmmodels.ProviderCapabilities{
+			ChatCompletions: true,
+			Streaming:       true,
+		},
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	if result.Output["nextKind"] != "shell/command" {
+		t.Fatalf("output = %+v, want shell plan from streamed decision", result.Output)
+	}
+	streamEvents, ok := result.Output["streamEvents"].([]map[string]any)
+	if !ok || len(streamEvents) != 2 || streamEvents[0]["delta"] == "" {
+		t.Fatalf("streamEvents = %+v, want persisted stream deltas", result.Output["streamEvents"])
+	}
+}
+
+func TestRuntimeAdapterFailsStreamingErrorClearly(t *testing.T) {
+	provider := &streamingProvider{
+		events: []llmmodels.ProviderStreamEvent{{Type: "delta", Delta: `{"completionState"`}},
+		err:    errors.New("stream disconnected"),
+	}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Capabilities: llmmodels.ProviderCapabilities{
+			ChatCompletions: true,
+			Streaming:       true,
+		},
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err == nil {
+		t.Fatal("expected streaming error")
+	}
+	if result.Output["stage"] != "llm_provider_stream_error" || result.Output["streamEvents"] == nil {
+		t.Fatalf("output = %+v, want stream error with events", result.Output)
+	}
+}
+
+func TestRuntimeAdapterRejectsUndeclaredNonChatOperation(t *testing.T) {
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Capabilities: llmmodels.ProviderCapabilities{
+			ChatCompletions:   true,
+			NonChatOperations: []string{"embeddings"},
+		},
+	}, &staticProvider{payload: []byte(`{"completionState":"continue"}`)})
+	request := llmStepRequest()
+	request.Input["llmOperation"] = "responses"
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), request)
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("execute err = %v, want invalid argument", err)
+	}
+	if result.Output["stage"] != "llm_provider_operation_unsupported" {
+		t.Fatalf("output = %+v, want unsupported operation failure", result.Output)
+	}
+}
+
+func TestRuntimeAdapterGeneratesEmbeddingForDeclaredProvider(t *testing.T) {
+	provider := &embeddingStaticProvider{result: llmmodels.ProviderEmbeddingResult{
+		Vector: []float64{0.1, 0.2, 0.3},
+	}}
+	adapter := NewRuntimeAdapterWithProviders("reasoning", map[string]ProviderRuntime{
+		"embedding": {
+			Config: llmmodels.ProviderConfig{
+				ID:       "embedding",
+				Provider: llmcommon.ProviderCompatible,
+				APIKey:   "secret-value",
+				Model:    "embedding-model",
+				Capabilities: llmmodels.ProviderCapabilities{
+					NonChatOperations: []string{llmcommon.ProviderOperationEmbeddings},
+				},
+			},
+			Provider: provider,
+		},
+	})
+
+	result, err := adapter.GenerateEmbedding(context.Background(), "embedding", "workspace goal")
+	if err != nil {
+		t.Fatalf("generate embedding: %v", err)
+	}
+	if provider.request.Input != "workspace goal" || provider.request.Model != "embedding-model" {
+		t.Fatalf("embedding request = %+v, want input and model", provider.request)
+	}
+	if result.ProviderID != "embedding" || result.Model != "embedding-model" || len(result.Vector) != 3 {
+		t.Fatalf("embedding result = %+v, want selected provider vector", result)
+	}
+}
+
+func TestRuntimeAdapterRejectsEmbeddingWhenCapabilityMissing(t *testing.T) {
+	adapter := NewRuntimeAdapterWithProviders("embedding", map[string]ProviderRuntime{
+		"embedding": {
+			Config: llmmodels.ProviderConfig{
+				ID:       "embedding",
+				Provider: llmcommon.ProviderCompatible,
+				APIKey:   "secret-value",
+				Model:    "embedding-model",
+				Capabilities: llmmodels.ProviderCapabilities{
+					ChatCompletions: true,
+				},
+			},
+			Provider: &embeddingStaticProvider{result: llmmodels.ProviderEmbeddingResult{Vector: []float64{0.1}}},
+		},
+	})
+
+	_, err := adapter.GenerateEmbedding(context.Background(), "embedding", "workspace goal")
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("generate embedding err = %v, want invalid argument", err)
 	}
 }
 

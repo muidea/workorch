@@ -194,7 +194,19 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "graph/mock", State: common.StepStateCompleted}); err != nil {
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"stage": "llm_execution_graph_plan",
+			"streamEvents": []map[string]any{
+				{"type": "delta", "delta": `{"completionState":"continue"`},
+				{"type": "done"},
+			},
+		},
+	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
 	if err := exports.Repositories.ToolCalls.Create(ctx, &runmodel.ToolCall{
@@ -270,6 +282,36 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 	if len(item.Timeline) < 2 {
 		t.Fatalf("timeline = %+v, want checkpoint and events", item.Timeline)
 	}
+	if !timelineContainsStepOutput(item.Timeline, string(stepID), "llm_execution_graph_plan") {
+		t.Fatalf("timeline = %+v, want step output timeline item", item.Timeline)
+	}
+	if !timelineContainsStreamDelta(item.Timeline, string(stepID), `{"completionState":"continue"`) {
+		t.Fatalf("timeline = %+v, want stream delta timeline item", item.Timeline)
+	}
+}
+
+func timelineContainsStepOutput(items []RuntimeTimelineItem, stepID string, stage string) bool {
+	for _, item := range items {
+		if item.Source != "step" || item.StepID != stepID || item.Output == nil {
+			continue
+		}
+		if item.Output["stage"] == stage {
+			return true
+		}
+	}
+	return false
+}
+
+func timelineContainsStreamDelta(items []RuntimeTimelineItem, stepID string, delta string) bool {
+	for _, item := range items {
+		if item.Source != "step_stream" || item.StepID != stepID {
+			continue
+		}
+		if item.Type == "delta" && item.Data["delta"] == delta {
+			return true
+		}
+	}
+	return false
 }
 
 func TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems(t *testing.T) {

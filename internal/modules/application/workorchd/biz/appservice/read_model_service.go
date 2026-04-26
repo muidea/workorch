@@ -3,6 +3,7 @@ package appservice
 import (
 	"context"
 	"sort"
+	"strconv"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
@@ -92,6 +93,7 @@ type RuntimeTimelineItem struct {
 	Summary    string         `json:"summary,omitempty"`
 	OccurredAt string         `json:"occurredAt,omitempty"`
 	Data       map[string]any `json:"data,omitempty"`
+	Output     map[string]any `json:"output,omitempty"`
 }
 
 type ToolCall struct {
@@ -677,6 +679,36 @@ func cloneReadModelMap(input map[string]any) map[string]any {
 	return out
 }
 
+func readModelStringValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return ""
+	}
+}
+
+func readModelMapSliceValue(value any) []map[string]any {
+	switch typed := value.(type) {
+	case []map[string]any:
+		ret := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			ret = append(ret, cloneReadModelMap(item))
+		}
+		return ret
+	case []any:
+		ret := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if mapped, ok := item.(map[string]any); ok {
+				ret = append(ret, cloneReadModelMap(mapped))
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
+}
+
 func mapRunStatus(snapshot RunSnapshot) RunStatus {
 	ret := RunStatus{
 		ID:                 snapshot.Run.ID,
@@ -786,7 +818,19 @@ func latestRuntimeCheckpoint(items []RuntimeCheckpoint) *RuntimeCheckpoint {
 }
 
 func runtimeTimeline(snapshot RunSnapshot) []RuntimeTimelineItem {
-	items := make([]RuntimeTimelineItem, 0, len(snapshot.RuntimeCheckpoints)+len(snapshot.Observed))
+	items := make([]RuntimeTimelineItem, 0, len(snapshot.Steps)+len(snapshot.RuntimeCheckpoints)+len(snapshot.Observed))
+	for _, step := range snapshot.Steps {
+		items = append(items, RuntimeTimelineItem{
+			Source:    "step",
+			Type:      step.Kind,
+			ID:        step.ID,
+			StepID:    step.ID,
+			StepState: step.State,
+			Summary:   timelineStepSummary(step.Output),
+			Output:    cloneReadModelMap(step.Output),
+		})
+		items = append(items, streamTimelineItems(step)...)
+	}
 	for _, checkpoint := range snapshot.RuntimeCheckpoints {
 		items = append(items, RuntimeTimelineItem{
 			Source:     "checkpoint",
@@ -819,6 +863,50 @@ func runtimeTimeline(snapshot RunSnapshot) []RuntimeTimelineItem {
 		return items[i].OccurredAt < items[j].OccurredAt
 	})
 	return items
+}
+
+func streamTimelineItems(step presenter.StepView) []RuntimeTimelineItem {
+	if len(step.Output) == 0 {
+		return nil
+	}
+	raw, ok := step.Output["streamEvents"]
+	if !ok {
+		return nil
+	}
+	events := readModelMapSliceValue(raw)
+	if len(events) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeTimelineItem, 0, len(events))
+	for idx, event := range events {
+		eventType, _ := event["type"].(string)
+		if eventType == "" {
+			eventType = "delta"
+		}
+		ret = append(ret, RuntimeTimelineItem{
+			Source:    "step_stream",
+			Type:      eventType,
+			ID:        step.ID + "/stream/" + strconv.Itoa(idx+1),
+			StepID:    step.ID,
+			StepState: step.State,
+			Summary:   readModelStringValue(event["delta"]),
+			Data:      cloneReadModelMap(event),
+		})
+	}
+	return ret
+}
+
+func timelineStepSummary(output map[string]any) string {
+	if len(output) == 0 {
+		return ""
+	}
+	if stage := readModelStringValue(output["stage"]); stage != "" {
+		return stage
+	}
+	if status := readModelStringValue(output["status"]); status != "" {
+		return status
+	}
+	return ""
 }
 
 func timelineEvents(items []RuntimeTimelineItem) []RuntimeTimelineItem {

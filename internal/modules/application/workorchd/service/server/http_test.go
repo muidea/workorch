@@ -12,7 +12,12 @@ import (
 	"testing"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
+	plugininitiator "github.com/muidea/magicCommon/framework/plugin/initiator"
+	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
+	magictask "github.com/muidea/magicCommon/task"
 	engine "github.com/muidea/magicEngine/http"
+	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	legacycommon "github.com/muidea/workorch/internal/modules/blocks/legacy/pkg/common"
@@ -24,6 +29,20 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+
+	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
+	_ "github.com/muidea/workorch/internal/modules/blocks/legacy"
+	_ "github.com/muidea/workorch/internal/modules/blocks/llm"
+	_ "github.com/muidea/workorch/internal/modules/blocks/mcp"
+	_ "github.com/muidea/workorch/internal/modules/blocks/shell"
+	_ "github.com/muidea/workorch/internal/modules/kernel/mcp"
+	_ "github.com/muidea/workorch/internal/modules/kernel/memory"
+	_ "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
+	_ "github.com/muidea/workorch/internal/modules/kernel/run"
+	_ "github.com/muidea/workorch/internal/modules/kernel/skill"
+	_ "github.com/muidea/workorch/internal/modules/kernel/soul"
+	_ "github.com/muidea/workorch/internal/modules/kernel/workspace"
 )
 
 func TestHealthzReturnsOK(t *testing.T) {
@@ -71,6 +90,56 @@ func TestReadyzNativeRouteInjectsEventHub(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestServerStatePrefersApplicationRuntimeSession(t *testing.T) {
+	useWorkorchRuntimeTestConfig(t, "memory", "")
+	hub := magicevent.NewHub(16)
+	routine := magictask.NewBackgroundRoutine(16)
+	defer routine.Shutdown(time.Second)
+	defer hub.Terminate()
+	defer plugininitiator.Teardown()
+	defer pluginmodule.Teardown()
+
+	if err := plugininitiator.Setup(hub, routine); err != nil {
+		t.Fatalf("setup runtime initiator: %v", err)
+	}
+	if err := pluginmodule.Setup(hub, routine); err != nil {
+		t.Fatalf("setup runtime modules: %v", err)
+	}
+
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	if state.sharedSession == nil {
+		t.Fatal("expected shared runtime session")
+	}
+	if state.sharedSession.Bootstrap != nil {
+		t.Fatal("expected application runtime session to be non-owning")
+	}
+	if state.sharedSession.Runtime == nil {
+		t.Fatal("expected managed runtime adapter")
+	}
+
+	ctx := context.Background()
+	workspace, err := state.createWorkspace(ctx, "", "", "application runtime", "", "workspaces/application-runtime")
+	if err != nil {
+		t.Fatalf("create workspace through server state: %v", err)
+	}
+
+	var helper runtimecommon.Helper
+	runtime, runtimeErr := plugininitiator.GetEntity(runtimecommon.InitiatorID, helper)
+	if runtimeErr != nil {
+		t.Fatalf("get runtime initiator: %v", runtimeErr)
+	}
+	if _, err := runtime.Repositories().Workspaces.Get(ctx, common.WorkspaceID(workspace.ID)); err != nil {
+		t.Fatalf("workspace was not persisted in application runtime repositories: %v", err)
+	}
+
+	if err := state.close(ctx); err != nil {
+		t.Fatalf("close server state: %v", err)
+	}
+	if _, err := runtime.Repositories().Workspaces.Get(ctx, common.WorkspaceID(workspace.ID)); err != nil {
+		t.Fatalf("server state close must not teardown application runtime: %v", err)
 	}
 }
 
@@ -258,7 +327,11 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 		"sourceType":"user",
 		"memoryType":"project_context",
 		"summary":"This workspace is verified through local workorchd HTTP APIs.",
-		"tags":["local","acceptance"]
+		"tags":["local","acceptance"],
+		"embeddingProviderId":"verify-embedding",
+		"embeddingModel":"verify-embedding-model",
+		"embeddingText":"local workorchd HTTP API verification",
+		"vector":[0.9,0.1,0]
 	}`, http.StatusCreated)
 
 	for _, spec := range []struct {
@@ -273,7 +346,7 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 		{path: "/api/v1/workorch/mcp/servers/mcp-local-context/tools", want: `"name": "repo.summary"`},
 		{path: "/api/v1/workorch/mcp/servers/mcp-local-context/resources", want: `"uri": "file://README.md"`},
 		{path: "/api/v1/workorch/mcp/servers/mcp-local-context/prompts", want: `"name": "delivery.plan"`},
-		{path: "/api/v1/workorch/memory?workspaceId=" + workspace.ID + "&q=HTTP", want: `"memoryType": "project_context"`},
+		{path: "/api/v1/workorch/memory?workspaceId=" + workspace.ID + "&q=HTTP", want: `"vectorReady": true`},
 	} {
 		req := httptest.NewRequest(http.MethodGet, spec.path, nil)
 		rec := httptest.NewRecorder()
@@ -348,6 +421,37 @@ func useUnavailableLLMProvider(t *testing.T) {
 	t.Setenv(llmcommon.EnvTimeout, "")
 }
 
+func useWorkorchRuntimeTestConfig(t *testing.T, backend string, dataRoot string) {
+	t.Helper()
+
+	_ = workorchconfig.Close()
+	configDir := t.TempDir()
+	content := fmt.Sprintf(`endpointName = "workorchd"
+
+[server]
+addr = "127.0.0.1:0"
+readHeaderTimeout = "5s"
+readTimeout = "15s"
+writeTimeout = "30s"
+idleTimeout = "60s"
+shutdownTimeout = "5s"
+maxConcurrentRuns = 1
+
+[repository]
+backend = %q
+dataDir = %q
+
+[llm]
+timeout = "60s"
+disabled = false
+`, backend, dataRoot)
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write runtime test config: %v", err)
+	}
+	t.Setenv("CONFIG_PATH", configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+}
+
 func TestAcceptedAPIRoutesAreRegisteredNatively(t *testing.T) {
 	router := engine.NewRouteRegistry()
 	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
@@ -417,6 +521,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/approvals/:approvalId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/approvals/:approvalId/approve"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/approvals/:approvalId/reject"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/approvals/resolve-batch"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/souls"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/souls"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/souls/:soulId"},
@@ -689,6 +794,15 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}
 		return appservice.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "rejected"}, nil
 	}
+	state.batchResolveApprovals = func(ctx context.Context, _, _ string, cmd appservice.BatchResolveApprovalCommand) ([]appservice.Approval, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("approval batch resolve event hub = %#v, want injected hub", got)
+		}
+		if !stringSliceEqual(cmd.ApprovalIDs, []string{"approval-native-read"}) || cmd.Action != "approve" {
+			t.Fatalf("batch approval cmd = %+v, want approval-native-read approve", cmd)
+		}
+		return []appservice.Approval{{ID: "approval-native-read", WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "approved"}}, nil
+	}
 	handler := newMuxWithState(state)
 
 	for _, tc := range []struct {
@@ -718,6 +832,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/workorch/approvals/approval-native-read", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/approvals/approval-native-read/approve", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/approvals/approval-native-read/reject", status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/approvals/resolve-batch", body: `{"approvalIds":["approval-native-read"],"action":"approve"}`, status: http.StatusOK},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 		if tc.body != "" {
@@ -1571,6 +1686,39 @@ func TestDecisionBatchResolveEndpointResolvesOpenTickets(t *testing.T) {
 	for _, item := range resolved.Decisions {
 		if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan || item.ResolutionPayload["operator"] != "http-batch" {
 			t.Fatalf("decision = %+v, want resolved replan with payload", item)
+		}
+	}
+}
+
+func TestApprovalBatchResolveEndpointApprovesPendingApprovals(t *testing.T) {
+	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+	firstRunID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-approval-batch-a"
+	secondRunID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-approval-batch-b"
+
+	createWorkspaceAndRunForHTTP(t, handler, "approval batch http workspace a", firstRunID)
+	first := startRunForHTTP(t, handler, firstRunID)
+	createWorkspaceAndRunForHTTP(t, handler, "approval batch http workspace b", secondRunID)
+	second := startRunForHTTP(t, handler, secondRunID)
+
+	body := strings.NewReader(`{"approvalIds":["` + second.BlockingApprovalID + `","` + first.BlockingApprovalID + `"],"action":"approve"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/approvals/resolve-batch", body)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("batch approval resolve status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var resolved approvalsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resolved); err != nil {
+		t.Fatalf("unmarshal batch resolved approvals: %v", err)
+	}
+	if len(resolved.Approvals) != 2 ||
+		resolved.Approvals[0].ID != second.BlockingApprovalID ||
+		resolved.Approvals[1].ID != first.BlockingApprovalID {
+		t.Fatalf("resolved approvals = %+v, want request order", resolved.Approvals)
+	}
+	for _, item := range resolved.Approvals {
+		if item.State != "approved" {
+			t.Fatalf("approval = %+v, want approved", item)
 		}
 	}
 }

@@ -30,6 +30,18 @@ func LoadProviderConfig(providerID string, values map[string]string) (llmmodels.
 	if err != nil {
 		return llmmodels.ProviderConfig{}, fmt.Errorf("%w: invalid %s", common.ErrInvalidArgument, llmcommon.EnvDisabled)
 	}
+	chatCompletions := true
+	if raw := strings.TrimSpace(values[llmcommon.EnvChatCompletions]); raw != "" {
+		parsed, parseErr := parseBool(raw)
+		if parseErr != nil {
+			return llmmodels.ProviderConfig{}, fmt.Errorf("%w: invalid %s", common.ErrInvalidArgument, llmcommon.EnvChatCompletions)
+		}
+		chatCompletions = parsed
+	}
+	streaming, err := parseBool(values[llmcommon.EnvStreaming])
+	if err != nil {
+		return llmmodels.ProviderConfig{}, fmt.Errorf("%w: invalid %s", common.ErrInvalidArgument, llmcommon.EnvStreaming)
+	}
 
 	cfg := llmmodels.ProviderConfig{
 		ID:       normalizedProviderID(providerID),
@@ -39,6 +51,11 @@ func LoadProviderConfig(providerID string, values map[string]string) (llmmodels.
 		Model:    strings.TrimSpace(values[llmcommon.EnvModel]),
 		Timeout:  timeout,
 		Disabled: disabled,
+		Capabilities: llmmodels.ProviderCapabilities{
+			ChatCompletions:   chatCompletions,
+			Streaming:         streaming,
+			NonChatOperations: normalizedOperations(values[llmcommon.EnvNonChatOperations]),
+		},
 	}
 	return withAvailability(cfg), nil
 }
@@ -67,15 +84,17 @@ func LoadProviderConfigs(defaultProviderID string, valueSets map[string]map[stri
 }
 
 func RedactedProviderConfig(cfg llmmodels.ProviderConfig) llmmodels.RedactedProviderConfig {
+	capabilities := effectiveProviderCapabilities(cfg.Capabilities)
 	return llmmodels.RedactedProviderConfig{
-		ID:       cfg.ID,
-		Provider: cfg.Provider,
-		BaseURL:  cfg.BaseURL,
-		Model:    cfg.Model,
-		Timeout:  cfg.Timeout.String(),
-		Disabled: cfg.Disabled,
-		Ready:    !cfg.Unavailable,
-		Reason:   cfg.UnavailableReason,
+		ID:           cfg.ID,
+		Provider:     cfg.Provider,
+		BaseURL:      cfg.BaseURL,
+		Model:        cfg.Model,
+		Timeout:      cfg.Timeout.String(),
+		Disabled:     cfg.Disabled,
+		Ready:        !cfg.Unavailable,
+		Reason:       cfg.UnavailableReason,
+		Capabilities: capabilities,
 	}
 }
 
@@ -119,6 +138,21 @@ func withAvailability(cfg llmmodels.ProviderConfig) llmmodels.ProviderConfig {
 		cfg.BaseURL = defaultOpenAIBaseURL
 	}
 	return cfg
+}
+
+func normalizedOperations(raw string) []string {
+	parts := strings.Split(raw, ",")
+	ret := make([]string, 0, len(parts))
+	seen := map[string]bool{}
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		ret = append(ret, item)
+	}
+	return ret
 }
 
 func isSupportedProvider(provider string) bool {

@@ -18,6 +18,11 @@ type Approval struct {
 	State       string `json:"state"`
 }
 
+type BatchResolveApprovalCommand struct {
+	ApprovalIDs []string `json:"approvalIds"`
+	Action      string   `json:"action"`
+}
+
 func ReadApprovalWithSession(ctx context.Context, session *RuntimeSession, approvalID string) (ret Approval, err error) {
 	_, repo, err := approvalDependenciesFromSession(session)
 	if err != nil {
@@ -142,6 +147,55 @@ func RejectApprovalWithSession(ctx context.Context, session *RuntimeSession, app
 	return mapApproval(item), nil
 }
 
+func BatchResolveApprovalsWithSession(ctx context.Context, session *RuntimeSession, cmd BatchResolveApprovalCommand) (ret []Approval, err error) {
+	service, repo, err := approvalDependenciesFromSession(session)
+	if err != nil {
+		return nil, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	if len(cmd.ApprovalIDs) == 0 || (cmd.Action != "approve" && cmd.Action != "reject") {
+		return nil, common.ErrInvalidArgument
+	}
+	seen := make(map[string]struct{}, len(cmd.ApprovalIDs))
+	for _, approvalID := range cmd.ApprovalIDs {
+		if approvalID == "" {
+			return nil, common.ErrInvalidArgument
+		}
+		if _, ok := seen[approvalID]; ok {
+			return nil, common.ErrInvalidArgument
+		}
+		seen[approvalID] = struct{}{}
+		item, err := repo.Get(ctx, common.ApprovalID(approvalID))
+		if err != nil {
+			return nil, err
+		}
+		if item.State != common.ApprovalStatePending {
+			return nil, common.ErrConflict
+		}
+	}
+
+	ret = make([]Approval, 0, len(cmd.ApprovalIDs))
+	for _, approvalID := range cmd.ApprovalIDs {
+		id := common.ApprovalID(approvalID)
+		var err error
+		if cmd.Action == "approve" {
+			err = service.EnsureApproved(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})
+		} else {
+			err = service.EnsureRejected(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})
+		}
+		if err != nil {
+			return nil, err
+		}
+		item, err := repo.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, mapApproval(item))
+	}
+	return ret, nil
+}
+
 func RejectApprovalWithBackend(ctx context.Context, backend string, dataRoot string, approvalID string) (Approval, error) {
 	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
@@ -150,12 +204,28 @@ func RejectApprovalWithBackend(ctx context.Context, backend string, dataRoot str
 	return RejectApprovalWithSession(ctx, session, approvalID)
 }
 
+func BatchResolveApprovalsWithBackend(ctx context.Context, backend string, dataRoot string, cmd BatchResolveApprovalCommand) ([]Approval, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return nil, err
+	}
+	return BatchResolveApprovalsWithSession(ctx, session, cmd)
+}
+
 func RejectApprovalFromEnv(ctx context.Context, approvalID string) (Approval, error) {
 	session, err := NewRuntimeSessionFromEnv()
 	if err != nil {
 		return Approval{}, err
 	}
 	return RejectApprovalWithSession(ctx, session, approvalID)
+}
+
+func BatchResolveApprovalsFromEnv(ctx context.Context, cmd BatchResolveApprovalCommand) ([]Approval, error) {
+	session, err := NewRuntimeSessionFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return BatchResolveApprovalsWithSession(ctx, session, cmd)
 }
 
 func approvalDependenciesFromSession(session *RuntimeSession) (approvalmodule.Service, repository.ApprovalRepository, error) {

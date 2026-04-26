@@ -26,6 +26,7 @@ export type RepositoryConfiguration = {
 
 export type LLMConfiguration = {
   defaultProviderId?: string;
+  defaultEmbeddingProviderId?: string;
   providers?: LLMProviderConfiguration[];
 };
 
@@ -40,10 +41,14 @@ export type LLMProviderConfiguration = {
   reason?: string;
   default: boolean;
   apiKeyConfigured: boolean;
+  chatCompletions: boolean;
+  streaming: boolean;
+  nonChatOperations?: string[];
 };
 
 export type UpdateLLMConfigurationRequest = {
   defaultProviderId?: string;
+  defaultEmbeddingProviderId?: string;
   providers: UpdateLLMProviderConfiguration[];
 };
 
@@ -55,6 +60,9 @@ export type UpdateLLMProviderConfiguration = {
   model?: string;
   timeout?: string;
   disabled?: boolean;
+  chatCompletions?: boolean;
+  streaming?: boolean;
+  nonChatOperations?: string[];
 };
 
 export type Workspace = {
@@ -157,6 +165,12 @@ export type MemoryItem = {
   memoryType: string;
   summary: string;
   tags?: string[];
+  embeddingProviderId?: string;
+  embeddingModel?: string;
+  embeddingText?: string;
+  vectorReady?: boolean;
+  vectorDimension?: number;
+  vectorScore?: number;
 };
 
 export type StepView = {
@@ -252,6 +266,7 @@ export type RuntimeTimelineItem = {
   summary?: string;
   occurredAt?: string;
   data?: Record<string, unknown>;
+  output?: Record<string, unknown>;
 };
 
 export type RunObservability = {

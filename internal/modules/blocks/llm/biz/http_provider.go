@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 )
 
 const maxProviderErrorBodyBytes = 4096
+const maxProviderStreamLineBytes = 1024 * 1024
 
 type HTTPProvider struct {
 	config llmmodels.ProviderConfig
@@ -91,11 +93,121 @@ func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderR
 	return []byte(content), nil
 }
 
+func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) ([]byte, error) {
+	if p == nil || p.client == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	endpoint, err := chatCompletionsURL(p.config.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(chatCompletionRequest{
+		Model: p.config.Model,
+		Messages: []chatCompletionMessage{
+			{Role: "system", Content: systemPrompt()},
+			{Role: "user", Content: userPrompt(request)},
+		},
+		Temperature:    0,
+		ResponseFormat: map[string]string{"type": "json_object"},
+		Stream:         true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+	httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderErrorBodyBytes))
+		return nil, fmt.Errorf("%w: llm provider http status %d: %s", common.ErrInvalidArgument, resp.StatusCode, sanitizeProviderBody(body, p.config.APIKey))
+	}
+	content, err := readChatCompletionStream(resp.Body, emit)
+	if err != nil {
+		return nil, err
+	}
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil, fmt.Errorf("%w: llm provider streamed response content is empty", common.ErrInvalidArgument)
+	}
+	return []byte(content), nil
+}
+
+func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbeddingRequest) (llmmodels.ProviderEmbeddingResult, error) {
+	if p == nil || p.client == nil {
+		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
+	}
+	input := strings.TrimSpace(request.Input)
+	if input == "" {
+		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: embedding input is required", common.ErrInvalidArgument)
+	}
+	model := strings.TrimSpace(request.Model)
+	if model == "" {
+		model = p.config.Model
+	}
+	endpoint, err := embeddingsURL(p.config.BaseURL)
+	if err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
+	}
+	payload, err := json.Marshal(embeddingRequest{
+		Model: model,
+		Input: input,
+	})
+	if err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderErrorBodyBytes))
+		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: llm provider http status %d: %s", common.ErrInvalidArgument, resp.StatusCode, sanitizeProviderBody(body, p.config.APIKey))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
+	}
+	var decoded embeddingResponse
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: invalid llm provider embedding response: %v", common.ErrInvalidArgument, err)
+	}
+	vector := decoded.FirstEmbedding()
+	if len(vector) == 0 {
+		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: llm provider embedding response is empty", common.ErrInvalidArgument)
+	}
+	return llmmodels.ProviderEmbeddingResult{
+		ProviderID: p.config.ID,
+		Model:      model,
+		Input:      input,
+		Vector:     vector,
+	}, nil
+}
+
 type chatCompletionRequest struct {
 	Model          string                  `json:"model"`
 	Messages       []chatCompletionMessage `json:"messages"`
 	Temperature    float64                 `json:"temperature"`
 	ResponseFormat map[string]string       `json:"response_format,omitempty"`
+	Stream         bool                    `json:"stream,omitempty"`
 }
 
 type chatCompletionMessage struct {
@@ -111,11 +223,61 @@ type chatCompletionResponse struct {
 	} `json:"choices"`
 }
 
+type chatCompletionStreamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content string `json:"content"`
+		} `json:"delta"`
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+}
+
+type embeddingRequest struct {
+	Model string `json:"model"`
+	Input string `json:"input"`
+}
+
+type embeddingResponse struct {
+	Data []struct {
+		Embedding []float64 `json:"embedding"`
+	} `json:"data"`
+}
+
+func (r embeddingResponse) FirstEmbedding() []float64 {
+	if len(r.Data) == 0 || len(r.Data[0].Embedding) == 0 {
+		return nil
+	}
+	return append([]float64(nil), r.Data[0].Embedding...)
+}
+
 func (r chatCompletionResponse) FirstContent() string {
 	if len(r.Choices) == 0 {
 		return ""
 	}
 	return r.Choices[0].Message.Content
+}
+
+func embeddingsURL(baseURL string) (string, error) {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return "", common.ErrInvalidArgument
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("%w: invalid llm provider base url", common.ErrInvalidArgument)
+	}
+	trimmedPath := strings.TrimRight(parsed.Path, "/")
+	if strings.HasSuffix(trimmedPath, "/embeddings") {
+		parsed.Path = trimmedPath
+	} else {
+		parsed.Path = trimmedJoin(trimmedPath, "embeddings")
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
 }
 
 func chatCompletionsURL(baseURL string) (string, error) {
@@ -136,6 +298,53 @@ func chatCompletionsURL(baseURL string) (string, error) {
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return parsed.String(), nil
+}
+
+func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error) (string, error) {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxProviderStreamLineBytes)
+	var builder strings.Builder
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			if emit != nil {
+				if err := emit(llmmodels.ProviderStreamEvent{Type: "done"}); err != nil {
+					return "", err
+				}
+			}
+			return builder.String(), nil
+		}
+		var chunk chatCompletionStreamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			return "", fmt.Errorf("%w: invalid llm provider stream chunk: %v", common.ErrInvalidArgument, err)
+		}
+		for _, choice := range chunk.Choices {
+			delta := choice.Delta.Content
+			if delta == "" {
+				delta = choice.Message.Content
+			}
+			if delta == "" {
+				continue
+			}
+			builder.WriteString(delta)
+			if emit != nil {
+				if err := emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: delta}); err != nil {
+					return "", err
+				}
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	return builder.String(), nil
 }
 
 func trimmedJoin(basePath string, child string) string {

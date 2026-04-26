@@ -106,13 +106,16 @@ Acceptance:
 - User can process pending Decision Tickets from a queue-like view.
 - User can inspect Workspace Detail with Goal, DoD, Run, Decision, Approval, and execution evidence context.
 
-## Non-Goals For Next MVP
+## Scope Boundaries At Next MVP Closure
 
 - Any long-term product-planning deviation not explicitly listed in the four Next MVP scope items.
 - Full knowledge asset, retrieval, template marketplace, enterprise collaboration, multi-tenant governance, and Sub-Agent orchestration.
-- Batch decision handling before single-ticket resolution semantics are stable.
 - Distributed scheduling, external runtime marketplace, external worker fleets,
   and multi-tenant execution quota.
+
+Decision batch handling and Approval batch handling were intentionally not part
+of the original four Next MVP items, but both have since been completed as
+post-completion control-plane governance features.
 
 ## Progress
 
@@ -149,3 +152,9 @@ Acceptance:
   mutation, rejects duplicate or already resolved tickets, preserves request
   order in the response, and applies the same resolution semantics as single
   ticket resolution.
+- completed: `Approval Batch Resolution`
+  Approval Queue now supports approving or rejecting multiple pending Approval
+  items in one formal batch operation. The API validates all requested approvals
+  before mutation, rejects duplicate or already resolved approvals, preserves
+  request order in the response, and applies the same resolution semantics as
+  single approval resolution.

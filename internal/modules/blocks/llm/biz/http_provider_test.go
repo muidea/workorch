@@ -87,6 +87,83 @@ func TestHTTPProviderCompleteReportsProviderErrorWithoutLeakingSecret(t *testing
 	}
 }
 
+func TestHTTPProviderStreamCompleteParsesChatCompletionDeltas(t *testing.T) {
+	var gotPayload chatCompletionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"completionState\\\":\\\"continue\\\"\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\",\\\"shellCommands\\\":[{\\\"command\\\":\\\"echo\\\",\\\"args\\\":[\\\"ok\\\"]}]}\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		BaseURL:  server.URL + "/v1",
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Timeout:  5 * time.Second,
+	})
+	events := []llmmodels.ProviderStreamEvent{}
+	payload, err := provider.StreamComplete(context.Background(), llmProviderRequest(), func(event llmmodels.ProviderStreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream complete: %v", err)
+	}
+	if !gotPayload.Stream {
+		t.Fatalf("stream flag = false, want true")
+	}
+	if !strings.Contains(string(payload), `"completionState":"continue"`) || len(events) != 3 || events[0].Delta == "" || events[2].Type != "done" {
+		t.Fatalf("payload=%s events=%+v, want streamed decision and done event", payload, events)
+	}
+}
+
+func TestHTTPProviderEmbedUsesEmbeddingsEndpoint(t *testing.T) {
+	var gotPath string
+	var gotAuthorization string
+	var gotPayload embeddingRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuthorization = r.Header.Get("Authorization")
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1,0.2,0.3]}]}`))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		ID:       "embedding",
+		Provider: llmcommon.ProviderCompatible,
+		BaseURL:  server.URL + "/v1",
+		APIKey:   "secret-value",
+		Model:    "embedding-model",
+		Timeout:  5 * time.Second,
+	})
+	result, err := provider.Embed(context.Background(), llmmodels.ProviderEmbeddingRequest{Input: "workspace goal"})
+	if err != nil {
+		t.Fatalf("embed: %v", err)
+	}
+	if gotPath != "/v1/embeddings" {
+		t.Fatalf("path = %q, want /v1/embeddings", gotPath)
+	}
+	if gotAuthorization != "Bearer secret-value" {
+		t.Fatalf("authorization = %q, want bearer secret", gotAuthorization)
+	}
+	if gotPayload.Model != "embedding-model" || gotPayload.Input != "workspace goal" {
+		t.Fatalf("payload = %+v, want embedding request", gotPayload)
+	}
+	if result.ProviderID != "embedding" || result.Model != "embedding-model" || len(result.Vector) != 3 {
+		t.Fatalf("embedding result = %+v, want vector", result)
+	}
+}
+
 func TestChatCompletionsURLAcceptsFullEndpoint(t *testing.T) {
 	got, err := chatCompletionsURL("http://127.0.0.1:11434/v1/chat/completions")
 	if err != nil {

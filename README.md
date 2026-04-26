@@ -2,6 +2,16 @@
 
 workorch is a local-first workspace orchestration service for defining Goals and DoD, activating execution Runs, observing runtime progress, and managing LLM / MCP / memory context through a bundled web console.
 
+Current LLM provider management supports explicit provider capabilities for
+chat completions, streaming, and declared non-chat operations. Streaming output
+is recorded as Run/Step observability evidence and non-chat operations remain
+capability-gated rather than implicitly selected by the orchestrator.
+
+Memory records support embedding metadata and vector readiness fields. Existing
+workspace-scoped list/search remains deterministic, while repositories can rank
+vector-backed Memory records by similarity for the next semantic retrieval
+slice.
+
 ## Structure
 
 - `application/workorchd`: executable entry
@@ -208,6 +218,7 @@ Available endpoints:
 - `GET /api/v1/workorch/approvals/{approvalId}`
 - `POST /api/v1/workorch/approvals/{approvalId}/approve`
 - `POST /api/v1/workorch/approvals/{approvalId}/reject`
+- `POST /api/v1/workorch/approvals/resolve-batch` with `approvalIds` and one shared `action`: `approve` or `reject`
 
 The Web Console Configuration page can update LLM providers. The service writes
 the change to `application.toml`, reloads magicCommon framework configuration,
@@ -342,7 +353,7 @@ curl -f "http://127.0.0.1:8080/api/v1/workorch/runs?workspaceId=${WORKSPACE_ID}"
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}
 ```
 
-The workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `workingDirectory` to `<service-working-directory>/workspaces/<generated-workspace-id>` when the client omits it. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, single-run, snapshot, status, and observability endpoints provide formal `workorch` run instance management. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision and approval endpoints provide formal query and processing paths for blocked runs. All run execution entrypoints share one in-process priority-aware wait queue behind `server.maxConcurrentRuns`.
+The workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `workingDirectory` to `<service-working-directory>/workspaces/<generated-workspace-id>` when the client omits it. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, single-run, snapshot, status, and observability endpoints provide formal `workorch` run instance management. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision and approval endpoints provide formal query and processing paths for blocked runs. All run execution entrypoints share one in-process priority-aware wait queue behind `server.maxConcurrentRuns`. If `[llm].defaultEmbeddingProvider` references a provider declaring `nonChatOperations = ["embeddings"]`, workspace execution activation uses `/embeddings` for vector Memory recall and records `memoryRetrieval` evidence on the Run execution context.
 
 Container-oriented deployment details are in `docs/deployment.md`, and `config/application.toml` provides the baseline runtime configuration template.
 
@@ -359,12 +370,13 @@ make verify-mvp
 make verify-mvp-file
 make verify-real-llm
 make verify-real-mcp-stdio
+make verify-real-vector-memory
 make verify-real-mvp
 make docker-verify
 make docker-verify-file
 ```
 
-`make verify-mvp` runs the local memory-backed MVP verification bundle. `make verify-mvp-file` runs the file-backed bundle with restart-read continuity. `make verify-real-mvp` targets an already running `workorchd`; it combines the configured real LLM check and the deployed MCP `stdio` runtime check.
+`make verify-mvp` runs the local memory-backed MVP verification bundle. `make verify-mvp-file` runs the file-backed bundle with restart-read continuity. `make verify-real-vector-memory` targets an already running `workorchd`, temporarily registers an embedding-capable mock provider, verifies vector Memory recall evidence, and restores the original LLM configuration. `make verify-real-mvp` targets an already running `workorchd`; it combines the configured real LLM check, deployed MCP `stdio` runtime check, and deployed vector Memory recall check.
 
 ## Development targets
 
@@ -384,3 +396,5 @@ make ci
 - `docs/next-mvp-acceptance.md`: next MVP scope aligned with the WorkOrch product planning baseline
 - `docs/runtime-expansion-plan.md`: completed runtime adapter, shell, patch, graph, and observability scope
 - `docs/advanced-runtime-scheduling-plan.md`: completed advanced MCP and priority scheduling scope
+- `docs/next-stage-p1-development-plan.md`: active next-stage P1 development scope
+- `docs/next-stage-demand-candidates.md`: future demand candidates that are not active MVP leftovers

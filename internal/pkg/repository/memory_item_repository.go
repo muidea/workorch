@@ -12,6 +12,8 @@ type MemorySearchQuery struct {
 	Query       string
 	Tags        []string
 	Types       []string
+	Vector      []float64
+	MinScore    float64
 	Limit       int
 }
 

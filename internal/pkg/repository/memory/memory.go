@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -147,9 +148,16 @@ func (r *MemoryItemRepository) Search(_ context.Context, query repository.Memory
 		if !memoryItemMatches(item, query) {
 			continue
 		}
-		ret = append(ret, cloneMemoryItem(item))
+		cloned := cloneMemoryItem(item)
+		if len(query.Vector) > 0 {
+			cloned.VectorScore = cosineSimilarity(query.Vector, item.Vector)
+		}
+		ret = append(ret, cloned)
 	}
 	sort.Slice(ret, func(i, j int) bool {
+		if len(query.Vector) > 0 && ret[i].VectorScore != ret[j].VectorScore {
+			return ret[i].VectorScore > ret[j].VectorScore
+		}
 		if ret[i].Importance != ret[j].Importance {
 			return ret[i].Importance > ret[j].Importance
 		}
@@ -1069,6 +1077,7 @@ func cloneSoul(item *soul.Soul) *soul.Soul {
 func cloneMemoryItem(item *memorymodel.MemoryItem) *memorymodel.MemoryItem {
 	cloned := *item
 	cloned.Tags = cloneStringSlice(item.Tags)
+	cloned.Vector = cloneFloatSlice(item.Vector)
 	return &cloned
 }
 
@@ -1102,6 +1111,14 @@ func memoryItemMatches(item *memorymodel.MemoryItem, query repository.MemorySear
 			return false
 		}
 	}
+	if len(query.Vector) > 0 {
+		if len(item.Vector) != len(query.Vector) || len(item.Vector) == 0 {
+			return false
+		}
+		if query.MinScore > 0 && cosineSimilarity(query.Vector, item.Vector) < query.MinScore {
+			return false
+		}
+	}
 	if query.Query == "" {
 		return true
 	}
@@ -1110,6 +1127,29 @@ func memoryItemMatches(item *memorymodel.MemoryItem, query repository.MemorySear
 		strings.Contains(strings.ToLower(item.Content), needle) ||
 		strings.Contains(strings.ToLower(item.MemoryType), needle) ||
 		containsTagText(item.Tags, needle)
+}
+
+func cloneFloatSlice(input []float64) []float64 {
+	if input == nil {
+		return nil
+	}
+	return append([]float64(nil), input...)
+}
+
+func cosineSimilarity(left []float64, right []float64) float64 {
+	if len(left) == 0 || len(left) != len(right) {
+		return 0
+	}
+	var dot, leftNorm, rightNorm float64
+	for idx := range left {
+		dot += left[idx] * right[idx]
+		leftNorm += left[idx] * left[idx]
+		rightNorm += right[idx] * right[idx]
+	}
+	if leftNorm == 0 || rightNorm == 0 {
+		return 0
+	}
+	return dot / (math.Sqrt(leftNorm) * math.Sqrt(rightNorm))
 }
 
 func containsTagText(tags []string, needle string) bool {

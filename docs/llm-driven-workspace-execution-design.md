@@ -31,13 +31,19 @@ The LLM-driven MVP implementation now covers:
 - `blocks/mcp` is registered for `mcp/tool_call` and supports governed
   HTTP/HTTPS MCP-style endpoint invocation and MCP `stdio` JSON-RPC
   `tools/call`.
+- Advanced MCP interaction has also been completed after the first LLM-driven
+  MVP: configured resources and prompts are exposed through HTTP APIs, runtime
+  graph nodes can execute `mcp/resource_read` and `mcp/prompt_get`, streaming
+  evidence is collected for HTTP/HTTPS and stdio transports, and long-lived
+  stdio sessions can be reused per MCP server.
 
-Remaining intentional boundaries:
+Remaining intentional boundaries after the completed MVP and runtime expansion:
 
-- Advanced MCP resources, prompts, streaming, and long-lived external runtime
-  adapters remain outside the current MVP.
-- Provider streaming, vector Memory search, distributed scheduling, and an
-  external runtime marketplace remain outside the current MVP.
+- LLM provider streaming and non-chat provider APIs are not part of the current
+  provider contract.
+- Vector Memory search, distributed scheduling, multi-tenant authorization, and
+  an external runtime marketplace remain outside the current local service
+  delivery scope.
 
 ## Design Inputs
 
@@ -102,6 +108,14 @@ Excluded from the first LLM-driven MVP:
 - Allowing LLM providers to directly execute shell, write files, apply patches,
   or invoke MCP tools.
 - Silent fallback from LLM-driven execution to `legacy/minimal`.
+
+Post-MVP completed extensions:
+
+- Runtime expansion added controlled shell execution, generalized diff patch
+  application, formal block execution graph traversal, runtime adapter
+  contracts, and observability.
+- Advanced runtime scheduling added MCP resources, prompts, streaming evidence,
+  long-lived stdio sessions, and priority-aware local run scheduling.
 
 ## Formal Boundary Contract
 
@@ -663,6 +677,9 @@ Responsibilities:
 - Execute approved HTTP/HTTPS MCP-style tool calls.
 - Execute approved MCP `stdio` JSON-RPC `tools/call` requests after
   `initialize` and `notifications/initialized`.
+- Execute approved MCP resource reads and prompt gets.
+- Collect MCP streaming evidence and manage long-lived stdio sessions according
+  to MCP server policy.
 - Normalize MCP output into `ToolCall` evidence payloads.
 
 Not responsible for:
@@ -670,8 +687,7 @@ Not responsible for:
 - Tool selection by model.
 - Soul or Skill selection.
 - Persistent Memory policy.
-- Advanced MCP resources, prompts, streaming, or long-lived external runtime
-  sessions.
+- External runtime marketplace installation or trust policy.
 
 ### `kernel/orchestrator`
 

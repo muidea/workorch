@@ -391,18 +391,22 @@ func testMemoryItemRepositoryContract(t *testing.T, factory func() repository.Me
 	repo := factory()
 
 	item := &memorymodel.MemoryItem{
-		ID:          common.MemoryID("memory-contract"),
-		WorkspaceID: common.WorkspaceID("ws-contract"),
-		RunID:       common.RunID("run-contract"),
-		SourceType:  "run",
-		SourceRef:   "run-contract",
-		MemoryType:  "run_summary",
-		Content:     "Local verification completed through workorchd APIs.",
-		Summary:     "workorchd local verification completed",
-		Tags:        []string{"local", "verification"},
-		Importance:  9,
-		Confidence:  8,
-		Visibility:  "workspace",
+		ID:                  common.MemoryID("memory-contract"),
+		WorkspaceID:         common.WorkspaceID("ws-contract"),
+		RunID:               common.RunID("run-contract"),
+		SourceType:          "run",
+		SourceRef:           "run-contract",
+		MemoryType:          "run_summary",
+		Content:             "Local verification completed through workorchd APIs.",
+		Summary:             "workorchd local verification completed",
+		Tags:                []string{"local", "verification"},
+		Importance:          9,
+		Confidence:          8,
+		Visibility:          "workspace",
+		EmbeddingProviderID: "embed-local",
+		EmbeddingModel:      "embed-model",
+		EmbeddingText:       "workorchd local verification completed",
+		Vector:              []float64{0.9, 0.1, 0},
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create memory item: %v", err)
@@ -416,6 +420,7 @@ func testMemoryItemRepositoryContract(t *testing.T, factory func() repository.Me
 		t.Fatalf("get memory item: %v", err)
 	}
 	got.Tags[0] = "mutated"
+	got.Vector[0] = 0
 
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
@@ -424,9 +429,13 @@ func testMemoryItemRepositoryContract(t *testing.T, factory func() repository.Me
 	if fresh.Tags[0] != "local" {
 		t.Fatalf("memory tags clone isolation failed, tags = %+v", fresh.Tags)
 	}
+	if fresh.Vector[0] != 0.9 || fresh.EmbeddingProviderID != "embed-local" {
+		t.Fatalf("memory vector clone isolation failed, item = %+v", fresh)
+	}
 
 	fresh.Summary = "updated local verification summary"
 	fresh.Importance = 10
+	fresh.Vector = []float64{0.1, 0.95, 0}
 	if err := repo.Update(ctx, fresh); err != nil {
 		t.Fatalf("update memory item: %v", err)
 	}
@@ -451,6 +460,18 @@ func testMemoryItemRepositoryContract(t *testing.T, factory func() repository.Me
 	}
 	if len(search) != 1 || search[0].ID != item.ID {
 		t.Fatalf("search memory = %+v, want %q", search, item.ID)
+	}
+	vectorSearch, err := repo.Search(ctx, repository.MemorySearchQuery{
+		WorkspaceID: item.WorkspaceID,
+		Vector:      []float64{0, 1, 0},
+		MinScore:    0.8,
+		Limit:       1,
+	})
+	if err != nil {
+		t.Fatalf("vector search memory: %v", err)
+	}
+	if len(vectorSearch) != 1 || vectorSearch[0].ID != item.ID || vectorSearch[0].VectorScore <= 0.8 {
+		t.Fatalf("vector search memory = %+v, want %q with score", vectorSearch, item.ID)
 	}
 
 	if _, err := repo.Get(ctx, common.MemoryID("missing")); !errors.Is(err, common.ErrNotFound) {
@@ -1467,15 +1488,19 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	}
 
 	memoryItem := &memorymodel.MemoryItem{
-		ID:          memoryID,
-		WorkspaceID: workspaceID,
-		RunID:       runID,
-		SourceType:  "run",
-		SourceRef:   string(runID),
-		MemoryType:  "run_summary",
-		Summary:     "bundle run summary",
-		Tags:        []string{"bundle"},
-		Importance:  5,
+		ID:                  memoryID,
+		WorkspaceID:         workspaceID,
+		RunID:               runID,
+		SourceType:          "run",
+		SourceRef:           string(runID),
+		MemoryType:          "run_summary",
+		Summary:             "bundle run summary",
+		Tags:                []string{"bundle"},
+		Importance:          5,
+		EmbeddingProviderID: "embedding-bundle",
+		EmbeddingModel:      "embedding-model",
+		EmbeddingText:       "bundle run summary",
+		Vector:              []float64{1, 0, 0},
 	}
 	if err := bundle.memoryItems.Create(ctx, memoryItem); err != nil {
 		t.Fatalf("create memory item: %v", err)
@@ -1736,6 +1761,21 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	}
 	if len(reloadedMemory) != 1 || reloadedMemory[0].ID != memoryID {
 		t.Fatalf("reloaded memory = %+v, want %q", reloadedMemory, memoryID)
+	}
+	reloadedVectorMemory, err := reloaded.memoryItems.Search(ctx, repository.MemorySearchQuery{
+		WorkspaceID: workspaceID,
+		Vector:      []float64{1, 0, 0},
+		MinScore:    0.99,
+		Limit:       1,
+	})
+	if err != nil {
+		t.Fatalf("reload memory vector search: %v", err)
+	}
+	if len(reloadedVectorMemory) != 1 ||
+		reloadedVectorMemory[0].ID != memoryID ||
+		reloadedVectorMemory[0].EmbeddingProviderID != "embedding-bundle" ||
+		reloadedVectorMemory[0].VectorScore < 0.99 {
+		t.Fatalf("reloaded vector memory = %+v, want preserved vector metadata", reloadedVectorMemory)
 	}
 
 	reloadedSkill, err := reloaded.skills.Get(ctx, skillID)

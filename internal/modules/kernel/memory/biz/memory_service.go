@@ -77,18 +77,22 @@ func validateMemoryCommand(cmd memoryservice.CreateMemoryItemCommand) error {
 
 func memoryItemFromCommand(cmd memoryservice.CreateMemoryItemCommand) *memorymodel.MemoryItem {
 	return &memorymodel.MemoryItem{
-		ID:          cmd.MemoryID,
-		WorkspaceID: cmd.WorkspaceID,
-		RunID:       cmd.RunID,
-		SourceType:  cmd.SourceType,
-		SourceRef:   cmd.SourceRef,
-		MemoryType:  cmd.MemoryType,
-		Content:     cmd.Content,
-		Summary:     cmd.Summary,
-		Tags:        cloneStrings(cmd.Tags),
-		Importance:  cmd.Importance,
-		Confidence:  cmd.Confidence,
-		Visibility:  cmd.Visibility,
+		ID:                  cmd.MemoryID,
+		WorkspaceID:         cmd.WorkspaceID,
+		RunID:               cmd.RunID,
+		SourceType:          cmd.SourceType,
+		SourceRef:           cmd.SourceRef,
+		MemoryType:          cmd.MemoryType,
+		Content:             cmd.Content,
+		Summary:             cmd.Summary,
+		Tags:                cloneStrings(cmd.Tags),
+		Importance:          cmd.Importance,
+		Confidence:          cmd.Confidence,
+		Visibility:          cmd.Visibility,
+		EmbeddingProviderID: cmd.EmbeddingProviderID,
+		EmbeddingModel:      cmd.EmbeddingModel,
+		EmbeddingText:       cmd.EmbeddingText,
+		Vector:              cloneFloats(cmd.Vector),
 	}
 }
 
@@ -106,4 +110,11 @@ func cloneStrings(input []string) []string {
 		return nil
 	}
 	return append([]string(nil), input...)
+}
+
+func cloneFloats(input []float64) []float64 {
+	if input == nil {
+		return nil
+	}
+	return append([]float64(nil), input...)
 }

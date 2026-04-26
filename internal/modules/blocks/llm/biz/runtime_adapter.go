@@ -43,6 +43,14 @@ type Provider interface {
 	Complete(context.Context, llmmodels.ProviderRequest) ([]byte, error)
 }
 
+type StreamingProvider interface {
+	StreamComplete(context.Context, llmmodels.ProviderRequest, func(llmmodels.ProviderStreamEvent) error) ([]byte, error)
+}
+
+type EmbeddingProvider interface {
+	Embed(context.Context, llmmodels.ProviderEmbeddingRequest) (llmmodels.ProviderEmbeddingResult, error)
+}
+
 type ProviderRuntime struct {
 	Config   llmmodels.ProviderConfig
 	Provider Provider
@@ -85,6 +93,7 @@ func NewRuntimeAdapterWithProviders(defaultProviderID string, providers map[stri
 			continue
 		}
 		runtime.Config.ID = id
+		runtime.Config.Capabilities = effectiveProviderCapabilities(runtime.Config.Capabilities)
 		normalized[id] = runtime
 	}
 	return &RuntimeAdapter{defaultProviderID: defaultProviderID, providers: normalized}
@@ -124,6 +133,7 @@ func providerRuntimesFromConfigs(configs map[string]llmmodels.ProviderConfig) ma
 		if !config.Unavailable {
 			provider = NewHTTPProvider(config)
 		}
+		config.Capabilities = effectiveProviderCapabilities(config.Capabilities)
 		providers[id] = ProviderRuntime{
 			Config:   config,
 			Provider: provider,
@@ -150,11 +160,22 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		output := failureOutput(request, "llm_provider_client_unavailable", "llm provider client is not configured", runtime.Config)
 		return runtimemodel.StepExecutionResult{Output: output}, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
 	}
+	operation := requestedProviderOperation(request.Input)
+	if err := validateProviderOperation(operation, runtime.Config.Capabilities); err != nil {
+		output := failureOutput(request, "llm_provider_operation_unsupported", err.Error(), runtime.Config)
+		output["operation"] = operation
+		return runtimemodel.StepExecutionResult{Output: output}, err
+	}
 
 	providerReq := providerRequest(request, runtime.Config)
-	payload, err := runtime.Provider.Complete(ctx, providerReq)
+	payload, streamEvents, err := completeProvider(ctx, runtime, providerReq)
 	if err != nil {
-		output := failureOutput(request, "llm_provider_error", err.Error(), runtime.Config)
+		stage := "llm_provider_error"
+		if len(streamEvents) > 0 {
+			stage = "llm_provider_stream_error"
+		}
+		output := failureOutput(request, stage, err.Error(), runtime.Config)
+		attachStreamEvents(output, streamEvents)
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 	decision, err := ParseLLMExecutionDecision(payload)
@@ -171,6 +192,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 			if len(repairPayload) > 0 {
 				output["repairRawContentPreview"] = previewLLMOutput(repairPayload)
 			}
+			attachStreamEvents(output, streamEvents)
 			return runtimemodel.StepExecutionResult{Output: output}, parseErr
 		}
 		decision = repairedDecision
@@ -183,8 +205,10 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	output, err := NormalizeDecisionOutput(request, decision)
 	if err != nil {
 		failure := failureOutput(request, "llm_decision_invalid", err.Error(), runtime.Config)
+		attachStreamEvents(failure, streamEvents)
 		return runtimemodel.StepExecutionResult{Output: failure}, err
 	}
+	attachStreamEvents(output, streamEvents)
 	if repairMetadata != nil {
 		output["llmRepair"] = repairMetadata
 	}
@@ -196,6 +220,104 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		return runtimemodel.StepExecutionResult{Output: output}, fmt.Errorf("%w: %s", common.ErrInvalidArgument, reason)
 	}
 	return runtimemodel.StepExecutionResult{Output: output}, nil
+}
+
+func completeProvider(ctx context.Context, runtime ProviderRuntime, request llmmodels.ProviderRequest) ([]byte, []llmmodels.ProviderStreamEvent, error) {
+	if runtime.Config.Capabilities.Streaming {
+		streaming, ok := runtime.Provider.(StreamingProvider)
+		if !ok {
+			return nil, nil, fmt.Errorf("%w: llm provider does not implement streaming", common.ErrInvalidArgument)
+		}
+		events := []llmmodels.ProviderStreamEvent{}
+		payload, err := streaming.StreamComplete(ctx, request, func(event llmmodels.ProviderStreamEvent) error {
+			if strings.TrimSpace(event.Type) == "" {
+				event.Type = "delta"
+			}
+			events = append(events, event)
+			return nil
+		})
+		return payload, events, err
+	}
+	payload, err := runtime.Provider.Complete(ctx, request)
+	return payload, nil, err
+}
+
+func (a *RuntimeAdapter) GenerateEmbedding(ctx context.Context, providerID string, input string) (llmmodels.ProviderEmbeddingResult, error) {
+	if a == nil {
+		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
+	}
+	runtime, selectedProviderID, err := a.selectProviderRuntimeByID(providerID)
+	if err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
+	}
+	if runtime.Config.Unavailable {
+		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: %s", common.ErrInvalidArgument, runtime.Config.UnavailableReason)
+	}
+	if err := validateNonChatProviderOperation(llmcommon.ProviderOperationEmbeddings, runtime.Config.Capabilities); err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
+	}
+	provider, ok := runtime.Provider.(EmbeddingProvider)
+	if !ok {
+		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: llm provider does not implement embeddings", common.ErrInvalidArgument)
+	}
+	result, err := provider.Embed(ctx, llmmodels.ProviderEmbeddingRequest{Input: input, Model: runtime.Config.Model})
+	if err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
+	}
+	result.ProviderID = selectedProviderID
+	if strings.TrimSpace(result.Model) == "" {
+		result.Model = runtime.Config.Model
+	}
+	return result, nil
+}
+
+func attachStreamEvents(output map[string]any, events []llmmodels.ProviderStreamEvent) {
+	if len(events) == 0 || output == nil {
+		return
+	}
+	streamEvents := make([]map[string]any, 0, len(events))
+	for _, event := range events {
+		item := map[string]any{"type": event.Type}
+		if event.Delta != "" {
+			item["delta"] = event.Delta
+		}
+		if len(event.Payload) > 0 {
+			item["payload"] = cloneMap(event.Payload)
+		}
+		streamEvents = append(streamEvents, item)
+	}
+	output["streamEvents"] = streamEvents
+}
+
+func validateNonChatProviderOperation(operation string, capabilities llmmodels.ProviderCapabilities) error {
+	operation = strings.TrimSpace(operation)
+	if operation == "" {
+		return common.ErrInvalidArgument
+	}
+	capabilities = effectiveProviderCapabilities(capabilities)
+	for _, supported := range capabilities.NonChatOperations {
+		if operation == supported {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: llm provider operation %q is not declared by provider capabilities", common.ErrInvalidArgument, operation)
+}
+
+func validateProviderOperation(operation string, capabilities llmmodels.ProviderCapabilities) error {
+	capabilities = effectiveProviderCapabilities(capabilities)
+	switch operation {
+	case "", llmcommon.ProviderOperationChatCompletions:
+		if capabilities.ChatCompletions {
+			return nil
+		}
+	default:
+		for _, supported := range capabilities.NonChatOperations {
+			if operation == supported {
+				return fmt.Errorf("%w: llm provider operation %q is capability-declared but not supported by workspace execution steps", common.ErrInvalidArgument, operation)
+			}
+		}
+	}
+	return fmt.Errorf("%w: llm provider operation %q is not declared by provider capabilities", common.ErrInvalidArgument, operation)
 }
 
 func repairLLMExecutionDecision(
@@ -251,6 +373,34 @@ func (a *RuntimeAdapter) selectProviderRuntime(request runtimemodel.StepExecutio
 	return runtime, providerID, nil
 }
 
+func (a *RuntimeAdapter) selectProviderRuntimeByID(providerID string) (ProviderRuntime, string, error) {
+	defaultProviderID := a.defaultProviderID
+	providers := a.providers
+	if a.configLoader != nil {
+		loadedDefaultProviderID, configs, err := a.configLoader()
+		if err != nil {
+			return ProviderRuntime{}, strings.TrimSpace(providerID), err
+		}
+		defaultProviderID = strings.TrimSpace(loadedDefaultProviderID)
+		if defaultProviderID == "" {
+			defaultProviderID = llmcommon.DefaultProviderID
+		}
+		providers = providerRuntimesFromConfigs(configs)
+	}
+	selectedProviderID := strings.TrimSpace(providerID)
+	if selectedProviderID == "" {
+		selectedProviderID = defaultProviderID
+	}
+	if selectedProviderID == "" {
+		return ProviderRuntime{}, selectedProviderID, fmt.Errorf("%w: llm provider is not configured", common.ErrInvalidArgument)
+	}
+	runtime, ok := providers[selectedProviderID]
+	if !ok {
+		return ProviderRuntime{}, selectedProviderID, fmt.Errorf("%w: llm provider %q is not configured", common.ErrInvalidArgument, selectedProviderID)
+	}
+	return runtime, selectedProviderID, nil
+}
+
 func requestedProviderID(input map[string]any, defaultProviderID string) string {
 	if providerID := stringValue(input[llmcommon.ExecutionContextLLMProviderID]); providerID != "" {
 		return providerID
@@ -261,6 +411,25 @@ func requestedProviderID(input map[string]any, defaultProviderID string) string 
 		}
 	}
 	return strings.TrimSpace(defaultProviderID)
+}
+
+func requestedProviderOperation(input map[string]any) string {
+	if operation := stringValue(input["llmOperation"]); operation != "" {
+		return operation
+	}
+	if executionContext, ok := input["executionContext"].(map[string]any); ok {
+		if operation := stringValue(executionContext["llmOperation"]); operation != "" {
+			return operation
+		}
+	}
+	return llmcommon.ProviderOperationChatCompletions
+}
+
+func effectiveProviderCapabilities(capabilities llmmodels.ProviderCapabilities) llmmodels.ProviderCapabilities {
+	if !capabilities.ChatCompletions && !capabilities.Streaming && len(capabilities.NonChatOperations) == 0 {
+		capabilities.ChatCompletions = true
+	}
+	return capabilities
 }
 
 func stringValue(value any) string {

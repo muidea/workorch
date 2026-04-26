@@ -137,6 +137,6 @@ Acceptance:
     nodes that call undeclared local `workorchd` HTTP endpoints such as `/runs`,
     `/observability`, or `/metrics?run=...`.
 
-## Current Remaining Items
+## Closure Status
 
 - none in this delivery round

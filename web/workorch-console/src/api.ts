@@ -210,5 +210,12 @@ export const workorchApi = {
   rejectApproval: async (approvalId: string) => {
     const body = await request<{ approval: Approval }>(`${apiBase}/approvals/${encodeURIComponent(approvalId)}/reject`, { method: 'POST' });
     return body.approval;
+  },
+  batchResolveApprovals: async (approvalIds: string[], action: 'approve' | 'reject') => {
+    const body = await request<{ approvals: Approval[] }>(`${apiBase}/approvals/resolve-batch`, {
+      method: 'POST',
+      body: JSON.stringify({ approvalIds, action })
+    });
+    return body.approvals ?? [];
   }
 };

@@ -306,6 +306,11 @@ type batchResolveDecisionsRequest struct {
 	ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
 }
 
+type batchResolveApprovalsRequest struct {
+	ApprovalIDs []string `json:"approvalIds"`
+	Action      string   `json:"action"`
+}
+
 type defineGoalRequest struct {
 	Text string `json:"text"`
 }
@@ -345,6 +350,7 @@ type listApprovalsFunc func(context.Context, string, string, string, string) ([]
 type readApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
 type approveApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
 type rejectApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
+type batchResolveApprovalsFunc func(context.Context, string, string, appservice.BatchResolveApprovalCommand) ([]appservice.Approval, error)
 type createSoulFunc func(context.Context, string, string, appservice.CreateSoulCommand) (appservice.Soul, error)
 type readSoulFunc func(context.Context, string, string, string) (appservice.Soul, error)
 type listSoulsFunc func(context.Context, string, string) ([]appservice.Soul, error)
@@ -395,6 +401,7 @@ type serverState struct {
 	readApproval           readApprovalFunc
 	approveApproval        approveApprovalFunc
 	rejectApproval         rejectApprovalFunc
+	batchResolveApprovals  batchResolveApprovalsFunc
 	createSoul             createSoulFunc
 	readSoul               readSoulFunc
 	listSouls              listSoulsFunc
@@ -1608,6 +1615,33 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			Approval: item,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/approvals/resolve-batch", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		var req batchResolveApprovalsRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		if req.Action == "approve" {
+			state.metrics.approvalApproveRequests.Add(uint64(len(req.ApprovalIDs)))
+		} else if req.Action == "reject" {
+			state.metrics.approvalRejectRequests.Add(uint64(len(req.ApprovalIDs)))
+		}
+		items, err := state.batchResolveApprovals(r.Context(), state.config.Backend, state.config.DataRoot, appservice.BatchResolveApprovalCommand{
+			ApprovalIDs: req.ApprovalIDs,
+			Action:      req.Action,
+		})
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, approvalsResponse{
+			Service:   "workorch",
+			Backend:   state.config.Backend,
+			DataRoot:  state.config.DataRoot,
+			Approvals: items,
+		})
+	})
 }
 
 func registerConsoleRoutes(router engine.RouteRegistry) {
@@ -1687,6 +1721,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		readApproval:           defaultReadApproval,
 		approveApproval:        defaultApproveApproval,
 		rejectApproval:         defaultRejectApproval,
+		batchResolveApprovals:  defaultBatchResolveApprovals,
 		createSoul:             defaultCreateSoul,
 		readSoul:               defaultReadSoul,
 		listSouls:              defaultListSouls,
@@ -1704,16 +1739,35 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		readConfiguration:      defaultReadConfiguration,
 		updateLLMConfiguration: appservice.UpdateLLMConfiguration,
 	}
+	state.configureApplicationRuntimeSession()
 	state.configureSharedMemorySession()
 	return state
 }
 
+func (s *serverState) configureApplicationRuntimeSession() {
+	if s == nil || s.sharedSession != nil {
+		return
+	}
+	session, err := appservice.NewRuntimeSessionFromInitiator()
+	if err != nil {
+		return
+	}
+	s.configureSessionBackedOperations(session)
+}
+
 func (s *serverState) configureSharedMemorySession() {
-	if s == nil || !isMemoryBackend(s.config.Backend) {
+	if s == nil || s.sharedSession != nil || !isMemoryBackend(s.config.Backend) {
 		return
 	}
 	session, err := appservice.NewRuntimeSessionWithBackendAndEventHub(s.config.Backend, s.config.DataRoot, s.eventHub)
 	if err != nil {
+		return
+	}
+	s.configureSessionBackedOperations(session)
+}
+
+func (s *serverState) configureSessionBackedOperations(session *appservice.RuntimeSession) {
+	if s == nil || session == nil {
 		return
 	}
 	s.sharedSession = session
@@ -1962,6 +2016,15 @@ func (s *serverState) configureSharedMemorySession() {
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.RejectApprovalWithSession(ctx, session, approvalID)
+			return err
+		})
+		return ret, err
+	}
+	s.batchResolveApprovals = func(ctx context.Context, _, _ string, cmd appservice.BatchResolveApprovalCommand) ([]appservice.Approval, error) {
+		var ret []appservice.Approval
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.BatchResolveApprovalsWithSession(ctx, session, cmd)
 			return err
 		})
 		return ret, err
@@ -2230,6 +2293,10 @@ func defaultApproveApproval(ctx context.Context, backend string, dataRoot string
 
 func defaultRejectApproval(ctx context.Context, backend string, dataRoot string, approvalID string) (appservice.Approval, error) {
 	return appservice.RejectApprovalWithBackend(ctx, backend, dataRoot, approvalID)
+}
+
+func defaultBatchResolveApprovals(ctx context.Context, backend string, dataRoot string, cmd appservice.BatchResolveApprovalCommand) ([]appservice.Approval, error) {
+	return appservice.BatchResolveApprovalsWithBackend(ctx, backend, dataRoot, cmd)
 }
 
 func defaultCreateSoul(ctx context.Context, backend string, dataRoot string, cmd appservice.CreateSoulCommand) (appservice.Soul, error) {

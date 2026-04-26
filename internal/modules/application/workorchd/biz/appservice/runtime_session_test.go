@@ -212,6 +212,56 @@ func TestRuntimeSessionExportsReturnsAssembledCapabilities(t *testing.T) {
 	}
 }
 
+func TestRuntimeSessionFromExportsBorrowsLongLivedRuntime(t *testing.T) {
+	bootstrapRuntime := bootstrap.NewWithBackend("memory", "")
+	t.Cleanup(func() {
+		if err := bootstrapRuntime.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown bootstrap runtime: %v", err)
+		}
+	})
+
+	session, err := NewRuntimeSessionFromExports(bootstrapRuntime.Exports())
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
+	}
+	if session.Bootstrap != nil || session.Runtime == nil {
+		t.Fatalf("session = %+v, want non-owning managed runtime", session)
+	}
+
+	borrowed := session.Borrow()
+	if borrowed.Bootstrap != nil || borrowed.Runtime == nil {
+		t.Fatalf("borrowed session = %+v, want non-owning managed runtime", borrowed)
+	}
+	if err := borrowed.Close(context.Background()); err != nil {
+		t.Fatalf("close borrowed session: %v", err)
+	}
+
+	exports := bootstrapRuntime.Exports()
+	if err := exports.Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
+		WorkspaceID:      "ws-long-lived-export-session",
+		Title:            "long lived export session",
+		WorkingDirectory: "workspaces/ws-long-lived-export-session",
+	}); err != nil {
+		t.Fatalf("create workspace after borrowed close: %v", err)
+	}
+	if _, err := exports.Repositories.Workspaces.Get(context.Background(), "ws-long-lived-export-session"); err != nil {
+		t.Fatalf("get workspace after borrowed close: %v", err)
+	}
+
+	if err := session.Close(context.Background()); err != nil {
+		t.Fatalf("close non-owning session: %v", err)
+	}
+	if _, err := exports.Repositories.Workspaces.Get(context.Background(), "ws-long-lived-export-session"); err != nil {
+		t.Fatalf("non-owning session close should not shutdown bootstrap runtime: %v", err)
+	}
+}
+
+func TestRuntimeSessionFromExportsRejectsIncompleteExports(t *testing.T) {
+	if _, err := NewRuntimeSessionFromExports(bootstrap.Exports{}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want invalid argument", err)
+	}
+}
+
 func TestRuntimeSessionCloseReturnsShutdownErrorAndReleasesState(t *testing.T) {
 	errShutdown := errors.New("shutdown failed")
 	session := &RuntimeSession{

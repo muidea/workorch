@@ -34,17 +34,21 @@ type RepositoryConfig struct {
 }
 
 type LLMConfig struct {
-	DefaultProvider string                       `json:"defaultProvider" toml:"defaultProvider"`
-	Providers       map[string]LLMProviderConfig `json:"providers" toml:"providers"`
+	DefaultProvider          string                       `json:"defaultProvider" toml:"defaultProvider"`
+	DefaultEmbeddingProvider string                       `json:"defaultEmbeddingProvider" toml:"defaultEmbeddingProvider"`
+	Providers                map[string]LLMProviderConfig `json:"providers" toml:"providers"`
 }
 
 type LLMProviderConfig struct {
-	Provider string `json:"provider" toml:"provider"`
-	BaseURL  string `json:"baseURL" toml:"baseURL"`
-	APIKey   string `json:"apiKey" toml:"apiKey"`
-	Model    string `json:"model" toml:"model"`
-	Timeout  string `json:"timeout" toml:"timeout"`
-	Disabled *bool  `json:"disabled" toml:"disabled"`
+	Provider          string   `json:"provider" toml:"provider"`
+	BaseURL           string   `json:"baseURL" toml:"baseURL"`
+	APIKey            string   `json:"apiKey" toml:"apiKey"`
+	Model             string   `json:"model" toml:"model"`
+	Timeout           string   `json:"timeout" toml:"timeout"`
+	Disabled          *bool    `json:"disabled" toml:"disabled"`
+	ChatCompletions   *bool    `json:"chatCompletions" toml:"chatCompletions"`
+	Streaming         *bool    `json:"streaming" toml:"streaming"`
+	NonChatOperations []string `json:"nonChatOperations" toml:"nonChatOperations"`
 }
 
 func ConfigureDirectory(configDir string) {
@@ -150,6 +154,15 @@ func llmProviderValues(provider LLMProviderConfig) map[string]string {
 			values["disabled"] = "false"
 		}
 	}
+	if provider.ChatCompletions != nil {
+		values["chatCompletions"] = boolString(*provider.ChatCompletions)
+	}
+	if provider.Streaming != nil {
+		values["streaming"] = boolString(*provider.Streaming)
+	}
+	if len(provider.NonChatOperations) > 0 {
+		values["nonChatOperations"] = strings.Join(provider.NonChatOperations, ",")
+	}
 	return values
 }
 
@@ -176,6 +189,13 @@ func set(values map[string]string, key string, value string) {
 	if strings.TrimSpace(value) != "" {
 		values[key] = strings.TrimSpace(value)
 	}
+}
+
+func boolString(value bool) string {
+	if value {
+		return "true"
+	}
+	return "false"
 }
 
 func Close() error {

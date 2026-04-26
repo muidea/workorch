@@ -36,10 +36,34 @@ func TestLoadProviderConfigAcceptsCompatibleProvider(t *testing.T) {
 	if cfg.Timeout != 5*time.Second {
 		t.Fatalf("timeout = %s, want 5s", cfg.Timeout)
 	}
+	if !cfg.Capabilities.ChatCompletions || cfg.Capabilities.Streaming || len(cfg.Capabilities.NonChatOperations) != 0 {
+		t.Fatalf("capabilities = %+v, want default chat completions only", cfg.Capabilities)
+	}
 
 	redacted := RedactedProviderConfig(cfg)
-	if !redacted.Ready || redacted.Model != "local-model" {
+	if !redacted.Ready || redacted.Model != "local-model" || !redacted.Capabilities.ChatCompletions {
 		t.Fatalf("redacted config = %+v, want ready local-model", redacted)
+	}
+}
+
+func TestLoadProviderConfigParsesDeclaredCapabilities(t *testing.T) {
+	cfg, err := LoadProviderConfig("local", map[string]string{
+		llmcommon.EnvProvider:          llmcommon.ProviderCompatible,
+		llmcommon.EnvBaseURL:           "http://127.0.0.1:11434/v1",
+		llmcommon.EnvAPIKey:            "test-secret-value",
+		llmcommon.EnvModel:             "local-model",
+		llmcommon.EnvChatCompletions:   "false",
+		llmcommon.EnvStreaming:         "true",
+		llmcommon.EnvNonChatOperations: "embeddings, responses, embeddings",
+	})
+	if err != nil {
+		t.Fatalf("load provider config: %v", err)
+	}
+	if cfg.Capabilities.ChatCompletions || !cfg.Capabilities.Streaming ||
+		len(cfg.Capabilities.NonChatOperations) != 2 ||
+		cfg.Capabilities.NonChatOperations[0] != "embeddings" ||
+		cfg.Capabilities.NonChatOperations[1] != "responses" {
+		t.Fatalf("capabilities = %+v, want declared streaming and non-chat operations", cfg.Capabilities)
 	}
 }
 

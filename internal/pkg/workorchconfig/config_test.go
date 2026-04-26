@@ -25,6 +25,7 @@ dataDir = ".workorch-data"
 
 [llm]
 defaultProvider = "local"
+defaultEmbeddingProvider = "local"
 
 [llm.providers.local]
 provider = "compatible"
@@ -32,6 +33,9 @@ baseURL = "http://127.0.0.1:11434/v1"
 apiKey = "local-key"
 model = "local-model"
 timeout = "60s"
+chatCompletions = true
+streaming = true
+nonChatOperations = ["embeddings"]
 	disabled = false
 	`)
 	_ = Close()
@@ -51,8 +55,16 @@ timeout = "60s"
 	if cfg.LLM.DefaultProvider != "local" {
 		t.Fatalf("default provider = %q, want local", cfg.LLM.DefaultProvider)
 	}
+	if cfg.LLM.DefaultEmbeddingProvider != "local" {
+		t.Fatalf("default embedding provider = %q, want local", cfg.LLM.DefaultEmbeddingProvider)
+	}
 	if cfg.LLM.Providers["local"].Disabled == nil || *cfg.LLM.Providers["local"].Disabled {
 		t.Fatalf("llm disabled = %+v, want false pointer", cfg.LLM.Providers["local"].Disabled)
+	}
+	if cfg.LLM.Providers["local"].Streaming == nil || !*cfg.LLM.Providers["local"].Streaming ||
+		len(cfg.LLM.Providers["local"].NonChatOperations) != 1 ||
+		cfg.LLM.Providers["local"].NonChatOperations[0] != "embeddings" {
+		t.Fatalf("llm provider capabilities = %+v, want streaming embeddings", cfg.LLM.Providers["local"])
 	}
 }
 
@@ -87,6 +99,7 @@ disabled = false
 	}
 	disabled := false
 	cfg.LLM.DefaultProvider = "reasoning"
+	cfg.LLM.DefaultEmbeddingProvider = "reasoning"
 	cfg.LLM.Providers = map[string]LLMProviderConfig{
 		"reasoning": {
 			Provider: "openai",
@@ -107,7 +120,9 @@ disabled = false
 	if err != nil {
 		t.Fatalf("current after reload: %v", err)
 	}
-	if next.LLM.DefaultProvider != "reasoning" || next.LLM.Providers["reasoning"].Model != "reasoning-model" {
+	if next.LLM.DefaultProvider != "reasoning" ||
+		next.LLM.DefaultEmbeddingProvider != "reasoning" ||
+		next.LLM.Providers["reasoning"].Model != "reasoning-model" {
 		t.Fatalf("next config = %+v, want saved llm provider", next.LLM)
 	}
 }
@@ -128,19 +143,21 @@ func TestLLMProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 			DefaultProvider: "reasoning",
 			Providers: map[string]LLMProviderConfig{
 				"reasoning": {
-					Provider: "openai",
-					BaseURL:  "https://example.test/v1",
-					APIKey:   "secret",
-					Model:    "model",
-					Timeout:  "30s",
-					Disabled: &disabled,
+					Provider:          "openai",
+					BaseURL:           "https://example.test/v1",
+					APIKey:            "secret",
+					Model:             "model",
+					Timeout:           "30s",
+					Disabled:          &disabled,
+					Streaming:         &disabled,
+					NonChatOperations: []string{"embeddings"},
 				},
 			},
 		},
 	}
 
 	values := cfg.LLMProviderValues()
-	if values["provider"] != "openai" || values["disabled"] != "true" {
+	if values["provider"] != "openai" || values["disabled"] != "true" || values["streaming"] != "true" || values["nonChatOperations"] != "embeddings" {
 		t.Fatalf("provider values = %+v, want llm provider bridge values", values)
 	}
 	valueSets := cfg.LLMProviderValueSets()

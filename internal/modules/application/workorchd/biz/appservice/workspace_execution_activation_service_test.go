@@ -3,6 +3,10 @@ package appservice
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +14,7 @@ import (
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 func TestActivateWorkspaceExecutionWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing.T) {
@@ -229,6 +234,133 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	}
 }
 
+func TestActivateWorkspaceExecutionWithBackendUsesSemanticMemoryRecall(t *testing.T) {
+	ctx := context.Background()
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/embeddings":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"embedding":[1,0,0]}]}`))
+		case "/v1/chat/completions":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"items\":[{\"item\":\"semantic memory selected\",\"state\":\"satisfied\",\"evidenceRefs\":[\"memory-semantic-match\"]}]}}"}}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer provider.Close()
+	useActivationLLMConfig(t, provider.URL+"/v1", "local")
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-semantic-memory", "semantic memory workspace", "", "workspaces/activation-semantic-memory")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "use semantic project context")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"semantic memory selected"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	if _, err := CreateMemoryItemWithBackend(ctx, "file", dataRoot, workspace.ID, CreateMemoryItemCommand{
+		MemoryID:            "memory-semantic-match",
+		SourceType:          memorycommon.MemorySourceUser,
+		MemoryType:          memorycommon.MemoryTypeProjectContext,
+		Summary:             "matching semantic project context",
+		Content:             "This memory should be retrieved by vector similarity.",
+		EmbeddingProviderID: "local",
+		EmbeddingModel:      "embedding-model",
+		EmbeddingText:       "matching semantic project context",
+		Vector:              []float64{1, 0, 0},
+	}); err != nil {
+		t.Fatalf("CreateMemoryItemWithBackend match: %v", err)
+	}
+	if _, err := CreateMemoryItemWithBackend(ctx, "file", dataRoot, workspace.ID, CreateMemoryItemCommand{
+		MemoryID:            "memory-semantic-other",
+		SourceType:          memorycommon.MemorySourceUser,
+		MemoryType:          memorycommon.MemoryTypeProjectContext,
+		Summary:             "unrelated semantic project context",
+		Content:             "This memory should not pass the vector score threshold.",
+		EmbeddingProviderID: "local",
+		EmbeddingModel:      "embedding-model",
+		EmbeddingText:       "unrelated semantic project context",
+		Vector:              []float64{0, 1, 0},
+	}); err != nil {
+		t.Fatalf("CreateMemoryItemWithBackend other: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	if !contextStringSliceContains(item.Run.ExecutionContext["memoryIds"], "memory-semantic-match") ||
+		contextStringSliceContains(item.Run.ExecutionContext["memoryIds"], "memory-semantic-other") {
+		t.Fatalf("memoryIds = %+v, want only semantic match", item.Run.ExecutionContext["memoryIds"])
+	}
+	retrieval, _ := item.Run.ExecutionContext["memoryRetrieval"].(map[string]any)
+	if retrieval["policy"] != "semantic_vector_search" ||
+		retrieval["status"] != "selected" ||
+		retrieval["providerId"] != "local" ||
+		!contextNumericEquals(retrieval["vectorDimension"], 3) {
+		t.Fatalf("memoryRetrieval = %+v, want semantic evidence", retrieval)
+	}
+}
+
+func TestActivateWorkspaceExecutionWithBackendReportsSemanticMemoryDegradation(t *testing.T) {
+	ctx := context.Background()
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"completionState\":\"continue\"}"}}]}`))
+	}))
+	defer provider.Close()
+	useActivationLLMConfig(t, provider.URL+"/v1", "missing-embedding")
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-semantic-degraded", "semantic degradation workspace", "", "workspaces/activation-semantic-degraded")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "use semantic memory degradation")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"semantic degradation visible"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	if _, err := CreateMemoryItemWithBackend(ctx, "file", dataRoot, workspace.ID, CreateMemoryItemCommand{
+		MemoryID:   "memory-degraded-fallback-should-not-select",
+		SourceType: memorycommon.MemorySourceUser,
+		MemoryType: memorycommon.MemoryTypeProjectContext,
+		Summary:    "available deterministic fallback",
+		Content:    "Configured semantic recall is degraded, so this must not be silently selected.",
+	}); err != nil {
+		t.Fatalf("CreateMemoryItemWithBackend: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	if item.Run.ExecutionContext["memoryIds"] != nil {
+		t.Fatalf("memoryIds = %+v, want no silent fallback when semantic recall degrades", item.Run.ExecutionContext["memoryIds"])
+	}
+	retrieval, _ := item.Run.ExecutionContext["memoryRetrieval"].(map[string]any)
+	if retrieval["policy"] != "semantic_vector_search" || retrieval["status"] != "degraded" || retrieval["reason"] == "" {
+		t.Fatalf("memoryRetrieval = %+v, want explicit degradation evidence", retrieval)
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendRejectsSoulDisallowedSkill(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
@@ -329,6 +461,19 @@ func contextStringSliceContains(value any, want string) bool {
 	return false
 }
 
+func contextNumericEquals(value any, want float64) bool {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed) == want
+	case int64:
+		return float64(typed) == want
+	case float64:
+		return typed == want
+	default:
+		return false
+	}
+}
+
 func useUnavailableLLMProvider(t *testing.T) {
 	t.Helper()
 	t.Setenv(llmcommon.EnvProvider, "")
@@ -337,4 +482,37 @@ func useUnavailableLLMProvider(t *testing.T) {
 	t.Setenv(llmcommon.EnvModel, "")
 	t.Setenv(llmcommon.EnvDisabled, "")
 	t.Setenv(llmcommon.EnvTimeout, "")
+}
+
+func useActivationLLMConfig(t *testing.T, baseURL string, embeddingProviderID string) {
+	t.Helper()
+	configDir := t.TempDir()
+	content := strings.ReplaceAll(`
+endpointName = "workorchd"
+
+[repository]
+backend = "file"
+
+[llm]
+defaultProvider = "local"
+defaultEmbeddingProvider = "__EMBEDDING_PROVIDER__"
+
+[llm.providers.local]
+provider = "compatible"
+baseURL = "__BASE_URL__"
+apiKey = "secret-value"
+model = "test-model"
+timeout = "5s"
+disabled = false
+chatCompletions = true
+streaming = false
+nonChatOperations = ["embeddings"]
+`, "__BASE_URL__", baseURL)
+	content = strings.ReplaceAll(content, "__EMBEDDING_PROVIDER__", embeddingProviderID)
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write application config: %v", err)
+	}
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
 }

@@ -114,6 +114,7 @@ make verify-service-file
 make verify-llm
 make verify-llm-file
 make verify-real-llm
+make verify-real-vector-memory
 make docker-verify
 make docker-verify-file
 ```
@@ -225,7 +226,8 @@ Supported LLM fields:
 Current MVP boundary:
 
 - The provider protocol is OpenAI-compatible `/chat/completions`.
-- Provider streaming and non-chat APIs are outside the current MVP.
+- LLM provider streaming and non-chat provider APIs are outside the current
+  provider contract.
 - LLM output must be one JSON object matching `LLMExecutionDecision`.
 - OpenAI-compatible calls use JSON object mode where supported.
 - Transport formatting drift is normalized only for markdown fences and first
@@ -268,8 +270,14 @@ A deployable `workorchd` instance is acceptable when:
   stdio check temporarily appends a local mock provider through the
   configuration API, restores provider config on exit, creates a governed MCP
   `stdio` server, and verifies the deployed process can execute it.
+- `make verify-real-vector-memory` passes against the running service. It
+  temporarily appends an embedding-capable mock provider through the
+  configuration API, restores provider config on exit, creates vectorized
+  workspace Memory, and verifies `memoryRetrieval` evidence on the activated
+  Run.
 - `make verify-real-mvp` passes as the grouped verification entrypoint for an
-  already running deployed service.
+  already running deployed service, covering real LLM execution, MCP `stdio`,
+  and vector Memory recall.
 - `POST /api/v1/workorch/workspaces` creates one `workorch` workspace instance, accepts an optional `description`, defaults `workingDirectory` to `<service-working-directory>/workspaces/<generated-workspace-id>` when omitted, and returns the generated `workspace.id`
 - with file-backed repository config, `GET /api/v1/workorch/workspaces` returns the current `workorch` workspace list
 - with file-backed repository config, `GET /api/v1/workorch/workspaces/{workspaceId}` returns one persisted `workorch` workspace instance
@@ -289,6 +297,7 @@ A deployable `workorchd` instance is acceptable when:
 - with file-backed repository config, `GET /api/v1/workorch/approvals/{approvalId}` returns one persisted approval item
 - with file-backed repository config, `POST /api/v1/workorch/approvals/{approvalId}/approve` approves one approval item
 - with file-backed repository config, `POST /api/v1/workorch/approvals/{approvalId}/reject` rejects one approval item
+- with file-backed repository config, `POST /api/v1/workorch/approvals/resolve-batch` resolves multiple pending approval items after prevalidating the whole batch
 - with file-backed repository config, `POST /api/v1/workorch/runs/{runId}/resume` can complete after approval approve or fail terminally after approval reject
 - with file-backed repository config, repository state is persisted under the configured `dataDir`
 - with file-backed repository config, restarting `workorchd` on the same `dataDir` preserves workspace / run / decision / approval terminal read paths

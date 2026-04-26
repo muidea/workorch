@@ -49,6 +49,7 @@
     `POST /api/v1/workorch/decisions/resolve-batch`,
     `POST /api/v1/workorch/approvals/{approvalId}/approve`,
     `POST /api/v1/workorch/approvals/{approvalId}/reject`,
+    `POST /api/v1/workorch/approvals/resolve-batch`,
     `POST /api/v1/workorch/souls`,
     `POST /api/v1/workorch/skills`,
     `POST /api/v1/workorch/mcp/servers`
@@ -83,9 +84,28 @@
   Chat Completions HTTP client inside `blocks/llm`; `openai` defaults to
   `https://api.openai.com/v1`, while `compatible` requires
   `[llm.providers.<id>].baseURL`.
+- LLM provider configuration now declares formal provider capabilities:
+  `chatCompletions`, `streaming`, and `nonChatOperations`. Web Console can edit
+  these fields, configuration reads expose them, and runtime selection will not
+  implicitly use undeclared non-chat operations.
 - OpenAI-compatible LLM calls use JSON object mode and a strict
   `workorch.llmExecutionDecision.v1` contract; provider formatting drift is
   normalized only for markdown fences and first JSON object extraction.
+- Streaming-capable LLM providers are invoked only when the selected provider
+  explicitly declares `streaming = true`; streamed deltas are persisted into
+  Step output as `streamEvents`, and stream failures before a valid final
+  decision fail the Step with an explicit `llm_provider_stream_error` stage.
+- Vector Memory recall is capability-gated through
+  `[llm].defaultEmbeddingProvider` plus provider `nonChatOperations =
+  ["embeddings"]`. When configured, workspace execution activation calls the
+  OpenAI-compatible `/embeddings` operation, searches workspace Memory by vector
+  similarity, and stores `memoryRetrieval` evidence on Run execution context.
+  Missing or failing embedding providers degrade explicitly with a reason and
+  do not silently select deterministic fallback Memory.
+- Run observability timeline now includes Step output items and explicit
+  `step_stream` entries for streamed provider deltas, so streaming evidence is
+  visible through `/api/v1/workorch/runs/{runId}/observability`, not only the
+  Run snapshot.
 - LLM provider requests include a formal `runtimeCapabilities` catalog covering
   available runtime block kinds, declared read-only local service APIs, and
   shell policy. LLM decisions are rejected if shell commands or execution graph
@@ -132,6 +152,11 @@
 - Runtime `memoryWrites` and terminal LLM run summaries now persist as
   Workspace Memory records with Run source refs; created Memory IDs are exposed
   on Step output as `memoryRefs` for later snapshots and recall.
+- Memory records now include formal embedding metadata and vector readiness
+  fields. Memory repositories preserve vector data, support vector similarity
+  ordering through repository search, and API/Web responses expose
+  `vectorReady` plus `vectorDimension` while preserving existing deterministic
+  list/search behavior.
 - Embedded Web Console can start LLM-driven Workspace execution with
   Goal/DoD/Soul/Skill/MCP/Memory context and observe execution context,
   Decision context, Step output, DoD assessment, and Memory refs.
@@ -149,10 +174,15 @@
 - `make verify-real-mcp-stdio` verifies an already running `workorchd` instance
   by temporarily adding a local mock provider through the configuration API and
   executing a governed MCP `stdio` tool call in the deployed process.
+- `make verify-real-vector-memory` verifies an already running `workorchd`
+  instance by temporarily adding an embedding-capable mock provider through the
+  configuration API, executing `/embeddings`-driven vector Memory recall, and
+  checking `memoryRetrieval` evidence on the Run execution context.
 - MVP verification is grouped by target:
   `make verify-mvp` for local memory-backed checks,
   `make verify-mvp-file` for file-backed restart-read checks, and
-  `make verify-real-mvp` for an already running deployed service.
+  `make verify-real-mvp` for an already running deployed service with real LLM,
+  MCP `stdio`, and vector Memory recall checks.
 
 ## Delivered in workorch
 
@@ -286,6 +316,7 @@ HTTP endpoints:
 - `GET /api/v1/workorch/approvals/{approvalId}`
 - `POST /api/v1/workorch/approvals/{approvalId}/approve`
 - `POST /api/v1/workorch/approvals/{approvalId}/reject`
+- `POST /api/v1/workorch/approvals/resolve-batch`
 - `POST /api/v1/workorch/souls`
 - `GET /api/v1/workorch/souls`
 - `GET /api/v1/workorch/souls/{soulId}`
@@ -466,15 +497,30 @@ Validated coverage currently includes:
 
 ## Out Of Current Delivery Scope
 
-以下内容不是当前已完成的 MVP / framework alignment 交付范围内的活跃待办项；如后续启动，需要重新拆成正式业务需求：
+以下内容不是当前已完成的 MVP / framework alignment 交付范围内的活跃待办项。P1 已提升到
+`docs/next-stage-p1-development-plan.md`；其余候选项继续保留在
+`docs/next-stage-demand-candidates.md`：
 
-- global `magicCommon/framework/plugin/module.Register` usage for long-lived workorch runtime units
 - distributed scheduling, external worker fleets, and multi-tenant execution quota
 
-当前已按 MVP 形式交付，后续如需增强应作为新需求处理：
+已完成的后续增强不再列为待办：
 
 - file-backed repository adapter as the first non-memory persistence path
 - priority-aware local run scheduling behind `[server].maxConcurrentRuns`
+- MCP resources, prompts, streaming evidence, and long-lived stdio session reuse
+- Decision batch resolution and Approval batch resolution
+
+## Next Stage P1 Scope
+
+下一阶段 P1 开发需求清单见：
+
+- `docs/next-stage-p1-development-plan.md`
+
+当前 P1 项：
+
+- completed: `P1-1 LLM Provider Streaming And Non-Chat APIs`
+- completed: `P1-2 Vector Memory Search`
+- completed: `P1-3 Global Long-Lived Runtime Module Registration`
 
 ## Runtime Expansion Scope
 

@@ -2,10 +2,13 @@ package appservice
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
+	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
@@ -16,6 +19,8 @@ import (
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 type ActivateWorkspaceExecutionCommand struct {
@@ -266,9 +271,12 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 		}
 	}
 
-	memories, err := selectedMemoryItems(ctx, workspaceID, exports.Services.MemoryService, memoryIDs)
+	memories, retrievalEvidence, err := selectedMemoryItems(ctx, workspaceID, exports.Services.MemoryService, memoryIDs, goal, dod)
 	if err != nil {
 		return nil, err
+	}
+	if retrievalEvidence != nil {
+		contextData["memoryRetrieval"] = retrievalEvidence
 	}
 	if len(memories) > 0 {
 		contextData["memoryIds"] = memoryItemIDs(memories)
@@ -324,35 +332,118 @@ func selectedMCPServers(ctx context.Context, service interface {
 func selectedMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, service interface {
 	GetMemoryItem(context.Context, common.MemoryID) (*memorymodel.MemoryItem, error)
 	ListMemoryByWorkspace(context.Context, common.WorkspaceID) ([]*memorymodel.MemoryItem, error)
-}, ids []string) ([]*memorymodel.MemoryItem, error) {
+	SearchMemory(context.Context, repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error)
+}, ids []string, goal *workspacemodel.Goal, dod *workspacemodel.DoD) ([]*memorymodel.MemoryItem, map[string]any, error) {
 	if service == nil {
 		if len(ids) > 0 {
-			return nil, common.ErrInvalidArgument
+			return nil, nil, common.ErrInvalidArgument
 		}
-		return nil, nil
+		return nil, nil, nil
 	}
 	if len(ids) > 0 {
 		ret := make([]*memorymodel.MemoryItem, 0, len(ids))
 		for _, id := range ids {
 			item, err := service.GetMemoryItem(ctx, common.MemoryID(id))
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if item.WorkspaceID != workspaceID {
-				return nil, common.ErrConflict
+				return nil, nil, common.ErrConflict
 			}
 			ret = append(ret, item)
 		}
-		return ret, nil
+		return ret, map[string]any{
+			"policy":             "explicit_memory_selection",
+			"status":             "selected",
+			"retrievedMemoryIds": memoryItemIDs(ret),
+		}, nil
+	}
+	semanticItems, semanticEvidence, semanticHandled := semanticMemoryItems(ctx, workspaceID, service, goal, dod)
+	if semanticHandled {
+		return semanticItems, semanticEvidence, nil
 	}
 	items, err := service.ListMemoryByWorkspace(ctx, workspaceID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(items) > 8 {
 		items = items[:8]
 	}
-	return items, nil
+	return items, map[string]any{
+		"policy":             "deterministic_workspace_list",
+		"status":             "selected",
+		"retrievedMemoryIds": memoryItemIDs(items),
+	}, nil
+}
+
+func semanticMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, service interface {
+	SearchMemory(context.Context, repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error)
+}, goal *workspacemodel.Goal, dod *workspacemodel.DoD) ([]*memorymodel.MemoryItem, map[string]any, bool) {
+	cfg, err := workorchconfig.Current()
+	if err != nil {
+		return nil, map[string]any{
+			"policy": "semantic_vector_search",
+			"status": "degraded",
+			"reason": err.Error(),
+		}, true
+	}
+	providerID := strings.TrimSpace(cfg.LLM.DefaultEmbeddingProvider)
+	if providerID == "" {
+		return nil, nil, false
+	}
+	queryText := memoryRetrievalQueryText(goal, dod)
+	evidence := map[string]any{
+		"policy":              "semantic_vector_search",
+		"providerId":          providerID,
+		"operation":           llmcommon.ProviderOperationEmbeddings,
+		"queryTextPreview":    previewRetrievalQuery(queryText),
+		"queryTextSha256":     sha256Hex(queryText),
+		"minScore":            0.1,
+		"limit":               8,
+		"retrievedMemoryIds":  []string{},
+		"retrievedMemoryHits": []map[string]any{},
+	}
+	defaultProviderID, providerConfigs, err := llmbiz.LoadProviderConfigs(cfg.LLM.DefaultProvider, cfg.LLMProviderValueSets())
+	if err != nil {
+		evidence["status"] = "degraded"
+		evidence["reason"] = err.Error()
+		return nil, evidence, true
+	}
+	providerConfig, ok := providerConfigs[providerID]
+	if !ok {
+		evidence["status"] = "degraded"
+		evidence["reason"] = fmt.Sprintf("embedding provider %q is not configured", providerID)
+		return nil, evidence, true
+	}
+	if providerConfig.Unavailable {
+		evidence["status"] = "degraded"
+		evidence["reason"] = providerConfig.UnavailableReason
+		return nil, evidence, true
+	}
+	adapter := llmbiz.NewRuntimeAdapterFromConfigs(defaultProviderID, providerConfigs)
+	embedding, err := adapter.GenerateEmbedding(ctx, providerID, queryText)
+	if err != nil {
+		evidence["status"] = "degraded"
+		evidence["reason"] = err.Error()
+		return nil, evidence, true
+	}
+	items, err := service.SearchMemory(ctx, repository.MemorySearchQuery{
+		WorkspaceID: workspaceID,
+		Vector:      embedding.Vector,
+		MinScore:    0.1,
+		Limit:       8,
+	})
+	if err != nil {
+		evidence["status"] = "degraded"
+		evidence["reason"] = err.Error()
+		return nil, evidence, true
+	}
+	evidence["status"] = "selected"
+	evidence["embeddingModel"] = embedding.Model
+	evidence["vectorDimension"] = len(embedding.Vector)
+	evidence["retrievedMemoryIds"] = memoryItemIDs(items)
+	evidence["retrievedMemoryHits"] = memoryRetrievalHits(items)
+	return items, evidence, true
 }
 
 func normalizeStringIDs(input []string) []string {
@@ -419,6 +510,50 @@ func memoryItemIDs(items []*memorymodel.MemoryItem) []string {
 		ret = append(ret, string(item.ID))
 	}
 	return ret
+}
+
+func memoryRetrievalHits(items []*memorymodel.MemoryItem) []map[string]any {
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, map[string]any{
+			"id":              string(item.ID),
+			"summary":         item.Summary,
+			"vectorScore":     item.VectorScore,
+			"vectorDimension": len(item.Vector),
+		})
+	}
+	return ret
+}
+
+func memoryRetrievalQueryText(goal *workspacemodel.Goal, dod *workspacemodel.DoD) string {
+	parts := []string{}
+	if goal != nil && strings.TrimSpace(goal.Text) != "" {
+		parts = append(parts, "Goal: "+strings.TrimSpace(goal.Text))
+	}
+	if dod != nil && len(dod.Items) > 0 {
+		parts = append(parts, "Definition of Done:")
+		for _, item := range dod.Items {
+			item = strings.TrimSpace(item)
+			if item != "" {
+				parts = append(parts, "- "+item)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func previewRetrievalQuery(text string) string {
+	text = strings.TrimSpace(text)
+	const limit = 240
+	if len(text) <= limit {
+		return text
+	}
+	return text[:limit]
+}
+
+func sha256Hex(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return fmt.Sprintf("%x", sum)
 }
 
 func goalContext(item *workspacemodel.Goal) map[string]any {
@@ -502,18 +637,23 @@ func memoryContexts(items []*memorymodel.MemoryItem) []map[string]any {
 	ret := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, map[string]any{
-			"id":          string(item.ID),
-			"workspaceId": string(item.WorkspaceID),
-			"runId":       string(item.RunID),
-			"sourceType":  item.SourceType,
-			"sourceRef":   item.SourceRef,
-			"memoryType":  item.MemoryType,
-			"summary":     item.Summary,
-			"content":     item.Content,
-			"tags":        cloneStrings(item.Tags),
-			"importance":  item.Importance,
-			"confidence":  item.Confidence,
-			"visibility":  item.Visibility,
+			"id":                  string(item.ID),
+			"workspaceId":         string(item.WorkspaceID),
+			"runId":               string(item.RunID),
+			"sourceType":          item.SourceType,
+			"sourceRef":           item.SourceRef,
+			"memoryType":          item.MemoryType,
+			"summary":             item.Summary,
+			"content":             item.Content,
+			"tags":                cloneStrings(item.Tags),
+			"importance":          item.Importance,
+			"confidence":          item.Confidence,
+			"visibility":          item.Visibility,
+			"embeddingProviderId": item.EmbeddingProviderID,
+			"embeddingModel":      item.EmbeddingModel,
+			"vectorReady":         len(item.Vector) > 0,
+			"vectorDimension":     len(item.Vector),
+			"vectorScore":         item.VectorScore,
 		})
 	}
 	return ret

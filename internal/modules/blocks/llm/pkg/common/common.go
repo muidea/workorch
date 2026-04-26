@@ -20,10 +20,18 @@ const (
 )
 
 const (
-	EnvProvider = "provider"
-	EnvBaseURL  = "baseURL"
-	EnvAPIKey   = "apiKey"
-	EnvModel    = "model"
-	EnvTimeout  = "timeout"
-	EnvDisabled = "disabled"
+	EnvProvider          = "provider"
+	EnvBaseURL           = "baseURL"
+	EnvAPIKey            = "apiKey"
+	EnvModel             = "model"
+	EnvTimeout           = "timeout"
+	EnvDisabled          = "disabled"
+	EnvChatCompletions   = "chatCompletions"
+	EnvStreaming         = "streaming"
+	EnvNonChatOperations = "nonChatOperations"
+)
+
+const (
+	ProviderOperationChatCompletions = "chat_completions"
+	ProviderOperationEmbeddings      = "embeddings"
 )

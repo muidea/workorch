@@ -75,18 +75,24 @@ type MCPPrompt struct {
 }
 
 type MemoryItem struct {
-	ID          string   `json:"id"`
-	WorkspaceID string   `json:"workspaceId"`
-	RunID       string   `json:"runId,omitempty"`
-	SourceType  string   `json:"sourceType"`
-	SourceRef   string   `json:"sourceRef,omitempty"`
-	MemoryType  string   `json:"memoryType"`
-	Content     string   `json:"content,omitempty"`
-	Summary     string   `json:"summary"`
-	Tags        []string `json:"tags,omitempty"`
-	Importance  int      `json:"importance,omitempty"`
-	Confidence  int      `json:"confidence,omitempty"`
-	Visibility  string   `json:"visibility,omitempty"`
+	ID                  string   `json:"id"`
+	WorkspaceID         string   `json:"workspaceId"`
+	RunID               string   `json:"runId,omitempty"`
+	SourceType          string   `json:"sourceType"`
+	SourceRef           string   `json:"sourceRef,omitempty"`
+	MemoryType          string   `json:"memoryType"`
+	Content             string   `json:"content,omitempty"`
+	Summary             string   `json:"summary"`
+	Tags                []string `json:"tags,omitempty"`
+	Importance          int      `json:"importance,omitempty"`
+	Confidence          int      `json:"confidence,omitempty"`
+	Visibility          string   `json:"visibility,omitempty"`
+	EmbeddingProviderID string   `json:"embeddingProviderId,omitempty"`
+	EmbeddingModel      string   `json:"embeddingModel,omitempty"`
+	EmbeddingText       string   `json:"embeddingText,omitempty"`
+	VectorReady         bool     `json:"vectorReady"`
+	VectorDimension     int      `json:"vectorDimension,omitempty"`
+	VectorScore         float64  `json:"vectorScore,omitempty"`
 }
 
 type CreateSoulCommand = Soul
@@ -94,17 +100,21 @@ type CreateSkillCommand = Skill
 type CreateMCPServerCommand = MCPServer
 
 type CreateMemoryItemCommand struct {
-	MemoryID   string   `json:"memoryId,omitempty"`
-	RunID      string   `json:"runId,omitempty"`
-	SourceType string   `json:"sourceType"`
-	SourceRef  string   `json:"sourceRef,omitempty"`
-	MemoryType string   `json:"memoryType"`
-	Content    string   `json:"content,omitempty"`
-	Summary    string   `json:"summary"`
-	Tags       []string `json:"tags,omitempty"`
-	Importance int      `json:"importance,omitempty"`
-	Confidence int      `json:"confidence,omitempty"`
-	Visibility string   `json:"visibility,omitempty"`
+	MemoryID            string    `json:"memoryId,omitempty"`
+	RunID               string    `json:"runId,omitempty"`
+	SourceType          string    `json:"sourceType"`
+	SourceRef           string    `json:"sourceRef,omitempty"`
+	MemoryType          string    `json:"memoryType"`
+	Content             string    `json:"content,omitempty"`
+	Summary             string    `json:"summary"`
+	Tags                []string  `json:"tags,omitempty"`
+	Importance          int       `json:"importance,omitempty"`
+	Confidence          int       `json:"confidence,omitempty"`
+	Visibility          string    `json:"visibility,omitempty"`
+	EmbeddingProviderID string    `json:"embeddingProviderId,omitempty"`
+	EmbeddingModel      string    `json:"embeddingModel,omitempty"`
+	EmbeddingText       string    `json:"embeddingText,omitempty"`
+	Vector              []float64 `json:"vector,omitempty"`
 }
 
 func CreateSoulWithSession(ctx context.Context, session *RuntimeSession, cmd CreateSoulCommand) (ret Soul, err error) {
@@ -458,18 +468,22 @@ func CreateMemoryItemWithSession(ctx context.Context, session *RuntimeSession, w
 		memoryID = generateContextID("memory")
 	}
 	if err := exports.Services.MemoryService.CreateMemoryItem(ctx, memorymodule.CreateMemoryItemCommand{
-		MemoryID:    common.MemoryID(memoryID),
-		WorkspaceID: common.WorkspaceID(workspaceID),
-		RunID:       common.RunID(cmd.RunID),
-		SourceType:  cmd.SourceType,
-		SourceRef:   cmd.SourceRef,
-		MemoryType:  cmd.MemoryType,
-		Content:     cmd.Content,
-		Summary:     cmd.Summary,
-		Tags:        cloneStrings(cmd.Tags),
-		Importance:  cmd.Importance,
-		Confidence:  cmd.Confidence,
-		Visibility:  cmd.Visibility,
+		MemoryID:            common.MemoryID(memoryID),
+		WorkspaceID:         common.WorkspaceID(workspaceID),
+		RunID:               common.RunID(cmd.RunID),
+		SourceType:          cmd.SourceType,
+		SourceRef:           cmd.SourceRef,
+		MemoryType:          cmd.MemoryType,
+		Content:             cmd.Content,
+		Summary:             cmd.Summary,
+		Tags:                cloneStrings(cmd.Tags),
+		Importance:          cmd.Importance,
+		Confidence:          cmd.Confidence,
+		Visibility:          cmd.Visibility,
+		EmbeddingProviderID: cmd.EmbeddingProviderID,
+		EmbeddingModel:      cmd.EmbeddingModel,
+		EmbeddingText:       cmd.EmbeddingText,
+		Vector:              cloneFloats(cmd.Vector),
 	}); err != nil {
 		return MemoryItem{}, err
 	}
@@ -587,18 +601,24 @@ func mapMemoryItem(item *memorymodel.MemoryItem) MemoryItem {
 		return MemoryItem{}
 	}
 	return MemoryItem{
-		ID:          string(item.ID),
-		WorkspaceID: string(item.WorkspaceID),
-		RunID:       string(item.RunID),
-		SourceType:  item.SourceType,
-		SourceRef:   item.SourceRef,
-		MemoryType:  item.MemoryType,
-		Content:     item.Content,
-		Summary:     item.Summary,
-		Tags:        cloneStrings(item.Tags),
-		Importance:  item.Importance,
-		Confidence:  item.Confidence,
-		Visibility:  item.Visibility,
+		ID:                  string(item.ID),
+		WorkspaceID:         string(item.WorkspaceID),
+		RunID:               string(item.RunID),
+		SourceType:          item.SourceType,
+		SourceRef:           item.SourceRef,
+		MemoryType:          item.MemoryType,
+		Content:             item.Content,
+		Summary:             item.Summary,
+		Tags:                cloneStrings(item.Tags),
+		Importance:          item.Importance,
+		Confidence:          item.Confidence,
+		Visibility:          item.Visibility,
+		EmbeddingProviderID: item.EmbeddingProviderID,
+		EmbeddingModel:      item.EmbeddingModel,
+		EmbeddingText:       item.EmbeddingText,
+		VectorReady:         len(item.Vector) > 0,
+		VectorDimension:     len(item.Vector),
+		VectorScore:         item.VectorScore,
 	}
 }
 
@@ -615,4 +635,11 @@ func cloneStrings(input []string) []string {
 		return nil
 	}
 	return append([]string(nil), input...)
+}
+
+func cloneFloats(input []float64) []float64 {
+	if input == nil {
+		return nil
+	}
+	return append([]float64(nil), input...)
 }
