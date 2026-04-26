@@ -27,11 +27,15 @@ mkdir -p .workorch-data
 chmod 0777 .workorch-data
 docker run --rm \
   -p 8080:8080 \
-  -e WORKORCH_REPOSITORY_BACKEND=file \
-  -e WORKORCH_DATA_DIR=/var/lib/workorch \
+  -v "$(pwd)/config/container-file/application.toml:/etc/workorch/application.toml:ro" \
   -v "$(pwd)/.workorch-data:/var/lib/workorch" \
   workorchd:local
 ```
+
+The image starts with `/etc/workorch/application.toml` through the magicCommon
+configuration manager. Runtime parameters should be managed through a
+configuration directory and passed with `workorchd -config-dir <dir>` for local
+runs, or by mounting a replacement `application.toml` file in containers.
 
 ## Verification
 
@@ -123,6 +127,32 @@ provider and verify the LLM-driven Workspace execution loop. The file-backed
 variant also restarts `workorchd` on the same data directory and verifies
 persisted Run and Memory reads.
 
+## Configuration file
+
+Use `config/application.toml` as the baseline local configuration:
+
+```bash
+go run ./application/workorchd -config-dir config
+```
+
+Use `config/file/application.toml` for the local file-backed backend:
+
+```bash
+rm -rf .workorch-data
+go run ./application/workorchd -config-dir config/file
+```
+
+Main sections:
+
+- `[server]`: `addr`, timeout values, and `maxConcurrentRuns`
+- `[repository]`: `backend` and `dataDir`
+- `[llm]`: default LLM provider selection and named provider definitions
+
+`CONFIG_PATH` can point to the configuration directory when command-line
+arguments are not convenient. This follows the magicCommon
+`framework/configuration` convention of loading `application.toml` and optional
+module files from `config.d/`.
+
 ## LLM provider configuration
 
 LLM-driven Workspace execution is enabled by configuring a provider before
@@ -130,31 +160,42 @@ starting `workorchd`.
 
 OpenAI-compatible default:
 
-```bash
-WORKORCH_LLM_PROVIDER=openai \
-WORKORCH_LLM_API_KEY=... \
-WORKORCH_LLM_MODEL=... \
-go run ./application/workorchd
+```toml
+[llm]
+defaultProvider = "reasoning"
+
+[llm.providers.reasoning]
+provider = "openai"
+apiKey = "..."
+model = "..."
+timeout = "60s"
+disabled = false
 ```
 
 Custom OpenAI-compatible endpoint:
 
-```bash
-WORKORCH_LLM_PROVIDER=compatible \
-WORKORCH_LLM_BASE_URL=http://127.0.0.1:11434/v1 \
-WORKORCH_LLM_API_KEY=local-key \
-WORKORCH_LLM_MODEL=local-model \
-go run ./application/workorchd
+```toml
+[llm]
+defaultProvider = "local"
+
+[llm.providers.local]
+provider = "compatible"
+baseURL = "http://127.0.0.1:11434/v1"
+apiKey = "local-key"
+model = "local-model"
+timeout = "60s"
+disabled = false
 ```
 
-Supported LLM variables:
+Supported LLM fields:
 
-- `WORKORCH_LLM_PROVIDER`: `openai` or `compatible`
-- `WORKORCH_LLM_BASE_URL`: required for `compatible`; defaults to `https://api.openai.com/v1` for `openai`
-- `WORKORCH_LLM_API_KEY`: bearer token used only inside `blocks/llm`
-- `WORKORCH_LLM_MODEL`: model name sent to `/chat/completions`
-- `WORKORCH_LLM_TIMEOUT`: request timeout, default `60s`
-- `WORKORCH_LLM_DISABLED`: set to `true` to force explicit provider-unavailable failure
+- `defaultProvider`: provider ID used when activation does not specify `llmProviderId`
+- `providers.<id>.provider`: `openai` or `compatible`
+- `providers.<id>.baseURL`: required for `compatible`; defaults to `https://api.openai.com/v1` for `openai`
+- `providers.<id>.apiKey`: bearer token used only inside `blocks/llm`
+- `providers.<id>.model`: model name sent to `/chat/completions`
+- `providers.<id>.timeout`: request timeout, default `60s`
+- `providers.<id>.disabled`: set to `true` to force explicit provider-unavailable failure
 
 Current MVP boundary:
 
@@ -163,29 +204,6 @@ Current MVP boundary:
 - LLM output must be one JSON object matching `LLMExecutionDecision`.
 - The LLM cannot execute shell, patch, or MCP directly; it can only request
   those actions through structured decision output consumed by the orchestrator.
-
-## Environment variables
-
-Use `.env.workorchd.example` as the baseline configuration template.
-For file-backed container runs, ensure the mounted host directory is writable by the container user.
-
-Primary variables:
-
-- `WORKORCH_SERVER_ADDR`
-- `WORKORCH_REPOSITORY_BACKEND`
-- `WORKORCH_DATA_DIR`
-- `WORKORCH_SERVER_READ_HEADER_TIMEOUT`
-- `WORKORCH_SERVER_READ_TIMEOUT`
-- `WORKORCH_SERVER_WRITE_TIMEOUT`
-- `WORKORCH_SERVER_IDLE_TIMEOUT`
-- `WORKORCH_SERVER_SHUTDOWN_TIMEOUT`
-- `WORKORCH_SERVER_MAX_CONCURRENT_RUNS`
-- `WORKORCH_LLM_PROVIDER`
-- `WORKORCH_LLM_BASE_URL`
-- `WORKORCH_LLM_API_KEY`
-- `WORKORCH_LLM_MODEL`
-- `WORKORCH_LLM_TIMEOUT`
-- `WORKORCH_LLM_DISABLED`
 
 ## Acceptance expectation
 
@@ -198,27 +216,27 @@ A deployable `workorchd` instance is acceptable when:
 - `GET /api/v1/workorch/slices` returns the executable `workorch` slice catalog
 - `POST /api/v1/workorch/slices/{sliceId}/runs` returns the requested single `workorch` slice
 - `POST /api/v1/workorch/runs` returns the current 17 `workorch` slices
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/workspaces` returns the current `workorch` workspace list
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/workspaces/{workspaceId}` returns one persisted `workorch` workspace instance
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/workspaces/{workspaceId}/snapshot` returns one aggregated `workorch` workspace read model
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `POST /api/v1/workorch/workspaces/{workspaceId}/runs` creates one persisted `workorch` run instance
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/runs` returns persisted `workorch` run instances and supports `workspaceId` filtering
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/runs/{runId}` returns one persisted `workorch` run instance
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/runs/{runId}/snapshot` returns one aggregated `workorch` run read model
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/runs/{runId}/status` returns one summarized `workorch` run status
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `POST /api/v1/workorch/runs/{runId}/start` advances one persisted `workorch` run instance and returns its updated state
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/decisions` returns persisted decision tickets and supports `workspaceId` / `runId` filtering
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/decisions/{ticketId}` returns one persisted decision ticket
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `POST /api/v1/workorch/decisions/{ticketId}/resolve` resolves one decision ticket with `provide_missing_info`, `reject_current_path`, or `replan`
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `POST /api/v1/workorch/runs/{runId}/resume` can complete after decision resolve or fail terminally after decision reject
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/approvals` returns persisted approval items and supports `workspaceId` / `runId` filtering
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/approvals/{approvalId}` returns one persisted approval item
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `POST /api/v1/workorch/approvals/{approvalId}/approve` approves one approval item
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `POST /api/v1/workorch/approvals/{approvalId}/reject` rejects one approval item
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `POST /api/v1/workorch/runs/{runId}/resume` can complete after approval approve or fail terminally after approval reject
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/slices/snapshots` returns the currently available persisted `workorch` slice snapshots
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/slices/statuses` returns the currently available persisted `workorch` slice summaries
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/slices/{sliceId}/status` returns the current `workorch` slice status summary when persisted state exists
-- with `WORKORCH_REPOSITORY_BACKEND=file`, `GET /api/v1/workorch/slices/{sliceId}/snapshot` returns the current persisted `workorch` slice snapshot when persisted state exists
-- with `WORKORCH_REPOSITORY_BACKEND=file`, repository state is persisted under the configured `WORKORCH_DATA_DIR`
-- with `WORKORCH_REPOSITORY_BACKEND=file`, restarting `workorchd` on the same `WORKORCH_DATA_DIR` preserves workspace / run / decision / approval terminal read paths
+- with file-backed repository config, `GET /api/v1/workorch/workspaces` returns the current `workorch` workspace list
+- with file-backed repository config, `GET /api/v1/workorch/workspaces/{workspaceId}` returns one persisted `workorch` workspace instance
+- with file-backed repository config, `GET /api/v1/workorch/workspaces/{workspaceId}/snapshot` returns one aggregated `workorch` workspace read model
+- with file-backed repository config, `POST /api/v1/workorch/workspaces/{workspaceId}/runs` creates one persisted `workorch` run instance
+- with file-backed repository config, `GET /api/v1/workorch/runs` returns persisted `workorch` run instances and supports `workspaceId` filtering
+- with file-backed repository config, `GET /api/v1/workorch/runs/{runId}` returns one persisted `workorch` run instance
+- with file-backed repository config, `GET /api/v1/workorch/runs/{runId}/snapshot` returns one aggregated `workorch` run read model
+- with file-backed repository config, `GET /api/v1/workorch/runs/{runId}/status` returns one summarized `workorch` run status
+- with file-backed repository config, `POST /api/v1/workorch/runs/{runId}/start` advances one persisted `workorch` run instance and returns its updated state
+- with file-backed repository config, `GET /api/v1/workorch/decisions` returns persisted decision tickets and supports `workspaceId` / `runId` filtering
+- with file-backed repository config, `GET /api/v1/workorch/decisions/{ticketId}` returns one persisted decision ticket
+- with file-backed repository config, `POST /api/v1/workorch/decisions/{ticketId}/resolve` resolves one decision ticket with `provide_missing_info`, `reject_current_path`, or `replan`
+- with file-backed repository config, `POST /api/v1/workorch/runs/{runId}/resume` can complete after decision resolve or fail terminally after decision reject
+- with file-backed repository config, `GET /api/v1/workorch/approvals` returns persisted approval items and supports `workspaceId` / `runId` filtering
+- with file-backed repository config, `GET /api/v1/workorch/approvals/{approvalId}` returns one persisted approval item
+- with file-backed repository config, `POST /api/v1/workorch/approvals/{approvalId}/approve` approves one approval item
+- with file-backed repository config, `POST /api/v1/workorch/approvals/{approvalId}/reject` rejects one approval item
+- with file-backed repository config, `POST /api/v1/workorch/runs/{runId}/resume` can complete after approval approve or fail terminally after approval reject
+- with file-backed repository config, `GET /api/v1/workorch/slices/snapshots` returns the currently available persisted `workorch` slice snapshots
+- with file-backed repository config, `GET /api/v1/workorch/slices/statuses` returns the currently available persisted `workorch` slice summaries
+- with file-backed repository config, `GET /api/v1/workorch/slices/{sliceId}/status` returns the current `workorch` slice status summary when persisted state exists
+- with file-backed repository config, `GET /api/v1/workorch/slices/{sliceId}/snapshot` returns the current persisted `workorch` slice snapshot when persisted state exists
+- with file-backed repository config, repository state is persisted under the configured `dataDir`
+- with file-backed repository config, restarting `workorchd` on the same `dataDir` preserves workspace / run / decision / approval terminal read paths

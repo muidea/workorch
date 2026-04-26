@@ -87,7 +87,11 @@
 - Ready LLM provider configuration now creates a real OpenAI-compatible
   Chat Completions HTTP client inside `blocks/llm`; `openai` defaults to
   `https://api.openai.com/v1`, while `compatible` requires
-  `WORKORCH_LLM_BASE_URL`.
+  `[llm.providers.<id>].baseURL`.
+- `workorchd` now loads runtime parameters through magicCommon
+  `framework/configuration` via `workorchd -config-dir <dir>`;
+  `config/application.toml` is the default local template and
+  `config/file/application.toml` is the file-backed local template.
 - LLM decision output now maps to runtime actions and gates: shell command
   dispatch, MCP tool-call dispatch boundary, patch evidence, Memory write
   request evidence, structured Decision Ticket fields, Approval gates, DoD
@@ -194,13 +198,13 @@ The current service MVP is closed. The next product-aligned MVP acceptance scope
 ### Command
 
 ```bash
-go run ./application/workorchd
+go run ./application/workorchd -config-dir config
 ```
 
 Optional file-backed service run:
 
 ```bash
-WORKORCH_REPOSITORY_BACKEND=file WORKORCH_DATA_DIR=.workorch-data go run ./application/workorchd
+go run ./application/workorchd -config-dir config/file
 ```
 
 ### Expected service behavior
@@ -227,7 +231,7 @@ HTTP endpoints:
 - `GET /api/v1/workorch/runs/{runId}/status`
 - `POST /api/v1/workorch/runs/{runId}/start`
 - `POST /api/v1/workorch/runs/{runId}/resume`
-- all run execution entrypoints now share one in-process FIFO wait queue behind `WORKORCH_SERVER_MAX_CONCURRENT_RUNS`
+- all run execution entrypoints now share one in-process FIFO wait queue behind `[server].maxConcurrentRuns`
 - `GET /api/v1/workorch/decisions`
 - `GET /api/v1/workorch/decisions/{ticketId}`
 - `POST /api/v1/workorch/decisions/{ticketId}/resolve`
@@ -368,7 +372,7 @@ make verify-service-file
 Verified with:
 
 ```bash
-WORKORCH_REPOSITORY_BACKEND=file WORKORCH_DATA_DIR=.workorch-data go run ./application/workorchd
+go run ./application/workorchd -config-dir config/file
 ```
 
 Observed persisted files:

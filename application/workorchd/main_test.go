@@ -302,8 +302,8 @@ func TestWorkorchdServerSupportsFileRepositoryBackend(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "workorch-data")
 	bin := buildWorkorchdBinary(t)
 	cmd := startWorkorchdProcess(t, bin, addr, []string{
-		"WORKORCH_REPOSITORY_BACKEND=file",
-		"WORKORCH_DATA_DIR=" + dataDir,
+		"repository.backend=file",
+		"repository.dataDir=" + dataDir,
 	})
 	defer stopWorkorchdProcess(t, cmd)
 
@@ -401,8 +401,8 @@ func TestWorkorchdServerRetainsFileBackedTerminalStateAcrossRestart(t *testing.T
 	dataDir := filepath.Join(t.TempDir(), "workorch-restart-data")
 	bin := buildWorkorchdBinary(t)
 	env := []string{
-		"WORKORCH_REPOSITORY_BACKEND=file",
-		"WORKORCH_DATA_DIR=" + dataDir,
+		"repository.backend=file",
+		"repository.dataDir=" + dataDir,
 	}
 
 	firstAddr := reserveLoopbackAddr(t)
@@ -467,12 +467,12 @@ func TestWorkorchdServerRetainsFileBackedTerminalStateAcrossRestart(t *testing.T
 func TestWorkorchdServerFailsWithUnsupportedRepositoryBackend(t *testing.T) {
 	addr := reserveLoopbackAddr(t)
 	bin := buildWorkorchdBinary(t)
-	cmd := exec.Command(bin)
-	cmd.Env = append(os.Environ(),
-		"WORKORCH_SERVER_ADDR="+addr,
-		"WORKORCH_REPOSITORY_BACKEND=unsupported",
-		"WORKORCH_DATA_DIR="+t.TempDir(),
-	)
+	configDir := writeWorkorchdTestConfig(t, addr, []string{
+		"repository.backend=unsupported",
+		"repository.dataDir=" + t.TempDir(),
+	})
+	cmd := exec.Command(bin, "-config-dir", configDir)
+	cmd.Env = os.Environ()
 
 	out, err := cmd.CombinedOutput()
 	if err == nil {
@@ -493,11 +493,11 @@ func TestWorkorchdServerFailsWithUnsupportedRepositoryBackend(t *testing.T) {
 func TestWorkorchdServerFailsWithInvalidServerTimeout(t *testing.T) {
 	addr := reserveLoopbackAddr(t)
 	bin := buildWorkorchdBinary(t)
-	cmd := exec.Command(bin)
-	cmd.Env = append(os.Environ(),
-		"WORKORCH_SERVER_ADDR="+addr,
-		"WORKORCH_SERVER_READ_TIMEOUT=not-a-duration",
-	)
+	configDir := writeWorkorchdTestConfig(t, addr, []string{
+		"server.readTimeout=not-a-duration",
+	})
+	cmd := exec.Command(bin, "-config-dir", configDir)
+	cmd.Env = os.Environ()
 
 	out, err := cmd.CombinedOutput()
 	if err == nil {
@@ -507,7 +507,7 @@ func TestWorkorchdServerFailsWithInvalidServerTimeout(t *testing.T) {
 	text := string(out)
 	for _, want := range []string{
 		"invalid duration",
-		"WORKORCH_SERVER_READ_TIMEOUT",
+		"server.readTimeout",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("invalid timeout output missing %q\noutput:\n%s", want, text)
@@ -542,12 +542,53 @@ func buildWorkorchdBinary(t *testing.T) string {
 func startWorkorchdProcess(t *testing.T, bin string, addr string, extraEnv []string) *exec.Cmd {
 	t.Helper()
 
-	cmd := exec.Command(bin)
-	cmd.Env = append(os.Environ(), append([]string{"WORKORCH_SERVER_ADDR=" + addr}, extraEnv...)...)
+	configDir := writeWorkorchdTestConfig(t, addr, extraEnv)
+	cmd := exec.Command(bin, "-config-dir", configDir)
+	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start workorchd: %v", err)
 	}
 	return cmd
+}
+
+func writeWorkorchdTestConfig(t *testing.T, addr string, extraEnv []string) string {
+	t.Helper()
+
+	values := map[string]string{
+		"repository.backend": "memory",
+		"repository.dataDir": "",
+		"server.readTimeout": "15s",
+	}
+	for _, item := range extraEnv {
+		key, value, ok := strings.Cut(item, "=")
+		if ok {
+			values[key] = value
+		}
+	}
+	configDir := t.TempDir()
+	content := fmt.Sprintf(`endpointName = "workorchd"
+
+[server]
+addr = %q
+readHeaderTimeout = "5s"
+readTimeout = %q
+writeTimeout = "30s"
+idleTimeout = "60s"
+shutdownTimeout = "5s"
+maxConcurrentRuns = 1
+
+[repository]
+backend = %q
+dataDir = %q
+
+[llm]
+timeout = "60s"
+disabled = false
+`, addr, values["server.readTimeout"], values["repository.backend"], values["repository.dataDir"])
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write workorchd config: %v", err)
+	}
+	return configDir
 }
 
 func stopWorkorchdProcess(t *testing.T, cmd *exec.Cmd) {
@@ -1310,8 +1351,8 @@ func TestWorkorchdServerReadyzReflectsConfiguration(t *testing.T) {
 	addr := reserveLoopbackAddr(t)
 	bin := buildWorkorchdBinary(t)
 	cmd := startWorkorchdProcess(t, bin, addr, []string{
-		"WORKORCH_REPOSITORY_BACKEND=file",
-		"WORKORCH_DATA_DIR=" + filepath.Join(t.TempDir(), "workorch-data"),
+		"repository.backend=file",
+		"repository.dataDir=" + filepath.Join(t.TempDir(), "workorch-data"),
 	})
 	defer stopWorkorchdProcess(t, cmd)
 

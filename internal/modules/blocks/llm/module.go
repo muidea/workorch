@@ -5,6 +5,7 @@ import (
 
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -19,11 +20,15 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 func (m *Module) Setup() error {
-	adapter, err := llmbiz.NewRuntimeAdapterFromEnv()
+	cfg, err := workorchconfig.Current()
 	if err != nil {
 		return err
 	}
-	m.runtimeAdapter = adapter
+	defaultProviderID, providerConfigs, err := llmbiz.LoadProviderConfigs(cfg.LLM.DefaultProvider, cfg.LLMProviderValueSets())
+	if err != nil {
+		return err
+	}
+	m.runtimeAdapter = llmbiz.NewRuntimeAdapterFromConfigs(defaultProviderID, providerConfigs)
 	return nil
 }
 

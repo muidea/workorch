@@ -11,6 +11,7 @@ BACKEND="${WORKORCH_VERIFY_BACKEND:-memory}"
 DATA_DIR="${WORKORCH_VERIFY_DATA_DIR:-$TMP_DIR/workorch-data}"
 PID=""
 LOG_PATH="$TMP_DIR/workorchd.log"
+CONFIG_DIR="$TMP_DIR/config"
 
 report_failure() {
   local status=$?
@@ -33,10 +34,31 @@ cleanup() {
 }
 
 start_server() {
-  WORKORCH_SERVER_ADDR="$ADDR" \
-  WORKORCH_REPOSITORY_BACKEND="$BACKEND" \
-  WORKORCH_DATA_DIR="$DATA_DIR" \
-  "$BIN_PATH" >>"$LOG_PATH" 2>&1 &
+  mkdir -p "$CONFIG_DIR"
+  cat >"$CONFIG_DIR/application.toml" <<EOF
+endpointName = "workorchd"
+
+[server]
+addr = "$ADDR"
+readHeaderTimeout = "5s"
+readTimeout = "15s"
+writeTimeout = "30s"
+idleTimeout = "60s"
+shutdownTimeout = "5s"
+maxConcurrentRuns = 1
+
+[repository]
+backend = "$BACKEND"
+dataDir = "$DATA_DIR"
+
+[llm]
+defaultProvider = "local"
+
+[llm.providers.local]
+timeout = "60s"
+disabled = false
+EOF
+  "$BIN_PATH" -config-dir "$CONFIG_DIR" >>"$LOG_PATH" 2>&1 &
   PID=$!
 }
 

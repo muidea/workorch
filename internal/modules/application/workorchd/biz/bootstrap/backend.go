@@ -9,11 +9,6 @@ import (
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
-const (
-	envBackend  = "WORKORCH_REPOSITORY_BACKEND"
-	envDataRoot = "WORKORCH_DATA_DIR"
-)
-
 type repositorySet struct {
 	soul              repository.SoulRepository
 	memoryItem        repository.MemoryItemRepository

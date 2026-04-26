@@ -1,8 +1,6 @@
 package bootstrap
 
 import (
-	"os"
-
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	legacymodule "github.com/muidea/workorch/internal/modules/blocks/legacy"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
@@ -17,10 +15,15 @@ import (
 	soulmodule "github.com/muidea/workorch/internal/modules/kernel/soul"
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 func NewFromEnv() *Runtime {
-	return NewWithBackend(os.Getenv(envBackend), os.Getenv(envDataRoot))
+	cfg, err := workorchconfig.Current()
+	if err != nil {
+		panic("load workorch config: " + err.Error())
+	}
+	return NewWithBackend(cfg.Repository.Backend, cfg.Repository.DataDir)
 }
 
 func NewWithBackend(backend string, dataRoot string) *Runtime {

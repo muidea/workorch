@@ -2,7 +2,12 @@ package appservice
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 func newTestRuntimeSession(t *testing.T, backend string, dataRoot string) (*RuntimeSession, context.Context) {
@@ -26,4 +31,35 @@ func newWorkorchTestService(t *testing.T) (*WorkorchService, Runtime) {
 
 	session, _ := newTestRuntimeSession(t, "memory", "")
 	return NewWorkorchService(session.Runtime), session.Runtime
+}
+
+func useWorkorchTestConfig(t *testing.T, backend string, dataRoot string) {
+	t.Helper()
+
+	_ = workorchconfig.Close()
+	configDir := t.TempDir()
+	content := fmt.Sprintf(`endpointName = "workorchd"
+
+[server]
+addr = ":8080"
+readHeaderTimeout = "5s"
+readTimeout = "15s"
+writeTimeout = "30s"
+idleTimeout = "60s"
+shutdownTimeout = "5s"
+maxConcurrentRuns = 1
+
+[repository]
+backend = %q
+dataDir = %q
+
+[llm]
+timeout = "60s"
+disabled = false
+`, backend, dataRoot)
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("CONFIG_PATH", configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
 }

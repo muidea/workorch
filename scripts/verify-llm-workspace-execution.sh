@@ -15,6 +15,7 @@ SERVER_PID=""
 MOCK_PID=""
 SERVER_LOG="$TMP_DIR/workorchd.log"
 MOCK_LOG="$TMP_DIR/llm-mock.log"
+CONFIG_DIR="$TMP_DIR/config"
 
 report_failure() {
   local status=$?
@@ -187,14 +188,35 @@ PY
 }
 
 start_server() {
-  WORKORCH_SERVER_ADDR="$ADDR" \
-  WORKORCH_REPOSITORY_BACKEND="$BACKEND" \
-  WORKORCH_DATA_DIR="$DATA_DIR" \
-  WORKORCH_LLM_PROVIDER=compatible \
-  WORKORCH_LLM_BASE_URL="$MOCK_BASE_URL" \
-  WORKORCH_LLM_API_KEY=verify-secret \
-  WORKORCH_LLM_MODEL=verify-model \
-  "$BIN_PATH" >>"$SERVER_LOG" 2>&1 &
+  mkdir -p "$CONFIG_DIR"
+  cat >"$CONFIG_DIR/application.toml" <<EOF
+endpointName = "workorchd"
+
+[server]
+addr = "$ADDR"
+readHeaderTimeout = "5s"
+readTimeout = "15s"
+writeTimeout = "30s"
+idleTimeout = "60s"
+shutdownTimeout = "5s"
+maxConcurrentRuns = 1
+
+[repository]
+backend = "$BACKEND"
+dataDir = "$DATA_DIR"
+
+[llm]
+defaultProvider = "verify"
+
+[llm.providers.verify]
+provider = "compatible"
+baseURL = "$MOCK_BASE_URL"
+apiKey = "verify-secret"
+model = "verify-model"
+timeout = "60s"
+disabled = false
+EOF
+  "$BIN_PATH" -config-dir "$CONFIG_DIR" >>"$SERVER_LOG" 2>&1 &
   SERVER_PID=$!
 }
 
@@ -235,7 +257,7 @@ activate_workspace_execution() {
   local output_file="$1"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'"}' >"$output_file"
+    -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify"}' >"$output_file"
 }
 
 trap report_failure ERR

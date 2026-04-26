@@ -19,12 +19,13 @@ import (
 )
 
 type ActivateWorkspaceExecutionCommand struct {
-	GoalID       string   `json:"goalId,omitempty"`
-	DoDID        string   `json:"doDId,omitempty"`
-	SoulID       string   `json:"soulId,omitempty"`
-	SkillIDs     []string `json:"skillIds,omitempty"`
-	MCPServerIDs []string `json:"mcpServerIds,omitempty"`
-	MemoryIDs    []string `json:"memoryIds,omitempty"`
+	GoalID        string   `json:"goalId,omitempty"`
+	DoDID         string   `json:"doDId,omitempty"`
+	LLMProviderID string   `json:"llmProviderId,omitempty"`
+	SoulID        string   `json:"soulId,omitempty"`
+	SkillIDs      []string `json:"skillIds,omitempty"`
+	MCPServerIDs  []string `json:"mcpServerIds,omitempty"`
+	MemoryIDs     []string `json:"memoryIds,omitempty"`
 }
 
 type WorkspaceExecutionActivation struct {
@@ -197,6 +198,9 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 		"workspaceId": string(workspaceID),
 		"goalId":      string(goalID),
 		"doDId":       string(dodID),
+	}
+	if llmProviderID := strings.TrimSpace(cmd.LLMProviderID); llmProviderID != "" {
+		contextData[llmcommon.ExecutionContextLLMProviderID] = llmProviderID
 	}
 
 	skillIDs := normalizeStringIDs(cmd.SkillIDs)

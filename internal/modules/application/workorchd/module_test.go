@@ -3,14 +3,18 @@ package workorchd
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 func TestModuleSetupReturnsConfigError(t *testing.T) {
-	t.Setenv("WORKORCH_SERVER_READ_TIMEOUT", "not-a-duration")
+	useWorkorchModuleTestConfig(t, "127.0.0.1:0", "memory", "", "not-a-duration")
 	mod := New()
 
 	if err := mod.Setup(event.NewHub(8), task.NewBackgroundRoutine(8)); err == nil {
@@ -46,8 +50,7 @@ func TestDoneReturnsClosedChannelBeforeSetup(t *testing.T) {
 }
 
 func TestModuleSetupAndTeardownWithEphemeralAddress(t *testing.T) {
-	t.Setenv("WORKORCH_SERVER_ADDR", "127.0.0.1:0")
-	t.Setenv("WORKORCH_REPOSITORY_BACKEND", "memory")
+	useWorkorchModuleTestConfig(t, "127.0.0.1:0", "memory", "", "15s")
 	mod := New()
 
 	if err := mod.Setup(event.NewHub(8), task.NewBackgroundRoutine(8)); err != nil {
@@ -57,8 +60,7 @@ func TestModuleSetupAndTeardownWithEphemeralAddress(t *testing.T) {
 }
 
 func TestModuleDoneReportsServerCloseAsCleanShutdown(t *testing.T) {
-	t.Setenv("WORKORCH_SERVER_ADDR", "127.0.0.1:0")
-	t.Setenv("WORKORCH_REPOSITORY_BACKEND", "memory")
+	useWorkorchModuleTestConfig(t, "127.0.0.1:0", "memory", "", "15s")
 	mod := New()
 
 	if err := mod.Setup(event.NewHub(8), task.NewBackgroundRoutine(8)); err != nil {
@@ -77,4 +79,35 @@ func TestModuleDoneReportsServerCloseAsCleanShutdown(t *testing.T) {
 	default:
 		t.Fatal("expected done channel to close after teardown")
 	}
+}
+
+func useWorkorchModuleTestConfig(t *testing.T, addr string, backend string, dataRoot string, readTimeout string) {
+	t.Helper()
+
+	_ = workorchconfig.Close()
+	configDir := t.TempDir()
+	content := fmt.Sprintf(`endpointName = "workorchd"
+
+[server]
+addr = %q
+readHeaderTimeout = "5s"
+readTimeout = %q
+writeTimeout = "30s"
+idleTimeout = "60s"
+shutdownTimeout = "5s"
+maxConcurrentRuns = 1
+
+[repository]
+backend = %q
+dataDir = %q
+
+[llm]
+timeout = "60s"
+disabled = false
+`, addr, readTimeout, backend, dataRoot)
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("CONFIG_PATH", configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
 }

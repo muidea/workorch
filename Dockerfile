@@ -15,21 +15,14 @@ RUN addgroup -S workorch && adduser -S -G workorch -h /srv/workorch workorch
 WORKDIR /srv/workorch
 
 COPY --from=builder /out/workorchd /usr/local/bin/workorchd
+COPY config/application.toml /etc/workorch/application.toml
 
-RUN mkdir -p /var/lib/workorch && chown -R workorch:workorch /srv/workorch /var/lib/workorch
+RUN mkdir -p /var/lib/workorch && chown -R workorch:workorch /srv/workorch /var/lib/workorch /etc/workorch
 
 USER workorch
 
-ENV WORKORCH_SERVER_ADDR=:8080
-ENV WORKORCH_REPOSITORY_BACKEND=memory
-ENV WORKORCH_DATA_DIR=/var/lib/workorch
-ENV WORKORCH_SERVER_READ_HEADER_TIMEOUT=5s
-ENV WORKORCH_SERVER_READ_TIMEOUT=15s
-ENV WORKORCH_SERVER_WRITE_TIMEOUT=30s
-ENV WORKORCH_SERVER_IDLE_TIMEOUT=60s
-ENV WORKORCH_SERVER_SHUTDOWN_TIMEOUT=5s
-ENV WORKORCH_SERVER_MAX_CONCURRENT_RUNS=1
+ENV CONFIG_PATH=/etc/workorch
 
 EXPOSE 8080
 
-ENTRYPOINT ["/usr/local/bin/workorchd"]
+ENTRYPOINT ["/usr/local/bin/workorchd", "-config-dir", "/etc/workorch"]

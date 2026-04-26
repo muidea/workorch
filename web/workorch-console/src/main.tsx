@@ -366,6 +366,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     activationForm.setFieldsValue({
       goalId: goals[0]?.id,
       doDId: readyDoDs[0]?.id,
+      llmProviderId: undefined,
       soulId: souls[0]?.id,
       skillIds: [],
       mcpServerIds: [],
@@ -737,6 +738,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           </Form.Item>
           <Form.Item name="doDId" label="Definition of Done" rules={[{ required: true }]}>
             <Select options={readyDoDs.map((item) => ({ value: item.id, label: `${item.items.join(' / ')} (${item.id})` }))} />
+          </Form.Item>
+          <Form.Item name="llmProviderId" label="LLM Provider ID">
+            <Input placeholder="Leave empty to use configured default provider" />
           </Form.Item>
           <Form.Item name="soulId" label="Soul">
             <Select allowClear options={souls.map((item) => ({ value: item.id, label: `${item.name || item.id} (${item.id})` }))} />

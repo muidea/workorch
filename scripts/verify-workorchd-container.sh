@@ -11,6 +11,7 @@ TMP_DIR="$(mktemp -d)"
 DATA_DIR="$TMP_DIR/workorch-data"
 CID=""
 LOG_PATH="$TMP_DIR/container.log"
+CONFIG_DIR="$TMP_DIR/config"
 
 report_failure() {
   local status=$?
@@ -33,11 +34,34 @@ cleanup() {
 }
 
 start_container() {
-  local docker_args=(run -d -p "$ADDR_PORT:8080")
+	local data_dir="/var/lib/workorch"
+  mkdir -p "$CONFIG_DIR"
+  cat >"$CONFIG_DIR/application.toml" <<EOF
+endpointName = "workorchd"
+
+[server]
+addr = ":8080"
+readHeaderTimeout = "5s"
+readTimeout = "15s"
+writeTimeout = "30s"
+idleTimeout = "60s"
+shutdownTimeout = "5s"
+maxConcurrentRuns = 1
+
+[repository]
+backend = "$BACKEND"
+dataDir = "$data_dir"
+
+[llm]
+defaultProvider = "local"
+
+[llm.providers.local]
+timeout = "60s"
+disabled = false
+EOF
+  local docker_args=(run -d -p "$ADDR_PORT:8080" -v "$CONFIG_DIR/application.toml:/etc/workorch/application.toml:ro")
   if [[ "$BACKEND" == "file" ]]; then
     docker_args+=(
-      -e WORKORCH_REPOSITORY_BACKEND=file
-      -e WORKORCH_DATA_DIR=/var/lib/workorch
       -v "$DATA_DIR:/var/lib/workorch"
     )
   fi

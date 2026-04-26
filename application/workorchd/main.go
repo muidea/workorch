@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
+	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/muidea/magicCommon/framework/application"
 	"github.com/muidea/magicCommon/framework/service"
 	workorchdmodule "github.com/muidea/workorch/internal/modules/application/workorchd"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 
 	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
 	_ "github.com/muidea/workorch/internal/modules/blocks/approval"
@@ -26,6 +29,10 @@ import (
 )
 
 func main() {
+	if err := configure(os.Args[1:]); err != nil {
+		log.Fatal(err)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -47,4 +54,14 @@ func main() {
 		}
 	case <-ctx.Done():
 	}
+}
+
+func configure(args []string) error {
+	flags := flag.NewFlagSet("workorchd", flag.ContinueOnError)
+	configDir := flags.String("config-dir", "", "path to workorchd configuration directory")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	workorchconfig.ConfigureDirectory(*configDir)
+	return nil
 }

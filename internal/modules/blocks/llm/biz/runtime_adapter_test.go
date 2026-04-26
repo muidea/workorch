@@ -63,6 +63,74 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterSelectsRequestedProvider(t *testing.T) {
+	localProvider := &staticProvider{payload: []byte(`{"completionState":"continue"}`)}
+	reasoningProvider := &staticProvider{payload: []byte(`{
+		"completionState":"continue",
+		"shellCommands":[{"command":"go","args":["test","./..."]}]
+	}`)}
+	adapter := NewRuntimeAdapterWithProviders("local", map[string]ProviderRuntime{
+		"local": {
+			Config: llmmodels.ProviderConfig{
+				ID:       "local",
+				Provider: llmcommon.ProviderCompatible,
+				APIKey:   "local-secret",
+				Model:    "local-model",
+			},
+			Provider: localProvider,
+		},
+		"reasoning": {
+			Config: llmmodels.ProviderConfig{
+				ID:       "reasoning",
+				Provider: llmcommon.ProviderOpenAI,
+				APIKey:   "reasoning-secret",
+				Model:    "reasoning-model",
+			},
+			Provider: reasoningProvider,
+		},
+	})
+	request := llmStepRequest()
+	request.Input["executionContext"] = map[string]any{
+		llmcommon.ExecutionContextLLMProviderID: "reasoning",
+	}
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), request)
+	if err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	if localProvider.request.Model != "" {
+		t.Fatalf("local provider was called: %+v", localProvider.request)
+	}
+	if reasoningProvider.request.Model != "reasoning-model" || result.Output["nextKind"] != "shell/command" {
+		t.Fatalf("reasoning request=%+v output=%+v, want selected reasoning provider", reasoningProvider.request, result.Output)
+	}
+}
+
+func TestRuntimeAdapterFailsUnknownRequestedProvider(t *testing.T) {
+	adapter := NewRuntimeAdapterWithProviders("local", map[string]ProviderRuntime{
+		"local": {
+			Config: llmmodels.ProviderConfig{
+				ID:       "local",
+				Provider: llmcommon.ProviderCompatible,
+				APIKey:   "local-secret",
+				Model:    "local-model",
+			},
+			Provider: &staticProvider{payload: []byte(`{"completionState":"continue"}`)},
+		},
+	})
+	request := llmStepRequest()
+	request.Input[llmcommon.ExecutionContextLLMProviderID] = "missing"
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), request)
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("execute err = %v, want invalid argument", err)
+	}
+	provider, ok := result.Output["provider"].(llmmodels.RedactedProviderConfig)
+	if result.Output["stage"] != "llm_provider_unavailable" || !ok || provider.ID != "missing" {
+		t.Fatalf("output = %+v, want missing provider failure", result.Output)
+	}
+}
+
 func TestRuntimeAdapterNormalizesRequiredDecisionFields(t *testing.T) {
 	provider := &staticProvider{payload: []byte(`{
 		"thoughtSummary":"need product direction",

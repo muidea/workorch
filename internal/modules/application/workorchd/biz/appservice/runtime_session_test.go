@@ -258,8 +258,7 @@ func TestNewRuntimeSessionWithBackendReturnsInvalidArgumentWhenBackendUnsupporte
 }
 
 func TestNewRuntimeSessionFromEnvReturnsInvalidArgumentWhenBackendUnsupported(t *testing.T) {
-	t.Setenv("WORKORCH_REPOSITORY_BACKEND", "unsupported")
-	t.Setenv("WORKORCH_DATA_DIR", t.TempDir())
+	useWorkorchTestConfig(t, "unsupported", t.TempDir())
 
 	session, err := NewRuntimeSessionFromEnv()
 	if session != nil {

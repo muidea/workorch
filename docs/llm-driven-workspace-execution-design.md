@@ -871,15 +871,19 @@ Complete:
 
 ## Provider Configuration
 
-Suggested environment contract for local MVP:
+Suggested TOML contract for local MVP:
 
-```text
-WORKORCH_LLM_PROVIDER=openai|compatible
-WORKORCH_LLM_BASE_URL=
-WORKORCH_LLM_API_KEY=
-WORKORCH_LLM_MODEL=
-WORKORCH_LLM_TIMEOUT=
-WORKORCH_LLM_DISABLED=false
+```toml
+[llm]
+defaultProvider = "reasoning"
+
+[llm.providers.reasoning]
+provider = "openai" # or "compatible"
+baseURL = ""
+apiKey = ""
+model = ""
+timeout = "60s"
+disabled = false
 ```
 
 Provider rules:

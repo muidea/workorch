@@ -397,8 +397,7 @@ func TestRunAllWorkorchWithBackendFileRemainsStableAcrossReloadsWhenDefaultDataR
 }
 
 func TestRunAllWorkorchFromEnvReturnsInvalidArgumentWhenBackendUnsupported(t *testing.T) {
-	t.Setenv("WORKORCH_REPOSITORY_BACKEND", "unsupported")
-	t.Setenv("WORKORCH_DATA_DIR", t.TempDir())
+	useWorkorchTestConfig(t, "unsupported", t.TempDir())
 
 	if _, err := RunAllWorkorchFromEnv(context.Background()); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("unsupported env backend err = %v, want invalid argument", err)
@@ -407,8 +406,7 @@ func TestRunAllWorkorchFromEnvReturnsInvalidArgumentWhenBackendUnsupported(t *te
 
 func TestRunAllWorkorchFromEnvWithFileBackend(t *testing.T) {
 	dataRoot := t.TempDir()
-	t.Setenv("WORKORCH_REPOSITORY_BACKEND", "file")
-	t.Setenv("WORKORCH_DATA_DIR", dataRoot)
+	useWorkorchTestConfig(t, "file", dataRoot)
 
 	slices, err := RunAllWorkorchFromEnv(context.Background())
 	if err != nil {
@@ -436,8 +434,7 @@ func TestRunAllWorkorchFromEnvWithFileBackendUsesDefaultDataRootWhenUnset(t *tes
 	tempRoot := t.TempDir()
 	defaultDataRoot := filepath.Join(tempRoot, "workorchd-data")
 	t.Setenv("TMPDIR", tempRoot)
-	t.Setenv("WORKORCH_REPOSITORY_BACKEND", "file")
-	t.Setenv("WORKORCH_DATA_DIR", "")
+	useWorkorchTestConfig(t, "file", "")
 
 	slices, err := RunAllWorkorchFromEnv(context.Background())
 	if err != nil {
@@ -463,8 +460,7 @@ func TestRunAllWorkorchFromEnvWithFileBackendUsesDefaultDataRootWhenUnset(t *tes
 
 func TestRunAllWorkorchFromEnvWithFileBackendRemainsStableAcrossReloads(t *testing.T) {
 	dataRoot := t.TempDir()
-	t.Setenv("WORKORCH_REPOSITORY_BACKEND", "file")
-	t.Setenv("WORKORCH_DATA_DIR", dataRoot)
+	useWorkorchTestConfig(t, "file", dataRoot)
 
 	first, err := RunAllWorkorchFromEnv(context.Background())
 	if err != nil {

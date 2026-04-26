@@ -2,7 +2,6 @@ package llm
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -15,11 +14,7 @@ import (
 const defaultProviderTimeout = 60 * time.Second
 const defaultOpenAIBaseURL = "https://api.openai.com/v1"
 
-func LoadProviderConfigFromEnv() (llmmodels.ProviderConfig, error) {
-	return LoadProviderConfig(envMap(os.Environ()))
-}
-
-func LoadProviderConfig(values map[string]string) (llmmodels.ProviderConfig, error) {
+func LoadProviderConfig(providerID string, values map[string]string) (llmmodels.ProviderConfig, error) {
 	timeout := defaultProviderTimeout
 	if raw := strings.TrimSpace(values[llmcommon.EnvTimeout]); raw != "" {
 		parsed, err := time.ParseDuration(raw)
@@ -37,6 +32,7 @@ func LoadProviderConfig(values map[string]string) (llmmodels.ProviderConfig, err
 	}
 
 	cfg := llmmodels.ProviderConfig{
+		ID:       normalizedProviderID(providerID),
 		Provider: strings.TrimSpace(values[llmcommon.EnvProvider]),
 		BaseURL:  strings.TrimSpace(values[llmcommon.EnvBaseURL]),
 		APIKey:   strings.TrimSpace(values[llmcommon.EnvAPIKey]),
@@ -47,8 +43,32 @@ func LoadProviderConfig(values map[string]string) (llmmodels.ProviderConfig, err
 	return withAvailability(cfg), nil
 }
 
+func LoadProviderConfigs(defaultProviderID string, valueSets map[string]map[string]string) (string, map[string]llmmodels.ProviderConfig, error) {
+	defaultProviderID = normalizedProviderID(defaultProviderID)
+	if defaultProviderID == "" {
+		defaultProviderID = llmcommon.DefaultProviderID
+	}
+	ret := make(map[string]llmmodels.ProviderConfig, len(valueSets))
+	for id, values := range valueSets {
+		cfg, err := LoadProviderConfig(id, values)
+		if err != nil {
+			return "", nil, err
+		}
+		ret[cfg.ID] = cfg
+	}
+	if len(ret) == 0 {
+		cfg, err := LoadProviderConfig(defaultProviderID, nil)
+		if err != nil {
+			return "", nil, err
+		}
+		ret[cfg.ID] = cfg
+	}
+	return defaultProviderID, ret, nil
+}
+
 func RedactedProviderConfig(cfg llmmodels.ProviderConfig) llmmodels.RedactedProviderConfig {
 	return llmmodels.RedactedProviderConfig{
+		ID:       cfg.ID,
 		Provider: cfg.Provider,
 		BaseURL:  cfg.BaseURL,
 		Model:    cfg.Model,
@@ -57,6 +77,10 @@ func RedactedProviderConfig(cfg llmmodels.ProviderConfig) llmmodels.RedactedProv
 		Ready:    !cfg.Unavailable,
 		Reason:   cfg.UnavailableReason,
 	}
+}
+
+func normalizedProviderID(providerID string) string {
+	return strings.TrimSpace(providerID)
 }
 
 func RedactSecret(value string) string {
@@ -112,16 +136,4 @@ func parseBool(raw string) (bool, error) {
 		return false, nil
 	}
 	return strconv.ParseBool(raw)
-}
-
-func envMap(values []string) map[string]string {
-	ret := make(map[string]string, len(values))
-	for _, item := range values {
-		key, value, ok := strings.Cut(item, "=")
-		if !ok {
-			continue
-		}
-		ret[key] = value
-	}
-	return ret
 }

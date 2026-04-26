@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"mime"
 	"net/http"
-	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -22,16 +21,17 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server/consoleassets"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 const (
-	envServerAddr              = "WORKORCH_SERVER_ADDR"
-	envServerReadHeaderTimeout = "WORKORCH_SERVER_READ_HEADER_TIMEOUT"
-	envServerReadTimeout       = "WORKORCH_SERVER_READ_TIMEOUT"
-	envServerWriteTimeout      = "WORKORCH_SERVER_WRITE_TIMEOUT"
-	envServerIdleTimeout       = "WORKORCH_SERVER_IDLE_TIMEOUT"
-	envServerShutdownTimeout   = "WORKORCH_SERVER_SHUTDOWN_TIMEOUT"
-	envServerMaxConcurrentRuns = "WORKORCH_SERVER_MAX_CONCURRENT_RUNS"
+	configServerAddr              = "server.addr"
+	configServerReadHeaderTimeout = "server.readHeaderTimeout"
+	configServerReadTimeout       = "server.readTimeout"
+	configServerWriteTimeout      = "server.writeTimeout"
+	configServerIdleTimeout       = "server.idleTimeout"
+	configServerShutdownTimeout   = "server.shutdownTimeout"
+	configServerMaxConcurrentRuns = "server.maxConcurrentRuns"
 
 	defaultServerAddr              = ":8080"
 	defaultReadHeaderTimeout       = 5 * time.Second
@@ -268,12 +268,13 @@ type createRunRequest struct {
 }
 
 type activateWorkspaceExecutionRequest struct {
-	GoalID       string   `json:"goalId,omitempty"`
-	DoDID        string   `json:"doDId,omitempty"`
-	SoulID       string   `json:"soulId,omitempty"`
-	SkillIDs     []string `json:"skillIds,omitempty"`
-	MCPServerIDs []string `json:"mcpServerIds,omitempty"`
-	MemoryIDs    []string `json:"memoryIds,omitempty"`
+	GoalID        string   `json:"goalId,omitempty"`
+	DoDID         string   `json:"doDId,omitempty"`
+	LLMProviderID string   `json:"llmProviderId,omitempty"`
+	SoulID        string   `json:"soulId,omitempty"`
+	SkillIDs      []string `json:"skillIds,omitempty"`
+	MCPServerIDs  []string `json:"mcpServerIds,omitempty"`
+	MemoryIDs     []string `json:"memoryIds,omitempty"`
 }
 
 type createSoulRequest = appservice.CreateSoulCommand
@@ -489,38 +490,87 @@ type serverMetrics struct {
 }
 
 func ConfigFromEnv() (Config, error) {
-	addr := os.Getenv(envServerAddr)
+	cfg, err := workorchconfig.Current()
+	if err != nil {
+		return Config{}, err
+	}
+	return ConfigFromWorkorch(cfg)
+}
+
+func ConfigFromWorkorch(cfg workorchconfig.Config) (Config, error) {
+	readHeaderTimeout, err := durationFromValue(configServerReadHeaderTimeout, cfg.Server.ReadHeaderTimeout, defaultReadHeaderTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	readTimeout, err := durationFromValue(configServerReadTimeout, cfg.Server.ReadTimeout, defaultReadTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	writeTimeout, err := durationFromValue(configServerWriteTimeout, cfg.Server.WriteTimeout, defaultWriteTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	idleTimeout, err := durationFromValue(configServerIdleTimeout, cfg.Server.IdleTimeout, defaultIdleTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	shutdownTimeout, err := durationFromValue(configServerShutdownTimeout, cfg.Server.ShutdownTimeout, defaultShutdownTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	maxConcurrentRuns := cfg.Server.MaxConcurrentRuns
+	if maxConcurrentRuns == 0 {
+		maxConcurrentRuns = defaultMaxConcurrentRuns
+	}
+	if maxConcurrentRuns < 0 {
+		return Config{}, fmt.Errorf("invalid integer for %s: must be positive", configServerMaxConcurrentRuns)
+	}
+	return Config{
+		Addr:              firstNonEmpty(cfg.Server.Addr, defaultServerAddr),
+		Backend:           cfg.Repository.Backend,
+		DataRoot:          cfg.Repository.DataDir,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+		ShutdownTimeout:   shutdownTimeout,
+		MaxConcurrentRuns: maxConcurrentRuns,
+	}, nil
+}
+
+func ConfigFromValues(values map[string]string) (Config, error) {
+	addr := values[configServerAddr]
 	if addr == "" {
 		addr = defaultServerAddr
 	}
-	readHeaderTimeout, err := durationFromEnv(envServerReadHeaderTimeout, defaultReadHeaderTimeout)
+	readHeaderTimeout, err := durationFromValues(values, configServerReadHeaderTimeout, defaultReadHeaderTimeout)
 	if err != nil {
 		return Config{}, err
 	}
-	readTimeout, err := durationFromEnv(envServerReadTimeout, defaultReadTimeout)
+	readTimeout, err := durationFromValues(values, configServerReadTimeout, defaultReadTimeout)
 	if err != nil {
 		return Config{}, err
 	}
-	writeTimeout, err := durationFromEnv(envServerWriteTimeout, defaultWriteTimeout)
+	writeTimeout, err := durationFromValues(values, configServerWriteTimeout, defaultWriteTimeout)
 	if err != nil {
 		return Config{}, err
 	}
-	idleTimeout, err := durationFromEnv(envServerIdleTimeout, defaultIdleTimeout)
+	idleTimeout, err := durationFromValues(values, configServerIdleTimeout, defaultIdleTimeout)
 	if err != nil {
 		return Config{}, err
 	}
-	shutdownTimeout, err := durationFromEnv(envServerShutdownTimeout, defaultShutdownTimeout)
+	shutdownTimeout, err := durationFromValues(values, configServerShutdownTimeout, defaultShutdownTimeout)
 	if err != nil {
 		return Config{}, err
 	}
-	maxConcurrentRuns, err := int64FromEnv(envServerMaxConcurrentRuns, defaultMaxConcurrentRuns)
+	maxConcurrentRuns, err := int64FromValues(values, configServerMaxConcurrentRuns, defaultMaxConcurrentRuns)
 	if err != nil {
 		return Config{}, err
 	}
 	return Config{
 		Addr:              addr,
-		Backend:           os.Getenv("WORKORCH_REPOSITORY_BACKEND"),
-		DataRoot:          os.Getenv("WORKORCH_DATA_DIR"),
+		Backend:           values["repository.backend"],
+		DataRoot:          values["repository.dataDir"],
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
@@ -1177,12 +1227,13 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 		}
 		defer release()
 		item, err := state.activateWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, appservice.ActivateWorkspaceExecutionCommand{
-			GoalID:       req.GoalID,
-			DoDID:        req.DoDID,
-			SoulID:       req.SoulID,
-			SkillIDs:     req.SkillIDs,
-			MCPServerIDs: req.MCPServerIDs,
-			MemoryIDs:    req.MemoryIDs,
+			GoalID:        req.GoalID,
+			DoDID:         req.DoDID,
+			LLMProviderID: req.LLMProviderID,
+			SoulID:        req.SoulID,
+			SkillIDs:      req.SkillIDs,
+			MCPServerIDs:  req.MCPServerIDs,
+			MemoryIDs:     req.MemoryIDs,
 		})
 		if err != nil {
 			writeBusinessError(w, err)
@@ -2606,7 +2657,35 @@ func mcpServerActionFromPath(path string) (serverID string, action string, ok bo
 }
 
 func durationFromEnv(name string, fallback time.Duration) (time.Duration, error) {
-	value := os.Getenv(name)
+	cfg, err := workorchconfig.Current()
+	if err != nil {
+		return 0, err
+	}
+	serverConfig, err := ConfigFromWorkorch(cfg)
+	if err != nil {
+		return 0, err
+	}
+	switch name {
+	case configServerReadHeaderTimeout:
+		return serverConfig.ReadHeaderTimeout, nil
+	case configServerReadTimeout:
+		return serverConfig.ReadTimeout, nil
+	case configServerWriteTimeout:
+		return serverConfig.WriteTimeout, nil
+	case configServerIdleTimeout:
+		return serverConfig.IdleTimeout, nil
+	case configServerShutdownTimeout:
+		return serverConfig.ShutdownTimeout, nil
+	default:
+		return fallback, nil
+	}
+}
+
+func durationFromValues(values map[string]string, name string, fallback time.Duration) (time.Duration, error) {
+	return durationFromValue(name, values[name], fallback)
+}
+
+func durationFromValue(name string, value string, fallback time.Duration) (time.Duration, error) {
 	if value == "" {
 		return fallback, nil
 	}
@@ -2618,7 +2697,22 @@ func durationFromEnv(name string, fallback time.Duration) (time.Duration, error)
 }
 
 func int64FromEnv(name string, fallback int64) (int64, error) {
-	value := os.Getenv(name)
+	cfg, err := workorchconfig.Current()
+	if err != nil {
+		return 0, err
+	}
+	if name == configServerMaxConcurrentRuns {
+		serverConfig, err := ConfigFromWorkorch(cfg)
+		if err != nil {
+			return 0, err
+		}
+		return serverConfig.MaxConcurrentRuns, nil
+	}
+	return fallback, nil
+}
+
+func int64FromValues(values map[string]string, name string, fallback int64) (int64, error) {
+	value := values[name]
 	if value == "" {
 		return fallback, nil
 	}
@@ -2630,6 +2724,13 @@ func int64FromEnv(name string, fallback int64) (int64, error) {
 		return 0, fmt.Errorf("invalid integer for %s: must be positive", name)
 	}
 	return number, nil
+}
+
+func firstNonEmpty(value string, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func writeMethodNotAllowed(w http.ResponseWriter) {

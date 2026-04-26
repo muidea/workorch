@@ -41,6 +41,7 @@ export type Run = {
 export type WorkspaceExecutionActivationRequest = {
   goalId?: string;
   doDId?: string;
+  llmProviderId?: string;
   soulId?: string;
   skillIds?: string[];
   mcpServerIds?: string[];

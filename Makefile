@@ -75,11 +75,11 @@ clean:
 	rm -rf ./bin ./.workorch-data ./workorchd
 
 run:
-	$(GO) run $(APP)
+	$(GO) run $(APP) -config-dir config
 
 run-file:
 	rm -rf ./.workorch-data
-	WORKORCH_REPOSITORY_BACKEND=file WORKORCH_DATA_DIR=.workorch-data $(GO) run $(APP)
+	$(GO) run $(APP) -config-dir config/file
 
 verify-service:
 	WORKORCH_VERIFY_ADDR=127.0.0.1:18080 ./scripts/verify-workorchd-http.sh
@@ -103,8 +103,7 @@ docker-run-file:
 	mkdir -p ./.workorch-data
 	chmod 0777 ./.workorch-data
 	docker run --rm -p 8080:8080 \
-		-e WORKORCH_REPOSITORY_BACKEND=file \
-		-e WORKORCH_DATA_DIR=/var/lib/workorch \
+		-v $(CURDIR)/config/container-file/application.toml:/etc/workorch/application.toml:ro \
 		-v $(CURDIR)/.workorch-data:/var/lib/workorch \
 		workorchd:local
 

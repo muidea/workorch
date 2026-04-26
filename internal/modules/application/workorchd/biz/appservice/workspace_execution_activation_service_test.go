@@ -176,12 +176,13 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	}
 
 	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
-		GoalID:       goal.ID,
-		DoDID:        dod.ID,
-		SoulID:       "soul-activation-context",
-		SkillIDs:     []string{"skill-activation-context"},
-		MCPServerIDs: []string{"mcp-activation-context"},
-		MemoryIDs:    []string{memory.ID},
+		GoalID:        goal.ID,
+		DoDID:         dod.ID,
+		LLMProviderID: "reasoning",
+		SoulID:        "soul-activation-context",
+		SkillIDs:      []string{"skill-activation-context"},
+		MCPServerIDs:  []string{"mcp-activation-context"},
+		MemoryIDs:     []string{memory.ID},
 	})
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
@@ -189,6 +190,9 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	executionContext := item.Run.ExecutionContext
 	if executionContext["soulId"] != "soul-activation-context" {
 		t.Fatalf("executionContext = %+v, want selected soul", executionContext)
+	}
+	if executionContext[llmcommon.ExecutionContextLLMProviderID] != "reasoning" {
+		t.Fatalf("executionContext = %+v, want selected llm provider", executionContext)
 	}
 	if !contextStringSliceContains(executionContext["skillIds"], "skill-activation-context") {
 		t.Fatalf("skillIds = %+v, want selected skill", executionContext["skillIds"])
@@ -207,6 +211,9 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	stepContext, _ := runSnapshot.Steps[0].Input["executionContext"].(map[string]any)
 	if stepContext["soulId"] != "soul-activation-context" {
 		t.Fatalf("first step input = %+v, want execution context propagated", runSnapshot.Steps[0].Input)
+	}
+	if stepContext[llmcommon.ExecutionContextLLMProviderID] != "reasoning" {
+		t.Fatalf("first step input = %+v, want llm provider propagated", runSnapshot.Steps[0].Input)
 	}
 }
 

@@ -3,6 +3,7 @@ package models
 import "time"
 
 type ProviderConfig struct {
+	ID                string
 	Provider          string
 	BaseURL           string
 	APIKey            string
@@ -14,6 +15,7 @@ type ProviderConfig struct {
 }
 
 type RedactedProviderConfig struct {
+	ID       string `json:"id,omitempty"`
 	Provider string `json:"provider,omitempty"`
 	BaseURL  string `json:"baseUrl,omitempty"`
 	Model    string `json:"model,omitempty"`

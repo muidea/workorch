@@ -202,7 +202,7 @@ func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
 	workspace := createWorkspaceForHTTP(t, mux, "activation http", "workspaces/ws-activation-http")
 	goalID, dodID := defineGoalAndDoDForHTTP(t, mux, workspace.ID)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{"llmProviderId":"reasoning"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -220,8 +220,11 @@ func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
 		body.Activation.Run.State != "failed" {
 		t.Fatalf("activation run = %+v, want generated failed llm run with definitions", body.Activation.Run)
 	}
-	if !strings.Contains(body.Activation.Run.FailureReason, "llm provider is not configured") {
-		t.Fatalf("activation failure reason = %q, want llm provider configuration failure", body.Activation.Run.FailureReason)
+	if !strings.Contains(body.Activation.Run.FailureReason, `llm provider "reasoning" is not configured`) {
+		t.Fatalf("activation failure reason = %q, want selected llm provider configuration failure", body.Activation.Run.FailureReason)
+	}
+	if body.Activation.Run.ExecutionContext[llmcommon.ExecutionContextLLMProviderID] != "reasoning" {
+		t.Fatalf("executionContext = %+v, want selected llm provider", body.Activation.Run.ExecutionContext)
 	}
 	if len(body.Activation.Snapshot.Runs) != 1 || body.Activation.Snapshot.Runs[0].ID != body.Activation.Run.ID {
 		t.Fatalf("activation snapshot runs = %+v, want created run", body.Activation.Snapshot.Runs)
@@ -2454,27 +2457,27 @@ func TestRunResumeEndpointReturnsRequestTimeoutWhenQueueWaitCanceled(t *testing.
 	}
 }
 
-func TestConfigFromEnvReturnsErrorForInvalidDuration(t *testing.T) {
-	t.Setenv(envServerReadTimeout, "definitely-not-a-duration")
-
-	_, err := ConfigFromEnv()
+func TestConfigFromValuesReturnsErrorForInvalidDuration(t *testing.T) {
+	_, err := ConfigFromValues(map[string]string{
+		configServerReadTimeout: "definitely-not-a-duration",
+	})
 	if err == nil {
 		t.Fatal("expected invalid duration error")
 	}
-	if !strings.Contains(err.Error(), envServerReadTimeout) {
-		t.Fatalf("error = %v, want env name %s", err, envServerReadTimeout)
+	if !strings.Contains(err.Error(), configServerReadTimeout) {
+		t.Fatalf("error = %v, want config key %s", err, configServerReadTimeout)
 	}
 }
 
-func TestConfigFromEnvReturnsErrorForInvalidConcurrentLimit(t *testing.T) {
-	t.Setenv(envServerMaxConcurrentRuns, "0")
-
-	_, err := ConfigFromEnv()
+func TestConfigFromValuesReturnsErrorForInvalidConcurrentLimit(t *testing.T) {
+	_, err := ConfigFromValues(map[string]string{
+		configServerMaxConcurrentRuns: "0",
+	})
 	if err == nil {
 		t.Fatal("expected invalid concurrent limit error")
 	}
-	if !strings.Contains(err.Error(), envServerMaxConcurrentRuns) {
-		t.Fatalf("error = %v, want env name %s", err, envServerMaxConcurrentRuns)
+	if !strings.Contains(err.Error(), configServerMaxConcurrentRuns) {
+		t.Fatalf("error = %v, want config key %s", err, configServerMaxConcurrentRuns)
 	}
 }
 

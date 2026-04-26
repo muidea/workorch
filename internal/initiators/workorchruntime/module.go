@@ -24,11 +24,7 @@ import (
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
-)
-
-const (
-	envBackend  = "WORKORCH_REPOSITORY_BACKEND"
-	envDataRoot = "WORKORCH_DATA_DIR"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 func init() {
@@ -65,7 +61,11 @@ func (r *Runtime) Weight() int {
 }
 
 func (r *Runtime) Setup(eventHub event.Hub, _ task.BackgroundRoutine) *cd.Error {
-	repositories, err := buildRepositories(os.Getenv(envBackend), os.Getenv(envDataRoot))
+	cfg, err := workorchconfig.Current()
+	if err != nil {
+		return cd.NewError(cd.IllegalParam, "invalid argument: "+err.Error())
+	}
+	repositories, err := buildRepositories(cfg.Repository.Backend, cfg.Repository.DataDir)
 	if err != nil {
 		return cd.NewError(cd.IllegalParam, "invalid argument: "+err.Error())
 	}

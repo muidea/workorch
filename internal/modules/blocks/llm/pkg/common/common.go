@@ -3,6 +3,8 @@ package common
 const ModuleID = "blocks/llm"
 
 const StepKindWorkspaceExecution = "llm/workspace_execution"
+const ExecutionContextLLMProviderID = "llmProviderId"
+const DefaultProviderID = "default"
 
 const (
 	ProviderOpenAI     = "openai"
@@ -10,10 +12,10 @@ const (
 )
 
 const (
-	EnvProvider = "WORKORCH_LLM_PROVIDER"
-	EnvBaseURL  = "WORKORCH_LLM_BASE_URL"
-	EnvAPIKey   = "WORKORCH_LLM_API_KEY"
-	EnvModel    = "WORKORCH_LLM_MODEL"
-	EnvTimeout  = "WORKORCH_LLM_TIMEOUT"
-	EnvDisabled = "WORKORCH_LLM_DISABLED"
+	EnvProvider = "provider"
+	EnvBaseURL  = "baseURL"
+	EnvAPIKey   = "apiKey"
+	EnvModel    = "model"
+	EnvTimeout  = "timeout"
+	EnvDisabled = "disabled"
 )

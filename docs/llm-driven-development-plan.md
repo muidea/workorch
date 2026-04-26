@@ -159,9 +159,10 @@ Status:
 Scope:
 
 - Add formal provider config fields:
-  `WORKORCH_LLM_PROVIDER`, `WORKORCH_LLM_BASE_URL`,
-  `WORKORCH_LLM_API_KEY`, `WORKORCH_LLM_MODEL`,
-  `WORKORCH_LLM_TIMEOUT`, and `WORKORCH_LLM_DISABLED`.
+  `[llm].defaultProvider`, `[llm.providers.<id>].provider`,
+  `[llm.providers.<id>].baseURL`, `[llm.providers.<id>].apiKey`,
+  `[llm.providers.<id>].model`, `[llm.providers.<id>].timeout`, and
+  `[llm.providers.<id>].disabled`.
 - Add provider availability validation.
 - Add redaction helper for logs, evidence, checkpoints, and Web/API payloads.
 
@@ -209,7 +210,8 @@ Status:
 - schema boundary: `LLMExecutionDecision` with strict JSON parsing and
   `completionState` validation
 - real provider client: OpenAI-compatible Chat Completions HTTP client is
-  created by `NewRuntimeAdapterFromEnv` when provider config is ready
+  created from magicCommon `framework/configuration` LLM section when provider
+  config is ready
 - normalized output covers provider unavailable, provider error, schema invalid,
   shell plan, patch requests, MCP plan, Decision block, Approval block, Memory
   write requests, and DoD assessment output
@@ -508,9 +510,11 @@ Status:
 - completed
 - Updated `docs/workorch-status.md` and this plan to reflect completed
   LLM-driven MVP work items.
-- Updated `docs/deployment.md` with LLM provider configuration, mock-provider
-  acceptance targets, supported variables, and MVP protocol boundary.
-- Updated `.env.workorchd.example` with LLM provider environment variables.
+- Updated `docs/deployment.md` with TOML runtime configuration, LLM provider
+  configuration, mock-provider acceptance targets, supported fields, and MVP
+  protocol boundary.
+- Updated `config/application.toml`, `config/file/application.toml`, and
+  `.env.workorchd.example` with the current configuration entrypoints.
 - verification:
   `make verify-llm`,
   `make verify-llm-file`

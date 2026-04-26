@@ -27,53 +27,113 @@ type Provider interface {
 	Complete(context.Context, llmmodels.ProviderRequest) ([]byte, error)
 }
 
+type ProviderRuntime struct {
+	Config   llmmodels.ProviderConfig
+	Provider Provider
+}
+
 type RuntimeAdapter struct {
-	config   llmmodels.ProviderConfig
-	provider Provider
+	defaultProviderID string
+	providers         map[string]ProviderRuntime
 }
 
 func NewRuntimeAdapter(config llmmodels.ProviderConfig, provider Provider) *RuntimeAdapter {
-	return &RuntimeAdapter{config: config, provider: provider}
+	providerID := strings.TrimSpace(config.ID)
+	if providerID == "" {
+		providerID = llmcommon.DefaultProviderID
+		config.ID = providerID
+	}
+	return NewRuntimeAdapterWithProviders(providerID, map[string]ProviderRuntime{
+		providerID: {
+			Config:   config,
+			Provider: provider,
+		},
+	})
 }
 
-func NewRuntimeAdapterFromEnv() (*RuntimeAdapter, error) {
-	config, err := LoadProviderConfigFromEnv()
-	if err != nil {
-		return nil, err
+func NewRuntimeAdapterWithProviders(defaultProviderID string, providers map[string]ProviderRuntime) *RuntimeAdapter {
+	defaultProviderID = strings.TrimSpace(defaultProviderID)
+	if defaultProviderID == "" {
+		defaultProviderID = llmcommon.DefaultProviderID
 	}
+	normalized := make(map[string]ProviderRuntime, len(providers))
+	for id, runtime := range providers {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			id = strings.TrimSpace(runtime.Config.ID)
+		}
+		if id == "" {
+			continue
+		}
+		runtime.Config.ID = id
+		normalized[id] = runtime
+	}
+	return &RuntimeAdapter{defaultProviderID: defaultProviderID, providers: normalized}
+}
+
+func NewRuntimeAdapterFromConfig(config llmmodels.ProviderConfig) *RuntimeAdapter {
 	var provider Provider
 	if !config.Unavailable {
 		provider = NewHTTPProvider(config)
 	}
-	return NewRuntimeAdapter(config, provider), nil
+	return NewRuntimeAdapter(config, provider)
+}
+
+func NewRuntimeAdapterFromConfigs(defaultProviderID string, configs map[string]llmmodels.ProviderConfig) *RuntimeAdapter {
+	providers := make(map[string]ProviderRuntime, len(configs))
+	for id, config := range configs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			id = strings.TrimSpace(config.ID)
+		}
+		if id == "" {
+			continue
+		}
+		config.ID = id
+		var provider Provider
+		if !config.Unavailable {
+			provider = NewHTTPProvider(config)
+		}
+		providers[id] = ProviderRuntime{
+			Config:   config,
+			Provider: provider,
+		}
+	}
+	return NewRuntimeAdapterWithProviders(defaultProviderID, providers)
 }
 
 func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
 	if a == nil {
 		return runtimemodel.StepExecutionResult{}, common.ErrInvalidArgument
 	}
-	if a.config.Unavailable {
-		output := failureOutput(request, "llm_provider_unavailable", a.config.UnavailableReason, a.config)
-		return runtimemodel.StepExecutionResult{Output: output}, fmt.Errorf("%w: %s", common.ErrInvalidArgument, a.config.UnavailableReason)
+	runtime, err := a.selectProviderRuntime(request)
+	if err != nil {
+		cfg := llmmodels.ProviderConfig{ID: requestedProviderID(request.Input, a.defaultProviderID), Unavailable: true, UnavailableReason: err.Error()}
+		output := failureOutput(request, "llm_provider_unavailable", err.Error(), cfg)
+		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
-	if a.provider == nil {
-		output := failureOutput(request, "llm_provider_client_unavailable", "llm provider client is not configured", a.config)
+	if runtime.Config.Unavailable {
+		output := failureOutput(request, "llm_provider_unavailable", runtime.Config.UnavailableReason, runtime.Config)
+		return runtimemodel.StepExecutionResult{Output: output}, fmt.Errorf("%w: %s", common.ErrInvalidArgument, runtime.Config.UnavailableReason)
+	}
+	if runtime.Provider == nil {
+		output := failureOutput(request, "llm_provider_client_unavailable", "llm provider client is not configured", runtime.Config)
 		return runtimemodel.StepExecutionResult{Output: output}, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
 	}
 
-	payload, err := a.provider.Complete(ctx, providerRequest(request, a.config))
+	payload, err := runtime.Provider.Complete(ctx, providerRequest(request, runtime.Config))
 	if err != nil {
-		output := failureOutput(request, "llm_provider_error", err.Error(), a.config)
+		output := failureOutput(request, "llm_provider_error", err.Error(), runtime.Config)
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 	decision, err := ParseLLMExecutionDecision(payload)
 	if err != nil {
-		output := failureOutput(request, "llm_schema_invalid", err.Error(), a.config)
+		output := failureOutput(request, "llm_schema_invalid", err.Error(), runtime.Config)
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 	output, err := NormalizeDecisionOutput(request, decision)
 	if err != nil {
-		failure := failureOutput(request, "llm_decision_invalid", err.Error(), a.config)
+		failure := failureOutput(request, "llm_decision_invalid", err.Error(), runtime.Config)
 		return runtimemodel.StepExecutionResult{Output: failure}, err
 	}
 	if status, _ := output[outputKeyStatus].(string); status == "failed" {
@@ -84,6 +144,39 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		return runtimemodel.StepExecutionResult{Output: output}, fmt.Errorf("%w: %s", common.ErrInvalidArgument, reason)
 	}
 	return runtimemodel.StepExecutionResult{Output: output}, nil
+}
+
+func (a *RuntimeAdapter) selectProviderRuntime(request runtimemodel.StepExecutionRequest) (ProviderRuntime, error) {
+	providerID := requestedProviderID(request.Input, a.defaultProviderID)
+	if providerID == "" {
+		return ProviderRuntime{}, fmt.Errorf("%w: llm provider is not configured", common.ErrInvalidArgument)
+	}
+	runtime, ok := a.providers[providerID]
+	if !ok {
+		return ProviderRuntime{}, fmt.Errorf("%w: llm provider %q is not configured", common.ErrInvalidArgument, providerID)
+	}
+	return runtime, nil
+}
+
+func requestedProviderID(input map[string]any, defaultProviderID string) string {
+	if providerID := stringValue(input[llmcommon.ExecutionContextLLMProviderID]); providerID != "" {
+		return providerID
+	}
+	if executionContext, ok := input["executionContext"].(map[string]any); ok {
+		if providerID := stringValue(executionContext[llmcommon.ExecutionContextLLMProviderID]); providerID != "" {
+			return providerID
+		}
+	}
+	return strings.TrimSpace(defaultProviderID)
+}
+
+func stringValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		return ""
+	}
 }
 
 func ParseLLMExecutionDecision(payload []byte) (llmmodels.LLMExecutionDecision, error) {
