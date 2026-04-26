@@ -9,6 +9,7 @@ import (
 type managedRuntimeAssembly struct {
 	runtime   Runtime
 	collector *observed.Collector
+	eventHub  events.Hub
 }
 
 func managedRuntimeAssemblyFromExports(exports bootstrap.Exports) managedRuntimeAssembly {
@@ -18,6 +19,7 @@ func managedRuntimeAssemblyFromExports(exports bootstrap.Exports) managedRuntime
 	return managedRuntimeAssembly{
 		runtime:   NewRuntimeAdapter(RuntimeDependenciesFromExports(exports)),
 		collector: observed.NewCollector(exports.Infrastructure.EventHub),
+		eventHub:  exports.Infrastructure.EventHub,
 	}
 }
 
@@ -25,6 +27,7 @@ func managedRuntimeAssemblyFromEventHub(runtime Runtime, eventHub events.Hub) ma
 	return managedRuntimeAssembly{
 		runtime:   runtime,
 		collector: observed.NewCollector(eventHub),
+		eventHub:  eventHub,
 	}
 }
 
@@ -35,6 +38,7 @@ func newManagedRuntimeFromAssembly(assembly managedRuntimeAssembly) *ManagedRunt
 	return &ManagedRuntime{
 		Runtime:   assembly.runtime,
 		collector: assembly.collector,
+		eventHub:  assembly.eventHub,
 	}
 }
 

@@ -258,9 +258,10 @@ Current internal event consumption boundary:
 - `internal/modules/...` publish formal workorch business events into the shared `EventHub`
 - `internal/modules/application/workorchd/pkg/observed/collector.go` subscribes only to the formal workorch topic set and stores normalized event input
 - `internal/modules/application/workorchd/pkg/observed/workorch_contract.go` maps published business events to `/workspace|run|step|decision|approval/snapshot` items
-- `internal/modules/application/workorchd/pkg/observed/workorch.go` only falls back to state-derived snapshot items when the current subject has no matching published event
+- `internal/modules/application/workorchd/pkg/observed/workorch.go` only emits snapshot items from matching published business events; missing formal events remain visible as missing observed evidence
 - Current default runtime `EventHub` is backed by `magicCommon/event.Hub` through `internal/pkg/events.MagicHub`.
 - The HTTP service injects the application-level EventHub into request contexts, and appservice backend sessions reuse that hub instead of always creating a per-request hub.
+- Observed event history is runtime-local unless a future formal event persistence path is added; file-backed entity reload does not synthesize observed evidence from repository state.
 - The business-facing `events.Hub` interface remains as a narrow workorch adapter boundary while module lifecycle is migrated.
 
 ## Acceptance
@@ -497,7 +498,7 @@ Validated coverage currently includes:
 
 ## Out Of Current Delivery Scope
 
-以下内容不是当前已完成的 MVP / framework alignment 交付范围内的活跃待办项。P1 已提升到
+以下内容不是当前已完成的 MVP / framework alignment / P1 交付范围内的活跃待办项。P1 已完成并记录在
 `docs/next-stage-p1-development-plan.md`；其余候选项继续保留在
 `docs/next-stage-demand-candidates.md`：
 
@@ -508,15 +509,21 @@ Validated coverage currently includes:
 - file-backed repository adapter as the first non-memory persistence path
 - priority-aware local run scheduling behind `[server].maxConcurrentRuns`
 - MCP resources, prompts, streaming evidence, and long-lived stdio session reuse
+- LLM provider streaming and non-chat provider APIs
+- vector Memory search and real embedding-backed recall verification
 - Decision batch resolution and Approval batch resolution
 
-## Next Stage P1 Scope
+## Completed P1 Scope
 
-下一阶段 P1 开发需求清单见：
+P1 交付范围与验收记录见：
 
 - `docs/next-stage-p1-development-plan.md`
 
-当前 P1 项：
+当前活跃项：
+
+- active: none
+
+已完成：
 
 - completed: `P1-1 LLM Provider Streaming And Non-Chat APIs`
 - completed: `P1-2 Vector Memory Search`

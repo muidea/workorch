@@ -770,10 +770,15 @@ func assertRunAvailableWithState(t *testing.T, endpoint string, runID string, wo
 
 func assertRunSnapshotAvailable(t *testing.T, endpoint string, runID string, workspaceID string) {
 	t.Helper()
-	assertRunSnapshotAvailableWithState(t, endpoint, runID, workspaceID, "")
+	assertRunSnapshot(t, endpoint, runID, workspaceID, "", true)
 }
 
 func assertRunSnapshotAvailableWithState(t *testing.T, endpoint string, runID string, workspaceID string, expectedState string) workorchRunSnapshotResponse {
+	t.Helper()
+	return assertRunSnapshot(t, endpoint, runID, workspaceID, expectedState, false)
+}
+
+func assertRunSnapshot(t *testing.T, endpoint string, runID string, workspaceID string, expectedState string, requireObserved bool) workorchRunSnapshotResponse {
 	t.Helper()
 
 	resp, err := http.Get(endpoint)
@@ -794,8 +799,11 @@ func assertRunSnapshotAvailableWithState(t *testing.T, endpoint string, runID st
 	if expectedState != "" && body.Snapshot.Run.State != expectedState {
 		t.Fatalf("snapshot run = %+v, want state %s", body.Snapshot.Run, expectedState)
 	}
-	if len(body.Snapshot.Steps) == 0 || len(body.Snapshot.Observed) == 0 {
-		t.Fatalf("snapshot = %+v, want steps and observed items", body.Snapshot)
+	if len(body.Snapshot.Steps) == 0 {
+		t.Fatalf("snapshot = %+v, want steps", body.Snapshot)
+	}
+	if requireObserved && len(body.Snapshot.Observed) == 0 {
+		t.Fatalf("snapshot = %+v, want observed items", body.Snapshot)
 	}
 	return body
 }

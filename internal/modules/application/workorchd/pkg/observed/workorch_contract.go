@@ -27,8 +27,6 @@ type workorchSnapshotRef struct {
 }
 
 type workorchSnapshotContract struct {
-	snapshotTopic   string
-	subjectType     string
 	publishedTopics []string
 	matches         func(events.WorkorchEvent, workorchSnapshotRef) bool
 	normalize       func(events.WorkorchEvent, workorchSnapshotRef) (SnapshotItem, bool)
@@ -36,8 +34,6 @@ type workorchSnapshotContract struct {
 
 var (
 	workorchWorkspaceSnapshotContract = workorchSnapshotContract{
-		snapshotTopic:   topicWorkspaceSnapshot,
-		subjectType:     "workspace",
 		publishedTopics: []string{events.TopicWorkspaceCreated, events.TopicWorkspaceStateChanged},
 		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
 			return item.Envelope().WorkspaceID == string(ref.workspaceID)
@@ -74,8 +70,6 @@ var (
 		},
 	}
 	workorchRunSnapshotContract = workorchSnapshotContract{
-		snapshotTopic:   topicRunSnapshot,
-		subjectType:     "run",
 		publishedTopics: []string{events.TopicRunCreated, events.TopicRunStateChanged},
 		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
 			return item.Envelope().RunID == string(ref.runID)
@@ -98,8 +92,6 @@ var (
 		},
 	}
 	workorchStepSnapshotContract = workorchSnapshotContract{
-		snapshotTopic:   topicStepSnapshot,
-		subjectType:     "step",
 		publishedTopics: []string{events.TopicStepDispatched, events.TopicStepStateChanged},
 		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
 			return item.Envelope().StepID == string(ref.stepID)
@@ -118,8 +110,6 @@ var (
 		},
 	}
 	workorchTicketSnapshotContract = workorchSnapshotContract{
-		snapshotTopic:   topicDecisionTicketSnapshot,
-		subjectType:     "decision_ticket",
 		publishedTopics: []string{events.TopicTicketCreated, events.TopicTicketResolved},
 		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
 			return item.Envelope().SubjectID == ref.subjectID
@@ -139,8 +129,6 @@ var (
 		},
 	}
 	workorchApprovalSnapshotContract = workorchSnapshotContract{
-		snapshotTopic:   topicApprovalSnapshot,
-		subjectType:     "approval",
 		publishedTopics: []string{events.TopicApprovalCreated, events.TopicApprovalResolved},
 		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
 			return item.Envelope().SubjectID == ref.subjectID
@@ -193,10 +181,6 @@ func (c workorchSnapshotContract) acceptsTopic(topic string) bool {
 		}
 	}
 	return false
-}
-
-func (c workorchSnapshotContract) fallback(ref workorchSnapshotRef, payload SnapshotPayload) SnapshotItem {
-	return newSnapshotItem(c.snapshotTopic, c.subjectType, ref.subjectID, ref.workspaceID, ref.runID, ref.stepID, payload)
 }
 
 func normalizePublishedSnapshot(item events.Envelope, snapshotTopic, subjectType string, payload SnapshotPayload) SnapshotItem {

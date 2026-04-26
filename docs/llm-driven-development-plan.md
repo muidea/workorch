@@ -232,9 +232,9 @@ Status:
 - normalized output covers provider unavailable, provider error, schema invalid,
   execution graph plan, shell plan, patch requests, MCP plan, Decision block,
   Approval block, Memory write requests, and DoD assessment output
-- current boundary: supported real protocol is OpenAI-compatible
-  `/chat/completions`; provider-specific streaming and non-chat APIs are not in
-  this MVP
+- current boundary: the first MVP used OpenAI-compatible `/chat/completions`;
+  provider-declared streaming and non-chat operations were completed later in
+  the P1 delivery scope
 - verification:
   `go test ./internal/modules/blocks/llm/... ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/kernel/orchestrator/... ./application/workorchd -count 1`,
   `go test ./... -count 1`

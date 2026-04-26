@@ -1,9 +1,9 @@
-# workorch Next Stage P1 Development Plan
+# workorch Completed P1 Development Record
 
 ## Goal
 
-This document promotes the selected P1 demand candidates into the next active
-development scope after the completed MVP, LLM-driven execution, runtime
+This document records the completed P1 demand candidates delivered after the
+completed MVP, LLM-driven execution, runtime
 expansion, advanced runtime scheduling, and decision/approval batch governance
 work.
 

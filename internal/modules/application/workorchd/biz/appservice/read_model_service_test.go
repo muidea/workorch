@@ -44,9 +44,6 @@ func TestReadRunSnapshotWithBackendReturnsBlockedDecisionReadModel(t *testing.T)
 	if len(item.Decisions) != 1 || item.Decisions[0].ID != started.BlockingTicketID {
 		t.Fatalf("decisions = %+v, want decision %s", item.Decisions, started.BlockingTicketID)
 	}
-	if len(item.Observed) == 0 {
-		t.Fatalf("observed = %+v, want non-empty", item.Observed)
-	}
 }
 
 func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func TestBuildWorkorchSnapshotIncludesExpectedTopics(t *testing.T) {
+func TestBuildWorkorchSnapshotIncludesExpectedPublishedTopics(t *testing.T) {
 	ws := &workspacemodel.Workspace{
 		ID:          common.WorkspaceID("ws-observed"),
 		State:       common.WorkspaceStateActive,
@@ -45,7 +45,80 @@ func TestBuildWorkorchSnapshotIncludesExpectedTopics(t *testing.T) {
 		State:       common.ApprovalStateApproved,
 	}
 
-	items := BuildWorkorchSnapshot(ws, run, []*runmodel.Step{step}, ticket, nil, approval, nil)
+	items := BuildWorkorchSnapshot(ws, run, []*runmodel.Step{step}, ticket, nil, approval, []events.WorkorchEvent{
+		mustWorkorchEvent(t, events.Envelope{
+			Version:      events.WorkorchEventVersion,
+			Topic:        events.TopicWorkspaceStateChanged,
+			OccurredAt:   "2026-04-21T08:00:00Z",
+			SourceModule: "kernel/orchestrator",
+			SubjectType:  "workspace",
+			SubjectID:    string(ws.ID),
+			WorkspaceID:  string(ws.ID),
+			RunID:        string(run.ID),
+			Payload: map[string]any{
+				events.PayloadKeyState:       string(ws.State),
+				events.PayloadKeyActiveRunID: string(ws.ActiveRunID),
+			},
+		}),
+		mustWorkorchEvent(t, events.Envelope{
+			Version:      events.WorkorchEventVersion,
+			Topic:        events.TopicRunStateChanged,
+			OccurredAt:   "2026-04-21T08:00:01Z",
+			SourceModule: "kernel/orchestrator",
+			SubjectType:  "run",
+			SubjectID:    string(run.ID),
+			WorkspaceID:  string(ws.ID),
+			RunID:        string(run.ID),
+			Payload: map[string]any{
+				events.PayloadKeyState: string(run.State),
+			},
+		}),
+		mustWorkorchEvent(t, events.Envelope{
+			Version:      events.WorkorchEventVersion,
+			Topic:        events.TopicStepStateChanged,
+			OccurredAt:   "2026-04-21T08:00:02Z",
+			SourceModule: "kernel/orchestrator",
+			SubjectType:  "step",
+			SubjectID:    string(step.ID),
+			WorkspaceID:  string(ws.ID),
+			RunID:        string(run.ID),
+			StepID:       string(step.ID),
+			Payload: map[string]any{
+				events.PayloadKeyKind:  step.Kind,
+				events.PayloadKeyState: string(step.State),
+			},
+		}),
+		mustWorkorchEvent(t, events.Envelope{
+			Version:      events.WorkorchEventVersion,
+			Topic:        events.TopicTicketCreated,
+			OccurredAt:   "2026-04-21T08:00:03Z",
+			SourceModule: "kernel/decision",
+			SubjectType:  "decision_ticket",
+			SubjectID:    string(ticket.ID),
+			WorkspaceID:  string(ws.ID),
+			RunID:        string(run.ID),
+			StepID:       string(ticket.StepID),
+			Payload: map[string]any{
+				events.PayloadKeyReason: ticket.Reason,
+				events.PayloadKeyState:  string(ticket.State),
+			},
+		}),
+		mustWorkorchEvent(t, events.Envelope{
+			Version:      events.WorkorchEventVersion,
+			Topic:        events.TopicApprovalResolved,
+			OccurredAt:   "2026-04-21T08:00:04Z",
+			SourceModule: "blocks/approval",
+			SubjectType:  "approval",
+			SubjectID:    string(approval.ID),
+			WorkspaceID:  string(ws.ID),
+			RunID:        string(run.ID),
+			StepID:       string(approval.StepID),
+			Payload: map[string]any{
+				events.PayloadKeyReason: approval.Reason,
+				events.PayloadKeyState:  string(approval.State),
+			},
+		}),
+	})
 	if len(items) != 5 {
 		t.Fatalf("len(items) = %d, want 5", len(items))
 	}
@@ -57,7 +130,7 @@ func TestBuildWorkorchSnapshotIncludesExpectedTopics(t *testing.T) {
 	assertTopic(t, items, "/approval/snapshot")
 }
 
-func TestBuildWorkorchSnapshotOmitsOptionalTopicsWhenObjectsMissing(t *testing.T) {
+func TestBuildWorkorchSnapshotRequiresPublishedEvents(t *testing.T) {
 	ws := &workspacemodel.Workspace{
 		ID:    common.WorkspaceID("ws-observed-min"),
 		State: common.WorkspaceStateActive,
@@ -69,18 +142,18 @@ func TestBuildWorkorchSnapshotOmitsOptionalTopicsWhenObjectsMissing(t *testing.T
 	}
 
 	items := BuildWorkorchSnapshot(ws, run, nil, nil, nil, nil, nil)
-	if len(items) != 2 {
-		t.Fatalf("len(items) = %d, want 2", len(items))
+	if len(items) != 0 {
+		t.Fatalf("len(items) = %d, want 0", len(items))
 	}
 
-	assertTopic(t, items, "/workspace/snapshot")
-	assertTopic(t, items, "/run/snapshot")
+	assertTopicAbsent(t, items, "/workspace/snapshot")
+	assertTopicAbsent(t, items, "/run/snapshot")
 	assertTopicAbsent(t, items, "/step/snapshot")
 	assertTopicAbsent(t, items, "/decision/ticket/snapshot")
 	assertTopicAbsent(t, items, "/approval/snapshot")
 }
 
-func TestBuildWorkorchSnapshotFallbackIncludesResolvedTicketResolution(t *testing.T) {
+func TestBuildWorkorchSnapshotPublishedTicketIncludesResolvedTicketResolution(t *testing.T) {
 	ws := &workspacemodel.Workspace{
 		ID:    common.WorkspaceID("ws-observed-resolution"),
 		State: common.WorkspaceStateActive,
@@ -105,7 +178,26 @@ func TestBuildWorkorchSnapshotFallbackIncludesResolvedTicketResolution(t *testin
 		Payload:  map[string]any{"operator": "workorch"},
 	}
 
-	items := BuildWorkorchSnapshot(ws, run, nil, ticket, resolution, nil, nil)
+	items := BuildWorkorchSnapshot(ws, run, nil, ticket, resolution, nil, []events.WorkorchEvent{
+		mustWorkorchEvent(t, events.Envelope{
+			Version:      events.WorkorchEventVersion,
+			Topic:        events.TopicTicketResolved,
+			OccurredAt:   "2026-04-21T08:05:00Z",
+			SourceModule: "kernel/decision",
+			SubjectType:  "decision_ticket",
+			SubjectID:    string(ticket.ID),
+			WorkspaceID:  string(ws.ID),
+			RunID:        string(run.ID),
+			StepID:       string(ticket.StepID),
+			Payload: map[string]any{
+				events.PayloadKeyReason:       ticket.Reason,
+				events.PayloadKeyState:        string(ticket.State),
+				events.PayloadKeyResolutionID: string(resolution.ID),
+				events.PayloadKeyType:         resolution.Type,
+				events.PayloadKeyPayload:      resolution.Payload,
+			},
+		}),
+	})
 
 	ticketItem := topicItem(t, items, "/decision/ticket/snapshot")
 	ticketPayload, ok := ticketItem.Payload.(DecisionTicketPayload)
@@ -451,25 +543,25 @@ func TestBuildWorkorchSnapshotPrefersLatestWorkspaceStateChangedEvent(t *testing
 	}
 }
 
-func TestBuildWorkorchSnapshotFallsBackWhenPublishedEventsDoNotMatchCurrentObjects(t *testing.T) {
+func TestBuildWorkorchSnapshotIgnoresPublishedEventsThatDoNotMatchCurrentObjects(t *testing.T) {
 	ws := &workspacemodel.Workspace{
-		ID:          common.WorkspaceID("ws-fallback-published"),
+		ID:          common.WorkspaceID("ws-unmatched-published"),
 		State:       common.WorkspaceStateActive,
-		ActiveRunID: common.RunID("run-fallback-published"),
+		ActiveRunID: common.RunID("run-unmatched-published"),
 	}
 	run := &runmodel.Run{
-		ID:                 common.RunID("run-fallback-published"),
+		ID:                 common.RunID("run-unmatched-published"),
 		WorkspaceID:        ws.ID,
 		State:              common.RunStateCompleted,
-		BlockingTicketID:   common.TicketID("ticket-fallback"),
-		BlockingApprovalID: common.ApprovalID("approval-fallback"),
+		BlockingTicketID:   common.TicketID("ticket-unmatched"),
+		BlockingApprovalID: common.ApprovalID("approval-unmatched"),
 	}
 	step := &runmodel.Step{
-		ID:     common.StepID("run-fallback-published/step-1"),
+		ID:     common.StepID("run-unmatched-published/step-1"),
 		RunID:  run.ID,
 		Kind:   "legacy/minimal",
 		State:  common.StepStateCompleted,
-		Output: map[string]any{"status": "fallback"},
+		Output: map[string]any{"status": "unmatched"},
 	}
 
 	items := BuildWorkorchSnapshot(ws, run, []*runmodel.Step{step}, nil, nil, nil, []events.WorkorchEvent{
@@ -504,32 +596,11 @@ func TestBuildWorkorchSnapshotFallsBackWhenPublishedEventsDoNotMatchCurrentObjec
 		}),
 	})
 
-	runItem := topicItem(t, items, "/run/snapshot")
-	runPayload, ok := runItem.Payload.(RunPayload)
-	if !ok {
-		t.Fatalf("run payload type = %T, want RunPayload", runItem.Payload)
+	if len(items) != 0 {
+		t.Fatalf("len(items) = %d, want 0", len(items))
 	}
-	if runItem.OccurredAt == "2026-04-21T09:30:00Z" {
-		t.Fatalf("run item should fall back instead of using unrelated published event")
-	}
-	if runPayload.BlockingTicketID != string(run.BlockingTicketID) {
-		t.Fatalf("run blockingTicketId = %v, want %s", runPayload.BlockingTicketID, run.BlockingTicketID)
-	}
-	if runPayload.BlockingApprovalID != string(run.BlockingApprovalID) {
-		t.Fatalf("run blockingApprovalId = %v, want %s", runPayload.BlockingApprovalID, run.BlockingApprovalID)
-	}
-
-	stepItem := topicItem(t, items, "/step/snapshot")
-	stepPayload, ok := stepItem.Payload.(StepPayload)
-	if !ok {
-		t.Fatalf("step payload type = %T, want StepPayload", stepItem.Payload)
-	}
-	if stepItem.OccurredAt == "2026-04-21T09:30:01Z" {
-		t.Fatalf("step item should fall back instead of using unrelated published event")
-	}
-	if stepPayload.Output["status"] != "fallback" {
-		t.Fatalf("step output status = %v, want fallback", stepPayload.Output["status"])
-	}
+	assertTopicAbsent(t, items, "/run/snapshot")
+	assertTopicAbsent(t, items, "/step/snapshot")
 }
 
 func assertTopic(t *testing.T, items []SnapshotItem, topic string) {

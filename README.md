@@ -8,9 +8,9 @@ is recorded as Run/Step observability evidence and non-chat operations remain
 capability-gated rather than implicitly selected by the orchestrator.
 
 Memory records support embedding metadata and vector readiness fields. Existing
-workspace-scoped list/search remains deterministic, while repositories can rank
-vector-backed Memory records by similarity for the next semantic retrieval
-slice.
+workspace-scoped list/search remains deterministic, and repositories can rank
+vector-backed Memory records by similarity when an embedding provider is
+configured.
 
 ## Structure
 
@@ -68,10 +68,10 @@ Current boundary:
 - `observed/snapshot_contract.go`: now centralizes typed workorch snapshot items while `presenter` handles the final JSON-compatible rendering shape
 - `workspace / run / decision / approval`: now publish formal business events into the shared `EventHub`, and `run` now has both `created` and `state changed` events
 - `orchestrator`: now also publishes `workspace` runtime state changes when `activeRunId` is bound or cleared
-- `observed/collector.go`: now subscribes to workorch event topics and collects observed input without relying on `MemoryHub.Published()`
+- `observed/collector.go`: now subscribes to workorch event topics, while `ManagedRuntime` can also read formal runtime EventHub history when available
 - `appservice/runtime_managed.go`: now owns explicit collector lifecycle via `ManagedRuntime`
 - `appservice/runtime_adapter.go`: now acts as a pure business runtime adapter without collector ownership
-- `observed/`: now prefers subscribed/published `workspace / run / step / decision / approval` events when available, treats `observed` as an event-normalization layer rather than a business state source, and falls back to state-derived envelopes only when a matching formal event is absent
+- `observed/`: normalizes subscribed/published `workspace / run / step / decision / approval` events into acceptance snapshots and does not synthesize snapshots from repository state when formal events are missing
 - `presenter/`: owns snapshot view mapping and output only
 
 ## Workorch semantics retained
@@ -396,5 +396,5 @@ make ci
 - `docs/next-mvp-acceptance.md`: next MVP scope aligned with the WorkOrch product planning baseline
 - `docs/runtime-expansion-plan.md`: completed runtime adapter, shell, patch, graph, and observability scope
 - `docs/advanced-runtime-scheduling-plan.md`: completed advanced MCP and priority scheduling scope
-- `docs/next-stage-p1-development-plan.md`: active next-stage P1 development scope
+- `docs/next-stage-p1-development-plan.md`: completed P1 runtime context, provider capability, vector Memory, and lifecycle scope
 - `docs/next-stage-demand-candidates.md`: future demand candidates that are not active MVP leftovers

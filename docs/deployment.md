@@ -223,11 +223,13 @@ Supported LLM fields:
 - `providers.<id>.timeout`: request timeout, default `60s`
 - `providers.<id>.disabled`: set to `true` to force explicit provider-unavailable failure
 
-Current MVP boundary:
+Current provider boundary:
 
-- The provider protocol is OpenAI-compatible `/chat/completions`.
-- LLM provider streaming and non-chat provider APIs are outside the current
-  provider contract.
+- The primary decision protocol is OpenAI-compatible `/chat/completions`.
+- Provider-declared streaming and non-chat operations are supported only when
+  the selected provider advertises the required capability.
+- Embedding-backed Memory recall is enabled only when an embedding provider is
+  configured and available.
 - LLM output must be one JSON object matching `LLMExecutionDecision`.
 - OpenAI-compatible calls use JSON object mode where supported.
 - Transport formatting drift is normalized only for markdown fences and first

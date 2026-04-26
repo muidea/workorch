@@ -39,11 +39,10 @@ The LLM-driven MVP implementation now covers:
 
 Remaining intentional boundaries after the completed MVP and runtime expansion:
 
-- LLM provider streaming and non-chat provider APIs are not part of the current
-  provider contract.
-- Vector Memory search, distributed scheduling, multi-tenant authorization, and
-  an external runtime marketplace remain outside the current local service
-  delivery scope.
+- Provider streaming, non-chat operations, and vector Memory recall are
+  supported as capability-gated P1 extensions.
+- Distributed scheduling, multi-tenant authorization, and an external runtime
+  marketplace remain outside the current local service delivery scope.
 
 ## Design Inputs
 
@@ -116,6 +115,8 @@ Post-MVP completed extensions:
   contracts, and observability.
 - Advanced runtime scheduling added MCP resources, prompts, streaming evidence,
   long-lived stdio sessions, and priority-aware local run scheduling.
+- P1 delivery added provider-declared streaming and non-chat operations, vector
+  Memory search, and global long-lived runtime module registration.
 
 ## Formal Boundary Contract
 
