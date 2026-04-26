@@ -1,22 +1,50 @@
 package models
 
 type ProviderRequest struct {
-	WorkspaceID string                 `json:"workspaceId"`
-	RunID       string                 `json:"runId"`
-	StepID      string                 `json:"stepId"`
-	Kind        string                 `json:"kind"`
-	Model       string                 `json:"model"`
-	Input       map[string]any         `json:"input,omitempty"`
-	Schema      string                 `json:"schema"`
-	TraceRefs   map[string]string      `json:"traceRefs,omitempty"`
-	Config      RedactedProviderConfig `json:"config"`
-	Repair      *ProviderRepairRequest `json:"repair,omitempty"`
+	WorkspaceID         string                 `json:"workspaceId"`
+	RunID               string                 `json:"runId"`
+	StepID              string                 `json:"stepId"`
+	Kind                string                 `json:"kind"`
+	Model               string                 `json:"model"`
+	Input               map[string]any         `json:"input,omitempty"`
+	Schema              string                 `json:"schema"`
+	RuntimeCapabilities RuntimeCapabilities    `json:"runtimeCapabilities,omitempty"`
+	TraceRefs           map[string]string      `json:"traceRefs,omitempty"`
+	Config              RedactedProviderConfig `json:"config"`
+	Repair              *ProviderRepairRequest `json:"repair,omitempty"`
 }
 
 type ProviderRepairRequest struct {
 	Attempt        int    `json:"attempt"`
 	OriginalOutput string `json:"originalOutput"`
 	ParseError     string `json:"parseError"`
+}
+
+type RuntimeCapabilities struct {
+	BlockKinds  []RuntimeBlockCapability `json:"blockKinds,omitempty"`
+	ServiceAPIs []ServiceAPICapability   `json:"serviceAPIs,omitempty"`
+	ShellPolicy ShellRuntimePolicy       `json:"shellPolicy,omitempty"`
+}
+
+type RuntimeBlockCapability struct {
+	Kind        string         `json:"kind"`
+	Description string         `json:"description,omitempty"`
+	Input       map[string]any `json:"input,omitempty"`
+}
+
+type ServiceAPICapability struct {
+	Method       string `json:"method"`
+	PathTemplate string `json:"pathTemplate"`
+	Description  string `json:"description,omitempty"`
+	ReadOnly     bool   `json:"readOnly,omitempty"`
+	AllowQuery   bool   `json:"allowQuery,omitempty"`
+}
+
+type ShellRuntimePolicy struct {
+	Enabled                 bool     `json:"enabled"`
+	LocalServiceHTTP        string   `json:"localServiceHttp,omitempty"`
+	UnavailableCommands     []string `json:"unavailableCommands,omitempty"`
+	AllowedLocalServiceHost []string `json:"allowedLocalServiceHost,omitempty"`
 }
 
 type LLMExecutionDecision struct {

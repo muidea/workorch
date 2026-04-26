@@ -283,6 +283,7 @@ A deployable `workorchd` instance is acceptable when:
 - with file-backed repository config, `GET /api/v1/workorch/decisions` returns persisted decision tickets and supports `workspaceId` / `runId` filtering
 - with file-backed repository config, `GET /api/v1/workorch/decisions/{ticketId}` returns one persisted decision ticket
 - with file-backed repository config, `POST /api/v1/workorch/decisions/{ticketId}/resolve` resolves one decision ticket with `provide_missing_info`, `reject_current_path`, or `replan`
+- with file-backed repository config, `POST /api/v1/workorch/decisions/resolve-batch` resolves multiple open decision tickets after prevalidating the whole batch
 - with file-backed repository config, `POST /api/v1/workorch/runs/{runId}/resume` can complete after decision resolve or fail terminally after decision reject
 - with file-backed repository config, `GET /api/v1/workorch/approvals` returns persisted approval items and supports `workspaceId` / `runId` filtering
 - with file-backed repository config, `GET /api/v1/workorch/approvals/{approvalId}` returns one persisted approval item

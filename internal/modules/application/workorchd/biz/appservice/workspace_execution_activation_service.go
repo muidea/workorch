@@ -26,6 +26,7 @@ type ActivateWorkspaceExecutionCommand struct {
 	SkillIDs      []string `json:"skillIds,omitempty"`
 	MCPServerIDs  []string `json:"mcpServerIds,omitempty"`
 	MemoryIDs     []string `json:"memoryIds,omitempty"`
+	Priority      int      `json:"priority,omitempty"`
 }
 
 type WorkspaceExecutionActivation struct {
@@ -80,7 +81,7 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 		return WorkspaceExecutionActivation{}, err
 	}
 
-	run, err := createAndStartWorkspaceExecutionRun(ctx, session, common.WorkspaceID(workspaceID), goalID, dodID, executionContext)
+	run, err := createAndStartWorkspaceExecutionRun(ctx, session, common.WorkspaceID(workspaceID), goalID, dodID, executionContext, cmd.Priority)
 	if err != nil {
 		return WorkspaceExecutionActivation{}, err
 	}
@@ -518,7 +519,7 @@ func memoryContexts(items []*memorymodel.MemoryItem) []map[string]any {
 	return ret
 }
 
-func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSession, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any) (*runmodel.Run, error) {
+func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSession, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any, priority int) (*runmodel.Run, error) {
 	exports, err := session.Exports()
 	if err != nil {
 		return nil, err
@@ -532,6 +533,7 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 			DoDID:            dodID,
 			InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
 			ExecutionContext: executionContext,
+			Priority:         priority,
 		}); err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				continue

@@ -87,6 +87,7 @@ export type Run = {
   initialStepKind?: string;
   executionContext?: Record<string, unknown>;
   state: string;
+  priority?: number;
   blockingTicketId?: string;
   blockingApprovalId?: string;
   failureReason?: string;
@@ -100,6 +101,7 @@ export type WorkspaceExecutionActivationRequest = {
   skillIds?: string[];
   mcpServerIds?: string[];
   memoryIds?: string[];
+  priority?: number;
 };
 
 export type Soul = {
@@ -124,6 +126,26 @@ export type MCPServer = {
   endpoint?: string;
   enabled: boolean;
   allowedTools?: string[];
+  allowedResources?: string[];
+  allowedPrompts?: string[];
+  defaultApprovalPolicy?: string;
+  sessionPolicy?: string;
+  timeoutMillis?: number;
+};
+
+export type MCPTool = {
+  serverId: string;
+  name: string;
+};
+
+export type MCPResource = {
+  serverId: string;
+  uri: string;
+};
+
+export type MCPPrompt = {
+  serverId: string;
+  name: string;
 };
 
 export type MemoryItem = {
@@ -287,25 +309,4 @@ export type Approval = {
   stepId?: string;
   reason: string;
   state: string;
-};
-
-export type SliceDescriptor = {
-  id: string;
-  title: string;
-};
-
-export type SliceStatus = {
-  id: string;
-  title: string;
-  slice: string;
-  workspaceId?: string;
-  workspaceState?: string;
-  runId?: string;
-  runState?: string;
-  stepId?: string;
-  stepState?: string;
-  blockingTicketId?: string;
-  blockingApprovalId?: string;
-  stepCount: number;
-  observedCount: number;
 };

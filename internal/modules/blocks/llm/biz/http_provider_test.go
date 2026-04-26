@@ -53,6 +53,13 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	if gotPayload.Model != "test-model" || len(gotPayload.Messages) != 2 || gotPayload.ResponseFormat["type"] != "json_object" {
 		t.Fatalf("payload = %+v, want chat completion json request", gotPayload)
 	}
+	if !strings.Contains(gotPayload.Messages[0].Content, "Do not invent a workorch CLI") ||
+		!strings.Contains(gotPayload.Messages[0].Content, "runtimeCapabilities") ||
+		!strings.Contains(gotPayload.Messages[1].Content, "Do not use a command named workorch") ||
+		!strings.Contains(gotPayload.Messages[1].Content, "runtimeCapabilities.serviceAPIs") ||
+		!strings.Contains(gotPayload.Messages[1].Content, "runtimeCapabilities") {
+		t.Fatalf("messages = %+v, want runtime capability boundary", gotPayload.Messages)
+	}
 	if !strings.Contains(string(payload), `"completionState":"completed"`) {
 		t.Fatalf("payload = %s, want decision json", payload)
 	}
@@ -92,12 +99,13 @@ func TestChatCompletionsURLAcceptsFullEndpoint(t *testing.T) {
 
 func llmProviderRequest() llmmodels.ProviderRequest {
 	return llmmodels.ProviderRequest{
-		WorkspaceID: "workspace-1",
-		RunID:       "run-1",
-		StepID:      "run-1/step-1",
-		Kind:        llmcommon.StepKindWorkspaceExecution,
-		Model:       "test-model",
-		Input:       map[string]any{"goalId": "goal-1", "doDId": "dod-1"},
-		Schema:      decisionSchemaName,
+		WorkspaceID:         "workspace-1",
+		RunID:               "run-1",
+		StepID:              "run-1/step-1",
+		Kind:                llmcommon.StepKindWorkspaceExecution,
+		Model:               "test-model",
+		Input:               map[string]any{"goalId": "goal-1", "doDId": "dod-1"},
+		Schema:              decisionSchemaName,
+		RuntimeCapabilities: declaredRuntimeCapabilities(),
 	}
 }

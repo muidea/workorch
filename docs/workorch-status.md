@@ -46,6 +46,7 @@
     `POST /api/v1/workorch/runs/{runId}/start`,
     `POST /api/v1/workorch/runs/{runId}/resume`,
     `POST /api/v1/workorch/decisions/{ticketId}/resolve`,
+    `POST /api/v1/workorch/decisions/resolve-batch`,
     `POST /api/v1/workorch/approvals/{approvalId}/approve`,
     `POST /api/v1/workorch/approvals/{approvalId}/reject`,
     `POST /api/v1/workorch/souls`,
@@ -85,6 +86,11 @@
 - OpenAI-compatible LLM calls use JSON object mode and a strict
   `workorch.llmExecutionDecision.v1` contract; provider formatting drift is
   normalized only for markdown fences and first JSON object extraction.
+- LLM provider requests include a formal `runtimeCapabilities` catalog covering
+  available runtime block kinds, declared read-only local service APIs, and
+  shell policy. LLM decisions are rejected if shell commands or execution graph
+  shell nodes call undeclared local `workorchd` endpoints such as `/runs`,
+  `/observability`, or `/metrics?run=...`.
 - Schema-invalid LLM output now triggers exactly one provider repair retry. A
   successful repair exposes `llmRepair` metadata on Step output; a failed repair
   keeps the original schema failure and exposes parse/repair diagnostics.
@@ -133,6 +139,9 @@
   `make verify-llm` and `make verify-llm-file`, backed by a local
   OpenAI-compatible mock provider, plus `make verify-real-llm` for an already
   running service with a configured real provider.
+- Decision Queue supports batch resolution for multiple open Decision Tickets
+  through the same formal resolution types as single-ticket resolution:
+  `provide_missing_info`, `replan`, and `reject_current_path`.
 - MCP `stdio` runtime execution has repeatable local acceptance scripts:
   `make verify-mcp-stdio` and `make verify-mcp-stdio-file`, which create a
   governed MCP server, invoke it through an LLM execution graph, and verify
@@ -272,6 +281,7 @@ HTTP endpoints:
 - `GET /api/v1/workorch/decisions`
 - `GET /api/v1/workorch/decisions/{ticketId}`
 - `POST /api/v1/workorch/decisions/{ticketId}/resolve`
+- `POST /api/v1/workorch/decisions/resolve-batch`
 - `GET /api/v1/workorch/approvals`
 - `GET /api/v1/workorch/approvals/{approvalId}`
 - `POST /api/v1/workorch/approvals/{approvalId}/approve`
@@ -500,6 +510,17 @@ advanced runtime and scheduling 交付范围已完成，范围与验收记录见
 - completed: `A2 MCP Streaming Evidence`
 - completed: `A3 MCP Long-Lived Stdio Session`
 - completed: `A4 Priority-Aware Local Run Scheduling`
+- completed: `A5 Web Console Runtime Management`
+- completed: `A6 Runtime Acceptance Gap Closure`
+
+## Decision Arbitration Scope
+
+决策与裁决能力继续按本地服务闭环推进，当前完成项：
+
+- completed: `Decision Batch Resolution`
+  Decision Queue can resolve multiple open Decision Tickets in one operation
+  after prevalidating ticket existence, open state, supported resolution type,
+  and duplicate IDs.
 
 ## LLM Driven Workspace Execution Design
 

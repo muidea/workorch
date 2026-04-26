@@ -31,6 +31,12 @@ type ResolveDecisionCommand struct {
 	ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
 }
 
+type BatchResolveDecisionCommand struct {
+	TicketIDs         []string       `json:"ticketIds"`
+	ResolutionType    string         `json:"resolutionType"`
+	ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
+}
+
 func ReadDecisionWithSession(ctx context.Context, session *RuntimeSession, ticketID string) (ret Decision, err error) {
 	_, tickets, resolutions, err := decisionDependenciesFromSession(session)
 	if err != nil {
@@ -143,6 +149,61 @@ func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 	return mapDecision(item, resolution), nil
 }
 
+func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSession, cmd BatchResolveDecisionCommand) (ret []Decision, err error) {
+	service, tickets, resolutions, err := decisionDependenciesFromSession(session)
+	if err != nil {
+		return nil, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	resolutionType := cmd.ResolutionType
+	if resolutionType == "" {
+		resolutionType = decisioncommon.ResolutionTypeProvideMissingInfo
+	}
+	if !decisioncommon.IsSupportedResolutionType(resolutionType) || len(cmd.TicketIDs) == 0 {
+		return nil, common.ErrInvalidArgument
+	}
+	seen := make(map[string]struct{}, len(cmd.TicketIDs))
+	for _, ticketID := range cmd.TicketIDs {
+		if ticketID == "" {
+			return nil, common.ErrInvalidArgument
+		}
+		if _, ok := seen[ticketID]; ok {
+			return nil, common.ErrInvalidArgument
+		}
+		seen[ticketID] = struct{}{}
+		item, err := tickets.Get(ctx, common.TicketID(ticketID))
+		if err != nil {
+			return nil, err
+		}
+		if item.State != common.DecisionTicketStateOpen {
+			return nil, common.ErrConflict
+		}
+	}
+
+	ret = make([]Decision, 0, len(cmd.TicketIDs))
+	for _, ticketID := range cmd.TicketIDs {
+		if err := service.EnsureResolvedTicket(ctx, decisionmodule.ResolveTicketCommand{
+			ResolutionID: common.ResolutionID("resolution-" + ticketID + "-" + resolutionType),
+			TicketID:     common.TicketID(ticketID),
+			Type:         resolutionType,
+			Payload:      cloneDecisionPayload(cmd.ResolutionPayload),
+		}); err != nil {
+			return nil, err
+		}
+		item, err := tickets.Get(ctx, common.TicketID(ticketID))
+		if err != nil {
+			return nil, err
+		}
+		resolution, err := resolutionForTicket(ctx, resolutions, item)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, mapDecision(item, resolution))
+	}
+	return ret, nil
+}
+
 func ResolveDecisionWithBackend(ctx context.Context, backend string, dataRoot string, ticketID string, cmd ResolveDecisionCommand) (Decision, error) {
 	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
@@ -151,12 +212,28 @@ func ResolveDecisionWithBackend(ctx context.Context, backend string, dataRoot st
 	return ResolveDecisionWithSession(ctx, session, ticketID, cmd)
 }
 
+func BatchResolveDecisionsWithBackend(ctx context.Context, backend string, dataRoot string, cmd BatchResolveDecisionCommand) ([]Decision, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return nil, err
+	}
+	return BatchResolveDecisionsWithSession(ctx, session, cmd)
+}
+
 func ResolveDecisionFromEnv(ctx context.Context, ticketID string, cmd ResolveDecisionCommand) (Decision, error) {
 	session, err := NewRuntimeSessionFromEnv()
 	if err != nil {
 		return Decision{}, err
 	}
 	return ResolveDecisionWithSession(ctx, session, ticketID, cmd)
+}
+
+func BatchResolveDecisionsFromEnv(ctx context.Context, cmd BatchResolveDecisionCommand) ([]Decision, error) {
+	session, err := NewRuntimeSessionFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return BatchResolveDecisionsWithSession(ctx, session, cmd)
 }
 
 func decisionDependenciesFromSession(session *RuntimeSession) (decisionmodule.Service, repository.DecisionTicketRepository, repository.DecisionResolutionRepository, error) {

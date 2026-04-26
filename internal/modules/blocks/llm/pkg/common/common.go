@@ -7,6 +7,14 @@ const ExecutionContextLLMProviderID = "llmProviderId"
 const DefaultProviderID = "default"
 
 const (
+	RuntimeBlockKindPatchApply      = "patch/apply"
+	RuntimeBlockKindDecisionRequest = "decision/request"
+	RuntimeBlockKindApprovalRequest = "approval/request"
+	RuntimeBlockKindMemoryWrite     = "memory/write"
+	RuntimeBlockKindDoDAssessment   = "dod/assessment"
+)
+
+const (
 	ProviderOpenAI     = "openai"
 	ProviderCompatible = "compatible"
 )

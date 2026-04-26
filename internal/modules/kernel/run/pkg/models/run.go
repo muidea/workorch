@@ -10,6 +10,7 @@ type Run struct {
 	InitialStepKind    string
 	ExecutionContext   map[string]any
 	State              common.RunState
+	Priority           int
 	BlockingTicketID   common.TicketID
 	BlockingApprovalID common.ApprovalID
 	FailureReason      string

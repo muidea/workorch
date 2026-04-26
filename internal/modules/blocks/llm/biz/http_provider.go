@@ -151,6 +151,8 @@ func systemPrompt() string {
 		"Return only one JSON object matching schema workorch.llmExecutionDecision.v1.",
 		"Do not wrap the JSON in markdown.",
 		"Do not execute tools directly. Request shell, patch, MCP, Decision, Approval, Memory, DoD assessment, or ExecutionGraph through the JSON fields only.",
+		"Do not invent a workorch CLI. workorch is a service exposed through HTTP APIs and runtime blocks; there is no shell command named workorch unless the provider request explicitly lists it as available.",
+		"Use only runtime block kinds and service APIs declared in runtimeCapabilities. Do not invent local service endpoints.",
 		"The word json is intentional because some providers require it when response_format is json_object.",
 	}, "\n")
 }
@@ -184,7 +186,10 @@ func decisionContractPrompt() string {
 		"- completionState must be one of: continue, blocked_on_decision, blocked_on_approval, completed, failed.",
 		"- Use executionGraph when the next work contains multiple blocks, dependencies, or future parallel-ready work.",
 		"- executionGraph.nodes items require id and kind; dependsOn is a list of node ids; input carries block input.",
+		"- executionGraph.nodes kind values must be selected from runtimeCapabilities.blockKinds only.",
 		"- Use shellCommands, patchRequests, mcpToolCalls, requiredDecision, requiredApproval, memoryWrites, or dodAssessment as appropriate.",
+		"- Shell command names must be real commands available in the local process environment. Do not use a command named workorch.",
+		"- Shell commands may call local workorchd HTTP only through runtimeCapabilities.serviceAPIs. Do not use /runs, /observability, /metrics?run=..., or any endpoint that is not explicitly declared.",
 		"- For completed, include dodAssessment with evidenceRefs for every satisfied item.",
 		"- Do not include workspaceId, runId, stepId, schema, traceRefs, config, or any unknown top-level field in the decision JSON.",
 		"Minimal examples:",

@@ -143,3 +143,9 @@ Acceptance:
   MCP resources, prompts, streaming evidence, long-lived stdio session reuse,
   and priority-aware local run scheduling are tracked as completed in
   `docs/advanced-runtime-scheduling-plan.md`.
+- completed: `Decision Batch Resolution`
+  Decision Queue now supports resolving multiple open Decision Tickets in one
+  formal batch operation. The API validates all requested tickets before
+  mutation, rejects duplicate or already resolved tickets, preserves request
+  order in the response, and applies the same resolution semantics as single
+  ticket resolution.

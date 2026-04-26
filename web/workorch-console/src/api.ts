@@ -1,4 +1,4 @@
-import type { Approval, Decision, DoD, Goal, MCPServer, MemoryItem, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, SliceDescriptor, SliceStatus, Soul, UpdateLLMConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
+import type { Approval, Decision, DoD, Goal, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, UpdateLLMConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -28,10 +28,32 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return (text ? JSON.parse(text) : {}) as T;
 }
 
+async function requestText(url: string, init?: RequestInit): Promise<string> {
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      ...init?.headers
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`);
+  }
+
+  return response.text();
+}
+
+function priorityQuery(priority?: number) {
+  if (priority === undefined || priority === null || Number.isNaN(priority)) {
+    return '';
+  }
+  return `?${new URLSearchParams({ priority: String(priority) }).toString()}`;
+}
+
 export const workorchApi = {
   healthz: () => request<ServiceStatus>('/healthz'),
   readyz: () => request<ServiceStatus>('/readyz'),
-  metrics: () => request<string>('/metrics', { headers: { Accept: 'text/plain' } }),
+  metrics: () => requestText('/metrics', { headers: { Accept: 'text/plain' } }),
   readConfiguration: async () => {
     const body = await request<{ configuration: ServiceConfiguration }>(`${apiBase}/configuration`);
     return body.configuration;
@@ -99,12 +121,12 @@ export const workorchApi = {
     });
     return body.run;
   },
-  startRun: async (runId: string) => {
-    const body = await request<{ run: Run }>(`${apiBase}/runs/${encodeURIComponent(runId)}/start`, { method: 'POST' });
+  startRun: async (runId: string, priority?: number) => {
+    const body = await request<{ run: Run }>(`${apiBase}/runs/${encodeURIComponent(runId)}/start${priorityQuery(priority)}`, { method: 'POST' });
     return body.run;
   },
-  resumeRun: async (runId: string) => {
-    const body = await request<{ run: Run }>(`${apiBase}/runs/${encodeURIComponent(runId)}/resume`, { method: 'POST' });
+  resumeRun: async (runId: string, priority?: number) => {
+    const body = await request<{ run: Run }>(`${apiBase}/runs/${encodeURIComponent(runId)}/resume${priorityQuery(priority)}`, { method: 'POST' });
     return body.run;
   },
   activateWorkspaceExecution: async (workspaceId: string, goalIdOrRequest?: string | WorkspaceExecutionActivationRequest, doDId?: string) => {
@@ -129,6 +151,25 @@ export const workorchApi = {
     const body = await request<{ servers: MCPServer[] }>(`${apiBase}/mcp/servers`);
     return body.servers ?? [];
   },
+  createMCPServer: async (server: MCPServer) => {
+    const body = await request<{ server: MCPServer }>(`${apiBase}/mcp/servers`, {
+      method: 'POST',
+      body: JSON.stringify(server)
+    });
+    return body.server;
+  },
+  listMCPServerTools: async (serverId: string) => {
+    const body = await request<{ tools: MCPTool[] }>(`${apiBase}/mcp/servers/${encodeURIComponent(serverId)}/tools`);
+    return body.tools ?? [];
+  },
+  listMCPServerResources: async (serverId: string) => {
+    const body = await request<{ resources: MCPResource[] }>(`${apiBase}/mcp/servers/${encodeURIComponent(serverId)}/resources`);
+    return body.resources ?? [];
+  },
+  listMCPServerPrompts: async (serverId: string) => {
+    const body = await request<{ prompts: MCPPrompt[] }>(`${apiBase}/mcp/servers/${encodeURIComponent(serverId)}/prompts`);
+    return body.prompts ?? [];
+  },
   listMemory: async (workspaceId: string, query?: string) => {
     const search = new URLSearchParams({ workspaceId });
     if (query) {
@@ -148,6 +189,13 @@ export const workorchApi = {
     });
     return body.decision;
   },
+  batchResolveDecisions: async (ticketIds: string[], resolutionType = 'provide_missing_info', resolutionPayload?: Record<string, unknown>) => {
+    const body = await request<{ decisions: Decision[] }>(`${apiBase}/decisions/resolve-batch`, {
+      method: 'POST',
+      body: JSON.stringify({ ticketIds, resolutionType, resolutionPayload })
+    });
+    return body.decisions ?? [];
+  },
   rejectDecision: async (ticketId: string) => {
     return workorchApi.resolveDecision(ticketId, 'reject_current_path', { operator: 'console' });
   },
@@ -162,14 +210,5 @@ export const workorchApi = {
   rejectApproval: async (approvalId: string) => {
     const body = await request<{ approval: Approval }>(`${apiBase}/approvals/${encodeURIComponent(approvalId)}/reject`, { method: 'POST' });
     return body.approval;
-  },
-  listSlices: async () => {
-    const body = await request<{ slices: SliceDescriptor[] }>(`${apiBase}/slices`);
-    return body.slices ?? [];
-  },
-  listSliceStatuses: async () => {
-    const body = await request<{ statuses: SliceStatus[] }>(`${apiBase}/slices/statuses`);
-    return body.statuses ?? [];
-  },
-  runSlice: async (sliceId: string) => request(`${apiBase}/slices/${encodeURIComponent(sliceId)}/runs`, { method: 'POST' })
+  }
 };

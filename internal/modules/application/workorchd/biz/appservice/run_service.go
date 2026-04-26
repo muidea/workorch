@@ -17,6 +17,7 @@ type Run struct {
 	InitialStepKind    string         `json:"initialStepKind,omitempty"`
 	ExecutionContext   map[string]any `json:"executionContext,omitempty"`
 	State              string         `json:"state"`
+	Priority           int            `json:"priority,omitempty"`
 	BlockingTicketID   string         `json:"blockingTicketId,omitempty"`
 	BlockingApprovalID string         `json:"blockingApprovalId,omitempty"`
 	FailureReason      string         `json:"failureReason,omitempty"`
@@ -274,6 +275,7 @@ func mapRun(item *runmodel.Run) Run {
 		InitialStepKind:    item.InitialStepKind,
 		ExecutionContext:   cloneContextMap(item.ExecutionContext),
 		State:              string(item.State),
+		Priority:           item.Priority,
 		BlockingTicketID:   string(item.BlockingTicketID),
 		BlockingApprovalID: string(item.BlockingApprovalID),
 		FailureReason:      item.FailureReason,

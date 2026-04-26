@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,6 +149,11 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 	}
 	if provider.request.Schema == "" || provider.request.Config.Ready != true {
 		t.Fatalf("provider request = %+v, want schema and ready redacted config", provider.request)
+	}
+	if !runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.StepKindWorkspaceExecution) ||
+		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "shell/command") ||
+		!runtimeCapabilitiesContainServiceAPI(provider.request.RuntimeCapabilities, "GET", "/api/v1/workorch/runs/{runId}/snapshot") {
+		t.Fatalf("runtime capabilities = %+v, want declared block and service API catalog", provider.request.RuntimeCapabilities)
 	}
 	if result.Output["status"] != "completed" ||
 		result.Output["stage"] != "llm_shell_plan" ||
@@ -440,6 +446,52 @@ func TestParseLLMExecutionDecisionRejectsInvalidExecutionGraph(t *testing.T) {
 	}
 }
 
+func TestParseLLMExecutionDecisionRejectsUnavailableWorkorchCLI(t *testing.T) {
+	for _, payload := range []string{
+		`{"completionState":"continue","shellCommands":[{"command":"workorch","args":["run","snapshot"]}]}`,
+		`{"completionState":"continue","executionGraph":{"nodes":[{"id":"inspect","kind":"shell/command","input":{"command":"workorch","args":["run","snapshot"]}}]}}`,
+	} {
+		_, err := ParseLLMExecutionDecision([]byte(payload))
+		if !errors.Is(err, common.ErrInvalidArgument) {
+			t.Fatalf("parse err = %v, want invalid argument for payload %s", err, payload)
+		}
+		if !strings.Contains(err.Error(), "not an available runtime command") {
+			t.Fatalf("parse err = %v, want unavailable runtime command", err)
+		}
+	}
+}
+
+func TestParseLLMExecutionDecisionRejectsUndeclaredLocalWorkorchServiceAPI(t *testing.T) {
+	for _, payload := range []string{
+		`{"completionState":"continue","shellCommands":[{"command":"bash","args":["-c","curl -s -X POST -H 'Content-Type: application/json' -d '{\"priority\":1}' http://localhost:8080/runs"]}]}`,
+		`{"completionState":"continue","executionGraph":{"nodes":[{"id":"inspect","kind":"shell/command","input":{"command":"bash","args":["-c","curl -s http://127.0.0.1:8080/observability?run=run-1"]}}]}}`,
+		`{"completionState":"continue","shellCommands":[{"command":"curl","args":["-s","http://localhost:8080/metrics?run=run-1"]}]}`,
+	} {
+		_, err := ParseLLMExecutionDecision([]byte(payload))
+		if !errors.Is(err, common.ErrInvalidArgument) {
+			t.Fatalf("parse err = %v, want invalid argument for payload %s", err, payload)
+		}
+		if !strings.Contains(err.Error(), "undeclared local workorch service API") {
+			t.Fatalf("parse err = %v, want undeclared local workorch service API", err)
+		}
+	}
+}
+
+func TestParseLLMExecutionDecisionAcceptsDeclaredLocalWorkorchServiceAPI(t *testing.T) {
+	for _, payload := range []string{
+		`{"completionState":"continue","shellCommands":[{"command":"curl","args":["-s","http://127.0.0.1:8080/api/v1/workorch/runs/run-1/snapshot"]}]}`,
+		`{"completionState":"continue","executionGraph":{"nodes":[{"id":"metrics","kind":"shell/command","input":{"command":"curl","args":["-s","http://localhost:8080/metrics"]}}]}}`,
+	} {
+		decision, err := ParseLLMExecutionDecision([]byte(payload))
+		if err != nil {
+			t.Fatalf("parse decision err = %v for payload %s", err, payload)
+		}
+		if decision.CompletionState != "continue" {
+			t.Fatalf("completionState = %q, want continue", decision.CompletionState)
+		}
+	}
+}
+
 func TestParseLLMExecutionDecisionRejectsMemoryWriteWithoutSummary(t *testing.T) {
 	_, err := ParseLLMExecutionDecision([]byte(`{
 		"completionState":"continue",
@@ -465,6 +517,24 @@ func TestRuntimeAdapterFailsOnSchemaInvalidOutput(t *testing.T) {
 	if result.Output["status"] != "failed" || result.Output["stage"] != "llm_schema_invalid" {
 		t.Fatalf("output = %+v, want schema invalid failure", result.Output)
 	}
+}
+
+func runtimeCapabilitiesContainBlock(caps llmmodels.RuntimeCapabilities, kind string) bool {
+	for _, block := range caps.BlockKinds {
+		if block.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeCapabilitiesContainServiceAPI(caps llmmodels.RuntimeCapabilities, method string, pathTemplate string) bool {
+	for _, api := range caps.ServiceAPIs {
+		if api.Method == method && api.PathTemplate == pathTemplate {
+			return true
+		}
+	}
+	return false
 }
 
 func llmStepRequest() runtimemodel.StepExecutionRequest {

@@ -183,9 +183,13 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 		SkillIDs:      []string{"skill-activation-context"},
 		MCPServerIDs:  []string{"mcp-activation-context"},
 		MemoryIDs:     []string{memory.ID},
+		Priority:      7,
 	})
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	if item.Run.Priority != 7 {
+		t.Fatalf("run priority = %d, want 7", item.Run.Priority)
 	}
 	executionContext := item.Run.ExecutionContext
 	if executionContext["soulId"] != "soul-activation-context" {

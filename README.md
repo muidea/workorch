@@ -203,6 +203,7 @@ Available endpoints:
 - `GET /api/v1/workorch/decisions`
 - `GET /api/v1/workorch/decisions/{ticketId}`
 - `POST /api/v1/workorch/decisions/{ticketId}/resolve` with `resolutionType`: `provide_missing_info`, `reject_current_path`, or `replan`
+- `POST /api/v1/workorch/decisions/resolve-batch` with `ticketIds` and one shared `resolutionType`
 - `GET /api/v1/workorch/approvals`
 - `GET /api/v1/workorch/approvals/{approvalId}`
 - `POST /api/v1/workorch/approvals/{approvalId}/approve`

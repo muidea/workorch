@@ -13,6 +13,7 @@ type CreateRunCommand struct {
 	DoDID            common.DoDID
 	InitialStepKind  string
 	ExecutionContext map[string]any
+	Priority         int
 }
 
 type StartRunCommand struct{ RunID common.RunID }

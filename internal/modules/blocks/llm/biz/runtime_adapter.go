@@ -6,12 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	mcpcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
+	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -26,6 +30,13 @@ const (
 	outputKeyBlockDecisionContext  = "blockDecisionContext"
 	outputKeyExecutionGraph        = "executionGraph"
 	maxLLMOutputPreviewBytes       = 4096
+	unavailableWorkorchCLICommand  = "workorch"
+	localServiceHTTPDeclaredOnly   = "declared_service_apis_only"
+)
+
+var (
+	httpURLPattern              = regexp.MustCompile(`https?://[^\s'"<>\\]+`)
+	bareLocalServicePathPattern = regexp.MustCompile(`(?:^|[\s'"(=])((?:/api/v1/workorch/[A-Za-z0-9._~:/?#\[\]@!$&()*+,;=%-]+)|(?:/(?:runs|observability|metrics)(?:[A-Za-z0-9._~:/?#\[\]@!$&()*+,;=%-]*)?))`)
 )
 
 type Provider interface {
@@ -455,6 +466,9 @@ func validateDecision(decision llmmodels.LLMExecutionDecision) error {
 		if strings.TrimSpace(command.Command) == "" {
 			return fmt.Errorf("%w: shellCommands.command is required", common.ErrInvalidArgument)
 		}
+		if err := validateShellCommandBoundary(command.Command, command.Args, "shellCommands.command"); err != nil {
+			return err
+		}
 	}
 	for _, patch := range decision.PatchRequests {
 		if strings.TrimSpace(patch.TargetRef) == "" {
@@ -499,6 +513,13 @@ func validateExecutionGraph(graph llmmodels.BlockExecutionGraph) error {
 		if nodeID == "" || strings.TrimSpace(node.Kind) == "" {
 			return fmt.Errorf("%w: executionGraph node id and kind are required", common.ErrInvalidArgument)
 		}
+		if strings.TrimSpace(node.Kind) == shellcommon.StepKindCommand {
+			if command, _ := node.Input["command"].(string); strings.TrimSpace(command) != "" {
+				if err := validateShellCommandBoundary(command, stringSliceValue(node.Input["args"]), "executionGraph shell command"); err != nil {
+					return err
+				}
+			}
+		}
 		if !isSafeGraphNodeID(nodeID) {
 			return fmt.Errorf("%w: executionGraph node id contains unsupported characters", common.ErrInvalidArgument)
 		}
@@ -520,6 +541,170 @@ func validateExecutionGraph(graph llmmodels.BlockExecutionGraph) error {
 		return fmt.Errorf("%w: executionGraph must be acyclic", common.ErrInvalidArgument)
 	}
 	return nil
+}
+
+func isUnavailableShellCommand(command string) bool {
+	return strings.TrimSpace(command) == unavailableWorkorchCLICommand
+}
+
+func validateShellCommandBoundary(command string, args []string, field string) error {
+	command = strings.TrimSpace(command)
+	if isUnavailableShellCommand(command) {
+		return fmt.Errorf("%w: %s %q is not an available runtime command", common.ErrInvalidArgument, field, command)
+	}
+	for _, ref := range localWorkorchServiceHTTPReferences(shellCommandLine(command, args)) {
+		if !isDeclaredServiceAPI(ref, declaredRuntimeCapabilities().ServiceAPIs) {
+			return fmt.Errorf("%w: %s references undeclared local workorch service API %s %s", common.ErrInvalidArgument, field, ref.Method, ref.Raw)
+		}
+	}
+	return nil
+}
+
+func shellCommandLine(command string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, strings.TrimSpace(command))
+	parts = append(parts, args...)
+	return strings.Join(parts, " ")
+}
+
+func stringSliceValue(input any) []string {
+	switch typed := input.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if value, ok := item.(string); ok {
+				ret = append(ret, value)
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
+}
+
+type localServiceAPIReference struct {
+	Method   string
+	Path     string
+	Raw      string
+	HasQuery bool
+}
+
+func localWorkorchServiceHTTPReferences(commandLine string) []localServiceAPIReference {
+	if !strings.Contains(commandLine, "localhost") &&
+		!strings.Contains(commandLine, "127.0.0.1") &&
+		!strings.Contains(commandLine, "/api/v1/workorch/") &&
+		!strings.Contains(commandLine, "/runs") &&
+		!strings.Contains(commandLine, "/observability") &&
+		!strings.Contains(commandLine, "/metrics") {
+		return nil
+	}
+	method := inferShellHTTPMethod(commandLine)
+	refs := make([]localServiceAPIReference, 0)
+	for _, raw := range httpURLPattern.FindAllString(commandLine, -1) {
+		parsed, err := url.Parse(raw)
+		if err != nil || !isLocalWorkorchServiceHost(parsed.Host) {
+			continue
+		}
+		path := parsed.EscapedPath()
+		if path == "" {
+			path = "/"
+		}
+		refs = append(refs, localServiceAPIReference{
+			Method:   method,
+			Path:     path,
+			Raw:      raw,
+			HasQuery: parsed.RawQuery != "",
+		})
+	}
+	for _, match := range bareLocalServicePathPattern.FindAllStringSubmatch(commandLine, -1) {
+		if len(match) < 2 || strings.TrimSpace(match[1]) == "" {
+			continue
+		}
+		raw := strings.TrimSpace(match[1])
+		pathPart, queryPart, _ := strings.Cut(raw, "?")
+		refs = append(refs, localServiceAPIReference{
+			Method:   method,
+			Path:     pathPart,
+			Raw:      raw,
+			HasQuery: queryPart != "",
+		})
+	}
+	return refs
+}
+
+func inferShellHTTPMethod(commandLine string) string {
+	upper := strings.ToUpper(commandLine)
+	for _, method := range []string{"DELETE", "PATCH", "POST", "PUT", "GET"} {
+		if strings.Contains(upper, "-X "+method) ||
+			strings.Contains(upper, "-X"+method) ||
+			strings.Contains(upper, "--REQUEST "+method) {
+			return method
+		}
+	}
+	lower := strings.ToLower(commandLine)
+	if strings.Contains(lower, " --data") ||
+		strings.Contains(lower, " --form") ||
+		strings.Contains(lower, " -d ") {
+		return "POST"
+	}
+	return "GET"
+}
+
+func isLocalWorkorchServiceHost(host string) bool {
+	parsedHost := host
+	port := ""
+	if strings.Contains(host, ":") {
+		if value, err := url.Parse("//" + host); err == nil {
+			parsedHost = value.Hostname()
+			port = value.Port()
+		}
+	}
+	if parsedHost != "localhost" && parsedHost != "127.0.0.1" {
+		return false
+	}
+	return port == "" || port == "8080"
+}
+
+func isDeclaredServiceAPI(ref localServiceAPIReference, apis []llmmodels.ServiceAPICapability) bool {
+	for _, api := range apis {
+		if !strings.EqualFold(ref.Method, strings.TrimSpace(api.Method)) {
+			continue
+		}
+		if ref.HasQuery && !api.AllowQuery {
+			continue
+		}
+		if serviceAPIPathMatches(api.PathTemplate, ref.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+func serviceAPIPathMatches(template string, path string) bool {
+	template = strings.Trim(strings.TrimSpace(template), "/")
+	path = strings.Trim(strings.TrimSpace(path), "/")
+	if template == path {
+		return true
+	}
+	templateParts := strings.Split(template, "/")
+	pathParts := strings.Split(path, "/")
+	if len(templateParts) != len(pathParts) {
+		return false
+	}
+	for idx, templatePart := range templateParts {
+		if strings.HasPrefix(templatePart, "{") && strings.HasSuffix(templatePart, "}") {
+			if pathParts[idx] == "" {
+				return false
+			}
+			continue
+		}
+		if templatePart != pathParts[idx] {
+			return false
+		}
+	}
+	return true
 }
 
 func isSafeGraphNodeID(input string) bool {
@@ -568,19 +753,102 @@ func hasExecutionGraphCycle(graph llmmodels.BlockExecutionGraph) bool {
 
 func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels.ProviderConfig) llmmodels.ProviderRequest {
 	return llmmodels.ProviderRequest{
-		WorkspaceID: string(request.WorkspaceID),
-		RunID:       string(request.RunID),
-		StepID:      string(request.StepID),
-		Kind:        request.Kind,
-		Model:       config.Model,
-		Input:       cloneMap(request.Input),
-		Schema:      decisionSchemaName,
+		WorkspaceID:         string(request.WorkspaceID),
+		RunID:               string(request.RunID),
+		StepID:              string(request.StepID),
+		Kind:                request.Kind,
+		Model:               config.Model,
+		Input:               cloneMap(request.Input),
+		Schema:              decisionSchemaName,
+		RuntimeCapabilities: declaredRuntimeCapabilities(),
 		TraceRefs: map[string]string{
 			"workspaceId": string(request.WorkspaceID),
 			"runId":       string(request.RunID),
 			"stepId":      string(request.StepID),
 		},
 		Config: RedactedProviderConfig(config),
+	}
+}
+
+func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
+	return llmmodels.RuntimeCapabilities{
+		BlockKinds: []llmmodels.RuntimeBlockCapability{
+			{
+				Kind:        llmcommon.StepKindWorkspaceExecution,
+				Description: "Plan the next workspace execution step from workspace goal, DoD, memory, skills, and MCP context.",
+			},
+			{
+				Kind:        shellcommon.StepKindCommand,
+				Description: "Execute one bounded local shell command in the workspace working directory.",
+				Input:       map[string]any{"command": "string", "args": "[]string"},
+			},
+			{
+				Kind:        llmcommon.RuntimeBlockKindPatchApply,
+				Description: "Request a diff or content patch to be applied by the runtime patch engine.",
+				Input:       map[string]any{"targetRef": "string", "diff": "string", "content": "string"},
+			},
+			{
+				Kind:        mcpcommon.StepKindToolCall,
+				Description: "Call an explicitly configured MCP server tool.",
+				Input:       map[string]any{"serverId": "string", "tool": "string", "input": "object"},
+			},
+			{
+				Kind:        mcpcommon.StepKindResourceRead,
+				Description: "Read an explicitly allowed MCP resource from a configured server.",
+				Input:       map[string]any{"serverId": "string", "uri": "string"},
+			},
+			{
+				Kind:        mcpcommon.StepKindPromptGet,
+				Description: "Get an explicitly allowed MCP prompt from a configured server.",
+				Input:       map[string]any{"serverId": "string", "prompt": "string", "arguments": "object"},
+			},
+			{
+				Kind:        llmcommon.RuntimeBlockKindDecisionRequest,
+				Description: "Pause execution and request a formal operator decision.",
+				Input:       map[string]any{"decisionKind": "string", "question": "string", "context": "object"},
+			},
+			{
+				Kind:        llmcommon.RuntimeBlockKindApprovalRequest,
+				Description: "Pause execution and request explicit approval before a sensitive action.",
+				Input:       map[string]any{"action": "string", "reason": "string", "context": "object"},
+			},
+			{
+				Kind:        llmcommon.RuntimeBlockKindMemoryWrite,
+				Description: "Persist durable workspace memory for later runs.",
+				Input:       map[string]any{"memoryType": "string", "summary": "string", "content": "string", "tags": "[]string"},
+			},
+			{
+				Kind:        llmcommon.RuntimeBlockKindDoDAssessment,
+				Description: "Assess Definition of Done satisfaction with evidence references.",
+				Input:       map[string]any{"satisfied": "bool", "items": "[]object", "summary": "string"},
+			},
+		},
+		ServiceAPIs: []llmmodels.ServiceAPICapability{
+			{
+				Method:       "GET",
+				PathTemplate: "/api/v1/workorch/runs/{runId}/snapshot",
+				Description:  "Read the current run snapshot. Use the active runId from the provider request.",
+				ReadOnly:     true,
+			},
+			{
+				Method:       "GET",
+				PathTemplate: "/api/v1/workorch/runs/{runId}/observability",
+				Description:  "Read the current run observability timeline and evidence counters.",
+				ReadOnly:     true,
+			},
+			{
+				Method:       "GET",
+				PathTemplate: "/metrics",
+				Description:  "Read service-level Prometheus metrics. This endpoint has no per-run query contract.",
+				ReadOnly:     true,
+			},
+		},
+		ShellPolicy: llmmodels.ShellRuntimePolicy{
+			Enabled:                 true,
+			LocalServiceHTTP:        localServiceHTTPDeclaredOnly,
+			UnavailableCommands:     []string{unavailableWorkorchCLICommand},
+			AllowedLocalServiceHost: []string{"localhost:8080", "127.0.0.1:8080"},
+		},
 	}
 }
 

@@ -113,3 +113,30 @@ Acceptance:
   - Local run execution waiters are selected by priority and FIFO sequence.
   - Activation supports body `priority`; start/resume support `priority` query
     and `X-Workorch-Run-Priority` header.
+- completed: `A5 Web Console Runtime Management`
+  - Web console adds a formal `Runtime Control` entry for MCP server capability
+    management and local run scheduling observability.
+  - The console can create MCP servers with tool/resource/prompt allow-lists,
+    session policy, timeout, approval policy, and enabled state.
+  - Workspace execution activation can specify run queue priority.
+  - Run observability exposes MCP operation, server, target, and streaming
+    evidence fields from Step output.
+  - Removed stale Web slice API bindings from the console source.
+- completed: `A6 Runtime Acceptance Gap Closure`
+  - Run priority is now a first-class Run field persisted by workspace execution
+    activation and exposed through Run responses and snapshots.
+  - Run outcome metrics now count returned Run terminal state instead of merely
+    counting successful HTTP dispatch requests.
+  - LLM planning contract now explicitly forbids invented `workorch` shell CLI
+    usage, and decision validation rejects shell commands that reference that
+    unavailable runtime command.
+  - LLM provider requests now include a formal `runtimeCapabilities` catalog
+    for supported runtime block kinds, read-only local service APIs, and shell
+    policy.
+  - LLM decision validation rejects shell commands and execution graph shell
+    nodes that call undeclared local `workorchd` HTTP endpoints such as `/runs`,
+    `/observability`, or `/metrics?run=...`.
+
+## Current Remaining Items
+
+- none in this delivery round

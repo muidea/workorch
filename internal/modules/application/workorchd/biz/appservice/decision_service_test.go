@@ -141,6 +141,66 @@ func TestResolveDecisionWithBackendRejectsUnsupportedResolutionType(t *testing.T
 	}
 }
 
+func TestBatchResolveDecisionsWithBackendResolvesTicketsInRequestOrder(t *testing.T) {
+	dataRoot := t.TempDir()
+	first := prepareDecisionRun(t, dataRoot, "ws-decision-batch-a", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-batch-a")
+	second := prepareDecisionRun(t, dataRoot, "ws-decision-batch-b", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-batch-b")
+
+	items, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, BatchResolveDecisionCommand{
+		TicketIDs:         []string{second.BlockingTicketID, first.BlockingTicketID},
+		ResolutionType:    decisioncommon.ResolutionTypeReplan,
+		ResolutionPayload: map[string]any{"operator": "batch-tester"},
+	})
+	if err != nil {
+		t.Fatalf("BatchResolveDecisionsWithBackend: %v", err)
+	}
+	if len(items) != 2 || items[0].ID != second.BlockingTicketID || items[1].ID != first.BlockingTicketID {
+		t.Fatalf("items = %+v, want request order", items)
+	}
+	for _, item := range items {
+		if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan || item.ResolutionPayload["operator"] != "batch-tester" {
+			t.Fatalf("item = %+v, want resolved replan with payload", item)
+		}
+	}
+}
+
+func TestBatchResolveDecisionsWithBackendRejectsDuplicateTicketIDs(t *testing.T) {
+	dataRoot := t.TempDir()
+	started := prepareDecisionRun(t, dataRoot, "ws-decision-batch-dup", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-batch-dup")
+
+	if _, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, BatchResolveDecisionCommand{
+		TicketIDs:      []string{started.BlockingTicketID, started.BlockingTicketID},
+		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want invalid argument", err)
+	}
+}
+
+func TestBatchResolveDecisionsWithBackendRejectsAlreadyResolvedTicketBeforeMutation(t *testing.T) {
+	dataRoot := t.TempDir()
+	first := prepareDecisionRun(t, dataRoot, "ws-decision-batch-conflict-a", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-batch-conflict-a")
+	second := prepareDecisionRun(t, dataRoot, "ws-decision-batch-conflict-b", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-batch-conflict-b")
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, second.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+	}); err != nil {
+		t.Fatalf("ResolveDecisionWithBackend: %v", err)
+	}
+
+	if _, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, BatchResolveDecisionCommand{
+		TicketIDs:      []string{first.BlockingTicketID, second.BlockingTicketID},
+		ResolutionType: decisioncommon.ResolutionTypeReplan,
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("err = %v, want conflict", err)
+	}
+	firstDecision, err := ReadDecisionWithBackend(context.Background(), "file", dataRoot, first.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("ReadDecisionWithBackend: %v", err)
+	}
+	if firstDecision.State != "open" {
+		t.Fatalf("first decision = %+v, want still open after prevalidation conflict", firstDecision)
+	}
+}
+
 func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID string) Run {
 	t.Helper()
 

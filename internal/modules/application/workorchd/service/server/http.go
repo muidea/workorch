@@ -300,6 +300,12 @@ type resolveDecisionRequest struct {
 	ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
 }
 
+type batchResolveDecisionsRequest struct {
+	TicketIDs         []string       `json:"ticketIds"`
+	ResolutionType    string         `json:"resolutionType"`
+	ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
+}
+
 type defineGoalRequest struct {
 	Text string `json:"text"`
 }
@@ -334,6 +340,7 @@ type activateWorkspaceExecutionFunc func(context.Context, string, string, string
 type listDecisionsFunc func(context.Context, string, string, string, string) ([]appservice.Decision, error)
 type readDecisionFunc func(context.Context, string, string, string) (appservice.Decision, error)
 type resolveDecisionFunc func(context.Context, string, string, string, appservice.ResolveDecisionCommand) (appservice.Decision, error)
+type batchResolveDecisionsFunc func(context.Context, string, string, appservice.BatchResolveDecisionCommand) ([]appservice.Decision, error)
 type listApprovalsFunc func(context.Context, string, string, string, string) ([]appservice.Approval, error)
 type readApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
 type approveApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
@@ -383,6 +390,7 @@ type serverState struct {
 	listDecisions          listDecisionsFunc
 	readDecision           readDecisionFunc
 	resolveDecision        resolveDecisionFunc
+	batchResolveDecisions  batchResolveDecisionsFunc
 	listApprovals          listApprovalsFunc
 	readApproval           readApprovalFunc
 	approveApproval        approveApprovalFunc
@@ -469,6 +477,19 @@ type serverMetrics struct {
 	runInFlight                 atomic.Int64
 	runQueueWaiting             atomic.Int64
 	runQueuedTotal              atomic.Uint64
+}
+
+func (m *serverMetrics) observeRunOutcome(run appservice.Run) {
+	switch run.State {
+	case string(common.RunStateCompleted):
+		m.runSucceeded.Add(1)
+	case string(common.RunStateFailed):
+		m.runFailed.Add(1)
+	case string(common.RunStateCancelled):
+		m.runCanceled.Add(1)
+	case string(common.RunStateSuperseded):
+		m.runRejected.Add(1)
+	}
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -1271,7 +1292,8 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		state.metrics.workspaceActivationRequests.Add(1)
-		release, err := state.acquireRunSlotWithPriority(r.Context(), runPriorityFromRequest(r, req.Priority))
+		priority := runPriorityFromRequest(r, req.Priority)
+		release, err := state.acquireRunSlotWithPriority(r.Context(), priority)
 		if err != nil {
 			state.metrics.runCanceled.Add(1)
 			writeRunQueueError(w, err)
@@ -1286,12 +1308,13 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			SkillIDs:      req.SkillIDs,
 			MCPServerIDs:  req.MCPServerIDs,
 			MemoryIDs:     req.MemoryIDs,
+			Priority:      priority,
 		})
 		if err != nil {
 			writeBusinessError(w, err)
 			return
 		}
-		state.metrics.runSucceeded.Add(1)
+		state.metrics.observeRunOutcome(item.Run)
 		writeJSON(w, http.StatusOK, workspaceExecutionActivationResponse{
 			Service:    "workorch",
 			Backend:    state.config.Backend,
@@ -1457,7 +1480,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			writeBusinessError(w, err)
 			return
 		}
-		state.metrics.runSucceeded.Add(1)
+		state.metrics.observeRunOutcome(item)
 		writeJSON(w, http.StatusOK, runInstanceResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -1485,7 +1508,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			writeBusinessError(w, err)
 			return
 		}
-		state.metrics.runSucceeded.Add(1)
+		state.metrics.observeRunOutcome(item)
 		writeJSON(w, http.StatusOK, runInstanceResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -1519,6 +1542,30 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			Backend:  state.config.Backend,
 			DataRoot: state.config.DataRoot,
 			Decision: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/decisions/resolve-batch", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		var req batchResolveDecisionsRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		state.metrics.decisionResolveRequests.Add(uint64(len(req.TicketIDs)))
+		items, err := state.batchResolveDecisions(r.Context(), state.config.Backend, state.config.DataRoot, appservice.BatchResolveDecisionCommand{
+			TicketIDs:         req.TicketIDs,
+			ResolutionType:    req.ResolutionType,
+			ResolutionPayload: req.ResolutionPayload,
+		})
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, decisionsResponse{
+			Service:   "workorch",
+			Backend:   state.config.Backend,
+			DataRoot:  state.config.DataRoot,
+			Decisions: items,
 		})
 	})
 	router.AddHandler("/api/v1/workorch/approvals/:approvalId/approve", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -1635,6 +1682,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		listDecisions:          defaultListDecisions,
 		readDecision:           defaultReadDecision,
 		resolveDecision:        defaultResolveDecision,
+		batchResolveDecisions:  defaultBatchResolveDecisions,
 		listApprovals:          defaultListApprovals,
 		readApproval:           defaultReadApproval,
 		approveApproval:        defaultApproveApproval,
@@ -1869,6 +1917,15 @@ func (s *serverState) configureSharedMemorySession() {
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ResolveDecisionWithSession(ctx, session, ticketID, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.batchResolveDecisions = func(ctx context.Context, _, _ string, cmd appservice.BatchResolveDecisionCommand) ([]appservice.Decision, error) {
+		var ret []appservice.Decision
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.BatchResolveDecisionsWithSession(ctx, session, cmd)
 			return err
 		})
 		return ret, err
@@ -2153,6 +2210,10 @@ func defaultReadDecision(ctx context.Context, backend string, dataRoot string, t
 
 func defaultResolveDecision(ctx context.Context, backend string, dataRoot string, ticketID string, cmd appservice.ResolveDecisionCommand) (appservice.Decision, error) {
 	return appservice.ResolveDecisionWithBackend(ctx, backend, dataRoot, ticketID, cmd)
+}
+
+func defaultBatchResolveDecisions(ctx context.Context, backend string, dataRoot string, cmd appservice.BatchResolveDecisionCommand) ([]appservice.Decision, error) {
+	return appservice.BatchResolveDecisionsWithBackend(ctx, backend, dataRoot, cmd)
 }
 
 func defaultListApprovals(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string) ([]appservice.Approval, error) {

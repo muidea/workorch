@@ -2,24 +2,26 @@ import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import {
   CheckCircleOutlined,
+  ClusterOutlined,
   DashboardOutlined,
   ExceptionOutlined,
   ProfileOutlined,
   SettingOutlined
 } from '@ant-design/icons';
 import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-components';
-import { App as AntApp, Button, ConfigProvider, Descriptions, Empty, Form, Input, Modal, Select, Space, Steps, Tag, Typography, theme } from 'antd';
+import { App as AntApp, Button, ConfigProvider, Descriptions, Empty, Form, Input, InputNumber, Modal, Select, Space, Steps, Tag, Typography, theme } from 'antd';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Decision, DoD, Goal, MCPServer, MemoryItem, Run, RunObservability, RunSnapshot, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
+import type { Approval, Decision, DoD, Goal, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Run, RunObservability, RunSnapshot, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
-type ViewKey = 'board' | 'decisionQueue' | 'workspaceDetail' | 'configuration' | 'service';
+type ViewKey = 'board' | 'decisionQueue' | 'workspaceDetail' | 'runtimeControl' | 'configuration' | 'service';
 
 const routes = [
   { path: '/board', name: 'Workspace Overview', icon: <DashboardOutlined /> },
   { path: '/decisionQueue', name: 'Decision Queue', icon: <ExceptionOutlined /> },
   { path: '/workspaceDetail', name: 'Workspace Console', icon: <ProfileOutlined /> },
+  { path: '/runtimeControl', name: 'Runtime Control', icon: <ClusterOutlined /> },
   { path: '/configuration', name: 'Configuration', icon: <SettingOutlined /> },
   { path: '/service', name: 'Service Health', icon: <CheckCircleOutlined /> }
 ];
@@ -101,6 +103,46 @@ function outputText(output: Record<string, unknown> | undefined, key: string) {
     return '-';
   }
   return typeof value === 'string' ? value : compactJSON(value);
+}
+
+function splitLines(value?: string) {
+  return (value || '').split('\n').map((item) => item.trim()).filter(Boolean);
+}
+
+function joinLines(values?: string[]) {
+  return (values ?? []).join('\n');
+}
+
+function metricValue(metrics: string, name: string) {
+  const line = metrics.split('\n').find((item) => item.startsWith(`${name} `));
+  if (!line) {
+    return '-';
+  }
+  const value = line.trim().split(/\s+/).at(-1);
+  return value || '-';
+}
+
+function runtimeTarget(output?: Record<string, unknown>) {
+  if (!output) {
+    return '-';
+  }
+  return outputText(output, 'tool') !== '-' ? outputText(output, 'tool') :
+    outputText(output, 'uri') !== '-' ? outputText(output, 'uri') :
+      outputText(output, 'prompt');
+}
+
+function runPriority(item: Run) {
+  const direct = item.priority;
+  if (direct !== undefined && direct !== null) {
+    return direct;
+  }
+  const contextPriority = item.executionContext?.priority;
+  return typeof contextPriority === 'number' ? contextPriority : '-';
+}
+
+function numericRunPriority(item: Run) {
+  const priority = runPriority(item);
+  return typeof priority === 'number' ? priority : undefined;
 }
 
 function llmConfigurationFormValues(configuration: ServiceConfiguration): UpdateLLMConfigurationRequest {
@@ -223,11 +265,28 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
 function DecisionQueuePage() {
   const { message } = AntApp.useApp();
   const actionRef = useRef<ActionType | undefined>(undefined);
+  const [selectedDecisionKeys, setSelectedDecisionKeys] = useState<React.Key[]>([]);
 
   const resolve = async (item: Decision, resolutionType: string, payload?: Record<string, unknown>) => {
     try {
       await workorchApi.resolveDecision(item.id, resolutionType, payload);
       message.success(`Decision resolved as ${resolutionType}`);
+      actionRef.current?.reload();
+    } catch (error) {
+      message.error(errorMessage(error));
+    }
+  };
+
+  const batchResolve = async (resolutionType: string) => {
+    const ticketIds = selectedDecisionKeys.map(String);
+    if (ticketIds.length === 0) {
+      message.warning('Select open decision tickets first');
+      return;
+    }
+    try {
+      await workorchApi.batchResolveDecisions(ticketIds, resolutionType, { operator: 'console', mode: 'batch' });
+      message.success(`${ticketIds.length} decisions resolved as ${resolutionType}`);
+      setSelectedDecisionKeys([]);
       actionRef.current?.reload();
     } catch (error) {
       message.error(errorMessage(error));
@@ -257,11 +316,26 @@ function DecisionQueuePage() {
   ];
 
   return (
-    <PageContainer title="Decision Queue" subTitle="Process pending decision tickets with formal resolution types">
+    <PageContainer
+      title="Decision Queue"
+      subTitle="Process pending decision tickets with formal resolution types"
+      extra={(
+        <Space wrap>
+          <Button disabled={selectedDecisionKeys.length === 0} onClick={() => void batchResolve('provide_missing_info')}>Batch provide info</Button>
+          <Button disabled={selectedDecisionKeys.length === 0} onClick={() => void batchResolve('replan')}>Batch replan</Button>
+          <Button danger disabled={selectedDecisionKeys.length === 0} onClick={() => void batchResolve('reject_current_path')}>Batch reject path</Button>
+        </Space>
+      )}
+    >
       <ProTable<Decision>
         actionRef={actionRef}
         rowKey="id"
         search={false}
+        rowSelection={{
+          selectedRowKeys: selectedDecisionKeys,
+          onChange: setSelectedDecisionKeys,
+          getCheckboxProps: (record) => ({ disabled: record.state !== 'open' })
+        }}
         columns={columns}
         request={async () => {
           const items = await workorchApi.listDecisions();
@@ -407,7 +481,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       soulId: souls[0]?.id,
       skillIds: [],
       mcpServerIds: [],
-      memoryIds: []
+      memoryIds: [],
+      priority: 0
     });
     setActivationOpen(true);
   };
@@ -416,6 +491,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     { title: 'Run ID', dataIndex: 'id', copyable: true },
     { title: 'Goal', dataIndex: 'goalId', copyable: true },
     { title: 'DoD', dataIndex: 'doDId', copyable: true },
+    { title: 'Priority', render: (_, item) => runPriority(item), width: 100 },
     { title: 'State', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
     { title: 'Blocking Ticket', dataIndex: 'blockingTicketId', copyable: true },
     {
@@ -437,7 +513,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           </Button>
           <Button
             size="small"
-            onClick={() => void workorchApi.resumeRun(item.id)
+            onClick={() => void workorchApi.resumeRun(item.id, numericRunPriority(item))
               .then(refreshWorkspace)
               .catch((error: unknown) => message.error(errorMessage(error)))}
           >
@@ -570,8 +646,12 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     { title: 'Step', dataIndex: 'id', copyable: true, ellipsis: true },
                     { title: 'Kind', dataIndex: 'kind', width: 180 },
                     { title: 'State', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+                    { title: 'Operation', render: (_, item) => outputText(item.output, 'operation'), ellipsis: true },
+                    { title: 'Server', render: (_, item) => outputText(item.output, 'serverId'), ellipsis: true },
+                    { title: 'Target', render: (_, item) => runtimeTarget(item.output), ellipsis: true },
                     { title: 'Stage', render: (_, item) => outputText(item.output, 'stage'), ellipsis: true },
                     { title: 'Next Kind', render: (_, item) => outputText(item.output, 'nextKind'), ellipsis: true },
+                    { title: 'Stream Events', render: (_, item) => outputText(item.output, 'streamEvents'), ellipsis: true },
                     { title: 'Memory Refs', render: (_, item) => outputText(item.output, 'memoryRefs'), ellipsis: true },
                     { title: 'DoD Assessment', render: (_, item) => outputText(item.output, 'dodAssessment'), ellipsis: true }
                   ]}
@@ -820,8 +900,321 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
               }))}
             />
           </Form.Item>
+          <Form.Item name="priority" label="Run Queue Priority">
+            <InputNumber style={{ width: '100%' }} placeholder="0" />
+          </Form.Item>
         </Form>
       </Modal>
+    </PageContainer>
+  );
+}
+
+type MCPServerFormValues = {
+  id: string;
+  name: string;
+  transport: string;
+  endpoint?: string;
+  enabled: boolean;
+  allowedTools?: string;
+  allowedResources?: string;
+  allowedPrompts?: string;
+  defaultApprovalPolicy?: string;
+  sessionPolicy?: string;
+  timeoutMillis?: number;
+};
+
+function mcpServerPayload(values: MCPServerFormValues): MCPServer {
+  return {
+    id: values.id.trim(),
+    name: values.name.trim(),
+    transport: values.transport,
+    endpoint: values.endpoint?.trim(),
+    enabled: values.enabled !== false,
+    allowedTools: splitLines(values.allowedTools),
+    allowedResources: splitLines(values.allowedResources),
+    allowedPrompts: splitLines(values.allowedPrompts),
+    defaultApprovalPolicy: values.defaultApprovalPolicy?.trim(),
+    sessionPolicy: values.sessionPolicy?.trim(),
+    timeoutMillis: values.timeoutMillis
+  };
+}
+
+function RuntimeControlPage() {
+  const { message } = AntApp.useApp();
+  const [serverForm] = Form.useForm<MCPServerFormValues>();
+  const [servers, setServers] = useState<MCPServer[]>([]);
+  const [selectedServerId, setSelectedServerId] = useState<string | undefined>(undefined);
+  const [tools, setTools] = useState<MCPTool[]>([]);
+  const [resources, setResources] = useState<MCPResource[]>([]);
+  const [prompts, setPrompts] = useState<MCPPrompt[]>([]);
+  const [metrics, setMetrics] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const selectedServer = servers.find((item) => item.id === selectedServerId);
+
+  const loadRuntime = async () => {
+    setLoading(true);
+    try {
+      const [nextServers, nextMetrics] = await Promise.all([
+        workorchApi.listMCPServers(),
+        workorchApi.metrics()
+      ]);
+      setServers(nextServers);
+      setMetrics(nextMetrics);
+      if (!selectedServerId && nextServers[0]) {
+        setSelectedServerId(nextServers[0].id);
+      }
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadCapabilities = async (serverId: string) => {
+    try {
+      const [nextTools, nextResources, nextPrompts] = await Promise.all([
+        workorchApi.listMCPServerTools(serverId),
+        workorchApi.listMCPServerResources(serverId),
+        workorchApi.listMCPServerPrompts(serverId)
+      ]);
+      setTools(nextTools);
+      setResources(nextResources);
+      setPrompts(nextPrompts);
+    } catch (error) {
+      setTools([]);
+      setResources([]);
+      setPrompts([]);
+      message.error(errorMessage(error));
+    }
+  };
+
+  useEffect(() => {
+    void loadRuntime();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedServerId) {
+      setTools([]);
+      setResources([]);
+      setPrompts([]);
+      return;
+    }
+    void loadCapabilities(selectedServerId);
+  }, [selectedServerId]);
+
+  const selectServer = (server: MCPServer) => {
+    setSelectedServerId(server.id);
+    serverForm.setFieldsValue({
+      id: server.id,
+      name: server.name,
+      transport: server.transport,
+      endpoint: server.endpoint,
+      enabled: server.enabled,
+      allowedTools: joinLines(server.allowedTools),
+      allowedResources: joinLines(server.allowedResources),
+      allowedPrompts: joinLines(server.allowedPrompts),
+      defaultApprovalPolicy: server.defaultApprovalPolicy,
+      sessionPolicy: server.sessionPolicy,
+      timeoutMillis: server.timeoutMillis
+    });
+  };
+
+  const resetServerDraft = () => {
+    const nextIndex = servers.length + 1;
+    serverForm.setFieldsValue({
+      id: `mcp-runtime-${nextIndex}`,
+      name: `Runtime MCP ${nextIndex}`,
+      transport: 'stdio',
+      enabled: true,
+      sessionPolicy: 'transient',
+      timeoutMillis: 60000,
+      allowedTools: '',
+      allowedResources: '',
+      allowedPrompts: ''
+    });
+  };
+
+  const createServer = async (values: MCPServerFormValues) => {
+    setSaving(true);
+    try {
+      const server = await workorchApi.createMCPServer(mcpServerPayload(values));
+      message.success(`MCP server ${server.id} created`);
+      await loadRuntime();
+      setSelectedServerId(server.id);
+      serverForm.resetFields();
+      resetServerDraft();
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const serverColumns: ProColumns<MCPServer>[] = [
+    { title: 'Server ID', dataIndex: 'id', copyable: true },
+    { title: 'Name', dataIndex: 'name' },
+    { title: 'Transport', dataIndex: 'transport', width: 120 },
+    { title: 'Session', dataIndex: 'sessionPolicy', width: 130, render: (_, item) => item.sessionPolicy || 'transient' },
+    { title: 'Enabled', dataIndex: 'enabled', width: 100, render: (_, item) => item.enabled ? <Tag color="green">enabled</Tag> : <Tag color="red">disabled</Tag> },
+    { title: 'Tools', render: (_, item) => item.allowedTools?.length ?? 0, width: 90 },
+    { title: 'Resources', render: (_, item) => item.allowedResources?.length ?? 0, width: 110 },
+    { title: 'Prompts', render: (_, item) => item.allowedPrompts?.length ?? 0, width: 100 },
+    {
+      title: 'Actions',
+      valueType: 'option',
+      render: (_, item) => <Button size="small" onClick={() => selectServer(item)}>Inspect</Button>
+    }
+  ];
+
+  return (
+    <PageContainer
+      title="Runtime Control"
+      subTitle="Manage MCP runtime capability and observe run scheduling pressure"
+      extra={<Button onClick={() => void loadRuntime()} loading={loading}>Refresh</Button>}
+    >
+      <ProCard gutter={16} wrap loading={loading}>
+        <ProCard title="Run Scheduling" colSpan={{ xs: 24, lg: 8 }}>
+          <Descriptions
+            column={1}
+            items={[
+              { key: 'max', label: 'Max Concurrent Runs', children: metricValue(metrics, 'workorch_server_max_concurrent_runs') },
+              { key: 'inFlight', label: 'In Flight', children: metricValue(metrics, 'workorch_run_requests_in_flight') },
+              { key: 'waiting', label: 'Queue Waiting', children: metricValue(metrics, 'workorch_run_queue_waiting') },
+              { key: 'total', label: 'Queue Total', children: metricValue(metrics, 'workorch_run_queue_total') }
+            ]}
+          />
+        </ProCard>
+        <ProCard title="MCP Capability Summary" colSpan={{ xs: 24, lg: 16 }}>
+          <Space wrap>
+            <Tag>{servers.length} servers</Tag>
+            <Tag color="green">{servers.filter((item) => item.enabled).length} enabled</Tag>
+            <Tag color="blue">{servers.reduce((total, item) => total + (item.allowedTools?.length ?? 0), 0)} tools</Tag>
+            <Tag color="cyan">{servers.reduce((total, item) => total + (item.allowedResources?.length ?? 0), 0)} resources</Tag>
+            <Tag color="geekblue">{servers.reduce((total, item) => total + (item.allowedPrompts?.length ?? 0), 0)} prompts</Tag>
+            <Tag color="purple">{servers.filter((item) => item.sessionPolicy === 'long_lived').length} long-lived sessions</Tag>
+          </Space>
+        </ProCard>
+      </ProCard>
+
+      <ProCard title="MCP Servers" className="workorch-section">
+        <ProTable<MCPServer>
+          rowKey="id"
+          search={false}
+          pagination={{ pageSize: 6 }}
+          columns={serverColumns}
+          dataSource={servers}
+          rowClassName={(item) => item.id === selectedServerId ? 'workorch-selected-row' : ''}
+        />
+      </ProCard>
+
+      <ProCard gutter={16} wrap className="workorch-section">
+        <ProCard title="Selected MCP Server" colSpan={{ xs: 24, lg: 12 }}>
+          {selectedServer ? (
+            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              <Descriptions
+                column={1}
+                items={[
+                  { key: 'id', label: 'Server ID', children: selectedServer.id },
+                  { key: 'endpoint', label: 'Endpoint', children: selectedServer.endpoint || '-' },
+                  { key: 'approval', label: 'Default Approval', children: selectedServer.defaultApprovalPolicy || '-' },
+                  { key: 'timeout', label: 'Timeout Millis', children: selectedServer.timeoutMillis ?? '-' }
+                ]}
+              />
+              <ProTable<MCPTool>
+                rowKey={(item) => `${item.serverId}-${item.name}`}
+                search={false}
+                pagination={false}
+                size="small"
+                columns={[{ title: 'Allowed Tools', dataIndex: 'name' }]}
+                dataSource={tools}
+              />
+              <ProTable<MCPResource>
+                rowKey={(item) => `${item.serverId}-${item.uri}`}
+                search={false}
+                pagination={false}
+                size="small"
+                columns={[{ title: 'Allowed Resources', dataIndex: 'uri' }]}
+                dataSource={resources}
+              />
+              <ProTable<MCPPrompt>
+                rowKey={(item) => `${item.serverId}-${item.name}`}
+                search={false}
+                pagination={false}
+                size="small"
+                columns={[{ title: 'Allowed Prompts', dataIndex: 'name' }]}
+                dataSource={prompts}
+              />
+            </Space>
+          ) : (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Select an MCP server" />
+          )}
+        </ProCard>
+
+        <ProCard
+          title="Create MCP Server"
+          colSpan={{ xs: 24, lg: 12 }}
+          extra={<Button onClick={resetServerDraft}>New Draft</Button>}
+        >
+          <Form
+            form={serverForm}
+            layout="vertical"
+            initialValues={{
+              transport: 'stdio',
+              enabled: true,
+              sessionPolicy: 'transient',
+              timeoutMillis: 60000
+            }}
+            onFinish={(values) => void createServer(values)}
+          >
+            <Form.Item name="id" label="Server ID" rules={[{ required: true }]}>
+              <Input placeholder="mcp-filesystem" />
+            </Form.Item>
+            <Form.Item name="name" label="Name" rules={[{ required: true }]}>
+              <Input placeholder="Filesystem MCP" />
+            </Form.Item>
+            <Form.Item name="transport" label="Transport" rules={[{ required: true }]}>
+              <Select options={[
+                { value: 'stdio', label: 'stdio' },
+                { value: 'http', label: 'http' },
+                { value: 'https', label: 'https' }
+              ]} />
+            </Form.Item>
+            <Form.Item name="endpoint" label="Endpoint">
+              <Input placeholder="Command path for stdio, or HTTP endpoint URL" />
+            </Form.Item>
+            <Form.Item name="enabled" label="Enabled">
+              <Select options={[
+                { value: true, label: 'true' },
+                { value: false, label: 'false' }
+              ]} />
+            </Form.Item>
+            <Form.Item name="sessionPolicy" label="Session Policy">
+              <Select options={[
+                { value: 'transient', label: 'transient' },
+                { value: 'long_lived', label: 'long_lived' }
+              ]} />
+            </Form.Item>
+            <Form.Item name="timeoutMillis" label="Timeout Millis">
+              <InputNumber style={{ width: '100%' }} min={0} />
+            </Form.Item>
+            <Form.Item name="defaultApprovalPolicy" label="Default Approval Policy">
+              <Input placeholder="optional approval policy" />
+            </Form.Item>
+            <Form.Item name="allowedTools" label="Allowed Tools">
+              <Input.TextArea rows={3} placeholder="One tool name per line" />
+            </Form.Item>
+            <Form.Item name="allowedResources" label="Allowed Resources">
+              <Input.TextArea rows={3} placeholder="One resource URI per line" />
+            </Form.Item>
+            <Form.Item name="allowedPrompts" label="Allowed Prompts">
+              <Input.TextArea rows={3} placeholder="One prompt name per line" />
+            </Form.Item>
+            <Button type="primary" htmlType="submit" loading={saving}>Create MCP Server</Button>
+          </Form>
+        </ProCard>
+      </ProCard>
     </PageContainer>
   );
 }
@@ -1118,6 +1511,8 @@ function ConsoleApp() {
         return <DecisionQueuePage />;
       case 'workspaceDetail':
         return <WorkspaceDetailPage selectedWorkspaceId={selectedWorkspaceId} />;
+      case 'runtimeControl':
+        return <RuntimeControlPage />;
       case 'configuration':
         return <ConfigurationPage />;
       case 'service':

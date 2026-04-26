@@ -52,6 +52,7 @@ func (s *Service) CreateRun(ctx context.Context, cmd runservice.CreateRunCommand
 		InitialStepKind:  cmd.InitialStepKind,
 		ExecutionContext: cloneExecutionContext(cmd.ExecutionContext),
 		State:            common.RunStateCreated,
+		Priority:         cmd.Priority,
 		FailureReason:    "",
 	}
 	if err := s.runs.Create(ctx, run); err != nil {
@@ -71,6 +72,7 @@ func (s *Service) EnsureRun(ctx context.Context, cmd runservice.CreateRunCommand
 			run.GoalID != cmd.GoalID ||
 			run.DoDID != cmd.DoDID ||
 			run.InitialStepKind != cmd.InitialStepKind ||
+			run.Priority != cmd.Priority ||
 			!reflect.DeepEqual(run.ExecutionContext, cmd.ExecutionContext) {
 			return common.ErrConflict
 		}
