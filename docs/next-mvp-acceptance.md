@@ -111,8 +111,8 @@ Acceptance:
 - Any long-term product-planning deviation not explicitly listed in the four Next MVP scope items.
 - Full knowledge asset, retrieval, template marketplace, enterprise collaboration, multi-tenant governance, and Sub-Agent orchestration.
 - Batch decision handling before single-ticket resolution semantics are stable.
-- Distributed scheduling, external runtime marketplace, and advanced MCP
-  resources, prompts, streaming, or long-lived session reuse.
+- Distributed scheduling, external runtime marketplace, external worker fleets,
+  and multi-tenant execution quota.
 
 ## Progress
 
@@ -139,3 +139,7 @@ Acceptance:
   Real-provider LLM decisions can emit validated `executionGraph` output; graph
   leaf completion dispatches an LLM follow-up for evidence-backed DoD
   assessment.
+- completed: `Advanced Runtime And Scheduling`
+  MCP resources, prompts, streaming evidence, long-lived stdio session reuse,
+  and priority-aware local run scheduling are tracked as completed in
+  `docs/advanced-runtime-scheduling-plan.md`.

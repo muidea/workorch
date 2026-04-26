@@ -53,11 +53,23 @@ type MCPServer struct {
 	Enabled               bool     `json:"enabled"`
 	AllowedTools          []string `json:"allowedTools,omitempty"`
 	AllowedResources      []string `json:"allowedResources,omitempty"`
+	AllowedPrompts        []string `json:"allowedPrompts,omitempty"`
 	DefaultApprovalPolicy string   `json:"defaultApprovalPolicy,omitempty"`
+	SessionPolicy         string   `json:"sessionPolicy,omitempty"`
 	TimeoutMillis         int      `json:"timeoutMillis,omitempty"`
 }
 
 type MCPTool struct {
+	ServerID string `json:"serverId"`
+	Name     string `json:"name"`
+}
+
+type MCPResource struct {
+	ServerID string `json:"serverId"`
+	URI      string `json:"uri"`
+}
+
+type MCPPrompt struct {
 	ServerID string `json:"serverId"`
 	Name     string `json:"name"`
 }
@@ -295,7 +307,9 @@ func CreateMCPServerWithSession(ctx context.Context, session *RuntimeSession, cm
 		Enabled:               cmd.Enabled,
 		AllowedTools:          cloneStrings(cmd.AllowedTools),
 		AllowedResources:      cloneStrings(cmd.AllowedResources),
+		AllowedPrompts:        cloneStrings(cmd.AllowedPrompts),
 		DefaultApprovalPolicy: cmd.DefaultApprovalPolicy,
+		SessionPolicy:         cmd.SessionPolicy,
 		TimeoutMillis:         cmd.TimeoutMillis,
 	}); err != nil {
 		return MCPServer{}, err
@@ -385,6 +399,46 @@ func ListMCPServerToolsWithBackend(ctx context.Context, backend string, dataRoot
 		return nil, err
 	}
 	return ListMCPServerToolsWithSession(ctx, session, serverID)
+}
+
+func ListMCPServerResourcesWithSession(ctx context.Context, session *RuntimeSession, serverID string) (ret []MCPResource, err error) {
+	server, err := ReadMCPServerWithSession(ctx, session, serverID)
+	if err != nil {
+		return nil, err
+	}
+	ret = make([]MCPResource, 0, len(server.AllowedResources))
+	for _, resource := range server.AllowedResources {
+		ret = append(ret, MCPResource{ServerID: server.ID, URI: resource})
+	}
+	return ret, nil
+}
+
+func ListMCPServerResourcesWithBackend(ctx context.Context, backend string, dataRoot string, serverID string) ([]MCPResource, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return nil, err
+	}
+	return ListMCPServerResourcesWithSession(ctx, session, serverID)
+}
+
+func ListMCPServerPromptsWithSession(ctx context.Context, session *RuntimeSession, serverID string) (ret []MCPPrompt, err error) {
+	server, err := ReadMCPServerWithSession(ctx, session, serverID)
+	if err != nil {
+		return nil, err
+	}
+	ret = make([]MCPPrompt, 0, len(server.AllowedPrompts))
+	for _, prompt := range server.AllowedPrompts {
+		ret = append(ret, MCPPrompt{ServerID: server.ID, Name: prompt})
+	}
+	return ret, nil
+}
+
+func ListMCPServerPromptsWithBackend(ctx context.Context, backend string, dataRoot string, serverID string) ([]MCPPrompt, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return nil, err
+	}
+	return ListMCPServerPromptsWithSession(ctx, session, serverID)
 }
 
 func CreateMemoryItemWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, cmd CreateMemoryItemCommand) (ret MemoryItem, err error) {
@@ -521,7 +575,9 @@ func mapMCPServer(item *mcpmodel.Server) MCPServer {
 		Enabled:               item.Enabled,
 		AllowedTools:          cloneStrings(item.AllowedTools),
 		AllowedResources:      cloneStrings(item.AllowedResources),
+		AllowedPrompts:        cloneStrings(item.AllowedPrompts),
 		DefaultApprovalPolicy: item.DefaultApprovalPolicy,
+		SessionPolicy:         item.SessionPolicy,
 		TimeoutMillis:         item.TimeoutMillis,
 	}
 }

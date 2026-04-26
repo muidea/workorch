@@ -342,7 +342,9 @@ func testMCPServerRepositoryContract(t *testing.T, factory func() repository.MCP
 		Enabled:               true,
 		AllowedTools:          []string{"repo.summary"},
 		AllowedResources:      []string{"repo://summary"},
+		AllowedPrompts:        []string{"delivery.plan"},
 		DefaultApprovalPolicy: "manual_for_write",
+		SessionPolicy:         "long_lived",
 		TimeoutMillis:         30000,
 	}
 	if err := repo.Create(ctx, item); err != nil {
@@ -356,12 +358,16 @@ func testMCPServerRepositoryContract(t *testing.T, factory func() repository.MCP
 		t.Fatalf("get mcp server: %v", err)
 	}
 	got.AllowedTools[0] = "mutated"
+	got.AllowedPrompts[0] = "mutated"
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get mcp server fresh: %v", err)
 	}
 	if fresh.AllowedTools[0] != "repo.summary" {
 		t.Fatalf("mcp server clone isolation failed, tools = %+v", fresh.AllowedTools)
+	}
+	if fresh.AllowedPrompts[0] != "delivery.plan" || fresh.SessionPolicy != "long_lived" {
+		t.Fatalf("mcp server clone isolation failed, prompts/session = %+v/%q", fresh.AllowedPrompts, fresh.SessionPolicy)
 	}
 	fresh.Enabled = false
 	if err := repo.Update(ctx, fresh); err != nil {
@@ -1493,12 +1499,14 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	}
 
 	mcpServer := &mcpmodel.Server{
-		ID:            mcpServerID,
-		Name:          "bundle mcp",
-		Transport:     "stdio",
-		Enabled:       true,
-		AllowedTools:  []string{"repo.summary"},
-		TimeoutMillis: 1000,
+		ID:             mcpServerID,
+		Name:           "bundle mcp",
+		Transport:      "stdio",
+		Enabled:        true,
+		AllowedTools:   []string{"repo.summary"},
+		AllowedPrompts: []string{"delivery.plan"},
+		SessionPolicy:  "long_lived",
+		TimeoutMillis:  1000,
 	}
 	if err := bundle.mcpServers.Create(ctx, mcpServer); err != nil {
 		t.Fatalf("create mcp server: %v", err)
@@ -1742,7 +1750,10 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	if err != nil {
 		t.Fatalf("reload mcp server: %v", err)
 	}
-	if reloadedMCPServer.Name != "bundle mcp" || reloadedMCPServer.AllowedTools[0] != "repo.summary" {
+	if reloadedMCPServer.Name != "bundle mcp" ||
+		reloadedMCPServer.AllowedTools[0] != "repo.summary" ||
+		reloadedMCPServer.AllowedPrompts[0] != "delivery.plan" ||
+		reloadedMCPServer.SessionPolicy != "long_lived" {
 		t.Fatalf("reloaded mcp server = %+v, want bundle mcp", reloadedMCPServer)
 	}
 

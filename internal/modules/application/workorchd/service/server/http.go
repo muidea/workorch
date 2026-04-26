@@ -238,6 +238,20 @@ type mcpToolsResponse struct {
 	Tools    []appservice.MCPTool `json:"tools"`
 }
 
+type mcpResourcesResponse struct {
+	Service   string                   `json:"service"`
+	Backend   string                   `json:"backend,omitempty"`
+	DataRoot  string                   `json:"dataRoot,omitempty"`
+	Resources []appservice.MCPResource `json:"resources"`
+}
+
+type mcpPromptsResponse struct {
+	Service  string                 `json:"service"`
+	Backend  string                 `json:"backend,omitempty"`
+	DataRoot string                 `json:"dataRoot,omitempty"`
+	Prompts  []appservice.MCPPrompt `json:"prompts"`
+}
+
 type memoryItemResponse struct {
 	Service  string                `json:"service"`
 	Backend  string                `json:"backend,omitempty"`
@@ -273,6 +287,7 @@ type activateWorkspaceExecutionRequest struct {
 	SkillIDs      []string `json:"skillIds,omitempty"`
 	MCPServerIDs  []string `json:"mcpServerIds,omitempty"`
 	MemoryIDs     []string `json:"memoryIds,omitempty"`
+	Priority      int      `json:"priority,omitempty"`
 }
 
 type createSoulRequest = appservice.CreateSoulCommand
@@ -333,6 +348,8 @@ type createMCPServerFunc func(context.Context, string, string, appservice.Create
 type readMCPServerFunc func(context.Context, string, string, string) (appservice.MCPServer, error)
 type listMCPServersFunc func(context.Context, string, string) ([]appservice.MCPServer, error)
 type listMCPServerToolsFunc func(context.Context, string, string, string) ([]appservice.MCPTool, error)
+type listMCPServerResourcesFunc func(context.Context, string, string, string) ([]appservice.MCPResource, error)
+type listMCPServerPromptsFunc func(context.Context, string, string, string) ([]appservice.MCPPrompt, error)
 type createMemoryItemFunc func(context.Context, string, string, string, appservice.CreateMemoryItemCommand) (appservice.MemoryItem, error)
 type listMemoryByWorkspaceFunc func(context.Context, string, string, string, string) ([]appservice.MemoryItem, error)
 type validateFunc func(context.Context, string, string) error
@@ -380,14 +397,23 @@ type serverState struct {
 	readMCPServer          readMCPServerFunc
 	listMCPServers         listMCPServersFunc
 	listMCPServerTools     listMCPServerToolsFunc
+	listMCPServerResources listMCPServerResourcesFunc
+	listMCPServerPrompts   listMCPServerPromptsFunc
 	createMemoryItem       createMemoryItemFunc
 	listMemoryByWorkspace  listMemoryByWorkspaceFunc
 	readConfiguration      readConfigurationFunc
 	updateLLMConfiguration updateLLMConfigurationFunc
 	runQueueMu             sync.Mutex
-	runQueueWaiters        []chan struct{}
+	runQueueWaiters        []*runQueueWaiter
+	runQueueSequence       uint64
 	activeRunSlots         int64
 	sharedSession          *appservice.RuntimeSession
+}
+
+type runQueueWaiter struct {
+	ready    chan struct{}
+	priority int
+	sequence uint64
 }
 
 type serverMetrics struct {
@@ -430,6 +456,8 @@ type serverMetrics struct {
 	mcpServerListRequests       atomic.Uint64
 	mcpServerGetRequests        atomic.Uint64
 	mcpToolListRequests         atomic.Uint64
+	mcpResourceListRequests     atomic.Uint64
+	mcpPromptListRequests       atomic.Uint64
 	memoryCreateRequests        atomic.Uint64
 	memoryListRequests          atomic.Uint64
 	configurationReadRequests   atomic.Uint64
@@ -1114,6 +1142,46 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Tools:    items,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/mcp/servers/:serverId/resources", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		serverID, action, ok := mcpServerActionFromPath(r.URL.Path)
+		if !ok || action != "resources" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.mcpResourceListRequests.Add(1)
+		items, err := state.listMCPServerResources(r.Context(), state.config.Backend, state.config.DataRoot, serverID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, mcpResourcesResponse{
+			Service:   "workorch",
+			Backend:   state.config.Backend,
+			DataRoot:  state.config.DataRoot,
+			Resources: items,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/mcp/servers/:serverId/prompts", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		serverID, action, ok := mcpServerActionFromPath(r.URL.Path)
+		if !ok || action != "prompts" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.mcpPromptListRequests.Add(1)
+		items, err := state.listMCPServerPrompts(r.Context(), state.config.Backend, state.config.DataRoot, serverID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, mcpPromptsResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Prompts:  items,
+		})
+	})
 	router.AddHandler("/api/v1/workorch/memory", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		workspaceID := r.URL.Query().Get("workspaceId")
@@ -1203,7 +1271,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		state.metrics.workspaceActivationRequests.Add(1)
-		release, err := state.acquireRunSlot(r.Context())
+		release, err := state.acquireRunSlotWithPriority(r.Context(), runPriorityFromRequest(r, req.Priority))
 		if err != nil {
 			state.metrics.runCanceled.Add(1)
 			writeRunQueueError(w, err)
@@ -1377,7 +1445,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		state.metrics.runStartRequests.Add(1)
-		release, err := state.acquireRunSlot(r.Context())
+		release, err := state.acquireRunSlotWithPriority(r.Context(), runPriorityFromRequest(r, 0))
 		if err != nil {
 			state.metrics.runCanceled.Add(1)
 			writeRunQueueError(w, err)
@@ -1405,7 +1473,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		state.metrics.runResumeRequests.Add(1)
-		release, err := state.acquireRunSlot(r.Context())
+		release, err := state.acquireRunSlotWithPriority(r.Context(), runPriorityFromRequest(r, 0))
 		if err != nil {
 			state.metrics.runCanceled.Add(1)
 			writeRunQueueError(w, err)
@@ -1581,6 +1649,8 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		readMCPServer:          defaultReadMCPServer,
 		listMCPServers:         defaultListMCPServers,
 		listMCPServerTools:     defaultListMCPServerTools,
+		listMCPServerResources: defaultListMCPServerResources,
+		listMCPServerPrompts:   defaultListMCPServerPrompts,
 		createMemoryItem:       defaultCreateMemoryItem,
 		listMemoryByWorkspace:  defaultListMemoryByWorkspace,
 		readConfiguration:      defaultReadConfiguration,
@@ -1929,6 +1999,24 @@ func (s *serverState) configureSharedMemorySession() {
 		})
 		return ret, err
 	}
+	s.listMCPServerResources = func(ctx context.Context, _, _, serverID string) ([]appservice.MCPResource, error) {
+		var ret []appservice.MCPResource
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListMCPServerResourcesWithSession(ctx, session, serverID)
+			return err
+		})
+		return ret, err
+	}
+	s.listMCPServerPrompts = func(ctx context.Context, _, _, serverID string) ([]appservice.MCPPrompt, error) {
+		var ret []appservice.MCPPrompt
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListMCPServerPromptsWithSession(ctx, session, serverID)
+			return err
+		})
+		return ret, err
+	}
 	s.createMemoryItem = func(ctx context.Context, _, _, workspaceID string, cmd appservice.CreateMemoryItemCommand) (appservice.MemoryItem, error) {
 		var ret appservice.MemoryItem
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
@@ -2123,6 +2211,14 @@ func defaultListMCPServerTools(ctx context.Context, backend string, dataRoot str
 	return appservice.ListMCPServerToolsWithBackend(ctx, backend, dataRoot, serverID)
 }
 
+func defaultListMCPServerResources(ctx context.Context, backend string, dataRoot string, serverID string) ([]appservice.MCPResource, error) {
+	return appservice.ListMCPServerResourcesWithBackend(ctx, backend, dataRoot, serverID)
+}
+
+func defaultListMCPServerPrompts(ctx context.Context, backend string, dataRoot string, serverID string) ([]appservice.MCPPrompt, error) {
+	return appservice.ListMCPServerPromptsWithBackend(ctx, backend, dataRoot, serverID)
+}
+
 func defaultCreateMemoryItem(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd appservice.CreateMemoryItemCommand) (appservice.MemoryItem, error) {
 	return appservice.CreateMemoryItemWithBackend(ctx, backend, dataRoot, workspaceID, cmd)
 }
@@ -2136,6 +2232,10 @@ func defaultReadConfiguration() (appservice.ServiceConfiguration, error) {
 }
 
 func (s *serverState) acquireRunSlot(ctx context.Context) (func(), error) {
+	return s.acquireRunSlotWithPriority(ctx, 0)
+}
+
+func (s *serverState) acquireRunSlotWithPriority(ctx context.Context, priority int) (func(), error) {
 	s.runQueueMu.Lock()
 	if s.activeRunSlots < s.config.MaxConcurrentRuns && len(s.runQueueWaiters) == 0 {
 		s.activeRunSlots++
@@ -2144,21 +2244,26 @@ func (s *serverState) acquireRunSlot(ctx context.Context) (func(), error) {
 		return s.releaseRunSlot, nil
 	}
 
-	waiter := make(chan struct{})
+	s.runQueueSequence++
+	waiter := &runQueueWaiter{
+		ready:    make(chan struct{}),
+		priority: priority,
+		sequence: s.runQueueSequence,
+	}
 	s.runQueueWaiters = append(s.runQueueWaiters, waiter)
 	s.metrics.runQueueWaiting.Add(1)
 	s.metrics.runQueuedTotal.Add(1)
 	s.runQueueMu.Unlock()
 
 	select {
-	case <-waiter:
+	case <-waiter.ready:
 		if ctx.Err() != nil {
 			s.releaseRunSlot()
 			return nil, ctx.Err()
 		}
 		return s.releaseRunSlot, nil
 	case <-ctx.Done():
-		if s.cancelQueuedRunWaiter(waiter) {
+		if s.cancelQueuedRunWaiter(waiter.ready) {
 			return nil, ctx.Err()
 		}
 		s.releaseRunSlot()
@@ -2169,11 +2274,12 @@ func (s *serverState) acquireRunSlot(ctx context.Context) (func(), error) {
 func (s *serverState) releaseRunSlot() {
 	s.runQueueMu.Lock()
 	if len(s.runQueueWaiters) > 0 {
-		waiter := s.runQueueWaiters[0]
-		s.runQueueWaiters = s.runQueueWaiters[1:]
+		idx := s.nextRunQueueWaiterIndex()
+		waiter := s.runQueueWaiters[idx]
+		s.runQueueWaiters = append(s.runQueueWaiters[:idx], s.runQueueWaiters[idx+1:]...)
 		s.metrics.runQueueWaiting.Add(-1)
 		s.runQueueMu.Unlock()
-		close(waiter)
+		close(waiter.ready)
 		return
 	}
 	if s.activeRunSlots > 0 {
@@ -2188,7 +2294,7 @@ func (s *serverState) cancelQueuedRunWaiter(target chan struct{}) bool {
 	defer s.runQueueMu.Unlock()
 
 	for idx, waiter := range s.runQueueWaiters {
-		if waiter != target {
+		if waiter.ready != target {
 			continue
 		}
 		s.runQueueWaiters = append(s.runQueueWaiters[:idx], s.runQueueWaiters[idx+1:]...)
@@ -2196,6 +2302,51 @@ func (s *serverState) cancelQueuedRunWaiter(target chan struct{}) bool {
 		return true
 	}
 	return false
+}
+
+func (s *serverState) nextRunQueueWaiterIndex() int {
+	best := 0
+	for idx := 1; idx < len(s.runQueueWaiters); idx++ {
+		if runQueueWaiterBefore(s.runQueueWaiters[idx], s.runQueueWaiters[best]) {
+			best = idx
+		}
+	}
+	return best
+}
+
+func runQueueWaiterBefore(left *runQueueWaiter, right *runQueueWaiter) bool {
+	if left == nil {
+		return false
+	}
+	if right == nil {
+		return true
+	}
+	if left.priority != right.priority {
+		return left.priority > right.priority
+	}
+	return left.sequence < right.sequence
+}
+
+func runPriorityFromRequest(r *http.Request, bodyPriority int) int {
+	if bodyPriority != 0 {
+		return bodyPriority
+	}
+	if r == nil {
+		return 0
+	}
+	for _, raw := range []string{
+		r.URL.Query().Get("priority"),
+		r.Header.Get("X-Workorch-Run-Priority"),
+	} {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		priority, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err == nil {
+			return priority
+		}
+	}
+	return 0
 }
 
 func (m *serverMetrics) render(config Config) string {

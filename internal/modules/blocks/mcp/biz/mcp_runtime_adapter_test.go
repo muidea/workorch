@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	kernelmcp "github.com/muidea/workorch/internal/modules/kernel/mcp"
@@ -71,6 +73,103 @@ func TestRuntimeAdapterExecutesAllowedHTTPToolCall(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterExecutesHTTPResourceReadAndPromptGet(t *testing.T) {
+	ctx := context.Background()
+	var captured []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		captured = append(captured, payload)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"operation": payload["operation"],
+			"ok":        true,
+		})
+	}))
+	defer server.Close()
+
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:         common.MCPServerID("mcp-http-context"),
+		Name:             "http context",
+		Transport:        "http",
+		Endpoint:         server.URL,
+		Enabled:          true,
+		AllowedResources: []string{"file://README.md"},
+		AllowedPrompts:   []string{"delivery.plan"},
+		TimeoutMillis:    1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+
+	resourceResult, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		Kind: "mcp/resource_read",
+		Input: map[string]any{
+			"serverId": "mcp-http-context",
+			"uri":      "file://README.md",
+		},
+	})
+	if err != nil {
+		t.Fatalf("resource ExecuteRuntimeStep: %v", err)
+	}
+	if resourceResult.Output["stage"] != "mcp_resource_read_completed" || resourceResult.Output["uri"] != "file://README.md" {
+		t.Fatalf("resource output = %+v, want completed resource read", resourceResult.Output)
+	}
+
+	promptResult, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		Kind: "mcp/prompt_get",
+		Input: map[string]any{
+			"serverId":  "mcp-http-context",
+			"prompt":    "delivery.plan",
+			"arguments": map[string]any{"goal": "ship"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("prompt ExecuteRuntimeStep: %v", err)
+	}
+	if promptResult.Output["stage"] != "mcp_prompt_get_completed" || promptResult.Output["prompt"] != "delivery.plan" {
+		t.Fatalf("prompt output = %+v, want completed prompt get", promptResult.Output)
+	}
+	if len(captured) != 2 || captured[0]["operation"] != "mcp/resource_read" || captured[1]["operation"] != "mcp/prompt_get" {
+		t.Fatalf("captured = %+v, want resource then prompt operations", captured)
+	}
+}
+
+func TestRuntimeAdapterCollectsHTTPStreamEvents(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"delta\":\"planning\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"summary\":\"done\"}\n\n"))
+	}))
+	defer server.Close()
+
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-http-stream"),
+		Name:          "http stream",
+		Transport:     "http",
+		Endpoint:      server.URL,
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		TimeoutMillis: 1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+	result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		Kind: "mcp/tool_call",
+		Input: map[string]any{
+			"serverId": "mcp-http-stream",
+			"tool":     "repo.summary",
+			"stream":   true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v", err)
+	}
+	events, ok := result.Output["streamEvents"].([]any)
+	if !ok || len(events) != 2 {
+		t.Fatalf("streamEvents = %#v, want two HTTP stream events", result.Output["streamEvents"])
+	}
+}
+
 func TestRuntimeAdapterRejectsDisallowedTool(t *testing.T) {
 	ctx := context.Background()
 	service := newMCPService(t, kernelmcp.CreateServerCommand{
@@ -131,6 +230,10 @@ func TestRuntimeAdapterExecutesAllowedStdioToolCall(t *testing.T) {
 	if result.Output["transport"] != "stdio" {
 		t.Fatalf("transport = %v, want stdio", result.Output["transport"])
 	}
+	events, ok := result.Output["streamEvents"].([]any)
+	if !ok || len(events) == 0 {
+		t.Fatalf("streamEvents = %#v, want stdio notification evidence", result.Output["streamEvents"])
+	}
 	resultPayload, ok := result.Output["result"].(map[string]any)
 	if !ok {
 		t.Fatalf("result payload = %#v, want decoded response", result.Output["result"])
@@ -138,6 +241,71 @@ func TestRuntimeAdapterExecutesAllowedStdioToolCall(t *testing.T) {
 	structured, ok := resultPayload["structuredContent"].(map[string]any)
 	if !ok || structured["tool"] != "repo.summary" {
 		t.Fatalf("structured content = %#v, want tool result", resultPayload["structuredContent"])
+	}
+}
+
+func TestRuntimeAdapterExecutesAllowedStdioResourceRead(t *testing.T) {
+	ctx := context.Background()
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:         common.MCPServerID("mcp-stdio-resource"),
+		Name:             "stdio resource",
+		Transport:        "stdio",
+		Endpoint:         "env WORKORCH_MCP_STDIO_HELPER=1 " + os.Args[0] + " -test.run=TestMCPStdioHelperProcess",
+		Enabled:          true,
+		AllowedResources: []string{"file://README.md"},
+		TimeoutMillis:    1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+
+	result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		Kind: "mcp/resource_read",
+		Input: map[string]any{
+			"serverId": "mcp-stdio-resource",
+			"uri":      "file://README.md",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v output=%+v", err, result.Output)
+	}
+	if result.Output["stage"] != "mcp_resource_read_completed" {
+		t.Fatalf("output = %+v, want completed resource read", result.Output)
+	}
+}
+
+func TestRuntimeAdapterReusesLongLivedStdioSession(t *testing.T) {
+	ctx := context.Background()
+	initFile := filepath.Join(t.TempDir(), "mcp-init-count.txt")
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-stdio-session"),
+		Name:          "stdio session",
+		Transport:     "stdio",
+		Endpoint:      "env WORKORCH_MCP_STDIO_HELPER=1 WORKORCH_MCP_STDIO_INIT_FILE=" + initFile + " " + os.Args[0] + " -test.run=TestMCPStdioHelperProcess",
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		SessionPolicy: "long_lived",
+		TimeoutMillis: 1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+	defer adapter.Close()
+
+	for idx := 0; idx < 2; idx++ {
+		result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+			Kind: "mcp/tool_call",
+			Input: map[string]any{
+				"serverId": "mcp-stdio-session",
+				"tool":     "repo.summary",
+			},
+		})
+		if err != nil {
+			t.Fatalf("ExecuteRuntimeStep #%d: %v output=%+v", idx+1, err, result.Output)
+		}
+	}
+	raw, err := os.ReadFile(initFile)
+	if err != nil {
+		t.Fatalf("read init file: %v", err)
+	}
+	if got := strings.Count(string(raw), "initialized\n"); got != 1 {
+		t.Fatalf("initialize count = %d, want one long-lived process initialization; raw=%q", got, string(raw))
 	}
 }
 
@@ -192,6 +360,13 @@ func TestMCPStdioHelperProcess(t *testing.T) {
 		}
 		switch request.Method {
 		case "initialize":
+			if initFile := os.Getenv("WORKORCH_MCP_STDIO_INIT_FILE"); initFile != "" {
+				f, err := os.OpenFile(initFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+				if err == nil {
+					_, _ = f.WriteString("initialized\n")
+					_ = f.Close()
+				}
+			}
 			_ = encoder.Encode(map[string]any{
 				"jsonrpc": "2.0",
 				"id":      request.ID,
@@ -210,6 +385,13 @@ func TestMCPStdioHelperProcess(t *testing.T) {
 		case "tools/call":
 			_ = encoder.Encode(map[string]any{
 				"jsonrpc": "2.0",
+				"method":  "notifications/progress",
+				"params": map[string]any{
+					"message": "tool call started",
+				},
+			})
+			_ = encoder.Encode(map[string]any{
+				"jsonrpc": "2.0",
 				"id":      request.ID,
 				"result": map[string]any{
 					"content": []map[string]any{
@@ -224,6 +406,36 @@ func TestMCPStdioHelperProcess(t *testing.T) {
 						"ok":        true,
 					},
 					"isError": false,
+				},
+			})
+		case "resources/read":
+			_ = encoder.Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      request.ID,
+				"result": map[string]any{
+					"contents": []map[string]any{
+						{
+							"uri":  request.Params["uri"],
+							"text": "resource content",
+						},
+					},
+				},
+			})
+		case "prompts/get":
+			_ = encoder.Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      request.ID,
+				"result": map[string]any{
+					"description": "prompt ready",
+					"messages": []map[string]any{
+						{
+							"role": "user",
+							"content": map[string]any{
+								"type": "text",
+								"text": "plan delivery",
+							},
+						},
+					},
 				},
 			})
 		default:

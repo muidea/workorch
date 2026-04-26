@@ -1445,6 +1445,7 @@ func cloneMCPServer(item *mcpmodel.Server) *mcpmodel.Server {
 	cloned := *item
 	cloned.AllowedTools = cloneStringSlice(item.AllowedTools)
 	cloned.AllowedResources = cloneStringSlice(item.AllowedResources)
+	cloned.AllowedPrompts = cloneStringSlice(item.AllowedPrompts)
 	return &cloned
 }
 

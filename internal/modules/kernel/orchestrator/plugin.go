@@ -10,6 +10,7 @@ import (
 	"github.com/muidea/magicCommon/task"
 	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	mcpcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 )
 
@@ -42,8 +43,10 @@ func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 		}
 	}
 	if runtime.MCPRuntimeAdapter() != nil {
-		if err := runtimeRegistry.Register("mcp/tool_call", runtime.MCPRuntimeAdapter()); err != nil {
-			return cd.NewError(cd.Unexpected, err.Error())
+		for _, stepKind := range []string{mcpcommon.StepKindToolCall, mcpcommon.StepKindResourceRead, mcpcommon.StepKindPromptGet} {
+			if err := runtimeRegistry.Register(stepKind, runtime.MCPRuntimeAdapter()); err != nil {
+				return cd.NewError(cd.Unexpected, err.Error())
+			}
 		}
 	}
 	if runtime.LLMRuntimeAdapter() != nil {

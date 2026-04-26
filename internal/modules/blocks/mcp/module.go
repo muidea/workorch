@@ -11,6 +11,8 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 const StepKindToolCall = modulecommon.StepKindToolCall
+const StepKindResourceRead = modulecommon.StepKindResourceRead
+const StepKindPromptGet = modulecommon.StepKindPromptGet
 
 type Dependencies struct {
 	MCPService mcpservice.Service
@@ -36,6 +38,9 @@ func (m *Module) Run() error { return nil }
 
 func (m *Module) Teardown(ctx context.Context) error {
 	_ = ctx
+	if m.runtimeAdapter != nil {
+		m.runtimeAdapter.Close()
+	}
 	m.runtimeAdapter = nil
 	return nil
 }

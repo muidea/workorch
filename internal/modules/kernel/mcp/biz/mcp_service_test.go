@@ -22,7 +22,9 @@ func TestServiceCreateAndListServer(t *testing.T) {
 		Enabled:               true,
 		AllowedTools:          []string{"repo.summary"},
 		AllowedResources:      []string{"repo://summary"},
+		AllowedPrompts:        []string{"delivery.plan"},
 		DefaultApprovalPolicy: "manual_for_write",
+		SessionPolicy:         "long_lived",
 		TimeoutMillis:         30000,
 	}
 	if err := service.CreateServer(ctx, cmd); err != nil {
@@ -32,7 +34,10 @@ func TestServiceCreateAndListServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get mcp server: %v", err)
 	}
-	if got.Name != cmd.Name || got.AllowedTools[0] != "repo.summary" {
+	if got.Name != cmd.Name ||
+		got.AllowedTools[0] != "repo.summary" ||
+		got.AllowedPrompts[0] != "delivery.plan" ||
+		got.SessionPolicy != "long_lived" {
 		t.Fatalf("mcp server = %+v, want command values", got)
 	}
 	list, err := service.ListServers(ctx)
@@ -57,5 +62,17 @@ func TestServiceRejectsInvalidServer(t *testing.T) {
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("create invalid mcp server err = %v, want invalid argument", err)
+	}
+
+	err = service.CreateServer(ctx, mcpservice.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-invalid-session"),
+		Name:          "invalid session",
+		Transport:     "stdio",
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		SessionPolicy: "sticky",
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("create invalid mcp server session err = %v, want invalid argument", err)
 	}
 }

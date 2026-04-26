@@ -169,7 +169,7 @@ timeout = "60s"
 disabled = false
 ```
 
-When the concurrent run limit is reached, execution requests enter an in-process FIFO wait queue and continue after a slot becomes available. If the caller cancels the request while waiting, the service returns `408 Request Timeout`.
+When the concurrent run limit is reached, execution requests enter an in-process priority-aware wait queue and continue after a slot becomes available. Equal-priority requests keep FIFO order. If the caller cancels the request while waiting, the service returns `408 Request Timeout`.
 
 Available endpoints:
 
@@ -341,7 +341,7 @@ curl -f "http://127.0.0.1:8080/api/v1/workorch/runs?workspaceId=${WORKSPACE_ID}"
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}
 ```
 
-The workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `workingDirectory` to `<service-working-directory>/workspaces/<generated-workspace-id>` when the client omits it. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, single-run, snapshot, status, and observability endpoints provide formal `workorch` run instance management. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision and approval endpoints provide formal query and processing paths for blocked runs. All run execution entrypoints share one in-process FIFO wait queue behind `server.maxConcurrentRuns`.
+The workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `workingDirectory` to `<service-working-directory>/workspaces/<generated-workspace-id>` when the client omits it. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, single-run, snapshot, status, and observability endpoints provide formal `workorch` run instance management. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision and approval endpoints provide formal query and processing paths for blocked runs. All run execution entrypoints share one in-process priority-aware wait queue behind `server.maxConcurrentRuns`.
 
 Container-oriented deployment details are in `docs/deployment.md`, and `config/application.toml` provides the baseline runtime configuration template.
 
@@ -381,3 +381,5 @@ make ci
 - `docs/workorch-status.md`: delivered scope, acceptance baseline, and current closure status
 - `docs/mvp-backlog.md`: closed MVP scope, completed items, and closure criteria used
 - `docs/next-mvp-acceptance.md`: next MVP scope aligned with the WorkOrch product planning baseline
+- `docs/runtime-expansion-plan.md`: completed runtime adapter, shell, patch, graph, and observability scope
+- `docs/advanced-runtime-scheduling-plan.md`: completed advanced MCP and priority scheduling scope

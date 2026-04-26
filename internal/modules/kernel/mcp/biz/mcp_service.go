@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"strings"
 
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
@@ -49,7 +50,12 @@ func validateServerCommand(cmd mcpservice.CreateServerCommand) error {
 	if cmd.TimeoutMillis < 0 {
 		return common.ErrInvalidArgument
 	}
-	if hasBlank(cmd.AllowedTools) || hasBlank(cmd.AllowedResources) {
+	if hasBlank(cmd.AllowedTools) || hasBlank(cmd.AllowedResources) || hasBlank(cmd.AllowedPrompts) {
+		return common.ErrInvalidArgument
+	}
+	switch strings.TrimSpace(cmd.SessionPolicy) {
+	case "", "transient", "long_lived":
+	default:
 		return common.ErrInvalidArgument
 	}
 	return nil
@@ -64,14 +70,16 @@ func serverFromCommand(cmd mcpservice.CreateServerCommand) *mcpmodel.Server {
 		Enabled:               cmd.Enabled,
 		AllowedTools:          cloneStrings(cmd.AllowedTools),
 		AllowedResources:      cloneStrings(cmd.AllowedResources),
+		AllowedPrompts:        cloneStrings(cmd.AllowedPrompts),
 		DefaultApprovalPolicy: cmd.DefaultApprovalPolicy,
+		SessionPolicy:         strings.TrimSpace(cmd.SessionPolicy),
 		TimeoutMillis:         cmd.TimeoutMillis,
 	}
 }
 
 func hasBlank(values []string) bool {
 	for _, value := range values {
-		if value == "" {
+		if strings.TrimSpace(value) == "" {
 			return true
 		}
 	}

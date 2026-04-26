@@ -109,7 +109,9 @@ func TestRuntimeAdapterReturnsInvalidArgumentWhenDependenciesMissing(t *testing.
 		{name: "ensure ticket", run: func() error { return runtime.EnsureTicket(ctx, "ticket", "ws", "run", "run/manual-gate", "decision") }},
 		{name: "get ticket", run: func() error { _, err := runtime.GetTicket(ctx, "ticket"); return err }},
 		{name: "get resolution", run: func() error { _, err := runtime.GetResolutionByTicketID(ctx, "ticket"); return err }},
-		{name: "ensure resolved ticket", run: func() error { return runtime.EnsureResolvedTicket(ctx, "resolution", "ticket", "provide_missing_info", nil) }},
+		{name: "ensure resolved ticket", run: func() error {
+			return runtime.EnsureResolvedTicket(ctx, "resolution", "ticket", "provide_missing_info", nil)
+		}},
 		{name: "ensure approval", run: func() error {
 			return runtime.EnsureApproval(ctx, "approval", "ws", "run", "run/manual-approval", "approval")
 		}},

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -245,12 +246,14 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 		"requiredMCPServerRefs":["mcp-local-context"]
 	}`, http.StatusCreated)
 	postAndExpect(t, mux, "/api/v1/workorch/mcp/servers", `{
-		"id":"mcp-local-context",
-		"name":"local context",
-		"transport":"stdio",
-		"enabled":true,
-		"allowedTools":["repo.summary"]
-	}`, http.StatusCreated)
+			"id":"mcp-local-context",
+			"name":"local context",
+			"transport":"stdio",
+			"enabled":true,
+			"allowedTools":["repo.summary"],
+			"allowedResources":["file://README.md"],
+			"allowedPrompts":["delivery.plan"]
+		}`, http.StatusCreated)
 	postAndExpect(t, mux, "/api/v1/workorch/workspaces/"+workspace.ID+"/memory", `{
 		"sourceType":"user",
 		"memoryType":"project_context",
@@ -268,6 +271,8 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 		{path: "/api/v1/workorch/skills/skill-local-go-service", want: `"requiredMCPServerRefs": [`},
 		{path: "/api/v1/workorch/mcp/servers", want: `"id": "mcp-local-context"`},
 		{path: "/api/v1/workorch/mcp/servers/mcp-local-context/tools", want: `"name": "repo.summary"`},
+		{path: "/api/v1/workorch/mcp/servers/mcp-local-context/resources", want: `"uri": "file://README.md"`},
+		{path: "/api/v1/workorch/mcp/servers/mcp-local-context/prompts", want: `"name": "delivery.plan"`},
 		{path: "/api/v1/workorch/memory?workspaceId=" + workspace.ID + "&q=HTTP", want: `"memoryType": "project_context"`},
 	} {
 		req := httptest.NewRequest(http.MethodGet, spec.path, nil)
@@ -406,6 +411,8 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers/:serverId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers/:serverId/tools"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers/:serverId/resources"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers/:serverId/prompts"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/memory"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/memory"},
 		{method: http.MethodGet, pattern: "/console"},
@@ -2119,6 +2126,93 @@ func TestRunStartEndpointWaitsForAvailableExecutionSlot(t *testing.T) {
 			t.Fatalf("metrics body missing %q\nbody:\n%s", want, metrics)
 		}
 	}
+}
+
+func TestRunStartEndpointDispatchesHigherPriorityQueuedRunFirst(t *testing.T) {
+	heldStarted := make(chan struct{}, 1)
+	highStarted := make(chan struct{}, 1)
+	lowStarted := make(chan struct{}, 1)
+	releaseHeld := make(chan struct{})
+	releaseHigh := make(chan struct{})
+	state := newServerState(normalizeConfig(Config{
+		Backend:           "memory",
+		MaxConcurrentRuns: 1,
+	}), nil)
+	state.validate = func(context.Context, string, string) error { return nil }
+	state.startRun = func(_ context.Context, _, _, runID string) (appservice.Run, error) {
+		switch runID {
+		case "run-held":
+			heldStarted <- struct{}{}
+			<-releaseHeld
+		case "run-high":
+			highStarted <- struct{}{}
+			<-releaseHigh
+		case "run-low":
+			lowStarted <- struct{}{}
+		}
+		return appservice.Run{ID: runID, State: "completed"}, nil
+	}
+
+	server := httptest.NewServer(newMuxWithState(state))
+	defer server.Close()
+
+	errs := make(chan error, 3)
+	postStart := func(path string) {
+		resp, err := http.Post(server.URL+path, "application/json", nil)
+		if err != nil {
+			errs <- err
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			errs <- fmt.Errorf("%s status = %d, want 200", path, resp.StatusCode)
+			return
+		}
+		errs <- nil
+	}
+
+	go postStart("/api/v1/workorch/runs/run-held/start")
+	<-heldStarted
+	go postStart("/api/v1/workorch/runs/run-low/start?priority=1")
+	go postStart("/api/v1/workorch/runs/run-high/start?priority=10")
+	waitForRunQueueWaiting(t, state, 2)
+
+	close(releaseHeld)
+	select {
+	case <-highStarted:
+	case <-lowStarted:
+		t.Fatal("low priority run started before high priority run")
+	case <-time.After(time.Second):
+		t.Fatal("high priority run did not start")
+	}
+	select {
+	case <-lowStarted:
+		t.Fatal("low priority run started while high priority run still holds slot")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseHigh)
+	select {
+	case <-lowStarted:
+	case <-time.After(time.Second):
+		t.Fatal("low priority run did not start after high priority run released slot")
+	}
+	for idx := 0; idx < 3; idx++ {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func waitForRunQueueWaiting(t *testing.T, state *serverState, want int64) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if state.metrics.runQueueWaiting.Load() == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("runQueueWaiting = %d, want %d", state.metrics.runQueueWaiting.Load(), want)
 }
 
 func TestRunResumeEndpointReturnsRequestTimeoutWhenQueueWaitCanceled(t *testing.T) {

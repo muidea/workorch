@@ -734,4 +734,4 @@ Exit criteria:
 | L16 | completed | Runtime graph leaf completion now dispatches an LLM follow-up for DoD assessment, and shell sandbox creates missing Workspace working directories before command execution. |
 | L17 | completed | `blocks/mcp` now registers `mcp/tool_call`, validates MCP server policy, invokes HTTP/HTTPS tool endpoints, and fails unsupported transports explicitly. |
 | L18 | completed | Orchestrator now dispatches all currently ready graph nodes concurrently and advances the graph only after the batch completes. |
-| L19 | completed | `blocks/mcp` now supports MCP `stdio` subprocess transport with JSON-RPC `initialize`, `notifications/initialized`, and `tools/call`; advanced MCP resources, prompts, streaming, and session reuse remain outside MVP. |
+| L19 | completed | `blocks/mcp` now supports MCP `stdio` subprocess transport with JSON-RPC `initialize`, `notifications/initialized`, and `tools/call`; later advanced MCP resources, prompts, streaming, and session reuse are tracked as completed in `docs/advanced-runtime-scheduling-plan.md`. |

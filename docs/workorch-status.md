@@ -34,6 +34,8 @@
     `GET /api/v1/workorch/mcp/servers`,
     `GET /api/v1/workorch/mcp/servers/{serverId}`,
     `GET /api/v1/workorch/mcp/servers/{serverId}/tools`,
+    `GET /api/v1/workorch/mcp/servers/{serverId}/resources`,
+    `GET /api/v1/workorch/mcp/servers/{serverId}/prompts`,
     `GET /api/v1/workorch/memory?workspaceId={workspaceId}`
   - workspace / run / decision / approval write and execution endpoints are registered as native `magicEngine/http` routes:
     `POST /api/v1/workorch/workspaces`,
@@ -110,11 +112,14 @@
   failing immediately after the last tool block.
 - The shell block now creates the Workspace working directory before executing
   a command, so default generated Workspace paths are usable by runtime blocks.
-- `blocks/mcp` now registers `mcp/tool_call` as a runtime adapter. It validates
-  MCP server enablement and `allowedTools`, invokes HTTP/HTTPS endpoints or
-  MCP `stdio` JSON-RPC tool calls, and records output through the standard Step
-  / ToolCall / ValidationResult evidence path. Unsupported transports still
-  fail explicitly instead of falling back to `legacy/minimal`.
+- `blocks/mcp` now registers `mcp/tool_call`, `mcp/resource_read`, and
+  `mcp/prompt_get` as runtime adapter operations. It validates MCP server
+  enablement plus `allowedTools`, `allowedResources`, and `allowedPrompts`,
+  invokes HTTP/HTTPS endpoints or MCP `stdio` JSON-RPC operations, collects
+  streaming evidence as `streamEvents`, and records output through the standard
+  Step / ToolCall / ValidationResult evidence path. The `long_lived` session
+  policy reuses initialized stdio sessions per MCP server; unsupported
+  transports still fail explicitly instead of falling back to `legacy/minimal`.
 - LLM-driven Runs that bind a DoD now require a satisfied, evidence-backed
   `dodAssessment` before completion; missing or invalid assessments fail the
   terminal Step and Run.
@@ -263,7 +268,7 @@ HTTP endpoints:
 - `GET /api/v1/workorch/runs/{runId}/observability`
 - `POST /api/v1/workorch/runs/{runId}/start`
 - `POST /api/v1/workorch/runs/{runId}/resume`
-- all run execution entrypoints now share one in-process FIFO wait queue behind `[server].maxConcurrentRuns`
+- all run execution entrypoints now share one in-process priority-aware wait queue behind `[server].maxConcurrentRuns`; equal priority preserves FIFO order
 - `GET /api/v1/workorch/decisions`
 - `GET /api/v1/workorch/decisions/{ticketId}`
 - `POST /api/v1/workorch/decisions/{ticketId}/resolve`
@@ -281,6 +286,8 @@ HTTP endpoints:
 - `GET /api/v1/workorch/mcp/servers`
 - `GET /api/v1/workorch/mcp/servers/{serverId}`
 - `GET /api/v1/workorch/mcp/servers/{serverId}/tools`
+- `GET /api/v1/workorch/mcp/servers/{serverId}/resources`
+- `GET /api/v1/workorch/mcp/servers/{serverId}/prompts`
 - `POST /api/v1/workorch/workspaces/{workspaceId}/memory`
 - `GET /api/v1/workorch/memory?workspaceId={workspaceId}`
 
@@ -452,11 +459,12 @@ Validated coverage currently includes:
 以下内容不是当前已完成的 MVP / framework alignment 交付范围内的活跃待办项；如后续启动，需要重新拆成正式业务需求：
 
 - global `magicCommon/framework/plugin/module.Register` usage for long-lived workorch runtime units
-- richer multi-run scheduling beyond the current in-process FIFO wait queue
+- distributed scheduling, external worker fleets, and multi-tenant execution quota
 
 当前已按 MVP 形式交付，后续如需增强应作为新需求处理：
 
 - file-backed repository adapter as the first non-memory persistence path
+- priority-aware local run scheduling behind `[server].maxConcurrentRuns`
 
 ## Runtime Expansion Scope
 
@@ -475,6 +483,23 @@ runtime expansion 交付范围已完成，范围与验收记录见：
 - completed: `R3 Generalized Diff Patch Apply Engine`
 - completed: `R4 Block Execution Graph`
 - completed: `R5 Observability Pipeline`
+
+## Advanced Runtime And Scheduling Scope
+
+advanced runtime and scheduling 交付范围已完成，范围与验收记录见：
+
+- `docs/advanced-runtime-scheduling-plan.md`
+
+当前活跃项：
+
+- active: none
+
+已完成：
+
+- completed: `A1 MCP Resources And Prompts`
+- completed: `A2 MCP Streaming Evidence`
+- completed: `A3 MCP Long-Lived Stdio Session`
+- completed: `A4 Priority-Aware Local Run Scheduling`
 
 ## LLM Driven Workspace Execution Design
 

@@ -15,7 +15,9 @@ type CreateServerCommand struct {
 	Enabled               bool
 	AllowedTools          []string
 	AllowedResources      []string
+	AllowedPrompts        []string
 	DefaultApprovalPolicy string
+	SessionPolicy         string
 	TimeoutMillis         int
 }
 

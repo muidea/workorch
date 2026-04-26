@@ -134,11 +134,12 @@ from the resulting formal execution events and evidence.
   `StepExecutionResult` contract and a step-kind based adapter registry. The
   legacy minimal runtime remains available through the same contract, and tests
   cover dispatch to a registered non-legacy adapter. Registered concrete
-  adapters now include `shell/command`, `llm/workspace_execution`, and
-  `mcp/tool_call`; the current MCP adapter supports governed HTTP/HTTPS
-  endpoint invocation and MCP `stdio` JSON-RPC tool calls. Advanced MCP
-  resources, prompts, streaming, and external runtime marketplace integration
-  remain outside this runtime expansion scope.
+  adapters now include `shell/command`, `llm/workspace_execution`,
+  `mcp/tool_call`, `mcp/resource_read`, and `mcp/prompt_get`; the current MCP
+  adapter supports governed HTTP/HTTPS endpoint invocation, MCP `stdio`
+  JSON-RPC operations, streaming evidence, and long-lived stdio session reuse.
+  External runtime marketplace integration remains outside this runtime
+  expansion scope.
 - completed: `R2 Controlled Shell Sandbox`
   The `blocks/shell` runtime unit now registers a `shell/command` adapter through
   the runtime adapter registry and can execute a non-interactive command in the
