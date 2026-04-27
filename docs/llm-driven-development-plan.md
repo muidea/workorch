@@ -489,17 +489,20 @@ Acceptance:
 
 - Scripts fail on missing evidence, missing DoD assessment, unexpected legacy
   fallback, missing Memory recall, or leaked provider secrets.
-- File backend restart preserves business objects and relationships.
+- Deployed-instance verification preserves business objects and relationships
+  through API reads; restart-read verification is an operator-managed deployment
+  check, not something e2e scripts perform by starting or stopping `workorchd`.
 
 Status:
 
 - completed
-- Added `scripts/verify-llm-workspace-execution.sh`, which starts
-  `workorchd` and a local OpenAI-compatible mock provider.
+- Added `scripts/verify-llm-workspace-execution.sh`, which connects to the
+  currently deployed `workorchd` instance and starts only a local
+  OpenAI-compatible mock provider.
 - Added `make verify-llm` and `make verify-llm-file`.
 - The script covers happy path, Decision resume, Approval rejection,
-  schema-invalid provider output, Memory write/recall, and file backend
-  restart-read verification.
+  schema-invalid provider output, and Memory write/recall through the deployed
+  service API.
 - LLM-created default Decision and Approval IDs are now URL-safe so HTTP
   detail and resolution routes can operate on them directly.
 - verification:

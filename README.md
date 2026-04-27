@@ -105,8 +105,8 @@ Notes:
 
 - `make build` writes the binary to `./bin/workorchd`
 - `make console-build` rebuilds the embedded management console assets from `web/workorch-console`
-- `make verify-service` and `make verify-service-file` are the formal local acceptance checks for the HTTP service
-- `make verify-service-file` includes file-backed restart-read verification for persisted workspace / run / decision / approval state
+- `make verify-service` and `make verify-service-file` verify the currently deployed HTTP service at `WORKORCH_BASE_URL` without starting or stopping `workorchd`
+- `make verify-service-file` is kept as an alias for the same deployed-instance check
 - `make run-file` runs the service with the file-backed repository backend
 - default memory-backed service state is shared within the running `workorchd` process; use `make run-file` for restart persistence
 - file-backed service execution is repeatable against the same data directory for the shipped workorch IDs
@@ -376,7 +376,7 @@ make docker-verify
 make docker-verify-file
 ```
 
-`make verify-mvp` runs the local memory-backed MVP verification bundle. `make verify-mvp-file` runs the file-backed bundle with restart-read continuity. `make verify-real-vector-memory` targets an already running `workorchd`, temporarily registers an embedding-capable mock provider, verifies vector Memory recall evidence, and restores the original LLM configuration. `make verify-real-mvp` targets an already running `workorchd`; it combines the configured real LLM check, deployed MCP `stdio` runtime check, and deployed vector Memory recall check.
+All `verify-*` e2e scripts target the currently deployed `workorchd` instance through `WORKORCH_BASE_URL` and do not build, start, stop, or restart the service. `make verify-mvp` runs service smoke, mock LLM, and mock MCP `stdio` checks against that deployed instance; `make verify-mvp-file` is an alias for the same check. `make verify-real-vector-memory` targets an already running `workorchd`, temporarily registers an embedding-capable mock provider, verifies vector Memory recall evidence, and restores the original LLM configuration. `make verify-real-mvp` targets an already running `workorchd`; it combines the configured real LLM check, deployed MCP `stdio` runtime check, and deployed vector Memory recall check.
 
 ## Development targets
 

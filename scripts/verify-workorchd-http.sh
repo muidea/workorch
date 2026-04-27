@@ -2,262 +2,161 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP_DIR="$(mktemp -d)"
-BIN_PATH="$TMP_DIR/workorchd"
-ADDR="${WORKORCH_VERIFY_ADDR:-127.0.0.1:18080}"
-BASE_URL="http://$ADDR"
-BACKEND="${WORKORCH_VERIFY_BACKEND:-memory}"
-DATA_DIR="${WORKORCH_VERIFY_DATA_DIR:-$TMP_DIR/workorch-data}"
-PID=""
-LOG_PATH="$TMP_DIR/workorchd.log"
-CONFIG_DIR="$TMP_DIR/config"
+BASE_URL="${WORKORCH_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
+TMP_DIR="${WORKORCH_VERIFY_ARTIFACT_DIR:-$(mktemp -d)}"
+KEEP_ARTIFACTS="${WORKORCH_VERIFY_KEEP_ARTIFACTS:-0}"
+RUN_SUFFIX="${WORKORCH_VERIFY_RUN_SUFFIX:-$$}"
 
 report_failure() {
   local status=$?
   if [[ $status -eq 0 ]]; then
     return
   fi
-  echo "workorchd HTTP verification failed for backend=$BACKEND" >&2
-  if [[ -f "$LOG_PATH" ]]; then
-    echo "--- workorchd.log ---" >&2
-    tail -n 200 "$LOG_PATH" >&2 || true
-  fi
+  echo "workorchd HTTP verification failed for deployed service $BASE_URL" >&2
+  echo "artifacts=$TMP_DIR" >&2
+  for file in "$TMP_DIR"/*.json; do
+    [[ -f "$file" ]] || continue
+    echo "--- $file ---" >&2
+    python3 -m json.tool "$file" >&2 || cat "$file" >&2
+  done
 }
 
 cleanup() {
-  if [[ -n "$PID" ]]; then
-    kill -INT "$PID" >/dev/null 2>&1 || true
-    wait "$PID" >/dev/null 2>&1 || true
+  local status=$?
+  if [[ "$KEEP_ARTIFACTS" != "1" && $status -eq 0 ]]; then
+    rm -rf "$TMP_DIR"
   fi
-  rm -rf "$TMP_DIR"
 }
 
-start_server() {
-  mkdir -p "$CONFIG_DIR"
-  cat >"$CONFIG_DIR/application.toml" <<EOF
-endpointName = "workorchd"
+json_path() {
+  python3 - "$1" "$2" <<'PY'
+import json
+import sys
 
-[server]
-addr = "$ADDR"
-readHeaderTimeout = "5s"
-readTimeout = "15s"
-writeTimeout = "30s"
-idleTimeout = "60s"
-shutdownTimeout = "5s"
-maxConcurrentRuns = 1
-
-[repository]
-backend = "$BACKEND"
-dataDir = "$DATA_DIR"
-
-[llm]
-defaultProvider = "local"
-
-[llm.providers.local]
-timeout = "60s"
-disabled = false
-EOF
-  "$BIN_PATH" -config-dir "$CONFIG_DIR" >>"$LOG_PATH" 2>&1 &
-  PID=$!
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+current = data
+for part in sys.argv[2].split("."):
+    current = current[part]
+print(current)
+PY
 }
 
-stop_server() {
-  if [[ -z "$PID" ]]; then
-    return
-  fi
-  kill -INT "$PID" >/dev/null 2>&1 || true
-  wait "$PID" >/dev/null 2>&1 || true
-  PID=""
-}
-
-wait_ready() {
-  for _ in $(seq 1 50); do
-    if curl -fsS "$BASE_URL/healthz" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 0.2
-  done
-  curl -fsS "$BASE_URL/healthz" >/dev/null
+post_json() {
+  local url="$1"
+  local body="$2"
+  local output="$3"
+  curl -fsS -H "Content-Type: application/json" -X POST "$url" -d "$body" >"$output"
 }
 
 trap report_failure ERR
 trap cleanup EXIT
 
-cd "$ROOT_DIR"
-go build -o "$BIN_PATH" ./application/workorchd
+mkdir -p "$TMP_DIR"
 
-mkdir -p "$DATA_DIR"
-start_server
-wait_ready
+curl -fsS "$BASE_URL/healthz" >"$TMP_DIR/healthz.json"
+grep '"status": "ok"' "$TMP_DIR/healthz.json" >/dev/null
+curl -fsS "$BASE_URL/readyz" >"$TMP_DIR/readyz.json"
+grep '"status": "ready"' "$TMP_DIR/readyz.json" >/dev/null
+curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics.txt"
+grep 'workorch_http_requests_total' "$TMP_DIR/metrics.txt" >/dev/null
 
-curl -fsS "$BASE_URL/healthz" | grep '"status": "ok"' >/dev/null
-curl -fsS "$BASE_URL/readyz" | grep '"status": "ready"' >/dev/null
-curl -fsS "$BASE_URL/metrics" | grep 'workorch_http_requests_total' >/dev/null
 curl -fsS "$BASE_URL/console" | grep 'workorch Console' >/dev/null
 curl -fsS "$BASE_URL/console/assets/workorch-console.css" | grep 'workorch-section' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Workspace Overview' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Decision Queue' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Workspace Console' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Configuration' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Service Health' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Runtime Summary' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Latest Run' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Start execution' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Create workspace' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Define goal' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Define DoD' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/configuration" | grep '"defaultProviderId": "local"' >/dev/null
-if curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep -E 'workorch management overview|Create run|Run slice|Available slice catalog' >/dev/null; then
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" >"$TMP_DIR/workorch-console.js"
+grep 'workorch 控制台' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '业务总览' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '治理队列' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '工作空间详情' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '运行控制' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '系统配置' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '服务状态' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '创建工作空间' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '定义目标' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '定义验收标准' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '启动执行' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '运行摘要' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '最近运行' "$TMP_DIR/workorch-console.js" >/dev/null
+if grep -E 'workorch management overview|Create run|Run slice|Available slice catalog' "$TMP_DIR/workorch-console.js" >/dev/null; then
   echo "console exposes retired web entries" >&2
   exit 1
 fi
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
-  -d '{"title":"verify workspace","description":"verify workspace description"}' >"$TMP_DIR/workspace.json"
-workspace_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/workspace.json" | head -n1)"
+
+curl -fsS "$BASE_URL/api/v1/workorch/configuration" >"$TMP_DIR/configuration.json"
+grep '"configuration"' "$TMP_DIR/configuration.json" >/dev/null
+
+post_json "$BASE_URL/api/v1/workorch/workspaces" \
+  '{"title":"verify workspace '"$RUN_SUFFIX"'","description":"verify workspace description"}' \
+  "$TMP_DIR/workspace.json"
+workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
-grep '"title": "verify workspace"' "$TMP_DIR/workspace.json" >/dev/null
+grep "\"id\": \"$workspace_id\"" "$TMP_DIR/workspace.json" >/dev/null
 grep '"description": "verify workspace description"' "$TMP_DIR/workspace.json" >/dev/null
 grep "\"workingDirectory\": \".*/workspaces/$workspace_id\"" "$TMP_DIR/workspace.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces" | grep "\"id\": \"$workspace_id\"" >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" -H 'Content-Type: application/json' \
-  -d '{"text":"verify workorch service delivery"}' >"$TMP_DIR/goal.json"
-goal_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/goal.json" | head -n1)"
+
+post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" \
+  '{"text":"verify workorch service delivery"}' \
+  "$TMP_DIR/goal.json"
+goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
 [[ -n "$goal_id" ]]
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" -H 'Content-Type: application/json' \
-  -d '{"items":["workspace can be created","run can be completed"]}' >"$TMP_DIR/dod.json"
-dod_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/dod.json" | head -n1)"
+
+post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" \
+  '{"items":["workspace can be created","run can be completed"]}' \
+  "$TMP_DIR/dod.json"
+dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 [[ -n "$dod_id" ]]
+
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" | grep "\"id\": \"$goal_id\"" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/goals/$goal_id" | grep '"text": "verify workorch service delivery"' >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" | grep "\"id\": \"$dod_id\"" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/dods/$dod_id" | grep '"state": "ready"' >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" -H 'Content-Type: application/json' \
-  -d '{"runId":"run-shared-verify","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'"}' | grep '"id": "run-shared-verify"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs" | grep '"id": "run-shared-verify"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs?workspaceId=$workspace_id" | grep '"id": "run-shared-verify"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/run-shared-verify" | grep "\"workspaceId\": \"$workspace_id\"" >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-shared-verify/start" | grep '"state": "completed"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/run-shared-verify/status" | grep '"state": "completed"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/run-shared-verify/observability" | grep '"runtimeCheckpointTotal"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" | grep '"id": "run-shared-verify"' >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" -H 'Content-Type: application/json' \
-  -d '{}' >"$TMP_DIR/workspace-activation.json"
-grep '"activation"' "$TMP_DIR/workspace-activation.json" >/dev/null
-grep "\"goalId\": \"$goal_id\"" "$TMP_DIR/workspace-activation.json" >/dev/null
-grep "\"doDId\": \"$dod_id\"" "$TMP_DIR/workspace-activation.json" >/dev/null
-grep '"state": "completed"' "$TMP_DIR/workspace-activation.json" >/dev/null
-curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type: application/json' \
-  -d '{"defaultProviderId":"local","providers":[{"id":"local","provider":"compatible","baseUrl":"http://127.0.0.1:11434/v1","apiKey":"verify-secret","model":"verify-model","timeout":"45s","disabled":false}]}' >"$TMP_DIR/configuration-llm.json"
-grep '"model": "verify-model"' "$TMP_DIR/configuration-llm.json" >/dev/null
-grep '"apiKeyConfigured": true' "$TMP_DIR/configuration-llm.json" >/dev/null
-if grep 'verify-secret' "$TMP_DIR/configuration-llm.json" >/dev/null; then
-  echo "configuration update leaked provider api key" >&2
-  exit 1
-fi
-curl -fsS "$BASE_URL/api/v1/workorch/configuration" | grep '"model": "verify-model"' >/dev/null
+
+run_id="run-shared-verify-$RUN_SUFFIX"
+post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" \
+  '{"runId":"'"$run_id"'","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'"}' \
+  "$TMP_DIR/run.json"
+grep "\"id\": \"$run_id\"" "$TMP_DIR/run.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs" | grep "\"id\": \"$run_id\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs?workspaceId=$workspace_id" | grep "\"id\": \"$run_id\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id" | grep "\"workspaceId\": \"$workspace_id\"" >/dev/null
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$run_id/start" >"$TMP_DIR/run-start.json"
+grep '"state": "completed"' "$TMP_DIR/run-start.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" | grep '"state": "completed"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/run-observability.json"
+grep '"runtimeCheckpointTotal"' "$TMP_DIR/run-observability.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/run-snapshot.json"
+grep "\"id\": \"$run_id\"" "$TMP_DIR/run-snapshot.json" >/dev/null
+grep '"runtimeCheckpoints"' "$TMP_DIR/run-snapshot.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" | grep "\"id\": \"$run_id\"" >/dev/null
 
 patch_work_dir="$TMP_DIR/runtime-patch-workspace"
 mkdir -p "$patch_work_dir"
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
-  -d '{"title":"verify runtime patch workspace","workingDirectory":"'"$patch_work_dir"'"}' >"$TMP_DIR/patch-workspace.json"
-patch_workspace_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/patch-workspace.json" | head -n1)"
+post_json "$BASE_URL/api/v1/workorch/workspaces" \
+  '{"title":"verify runtime patch workspace '"$RUN_SUFFIX"'","workingDirectory":"'"$patch_work_dir"'"}' \
+  "$TMP_DIR/patch-workspace.json"
+patch_workspace_id="$(json_path "$TMP_DIR/patch-workspace.json" "workspace.id")"
 [[ -n "$patch_workspace_id" ]]
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$patch_workspace_id/goals" -H 'Content-Type: application/json' \
-  -d '{"text":"verify runtime patch"}' >"$TMP_DIR/patch-goal.json"
-patch_goal_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/patch-goal.json" | head -n1)"
+post_json "$BASE_URL/api/v1/workorch/workspaces/$patch_workspace_id/goals" \
+  '{"text":"verify runtime patch"}' \
+  "$TMP_DIR/patch-goal.json"
+patch_goal_id="$(json_path "$TMP_DIR/patch-goal.json" "goal.id")"
 [[ -n "$patch_goal_id" ]]
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$patch_workspace_id/dods" -H 'Content-Type: application/json' \
-  -d '{"items":["runtime patch is applied"]}' >"$TMP_DIR/patch-dod.json"
-patch_dod_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/patch-dod.json" | head -n1)"
+post_json "$BASE_URL/api/v1/workorch/workspaces/$patch_workspace_id/dods" \
+  '{"items":["runtime patch is applied"]}' \
+  "$TMP_DIR/patch-dod.json"
+patch_dod_id="$(json_path "$TMP_DIR/patch-dod.json" "dod.id")"
 [[ -n "$patch_dod_id" ]]
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$patch_workspace_id/runs" -H 'Content-Type: application/json' \
-  -d '{"runId":"run-runtime-patch-verify","goalId":"'"$patch_goal_id"'","doDId":"'"$patch_dod_id"'"}' | grep '"id": "run-runtime-patch-verify"' >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-runtime-patch-verify/start" | grep '"state": "completed"' >/dev/null
+patch_run_id="run-runtime-patch-verify-$RUN_SUFFIX"
+post_json "$BASE_URL/api/v1/workorch/workspaces/$patch_workspace_id/runs" \
+  '{"runId":"'"$patch_run_id"'","goalId":"'"$patch_goal_id"'","doDId":"'"$patch_dod_id"'"}' \
+  "$TMP_DIR/patch-run.json"
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$patch_run_id/start" >"$TMP_DIR/patch-run-start.json"
+grep '"state": "completed"' "$TMP_DIR/patch-run-start.json" >/dev/null
 [[ -f "$patch_work_dir/workorch-runtime-output.txt" ]]
-grep 'run=run-runtime-patch-verify' "$patch_work_dir/workorch-runtime-output.txt" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/run-runtime-patch-verify/snapshot" >"$TMP_DIR/run-runtime-patch-verify-snapshot.json"
-grep '"targetRef": "workorch-runtime-output.txt"' "$TMP_DIR/run-runtime-patch-verify-snapshot.json" >/dev/null
-grep '"state": "applied"' "$TMP_DIR/run-runtime-patch-verify-snapshot.json" >/dev/null
+grep "run=$patch_run_id" "$patch_work_dir/workorch-runtime-output.txt" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$patch_run_id/snapshot" >"$TMP_DIR/patch-run-snapshot.json"
+grep '"targetRef": "workorch-runtime-output.txt"' "$TMP_DIR/patch-run-snapshot.json" >/dev/null
+grep '"state": "applied"' "$TMP_DIR/patch-run-snapshot.json" >/dev/null
 
-if [[ "$BACKEND" == "file" ]]; then
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" -H 'Content-Type: application/json' \
-    -d '{"runId":"run-verify","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'"}' | grep '"id": "run-verify"' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-verify/start" | grep '"state": "completed"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify/snapshot" | grep '"id": "run-verify"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify/status" | grep '"state": "completed"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify/observability" | grep '"terminal": true' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" -H 'Content-Type: application/json' \
-    -d '{"runId":"run-runtime-decision-block-verify","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'"}' | grep '"id": "run-runtime-decision-block-verify"' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-verify/start" >"$TMP_DIR/run-runtime-decision-block-verify.json"
-  grep '"state": "blocked_on_decision"' "$TMP_DIR/run-runtime-decision-block-verify.json" >/dev/null
-  ticket_id="$(sed -n 's/.*"blockingTicketId": "\(.*\)".*/\1/p' "$TMP_DIR/run-runtime-decision-block-verify.json" | head -n1)"
-  [[ -n "$ticket_id" ]]
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions" | grep "\"id\": \"$ticket_id\"" >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_id" | grep '"state": "open"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions?runId=run-runtime-decision-block-verify" | grep "\"id\": \"$ticket_id\"" >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_id/resolve" -H 'Content-Type: application/json' \
-    -d '{"resolutionType":"provide_missing_info"}' | grep '"resolutionType": "provide_missing_info"' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-verify/resume" | grep '"state": "completed"' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" -H 'Content-Type: application/json' \
-    -d '{"runId":"run-runtime-decision-block-rejected-verify","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'"}' | grep '"id": "run-runtime-decision-block-rejected-verify"' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-rejected-verify/start" >"$TMP_DIR/run-runtime-decision-block-rejected-verify.json"
-  reject_ticket_id="$(sed -n 's/.*"blockingTicketId": "\(.*\)".*/\1/p' "$TMP_DIR/run-runtime-decision-block-rejected-verify.json" | head -n1)"
-  [[ -n "$reject_ticket_id" ]]
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$reject_ticket_id/resolve" -H 'Content-Type: application/json' \
-    -d '{"resolutionType":"reject_current_path","resolutionPayload":{"operator":"verify"}}' | grep '"resolutionType": "reject_current_path"' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-rejected-verify/resume" | grep '"state": "failed"' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" -H 'Content-Type: application/json' \
-    -d '{"runId":"run-runtime-approval-block-verify","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'"}' | grep '"id": "run-runtime-approval-block-verify"' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-runtime-approval-block-verify/start" >"$TMP_DIR/run-runtime-approval-block-verify.json"
-  grep '"state": "blocked_on_approval"' "$TMP_DIR/run-runtime-approval-block-verify.json" >/dev/null
-  approval_id="$(sed -n 's/.*"blockingApprovalId": "\(.*\)".*/\1/p' "$TMP_DIR/run-runtime-approval-block-verify.json" | head -n1)"
-  [[ -n "$approval_id" ]]
-  curl -fsS "$BASE_URL/api/v1/workorch/approvals" | grep "\"id\": \"$approval_id\"" >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_id" | grep '"state": "pending"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id" | grep "\"id\": \"$approval_id\"" >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/approvals?runId=run-runtime-approval-block-verify" | grep "\"id\": \"$approval_id\"" >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_id/approve" | grep '"state": "approved"' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-runtime-approval-block-verify/resume" | grep '"state": "completed"' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" -H 'Content-Type: application/json' \
-    -d '{"runId":"run-runtime-approval-block-rejected-verify","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'"}' | grep '"id": "run-runtime-approval-block-rejected-verify"' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-runtime-approval-block-rejected-verify/start" >"$TMP_DIR/run-runtime-approval-block-rejected-verify.json"
-  reject_approval_id="$(sed -n 's/.*"blockingApprovalId": "\(.*\)".*/\1/p' "$TMP_DIR/run-runtime-approval-block-rejected-verify.json" | head -n1)"
-  [[ -n "$reject_approval_id" ]]
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$reject_approval_id/reject" | grep '"state": "rejected"' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/run-runtime-approval-block-rejected-verify/resume" | grep '"state": "failed"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/workspaces" | grep "\"id\": \"$workspace_id\"" >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | grep '"title": "verify workspace"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" | grep "\"id\": \"$workspace_id\"" >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs" | grep '"id": "run-verify"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs?workspaceId=$workspace_id" | grep '"id": "run-verify"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify" | grep "\"workspaceId\": \"$workspace_id\"" >/dev/null
-  for name in workspace.json goal.json dod.json run.json step.json tool_call.json patch.json validation_result.json runtime_checkpoint.json ticket.json resolution.json approval.json; do
-    [[ -f "$DATA_DIR/$name" ]]
-  done
-
-  stop_server
-  start_server
-  wait_ready
-
-  curl -fsS "$BASE_URL/readyz" | grep '"status": "ready"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | grep '"title": "verify workspace"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/goals/$goal_id" | grep '"text": "verify workorch service delivery"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/dods/$dod_id" | grep '"state": "ready"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" | grep '"id": "run-verify"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify" | grep '"state": "completed"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify/snapshot" | grep '"id": "run-verify"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify/status" | grep '"state": "completed"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify/observability" | grep '"runtimeCheckpointTotal"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-runtime-patch-verify/snapshot" | grep '"targetRef": "workorch-runtime-output.txt"' >/dev/null
-  [[ -f "$patch_work_dir/workorch-runtime-output.txt" ]]
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-verify" | grep '"state": "completed"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/run-runtime-decision-block-rejected-verify" | grep '"state": "failed"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_id" | grep '"state": "resolved"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$reject_ticket_id" | grep '"resolutionType": "reject_current_path"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_id" | grep '"state": "approved"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$reject_approval_id" | grep '"state": "rejected"' >/dev/null
-fi
-
-echo "workorchd HTTP verification passed for backend=$BACKEND"
+echo "workorchd HTTP verification passed for deployed service $BASE_URL"

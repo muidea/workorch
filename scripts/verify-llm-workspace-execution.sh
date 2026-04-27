@@ -4,39 +4,39 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
-BIN_PATH="$TMP_DIR/workorchd"
-ADDR="${WORKORCH_LLM_VERIFY_ADDR:-127.0.0.1:18180}"
+BASE_URL="${WORKORCH_LLM_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
 MOCK_ADDR="${WORKORCH_LLM_VERIFY_MOCK_ADDR:-127.0.0.1:18181}"
-BASE_URL="http://$ADDR"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
-BACKEND="${WORKORCH_LLM_VERIFY_BACKEND:-memory}"
-DATA_DIR="${WORKORCH_LLM_VERIFY_DATA_DIR:-$TMP_DIR/workorch-data}"
-SERVER_PID=""
+VERIFY_SUFFIX="${WORKORCH_LLM_VERIFY_SUFFIX:-$$}"
+MCP_SERVER_ID="mcp-context-verify-$VERIFY_SUFFIX"
+SKILL_ID="skill-llm-acceptance-$VERIFY_SUFFIX"
+SOUL_ID="soul-llm-acceptance-$VERIFY_SUFFIX"
+MEMORY_ID="memory-context-seed-$VERIFY_SUFFIX"
 MOCK_PID=""
-SERVER_LOG="$TMP_DIR/workorchd.log"
 MOCK_LOG="$TMP_DIR/llm-mock.log"
-CONFIG_DIR="$TMP_DIR/config"
 
 report_failure() {
   local status=$?
   if [[ $status -eq 0 ]]; then
     return
   fi
-  echo "workorchd LLM workspace execution verification failed for backend=$BACKEND" >&2
-  if [[ -f "$SERVER_LOG" ]]; then
-    echo "--- workorchd.log ---" >&2
-    tail -n 200 "$SERVER_LOG" >&2 || true
-  fi
+  echo "workorchd LLM workspace execution verification failed for deployed service $BASE_URL" >&2
   if [[ -f "$MOCK_LOG" ]]; then
     echo "--- llm-mock.log ---" >&2
     tail -n 200 "$MOCK_LOG" >&2 || true
   fi
+  for file in "$TMP_DIR"/*.json; do
+    [[ -f "$file" ]] || continue
+    echo "--- $file ---" >&2
+    python3 -m json.tool "$file" >&2 || cat "$file" >&2
+  done
 }
 
 cleanup() {
-  if [[ -n "$SERVER_PID" ]]; then
-    kill -INT "$SERVER_PID" >/dev/null 2>&1 || true
-    wait "$SERVER_PID" >/dev/null 2>&1 || true
+  if [[ -f "$TMP_DIR/original-llm-update.json" ]]; then
+    curl -fsS -H "Content-Type: application/json" -X PUT \
+      "$BASE_URL/api/v1/workorch/configuration/llm" \
+      -d @"$TMP_DIR/original-llm-update.json" >/dev/null 2>&1 || true
   fi
   if [[ -n "$MOCK_PID" ]]; then
     kill "$MOCK_PID" >/dev/null 2>&1 || true
@@ -188,6 +188,24 @@ def decision_payload(request):
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
+        if self.path == "/v1/embeddings":
+            size = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(size)
+            try:
+                payload = json.loads(body)
+            except Exception:
+                payload = {}
+            input_text = payload.get("input", "")
+            seed = sum(ord(ch) for ch in str(input_text)) or 1
+            vector = [round(((seed % 17) + 1) / 17, 6), round(((seed % 23) + 1) / 23, 6), round(((seed % 29) + 1) / 29, 6)]
+            response = {"data": [{"embedding": vector}]}
+            encoded = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
         if self.path != "/v1/chat/completions":
             self.send_response(404)
             self.end_headers()
@@ -223,48 +241,6 @@ PY
   MOCK_PID=$!
 }
 
-start_server() {
-  mkdir -p "$CONFIG_DIR"
-  cat >"$CONFIG_DIR/application.toml" <<EOF
-endpointName = "workorchd"
-
-[server]
-addr = "$ADDR"
-readHeaderTimeout = "5s"
-readTimeout = "15s"
-writeTimeout = "30s"
-idleTimeout = "60s"
-shutdownTimeout = "5s"
-maxConcurrentRuns = 1
-
-[repository]
-backend = "$BACKEND"
-dataDir = "$DATA_DIR"
-
-[llm]
-defaultProvider = "verify"
-
-[llm.providers.verify]
-provider = "compatible"
-baseURL = "$MOCK_BASE_URL"
-apiKey = "verify-secret"
-model = "verify-model"
-timeout = "60s"
-disabled = false
-EOF
-  "$BIN_PATH" -config-dir "$CONFIG_DIR" >>"$SERVER_LOG" 2>&1 &
-  SERVER_PID=$!
-}
-
-stop_server() {
-  if [[ -z "$SERVER_PID" ]]; then
-    return
-  fi
-  kill -INT "$SERVER_PID" >/dev/null 2>&1 || true
-  wait "$SERVER_PID" >/dev/null 2>&1 || true
-  SERVER_PID=""
-}
-
 wait_ready() {
   for _ in $(seq 1 50); do
     if curl -fsS "$BASE_URL/healthz" >/dev/null 2>&1; then
@@ -289,48 +265,168 @@ wait_mock() {
     -d '{"messages":[{"role":"user","content":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}]}' >/dev/null
 }
 
+write_llm_update_payloads() {
+  python3 - "$TMP_DIR/configuration.json" "$TMP_DIR/original-llm-update.json" "$TMP_DIR/verify-llm-update.json" "$MOCK_BASE_URL" <<'PY'
+import json
+import sys
+
+config_path, original_path, update_path, mock_base_url = sys.argv[1:]
+data = json.load(open(config_path, encoding="utf-8"))
+llm = data.get("configuration", {}).get("llm", {})
+providers = llm.get("providers") or []
+default_provider = llm.get("defaultProviderId") or "verify"
+default_embedding_provider = llm.get("defaultEmbeddingProviderId") or ""
+
+def clean_provider(item):
+    return {
+        "id": item.get("id", ""),
+        "provider": item.get("provider", ""),
+        "baseUrl": item.get("baseUrl", ""),
+        "model": item.get("model", ""),
+        "timeout": item.get("timeout", ""),
+        "disabled": bool(item.get("disabled", False)),
+        "chatCompletions": bool(item.get("chatCompletions", True)),
+        "streaming": bool(item.get("streaming", False)),
+        "nonChatOperations": item.get("nonChatOperations") or [],
+    }
+
+original = {
+    "defaultProviderId": default_provider,
+    "defaultEmbeddingProviderId": default_embedding_provider,
+    "providers": [clean_provider(item) for item in providers if item.get("id")],
+}
+if not original["providers"]:
+    original["providers"].append({
+        "id": "verify",
+        "provider": "compatible",
+        "baseUrl": mock_base_url,
+        "model": "verify-model",
+        "timeout": "60s",
+        "disabled": False,
+        "chatCompletions": True,
+        "streaming": False,
+        "nonChatOperations": ["embeddings"],
+    })
+    original["defaultProviderId"] = "verify"
+    original["defaultEmbeddingProviderId"] = "verify"
+with open(original_path, "w", encoding="utf-8") as handle:
+    json.dump(original, handle, separators=(",", ":"))
+
+updated_providers = [item for item in original["providers"] if item["id"] != "verify"]
+updated_providers.append({
+    "id": "verify",
+    "provider": "compatible",
+    "baseUrl": mock_base_url,
+    "apiKey": "verify-secret",
+    "model": "verify-model",
+    "timeout": "60s",
+    "disabled": False,
+    "chatCompletions": True,
+    "streaming": False,
+    "nonChatOperations": ["embeddings"],
+})
+update = {
+    "defaultProviderId": "verify",
+    "defaultEmbeddingProviderId": "verify",
+    "providers": updated_providers,
+}
+with open(update_path, "w", encoding="utf-8") as handle:
+    json.dump(update, handle, separators=(",", ":"))
+PY
+}
+
 activate_workspace_execution() {
   local output_file="$1"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify"}' >"$output_file"
+    -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"memoryIds":["'"$MEMORY_ID"'"],"priority":2}' >"$output_file"
+}
+
+activate_workspace_execution_with_auto_memory() {
+  local output_file="$1"
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
+    -H 'Content-Type: application/json' \
+    -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
 }
 
 trap report_failure ERR
 trap cleanup EXIT
 
 cd "$ROOT_DIR"
-go build -o "$BIN_PATH" ./application/workorchd
-
-mkdir -p "$DATA_DIR"
 start_mock_provider
 wait_mock
-start_server
 wait_ready
 
 curl -fsS "$BASE_URL/readyz" | grep '"status": "ready"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/configuration" >"$TMP_DIR/configuration.json"
+write_llm_update_payloads
+curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type: application/json' \
+  -d @"$TMP_DIR/verify-llm-update.json" >"$TMP_DIR/configuration-updated.json"
+grep '"apiKeyConfigured": true' "$TMP_DIR/configuration-updated.json" >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
   -d '{"title":"llm acceptance workspace","description":"verify LLM driven workspace execution"}' >"$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces" | grep "\"id\": \"$workspace_id\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | grep '"description": "verify LLM driven workspace execution"' >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" -H 'Content-Type: application/json' \
   -d '{"text":"verify LLM driven workspace execution"}' >"$TMP_DIR/goal.json"
 goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
 [[ -n "$goal_id" ]]
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" | grep "\"id\": \"$goal_id\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/goals/$goal_id" | grep '"verify LLM driven workspace execution"' >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" -H 'Content-Type: application/json' \
   -d '{"items":["happy path completes","decision can be resolved","approval rejection fails safely","multi gate decision then approval can complete","schema failure is observable","memory recall is visible"]}' >"$TMP_DIR/dod.json"
 dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 [[ -n "$dod_id" ]]
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" | grep "\"id\": \"$dod_id\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/dods/$dod_id" | grep '"multi gate decision then approval can complete"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/workspace-snapshot-defined.json"
+grep "\"id\": \"$workspace_id\"" "$TMP_DIR/workspace-snapshot-defined.json" >/dev/null
+
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/mcp/servers" -H 'Content-Type: application/json' \
+  -d '{"id":"'"$MCP_SERVER_ID"'","name":"MCP Context Verify","transport":"stdio","endpoint":"context-helper","enabled":true,"allowedTools":["repo.summary"],"allowedResources":["workspace://acceptance"],"allowedPrompts":["workorch.acceptance"],"defaultApprovalPolicy":"operator","sessionPolicy":"long_lived","timeoutMillis":60000}' >"$TMP_DIR/mcp-server.json"
+grep "\"id\": \"$MCP_SERVER_ID\"" "$TMP_DIR/mcp-server.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/mcp/servers" | grep "\"id\": \"$MCP_SERVER_ID\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID" | grep '"sessionPolicy": "long_lived"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID/tools" | grep '"name": "repo.summary"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID/resources" | grep '"uri": "workspace://acceptance"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID/prompts" | grep '"name": "workorch.acceptance"' >/dev/null
+
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/skills" -H 'Content-Type: application/json' \
+  -d '{"id":"'"$SKILL_ID"'","name":"LLM acceptance skill","version":"v1","description":"acceptance skill for governed execution","triggerRules":["workspace acceptance"],"instruction":"Use the provided Goal, DoD, MCP and Memory context to complete the run.","requiredToolKinds":["llm/chat"],"requiredMCPServerRefs":["'"$MCP_SERVER_ID"'"],"constraints":["must preserve governance gates"]}' >"$TMP_DIR/skill.json"
+grep "\"id\": \"$SKILL_ID\"" "$TMP_DIR/skill.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/skills" | grep "\"id\": \"$SKILL_ID\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/skills/$SKILL_ID" | grep '"requiredMCPServerRefs"' >/dev/null
+
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/souls" -H 'Content-Type: application/json' \
+  -d '{"id":"'"$SOUL_ID"'","name":"LLM Acceptance Soul","description":"acceptance soul for governed execution","businessDomains":["workorch"],"systemInstruction":"Drive the workspace according to Goal and DoD while respecting governance gates.","planningPolicy":"goal-first","decisionPolicy":"ask when missing info is required","approvalPolicy":"require operator approval for risky action","validationPolicy":"produce DoD evidence","allowedSkillRefs":["'"$SKILL_ID"'"],"allowedMCPServerRefs":["'"$MCP_SERVER_ID"'"],"allowedToolKinds":["llm/chat"],"outputContract":"workorch llm step contract"}' >"$TMP_DIR/soul.json"
+grep "\"id\": \"$SOUL_ID\"" "$TMP_DIR/soul.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/souls" | grep "\"id\": \"$SOUL_ID\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/souls/$SOUL_ID" | grep '"decisionPolicy"' >/dev/null
+
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory" -H 'Content-Type: application/json' \
+  -d '{"memoryId":"'"$MEMORY_ID"'","sourceType":"user","memoryType":"project_context","content":"Seed memory for acceptance execution.","summary":"Seeded acceptance memory is available to runs.","tags":["acceptance","seed"],"importance":8,"confidence":9,"visibility":"workspace","embeddingProviderId":"verify","embeddingModel":"verify-embedding","embeddingText":"seeded acceptance memory","vector":[0.1,0.2,0.3]}' >"$TMP_DIR/memory-seed.json"
+grep "\"id\": \"$MEMORY_ID\"" "$TMP_DIR/memory-seed.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" | grep "\"$MEMORY_ID\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id&q=Seeded" | grep "\"$MEMORY_ID\"" >/dev/null
 
 activate_workspace_execution "$TMP_DIR/happy-activation.json"
 grep '"state": "completed"' "$TMP_DIR/happy-activation.json" >/dev/null
 happy_run_id="$(json_path "$TMP_DIR/happy-activation.json" "activation.run.id")"
+curl -fsS "$BASE_URL/api/v1/workorch/runs?workspaceId=$workspace_id" | grep "\"id\": \"$happy_run_id\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id" | grep '"state": "completed"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id/status" | grep '"state": "completed"' >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id/snapshot" >"$TMP_DIR/happy-snapshot.json"
 grep '"dodAssessment"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"memoryRefs"' "$TMP_DIR/happy-snapshot.json" >/dev/null
+grep "\"soulId\": \"$SOUL_ID\"" "$TMP_DIR/happy-snapshot.json" >/dev/null
+grep '"skillIds"' "$TMP_DIR/happy-snapshot.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id/observability" >"$TMP_DIR/happy-observability.json"
+grep '"terminal": true' "$TMP_DIR/happy-observability.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DIR/memory-after-happy.json"
 grep 'LLM happy path acceptance produced reusable workspace memory' "$TMP_DIR/memory-after-happy.json" >/dev/null
 
@@ -339,18 +435,26 @@ grep '"state": "blocked_on_decision"' "$TMP_DIR/decision-activation.json" >/dev/
 decision_run_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.id")"
 ticket_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.blockingTicketId")"
 ticket_path="$(url_encode "$ticket_id")"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id/status" | grep '"state": "blocked_on_decision"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/decisions?runId=$decision_run_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path" | grep '"decisionKind": "provide_missing_info"' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve" -H 'Content-Type: application/json' \
   -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance"}}' | grep '"resolutionType": "provide_missing_info"' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$decision_run_id/resume" | grep '"state": "completed"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id/observability" | grep '"terminal": true' >/dev/null
 
 activate_workspace_execution "$TMP_DIR/approval-activation.json"
 grep '"state": "blocked_on_approval"' "$TMP_DIR/approval-activation.json" >/dev/null
 approval_run_id="$(json_path "$TMP_DIR/approval-activation.json" "activation.run.id")"
 approval_id="$(json_path "$TMP_DIR/approval-activation.json" "activation.run.blockingApprovalId")"
 approval_path="$(url_encode "$approval_id")"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$approval_run_id/status" | grep '"state": "blocked_on_approval"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id" | grep "\"id\": \"$approval_id\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/approvals?runId=$approval_run_id" | grep "\"id\": \"$approval_id\"" >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_path/reject" | grep '"state": "rejected"' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$approval_run_id/resume" | grep '"state": "failed"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$approval_run_id/observability" | grep '"terminal": true' >/dev/null
 
 activate_workspace_execution "$TMP_DIR/multi-gate-decision-activation.json"
 grep '"state": "blocked_on_decision"' "$TMP_DIR/multi-gate-decision-activation.json" >/dev/null
@@ -371,34 +475,34 @@ curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/snapshot" >"$TMP_DI
 grep "\"id\": \"$multi_gate_ticket_id\"" "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
 grep "\"id\": \"$multi_gate_approval_id\"" "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
 grep 'multi gate decision then approval can complete' "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/status" | grep '"state": "completed"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/observability" >"$TMP_DIR/multi-gate-observability.json"
+grep '"terminal": true' "$TMP_DIR/multi-gate-observability.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/workspace-snapshot-after-governance.json"
+grep "\"id\": \"$multi_gate_run_id\"" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
+grep "\"id\": \"$multi_gate_ticket_id\"" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
+grep "\"id\": \"$multi_gate_approval_id\"" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
 
 activate_workspace_execution "$TMP_DIR/schema-failure-activation.json"
 grep '"state": "failed"' "$TMP_DIR/schema-failure-activation.json" >/dev/null
 schema_run_id="$(json_path "$TMP_DIR/schema-failure-activation.json" "activation.run.id")"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_run_id/snapshot" >"$TMP_DIR/schema-failure-snapshot.json"
 grep '"llm_schema_invalid"' "$TMP_DIR/schema-failure-snapshot.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_run_id/observability" | grep '"terminal": true' >/dev/null
 
-activate_workspace_execution "$TMP_DIR/memory-recall-activation.json"
+activate_workspace_execution_with_auto_memory "$TMP_DIR/memory-recall-activation.json"
 grep '"state": "completed"' "$TMP_DIR/memory-recall-activation.json" >/dev/null
 memory_run_id="$(json_path "$TMP_DIR/memory-recall-activation.json" "activation.run.id")"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/snapshot" >"$TMP_DIR/memory-recall-snapshot.json"
 grep '"memories"' "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
-grep 'LLM happy path acceptance produced reusable workspace memory' "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
+grep '"memoryRetrieval"' "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
+grep "\"$MEMORY_ID\"" "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/observability" | grep '"terminal": true' >/dev/null
+curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics.txt"
+grep 'workorch_http_requests_total{endpoint="configuration_update"}' "$TMP_DIR/metrics.txt" >/dev/null
+grep 'workorch_http_requests_total{endpoint="workspace_execution_activation"}' "$TMP_DIR/metrics.txt" >/dev/null
+grep 'workorch_http_requests_total{endpoint="run_observability"}' "$TMP_DIR/metrics.txt" >/dev/null
+grep 'workorch_http_requests_total{endpoint="approval_approve"}' "$TMP_DIR/metrics.txt" >/dev/null
+grep 'workorch_http_requests_total{endpoint="approval_reject"}' "$TMP_DIR/metrics.txt" >/dev/null
 
-if [[ "$BACKEND" == "file" ]]; then
-  [[ -f "$DATA_DIR/memory_item.json" ]]
-  stop_server
-  start_server
-  wait_ready
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id" | grep '"state": "completed"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id" | grep '"state": "completed"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$approval_run_id" | grep '"state": "failed"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id" | grep '"state": "completed"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$multi_gate_ticket_path" | grep '"state": "resolved"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path" | grep '"state": "approved"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/snapshot" | grep 'multi gate decision then approval can complete' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_run_id/snapshot" | grep '"llm_schema_invalid"' >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" | grep 'LLM happy path acceptance produced reusable workspace memory' >/dev/null
-fi
-
-echo "workorchd LLM workspace execution verification passed for backend=$BACKEND"
+echo "workorchd LLM workspace execution verification passed for deployed service $BASE_URL"

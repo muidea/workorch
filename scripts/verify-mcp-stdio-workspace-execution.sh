@@ -4,18 +4,13 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
-BIN_PATH="$TMP_DIR/workorchd"
-ADDR="${WORKORCH_MCP_STDIO_VERIFY_ADDR:-127.0.0.1:18184}"
+BASE_URL="${WORKORCH_MCP_STDIO_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
 MOCK_ADDR="${WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR:-127.0.0.1:18185}"
-BASE_URL="http://$ADDR"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
-BACKEND="${WORKORCH_MCP_STDIO_VERIFY_BACKEND:-memory}"
-DATA_DIR="${WORKORCH_MCP_STDIO_VERIFY_DATA_DIR:-$TMP_DIR/workorch-data}"
-SERVER_PID=""
+VERIFY_SUFFIX="${WORKORCH_MCP_STDIO_VERIFY_SUFFIX:-$$}"
+MCP_SERVER_ID="mcp-stdio-verify-$VERIFY_SUFFIX"
 MOCK_PID=""
-SERVER_LOG="$TMP_DIR/workorchd.log"
 MOCK_LOG="$TMP_DIR/llm-mock.log"
-CONFIG_DIR="$TMP_DIR/config"
 MCP_HELPER="$TMP_DIR/mcp_stdio_helper.py"
 
 report_failure() {
@@ -23,11 +18,7 @@ report_failure() {
   if [[ $status -eq 0 ]]; then
     return
   fi
-  echo "workorchd MCP stdio verification failed for backend=$BACKEND" >&2
-  if [[ -f "$SERVER_LOG" ]]; then
-    echo "--- workorchd.log ---" >&2
-    tail -n 200 "$SERVER_LOG" >&2 || true
-  fi
+  echo "workorchd MCP stdio verification failed for deployed service $BASE_URL" >&2
   if [[ -f "$MOCK_LOG" ]]; then
     echo "--- llm-mock.log ---" >&2
     tail -n 200 "$MOCK_LOG" >&2 || true
@@ -40,9 +31,10 @@ report_failure() {
 }
 
 cleanup() {
-  if [[ -n "$SERVER_PID" ]]; then
-    kill -INT "$SERVER_PID" >/dev/null 2>&1 || true
-    wait "$SERVER_PID" >/dev/null 2>&1 || true
+  if [[ -f "$TMP_DIR/original-llm-update.json" ]]; then
+    curl -fsS -H "Content-Type: application/json" -X PUT \
+      "$BASE_URL/api/v1/workorch/configuration/llm" \
+      -d @"$TMP_DIR/original-llm-update.json" >/dev/null 2>&1 || true
   fi
   if [[ -n "$MOCK_PID" ]]; then
     kill "$MOCK_PID" >/dev/null 2>&1 || true
@@ -106,7 +98,7 @@ def decision_payload(user_content):
                 "id": "mcp-stdio-call",
                 "kind": "mcp/tool_call",
                 "input": {
-                    "serverId": "mcp-stdio-verify",
+                    "serverId": os.environ.get("WORKORCH_MCP_STDIO_VERIFY_SERVER_ID", "mcp-stdio-verify"),
                     "tool": "repo.summary",
                     "input": {"path": "."}
                 }
@@ -144,7 +136,7 @@ class Handler(BaseHTTPRequestHandler):
 host, port_text = os.environ.get("WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR", "127.0.0.1:18185").split(":", 1)
 ThreadingHTTPServer((host, int(port_text)), Handler).serve_forever()
 PY
-  WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR="$MOCK_ADDR" python3 "$TMP_DIR/llm_mock_provider.py" >>"$MOCK_LOG" 2>&1 &
+  WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR="$MOCK_ADDR" WORKORCH_MCP_STDIO_VERIFY_SERVER_ID="$MCP_SERVER_ID" python3 "$TMP_DIR/llm_mock_provider.py" >>"$MOCK_LOG" 2>&1 &
   MOCK_PID=$!
 }
 
@@ -198,48 +190,6 @@ PY
   chmod +x "$MCP_HELPER"
 }
 
-start_server() {
-  mkdir -p "$CONFIG_DIR"
-  cat >"$CONFIG_DIR/application.toml" <<EOF
-endpointName = "workorchd"
-
-[server]
-addr = "$ADDR"
-readHeaderTimeout = "5s"
-readTimeout = "15s"
-writeTimeout = "30s"
-idleTimeout = "60s"
-shutdownTimeout = "5s"
-maxConcurrentRuns = 1
-
-[repository]
-backend = "$BACKEND"
-dataDir = "$DATA_DIR"
-
-[llm]
-defaultProvider = "verify"
-
-[llm.providers.verify]
-provider = "compatible"
-baseURL = "$MOCK_BASE_URL"
-apiKey = "verify-secret"
-model = "verify-model"
-timeout = "60s"
-disabled = false
-EOF
-  "$BIN_PATH" -config-dir "$CONFIG_DIR" >>"$SERVER_LOG" 2>&1 &
-  SERVER_PID=$!
-}
-
-stop_server() {
-  if [[ -z "$SERVER_PID" ]]; then
-    return
-  fi
-  kill -INT "$SERVER_PID" >/dev/null 2>&1 || true
-  wait "$SERVER_PID" >/dev/null 2>&1 || true
-  SERVER_PID=""
-}
-
 wait_ready() {
   for _ in $(seq 1 50); do
     if curl -fsS "$BASE_URL/readyz" >/dev/null 2>&1; then
@@ -262,6 +212,75 @@ wait_mock() {
   curl -fsS -X POST "http://$MOCK_ADDR/v1/chat/completions" \
     -H 'Content-Type: application/json' \
     -d '{"messages":[{"role":"user","content":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}]}' >/dev/null
+}
+
+write_llm_update_payloads() {
+  python3 - "$TMP_DIR/configuration.json" "$TMP_DIR/original-llm-update.json" "$TMP_DIR/verify-llm-update.json" "$MOCK_BASE_URL" <<'PY'
+import json
+import sys
+
+config_path, original_path, update_path, mock_base_url = sys.argv[1:]
+data = json.load(open(config_path, encoding="utf-8"))
+llm = data.get("configuration", {}).get("llm", {})
+providers = llm.get("providers") or []
+default_provider = llm.get("defaultProviderId") or "verify"
+default_embedding_provider = llm.get("defaultEmbeddingProviderId") or ""
+
+def clean_provider(item):
+    return {
+        "id": item.get("id", ""),
+        "provider": item.get("provider", ""),
+        "baseUrl": item.get("baseUrl", ""),
+        "model": item.get("model", ""),
+        "timeout": item.get("timeout", ""),
+        "disabled": bool(item.get("disabled", False)),
+        "chatCompletions": bool(item.get("chatCompletions", True)),
+        "streaming": bool(item.get("streaming", False)),
+        "nonChatOperations": item.get("nonChatOperations") or [],
+    }
+
+original = {
+    "defaultProviderId": default_provider,
+    "defaultEmbeddingProviderId": default_embedding_provider,
+    "providers": [clean_provider(item) for item in providers if item.get("id")],
+}
+if not original["providers"]:
+    original["providers"].append({
+        "id": "verify",
+        "provider": "compatible",
+        "baseUrl": mock_base_url,
+        "model": "verify-model",
+        "timeout": "60s",
+        "disabled": False,
+        "chatCompletions": True,
+        "streaming": False,
+        "nonChatOperations": [],
+    })
+    original["defaultProviderId"] = "verify"
+with open(original_path, "w", encoding="utf-8") as handle:
+    json.dump(original, handle, separators=(",", ":"))
+
+updated_providers = [item for item in original["providers"] if item["id"] != "verify"]
+updated_providers.append({
+    "id": "verify",
+    "provider": "compatible",
+    "baseUrl": mock_base_url,
+    "apiKey": "verify-secret",
+    "model": "verify-model",
+    "timeout": "60s",
+    "disabled": False,
+    "chatCompletions": True,
+    "streaming": False,
+    "nonChatOperations": [],
+})
+update = {
+    "defaultProviderId": "verify",
+    "defaultEmbeddingProviderId": default_embedding_provider,
+    "providers": updated_providers,
+}
+with open(update_path, "w", encoding="utf-8") as handle:
+    json.dump(update, handle, separators=(",", ":"))
+PY
 }
 
 validate_snapshot() {
@@ -327,20 +346,22 @@ trap report_failure ERR
 trap cleanup EXIT
 
 cd "$ROOT_DIR"
-go build -o "$BIN_PATH" ./application/workorchd
-
-mkdir -p "$DATA_DIR"
 create_mcp_helper
 start_mock_provider
 wait_mock
-start_server
 wait_ready
 
 curl -fsS "$BASE_URL/readyz" >"$TMP_DIR/readyz.json"
 grep '"status": "ready"' "$TMP_DIR/readyz.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/configuration" >"$TMP_DIR/configuration.json"
+write_llm_update_payloads
+curl -fsS -H "Content-Type: application/json" -X PUT \
+  "$BASE_URL/api/v1/workorch/configuration/llm" \
+  -d @"$TMP_DIR/verify-llm-update.json" >"$TMP_DIR/configuration-updated.json"
+grep '"apiKeyConfigured": true' "$TMP_DIR/configuration-updated.json" >/dev/null
 
 post_json "$BASE_URL/api/v1/workorch/mcp/servers" \
-  '{"id":"mcp-stdio-verify","name":"stdio verification","transport":"stdio","endpoint":"'"$MCP_HELPER"'","enabled":true,"allowedTools":["repo.summary"],"timeoutMillis":5000}' \
+  '{"id":"'"$MCP_SERVER_ID"'","name":"stdio verification","transport":"stdio","endpoint":"'"$MCP_HELPER"'","enabled":true,"allowedTools":["repo.summary"],"timeoutMillis":5000}' \
   "$TMP_DIR/mcp-server.json"
 grep '"transport": "stdio"' "$TMP_DIR/mcp-server.json" >/dev/null
 
@@ -363,7 +384,7 @@ dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 [[ -n "$dod_id" ]]
 
 post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
-  '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","mcpServerIds":["mcp-stdio-verify"]}' \
+  '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","mcpServerIds":["'"$MCP_SERVER_ID"'"]}' \
   "$TMP_DIR/activation.json"
 run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
 [[ -n "$run_id" ]]
@@ -372,12 +393,4 @@ curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.
 echo "workspaceId=$workspace_id"
 validate_snapshot "$TMP_DIR/snapshot.json"
 
-if [[ "$BACKEND" == "file" ]]; then
-  stop_server
-  start_server
-  wait_ready
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/snapshot-after-restart.json"
-  validate_snapshot "$TMP_DIR/snapshot-after-restart.json" >/dev/null
-fi
-
-echo "workorchd MCP stdio verification passed for backend=$BACKEND"
+echo "workorchd MCP stdio verification passed for deployed service $BASE_URL"

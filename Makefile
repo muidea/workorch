@@ -23,14 +23,14 @@ help:
 	@echo "  clean      - remove build/demo artifacts"
 	@echo "  run        - go run $(APP) as HTTP service"
 	@echo "  run-file   - clean data, then run $(APP) as HTTP service with file-backed repository"
-	@echo "  verify-service      - build, start, and verify the HTTP service with memory repository"
-	@echo "  verify-service-file - build, start, and verify the HTTP service with file-backed repository and restart-read validation"
-	@echo "  verify-llm      - build, start, and verify LLM-driven workspace execution with a local mock provider"
-	@echo "  verify-llm-file - verify LLM-driven workspace execution with file-backed repository and restart-read validation"
-	@echo "  verify-mcp-stdio      - verify MCP stdio tool-call execution through LLM graph with memory repository"
-	@echo "  verify-mcp-stdio-file - verify MCP stdio tool-call execution with file-backed restart-read validation"
-	@echo "  verify-mvp      - run local memory-backed service, LLM, and MCP stdio MVP verification"
-	@echo "  verify-mvp-file - run local file-backed service, LLM, and MCP stdio MVP verification"
+	@echo "  verify-service      - verify the deployed workorchd HTTP service at WORKORCH_BASE_URL"
+	@echo "  verify-service-file - alias of verify-service; e2e uses the deployed instance only"
+	@echo "  verify-llm      - verify deployed LLM-driven execution using a local mock provider"
+	@echo "  verify-llm-file - alias of verify-llm; e2e uses the deployed instance only"
+	@echo "  verify-mcp-stdio      - verify deployed MCP stdio execution through LLM graph"
+	@echo "  verify-mcp-stdio-file - alias of verify-mcp-stdio; e2e uses the deployed instance only"
+	@echo "  verify-mvp      - verify deployed service, LLM, and MCP stdio MVP flows"
+	@echo "  verify-mvp-file - alias of verify-mvp; e2e uses the deployed instance only"
 	@echo "  verify-real-llm - verify a running workorchd against its configured real LLM provider"
 	@echo "  verify-real-mcp-stdio - verify a running workorchd can execute MCP stdio through LLM graph"
 	@echo "  verify-real-vector-memory - verify vector Memory recall on a running workorchd"
@@ -38,8 +38,8 @@ help:
 	@echo "  docker-build    - docker build local workorchd image"
 	@echo "  docker-run      - run workorchd container with in-memory repository"
 	@echo "  docker-run-file - run workorchd container with file-backed repository"
-	@echo "  docker-verify      - build image and verify the container with memory repository"
-	@echo "  docker-verify-file - build image and verify the container with file-backed repository and restart-read validation"
+	@echo "  docker-verify      - container image packaging verification; not a deployed-instance e2e target"
+	@echo "  docker-verify-file - container image packaging verification with file-backed container data"
 	@echo "  ci         - fmt-check + vet + test + build + file-backed service verification"
 
 fmt:
@@ -90,26 +90,23 @@ run-file:
 	$(GO) run $(APP) -config-dir config/file
 
 verify-service:
-	WORKORCH_VERIFY_ADDR=127.0.0.1:18080 ./scripts/verify-workorchd-http.sh
+	./scripts/verify-workorchd-http.sh
 
-verify-service-file:
-	WORKORCH_VERIFY_ADDR=127.0.0.1:18082 WORKORCH_VERIFY_BACKEND=file ./scripts/verify-workorchd-http.sh
+verify-service-file: verify-service
 
 verify-llm:
-	WORKORCH_LLM_VERIFY_ADDR=127.0.0.1:18180 WORKORCH_LLM_VERIFY_MOCK_ADDR=127.0.0.1:18181 ./scripts/verify-llm-workspace-execution.sh
+	WORKORCH_LLM_VERIFY_MOCK_ADDR=127.0.0.1:18181 ./scripts/verify-llm-workspace-execution.sh
 
-verify-llm-file:
-	WORKORCH_LLM_VERIFY_ADDR=127.0.0.1:18182 WORKORCH_LLM_VERIFY_MOCK_ADDR=127.0.0.1:18183 WORKORCH_LLM_VERIFY_BACKEND=file ./scripts/verify-llm-workspace-execution.sh
+verify-llm-file: verify-llm
 
 verify-mcp-stdio:
-	WORKORCH_MCP_STDIO_VERIFY_ADDR=127.0.0.1:18184 WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR=127.0.0.1:18185 ./scripts/verify-mcp-stdio-workspace-execution.sh
+	WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR=127.0.0.1:18185 ./scripts/verify-mcp-stdio-workspace-execution.sh
 
-verify-mcp-stdio-file:
-	WORKORCH_MCP_STDIO_VERIFY_ADDR=127.0.0.1:18186 WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR=127.0.0.1:18187 WORKORCH_MCP_STDIO_VERIFY_BACKEND=file ./scripts/verify-mcp-stdio-workspace-execution.sh
+verify-mcp-stdio-file: verify-mcp-stdio
 
 verify-mvp: verify-service verify-llm verify-mcp-stdio
 
-verify-mvp-file: verify-service-file verify-llm-file verify-mcp-stdio-file
+verify-mvp-file: verify-mvp
 
 verify-real-llm:
 	./scripts/verify-real-llm-workspace-execution.sh
@@ -142,4 +139,4 @@ docker-verify:
 docker-verify-file:
 	WORKORCH_VERIFY_PORT=18083 WORKORCH_VERIFY_BACKEND=file ./scripts/verify-workorchd-container.sh
 
-ci: fmt-check vet test build verify-service-file
+ci: fmt-check vet test build

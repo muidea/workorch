@@ -164,17 +164,24 @@
 - Embedded Web Console can start LLM-driven Workspace execution with
   Goal/DoD/Soul/Skill/MCP/Memory context and observe execution context,
   Decision context, Step output, DoD assessment, and Memory refs.
-- LLM-driven Workspace execution has repeatable local acceptance scripts:
-  `make verify-llm` and `make verify-llm-file`, backed by a local
-  OpenAI-compatible mock provider, plus `make verify-real-llm` for an already
-  running service with a configured real provider.
+- Embedded Web Console now uses Chinese business-facing labels and converged
+  control-plane entries: business overview, workspace console, governance
+  queue, runtime control, system configuration, and service status. Workspace
+  detail exposes the main business models and process visualization from Goal
+  and DoD through Run governance, runtime evidence, and terminal closure.
+- LLM-driven Workspace execution has repeatable deployed-instance acceptance
+  scripts: `make verify-llm` and `make verify-llm-file` both connect to the
+  current `workorchd` service through `WORKORCH_BASE_URL` and use only a local
+  OpenAI-compatible mock provider as an external dependency. Scripts no longer
+  build, start, stop, or restart `workorchd`.
 - Decision Queue supports batch resolution for multiple open Decision Tickets
   through the same formal resolution types as single-ticket resolution:
   `provide_missing_info`, `replan`, and `reject_current_path`.
-- MCP `stdio` runtime execution has repeatable local acceptance scripts:
-  `make verify-mcp-stdio` and `make verify-mcp-stdio-file`, which create a
-  governed MCP server, invoke it through an LLM execution graph, and verify
-  restart-read continuity for the file backend.
+- MCP `stdio` runtime execution has repeatable deployed-instance acceptance
+  scripts: `make verify-mcp-stdio` and `make verify-mcp-stdio-file` both connect
+  to the current `workorchd` service, temporarily register a governed MCP
+  server, invoke it through an LLM execution graph, and restore temporary LLM
+  provider configuration on exit.
 - `make verify-real-mcp-stdio` verifies an already running `workorchd` instance
   by temporarily adding a local mock provider through the configuration API and
   executing a governed MCP `stdio` tool call in the deployed process.
@@ -182,11 +189,12 @@
   instance by temporarily adding an embedding-capable mock provider through the
   configuration API, executing `/embeddings`-driven vector Memory recall, and
   checking `memoryRetrieval` evidence on the Run execution context.
-- MVP verification is grouped by target:
-  `make verify-mvp` for local memory-backed checks,
-  `make verify-mvp-file` for file-backed restart-read checks, and
-  `make verify-real-mvp` for an already running deployed service with real LLM,
-  MCP `stdio`, and vector Memory recall checks.
+- MVP verification is grouped by dependency type:
+  `make verify-mvp` verifies the current deployed service with service smoke,
+  mock LLM, and mock MCP `stdio` flows; `make verify-mvp-file` is kept as an
+  alias for the same deployed-instance check; `make verify-real-mvp` verifies
+  the current deployed service with its configured real LLM plus deployed MCP
+  `stdio` and vector Memory recall checks.
 
 ## Delivered in workorch
 
@@ -423,14 +431,16 @@ curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}
 - with the file-backed backend, the workspace list endpoint returns persisted `workorch` workspace instances
 - with the file-backed backend, the single-workspace endpoint returns one persisted `workorch` workspace instance
 
-Formal local verification:
+Formal deployed-instance verification:
 
 ```bash
 make verify-service
 make verify-service-file
 ```
 
-`make verify-service-file` now includes a same-data-dir restart pass for persisted workspace / run / decision / approval reads.
+Both targets connect to the current deployed service through `WORKORCH_BASE_URL`.
+`make verify-service-file` is retained as an alias and does not start, stop, or
+restart `workorchd`.
 
 ### File-backed acceptance verification
 
@@ -492,7 +502,7 @@ Validated coverage currently includes:
 - corrupt file-backed persisted JSON boundary returns explicit errors
 - workorch formal business event contract now covers `workspace / run / step / decision / approval`
 - run-created and enriched run/workspace event payloads are covered by `events` / `run` / `observed` tests
-- framework entry adaptation is covered by `application/workorchd` and `internal/modules/application/workorchd/service/server` tests plus `make verify-service-file`
+- framework entry adaptation is covered by `application/workorchd` and `internal/modules/application/workorchd/service/server` tests plus deployed-instance `make verify-service-file`
 - magicCommon-backed event adapter is covered by `internal/pkg/events` and appservice / observed integration tests
 - application-level EventHub injection is covered by appservice runtime-session tests and service-level verification
 - local plugin lifecycle integration is covered by bootstrap lifecycle tests

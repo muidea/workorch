@@ -119,12 +119,14 @@ make docker-verify
 make docker-verify-file
 ```
 
-For the file-backed backend, `make verify-service-file` and `make docker-verify-file` both include a restart-read verification pass on the same persisted data directory.
+All non-docker e2e verification targets connect to the currently deployed
+`workorchd` instance through `WORKORCH_BASE_URL` and must not build, start,
+stop, or restart `workorchd`. The `*-file` targets are retained as aliases for
+the same deployed-instance checks.
 
-`make verify-llm` and `make verify-llm-file` start a local OpenAI-compatible mock
-provider and verify the LLM-driven Workspace execution loop. The file-backed
-variant also restarts `workorchd` on the same data directory and verifies
-persisted Run and Memory reads.
+`make verify-llm` and `make verify-llm-file` start only a local
+OpenAI-compatible mock provider and verify the LLM-driven Workspace execution
+loop through the deployed service API.
 
 `make verify-real-llm` verifies an already running `workorchd` service against
 its configured real LLM provider. By default it targets
@@ -260,13 +262,13 @@ A deployable `workorchd` instance is acceptable when:
 - `GET /healthz` returns `200`
 - `GET /readyz` returns `200`
 - `GET /metrics` returns service counters and gauges
-- `make verify-llm` and `make verify-llm-file` pass against local mock-provider
-  execution.
-- `make verify-mcp-stdio` and `make verify-mcp-stdio-file` pass, proving the
-  governed MCP `stdio` tool-call path through LLM graph execution and
-  file-backed restart-read continuity.
-- `make verify-mvp` and `make verify-mvp-file` pass as the grouped local MVP
-  verification bundles.
+- `make verify-llm` and `make verify-llm-file` pass against the deployed
+  service with local mock-provider execution.
+- `make verify-mcp-stdio` and `make verify-mcp-stdio-file` pass against the
+  deployed service, proving the governed MCP `stdio` tool-call path through LLM
+  graph execution.
+- `make verify-mvp` and `make verify-mvp-file` pass as the grouped deployed
+  instance MVP verification bundles.
 - after deploying `workorchd`, `make verify-real-llm` and
   `make verify-real-mcp-stdio` pass against the running service. The real MCP
   stdio check temporarily appends a local mock provider through the
