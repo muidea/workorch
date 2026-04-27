@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -2762,6 +2763,117 @@ func TestRuntimeOrchestrator_ResumeRunSupportsDecisionThenApprovalGates(t *testi
 	}
 	if len(runtime.calls) != 3 || runtime.calls[0] != "run-mixed-gate/step-1" || runtime.calls[1] != "run-mixed-gate/step-2" || runtime.calls[2] != "run-mixed-gate/step-3" {
 		t.Fatalf("runtime calls = %#v, want [run-mixed-gate/step-1 run-mixed-gate/step-2 run-mixed-gate/step-3]", runtime.calls)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeRunSupportsLLMNamedDecisionThenApprovalGates(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{
+		fn: func(stepID common.StepID) (map[string]any, error) {
+			switch stepID {
+			case "run-llm-mixed/step-1":
+				return map[string]any{
+					"status":                           "completed",
+					stepOutputKeyBlockDecisionReason:   "llm decision",
+					stepOutputKeyBlockDecisionTicketID: "ticket-llm-mixed-1",
+					stepOutputKeyNextStep:              "run-llm-mixed/llm-after-decision",
+					stepOutputKeyNextKind:              "llm/workspace-plan",
+				}, nil
+			case "run-llm-mixed/llm-after-decision":
+				return map[string]any{
+					"status":                         "completed",
+					stepOutputKeyBlockApprovalReason: "llm approval",
+					stepOutputKeyBlockApprovalID:     "approval-llm-mixed-1",
+					stepOutputKeyNextStep:            "run-llm-mixed/llm-after-approval",
+					stepOutputKeyNextKind:            "llm/workspace-plan",
+				}, nil
+			case "run-llm-mixed/llm-after-approval":
+				return map[string]any{
+					"status": "completed",
+					"dodAssessment": map[string]any{
+						"passed":  true,
+						"summary": "multi gate completed",
+					},
+				}, nil
+			default:
+				return nil, fmt.Errorf("unexpected step %s", stepID)
+			}
+		},
+	}
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-llm-mixed")
+	runID := common.RunID("run-llm-mixed")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated, DoDID: "dod-llm-mixed"}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	ticket, err := ticketRepo.Get(ctx, "ticket-llm-mixed-1")
+	if err != nil {
+		t.Fatalf("get ticket: %v", err)
+	}
+	ticket.State = common.DecisionTicketStateResolved
+	if err := ticketRepo.Update(ctx, ticket); err != nil {
+		t.Fatalf("update ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       common.ResolutionID("resolution-llm-mixed-1"),
+		TicketID: ticket.ID,
+		Type:     "provide_missing_info",
+		Payload:  map[string]any{"operator": "tester"},
+	}); err != nil {
+		t.Fatalf("create resolution: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume after decision: %v", err)
+	}
+
+	approval, err := approvalRepo.Get(ctx, "approval-llm-mixed-1")
+	if err != nil {
+		t.Fatalf("get approval: %v", err)
+	}
+	approval.State = common.ApprovalStateApproved
+	if err := approvalRepo.Update(ctx, approval); err != nil {
+		t.Fatalf("update approval: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume after approval: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get final run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s, want completed", runItem.State)
+	}
+	afterApproval, err := stepRepo.Get(ctx, "run-llm-mixed/llm-after-approval")
+	if err != nil {
+		t.Fatalf("get after approval step: %v", err)
+	}
+	if afterApproval.Input["previousStepId"] != "run-llm-mixed/llm-after-decision" {
+		t.Fatalf("after approval previousStepId = %v, want run-llm-mixed/llm-after-decision", afterApproval.Input["previousStepId"])
+	}
+	if len(runtime.calls) != 3 ||
+		runtime.calls[0] != "run-llm-mixed/step-1" ||
+		runtime.calls[1] != "run-llm-mixed/llm-after-decision" ||
+		runtime.calls[2] != "run-llm-mixed/llm-after-approval" {
+		t.Fatalf("runtime calls = %#v, want llm named decision then approval flow", runtime.calls)
 	}
 }
 

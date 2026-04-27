@@ -10,7 +10,8 @@
   - `internal/modules/application/workorchd` attaches `internal/modules/application/workorchd/service/server.Service` to the `magicCommon/framework/plugin/module` lifecycle
   - HTTP requests pass through `magicEngine/http` `RouteRegistry` / `HTTPServer`; current acceptance API endpoints are registered as explicit native routes
   - `/healthz`, `/readyz`, and `/metrics` are registered as native `magicEngine/http` routes
-  - workspace / run read endpoints are registered as native `magicEngine/http` routes:
+  - configuration / workspace / run read endpoints are registered as native `magicEngine/http` routes:
+    `GET /api/v1/workorch/configuration`,
     `GET /api/v1/workorch/workspaces`,
     `GET /api/v1/workorch/workspaces/{workspaceId}`,
     `GET /api/v1/workorch/workspaces/{workspaceId}/snapshot`,
@@ -23,6 +24,7 @@
     `GET /api/v1/workorch/runs/{runId}`,
     `GET /api/v1/workorch/runs/{runId}/snapshot`,
     `GET /api/v1/workorch/runs/{runId}/status`,
+    `GET /api/v1/workorch/runs/{runId}/observability`,
     `GET /api/v1/workorch/decisions`,
     `GET /api/v1/workorch/decisions/{ticketId}`,
     `GET /api/v1/workorch/approvals`,
@@ -37,12 +39,14 @@
     `GET /api/v1/workorch/mcp/servers/{serverId}/resources`,
     `GET /api/v1/workorch/mcp/servers/{serverId}/prompts`,
     `GET /api/v1/workorch/memory?workspaceId={workspaceId}`
-  - workspace / run / decision / approval write and execution endpoints are registered as native `magicEngine/http` routes:
+  - configuration / workspace / run / decision / approval write and execution endpoints are registered as native `magicEngine/http` routes:
+    `PUT /api/v1/workorch/configuration/llm`,
     `POST /api/v1/workorch/workspaces`,
     `POST /api/v1/workorch/workspaces/{workspaceId}/goals`,
     `POST /api/v1/workorch/workspaces/{workspaceId}/dods`,
     `POST /api/v1/workorch/workspaces/{workspaceId}/memory`,
     `POST /api/v1/workorch/workspaces/{workspaceId}/runs`,
+    `POST /api/v1/workorch/workspaces/{workspaceId}/execution-activations`,
     `POST /api/v1/workorch/runs/{runId}/start`,
     `POST /api/v1/workorch/runs/{runId}/resume`,
     `POST /api/v1/workorch/decisions/{ticketId}/resolve`,

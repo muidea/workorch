@@ -252,6 +252,7 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 		return err
 	}
 
+	var resumeAfterStepID common.StepID
 	switch r.State {
 	case common.RunStateBlockedOnDecision:
 		if r.BlockingTicketID == "" || o.tickets == nil {
@@ -264,6 +265,7 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 		if ticket.State != common.DecisionTicketStateResolved {
 			return common.ErrBlocked
 		}
+		resumeAfterStepID = ticket.StepID
 		if o.resolutions != nil {
 			resolution, err := o.resolutions.GetByTicketID(ctx, r.BlockingTicketID)
 			if err != nil {
@@ -292,6 +294,7 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 		}
 		switch approval.State {
 		case common.ApprovalStateApproved:
+			resumeAfterStepID = approval.StepID
 			r.BlockingApprovalID = ""
 		case common.ApprovalStateRejected:
 			return o.FailRun(ctx, runID, fmt.Sprintf("approval %s rejected", approval.ID))
@@ -310,7 +313,7 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 	if err := o.publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
-	specs, err := o.nextDispatchSpecs(ctx, r)
+	specs, err := o.nextDispatchSpecsAfterStep(ctx, r, resumeAfterStepID)
 	if err != nil {
 		return err
 	}
@@ -1372,7 +1375,11 @@ func (o *RuntimeOrchestrator) latestStepID(ctx context.Context, runID common.Run
 	if err != nil || len(steps) == 0 {
 		return ""
 	}
-	return steps[len(steps)-1].ID
+	step := terminalExecutionStep(steps)
+	if step == nil {
+		return ""
+	}
+	return step.ID
 }
 
 func runtimeEvidenceTimestamp() string {
@@ -1412,7 +1419,44 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 		}}, nil
 	}
 
-	last := steps[len(steps)-1]
+	last := terminalExecutionStep(steps)
+	if last == nil {
+		return nil, common.ErrConflict
+	}
+	return o.nextDispatchSpecsFromStep(ctx, run, last)
+}
+
+func (o *RuntimeOrchestrator) nextDispatchSpecsAfterStep(
+	ctx context.Context,
+	run *runModel.Run,
+	stepID common.StepID,
+) ([]stepDispatchSpec, error) {
+	if stepID == "" {
+		return o.nextDispatchSpecs(ctx, run)
+	}
+	if run == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, step := range steps {
+		if step != nil && step.ID == stepID {
+			return o.nextDispatchSpecsFromStep(ctx, run, step)
+		}
+	}
+	return nil, common.ErrConflict
+}
+
+func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
+	ctx context.Context,
+	run *runModel.Run,
+	last *runModel.Step,
+) ([]stepDispatchSpec, error) {
+	if run == nil || last == nil {
+		return nil, common.ErrInvalidArgument
+	}
 	if last.State == common.StepStateCompleted {
 		if specs := o.readyGraphStepSpecs(ctx, run, last); len(specs) > 0 {
 			return specs, nil
@@ -1441,6 +1485,48 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 		}}, nil
 	}
 	return nil, common.ErrConflict
+}
+
+func terminalExecutionStep(steps []*runModel.Step) *runModel.Step {
+	if len(steps) == 0 {
+		return nil
+	}
+	referenced := map[common.StepID]bool{}
+	for _, step := range steps {
+		if previousStepID := previousExecutionStepID(step); previousStepID != "" {
+			referenced[previousStepID] = true
+		}
+	}
+	var terminals []*runModel.Step
+	for _, step := range steps {
+		if step == nil || referenced[step.ID] {
+			continue
+		}
+		terminals = append(terminals, step)
+	}
+	if len(terminals) == 0 {
+		return nil
+	}
+	if len(terminals) == 1 {
+		return terminals[0]
+	}
+	for _, step := range terminals {
+		if step.State == common.StepStateDispatched {
+			return step
+		}
+	}
+	if graphStep := latestCompletedGraphStep(terminals); graphStep != nil {
+		return graphStep
+	}
+	return terminals[len(terminals)-1]
+}
+
+func previousExecutionStepID(step *runModel.Step) common.StepID {
+	if step == nil || step.Input == nil {
+		return ""
+	}
+	previousStepID, _ := step.Input["previousStepId"].(string)
+	return common.StepID(strings.TrimSpace(previousStepID))
 }
 
 func (o *RuntimeOrchestrator) dispatchStepSpecs(ctx context.Context, run *runModel.Run, specs []stepDispatchSpec) error {

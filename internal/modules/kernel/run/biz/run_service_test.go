@@ -540,7 +540,19 @@ func TestService_ResumeRun_FromBlockedStates_ReachesMinimalExecutionChain(t *tes
 				t.Fatalf("set active run: %v", err)
 			}
 
+			sourceStepID := common.StepID(string(runID) + "/gate")
 			stepID := common.StepID(string(runID) + "/step-1")
+			if err := stepRepo.Create(ctx, &runmodel.Step{
+				ID:    sourceStepID,
+				RunID: runID,
+				Kind:  "legacy/minimal",
+				State: common.StepStateCompleted,
+				Output: map[string]any{
+					"nextStep": string(stepID),
+				},
+			}); err != nil {
+				t.Fatalf("seed gate step: %v", err)
+			}
 			if err := tc.setupBlock(ctx, service, runID); err != nil {
 				t.Fatalf("setup block state: %v", err)
 			}
@@ -558,7 +570,7 @@ func TestService_ResumeRun_FromBlockedStates_ReachesMinimalExecutionChain(t *tes
 					ID:          blockedRun.BlockingTicketID,
 					WorkspaceID: workspaceID,
 					RunID:       runID,
-					StepID:      stepID,
+					StepID:      sourceStepID,
 					Reason:      "resume",
 					State:       common.DecisionTicketStateResolved,
 				}); err != nil {
@@ -569,7 +581,7 @@ func TestService_ResumeRun_FromBlockedStates_ReachesMinimalExecutionChain(t *tes
 					ID:          blockedRun.BlockingApprovalID,
 					WorkspaceID: workspaceID,
 					RunID:       runID,
-					StepID:      stepID,
+					StepID:      sourceStepID,
 					Reason:      "resume",
 					State:       common.ApprovalStateApproved,
 				}); err != nil {

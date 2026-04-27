@@ -82,6 +82,17 @@ def decision_payload(request):
     step_id = request.get("stepId", "")
     if run_id == "probe":
         return {"completionState": "failed", "thoughtSummary": "probe"}
+    scenario = initial_runs.index(run_id) if run_id in initial_runs else -1
+    if "llm-after-decision" in step_id and scenario == 3:
+        return {
+            "thoughtSummary": "Decision information was provided; approval is now required before completing.",
+            "completionState": "blocked_on_approval",
+            "requiredApproval": {
+                "reason": "Approve the second governance gate after decision resolution.",
+                "action": "complete multi-gate LLM path",
+                "context": {"scenario": "decision_then_approval"}
+            }
+        }
     if "llm-after-decision" in step_id:
         return {
             "thoughtSummary": "Decision information provided; DoD is now satisfied.",
@@ -96,6 +107,20 @@ def decision_payload(request):
                 "satisfied": True,
                 "summary": "Decision path completed.",
                 "items": [{"item": "decision can be resolved", "state": "satisfied", "evidenceRefs": [step_id]}]
+            }
+        }
+    if "llm-after-approval" in step_id and scenario == 3:
+        return {
+            "thoughtSummary": "Decision and approval gates were both completed; DoD is now satisfied.",
+            "completionState": "completed",
+            "dodAssessment": {
+                "satisfied": True,
+                "summary": "Multi-gate path completed after Decision and Approval.",
+                "items": [{
+                    "item": "multi gate decision then approval can complete",
+                    "state": "satisfied",
+                    "evidenceRefs": [step_id]
+                }]
             }
         }
     if run_id not in initial_runs:
@@ -139,6 +164,17 @@ def decision_payload(request):
             }
         }
     if scenario == 3:
+        return {
+            "thoughtSummary": "Need operator direction before approval gate can be evaluated.",
+            "completionState": "blocked_on_decision",
+            "requiredDecision": {
+                "reason": "Need missing detail before the approval gate.",
+                "decisionKind": "provide_missing_info",
+                "question": "What implementation direction should be approved next?",
+                "context": {"scenario": "decision_then_approval"}
+            }
+        }
+    if scenario == 4:
         return "not-json"
     return {
         "thoughtSummary": "Memory recall path completed.",
@@ -285,7 +321,7 @@ goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
 [[ -n "$goal_id" ]]
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" -H 'Content-Type: application/json' \
-  -d '{"items":["happy path completes","decision can be resolved","approval rejection fails safely","schema failure is observable","memory recall is visible"]}' >"$TMP_DIR/dod.json"
+  -d '{"items":["happy path completes","decision can be resolved","approval rejection fails safely","multi gate decision then approval can complete","schema failure is observable","memory recall is visible"]}' >"$TMP_DIR/dod.json"
 dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 [[ -n "$dod_id" ]]
 
@@ -316,6 +352,26 @@ approval_path="$(url_encode "$approval_id")"
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_path/reject" | grep '"state": "rejected"' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$approval_run_id/resume" | grep '"state": "failed"' >/dev/null
 
+activate_workspace_execution "$TMP_DIR/multi-gate-decision-activation.json"
+grep '"state": "blocked_on_decision"' "$TMP_DIR/multi-gate-decision-activation.json" >/dev/null
+multi_gate_run_id="$(json_path "$TMP_DIR/multi-gate-decision-activation.json" "activation.run.id")"
+multi_gate_ticket_id="$(json_path "$TMP_DIR/multi-gate-decision-activation.json" "activation.run.blockingTicketId")"
+multi_gate_ticket_path="$(url_encode "$multi_gate_ticket_id")"
+curl -fsS "$BASE_URL/api/v1/workorch/decisions/$multi_gate_ticket_path" | grep '"decisionKind": "provide_missing_info"' >/dev/null
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$multi_gate_ticket_path/resolve" -H 'Content-Type: application/json' \
+  -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance","nextGate":"approval"}}' | grep '"resolutionType": "provide_missing_info"' >/dev/null
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/resume" >"$TMP_DIR/multi-gate-approval-activation.json"
+grep '"state": "blocked_on_approval"' "$TMP_DIR/multi-gate-approval-activation.json" >/dev/null
+multi_gate_approval_id="$(json_path "$TMP_DIR/multi-gate-approval-activation.json" "run.blockingApprovalId")"
+multi_gate_approval_path="$(url_encode "$multi_gate_approval_id")"
+curl -fsS "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path" | grep '"state": "pending"' >/dev/null
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path/approve" | grep '"state": "approved"' >/dev/null
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/resume" | grep '"state": "completed"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/snapshot" >"$TMP_DIR/multi-gate-snapshot.json"
+grep "\"id\": \"$multi_gate_ticket_id\"" "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
+grep "\"id\": \"$multi_gate_approval_id\"" "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
+grep 'multi gate decision then approval can complete' "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
+
 activate_workspace_execution "$TMP_DIR/schema-failure-activation.json"
 grep '"state": "failed"' "$TMP_DIR/schema-failure-activation.json" >/dev/null
 schema_run_id="$(json_path "$TMP_DIR/schema-failure-activation.json" "activation.run.id")"
@@ -337,6 +393,10 @@ if [[ "$BACKEND" == "file" ]]; then
   curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id" | grep '"state": "completed"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id" | grep '"state": "completed"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/runs/$approval_run_id" | grep '"state": "failed"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id" | grep '"state": "completed"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$multi_gate_ticket_path" | grep '"state": "resolved"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path" | grep '"state": "approved"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/snapshot" | grep 'multi gate decision then approval can complete' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_run_id/snapshot" | grep '"llm_schema_invalid"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" | grep 'LLM happy path acceptance produced reusable workspace memory' >/dev/null
 fi
