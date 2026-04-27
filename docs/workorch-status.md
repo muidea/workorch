@@ -194,12 +194,25 @@
   tool. It queries Open-Meteo for Zhejiang Hangzhou current weather and checks
   the resulting ToolCall, ValidationResult, RuntimeCheckpoint, and DoD evidence
   in the Run snapshot.
+- `make verify-weather-ticket-approval` verifies an already running
+  `workorchd` instance with the configured real LLM provider and a temporary
+  MCP `stdio` weather tool. It exercises the full governance chain for a
+  specified city weather query: Decision Ticket creation and resolution,
+  Approval creation and approval, MCP weather ToolCall execution, and final DoD
+  evidence closure.
+- `make verify-weather-ticket-approval-mock` is reserved for CI-style mock LLM
+  checks. Local MVP validation must prefer the real LLM target above.
 - MVP verification is grouped by dependency type:
   `make verify-mvp` verifies the current deployed service with service smoke,
-  mock LLM, and mock MCP `stdio` flows; `make verify-mvp-file` is kept as an
-  alias for the same deployed-instance check; `make verify-real-mvp` verifies
-  the current deployed service with its configured real LLM plus deployed MCP
-  `stdio` and vector Memory recall checks.
+  real LLM execution, real LLM weather query, and real LLM weather governance
+  flows; `make verify-mvp-file` is kept as an alias for the
+  same deployed-instance check. `make verify-ci-mvp-file` is the CI-safe
+  grouped check with mock LLM/MCP flows.
+- Boundary hardening is now executable: `make verify-boundary-contract` scans
+  reusable runtime layers and Web source to prevent concrete business fallback
+  logic from leaking into `kernel/orchestrator`, `kernel/run`, `blocks/llm`,
+  `blocks/mcp`, or Web outcome rendering. Business-specific weather acceptance
+  terms remain allowed only in e2e scripts, tests, and documentation.
 
 ## Delivered in workorch
 
@@ -617,6 +630,10 @@ LLM 驱动 Workspace 执行的设计文档已补齐，范围、边界与交互�
 - blocks/llm 只负责 provider request、provider call、schema parsing 和 normalized Step output
 - Web Console 只通过 HTTP API 交互，不暴露 provider secret 或低层 adapter 直接执行入口
 - 未配置 LLM provider 时，LLM-driven execution 必须明确失败，不能回落到 `legacy/minimal` 形成假完成
+- kernel/orchestrator、kernel/run、blocks/llm、blocks/mcp 和 Web Console 不得根据具体
+  Workspace 目标、城市、天气、工具 payload 字段或 provider 特定结构合成业务完成结果
+- ToolCall/MCP 输出只能作为 evidence；最终目标成果必须来自 `dodAssessment.summary`
+  或后续正式业务结果模型
 
 该设计同步定义了后续实现验收的数据交互流程：
 

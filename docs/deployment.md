@@ -267,8 +267,9 @@ A deployable `workorchd` instance is acceptable when:
 - `make verify-mcp-stdio` and `make verify-mcp-stdio-file` pass against the
   deployed service, proving the governed MCP `stdio` tool-call path through LLM
   graph execution.
-- `make verify-mvp` and `make verify-mvp-file` pass as the grouped deployed
-  instance MVP verification bundles.
+- `make verify-mvp` and `make verify-mvp-file` pass as the grouped local
+  deployed-instance MVP verification bundles with the configured real LLM
+  provider. CI uses `make verify-ci-mvp-file` instead.
 - after deploying `workorchd`, `make verify-real-llm` and
   `make verify-real-mcp-stdio` pass against the running service. The real MCP
   stdio check temporarily appends a local mock provider through the
@@ -284,6 +285,21 @@ A deployable `workorchd` instance is acceptable when:
   queries Open-Meteo for Zhejiang Hangzhou current weather, and validates
   weather ToolCall, ValidationResult, RuntimeCheckpoint, and DoD evidence in
   the Run snapshot.
+- `make verify-weather-ticket-approval` passes against the running service. It
+  uses the configured real LLM provider and an MCP `stdio` weather tool,
+  resolves a Decision Ticket with the specified city, approves the generated
+  Approval, queries Open-Meteo, and validates Decision, Approval, ToolCall,
+  ValidationResult, RuntimeCheckpoint, and DoD evidence in the Run snapshot.
+  The target city can be changed with `WORKORCH_WEATHER_COUNTRY`,
+  `WORKORCH_WEATHER_PROVINCE`, `WORKORCH_WEATHER_CITY`, and
+  `WORKORCH_WEATHER_LOOKUP_NAME`.
+- `make verify-weather-ticket-approval-mock` is the deterministic mock LLM
+  variant for CI-style checks only. Local acceptance should use the real LLM
+  target above so provider behavior and Web/manual governance assumptions are
+  not hidden by a scripted provider.
+- `make verify-ci-mvp-file` is the CI-safe grouped verification entrypoint. It
+  intentionally uses mock LLM/MCP checks and does not run real LLM or external
+  weather governance checks.
 - `make verify-real-mvp` passes as the grouped verification entrypoint for an
   already running deployed service, covering real LLM execution, MCP `stdio`,
   and vector Memory recall.

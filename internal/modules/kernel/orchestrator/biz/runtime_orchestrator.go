@@ -253,6 +253,7 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 	}
 
 	var resumeAfterStepID common.StepID
+	var resumeInput map[string]any
 	switch r.State {
 	case common.RunStateBlockedOnDecision:
 		if r.BlockingTicketID == "" || o.tickets == nil {
@@ -273,6 +274,7 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 			}
 			switch resolution.Type {
 			case decisioncommon.ResolutionTypeProvideMissingInfo:
+				resumeInput = decisionResolutionInput(ticket, resolution)
 				r.BlockingTicketID = ""
 			case decisioncommon.ResolutionTypeRejectCurrentPath:
 				return o.FailRun(ctx, runID, fmt.Sprintf("decision ticket %s rejected", ticket.ID))
@@ -295,6 +297,7 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 		switch approval.State {
 		case common.ApprovalStateApproved:
 			resumeAfterStepID = approval.StepID
+			resumeInput = approvalResolutionInput(approval)
 			r.BlockingApprovalID = ""
 		case common.ApprovalStateRejected:
 			return o.FailRun(ctx, runID, fmt.Sprintf("approval %s rejected", approval.ID))
@@ -317,6 +320,7 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 	if err != nil {
 		return err
 	}
+	mergeResumeInput(specs, resumeInput)
 	return o.dispatchStepSpecs(ctx, r, specs)
 }
 
@@ -1537,6 +1541,52 @@ func (o *RuntimeOrchestrator) dispatchStepSpecs(ctx context.Context, run *runMod
 		return o.dispatchStep(ctx, run, specs[0].ID, specs[0].Kind, specs[0].Input)
 	}
 	return o.dispatchGraphStepBatch(ctx, run, specs)
+}
+
+func mergeResumeInput(specs []stepDispatchSpec, resumeInput map[string]any) {
+	if len(resumeInput) == 0 {
+		return
+	}
+	for idx := range specs {
+		if specs[idx].Input == nil {
+			specs[idx].Input = map[string]any{}
+		}
+		for key, value := range resumeInput {
+			specs[idx].Input[key] = value
+		}
+	}
+}
+
+func decisionResolutionInput(ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) map[string]any {
+	if ticket == nil || resolution == nil {
+		return nil
+	}
+	return map[string]any{
+		"decisionResolution": map[string]any{
+			"ticketId":          string(ticket.ID),
+			"stepId":            string(ticket.StepID),
+			"decisionKind":      ticket.DecisionKind,
+			"question":          ticket.Question,
+			"reason":            ticket.Reason,
+			"resolutionId":      string(resolution.ID),
+			"resolutionType":    resolution.Type,
+			"resolutionPayload": cloneStepPayload(resolution.Payload),
+		},
+	}
+}
+
+func approvalResolutionInput(approval *approvalmodel.Approval) map[string]any {
+	if approval == nil {
+		return nil
+	}
+	return map[string]any{
+		"approvalResolution": map[string]any{
+			"approvalId": string(approval.ID),
+			"stepId":     string(approval.StepID),
+			"reason":     approval.Reason,
+			"state":      string(approval.State),
+		},
+	}
 }
 
 func (o *RuntimeOrchestrator) hasGraphContinuation(ctx context.Context, run *runModel.Run, step *runModel.Step) bool {

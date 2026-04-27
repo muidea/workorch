@@ -148,6 +148,18 @@ Hard rules:
   reusable planning context derived from cited sources.
 - All module loading must stay explicit through the `workorchd` application
   entry and `internal/modules/...` plugin/module registration pattern.
+- Generic runtime layers must never inspect concrete Workspace goals, cities,
+  domains, tool names, or provider-specific payload fields to decide business
+  completion. This includes `kernel/orchestrator`, `kernel/run`, `blocks/llm`,
+  `blocks/mcp`, and the embedded Web console.
+- Final Workspace outcome must come from formal business output, primarily
+  `dodAssessment.summary` and evidence-backed DoD items, or from a future
+  explicit business result model. Tool output is evidence only; it must not be
+  re-labeled by orchestration, adapter, or Web code as the final acceptance
+  result.
+- Domain-specific acceptance flows may define concrete tools and expected
+  result text in `scripts/`, tests, and documentation. That specificity must
+  not leak into reusable runtime modules.
 
 ## Interaction Contract
 
@@ -405,6 +417,12 @@ Runtime Observability
 
 Web must not expose raw provider secrets, raw prompt logs containing secrets, or
 direct low-level adapter execution controls as primary user actions.
+
+Web must also avoid synthesizing missing business outcomes from raw Step,
+ToolCall, MCP, or provider-specific payloads. If the Run does not expose a
+formal `dodAssessment.summary` or future explicit result model, Web should show
+that the target outcome is not yet formed and point users to the evidence
+timeline for diagnosis.
 
 ## Business Objects
 
@@ -1241,6 +1259,12 @@ Every acceptance flow must satisfy these invariants:
   RuntimeCheckpoint, Web payloads, or logs intended for users.
 - Re-running the same flow with file repository backend after restart must
   preserve the business objects and their relationships.
+- Domain-specific e2e checks must fail when the LLM does not produce a formal
+  final `dodAssessment.summary`; acceptance scripts must not pass by reading
+  raw tool output as if it were the final business outcome.
+- `make verify-boundary-contract` must pass before CI or release acceptance. It
+  guards reusable runtime layers from domain-specific fallback logic such as
+  city/weather/tool-payload inspection.
 
 ### Web Verification
 

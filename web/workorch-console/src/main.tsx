@@ -142,6 +142,38 @@ function compactJSON(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function decisionRequiredFields(item: Decision) {
+  const context = recordValue(item.context);
+  const requiredFields = Array.isArray(context?.requiredFields) ? context.requiredFields.map(String).filter(Boolean) : [];
+  const suggested = recordValue(context?.suggestedCity);
+  const suggestedFields = suggested ? Object.keys(suggested) : [];
+  return Array.from(new Set([...requiredFields, ...suggestedFields]));
+}
+
+function decisionInitialPayload(item: Decision) {
+  const context = recordValue(item.context);
+  const suggested = recordValue(context?.suggestedCity);
+  const payload: Record<string, unknown> = { operator: 'console' };
+  for (const field of decisionRequiredFields(item)) {
+    payload[field] = suggested?.[field] ?? '';
+  }
+  return payload;
+}
+
+function decisionFieldLabel(field: string) {
+  const labels: Record<string, string> = {
+    country: '国家',
+    province: '省份',
+    city: '城市',
+    lookupName: '查询名称'
+  };
+  return labels[field] ? `${labels[field]} (${field})` : field;
+}
+
 function outputText(output: Record<string, unknown> | undefined, key: string) {
   const value = output?.[key];
   if (value === undefined || value === null || value === '') {
@@ -414,14 +446,48 @@ function DecisionQueuePage() {
   const { message } = AntApp.useApp();
   const actionRef = useRef<ActionType | undefined>(undefined);
   const [selectedDecisionKeys, setSelectedDecisionKeys] = useState<React.Key[]>([]);
+  const [decisionTarget, setDecisionTarget] = useState<{ item: Decision; resolutionType: string } | undefined>(undefined);
+  const [decisionSubmitting, setDecisionSubmitting] = useState(false);
+  const [decisionForm] = Form.useForm();
 
   const resolve = async (item: Decision, resolutionType: string, payload?: Record<string, unknown>) => {
     try {
       await workorchApi.resolveDecision(item.id, resolutionType, payload);
-      message.success(`决策已按 ${resolutionType} 处理`);
+      await workorchApi.resumeRun(item.runId);
+      message.success(`决策已按 ${resolutionType} 处理，Run 已继续推进`);
       actionRef.current?.reload();
     } catch (error) {
       message.error(errorMessage(error));
+    }
+  };
+
+  const openDecisionResolution = (item: Decision, resolutionType: string) => {
+    decisionForm.resetFields();
+    if (resolutionType === 'provide_missing_info') {
+      decisionForm.setFieldsValue(decisionInitialPayload(item));
+    } else {
+      decisionForm.setFieldsValue({ operator: 'console' });
+    }
+    setDecisionTarget({ item, resolutionType });
+  };
+
+  const submitDecisionResolution = async () => {
+    if (!decisionTarget) {
+      return;
+    }
+    setDecisionSubmitting(true);
+    try {
+      const values = await decisionForm.validateFields();
+      const payload = { operator: 'console', ...values };
+      await workorchApi.resolveDecision(decisionTarget.item.id, decisionTarget.resolutionType, payload);
+      await workorchApi.resumeRun(decisionTarget.item.runId);
+      message.success(`决策已按 ${decisionTarget.resolutionType} 处理，Run 已继续推进`);
+      setDecisionTarget(undefined);
+      actionRef.current?.reload();
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setDecisionSubmitting(false);
     }
   };
 
@@ -432,7 +498,10 @@ function DecisionQueuePage() {
       return;
     }
     try {
+      const decisions = await workorchApi.listDecisions();
+      const selectedDecisions = decisions.filter((item) => ticketIds.includes(item.id));
       await workorchApi.batchResolveDecisions(ticketIds, resolutionType, { operator: 'console', mode: 'batch' });
+      await Promise.all(selectedDecisions.map((item) => workorchApi.resumeRun(item.runId)));
       message.success(`${ticketIds.length} 个决策工单已按 ${resolutionType} 处理`);
       setSelectedDecisionKeys([]);
       actionRef.current?.reload();
@@ -449,15 +518,16 @@ function DecisionQueuePage() {
     { title: '问题', dataIndex: 'question', ellipsis: true },
     { title: '原因', dataIndex: 'reason', ellipsis: true },
     { title: '上下文', dataIndex: 'context', render: (_, item) => <pre className="json-panel">{compactJSON(item.context)}</pre> },
+    { title: '解决内容', dataIndex: 'resolutionPayload', render: (_, item) => <pre className="json-panel">{compactJSON(item.resolutionPayload)}</pre> },
     { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
     {
       title: '操作',
       valueType: 'option',
       render: (_, item) => item.state === 'open' ? (
         <Space wrap>
-          <Button size="small" type="primary" onClick={() => void resolve(item, 'provide_missing_info', { operator: 'console' })}>补充信息</Button>
-          <Button size="small" onClick={() => void resolve(item, 'replan', { operator: 'console' })}>重新规划</Button>
-          <Button size="small" danger onClick={() => void resolve(item, 'reject_current_path', { operator: 'console' })}>拒绝路径</Button>
+          <Button size="small" type="primary" onClick={() => openDecisionResolution(item, 'provide_missing_info')}>补充信息</Button>
+          <Button size="small" onClick={() => void resolve(item, 'replan', { operator: 'console' })}>重新规划并继续</Button>
+          <Button size="small" danger onClick={() => void resolve(item, 'reject_current_path', { operator: 'console' })}>拒绝路径并继续</Button>
         </Space>
       ) : stateTag(item.resolutionType)
     }
@@ -469,7 +539,6 @@ function DecisionQueuePage() {
       subTitle="处理阻塞 Run 的 Decision Ticket，支持补充信息、重新规划和拒绝当前路径"
       extra={(
         <Space wrap>
-          <Button disabled={selectedDecisionKeys.length === 0} onClick={() => void batchResolve('provide_missing_info')}>批量补充信息</Button>
           <Button disabled={selectedDecisionKeys.length === 0} onClick={() => void batchResolve('replan')}>批量重新规划</Button>
           <Button danger disabled={selectedDecisionKeys.length === 0} onClick={() => void batchResolve('reject_current_path')}>批量拒绝路径</Button>
         </Space>
@@ -490,6 +559,42 @@ function DecisionQueuePage() {
           return tableResult(items.sort((left, right) => Number(left.state !== 'open') - Number(right.state !== 'open')));
         }}
       />
+      <Modal
+        title="补充决策信息"
+        open={Boolean(decisionTarget)}
+        confirmLoading={decisionSubmitting}
+        onCancel={() => setDecisionTarget(undefined)}
+        onOk={() => void submitDecisionResolution()}
+        okText="提交并继续运行"
+        destroyOnHidden
+      >
+        {decisionTarget ? (
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Descriptions
+              column={1}
+              size="small"
+              items={[
+                { key: 'ticket', label: '决策工单', children: decisionTarget.item.id },
+                { key: 'run', label: '关联 Run', children: decisionTarget.item.runId },
+                { key: 'question', label: '问题', children: decisionTarget.item.question || '-' },
+                { key: 'reason', label: '原因', children: decisionTarget.item.reason || '-' }
+              ]}
+            />
+            <Form form={decisionForm} layout="vertical">
+              {decisionRequiredFields(decisionTarget.item).map((field) => (
+                <Form.Item key={field} name={field} label={decisionFieldLabel(field)} rules={[{ required: true, message: `请补充${decisionFieldLabel(field)}` }]}>
+                  <Input />
+                </Form.Item>
+              ))}
+              <Form.Item name="operator" label="处理人" rules={[{ required: true, message: '请填写处理人' }]}>
+                <Input />
+              </Form.Item>
+            </Form>
+            <Typography.Text type="secondary">上下文</Typography.Text>
+            <pre className="json-panel">{compactJSON(decisionTarget.item.context)}</pre>
+          </Space>
+        ) : null}
+      </Modal>
     </PageContainer>
   );
 }
@@ -498,19 +603,45 @@ function ApprovalQueuePage() {
   const { message } = AntApp.useApp();
   const actionRef = useRef<ActionType | undefined>(undefined);
   const [selectedApprovalKeys, setSelectedApprovalKeys] = useState<React.Key[]>([]);
+  const [approvalTarget, setApprovalTarget] = useState<{ item: Approval; action: 'approve' | 'reject'; relatedDecision?: Decision } | undefined>(undefined);
+  const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+  const [approvalForm] = Form.useForm<{ operator?: string; comment?: string }>();
   const actionLabel = (action: 'approve' | 'reject') => action === 'approve' ? '已批准' : '已拒绝';
 
-  const resolve = async (item: Approval, action: 'approve' | 'reject') => {
+  const openApprovalResolution = async (item: Approval, action: 'approve' | 'reject') => {
+    approvalForm.resetFields();
+    approvalForm.setFieldsValue({ operator: 'console' });
     try {
-      if (action === 'approve') {
-        await workorchApi.approveApproval(item.id);
+      const decisions = await workorchApi.listDecisions();
+      const relatedDecision = decisions
+        .filter((decision) => decision.runId === item.runId && decision.state === 'resolved')
+        .at(-1);
+      setApprovalTarget({ item, action, relatedDecision });
+    } catch (error) {
+      message.error(errorMessage(error));
+    }
+  };
+
+  const submitApprovalResolution = async () => {
+    if (!approvalTarget) {
+      return;
+    }
+    setApprovalSubmitting(true);
+    try {
+      await approvalForm.validateFields();
+      if (approvalTarget.action === 'approve') {
+        await workorchApi.approveApproval(approvalTarget.item.id);
       } else {
-        await workorchApi.rejectApproval(item.id);
+        await workorchApi.rejectApproval(approvalTarget.item.id);
       }
-      message.success(`审批${actionLabel(action)}`);
+      await workorchApi.resumeRun(approvalTarget.item.runId);
+      message.success(`审批${actionLabel(approvalTarget.action)}，Run 已继续推进`);
+      setApprovalTarget(undefined);
       actionRef.current?.reload();
     } catch (error) {
       message.error(errorMessage(error));
+    } finally {
+      setApprovalSubmitting(false);
     }
   };
 
@@ -521,7 +652,10 @@ function ApprovalQueuePage() {
       return;
     }
     try {
+      const approvals = await workorchApi.listApprovals();
+      const selectedApprovals = approvals.filter((item) => approvalIds.includes(item.id));
       await workorchApi.batchResolveApprovals(approvalIds, action);
+      await Promise.all(selectedApprovals.map((item) => workorchApi.resumeRun(item.runId)));
       message.success(`${approvalIds.length} 个审批项${actionLabel(action)}`);
       setSelectedApprovalKeys([]);
       actionRef.current?.reload();
@@ -542,8 +676,8 @@ function ApprovalQueuePage() {
       valueType: 'option',
       render: (_, item) => item.state === 'pending' ? (
         <Space wrap>
-          <Button size="small" type="primary" onClick={() => void resolve(item, 'approve')}>批准</Button>
-          <Button size="small" danger onClick={() => void resolve(item, 'reject')}>拒绝</Button>
+          <Button size="small" type="primary" onClick={() => void openApprovalResolution(item, 'approve')}>审批确认</Button>
+          <Button size="small" danger onClick={() => void openApprovalResolution(item, 'reject')}>拒绝确认</Button>
         </Space>
       ) : stateTag(item.state)
     }
@@ -575,6 +709,41 @@ function ApprovalQueuePage() {
           return tableResult(items.sort((left, right) => Number(left.state !== 'pending') - Number(right.state !== 'pending')));
         }}
       />
+      <Modal
+        title={approvalTarget?.action === 'reject' ? '拒绝审批确认' : '审批确认'}
+        open={Boolean(approvalTarget)}
+        confirmLoading={approvalSubmitting}
+        onCancel={() => setApprovalTarget(undefined)}
+        onOk={() => void submitApprovalResolution()}
+        okText={approvalTarget?.action === 'reject' ? '拒绝并继续运行' : '批准并继续运行'}
+        okButtonProps={{ danger: approvalTarget?.action === 'reject' }}
+        destroyOnHidden
+      >
+        {approvalTarget ? (
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Descriptions
+              column={1}
+              size="small"
+              items={[
+                { key: 'approval', label: '审批 ID', children: approvalTarget.item.id },
+                { key: 'run', label: '关联 Run', children: approvalTarget.item.runId },
+                { key: 'step', label: '步骤', children: approvalTarget.item.stepId || '-' },
+                { key: 'reason', label: '审批原因', children: approvalTarget.item.reason || '-' }
+              ]}
+            />
+            <Typography.Text type="secondary">已补充的决策信息</Typography.Text>
+            <pre className="json-panel">{compactJSON(approvalTarget.relatedDecision?.resolutionPayload)}</pre>
+            <Form form={approvalForm} layout="vertical">
+              <Form.Item name="operator" label="审批人" rules={[{ required: true, message: '请填写审批人' }]}>
+                <Input />
+              </Form.Item>
+              <Form.Item name="comment" label="审批意见">
+                <Input.TextArea rows={3} placeholder="记录本次审批判断依据，当前版本用于界面确认，不写入审批模型" />
+              </Form.Item>
+            </Form>
+          </Space>
+        ) : null}
+      </Modal>
     </PageContainer>
   );
 }
@@ -1020,13 +1189,20 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             <ProCard title="决策工单（Decision）" colSpan="50%">
               <ProTable<Decision> rowKey="id" search={false} pagination={false} columns={[
                 { title: '工单', dataIndex: 'id', copyable: true },
+                { title: '类型', dataIndex: 'decisionKind', width: 150 },
+                { title: '问题', dataIndex: 'question', ellipsis: true },
+                { title: '原因', dataIndex: 'reason', ellipsis: true },
                 { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
-                { title: '解决方式', dataIndex: 'resolutionType' }
+                { title: '上下文', dataIndex: 'context', render: (_, item) => <pre className="json-panel">{compactJSON(item.context)}</pre> },
+                { title: '解决方式', dataIndex: 'resolutionType' },
+                { title: '解决内容', dataIndex: 'resolutionPayload', render: (_, item) => <pre className="json-panel">{compactJSON(item.resolutionPayload)}</pre> }
               ]} dataSource={snapshot.decisions ?? []} />
             </ProCard>
             <ProCard title="审批工单（Approval）" colSpan="50%">
               <ProTable<Approval> rowKey="id" search={false} pagination={false} columns={[
                 { title: '审批', dataIndex: 'id', copyable: true },
+                { title: '运行', dataIndex: 'runId', copyable: true, ellipsis: true },
+                { title: '步骤', dataIndex: 'stepId', copyable: true, ellipsis: true },
                 { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
                 { title: '原因', dataIndex: 'reason' }
               ]} dataSource={snapshot.approvals ?? []} />

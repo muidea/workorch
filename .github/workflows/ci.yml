@@ -34,6 +34,9 @@ jobs:
       - name: Make test
         run: make test
 
+      - name: Make verify-boundary-contract
+        run: make verify-boundary-contract
+
       - name: Make build
         run: make build
 
@@ -52,14 +55,14 @@ jobs:
           cat workorchd-ci.log >&2 || true
           exit 1
 
-      - name: Make verify-mvp-file with mock providers
+      - name: Make verify-ci-mvp-file with mock providers
         env:
           WORKORCH_BASE_URL: http://127.0.0.1:8080
         run: |
           # CI intentionally runs only deployed-instance checks that use local
           # mock providers. Real LLM / real weather checks require external
           # credentials and are kept out of CI to avoid false negatives.
-          make verify-mvp-file
+          make verify-ci-mvp-file
 
       - name: Stop workorchd service
         if: always()

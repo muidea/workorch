@@ -296,6 +296,9 @@ else:
         errors.append(f"dodAssessment.satisfied is {assessment.get('satisfied')!r}, want true")
     if not any(item.get("evidenceRefs") for item in assessment.get("items") or []):
         errors.append(f"dodAssessment has no evidenceRefs: {assessment}")
+    summary = str(assessment.get("summary") or "")
+    if "杭州" not in summary or "气温" not in summary or "湿度" not in summary:
+        errors.append(f"dodAssessment.summary does not expose final weather result: {summary!r}")
 
 progress = observability.get("progress") or {}
 if progress.get("terminal") is not True:
@@ -359,7 +362,7 @@ workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
 
 post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" \
-  '{"text":"查询中国浙江杭州当前天气。必须使用已选择的 MCP Server '"$MCP_SERVER_ID"' 调用 weather.current 工具，工具参数使用 {\"country\":\"中国\",\"province\":\"浙江\",\"city\":\"杭州\",\"lookupName\":\"Hangzhou\"}。第一轮 LLM 必须返回 executionGraph 或 mcpToolCalls，且包含一个 mcp/tool_call 节点调用 weather.current；不要使用 shell/command，不要请求人工决策或审批。工具返回后，后续 LLM 步骤必须基于 previousStepOutput 总结当前天气，并返回 completionState completed 与 dodAssessment，evidenceRefs 使用 previousStepId。"}' \
+  '{"text":"查询中国浙江杭州当前天气。必须使用已选择的 MCP Server '"$MCP_SERVER_ID"' 调用 weather.current 工具，工具参数使用 {\"country\":\"中国\",\"province\":\"浙江\",\"city\":\"杭州\",\"lookupName\":\"Hangzhou\"}。第一轮 LLM 必须返回 executionGraph 或 mcpToolCalls，且包含一个 mcp/tool_call 节点调用 weather.current；不要使用 shell/command，不要请求人工决策或审批。工具返回后，后续 LLM 步骤必须基于 previousStepOutput 总结当前天气，并返回 completionState completed 与 dodAssessment，evidenceRefs 使用 previousStepId，dodAssessment.summary 必须包含当前天气结果文本，包括天气现象、气温、湿度和风速。"}' \
   "$TMP_DIR/goal.json"
 goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
 [[ -n "$goal_id" ]]

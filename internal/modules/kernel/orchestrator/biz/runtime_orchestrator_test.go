@@ -2841,6 +2841,21 @@ func TestRuntimeOrchestrator_ResumeRunSupportsLLMNamedDecisionThenApprovalGates(
 	if err := orch.ResumeRun(ctx, runID); err != nil {
 		t.Fatalf("resume after decision: %v", err)
 	}
+	afterDecision, err := stepRepo.Get(ctx, "run-llm-mixed/llm-after-decision")
+	if err != nil {
+		t.Fatalf("get after decision step: %v", err)
+	}
+	decisionResolution, ok := afterDecision.Input["decisionResolution"].(map[string]any)
+	if !ok {
+		t.Fatalf("decisionResolution input = %#v, want map", afterDecision.Input["decisionResolution"])
+	}
+	if decisionResolution["ticketId"] != string(ticket.ID) || decisionResolution["resolutionType"] != "provide_missing_info" {
+		t.Fatalf("decisionResolution = %#v, want ticket and provide_missing_info", decisionResolution)
+	}
+	resolutionPayload, ok := decisionResolution["resolutionPayload"].(map[string]any)
+	if !ok || resolutionPayload["operator"] != "tester" {
+		t.Fatalf("decisionResolution payload = %#v, want operator tester", decisionResolution["resolutionPayload"])
+	}
 
 	approval, err := approvalRepo.Get(ctx, "approval-llm-mixed-1")
 	if err != nil {
@@ -2868,6 +2883,13 @@ func TestRuntimeOrchestrator_ResumeRunSupportsLLMNamedDecisionThenApprovalGates(
 	}
 	if afterApproval.Input["previousStepId"] != "run-llm-mixed/llm-after-decision" {
 		t.Fatalf("after approval previousStepId = %v, want run-llm-mixed/llm-after-decision", afterApproval.Input["previousStepId"])
+	}
+	approvalResolution, ok := afterApproval.Input["approvalResolution"].(map[string]any)
+	if !ok {
+		t.Fatalf("approvalResolution input = %#v, want map", afterApproval.Input["approvalResolution"])
+	}
+	if approvalResolution["approvalId"] != string(approval.ID) || approvalResolution["state"] != string(common.ApprovalStateApproved) {
+		t.Fatalf("approvalResolution = %#v, want approved approval", approvalResolution)
 	}
 	if len(runtime.calls) != 3 ||
 		runtime.calls[0] != "run-llm-mixed/step-1" ||

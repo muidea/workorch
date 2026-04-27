@@ -9,7 +9,7 @@ GOTEST_FLAGS ?=
 BUILD_OUT ?= ./bin/workorchd
 CONSOLE_WEB := ./web/workorch-console
 
-.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-service verify-service-file verify-llm verify-llm-file verify-mcp-stdio verify-mcp-stdio-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-real-mvp docker-build docker-run docker-run-file docker-verify docker-verify-file ci
+.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-llm verify-llm-file verify-mcp-stdio verify-mcp-stdio-file verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp docker-build docker-run docker-run-file docker-verify docker-verify-file ci
 
 help:
 	@echo "Targets:"
@@ -23,18 +23,23 @@ help:
 	@echo "  clean      - remove build/demo artifacts"
 	@echo "  run        - go run $(APP) as HTTP service"
 	@echo "  run-file   - clean data, then run $(APP) as HTTP service with file-backed repository"
+	@echo "  verify-boundary-contract - fail if generic runtime/Web code contains business-specific fallback logic"
 	@echo "  verify-service      - verify the deployed workorchd HTTP service at WORKORCH_BASE_URL"
 	@echo "  verify-service-file - alias of verify-service; e2e uses the deployed instance only"
 	@echo "  verify-llm      - verify deployed LLM-driven execution using a local mock provider"
 	@echo "  verify-llm-file - alias of verify-llm; e2e uses the deployed instance only"
 	@echo "  verify-mcp-stdio      - verify deployed MCP stdio execution through LLM graph"
 	@echo "  verify-mcp-stdio-file - alias of verify-mcp-stdio; e2e uses the deployed instance only"
-	@echo "  verify-mvp      - verify deployed service, LLM, and MCP stdio MVP flows"
+	@echo "  verify-ci-mvp      - verify deployed service with CI-safe mock LLM/MCP checks"
+	@echo "  verify-ci-mvp-file - alias of verify-ci-mvp; e2e uses the deployed instance only"
+	@echo "  verify-mvp      - verify deployed service with local real LLM MVP checks"
 	@echo "  verify-mvp-file - alias of verify-mvp; e2e uses the deployed instance only"
 	@echo "  verify-real-llm - verify a running workorchd against its configured real LLM provider"
 	@echo "  verify-real-mcp-stdio - verify a running workorchd can execute MCP stdio through LLM graph"
 	@echo "  verify-real-vector-memory - verify vector Memory recall on a running workorchd"
 	@echo "  verify-real-weather - verify real LLM + MCP stdio current weather query for Zhejiang Hangzhou"
+	@echo "  verify-weather-ticket-approval - verify specified city weather governance with the configured real LLM"
+	@echo "  verify-weather-ticket-approval-mock - CI-only deterministic mock LLM weather governance check"
 	@echo "  verify-real-mvp - verify a running workorchd with real LLM, MCP stdio, and vector Memory checks"
 	@echo "  docker-build    - docker build local workorchd image"
 	@echo "  docker-run      - run workorchd container with in-memory repository"
@@ -90,6 +95,9 @@ run-file:
 	rm -rf ./.workorch-data
 	$(GO) run $(APP) -config-dir config/file
 
+verify-boundary-contract:
+	./scripts/verify-boundary-contract.sh
+
 verify-service:
 	./scripts/verify-workorchd-http.sh
 
@@ -105,7 +113,11 @@ verify-mcp-stdio:
 
 verify-mcp-stdio-file: verify-mcp-stdio
 
-verify-mvp: verify-service verify-llm verify-mcp-stdio
+verify-ci-mvp: verify-service verify-llm verify-mcp-stdio
+
+verify-ci-mvp-file: verify-ci-mvp
+
+verify-mvp: verify-service verify-real-llm verify-real-weather verify-weather-ticket-approval
 
 verify-mvp-file: verify-mvp
 
@@ -120,6 +132,12 @@ verify-real-vector-memory:
 
 verify-real-weather:
 	./scripts/verify-real-weather-query.sh
+
+verify-weather-ticket-approval:
+	./scripts/verify-weather-ticket-approval-query.sh
+
+verify-weather-ticket-approval-mock:
+	WORKORCH_WEATHER_GOVERNANCE_LLM_MODE=mock ./scripts/verify-weather-ticket-approval-query.sh
 
 verify-real-mvp: verify-real-llm verify-real-mcp-stdio verify-real-vector-memory
 
@@ -143,4 +161,4 @@ docker-verify:
 docker-verify-file:
 	WORKORCH_VERIFY_PORT=18083 WORKORCH_VERIFY_BACKEND=file ./scripts/verify-workorchd-container.sh
 
-ci: fmt-check vet test build
+ci: fmt-check vet test verify-boundary-contract build

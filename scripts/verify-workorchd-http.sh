@@ -77,6 +77,9 @@ grep '定义验收标准' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '启动执行' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '运行摘要' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '最近运行' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '补充决策信息' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '提交并继续运行' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '审批确认' "$TMP_DIR/workorch-console.js" >/dev/null
 if grep -E 'workorch management overview|Create run|Run slice|Available slice catalog' "$TMP_DIR/workorch-console.js" >/dev/null; then
   echo "console exposes retired web entries" >&2
   exit 1
