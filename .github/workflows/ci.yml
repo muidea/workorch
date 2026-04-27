@@ -37,8 +37,45 @@ jobs:
       - name: Make build
         run: make build
 
-      - name: Make verify-service-file
-        run: make verify-service-file
+      - name: Start workorchd file-backed service
+        run: |
+          rm -rf ./.workorch-data
+          ./bin/workorchd -config-dir config/file > workorchd-ci.log 2>&1 &
+          echo "$!" > workorchd-ci.pid
+          for _ in $(seq 1 100); do
+            if curl -fsS http://127.0.0.1:8080/readyz >/dev/null; then
+              exit 0
+            fi
+            sleep 0.2
+          done
+          echo "workorchd did not become ready" >&2
+          cat workorchd-ci.log >&2 || true
+          exit 1
+
+      - name: Make verify-mvp-file with mock providers
+        env:
+          WORKORCH_BASE_URL: http://127.0.0.1:8080
+        run: |
+          # CI intentionally runs only deployed-instance checks that use local
+          # mock providers. Real LLM / real weather checks require external
+          # credentials and are kept out of CI to avoid false negatives.
+          make verify-mvp-file
+
+      - name: Stop workorchd service
+        if: always()
+        run: |
+          if [[ -f workorchd-ci.pid ]]; then
+            kill "$(cat workorchd-ci.pid)" >/dev/null 2>&1 || true
+            wait "$(cat workorchd-ci.pid)" >/dev/null 2>&1 || true
+          fi
+
+      - name: Upload workorchd service log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workorchd-ci-log-go${{ matrix.go-version }}
+          path: workorchd-ci.log
+          if-no-files-found: ignore
 
       - name: Upload built binary
         if: matrix.go-version == '1.24.13'

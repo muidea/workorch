@@ -189,6 +189,11 @@
   instance by temporarily adding an embedding-capable mock provider through the
   configuration API, executing `/embeddings`-driven vector Memory recall, and
   checking `memoryRetrieval` evidence on the Run execution context.
+- `make verify-real-weather` verifies an already running `workorchd` instance
+  with the configured real LLM provider and a temporary MCP `stdio` weather
+  tool. It queries Open-Meteo for Zhejiang Hangzhou current weather and checks
+  the resulting ToolCall, ValidationResult, RuntimeCheckpoint, and DoD evidence
+  in the Run snapshot.
 - MVP verification is grouped by dependency type:
   `make verify-mvp` verifies the current deployed service with service smoke,
   mock LLM, and mock MCP `stdio` flows; `make verify-mvp-file` is kept as an

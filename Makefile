@@ -9,7 +9,7 @@ GOTEST_FLAGS ?=
 BUILD_OUT ?= ./bin/workorchd
 CONSOLE_WEB := ./web/workorch-console
 
-.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-service verify-service-file verify-llm verify-llm-file verify-mcp-stdio verify-mcp-stdio-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-mvp docker-build docker-run docker-run-file docker-verify docker-verify-file ci
+.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-service verify-service-file verify-llm verify-llm-file verify-mcp-stdio verify-mcp-stdio-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-real-mvp docker-build docker-run docker-run-file docker-verify docker-verify-file ci
 
 help:
 	@echo "Targets:"
@@ -34,6 +34,7 @@ help:
 	@echo "  verify-real-llm - verify a running workorchd against its configured real LLM provider"
 	@echo "  verify-real-mcp-stdio - verify a running workorchd can execute MCP stdio through LLM graph"
 	@echo "  verify-real-vector-memory - verify vector Memory recall on a running workorchd"
+	@echo "  verify-real-weather - verify real LLM + MCP stdio current weather query for Zhejiang Hangzhou"
 	@echo "  verify-real-mvp - verify a running workorchd with real LLM, MCP stdio, and vector Memory checks"
 	@echo "  docker-build    - docker build local workorchd image"
 	@echo "  docker-run      - run workorchd container with in-memory repository"
@@ -116,6 +117,9 @@ verify-real-mcp-stdio:
 
 verify-real-vector-memory:
 	./scripts/verify-real-vector-memory-recall.sh
+
+verify-real-weather:
+	./scripts/verify-real-weather-query.sh
 
 verify-real-mvp: verify-real-llm verify-real-mcp-stdio verify-real-vector-memory
 

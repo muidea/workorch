@@ -217,6 +217,30 @@ function goalOutcomeState(snapshot?: RunSnapshot) {
   return snapshot ? stateTag(snapshot.run.state) : <Tag>未选择 Run</Tag>;
 }
 
+function boundedParagraph(value?: React.ReactNode, options?: { rows?: number; copyText?: string; className?: string }) {
+  return (
+    <Typography.Paragraph
+      className={['workorch-bounded-text', options?.className].filter(Boolean).join(' ')}
+      copyable={options?.copyText ? { text: options.copyText } : false}
+      ellipsis={{ rows: options?.rows ?? 2, expandable: true, symbol: '展开' }}
+    >
+      {value || '-'}
+    </Typography.Paragraph>
+  );
+}
+
+function compactTags(items: string[], limit = 3) {
+  if (items.length === 0) {
+    return '-';
+  }
+  return (
+    <Space wrap size={[4, 4]} className="workorch-compact-tags">
+      {items.slice(0, limit).map((item) => <Tag key={item}>{item}</Tag>)}
+      {items.length > limit ? <Tag color="blue">+{items.length - limit}</Tag> : null}
+    </Space>
+  );
+}
+
 function splitLines(value?: string) {
   return (value || '').split('\n').map((item) => item.trim()).filter(Boolean);
 }
@@ -773,6 +797,13 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const outcomeMemoryRefs = memoryRefIDs(runSnapshot);
   const outcomeMemories = memoryItems.filter((item) => item.runId === outcomeRun?.id || outcomeMemoryRefs.has(item.id));
   const outcomeDoDItems = dodAssessmentItems(runSnapshot);
+  const dodDefinitionRows = dods.flatMap((dod) => dod.items.map((text, index) => ({
+    key: `${dod.id}-${index}`,
+    id: dod.id,
+    state: dod.state,
+    index: index + 1,
+    text
+  })));
 
   return (
     <PageContainer
@@ -802,8 +833,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
               items={[
                 { key: 'id', label: '工作空间 ID', children: snapshot.workspace.id },
                 { key: 'activeRun', label: '活跃运行', children: snapshot.workspace.activeRunId || '-' },
-                { key: 'description', label: '描述', children: snapshot.workspace.description || '-' },
-                { key: 'workingDirectory', label: '工作目录', children: snapshot.workspace.workingDirectory }
+                { key: 'description', label: '描述', children: boundedParagraph(snapshot.workspace.description, { rows: 2 }) },
+                { key: 'workingDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.workingDirectory, { rows: 1, copyText: snapshot.workspace.workingDirectory }) }
               ]}
             />
           </ProCard>
@@ -847,11 +878,39 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             />
           </ProCard>
           <ProCard gutter={16} wrap className="workorch-section">
-            <ProCard title="目标定义（Goal）" colSpan="50%">
-              {goals.length ? goals.map((item) => <Typography.Paragraph key={item.id}>{item.text}</Typography.Paragraph>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无目标" />}
+            <ProCard title="目标定义（Goal）" colSpan={{ xs: 24, lg: 12 }} extra={<Tag>{goals.length} 项</Tag>}>
+              {goals.length ? (
+                <ProTable<Goal>
+                  rowKey="id"
+                  search={false}
+                  options={false}
+                  size="small"
+                  pagination={{ pageSize: 5, showSizeChanger: false }}
+                  columns={[
+                    { title: '目标', dataIndex: 'text', ellipsis: true, render: (_, item) => boundedParagraph(item.text, { rows: 2 }) },
+                    { title: 'Goal ID', dataIndex: 'id', copyable: true, ellipsis: true, width: 180 }
+                  ]}
+                  dataSource={goals}
+                />
+              ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无目标" />}
             </ProCard>
-            <ProCard title="验收标准（DoD）" colSpan="50%">
-              {dods.length ? dods.flatMap((item) => item.items).map((item) => <Tag key={item}>{item}</Tag>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无验收标准" />}
+            <ProCard title="验收标准（DoD）" colSpan={{ xs: 24, lg: 12 }} extra={<Tag>{dodDefinitionRows.length} 项</Tag>}>
+              {dodDefinitionRows.length ? (
+                <ProTable<{ key: string; id: string; state: string; index: number; text: string }>
+                  rowKey="key"
+                  search={false}
+                  options={false}
+                  size="small"
+                  pagination={{ pageSize: 5, showSizeChanger: false }}
+                  columns={[
+                    { title: '序号', dataIndex: 'index', width: 72 },
+                    { title: '验收标准', dataIndex: 'text', ellipsis: true, render: (_, item) => boundedParagraph(item.text, { rows: 2 }) },
+                    { title: '状态', dataIndex: 'state', width: 100, render: (_, item) => stateTag(item.state) },
+                    { title: 'DoD ID', dataIndex: 'id', copyable: true, ellipsis: true, width: 180 }
+                  ]}
+                  dataSource={dodDefinitionRows}
+                />
+              ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无验收标准" />}
             </ProCard>
           </ProCard>
           <ProCard
@@ -865,9 +924,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                   column={2}
                   items={[
                     { key: 'run', label: '关联 Run', children: `${runSnapshot.run.id} / ${stateLabel(runSnapshot.run.state)}` },
-                    { key: 'goal', label: '目标', children: outcomeGoal?.text || runSnapshot.run.goalId || '-' },
-                    { key: 'dod', label: '验收标准', children: outcomeDoD?.items?.length ? outcomeDoD.items.map((item) => <Tag key={item}>{item}</Tag>) : runSnapshot.run.doDId || '-' },
-                    { key: 'summary', label: '成果结论', children: <Typography.Paragraph className="goal-outcome-summary">{goalOutcomeSummary(runSnapshot)}</Typography.Paragraph> }
+                    { key: 'goal', label: '目标', children: boundedParagraph(outcomeGoal?.text || runSnapshot.run.goalId, { rows: 2 }) },
+                    { key: 'dod', label: '验收标准', children: outcomeDoD?.items?.length ? compactTags(outcomeDoD.items) : runSnapshot.run.doDId || '-' },
+                    { key: 'summary', label: '成果结论', children: boundedParagraph(goalOutcomeSummary(runSnapshot), { rows: 3, className: 'goal-outcome-summary' }) }
                   ]}
                 />
                 <ProCard gutter={16} wrap>

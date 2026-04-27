@@ -279,6 +279,11 @@ A deployable `workorchd` instance is acceptable when:
   configuration API, restores provider config on exit, creates vectorized
   workspace Memory, and verifies `memoryRetrieval` evidence on the activated
   Run.
+- `make verify-real-weather` passes against the running service. It uses the
+  configured real LLM provider, registers a temporary MCP `stdio` weather tool,
+  queries Open-Meteo for Zhejiang Hangzhou current weather, and validates
+  weather ToolCall, ValidationResult, RuntimeCheckpoint, and DoD evidence in
+  the Run snapshot.
 - `make verify-real-mvp` passes as the grouped verification entrypoint for an
   already running deployed service, covering real LLM execution, MCP `stdio`,
   and vector Memory recall.

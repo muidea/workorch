@@ -371,12 +371,13 @@ make verify-mvp-file
 make verify-real-llm
 make verify-real-mcp-stdio
 make verify-real-vector-memory
+make verify-real-weather
 make verify-real-mvp
 make docker-verify
 make docker-verify-file
 ```
 
-All `verify-*` e2e scripts target the currently deployed `workorchd` instance through `WORKORCH_BASE_URL` and do not build, start, stop, or restart the service. `make verify-mvp` runs service smoke, mock LLM, and mock MCP `stdio` checks against that deployed instance; `make verify-mvp-file` is an alias for the same check. `make verify-real-vector-memory` targets an already running `workorchd`, temporarily registers an embedding-capable mock provider, verifies vector Memory recall evidence, and restores the original LLM configuration. `make verify-real-mvp` targets an already running `workorchd`; it combines the configured real LLM check, deployed MCP `stdio` runtime check, and deployed vector Memory recall check.
+All `verify-*` e2e scripts target the currently deployed `workorchd` instance through `WORKORCH_BASE_URL` and do not build, start, stop, or restart the service. `make verify-mvp` runs service smoke, mock LLM, and mock MCP `stdio` checks against that deployed instance; `make verify-mvp-file` is an alias for the same check. `make verify-real-vector-memory` targets an already running `workorchd`, temporarily registers an embedding-capable mock provider, verifies vector Memory recall evidence, and restores the original LLM configuration. `make verify-real-weather` uses the configured real LLM provider plus a temporary MCP `stdio` weather tool to query Zhejiang Hangzhou current weather from Open-Meteo and validate the Run snapshot evidence. `make verify-real-mvp` targets an already running `workorchd`; it combines the configured real LLM check, deployed MCP `stdio` runtime check, and deployed vector Memory recall check.
 
 ## Development targets
 
