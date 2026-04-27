@@ -6,6 +6,7 @@ import (
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
+	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp"
 	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory"
@@ -41,6 +42,8 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	mustSetup("legacy", legacyModule.Setup())
 	shellModule := shellmodule.New()
 	mustSetup("shell", shellModule.Setup())
+	sshModule := sshmodule.New()
+	mustSetup("ssh", sshModule.Setup())
 	llmModule := llmmodule.New()
 	mustSetup("llm", llmModule.Setup())
 
@@ -92,6 +95,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	orchestratorModule := orchestratormodule.New()
 	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry(legacyModule.RuntimeAdapter())
 	mustSetup("runtime-registry", runtimeRegistry.Register(shellmodule.StepKindCommand, shellModule.RuntimeAdapter()))
+	mustSetup("runtime-registry", runtimeRegistry.Register(sshmodule.StepKindCommand, sshModule.RuntimeAdapter()))
 	mustSetup("runtime-registry", runtimeRegistry.Register(mcpblockmodule.StepKindToolCall, mcpBlockModule.RuntimeAdapter()))
 	mustSetup("runtime-registry", runtimeRegistry.Register(llmmodule.StepKindWorkspaceExecution, llmModule.RuntimeAdapter()))
 	mustSetup("orchestrator", orchestratorModule.Setup(orchestratormodule.Dependencies{
@@ -121,6 +125,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	modules := []lifecycle{
 		legacyModule,
 		shellModule,
+		sshModule,
 		llmModule,
 		soulModule,
 		memoryModule,

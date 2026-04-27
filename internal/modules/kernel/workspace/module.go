@@ -16,7 +16,9 @@ const ModuleID = modulecommon.ModuleID
 type CreateWorkspaceCommand = workspaceservice.CreateWorkspaceCommand
 type EnsureWorkspaceCommand = workspaceservice.EnsureWorkspaceCommand
 type DefineGoalCommand = workspaceservice.DefineGoalCommand
+type UpdateGoalCommand = workspaceservice.UpdateGoalCommand
 type DefineDoDCommand = workspaceservice.DefineDoDCommand
+type UpdateDoDCommand = workspaceservice.UpdateDoDCommand
 type Service = workspaceservice.Service
 
 type Dependencies struct {
@@ -44,7 +46,9 @@ func (m *Module) Setup(deps Dependencies) error {
 		CreateWorkspace: m.bizPtr.CreateWorkspace,
 		EnsureWorkspace: m.bizPtr.EnsureWorkspace,
 		DefineGoal:      m.bizPtr.DefineGoal,
+		UpdateGoal:      m.bizPtr.UpdateGoal,
 		DefineDoD:       m.bizPtr.DefineDoD,
+		UpdateDoD:       m.bizPtr.UpdateDoD,
 	})
 	return nil
 }

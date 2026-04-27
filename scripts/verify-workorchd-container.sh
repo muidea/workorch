@@ -102,9 +102,9 @@ curl -fsS "$BASE_URL/readyz" | grep '"status": "ready"' >/dev/null
 curl -fsS "$BASE_URL/metrics" | grep 'workorch_http_requests_total' >/dev/null
 curl -fsS "$BASE_URL/console" | grep 'workorch Console' >/dev/null
 curl -fsS "$BASE_URL/console/assets/workorch-console.css" | grep 'workorch-section' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Workspace Board' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Decision Queue' >/dev/null
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep 'Workspace Detail' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep '业务总览' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep '治理队列' >/dev/null
+curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep '工作空间详情' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
   -d '{"title":"verify workspace","description":"verify workspace description"}' >"$TMP_DIR/workspace.json"
 workspace_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/workspace.json" | head -n1)"

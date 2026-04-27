@@ -285,6 +285,12 @@ else:
 assessment_steps = [s for s in steps if (s.get("output") or {}).get("stage") == "llm_dod_assessment"]
 if not assessment_steps:
     errors.append("missing llm_dod_assessment follow-up step")
+else:
+    assessment = (assessment_steps[-1].get("output") or {}).get("dodAssessment") or {}
+    if assessment.get("satisfied") is not True:
+        errors.append(f"dodAssessment.satisfied is {assessment.get('satisfied')!r}, want true")
+    if not str(assessment.get("summary") or "").strip():
+        errors.append(f"dodAssessment.summary is empty: {assessment!r}")
 if not tool_calls:
     errors.append("missing ToolCall evidence")
 if not validations:
@@ -341,7 +347,7 @@ workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
 
 post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" \
-  '{"text":"Use the selected MCP server '"$MCP_SERVER_ID"' to execute repo.summary through stdio. Return an executionGraph first, then after tool evidence return completed dodAssessment."}' \
+  '{"text":"Use the selected MCP server '"$MCP_SERVER_ID"' to execute repo.summary through stdio. Return an executionGraph first, then after tool evidence return completed dodAssessment with a non-empty summary and evidenceRefs."}' \
   "$TMP_DIR/goal.json"
 goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
 [[ -n "$goal_id" ]]

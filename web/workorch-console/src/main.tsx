@@ -93,17 +93,54 @@ function runStateSummary(runs?: Run[]) {
   };
 }
 
+function isBlockedRunState(state?: string) {
+  return state === 'blocked_on_decision' || state === 'blocked_on_approval';
+}
+
+function isCompletedRunState(state?: string) {
+  return state === 'completed';
+}
+
+function isFailedRunState(state?: string) {
+  return state === 'failed' || state === 'cancelled' || state === 'superseded';
+}
+
+function isTerminalRunState(state?: string) {
+  return isCompletedRunState(state) || isFailedRunState(state);
+}
+
+function activeOrLatestRun(snapshot?: WorkspaceSnapshot) {
+  if (!snapshot) {
+    return undefined;
+  }
+  const activeRun = snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId);
+  return activeRun ?? runStateSummary(snapshot.runs).latest;
+}
+
 function workspaceProcessItems(snapshot?: WorkspaceSnapshot, goals?: Goal[], dods?: DoD[]) {
-  const latestRun = runStateSummary(snapshot?.runs).latest;
+  const currentRun = activeOrLatestRun(snapshot);
   const hasDefinition = Boolean((goals?.length ?? 0) > 0 && (dods?.length ?? 0) > 0);
-  const blocked = latestRun?.state === 'blocked_on_decision' || latestRun?.state === 'blocked_on_approval';
-  const terminal = latestRun?.state === 'completed' || latestRun?.state === 'failed' || latestRun?.state === 'cancelled' || latestRun?.state === 'superseded';
+  const missingDefinition = !goals?.length ? '需要定义 Goal' : !dods?.length ? '需要定义 DoD' : '需要补齐 Goal / DoD';
+  const pendingDecisions = pendingCount(snapshot?.decisions);
+  const pendingApprovals = pendingCount(snapshot?.approvals);
+  const blocked = isBlockedRunState(currentRun?.state) || pendingDecisions > 0 || pendingApprovals > 0;
+  const terminal = isTerminalRunState(currentRun?.state);
+  const failed = isFailedRunState(currentRun?.state);
+  const completed = isCompletedRunState(currentRun?.state);
+  const governanceDescription = pendingDecisions > 0 || pendingApprovals > 0
+    ? `待处理：决策 ${pendingDecisions} / 审批 ${pendingApprovals}`
+    : blocked ? stateLabel(currentRun?.state) : '无待处理阻塞';
+  const evidenceDescription = completed
+    ? stateLabel(currentRun?.state)
+    : failed ? stateLabel(currentRun?.state)
+      : currentRun?.state === 'validating' ? '正在执行 DoD 验收'
+        : currentRun ? '等待运行证据闭环' : '尚未启动 Run';
   return [
     { title: '工作空间', description: snapshot?.workspace ? stateLabel(snapshot.workspace.state) : '未选择', status: snapshot?.workspace ? 'finish' as const : 'wait' as const },
-    { title: '目标与验收', description: hasDefinition ? 'Goal / DoD 已定义' : '需要补齐 Goal / DoD', status: hasDefinition ? 'finish' as const : 'process' as const },
-    { title: '启动执行', description: latestRun ? `${latestRun.id} / ${stateLabel(latestRun.state)}` : '尚未启动 Run', status: latestRun ? 'finish' as const : 'wait' as const },
-    { title: '治理处理', description: blocked ? stateLabel(latestRun?.state) : '无待处理阻塞', status: blocked ? 'process' as const : latestRun ? 'finish' as const : 'wait' as const },
-    { title: '证据验收', description: terminal ? stateLabel(latestRun?.state) : '等待运行证据闭环', status: latestRun?.state === 'failed' ? 'error' as const : terminal ? 'finish' as const : 'wait' as const }
+    { title: '目标与验收', description: hasDefinition ? 'Goal / DoD 已定义' : missingDefinition, status: hasDefinition ? 'finish' as const : 'process' as const },
+    { title: '启动执行', description: currentRun ? `${currentRun.id} / ${stateLabel(currentRun.state)}` : '尚未启动 Run', status: currentRun ? 'finish' as const : 'wait' as const },
+    { title: '治理处理', description: governanceDescription, status: blocked ? 'process' as const : currentRun ? 'finish' as const : 'wait' as const },
+    { title: '证据验收', description: evidenceDescription, status: failed ? 'error' as const : completed ? 'finish' as const : terminal ? 'finish' as const : currentRun ? 'process' as const : 'wait' as const }
   ];
 }
 
@@ -146,22 +183,90 @@ function recordValue(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
+type DecisionPayloadField = {
+  name: string;
+  label: string;
+  required: boolean;
+  initialValue?: unknown;
+};
+
+function stringListFromValue(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => {
+    if (typeof item === 'string') {
+      return item;
+    }
+    const record = recordValue(item);
+    return String(record?.name ?? record?.key ?? record?.field ?? '');
+  }).map((item) => item.trim()).filter(Boolean);
+}
+
+function primitiveSuggestedPayload(context: Record<string, unknown> | undefined) {
+  const payload: Record<string, unknown> = {};
+  if (!context) {
+    return payload;
+  }
+  for (const [key, value] of Object.entries(context)) {
+    const lowerKey = key.toLowerCase();
+    const shouldUse = lowerKey.startsWith('suggested') ||
+      lowerKey.startsWith('default') ||
+      lowerKey === 'candidate' ||
+      lowerKey === 'payload';
+    const record = shouldUse ? recordValue(value) : undefined;
+    if (!record) {
+      continue;
+    }
+    for (const [field, fieldValue] of Object.entries(record)) {
+      if (fieldValue === null || fieldValue === undefined) {
+        continue;
+      }
+      if (typeof fieldValue === 'string' || typeof fieldValue === 'number' || typeof fieldValue === 'boolean') {
+        payload[field] = fieldValue;
+      }
+    }
+  }
+  return payload;
+}
+
 function decisionRequiredFields(item: Decision) {
   const context = recordValue(item.context);
-  const requiredFields = Array.isArray(context?.requiredFields) ? context.requiredFields.map(String).filter(Boolean) : [];
-  const suggested = recordValue(context?.suggestedCity);
-  const suggestedFields = suggested ? Object.keys(suggested) : [];
+  const requiredFields = [
+    ...stringListFromValue(context?.requiredFields),
+    ...stringListFromValue(context?.fields)
+  ];
+  const suggestedFields = Object.keys(primitiveSuggestedPayload(context));
   return Array.from(new Set([...requiredFields, ...suggestedFields]));
 }
 
-function decisionInitialPayload(item: Decision) {
+function decisionPayloadFields(item: Decision): DecisionPayloadField[] {
   const context = recordValue(item.context);
-  const suggested = recordValue(context?.suggestedCity);
-  const payload: Record<string, unknown> = { operator: 'console' };
-  for (const field of decisionRequiredFields(item)) {
-    payload[field] = suggested?.[field] ?? '';
+  const suggested = primitiveSuggestedPayload(context);
+  const required = new Set([
+    ...stringListFromValue(context?.requiredFields),
+    ...stringListFromValue(context?.fields)
+  ]);
+  return decisionRequiredFields(item).map((field) => ({
+    name: field,
+    label: decisionFieldLabel(field),
+    required: required.has(field),
+    initialValue: suggested[field]
+  }));
+}
+
+function decisionInitialPayload(item: Decision) {
+  const structuredPayload: Record<string, unknown> = {};
+  for (const field of decisionPayloadFields(item)) {
+    structuredPayload[field.name] = field.initialValue ?? '';
   }
-  return payload;
+  return {
+    operator: 'console',
+    answer: '',
+    note: '',
+    extraPayloadText: '',
+    structuredPayload
+  };
 }
 
 function decisionFieldLabel(field: string) {
@@ -172,6 +277,43 @@ function decisionFieldLabel(field: string) {
     lookupName: '查询名称'
   };
   return labels[field] ? `${labels[field]} (${field})` : field;
+}
+
+function parseDecisionExtraPayload(text: unknown) {
+  const content = typeof text === 'string' ? text.trim() : '';
+  if (!content) {
+    return {};
+  }
+  const parsed = JSON.parse(content) as unknown;
+  const record = recordValue(parsed);
+  if (!record) {
+    throw new Error('JSON 高级载荷必须是对象');
+  }
+  return record;
+}
+
+function normalizeDecisionResolutionPayload(values: Record<string, unknown>) {
+  const structuredPayload = recordValue(values.structuredPayload) ?? {};
+  const payload: Record<string, unknown> = {
+    operator: typeof values.operator === 'string' && values.operator.trim() ? values.operator.trim() : 'console'
+  };
+  for (const [key, value] of Object.entries(structuredPayload)) {
+    if (typeof value === 'string') {
+      payload[key] = value.trim();
+      continue;
+    }
+    payload[key] = value;
+  }
+  if (typeof values.answer === 'string' && values.answer.trim()) {
+    payload.answer = values.answer.trim();
+  }
+  if (typeof values.note === 'string' && values.note.trim()) {
+    payload.note = values.note.trim();
+  }
+  return {
+    ...payload,
+    ...parseDecisionExtraPayload(values.extraPayloadText)
+  };
 }
 
 function outputText(output: Record<string, unknown> | undefined, key: string) {
@@ -356,17 +498,30 @@ type ControlPlaneProps = {
   onOpenWorkspace: (workspaceId: string) => void;
 };
 
+type WorkspaceBoardItem = {
+  snapshot: WorkspaceSnapshot;
+  goals: Goal[];
+  dods: DoD[];
+};
+
 function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
   const { message } = AntApp.useApp();
-  const [snapshots, setSnapshots] = useState<WorkspaceSnapshot[]>([]);
+  const [boardItems, setBoardItems] = useState<WorkspaceBoardItem[]>([]);
   const [loading, setLoading] = useState(false);
 
   const loadBoard = async () => {
     setLoading(true);
     try {
       const workspaces = await workorchApi.listWorkspaces();
-      const nextSnapshots = await Promise.all(workspaces.map((item) => workorchApi.readWorkspaceSnapshot(item.id)));
-      setSnapshots(nextSnapshots);
+      const nextBoardItems = await Promise.all(workspaces.map(async (item) => {
+        const [snapshot, goals, dods] = await Promise.all([
+          workorchApi.readWorkspaceSnapshot(item.id),
+          workorchApi.listGoals(item.id),
+          workorchApi.listDoDs(item.id)
+        ]);
+        return { snapshot, goals, dods };
+      }));
+      setBoardItems(nextBoardItems);
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
@@ -378,14 +533,21 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
     void loadBoard();
   }, []);
 
+  const trackWorkspaceActivationInBackground = (workspaceId: string) => {
+    void workorchApi.activateWorkspaceExecution(workspaceId)
+      .then(() => {
+        message.success('工作空间执行已在后台启动');
+        void loadBoard();
+      })
+      .catch((error: unknown) => {
+        message.error(`工作空间执行后台启动失败：${errorMessage(error)}`);
+        void loadBoard();
+      });
+  };
+
   const activateWorkspaceExecution = async (workspaceId: string) => {
-    try {
-      await workorchApi.activateWorkspaceExecution(workspaceId);
-      message.success('工作空间执行已启动');
-      await loadBoard();
-    } catch (error) {
-      message.error(errorMessage(error));
-    }
+    message.info('工作空间执行已提交，正在后台启动');
+    trackWorkspaceActivationInBackground(workspaceId);
   };
 
   return (
@@ -394,15 +556,17 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
       subTitle="从工作空间视角查看目标、运行、治理阻塞和交付状态"
       extra={<Button onClick={() => void loadBoard()} loading={loading}>刷新</Button>}
     >
-      {snapshots.length === 0 && !loading ? (
+      {boardItems.length === 0 && !loading ? (
         <Empty description="暂无工作空间" />
       ) : (
         <ProCard gutter={16} wrap loading={loading}>
-          {snapshots.map((snapshot) => {
+          {boardItems.map(({ snapshot, goals, dods }) => {
             const activeRun = snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId);
+            const currentRun = activeRun ?? runStateSummary(snapshot.runs).latest;
             const runSummary = runStateSummary(snapshot.runs);
             const pendingDecisions = pendingCount(snapshot.decisions);
             const pendingApprovals = pendingCount(snapshot.approvals);
+            const canStartRun = !currentRun || isTerminalRunState(currentRun.state);
             return (
               <ProCard
                 key={snapshot.workspace.id}
@@ -417,6 +581,7 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
                   items={[
                     { key: 'workingDirectory', label: '工作目录', children: snapshot.workspace.workingDirectory },
                     { key: 'activeRun', label: '活跃运行', children: activeRun ? `${activeRun.id} / ${stateLabel(activeRun.state)}` : '-' },
+                    { key: 'definition', label: '目标/验收', children: <Space wrap><Tag>Goal {goals.length}</Tag><Tag>DoD {dods.length}</Tag></Space> },
                     { key: 'runtimeSummary', label: '运行摘要', children: runtimeSummaryTags(snapshot.runs) },
                     { key: 'latestRun', label: '最近运行', children: runSummary.latest ? `${runSummary.latest.id} / ${stateLabel(runSummary.latest.state)}` : '-' },
                     { key: 'decisions', label: '待处理决策', children: pendingDecisions },
@@ -426,12 +591,12 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
                 <Steps
                   size="small"
                   className="workorch-section"
-                  items={workspaceProcessItems(snapshot)}
+                  items={workspaceProcessItems(snapshot, goals, dods)}
                 />
                 <Space className="workorch-section" wrap>
                   <Button type="primary" onClick={() => onOpenWorkspace(snapshot.workspace.id)}>进入工作空间</Button>
-                  {!activeRun ? <Button onClick={() => void activateWorkspaceExecution(snapshot.workspace.id)}>启动执行</Button> : null}
-                  {activeRun ? <Button onClick={() => void workorchApi.resumeRun(activeRun.id).then(loadBoard).catch((error: unknown) => message.error(errorMessage(error)))}>继续运行</Button> : null}
+                  {canStartRun ? <Button onClick={() => void activateWorkspaceExecution(snapshot.workspace.id)}>启动执行</Button> : null}
+                  {currentRun && !isTerminalRunState(currentRun.state) ? <Button onClick={() => void workorchApi.resumeRun(currentRun.id).then(loadBoard).catch((error: unknown) => message.error(errorMessage(error)))}>继续运行</Button> : null}
                 </Space>
               </ProCard>
             );
@@ -450,12 +615,24 @@ function DecisionQueuePage() {
   const [decisionSubmitting, setDecisionSubmitting] = useState(false);
   const [decisionForm] = Form.useForm();
 
+  const resumeRunInBackground = (runId: string) => {
+    void workorchApi.resumeRun(runId)
+      .then(() => {
+        message.success(`Run ${runId} 已在后台继续执行`);
+        actionRef.current?.reload();
+      })
+      .catch((error: unknown) => {
+        message.error(`Run ${runId} 后台继续失败：${errorMessage(error)}`);
+        actionRef.current?.reload();
+      });
+  };
+
   const resolve = async (item: Decision, resolutionType: string, payload?: Record<string, unknown>) => {
     try {
       await workorchApi.resolveDecision(item.id, resolutionType, payload);
-      await workorchApi.resumeRun(item.runId);
-      message.success(`决策已按 ${resolutionType} 处理，Run 已继续推进`);
+      message.success(`决策已按 ${resolutionType} 处理，Run 已转入后台继续`);
       actionRef.current?.reload();
+      resumeRunInBackground(item.runId);
     } catch (error) {
       message.error(errorMessage(error));
     }
@@ -478,12 +655,14 @@ function DecisionQueuePage() {
     setDecisionSubmitting(true);
     try {
       const values = await decisionForm.validateFields();
-      const payload = { operator: 'console', ...values };
-      await workorchApi.resolveDecision(decisionTarget.item.id, decisionTarget.resolutionType, payload);
-      await workorchApi.resumeRun(decisionTarget.item.runId);
-      message.success(`决策已按 ${decisionTarget.resolutionType} 处理，Run 已继续推进`);
+      const payload = normalizeDecisionResolutionPayload(values);
+      const target = decisionTarget;
+      await workorchApi.resolveDecision(target.item.id, target.resolutionType, payload);
       setDecisionTarget(undefined);
+      decisionForm.resetFields();
+      message.success(`决策已按 ${target.resolutionType} 处理，Run 已转入后台继续`);
       actionRef.current?.reload();
+      resumeRunInBackground(target.item.runId);
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
@@ -501,10 +680,10 @@ function DecisionQueuePage() {
       const decisions = await workorchApi.listDecisions();
       const selectedDecisions = decisions.filter((item) => ticketIds.includes(item.id));
       await workorchApi.batchResolveDecisions(ticketIds, resolutionType, { operator: 'console', mode: 'batch' });
-      await Promise.all(selectedDecisions.map((item) => workorchApi.resumeRun(item.runId)));
-      message.success(`${ticketIds.length} 个决策工单已按 ${resolutionType} 处理`);
+      message.success(`${ticketIds.length} 个决策工单已按 ${resolutionType} 处理，相关 Run 已转入后台继续`);
       setSelectedDecisionKeys([]);
       actionRef.current?.reload();
+      Array.from(new Set(selectedDecisions.map((item) => item.runId))).forEach(resumeRunInBackground);
     } catch (error) {
       message.error(errorMessage(error));
     }
@@ -565,7 +744,7 @@ function DecisionQueuePage() {
         confirmLoading={decisionSubmitting}
         onCancel={() => setDecisionTarget(undefined)}
         onOk={() => void submitDecisionResolution()}
-        okText="提交并继续运行"
+        okText="提交并转入后台"
         destroyOnHidden
       >
         {decisionTarget ? (
@@ -581,11 +760,47 @@ function DecisionQueuePage() {
               ]}
             />
             <Form form={decisionForm} layout="vertical">
-              {decisionRequiredFields(decisionTarget.item).map((field) => (
-                <Form.Item key={field} name={field} label={decisionFieldLabel(field)} rules={[{ required: true, message: `请补充${decisionFieldLabel(field)}` }]}>
+              {decisionPayloadFields(decisionTarget.item).map((field) => (
+                <Form.Item
+                  key={field.name}
+                  name={['structuredPayload', field.name]}
+                  label={field.label}
+                  rules={field.required ? [{ required: true, message: `请补充${field.label}` }] : undefined}
+                >
                   <Input />
                 </Form.Item>
               ))}
+              {decisionPayloadFields(decisionTarget.item).length === 0 ? (
+                <Form.Item name="answer" label="补充信息" rules={[{ required: true, message: '请填写补充信息' }]}>
+                  <Input.TextArea rows={4} placeholder="按决策问题补充业务信息，例如目标对象、执行范围、路径选择或缺失参数。" />
+                </Form.Item>
+              ) : (
+                <Form.Item name="answer" label="补充说明">
+                  <Input.TextArea rows={3} placeholder="可选。用于补充字段之外的业务判断、执行约束或上下文说明。" />
+                </Form.Item>
+              )}
+              <Form.Item name="note" label="处理备注">
+                <Input.TextArea rows={2} placeholder="可选。记录本次处理依据，供后续审计和审批查看。" />
+              </Form.Item>
+              <Form.Item
+                name="extraPayloadText"
+                label="高级 JSON 载荷"
+                tooltip="可选。填写 JSON 对象，会合并到 resolutionPayload，用于复杂结构化信息。"
+                rules={[
+                  {
+                    validator: (_, value) => {
+                      try {
+                        parseDecisionExtraPayload(value);
+                        return Promise.resolve();
+                      } catch (error) {
+                        return Promise.reject(error instanceof Error ? error : new Error('JSON 格式不正确'));
+                      }
+                    }
+                  }
+                ]}
+              >
+                <Input.TextArea rows={4} placeholder='例如：{"target":"业务对象","method":"执行方式","constraints":["约束条件"]}' />
+              </Form.Item>
               <Form.Item name="operator" label="处理人" rules={[{ required: true, message: '请填写处理人' }]}>
                 <Input />
               </Form.Item>
@@ -607,6 +822,18 @@ function ApprovalQueuePage() {
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
   const [approvalForm] = Form.useForm<{ operator?: string; comment?: string }>();
   const actionLabel = (action: 'approve' | 'reject') => action === 'approve' ? '已批准' : '已拒绝';
+
+  const resumeRunInBackground = (runId: string) => {
+    void workorchApi.resumeRun(runId)
+      .then(() => {
+        message.success(`Run ${runId} 已在后台继续执行`);
+        actionRef.current?.reload();
+      })
+      .catch((error: unknown) => {
+        message.error(`Run ${runId} 后台继续失败：${errorMessage(error)}`);
+        actionRef.current?.reload();
+      });
+  };
 
   const openApprovalResolution = async (item: Approval, action: 'approve' | 'reject') => {
     approvalForm.resetFields();
@@ -634,10 +861,12 @@ function ApprovalQueuePage() {
       } else {
         await workorchApi.rejectApproval(approvalTarget.item.id);
       }
-      await workorchApi.resumeRun(approvalTarget.item.runId);
-      message.success(`审批${actionLabel(approvalTarget.action)}，Run 已继续推进`);
+      const target = approvalTarget;
       setApprovalTarget(undefined);
+      approvalForm.resetFields();
+      message.success(`审批${actionLabel(target.action)}，Run 已转入后台继续`);
       actionRef.current?.reload();
+      resumeRunInBackground(target.item.runId);
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
@@ -655,10 +884,10 @@ function ApprovalQueuePage() {
       const approvals = await workorchApi.listApprovals();
       const selectedApprovals = approvals.filter((item) => approvalIds.includes(item.id));
       await workorchApi.batchResolveApprovals(approvalIds, action);
-      await Promise.all(selectedApprovals.map((item) => workorchApi.resumeRun(item.runId)));
-      message.success(`${approvalIds.length} 个审批项${actionLabel(action)}`);
+      message.success(`${approvalIds.length} 个审批项${actionLabel(action)}，相关 Run 已转入后台继续`);
       setSelectedApprovalKeys([]);
       actionRef.current?.reload();
+      Array.from(new Set(selectedApprovals.map((item) => item.runId))).forEach(resumeRunInBackground);
     } catch (error) {
       message.error(errorMessage(error));
     }
@@ -715,7 +944,7 @@ function ApprovalQueuePage() {
         confirmLoading={approvalSubmitting}
         onCancel={() => setApprovalTarget(undefined)}
         onOk={() => void submitApprovalResolution()}
-        okText={approvalTarget?.action === 'reject' ? '拒绝并继续运行' : '批准并继续运行'}
+        okText={approvalTarget?.action === 'reject' ? '拒绝并转入后台' : '批准并转入后台'}
         okButtonProps={{ danger: approvalTarget?.action === 'reject' }}
         destroyOnHidden
       >
@@ -793,6 +1022,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [goalDefinitionOpen, setGoalDefinitionOpen] = useState(false);
   const [dodDefinitionOpen, setDoDDefinitionOpen] = useState(false);
   const [businessSubmitting, setBusinessSubmitting] = useState(false);
+  const [editingGoal, setEditingGoal] = useState<Goal | undefined>(undefined);
+  const [editingDoD, setEditingDoD] = useState<DoD | undefined>(undefined);
+  const [activationTracking, setActivationTracking] = useState(false);
   const [setupStep, setSetupStep] = useState(0);
   const [createdWorkspace, setCreatedWorkspace] = useState<Workspace | undefined>(undefined);
   const [activationForm] = Form.useForm();
@@ -826,6 +1058,18 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       message.error(errorMessage(error));
     }).finally(() => setLoading(false));
   }, [workspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId || !activationTracking) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      void loadWorkspaceContext(workspaceId).catch((error: unknown) => {
+        message.error(errorMessage(error));
+      });
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [workspaceId, activationTracking]);
 
   const readyDoDs = dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
   const llmProviders = configuration?.llm.providers ?? [];
@@ -889,24 +1133,31 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     setupDoDForm.resetFields();
   };
 
-  const activateWorkspaceExecution = async (request: WorkspaceExecutionActivationRequest) => {
+  const activateWorkspaceExecution = (request: WorkspaceExecutionActivationRequest) => {
     if (!workspaceId) {
       return;
     }
+    const targetWorkspaceId = workspaceId;
     setActivationLoading(true);
-    try {
-      const activation = await workorchApi.activateWorkspaceExecution(workspaceId, request);
-      setSnapshot(activation.snapshot);
-      setRunSnapshot(undefined);
-      setRunObservability(undefined);
-      setActivationOpen(false);
-      activationForm.resetFields();
-      message.success('工作空间执行已启动');
-    } catch (error) {
-      message.error(errorMessage(error));
-    } finally {
-      setActivationLoading(false);
-    }
+    setActivationOpen(false);
+    setActivationTracking(true);
+    activationForm.resetFields();
+    message.info('工作空间执行已提交，已转入后台跟踪');
+    void workorchApi.activateWorkspaceExecution(targetWorkspaceId, request)
+      .then(async (activation) => {
+        setSnapshot(activation.snapshot);
+        setRunSnapshot(undefined);
+        setRunObservability(undefined);
+        await loadWorkspaceContext(targetWorkspaceId);
+        message.success('工作空间执行已完成一次状态刷新');
+      })
+      .catch((error: unknown) => {
+        message.error(errorMessage(error));
+      })
+      .finally(() => {
+        setActivationLoading(false);
+        setActivationTracking(false);
+      });
   };
 
   const requestWorkspaceActivation = () => {
@@ -921,6 +1172,18 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       priority: 0
     });
     setActivationOpen(true);
+  };
+
+  const openGoalDefinition = (goal?: Goal) => {
+    setEditingGoal(goal);
+    goalForm.setFieldsValue({ text: goal?.text || '' });
+    setGoalDefinitionOpen(true);
+  };
+
+  const openDoDDefinition = (dod?: DoD) => {
+    setEditingDoD(dod);
+    dodForm.setFieldsValue({ items: dod?.items?.join('\n') || '' });
+    setDoDDefinitionOpen(true);
   };
 
   const runColumns: ProColumns<Run>[] = [
@@ -981,9 +1244,10 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       extra={
         <Space wrap>
           <Button onClick={() => setWorkspaceSetupOpen(true)}>创建工作空间</Button>
-          <Button disabled={!workspaceId} onClick={() => setGoalDefinitionOpen(true)}>定义目标</Button>
-          <Button disabled={!workspaceId} onClick={() => setDoDDefinitionOpen(true)}>定义验收标准</Button>
+          <Button disabled={!workspaceId} onClick={() => openGoalDefinition()}>定义目标</Button>
+          <Button disabled={!workspaceId} onClick={() => openDoDDefinition()}>定义验收标准</Button>
           <Button type="primary" disabled={!workspaceId} onClick={requestWorkspaceActivation}>启动执行</Button>
+          {activationTracking ? <Tag color="processing">后台跟踪中</Tag> : null}
           <Select
             style={{ width: 360 }}
             placeholder="选择工作空间"
@@ -1057,7 +1321,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                   pagination={{ pageSize: 5, showSizeChanger: false }}
                   columns={[
                     { title: '目标', dataIndex: 'text', ellipsis: true, render: (_, item) => boundedParagraph(item.text, { rows: 2 }) },
-                    { title: 'Goal ID', dataIndex: 'id', copyable: true, ellipsis: true, width: 180 }
+                    { title: 'Goal ID', dataIndex: 'id', copyable: true, ellipsis: true, width: 180 },
+                    { title: '操作', width: 80, render: (_, item) => <Button type="link" size="small" onClick={() => openGoalDefinition(item)}>修改</Button> }
                   ]}
                   dataSource={goals}
                 />
@@ -1075,7 +1340,11 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     { title: '序号', dataIndex: 'index', width: 72 },
                     { title: '验收标准', dataIndex: 'text', ellipsis: true, render: (_, item) => boundedParagraph(item.text, { rows: 2 }) },
                     { title: '状态', dataIndex: 'state', width: 100, render: (_, item) => stateTag(item.state) },
-                    { title: 'DoD ID', dataIndex: 'id', copyable: true, ellipsis: true, width: 180 }
+                    { title: 'DoD ID', dataIndex: 'id', copyable: true, ellipsis: true, width: 180 },
+                    { title: '操作', width: 80, render: (_, item) => {
+                      const dod = dods.find((candidate) => candidate.id === item.id);
+                      return <Button type="link" size="small" disabled={!dod} onClick={() => dod && openDoDDefinition(dod)}>修改</Button>;
+                    } }
                   ]}
                   dataSource={dodDefinitionRows}
                 />
@@ -1398,7 +1667,17 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           </Form.Item>
         </Form>
       </Modal>
-      <Modal title="定义目标" open={goalDefinitionOpen} confirmLoading={businessSubmitting} onCancel={() => setGoalDefinitionOpen(false)} onOk={() => goalForm.submit()}>
+      <Modal
+        title={editingGoal ? '修改目标' : '定义目标'}
+        open={goalDefinitionOpen}
+        confirmLoading={businessSubmitting}
+        onCancel={() => {
+          setGoalDefinitionOpen(false);
+          setEditingGoal(undefined);
+          goalForm.resetFields();
+        }}
+        onOk={() => goalForm.submit()}
+      >
         <Form
           form={goalForm}
           layout="vertical"
@@ -1409,11 +1688,16 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             }
             setBusinessSubmitting(true);
             try {
-              await workorchApi.defineGoal(workspaceId, values.text);
+              if (editingGoal) {
+                await workorchApi.updateGoal(editingGoal.id, values.text);
+              } else {
+                await workorchApi.defineGoal(workspaceId, values.text);
+              }
               await loadWorkspaceContext(workspaceId);
               setGoalDefinitionOpen(false);
+              setEditingGoal(undefined);
               goalForm.resetFields();
-              message.success('目标已定义');
+              message.success(editingGoal ? '目标已修改' : '目标已定义');
             } catch (error) {
               message.error(errorMessage(error));
             } finally {
@@ -1426,7 +1710,17 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           </Form.Item>
         </Form>
       </Modal>
-      <Modal title="定义验收标准" open={dodDefinitionOpen} confirmLoading={businessSubmitting} onCancel={() => setDoDDefinitionOpen(false)} onOk={() => dodForm.submit()}>
+      <Modal
+        title={editingDoD ? '修改验收标准' : '定义验收标准'}
+        open={dodDefinitionOpen}
+        confirmLoading={businessSubmitting}
+        onCancel={() => {
+          setDoDDefinitionOpen(false);
+          setEditingDoD(undefined);
+          dodForm.resetFields();
+        }}
+        onOk={() => dodForm.submit()}
+      >
         <Form
           form={dodForm}
           layout="vertical"
@@ -1438,11 +1732,16 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             setBusinessSubmitting(true);
             try {
               const items = values.items.split('\n').map((item) => item.trim()).filter(Boolean);
-              await workorchApi.defineDoD(workspaceId, items);
+              if (editingDoD) {
+                await workorchApi.updateDoD(editingDoD.id, items);
+              } else {
+                await workorchApi.defineDoD(workspaceId, items);
+              }
               await loadWorkspaceContext(workspaceId);
               setDoDDefinitionOpen(false);
+              setEditingDoD(undefined);
               dodForm.resetFields();
-              message.success('验收标准已定义');
+              message.success(editingDoD ? '验收标准已修改' : '验收标准已定义');
             } catch (error) {
               message.error(errorMessage(error));
             } finally {
@@ -1461,7 +1760,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
         confirmLoading={activationLoading}
         onCancel={() => setActivationOpen(false)}
         onOk={() => activationForm.submit()}
-        okText="启动执行"
+        okText="提交后台执行"
       >
         <Form
           form={activationForm}

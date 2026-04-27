@@ -398,13 +398,19 @@ func decisionContractPrompt() string {
 		"- executionGraph.nodes kind values must be selected from runtimeCapabilities.blockKinds only.",
 		"- Use shellCommands, patchRequests, mcpToolCalls, requiredDecision, requiredApproval, memoryWrites, or dodAssessment as appropriate.",
 		"- Shell command names must be real commands available in the local process environment. Do not use a command named workorch.",
+		"- Do not use commands listed in runtimeCapabilities.shellPolicy.unavailableCommands, including inside sh -c, bash -c, or other nested shell scripts.",
+		"- Shell command input may include timeoutMillis for commands expected to take longer than the default; keep commands non-interactive and bounded.",
+		"- Do not assume remote host access credentials, SSH users, keys, or passwords. If a goal requires remote host configuration and no access method is present in the request, return blocked_on_decision with decisionKind provide_missing_info and ask for the access method or credentials.",
+		"- When remote SSH credentials are explicitly available, prefer the ssh/command block kind from runtimeCapabilities.blockKinds. Do not emulate password SSH with sshpass or expect through shell/command.",
+		"- ssh/command input supports host, port, username, password, privateKey, privateKeyPath, command, and timeoutMillis. Keep the remote command non-interactive and bounded.",
 		"- Shell commands may call local workorchd HTTP only through runtimeCapabilities.serviceAPIs. Do not use /runs, /observability, /metrics?run=..., or any endpoint that is not explicitly declared.",
-		"- For completed, include dodAssessment with evidenceRefs for every satisfied item.",
+		"- When input.graphFollowUp is true, use input.graphEvidence as the collected execution graph evidence. Return completed with dodAssessment when the DoD can be assessed; request more work only when evidence is insufficient.",
+		"- For completed, include dodAssessment.summary as a non-empty user-facing final result, and evidenceRefs for every satisfied item.",
 		"- Do not include workspaceId, runId, stepId, schema, traceRefs, config, or any unknown top-level field in the decision JSON.",
 		"Minimal examples:",
 		`{"completionState":"continue","executionGraph":{"nodes":[{"id":"inspect","kind":"shell/command","input":{"command":"ls","args":["-la"]}},{"id":"test","kind":"shell/command","dependsOn":["inspect"],"input":{"command":"go","args":["test","./..."]}}]}}`,
 		`{"completionState":"blocked_on_decision","requiredDecision":{"reason":"missing product choice","decisionKind":"provide_missing_info","question":"Which runtime adapter should be used?"}}`,
-		`{"completionState":"completed","dodAssessment":{"satisfied":true,"items":[{"item":"tests pass","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}]}}`,
+		`{"completionState":"completed","dodAssessment":{"satisfied":true,"summary":"Tests passed and the requested artifact is ready.","items":[{"item":"tests pass","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}]}}`,
 	}, "\n")
 }
 

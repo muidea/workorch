@@ -3,6 +3,7 @@ package shell
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,9 +49,9 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		return runtimemodel.StepExecutionResult{}, err
 	}
 
-	timeout := a.timeout
-	if timeout <= 0 {
-		timeout = 5 * time.Second
+	timeout, err := shellCommandTimeout(request.Input, a.timeout)
+	if err != nil {
+		return runtimemodel.StepExecutionResult{}, err
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -78,6 +79,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		"stderr":         stderr.String(),
 		"exitCode":       exitCode,
 		"durationMillis": duration.Milliseconds(),
+		"timeoutMillis":  timeout.Milliseconds(),
 	}
 	if runCtx.Err() == context.DeadlineExceeded {
 		output["status"] = "timeout"
@@ -88,6 +90,50 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 	return runtimemodel.StepExecutionResult{Output: output}, nil
+}
+
+func shellCommandTimeout(input map[string]any, defaultTimeout time.Duration) (time.Duration, error) {
+	if defaultTimeout <= 0 {
+		defaultTimeout = 5 * time.Second
+	}
+	if input == nil || input["timeoutMillis"] == nil {
+		return defaultTimeout, nil
+	}
+	value, ok := numericMillis(input["timeoutMillis"])
+	if !ok || value <= 0 {
+		return 0, common.ErrInvalidArgument
+	}
+	timeout := time.Duration(value) * time.Millisecond
+	if timeout < time.Second {
+		return 0, fmt.Errorf("%w: timeoutMillis must be at least 1000", common.ErrInvalidArgument)
+	}
+	if timeout > 5*time.Minute {
+		return 0, fmt.Errorf("%w: timeoutMillis must not exceed 300000", common.ErrInvalidArgument)
+	}
+	return timeout, nil
+}
+
+func numericMillis(input any) (int64, bool) {
+	switch typed := input.(type) {
+	case int:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case int32:
+		return int64(typed), true
+	case float64:
+		if typed != float64(int64(typed)) {
+			return 0, false
+		}
+		return int64(typed), true
+	case float32:
+		if typed != float32(int64(typed)) {
+			return 0, false
+		}
+		return int64(typed), true
+	default:
+		return 0, false
+	}
 }
 
 func (a *RuntimeAdapter) filteredEnv() []string {

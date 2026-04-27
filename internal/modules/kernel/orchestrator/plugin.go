@@ -11,6 +11,7 @@ import (
 	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
+	sshcommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 )
 
@@ -39,6 +40,11 @@ func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry(runtime.LegacyRuntimeAdapter())
 	if runtime.ShellRuntimeAdapter() != nil {
 		if err := runtimeRegistry.Register("shell/command", runtime.ShellRuntimeAdapter()); err != nil {
+			return cd.NewError(cd.Unexpected, err.Error())
+		}
+	}
+	if runtime.SSHRuntimeAdapter() != nil {
+		if err := runtimeRegistry.Register(sshcommon.StepKindCommand, runtime.SSHRuntimeAdapter()); err != nil {
 			return cd.NewError(cd.Unexpected, err.Error())
 		}
 	}

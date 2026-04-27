@@ -1664,6 +1664,7 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterExecutionGraphCompletes(t
 					"status": "completed",
 					"dodAssessment": map[string]any{
 						"satisfied": true,
+						"summary":   "graph completed",
 						"items": []map[string]any{
 							{
 								"item":         "graph completed",
@@ -1721,6 +1722,152 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterExecutionGraphCompletes(t
 	previousOutput, ok := followUpInput["previousStepOutput"].(map[string]any)
 	if !ok || previousOutput["stdout"] != "workspace inspected" {
 		t.Fatalf("previousStepOutput = %+v, want graph node output", followUpInput["previousStepOutput"])
+	}
+}
+
+func TestRuntimeOrchestrator_GraphFollowUpIncludesAllCompletedParallelEvidence(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "cpu", Kind: "graph/mock"},
+		{ID: "memory", Kind: "graph/mock"},
+	}}
+	var followUpInput map[string]any
+	runtime := &stubRuntimeAdapter{
+		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			switch {
+			case request.StepID == "run-graph-parallel-follow-up/step-1":
+				return map[string]any{
+					"status":         "completed",
+					"executionGraph": graph,
+				}, nil
+			case request.StepID == "run-graph-parallel-follow-up/block/cpu":
+				return map[string]any{
+					"status": "completed",
+					"stdout": "cpu: 4 cores",
+				}, nil
+			case request.StepID == "run-graph-parallel-follow-up/block/memory":
+				return map[string]any{
+					"status": "completed",
+					"stdout": "memory: 15Gi",
+				}, nil
+			case strings.HasPrefix(string(request.StepID), "run-graph-parallel-follow-up/zz-llm-after-graph-"):
+				followUpInput = request.Input
+				return map[string]any{
+					"status": "completed",
+					"dodAssessment": map[string]any{
+						"satisfied": true,
+						"summary":   "parallel graph evidence assessed",
+						"items": []map[string]any{
+							{
+								"item":         "parallel graph completed",
+								"state":        "satisfied",
+								"evidenceRefs": []string{"run-graph-parallel-follow-up/block/cpu", "run-graph-parallel-follow-up/block/memory"},
+							},
+						},
+					},
+				}, nil
+			default:
+				return nil, fmt.Errorf("unexpected graph parallel follow-up step %s", request.StepID)
+			}
+		},
+	}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-graph-parallel-follow-up")
+	runID := common.RunID("run-graph-parallel-follow-up")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-graph-parallel-follow-up"),
+		State:           common.RunStateCreated,
+		InitialStepKind: "llm/workspace_execution",
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s, want completed", runItem.State)
+	}
+	evidence, ok := followUpInput["graphEvidence"].([]map[string]any)
+	if !ok || len(evidence) != 2 {
+		t.Fatalf("graphEvidence = %#v, want two completed graph node evidence entries", followUpInput["graphEvidence"])
+	}
+	if evidence[0]["nodeId"] != "cpu" || evidence[1]["nodeId"] != "memory" {
+		t.Fatalf("graphEvidence = %#v, want graph node order", evidence)
+	}
+	output0, _ := evidence[0]["output"].(map[string]any)
+	output1, _ := evidence[1]["output"].(map[string]any)
+	if output0["stdout"] != "cpu: 4 cores" || output1["stdout"] != "memory: 15Gi" {
+		t.Fatalf("graphEvidence outputs = %#v, want both parallel outputs", evidence)
+	}
+	if !reflect.DeepEqual(followUpInput["graphCompletedNodes"], []string{"cpu", "memory"}) {
+		t.Fatalf("graphCompletedNodes = %#v, want both completed nodes", followUpInput["graphCompletedNodes"])
+	}
+}
+
+func TestRuntimeOrchestrator_FailsLLMRunCompletionWithoutDoDSummary(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{
+		"status": "completed",
+		"dodAssessment": map[string]any{
+			"satisfied": true,
+			"items": []map[string]any{
+				{
+					"item":         "tests pass",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-dod-summary-missing/validation/runtime-step"},
+				},
+			},
+		},
+	}}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-dod-summary-missing")
+	runID := common.RunID("run-dod-summary-missing")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-1"),
+		State:           common.RunStateCreated,
+		InitialStepKind: "llm/workspace_execution",
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run should close as failed without returning error: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateFailed || !strings.Contains(runItem.FailureReason, "dodAssessment.summary is required") {
+		t.Fatalf("run = %+v, want failed DoD summary gate", runItem)
 	}
 }
 
@@ -2194,6 +2341,131 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeDecisionR
 	}
 	if len(runtime.calls) != 2 || runtime.calls[0] != "run-runtime-resume/step-1" || runtime.calls[1] != "run-runtime-resume/step-2" {
 		t.Fatalf("runtime calls = %#v, want [run-runtime-resume/step-1 run-runtime-resume/step-2]", runtime.calls)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeRunCreatesUniqueStepForMultiRoundDecision(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runID := common.RunID("run-runtime-multi-decision")
+	firstResumeStepID := common.StepID("run-runtime-multi-decision/llm-after-decision")
+	secondResumeStepID := common.StepID("run-runtime-multi-decision/llm-after-decision-2")
+	runtime := &stubRuntimeAdapter{
+		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			switch request.StepID {
+			case "run-runtime-multi-decision/step-1":
+				return map[string]any{
+					"status":                           "completed",
+					stepOutputKeyBlockDecisionReason:   "first decision gate",
+					stepOutputKeyBlockDecisionTicketID: "ticket-runtime-multi-decision-first",
+					stepOutputKeyNextStep:              string(firstResumeStepID),
+					stepOutputKeyNextKind:              "legacy/minimal",
+				}, nil
+			case firstResumeStepID:
+				resolution := mapFromValue(request.Input["decisionResolution"])
+				payload := mapFromValue(resolution["resolutionPayload"])
+				if payload["answer"] != "first answer is incomplete" {
+					return nil, fmt.Errorf("first resume payload = %+v, want first answer", payload)
+				}
+				return map[string]any{
+					"status":                         "completed",
+					stepOutputKeyBlockDecisionReason: "second decision gate",
+					stepOutputKeyNextStep:            string(firstResumeStepID),
+					stepOutputKeyNextKind:            "legacy/minimal",
+				}, nil
+			case secondResumeStepID:
+				resolution := mapFromValue(request.Input["decisionResolution"])
+				payload := mapFromValue(resolution["resolutionPayload"])
+				if payload["answer"] != "second answer is enough" {
+					return nil, fmt.Errorf("second resume payload = %+v, want second answer", payload)
+				}
+				return map[string]any{
+					"status": "completed",
+					"stage":  "finalize",
+				}, nil
+			default:
+				return nil, fmt.Errorf("unexpected step %s", request.StepID)
+			}
+		},
+	}
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-runtime-multi-decision")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	resolveRuntimeTicket(t, ctx, ticketRepo, resolutionRepo, "ticket-runtime-multi-decision-first", "resolution-runtime-multi-decision-first", map[string]any{"answer": "first answer is incomplete"})
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("first resume run: %v", err)
+	}
+	secondTicketID := common.TicketID("run-runtime-multi-decision-llm-after-decision-decision")
+	resolveRuntimeTicket(t, ctx, ticketRepo, resolutionRepo, secondTicketID, "resolution-runtime-multi-decision-second", map[string]any{"answer": "second answer is enough"})
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("second resume run: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s, want completed", runItem.State)
+	}
+	if _, err := stepRepo.Get(ctx, firstResumeStepID); err != nil {
+		t.Fatalf("get first resume step: %v", err)
+	}
+	secondStep, err := stepRepo.Get(ctx, secondResumeStepID)
+	if err != nil {
+		t.Fatalf("get second resume step: %v", err)
+	}
+	if secondStep.Input["previousStepId"] != string(firstResumeStepID) {
+		t.Fatalf("second previousStepId = %v, want %s", secondStep.Input["previousStepId"], firstResumeStepID)
+	}
+	if len(runtime.calls) != 3 ||
+		runtime.calls[0] != "run-runtime-multi-decision/step-1" ||
+		runtime.calls[1] != firstResumeStepID ||
+		runtime.calls[2] != secondResumeStepID {
+		t.Fatalf("runtime calls = %#v, want unique multi-round decision calls", runtime.calls)
+	}
+}
+
+func resolveRuntimeTicket(
+	t *testing.T,
+	ctx context.Context,
+	ticketRepo *memory.DecisionTicketRepository,
+	resolutionRepo *memory.DecisionResolutionRepository,
+	ticketID common.TicketID,
+	resolutionID common.ResolutionID,
+	payload map[string]any,
+) {
+	t.Helper()
+	ticket, err := ticketRepo.Get(ctx, ticketID)
+	if err != nil {
+		t.Fatalf("get ticket %s: %v", ticketID, err)
+	}
+	ticket.State = common.DecisionTicketStateResolved
+	if err := ticketRepo.Update(ctx, ticket); err != nil {
+		t.Fatalf("update ticket %s: %v", ticketID, err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       resolutionID,
+		TicketID: ticket.ID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:  payload,
+	}); err != nil {
+		t.Fatalf("create resolution %s: %v", resolutionID, err)
 	}
 }
 

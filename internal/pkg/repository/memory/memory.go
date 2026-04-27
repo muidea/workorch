@@ -354,8 +354,7 @@ func (r *GoalRepository) Create(_ context.Context, item *workspace.Goal) error {
 	if _, ok := r.items[item.ID]; ok {
 		return common.ErrConflict
 	}
-	cloned := *item
-	r.items[item.ID] = &cloned
+	r.items[item.ID] = cloneGoal(item)
 	return nil
 }
 
@@ -389,6 +388,16 @@ func (r *GoalRepository) ListByWorkspaceID(_ context.Context, workspaceID common
 		return nil, nil
 	}
 	return items, nil
+}
+
+func (r *GoalRepository) Update(_ context.Context, item *workspace.Goal) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	r.items[item.ID] = cloneGoal(item)
+	return nil
 }
 
 type DoDRepository struct {
@@ -1054,6 +1063,11 @@ func cloneRuntimeCheckpoint(item *run.RuntimeCheckpoint) *run.RuntimeCheckpoint 
 func cloneDecisionTicket(item *decision.Ticket) *decision.Ticket {
 	cloned := *item
 	cloned.Context = cloneMap(item.Context)
+	return &cloned
+}
+
+func cloneGoal(item *workspace.Goal) *workspace.Goal {
+	cloned := *item
 	return &cloned
 }
 

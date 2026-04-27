@@ -92,7 +92,7 @@ func useWorkorchModuleTestConfig(t *testing.T, addr string, backend string, data
 addr = %q
 readHeaderTimeout = "5s"
 readTimeout = %q
-writeTimeout = "30s"
+writeTimeout = "180s"
 idleTimeout = "60s"
 shutdownTimeout = "5s"
 maxConcurrentRuns = 1

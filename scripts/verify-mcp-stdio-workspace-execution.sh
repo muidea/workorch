@@ -320,6 +320,8 @@ else:
     assessment = (assessment_steps[-1].get("output") or {}).get("dodAssessment") or {}
     if assessment.get("satisfied") is not True:
         errors.append(f"dodAssessment.satisfied is {assessment.get('satisfied')!r}, want true")
+    if not str(assessment.get("summary") or "").strip():
+        errors.append(f"dodAssessment.summary is empty: {assessment!r}")
 
 if not tool_calls:
     errors.append("missing ToolCall evidence")

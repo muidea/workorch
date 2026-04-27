@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os/exec"
 	"regexp"
 	"sort"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	mcpcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	sshcommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -33,6 +35,8 @@ const (
 	unavailableWorkorchCLICommand  = "workorch"
 	localServiceHTTPDeclaredOnly   = "declared_service_apis_only"
 )
+
+var unavailableIfMissingShellCommands = []string{"sshpass", "expect"}
 
 var (
 	httpURLPattern              = regexp.MustCompile(`https?://[^\s'"<>\\]+`)
@@ -663,6 +667,9 @@ func validateDecision(decision llmmodels.LLMExecutionDecision) error {
 		if decision.DoDAssessment == nil {
 			return fmt.Errorf("%w: dodAssessment is required for completed decision", common.ErrInvalidArgument)
 		}
+		if strings.TrimSpace(decision.DoDAssessment.Summary) == "" {
+			return fmt.Errorf("%w: dodAssessment.summary is required for completed decision", common.ErrInvalidArgument)
+		}
 		for _, item := range decision.DoDAssessment.Items {
 			if item.State == "satisfied" && len(item.EvidenceRefs) == 0 {
 				return fmt.Errorf("%w: satisfied dodAssessment item requires evidenceRefs", common.ErrInvalidArgument)
@@ -712,21 +719,43 @@ func validateExecutionGraph(graph llmmodels.BlockExecutionGraph) error {
 	return nil
 }
 
-func isUnavailableShellCommand(command string) bool {
-	return strings.TrimSpace(command) == unavailableWorkorchCLICommand
-}
-
 func validateShellCommandBoundary(command string, args []string, field string) error {
 	command = strings.TrimSpace(command)
-	if isUnavailableShellCommand(command) {
-		return fmt.Errorf("%w: %s %q is not an available runtime command", common.ErrInvalidArgument, field, command)
+	commandLine := shellCommandLine(command, args)
+	for _, unavailable := range unavailableRuntimeCommands() {
+		if commandReferencesShellCommand(command, commandLine, unavailable) {
+			return fmt.Errorf("%w: %s references unavailable runtime command %q", common.ErrInvalidArgument, field, unavailable)
+		}
 	}
-	for _, ref := range localWorkorchServiceHTTPReferences(shellCommandLine(command, args)) {
+	for _, ref := range localWorkorchServiceHTTPReferences(commandLine) {
 		if !isDeclaredServiceAPI(ref, declaredRuntimeCapabilities().ServiceAPIs) {
 			return fmt.Errorf("%w: %s references undeclared local workorch service API %s %s", common.ErrInvalidArgument, field, ref.Method, ref.Raw)
 		}
 	}
 	return nil
+}
+
+func unavailableRuntimeCommands() []string {
+	ret := []string{unavailableWorkorchCLICommand}
+	for _, command := range unavailableIfMissingShellCommands {
+		if _, err := exec.LookPath(command); err != nil {
+			ret = append(ret, command)
+		}
+	}
+	sort.Strings(ret)
+	return ret
+}
+
+func commandReferencesShellCommand(command string, commandLine string, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	if strings.TrimSpace(command) == target {
+		return true
+	}
+	pattern := regexp.MustCompile(`(^|[\s;&|()])` + regexp.QuoteMeta(target) + `($|[\s;&|()])`)
+	return pattern.MatchString(commandLine)
 }
 
 func shellCommandLine(command string, args []string) string {
@@ -952,6 +981,11 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 				Input:       map[string]any{"command": "string", "args": "[]string"},
 			},
 			{
+				Kind:        sshcommon.StepKindCommand,
+				Description: "Execute one bounded non-interactive SSH command on a remote host using supplied password or private key credentials.",
+				Input:       map[string]any{"host": "string", "port": "number", "username": "string", "password": "string", "privateKey": "string", "privateKeyPath": "string", "command": "string", "timeoutMillis": "number"},
+			},
+			{
 				Kind:        llmcommon.RuntimeBlockKindPatchApply,
 				Description: "Request a diff or content patch to be applied by the runtime patch engine.",
 				Input:       map[string]any{"targetRef": "string", "diff": "string", "content": "string"},
@@ -1015,7 +1049,7 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 		ShellPolicy: llmmodels.ShellRuntimePolicy{
 			Enabled:                 true,
 			LocalServiceHTTP:        localServiceHTTPDeclaredOnly,
-			UnavailableCommands:     []string{unavailableWorkorchCLICommand},
+			UnavailableCommands:     unavailableRuntimeCommands(),
 			AllowedLocalServiceHost: []string{"localhost:8080", "127.0.0.1:8080"},
 		},
 	}

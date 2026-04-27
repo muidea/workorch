@@ -46,6 +46,7 @@ const (
 	stepInputKeyGraphPreviousNodeID    = "graphPreviousNodeId"
 	stepInputKeyGraphCompletedNodes    = "graphCompletedNodes"
 	stepInputKeyGraphBatch             = "graphBatch"
+	stepInputKeyGraphEvidence          = "graphEvidence"
 	stepOutputKeyBlockDecisionReason   = "blockDecisionReason"
 	stepOutputKeyBlockDecisionTicketID = "blockDecisionTicketId"
 	stepOutputKeyBlockDecisionKind     = "blockDecisionKind"
@@ -321,7 +322,13 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 		return err
 	}
 	mergeResumeInput(specs, resumeInput)
-	return o.dispatchStepSpecs(ctx, r, specs)
+	if err := o.dispatchStepSpecs(ctx, r, specs); err != nil {
+		if current, getErr := o.runs.Get(ctx, runID); getErr == nil && current.State == common.RunStateRunning {
+			_ = o.FailRun(ctx, runID, err.Error())
+		}
+		return err
+	}
+	return nil
 }
 
 func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunID) error {
@@ -507,8 +514,10 @@ func (o *RuntimeOrchestrator) dispatchStep(
 		if kind != "" {
 			step.Kind = kind
 		}
-		if step.Input == nil {
+		if input != nil {
 			step.Input = cloneStepPayload(input)
+		} else if step.Input == nil {
+			step.Input = map[string]any{}
 		}
 		if err := o.steps.Update(ctx, step); err != nil {
 			return err
@@ -628,7 +637,7 @@ func (o *RuntimeOrchestrator) dispatchStep(
 		return o.dispatchGraphStepBatch(ctx, run, graphSpecs)
 	}
 	if shouldDispatchGraphFollowUp(run, step, output) {
-		return o.dispatchStep(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), graphFollowUpStepInput(run, step))
+		return o.dispatchStep(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), o.graphFollowUpStepInput(ctx, run, step))
 	}
 	if err := completionDoDAssessmentError(run, output); err != nil {
 		step.State = common.StepStateFailed
@@ -1467,8 +1476,12 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 		}
 		nextStepID, nextKind := nextStepSpec(last.Output)
 		if nextStepID != "" {
+			uniqueStepID, err := o.uniqueDispatchStepID(ctx, run.ID, nextStepID)
+			if err != nil {
+				return nil, err
+			}
 			return []stepDispatchSpec{{
-				ID:    nextStepID,
+				ID:    uniqueStepID,
 				Kind:  nextKind,
 				Input: nextStepInputFromOutput(run, last),
 			}}, nil
@@ -1477,7 +1490,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			return []stepDispatchSpec{{
 				ID:    graphFollowUpStepID(run.ID, last),
 				Kind:  initialStepKind(run),
-				Input: graphFollowUpStepInput(run, last),
+				Input: o.graphFollowUpStepInput(ctx, run, last),
 			}}, nil
 		}
 	}
@@ -1489,6 +1502,35 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 		}}, nil
 	}
 	return nil, common.ErrConflict
+}
+
+func (o *RuntimeOrchestrator) uniqueDispatchStepID(ctx context.Context, runID common.RunID, base common.StepID) (common.StepID, error) {
+	if o == nil || o.steps == nil || runID == "" || base == "" {
+		return base, nil
+	}
+	existing, err := o.steps.Get(ctx, base)
+	if errors.Is(err, common.ErrNotFound) {
+		return base, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if existing != nil && existing.RunID != runID {
+		return "", common.ErrConflict
+	}
+	for idx := 2; ; idx++ {
+		candidate := common.StepID(fmt.Sprintf("%s-%d", base, idx))
+		existing, err := o.steps.Get(ctx, candidate)
+		if errors.Is(err, common.ErrNotFound) {
+			return candidate, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if existing != nil && existing.RunID != runID {
+			return "", common.ErrConflict
+		}
+	}
 }
 
 func terminalExecutionStep(steps []*runModel.Step) *runModel.Step {
@@ -1696,7 +1738,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatch(ctx context.Context, run *r
 		return o.dispatchGraphStepBatch(ctx, currentRun, nextSpecs)
 	}
 	if shouldDispatchGraphFollowUp(currentRun, last, last.Output) {
-		return o.dispatchStep(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), graphFollowUpStepInput(currentRun, last))
+		return o.dispatchStep(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphFollowUpStepInput(ctx, currentRun, last))
 	}
 	if err := completionDoDAssessmentError(currentRun, last.Output); err != nil {
 		last.State = common.StepStateFailed
@@ -1965,6 +2007,27 @@ func graphFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID 
 	return common.StepID(fmt.Sprintf("%s/zz-llm-after-graph-%s", runID, nodeID))
 }
 
+func (o *RuntimeOrchestrator) graphFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
+	input := graphFollowUpStepInput(run, step)
+	evidence := o.completedGraphEvidence(ctx, run, step)
+	if len(evidence) == 0 {
+		return input
+	}
+	input[stepInputKeyGraphEvidence] = evidence
+	completed := make([]string, 0, len(evidence))
+	for _, item := range evidence {
+		nodeID, _ := item["nodeId"].(string)
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID != "" {
+			completed = append(completed, nodeID)
+		}
+	}
+	if len(completed) > 0 {
+		input[stepInputKeyGraphCompletedNodes] = completed
+	}
+	return input
+}
+
 func graphFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]any {
 	input := nextStepInput(run, step.ID)
 	input["graphFollowUp"] = true
@@ -1984,6 +2047,45 @@ func graphFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]a
 		input["previousStepOutput"] = cloneStepPayload(step.Output)
 	}
 	return input
+}
+
+func (o *RuntimeOrchestrator) completedGraphEvidence(ctx context.Context, run *runModel.Run, anchor *runModel.Step) []map[string]any {
+	if o == nil || run == nil || anchor == nil {
+		return nil
+	}
+	graph, ok := runtimeGraphSpecFromStep(anchor)
+	if !ok || len(graph.Nodes) == 0 {
+		return nil
+	}
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil {
+		return nil
+	}
+	completedByNode := map[string]*runModel.Step{}
+	for _, step := range steps {
+		if step == nil || step.State != common.StepStateCompleted {
+			continue
+		}
+		nodeID := graphNodeID(step)
+		if nodeID == "" {
+			continue
+		}
+		completedByNode[nodeID] = step
+	}
+	evidence := make([]map[string]any, 0, len(completedByNode))
+	for _, node := range graph.Nodes {
+		step := completedByNode[node.ID]
+		if step == nil {
+			continue
+		}
+		evidence = append(evidence, map[string]any{
+			"nodeId": node.ID,
+			"stepId": string(step.ID),
+			"kind":   step.Kind,
+			"output": cloneStepPayload(step.Output),
+		})
+	}
+	return evidence
 }
 
 func nextStepSpec(output map[string]any) (common.StepID, string) {
@@ -2080,6 +2182,9 @@ func completionDoDAssessmentError(run *runModel.Run, output map[string]any) erro
 	}
 	if !satisfied {
 		return fmt.Errorf("%w: dodAssessment is not satisfied", common.ErrInvalidArgument)
+	}
+	if summary, _ := assessment["summary"].(string); strings.TrimSpace(summary) == "" {
+		return fmt.Errorf("%w: dodAssessment.summary is required for llm-driven completion", common.ErrInvalidArgument)
 	}
 	if err := validateDoDAssessmentItems(assessment["items"]); err != nil {
 		return err

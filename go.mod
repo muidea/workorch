@@ -5,6 +5,7 @@ go 1.24.13
 require (
 	github.com/muidea/magicCommon v1.5.7
 	github.com/muidea/magicEngine v1.4.9
+	github.com/pelletier/go-toml/v2 v2.2.4
 )
 
 require (
@@ -15,7 +16,6 @@ require (
 	github.com/go-playground/validator/v10 v10.30.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
-	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect

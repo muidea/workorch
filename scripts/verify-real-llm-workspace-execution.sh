@@ -92,13 +92,13 @@ workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
 
 post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" \
-  '{"text":"无需人工决策、无需审批。第一轮 LLM 必须返回 executionGraph，包含一个 shell/command 节点执行 pwd。不要返回 requiredDecision 或 requiredApproval。图节点执行完成后的后续 LLM 步骤必须基于 previousStepOutput 返回 completionState completed 和 dodAssessment，evidenceRefs 使用 previousStepId。"}' \
+  '{"text":"无需人工决策、无需审批。第一轮 LLM 必须返回 executionGraph，包含一个 shell/command 节点执行 pwd。不要返回 requiredDecision 或 requiredApproval。图节点执行完成后的后续 LLM 步骤必须基于 previousStepOutput 返回 completionState completed 和 dodAssessment，evidenceRefs 使用 previousStepId，dodAssessment.summary 必须用自然语言总结最终结果。"}' \
   >"$TMP_DIR/goal.json"
 goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
 [[ -n "$goal_id" ]]
 
 post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" \
-  '{"items":["第一轮 LLM 输出 executionGraph","shell 图节点由 Runtime 执行成功","后续 LLM 步骤返回 completed 的 dodAssessment 且包含 evidenceRefs"]}' \
+  '{"items":["第一轮 LLM 输出 executionGraph","shell 图节点由 Runtime 执行成功","后续 LLM 步骤返回 completed 的 dodAssessment，包含 summary 和 evidenceRefs"]}' \
   >"$TMP_DIR/dod.json"
 dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 [[ -n "$dod_id" ]]
@@ -148,6 +148,8 @@ else:
     assessment = (assessment_steps[-1].get("output") or {}).get("dodAssessment") or {}
     if assessment.get("satisfied") is not True:
         errors.append(f"dodAssessment.satisfied is {assessment.get('satisfied')!r}, want true")
+    if not str(assessment.get("summary") or "").strip():
+        errors.append(f"dodAssessment.summary is empty: {assessment!r}")
     for item in assessment.get("items") or []:
         if not item.get("evidenceRefs"):
             errors.append(f"dodAssessment item has no evidenceRefs: {item}")

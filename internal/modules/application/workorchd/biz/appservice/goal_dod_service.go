@@ -76,6 +76,46 @@ func DefineGoalFromEnv(ctx context.Context, workspaceID string, text string) (Go
 	return DefineGoalWithSession(ctx, session, workspaceID, text)
 }
 
+func UpdateGoalWithSession(ctx context.Context, session *RuntimeSession, goalID string, text string) (ret Goal, err error) {
+	service, repo, err := goalDependenciesFromSession(session)
+	if err != nil {
+		return Goal{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	text = strings.TrimSpace(text)
+	if goalID == "" || text == "" {
+		return Goal{}, common.ErrInvalidArgument
+	}
+	if err := service.UpdateGoal(ctx, workspacemodule.UpdateGoalCommand{
+		GoalID: common.GoalID(goalID),
+		Text:   text,
+	}); err != nil {
+		return Goal{}, err
+	}
+	item, err := repo.Get(ctx, common.GoalID(goalID))
+	if err != nil {
+		return Goal{}, err
+	}
+	return mapGoal(item), nil
+}
+
+func UpdateGoalWithBackend(ctx context.Context, backend string, dataRoot string, goalID string, text string) (Goal, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return Goal{}, err
+	}
+	return UpdateGoalWithSession(ctx, session, goalID, text)
+}
+
+func UpdateGoalFromEnv(ctx context.Context, goalID string, text string) (Goal, error) {
+	session, err := NewRuntimeSessionFromEnv()
+	if err != nil {
+		return Goal{}, err
+	}
+	return UpdateGoalWithSession(ctx, session, goalID, text)
+}
+
 func ReadGoalWithSession(ctx context.Context, session *RuntimeSession, goalID string) (ret Goal, err error) {
 	_, repo, err := goalDependenciesFromSession(session)
 	if err != nil {
@@ -170,6 +210,46 @@ func DefineDoDFromEnv(ctx context.Context, workspaceID string, items []string) (
 		return DoD{}, err
 	}
 	return DefineDoDWithSession(ctx, session, workspaceID, items)
+}
+
+func UpdateDoDWithSession(ctx context.Context, session *RuntimeSession, dodID string, items []string) (ret DoD, err error) {
+	service, repo, err := dodDependenciesFromSession(session)
+	if err != nil {
+		return DoD{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	items = normalizeDoDItems(items)
+	if dodID == "" || len(items) == 0 {
+		return DoD{}, common.ErrInvalidArgument
+	}
+	if err := service.UpdateDoD(ctx, workspacemodule.UpdateDoDCommand{
+		DoDID: common.DoDID(dodID),
+		Items: items,
+	}); err != nil {
+		return DoD{}, err
+	}
+	item, err := repo.Get(ctx, common.DoDID(dodID))
+	if err != nil {
+		return DoD{}, err
+	}
+	return mapDoD(item), nil
+}
+
+func UpdateDoDWithBackend(ctx context.Context, backend string, dataRoot string, dodID string, items []string) (DoD, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return DoD{}, err
+	}
+	return UpdateDoDWithSession(ctx, session, dodID, items)
+}
+
+func UpdateDoDFromEnv(ctx context.Context, dodID string, items []string) (DoD, error) {
+	session, err := NewRuntimeSessionFromEnv()
+	if err != nil {
+		return DoD{}, err
+	}
+	return UpdateDoDWithSession(ctx, session, dodID, items)
 }
 
 func ReadDoDWithSession(ctx context.Context, session *RuntimeSession, dodID string) (ret DoD, err error) {

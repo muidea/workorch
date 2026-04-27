@@ -36,6 +36,7 @@ type Runtime struct {
 	eventHub             workorchevents.Hub
 	legacyRuntimeAdapter orchestratorbiz.RuntimeAdapter
 	shellRuntimeAdapter  orchestratorbiz.RuntimeAdapter
+	sshRuntimeAdapter    orchestratorbiz.RuntimeAdapter
 	mcpRuntimeAdapter    orchestratorbiz.RuntimeAdapter
 	llmRuntimeAdapter    *llmbiz.RuntimeAdapter
 	soulService          soulservice.Service
@@ -84,6 +85,7 @@ func (r *Runtime) Teardown() {
 	r.eventHub = nil
 	r.legacyRuntimeAdapter = nil
 	r.shellRuntimeAdapter = nil
+	r.sshRuntimeAdapter = nil
 	r.mcpRuntimeAdapter = nil
 	r.llmRuntimeAdapter = nil
 	r.soulService = nil
@@ -134,6 +136,19 @@ func (r *Runtime) ShellRuntimeAdapter() orchestratorbiz.RuntimeAdapter {
 func (r *Runtime) SetShellRuntimeAdapter(adapter orchestratorbiz.RuntimeAdapter) {
 	if r != nil {
 		r.shellRuntimeAdapter = adapter
+	}
+}
+
+func (r *Runtime) SSHRuntimeAdapter() orchestratorbiz.RuntimeAdapter {
+	if r == nil {
+		return nil
+	}
+	return r.sshRuntimeAdapter
+}
+
+func (r *Runtime) SetSSHRuntimeAdapter(adapter orchestratorbiz.RuntimeAdapter) {
+	if r != nil {
+		r.sshRuntimeAdapter = adapter
 	}
 }
 

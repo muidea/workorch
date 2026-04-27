@@ -91,6 +91,13 @@ export const workorchApi = {
     });
     return body.goal;
   },
+  updateGoal: async (goalId: string, text: string) => {
+    const body = await request<{ goal: Goal }>(`${apiBase}/goals/${encodeURIComponent(goalId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ text })
+    });
+    return body.goal;
+  },
   listDoDs: async (workspaceId: string) => {
     const body = await request<{ dods: DoD[] }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/dods`);
     return body.dods ?? [];
@@ -98,6 +105,13 @@ export const workorchApi = {
   defineDoD: async (workspaceId: string, items: string[]) => {
     const body = await request<{ dod: DoD }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/dods`, {
       method: 'POST',
+      body: JSON.stringify({ items })
+    });
+    return body.dod;
+  },
+  updateDoD: async (dodId: string, items: string[]) => {
+    const body = await request<{ dod: DoD }>(`${apiBase}/dods/${encodeURIComponent(dodId)}`, {
+      method: 'PUT',
       body: JSON.stringify({ items })
     });
     return body.dod;

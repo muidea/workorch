@@ -27,7 +27,7 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"choices":[{"message":{"content":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"items\":[{\"item\":\"done\",\"state\":\"satisfied\",\"evidenceRefs\":[\"evidence-1\"]}]}}"}}]
+			"choices":[{"message":{"content":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"summary\":\"done with evidence\",\"items\":[{\"item\":\"done\",\"state\":\"satisfied\",\"evidenceRefs\":[\"evidence-1\"]}]}}"}}]
 		}`))
 	}))
 	defer server.Close()
@@ -56,7 +56,11 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	if !strings.Contains(gotPayload.Messages[0].Content, "Do not invent a workorch CLI") ||
 		!strings.Contains(gotPayload.Messages[0].Content, "runtimeCapabilities") ||
 		!strings.Contains(gotPayload.Messages[1].Content, "Do not use a command named workorch") ||
+		!strings.Contains(gotPayload.Messages[1].Content, "runtimeCapabilities.shellPolicy.unavailableCommands") ||
 		!strings.Contains(gotPayload.Messages[1].Content, "runtimeCapabilities.serviceAPIs") ||
+		!strings.Contains(gotPayload.Messages[1].Content, "Do not assume remote host access credentials") ||
+		!strings.Contains(gotPayload.Messages[1].Content, "ssh/command") ||
+		!strings.Contains(gotPayload.Messages[1].Content, "timeoutMillis") ||
 		!strings.Contains(gotPayload.Messages[1].Content, "runtimeCapabilities") {
 		t.Fatalf("messages = %+v, want runtime capability boundary", gotPayload.Messages)
 	}

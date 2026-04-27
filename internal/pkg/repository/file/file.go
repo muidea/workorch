@@ -506,6 +506,21 @@ func (r *GoalRepository) ListByWorkspaceID(_ context.Context, workspaceID common
 	return ret, nil
 }
 
+func (r *GoalRepository) Update(_ context.Context, item *workspace.Goal) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[common.GoalID, workspace.Goal](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	items[item.ID] = *cloneGoal(item)
+	return saveMap(r.path, items)
+}
+
 type DoDRepository struct {
 	mu   sync.RWMutex
 	path string

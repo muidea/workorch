@@ -111,3 +111,46 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReturnsTimeoutOutput(t *testing.T) {
 		t.Fatalf("workingDir = %v, want %s", result.Output["workingDir"], workingDirectory)
 	}
 }
+
+func TestRuntimeAdapter_ExecuteRuntimeStepUsesInputTimeoutMillis(t *testing.T) {
+	adapter := NewRuntimeAdapterWithTimeout(time.Second)
+	workingDirectory := t.TempDir()
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceWorkingDirectory: workingDirectory,
+		Kind:                      "shell/command",
+		Input: map[string]any{
+			"command":       "sh",
+			"args":          []any{"-c", "sleep 0.2; echo done"},
+			"timeoutMillis": 2000,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v", err)
+	}
+	if result.Output["status"] != "completed" {
+		t.Fatalf("status = %v, want completed", result.Output["status"])
+	}
+	if result.Output["timeoutMillis"] != int64(2000) {
+		t.Fatalf("timeoutMillis = %v, want 2000", result.Output["timeoutMillis"])
+	}
+	stdout, _ := result.Output["stdout"].(string)
+	if strings.TrimSpace(stdout) != "done" {
+		t.Fatalf("stdout = %q, want done", stdout)
+	}
+}
+
+func TestRuntimeAdapter_ExecuteRuntimeStepRejectsInvalidInputTimeoutMillis(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	_, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceWorkingDirectory: t.TempDir(),
+		Kind:                      "shell/command",
+		Input: map[string]any{
+			"command":       "pwd",
+			"timeoutMillis": 500,
+		},
+	})
+	if err == nil {
+		t.Fatal("ExecuteRuntimeStep err = nil, want invalid argument")
+	}
+}

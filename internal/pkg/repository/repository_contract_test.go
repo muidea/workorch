@@ -666,6 +666,17 @@ func testGoalRepositoryContract(t *testing.T, factory func() repository.GoalRepo
 	if fresh.Text != item.Text {
 		t.Fatalf("goal text = %q, want %q", fresh.Text, item.Text)
 	}
+	fresh.Text = "updated contract goal"
+	if err := repo.Update(ctx, fresh); err != nil {
+		t.Fatalf("update goal: %v", err)
+	}
+	updated, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get updated goal: %v", err)
+	}
+	if updated.Text != "updated contract goal" {
+		t.Fatalf("goal text = %q, want updated contract goal", updated.Text)
+	}
 	second := &workspacemodel.Goal{
 		ID:          common.GoalID("goal-contract-2"),
 		WorkspaceID: item.WorkspaceID,
@@ -683,6 +694,9 @@ func testGoalRepositoryContract(t *testing.T, factory func() repository.GoalRepo
 	}
 	if _, err := repo.Get(ctx, common.GoalID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing get err = %v, want not found", err)
+	}
+	if err := repo.Update(ctx, &workspacemodel.Goal{ID: common.GoalID("missing")}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing update err = %v, want not found", err)
 	}
 }
 

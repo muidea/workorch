@@ -158,7 +158,7 @@ Runtime configuration is loaded from TOML:
 addr = ":8080"
 readHeaderTimeout = "5s"
 readTimeout = "15s"
-writeTimeout = "30s"
+writeTimeout = "180s"
 idleTimeout = "60s"
 shutdownTimeout = "5s"
 maxConcurrentRuns = 1

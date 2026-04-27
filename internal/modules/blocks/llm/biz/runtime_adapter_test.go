@@ -137,6 +137,60 @@ func TestRuntimeAdapterRepairsInvalidDecisionOnce(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterRepairsUnavailableNestedShellCommand(t *testing.T) {
+	unavailableCommand := "sshpass"
+	commandUnavailable := false
+	for _, command := range unavailableRuntimeCommands() {
+		if command == unavailableCommand {
+			commandUnavailable = true
+			break
+		}
+	}
+	if !commandUnavailable {
+		unavailableCommand = unavailableWorkorchCLICommand
+	}
+
+	provider := &sequenceProvider{payloads: [][]byte{
+		[]byte(`{
+			"thoughtSummary":"inspect remote host through shell",
+			"completionState":"continue",
+			"executionGraph":{"nodes":[
+				{"id":"remote_inspect","kind":"shell/command","input":{"command":"sh","args":["-c","` + unavailableCommand + ` -p secret ssh host uname -a"]}}
+			]}
+		}`),
+		[]byte(`{
+			"thoughtSummary":"runtime command is unavailable",
+			"completionState":"blocked_on_decision",
+			"requiredDecision":{
+				"reason":"requested remote access depends on a command that is unavailable in this runtime",
+				"decisionKind":"provide_missing_info",
+				"question":"Please provide a supported non-interactive access method such as key-based SSH, an installed helper, MCP, or an external runtime adapter."
+			}
+		}`),
+	}}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	if len(provider.requests) != 2 || provider.requests[1].Repair == nil {
+		t.Fatalf("requests = %+v, want repair after unavailable nested shell command", provider.requests)
+	}
+	if !strings.Contains(provider.requests[1].Repair.ParseError, "unavailable runtime command") ||
+		!strings.Contains(provider.requests[1].Repair.ParseError, unavailableCommand) {
+		t.Fatalf("repair parse error = %q, want unavailable command context", provider.requests[1].Repair.ParseError)
+	}
+	if result.Output["stage"] != "llm_decision_required" ||
+		result.Output["blockDecisionKind"] != "provide_missing_info" {
+		t.Fatalf("output = %+v, want repaired decision ticket", result.Output)
+	}
+}
+
 func TestRuntimeAdapterReportsRepairFailure(t *testing.T) {
 	provider := &sequenceProvider{payloads: [][]byte{
 		[]byte(`{"workspaceId":"ws-1","completionState":"continue"}`),
@@ -186,6 +240,7 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 	}
 	if !runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.StepKindWorkspaceExecution) ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "shell/command") ||
+		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "ssh/command") ||
 		!runtimeCapabilitiesContainServiceAPI(provider.request.RuntimeCapabilities, "GET", "/api/v1/workorch/runs/{runId}/snapshot") {
 		t.Fatalf("runtime capabilities = %+v, want declared block and service API catalog", provider.request.RuntimeCapabilities)
 	}
@@ -573,7 +628,17 @@ func TestRuntimeAdapterExposesCompletedDoDAssessment(t *testing.T) {
 func TestParseLLMExecutionDecisionRejectsSatisfiedDoDWithoutEvidence(t *testing.T) {
 	_, err := ParseLLMExecutionDecision([]byte(`{
 		"completionState":"completed",
-		"dodAssessment":{"satisfied":true,"items":[{"item":"done","state":"satisfied"}]}
+		"dodAssessment":{"satisfied":true,"summary":"done","items":[{"item":"done","state":"satisfied"}]}
+	}`))
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("parse err = %v, want invalid argument", err)
+	}
+}
+
+func TestParseLLMExecutionDecisionRejectsCompletedDoDWithoutSummary(t *testing.T) {
+	_, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"completed",
+		"dodAssessment":{"satisfied":true,"items":[{"item":"done","state":"satisfied","evidenceRefs":["run-1/step-1"]}]}
 	}`))
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("parse err = %v, want invalid argument", err)
@@ -614,12 +679,13 @@ func TestParseLLMExecutionDecisionRejectsUnavailableWorkorchCLI(t *testing.T) {
 	for _, payload := range []string{
 		`{"completionState":"continue","shellCommands":[{"command":"workorch","args":["run","snapshot"]}]}`,
 		`{"completionState":"continue","executionGraph":{"nodes":[{"id":"inspect","kind":"shell/command","input":{"command":"workorch","args":["run","snapshot"]}}]}}`,
+		`{"completionState":"continue","executionGraph":{"nodes":[{"id":"inspect","kind":"shell/command","input":{"command":"sh","args":["-c","workorch run snapshot"]}}]}}`,
 	} {
 		_, err := ParseLLMExecutionDecision([]byte(payload))
 		if !errors.Is(err, common.ErrInvalidArgument) {
 			t.Fatalf("parse err = %v, want invalid argument for payload %s", err, payload)
 		}
-		if !strings.Contains(err.Error(), "not an available runtime command") {
+		if !strings.Contains(err.Error(), "unavailable runtime command") {
 			t.Fatalf("parse err = %v, want unavailable runtime command", err)
 		}
 	}

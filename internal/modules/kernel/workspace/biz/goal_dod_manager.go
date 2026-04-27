@@ -107,6 +107,24 @@ func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspaceservice.De
 	return m.publishGoalEvent(ctx, goal)
 }
 
+func (m *GoalDoDManager) UpdateGoal(ctx context.Context, cmd workspaceservice.UpdateGoalCommand) error {
+	if cmd.GoalID == "" || cmd.Text == "" {
+		return common.ErrInvalidArgument
+	}
+	goal, err := m.goals.Get(ctx, cmd.GoalID)
+	if err != nil {
+		return err
+	}
+	if _, err := m.workspaces.Get(ctx, goal.WorkspaceID); err != nil {
+		return err
+	}
+	goal.Text = cmd.Text
+	if err := m.goals.Update(ctx, goal); err != nil {
+		return err
+	}
+	return m.publishGoalEvent(ctx, goal)
+}
+
 func (m *GoalDoDManager) DefineDoD(ctx context.Context, cmd workspaceservice.DefineDoDCommand) error {
 	if cmd.DoDID == "" || cmd.WorkspaceID == "" || len(cmd.Items) == 0 {
 		return common.ErrInvalidArgument
@@ -126,6 +144,30 @@ func (m *GoalDoDManager) DefineDoD(ctx context.Context, cmd workspaceservice.Def
 		State:       common.DoDStateReady,
 	}
 	if err := m.dods.Create(ctx, dod); err != nil {
+		return err
+	}
+	return m.publishDoDEvent(ctx, dod)
+}
+
+func (m *GoalDoDManager) UpdateDoD(ctx context.Context, cmd workspaceservice.UpdateDoDCommand) error {
+	if cmd.DoDID == "" || len(cmd.Items) == 0 {
+		return common.ErrInvalidArgument
+	}
+	for _, item := range cmd.Items {
+		if item == "" {
+			return common.ErrInvalidArgument
+		}
+	}
+	dod, err := m.dods.Get(ctx, cmd.DoDID)
+	if err != nil {
+		return err
+	}
+	if _, err := m.workspaces.Get(ctx, dod.WorkspaceID); err != nil {
+		return err
+	}
+	dod.Items = append([]string(nil), cmd.Items...)
+	dod.State = common.DoDStateReady
+	if err := m.dods.Update(ctx, dod); err != nil {
 		return err
 	}
 	return m.publishDoDEvent(ctx, dod)

@@ -432,7 +432,7 @@ func useWorkorchRuntimeTestConfig(t *testing.T, backend string, dataRoot string)
 addr = "127.0.0.1:0"
 readHeaderTimeout = "5s"
 readTimeout = "15s"
-writeTimeout = "30s"
+writeTimeout = "180s"
 idleTimeout = "60s"
 shutdownTimeout = "5s"
 maxConcurrentRuns = 1
@@ -500,9 +500,11 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/goals/:goalId"},
+		{method: http.MethodPut, pattern: "/api/v1/workorch/goals/:goalId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/dods/:dodId"},
+		{method: http.MethodPut, pattern: "/api/v1/workorch/dods/:dodId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-activations"},
@@ -964,6 +966,42 @@ func TestWorkspaceGetEndpointReturnsNotFoundWhenMissing(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGoalAndDoDUpdateEndpointsReturnUpdatedDefinitions(t *testing.T) {
+	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+	workspace := createWorkspaceForHTTP(t, handler, "definition update workspace", "workspaces/definition-update")
+	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
+
+	goalReq := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/goals/"+goalID, strings.NewReader(`{"text":"updated goal text"}`))
+	goalReq.Header.Set("Content-Type", "application/json")
+	goalRec := httptest.NewRecorder()
+	handler.ServeHTTP(goalRec, goalReq)
+	if goalRec.Code != http.StatusOK {
+		t.Fatalf("goal update status = %d, want 200, body=%s", goalRec.Code, goalRec.Body.String())
+	}
+	var goalBody goalResponse
+	if err := json.Unmarshal(goalRec.Body.Bytes(), &goalBody); err != nil {
+		t.Fatalf("unmarshal goal response: %v", err)
+	}
+	if goalBody.Goal.ID != goalID || goalBody.Goal.Text != "updated goal text" {
+		t.Fatalf("goal response = %+v, want updated text", goalBody.Goal)
+	}
+
+	dodReq := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/dods/"+dodID, strings.NewReader(`{"items":["updated dod","second dod"]}`))
+	dodReq.Header.Set("Content-Type", "application/json")
+	dodRec := httptest.NewRecorder()
+	handler.ServeHTTP(dodRec, dodReq)
+	if dodRec.Code != http.StatusOK {
+		t.Fatalf("dod update status = %d, want 200, body=%s", dodRec.Code, dodRec.Body.String())
+	}
+	var dodBody dodResponse
+	if err := json.Unmarshal(dodRec.Body.Bytes(), &dodBody); err != nil {
+		t.Fatalf("unmarshal dod response: %v", err)
+	}
+	if dodBody.DoD.ID != dodID || len(dodBody.DoD.Items) != 2 || dodBody.DoD.Items[0] != "updated dod" || dodBody.DoD.State != "ready" {
+		t.Fatalf("dod response = %+v, want updated ready DoD", dodBody.DoD)
 	}
 }
 
