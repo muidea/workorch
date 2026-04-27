@@ -49,7 +49,7 @@ func TestMapObservedDeepClonesNestedPayloads(t *testing.T) {
 			Version: "workorch.v1",
 			Topic:   "/step/snapshot",
 			Payload: observed.StepPayload{
-				Kind:  "legacy/minimal",
+				Kind:  "llm/workspace_execution",
 				State: "completed",
 				Input: map[string]any{
 					"workspaceId": "ws-1",
@@ -107,7 +107,7 @@ func TestMapObservedDeepClonesNestedPayloads(t *testing.T) {
 func TestMapStepDeepClonesNestedPayloads(t *testing.T) {
 	step := &runmodel.Step{
 		ID:    "step-1",
-		Kind:  "legacy/minimal",
+		Kind:  "llm/workspace_execution",
 		State: common.StepStateCompleted,
 		Input: map[string]any{
 			"workspaceId": "ws-1",

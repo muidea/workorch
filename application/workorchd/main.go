@@ -15,7 +15,6 @@ import (
 
 	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
 	_ "github.com/muidea/workorch/internal/modules/blocks/approval"
-	_ "github.com/muidea/workorch/internal/modules/blocks/legacy"
 	_ "github.com/muidea/workorch/internal/modules/blocks/llm"
 	_ "github.com/muidea/workorch/internal/modules/blocks/mcp"
 	_ "github.com/muidea/workorch/internal/modules/blocks/shell"

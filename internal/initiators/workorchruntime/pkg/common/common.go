@@ -40,8 +40,6 @@ type RepositorySet struct {
 type Helper interface {
 	Repositories() RepositorySet
 	EventHub() events.Hub
-	LegacyRuntimeAdapter() orchestratorbiz.RuntimeAdapter
-	SetLegacyRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
 	ShellRuntimeAdapter() orchestratorbiz.RuntimeAdapter
 	SetShellRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
 	SSHRuntimeAdapter() orchestratorbiz.RuntimeAdapter

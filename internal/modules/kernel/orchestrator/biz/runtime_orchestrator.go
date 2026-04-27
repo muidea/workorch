@@ -54,7 +54,8 @@ const (
 	stepOutputKeyBlockDecisionContext  = "blockDecisionContext"
 	stepOutputKeyBlockApprovalReason   = "blockApprovalReason"
 	stepOutputKeyBlockApprovalID       = "blockApprovalId"
-	defaultInitialStepKind             = "legacy/minimal"
+	llmWorkspaceExecutionStepKind      = "llm/workspace_execution"
+	defaultInitialStepKind             = llmWorkspaceExecutionStepKind
 )
 
 type RuntimeOrchestrator struct {
@@ -2193,7 +2194,7 @@ func completionDoDAssessmentError(run *runModel.Run, output map[string]any) erro
 }
 
 func requiresDoDAssessmentCompletionGate(run *runModel.Run) bool {
-	return run != nil && run.DoDID != "" && initialStepKind(run) != defaultInitialStepKind
+	return run != nil && run.DoDID != "" && initialStepKind(run) == llmWorkspaceExecutionStepKind
 }
 
 func doDAssessmentFromOutput(output map[string]any) map[string]any {

@@ -545,7 +545,7 @@ func TestService_ResumeRun_FromBlockedStates_ReachesMinimalExecutionChain(t *tes
 			if err := stepRepo.Create(ctx, &runmodel.Step{
 				ID:    sourceStepID,
 				RunID: runID,
-				Kind:  "legacy/minimal",
+				Kind:  "llm/workspace_execution",
 				State: common.StepStateCompleted,
 				Output: map[string]any{
 					"nextStep": string(stepID),

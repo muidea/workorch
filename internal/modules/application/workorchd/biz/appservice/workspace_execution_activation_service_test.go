@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	legacycommon "github.com/muidea/workorch/internal/modules/blocks/legacy/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -411,24 +410,20 @@ func TestActivateWorkspaceExecutionWithBackendReturnsActiveRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
-	goal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "active activation goal")
-	if err != nil {
-		t.Fatalf("DefineGoalWithBackend: %v", err)
-	}
-	dod, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"active activation dod"})
-	if err != nil {
-		t.Fatalf("DefineDoDWithBackend: %v", err)
-	}
-	activeRunID := "run-" + legacycommon.RuntimeDecisionBlockRunToken
-	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, workspace.ID, activeRunID, goal.ID, dod.ID); err != nil {
-		t.Fatalf("CreateRunWithBackend: %v", err)
-	}
-	started, err := StartRunWithBackend(context.Background(), "file", dataRoot, activeRunID)
-	if err != nil {
-		t.Fatalf("StartRunWithBackend: %v", err)
-	}
+	activeRunID := "run-activation-active-blocked-decision"
+	started := prepareDecisionRun(t, dataRoot, workspace.ID, activeRunID)
 	if started.State != "blocked_on_decision" {
 		t.Fatalf("started run = %+v, want blocked_on_decision", started)
+	}
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.ActiveRunID = common.RunID(activeRunID)
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("update workspace active run: %v", err)
 	}
 
 	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{})

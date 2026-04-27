@@ -81,7 +81,7 @@ func TestSnapshotItemPayloadMapAndEnvelopeDeepCloneNestedPayloads(t *testing.T) 
 	item := SnapshotItem{
 		Topic: topicStepSnapshot,
 		Payload: StepPayload{
-			Kind:  "legacy/minimal",
+			Kind:  "llm/workspace_execution",
 			State: "completed",
 			Input: map[string]any{
 				"workspaceId": "ws-1",

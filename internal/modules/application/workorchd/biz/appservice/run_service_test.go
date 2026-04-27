@@ -3,14 +3,8 @@ package appservice
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 
-	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
-	legacycommon "github.com/muidea/workorch/internal/modules/blocks/legacy/pkg/common"
-	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -45,6 +39,36 @@ func TestCreateRunWithBackendReturnsCreatedRun(t *testing.T) {
 	}
 	if item.State != "created" || item.GoalID != goal.ID || item.DoDID != dod.ID {
 		t.Fatalf("run fields = %+v, want created state with goal/dod", item)
+	}
+	goalContext, _ := item.ExecutionContext["goal"].(map[string]any)
+	dodContext, _ := item.ExecutionContext["dod"].(map[string]any)
+	if goalContext["text"] != "created goal" {
+		t.Fatalf("execution goal context = %+v, want created goal", goalContext)
+	}
+	if dodContext["state"] != "ready" {
+		t.Fatalf("execution dod context = %+v, want ready dod", dodContext)
+	}
+	dodItems := normalizeStringIDsFromAny(dodContext["items"])
+	if len(dodItems) != 1 || dodItems[0] != "created dod" {
+		t.Fatalf("execution dod items = %+v, want created dod", dodContext["items"])
+	}
+}
+
+func normalizeStringIDsFromAny(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return typed
+	case []any:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text, ok := item.(string)
+			if ok {
+				ret = append(ret, text)
+			}
+		}
+		return ret
+	default:
+		return nil
 	}
 }
 
@@ -119,7 +143,8 @@ func TestListRunsWithBackendReturnsFilteredRuns(t *testing.T) {
 	}
 }
 
-func TestStartRunWithBackendReturnsCompletedRun(t *testing.T) {
+func TestStartRunWithBackendFailsWhenDefaultLLMProviderUnavailable(t *testing.T) {
+	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
 	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-start", "run start workspace", "", "workspaces/run start workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -132,52 +157,13 @@ func TestStartRunWithBackendReturnsCompletedRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartRunWithBackend: %v", err)
 	}
-	if item.ID != "run-start" || item.State != "completed" {
-		t.Fatalf("run = %+v, want run-start/completed", item)
-	}
-	if item.BlockingTicketID != "" || item.BlockingApprovalID != "" || item.FailureReason != "" {
-		t.Fatalf("run blocking/failure = %+v, want empty", item)
+	if item.ID != "run-start" || item.State != "failed" || item.FailureReason == "" {
+		t.Fatalf("run = %+v, want run-start/failed with provider failure reason", item)
 	}
 }
 
-func TestStartRunWithBackendAppliesRuntimePatch(t *testing.T) {
-	dataRoot := t.TempDir()
-	workingDirectory := t.TempDir()
-	runID := "run-" + legacycommon.RuntimePatchRunToken
-	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-patch", "run patch workspace", "", workingDirectory); err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-patch", runID, "", ""); err != nil {
-		t.Fatalf("CreateRunWithBackend: %v", err)
-	}
-
-	item, err := StartRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("StartRunWithBackend: %v", err)
-	}
-	if item.State != "completed" {
-		t.Fatalf("run = %+v, want completed", item)
-	}
-	content, err := os.ReadFile(filepath.Join(workingDirectory, "workorch-runtime-output.txt"))
-	if err != nil {
-		t.Fatalf("read runtime patch output: %v", err)
-	}
-	if string(content) == "" {
-		t.Fatalf("runtime patch output is empty")
-	}
-	snapshot, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
-	}
-	if len(snapshot.Patches) != 1 || snapshot.Patches[0].State != "applied" || snapshot.Patches[0].TargetRef != "workorch-runtime-output.txt" {
-		t.Fatalf("patches = %+v, want applied runtime patch", snapshot.Patches)
-	}
-	if len(snapshot.ToolCalls) != 1 || snapshot.Patches[0].ToolCallID != snapshot.ToolCalls[0].ID {
-		t.Fatalf("patch/toolCall = %+v/%+v, want linked patch evidence", snapshot.Patches, snapshot.ToolCalls)
-	}
-}
-
-func TestStartRunWithBackendReturnsCompletedRunForCompletedRunAfterReload(t *testing.T) {
+func TestStartRunWithBackendReturnsFailedRunForFailedRunAfterReload(t *testing.T) {
+	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
 	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-start-restart", "run start restart workspace", "", "workspaces/run start restart workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -189,159 +175,25 @@ func TestStartRunWithBackendReturnsCompletedRunForCompletedRunAfterReload(t *tes
 		t.Fatalf("first StartRunWithBackend: %v", err)
 	}
 
-	item, err := StartRunWithBackend(context.Background(), "file", dataRoot, "run-start-restart")
-	if err != nil {
-		t.Fatalf("second StartRunWithBackend: %v", err)
-	}
-	if item.ID != "run-start-restart" || item.State != "completed" || item.FailureReason != "" {
-		t.Fatalf("run = %+v, want completed without failure reason", item)
+	if _, err := StartRunWithBackend(context.Background(), "file", dataRoot, "run-start-restart"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("second StartRunWithBackend err = %v, want conflict for failed run", err)
 	}
 }
 
 func TestStartRunWithBackendReturnsBlockedDecisionRun(t *testing.T) {
 	dataRoot := t.TempDir()
-	runID := "run-" + legacycommon.RuntimeDecisionBlockRunToken
-	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-start-blocked-decision", "run start blocked decision workspace", "", "workspaces/run start blocked decision workspace"); err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-start-blocked-decision", runID, "", ""); err != nil {
-		t.Fatalf("CreateRunWithBackend: %v", err)
-	}
-
-	item, err := StartRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("StartRunWithBackend: %v", err)
-	}
+	item := prepareDecisionRun(t, dataRoot, "ws-run-start-blocked-decision", "run-start-blocked-decision")
 	if item.State != "blocked_on_decision" || item.BlockingTicketID == "" {
 		t.Fatalf("run = %+v, want blocked decision with ticket", item)
 	}
 }
 
-func TestResumeRunWithBackendReturnsCompletedRunAfterDecisionResolved(t *testing.T) {
-	dataRoot := t.TempDir()
-	runID := "run-" + legacycommon.RuntimeDecisionBlockRunToken
-	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-decision", "run resume decision workspace", "", "workspaces/run resume decision workspace"); err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-decision", runID, "", ""); err != nil {
-		t.Fatalf("CreateRunWithBackend: %v", err)
-	}
-
-	started, err := StartRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("StartRunWithBackend: %v", err)
-	}
-	if started.State != "blocked_on_decision" || started.BlockingTicketID == "" {
-		t.Fatalf("started run = %+v, want blocked decision with ticket", started)
-	}
-
-	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	if err := session.Bootstrap.Exports().Services.DecisionService.EnsureResolvedTicket(ctx, decisionmodule.ResolveTicketCommand{
-		ResolutionID: "resolution-run-resume-decision",
-		TicketID:     common.TicketID(started.BlockingTicketID),
-		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
-	}); err != nil {
-		t.Fatalf("EnsureResolvedTicket: %v", err)
-	}
-
-	item, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("ResumeRunWithBackend: %v", err)
-	}
-	if item.State != "completed" || item.BlockingTicketID != "" || item.FailureReason != "" {
-		t.Fatalf("run = %+v, want completed with cleared block", item)
-	}
-}
-
-func TestResumeRunWithBackendReturnsCompletedRunAfterApprovalApproved(t *testing.T) {
-	dataRoot := t.TempDir()
-	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken
-	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-approval", "run resume approval workspace", "", "workspaces/run resume approval workspace"); err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-approval", runID, "", ""); err != nil {
-		t.Fatalf("CreateRunWithBackend: %v", err)
-	}
-
-	started, err := StartRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("StartRunWithBackend: %v", err)
-	}
-	if started.State != "blocked_on_approval" || started.BlockingApprovalID == "" {
-		t.Fatalf("started run = %+v, want blocked approval with approval id", started)
-	}
-
-	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	if err := session.Bootstrap.Exports().Services.ApprovalService.EnsureApproved(ctx, approvalmodule.ResolveApprovalCommand{
-		ApprovalID: common.ApprovalID(started.BlockingApprovalID),
-	}); err != nil {
-		t.Fatalf("EnsureApproved: %v", err)
-	}
-
-	item, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("ResumeRunWithBackend: %v", err)
-	}
-	if item.State != "completed" || item.BlockingApprovalID != "" || item.FailureReason != "" {
-		t.Fatalf("run = %+v, want completed with cleared approval", item)
-	}
-}
-
-func TestResumeRunWithBackendReturnsCompletedRunForCompletedRunAfterReload(t *testing.T) {
-	dataRoot := t.TempDir()
-	runID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-resume-completed"
-	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-completed", "run resume completed workspace", "", "workspaces/run resume completed workspace"); err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-completed", runID, "", ""); err != nil {
-		t.Fatalf("CreateRunWithBackend: %v", err)
-	}
-
-	started, err := StartRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("StartRunWithBackend: %v", err)
-	}
-	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
-		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
-	}); err != nil {
-		t.Fatalf("ResolveDecisionWithBackend: %v", err)
-	}
-	if _, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID); err != nil {
-		t.Fatalf("first ResumeRunWithBackend: %v", err)
-	}
-
-	item, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("second ResumeRunWithBackend: %v", err)
-	}
-	if item.ID != runID || item.State != "completed" || item.FailureReason != "" {
-		t.Fatalf("run = %+v, want completed without failure reason", item)
-	}
-}
-
 func TestResumeRunWithBackendReturnsFailedRunAfterApprovalRejected(t *testing.T) {
 	dataRoot := t.TempDir()
-	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-rejected"
-	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-approval-rejected", "run resume approval rejected workspace", "", "workspaces/run resume approval rejected workspace"); err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-approval-rejected", runID, "", ""); err != nil {
-		t.Fatalf("CreateRunWithBackend: %v", err)
-	}
-
-	started, err := StartRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("StartRunWithBackend: %v", err)
-	}
-	if started.State != "blocked_on_approval" || started.BlockingApprovalID == "" {
-		t.Fatalf("started run = %+v, want blocked approval with approval id", started)
-	}
-
-	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	if err := session.Bootstrap.Exports().Services.ApprovalService.EnsureRejected(ctx, approvalmodule.ResolveApprovalCommand{
-		ApprovalID: common.ApprovalID(started.BlockingApprovalID),
-	}); err != nil {
-		t.Fatalf("EnsureRejected: %v", err)
+	runID := "run-approval-rejected"
+	started := prepareApprovalRun(t, dataRoot, "ws-run-resume-approval-rejected", runID)
+	if _, err := RejectApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID); err != nil {
+		t.Fatalf("RejectApprovalWithBackend: %v", err)
 	}
 
 	item, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID)
@@ -355,18 +207,8 @@ func TestResumeRunWithBackendReturnsFailedRunAfterApprovalRejected(t *testing.T)
 
 func TestResumeRunWithBackendReturnsFailedRunForFailedRunAfterReload(t *testing.T) {
 	dataRoot := t.TempDir()
-	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-rejected-restart"
-	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-failed", "run resume failed workspace", "", "workspaces/run resume failed workspace"); err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-failed", runID, "", ""); err != nil {
-		t.Fatalf("CreateRunWithBackend: %v", err)
-	}
-
-	started, err := StartRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("StartRunWithBackend: %v", err)
-	}
+	runID := "run-approval-rejected-restart"
+	started := prepareApprovalRun(t, dataRoot, "ws-run-resume-failed", runID)
 	if _, err := RejectApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID); err != nil {
 		t.Fatalf("RejectApprovalWithBackend: %v", err)
 	}
@@ -385,18 +227,8 @@ func TestResumeRunWithBackendReturnsFailedRunForFailedRunAfterReload(t *testing.
 
 func TestStartRunWithBackendReturnsConflictForFailedRunAfterReload(t *testing.T) {
 	dataRoot := t.TempDir()
-	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-failed-start-conflict"
-	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-start-failed", "run start failed workspace", "", "workspaces/run start failed workspace"); err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-start-failed", runID, "", ""); err != nil {
-		t.Fatalf("CreateRunWithBackend: %v", err)
-	}
-
-	started, err := StartRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("StartRunWithBackend: %v", err)
-	}
+	runID := "run-approval-failed-start-conflict"
+	started := prepareApprovalRun(t, dataRoot, "ws-run-start-failed", runID)
 	if _, err := RejectApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID); err != nil {
 		t.Fatalf("RejectApprovalWithBackend: %v", err)
 	}
@@ -411,18 +243,8 @@ func TestStartRunWithBackendReturnsConflictForFailedRunAfterReload(t *testing.T)
 
 func TestResumeRunWithBackendReturnsBlockedWhenDependencyPending(t *testing.T) {
 	dataRoot := t.TempDir()
-	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-pending"
-	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-pending", "run resume pending workspace", "", "workspaces/run resume pending workspace"); err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-pending", runID, "", ""); err != nil {
-		t.Fatalf("CreateRunWithBackend: %v", err)
-	}
-
-	started, err := StartRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("StartRunWithBackend: %v", err)
-	}
+	runID := "run-approval-pending"
+	started := prepareApprovalRun(t, dataRoot, "ws-run-resume-pending", runID)
 	if started.State != "blocked_on_approval" || started.BlockingApprovalID == "" {
 		t.Fatalf("started run = %+v, want blocked approval with approval id", started)
 	}

@@ -30,7 +30,7 @@ func TestStepPayloadClonesMaps(t *testing.T) {
 	input := map[string]any{"workspaceId": "ws-1"}
 	output := map[string]any{"status": "completed"}
 
-	payload := StepPayload("legacy/minimal", common.StepStateCompleted, input, output)
+	payload := StepPayload("llm/workspace_execution", common.StepStateCompleted, input, output)
 	input["workspaceId"] = "ws-mutated"
 	output["status"] = "mutated"
 
@@ -82,7 +82,7 @@ func TestDecisionResolutionPayloadIncludesResolutionFields(t *testing.T) {
 
 func TestDecodeStepPayloadRejectsInvalidOutputType(t *testing.T) {
 	_, ok := DecodeStepPayload(map[string]any{
-		PayloadKeyKind:   "legacy/minimal",
+		PayloadKeyKind:   "llm/workspace_execution",
 		PayloadKeyState:  string(common.StepStateCompleted),
 		PayloadKeyOutput: "invalid",
 	})

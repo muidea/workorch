@@ -140,17 +140,17 @@ post_json "$BASE_URL/api/v1/workorch/workspaces" \
   "$TMP_DIR/patch-workspace.json"
 patch_workspace_id="$(json_path "$TMP_DIR/patch-workspace.json" "workspace.id")"
 [[ -n "$patch_workspace_id" ]]
+patch_run_id="run-runtime-patch-verify-$RUN_SUFFIX"
 post_json "$BASE_URL/api/v1/workorch/workspaces/$patch_workspace_id/goals" \
-  '{"text":"verify runtime patch"}' \
+  '{"text":"Use patchRequests to create a workspace file named workorch-runtime-output.txt. The file content must include run='"$patch_run_id"'."}' \
   "$TMP_DIR/patch-goal.json"
 patch_goal_id="$(json_path "$TMP_DIR/patch-goal.json" "goal.id")"
 [[ -n "$patch_goal_id" ]]
 post_json "$BASE_URL/api/v1/workorch/workspaces/$patch_workspace_id/dods" \
-  '{"items":["runtime patch is applied"]}' \
+  '{"items":["A patchRequests entry writes targetRef workorch-runtime-output.txt","workorch-runtime-output.txt exists in the workspace working directory","workorch-runtime-output.txt content contains run='"$patch_run_id"'"]}' \
   "$TMP_DIR/patch-dod.json"
 patch_dod_id="$(json_path "$TMP_DIR/patch-dod.json" "dod.id")"
 [[ -n "$patch_dod_id" ]]
-patch_run_id="run-runtime-patch-verify-$RUN_SUFFIX"
 post_json "$BASE_URL/api/v1/workorch/workspaces/$patch_workspace_id/runs" \
   '{"runId":"'"$patch_run_id"'","goalId":"'"$patch_goal_id"'","doDId":"'"$patch_dod_id"'"}' \
   "$TMP_DIR/patch-run.json"

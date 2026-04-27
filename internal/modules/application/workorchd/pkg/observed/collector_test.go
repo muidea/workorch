@@ -99,7 +99,7 @@ func TestCollectorPublishedWorkorchEventsReturnsDeepClonedPayloads(t *testing.T)
 		RunID:       "run-1",
 		StepID:      "run-1/step-1",
 		Payload: events.StepPayload(
-			"legacy/minimal",
+			"llm/workspace_execution",
 			"completed",
 			map[string]any{
 				"workspaceId": "ws-1",

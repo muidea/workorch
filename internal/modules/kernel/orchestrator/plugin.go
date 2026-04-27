@@ -37,7 +37,7 @@ func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 		return err
 	}
 	repos := runtime.Repositories()
-	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry(runtime.LegacyRuntimeAdapter())
+	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry()
 	if runtime.ShellRuntimeAdapter() != nil {
 		if err := runtimeRegistry.Register("shell/command", runtime.ShellRuntimeAdapter()); err != nil {
 			return cd.NewError(cd.Unexpected, err.Error())

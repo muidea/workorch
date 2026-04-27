@@ -846,7 +846,7 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 	item := &runmodel.Step{
 		ID:    common.StepID("run-contract/step-1"),
 		RunID: common.RunID("run-contract"),
-		Kind:  "legacy/minimal",
+		Kind:  "llm/workspace_execution",
 		State: common.StepStateDispatched,
 		Input: map[string]any{"workspaceId": "ws-contract"},
 	}
@@ -895,7 +895,7 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 	if err := repo.Create(ctx, &runmodel.Step{
 		ID:    common.StepID("run-contract/step-2"),
 		RunID: common.RunID("run-contract"),
-		Kind:  "legacy/minimal",
+		Kind:  "llm/workspace_execution",
 		State: common.StepStateCompleted,
 		Input: map[string]any{"workspaceId": "ws-contract", "previousStepId": "run-contract/step-1"},
 	}); err != nil {
@@ -904,7 +904,7 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 	if err := repo.Create(ctx, &runmodel.Step{
 		ID:    common.StepID("run-other/step-1"),
 		RunID: common.RunID("run-other"),
-		Kind:  "legacy/minimal",
+		Kind:  "llm/workspace_execution",
 		State: common.StepStateCompleted,
 	}); err != nil {
 		t.Fatalf("create other run step: %v", err)

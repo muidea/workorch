@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	legacycommon "github.com/muidea/workorch/internal/modules/blocks/legacy/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -18,8 +17,8 @@ func TestReadDecisionWithSessionReturnsInvalidArgumentWhenSessionMissing(t *test
 
 func TestListDecisionsWithBackendReturnsFilteredTickets(t *testing.T) {
 	dataRoot := t.TempDir()
-	first := prepareDecisionRun(t, dataRoot, "ws-decision-list-a", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-list-a")
-	second := prepareDecisionRun(t, dataRoot, "ws-decision-list-b", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-list-b")
+	first := prepareDecisionRun(t, dataRoot, "ws-decision-list-a", "run-decision-list-a")
+	second := prepareDecisionRun(t, dataRoot, "ws-decision-list-b", "run-decision-list-b")
 
 	items, err := ListDecisionsWithBackend(context.Background(), "file", dataRoot, "", "")
 	if err != nil {
@@ -32,7 +31,7 @@ func TestListDecisionsWithBackendReturnsFilteredTickets(t *testing.T) {
 		t.Fatalf("ticket ids = %q/%q, want %q/%q", items[0].ID, items[1].ID, first.BlockingTicketID, second.BlockingTicketID)
 	}
 
-	filteredByRun, err := ListDecisionsWithBackend(context.Background(), "file", dataRoot, "", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-list-b")
+	filteredByRun, err := ListDecisionsWithBackend(context.Background(), "file", dataRoot, "", "run-decision-list-b")
 	if err != nil {
 		t.Fatalf("ListDecisionsWithBackend filtered by run: %v", err)
 	}
@@ -51,7 +50,7 @@ func TestListDecisionsWithBackendReturnsFilteredTickets(t *testing.T) {
 
 func TestReadDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 	dataRoot := t.TempDir()
-	started := prepareDecisionRun(t, dataRoot, "ws-decision-read", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-read")
+	started := prepareDecisionRun(t, dataRoot, "ws-decision-read", "run-decision-read")
 	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 	}); err != nil {
@@ -72,7 +71,7 @@ func TestReadDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 
 func TestResolveDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 	dataRoot := t.TempDir()
-	started := prepareDecisionRun(t, dataRoot, "ws-decision-resolve", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-resolve")
+	started := prepareDecisionRun(t, dataRoot, "ws-decision-resolve", "run-decision-resolve")
 
 	item, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
@@ -94,7 +93,7 @@ func TestResolveDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 
 func TestResolveDecisionWithBackendSupportsRejectCurrentPath(t *testing.T) {
 	dataRoot := t.TempDir()
-	started := prepareDecisionRun(t, dataRoot, "ws-decision-reject", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-reject")
+	started := prepareDecisionRun(t, dataRoot, "ws-decision-reject", "run-decision-reject")
 
 	item, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeRejectCurrentPath,
@@ -116,7 +115,7 @@ func TestResolveDecisionWithBackendSupportsRejectCurrentPath(t *testing.T) {
 
 func TestResolveDecisionWithBackendReturnsConflictAfterResolution(t *testing.T) {
 	dataRoot := t.TempDir()
-	started := prepareDecisionRun(t, dataRoot, "ws-decision-conflict", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-conflict")
+	started := prepareDecisionRun(t, dataRoot, "ws-decision-conflict", "run-decision-conflict")
 	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 	}); err != nil {
@@ -132,7 +131,7 @@ func TestResolveDecisionWithBackendReturnsConflictAfterResolution(t *testing.T) 
 
 func TestResolveDecisionWithBackendRejectsUnsupportedResolutionType(t *testing.T) {
 	dataRoot := t.TempDir()
-	started := prepareDecisionRun(t, dataRoot, "ws-decision-invalid", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-invalid")
+	started := prepareDecisionRun(t, dataRoot, "ws-decision-invalid", "run-decision-invalid")
 
 	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType: "unsupported_resolution",
@@ -143,8 +142,8 @@ func TestResolveDecisionWithBackendRejectsUnsupportedResolutionType(t *testing.T
 
 func TestBatchResolveDecisionsWithBackendResolvesTicketsInRequestOrder(t *testing.T) {
 	dataRoot := t.TempDir()
-	first := prepareDecisionRun(t, dataRoot, "ws-decision-batch-a", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-batch-a")
-	second := prepareDecisionRun(t, dataRoot, "ws-decision-batch-b", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-batch-b")
+	first := prepareDecisionRun(t, dataRoot, "ws-decision-batch-a", "run-decision-batch-a")
+	second := prepareDecisionRun(t, dataRoot, "ws-decision-batch-b", "run-decision-batch-b")
 
 	items, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, BatchResolveDecisionCommand{
 		TicketIDs:         []string{second.BlockingTicketID, first.BlockingTicketID},
@@ -166,7 +165,7 @@ func TestBatchResolveDecisionsWithBackendResolvesTicketsInRequestOrder(t *testin
 
 func TestBatchResolveDecisionsWithBackendRejectsDuplicateTicketIDs(t *testing.T) {
 	dataRoot := t.TempDir()
-	started := prepareDecisionRun(t, dataRoot, "ws-decision-batch-dup", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-batch-dup")
+	started := prepareDecisionRun(t, dataRoot, "ws-decision-batch-dup", "run-decision-batch-dup")
 
 	if _, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, BatchResolveDecisionCommand{
 		TicketIDs:      []string{started.BlockingTicketID, started.BlockingTicketID},
@@ -178,8 +177,8 @@ func TestBatchResolveDecisionsWithBackendRejectsDuplicateTicketIDs(t *testing.T)
 
 func TestBatchResolveDecisionsWithBackendRejectsAlreadyResolvedTicketBeforeMutation(t *testing.T) {
 	dataRoot := t.TempDir()
-	first := prepareDecisionRun(t, dataRoot, "ws-decision-batch-conflict-a", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-batch-conflict-a")
-	second := prepareDecisionRun(t, dataRoot, "ws-decision-batch-conflict-b", "run-"+legacycommon.RuntimeDecisionBlockRunToken+"-batch-conflict-b")
+	first := prepareDecisionRun(t, dataRoot, "ws-decision-batch-conflict-a", "run-decision-batch-conflict-a")
+	second := prepareDecisionRun(t, dataRoot, "ws-decision-batch-conflict-b", "run-decision-batch-conflict-b")
 	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, second.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 	}); err != nil {
@@ -199,23 +198,4 @@ func TestBatchResolveDecisionsWithBackendRejectsAlreadyResolvedTicketBeforeMutat
 	if firstDecision.State != "open" {
 		t.Fatalf("first decision = %+v, want still open after prevalidation conflict", firstDecision)
 	}
-}
-
-func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID string) Run {
-	t.Helper()
-
-	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, workspaceID, workspaceID+" title", "", "workspaces/"+workspaceID); err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, workspaceID, runID, "", ""); err != nil {
-		t.Fatalf("CreateRunWithBackend: %v", err)
-	}
-	started, err := StartRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("StartRunWithBackend: %v", err)
-	}
-	if started.State != "blocked_on_decision" || started.BlockingTicketID == "" {
-		t.Fatalf("started run = %+v, want blocked decision with ticket", started)
-	}
-	return started
 }

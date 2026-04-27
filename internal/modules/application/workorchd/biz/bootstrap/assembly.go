@@ -2,7 +2,6 @@ package bootstrap
 
 import (
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
-	legacymodule "github.com/muidea/workorch/internal/modules/blocks/legacy"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
@@ -38,8 +37,6 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	if eventHub == nil {
 		eventHub = events.NewMagicHub()
 	}
-	legacyModule := legacymodule.New()
-	mustSetup("legacy", legacyModule.Setup())
 	shellModule := shellmodule.New()
 	mustSetup("shell", shellModule.Setup())
 	sshModule := sshmodule.New()
@@ -93,7 +90,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	}))
 
 	orchestratorModule := orchestratormodule.New()
-	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry(legacyModule.RuntimeAdapter())
+	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry()
 	mustSetup("runtime-registry", runtimeRegistry.Register(shellmodule.StepKindCommand, shellModule.RuntimeAdapter()))
 	mustSetup("runtime-registry", runtimeRegistry.Register(sshmodule.StepKindCommand, sshModule.RuntimeAdapter()))
 	mustSetup("runtime-registry", runtimeRegistry.Register(mcpblockmodule.StepKindToolCall, mcpBlockModule.RuntimeAdapter()))
@@ -123,7 +120,6 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	}))
 
 	modules := []lifecycle{
-		legacyModule,
 		shellModule,
 		sshModule,
 		llmModule,

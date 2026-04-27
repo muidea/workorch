@@ -18,7 +18,6 @@ It remains a single `go.mod` repository. The current normalization target is mod
 - old `domain/shared` + `workorchcommon` -> `internal/pkg/common`
 - old `workorchevents` -> `internal/pkg/events` including shared workorch event payload builders/keys, typed workorch event helpers, strict workorch version rules, and topic-scoped contract lookup
 - old `repository` -> `internal/pkg/repository`
-- old `adapters/legacy` runtime/tool adapters -> `internal/modules/blocks/legacy/{biz,service}`
 - old `main.go` -> `application/workorchd/main.go`
 
 ## Module Shape
@@ -43,4 +42,4 @@ For `application/{app}`, prefer the same separation idea:
 - let application-layer writes prefer module `service/` entrypoints; repository direct access should be read-side first
 - let observed/event snapshot assembly live outside `presenter` when it represents application semantics rather than rendering
 - keep rendering / presentation adapters separate from runtime assembly
-- keep `demo` as a compatibility shim unless it regains independent responsibilities
+- remove compatibility shims unless they regain independent responsibilities

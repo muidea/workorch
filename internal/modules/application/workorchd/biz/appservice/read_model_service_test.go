@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"testing"
 
-	legacycommon "github.com/muidea/workorch/internal/modules/blocks/legacy/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -22,7 +21,7 @@ func TestReadRunSnapshotWithSessionReturnsInvalidArgumentWhenSessionMissing(t *t
 
 func TestReadRunSnapshotWithBackendReturnsBlockedDecisionReadModel(t *testing.T) {
 	dataRoot := t.TempDir()
-	runID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-snapshot"
+	runID := "run-decision-snapshot"
 	started := prepareDecisionRun(t, dataRoot, "ws-run-snapshot", runID)
 
 	item, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, runID)
@@ -157,7 +156,7 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 
 func TestReadRunStatusWithBackendReturnsBlockedApprovalSummary(t *testing.T) {
 	dataRoot := t.TempDir()
-	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-status"
+	runID := "run-approval-status"
 	started := prepareApprovalRun(t, dataRoot, "ws-run-status", runID)
 
 	item, err := ReadRunStatusWithBackend(context.Background(), "file", dataRoot, runID)
@@ -318,37 +317,36 @@ func TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems(t *t
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 
-	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, workspaceID, "run-workspace-snapshot-completed", "", ""); err != nil {
-		t.Fatalf("CreateRunWithBackend completed: %v", err)
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("runtime exports: %v", err)
 	}
-	if _, err := StartRunWithBackend(context.Background(), "file", dataRoot, "run-workspace-snapshot-completed"); err != nil {
-		t.Fatalf("StartRunWithBackend completed: %v", err)
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          "run-workspace-snapshot-completed",
+		WorkspaceID: common.WorkspaceID(workspaceID),
+		State:       common.RunStateCompleted,
+	}); err != nil {
+		t.Fatalf("create completed run: %v", err)
 	}
 
-	decisionRunID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-workspace-snapshot"
-	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, workspaceID, decisionRunID, "", ""); err != nil {
-		t.Fatalf("CreateRunWithBackend decision: %v", err)
-	}
-	decisionRun, err := StartRunWithBackend(context.Background(), "file", dataRoot, decisionRunID)
-	if err != nil {
-		t.Fatalf("StartRunWithBackend decision: %v", err)
-	}
+	decisionRunID := "run-decision-workspace-snapshot"
+	decisionRun := prepareDecisionRun(t, dataRoot, workspaceID, decisionRunID)
 	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, decisionRun.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
-	if _, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, decisionRunID); err != nil {
-		t.Fatalf("ResumeRunWithBackend decision: %v", err)
-	}
 
-	approvalRunID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-workspace-snapshot"
-	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, workspaceID, approvalRunID, "", ""); err != nil {
-		t.Fatalf("CreateRunWithBackend approval: %v", err)
-	}
-	approvalRun, err := StartRunWithBackend(context.Background(), "file", dataRoot, approvalRunID)
+	approvalRunID := "run-approval-workspace-snapshot"
+	approvalRun := prepareApprovalRun(t, dataRoot, workspaceID, approvalRunID)
+	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspaceID))
 	if err != nil {
-		t.Fatalf("StartRunWithBackend approval: %v", err)
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.ActiveRunID = common.RunID(approvalRunID)
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("update workspace active run: %v", err)
 	}
 
 	item, err := ReadWorkspaceSnapshotWithBackend(context.Background(), "file", dataRoot, workspaceID)
@@ -433,7 +431,7 @@ func TestReadWorkspaceSnapshotProjectsWorkspaceStateFromRun(t *testing.T) {
 func TestReadTerminalRunModelsWithBackendRemainStableAcrossReloads(t *testing.T) {
 	dataRoot := t.TempDir()
 	workspaceID := "ws-run-terminal-reload"
-	runID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-terminal-reload"
+	runID := "run-approval-terminal-reload"
 	started := prepareApprovalRun(t, dataRoot, workspaceID, runID)
 	if _, err := RejectApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID); err != nil {
 		t.Fatalf("RejectApprovalWithBackend: %v", err)

@@ -279,8 +279,8 @@ Scope:
 
 - Ensure LLM-driven activation dispatches `llm/workspace_execution` as first
   Step.
-- Prevent LLM-driven execution from silently completing through
-  `legacy/minimal`.
+- Prevent LLM-driven execution from silently completing through any fallback
+  runtime.
 - Map provider/schema failure into failed Step evidence and stable Run state.
 
 Acceptance:
@@ -296,8 +296,8 @@ Status:
   `ExecutionContext` for business-driven execution.
 - Workspace execution activation creates Runs with
   `llm/workspace_execution` as the first Step kind.
-- Orchestrator keeps `legacy/minimal` only as the explicit default for legacy
-  manual Run and slice paths.
+- Orchestrator defaults business activation to `llm/workspace_execution` and
+  does not register a legacy runtime fallback.
 - Runtime output `nextInput` is carried into the next dispatched Step so LLM
   decisions can hand concrete command/tool input to follow-up block execution.
 - Provider-unavailable LLM execution fails the Step and Run with observable
@@ -335,7 +335,7 @@ Status:
   persists these fields into the created Decision Ticket.
 - Failed LLM decisions now fail the Step and Run with `llm_failed` evidence
   instead of being treated as a completed plan.
-- Unknown runtime kinds no longer fall back to `legacy/minimal`; they fail with
+- Unknown runtime kinds no longer fall back to a legacy runtime; they fail with
   `runtime_adapter_unavailable`.
 - Memory write requests require `memoryType` and `summary` at schema parsing
   time.
@@ -368,8 +368,8 @@ Status:
   terminal Step output contains a satisfied DoD assessment.
 - Missing, unsatisfied, malformed, or evidence-free satisfied DoD assessment
   items fail the Step and Run through the runtime completion gate.
-- The gate applies to non-legacy LLM-driven execution and does not change
-  explicit `legacy/minimal` manual or slice paths.
+- The gate applies to LLM-driven execution and leaves non-LLM runtime kinds to
+  their own explicit contracts.
 - verification:
   `go test ./internal/modules/blocks/llm/... -count 1`,
   `go test ./internal/modules/kernel/orchestrator/... -count 1`
@@ -667,7 +667,7 @@ Exit criteria:
 
 - `llm/workspace_execution` is registered and dispatchable.
 - Missing provider and schema-invalid provider output fail safely.
-- LLM-driven flow cannot complete through `legacy/minimal`.
+- LLM-driven flow cannot complete through an unregistered fallback runtime.
 
 ### Round 3: Workspace Execution Loop
 
@@ -733,7 +733,7 @@ Exit criteria:
 | L4 | completed | LLM provider env config, disabled/unavailable state, timeout validation, supported provider validation, and redaction helper completed. Runtime dispatch failure path remains L5/L7. |
 | L5 | completed | LLM runtime adapter, OpenAI-compatible HTTP provider client, provider request boundary, strict decision parsing, normalized output, module registration, runtime helper injection, and bootstrap/orchestrator registration completed. |
 | L6 | completed | Workspace execution activation now binds selected Soul, Skill, MCP server, and Memory context into Run execution context and first LLM Step input; disallowed or missing selections are rejected before Run creation. |
-| L7 | completed | LLM-driven activation dispatches `llm/workspace_execution` first, propagates execution context and `nextInput`, and fails visibly when provider config is unavailable instead of falling back to `legacy/minimal`. |
+| L7 | completed | LLM-driven activation dispatches `llm/workspace_execution` first, propagates execution context and `nextInput`, and fails visibly when provider config is unavailable instead of falling back to a legacy runtime. |
 | L8 | completed | LLM decisions now map to shell, MCP boundary, patches, Memory write requests, structured Decision Tickets, Approval gates, DoD assessment, and explicit failed decisions; unregistered runtime kinds fail instead of using legacy fallback. |
 | L9 | completed | LLM-driven Runs with DoD now require a satisfied evidence-backed DoD assessment before completion; missing or invalid assessments fail the Step and Run. |
 | L10 | completed | Runtime `memoryWrites` and terminal run summaries now persist as Workspace Memory with Run source refs; created IDs are exposed as `memoryRefs`, and later activation can recall Workspace Memory into LLM context. |

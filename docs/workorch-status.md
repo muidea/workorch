@@ -72,12 +72,12 @@
   - `internal/modules/kernel/mcp`
 - block modules:
   - `internal/modules/blocks/approval`
-  - `internal/modules/blocks/legacy`
   - `internal/modules/blocks/llm`
+  - `internal/modules/blocks/mcp`
   - `internal/modules/blocks/shell`
+  - `internal/modules/blocks/ssh`
 - Workspace execution activation now creates business Runs whose first Step is
-  `llm/workspace_execution`; `legacy/minimal` remains only as the default for
-  explicit legacy/manual run paths.
+  `llm/workspace_execution`; no legacy runtime fallback is registered.
 - Workspace execution activation accepts and persists selected Soul, Skill, MCP
   server, and Memory context on Run execution context; the same context is
   passed to the first LLM Step input.
@@ -149,7 +149,7 @@
   streaming evidence as `streamEvents`, and records output through the standard
   Step / ToolCall / ValidationResult evidence path. The `long_lived` session
   policy reuses initialized stdio sessions per MCP server; unsupported
-  transports still fail explicitly instead of falling back to `legacy/minimal`.
+  transports fail explicitly.
 - LLM-driven Runs that bind a DoD now require a satisfied, evidence-backed
   `dodAssessment` before completion; missing or invalid assessments fail the
   terminal Step and Run.
@@ -629,7 +629,7 @@ LLM 驱动 Workspace 执行的设计文档已补齐，范围、边界与交互�
 - application/workorchd 只负责 HTTP/Web、执行激活和上下文装配，不承载 provider 或 MCP 协议实现
 - blocks/llm 只负责 provider request、provider call、schema parsing 和 normalized Step output
 - Web Console 只通过 HTTP API 交互，不暴露 provider secret 或低层 adapter 直接执行入口
-- 未配置 LLM provider 时，LLM-driven execution 必须明确失败，不能回落到 `legacy/minimal` 形成假完成
+- 未配置 LLM provider 时，LLM-driven execution 必须明确失败，不能回落到旧运行时形成假完成
 - kernel/orchestrator、kernel/run、blocks/llm、blocks/mcp 和 Web Console 不得根据具体
   Workspace 目标、城市、天气、工具 payload 字段或 provider 特定结构合成业务完成结果
 - ToolCall/MCP 输出只能作为 evidence；最终目标成果必须来自 `dodAssessment.summary`
@@ -640,7 +640,7 @@ LLM 驱动 Workspace 执行的设计文档已补齐，范围、边界与交互�
 - happy path: Goal/DoD/Soul/Skill/MCP/Memory 绑定后，通过 `llm/workspace_execution`、具体 block action、DoD assessment 和 Memory write 完成 Run
 - decision path: LLM 请求业务补充信息时创建 Decision Ticket，resolve 后 resume 并把 resolution 放入后续 planning context
 - approval path: 风险动作进入 Approval，reject 后不得产生对应 ToolCall 或 Patch
-- failure path: provider 缺失或 schema-invalid 时 Step 明确失败，不派发外部动作，不回落到 `legacy/minimal`
+- failure path: provider 缺失或 schema-invalid 时 Step 明确失败，不派发外部动作，不回落到旧运行时
 - memory recall path: 第一轮 Run 生成 Memory，第二轮 Run 可召回并在 snapshot/observability 中可见
 
 当前细化开发项：

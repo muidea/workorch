@@ -73,6 +73,16 @@ func (a *requestCapturingRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, r
 	return runtimemodel.StepExecutionResult{Output: a.output}, nil
 }
 
+func newRuntimeAdapterRegistryForTest(defaultAdapter RuntimeAdapter) *RuntimeAdapterRegistry {
+	registry := NewRuntimeAdapterRegistry()
+	if defaultAdapter != nil {
+		if err := registry.Register(defaultInitialStepKind, defaultAdapter); err != nil {
+			panic(err)
+		}
+	}
+	return registry
+}
+
 func TestRuntimeOrchestrator_StartRunToComplete_Mainline(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -138,7 +148,7 @@ func TestRuntimeAdapterRegistryDispatchesByStepKind(t *testing.T) {
 	approvalRepo := memory.NewApprovalRepository()
 	defaultRuntime := &requestCapturingRuntimeAdapter{output: map[string]any{"status": "default"}}
 	nonLegacyRuntime := &requestCapturingRuntimeAdapter{output: map[string]any{"status": "non-legacy"}}
-	registry := NewRuntimeAdapterRegistry(defaultRuntime)
+	registry := newRuntimeAdapterRegistryForTest(defaultRuntime)
 	if err := registry.Register("external/mock", nonLegacyRuntime); err != nil {
 		t.Fatalf("register non-legacy runtime: %v", err)
 	}
@@ -188,7 +198,7 @@ func TestRuntimeAdapterRegistryDoesNotFallbackForUnknownRuntimeKind(t *testing.T
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	defaultRuntime := &requestCapturingRuntimeAdapter{output: map[string]any{"status": "default"}}
-	registry := NewRuntimeAdapterRegistry(defaultRuntime)
+	registry := newRuntimeAdapterRegistryForTest(defaultRuntime)
 	orch := NewRuntimeOrchestrator(registry, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
 
 	workspaceID := common.WorkspaceID("ws-runtime-unknown")
@@ -236,7 +246,7 @@ func TestRuntimeOrchestrator_DispatchNextStepRunsShellCommandAdapter(t *testing.
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
-	registry := NewRuntimeAdapterRegistry(&stubRuntimeAdapter{output: map[string]any{"status": "default"}})
+	registry := newRuntimeAdapterRegistryForTest(&stubRuntimeAdapter{output: map[string]any{"status": "default"}})
 	if err := registry.Register(shellcommon.StepKindCommand, shellbiz.NewRuntimeAdapter()); err != nil {
 		t.Fatalf("register shell runtime: %v", err)
 	}
@@ -319,7 +329,7 @@ func TestRuntimeOrchestrator_DispatchNextStepRunsMCPHTTPAdapter(t *testing.T) {
 		t.Fatalf("create mcp server: %v", err)
 	}
 
-	registry := NewRuntimeAdapterRegistry(&stubRuntimeAdapter{output: map[string]any{"status": "default"}})
+	registry := newRuntimeAdapterRegistryForTest(&stubRuntimeAdapter{output: map[string]any{"status": "default"}})
 	if err := registry.Register(mcpblockcommon.StepKindToolCall, mcpblockbiz.NewRuntimeAdapter(mcpService)); err != nil {
 		t.Fatalf("register mcp runtime: %v", err)
 	}
@@ -395,7 +405,7 @@ func TestRuntimeOrchestrator_DispatchNextStepPreservesShellFailureEvidence(t *te
 	toolCallRepo := memory.NewToolCallRepository()
 	validationRepo := memory.NewValidationResultRepository()
 	checkpointRepo := memory.NewRuntimeCheckpointRepository()
-	registry := NewRuntimeAdapterRegistry(&stubRuntimeAdapter{output: map[string]any{"status": "default"}})
+	registry := newRuntimeAdapterRegistryForTest(&stubRuntimeAdapter{output: map[string]any{"status": "default"}})
 	if err := registry.Register(shellcommon.StepKindCommand, shellbiz.NewRuntimeAdapter()); err != nil {
 		t.Fatalf("register shell runtime: %v", err)
 	}
@@ -484,7 +494,7 @@ func TestRuntimeOrchestrator_DispatchNextStepPreservesShellTimeoutEvidence(t *te
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	toolCallRepo := memory.NewToolCallRepository()
-	registry := NewRuntimeAdapterRegistry(&stubRuntimeAdapter{output: map[string]any{"status": "default"}})
+	registry := newRuntimeAdapterRegistryForTest(&stubRuntimeAdapter{output: map[string]any{"status": "default"}})
 	if err := registry.Register(shellcommon.StepKindCommand, shellbiz.NewRuntimeAdapterWithTimeout(10*time.Millisecond)); err != nil {
 		t.Fatalf("register shell runtime: %v", err)
 	}
@@ -1184,7 +1194,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesMultipleStepsWhenRuntimeRequestsN
 				return map[string]any{
 					"status":   "completed",
 					"nextStep": "run-multi/step-2",
-					"nextKind": "legacy/minimal",
+					"nextKind": "runtime/test",
 					"stage":    "prepare",
 				}, nil
 			case "run-multi/step-2":
@@ -2043,7 +2053,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesConditionalBranchStep(t *testing.
 					"stage":    "route",
 					"branch":   "fast-track",
 					"nextStep": "run-branch/step-fast",
-					"nextKind": "legacy/minimal",
+					"nextKind": "runtime/test",
 				}, nil
 			case "run-branch/step-fast":
 				return map[string]any{
@@ -2118,7 +2128,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesConditionalReviewStep(t *testing.
 					"stage":    "route",
 					"branch":   "review-path",
 					"nextStep": "run-branch-review/step-review",
-					"nextKind": "legacy/minimal",
+					"nextKind": "runtime/test",
 				}, nil
 			case "run-branch-review/step-review":
 				return map[string]any{
@@ -2190,7 +2200,7 @@ func TestRuntimeOrchestrator_StartRunBlocksOnDecisionWhenRuntimeRequestsDecision
 			stepOutputKeyBlockDecisionReason:   "runtime decision gate",
 			stepOutputKeyBlockDecisionTicketID: "ticket-runtime-block",
 			stepOutputKeyNextStep:              "run-runtime-block/step-2",
-			stepOutputKeyNextKind:              "legacy/minimal",
+			stepOutputKeyNextKind:              "runtime/test",
 		},
 	}
 	hub := events.NewMemoryHub()
@@ -2272,7 +2282,7 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeDecisionR
 					stepOutputKeyBlockDecisionReason:   "runtime decision gate",
 					stepOutputKeyBlockDecisionTicketID: "ticket-runtime-resume",
 					stepOutputKeyNextStep:              "run-runtime-resume/step-2",
-					stepOutputKeyNextKind:              "legacy/minimal",
+					stepOutputKeyNextKind:              "runtime/test",
 				}, nil
 			case "run-runtime-resume/step-2":
 				return map[string]any{
@@ -2364,7 +2374,7 @@ func TestRuntimeOrchestrator_ResumeRunCreatesUniqueStepForMultiRoundDecision(t *
 					stepOutputKeyBlockDecisionReason:   "first decision gate",
 					stepOutputKeyBlockDecisionTicketID: "ticket-runtime-multi-decision-first",
 					stepOutputKeyNextStep:              string(firstResumeStepID),
-					stepOutputKeyNextKind:              "legacy/minimal",
+					stepOutputKeyNextKind:              "runtime/test",
 				}, nil
 			case firstResumeStepID:
 				resolution := mapFromValue(request.Input["decisionResolution"])
@@ -2376,7 +2386,7 @@ func TestRuntimeOrchestrator_ResumeRunCreatesUniqueStepForMultiRoundDecision(t *
 					"status":                         "completed",
 					stepOutputKeyBlockDecisionReason: "second decision gate",
 					stepOutputKeyNextStep:            string(firstResumeStepID),
-					stepOutputKeyNextKind:            "legacy/minimal",
+					stepOutputKeyNextKind:            "runtime/test",
 				}, nil
 			case secondResumeStepID:
 				resolution := mapFromValue(request.Input["decisionResolution"])
@@ -2486,7 +2496,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsRuntimeDecisionWithoutDispatchingNe
 					stepOutputKeyBlockDecisionReason:   "runtime decision gate",
 					stepOutputKeyBlockDecisionTicketID: "ticket-runtime-decision-reject",
 					stepOutputKeyNextStep:              "run-runtime-decision-reject/step-2",
-					stepOutputKeyNextKind:              "legacy/minimal",
+					stepOutputKeyNextKind:              "runtime/test",
 				}, nil
 			default:
 				return nil, errors.New("unexpected step")
@@ -2564,7 +2574,7 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeApprovalA
 					stepOutputKeyBlockApprovalReason: "runtime approval gate",
 					stepOutputKeyBlockApprovalID:     "approval-runtime-approval",
 					stepOutputKeyNextStep:            "run-runtime-approval/step-2",
-					stepOutputKeyNextKind:            "legacy/minimal",
+					stepOutputKeyNextKind:            "runtime/test",
 				}, nil
 			case "run-runtime-approval/step-2":
 				return map[string]any{
@@ -2644,7 +2654,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsRuntimeApprovalWithoutDispatchingNe
 					stepOutputKeyBlockApprovalReason: "runtime approval gate",
 					stepOutputKeyBlockApprovalID:     "approval-runtime-approval-reject",
 					stepOutputKeyNextStep:            "run-runtime-approval-reject/step-2",
-					stepOutputKeyNextKind:            "legacy/minimal",
+					stepOutputKeyNextKind:            "runtime/test",
 				}, nil
 			default:
 				return nil, errors.New("unexpected step")
@@ -2715,7 +2725,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsMultipleDecisionGates(t *testing.T
 					stepOutputKeyBlockDecisionReason:   "gate 1",
 					stepOutputKeyBlockDecisionTicketID: "ticket-multi-gate-1",
 					stepOutputKeyNextStep:              "run-multi-gate/step-2",
-					stepOutputKeyNextKind:              "legacy/minimal",
+					stepOutputKeyNextKind:              "runtime/test",
 				}, nil
 			case "run-multi-gate/step-2":
 				return map[string]any{
@@ -2723,7 +2733,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsMultipleDecisionGates(t *testing.T
 					stepOutputKeyBlockDecisionReason:   "gate 2",
 					stepOutputKeyBlockDecisionTicketID: "ticket-multi-gate-2",
 					stepOutputKeyNextStep:              "run-multi-gate/step-3",
-					stepOutputKeyNextKind:              "legacy/minimal",
+					stepOutputKeyNextKind:              "runtime/test",
 				}, nil
 			case "run-multi-gate/step-3":
 				return map[string]any{
@@ -2829,7 +2839,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsSecondDecisionGateWithoutDispatchin
 					stepOutputKeyBlockDecisionReason:   "gate 1",
 					stepOutputKeyBlockDecisionTicketID: "ticket-multi-gate-reject-1",
 					stepOutputKeyNextStep:              "run-multi-gate-reject/step-2",
-					stepOutputKeyNextKind:              "legacy/minimal",
+					stepOutputKeyNextKind:              "runtime/test",
 				}, nil
 			case "run-multi-gate-reject/step-2":
 				return map[string]any{
@@ -2837,7 +2847,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsSecondDecisionGateWithoutDispatchin
 					stepOutputKeyBlockDecisionReason:   "gate 2",
 					stepOutputKeyBlockDecisionTicketID: "ticket-multi-gate-reject-2",
 					stepOutputKeyNextStep:              "run-multi-gate-reject/step-3",
-					stepOutputKeyNextKind:              "legacy/minimal",
+					stepOutputKeyNextKind:              "runtime/test",
 				}, nil
 			default:
 				return nil, errors.New("unexpected step")
@@ -2937,7 +2947,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsDecisionThenApprovalGates(t *testi
 					stepOutputKeyBlockDecisionReason:   "mixed decision",
 					stepOutputKeyBlockDecisionTicketID: "ticket-mixed-gate-1",
 					stepOutputKeyNextStep:              "run-mixed-gate/step-2",
-					stepOutputKeyNextKind:              "legacy/minimal",
+					stepOutputKeyNextKind:              "runtime/test",
 				}, nil
 			case "run-mixed-gate/step-2":
 				return map[string]any{
@@ -2945,7 +2955,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsDecisionThenApprovalGates(t *testi
 					stepOutputKeyBlockApprovalReason: "mixed approval",
 					stepOutputKeyBlockApprovalID:     "approval-mixed-gate-1",
 					stepOutputKeyNextStep:            "run-mixed-gate/step-3",
-					stepOutputKeyNextKind:            "legacy/minimal",
+					stepOutputKeyNextKind:            "runtime/test",
 				}, nil
 			case "run-mixed-gate/step-3":
 				return map[string]any{
@@ -3069,8 +3079,13 @@ func TestRuntimeOrchestrator_ResumeRunSupportsLLMNamedDecisionThenApprovalGates(
 				return map[string]any{
 					"status": "completed",
 					"dodAssessment": map[string]any{
-						"passed":  true,
-						"summary": "multi gate completed",
+						"satisfied": true,
+						"summary":   "multi gate completed",
+						"items": []map[string]any{{
+							"item":         "multi gate completed",
+							"state":        "satisfied",
+							"evidenceRefs": []string{"run-llm-mixed/llm-after-approval"},
+						}},
 					},
 				}, nil
 			default:
@@ -3188,7 +3203,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsDecisionThenRejectedApproval(t *te
 					stepOutputKeyBlockDecisionReason:   "mixed decision",
 					stepOutputKeyBlockDecisionTicketID: "ticket-mixed-gate-reject-1",
 					stepOutputKeyNextStep:              "run-mixed-gate-reject/step-2",
-					stepOutputKeyNextKind:              "legacy/minimal",
+					stepOutputKeyNextKind:              "runtime/test",
 				}, nil
 			case "run-mixed-gate-reject/step-2":
 				return map[string]any{
@@ -3196,7 +3211,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsDecisionThenRejectedApproval(t *te
 					stepOutputKeyBlockApprovalReason: "mixed approval",
 					stepOutputKeyBlockApprovalID:     "approval-mixed-gate-reject-1",
 					stepOutputKeyNextStep:            "run-mixed-gate-reject/step-3",
-					stepOutputKeyNextKind:            "legacy/minimal",
+					stepOutputKeyNextKind:            "runtime/test",
 				}, nil
 			default:
 				return nil, errors.New("unexpected step")

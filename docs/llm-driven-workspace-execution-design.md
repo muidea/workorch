@@ -21,7 +21,7 @@ The LLM-driven MVP implementation now covers:
 
 - `Goal` and `DoD` are included in Workspace execution planning context.
 - Workspace activation starts with `llm/workspace_execution` instead of
-  silently completing through `legacy/minimal`.
+  silently completing through fallback runtime logic.
 - A configured OpenAI-compatible provider can return strict
   `LLMExecutionDecision` JSON, including validated `executionGraph` plans.
 - Runtime graph leaf completion can dispatch an LLM follow-up for
@@ -72,7 +72,7 @@ and module boundaries.
 - Soul, Skill, MCP, and Memory are first-class business context, not prompt text
   concatenation helpers.
 - Missing LLM configuration must fail clearly. It must not silently fall back to
-  `legacy/minimal` and report a false completion.
+  another runtime and report a false completion.
 - Memory is durable execution context. It is not a replacement for evidence,
   checkpoint, audit, or knowledge asset records.
 
@@ -106,7 +106,7 @@ Excluded from the first LLM-driven MVP:
 - General external runtime marketplace.
 - Allowing LLM providers to directly execute shell, write files, apply patches,
   or invoke MCP tools.
-- Silent fallback from LLM-driven execution to `legacy/minimal`.
+- Silent fallback from LLM-driven execution to any other runtime.
 
 Post-MVP completed extensions:
 
@@ -241,7 +241,7 @@ Failure rules:
 - Selected Skills or MCP servers not allowed by Soul/policy are rejected before
   Run creation.
 - Missing or disabled LLM provider fails activation or the first LLM Step with a
-  clear error. It must not create a completed Run through `legacy/minimal`.
+  clear error. It must not create a completed Run through fallback runtime logic.
 
 ### LLM Planning Interaction
 
@@ -1221,7 +1221,7 @@ Purpose: prove LLM integration fails safely and observably.
    -> start LLM-driven execution
    -> expect activation or first Step fails with a clear provider-unavailable
       error
-   -> expect Run does not complete through legacy/minimal
+   -> expect Run does not complete through fallback runtime logic
 
 2. Configure provider to return invalid JSON or schema-invalid fields
    -> expect llm/workspace_execution Step fails with schema validation details
@@ -1309,7 +1309,7 @@ LLM-driven execution is acceptable when:
 - A second Run in the same Workspace can recall prior Memory.
 - Memory and file backends both preserve LLM execution records after restart.
 - If LLM provider is not configured, LLM-driven activation fails clearly and
-  does not complete through `legacy/minimal`.
+  does not complete through fallback runtime logic.
 
 ## Non-Goals
 

@@ -9,17 +9,13 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-const legacyRuntimeKind = "legacy/minimal"
-
 type RuntimeAdapterRegistry struct {
-	defaultAdapter RuntimeAdapter
-	adapters       map[string]RuntimeAdapter
+	adapters map[string]RuntimeAdapter
 }
 
-func NewRuntimeAdapterRegistry(defaultAdapter RuntimeAdapter) *RuntimeAdapterRegistry {
+func NewRuntimeAdapterRegistry() *RuntimeAdapterRegistry {
 	return &RuntimeAdapterRegistry{
-		defaultAdapter: defaultAdapter,
-		adapters:       map[string]RuntimeAdapter{},
+		adapters: map[string]RuntimeAdapter{},
 	}
 }
 
@@ -38,9 +34,6 @@ func (r *RuntimeAdapterRegistry) ExecuteRuntimeStep(ctx context.Context, request
 	kind := strings.TrimSpace(request.Kind)
 	if adapter := r.adapters[kind]; adapter != nil {
 		return adapter.ExecuteRuntimeStep(ctx, request)
-	}
-	if kind == legacyRuntimeKind && r.defaultAdapter != nil {
-		return r.defaultAdapter.ExecuteRuntimeStep(ctx, request)
 	}
 	return runtimemodel.StepExecutionResult{
 		Output: map[string]any{

@@ -3,6 +3,7 @@ package appservice
 import (
 	"context"
 
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -33,13 +34,29 @@ func CreateRunWithSession(ctx context.Context, session *RuntimeSession, workspac
 	if err := validateRunDefinitions(ctx, session, workspaceID, goalID, dodID); err != nil {
 		return Run{}, err
 	}
+	var executionContext map[string]any
+	if goalID != "" || dodID != "" {
+		executionContext, err = buildWorkspaceExecutionContext(
+			ctx,
+			session,
+			common.WorkspaceID(workspaceID),
+			common.GoalID(goalID),
+			common.DoDID(dodID),
+			ActivateWorkspaceExecutionCommand{},
+		)
+		if err != nil {
+			return Run{}, err
+		}
+	}
 
 	id := common.RunID(runID)
 	if err := service.CreateRun(ctx, runmodule.CreateRunCommand{
-		RunID:       id,
-		WorkspaceID: common.WorkspaceID(workspaceID),
-		GoalID:      common.GoalID(goalID),
-		DoDID:       common.DoDID(dodID),
+		RunID:            id,
+		WorkspaceID:      common.WorkspaceID(workspaceID),
+		GoalID:           common.GoalID(goalID),
+		DoDID:            common.DoDID(dodID),
+		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: executionContext,
 	}); err != nil {
 		return Run{}, err
 	}

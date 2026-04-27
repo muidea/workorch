@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	legacycommon "github.com/muidea/workorch/internal/modules/blocks/legacy/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -17,8 +16,8 @@ func TestReadApprovalWithSessionReturnsInvalidArgumentWhenSessionMissing(t *test
 
 func TestListApprovalsWithBackendReturnsFilteredApprovals(t *testing.T) {
 	dataRoot := t.TempDir()
-	first := prepareApprovalRun(t, dataRoot, "ws-approval-list-a", "run-"+legacycommon.RuntimeApprovalBlockRunToken+"-list-a")
-	second := prepareApprovalRun(t, dataRoot, "ws-approval-list-b", "run-"+legacycommon.RuntimeApprovalBlockRunToken+"-list-b")
+	first := prepareApprovalRun(t, dataRoot, "ws-approval-list-a", "run-approval-list-a")
+	second := prepareApprovalRun(t, dataRoot, "ws-approval-list-b", "run-approval-list-b")
 
 	items, err := ListApprovalsWithBackend(context.Background(), "file", dataRoot, "", "")
 	if err != nil {
@@ -31,7 +30,7 @@ func TestListApprovalsWithBackendReturnsFilteredApprovals(t *testing.T) {
 		t.Fatalf("approval ids = %q/%q, want %q/%q", items[0].ID, items[1].ID, first.BlockingApprovalID, second.BlockingApprovalID)
 	}
 
-	filteredByRun, err := ListApprovalsWithBackend(context.Background(), "file", dataRoot, "", "run-"+legacycommon.RuntimeApprovalBlockRunToken+"-list-b")
+	filteredByRun, err := ListApprovalsWithBackend(context.Background(), "file", dataRoot, "", "run-approval-list-b")
 	if err != nil {
 		t.Fatalf("ListApprovalsWithBackend filtered by run: %v", err)
 	}
@@ -50,7 +49,7 @@ func TestListApprovalsWithBackendReturnsFilteredApprovals(t *testing.T) {
 
 func TestReadApprovalWithBackendReturnsRejectedApproval(t *testing.T) {
 	dataRoot := t.TempDir()
-	started := prepareApprovalRun(t, dataRoot, "ws-approval-read", "run-"+legacycommon.RuntimeApprovalBlockRunToken+"-read")
+	started := prepareApprovalRun(t, dataRoot, "ws-approval-read", "run-approval-read")
 	if _, err := RejectApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID); err != nil {
 		t.Fatalf("RejectApprovalWithBackend: %v", err)
 	}
@@ -66,7 +65,7 @@ func TestReadApprovalWithBackendReturnsRejectedApproval(t *testing.T) {
 
 func TestApproveApprovalWithBackendReturnsApprovedApproval(t *testing.T) {
 	dataRoot := t.TempDir()
-	started := prepareApprovalRun(t, dataRoot, "ws-approval-approve", "run-"+legacycommon.RuntimeApprovalBlockRunToken+"-approve")
+	started := prepareApprovalRun(t, dataRoot, "ws-approval-approve", "run-approval-approve")
 
 	item, err := ApproveApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID)
 	if err != nil {
@@ -79,7 +78,7 @@ func TestApproveApprovalWithBackendReturnsApprovedApproval(t *testing.T) {
 
 func TestRejectApprovalWithBackendReturnsRejectedApproval(t *testing.T) {
 	dataRoot := t.TempDir()
-	started := prepareApprovalRun(t, dataRoot, "ws-approval-reject", "run-"+legacycommon.RuntimeApprovalBlockRunToken+"-reject")
+	started := prepareApprovalRun(t, dataRoot, "ws-approval-reject", "run-approval-reject")
 
 	item, err := RejectApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID)
 	if err != nil {
@@ -92,7 +91,7 @@ func TestRejectApprovalWithBackendReturnsRejectedApproval(t *testing.T) {
 
 func TestRejectApprovalWithBackendReturnsConflictAfterApproved(t *testing.T) {
 	dataRoot := t.TempDir()
-	started := prepareApprovalRun(t, dataRoot, "ws-approval-conflict", "run-"+legacycommon.RuntimeApprovalBlockRunToken+"-conflict")
+	started := prepareApprovalRun(t, dataRoot, "ws-approval-conflict", "run-approval-conflict")
 	if _, err := ApproveApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID); err != nil {
 		t.Fatalf("ApproveApprovalWithBackend: %v", err)
 	}
@@ -104,8 +103,8 @@ func TestRejectApprovalWithBackendReturnsConflictAfterApproved(t *testing.T) {
 
 func TestBatchResolveApprovalsWithBackendApprovesInRequestOrder(t *testing.T) {
 	dataRoot := t.TempDir()
-	first := prepareApprovalRun(t, dataRoot, "ws-approval-batch-a", "run-"+legacycommon.RuntimeApprovalBlockRunToken+"-batch-a")
-	second := prepareApprovalRun(t, dataRoot, "ws-approval-batch-b", "run-"+legacycommon.RuntimeApprovalBlockRunToken+"-batch-b")
+	first := prepareApprovalRun(t, dataRoot, "ws-approval-batch-a", "run-approval-batch-a")
+	second := prepareApprovalRun(t, dataRoot, "ws-approval-batch-b", "run-approval-batch-b")
 
 	items, err := BatchResolveApprovalsWithBackend(context.Background(), "file", dataRoot, BatchResolveApprovalCommand{
 		ApprovalIDs: []string{second.BlockingApprovalID, first.BlockingApprovalID},
@@ -126,8 +125,8 @@ func TestBatchResolveApprovalsWithBackendApprovesInRequestOrder(t *testing.T) {
 
 func TestBatchResolveApprovalsWithBackendRejectsInRequestOrder(t *testing.T) {
 	dataRoot := t.TempDir()
-	first := prepareApprovalRun(t, dataRoot, "ws-approval-batch-reject-a", "run-"+legacycommon.RuntimeApprovalBlockRunToken+"-batch-reject-a")
-	second := prepareApprovalRun(t, dataRoot, "ws-approval-batch-reject-b", "run-"+legacycommon.RuntimeApprovalBlockRunToken+"-batch-reject-b")
+	first := prepareApprovalRun(t, dataRoot, "ws-approval-batch-reject-a", "run-approval-batch-reject-a")
+	second := prepareApprovalRun(t, dataRoot, "ws-approval-batch-reject-b", "run-approval-batch-reject-b")
 
 	items, err := BatchResolveApprovalsWithBackend(context.Background(), "file", dataRoot, BatchResolveApprovalCommand{
 		ApprovalIDs: []string{first.BlockingApprovalID, second.BlockingApprovalID},
@@ -148,7 +147,7 @@ func TestBatchResolveApprovalsWithBackendRejectsInRequestOrder(t *testing.T) {
 
 func TestBatchResolveApprovalsWithBackendRejectsDuplicateApprovalIDs(t *testing.T) {
 	dataRoot := t.TempDir()
-	started := prepareApprovalRun(t, dataRoot, "ws-approval-batch-dup", "run-"+legacycommon.RuntimeApprovalBlockRunToken+"-batch-dup")
+	started := prepareApprovalRun(t, dataRoot, "ws-approval-batch-dup", "run-approval-batch-dup")
 
 	if _, err := BatchResolveApprovalsWithBackend(context.Background(), "file", dataRoot, BatchResolveApprovalCommand{
 		ApprovalIDs: []string{started.BlockingApprovalID, started.BlockingApprovalID},
@@ -160,8 +159,8 @@ func TestBatchResolveApprovalsWithBackendRejectsDuplicateApprovalIDs(t *testing.
 
 func TestBatchResolveApprovalsWithBackendRejectsAlreadyResolvedBeforeMutation(t *testing.T) {
 	dataRoot := t.TempDir()
-	first := prepareApprovalRun(t, dataRoot, "ws-approval-batch-conflict-a", "run-"+legacycommon.RuntimeApprovalBlockRunToken+"-batch-conflict-a")
-	second := prepareApprovalRun(t, dataRoot, "ws-approval-batch-conflict-b", "run-"+legacycommon.RuntimeApprovalBlockRunToken+"-batch-conflict-b")
+	first := prepareApprovalRun(t, dataRoot, "ws-approval-batch-conflict-a", "run-approval-batch-conflict-a")
+	second := prepareApprovalRun(t, dataRoot, "ws-approval-batch-conflict-b", "run-approval-batch-conflict-b")
 	if _, err := ApproveApprovalWithBackend(context.Background(), "file", dataRoot, second.BlockingApprovalID); err != nil {
 		t.Fatalf("ApproveApprovalWithBackend: %v", err)
 	}
@@ -179,23 +178,4 @@ func TestBatchResolveApprovalsWithBackendRejectsAlreadyResolvedBeforeMutation(t 
 	if firstApproval.State != "pending" {
 		t.Fatalf("first approval = %+v, want still pending after prevalidation conflict", firstApproval)
 	}
-}
-
-func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID string) Run {
-	t.Helper()
-
-	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, workspaceID, workspaceID+" title", "", "workspaces/"+workspaceID); err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, workspaceID, runID, "", ""); err != nil {
-		t.Fatalf("CreateRunWithBackend: %v", err)
-	}
-	started, err := StartRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("StartRunWithBackend: %v", err)
-	}
-	if started.State != "blocked_on_approval" || started.BlockingApprovalID == "" {
-		t.Fatalf("started run = %+v, want blocked approval with approval", started)
-	}
-	return started
 }

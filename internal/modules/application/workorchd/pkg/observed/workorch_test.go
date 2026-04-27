@@ -25,7 +25,7 @@ func TestBuildWorkorchSnapshotIncludesExpectedPublishedTopics(t *testing.T) {
 	step := &runmodel.Step{
 		ID:    common.StepID("run-observed/step-1"),
 		RunID: run.ID,
-		Kind:  "legacy/minimal",
+		Kind:  "llm/workspace_execution",
 		State: common.StepStateCompleted,
 	}
 	ticket := &decisionmodel.Ticket{
@@ -232,7 +232,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunAndStepEvents(t *testing.T) {
 	step := &runmodel.Step{
 		ID:    common.StepID("run-published/step-1"),
 		RunID: run.ID,
-		Kind:  "legacy/minimal",
+		Kind:  "llm/workspace_execution",
 		State: common.StepStateCompleted,
 	}
 
@@ -559,7 +559,7 @@ func TestBuildWorkorchSnapshotIgnoresPublishedEventsThatDoNotMatchCurrentObjects
 	step := &runmodel.Step{
 		ID:     common.StepID("run-unmatched-published/step-1"),
 		RunID:  run.ID,
-		Kind:   "legacy/minimal",
+		Kind:   "llm/workspace_execution",
 		State:  common.StepStateCompleted,
 		Output: map[string]any{"status": "unmatched"},
 	}

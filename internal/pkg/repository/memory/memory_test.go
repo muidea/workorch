@@ -103,7 +103,7 @@ func TestStepRepository_CloneIsolation(t *testing.T) {
 	step := &runmodel.Step{
 		ID:    common.StepID("run-1/step-1"),
 		RunID: common.RunID("run-1"),
-		Kind:  "legacy/minimal",
+		Kind:  "llm/workspace_execution",
 		State: common.StepStateDispatched,
 		Input: map[string]any{"workspaceId": "ws-1"},
 	}

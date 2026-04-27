@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,8 +15,13 @@ import (
 	"testing"
 	"time"
 
-	legacycommon "github.com/muidea/workorch/internal/modules/blocks/legacy/pkg/common"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
+	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
 )
 
 type workorchWorkspaceResponse struct {
@@ -248,44 +254,41 @@ func TestWorkorchdServerSupportsFileRepositoryBackend(t *testing.T) {
 	assertRunListAvailable(t, "http://"+addr+"/api/v1/workorch/runs", "run-main-file")
 	assertRunAvailable(t, "http://"+addr+"/api/v1/workorch/runs/run-main-file", "run-main-file", workspaceID)
 	assertRunListAvailable(t, "http://"+addr+"/api/v1/workorch/runs?workspaceId="+workspaceID, "run-main-file")
-	assertRunStartAvailable(t, "http://"+addr+"/api/v1/workorch/runs/run-main-file/start", "run-main-file", "completed")
-	assertRunSnapshotAvailable(t, "http://"+addr+"/api/v1/workorch/runs/run-main-file/snapshot", "run-main-file", workspaceID)
-	assertRunStatusAvailable(t, "http://"+addr+"/api/v1/workorch/runs/run-main-file/status", "run-main-file", "completed")
+	failedRun := assertRunStartAvailable(t, "http://"+addr+"/api/v1/workorch/runs/run-main-file/start", "run-main-file", "failed")
+	if failedRun.Run.FailureReason == "" {
+		t.Fatalf("failed run failureReason = %q, want non-empty", failedRun.Run.FailureReason)
+	}
+	assertRunSnapshotAvailableWithState(t, "http://"+addr+"/api/v1/workorch/runs/run-main-file/snapshot", "run-main-file", workspaceID, "failed")
+	assertRunStatusAvailable(t, "http://"+addr+"/api/v1/workorch/runs/run-main-file/status", "run-main-file", "failed")
 
-	decisionResolveRunID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-main-file"
-	createRunInstance(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", decisionResolveRunID, "", "")
-	blockedDecision := assertRunStartAvailable(t, "http://"+addr+"/api/v1/workorch/runs/"+decisionResolveRunID+"/start", decisionResolveRunID, "blocked_on_decision")
+	decisionResolveRunID := "run-decision-main-file"
+	blockedDecisionID := seedBlockedDecisionRunForProcess(t, dataDir, workspaceID, decisionResolveRunID)
 	assertRunStatusAvailable(t, "http://"+addr+"/api/v1/workorch/runs/"+decisionResolveRunID+"/status", decisionResolveRunID, "blocked_on_decision")
-	assertDecisionListAvailable(t, "http://"+addr+"/api/v1/workorch/decisions", blockedDecision.Run.BlockingTicketID)
-	assertDecisionAvailable(t, "http://"+addr+"/api/v1/workorch/decisions/"+blockedDecision.Run.BlockingTicketID, blockedDecision.Run.BlockingTicketID, "open")
-	assertDecisionListAvailable(t, "http://"+addr+"/api/v1/workorch/decisions?workspaceId="+workspaceID, blockedDecision.Run.BlockingTicketID)
-	assertDecisionListAvailable(t, "http://"+addr+"/api/v1/workorch/decisions?runId="+decisionResolveRunID, blockedDecision.Run.BlockingTicketID)
-	assertDecisionResolveAvailable(t, "http://"+addr+"/api/v1/workorch/decisions/"+blockedDecision.Run.BlockingTicketID+"/resolve", blockedDecision.Run.BlockingTicketID, decisioncommon.ResolutionTypeProvideMissingInfo)
-	assertRunResumeAvailable(t, "http://"+addr+"/api/v1/workorch/runs/"+decisionResolveRunID+"/resume", decisionResolveRunID, "completed")
+	assertDecisionListAvailable(t, "http://"+addr+"/api/v1/workorch/decisions", blockedDecisionID)
+	assertDecisionAvailable(t, "http://"+addr+"/api/v1/workorch/decisions/"+blockedDecisionID, blockedDecisionID, "open")
+	assertDecisionListAvailable(t, "http://"+addr+"/api/v1/workorch/decisions?workspaceId="+workspaceID, blockedDecisionID)
+	assertDecisionListAvailable(t, "http://"+addr+"/api/v1/workorch/decisions?runId="+decisionResolveRunID, blockedDecisionID)
+	assertDecisionResolveAvailable(t, "http://"+addr+"/api/v1/workorch/decisions/"+blockedDecisionID+"/resolve", blockedDecisionID, decisioncommon.ResolutionTypeProvideMissingInfo)
 
-	decisionRejectRunID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-rejected-main-file"
-	createRunInstance(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", decisionRejectRunID, "", "")
-	rejectedDecision := assertRunStartAvailable(t, "http://"+addr+"/api/v1/workorch/runs/"+decisionRejectRunID+"/start", decisionRejectRunID, "blocked_on_decision")
-	assertDecisionRejectAvailable(t, "http://"+addr+"/api/v1/workorch/decisions/"+rejectedDecision.Run.BlockingTicketID+"/resolve", rejectedDecision.Run.BlockingTicketID, decisioncommon.ResolutionTypeRejectCurrentPath)
+	decisionRejectRunID := "run-decision-rejected-main-file"
+	rejectedDecisionID := seedBlockedDecisionRunForProcess(t, dataDir, workspaceID, decisionRejectRunID)
+	assertDecisionRejectAvailable(t, "http://"+addr+"/api/v1/workorch/decisions/"+rejectedDecisionID+"/resolve", rejectedDecisionID, decisioncommon.ResolutionTypeRejectCurrentPath)
 	rejectedRun := assertRunResumeAvailable(t, "http://"+addr+"/api/v1/workorch/runs/"+decisionRejectRunID+"/resume", decisionRejectRunID, "failed")
 	if rejectedRun.Run.FailureReason == "" {
 		t.Fatalf("rejected run failureReason = %q, want non-empty", rejectedRun.Run.FailureReason)
 	}
 
-	approvalApproveRunID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-main-file"
-	createRunInstance(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", approvalApproveRunID, "", "")
-	blockedApproval := assertRunStartAvailable(t, "http://"+addr+"/api/v1/workorch/runs/"+approvalApproveRunID+"/start", approvalApproveRunID, "blocked_on_approval")
-	assertApprovalListAvailable(t, "http://"+addr+"/api/v1/workorch/approvals", blockedApproval.Run.BlockingApprovalID)
-	assertApprovalAvailable(t, "http://"+addr+"/api/v1/workorch/approvals/"+blockedApproval.Run.BlockingApprovalID, blockedApproval.Run.BlockingApprovalID, "pending")
-	assertApprovalListAvailable(t, "http://"+addr+"/api/v1/workorch/approvals?workspaceId="+workspaceID, blockedApproval.Run.BlockingApprovalID)
-	assertApprovalListAvailable(t, "http://"+addr+"/api/v1/workorch/approvals?runId="+approvalApproveRunID, blockedApproval.Run.BlockingApprovalID)
-	assertApprovalApproveAvailable(t, "http://"+addr+"/api/v1/workorch/approvals/"+blockedApproval.Run.BlockingApprovalID+"/approve", blockedApproval.Run.BlockingApprovalID, "approved")
-	assertRunResumeAvailable(t, "http://"+addr+"/api/v1/workorch/runs/"+approvalApproveRunID+"/resume", approvalApproveRunID, "completed")
+	approvalApproveRunID := "run-approval-main-file"
+	blockedApprovalID := seedBlockedApprovalRunForProcess(t, dataDir, workspaceID, approvalApproveRunID)
+	assertApprovalListAvailable(t, "http://"+addr+"/api/v1/workorch/approvals", blockedApprovalID)
+	assertApprovalAvailable(t, "http://"+addr+"/api/v1/workorch/approvals/"+blockedApprovalID, blockedApprovalID, "pending")
+	assertApprovalListAvailable(t, "http://"+addr+"/api/v1/workorch/approvals?workspaceId="+workspaceID, blockedApprovalID)
+	assertApprovalListAvailable(t, "http://"+addr+"/api/v1/workorch/approvals?runId="+approvalApproveRunID, blockedApprovalID)
+	assertApprovalApproveAvailable(t, "http://"+addr+"/api/v1/workorch/approvals/"+blockedApprovalID+"/approve", blockedApprovalID, "approved")
 
-	approvalRejectRunID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-rejected-main-file"
-	createRunInstance(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", approvalRejectRunID, "", "")
-	rejectedApproval := assertRunStartAvailable(t, "http://"+addr+"/api/v1/workorch/runs/"+approvalRejectRunID+"/start", approvalRejectRunID, "blocked_on_approval")
-	assertApprovalRejectAvailable(t, "http://"+addr+"/api/v1/workorch/approvals/"+rejectedApproval.Run.BlockingApprovalID+"/reject", rejectedApproval.Run.BlockingApprovalID, "rejected")
+	approvalRejectRunID := "run-approval-rejected-main-file"
+	rejectedApprovalID := seedBlockedApprovalRunForProcess(t, dataDir, workspaceID, approvalRejectRunID)
+	assertApprovalRejectAvailable(t, "http://"+addr+"/api/v1/workorch/approvals/"+rejectedApprovalID+"/reject", rejectedApprovalID, "rejected")
 	rejectedApprovalRun := assertRunResumeAvailable(t, "http://"+addr+"/api/v1/workorch/runs/"+approvalRejectRunID+"/resume", approvalRejectRunID, "failed")
 	if rejectedApprovalRun.Run.FailureReason == "" {
 		t.Fatalf("rejected approval run failureReason = %q, want non-empty", rejectedApprovalRun.Run.FailureReason)
@@ -295,8 +298,8 @@ func TestWorkorchdServerSupportsFileRepositoryBackend(t *testing.T) {
 		"http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/snapshot",
 		workspaceID,
 		[]string{"run-main-file", decisionResolveRunID, decisionRejectRunID, approvalApproveRunID, approvalRejectRunID},
-		[]string{blockedDecision.Run.BlockingTicketID, rejectedDecision.Run.BlockingTicketID},
-		[]string{blockedApproval.Run.BlockingApprovalID, rejectedApproval.Run.BlockingApprovalID},
+		[]string{blockedDecisionID, rejectedDecisionID},
+		[]string{blockedApprovalID, rejectedApprovalID},
 	)
 
 	for _, name := range []string{
@@ -330,18 +333,15 @@ func TestWorkorchdServerRetainsFileBackedTerminalStateAcrossRestart(t *testing.T
 	workspaceID := createWorkspace(t, "http://"+firstAddr+"/api/v1/workorch/workspaces", "restart file workspace")
 
 	createRunInstance(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", "run-restart-completed", "", "")
-	assertRunStartAvailable(t, "http://"+firstAddr+"/api/v1/workorch/runs/run-restart-completed/start", "run-restart-completed", "completed")
+	assertRunStartAvailable(t, "http://"+firstAddr+"/api/v1/workorch/runs/run-restart-completed/start", "run-restart-completed", "failed")
 
-	decisionRunID := "run-" + legacycommon.RuntimeDecisionBlockRunToken + "-restart-completed"
-	createRunInstance(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", decisionRunID, "", "")
-	blockedDecision := assertRunStartAvailable(t, "http://"+firstAddr+"/api/v1/workorch/runs/"+decisionRunID+"/start", decisionRunID, "blocked_on_decision")
-	assertDecisionResolveAvailable(t, "http://"+firstAddr+"/api/v1/workorch/decisions/"+blockedDecision.Run.BlockingTicketID+"/resolve", blockedDecision.Run.BlockingTicketID, decisioncommon.ResolutionTypeProvideMissingInfo)
-	assertRunResumeAvailable(t, "http://"+firstAddr+"/api/v1/workorch/runs/"+decisionRunID+"/resume", decisionRunID, "completed")
+	decisionRunID := "run-decision-restart-resolved"
+	blockedDecisionID := seedBlockedDecisionRunForProcess(t, dataDir, workspaceID, decisionRunID)
+	assertDecisionResolveAvailable(t, "http://"+firstAddr+"/api/v1/workorch/decisions/"+blockedDecisionID+"/resolve", blockedDecisionID, decisioncommon.ResolutionTypeProvideMissingInfo)
 
-	approvalRunID := "run-" + legacycommon.RuntimeApprovalBlockRunToken + "-restart-failed"
-	createRunInstance(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", approvalRunID, "", "")
-	blockedApproval := assertRunStartAvailable(t, "http://"+firstAddr+"/api/v1/workorch/runs/"+approvalRunID+"/start", approvalRunID, "blocked_on_approval")
-	assertApprovalRejectAvailable(t, "http://"+firstAddr+"/api/v1/workorch/approvals/"+blockedApproval.Run.BlockingApprovalID+"/reject", blockedApproval.Run.BlockingApprovalID, "rejected")
+	approvalRunID := "run-approval-restart-failed"
+	blockedApprovalID := seedBlockedApprovalRunForProcess(t, dataDir, workspaceID, approvalRunID)
+	assertApprovalRejectAvailable(t, "http://"+firstAddr+"/api/v1/workorch/approvals/"+blockedApprovalID+"/reject", blockedApprovalID, "rejected")
 	assertRunResumeAvailable(t, "http://"+firstAddr+"/api/v1/workorch/runs/"+approvalRunID+"/resume", approvalRunID, "failed")
 
 	stopWorkorchdProcess(t, first)
@@ -353,13 +353,13 @@ func TestWorkorchdServerRetainsFileBackedTerminalStateAcrossRestart(t *testing.T
 	waitForHealthy(t, "http://"+secondAddr+"/healthz")
 
 	assertWorkspaceAvailable(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID, workspaceID, "restart file workspace")
-	assertRunAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed", "run-restart-completed", workspaceID, "completed")
-	assertRunSnapshotAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed/snapshot", "run-restart-completed", workspaceID, "completed")
-	assertRunStatusAvailable(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed/status", "run-restart-completed", "completed")
+	assertRunAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed", "run-restart-completed", workspaceID, "failed")
+	assertRunSnapshotAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed/snapshot", "run-restart-completed", workspaceID, "failed")
+	assertRunStatusAvailable(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed/status", "run-restart-completed", "failed")
 
-	assertRunAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+decisionRunID, decisionRunID, workspaceID, "completed")
-	assertRunSnapshotAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+decisionRunID+"/snapshot", decisionRunID, workspaceID, "completed")
-	assertDecisionAvailable(t, "http://"+secondAddr+"/api/v1/workorch/decisions/"+blockedDecision.Run.BlockingTicketID, blockedDecision.Run.BlockingTicketID, "resolved")
+	assertRunAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+decisionRunID, decisionRunID, workspaceID, "blocked_on_decision")
+	assertRunSnapshotAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+decisionRunID+"/snapshot", decisionRunID, workspaceID, "blocked_on_decision")
+	assertDecisionAvailable(t, "http://"+secondAddr+"/api/v1/workorch/decisions/"+blockedDecisionID, blockedDecisionID, "resolved")
 
 	failedStatus := assertRunStatusAvailable(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+approvalRunID+"/status", approvalRunID, "failed")
 	if failedStatus.Status.FailureReason == "" {
@@ -367,17 +367,17 @@ func TestWorkorchdServerRetainsFileBackedTerminalStateAcrossRestart(t *testing.T
 	}
 	assertRunAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+approvalRunID, approvalRunID, workspaceID, "failed")
 	assertRunSnapshotAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+approvalRunID+"/snapshot", approvalRunID, workspaceID, "failed")
-	assertApprovalAvailable(t, "http://"+secondAddr+"/api/v1/workorch/approvals/"+blockedApproval.Run.BlockingApprovalID, blockedApproval.Run.BlockingApprovalID, "rejected")
+	assertApprovalAvailable(t, "http://"+secondAddr+"/api/v1/workorch/approvals/"+blockedApprovalID, blockedApprovalID, "rejected")
 
 	assertWorkspaceSnapshotAvailable(
 		t,
 		"http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/snapshot",
 		workspaceID,
 		[]string{"run-restart-completed", decisionRunID, approvalRunID},
-		[]string{blockedDecision.Run.BlockingTicketID},
-		[]string{blockedApproval.Run.BlockingApprovalID},
+		[]string{blockedDecisionID},
+		[]string{blockedApprovalID},
 	)
-	assertRunStartAvailable(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed/start", "run-restart-completed", "completed")
+	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed/start", "conflict")
 	assertRunResumeAvailable(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+approvalRunID+"/resume", approvalRunID, "failed")
 	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+approvalRunID+"/start", "conflict")
 }
@@ -713,6 +713,91 @@ func defineGoalAndDoD(t *testing.T, runEndpoint string) (string, string) {
 		t.Fatalf("decode dod response: %v", err)
 	}
 	return goalBody.Goal.ID, dodBody.DoD.ID
+}
+
+func seedBlockedDecisionRunForProcess(t *testing.T, dataRoot string, workspaceID string, runID string) string {
+	t.Helper()
+
+	ticketID := common.TicketID("ticket-" + runID + "-decision")
+	stepID := common.StepID(runID + "/decision")
+	ctx := context.Background()
+	runRepo := fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json"))
+	stepRepo := fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json"))
+	ticketRepo := fileRepo.NewDecisionTicketRepository(filepath.Join(dataRoot, "ticket.json"))
+
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:               common.RunID(runID),
+		WorkspaceID:      common.WorkspaceID(workspaceID),
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID,
+		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed decision run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     stepID,
+		RunID:  common.RunID(runID),
+		Kind:   llmcommon.StepKindWorkspaceExecution,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"stage": "blocked_on_decision"},
+	}); err != nil {
+		t.Fatalf("seed decision step: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:           ticketID,
+		WorkspaceID:  common.WorkspaceID(workspaceID),
+		RunID:        common.RunID(runID),
+		StepID:       stepID,
+		Reason:       "process test decision gate",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "provide process test input",
+		Context:      map[string]any{"requiredFields": []any{"input"}},
+		State:        common.DecisionTicketStateOpen,
+	}); err != nil {
+		t.Fatalf("seed decision ticket: %v", err)
+	}
+	return string(ticketID)
+}
+
+func seedBlockedApprovalRunForProcess(t *testing.T, dataRoot string, workspaceID string, runID string) string {
+	t.Helper()
+
+	approvalID := common.ApprovalID("approval-" + runID + "-approval")
+	stepID := common.StepID(runID + "/approval")
+	ctx := context.Background()
+	runRepo := fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json"))
+	stepRepo := fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json"))
+	approvalRepo := fileRepo.NewApprovalRepository(filepath.Join(dataRoot, "approval.json"))
+
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:                 common.RunID(runID),
+		WorkspaceID:        common.WorkspaceID(workspaceID),
+		State:              common.RunStateBlockedOnApproval,
+		BlockingApprovalID: approvalID,
+		InitialStepKind:    llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed approval run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     stepID,
+		RunID:  common.RunID(runID),
+		Kind:   llmcommon.StepKindWorkspaceExecution,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"stage": "blocked_on_approval"},
+	}); err != nil {
+		t.Fatalf("seed approval step: %v", err)
+	}
+	if err := approvalRepo.Create(ctx, &approvalmodel.Approval{
+		ID:          approvalID,
+		WorkspaceID: common.WorkspaceID(workspaceID),
+		RunID:       common.RunID(runID),
+		StepID:      stepID,
+		Reason:      "process test approval gate",
+		State:       common.ApprovalStatePending,
+	}); err != nil {
+		t.Fatalf("seed approval: %v", err)
+	}
+	return string(approvalID)
 }
 
 func assertRunListAvailable(t *testing.T, endpoint string, runID string) {
