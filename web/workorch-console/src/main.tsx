@@ -12,7 +12,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Button, ConfigProvider, Descriptions, Empty, Form, Input, InputNumber, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Decision, DoD, Goal, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Run, RunObservability, RunSnapshot, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
+import type { Approval, Decision, DoD, Goal, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, Run, RunObservability, RunSnapshot, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -148,6 +148,73 @@ function outputText(output: Record<string, unknown> | undefined, key: string) {
     return '-';
   }
   return typeof value === 'string' ? value : compactJSON(value);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+}
+
+function latestStepOutput(snapshot?: RunSnapshot) {
+  const steps = snapshot?.steps ?? [];
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    if (steps[index].output) {
+      return steps[index].output;
+    }
+  }
+  return undefined;
+}
+
+function dodAssessment(snapshot?: RunSnapshot) {
+  const steps = snapshot?.steps ?? [];
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const assessment = asRecord(steps[index].output?.dodAssessment);
+    if (assessment) {
+      return assessment;
+    }
+  }
+  return undefined;
+}
+
+function dodAssessmentItems(snapshot?: RunSnapshot) {
+  const assessmentItems = dodAssessment(snapshot)?.items;
+  return Array.isArray(assessmentItems) ? assessmentItems.map((item, index) => ({
+    key: `dod-${index}`,
+    item: asRecord(item)?.item ? String(asRecord(item)?.item) : compactJSON(item),
+    state: asRecord(item)?.state ? String(asRecord(item)?.state) : '-',
+    evidenceRefs: asStringArray(asRecord(item)?.evidenceRefs)
+  })) : [];
+}
+
+function memoryRefIDs(snapshot?: RunSnapshot) {
+  const refs = new Set<string>();
+  for (const step of snapshot?.steps ?? []) {
+    for (const ref of asStringArray(step.output?.memoryRefs)) {
+      refs.add(ref);
+    }
+  }
+  return refs;
+}
+
+function goalOutcomeSummary(snapshot?: RunSnapshot) {
+  const assessment = dodAssessment(snapshot);
+  const output = latestStepOutput(snapshot);
+  const summary = assessment?.summary || output?.thoughtSummary || output?.summary || snapshot?.run.failureReason;
+  return summary ? String(summary) : '尚未形成可确认的目标成果';
+}
+
+function goalOutcomeState(snapshot?: RunSnapshot) {
+  const assessment = dodAssessment(snapshot);
+  if (assessment?.satisfied === true) {
+    return <Tag color="green">DoD 已满足</Tag>;
+  }
+  if (assessment?.satisfied === false) {
+    return <Tag color="red">DoD 未满足</Tag>;
+  }
+  return snapshot ? stateTag(snapshot.run.state) : <Tag>未选择 Run</Tag>;
 }
 
 function splitLines(value?: string) {
@@ -599,8 +666,18 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     setMCPServers(nextMCPServers);
     setMemoryItems(nextMemoryItems);
     setConfiguration(nextConfiguration);
-    setRunSnapshot(undefined);
-    setRunObservability(undefined);
+    const latestRun = runStateSummary(nextSnapshot.runs).latest;
+    if (latestRun) {
+      const [nextRunSnapshot, nextRunObservability] = await Promise.all([
+        workorchApi.readRunSnapshot(latestRun.id),
+        workorchApi.readRunObservability(latestRun.id)
+      ]);
+      setRunSnapshot(nextRunSnapshot);
+      setRunObservability(nextRunObservability);
+    } else {
+      setRunSnapshot(undefined);
+      setRunObservability(undefined);
+    }
   }
 
   const refreshWorkspace = async () => {
@@ -675,7 +752,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
               setRunObservability(nextObservability);
             }).catch((error: unknown) => message.error(errorMessage(error)))}
           >
-            查看过程
+            查看成果与过程
           </Button>
           <Button
             size="small"
@@ -690,6 +767,12 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     }
   ];
   const runSummary = runStateSummary(snapshot?.runs);
+  const outcomeRun = runSnapshot?.run;
+  const outcomeGoal = goals.find((item) => item.id === outcomeRun?.goalId);
+  const outcomeDoD = dods.find((item) => item.id === outcomeRun?.doDId);
+  const outcomeMemoryRefs = memoryRefIDs(runSnapshot);
+  const outcomeMemories = memoryItems.filter((item) => item.runId === outcomeRun?.id || outcomeMemoryRefs.has(item.id));
+  const outcomeDoDItems = dodAssessmentItems(runSnapshot);
 
   return (
     <PageContainer
@@ -770,6 +853,106 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             <ProCard title="验收标准（DoD）" colSpan="50%">
               {dods.length ? dods.flatMap((item) => item.items).map((item) => <Tag key={item}>{item}</Tag>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无验收标准" />}
             </ProCard>
+          </ProCard>
+          <ProCard
+            title="目标成果"
+            className="workorch-section"
+            extra={goalOutcomeState(runSnapshot)}
+          >
+            {runSnapshot ? (
+              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                <Descriptions
+                  column={2}
+                  items={[
+                    { key: 'run', label: '关联 Run', children: `${runSnapshot.run.id} / ${stateLabel(runSnapshot.run.state)}` },
+                    { key: 'goal', label: '目标', children: outcomeGoal?.text || runSnapshot.run.goalId || '-' },
+                    { key: 'dod', label: '验收标准', children: outcomeDoD?.items?.length ? outcomeDoD.items.map((item) => <Tag key={item}>{item}</Tag>) : runSnapshot.run.doDId || '-' },
+                    { key: 'summary', label: '成果结论', children: <Typography.Paragraph className="goal-outcome-summary">{goalOutcomeSummary(runSnapshot)}</Typography.Paragraph> }
+                  ]}
+                />
+                <ProCard gutter={16} wrap>
+                  <ProCard title="验收项确认" colSpan={{ xs: 24, lg: 12 }}>
+                    {outcomeDoDItems.length ? (
+                      <ProTable
+                        rowKey="key"
+                        search={false}
+                        pagination={false}
+                        size="small"
+                        columns={[
+                          { title: '验收项', dataIndex: 'item', ellipsis: true },
+                          { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(String(item.state)) },
+                          { title: '证据', dataIndex: 'evidenceRefs', ellipsis: true, render: (_, item) => (item.evidenceRefs as string[]).join(', ') || '-' }
+                        ]}
+                        dataSource={outcomeDoDItems}
+                      />
+                    ) : (
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 尚未输出 DoD 评估" />
+                    )}
+                  </ProCard>
+                  <ProCard title="交付物与变更" colSpan={{ xs: 24, lg: 12 }}>
+                    {(runSnapshot.patches?.length ?? 0) > 0 ? (
+                      <ProTable<Patch>
+                        rowKey="id"
+                        search={false}
+                        pagination={false}
+                        size="small"
+                        columns={[
+                          { title: '目标文件/资源', dataIndex: 'targetRef', ellipsis: true },
+                          { title: '类型', dataIndex: 'patchType', width: 120 },
+                          { title: '状态', dataIndex: 'state', width: 110, render: (_, item) => stateTag(item.state) },
+                          { title: '摘要', dataIndex: 'summary', ellipsis: true }
+                        ]}
+                        dataSource={runSnapshot.patches ?? []}
+                      />
+                    ) : (
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 未产生 Patch/文件交付物" />
+                    )}
+                  </ProCard>
+                </ProCard>
+                <ProCard gutter={16} wrap>
+                  <ProCard title="工具调用成果" colSpan={{ xs: 24, lg: 12 }}>
+                    {(runSnapshot.toolCalls?.length ?? 0) > 0 ? (
+                      <ProTable<ToolCall>
+                        rowKey="id"
+                        search={false}
+                        pagination={{ pageSize: 5 }}
+                        size="small"
+                        columns={[
+                          { title: '工具', dataIndex: 'toolName', ellipsis: true },
+                          { title: '状态', dataIndex: 'state', width: 110, render: (_, item) => stateTag(item.state) },
+                          { title: '结果摘要', dataIndex: 'exitSummary', ellipsis: true },
+                          { title: '错误', dataIndex: 'error', ellipsis: true }
+                        ]}
+                        dataSource={runSnapshot.toolCalls ?? []}
+                      />
+                    ) : (
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 未产生工具调用" />
+                    )}
+                  </ProCard>
+                  <ProCard title="Memory 输出" colSpan={{ xs: 24, lg: 12 }}>
+                    {outcomeMemories.length ? (
+                      <ProTable<MemoryItem>
+                        rowKey="id"
+                        search={false}
+                        pagination={{ pageSize: 5 }}
+                        size="small"
+                        columns={[
+                          { title: '记忆', dataIndex: 'summary', ellipsis: true },
+                          { title: '类型', dataIndex: 'memoryType', width: 130 },
+                          { title: '来源', dataIndex: 'sourceType', width: 100 },
+                          { title: '向量', width: 90, render: (_, item) => item.vectorReady ? <Tag color="cyan">{item.vectorDimension}</Tag> : '-' }
+                        ]}
+                        dataSource={outcomeMemories}
+                      />
+                    ) : (
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 未产生或引用 Memory 成果" />
+                    )}
+                  </ProCard>
+                </ProCard>
+              </Space>
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先启动或选择一个 Run 查看目标成果" />
+            )}
           </ProCard>
           <ProCard title="运行记录（Run）" className="workorch-section">
             <ProTable<Run> rowKey="id" search={false} pagination={false} columns={runColumns} dataSource={snapshot.runs ?? []} />
