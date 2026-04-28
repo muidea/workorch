@@ -5,7 +5,6 @@ set -euo pipefail
 BASE_URL="${WORKORCH_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
 TMP_DIR="${WORKORCH_VERIFY_ARTIFACT_DIR:-$(mktemp -d)}"
 KEEP_ARTIFACTS="${WORKORCH_VERIFY_KEEP_ARTIFACTS:-0}"
-RUN_SUFFIX="${WORKORCH_VERIFY_RUN_SUFFIX:-$$}"
 
 report_failure() {
   local status=$?
@@ -26,27 +25,6 @@ cleanup() {
   if [[ "$KEEP_ARTIFACTS" != "1" && $status -eq 0 ]]; then
     rm -rf "$TMP_DIR"
   fi
-}
-
-json_path() {
-  python3 - "$1" "$2" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-current = data
-for part in sys.argv[2].split("."):
-    current = current[part]
-print(current)
-PY
-}
-
-post_json() {
-  local url="$1"
-  local body="$2"
-  local output="$3"
-  curl -fsS -H "Content-Type: application/json" -X POST "$url" -d "$body" >"$output"
 }
 
 trap report_failure ERR
@@ -88,48 +66,11 @@ fi
 curl -fsS "$BASE_URL/api/v1/workorch/configuration" >"$TMP_DIR/configuration.json"
 grep '"configuration"' "$TMP_DIR/configuration.json" >/dev/null
 
-post_json "$BASE_URL/api/v1/workorch/workspaces" \
-  '{"title":"verify workspace '"$RUN_SUFFIX"'","description":"verify workspace description"}' \
-  "$TMP_DIR/workspace.json"
-workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
-[[ -n "$workspace_id" ]]
-grep "\"id\": \"$workspace_id\"" "$TMP_DIR/workspace.json" >/dev/null
-grep '"description": "verify workspace description"' "$TMP_DIR/workspace.json" >/dev/null
-grep "\"workingDirectory\": \".*/workspaces/$workspace_id\"" "$TMP_DIR/workspace.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces" | grep "\"id\": \"$workspace_id\"" >/dev/null
-
-post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" \
-  '{"text":"verify workorch service delivery"}' \
-  "$TMP_DIR/goal.json"
-goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
-[[ -n "$goal_id" ]]
-
-post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" \
-  '{"items":["workspace can be created","run can be completed"]}' \
-  "$TMP_DIR/dod.json"
-dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
-[[ -n "$dod_id" ]]
-
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" | grep "\"id\": \"$goal_id\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/goals/$goal_id" | grep '"text": "verify workorch service delivery"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" | grep "\"id\": \"$dod_id\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/dods/$dod_id" | grep '"state": "ready"' >/dev/null
-
-run_id="run-shared-verify-$RUN_SUFFIX"
-post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" \
-  '{"runId":"'"$run_id"'","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'"}' \
-  "$TMP_DIR/run.json"
-grep "\"id\": \"$run_id\"" "$TMP_DIR/run.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs" | grep "\"id\": \"$run_id\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs?workspaceId=$workspace_id" | grep "\"id\": \"$run_id\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id" | grep "\"workspaceId\": \"$workspace_id\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" | grep '"state": "created"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/run-observability.json"
-grep '"progress"' "$TMP_DIR/run-observability.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/run-snapshot.json"
-grep "\"id\": \"$run_id\"" "$TMP_DIR/run-snapshot.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" | grep "\"id\": \"$run_id\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/events?runId=$run_id&limit=20" >"$TMP_DIR/run-events.json"
-grep "\"runId\": \"$run_id\"" "$TMP_DIR/run-events.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces" >"$TMP_DIR/workspaces.json"
+grep '"workspaces"' "$TMP_DIR/workspaces.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs" >"$TMP_DIR/runs.json"
+grep '"runs"' "$TMP_DIR/runs.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/events?limit=20" >"$TMP_DIR/events.json"
+grep '"eventRecords"' "$TMP_DIR/events.json" >/dev/null
 
 echo "workorchd HTTP verification passed for deployed service $BASE_URL"

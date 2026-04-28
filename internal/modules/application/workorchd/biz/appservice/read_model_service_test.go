@@ -315,32 +315,32 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 	if len(item.Timeline) < 2 {
 		t.Fatalf("timeline = %+v, want checkpoint and events", item.Timeline)
 	}
-	if !timelineContainsStepOutput(item.Timeline, string(stepID), "llm_execution_graph_plan") {
+	if !timelineContainsStepOutput(item.Timeline, string(stepID), "llm_execution_graph_plan", "completed") {
 		t.Fatalf("timeline = %+v, want step output timeline item", item.Timeline)
 	}
-	if !timelineContainsStreamDelta(item.Timeline, string(stepID), `{"completionState":"continue"`) {
+	if !timelineContainsStreamDelta(item.Timeline, string(stepID), `{"completionState":"continue"`, "completed") {
 		t.Fatalf("timeline = %+v, want stream delta timeline item", item.Timeline)
 	}
 }
 
-func timelineContainsStepOutput(items []RuntimeTimelineItem, stepID string, stage string) bool {
+func timelineContainsStepOutput(items []RuntimeTimelineItem, stepID string, stage string, runState string) bool {
 	for _, item := range items {
 		if item.Source != "step" || item.StepID != stepID || item.Output == nil {
 			continue
 		}
-		if item.Output["stage"] == stage {
+		if item.Output["stage"] == stage && item.RunState == runState {
 			return true
 		}
 	}
 	return false
 }
 
-func timelineContainsStreamDelta(items []RuntimeTimelineItem, stepID string, delta string) bool {
+func timelineContainsStreamDelta(items []RuntimeTimelineItem, stepID string, delta string, runState string) bool {
 	for _, item := range items {
 		if item.Source != "step_stream" || item.StepID != stepID {
 			continue
 		}
-		if item.Type == "delta" && item.Data["delta"] == delta {
+		if item.Type == "delta" && item.Data["delta"] == delta && item.RunState == runState {
 			return true
 		}
 	}

@@ -1089,12 +1089,13 @@ func runtimeTimeline(snapshot RunSnapshot) []RuntimeTimelineItem {
 			Source:    "step",
 			Type:      step.Kind,
 			ID:        step.ID,
+			RunState:  snapshot.Run.State,
 			StepID:    step.ID,
 			StepState: step.State,
 			Summary:   timelineStepSummary(step.Output),
 			Output:    cloneReadModelMap(step.Output),
 		})
-		items = append(items, streamTimelineItems(step)...)
+		items = append(items, streamTimelineItems(step, snapshot.Run.State)...)
 	}
 	for _, checkpoint := range snapshot.RuntimeCheckpoints {
 		items = append(items, RuntimeTimelineItem{
@@ -1147,7 +1148,7 @@ func runtimeTimeline(snapshot RunSnapshot) []RuntimeTimelineItem {
 	return items
 }
 
-func streamTimelineItems(step presenter.StepView) []RuntimeTimelineItem {
+func streamTimelineItems(step presenter.StepView, runState string) []RuntimeTimelineItem {
 	if len(step.Output) == 0 {
 		return nil
 	}
@@ -1169,6 +1170,7 @@ func streamTimelineItems(step presenter.StepView) []RuntimeTimelineItem {
 			Source:    "step_stream",
 			Type:      eventType,
 			ID:        step.ID + "/stream/" + strconv.Itoa(idx+1),
+			RunState:  runState,
 			StepID:    step.ID,
 			StepState: step.State,
 			Summary:   readModelStringValue(event["delta"]),
