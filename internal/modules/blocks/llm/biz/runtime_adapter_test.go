@@ -244,10 +244,103 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 		!runtimeCapabilitiesContainServiceAPI(provider.request.RuntimeCapabilities, "GET", "/api/v1/workorch/runs/{runId}/snapshot") {
 		t.Fatalf("runtime capabilities = %+v, want declared block and service API catalog", provider.request.RuntimeCapabilities)
 	}
+	for _, kind := range []string{
+		llmcommon.RuntimeBlockKindPatchApply,
+		llmcommon.RuntimeBlockKindDecisionRequest,
+		llmcommon.RuntimeBlockKindApprovalRequest,
+		llmcommon.RuntimeBlockKindMemoryWrite,
+		llmcommon.RuntimeBlockKindDoDAssessment,
+	} {
+		if runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, kind) {
+			t.Fatalf("runtime capabilities = %+v, pseudo output kind %s must not be advertised as executable graph block", provider.request.RuntimeCapabilities, kind)
+		}
+	}
 	if result.Output["status"] != "completed" ||
 		result.Output["stage"] != "llm_shell_plan" ||
 		result.Output["nextKind"] != "shell/command" {
 		t.Fatalf("output = %+v, want shell plan", result.Output)
+	}
+}
+
+func TestRuntimeAdapterToleratesPatchOperationProviderDrift(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{
+		"completionState":"continue",
+		"patchRequests":[{
+			"operation":"create",
+			"targetRef":"workorch-runtime-output.txt",
+			"content":"run=run-patch-drift"
+		}]
+	}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	patches, ok := result.Output["patches"].([]map[string]any)
+	if !ok || len(patches) != 1 {
+		t.Fatalf("patches = %#v, want one normalized patch request", result.Output["patches"])
+	}
+	if patches[0]["targetRef"] != "workorch-runtime-output.txt" || patches[0]["content"] != "run=run-patch-drift" {
+		t.Fatalf("patch = %+v, want normalized target/content", patches[0])
+	}
+	if patches[0]["patchType"] != "file_write" {
+		t.Fatalf("patch = %+v, want operation drift normalized to file_write", patches[0])
+	}
+	if _, exists := patches[0]["operation"]; exists {
+		t.Fatalf("patch = %+v, operation is provider drift and must not leak to runtime output", patches[0])
+	}
+	decision, ok := result.Output["llmDecision"].(map[string]any)
+	if !ok {
+		t.Fatalf("llmDecision = %#v, want normalized map", result.Output["llmDecision"])
+	}
+	decisionPatches, ok := decision["patchRequests"].([]any)
+	if !ok || len(decisionPatches) != 1 {
+		t.Fatalf("llmDecision.patchRequests = %#v, want one normalized patch", decision["patchRequests"])
+	}
+	decisionPatch, ok := decisionPatches[0].(map[string]any)
+	if !ok || decisionPatch["patchType"] != "file_write" {
+		t.Fatalf("llmDecision.patchRequests[0] = %#v, want file_write", decisionPatches[0])
+	}
+	if _, exists := decisionPatch["operation"]; exists {
+		t.Fatalf("llmDecision.patchRequests[0] = %+v, operation must not leak", decisionPatch)
+	}
+}
+
+func TestRuntimeAdapterNormalizesPatchTypeCreateProviderDrift(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{
+		"completionState":"continue",
+		"patchRequests":[{
+			"patchType":"create",
+			"targetRef":"workorch-runtime-output.txt",
+			"content":"run=run-patch-create-drift"
+		}]
+	}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	patches, ok := result.Output["patches"].([]map[string]any)
+	if !ok || len(patches) != 1 {
+		t.Fatalf("patches = %#v, want one normalized patch request", result.Output["patches"])
+	}
+	if patches[0]["patchType"] != "file_write" || patches[0]["targetRef"] != "workorch-runtime-output.txt" {
+		t.Fatalf("patch = %+v, want create normalized to file_write", patches[0])
+	}
+	decision := result.Output["llmDecision"].(map[string]any)
+	decisionPatch := decision["patchRequests"].([]any)[0].(map[string]any)
+	if decisionPatch["patchType"] != "file_write" {
+		t.Fatalf("llmDecision.patchRequests[0] = %+v, want create normalized to file_write", decisionPatch)
 	}
 }
 

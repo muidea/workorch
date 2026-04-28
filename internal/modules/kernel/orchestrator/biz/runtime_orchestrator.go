@@ -43,6 +43,7 @@ const (
 	stepOutputKeyExecutionGraph        = "executionGraph"
 	stepOutputKeyGraphBranch           = "graphBranch"
 	stepInputKeyGraphNodeID            = "graphNodeId"
+	stepInputKeyGraphRootStepID        = "graphRootStepId"
 	stepInputKeyGraphPreviousNodeID    = "graphPreviousNodeId"
 	stepInputKeyGraphCompletedNodes    = "graphCompletedNodes"
 	stepInputKeyGraphBatch             = "graphBatch"
@@ -639,6 +640,9 @@ func (o *RuntimeOrchestrator) dispatchStep(
 	}
 	if shouldDispatchGraphFollowUp(run, step, output) {
 		return o.dispatchStep(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), o.graphFollowUpStepInput(ctx, run, step))
+	}
+	if shouldDispatchLLMCompletionFollowUp(run, step, output) {
+		return o.dispatchStep(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), llmCompletionFollowUpStepInput(run, step))
 	}
 	if err := completionDoDAssessmentError(run, output); err != nil {
 		step.State = common.StepStateFailed
@@ -1494,6 +1498,13 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 				Input: o.graphFollowUpStepInput(ctx, run, last),
 			}}, nil
 		}
+		if shouldDispatchLLMCompletionFollowUp(run, last, last.Output) {
+			return []stepDispatchSpec{{
+				ID:    llmCompletionFollowUpStepID(run.ID, last),
+				Kind:  initialStepKind(run),
+				Input: llmCompletionFollowUpStepInput(run, last),
+			}}, nil
+		}
 	}
 	if last.State == common.StepStateDispatched {
 		return []stepDispatchSpec{{
@@ -1664,8 +1675,9 @@ func (o *RuntimeOrchestrator) readyGraphStepSpecs(
 	if err != nil {
 		return nil
 	}
-	completed := completedGraphNodes(steps)
-	started := startedGraphNodes(steps)
+	rootStepID := graphDispatchRootStepID(last)
+	completed := completedGraphNodes(steps, rootStepID)
+	started := startedGraphNodes(steps, rootStepID)
 	branch := selectedGraphBranch(steps)
 	ret := make([]stepDispatchSpec, 0, len(graph.Nodes))
 	for _, node := range graph.Nodes {
@@ -1679,8 +1691,9 @@ func (o *RuntimeOrchestrator) readyGraphStepSpecs(
 			continue
 		}
 		input := nextGraphStepInput(run, last, graph, node, completed, branch)
+		input[stepInputKeyGraphRootStepID] = string(rootStepID)
 		ret = append(ret, stepDispatchSpec{
-			ID:    graphStepID(run.ID, node.ID),
+			ID:    graphStepIDForRoot(ctx, o.steps, run.ID, rootStepID, node.ID),
 			Kind:  node.Kind,
 			Input: input,
 		})
@@ -1740,6 +1753,9 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatch(ctx context.Context, run *r
 	}
 	if shouldDispatchGraphFollowUp(currentRun, last, last.Output) {
 		return o.dispatchStep(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphFollowUpStepInput(ctx, currentRun, last))
+	}
+	if shouldDispatchLLMCompletionFollowUp(currentRun, last, last.Output) {
+		return o.dispatchStep(ctx, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInput(currentRun, last))
 	}
 	if err := completionDoDAssessmentError(currentRun, last.Output); err != nil {
 		last.State = common.StepStateFailed
@@ -1859,10 +1875,13 @@ func mapFromValue(value any) map[string]any {
 	return cloneStepPayload(typed)
 }
 
-func completedGraphNodes(steps []*runModel.Step) map[string]bool {
+func completedGraphNodes(steps []*runModel.Step, rootStepID common.StepID) map[string]bool {
 	ret := map[string]bool{}
 	for _, step := range steps {
 		if step == nil || step.State != common.StepStateCompleted {
+			continue
+		}
+		if !sameGraphRoot(step, rootStepID) {
 			continue
 		}
 		nodeID, _ := step.Input[stepInputKeyGraphNodeID].(string)
@@ -1874,9 +1893,12 @@ func completedGraphNodes(steps []*runModel.Step) map[string]bool {
 	return ret
 }
 
-func startedGraphNodes(steps []*runModel.Step) map[string]bool {
+func startedGraphNodes(steps []*runModel.Step, rootStepID common.StepID) map[string]bool {
 	ret := map[string]bool{}
 	for _, step := range steps {
+		if !sameGraphRoot(step, rootStepID) {
+			continue
+		}
 		nodeID := graphNodeID(step)
 		if nodeID != "" {
 			ret[nodeID] = true
@@ -1902,6 +1924,44 @@ func selectedGraphBranch(steps []*runModel.Step) string {
 	return branch
 }
 
+func sameGraphRoot(step *runModel.Step, rootStepID common.StepID) bool {
+	if step == nil || rootStepID == "" {
+		return false
+	}
+	return graphRootStepID(step) == rootStepID
+}
+
+func graphRootStepID(step *runModel.Step) common.StepID {
+	if step == nil {
+		return ""
+	}
+	if step.Input != nil {
+		root, _ := step.Input[stepInputKeyGraphRootStepID].(string)
+		if strings.TrimSpace(root) != "" {
+			return common.StepID(strings.TrimSpace(root))
+		}
+	}
+	if graphNodeID(step) == "" {
+		return step.ID
+	}
+	if previousStepID := previousExecutionStepID(step); previousStepID != "" {
+		return previousStepID
+	}
+	return step.ID
+}
+
+func graphDispatchRootStepID(step *runModel.Step) common.StepID {
+	if step == nil {
+		return ""
+	}
+	if graphNodeID(step) == "" {
+		if _, ok := runtimeGraphSpecFromValue(step.Output[stepOutputKeyExecutionGraph]); ok {
+			return step.ID
+		}
+	}
+	return graphRootStepID(step)
+}
+
 func graphNodeDependenciesSatisfied(node runtimemodel.BlockExecutionNode, completed map[string]bool) bool {
 	for _, dependency := range node.DependsOn {
 		if !completed[dependency] {
@@ -1925,6 +1985,7 @@ func nextGraphStepInput(
 	}
 	input[stepOutputKeyExecutionGraph] = graph
 	input[stepInputKeyGraphNodeID] = node.ID
+	input[stepInputKeyGraphRootStepID] = string(graphDispatchRootStepID(last))
 	input[stepInputKeyGraphPreviousNodeID] = graphNodeID(last)
 	input[stepInputKeyGraphCompletedNodes] = completedGraphNodeList(completed)
 	if branch != "" {
@@ -1935,6 +1996,22 @@ func nextGraphStepInput(
 
 func graphStepID(runID common.RunID, nodeID string) common.StepID {
 	return common.StepID(fmt.Sprintf("%s/block/%s", runID, nodeID))
+}
+
+func graphStepIDForRoot(ctx context.Context, steps repository.StepRepository, runID common.RunID, rootStepID common.StepID, nodeID string) common.StepID {
+	base := graphStepID(runID, nodeID)
+	if steps == nil || rootStepID == "" {
+		return base
+	}
+	existing, err := steps.Get(ctx, base)
+	if errors.Is(err, common.ErrNotFound) || err != nil || existing == nil || graphRootStepID(existing) == rootStepID {
+		return base
+	}
+	rootSuffix := runtimeChildID(rootStepID, nodeID)
+	if rootSuffix == "" {
+		return base
+	}
+	return common.StepID(fmt.Sprintf("%s/block/%s", runID, rootSuffix))
 }
 
 func graphNodeID(step *runModel.Step) string {
@@ -2000,10 +2077,68 @@ func shouldDispatchGraphFollowUp(run *runModel.Run, step *runModel.Step, output 
 	return doDAssessmentFromOutput(output) == nil
 }
 
+func shouldDispatchLLMCompletionFollowUp(run *runModel.Run, step *runModel.Step, output map[string]any) bool {
+	if !requiresDoDAssessmentCompletionGate(run) || step == nil || output == nil {
+		return false
+	}
+	if graphNodeID(step) != "" {
+		return false
+	}
+	if doDAssessmentFromOutput(output) != nil {
+		return false
+	}
+	if step.Kind != initialStepKind(run) {
+		return true
+	}
+	return hasCompletionFollowUpSideEffect(output)
+}
+
+func hasCompletionFollowUpSideEffect(output map[string]any) bool {
+	return outputItemCount(output[stepOutputKeyPatches]) > 0 ||
+		outputItemCount(output[stepOutputKeyMemoryWrites]) > 0 ||
+		outputItemCount(output[stepOutputKeyMemoryRefs]) > 0
+}
+
+func outputItemCount(value any) int {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return len(typed)
+	case []string:
+		return len(typed)
+	case []any:
+		return len(typed)
+	default:
+		return 0
+	}
+}
+
+func llmCompletionFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {
+	stepID := runtimeChildID(step.ID, "completion")
+	if stepID == "" {
+		stepID = "completion"
+	}
+	return common.StepID(fmt.Sprintf("%s/zz-llm-after-step-%s", runID, stepID))
+}
+
+func llmCompletionFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]any {
+	input := nextStepInput(run, step.ID)
+	input["completionFollowUp"] = true
+	if step.Kind != "" {
+		input["previousStepKind"] = step.Kind
+	}
+	if step.Output != nil {
+		input["previousStepOutput"] = cloneStepPayload(step.Output)
+	}
+	return input
+}
+
 func graphFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {
 	nodeID := runtimeChildID(common.StepID(graphNodeID(step)), "")
 	if nodeID == "" {
 		nodeID = runtimeChildID(step.ID, "graph")
+	}
+	if rootStepID := graphRootStepID(step); rootStepID != "" {
+		nodeID = runtimeChildID(rootStepID, nodeID)
 	}
 	return common.StepID(fmt.Sprintf("%s/zz-llm-after-graph-%s", runID, nodeID))
 }
@@ -2043,6 +2178,7 @@ func graphFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]a
 	}
 	if graph, ok := runtimeGraphSpecFromStep(step); ok {
 		input[stepOutputKeyExecutionGraph] = graph
+		input[stepInputKeyGraphRootStepID] = string(graphRootStepID(step))
 	}
 	if step.Output != nil {
 		input["previousStepOutput"] = cloneStepPayload(step.Output)

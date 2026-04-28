@@ -986,11 +986,6 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 				Input:       map[string]any{"host": "string", "port": "number", "username": "string", "password": "string", "privateKey": "string", "privateKeyPath": "string", "command": "string", "timeoutMillis": "number"},
 			},
 			{
-				Kind:        llmcommon.RuntimeBlockKindPatchApply,
-				Description: "Request a diff or content patch to be applied by the runtime patch engine.",
-				Input:       map[string]any{"targetRef": "string", "diff": "string", "content": "string"},
-			},
-			{
 				Kind:        mcpcommon.StepKindToolCall,
 				Description: "Call an explicitly configured MCP server tool.",
 				Input:       map[string]any{"serverId": "string", "tool": "string", "input": "object"},
@@ -1004,26 +999,6 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 				Kind:        mcpcommon.StepKindPromptGet,
 				Description: "Get an explicitly allowed MCP prompt from a configured server.",
 				Input:       map[string]any{"serverId": "string", "prompt": "string", "arguments": "object"},
-			},
-			{
-				Kind:        llmcommon.RuntimeBlockKindDecisionRequest,
-				Description: "Pause execution and request a formal operator decision.",
-				Input:       map[string]any{"decisionKind": "string", "question": "string", "context": "object"},
-			},
-			{
-				Kind:        llmcommon.RuntimeBlockKindApprovalRequest,
-				Description: "Pause execution and request explicit approval before a sensitive action.",
-				Input:       map[string]any{"action": "string", "reason": "string", "context": "object"},
-			},
-			{
-				Kind:        llmcommon.RuntimeBlockKindMemoryWrite,
-				Description: "Persist durable workspace memory for later runs.",
-				Input:       map[string]any{"memoryType": "string", "summary": "string", "content": "string", "tags": "[]string"},
-			},
-			{
-				Kind:        llmcommon.RuntimeBlockKindDoDAssessment,
-				Description: "Assess Definition of Done satisfaction with evidence references.",
-				Input:       map[string]any{"satisfied": "bool", "items": "[]object", "summary": "string"},
 			},
 		},
 		ServiceAPIs: []llmmodels.ServiceAPICapability{
@@ -1068,7 +1043,7 @@ func failureOutput(request runtimemodel.StepExecutionRequest, stage string, reas
 
 func patchOutput(requests []llmmodels.PatchRequest) []map[string]any {
 	ret := make([]map[string]any, 0, len(requests))
-	for _, request := range requests {
+	for _, request := range normalizedPatchRequests(requests) {
 		ret = append(ret, map[string]any{
 			"patchType": request.PatchType,
 			"targetRef": request.TargetRef,
@@ -1078,6 +1053,29 @@ func patchOutput(requests []llmmodels.PatchRequest) []map[string]any {
 		})
 	}
 	return ret
+}
+
+func normalizedPatchRequests(requests []llmmodels.PatchRequest) []llmmodels.PatchRequest {
+	ret := make([]llmmodels.PatchRequest, 0, len(requests))
+	for _, request := range requests {
+		request.PatchType = normalizedPatchType(request)
+		request.Operation = ""
+		ret = append(ret, request)
+	}
+	return ret
+}
+
+func normalizedPatchType(request llmmodels.PatchRequest) string {
+	patchType := strings.TrimSpace(request.PatchType)
+	if patchType == "" {
+		patchType = strings.TrimSpace(request.Operation)
+	}
+	switch patchType {
+	case "", "create", "write", "replace", "file":
+		return "file_write"
+	default:
+		return patchType
+	}
 }
 
 func memoryWriteOutput(requests []llmmodels.MemoryWriteRequest) []map[string]any {
@@ -1139,6 +1137,7 @@ func executionGraphOutput(graph *llmmodels.BlockExecutionGraph) map[string]any {
 }
 
 func decisionMap(decision llmmodels.LLMExecutionDecision) map[string]any {
+	decision.PatchRequests = normalizedPatchRequests(decision.PatchRequests)
 	data, err := json.Marshal(decision)
 	if err != nil {
 		return map[string]any{"completionState": decision.CompletionState}

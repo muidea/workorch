@@ -95,6 +95,7 @@ type RequiredApproval struct {
 
 type PatchRequest struct {
 	PatchType string `json:"patchType,omitempty"`
+	Operation string `json:"operation,omitempty"`
 	TargetRef string `json:"targetRef"`
 	Content   string `json:"content,omitempty"`
 	Diff      string `json:"diff,omitempty"`
