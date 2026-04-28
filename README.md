@@ -384,6 +384,8 @@ make docker-verify-file
 
 All `verify-*` e2e scripts target the currently deployed `workorchd` instance through `WORKORCH_BASE_URL` and do not build, start, stop, or restart the service. Local MVP acceptance uses the configured real LLM provider: `make verify-mvp` runs service smoke, real LLM execution, real LLM weather query, and real LLM weather governance checks against that deployed instance; `make verify-mvp-file` is an alias for the same check. CI uses only mock-provider checks through `make verify-ci-mvp` / `make verify-ci-mvp-file` to avoid external LLM credentials and provider/network false negatives. `make verify-real-vector-memory` targets an already running `workorchd`, temporarily registers an embedding-capable mock provider, verifies vector Memory recall evidence, and restores the original LLM configuration. `make verify-real-weather` uses the configured real LLM provider plus a temporary MCP `stdio` weather tool to query Zhejiang Hangzhou current weather from Open-Meteo and validate the Run snapshot evidence. `make verify-weather-ticket-approval` uses the configured real LLM provider plus a temporary MCP `stdio` weather tool to verify a specified city weather query through Decision Ticket and Approval gates. `make verify-weather-ticket-approval-mock` is the deterministic mock LLM variant reserved for CI-style checks. `make verify-real-mvp` targets an already running `workorchd`; it combines the configured real LLM check, deployed MCP `stdio` runtime check, and deployed vector Memory recall check.
 
+Governed workspace concurrency load tests also target the currently deployed instance. `make loadtest-governed` uses a deterministic mock LLM to measure workorch scheduling, Ticket / Approval, MCP, evidence, and file-backed read-model capacity. `make loadtest-governed-real` uses the configured real LLM provider for small-scale end-to-end pressure checks; do not run the real target in CI. Capacity runs can set `WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS` so the controller fails fast when the deployed `server.maxConcurrentRuns` is lower than the intended parallel execution slot count.
+
 ## Development targets
 
 ```bash
@@ -402,5 +404,6 @@ make ci
 - `docs/next-mvp-acceptance.md`: next MVP scope aligned with the WorkOrch product planning baseline
 - `docs/runtime-expansion-plan.md`: completed runtime adapter, shell, patch, graph, and observability scope
 - `docs/advanced-runtime-scheduling-plan.md`: completed advanced MCP and priority scheduling scope
+- `docs/workspace-concurrency-loadtest-plan.md`: planned workspace concurrency load test scope for mock and real LLM governed execution
 - `docs/next-stage-p1-development-plan.md`: completed P1 runtime context, provider capability, vector Memory, and lifecycle scope
 - `docs/next-stage-demand-candidates.md`: future demand candidates that are not active MVP leftovers

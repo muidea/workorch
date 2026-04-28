@@ -9,7 +9,7 @@ GOTEST_FLAGS ?=
 BUILD_OUT ?= ./bin/workorchd
 CONSOLE_WEB := ./web/workorch-console
 
-.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-llm verify-llm-file verify-mcp-stdio verify-mcp-stdio-file verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp docker-build docker-run docker-run-file docker-verify docker-verify-file ci
+.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-llm verify-llm-file verify-mcp-stdio verify-mcp-stdio-file verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file ci
 
 help:
 	@echo "Targets:"
@@ -41,6 +41,8 @@ help:
 	@echo "  verify-weather-ticket-approval - verify specified city weather governance with the configured real LLM"
 	@echo "  verify-weather-ticket-approval-mock - CI-only deterministic mock LLM weather governance check"
 	@echo "  verify-real-mvp - verify a running workorchd with real LLM, MCP stdio, and vector Memory checks"
+	@echo "  loadtest-governed - run governed workspace concurrency load test with deterministic mock LLM"
+	@echo "  loadtest-governed-real - run governed workspace concurrency load test with configured real LLM"
 	@echo "  docker-build    - docker build local workorchd image"
 	@echo "  docker-run      - run workorchd container with in-memory repository"
 	@echo "  docker-run-file - run workorchd container with file-backed repository"
@@ -140,6 +142,12 @@ verify-weather-ticket-approval-mock:
 	WORKORCH_WEATHER_GOVERNANCE_LLM_MODE=mock ./scripts/verify-weather-ticket-approval-query.sh
 
 verify-real-mvp: verify-real-llm verify-real-mcp-stdio verify-real-vector-memory
+
+loadtest-governed:
+	./scripts/loadtest-governed-workspace-concurrency.sh
+
+loadtest-governed-real:
+	WORKORCH_LOAD_LLM_MODE=real ./scripts/loadtest-governed-workspace-concurrency.sh
 
 docker-build:
 	docker build -t workorchd:local .

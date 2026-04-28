@@ -709,6 +709,16 @@ MVP 功能收口记录见：
 
 MVP 功能清单已收口，不再作为活跃待办清单使用。
 
+## Workspace Concurrency Load Test Plan
+
+workspace 并发压测方案已固化，见：
+
+- `docs/workspace-concurrency-loadtest-plan.md`
+
+压测采用 mock LLM 容量压测和 real LLM 真实端到端压测双轨设计，业务场景必须覆盖多轮
+Decision Ticket、Approval、MCP / ToolCall、RuntimeCheckpoint、ValidationResult、Result、
+Artifact 与 observability 回查。
+
 当前进度：
 
 - `B1 workspace 实例接口` 已完成
