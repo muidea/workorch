@@ -226,6 +226,44 @@ export type RuntimeCheckpoint = {
   blockingApprovalId?: string;
 };
 
+export type Result = {
+  id: string;
+  workspaceId: string;
+  runId: string;
+  goalId?: string;
+  doDId?: string;
+  state: string;
+  title?: string;
+  summary?: string;
+  sourceType?: string;
+  sourceRef?: string;
+  evidenceRefs?: string[];
+  artifactRefs?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type Artifact = {
+  id: string;
+  workspaceId: string;
+  runId?: string;
+  resultId?: string;
+  stepId?: string;
+  toolCallId?: string;
+  patchId?: string;
+  validationResultId?: string;
+  artifactType: string;
+  name?: string;
+  summary?: string;
+  uri?: string;
+  contentType?: string;
+  state: string;
+  evidenceRefs?: string[];
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type RunProgress = {
   state: string;
   currentStepId?: string;
@@ -252,6 +290,8 @@ export type RuntimeEvidenceSummary = {
   validationFailed: number;
   validationWarning: number;
   runtimeCheckpointTotal: number;
+  resultTotal: number;
+  artifactTotal: number;
   eventTotal: number;
 };
 
@@ -267,6 +307,20 @@ export type RuntimeTimelineItem = {
   occurredAt?: string;
   data?: Record<string, unknown>;
   output?: Record<string, unknown>;
+};
+
+export type EventRecord = {
+  id: string;
+  version: string;
+  topic: string;
+  occurredAt?: string;
+  sourceModule?: string;
+  subjectType?: string;
+  subjectId?: string;
+  workspaceId?: string;
+  runId?: string;
+  stepId?: string;
+  payload?: Record<string, unknown>;
 };
 
 export type RunObservability = {
@@ -285,6 +339,9 @@ export type RunSnapshot = {
   patches?: Patch[];
   validationResults?: ValidationResult[];
   runtimeCheckpoints?: RuntimeCheckpoint[];
+  results?: Result[];
+  artifacts?: Artifact[];
+  eventRecords?: EventRecord[];
   decisions?: Decision[];
   approvals?: Approval[];
 };
@@ -292,6 +349,9 @@ export type RunSnapshot = {
 export type WorkspaceSnapshot = {
   workspace: Workspace;
   runs?: Run[];
+  results?: Result[];
+  artifacts?: Artifact[];
+  eventRecords?: EventRecord[];
   decisions?: Decision[];
   approvals?: Approval[];
 };

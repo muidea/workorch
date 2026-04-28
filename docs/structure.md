@@ -13,6 +13,8 @@ It remains a single `go.mod` repository. The current normalization target is mod
 - `internal/modules/application/workorchd/biz/appservice` -> application-level orchestration / workflow composition, grouped runtime adapter, managed runtime wrapper, workspace writes kept behind module service, runtime usage split into guard/snapshot read faces plus workspace/run/decision/approval action faces, adapter dependencies grouped as reads/actions capabilities, exports-to-runtime mapping centralized in a single helper, managed runtime assembly centralized in a single helper, and repeated runtime lifecycle handling unified through a session helper
 - `internal/modules/application/workorchd/pkg/observed` -> workorch acceptance observed adapter, explicit workorch event-to-snapshot contract mapper, typed snapshot contract, and collector that now consumes typed/validated/final-version workorch event helpers from `internal/pkg/events`
 - `internal/modules/application/workorchd/pkg/presenter` -> observable output rendering
+- `internal/modules/kernel/result` -> formal Result / Artifact business outcome models introduced for next-stage final outcome management
+- `internal/modules/kernel/eventstream` -> persistent Workorch EventRecord model and EventHub subscriber for audit/replay oriented event stream
 - old `application/*` service files -> `internal/modules/kernel/*/biz`
 - old `domain/*` -> module-local `pkg/models`
 - old `domain/shared` + `workorchcommon` -> `internal/pkg/common`

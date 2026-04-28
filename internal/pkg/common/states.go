@@ -15,6 +15,8 @@ type ToolCallState string
 type PatchState string
 type ValidationResultState string
 type CheckpointType string
+type ResultState string
+type ArtifactState string
 
 const (
 	WorkspaceStateActive          WorkspaceState = "active"
@@ -90,4 +92,16 @@ const (
 	CheckpointTypeRunState CheckpointType = "run_state"
 	CheckpointTypeBlocked  CheckpointType = "blocked"
 	CheckpointTypeRecovery CheckpointType = "recovery"
+)
+
+const (
+	ResultStateDraft      ResultState = "draft"
+	ResultStateAccepted   ResultState = "accepted"
+	ResultStateSuperseded ResultState = "superseded"
+)
+
+const (
+	ArtifactStateCreated   ArtifactState = "created"
+	ArtifactStateAvailable ArtifactState = "available"
+	ArtifactStateFailed    ArtifactState = "failed"
 )

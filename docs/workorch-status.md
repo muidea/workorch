@@ -561,6 +561,42 @@ P1 交付范围与验收记录见：
 - completed: `P1-2 Vector Memory Search`
 - completed: `P1-3 Global Long-Lived Runtime Module Registration`
 
+## Active Next Stage Scope
+
+下一轮需求开发清单已晋级，范围与验收计划见：
+
+- `docs/next-stage-result-event-development-plan.md`
+
+当前活跃项：
+
+- in_progress: `RE1 Formal Business Result And Artifact Model`
+- planned: `RE2 Persistent Workorch Event Stream`
+
+RE1 当前进度：
+
+- completed: Result / Artifact 正式模型、仓储、file/memory 持久化与 runtime/bootstrap 导出。
+- completed: LLM-driven Run 在满足正式 DoD assessment 后自动生成 accepted Result。
+- completed: Run Snapshot 与 Workspace Snapshot 通过 read-model 暴露 Result / Artifact。
+- completed: Web Console 的目标成果区优先消费正式 Result / Artifact，运行证据仍展示
+  DoD assessment、Patch、ToolCall、ValidationResult 与 RuntimeCheckpoint。
+
+RE2 当前进度：
+
+- completed: EventRecord 正式模型、memory/file 仓储与 repository contract。
+- completed: `kernel/eventstream` 模块订阅正式 Workorch EventHub 事件并持久化。
+- completed: Run / Workspace Snapshot 与 Run Observability 已接入持久化事件记录。
+- completed: HTTP 查询接口 `GET /api/v1/workorch/events` 支持按 workspace、run、topic、
+  subject、cursor、limit 查询。
+- remaining: file-backed 服务重启后的事件流端到端 replay 验证。
+
+边界：
+
+- Result / Artifact 用于表达正式业务成果，不替代 ToolCall、Patch、ValidationResult、
+  RuntimeCheckpoint、Memory 或 event evidence。
+- Persistent Event Stream 用于审计与回放，不成为 Run / Workspace 状态拥有者。
+- 通用 runtime 层和 Web 仍不得根据具体业务目标、城市、天气、工具 payload 或 provider
+  特定字段合成最终业务结果。
+
 ## Runtime Expansion Scope
 
 runtime expansion 交付范围已完成，范围与验收记录见：

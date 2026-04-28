@@ -13,6 +13,7 @@ import (
 	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
+	eventstreamservice "github.com/muidea/workorch/internal/modules/kernel/eventstream/service"
 	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
 	memoryservice "github.com/muidea/workorch/internal/modules/kernel/memory/service"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
@@ -32,21 +33,22 @@ func init() {
 }
 
 type Runtime struct {
-	repositories         common.RepositorySet
-	eventHub             workorchevents.Hub
-	shellRuntimeAdapter  orchestratorbiz.RuntimeAdapter
-	sshRuntimeAdapter    orchestratorbiz.RuntimeAdapter
-	mcpRuntimeAdapter    orchestratorbiz.RuntimeAdapter
-	llmRuntimeAdapter    *llmbiz.RuntimeAdapter
-	soulService          soulservice.Service
-	memoryService        memoryservice.Service
-	skillService         skillservice.Service
-	mcpService           mcpservice.Service
-	workspaceService     workspaceservice.Service
-	decisionService      decisionservice.Service
-	approvalService      approvalservice.Service
-	orchestratorService  orchestratorservice.Service
-	runService           runservice.Service
+	repositories        common.RepositorySet
+	eventHub            workorchevents.Hub
+	shellRuntimeAdapter orchestratorbiz.RuntimeAdapter
+	sshRuntimeAdapter   orchestratorbiz.RuntimeAdapter
+	mcpRuntimeAdapter   orchestratorbiz.RuntimeAdapter
+	llmRuntimeAdapter   *llmbiz.RuntimeAdapter
+	soulService         soulservice.Service
+	memoryService       memoryservice.Service
+	skillService        skillservice.Service
+	mcpService          mcpservice.Service
+	eventStreamService  eventstreamservice.Service
+	workspaceService    workspaceservice.Service
+	decisionService     decisionservice.Service
+	approvalService     approvalservice.Service
+	orchestratorService orchestratorservice.Service
+	runService          runservice.Service
 }
 
 func New() *Runtime {
@@ -215,6 +217,19 @@ func (r *Runtime) SetMCPService(service mcpservice.Service) {
 	}
 }
 
+func (r *Runtime) EventStreamService() eventstreamservice.Service {
+	if r == nil {
+		return nil
+	}
+	return r.eventStreamService
+}
+
+func (r *Runtime) SetEventStreamService(service eventstreamservice.Service) {
+	if r != nil {
+		r.eventStreamService = service
+	}
+}
+
 func (r *Runtime) WorkspaceService() workspaceservice.Service {
 	if r == nil {
 		return nil
@@ -288,6 +303,9 @@ func buildRepositories(backend string, dataRoot string) (common.RepositorySet, e
 			MemoryItems:        memory.NewMemoryItemRepository(),
 			Skills:             memory.NewSkillRepository(),
 			MCPServers:         memory.NewMCPServerRepository(),
+			Results:            memory.NewResultRepository(),
+			Artifacts:          memory.NewArtifactRepository(),
+			EventRecords:       memory.NewEventRecordRepository(),
 			Workspaces:         memory.NewWorkspaceRepository(),
 			Goals:              memory.NewGoalRepository(),
 			DoDs:               memory.NewDoDRepository(),
@@ -310,6 +328,9 @@ func buildRepositories(backend string, dataRoot string) (common.RepositorySet, e
 			MemoryItems:        fileRepo.NewMemoryItemRepository(filepath.Join(dataRoot, "memory_item.json")),
 			Skills:             fileRepo.NewSkillRepository(filepath.Join(dataRoot, "skill.json")),
 			MCPServers:         fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "mcp_server.json")),
+			Results:            fileRepo.NewResultRepository(filepath.Join(dataRoot, "result.json")),
+			Artifacts:          fileRepo.NewArtifactRepository(filepath.Join(dataRoot, "artifact.json")),
+			EventRecords:       fileRepo.NewEventRecordRepository(filepath.Join(dataRoot, "event_record.json")),
 			Workspaces:         fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json")),
 			Goals:              fileRepo.NewGoalRepository(filepath.Join(dataRoot, "goal.json")),
 			DoDs:               fileRepo.NewDoDRepository(filepath.Join(dataRoot, "dod.json")),

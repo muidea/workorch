@@ -311,6 +311,7 @@ func TestWorkorchdServerSupportsFileRepositoryBackend(t *testing.T) {
 		"ticket.json",
 		"resolution.json",
 		"approval.json",
+		"event_record.json",
 	} {
 		if _, err := os.Stat(filepath.Join(dataDir, name)); err != nil {
 			t.Fatalf("expected persisted file %s: %v", name, err)

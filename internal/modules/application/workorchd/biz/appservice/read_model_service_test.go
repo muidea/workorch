@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -124,6 +125,36 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create runtime checkpoint: %v", err)
 	}
+	resultID := common.ResultID("result-evidence-snapshot")
+	if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
+		ID:           resultID,
+		WorkspaceID:  workspaceID,
+		RunID:        runID,
+		DoDID:        common.DoDID("dod-evidence-snapshot"),
+		State:        common.ResultStateAccepted,
+		Title:        "Accepted Result",
+		Summary:      "formal outcome",
+		SourceType:   "dod_assessment",
+		SourceRef:    string(stepID),
+		EvidenceRefs: []string{string(stepID), "validation-evidence-snapshot"},
+	}); err != nil {
+		t.Fatalf("create result: %v", err)
+	}
+	if err := exports.Repositories.Artifacts.Create(ctx, &resultmodel.Artifact{
+		ID:           common.ArtifactID("artifact-evidence-snapshot"),
+		WorkspaceID:  workspaceID,
+		RunID:        runID,
+		ResultID:     resultID,
+		StepID:       stepID,
+		ArtifactType: "report",
+		Name:         "outcome.md",
+		Summary:      "formal artifact",
+		State:        common.ArtifactStateAvailable,
+		EvidenceRefs: []string{string(resultID)},
+		Metadata:     map[string]any{"format": "markdown"},
+	}); err != nil {
+		t.Fatalf("create artifact: %v", err)
+	}
 
 	first, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, string(runID))
 	if err != nil {
@@ -148,6 +179,12 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 	}
 	if len(first.RuntimeCheckpoints) != 1 || first.RuntimeCheckpoints[0].Data["thread"] != "main" {
 		t.Fatalf("runtimeCheckpoints = %+v, want checkpoint data", first.RuntimeCheckpoints)
+	}
+	if len(first.Results) != 1 || first.Results[0].Summary != "formal outcome" {
+		t.Fatalf("results = %+v, want formal outcome", first.Results)
+	}
+	if len(first.Artifacts) != 1 || first.Artifacts[0].ResultID != string(resultID) || first.Artifacts[0].Metadata["format"] != "markdown" {
+		t.Fatalf("artifacts = %+v, want result-linked artifact", first.Artifacts)
 	}
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("snapshot mismatch after reload: first=%+v second=%+v", first, second)
@@ -329,6 +366,25 @@ func TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems(t *t
 	}); err != nil {
 		t.Fatalf("create completed run: %v", err)
 	}
+	if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
+		ID:          "result-workspace-snapshot",
+		WorkspaceID: common.WorkspaceID(workspaceID),
+		RunID:       "run-workspace-snapshot-completed",
+		State:       common.ResultStateAccepted,
+		Summary:     "workspace formal outcome",
+	}); err != nil {
+		t.Fatalf("create workspace result: %v", err)
+	}
+	if err := exports.Repositories.Artifacts.Create(ctx, &resultmodel.Artifact{
+		ID:           "artifact-workspace-snapshot",
+		WorkspaceID:  common.WorkspaceID(workspaceID),
+		RunID:        "run-workspace-snapshot-completed",
+		ResultID:     "result-workspace-snapshot",
+		ArtifactType: "report",
+		State:        common.ArtifactStateAvailable,
+	}); err != nil {
+		t.Fatalf("create workspace artifact: %v", err)
+	}
 
 	decisionRunID := "run-decision-workspace-snapshot"
 	decisionRun := prepareDecisionRun(t, dataRoot, workspaceID, decisionRunID)
@@ -362,11 +418,36 @@ func TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems(t *t
 	if len(item.Runs) != 3 {
 		t.Fatalf("runs = %+v, want 3 runs", item.Runs)
 	}
+	if len(item.Results) != 1 || item.Results[0].Summary != "workspace formal outcome" {
+		t.Fatalf("results = %+v, want workspace formal outcome", item.Results)
+	}
+	if len(item.Artifacts) != 1 || item.Artifacts[0].ResultID != "result-workspace-snapshot" {
+		t.Fatalf("artifacts = %+v, want workspace artifact", item.Artifacts)
+	}
 	if len(item.Decisions) != 1 || item.Decisions[0].ID != decisionRun.BlockingTicketID {
 		t.Fatalf("decisions = %+v, want decision %s", item.Decisions, decisionRun.BlockingTicketID)
 	}
 	if len(item.Approvals) != 1 || item.Approvals[0].ID != approvalRun.BlockingApprovalID {
 		t.Fatalf("approvals = %+v, want approval %s", item.Approvals, approvalRun.BlockingApprovalID)
+	}
+}
+
+func TestReadWorkspaceSnapshotWithBackendReturnsPersistedEventRecords(t *testing.T) {
+	dataRoot := t.TempDir()
+	workspaceID := "ws-event-record-snapshot"
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, workspaceID, "event record snapshot", "", "workspaces/event record snapshot"); err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+
+	item, err := ReadWorkspaceSnapshotWithBackend(context.Background(), "file", dataRoot, workspaceID)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceSnapshotWithBackend: %v", err)
+	}
+	if len(item.EventRecords) == 0 {
+		t.Fatalf("eventRecords = %+v, want persisted workspace event", item.EventRecords)
+	}
+	if item.EventRecords[0].WorkspaceID != workspaceID || item.EventRecords[0].Topic != events.TopicWorkspaceCreated {
+		t.Fatalf("eventRecords = %+v, want workspace-created event", item.EventRecords)
 	}
 }
 

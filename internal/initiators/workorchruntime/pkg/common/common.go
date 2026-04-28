@@ -4,6 +4,7 @@ import (
 	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
+	eventstreamservice "github.com/muidea/workorch/internal/modules/kernel/eventstream/service"
 	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
 	memoryservice "github.com/muidea/workorch/internal/modules/kernel/memory/service"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
@@ -23,6 +24,9 @@ type RepositorySet struct {
 	MemoryItems        repository.MemoryItemRepository
 	Skills             repository.SkillRepository
 	MCPServers         repository.MCPServerRepository
+	Results            repository.ResultRepository
+	Artifacts          repository.ArtifactRepository
+	EventRecords       repository.EventRecordRepository
 	Workspaces         repository.WorkspaceRepository
 	Goals              repository.GoalRepository
 	DoDs               repository.DoDRepository
@@ -56,6 +60,8 @@ type Helper interface {
 	SetSkillService(skillservice.Service)
 	MCPService() mcpservice.Service
 	SetMCPService(mcpservice.Service)
+	EventStreamService() eventstreamservice.Service
+	SetEventStreamService(eventstreamservice.Service)
 	WorkspaceService() workspaceservice.Service
 	SetWorkspaceService(workspaceservice.Service)
 	DecisionService() decisionservice.Service

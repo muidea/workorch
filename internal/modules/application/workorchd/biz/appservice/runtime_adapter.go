@@ -20,6 +20,9 @@ type RuntimeSnapshotDependencies struct {
 	Workspaces         repository.WorkspaceRepository
 	Goals              repository.GoalRepository
 	DoDs               repository.DoDRepository
+	Results            repository.ResultRepository
+	Artifacts          repository.ArtifactRepository
+	EventRecords       repository.EventRecordRepository
 	Runs               repository.RunRepository
 	Steps              repository.StepRepository
 	ToolCalls          repository.ToolCallRepository

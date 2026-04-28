@@ -9,6 +9,8 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -25,6 +27,9 @@ type RunSnapshot struct {
 	Patches            []Patch                  `json:"patches,omitempty"`
 	ValidationResults  []ValidationResult       `json:"validationResults,omitempty"`
 	RuntimeCheckpoints []RuntimeCheckpoint      `json:"runtimeCheckpoints,omitempty"`
+	Results            []Result                 `json:"results,omitempty"`
+	Artifacts          []Artifact               `json:"artifacts,omitempty"`
+	EventRecords       []EventRecord            `json:"eventRecords,omitempty"`
 	Decisions          []Decision               `json:"decisions,omitempty"`
 	Approvals          []Approval               `json:"approvals,omitempty"`
 	Observed           []presenter.ObservedView `json:"observed,omitempty"`
@@ -79,6 +84,8 @@ type RuntimeEvidenceSummary struct {
 	ValidationFailed       int `json:"validationFailed"`
 	ValidationWarning      int `json:"validationWarning"`
 	RuntimeCheckpointTotal int `json:"runtimeCheckpointTotal"`
+	ResultTotal            int `json:"resultTotal"`
+	ArtifactTotal          int `json:"artifactTotal"`
 	EventTotal             int `json:"eventTotal"`
 }
 
@@ -94,6 +101,32 @@ type RuntimeTimelineItem struct {
 	OccurredAt string         `json:"occurredAt,omitempty"`
 	Data       map[string]any `json:"data,omitempty"`
 	Output     map[string]any `json:"output,omitempty"`
+}
+
+type EventRecord struct {
+	ID           string         `json:"id"`
+	Version      string         `json:"version"`
+	Topic        string         `json:"topic"`
+	OccurredAt   string         `json:"occurredAt,omitempty"`
+	SourceModule string         `json:"sourceModule,omitempty"`
+	SubjectType  string         `json:"subjectType,omitempty"`
+	SubjectID    string         `json:"subjectId,omitempty"`
+	WorkspaceID  string         `json:"workspaceId,omitempty"`
+	RunID        string         `json:"runId,omitempty"`
+	StepID       string         `json:"stepId,omitempty"`
+	Payload      map[string]any `json:"payload,omitempty"`
+}
+
+type EventRecordQuery struct {
+	WorkspaceID    string
+	RunID          string
+	Topic          string
+	SubjectType    string
+	SubjectID      string
+	CursorAfterID  string
+	OccurredAfter  string
+	OccurredBefore string
+	Limit          int
 }
 
 type ToolCall struct {
@@ -154,25 +187,69 @@ type RuntimeCheckpoint struct {
 	Data               map[string]any `json:"data,omitempty"`
 }
 
+type Result struct {
+	ID           string   `json:"id"`
+	WorkspaceID  string   `json:"workspaceId"`
+	RunID        string   `json:"runId"`
+	GoalID       string   `json:"goalId,omitempty"`
+	DoDID        string   `json:"doDId,omitempty"`
+	State        string   `json:"state"`
+	Title        string   `json:"title,omitempty"`
+	Summary      string   `json:"summary,omitempty"`
+	SourceType   string   `json:"sourceType,omitempty"`
+	SourceRef    string   `json:"sourceRef,omitempty"`
+	EvidenceRefs []string `json:"evidenceRefs,omitempty"`
+	ArtifactRefs []string `json:"artifactRefs,omitempty"`
+	CreatedAt    string   `json:"createdAt,omitempty"`
+	UpdatedAt    string   `json:"updatedAt,omitempty"`
+}
+
+type Artifact struct {
+	ID                 string         `json:"id"`
+	WorkspaceID        string         `json:"workspaceId"`
+	RunID              string         `json:"runId,omitempty"`
+	ResultID           string         `json:"resultId,omitempty"`
+	StepID             string         `json:"stepId,omitempty"`
+	ToolCallID         string         `json:"toolCallId,omitempty"`
+	PatchID            string         `json:"patchId,omitempty"`
+	ValidationResultID string         `json:"validationResultId,omitempty"`
+	ArtifactType       string         `json:"artifactType"`
+	Name               string         `json:"name,omitempty"`
+	Summary            string         `json:"summary,omitempty"`
+	URI                string         `json:"uri,omitempty"`
+	ContentType        string         `json:"contentType,omitempty"`
+	State              string         `json:"state"`
+	EvidenceRefs       []string       `json:"evidenceRefs,omitempty"`
+	Metadata           map[string]any `json:"metadata,omitempty"`
+	CreatedAt          string         `json:"createdAt,omitempty"`
+	UpdatedAt          string         `json:"updatedAt,omitempty"`
+}
+
 type WorkspaceSnapshot struct {
-	Workspace Workspace  `json:"workspace"`
-	Runs      []Run      `json:"runs,omitempty"`
-	Decisions []Decision `json:"decisions,omitempty"`
-	Approvals []Approval `json:"approvals,omitempty"`
+	Workspace    Workspace     `json:"workspace"`
+	Runs         []Run         `json:"runs,omitempty"`
+	Results      []Result      `json:"results,omitempty"`
+	Artifacts    []Artifact    `json:"artifacts,omitempty"`
+	EventRecords []EventRecord `json:"eventRecords,omitempty"`
+	Decisions    []Decision    `json:"decisions,omitempty"`
+	Approvals    []Approval    `json:"approvals,omitempty"`
 }
 
 type readModelDependencies struct {
-	workspaces  repository.WorkspaceRepository
-	runs        repository.RunRepository
-	steps       repository.StepRepository
-	toolCalls   repository.ToolCallRepository
-	patches     repository.PatchRepository
-	validations repository.ValidationResultRepository
-	checkpoints repository.RuntimeCheckpointRepository
-	tickets     repository.DecisionTicketRepository
-	resolutions repository.DecisionResolutionRepository
-	approvals   repository.ApprovalRepository
-	published   []events.WorkorchEvent
+	workspaces   repository.WorkspaceRepository
+	runs         repository.RunRepository
+	steps        repository.StepRepository
+	results      repository.ResultRepository
+	artifacts    repository.ArtifactRepository
+	eventRecords repository.EventRecordRepository
+	toolCalls    repository.ToolCallRepository
+	patches      repository.PatchRepository
+	validations  repository.ValidationResultRepository
+	checkpoints  repository.RuntimeCheckpointRepository
+	tickets      repository.DecisionTicketRepository
+	resolutions  repository.DecisionResolutionRepository
+	approvals    repository.ApprovalRepository
+	published    []events.WorkorchEvent
 }
 
 func ReadRunSnapshotWithSession(ctx context.Context, session *RuntimeSession, runID string) (ret RunSnapshot, err error) {
@@ -261,6 +338,46 @@ func ReadRunObservabilityFromEnv(ctx context.Context, runID string) (RunObservab
 	return ReadRunObservabilityWithSession(ctx, session, runID)
 }
 
+func ListEventRecordsWithSession(ctx context.Context, session *RuntimeSession, query EventRecordQuery) (ret []EventRecord, err error) {
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		return nil, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	items, err := deps.eventRecords.List(ctx, repository.EventRecordQuery{
+		WorkspaceID:    common.WorkspaceID(query.WorkspaceID),
+		RunID:          common.RunID(query.RunID),
+		Topic:          query.Topic,
+		SubjectType:    query.SubjectType,
+		SubjectID:      query.SubjectID,
+		CursorAfterID:  common.EventRecordID(query.CursorAfterID),
+		OccurredAfter:  query.OccurredAfter,
+		OccurredBefore: query.OccurredBefore,
+		Limit:          query.Limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapEventRecords(items), nil
+}
+
+func ListEventRecordsWithBackend(ctx context.Context, backend string, dataRoot string, query EventRecordQuery) ([]EventRecord, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return nil, err
+	}
+	return ListEventRecordsWithSession(ctx, session, query)
+}
+
+func ListEventRecordsFromEnv(ctx context.Context, query EventRecordQuery) ([]EventRecord, error) {
+	session, err := NewRuntimeSessionFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return ListEventRecordsWithSession(ctx, session, query)
+}
+
 func ReadWorkspaceSnapshotWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret WorkspaceSnapshot, err error) {
 	deps, err := readModelDependenciesFromSession(session)
 	if err != nil {
@@ -295,6 +412,9 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 	if exports.Repositories.Workspaces == nil ||
 		exports.Repositories.Runs == nil ||
 		exports.Repositories.Steps == nil ||
+		exports.Repositories.Results == nil ||
+		exports.Repositories.Artifacts == nil ||
+		exports.Repositories.EventRecords == nil ||
 		exports.Repositories.ToolCalls == nil ||
 		exports.Repositories.Patches == nil ||
 		exports.Repositories.ValidationResults == nil ||
@@ -311,17 +431,20 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 	}
 
 	return readModelDependencies{
-		workspaces:  exports.Repositories.Workspaces,
-		runs:        exports.Repositories.Runs,
-		steps:       exports.Repositories.Steps,
-		toolCalls:   exports.Repositories.ToolCalls,
-		patches:     exports.Repositories.Patches,
-		validations: exports.Repositories.ValidationResults,
-		checkpoints: exports.Repositories.RuntimeCheckpoints,
-		tickets:     exports.Repositories.Tickets,
-		resolutions: exports.Repositories.Resolutions,
-		approvals:   exports.Repositories.Approvals,
-		published:   published,
+		workspaces:   exports.Repositories.Workspaces,
+		runs:         exports.Repositories.Runs,
+		steps:        exports.Repositories.Steps,
+		results:      exports.Repositories.Results,
+		artifacts:    exports.Repositories.Artifacts,
+		eventRecords: exports.Repositories.EventRecords,
+		toolCalls:    exports.Repositories.ToolCalls,
+		patches:      exports.Repositories.Patches,
+		validations:  exports.Repositories.ValidationResults,
+		checkpoints:  exports.Repositories.RuntimeCheckpoints,
+		tickets:      exports.Repositories.Tickets,
+		resolutions:  exports.Repositories.Resolutions,
+		approvals:    exports.Repositories.Approvals,
+		published:    published,
 	}, nil
 }
 
@@ -354,6 +477,18 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 	if err != nil {
 		return RunSnapshot{}, err
 	}
+	results, err := deps.results.ListByRun(ctx, item.ID)
+	if err != nil {
+		return RunSnapshot{}, err
+	}
+	artifacts, err := deps.artifacts.ListByRun(ctx, item.ID)
+	if err != nil {
+		return RunSnapshot{}, err
+	}
+	eventRecords, err := deps.eventRecords.List(ctx, repository.EventRecordQuery{RunID: item.ID})
+	if err != nil {
+		return RunSnapshot{}, err
+	}
 	decisions, selectedTicket, selectedResolution, err := decisionsForRun(ctx, deps, item)
 	if err != nil {
 		return RunSnapshot{}, err
@@ -375,6 +510,9 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		Patches:            mapPatches(patches),
 		ValidationResults:  mapValidationResults(validations),
 		RuntimeCheckpoints: mapRuntimeCheckpoints(checkpoints),
+		Results:            mapResults(results),
+		Artifacts:          mapArtifacts(artifacts),
+		EventRecords:       mapEventRecords(eventRecords),
 		Decisions:          decisions,
 		Approvals:          approvals,
 		Observed:           presenter.MapObserved(observedItems),
@@ -398,6 +536,18 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 			continue
 		}
 		runs = append(runs, mapRun(runItem))
+	}
+	resultItems, err := deps.results.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return WorkspaceSnapshot{}, err
+	}
+	artifactItems, err := deps.artifacts.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return WorkspaceSnapshot{}, err
+	}
+	eventRecordItems, err := deps.eventRecords.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID})
+	if err != nil {
+		return WorkspaceSnapshot{}, err
 	}
 
 	ticketItems, err := deps.tickets.List(ctx)
@@ -429,10 +579,13 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 	}
 
 	return WorkspaceSnapshot{
-		Workspace: mapWorkspaceWithRunProjection(item, projectionRun),
-		Runs:      runs,
-		Decisions: decisions,
-		Approvals: approvals,
+		Workspace:    mapWorkspaceWithRunProjection(item, projectionRun),
+		Runs:         runs,
+		Results:      mapResults(resultItems),
+		Artifacts:    mapArtifacts(artifactItems),
+		EventRecords: mapEventRecords(eventRecordItems),
+		Decisions:    decisions,
+		Approvals:    approvals,
 	}, nil
 }
 
@@ -668,6 +821,109 @@ func mapRuntimeCheckpoints(items []*runmodel.RuntimeCheckpoint) []RuntimeCheckpo
 	return ret
 }
 
+func mapResults(items []*resultmodel.Result) []Result {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]Result, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		artifactRefs := make([]string, 0, len(item.ArtifactRefs))
+		for _, ref := range item.ArtifactRefs {
+			if ref != "" {
+				artifactRefs = append(artifactRefs, string(ref))
+			}
+		}
+		ret = append(ret, Result{
+			ID:           string(item.ID),
+			WorkspaceID:  string(item.WorkspaceID),
+			RunID:        string(item.RunID),
+			GoalID:       string(item.GoalID),
+			DoDID:        string(item.DoDID),
+			State:        string(item.State),
+			Title:        item.Title,
+			Summary:      item.Summary,
+			SourceType:   item.SourceType,
+			SourceRef:    item.SourceRef,
+			EvidenceRefs: cloneReadModelStringSlice(item.EvidenceRefs),
+			ArtifactRefs: artifactRefs,
+			CreatedAt:    item.CreatedAt,
+			UpdatedAt:    item.UpdatedAt,
+		})
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func mapArtifacts(items []*resultmodel.Artifact) []Artifact {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]Artifact, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		ret = append(ret, Artifact{
+			ID:                 string(item.ID),
+			WorkspaceID:        string(item.WorkspaceID),
+			RunID:              string(item.RunID),
+			ResultID:           string(item.ResultID),
+			StepID:             string(item.StepID),
+			ToolCallID:         string(item.ToolCallID),
+			PatchID:            string(item.PatchID),
+			ValidationResultID: string(item.ValidationResultID),
+			ArtifactType:       item.ArtifactType,
+			Name:               item.Name,
+			Summary:            item.Summary,
+			URI:                item.URI,
+			ContentType:        item.ContentType,
+			State:              string(item.State),
+			EvidenceRefs:       cloneReadModelStringSlice(item.EvidenceRefs),
+			Metadata:           cloneReadModelMap(item.Metadata),
+			CreatedAt:          item.CreatedAt,
+			UpdatedAt:          item.UpdatedAt,
+		})
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func mapEventRecords(items []*eventstreammodel.EventRecord) []EventRecord {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]EventRecord, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		ret = append(ret, EventRecord{
+			ID:           string(item.ID),
+			Version:      item.Version,
+			Topic:        item.Topic,
+			OccurredAt:   item.OccurredAt,
+			SourceModule: item.SourceModule,
+			SubjectType:  item.SubjectType,
+			SubjectID:    item.SubjectID,
+			WorkspaceID:  string(item.WorkspaceID),
+			RunID:        string(item.RunID),
+			StepID:       string(item.StepID),
+			Payload:      cloneReadModelMap(item.Payload),
+		})
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
 func cloneReadModelMap(input map[string]any) map[string]any {
 	if input == nil {
 		return nil
@@ -677,6 +933,13 @@ func cloneReadModelMap(input map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+func cloneReadModelStringSlice(input []string) []string {
+	if len(input) == 0 {
+		return nil
+	}
+	return append([]string(nil), input...)
 }
 
 func readModelStringValue(value any) string {
@@ -771,6 +1034,8 @@ func runtimeEvidenceSummary(snapshot RunSnapshot, eventTotal int) RuntimeEvidenc
 		PatchTotal:             len(snapshot.Patches),
 		ValidationTotal:        len(snapshot.ValidationResults),
 		RuntimeCheckpointTotal: len(snapshot.RuntimeCheckpoints),
+		ResultTotal:            len(snapshot.Results),
+		ArtifactTotal:          len(snapshot.Artifacts),
 		EventTotal:             eventTotal,
 	}
 	for _, item := range snapshot.ToolCalls {
@@ -842,19 +1107,36 @@ func runtimeTimeline(snapshot RunSnapshot) []RuntimeTimelineItem {
 			Data:       cloneReadModelMap(checkpoint.Data),
 		})
 	}
-	for _, item := range snapshot.Observed {
+	for _, item := range snapshot.EventRecords {
 		if item.RunID != "" && item.RunID != snapshot.Run.ID {
 			continue
 		}
 		items = append(items, RuntimeTimelineItem{
-			Source:     "event",
+			Source:     "persisted_event",
 			Type:       item.SubjectType,
-			ID:         item.SubjectID,
+			ID:         item.ID,
 			Topic:      item.Topic,
+			RunState:   readModelStringValue(item.Payload[events.PayloadKeyState]),
 			StepID:     item.StepID,
 			OccurredAt: item.OccurredAt,
 			Data:       cloneReadModelMap(item.Payload),
 		})
+	}
+	if len(snapshot.EventRecords) == 0 {
+		for _, item := range snapshot.Observed {
+			if item.RunID != "" && item.RunID != snapshot.Run.ID {
+				continue
+			}
+			items = append(items, RuntimeTimelineItem{
+				Source:     "event",
+				Type:       item.SubjectType,
+				ID:         item.SubjectID,
+				Topic:      item.Topic,
+				StepID:     item.StepID,
+				OccurredAt: item.OccurredAt,
+				Data:       cloneReadModelMap(item.Payload),
+			})
+		}
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].OccurredAt == items[j].OccurredAt {
@@ -912,7 +1194,7 @@ func timelineStepSummary(output map[string]any) string {
 func timelineEvents(items []RuntimeTimelineItem) []RuntimeTimelineItem {
 	ret := make([]RuntimeTimelineItem, 0, len(items))
 	for _, item := range items {
-		if item.Source == "event" {
+		if item.Source == "event" || item.Source == "persisted_event" {
 			ret = append(ret, item)
 		}
 	}

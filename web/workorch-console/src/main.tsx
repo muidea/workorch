@@ -12,7 +12,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Button, ConfigProvider, Descriptions, Empty, Form, Input, InputNumber, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Decision, DoD, Goal, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, Run, RunObservability, RunSnapshot, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
+import type { Approval, Artifact, Decision, DoD, Goal, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Result, Run, RunObservability, RunSnapshot, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -165,7 +165,9 @@ function evidenceCount(snapshot?: RunSnapshot) {
   return (snapshot.toolCalls?.length ?? 0) +
     (snapshot.patches?.length ?? 0) +
     (snapshot.validationResults?.length ?? 0) +
-    (snapshot.runtimeCheckpoints?.length ?? 0);
+    (snapshot.runtimeCheckpoints?.length ?? 0) +
+    (snapshot.results?.length ?? 0) +
+    (snapshot.artifacts?.length ?? 0);
 }
 
 function timelineLabel(item: RuntimeTimelineItem) {
@@ -332,16 +334,6 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
 
-function latestStepOutput(snapshot?: RunSnapshot) {
-  const steps = snapshot?.steps ?? [];
-  for (let index = steps.length - 1; index >= 0; index -= 1) {
-    if (steps[index].output) {
-      return steps[index].output;
-    }
-  }
-  return undefined;
-}
-
 function dodAssessment(snapshot?: RunSnapshot) {
   const steps = snapshot?.steps ?? [];
   for (let index = steps.length - 1; index >= 0; index -= 1) {
@@ -364,26 +356,43 @@ function dodAssessmentItems(snapshot?: RunSnapshot) {
 }
 
 function memoryRefIDs(snapshot?: RunSnapshot) {
-  const refs = new Set<string>();
-  for (const step of snapshot?.steps ?? []) {
-    for (const ref of asStringArray(step.output?.memoryRefs)) {
-      refs.add(ref);
+	const refs = new Set<string>();
+	for (const step of snapshot?.steps ?? []) {
+		for (const ref of asStringArray(step.output?.memoryRefs)) {
+			refs.add(ref);
     }
-  }
-  return refs;
+	}
+	return refs;
+}
+
+function resultTimeValue(result: Result) {
+	return result.updatedAt || result.createdAt || result.id;
+}
+
+function primaryResult(snapshot?: RunSnapshot) {
+	const results = snapshot?.results ?? [];
+	if (!results.length) {
+		return undefined;
+	}
+	return [...results].sort((left, right) => resultTimeValue(right).localeCompare(resultTimeValue(left)))[0];
 }
 
 function goalOutcomeSummary(snapshot?: RunSnapshot) {
-  const assessment = dodAssessment(snapshot);
-  const output = latestStepOutput(snapshot);
-  const summary = assessment?.summary || output?.thoughtSummary || output?.summary || snapshot?.run.failureReason;
-  return summary ? String(summary) : '尚未形成可确认的目标成果';
+	const summary = primaryResult(snapshot)?.summary || snapshot?.run.failureReason;
+	return summary ? String(summary) : '尚未形成可确认的目标成果';
 }
 
 function goalOutcomeState(snapshot?: RunSnapshot) {
-  const assessment = dodAssessment(snapshot);
-  if (assessment?.satisfied === true) {
-    return <Tag color="green">DoD 已满足</Tag>;
+	const result = primaryResult(snapshot);
+	if (result?.state === 'accepted') {
+		return <Tag color="green">Result 已接受</Tag>;
+	}
+	if (result) {
+		return stateTag(result.state);
+	}
+	const assessment = dodAssessment(snapshot);
+	if (assessment?.satisfied === true) {
+		return <Tag color="green">DoD 已满足</Tag>;
   }
   if (assessment?.satisfied === false) {
     return <Tag color="red">DoD 未满足</Tag>;
@@ -1226,6 +1235,10 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const outcomeRun = runSnapshot?.run;
   const outcomeGoal = goals.find((item) => item.id === outcomeRun?.goalId);
   const outcomeDoD = dods.find((item) => item.id === outcomeRun?.doDId);
+  const outcomeResult = primaryResult(runSnapshot);
+  const outcomeArtifacts = outcomeResult
+    ? (runSnapshot?.artifacts ?? []).filter((item) => item.resultId === outcomeResult.id || !item.resultId)
+    : (runSnapshot?.artifacts ?? []);
   const outcomeMemoryRefs = memoryRefIDs(runSnapshot);
   const outcomeMemories = memoryItems.filter((item) => item.runId === outcomeRun?.id || outcomeMemoryRefs.has(item.id));
   const outcomeDoDItems = dodAssessmentItems(runSnapshot);
@@ -1287,6 +1300,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
               <Tag>MCP Server {mcpServers.length}</Tag>
               <Tag>Memory {memoryItems.length}</Tag>
               <Tag color="cyan">Step {runSnapshot?.steps?.length ?? 0}</Tag>
+              <Tag color="green">Result {snapshot.results?.length ?? runSnapshot?.results?.length ?? 0}</Tag>
+              <Tag>Artifact {snapshot.artifacts?.length ?? runSnapshot?.artifacts?.length ?? 0}</Tag>
               <Tag color="purple">ToolCall {runSnapshot?.toolCalls?.length ?? 0}</Tag>
               <Tag>Patch {runSnapshot?.patches?.length ?? 0}</Tag>
               <Tag>Validation {runSnapshot?.validationResults?.length ?? 0}</Tag>
@@ -1362,9 +1377,12 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                   column={2}
                   items={[
                     { key: 'run', label: '关联 Run', children: `${runSnapshot.run.id} / ${stateLabel(runSnapshot.run.state)}` },
+                    { key: 'result', label: '正式 Result', children: outcomeResult ? boundedParagraph(outcomeResult.id, { rows: 1, copyText: outcomeResult.id }) : '-' },
                     { key: 'goal', label: '目标', children: boundedParagraph(outcomeGoal?.text || runSnapshot.run.goalId, { rows: 2 }) },
                     { key: 'dod', label: '验收标准', children: outcomeDoD?.items?.length ? compactTags(outcomeDoD.items) : runSnapshot.run.doDId || '-' },
-                    { key: 'summary', label: '成果结论', children: boundedParagraph(goalOutcomeSummary(runSnapshot), { rows: 3, className: 'goal-outcome-summary' }) }
+                    { key: 'summary', label: '成果结论', children: boundedParagraph(goalOutcomeSummary(runSnapshot), { rows: 3, className: 'goal-outcome-summary' }) },
+                    { key: 'source', label: '结果来源', children: outcomeResult ? `${outcomeResult.sourceType || '-'} / ${outcomeResult.sourceRef || '-'}` : '-' },
+                    { key: 'evidence', label: '结果证据', children: outcomeResult?.evidenceRefs?.length ? compactTags(outcomeResult.evidenceRefs) : '-' }
                   ]}
                 />
                 <ProCard gutter={16} wrap>
@@ -1386,23 +1404,23 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                       <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 尚未输出 DoD 评估" />
                     )}
                   </ProCard>
-                  <ProCard title="交付物与变更" colSpan={{ xs: 24, lg: 12 }}>
-                    {(runSnapshot.patches?.length ?? 0) > 0 ? (
-                      <ProTable<Patch>
+                  <ProCard title="正式交付物（Artifact）" colSpan={{ xs: 24, lg: 12 }}>
+                    {outcomeArtifacts.length > 0 ? (
+                      <ProTable<Artifact>
                         rowKey="id"
                         search={false}
                         pagination={false}
                         size="small"
                         columns={[
-                          { title: '目标文件/资源', dataIndex: 'targetRef', ellipsis: true },
-                          { title: '类型', dataIndex: 'patchType', width: 120 },
+                          { title: '名称/URI', ellipsis: true, render: (_, item) => item.name || item.uri || item.id },
+                          { title: '类型', dataIndex: 'artifactType', width: 120 },
                           { title: '状态', dataIndex: 'state', width: 110, render: (_, item) => stateTag(item.state) },
                           { title: '摘要', dataIndex: 'summary', ellipsis: true }
                         ]}
-                        dataSource={runSnapshot.patches ?? []}
+                        dataSource={outcomeArtifacts}
                       />
                     ) : (
-                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 未产生 Patch/文件交付物" />
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 尚未形成正式 Artifact" />
                     )}
                   </ProCard>
                 </ProCard>
@@ -1501,6 +1519,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     { key: 'patches', label: 'Patch', children: `${runObservability?.evidence.patchApplied ?? 0}/${runObservability?.evidence.patchTotal ?? runSnapshot.patches?.length ?? 0} 已应用` },
                     { key: 'validations', label: '校验结果', children: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? runSnapshot.validationResults?.length ?? 0} 通过` },
                     { key: 'checkpoints', label: '运行检查点', children: runObservability?.evidence.runtimeCheckpointTotal ?? runSnapshot.runtimeCheckpoints?.length ?? 0 },
+                    { key: 'results', label: '正式 Result', children: runObservability?.evidence.resultTotal ?? runSnapshot.results?.length ?? 0 },
+                    { key: 'artifacts', label: '正式 Artifact', children: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 },
                     { key: 'events', label: '事件', children: runObservability?.evidence.eventTotal ?? 0 },
                     { key: 'context', label: '执行上下文', children: <pre className="json-panel">{compactJSON(runSnapshot.run.executionContext)}</pre> }
                   ]}

@@ -2194,6 +2194,9 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
+	resultRepo := memory.NewResultRepository()
+	artifactRepo := memory.NewArtifactRepository()
+	validationRepo := memory.NewValidationResultRepository()
 	runtime := &stubRuntimeAdapter{output: map[string]any{
 		"status": "completed",
 		"dodAssessment": map[string]any{
@@ -2202,13 +2205,27 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 				{
 					"item":         "tests pass",
 					"state":        "satisfied",
-					"evidenceRefs": []string{"run-dod-gate-complete/validation/runtime-step"},
+					"evidenceRefs": []string{"run-dod-gate-complete/step-1/validation/runtime-step"},
 				},
 			},
 			"summary": "DoD satisfied",
 		},
 	}}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			Results:           resultRepo,
+			Artifacts:         artifactRepo,
+			ValidationResults: validationRepo,
+		},
+		events.NewMemoryHub(),
+	)
 
 	workspaceID := common.WorkspaceID("ws-dod-gate-complete")
 	runID := common.RunID("run-dod-gate-complete")
@@ -2235,6 +2252,43 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 	}
 	if runItem.State != common.RunStateCompleted {
 		t.Fatalf("run state = %s, want completed", runItem.State)
+	}
+	results, err := resultRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list results: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %+v, want one accepted result", results)
+	}
+	result := results[0]
+	if result.State != common.ResultStateAccepted || result.Summary != "DoD satisfied" {
+		t.Fatalf("result = %+v, want accepted DoD result", result)
+	}
+	if result.WorkspaceID != workspaceID || result.RunID != runID || result.DoDID != "dod-1" {
+		t.Fatalf("result refs = %+v, want workspace/run/dod refs", result)
+	}
+	if result.SourceType != "dod_assessment" || result.SourceRef != "run-dod-gate-complete/step-1" {
+		t.Fatalf("result source = %+v, want DoD assessment step source", result)
+	}
+	if !reflect.DeepEqual(result.EvidenceRefs, []string{"run-dod-gate-complete/step-1", "run-dod-gate-complete/step-1/validation/runtime-step"}) {
+		t.Fatalf("result evidence = %+v, want step and validation refs", result.EvidenceRefs)
+	}
+	if !reflect.DeepEqual(result.ArtifactRefs, []common.ArtifactID{"run-dod-gate-complete/artifact/result-summary"}) {
+		t.Fatalf("result artifacts = %+v, want summary artifact ref", result.ArtifactRefs)
+	}
+	artifacts, err := artifactRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	}
+	if len(artifacts) != 1 {
+		t.Fatalf("artifacts = %+v, want one summary artifact", artifacts)
+	}
+	artifact := artifacts[0]
+	if artifact.ResultID != result.ID || artifact.ArtifactType != "text" || artifact.State != common.ArtifactStateAvailable {
+		t.Fatalf("artifact = %+v, want available text artifact linked to result", artifact)
+	}
+	if artifact.Summary != "DoD satisfied" || artifact.ContentType != "text/plain; charset=utf-8" {
+		t.Fatalf("artifact content = %+v, want DoD summary text artifact", artifact)
 	}
 }
 

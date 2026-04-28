@@ -69,6 +69,8 @@ func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 		Tickets:            repos.Tickets,
 		Resolutions:        repos.Resolutions,
 		Approvals:          repos.Approvals,
+		Results:            repos.Results,
+		Artifacts:          repos.Artifacts,
 		ToolCalls:          repos.ToolCalls,
 		Patches:            repos.Patches,
 		ValidationResults:  repos.ValidationResults,

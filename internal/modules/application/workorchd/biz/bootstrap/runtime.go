@@ -5,6 +5,7 @@ import (
 
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
+	eventstreammodule "github.com/muidea/workorch/internal/modules/kernel/eventstream"
 	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp"
 	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
@@ -32,6 +33,9 @@ type RepositoryExports struct {
 	MemoryItems        repository.MemoryItemRepository
 	Skills             repository.SkillRepository
 	MCPServers         repository.MCPServerRepository
+	Results            repository.ResultRepository
+	Artifacts          repository.ArtifactRepository
+	EventRecords       repository.EventRecordRepository
 	Workspaces         repository.WorkspaceRepository
 	Goals              repository.GoalRepository
 	DoDs               repository.DoDRepository
@@ -47,14 +51,15 @@ type RepositoryExports struct {
 }
 
 type ServiceExports struct {
-	WorkspaceService workspacemodule.Service
-	SoulService      soulmodule.Service
-	MemoryService    memorymodule.Service
-	SkillService     skillmodule.Service
-	MCPService       mcpmodule.Service
-	DecisionService  decisionmodule.Service
-	ApprovalService  approvalmodule.Service
-	RunService       runmodule.Service
+	WorkspaceService   workspacemodule.Service
+	SoulService        soulmodule.Service
+	MemoryService      memorymodule.Service
+	SkillService       skillmodule.Service
+	MCPService         mcpmodule.Service
+	EventStreamService eventstreammodule.Service
+	DecisionService    decisionmodule.Service
+	ApprovalService    approvalmodule.Service
+	RunService         runmodule.Service
 }
 
 type InfrastructureExports struct {

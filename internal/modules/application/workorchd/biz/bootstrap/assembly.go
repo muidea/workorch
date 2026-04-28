@@ -7,6 +7,7 @@ import (
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
+	eventstreammodule "github.com/muidea/workorch/internal/modules/kernel/eventstream"
 	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp"
 	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory"
 	orchestratormodule "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
@@ -68,6 +69,12 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 		MCPService: mcpModule.Service(),
 	}))
 
+	eventStreamModule := eventstreammodule.New()
+	mustSetup("eventstream", eventStreamModule.Setup(eventstreammodule.Dependencies{
+		EventRecords: repos.eventRecord,
+		EventHub:     eventHub,
+	}))
+
 	workspaceModule := workspacemodule.New()
 	mustSetup("workspace", workspaceModule.Setup(workspacemodule.Dependencies{
 		Workspaces: repos.workspace,
@@ -103,6 +110,8 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 		Tickets:            repos.ticket,
 		Resolutions:        repos.resolution,
 		Approvals:          repos.approval,
+		Results:            repos.result,
+		Artifacts:          repos.artifact,
 		ToolCalls:          repos.toolCall,
 		Patches:            repos.patch,
 		ValidationResults:  repos.validationResult,
@@ -128,6 +137,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 		skillModule,
 		mcpModule,
 		mcpBlockModule,
+		eventStreamModule,
 		workspaceModule,
 		decisionModule,
 		approvalModule,
@@ -145,6 +155,9 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 				MemoryItems:        repos.memoryItem,
 				Skills:             repos.skill,
 				MCPServers:         repos.mcpServer,
+				Results:            repos.result,
+				Artifacts:          repos.artifact,
+				EventRecords:       repos.eventRecord,
 				Workspaces:         repos.workspace,
 				Goals:              repos.goal,
 				DoDs:               repos.dod,
@@ -159,14 +172,15 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 				Approvals:          repos.approval,
 			},
 			Services: ServiceExports{
-				WorkspaceService: workspaceModule.Service(),
-				SoulService:      soulModule.Service(),
-				MemoryService:    memoryModule.Service(),
-				SkillService:     skillModule.Service(),
-				MCPService:       mcpModule.Service(),
-				DecisionService:  decisionModule.Service(),
-				ApprovalService:  approvalModule.Service(),
-				RunService:       runModule.Service(),
+				WorkspaceService:   workspaceModule.Service(),
+				SoulService:        soulModule.Service(),
+				MemoryService:      memoryModule.Service(),
+				SkillService:       skillModule.Service(),
+				MCPService:         mcpModule.Service(),
+				EventStreamService: eventStreamModule.Service(),
+				DecisionService:    decisionModule.Service(),
+				ApprovalService:    approvalModule.Service(),
+				RunService:         runModule.Service(),
 			},
 			Infrastructure: InfrastructureExports{
 				EventHub: eventHub,

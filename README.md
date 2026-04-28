@@ -19,10 +19,11 @@ configured.
 - `internal/modules/application/workorchd`: workorchd plugin module plus `biz` / `service` / `pkg` implementation packages
 - `web/workorch-console`: React/TypeScript management console source, built into `workorchd` assets
 - `internal/modules/application/workorchd/service/server/consoleassets`: embedded management console build output served by `workorchd`
-- `internal/modules/kernel/{workspace,run,decision,orchestrator}`: workorch kernel modules
+- `internal/modules/kernel/{workspace,run,decision,orchestrator,result}`: workorch kernel modules
 - `internal/modules/blocks/{approval,legacy,llm,mcp,shell}`: reusable/block modules
 - `internal/pkg/{common,events,repository}`: shared internal primitives
 - `docs/`: repo docs
+- `docs/next-stage-result-event-development-plan.md`: active next-stage plan for formal Result / Artifact and persistent Workorch event stream
 - `.github/workflows/ci.yml`: GitHub Actions CI workflow
 - `Makefile`: local and CI entry targets
 

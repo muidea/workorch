@@ -22,6 +22,16 @@ const (
 	PayloadKeyResolutionID       = "resolutionId"
 	PayloadKeyType               = "type"
 	PayloadKeyPayload            = "payload"
+	PayloadKeySummary            = "summary"
+	PayloadKeySourceType         = "sourceType"
+	PayloadKeySourceRef          = "sourceRef"
+	PayloadKeyEvidenceRefs       = "evidenceRefs"
+	PayloadKeyArtifactRefs       = "artifactRefs"
+	PayloadKeyResultID           = "resultId"
+	PayloadKeyArtifactType       = "artifactType"
+	PayloadKeyName               = "name"
+	PayloadKeyURI                = "uri"
+	PayloadKeyContentType        = "contentType"
 )
 
 type WorkspacePayloadData struct {
@@ -39,6 +49,15 @@ type RunPayloadData struct {
 	BlockingTicketID   common.TicketID
 	BlockingApprovalID common.ApprovalID
 	FailureReason      string
+}
+
+type GoalPayloadData struct {
+	Text string
+}
+
+type DoDPayloadData struct {
+	Items []string
+	State common.DoDState
 }
 
 func GoalPayload(text string) map[string]any {
@@ -76,6 +95,33 @@ type DecisionResolutionPayloadData struct {
 type ApprovalPayloadData struct {
 	Reason string
 	State  common.ApprovalState
+}
+
+type ResultPayloadData struct {
+	GoalID       common.GoalID
+	DoDID        common.DoDID
+	State        common.ResultState
+	Title        string
+	Summary      string
+	SourceType   string
+	SourceRef    string
+	EvidenceRefs []string
+	ArtifactRefs []string
+}
+
+type ArtifactPayloadData struct {
+	ResultID           common.ResultID
+	StepID             common.StepID
+	ToolCallID         common.ToolCallID
+	PatchID            common.PatchID
+	ValidationResultID common.ValidationResultID
+	ArtifactType       string
+	Name               string
+	Summary            string
+	URI                string
+	ContentType        string
+	State              common.ArtifactState
+	EvidenceRefs       []string
 }
 
 func WorkspacePayload(title string, description string, workingDirectory string, state common.WorkspaceState, activeRunID common.RunID) map[string]any {
@@ -162,6 +208,92 @@ func ApprovalPayload(reason string, state common.ApprovalState) map[string]any {
 	}
 }
 
+func ResultPayload(
+	goalID common.GoalID,
+	dodID common.DoDID,
+	state common.ResultState,
+	title string,
+	summary string,
+	sourceType string,
+	sourceRef string,
+	evidenceRefs []string,
+	artifactRefs []string,
+) map[string]any {
+	payload := map[string]any{
+		PayloadKeyState:        string(state),
+		PayloadKeyEvidenceRefs: append([]string(nil), evidenceRefs...),
+		PayloadKeyArtifactRefs: append([]string(nil), artifactRefs...),
+	}
+	if goalID != "" {
+		payload[PayloadKeyGoalID] = string(goalID)
+	}
+	if dodID != "" {
+		payload[PayloadKeyDoDID] = string(dodID)
+	}
+	if title != "" {
+		payload[PayloadKeyTitle] = title
+	}
+	if summary != "" {
+		payload[PayloadKeySummary] = summary
+	}
+	if sourceType != "" {
+		payload[PayloadKeySourceType] = sourceType
+	}
+	if sourceRef != "" {
+		payload[PayloadKeySourceRef] = sourceRef
+	}
+	return payload
+}
+
+func ArtifactPayload(
+	resultID common.ResultID,
+	stepID common.StepID,
+	toolCallID common.ToolCallID,
+	patchID common.PatchID,
+	validationResultID common.ValidationResultID,
+	artifactType string,
+	name string,
+	summary string,
+	uri string,
+	contentType string,
+	state common.ArtifactState,
+	evidenceRefs []string,
+) map[string]any {
+	payload := map[string]any{
+		PayloadKeyArtifactType: artifactType,
+		PayloadKeyState:        string(state),
+		PayloadKeyEvidenceRefs: append([]string(nil), evidenceRefs...),
+	}
+	if resultID != "" {
+		payload[PayloadKeyResultID] = string(resultID)
+	}
+	if stepID != "" {
+		payload["stepId"] = string(stepID)
+	}
+	if toolCallID != "" {
+		payload["toolCallId"] = string(toolCallID)
+	}
+	if patchID != "" {
+		payload["patchId"] = string(patchID)
+	}
+	if validationResultID != "" {
+		payload["validationResultId"] = string(validationResultID)
+	}
+	if name != "" {
+		payload[PayloadKeyName] = name
+	}
+	if summary != "" {
+		payload[PayloadKeySummary] = summary
+	}
+	if uri != "" {
+		payload[PayloadKeyURI] = uri
+	}
+	if contentType != "" {
+		payload[PayloadKeyContentType] = contentType
+	}
+	return payload
+}
+
 func clonePayloadMap(payload map[string]any) map[string]any {
 	if payload == nil {
 		return nil
@@ -218,6 +350,26 @@ func DecodeRunPayload(payload map[string]any) (RunPayloadData, bool) {
 		BlockingApprovalID: common.ApprovalID(blockingApprovalID),
 		FailureReason:      failureReason,
 	}, true
+}
+
+func DecodeGoalPayload(payload map[string]any) (GoalPayloadData, bool) {
+	text, ok := stringField(payload, PayloadKeyText)
+	if !ok {
+		return GoalPayloadData{}, false
+	}
+	return GoalPayloadData{Text: text}, true
+}
+
+func DecodeDoDPayload(payload map[string]any) (DoDPayloadData, bool) {
+	items, ok := optionalStringSliceField(payload, PayloadKeyItems)
+	if !ok || len(items) == 0 {
+		return DoDPayloadData{}, false
+	}
+	state, ok := stringField(payload, PayloadKeyState)
+	if !ok {
+		return DoDPayloadData{}, false
+	}
+	return DoDPayloadData{Items: items, State: common.DoDState(state)}, true
 }
 
 func DecodeStepPayload(payload map[string]any) (StepPayloadData, bool) {
@@ -300,6 +452,121 @@ func DecodeApprovalPayload(payload map[string]any) (ApprovalPayloadData, bool) {
 	}, true
 }
 
+func DecodeResultPayload(payload map[string]any) (ResultPayloadData, bool) {
+	state, ok := stringField(payload, PayloadKeyState)
+	if !ok {
+		return ResultPayloadData{}, false
+	}
+	goalID, ok := optionalStringField(payload, PayloadKeyGoalID)
+	if !ok {
+		return ResultPayloadData{}, false
+	}
+	dodID, ok := optionalStringField(payload, PayloadKeyDoDID)
+	if !ok {
+		return ResultPayloadData{}, false
+	}
+	title, ok := optionalStringField(payload, PayloadKeyTitle)
+	if !ok {
+		return ResultPayloadData{}, false
+	}
+	summary, ok := optionalStringField(payload, PayloadKeySummary)
+	if !ok {
+		return ResultPayloadData{}, false
+	}
+	sourceType, ok := optionalStringField(payload, PayloadKeySourceType)
+	if !ok {
+		return ResultPayloadData{}, false
+	}
+	sourceRef, ok := optionalStringField(payload, PayloadKeySourceRef)
+	if !ok {
+		return ResultPayloadData{}, false
+	}
+	evidenceRefs, ok := optionalStringSliceField(payload, PayloadKeyEvidenceRefs)
+	if !ok {
+		return ResultPayloadData{}, false
+	}
+	artifactRefs, ok := optionalStringSliceField(payload, PayloadKeyArtifactRefs)
+	if !ok {
+		return ResultPayloadData{}, false
+	}
+	return ResultPayloadData{
+		GoalID:       common.GoalID(goalID),
+		DoDID:        common.DoDID(dodID),
+		State:        common.ResultState(state),
+		Title:        title,
+		Summary:      summary,
+		SourceType:   sourceType,
+		SourceRef:    sourceRef,
+		EvidenceRefs: evidenceRefs,
+		ArtifactRefs: artifactRefs,
+	}, true
+}
+
+func DecodeArtifactPayload(payload map[string]any) (ArtifactPayloadData, bool) {
+	artifactType, ok := stringField(payload, PayloadKeyArtifactType)
+	if !ok {
+		return ArtifactPayloadData{}, false
+	}
+	state, ok := stringField(payload, PayloadKeyState)
+	if !ok {
+		return ArtifactPayloadData{}, false
+	}
+	resultID, ok := optionalStringField(payload, PayloadKeyResultID)
+	if !ok {
+		return ArtifactPayloadData{}, false
+	}
+	stepID, ok := optionalStringField(payload, "stepId")
+	if !ok {
+		return ArtifactPayloadData{}, false
+	}
+	toolCallID, ok := optionalStringField(payload, "toolCallId")
+	if !ok {
+		return ArtifactPayloadData{}, false
+	}
+	patchID, ok := optionalStringField(payload, "patchId")
+	if !ok {
+		return ArtifactPayloadData{}, false
+	}
+	validationResultID, ok := optionalStringField(payload, "validationResultId")
+	if !ok {
+		return ArtifactPayloadData{}, false
+	}
+	name, ok := optionalStringField(payload, PayloadKeyName)
+	if !ok {
+		return ArtifactPayloadData{}, false
+	}
+	summary, ok := optionalStringField(payload, PayloadKeySummary)
+	if !ok {
+		return ArtifactPayloadData{}, false
+	}
+	uri, ok := optionalStringField(payload, PayloadKeyURI)
+	if !ok {
+		return ArtifactPayloadData{}, false
+	}
+	contentType, ok := optionalStringField(payload, PayloadKeyContentType)
+	if !ok {
+		return ArtifactPayloadData{}, false
+	}
+	evidenceRefs, ok := optionalStringSliceField(payload, PayloadKeyEvidenceRefs)
+	if !ok {
+		return ArtifactPayloadData{}, false
+	}
+	return ArtifactPayloadData{
+		ResultID:           common.ResultID(resultID),
+		StepID:             common.StepID(stepID),
+		ToolCallID:         common.ToolCallID(toolCallID),
+		PatchID:            common.PatchID(patchID),
+		ValidationResultID: common.ValidationResultID(validationResultID),
+		ArtifactType:       artifactType,
+		Name:               name,
+		Summary:            summary,
+		URI:                uri,
+		ContentType:        contentType,
+		State:              common.ArtifactState(state),
+		EvidenceRefs:       evidenceRefs,
+	}, true
+}
+
 func stringField(payload map[string]any, key string) (string, bool) {
 	if payload == nil {
 		return "", false
@@ -343,4 +610,30 @@ func optionalMapField(payload map[string]any, key string) (map[string]any, bool)
 		return nil, false
 	}
 	return clonePayloadMap(ret), true
+}
+
+func optionalStringSliceField(payload map[string]any, key string) ([]string, bool) {
+	if payload == nil {
+		return nil, true
+	}
+	value, ok := payload[key]
+	if !ok || value == nil {
+		return nil, true
+	}
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...), true
+	case []any:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			ret = append(ret, text)
+		}
+		return ret, true
+	default:
+		return nil, false
+	}
 }

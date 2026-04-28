@@ -21,6 +21,16 @@ type RunEvent struct {
 	Data     RunPayloadData
 }
 
+type GoalEvent struct {
+	envelope Envelope
+	Data     GoalPayloadData
+}
+
+type DoDEvent struct {
+	envelope Envelope
+	Data     DoDPayloadData
+}
+
 type StepEvent struct {
 	envelope Envelope
 	Data     StepPayloadData
@@ -39,9 +49,21 @@ type ApprovalEvent struct {
 	Data     ApprovalPayloadData
 }
 
+type ResultEvent struct {
+	envelope Envelope
+	Data     ResultPayloadData
+}
+
+type ArtifactEvent struct {
+	envelope Envelope
+	Data     ArtifactPayloadData
+}
+
 var workorchTopics = []string{
 	TopicWorkspaceCreated,
 	TopicWorkspaceStateChanged,
+	TopicGoalDefined,
+	TopicDoDDefined,
 	TopicRunCreated,
 	TopicRunStateChanged,
 	TopicStepDispatched,
@@ -50,6 +72,8 @@ var workorchTopics = []string{
 	TopicTicketResolved,
 	TopicApprovalCreated,
 	TopicApprovalResolved,
+	TopicResultAccepted,
+	TopicArtifactCreated,
 }
 
 func WorkorchTopics() []string {
@@ -97,6 +121,18 @@ func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 			return nil, false
 		}
 		return event, true
+	case TopicGoalDefined:
+		event, ok := DecodeGoalEvent(envelope)
+		if !ok {
+			return nil, false
+		}
+		return event, true
+	case TopicDoDDefined:
+		event, ok := DecodeDoDEvent(envelope)
+		if !ok {
+			return nil, false
+		}
+		return event, true
 	case TopicStepDispatched, TopicStepStateChanged:
 		event, ok := DecodeStepEvent(envelope)
 		if !ok {
@@ -111,6 +147,18 @@ func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 		return event, true
 	case TopicApprovalCreated, TopicApprovalResolved:
 		event, ok := DecodeApprovalEvent(envelope)
+		if !ok {
+			return nil, false
+		}
+		return event, true
+	case TopicResultAccepted:
+		event, ok := DecodeResultEvent(envelope)
+		if !ok {
+			return nil, false
+		}
+		return event, true
+	case TopicArtifactCreated:
+		event, ok := DecodeArtifactEvent(envelope)
 		if !ok {
 			return nil, false
 		}
@@ -161,6 +209,42 @@ func DecodeRunEvent(envelope Envelope) (RunEvent, bool) {
 		data.FailureReason,
 	)
 	return RunEvent{envelope: envelope, Data: data}, true
+}
+
+func DecodeGoalEvent(envelope Envelope) (GoalEvent, bool) {
+	if envelope.Topic != TopicGoalDefined {
+		return GoalEvent{}, false
+	}
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
+		return GoalEvent{}, false
+	}
+	data, ok := DecodeGoalPayload(envelope.Payload)
+	if !ok {
+		return GoalEvent{}, false
+	}
+	envelope = cloneEnvelope(envelope)
+	envelope.Version = spec.CurrentVersion
+	envelope.Payload = GoalPayload(data.Text)
+	return GoalEvent{envelope: envelope, Data: data}, true
+}
+
+func DecodeDoDEvent(envelope Envelope) (DoDEvent, bool) {
+	if envelope.Topic != TopicDoDDefined {
+		return DoDEvent{}, false
+	}
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
+		return DoDEvent{}, false
+	}
+	data, ok := DecodeDoDPayload(envelope.Payload)
+	if !ok {
+		return DoDEvent{}, false
+	}
+	envelope = cloneEnvelope(envelope)
+	envelope.Version = spec.CurrentVersion
+	envelope.Payload = DoDPayload(data.Items, data.State)
+	return DoDEvent{envelope: envelope, Data: data}, true
 }
 
 func DecodeStepEvent(envelope Envelope) (StepEvent, bool) {
@@ -233,6 +317,42 @@ func DecodeApprovalEvent(envelope Envelope) (ApprovalEvent, bool) {
 	return ApprovalEvent{envelope: envelope, Data: data}, true
 }
 
+func DecodeResultEvent(envelope Envelope) (ResultEvent, bool) {
+	if envelope.Topic != TopicResultAccepted {
+		return ResultEvent{}, false
+	}
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
+		return ResultEvent{}, false
+	}
+	data, ok := DecodeResultPayload(envelope.Payload)
+	if !ok {
+		return ResultEvent{}, false
+	}
+	envelope = cloneEnvelope(envelope)
+	envelope.Version = spec.CurrentVersion
+	envelope.Payload = ResultPayload(data.GoalID, data.DoDID, data.State, data.Title, data.Summary, data.SourceType, data.SourceRef, data.EvidenceRefs, data.ArtifactRefs)
+	return ResultEvent{envelope: envelope, Data: data}, true
+}
+
+func DecodeArtifactEvent(envelope Envelope) (ArtifactEvent, bool) {
+	if envelope.Topic != TopicArtifactCreated {
+		return ArtifactEvent{}, false
+	}
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
+		return ArtifactEvent{}, false
+	}
+	data, ok := DecodeArtifactPayload(envelope.Payload)
+	if !ok {
+		return ArtifactEvent{}, false
+	}
+	envelope = cloneEnvelope(envelope)
+	envelope.Version = spec.CurrentVersion
+	envelope.Payload = ArtifactPayload(data.ResultID, data.StepID, data.ToolCallID, data.PatchID, data.ValidationResultID, data.ArtifactType, data.Name, data.Summary, data.URI, data.ContentType, data.State, data.EvidenceRefs)
+	return ArtifactEvent{envelope: envelope, Data: data}, true
+}
+
 func (e WorkspaceEvent) Envelope() Envelope {
 	return cloneEnvelope(e.envelope)
 }
@@ -246,6 +366,22 @@ func (e RunEvent) Envelope() Envelope {
 }
 
 func (e RunEvent) Topic() string {
+	return e.envelope.Topic
+}
+
+func (e GoalEvent) Envelope() Envelope {
+	return cloneEnvelope(e.envelope)
+}
+
+func (e GoalEvent) Topic() string {
+	return e.envelope.Topic
+}
+
+func (e DoDEvent) Envelope() Envelope {
+	return cloneEnvelope(e.envelope)
+}
+
+func (e DoDEvent) Topic() string {
 	return e.envelope.Topic
 }
 
@@ -270,5 +406,21 @@ func (e ApprovalEvent) Envelope() Envelope {
 }
 
 func (e ApprovalEvent) Topic() string {
+	return e.envelope.Topic
+}
+
+func (e ResultEvent) Envelope() Envelope {
+	return cloneEnvelope(e.envelope)
+}
+
+func (e ResultEvent) Topic() string {
+	return e.envelope.Topic
+}
+
+func (e ArtifactEvent) Envelope() Envelope {
+	return cloneEnvelope(e.envelope)
+}
+
+func (e ArtifactEvent) Topic() string {
 	return e.envelope.Topic
 }

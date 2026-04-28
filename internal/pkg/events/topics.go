@@ -13,4 +13,6 @@ const (
 	TopicTicketResolved        = "/ticket/resolved"
 	TopicApprovalCreated       = "/approval/created"
 	TopicApprovalResolved      = "/approval/resolved"
+	TopicResultAccepted        = "/result/accepted"
+	TopicArtifactCreated       = "/artifact/created"
 )

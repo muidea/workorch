@@ -9,8 +9,10 @@ import (
 
 	approval "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decision "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	eventstream "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	run "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
 	soul "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
@@ -42,6 +44,21 @@ type SkillRepository struct {
 type MCPServerRepository struct {
 	mu    sync.RWMutex
 	items map[common.MCPServerID]*mcpmodel.Server
+}
+
+type ResultRepository struct {
+	mu    sync.RWMutex
+	items map[common.ResultID]*resultmodel.Result
+}
+
+type ArtifactRepository struct {
+	mu    sync.RWMutex
+	items map[common.ArtifactID]*resultmodel.Artifact
+}
+
+type EventRecordRepository struct {
+	mu    sync.RWMutex
+	items map[common.EventRecordID]*eventstream.EventRecord
 }
 
 func NewSoulRepository() *SoulRepository {
@@ -282,6 +299,168 @@ func (r *MCPServerRepository) Update(_ context.Context, item *mcpmodel.Server) e
 	}
 	r.items[item.ID] = cloneMCPServer(item)
 	return nil
+}
+
+func NewResultRepository() *ResultRepository {
+	return &ResultRepository{items: map[common.ResultID]*resultmodel.Result{}}
+}
+
+func (r *ResultRepository) Create(_ context.Context, item *resultmodel.Result) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	r.items[item.ID] = cloneResult(item)
+	return nil
+}
+
+func (r *ResultRepository) Get(_ context.Context, id common.ResultID) (*resultmodel.Result, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneResult(item), nil
+}
+
+func (r *ResultRepository) ListByWorkspace(_ context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Result, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]*resultmodel.Result, 0)
+	for _, item := range r.items {
+		if item.WorkspaceID != workspaceID {
+			continue
+		}
+		items = append(items, cloneResult(item))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return string(items[i].ID) < string(items[j].ID)
+	})
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
+}
+
+func (r *ResultRepository) ListByRun(_ context.Context, runID common.RunID) ([]*resultmodel.Result, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]*resultmodel.Result, 0)
+	for _, item := range r.items {
+		if item.RunID != runID {
+			continue
+		}
+		items = append(items, cloneResult(item))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return string(items[i].ID) < string(items[j].ID)
+	})
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
+}
+
+func (r *ResultRepository) Update(_ context.Context, item *resultmodel.Result) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	r.items[item.ID] = cloneResult(item)
+	return nil
+}
+
+func NewArtifactRepository() *ArtifactRepository {
+	return &ArtifactRepository{items: map[common.ArtifactID]*resultmodel.Artifact{}}
+}
+
+func (r *ArtifactRepository) Create(_ context.Context, item *resultmodel.Artifact) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	r.items[item.ID] = cloneArtifact(item)
+	return nil
+}
+
+func (r *ArtifactRepository) Get(_ context.Context, id common.ArtifactID) (*resultmodel.Artifact, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneArtifact(item), nil
+}
+
+func (r *ArtifactRepository) ListByWorkspace(_ context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Artifact, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return listArtifacts(r.items, func(item *resultmodel.Artifact) bool {
+		return item.WorkspaceID == workspaceID
+	}), nil
+}
+
+func (r *ArtifactRepository) ListByRun(_ context.Context, runID common.RunID) ([]*resultmodel.Artifact, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return listArtifacts(r.items, func(item *resultmodel.Artifact) bool {
+		return item.RunID == runID
+	}), nil
+}
+
+func (r *ArtifactRepository) ListByResult(_ context.Context, resultID common.ResultID) ([]*resultmodel.Artifact, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return listArtifacts(r.items, func(item *resultmodel.Artifact) bool {
+		return item.ResultID == resultID
+	}), nil
+}
+
+func (r *ArtifactRepository) Update(_ context.Context, item *resultmodel.Artifact) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	r.items[item.ID] = cloneArtifact(item)
+	return nil
+}
+
+func NewEventRecordRepository() *EventRecordRepository {
+	return &EventRecordRepository{items: map[common.EventRecordID]*eventstream.EventRecord{}}
+}
+
+func (r *EventRecordRepository) Append(_ context.Context, item *eventstream.EventRecord) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	r.items[item.ID] = cloneEventRecord(item)
+	return nil
+}
+
+func (r *EventRecordRepository) Get(_ context.Context, id common.EventRecordID) (*eventstream.EventRecord, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneEventRecord(item), nil
+}
+
+func (r *EventRecordRepository) List(_ context.Context, query repository.EventRecordQuery) ([]*eventstream.EventRecord, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return listEventRecords(r.items, query), nil
 }
 
 func NewWorkspaceRepository() *WorkspaceRepository {
@@ -1060,6 +1239,28 @@ func cloneRuntimeCheckpoint(item *run.RuntimeCheckpoint) *run.RuntimeCheckpoint 
 	return &cloned
 }
 
+func cloneResult(item *resultmodel.Result) *resultmodel.Result {
+	cloned := *item
+	cloned.EvidenceRefs = cloneStringSlice(item.EvidenceRefs)
+	if item.ArtifactRefs != nil {
+		cloned.ArtifactRefs = append([]common.ArtifactID(nil), item.ArtifactRefs...)
+	}
+	return &cloned
+}
+
+func cloneArtifact(item *resultmodel.Artifact) *resultmodel.Artifact {
+	cloned := *item
+	cloned.EvidenceRefs = cloneStringSlice(item.EvidenceRefs)
+	cloned.Metadata = cloneMap(item.Metadata)
+	return &cloned
+}
+
+func cloneEventRecord(item *eventstream.EventRecord) *eventstream.EventRecord {
+	cloned := *item
+	cloned.Payload = cloneMap(item.Payload)
+	return &cloned
+}
+
 func cloneDecisionTicket(item *decision.Ticket) *decision.Ticket {
 	cloned := *item
 	cloned.Context = cloneMap(item.Context)
@@ -1111,6 +1312,88 @@ func cloneMCPServer(item *mcpmodel.Server) *mcpmodel.Server {
 	cloned.AllowedResources = cloneStringSlice(item.AllowedResources)
 	cloned.AllowedPrompts = cloneStringSlice(item.AllowedPrompts)
 	return &cloned
+}
+
+func listArtifacts(items map[common.ArtifactID]*resultmodel.Artifact, matches func(*resultmodel.Artifact) bool) []*resultmodel.Artifact {
+	ret := make([]*resultmodel.Artifact, 0)
+	for _, item := range items {
+		if !matches(item) {
+			continue
+		}
+		ret = append(ret, cloneArtifact(item))
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		return string(ret[i].ID) < string(ret[j].ID)
+	})
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func listEventRecords(items map[common.EventRecordID]*eventstream.EventRecord, query repository.EventRecordQuery) []*eventstream.EventRecord {
+	ret := make([]*eventstream.EventRecord, 0)
+	cursorMatched := query.CursorAfterID == ""
+	for _, item := range items {
+		if !eventRecordMatches(item, query) {
+			continue
+		}
+		ret = append(ret, cloneEventRecord(item))
+	}
+	sort.SliceStable(ret, func(i, j int) bool {
+		if ret[i].OccurredAt == ret[j].OccurredAt {
+			return string(ret[i].ID) < string(ret[j].ID)
+		}
+		return ret[i].OccurredAt < ret[j].OccurredAt
+	})
+	if query.CursorAfterID != "" {
+		filtered := ret[:0]
+		for _, item := range ret {
+			if !cursorMatched {
+				if item.ID == query.CursorAfterID {
+					cursorMatched = true
+				}
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		ret = filtered
+	}
+	if query.Limit > 0 && len(ret) > query.Limit {
+		ret = ret[:query.Limit]
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func eventRecordMatches(item *eventstream.EventRecord, query repository.EventRecordQuery) bool {
+	if item == nil {
+		return false
+	}
+	if query.WorkspaceID != "" && item.WorkspaceID != query.WorkspaceID {
+		return false
+	}
+	if query.RunID != "" && item.RunID != query.RunID {
+		return false
+	}
+	if query.Topic != "" && item.Topic != query.Topic {
+		return false
+	}
+	if query.SubjectType != "" && item.SubjectType != query.SubjectType {
+		return false
+	}
+	if query.SubjectID != "" && item.SubjectID != query.SubjectID {
+		return false
+	}
+	if query.OccurredAfter != "" && item.OccurredAt <= query.OccurredAfter {
+		return false
+	}
+	if query.OccurredBefore != "" && item.OccurredAt >= query.OccurredBefore {
+		return false
+	}
+	return true
 }
 
 func memoryItemMatches(item *memorymodel.MemoryItem, query repository.MemorySearchQuery) bool {

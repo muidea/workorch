@@ -140,6 +140,13 @@ type runObservabilityResponse struct {
 	Observability appservice.RunObservability `json:"observability"`
 }
 
+type eventRecordsResponse struct {
+	Service      string                   `json:"service"`
+	Backend      string                   `json:"backend,omitempty"`
+	DataRoot     string                   `json:"dataRoot,omitempty"`
+	EventRecords []appservice.EventRecord `json:"eventRecords"`
+}
+
 type runsResponse struct {
 	Service  string           `json:"service"`
 	Backend  string           `json:"backend,omitempty"`
@@ -340,6 +347,7 @@ type readRunInstanceFunc func(context.Context, string, string, string) (appservi
 type readRunSnapshotFunc func(context.Context, string, string, string) (appservice.RunSnapshot, error)
 type readRunStatusFunc func(context.Context, string, string, string) (appservice.RunStatus, error)
 type readRunObservabilityFunc func(context.Context, string, string, string) (appservice.RunObservability, error)
+type listEventRecordsFunc func(context.Context, string, string, appservice.EventRecordQuery) ([]appservice.EventRecord, error)
 type listRunInstancesFunc func(context.Context, string, string, string) ([]appservice.Run, error)
 type startRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
 type resumeRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
@@ -393,6 +401,7 @@ type serverState struct {
 	readRunSnapshot        readRunSnapshotFunc
 	readRunStatus          readRunStatusFunc
 	readRunObservability   readRunObservabilityFunc
+	listEventRecords       listEventRecordsFunc
 	listRuns               listRunInstancesFunc
 	startRun               startRunInstanceFunc
 	resumeRun              resumeRunInstanceFunc
@@ -455,6 +464,7 @@ type serverMetrics struct {
 	runSnapshotRequests         atomic.Uint64
 	runStatusRequests           atomic.Uint64
 	runObservabilityRequests    atomic.Uint64
+	eventListRequests           atomic.Uint64
 	runStartRequests            atomic.Uint64
 	runResumeRequests           atomic.Uint64
 	workspaceActivationRequests atomic.Uint64
@@ -973,6 +983,21 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Backend:       state.config.Backend,
 			DataRoot:      state.config.DataRoot,
 			Observability: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/events", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.eventListRequests.Add(1)
+		items, err := state.listEventRecords(r.Context(), state.config.Backend, state.config.DataRoot, eventRecordQueryFromRequest(r))
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, eventRecordsResponse{
+			Service:      "workorch",
+			Backend:      state.config.Backend,
+			DataRoot:     state.config.DataRoot,
+			EventRecords: items,
 		})
 	})
 	router.AddHandler("/api/v1/workorch/decisions", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -1765,6 +1790,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		readRunSnapshot:        defaultReadRunSnapshot,
 		readRunStatus:          defaultReadRunStatus,
 		readRunObservability:   defaultReadRunObservability,
+		listEventRecords:       defaultListEventRecords,
 		listRuns:               defaultListRuns,
 		startRun:               defaultStartRun,
 		resumeRun:              defaultResumeRun,
@@ -1982,6 +2008,15 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ReadRunObservabilityWithSession(ctx, session, runID)
+			return err
+		})
+		return ret, err
+	}
+	s.listEventRecords = func(ctx context.Context, _, _ string, query appservice.EventRecordQuery) ([]appservice.EventRecord, error) {
+		var ret []appservice.EventRecord
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListEventRecordsWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
@@ -2325,6 +2360,10 @@ func defaultReadRunObservability(ctx context.Context, backend string, dataRoot s
 	return appservice.ReadRunObservabilityWithBackend(ctx, backend, dataRoot, runID)
 }
 
+func defaultListEventRecords(ctx context.Context, backend string, dataRoot string, query appservice.EventRecordQuery) ([]appservice.EventRecord, error) {
+	return appservice.ListEventRecordsWithBackend(ctx, backend, dataRoot, query)
+}
+
 func defaultListWorkspaces(ctx context.Context, backend string, dataRoot string) ([]appservice.Workspace, error) {
 	return appservice.ListWorkspacesWithBackend(ctx, backend, dataRoot)
 }
@@ -2557,6 +2596,27 @@ func runPriorityFromRequest(r *http.Request, bodyPriority int) int {
 		}
 	}
 	return 0
+}
+
+func eventRecordQueryFromRequest(r *http.Request) appservice.EventRecordQuery {
+	values := r.URL.Query()
+	limit := 0
+	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	return appservice.EventRecordQuery{
+		WorkspaceID:    values.Get("workspaceId"),
+		RunID:          values.Get("runId"),
+		Topic:          values.Get("topic"),
+		SubjectType:    values.Get("subjectType"),
+		SubjectID:      values.Get("subjectId"),
+		CursorAfterID:  values.Get("cursorAfterId"),
+		OccurredAfter:  values.Get("occurredAfter"),
+		OccurredBefore: values.Get("occurredBefore"),
+		Limit:          limit,
+	}
 }
 
 func (m *serverMetrics) render(config Config) string {

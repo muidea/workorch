@@ -20,6 +20,8 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
+	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
+	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -72,6 +74,8 @@ type RuntimeOrchestrator struct {
 }
 
 type RuntimeEvidenceRepositories struct {
+	Results            repository.ResultRepository
+	Artifacts          repository.ArtifactRepository
 	ToolCalls          repository.ToolCallRepository
 	Patches            repository.PatchRepository
 	ValidationResults  repository.ValidationResultRepository
@@ -653,6 +657,9 @@ func (o *RuntimeOrchestrator) dispatchStep(
 		_ = o.steps.Update(ctx, step)
 		_ = o.publishStepState(ctx, run, step, events.TopicStepStateChanged)
 		return o.FailRun(ctx, run.ID, err.Error())
+	}
+	if err := o.recordRunResultFromDoDAssessment(ctx, run, step, output); err != nil {
+		return err
 	}
 	if err := o.ValidateRun(ctx, run.ID); err != nil {
 		return err
@@ -1319,6 +1326,224 @@ func (o *RuntimeOrchestrator) recordValidationResult(
 	return nil
 }
 
+func (o *RuntimeOrchestrator) recordRunResultFromDoDAssessment(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	output map[string]any,
+) error {
+	if run == nil || step == nil || o.evidence.Results == nil || !requiresDoDAssessmentCompletionGate(run) {
+		return nil
+	}
+	assessment := doDAssessmentFromOutput(output)
+	if assessment == nil {
+		return nil
+	}
+	summary, _ := assessment["summary"].(string)
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return nil
+	}
+	now := runtimeEvidenceTimestamp()
+	artifactRefs, err := o.recordResultSummaryArtifact(ctx, run, step, summary, assessment, now)
+	if err != nil {
+		return err
+	}
+	item := &resultmodel.Result{
+		ID:           common.ResultID(fmt.Sprintf("%s/result/dod-assessment", run.ID)),
+		WorkspaceID:  run.WorkspaceID,
+		RunID:        run.ID,
+		GoalID:       run.GoalID,
+		DoDID:        run.DoDID,
+		State:        common.ResultStateAccepted,
+		Title:        "Accepted Result",
+		Summary:      summary,
+		SourceType:   resultcommon.SourceTypeDoDAssessment,
+		SourceRef:    string(step.ID),
+		EvidenceRefs: doDAssessmentEvidenceRefs(step.ID, assessment),
+		ArtifactRefs: artifactRefs,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := o.evidence.Results.Create(ctx, item); err != nil {
+		if err != common.ErrConflict {
+			return err
+		}
+		existing, getErr := o.evidence.Results.Get(ctx, item.ID)
+		if getErr != nil {
+			return getErr
+		}
+		existing.WorkspaceID = item.WorkspaceID
+		existing.RunID = item.RunID
+		existing.GoalID = item.GoalID
+		existing.DoDID = item.DoDID
+		existing.State = item.State
+		existing.Title = item.Title
+		existing.Summary = item.Summary
+		existing.SourceType = item.SourceType
+		existing.SourceRef = item.SourceRef
+		existing.EvidenceRefs = item.EvidenceRefs
+		existing.ArtifactRefs = item.ArtifactRefs
+		existing.UpdatedAt = now
+		if err := o.evidence.Results.Update(ctx, existing); err != nil {
+			return err
+		}
+		return o.publishResultAccepted(ctx, existing)
+	}
+	return o.publishResultAccepted(ctx, item)
+}
+
+func (o *RuntimeOrchestrator) recordResultSummaryArtifact(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	summary string,
+	assessment map[string]any,
+	now string,
+) ([]common.ArtifactID, error) {
+	if run == nil || step == nil || o.evidence.Artifacts == nil {
+		return nil, nil
+	}
+	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
+	item := &resultmodel.Artifact{
+		ID:           common.ArtifactID(fmt.Sprintf("%s/artifact/result-summary", run.ID)),
+		WorkspaceID:  run.WorkspaceID,
+		RunID:        run.ID,
+		ResultID:     common.ResultID(fmt.Sprintf("%s/result/dod-assessment", run.ID)),
+		StepID:       step.ID,
+		ArtifactType: resultcommon.ArtifactTypeText,
+		Name:         "Accepted Result Summary",
+		Summary:      summary,
+		URI:          fmt.Sprintf("workorch://runs/%s/results/dod-assessment/summary", run.ID),
+		ContentType:  "text/plain; charset=utf-8",
+		State:        common.ArtifactStateAvailable,
+		EvidenceRefs: evidenceRefs,
+		Metadata: map[string]any{
+			"sourceType": resultcommon.SourceTypeDoDAssessment,
+			"sourceRef":  string(step.ID),
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := o.evidence.Artifacts.Create(ctx, item); err != nil {
+		if err != common.ErrConflict {
+			return nil, err
+		}
+		existing, getErr := o.evidence.Artifacts.Get(ctx, item.ID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		existing.WorkspaceID = item.WorkspaceID
+		existing.RunID = item.RunID
+		existing.ResultID = item.ResultID
+		existing.StepID = item.StepID
+		existing.ArtifactType = item.ArtifactType
+		existing.Name = item.Name
+		existing.Summary = item.Summary
+		existing.URI = item.URI
+		existing.ContentType = item.ContentType
+		existing.State = item.State
+		existing.EvidenceRefs = item.EvidenceRefs
+		existing.Metadata = item.Metadata
+		existing.UpdatedAt = now
+		if err := o.evidence.Artifacts.Update(ctx, existing); err != nil {
+			return nil, err
+		}
+		return []common.ArtifactID{existing.ID}, o.publishArtifactCreated(ctx, existing)
+	}
+	return []common.ArtifactID{item.ID}, o.publishArtifactCreated(ctx, item)
+}
+
+func (o *RuntimeOrchestrator) publishResultAccepted(ctx context.Context, item *resultmodel.Result) error {
+	if item == nil || o.eventHub == nil {
+		return nil
+	}
+	artifactRefs := make([]string, 0, len(item.ArtifactRefs))
+	for _, ref := range item.ArtifactRefs {
+		if ref != "" {
+			artifactRefs = append(artifactRefs, string(ref))
+		}
+	}
+	return o.eventHub.Publish(ctx, events.Envelope{
+		ID:           fmt.Sprintf("%s/event/accepted", item.ID),
+		Version:      events.WorkorchEventVersion,
+		Topic:        events.TopicResultAccepted,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "result",
+		SubjectID:    string(item.ID),
+		WorkspaceID:  string(item.WorkspaceID),
+		RunID:        string(item.RunID),
+		Payload: events.ResultPayload(
+			item.GoalID,
+			item.DoDID,
+			item.State,
+			item.Title,
+			item.Summary,
+			item.SourceType,
+			item.SourceRef,
+			item.EvidenceRefs,
+			artifactRefs,
+		),
+	})
+}
+
+func (o *RuntimeOrchestrator) publishArtifactCreated(ctx context.Context, item *resultmodel.Artifact) error {
+	if item == nil || o.eventHub == nil {
+		return nil
+	}
+	return o.eventHub.Publish(ctx, events.Envelope{
+		ID:           fmt.Sprintf("%s/event/created", item.ID),
+		Version:      events.WorkorchEventVersion,
+		Topic:        events.TopicArtifactCreated,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "artifact",
+		SubjectID:    string(item.ID),
+		WorkspaceID:  string(item.WorkspaceID),
+		RunID:        string(item.RunID),
+		Payload: events.ArtifactPayload(
+			item.ResultID,
+			item.StepID,
+			item.ToolCallID,
+			item.PatchID,
+			item.ValidationResultID,
+			item.ArtifactType,
+			item.Name,
+			item.Summary,
+			item.URI,
+			item.ContentType,
+			item.State,
+			item.EvidenceRefs,
+		),
+	})
+}
+
+func doDAssessmentEvidenceRefs(stepID common.StepID, assessment map[string]any) []string {
+	seen := map[string]struct{}{}
+	ret := []string{}
+	add := func(ref string) {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			return
+		}
+		if _, exists := seen[ref]; exists {
+			return
+		}
+		seen[ref] = struct{}{}
+		ret = append(ret, ref)
+	}
+	add(string(stepID))
+	items, ok := doDAssessmentItemMaps(assessment["items"])
+	if ok {
+		for _, item := range items {
+			for _, ref := range evidenceRefsFromValue(item["evidenceRefs"]) {
+				add(ref)
+			}
+		}
+	}
+	sort.Strings(ret)
+	return ret
+}
+
 func (o *RuntimeOrchestrator) recordRunCheckpoint(ctx context.Context, run *runModel.Run) error {
 	if run == nil || o.evidence.RuntimeCheckpoints == nil {
 		return nil
@@ -1762,6 +1987,9 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatch(ctx context.Context, run *r
 		last.Output = runtimeFailureOutput(last.Output, err)
 		_ = o.steps.Update(ctx, last)
 		return o.FailRun(ctx, currentRun.ID, err.Error())
+	}
+	if err := o.recordRunResultFromDoDAssessment(ctx, currentRun, last, last.Output); err != nil {
+		return err
 	}
 	if err := o.ValidateRun(ctx, currentRun.ID); err != nil {
 		return err

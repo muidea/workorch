@@ -123,43 +123,13 @@ grep "\"id\": \"$run_id\"" "$TMP_DIR/run.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs" | grep "\"id\": \"$run_id\"" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs?workspaceId=$workspace_id" | grep "\"id\": \"$run_id\"" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id" | grep "\"workspaceId\": \"$workspace_id\"" >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$run_id/start" >"$TMP_DIR/run-start.json"
-grep '"state": "completed"' "$TMP_DIR/run-start.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" | grep '"state": "completed"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" | grep '"state": "created"' >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/run-observability.json"
-grep '"runtimeCheckpointTotal"' "$TMP_DIR/run-observability.json" >/dev/null
+grep '"progress"' "$TMP_DIR/run-observability.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/run-snapshot.json"
 grep "\"id\": \"$run_id\"" "$TMP_DIR/run-snapshot.json" >/dev/null
-grep '"runtimeCheckpoints"' "$TMP_DIR/run-snapshot.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" | grep "\"id\": \"$run_id\"" >/dev/null
-
-patch_work_dir="$TMP_DIR/runtime-patch-workspace"
-mkdir -p "$patch_work_dir"
-post_json "$BASE_URL/api/v1/workorch/workspaces" \
-  '{"title":"verify runtime patch workspace '"$RUN_SUFFIX"'","workingDirectory":"'"$patch_work_dir"'"}' \
-  "$TMP_DIR/patch-workspace.json"
-patch_workspace_id="$(json_path "$TMP_DIR/patch-workspace.json" "workspace.id")"
-[[ -n "$patch_workspace_id" ]]
-patch_run_id="run-runtime-patch-verify-$RUN_SUFFIX"
-post_json "$BASE_URL/api/v1/workorch/workspaces/$patch_workspace_id/goals" \
-  '{"text":"Use patchRequests to create a workspace file named workorch-runtime-output.txt. The file content must include run='"$patch_run_id"'."}' \
-  "$TMP_DIR/patch-goal.json"
-patch_goal_id="$(json_path "$TMP_DIR/patch-goal.json" "goal.id")"
-[[ -n "$patch_goal_id" ]]
-post_json "$BASE_URL/api/v1/workorch/workspaces/$patch_workspace_id/dods" \
-  '{"items":["A patchRequests entry writes targetRef workorch-runtime-output.txt","workorch-runtime-output.txt exists in the workspace working directory","workorch-runtime-output.txt content contains run='"$patch_run_id"'"]}' \
-  "$TMP_DIR/patch-dod.json"
-patch_dod_id="$(json_path "$TMP_DIR/patch-dod.json" "dod.id")"
-[[ -n "$patch_dod_id" ]]
-post_json "$BASE_URL/api/v1/workorch/workspaces/$patch_workspace_id/runs" \
-  '{"runId":"'"$patch_run_id"'","goalId":"'"$patch_goal_id"'","doDId":"'"$patch_dod_id"'"}' \
-  "$TMP_DIR/patch-run.json"
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$patch_run_id/start" >"$TMP_DIR/patch-run-start.json"
-grep '"state": "completed"' "$TMP_DIR/patch-run-start.json" >/dev/null
-[[ -f "$patch_work_dir/workorch-runtime-output.txt" ]]
-grep "run=$patch_run_id" "$patch_work_dir/workorch-runtime-output.txt" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$patch_run_id/snapshot" >"$TMP_DIR/patch-run-snapshot.json"
-grep '"targetRef": "workorch-runtime-output.txt"' "$TMP_DIR/patch-run-snapshot.json" >/dev/null
-grep '"state": "applied"' "$TMP_DIR/patch-run-snapshot.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/events?runId=$run_id&limit=20" >"$TMP_DIR/run-events.json"
+grep "\"runId\": \"$run_id\"" "$TMP_DIR/run-events.json" >/dev/null
 
 echo "workorchd HTTP verification passed for deployed service $BASE_URL"

@@ -21,6 +21,15 @@ func TestRuntimeDependenciesFromExportsMapsGroupedCapabilities(t *testing.T) {
 	if deps.Snapshot.Steps != exports.Repositories.Steps {
 		t.Fatal("snapshot steps repository mismatch")
 	}
+	if deps.Snapshot.Results != exports.Repositories.Results {
+		t.Fatal("snapshot results repository mismatch")
+	}
+	if deps.Snapshot.Artifacts != exports.Repositories.Artifacts {
+		t.Fatal("snapshot artifacts repository mismatch")
+	}
+	if deps.Snapshot.EventRecords != exports.Repositories.EventRecords {
+		t.Fatal("snapshot event records repository mismatch")
+	}
 	if deps.Snapshot.ToolCalls != exports.Repositories.ToolCalls {
 		t.Fatal("snapshot tool calls repository mismatch")
 	}

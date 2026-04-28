@@ -20,6 +20,7 @@ import (
 	_ "github.com/muidea/workorch/internal/modules/blocks/shell"
 	_ "github.com/muidea/workorch/internal/modules/blocks/ssh"
 	_ "github.com/muidea/workorch/internal/modules/kernel/decision"
+	_ "github.com/muidea/workorch/internal/modules/kernel/eventstream"
 	_ "github.com/muidea/workorch/internal/modules/kernel/mcp"
 	_ "github.com/muidea/workorch/internal/modules/kernel/memory"
 	_ "github.com/muidea/workorch/internal/modules/kernel/orchestrator"

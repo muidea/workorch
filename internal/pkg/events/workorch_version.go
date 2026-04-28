@@ -14,6 +14,8 @@ var (
 	workorchEventContracts = map[string]WorkorchContractSpec{
 		TopicWorkspaceCreated:      newWorkorchEventContract(TopicWorkspaceCreated),
 		TopicWorkspaceStateChanged: newWorkorchEventContract(TopicWorkspaceStateChanged),
+		TopicGoalDefined:           newWorkorchEventContract(TopicGoalDefined),
+		TopicDoDDefined:            newWorkorchEventContract(TopicDoDDefined),
 		TopicRunCreated:            newWorkorchEventContract(TopicRunCreated),
 		TopicRunStateChanged:       newWorkorchEventContract(TopicRunStateChanged),
 		TopicStepDispatched:        newWorkorchEventContract(TopicStepDispatched),
@@ -22,6 +24,8 @@ var (
 		TopicTicketResolved:        newWorkorchEventContract(TopicTicketResolved),
 		TopicApprovalCreated:       newWorkorchEventContract(TopicApprovalCreated),
 		TopicApprovalResolved:      newWorkorchEventContract(TopicApprovalResolved),
+		TopicResultAccepted:        newWorkorchEventContract(TopicResultAccepted),
+		TopicArtifactCreated:       newWorkorchEventContract(TopicArtifactCreated),
 	}
 	workorchSnapshotContracts = map[string]WorkorchContractSpec{
 		"/workspace/snapshot":       newWorkorchSnapshotContract("/workspace/snapshot"),

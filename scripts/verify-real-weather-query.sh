@@ -257,6 +257,8 @@ steps = snapshot.get("steps") or ([] if not snapshot.get("step") else [snapshot[
 tool_calls = snapshot.get("toolCalls") or []
 validations = snapshot.get("validationResults") or []
 checkpoints = snapshot.get("runtimeCheckpoints") or []
+results = snapshot.get("results") or []
+artifacts = snapshot.get("artifacts") or []
 errors = []
 
 if run.get("state") != "completed":
@@ -309,6 +311,19 @@ if not validations:
     errors.append("missing ValidationResult evidence")
 if not checkpoints:
     errors.append("missing RuntimeCheckpoint evidence")
+accepted_results = [item for item in results if item.get("state") == "accepted"]
+if not accepted_results:
+    errors.append("missing accepted Result final outcome")
+else:
+    result = accepted_results[-1]
+    if "杭州" not in str(result.get("summary") or ""):
+        errors.append(f"Result summary does not expose final weather result: {result}")
+    artifact_refs = set(result.get("artifactRefs") or [])
+    linked_artifacts = [item for item in artifacts if item.get("resultId") == result.get("id")]
+    if not linked_artifacts:
+        errors.append(f"missing Artifact linked to accepted Result {result.get('id')}")
+    elif not any(item.get("id") in artifact_refs and item.get("artifactType") == "text" for item in linked_artifacts):
+        errors.append(f"missing text Artifact referenced by Result: result={result} artifacts={linked_artifacts}")
 
 if errors:
     for item in errors:
@@ -328,6 +343,8 @@ print(f"windSpeedKmh={current.get('windSpeedKmh')}")
 print(f"steps={len(steps)}")
 print(f"toolCalls={len(tool_calls)}")
 print(f"validations={len(validations)}")
+print(f"results={len(results)}")
+print(f"artifacts={len(artifacts)}")
 print(f"runtimeCheckpoints={len(checkpoints)}")
 PY
 }

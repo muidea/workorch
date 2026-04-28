@@ -8,8 +8,10 @@ import (
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
@@ -71,6 +73,42 @@ func TestMCPServerRepositoryContract_Memory(t *testing.T) {
 func TestMCPServerRepositoryContract_File(t *testing.T) {
 	testMCPServerRepositoryContract(t, func() repository.MCPServerRepository {
 		return file.NewMCPServerRepository(filepath.Join(t.TempDir(), "mcp_server.json"))
+	})
+}
+
+func TestResultRepositoryContract_Memory(t *testing.T) {
+	testResultRepositoryContract(t, func() repository.ResultRepository {
+		return memory.NewResultRepository()
+	})
+}
+
+func TestResultRepositoryContract_File(t *testing.T) {
+	testResultRepositoryContract(t, func() repository.ResultRepository {
+		return file.NewResultRepository(filepath.Join(t.TempDir(), "result.json"))
+	})
+}
+
+func TestArtifactRepositoryContract_Memory(t *testing.T) {
+	testArtifactRepositoryContract(t, func() repository.ArtifactRepository {
+		return memory.NewArtifactRepository()
+	})
+}
+
+func TestArtifactRepositoryContract_File(t *testing.T) {
+	testArtifactRepositoryContract(t, func() repository.ArtifactRepository {
+		return file.NewArtifactRepository(filepath.Join(t.TempDir(), "artifact.json"))
+	})
+}
+
+func TestEventRecordRepositoryContract_Memory(t *testing.T) {
+	testEventRecordRepositoryContract(t, func() repository.EventRecordRepository {
+		return memory.NewEventRecordRepository()
+	})
+}
+
+func TestEventRecordRepositoryContract_File(t *testing.T) {
+	testEventRecordRepositoryContract(t, func() repository.EventRecordRepository {
+		return file.NewEventRecordRepository(filepath.Join(t.TempDir(), "event_record.json"))
 	})
 }
 
@@ -218,6 +256,9 @@ func TestRepositoryBundleContract_Memory(t *testing.T) {
 		memoryItems:        memory.NewMemoryItemRepository(),
 		skills:             memory.NewSkillRepository(),
 		mcpServers:         memory.NewMCPServerRepository(),
+		results:            memory.NewResultRepository(),
+		artifacts:          memory.NewArtifactRepository(),
+		eventRecords:       memory.NewEventRecordRepository(),
 		workspaces:         memory.NewWorkspaceRepository(),
 		goals:              memory.NewGoalRepository(),
 		dods:               memory.NewDoDRepository(),
@@ -242,6 +283,9 @@ func TestRepositoryBundleContract_File(t *testing.T) {
 			memoryItems:        file.NewMemoryItemRepository(filepath.Join(dir, "memory_item.json")),
 			skills:             file.NewSkillRepository(filepath.Join(dir, "skill.json")),
 			mcpServers:         file.NewMCPServerRepository(filepath.Join(dir, "mcp_server.json")),
+			results:            file.NewResultRepository(filepath.Join(dir, "result.json")),
+			artifacts:          file.NewArtifactRepository(filepath.Join(dir, "artifact.json")),
+			eventRecords:       file.NewEventRecordRepository(filepath.Join(dir, "event_record.json")),
 			workspaces:         file.NewWorkspaceRepository(filepath.Join(dir, "workspace.json")),
 			goals:              file.NewGoalRepository(filepath.Join(dir, "goal.json")),
 			dods:               file.NewDoDRepository(filepath.Join(dir, "dod.json")),
@@ -264,6 +308,9 @@ type repositoryBundle struct {
 	memoryItems        repository.MemoryItemRepository
 	skills             repository.SkillRepository
 	mcpServers         repository.MCPServerRepository
+	results            repository.ResultRepository
+	artifacts          repository.ArtifactRepository
+	eventRecords       repository.EventRecordRepository
 	workspaces         repository.WorkspaceRepository
 	goals              repository.GoalRepository
 	dods               repository.DoDRepository
@@ -382,6 +429,242 @@ func testMCPServerRepositoryContract(t *testing.T, factory func() repository.MCP
 	}
 	if _, err := repo.Get(ctx, common.MCPServerID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("get missing mcp server err = %v, want not found", err)
+	}
+}
+
+func testResultRepositoryContract(t *testing.T, factory func() repository.ResultRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &resultmodel.Result{
+		ID:           common.ResultID("result-contract"),
+		WorkspaceID:  common.WorkspaceID("ws-contract"),
+		RunID:        common.RunID("run-contract"),
+		GoalID:       common.GoalID("goal-contract"),
+		DoDID:        common.DoDID("dod-contract"),
+		State:        common.ResultStateAccepted,
+		Title:        "accepted outcome",
+		Summary:      "Run completed with evidence-backed result.",
+		SourceType:   "dod_assessment",
+		SourceRef:    "step-contract",
+		EvidenceRefs: []string{"step-contract", "validation-contract"},
+		ArtifactRefs: []common.ArtifactID{common.ArtifactID("artifact-contract")},
+		CreatedAt:    "2026-04-28T00:00:00Z",
+		UpdatedAt:    "2026-04-28T00:00:00Z",
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create result: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate result create err = %v, want conflict", err)
+	}
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get result: %v", err)
+	}
+	got.EvidenceRefs[0] = "mutated"
+	got.ArtifactRefs[0] = common.ArtifactID("mutated")
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get result fresh: %v", err)
+	}
+	if fresh.EvidenceRefs[0] != "step-contract" || fresh.ArtifactRefs[0] != "artifact-contract" {
+		t.Fatalf("result clone isolation failed: %+v", fresh)
+	}
+	fresh.Summary = "updated accepted outcome"
+	fresh.UpdatedAt = "2026-04-28T00:01:00Z"
+	if err := repo.Update(ctx, fresh); err != nil {
+		t.Fatalf("update result: %v", err)
+	}
+	byWorkspace, err := repo.ListByWorkspace(ctx, item.WorkspaceID)
+	if err != nil {
+		t.Fatalf("list results by workspace: %v", err)
+	}
+	if len(byWorkspace) != 1 || byWorkspace[0].Summary != "updated accepted outcome" {
+		t.Fatalf("workspace results = %+v, want updated result", byWorkspace)
+	}
+	byRun, err := repo.ListByRun(ctx, item.RunID)
+	if err != nil {
+		t.Fatalf("list results by run: %v", err)
+	}
+	if len(byRun) != 1 || byRun[0].ID != item.ID {
+		t.Fatalf("run results = %+v, want %s", byRun, item.ID)
+	}
+	empty, err := repo.ListByRun(ctx, common.RunID("missing"))
+	if err != nil {
+		t.Fatalf("list missing run results: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("missing run results = %+v, want empty", empty)
+	}
+	if _, err := repo.Get(ctx, common.ResultID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get missing result err = %v, want not found", err)
+	}
+	if err := repo.Update(ctx, &resultmodel.Result{ID: common.ResultID("missing")}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("update missing result err = %v, want not found", err)
+	}
+}
+
+func testArtifactRepositoryContract(t *testing.T, factory func() repository.ArtifactRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &resultmodel.Artifact{
+		ID:                 common.ArtifactID("artifact-contract"),
+		WorkspaceID:        common.WorkspaceID("ws-contract"),
+		RunID:              common.RunID("run-contract"),
+		ResultID:           common.ResultID("result-contract"),
+		StepID:             common.StepID("step-contract"),
+		ToolCallID:         common.ToolCallID("tool-contract"),
+		PatchID:            common.PatchID("patch-contract"),
+		ValidationResultID: common.ValidationResultID("validation-contract"),
+		ArtifactType:       "report",
+		Name:               "acceptance report",
+		Summary:            "Final acceptance report",
+		URI:                "workspace://results/acceptance.md",
+		ContentType:        "text/markdown",
+		State:              common.ArtifactStateAvailable,
+		EvidenceRefs:       []string{"tool-contract", "validation-contract"},
+		Metadata:           map[string]any{"kind": "acceptance", "score": float64(1)},
+		CreatedAt:          "2026-04-28T00:00:00Z",
+		UpdatedAt:          "2026-04-28T00:00:00Z",
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create artifact: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate artifact create err = %v, want conflict", err)
+	}
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get artifact: %v", err)
+	}
+	got.EvidenceRefs[0] = "mutated"
+	got.Metadata["kind"] = "mutated"
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get artifact fresh: %v", err)
+	}
+	if fresh.EvidenceRefs[0] != "tool-contract" || fresh.Metadata["kind"] != "acceptance" {
+		t.Fatalf("artifact clone isolation failed: %+v", fresh)
+	}
+	fresh.Summary = "Updated final report"
+	fresh.UpdatedAt = "2026-04-28T00:01:00Z"
+	if err := repo.Update(ctx, fresh); err != nil {
+		t.Fatalf("update artifact: %v", err)
+	}
+	byWorkspace, err := repo.ListByWorkspace(ctx, item.WorkspaceID)
+	if err != nil {
+		t.Fatalf("list artifacts by workspace: %v", err)
+	}
+	if len(byWorkspace) != 1 || byWorkspace[0].Summary != "Updated final report" {
+		t.Fatalf("workspace artifacts = %+v, want updated artifact", byWorkspace)
+	}
+	byRun, err := repo.ListByRun(ctx, item.RunID)
+	if err != nil {
+		t.Fatalf("list artifacts by run: %v", err)
+	}
+	if len(byRun) != 1 || byRun[0].ID != item.ID {
+		t.Fatalf("run artifacts = %+v, want %s", byRun, item.ID)
+	}
+	byResult, err := repo.ListByResult(ctx, item.ResultID)
+	if err != nil {
+		t.Fatalf("list artifacts by result: %v", err)
+	}
+	if len(byResult) != 1 || byResult[0].ID != item.ID {
+		t.Fatalf("result artifacts = %+v, want %s", byResult, item.ID)
+	}
+	empty, err := repo.ListByResult(ctx, common.ResultID("missing"))
+	if err != nil {
+		t.Fatalf("list missing result artifacts: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("missing result artifacts = %+v, want empty", empty)
+	}
+	if _, err := repo.Get(ctx, common.ArtifactID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get missing artifact err = %v, want not found", err)
+	}
+	if err := repo.Update(ctx, &resultmodel.Artifact{ID: common.ArtifactID("missing")}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("update missing artifact err = %v, want not found", err)
+	}
+}
+
+func testEventRecordRepositoryContract(t *testing.T, factory func() repository.EventRecordRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	first := &eventstreammodel.EventRecord{
+		ID:           common.EventRecordID("event-record-1"),
+		Version:      "workorch.event.v1",
+		Topic:        "/run/state/changed",
+		OccurredAt:   "2026-04-28T00:00:00Z",
+		SourceModule: "kernel/run",
+		SubjectType:  "run",
+		SubjectID:    "run-contract",
+		WorkspaceID:  common.WorkspaceID("ws-contract"),
+		RunID:        common.RunID("run-contract"),
+		Payload:      map[string]any{"state": "running"},
+	}
+	second := &eventstreammodel.EventRecord{
+		ID:           common.EventRecordID("event-record-2"),
+		Version:      "workorch.event.v1",
+		Topic:        "/step/state/changed",
+		OccurredAt:   "2026-04-28T00:01:00Z",
+		SourceModule: "kernel/orchestrator",
+		SubjectType:  "step",
+		SubjectID:    "step-contract",
+		WorkspaceID:  common.WorkspaceID("ws-contract"),
+		RunID:        common.RunID("run-contract"),
+		StepID:       common.StepID("step-contract"),
+		Payload:      map[string]any{"state": "completed"},
+	}
+	if err := repo.Append(ctx, first); err != nil {
+		t.Fatalf("append first event record: %v", err)
+	}
+	if err := repo.Append(ctx, first); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate event record append err = %v, want conflict", err)
+	}
+	if err := repo.Append(ctx, second); err != nil {
+		t.Fatalf("append second event record: %v", err)
+	}
+	got, err := repo.Get(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("get event record: %v", err)
+	}
+	got.Payload["state"] = "mutated"
+	fresh, err := repo.Get(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("get event record fresh: %v", err)
+	}
+	if fresh.Payload["state"] != "running" {
+		t.Fatalf("event record clone isolation failed: %+v", fresh)
+	}
+	byRun, err := repo.List(ctx, repository.EventRecordQuery{RunID: first.RunID})
+	if err != nil {
+		t.Fatalf("list events by run: %v", err)
+	}
+	if len(byRun) != 2 || byRun[0].ID != first.ID || byRun[1].ID != second.ID {
+		t.Fatalf("run events = %+v, want ordered first and second", byRun)
+	}
+	byTopic, err := repo.List(ctx, repository.EventRecordQuery{Topic: second.Topic})
+	if err != nil {
+		t.Fatalf("list events by topic: %v", err)
+	}
+	if len(byTopic) != 1 || byTopic[0].ID != second.ID {
+		t.Fatalf("topic events = %+v, want second", byTopic)
+	}
+	afterCursor, err := repo.List(ctx, repository.EventRecordQuery{RunID: first.RunID, CursorAfterID: first.ID, Limit: 1})
+	if err != nil {
+		t.Fatalf("list events after cursor: %v", err)
+	}
+	if len(afterCursor) != 1 || afterCursor[0].ID != second.ID {
+		t.Fatalf("cursor events = %+v, want second", afterCursor)
+	}
+	if _, err := repo.Get(ctx, common.EventRecordID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get missing event record err = %v, want not found", err)
 	}
 }
 
@@ -1478,6 +1761,9 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	patchID := common.PatchID("patch-bundle-contract")
 	validationResultID := common.ValidationResultID("validation-bundle-contract")
 	checkpointID := common.CheckpointID("checkpoint-bundle-contract")
+	resultID := common.ResultID("result-bundle-contract")
+	artifactID := common.ArtifactID("artifact-bundle-contract")
+	eventRecordID := common.EventRecordID("event-bundle-contract")
 	ticketID := common.TicketID("ticket-bundle-contract")
 	resolutionID := common.ResolutionID("resolution-bundle-contract")
 	approvalID := common.ApprovalID("approval-bundle-contract")
@@ -1692,6 +1978,71 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		t.Fatalf("duplicate runtime checkpoint create err = %v, want conflict", err)
 	}
 
+	result := &resultmodel.Result{
+		ID:           resultID,
+		WorkspaceID:  workspaceID,
+		RunID:        runID,
+		GoalID:       goalID,
+		DoDID:        dodID,
+		State:        common.ResultStateAccepted,
+		Title:        "bundle result",
+		Summary:      "bundle accepted outcome",
+		SourceType:   "dod_assessment",
+		SourceRef:    string(stepID),
+		EvidenceRefs: []string{string(stepID), string(validationResultID)},
+		ArtifactRefs: []common.ArtifactID{artifactID},
+	}
+	if err := bundle.results.Create(ctx, result); err != nil {
+		t.Fatalf("create result: %v", err)
+	}
+	if err := bundle.results.Create(ctx, result); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate result create err = %v, want conflict", err)
+	}
+
+	artifact := &resultmodel.Artifact{
+		ID:                 artifactID,
+		WorkspaceID:        workspaceID,
+		RunID:              runID,
+		ResultID:           resultID,
+		StepID:             stepID,
+		ToolCallID:         toolCallID,
+		PatchID:            patchID,
+		ValidationResultID: validationResultID,
+		ArtifactType:       "report",
+		Name:               "bundle report",
+		Summary:            "bundle report summary",
+		URI:                "workspace://results/bundle-report.md",
+		ContentType:        "text/markdown",
+		State:              common.ArtifactStateAvailable,
+		EvidenceRefs:       []string{string(toolCallID), string(validationResultID)},
+		Metadata:           map[string]any{"scope": "bundle"},
+	}
+	if err := bundle.artifacts.Create(ctx, artifact); err != nil {
+		t.Fatalf("create artifact: %v", err)
+	}
+	if err := bundle.artifacts.Create(ctx, artifact); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate artifact create err = %v, want conflict", err)
+	}
+
+	eventRecord := &eventstreammodel.EventRecord{
+		ID:           eventRecordID,
+		Version:      "workorch.event.v1",
+		Topic:        "/run/state/changed",
+		OccurredAt:   "2026-04-28T00:00:00Z",
+		SourceModule: "kernel/run",
+		SubjectType:  "run",
+		SubjectID:    string(runID),
+		WorkspaceID:  workspaceID,
+		RunID:        runID,
+		Payload:      map[string]any{"state": string(common.RunStateBlockedOnDecision)},
+	}
+	if err := bundle.eventRecords.Append(ctx, eventRecord); err != nil {
+		t.Fatalf("append event record: %v", err)
+	}
+	if err := bundle.eventRecords.Append(ctx, eventRecord); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate event record append err = %v, want conflict", err)
+	}
+
 	ticket := &decisionmodel.Ticket{
 		ID:          ticketID,
 		WorkspaceID: workspaceID,
@@ -1894,6 +2245,30 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		t.Fatalf("reloaded runtime checkpoints = %+v, want %q", reloadedCheckpoints, checkpointID)
 	}
 
+	reloadedResults, err := reloaded.results.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("reload results by run: %v", err)
+	}
+	if len(reloadedResults) != 1 || reloadedResults[0].ID != resultID || reloadedResults[0].ArtifactRefs[0] != artifactID {
+		t.Fatalf("reloaded results = %+v, want %q with artifact ref", reloadedResults, resultID)
+	}
+
+	reloadedArtifacts, err := reloaded.artifacts.ListByResult(ctx, resultID)
+	if err != nil {
+		t.Fatalf("reload artifacts by result: %v", err)
+	}
+	if len(reloadedArtifacts) != 1 || reloadedArtifacts[0].ID != artifactID || reloadedArtifacts[0].Metadata["scope"] != "bundle" {
+		t.Fatalf("reloaded artifacts = %+v, want %q with metadata", reloadedArtifacts, artifactID)
+	}
+
+	reloadedEvents, err := reloaded.eventRecords.List(ctx, repository.EventRecordQuery{RunID: runID})
+	if err != nil {
+		t.Fatalf("reload event records by run: %v", err)
+	}
+	if len(reloadedEvents) != 1 || reloadedEvents[0].ID != eventRecordID || reloadedEvents[0].Payload["state"] != string(common.RunStateBlockedOnDecision) {
+		t.Fatalf("reloaded event records = %+v, want %q", reloadedEvents, eventRecordID)
+	}
+
 	reloadedTickets, err := reloaded.tickets.List(ctx)
 	if err != nil {
 		t.Fatalf("reload tickets: %v", err)
@@ -1956,6 +2331,9 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	}
 	if _, err := reloaded.runtimeCheckpoints.Get(ctx, common.CheckpointID("checkpoint-missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing runtime checkpoint get err = %v, want not found", err)
+	}
+	if _, err := reloaded.eventRecords.Get(ctx, common.EventRecordID("event-missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing event record get err = %v, want not found", err)
 	}
 	if _, err := reloaded.tickets.Get(ctx, common.TicketID("ticket-missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing ticket get err = %v, want not found", err)

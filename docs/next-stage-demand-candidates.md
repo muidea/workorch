@@ -10,7 +10,12 @@ API/Web impact, and verification commands.
 
 ## Current Promoted Requirement
 
-- none
+- `Formal Business Result And Artifact Model`
+- `Persistent Workorch Event Stream`
+
+Active delivery plan:
+
+- `docs/next-stage-result-event-development-plan.md`
 
 ## Completed P1 Delivery
 
@@ -19,6 +24,39 @@ API/Web impact, and verification commands.
 - `C6 LLM Provider Streaming And Non-Chat APIs`
 
 ## Candidate List
+
+### C8. Formal Business Result And Artifact Model
+
+Status: promoted
+
+Target direction:
+
+- Promote final Workspace / Run outcome from `dodAssessment.summary` into a
+  first-class business Result.
+- Attach generated deliverables, file outputs, external references, and
+  evidence-backed outputs as formal Artifacts.
+- Keep ToolCall, Patch, ValidationResult, RuntimeCheckpoint, Memory, and events
+  as evidence/context rather than final business outcome.
+
+Acceptance:
+
+- Tracked in `docs/next-stage-result-event-development-plan.md`.
+
+### C9. Persistent Workorch Event Stream
+
+Status: promoted
+
+Target direction:
+
+- Persist formal Workorch business events emitted through the existing EventHub
+  boundary.
+- Support audit/replay queries by workspace, run, topic, subject, and cursor.
+- Allow observability and Workspace detail to use persisted event timeline data
+  without synthesizing missing events from repository state.
+
+Acceptance:
+
+- Tracked in `docs/next-stage-result-event-development-plan.md`.
 
 ### C2. Distributed Scheduling And External Worker Fleets
 

@@ -14,6 +14,9 @@ type repositorySet struct {
 	memoryItem        repository.MemoryItemRepository
 	skill             repository.SkillRepository
 	mcpServer         repository.MCPServerRepository
+	result            repository.ResultRepository
+	artifact          repository.ArtifactRepository
+	eventRecord       repository.EventRecordRepository
 	workspace         repository.WorkspaceRepository
 	goal              repository.GoalRepository
 	dod               repository.DoDRepository
@@ -36,6 +39,9 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 			memoryItem:        memory.NewMemoryItemRepository(),
 			skill:             memory.NewSkillRepository(),
 			mcpServer:         memory.NewMCPServerRepository(),
+			result:            memory.NewResultRepository(),
+			artifact:          memory.NewArtifactRepository(),
+			eventRecord:       memory.NewEventRecordRepository(),
 			workspace:         memory.NewWorkspaceRepository(),
 			goal:              memory.NewGoalRepository(),
 			dod:               memory.NewDoDRepository(),
@@ -58,6 +64,9 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 			memoryItem:        fileRepo.NewMemoryItemRepository(filepath.Join(dataRoot, "memory_item.json")),
 			skill:             fileRepo.NewSkillRepository(filepath.Join(dataRoot, "skill.json")),
 			mcpServer:         fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "mcp_server.json")),
+			result:            fileRepo.NewResultRepository(filepath.Join(dataRoot, "result.json")),
+			artifact:          fileRepo.NewArtifactRepository(filepath.Join(dataRoot, "artifact.json")),
+			eventRecord:       fileRepo.NewEventRecordRepository(filepath.Join(dataRoot, "event_record.json")),
 			workspace:         fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json")),
 			goal:              fileRepo.NewGoalRepository(filepath.Join(dataRoot, "goal.json")),
 			dod:               fileRepo.NewDoDRepository(filepath.Join(dataRoot, "dod.json")),

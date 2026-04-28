@@ -24,6 +24,8 @@ type Dependencies struct {
 	Tickets            repository.DecisionTicketRepository
 	Resolutions        repository.DecisionResolutionRepository
 	Approvals          repository.ApprovalRepository
+	Results            repository.ResultRepository
+	Artifacts          repository.ArtifactRepository
 	ToolCalls          repository.ToolCallRepository
 	Patches            repository.PatchRepository
 	ValidationResults  repository.ValidationResultRepository
@@ -49,6 +51,8 @@ func (m *Module) Setup(deps Dependencies) error {
 		deps.Tickets == nil ||
 		deps.Resolutions == nil ||
 		deps.Approvals == nil ||
+		deps.Results == nil ||
+		deps.Artifacts == nil ||
 		deps.ToolCalls == nil ||
 		deps.Patches == nil ||
 		deps.ValidationResults == nil ||
@@ -65,6 +69,8 @@ func (m *Module) Setup(deps Dependencies) error {
 		deps.Resolutions,
 		deps.Approvals,
 		orchestratorbiz.RuntimeEvidenceRepositories{
+			Results:            deps.Results,
+			Artifacts:          deps.Artifacts,
 			ToolCalls:          deps.ToolCalls,
 			Patches:            deps.Patches,
 			ValidationResults:  deps.ValidationResults,
