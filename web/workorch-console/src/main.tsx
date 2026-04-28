@@ -272,13 +272,7 @@ function decisionInitialPayload(item: Decision) {
 }
 
 function decisionFieldLabel(field: string) {
-  const labels: Record<string, string> = {
-    country: '国家',
-    province: '省份',
-    city: '城市',
-    lookupName: '查询名称'
-  };
-  return labels[field] ? `${labels[field]} (${field})` : field;
+  return field;
 }
 
 function parseDecisionExtraPayload(text: unknown) {
