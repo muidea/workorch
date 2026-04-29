@@ -13,4 +13,5 @@ type ToolCallRepository interface {
 	ListByRun(context.Context, common.RunID) ([]*run.ToolCall, error)
 	ListByStep(context.Context, common.StepID) ([]*run.ToolCall, error)
 	Update(context.Context, *run.ToolCall) error
+	Delete(context.Context, common.ToolCallID) error
 }

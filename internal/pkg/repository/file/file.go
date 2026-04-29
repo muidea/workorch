@@ -333,6 +333,12 @@ func (r *MemoryItemRepository) Update(_ context.Context, item *memorymodel.Memor
 	return saveMap(r.path, items)
 }
 
+func (r *MemoryItemRepository) Delete(_ context.Context, id common.MemoryID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return deleteMapItem[common.MemoryID, memorymodel.MemoryItem](r.path, id)
+}
+
 func NewSkillRepository(path string) *SkillRepository {
 	return &SkillRepository{path: path}
 }
@@ -550,6 +556,12 @@ func (r *ResultRepository) Update(_ context.Context, item *resultmodel.Result) e
 	return saveMap(r.path, items)
 }
 
+func (r *ResultRepository) Delete(_ context.Context, id common.ResultID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return deleteMapItem[common.ResultID, resultmodel.Result](r.path, id)
+}
+
 func NewArtifactRepository(path string) *ArtifactRepository {
 	return &ArtifactRepository{path: path}
 }
@@ -638,6 +650,12 @@ func (r *ArtifactRepository) Update(_ context.Context, item *resultmodel.Artifac
 	return saveMap(r.path, items)
 }
 
+func (r *ArtifactRepository) Delete(_ context.Context, id common.ArtifactID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return deleteMapItem[common.ArtifactID, resultmodel.Artifact](r.path, id)
+}
+
 func NewEventRecordRepository(path string) *EventRecordRepository {
 	return &EventRecordRepository{path: path}
 }
@@ -681,6 +699,12 @@ func (r *EventRecordRepository) List(_ context.Context, query repository.EventRe
 		return nil, err
 	}
 	return listEventRecords(items, query), nil
+}
+
+func (r *EventRecordRepository) Delete(_ context.Context, id common.EventRecordID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return deleteMapItem[common.EventRecordID, eventstream.EventRecord](r.path, id)
 }
 
 func NewWorkspaceRepository(path string) *WorkspaceRepository {
@@ -752,6 +776,21 @@ func (r *WorkspaceRepository) Update(_ context.Context, item *workspace.Workspac
 		return common.ErrNotFound
 	}
 	items[item.ID] = *cloneWorkspace(item)
+	return saveMap(r.path, items)
+}
+
+func (r *WorkspaceRepository) Delete(_ context.Context, id common.WorkspaceID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[common.WorkspaceID, workspace.Workspace](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[id]; !ok {
+		return common.ErrNotFound
+	}
+	delete(items, id)
 	return saveMap(r.path, items)
 }
 
@@ -905,6 +944,12 @@ func (r *GoalRepository) Update(_ context.Context, item *workspace.Goal) error {
 	return saveMap(r.path, items)
 }
 
+func (r *GoalRepository) Delete(_ context.Context, id common.GoalID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return deleteMapItem[common.GoalID, workspace.Goal](r.path, id)
+}
+
 type DoDRepository struct {
 	mu   sync.RWMutex
 	path string
@@ -981,6 +1026,12 @@ func (r *DoDRepository) Update(_ context.Context, item *workspace.DoD) error {
 	}
 	items[item.ID] = *cloneDoD(item)
 	return saveMap(r.path, items)
+}
+
+func (r *DoDRepository) Delete(_ context.Context, id common.DoDID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return deleteMapItem[common.DoDID, workspace.DoD](r.path, id)
 }
 
 type RunRepository struct {
@@ -1060,6 +1111,12 @@ func (r *RunRepository) Update(_ context.Context, item *run.Run) error {
 	return saveMap(r.path, items)
 }
 
+func (r *RunRepository) Delete(_ context.Context, id common.RunID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return deleteMapItem[common.RunID, run.Run](r.path, id)
+}
+
 type StepRepository struct {
 	mu   sync.RWMutex
 	path string
@@ -1136,6 +1193,12 @@ func (r *StepRepository) Update(_ context.Context, item *run.Step) error {
 	}
 	items[item.ID] = *cloneStep(item)
 	return saveMap(r.path, items)
+}
+
+func (r *StepRepository) Delete(_ context.Context, id common.StepID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return deleteMapItem[common.StepID, run.Step](r.path, id)
 }
 
 type ToolCallRepository struct {
@@ -1240,6 +1303,12 @@ func (r *ToolCallRepository) Update(_ context.Context, item *run.ToolCall) error
 	return saveMap(r.path, items)
 }
 
+func (r *ToolCallRepository) Delete(_ context.Context, id common.ToolCallID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return deleteMapItem[common.ToolCallID, run.ToolCall](r.path, id)
+}
+
 type PatchRepository struct {
 	mu   sync.RWMutex
 	path string
@@ -1340,6 +1409,12 @@ func (r *PatchRepository) Update(_ context.Context, item *run.Patch) error {
 	}
 	items[item.ID] = *clonePatch(item)
 	return saveMap(r.path, items)
+}
+
+func (r *PatchRepository) Delete(_ context.Context, id common.PatchID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return deleteMapItem[common.PatchID, run.Patch](r.path, id)
 }
 
 type ValidationResultRepository struct {
@@ -1444,6 +1519,12 @@ func (r *ValidationResultRepository) Update(_ context.Context, item *run.Validat
 	return saveMap(r.path, items)
 }
 
+func (r *ValidationResultRepository) Delete(_ context.Context, id common.ValidationResultID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return deleteMapItem[common.ValidationResultID, run.ValidationResult](r.path, id)
+}
+
 type RuntimeCheckpointRepository struct {
 	mu   sync.RWMutex
 	path string
@@ -1520,6 +1601,12 @@ func (r *RuntimeCheckpointRepository) Update(_ context.Context, item *run.Runtim
 	}
 	items[item.ID] = *cloneRuntimeCheckpoint(item)
 	return saveMap(r.path, items)
+}
+
+func (r *RuntimeCheckpointRepository) Delete(_ context.Context, id common.CheckpointID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return deleteMapItem[common.CheckpointID, run.RuntimeCheckpoint](r.path, id)
 }
 
 type DecisionTicketRepository struct {
@@ -1599,6 +1686,12 @@ func (r *DecisionTicketRepository) Update(_ context.Context, item *decision.Tick
 	return saveMap(r.path, items)
 }
 
+func (r *DecisionTicketRepository) Delete(_ context.Context, id common.TicketID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return deleteMapItem[common.TicketID, decision.Ticket](r.path, id)
+}
+
 type DecisionResolutionRepository struct {
 	mu   sync.RWMutex
 	path string
@@ -1636,6 +1729,12 @@ func (r *DecisionResolutionRepository) GetByTicketID(_ context.Context, ticketID
 		return nil, common.ErrNotFound
 	}
 	return cloneDecisionResolution(&item), nil
+}
+
+func (r *DecisionResolutionRepository) DeleteByTicketID(_ context.Context, ticketID common.TicketID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return deleteMapItem[common.TicketID, decision.Resolution](r.path, ticketID)
 }
 
 type ApprovalRepository struct {
@@ -1715,6 +1814,12 @@ func (r *ApprovalRepository) Update(_ context.Context, item *approval.Approval) 
 	return saveMap(r.path, items)
 }
 
+func (r *ApprovalRepository) Delete(_ context.Context, id common.ApprovalID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return deleteMapItem[common.ApprovalID, approval.Approval](r.path, id)
+}
+
 func loadMap[K comparable, V any](path string) (map[K]V, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -1731,6 +1836,18 @@ func loadMap[K comparable, V any](path string) (map[K]V, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+func deleteMapItem[K comparable, V any](path string, id K) error {
+	items, err := loadMap[K, V](path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[id]; !ok {
+		return common.ErrNotFound
+	}
+	delete(items, id)
+	return saveMap(path, items)
 }
 
 func saveMap[K comparable, V any](path string, items map[K]V) error {

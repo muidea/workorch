@@ -54,6 +54,10 @@ func (r *artifactStorageRepository) Update(ctx context.Context, item *resultmode
 	return r.base.Update(ctx, item)
 }
 
+func (r *artifactStorageRepository) Delete(ctx context.Context, id common.ArtifactID) error {
+	return r.base.Delete(ctx, id)
+}
+
 func (r *artifactStorageRepository) prepareStoredArtifact(item *resultmodel.Artifact) error {
 	if r == nil || item == nil || item.State != common.ArtifactStateAvailable {
 		return nil

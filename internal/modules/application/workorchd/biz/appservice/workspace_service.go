@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -184,6 +185,62 @@ func ListWorkspacesFromEnv(ctx context.Context) ([]Workspace, error) {
 	return ListWorkspacesWithSession(ctx, session)
 }
 
+type DeleteWorkspaceCommand struct {
+	Purge bool `json:"purge,omitempty"`
+}
+
+func DeleteWorkspaceWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, cmd DeleteWorkspaceCommand) (err error) {
+	service, repo, err := workspaceDependenciesFromSession(session)
+	if err != nil {
+		return err
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		return err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	id := common.WorkspaceID(strings.TrimSpace(workspaceID))
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	workspace, err := repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if cmd.Purge {
+		if err := purgeWorkspaceRecords(ctx, exports.Repositories, id); err != nil {
+			return err
+		}
+	}
+	if err := service.DeleteWorkspace(ctx, id); err != nil {
+		return err
+	}
+	if !cmd.Purge {
+		return nil
+	}
+	if err := purgeWorkspaceEventRecords(ctx, exports.Repositories, id); err != nil {
+		return err
+	}
+	return purgeWorkspaceDirectories(session, id, workspace.WorkingDirectory)
+}
+
+func DeleteWorkspaceWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd DeleteWorkspaceCommand) error {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return err
+	}
+	return DeleteWorkspaceWithSession(ctx, session, workspaceID, cmd)
+}
+
+func DeleteWorkspaceFromEnv(ctx context.Context, workspaceID string, cmd DeleteWorkspaceCommand) error {
+	session, err := NewRuntimeSessionFromEnv()
+	if err != nil {
+		return err
+	}
+	return DeleteWorkspaceWithSession(ctx, session, workspaceID, cmd)
+}
+
 func workspaceDependenciesFromSession(session *RuntimeSession) (workspacemodule.Service, repository.WorkspaceRepository, error) {
 	exports, err := session.Exports()
 	if err != nil {
@@ -193,6 +250,283 @@ func workspaceDependenciesFromSession(session *RuntimeSession) (workspacemodule.
 		return nil, nil, common.ErrInvalidArgument
 	}
 	return exports.Services.WorkspaceService, exports.Repositories.Workspaces, nil
+}
+
+func purgeWorkspaceRecords(ctx context.Context, repos bootstrap.RepositoryExports, workspaceID common.WorkspaceID) error {
+	if repos.Goals != nil {
+		items, err := repos.Goals.ListByWorkspaceID(ctx, workspaceID)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if err := ignoreNotFound(repos.Goals.Delete(ctx, item.ID)); err != nil {
+				return err
+			}
+		}
+	}
+	if repos.DoDs != nil {
+		items, err := repos.DoDs.ListByWorkspaceID(ctx, workspaceID)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if err := ignoreNotFound(repos.DoDs.Delete(ctx, item.ID)); err != nil {
+				return err
+			}
+		}
+	}
+	if repos.MemoryItems != nil {
+		items, err := repos.MemoryItems.ListByWorkspaceID(ctx, workspaceID)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if err := ignoreNotFound(repos.MemoryItems.Delete(ctx, item.ID)); err != nil {
+				return err
+			}
+		}
+	}
+	runIDs, err := workspaceRunIDs(ctx, repos, workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, runID := range runIDs {
+		if err := purgeRunRecords(ctx, repos, runID); err != nil {
+			return err
+		}
+	}
+	if repos.Tickets != nil {
+		tickets, err := repos.Tickets.List(ctx)
+		if err != nil {
+			return err
+		}
+		for _, item := range tickets {
+			if item.WorkspaceID != workspaceID {
+				continue
+			}
+			if repos.Resolutions != nil {
+				if err := ignoreNotFound(repos.Resolutions.DeleteByTicketID(ctx, item.ID)); err != nil {
+					return err
+				}
+			}
+			if err := ignoreNotFound(repos.Tickets.Delete(ctx, item.ID)); err != nil {
+				return err
+			}
+		}
+	}
+	if repos.Approvals != nil {
+		items, err := repos.Approvals.List(ctx)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if item.WorkspaceID != workspaceID {
+				continue
+			}
+			if err := ignoreNotFound(repos.Approvals.Delete(ctx, item.ID)); err != nil {
+				return err
+			}
+		}
+	}
+	if repos.Results != nil {
+		items, err := repos.Results.ListByWorkspace(ctx, workspaceID)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if err := ignoreNotFound(repos.Results.Delete(ctx, item.ID)); err != nil {
+				return err
+			}
+		}
+	}
+	if repos.Artifacts != nil {
+		items, err := repos.Artifacts.ListByWorkspace(ctx, workspaceID)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if err := ignoreNotFound(repos.Artifacts.Delete(ctx, item.ID)); err != nil {
+				return err
+			}
+		}
+	}
+	if repos.EventRecords != nil {
+		if err := purgeWorkspaceEventRecords(ctx, repos, workspaceID); err != nil {
+			return err
+		}
+	}
+	for _, runID := range runIDs {
+		if repos.Runs == nil {
+			continue
+		}
+		if err := ignoreNotFound(repos.Runs.Delete(ctx, runID)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func purgeWorkspaceEventRecords(ctx context.Context, repos bootstrap.RepositoryExports, workspaceID common.WorkspaceID) error {
+	if repos.EventRecords == nil {
+		return nil
+	}
+	items, err := repos.EventRecords.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID})
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.WorkspaceID != workspaceID {
+			continue
+		}
+		if err := ignoreNotFound(repos.EventRecords.Delete(ctx, item.ID)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func workspaceRunIDs(ctx context.Context, repos bootstrap.RepositoryExports, workspaceID common.WorkspaceID) ([]common.RunID, error) {
+	if repos.Runs == nil {
+		return nil, nil
+	}
+	runs, err := repos.Runs.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]common.RunID, 0, len(runs))
+	for _, item := range runs {
+		if item.WorkspaceID == workspaceID {
+			ret = append(ret, item.ID)
+		}
+	}
+	return ret, nil
+}
+
+func purgeRunRecords(ctx context.Context, repos bootstrap.RepositoryExports, runID common.RunID) error {
+	if repos.Steps != nil {
+		items, err := repos.Steps.ListByRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if err := ignoreNotFound(repos.Steps.Delete(ctx, item.ID)); err != nil {
+				return err
+			}
+		}
+	}
+	if repos.ToolCalls != nil {
+		items, err := repos.ToolCalls.ListByRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if err := ignoreNotFound(repos.ToolCalls.Delete(ctx, item.ID)); err != nil {
+				return err
+			}
+		}
+	}
+	if repos.Patches != nil {
+		items, err := repos.Patches.ListByRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if err := ignoreNotFound(repos.Patches.Delete(ctx, item.ID)); err != nil {
+				return err
+			}
+		}
+	}
+	if repos.ValidationResults != nil {
+		items, err := repos.ValidationResults.ListByRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if err := ignoreNotFound(repos.ValidationResults.Delete(ctx, item.ID)); err != nil {
+				return err
+			}
+		}
+	}
+	if repos.RuntimeCheckpoints != nil {
+		items, err := repos.RuntimeCheckpoints.ListByRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if err := ignoreNotFound(repos.RuntimeCheckpoints.Delete(ctx, item.ID)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func purgeWorkspaceDirectories(session *RuntimeSession, workspaceID common.WorkspaceID, workingDirectory string) error {
+	paths := make([]string, 0, 2)
+	if strings.EqualFold(session.RepositoryBackend(), "file") && strings.TrimSpace(session.RepositoryDataDir()) != "" {
+		paths = append(paths, filepath.Join(session.RepositoryDataDir(), "workspaces", string(workspaceID)))
+	}
+	paths = append(paths, workingDirectory)
+
+	seen := map[string]struct{}{}
+	for _, item := range paths {
+		path, err := safeWorkspaceRemovalPath(session, workspaceID, item)
+		if err != nil {
+			return err
+		}
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		if err := os.RemoveAll(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func safeWorkspaceRemovalPath(session *RuntimeSession, workspaceID common.WorkspaceID, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	abs, err := filepath.Abs(value)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+	if abs == string(filepath.Separator) {
+		return "", common.ErrInvalidArgument
+	}
+	home, _ := os.UserHomeDir()
+	wd, _ := os.Getwd()
+	protected := []string{home, wd}
+	if session != nil && strings.TrimSpace(session.RepositoryDataDir()) != "" {
+		protected = append(protected, session.RepositoryDataDir())
+	}
+	for _, item := range protected {
+		if item == "" {
+			continue
+		}
+		itemAbs, err := filepath.Abs(item)
+		if err != nil {
+			return "", err
+		}
+		if abs == filepath.Clean(itemAbs) {
+			return "", common.ErrInvalidArgument
+		}
+	}
+	return abs, nil
+}
+
+func ignoreNotFound(err error) error {
+	if errors.Is(err, common.ErrNotFound) {
+		return nil
+	}
+	return err
 }
 
 func mapWorkspace(item *workspacemodel.Workspace) Workspace {

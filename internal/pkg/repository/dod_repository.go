@@ -12,4 +12,5 @@ type DoDRepository interface {
 	Get(context.Context, common.DoDID) (*workspace.DoD, error)
 	ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*workspace.DoD, error)
 	Update(context.Context, *workspace.DoD) error
+	Delete(context.Context, common.DoDID) error
 }

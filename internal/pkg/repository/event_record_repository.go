@@ -23,4 +23,5 @@ type EventRecordRepository interface {
 	Append(context.Context, *eventstream.EventRecord) error
 	Get(context.Context, common.EventRecordID) (*eventstream.EventRecord, error)
 	List(context.Context, EventRecordQuery) ([]*eventstream.EventRecord, error)
+	Delete(context.Context, common.EventRecordID) error
 }

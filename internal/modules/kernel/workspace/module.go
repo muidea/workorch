@@ -45,6 +45,7 @@ func (m *Module) Setup(deps Dependencies) error {
 	m.servicePtr = workspaceservice.New(workspaceservice.Dependencies{
 		CreateWorkspace: m.bizPtr.CreateWorkspace,
 		EnsureWorkspace: m.bizPtr.EnsureWorkspace,
+		DeleteWorkspace: m.bizPtr.DeleteWorkspace,
 		DefineGoal:      m.bizPtr.DefineGoal,
 		UpdateGoal:      m.bizPtr.UpdateGoal,
 		DefineDoD:       m.bizPtr.DefineDoD,

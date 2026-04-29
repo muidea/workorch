@@ -90,6 +90,58 @@ func TestReadWorkspaceWithBackendReturnsNotFoundWhenMissing(t *testing.T) {
 	}
 }
 
+func TestDeleteWorkspaceWithBackendDeletesOnlyWorkspaceByDefault(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	created, err := CreateWorkspaceWithBackend(ctx, "file", dataRoot, "delete workspace", "", "")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	if _, err := DefineGoalWithBackend(ctx, "file", dataRoot, created.ID, "keep related goal"); err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+
+	if err := DeleteWorkspaceWithBackend(ctx, "file", dataRoot, created.ID, DeleteWorkspaceCommand{}); err != nil {
+		t.Fatalf("DeleteWorkspaceWithBackend: %v", err)
+	}
+	if _, err := ReadWorkspaceWithBackend(ctx, "file", dataRoot, created.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("ReadWorkspaceWithBackend err = %v, want not found", err)
+	}
+	if info, err := os.Stat(created.WorkingDirectory); err != nil || !info.IsDir() {
+		t.Fatalf("working directory = %v/%v, want preserved directory", info, err)
+	}
+}
+
+func TestDeleteWorkspaceWithBackendPurgesWorkspaceData(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	created, err := CreateWorkspaceWithBackend(ctx, "file", dataRoot, "purge workspace", "", "")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, created.ID, "purge related goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, created.ID, []string{"purge related dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	if _, err := CreateRunWithBackend(ctx, "file", dataRoot, created.ID, "run-purge-workspace", goal.ID, dod.ID); err != nil {
+		t.Fatalf("CreateRunWithBackend: %v", err)
+	}
+
+	if err := DeleteWorkspaceWithBackend(ctx, "file", dataRoot, created.ID, DeleteWorkspaceCommand{Purge: true}); err != nil {
+		t.Fatalf("DeleteWorkspaceWithBackend purge: %v", err)
+	}
+	if _, err := ReadWorkspaceWithBackend(ctx, "file", dataRoot, created.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("ReadWorkspaceWithBackend err = %v, want not found", err)
+	}
+	if _, err := os.Stat(filepath.Join(dataRoot, "workspaces", created.ID)); !os.IsNotExist(err) {
+		t.Fatalf("workspace data root stat err = %v, want not exist", err)
+	}
+}
+
 func TestListWorkspacesWithBackendReturnsSortedWorkspaces(t *testing.T) {
 	dataRoot := t.TempDir()
 	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-b", "workspace b", "", "workspaces/workspace b"); err != nil {

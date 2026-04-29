@@ -12,4 +12,5 @@ type RunRepository interface {
 	Get(context.Context, common.RunID) (*run.Run, error)
 	List(context.Context) ([]*run.Run, error)
 	Update(context.Context, *run.Run) error
+	Delete(context.Context, common.RunID) error
 }

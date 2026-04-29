@@ -322,6 +322,8 @@ type createWorkspaceRequest struct {
 	WorkingDirectory string `json:"workingDirectory"`
 }
 
+type deleteWorkspaceRequest = appservice.DeleteWorkspaceCommand
+
 type createRunRequest struct {
 	RunID  string `json:"runId"`
 	GoalID string `json:"goalId,omitempty"`
@@ -375,6 +377,7 @@ type errorResponse struct {
 }
 
 type createWorkspaceFunc func(context.Context, string, string, string, string, string) (appservice.Workspace, error)
+type deleteWorkspaceFunc func(context.Context, string, string, string, appservice.DeleteWorkspaceCommand) error
 type readWorkspaceFunc func(context.Context, string, string, string) (appservice.Workspace, error)
 type readWorkspaceSnapshotFunc func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error)
 type readWorkspaceSoulBindingsFunc func(context.Context, string, string, string) (appservice.WorkspaceSoulBindings, error)
@@ -443,6 +446,7 @@ type serverState struct {
 	metrics                         *serverMetrics
 	validate                        validateFunc
 	createWorkspace                 createWorkspaceFunc
+	deleteWorkspace                 deleteWorkspaceFunc
 	readWorkspace                   readWorkspaceFunc
 	readWorkspaceSnapshot           readWorkspaceSnapshotFunc
 	readWorkspaceSoulBindings       readWorkspaceSoulBindingsFunc
@@ -521,6 +525,7 @@ type serverMetrics struct {
 	readyzRequests                     atomic.Uint64
 	metricsRequests                    atomic.Uint64
 	workspaceCreateRequests            atomic.Uint64
+	workspaceDeleteRequests            atomic.Uint64
 	workspaceListRequests              atomic.Uint64
 	workspaceGetRequests               atomic.Uint64
 	workspaceSnapshotRequests          atomic.Uint64
@@ -1532,6 +1537,35 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			Workspace: item,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId", http.MethodDelete, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "" {
+			http.NotFound(w, r)
+			return
+		}
+		cmd := deleteWorkspaceRequest{}
+		if r.Body != nil && r.ContentLength != 0 {
+			if err := decodeJSON(r, &cmd); err != nil {
+				writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+				return
+			}
+		}
+		if value := strings.TrimSpace(r.URL.Query().Get("purge")); value != "" {
+			purge, err := strconv.ParseBool(value)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid purge query"})
+				return
+			}
+			cmd.Purge = purge
+		}
+		state.metrics.workspaceDeleteRequests.Add(1)
+		if err := state.deleteWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, cmd); err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
@@ -2127,6 +2161,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		metrics:                         &serverMetrics{},
 		validate:                        defaultValidate,
 		createWorkspace:                 defaultCreateWorkspace,
+		deleteWorkspace:                 defaultDeleteWorkspace,
 		readWorkspace:                   defaultReadWorkspace,
 		readWorkspaceSnapshot:           defaultReadWorkspaceSnapshot,
 		readWorkspaceSoulBindings:       defaultReadWorkspaceSoulBindings,
@@ -2234,6 +2269,11 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 			return err
 		})
 		return ret, err
+	}
+	s.deleteWorkspace = func(ctx context.Context, _, _, workspaceID string, cmd appservice.DeleteWorkspaceCommand) error {
+		return s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			return appservice.DeleteWorkspaceWithSession(ctx, session, workspaceID, cmd)
+		})
 	}
 	s.readWorkspace = func(ctx context.Context, _, _, workspaceID string) (appservice.Workspace, error) {
 		var ret appservice.Workspace
@@ -2789,6 +2829,10 @@ func defaultCreateWorkspace(ctx context.Context, backend string, dataRoot string
 	return appservice.CreateWorkspaceWithBackend(ctx, backend, dataRoot, title, description, workingDirectory)
 }
 
+func defaultDeleteWorkspace(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd appservice.DeleteWorkspaceCommand) error {
+	return appservice.DeleteWorkspaceWithBackend(ctx, backend, dataRoot, workspaceID, cmd)
+}
+
 func defaultDefineGoal(ctx context.Context, backend string, dataRoot string, workspaceID string, text string) (appservice.Goal, error) {
 	return appservice.DefineGoalWithBackend(ctx, backend, dataRoot, workspaceID, text)
 }
@@ -3171,6 +3215,7 @@ func (m *serverMetrics) render(config Config) string {
 			"workorch_http_requests_total{endpoint=\"readyz\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"metrics\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"workspace_create\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"workspace_delete\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"workspace_list\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"workspace_get\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"workspace_snapshot\"} %d\n"+
@@ -3222,6 +3267,7 @@ func (m *serverMetrics) render(config Config) string {
 		m.readyzRequests.Load(),
 		m.metricsRequests.Load(),
 		m.workspaceCreateRequests.Load(),
+		m.workspaceDeleteRequests.Load(),
 		m.workspaceListRequests.Load(),
 		m.workspaceGetRequests.Load(),
 		m.workspaceSnapshotRequests.Load(),

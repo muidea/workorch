@@ -13,4 +13,5 @@ type ValidationResultRepository interface {
 	ListByRun(context.Context, common.RunID) ([]*run.ValidationResult, error)
 	ListByStep(context.Context, common.StepID) ([]*run.ValidationResult, error)
 	Update(context.Context, *run.ValidationResult) error
+	Delete(context.Context, common.ValidationResultID) error
 }

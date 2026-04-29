@@ -12,4 +12,5 @@ type ApprovalRepository interface {
 	Get(context.Context, common.ApprovalID) (*approval.Approval, error)
 	List(context.Context) ([]*approval.Approval, error)
 	Update(context.Context, *approval.Approval) error
+	Delete(context.Context, common.ApprovalID) error
 }

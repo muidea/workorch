@@ -3,6 +3,7 @@ package events
 const (
 	TopicWorkspaceCreated      = "/workspace/created"
 	TopicWorkspaceStateChanged = "/workspace/state/changed"
+	TopicWorkspaceDeleted      = "/workspace/deleted"
 	TopicGoalDefined           = "/goal/defined"
 	TopicDoDDefined            = "/dod/defined"
 	TopicRunCreated            = "/run/created"

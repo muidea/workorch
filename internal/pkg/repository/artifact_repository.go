@@ -14,4 +14,5 @@ type ArtifactRepository interface {
 	ListByRun(context.Context, common.RunID) ([]*result.Artifact, error)
 	ListByResult(context.Context, common.ResultID) ([]*result.Artifact, error)
 	Update(context.Context, *result.Artifact) error
+	Delete(context.Context, common.ArtifactID) error
 }

@@ -23,4 +23,5 @@ type MemoryItemRepository interface {
 	ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*memorymodel.MemoryItem, error)
 	Search(context.Context, MemorySearchQuery) ([]*memorymodel.MemoryItem, error)
 	Update(context.Context, *memorymodel.MemoryItem) error
+	Delete(context.Context, common.MemoryID) error
 }

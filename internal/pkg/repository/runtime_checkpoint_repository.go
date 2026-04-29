@@ -12,4 +12,5 @@ type RuntimeCheckpointRepository interface {
 	Get(context.Context, common.CheckpointID) (*run.RuntimeCheckpoint, error)
 	ListByRun(context.Context, common.RunID) ([]*run.RuntimeCheckpoint, error)
 	Update(context.Context, *run.RuntimeCheckpoint) error
+	Delete(context.Context, common.CheckpointID) error
 }

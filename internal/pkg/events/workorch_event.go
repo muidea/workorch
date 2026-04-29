@@ -62,6 +62,7 @@ type ArtifactEvent struct {
 var workorchTopics = []string{
 	TopicWorkspaceCreated,
 	TopicWorkspaceStateChanged,
+	TopicWorkspaceDeleted,
 	TopicGoalDefined,
 	TopicDoDDefined,
 	TopicRunCreated,
@@ -109,7 +110,7 @@ func NormalizeWorkorchEnvelope(envelope Envelope) (Envelope, bool) {
 
 func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 	switch envelope.Topic {
-	case TopicWorkspaceCreated, TopicWorkspaceStateChanged:
+	case TopicWorkspaceCreated, TopicWorkspaceStateChanged, TopicWorkspaceDeleted:
 		event, ok := DecodeWorkspaceEvent(envelope)
 		if !ok {
 			return nil, false
@@ -169,7 +170,7 @@ func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 }
 
 func DecodeWorkspaceEvent(envelope Envelope) (WorkspaceEvent, bool) {
-	if envelope.Topic != TopicWorkspaceCreated && envelope.Topic != TopicWorkspaceStateChanged {
+	if envelope.Topic != TopicWorkspaceCreated && envelope.Topic != TopicWorkspaceStateChanged && envelope.Topic != TopicWorkspaceDeleted {
 		return WorkspaceEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)

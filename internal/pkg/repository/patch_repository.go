@@ -13,4 +13,5 @@ type PatchRepository interface {
 	ListByRun(context.Context, common.RunID) ([]*run.Patch, error)
 	ListByStep(context.Context, common.StepID) ([]*run.Patch, error)
 	Update(context.Context, *run.Patch) error
+	Delete(context.Context, common.PatchID) error
 }

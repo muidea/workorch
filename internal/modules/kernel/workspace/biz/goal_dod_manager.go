@@ -89,6 +89,20 @@ func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspaceservi
 	return m.publishWorkspaceEvent(ctx, events.TopicWorkspaceStateChanged, workspace)
 }
 
+func (m *GoalDoDManager) DeleteWorkspace(ctx context.Context, id common.WorkspaceID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	workspace, err := m.workspaces.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := m.workspaces.Delete(ctx, id); err != nil {
+		return err
+	}
+	return m.publishWorkspaceEvent(ctx, events.TopicWorkspaceDeleted, workspace)
+}
+
 func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspaceservice.DefineGoalCommand) error {
 	if cmd.GoalID == "" || cmd.WorkspaceID == "" || cmd.Text == "" {
 		return common.ErrInvalidArgument

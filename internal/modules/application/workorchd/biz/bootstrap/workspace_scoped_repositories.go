@@ -456,6 +456,30 @@ func (s *workspaceScopedFileStore) listWorkspaceIndexEntries() ([]workspaceIndex
 	return append([]workspaceIndexEntry(nil), idx.Workspaces...), nil
 }
 
+func (s *workspaceScopedFileStore) deleteWorkspaceIndexEntry(workspaceID common.WorkspaceID) error {
+	s.indexMu.Lock()
+	defer s.indexMu.Unlock()
+
+	idx, err := s.loadWorkspaceIndexLocked()
+	if err != nil {
+		return err
+	}
+	next := idx.Workspaces[:0]
+	found := false
+	for _, item := range idx.Workspaces {
+		if item.WorkspaceID == workspaceID {
+			found = true
+			continue
+		}
+		next = append(next, item)
+	}
+	if !found {
+		return common.ErrNotFound
+	}
+	idx.Workspaces = next
+	return s.saveWorkspaceIndexLocked(idx)
+}
+
 type workspaceScopedWorkspaceRepository struct {
 	store *workspaceScopedFileStore
 }
@@ -522,6 +546,25 @@ func (r *workspaceScopedWorkspaceRepository) Update(ctx context.Context, item *w
 		return err
 	}
 	return r.store.upsertWorkspaceIndex(item)
+}
+
+func (r *workspaceScopedWorkspaceRepository) Delete(ctx context.Context, id common.WorkspaceID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	if _, err := r.Get(ctx, id); err != nil {
+		return err
+	}
+	if err := r.store.workspaceRepo(filepath.Join(r.store.workspaceRoot(id), workspaceScopedWorkspaceFile)).Delete(ctx, id); err != nil {
+		return err
+	}
+	if err := os.Remove(r.store.workspaceSoulBindingsPath(id)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := r.store.deleteWorkspaceIndexEntry(id); err != nil && err != common.ErrNotFound {
+		return err
+	}
+	return nil
 }
 
 func workspaceMetadata(item *workspacemodel.Workspace) *workspacemodel.Workspace {
@@ -656,6 +699,17 @@ func (r *workspaceScopedGoalRepository) Update(ctx context.Context, item *worksp
 	return r.store.goalRepo(filepath.Join(r.store.workspaceRoot(item.WorkspaceID), workspaceScopedGoalFile)).Update(ctx, item)
 }
 
+func (r *workspaceScopedGoalRepository) Delete(ctx context.Context, id common.GoalID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.store.goalRepo(filepath.Join(r.store.workspaceRoot(current.WorkspaceID), workspaceScopedGoalFile)).Delete(ctx, id)
+}
+
 type workspaceScopedDoDRepository struct {
 	store *workspaceScopedFileStore
 }
@@ -710,6 +764,17 @@ func (r *workspaceScopedDoDRepository) Update(ctx context.Context, item *workspa
 	}
 	item.WorkspaceID = current.WorkspaceID
 	return r.store.dodRepo(filepath.Join(r.store.workspaceRoot(item.WorkspaceID), workspaceScopedDoDFile)).Update(ctx, item)
+}
+
+func (r *workspaceScopedDoDRepository) Delete(ctx context.Context, id common.DoDID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.store.dodRepo(filepath.Join(r.store.workspaceRoot(current.WorkspaceID), workspaceScopedDoDFile)).Delete(ctx, id)
 }
 
 type workspaceScopedMemoryItemRepository struct {
@@ -789,6 +854,17 @@ func (r *workspaceScopedMemoryItemRepository) Update(ctx context.Context, item *
 	return r.store.memoryItemRepo(filepath.Join(r.store.workspaceRoot(item.WorkspaceID), workspaceScopedMemoryItemFile)).Update(ctx, item)
 }
 
+func (r *workspaceScopedMemoryItemRepository) Delete(ctx context.Context, id common.MemoryID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.store.memoryItemRepo(filepath.Join(r.store.workspaceRoot(current.WorkspaceID), workspaceScopedMemoryItemFile)).Delete(ctx, id)
+}
+
 type workspaceScopedRunRepository struct {
 	store *workspaceScopedFileStore
 }
@@ -849,6 +925,17 @@ func (r *workspaceScopedRunRepository) Update(ctx context.Context, item *runmode
 	}
 	item.WorkspaceID = current.WorkspaceID
 	return r.store.runRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.ID), workspaceScopedRunFile)).Update(ctx, item)
+}
+
+func (r *workspaceScopedRunRepository) Delete(ctx context.Context, id common.RunID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.store.runRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.ID), workspaceScopedRunFile)).Delete(ctx, id)
 }
 
 func (r *workspaceScopedRunRepository) rootForRun(ctx context.Context, runID common.RunID) (string, error) {
@@ -929,6 +1016,21 @@ func (r *workspaceScopedStepRepository) Update(ctx context.Context, item *runmod
 	return r.store.stepRepo(r.store.runPath(root, workspaceScopedStepFile)).Update(ctx, item)
 }
 
+func (r *workspaceScopedStepRepository) Delete(ctx context.Context, id common.StepID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	root, err := r.runs.rootForRun(ctx, current.RunID)
+	if err != nil {
+		return err
+	}
+	return r.store.stepRepo(r.store.runPath(root, workspaceScopedStepFile)).Delete(ctx, id)
+}
+
 type workspaceScopedToolCallRepository struct {
 	store *workspaceScopedFileStore
 }
@@ -1000,6 +1102,17 @@ func (r *workspaceScopedToolCallRepository) Update(ctx context.Context, item *ru
 	item.WorkspaceID = current.WorkspaceID
 	item.RunID = current.RunID
 	return r.store.toolCallRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedToolCallFile)).Update(ctx, item)
+}
+
+func (r *workspaceScopedToolCallRepository) Delete(ctx context.Context, id common.ToolCallID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.store.toolCallRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.RunID), workspaceScopedToolCallFile)).Delete(ctx, id)
 }
 
 type workspaceScopedPatchRepository struct {
@@ -1075,6 +1188,17 @@ func (r *workspaceScopedPatchRepository) Update(ctx context.Context, item *runmo
 	return r.store.patchRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedPatchFile)).Update(ctx, item)
 }
 
+func (r *workspaceScopedPatchRepository) Delete(ctx context.Context, id common.PatchID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.store.patchRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.RunID), workspaceScopedPatchFile)).Delete(ctx, id)
+}
+
 type workspaceScopedValidationResultRepository struct {
 	store *workspaceScopedFileStore
 }
@@ -1148,6 +1272,17 @@ func (r *workspaceScopedValidationResultRepository) Update(ctx context.Context, 
 	return r.store.validationResultRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedValidationResultFile)).Update(ctx, item)
 }
 
+func (r *workspaceScopedValidationResultRepository) Delete(ctx context.Context, id common.ValidationResultID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.store.validationResultRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.RunID), workspaceScopedValidationResultFile)).Delete(ctx, id)
+}
+
 type workspaceScopedRuntimeCheckpointRepository struct {
 	store *workspaceScopedFileStore
 }
@@ -1206,6 +1341,17 @@ func (r *workspaceScopedRuntimeCheckpointRepository) Update(ctx context.Context,
 	item.WorkspaceID = current.WorkspaceID
 	item.RunID = current.RunID
 	return r.store.runtimeCheckpointRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedRuntimeCheckpointFile)).Update(ctx, item)
+}
+
+func (r *workspaceScopedRuntimeCheckpointRepository) Delete(ctx context.Context, id common.CheckpointID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.store.runtimeCheckpointRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.RunID), workspaceScopedRuntimeCheckpointFile)).Delete(ctx, id)
 }
 
 type workspaceScopedResultRepository struct {
@@ -1279,6 +1425,17 @@ func (r *workspaceScopedResultRepository) Update(ctx context.Context, item *resu
 	item.WorkspaceID = current.WorkspaceID
 	item.RunID = current.RunID
 	return r.store.resultRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedResultFile)).Update(ctx, item)
+}
+
+func (r *workspaceScopedResultRepository) Delete(ctx context.Context, id common.ResultID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.store.resultRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.RunID), workspaceScopedResultFile)).Delete(ctx, id)
 }
 
 type workspaceScopedArtifactRepository struct {
@@ -1367,6 +1524,17 @@ func (r *workspaceScopedArtifactRepository) Update(ctx context.Context, item *re
 	return r.store.artifactRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedArtifactFile)).Update(ctx, item)
 }
 
+func (r *workspaceScopedArtifactRepository) Delete(ctx context.Context, id common.ArtifactID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.store.artifactRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.RunID), workspaceScopedArtifactFile)).Delete(ctx, id)
+}
+
 type workspaceScopedEventRecordRepository struct {
 	store *workspaceScopedFileStore
 }
@@ -1425,6 +1593,20 @@ func (r *workspaceScopedEventRecordRepository) List(ctx context.Context, query r
 	sortEventRecords(ret)
 	ret = applyEventRecordCursorAndLimit(ret, query)
 	return nilIfEmpty(ret), nil
+}
+
+func (r *workspaceScopedEventRecordRepository) Delete(ctx context.Context, id common.EventRecordID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if current.WorkspaceID != "" && current.RunID != "" {
+		return r.store.eventRecordRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.RunID), workspaceScopedEventRecordFile)).Delete(ctx, id)
+	}
+	return r.store.eventRecordRepo(r.store.systemPath(workspaceScopedEventRecordFile)).Delete(ctx, id)
 }
 
 type workspaceScopedDecisionTicketRepository struct {
@@ -1487,6 +1669,17 @@ func (r *workspaceScopedDecisionTicketRepository) Update(ctx context.Context, it
 	return r.store.ticketRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedTicketFile)).Update(ctx, item)
 }
 
+func (r *workspaceScopedDecisionTicketRepository) Delete(ctx context.Context, id common.TicketID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.store.ticketRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.RunID), workspaceScopedTicketFile)).Delete(ctx, id)
+}
+
 type workspaceScopedDecisionResolutionRepository struct {
 	store   *workspaceScopedFileStore
 	tickets *workspaceScopedDecisionTicketRepository
@@ -1529,6 +1722,30 @@ func (r *workspaceScopedDecisionResolutionRepository) GetByTicketID(ctx context.
 		}
 	}
 	return nil, common.ErrNotFound
+}
+
+func (r *workspaceScopedDecisionResolutionRepository) DeleteByTicketID(ctx context.Context, ticketID common.TicketID) error {
+	if ticketID == "" {
+		return common.ErrInvalidArgument
+	}
+	if ticket, err := r.tickets.Get(ctx, ticketID); err == nil {
+		err := r.store.resolutionRepo(r.store.runPath(r.store.runRoot(ticket.WorkspaceID, ticket.RunID), workspaceScopedResolutionFile)).DeleteByTicketID(ctx, ticketID)
+		if err == nil || err != common.ErrNotFound {
+			return err
+		}
+	} else if err != common.ErrNotFound {
+		return err
+	}
+	for _, root := range r.store.allRunRoots() {
+		err := r.store.resolutionRepo(r.store.runPath(root, workspaceScopedResolutionFile)).DeleteByTicketID(ctx, ticketID)
+		if err == nil {
+			return nil
+		}
+		if err != common.ErrNotFound {
+			return err
+		}
+	}
+	return common.ErrNotFound
 }
 
 type workspaceScopedApprovalRepository struct {
@@ -1589,6 +1806,17 @@ func (r *workspaceScopedApprovalRepository) Update(ctx context.Context, item *ap
 	item.WorkspaceID = current.WorkspaceID
 	item.RunID = current.RunID
 	return r.store.approvalRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedApprovalFile)).Update(ctx, item)
+}
+
+func (r *workspaceScopedApprovalRepository) Delete(ctx context.Context, id common.ApprovalID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.store.approvalRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.RunID), workspaceScopedApprovalFile)).Delete(ctx, id)
 }
 
 func nilIfEmpty[T any](items []T) []T {

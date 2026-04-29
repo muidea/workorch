@@ -9,7 +9,7 @@ import {
   SettingOutlined
 } from '@ant-design/icons';
 import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-components';
-import { App as AntApp, Badge, Button, ConfigProvider, Descriptions, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
+import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, Goal, LLMProviderTemplate, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
@@ -840,6 +840,25 @@ type SoulBindingFormValues = {
   bindings?: Record<string, string | undefined>;
 };
 
+type WorkspaceSetupFormValues = {
+  templateId?: string;
+  title: string;
+  description?: string;
+  workingDirectory?: string;
+};
+
+type GoalSetupFormValues = {
+  text: string;
+};
+
+type DoDSetupFormValues = {
+  items: string;
+};
+
+type WorkspaceDeleteFormValues = {
+  purge?: boolean;
+};
+
 function normalizeSoulBindingFormValues(values: SoulBindingFormValues): WorkspaceSoulBindings {
   const defaultSoulId = values.defaultSoulId?.trim() || undefined;
   const bindings = Object.fromEntries(
@@ -859,6 +878,10 @@ function stageBindings(stages: string[], soulId?: string) {
     return {};
   }
   return Object.fromEntries(stages.map((stage) => [stage, value]));
+}
+
+function setupDoDItems(value?: string) {
+  return (value || '').split('\n').map((item) => item.trim()).filter(Boolean);
 }
 
 type SoulDefinitionFormValues = {
@@ -1852,22 +1875,24 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [goalDefinitionOpen, setGoalDefinitionOpen] = useState(false);
   const [dodDefinitionOpen, setDoDDefinitionOpen] = useState(false);
   const [soulBindingEditorOpen, setSoulBindingEditorOpen] = useState(false);
+  const [workspaceDeleteOpen, setWorkspaceDeleteOpen] = useState(false);
   const [businessSubmitting, setBusinessSubmitting] = useState(false);
+  const [workspaceDeleting, setWorkspaceDeleting] = useState(false);
   const [soulBindingSaving, setSoulBindingSaving] = useState(false);
   const [editingGoal, setEditingGoal] = useState<Goal | undefined>(undefined);
   const [editingDoD, setEditingDoD] = useState<DoD | undefined>(undefined);
   const [activationTracking, setActivationTracking] = useState(false);
   const [workspaceListReady, setWorkspaceListReady] = useState(false);
   const [setupStep, setSetupStep] = useState(0);
-  const [createdWorkspace, setCreatedWorkspace] = useState<Workspace | undefined>(undefined);
   const workspaceListRequestSeq = useRef(0);
   const workspaceContextRequestSeq = useRef(0);
   const [activationForm] = Form.useForm();
   const [soulBindingsForm] = Form.useForm();
   const [setupSoulBindingsForm] = Form.useForm<SoulBindingFormValues>();
-  const [workspaceForm] = Form.useForm();
-  const [setupGoalForm] = Form.useForm();
-  const [setupDoDForm] = Form.useForm();
+  const [workspaceForm] = Form.useForm<WorkspaceSetupFormValues>();
+  const [setupGoalForm] = Form.useForm<GoalSetupFormValues>();
+  const [setupDoDForm] = Form.useForm<DoDSetupFormValues>();
+  const [workspaceDeleteForm] = Form.useForm<WorkspaceDeleteFormValues>();
   const [goalForm] = Form.useForm();
   const [dodForm] = Form.useForm();
 
@@ -2049,7 +2074,6 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const closeWorkspaceSetup = () => {
     setWorkspaceSetupOpen(false);
     setSetupStep(0);
-    setCreatedWorkspace(undefined);
     workspaceForm.resetFields();
     setupGoalForm.resetFields();
     setupDoDForm.resetFields();
@@ -2070,7 +2094,6 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       setupDoDForm.resetFields();
       setupSoulBindingsForm.resetFields();
       setSetupStep(0);
-      setCreatedWorkspace(undefined);
       setWorkspaceSetupOpen(true);
     } catch (error) {
       message.error(errorMessage(error));
@@ -2095,12 +2118,99 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     });
   };
 
+  const validateWorkspaceSetupStep = async (step: number) => {
+    if (step === 0) {
+      await workspaceForm.validateFields();
+      return;
+    }
+    if (step === 1) {
+      await setupGoalForm.validateFields();
+      return;
+    }
+    if (step === 2) {
+      const values = await setupDoDForm.validateFields();
+      if (setupDoDItems(values.items).length === 0) {
+        throw new Error('请至少填写一个验收项');
+      }
+      return;
+    }
+    if (step === 3) {
+      await setupSoulBindingsForm.validateFields();
+    }
+  };
+
+  const goNextWorkspaceSetupStep = async () => {
+    try {
+      await validateWorkspaceSetupStep(setupStep);
+      setSetupStep((current) => Math.min(current + 1, 4));
+    } catch (error) {
+      message.error(errorMessage(error));
+    }
+  };
+
+  const goPreviousWorkspaceSetupStep = () => {
+    setSetupStep((current) => Math.max(current - 1, 0));
+  };
+
+  const submitWorkspaceSetup = async () => {
+    setBusinessSubmitting(true);
+    try {
+      await validateWorkspaceSetupStep(0);
+      await validateWorkspaceSetupStep(1);
+      await validateWorkspaceSetupStep(2);
+      await validateWorkspaceSetupStep(3);
+
+      const workspaceValues = workspaceForm.getFieldsValue();
+      const goalValues = setupGoalForm.getFieldsValue();
+      const dodValues = setupDoDForm.getFieldsValue();
+      const soulBindingValues = setupSoulBindingsForm.getFieldsValue();
+      const workspace = await workorchApi.createWorkspace(workspaceValues.title, workspaceValues.description, workspaceValues.workingDirectory);
+      await workorchApi.defineGoal(workspace.id, goalValues.text);
+      await workorchApi.defineDoD(workspace.id, setupDoDItems(dodValues.items));
+      await workorchApi.updateWorkspaceSoulBindings(workspace.id, normalizeSoulBindingFormValues(soulBindingValues));
+      await loadWorkspaceList(workspace.id);
+      await loadWorkspaceContext(workspace.id);
+      closeWorkspaceSetup();
+      message.success('工作空间、目标、验收标准和执行人格配置已提交');
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setBusinessSubmitting(false);
+    }
+  };
+
   const openSoulBindingEditor = () => {
     soulBindingsForm.setFieldsValue({
       defaultSoulId: soulBindings?.defaultSoulId,
       bindings: soulBindings?.bindings ?? {}
     });
     setSoulBindingEditorOpen(true);
+  };
+
+  const openWorkspaceDelete = () => {
+    workspaceDeleteForm.setFieldsValue({ purge: false });
+    setWorkspaceDeleteOpen(true);
+  };
+
+  const submitWorkspaceDelete = async () => {
+    if (!workspaceId) {
+      return;
+    }
+    const targetWorkspaceId = workspaceId;
+    const values = workspaceDeleteForm.getFieldsValue();
+    setWorkspaceDeleting(true);
+    try {
+      await workorchApi.deleteWorkspace(targetWorkspaceId, values.purge);
+      setWorkspaceDeleteOpen(false);
+      workspaceDeleteForm.resetFields();
+      clearWorkspaceContext();
+      await loadWorkspaceList(undefined, targetWorkspaceId);
+      message.success(values.purge ? '工作空间及关联数据已删除' : '工作空间已删除');
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setWorkspaceDeleting(false);
+    }
   };
 
   const activateWorkspaceExecution = (request: WorkspaceExecutionActivationRequest) => {
@@ -2224,6 +2334,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           <Button disabled={!workspaceId} onClick={() => openDoDDefinition()}>定义验收标准</Button>
           <Button disabled={!workspaceId} onClick={openSoulBindingEditor}>调整 Soul</Button>
           <Button type="primary" disabled={!workspaceId} onClick={requestWorkspaceActivation}>启动执行</Button>
+          <Button danger disabled={!workspaceId} onClick={openWorkspaceDelete}>删除工作空间</Button>
           {activationTracking ? <Tag color="processing">后台跟踪中</Tag> : null}
           <Select
             style={{ width: 360 }}
@@ -2842,18 +2953,13 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
         open={workspaceSetupOpen}
         confirmLoading={businessSubmitting}
         onCancel={closeWorkspaceSetup}
-        onOk={() => {
-          if (setupStep === 0) {
-            workspaceForm.submit();
-          } else if (setupStep === 1) {
-            setupGoalForm.submit();
-          } else if (setupStep === 2) {
-            setupDoDForm.submit();
-          } else {
-            setupSoulBindingsForm.submit();
-          }
-        }}
-        okText={setupStep === 0 ? '创建工作空间' : setupStep === 1 ? '定义目标' : setupStep === 2 ? '定义验收标准' : '保存执行人格配置'}
+        width={820}
+        footer={[
+          <Button key="cancel" onClick={closeWorkspaceSetup}>取消</Button>,
+          setupStep > 0 ? <Button key="previous" onClick={goPreviousWorkspaceSetupStep}>上一步</Button> : null,
+          setupStep < 4 ? <Button key="next" type="primary" onClick={() => void goNextWorkspaceSetupStep()}>下一步</Button> : null,
+          setupStep === 4 ? <Button key="submit" type="primary" loading={businessSubmitting} onClick={() => void submitWorkspaceSetup()}>确认提交</Button> : null
+        ].filter(Boolean)}
       >
         <Steps
           current={setupStep}
@@ -2862,27 +2968,14 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             { title: '工作空间' },
             { title: '目标' },
             { title: '验收标准' },
-            { title: '执行人格' }
+            { title: '执行人格' },
+            { title: '确认提交' }
           ]}
         />
         <Form
           form={workspaceForm}
           layout="vertical"
           style={{ display: setupStep === 0 ? 'block' : 'none' }}
-          onFinish={async (values: { title: string; description?: string; workingDirectory?: string }) => {
-            setBusinessSubmitting(true);
-            try {
-              const workspace = await workorchApi.createWorkspace(values.title, values.description, values.workingDirectory);
-              setCreatedWorkspace(workspace);
-              await loadWorkspaceList(workspace.id);
-              setSetupStep(1);
-              message.success('工作空间已创建，请继续定义目标');
-            } catch (error) {
-              message.error(errorMessage(error));
-            } finally {
-              setBusinessSubmitting(false);
-            }
-          }}
         >
           <Form.Item name="templateId" label="Workspace 模板">
             <Select
@@ -2906,26 +2999,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           form={setupGoalForm}
           layout="vertical"
           style={{ display: setupStep === 1 ? 'block' : 'none' }}
-          onFinish={async (values: { text: string }) => {
-            if (!createdWorkspace) {
-              message.error('工作空间尚未创建');
-              return;
-            }
-            setBusinessSubmitting(true);
-            try {
-              await workorchApi.defineGoal(createdWorkspace.id, values.text);
-              await loadWorkspaceContext(createdWorkspace.id);
-              setSetupStep(2);
-              message.success('目标已定义，请继续定义验收标准');
-            } catch (error) {
-              message.error(errorMessage(error));
-            } finally {
-              setBusinessSubmitting(false);
-            }
-          }}
         >
           <Form.Item label="工作空间">
-            <Input value={createdWorkspace?.id || ''} disabled />
+            <Input value={workspaceForm.getFieldValue('title') || '待创建，最终确认提交后生成'} disabled />
           </Form.Item>
           <Form.Item name="text" label="目标" rules={[{ required: true }]}>
             <Input.TextArea rows={4} placeholder="描述该工作空间要达成的业务结果" />
@@ -2935,27 +3011,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           form={setupDoDForm}
           layout="vertical"
           style={{ display: setupStep === 2 ? 'block' : 'none' }}
-          onFinish={async (values: { items: string }) => {
-            if (!createdWorkspace) {
-              message.error('工作空间尚未创建');
-              return;
-            }
-            setBusinessSubmitting(true);
-            try {
-              const items = values.items.split('\n').map((item) => item.trim()).filter(Boolean);
-              await workorchApi.defineDoD(createdWorkspace.id, items);
-              await loadWorkspaceContext(createdWorkspace.id);
-              setSetupStep(3);
-              message.success('验收标准已定义，请继续确认执行人格配置');
-            } catch (error) {
-              message.error(errorMessage(error));
-            } finally {
-              setBusinessSubmitting(false);
-            }
-          }}
         >
           <Form.Item label="工作空间">
-            <Input value={createdWorkspace?.id || ''} disabled />
+            <Input value={workspaceForm.getFieldValue('title') || '待创建，最终确认提交后生成'} disabled />
           </Form.Item>
           <Form.Item name="items" label="验收项" rules={[{ required: true }]}>
             <Input.TextArea rows={5} placeholder={'每行一个验收标准\n示例：服务已完成本地部署并可访问'} />
@@ -2965,26 +3023,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           form={setupSoulBindingsForm}
           layout="vertical"
           style={{ display: setupStep === 3 ? 'block' : 'none' }}
-          onFinish={async (values) => {
-            if (!createdWorkspace) {
-              message.error('工作空间尚未创建');
-              return;
-            }
-            setBusinessSubmitting(true);
-            try {
-              await workorchApi.updateWorkspaceSoulBindings(createdWorkspace.id, normalizeSoulBindingFormValues(values));
-              await loadWorkspaceContext(createdWorkspace.id);
-              closeWorkspaceSetup();
-              message.success('工作空间目标、验收标准和执行人格配置已就绪');
-            } catch (error) {
-              message.error(errorMessage(error));
-            } finally {
-              setBusinessSubmitting(false);
-            }
-          }}
         >
           <Form.Item label="工作空间">
-            <Input value={createdWorkspace?.id || ''} disabled />
+            <Input value={workspaceForm.getFieldValue('title') || '待创建，最终确认提交后生成'} disabled />
           </Form.Item>
           <Typography.Paragraph type="secondary">
             可选。用于设置该工作空间默认 Soul 和各任务阶段 Soul；后续可在工作空间详情中修改。
@@ -3014,6 +3055,65 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           ) : (
             <Empty description="暂无 Soul，可先到系统配置创建，或直接完成后续配置" />
           )}
+        </Form>
+        <div style={{ display: setupStep === 4 ? 'block' : 'none' }}>
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Typography.Paragraph type="secondary">
+              请确认以下信息。点击“确认提交”后，workorch 会按顺序创建 Workspace、写入 Goal、写入 DoD，并保存工作空间 Soul 配置。
+            </Typography.Paragraph>
+            <Descriptions
+              bordered
+              column={1}
+              size="small"
+              items={[
+                { key: 'title', label: '工作空间', children: workspaceForm.getFieldValue('title') || '-' },
+                { key: 'description', label: '描述', children: boundedParagraph(workspaceForm.getFieldValue('description'), { rows: 2 }) },
+                { key: 'workingDirectory', label: '工作目录', children: workspaceForm.getFieldValue('workingDirectory') || '自动生成' },
+                { key: 'goal', label: '目标', children: boundedParagraph(setupGoalForm.getFieldValue('text'), { rows: 3 }) },
+                { key: 'dod', label: '验收标准', children: compactTags(setupDoDItems(setupDoDForm.getFieldValue('items')), 6) },
+                {
+                  key: 'defaultSoul',
+                  label: '默认 Soul',
+                  children: setupSoulBindingsForm.getFieldValue('defaultSoulId')
+                    ? soulNameById.get(setupSoulBindingsForm.getFieldValue('defaultSoulId')) || setupSoulBindingsForm.getFieldValue('defaultSoulId')
+                    : '未配置'
+                },
+                {
+                  key: 'stageSouls',
+                  label: '阶段 Soul',
+                  children: compactTags(
+                    Object.entries(setupSoulBindingsForm.getFieldValue('bindings') ?? {})
+                      .filter(([, soulId]) => Boolean(soulId))
+                      .map(([stage, soulId]) => `${soulBindingStageLabel(stage)}: ${soulNameById.get(String(soulId)) || soulId}`),
+                    6
+                  )
+                }
+              ]}
+            />
+          </Space>
+        </div>
+      </Modal>
+      <Modal
+        title="删除工作空间"
+        open={workspaceDeleteOpen}
+        okText="确认删除"
+        okButtonProps={{ danger: true }}
+        confirmLoading={workspaceDeleting}
+        onCancel={() => setWorkspaceDeleteOpen(false)}
+        onOk={() => void submitWorkspaceDelete()}
+      >
+        <Form form={workspaceDeleteForm} layout="vertical" initialValues={{ purge: false }}>
+          <Typography.Paragraph>
+            确认删除「{snapshot?.workspace.title || workspaceId}」？默认仅删除工作空间实体记录，不会清理运行数据或工作目录。
+          </Typography.Paragraph>
+          <Form.Item name="purge" valuePropName="checked">
+            <Checkbox>
+              同时删除该工作空间的目标、验收标准、运行数据、治理记录、交付物索引、Memory 和工作目录
+            </Checkbox>
+          </Form.Item>
+          <Typography.Paragraph type="secondary">
+            勾选后会清理 file backend 下该工作空间的数据目录，并删除 Workspace 的工作目录。该操作不可恢复。
+          </Typography.Paragraph>
         </Form>
       </Modal>
       <Modal

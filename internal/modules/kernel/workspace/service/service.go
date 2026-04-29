@@ -45,6 +45,7 @@ type UpdateDoDCommand struct {
 type Service interface {
 	CreateWorkspace(context.Context, CreateWorkspaceCommand) error
 	EnsureWorkspace(context.Context, EnsureWorkspaceCommand) error
+	DeleteWorkspace(context.Context, common.WorkspaceID) error
 	DefineGoal(context.Context, DefineGoalCommand) error
 	UpdateGoal(context.Context, UpdateGoalCommand) error
 	DefineDoD(context.Context, DefineDoDCommand) error
@@ -53,6 +54,7 @@ type Service interface {
 
 type CreateWorkspaceHandler func(context.Context, CreateWorkspaceCommand) error
 type EnsureWorkspaceHandler func(context.Context, EnsureWorkspaceCommand) error
+type DeleteWorkspaceHandler func(context.Context, common.WorkspaceID) error
 type DefineGoalHandler func(context.Context, DefineGoalCommand) error
 type UpdateGoalHandler func(context.Context, UpdateGoalCommand) error
 type DefineDoDHandler func(context.Context, DefineDoDCommand) error
@@ -61,6 +63,7 @@ type UpdateDoDHandler func(context.Context, UpdateDoDCommand) error
 type Module struct {
 	createWorkspace CreateWorkspaceHandler
 	ensureWorkspace EnsureWorkspaceHandler
+	deleteWorkspace DeleteWorkspaceHandler
 	defineGoal      DefineGoalHandler
 	updateGoal      UpdateGoalHandler
 	defineDoD       DefineDoDHandler
@@ -70,6 +73,7 @@ type Module struct {
 type Dependencies struct {
 	CreateWorkspace CreateWorkspaceHandler
 	EnsureWorkspace EnsureWorkspaceHandler
+	DeleteWorkspace DeleteWorkspaceHandler
 	DefineGoal      DefineGoalHandler
 	UpdateGoal      UpdateGoalHandler
 	DefineDoD       DefineDoDHandler
@@ -80,6 +84,7 @@ func New(deps Dependencies) *Module {
 	return &Module{
 		createWorkspace: deps.CreateWorkspace,
 		ensureWorkspace: deps.EnsureWorkspace,
+		deleteWorkspace: deps.DeleteWorkspace,
 		defineGoal:      deps.DefineGoal,
 		updateGoal:      deps.UpdateGoal,
 		defineDoD:       deps.DefineDoD,
@@ -99,6 +104,13 @@ func (m *Module) EnsureWorkspace(ctx context.Context, cmd EnsureWorkspaceCommand
 		return common.ErrInvalidArgument
 	}
 	return m.ensureWorkspace(ctx, cmd)
+}
+
+func (m *Module) DeleteWorkspace(ctx context.Context, id common.WorkspaceID) error {
+	if m == nil || m.deleteWorkspace == nil {
+		return common.ErrInvalidArgument
+	}
+	return m.deleteWorkspace(ctx, id)
 }
 
 func (m *Module) DefineGoal(ctx context.Context, cmd DefineGoalCommand) error {

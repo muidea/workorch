@@ -567,6 +567,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId"},
+		{method: http.MethodDelete, pattern: "/api/v1/workorch/workspaces/:workspaceId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/snapshot"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/task-progress"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/context-bundle"},
@@ -876,6 +877,15 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}
 		return appservice.Workspace{ID: "ws-native-write", Title: title, Description: description, WorkingDirectory: workingDirectory, State: "active"}, nil
 	}
+	state.deleteWorkspace = func(ctx context.Context, _, _, workspaceID string, cmd appservice.DeleteWorkspaceCommand) error {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("workspace delete event hub = %#v, want injected hub", got)
+		}
+		if workspaceID != "ws-native-read" || !cmd.Purge {
+			t.Fatalf("workspace delete input = %q/%+v, want ws-native-read purge", workspaceID, cmd)
+		}
+		return nil
+	}
 	state.createRun = func(ctx context.Context, _, _, workspaceID, runID, goalID, dodID string) (appservice.Run, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("run create event hub = %#v, want injected hub", got)
@@ -980,6 +990,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces", body: `{"title":"native write","description":"native description","workingDirectory":"workspaces/native-write"}`, status: http.StatusCreated},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read", status: http.StatusOK},
+		{method: http.MethodDelete, path: "/api/v1/workorch/workspaces/ws-native-read?purge=true", status: http.StatusNoContent},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/snapshot", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/task-progress", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/context-bundle", status: http.StatusOK},
@@ -1157,6 +1168,40 @@ func TestWorkspaceListAndGetEndpointsReturnPersistedWorkspaces(t *testing.T) {
 	}
 	if fetched.Workspace.ID != workspace.ID || fetched.Workspace.Title != "http workspace" || fetched.Workspace.WorkingDirectory != "workspaces/ws-http" {
 		t.Fatalf("fetched workspace = %+v, want %s/http workspace/workspaces/ws-http", fetched.Workspace, workspace.ID)
+	}
+}
+
+func TestWorkspaceDeleteEndpointDeletesWorkspaceAndSupportsPurge(t *testing.T) {
+	dataRoot := t.TempDir()
+	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"http delete workspace"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("workspace create status = %d, want 201, body=%s", createRec.Code, createRec.Body.String())
+	}
+	var created workspaceResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal created workspace: %v", err)
+	}
+	workspace := created.Workspace
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/workorch/workspaces/"+workspace.ID+"?purge=true", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want 204, body=%s", rec.Code, rec.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID, nil)
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusNotFound {
+		t.Fatalf("get deleted status = %d, want 404, body=%s", getRec.Code, getRec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(dataRoot, "workspaces", workspace.ID)); !os.IsNotExist(err) {
+		t.Fatalf("workspace data dir err = %v, want not exist", err)
 	}
 }
 

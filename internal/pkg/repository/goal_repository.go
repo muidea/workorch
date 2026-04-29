@@ -12,4 +12,5 @@ type GoalRepository interface {
 	Get(context.Context, common.GoalID) (*workspace.Goal, error)
 	ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*workspace.Goal, error)
 	Update(context.Context, *workspace.Goal) error
+	Delete(context.Context, common.GoalID) error
 }

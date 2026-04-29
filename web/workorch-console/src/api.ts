@@ -103,6 +103,12 @@ export const workorchApi = {
     });
     return body.workspace;
   },
+  deleteWorkspace: async (workspaceId: string, purge?: boolean) => {
+    const suffix = purge ? `?${new URLSearchParams({ purge: 'true' }).toString()}` : '';
+    await request<Record<string, never>>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}${suffix}`, {
+      method: 'DELETE'
+    });
+  },
   listGoals: async (workspaceId: string) => {
     const body = await request<{ goals: Goal[] }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/goals`);
     return body.goals ?? [];
