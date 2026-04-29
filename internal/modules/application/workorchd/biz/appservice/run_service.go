@@ -2,6 +2,7 @@ package appservice
 
 import (
 	"context"
+	"encoding/json"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
@@ -92,6 +93,9 @@ func StartRunWithSession(ctx context.Context, session *RuntimeSession, runID str
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.RunID(runID)
+	if err := attachCompressedContextToRun(ctx, session, id); err != nil {
+		return Run{}, err
+	}
 	if err := service.EnsureStarted(ctx, runmodule.StartRunCommand{RunID: id}); err != nil {
 		return Run{}, err
 	}
@@ -127,6 +131,9 @@ func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID st
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.RunID(runID)
+	if err := attachCompressedContextToRun(ctx, session, id); err != nil {
+		return Run{}, err
+	}
 	if err := service.EnsureResumed(ctx, runmodule.ResumeRunCommand{RunID: id}); err != nil {
 		return Run{}, err
 	}
@@ -219,6 +226,48 @@ func ListRunsFromEnv(ctx context.Context, workspaceID string) ([]Run, error) {
 		return nil, err
 	}
 	return ListRunsWithSession(ctx, session, workspaceID)
+}
+
+func attachCompressedContextToRun(ctx context.Context, session *RuntimeSession, runID common.RunID) error {
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		return err
+	}
+	bundle, err := readRunContextBundle(ctx, deps, runID)
+	if err != nil {
+		return err
+	}
+	item, err := deps.runs.Get(ctx, runID)
+	if err != nil {
+		return err
+	}
+	executionContext := cloneContextMap(item.ExecutionContext)
+	if executionContext == nil {
+		executionContext = map[string]any{}
+	}
+	executionContext["compressedContext"] = compressedContextMap(bundle.CompressedContext)
+	item.ExecutionContext = executionContext
+	return deps.runs.Update(ctx, item)
+}
+
+func readRunContextBundle(ctx context.Context, deps readModelDependencies, runID common.RunID) (ContextBundle, error) {
+	snapshot, err := readRunSnapshot(ctx, deps, runID)
+	if err != nil {
+		return ContextBundle{}, err
+	}
+	return mapRunContextBundle(snapshot), nil
+}
+
+func compressedContextMap(input CompressedContext) map[string]any {
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return nil
+	}
+	var ret map[string]any
+	if err := json.Unmarshal(payload, &ret); err != nil {
+		return nil
+	}
+	return ret
 }
 
 func runDependenciesFromSession(session *RuntimeSession) (runmodule.Service, repository.RunRepository, error) {

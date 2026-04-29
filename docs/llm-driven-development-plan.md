@@ -14,6 +14,8 @@ The plan originally scoped the first locally deployable LLM-driven MVP. That
 MVP is now completed, and later runtime expansion items are tracked in
 `docs/runtime-expansion-plan.md` and
 `docs/advanced-runtime-scheduling-plan.md`.
+This document is retained as a completed implementation record rather than an
+active backlog.
 
 Vector Memory search has been promoted into the completed P1 scope tracked in
 `docs/next-stage-p1-development-plan.md`. Still outside the completed local
@@ -697,7 +699,8 @@ Exit criteria:
 
 - API and Web both verify the same business flow.
 - Acceptance scripts cover memory and file backends.
-- Status document accurately tracks completed and remaining items.
+- Status document accurately tracks completed items and confirms no active
+  leftovers for this scope.
 
 ### Round 5: Real Provider Stabilization
 

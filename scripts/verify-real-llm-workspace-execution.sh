@@ -111,14 +111,22 @@ run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
 
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/observability.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/task-progress" >"$TMP_DIR/task-progress.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/context-bundle" >"$TMP_DIR/context-bundle.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/task-decompositions" >"$TMP_DIR/task-decompositions.json"
+curl -fsS "$BASE_URL/api/v1/workorch/events?runId=$run_id" >"$TMP_DIR/events.json"
 
-python3 - "$TMP_DIR/activation.json" "$TMP_DIR/snapshot.json" "$TMP_DIR/observability.json" <<'PY'
+python3 - "$TMP_DIR/activation.json" "$TMP_DIR/snapshot.json" "$TMP_DIR/observability.json" "$TMP_DIR/task-progress.json" "$TMP_DIR/context-bundle.json" "$TMP_DIR/task-decompositions.json" "$TMP_DIR/events.json" <<'PY'
 import json
 import sys
 
 activation = json.load(open(sys.argv[1], encoding="utf-8"))["activation"]
 snapshot = json.load(open(sys.argv[2], encoding="utf-8"))["snapshot"]
 observability = json.load(open(sys.argv[3], encoding="utf-8"))["observability"]
+task_progress = json.load(open(sys.argv[4], encoding="utf-8"))["taskProgress"]
+context_bundle = json.load(open(sys.argv[5], encoding="utf-8"))["contextBundle"]
+task_decompositions = json.load(open(sys.argv[6], encoding="utf-8")).get("taskDecompositions") or []
+event_records = json.load(open(sys.argv[7], encoding="utf-8")).get("eventRecords") or []
 run = snapshot["run"]
 steps = snapshot.get("steps") or ([] if not snapshot.get("step") else [snapshot["step"]])
 tool_calls = snapshot.get("toolCalls") or []
@@ -130,6 +138,14 @@ artifacts = snapshot.get("artifacts") or []
 errors = []
 if run.get("state") != "completed":
     errors.append(f"run state is {run.get('state')!r}, want completed: {run.get('failureReason', '')}")
+
+compressed = (run.get("executionContext") or {}).get("compressedContext") or {}
+if compressed.get("version") != "workorch.compressedContext.v1":
+    errors.append(f"executionContext.compressedContext missing or invalid: {compressed}")
+if compressed.get("mode") != "deterministic_recovery_summary":
+    errors.append(f"compressedContext mode is {compressed.get('mode')!r}")
+if compressed.get("runId") != run.get("id") or compressed.get("workspaceId") != run.get("workspaceId"):
+    errors.append(f"compressedContext identity mismatch: {compressed}")
 
 graph_steps = [s for s in steps if (s.get("output") or {}).get("stage") == "llm_execution_graph_plan"]
 if not graph_steps:
@@ -160,6 +176,33 @@ progress = observability.get("progress") or {}
 if progress.get("terminal") is not True:
     errors.append(f"observability terminal is {progress.get('terminal')!r}, want true")
 
+if task_progress.get("runId") != run.get("id") or task_progress.get("state") != "completed":
+    errors.append(f"taskProgress mismatch: {task_progress}")
+if not (task_progress.get("recovery") or {}).get("mode"):
+    errors.append(f"taskProgress recovery mode empty: {task_progress}")
+
+bundle_compressed = context_bundle.get("compressedContext") or {}
+if context_bundle.get("runId") != run.get("id") or context_bundle.get("workspaceId") != run.get("workspaceId"):
+    errors.append(f"context bundle identity mismatch: {context_bundle.get('workspaceId')}/{context_bundle.get('runId')}")
+if bundle_compressed.get("version") != "workorch.compressedContext.v1":
+    errors.append(f"context bundle compressedContext invalid: {bundle_compressed}")
+section_ids = {item.get("id") for item in (context_bundle.get("sections") or [])}
+for required in ["workspace", "run", "task_progress", "task_decomposition", "formal_output", "recovery"]:
+    if required not in section_ids:
+        errors.append(f"context bundle missing section {required!r}: {section_ids}")
+
+if not task_decompositions:
+    errors.append("missing taskDecompositions for executionGraph run")
+else:
+    latest = task_decompositions[-1]
+    if latest.get("state") != "completed":
+        errors.append(f"taskDecomposition state is {latest.get('state')!r}, want completed: {latest}")
+    if latest.get("nodeTotal", 0) < 1 or latest.get("nodeCompleted") != latest.get("nodeTotal"):
+        errors.append(f"taskDecomposition node completion mismatch: {latest}")
+    nodes = latest.get("nodes") or []
+    if not nodes or not any(item.get("kind") == "shell/command" and item.get("state") == "completed" for item in nodes):
+        errors.append(f"taskDecomposition missing completed shell node: {nodes}")
+
 if not tool_calls:
     errors.append("missing ToolCall evidence")
 if not validations:
@@ -179,6 +222,11 @@ else:
         errors.append(f"missing Artifact linked to accepted Result {result.get('id')}")
     elif not any(item.get("id") in artifact_refs and item.get("artifactType") == "text" for item in linked_artifacts):
         errors.append(f"missing text Artifact referenced by Result: result={result} artifacts={linked_artifacts}")
+
+topics = {item.get("topic") for item in event_records}
+for topic in ["/run/created", "/run/state/changed", "/step/dispatched", "/step/state/changed", "/result/accepted", "/artifact/created"]:
+    if topic not in topics:
+        errors.append(f"event stream missing {topic}: {topics}")
 
 if errors:
     for item in errors:

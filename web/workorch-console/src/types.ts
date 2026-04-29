@@ -344,6 +344,142 @@ export type RuntimeTimelineItem = {
   output?: Record<string, unknown>;
 };
 
+export type TaskProgress = {
+  workspaceId: string;
+  runId?: string;
+  state: string;
+  summary?: string;
+  currentMilestone?: string;
+  milestones?: ProgressMilestone[];
+  items?: ProgressItem[];
+  blockers?: ProgressBlocker[];
+  recovery: RecoveryPlan;
+  evidenceRefs?: string[];
+};
+
+export type TaskDecomposition = {
+  id: string;
+  workspaceId: string;
+  runId: string;
+  rootStepId: string;
+  state: string;
+  summary?: string;
+  graphBranch?: string;
+  nodeTotal: number;
+  nodeCompleted: number;
+  nodeFailed: number;
+  nodeRunning: number;
+  nodes?: TaskDecompositionNode[];
+  evidenceRefs?: string[];
+};
+
+export type TaskDecompositionNode = {
+  id: string;
+  kind: string;
+  title?: string;
+  state: string;
+  dependsOn?: string[];
+  branch?: string;
+  stepId?: string;
+  stepState?: string;
+  evidenceRefs?: string[];
+  input?: Record<string, unknown>;
+};
+
+export type ProgressMilestone = {
+  id: string;
+  title: string;
+  state: string;
+  evidenceRefs?: string[];
+};
+
+export type ProgressItem = {
+  id: string;
+  kind: string;
+  title: string;
+  state: string;
+  evidenceRefs?: string[];
+};
+
+export type ProgressBlocker = {
+  id: string;
+  kind: string;
+  state: string;
+  reason?: string;
+  evidenceRef?: string;
+};
+
+export type RecoveryPlan = {
+  mode: string;
+  nextAction?: string;
+  runId?: string;
+  stepId?: string;
+  blockingTicketId?: string;
+  blockingApprovalId?: string;
+  checkpointId?: string;
+  reason?: string;
+};
+
+export type ContextBundle = {
+  workspaceId: string;
+  runId?: string;
+  mode: string;
+  summary?: string;
+  compressedContext: CompressedContext;
+  taskProgress: TaskProgress;
+  recovery: RecoveryPlan;
+  latestCheckpoint?: RuntimeCheckpoint;
+  sections?: ContextSection[];
+  recentEvidence?: ContextEvidence[];
+  compressionCandidates?: ContextCompressionCandidate[];
+};
+
+export type CompressedContext = {
+  version: string;
+  mode: string;
+  workspaceId: string;
+  runId?: string;
+  summary?: string;
+  currentMilestone?: string;
+  milestones?: ProgressMilestone[];
+  blockers?: ProgressBlocker[];
+  recovery: RecoveryPlan;
+  recentEvidence?: ContextEvidence[];
+  resultRefs?: string[];
+  sourceSectionRefs?: string[];
+  sourceEvidenceRefs?: string[];
+  retentionPolicy?: string;
+};
+
+export type ContextSection = {
+  id: string;
+  kind: string;
+  title: string;
+  priority: number;
+  state?: string;
+  summary?: string;
+  evidenceRefs?: string[];
+  data?: Record<string, unknown>;
+};
+
+export type ContextEvidence = {
+  id: string;
+  kind: string;
+  state?: string;
+  summary?: string;
+  occurredAt?: string;
+  evidenceRefs?: string[];
+  data?: Record<string, unknown>;
+};
+
+export type ContextCompressionCandidate = {
+  sectionId: string;
+  reason: string;
+  retention: string;
+  sourceRefs?: string[];
+  suggestedMode?: string;
+};
+
 export type EventRecord = {
   id: string;
   version: string;
@@ -361,6 +497,8 @@ export type EventRecord = {
 export type RunObservability = {
   run: Run;
   progress: RunProgress;
+  taskProgress: TaskProgress;
+  taskDecompositions?: TaskDecomposition[];
   evidence: RuntimeEvidenceSummary;
   latestCheckpoint?: RuntimeCheckpoint;
   timeline?: RuntimeTimelineItem[];
@@ -369,6 +507,8 @@ export type RunObservability = {
 export type RunSnapshot = {
   workspace: Workspace;
   run: Run;
+  taskProgress: TaskProgress;
+  taskDecompositions?: TaskDecomposition[];
   steps?: StepView[];
   toolCalls?: ToolCall[];
   patches?: Patch[];
@@ -383,6 +523,8 @@ export type RunSnapshot = {
 
 export type WorkspaceSnapshot = {
   workspace: Workspace;
+  taskProgress: TaskProgress;
+  taskDecompositions?: TaskDecomposition[];
   runs?: Run[];
   results?: Result[];
   artifacts?: Artifact[];

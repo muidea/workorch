@@ -15,6 +15,9 @@
     `GET /api/v1/workorch/workspaces`,
     `GET /api/v1/workorch/workspaces/{workspaceId}`,
     `GET /api/v1/workorch/workspaces/{workspaceId}/snapshot`,
+    `GET /api/v1/workorch/workspaces/{workspaceId}/task-progress`,
+    `GET /api/v1/workorch/workspaces/{workspaceId}/task-decompositions`,
+    `GET /api/v1/workorch/workspaces/{workspaceId}/context-bundle`,
     `GET /api/v1/workorch/workspaces/{workspaceId}/goals`,
     `GET /api/v1/workorch/goals/{goalId}`,
     `GET /api/v1/workorch/workspaces/{workspaceId}/dods`,
@@ -25,6 +28,9 @@
     `GET /api/v1/workorch/runs/{runId}/snapshot`,
     `GET /api/v1/workorch/runs/{runId}/status`,
     `GET /api/v1/workorch/runs/{runId}/observability`,
+    `GET /api/v1/workorch/runs/{runId}/task-progress`,
+    `GET /api/v1/workorch/runs/{runId}/task-decompositions`,
+    `GET /api/v1/workorch/runs/{runId}/context-bundle`,
     `GET /api/v1/workorch/decisions`,
     `GET /api/v1/workorch/decisions/{ticketId}`,
     `GET /api/v1/workorch/approvals`,
@@ -282,6 +288,8 @@ Current formal business events:
 - `/ticket/resolved`
 - `/approval/created`
 - `/approval/resolved`
+- `/result/accepted`
+- `/artifact/created`
 
 Current internal event consumption boundary:
 
@@ -291,7 +299,9 @@ Current internal event consumption boundary:
 - `internal/modules/application/workorchd/pkg/observed/workorch.go` only emits snapshot items from matching published business events; missing formal events remain visible as missing observed evidence
 - Current default runtime `EventHub` is backed by `magicCommon/event.Hub` through `internal/pkg/events.MagicHub`.
 - The HTTP service injects the application-level EventHub into request contexts, and appservice backend sessions reuse that hub instead of always creating a per-request hub.
-- Observed event history is runtime-local unless a future formal event persistence path is added; file-backed entity reload does not synthesize observed evidence from repository state.
+- Observed runtime history remains runtime-local, while the formal `kernel/eventstream`
+  path persists normalized Workorch EventHub records for file-backed replay.
+  File-backed entity reload still must not synthesize missing events from repository state.
 - The business-facing `events.Hub` interface remains as a narrow workorch adapter boundary while module lifecycle is migrated.
 
 ## Acceptance
@@ -569,8 +579,7 @@ P1 交付范围与验收记录见：
 
 当前活跃项：
 
-- in_progress: `RE1 Formal Business Result And Artifact Model`
-- planned: `RE2 Persistent Workorch Event Stream`
+- active: none
 
 RE1 当前进度：
 
@@ -587,7 +596,8 @@ RE2 当前进度：
 - completed: Run / Workspace Snapshot 与 Run Observability 已接入持久化事件记录。
 - completed: HTTP 查询接口 `GET /api/v1/workorch/events` 支持按 workspace、run、topic、
   subject、cursor、limit 查询。
-- remaining: file-backed 服务重启后的事件流端到端 replay 验证。
+- completed: file-backed 服务重启后的事件流 replay 验证，覆盖 `/events` 查询、
+  Run snapshot eventRecords 和 Run observability persisted event timeline。
 
 边界：
 
@@ -668,8 +678,8 @@ LLM 驱动 Workspace 执行的设计文档已补齐，范围、边界与交互�
 - 未配置 LLM provider 时，LLM-driven execution 必须明确失败，不能回落到旧运行时形成假完成
 - kernel/orchestrator、kernel/run、blocks/llm、blocks/mcp 和 Web Console 不得根据具体
   Workspace 目标、城市、天气、工具 payload 字段或 provider 特定结构合成业务完成结果
-- ToolCall/MCP 输出只能作为 evidence；最终目标成果必须来自 `dodAssessment.summary`
-  或后续正式业务结果模型
+- ToolCall/MCP 输出只能作为 evidence；最终目标成果必须来自正式 `Result` /
+  `Artifact`，历史 `dodAssessment.summary` 只作为验收证据来源
 
 该设计同步定义了后续实现验收的数据交互流程：
 
@@ -740,6 +750,46 @@ Skill 能力来源已从单一 workorch 内置仓储扩展为 workorch 读模型
   与 Goal/DoD 文本的通用匹配，避免框架层解析具体业务目标
 - `skill-hub feedback` 仍不由 workorch 自动触发；运行效果先进入 workorch `skill_feedback`
   Memory，Skill 内容归档继续由 skill-hub 生命周期命令处理
+
+## Task Progress And Recovery Projection
+
+本轮围绕 LLM 上下文压缩和多轮任务恢复的前置能力，先落地只读 `TaskProgress`
+业务投影。该投影不作为执行状态机的新事实源，只从 Workspace / Run / Step、
+Decision / Approval、ToolCall / Patch / ValidationResult、RuntimeCheckpoint、
+Result / Artifact 等已持久化模型推导任务进度、阻塞项、证据引用和恢复建议。
+
+当前进度：
+
+- completed: Run snapshot 和 Run observability 暴露 `taskProgress`
+- completed: `GET /api/v1/workorch/runs/{runId}/task-progress`
+- completed: `GET /api/v1/workorch/workspaces/{workspaceId}/task-progress`
+- completed: Web Workspace Detail 展示任务进度里程碑、阻塞项和恢复建议
+- completed: 单元测试覆盖正式 Result / Artifact 完成态、Decision 阻塞恢复、Workspace 活跃 Run 恢复投影
+- completed: `ContextBundle` 只读上下文恢复包，汇总身份信息、执行上下文、
+  `TaskProgress`、最近证据、压缩候选和恢复检查点
+- completed: `CompressedContext` 确定性压缩摘要，保留恢复建议、阻塞项、
+  里程碑、最近证据摘要、正式结果引用和源证据引用
+- completed: `GET /api/v1/workorch/runs/{runId}/context-bundle`
+- completed: `GET /api/v1/workorch/workspaces/{workspaceId}/context-bundle`
+- completed: `TaskDecomposition` 只读任务拆分投影，从 Run step 输出中的
+  `executionGraph` 和后续 graph node 执行步骤推导拆分图、节点依赖、节点状态和证据引用
+- completed: `GET /api/v1/workorch/runs/{runId}/task-decompositions`
+- completed: `GET /api/v1/workorch/workspaces/{workspaceId}/task-decompositions`
+- completed: Run start / resume 前自动将 `compressedContext` 写入 Run
+  `executionContext`，后续 `llm/workspace_execution` 可直接读取压缩恢复上下文
+- completed: Web Workspace Detail 展示上下文分区、压缩上下文、最近证据和压缩候选
+- completed: Web Workspace Detail 展示任务拆分图、节点依赖、节点执行状态和节点输入证据
+- completed: 单元测试覆盖上下文包、压缩上下文、恢复检查点、压缩候选推导，
+  start / resume 前的压缩上下文注入，以及 execution graph 到任务拆分投影的映射
+
+当前边界：
+
+- `TaskProgress` 只读取业务模型，不直接驱动调度或修改 Run 状态
+- `TaskDecomposition` 只读取 LLM execution graph 和已落库 Step evidence，
+  不作为 scheduler、dispatcher 或 block execution graph 的新事实源
+- `CompressedContext` 当前采用确定性压缩，不调用 LLM 进行二次摘要
+- LLM 参与的进一步语义压缩仍作为后续增量开发
+- 投影规则只使用通用状态、证据和治理模型，不解析具体 Workspace Goal 业务语义
 
 ## MVP Closure Record
 

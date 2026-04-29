@@ -140,6 +140,27 @@ type runObservabilityResponse struct {
 	Observability appservice.RunObservability `json:"observability"`
 }
 
+type taskProgressResponse struct {
+	Service      string                  `json:"service"`
+	Backend      string                  `json:"backend,omitempty"`
+	DataRoot     string                  `json:"dataRoot,omitempty"`
+	TaskProgress appservice.TaskProgress `json:"taskProgress"`
+}
+
+type contextBundleResponse struct {
+	Service       string                   `json:"service"`
+	Backend       string                   `json:"backend,omitempty"`
+	DataRoot      string                   `json:"dataRoot,omitempty"`
+	ContextBundle appservice.ContextBundle `json:"contextBundle"`
+}
+
+type taskDecompositionsResponse struct {
+	Service            string                         `json:"service"`
+	Backend            string                         `json:"backend,omitempty"`
+	DataRoot           string                         `json:"dataRoot,omitempty"`
+	TaskDecompositions []appservice.TaskDecomposition `json:"taskDecompositions"`
+}
+
 type eventRecordsResponse struct {
 	Service      string                   `json:"service"`
 	Backend      string                   `json:"backend,omitempty"`
@@ -347,6 +368,12 @@ type readRunInstanceFunc func(context.Context, string, string, string) (appservi
 type readRunSnapshotFunc func(context.Context, string, string, string) (appservice.RunSnapshot, error)
 type readRunStatusFunc func(context.Context, string, string, string) (appservice.RunStatus, error)
 type readRunObservabilityFunc func(context.Context, string, string, string) (appservice.RunObservability, error)
+type readRunTaskProgressFunc func(context.Context, string, string, string) (appservice.TaskProgress, error)
+type readWorkspaceTaskProgressFunc func(context.Context, string, string, string) (appservice.TaskProgress, error)
+type readRunContextBundleFunc func(context.Context, string, string, string) (appservice.ContextBundle, error)
+type readWorkspaceContextBundleFunc func(context.Context, string, string, string) (appservice.ContextBundle, error)
+type readRunTaskDecompositionsFunc func(context.Context, string, string, string) ([]appservice.TaskDecomposition, error)
+type readWorkspaceTaskDecompositionsFunc func(context.Context, string, string, string) ([]appservice.TaskDecomposition, error)
 type listEventRecordsFunc func(context.Context, string, string, appservice.EventRecordQuery) ([]appservice.EventRecord, error)
 type listRunInstancesFunc func(context.Context, string, string, string) ([]appservice.Run, error)
 type startRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
@@ -380,62 +407,68 @@ type readConfigurationFunc func() (appservice.ServiceConfiguration, error)
 type updateLLMConfigurationFunc func(appservice.UpdateLLMConfigurationCommand) (appservice.ServiceConfiguration, error)
 
 type serverState struct {
-	config                 Config
-	eventHub               events.Hub
-	metrics                *serverMetrics
-	validate               validateFunc
-	createWorkspace        createWorkspaceFunc
-	readWorkspace          readWorkspaceFunc
-	readWorkspaceSnapshot  readWorkspaceSnapshotFunc
-	listWorkspaces         listWorkspacesFunc
-	defineGoal             defineGoalFunc
-	updateGoal             updateGoalFunc
-	readGoal               readGoalFunc
-	listGoals              listGoalsFunc
-	defineDoD              defineDoDFunc
-	updateDoD              updateDoDFunc
-	readDoD                readDoDFunc
-	listDoDs               listDoDsFunc
-	createRun              createRunInstanceFunc
-	readRun                readRunInstanceFunc
-	readRunSnapshot        readRunSnapshotFunc
-	readRunStatus          readRunStatusFunc
-	readRunObservability   readRunObservabilityFunc
-	listEventRecords       listEventRecordsFunc
-	listRuns               listRunInstancesFunc
-	startRun               startRunInstanceFunc
-	resumeRun              resumeRunInstanceFunc
-	activateWorkspace      activateWorkspaceExecutionFunc
-	listDecisions          listDecisionsFunc
-	readDecision           readDecisionFunc
-	resolveDecision        resolveDecisionFunc
-	batchResolveDecisions  batchResolveDecisionsFunc
-	listApprovals          listApprovalsFunc
-	readApproval           readApprovalFunc
-	approveApproval        approveApprovalFunc
-	rejectApproval         rejectApprovalFunc
-	batchResolveApprovals  batchResolveApprovalsFunc
-	createSoul             createSoulFunc
-	readSoul               readSoulFunc
-	listSouls              listSoulsFunc
-	createSkill            createSkillFunc
-	readSkill              readSkillFunc
-	listSkills             listSkillsFunc
-	createMCPServer        createMCPServerFunc
-	readMCPServer          readMCPServerFunc
-	listMCPServers         listMCPServersFunc
-	listMCPServerTools     listMCPServerToolsFunc
-	listMCPServerResources listMCPServerResourcesFunc
-	listMCPServerPrompts   listMCPServerPromptsFunc
-	createMemoryItem       createMemoryItemFunc
-	listMemoryByWorkspace  listMemoryByWorkspaceFunc
-	readConfiguration      readConfigurationFunc
-	updateLLMConfiguration updateLLMConfigurationFunc
-	runQueueMu             sync.Mutex
-	runQueueWaiters        []*runQueueWaiter
-	runQueueSequence       uint64
-	activeRunSlots         int64
-	sharedSession          *appservice.RuntimeSession
+	config                          Config
+	eventHub                        events.Hub
+	metrics                         *serverMetrics
+	validate                        validateFunc
+	createWorkspace                 createWorkspaceFunc
+	readWorkspace                   readWorkspaceFunc
+	readWorkspaceSnapshot           readWorkspaceSnapshotFunc
+	listWorkspaces                  listWorkspacesFunc
+	defineGoal                      defineGoalFunc
+	updateGoal                      updateGoalFunc
+	readGoal                        readGoalFunc
+	listGoals                       listGoalsFunc
+	defineDoD                       defineDoDFunc
+	updateDoD                       updateDoDFunc
+	readDoD                         readDoDFunc
+	listDoDs                        listDoDsFunc
+	createRun                       createRunInstanceFunc
+	readRun                         readRunInstanceFunc
+	readRunSnapshot                 readRunSnapshotFunc
+	readRunStatus                   readRunStatusFunc
+	readRunObservability            readRunObservabilityFunc
+	readRunTaskProgress             readRunTaskProgressFunc
+	readWorkspaceTaskProgress       readWorkspaceTaskProgressFunc
+	readRunContextBundle            readRunContextBundleFunc
+	readWorkspaceContextBundle      readWorkspaceContextBundleFunc
+	readRunTaskDecompositions       readRunTaskDecompositionsFunc
+	readWorkspaceTaskDecompositions readWorkspaceTaskDecompositionsFunc
+	listEventRecords                listEventRecordsFunc
+	listRuns                        listRunInstancesFunc
+	startRun                        startRunInstanceFunc
+	resumeRun                       resumeRunInstanceFunc
+	activateWorkspace               activateWorkspaceExecutionFunc
+	listDecisions                   listDecisionsFunc
+	readDecision                    readDecisionFunc
+	resolveDecision                 resolveDecisionFunc
+	batchResolveDecisions           batchResolveDecisionsFunc
+	listApprovals                   listApprovalsFunc
+	readApproval                    readApprovalFunc
+	approveApproval                 approveApprovalFunc
+	rejectApproval                  rejectApprovalFunc
+	batchResolveApprovals           batchResolveApprovalsFunc
+	createSoul                      createSoulFunc
+	readSoul                        readSoulFunc
+	listSouls                       listSoulsFunc
+	createSkill                     createSkillFunc
+	readSkill                       readSkillFunc
+	listSkills                      listSkillsFunc
+	createMCPServer                 createMCPServerFunc
+	readMCPServer                   readMCPServerFunc
+	listMCPServers                  listMCPServersFunc
+	listMCPServerTools              listMCPServerToolsFunc
+	listMCPServerResources          listMCPServerResourcesFunc
+	listMCPServerPrompts            listMCPServerPromptsFunc
+	createMemoryItem                createMemoryItemFunc
+	listMemoryByWorkspace           listMemoryByWorkspaceFunc
+	readConfiguration               readConfigurationFunc
+	updateLLMConfiguration          updateLLMConfigurationFunc
+	runQueueMu                      sync.Mutex
+	runQueueWaiters                 []*runQueueWaiter
+	runQueueSequence                uint64
+	activeRunSlots                  int64
+	sharedSession                   *appservice.RuntimeSession
 }
 
 type runQueueWaiter struct {
@@ -445,59 +478,65 @@ type runQueueWaiter struct {
 }
 
 type serverMetrics struct {
-	healthzRequests             atomic.Uint64
-	readyzRequests              atomic.Uint64
-	metricsRequests             atomic.Uint64
-	workspaceCreateRequests     atomic.Uint64
-	workspaceListRequests       atomic.Uint64
-	workspaceGetRequests        atomic.Uint64
-	workspaceSnapshotRequests   atomic.Uint64
-	goalDefineRequests          atomic.Uint64
-	goalListRequests            atomic.Uint64
-	goalGetRequests             atomic.Uint64
-	dodDefineRequests           atomic.Uint64
-	dodListRequests             atomic.Uint64
-	dodGetRequests              atomic.Uint64
-	runCreateRequests           atomic.Uint64
-	runListRequests             atomic.Uint64
-	runGetRequests              atomic.Uint64
-	runSnapshotRequests         atomic.Uint64
-	runStatusRequests           atomic.Uint64
-	runObservabilityRequests    atomic.Uint64
-	eventListRequests           atomic.Uint64
-	runStartRequests            atomic.Uint64
-	runResumeRequests           atomic.Uint64
-	workspaceActivationRequests atomic.Uint64
-	decisionListRequests        atomic.Uint64
-	decisionGetRequests         atomic.Uint64
-	decisionResolveRequests     atomic.Uint64
-	approvalListRequests        atomic.Uint64
-	approvalGetRequests         atomic.Uint64
-	approvalApproveRequests     atomic.Uint64
-	approvalRejectRequests      atomic.Uint64
-	soulCreateRequests          atomic.Uint64
-	soulListRequests            atomic.Uint64
-	soulGetRequests             atomic.Uint64
-	skillCreateRequests         atomic.Uint64
-	skillListRequests           atomic.Uint64
-	skillGetRequests            atomic.Uint64
-	mcpServerCreateRequests     atomic.Uint64
-	mcpServerListRequests       atomic.Uint64
-	mcpServerGetRequests        atomic.Uint64
-	mcpToolListRequests         atomic.Uint64
-	mcpResourceListRequests     atomic.Uint64
-	mcpPromptListRequests       atomic.Uint64
-	memoryCreateRequests        atomic.Uint64
-	memoryListRequests          atomic.Uint64
-	configurationReadRequests   atomic.Uint64
-	configurationUpdateRequests atomic.Uint64
-	runSucceeded                atomic.Uint64
-	runFailed                   atomic.Uint64
-	runRejected                 atomic.Uint64
-	runCanceled                 atomic.Uint64
-	runInFlight                 atomic.Int64
-	runQueueWaiting             atomic.Int64
-	runQueuedTotal              atomic.Uint64
+	healthzRequests                    atomic.Uint64
+	readyzRequests                     atomic.Uint64
+	metricsRequests                    atomic.Uint64
+	workspaceCreateRequests            atomic.Uint64
+	workspaceListRequests              atomic.Uint64
+	workspaceGetRequests               atomic.Uint64
+	workspaceSnapshotRequests          atomic.Uint64
+	goalDefineRequests                 atomic.Uint64
+	goalListRequests                   atomic.Uint64
+	goalGetRequests                    atomic.Uint64
+	dodDefineRequests                  atomic.Uint64
+	dodListRequests                    atomic.Uint64
+	dodGetRequests                     atomic.Uint64
+	runCreateRequests                  atomic.Uint64
+	runListRequests                    atomic.Uint64
+	runGetRequests                     atomic.Uint64
+	runSnapshotRequests                atomic.Uint64
+	runStatusRequests                  atomic.Uint64
+	runObservabilityRequests           atomic.Uint64
+	runTaskProgressRequests            atomic.Uint64
+	workspaceTaskProgressRequests      atomic.Uint64
+	runContextBundleRequests           atomic.Uint64
+	workspaceContextBundleRequests     atomic.Uint64
+	runTaskDecompositionRequests       atomic.Uint64
+	workspaceTaskDecompositionRequests atomic.Uint64
+	eventListRequests                  atomic.Uint64
+	runStartRequests                   atomic.Uint64
+	runResumeRequests                  atomic.Uint64
+	workspaceActivationRequests        atomic.Uint64
+	decisionListRequests               atomic.Uint64
+	decisionGetRequests                atomic.Uint64
+	decisionResolveRequests            atomic.Uint64
+	approvalListRequests               atomic.Uint64
+	approvalGetRequests                atomic.Uint64
+	approvalApproveRequests            atomic.Uint64
+	approvalRejectRequests             atomic.Uint64
+	soulCreateRequests                 atomic.Uint64
+	soulListRequests                   atomic.Uint64
+	soulGetRequests                    atomic.Uint64
+	skillCreateRequests                atomic.Uint64
+	skillListRequests                  atomic.Uint64
+	skillGetRequests                   atomic.Uint64
+	mcpServerCreateRequests            atomic.Uint64
+	mcpServerListRequests              atomic.Uint64
+	mcpServerGetRequests               atomic.Uint64
+	mcpToolListRequests                atomic.Uint64
+	mcpResourceListRequests            atomic.Uint64
+	mcpPromptListRequests              atomic.Uint64
+	memoryCreateRequests               atomic.Uint64
+	memoryListRequests                 atomic.Uint64
+	configurationReadRequests          atomic.Uint64
+	configurationUpdateRequests        atomic.Uint64
+	runSucceeded                       atomic.Uint64
+	runFailed                          atomic.Uint64
+	runRejected                        atomic.Uint64
+	runCanceled                        atomic.Uint64
+	runInFlight                        atomic.Int64
+	runQueueWaiting                    atomic.Int64
+	runQueuedTotal                     atomic.Uint64
 }
 
 func (m *serverMetrics) observeRunOutcome(run appservice.Run) {
@@ -825,6 +864,66 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Snapshot: item,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/task-progress", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "task-progress" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.workspaceTaskProgressRequests.Add(1)
+		item, err := state.readWorkspaceTaskProgress(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, taskProgressResponse{
+			Service:      "workorch",
+			Backend:      state.config.Backend,
+			DataRoot:     state.config.DataRoot,
+			TaskProgress: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/context-bundle", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "context-bundle" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.workspaceContextBundleRequests.Add(1)
+		item, err := state.readWorkspaceContextBundle(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, contextBundleResponse{
+			Service:       "workorch",
+			Backend:       state.config.Backend,
+			DataRoot:      state.config.DataRoot,
+			ContextBundle: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/task-decompositions", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "task-decompositions" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.workspaceTaskDecompositionRequests.Add(1)
+		items, err := state.readWorkspaceTaskDecompositions(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, taskDecompositionsResponse{
+			Service:            "workorch",
+			Backend:            state.config.Backend,
+			DataRoot:           state.config.DataRoot,
+			TaskDecompositions: items,
+		})
+	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
@@ -983,6 +1082,66 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Backend:       state.config.Backend,
 			DataRoot:      state.config.DataRoot,
 			Observability: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/task-progress", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "task-progress" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.runTaskProgressRequests.Add(1)
+		item, err := state.readRunTaskProgress(r.Context(), state.config.Backend, state.config.DataRoot, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, taskProgressResponse{
+			Service:      "workorch",
+			Backend:      state.config.Backend,
+			DataRoot:     state.config.DataRoot,
+			TaskProgress: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/context-bundle", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "context-bundle" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.runContextBundleRequests.Add(1)
+		item, err := state.readRunContextBundle(r.Context(), state.config.Backend, state.config.DataRoot, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, contextBundleResponse{
+			Service:       "workorch",
+			Backend:       state.config.Backend,
+			DataRoot:      state.config.DataRoot,
+			ContextBundle: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/task-decompositions", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "task-decompositions" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.runTaskDecompositionRequests.Add(1)
+		items, err := state.readRunTaskDecompositions(r.Context(), state.config.Backend, state.config.DataRoot, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, taskDecompositionsResponse{
+			Service:            "workorch",
+			Backend:            state.config.Backend,
+			DataRoot:           state.config.DataRoot,
+			TaskDecompositions: items,
 		})
 	})
 	router.AddHandler("/api/v1/workorch/events", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -1771,57 +1930,63 @@ func serveConsoleFile(w http.ResponseWriter, r *http.Request, staticFS fs.FS, na
 
 func newServerState(config Config, eventHub events.Hub) *serverState {
 	state := &serverState{
-		config:                 config,
-		eventHub:               eventHub,
-		metrics:                &serverMetrics{},
-		validate:               defaultValidate,
-		createWorkspace:        defaultCreateWorkspace,
-		readWorkspace:          defaultReadWorkspace,
-		readWorkspaceSnapshot:  defaultReadWorkspaceSnapshot,
-		listWorkspaces:         defaultListWorkspaces,
-		defineGoal:             defaultDefineGoal,
-		updateGoal:             defaultUpdateGoal,
-		readGoal:               defaultReadGoal,
-		listGoals:              defaultListGoals,
-		defineDoD:              defaultDefineDoD,
-		updateDoD:              defaultUpdateDoD,
-		readDoD:                defaultReadDoD,
-		listDoDs:               defaultListDoDs,
-		createRun:              defaultCreateRun,
-		readRun:                defaultReadRun,
-		readRunSnapshot:        defaultReadRunSnapshot,
-		readRunStatus:          defaultReadRunStatus,
-		readRunObservability:   defaultReadRunObservability,
-		listEventRecords:       defaultListEventRecords,
-		listRuns:               defaultListRuns,
-		startRun:               defaultStartRun,
-		resumeRun:              defaultResumeRun,
-		activateWorkspace:      defaultActivateWorkspaceExecution,
-		listDecisions:          defaultListDecisions,
-		readDecision:           defaultReadDecision,
-		resolveDecision:        defaultResolveDecision,
-		batchResolveDecisions:  defaultBatchResolveDecisions,
-		listApprovals:          defaultListApprovals,
-		readApproval:           defaultReadApproval,
-		approveApproval:        defaultApproveApproval,
-		rejectApproval:         defaultRejectApproval,
-		batchResolveApprovals:  defaultBatchResolveApprovals,
-		createSoul:             defaultCreateSoul,
-		readSoul:               defaultReadSoul,
-		listSouls:              defaultListSouls,
-		createSkill:            defaultCreateSkill,
-		readSkill:              defaultReadSkill,
-		listSkills:             defaultListSkills,
-		createMCPServer:        defaultCreateMCPServer,
-		readMCPServer:          defaultReadMCPServer,
-		listMCPServers:         defaultListMCPServers,
-		listMCPServerTools:     defaultListMCPServerTools,
-		listMCPServerResources: defaultListMCPServerResources,
-		listMCPServerPrompts:   defaultListMCPServerPrompts,
-		createMemoryItem:       defaultCreateMemoryItem,
-		listMemoryByWorkspace:  defaultListMemoryByWorkspace,
-		readConfiguration:      defaultReadConfiguration,
-		updateLLMConfiguration: appservice.UpdateLLMConfiguration,
+		config:                          config,
+		eventHub:                        eventHub,
+		metrics:                         &serverMetrics{},
+		validate:                        defaultValidate,
+		createWorkspace:                 defaultCreateWorkspace,
+		readWorkspace:                   defaultReadWorkspace,
+		readWorkspaceSnapshot:           defaultReadWorkspaceSnapshot,
+		listWorkspaces:                  defaultListWorkspaces,
+		defineGoal:                      defaultDefineGoal,
+		updateGoal:                      defaultUpdateGoal,
+		readGoal:                        defaultReadGoal,
+		listGoals:                       defaultListGoals,
+		defineDoD:                       defaultDefineDoD,
+		updateDoD:                       defaultUpdateDoD,
+		readDoD:                         defaultReadDoD,
+		listDoDs:                        defaultListDoDs,
+		createRun:                       defaultCreateRun,
+		readRun:                         defaultReadRun,
+		readRunSnapshot:                 defaultReadRunSnapshot,
+		readRunStatus:                   defaultReadRunStatus,
+		readRunObservability:            defaultReadRunObservability,
+		readRunTaskProgress:             defaultReadRunTaskProgress,
+		readWorkspaceTaskProgress:       defaultReadWorkspaceTaskProgress,
+		readRunContextBundle:            defaultReadRunContextBundle,
+		readWorkspaceContextBundle:      defaultReadWorkspaceContextBundle,
+		readRunTaskDecompositions:       defaultReadRunTaskDecompositions,
+		readWorkspaceTaskDecompositions: defaultReadWorkspaceTaskDecompositions,
+		listEventRecords:                defaultListEventRecords,
+		listRuns:                        defaultListRuns,
+		startRun:                        defaultStartRun,
+		resumeRun:                       defaultResumeRun,
+		activateWorkspace:               defaultActivateWorkspaceExecution,
+		listDecisions:                   defaultListDecisions,
+		readDecision:                    defaultReadDecision,
+		resolveDecision:                 defaultResolveDecision,
+		batchResolveDecisions:           defaultBatchResolveDecisions,
+		listApprovals:                   defaultListApprovals,
+		readApproval:                    defaultReadApproval,
+		approveApproval:                 defaultApproveApproval,
+		rejectApproval:                  defaultRejectApproval,
+		batchResolveApprovals:           defaultBatchResolveApprovals,
+		createSoul:                      defaultCreateSoul,
+		readSoul:                        defaultReadSoul,
+		listSouls:                       defaultListSouls,
+		createSkill:                     defaultCreateSkill,
+		readSkill:                       defaultReadSkill,
+		listSkills:                      defaultListSkills,
+		createMCPServer:                 defaultCreateMCPServer,
+		readMCPServer:                   defaultReadMCPServer,
+		listMCPServers:                  defaultListMCPServers,
+		listMCPServerTools:              defaultListMCPServerTools,
+		listMCPServerResources:          defaultListMCPServerResources,
+		listMCPServerPrompts:            defaultListMCPServerPrompts,
+		createMemoryItem:                defaultCreateMemoryItem,
+		listMemoryByWorkspace:           defaultListMemoryByWorkspace,
+		readConfiguration:               defaultReadConfiguration,
+		updateLLMConfiguration:          appservice.UpdateLLMConfiguration,
 	}
 	state.configureApplicationRuntimeSession()
 	state.configureSharedMemorySession()
@@ -1884,6 +2049,33 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceSnapshotWithSession(ctx, session, workspaceID)
+			return err
+		})
+		return ret, err
+	}
+	s.readWorkspaceTaskProgress = func(ctx context.Context, _, _, workspaceID string) (appservice.TaskProgress, error) {
+		var ret appservice.TaskProgress
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadWorkspaceTaskProgressWithSession(ctx, session, workspaceID)
+			return err
+		})
+		return ret, err
+	}
+	s.readWorkspaceContextBundle = func(ctx context.Context, _, _, workspaceID string) (appservice.ContextBundle, error) {
+		var ret appservice.ContextBundle
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadWorkspaceContextBundleWithSession(ctx, session, workspaceID)
+			return err
+		})
+		return ret, err
+	}
+	s.readWorkspaceTaskDecompositions = func(ctx context.Context, _, _, workspaceID string) ([]appservice.TaskDecomposition, error) {
+		var ret []appservice.TaskDecomposition
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadWorkspaceTaskDecompositionsWithSession(ctx, session, workspaceID)
 			return err
 		})
 		return ret, err
@@ -2010,6 +2202,33 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ReadRunObservabilityWithSession(ctx, session, runID)
+			return err
+		})
+		return ret, err
+	}
+	s.readRunTaskProgress = func(ctx context.Context, _, _, runID string) (appservice.TaskProgress, error) {
+		var ret appservice.TaskProgress
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadRunTaskProgressWithSession(ctx, session, runID)
+			return err
+		})
+		return ret, err
+	}
+	s.readRunContextBundle = func(ctx context.Context, _, _, runID string) (appservice.ContextBundle, error) {
+		var ret appservice.ContextBundle
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadRunContextBundleWithSession(ctx, session, runID)
+			return err
+		})
+		return ret, err
+	}
+	s.readRunTaskDecompositions = func(ctx context.Context, _, _, runID string) ([]appservice.TaskDecomposition, error) {
+		var ret []appservice.TaskDecomposition
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadRunTaskDecompositionsWithSession(ctx, session, runID)
 			return err
 		})
 		return ret, err
@@ -2362,6 +2581,30 @@ func defaultReadRunObservability(ctx context.Context, backend string, dataRoot s
 	return appservice.ReadRunObservabilityWithBackend(ctx, backend, dataRoot, runID)
 }
 
+func defaultReadRunTaskProgress(ctx context.Context, backend string, dataRoot string, runID string) (appservice.TaskProgress, error) {
+	return appservice.ReadRunTaskProgressWithBackend(ctx, backend, dataRoot, runID)
+}
+
+func defaultReadWorkspaceTaskProgress(ctx context.Context, backend string, dataRoot string, workspaceID string) (appservice.TaskProgress, error) {
+	return appservice.ReadWorkspaceTaskProgressWithBackend(ctx, backend, dataRoot, workspaceID)
+}
+
+func defaultReadRunContextBundle(ctx context.Context, backend string, dataRoot string, runID string) (appservice.ContextBundle, error) {
+	return appservice.ReadRunContextBundleWithBackend(ctx, backend, dataRoot, runID)
+}
+
+func defaultReadWorkspaceContextBundle(ctx context.Context, backend string, dataRoot string, workspaceID string) (appservice.ContextBundle, error) {
+	return appservice.ReadWorkspaceContextBundleWithBackend(ctx, backend, dataRoot, workspaceID)
+}
+
+func defaultReadRunTaskDecompositions(ctx context.Context, backend string, dataRoot string, runID string) ([]appservice.TaskDecomposition, error) {
+	return appservice.ReadRunTaskDecompositionsWithBackend(ctx, backend, dataRoot, runID)
+}
+
+func defaultReadWorkspaceTaskDecompositions(ctx context.Context, backend string, dataRoot string, workspaceID string) ([]appservice.TaskDecomposition, error) {
+	return appservice.ReadWorkspaceTaskDecompositionsWithBackend(ctx, backend, dataRoot, workspaceID)
+}
+
 func defaultListEventRecords(ctx context.Context, backend string, dataRoot string, query appservice.EventRecordQuery) ([]appservice.EventRecord, error) {
 	return appservice.ListEventRecordsWithBackend(ctx, backend, dataRoot, query)
 }
@@ -2643,6 +2886,12 @@ func (m *serverMetrics) render(config Config) string {
 			"workorch_http_requests_total{endpoint=\"run_snapshot\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_status\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_observability\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"run_task_progress\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"workspace_task_progress\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"run_context_bundle\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"workspace_context_bundle\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"run_task_decomposition\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"workspace_task_decomposition\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_start\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_resume\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"workspace_execution_activation\"} %d\n"+
@@ -2687,6 +2936,12 @@ func (m *serverMetrics) render(config Config) string {
 		m.runSnapshotRequests.Load(),
 		m.runStatusRequests.Load(),
 		m.runObservabilityRequests.Load(),
+		m.runTaskProgressRequests.Load(),
+		m.workspaceTaskProgressRequests.Load(),
+		m.runContextBundleRequests.Load(),
+		m.workspaceContextBundleRequests.Load(),
+		m.runTaskDecompositionRequests.Load(),
+		m.workspaceTaskDecompositionRequests.Load(),
 		m.runStartRequests.Load(),
 		m.runResumeRequests.Load(),
 		m.workspaceActivationRequests.Load(),

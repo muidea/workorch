@@ -72,6 +72,15 @@ func normalizeStringIDsFromAny(value any) []string {
 	}
 }
 
+func runCompressedContext(t *testing.T, item Run) map[string]any {
+	t.Helper()
+	compressed, ok := item.ExecutionContext["compressedContext"].(map[string]any)
+	if !ok || len(compressed) == 0 {
+		t.Fatalf("executionContext = %+v, want compressedContext map", item.ExecutionContext)
+	}
+	return compressed
+}
+
 func TestStartRunWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing.T) {
 	if _, err := StartRunWithSession(context.Background(), nil, "run-1"); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid argument", err)
@@ -160,6 +169,13 @@ func TestStartRunWithBackendFailsWhenDefaultLLMProviderUnavailable(t *testing.T)
 	if item.ID != "run-start" || item.State != "failed" || item.FailureReason == "" {
 		t.Fatalf("run = %+v, want run-start/failed with provider failure reason", item)
 	}
+	compressed := runCompressedContext(t, item)
+	if compressed["version"] != "workorch.compressedContext.v1" || compressed["mode"] != "deterministic_recovery_summary" {
+		t.Fatalf("compressedContext = %+v, want deterministic recovery summary", compressed)
+	}
+	if compressed["runId"] != "run-start" || compressed["workspaceId"] != "ws-run-start" {
+		t.Fatalf("compressedContext identity = %+v, want run-start/ws-run-start", compressed)
+	}
 }
 
 func TestStartRunWithBackendReturnsFailedRunForFailedRunAfterReload(t *testing.T) {
@@ -202,6 +218,13 @@ func TestResumeRunWithBackendReturnsFailedRunAfterApprovalRejected(t *testing.T)
 	}
 	if item.State != "failed" || item.BlockingApprovalID != "" || item.FailureReason == "" {
 		t.Fatalf("run = %+v, want failed with reason and cleared approval", item)
+	}
+	compressed := runCompressedContext(t, item)
+	if compressed["runId"] != runID || compressed["workspaceId"] != "ws-run-resume-approval-rejected" {
+		t.Fatalf("compressedContext identity = %+v, want resumed approval run", compressed)
+	}
+	if _, ok := compressed["recentEvidence"].([]any); !ok {
+		t.Fatalf("compressedContext = %+v, want recent evidence for resumed run", compressed)
 	}
 }
 

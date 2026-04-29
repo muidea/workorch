@@ -52,12 +52,23 @@ func TestActivateWorkspaceExecutionWithBackendCreatesAndStartsRun(t *testing.T) 
 	if item.Snapshot.Workspace.ID != workspace.ID || len(item.Snapshot.Runs) != 1 {
 		t.Fatalf("activation snapshot = %+v, want workspace with one run", item.Snapshot)
 	}
+	compressed := runCompressedContext(t, item.Run)
+	if compressed["version"] != "workorch.compressedContext.v1" || compressed["mode"] != "deterministic_recovery_summary" {
+		t.Fatalf("compressedContext = %+v, want deterministic recovery summary", compressed)
+	}
+	if compressed["runId"] != item.Run.ID || compressed["workspaceId"] != workspace.ID {
+		t.Fatalf("compressedContext identity = %+v, want activation run/workspace", compressed)
+	}
 	runSnapshot, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, item.Run.ID)
 	if err != nil {
 		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
 	}
 	if len(runSnapshot.Steps) != 1 || runSnapshot.Steps[0].Kind != llmcommon.StepKindWorkspaceExecution {
 		t.Fatalf("steps = %+v, want first llm workspace execution step", runSnapshot.Steps)
+	}
+	stepContext, _ := runSnapshot.Steps[0].Input["executionContext"].(map[string]any)
+	if _, ok := stepContext["compressedContext"].(map[string]any); !ok {
+		t.Fatalf("first step input = %+v, want compressed execution context propagated", runSnapshot.Steps[0].Input)
 	}
 	if stage, _ := runSnapshot.Steps[0].Output["stage"].(string); stage != "llm_provider_unavailable" {
 		t.Fatalf("step output = %+v, want llm provider unavailable stage", runSnapshot.Steps[0].Output)

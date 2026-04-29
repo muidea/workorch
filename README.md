@@ -24,7 +24,7 @@ configured.
 - `internal/modules/blocks/{approval,llm,mcp,shell,ssh}`: reusable/block modules
 - `internal/pkg/{common,events,repository}`: shared internal primitives
 - `docs/`: repo docs
-- `docs/next-stage-result-event-development-plan.md`: active next-stage plan for formal Result / Artifact and persistent Workorch event stream
+- `docs/next-stage-result-event-development-plan.md`: completed formal Result / Artifact and persistent Workorch event stream scope
 - `.github/workflows/ci.yml`: GitHub Actions CI workflow
 - `Makefile`: local and CI entry targets
 
@@ -406,6 +406,6 @@ make ci
 - `docs/next-mvp-acceptance.md`: next MVP scope aligned with the WorkOrch product planning baseline
 - `docs/runtime-expansion-plan.md`: completed runtime adapter, shell, patch, graph, and observability scope
 - `docs/advanced-runtime-scheduling-plan.md`: completed advanced MCP and priority scheduling scope
-- `docs/workspace-concurrency-loadtest-plan.md`: planned workspace concurrency load test scope for mock and real LLM governed execution
+- `docs/workspace-concurrency-loadtest-plan.md`: workspace concurrency load test scope and completed pressure-test findings for mock and real LLM governed execution
 - `docs/next-stage-p1-development-plan.md`: completed P1 runtime context, provider capability, vector Memory, and lifecycle scope
 - `docs/next-stage-demand-candidates.md`: future demand candidates that are not active MVP leftovers

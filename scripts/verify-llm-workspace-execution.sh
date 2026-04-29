@@ -349,6 +349,127 @@ activate_workspace_execution_with_auto_memory() {
     -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
 }
 
+assert_run_recovery_read_models() {
+  local run_id="$1"
+  local label="$2"
+  local expected_state="$3"
+
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/$label-snapshot-read-model.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/$label-observability-read-model.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/task-progress" >"$TMP_DIR/$label-task-progress.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/context-bundle" >"$TMP_DIR/$label-context-bundle.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/events?runId=$run_id" >"$TMP_DIR/$label-events.json"
+  python3 - "$TMP_DIR/$label-snapshot-read-model.json" \
+    "$TMP_DIR/$label-observability-read-model.json" \
+    "$TMP_DIR/$label-task-progress.json" \
+    "$TMP_DIR/$label-context-bundle.json" \
+    "$TMP_DIR/$label-events.json" \
+    "$run_id" "$workspace_id" "$expected_state" <<'PY'
+import json
+import sys
+
+snapshot = json.load(open(sys.argv[1], encoding="utf-8"))["snapshot"]
+observability = json.load(open(sys.argv[2], encoding="utf-8"))["observability"]
+task_progress = json.load(open(sys.argv[3], encoding="utf-8"))["taskProgress"]
+bundle = json.load(open(sys.argv[4], encoding="utf-8"))["contextBundle"]
+events = json.load(open(sys.argv[5], encoding="utf-8")).get("eventRecords") or []
+run_id, workspace_id, expected_state = sys.argv[6:9]
+
+errors = []
+run = snapshot.get("run") or {}
+if run.get("id") != run_id:
+    errors.append(f"snapshot run id is {run.get('id')!r}, want {run_id!r}")
+if run.get("workspaceId") != workspace_id:
+    errors.append(f"snapshot workspace id is {run.get('workspaceId')!r}, want {workspace_id!r}")
+if run.get("state") != expected_state:
+    errors.append(f"run state is {run.get('state')!r}, want {expected_state!r}")
+
+compressed = (run.get("executionContext") or {}).get("compressedContext") or {}
+if compressed.get("version") != "workorch.compressedContext.v1":
+    errors.append(f"executionContext.compressedContext missing or invalid: {compressed}")
+if compressed.get("mode") != "deterministic_recovery_summary":
+    errors.append(f"compressedContext mode is {compressed.get('mode')!r}")
+if compressed.get("runId") != run_id or compressed.get("workspaceId") != workspace_id:
+    errors.append(f"compressedContext identity mismatch: {compressed}")
+if not (compressed.get("sourceSectionRefs") or []):
+    errors.append(f"compressedContext sourceSectionRefs empty: {compressed}")
+
+bundle_compressed = bundle.get("compressedContext") or {}
+if bundle.get("runId") != run_id or bundle.get("workspaceId") != workspace_id:
+    errors.append(f"context bundle identity mismatch: {bundle.get('workspaceId')}/{bundle.get('runId')}")
+if bundle_compressed.get("version") != "workorch.compressedContext.v1":
+    errors.append(f"context bundle compressedContext invalid: {bundle_compressed}")
+section_ids = {item.get("id") for item in (bundle.get("sections") or [])}
+for required in ["workspace", "run", "task_progress", "recovery"]:
+    if required not in section_ids:
+        errors.append(f"context bundle missing section {required!r}: {section_ids}")
+
+if task_progress.get("runId") != run_id or task_progress.get("workspaceId") != workspace_id:
+    errors.append(f"taskProgress identity mismatch: {task_progress}")
+if not task_progress.get("state"):
+    errors.append(f"taskProgress state empty: {task_progress}")
+if not (task_progress.get("recovery") or {}).get("mode"):
+    errors.append(f"taskProgress recovery mode empty: {task_progress}")
+if not (task_progress.get("milestones") or []):
+    errors.append(f"taskProgress milestones empty: {task_progress}")
+
+observed_progress = observability.get("taskProgress") or {}
+if observed_progress.get("runId") != run_id:
+    errors.append(f"observability taskProgress missing run id: {observed_progress}")
+
+topics = {item.get("topic") for item in events}
+if "/run/created" not in topics:
+    errors.append(f"event stream missing run-created event: {topics}")
+if expected_state in {"completed", "failed"} and "/run/state/changed" not in topics:
+    errors.append(f"event stream missing terminal run state event: {topics}")
+if any(item.get("state") == "accepted" for item in (snapshot.get("results") or [])):
+    for topic in ["/result/accepted", "/artifact/created"]:
+        if topic not in topics:
+            errors.append(f"event stream missing {topic}: {topics}")
+
+if expected_state == "completed":
+    if not [item for item in (snapshot.get("results") or []) if item.get("state") == "accepted"]:
+        errors.append("completed run missing accepted Result")
+    if not snapshot.get("artifacts"):
+        errors.append("completed run missing Artifact")
+
+if errors:
+    for item in errors:
+        print(item, file=sys.stderr)
+    raise SystemExit(1)
+PY
+}
+
+assert_workspace_recovery_read_models() {
+  local label="$1"
+
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/task-progress" >"$TMP_DIR/$label-workspace-task-progress.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/context-bundle" >"$TMP_DIR/$label-workspace-context-bundle.json"
+  python3 - "$TMP_DIR/$label-workspace-task-progress.json" "$TMP_DIR/$label-workspace-context-bundle.json" "$workspace_id" <<'PY'
+import json
+import sys
+
+progress = json.load(open(sys.argv[1], encoding="utf-8"))["taskProgress"]
+bundle = json.load(open(sys.argv[2], encoding="utf-8"))["contextBundle"]
+workspace_id = sys.argv[3]
+errors = []
+if progress.get("workspaceId") != workspace_id:
+    errors.append(f"workspace taskProgress identity mismatch: {progress}")
+if not progress.get("state"):
+    errors.append(f"workspace taskProgress state empty: {progress}")
+if bundle.get("workspaceId") != workspace_id:
+    errors.append(f"workspace context bundle identity mismatch: {bundle}")
+if (bundle.get("compressedContext") or {}).get("version") != "workorch.compressedContext.v1":
+    errors.append(f"workspace context bundle missing compressedContext: {bundle}")
+if not (bundle.get("sections") or []):
+    errors.append(f"workspace context bundle sections empty: {bundle}")
+if errors:
+    for item in errors:
+        print(item, file=sys.stderr)
+    raise SystemExit(1)
+PY
+}
+
 trap report_failure ERR
 trap cleanup EXIT
 
@@ -427,6 +548,7 @@ grep "\"soulId\": \"$SOUL_ID\"" "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"skillIds"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id/observability" >"$TMP_DIR/happy-observability.json"
 grep '"terminal": true' "$TMP_DIR/happy-observability.json" >/dev/null
+assert_run_recovery_read_models "$happy_run_id" "happy" "completed"
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DIR/memory-after-happy.json"
 grep 'LLM happy path acceptance produced reusable workspace memory' "$TMP_DIR/memory-after-happy.json" >/dev/null
 
@@ -443,6 +565,7 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve" -H 
   -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance"}}' | grep '"resolutionType": "provide_missing_info"' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$decision_run_id/resume" | grep '"state": "completed"' >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id/observability" | grep '"terminal": true' >/dev/null
+assert_run_recovery_read_models "$decision_run_id" "decision" "completed"
 
 activate_workspace_execution "$TMP_DIR/approval-activation.json"
 grep '"state": "blocked_on_approval"' "$TMP_DIR/approval-activation.json" >/dev/null
@@ -455,6 +578,7 @@ curl -fsS "$BASE_URL/api/v1/workorch/approvals?runId=$approval_run_id" | grep "\
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_path/reject" | grep '"state": "rejected"' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$approval_run_id/resume" | grep '"state": "failed"' >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$approval_run_id/observability" | grep '"terminal": true' >/dev/null
+assert_run_recovery_read_models "$approval_run_id" "approval-rejected" "failed"
 
 activate_workspace_execution "$TMP_DIR/multi-gate-decision-activation.json"
 grep '"state": "blocked_on_decision"' "$TMP_DIR/multi-gate-decision-activation.json" >/dev/null
@@ -478,6 +602,7 @@ grep 'multi gate decision then approval can complete' "$TMP_DIR/multi-gate-snaps
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/status" | grep '"state": "completed"' >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/observability" >"$TMP_DIR/multi-gate-observability.json"
 grep '"terminal": true' "$TMP_DIR/multi-gate-observability.json" >/dev/null
+assert_run_recovery_read_models "$multi_gate_run_id" "multi-gate" "completed"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/workspace-snapshot-after-governance.json"
 grep "\"id\": \"$multi_gate_run_id\"" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
 grep "\"id\": \"$multi_gate_ticket_id\"" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
@@ -489,6 +614,7 @@ schema_run_id="$(json_path "$TMP_DIR/schema-failure-activation.json" "activation
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_run_id/snapshot" >"$TMP_DIR/schema-failure-snapshot.json"
 grep '"llm_schema_invalid"' "$TMP_DIR/schema-failure-snapshot.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_run_id/observability" | grep '"terminal": true' >/dev/null
+assert_run_recovery_read_models "$schema_run_id" "schema-failure" "failed"
 
 activate_workspace_execution_with_auto_memory "$TMP_DIR/memory-recall-activation.json"
 grep '"state": "completed"' "$TMP_DIR/memory-recall-activation.json" >/dev/null
@@ -498,6 +624,8 @@ grep '"memories"' "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
 grep '"memoryRetrieval"' "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
 grep "\"$MEMORY_ID\"" "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/observability" | grep '"terminal": true' >/dev/null
+assert_run_recovery_read_models "$memory_run_id" "memory-recall" "completed"
+assert_workspace_recovery_read_models "final"
 curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics.txt"
 grep 'workorch_http_requests_total{endpoint="configuration_update"}' "$TMP_DIR/metrics.txt" >/dev/null
 grep 'workorch_http_requests_total{endpoint="workspace_execution_activation"}' "$TMP_DIR/metrics.txt" >/dev/null

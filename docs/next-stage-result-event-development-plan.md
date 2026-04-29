@@ -17,7 +17,7 @@ external runtime marketplace.
 
 ### RE1. Formal Business Result And Artifact Model
 
-Status: in_progress
+Status: completed
 
 Target:
 
@@ -48,7 +48,7 @@ Acceptance:
 
 ### RE2. Persistent Workorch Event Stream
 
-Status: planned
+Status: completed
 
 Target:
 
@@ -172,4 +172,8 @@ the configured real LLM provider where the test depends on actual LLM behavior.
   uses persisted event timeline items when available, and
   `GET /api/v1/workorch/events` supports query by workspace, run, topic,
   subject, cursor, and limit.
-- planned: `RE2.4 File-backed restart and e2e replay verification`
+- completed: `RE2.4 File-backed restart and e2e replay verification`
+  Service-level regression now creates file-backed Workspace / Goal / DoD / Run
+  records through the HTTP surface, restarts the `workorchd` server state with
+  the same data directory, and verifies `/api/v1/workorch/events`, Run snapshot,
+  and Run observability replay the persisted event stream.

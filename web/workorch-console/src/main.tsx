@@ -12,7 +12,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Badge, Button, ConfigProvider, Descriptions, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Artifact, Decision, DoD, Goal, LLMProviderTemplate, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, Result, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
+import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, Goal, LLMProviderTemplate, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -50,11 +50,65 @@ const stateLabels: Record<string, string> = {
   satisfied: '已满足'
 };
 
+const progressKindLabels: Record<string, string> = {
+  step: '步骤',
+  tool_call: '工具调用',
+  patch: 'Patch',
+  validation_result: '校验结果',
+  result: '正式结果',
+  artifact: '交付物',
+  decision: '决策工单',
+  approval: '审批工单'
+};
+
+const recoveryModeLabels: Record<string, string> = {
+  idle: '待启动',
+  continue: '可继续',
+  wait_decision: '等待决策',
+  wait_approval: '等待审批',
+  inspect_failure: '排查失败',
+  restart: '可重新启动',
+  none: '无需恢复'
+};
+
+const recoveryActionLabels: Record<string, string> = {
+  start_workspace_execution: '启动工作空间执行',
+  inspect_active_run: '查看活跃运行',
+  continue_run: '继续运行',
+  continue_validation: '继续验收',
+  resolve_decision_ticket: '补充或处理决策工单',
+  resolve_approval: '处理审批工单',
+  inspect_result: '查看正式交付物',
+  inspect_failure_reason_and_evidence: '查看失败原因和运行证据',
+  start_new_run: '启动新的运行'
+};
+
 function stateLabel(state?: string) {
   if (!state) {
     return '未知';
   }
   return stateLabels[state] ? `${stateLabels[state]} (${state})` : state;
+}
+
+function progressKindLabel(kind?: string) {
+  if (!kind) {
+    return '未知';
+  }
+  return progressKindLabels[kind] ?? kind;
+}
+
+function recoveryModeLabel(mode?: string) {
+  if (!mode) {
+    return '未知';
+  }
+  return recoveryModeLabels[mode] ? `${recoveryModeLabels[mode]} (${mode})` : mode;
+}
+
+function recoveryActionLabel(action?: string) {
+  if (!action) {
+    return '-';
+  }
+  return recoveryActionLabels[action] ?? action;
 }
 
 function stateTag(state?: string) {
@@ -165,6 +219,274 @@ function runtimeSummaryTags(runs?: Run[]) {
       <Tag color="cyan">验收中 {summary.validating}</Tag>
       <Tag color="green">完成 {summary.completed}</Tag>
       <Tag color="red">失败 {summary.failed}</Tag>
+    </Space>
+  );
+}
+
+function taskProgressStepStatus(state?: string) {
+  if (state === 'failed') {
+    return 'error' as const;
+  }
+  if (state === 'completed') {
+    return 'finish' as const;
+  }
+  if (state === 'running' || state === 'blocked') {
+    return 'process' as const;
+  }
+  return 'wait' as const;
+}
+
+function taskProgressCard(progress?: TaskProgress) {
+  if (!progress) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无任务进度投影" />;
+  }
+  const blockers = progress.blockers ?? [];
+  const recovery = progress.recovery ?? { mode: 'unknown' };
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Steps
+        size="small"
+        items={(progress.milestones ?? []).map((item) => ({
+          title: item.title,
+          description: stateLabel(item.state),
+          status: taskProgressStepStatus(item.state)
+        }))}
+      />
+      <Descriptions
+        column={{ xs: 1, md: 2 }}
+        size="small"
+        items={[
+          { key: 'state', label: '任务状态', children: stateTag(progress.state) },
+          { key: 'currentMilestone', label: '当前里程碑', children: progress.currentMilestone || '-' },
+          { key: 'summary', label: '进度摘要', children: boundedParagraph(progress.summary, { rows: 2 }) },
+          { key: 'recoveryMode', label: '恢复模式', children: recoveryModeLabel(recovery.mode) },
+          { key: 'nextAction', label: '建议动作', children: recoveryActionLabel(recovery.nextAction) },
+          { key: 'checkpoint', label: '恢复检查点', children: recovery.checkpointId ? boundedParagraph(recovery.checkpointId, { rows: 1, copyText: recovery.checkpointId }) : '-' },
+          { key: 'blockingTicket', label: '阻塞决策', children: recovery.blockingTicketId || '-' },
+          { key: 'blockingApproval', label: '阻塞审批', children: recovery.blockingApprovalId || '-' }
+        ]}
+      />
+      {blockers.length ? (
+        <ProTable<ProgressBlocker>
+          rowKey="id"
+          search={false}
+          options={false}
+          pagination={false}
+          size="small"
+          columns={[
+            { title: '阻塞项', dataIndex: 'id', copyable: true, ellipsis: true },
+            { title: '类型', dataIndex: 'kind', width: 120, render: (_, item) => progressKindLabel(String(item.kind)) },
+            { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(String(item.state)) },
+            { title: '原因', dataIndex: 'reason', ellipsis: true },
+            { title: '证据', dataIndex: 'evidenceRef', ellipsis: true }
+          ]}
+          dataSource={blockers}
+        />
+      ) : null}
+      {(progress.items?.length ?? 0) > 0 ? (
+        <ProTable<ProgressItem>
+          rowKey="id"
+          search={false}
+          options={false}
+          pagination={{ pageSize: 6 }}
+          size="small"
+          columns={[
+            { title: '项目', dataIndex: 'id', copyable: true, ellipsis: true },
+            { title: '类型', dataIndex: 'kind', width: 140, render: (_, item) => progressKindLabel(String(item.kind)) },
+            { title: '名称', dataIndex: 'title', ellipsis: true },
+            { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(String(item.state)) }
+          ]}
+          dataSource={progress.items ?? []}
+        />
+      ) : null}
+    </Space>
+  );
+}
+
+function taskDecompositionCard(items?: TaskDecomposition[]) {
+  const decompositions = items ?? [];
+  if (decompositions.length === 0) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无任务拆分图" />;
+  }
+  const latest = decompositions.at(-1);
+  const total = decompositions.reduce((sum, item) => sum + item.nodeTotal, 0);
+  const completed = decompositions.reduce((sum, item) => sum + item.nodeCompleted, 0);
+  const failed = decompositions.reduce((sum, item) => sum + item.nodeFailed, 0);
+  const running = decompositions.reduce((sum, item) => sum + item.nodeRunning, 0);
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Descriptions
+        column={{ xs: 1, md: 4 }}
+        size="small"
+        items={[
+          { key: 'graph', label: '拆分图', children: decompositions.length },
+          { key: 'node', label: '节点', children: `${completed}/${total} 已完成` },
+          { key: 'running', label: '执行中', children: running },
+          { key: 'failed', label: '失败', children: failed },
+          { key: 'latest', label: '最新根步骤', children: latest?.rootStepId ? boundedParagraph(latest.rootStepId, { rows: 1, copyText: latest.rootStepId }) : '-' },
+          { key: 'state', label: '最新状态', children: latest ? stateTag(latest.state) : '-' },
+          { key: 'branch', label: '分支', children: latest?.graphBranch || '-' },
+          { key: 'summary', label: '摘要', children: boundedParagraph(latest?.summary, { rows: 2 }) }
+        ]}
+      />
+      <Tabs
+        items={decompositions.map((item, index) => ({
+          key: item.id || `${item.rootStepId}-${index}`,
+          label: `拆分图 ${index + 1} / ${stateLabel(item.state)}`,
+          children: (
+            <Space direction="vertical" size="small" style={{ width: '100%' }}>
+              {metricGrid([
+                { key: 'nodes', label: '节点总数', value: item.nodeTotal },
+                { key: 'completed', label: '已完成', value: item.nodeCompleted, color: '#389e0d' },
+                { key: 'running', label: '执行中', value: item.nodeRunning, color: '#0958d9' },
+                { key: 'failed', label: '失败', value: item.nodeFailed, color: '#cf1322' }
+              ])}
+              <ProTable<TaskDecompositionNode>
+                rowKey={(node, nodeIndex) => `${item.id}-${node.id}-${nodeIndex}`}
+                search={false}
+                options={false}
+                pagination={{ pageSize: 8 }}
+                size="small"
+                columns={[
+                  { title: '节点', dataIndex: 'id', copyable: true, ellipsis: true },
+                  { title: '类型', dataIndex: 'kind', width: 150 },
+                  { title: '标题', dataIndex: 'title', ellipsis: true, render: (_, node) => boundedParagraph(node.title, { rows: 2 }) },
+                  { title: '状态', dataIndex: 'state', width: 110, render: (_, node) => stateTag(node.state) },
+                  { title: '依赖', dataIndex: 'dependsOn', width: 180, render: (_, node) => compactTags(node.dependsOn ?? []) },
+                  { title: '执行步骤', dataIndex: 'stepId', copyable: true, ellipsis: true }
+                ]}
+                expandable={{
+                  expandedRowRender: (node) => (
+                    <Descriptions
+                      column={1}
+                      size="small"
+                      items={[
+                        { key: 'stepState', label: '步骤状态', children: node.stepState ? stateLabel(node.stepState) : '-' },
+                        { key: 'branch', label: '分支', children: node.branch || '-' },
+                        { key: 'evidence', label: '证据', children: compactTags(node.evidenceRefs ?? [], 6) },
+                        { key: 'input', label: '输入', children: <pre className="json-panel">{compactJSON(node.input)}</pre> }
+                      ]}
+                    />
+                  )
+                }}
+                dataSource={item.nodes ?? []}
+              />
+            </Space>
+          )
+        }))}
+      />
+    </Space>
+  );
+}
+
+function contextBundleCard(bundle?: ContextBundle) {
+  if (!bundle) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无上下文包" />;
+  }
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Descriptions
+        column={{ xs: 1, md: 3 }}
+        size="small"
+        items={[
+          { key: 'mode', label: '上下文模式', children: bundle.mode },
+          { key: 'compressedMode', label: '压缩模式', children: bundle.compressedContext?.mode || '-' },
+          { key: 'run', label: '关联 Run', children: bundle.runId || '-' },
+          { key: 'summary', label: '摘要', children: boundedParagraph(bundle.summary, { rows: 2 }) },
+          { key: 'recovery', label: '恢复建议', children: recoveryActionLabel(bundle.recovery?.nextAction) },
+          { key: 'checkpoint', label: '恢复检查点', children: bundle.latestCheckpoint?.id ? boundedParagraph(bundle.latestCheckpoint.id, { rows: 1, copyText: bundle.latestCheckpoint.id }) : '-' },
+          { key: 'compression', label: '压缩候选', children: `${bundle.compressionCandidates?.length ?? 0} 项` }
+        ]}
+      />
+      <Tabs
+        items={[
+          {
+            key: 'sections',
+            label: `上下文分区 ${bundle.sections?.length ?? 0}`,
+            children: (
+              <ProTable<ContextSection>
+                rowKey="id"
+                search={false}
+                options={false}
+                pagination={{ pageSize: 6 }}
+                size="small"
+                columns={[
+                  { title: '分区', dataIndex: 'title', ellipsis: true },
+                  { title: '类型', dataIndex: 'kind', width: 160 },
+                  { title: '优先级', dataIndex: 'priority', width: 90 },
+                  { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => item.state ? stateTag(item.state) : '-' },
+                  { title: '摘要', dataIndex: 'summary', ellipsis: true }
+                ]}
+                expandable={{
+                  expandedRowRender: (item) => <pre className="json-panel json-panel-large">{compactJSON(item.data)}</pre>
+                }}
+                dataSource={bundle.sections ?? []}
+              />
+            )
+          },
+          {
+            key: 'compressed',
+            label: '压缩上下文',
+            children: (
+              <Descriptions
+                column={1}
+                size="small"
+                items={[
+                  { key: 'version', label: '版本', children: bundle.compressedContext?.version || '-' },
+                  { key: 'summary', label: '压缩摘要', children: boundedParagraph(bundle.compressedContext?.summary, { rows: 3 }) },
+                  { key: 'retention', label: '保留策略', children: boundedParagraph(bundle.compressedContext?.retentionPolicy, { rows: 2 }) },
+                  { key: 'sourceSections', label: '来源分区', children: compactTags(bundle.compressedContext?.sourceSectionRefs ?? []) },
+                  { key: 'sourceEvidence', label: '来源证据', children: compactTags(bundle.compressedContext?.sourceEvidenceRefs ?? []) }
+                ]}
+              />
+            )
+          },
+          {
+            key: 'evidence',
+            label: `最近证据 ${bundle.recentEvidence?.length ?? 0}`,
+            children: (
+              <ProTable<ContextEvidence>
+                rowKey={(item, index) => `${item.kind}-${item.id}-${index}`}
+                search={false}
+                options={false}
+                pagination={{ pageSize: 6 }}
+                size="small"
+                columns={[
+                  { title: '证据', dataIndex: 'id', copyable: true, ellipsis: true },
+                  { title: '类型', dataIndex: 'kind', width: 180 },
+                  { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => item.state ? stateTag(item.state) : '-' },
+                  { title: '摘要', dataIndex: 'summary', ellipsis: true },
+                  { title: '时间', dataIndex: 'occurredAt', width: 190 }
+                ]}
+                expandable={{
+                  expandedRowRender: (item) => <pre className="json-panel json-panel-large">{compactJSON(item.data)}</pre>
+                }}
+                dataSource={bundle.recentEvidence ?? []}
+              />
+            )
+          },
+          {
+            key: 'compression',
+            label: `压缩候选 ${bundle.compressionCandidates?.length ?? 0}`,
+            children: (
+              <ProTable<ContextCompressionCandidate>
+                rowKey={(item, index) => `${item.sectionId}-${index}`}
+                search={false}
+                options={false}
+                pagination={false}
+                size="small"
+                columns={[
+                  { title: '分区', dataIndex: 'sectionId', width: 180 },
+                  { title: '建议模式', dataIndex: 'suggestedMode', width: 150 },
+                  { title: '原因', dataIndex: 'reason', ellipsis: true },
+                  { title: '保留策略', dataIndex: 'retention', ellipsis: true }
+                ]}
+                dataSource={bundle.compressionCandidates ?? []}
+              />
+            )
+          }
+        ]}
+      />
     </Space>
   );
 }
@@ -1155,6 +1477,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [configuration, setConfiguration] = useState<ServiceConfiguration | undefined>(undefined);
   const [runSnapshot, setRunSnapshot] = useState<RunSnapshot | undefined>(undefined);
   const [runObservability, setRunObservability] = useState<RunObservability | undefined>(undefined);
+  const [contextBundle, setContextBundle] = useState<ContextBundle | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [activationOpen, setActivationOpen] = useState(false);
   const [activationLoading, setActivationLoading] = useState(false);
@@ -1230,6 +1553,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     setMemoryItems([]);
     setRunSnapshot(undefined);
     setRunObservability(undefined);
+    setContextBundle(undefined);
   }
 
   async function loadWorkspaceList(preferredWorkspaceId?: string, ignoredWorkspaceId?: string) {
@@ -1256,8 +1580,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
 
   async function loadWorkspaceContext(targetWorkspaceId: string) {
     const requestSeq = ++workspaceContextRequestSeq.current;
-    const [nextSnapshot, nextGoals, nextDoDs, nextSouls, nextSkills, nextMCPServers, nextMemoryItems, nextConfiguration] = await Promise.all([
+    const [nextSnapshot, nextContextBundle, nextGoals, nextDoDs, nextSouls, nextSkills, nextMCPServers, nextMemoryItems, nextConfiguration] = await Promise.all([
       workorchApi.readWorkspaceSnapshot(targetWorkspaceId),
+      workorchApi.readWorkspaceContextBundle(targetWorkspaceId),
       workorchApi.listGoals(targetWorkspaceId),
       workorchApi.listDoDs(targetWorkspaceId),
       workorchApi.listSouls(),
@@ -1270,6 +1595,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       return;
     }
     setSnapshot(nextSnapshot);
+    setContextBundle(nextContextBundle);
     setGoals(nextGoals);
     setDoDs(nextDoDs);
     setSouls(nextSouls);
@@ -1279,18 +1605,21 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     setConfiguration(nextConfiguration);
     const latestRun = runStateSummary(nextSnapshot.runs).latest;
     if (latestRun) {
-      const [nextRunSnapshot, nextRunObservability] = await Promise.all([
+      const [nextRunSnapshot, nextRunObservability, nextRunContextBundle] = await Promise.all([
         workorchApi.readRunSnapshot(latestRun.id),
-        workorchApi.readRunObservability(latestRun.id)
+        workorchApi.readRunObservability(latestRun.id),
+        workorchApi.readRunContextBundle(latestRun.id)
       ]);
       if (requestSeq !== workspaceContextRequestSeq.current) {
         return;
       }
       setRunSnapshot(nextRunSnapshot);
       setRunObservability(nextRunObservability);
+      setContextBundle(nextRunContextBundle);
     } else {
       setRunSnapshot(undefined);
       setRunObservability(undefined);
+      setContextBundle(nextContextBundle);
     }
   }
 
@@ -1325,6 +1654,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
         setSnapshot(activation.snapshot);
         setRunSnapshot(undefined);
         setRunObservability(undefined);
+        setContextBundle(undefined);
         await loadWorkspaceContext(targetWorkspaceId);
         message.success('工作空间执行已完成一次状态刷新');
       })
@@ -1650,6 +1980,27 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           </ProCard>
           <ProCard title="运行记录（Run）" className="workorch-section">
             <ProTable<Run> rowKey="id" search={false} options={false} pagination={false} columns={runColumns} dataSource={snapshot.runs ?? []} />
+          </ProCard>
+          <ProCard
+            title="任务进度与恢复"
+            className="workorch-section"
+            extra={stateTag((runObservability?.taskProgress ?? runSnapshot?.taskProgress ?? snapshot.taskProgress)?.state)}
+          >
+            {taskProgressCard(runObservability?.taskProgress ?? runSnapshot?.taskProgress ?? snapshot.taskProgress)}
+          </ProCard>
+          <ProCard
+            title="任务拆分图"
+            className="workorch-section"
+            extra={<Tag>{(runObservability?.taskDecompositions ?? runSnapshot?.taskDecompositions ?? snapshot.taskDecompositions ?? []).length} 个图</Tag>}
+          >
+            {taskDecompositionCard(runObservability?.taskDecompositions ?? runSnapshot?.taskDecompositions ?? snapshot.taskDecompositions)}
+          </ProCard>
+          <ProCard
+            title="上下文恢复包"
+            className="workorch-section"
+            extra={<Tag>{contextBundle?.mode || '未生成'}</Tag>}
+          >
+            {contextBundleCard(contextBundle)}
           </ProCard>
           <ProCard gutter={16} wrap className="workorch-section">
             <ProCard title="决策工单（Decision）" colSpan="50%">

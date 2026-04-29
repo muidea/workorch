@@ -1,4 +1,4 @@
-import type { Approval, Decision, DoD, EventRecord, Goal, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, UpdateLLMConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
+import type { Approval, ContextBundle, Decision, DoD, EventRecord, Goal, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, TaskDecomposition, TaskProgress, UpdateLLMConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -73,6 +73,18 @@ export const workorchApi = {
     const body = await request<{ snapshot: WorkspaceSnapshot }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/snapshot`);
     return body.snapshot;
   },
+  readWorkspaceTaskProgress: async (workspaceId: string) => {
+    const body = await request<{ taskProgress: TaskProgress }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/task-progress`);
+    return body.taskProgress;
+  },
+  readWorkspaceTaskDecompositions: async (workspaceId: string) => {
+    const body = await request<{ taskDecompositions: TaskDecomposition[] }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/task-decompositions`);
+    return body.taskDecompositions ?? [];
+  },
+  readWorkspaceContextBundle: async (workspaceId: string) => {
+    const body = await request<{ contextBundle: ContextBundle }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/context-bundle`);
+    return body.contextBundle;
+  },
   createWorkspace: async (title: string, description?: string, workingDirectory?: string) => {
     const body = await request<{ workspace: Workspace }>(`${apiBase}/workspaces`, {
       method: 'POST',
@@ -127,6 +139,18 @@ export const workorchApi = {
   readRunObservability: async (runId: string) => {
     const body = await request<{ observability: RunObservability }>(`${apiBase}/runs/${encodeURIComponent(runId)}/observability`);
     return body.observability;
+  },
+  readRunTaskProgress: async (runId: string) => {
+    const body = await request<{ taskProgress: TaskProgress }>(`${apiBase}/runs/${encodeURIComponent(runId)}/task-progress`);
+    return body.taskProgress;
+  },
+  readRunTaskDecompositions: async (runId: string) => {
+    const body = await request<{ taskDecompositions: TaskDecomposition[] }>(`${apiBase}/runs/${encodeURIComponent(runId)}/task-decompositions`);
+    return body.taskDecompositions ?? [];
+  },
+  readRunContextBundle: async (runId: string) => {
+    const body = await request<{ contextBundle: ContextBundle }>(`${apiBase}/runs/${encodeURIComponent(runId)}/context-bundle`);
+    return body.contextBundle;
   },
   listEventRecords: async (query?: { workspaceId?: string; runId?: string; topic?: string; subjectType?: string; subjectId?: string; cursorAfterId?: string; limit?: number }) => {
     const search = new URLSearchParams();

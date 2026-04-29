@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
 	"testing"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
@@ -327,6 +328,337 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 	if !timelineContainsStepOccurredAt(item.Timeline, "step_stream", string(stepID), "2026-04-25T10:00:00Z") {
 		t.Fatalf("timeline = %+v, want stream occurrence derived from step checkpoint", item.Timeline)
 	}
+}
+
+func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-task-progress-result")
+	runID := common.RunID("run-task-progress-result")
+	stepID := common.StepID("run-task-progress-result/step-1")
+	resultID := common.ResultID("result-task-progress")
+	artifactID := common.ArtifactID("artifact-task-progress")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "task progress", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateCompleted}); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	if err := exports.Repositories.ValidationResults.Create(ctx, &runmodel.ValidationResult{
+		ID:          common.ValidationResultID("validation-task-progress"),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		State:       common.ValidationResultStatePassed,
+		Summary:     "validation passed",
+	}); err != nil {
+		t.Fatalf("create validation: %v", err)
+	}
+	if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
+		ID:           resultID,
+		WorkspaceID:  workspaceID,
+		RunID:        runID,
+		State:        common.ResultStateAccepted,
+		Title:        "Accepted Result",
+		Summary:      "formal task outcome",
+		EvidenceRefs: []string{string(stepID), "validation-task-progress"},
+		ArtifactRefs: []common.ArtifactID{artifactID},
+	}); err != nil {
+		t.Fatalf("create result: %v", err)
+	}
+	if err := exports.Repositories.Artifacts.Create(ctx, &resultmodel.Artifact{
+		ID:           artifactID,
+		WorkspaceID:  workspaceID,
+		RunID:        runID,
+		ResultID:     resultID,
+		ArtifactType: "report",
+		State:        common.ArtifactStateAvailable,
+		Summary:      "formal artifact",
+	}); err != nil {
+		t.Fatalf("create artifact: %v", err)
+	}
+
+	progress, err := ReadRunTaskProgressWithBackend(context.Background(), "file", dataRoot, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunTaskProgressWithBackend: %v", err)
+	}
+	if progress.WorkspaceID != string(workspaceID) || progress.RunID != string(runID) || progress.State != "completed" {
+		t.Fatalf("progress identity = %+v, want completed run progress", progress)
+	}
+	if progress.Recovery.Mode != "none" || progress.Recovery.NextAction != "inspect_result" {
+		t.Fatalf("recovery = %+v, want inspect completed result", progress.Recovery)
+	}
+	if progress.Summary != "formal task outcome" {
+		t.Fatalf("summary = %q, want formal task outcome", progress.Summary)
+	}
+	if !progressContainsMilestone(progress, "formal_result", "completed") {
+		t.Fatalf("milestones = %+v, want completed formal result", progress.Milestones)
+	}
+	if !progressContainsItem(progress, string(resultID), "result", "accepted") || !progressContainsItem(progress, string(artifactID), "artifact", "available") {
+		t.Fatalf("items = %+v, want result and artifact items", progress.Items)
+	}
+}
+
+func TestReadRunTaskProgressWithBackendReturnsDecisionRecovery(t *testing.T) {
+	dataRoot := t.TempDir()
+	runID := "run-task-progress-decision"
+	started := prepareDecisionRun(t, dataRoot, "ws-task-progress-decision", runID)
+
+	progress, err := ReadRunTaskProgressWithBackend(context.Background(), "file", dataRoot, runID)
+	if err != nil {
+		t.Fatalf("ReadRunTaskProgressWithBackend: %v", err)
+	}
+	if progress.Recovery.Mode != "wait_decision" || progress.Recovery.BlockingTicketID != started.BlockingTicketID {
+		t.Fatalf("recovery = %+v, want decision blocker %s", progress.Recovery, started.BlockingTicketID)
+	}
+	if len(progress.Blockers) != 1 || progress.Blockers[0].Kind != "decision" || progress.Blockers[0].ID != started.BlockingTicketID {
+		t.Fatalf("blockers = %+v, want decision blocker %s", progress.Blockers, started.BlockingTicketID)
+	}
+	if !progressContainsMilestone(progress, "governance", "blocked") {
+		t.Fatalf("milestones = %+v, want blocked governance", progress.Milestones)
+	}
+}
+
+func TestReadWorkspaceTaskProgressWithBackendReturnsActiveRunProgress(t *testing.T) {
+	dataRoot := t.TempDir()
+	workspaceID := "ws-task-progress-approval"
+	runID := "run-task-progress-approval"
+	started := prepareApprovalRun(t, dataRoot, workspaceID, runID)
+
+	progress, err := ReadWorkspaceTaskProgressWithBackend(context.Background(), "file", dataRoot, workspaceID)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceTaskProgressWithBackend: %v", err)
+	}
+	if progress.WorkspaceID != workspaceID || progress.RunID != runID {
+		t.Fatalf("progress identity = %+v, want workspace active run progress", progress)
+	}
+	if progress.Recovery.Mode != "wait_approval" || progress.Recovery.BlockingApprovalID != started.BlockingApprovalID {
+		t.Fatalf("recovery = %+v, want approval blocker %s", progress.Recovery, started.BlockingApprovalID)
+	}
+}
+
+func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCandidates(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-context-bundle")
+	runID := common.RunID("run-context-bundle")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:               workspaceID,
+		Title:            "context bundle workspace",
+		State:            common.WorkspaceStateActive,
+		WorkingDirectory: "workspaces/context-bundle",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{"id": "goal-context-bundle", "text": "deliver context bundle"},
+			"dod":  map[string]any{"id": "dod-context-bundle", "state": "ready", "items": []any{"bundle exposes recovery context"}},
+			"skills": []any{
+				map[string]any{"id": "skill-context", "name": "context"},
+			},
+			"mcpServers": []any{
+				map[string]any{"id": "mcp-context", "name": "context mcp"},
+			},
+			"memories": []any{
+				map[string]any{"id": "memory-context", "summary": "prior context"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for idx := 0; idx < 11; idx++ {
+		stepID := common.StepID("run-context-bundle/step-" + strconv.Itoa(idx+1))
+		if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+			ID:     stepID,
+			RunID:  runID,
+			Kind:   "llm/workspace_execution",
+			State:  common.StepStateCompleted,
+			Output: map[string]any{"stage": "context_bundle_stage"},
+		}); err != nil {
+			t.Fatalf("create step: %v", err)
+		}
+		if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+			ID:               common.CheckpointID("checkpoint-context-bundle-" + strconv.Itoa(idx+1)),
+			WorkspaceID:      workspaceID,
+			RunID:            runID,
+			CheckpointType:   common.CheckpointTypeRunState,
+			CurrentStepID:    stepID,
+			RunStateSnapshot: common.RunStateRunning,
+			OccurredAt:       "2026-04-29T10:00:" + twoDigitSecond(idx) + "Z",
+			Data:             map[string]any{"event": "step_completed"},
+		}); err != nil {
+			t.Fatalf("create checkpoint: %v", err)
+		}
+	}
+
+	bundle, err := ReadRunContextBundleWithBackend(context.Background(), "file", dataRoot, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunContextBundleWithBackend: %v", err)
+	}
+	if bundle.WorkspaceID != string(workspaceID) || bundle.RunID != string(runID) || bundle.Mode != "run_recovery" {
+		t.Fatalf("bundle identity = %+v, want run recovery bundle", bundle)
+	}
+	if bundle.TaskProgress.RunID != string(runID) || bundle.Recovery.Mode != "continue" {
+		t.Fatalf("bundle progress/recovery = %+v/%+v, want continue run progress", bundle.TaskProgress, bundle.Recovery)
+	}
+	if bundle.CompressedContext.Version != "workorch.compressedContext.v1" ||
+		bundle.CompressedContext.Mode != "deterministic_recovery_summary" ||
+		bundle.CompressedContext.RunID != string(runID) {
+		t.Fatalf("compressedContext = %+v, want deterministic compressed context for run", bundle.CompressedContext)
+	}
+	if bundle.LatestCheckpoint == nil || bundle.LatestCheckpoint.ID != "checkpoint-context-bundle-11" {
+		t.Fatalf("latest checkpoint = %+v, want checkpoint-context-bundle-11", bundle.LatestCheckpoint)
+	}
+	if !contextBundleContainsSection(bundle, "goal") || !contextBundleContainsSection(bundle, "dod") || !contextBundleContainsSection(bundle, "task_progress") {
+		t.Fatalf("sections = %+v, want goal/dod/task_progress", bundle.Sections)
+	}
+	if len(bundle.RecentEvidence) != 12 {
+		t.Fatalf("recentEvidence = %d, want 12", len(bundle.RecentEvidence))
+	}
+	if len(bundle.CompressedContext.RecentEvidence) != 6 {
+		t.Fatalf("compressed recentEvidence = %d, want 6", len(bundle.CompressedContext.RecentEvidence))
+	}
+	if !contextBundleContainsCompressionCandidate(bundle, "recent_evidence") || !contextBundleContainsCompressionCandidate(bundle, "task_progress") {
+		t.Fatalf("compressionCandidates = %+v, want recent evidence and task progress candidates", bundle.CompressionCandidates)
+	}
+}
+
+func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-task-decomposition")
+	runID := common.RunID("run-task-decomposition")
+	rootStepID := common.StepID("run-task-decomposition/step-1")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "task decomposition", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    rootStepID,
+		RunID: runID,
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"stage": "llm_execution_graph_plan",
+			"executionGraph": map[string]any{
+				"nodes": []map[string]any{
+					{"id": "inspect", "kind": "shell/command", "input": map[string]any{"command": "hostname"}},
+					{"id": "verify", "kind": "shell/command", "dependsOn": []string{"inspect"}, "input": map[string]any{"command": "true"}},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("create root step: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    common.StepID("run-task-decomposition/block/inspect"),
+		RunID: runID,
+		Kind:  "shell/command",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"graphNodeId":     "inspect",
+			"graphRootStepId": string(rootStepID),
+		},
+		Output: map[string]any{"exitCode": 0},
+	}); err != nil {
+		t.Fatalf("create inspect step: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    common.StepID("run-task-decomposition/block/verify"),
+		RunID: runID,
+		Kind:  "shell/command",
+		State: common.StepStateDispatched,
+		Input: map[string]any{
+			"graphNodeId":     "verify",
+			"graphRootStepId": string(rootStepID),
+		},
+	}); err != nil {
+		t.Fatalf("create verify step: %v", err)
+	}
+
+	items, err := ReadRunTaskDecompositionsWithBackend(context.Background(), "file", dataRoot, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunTaskDecompositionsWithBackend: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("task decompositions = %+v, want one graph projection", items)
+	}
+	item := items[0]
+	if item.RootStepID != string(rootStepID) || item.State != "running" || item.NodeTotal != 2 || item.NodeCompleted != 1 || item.NodeRunning != 1 {
+		t.Fatalf("task decomposition = %+v, want running 1/2 completed", item)
+	}
+	if len(item.Nodes) != 2 || item.Nodes[0].ID != "inspect" || item.Nodes[0].State != "completed" || item.Nodes[1].ID != "verify" || item.Nodes[1].State != "running" {
+		t.Fatalf("nodes = %+v, want inspect completed and verify running", item.Nodes)
+	}
+	if len(item.Nodes[1].DependsOn) != 1 || item.Nodes[1].DependsOn[0] != "inspect" {
+		t.Fatalf("verify dependsOn = %+v, want inspect", item.Nodes[1].DependsOn)
+	}
+
+	bundle, err := ReadRunContextBundleWithBackend(context.Background(), "file", dataRoot, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunContextBundleWithBackend: %v", err)
+	}
+	if !contextBundleContainsSection(bundle, "task_decomposition") {
+		t.Fatalf("context bundle sections = %+v, want task_decomposition", bundle.Sections)
+	}
+}
+
+func progressContainsMilestone(progress TaskProgress, id string, state string) bool {
+	for _, item := range progress.Milestones {
+		if item.ID == id && item.State == state {
+			return true
+		}
+	}
+	return false
+}
+
+func contextBundleContainsSection(bundle ContextBundle, id string) bool {
+	for _, item := range bundle.Sections {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func contextBundleContainsCompressionCandidate(bundle ContextBundle, sectionID string) bool {
+	for _, item := range bundle.CompressionCandidates {
+		if item.SectionID == sectionID {
+			return true
+		}
+	}
+	return false
+}
+
+func twoDigitSecond(value int) string {
+	if value < 10 {
+		return "0" + strconv.Itoa(value)
+	}
+	return strconv.Itoa(value)
+}
+
+func progressContainsItem(progress TaskProgress, id string, kind string, state string) bool {
+	for _, item := range progress.Items {
+		if item.ID == id && item.Kind == kind && item.State == state {
+			return true
+		}
+	}
+	return false
 }
 
 func timelineContainsStepOutput(items []RuntimeTimelineItem, stepID string, stage string, runState string) bool {

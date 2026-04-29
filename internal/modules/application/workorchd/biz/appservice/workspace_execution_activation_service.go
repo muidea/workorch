@@ -719,6 +719,9 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 			}
 			return nil, err
 		}
+		if err := attachCompressedContextToRun(ctx, session, runID); err != nil {
+			return nil, err
+		}
 		if err := exports.Services.RunService.EnsureStarted(ctx, runmodule.StartRunCommand{RunID: runID}); err != nil {
 			return nil, err
 		}

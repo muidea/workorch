@@ -419,10 +419,11 @@ Web must not expose raw provider secrets, raw prompt logs containing secrets, or
 direct low-level adapter execution controls as primary user actions.
 
 Web must also avoid synthesizing missing business outcomes from raw Step,
-ToolCall, MCP, or provider-specific payloads. If the Run does not expose a
-formal `dodAssessment.summary` or future explicit result model, Web should show
+ToolCall, MCP, or provider-specific payloads. The target outcome is exposed
+through formal Result / Artifact records; if they are absent, Web should show
 that the target outcome is not yet formed and point users to the evidence
-timeline for diagnosis.
+timeline for diagnosis. `dodAssessment.summary` remains evidence for Result
+materialization, not the primary business outcome surface.
 
 ## Business Objects
 

@@ -497,6 +497,9 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/snapshot"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/task-progress"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/context-bundle"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/task-decompositions"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/goals/:goalId"},
@@ -513,6 +516,9 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/snapshot"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/status"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/observability"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/task-progress"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/context-bundle"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/task-decompositions"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/runs/:runId/start"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/runs/:runId/resume"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/decisions"},
@@ -632,6 +638,33 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}
 		return appservice.WorkspaceSnapshot{Workspace: appservice.Workspace{ID: workspaceID}}, nil
 	}
+	state.readWorkspaceTaskProgress = func(ctx context.Context, _, _, workspaceID string) (appservice.TaskProgress, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("workspace task progress event hub = %#v, want injected hub", got)
+		}
+		if workspaceID != "ws-native-read" {
+			t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
+		}
+		return appservice.TaskProgress{WorkspaceID: workspaceID, State: "running", Recovery: appservice.RecoveryPlan{Mode: "continue"}}, nil
+	}
+	state.readWorkspaceContextBundle = func(ctx context.Context, _, _, workspaceID string) (appservice.ContextBundle, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("workspace context bundle event hub = %#v, want injected hub", got)
+		}
+		if workspaceID != "ws-native-read" {
+			t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
+		}
+		return appservice.ContextBundle{WorkspaceID: workspaceID, Mode: "workspace", Recovery: appservice.RecoveryPlan{Mode: "continue"}}, nil
+	}
+	state.readWorkspaceTaskDecompositions = func(ctx context.Context, _, _, workspaceID string) ([]appservice.TaskDecomposition, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("workspace task decomposition event hub = %#v, want injected hub", got)
+		}
+		if workspaceID != "ws-native-read" {
+			t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
+		}
+		return []appservice.TaskDecomposition{{ID: "task-native", WorkspaceID: workspaceID, RunID: "run-native-read", State: "running"}}, nil
+	}
 	state.readRun = func(ctx context.Context, _, _, runID string) (appservice.Run, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("run get event hub = %#v, want injected hub", got)
@@ -667,6 +700,33 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 			t.Fatalf("runID = %q, want run-native-read", runID)
 		}
 		return appservice.RunObservability{Run: appservice.Run{ID: runID, WorkspaceID: "ws-native-read", State: "created"}}, nil
+	}
+	state.readRunTaskProgress = func(ctx context.Context, _, _, runID string) (appservice.TaskProgress, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run task progress event hub = %#v, want injected hub", got)
+		}
+		if runID != "run-native-read" {
+			t.Fatalf("runID = %q, want run-native-read", runID)
+		}
+		return appservice.TaskProgress{WorkspaceID: "ws-native-read", RunID: runID, State: "running", Recovery: appservice.RecoveryPlan{Mode: "continue"}}, nil
+	}
+	state.readRunContextBundle = func(ctx context.Context, _, _, runID string) (appservice.ContextBundle, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run context bundle event hub = %#v, want injected hub", got)
+		}
+		if runID != "run-native-read" {
+			t.Fatalf("runID = %q, want run-native-read", runID)
+		}
+		return appservice.ContextBundle{WorkspaceID: "ws-native-read", RunID: runID, Mode: "run_recovery", Recovery: appservice.RecoveryPlan{Mode: "continue"}}, nil
+	}
+	state.readRunTaskDecompositions = func(ctx context.Context, _, _, runID string) ([]appservice.TaskDecomposition, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run task decomposition event hub = %#v, want injected hub", got)
+		}
+		if runID != "run-native-read" {
+			t.Fatalf("runID = %q, want run-native-read", runID)
+		}
+		return []appservice.TaskDecomposition{{ID: "task-native", WorkspaceID: "ws-native-read", RunID: runID, State: "running"}}, nil
 	}
 	state.listDecisions = func(ctx context.Context, _, _, workspaceID, runID string) ([]appservice.Decision, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
@@ -817,12 +877,18 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces", body: `{"title":"native write","description":"native description","workingDirectory":"workspaces/native-write"}`, status: http.StatusCreated},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/snapshot", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/task-progress", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/context-bundle", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/task-decompositions", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs", body: `{"runId":"run-native-write","goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusCreated},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs?workspaceId=ws-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/snapshot", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/status", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/observability", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/task-progress", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/context-bundle", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/task-decompositions", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/start", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/resume", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native","soulId":"soul-native","skillIds":["skill-native"],"mcpServerIds":["mcp-native"],"memoryIds":["memory-native"],"priority":9}`, status: http.StatusOK},
@@ -1095,6 +1161,75 @@ func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
 	}
 	if fetched.Run.ID != "run-a" || fetched.Run.WorkspaceID != workspaceA.ID {
 		t.Fatalf("fetched run = %+v, want run-a/%s", fetched.Run, workspaceA.ID)
+	}
+}
+
+func TestEventStreamEndpointReplaysFileBackedRecordsAfterRestart(t *testing.T) {
+	dataRoot := t.TempDir()
+	ctx := context.Background()
+	first := NewHTTPServer(Config{Backend: "file", DataRoot: dataRoot})
+	firstHandler := first.http.Handler
+
+	workspace := createWorkspaceForHTTP(t, firstHandler, "event replay workspace", "workspaces/event-replay")
+	goalID, dodID := defineGoalAndDoDForHTTP(t, firstHandler, workspace.ID)
+	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-event-replay","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
+	runReq.Header.Set("Content-Type", "application/json")
+	runRec := httptest.NewRecorder()
+	firstHandler.ServeHTTP(runRec, runReq)
+	if runRec.Code != http.StatusCreated {
+		t.Fatalf("run create status = %d, want 201, body=%s", runRec.Code, runRec.Body.String())
+	}
+	if err := first.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown first server: %v", err)
+	}
+
+	second := NewHTTPServer(Config{Backend: "file", DataRoot: dataRoot})
+	t.Cleanup(func() {
+		if err := second.Shutdown(ctx); err != nil {
+			t.Fatalf("shutdown second server: %v", err)
+		}
+	})
+	secondHandler := second.http.Handler
+
+	workspaceEvents := readEventRecordsForHTTP(t, secondHandler, "/api/v1/workorch/events?workspaceId="+workspace.ID)
+	if !eventRecordsContainTopic(workspaceEvents, events.TopicWorkspaceCreated) ||
+		!eventRecordsContainTopic(workspaceEvents, events.TopicGoalDefined) ||
+		!eventRecordsContainTopic(workspaceEvents, events.TopicDoDDefined) ||
+		!eventRecordsContainTopic(workspaceEvents, events.TopicRunCreated) {
+		t.Fatalf("workspace events = %+v, want workspace/goal/dod/run persisted events after restart", workspaceEvents)
+	}
+
+	runEvents := readEventRecordsForHTTP(t, secondHandler, "/api/v1/workorch/events?runId=run-event-replay")
+	if len(runEvents) != 1 || runEvents[0].Topic != events.TopicRunCreated || runEvents[0].WorkspaceID != workspace.ID {
+		t.Fatalf("run events = %+v, want replayed run-created event", runEvents)
+	}
+
+	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-event-replay/snapshot", nil)
+	snapshotRec := httptest.NewRecorder()
+	secondHandler.ServeHTTP(snapshotRec, snapshotReq)
+	if snapshotRec.Code != http.StatusOK {
+		t.Fatalf("snapshot status = %d, want 200, body=%s", snapshotRec.Code, snapshotRec.Body.String())
+	}
+	var snapshotBody runSnapshotResponse
+	if err := json.Unmarshal(snapshotRec.Body.Bytes(), &snapshotBody); err != nil {
+		t.Fatalf("unmarshal run snapshot: %v", err)
+	}
+	if len(snapshotBody.Snapshot.EventRecords) != 1 || snapshotBody.Snapshot.EventRecords[0].Topic != events.TopicRunCreated {
+		t.Fatalf("snapshot eventRecords = %+v, want replayed run-created event", snapshotBody.Snapshot.EventRecords)
+	}
+
+	observabilityReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-event-replay/observability", nil)
+	observabilityRec := httptest.NewRecorder()
+	secondHandler.ServeHTTP(observabilityRec, observabilityReq)
+	if observabilityRec.Code != http.StatusOK {
+		t.Fatalf("observability status = %d, want 200, body=%s", observabilityRec.Code, observabilityRec.Body.String())
+	}
+	var observabilityBody runObservabilityResponse
+	if err := json.Unmarshal(observabilityRec.Body.Bytes(), &observabilityBody); err != nil {
+		t.Fatalf("unmarshal run observability: %v", err)
+	}
+	if !timelineContainsPersistedEvent(observabilityBody.Observability.Timeline, events.TopicRunCreated) {
+		t.Fatalf("timeline = %+v, want persisted run event after restart", observabilityBody.Observability.Timeline)
 	}
 }
 
@@ -2201,6 +2336,40 @@ func defineGoalAndDoDForHTTP(t *testing.T, handler http.Handler, workspaceID str
 		t.Fatalf("unmarshal dod response: %v", err)
 	}
 	return goalBody.Goal.ID, dodBody.DoD.ID
+}
+
+func readEventRecordsForHTTP(t *testing.T, handler http.Handler, path string) []appservice.EventRecord {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%s status = %d, want 200, body=%s", path, rec.Code, rec.Body.String())
+	}
+	var body eventRecordsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal event records: %v", err)
+	}
+	return body.EventRecords
+}
+
+func eventRecordsContainTopic(items []appservice.EventRecord, topic string) bool {
+	for _, item := range items {
+		if item.Topic == topic {
+			return true
+		}
+	}
+	return false
+}
+
+func timelineContainsPersistedEvent(items []appservice.RuntimeTimelineItem, topic string) bool {
+	for _, item := range items {
+		if item.Source == "persisted_event" && item.Topic == topic {
+			return true
+		}
+	}
+	return false
 }
 
 func startRunForHTTP(t *testing.T, handler http.Handler, runID string) appservice.Run {
