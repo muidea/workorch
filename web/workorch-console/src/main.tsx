@@ -74,6 +74,10 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : '操作失败';
 }
 
+function isNotFoundError(error: unknown) {
+  return /(^|\s)404(\s|$)|not found|不存在/i.test(errorMessage(error));
+}
+
 function tableResult<T>(data: T[]) {
   return {
     data,
@@ -1126,7 +1130,7 @@ function GovernanceQueuePage() {
 function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 'selectedWorkspaceId'>) {
   const { message } = AntApp.useApp();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [workspaceId, setWorkspaceId] = useState<string | undefined>(selectedWorkspaceId);
+  const [workspaceId, setWorkspaceId] = useState<string | undefined>(undefined);
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | undefined>(undefined);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [dods, setDoDs] = useState<DoD[]>([]);
@@ -1147,8 +1151,11 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [editingGoal, setEditingGoal] = useState<Goal | undefined>(undefined);
   const [editingDoD, setEditingDoD] = useState<DoD | undefined>(undefined);
   const [activationTracking, setActivationTracking] = useState(false);
+  const [workspaceListReady, setWorkspaceListReady] = useState(false);
   const [setupStep, setSetupStep] = useState(0);
   const [createdWorkspace, setCreatedWorkspace] = useState<Workspace | undefined>(undefined);
+  const workspaceListRequestSeq = useRef(0);
+  const workspaceContextRequestSeq = useRef(0);
   const [activationForm] = Form.useForm();
   const [workspaceForm] = Form.useForm();
   const [setupGoalForm] = Form.useForm();
@@ -1157,29 +1164,35 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [dodForm] = Form.useForm();
 
   useEffect(() => {
-    void workorchApi.listWorkspaces().then((items) => {
-      setWorkspaces(items);
-      if (!workspaceId && items[0]) {
-        setWorkspaceId(items[0].id);
-      }
-    });
-  }, []);
-
-  useEffect(() => {
-    if (selectedWorkspaceId) {
-      setWorkspaceId(selectedWorkspaceId);
-    }
+    setWorkspaceListReady(false);
+    setLoading(true);
+    void loadWorkspaceList(selectedWorkspaceId)
+      .catch((error: unknown) => {
+        message.error(errorMessage(error));
+      })
+      .finally(() => setLoading(false));
   }, [selectedWorkspaceId]);
 
   useEffect(() => {
+    if (!workspaceListReady) {
+      return;
+    }
     if (!workspaceId) {
+      clearWorkspaceContext();
       return;
     }
     setLoading(true);
     void loadWorkspaceContext(workspaceId).catch((error: unknown) => {
-      message.error(errorMessage(error));
+      if (isNotFoundError(error)) {
+        message.warning('当前工作空间不存在，已刷新可用工作空间列表');
+        void loadWorkspaceList(undefined, workspaceId).catch((refreshError: unknown) => {
+          message.error(errorMessage(refreshError));
+        });
+      } else {
+        message.error(errorMessage(error));
+      }
     }).finally(() => setLoading(false));
-  }, [workspaceId]);
+  }, [workspaceListReady, workspaceId]);
 
   useEffect(() => {
     if (!workspaceId || !activationTracking) {
@@ -1196,17 +1209,39 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const readyDoDs = dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
   const llmProviders = configuration?.llm.providers ?? [];
 
-  async function loadWorkspaceList(nextWorkspaceId?: string) {
+  function clearWorkspaceContext() {
+    setSnapshot(undefined);
+    setGoals([]);
+    setDoDs([]);
+    setMemoryItems([]);
+    setRunSnapshot(undefined);
+    setRunObservability(undefined);
+  }
+
+  async function loadWorkspaceList(preferredWorkspaceId?: string, ignoredWorkspaceId?: string) {
+    const requestSeq = ++workspaceListRequestSeq.current;
     const items = await workorchApi.listWorkspaces();
-    setWorkspaces(items);
-    if (nextWorkspaceId) {
-      setWorkspaceId(nextWorkspaceId);
-    } else if (!workspaceId && items[0]) {
-      setWorkspaceId(items[0].id);
+    if (requestSeq !== workspaceListRequestSeq.current) {
+      return workspaceId;
     }
+    setWorkspaces(items);
+    const selectableItems = ignoredWorkspaceId ? items.filter((item) => item.id !== ignoredWorkspaceId) : items;
+    const selectableIDs = new Set(selectableItems.map((item) => item.id));
+    const nextWorkspaceId = preferredWorkspaceId && selectableIDs.has(preferredWorkspaceId)
+      ? preferredWorkspaceId
+      : workspaceId && selectableIDs.has(workspaceId)
+        ? workspaceId
+        : selectableItems[0]?.id;
+    setWorkspaceListReady(true);
+    setWorkspaceId(nextWorkspaceId);
+    if (!nextWorkspaceId) {
+      clearWorkspaceContext();
+    }
+    return nextWorkspaceId;
   }
 
   async function loadWorkspaceContext(targetWorkspaceId: string) {
+    const requestSeq = ++workspaceContextRequestSeq.current;
     const [nextSnapshot, nextGoals, nextDoDs, nextSouls, nextSkills, nextMCPServers, nextMemoryItems, nextConfiguration] = await Promise.all([
       workorchApi.readWorkspaceSnapshot(targetWorkspaceId),
       workorchApi.listGoals(targetWorkspaceId),
@@ -1217,6 +1252,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       workorchApi.listMemory(targetWorkspaceId),
       workorchApi.readConfiguration()
     ]);
+    if (requestSeq !== workspaceContextRequestSeq.current) {
+      return;
+    }
     setSnapshot(nextSnapshot);
     setGoals(nextGoals);
     setDoDs(nextDoDs);
@@ -1231,6 +1269,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
         workorchApi.readRunSnapshot(latestRun.id),
         workorchApi.readRunObservability(latestRun.id)
       ]);
+      if (requestSeq !== workspaceContextRequestSeq.current) {
+        return;
+      }
       setRunSnapshot(nextRunSnapshot);
       setRunObservability(nextRunObservability);
     } else {
