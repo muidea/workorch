@@ -238,6 +238,20 @@ type soulsResponse struct {
 	Souls    []appservice.Soul `json:"souls"`
 }
 
+type workspaceTemplateResponse struct {
+	Service           string                       `json:"service"`
+	Backend           string                       `json:"backend,omitempty"`
+	DataRoot          string                       `json:"dataRoot,omitempty"`
+	WorkspaceTemplate appservice.WorkspaceTemplate `json:"workspaceTemplate"`
+}
+
+type workspaceTemplatesResponse struct {
+	Service            string                         `json:"service"`
+	Backend            string                         `json:"backend,omitempty"`
+	DataRoot           string                         `json:"dataRoot,omitempty"`
+	WorkspaceTemplates []appservice.WorkspaceTemplate `json:"workspaceTemplates"`
+}
+
 type skillResponse struct {
 	Service  string           `json:"service"`
 	Backend  string           `json:"backend,omitempty"`
@@ -327,6 +341,7 @@ type activateWorkspaceExecutionRequest struct {
 }
 
 type createSoulRequest = appservice.CreateSoulCommand
+type createWorkspaceTemplateRequest = appservice.WorkspaceTemplate
 type createSkillRequest = appservice.CreateSkillCommand
 type createMCPServerRequest = appservice.CreateMCPServerCommand
 type createMemoryItemRequest = appservice.CreateMemoryItemCommand
@@ -400,8 +415,12 @@ type approveApprovalFunc func(context.Context, string, string, string) (appservi
 type rejectApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
 type batchResolveApprovalsFunc func(context.Context, string, string, appservice.BatchResolveApprovalCommand) ([]appservice.Approval, error)
 type createSoulFunc func(context.Context, string, string, appservice.CreateSoulCommand) (appservice.Soul, error)
+type updateSoulFunc func(context.Context, string, string, string, appservice.UpdateSoulCommand) (appservice.Soul, error)
 type readSoulFunc func(context.Context, string, string, string) (appservice.Soul, error)
 type listSoulsFunc func(context.Context, string, string) ([]appservice.Soul, error)
+type createWorkspaceTemplateFunc func(context.Context, string, string, appservice.WorkspaceTemplate) (appservice.WorkspaceTemplate, error)
+type updateWorkspaceTemplateFunc func(context.Context, string, string, string, appservice.WorkspaceTemplate) (appservice.WorkspaceTemplate, error)
+type listWorkspaceTemplatesFunc func(context.Context, string, string) ([]appservice.WorkspaceTemplate, error)
 type createSkillFunc func(context.Context, string, string, appservice.CreateSkillCommand) (appservice.Skill, error)
 type readSkillFunc func(context.Context, string, string, string, appservice.SkillQuery) (appservice.Skill, error)
 type listSkillsFunc func(context.Context, string, string, appservice.SkillQuery) ([]appservice.Skill, error)
@@ -463,8 +482,12 @@ type serverState struct {
 	rejectApproval                  rejectApprovalFunc
 	batchResolveApprovals           batchResolveApprovalsFunc
 	createSoul                      createSoulFunc
+	updateSoul                      updateSoulFunc
 	readSoul                        readSoulFunc
 	listSouls                       listSoulsFunc
+	createWorkspaceTemplate         createWorkspaceTemplateFunc
+	updateWorkspaceTemplate         updateWorkspaceTemplateFunc
+	listWorkspaceTemplates          listWorkspaceTemplatesFunc
 	createSkill                     createSkillFunc
 	readSkill                       readSkillFunc
 	listSkills                      listSkillsFunc
@@ -530,6 +553,7 @@ type serverMetrics struct {
 	approvalApproveRequests            atomic.Uint64
 	approvalRejectRequests             atomic.Uint64
 	soulCreateRequests                 atomic.Uint64
+	soulUpdateRequests                 atomic.Uint64
 	soulListRequests                   atomic.Uint64
 	soulGetRequests                    atomic.Uint64
 	skillCreateRequests                atomic.Uint64
@@ -1308,6 +1332,20 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Soul:     item,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/workspace-templates", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		items, err := state.listWorkspaceTemplates(r.Context(), state.config.Backend, state.config.DataRoot)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, workspaceTemplatesResponse{
+			Service:            "workorch",
+			Backend:            state.config.Backend,
+			DataRoot:           state.config.DataRoot,
+			WorkspaceTemplates: items,
+		})
+	})
 	router.AddHandler("/api/v1/workorch/skills", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		state.metrics.skillListRequests.Add(1)
@@ -1733,6 +1771,74 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			Soul:     item,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/souls/:soulId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		soulID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/souls/")
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.soulUpdateRequests.Add(1)
+		var req appservice.UpdateSoulCommand
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.updateSoul(r.Context(), state.config.Backend, state.config.DataRoot, soulID, req)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, soulResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Soul:     item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/workspace-templates", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		var req createWorkspaceTemplateRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.createWorkspaceTemplate(r.Context(), state.config.Backend, state.config.DataRoot, req)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, workspaceTemplateResponse{
+			Service:           "workorch",
+			Backend:           state.config.Backend,
+			DataRoot:          state.config.DataRoot,
+			WorkspaceTemplate: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/workspace-templates/:templateId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		templateID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/workspace-templates/")
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		var req appservice.WorkspaceTemplate
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.updateWorkspaceTemplate(r.Context(), state.config.Backend, state.config.DataRoot, templateID, req)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, workspaceTemplateResponse{
+			Service:           "workorch",
+			Backend:           state.config.Backend,
+			DataRoot:          state.config.DataRoot,
+			WorkspaceTemplate: item,
+		})
+	})
 	router.AddHandler("/api/v1/workorch/skills", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		state.metrics.skillCreateRequests.Add(1)
@@ -2044,8 +2150,12 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		rejectApproval:                  defaultRejectApproval,
 		batchResolveApprovals:           defaultBatchResolveApprovals,
 		createSoul:                      defaultCreateSoul,
+		updateSoul:                      defaultUpdateSoul,
 		readSoul:                        defaultReadSoul,
 		listSouls:                       defaultListSouls,
+		createWorkspaceTemplate:         defaultCreateWorkspaceTemplate,
+		updateWorkspaceTemplate:         defaultUpdateWorkspaceTemplate,
+		listWorkspaceTemplates:          defaultListWorkspaceTemplates,
 		createSkill:                     defaultCreateSkill,
 		readSkill:                       defaultReadSkill,
 		listSkills:                      defaultListSkills,
@@ -2467,6 +2577,15 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		})
 		return ret, err
 	}
+	s.updateSoul = func(ctx context.Context, _, _ string, soulID string, cmd appservice.UpdateSoulCommand) (appservice.Soul, error) {
+		var ret appservice.Soul
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.UpdateSoulWithSession(ctx, session, soulID, cmd)
+			return err
+		})
+		return ret, err
+	}
 	s.readSoul = func(ctx context.Context, _, _, soulID string) (appservice.Soul, error) {
 		var ret appservice.Soul
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
@@ -2481,6 +2600,33 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ListSoulsWithSession(ctx, session)
+			return err
+		})
+		return ret, err
+	}
+	s.createWorkspaceTemplate = func(ctx context.Context, _, _ string, cmd appservice.WorkspaceTemplate) (appservice.WorkspaceTemplate, error) {
+		var ret appservice.WorkspaceTemplate
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.CreateWorkspaceTemplateWithSession(ctx, session, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.updateWorkspaceTemplate = func(ctx context.Context, _, _ string, templateID string, cmd appservice.WorkspaceTemplate) (appservice.WorkspaceTemplate, error) {
+		var ret appservice.WorkspaceTemplate
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.UpdateWorkspaceTemplateWithSession(ctx, session, templateID, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.listWorkspaceTemplates = func(ctx context.Context, _, _ string) ([]appservice.WorkspaceTemplate, error) {
+		var ret []appservice.WorkspaceTemplate
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListWorkspaceTemplatesWithSession(ctx, session)
 			return err
 		})
 		return ret, err
@@ -2780,12 +2926,28 @@ func defaultCreateSoul(ctx context.Context, backend string, dataRoot string, cmd
 	return appservice.CreateSoulWithBackend(ctx, backend, dataRoot, cmd)
 }
 
+func defaultUpdateSoul(ctx context.Context, backend string, dataRoot string, soulID string, cmd appservice.UpdateSoulCommand) (appservice.Soul, error) {
+	return appservice.UpdateSoulWithBackend(ctx, backend, dataRoot, soulID, cmd)
+}
+
 func defaultReadSoul(ctx context.Context, backend string, dataRoot string, soulID string) (appservice.Soul, error) {
 	return appservice.ReadSoulWithBackend(ctx, backend, dataRoot, soulID)
 }
 
 func defaultListSouls(ctx context.Context, backend string, dataRoot string) ([]appservice.Soul, error) {
 	return appservice.ListSoulsWithBackend(ctx, backend, dataRoot)
+}
+
+func defaultCreateWorkspaceTemplate(ctx context.Context, backend string, dataRoot string, cmd appservice.WorkspaceTemplate) (appservice.WorkspaceTemplate, error) {
+	return appservice.CreateWorkspaceTemplateWithBackend(ctx, backend, dataRoot, cmd)
+}
+
+func defaultUpdateWorkspaceTemplate(ctx context.Context, backend string, dataRoot string, templateID string, cmd appservice.WorkspaceTemplate) (appservice.WorkspaceTemplate, error) {
+	return appservice.UpdateWorkspaceTemplateWithBackend(ctx, backend, dataRoot, templateID, cmd)
+}
+
+func defaultListWorkspaceTemplates(ctx context.Context, backend string, dataRoot string) ([]appservice.WorkspaceTemplate, error) {
+	return appservice.ListWorkspaceTemplatesWithBackend(ctx, backend, dataRoot)
 }
 
 func defaultCreateSkill(ctx context.Context, backend string, dataRoot string, cmd appservice.CreateSkillCommand) (appservice.Skill, error) {

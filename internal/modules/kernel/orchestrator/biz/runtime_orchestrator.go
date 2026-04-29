@@ -50,6 +50,7 @@ const (
 	stepInputKeyGraphCompletedNodes    = "graphCompletedNodes"
 	stepInputKeyGraphBatch             = "graphBatch"
 	stepInputKeyGraphEvidence          = "graphEvidence"
+	stepInputKeySoulStage              = "soulStage"
 	stepOutputKeyBlockDecisionReason   = "blockDecisionReason"
 	stepOutputKeyBlockDecisionTicketID = "blockDecisionTicketId"
 	stepOutputKeyBlockDecisionKind     = "blockDecisionKind"
@@ -59,6 +60,11 @@ const (
 	stepOutputKeyBlockApprovalID       = "blockApprovalId"
 	llmWorkspaceExecutionStepKind      = "llm/workspace_execution"
 	defaultInitialStepKind             = llmWorkspaceExecutionStepKind
+	soulStagePlanning                  = "planning"
+	soulStageExecution                 = "execution"
+	soulStageDecision                  = "decision"
+	soulStageApproval                  = "approval"
+	soulStageValidation                = "validation"
 )
 
 type RuntimeOrchestrator struct {
@@ -1950,6 +1956,7 @@ func decisionResolutionInput(ticket *decisionmodel.Ticket, resolution *decisionm
 		return nil
 	}
 	return map[string]any{
+		stepInputKeySoulStage: soulStageDecision,
 		"decisionResolution": map[string]any{
 			"ticketId":          string(ticket.ID),
 			"stepId":            string(ticket.StepID),
@@ -1968,6 +1975,7 @@ func approvalResolutionInput(approval *approvalmodel.Approval) map[string]any {
 		return nil
 	}
 	return map[string]any{
+		stepInputKeySoulStage: soulStageApproval,
 		"approvalResolution": map[string]any{
 			"approvalId": string(approval.ID),
 			"stepId":     string(approval.StepID),
@@ -2323,6 +2331,7 @@ func nextGraphStepInput(
 	for key, value := range node.Input {
 		input[key] = value
 	}
+	input[stepInputKeySoulStage] = soulStageExecution
 	input[stepOutputKeyExecutionGraph] = graph
 	input[stepInputKeyGraphNodeID] = node.ID
 	input[stepInputKeyGraphRootStepID] = string(graphDispatchRootStepID(last))
@@ -2462,6 +2471,7 @@ func llmCompletionFollowUpStepID(runID common.RunID, step *runModel.Step) common
 
 func llmCompletionFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]any {
 	input := nextStepInput(run, step.ID)
+	input[stepInputKeySoulStage] = soulStageValidation
 	input["completionFollowUp"] = true
 	if step.Kind != "" {
 		input["previousStepKind"] = step.Kind
@@ -2506,6 +2516,7 @@ func (o *RuntimeOrchestrator) graphFollowUpStepInput(ctx context.Context, run *r
 
 func graphFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]any {
 	input := nextStepInput(run, step.ID)
+	input[stepInputKeySoulStage] = soulStageValidation
 	input["graphFollowUp"] = true
 	if nodeID := graphNodeID(step); nodeID != "" {
 		input[stepInputKeyGraphPreviousNodeID] = nodeID
@@ -2582,7 +2593,14 @@ func initialStepKind(run *runModel.Run) string {
 }
 
 func initialStepInput(run *runModel.Run) map[string]any {
-	return nextStepInput(run, "")
+	input := nextStepInput(run, "")
+	if input == nil {
+		return nil
+	}
+	if initialStepKind(run) == llmWorkspaceExecutionStepKind {
+		input[stepInputKeySoulStage] = soulStagePlanning
+	}
+	return input
 }
 
 func nextStepInputFromOutput(run *runModel.Run, previousStep *runModel.Step) map[string]any {

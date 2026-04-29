@@ -12,7 +12,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Badge, Button, ConfigProvider, Descriptions, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, Goal, LLMProviderTemplate, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings } from './types';
+import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, Goal, LLMProviderTemplate, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -831,6 +831,86 @@ function joinLines(values?: string[]) {
   return (values ?? []).join('\n');
 }
 
+function splitDefinitionList(value?: string) {
+  return (value || '').split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+}
+
+type SoulBindingFormValues = {
+  defaultSoulId?: string;
+  bindings?: Record<string, string | undefined>;
+};
+
+function normalizeSoulBindingFormValues(values: SoulBindingFormValues): WorkspaceSoulBindings {
+  const defaultSoulId = values.defaultSoulId?.trim() || undefined;
+  const bindings = Object.fromEntries(
+    Object.entries(values.bindings ?? {})
+      .map(([stage, soulId]) => [stage, soulId?.trim() || ''])
+      .filter(([, soulId]) => Boolean(soulId))
+  );
+  return {
+    defaultSoulId,
+    bindings
+  };
+}
+
+function stageBindings(stages: string[], soulId?: string) {
+  const value = soulId?.trim();
+  if (!value) {
+    return {};
+  }
+  return Object.fromEntries(stages.map((stage) => [stage, value]));
+}
+
+type SoulDefinitionFormValues = {
+  id?: string;
+  name?: string;
+  description?: string;
+  businessDomains?: string;
+  soulMd?: string;
+  allowedSkillRefs?: string;
+  allowedMCPServerRefs?: string;
+  allowedToolKinds?: string;
+};
+
+function soulDefinitionPayload(values: SoulDefinitionFormValues, soulID: string): Soul {
+  return {
+    id: soulID,
+    name: (values.name || '').trim(),
+    description: (values.description || '').trim(),
+    businessDomains: splitDefinitionList(values.businessDomains),
+    soulMd: (values.soulMd || '').trim(),
+    allowedSkillRefs: splitDefinitionList(values.allowedSkillRefs),
+    allowedMCPServerRefs: splitDefinitionList(values.allowedMCPServerRefs),
+    allowedToolKinds: splitDefinitionList(values.allowedToolKinds)
+  };
+}
+
+type WorkspaceTemplateFormValues = {
+  id?: string;
+  name?: string;
+  description?: string;
+  goalText?: string;
+  doDItems?: string;
+  defaultSoulId?: string;
+  soulBindings?: Record<string, string | undefined>;
+};
+
+function workspaceTemplatePayload(values: WorkspaceTemplateFormValues, templateID: string): WorkspaceTemplate {
+  const bindings = normalizeSoulBindingFormValues({
+    defaultSoulId: values.defaultSoulId,
+    bindings: values.soulBindings
+  });
+  return {
+    id: templateID,
+    name: (values.name || '').trim(),
+    description: (values.description || '').trim(),
+    goalText: (values.goalText || '').trim(),
+    doDItems: splitLines(values.doDItems),
+    defaultSoulId: bindings.defaultSoulId,
+    soulBindings: bindings.bindings
+  };
+}
+
 function metricValue(metrics: string, name: string) {
   const line = metrics.split('\n').find((item) => item.startsWith(`${name} `));
   if (!line) {
@@ -939,6 +1019,247 @@ function nextProviderDraft(existing: UpdateLLMProviderConfiguration[], template?
     streaming: false,
     nonChatOperations: []
   };
+}
+
+function SoulDefinitionManager({ souls, onSoulsChange }: { souls: Soul[]; onSoulsChange: (souls: Soul[]) => void }) {
+  const { message } = AntApp.useApp();
+  const [form] = Form.useForm<SoulDefinitionFormValues>();
+  const [editingSoul, setEditingSoul] = useState<Soul | undefined>(undefined);
+  const [saving, setSaving] = useState(false);
+
+  const editSoul = (soul?: Soul) => {
+    setEditingSoul(soul);
+    form.setFieldsValue({
+      id: soul?.id || '',
+      name: soul?.name || '',
+      description: soul?.description || '',
+      businessDomains: joinLines(soul?.businessDomains),
+      soulMd: soul?.soulMd || '',
+      allowedSkillRefs: joinLines(soul?.allowedSkillRefs),
+      allowedMCPServerRefs: joinLines(soul?.allowedMCPServerRefs),
+      allowedToolKinds: joinLines(soul?.allowedToolKinds)
+    });
+  };
+
+  const saveSoul = async (values: SoulDefinitionFormValues) => {
+    const soulID = (editingSoul?.id || values.id || '').trim();
+    if (!soulID) {
+      message.error('请填写 Soul ID');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = soulDefinitionPayload(values, soulID);
+      const saved = editingSoul
+        ? await workorchApi.updateSoul(soulID, payload)
+        : await workorchApi.createSoul(payload);
+      const nextSouls = await workorchApi.listSouls();
+      onSoulsChange(nextSouls);
+      editSoul(saved);
+      message.success(editingSoul ? 'Soul 定义已更新' : 'Soul 定义已创建');
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ProCard title="执行人格（Soul）" className="workorch-section">
+      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Typography.Text type="secondary">
+          Soul 是系统级执行人格配置，定义人格、阶段策略和输出契约；Skill、MCP、Tool 权限必须通过结构化字段显式维护。
+        </Typography.Text>
+        <ProCard split="vertical" bordered={false}>
+          <ProCard colSpan={{ xs: 24, lg: 8 }} ghost>
+            <List
+              size="small"
+              dataSource={souls}
+              locale={{ emptyText: <Empty description="暂无 Soul 定义" /> }}
+              renderItem={(item) => (
+                <List.Item
+                  actions={[
+                    <Button key="edit" type="link" size="small" onClick={() => editSoul(item)}>编辑</Button>
+                  ]}
+                >
+                  <List.Item.Meta
+                    title={<Typography.Text strong>{item.name || item.id}</Typography.Text>}
+                    description={
+                      <Space direction="vertical" size={2}>
+                        <Typography.Text type="secondary">{item.id}</Typography.Text>
+                        {compactTags(item.businessDomains ?? [], 2)}
+                      </Space>
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+            <Button style={{ marginTop: 12 }} onClick={() => editSoul(undefined)}>新增 Soul</Button>
+          </ProCard>
+          <ProCard colSpan={{ xs: 24, lg: 16 }} ghost>
+            <Form form={form} layout="vertical" onFinish={(values) => void saveSoul(values)}>
+              <Form.Item name="id" label="Soul ID" rules={[{ required: !editingSoul, message: '请输入 Soul ID' }]}>
+                <Input disabled={Boolean(editingSoul)} placeholder="例如 soul-engineering-delivery" />
+              </Form.Item>
+              <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
+                <Input placeholder="例如 Engineering Delivery" />
+              </Form.Item>
+              <Form.Item name="description" label="描述">
+                <Input.TextArea rows={2} placeholder="说明该 Soul 的适用场景" />
+              </Form.Item>
+              <Form.Item name="businessDomains" label="业务域">
+                <Input.TextArea rows={2} placeholder="每行或逗号分隔，例如 engineering, validation" />
+              </Form.Item>
+              <Form.Item name="soulMd" label="soul.md" rules={[{ required: true, message: '请输入 Soul 定义内容' }]}>
+                <Input.TextArea rows={8} placeholder="# Soul\n\n定义人格、阶段策略和输出契约" />
+              </Form.Item>
+              <Form.Item name="allowedSkillRefs" label="允许 Skill">
+                <Input.TextArea rows={2} placeholder="每行或逗号分隔" />
+              </Form.Item>
+              <Form.Item name="allowedMCPServerRefs" label="允许 MCP Server">
+                <Input.TextArea rows={2} placeholder="每行或逗号分隔" />
+              </Form.Item>
+              <Form.Item name="allowedToolKinds" label="允许 Tool Kind">
+                <Input.TextArea rows={2} placeholder="每行或逗号分隔，例如 llm/chat" />
+              </Form.Item>
+              <Space>
+                <Button type="primary" htmlType="submit" loading={saving}>
+                  {editingSoul ? '保存 Soul' : '创建 Soul'}
+                </Button>
+                <Button onClick={() => editSoul(undefined)}>清空</Button>
+              </Space>
+            </Form>
+          </ProCard>
+        </ProCard>
+      </Space>
+    </ProCard>
+  );
+}
+
+function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }: { souls: Soul[]; templates: WorkspaceTemplate[]; onTemplatesChange: (templates: WorkspaceTemplate[]) => void }) {
+  const { message } = AntApp.useApp();
+  const [form] = Form.useForm<WorkspaceTemplateFormValues>();
+  const [editingTemplate, setEditingTemplate] = useState<WorkspaceTemplate | undefined>(undefined);
+  const [saving, setSaving] = useState(false);
+  const stages = defaultSoulBindingStages;
+  const soulOptions = souls.map((item) => ({ value: item.id, label: `${item.name || item.id} (${item.id})` }));
+
+  const editTemplate = (template?: WorkspaceTemplate) => {
+    setEditingTemplate(template);
+    form.setFieldsValue({
+      id: template?.id || '',
+      name: template?.name || '',
+      description: template?.description || '',
+      goalText: template?.goalText || '',
+      doDItems: joinLines(template?.doDItems),
+      defaultSoulId: template?.defaultSoulId,
+      soulBindings: template?.soulBindings ?? {}
+    });
+  };
+
+  const applyDefaultSoulToStages = () => {
+    const defaultSoulId = form.getFieldValue('defaultSoulId');
+    form.setFieldsValue({ soulBindings: stageBindings(stages, defaultSoulId) });
+  };
+
+  const saveTemplate = async (values: WorkspaceTemplateFormValues) => {
+    const templateID = (editingTemplate?.id || values.id || '').trim();
+    if (!templateID) {
+      message.error('请填写模板 ID');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = workspaceTemplatePayload(values, templateID);
+      const saved = editingTemplate
+        ? await workorchApi.updateWorkspaceTemplate(templateID, payload)
+        : await workorchApi.createWorkspaceTemplate(payload);
+      const nextTemplates = await workorchApi.listWorkspaceTemplates();
+      onTemplatesChange(nextTemplates);
+      editTemplate(saved);
+      message.success(editingTemplate ? 'Workspace 模板已更新' : 'Workspace 模板已创建');
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ProCard title="Workspace 模板" className="workorch-section">
+      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Typography.Text type="secondary">
+          模板用于复用新建工作空间时的 Goal、DoD、默认 Soul 与阶段 Soul 绑定；实际工作空间仍通过正式业务 API 创建和写入定义。
+        </Typography.Text>
+        <ProCard split="vertical" bordered={false}>
+          <ProCard colSpan={{ xs: 24, lg: 8 }} ghost>
+            <List
+              size="small"
+              dataSource={templates}
+              locale={{ emptyText: <Empty description="暂无 Workspace 模板" /> }}
+              renderItem={(item) => (
+                <List.Item actions={[<Button key="edit" type="link" size="small" onClick={() => editTemplate(item)}>编辑</Button>]}>
+                  <List.Item.Meta
+                    title={<Typography.Text strong>{item.name || item.id}</Typography.Text>}
+                    description={
+                      <Space direction="vertical" size={2}>
+                        <Typography.Text type="secondary">{item.id}</Typography.Text>
+                        <Space wrap size={[4, 4]}>
+                          {item.goalText ? <Tag color="blue">Goal</Tag> : null}
+                          {(item.doDItems?.length ?? 0) > 0 ? <Tag color="green">DoD {item.doDItems?.length}</Tag> : null}
+                          {item.defaultSoulId ? <Tag color="cyan">默认 Soul</Tag> : null}
+                        </Space>
+                      </Space>
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+            <Button style={{ marginTop: 12 }} onClick={() => editTemplate(undefined)}>新增模板</Button>
+          </ProCard>
+          <ProCard colSpan={{ xs: 24, lg: 16 }} ghost>
+            <Form form={form} layout="vertical" onFinish={(values) => void saveTemplate(values)}>
+              <Form.Item name="id" label="模板 ID" rules={[{ required: !editingTemplate, message: '请输入模板 ID' }]}>
+                <Input disabled={Boolean(editingTemplate)} placeholder="例如 workspace-template-delivery" />
+              </Form.Item>
+              <Form.Item name="name" label="模板名称" rules={[{ required: true, message: '请输入模板名称' }]}>
+                <Input placeholder="例如 软件交付验证模板" />
+              </Form.Item>
+              <Form.Item name="description" label="描述">
+                <Input.TextArea rows={2} placeholder="说明模板适用场景" />
+              </Form.Item>
+              <Form.Item name="goalText" label="默认目标（Goal）">
+                <Input.TextArea rows={3} placeholder="创建工作空间时自动带入，可在向导中修改" />
+              </Form.Item>
+              <Form.Item name="doDItems" label="默认验收标准（DoD）">
+                <Input.TextArea rows={4} placeholder={'每行一个验收标准\n创建工作空间时自动带入，可在向导中修改'} />
+              </Form.Item>
+              <Form.Item name="defaultSoulId" label="默认 Soul">
+                <Select allowClear placeholder="不设置默认 Soul" options={soulOptions} />
+              </Form.Item>
+              <Space className="workorch-section">
+                <Typography.Text type="secondary">阶段 Soul 绑定</Typography.Text>
+                <Button size="small" onClick={applyDefaultSoulToStages}>默认 Soul 应用到全部阶段</Button>
+              </Space>
+              <div className="soul-binding-grid">
+                {stages.map((stage) => (
+                  <Form.Item key={stage} name={['soulBindings', stage]} label={soulBindingStageLabel(stage)}>
+                    <Select allowClear placeholder="继承默认 Soul" options={soulOptions} />
+                  </Form.Item>
+                ))}
+              </div>
+              <Space>
+                <Button type="primary" htmlType="submit" loading={saving}>
+                  {editingTemplate ? '保存模板' : '创建模板'}
+                </Button>
+                <Button onClick={() => editTemplate(undefined)}>清空</Button>
+              </Space>
+            </Form>
+          </ProCard>
+        </ProCard>
+      </Space>
+    </ProCard>
+  );
 }
 
 type ControlPlaneProps = {
@@ -1487,6 +1808,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [dods, setDoDs] = useState<DoD[]>([]);
   const [souls, setSouls] = useState<Soul[]>([]);
   const [soulBindings, setSoulBindings] = useState<WorkspaceSoulBindings | undefined>(undefined);
+  const [workspaceTemplates, setWorkspaceTemplates] = useState<WorkspaceTemplate[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [mcpServers, setMCPServers] = useState<MCPServer[]>([]);
   const [memoryItems, setMemoryItems] = useState<MemoryItem[]>([]);
@@ -1512,6 +1834,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const workspaceContextRequestSeq = useRef(0);
   const [activationForm] = Form.useForm();
   const [soulBindingsForm] = Form.useForm();
+  const [setupSoulBindingsForm] = Form.useForm<SoulBindingFormValues>();
   const [workspaceForm] = Form.useForm();
   const [setupGoalForm] = Form.useForm();
   const [setupDoDForm] = Form.useForm();
@@ -1692,6 +2015,46 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     workspaceForm.resetFields();
     setupGoalForm.resetFields();
     setupDoDForm.resetFields();
+    setupSoulBindingsForm.resetFields();
+  };
+
+  const openWorkspaceSetup = async () => {
+    setLoading(true);
+    try {
+      const [nextSouls, nextTemplates] = await Promise.all([
+        workorchApi.listSouls(),
+        workorchApi.listWorkspaceTemplates()
+      ]);
+      setSouls(nextSouls);
+      setWorkspaceTemplates(nextTemplates);
+      workspaceForm.resetFields();
+      setupGoalForm.resetFields();
+      setupDoDForm.resetFields();
+      setupSoulBindingsForm.resetFields();
+      setSetupStep(0);
+      setCreatedWorkspace(undefined);
+      setWorkspaceSetupOpen(true);
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const applyWorkspaceTemplate = (templateID?: string) => {
+    const template = workspaceTemplates.find((item) => item.id === templateID);
+    if (!template) {
+      setupGoalForm.resetFields();
+      setupDoDForm.resetFields();
+      setupSoulBindingsForm.resetFields();
+      return;
+    }
+    setupGoalForm.setFieldsValue({ text: template.goalText || '' });
+    setupDoDForm.setFieldsValue({ items: joinLines(template.doDItems) });
+    setupSoulBindingsForm.setFieldsValue({
+      defaultSoulId: template.defaultSoulId,
+      bindings: template.soulBindings ?? {}
+    });
   };
 
   const activateWorkspaceExecution = (request: WorkspaceExecutionActivationRequest) => {
@@ -1810,7 +2173,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       subTitle="围绕 Workspace 管理目标、验收标准、执行过程、治理阻塞和运行证据"
       extra={
         <Space wrap>
-          <Button onClick={() => setWorkspaceSetupOpen(true)}>创建工作空间</Button>
+          <Button onClick={() => void openWorkspaceSetup()}>创建工作空间</Button>
           <Button disabled={!workspaceId} onClick={() => openGoalDefinition()}>定义目标</Button>
           <Button disabled={!workspaceId} onClick={() => openDoDDefinition()}>定义验收标准</Button>
           <Button type="primary" disabled={!workspaceId} onClick={requestWorkspaceActivation}>启动执行</Button>
@@ -2401,11 +2764,13 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             workspaceForm.submit();
           } else if (setupStep === 1) {
             setupGoalForm.submit();
-          } else {
+          } else if (setupStep === 2) {
             setupDoDForm.submit();
+          } else {
+            setupSoulBindingsForm.submit();
           }
         }}
-        okText={setupStep === 0 ? '创建工作空间' : setupStep === 1 ? '定义目标' : '定义验收标准'}
+        okText={setupStep === 0 ? '创建工作空间' : setupStep === 1 ? '定义目标' : setupStep === 2 ? '定义验收标准' : '保存执行人格配置'}
       >
         <Steps
           current={setupStep}
@@ -2413,7 +2778,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           items={[
             { title: '工作空间' },
             { title: '目标' },
-            { title: '验收标准' }
+            { title: '验收标准' },
+            { title: '执行人格' }
           ]}
         />
         <Form
@@ -2435,6 +2801,14 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             }
           }}
         >
+          <Form.Item name="templateId" label="Workspace 模板">
+            <Select
+              allowClear
+              placeholder="可选。选择后自动带入目标、验收标准和 Soul 绑定"
+              onChange={applyWorkspaceTemplate}
+              options={workspaceTemplates.map((item) => ({ value: item.id, label: `${item.name || item.id} (${item.id})` }))}
+            />
+          </Form.Item>
           <Form.Item name="title" label="标题" rules={[{ required: true }]}>
             <Input placeholder="本地 workorch 工作空间" />
           </Form.Item>
@@ -2488,8 +2862,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
               const items = values.items.split('\n').map((item) => item.trim()).filter(Boolean);
               await workorchApi.defineDoD(createdWorkspace.id, items);
               await loadWorkspaceContext(createdWorkspace.id);
-              closeWorkspaceSetup();
-              message.success('工作空间目标和验收标准已就绪');
+              setSetupStep(3);
+              message.success('验收标准已定义，请继续确认执行人格配置');
             } catch (error) {
               message.error(errorMessage(error));
             } finally {
@@ -2503,6 +2877,60 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           <Form.Item name="items" label="验收项" rules={[{ required: true }]}>
             <Input.TextArea rows={5} placeholder={'每行一个验收标准\n示例：服务已完成本地部署并可访问'} />
           </Form.Item>
+        </Form>
+        <Form
+          form={setupSoulBindingsForm}
+          layout="vertical"
+          style={{ display: setupStep === 3 ? 'block' : 'none' }}
+          onFinish={async (values) => {
+            if (!createdWorkspace) {
+              message.error('工作空间尚未创建');
+              return;
+            }
+            setBusinessSubmitting(true);
+            try {
+              await workorchApi.updateWorkspaceSoulBindings(createdWorkspace.id, normalizeSoulBindingFormValues(values));
+              await loadWorkspaceContext(createdWorkspace.id);
+              closeWorkspaceSetup();
+              message.success('工作空间目标、验收标准和执行人格配置已就绪');
+            } catch (error) {
+              message.error(errorMessage(error));
+            } finally {
+              setBusinessSubmitting(false);
+            }
+          }}
+        >
+          <Form.Item label="工作空间">
+            <Input value={createdWorkspace?.id || ''} disabled />
+          </Form.Item>
+          <Typography.Paragraph type="secondary">
+            可选。用于设置该工作空间默认 Soul 和各任务阶段 Soul；后续可在工作空间详情中修改。
+          </Typography.Paragraph>
+          {souls.length ? (
+            <>
+              <Form.Item name="defaultSoulId" label="工作空间默认 Soul">
+                <Select allowClear placeholder="未绑定时不注入默认 Soul" options={soulOptions} />
+              </Form.Item>
+              <Space className="workorch-section">
+                <Typography.Text type="secondary">阶段 Soul 绑定</Typography.Text>
+                <Button
+                  size="small"
+                  onClick={() => setupSoulBindingsForm.setFieldsValue({ bindings: stageBindings(soulBindingStages, setupSoulBindingsForm.getFieldValue('defaultSoulId')) })}
+                >
+                  默认 Soul 应用到全部阶段
+                </Button>
+              </Space>
+              <div className="soul-binding-grid">
+                {soulBindingStages.map((stage) => (
+                  <Form.Item key={stage} name={['bindings', stage]} label={soulBindingStageLabel(stage)}>
+                    <Select allowClear placeholder="继承默认 Soul" options={soulOptions} />
+                  </Form.Item>
+                ))}
+              </div>
+            </>
+          ) : (
+            <Empty description="暂无 Soul，可先到系统配置创建，或直接完成后续配置" />
+          )}
         </Form>
       </Modal>
       <Modal
@@ -2990,6 +3418,8 @@ function ConfigurationPage() {
   const { message } = AntApp.useApp();
   const [providerEditorForm] = Form.useForm<UpdateLLMProviderConfiguration>();
   const [configuration, setConfiguration] = useState<ServiceConfiguration | undefined>(undefined);
+  const [souls, setSouls] = useState<Soul[]>([]);
+  const [workspaceTemplates, setWorkspaceTemplates] = useState<WorkspaceTemplate[]>([]);
   const [defaultProviderId, setDefaultProviderId] = useState<string | undefined>(undefined);
   const [defaultEmbeddingProviderId, setDefaultEmbeddingProviderId] = useState<string | undefined>(undefined);
   const [providerDrafts, setProviderDrafts] = useState<UpdateLLMProviderConfiguration[]>([]);
@@ -3001,9 +3431,15 @@ function ConfigurationPage() {
   const loadConfiguration = async () => {
     setLoading(true);
     try {
-      const nextConfiguration = await workorchApi.readConfiguration();
+      const [nextConfiguration, nextSouls, nextWorkspaceTemplates] = await Promise.all([
+        workorchApi.readConfiguration(),
+        workorchApi.listSouls(),
+        workorchApi.listWorkspaceTemplates()
+      ]);
       const nextFormValues = llmConfigurationFormValues(nextConfiguration);
       setConfiguration(nextConfiguration);
+      setSouls(nextSouls);
+      setWorkspaceTemplates(nextWorkspaceTemplates);
       setDefaultProviderId(nextFormValues.defaultProviderId);
       setDefaultEmbeddingProviderId(nextFormValues.defaultEmbeddingProviderId);
       setProviderDrafts(nextFormValues.providers);
@@ -3132,7 +3568,7 @@ function ConfigurationPage() {
   return (
     <PageContainer
       title="系统配置"
-      subTitle="管理服务配置、仓储配置和运行期生效的 LLM Provider"
+      subTitle="管理服务配置、Soul、Workspace 模板和运行期生效的 LLM Provider"
       extra={<Button onClick={() => void loadConfiguration()} loading={loading}>刷新</Button>}
     >
       <ProCard gutter={16} wrap loading={loading}>
@@ -3161,6 +3597,8 @@ function ConfigurationPage() {
           />
         </ProCard>
       </ProCard>
+      <SoulDefinitionManager souls={souls} onSoulsChange={setSouls} />
+      <WorkspaceTemplateManager souls={souls} templates={workspaceTemplates} onTemplatesChange={setWorkspaceTemplates} />
       <ProCard
         title="LLM 服务商"
         className="workorch-section"

@@ -306,11 +306,36 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 	postAndExpect(t, mux, "/api/v1/workorch/souls", `{
 		"id":"soul-engineering-delivery",
 		"name":"engineering delivery",
-		"systemInstruction":"Plan and cite evidence.",
+		"soulMd":"# Engineering Delivery\n\nPlan and cite evidence.",
 		"allowedSkillRefs":["skill-local-go-service"],
 		"allowedMCPServerRefs":["mcp-local-context"],
 		"allowedToolKinds":["shell/command"]
 	}`, http.StatusCreated)
+	putAndExpect(t, mux, "/api/v1/workorch/souls/soul-engineering-delivery", `{
+		"name":"engineering delivery updated",
+		"description":"updated through HTTP API",
+		"businessDomains":["engineering"],
+		"soulMd":"# Engineering Delivery\n\nPlan, cite evidence, and keep capability boundaries explicit.",
+		"allowedSkillRefs":["skill-local-go-service"],
+		"allowedMCPServerRefs":["mcp-local-context"],
+		"allowedToolKinds":["shell/command"]
+	}`, http.StatusOK)
+	postAndExpect(t, mux, "/api/v1/workorch/workspace-templates", `{
+		"id":"workspace-template-delivery",
+		"name":"delivery workspace template",
+		"description":"reuse goal, dod and soul bindings",
+		"goalText":"Deliver a verified local service",
+		"doDItems":["Goal is implemented","Evidence is available"],
+		"defaultSoulId":"soul-engineering-delivery",
+		"soulBindings":{"planning":"soul-engineering-delivery","execution":"soul-engineering-delivery"}
+	}`, http.StatusCreated)
+	putAndExpect(t, mux, "/api/v1/workorch/workspace-templates/workspace-template-delivery", `{
+		"name":"delivery workspace template updated",
+		"goalText":"Deliver an updated verified local service",
+		"doDItems":["Goal is implemented","Evidence is available","Result is accepted"],
+		"defaultSoulId":"soul-engineering-delivery",
+		"soulBindings":{"planning":"soul-engineering-delivery","validation":"soul-engineering-delivery"}
+	}`, http.StatusOK)
 	postAndExpect(t, mux, "/api/v1/workorch/skills", `{
 		"id":"skill-local-go-service",
 		"name":"local go service",
@@ -344,7 +369,8 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 		want string
 	}{
 		{path: "/api/v1/workorch/souls", want: `"id": "soul-engineering-delivery"`},
-		{path: "/api/v1/workorch/souls/soul-engineering-delivery", want: `"allowedSkillRefs": [`},
+		{path: "/api/v1/workorch/souls/soul-engineering-delivery", want: `"name": "engineering delivery updated"`},
+		{path: "/api/v1/workorch/workspace-templates", want: `"id": "workspace-template-delivery"`},
 		{path: "/api/v1/workorch/skills", want: `"id": "skill-local-go-service"`},
 		{path: "/api/v1/workorch/skills/skill-local-go-service", want: `"requiredMCPServerRefs": [`},
 		{path: "/api/v1/workorch/mcp/servers", want: `"id": "mcp-local-context"`},
@@ -412,6 +438,35 @@ func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
 	} {
 		if !strings.Contains(metricsRec.Body.String(), want) {
 			t.Fatalf("metrics body missing %q\nbody:\n%s", want, metricsRec.Body.String())
+		}
+	}
+}
+
+func TestWorkspaceExecutionActivationReportsDisallowedSoulCapability(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	mux := newMux(Config{Backend: "memory"})
+
+	workspace := createWorkspaceForHTTP(t, mux, "activation soul capability", "workspaces/ws-activation-soul-capability")
+	defineGoalAndDoDForHTTP(t, mux, workspace.ID)
+	postAndExpect(t, mux, "/api/v1/workorch/souls", `{
+		"id":"soul-restricted",
+		"name":"restricted soul",
+		"soulMd":"# Restricted Soul\n\nOnly use explicitly allowed capabilities."
+	}`, http.StatusCreated)
+	postAndExpect(t, mux, "/api/v1/workorch/skills", `{
+		"id":"skill-denied",
+		"name":"denied skill",
+		"version":"v1",
+		"instruction":"This skill is intentionally not allowed by the selected soul."
+	}`, http.StatusCreated)
+
+	body := postAndExpect(t, mux, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", `{
+		"soulId":"soul-restricted",
+		"skillIds":["skill-denied"]
+	}`, http.StatusBadRequest)
+	for _, want := range []string{"invalid argument", "soul-restricted", "skill-denied"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("activation capability error body = %s, want %q", body, want)
 		}
 	}
 }
@@ -538,8 +593,12 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodPost, pattern: "/api/v1/workorch/approvals/:approvalId/reject"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/approvals/resolve-batch"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/souls"},
+		{method: http.MethodPut, pattern: "/api/v1/workorch/souls/:soulId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/souls"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/souls/:soulId"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspace-templates"},
+		{method: http.MethodPut, pattern: "/api/v1/workorch/workspace-templates/:templateId"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspace-templates"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/skills"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/skills"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/skills/:skillId"},
@@ -2218,6 +2277,19 @@ func postAndExpect(t *testing.T, handler http.Handler, path string, body string,
 	t.Helper()
 
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != wantStatus {
+		t.Fatalf("%s status = %d, want %d, body = %s", path, rec.Code, wantStatus, rec.Body.String())
+	}
+	return rec.Body.String()
+}
+
+func putAndExpect(t *testing.T, handler http.Handler, path string, body string, wantStatus int) string {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)

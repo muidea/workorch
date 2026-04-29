@@ -559,6 +559,42 @@ func TestRuntimeAdapterInjectsCurrentSoulFromRoutingIntoProviderRequest(t *testi
 	}
 }
 
+func TestRuntimeAdapterUsesExplicitSoulStageFromStepInput(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{"completionState":"continue"}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+	request := llmStepRequest()
+	request.Input["soulStage"] = "artifact"
+	request.Input["executionContext"] = map[string]any{
+		"soulRouting": map[string]any{
+			"bindings": map[string]any{
+				"artifact": map[string]any{
+					"soulId": "soul-writer",
+					"source": "workspace_stage_binding",
+					"soul": map[string]any{
+						"id":   "soul-writer",
+						"name": "Artifact Writer",
+					},
+				},
+			},
+		},
+	}
+
+	if _, err := adapter.ExecuteRuntimeStep(context.Background(), request); err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	if provider.request.Input["currentSoulStage"] != "artifact" {
+		t.Fatalf("currentSoulStage = %v, want artifact", provider.request.Input["currentSoulStage"])
+	}
+	soul := provider.request.Input["currentSoul"].(map[string]any)
+	if soul["id"] != "soul-writer" || soul["name"] != "Artifact Writer" {
+		t.Fatalf("currentSoul = %+v, want artifact writer soul context", soul)
+	}
+}
+
 func TestRuntimeAdapterFailsUnknownRequestedProvider(t *testing.T) {
 	adapter := NewRuntimeAdapterWithProviders("local", map[string]ProviderRuntime{
 		"local": {

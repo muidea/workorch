@@ -1,4 +1,4 @@
-import type { Approval, ContextBundle, Decision, DoD, EventRecord, Goal, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, TaskDecomposition, TaskProgress, UpdateLLMConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings } from './types';
+import type { Approval, ContextBundle, Decision, DoD, EventRecord, Goal, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, TaskDecomposition, TaskProgress, UpdateLLMConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -203,6 +203,38 @@ export const workorchApi = {
   listSouls: async () => {
     const body = await request<{ souls: Soul[] }>(`${apiBase}/souls`);
     return body.souls ?? [];
+  },
+  createSoul: async (soul: Soul) => {
+    const body = await request<{ soul: Soul }>(`${apiBase}/souls`, {
+      method: 'POST',
+      body: JSON.stringify(soul)
+    });
+    return body.soul;
+  },
+  updateSoul: async (soulId: string, soul: Soul) => {
+    const body = await request<{ soul: Soul }>(`${apiBase}/souls/${encodeURIComponent(soulId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(soul)
+    });
+    return body.soul;
+  },
+  listWorkspaceTemplates: async () => {
+    const body = await request<{ workspaceTemplates: WorkspaceTemplate[] }>(`${apiBase}/workspace-templates`);
+    return body.workspaceTemplates ?? [];
+  },
+  createWorkspaceTemplate: async (template: WorkspaceTemplate) => {
+    const body = await request<{ workspaceTemplate: WorkspaceTemplate }>(`${apiBase}/workspace-templates`, {
+      method: 'POST',
+      body: JSON.stringify(template)
+    });
+    return body.workspaceTemplate;
+  },
+  updateWorkspaceTemplate: async (templateId: string, template: WorkspaceTemplate) => {
+    const body = await request<{ workspaceTemplate: WorkspaceTemplate }>(`${apiBase}/workspace-templates/${encodeURIComponent(templateId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(template)
+    });
+    return body.workspaceTemplate;
   },
   listSkills: async (workspaceId?: string) => {
     const search = new URLSearchParams();

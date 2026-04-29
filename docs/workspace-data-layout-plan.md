@@ -28,7 +28,10 @@
 .workorch-data/
   system/
     workspace_index.json
-    soul.json
+    souls/
+      soul-general/
+        metadata.json
+        soul.md
     skill.json
     mcp_server.json
     event_record.json
@@ -113,8 +116,9 @@ Workspace 本地 Skill 不放在 `system/skill.json`，而是通过对应 Worksp
 }
 ```
 
-Soul 定义本身继续存放在 `system/soul.json` 或后续正式 Soul repository 中；
-Workspace 只保存绑定关系。完整启用规则见 `docs/workspace-soul-routing-plan.md`。
+Soul 定义本身继续存放在 `system/souls/{soulId}/soul.md`，结构化元数据存放在
+`system/souls/{soulId}/metadata.json`；Workspace 只保存绑定关系。完整启用规则见
+`docs/workspace-soul-routing-plan.md`。
 
 ### `working`
 
@@ -266,8 +270,11 @@ Run 目录中的 `artifact.json` 只保存元数据，不保存大体积文件�
 
 3. Workspace-scoped file backend
    - 已在 `system/workspace_index.json` 维护 Workspace 索引，用于列表化和
-     定位 Workspace 目录；Workspace 实体仍以
+     定位 Workspace 目录；Workspace 元数据仍以
      `workspaces/{workspaceId}/workspace.json` 为准。
+   - Workspace Soul binding 已从 Workspace 元数据中拆出，独立保存到
+     `workspaces/{workspaceId}/config/soul_bindings.json`；读取时由 application
+     bootstrap repository 合并为 Workspace 模型。
    - 已将 Workspace / Goal / DoD / MemoryItem 等 Workspace-scoped 模型从
      全局扁平 JSON 文件迁移到 `workspaces/{workspaceId}`。
    - 已将 Run-scoped 模型迁移到

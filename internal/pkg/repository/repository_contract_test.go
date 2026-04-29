@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -36,7 +37,7 @@ func TestSoulRepositoryContract_Memory(t *testing.T) {
 
 func TestSoulRepositoryContract_File(t *testing.T) {
 	testSoulRepositoryContract(t, func() repository.SoulRepository {
-		return file.NewSoulRepository(filepath.Join(t.TempDir(), "soul.json"))
+		return file.NewSoulRepository(filepath.Join(t.TempDir(), "souls"))
 	})
 }
 
@@ -279,7 +280,7 @@ func TestRepositoryBundleContract_File(t *testing.T) {
 	dir := t.TempDir()
 	build := func() repositoryBundle {
 		return repositoryBundle{
-			souls:              file.NewSoulRepository(filepath.Join(dir, "soul.json")),
+			souls:              file.NewSoulRepository(filepath.Join(dir, "souls")),
 			memoryItems:        file.NewMemoryItemRepository(filepath.Join(dir, "memory_item.json")),
 			skills:             file.NewSkillRepository(filepath.Join(dir, "skill.json")),
 			mcpServers:         file.NewMCPServerRepository(filepath.Join(dir, "mcp_server.json")),
@@ -775,15 +776,10 @@ func testSoulRepositoryContract(t *testing.T, factory func() repository.SoulRepo
 		Name:                 "engineering delivery",
 		Description:          "drives engineering delivery",
 		BusinessDomains:      []string{"engineering"},
-		SystemInstruction:    "Plan and verify before completion.",
-		PlanningPolicy:       "small_steps",
-		DecisionPolicy:       "ask_when_missing",
-		ApprovalPolicy:       "approve_risky_actions",
-		ValidationPolicy:     "evidence_required",
+		SoulMD:               "# Engineering Delivery\n\nPlan and verify before completion.\n\n## Planning\n\nUse small steps.\n\n## Decision\n\nAsk when information is missing.\n\n## Approval\n\nRequest approval for risky actions.\n\n## Validation\n\nRequire evidence.\n",
 		AllowedSkillRefs:     []string{"skill-go"},
 		AllowedMCPServerRefs: []string{"mcp-repo"},
 		AllowedToolKinds:     []string{"shell/command"},
-		OutputContract:       "LLMExecutionDecision",
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create soul: %v", err)
@@ -803,14 +799,15 @@ func testSoulRepositoryContract(t *testing.T, factory func() repository.SoulRepo
 	if err != nil {
 		t.Fatalf("get soul fresh: %v", err)
 	}
-	if fresh.Name != "engineering delivery" {
-		t.Fatalf("clone isolation failed, name = %q", fresh.Name)
+	if fresh.Name != "engineering delivery" || !strings.Contains(fresh.SoulMD, "Plan and verify") {
+		t.Fatalf("clone isolation failed, soul = %+v", fresh)
 	}
 	if fresh.AllowedSkillRefs[0] != "skill-go" {
 		t.Fatalf("skill refs clone isolation failed, refs = %+v", fresh.AllowedSkillRefs)
 	}
 
 	fresh.Description = "updated description"
+	fresh.SoulMD = "# Engineering Delivery\n\nUpdated soul definition.\n"
 	fresh.AllowedToolKinds = []string{"shell/command", "patch/apply"}
 	if err := repo.Update(ctx, fresh); err != nil {
 		t.Fatalf("update soul: %v", err)
@@ -820,7 +817,7 @@ func testSoulRepositoryContract(t *testing.T, factory func() repository.SoulRepo
 	if err != nil {
 		t.Fatalf("list soul: %v", err)
 	}
-	if len(list) != 1 || list[0].Description != "updated description" || len(list[0].AllowedToolKinds) != 2 {
+	if len(list) != 1 || list[0].Description != "updated description" || !strings.Contains(list[0].SoulMD, "Updated soul definition") || len(list[0].AllowedToolKinds) != 2 {
 		t.Fatalf("list soul = %+v, want updated soul", list)
 	}
 
@@ -1775,7 +1772,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	soul := &soulmodel.Soul{
 		ID:                   soulID,
 		Name:                 "bundle soul",
-		SystemInstruction:    "Plan and cite evidence.",
+		SoulMD:               "# Evidence Soul\n\nPlan and cite evidence.\n",
 		AllowedSkillRefs:     []string{"skill-bundle"},
 		AllowedMCPServerRefs: []string{"mcp-bundle"},
 		AllowedToolKinds:     []string{"shell/command"},

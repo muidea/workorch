@@ -16,11 +16,17 @@ Soul，同时保持现有单一 `soulId` 启动方式可继续作为本次 Run �
 
 ## Non-Goals
 
-- 不让 `kernel/orchestrator` 解析具体业务目标来决定 Soul。
-- 不让 `blocks/llm` 自行查询 Workspace 配置或修改 Soul 绑定。
 - 不把 Soul 定义复制到 Workspace 目录；Workspace 只保存绑定关系和使用策略。
 - 不把 Run 级覆盖回写到 Workspace 配置。
 - 当前阶段不要求兼容旧的无 Soul routing 数据；旧 Run 可按缺省 `unbound` 读模型展示。
+
+## Implementation Constraints
+
+- `application/workorchd` 是 Soul Routing 的唯一策略解析层，负责在 Run 创建或恢复前解析 Workspace/Run/System 的 Soul 配置并写入 `executionContext.soulRouting`。
+- `kernel/orchestrator` 只消费和透传 execution context，不允许根据 Goal、DoD 或其他业务目标文本选择 Soul。
+- `blocks/llm` 只根据 Step input 和 `executionContext.soulRouting` 选择当前阶段的 Soul 上下文，不允许读取 Workspace/Soul 仓储，也不允许修改 Soul 绑定。
+- `soulMd` 是提示词定义内容，不是授权源；Skill、MCP 和 Tool 权限只能来自结构化字段 `allowedSkillRefs`、`allowedMCPServerRefs`、`allowedToolKinds`。
+- 阶段级 Soul 选择不违反以上约束；只要选择结果由 `application/workorchd` 解析并固化到 Run context，运行期 block 只消费该结果即可。
 
 ## Task Stages
 
@@ -46,7 +52,10 @@ Soul 定制配置纳入 Workspace 数据目录，不放入 `working` 或 `artifa
 ```text
 .workorch-data/
   system/
-    soul.json
+    souls/
+      soul-general/
+        metadata.json
+        soul.md
     skill.json
     mcp_server.json
     runtime_profile.json
@@ -64,7 +73,8 @@ Soul 定制配置纳入 Workspace 数据目录，不放入 `working` 或 `artifa
 
 目录职责：
 
-- `system/soul.json`: 全局 Soul 定义库，保存可复用 Soul。
+- `system/souls/{soulId}/soul.md`: 全局 Soul 定义内容，保存可复用 Soul 的 Markdown 人格、策略和输出契约。
+- `system/souls/{soulId}/metadata.json`: Soul 结构化元数据和能力边界。
 - `system/runtime_profile.json`: 系统默认运行配置，可包含系统默认 Soul。
 - `workspaces/{workspaceId}/config/soul_bindings.json`: 当前 Workspace 的 Soul 使用策略。
 - `working/`: 源码、博文、素材、临时执行文件等可持续编辑内容。
@@ -227,16 +237,18 @@ LLM Step 应根据当前任务意图选择阶段：
 
 - `application/workorchd` 在 Run 创建前解析并持久化完整 `soulRouting`。
 - `kernel/orchestrator` 只透传 execution context，不理解 Soul 业务策略。
-- `blocks/llm` 根据 Step input 中的阶段标记和 `soulRouting` 选择当前有效 Soul 上下文。
+- `blocks/llm` 根据 Step input 中的阶段标记和 `soulRouting` 选择当前有效 Soul 上下文，不读取仓储、不修改绑定。
 - 如果无法识别阶段，使用 `effectiveDefaultSoulId`；若仍不存在则按 `unbound` 执行。
 
 当前实现状态：
 
 - 已落地 Workspace 默认 Soul、Workspace 阶段 Soul、Run 默认 Soul、Run 阶段覆盖的解析和持久化。
+- 已落地 `soul.md` 定义方式：Soul 人格、阶段策略和输出契约统一通过 `soulMd` 管理；file backend 写入 `system/souls/{soulId}/soul.md`，结构化能力边界写入 `metadata.json`。
 - 已落地 `GET/PUT /api/v1/workorch/workspaces/{workspaceId}/soul-bindings`。
 - 已落地 Run `executionContext.soulRouting`，并在 Web Console 暴露 Workspace 级配置和启动执行时的阶段覆盖。
-- 已落地 LLM provider request 的 `currentSoulStage`、`currentSoulBinding`、`currentSoul` 注入；当前可识别初始规划、Decision resolution、Approval resolution、graph/completion follow-up 验收上下文。
-- `execution` 和 `artifact` 阶段已作为正式配置和路由模型保存；是否由独立工具执行上下文或正式 Artifact 生成步骤消费，需要在对应运行环节独立接入。
+- 已落地 LLM provider request 的 `currentSoulStage`、`currentSoulBinding`、`currentSoul` 注入；当前可识别初始规划、graph 节点执行、Decision resolution、Approval resolution、graph/completion follow-up 验收上下文，并支持 Step input 通过 `soulStage` 显式指定 `planning/execution/decision/approval/validation/artifact`。
+- 已落地 Soul capability 校验诊断：Run 启动前会明确返回不被允许的 Skill、MCP server 或 Tool kind，便于在 API/Web 验收时定位绑定问题。
+- `execution` 阶段已由 execution graph 节点调度上下文消费；`artifact` 阶段已支持显式 LLM Step 输入消费，默认 Result Summary Artifact 仍由 DoD assessment 确定性生成。
 - `system_default` 已接入 `[runtime].defaultSoulId` 配置源；服务配置响应和 Web Console 会展示当前系统默认 Soul。后续目录规划落地后，可将该值迁移或同步到 `system/runtime_profile.json`。
 
 ## API Design
@@ -246,6 +258,10 @@ Workspace 级配置：
 ```http
 GET /api/v1/workorch/workspaces/{workspaceId}/soul-bindings
 PUT /api/v1/workorch/workspaces/{workspaceId}/soul-bindings
+GET /api/v1/workorch/souls
+POST /api/v1/workorch/souls
+GET /api/v1/workorch/souls/{soulId}
+PUT /api/v1/workorch/souls/{soulId}
 ```
 
 PUT 请求：
@@ -335,11 +351,12 @@ Workspace Detail 增加“执行人格配置”区域：
 
 当前 file backend 规划：
 
-- Workspace Soul binding 可先作为 Workspace-scoped 配置模型保存。
+- Workspace Soul binding 已作为 Workspace-scoped 配置模型保存。
 - 系统默认 Soul 当前来自 `application.toml` 的 `[runtime].defaultSoulId`。
-- 在后续 workspace data layout 落地后，文件落点为：
+- file backend 文件落点为：
   `workspaces/{workspaceId}/config/soul_bindings.json`。
-- 在当前扁平 repository 过渡期，可用正式 repository 模型保存，不应把配置写入临时散落文件。
+- `workspaces/{workspaceId}/workspace.json` 只保存 Workspace 元数据；读取 Workspace
+  时由 application bootstrap repository 合并配置模型，kernel/workspace 不感知目录策略。
 
 ## E2E Acceptance
 

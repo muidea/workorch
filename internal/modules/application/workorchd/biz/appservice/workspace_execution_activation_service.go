@@ -602,15 +602,10 @@ func soulContext(item *soulmodel.Soul) map[string]any {
 		"name":                 item.Name,
 		"description":          item.Description,
 		"businessDomains":      cloneStrings(item.BusinessDomains),
-		"systemInstruction":    item.SystemInstruction,
-		"planningPolicy":       item.PlanningPolicy,
-		"decisionPolicy":       item.DecisionPolicy,
-		"approvalPolicy":       item.ApprovalPolicy,
-		"validationPolicy":     item.ValidationPolicy,
+		"soulMd":               item.SoulMD,
 		"allowedSkillRefs":     cloneStrings(item.AllowedSkillRefs),
 		"allowedMCPServerRefs": cloneStrings(item.AllowedMCPServerRefs),
 		"allowedToolKinds":     cloneStrings(item.AllowedToolKinds),
-		"outputContract":       item.OutputContract,
 	}
 }
 

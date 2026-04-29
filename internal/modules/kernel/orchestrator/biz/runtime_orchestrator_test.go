@@ -138,6 +138,9 @@ func TestRuntimeOrchestrator_StartRunToComplete_Mainline(t *testing.T) {
 	if step.Output["status"] != "ok" {
 		t.Fatalf("step output status = %v, want ok", step.Output["status"])
 	}
+	if step.Input[stepInputKeySoulStage] != soulStagePlanning {
+		t.Fatalf("step soulStage = %v, want planning", step.Input[stepInputKeySoulStage])
+	}
 	if len(runtime.calls) != 1 || runtime.calls[0] != stepID {
 		t.Fatalf("runtime calls = %#v, want [%q]", runtime.calls, stepID)
 	}
@@ -1326,7 +1329,7 @@ func TestRuntimeOrchestrator_StartRunExecutesBlockExecutionGraphBranch(t *testin
 	checkpointRepo := memory.NewRuntimeCheckpointRepository()
 	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
 		{ID: "prepare", Kind: "graph/mock"},
-		{ID: "build", Kind: "graph/mock", DependsOn: []string{"prepare"}, Branch: "ship"},
+		{ID: "build", Kind: "graph/mock", DependsOn: []string{"prepare"}, Branch: "ship", Input: map[string]any{stepInputKeySoulStage: "artifact"}},
 		{ID: "reject", Kind: "graph/mock", DependsOn: []string{"prepare"}, Branch: "reject"},
 	}}
 	runtime := &stubRuntimeAdapter{
@@ -1407,6 +1410,9 @@ func TestRuntimeOrchestrator_StartRunExecutesBlockExecutionGraphBranch(t *testin
 	}
 	if buildStep.Input["graphBranch"] != "ship" || buildStep.Input["graphPreviousNodeId"] != "prepare" {
 		t.Fatalf("build input = %+v, want graph branch and previous node", buildStep.Input)
+	}
+	if buildStep.Input[stepInputKeySoulStage] != soulStageExecution {
+		t.Fatalf("build soulStage = %v, want execution", buildStep.Input[stepInputKeySoulStage])
 	}
 	checkpoints, err := checkpointRepo.ListByRun(ctx, runID)
 	if err != nil {
@@ -1817,7 +1823,8 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterExecutionGraphCompletes(t
 	}
 	if followUpInput["graphFollowUp"] != true ||
 		followUpInput["graphPreviousNodeId"] != "inspect" ||
-		followUpInput["previousStepId"] != "run-graph-follow-up/block/inspect" {
+		followUpInput["previousStepId"] != "run-graph-follow-up/block/inspect" ||
+		followUpInput[stepInputKeySoulStage] != soulStageValidation {
 		t.Fatalf("followUpInput = %+v, want graph follow-up context", followUpInput)
 	}
 	previousOutput, ok := followUpInput["previousStepOutput"].(map[string]any)
@@ -1903,7 +1910,8 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterLLMPlannedShellLeaf(t *te
 	}
 	if followUpInput["completionFollowUp"] != true ||
 		followUpInput["previousStepKind"] != "shell/command" ||
-		followUpInput["previousStepId"] != "run-shell-follow-up/shell-1" {
+		followUpInput["previousStepId"] != "run-shell-follow-up/shell-1" ||
+		followUpInput[stepInputKeySoulStage] != soulStageValidation {
 		t.Fatalf("followUpInput = %+v, want completion follow-up context", followUpInput)
 	}
 	previousOutput, ok := followUpInput["previousStepOutput"].(map[string]any)
@@ -2002,7 +2010,8 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterLLMPatchSideEffect(t *tes
 	}
 	if followUpInput["completionFollowUp"] != true ||
 		followUpInput["previousStepKind"] != "llm/workspace_execution" ||
-		followUpInput["previousStepId"] != "run-patch-follow-up/step-1" {
+		followUpInput["previousStepId"] != "run-patch-follow-up/step-1" ||
+		followUpInput[stepInputKeySoulStage] != soulStageValidation {
 		t.Fatalf("followUpInput = %+v, want completion follow-up context", followUpInput)
 	}
 }
@@ -3562,6 +3571,9 @@ func TestRuntimeOrchestrator_ResumeRunSupportsLLMNamedDecisionThenApprovalGates(
 	if err != nil {
 		t.Fatalf("get after decision step: %v", err)
 	}
+	if afterDecision.Input[stepInputKeySoulStage] != soulStageDecision {
+		t.Fatalf("after decision soulStage = %v, want decision", afterDecision.Input[stepInputKeySoulStage])
+	}
 	decisionResolution, ok := afterDecision.Input["decisionResolution"].(map[string]any)
 	if !ok {
 		t.Fatalf("decisionResolution input = %#v, want map", afterDecision.Input["decisionResolution"])
@@ -3600,6 +3612,9 @@ func TestRuntimeOrchestrator_ResumeRunSupportsLLMNamedDecisionThenApprovalGates(
 	}
 	if afterApproval.Input["previousStepId"] != "run-llm-mixed/llm-after-decision" {
 		t.Fatalf("after approval previousStepId = %v, want run-llm-mixed/llm-after-decision", afterApproval.Input["previousStepId"])
+	}
+	if afterApproval.Input[stepInputKeySoulStage] != soulStageApproval {
+		t.Fatalf("after approval soulStage = %v, want approval", afterApproval.Input[stepInputKeySoulStage])
 	}
 	approvalResolution, ok := afterApproval.Input["approvalResolution"].(map[string]any)
 	if !ok {

@@ -323,7 +323,7 @@ func buildRepositories(backend string, dataRoot string) (common.RepositorySet, e
 		dataRoot = appbootstrap.ResolveRepositoryDataRoot(backend, dataRoot)
 		workspaceScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
 		return common.RepositorySet{
-			Souls:              fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "soul.json")),
+			Souls:              fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "souls")),
 			MemoryItems:        workspaceScopedRepos.MemoryItems,
 			Skills:             fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
 			MCPServers:         fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "system", "mcp_server.json")),

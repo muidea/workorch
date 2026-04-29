@@ -59,7 +59,7 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 		dataRoot = ResolveRepositoryDataRoot(backend, dataRoot)
 		workspaceScopedRepos := NewWorkspaceScopedFileRepositorySet(dataRoot)
 		return repositorySet{
-			soul:              fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "soul.json")),
+			soul:              fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "souls")),
 			memoryItem:        workspaceScopedRepos.MemoryItems,
 			skill:             fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
 			mcpServer:         fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "system", "mcp_server.json")),

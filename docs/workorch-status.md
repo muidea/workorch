@@ -61,6 +61,7 @@
     `POST /api/v1/workorch/approvals/{approvalId}/reject`,
     `POST /api/v1/workorch/approvals/resolve-batch`,
     `POST /api/v1/workorch/souls`,
+    `PUT /api/v1/workorch/souls/{soulId}`,
     `POST /api/v1/workorch/skills`,
     `POST /api/v1/workorch/mcp/servers`
   - `internal/modules/application/workorchd/biz/bootstrap` now uses a `magicCommon/event.Hub` backed workorch event adapter by default
@@ -247,21 +248,34 @@
   `repository.dataDir/workspaces/{workspaceId}/runs/{runId}`; Soul, global
   Skill, MCP Server, and service-level EventRecord entries remain under
   `repository.dataDir/system`. Workspace list and directory lookup are backed
-  by `repository.dataDir/system/workspace_index.json`, while the Workspace
-  entity remains authoritative under `workspaces/{workspaceId}/workspace.json`.
+  by `repository.dataDir/system/workspace_index.json`, while Workspace metadata
+  remains under `workspaces/{workspaceId}/workspace.json` and Workspace Soul
+  bindings are persisted separately under
+  `workspaces/{workspaceId}/config/soul_bindings.json`.
 - Workspace task-stage Soul routing has a formal plan in
   `docs/workspace-soul-routing-plan.md`: each Workspace can define default and
   stage-specific Soul bindings, Run activation can override them for one Run,
   and the effective priority is run stage override, workspace stage binding,
   run default, workspace default, system default, then explicit unbound.
-- Workspace task-stage Soul routing is now partially implemented for MVP use:
+- Workspace task-stage Soul routing is now implemented for MVP use:
   Workspace stores `defaultSoulId` and stage `soulBindings`, Web Console can
   edit Workspace bindings and per-Run overrides, activation writes effective
   `executionContext.soulRouting`, and LLM provider requests expose
   `currentSoulStage`, `currentSoulBinding`, and `currentSoul` for the active
-  planning / decision / approval / validation context. `[runtime].defaultSoulId`
-  is now the system default Soul source for the `system_default` priority slot
-  and is exposed in the service configuration response / Web Console.
+  planning / execution / decision / approval / validation context. LLM Step
+  input can also explicitly select any formal Soul stage through `soulStage`,
+  including `artifact`, without moving routing policy into the LLM block.
+  `[runtime].defaultSoulId` is now the system default Soul source for the
+  `system_default` priority slot and is exposed in the service configuration
+  response / Web Console.
+- Soul definition content is now managed through `soul.md`: structured Soul
+  fields keep identity and capability boundaries, while the full persona,
+  stage policies, and output contract are stored as Markdown under
+  `repository.dataDir/system/souls/{soulId}/soul.md` for the file backend and
+  exposed through API field `soulMd`.
+- Soul capability enforcement now returns actionable startup diagnostics for
+  denied Skill, MCP server, or Tool kind selections while preserving
+  `ErrInvalidArgument` semantics for callers and HTTP `400` responses.
 
 ## Delivered in workorch
 
@@ -402,8 +416,12 @@ HTTP endpoints:
 - `POST /api/v1/workorch/approvals/{approvalId}/reject`
 - `POST /api/v1/workorch/approvals/resolve-batch`
 - `POST /api/v1/workorch/souls`
+- `PUT /api/v1/workorch/souls/{soulId}`
 - `GET /api/v1/workorch/souls`
 - `GET /api/v1/workorch/souls/{soulId}`
+- `POST /api/v1/workorch/workspace-templates`
+- `PUT /api/v1/workorch/workspace-templates/{templateId}`
+- `GET /api/v1/workorch/workspace-templates`
 - `POST /api/v1/workorch/skills`
 - `GET /api/v1/workorch/skills`
 - `GET /api/v1/workorch/skills/{skillId}`
@@ -524,10 +542,13 @@ go run ./application/workorchd -config-dir config/file
 Observed persisted files:
 
 - `.workorch-data/system/workspace_index.json`
-- `.workorch-data/system/soul.json`
+- `.workorch-data/system/souls/{soulId}/metadata.json`
+- `.workorch-data/system/souls/{soulId}/soul.md`
+- `.workorch-data/system/workspace_templates.json`
 - `.workorch-data/system/skill.json`
 - `.workorch-data/system/mcp_server.json`
 - `.workorch-data/workspaces/{workspaceId}/workspace.json`
+- `.workorch-data/workspaces/{workspaceId}/config/soul_bindings.json`
 - `.workorch-data/workspaces/{workspaceId}/goals.json`
 - `.workorch-data/workspaces/{workspaceId}/dods.json`
 - `.workorch-data/workspaces/{workspaceId}/memory_item.json`

@@ -141,15 +141,10 @@ export type Soul = {
   name: string;
   description?: string;
   businessDomains?: string[];
-  systemInstruction?: string;
-  planningPolicy?: string;
-  decisionPolicy?: string;
-  approvalPolicy?: string;
-  validationPolicy?: string;
+  soulMd?: string;
   allowedSkillRefs?: string[];
   allowedMCPServerRefs?: string[];
   allowedToolKinds?: string[];
-  outputContract?: string;
 };
 
 export type WorkspaceSoulBindings = {
@@ -158,6 +153,16 @@ export type WorkspaceSoulBindings = {
   bindings?: Record<string, string>;
   priorityPolicy?: string[];
   availableStages?: string[];
+};
+
+export type WorkspaceTemplate = {
+  id: string;
+  name: string;
+  description?: string;
+  goalText?: string;
+  doDItems?: string[];
+  defaultSoulId?: string;
+  soulBindings?: Record<string, string>;
 };
 
 export type Skill = {

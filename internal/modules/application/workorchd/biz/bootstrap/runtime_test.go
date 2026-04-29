@@ -144,6 +144,10 @@ func TestNewWithBackendFilePartitionsWorkspaceScopedRepositories(t *testing.T) {
 		Title:            "workspace partition",
 		WorkingDirectory: filepath.Join(dataDir, "workspaces", string(workspaceID), "working"),
 		State:            common.WorkspaceStateActive,
+		DefaultSoulID:    common.SoulID("soul-default"),
+		SoulBindings: map[string]common.SoulID{
+			"execution": common.SoulID("soul-execution"),
+		},
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -184,6 +188,10 @@ func TestNewWithBackendFilePartitionsWorkspaceScopedRepositories(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dataDir, "system", "workspace_index.json")); err != nil {
 		t.Fatalf("expected workspace index: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(workspaceRoot, "config", "soul_bindings.json")); err != nil {
+		t.Fatalf("expected workspace soul bindings config: %v", err)
+	}
+	assertWorkspaceSoulBindingsStoredOutsideWorkspaceJSON(t, workspaceRoot, workspaceID, "soul-default", "soul-execution")
 	indexPayload, err := os.ReadFile(filepath.Join(dataDir, "system", "workspace_index.json"))
 	if err != nil {
 		t.Fatalf("read workspace index: %v", err)
@@ -199,12 +207,20 @@ func TestNewWithBackendFilePartitionsWorkspaceScopedRepositories(t *testing.T) {
 	if err != nil || len(workspaces) != 1 || workspaces[0].ID != workspaceID {
 		t.Fatalf("workspaces = %+v, err=%v; want %s", workspaces, err, workspaceID)
 	}
+	if workspaces[0].DefaultSoulID != "soul-default" || workspaces[0].SoulBindings["execution"] != "soul-execution" {
+		t.Fatalf("workspace soul bindings = %+v/%+v, want persisted config values", workspaces[0].DefaultSoulID, workspaces[0].SoulBindings)
+	}
 	updated := *workspaces[0]
 	updated.State = common.WorkspaceStateRunning
 	updated.ActiveRunID = common.RunID("run-bootstrap-index-active")
+	updated.DefaultSoulID = common.SoulID("soul-updated")
+	updated.SoulBindings = map[string]common.SoulID{
+		"validation": common.SoulID("soul-validation"),
+	}
 	if err := exports.Repositories.Workspaces.Update(ctx, &updated); err != nil {
 		t.Fatalf("update workspace: %v", err)
 	}
+	assertWorkspaceSoulBindingsStoredOutsideWorkspaceJSON(t, workspaceRoot, workspaceID, "soul-updated", "soul-validation")
 	indexPayload, err = os.ReadFile(filepath.Join(dataDir, "system", "workspace_index.json"))
 	if err != nil {
 		t.Fatalf("read updated workspace index: %v", err)
@@ -226,6 +242,45 @@ func TestNewWithBackendFilePartitionsWorkspaceScopedRepositories(t *testing.T) {
 	}
 }
 
+func assertWorkspaceSoulBindingsStoredOutsideWorkspaceJSON(t *testing.T, workspaceRoot string, workspaceID common.WorkspaceID, wantDefault common.SoulID, wantBinding common.SoulID) {
+	t.Helper()
+
+	workspacePayload, err := os.ReadFile(filepath.Join(workspaceRoot, "workspace.json"))
+	if err != nil {
+		t.Fatalf("read workspace metadata: %v", err)
+	}
+	var workspaces map[common.WorkspaceID]workspacemodel.Workspace
+	if err := json.Unmarshal(workspacePayload, &workspaces); err != nil {
+		t.Fatalf("decode workspace metadata: %v", err)
+	}
+	workspace := workspaces[workspaceID]
+	if workspace.DefaultSoulID != "" || len(workspace.SoulBindings) != 0 {
+		t.Fatalf("workspace metadata contains soul bindings: %+v", workspace)
+	}
+
+	bindingsPayload, err := os.ReadFile(filepath.Join(workspaceRoot, "config", "soul_bindings.json"))
+	if err != nil {
+		t.Fatalf("read workspace soul bindings: %v", err)
+	}
+	var bindings workspaceSoulBindingsFile
+	if err := json.Unmarshal(bindingsPayload, &bindings); err != nil {
+		t.Fatalf("decode workspace soul bindings: %v", err)
+	}
+	if bindings.DefaultSoulID != wantDefault {
+		t.Fatalf("defaultSoulId = %s, want %s", bindings.DefaultSoulID, wantDefault)
+	}
+	found := false
+	for _, value := range bindings.Bindings {
+		if value == wantBinding {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("bindings = %+v, want value %s", bindings.Bindings, wantBinding)
+	}
+}
+
 func workspaceIndexContains(index workspaceIndex, workspaceID common.WorkspaceID, state common.WorkspaceState, activeRunID common.RunID) bool {
 	for _, item := range index.Workspaces {
 		if item.WorkspaceID == workspaceID && item.State == state && item.ActiveRunID == activeRunID && item.WorkspaceRoot == filepath.ToSlash(filepath.Join("workspaces", string(workspaceID))) {
@@ -241,7 +296,7 @@ func TestNewWithBackendFileStoresSystemRepositoriesUnderSystemDirectory(t *testi
 	rt := NewWithBackend("file", dataDir)
 	exports := rt.Exports()
 
-	if err := exports.Repositories.Souls.Create(ctx, &soulmodel.Soul{ID: common.SoulID("soul-bootstrap-system"), Name: "system soul"}); err != nil {
+	if err := exports.Repositories.Souls.Create(ctx, &soulmodel.Soul{ID: common.SoulID("soul-bootstrap-system"), Name: "system soul", SoulMD: "# System Soul\n\nUse system soul.\n"}); err != nil {
 		t.Fatalf("create soul: %v", err)
 	}
 	if err := exports.Repositories.Skills.Create(ctx, &skillmodel.Skill{ID: common.SkillID("skill-bootstrap-system"), Name: "system skill"}); err != nil {
@@ -251,7 +306,16 @@ func TestNewWithBackendFileStoresSystemRepositoriesUnderSystemDirectory(t *testi
 		t.Fatalf("create mcp server: %v", err)
 	}
 
-	for _, fileName := range []string{"soul.json", "skill.json", "mcp_server.json"} {
+	if _, err := os.Stat(filepath.Join(dataDir, "system", "souls", "soul-bootstrap-system", "soul.md")); err != nil {
+		t.Fatalf("expected soul.md definition: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "system", "souls", "soul-bootstrap-system", "metadata.json")); err != nil {
+		t.Fatalf("expected soul metadata: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "system", "soul.json")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected root soul.json err=%v", err)
+	}
+	for _, fileName := range []string{"skill.json", "mcp_server.json"} {
 		if _, err := os.Stat(filepath.Join(dataDir, "system", fileName)); err != nil {
 			t.Fatalf("expected system-scoped %s: %v", fileName, err)
 		}

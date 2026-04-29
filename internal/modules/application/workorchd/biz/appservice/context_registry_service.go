@@ -22,15 +22,10 @@ type Soul struct {
 	Name                 string   `json:"name"`
 	Description          string   `json:"description,omitempty"`
 	BusinessDomains      []string `json:"businessDomains,omitempty"`
-	SystemInstruction    string   `json:"systemInstruction"`
-	PlanningPolicy       string   `json:"planningPolicy,omitempty"`
-	DecisionPolicy       string   `json:"decisionPolicy,omitempty"`
-	ApprovalPolicy       string   `json:"approvalPolicy,omitempty"`
-	ValidationPolicy     string   `json:"validationPolicy,omitempty"`
+	SoulMD               string   `json:"soulMd"`
 	AllowedSkillRefs     []string `json:"allowedSkillRefs,omitempty"`
 	AllowedMCPServerRefs []string `json:"allowedMCPServerRefs,omitempty"`
 	AllowedToolKinds     []string `json:"allowedToolKinds,omitempty"`
-	OutputContract       string   `json:"outputContract,omitempty"`
 }
 
 type Skill struct {
@@ -115,6 +110,7 @@ type MemoryItem struct {
 }
 
 type CreateSoulCommand = Soul
+type UpdateSoulCommand = Soul
 type CreateSkillCommand = Skill
 type CreateMCPServerCommand = MCPServer
 
@@ -150,15 +146,10 @@ func CreateSoulWithSession(ctx context.Context, session *RuntimeSession, cmd Cre
 		Name:                 cmd.Name,
 		Description:          cmd.Description,
 		BusinessDomains:      cloneStrings(cmd.BusinessDomains),
-		SystemInstruction:    cmd.SystemInstruction,
-		PlanningPolicy:       cmd.PlanningPolicy,
-		DecisionPolicy:       cmd.DecisionPolicy,
-		ApprovalPolicy:       cmd.ApprovalPolicy,
-		ValidationPolicy:     cmd.ValidationPolicy,
+		SoulMD:               cmd.SoulMD,
 		AllowedSkillRefs:     cloneStrings(cmd.AllowedSkillRefs),
 		AllowedMCPServerRefs: cloneStrings(cmd.AllowedMCPServerRefs),
 		AllowedToolKinds:     cloneStrings(cmd.AllowedToolKinds),
-		OutputContract:       cmd.OutputContract,
 	}); err != nil {
 		return Soul{}, err
 	}
@@ -175,6 +166,50 @@ func CreateSoulWithBackend(ctx context.Context, backend string, dataRoot string,
 		return Soul{}, err
 	}
 	return CreateSoulWithSession(ctx, session, cmd)
+}
+
+func UpdateSoulWithSession(ctx context.Context, session *RuntimeSession, soulID string, cmd UpdateSoulCommand) (ret Soul, err error) {
+	exports, err := session.Exports()
+	if err != nil {
+		return Soul{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+	if exports.Services.SoulService == nil || exports.Repositories.Souls == nil {
+		return Soul{}, common.ErrInvalidArgument
+	}
+	soulID = strings.TrimSpace(soulID)
+	if soulID == "" {
+		return Soul{}, common.ErrInvalidArgument
+	}
+	if strings.TrimSpace(cmd.ID) != "" && strings.TrimSpace(cmd.ID) != soulID {
+		return Soul{}, common.ErrInvalidArgument
+	}
+	cmd.ID = soulID
+	if err := exports.Services.SoulService.UpdateSoul(ctx, soulmodule.UpdateSoulCommand{
+		SoulID:               common.SoulID(cmd.ID),
+		Name:                 cmd.Name,
+		Description:          cmd.Description,
+		BusinessDomains:      cloneStrings(cmd.BusinessDomains),
+		SoulMD:               cmd.SoulMD,
+		AllowedSkillRefs:     cloneStrings(cmd.AllowedSkillRefs),
+		AllowedMCPServerRefs: cloneStrings(cmd.AllowedMCPServerRefs),
+		AllowedToolKinds:     cloneStrings(cmd.AllowedToolKinds),
+	}); err != nil {
+		return Soul{}, err
+	}
+	item, err := exports.Repositories.Souls.Get(ctx, common.SoulID(cmd.ID))
+	if err != nil {
+		return Soul{}, err
+	}
+	return mapSoul(item), nil
+}
+
+func UpdateSoulWithBackend(ctx context.Context, backend string, dataRoot string, soulID string, cmd UpdateSoulCommand) (Soul, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return Soul{}, err
+	}
+	return UpdateSoulWithSession(ctx, session, soulID, cmd)
 }
 
 func ReadSoulWithSession(ctx context.Context, session *RuntimeSession, soulID string) (ret Soul, err error) {
@@ -660,15 +695,10 @@ func mapSoul(item *soulmodel.Soul) Soul {
 		Name:                 item.Name,
 		Description:          item.Description,
 		BusinessDomains:      cloneStrings(item.BusinessDomains),
-		SystemInstruction:    item.SystemInstruction,
-		PlanningPolicy:       item.PlanningPolicy,
-		DecisionPolicy:       item.DecisionPolicy,
-		ApprovalPolicy:       item.ApprovalPolicy,
-		ValidationPolicy:     item.ValidationPolicy,
+		SoulMD:               item.SoulMD,
 		AllowedSkillRefs:     cloneStrings(item.AllowedSkillRefs),
 		AllowedMCPServerRefs: cloneStrings(item.AllowedMCPServerRefs),
 		AllowedToolKinds:     cloneStrings(item.AllowedToolKinds),
-		OutputContract:       item.OutputContract,
 	}
 }
 

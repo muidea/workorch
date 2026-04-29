@@ -7,13 +7,8 @@ type Soul struct {
 	Name                 string
 	Description          string
 	BusinessDomains      []string
-	SystemInstruction    string
-	PlanningPolicy       string
-	DecisionPolicy       string
-	ApprovalPolicy       string
-	ValidationPolicy     string
+	SoulMD               string
 	AllowedSkillRefs     []string
 	AllowedMCPServerRefs []string
 	AllowedToolKinds     []string
-	OutputContract       string
 }

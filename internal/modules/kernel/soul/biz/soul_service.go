@@ -2,7 +2,9 @@ package soul
 
 import (
 	"context"
+	"fmt"
 	"slices"
+	"strings"
 
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	soulservice "github.com/muidea/workorch/internal/modules/kernel/soul/service"
@@ -45,33 +47,45 @@ func (s *Service) ListSouls(ctx context.Context) ([]*soulmodel.Soul, error) {
 
 func (s *Service) ValidateCapabilitySelection(ctx context.Context, cmd soulservice.ValidateCapabilitySelectionCommand) error {
 	if cmd.SoulID == "" {
-		return common.ErrInvalidArgument
+		return fmt.Errorf("%w: soulId is required", common.ErrInvalidArgument)
 	}
 	soul, err := s.souls.Get(ctx, cmd.SoulID)
 	if err != nil {
 		return err
 	}
-	if !allAllowed(cmd.SkillRefs, soul.AllowedSkillRefs) {
-		return common.ErrInvalidArgument
+	if value, reason, ok := firstInvalidSelection(cmd.SkillRefs, soul.AllowedSkillRefs); ok {
+		return invalidCapabilitySelectionError(cmd.SoulID, "skill", value, reason)
 	}
-	if !allAllowed(cmd.MCPServerRefs, soul.AllowedMCPServerRefs) {
-		return common.ErrInvalidArgument
+	if value, reason, ok := firstInvalidSelection(cmd.MCPServerRefs, soul.AllowedMCPServerRefs); ok {
+		return invalidCapabilitySelectionError(cmd.SoulID, "MCP server", value, reason)
 	}
-	if !allAllowed(cmd.ToolKinds, soul.AllowedToolKinds) {
-		return common.ErrInvalidArgument
+	if value, reason, ok := firstInvalidSelection(cmd.ToolKinds, soul.AllowedToolKinds); ok {
+		return invalidCapabilitySelectionError(cmd.SoulID, "tool kind", value, reason)
 	}
 	return nil
 }
 
 func validateSoulCommand(cmd soulservice.CreateSoulCommand) error {
-	if cmd.SoulID == "" || cmd.Name == "" || cmd.SystemInstruction == "" {
-		return common.ErrInvalidArgument
+	if cmd.SoulID == "" {
+		return fmt.Errorf("%w: soulId is required", common.ErrInvalidArgument)
 	}
-	if hasBlank(cmd.BusinessDomains) ||
-		hasBlank(cmd.AllowedSkillRefs) ||
-		hasBlank(cmd.AllowedMCPServerRefs) ||
-		hasBlank(cmd.AllowedToolKinds) {
-		return common.ErrInvalidArgument
+	if strings.TrimSpace(cmd.Name) == "" {
+		return fmt.Errorf("%w: soul name is required", common.ErrInvalidArgument)
+	}
+	if strings.TrimSpace(cmd.SoulMD) == "" {
+		return fmt.Errorf("%w: soulMd is required", common.ErrInvalidArgument)
+	}
+	if hasBlank(cmd.BusinessDomains) {
+		return fmt.Errorf("%w: businessDomains contains blank value", common.ErrInvalidArgument)
+	}
+	if hasBlank(cmd.AllowedSkillRefs) {
+		return fmt.Errorf("%w: allowedSkillRefs contains blank value", common.ErrInvalidArgument)
+	}
+	if hasBlank(cmd.AllowedMCPServerRefs) {
+		return fmt.Errorf("%w: allowedMCPServerRefs contains blank value", common.ErrInvalidArgument)
+	}
+	if hasBlank(cmd.AllowedToolKinds) {
+		return fmt.Errorf("%w: allowedToolKinds contains blank value", common.ErrInvalidArgument)
 	}
 	return nil
 }
@@ -82,30 +96,35 @@ func soulFromCommand(cmd soulservice.CreateSoulCommand) *soulmodel.Soul {
 		Name:                 cmd.Name,
 		Description:          cmd.Description,
 		BusinessDomains:      cloneStrings(cmd.BusinessDomains),
-		SystemInstruction:    cmd.SystemInstruction,
-		PlanningPolicy:       cmd.PlanningPolicy,
-		DecisionPolicy:       cmd.DecisionPolicy,
-		ApprovalPolicy:       cmd.ApprovalPolicy,
-		ValidationPolicy:     cmd.ValidationPolicy,
+		SoulMD:               cmd.SoulMD,
 		AllowedSkillRefs:     cloneStrings(cmd.AllowedSkillRefs),
 		AllowedMCPServerRefs: cloneStrings(cmd.AllowedMCPServerRefs),
 		AllowedToolKinds:     cloneStrings(cmd.AllowedToolKinds),
-		OutputContract:       cmd.OutputContract,
 	}
 }
 
-func allAllowed(selected []string, allowed []string) bool {
+func firstInvalidSelection(selected []string, allowed []string) (string, string, bool) {
 	for _, value := range selected {
-		if value == "" || !slices.Contains(allowed, value) {
-			return false
+		if strings.TrimSpace(value) == "" {
+			return value, "blank", true
+		}
+		if !slices.Contains(allowed, value) {
+			return value, "disallowed", true
 		}
 	}
-	return true
+	return "", "", false
+}
+
+func invalidCapabilitySelectionError(soulID common.SoulID, capability string, value string, reason string) error {
+	if reason == "blank" {
+		return fmt.Errorf("%w: soul %s selected %s is blank", common.ErrInvalidArgument, soulID, capability)
+	}
+	return fmt.Errorf("%w: soul %s does not allow %s %q", common.ErrInvalidArgument, soulID, capability, value)
 }
 
 func hasBlank(values []string) bool {
 	for _, value := range values {
-		if value == "" {
+		if strings.TrimSpace(value) == "" {
 			return true
 		}
 	}

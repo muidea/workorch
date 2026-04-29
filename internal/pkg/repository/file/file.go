@@ -34,6 +34,11 @@ type SoulRepository struct {
 	path string
 }
 
+const (
+	soulDefinitionFile = "soul.md"
+	soulMetadataFile   = "metadata.json"
+)
+
 type MemoryItemRepository struct {
 	mu   sync.RWMutex
 	path string
@@ -72,51 +77,56 @@ func (r *SoulRepository) Create(_ context.Context, item *soul.Soul) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.SoulID, soul.Soul](r.path)
+	dir, err := r.soulDir(item.ID)
 	if err != nil {
 		return err
 	}
-	if _, ok := items[item.ID]; ok {
+	if _, err := os.Stat(filepath.Join(dir, soulMetadataFile)); err == nil {
 		return common.ErrConflict
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
 	}
-	items[item.ID] = *cloneSoul(item)
-	return saveMap(r.path, items)
+	return r.saveSoul(dir, item)
 }
 
 func (r *SoulRepository) Get(_ context.Context, id common.SoulID) (*soul.Soul, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.SoulID, soul.Soul](r.path)
+	dir, err := r.soulDir(id)
 	if err != nil {
 		return nil, err
 	}
-	item, ok := items[id]
-	if !ok {
-		return nil, common.ErrNotFound
-	}
-	return cloneSoul(&item), nil
+	return r.loadSoul(dir, id)
 }
 
 func (r *SoulRepository) List(_ context.Context) ([]*soul.Soul, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.SoulID, soul.Soul](r.path)
+	entries, err := os.ReadDir(r.soulRoot())
+	if err != nil && os.IsNotExist(err) {
+		return []*soul.Soul{}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	ids := make([]string, 0, len(items))
-	for id := range items {
-		ids = append(ids, string(id))
+	ids := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			ids = append(ids, entry.Name())
+		}
 	}
 	sort.Strings(ids)
 
 	ret := make([]*soul.Soul, 0, len(ids))
 	for _, id := range ids {
-		item := items[common.SoulID(id)]
-		ret = append(ret, cloneSoul(&item))
+		item, err := r.loadSoul(filepath.Join(r.soulRoot(), id), common.SoulID(id))
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, item)
 	}
 	return ret, nil
 }
@@ -125,15 +135,71 @@ func (r *SoulRepository) Update(_ context.Context, item *soul.Soul) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.SoulID, soul.Soul](r.path)
+	dir, err := r.soulDir(item.ID)
 	if err != nil {
 		return err
 	}
-	if _, ok := items[item.ID]; !ok {
+	if _, err := os.Stat(filepath.Join(dir, soulMetadataFile)); os.IsNotExist(err) {
 		return common.ErrNotFound
+	} else if err != nil {
+		return err
 	}
-	items[item.ID] = *cloneSoul(item)
-	return saveMap(r.path, items)
+	return r.saveSoul(dir, item)
+}
+
+func (r *SoulRepository) soulRoot() string {
+	return r.path
+}
+
+func (r *SoulRepository) soulDir(id common.SoulID) (string, error) {
+	value := strings.TrimSpace(string(id))
+	if value == "" || value == "." || value == ".." || strings.ContainsAny(value, `/\`) {
+		return "", common.ErrInvalidArgument
+	}
+	return filepath.Join(r.soulRoot(), value), nil
+}
+
+func (r *SoulRepository) loadSoul(dir string, id common.SoulID) (*soul.Soul, error) {
+	data, err := os.ReadFile(filepath.Join(dir, soulMetadataFile))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, common.ErrNotFound
+		}
+		return nil, err
+	}
+	var item soul.Soul
+	if err := json.Unmarshal(data, &item); err != nil {
+		return nil, err
+	}
+	if item.ID == "" {
+		item.ID = id
+	}
+	content, err := os.ReadFile(filepath.Join(dir, soulDefinitionFile))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, common.ErrNotFound
+		}
+		return nil, err
+	}
+	item.SoulMD = string(content)
+	return cloneSoul(&item), nil
+}
+
+func (r *SoulRepository) saveSoul(dir string, item *soul.Soul) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	cloned := cloneSoul(item)
+	soulMD := cloned.SoulMD
+	cloned.SoulMD = ""
+	data, err := json.MarshalIndent(cloned, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, soulMetadataFile), data, 0o644); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, soulDefinitionFile), []byte(strings.TrimSpace(soulMD)+"\n"), 0o644)
 }
 
 func NewMemoryItemRepository(path string) *MemoryItemRepository {

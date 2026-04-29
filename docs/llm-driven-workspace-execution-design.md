@@ -440,18 +440,19 @@ Soul
 - name
 - description
 - businessDomains
-- systemInstruction
-- planningPolicy
-- decisionPolicy
-- approvalPolicy
-- validationPolicy
+- soulMd
 - allowedSkillRefs
 - allowedMCPServerRefs
 - allowedToolKinds
-- outputContract
 - createdAt
 - updatedAt
 ```
+
+`soulMd` is the canonical Soul definition content. It is managed as a
+`soul.md` document and should contain the execution stance, planning policy,
+decision policy, approval policy, validation policy, and output contract in
+Markdown sections. Capability boundaries remain structured fields so they can
+be validated without parsing Markdown.
 
 Boundary:
 
@@ -623,7 +624,7 @@ internal/modules/blocks/mcp
 
 Responsibilities:
 
-- Store and query Soul definitions.
+- Store, update, and query Soul definitions.
 - Select default Soul for Workspace execution.
 - Validate that selected Soul allows requested Skills and MCP servers.
 
@@ -988,6 +989,7 @@ Initial API candidates:
 GET  /api/v1/workorch/souls
 POST /api/v1/workorch/souls
 GET  /api/v1/workorch/souls/{soulId}
+PUT  /api/v1/workorch/souls/{soulId}
 
 GET  /api/v1/workorch/skills
 POST /api/v1/workorch/skills
@@ -1039,7 +1041,8 @@ Optional administration views:
 Memory and file repository backends should support all new models:
 
 ```text
-soul.json
+system/souls/{soulId}/metadata.json
+system/souls/{soulId}/soul.md
 skill.json
 memory_item.json
 mcp_server.json
@@ -1100,6 +1103,7 @@ DoD
 
 Soul
 - id: "soul-engineering-delivery"
+- soulMd: "# Engineering Delivery\n\nPrefer small verifiable steps and cite evidence before completion."
 - allowedSkillRefs: ["skill-local-go-service"]
 - allowedMCPServerRefs: ["mcp-local-context"]
 - allowedToolKinds: ["shell/command", "patch/apply", "mcp/tool_call"]
@@ -1298,7 +1302,7 @@ LLM-driven execution is acceptable when:
 - A Workspace can bind Goal, DoD, Soul, selected Skills, allowed MCP servers,
   and relevant Memory.
 - Starting Workspace execution dispatches an `llm/workspace_execution` Step.
-- The LLM planning context includes Goal text, DoD items, Soul instruction,
+- The LLM planning context includes Goal text, DoD items, Soul `soul.md` content,
   selected Skill content, relevant Memory, and MCP tool catalog.
 - The LLM returns a schema-validated `LLMExecutionDecision`.
 - The Run can continue by dispatching at least one concrete action through an

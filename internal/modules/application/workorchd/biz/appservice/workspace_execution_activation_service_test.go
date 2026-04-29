@@ -173,7 +173,7 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
 		ID:                   "soul-activation-context",
 		Name:                 "Activation Context Soul",
-		SystemInstruction:    "Execute workspace goals with evidence.",
+		SoulMD:               "# Activation Context Soul\n\nExecute workspace goals with evidence.\n",
 		AllowedSkillRefs:     []string{"skill-activation-context"},
 		AllowedMCPServerRefs: []string{"mcp-activation-context"},
 		AllowedToolKinds:     []string{"shell/command"},
@@ -263,9 +263,9 @@ func TestWorkspaceSoulBindingsWithBackendRoutesExecutionSoulByStage(t *testing.T
 	}
 	for _, id := range []string{"soul-default", "soul-execution", "soul-decision", "soul-validation"} {
 		if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
-			ID:                id,
-			Name:              id,
-			SystemInstruction: "Use " + id,
+			ID:     id,
+			Name:   id,
+			SoulMD: "# " + id + "\n\nUse " + id + ".\n",
 		}); err != nil {
 			t.Fatalf("CreateSoulWithBackend %s: %v", id, err)
 		}
@@ -333,9 +333,9 @@ func TestActivateWorkspaceExecutionWithBackendUsesSystemDefaultSoul(t *testing.T
 		t.Fatalf("DefineDoDWithBackend: %v", err)
 	}
 	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
-		ID:                "soul-system-default",
-		Name:              "System Default Soul",
-		SystemInstruction: "Use system default soul.",
+		ID:     "soul-system-default",
+		Name:   "System Default Soul",
+		SoulMD: "# System Default Soul\n\nUse system default soul.\n",
 	}); err != nil {
 		t.Fatalf("CreateSoulWithBackend: %v", err)
 	}
@@ -594,9 +594,9 @@ func TestActivateWorkspaceExecutionWithBackendRejectsSoulDisallowedSkill(t *test
 		t.Fatalf("CreateSkillWithBackend: %v", err)
 	}
 	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
-		ID:                "soul-restrictive",
-		Name:              "Restrictive Soul",
-		SystemInstruction: "Only use explicitly allowed capabilities.",
+		ID:     "soul-restrictive",
+		Name:   "Restrictive Soul",
+		SoulMD: "# Restrictive Soul\n\nOnly use explicitly allowed capabilities.\n",
 	}); err != nil {
 		t.Fatalf("CreateSoulWithBackend: %v", err)
 	}

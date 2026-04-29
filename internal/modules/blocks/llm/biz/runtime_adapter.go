@@ -43,6 +43,15 @@ var (
 	bareLocalServicePathPattern = regexp.MustCompile(`(?:^|[\s'"(=])((?:/api/v1/workorch/[A-Za-z0-9._~:/?#\[\]@!$&()*+,;=%-]+)|(?:/(?:runs|observability|metrics)(?:[A-Za-z0-9._~:/?#\[\]@!$&()*+,;=%-]*)?))`)
 )
 
+var providerSoulStages = map[string]struct{}{
+	"planning":   {},
+	"execution":  {},
+	"decision":   {},
+	"approval":   {},
+	"validation": {},
+	"artifact":   {},
+}
+
 type Provider interface {
 	Complete(context.Context, llmmodels.ProviderRequest) ([]byte, error)
 }
@@ -1050,6 +1059,12 @@ func enrichProviderInputWithSoulRouting(input map[string]any) {
 }
 
 func inferProviderSoulStage(input map[string]any) string {
+	if stage := normalizedProviderSoulStage(input["soulStage"]); stage != "" {
+		return stage
+	}
+	if stage := normalizedProviderSoulStage(input["currentSoulStage"]); stage != "" {
+		return stage
+	}
 	if _, ok := input["decisionResolution"]; ok {
 		return "decision"
 	}
@@ -1063,6 +1078,17 @@ func inferProviderSoulStage(input map[string]any) string {
 		return "validation"
 	}
 	return "planning"
+}
+
+func normalizedProviderSoulStage(value any) string {
+	stage := strings.ToLower(strings.TrimSpace(stringValue(value)))
+	if stage == "" {
+		return ""
+	}
+	if _, ok := providerSoulStages[stage]; !ok {
+		return ""
+	}
+	return stage
 }
 
 func recordFromAny(value any) map[string]any {

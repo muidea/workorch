@@ -24,6 +24,8 @@ import (
 const (
 	workspaceScopedWorkspaceFile         = "workspace.json"
 	workspaceScopedWorkspaceIndexFile    = "workspace_index.json"
+	workspaceScopedConfigDir             = "config"
+	workspaceScopedSoulBindingsFile      = "soul_bindings.json"
 	workspaceScopedGoalFile              = "goals.json"
 	workspaceScopedDoDFile               = "dods.json"
 	workspaceScopedMemoryItemFile        = "memory_item.json"
@@ -96,6 +98,11 @@ type workspaceIndexEntry struct {
 	UpdatedAt        string                `json:"updatedAt"`
 }
 
+type workspaceSoulBindingsFile struct {
+	DefaultSoulID common.SoulID            `json:"defaultSoulId,omitempty"`
+	Bindings      map[string]common.SoulID `json:"bindings,omitempty"`
+}
+
 func NewWorkspaceScopedFileRepositorySet(dataRoot string) WorkspaceScopedFileRepositorySet {
 	store := newWorkspaceScopedFileStore(dataRoot)
 	runs := newWorkspaceScopedRunRepository(store)
@@ -145,6 +152,10 @@ func newWorkspaceScopedFileStore(dataRoot string) *workspaceScopedFileStore {
 
 func (s *workspaceScopedFileStore) workspaceRoot(workspaceID common.WorkspaceID) string {
 	return filepath.Join(s.dataRoot, "workspaces", string(workspaceID))
+}
+
+func (s *workspaceScopedFileStore) workspaceSoulBindingsPath(workspaceID common.WorkspaceID) string {
+	return filepath.Join(s.workspaceRoot(workspaceID), workspaceScopedConfigDir, workspaceScopedSoulBindingsFile)
 }
 
 func (s *workspaceScopedFileStore) runRoot(workspaceID common.WorkspaceID, runID common.RunID) string {
@@ -457,7 +468,10 @@ func (r *workspaceScopedWorkspaceRepository) Create(ctx context.Context, item *w
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	if err := r.store.workspaceRepo(filepath.Join(r.store.workspaceRoot(item.ID), workspaceScopedWorkspaceFile)).Create(ctx, item); err != nil {
+	if err := r.store.workspaceRepo(filepath.Join(r.store.workspaceRoot(item.ID), workspaceScopedWorkspaceFile)).Create(ctx, workspaceMetadata(item)); err != nil {
+		return err
+	}
+	if err := r.store.saveWorkspaceSoulBindings(item); err != nil {
 		return err
 	}
 	return r.store.upsertWorkspaceIndex(item)
@@ -467,7 +481,11 @@ func (r *workspaceScopedWorkspaceRepository) Get(ctx context.Context, id common.
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	return r.store.workspaceRepo(filepath.Join(r.store.workspaceRoot(id), workspaceScopedWorkspaceFile)).Get(ctx, id)
+	item, err := r.store.workspaceRepo(filepath.Join(r.store.workspaceRoot(id), workspaceScopedWorkspaceFile)).Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return r.store.attachWorkspaceSoulBindings(item)
 }
 
 func (r *workspaceScopedWorkspaceRepository) List(ctx context.Context) ([]*workspacemodel.Workspace, error) {
@@ -497,10 +515,89 @@ func (r *workspaceScopedWorkspaceRepository) Update(ctx context.Context, item *w
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	if err := r.store.workspaceRepo(filepath.Join(r.store.workspaceRoot(item.ID), workspaceScopedWorkspaceFile)).Update(ctx, item); err != nil {
+	if err := r.store.workspaceRepo(filepath.Join(r.store.workspaceRoot(item.ID), workspaceScopedWorkspaceFile)).Update(ctx, workspaceMetadata(item)); err != nil {
+		return err
+	}
+	if err := r.store.saveWorkspaceSoulBindings(item); err != nil {
 		return err
 	}
 	return r.store.upsertWorkspaceIndex(item)
+}
+
+func workspaceMetadata(item *workspacemodel.Workspace) *workspacemodel.Workspace {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	cloned.DefaultSoulID = ""
+	cloned.SoulBindings = nil
+	return &cloned
+}
+
+func (s *workspaceScopedFileStore) attachWorkspaceSoulBindings(item *workspacemodel.Workspace) (*workspacemodel.Workspace, error) {
+	if item == nil {
+		return nil, nil
+	}
+	bindings, err := s.loadWorkspaceSoulBindings(item.ID)
+	if err != nil {
+		return nil, err
+	}
+	cloned := *item
+	cloned.DefaultSoulID = bindings.DefaultSoulID
+	if len(bindings.Bindings) > 0 {
+		cloned.SoulBindings = map[string]common.SoulID{}
+		for key, value := range bindings.Bindings {
+			cloned.SoulBindings[key] = value
+		}
+	} else {
+		cloned.SoulBindings = nil
+	}
+	return &cloned, nil
+}
+
+func (s *workspaceScopedFileStore) loadWorkspaceSoulBindings(workspaceID common.WorkspaceID) (workspaceSoulBindingsFile, error) {
+	if workspaceID == "" {
+		return workspaceSoulBindingsFile{}, common.ErrInvalidArgument
+	}
+	data, err := os.ReadFile(s.workspaceSoulBindingsPath(workspaceID))
+	if os.IsNotExist(err) {
+		return workspaceSoulBindingsFile{}, nil
+	}
+	if err != nil {
+		return workspaceSoulBindingsFile{}, err
+	}
+	if len(data) == 0 {
+		return workspaceSoulBindingsFile{}, nil
+	}
+	var ret workspaceSoulBindingsFile
+	if err := json.Unmarshal(data, &ret); err != nil {
+		return workspaceSoulBindingsFile{}, err
+	}
+	return ret, nil
+}
+
+func (s *workspaceScopedFileStore) saveWorkspaceSoulBindings(item *workspacemodel.Workspace) error {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	payload := workspaceSoulBindingsFile{
+		DefaultSoulID: item.DefaultSoulID,
+	}
+	if len(item.SoulBindings) > 0 {
+		payload.Bindings = map[string]common.SoulID{}
+		for key, value := range item.SoulBindings {
+			payload.Bindings[key] = value
+		}
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := s.workspaceSoulBindingsPath(item.ID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 type workspaceScopedGoalRepository struct {
