@@ -15,6 +15,7 @@ type Config struct {
 	EndpointName string           `json:"endpointName" toml:"endpointName"`
 	Server       ServerConfig     `json:"server" toml:"server"`
 	Repository   RepositoryConfig `json:"repository" toml:"repository"`
+	Runtime      RuntimeConfig    `json:"runtime" toml:"runtime"`
 	LLM          LLMConfig        `json:"llm" toml:"llm"`
 }
 
@@ -31,6 +32,10 @@ type ServerConfig struct {
 type RepositoryConfig struct {
 	Backend string `json:"backend" toml:"backend"`
 	DataDir string `json:"dataDir" toml:"dataDir"`
+}
+
+type RuntimeConfig struct {
+	DefaultSoulID string `json:"defaultSoulId" toml:"defaultSoulId"`
 }
 
 type LLMConfig struct {
@@ -75,6 +80,9 @@ func Current() (Config, error) {
 		return Config{}, err
 	}
 	if err := loadSection("repository", &cfg.Repository); err != nil {
+		return Config{}, err
+	}
+	if err := loadSection("runtime", &cfg.Runtime); err != nil {
 		return Config{}, err
 	}
 	if err := loadSection("llm", &cfg.LLM); err != nil {

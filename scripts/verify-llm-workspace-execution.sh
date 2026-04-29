@@ -403,6 +403,8 @@ section_ids = {item.get("id") for item in (bundle.get("sections") or [])}
 for required in ["workspace", "run", "task_progress", "recovery"]:
     if required not in section_ids:
         errors.append(f"context bundle missing section {required!r}: {section_ids}")
+if expected_state == "completed" and "formal_outputs" not in section_ids:
+    errors.append(f"context bundle missing completed formal_outputs section: {section_ids}")
 
 if task_progress.get("runId") != run_id or task_progress.get("workspaceId") != workspace_id:
     errors.append(f"taskProgress identity mismatch: {task_progress}")

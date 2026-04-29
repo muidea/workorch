@@ -517,6 +517,48 @@ func TestRuntimeAdapterSelectsRequestedProvider(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterInjectsCurrentSoulFromRoutingIntoProviderRequest(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{"completionState":"continue"}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+	request := llmStepRequest()
+	request.Input["decisionResolution"] = map[string]any{
+		"resolutionType": "provide_missing_info",
+	}
+	request.Input["executionContext"] = map[string]any{
+		"soulRouting": map[string]any{
+			"bindings": map[string]any{
+				"decision": map[string]any{
+					"soulId": "soul-decision",
+					"source": "workspace_stage_binding",
+					"soul": map[string]any{
+						"id":   "soul-decision",
+						"name": "Decision Soul",
+					},
+				},
+			},
+		},
+	}
+
+	if _, err := adapter.ExecuteRuntimeStep(context.Background(), request); err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	if provider.request.Input["currentSoulStage"] != "decision" {
+		t.Fatalf("currentSoulStage = %v, want decision", provider.request.Input["currentSoulStage"])
+	}
+	binding := provider.request.Input["currentSoulBinding"].(map[string]any)
+	if binding["soulId"] != "soul-decision" || binding["source"] != "workspace_stage_binding" {
+		t.Fatalf("currentSoulBinding = %+v, want decision soul binding", binding)
+	}
+	soul := provider.request.Input["currentSoul"].(map[string]any)
+	if soul["id"] != "soul-decision" || soul["name"] != "Decision Soul" {
+		t.Fatalf("currentSoul = %+v, want decision soul context", soul)
+	}
+}
+
 func TestRuntimeAdapterFailsUnknownRequestedProvider(t *testing.T) {
 	adapter := NewRuntimeAdapterWithProviders("local", map[string]ProviderRuntime{
 		"local": {

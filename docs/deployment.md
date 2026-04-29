@@ -303,7 +303,7 @@ A deployable `workorchd` instance is acceptable when:
 - `make verify-real-mvp` passes as the grouped verification entrypoint for an
   already running deployed service, covering real LLM execution, MCP `stdio`,
   and vector Memory recall.
-- `POST /api/v1/workorch/workspaces` creates one `workorch` workspace instance, accepts an optional `description`, defaults `workingDirectory` to `<service-working-directory>/workspaces/<generated-workspace-id>` when omitted, and returns the generated `workspace.id`
+- `POST /api/v1/workorch/workspaces` creates one `workorch` workspace instance, accepts an optional `description`, defaults `workingDirectory` to `repository.dataDir/workspaces/<generated-workspace-id>/working` for the file backend when omitted, and returns the generated `workspace.id`
 - with file-backed repository config, `GET /api/v1/workorch/workspaces` returns the current `workorch` workspace list
 - with file-backed repository config, `GET /api/v1/workorch/workspaces/{workspaceId}` returns one persisted `workorch` workspace instance
 - with file-backed repository config, `GET /api/v1/workorch/workspaces/{workspaceId}/snapshot` returns one aggregated `workorch` workspace read model

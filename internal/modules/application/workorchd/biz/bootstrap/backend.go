@@ -56,31 +56,40 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 			approval:          memory.NewApprovalRepository(),
 		}
 	case "file":
-		if dataRoot == "" {
-			dataRoot = filepath.Join(os.TempDir(), "workorchd-data")
-		}
+		dataRoot = ResolveRepositoryDataRoot(backend, dataRoot)
+		workspaceScopedRepos := NewWorkspaceScopedFileRepositorySet(dataRoot)
 		return repositorySet{
-			soul:              fileRepo.NewSoulRepository(filepath.Join(dataRoot, "soul.json")),
-			memoryItem:        fileRepo.NewMemoryItemRepository(filepath.Join(dataRoot, "memory_item.json")),
-			skill:             fileRepo.NewSkillRepository(filepath.Join(dataRoot, "skill.json")),
-			mcpServer:         fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "mcp_server.json")),
-			result:            fileRepo.NewResultRepository(filepath.Join(dataRoot, "result.json")),
-			artifact:          fileRepo.NewArtifactRepository(filepath.Join(dataRoot, "artifact.json")),
-			eventRecord:       fileRepo.NewEventRecordRepository(filepath.Join(dataRoot, "event_record.json")),
-			workspace:         fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json")),
-			goal:              fileRepo.NewGoalRepository(filepath.Join(dataRoot, "goal.json")),
-			dod:               fileRepo.NewDoDRepository(filepath.Join(dataRoot, "dod.json")),
-			run:               fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json")),
-			step:              fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json")),
-			toolCall:          fileRepo.NewToolCallRepository(filepath.Join(dataRoot, "tool_call.json")),
-			patch:             fileRepo.NewPatchRepository(filepath.Join(dataRoot, "patch.json")),
-			validationResult:  fileRepo.NewValidationResultRepository(filepath.Join(dataRoot, "validation_result.json")),
-			runtimeCheckpoint: fileRepo.NewRuntimeCheckpointRepository(filepath.Join(dataRoot, "runtime_checkpoint.json")),
-			ticket:            fileRepo.NewDecisionTicketRepository(filepath.Join(dataRoot, "ticket.json")),
-			resolution:        fileRepo.NewDecisionResolutionRepository(filepath.Join(dataRoot, "resolution.json")),
-			approval:          fileRepo.NewApprovalRepository(filepath.Join(dataRoot, "approval.json")),
+			soul:              fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "soul.json")),
+			memoryItem:        workspaceScopedRepos.MemoryItems,
+			skill:             fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
+			mcpServer:         fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "system", "mcp_server.json")),
+			result:            workspaceScopedRepos.Results,
+			artifact:          workspaceScopedRepos.Artifacts,
+			eventRecord:       workspaceScopedRepos.EventRecords,
+			workspace:         workspaceScopedRepos.Workspaces,
+			goal:              workspaceScopedRepos.Goals,
+			dod:               workspaceScopedRepos.DoDs,
+			run:               workspaceScopedRepos.Runs,
+			step:              workspaceScopedRepos.Steps,
+			toolCall:          workspaceScopedRepos.ToolCalls,
+			patch:             workspaceScopedRepos.Patches,
+			validationResult:  workspaceScopedRepos.ValidationResults,
+			runtimeCheckpoint: workspaceScopedRepos.RuntimeCheckpoints,
+			ticket:            workspaceScopedRepos.Tickets,
+			resolution:        workspaceScopedRepos.Resolutions,
+			approval:          workspaceScopedRepos.Approvals,
 		}
 	default:
 		panic("unsupported repository backend: " + backend)
 	}
+}
+
+func ResolveRepositoryDataRoot(backend string, dataRoot string) string {
+	if backend != "file" {
+		return ""
+	}
+	if dataRoot == "" {
+		return filepath.Join(os.TempDir(), "workorchd-data")
+	}
+	return dataRoot
 }

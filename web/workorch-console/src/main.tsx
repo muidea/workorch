@@ -12,7 +12,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Badge, Button, ConfigProvider, Descriptions, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, Goal, LLMProviderTemplate, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
+import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, Goal, LLMProviderTemplate, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -83,11 +83,26 @@ const recoveryActionLabels: Record<string, string> = {
   start_new_run: '启动新的运行'
 };
 
+const defaultSoulBindingStages = ['planning', 'execution', 'decision', 'approval', 'validation', 'artifact'];
+
+const soulBindingStageLabels: Record<string, string> = {
+  planning: '规划',
+  execution: '执行',
+  decision: '决策',
+  approval: '审批',
+  validation: '验收',
+  artifact: '交付物'
+};
+
 function stateLabel(state?: string) {
   if (!state) {
     return '未知';
   }
   return stateLabels[state] ? `${stateLabels[state]} (${state})` : state;
+}
+
+function soulBindingStageLabel(stage: string) {
+  return soulBindingStageLabels[stage] ? `${soulBindingStageLabels[stage]} (${stage})` : stage;
 }
 
 function progressKindLabel(kind?: string) {
@@ -1471,6 +1486,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [goals, setGoals] = useState<Goal[]>([]);
   const [dods, setDoDs] = useState<DoD[]>([]);
   const [souls, setSouls] = useState<Soul[]>([]);
+  const [soulBindings, setSoulBindings] = useState<WorkspaceSoulBindings | undefined>(undefined);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [mcpServers, setMCPServers] = useState<MCPServer[]>([]);
   const [memoryItems, setMemoryItems] = useState<MemoryItem[]>([]);
@@ -1485,6 +1501,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [goalDefinitionOpen, setGoalDefinitionOpen] = useState(false);
   const [dodDefinitionOpen, setDoDDefinitionOpen] = useState(false);
   const [businessSubmitting, setBusinessSubmitting] = useState(false);
+  const [soulBindingSaving, setSoulBindingSaving] = useState(false);
   const [editingGoal, setEditingGoal] = useState<Goal | undefined>(undefined);
   const [editingDoD, setEditingDoD] = useState<DoD | undefined>(undefined);
   const [activationTracking, setActivationTracking] = useState(false);
@@ -1494,6 +1511,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const workspaceListRequestSeq = useRef(0);
   const workspaceContextRequestSeq = useRef(0);
   const [activationForm] = Form.useForm();
+  const [soulBindingsForm] = Form.useForm();
   const [workspaceForm] = Form.useForm();
   const [setupGoalForm] = Form.useForm();
   const [setupDoDForm] = Form.useForm();
@@ -1545,11 +1563,17 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
 
   const readyDoDs = dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
   const llmProviders = configuration?.llm.providers ?? [];
+  const soulBindingStages = soulBindings?.availableStages?.length ? soulBindings.availableStages : defaultSoulBindingStages;
+  const soulOptions = souls.map((item) => ({
+    value: item.id,
+    label: `${item.name || item.id} (${item.id})`
+  }));
 
   function clearWorkspaceContext() {
     setSnapshot(undefined);
     setGoals([]);
     setDoDs([]);
+    setSoulBindings(undefined);
     setMemoryItems([]);
     setRunSnapshot(undefined);
     setRunObservability(undefined);
@@ -1580,12 +1604,13 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
 
   async function loadWorkspaceContext(targetWorkspaceId: string) {
     const requestSeq = ++workspaceContextRequestSeq.current;
-    const [nextSnapshot, nextContextBundle, nextGoals, nextDoDs, nextSouls, nextSkills, nextMCPServers, nextMemoryItems, nextConfiguration] = await Promise.all([
+    const [nextSnapshot, nextContextBundle, nextGoals, nextDoDs, nextSouls, nextSoulBindings, nextSkills, nextMCPServers, nextMemoryItems, nextConfiguration] = await Promise.all([
       workorchApi.readWorkspaceSnapshot(targetWorkspaceId),
       workorchApi.readWorkspaceContextBundle(targetWorkspaceId),
       workorchApi.listGoals(targetWorkspaceId),
       workorchApi.listDoDs(targetWorkspaceId),
       workorchApi.listSouls(),
+      workorchApi.readWorkspaceSoulBindings(targetWorkspaceId),
       workorchApi.listSkills(targetWorkspaceId),
       workorchApi.listMCPServers(),
       workorchApi.listMemory(targetWorkspaceId),
@@ -1599,6 +1624,11 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     setGoals(nextGoals);
     setDoDs(nextDoDs);
     setSouls(nextSouls);
+    setSoulBindings(nextSoulBindings);
+    soulBindingsForm.setFieldsValue({
+      defaultSoulId: nextSoulBindings.defaultSoulId,
+      bindings: nextSoulBindings.bindings ?? {}
+    });
     setSkills(nextSkills);
     setMCPServers(nextMCPServers);
     setMemoryItems(nextMemoryItems);
@@ -1628,6 +1658,31 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       return;
     }
     await loadWorkspaceContext(workspaceId);
+  };
+
+  const saveWorkspaceSoulBindings = async (values: { defaultSoulId?: string; bindings?: Record<string, string> }) => {
+    if (!workspaceId) {
+      message.error('请先选择工作空间');
+      return;
+    }
+    setSoulBindingSaving(true);
+    try {
+      const nextBindings = await workorchApi.updateWorkspaceSoulBindings(workspaceId, {
+        defaultSoulId: values.defaultSoulId,
+        bindings: values.bindings
+      });
+      setSoulBindings(nextBindings);
+      soulBindingsForm.setFieldsValue({
+        defaultSoulId: nextBindings.defaultSoulId,
+        bindings: nextBindings.bindings ?? {}
+      });
+      await loadWorkspaceContext(workspaceId);
+      message.success('执行人格配置已保存');
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setSoulBindingSaving(false);
+    }
   };
 
   const closeWorkspaceSetup = () => {
@@ -1673,6 +1728,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       doDId: readyDoDs[0]?.id,
       llmProviderId: configuration?.llm.defaultProviderId,
       soulId: souls[0]?.id,
+      soulBindings: {},
       skillIds: [],
       mcpServerIds: [],
       memoryIds: [],
@@ -1872,6 +1928,41 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             </ProCard>
           </ProCard>
           <ProCard
+            title="执行人格配置（Soul）"
+            className="workorch-section"
+            extra={<Button type="primary" loading={soulBindingSaving} disabled={!workspaceId} onClick={() => soulBindingsForm.submit()}>保存配置</Button>}
+          >
+            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              <Typography.Text type="secondary">
+                工作空间级配置用于默认约束本工作空间的规划、执行、决策、审批、验收和交付物阶段；启动执行时仍可做单次覆盖。
+              </Typography.Text>
+              <Form
+                form={soulBindingsForm}
+                layout="vertical"
+                onFinish={(values) => void saveWorkspaceSoulBindings(values as { defaultSoulId?: string; bindings?: Record<string, string> })}
+              >
+                <Form.Item name="defaultSoulId" label="工作空间默认 Soul">
+                  <Select allowClear placeholder="未绑定时不注入默认 Soul" options={soulOptions} />
+                </Form.Item>
+                <div className="soul-binding-grid">
+                  {soulBindingStages.map((stage) => (
+                    <Form.Item key={stage} name={['bindings', stage]} label={soulBindingStageLabel(stage)}>
+                      <Select allowClear placeholder="继承默认 Soul" options={soulOptions} />
+                    </Form.Item>
+                  ))}
+                </div>
+              </Form>
+              <Descriptions
+                size="small"
+                column={1}
+                items={[
+                  { key: 'priority', label: '启用优先级', children: compactTags(soulBindings?.priorityPolicy ?? []) },
+                  { key: 'current', label: '当前绑定', children: <pre className="json-panel">{compactJSON(soulBindings)}</pre> }
+                ]}
+              />
+            </Space>
+          </ProCard>
+          <ProCard
             title="目标成果"
             className="workorch-section"
             extra={goalOutcomeState(runSnapshot)}
@@ -1922,7 +2013,16 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                           { title: '名称/URI', ellipsis: true, render: (_, item) => item.name || item.uri || item.id },
                           { title: '类型', dataIndex: 'artifactType', width: 120 },
                           { title: '状态', dataIndex: 'state', width: 110, render: (_, item) => stateTag(item.state) },
-                          { title: '摘要', dataIndex: 'summary', ellipsis: true }
+                          { title: '摘要', dataIndex: 'summary', ellipsis: true },
+                          {
+                            title: '操作',
+                            valueType: 'option',
+                            render: (_, item) => item.uri ? (
+                              <Button size="small" type="link" href={workorchApi.artifactContentURL(item.uri)} target="_blank">
+                                下载
+                              </Button>
+                            ) : null
+                          }
                         ]}
                         dataSource={outcomeArtifacts}
                       />
@@ -2265,7 +2365,16 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                             { title: '类型', dataIndex: 'artifactType', width: 140 },
                             { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
                             { title: '名称/URI', render: (_, item) => item.name || item.uri || '-', ellipsis: true },
-                            { title: '摘要', dataIndex: 'summary', ellipsis: true }
+                            { title: '摘要', dataIndex: 'summary', ellipsis: true },
+                            {
+                              title: '操作',
+                              valueType: 'option',
+                              render: (_, item) => item.uri ? (
+                                <Button size="small" type="link" href={workorchApi.artifactContentURL(item.uri)} target="_blank">
+                                  下载
+                                </Button>
+                              ) : null
+                            }
                           ]}
                           dataSource={runSnapshot.artifacts ?? []}
                         />
@@ -2333,7 +2442,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             <Input.TextArea rows={3} placeholder="描述工作空间目标、范围或当前交付预期" />
           </Form.Item>
           <Form.Item name="workingDirectory" label="工作目录">
-            <Input placeholder="留空时自动使用服务工作路径 / workspaces / 生成的工作空间 ID" />
+            <Input placeholder="留空时自动使用 repository.dataDir/workspaces/工作空间 ID/working" />
           </Form.Item>
         </Form>
         <Form
@@ -2513,8 +2622,16 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             />
           </Form.Item>
           <Form.Item name="soulId" label="执行人格（Soul）">
-            <Select allowClear options={souls.map((item) => ({ value: item.id, label: `${item.name || item.id} (${item.id})` }))} />
+            <Select allowClear placeholder="使用工作空间默认 Soul" options={soulOptions} />
           </Form.Item>
+          <Typography.Text type="secondary">本次执行阶段 Soul 覆盖</Typography.Text>
+          <div className="soul-binding-grid soul-binding-grid-compact">
+            {soulBindingStages.map((stage) => (
+              <Form.Item key={stage} name={['soulBindings', stage]} label={soulBindingStageLabel(stage)}>
+                <Select allowClear placeholder="继承工作空间配置" options={soulOptions} />
+              </Form.Item>
+            ))}
+          </div>
           <Form.Item name="skillIds" label="可用技能（Skill）">
             <Select
               mode="multiple"
@@ -3029,7 +3146,8 @@ function ConfigurationPage() {
               { key: 'writeTimeout', label: '写超时', children: configuration?.server.writeTimeout || '-' },
               { key: 'idleTimeout', label: '空闲超时', children: configuration?.server.idleTimeout || '-' },
               { key: 'shutdownTimeout', label: '关闭超时', children: configuration?.server.shutdownTimeout || '-' },
-              { key: 'maxConcurrentRuns', label: '最大并发 Run', children: configuration?.server.maxConcurrentRuns ?? '-' }
+              { key: 'maxConcurrentRuns', label: '最大并发 Run', children: configuration?.server.maxConcurrentRuns ?? '-' },
+              { key: 'defaultSoulId', label: '系统默认 Soul', children: configuration?.runtime.defaultSoulId || '-' }
             ]}
           />
         </ProCard>

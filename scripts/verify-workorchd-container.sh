@@ -111,7 +111,7 @@ workspace_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/workspace.json" 
 [[ -n "$workspace_id" ]]
 grep '"title": "verify workspace"' "$TMP_DIR/workspace.json" >/dev/null
 grep '"description": "verify workspace description"' "$TMP_DIR/workspace.json" >/dev/null
-grep "\"workingDirectory\": \".*/workspaces/$workspace_id\"" "$TMP_DIR/workspace.json" >/dev/null
+grep "\"workingDirectory\": \".*/workspaces/$workspace_id/working\"" "$TMP_DIR/workspace.json" >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" -H 'Content-Type: application/json' \
   -d '{"text":"verify workorch service delivery"}' >"$TMP_DIR/goal.json"
 goal_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/goal.json" | head -n1)"
@@ -174,8 +174,19 @@ if [[ "$BACKEND" == "file" ]]; then
   curl -fsS "$BASE_URL/api/v1/workorch/runs" | grep '"id": "run-verify"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/runs?workspaceId=$workspace_id" | grep '"id": "run-verify"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/runs/run-verify" | grep "\"workspaceId\": \"$workspace_id\"" >/dev/null
-  for name in workspace.json goal.json dod.json run.json step.json ticket.json resolution.json approval.json; do
-    [[ -f "$DATA_DIR/$name" ]]
+  [[ -f "$DATA_DIR/system/workspace_index.json" ]]
+  grep "\"workspaceId\": \"$workspace_id\"" "$DATA_DIR/system/workspace_index.json" >/dev/null
+  for name in workspace.json goals.json dods.json; do
+    [[ -f "$DATA_DIR/workspaces/$workspace_id/$name" ]]
+  done
+  for name in run.json step.json; do
+    [[ -f "$DATA_DIR/workspaces/$workspace_id/runs/run-verify/$name" ]]
+  done
+  for name in ticket.json resolution.json; do
+    [[ -f "$DATA_DIR/workspaces/$workspace_id/runs/run-runtime-decision-block-verify/$name" ]]
+  done
+  for name in approval.json; do
+    [[ -f "$DATA_DIR/workspaces/$workspace_id/runs/run-runtime-approval-block-verify/$name" ]]
   done
 
   restart_container

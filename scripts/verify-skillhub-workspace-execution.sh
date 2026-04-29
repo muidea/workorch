@@ -10,6 +10,7 @@ VERIFY_SUFFIX="${WORKORCH_SKILLHUB_VERIFY_SUFFIX:-$$}"
 GLOBAL_SKILL_ID="${WORKORCH_VERIFY_GLOBAL_SKILL_ID:-go-multi-module-dev}"
 MCP_SERVER_ID="mcp-skillhub-auto-$VERIFY_SUFFIX"
 REPOSITORY_SKILL_ID="skill-skillhub-auto-mcp-$VERIFY_SUFFIX"
+SOUL_ID="soul-skillhub-auto-$VERIFY_SUFFIX"
 MOCK_PID=""
 MOCK_LOG="$TMP_DIR/llm-mock.log"
 
@@ -271,6 +272,10 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/skills" -H 'Content-Type: applicati
   -d '{"id":"'"$REPOSITORY_SKILL_ID"'","name":"SkillHub Auto MCP Skill","version":"v1","description":"repository skill used to verify required MCP auto binding","triggerRules":["skillhub auto mcp"],"instruction":"Require the configured MCP server when this skill is selected.","requiredToolKinds":["llm/chat"],"requiredMCPServerRefs":["'"$MCP_SERVER_ID"'"],"constraints":["generic Skill to MCP binding only"]}' >"$TMP_DIR/repository-skill.json"
 grep "\"id\": \"$REPOSITORY_SKILL_ID\"" "$TMP_DIR/repository-skill.json" >/dev/null
 
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/souls" -H 'Content-Type: application/json' \
+  -d '{"id":"'"$SOUL_ID"'","name":"SkillHub Auto Selection Soul","description":"scope SkillHub e2e auto selection to the current verification data","businessDomains":["workorch"],"systemInstruction":"Use only the allowed verification skills and produce evidence-backed DoD assessment.","planningPolicy":"goal-first","decisionPolicy":"complete when evidence is sufficient","approvalPolicy":"no approval needed for deterministic verification","validationPolicy":"require DoD evidence","allowedSkillRefs":["skillhub:global:'"$GLOBAL_SKILL_ID"'","skillhub:workspace:'"$workspace_id"':'"$GLOBAL_SKILL_ID"'","'"$REPOSITORY_SKILL_ID"'"],"allowedMCPServerRefs":["'"$MCP_SERVER_ID"'"],"allowedToolKinds":["llm/chat"],"outputContract":"workorch llm step contract"}' >"$TMP_DIR/soul.json"
+grep "\"id\": \"$SOUL_ID\"" "$TMP_DIR/soul.json" >/dev/null
+
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" -H 'Content-Type: application/json' \
   -d '{"text":"verify go multi module dev skillhub auto mcp execution"}' >"$TMP_DIR/goal.json"
 goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
@@ -280,7 +285,7 @@ dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
   -H 'Content-Type: application/json' \
-  -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify-skillhub","priority":2}' >"$TMP_DIR/activation.json"
+  -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify-skillhub","soulId":"'"$SOUL_ID"'","priority":2}' >"$TMP_DIR/activation.json"
 grep '"state": "completed"' "$TMP_DIR/activation.json" >/dev/null
 run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/run-snapshot.json"

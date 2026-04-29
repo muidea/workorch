@@ -990,13 +990,15 @@ func hasExecutionGraphCycle(graph llmmodels.BlockExecutionGraph) bool {
 }
 
 func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels.ProviderConfig) llmmodels.ProviderRequest {
+	input := cloneMap(request.Input)
+	enrichProviderInputWithSoulRouting(input)
 	return llmmodels.ProviderRequest{
 		WorkspaceID:         string(request.WorkspaceID),
 		RunID:               string(request.RunID),
 		StepID:              string(request.StepID),
 		Kind:                request.Kind,
 		Model:               config.Model,
-		Input:               cloneMap(request.Input),
+		Input:               input,
 		Schema:              decisionSchemaName,
 		RuntimeCapabilities: declaredRuntimeCapabilities(),
 		TraceRefs: map[string]string{
@@ -1005,6 +1007,90 @@ func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels
 			"stepId":      string(request.StepID),
 		},
 		Config: RedactedProviderConfig(config),
+	}
+}
+
+func enrichProviderInputWithSoulRouting(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	executionContext := recordFromAny(input["executionContext"])
+	if len(executionContext) == 0 {
+		return
+	}
+	stage := inferProviderSoulStage(input)
+	if stage == "" {
+		return
+	}
+	input["currentSoulStage"] = stage
+
+	routing := recordFromAny(executionContext["soulRouting"])
+	if len(routing) == 0 {
+		if soul := recordFromAny(executionContext["soul"]); len(soul) > 0 {
+			input["currentSoul"] = soul
+		}
+		return
+	}
+	bindings := recordFromAny(routing["bindings"])
+	binding := recordFromAny(bindings[stage])
+	if len(binding) == 0 {
+		return
+	}
+	input["currentSoulBinding"] = binding
+	if soul := recordFromAny(binding["soul"]); len(soul) > 0 {
+		input["currentSoul"] = soul
+		return
+	}
+	if soulID := stringValue(binding["soulId"]); soulID != "" {
+		input["currentSoul"] = map[string]any{
+			"id":     soulID,
+			"source": stringValue(binding["source"]),
+		}
+	}
+}
+
+func inferProviderSoulStage(input map[string]any) string {
+	if _, ok := input["decisionResolution"]; ok {
+		return "decision"
+	}
+	if _, ok := input["approvalResolution"]; ok {
+		return "approval"
+	}
+	if boolValue(input["graphFollowUp"]) || boolValue(input["completionFollowUp"]) {
+		return "validation"
+	}
+	if _, ok := input["previousStepOutput"]; ok {
+		return "validation"
+	}
+	return "planning"
+}
+
+func recordFromAny(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed
+	default:
+		if value == nil {
+			return nil
+		}
+		payload, err := json.Marshal(value)
+		if err != nil {
+			return nil
+		}
+		var ret map[string]any
+		if err := json.Unmarshal(payload, &ret); err != nil {
+			return nil
+		}
+		return ret
+	}
+}
+
+func boolValue(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	default:
+		return false
 	}
 }
 

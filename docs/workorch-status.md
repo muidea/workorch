@@ -219,6 +219,49 @@
   logic from leaking into `kernel/orchestrator`, `kernel/run`, `blocks/llm`,
   `blocks/mcp`, or Web outcome rendering. Business-specific weather acceptance
   terms remain allowed only in e2e scripts, tests, and documentation.
+- Workspace data layout has a formal next-step plan in
+  `docs/workspace-data-layout-plan.md`: `.workorch-data` becomes the single
+  persistence root, Workspace directories own `working`, `artifacts`, and
+  Run-scoped evidence, while software source files and blog drafts remain in
+  `working` and accepted delivery snapshots are stored under `artifacts`.
+- Workspace default directory allocation now follows the data layout plan for
+  the file backend: when `workingDirectory` is omitted, workorch creates
+  `repository.dataDir/workspaces/{workspaceId}/working` and prepares sibling
+  `artifacts` and `runs` directories. Explicit `workingDirectory` remains a
+  user-managed workspace path and is created as the working root only.
+- File backend Artifact storage now writes available text/report Artifact
+  summaries under `repository.dataDir/workspaces/{workspaceId}/artifacts/{runId}`
+  and stores a `workorch://workspaces/{workspaceId}/artifacts/{runId}/...` URI
+  in Artifact metadata. The orchestrator still records only formal Artifact
+  metadata; directory and URI materialization stay in the application bootstrap
+  storage adapter.
+- Artifact content can now be downloaded through
+  `GET /api/v1/workorch/artifacts/content?uri=...`; the endpoint resolves only
+  registered `workorch://workspaces/{workspaceId}/artifacts/{runId}/...` URIs
+  and the Web Console exposes download actions in Artifact tables.
+- File backend metadata now follows the Workspace data layout: Workspace,
+  Goal, DoD, and MemoryItem are stored under
+  `repository.dataDir/workspaces/{workspaceId}`; Run, Step, ToolCall, Patch,
+  ValidationResult, RuntimeCheckpoint, Result, Artifact, Decision Ticket,
+  Resolution, Approval, and Run-bound EventRecord are stored under
+  `repository.dataDir/workspaces/{workspaceId}/runs/{runId}`; Soul, global
+  Skill, MCP Server, and service-level EventRecord entries remain under
+  `repository.dataDir/system`. Workspace list and directory lookup are backed
+  by `repository.dataDir/system/workspace_index.json`, while the Workspace
+  entity remains authoritative under `workspaces/{workspaceId}/workspace.json`.
+- Workspace task-stage Soul routing has a formal plan in
+  `docs/workspace-soul-routing-plan.md`: each Workspace can define default and
+  stage-specific Soul bindings, Run activation can override them for one Run,
+  and the effective priority is run stage override, workspace stage binding,
+  run default, workspace default, system default, then explicit unbound.
+- Workspace task-stage Soul routing is now partially implemented for MVP use:
+  Workspace stores `defaultSoulId` and stage `soulBindings`, Web Console can
+  edit Workspace bindings and per-Run overrides, activation writes effective
+  `executionContext.soulRouting`, and LLM provider requests expose
+  `currentSoulStage`, `currentSoulBinding`, and `currentSoul` for the active
+  planning / decision / approval / validation context. `[runtime].defaultSoulId`
+  is now the system default Soul source for the `system_default` priority slot
+  and is exposed in the service configuration response / Web Console.
 
 ## Delivered in workorch
 
@@ -440,7 +483,7 @@ curl -f "http://127.0.0.1:8080/api/v1/workorch/runs?workspaceId=${WORKSPACE_ID}"
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}
 ```
 
-- the workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `workingDirectory` to `<service-working-directory>/workspaces/<generated-workspace-id>` when omitted
+- the workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `workingDirectory` to `repository.dataDir/workspaces/<generated-workspace-id>/working` for the file backend when omitted
 - with the file-backed backend, the run create endpoint creates one formal `workorch` run instance for the requested workspace
 - with the file-backed backend, the run list endpoint returns persisted `workorch` run instances and supports `workspaceId` filtering
 - with the file-backed backend, the single-run endpoint returns one persisted `workorch` run instance
@@ -480,12 +523,20 @@ go run ./application/workorchd -config-dir config/file
 
 Observed persisted files:
 
-- `.workorch-data/workspace.json`
-- `.workorch-data/run.json`
-- `.workorch-data/step.json`
-- `.workorch-data/ticket.json`
-- `.workorch-data/approval.json`
-- `.workorch-data/resolution.json`
+- `.workorch-data/system/workspace_index.json`
+- `.workorch-data/system/soul.json`
+- `.workorch-data/system/skill.json`
+- `.workorch-data/system/mcp_server.json`
+- `.workorch-data/workspaces/{workspaceId}/workspace.json`
+- `.workorch-data/workspaces/{workspaceId}/goals.json`
+- `.workorch-data/workspaces/{workspaceId}/dods.json`
+- `.workorch-data/workspaces/{workspaceId}/memory_item.json`
+- `.workorch-data/workspaces/{workspaceId}/runs/{runId}/run.json`
+- `.workorch-data/workspaces/{workspaceId}/runs/{runId}/step.json`
+- `.workorch-data/workspaces/{workspaceId}/runs/{runId}/ticket.json`
+- `.workorch-data/workspaces/{workspaceId}/runs/{runId}/approval.json`
+- `.workorch-data/workspaces/{workspaceId}/runs/{runId}/resolution.json`
+- `.workorch-data/workspaces/{workspaceId}/runs/{runId}/artifact.json`
 
 Verified terminal states:
 
@@ -737,6 +788,9 @@ Skill 能力来源已从单一 workorch 内置仓储扩展为 workorch 读模型
 - completed: deployed-instance e2e script `scripts/verify-skillhub-workspace-execution.sh`
   covers global SkillHub Skill, Workspace SkillHub Skill, repository Skill required MCP auto-binding,
   Run snapshot context, accepted Result/Artifact, and `skill_feedback` Memory
+- completed: SkillHub e2e uses a verification Soul to scope `allowedSkillRefs`
+  to the current global, workspace, and repository Skill set, so repeated
+  deployed-instance runs are not affected by historical repository Skill data
 - completed: deployed-instance full regression target `make verify-deployed-full`
   includes service smoke, mock LLM governance, SkillHub, MCP stdio, real LLM,
   real weather, weather Decision/Approval governance, and vector Memory checks
@@ -781,6 +835,14 @@ Result / Artifact 等已持久化模型推导任务进度、阻塞项、证据�
 - completed: Web Workspace Detail 展示任务拆分图、节点依赖、节点执行状态和节点输入证据
 - completed: 单元测试覆盖上下文包、压缩上下文、恢复检查点、压缩候选推导，
   start / resume 前的压缩上下文注入，以及 execution graph 到任务拆分投影的映射
+- completed: deployed-instance e2e coverage now checks Run `task-progress`,
+  Run `context-bundle`, persisted `executionContext.compressedContext`,
+  event stream terminal records, and completed `formal_outputs` through
+  `make verify-llm`
+- completed: real LLM deployed-instance e2e now checks `task-progress`,
+  `context-bundle`, `task-decompositions`, compressed context identity,
+  formal Result / Artifact, and event stream records through
+  `make verify-real-llm`
 
 当前边界：
 

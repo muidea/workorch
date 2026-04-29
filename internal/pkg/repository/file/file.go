@@ -1587,6 +1587,12 @@ func saveMap[K comparable, V any](path string, items map[K]V) error {
 
 func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 	cloned := *item
+	if item.SoulBindings != nil {
+		cloned.SoulBindings = map[string]common.SoulID{}
+		for key, value := range item.SoulBindings {
+			cloned.SoulBindings[key] = value
+		}
+	}
 	return &cloned
 }
 

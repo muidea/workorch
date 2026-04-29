@@ -11,13 +11,16 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 type RuntimeSession struct {
-	Bootstrap *bootstrap.Runtime
-	Runtime   *ManagedRuntime
-	exports   bootstrap.Exports
-	borrowed  bool
+	Bootstrap         *bootstrap.Runtime
+	Runtime           *ManagedRuntime
+	exports           bootstrap.Exports
+	borrowed          bool
+	repositoryBackend string
+	repositoryDataDir string
 }
 
 func NewRuntimeSession(bootstrapRuntime *bootstrap.Runtime) *RuntimeSession {
@@ -47,7 +50,14 @@ func NewRuntimeSessionFromInitiator() (*RuntimeSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewRuntimeSessionFromExports(exportsFromRuntimeHelper(runtime))
+	session, sessionErr := NewRuntimeSessionFromExports(exportsFromRuntimeHelper(runtime))
+	if sessionErr != nil {
+		return nil, sessionErr
+	}
+	if cfg, err := workorchconfig.Current(); err == nil {
+		session.setRepositoryConfig(cfg.Repository.Backend, cfg.Repository.DataDir)
+	}
+	return session, nil
 }
 
 func (s *RuntimeSession) Borrow() *RuntimeSession {
@@ -56,15 +66,19 @@ func (s *RuntimeSession) Borrow() *RuntimeSession {
 	}
 	if s.Bootstrap == nil {
 		return &RuntimeSession{
-			Runtime:  NewRuntimeFromExports(s.exports),
-			exports:  s.exports,
-			borrowed: true,
+			Runtime:           NewRuntimeFromExports(s.exports),
+			exports:           s.exports,
+			borrowed:          true,
+			repositoryBackend: s.repositoryBackend,
+			repositoryDataDir: s.repositoryDataDir,
 		}
 	}
 	return &RuntimeSession{
-		Bootstrap: s.Bootstrap,
-		Runtime:   NewRuntimeFromBootstrap(s.Bootstrap),
-		borrowed:  true,
+		Bootstrap:         s.Bootstrap,
+		Runtime:           NewRuntimeFromBootstrap(s.Bootstrap),
+		borrowed:          true,
+		repositoryBackend: s.repositoryBackend,
+		repositoryDataDir: s.repositoryDataDir,
 	}
 }
 
@@ -75,7 +89,9 @@ func NewRuntimeSessionWithBackend(backend string, dataRoot string) (*RuntimeSess
 	if err != nil {
 		return nil, err
 	}
-	return NewRuntimeSession(bootstrapRuntime), nil
+	session := NewRuntimeSession(bootstrapRuntime)
+	session.setRepositoryConfig(backend, dataRoot)
+	return session, nil
 }
 
 func NewRuntimeSessionWithBackendAndEventHub(backend string, dataRoot string, eventHub events.Hub) (*RuntimeSession, error) {
@@ -85,15 +101,25 @@ func NewRuntimeSessionWithBackendAndEventHub(backend string, dataRoot string, ev
 	if err != nil {
 		return nil, err
 	}
-	return NewRuntimeSession(bootstrapRuntime), nil
+	session := NewRuntimeSession(bootstrapRuntime)
+	session.setRepositoryConfig(backend, dataRoot)
+	return session, nil
 }
 
 func NewRuntimeSessionFromEnv() (*RuntimeSession, error) {
-	bootstrapRuntime, err := buildBootstrapRuntime(bootstrap.NewFromEnv)
+	cfg, err := workorchconfig.Current()
 	if err != nil {
 		return nil, err
 	}
-	return NewRuntimeSession(bootstrapRuntime), nil
+	bootstrapRuntime, err := buildBootstrapRuntime(func() *bootstrap.Runtime {
+		return bootstrap.NewWithBackend(cfg.Repository.Backend, cfg.Repository.DataDir)
+	})
+	if err != nil {
+		return nil, err
+	}
+	session := NewRuntimeSession(bootstrapRuntime)
+	session.setRepositoryConfig(cfg.Repository.Backend, cfg.Repository.DataDir)
+	return session, nil
 }
 
 func (s *RuntimeSession) Close(ctx context.Context) error {
@@ -176,6 +202,31 @@ func EventHubFromContext(ctx context.Context) events.Hub {
 
 func newRuntimeSessionWithBackend(ctx context.Context, backend string, dataRoot string) (*RuntimeSession, error) {
 	return NewRuntimeSessionWithBackendAndEventHub(backend, dataRoot, EventHubFromContext(ctx))
+}
+
+func (s *RuntimeSession) setRepositoryConfig(backend string, dataRoot string) {
+	if s == nil {
+		return
+	}
+	s.repositoryBackend = strings.TrimSpace(backend)
+	if s.repositoryBackend == "" {
+		s.repositoryBackend = "memory"
+	}
+	s.repositoryDataDir = bootstrap.ResolveRepositoryDataRoot(s.repositoryBackend, strings.TrimSpace(dataRoot))
+}
+
+func (s *RuntimeSession) RepositoryBackend() string {
+	if s == nil {
+		return ""
+	}
+	return s.repositoryBackend
+}
+
+func (s *RuntimeSession) RepositoryDataDir() string {
+	if s == nil {
+		return ""
+	}
+	return s.repositoryDataDir
 }
 
 func exportsFromRuntimeHelper(runtime runtimecommon.Helper) bootstrap.Exports {

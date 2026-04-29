@@ -6,6 +6,7 @@ export type ServiceStatus = {
 export type ServiceConfiguration = {
   server: ServerConfiguration;
   repository: RepositoryConfiguration;
+  runtime: RuntimeConfiguration;
   llm: LLMConfiguration;
 };
 
@@ -22,6 +23,10 @@ export type ServerConfiguration = {
 export type RepositoryConfiguration = {
   backend?: string;
   dataDir?: string;
+};
+
+export type RuntimeConfiguration = {
+  defaultSoulId?: string;
 };
 
 export type LLMConfiguration = {
@@ -88,6 +93,8 @@ export type Workspace = {
   workingDirectory: string;
   state: string;
   activeRunId?: string;
+  defaultSoulId?: string;
+  soulBindings?: Record<string, string>;
 };
 
 export type Goal = {
@@ -122,6 +129,7 @@ export type WorkspaceExecutionActivationRequest = {
   doDId?: string;
   llmProviderId?: string;
   soulId?: string;
+  soulBindings?: Record<string, string>;
   skillIds?: string[];
   mcpServerIds?: string[];
   memoryIds?: string[];
@@ -132,6 +140,24 @@ export type Soul = {
   id: string;
   name: string;
   description?: string;
+  businessDomains?: string[];
+  systemInstruction?: string;
+  planningPolicy?: string;
+  decisionPolicy?: string;
+  approvalPolicy?: string;
+  validationPolicy?: string;
+  allowedSkillRefs?: string[];
+  allowedMCPServerRefs?: string[];
+  allowedToolKinds?: string[];
+  outputContract?: string;
+};
+
+export type WorkspaceSoulBindings = {
+  workspaceId?: string;
+  defaultSoulId?: string;
+  bindings?: Record<string, string>;
+  priorityPolicy?: string[];
+  availableStages?: string[];
 };
 
 export type Skill = {

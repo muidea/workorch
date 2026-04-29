@@ -13,6 +13,9 @@ maxConcurrentRuns = 1
 backend = "file"
 dataDir = ".workorch-data"
 
+[runtime]
+defaultSoulId = ""
+
 [llm]
 defaultProvider = "local"
 

@@ -14,7 +14,6 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	soulmodule "github.com/muidea/workorch/internal/modules/kernel/soul"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -23,14 +22,15 @@ import (
 )
 
 type ActivateWorkspaceExecutionCommand struct {
-	GoalID        string   `json:"goalId,omitempty"`
-	DoDID         string   `json:"doDId,omitempty"`
-	LLMProviderID string   `json:"llmProviderId,omitempty"`
-	SoulID        string   `json:"soulId,omitempty"`
-	SkillIDs      []string `json:"skillIds,omitempty"`
-	MCPServerIDs  []string `json:"mcpServerIds,omitempty"`
-	MemoryIDs     []string `json:"memoryIds,omitempty"`
-	Priority      int      `json:"priority,omitempty"`
+	GoalID        string            `json:"goalId,omitempty"`
+	DoDID         string            `json:"doDId,omitempty"`
+	LLMProviderID string            `json:"llmProviderId,omitempty"`
+	SoulID        string            `json:"soulId,omitempty"`
+	SoulBindings  map[string]string `json:"soulBindings,omitempty"`
+	SkillIDs      []string          `json:"skillIds,omitempty"`
+	MCPServerIDs  []string          `json:"mcpServerIds,omitempty"`
+	MemoryIDs     []string          `json:"memoryIds,omitempty"`
+	Priority      int               `json:"priority,omitempty"`
 }
 
 type WorkspaceExecutionActivation struct {
@@ -221,20 +221,21 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 	mcpServerIDs := normalizeStringIDs(cmd.MCPServerIDs)
 	memoryIDs := normalizeStringIDs(cmd.MemoryIDs)
 
-	var soul *soulmodel.Soul
-	if strings.TrimSpace(cmd.SoulID) != "" {
-		if exports.Services.SoulService == nil {
-			return nil, common.ErrInvalidArgument
-		}
-		soul, err = exports.Services.SoulService.GetSoul(ctx, common.SoulID(strings.TrimSpace(cmd.SoulID)))
-		if err != nil {
-			return nil, err
-		}
-		contextData["soulId"] = string(soul.ID)
-		contextData["soul"] = soulContext(soul)
+	workspace, err := exports.Repositories.Workspaces.Get(ctx, workspaceID)
+	if err != nil {
+		return nil, err
 	}
+	defaultSoul, soulRouting, effectiveSoulIDs, err := resolveWorkspaceSoulRouting(ctx, exports, workspace, cmd)
+	if err != nil {
+		return nil, err
+	}
+	if defaultSoul != nil {
+		contextData["soulId"] = string(defaultSoul.ID)
+		contextData["soul"] = soulContext(defaultSoul)
+	}
+	contextData["soulRouting"] = soulRouting
 
-	skills, skillIDs, skillSelection, err := selectSkillsForWorkspaceExecution(ctx, session, workspaceID, goal, dod, cmd.SkillIDs, soul)
+	skills, skillIDs, skillSelection, err := selectSkillsForWorkspaceExecution(ctx, session, workspaceID, goal, dod, cmd.SkillIDs, defaultSoul)
 	if err != nil {
 		return nil, err
 	}
@@ -268,13 +269,8 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 		contextData["mcpServers"] = mcpServerContexts(mcpServers)
 	}
 
-	if soul != nil {
-		if err := exports.Services.SoulService.ValidateCapabilitySelection(ctx, soulmodule.ValidateCapabilitySelectionCommand{
-			SoulID:        soul.ID,
-			SkillRefs:     skillIDs,
-			MCPServerRefs: mcpServerIDs,
-			ToolKinds:     requiredToolKinds(skills),
-		}); err != nil {
+	for _, soulID := range effectiveSoulIDs {
+		if err := validateSoulCapabilitySelection(ctx, exports.Services.SoulService, soulID, skillIDs, mcpServerIDs, requiredToolKinds(skills)); err != nil {
 			return nil, err
 		}
 	}

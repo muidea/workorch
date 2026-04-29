@@ -15,6 +15,7 @@ import (
 type ServiceConfiguration struct {
 	Server     ServerConfiguration     `json:"server"`
 	Repository RepositoryConfiguration `json:"repository"`
+	Runtime    RuntimeConfiguration    `json:"runtime"`
 	LLM        LLMConfiguration        `json:"llm"`
 }
 
@@ -31,6 +32,10 @@ type ServerConfiguration struct {
 type RepositoryConfiguration struct {
 	Backend string `json:"backend"`
 	DataDir string `json:"dataDir"`
+}
+
+type RuntimeConfiguration struct {
+	DefaultSoulID string `json:"defaultSoulId,omitempty"`
 }
 
 type LLMConfiguration struct {
@@ -138,6 +143,9 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 		Repository: RepositoryConfiguration{
 			Backend: cfg.Repository.Backend,
 			DataDir: cfg.Repository.DataDir,
+		},
+		Runtime: RuntimeConfiguration{
+			DefaultSoulID: strings.TrimSpace(cfg.Runtime.DefaultSoulID),
 		},
 		LLM: LLMConfiguration{
 			DefaultProviderID:          defaultProviderID,

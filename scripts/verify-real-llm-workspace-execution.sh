@@ -187,7 +187,7 @@ if context_bundle.get("runId") != run.get("id") or context_bundle.get("workspace
 if bundle_compressed.get("version") != "workorch.compressedContext.v1":
     errors.append(f"context bundle compressedContext invalid: {bundle_compressed}")
 section_ids = {item.get("id") for item in (context_bundle.get("sections") or [])}
-for required in ["workspace", "run", "task_progress", "task_decomposition", "formal_output", "recovery"]:
+for required in ["workspace", "run", "task_progress", "task_decomposition", "formal_outputs", "recovery"]:
     if required not in section_ids:
         errors.append(f"context bundle missing section {required!r}: {section_ids}")
 

@@ -2,6 +2,7 @@ package appservice
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -241,6 +242,140 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	}
 	if stepContext[llmcommon.ExecutionContextLLMProviderID] != "reasoning" {
 		t.Fatalf("first step input = %+v, want llm provider propagated", runSnapshot.Steps[0].Input)
+	}
+}
+
+func TestWorkspaceSoulBindingsWithBackendRoutesExecutionSoulByStage(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-soul-routing", "soul routing workspace", "", "workspaces/soul-routing")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "route soul by workspace stage")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"soul routing is exposed"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	for _, id := range []string{"soul-default", "soul-execution", "soul-decision", "soul-validation"} {
+		if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
+			ID:                id,
+			Name:              id,
+			SystemInstruction: "Use " + id,
+		}); err != nil {
+			t.Fatalf("CreateSoulWithBackend %s: %v", id, err)
+		}
+	}
+
+	bindings, err := UpdateWorkspaceSoulBindingsWithBackend(ctx, "file", dataRoot, workspace.ID, WorkspaceSoulBindings{
+		DefaultSoulID: "soul-default",
+		Bindings: map[string]string{
+			SoulBindingStageExecution: "soul-execution",
+			SoulBindingStageDecision:  "soul-decision",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateWorkspaceSoulBindingsWithBackend: %v", err)
+	}
+	if bindings.DefaultSoulID != "soul-default" ||
+		bindings.Bindings[SoulBindingStageExecution] != "soul-execution" ||
+		bindings.Bindings[SoulBindingStageDecision] != "soul-decision" {
+		t.Fatalf("bindings = %+v, want default/execution/decision souls", bindings)
+	}
+	readBack, err := ReadWorkspaceSoulBindingsWithBackend(ctx, "file", dataRoot, workspace.ID)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceSoulBindingsWithBackend: %v", err)
+	}
+	if readBack.DefaultSoulID != bindings.DefaultSoulID || readBack.Bindings[SoulBindingStageExecution] != "soul-execution" {
+		t.Fatalf("readBack = %+v, want persisted bindings", readBack)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+		SoulBindings: map[string]string{
+			SoulBindingStageValidation: "soul-validation",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	routing := contextMapFromValue(t, item.Run.ExecutionContext["soulRouting"])
+	if routing["status"] != "resolved" || routing["effectiveDefaultSoulId"] != "soul-default" {
+		t.Fatalf("soulRouting = %+v, want resolved workspace default", routing)
+	}
+	routingBindings := contextMapFromValue(t, routing["bindings"])
+	assertSoulRoutingBinding(t, routingBindings, SoulBindingStagePlanning, "soul-default", "workspace_default")
+	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageExecution, "soul-execution", "workspace_stage_binding")
+	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageDecision, "soul-decision", "workspace_stage_binding")
+	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageValidation, "soul-validation", "run_stage_override")
+}
+
+func TestActivateWorkspaceExecutionWithBackendUsesSystemDefaultSoul(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	useSystemDefaultSoulConfig(t, "soul-system-default")
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-system-soul-routing", "system soul routing workspace", "", "workspaces/system-soul-routing")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "use system default soul")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"system default soul is used"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
+		ID:                "soul-system-default",
+		Name:              "System Default Soul",
+		SystemInstruction: "Use system default soul.",
+	}); err != nil {
+		t.Fatalf("CreateSoulWithBackend: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	if item.Run.ExecutionContext["soulId"] != "soul-system-default" {
+		t.Fatalf("executionContext = %+v, want system default soul id", item.Run.ExecutionContext)
+	}
+	routing := contextMapFromValue(t, item.Run.ExecutionContext["soulRouting"])
+	if routing["effectiveDefaultSoulId"] != "soul-system-default" {
+		t.Fatalf("soulRouting = %+v, want system default soul", routing)
+	}
+	routingBindings := contextMapFromValue(t, routing["bindings"])
+	assertSoulRoutingBinding(t, routingBindings, SoulBindingStagePlanning, "soul-system-default", "system_default")
+	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageValidation, "soul-system-default", "system_default")
+}
+
+func TestWorkspaceSoulBindingsWithBackendRejectsInvalidBinding(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-soul-routing-invalid", "soul routing invalid workspace", "", "workspaces/soul-routing-invalid")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+
+	if _, err := UpdateWorkspaceSoulBindingsWithBackend(ctx, "file", dataRoot, workspace.ID, WorkspaceSoulBindings{
+		Bindings: map[string]string{"not-a-stage": "soul-missing"},
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want invalid argument for unsupported stage", err)
+	}
+	if _, err := UpdateWorkspaceSoulBindingsWithBackend(ctx, "file", dataRoot, workspace.ID, WorkspaceSoulBindings{
+		DefaultSoulID: "soul-missing",
+	}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("err = %v, want not found for missing soul", err)
 	}
 }
 
@@ -543,6 +678,33 @@ func contextNumericEquals(value any, want float64) bool {
 	}
 }
 
+func contextMapFromValue(t *testing.T, value any) map[string]any {
+	t.Helper()
+	if value == nil {
+		return nil
+	}
+	if typed, ok := value.(map[string]any); ok {
+		return typed
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal context value: %v", err)
+	}
+	var ret map[string]any
+	if err := json.Unmarshal(payload, &ret); err != nil {
+		t.Fatalf("unmarshal context value: %v", err)
+	}
+	return ret
+}
+
+func assertSoulRoutingBinding(t *testing.T, bindings map[string]any, stage string, soulID string, source string) {
+	t.Helper()
+	binding := contextMapFromValue(t, bindings[stage])
+	if binding["soulId"] != soulID || binding["source"] != source {
+		t.Fatalf("binding[%s] = %+v, want %s/%s", stage, binding, soulID, source)
+	}
+}
+
 func skillSelectionPolicyAndStatus(value any) (string, string) {
 	switch typed := value.(type) {
 	case skillSelectionEvidence:
@@ -591,6 +753,37 @@ streaming = false
 nonChatOperations = ["embeddings"]
 `, "__BASE_URL__", baseURL)
 	content = strings.ReplaceAll(content, "__EMBEDDING_PROVIDER__", embeddingProviderID)
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write application config: %v", err)
+	}
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+}
+
+func useSystemDefaultSoulConfig(t *testing.T, defaultSoulID string) {
+	t.Helper()
+	configDir := t.TempDir()
+	content := strings.ReplaceAll(`
+endpointName = "workorchd"
+
+[repository]
+backend = "file"
+
+[runtime]
+defaultSoulId = "__DEFAULT_SOUL_ID__"
+
+[llm]
+defaultProvider = "local"
+
+[llm.providers.local]
+provider = "compatible"
+baseURL = ""
+apiKey = ""
+model = ""
+timeout = "5s"
+disabled = false
+`, "__DEFAULT_SOUL_ID__", defaultSoulID)
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write application config: %v", err)
 	}

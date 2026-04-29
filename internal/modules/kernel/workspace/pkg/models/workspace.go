@@ -9,4 +9,6 @@ type Workspace struct {
 	WorkingDirectory string
 	State            common.WorkspaceState
 	ActiveRunID      common.RunID
+	DefaultSoulID    common.SoulID
+	SoulBindings     map[string]common.SoulID
 }

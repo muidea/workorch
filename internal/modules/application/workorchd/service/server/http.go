@@ -189,6 +189,13 @@ type workspaceExecutionActivationResponse struct {
 	Activation appservice.WorkspaceExecutionActivation `json:"activation"`
 }
 
+type workspaceSoulBindingsResponse struct {
+	Service      string                           `json:"service"`
+	Backend      string                           `json:"backend,omitempty"`
+	DataRoot     string                           `json:"dataRoot,omitempty"`
+	SoulBindings appservice.WorkspaceSoulBindings `json:"soulBindings"`
+}
+
 type decisionResponse struct {
 	Service  string              `json:"service"`
 	Backend  string              `json:"backend,omitempty"`
@@ -308,14 +315,15 @@ type createRunRequest struct {
 }
 
 type activateWorkspaceExecutionRequest struct {
-	GoalID        string   `json:"goalId,omitempty"`
-	DoDID         string   `json:"doDId,omitempty"`
-	LLMProviderID string   `json:"llmProviderId,omitempty"`
-	SoulID        string   `json:"soulId,omitempty"`
-	SkillIDs      []string `json:"skillIds,omitempty"`
-	MCPServerIDs  []string `json:"mcpServerIds,omitempty"`
-	MemoryIDs     []string `json:"memoryIds,omitempty"`
-	Priority      int      `json:"priority,omitempty"`
+	GoalID        string            `json:"goalId,omitempty"`
+	DoDID         string            `json:"doDId,omitempty"`
+	LLMProviderID string            `json:"llmProviderId,omitempty"`
+	SoulID        string            `json:"soulId,omitempty"`
+	SoulBindings  map[string]string `json:"soulBindings,omitempty"`
+	SkillIDs      []string          `json:"skillIds,omitempty"`
+	MCPServerIDs  []string          `json:"mcpServerIds,omitempty"`
+	MemoryIDs     []string          `json:"memoryIds,omitempty"`
+	Priority      int               `json:"priority,omitempty"`
 }
 
 type createSoulRequest = appservice.CreateSoulCommand
@@ -354,6 +362,8 @@ type errorResponse struct {
 type createWorkspaceFunc func(context.Context, string, string, string, string, string) (appservice.Workspace, error)
 type readWorkspaceFunc func(context.Context, string, string, string) (appservice.Workspace, error)
 type readWorkspaceSnapshotFunc func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error)
+type readWorkspaceSoulBindingsFunc func(context.Context, string, string, string) (appservice.WorkspaceSoulBindings, error)
+type updateWorkspaceSoulBindingsFunc func(context.Context, string, string, string, appservice.WorkspaceSoulBindings) (appservice.WorkspaceSoulBindings, error)
 type listWorkspacesFunc func(context.Context, string, string) ([]appservice.Workspace, error)
 type defineGoalFunc func(context.Context, string, string, string, string) (appservice.Goal, error)
 type updateGoalFunc func(context.Context, string, string, string, string) (appservice.Goal, error)
@@ -368,6 +378,7 @@ type readRunInstanceFunc func(context.Context, string, string, string) (appservi
 type readRunSnapshotFunc func(context.Context, string, string, string) (appservice.RunSnapshot, error)
 type readRunStatusFunc func(context.Context, string, string, string) (appservice.RunStatus, error)
 type readRunObservabilityFunc func(context.Context, string, string, string) (appservice.RunObservability, error)
+type readArtifactContentFunc func(context.Context, string, string, string) (appservice.ArtifactContent, error)
 type readRunTaskProgressFunc func(context.Context, string, string, string) (appservice.TaskProgress, error)
 type readWorkspaceTaskProgressFunc func(context.Context, string, string, string) (appservice.TaskProgress, error)
 type readRunContextBundleFunc func(context.Context, string, string, string) (appservice.ContextBundle, error)
@@ -414,6 +425,8 @@ type serverState struct {
 	createWorkspace                 createWorkspaceFunc
 	readWorkspace                   readWorkspaceFunc
 	readWorkspaceSnapshot           readWorkspaceSnapshotFunc
+	readWorkspaceSoulBindings       readWorkspaceSoulBindingsFunc
+	updateWorkspaceSoulBindings     updateWorkspaceSoulBindingsFunc
 	listWorkspaces                  listWorkspacesFunc
 	defineGoal                      defineGoalFunc
 	updateGoal                      updateGoalFunc
@@ -428,6 +441,7 @@ type serverState struct {
 	readRunSnapshot                 readRunSnapshotFunc
 	readRunStatus                   readRunStatusFunc
 	readRunObservability            readRunObservabilityFunc
+	readArtifactContent             readArtifactContentFunc
 	readRunTaskProgress             readRunTaskProgressFunc
 	readWorkspaceTaskProgress       readWorkspaceTaskProgressFunc
 	readRunContextBundle            readRunContextBundleFunc
@@ -497,6 +511,7 @@ type serverMetrics struct {
 	runSnapshotRequests                atomic.Uint64
 	runStatusRequests                  atomic.Uint64
 	runObservabilityRequests           atomic.Uint64
+	artifactContentRequests            atomic.Uint64
 	runTaskProgressRequests            atomic.Uint64
 	workspaceTaskProgressRequests      atomic.Uint64
 	runContextBundleRequests           atomic.Uint64
@@ -924,6 +939,25 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			TaskDecompositions: items,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/soul-bindings", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "soul-bindings" {
+			http.NotFound(w, r)
+			return
+		}
+		item, err := state.readWorkspaceSoulBindings(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, workspaceSoulBindingsResponse{
+			Service:      "workorch",
+			Backend:      state.config.Backend,
+			DataRoot:     state.config.DataRoot,
+			SoulBindings: item,
+		})
+	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
@@ -1083,6 +1117,16 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			DataRoot:      state.config.DataRoot,
 			Observability: item,
 		})
+	})
+	router.AddHandler("/api/v1/workorch/artifacts/content", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.artifactContentRequests.Add(1)
+		item, err := state.readArtifactContent(r.Context(), state.config.Backend, state.config.DataRoot, r.URL.Query().Get("uri"))
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeArtifactContent(w, item)
 	})
 	router.AddHandler("/api/v1/workorch/runs/:runId/task-progress", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
@@ -1502,6 +1546,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			DoDID:         req.DoDID,
 			LLMProviderID: req.LLMProviderID,
 			SoulID:        req.SoulID,
+			SoulBindings:  req.SoulBindings,
 			SkillIDs:      req.SkillIDs,
 			MCPServerIDs:  req.MCPServerIDs,
 			MemoryIDs:     req.MemoryIDs,
@@ -1517,6 +1562,30 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			Backend:    state.config.Backend,
 			DataRoot:   state.config.DataRoot,
 			Activation: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/soul-bindings", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "soul-bindings" {
+			http.NotFound(w, r)
+			return
+		}
+		var req appservice.WorkspaceSoulBindings
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.updateWorkspaceSoulBindings(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, req)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, workspaceSoulBindingsResponse{
+			Service:      "workorch",
+			Backend:      state.config.Backend,
+			DataRoot:     state.config.DataRoot,
+			SoulBindings: item,
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -1937,6 +2006,8 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		createWorkspace:                 defaultCreateWorkspace,
 		readWorkspace:                   defaultReadWorkspace,
 		readWorkspaceSnapshot:           defaultReadWorkspaceSnapshot,
+		readWorkspaceSoulBindings:       defaultReadWorkspaceSoulBindings,
+		updateWorkspaceSoulBindings:     defaultUpdateWorkspaceSoulBindings,
 		listWorkspaces:                  defaultListWorkspaces,
 		defineGoal:                      defaultDefineGoal,
 		updateGoal:                      defaultUpdateGoal,
@@ -1951,6 +2022,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		readRunSnapshot:                 defaultReadRunSnapshot,
 		readRunStatus:                   defaultReadRunStatus,
 		readRunObservability:            defaultReadRunObservability,
+		readArtifactContent:             defaultReadArtifactContent,
 		readRunTaskProgress:             defaultReadRunTaskProgress,
 		readWorkspaceTaskProgress:       defaultReadWorkspaceTaskProgress,
 		readRunContextBundle:            defaultReadRunContextBundle,
@@ -2049,6 +2121,24 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceSnapshotWithSession(ctx, session, workspaceID)
+			return err
+		})
+		return ret, err
+	}
+	s.readWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string) (appservice.WorkspaceSoulBindings, error) {
+		var ret appservice.WorkspaceSoulBindings
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadWorkspaceSoulBindingsWithSession(ctx, session, workspaceID)
+			return err
+		})
+		return ret, err
+	}
+	s.updateWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string, cmd appservice.WorkspaceSoulBindings) (appservice.WorkspaceSoulBindings, error) {
+		var ret appservice.WorkspaceSoulBindings
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.UpdateWorkspaceSoulBindingsWithSession(ctx, session, workspaceID, cmd)
 			return err
 		})
 		return ret, err
@@ -2202,6 +2292,15 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ReadRunObservabilityWithSession(ctx, session, runID)
+			return err
+		})
+		return ret, err
+	}
+	s.readArtifactContent = func(ctx context.Context, _, _, artifactURI string) (appservice.ArtifactContent, error) {
+		var ret appservice.ArtifactContent
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadArtifactContentWithSession(ctx, session, artifactURI)
 			return err
 		})
 		return ret, err
@@ -2565,6 +2664,14 @@ func defaultReadWorkspaceSnapshot(ctx context.Context, backend string, dataRoot 
 	return appservice.ReadWorkspaceSnapshotWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
+func defaultReadWorkspaceSoulBindings(ctx context.Context, backend string, dataRoot string, workspaceID string) (appservice.WorkspaceSoulBindings, error) {
+	return appservice.ReadWorkspaceSoulBindingsWithBackend(ctx, backend, dataRoot, workspaceID)
+}
+
+func defaultUpdateWorkspaceSoulBindings(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd appservice.WorkspaceSoulBindings) (appservice.WorkspaceSoulBindings, error) {
+	return appservice.UpdateWorkspaceSoulBindingsWithBackend(ctx, backend, dataRoot, workspaceID, cmd)
+}
+
 func defaultReadRun(ctx context.Context, backend string, dataRoot string, runID string) (appservice.Run, error) {
 	return appservice.ReadRunWithBackend(ctx, backend, dataRoot, runID)
 }
@@ -2579,6 +2686,10 @@ func defaultReadRunStatus(ctx context.Context, backend string, dataRoot string, 
 
 func defaultReadRunObservability(ctx context.Context, backend string, dataRoot string, runID string) (appservice.RunObservability, error) {
 	return appservice.ReadRunObservabilityWithBackend(ctx, backend, dataRoot, runID)
+}
+
+func defaultReadArtifactContent(ctx context.Context, backend string, dataRoot string, artifactURI string) (appservice.ArtifactContent, error) {
+	return appservice.ReadArtifactContentWithBackend(ctx, backend, dataRoot, artifactURI)
 }
 
 func defaultReadRunTaskProgress(ctx context.Context, backend string, dataRoot string, runID string) (appservice.TaskProgress, error) {
@@ -2886,6 +2997,7 @@ func (m *serverMetrics) render(config Config) string {
 			"workorch_http_requests_total{endpoint=\"run_snapshot\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_status\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_observability\"} %d\n"+
+			"workorch_http_requests_total{endpoint=\"artifact_content\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_task_progress\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"workspace_task_progress\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_context_bundle\"} %d\n"+
@@ -2936,6 +3048,7 @@ func (m *serverMetrics) render(config Config) string {
 		m.runSnapshotRequests.Load(),
 		m.runStatusRequests.Load(),
 		m.runObservabilityRequests.Load(),
+		m.artifactContentRequests.Load(),
 		m.runTaskProgressRequests.Load(),
 		m.workspaceTaskProgressRequests.Load(),
 		m.runContextBundleRequests.Load(),
@@ -3160,6 +3273,22 @@ func writeBusinessError(w http.ResponseWriter, err error) {
 	default:
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 	}
+}
+
+func writeArtifactContent(w http.ResponseWriter, item appservice.ArtifactContent) {
+	contentType := strings.TrimSpace(item.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	fileName := strings.TrimSpace(item.FileName)
+	if fileName == "" {
+		fileName = "artifact"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": fileName}))
+	w.Header().Set("X-Workorch-Artifact-URI", item.URI)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(item.Content)
 }
 
 func writeRunQueueError(w http.ResponseWriter, err error) {

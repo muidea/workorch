@@ -2,7 +2,6 @@ package workorchruntime
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -10,6 +9,7 @@ import (
 	"github.com/muidea/magicCommon/framework/plugin/initiator"
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
+	appbootstrap "github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
@@ -320,29 +320,28 @@ func buildRepositories(backend string, dataRoot string) (common.RepositorySet, e
 			Approvals:          memory.NewApprovalRepository(),
 		}, nil
 	case "file":
-		if dataRoot == "" {
-			dataRoot = filepath.Join(os.TempDir(), "workorchd-data")
-		}
+		dataRoot = appbootstrap.ResolveRepositoryDataRoot(backend, dataRoot)
+		workspaceScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
 		return common.RepositorySet{
-			Souls:              fileRepo.NewSoulRepository(filepath.Join(dataRoot, "soul.json")),
-			MemoryItems:        fileRepo.NewMemoryItemRepository(filepath.Join(dataRoot, "memory_item.json")),
-			Skills:             fileRepo.NewSkillRepository(filepath.Join(dataRoot, "skill.json")),
-			MCPServers:         fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "mcp_server.json")),
-			Results:            fileRepo.NewResultRepository(filepath.Join(dataRoot, "result.json")),
-			Artifacts:          fileRepo.NewArtifactRepository(filepath.Join(dataRoot, "artifact.json")),
-			EventRecords:       fileRepo.NewEventRecordRepository(filepath.Join(dataRoot, "event_record.json")),
-			Workspaces:         fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json")),
-			Goals:              fileRepo.NewGoalRepository(filepath.Join(dataRoot, "goal.json")),
-			DoDs:               fileRepo.NewDoDRepository(filepath.Join(dataRoot, "dod.json")),
-			Runs:               fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json")),
-			Steps:              fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json")),
-			ToolCalls:          fileRepo.NewToolCallRepository(filepath.Join(dataRoot, "tool_call.json")),
-			Patches:            fileRepo.NewPatchRepository(filepath.Join(dataRoot, "patch.json")),
-			ValidationResults:  fileRepo.NewValidationResultRepository(filepath.Join(dataRoot, "validation_result.json")),
-			RuntimeCheckpoints: fileRepo.NewRuntimeCheckpointRepository(filepath.Join(dataRoot, "runtime_checkpoint.json")),
-			Tickets:            fileRepo.NewDecisionTicketRepository(filepath.Join(dataRoot, "ticket.json")),
-			Resolutions:        fileRepo.NewDecisionResolutionRepository(filepath.Join(dataRoot, "resolution.json")),
-			Approvals:          fileRepo.NewApprovalRepository(filepath.Join(dataRoot, "approval.json")),
+			Souls:              fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "soul.json")),
+			MemoryItems:        workspaceScopedRepos.MemoryItems,
+			Skills:             fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
+			MCPServers:         fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "system", "mcp_server.json")),
+			Results:            workspaceScopedRepos.Results,
+			Artifacts:          workspaceScopedRepos.Artifacts,
+			EventRecords:       workspaceScopedRepos.EventRecords,
+			Workspaces:         workspaceScopedRepos.Workspaces,
+			Goals:              workspaceScopedRepos.Goals,
+			DoDs:               workspaceScopedRepos.DoDs,
+			Runs:               workspaceScopedRepos.Runs,
+			Steps:              workspaceScopedRepos.Steps,
+			ToolCalls:          workspaceScopedRepos.ToolCalls,
+			Patches:            workspaceScopedRepos.Patches,
+			ValidationResults:  workspaceScopedRepos.ValidationResults,
+			RuntimeCheckpoints: workspaceScopedRepos.RuntimeCheckpoints,
+			Tickets:            workspaceScopedRepos.Tickets,
+			Resolutions:        workspaceScopedRepos.Resolutions,
+			Approvals:          workspaceScopedRepos.Approvals,
 		}, nil
 	default:
 		return common.RepositorySet{}, fmt.Errorf("unsupported repository backend: %s", backend)

@@ -473,8 +473,7 @@ func (r *WorkspaceRepository) Create(_ context.Context, item *workspace.Workspac
 	if _, ok := r.items[item.ID]; ok {
 		return common.ErrConflict
 	}
-	cloned := *item
-	r.items[item.ID] = &cloned
+	r.items[item.ID] = cloneWorkspace(item)
 	return nil
 }
 
@@ -485,8 +484,7 @@ func (r *WorkspaceRepository) Get(_ context.Context, id common.WorkspaceID) (*wo
 	if !ok {
 		return nil, common.ErrNotFound
 	}
-	cloned := *item
-	return &cloned, nil
+	return cloneWorkspace(item), nil
 }
 
 func (r *WorkspaceRepository) List(_ context.Context) ([]*workspace.Workspace, error) {
@@ -501,8 +499,7 @@ func (r *WorkspaceRepository) List(_ context.Context) ([]*workspace.Workspace, e
 
 	ret := make([]*workspace.Workspace, 0, len(ids))
 	for _, id := range ids {
-		cloned := *r.items[common.WorkspaceID(id)]
-		ret = append(ret, &cloned)
+		ret = append(ret, cloneWorkspace(r.items[common.WorkspaceID(id)]))
 	}
 	return ret, nil
 }
@@ -513,9 +510,19 @@ func (r *WorkspaceRepository) Update(_ context.Context, item *workspace.Workspac
 	if _, ok := r.items[item.ID]; !ok {
 		return common.ErrNotFound
 	}
-	cloned := *item
-	r.items[item.ID] = &cloned
+	r.items[item.ID] = cloneWorkspace(item)
 	return nil
+}
+
+func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
+	cloned := *item
+	if item.SoulBindings != nil {
+		cloned.SoulBindings = map[string]common.SoulID{}
+		for key, value := range item.SoulBindings {
+			cloned.SoulBindings[key] = value
+		}
+	}
+	return &cloned
 }
 
 type GoalRepository struct {

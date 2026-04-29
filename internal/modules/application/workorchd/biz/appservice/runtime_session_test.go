@@ -342,8 +342,11 @@ func TestNewRuntimeSessionWithBackendFileUsesDefaultDataRootWhenUnset(t *testing
 		t.Fatalf("create workspace: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(defaultDataDir, "workspace.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(defaultDataDir, "workspaces", "ws-runtime-session-default-file", "workspace.json")); err != nil {
 		t.Fatalf("expected workspace persistence file in default data dir: %v", err)
+	}
+	if session.RepositoryBackend() != "file" || session.RepositoryDataDir() != defaultDataDir {
+		t.Fatalf("repository config = %q/%q, want file/%q", session.RepositoryBackend(), session.RepositoryDataDir(), defaultDataDir)
 	}
 }
 

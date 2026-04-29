@@ -15,13 +15,13 @@ import (
 	"testing"
 	"time"
 
+	appbootstrap "github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
 )
 
 type workorchWorkspaceResponse struct {
@@ -248,6 +248,7 @@ func TestWorkorchdServerSupportsFileRepositoryBackend(t *testing.T) {
 	waitForHealthy(t, "http://"+addr+"/healthz")
 
 	workspaceID := createWorkspace(t, "http://"+addr+"/api/v1/workorch/workspaces", "main file workspace")
+	assertWorkspaceLayoutDirectories(t, dataDir, workspaceID)
 	createRunInstance(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", "run-main-file", "goal-main-file", "dod-main-file")
 	assertWorkspaceListAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces", workspaceID)
 	assertWorkspaceAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID, workspaceID, "main file workspace", "active")
@@ -302,19 +303,14 @@ func TestWorkorchdServerSupportsFileRepositoryBackend(t *testing.T) {
 		[]string{blockedApprovalID, rejectedApprovalID},
 	)
 
-	for _, name := range []string{
-		"workspace.json",
-		"goal.json",
-		"dod.json",
-		"run.json",
-		"step.json",
-		"ticket.json",
-		"resolution.json",
-		"approval.json",
-		"event_record.json",
-	} {
-		if _, err := os.Stat(filepath.Join(dataDir, name)); err != nil {
-			t.Fatalf("expected persisted file %s: %v", name, err)
+	for _, name := range []string{"workspace.json", "goals.json", "dods.json"} {
+		if _, err := os.Stat(filepath.Join(dataDir, "workspaces", workspaceID, name)); err != nil {
+			t.Fatalf("expected workspace-scoped persisted file %s: %v", name, err)
+		}
+	}
+	for _, runID := range []string{"run-main-file", decisionResolveRunID, decisionRejectRunID, approvalApproveRunID, approvalRejectRunID} {
+		if _, err := os.Stat(filepath.Join(dataDir, "workspaces", workspaceID, "runs", runID, "run.json")); err != nil {
+			t.Fatalf("expected run-scoped persistence for %s: %v", runID, err)
 		}
 	}
 }
@@ -332,6 +328,7 @@ func TestWorkorchdServerRetainsFileBackedTerminalStateAcrossRestart(t *testing.T
 	waitForHealthy(t, "http://"+firstAddr+"/healthz")
 
 	workspaceID := createWorkspace(t, "http://"+firstAddr+"/api/v1/workorch/workspaces", "restart file workspace")
+	assertWorkspaceLayoutDirectories(t, dataDir, workspaceID)
 
 	createRunInstance(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", "run-restart-completed", "", "")
 	assertRunStartAvailable(t, "http://"+firstAddr+"/api/v1/workorch/runs/run-restart-completed/start", "run-restart-completed", "failed")
@@ -598,15 +595,23 @@ func createWorkspace(t *testing.T, endpoint string, title string) string {
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode create workspace response: %v", err)
 	}
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	workingDirectory := filepath.Join(wd, "workspaces", payload.Workspace.ID)
-	if payload.Workspace.ID == "" || payload.Workspace.Title != title || payload.Workspace.Description != description || payload.Workspace.WorkingDirectory != workingDirectory || payload.Workspace.State != "active" {
-		t.Fatalf("created workspace = %+v, want generated/%s/%s/%s/active", payload.Workspace, title, description, workingDirectory)
+	if payload.Workspace.ID == "" || payload.Workspace.Title != title || payload.Workspace.Description != description || payload.Workspace.WorkingDirectory == "" || payload.Workspace.State != "active" {
+		t.Fatalf("created workspace = %+v, want generated/%s/%s/non-empty working directory/active", payload.Workspace, title, description)
 	}
 	return payload.Workspace.ID
+}
+
+func assertWorkspaceLayoutDirectories(t *testing.T, dataDir string, workspaceID string) {
+	t.Helper()
+	for _, dir := range []string{
+		filepath.Join(dataDir, "workspaces", workspaceID, "working"),
+		filepath.Join(dataDir, "workspaces", workspaceID, "artifacts"),
+		filepath.Join(dataDir, "workspaces", workspaceID, "runs"),
+	} {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Fatalf("workspace directory %q = %v/%v, want existing directory", dir, info, err)
+		}
+	}
 }
 
 func assertWorkspaceListAvailable(t *testing.T, endpoint string, workspaceID string) {
@@ -722,9 +727,10 @@ func seedBlockedDecisionRunForProcess(t *testing.T, dataRoot string, workspaceID
 	ticketID := common.TicketID("ticket-" + runID + "-decision")
 	stepID := common.StepID(runID + "/decision")
 	ctx := context.Background()
-	runRepo := fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json"))
-	stepRepo := fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json"))
-	ticketRepo := fileRepo.NewDecisionTicketRepository(filepath.Join(dataRoot, "ticket.json"))
+	runScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	runRepo := runScopedRepos.Runs
+	stepRepo := runScopedRepos.Steps
+	ticketRepo := runScopedRepos.Tickets
 
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:               common.RunID(runID),
@@ -766,9 +772,10 @@ func seedBlockedApprovalRunForProcess(t *testing.T, dataRoot string, workspaceID
 	approvalID := common.ApprovalID("approval-" + runID + "-approval")
 	stepID := common.StepID(runID + "/approval")
 	ctx := context.Background()
-	runRepo := fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json"))
-	stepRepo := fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json"))
-	approvalRepo := fileRepo.NewApprovalRepository(filepath.Join(dataRoot, "approval.json"))
+	runScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	runRepo := runScopedRepos.Runs
+	stepRepo := runScopedRepos.Steps
+	approvalRepo := runScopedRepos.Approvals
 
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:                 common.RunID(runID),

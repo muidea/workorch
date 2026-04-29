@@ -47,6 +47,16 @@ body {
   background: #f8fbff;
 }
 
+.soul-binding-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0 12px;
+}
+
+.soul-binding-grid-compact {
+  margin-top: 8px;
+}
+
 .workorch-selected-row td {
   background: #e8f1ff !important;
 }

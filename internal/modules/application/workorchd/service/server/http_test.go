@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,17 +20,19 @@ import (
 	engine "github.com/muidea/magicEngine/http"
 	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	appbootstrap "github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
+	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
-	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 
 	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
@@ -149,6 +152,7 @@ func TestConfigurationEndpointReturnsRedactedLLMProviders(t *testing.T) {
 		return appservice.ServiceConfiguration{
 			Server:     appservice.ServerConfiguration{Addr: ":8080", MaxConcurrentRuns: 1},
 			Repository: appservice.RepositoryConfiguration{Backend: "file", DataDir: ".workorch-data"},
+			Runtime:    appservice.RuntimeConfiguration{DefaultSoulID: "soul-system"},
 			LLM: appservice.LLMConfiguration{
 				DefaultProviderID: "local",
 				Providers: []appservice.LLMProviderConfiguration{{
@@ -177,6 +181,7 @@ func TestConfigurationEndpointReturnsRedactedLLMProviders(t *testing.T) {
 		t.Fatalf("unmarshal configuration: %v", err)
 	}
 	if body.Configuration.LLM.DefaultProviderID != "local" ||
+		body.Configuration.Runtime.DefaultSoulID != "soul-system" ||
 		len(body.Configuration.LLM.Providers) != 1 ||
 		!body.Configuration.LLM.Providers[0].APIKeyConfigured ||
 		strings.Contains(rec.Body.String(), "secret-value") {
@@ -500,6 +505,8 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/task-progress"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/context-bundle"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/task-decompositions"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/soul-bindings"},
+		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/soul-bindings"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/goals/:goalId"},
@@ -637,6 +644,31 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 			t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
 		}
 		return appservice.WorkspaceSnapshot{Workspace: appservice.Workspace{ID: workspaceID}}, nil
+	}
+	state.readWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string) (appservice.WorkspaceSoulBindings, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("workspace soul bindings read event hub = %#v, want injected hub", got)
+		}
+		if workspaceID != "ws-native-read" {
+			t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
+		}
+		return appservice.WorkspaceSoulBindings{
+			WorkspaceID:   workspaceID,
+			DefaultSoulID: "soul-native",
+			Bindings: map[string]string{
+				"planning": "soul-native",
+			},
+		}, nil
+	}
+	state.updateWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string, cmd appservice.WorkspaceSoulBindings) (appservice.WorkspaceSoulBindings, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("workspace soul bindings update event hub = %#v, want injected hub", got)
+		}
+		if workspaceID != "ws-native-read" || cmd.DefaultSoulID != "soul-native" || cmd.Bindings["execution"] != "soul-native-execution" {
+			t.Fatalf("soul bindings input = %+v for workspace %q, want native soul bindings", cmd, workspaceID)
+		}
+		cmd.WorkspaceID = workspaceID
+		return cmd, nil
 	}
 	state.readWorkspaceTaskProgress = func(ctx context.Context, _, _, workspaceID string) (appservice.TaskProgress, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
@@ -808,6 +840,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 			cmd.GoalID != "goal-native" ||
 			cmd.DoDID != "dod-native" ||
 			cmd.SoulID != "soul-native" ||
+			cmd.SoulBindings["validation"] != "soul-native-validation" ||
 			cmd.Priority != 9 ||
 			!stringSliceEqual(cmd.SkillIDs, []string{"skill-native"}) ||
 			!stringSliceEqual(cmd.MCPServerIDs, []string{"mcp-native"}) ||
@@ -880,6 +913,8 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/task-progress", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/context-bundle", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/task-decompositions", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/soul-bindings", status: http.StatusOK},
+		{method: http.MethodPut, path: "/api/v1/workorch/workspaces/ws-native-read/soul-bindings", body: `{"defaultSoulId":"soul-native","bindings":{"execution":"soul-native-execution"}}`, status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs", body: `{"runId":"run-native-write","goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusCreated},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs?workspaceId=ws-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read", status: http.StatusOK},
@@ -891,7 +926,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/task-decompositions", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/start", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/resume", status: http.StatusOK},
-		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native","soulId":"soul-native","skillIds":["skill-native"],"mcpServerIds":["mcp-native"],"memoryIds":["memory-native"],"priority":9}`, status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native","soulId":"soul-native","soulBindings":{"validation":"soul-native-validation"},"skillIds":["skill-native"],"mcpServerIds":["mcp-native"],"memoryIds":["memory-native"],"priority":9}`, status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions?workspaceId=ws-native-read&runId=run-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions/ticket-native-read", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/decisions/ticket-native-read/resolve", status: http.StatusOK},
@@ -939,7 +974,8 @@ func TestWorkspaceCreateEndpointReturnsCreatedWorkspace(t *testing.T) {
 }
 
 func TestWorkspaceCreateEndpointDefaultsWorkingDirectory(t *testing.T) {
-	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+	dataRoot := t.TempDir()
+	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"http default directory workspace"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -955,13 +991,66 @@ func TestWorkspaceCreateEndpointDefaultsWorkingDirectory(t *testing.T) {
 	if body.Workspace.ID == "" {
 		t.Fatalf("workspace id is empty")
 	}
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	want := filepath.Join(wd, "workspaces", body.Workspace.ID)
+	want := filepath.Join(dataRoot, "workspaces", body.Workspace.ID, "working")
 	if body.Workspace.WorkingDirectory != want {
 		t.Fatalf("workingDirectory = %q, want %q", body.Workspace.WorkingDirectory, want)
+	}
+	for _, dir := range []string{
+		filepath.Join(dataRoot, "workspaces", body.Workspace.ID, "working"),
+		filepath.Join(dataRoot, "workspaces", body.Workspace.ID, "artifacts"),
+		filepath.Join(dataRoot, "workspaces", body.Workspace.ID, "runs"),
+	} {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Fatalf("workspace directory %q = %v/%v, want existing directory", dir, info, err)
+		}
+	}
+}
+
+func TestArtifactContentEndpointReturnsStoredArtifactFile(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	session, err := appservice.NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("Exports: %v", err)
+	}
+	artifact := &resultmodel.Artifact{
+		ID:           common.ArtifactID("run-http-artifact/artifact/result-summary"),
+		WorkspaceID:  common.WorkspaceID("ws-http-artifact"),
+		RunID:        common.RunID("run-http-artifact"),
+		ResultID:     common.ResultID("run-http-artifact/result/dod-assessment"),
+		ArtifactType: resultcommon.ArtifactTypeText,
+		Name:         "Accepted Result Summary",
+		Summary:      "HTTP artifact payload",
+		State:        common.ArtifactStateAvailable,
+	}
+	if err := exports.Repositories.Artifacts.Create(ctx, artifact); err != nil {
+		t.Fatalf("Create artifact: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("Close session: %v", err)
+	}
+
+	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	artifactURI := "workorch://workspaces/ws-http-artifact/artifacts/run-http-artifact/result-summary.txt"
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/artifacts/content?uri="+url.QueryEscape(artifactURI), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("content-type = %q, want text/plain", got)
+	}
+	if got := rec.Header().Get("X-Workorch-Artifact-URI"); got != artifactURI {
+		t.Fatalf("artifact uri header = %q, want %q", got, artifactURI)
+	}
+	if rec.Body.String() != "HTTP artifact payload\n" {
+		t.Fatalf("body = %q, want artifact payload", rec.Body.String())
 	}
 }
 
@@ -1276,21 +1365,22 @@ func TestRunSnapshotEndpointReturnsExecutionEvidence(t *testing.T) {
 	stepID := common.StepID("run-evidence-http/step-1")
 	toolCallID := common.ToolCallID("tool-call-evidence-http")
 
-	if err := fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json")).Create(ctx, &workspacemodel.Workspace{
+	runScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	if err := runScopedRepos.Workspaces.Create(ctx, &workspacemodel.Workspace{
 		ID:    workspaceID,
 		Title: "run evidence http",
 		State: common.WorkspaceStateActive,
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json")).Create(ctx, &runmodel.Run{
+	if err := runScopedRepos.Runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
 		State:       common.RunStateCompleted,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json")).Create(ctx, &runmodel.Step{
+	if err := runScopedRepos.Steps.Create(ctx, &runmodel.Step{
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "validation",
@@ -1298,7 +1388,7 @@ func TestRunSnapshotEndpointReturnsExecutionEvidence(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
-	if err := fileRepo.NewToolCallRepository(filepath.Join(dataRoot, "tool_call.json")).Create(ctx, &runmodel.ToolCall{
+	if err := runScopedRepos.ToolCalls.Create(ctx, &runmodel.ToolCall{
 		ID:          toolCallID,
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -1309,7 +1399,7 @@ func TestRunSnapshotEndpointReturnsExecutionEvidence(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create tool call: %v", err)
 	}
-	if err := fileRepo.NewPatchRepository(filepath.Join(dataRoot, "patch.json")).Create(ctx, &runmodel.Patch{
+	if err := runScopedRepos.Patches.Create(ctx, &runmodel.Patch{
 		ID:          common.PatchID("patch-evidence-http"),
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -1320,7 +1410,7 @@ func TestRunSnapshotEndpointReturnsExecutionEvidence(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create patch: %v", err)
 	}
-	if err := fileRepo.NewValidationResultRepository(filepath.Join(dataRoot, "validation_result.json")).Create(ctx, &runmodel.ValidationResult{
+	if err := runScopedRepos.ValidationResults.Create(ctx, &runmodel.ValidationResult{
 		ID:             common.ValidationResultID("validation-evidence-http"),
 		WorkspaceID:    workspaceID,
 		RunID:          runID,
@@ -1330,7 +1420,7 @@ func TestRunSnapshotEndpointReturnsExecutionEvidence(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create validation result: %v", err)
 	}
-	if err := fileRepo.NewRuntimeCheckpointRepository(filepath.Join(dataRoot, "runtime_checkpoint.json")).Create(ctx, &runmodel.RuntimeCheckpoint{
+	if err := runScopedRepos.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
 		ID:               common.CheckpointID("checkpoint-evidence-http"),
 		WorkspaceID:      workspaceID,
 		RunID:            runID,
@@ -1402,9 +1492,9 @@ func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.
 
 	workspace := createWorkspaceForHTTP(t, handler, "workspace snapshot http", "workspaces/workspace-snapshot-http")
 	ctx := context.Background()
-	runRepo := fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json"))
-	workspaceRepo := fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json"))
-	if err := runRepo.Create(ctx, &runmodel.Run{
+	runScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	workspaceRepo := runScopedRepos.Workspaces
+	if err := runScopedRepos.Runs.Create(ctx, &runmodel.Run{
 		ID:          "run-workspace-snapshot-http-completed",
 		WorkspaceID: common.WorkspaceID(workspace.ID),
 		State:       common.RunStateCompleted,
@@ -2165,9 +2255,10 @@ func seedBlockedDecisionRunInWorkspaceForHTTP(t *testing.T, dataRoot string, wor
 	ticketID := common.TicketID("ticket-" + runID + "-decision")
 	stepID := common.StepID(runID + "/decision")
 	ctx := context.Background()
-	runRepo := fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json"))
-	stepRepo := fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json"))
-	ticketRepo := fileRepo.NewDecisionTicketRepository(filepath.Join(dataRoot, "ticket.json"))
+	runScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	runRepo := runScopedRepos.Runs
+	stepRepo := runScopedRepos.Steps
+	ticketRepo := runScopedRepos.Tickets
 	if existing, err := runRepo.Get(ctx, common.RunID(runID)); err == nil {
 		existing.State = common.RunStateBlockedOnDecision
 		existing.BlockingTicketID = ticketID
@@ -2231,9 +2322,10 @@ func seedBlockedApprovalRunInWorkspaceForHTTP(t *testing.T, dataRoot string, wor
 	approvalID := common.ApprovalID("approval-" + runID + "-approval")
 	stepID := common.StepID(runID + "/approval")
 	ctx := context.Background()
-	runRepo := fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json"))
-	stepRepo := fileRepo.NewStepRepository(filepath.Join(dataRoot, "step.json"))
-	approvalRepo := fileRepo.NewApprovalRepository(filepath.Join(dataRoot, "approval.json"))
+	runScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	runRepo := runScopedRepos.Runs
+	stepRepo := runScopedRepos.Steps
+	approvalRepo := runScopedRepos.Approvals
 	if existing, err := runRepo.Get(ctx, common.RunID(runID)); err == nil {
 		existing.State = common.RunStateBlockedOnApproval
 		existing.BlockingApprovalID = approvalID
@@ -2291,10 +2383,11 @@ func seedBlockedRunForHTTP(t *testing.T, dataRoot string, title string, runID st
 		WorkingDirectory: "workspaces/" + runID,
 		State:            common.WorkspaceStateActive,
 	}
-	if err := fileRepo.NewWorkspaceRepository(filepath.Join(dataRoot, "workspace.json")).Create(ctx, workspace); err != nil {
+	runScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	if err := runScopedRepos.Workspaces.Create(ctx, workspace); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	runRepo := fileRepo.NewRunRepository(filepath.Join(dataRoot, "run.json"))
+	runRepo := runScopedRepos.Runs
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          common.RunID(runID),
 		WorkspaceID: workspace.ID,

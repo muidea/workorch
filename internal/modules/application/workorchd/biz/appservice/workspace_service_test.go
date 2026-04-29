@@ -50,17 +50,37 @@ func TestReadWorkspaceWithBackendReturnsPersistedWorkspace(t *testing.T) {
 }
 
 func TestCreateWorkspaceWithBackendDefaultsWorkingDirectory(t *testing.T) {
-	item, err := CreateWorkspaceWithBackend(context.Background(), "file", t.TempDir(), "appservice default directory workspace", "", "")
+	dataRoot := t.TempDir()
+	item, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "appservice default directory workspace", "", "")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	want := filepath.Join(wd, "workspaces", item.ID)
+	want := filepath.Join(dataRoot, "workspaces", item.ID, "working")
 	if item.WorkingDirectory != want {
 		t.Fatalf("workingDirectory = %q, want %q", item.WorkingDirectory, want)
+	}
+	for _, dir := range []string{
+		filepath.Join(dataRoot, "workspaces", item.ID, "working"),
+		filepath.Join(dataRoot, "workspaces", item.ID, "artifacts"),
+		filepath.Join(dataRoot, "workspaces", item.ID, "runs"),
+	} {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Fatalf("workspace directory %q = %v/%v, want existing directory", dir, info, err)
+		}
+	}
+}
+
+func TestCreateWorkspaceWithBackendCreatesExplicitWorkingDirectory(t *testing.T) {
+	workingDirectory := filepath.Join(t.TempDir(), "custom-working")
+	item, err := CreateWorkspaceWithBackend(context.Background(), "file", t.TempDir(), "appservice explicit directory workspace", "", workingDirectory)
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	if item.WorkingDirectory != workingDirectory {
+		t.Fatalf("workingDirectory = %q, want %q", item.WorkingDirectory, workingDirectory)
+	}
+	if info, err := os.Stat(workingDirectory); err != nil || !info.IsDir() {
+		t.Fatalf("explicit working directory = %v/%v, want existing directory", info, err)
 	}
 }
 

@@ -1,4 +1,4 @@
-import type { Approval, ContextBundle, Decision, DoD, EventRecord, Goal, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, TaskDecomposition, TaskProgress, UpdateLLMConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
+import type { Approval, ContextBundle, Decision, DoD, EventRecord, Goal, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, TaskDecomposition, TaskProgress, UpdateLLMConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -81,6 +81,17 @@ export const workorchApi = {
     const body = await request<{ taskDecompositions: TaskDecomposition[] }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/task-decompositions`);
     return body.taskDecompositions ?? [];
   },
+  readWorkspaceSoulBindings: async (workspaceId: string) => {
+    const body = await request<{ soulBindings: WorkspaceSoulBindings }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/soul-bindings`);
+    return body.soulBindings;
+  },
+  updateWorkspaceSoulBindings: async (workspaceId: string, soulBindings: WorkspaceSoulBindings) => {
+    const body = await request<{ soulBindings: WorkspaceSoulBindings }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/soul-bindings`, {
+      method: 'PUT',
+      body: JSON.stringify(soulBindings)
+    });
+    return body.soulBindings;
+  },
   readWorkspaceContextBundle: async (workspaceId: string) => {
     const body = await request<{ contextBundle: ContextBundle }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/context-bundle`);
     return body.contextBundle;
@@ -140,6 +151,7 @@ export const workorchApi = {
     const body = await request<{ observability: RunObservability }>(`${apiBase}/runs/${encodeURIComponent(runId)}/observability`);
     return body.observability;
   },
+  artifactContentURL: (uri: string) => `${apiBase}/artifacts/content?${new URLSearchParams({ uri }).toString()}`,
   readRunTaskProgress: async (runId: string) => {
     const body = await request<{ taskProgress: TaskProgress }>(`${apiBase}/runs/${encodeURIComponent(runId)}/task-progress`);
     return body.taskProgress;

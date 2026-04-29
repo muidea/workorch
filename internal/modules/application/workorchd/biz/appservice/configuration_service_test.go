@@ -28,6 +28,9 @@ maxConcurrentRuns = 2
 backend = "file"
 dataDir = ".workorch-data"
 
+[runtime]
+defaultSoulId = "soul-system"
+
 [llm]
 defaultProvider = "local"
 defaultEmbeddingProvider = "local"
@@ -55,6 +58,9 @@ nonChatOperations = ["embeddings"]
 	}
 	if cfg.Server.Addr != "127.0.0.1:18080" || cfg.Repository.Backend != "file" {
 		t.Fatalf("configuration = %+v, want server and repository config", cfg)
+	}
+	if cfg.Runtime.DefaultSoulID != "soul-system" {
+		t.Fatalf("runtime configuration = %+v, want system default soul", cfg.Runtime)
 	}
 	if cfg.LLM.DefaultProviderID != "local" || cfg.LLM.DefaultEmbeddingProviderID != "local" || len(cfg.LLM.Providers) != 1 {
 		t.Fatalf("llm configuration = %+v, want local provider", cfg.LLM)
