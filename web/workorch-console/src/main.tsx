@@ -208,6 +208,29 @@ function compactJSON(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
+function secondaryCellText(value: string) {
+  return <Typography.Text type="secondary">{value}</Typography.Text>;
+}
+
+function timelineStreamContent(item: RuntimeTimelineItem) {
+  if (item.source === 'step_stream') {
+    const delta = outputText(item.data, 'delta');
+    if (delta !== '-') {
+      return delta;
+    }
+    return item.type ? `事件类型：${item.type}` : '已记录流式片段';
+  }
+  const raw = (item.output ?? item.data)?.streamEvents;
+  if (Array.isArray(raw) && raw.length > 0) {
+    return <Tag color="cyan">已记录 {raw.length} 条</Tag>;
+  }
+  return secondaryCellText('不适用');
+}
+
+function timelineOccurredAtContent(item: RuntimeTimelineItem) {
+  return item.occurredAt || secondaryCellText('未记录');
+}
+
 function recordValue(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
@@ -1678,8 +1701,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                             { title: 'Run 状态', dataIndex: 'runState', width: 130, render: (_, item) => stateLabel(item.runState) },
                             { title: '步骤', dataIndex: 'stepId', ellipsis: true },
                             { title: '摘要', dataIndex: 'summary', ellipsis: true },
-                            { title: '流式事件', render: (_, item) => outputText(item.output ?? item.data, 'streamEvents') !== '-' ? outputText(item.output ?? item.data, 'streamEvents') : outputText(item.data, 'delta'), ellipsis: true },
-                            { title: '发生时间', dataIndex: 'occurredAt', width: 210 }
+                            { title: '流式事件', render: (_, item) => timelineStreamContent(item), ellipsis: true },
+                            { title: '发生时间', dataIndex: 'occurredAt', width: 210, render: (_, item) => timelineOccurredAtContent(item) }
                           ]}
                           expandable={{
                             expandedRowRender: (item) => <pre className="json-panel json-panel-large">{compactJSON(item.output ?? item.data)}</pre>

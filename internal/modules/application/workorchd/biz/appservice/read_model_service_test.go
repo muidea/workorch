@@ -321,6 +321,12 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 	if !timelineContainsStreamDelta(item.Timeline, string(stepID), `{"completionState":"continue"`, "completed") {
 		t.Fatalf("timeline = %+v, want stream delta timeline item", item.Timeline)
 	}
+	if !timelineContainsStepOccurredAt(item.Timeline, "step", string(stepID), "2026-04-25T10:00:00Z") {
+		t.Fatalf("timeline = %+v, want step occurrence derived from checkpoint", item.Timeline)
+	}
+	if !timelineContainsStepOccurredAt(item.Timeline, "step_stream", string(stepID), "2026-04-25T10:00:00Z") {
+		t.Fatalf("timeline = %+v, want stream occurrence derived from step checkpoint", item.Timeline)
+	}
 }
 
 func timelineContainsStepOutput(items []RuntimeTimelineItem, stepID string, stage string, runState string) bool {
@@ -341,6 +347,15 @@ func timelineContainsStreamDelta(items []RuntimeTimelineItem, stepID string, del
 			continue
 		}
 		if item.Type == "delta" && item.Data["delta"] == delta && item.RunState == runState {
+			return true
+		}
+	}
+	return false
+}
+
+func timelineContainsStepOccurredAt(items []RuntimeTimelineItem, source string, stepID string, occurredAt string) bool {
+	for _, item := range items {
+		if item.Source == source && item.StepID == stepID && item.OccurredAt == occurredAt {
 			return true
 		}
 	}

@@ -1137,18 +1137,21 @@ func latestRuntimeCheckpoint(items []RuntimeCheckpoint) *RuntimeCheckpoint {
 
 func runtimeTimeline(snapshot RunSnapshot) []RuntimeTimelineItem {
 	items := make([]RuntimeTimelineItem, 0, len(snapshot.Steps)+len(snapshot.RuntimeCheckpoints)+len(snapshot.Observed))
+	stepOccurrences := timelineStepOccurrences(snapshot)
 	for _, step := range snapshot.Steps {
+		occurredAt := stepOccurrences[step.ID]
 		items = append(items, RuntimeTimelineItem{
-			Source:    "step",
-			Type:      step.Kind,
-			ID:        step.ID,
-			RunState:  snapshot.Run.State,
-			StepID:    step.ID,
-			StepState: step.State,
-			Summary:   timelineStepSummary(step.Output),
-			Output:    cloneReadModelMap(step.Output),
+			Source:     "step",
+			Type:       step.Kind,
+			ID:         step.ID,
+			RunState:   snapshot.Run.State,
+			StepID:     step.ID,
+			StepState:  step.State,
+			Summary:    timelineStepSummary(step.Output),
+			OccurredAt: occurredAt,
+			Output:     cloneReadModelMap(step.Output),
 		})
-		items = append(items, streamTimelineItems(step, snapshot.Run.State)...)
+		items = append(items, streamTimelineItems(step, snapshot.Run.State, occurredAt)...)
 	}
 	for _, checkpoint := range snapshot.RuntimeCheckpoints {
 		items = append(items, RuntimeTimelineItem{
@@ -1201,7 +1204,51 @@ func runtimeTimeline(snapshot RunSnapshot) []RuntimeTimelineItem {
 	return items
 }
 
-func streamTimelineItems(step presenter.StepView, runState string) []RuntimeTimelineItem {
+func timelineStepOccurrences(snapshot RunSnapshot) map[string]string {
+	ret := map[string]string{}
+	remember := func(stepID string, occurredAt string) {
+		if stepID == "" || occurredAt == "" {
+			return
+		}
+		if ret[stepID] == "" || occurredAt > ret[stepID] {
+			ret[stepID] = occurredAt
+		}
+	}
+	for _, item := range snapshot.EventRecords {
+		stepID := item.StepID
+		if stepID == "" && item.SubjectType == "step" {
+			stepID = item.SubjectID
+		}
+		remember(stepID, item.OccurredAt)
+	}
+	for _, item := range snapshot.Observed {
+		stepID := item.StepID
+		if stepID == "" && item.SubjectType == "step" {
+			stepID = item.SubjectID
+		}
+		remember(stepID, item.OccurredAt)
+	}
+	for _, checkpoint := range snapshot.RuntimeCheckpoints {
+		if !isStepRuntimeCheckpoint(checkpoint) {
+			continue
+		}
+		remember(checkpoint.CurrentStepID, checkpoint.OccurredAt)
+	}
+	return ret
+}
+
+func isStepRuntimeCheckpoint(checkpoint RuntimeCheckpoint) bool {
+	if checkpoint.CurrentStepID == "" || len(checkpoint.Data) == 0 {
+		return false
+	}
+	if readModelStringValue(checkpoint.Data["stepState"]) != "" {
+		return true
+	}
+	eventName := readModelStringValue(checkpoint.Data["event"])
+	return eventName == "step_dispatched" || eventName == "step_completed" || eventName == "step_failed"
+}
+
+func streamTimelineItems(step presenter.StepView, runState string, stepOccurredAt string) []RuntimeTimelineItem {
 	if len(step.Output) == 0 {
 		return nil
 	}
@@ -1219,18 +1266,32 @@ func streamTimelineItems(step presenter.StepView, runState string) []RuntimeTime
 		if eventType == "" {
 			eventType = "delta"
 		}
+		occurredAt := streamEventOccurredAt(event)
+		if occurredAt == "" {
+			occurredAt = stepOccurredAt
+		}
 		ret = append(ret, RuntimeTimelineItem{
-			Source:    "step_stream",
-			Type:      eventType,
-			ID:        step.ID + "/stream/" + strconv.Itoa(idx+1),
-			RunState:  runState,
-			StepID:    step.ID,
-			StepState: step.State,
-			Summary:   readModelStringValue(event["delta"]),
-			Data:      cloneReadModelMap(event),
+			Source:     "step_stream",
+			Type:       eventType,
+			ID:         step.ID + "/stream/" + strconv.Itoa(idx+1),
+			RunState:   runState,
+			StepID:     step.ID,
+			StepState:  step.State,
+			Summary:    readModelStringValue(event["delta"]),
+			OccurredAt: occurredAt,
+			Data:       cloneReadModelMap(event),
 		})
 	}
 	return ret
+}
+
+func streamEventOccurredAt(event map[string]any) string {
+	for _, key := range []string{"occurredAt", "timestamp", "time"} {
+		if value := readModelStringValue(event[key]); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func timelineStepSummary(output map[string]any) string {
