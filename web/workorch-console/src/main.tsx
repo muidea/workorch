@@ -9,10 +9,10 @@ import {
   SettingOutlined
 } from '@ant-design/icons';
 import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-components';
-import { App as AntApp, Button, ConfigProvider, Descriptions, Empty, Form, Input, InputNumber, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
+import { App as AntApp, Badge, Button, ConfigProvider, Descriptions, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Artifact, Decision, DoD, Goal, LLMProviderTemplate, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Result, Run, RunObservability, RunSnapshot, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
+import type { Approval, Artifact, Decision, DoD, Goal, LLMProviderTemplate, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, Result, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -61,6 +61,13 @@ function stateTag(state?: string) {
   const value = state || 'unknown';
   const color = value.includes('failed') || value.includes('reject') ? 'red' : value.includes('block') || value.includes('pending') ? 'gold' : 'green';
   return <Tag color={color}>{stateLabel(value)}</Tag>;
+}
+
+function shortId(value?: string, keep = 10) {
+  if (!value) {
+    return '-';
+  }
+  return value.length > keep ? `${value.slice(0, keep)}…` : value;
 }
 
 function errorMessage(error: unknown) {
@@ -155,6 +162,26 @@ function runtimeSummaryTags(runs?: Run[]) {
       <Tag color="green">完成 {summary.completed}</Tag>
       <Tag color="red">失败 {summary.failed}</Tag>
     </Space>
+  );
+}
+
+type MetricItem = {
+  key: string;
+  label: string;
+  value: React.ReactNode;
+  color?: string;
+};
+
+function metricGrid(items: MetricItem[]) {
+  return (
+    <div className="workorch-metric-grid">
+      {items.map((item) => (
+        <div key={item.key} className="workorch-metric-item">
+          <Typography.Text type="secondary">{item.label}</Typography.Text>
+          <Typography.Title level={4} style={{ margin: 0, color: item.color }}>{item.value}</Typography.Title>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -444,6 +471,16 @@ function runtimeTarget(output?: Record<string, unknown>) {
       outputText(output, 'prompt');
 }
 
+function checkpointTypeLabel(type?: string) {
+  const labels: Record<string, string> = {
+    run_state: 'Run 状态',
+    runtime_step: '运行步骤',
+    graph_state: '执行图',
+    validation: '验收校验'
+  };
+  return type ? labels[type] ?? type : '-';
+}
+
 function runPriority(item: Run) {
   const direct = item.priority;
   if (direct !== undefined && direct !== null) {
@@ -609,18 +646,34 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
                 bordered
                 extra={stateTag(snapshot.workspace.state)}
               >
-                <Descriptions
-                  column={1}
-                  items={[
-                    { key: 'workingDirectory', label: '工作目录', children: snapshot.workspace.workingDirectory },
-                    { key: 'activeRun', label: '活跃运行', children: activeRun ? `${activeRun.id} / ${stateLabel(activeRun.state)}` : '-' },
-                    { key: 'definition', label: '目标/验收', children: <Space wrap><Tag>Goal {goals.length}</Tag><Tag>DoD {dods.length}</Tag></Space> },
-                    { key: 'runtimeSummary', label: '运行摘要', children: runtimeSummaryTags(snapshot.runs) },
-                    { key: 'latestRun', label: '最近运行', children: runSummary.latest ? `${runSummary.latest.id} / ${stateLabel(runSummary.latest.state)}` : '-' },
-                    { key: 'decisions', label: '待处理决策', children: pendingDecisions },
-                    { key: 'approvals', label: '待处理审批', children: pendingApprovals }
-                  ]}
-                />
+                <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                  <div className="workorch-card-summary">
+                    <div>
+                      <Typography.Text type="secondary">最近 Run</Typography.Text>
+                      <div>{runSummary.latest ? <Space>{shortId(runSummary.latest.id)}{stateTag(runSummary.latest.state)}</Space> : '-'}</div>
+                    </div>
+                    <div>
+                      <Typography.Text type="secondary">治理阻塞</Typography.Text>
+                      <div><Badge count={pendingDecisions + pendingApprovals} showZero color={pendingDecisions + pendingApprovals > 0 ? '#faad14' : '#52c41a'} /></div>
+                    </div>
+                  </div>
+                  {metricGrid([
+                    { key: 'goal', label: 'Goal', value: goals.length },
+                    { key: 'dod', label: 'DoD', value: dods.length },
+                    { key: 'run', label: 'Run', value: runSummary.total },
+                    { key: 'completed', label: '完成', value: runSummary.completed, color: '#389e0d' },
+                    { key: 'failed', label: '失败', value: runSummary.failed, color: '#cf1322' }
+                  ])}
+                  <Descriptions
+                    column={1}
+                    size="small"
+                    items={[
+                      { key: 'workingDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.workingDirectory, { rows: 1, copyText: snapshot.workspace.workingDirectory }) },
+                      { key: 'activeRun', label: '活跃运行', children: activeRun ? `${activeRun.id} / ${stateLabel(activeRun.state)}` : '-' },
+                      { key: 'runtimeSummary', label: '运行摘要', children: runtimeSummaryTags(snapshot.runs) }
+                    ]}
+                  />
+                </Space>
                 <Steps
                   size="small"
                   className="workorch-section"
@@ -727,10 +780,9 @@ function DecisionQueuePage() {
     { title: '工作空间', dataIndex: 'workspaceId', copyable: true },
     { title: '运行', dataIndex: 'runId', copyable: true },
     { title: '类型', dataIndex: 'decisionKind' },
-    { title: '问题', dataIndex: 'question', ellipsis: true },
+    { title: '问题', dataIndex: 'question', ellipsis: true, render: (_, item) => boundedParagraph(item.question, { rows: 2 }) },
     { title: '原因', dataIndex: 'reason', ellipsis: true },
-    { title: '上下文', dataIndex: 'context', render: (_, item) => <pre className="json-panel">{compactJSON(item.context)}</pre> },
-    { title: '解决内容', dataIndex: 'resolutionPayload', render: (_, item) => <pre className="json-panel">{compactJSON(item.resolutionPayload)}</pre> },
+    { title: '解决方式', dataIndex: 'resolutionType', width: 140, render: (_, item) => item.resolutionType ? stateTag(item.resolutionType) : '-' },
     { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
     {
       title: '操作',
@@ -760,6 +812,7 @@ function DecisionQueuePage() {
         actionRef={actionRef}
         rowKey="id"
         search={false}
+        options={false}
         rowSelection={{
           selectedRowKeys: selectedDecisionKeys,
           onChange: setSelectedDecisionKeys,
@@ -769,6 +822,18 @@ function DecisionQueuePage() {
         request={async () => {
           const items = await workorchApi.listDecisions();
           return tableResult(items.sort((left, right) => Number(left.state !== 'open') - Number(right.state !== 'open')));
+        }}
+        expandable={{
+          expandedRowRender: (item) => (
+            <ProCard gutter={16} wrap ghost>
+              <ProCard title="决策上下文" colSpan={{ xs: 24, lg: 12 }}>
+                <pre className="json-panel json-panel-large">{compactJSON(item.context)}</pre>
+              </ProCard>
+              <ProCard title="解决内容" colSpan={{ xs: 24, lg: 12 }}>
+                <pre className="json-panel json-panel-large">{compactJSON(item.resolutionPayload)}</pre>
+              </ProCard>
+            </ProCard>
+          )
         }}
       />
       <Modal
@@ -960,6 +1025,7 @@ function ApprovalQueuePage() {
         actionRef={actionRef}
         rowKey="id"
         search={false}
+        options={false}
         rowSelection={{
           selectedRowKeys: selectedApprovalKeys,
           onChange: setSelectedApprovalKeys,
@@ -1312,80 +1378,87 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             <Steps items={workspaceProcessItems(snapshot, goals, dods)} />
           </ProCard>
           <ProCard title="主要业务模型" className="workorch-section">
-            <Space wrap>
-              <Tag color="blue">Workspace 1</Tag>
-              <Tag>Goal {goals.length}</Tag>
-              <Tag>DoD {dods.length}</Tag>
-              <Tag color="geekblue">Run {snapshot.runs?.length ?? 0}</Tag>
-              <Tag>Decision {snapshot.decisions?.length ?? 0}</Tag>
-              <Tag>Approval {snapshot.approvals?.length ?? 0}</Tag>
-              <Tag>Soul {souls.length}</Tag>
-              <Tag>Skill {skills.length}</Tag>
-              <Tag>MCP Server {mcpServers.length}</Tag>
-              <Tag>Memory {memoryItems.length}</Tag>
-              <Tag color="cyan">Step {runSnapshot?.steps?.length ?? 0}</Tag>
-              <Tag color="green">Result {snapshot.results?.length ?? runSnapshot?.results?.length ?? 0}</Tag>
-              <Tag>Artifact {snapshot.artifacts?.length ?? runSnapshot?.artifacts?.length ?? 0}</Tag>
-              <Tag color="purple">ToolCall {runSnapshot?.toolCalls?.length ?? 0}</Tag>
-              <Tag>Patch {runSnapshot?.patches?.length ?? 0}</Tag>
-              <Tag>Validation {runSnapshot?.validationResults?.length ?? 0}</Tag>
-              <Tag>Checkpoint {runSnapshot?.runtimeCheckpoints?.length ?? 0}</Tag>
-            </Space>
+            {metricGrid([
+              { key: 'workspace', label: 'Workspace', value: 1, color: '#1668dc' },
+              { key: 'goal', label: 'Goal', value: goals.length },
+              { key: 'dod', label: 'DoD', value: dods.length },
+              { key: 'run', label: 'Run', value: snapshot.runs?.length ?? 0, color: '#0958d9' },
+              { key: 'decision', label: 'Decision', value: snapshot.decisions?.length ?? 0 },
+              { key: 'approval', label: 'Approval', value: snapshot.approvals?.length ?? 0 },
+              { key: 'soul', label: 'Soul', value: souls.length },
+              { key: 'skill', label: 'Skill', value: skills.length },
+              { key: 'mcp', label: 'MCP Server', value: mcpServers.length },
+              { key: 'memory', label: 'Memory', value: memoryItems.length },
+              { key: 'step', label: 'Step', value: runSnapshot?.steps?.length ?? 0 },
+              { key: 'result', label: 'Result', value: snapshot.results?.length ?? runSnapshot?.results?.length ?? 0, color: '#389e0d' },
+              { key: 'artifact', label: 'Artifact', value: snapshot.artifacts?.length ?? runSnapshot?.artifacts?.length ?? 0 },
+              { key: 'tool', label: 'ToolCall', value: runSnapshot?.toolCalls?.length ?? 0 },
+              { key: 'patch', label: 'Patch', value: runSnapshot?.patches?.length ?? 0 },
+              { key: 'validation', label: 'Validation', value: runSnapshot?.validationResults?.length ?? 0 },
+              { key: 'checkpoint', label: 'Checkpoint', value: runSnapshot?.runtimeCheckpoints?.length ?? 0 }
+            ])}
           </ProCard>
           <ProCard title="运行摘要" className="workorch-section">
-            <Descriptions
-              column={3}
-              items={[
-                { key: 'runs', label: 'Run 总数', children: runSummary.total },
-                { key: 'created', label: '已创建', children: runSummary.created },
-                { key: 'active', label: '运行中', children: runSummary.active },
-                { key: 'blocked', label: '阻塞中', children: runSummary.blocked },
-                { key: 'validating', label: '验收中', children: runSummary.validating },
-                { key: 'completed', label: '已完成', children: runSummary.completed },
-                { key: 'failed', label: '失败/终止', children: runSummary.failed },
-                { key: 'decisions', label: '待处理决策', children: pendingCount(snapshot.decisions) },
-                { key: 'approvals', label: '待处理审批', children: pendingCount(snapshot.approvals) },
-                { key: 'latestRun', label: '最近运行', children: runSummary.latest ? `${runSummary.latest.id} / ${stateLabel(runSummary.latest.state)}` : '-' }
-              ]}
-            />
+            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              {metricGrid([
+                { key: 'runs', label: 'Run 总数', value: runSummary.total },
+                { key: 'created', label: '已创建', value: runSummary.created },
+                { key: 'active', label: '运行中', value: runSummary.active, color: '#0958d9' },
+                { key: 'blocked', label: '阻塞中', value: runSummary.blocked, color: '#d48806' },
+                { key: 'validating', label: '验收中', value: runSummary.validating, color: '#08979c' },
+                { key: 'completed', label: '已完成', value: runSummary.completed, color: '#389e0d' },
+                { key: 'failed', label: '失败/终止', value: runSummary.failed, color: '#cf1322' },
+                { key: 'decisions', label: '待处理决策', value: pendingCount(snapshot.decisions), color: pendingCount(snapshot.decisions) ? '#d48806' : undefined },
+                { key: 'approvals', label: '待处理审批', value: pendingCount(snapshot.approvals), color: pendingCount(snapshot.approvals) ? '#d48806' : undefined }
+              ])}
+              <Descriptions
+                column={1}
+                size="small"
+                items={[
+                  { key: 'latestRun', label: '最近运行', children: runSummary.latest ? `${runSummary.latest.id} / ${stateLabel(runSummary.latest.state)}` : '-' }
+                ]}
+              />
+            </Space>
           </ProCard>
           <ProCard gutter={16} wrap className="workorch-section">
             <ProCard title="目标定义（Goal）" colSpan={{ xs: 24, lg: 12 }} extra={<Tag>{goals.length} 项</Tag>}>
               {goals.length ? (
-                <ProTable<Goal>
-                  rowKey="id"
-                  search={false}
-                  options={false}
-                  size="small"
-                  pagination={{ pageSize: 5, showSizeChanger: false }}
-                  columns={[
-                    { title: '目标', dataIndex: 'text', ellipsis: true, render: (_, item) => boundedParagraph(item.text, { rows: 2 }) },
-                    { title: 'Goal ID', dataIndex: 'id', copyable: true, ellipsis: true, width: 180 },
-                    { title: '操作', width: 80, render: (_, item) => <Button type="link" size="small" onClick={() => openGoalDefinition(item)}>修改</Button> }
-                  ]}
+                <List
+                  className="workorch-definition-list"
+                  pagination={goals.length > 4 ? { pageSize: 4, size: 'small' } : false}
                   dataSource={goals}
+                  renderItem={(item) => (
+                    <List.Item
+                      actions={[<Button key="edit" type="link" size="small" onClick={() => openGoalDefinition(item)}>修改</Button>]}
+                    >
+                      <List.Item.Meta
+                        title={<Space><Typography.Text copyable>{item.id}</Typography.Text></Space>}
+                        description={boundedParagraph(item.text, { rows: 3 })}
+                      />
+                    </List.Item>
+                  )}
                 />
               ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无目标" />}
             </ProCard>
             <ProCard title="验收标准（DoD）" colSpan={{ xs: 24, lg: 12 }} extra={<Tag>{dodDefinitionRows.length} 项</Tag>}>
               {dodDefinitionRows.length ? (
-                <ProTable<{ key: string; id: string; state: string; index: number; text: string }>
-                  rowKey="key"
-                  search={false}
-                  options={false}
-                  size="small"
-                  pagination={{ pageSize: 5, showSizeChanger: false }}
-                  columns={[
-                    { title: '序号', dataIndex: 'index', width: 72 },
-                    { title: '验收标准', dataIndex: 'text', ellipsis: true, render: (_, item) => boundedParagraph(item.text, { rows: 2 }) },
-                    { title: '状态', dataIndex: 'state', width: 100, render: (_, item) => stateTag(item.state) },
-                    { title: 'DoD ID', dataIndex: 'id', copyable: true, ellipsis: true, width: 180 },
-                    { title: '操作', width: 80, render: (_, item) => {
-                      const dod = dods.find((candidate) => candidate.id === item.id);
-                      return <Button type="link" size="small" disabled={!dod} onClick={() => dod && openDoDDefinition(dod)}>修改</Button>;
-                    } }
-                  ]}
+                <List
+                  className="workorch-definition-list"
+                  pagination={dodDefinitionRows.length > 5 ? { pageSize: 5, size: 'small' } : false}
                   dataSource={dodDefinitionRows}
+                  renderItem={(item) => {
+                    const dod = dods.find((candidate) => candidate.id === item.id);
+                    return (
+                      <List.Item
+                        actions={[<Button key="edit" type="link" size="small" disabled={!dod} onClick={() => dod && openDoDDefinition(dod)}>修改</Button>]}
+                      >
+                        <List.Item.Meta
+                          title={<Space><Tag>{item.index}</Tag>{stateTag(item.state)}<Typography.Text copyable>{item.id}</Typography.Text></Space>}
+                          description={boundedParagraph(item.text, { rows: 2 })}
+                        />
+                      </List.Item>
+                    );
+                  }}
                 />
               ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无验收标准" />}
             </ProCard>
@@ -1415,6 +1488,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                       <ProTable
                         rowKey="key"
                         search={false}
+                        options={false}
                         pagination={false}
                         size="small"
                         columns={[
@@ -1433,6 +1507,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                       <ProTable<Artifact>
                         rowKey="id"
                         search={false}
+                        options={false}
                         pagination={false}
                         size="small"
                         columns={[
@@ -1454,6 +1529,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                       <ProTable<ToolCall>
                         rowKey="id"
                         search={false}
+                        options={false}
                         pagination={{ pageSize: 5 }}
                         size="small"
                         columns={[
@@ -1473,6 +1549,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                       <ProTable<MemoryItem>
                         rowKey="id"
                         search={false}
+                        options={false}
                         pagination={{ pageSize: 5 }}
                         size="small"
                         columns={[
@@ -1494,23 +1571,28 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             )}
           </ProCard>
           <ProCard title="运行记录（Run）" className="workorch-section">
-            <ProTable<Run> rowKey="id" search={false} pagination={false} columns={runColumns} dataSource={snapshot.runs ?? []} />
+            <ProTable<Run> rowKey="id" search={false} options={false} pagination={false} columns={runColumns} dataSource={snapshot.runs ?? []} />
           </ProCard>
           <ProCard gutter={16} wrap className="workorch-section">
             <ProCard title="决策工单（Decision）" colSpan="50%">
-              <ProTable<Decision> rowKey="id" search={false} pagination={false} columns={[
+              <ProTable<Decision> rowKey="id" search={false} options={false} pagination={false} columns={[
                 { title: '工单', dataIndex: 'id', copyable: true },
                 { title: '类型', dataIndex: 'decisionKind', width: 150 },
-                { title: '问题', dataIndex: 'question', ellipsis: true },
+                { title: '问题', dataIndex: 'question', ellipsis: true, render: (_, item) => boundedParagraph(item.question, { rows: 2 }) },
                 { title: '原因', dataIndex: 'reason', ellipsis: true },
                 { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
-                { title: '上下文', dataIndex: 'context', render: (_, item) => <pre className="json-panel">{compactJSON(item.context)}</pre> },
-                { title: '解决方式', dataIndex: 'resolutionType' },
-                { title: '解决内容', dataIndex: 'resolutionPayload', render: (_, item) => <pre className="json-panel">{compactJSON(item.resolutionPayload)}</pre> }
-              ]} dataSource={snapshot.decisions ?? []} />
+                { title: '解决方式', dataIndex: 'resolutionType' }
+              ]} dataSource={snapshot.decisions ?? []} expandable={{
+                expandedRowRender: (item) => (
+                  <ProCard gutter={16} wrap ghost>
+                    <ProCard title="上下文" colSpan={{ xs: 24, lg: 12 }}><pre className="json-panel json-panel-large">{compactJSON(item.context)}</pre></ProCard>
+                    <ProCard title="解决内容" colSpan={{ xs: 24, lg: 12 }}><pre className="json-panel json-panel-large">{compactJSON(item.resolutionPayload)}</pre></ProCard>
+                  </ProCard>
+                )
+              }} />
             </ProCard>
             <ProCard title="审批工单（Approval）" colSpan="50%">
-              <ProTable<Approval> rowKey="id" search={false} pagination={false} columns={[
+              <ProTable<Approval> rowKey="id" search={false} options={false} pagination={false} columns={[
                 { title: '审批', dataIndex: 'id', copyable: true },
                 { title: '运行', dataIndex: 'runId', copyable: true, ellipsis: true },
                 { title: '步骤', dataIndex: 'stepId', copyable: true, ellipsis: true },
@@ -1532,6 +1614,14 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     { title: '终态', description: runObservability?.progress.terminal ? '已进入终态' : '尚未终态', status: runObservability?.progress.terminal ? 'finish' : 'process' }
                   ]}
                 />
+                {metricGrid([
+                  { key: 'steps', label: '步骤完成', value: `${runObservability?.progress.stepCompleted ?? 0}/${runObservability?.progress.stepTotal ?? runSnapshot.steps?.length ?? 0}`, color: runObservability?.progress.stepFailed ? '#cf1322' : '#0958d9' },
+                  { key: 'tools', label: '工具完成', value: `${runObservability?.evidence.toolCallCompleted ?? 0}/${runObservability?.evidence.toolCallTotal ?? runSnapshot.toolCalls?.length ?? 0}` },
+                  { key: 'validations', label: '校验通过', value: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? runSnapshot.validationResults?.length ?? 0}`, color: runObservability?.evidence.validationFailed ? '#cf1322' : '#389e0d' },
+                  { key: 'patches', label: 'Patch 应用', value: `${runObservability?.evidence.patchApplied ?? 0}/${runObservability?.evidence.patchTotal ?? runSnapshot.patches?.length ?? 0}` },
+                  { key: 'results', label: 'Result', value: runObservability?.evidence.resultTotal ?? runSnapshot.results?.length ?? 0, color: '#389e0d' },
+                  { key: 'artifacts', label: 'Artifact', value: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 }
+                ])}
                 <Descriptions
                   column={3}
                   items={[
@@ -1549,44 +1639,210 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     { key: 'context', label: '执行上下文', children: <pre className="json-panel">{compactJSON(runSnapshot.run.executionContext)}</pre> }
                   ]}
                 />
-                {runObservability?.latestCheckpoint ? (
-                  <Tag color="blue">最新检查点：{runObservability.latestCheckpoint.checkpointType} / {stateLabel(runObservability.latestCheckpoint.runStateSnapshot)}</Tag>
-                ) : null}
-                <ProTable<RuntimeTimelineItem>
-                  rowKey={(item, index) => `${item.source}-${item.id || item.topic || index}-${index}`}
-                  search={false}
-                  pagination={{ pageSize: 5 }}
+                <ProCard
                   size="small"
-                  columns={[
-                    { title: '来源', dataIndex: 'source', width: 110 },
-                    { title: '事件', render: (_, item) => timelineLabel(item), ellipsis: true },
-                    { title: 'Run 状态', dataIndex: 'runState', width: 130, render: (_, item) => stateLabel(item.runState) },
-                    { title: '步骤', dataIndex: 'stepId', ellipsis: true },
-                    { title: '摘要', dataIndex: 'summary', ellipsis: true },
-                    { title: '流式事件', render: (_, item) => outputText(item.output ?? item.data, 'streamEvents') !== '-' ? outputText(item.output ?? item.data, 'streamEvents') : outputText(item.data, 'delta'), ellipsis: true },
-                    { title: '发生时间', dataIndex: 'occurredAt', width: 210 }
+                  title="最新检查点"
+                  className="workorch-checkpoint-card"
+                  extra={runObservability?.latestCheckpoint ? stateTag(runObservability.latestCheckpoint.runStateSnapshot) : <Tag>暂无</Tag>}
+                >
+                  {runObservability?.latestCheckpoint ? (
+                    <Descriptions
+                      size="small"
+                      column={{ xs: 1, sm: 2, md: 4 }}
+                      items={[
+                        { key: 'type', label: '检查点类型', children: checkpointTypeLabel(runObservability.latestCheckpoint.checkpointType) },
+                        { key: 'state', label: 'Run 状态', children: stateLabel(runObservability.latestCheckpoint.runStateSnapshot) },
+                        { key: 'step', label: '当前步骤', children: boundedParagraph(runObservability.latestCheckpoint.currentStepId, { rows: 1, copyText: runObservability.latestCheckpoint.currentStepId }) },
+                        { key: 'blocked', label: '阻塞信息', children: runObservability.latestCheckpoint.blockingTicketId || runObservability.latestCheckpoint.blockingApprovalId || '无阻塞' }
+                      ]}
+                    />
+                  ) : (
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 尚未记录检查点" />
+                  )}
+                </ProCard>
+                <Tabs
+                  items={[
+                    {
+                      key: 'timeline',
+                      label: `时间线 ${runObservability?.timeline?.length ?? 0}`,
+                      children: (
+                        <ProTable<RuntimeTimelineItem>
+                          rowKey={(item, index) => `${item.source}-${item.id || item.topic || index}-${index}`}
+                          search={false}
+                          options={false}
+                          pagination={{ pageSize: 8 }}
+                          size="small"
+                          columns={[
+                            { title: '来源', dataIndex: 'source', width: 110 },
+                            { title: '事件', render: (_, item) => timelineLabel(item), ellipsis: true },
+                            { title: 'Run 状态', dataIndex: 'runState', width: 130, render: (_, item) => stateLabel(item.runState) },
+                            { title: '步骤', dataIndex: 'stepId', ellipsis: true },
+                            { title: '摘要', dataIndex: 'summary', ellipsis: true },
+                            { title: '流式事件', render: (_, item) => outputText(item.output ?? item.data, 'streamEvents') !== '-' ? outputText(item.output ?? item.data, 'streamEvents') : outputText(item.data, 'delta'), ellipsis: true },
+                            { title: '发生时间', dataIndex: 'occurredAt', width: 210 }
+                          ]}
+                          expandable={{
+                            expandedRowRender: (item) => <pre className="json-panel json-panel-large">{compactJSON(item.output ?? item.data)}</pre>
+                          }}
+                          dataSource={runObservability?.timeline ?? []}
+                        />
+                      )
+                    },
+                    {
+                      key: 'steps',
+                      label: `步骤 ${runSnapshot.steps?.length ?? 0}`,
+                      children: (
+                        <ProTable<StepView>
+                          rowKey="id"
+                          search={false}
+                          options={false}
+                          pagination={{ pageSize: 8 }}
+                          size="small"
+                          columns={[
+                            { title: '步骤', dataIndex: 'id', copyable: true, ellipsis: true },
+                            { title: '类型', dataIndex: 'kind', width: 180 },
+                            { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+                            { title: '操作', render: (_, item) => outputText(item.output, 'operation'), ellipsis: true },
+                            { title: '服务', render: (_, item) => outputText(item.output, 'serverId'), ellipsis: true },
+                            { title: '目标', render: (_, item) => runtimeTarget(item.output), ellipsis: true },
+                            { title: '阶段', render: (_, item) => outputText(item.output, 'stage'), ellipsis: true },
+                            { title: '下一类型', render: (_, item) => outputText(item.output, 'nextKind'), ellipsis: true }
+                          ]}
+                          expandable={{
+                            expandedRowRender: (item) => <pre className="json-panel json-panel-large">{compactJSON(item.output)}</pre>
+                          }}
+                          dataSource={runSnapshot.steps ?? []}
+                        />
+                      )
+                    },
+                    {
+                      key: 'toolCalls',
+                      label: `工具 ${runSnapshot.toolCalls?.length ?? 0}`,
+                      children: (
+                        <ProTable<ToolCall>
+                          rowKey="id"
+                          search={false}
+                          options={false}
+                          pagination={{ pageSize: 8 }}
+                          size="small"
+                          columns={[
+                            { title: '工具调用', dataIndex: 'id', copyable: true, ellipsis: true },
+                            { title: '工具', dataIndex: 'toolName', ellipsis: true },
+                            { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+                            { title: '摘要', dataIndex: 'exitSummary', ellipsis: true },
+                            { title: '错误', dataIndex: 'error', ellipsis: true }
+                          ]}
+                          dataSource={runSnapshot.toolCalls ?? []}
+                        />
+                      )
+                    },
+                    {
+                      key: 'validations',
+                      label: `校验 ${runSnapshot.validationResults?.length ?? 0}`,
+                      children: (
+                        <ProTable<ValidationResult>
+                          rowKey="id"
+                          search={false}
+                          options={false}
+                          pagination={{ pageSize: 8 }}
+                          size="small"
+                          columns={[
+                            { title: '校验', dataIndex: 'id', copyable: true, ellipsis: true },
+                            { title: '类型', dataIndex: 'validationKind', width: 160 },
+                            { title: '目标', dataIndex: 'targetRef', ellipsis: true },
+                            { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+                            { title: '摘要', dataIndex: 'summary', ellipsis: true }
+                          ]}
+                          dataSource={runSnapshot.validationResults ?? []}
+                        />
+                      )
+                    },
+                    {
+                      key: 'patches',
+                      label: `Patch ${runSnapshot.patches?.length ?? 0}`,
+                      children: (
+                        <ProTable<Patch>
+                          rowKey="id"
+                          search={false}
+                          options={false}
+                          pagination={{ pageSize: 8 }}
+                          size="small"
+                          columns={[
+                            { title: 'Patch', dataIndex: 'id', copyable: true, ellipsis: true },
+                            { title: '类型', dataIndex: 'patchType', width: 140 },
+                            { title: '目标', dataIndex: 'targetRef', ellipsis: true },
+                            { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+                            { title: '摘要', dataIndex: 'summary', ellipsis: true }
+                          ]}
+                          dataSource={runSnapshot.patches ?? []}
+                        />
+                      )
+                    },
+                    {
+                      key: 'checkpoints',
+                      label: `检查点 ${runSnapshot.runtimeCheckpoints?.length ?? 0}`,
+                      children: (
+                        <ProTable<RuntimeCheckpoint>
+                          rowKey="id"
+                          search={false}
+                          options={false}
+                          pagination={{ pageSize: 8 }}
+                          size="small"
+                          columns={[
+                            { title: '检查点', dataIndex: 'id', copyable: true, ellipsis: true },
+                            { title: '类型', dataIndex: 'checkpointType', width: 180 },
+                            { title: 'Run 状态', dataIndex: 'runStateSnapshot', width: 140, render: (_, item) => stateTag(item.runStateSnapshot) },
+                            { title: '当前步骤', dataIndex: 'currentStepId', ellipsis: true },
+                            { title: '决策', dataIndex: 'blockingTicketId', ellipsis: true },
+                            { title: '审批', dataIndex: 'blockingApprovalId', ellipsis: true }
+                          ]}
+                          dataSource={runSnapshot.runtimeCheckpoints ?? []}
+                        />
+                      )
+                    },
+                    {
+                      key: 'results',
+                      label: `Result ${runSnapshot.results?.length ?? 0}`,
+                      children: (
+                        <ProTable<Result>
+                          rowKey="id"
+                          search={false}
+                          options={false}
+                          pagination={{ pageSize: 8 }}
+                          size="small"
+                          columns={[
+                            { title: 'Result', dataIndex: 'id', copyable: true, ellipsis: true },
+                            { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+                            { title: '标题', dataIndex: 'title', ellipsis: true },
+                            { title: '摘要', dataIndex: 'summary', ellipsis: true },
+                            { title: '来源', render: (_, item) => `${item.sourceType || '-'} / ${item.sourceRef || '-'}`, ellipsis: true }
+                          ]}
+                          dataSource={runSnapshot.results ?? []}
+                        />
+                      )
+                    },
+                    {
+                      key: 'artifacts',
+                      label: `Artifact ${runSnapshot.artifacts?.length ?? 0}`,
+                      children: (
+                        <ProTable<Artifact>
+                          rowKey="id"
+                          search={false}
+                          options={false}
+                          pagination={{ pageSize: 8 }}
+                          size="small"
+                          columns={[
+                            { title: 'Artifact', dataIndex: 'id', copyable: true, ellipsis: true },
+                            { title: '类型', dataIndex: 'artifactType', width: 140 },
+                            { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+                            { title: '名称/URI', render: (_, item) => item.name || item.uri || '-', ellipsis: true },
+                            { title: '摘要', dataIndex: 'summary', ellipsis: true }
+                          ]}
+                          dataSource={runSnapshot.artifacts ?? []}
+                        />
+                      )
+                    }
                   ]}
-                  dataSource={runObservability?.timeline ?? []}
-                />
-                <ProTable<StepView>
-                  rowKey="id"
-                  search={false}
-                  pagination={{ pageSize: 5 }}
-                  size="small"
-                  columns={[
-                    { title: '步骤', dataIndex: 'id', copyable: true, ellipsis: true },
-                    { title: '类型', dataIndex: 'kind', width: 180 },
-                    { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
-                    { title: '操作', render: (_, item) => outputText(item.output, 'operation'), ellipsis: true },
-                    { title: '服务', render: (_, item) => outputText(item.output, 'serverId'), ellipsis: true },
-                    { title: '目标', render: (_, item) => runtimeTarget(item.output), ellipsis: true },
-                    { title: '阶段', render: (_, item) => outputText(item.output, 'stage'), ellipsis: true },
-                    { title: '下一类型', render: (_, item) => outputText(item.output, 'nextKind'), ellipsis: true },
-                    { title: '流式事件', render: (_, item) => outputText(item.output, 'streamEvents'), ellipsis: true },
-                    { title: 'Memory 引用', render: (_, item) => outputText(item.output, 'memoryRefs'), ellipsis: true },
-                    { title: 'DoD 评估', render: (_, item) => outputText(item.output, 'dodAssessment'), ellipsis: true }
-                  ]}
-                  dataSource={runSnapshot.steps ?? []}
                 />
               </Space>
             ) : (
@@ -2063,6 +2319,7 @@ function RuntimeControlPage() {
         <ProTable<MCPServer>
           rowKey="id"
           search={false}
+          options={false}
           pagination={{ pageSize: 6 }}
           columns={serverColumns}
           dataSource={servers}
@@ -2086,6 +2343,7 @@ function RuntimeControlPage() {
               <ProTable<MCPTool>
                 rowKey={(item) => `${item.serverId}-${item.name}`}
                 search={false}
+                options={false}
                 pagination={false}
                 size="small"
                 columns={[{ title: '允许的工具', dataIndex: 'name' }]}
@@ -2094,6 +2352,7 @@ function RuntimeControlPage() {
               <ProTable<MCPResource>
                 rowKey={(item) => `${item.serverId}-${item.uri}`}
                 search={false}
+                options={false}
                 pagination={false}
                 size="small"
                 columns={[{ title: '允许的资源', dataIndex: 'uri' }]}
@@ -2102,6 +2361,7 @@ function RuntimeControlPage() {
               <ProTable<MCPPrompt>
                 rowKey={(item) => `${item.serverId}-${item.name}`}
                 search={false}
+                options={false}
                 pagination={false}
                 size="small"
                 columns={[{ title: '允许的提示词', dataIndex: 'name' }]}

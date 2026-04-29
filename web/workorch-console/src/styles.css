@@ -12,6 +12,41 @@ body {
   margin-top: 16px;
 }
 
+.workorch-card-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.workorch-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
+}
+
+.workorch-metric-item {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #edf1f7;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.workorch-definition-list .ant-list-item {
+  align-items: flex-start;
+  padding-inline: 0;
+}
+
+.workorch-definition-list .ant-list-item-meta {
+  min-width: 0;
+}
+
+.workorch-checkpoint-card {
+  border-color: #d6e4ff;
+  background: #f8fbff;
+}
+
 .workorch-selected-row td {
   background: #e8f1ff !important;
 }
@@ -96,6 +131,10 @@ body {
   color: #334155;
   font-size: 12px;
   white-space: pre-wrap;
+}
+
+.json-panel-large {
+  max-height: 360px;
 }
 
 .workorch-bounded-text {
