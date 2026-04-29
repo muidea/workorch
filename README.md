@@ -19,8 +19,9 @@ configured.
 - `internal/modules/application/workorchd`: workorchd plugin module plus `biz` / `service` / `pkg` implementation packages
 - `web/workorch-console`: React/TypeScript management console source, built into `workorchd` assets
 - `internal/modules/application/workorchd/service/server/consoleassets`: embedded management console build output served by `workorchd`
-- `internal/modules/kernel/{workspace,run,decision,orchestrator,result}`: workorch kernel modules
-- `internal/modules/blocks/{approval,legacy,llm,mcp,shell}`: reusable/block modules
+- `internal/modules/kernel/{workspace,run,decision,orchestrator,eventstream,mcp,memory,skill,soul}`: workorch kernel modules
+- `internal/modules/kernel/result`: formal Result / Artifact business outcome models
+- `internal/modules/blocks/{approval,llm,mcp,shell,ssh}`: reusable/block modules
 - `internal/pkg/{common,events,repository}`: shared internal primitives
 - `docs/`: repo docs
 - `docs/next-stage-result-event-development-plan.md`: active next-stage plan for formal Result / Artifact and persistent Workorch event stream
@@ -77,8 +78,9 @@ Current boundary:
 
 ## Workorch semantics retained
 
-- kernel: `workspace`, `run`, `decision`, `orchestrator`
-- blocks: `approval`, `legacy`
+- kernel: `workspace`, `run`, `decision`, `orchestrator`, `eventstream`, `mcp`, `memory`, `skill`, `soul`
+- models: `result`
+- blocks: `approval`, `llm`, `mcp`, `shell`, `ssh`
 - shared common/events/repository primitives moved under `internal/pkg`
 
 ## Development workflow

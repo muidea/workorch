@@ -77,13 +77,13 @@
   - `internal/modules/blocks/shell`
   - `internal/modules/blocks/ssh`
 - Workspace execution activation now creates business Runs whose first Step is
-  `llm/workspace_execution`; no legacy runtime fallback is registered.
+  `llm/workspace_execution`; no alternate runtime fallback is registered.
 - Workspace execution activation accepts and persists selected Soul, Skill, MCP
   server, and Memory context on Run execution context; the same context is
   passed to the first LLM Step input.
 - Missing or disabled LLM provider configuration fails the LLM Step and Run
-  with observable runtime evidence instead of silently completing through the
-  legacy adapter.
+  with observable runtime evidence instead of silently completing through an
+  alternate runtime path.
 - Ready LLM provider configuration now creates a real OpenAI-compatible
   Chat Completions HTTP client inside `blocks/llm`; `openai` defaults to
   `https://api.openai.com/v1`, while `compatible` requires
@@ -216,17 +216,17 @@
 
 ## Delivered in workorch
 
-### Slice A: normal completion chain
+### Slice A: LLM-driven completion chain
 
 Implemented and runnable:
 
-1. create workspace
-2. create run
-3. start run
-4. runtime orchestrator delegates to legacy minimal runtime adapter
-5. adapter produces one step
-6. step completes
-7. run reaches `completed`
+1. create Workspace
+2. define Goal
+3. define DoD
+4. activate Workspace execution with selected context
+5. orchestrator dispatches `llm/workspace_execution`
+6. runtime blocks produce ToolCall / Patch / ValidationResult / RuntimeCheckpoint evidence as required
+7. DoD assessment is accepted and the Run reaches `completed`
 
 ### Slice B: decision-blocking chain
 
@@ -238,7 +238,7 @@ Implemented and runnable:
 4. run transitions to blocked-on-decision state
 5. resolve ticket
 6. resume run
-7. runtime orchestrator runs minimal slice
+7. runtime orchestrator continues from the blocked Step
 8. run reaches `completed`
 
 ### Slice C: approval-blocking chain
@@ -251,7 +251,7 @@ Implemented and runnable:
 4. run transitions to blocked-on-approval state
 5. approve gate
 6. resume run
-7. runtime orchestrator runs minimal slice
+7. runtime orchestrator continues from the blocked Step
 8. run reaches `completed`
 
 ### Slice D: approval-rejection terminal path

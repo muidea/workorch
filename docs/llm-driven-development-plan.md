@@ -45,7 +45,7 @@ the item is explicitly marked as design-only.
 | L4 | LLM provider configuration | completed | Provider config, disabled-provider behavior, redaction rules | Provider availability and redacted config are deterministic; runtime failure path is consumed in L5/L7 |
 | L5 | `blocks/llm` runtime adapter skeleton | completed | `llm/workspace_execution` adapter module, provider request boundary, schema parser | Adapter returns normalized Step output or schema/provider failure output |
 | L6 | Workspace execution activation context | completed | Activation request accepts Goal, DoD, Soul, Skill, MCP selections and recalled Memory refs | Created Run snapshot exposes selected execution context refs |
-| L7 | Orchestrator LLM step integration | completed | Runtime registry dispatches `llm/workspace_execution`; normalized output maps to state/evidence | First execution Step is LLM planning and does not use legacy completion |
+| L7 | Orchestrator LLM step integration | completed | Runtime registry dispatches `llm/workspace_execution`; normalized output maps to state/evidence | First execution Step is LLM planning and does not use alternate runtime completion |
 | L8 | LLM decision to action mapping | completed | Shell, patch, MCP, Decision, Approval, Memory write requests map from `LLMExecutionDecision` | Continue, block, approval, patch, and tool-call paths create expected evidence |
 | L9 | DoD assessment completion gate | completed | Run completion requires schema-valid DoD assessment with evidence refs | Run cannot complete without evidence-backed DoD assessment |
 | L10 | Memory write and recall loop | completed | Run summary and decision-derived Memory writes; second Run recall | Second Run includes prior relevant Memory in LLM planning context |
@@ -182,7 +182,7 @@ Acceptance:
 - Disabled or missing provider fails LLM-driven execution clearly.
 - No provider secret appears in snapshots, Memory, RuntimeCheckpoint, or logs
   intended for users.
-- Failure path does not dispatch shell, patch, MCP, or legacy adapter steps.
+- Failure path does not dispatch shell, patch, MCP, or alternate runtime steps.
 
 Status:
 
@@ -297,11 +297,12 @@ Status:
 - Workspace execution activation creates Runs with
   `llm/workspace_execution` as the first Step kind.
 - Orchestrator defaults business activation to `llm/workspace_execution` and
-  does not register a legacy runtime fallback.
+  does not register an alternate runtime fallback.
 - Runtime output `nextInput` is carried into the next dispatched Step so LLM
   decisions can hand concrete command/tool input to follow-up block execution.
 - Provider-unavailable LLM execution fails the Step and Run with observable
-  `llm_provider_unavailable` output instead of completing through legacy.
+  `llm_provider_unavailable` output instead of completing through an alternate
+  runtime path.
 - verification:
   `go test ./internal/modules/kernel/run/... ./internal/modules/kernel/orchestrator/... ./internal/modules/application/workorchd/biz/appservice -count 1`
 
@@ -335,7 +336,7 @@ Status:
   persists these fields into the created Decision Ticket.
 - Failed LLM decisions now fail the Step and Run with `llm_failed` evidence
   instead of being treated as a completed plan.
-- Unknown runtime kinds no longer fall back to a legacy runtime; they fail with
+- Unknown runtime kinds no longer fall back to an alternate runtime; they fail with
   `runtime_adapter_unavailable`.
 - Memory write requests require `memoryType` and `summary` at schema parsing
   time.
@@ -487,7 +488,7 @@ Scope:
 
 Acceptance:
 
-- Scripts fail on missing evidence, missing DoD assessment, unexpected legacy
+- Scripts fail on missing evidence, missing DoD assessment, unexpected runtime
   fallback, missing Memory recall, or leaked provider secrets.
 - Deployed-instance verification preserves business objects and relationships
   through API reads; restart-read verification is an operator-managed deployment
@@ -733,8 +734,8 @@ Exit criteria:
 | L4 | completed | LLM provider env config, disabled/unavailable state, timeout validation, supported provider validation, and redaction helper completed. Runtime dispatch failure path remains L5/L7. |
 | L5 | completed | LLM runtime adapter, OpenAI-compatible HTTP provider client, provider request boundary, strict decision parsing, normalized output, module registration, runtime helper injection, and bootstrap/orchestrator registration completed. |
 | L6 | completed | Workspace execution activation now binds selected Soul, Skill, MCP server, and Memory context into Run execution context and first LLM Step input; disallowed or missing selections are rejected before Run creation. |
-| L7 | completed | LLM-driven activation dispatches `llm/workspace_execution` first, propagates execution context and `nextInput`, and fails visibly when provider config is unavailable instead of falling back to a legacy runtime. |
-| L8 | completed | LLM decisions now map to shell, MCP boundary, patches, Memory write requests, structured Decision Tickets, Approval gates, DoD assessment, and explicit failed decisions; unregistered runtime kinds fail instead of using legacy fallback. |
+| L7 | completed | LLM-driven activation dispatches `llm/workspace_execution` first, propagates execution context and `nextInput`, and fails visibly when provider config is unavailable instead of falling back to an alternate runtime path. |
+| L8 | completed | LLM decisions now map to shell, MCP boundary, patches, Memory write requests, structured Decision Tickets, Approval gates, DoD assessment, and explicit failed decisions; unregistered runtime kinds fail instead of using alternate runtime fallback. |
 | L9 | completed | LLM-driven Runs with DoD now require a satisfied evidence-backed DoD assessment before completion; missing or invalid assessments fail the Step and Run. |
 | L10 | completed | Runtime `memoryWrites` and terminal run summaries now persist as Workspace Memory with Run source refs; created IDs are exposed as `memoryRefs`, and later activation can recall Workspace Memory into LLM context. |
 | L11 | completed | Minimal HTTP API surface for Soul, Skill, MCPServer, and Workspace Memory completed; baseline acceptance dataset can be created through workorchd APIs. |

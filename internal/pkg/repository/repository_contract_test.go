@@ -1896,7 +1896,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	step := &runmodel.Step{
 		ID:    stepID,
 		RunID: runID,
-		Kind:  "legacy/manual",
+		Kind:  "manual/checkpoint",
 		State: common.StepStateDispatched,
 		Input: map[string]any{"workspaceId": string(workspaceID), "runId": string(runID)},
 	}

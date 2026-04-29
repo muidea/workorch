@@ -150,10 +150,10 @@ func TestRuntimeAdapterRegistryDispatchesByStepKind(t *testing.T) {
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	defaultRuntime := &requestCapturingRuntimeAdapter{output: map[string]any{"status": "default"}}
-	nonLegacyRuntime := &requestCapturingRuntimeAdapter{output: map[string]any{"status": "non-legacy"}}
+	externalRuntime := &requestCapturingRuntimeAdapter{output: map[string]any{"status": "external"}}
 	registry := newRuntimeAdapterRegistryForTest(defaultRuntime)
-	if err := registry.Register("external/mock", nonLegacyRuntime); err != nil {
-		t.Fatalf("register non-legacy runtime: %v", err)
+	if err := registry.Register("external/mock", externalRuntime); err != nil {
+		t.Fatalf("register external runtime: %v", err)
 	}
 	orch := NewRuntimeOrchestrator(registry, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
 
@@ -174,10 +174,10 @@ func TestRuntimeAdapterRegistryDispatchesByStepKind(t *testing.T) {
 		t.Fatalf("dispatch next step: %v", err)
 	}
 
-	if len(nonLegacyRuntime.requests) != 1 {
-		t.Fatalf("non legacy requests = %d, want 1", len(nonLegacyRuntime.requests))
+	if len(externalRuntime.requests) != 1 {
+		t.Fatalf("external runtime requests = %d, want 1", len(externalRuntime.requests))
 	}
-	request := nonLegacyRuntime.requests[0]
+	request := externalRuntime.requests[0]
 	if request.WorkspaceID != workspaceID || request.RunID != runID || request.StepID != stepID || request.Kind != "external/mock" || request.Input["seed"] != "yes" {
 		t.Fatalf("request = %+v, want full runtime request", request)
 	}
@@ -188,8 +188,8 @@ func TestRuntimeAdapterRegistryDispatchesByStepKind(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get step: %v", err)
 	}
-	if step.Output["status"] != "non-legacy" {
-		t.Fatalf("step output = %+v, want non-legacy", step.Output)
+	if step.Output["status"] != "external" {
+		t.Fatalf("step output = %+v, want external", step.Output)
 	}
 }
 

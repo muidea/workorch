@@ -19,8 +19,8 @@ Status: completed
 
 Target:
 
-- Define a formal runtime/tool adapter contract outside the legacy minimal
-  adapter.
+- Define a formal runtime/tool adapter contract for all runtime block
+  execution.
 - Support adapter selection by step kind or block kind.
 - Keep runtime output normalized into the existing evidence model:
   `ToolCall`, `Patch`, `ValidationResult`, and `RuntimeCheckpoint`.
@@ -28,8 +28,8 @@ Target:
 
 Acceptance:
 
-- Existing legacy runtime remains supported through the new adapter boundary.
-- At least one non-legacy adapter can be registered and executed in tests.
+- Registered adapters are selected through the formal runtime adapter boundary.
+- At least one additional adapter can be registered and executed in tests.
 - Adapter output can produce tool calls, validation results, checkpoints, and
   patch requests without special-case orchestration code per adapter.
 
@@ -132,8 +132,7 @@ from the resulting formal execution events and evidence.
 - completed: `R1 External Runtime And Tool Adapter Contract`
   Runtime execution now uses a formal `StepExecutionRequest` /
   `StepExecutionResult` contract and a step-kind based adapter registry. The
-  legacy minimal runtime remains available through the same contract, and tests
-  cover dispatch to a registered non-legacy adapter. Registered concrete
+  tests cover dispatch to an explicitly registered adapter. Registered concrete
   adapters now include `shell/command`, `llm/workspace_execution`,
   `mcp/tool_call`, `mcp/resource_read`, and `mcp/prompt_get`; the current MCP
   adapter supports governed HTTP/HTTPS endpoint invocation, MCP `stdio`
