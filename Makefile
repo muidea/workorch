@@ -9,7 +9,7 @@ GOTEST_FLAGS ?=
 BUILD_OUT ?= ./bin/workorchd
 CONSOLE_WEB := ./web/workorch-console
 
-.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-llm verify-llm-file verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file ci
+.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file ci
 
 help:
 	@echo "Targets:"
@@ -26,6 +26,8 @@ help:
 	@echo "  verify-boundary-contract - fail if generic runtime/Web code contains business-specific fallback logic"
 	@echo "  verify-service      - verify the deployed workorchd HTTP service at WORKORCH_BASE_URL"
 	@echo "  verify-service-file - alias of verify-service; e2e uses the deployed instance only"
+	@echo "  verify-workspace-template-soul      - verify deployed Soul, Workspace Template, and template-based Workspace setup"
+	@echo "  verify-workspace-template-soul-file - alias of verify-workspace-template-soul; e2e uses the deployed instance only"
 	@echo "  verify-llm      - verify deployed LLM-driven execution using a local mock provider"
 	@echo "  verify-llm-file - alias of verify-llm; e2e uses the deployed instance only"
 	@echo "  verify-skillhub      - verify deployed SkillHub global/workspace Skill auto-selection"
@@ -108,6 +110,11 @@ verify-service:
 
 verify-service-file: verify-service
 
+verify-workspace-template-soul:
+	./scripts/verify-workspace-template-soul.sh
+
+verify-workspace-template-soul-file: verify-workspace-template-soul
+
 verify-llm:
 	WORKORCH_LLM_VERIFY_MOCK_ADDR=127.0.0.1:18181 ./scripts/verify-llm-workspace-execution.sh
 
@@ -123,7 +130,7 @@ verify-mcp-stdio:
 
 verify-mcp-stdio-file: verify-mcp-stdio
 
-verify-ci-mvp: verify-service verify-llm verify-mcp-stdio
+verify-ci-mvp: verify-service verify-workspace-template-soul verify-llm verify-mcp-stdio
 
 verify-ci-mvp-file: verify-ci-mvp
 

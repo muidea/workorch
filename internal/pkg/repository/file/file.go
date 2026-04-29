@@ -29,6 +29,11 @@ type WorkspaceRepository struct {
 	path string
 }
 
+type WorkspaceTemplateRepository struct {
+	mu   sync.RWMutex
+	path string
+}
+
 type SoulRepository struct {
 	mu   sync.RWMutex
 	path string
@@ -731,6 +736,78 @@ func (r *WorkspaceRepository) Update(_ context.Context, item *workspace.Workspac
 		return common.ErrNotFound
 	}
 	items[item.ID] = *cloneWorkspace(item)
+	return saveMap(r.path, items)
+}
+
+func NewWorkspaceTemplateRepository(path string) *WorkspaceTemplateRepository {
+	return &WorkspaceTemplateRepository{path: path}
+}
+
+func (r *WorkspaceTemplateRepository) Create(_ context.Context, item *repository.WorkspaceTemplate) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[string, repository.WorkspaceTemplate](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	items[item.ID] = *cloneWorkspaceTemplate(item)
+	return saveMap(r.path, items)
+}
+
+func (r *WorkspaceTemplateRepository) Get(_ context.Context, id string) (*repository.WorkspaceTemplate, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[string, repository.WorkspaceTemplate](r.path)
+	if err != nil {
+		return nil, err
+	}
+	item, ok := items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneWorkspaceTemplate(&item), nil
+}
+
+func (r *WorkspaceTemplateRepository) List(_ context.Context) ([]*repository.WorkspaceTemplate, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[string, repository.WorkspaceTemplate](r.path)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]string, 0, len(items))
+	for id := range items {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	ret := make([]*repository.WorkspaceTemplate, 0, len(ids))
+	for _, id := range ids {
+		item := items[id]
+		ret = append(ret, cloneWorkspaceTemplate(&item))
+	}
+	return ret, nil
+}
+
+func (r *WorkspaceTemplateRepository) Update(_ context.Context, item *repository.WorkspaceTemplate) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[string, repository.WorkspaceTemplate](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	items[item.ID] = *cloneWorkspaceTemplate(item)
 	return saveMap(r.path, items)
 }
 
@@ -1764,6 +1841,18 @@ func cloneSoul(item *soul.Soul) *soul.Soul {
 	cloned.AllowedSkillRefs = cloneStringSlice(item.AllowedSkillRefs)
 	cloned.AllowedMCPServerRefs = cloneStringSlice(item.AllowedMCPServerRefs)
 	cloned.AllowedToolKinds = cloneStringSlice(item.AllowedToolKinds)
+	return &cloned
+}
+
+func cloneWorkspaceTemplate(item *repository.WorkspaceTemplate) *repository.WorkspaceTemplate {
+	cloned := *item
+	cloned.DoDItems = cloneStringSlice(item.DoDItems)
+	if item.SoulBindings != nil {
+		cloned.SoulBindings = map[string]string{}
+		for key, value := range item.SoulBindings {
+			cloned.SoulBindings[key] = value
+		}
+	}
 	return &cloned
 }
 

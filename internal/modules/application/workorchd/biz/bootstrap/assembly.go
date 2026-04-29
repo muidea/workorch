@@ -152,6 +152,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 		exports: Exports{
 			Repositories: RepositoryExports{
 				Souls:              repos.soul,
+				WorkspaceTemplates: repos.workspaceTemplate,
 				MemoryItems:        repos.memoryItem,
 				Skills:             repos.skill,
 				MCPServers:         repos.mcpServer,

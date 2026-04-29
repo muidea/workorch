@@ -111,6 +111,8 @@ Automated verification entrypoints:
 ```bash
 make verify-service
 make verify-service-file
+make verify-workspace-template-soul
+make verify-workspace-template-soul-file
 make verify-llm
 make verify-llm-file
 make verify-real-llm
@@ -123,6 +125,11 @@ All non-docker e2e verification targets connect to the currently deployed
 `workorchd` instance through `WORKORCH_BASE_URL` and must not build, start,
 stop, or restart `workorchd`. The `*-file` targets are retained as aliases for
 the same deployed-instance checks.
+
+`make verify-workspace-template-soul` and
+`make verify-workspace-template-soul-file` verify deployed Soul management,
+Workspace Template management, and template-based Workspace setup with Goal,
+DoD, and Workspace Soul binding read models.
 
 `make verify-llm` and `make verify-llm-file` start only a local
 OpenAI-compatible mock provider and verify the LLM-driven Workspace execution
@@ -267,6 +274,10 @@ A deployable `workorchd` instance is acceptable when:
 - `make verify-mcp-stdio` and `make verify-mcp-stdio-file` pass against the
   deployed service, proving the governed MCP `stdio` tool-call path through LLM
   graph execution.
+- `make verify-workspace-template-soul` and
+  `make verify-workspace-template-soul-file` pass against the deployed service,
+  proving Soul management, Workspace Template management, and template-based
+  Workspace setup with Goal / DoD / Soul binding persistence.
 - `make verify-mvp` and `make verify-mvp-file` pass as the grouped local
   deployed-instance MVP verification bundles with the configured real LLM
   provider. CI uses `make verify-ci-mvp-file` instead.

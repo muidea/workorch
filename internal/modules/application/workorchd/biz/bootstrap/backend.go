@@ -11,6 +11,7 @@ import (
 
 type repositorySet struct {
 	soul              repository.SoulRepository
+	workspaceTemplate repository.WorkspaceTemplateRepository
 	memoryItem        repository.MemoryItemRepository
 	skill             repository.SkillRepository
 	mcpServer         repository.MCPServerRepository
@@ -36,6 +37,7 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 	case "", "memory":
 		return repositorySet{
 			soul:              memory.NewSoulRepository(),
+			workspaceTemplate: memory.NewWorkspaceTemplateRepository(),
 			memoryItem:        memory.NewMemoryItemRepository(),
 			skill:             memory.NewSkillRepository(),
 			mcpServer:         memory.NewMCPServerRepository(),
@@ -60,6 +62,7 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 		workspaceScopedRepos := NewWorkspaceScopedFileRepositorySet(dataRoot)
 		return repositorySet{
 			soul:              fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "souls")),
+			workspaceTemplate: fileRepo.NewWorkspaceTemplateRepository(filepath.Join(dataRoot, "system", "workspace_templates.json")),
 			memoryItem:        workspaceScopedRepos.MemoryItems,
 			skill:             fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
 			mcpServer:         fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "system", "mcp_server.json")),

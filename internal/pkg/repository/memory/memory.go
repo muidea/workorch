@@ -26,6 +26,11 @@ type WorkspaceRepository struct {
 	items map[common.WorkspaceID]*workspace.Workspace
 }
 
+type WorkspaceTemplateRepository struct {
+	mu    sync.RWMutex
+	items map[string]*repository.WorkspaceTemplate
+}
+
 type SoulRepository struct {
 	mu    sync.RWMutex
 	items map[common.SoulID]*soul.Soul
@@ -109,6 +114,57 @@ func (r *SoulRepository) Update(_ context.Context, item *soul.Soul) error {
 		return common.ErrNotFound
 	}
 	r.items[item.ID] = cloneSoul(item)
+	return nil
+}
+
+func NewWorkspaceTemplateRepository() *WorkspaceTemplateRepository {
+	return &WorkspaceTemplateRepository{items: map[string]*repository.WorkspaceTemplate{}}
+}
+
+func (r *WorkspaceTemplateRepository) Create(_ context.Context, item *repository.WorkspaceTemplate) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	r.items[item.ID] = cloneWorkspaceTemplate(item)
+	return nil
+}
+
+func (r *WorkspaceTemplateRepository) Get(_ context.Context, id string) (*repository.WorkspaceTemplate, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneWorkspaceTemplate(item), nil
+}
+
+func (r *WorkspaceTemplateRepository) List(_ context.Context) ([]*repository.WorkspaceTemplate, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := make([]string, 0, len(r.items))
+	for id := range r.items {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	ret := make([]*repository.WorkspaceTemplate, 0, len(ids))
+	for _, id := range ids {
+		ret = append(ret, cloneWorkspaceTemplate(r.items[id]))
+	}
+	return ret, nil
+}
+
+func (r *WorkspaceTemplateRepository) Update(_ context.Context, item *repository.WorkspaceTemplate) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	r.items[item.ID] = cloneWorkspaceTemplate(item)
 	return nil
 }
 
@@ -1293,6 +1349,18 @@ func cloneSoul(item *soul.Soul) *soul.Soul {
 	cloned.AllowedSkillRefs = cloneStringSlice(item.AllowedSkillRefs)
 	cloned.AllowedMCPServerRefs = cloneStringSlice(item.AllowedMCPServerRefs)
 	cloned.AllowedToolKinds = cloneStringSlice(item.AllowedToolKinds)
+	return &cloned
+}
+
+func cloneWorkspaceTemplate(item *repository.WorkspaceTemplate) *repository.WorkspaceTemplate {
+	cloned := *item
+	cloned.DoDItems = cloneStringSlice(item.DoDItems)
+	if item.SoulBindings != nil {
+		cloned.SoulBindings = map[string]string{}
+		for key, value := range item.SoulBindings {
+			cloned.SoulBindings[key] = value
+		}
+	}
 	return &cloned
 }
 

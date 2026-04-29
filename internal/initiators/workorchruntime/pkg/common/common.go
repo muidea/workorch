@@ -21,6 +21,7 @@ const InitiatorID = "workorch/runtime"
 
 type RepositorySet struct {
 	Souls              repository.SoulRepository
+	WorkspaceTemplates repository.WorkspaceTemplateRepository
 	MemoryItems        repository.MemoryItemRepository
 	Skills             repository.SkillRepository
 	MCPServers         repository.MCPServerRepository

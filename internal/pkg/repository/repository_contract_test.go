@@ -41,6 +41,18 @@ func TestSoulRepositoryContract_File(t *testing.T) {
 	})
 }
 
+func TestWorkspaceTemplateRepositoryContract_Memory(t *testing.T) {
+	testWorkspaceTemplateRepositoryContract(t, func() repository.WorkspaceTemplateRepository {
+		return memory.NewWorkspaceTemplateRepository()
+	})
+}
+
+func TestWorkspaceTemplateRepositoryContract_File(t *testing.T) {
+	testWorkspaceTemplateRepositoryContract(t, func() repository.WorkspaceTemplateRepository {
+		return file.NewWorkspaceTemplateRepository(filepath.Join(t.TempDir(), "workspace_templates.json"))
+	})
+}
+
 func TestMemoryItemRepositoryContract_Memory(t *testing.T) {
 	testMemoryItemRepositoryContract(t, func() repository.MemoryItemRepository {
 		return memory.NewMemoryItemRepository()
@@ -826,6 +838,69 @@ func testSoulRepositoryContract(t *testing.T, factory func() repository.SoulRepo
 	}
 	if err := repo.Update(ctx, &soulmodel.Soul{ID: common.SoulID("missing")}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("update missing soul err = %v, want not found", err)
+	}
+}
+
+func testWorkspaceTemplateRepositoryContract(t *testing.T, factory func() repository.WorkspaceTemplateRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &repository.WorkspaceTemplate{
+		ID:            "workspace-template-contract",
+		Name:          "contract template",
+		Description:   "template contract description",
+		GoalText:      "Deliver a verified workspace",
+		DoDItems:      []string{"goal is defined", "result is accepted"},
+		DefaultSoulID: "soul-contract",
+		SoulBindings: map[string]string{
+			"planning":  "soul-contract",
+			"execution": "soul-contract",
+		},
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create workspace template: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate create err = %v, want conflict", err)
+	}
+
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get workspace template: %v", err)
+	}
+	got.Name = "mutated"
+	got.DoDItems[0] = "mutated"
+	got.SoulBindings["planning"] = "mutated"
+
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get workspace template fresh: %v", err)
+	}
+	if fresh.Name != "contract template" || fresh.DoDItems[0] != "goal is defined" || fresh.SoulBindings["planning"] != "soul-contract" {
+		t.Fatalf("clone isolation failed, workspace template = %+v", fresh)
+	}
+
+	fresh.Description = "updated description"
+	fresh.DoDItems = append(fresh.DoDItems, "evidence is available")
+	fresh.SoulBindings["validation"] = "soul-contract"
+	if err := repo.Update(ctx, fresh); err != nil {
+		t.Fatalf("update workspace template: %v", err)
+	}
+
+	list, err := repo.List(ctx)
+	if err != nil {
+		t.Fatalf("list workspace template: %v", err)
+	}
+	if len(list) != 1 || list[0].Description != "updated description" || len(list[0].DoDItems) != 3 || list[0].SoulBindings["validation"] != "soul-contract" {
+		t.Fatalf("list workspace template = %+v, want updated template", list)
+	}
+
+	if _, err := repo.Get(ctx, "missing"); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get missing workspace template err = %v, want not found", err)
+	}
+	if err := repo.Update(ctx, &repository.WorkspaceTemplate{ID: "missing"}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("update missing workspace template err = %v, want not found", err)
 	}
 }
 
