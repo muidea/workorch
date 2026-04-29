@@ -13,6 +13,7 @@ import (
 
 const defaultProviderTimeout = 60 * time.Second
 const defaultOpenAIBaseURL = "https://api.openai.com/v1"
+const defaultAnthropicBaseURL = "https://api.anthropic.com"
 
 func LoadProviderConfig(providerID string, values map[string]string) (llmmodels.ProviderConfig, error) {
 	timeout := defaultProviderTimeout
@@ -134,8 +135,17 @@ func withAvailability(cfg llmmodels.ProviderConfig) llmmodels.ProviderConfig {
 		cfg.Unavailable = true
 		cfg.UnavailableReason = "llm api key is not configured"
 	}
-	if !cfg.Unavailable && cfg.Provider == llmcommon.ProviderOpenAI && cfg.BaseURL == "" {
-		cfg.BaseURL = defaultOpenAIBaseURL
+	if !cfg.Unavailable {
+		switch cfg.Provider {
+		case llmcommon.ProviderOpenAI:
+			if cfg.BaseURL == "" {
+				cfg.BaseURL = defaultOpenAIBaseURL
+			}
+		case llmcommon.ProviderAnthropic:
+			if cfg.BaseURL == "" {
+				cfg.BaseURL = defaultAnthropicBaseURL
+			}
+		}
 	}
 	return cfg
 }
@@ -157,7 +167,7 @@ func normalizedOperations(raw string) []string {
 
 func isSupportedProvider(provider string) bool {
 	switch provider {
-	case llmcommon.ProviderOpenAI, llmcommon.ProviderCompatible:
+	case llmcommon.ProviderOpenAI, llmcommon.ProviderCompatible, llmcommon.ProviderAnthropic:
 		return true
 	default:
 		return false

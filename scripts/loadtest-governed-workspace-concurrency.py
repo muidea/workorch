@@ -37,20 +37,41 @@ PROVINCE = os.environ.get("WORKORCH_LOAD_PROVINCE", "浙江")
 CITY = os.environ.get("WORKORCH_LOAD_CITY", "杭州")
 LOOKUP_NAME = os.environ.get("WORKORCH_LOAD_LOOKUP_NAME", "Hangzhou")
 EXPECTED_MAX_CONCURRENT_RUNS = int(os.environ.get("WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS", "0"))
+MCP_SESSION_POLICY = os.environ.get("WORKORCH_LOAD_MCP_SESSION_POLICY", "transient").strip().lower()
 
 if LLM_MODE not in {"mock", "real"}:
     raise SystemExit(f"WORKORCH_LOAD_LLM_MODE must be mock or real, got {LLM_MODE!r}")
 if CONCURRENCY <= 0 or TOTAL <= 0:
     raise SystemExit("WORKORCH_LOAD_CONCURRENCY and WORKORCH_LOAD_TOTAL must be positive")
+if MCP_SESSION_POLICY not in {"transient", "long_lived"}:
+    raise SystemExit(f"WORKORCH_LOAD_MCP_SESSION_POLICY must be transient or long_lived, got {MCP_SESSION_POLICY!r}")
 
 
 class HTTPError(RuntimeError):
-    def __init__(self, method: str, path: str, status: int, stderr: str):
-        super().__init__(f"{method} {path} failed with HTTP/status {status}: {stderr.strip()}")
+    def __init__(self, method: str, path: str, curl_code: int, stderr: str, *, http_status: int = 0, body: str = "", elapsed_ms: float = 0):
+        status_text = f"HTTP {http_status}" if http_status else f"curl {curl_code}"
+        details = stderr.strip() or body_preview(body) or "request failed"
+        super().__init__(f"{method} {path} failed with {status_text}: {details}")
         self.method = method
         self.path = path
-        self.status = status
+        self.curl_code = curl_code
+        self.http_status = http_status
+        self.status = http_status or curl_code
         self.stderr = stderr
+        self.body = body
+        self.elapsed_ms = elapsed_ms
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "method": self.method,
+            "path": self.path,
+            "curlCode": self.curl_code,
+            "httpStatus": self.http_status,
+            "stderr": self.stderr,
+            "body": self.body,
+            "bodyPreview": body_preview(self.body),
+            "elapsedMs": self.elapsed_ms,
+        }
 
 
 @dataclass
@@ -270,25 +291,54 @@ def extract_json_string(raw: str, key: str) -> str:
     return match.group(1) if match else ""
 
 
+def body_preview(body: str, limit: int = 1000) -> str:
+    text = (body or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...<truncated>"
+
+
 def run_curl(method: str, path: str, body: Any | None = None, *, base_url: str = BASE_URL) -> Any:
     url = f"{base_url.rstrip('/')}{path}"
-    cmd = ["curl", "-fsS", "--max-time", CURL_MAX_TIME, "-X", method, "-H", "Content-Type: application/json", url]
+    cmd = ["curl", "-sS", "--max-time", CURL_MAX_TIME, "-X", method, "-H", "Content-Type: application/json", "-w", "\n%{http_code}", url]
     if body is not None:
         cmd.extend(["-d", json.dumps(body, ensure_ascii=False, separators=(",", ":"))])
+    started = time.monotonic()
     completed = subprocess.run(cmd, text=True, capture_output=True)
+    elapsed_ms = (time.monotonic() - started) * 1000
+    response_body, http_status = split_curl_response(completed.stdout)
     if completed.returncode != 0:
-        raise HTTPError(method, path, completed.returncode, completed.stderr)
-    if not completed.stdout.strip():
+        raise HTTPError(method, path, completed.returncode, completed.stderr, http_status=http_status, body=response_body, elapsed_ms=elapsed_ms)
+    if http_status >= 400:
+        raise HTTPError(method, path, completed.returncode, completed.stderr, http_status=http_status, body=response_body, elapsed_ms=elapsed_ms)
+    if not response_body.strip():
         return {}
-    return json.loads(completed.stdout)
+    return json.loads(response_body)
 
 
 def run_curl_text(path: str) -> str:
-    cmd = ["curl", "-fsS", "--max-time", CURL_MAX_TIME, f"{BASE_URL}{path}"]
+    cmd = ["curl", "-sS", "--max-time", CURL_MAX_TIME, "-w", "\n%{http_code}", f"{BASE_URL}{path}"]
+    started = time.monotonic()
     completed = subprocess.run(cmd, text=True, capture_output=True)
+    elapsed_ms = (time.monotonic() - started) * 1000
+    response_body, http_status = split_curl_response(completed.stdout)
     if completed.returncode != 0:
-        raise HTTPError("GET", path, completed.returncode, completed.stderr)
-    return completed.stdout
+        raise HTTPError("GET", path, completed.returncode, completed.stderr, http_status=http_status, body=response_body, elapsed_ms=elapsed_ms)
+    if http_status >= 400:
+        raise HTTPError("GET", path, completed.returncode, completed.stderr, http_status=http_status, body=response_body, elapsed_ms=elapsed_ms)
+    return response_body
+
+
+def split_curl_response(stdout: str) -> tuple[str, int]:
+    if not stdout:
+        return "", 0
+    body, sep, status_text = stdout.rpartition("\n")
+    if not sep:
+        return stdout, 0
+    try:
+        return body, int(status_text.strip())
+    except ValueError:
+        return stdout, 0
 
 
 def url_quote(value: str) -> str:
@@ -759,6 +809,8 @@ def execute_workspace(seq: int, provider_id: str, mcp_server_id: str) -> Workspa
         result.success = True
     except Exception as exc:
         result.error = str(exc)
+        if isinstance(exc, HTTPError):
+            write_json(case_dir / "http-error.json", exc.to_dict())
         collect_failure_evidence(result, case_dir)
         write_text(case_dir / "error.txt", result.error + "\n")
     finally:
@@ -860,6 +912,7 @@ def build_summary(
         "batchId": BATCH_ID,
         "baseUrl": BASE_URL,
         "llmMode": LLM_MODE,
+        "mcpSessionPolicy": MCP_SESSION_POLICY,
         "total": TOTAL,
         "concurrency": CONCURRENCY,
         "serverMaxConcurrentRuns": server_max_concurrent_runs,
@@ -887,6 +940,7 @@ def write_markdown_report(summary: dict[str, Any]) -> None:
         f"- batchId: `{summary['batchId']}`",
         f"- baseUrl: `{summary['baseUrl']}`",
         f"- llmMode: `{summary['llmMode']}`",
+        f"- mcpSessionPolicy: `{summary['mcpSessionPolicy']}`",
         f"- total: `{summary['total']}`",
         f"- concurrency: `{summary['concurrency']}`",
         f"- serverMaxConcurrentRuns: `{summary['serverMaxConcurrentRuns']}`",
@@ -981,7 +1035,7 @@ def main() -> int:
                 "enabled": True,
                 "allowedTools": ["loadtest.governed_result"],
                 "defaultApprovalPolicy": "operator",
-                "sessionPolicy": "long_lived",
+                "sessionPolicy": MCP_SESSION_POLICY,
                 "timeoutMillis": 30000,
             },
         )
@@ -1000,7 +1054,7 @@ def main() -> int:
         summary = build_summary(results, started_at, ended_at, metrics_before, server_max_concurrent_runs)
         write_json(ARTIFACT_DIR / "summary.json", summary)
         write_markdown_report(summary)
-        print(json.dumps({k: summary[k] for k in ["batchId", "llmMode", "total", "concurrency", "serverMaxConcurrentRuns", "workspaceSuccessTotal", "workspaceFailedTotal", "successRate", "throughputWorkspacesPerMin", "llmProtocolErrorTotal", "timelineMissingRunStateTotal"]}, ensure_ascii=False, indent=2))
+        print(json.dumps({k: summary[k] for k in ["batchId", "llmMode", "mcpSessionPolicy", "total", "concurrency", "serverMaxConcurrentRuns", "workspaceSuccessTotal", "workspaceFailedTotal", "successRate", "throughputWorkspacesPerMin", "llmProtocolErrorTotal", "timelineMissingRunStateTotal"]}, ensure_ascii=False, indent=2))
         print(f"artifacts={ARTIFACT_DIR}")
         return 0 if summary["workspaceFailedTotal"] == 0 else 1
     except KeyboardInterrupt:

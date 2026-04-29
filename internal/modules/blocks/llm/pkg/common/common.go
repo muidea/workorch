@@ -17,6 +17,7 @@ const (
 const (
 	ProviderOpenAI     = "openai"
 	ProviderCompatible = "compatible"
+	ProviderAnthropic  = "anthropic"
 )
 
 const (

@@ -250,7 +250,7 @@ func TestWorkorchdServerSupportsFileRepositoryBackend(t *testing.T) {
 	workspaceID := createWorkspace(t, "http://"+addr+"/api/v1/workorch/workspaces", "main file workspace")
 	createRunInstance(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", "run-main-file", "goal-main-file", "dod-main-file")
 	assertWorkspaceListAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces", workspaceID)
-	assertWorkspaceAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID, workspaceID, "main file workspace")
+	assertWorkspaceAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID, workspaceID, "main file workspace", "active")
 	assertRunListAvailable(t, "http://"+addr+"/api/v1/workorch/runs", "run-main-file")
 	assertRunAvailable(t, "http://"+addr+"/api/v1/workorch/runs/run-main-file", "run-main-file", workspaceID)
 	assertRunListAvailable(t, "http://"+addr+"/api/v1/workorch/runs?workspaceId="+workspaceID, "run-main-file")
@@ -353,7 +353,7 @@ func TestWorkorchdServerRetainsFileBackedTerminalStateAcrossRestart(t *testing.T
 
 	waitForHealthy(t, "http://"+secondAddr+"/healthz")
 
-	assertWorkspaceAvailable(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID, workspaceID, "restart file workspace")
+	assertWorkspaceAvailable(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID, workspaceID, "restart file workspace", "failed")
 	assertRunAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed", "run-restart-completed", workspaceID, "failed")
 	assertRunSnapshotAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed/snapshot", "run-restart-completed", workspaceID, "failed")
 	assertRunStatusAvailable(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed/status", "run-restart-completed", "failed")
@@ -639,7 +639,7 @@ func assertWorkspaceListAvailable(t *testing.T, endpoint string, workspaceID str
 	}
 }
 
-func assertWorkspaceAvailable(t *testing.T, endpoint string, workspaceID string, title string) {
+func assertWorkspaceAvailable(t *testing.T, endpoint string, workspaceID string, title string, state string) {
 	t.Helper()
 
 	resp, err := http.Get(endpoint)
@@ -654,8 +654,8 @@ func assertWorkspaceAvailable(t *testing.T, endpoint string, workspaceID string,
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode workspace response: %v", err)
 	}
-	if body.Workspace.ID != workspaceID || body.Workspace.Title != title || body.Workspace.State != "active" {
-		t.Fatalf("workspace = %+v, want %s/%s/active", body.Workspace, workspaceID, title)
+	if body.Workspace.ID != workspaceID || body.Workspace.Title != title || body.Workspace.State != state {
+		t.Fatalf("workspace = %+v, want %s/%s/%s", body.Workspace, workspaceID, title, state)
 	}
 }
 

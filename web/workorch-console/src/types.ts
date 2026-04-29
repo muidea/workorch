@@ -28,6 +28,7 @@ export type LLMConfiguration = {
   defaultProviderId?: string;
   defaultEmbeddingProviderId?: string;
   providers?: LLMProviderConfiguration[];
+  providerTemplates?: LLMProviderTemplate[];
 };
 
 export type LLMProviderConfiguration = {
@@ -41,6 +42,21 @@ export type LLMProviderConfiguration = {
   reason?: string;
   default: boolean;
   apiKeyConfigured: boolean;
+  chatCompletions: boolean;
+  streaming: boolean;
+  nonChatOperations?: string[];
+};
+
+export type LLMProviderTemplate = {
+  templateId: string;
+  name: string;
+  description?: string;
+  id: string;
+  provider: string;
+  baseUrl?: string;
+  model?: string;
+  timeout?: string;
+  disabled: boolean;
   chatCompletions: boolean;
   streaming: boolean;
   nonChatOperations?: string[];

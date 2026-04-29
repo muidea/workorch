@@ -502,10 +502,74 @@ func TestReadWorkspaceSnapshotProjectsWorkspaceStateFromRun(t *testing.T) {
 			if snapshot.Workspace.State != tc.workspaceState {
 				t.Fatalf("workspace state = %q, want %q", snapshot.Workspace.State, tc.workspaceState)
 			}
-			if snapshot.Workspace.ActiveRunID != string(runID) {
-				t.Fatalf("activeRunId = %q, want %s", snapshot.Workspace.ActiveRunID, runID)
+			expectedActiveRunID := string(runID)
+			if tc.runState == common.RunStateCompleted ||
+				tc.runState == common.RunStateFailed ||
+				tc.runState == common.RunStateCancelled ||
+				tc.runState == common.RunStateSuperseded {
+				expectedActiveRunID = ""
+			}
+			if snapshot.Workspace.ActiveRunID != expectedActiveRunID {
+				t.Fatalf("activeRunId = %q, want %q", snapshot.Workspace.ActiveRunID, expectedActiveRunID)
 			}
 		})
+	}
+}
+
+func TestReadWorkspaceSnapshotProjectsAcceptedResultOverStaleTerminalActiveRun(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-stale-active-result")
+	staleRunID := common.RunID("run-stale-failed")
+	completedRunID := common.RunID("run-result-completed")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "stale projection",
+		State:       common.WorkspaceStateFailed,
+		ActiveRunID: staleRunID,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:            staleRunID,
+		WorkspaceID:   workspaceID,
+		State:         common.RunStateFailed,
+		FailureReason: "old provider failure",
+	}); err != nil {
+		t.Fatalf("create stale run: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          completedRunID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateCompleted,
+	}); err != nil {
+		t.Fatalf("create completed run: %v", err)
+	}
+	if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
+		ID:          common.ResultID(string(completedRunID) + "/result/dod-assessment"),
+		WorkspaceID: workspaceID,
+		RunID:       completedRunID,
+		State:       common.ResultStateAccepted,
+		Summary:     "formal result",
+		CreatedAt:   "2026-04-29T10:00:00Z",
+	}); err != nil {
+		t.Fatalf("create result: %v", err)
+	}
+
+	snapshot, err := ReadWorkspaceSnapshotWithBackend(context.Background(), "file", dataRoot, string(workspaceID))
+	if err != nil {
+		t.Fatalf("ReadWorkspaceSnapshotWithBackend: %v", err)
+	}
+	if snapshot.Workspace.State != string(common.WorkspaceStateCompleted) {
+		t.Fatalf("workspace state = %q, want completed", snapshot.Workspace.State)
+	}
+	if snapshot.Workspace.ActiveRunID != "" {
+		t.Fatalf("activeRunId = %q, want empty for terminal projection", snapshot.Workspace.ActiveRunID)
+	}
+	if len(snapshot.Results) != 1 || snapshot.Results[0].RunID != string(completedRunID) || snapshot.Results[0].Summary != "formal result" {
+		t.Fatalf("results = %+v, want accepted formal result for completed run", snapshot.Results)
 	}
 }
 

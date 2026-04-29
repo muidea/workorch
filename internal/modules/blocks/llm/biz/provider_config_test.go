@@ -95,6 +95,20 @@ func TestLoadProviderConfigDefaultsOpenAIBaseURL(t *testing.T) {
 	}
 }
 
+func TestLoadProviderConfigDefaultsAnthropicBaseURL(t *testing.T) {
+	cfg, err := LoadProviderConfig("claude", map[string]string{
+		llmcommon.EnvProvider: llmcommon.ProviderAnthropic,
+		llmcommon.EnvAPIKey:   "test-secret-value",
+		llmcommon.EnvModel:    "claude-test",
+	})
+	if err != nil {
+		t.Fatalf("load provider config: %v", err)
+	}
+	if cfg.Unavailable || cfg.BaseURL != defaultAnthropicBaseURL {
+		t.Fatalf("config = %+v, want ready anthropic default base url", cfg)
+	}
+}
+
 func TestLoadProviderConfigRejectsInvalidTimeout(t *testing.T) {
 	_, err := LoadProviderConfig("local", map[string]string{
 		llmcommon.EnvTimeout: "bad",

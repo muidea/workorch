@@ -106,7 +106,7 @@ func NewRuntimeAdapterWithProviders(defaultProviderID string, providers map[stri
 func NewRuntimeAdapterFromConfig(config llmmodels.ProviderConfig) *RuntimeAdapter {
 	var provider Provider
 	if !config.Unavailable {
-		provider = NewHTTPProvider(config)
+		provider = NewProviderFromConfig(config)
 	}
 	return NewRuntimeAdapter(config, provider)
 }
@@ -135,7 +135,7 @@ func providerRuntimesFromConfigs(configs map[string]llmmodels.ProviderConfig) ma
 		config.ID = id
 		var provider Provider
 		if !config.Unavailable {
-			provider = NewHTTPProvider(config)
+			provider = NewProviderFromConfig(config)
 		}
 		config.Capabilities = effectiveProviderCapabilities(config.Capabilities)
 		providers[id] = ProviderRuntime{
@@ -144,6 +144,17 @@ func providerRuntimesFromConfigs(configs map[string]llmmodels.ProviderConfig) ma
 		}
 	}
 	return providers
+}
+
+func NewProviderFromConfig(config llmmodels.ProviderConfig) Provider {
+	switch strings.TrimSpace(config.Provider) {
+	case llmcommon.ProviderOpenAI:
+		return NewOpenAIProvider(config)
+	case llmcommon.ProviderAnthropic:
+		return NewAnthropicProvider(config)
+	default:
+		return NewHTTPProvider(config)
+	}
 }
 
 func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {

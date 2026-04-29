@@ -113,7 +113,9 @@ Mock MCP 工具必须本地执行，避免外部网络依赖。工具输出应�
 
 ## 5. Real LLM 场景
 
-真实 LLM 场景使用部署实例已配置的默认 provider，当前本地验收默认使用 `local`。
+真实 LLM 场景默认使用部署实例已配置的默认 provider；如果默认 provider 发生网络 EOF、限流或不可用，应显式指定
+`WORKORCH_LOAD_PROVIDER_ID` 重跑最小样本，用于区分 provider 可用性问题和 workorch 框架问题。当前本地验收建议使用
+`local` provider 作为真实 LLM smoke 基线。
 
 真实 LLM prompt 必须明确：
 
@@ -257,6 +259,7 @@ scripts/loadtest-governed-workspace-concurrency.sh
 - 输出 JSON 和 Markdown 报告。
 - 报告当前部署实例的 `serverMaxConcurrentRuns`、压测前后 metrics。
 - 可通过 `WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS` 在容量曲线压测前校验服务端执行槽，避免把单执行槽排队压测误判为真实并行压测。
+- 可通过 `WORKORCH_LOAD_MCP_SESSION_POLICY=long_lived` 显式验证长会话；默认使用 `transient`，避免反复压测后遗留多批次 stdio helper 进程污染容量结论。
 
 当前入口：
 
@@ -363,6 +366,14 @@ server.maxConcurrentRuns = 1
 | `/tmp/workorch-loadtest-real-c4-t20-mcr10-20260428191046` | real | 4 | 20 | 18 | 2 | 1.55 | 0 | 0 |
 | `/tmp/workorch-loadtest-real-c4-t20-mcr10-retry-20260428192538` | real | 4 | 20 | 16 | 4 | 1.64 | 0 | 0 |
 | `/tmp/workorch-loadtest-real-c2-t10-mcr10-20260428193626` | real | 2 | 10 | 8 | 2 | 1.45 | 2 | 0 |
+| `/tmp/workorch-loadtest-mock-c100-t300-mcr100-20260428200956` | mock | 100 | 300 | 13 | 287 | 1.61 | 0 | 0 |
+| `/tmp/workorch-loadtest-mock-c50-t100-mcr100-20260428201837` | mock | 50 | 100 | 16 | 84 | 1.13 | 0 | 0 |
+| `/tmp/workorch-loadtest-mock-c20-t50-mcr100-20260428203318` | mock | 20 | 50 | 28 | 22 | 1.29 | 0 | 0 |
+| `/tmp/workorch-loadtest-mock-c10-t20-mcr100-20260428212246-pqagfzbz` | mock | 10 | 20 | 12 | 8 | 0.82 | 0 | 0 |
+| `/tmp/workorch-loadtest-mock-c5-t10-mcr100-20260428213804-e37mir89` | mock | 5 | 10 | 10 | 0 | 1.64 | 0 | 0 |
+| `/tmp/workorch-loadtest-real-c1-t1-mcr100-20260428214440-v8ttwewc` | real `miniMax` | 1 | 1 | 0 | 1 | 0.00 | 0 | 0 |
+| `/tmp/workorch-loadtest-real-local-c1-t1-mcr100-20260428214523-zqmbb9_7` | real `local` | 1 | 1 | 1 | 0 | 0.63 | 0 | 0 |
+| `/tmp/workorch-loadtest-mock-transient-smoke-20260428214855-t28cia0u` | mock transient MCP | 1 | 1 | 1 | 0 | 1.14 | 0 | 0 |
 
 结论：
 
@@ -370,6 +381,12 @@ server.maxConcurrentRuns = 1
 - 这些结果验证的是排队稳定性和完整业务闭环，不代表多 Run 真正并行容量。
 - `server.maxConcurrentRuns=10` 部署下，mock `concurrency=20,total=100` 已验证 workorch 自身并发调度、file backend 和证据链完整性。
 - 真实 LLM 在 `concurrency=2/4` 下仍存在 workflow protocol violation，典型表现是跳过第二轮 Decision 直接进入 Approval，或第二轮后继续生成额外 Decision；这类失败应归入 LLM 协议稳定性问题，不作为 workorch 内部并发容量失败。
+- `server.maxConcurrentRuns=100` 部署下，mock 压测在 `concurrency=100/50/20` 均未通过；失败主要表现为 workspace create HTTP 500、empty reply，以及 activation/resume 阶段 empty reply。当前服务指标显示 run queue 没有排队，说明瓶颈已从 Run 执行槽转移到 HTTP 写入路径、file backend 并发落盘和读模型回查。
+- 在 `.workorch-data` 已积累约 103 万行 JSONL 数据时，`event_record.json`、`tool_call.json`、`step.json`、`runtime_checkpoint.json` 成为主要数据文件；后续提升并发应优先治理持久化与读模型性能，而不是继续单纯提高 `server.maxConcurrentRuns`。
+- 在 `.workorch-data` 继续增长后，mock `concurrency=10,total=20` 只达到 60% 成功率；8 个失败全部发生在最终 `POST /runs/{runId}/resume`，curl code 为 52 empty reply，耗时 184s 到 225s。失败样本回查 Run snapshot 均为 `completed`，并且包含 2 个 Decision、1 个 Approval、ToolCall、ValidationResult、RuntimeCheckpoint、accepted Result 和 linked Artifact。因此该类失败应归因为同步 HTTP 长请求超过 `server.writeTimeout=180s` 后连接被关闭，而不是业务状态机失败。
+- 同一数据规模下，mock `concurrency=5,total=10` 全部通过；当前 file backend 与同步 resume 模式下，可作为临时可靠对照阈值，但不应视为最终容量目标。该批次 `toolExecutionAndResultMaterialization` 平均 60.23s、p95 69.86s，workspace e2e p95 194.45s。
+- 真实 LLM 最小样本使用默认 `miniMax` provider 失败，failureReason 为 `Post "https://aiapi.bluetron.cn/chat/completions": EOF`，未进入 Ticket/Approval 流程；同一部署显式指定 `WORKORCH_LOAD_PROVIDER_ID=local` 后成功完成完整真实 LLM 链路。因此默认 provider EOF 归入 provider 可用性问题，不作为 workorch 框架失败。
+- 脚本默认改为 `WORKORCH_LOAD_MCP_SESSION_POLICY=transient` 后，mock transient smoke 仍可完成完整业务闭环，并且不会新增长期驻留的 loadtest MCP helper 进程。早前 `long_lived` 批次遗留进程仍需通过重启服务或后续 MCP 管理能力清理。
 
 ## 11. 风险与边界
 
@@ -380,3 +397,28 @@ server.maxConcurrentRuns = 1
 - 真实 LLM 压测不能作为 workorch 内部容量的唯一依据。
 - 压测不能在通用 runtime 中加入具体业务 fallback。
 - 压测数据应通过批次前缀标识，便于清理与复盘。
+- 常规容量压测默认使用 transient MCP session；长会话压测必须作为单独场景记录，并在压测后通过重启或后续管理能力清理遗留 stdio helper 进程。
+
+## 12. 稳定性诊断规则
+
+当前阶段应通过测试把问题定位到明确层级，而不是只看最终成功率。
+
+诊断分层：
+
+- HTTP 入口层：记录 method、path、curl code、HTTP status、response body、stderr、elapsedMs。
+- repository / file backend 层：用 Go 并发测试隔离仓储写入行为，避免把 HTTP 或 Run 调度混入判断。
+- Run 调度层：观察 `workorch_run_requests_in_flight`、`workorch_run_queue_waiting`、`workorch_run_queue_total`。
+- 业务状态机层：校验 Run snapshot、Workspace snapshot、status、observability、Ticket、Approval、ToolCall、ValidationResult、RuntimeCheckpoint、Result、Artifact。
+- LLM 协议层：统计 workflow protocol violation、schema parse / repair error、provider HTTP error。
+
+已补充：
+
+- 压测控制器失败时输出 `http-error.json`，保留 HTTP status、body preview、curl stderr 和请求耗时。
+- `TestWorkspaceRepositorySharedInstanceConcurrentCreate` 验证共享 file repository 实例的并发写入安全性。
+- `TestWorkspaceRepositoryIndependentInstancesConcurrentCreateStress` 默认跳过，设置 `WORKORCH_STRESS_TEST=1` 后用于验证多个 file repository 实例指向同一文件时的并发写入风险。
+
+已复现的关键规则：
+
+- 共享 file repository 实例可以通过实例内 mutex 保护同一文件写入。
+- 多个 file repository 实例并发写同一文件会破坏 JSON 持久化文件，例如出现 `invalid character '"' after top-level value`。
+- 因此 file backend 的稳定性要求是：运行中必须复用同一组 repository 实例；如果未来存在跨进程、多服务实例、或未走 shared runtime 的 fallback 路径，必须引入跨实例文件锁或升级持久化后端。

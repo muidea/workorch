@@ -180,6 +180,7 @@ func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) 
 		return err
 	}
 	ws.ActiveRunID = runID
+	ws.State = common.WorkspaceStateRunning
 	if err := o.workspaces.Update(ctx, ws); err != nil {
 		return err
 	}
@@ -358,19 +359,7 @@ func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunI
 	if err := o.publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
-
-	ws, err := o.workspaces.Get(ctx, r.WorkspaceID)
-	if err != nil {
-		return err
-	}
-	if ws.ActiveRunID == runID {
-		ws.ActiveRunID = ""
-		if err := o.workspaces.Update(ctx, ws); err != nil {
-			return err
-		}
-		return o.publishWorkspaceStateChanged(ctx, ws, runID)
-	}
-	return nil
+	return o.releaseWorkspaceForTerminalRun(ctx, r, common.WorkspaceStateCompleted)
 }
 
 func (o *RuntimeOrchestrator) ValidateRun(ctx context.Context, runID common.RunID) error {
@@ -432,18 +421,70 @@ func (o *RuntimeOrchestrator) closeRun(ctx context.Context, runID common.RunID, 
 		return err
 	}
 
-	ws, err := o.workspaces.Get(ctx, r.WorkspaceID)
+	return o.releaseWorkspaceForTerminalRun(ctx, r, workspaceStateForTerminalRun(state))
+}
+
+func (o *RuntimeOrchestrator) releaseWorkspaceForTerminalRun(ctx context.Context, run *runModel.Run, state common.WorkspaceState) error {
+	if run == nil {
+		return common.ErrInvalidArgument
+	}
+	ws, err := o.workspaces.Get(ctx, run.WorkspaceID)
 	if err != nil {
 		return err
 	}
-	if ws.ActiveRunID == runID {
-		ws.ActiveRunID = ""
-		if err := o.workspaces.Update(ctx, ws); err != nil {
-			return err
-		}
-		return o.publishWorkspaceStateChanged(ctx, ws, runID)
+	canRelease, err := o.canTerminalRunReleaseWorkspace(ctx, ws, run)
+	if err != nil {
+		return err
 	}
-	return nil
+	if !canRelease {
+		return nil
+	}
+	ws.ActiveRunID = ""
+	ws.State = state
+	if err := o.workspaces.Update(ctx, ws); err != nil {
+		return err
+	}
+	return o.publishWorkspaceStateChanged(ctx, ws, run.ID)
+}
+
+func (o *RuntimeOrchestrator) canTerminalRunReleaseWorkspace(ctx context.Context, workspace *workspaceModel.Workspace, run *runModel.Run) (bool, error) {
+	if workspace == nil || run == nil || workspace.ID != run.WorkspaceID {
+		return false, nil
+	}
+	if workspace.ActiveRunID == "" || workspace.ActiveRunID == run.ID {
+		return true, nil
+	}
+	activeRun, err := o.runs.Get(ctx, workspace.ActiveRunID)
+	if err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return true, nil
+		}
+		return false, err
+	}
+	if activeRun.WorkspaceID != workspace.ID {
+		return true, nil
+	}
+	return isTerminalRunState(activeRun.State), nil
+}
+
+func workspaceStateForTerminalRun(state common.RunState) common.WorkspaceState {
+	switch state {
+	case common.RunStateCompleted:
+		return common.WorkspaceStateCompleted
+	case common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return common.WorkspaceStateFailed
+	default:
+		return common.WorkspaceStateActive
+	}
+}
+
+func isTerminalRunState(state common.RunState) bool {
+	switch state {
+	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return true
+	default:
+		return false
+	}
 }
 
 func canCloseRunAs(current common.RunState, target common.RunState) bool {

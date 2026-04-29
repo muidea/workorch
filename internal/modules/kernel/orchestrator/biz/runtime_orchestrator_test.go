@@ -122,6 +122,9 @@ func TestRuntimeOrchestrator_StartRunToComplete_Mainline(t *testing.T) {
 	if ws.ActiveRunID != "" {
 		t.Fatalf("workspace active run id = %q, want empty", ws.ActiveRunID)
 	}
+	if ws.State != common.WorkspaceStateCompleted {
+		t.Fatalf("workspace state = %q, want completed", ws.State)
+	}
 
 	stepID := common.StepID(string(runID) + "/step-1")
 	step, err := stepRepo.Get(ctx, stepID)
@@ -1162,6 +1165,9 @@ func TestRuntimeOrchestrator_StartRunPublishesRunAndStepEvents(t *testing.T) {
 	if published[1].Topic != events.TopicWorkspaceStateChanged || published[1].Payload[events.PayloadKeyActiveRunID] != string(runID) {
 		t.Fatalf("second event = %#v, want workspace active run bound", published[1])
 	}
+	if published[1].Payload[events.PayloadKeyState] != string(common.WorkspaceStateRunning) {
+		t.Fatalf("second event state = %v, want workspace running", published[1].Payload[events.PayloadKeyState])
+	}
 	if published[2].Topic != events.TopicStepDispatched || published[2].Payload[events.PayloadKeyState] != string(common.StepStateDispatched) {
 		t.Fatalf("third event = %#v, want step dispatched", published[2])
 	}
@@ -1177,6 +1183,57 @@ func TestRuntimeOrchestrator_StartRunPublishesRunAndStepEvents(t *testing.T) {
 	last := published[len(published)-1]
 	if last.Topic != events.TopicWorkspaceStateChanged || last.Payload[events.PayloadKeyActiveRunID] != "" {
 		t.Fatalf("last event = %#v, want workspace active run cleared", last)
+	}
+	if last.Payload[events.PayloadKeyState] != string(common.WorkspaceStateCompleted) {
+		t.Fatalf("last event state = %v, want workspace completed", last.Payload[events.PayloadKeyState])
+	}
+}
+
+func TestRuntimeOrchestrator_CompleteRunClearsStaleTerminalActiveRun(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	hub := events.NewMemoryHub()
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"status": "ok"}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
+
+	workspaceID := common.WorkspaceID("ws-stale-active-complete")
+	staleRunID := common.RunID("run-stale-failed")
+	completedRunID := common.RunID("run-new-completed")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "ws",
+		State:       common.WorkspaceStateFailed,
+		ActiveRunID: staleRunID,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: staleRunID, WorkspaceID: workspaceID, State: common.RunStateFailed}); err != nil {
+		t.Fatalf("seed stale run: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: completedRunID, WorkspaceID: workspaceID, State: common.RunStateValidating}); err != nil {
+		t.Fatalf("seed completed run: %v", err)
+	}
+
+	if err := orch.CompleteRun(ctx, completedRunID); err != nil {
+		t.Fatalf("complete run: %v", err)
+	}
+
+	ws, err := workspaceRepo.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if ws.State != common.WorkspaceStateCompleted || ws.ActiveRunID != "" {
+		t.Fatalf("workspace = %+v, want completed with no active run", ws)
+	}
+	last := hub.Published()[len(hub.Published())-1]
+	if last.Topic != events.TopicWorkspaceStateChanged ||
+		last.RunID != string(completedRunID) ||
+		last.Payload[events.PayloadKeyState] != string(common.WorkspaceStateCompleted) ||
+		last.Payload[events.PayloadKeyActiveRunID] != "" {
+		t.Fatalf("last event = %#v, want completed workspace release for new run", last)
 	}
 }
 

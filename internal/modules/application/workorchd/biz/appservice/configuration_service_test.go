@@ -59,6 +59,9 @@ nonChatOperations = ["embeddings"]
 	if cfg.LLM.DefaultProviderID != "local" || cfg.LLM.DefaultEmbeddingProviderID != "local" || len(cfg.LLM.Providers) != 1 {
 		t.Fatalf("llm configuration = %+v, want local provider", cfg.LLM)
 	}
+	if len(cfg.LLM.ProviderTemplates) != 3 {
+		t.Fatalf("provider templates = %+v, want openai/anthropic/compatible templates", cfg.LLM.ProviderTemplates)
+	}
 	provider := cfg.LLM.Providers[0]
 	if !provider.Ready || !provider.Default || !provider.APIKeyConfigured || provider.Model != "local-model" ||
 		!provider.ChatCompletions || !provider.Streaming || len(provider.NonChatOperations) != 1 || provider.NonChatOperations[0] != "embeddings" {

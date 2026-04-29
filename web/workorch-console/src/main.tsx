@@ -12,7 +12,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Button, ConfigProvider, Descriptions, Empty, Form, Input, InputNumber, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Artifact, Decision, DoD, Goal, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Result, Run, RunObservability, RunSnapshot, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
+import type { Approval, Artifact, Decision, DoD, Goal, LLMProviderTemplate, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Result, Run, RunObservability, RunSnapshot, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -477,7 +477,37 @@ function llmConfigurationFormValues(configuration: ServiceConfiguration): Update
   };
 }
 
-function nextProviderDraft(existing: UpdateLLMProviderConfiguration[]): UpdateLLMProviderConfiguration {
+function providerDraftFromTemplate(template: LLMProviderTemplate, existing: UpdateLLMProviderConfiguration[], current?: UpdateLLMProviderConfiguration): UpdateLLMProviderConfiguration {
+  let id = current?.id?.trim() || template.id;
+  const currentID = current?.id?.trim();
+  const existingIDs = new Set(existing.map((item) => item.id?.trim()).filter((item) => item && item !== currentID));
+  if (existingIDs.has(id)) {
+    let index = existing.length + 1;
+    id = `${template.provider}-${index}`;
+    while (existingIDs.has(id)) {
+      index += 1;
+      id = `${template.provider}-${index}`;
+    }
+  }
+  return {
+    ...current,
+    id,
+    provider: template.provider,
+    baseUrl: template.baseUrl,
+    model: template.model,
+    timeout: template.timeout || '60s',
+    disabled: template.disabled,
+    chatCompletions: template.chatCompletions,
+    streaming: template.streaming,
+    nonChatOperations: template.nonChatOperations ?? [],
+    apiKey: current?.apiKey ?? ''
+  };
+}
+
+function nextProviderDraft(existing: UpdateLLMProviderConfiguration[], template?: LLMProviderTemplate): UpdateLLMProviderConfiguration {
+  if (template) {
+    return providerDraftFromTemplate(template, existing);
+  }
   let index = existing.length + 1;
   let id = `provider-${index}`;
   const existingIDs = new Set(existing.map((item) => item.id));
@@ -2158,6 +2188,7 @@ function ConfigurationPage() {
   const [defaultEmbeddingProviderId, setDefaultEmbeddingProviderId] = useState<string | undefined>(undefined);
   const [providerDrafts, setProviderDrafts] = useState<UpdateLLMProviderConfiguration[]>([]);
   const [selectedProviderIndex, setSelectedProviderIndex] = useState(0);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -2171,6 +2202,7 @@ function ConfigurationPage() {
       setDefaultEmbeddingProviderId(nextFormValues.defaultEmbeddingProviderId);
       setProviderDrafts(nextFormValues.providers);
       setSelectedProviderIndex(0);
+      setSelectedTemplateId(nextConfiguration.llm.providerTemplates?.[0]?.templateId);
       providerEditorForm.setFieldsValue(nextFormValues.providers[0] ?? nextProviderDraft([]));
     } catch (error) {
       message.error(errorMessage(error));
@@ -2226,8 +2258,11 @@ function ConfigurationPage() {
     providerEditorForm.setFieldsValue(item);
   };
 
+  const providerTemplates = configuration?.llm.providerTemplates ?? [];
+  const providerTemplateByID = new Map(providerTemplates.map((item) => [item.templateId, item]));
+
   const addProvider = () => {
-    const draft = nextProviderDraft(providerDrafts);
+    const draft = nextProviderDraft(providerDrafts, selectedTemplateId ? providerTemplateByID.get(selectedTemplateId) : undefined);
     setProviderDrafts((items) => [...items, draft]);
     setSelectedProviderIndex(providerDrafts.length);
     providerEditorForm.setFieldsValue(draft);
@@ -2253,7 +2288,20 @@ function ConfigurationPage() {
     }
   };
 
-  const updateSelectedProvider = (_changedValues: Partial<UpdateLLMProviderConfiguration>, values: UpdateLLMProviderConfiguration) => {
+  const updateSelectedProvider = (changedValues: Partial<UpdateLLMProviderConfiguration>, values: UpdateLLMProviderConfiguration) => {
+    if (changedValues.provider) {
+      const template = providerTemplates.find((item) => item.provider === changedValues.provider);
+      if (template) {
+        const templated = providerDraftFromTemplate(template, providerDrafts, { ...values, id: values.id, apiKey: values.apiKey });
+        providerEditorForm.setFieldsValue(templated);
+        setProviderDrafts((items) => {
+          const nextItems = [...items];
+          nextItems[selectedProviderIndex] = templated;
+          return nextItems;
+        });
+        return;
+      }
+    }
     setProviderDrafts((items) => {
       const previousID = items[selectedProviderIndex]?.id;
       const nextItems = [...items];
@@ -2317,8 +2365,22 @@ function ConfigurationPage() {
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <ProCard
             title="服务商列表"
-            extra={<Button onClick={addProvider}>新增服务商</Button>}
+            extra={(
+              <Space>
+                <Select
+                  style={{ width: 220 }}
+                  value={selectedTemplateId}
+                  onChange={setSelectedTemplateId}
+                  placeholder="选择配置模板"
+                  options={providerTemplates.map((item) => ({ value: item.templateId, label: item.name }))}
+                />
+                <Button onClick={addProvider}>按模板新增</Button>
+              </Space>
+            )}
           >
+            <Typography.Paragraph type="secondary">
+              配置模板按 provider 模式生成草稿：OpenAI 与 Anthropic 使用官方 SDK；compatible 用于 DeepSeek、MiniMax、Ollama 或本地兼容服务。
+            </Typography.Paragraph>
             <Form.Item label="默认 LLM 服务商">
               <Select
                 value={defaultProviderId}
@@ -2384,10 +2446,7 @@ function ConfigurationPage() {
                 </Form.Item>
                 <Form.Item name="provider" label="服务商类型" rules={[{ required: true }]}>
                   <Select
-                    options={[
-                      { value: 'compatible', label: 'compatible' },
-                      { value: 'openai', label: 'openai' }
-                    ]}
+                    options={providerTemplates.map((item) => ({ value: item.provider, label: `${item.provider} / ${item.name}` }))}
                   />
                 </Form.Item>
                 <Form.Item name="model" label="模型" rules={[{ required: true }]}>

@@ -3,8 +3,10 @@ package file
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -83,5 +85,82 @@ func TestWorkspaceRepositoryCreateStillSucceedsAfterEmptyPersistedFile(t *testin
 	}
 	if item.ID != "ws-empty" || item.Title != "empty workspace" || item.State != common.WorkspaceStateActive {
 		t.Fatalf("workspace = %+v, want ws-empty/empty workspace/active", item)
+	}
+}
+
+func TestWorkspaceRepositorySharedInstanceConcurrentCreate(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "workspace.json")
+	repo := NewWorkspaceRepository(path)
+	const total = 100
+
+	var wg sync.WaitGroup
+	errs := make(chan error, total)
+	for idx := 0; idx < total; idx++ {
+		idx := idx
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- repo.Create(ctx, &workspacemodel.Workspace{
+				ID:    common.WorkspaceID(fmt.Sprintf("ws-shared-%03d", idx)),
+				Title: fmt.Sprintf("shared workspace %03d", idx),
+				State: common.WorkspaceStateActive,
+			})
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent Create with shared repository instance: %v", err)
+		}
+	}
+
+	items, err := repo.List(ctx)
+	if err != nil {
+		t.Fatalf("List after concurrent Create: %v", err)
+	}
+	if len(items) != total {
+		t.Fatalf("workspace count = %d, want %d", len(items), total)
+	}
+}
+
+func TestWorkspaceRepositoryIndependentInstancesConcurrentCreateStress(t *testing.T) {
+	if os.Getenv("WORKORCH_STRESS_TEST") != "1" {
+		t.Skip("set WORKORCH_STRESS_TEST=1 to run file backend cross-instance concurrency stress")
+	}
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "workspace.json")
+	const total = 100
+
+	var wg sync.WaitGroup
+	errs := make(chan error, total)
+	for idx := 0; idx < total; idx++ {
+		idx := idx
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			repo := NewWorkspaceRepository(path)
+			errs <- repo.Create(ctx, &workspacemodel.Workspace{
+				ID:    common.WorkspaceID(fmt.Sprintf("ws-independent-%03d", idx)),
+				Title: fmt.Sprintf("independent workspace %03d", idx),
+				State: common.WorkspaceStateActive,
+			})
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent Create with independent repository instances: %v", err)
+		}
+	}
+
+	items, err := NewWorkspaceRepository(path).List(ctx)
+	if err != nil {
+		t.Fatalf("List after independent concurrent Create: %v", err)
+	}
+	if len(items) != total {
+		t.Fatalf("workspace count = %d, want %d", len(items), total)
 	}
 }

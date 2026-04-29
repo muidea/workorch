@@ -529,17 +529,17 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
+	resultItems, err := deps.results.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return WorkspaceSnapshot{}, err
+	}
 	runs := make([]Run, 0, len(runItems))
-	projectionRun := selectWorkspaceProjectionRun(item, runItems)
+	projectionRun := selectWorkspaceProjectionRun(item, runItems, resultItems)
 	for _, runItem := range runItems {
 		if runItem.WorkspaceID != workspaceID {
 			continue
 		}
 		runs = append(runs, mapRun(runItem))
-	}
-	resultItems, err := deps.results.ListByWorkspace(ctx, workspaceID)
-	if err != nil {
-		return WorkspaceSnapshot{}, err
 	}
 	artifactItems, err := deps.artifacts.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
@@ -589,21 +589,33 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 	}, nil
 }
 
-func selectWorkspaceProjectionRun(workspace *workspacemodel.Workspace, runs []*runmodel.Run) *runmodel.Run {
+func selectWorkspaceProjectionRun(workspace *workspacemodel.Workspace, runs []*runmodel.Run, results []*resultmodel.Result) *runmodel.Run {
 	if workspace == nil || len(runs) == 0 {
 		return nil
 	}
 	var latest *runmodel.Run
+	var active *runmodel.Run
+	runsByID := make(map[common.RunID]*runmodel.Run, len(runs))
 	for _, item := range runs {
 		if item == nil || item.WorkspaceID != workspace.ID {
 			continue
 		}
+		runsByID[item.ID] = item
 		if workspace.ActiveRunID != "" && item.ID == workspace.ActiveRunID {
-			return item
+			active = item
 		}
 		if latest == nil || string(item.ID) > string(latest.ID) {
 			latest = item
 		}
+	}
+	if active != nil && !isTerminalProjectionRunState(active.State) {
+		return active
+	}
+	if resultRun := selectAcceptedResultRun(workspace.ID, runsByID, results); resultRun != nil {
+		return resultRun
+	}
+	if active != nil {
+		return active
 	}
 	return latest
 }
@@ -614,10 +626,42 @@ func mapWorkspaceWithRunProjection(workspace *workspacemodel.Workspace, run *run
 		return ret
 	}
 	ret.State = string(workspaceProjectionState(run.State))
-	if ret.ActiveRunID == "" {
+	if isTerminalProjectionRunState(run.State) {
+		ret.ActiveRunID = ""
+	} else {
 		ret.ActiveRunID = string(run.ID)
 	}
 	return ret
+}
+
+func selectAcceptedResultRun(workspaceID common.WorkspaceID, runs map[common.RunID]*runmodel.Run, results []*resultmodel.Result) *runmodel.Run {
+	var selected *resultmodel.Result
+	for _, item := range results {
+		if item == nil || item.WorkspaceID != workspaceID || item.State != common.ResultStateAccepted || item.RunID == "" {
+			continue
+		}
+		run := runs[item.RunID]
+		if run == nil || run.State != common.RunStateCompleted {
+			continue
+		}
+		if selected == nil || resultProjectionTime(item) >= resultProjectionTime(selected) {
+			selected = item
+		}
+	}
+	if selected == nil {
+		return nil
+	}
+	return runs[selected.RunID]
+}
+
+func resultProjectionTime(item *resultmodel.Result) string {
+	if item == nil {
+		return ""
+	}
+	if item.UpdatedAt != "" {
+		return item.UpdatedAt
+	}
+	return item.CreatedAt
 }
 
 func workspaceProjectionState(runState common.RunState) common.WorkspaceState {
@@ -638,6 +682,15 @@ func workspaceProjectionState(runState common.RunState) common.WorkspaceState {
 		return common.WorkspaceStateFailed
 	default:
 		return common.WorkspaceStateActive
+	}
+}
+
+func isTerminalProjectionRunState(state common.RunState) bool {
+	switch state {
+	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return true
+	default:
+		return false
 	}
 }
 
