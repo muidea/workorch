@@ -1022,10 +1022,11 @@ function nextProviderDraft(existing: UpdateLLMProviderConfiguration[], template?
 }
 
 function SoulDefinitionManager({ souls, onSoulsChange }: { souls: Soul[]; onSoulsChange: (souls: Soul[]) => void }) {
-  const { message } = AntApp.useApp();
+  const { message, modal } = AntApp.useApp();
   const [form] = Form.useForm<SoulDefinitionFormValues>();
   const [editingSoul, setEditingSoul] = useState<Soul | undefined>(undefined);
   const [saving, setSaving] = useState(false);
+  const [deletingSoulId, setDeletingSoulId] = useState<string | undefined>(undefined);
 
   const editSoul = (soul?: Soul) => {
     setEditingSoul(soul);
@@ -1064,6 +1065,33 @@ function SoulDefinitionManager({ souls, onSoulsChange }: { souls: Soul[]; onSoul
     }
   };
 
+  const deleteSoul = (soul: Soul) => {
+    modal.confirm({
+      title: '删除 Soul',
+      content: `确认删除「${soul.name || soul.id}」？删除后，仍引用该 Soul 的工作空间或模板需要重新调整执行人格配置。`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        setDeletingSoulId(soul.id);
+        try {
+          await workorchApi.deleteSoul(soul.id);
+          const nextSouls = await workorchApi.listSouls();
+          onSoulsChange(nextSouls);
+          if (editingSoul?.id === soul.id) {
+            editSoul(undefined);
+          }
+          message.success('Soul 定义已删除');
+        } catch (error) {
+          message.error(errorMessage(error));
+          throw error;
+        } finally {
+          setDeletingSoulId(undefined);
+        }
+      }
+    });
+  };
+
   return (
     <ProCard title="执行人格（Soul）" className="workorch-section">
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -1079,7 +1107,8 @@ function SoulDefinitionManager({ souls, onSoulsChange }: { souls: Soul[]; onSoul
               renderItem={(item) => (
                 <List.Item
                   actions={[
-                    <Button key="edit" type="link" size="small" onClick={() => editSoul(item)}>编辑</Button>
+                    <Button key="edit" type="link" size="small" onClick={() => editSoul(item)}>编辑</Button>,
+                    <Button key="delete" type="link" danger size="small" loading={deletingSoulId === item.id} onClick={() => deleteSoul(item)}>删除</Button>
                   ]}
                 >
                   <List.Item.Meta
@@ -1822,6 +1851,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [workspaceSetupOpen, setWorkspaceSetupOpen] = useState(false);
   const [goalDefinitionOpen, setGoalDefinitionOpen] = useState(false);
   const [dodDefinitionOpen, setDoDDefinitionOpen] = useState(false);
+  const [soulBindingEditorOpen, setSoulBindingEditorOpen] = useState(false);
   const [businessSubmitting, setBusinessSubmitting] = useState(false);
   const [soulBindingSaving, setSoulBindingSaving] = useState(false);
   const [editingGoal, setEditingGoal] = useState<Goal | undefined>(undefined);
@@ -1891,6 +1921,13 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     value: item.id,
     label: `${item.name || item.id} (${item.id})`
   }));
+  const soulNameById = new Map(souls.map((item) => [item.id, item.name ? `${item.name} (${item.id})` : item.id]));
+  const workspaceDefaultSoulLabel = soulBindings?.defaultSoulId
+    ? soulNameById.get(soulBindings.defaultSoulId) || soulBindings.defaultSoulId
+    : '未配置';
+  const stageBindingTags = soulBindingStages
+    .filter((stage) => soulBindings?.bindings?.[stage])
+    .map((stage) => `${soulBindingStageLabel(stage)}: ${soulNameById.get(soulBindings?.bindings?.[stage] || '') || soulBindings?.bindings?.[stage]}`);
 
   function clearWorkspaceContext() {
     setSnapshot(undefined);
@@ -2000,6 +2037,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
         bindings: nextBindings.bindings ?? {}
       });
       await loadWorkspaceContext(workspaceId);
+      setSoulBindingEditorOpen(false);
       message.success('执行人格配置已保存');
     } catch (error) {
       message.error(errorMessage(error));
@@ -2055,6 +2093,14 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       defaultSoulId: template.defaultSoulId,
       bindings: template.soulBindings ?? {}
     });
+  };
+
+  const openSoulBindingEditor = () => {
+    soulBindingsForm.setFieldsValue({
+      defaultSoulId: soulBindings?.defaultSoulId,
+      bindings: soulBindings?.bindings ?? {}
+    });
+    setSoulBindingEditorOpen(true);
   };
 
   const activateWorkspaceExecution = (request: WorkspaceExecutionActivationRequest) => {
@@ -2176,6 +2222,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           <Button onClick={() => void openWorkspaceSetup()}>创建工作空间</Button>
           <Button disabled={!workspaceId} onClick={() => openGoalDefinition()}>定义目标</Button>
           <Button disabled={!workspaceId} onClick={() => openDoDDefinition()}>定义验收标准</Button>
+          <Button disabled={!workspaceId} onClick={openSoulBindingEditor}>调整 Soul</Button>
           <Button type="primary" disabled={!workspaceId} onClick={requestWorkspaceActivation}>启动执行</Button>
           {activationTracking ? <Tag color="processing">后台跟踪中</Tag> : null}
           <Select
@@ -2197,7 +2244,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                 { key: 'id', label: '工作空间 ID', children: snapshot.workspace.id },
                 { key: 'activeRun', label: '活跃运行', children: snapshot.workspace.activeRunId || '-' },
                 { key: 'description', label: '描述', children: boundedParagraph(snapshot.workspace.description, { rows: 2 }) },
-                { key: 'workingDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.workingDirectory, { rows: 1, copyText: snapshot.workspace.workingDirectory }) }
+                { key: 'workingDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.workingDirectory, { rows: 1, copyText: snapshot.workspace.workingDirectory }) },
+                { key: 'defaultSoul', label: '默认 Soul', children: workspaceDefaultSoulLabel },
+                { key: 'stageSouls', label: '阶段 Soul', children: compactTags(stageBindingTags, 4) }
               ]}
             />
           </ProCard>
@@ -2248,7 +2297,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             </Space>
           </ProCard>
           <ProCard gutter={16} wrap className="workorch-section">
-            <ProCard title="目标定义（Goal）" colSpan={{ xs: 24, lg: 12 }} extra={<Tag>{goals.length} 项</Tag>}>
+            <ProCard title="目标定义（Goal）" colSpan={{ xs: 24, lg: 9 }} extra={<Tag>{goals.length} 项</Tag>}>
               {goals.length ? (
                 <List
                   className="workorch-definition-list"
@@ -2267,7 +2316,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                 />
               ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无目标" />}
             </ProCard>
-            <ProCard title="验收标准（DoD）" colSpan={{ xs: 24, lg: 12 }} extra={<Tag>{dodDefinitionRows.length} 项</Tag>}>
+            <ProCard title="验收标准（DoD）" colSpan={{ xs: 24, lg: 9 }} extra={<Tag>{dodDefinitionRows.length} 项</Tag>}>
               {dodDefinitionRows.length ? (
                 <List
                   className="workorch-definition-list"
@@ -2289,41 +2338,22 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                 />
               ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无验收标准" />}
             </ProCard>
-          </ProCard>
-          <ProCard
-            title="执行人格配置（Soul）"
-            className="workorch-section"
-            extra={<Button type="primary" loading={soulBindingSaving} disabled={!workspaceId} onClick={() => soulBindingsForm.submit()}>保存配置</Button>}
-          >
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-              <Typography.Text type="secondary">
-                工作空间级配置用于默认约束本工作空间的规划、执行、决策、审批、验收和交付物阶段；启动执行时仍可做单次覆盖。
-              </Typography.Text>
-              <Form
-                form={soulBindingsForm}
-                layout="vertical"
-                onFinish={(values) => void saveWorkspaceSoulBindings(values as { defaultSoulId?: string; bindings?: Record<string, string> })}
-              >
-                <Form.Item name="defaultSoulId" label="工作空间默认 Soul">
-                  <Select allowClear placeholder="未绑定时不注入默认 Soul" options={soulOptions} />
-                </Form.Item>
-                <div className="soul-binding-grid">
-                  {soulBindingStages.map((stage) => (
-                    <Form.Item key={stage} name={['bindings', stage]} label={soulBindingStageLabel(stage)}>
-                      <Select allowClear placeholder="继承默认 Soul" options={soulOptions} />
-                    </Form.Item>
-                  ))}
-                </div>
-              </Form>
-              <Descriptions
-                size="small"
-                column={1}
-                items={[
-                  { key: 'priority', label: '启用优先级', children: compactTags(soulBindings?.priorityPolicy ?? []) },
-                  { key: 'current', label: '当前绑定', children: <pre className="json-panel">{compactJSON(soulBindings)}</pre> }
-                ]}
-              />
-            </Space>
+            <ProCard title="执行配置（Soul）" colSpan={{ xs: 24, lg: 6 }} extra={<Button size="small" onClick={openSoulBindingEditor}>调整</Button>}>
+              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                <Typography.Text type="secondary">
+                  Soul 作为工作空间执行配置参与规划、执行、决策、审批、验收和交付物阶段，不改变 Goal / DoD 主体定义。
+                </Typography.Text>
+                <Descriptions
+                  size="small"
+                  column={1}
+                  items={[
+                    { key: 'defaultSoul', label: '默认 Soul', children: workspaceDefaultSoulLabel },
+                    { key: 'stageSoul', label: '阶段覆盖', children: compactTags(stageBindingTags, 3) },
+                    { key: 'priority', label: '启用优先级', children: compactTags(soulBindings?.priorityPolicy ?? []) }
+                  ]}
+                />
+              </Space>
+            </ProCard>
           </ProCard>
           <ProCard
             title="目标成果"
@@ -2754,6 +2784,59 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       ) : (
         <Empty description={loading ? '正在加载工作空间详情' : '未选择工作空间'} />
       )}
+      <Modal
+        title="调整工作空间 Soul"
+        open={soulBindingEditorOpen}
+        confirmLoading={soulBindingSaving}
+        onCancel={() => setSoulBindingEditorOpen(false)}
+        onOk={() => soulBindingsForm.submit()}
+        okText="保存执行配置"
+        cancelText="取消"
+        width={760}
+      >
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Typography.Paragraph type="secondary">
+            Soul 是工作空间的执行配置。先维护 Goal 和 DoD，再按需设置默认 Soul 与阶段覆盖；启动执行时仍可做单次覆盖。
+          </Typography.Paragraph>
+          <Descriptions
+            size="small"
+            column={1}
+            items={[
+              { key: 'workspace', label: '工作空间', children: snapshot?.workspace ? `${snapshot.workspace.title || snapshot.workspace.id} (${snapshot.workspace.id})` : '-' },
+              { key: 'priority', label: '启用优先级', children: compactTags(soulBindings?.priorityPolicy ?? []) }
+            ]}
+          />
+          {souls.length ? (
+            <Form
+              form={soulBindingsForm}
+              layout="vertical"
+              onFinish={(values) => void saveWorkspaceSoulBindings(values as { defaultSoulId?: string; bindings?: Record<string, string> })}
+            >
+              <Form.Item name="defaultSoulId" label="工作空间默认 Soul">
+                <Select allowClear placeholder="未绑定时不注入默认 Soul" options={soulOptions} />
+              </Form.Item>
+              <Space className="workorch-section">
+                <Typography.Text type="secondary">阶段 Soul 绑定</Typography.Text>
+                <Button
+                  size="small"
+                  onClick={() => soulBindingsForm.setFieldsValue({ bindings: stageBindings(soulBindingStages, soulBindingsForm.getFieldValue('defaultSoulId')) })}
+                >
+                  默认 Soul 应用到全部阶段
+                </Button>
+              </Space>
+              <div className="soul-binding-grid">
+                {soulBindingStages.map((stage) => (
+                  <Form.Item key={stage} name={['bindings', stage]} label={soulBindingStageLabel(stage)}>
+                    <Select allowClear placeholder="继承默认 Soul" options={soulOptions} />
+                  </Form.Item>
+                ))}
+              </div>
+            </Form>
+          ) : (
+            <Empty description="暂无可用 Soul，可先到系统配置创建 Soul" />
+          )}
+        </Space>
+      </Modal>
       <Modal
         title="创建工作空间"
         open={workspaceSetupOpen}

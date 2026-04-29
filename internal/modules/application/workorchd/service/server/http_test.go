@@ -320,6 +320,12 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 		"allowedMCPServerRefs":["mcp-local-context"],
 		"allowedToolKinds":["shell/command"]
 	}`, http.StatusOK)
+	postAndExpect(t, mux, "/api/v1/workorch/souls", `{
+		"id":"soul-delete-http",
+		"name":"delete through HTTP",
+		"soulMd":"# Delete Through HTTP\n\nTemporary soul for DELETE coverage."
+	}`, http.StatusCreated)
+	deleteAndExpect(t, mux, "/api/v1/workorch/souls/soul-delete-http", http.StatusNoContent)
 	postAndExpect(t, mux, "/api/v1/workorch/workspace-templates", `{
 		"id":"workspace-template-delivery",
 		"name":"delivery workspace template",
@@ -370,6 +376,7 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 	}{
 		{path: "/api/v1/workorch/souls", want: `"id": "soul-engineering-delivery"`},
 		{path: "/api/v1/workorch/souls/soul-engineering-delivery", want: `"name": "engineering delivery updated"`},
+		{path: "/api/v1/workorch/souls/soul-delete-http", want: `"error": "not found"`},
 		{path: "/api/v1/workorch/workspace-templates", want: `"id": "workspace-template-delivery"`},
 		{path: "/api/v1/workorch/skills", want: `"id": "skill-local-go-service"`},
 		{path: "/api/v1/workorch/skills/skill-local-go-service", want: `"requiredMCPServerRefs": [`},
@@ -382,8 +389,12 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, spec.path, nil)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s status = %d, want 200, body = %s", spec.path, rec.Code, rec.Body.String())
+		wantStatus := http.StatusOK
+		if strings.Contains(spec.want, `"error": "not found"`) {
+			wantStatus = http.StatusNotFound
+		}
+		if rec.Code != wantStatus {
+			t.Fatalf("%s status = %d, want %d, body = %s", spec.path, rec.Code, wantStatus, rec.Body.String())
 		}
 		if !strings.Contains(rec.Body.String(), spec.want) {
 			t.Fatalf("%s body = %s, want %q", spec.path, rec.Body.String(), spec.want)
@@ -594,6 +605,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodPost, pattern: "/api/v1/workorch/approvals/resolve-batch"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/souls"},
 		{method: http.MethodPut, pattern: "/api/v1/workorch/souls/:soulId"},
+		{method: http.MethodDelete, pattern: "/api/v1/workorch/souls/:soulId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/souls"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/souls/:soulId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspace-templates"},
@@ -2291,6 +2303,18 @@ func putAndExpect(t *testing.T, handler http.Handler, path string, body string, 
 
 	req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != wantStatus {
+		t.Fatalf("%s status = %d, want %d, body = %s", path, rec.Code, wantStatus, rec.Body.String())
+	}
+	return rec.Body.String()
+}
+
+func deleteAndExpect(t *testing.T, handler http.Handler, path string, wantStatus int) string {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodDelete, path, nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != wantStatus {

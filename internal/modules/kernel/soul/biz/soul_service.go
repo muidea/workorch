@@ -34,6 +34,13 @@ func (s *Service) UpdateSoul(ctx context.Context, cmd soulservice.UpdateSoulComm
 	return s.souls.Update(ctx, soulFromCommand(cmd))
 }
 
+func (s *Service) DeleteSoul(ctx context.Context, id common.SoulID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	return s.souls.Delete(ctx, id)
+}
+
 func (s *Service) GetSoul(ctx context.Context, id common.SoulID) (*soulmodel.Soul, error) {
 	if id == "" {
 		return nil, common.ErrInvalidArgument

@@ -117,6 +117,16 @@ func (r *SoulRepository) Update(_ context.Context, item *soul.Soul) error {
 	return nil
 }
 
+func (r *SoulRepository) Delete(_ context.Context, id common.SoulID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[id]; !ok {
+		return common.ErrNotFound
+	}
+	delete(r.items, id)
+	return nil
+}
+
 func NewWorkspaceTemplateRepository() *WorkspaceTemplateRepository {
 	return &WorkspaceTemplateRepository{items: map[string]*repository.WorkspaceTemplate{}}
 }

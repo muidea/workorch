@@ -30,6 +30,7 @@ type ValidateCapabilitySelectionCommand struct {
 type Service interface {
 	CreateSoul(context.Context, CreateSoulCommand) error
 	UpdateSoul(context.Context, UpdateSoulCommand) error
+	DeleteSoul(context.Context, common.SoulID) error
 	GetSoul(context.Context, common.SoulID) (*soulmodel.Soul, error)
 	ListSouls(context.Context) ([]*soulmodel.Soul, error)
 	ValidateCapabilitySelection(context.Context, ValidateCapabilitySelectionCommand) error
@@ -38,6 +39,7 @@ type Service interface {
 type Dependencies struct {
 	CreateSoul                  func(context.Context, CreateSoulCommand) error
 	UpdateSoul                  func(context.Context, UpdateSoulCommand) error
+	DeleteSoul                  func(context.Context, common.SoulID) error
 	GetSoul                     func(context.Context, common.SoulID) (*soulmodel.Soul, error)
 	ListSouls                   func(context.Context) ([]*soulmodel.Soul, error)
 	ValidateCapabilitySelection func(context.Context, ValidateCapabilitySelectionCommand) error
@@ -46,6 +48,7 @@ type Dependencies struct {
 type Module struct {
 	createSoul                  func(context.Context, CreateSoulCommand) error
 	updateSoul                  func(context.Context, UpdateSoulCommand) error
+	deleteSoul                  func(context.Context, common.SoulID) error
 	getSoul                     func(context.Context, common.SoulID) (*soulmodel.Soul, error)
 	listSouls                   func(context.Context) ([]*soulmodel.Soul, error)
 	validateCapabilitySelection func(context.Context, ValidateCapabilitySelectionCommand) error
@@ -55,6 +58,7 @@ func New(deps Dependencies) *Module {
 	return &Module{
 		createSoul:                  deps.CreateSoul,
 		updateSoul:                  deps.UpdateSoul,
+		deleteSoul:                  deps.DeleteSoul,
 		getSoul:                     deps.GetSoul,
 		listSouls:                   deps.ListSouls,
 		validateCapabilitySelection: deps.ValidateCapabilitySelection,
@@ -73,6 +77,13 @@ func (m *Module) UpdateSoul(ctx context.Context, cmd UpdateSoulCommand) error {
 		return common.ErrInvalidArgument
 	}
 	return m.updateSoul(ctx, cmd)
+}
+
+func (m *Module) DeleteSoul(ctx context.Context, id common.SoulID) error {
+	if m == nil || m.deleteSoul == nil {
+		return common.ErrInvalidArgument
+	}
+	return m.deleteSoul(ctx, id)
 }
 
 func (m *Module) GetSoul(ctx context.Context, id common.SoulID) (*soulmodel.Soul, error) {

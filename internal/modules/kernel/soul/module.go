@@ -38,6 +38,7 @@ func (m *Module) Setup(deps Dependencies) error {
 	m.servicePtr = soulservice.New(soulservice.Dependencies{
 		CreateSoul:                  m.bizPtr.CreateSoul,
 		UpdateSoul:                  m.bizPtr.UpdateSoul,
+		DeleteSoul:                  m.bizPtr.DeleteSoul,
 		GetSoul:                     m.bizPtr.GetSoul,
 		ListSouls:                   m.bizPtr.ListSouls,
 		ValidateCapabilitySelection: m.bizPtr.ValidateCapabilitySelection,

@@ -416,6 +416,7 @@ type rejectApprovalFunc func(context.Context, string, string, string) (appservic
 type batchResolveApprovalsFunc func(context.Context, string, string, appservice.BatchResolveApprovalCommand) ([]appservice.Approval, error)
 type createSoulFunc func(context.Context, string, string, appservice.CreateSoulCommand) (appservice.Soul, error)
 type updateSoulFunc func(context.Context, string, string, string, appservice.UpdateSoulCommand) (appservice.Soul, error)
+type deleteSoulFunc func(context.Context, string, string, string) error
 type readSoulFunc func(context.Context, string, string, string) (appservice.Soul, error)
 type listSoulsFunc func(context.Context, string, string) ([]appservice.Soul, error)
 type createWorkspaceTemplateFunc func(context.Context, string, string, appservice.WorkspaceTemplate) (appservice.WorkspaceTemplate, error)
@@ -483,6 +484,7 @@ type serverState struct {
 	batchResolveApprovals           batchResolveApprovalsFunc
 	createSoul                      createSoulFunc
 	updateSoul                      updateSoulFunc
+	deleteSoul                      deleteSoulFunc
 	readSoul                        readSoulFunc
 	listSouls                       listSoulsFunc
 	createWorkspaceTemplate         createWorkspaceTemplateFunc
@@ -554,6 +556,7 @@ type serverMetrics struct {
 	approvalRejectRequests             atomic.Uint64
 	soulCreateRequests                 atomic.Uint64
 	soulUpdateRequests                 atomic.Uint64
+	soulDeleteRequests                 atomic.Uint64
 	soulListRequests                   atomic.Uint64
 	soulGetRequests                    atomic.Uint64
 	skillCreateRequests                atomic.Uint64
@@ -1796,6 +1799,20 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			Soul:     item,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/souls/:soulId", http.MethodDelete, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		soulID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/souls/")
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.soulDeleteRequests.Add(1)
+		if err := state.deleteSoul(r.Context(), state.config.Backend, state.config.DataRoot, soulID); err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	router.AddHandler("/api/v1/workorch/workspace-templates", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		var req createWorkspaceTemplateRequest
@@ -2151,6 +2168,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		batchResolveApprovals:           defaultBatchResolveApprovals,
 		createSoul:                      defaultCreateSoul,
 		updateSoul:                      defaultUpdateSoul,
+		deleteSoul:                      defaultDeleteSoul,
 		readSoul:                        defaultReadSoul,
 		listSouls:                       defaultListSouls,
 		createWorkspaceTemplate:         defaultCreateWorkspaceTemplate,
@@ -2586,6 +2604,11 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		})
 		return ret, err
 	}
+	s.deleteSoul = func(ctx context.Context, _, _, soulID string) error {
+		return s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			return appservice.DeleteSoulWithSession(ctx, session, soulID)
+		})
+	}
 	s.readSoul = func(ctx context.Context, _, _, soulID string) (appservice.Soul, error) {
 		var ret appservice.Soul
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
@@ -2928,6 +2951,10 @@ func defaultCreateSoul(ctx context.Context, backend string, dataRoot string, cmd
 
 func defaultUpdateSoul(ctx context.Context, backend string, dataRoot string, soulID string, cmd appservice.UpdateSoulCommand) (appservice.Soul, error) {
 	return appservice.UpdateSoulWithBackend(ctx, backend, dataRoot, soulID, cmd)
+}
+
+func defaultDeleteSoul(ctx context.Context, backend string, dataRoot string, soulID string) error {
+	return appservice.DeleteSoulWithBackend(ctx, backend, dataRoot, soulID)
 }
 
 func defaultReadSoul(ctx context.Context, backend string, dataRoot string, soulID string) (appservice.Soul, error) {

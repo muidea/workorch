@@ -95,3 +95,29 @@ func TestServiceRejectsInvalidSoul(t *testing.T) {
 		t.Fatalf("create blank skill ref err = %v, want invalid argument", err)
 	}
 }
+
+func TestServiceDeleteSoul(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(memory.NewSoulRepository())
+
+	cmd := soulservice.CreateSoulCommand{
+		SoulID: common.SoulID("soul-delete"),
+		Name:   "delete soul",
+		SoulMD: "# Delete Soul\n",
+	}
+	if err := service.CreateSoul(ctx, cmd); err != nil {
+		t.Fatalf("create soul: %v", err)
+	}
+	if err := service.DeleteSoul(ctx, cmd.SoulID); err != nil {
+		t.Fatalf("delete soul: %v", err)
+	}
+	if _, err := service.GetSoul(ctx, cmd.SoulID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get deleted soul err = %v, want not found", err)
+	}
+	if err := service.DeleteSoul(ctx, ""); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("delete blank soul err = %v, want invalid argument", err)
+	}
+	if err := service.DeleteSoul(ctx, cmd.SoulID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("delete missing soul err = %v, want not found", err)
+	}
+}

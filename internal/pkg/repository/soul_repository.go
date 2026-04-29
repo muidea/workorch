@@ -12,4 +12,5 @@ type SoulRepository interface {
 	Get(context.Context, common.SoulID) (*soul.Soul, error)
 	List(context.Context) ([]*soul.Soul, error)
 	Update(context.Context, *soul.Soul) error
+	Delete(context.Context, common.SoulID) error
 }

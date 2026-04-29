@@ -84,6 +84,8 @@ assert_json "$TMP_DIR/readyz.json" "readyz status" 'data.get("status") == "ready
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" >"$TMP_DIR/workorch-console.js"
 grep '执行人格（Soul）' "$TMP_DIR/workorch-console.js" >/dev/null
 grep 'Workspace 模板' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '删除 Soul' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '调整工作空间 Soul' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '保存执行人格配置' "$TMP_DIR/workorch-console.js" >/dev/null
 
 cat >"$TMP_DIR/soul-create.json" <<JSON
@@ -126,6 +128,31 @@ curl -fsS "$BASE_URL/api/v1/workorch/souls" >"$TMP_DIR/souls.json"
 assert_json "$TMP_DIR/souls.json" "soul listed" "any(item.get('id') == '$SOUL_ID' for item in data.get('souls', []))"
 curl -fsS "$BASE_URL/api/v1/workorch/souls/$SOUL_ID" >"$TMP_DIR/soul-read.json"
 assert_json "$TMP_DIR/soul-read.json" "soul.md exposed" '"soulMd" in data["soul"] and "Template E2E Soul" in data["soul"]["soulMd"]'
+
+DELETE_SOUL_ID="soul-template-e2e-delete-$VERIFY_SUFFIX"
+cat >"$TMP_DIR/soul-delete-create.json" <<JSON
+{
+  "id": "$DELETE_SOUL_ID",
+  "name": "Template E2E Delete Soul $VERIFY_SUFFIX",
+  "description": "Temporary Soul used to verify system configuration delete.",
+  "soulMd": "# Template E2E Delete Soul\\n\\nTemporary delete verification.\\n"
+}
+JSON
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/souls" \
+  -H 'Content-Type: application/json' \
+  -d @"$TMP_DIR/soul-delete-create.json" >"$TMP_DIR/soul-delete-created.json"
+delete_status="$(curl -sS -o "$TMP_DIR/soul-delete-response.json" -w '%{http_code}' \
+  -X DELETE "$BASE_URL/api/v1/workorch/souls/$DELETE_SOUL_ID")"
+if [[ "$delete_status" != "204" ]]; then
+  echo "delete soul status=$delete_status, want 204" >&2
+  exit 1
+fi
+deleted_read_status="$(curl -sS -o "$TMP_DIR/soul-delete-read-response.json" -w '%{http_code}' \
+  "$BASE_URL/api/v1/workorch/souls/$DELETE_SOUL_ID")"
+if [[ "$deleted_read_status" != "404" ]]; then
+  echo "deleted soul read status=$deleted_read_status, want 404" >&2
+  exit 1
+fi
 
 cat >"$TMP_DIR/template-invalid.json" <<JSON
 {

@@ -218,6 +218,11 @@ export const workorchApi = {
     });
     return body.soul;
   },
+  deleteSoul: async (soulId: string) => {
+    await request<Record<string, never>>(`${apiBase}/souls/${encodeURIComponent(soulId)}`, {
+      method: 'DELETE'
+    });
+  },
   listWorkspaceTemplates: async () => {
     const body = await request<{ workspaceTemplates: WorkspaceTemplate[] }>(`${apiBase}/workspace-templates`);
     return body.workspaceTemplates ?? [];

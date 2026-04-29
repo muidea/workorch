@@ -152,6 +152,22 @@ func (r *SoulRepository) Update(_ context.Context, item *soul.Soul) error {
 	return r.saveSoul(dir, item)
 }
 
+func (r *SoulRepository) Delete(_ context.Context, id common.SoulID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	dir, err := r.soulDir(id)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(dir, soulMetadataFile)); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return os.RemoveAll(dir)
+}
+
 func (r *SoulRepository) soulRoot() string {
 	return r.path
 }

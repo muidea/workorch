@@ -212,6 +212,30 @@ func UpdateSoulWithBackend(ctx context.Context, backend string, dataRoot string,
 	return UpdateSoulWithSession(ctx, session, soulID, cmd)
 }
 
+func DeleteSoulWithSession(ctx context.Context, session *RuntimeSession, soulID string) (err error) {
+	exports, err := session.Exports()
+	if err != nil {
+		return err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+	if exports.Services.SoulService == nil || exports.Repositories.Souls == nil {
+		return common.ErrInvalidArgument
+	}
+	soulID = strings.TrimSpace(soulID)
+	if soulID == "" {
+		return common.ErrInvalidArgument
+	}
+	return exports.Services.SoulService.DeleteSoul(ctx, common.SoulID(soulID))
+}
+
+func DeleteSoulWithBackend(ctx context.Context, backend string, dataRoot string, soulID string) error {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return err
+	}
+	return DeleteSoulWithSession(ctx, session, soulID)
+}
+
 func ReadSoulWithSession(ctx context.Context, session *RuntimeSession, soulID string) (ret Soul, err error) {
 	exports, err := session.Exports()
 	if err != nil {

@@ -839,6 +839,15 @@ func testSoulRepositoryContract(t *testing.T, factory func() repository.SoulRepo
 	if err := repo.Update(ctx, &soulmodel.Soul{ID: common.SoulID("missing")}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("update missing soul err = %v, want not found", err)
 	}
+	if err := repo.Delete(ctx, item.ID); err != nil {
+		t.Fatalf("delete soul: %v", err)
+	}
+	if _, err := repo.Get(ctx, item.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get deleted soul err = %v, want not found", err)
+	}
+	if err := repo.Delete(ctx, item.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("delete missing soul err = %v, want not found", err)
+	}
 }
 
 func testWorkspaceTemplateRepositoryContract(t *testing.T, factory func() repository.WorkspaceTemplateRepository) {
