@@ -169,6 +169,20 @@ function runtimeSummaryTags(runs?: Run[]) {
   );
 }
 
+function skillScopeLabel(skill: Skill) {
+  if (skill.source === 'skill-hub') {
+    return skill.scope === 'workspace' ? '工作区 SkillHub' : '全局 SkillHub';
+  }
+  return '内置 Skill';
+}
+
+function skillDisplayLabel(skill: Skill) {
+  const name = skill.name || skill.sourceSkillId || skill.id;
+  const version = skill.version ? `@${skill.version}` : '';
+  const status = skill.status ? ` / ${skill.status}` : '';
+  return `${name}${version} / ${skillScopeLabel(skill)}${status}`;
+}
+
 type MetricItem = {
   key: string;
   label: string;
@@ -1247,7 +1261,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       workorchApi.listGoals(targetWorkspaceId),
       workorchApi.listDoDs(targetWorkspaceId),
       workorchApi.listSouls(),
-      workorchApi.listSkills(),
+      workorchApi.listSkills(targetWorkspaceId),
       workorchApi.listMCPServers(),
       workorchApi.listMemory(targetWorkspaceId),
       workorchApi.readConfiguration()
@@ -2156,7 +2170,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
               allowClear
               options={skills.map((item) => ({
                 value: item.id,
-                label: `${item.name || item.id}${item.version ? `@${item.version}` : ''}`
+                label: skillDisplayLabel(item)
               }))}
             />
           </Form.Item>

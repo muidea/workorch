@@ -14,7 +14,6 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
 	soulmodule "github.com/muidea/workorch/internal/modules/kernel/soul"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -219,7 +218,6 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 		contextData[llmcommon.ExecutionContextLLMProviderID] = llmProviderID
 	}
 
-	skillIDs := normalizeStringIDs(cmd.SkillIDs)
 	mcpServerIDs := normalizeStringIDs(cmd.MCPServerIDs)
 	memoryIDs := normalizeStringIDs(cmd.MemoryIDs)
 
@@ -236,24 +234,34 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 		contextData["soul"] = soulContext(soul)
 	}
 
-	skills, err := selectedSkills(ctx, exports.Services.SkillService, skillIDs)
+	skills, skillIDs, skillSelection, err := selectSkillsForWorkspaceExecution(ctx, session, workspaceID, goal, dod, cmd.SkillIDs, soul)
 	if err != nil {
 		return nil, err
 	}
+	contextData["skillSelection"] = skillSelection
 	if len(skills) > 0 {
 		contextData["skillIds"] = skillIDs
 		contextData["skills"] = skillContexts(skills)
 	}
 
 	requiredMCPServerIDs := requiredMCPServerRefs(skills)
+	autoBoundMCPServerIDs := make([]string, 0)
 	for _, id := range requiredMCPServerIDs {
 		if !slices.Contains(mcpServerIDs, id) {
-			return nil, common.ErrConflict
+			mcpServerIDs = append(mcpServerIDs, id)
+			autoBoundMCPServerIDs = append(autoBoundMCPServerIDs, id)
 		}
 	}
 	mcpServers, err := selectedMCPServers(ctx, exports.Services.MCPService, mcpServerIDs)
 	if err != nil {
 		return nil, err
+	}
+	contextData["mcpSelection"] = map[string]any{
+		"policy":                "skill_required_mcp_auto_bind",
+		"requestedMCPServerIds": normalizeStringIDs(cmd.MCPServerIDs),
+		"requiredMCPServerIds":  requiredMCPServerIDs,
+		"autoBoundMCPServerIds": autoBoundMCPServerIDs,
+		"selectedMCPServerIds":  mcpServerIDs,
 	}
 	if len(mcpServers) > 0 {
 		contextData["mcpServerIds"] = mcpServerIDs
@@ -286,22 +294,35 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 	return contextData, nil
 }
 
-func selectedSkills(ctx context.Context, service interface {
-	GetSkill(context.Context, common.SkillID) (*skillmodel.Skill, error)
-}, ids []string) ([]*skillmodel.Skill, error) {
+func selectedSkills(ctx context.Context, session *RuntimeSession, ids []string, workspaceID string) ([]Skill, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	if service == nil {
+	if session == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	ret := make([]*skillmodel.Skill, 0, len(ids))
+	exports, err := session.Exports()
+	if err != nil {
+		return nil, err
+	}
+	if exports.Repositories.Skills == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	ret := make([]Skill, 0, len(ids))
 	for _, id := range ids {
-		item, err := service.GetSkill(ctx, common.SkillID(id))
+		item, err := exports.Repositories.Skills.Get(ctx, common.SkillID(id))
+		if err == nil {
+			ret = append(ret, mapSkill(item))
+			continue
+		}
+		if !errors.Is(err, common.ErrNotFound) {
+			return nil, err
+		}
+		skill, err := readSkillHubSkill(ctx, session, id, SkillQuery{WorkspaceID: workspaceID})
 		if err != nil {
 			return nil, err
 		}
-		ret = append(ret, item)
+		ret = append(ret, skill)
 	}
 	return ret, nil
 }
@@ -466,7 +487,7 @@ func normalizeStringIDs(input []string) []string {
 	return ret
 }
 
-func requiredToolKinds(skills []*skillmodel.Skill) []string {
+func requiredToolKinds(skills []Skill) []string {
 	ret := make([]string, 0)
 	seen := map[string]struct{}{}
 	for _, skill := range skills {
@@ -485,7 +506,7 @@ func requiredToolKinds(skills []*skillmodel.Skill) []string {
 	return ret
 }
 
-func requiredMCPServerRefs(skills []*skillmodel.Skill) []string {
+func requiredMCPServerRefs(skills []Skill) []string {
 	ret := make([]string, 0)
 	seen := map[string]struct{}{}
 	for _, skill := range skills {
@@ -597,11 +618,11 @@ func soulContext(item *soulmodel.Soul) map[string]any {
 	}
 }
 
-func skillContexts(items []*skillmodel.Skill) []map[string]any {
+func skillContexts(items []Skill) []map[string]any {
 	ret := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, map[string]any{
-			"id":                    string(item.ID),
+			"id":                    item.ID,
 			"name":                  item.Name,
 			"version":               item.Version,
 			"description":           item.Description,
@@ -611,6 +632,24 @@ func skillContexts(items []*skillmodel.Skill) []map[string]any {
 			"requiredToolKinds":     cloneStrings(item.RequiredToolKinds),
 			"requiredMCPServerRefs": cloneStrings(item.RequiredMCPServerRefs),
 			"constraints":           cloneStrings(item.Constraints),
+			"source":                item.Source,
+			"scope":                 item.Scope,
+			"workspaceId":           item.WorkspaceID,
+			"status":                item.Status,
+			"sourceRepository":      item.SourceRepository,
+			"sourcePath":            item.SourcePath,
+			"targetPath":            item.TargetPath,
+			"localPath":             item.LocalPath,
+			"repoPath":              item.RepoPath,
+			"globalPath":            item.GlobalPath,
+			"projectPath":           item.ProjectPath,
+			"contentHash":           item.ContentHash,
+			"sourceHash":            item.SourceHash,
+			"appliedHash":           item.AppliedHash,
+			"actualHash":            item.ActualHash,
+			"agent":                 item.Agent,
+			"managedBy":             item.ManagedBy,
+			"sourceSkillId":         item.SourceSkillID,
 		})
 	}
 	return ret

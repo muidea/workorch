@@ -233,6 +233,69 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	}
 }
 
+func TestActivateWorkspaceExecutionWithBackendAutoSelectsSkillAndBindsRequiredMCP(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-auto-skill-context", "auto skill context workspace", "", "workspaces/auto-skill-context")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "complete auto delivery verification")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"auto delivery evidence is produced"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	if _, err := CreateMCPServerWithBackend(ctx, "file", dataRoot, CreateMCPServerCommand{
+		ID:           "mcp-auto-skill",
+		Name:         "Auto Skill MCP",
+		Transport:    "stdio",
+		Enabled:      true,
+		AllowedTools: []string{"repo.summary"},
+	}); err != nil {
+		t.Fatalf("CreateMCPServerWithBackend: %v", err)
+	}
+	if _, err := CreateSkillWithBackend(ctx, "file", dataRoot, CreateSkillCommand{
+		ID:                    "skill-auto-delivery",
+		Name:                  "Auto Delivery Skill",
+		Version:               "1.0.0",
+		Description:           "Skill for auto delivery verification",
+		TriggerRules:          []string{"auto delivery"},
+		Instruction:           "Use this skill when Goal and DoD request auto delivery.",
+		RequiredToolKinds:     []string{"llm/chat"},
+		RequiredMCPServerRefs: []string{"mcp-auto-skill"},
+	}); err != nil {
+		t.Fatalf("CreateSkillWithBackend: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID:        goal.ID,
+		DoDID:         dod.ID,
+		LLMProviderID: "reasoning",
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	executionContext := item.Run.ExecutionContext
+	if !contextStringSliceContains(executionContext["skillIds"], "skill-auto-delivery") {
+		t.Fatalf("skillIds = %+v, want auto selected skill", executionContext["skillIds"])
+	}
+	if !contextStringSliceContains(executionContext["mcpServerIds"], "mcp-auto-skill") {
+		t.Fatalf("mcpServerIds = %+v, want required MCP auto bound", executionContext["mcpServerIds"])
+	}
+	selectionPolicy, selectionStatus := skillSelectionPolicyAndStatus(executionContext["skillSelection"])
+	if selectionPolicy != "goal_dod_auto_match" || selectionStatus != "selected" {
+		t.Fatalf("skillSelection = %+v, want auto selected evidence", executionContext["skillSelection"])
+	}
+	mcpSelection, _ := executionContext["mcpSelection"].(map[string]any)
+	if !contextStringSliceContains(mcpSelection["autoBoundMCPServerIds"], "mcp-auto-skill") {
+		t.Fatalf("mcpSelection = %+v, want auto bound MCP evidence", mcpSelection)
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendUsesSemanticMemoryRecall(t *testing.T) {
 	ctx := context.Background()
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -466,6 +529,19 @@ func contextNumericEquals(value any, want float64) bool {
 		return typed == want
 	default:
 		return false
+	}
+}
+
+func skillSelectionPolicyAndStatus(value any) (string, string) {
+	switch typed := value.(type) {
+	case skillSelectionEvidence:
+		return typed.Policy, typed.Status
+	case map[string]any:
+		policy, _ := typed["policy"].(string)
+		status, _ := typed["status"].(string)
+		return policy, status
+	default:
+		return "", ""
 	}
 }
 

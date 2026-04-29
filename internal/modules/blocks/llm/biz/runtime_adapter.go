@@ -462,9 +462,8 @@ func ParseLLMExecutionDecision(payload []byte) (llmmodels.LLMExecutionDecision, 
 		return llmmodels.LLMExecutionDecision{}, err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(normalized))
-	decoder.DisallowUnknownFields()
-	var decision llmmodels.LLMExecutionDecision
-	if err := decoder.Decode(&decision); err != nil {
+	var raw map[string]json.RawMessage
+	if err := decoder.Decode(&raw); err != nil {
 		return llmmodels.LLMExecutionDecision{}, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
 	}
 	var extra any
@@ -473,10 +472,40 @@ func ParseLLMExecutionDecision(payload []byte) (llmmodels.LLMExecutionDecision, 
 	} else if err != io.EOF {
 		return llmmodels.LLMExecutionDecision{}, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
 	}
+	if err := validateLLMDecisionTopLevelFields(raw); err != nil {
+		return llmmodels.LLMExecutionDecision{}, err
+	}
+	var decision llmmodels.LLMExecutionDecision
+	if err := json.Unmarshal(normalized, &decision); err != nil {
+		return llmmodels.LLMExecutionDecision{}, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
+	}
 	if err := validateDecision(decision); err != nil {
 		return llmmodels.LLMExecutionDecision{}, err
 	}
 	return decision, nil
+}
+
+func validateLLMDecisionTopLevelFields(raw map[string]json.RawMessage) error {
+	for key := range raw {
+		switch key {
+		case "thoughtSummary",
+			"plan",
+			"executionGraph",
+			"nextAction",
+			"requiredDecision",
+			"requiredApproval",
+			"patchRequests",
+			"mcpToolCalls",
+			"shellCommands",
+			"memoryWrites",
+			"dodAssessment",
+			"completionState":
+			continue
+		default:
+			return fmt.Errorf("%w: invalid llm decision json: json: unknown field %q", common.ErrInvalidArgument, key)
+		}
+	}
+	return nil
 }
 
 func NormalizeLLMDecisionPayload(payload []byte) ([]byte, error) {

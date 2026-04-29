@@ -2,6 +2,7 @@ package appservice
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp"
@@ -43,6 +44,24 @@ type Skill struct {
 	RequiredToolKinds     []string `json:"requiredToolKinds,omitempty"`
 	RequiredMCPServerRefs []string `json:"requiredMCPServerRefs,omitempty"`
 	Constraints           []string `json:"constraints,omitempty"`
+	Source                string   `json:"source,omitempty"`
+	Scope                 string   `json:"scope,omitempty"`
+	WorkspaceID           string   `json:"workspaceId,omitempty"`
+	Status                string   `json:"status,omitempty"`
+	SourceRepository      string   `json:"sourceRepository,omitempty"`
+	SourcePath            string   `json:"sourcePath,omitempty"`
+	TargetPath            string   `json:"targetPath,omitempty"`
+	LocalPath             string   `json:"localPath,omitempty"`
+	RepoPath              string   `json:"repoPath,omitempty"`
+	GlobalPath            string   `json:"globalPath,omitempty"`
+	ProjectPath           string   `json:"projectPath,omitempty"`
+	ContentHash           string   `json:"contentHash,omitempty"`
+	SourceHash            string   `json:"sourceHash,omitempty"`
+	AppliedHash           string   `json:"appliedHash,omitempty"`
+	ActualHash            string   `json:"actualHash,omitempty"`
+	Agent                 string   `json:"agent,omitempty"`
+	ManagedBy             string   `json:"managedBy,omitempty"`
+	SourceSkillID         string   `json:"sourceSkillId,omitempty"`
 }
 
 type MCPServer struct {
@@ -248,7 +267,7 @@ func CreateSkillWithBackend(ctx context.Context, backend string, dataRoot string
 	return CreateSkillWithSession(ctx, session, cmd)
 }
 
-func ReadSkillWithSession(ctx context.Context, session *RuntimeSession, skillID string) (ret Skill, err error) {
+func ReadSkillWithSession(ctx context.Context, session *RuntimeSession, skillID string, query ...SkillQuery) (ret Skill, err error) {
 	exports, err := session.Exports()
 	if err != nil {
 		return Skill{}, err
@@ -259,20 +278,23 @@ func ReadSkillWithSession(ctx context.Context, session *RuntimeSession, skillID 
 	}
 	item, err := exports.Repositories.Skills.Get(ctx, common.SkillID(skillID))
 	if err != nil {
-		return Skill{}, err
+		if !errors.Is(err, common.ErrNotFound) {
+			return Skill{}, err
+		}
+		return readSkillHubSkill(ctx, session, skillID, firstSkillQuery(query))
 	}
 	return mapSkill(item), nil
 }
 
-func ReadSkillWithBackend(ctx context.Context, backend string, dataRoot string, skillID string) (Skill, error) {
+func ReadSkillWithBackend(ctx context.Context, backend string, dataRoot string, skillID string, query ...SkillQuery) (Skill, error) {
 	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Skill{}, err
 	}
-	return ReadSkillWithSession(ctx, session, skillID)
+	return ReadSkillWithSession(ctx, session, skillID, query...)
 }
 
-func ListSkillsWithSession(ctx context.Context, session *RuntimeSession) (ret []Skill, err error) {
+func ListSkillsWithSession(ctx context.Context, session *RuntimeSession, query ...SkillQuery) (ret []Skill, err error) {
 	exports, err := session.Exports()
 	if err != nil {
 		return nil, err
@@ -289,15 +311,106 @@ func ListSkillsWithSession(ctx context.Context, session *RuntimeSession) (ret []
 	for _, item := range items {
 		ret = append(ret, mapSkill(item))
 	}
+	ret = append(ret, listSkillHubSkillsForQuery(ctx, session, firstSkillQuery(query))...)
 	return ret, nil
 }
 
-func ListSkillsWithBackend(ctx context.Context, backend string, dataRoot string) ([]Skill, error) {
+func ListSkillsWithBackend(ctx context.Context, backend string, dataRoot string, query ...SkillQuery) ([]Skill, error) {
 	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return nil, err
 	}
-	return ListSkillsWithSession(ctx, session)
+	return ListSkillsWithSession(ctx, session, query...)
+}
+
+func firstSkillQuery(query []SkillQuery) SkillQuery {
+	if len(query) == 0 {
+		return SkillQuery{}
+	}
+	return query[0]
+}
+
+func listSkillHubSkillsForQuery(ctx context.Context, session *RuntimeSession, query SkillQuery) []Skill {
+	ret, err := listSkillHubGlobalSkills(ctx)
+	if err != nil {
+		ret = nil
+	}
+	workspaceID := strings.TrimSpace(query.WorkspaceID)
+	if workspaceID == "" {
+		return ret
+	}
+	workspaceSkills, err := listSkillHubWorkspaceSkillsForWorkspace(ctx, session, workspaceID)
+	if err != nil {
+		return ret
+	}
+	return append(ret, workspaceSkills...)
+}
+
+func listSkillHubWorkspaceSkillsForWorkspace(ctx context.Context, session *RuntimeSession, workspaceID string) ([]Skill, error) {
+	exports, err := session.Exports()
+	if err != nil {
+		return nil, err
+	}
+	if exports.Repositories.Workspaces == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	workspace, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(strings.TrimSpace(workspaceID)))
+	if err != nil {
+		return nil, err
+	}
+	return listSkillHubWorkspaceSkills(ctx, string(workspace.ID), workspace.WorkingDirectory)
+}
+
+func readSkillHubSkill(ctx context.Context, session *RuntimeSession, skillID string, query SkillQuery) (Skill, error) {
+	scope, refWorkspaceID, sourceSkillID, isSkillHubRef := parseSkillHubSkillRef(skillID)
+	if isSkillHubRef {
+		switch scope {
+		case skillScopeGlobal:
+			items, err := listSkillHubGlobalSkills(ctx)
+			if err != nil {
+				return Skill{}, err
+			}
+			return findSkillByRef(items, skillID, sourceSkillID)
+		case skillScopeWorkspace:
+			workspaceID := firstNonEmpty(refWorkspaceID, query.WorkspaceID)
+			if strings.TrimSpace(workspaceID) == "" {
+				return Skill{}, common.ErrInvalidArgument
+			}
+			items, err := listSkillHubWorkspaceSkillsForWorkspace(ctx, session, workspaceID)
+			if err != nil {
+				return Skill{}, err
+			}
+			return findSkillByRef(items, skillID, sourceSkillID)
+		}
+		return Skill{}, common.ErrNotFound
+	}
+
+	if strings.TrimSpace(query.WorkspaceID) != "" {
+		items, err := listSkillHubWorkspaceSkillsForWorkspace(ctx, session, query.WorkspaceID)
+		if err == nil {
+			if item, err := findSkillByRef(items, skillID, skillID); err == nil {
+				return item, nil
+			}
+		}
+	}
+	items, err := listSkillHubGlobalSkills(ctx)
+	if err == nil {
+		if item, err := findSkillByRef(items, skillID, skillID); err == nil {
+			return item, nil
+		}
+	}
+	return Skill{}, common.ErrNotFound
+}
+
+func findSkillByRef(items []Skill, id string, sourceSkillID string) (Skill, error) {
+	id = strings.TrimSpace(id)
+	sourceSkillID = strings.TrimSpace(sourceSkillID)
+	for _, item := range items {
+		if item.ID == id || (sourceSkillID != "" && item.SourceSkillID == sourceSkillID) {
+			return item, nil
+		}
+	}
+	return Skill{}, common.ErrNotFound
 }
 
 func CreateMCPServerWithSession(ctx context.Context, session *RuntimeSession, cmd CreateMCPServerCommand) (ret MCPServer, err error) {
@@ -574,6 +687,10 @@ func mapSkill(item *skillmodel.Skill) Skill {
 		RequiredToolKinds:     cloneStrings(item.RequiredToolKinds),
 		RequiredMCPServerRefs: cloneStrings(item.RequiredMCPServerRefs),
 		Constraints:           cloneStrings(item.Constraints),
+		Source:                skillSourceRepository,
+		Scope:                 skillScopeRepository,
+		ManagedBy:             skillManagedByWorkorch,
+		SourceSkillID:         string(item.ID),
 	}
 }
 

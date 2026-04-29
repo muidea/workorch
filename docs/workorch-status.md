@@ -701,6 +701,46 @@ LLM 驱动 Workspace 执行的设计文档已补齐，范围、边界与交互�
 - L18 Concurrent ready-node graph dispatch: completed
 - L19 MCP stdio protocol transport adapter: completed
 
+## SkillHub Capability Integration
+
+Skill 能力来源已从单一 workorch 内置仓储扩展为 workorch 读模型消费 `skill-hub`
+管理结果，边界如下：
+
+- `skill-hub` 继续负责 Skill 生命周期管理，包括 use/apply/status/repo sync/feedback
+- workorch 只读取 `skill-hub status --json` 输出并映射为 Skill 读模型和 Run execution context
+- 全局 Skill 通过 `skill-hub status --global --json --agent codex` 暴露为 `skillhub:global:<skillId>`
+- Workspace 本地 Skill 通过在 `workspace.workingDirectory` 执行 `skill-hub status --json`
+  暴露为 `skillhub:workspace:<workspaceId>:<skillId>`
+- Web Console 在 Workspace 上下文下加载 Skill 列表，选择器展示来源、作用域、版本和状态
+
+当前进度：
+
+- completed: SkillHub command adapter and status JSON mapping
+- completed: Skill read model fields for source/scope/status/path/hash/agent/managedBy
+- completed: `GET /api/v1/workorch/skills?workspaceId=...` exposes repository, global SkillHub, and Workspace SkillHub skills
+- completed: Workspace execution activation resolves repository Skill and SkillHub skill refs into Run context
+- completed: Web activation Skill selector uses Workspace-aware Skill list and source-aware labels
+- completed: unit tests for global SkillHub, Workspace SkillHub, and execution selection resolution
+- completed: Goal/DoD-based automatic Skill selection using explicit trigger rules and Skill name/source ID matching
+- completed: Skill-required MCP server refs are auto-bound into Workspace execution activation and still validated through MCP enabled state
+- completed: selected Skill usage writes generic `skill_feedback` Memory after satisfied DoD completion
+- completed: deployed-instance e2e script `scripts/verify-skillhub-workspace-execution.sh`
+  covers global SkillHub Skill, Workspace SkillHub Skill, repository Skill required MCP auto-binding,
+  Run snapshot context, accepted Result/Artifact, and `skill_feedback` Memory
+- completed: deployed-instance full regression target `make verify-deployed-full`
+  includes service smoke, mock LLM governance, SkillHub, MCP stdio, real LLM,
+  real weather, weather Decision/Approval governance, and vector Memory checks
+- completed: LLM decision parser keeps top-level `LLMExecutionDecision` fields strict
+  while ignoring unsupported nested governance extra fields from real providers
+
+当前边界：
+
+- Web 不直接触发 `skill-hub use/apply/feedback`，Skill 生命周期仍由 `skill-hub` 管理
+- 自动选择不使用模糊业务语义推断，只根据 Skill `triggerRules` 和 Skill 名称/source ID
+  与 Goal/DoD 文本的通用匹配，避免框架层解析具体业务目标
+- `skill-hub feedback` 仍不由 workorch 自动触发；运行效果先进入 workorch `skill_feedback`
+  Memory，Skill 内容归档继续由 skill-hub 生命周期命令处理
+
 ## MVP Closure Record
 
 MVP 功能收口记录见：

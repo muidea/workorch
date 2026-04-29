@@ -168,8 +168,13 @@ export const workorchApi = {
     const body = await request<{ souls: Soul[] }>(`${apiBase}/souls`);
     return body.souls ?? [];
   },
-  listSkills: async () => {
-    const body = await request<{ skills: Skill[] }>(`${apiBase}/skills`);
+  listSkills: async (workspaceId?: string) => {
+    const search = new URLSearchParams();
+    if (workspaceId) {
+      search.set('workspaceId', workspaceId);
+    }
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    const body = await request<{ skills: Skill[] }>(`${apiBase}/skills${suffix}`);
     return body.skills ?? [];
   },
   listMCPServers: async () => {

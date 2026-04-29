@@ -702,6 +702,9 @@ func (o *RuntimeOrchestrator) dispatchStep(
 	if err := o.recordRunResultFromDoDAssessment(ctx, run, step, output); err != nil {
 		return err
 	}
+	if err := o.recordSkillFeedbackMemory(ctx, run, step, output); err != nil {
+		return err
+	}
 	if err := o.ValidateRun(ctx, run.ID); err != nil {
 		return err
 	}
@@ -1434,6 +1437,71 @@ func (o *RuntimeOrchestrator) recordRunResultFromDoDAssessment(
 	return o.publishResultAccepted(ctx, item)
 }
 
+func (o *RuntimeOrchestrator) recordSkillFeedbackMemory(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	output map[string]any,
+) error {
+	if run == nil || step == nil || o.evidence.MemoryItems == nil || !requiresDoDAssessmentCompletionGate(run) {
+		return nil
+	}
+	skillIDs := stringSliceFromValue(run.ExecutionContext["skillIds"])
+	if len(skillIDs) == 0 {
+		return nil
+	}
+	assessment := doDAssessmentFromOutput(output)
+	if assessment == nil {
+		return nil
+	}
+	summary, _ := assessment["summary"].(string)
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return nil
+	}
+	item := &memorymodel.MemoryItem{
+		ID:          common.MemoryID(fmt.Sprintf("%s/memory/skill-feedback", run.ID)),
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		SourceType:  memorycommon.MemorySourceRun,
+		SourceRef:   string(step.ID),
+		MemoryType:  memorycommon.MemoryTypeSkillFeedback,
+		Content: fmt.Sprintf(
+			"Run %s completed with selected skills: %s.\nDoD summary: %s",
+			run.ID,
+			strings.Join(skillIDs, ", "),
+			summary,
+		),
+		Summary:    fmt.Sprintf("Selected skills completed run: %s", strings.Join(skillIDs, ", ")),
+		Tags:       []string{"skill_feedback", "run_completed"},
+		Importance: 50,
+		Confidence: 50,
+		Visibility: "workspace",
+	}
+	if err := o.evidence.MemoryItems.Create(ctx, item); err != nil {
+		if err != common.ErrConflict {
+			return err
+		}
+		existing, getErr := o.evidence.MemoryItems.Get(ctx, item.ID)
+		if getErr != nil {
+			return getErr
+		}
+		existing.WorkspaceID = item.WorkspaceID
+		existing.RunID = item.RunID
+		existing.SourceType = item.SourceType
+		existing.SourceRef = item.SourceRef
+		existing.MemoryType = item.MemoryType
+		existing.Content = item.Content
+		existing.Summary = item.Summary
+		existing.Tags = item.Tags
+		existing.Importance = item.Importance
+		existing.Confidence = item.Confidence
+		existing.Visibility = item.Visibility
+		return o.evidence.MemoryItems.Update(ctx, existing)
+	}
+	return nil
+}
+
 func (o *RuntimeOrchestrator) recordResultSummaryArtifact(
 	ctx context.Context,
 	run *runModel.Run,
@@ -2030,6 +2098,9 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatch(ctx context.Context, run *r
 		return o.FailRun(ctx, currentRun.ID, err.Error())
 	}
 	if err := o.recordRunResultFromDoDAssessment(ctx, currentRun, last, last.Output); err != nil {
+		return err
+	}
+	if err := o.recordSkillFeedbackMemory(ctx, currentRun, last, last.Output); err != nil {
 		return err
 	}
 	if err := o.ValidateRun(ctx, currentRun.ID); err != nil {

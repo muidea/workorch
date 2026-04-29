@@ -25,6 +25,7 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	mcpbiz "github.com/muidea/workorch/internal/modules/kernel/mcp/biz"
 	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
+	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -2254,6 +2255,7 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 	resultRepo := memory.NewResultRepository()
 	artifactRepo := memory.NewArtifactRepository()
 	validationRepo := memory.NewValidationResultRepository()
+	memoryRepo := memory.NewMemoryItemRepository()
 	runtime := &stubRuntimeAdapter{output: map[string]any{
 		"status": "completed",
 		"dodAssessment": map[string]any{
@@ -2280,6 +2282,7 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 			Results:           resultRepo,
 			Artifacts:         artifactRepo,
 			ValidationResults: validationRepo,
+			MemoryItems:       memoryRepo,
 		},
 		events.NewMemoryHub(),
 	)
@@ -2295,6 +2298,9 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 		DoDID:           common.DoDID("dod-1"),
 		State:           common.RunStateCreated,
 		InitialStepKind: "llm/workspace_execution",
+		ExecutionContext: map[string]any{
+			"skillIds": []string{"skill-dod-gate"},
+		},
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -2346,6 +2352,13 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 	}
 	if artifact.Summary != "DoD satisfied" || artifact.ContentType != "text/plain; charset=utf-8" {
 		t.Fatalf("artifact content = %+v, want DoD summary text artifact", artifact)
+	}
+	memories, err := memoryRepo.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("list memory: %v", err)
+	}
+	if !hasSkillFeedbackMemory(memories, runID, "skill-dod-gate") {
+		t.Fatalf("memories = %+v, want skill feedback memory", memories)
 	}
 }
 
@@ -4455,6 +4468,19 @@ func hasMemoryItem(items []*memorymodel.MemoryItem, runID common.RunID, memoryTy
 			item.SourceRef == string(runID) &&
 			item.MemoryType == memoryType &&
 			item.Summary == summary {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSkillFeedbackMemory(items []*memorymodel.MemoryItem, runID common.RunID, skillID string) bool {
+	for _, item := range items {
+		if item != nil &&
+			item.RunID == runID &&
+			item.SourceType == "run" &&
+			item.MemoryType == memorycommon.MemoryTypeSkillFeedback &&
+			strings.Contains(item.Summary, skillID) {
 			return true
 		}
 	}

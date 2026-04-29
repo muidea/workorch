@@ -365,8 +365,8 @@ type createSoulFunc func(context.Context, string, string, appservice.CreateSoulC
 type readSoulFunc func(context.Context, string, string, string) (appservice.Soul, error)
 type listSoulsFunc func(context.Context, string, string) ([]appservice.Soul, error)
 type createSkillFunc func(context.Context, string, string, appservice.CreateSkillCommand) (appservice.Skill, error)
-type readSkillFunc func(context.Context, string, string, string) (appservice.Skill, error)
-type listSkillsFunc func(context.Context, string, string) ([]appservice.Skill, error)
+type readSkillFunc func(context.Context, string, string, string, appservice.SkillQuery) (appservice.Skill, error)
+type listSkillsFunc func(context.Context, string, string, appservice.SkillQuery) ([]appservice.Skill, error)
 type createMCPServerFunc func(context.Context, string, string, appservice.CreateMCPServerCommand) (appservice.MCPServer, error)
 type readMCPServerFunc func(context.Context, string, string, string) (appservice.MCPServer, error)
 type listMCPServersFunc func(context.Context, string, string) ([]appservice.MCPServer, error)
@@ -1108,7 +1108,8 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/skills", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		state.metrics.skillListRequests.Add(1)
-		items, err := state.listSkills(r.Context(), state.config.Backend, state.config.DataRoot)
+		query := appservice.SkillQuery{WorkspaceID: strings.TrimSpace(r.URL.Query().Get("workspaceId"))}
+		items, err := state.listSkills(r.Context(), state.config.Backend, state.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1128,7 +1129,8 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			return
 		}
 		state.metrics.skillGetRequests.Add(1)
-		item, err := state.readSkill(r.Context(), state.config.Backend, state.config.DataRoot, skillID)
+		query := appservice.SkillQuery{WorkspaceID: strings.TrimSpace(r.URL.Query().Get("workspaceId"))}
+		item, err := state.readSkill(r.Context(), state.config.Backend, state.config.DataRoot, skillID, query)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -2174,20 +2176,20 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		})
 		return ret, err
 	}
-	s.readSkill = func(ctx context.Context, _, _, skillID string) (appservice.Skill, error) {
+	s.readSkill = func(ctx context.Context, _, _, skillID string, query appservice.SkillQuery) (appservice.Skill, error) {
 		var ret appservice.Skill
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
-			ret, err = appservice.ReadSkillWithSession(ctx, session, skillID)
+			ret, err = appservice.ReadSkillWithSession(ctx, session, skillID, query)
 			return err
 		})
 		return ret, err
 	}
-	s.listSkills = func(ctx context.Context, _, _ string) ([]appservice.Skill, error) {
+	s.listSkills = func(ctx context.Context, _, _ string, query appservice.SkillQuery) ([]appservice.Skill, error) {
 		var ret []appservice.Skill
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
-			ret, err = appservice.ListSkillsWithSession(ctx, session)
+			ret, err = appservice.ListSkillsWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
@@ -2436,12 +2438,12 @@ func defaultCreateSkill(ctx context.Context, backend string, dataRoot string, cm
 	return appservice.CreateSkillWithBackend(ctx, backend, dataRoot, cmd)
 }
 
-func defaultReadSkill(ctx context.Context, backend string, dataRoot string, skillID string) (appservice.Skill, error) {
-	return appservice.ReadSkillWithBackend(ctx, backend, dataRoot, skillID)
+func defaultReadSkill(ctx context.Context, backend string, dataRoot string, skillID string, query appservice.SkillQuery) (appservice.Skill, error) {
+	return appservice.ReadSkillWithBackend(ctx, backend, dataRoot, skillID, query)
 }
 
-func defaultListSkills(ctx context.Context, backend string, dataRoot string) ([]appservice.Skill, error) {
-	return appservice.ListSkillsWithBackend(ctx, backend, dataRoot)
+func defaultListSkills(ctx context.Context, backend string, dataRoot string, query appservice.SkillQuery) ([]appservice.Skill, error) {
+	return appservice.ListSkillsWithBackend(ctx, backend, dataRoot, query)
 }
 
 func defaultCreateMCPServer(ctx context.Context, backend string, dataRoot string, cmd appservice.CreateMCPServerCommand) (appservice.MCPServer, error) {

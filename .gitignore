@@ -1,5 +1,6 @@
 /workorchd
 .workorch-data/
+/workspaces/
 /bin/
 /web/workorch-console/node_modules/
 /config/application.toml

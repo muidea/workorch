@@ -755,6 +755,24 @@ func TestParseLLMExecutionDecisionRejectsUnknownFieldAfterNormalization(t *testi
 	}
 }
 
+func TestParseLLMExecutionDecisionAllowsNestedGovernanceExtraFields(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"blocked_on_approval",
+		"requiredApproval":{
+			"reason":"operator approval is required",
+			"action":"query external weather tool",
+			"approver":"operator",
+			"context":{"risk":"external_tool_call"}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	if decision.RequiredApproval == nil || decision.RequiredApproval.Reason != "operator approval is required" {
+		t.Fatalf("requiredApproval = %+v, want parsed approval", decision.RequiredApproval)
+	}
+}
+
 func TestParseLLMExecutionDecisionRejectsInvalidExecutionGraph(t *testing.T) {
 	_, err := ParseLLMExecutionDecision([]byte(`{
 		"completionState":"continue",
