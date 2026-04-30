@@ -359,6 +359,29 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 			"allowedResources":["file://README.md"],
 			"allowedPrompts":["delivery.plan"]
 		}`, http.StatusCreated)
+	putAndExpect(t, mux, "/api/v1/workorch/mcp/servers/mcp-local-context", `{
+			"name":"local context updated",
+			"transport":"stdio",
+			"endpoint":".workorch-data/system/mcp-endpoints/mcp-local-context/context-helper.py",
+			"enabled":true,
+			"allowedTools":["repo.summary"],
+			"allowedResources":["file://README.md"],
+			"allowedPrompts":["delivery.plan"],
+			"sessionPolicy":"transient"
+		}`, http.StatusOK)
+	postAndExpect(t, mux, "/api/v1/workorch/mcp/capabilities", `{
+		"id":"mcp-local-context:tool:repo.details",
+		"serverId":"mcp-local-context",
+		"kind":"tool",
+		"name":"repo.details",
+		"displayName":"仓库详情",
+		"description":"获取代码仓库更详细的上下文信息。",
+		"category":"代码仓库",
+		"tags":["repo","details"],
+		"stageHints":["planning","execution"],
+		"riskLevel":"read_only",
+		"enabled":true
+	}`, http.StatusCreated)
 	postAndExpect(t, mux, "/api/v1/workorch/workspaces/"+workspace.ID+"/memory", `{
 		"sourceType":"user",
 		"memoryType":"project_context",
@@ -380,7 +403,9 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 		{path: "/api/v1/workorch/workspace-templates", want: `"id": "workspace-template-delivery"`},
 		{path: "/api/v1/workorch/skills", want: `"id": "skill-local-go-service"`},
 		{path: "/api/v1/workorch/skills/skill-local-go-service", want: `"requiredMCPServerRefs": [`},
-		{path: "/api/v1/workorch/mcp/servers", want: `"id": "mcp-local-context"`},
+		{path: "/api/v1/workorch/mcp/servers", want: `".workorch-data/system/mcp-endpoints/mcp-local-context/context-helper.py"`},
+		{path: "/api/v1/workorch/mcp/capabilities?kind=tool&q=%E4%BB%93%E5%BA%93", want: `"displayName": "仓库详情"`},
+		{path: "/api/v1/workorch/mcp/capabilities/mcp-local-context:tool:repo.details", want: `"category": "代码仓库"`},
 		{path: "/api/v1/workorch/mcp/servers/mcp-local-context/tools", want: `"name": "repo.summary"`},
 		{path: "/api/v1/workorch/mcp/servers/mcp-local-context/resources", want: `"uri": "file://README.md"`},
 		{path: "/api/v1/workorch/mcp/servers/mcp-local-context/prompts", want: `"name": "delivery.plan"`},
@@ -616,7 +641,12 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/skills"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/skills/:skillId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/mcp/servers"},
+		{method: http.MethodPut, pattern: "/api/v1/workorch/mcp/servers/:serverId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/mcp/capabilities"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/capabilities"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/capabilities/:capabilityId"},
+		{method: http.MethodPut, pattern: "/api/v1/workorch/mcp/capabilities/:capabilityId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers/:serverId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers/:serverId/tools"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers/:serverId/resources"},

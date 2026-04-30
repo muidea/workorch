@@ -12,7 +12,7 @@ import (
 
 func TestServiceCreateAndListServer(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(backend.NewMCPServerRepository())
+	service := NewService(backend.NewMCPServerRepository(), backend.NewMCPCapabilityRepository())
 
 	cmd := mcpservice.CreateServerCommand{
 		ServerID:              common.MCPServerID("mcp-local-context"),
@@ -47,11 +47,21 @@ func TestServiceCreateAndListServer(t *testing.T) {
 	if len(list) != 1 {
 		t.Fatalf("mcp servers len = %d, want 1", len(list))
 	}
+	capabilities, err := service.ListCapabilities(ctx, mcpservice.CapabilityQuery{ServerID: cmd.ServerID})
+	if err != nil {
+		t.Fatalf("list mcp capabilities: %v", err)
+	}
+	if len(capabilities) != 3 {
+		t.Fatalf("mcp capabilities len = %d, want 3", len(capabilities))
+	}
+	if capabilities[0].DisplayName == "" || !capabilities[0].Enabled {
+		t.Fatalf("default capability = %+v, want display name and enabled", capabilities[0])
+	}
 }
 
 func TestServiceRejectsInvalidServer(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(backend.NewMCPServerRepository())
+	service := NewService(backend.NewMCPServerRepository(), backend.NewMCPCapabilityRepository())
 
 	err := service.CreateServer(ctx, mcpservice.CreateServerCommand{
 		ServerID:      common.MCPServerID("mcp-invalid"),
@@ -74,5 +84,48 @@ func TestServiceRejectsInvalidServer(t *testing.T) {
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("create invalid mcp server session err = %v, want invalid argument", err)
+	}
+}
+
+func TestServiceCreateAndFilterCapability(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(backend.NewMCPServerRepository(), backend.NewMCPCapabilityRepository())
+	if err := service.CreateServer(ctx, mcpservice.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-capability"),
+		Name:          "capability server",
+		Transport:     "stdio",
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		SessionPolicy: "transient",
+	}); err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	created, err := service.CreateCapability(ctx, mcpservice.CreateCapabilityCommand{
+		ServerID:      common.MCPServerID("mcp-capability"),
+		Kind:          "resource",
+		Name:          "workspace://acceptance",
+		DisplayName:   "工作空间验收资料",
+		Category:      "验收",
+		StageHints:    []string{"validation", "acceptance"},
+		RiskLevel:     "read_only",
+		Enabled:       true,
+		OutputSummary: "返回 DoD、Result、Artifact 和证据引用。",
+	})
+	if err != nil {
+		t.Fatalf("create capability: %v", err)
+	}
+	if created.ID == "" || created.URI != "" {
+		t.Fatalf("created capability = %+v, want generated id and explicit uri only when provided", created)
+	}
+	list, err := service.ListCapabilities(ctx, mcpservice.CapabilityQuery{
+		ServerID: common.MCPServerID("mcp-capability"),
+		Stage:    "acceptance",
+		Query:    "验收",
+	})
+	if err != nil {
+		t.Fatalf("list capabilities: %v", err)
+	}
+	if len(list) != 1 || list[0].DisplayName != "工作空间验收资料" {
+		t.Fatalf("filtered capabilities = %+v, want acceptance capability", list)
 	}
 }

@@ -34,6 +34,10 @@
         soul.md
     skill.json
     mcp_server.json
+    mcp_capability.json
+    mcp-endpoints/
+      mcp-xxx/
+        helper.py
     event_record.json
     configuration_snapshot.json
   workspaces/

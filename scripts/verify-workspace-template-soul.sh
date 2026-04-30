@@ -86,7 +86,7 @@ grep '执行人格（Soul）' "$TMP_DIR/workorch-console.js" >/dev/null
 grep 'Workspace 模板' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '删除 Soul' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '调整工作空间 Soul' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '保存执行人格配置' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '执行人格配置已保存' "$TMP_DIR/workorch-console.js" >/dev/null
 
 cat >"$TMP_DIR/soul-create.json" <<JSON
 {

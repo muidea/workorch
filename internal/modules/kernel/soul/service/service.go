@@ -8,23 +8,27 @@ import (
 )
 
 type CreateSoulCommand struct {
-	SoulID               common.SoulID
-	Name                 string
-	Description          string
-	BusinessDomains      []string
-	SoulMD               string
-	AllowedSkillRefs     []string
-	AllowedMCPServerRefs []string
-	AllowedToolKinds     []string
+	SoulID                      common.SoulID
+	Name                        string
+	Description                 string
+	BusinessDomains             []string
+	SoulMD                      string
+	AllowedSkillRefs            []string
+	AllowedMCPServerRefs        []string
+	AllowedCapabilityRefs       []string
+	AllowedCapabilityCategories []string
+	AllowedToolKinds            []string
 }
 
 type UpdateSoulCommand = CreateSoulCommand
 
 type ValidateCapabilitySelectionCommand struct {
-	SoulID        common.SoulID
-	SkillRefs     []string
-	MCPServerRefs []string
-	ToolKinds     []string
+	SoulID               common.SoulID
+	SkillRefs            []string
+	MCPServerRefs        []string
+	CapabilityRefs       []string
+	CapabilityCategories []string
+	ToolKinds            []string
 }
 
 type Service interface {

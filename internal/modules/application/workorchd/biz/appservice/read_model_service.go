@@ -2,6 +2,7 @@ package appservice
 
 import (
 	"context"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -20,22 +22,24 @@ import (
 )
 
 type RunSnapshot struct {
-	Workspace          Workspace                `json:"workspace"`
-	Run                Run                      `json:"run"`
-	TaskProgress       TaskProgress             `json:"taskProgress"`
-	TaskDecompositions []TaskDecomposition      `json:"taskDecompositions,omitempty"`
-	Step               *presenter.StepView      `json:"step,omitempty"`
-	Steps              []presenter.StepView     `json:"steps,omitempty"`
-	ToolCalls          []ToolCall               `json:"toolCalls,omitempty"`
-	Patches            []Patch                  `json:"patches,omitempty"`
-	ValidationResults  []ValidationResult       `json:"validationResults,omitempty"`
-	RuntimeCheckpoints []RuntimeCheckpoint      `json:"runtimeCheckpoints,omitempty"`
-	Results            []Result                 `json:"results,omitempty"`
-	Artifacts          []Artifact               `json:"artifacts,omitempty"`
-	EventRecords       []EventRecord            `json:"eventRecords,omitempty"`
-	Decisions          []Decision               `json:"decisions,omitempty"`
-	Approvals          []Approval               `json:"approvals,omitempty"`
-	Observed           []presenter.ObservedView `json:"observed,omitempty"`
+	Workspace            Workspace                `json:"workspace"`
+	Run                  Run                      `json:"run"`
+	TaskProgress         TaskProgress             `json:"taskProgress"`
+	TaskDecompositions   []TaskDecomposition      `json:"taskDecompositions,omitempty"`
+	Step                 *presenter.StepView      `json:"step,omitempty"`
+	Steps                []presenter.StepView     `json:"steps,omitempty"`
+	ToolCalls            []ToolCall               `json:"toolCalls,omitempty"`
+	Patches              []Patch                  `json:"patches,omitempty"`
+	ValidationResults    []ValidationResult       `json:"validationResults,omitempty"`
+	RuntimeCheckpoints   []RuntimeCheckpoint      `json:"runtimeCheckpoints,omitempty"`
+	Results              []Result                 `json:"results,omitempty"`
+	Artifacts            []Artifact               `json:"artifacts,omitempty"`
+	SelectedCapabilities []RuntimeCapability      `json:"selectedCapabilities,omitempty"`
+	UsedCapabilities     []RuntimeCapability      `json:"usedCapabilities,omitempty"`
+	EventRecords         []EventRecord            `json:"eventRecords,omitempty"`
+	Decisions            []Decision               `json:"decisions,omitempty"`
+	Approvals            []Approval               `json:"approvals,omitempty"`
+	Observed             []presenter.ObservedView `json:"observed,omitempty"`
 }
 
 type RunStatus struct {
@@ -54,13 +58,15 @@ type RunStatus struct {
 }
 
 type RunObservability struct {
-	Run                Run                    `json:"run"`
-	Progress           RunProgress            `json:"progress"`
-	TaskProgress       TaskProgress           `json:"taskProgress"`
-	TaskDecompositions []TaskDecomposition    `json:"taskDecompositions,omitempty"`
-	Evidence           RuntimeEvidenceSummary `json:"evidence"`
-	LatestCheckpoint   *RuntimeCheckpoint     `json:"latestCheckpoint,omitempty"`
-	Timeline           []RuntimeTimelineItem  `json:"timeline,omitempty"`
+	Run                  Run                    `json:"run"`
+	Progress             RunProgress            `json:"progress"`
+	TaskProgress         TaskProgress           `json:"taskProgress"`
+	TaskDecompositions   []TaskDecomposition    `json:"taskDecompositions,omitempty"`
+	Evidence             RuntimeEvidenceSummary `json:"evidence"`
+	LatestCheckpoint     *RuntimeCheckpoint     `json:"latestCheckpoint,omitempty"`
+	SelectedCapabilities []RuntimeCapability    `json:"selectedCapabilities,omitempty"`
+	UsedCapabilities     []RuntimeCapability    `json:"usedCapabilities,omitempty"`
+	Timeline             []RuntimeTimelineItem  `json:"timeline,omitempty"`
 }
 
 type TaskProgress struct {
@@ -244,6 +250,23 @@ type RuntimeTimelineItem struct {
 	Output     map[string]any `json:"output,omitempty"`
 }
 
+type RuntimeCapability struct {
+	ID             string   `json:"id"`
+	ServerID       string   `json:"serverId,omitempty"`
+	Kind           string   `json:"kind,omitempty"`
+	Name           string   `json:"name,omitempty"`
+	DisplayName    string   `json:"displayName,omitempty"`
+	Description    string   `json:"description,omitempty"`
+	Category       string   `json:"category,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
+	RiskLevel      string   `json:"riskLevel,omitempty"`
+	Enabled        bool     `json:"enabled"`
+	ApprovalPolicy string   `json:"approvalPolicy,omitempty"`
+	Status         string   `json:"status,omitempty"`
+	UseCount       int      `json:"useCount,omitempty"`
+	EvidenceRefs   []string `json:"evidenceRefs,omitempty"`
+}
+
 type EventRecord struct {
 	ID           string         `json:"id"`
 	Version      string         `json:"version"`
@@ -379,20 +402,21 @@ type WorkspaceSnapshot struct {
 }
 
 type readModelDependencies struct {
-	workspaces   repository.WorkspaceRepository
-	runs         repository.RunRepository
-	steps        repository.StepRepository
-	results      repository.ResultRepository
-	artifacts    repository.ArtifactRepository
-	eventRecords repository.EventRecordRepository
-	toolCalls    repository.ToolCallRepository
-	patches      repository.PatchRepository
-	validations  repository.ValidationResultRepository
-	checkpoints  repository.RuntimeCheckpointRepository
-	tickets      repository.DecisionTicketRepository
-	resolutions  repository.DecisionResolutionRepository
-	approvals    repository.ApprovalRepository
-	published    []events.WorkorchEvent
+	workspaces      repository.WorkspaceRepository
+	runs            repository.RunRepository
+	steps           repository.StepRepository
+	results         repository.ResultRepository
+	artifacts       repository.ArtifactRepository
+	eventRecords    repository.EventRecordRepository
+	toolCalls       repository.ToolCallRepository
+	mcpCapabilities repository.MCPCapabilityRepository
+	patches         repository.PatchRepository
+	validations     repository.ValidationResultRepository
+	checkpoints     repository.RuntimeCheckpointRepository
+	tickets         repository.DecisionTicketRepository
+	resolutions     repository.DecisionResolutionRepository
+	approvals       repository.ApprovalRepository
+	published       []events.WorkorchEvent
 }
 
 func ReadRunSnapshotWithSession(ctx context.Context, session *RuntimeSession, runID string) (ret RunSnapshot, err error) {
@@ -727,6 +751,7 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 		exports.Repositories.Artifacts == nil ||
 		exports.Repositories.EventRecords == nil ||
 		exports.Repositories.ToolCalls == nil ||
+		exports.Repositories.MCPCapabilities == nil ||
 		exports.Repositories.Patches == nil ||
 		exports.Repositories.ValidationResults == nil ||
 		exports.Repositories.RuntimeCheckpoints == nil ||
@@ -742,20 +767,21 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 	}
 
 	return readModelDependencies{
-		workspaces:   exports.Repositories.Workspaces,
-		runs:         exports.Repositories.Runs,
-		steps:        exports.Repositories.Steps,
-		results:      exports.Repositories.Results,
-		artifacts:    exports.Repositories.Artifacts,
-		eventRecords: exports.Repositories.EventRecords,
-		toolCalls:    exports.Repositories.ToolCalls,
-		patches:      exports.Repositories.Patches,
-		validations:  exports.Repositories.ValidationResults,
-		checkpoints:  exports.Repositories.RuntimeCheckpoints,
-		tickets:      exports.Repositories.Tickets,
-		resolutions:  exports.Repositories.Resolutions,
-		approvals:    exports.Repositories.Approvals,
-		published:    published,
+		workspaces:      exports.Repositories.Workspaces,
+		runs:            exports.Repositories.Runs,
+		steps:           exports.Repositories.Steps,
+		results:         exports.Repositories.Results,
+		artifacts:       exports.Repositories.Artifacts,
+		eventRecords:    exports.Repositories.EventRecords,
+		toolCalls:       exports.Repositories.ToolCalls,
+		mcpCapabilities: exports.Repositories.MCPCapabilities,
+		patches:         exports.Repositories.Patches,
+		validations:     exports.Repositories.ValidationResults,
+		checkpoints:     exports.Repositories.RuntimeCheckpoints,
+		tickets:         exports.Repositories.Tickets,
+		resolutions:     exports.Repositories.Resolutions,
+		approvals:       exports.Repositories.Approvals,
+		published:       published,
 	}, nil
 }
 
@@ -828,6 +854,8 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		Approvals:          approvals,
 		Observed:           presenter.MapObserved(observedItems),
 	}
+	ret.SelectedCapabilities = selectedRuntimeCapabilities(ctx, deps, ret.Run.ExecutionContext)
+	ret.UsedCapabilities = usedRuntimeCapabilities(ctx, deps, ret)
 	ret.TaskProgress = mapTaskProgress(ret)
 	ret.TaskDecompositions = mapTaskDecompositions(ret)
 	return ret, nil
@@ -1162,6 +1190,155 @@ func mapToolCalls(items []*runmodel.ToolCall) []ToolCall {
 	return ret
 }
 
+func selectedRuntimeCapabilities(ctx context.Context, deps readModelDependencies, executionContext map[string]any) []RuntimeCapability {
+	if len(executionContext) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeCapability, 0)
+	seen := map[string]struct{}{}
+	for _, raw := range readModelMapSliceValue(executionContext["mcpCapabilities"]) {
+		item := runtimeCapabilityFromContext(raw)
+		if item.ID == "" {
+			continue
+		}
+		if _, ok := seen[item.ID]; ok {
+			continue
+		}
+		seen[item.ID] = struct{}{}
+		ret = append(ret, item)
+	}
+	for _, id := range readModelStringSliceValue(executionContext["capabilityIds"]) {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		if item, err := deps.mcpCapabilities.Get(ctx, common.MCPCapabilityID(id)); err == nil {
+			ret = append(ret, runtimeCapabilityFromModel(item))
+		} else {
+			ret = append(ret, RuntimeCapability{ID: id, DisplayName: id})
+		}
+		seen[id] = struct{}{}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func usedRuntimeCapabilities(ctx context.Context, deps readModelDependencies, snapshot RunSnapshot) []RuntimeCapability {
+	if len(snapshot.ToolCalls) == 0 {
+		return nil
+	}
+	selected := map[string]RuntimeCapability{}
+	for _, item := range snapshot.SelectedCapabilities {
+		selected[item.ID] = item
+	}
+	used := map[string]RuntimeCapability{}
+	order := make([]string, 0)
+	for _, toolCall := range snapshot.ToolCalls {
+		identity := runtimeCapabilityIdentity(toolCall)
+		if identity.ID == "" {
+			continue
+		}
+		item, ok := used[identity.ID]
+		if !ok {
+			if loaded, err := deps.mcpCapabilities.Get(ctx, common.MCPCapabilityID(identity.ID)); err == nil {
+				item = runtimeCapabilityFromModel(loaded)
+			} else if selectedItem, exists := selected[identity.ID]; exists {
+				item = selectedItem
+			} else {
+				item = identity
+			}
+			order = append(order, identity.ID)
+		}
+		item.UseCount++
+		item.EvidenceRefs = compactUniqueStrings(append(item.EvidenceRefs, toolCall.ID, toolCall.StepID))
+		used[identity.ID] = item
+	}
+	ret := make([]RuntimeCapability, 0, len(order))
+	for _, id := range order {
+		ret = append(ret, used[id])
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func runtimeCapabilityIdentity(toolCall ToolCall) RuntimeCapability {
+	source := toolCall.Output
+	if len(source) == 0 {
+		source = toolCall.Arguments
+	}
+	serverID := readModelStringValue(source["serverId"])
+	operation := readModelStringValue(source["operation"])
+	var kind string
+	var name string
+	switch operation {
+	case "mcp/tool_call":
+		kind = mcpmodel.CapabilityKindTool
+		name = readModelStringValue(source["tool"])
+	case "mcp/resource_read":
+		kind = mcpmodel.CapabilityKindResource
+		name = readModelStringValue(source["uri"])
+	case "mcp/prompt_get":
+		kind = mcpmodel.CapabilityKindPrompt
+		name = readModelStringValue(source["prompt"])
+	}
+	if serverID == "" || kind == "" || name == "" {
+		return RuntimeCapability{}
+	}
+	id := defaultRuntimeCapabilityID(serverID, kind, name)
+	return RuntimeCapability{
+		ID:          id,
+		ServerID:    serverID,
+		Kind:        kind,
+		Name:        name,
+		DisplayName: name,
+	}
+}
+
+func runtimeCapabilityFromModel(item *mcpmodel.Capability) RuntimeCapability {
+	if item == nil {
+		return RuntimeCapability{}
+	}
+	return RuntimeCapability{
+		ID:             string(item.ID),
+		ServerID:       string(item.ServerID),
+		Kind:           item.Kind,
+		Name:           item.Name,
+		DisplayName:    firstNonEmptyReadModel(item.DisplayName, item.Name, string(item.ID)),
+		Description:    item.Description,
+		Category:       item.Category,
+		Tags:           cloneReadModelStringSlice(item.Tags),
+		RiskLevel:      item.RiskLevel,
+		Enabled:        item.Enabled,
+		ApprovalPolicy: item.ApprovalPolicy,
+		Status:         item.Status,
+	}
+}
+
+func runtimeCapabilityFromContext(raw map[string]any) RuntimeCapability {
+	id := readModelStringValue(raw["id"])
+	return RuntimeCapability{
+		ID:             id,
+		ServerID:       readModelStringValue(raw["serverId"]),
+		Kind:           readModelStringValue(raw["kind"]),
+		Name:           readModelStringValue(raw["name"]),
+		DisplayName:    firstNonEmptyReadModel(readModelStringValue(raw["displayName"]), readModelStringValue(raw["name"]), id),
+		Description:    readModelStringValue(raw["description"]),
+		Category:       readModelStringValue(raw["category"]),
+		Tags:           readModelStringSliceValue(raw["tags"]),
+		RiskLevel:      readModelStringValue(raw["riskLevel"]),
+		Enabled:        readModelBoolValue(raw["enabled"]),
+		ApprovalPolicy: readModelStringValue(raw["approvalPolicy"]),
+		Status:         readModelStringValue(raw["status"]),
+	}
+}
+
+func defaultRuntimeCapabilityID(serverID string, kind string, name string) string {
+	return strings.TrimSpace(serverID) + ":" + strings.TrimSpace(kind) + ":" + url.PathEscape(strings.TrimSpace(name))
+}
+
 func mapPatches(items []*runmodel.Patch) []Patch {
 	if len(items) == 0 {
 		return nil
@@ -1380,6 +1557,15 @@ func readModelStringValue(value any) string {
 	}
 }
 
+func readModelBoolValue(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	default:
+		return false
+	}
+}
+
 func readModelMapSliceValue(value any) []map[string]any {
 	switch typed := value.(type) {
 	case []map[string]any:
@@ -1441,13 +1627,15 @@ func mapRunStatus(snapshot RunSnapshot) RunStatus {
 func mapRunObservability(snapshot RunSnapshot) RunObservability {
 	timeline := runtimeTimeline(snapshot)
 	return RunObservability{
-		Run:                snapshot.Run,
-		Progress:           runtimeProgress(snapshot),
-		TaskProgress:       mapTaskProgress(snapshot),
-		TaskDecompositions: mapTaskDecompositions(snapshot),
-		Evidence:           runtimeEvidenceSummary(snapshot, len(timelineEvents(timeline))),
-		LatestCheckpoint:   latestRuntimeCheckpoint(snapshot.RuntimeCheckpoints),
-		Timeline:           timeline,
+		Run:                  snapshot.Run,
+		Progress:             runtimeProgress(snapshot),
+		TaskProgress:         mapTaskProgress(snapshot),
+		TaskDecompositions:   mapTaskDecompositions(snapshot),
+		Evidence:             runtimeEvidenceSummary(snapshot, len(timelineEvents(timeline))),
+		LatestCheckpoint:     latestRuntimeCheckpoint(snapshot.RuntimeCheckpoints),
+		SelectedCapabilities: snapshot.SelectedCapabilities,
+		UsedCapabilities:     snapshot.UsedCapabilities,
+		Timeline:             timeline,
 	}
 }
 

@@ -66,6 +66,12 @@ func (s *Service) ValidateCapabilitySelection(ctx context.Context, cmd soulservi
 	if value, reason, ok := firstInvalidSelection(cmd.MCPServerRefs, soul.AllowedMCPServerRefs); ok {
 		return invalidCapabilitySelectionError(cmd.SoulID, "MCP server", value, reason)
 	}
+	if value, reason, ok := firstInvalidSelection(cmd.CapabilityRefs, soul.AllowedCapabilityRefs); ok {
+		return invalidCapabilitySelectionError(cmd.SoulID, "MCP capability", value, reason)
+	}
+	if value, reason, ok := firstInvalidSelection(cmd.CapabilityCategories, soul.AllowedCapabilityCategories); ok {
+		return invalidCapabilitySelectionError(cmd.SoulID, "MCP capability category", value, reason)
+	}
 	if value, reason, ok := firstInvalidSelection(cmd.ToolKinds, soul.AllowedToolKinds); ok {
 		return invalidCapabilitySelectionError(cmd.SoulID, "tool kind", value, reason)
 	}
@@ -91,6 +97,12 @@ func validateSoulCommand(cmd soulservice.CreateSoulCommand) error {
 	if hasBlank(cmd.AllowedMCPServerRefs) {
 		return fmt.Errorf("%w: allowedMCPServerRefs contains blank value", common.ErrInvalidArgument)
 	}
+	if hasBlank(cmd.AllowedCapabilityRefs) {
+		return fmt.Errorf("%w: allowedCapabilityRefs contains blank value", common.ErrInvalidArgument)
+	}
+	if hasBlank(cmd.AllowedCapabilityCategories) {
+		return fmt.Errorf("%w: allowedCapabilityCategories contains blank value", common.ErrInvalidArgument)
+	}
 	if hasBlank(cmd.AllowedToolKinds) {
 		return fmt.Errorf("%w: allowedToolKinds contains blank value", common.ErrInvalidArgument)
 	}
@@ -99,14 +111,16 @@ func validateSoulCommand(cmd soulservice.CreateSoulCommand) error {
 
 func soulFromCommand(cmd soulservice.CreateSoulCommand) *soulmodel.Soul {
 	return &soulmodel.Soul{
-		ID:                   cmd.SoulID,
-		Name:                 cmd.Name,
-		Description:          cmd.Description,
-		BusinessDomains:      cloneStrings(cmd.BusinessDomains),
-		SoulMD:               cmd.SoulMD,
-		AllowedSkillRefs:     cloneStrings(cmd.AllowedSkillRefs),
-		AllowedMCPServerRefs: cloneStrings(cmd.AllowedMCPServerRefs),
-		AllowedToolKinds:     cloneStrings(cmd.AllowedToolKinds),
+		ID:                          cmd.SoulID,
+		Name:                        cmd.Name,
+		Description:                 cmd.Description,
+		BusinessDomains:             cloneStrings(cmd.BusinessDomains),
+		SoulMD:                      cmd.SoulMD,
+		AllowedSkillRefs:            cloneStrings(cmd.AllowedSkillRefs),
+		AllowedMCPServerRefs:        cloneStrings(cmd.AllowedMCPServerRefs),
+		AllowedCapabilityRefs:       cloneStrings(cmd.AllowedCapabilityRefs),
+		AllowedCapabilityCategories: cloneStrings(cmd.AllowedCapabilityCategories),
+		AllowedToolKinds:            cloneStrings(cmd.AllowedToolKinds),
 	}
 }
 

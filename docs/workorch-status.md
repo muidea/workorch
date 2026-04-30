@@ -41,6 +41,7 @@
     `GET /api/v1/workorch/skills/{skillId}`,
     `GET /api/v1/workorch/mcp/servers`,
     `GET /api/v1/workorch/mcp/servers/{serverId}`,
+    `PUT /api/v1/workorch/mcp/servers/{serverId}`,
     `GET /api/v1/workorch/mcp/servers/{serverId}/tools`,
     `GET /api/v1/workorch/mcp/servers/{serverId}/resources`,
     `GET /api/v1/workorch/mcp/servers/{serverId}/prompts`,
@@ -63,7 +64,8 @@
     `POST /api/v1/workorch/souls`,
     `PUT /api/v1/workorch/souls/{soulId}`,
     `POST /api/v1/workorch/skills`,
-    `POST /api/v1/workorch/mcp/servers`
+    `POST /api/v1/workorch/mcp/servers`,
+    `PUT /api/v1/workorch/mcp/servers/{serverId}`
   - `internal/modules/application/workorchd/biz/bootstrap` now uses a `magicCommon/event.Hub` backed workorch event adapter by default
   - request-scoped `RuntimeSession` construction now reuses the application-injected EventHub when available
   - `internal/modules/application/workorchd/biz/bootstrap` now runs request-scoped runtime modules through a local magicCommon plugin manager lifecycle
@@ -197,10 +199,10 @@
   configuration API, executing `/embeddings`-driven vector Memory recall, and
   checking `memoryRetrieval` evidence on the Run execution context.
 - `make verify-real-weather` verifies an already running `workorchd` instance
-  with the configured real LLM provider and a temporary MCP `stdio` weather
-  tool. It queries Open-Meteo for Zhejiang Hangzhou current weather and checks
-  the resulting ToolCall, ValidationResult, RuntimeCheckpoint, and DoD evidence
-  in the Run snapshot.
+  with the configured real LLM provider and a managed local MCP `stdio` weather
+  endpoint. It queries Open-Meteo for Zhejiang Hangzhou current weather and
+  checks the resulting ToolCall, ValidationResult, RuntimeCheckpoint, and DoD
+  evidence in the Run snapshot.
 - `make verify-weather-ticket-approval` verifies an already running
   `workorchd` instance with the configured real LLM provider and a temporary
   MCP `stdio` weather tool. It exercises the full governance chain for a
@@ -426,6 +428,7 @@ HTTP endpoints:
 - `GET /api/v1/workorch/skills`
 - `GET /api/v1/workorch/skills/{skillId}`
 - `POST /api/v1/workorch/mcp/servers`
+- `PUT /api/v1/workorch/mcp/servers/{serverId}`
 - `GET /api/v1/workorch/mcp/servers`
 - `GET /api/v1/workorch/mcp/servers/{serverId}`
 - `GET /api/v1/workorch/mcp/servers/{serverId}/tools`
@@ -547,6 +550,8 @@ Observed persisted files:
 - `.workorch-data/system/workspace_templates.json`
 - `.workorch-data/system/skill.json`
 - `.workorch-data/system/mcp_server.json`
+- `.workorch-data/system/mcp_capability.json`
+- `.workorch-data/system/mcp-endpoints/{mcpServerId}/{helper}`
 - `.workorch-data/workspaces/{workspaceId}/workspace.json`
 - `.workorch-data/workspaces/{workspaceId}/config/soul_bindings.json`
 - `.workorch-data/workspaces/{workspaceId}/goals.json`

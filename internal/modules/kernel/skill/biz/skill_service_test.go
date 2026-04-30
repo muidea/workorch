@@ -15,15 +15,16 @@ func TestServiceCreateAndListSkill(t *testing.T) {
 	service := NewService(backend.NewSkillRepository())
 
 	cmd := skillservice.CreateSkillCommand{
-		SkillID:               common.SkillID("skill-local-go-service"),
-		Name:                  "local go service",
-		Version:               "v1",
-		TriggerRules:          []string{"go", "service"},
-		Instruction:           "Use small verified steps.",
-		ReferenceRefs:         []string{"docs/structure.md"},
-		RequiredToolKinds:     []string{"shell/command"},
-		RequiredMCPServerRefs: []string{"mcp-local-context"},
-		Constraints:           []string{"cite evidence"},
+		SkillID:                common.SkillID("skill-local-go-service"),
+		Name:                   "local go service",
+		Version:                "v1",
+		TriggerRules:           []string{"go", "service"},
+		Instruction:            "Use small verified steps.",
+		ReferenceRefs:          []string{"docs/structure.md"},
+		RequiredToolKinds:      []string{"shell/command"},
+		RequiredMCPServerRefs:  []string{"mcp-local-context"},
+		RequiredCapabilityRefs: []string{"mcp-local-context:tool:repo.summary"},
+		Constraints:            []string{"cite evidence"},
 	}
 	if err := service.CreateSkill(ctx, cmd); err != nil {
 		t.Fatalf("create skill: %v", err)
@@ -32,7 +33,7 @@ func TestServiceCreateAndListSkill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get skill: %v", err)
 	}
-	if got.Name != cmd.Name || got.RequiredMCPServerRefs[0] != "mcp-local-context" {
+	if got.Name != cmd.Name || got.RequiredMCPServerRefs[0] != "mcp-local-context" || got.RequiredCapabilityRefs[0] != "mcp-local-context:tool:repo.summary" {
 		t.Fatalf("skill = %+v, want command values", got)
 	}
 	list, err := service.ListSkills(ctx)

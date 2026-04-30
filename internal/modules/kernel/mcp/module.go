@@ -17,7 +17,8 @@ type CreateServerCommand = mcpservice.CreateServerCommand
 type UpdateServerCommand = mcpservice.UpdateServerCommand
 
 type Dependencies struct {
-	Servers repository.MCPServerRepository
+	Servers      repository.MCPServerRepository
+	Capabilities repository.MCPCapabilityRepository
 }
 
 type Module struct {
@@ -30,15 +31,19 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 func (m *Module) Setup(deps Dependencies) error {
-	if deps.Servers == nil {
+	if deps.Servers == nil || deps.Capabilities == nil {
 		return common.ErrInvalidArgument
 	}
-	m.bizPtr = mcpbiz.NewService(deps.Servers)
+	m.bizPtr = mcpbiz.NewService(deps.Servers, deps.Capabilities)
 	m.servicePtr = mcpservice.New(mcpservice.Dependencies{
-		CreateServer: m.bizPtr.CreateServer,
-		UpdateServer: m.bizPtr.UpdateServer,
-		GetServer:    m.bizPtr.GetServer,
-		ListServers:  m.bizPtr.ListServers,
+		CreateServer:     m.bizPtr.CreateServer,
+		UpdateServer:     m.bizPtr.UpdateServer,
+		GetServer:        m.bizPtr.GetServer,
+		ListServers:      m.bizPtr.ListServers,
+		CreateCapability: m.bizPtr.CreateCapability,
+		UpdateCapability: m.bizPtr.UpdateCapability,
+		GetCapability:    m.bizPtr.GetCapability,
+		ListCapabilities: m.bizPtr.ListCapabilities,
 	})
 	return nil
 }

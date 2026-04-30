@@ -15,6 +15,7 @@ type repositorySet struct {
 	memoryItem        repository.MemoryItemRepository
 	skill             repository.SkillRepository
 	mcpServer         repository.MCPServerRepository
+	mcpCapability     repository.MCPCapabilityRepository
 	result            repository.ResultRepository
 	artifact          repository.ArtifactRepository
 	eventRecord       repository.EventRecordRepository
@@ -41,6 +42,7 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 			memoryItem:        memory.NewMemoryItemRepository(),
 			skill:             memory.NewSkillRepository(),
 			mcpServer:         memory.NewMCPServerRepository(),
+			mcpCapability:     memory.NewMCPCapabilityRepository(),
 			result:            memory.NewResultRepository(),
 			artifact:          memory.NewArtifactRepository(),
 			eventRecord:       memory.NewEventRecordRepository(),
@@ -66,6 +68,7 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 			memoryItem:        workspaceScopedRepos.MemoryItems,
 			skill:             fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
 			mcpServer:         fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "system", "mcp_server.json")),
+			mcpCapability:     fileRepo.NewMCPCapabilityRepository(filepath.Join(dataRoot, "system", "mcp_capability.json")),
 			result:            workspaceScopedRepos.Results,
 			artifact:          workspaceScopedRepos.Artifacts,
 			eventRecord:       workspaceScopedRepos.EventRecords,

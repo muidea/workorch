@@ -2,16 +2,19 @@
 
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${WORKORCH_REAL_MCP_STDIO_BASE_URL:-http://127.0.0.1:8080}"
 MOCK_ADDR="${WORKORCH_REAL_MCP_STDIO_MOCK_ADDR:-127.0.0.1:18188}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 PROVIDER_ID="${WORKORCH_REAL_MCP_STDIO_PROVIDER_ID:-verify_mcp_stdio_$$}"
 MCP_SERVER_ID="${WORKORCH_REAL_MCP_STDIO_SERVER_ID:-mcp-stdio-real-verify-$$}"
 TMP_DIR="${WORKORCH_REAL_MCP_STDIO_ARTIFACT_DIR:-$(mktemp -d)}"
+MCP_ENDPOINT_ROOT="${WORKORCH_MCP_ENDPOINT_DIR:-$ROOT_DIR/.workorch-data/system/mcp-endpoints}"
+MCP_ENDPOINT_DIR="$MCP_ENDPOINT_ROOT/$MCP_SERVER_ID"
 KEEP_ARTIFACTS="${WORKORCH_REAL_MCP_STDIO_KEEP_ARTIFACTS:-1}"
 MOCK_PID=""
 MOCK_LOG="$TMP_DIR/llm-mock.log"
-MCP_HELPER="$TMP_DIR/mcp_stdio_helper.py"
+MCP_HELPER="$MCP_ENDPOINT_DIR/mcp_stdio_helper.py"
 
 cleanup() {
   local status=$?
@@ -66,6 +69,30 @@ post_json() {
   local body="$2"
   local output="$3"
   curl -fsS -H "Content-Type: application/json" -X POST "$url" -d "$body" >"$output"
+}
+
+upsert_json() {
+  local collection_url="$1"
+  local resource_url="$2"
+  local body="$3"
+  local output="$4"
+  local tmp="$output.tmp"
+  local status
+  status="$(curl -sS -H "Content-Type: application/json" -X POST "$collection_url" -d "$body" -o "$tmp" -w "%{http_code}" || true)"
+  case "$status" in
+    200|201)
+      mv "$tmp" "$output"
+      ;;
+    409)
+      rm -f "$tmp"
+      curl -fsS -H "Content-Type: application/json" -X PUT "$resource_url" -d "$body" >"$output"
+      ;;
+    *)
+      cat "$tmp" >&2 || true
+      rm -f "$tmp"
+      return 1
+      ;;
+  esac
 }
 
 start_mock_provider() {
@@ -144,6 +171,7 @@ PY
 }
 
 create_mcp_helper() {
+  mkdir -p "$MCP_ENDPOINT_DIR"
   cat >"$MCP_HELPER" <<'PY'
 #!/usr/bin/env python3
 import json
@@ -336,7 +364,8 @@ curl -fsS -H "Content-Type: application/json" -X PUT \
   "$BASE_URL/api/v1/workorch/configuration/llm" \
   -d @"$TMP_DIR/verify-llm-update.json" >"$TMP_DIR/configuration-updated.json"
 
-post_json "$BASE_URL/api/v1/workorch/mcp/servers" \
+upsert_json "$BASE_URL/api/v1/workorch/mcp/servers" \
+  "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID" \
   '{"id":"'"$MCP_SERVER_ID"'","name":"real service stdio verification","transport":"stdio","endpoint":"'"$MCP_HELPER"'","enabled":true,"allowedTools":["repo.summary"],"timeoutMillis":5000}' \
   "$TMP_DIR/mcp-server.json"
 

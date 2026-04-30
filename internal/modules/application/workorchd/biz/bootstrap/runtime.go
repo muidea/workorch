@@ -34,6 +34,7 @@ type RepositoryExports struct {
 	MemoryItems        repository.MemoryItemRepository
 	Skills             repository.SkillRepository
 	MCPServers         repository.MCPServerRepository
+	MCPCapabilities    repository.MCPCapabilityRepository
 	Results            repository.ResultRepository
 	Artifacts          repository.ArtifactRepository
 	EventRecords       repository.EventRecordRepository

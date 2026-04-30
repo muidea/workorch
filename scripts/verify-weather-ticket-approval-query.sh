@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${WORKORCH_WEATHER_GOVERNANCE_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
 MOCK_ADDR="${WORKORCH_WEATHER_GOVERNANCE_MOCK_ADDR:-127.0.0.1:18190}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
@@ -28,10 +29,12 @@ PROVINCE="${WORKORCH_WEATHER_PROVINCE:-浙江}"
 CITY="${WORKORCH_WEATHER_CITY:-杭州}"
 LOOKUP_NAME="${WORKORCH_WEATHER_LOOKUP_NAME:-Hangzhou}"
 TMP_DIR="${WORKORCH_WEATHER_GOVERNANCE_ARTIFACT_DIR:-$(mktemp -d)}"
+MCP_ENDPOINT_ROOT="${WORKORCH_MCP_ENDPOINT_DIR:-$ROOT_DIR/.workorch-data/system/mcp-endpoints}"
+MCP_ENDPOINT_DIR="$MCP_ENDPOINT_ROOT/$MCP_SERVER_ID"
 KEEP_ARTIFACTS="${WORKORCH_WEATHER_GOVERNANCE_KEEP_ARTIFACTS:-1}"
 MOCK_PID=""
 MOCK_LOG="$TMP_DIR/weather-governance-llm-mock.log"
-WEATHER_HELPER="$TMP_DIR/weather_mcp_helper.py"
+WEATHER_HELPER="$MCP_ENDPOINT_DIR/weather_mcp_helper.py"
 
 cleanup() {
   local status=$?
@@ -101,6 +104,30 @@ post_json() {
   curl -fsS -H "Content-Type: application/json" -X POST "$url" -d "$body" >"$output"
 }
 
+upsert_json() {
+  local collection_url="$1"
+  local resource_url="$2"
+  local body="$3"
+  local output="$4"
+  local tmp="$output.tmp"
+  local status
+  status="$(curl -sS -H "Content-Type: application/json" -X POST "$collection_url" -d "$body" -o "$tmp" -w "%{http_code}" || true)"
+  case "$status" in
+    200|201)
+      mv "$tmp" "$output"
+      ;;
+    409)
+      rm -f "$tmp"
+      curl -fsS -H "Content-Type: application/json" -X PUT "$resource_url" -d "$body" >"$output"
+      ;;
+    *)
+      cat "$tmp" >&2 || true
+      rm -f "$tmp"
+      return 1
+      ;;
+  esac
+}
+
 post_json_file() {
   local url="$1"
   local body_file="$2"
@@ -156,6 +183,7 @@ PY
 }
 
 create_weather_helper() {
+  mkdir -p "$MCP_ENDPOINT_DIR"
   cat >"$WEATHER_HELPER" <<'PY'
 #!/usr/bin/env python3
 import datetime as dt
@@ -722,7 +750,8 @@ else
   PROVIDER_ID="$(select_real_provider)"
 fi
 
-post_json "$BASE_URL/api/v1/workorch/mcp/servers" \
+upsert_json "$BASE_URL/api/v1/workorch/mcp/servers" \
+  "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID" \
   '{"id":"'"$MCP_SERVER_ID"'","name":"weather governance MCP","transport":"stdio","endpoint":"'"$WEATHER_HELPER"'","enabled":true,"allowedTools":["weather.current"],"defaultApprovalPolicy":"operator","sessionPolicy":"long_lived","timeoutMillis":30000}' \
   "$TMP_DIR/mcp-server.json"
 

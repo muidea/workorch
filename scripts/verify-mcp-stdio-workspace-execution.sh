@@ -9,9 +9,12 @@ MOCK_ADDR="${WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR:-127.0.0.1:18185}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 VERIFY_SUFFIX="${WORKORCH_MCP_STDIO_VERIFY_SUFFIX:-$$}"
 MCP_SERVER_ID="mcp-stdio-verify-$VERIFY_SUFFIX"
+MCP_CAPABILITY_ID="$MCP_SERVER_ID:tool:repo.summary"
+MCP_ENDPOINT_ROOT="${WORKORCH_MCP_ENDPOINT_DIR:-$ROOT_DIR/.workorch-data/system/mcp-endpoints}"
+MCP_ENDPOINT_DIR="$MCP_ENDPOINT_ROOT/$MCP_SERVER_ID"
 MOCK_PID=""
 MOCK_LOG="$TMP_DIR/llm-mock.log"
-MCP_HELPER="$TMP_DIR/mcp_stdio_helper.py"
+MCP_HELPER="$MCP_ENDPOINT_DIR/mcp_stdio_helper.py"
 
 report_failure() {
   local status=$?
@@ -62,6 +65,30 @@ post_json() {
   local body="$2"
   local output="$3"
   curl -fsS -H "Content-Type: application/json" -X POST "$url" -d "$body" >"$output"
+}
+
+upsert_json() {
+  local collection_url="$1"
+  local resource_url="$2"
+  local body="$3"
+  local output="$4"
+  local tmp="$output.tmp"
+  local status
+  status="$(curl -sS -H "Content-Type: application/json" -X POST "$collection_url" -d "$body" -o "$tmp" -w "%{http_code}" || true)"
+  case "$status" in
+    200|201)
+      mv "$tmp" "$output"
+      ;;
+    409)
+      rm -f "$tmp"
+      curl -fsS -H "Content-Type: application/json" -X PUT "$resource_url" -d "$body" >"$output"
+      ;;
+    *)
+      cat "$tmp" >&2 || true
+      rm -f "$tmp"
+      return 1
+      ;;
+  esac
 }
 
 start_mock_provider() {
@@ -141,6 +168,7 @@ PY
 }
 
 create_mcp_helper() {
+  mkdir -p "$MCP_ENDPOINT_DIR"
   cat >"$MCP_HELPER" <<'PY'
 #!/usr/bin/env python3
 import json
@@ -284,16 +312,19 @@ PY
 }
 
 validate_snapshot() {
-  python3 - "$1" <<'PY'
+  python3 - "$1" "$MCP_CAPABILITY_ID" <<'PY'
 import json
 import sys
 
 snapshot = json.load(open(sys.argv[1], encoding="utf-8"))["snapshot"]
+capability_id = sys.argv[2]
 run = snapshot["run"]
 steps = snapshot.get("steps") or ([] if not snapshot.get("step") else [snapshot["step"]])
 tool_calls = snapshot.get("toolCalls") or []
 validations = snapshot.get("validationResults") or []
 checkpoints = snapshot.get("runtimeCheckpoints") or []
+selected_capabilities = snapshot.get("selectedCapabilities") or []
+used_capabilities = snapshot.get("usedCapabilities") or []
 
 errors = []
 if run.get("state") != "completed":
@@ -329,6 +360,10 @@ if not validations:
     errors.append("missing ValidationResult evidence")
 if not checkpoints:
     errors.append("missing RuntimeCheckpoint evidence")
+if not any(item.get("id") == capability_id and item.get("displayName") == "仓库摘要能力 E2E" for item in selected_capabilities):
+    errors.append(f"missing selected MCP capability metadata: {selected_capabilities}")
+if not any(item.get("id") == capability_id and item.get("useCount", 0) >= 1 for item in used_capabilities):
+    errors.append(f"missing used MCP capability evidence: {used_capabilities}")
 
 if errors:
     for item in errors:
@@ -362,10 +397,24 @@ curl -fsS -H "Content-Type: application/json" -X PUT \
   -d @"$TMP_DIR/verify-llm-update.json" >"$TMP_DIR/configuration-updated.json"
 grep '"apiKeyConfigured": true' "$TMP_DIR/configuration-updated.json" >/dev/null
 
-post_json "$BASE_URL/api/v1/workorch/mcp/servers" \
-  '{"id":"'"$MCP_SERVER_ID"'","name":"stdio verification","transport":"stdio","endpoint":"'"$MCP_HELPER"'","enabled":true,"allowedTools":["repo.summary"],"timeoutMillis":5000}' \
+upsert_json "$BASE_URL/api/v1/workorch/mcp/servers" \
+  "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID" \
+  '{"id":"'"$MCP_SERVER_ID"'","name":"stdio verification","transport":"stdio","endpoint":"'"$MCP_HELPER"'","enabled":true,"allowedTools":["repo.summary"],"allowedResources":["workspace://acceptance"],"allowedPrompts":["workorch.acceptance"],"timeoutMillis":5000}' \
   "$TMP_DIR/mcp-server.json"
 grep '"transport": "stdio"' "$TMP_DIR/mcp-server.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=tool&q=repo.summary" >"$TMP_DIR/mcp-capabilities-derived.json"
+grep "\"id\": \"$MCP_CAPABILITY_ID\"" "$TMP_DIR/mcp-capabilities-derived.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=resource&q=workspace" >"$TMP_DIR/mcp-resource-capabilities-derived.json"
+grep '工作空间验收资料' "$TMP_DIR/mcp-resource-capabilities-derived.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=prompt&q=acceptance" >"$TMP_DIR/mcp-prompt-capabilities-derived.json"
+grep '验收提示词' "$TMP_DIR/mcp-prompt-capabilities-derived.json" >/dev/null
+curl -fsS -H "Content-Type: application/json" -X PUT \
+  "$BASE_URL/api/v1/workorch/mcp/capabilities/$MCP_CAPABILITY_ID" \
+  -d '{"id":"'"$MCP_CAPABILITY_ID"'","serverId":"'"$MCP_SERVER_ID"'","kind":"tool","name":"repo.summary","displayName":"仓库摘要能力 E2E","description":"通过 MCP stdio 读取仓库摘要，用于能力目录、Workspace 绑定和 Run 证据验收。","category":"代码仓库","tags":["e2e","stdio","repo"],"usageHint":"当 Goal 需要仓库上下文摘要时使用。","inputSummary":"workspaceId、runId、stepId 和工具输入。","outputSummary":"返回仓库摘要 structuredContent。","stageHints":["execution","validation"],"riskLevel":"read_only","enabled":true,"approvalPolicy":"operator","status":"active"}' \
+  >"$TMP_DIR/mcp-capability-updated.json"
+grep '"displayName": "仓库摘要能力 E2E"' "$TMP_DIR/mcp-capability-updated.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/mcp/capabilities?category=%E4%BB%A3%E7%A0%81%E4%BB%93%E5%BA%93&stage=execution&riskLevel=read_only&enabled=true&q=stdio" >"$TMP_DIR/mcp-capabilities-filtered.json"
+grep "\"id\": \"$MCP_CAPABILITY_ID\"" "$TMP_DIR/mcp-capabilities-filtered.json" >/dev/null
 
 post_json "$BASE_URL/api/v1/workorch/workspaces" \
   '{"title":"mcp stdio verification","description":"verify MCP stdio transport through LLM execution graph"}' \
@@ -386,13 +435,17 @@ dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 [[ -n "$dod_id" ]]
 
 post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
-  '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","mcpServerIds":["'"$MCP_SERVER_ID"'"]}' \
+  '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","mcpServerIds":["'"$MCP_SERVER_ID"'"],"capabilityIds":["'"$MCP_CAPABILITY_ID"'"]}' \
   "$TMP_DIR/activation.json"
 run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
 [[ -n "$run_id" ]]
 
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/observability.json"
+grep '"selectedCapabilities"' "$TMP_DIR/observability.json" >/dev/null
+grep '"usedCapabilities"' "$TMP_DIR/observability.json" >/dev/null
 echo "workspaceId=$workspace_id"
+echo "runId=$run_id"
 validate_snapshot "$TMP_DIR/snapshot.json"
 
 echo "workorchd MCP stdio verification passed for deployed service $BASE_URL"

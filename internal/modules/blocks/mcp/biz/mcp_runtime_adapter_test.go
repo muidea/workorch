@@ -455,7 +455,7 @@ func TestMCPStdioHelperProcess(t *testing.T) {
 func newMCPService(t *testing.T, cmd kernelmcp.CreateServerCommand) kernelmcp.Service {
 	t.Helper()
 	module := kernelmcp.New()
-	if err := module.Setup(kernelmcp.Dependencies{Servers: memory.NewMCPServerRepository()}); err != nil {
+	if err := module.Setup(kernelmcp.Dependencies{Servers: memory.NewMCPServerRepository(), Capabilities: memory.NewMCPCapabilityRepository()}); err != nil {
 		t.Fatalf("setup mcp module: %v", err)
 	}
 	if err := module.Service().CreateServer(context.Background(), cmd); err != nil {

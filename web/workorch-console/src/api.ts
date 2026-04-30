@@ -1,4 +1,4 @@
-import type { Approval, ContextBundle, Decision, DoD, EventRecord, Goal, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, TaskDecomposition, TaskProgress, UpdateLLMConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, TaskDecomposition, TaskProgress, UpdateLLMConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -267,6 +267,13 @@ export const workorchApi = {
     });
     return body.server;
   },
+  updateMCPServer: async (serverId: string, server: MCPServer) => {
+    const body = await request<{ server: MCPServer }>(`${apiBase}/mcp/servers/${encodeURIComponent(serverId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(server)
+    });
+    return body.server;
+  },
   listMCPServerTools: async (serverId: string) => {
     const body = await request<{ tools: MCPTool[] }>(`${apiBase}/mcp/servers/${encodeURIComponent(serverId)}/tools`);
     return body.tools ?? [];
@@ -278,6 +285,31 @@ export const workorchApi = {
   listMCPServerPrompts: async (serverId: string) => {
     const body = await request<{ prompts: MCPPrompt[] }>(`${apiBase}/mcp/servers/${encodeURIComponent(serverId)}/prompts`);
     return body.prompts ?? [];
+  },
+  listMCPCapabilities: async (query?: { serverId?: string; kind?: string; category?: string; stage?: string; riskLevel?: string; enabled?: boolean; q?: string }) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value));
+      }
+    }
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    const body = await request<{ capabilities: MCPCapability[] }>(`${apiBase}/mcp/capabilities${suffix}`);
+    return body.capabilities ?? [];
+  },
+  createMCPCapability: async (capability: MCPCapability) => {
+    const body = await request<{ capability: MCPCapability }>(`${apiBase}/mcp/capabilities`, {
+      method: 'POST',
+      body: JSON.stringify(capability)
+    });
+    return body.capability;
+  },
+  updateMCPCapability: async (capabilityId: string, capability: MCPCapability) => {
+    const body = await request<{ capability: MCPCapability }>(`${apiBase}/mcp/capabilities/${encodeURIComponent(capabilityId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(capability)
+    });
+    return body.capability;
   },
   listMemory: async (workspaceId: string, query?: string) => {
     const search = new URLSearchParams({ workspaceId });

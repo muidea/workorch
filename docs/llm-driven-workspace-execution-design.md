@@ -1046,6 +1046,8 @@ system/souls/{soulId}/soul.md
 skill.json
 memory_item.json
 mcp_server.json
+mcp_capability.json
+system/mcp-endpoints/{mcpServerId}/{helper}
 ```
 
 Repository contracts should include:

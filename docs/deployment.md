@@ -261,6 +261,12 @@ MCP runtime boundary:
 - `stdio` endpoint parsing is command plus whitespace-separated args. Shell
   expansion is not applied by `workorchd`; use an explicit wrapper command when
   complex environment setup is required.
+- Local verification and load-test scripts write managed MCP `stdio` endpoint
+  helpers under `.workorch-data/system/mcp-endpoints/{mcpServerId}/` by default.
+  Override `WORKORCH_MCP_ENDPOINT_DIR` when the deployed service uses a
+  different data root or when endpoints should be shared outside the repository.
+  Runtime artifacts and logs may still use temporary directories, but persisted
+  MCP server endpoint paths should not point to deleted `/tmp` files.
 
 ## Acceptance expectation
 
@@ -292,10 +298,10 @@ A deployable `workorchd` instance is acceptable when:
   workspace Memory, and verifies `memoryRetrieval` evidence on the activated
   Run.
 - `make verify-real-weather` passes against the running service. It uses the
-  configured real LLM provider, registers a temporary MCP `stdio` weather tool,
-  queries Open-Meteo for Zhejiang Hangzhou current weather, and validates
-  weather ToolCall, ValidationResult, RuntimeCheckpoint, and DoD evidence in
-  the Run snapshot.
+  configured real LLM provider, registers a managed local MCP `stdio` weather
+  endpoint, queries Open-Meteo for Zhejiang Hangzhou current weather, and
+  validates weather ToolCall, ValidationResult, RuntimeCheckpoint, and DoD
+  evidence in the Run snapshot.
 - `make verify-weather-ticket-approval` passes against the running service. It
   uses the configured real LLM provider and an MCP `stdio` weather tool,
   resolves a Decision Ticket with the specified city, approves the generated

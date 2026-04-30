@@ -29,6 +29,7 @@ type ActivateWorkspaceExecutionCommand struct {
 	SoulBindings  map[string]string `json:"soulBindings,omitempty"`
 	SkillIDs      []string          `json:"skillIds,omitempty"`
 	MCPServerIDs  []string          `json:"mcpServerIds,omitempty"`
+	CapabilityIDs []string          `json:"capabilityIds,omitempty"`
 	MemoryIDs     []string          `json:"memoryIds,omitempty"`
 	Priority      int               `json:"priority,omitempty"`
 }
@@ -219,6 +220,7 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 	}
 
 	mcpServerIDs := normalizeStringIDs(cmd.MCPServerIDs)
+	capabilityIDs := normalizeStringIDs(cmd.CapabilityIDs)
 	memoryIDs := normalizeStringIDs(cmd.MemoryIDs)
 
 	workspace, err := exports.Repositories.Workspaces.Get(ctx, workspaceID)
@@ -246,6 +248,7 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 	}
 
 	requiredMCPServerIDs := requiredMCPServerRefs(skills)
+	requiredCapabilityIDs := requiredCapabilityRefs(skills)
 	autoBoundMCPServerIDs := make([]string, 0)
 	for _, id := range requiredMCPServerIDs {
 		if !slices.Contains(mcpServerIDs, id) {
@@ -253,24 +256,43 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 			autoBoundMCPServerIDs = append(autoBoundMCPServerIDs, id)
 		}
 	}
+	autoBoundCapabilityIDs := make([]string, 0)
+	for _, id := range requiredCapabilityIDs {
+		if !slices.Contains(capabilityIDs, id) {
+			capabilityIDs = append(capabilityIDs, id)
+			autoBoundCapabilityIDs = append(autoBoundCapabilityIDs, id)
+		}
+	}
 	mcpServers, err := selectedMCPServers(ctx, exports.Services.MCPService, mcpServerIDs)
 	if err != nil {
 		return nil, err
 	}
 	contextData["mcpSelection"] = map[string]any{
-		"policy":                "skill_required_mcp_auto_bind",
-		"requestedMCPServerIds": normalizeStringIDs(cmd.MCPServerIDs),
-		"requiredMCPServerIds":  requiredMCPServerIDs,
-		"autoBoundMCPServerIds": autoBoundMCPServerIDs,
-		"selectedMCPServerIds":  mcpServerIDs,
+		"policy":                 "skill_required_mcp_auto_bind",
+		"requestedMCPServerIds":  normalizeStringIDs(cmd.MCPServerIDs),
+		"requiredMCPServerIds":   requiredMCPServerIDs,
+		"autoBoundMCPServerIds":  autoBoundMCPServerIDs,
+		"selectedMCPServerIds":   mcpServerIDs,
+		"requestedCapabilityIds": normalizeStringIDs(cmd.CapabilityIDs),
+		"requiredCapabilityIds":  requiredCapabilityIDs,
+		"autoBoundCapabilityIds": autoBoundCapabilityIDs,
+		"selectedCapabilityIds":  capabilityIDs,
 	}
 	if len(mcpServers) > 0 {
 		contextData["mcpServerIds"] = mcpServerIDs
 		contextData["mcpServers"] = mcpServerContexts(mcpServers)
 	}
+	mcpCapabilities, err := selectedMCPCapabilities(ctx, exports.Services.MCPService, capabilityIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(mcpCapabilities) > 0 {
+		contextData["capabilityIds"] = capabilityIDs
+		contextData["mcpCapabilities"] = mcpCapabilityContexts(mcpCapabilities)
+	}
 
 	for _, soulID := range effectiveSoulIDs {
-		if err := validateSoulCapabilitySelection(ctx, exports.Services.SoulService, soulID, skillIDs, mcpServerIDs, requiredToolKinds(skills)); err != nil {
+		if err := validateSoulCapabilitySelection(ctx, exports.Services.SoulService, soulID, skillIDs, mcpServerIDs, capabilityIDs, capabilityCategories(mcpCapabilities), requiredToolKinds(skills)); err != nil {
 			return nil, err
 		}
 	}
@@ -335,6 +357,29 @@ func selectedMCPServers(ctx context.Context, service interface {
 	ret := make([]*mcpmodel.Server, 0, len(ids))
 	for _, id := range ids {
 		item, err := service.GetServer(ctx, common.MCPServerID(id))
+		if err != nil {
+			return nil, err
+		}
+		if !item.Enabled {
+			return nil, common.ErrConflict
+		}
+		ret = append(ret, item)
+	}
+	return ret, nil
+}
+
+func selectedMCPCapabilities(ctx context.Context, service interface {
+	GetCapability(context.Context, common.MCPCapabilityID) (*mcpmodel.Capability, error)
+}, ids []string) ([]*mcpmodel.Capability, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if service == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	ret := make([]*mcpmodel.Capability, 0, len(ids))
+	for _, id := range ids {
+		item, err := service.GetCapability(ctx, common.MCPCapabilityID(id))
 		if err != nil {
 			return nil, err
 		}
@@ -521,6 +566,42 @@ func requiredMCPServerRefs(skills []Skill) []string {
 	return ret
 }
 
+func requiredCapabilityRefs(skills []Skill) []string {
+	ret := make([]string, 0)
+	seen := map[string]struct{}{}
+	for _, skill := range skills {
+		for _, id := range skill.RequiredCapabilityRefs {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			ret = append(ret, id)
+		}
+	}
+	return ret
+}
+
+func capabilityCategories(items []*mcpmodel.Capability) []string {
+	ret := make([]string, 0)
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		category := strings.TrimSpace(item.Category)
+		if category == "" {
+			continue
+		}
+		if _, ok := seen[category]; ok {
+			continue
+		}
+		seen[category] = struct{}{}
+		ret = append(ret, category)
+	}
+	return ret
+}
+
 func memoryItemIDs(items []*memorymodel.MemoryItem) []string {
 	ret := make([]string, 0, len(items))
 	for _, item := range items {
@@ -613,34 +694,35 @@ func skillContexts(items []Skill) []map[string]any {
 	ret := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, map[string]any{
-			"id":                    item.ID,
-			"name":                  item.Name,
-			"version":               item.Version,
-			"description":           item.Description,
-			"triggerRules":          cloneStrings(item.TriggerRules),
-			"instruction":           item.Instruction,
-			"referenceRefs":         cloneStrings(item.ReferenceRefs),
-			"requiredToolKinds":     cloneStrings(item.RequiredToolKinds),
-			"requiredMCPServerRefs": cloneStrings(item.RequiredMCPServerRefs),
-			"constraints":           cloneStrings(item.Constraints),
-			"source":                item.Source,
-			"scope":                 item.Scope,
-			"workspaceId":           item.WorkspaceID,
-			"status":                item.Status,
-			"sourceRepository":      item.SourceRepository,
-			"sourcePath":            item.SourcePath,
-			"targetPath":            item.TargetPath,
-			"localPath":             item.LocalPath,
-			"repoPath":              item.RepoPath,
-			"globalPath":            item.GlobalPath,
-			"projectPath":           item.ProjectPath,
-			"contentHash":           item.ContentHash,
-			"sourceHash":            item.SourceHash,
-			"appliedHash":           item.AppliedHash,
-			"actualHash":            item.ActualHash,
-			"agent":                 item.Agent,
-			"managedBy":             item.ManagedBy,
-			"sourceSkillId":         item.SourceSkillID,
+			"id":                     item.ID,
+			"name":                   item.Name,
+			"version":                item.Version,
+			"description":            item.Description,
+			"triggerRules":           cloneStrings(item.TriggerRules),
+			"instruction":            item.Instruction,
+			"referenceRefs":          cloneStrings(item.ReferenceRefs),
+			"requiredToolKinds":      cloneStrings(item.RequiredToolKinds),
+			"requiredMCPServerRefs":  cloneStrings(item.RequiredMCPServerRefs),
+			"requiredCapabilityRefs": cloneStrings(item.RequiredCapabilityRefs),
+			"constraints":            cloneStrings(item.Constraints),
+			"source":                 item.Source,
+			"scope":                  item.Scope,
+			"workspaceId":            item.WorkspaceID,
+			"status":                 item.Status,
+			"sourceRepository":       item.SourceRepository,
+			"sourcePath":             item.SourcePath,
+			"targetPath":             item.TargetPath,
+			"localPath":              item.LocalPath,
+			"repoPath":               item.RepoPath,
+			"globalPath":             item.GlobalPath,
+			"projectPath":            item.ProjectPath,
+			"contentHash":            item.ContentHash,
+			"sourceHash":             item.SourceHash,
+			"appliedHash":            item.AppliedHash,
+			"actualHash":             item.ActualHash,
+			"agent":                  item.Agent,
+			"managedBy":              item.ManagedBy,
+			"sourceSkillId":          item.SourceSkillID,
 		})
 	}
 	return ret
@@ -658,6 +740,32 @@ func mcpServerContexts(items []*mcpmodel.Server) []map[string]any {
 			"allowedResources":      cloneStrings(item.AllowedResources),
 			"defaultApprovalPolicy": item.DefaultApprovalPolicy,
 			"timeoutMillis":         item.TimeoutMillis,
+		})
+	}
+	return ret
+}
+
+func mcpCapabilityContexts(items []*mcpmodel.Capability) []map[string]any {
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, map[string]any{
+			"id":             string(item.ID),
+			"serverId":       string(item.ServerID),
+			"kind":           item.Kind,
+			"name":           item.Name,
+			"displayName":    item.DisplayName,
+			"description":    item.Description,
+			"category":       item.Category,
+			"tags":           cloneStrings(item.Tags),
+			"usageHint":      item.UsageHint,
+			"inputSummary":   item.InputSummary,
+			"outputSummary":  item.OutputSummary,
+			"stageHints":     cloneStrings(item.StageHints),
+			"riskLevel":      item.RiskLevel,
+			"uri":            item.URI,
+			"enabled":        item.Enabled,
+			"approvalPolicy": item.ApprovalPolicy,
+			"status":         item.Status,
 		})
 	}
 	return ret

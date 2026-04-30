@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -189,6 +190,93 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 	}
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("snapshot mismatch after reload: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestReadRunSnapshotWithBackendReturnsSelectedAndUsedCapabilities(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-run-capability-snapshot")
+	runID := common.RunID("run-capability-snapshot")
+	stepID := common.StepID("run-capability-snapshot/block/repo-summary")
+	capabilityID := common.MCPCapabilityID("mcp-capability-read-model:tool:repo.summary")
+
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "capability snapshot", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.MCPCapabilities.Create(ctx, &mcpmodel.Capability{
+		ID:             capabilityID,
+		ServerID:       common.MCPServerID("mcp-capability-read-model"),
+		Kind:           mcpmodel.CapabilityKindTool,
+		Name:           "repo.summary",
+		DisplayName:    "仓库摘要能力",
+		Category:       "代码仓库",
+		RiskLevel:      "read_only",
+		Enabled:        true,
+		ApprovalPolicy: "operator",
+		Status:         "active",
+	}); err != nil {
+		t.Fatalf("create capability: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateCompleted,
+		ExecutionContext: map[string]any{
+			"capabilityIds": []string{string(capabilityID)},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "mcp/tool_call",
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"operation": "mcp/tool_call",
+			"serverId":  "mcp-capability-read-model",
+			"tool":      "repo.summary",
+			"status":    "completed",
+		},
+	}); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	if err := exports.Repositories.ToolCalls.Create(ctx, &runmodel.ToolCall{
+		ID:          common.ToolCallID("tool-call-capability-read-model"),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		ToolName:    "mcp/tool_call",
+		State:       common.ToolCallStateCompleted,
+		Output: map[string]any{
+			"operation": "mcp/tool_call",
+			"serverId":  "mcp-capability-read-model",
+			"tool":      "repo.summary",
+			"status":    "completed",
+		},
+	}); err != nil {
+		t.Fatalf("create tool call: %v", err)
+	}
+
+	snapshot, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
+	}
+	if len(snapshot.SelectedCapabilities) != 1 || snapshot.SelectedCapabilities[0].DisplayName != "仓库摘要能力" {
+		t.Fatalf("selected capabilities = %+v, want display metadata", snapshot.SelectedCapabilities)
+	}
+	if len(snapshot.UsedCapabilities) != 1 || snapshot.UsedCapabilities[0].ID != string(capabilityID) || snapshot.UsedCapabilities[0].UseCount != 1 {
+		t.Fatalf("used capabilities = %+v, want used capability evidence", snapshot.UsedCapabilities)
+	}
+	observability, err := ReadRunObservabilityWithBackend(context.Background(), "file", dataRoot, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunObservabilityWithBackend: %v", err)
+	}
+	if len(observability.SelectedCapabilities) != 1 || len(observability.UsedCapabilities) != 1 {
+		t.Fatalf("observability capabilities = selected:%+v used:%+v, want capability refs", observability.SelectedCapabilities, observability.UsedCapabilities)
 	}
 }
 

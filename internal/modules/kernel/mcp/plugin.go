@@ -35,7 +35,8 @@ func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 	repos := runtime.Repositories()
 	p.module = New()
 	if setupErr := p.module.Setup(Dependencies{
-		Servers: repos.MCPServers,
+		Servers:      repos.MCPServers,
+		Capabilities: repos.MCPCapabilities,
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}

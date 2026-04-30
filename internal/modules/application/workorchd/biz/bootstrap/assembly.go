@@ -62,7 +62,8 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 
 	mcpModule := mcpmodule.New()
 	mustSetup("mcp", mcpModule.Setup(mcpmodule.Dependencies{
-		Servers: repos.mcpServer,
+		Servers:      repos.mcpServer,
+		Capabilities: repos.mcpCapability,
 	}))
 	mcpBlockModule := mcpblockmodule.New()
 	mustSetup("mcp-block", mcpBlockModule.Setup(mcpblockmodule.Dependencies{
@@ -156,6 +157,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 				MemoryItems:        repos.memoryItem,
 				Skills:             repos.skill,
 				MCPServers:         repos.mcpServer,
+				MCPCapabilities:    repos.mcpCapability,
 				Results:            repos.result,
 				Artifacts:          repos.artifact,
 				EventRecords:       repos.eventRecord,

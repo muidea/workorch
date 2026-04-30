@@ -435,6 +435,7 @@ Status:
   `GET /api/v1/workorch/skills`,
   `GET /api/v1/workorch/skills/{skillId}`,
   `POST /api/v1/workorch/mcp/servers`,
+  `PUT /api/v1/workorch/mcp/servers/{serverId}`,
   `GET /api/v1/workorch/mcp/servers`,
   `GET /api/v1/workorch/mcp/servers/{serverId}`,
   `GET /api/v1/workorch/mcp/servers/{serverId}/tools`,

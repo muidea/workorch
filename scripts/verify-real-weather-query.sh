@@ -2,13 +2,16 @@
 
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${WORKORCH_REAL_WEATHER_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
 PROVIDER_ID="${WORKORCH_REAL_WEATHER_PROVIDER_ID:-}"
 VERIFY_SUFFIX="${WORKORCH_REAL_WEATHER_VERIFY_SUFFIX:-$$}"
 MCP_SERVER_ID="${WORKORCH_REAL_WEATHER_MCP_SERVER_ID:-mcp-weather-real-$VERIFY_SUFFIX}"
 TMP_DIR="${WORKORCH_REAL_WEATHER_ARTIFACT_DIR:-$(mktemp -d)}"
+MCP_ENDPOINT_ROOT="${WORKORCH_MCP_ENDPOINT_DIR:-$ROOT_DIR/.workorch-data/system/mcp-endpoints}"
+MCP_ENDPOINT_DIR="$MCP_ENDPOINT_ROOT/$MCP_SERVER_ID"
 KEEP_ARTIFACTS="${WORKORCH_REAL_WEATHER_KEEP_ARTIFACTS:-1}"
-WEATHER_HELPER="$TMP_DIR/weather_mcp_helper.py"
+WEATHER_HELPER="$MCP_ENDPOINT_DIR/weather_mcp_helper.py"
 
 cleanup() {
   local status=$?
@@ -53,7 +56,32 @@ post_json() {
   curl -fsS -H "Content-Type: application/json" -X POST "$url" -d "$body" >"$output"
 }
 
+upsert_json() {
+  local collection_url="$1"
+  local resource_url="$2"
+  local body="$3"
+  local output="$4"
+  local tmp="$output.tmp"
+  local status
+  status="$(curl -sS -H "Content-Type: application/json" -X POST "$collection_url" -d "$body" -o "$tmp" -w "%{http_code}" || true)"
+  case "$status" in
+    200|201)
+      mv "$tmp" "$output"
+      ;;
+    409)
+      rm -f "$tmp"
+      curl -fsS -H "Content-Type: application/json" -X PUT "$resource_url" -d "$body" >"$output"
+      ;;
+    *)
+      cat "$tmp" >&2 || true
+      rm -f "$tmp"
+      return 1
+      ;;
+  esac
+}
+
 create_weather_helper() {
+  mkdir -p "$MCP_ENDPOINT_DIR"
   cat >"$WEATHER_HELPER" <<'PY'
 #!/usr/bin/env python3
 import datetime as dt
@@ -368,7 +396,8 @@ PY
 curl -fsS "$BASE_URL/api/v1/workorch/configuration" >"$TMP_DIR/configuration.json"
 PROVIDER_ID="$(select_provider)"
 
-post_json "$BASE_URL/api/v1/workorch/mcp/servers" \
+upsert_json "$BASE_URL/api/v1/workorch/mcp/servers" \
+  "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID" \
   '{"id":"'"$MCP_SERVER_ID"'","name":"real weather query MCP","transport":"stdio","endpoint":"'"$WEATHER_HELPER"'","enabled":true,"allowedTools":["weather.current"],"allowedResources":[],"allowedPrompts":[],"defaultApprovalPolicy":"operator","sessionPolicy":"long_lived","timeoutMillis":30000}' \
   "$TMP_DIR/mcp-server.json"
 

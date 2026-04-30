@@ -171,12 +171,13 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 		t.Fatalf("CreateSkillWithBackend: %v", err)
 	}
 	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
-		ID:                   "soul-activation-context",
-		Name:                 "Activation Context Soul",
-		SoulMD:               "# Activation Context Soul\n\nExecute workspace goals with evidence.\n",
-		AllowedSkillRefs:     []string{"skill-activation-context"},
-		AllowedMCPServerRefs: []string{"mcp-activation-context"},
-		AllowedToolKinds:     []string{"shell/command"},
+		ID:                    "soul-activation-context",
+		Name:                  "Activation Context Soul",
+		SoulMD:                "# Activation Context Soul\n\nExecute workspace goals with evidence.\n",
+		AllowedSkillRefs:      []string{"skill-activation-context"},
+		AllowedMCPServerRefs:  []string{"mcp-activation-context"},
+		AllowedCapabilityRefs: []string{"mcp-activation-context:tool:repo.summary"},
+		AllowedToolKinds:      []string{"shell/command"},
 	}); err != nil {
 		t.Fatalf("CreateSoulWithBackend: %v", err)
 	}
@@ -198,6 +199,7 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 		SoulID:        "soul-activation-context",
 		SkillIDs:      []string{"skill-activation-context"},
 		MCPServerIDs:  []string{"mcp-activation-context"},
+		CapabilityIDs: []string{"mcp-activation-context:tool:repo.summary"},
 		MemoryIDs:     []string{memory.ID},
 		Priority:      7,
 	})
@@ -227,6 +229,9 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	}
 	if !contextStringSliceContains(executionContext["mcpServerIds"], "mcp-activation-context") {
 		t.Fatalf("mcpServerIds = %+v, want selected MCP server", executionContext["mcpServerIds"])
+	}
+	if !contextStringSliceContains(executionContext["capabilityIds"], "mcp-activation-context:tool:repo.summary") {
+		t.Fatalf("capabilityIds = %+v, want selected MCP capability", executionContext["capabilityIds"])
 	}
 	if !contextStringSliceContains(executionContext["memoryIds"], memory.ID) {
 		t.Fatalf("memoryIds = %+v, want selected memory", executionContext["memoryIds"])

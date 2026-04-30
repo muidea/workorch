@@ -323,7 +323,7 @@ func TestRuntimeOrchestrator_DispatchNextStepRunsMCPHTTPAdapter(t *testing.T) {
 	}))
 	defer server.Close()
 
-	mcpService := mcpbiz.NewService(memory.NewMCPServerRepository())
+	mcpService := mcpbiz.NewService(memory.NewMCPServerRepository(), memory.NewMCPCapabilityRepository())
 	if err := mcpService.CreateServer(ctx, mcpservice.CreateServerCommand{
 		ServerID:      common.MCPServerID("mcp-http"),
 		Name:          "http tool",

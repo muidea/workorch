@@ -59,6 +59,11 @@ type MCPServerRepository struct {
 	path string
 }
 
+type MCPCapabilityRepository struct {
+	mu   sync.RWMutex
+	path string
+}
+
 type ResultRepository struct {
 	mu   sync.RWMutex
 	path string
@@ -478,6 +483,77 @@ func (r *MCPServerRepository) Update(_ context.Context, item *mcpmodel.Server) e
 		return common.ErrNotFound
 	}
 	items[item.ID] = *cloneMCPServer(item)
+	return saveMap(r.path, items)
+}
+
+func NewMCPCapabilityRepository(path string) *MCPCapabilityRepository {
+	return &MCPCapabilityRepository{path: path}
+}
+
+func (r *MCPCapabilityRepository) Create(_ context.Context, item *mcpmodel.Capability) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[common.MCPCapabilityID, mcpmodel.Capability](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	items[item.ID] = *cloneMCPCapability(item)
+	return saveMap(r.path, items)
+}
+
+func (r *MCPCapabilityRepository) Get(_ context.Context, id common.MCPCapabilityID) (*mcpmodel.Capability, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.MCPCapabilityID, mcpmodel.Capability](r.path)
+	if err != nil {
+		return nil, err
+	}
+	item, ok := items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneMCPCapability(&item), nil
+}
+
+func (r *MCPCapabilityRepository) List(_ context.Context) ([]*mcpmodel.Capability, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.MCPCapabilityID, mcpmodel.Capability](r.path)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(items))
+	for id := range items {
+		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+
+	ret := make([]*mcpmodel.Capability, 0, len(ids))
+	for _, id := range ids {
+		item := items[common.MCPCapabilityID(id)]
+		ret = append(ret, cloneMCPCapability(&item))
+	}
+	return ret, nil
+}
+
+func (r *MCPCapabilityRepository) Update(_ context.Context, item *mcpmodel.Capability) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[common.MCPCapabilityID, mcpmodel.Capability](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	items[item.ID] = *cloneMCPCapability(item)
 	return saveMap(r.path, items)
 }
 
@@ -1973,6 +2049,8 @@ func cloneSoul(item *soul.Soul) *soul.Soul {
 	cloned.BusinessDomains = cloneStringSlice(item.BusinessDomains)
 	cloned.AllowedSkillRefs = cloneStringSlice(item.AllowedSkillRefs)
 	cloned.AllowedMCPServerRefs = cloneStringSlice(item.AllowedMCPServerRefs)
+	cloned.AllowedCapabilityRefs = cloneStringSlice(item.AllowedCapabilityRefs)
+	cloned.AllowedCapabilityCategories = cloneStringSlice(item.AllowedCapabilityCategories)
 	cloned.AllowedToolKinds = cloneStringSlice(item.AllowedToolKinds)
 	return &cloned
 }
@@ -2002,6 +2080,7 @@ func cloneSkill(item *skillmodel.Skill) *skillmodel.Skill {
 	cloned.ReferenceRefs = cloneStringSlice(item.ReferenceRefs)
 	cloned.RequiredToolKinds = cloneStringSlice(item.RequiredToolKinds)
 	cloned.RequiredMCPServerRefs = cloneStringSlice(item.RequiredMCPServerRefs)
+	cloned.RequiredCapabilityRefs = cloneStringSlice(item.RequiredCapabilityRefs)
 	cloned.Constraints = cloneStringSlice(item.Constraints)
 	return &cloned
 }
@@ -2011,6 +2090,14 @@ func cloneMCPServer(item *mcpmodel.Server) *mcpmodel.Server {
 	cloned.AllowedTools = cloneStringSlice(item.AllowedTools)
 	cloned.AllowedResources = cloneStringSlice(item.AllowedResources)
 	cloned.AllowedPrompts = cloneStringSlice(item.AllowedPrompts)
+	return &cloned
+}
+
+func cloneMCPCapability(item *mcpmodel.Capability) *mcpmodel.Capability {
+	cloned := *item
+	cloned.Tags = cloneStringSlice(item.Tags)
+	cloned.StageHints = cloneStringSlice(item.StageHints)
+	cloned.Schema = cloneMap(item.Schema)
 	return &cloned
 }
 

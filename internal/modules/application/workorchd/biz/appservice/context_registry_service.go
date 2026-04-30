@@ -7,6 +7,7 @@ import (
 
 	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
+	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
 	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	skillmodule "github.com/muidea/workorch/internal/modules/kernel/skill"
@@ -18,45 +19,48 @@ import (
 )
 
 type Soul struct {
-	ID                   string   `json:"id"`
-	Name                 string   `json:"name"`
-	Description          string   `json:"description,omitempty"`
-	BusinessDomains      []string `json:"businessDomains,omitempty"`
-	SoulMD               string   `json:"soulMd"`
-	AllowedSkillRefs     []string `json:"allowedSkillRefs,omitempty"`
-	AllowedMCPServerRefs []string `json:"allowedMCPServerRefs,omitempty"`
-	AllowedToolKinds     []string `json:"allowedToolKinds,omitempty"`
+	ID                          string   `json:"id"`
+	Name                        string   `json:"name"`
+	Description                 string   `json:"description,omitempty"`
+	BusinessDomains             []string `json:"businessDomains,omitempty"`
+	SoulMD                      string   `json:"soulMd"`
+	AllowedSkillRefs            []string `json:"allowedSkillRefs,omitempty"`
+	AllowedMCPServerRefs        []string `json:"allowedMCPServerRefs,omitempty"`
+	AllowedCapabilityRefs       []string `json:"allowedCapabilityRefs,omitempty"`
+	AllowedCapabilityCategories []string `json:"allowedCapabilityCategories,omitempty"`
+	AllowedToolKinds            []string `json:"allowedToolKinds,omitempty"`
 }
 
 type Skill struct {
-	ID                    string   `json:"id"`
-	Name                  string   `json:"name"`
-	Version               string   `json:"version"`
-	Description           string   `json:"description,omitempty"`
-	TriggerRules          []string `json:"triggerRules,omitempty"`
-	Instruction           string   `json:"instruction"`
-	ReferenceRefs         []string `json:"referenceRefs,omitempty"`
-	RequiredToolKinds     []string `json:"requiredToolKinds,omitempty"`
-	RequiredMCPServerRefs []string `json:"requiredMCPServerRefs,omitempty"`
-	Constraints           []string `json:"constraints,omitempty"`
-	Source                string   `json:"source,omitempty"`
-	Scope                 string   `json:"scope,omitempty"`
-	WorkspaceID           string   `json:"workspaceId,omitempty"`
-	Status                string   `json:"status,omitempty"`
-	SourceRepository      string   `json:"sourceRepository,omitempty"`
-	SourcePath            string   `json:"sourcePath,omitempty"`
-	TargetPath            string   `json:"targetPath,omitempty"`
-	LocalPath             string   `json:"localPath,omitempty"`
-	RepoPath              string   `json:"repoPath,omitempty"`
-	GlobalPath            string   `json:"globalPath,omitempty"`
-	ProjectPath           string   `json:"projectPath,omitempty"`
-	ContentHash           string   `json:"contentHash,omitempty"`
-	SourceHash            string   `json:"sourceHash,omitempty"`
-	AppliedHash           string   `json:"appliedHash,omitempty"`
-	ActualHash            string   `json:"actualHash,omitempty"`
-	Agent                 string   `json:"agent,omitempty"`
-	ManagedBy             string   `json:"managedBy,omitempty"`
-	SourceSkillID         string   `json:"sourceSkillId,omitempty"`
+	ID                     string   `json:"id"`
+	Name                   string   `json:"name"`
+	Version                string   `json:"version"`
+	Description            string   `json:"description,omitempty"`
+	TriggerRules           []string `json:"triggerRules,omitempty"`
+	Instruction            string   `json:"instruction"`
+	ReferenceRefs          []string `json:"referenceRefs,omitempty"`
+	RequiredToolKinds      []string `json:"requiredToolKinds,omitempty"`
+	RequiredMCPServerRefs  []string `json:"requiredMCPServerRefs,omitempty"`
+	RequiredCapabilityRefs []string `json:"requiredCapabilityRefs,omitempty"`
+	Constraints            []string `json:"constraints,omitempty"`
+	Source                 string   `json:"source,omitempty"`
+	Scope                  string   `json:"scope,omitempty"`
+	WorkspaceID            string   `json:"workspaceId,omitempty"`
+	Status                 string   `json:"status,omitempty"`
+	SourceRepository       string   `json:"sourceRepository,omitempty"`
+	SourcePath             string   `json:"sourcePath,omitempty"`
+	TargetPath             string   `json:"targetPath,omitempty"`
+	LocalPath              string   `json:"localPath,omitempty"`
+	RepoPath               string   `json:"repoPath,omitempty"`
+	GlobalPath             string   `json:"globalPath,omitempty"`
+	ProjectPath            string   `json:"projectPath,omitempty"`
+	ContentHash            string   `json:"contentHash,omitempty"`
+	SourceHash             string   `json:"sourceHash,omitempty"`
+	AppliedHash            string   `json:"appliedHash,omitempty"`
+	ActualHash             string   `json:"actualHash,omitempty"`
+	Agent                  string   `json:"agent,omitempty"`
+	ManagedBy              string   `json:"managedBy,omitempty"`
+	SourceSkillID          string   `json:"sourceSkillId,omitempty"`
 }
 
 type MCPServer struct {
@@ -88,6 +92,37 @@ type MCPPrompt struct {
 	Name     string `json:"name"`
 }
 
+type MCPCapability struct {
+	ID             string         `json:"id"`
+	ServerID       string         `json:"serverId"`
+	Kind           string         `json:"kind"`
+	Name           string         `json:"name"`
+	DisplayName    string         `json:"displayName"`
+	Description    string         `json:"description,omitempty"`
+	Category       string         `json:"category,omitempty"`
+	Tags           []string       `json:"tags,omitempty"`
+	UsageHint      string         `json:"usageHint,omitempty"`
+	InputSummary   string         `json:"inputSummary,omitempty"`
+	OutputSummary  string         `json:"outputSummary,omitempty"`
+	StageHints     []string       `json:"stageHints,omitempty"`
+	RiskLevel      string         `json:"riskLevel,omitempty"`
+	Schema         map[string]any `json:"schema,omitempty"`
+	URI            string         `json:"uri,omitempty"`
+	Enabled        bool           `json:"enabled"`
+	ApprovalPolicy string         `json:"approvalPolicy,omitempty"`
+	Status         string         `json:"status,omitempty"`
+}
+
+type MCPCapabilityQuery struct {
+	ServerID  string
+	Kind      string
+	Category  string
+	Stage     string
+	RiskLevel string
+	Enabled   *bool
+	Query     string
+}
+
 type MemoryItem struct {
 	ID                  string   `json:"id"`
 	WorkspaceID         string   `json:"workspaceId"`
@@ -113,6 +148,9 @@ type CreateSoulCommand = Soul
 type UpdateSoulCommand = Soul
 type CreateSkillCommand = Skill
 type CreateMCPServerCommand = MCPServer
+type UpdateMCPServerCommand = MCPServer
+type CreateMCPCapabilityCommand = MCPCapability
+type UpdateMCPCapabilityCommand = MCPCapability
 
 type CreateMemoryItemCommand struct {
 	MemoryID            string    `json:"memoryId,omitempty"`
@@ -142,14 +180,16 @@ func CreateSoulWithSession(ctx context.Context, session *RuntimeSession, cmd Cre
 		return Soul{}, common.ErrInvalidArgument
 	}
 	if err := exports.Services.SoulService.CreateSoul(ctx, soulmodule.CreateSoulCommand{
-		SoulID:               common.SoulID(cmd.ID),
-		Name:                 cmd.Name,
-		Description:          cmd.Description,
-		BusinessDomains:      cloneStrings(cmd.BusinessDomains),
-		SoulMD:               cmd.SoulMD,
-		AllowedSkillRefs:     cloneStrings(cmd.AllowedSkillRefs),
-		AllowedMCPServerRefs: cloneStrings(cmd.AllowedMCPServerRefs),
-		AllowedToolKinds:     cloneStrings(cmd.AllowedToolKinds),
+		SoulID:                      common.SoulID(cmd.ID),
+		Name:                        cmd.Name,
+		Description:                 cmd.Description,
+		BusinessDomains:             cloneStrings(cmd.BusinessDomains),
+		SoulMD:                      cmd.SoulMD,
+		AllowedSkillRefs:            cloneStrings(cmd.AllowedSkillRefs),
+		AllowedMCPServerRefs:        cloneStrings(cmd.AllowedMCPServerRefs),
+		AllowedCapabilityRefs:       cloneStrings(cmd.AllowedCapabilityRefs),
+		AllowedCapabilityCategories: cloneStrings(cmd.AllowedCapabilityCategories),
+		AllowedToolKinds:            cloneStrings(cmd.AllowedToolKinds),
 	}); err != nil {
 		return Soul{}, err
 	}
@@ -186,14 +226,16 @@ func UpdateSoulWithSession(ctx context.Context, session *RuntimeSession, soulID 
 	}
 	cmd.ID = soulID
 	if err := exports.Services.SoulService.UpdateSoul(ctx, soulmodule.UpdateSoulCommand{
-		SoulID:               common.SoulID(cmd.ID),
-		Name:                 cmd.Name,
-		Description:          cmd.Description,
-		BusinessDomains:      cloneStrings(cmd.BusinessDomains),
-		SoulMD:               cmd.SoulMD,
-		AllowedSkillRefs:     cloneStrings(cmd.AllowedSkillRefs),
-		AllowedMCPServerRefs: cloneStrings(cmd.AllowedMCPServerRefs),
-		AllowedToolKinds:     cloneStrings(cmd.AllowedToolKinds),
+		SoulID:                      common.SoulID(cmd.ID),
+		Name:                        cmd.Name,
+		Description:                 cmd.Description,
+		BusinessDomains:             cloneStrings(cmd.BusinessDomains),
+		SoulMD:                      cmd.SoulMD,
+		AllowedSkillRefs:            cloneStrings(cmd.AllowedSkillRefs),
+		AllowedMCPServerRefs:        cloneStrings(cmd.AllowedMCPServerRefs),
+		AllowedCapabilityRefs:       cloneStrings(cmd.AllowedCapabilityRefs),
+		AllowedCapabilityCategories: cloneStrings(cmd.AllowedCapabilityCategories),
+		AllowedToolKinds:            cloneStrings(cmd.AllowedToolKinds),
 	}); err != nil {
 		return Soul{}, err
 	}
@@ -298,16 +340,17 @@ func CreateSkillWithSession(ctx context.Context, session *RuntimeSession, cmd Cr
 		return Skill{}, common.ErrInvalidArgument
 	}
 	if err := exports.Services.SkillService.CreateSkill(ctx, skillmodule.CreateSkillCommand{
-		SkillID:               common.SkillID(cmd.ID),
-		Name:                  cmd.Name,
-		Version:               cmd.Version,
-		Description:           cmd.Description,
-		TriggerRules:          cloneStrings(cmd.TriggerRules),
-		Instruction:           cmd.Instruction,
-		ReferenceRefs:         cloneStrings(cmd.ReferenceRefs),
-		RequiredToolKinds:     cloneStrings(cmd.RequiredToolKinds),
-		RequiredMCPServerRefs: cloneStrings(cmd.RequiredMCPServerRefs),
-		Constraints:           cloneStrings(cmd.Constraints),
+		SkillID:                common.SkillID(cmd.ID),
+		Name:                   cmd.Name,
+		Version:                cmd.Version,
+		Description:            cmd.Description,
+		TriggerRules:           cloneStrings(cmd.TriggerRules),
+		Instruction:            cmd.Instruction,
+		ReferenceRefs:          cloneStrings(cmd.ReferenceRefs),
+		RequiredToolKinds:      cloneStrings(cmd.RequiredToolKinds),
+		RequiredMCPServerRefs:  cloneStrings(cmd.RequiredMCPServerRefs),
+		RequiredCapabilityRefs: cloneStrings(cmd.RequiredCapabilityRefs),
+		Constraints:            cloneStrings(cmd.Constraints),
 	}); err != nil {
 		return Skill{}, err
 	}
@@ -511,6 +554,54 @@ func CreateMCPServerWithBackend(ctx context.Context, backend string, dataRoot st
 	return CreateMCPServerWithSession(ctx, session, cmd)
 }
 
+func UpdateMCPServerWithSession(ctx context.Context, session *RuntimeSession, serverID string, cmd UpdateMCPServerCommand) (ret MCPServer, err error) {
+	exports, err := session.Exports()
+	if err != nil {
+		return MCPServer{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+	if exports.Services.MCPService == nil || exports.Repositories.MCPServers == nil {
+		return MCPServer{}, common.ErrInvalidArgument
+	}
+	cmd.ID = strings.TrimSpace(cmd.ID)
+	serverID = strings.TrimSpace(serverID)
+	if serverID == "" {
+		return MCPServer{}, common.ErrInvalidArgument
+	}
+	if cmd.ID != "" && cmd.ID != serverID {
+		return MCPServer{}, common.ErrInvalidArgument
+	}
+	cmd.ID = serverID
+	if err := exports.Services.MCPService.UpdateServer(ctx, mcpmodule.UpdateServerCommand{
+		ServerID:              common.MCPServerID(cmd.ID),
+		Name:                  cmd.Name,
+		Transport:             cmd.Transport,
+		Endpoint:              cmd.Endpoint,
+		Enabled:               cmd.Enabled,
+		AllowedTools:          cloneStrings(cmd.AllowedTools),
+		AllowedResources:      cloneStrings(cmd.AllowedResources),
+		AllowedPrompts:        cloneStrings(cmd.AllowedPrompts),
+		DefaultApprovalPolicy: cmd.DefaultApprovalPolicy,
+		SessionPolicy:         cmd.SessionPolicy,
+		TimeoutMillis:         cmd.TimeoutMillis,
+	}); err != nil {
+		return MCPServer{}, err
+	}
+	item, err := exports.Repositories.MCPServers.Get(ctx, common.MCPServerID(cmd.ID))
+	if err != nil {
+		return MCPServer{}, err
+	}
+	return mapMCPServer(item), nil
+}
+
+func UpdateMCPServerWithBackend(ctx context.Context, backend string, dataRoot string, serverID string, cmd UpdateMCPServerCommand) (MCPServer, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return MCPServer{}, err
+	}
+	return UpdateMCPServerWithSession(ctx, session, serverID, cmd)
+}
+
 func ReadMCPServerWithSession(ctx context.Context, session *RuntimeSession, serverID string) (ret MCPServer, err error) {
 	exports, err := session.Exports()
 	if err != nil {
@@ -623,6 +714,107 @@ func ListMCPServerPromptsWithBackend(ctx context.Context, backend string, dataRo
 	return ListMCPServerPromptsWithSession(ctx, session, serverID)
 }
 
+func CreateMCPCapabilityWithSession(ctx context.Context, session *RuntimeSession, cmd CreateMCPCapabilityCommand) (ret MCPCapability, err error) {
+	exports, err := session.Exports()
+	if err != nil {
+		return MCPCapability{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+	if exports.Services.MCPService == nil {
+		return MCPCapability{}, common.ErrInvalidArgument
+	}
+	item, err := exports.Services.MCPService.CreateCapability(ctx, mcpCapabilityCommand(cmd))
+	if err != nil {
+		return MCPCapability{}, err
+	}
+	return mapMCPCapability(item), nil
+}
+
+func CreateMCPCapabilityWithBackend(ctx context.Context, backend string, dataRoot string, cmd CreateMCPCapabilityCommand) (MCPCapability, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return MCPCapability{}, err
+	}
+	return CreateMCPCapabilityWithSession(ctx, session, cmd)
+}
+
+func UpdateMCPCapabilityWithSession(ctx context.Context, session *RuntimeSession, capabilityID string, cmd UpdateMCPCapabilityCommand) (ret MCPCapability, err error) {
+	exports, err := session.Exports()
+	if err != nil {
+		return MCPCapability{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+	if exports.Services.MCPService == nil {
+		return MCPCapability{}, common.ErrInvalidArgument
+	}
+	cmd.ID = capabilityID
+	item, err := exports.Services.MCPService.UpdateCapability(ctx, mcpCapabilityCommand(cmd))
+	if err != nil {
+		return MCPCapability{}, err
+	}
+	return mapMCPCapability(item), nil
+}
+
+func UpdateMCPCapabilityWithBackend(ctx context.Context, backend string, dataRoot string, capabilityID string, cmd UpdateMCPCapabilityCommand) (MCPCapability, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return MCPCapability{}, err
+	}
+	return UpdateMCPCapabilityWithSession(ctx, session, capabilityID, cmd)
+}
+
+func ReadMCPCapabilityWithSession(ctx context.Context, session *RuntimeSession, capabilityID string) (ret MCPCapability, err error) {
+	exports, err := session.Exports()
+	if err != nil {
+		return MCPCapability{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+	if exports.Services.MCPService == nil {
+		return MCPCapability{}, common.ErrInvalidArgument
+	}
+	item, err := exports.Services.MCPService.GetCapability(ctx, common.MCPCapabilityID(capabilityID))
+	if err != nil {
+		return MCPCapability{}, err
+	}
+	return mapMCPCapability(item), nil
+}
+
+func ReadMCPCapabilityWithBackend(ctx context.Context, backend string, dataRoot string, capabilityID string) (MCPCapability, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return MCPCapability{}, err
+	}
+	return ReadMCPCapabilityWithSession(ctx, session, capabilityID)
+}
+
+func ListMCPCapabilitiesWithSession(ctx context.Context, session *RuntimeSession, query MCPCapabilityQuery) (ret []MCPCapability, err error) {
+	exports, err := session.Exports()
+	if err != nil {
+		return nil, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+	if exports.Services.MCPService == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	items, err := exports.Services.MCPService.ListCapabilities(ctx, mcpCapabilityQuery(query))
+	if err != nil {
+		return nil, err
+	}
+	ret = make([]MCPCapability, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, mapMCPCapability(item))
+	}
+	return ret, nil
+}
+
+func ListMCPCapabilitiesWithBackend(ctx context.Context, backend string, dataRoot string, query MCPCapabilityQuery) ([]MCPCapability, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return nil, err
+	}
+	return ListMCPCapabilitiesWithSession(ctx, session, query)
+}
+
 func CreateMemoryItemWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, cmd CreateMemoryItemCommand) (ret MemoryItem, err error) {
 	exports, err := session.Exports()
 	if err != nil {
@@ -715,14 +907,16 @@ func mapSoul(item *soulmodel.Soul) Soul {
 		return Soul{}
 	}
 	return Soul{
-		ID:                   string(item.ID),
-		Name:                 item.Name,
-		Description:          item.Description,
-		BusinessDomains:      cloneStrings(item.BusinessDomains),
-		SoulMD:               item.SoulMD,
-		AllowedSkillRefs:     cloneStrings(item.AllowedSkillRefs),
-		AllowedMCPServerRefs: cloneStrings(item.AllowedMCPServerRefs),
-		AllowedToolKinds:     cloneStrings(item.AllowedToolKinds),
+		ID:                          string(item.ID),
+		Name:                        item.Name,
+		Description:                 item.Description,
+		BusinessDomains:             cloneStrings(item.BusinessDomains),
+		SoulMD:                      item.SoulMD,
+		AllowedSkillRefs:            cloneStrings(item.AllowedSkillRefs),
+		AllowedMCPServerRefs:        cloneStrings(item.AllowedMCPServerRefs),
+		AllowedCapabilityRefs:       cloneStrings(item.AllowedCapabilityRefs),
+		AllowedCapabilityCategories: cloneStrings(item.AllowedCapabilityCategories),
+		AllowedToolKinds:            cloneStrings(item.AllowedToolKinds),
 	}
 }
 
@@ -731,20 +925,21 @@ func mapSkill(item *skillmodel.Skill) Skill {
 		return Skill{}
 	}
 	return Skill{
-		ID:                    string(item.ID),
-		Name:                  item.Name,
-		Version:               item.Version,
-		Description:           item.Description,
-		TriggerRules:          cloneStrings(item.TriggerRules),
-		Instruction:           item.Instruction,
-		ReferenceRefs:         cloneStrings(item.ReferenceRefs),
-		RequiredToolKinds:     cloneStrings(item.RequiredToolKinds),
-		RequiredMCPServerRefs: cloneStrings(item.RequiredMCPServerRefs),
-		Constraints:           cloneStrings(item.Constraints),
-		Source:                skillSourceRepository,
-		Scope:                 skillScopeRepository,
-		ManagedBy:             skillManagedByWorkorch,
-		SourceSkillID:         string(item.ID),
+		ID:                     string(item.ID),
+		Name:                   item.Name,
+		Version:                item.Version,
+		Description:            item.Description,
+		TriggerRules:           cloneStrings(item.TriggerRules),
+		Instruction:            item.Instruction,
+		ReferenceRefs:          cloneStrings(item.ReferenceRefs),
+		RequiredToolKinds:      cloneStrings(item.RequiredToolKinds),
+		RequiredMCPServerRefs:  cloneStrings(item.RequiredMCPServerRefs),
+		RequiredCapabilityRefs: cloneStrings(item.RequiredCapabilityRefs),
+		Constraints:            cloneStrings(item.Constraints),
+		Source:                 skillSourceRepository,
+		Scope:                  skillScopeRepository,
+		ManagedBy:              skillManagedByWorkorch,
+		SourceSkillID:          string(item.ID),
 	}
 }
 
@@ -764,6 +959,67 @@ func mapMCPServer(item *mcpmodel.Server) MCPServer {
 		DefaultApprovalPolicy: item.DefaultApprovalPolicy,
 		SessionPolicy:         item.SessionPolicy,
 		TimeoutMillis:         item.TimeoutMillis,
+	}
+}
+
+func mapMCPCapability(item *mcpmodel.Capability) MCPCapability {
+	if item == nil {
+		return MCPCapability{}
+	}
+	return MCPCapability{
+		ID:             string(item.ID),
+		ServerID:       string(item.ServerID),
+		Kind:           item.Kind,
+		Name:           item.Name,
+		DisplayName:    item.DisplayName,
+		Description:    item.Description,
+		Category:       item.Category,
+		Tags:           cloneStrings(item.Tags),
+		UsageHint:      item.UsageHint,
+		InputSummary:   item.InputSummary,
+		OutputSummary:  item.OutputSummary,
+		StageHints:     cloneStrings(item.StageHints),
+		RiskLevel:      item.RiskLevel,
+		Schema:         cloneMap(item.Schema),
+		URI:            item.URI,
+		Enabled:        item.Enabled,
+		ApprovalPolicy: item.ApprovalPolicy,
+		Status:         item.Status,
+	}
+}
+
+func mcpCapabilityCommand(cmd MCPCapability) mcpservice.CreateCapabilityCommand {
+	return mcpservice.CreateCapabilityCommand{
+		ID:             common.MCPCapabilityID(cmd.ID),
+		ServerID:       common.MCPServerID(cmd.ServerID),
+		Kind:           cmd.Kind,
+		Name:           cmd.Name,
+		DisplayName:    cmd.DisplayName,
+		Description:    cmd.Description,
+		Category:       cmd.Category,
+		Tags:           cloneStrings(cmd.Tags),
+		UsageHint:      cmd.UsageHint,
+		InputSummary:   cmd.InputSummary,
+		OutputSummary:  cmd.OutputSummary,
+		StageHints:     cloneStrings(cmd.StageHints),
+		RiskLevel:      cmd.RiskLevel,
+		Schema:         cloneMap(cmd.Schema),
+		URI:            cmd.URI,
+		Enabled:        cmd.Enabled,
+		ApprovalPolicy: cmd.ApprovalPolicy,
+		Status:         cmd.Status,
+	}
+}
+
+func mcpCapabilityQuery(query MCPCapabilityQuery) mcpservice.CapabilityQuery {
+	return mcpservice.CapabilityQuery{
+		ServerID:  common.MCPServerID(strings.TrimSpace(query.ServerID)),
+		Kind:      strings.TrimSpace(query.Kind),
+		Category:  strings.TrimSpace(query.Category),
+		Stage:     strings.TrimSpace(query.Stage),
+		RiskLevel: strings.TrimSpace(query.RiskLevel),
+		Enabled:   query.Enabled,
+		Query:     strings.TrimSpace(query.Query),
 	}
 }
 
@@ -806,6 +1062,17 @@ func cloneStrings(input []string) []string {
 		return nil
 	}
 	return append([]string(nil), input...)
+}
+
+func cloneMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
 }
 
 func cloneFloats(input []float64) []float64 {

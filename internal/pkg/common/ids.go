@@ -19,3 +19,4 @@ type SoulID string
 type MemoryID string
 type SkillID string
 type MCPServerID string
+type MCPCapabilityID string

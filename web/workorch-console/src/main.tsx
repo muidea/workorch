@@ -13,7 +13,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, Goal, LLMProviderTemplate, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, Goal, LLMProviderTemplate, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -539,6 +539,39 @@ function metricGrid(items: MetricItem[]) {
       ))}
     </div>
   );
+}
+
+function runtimeCapabilityTable(items: RuntimeCapability[] | undefined, emptyText: string) {
+  if (!items?.length) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyText} />;
+  }
+  return (
+    <ProTable<RuntimeCapability>
+      rowKey="id"
+      search={false}
+      options={false}
+      pagination={false}
+      size="small"
+      columns={[
+        { title: '业务能力', dataIndex: 'displayName', ellipsis: true },
+        { title: '类型', dataIndex: 'kind', width: 100, render: (_, item) => capabilityKindTag(item.kind) },
+        { title: '技术标识', dataIndex: 'name', ellipsis: true },
+        { title: '服务', dataIndex: 'serverId', ellipsis: true },
+        { title: '分类', dataIndex: 'category', width: 120, render: (_, item) => item.category || '-' },
+        { title: '风险', dataIndex: 'riskLevel', width: 110, render: (_, item) => item.riskLevel || '-' },
+        { title: '使用次数', dataIndex: 'useCount', width: 100, render: (_, item) => item.useCount ?? '-' },
+        { title: '证据', dataIndex: 'evidenceRefs', ellipsis: true, render: (_, item) => (item.evidenceRefs ?? []).join(', ') || '-' }
+      ]}
+      dataSource={items}
+    />
+  );
+}
+
+function capabilityKindTag(kind?: string) {
+  if (kind === 'tool') return <Tag color="blue">Tool</Tag>;
+  if (kind === 'resource') return <Tag color="cyan">Resource</Tag>;
+  if (kind === 'prompt') return <Tag color="geekblue">Prompt</Tag>;
+  return kind ? <Tag>{kind}</Tag> : '-';
 }
 
 function evidenceCount(snapshot?: RunSnapshot) {
@@ -1864,6 +1897,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [workspaceTemplates, setWorkspaceTemplates] = useState<WorkspaceTemplate[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [mcpServers, setMCPServers] = useState<MCPServer[]>([]);
+  const [mcpCapabilities, setMCPCapabilities] = useState<MCPCapability[]>([]);
   const [memoryItems, setMemoryItems] = useState<MemoryItem[]>([]);
   const [configuration, setConfiguration] = useState<ServiceConfiguration | undefined>(undefined);
   const [runSnapshot, setRunSnapshot] = useState<RunSnapshot | undefined>(undefined);
@@ -1960,6 +1994,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     setGoals([]);
     setDoDs([]);
     setSoulBindings(undefined);
+    setSkills([]);
+    setMCPServers([]);
+    setMCPCapabilities([]);
     setMemoryItems([]);
     setRunSnapshot(undefined);
     setRunObservability(undefined);
@@ -1990,7 +2027,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
 
   async function loadWorkspaceContext(targetWorkspaceId: string) {
     const requestSeq = ++workspaceContextRequestSeq.current;
-    const [nextSnapshot, nextContextBundle, nextGoals, nextDoDs, nextSouls, nextSoulBindings, nextSkills, nextMCPServers, nextMemoryItems, nextConfiguration] = await Promise.all([
+    const [nextSnapshot, nextContextBundle, nextGoals, nextDoDs, nextSouls, nextSoulBindings, nextSkills, nextMCPServers, nextMCPCapabilities, nextMemoryItems, nextConfiguration] = await Promise.all([
       workorchApi.readWorkspaceSnapshot(targetWorkspaceId),
       workorchApi.readWorkspaceContextBundle(targetWorkspaceId),
       workorchApi.listGoals(targetWorkspaceId),
@@ -1999,6 +2036,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       workorchApi.readWorkspaceSoulBindings(targetWorkspaceId),
       workorchApi.listSkills(targetWorkspaceId),
       workorchApi.listMCPServers(),
+      workorchApi.listMCPCapabilities({ enabled: true }),
       workorchApi.listMemory(targetWorkspaceId),
       workorchApi.readConfiguration()
     ]);
@@ -2017,6 +2055,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     });
     setSkills(nextSkills);
     setMCPServers(nextMCPServers);
+    setMCPCapabilities(nextMCPCapabilities);
     setMemoryItems(nextMemoryItems);
     setConfiguration(nextConfiguration);
     const latestRun = runStateSummary(nextSnapshot.runs).latest;
@@ -2218,13 +2257,20 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     if (!workspaceId) {
       return;
     }
+    const selectedCapabilityServerIds = (request.capabilityIds ?? [])
+      .map((capabilityId) => mcpCapabilities.find((item) => item.id === capabilityId)?.serverId)
+      .filter((value): value is string => Boolean(value));
+    const requestWithCapabilityServers: WorkspaceExecutionActivationRequest = {
+      ...request,
+      mcpServerIds: Array.from(new Set([...(request.mcpServerIds ?? []), ...selectedCapabilityServerIds]))
+    };
     const targetWorkspaceId = workspaceId;
     setActivationLoading(true);
     setActivationOpen(false);
     setActivationTracking(true);
     activationForm.resetFields();
     message.info('工作空间执行已提交，已转入后台跟踪');
-    void workorchApi.activateWorkspaceExecution(targetWorkspaceId, request)
+    void workorchApi.activateWorkspaceExecution(targetWorkspaceId, requestWithCapabilityServers)
       .then(async (activation) => {
         setSnapshot(activation.snapshot);
         setRunSnapshot(undefined);
@@ -2251,6 +2297,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       soulBindings: {},
       skillIds: [],
       mcpServerIds: [],
+      capabilityIds: [],
       memoryIds: [],
       priority: 0
     });
@@ -2704,10 +2751,20 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     { key: 'checkpoints', label: '运行检查点', children: runObservability?.evidence.runtimeCheckpointTotal ?? runSnapshot.runtimeCheckpoints?.length ?? 0 },
                     { key: 'results', label: '正式 Result', children: runObservability?.evidence.resultTotal ?? runSnapshot.results?.length ?? 0 },
                     { key: 'artifacts', label: '正式 Artifact', children: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 },
+                    { key: 'selectedCapabilities', label: '选择能力', children: runObservability?.selectedCapabilities?.length ?? runSnapshot.selectedCapabilities?.length ?? 0 },
+                    { key: 'usedCapabilities', label: '使用能力', children: runObservability?.usedCapabilities?.length ?? runSnapshot.usedCapabilities?.length ?? 0 },
                     { key: 'events', label: '事件', children: runObservability?.evidence.eventTotal ?? 0 },
                     { key: 'context', label: '执行上下文', children: <pre className="json-panel">{compactJSON(runSnapshot.run.executionContext)}</pre> }
                   ]}
                 />
+                <ProCard gutter={16} wrap>
+                  <ProCard title="已选择 MCP 能力" colSpan={{ xs: 24, lg: 12 }}>
+                    {runtimeCapabilityTable(runObservability?.selectedCapabilities ?? runSnapshot.selectedCapabilities, '当前 Run 未显式选择 MCP 能力')}
+                  </ProCard>
+                  <ProCard title="实际使用 MCP 能力" colSpan={{ xs: 24, lg: 12 }}>
+                    {runtimeCapabilityTable(runObservability?.usedCapabilities ?? runSnapshot.usedCapabilities, '当前 Run 未产生 MCP 能力使用证据')}
+                  </ProCard>
+                </ProCard>
                 <ProCard
                   size="small"
                   title="最新检查点"
@@ -3299,6 +3356,19 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
               }))}
             />
           </Form.Item>
+          <Form.Item name="capabilityIds" label="MCP 能力（Tool / Resource / Prompt）">
+            <Select
+              mode="multiple"
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="可按业务能力细粒度限制本次执行可用范围"
+              options={mcpCapabilities.map((item) => ({
+                value: item.id,
+                label: `${item.displayName || item.name} / ${item.kind} / ${item.name}`
+              }))}
+            />
+          </Form.Item>
           <Form.Item name="memoryIds" label="记忆（Memory）">
             <Select
               mode="multiple"
@@ -3333,6 +3403,31 @@ type MCPServerFormValues = {
   timeoutMillis?: number;
 };
 
+type MCPCapabilityFilterValues = {
+  q?: string;
+  serverId?: string;
+  kind?: string;
+  category?: string;
+  stage?: string;
+  riskLevel?: string;
+  enabled?: boolean;
+};
+
+type MCPCapabilityFormValues = {
+  displayName?: string;
+  description?: string;
+  category?: string;
+  tags?: string[];
+  usageHint?: string;
+  inputSummary?: string;
+  outputSummary?: string;
+  stageHints?: string[];
+  riskLevel?: string;
+  enabled?: boolean;
+  approvalPolicy?: string;
+  status?: string;
+};
+
 function mcpServerPayload(values: MCPServerFormValues): MCPServer {
   return {
     id: values.id.trim(),
@@ -3352,16 +3447,34 @@ function mcpServerPayload(values: MCPServerFormValues): MCPServer {
 function RuntimeControlPage() {
   const { message } = AntApp.useApp();
   const [serverForm] = Form.useForm<MCPServerFormValues>();
+  const [capabilityFilterForm] = Form.useForm<MCPCapabilityFilterValues>();
+  const [capabilityForm] = Form.useForm<MCPCapabilityFormValues>();
   const [servers, setServers] = useState<MCPServer[]>([]);
   const [selectedServerId, setSelectedServerId] = useState<string | undefined>(undefined);
   const [tools, setTools] = useState<MCPTool[]>([]);
   const [resources, setResources] = useState<MCPResource[]>([]);
   const [prompts, setPrompts] = useState<MCPPrompt[]>([]);
+  const [capabilities, setCapabilities] = useState<MCPCapability[]>([]);
+  const [editingCapability, setEditingCapability] = useState<MCPCapability | undefined>(undefined);
+  const [capabilityModalOpen, setCapabilityModalOpen] = useState(false);
   const [metrics, setMetrics] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const selectedServer = servers.find((item) => item.id === selectedServerId);
+
+  const loadCapabilityDirectory = async (values?: MCPCapabilityFilterValues) => {
+    const query = values ?? capabilityFilterForm.getFieldsValue();
+    setCapabilities(await workorchApi.listMCPCapabilities({
+      serverId: query.serverId,
+      kind: query.kind,
+      category: query.category,
+      stage: query.stage,
+      riskLevel: query.riskLevel,
+      enabled: query.enabled,
+      q: query.q
+    }));
+  };
 
   const loadRuntime = async () => {
     setLoading(true);
@@ -3372,6 +3485,7 @@ function RuntimeControlPage() {
       ]);
       setServers(nextServers);
       setMetrics(nextMetrics);
+      await loadCapabilityDirectory();
       if (!selectedServerId && nextServers[0]) {
         setSelectedServerId(nextServers[0].id);
       }
@@ -3384,14 +3498,19 @@ function RuntimeControlPage() {
 
   const loadCapabilities = async (serverId: string) => {
     try {
-      const [nextTools, nextResources, nextPrompts] = await Promise.all([
+      const [nextTools, nextResources, nextPrompts, nextCapabilities] = await Promise.all([
         workorchApi.listMCPServerTools(serverId),
         workorchApi.listMCPServerResources(serverId),
-        workorchApi.listMCPServerPrompts(serverId)
+        workorchApi.listMCPServerPrompts(serverId),
+        workorchApi.listMCPCapabilities({ serverId })
       ]);
       setTools(nextTools);
       setResources(nextResources);
       setPrompts(nextPrompts);
+      setCapabilities((previous) => {
+        const retained = previous.filter((item) => item.serverId !== serverId);
+        return [...retained, ...nextCapabilities].sort((left, right) => left.id.localeCompare(right.id));
+      });
     } catch (error) {
       setTools([]);
       setResources([]);
@@ -3446,15 +3565,61 @@ function RuntimeControlPage() {
     });
   };
 
-  const createServer = async (values: MCPServerFormValues) => {
+  const saveServer = async (values: MCPServerFormValues) => {
     setSaving(true);
     try {
-      const server = await workorchApi.createMCPServer(mcpServerPayload(values));
-      message.success(`MCP 服务 ${server.id} 已创建`);
+      const payload = mcpServerPayload(values);
+      const exists = servers.some((item) => item.id === payload.id);
+      const server = exists
+        ? await workorchApi.updateMCPServer(payload.id, payload)
+        : await workorchApi.createMCPServer(payload);
+      message.success(`MCP 服务 ${server.id} 已${exists ? '更新' : '创建'}`);
       await loadRuntime();
       setSelectedServerId(server.id);
-      serverForm.resetFields();
-      resetServerDraft();
+      await loadCapabilities(server.id);
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const editCapability = (item: MCPCapability) => {
+    setEditingCapability(item);
+    capabilityForm.setFieldsValue({
+      ...item,
+      tags: item.tags ?? [],
+      stageHints: item.stageHints ?? [],
+      enabled: item.enabled !== false
+    });
+    setCapabilityModalOpen(true);
+  };
+
+  const saveCapability = async () => {
+    if (!editingCapability) {
+      return;
+    }
+    setSaving(true);
+    try {
+      const values = await capabilityForm.validateFields();
+      await workorchApi.updateMCPCapability(editingCapability.id, {
+        ...editingCapability,
+        ...values,
+        id: editingCapability.id,
+        serverId: editingCapability.serverId,
+        kind: editingCapability.kind,
+        name: editingCapability.name,
+        tags: values.tags ?? [],
+        stageHints: values.stageHints ?? [],
+        enabled: values.enabled !== false
+      });
+      message.success('MCP 能力已更新');
+      setCapabilityModalOpen(false);
+      setEditingCapability(undefined);
+      await loadCapabilityDirectory();
+      if (selectedServerId) {
+        await loadCapabilities(selectedServerId);
+      }
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
@@ -3478,6 +3643,36 @@ function RuntimeControlPage() {
     }
   ];
 
+  const capabilityColumns: ProColumns<MCPCapability>[] = [
+    { title: '能力名称', dataIndex: 'displayName', copyable: true },
+    {
+      title: '类型',
+      dataIndex: 'kind',
+      width: 110,
+      render: (_, item) => capabilityKindTag(item.kind)
+    },
+    { title: '技术标识', dataIndex: 'name', copyable: true, ellipsis: true },
+    { title: '所属服务', dataIndex: 'serverId', ellipsis: true },
+    { title: '分类', dataIndex: 'category', width: 120, render: (_, item) => item.category || '-' },
+    {
+      title: '阶段',
+      dataIndex: 'stageHints',
+      render: (_, item) => <Space wrap>{(item.stageHints ?? []).map((stage) => <Tag key={stage}>{stage}</Tag>)}</Space>
+    },
+    { title: '风险', dataIndex: 'riskLevel', width: 120, render: (_, item) => item.riskLevel || '-' },
+    { title: '状态', dataIndex: 'enabled', width: 100, render: (_, item) => item.enabled ? <Tag color="green">已启用</Tag> : <Tag color="red">已禁用</Tag> },
+    {
+      title: '操作',
+      valueType: 'option',
+      width: 90,
+      render: (_, item) => <Button size="small" onClick={() => editCapability(item)}>编辑</Button>
+    }
+  ];
+
+  const selectedCapabilities = selectedServerId
+    ? capabilities.filter((item) => item.serverId === selectedServerId)
+    : capabilities;
+
   return (
     <PageContainer
       title="运行控制"
@@ -3500,12 +3695,110 @@ function RuntimeControlPage() {
           <Space wrap>
             <Tag>{servers.length} 个服务</Tag>
             <Tag color="green">{servers.filter((item) => item.enabled).length} 个已启用</Tag>
-            <Tag color="blue">{servers.reduce((total, item) => total + (item.allowedTools?.length ?? 0), 0)} 个工具</Tag>
-            <Tag color="cyan">{servers.reduce((total, item) => total + (item.allowedResources?.length ?? 0), 0)} 个资源</Tag>
-            <Tag color="geekblue">{servers.reduce((total, item) => total + (item.allowedPrompts?.length ?? 0), 0)} 个提示词</Tag>
+            <Tag color="blue">{capabilities.filter((item) => item.kind === 'tool').length} 个工具</Tag>
+            <Tag color="cyan">{capabilities.filter((item) => item.kind === 'resource').length} 个资源</Tag>
+            <Tag color="geekblue">{capabilities.filter((item) => item.kind === 'prompt').length} 个提示词</Tag>
             <Tag color="purple">{servers.filter((item) => item.sessionPolicy === 'long_lived').length} 个长会话</Tag>
           </Space>
         </ProCard>
+      </ProCard>
+
+      <ProCard
+        title="MCP 能力目录"
+        subTitle="以业务名称统一识别 Tool / Resource / Prompt，同时保留技术标识"
+        className="workorch-section"
+      >
+        <Form
+          form={capabilityFilterForm}
+          layout="inline"
+          className="workorch-inline-filter"
+          onFinish={(values) => void loadCapabilityDirectory(values)}
+        >
+          <Form.Item name="q" label="搜索">
+            <Input allowClear placeholder="业务名称、技术标识、说明、标签" style={{ width: 260 }} />
+          </Form.Item>
+          <Form.Item name="serverId" label="服务">
+            <Select
+              allowClear
+              placeholder="全部服务"
+              style={{ width: 220 }}
+              options={servers.map((item) => ({ value: item.id, label: `${item.name} / ${item.id}` }))}
+            />
+          </Form.Item>
+          <Form.Item name="kind" label="类型">
+            <Select
+              allowClear
+              placeholder="全部"
+              style={{ width: 140 }}
+              options={[
+                { value: 'tool', label: 'Tool' },
+                { value: 'resource', label: 'Resource' },
+                { value: 'prompt', label: 'Prompt' }
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="category" label="分类">
+            <Input allowClear placeholder="分类" style={{ width: 150 }} />
+          </Form.Item>
+          <Form.Item name="stage" label="阶段">
+            <Input allowClear placeholder="阶段" style={{ width: 150 }} />
+          </Form.Item>
+          <Form.Item name="riskLevel" label="风险">
+            <Select
+              allowClear
+              placeholder="全部"
+              style={{ width: 150 }}
+              options={[
+                { value: 'read_only', label: '只读' },
+                { value: 'operator', label: '需操作员确认' },
+                { value: 'high', label: '高风险' }
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="enabled" label="状态">
+            <Select
+              allowClear
+              placeholder="全部"
+              style={{ width: 130 }}
+              options={[
+                { value: true, label: '已启用' },
+                { value: false, label: '已禁用' }
+              ]}
+            />
+          </Form.Item>
+          <Form.Item>
+            <Space>
+              <Button type="primary" htmlType="submit">筛选</Button>
+              <Button onClick={() => { capabilityFilterForm.resetFields(); void loadCapabilityDirectory({}); }}>重置</Button>
+            </Space>
+          </Form.Item>
+        </Form>
+        <ProTable<MCPCapability>
+          rowKey="id"
+          search={false}
+          options={false}
+          pagination={{ pageSize: 8 }}
+          columns={capabilityColumns}
+          dataSource={capabilities}
+          expandable={{
+            expandedRowRender: (item) => (
+              <Descriptions
+                column={1}
+                size="small"
+                items={[
+                  { key: 'id', label: '能力 ID', children: item.id },
+                  { key: 'description', label: '说明', children: item.description || '-' },
+                  { key: 'usageHint', label: '使用建议', children: item.usageHint || '-' },
+                  { key: 'input', label: '输入摘要', children: item.inputSummary || '-' },
+                  { key: 'output', label: '输出摘要', children: item.outputSummary || '-' },
+                  { key: 'uri', label: '资源 URI', children: item.uri || '-' },
+                  { key: 'approval', label: '审批策略', children: item.approvalPolicy || '-' },
+                  { key: 'tags', label: '标签', children: (item.tags ?? []).length > 0 ? <Space wrap>{item.tags?.map((tag) => <Tag key={tag}>{tag}</Tag>)}</Space> : '-' }
+                ]}
+              />
+            )
+          }}
+        />
       </ProCard>
 
       <ProCard title="MCP 服务" className="workorch-section">
@@ -3542,6 +3835,20 @@ function RuntimeControlPage() {
                 columns={[{ title: '允许的工具', dataIndex: 'name' }]}
                 dataSource={tools}
               />
+              <ProTable<MCPCapability>
+                rowKey="id"
+                search={false}
+                options={false}
+                pagination={false}
+                size="small"
+                columns={[
+                  { title: '业务能力', dataIndex: 'displayName' },
+                  { title: '类型', dataIndex: 'kind', width: 100 },
+                  { title: '技术标识', dataIndex: 'name', ellipsis: true },
+                  { title: '状态', dataIndex: 'enabled', width: 100, render: (_, item) => item.enabled ? <Tag color="green">已启用</Tag> : <Tag color="red">已禁用</Tag> }
+                ]}
+                dataSource={selectedCapabilities}
+              />
               <ProTable<MCPResource>
                 rowKey={(item) => `${item.serverId}-${item.uri}`}
                 search={false}
@@ -3567,7 +3874,7 @@ function RuntimeControlPage() {
         </ProCard>
 
         <ProCard
-          title="创建 MCP 服务"
+          title="MCP 服务配置"
           colSpan={{ xs: 24, lg: 12 }}
           extra={<Button onClick={resetServerDraft}>新建草稿</Button>}
         >
@@ -3580,7 +3887,7 @@ function RuntimeControlPage() {
               sessionPolicy: 'transient',
               timeoutMillis: 60000
             }}
-            onFinish={(values) => void createServer(values)}
+            onFinish={(values) => void saveServer(values)}
           >
             <Form.Item name="id" label="服务 ID" rules={[{ required: true }]}>
               <Input placeholder="mcp-filesystem" />
@@ -3625,10 +3932,86 @@ function RuntimeControlPage() {
             <Form.Item name="allowedPrompts" label="允许的提示词（Prompt）">
               <Input.TextArea rows={3} placeholder="每行一个提示词名称" />
             </Form.Item>
-            <Button type="primary" htmlType="submit" loading={saving}>创建 MCP 服务</Button>
+            <Button type="primary" htmlType="submit" loading={saving}>保存 MCP 服务</Button>
           </Form>
         </ProCard>
       </ProCard>
+      <Modal
+        title="编辑 MCP 能力"
+        open={capabilityModalOpen}
+        onCancel={() => {
+          setCapabilityModalOpen(false);
+          setEditingCapability(undefined);
+        }}
+        onOk={() => void saveCapability()}
+        confirmLoading={saving}
+        width={760}
+        destroyOnHidden
+      >
+        <Form form={capabilityForm} layout="vertical">
+          <Descriptions
+            size="small"
+            column={1}
+            items={[
+              { key: 'id', label: '能力 ID', children: editingCapability?.id || '-' },
+              { key: 'technical', label: '技术标识', children: `${editingCapability?.kind || '-'} / ${editingCapability?.serverId || '-'} / ${editingCapability?.name || '-'}` }
+            ]}
+          />
+          <Form.Item name="displayName" label="业务名称" rules={[{ required: true }]}>
+            <Input placeholder="便于用户识别的能力名称" />
+          </Form.Item>
+          <Form.Item name="description" label="能力说明">
+            <Input.TextArea rows={3} placeholder="说明该 Tool / Resource / Prompt 做什么、何时使用" />
+          </Form.Item>
+          <Form.Item name="category" label="业务分类">
+            <Input placeholder="例如：代码仓库、验收、天气查询" />
+          </Form.Item>
+          <Form.Item name="tags" label="标签">
+            <Select mode="tags" placeholder="输入后回车生成标签" options={[]} />
+          </Form.Item>
+          <Form.Item name="stageHints" label="适用阶段">
+            <Select mode="tags" placeholder="例如：planning、execution、validation" options={[]} />
+          </Form.Item>
+          <Form.Item name="usageHint" label="使用建议">
+            <Input.TextArea rows={2} placeholder="给 Workspace / Skill 选择该能力时的提示" />
+          </Form.Item>
+          <Form.Item name="inputSummary" label="输入摘要">
+            <Input.TextArea rows={2} placeholder="说明需要哪些输入" />
+          </Form.Item>
+          <Form.Item name="outputSummary" label="输出摘要">
+            <Input.TextArea rows={2} placeholder="说明会产生哪些输出" />
+          </Form.Item>
+          <Form.Item name="riskLevel" label="风险等级">
+            <Select
+              allowClear
+              options={[
+                { value: 'read_only', label: '只读' },
+                { value: 'operator', label: '需操作员确认' },
+                { value: 'high', label: '高风险' }
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="approvalPolicy" label="审批策略">
+            <Input placeholder="例如：operator、auto、manual" />
+          </Form.Item>
+          <Form.Item name="status" label="管理状态">
+            <Select
+              allowClear
+              options={[
+                { value: 'draft', label: '草稿' },
+                { value: 'active', label: '已确认' },
+                { value: 'deprecated', label: '已废弃' }
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="enabled" label="是否启用">
+            <Select options={[
+              { value: true, label: '启用' },
+              { value: false, label: '禁用' }
+            ]} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </PageContainer>
   );
 }

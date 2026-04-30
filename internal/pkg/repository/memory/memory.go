@@ -51,6 +51,11 @@ type MCPServerRepository struct {
 	items map[common.MCPServerID]*mcpmodel.Server
 }
 
+type MCPCapabilityRepository struct {
+	mu    sync.RWMutex
+	items map[common.MCPCapabilityID]*mcpmodel.Capability
+}
+
 type ResultRepository struct {
 	mu    sync.RWMutex
 	items map[common.ResultID]*resultmodel.Result
@@ -374,6 +379,57 @@ func (r *MCPServerRepository) Update(_ context.Context, item *mcpmodel.Server) e
 		return common.ErrNotFound
 	}
 	r.items[item.ID] = cloneMCPServer(item)
+	return nil
+}
+
+func NewMCPCapabilityRepository() *MCPCapabilityRepository {
+	return &MCPCapabilityRepository{items: map[common.MCPCapabilityID]*mcpmodel.Capability{}}
+}
+
+func (r *MCPCapabilityRepository) Create(_ context.Context, item *mcpmodel.Capability) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	r.items[item.ID] = cloneMCPCapability(item)
+	return nil
+}
+
+func (r *MCPCapabilityRepository) Get(_ context.Context, id common.MCPCapabilityID) (*mcpmodel.Capability, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneMCPCapability(item), nil
+}
+
+func (r *MCPCapabilityRepository) List(_ context.Context) ([]*mcpmodel.Capability, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := make([]string, 0, len(r.items))
+	for id := range r.items {
+		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+
+	ret := make([]*mcpmodel.Capability, 0, len(ids))
+	for _, id := range ids {
+		ret = append(ret, cloneMCPCapability(r.items[common.MCPCapabilityID(id)]))
+	}
+	return ret, nil
+}
+
+func (r *MCPCapabilityRepository) Update(_ context.Context, item *mcpmodel.Capability) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; !ok {
+		return common.ErrNotFound
+	}
+	r.items[item.ID] = cloneMCPCapability(item)
 	return nil
 }
 
@@ -1518,6 +1574,8 @@ func cloneSoul(item *soul.Soul) *soul.Soul {
 	cloned.BusinessDomains = cloneStringSlice(item.BusinessDomains)
 	cloned.AllowedSkillRefs = cloneStringSlice(item.AllowedSkillRefs)
 	cloned.AllowedMCPServerRefs = cloneStringSlice(item.AllowedMCPServerRefs)
+	cloned.AllowedCapabilityRefs = cloneStringSlice(item.AllowedCapabilityRefs)
+	cloned.AllowedCapabilityCategories = cloneStringSlice(item.AllowedCapabilityCategories)
 	cloned.AllowedToolKinds = cloneStringSlice(item.AllowedToolKinds)
 	return &cloned
 }
@@ -1547,6 +1605,7 @@ func cloneSkill(item *skillmodel.Skill) *skillmodel.Skill {
 	cloned.ReferenceRefs = cloneStringSlice(item.ReferenceRefs)
 	cloned.RequiredToolKinds = cloneStringSlice(item.RequiredToolKinds)
 	cloned.RequiredMCPServerRefs = cloneStringSlice(item.RequiredMCPServerRefs)
+	cloned.RequiredCapabilityRefs = cloneStringSlice(item.RequiredCapabilityRefs)
 	cloned.Constraints = cloneStringSlice(item.Constraints)
 	return &cloned
 }
@@ -1557,6 +1616,25 @@ func cloneMCPServer(item *mcpmodel.Server) *mcpmodel.Server {
 	cloned.AllowedResources = cloneStringSlice(item.AllowedResources)
 	cloned.AllowedPrompts = cloneStringSlice(item.AllowedPrompts)
 	return &cloned
+}
+
+func cloneMCPCapability(item *mcpmodel.Capability) *mcpmodel.Capability {
+	cloned := *item
+	cloned.Tags = cloneStringSlice(item.Tags)
+	cloned.StageHints = cloneStringSlice(item.StageHints)
+	cloned.Schema = cloneAnyMap(item.Schema)
+	return &cloned
+}
+
+func cloneAnyMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
 }
 
 func listArtifacts(items map[common.ArtifactID]*resultmodel.Artifact, matches func(*resultmodel.Artifact) bool) []*resultmodel.Artifact {

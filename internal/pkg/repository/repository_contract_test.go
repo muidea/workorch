@@ -83,9 +83,21 @@ func TestMCPServerRepositoryContract_Memory(t *testing.T) {
 	})
 }
 
+func TestMCPCapabilityRepositoryContract_Memory(t *testing.T) {
+	testMCPCapabilityRepositoryContract(t, func() repository.MCPCapabilityRepository {
+		return memory.NewMCPCapabilityRepository()
+	})
+}
+
 func TestMCPServerRepositoryContract_File(t *testing.T) {
 	testMCPServerRepositoryContract(t, func() repository.MCPServerRepository {
 		return file.NewMCPServerRepository(filepath.Join(t.TempDir(), "mcp_server.json"))
+	})
+}
+
+func TestMCPCapabilityRepositoryContract_File(t *testing.T) {
+	testMCPCapabilityRepositoryContract(t, func() repository.MCPCapabilityRepository {
+		return file.NewMCPCapabilityRepository(filepath.Join(t.TempDir(), "mcp_capability.json"))
 	})
 }
 
@@ -269,6 +281,7 @@ func TestRepositoryBundleContract_Memory(t *testing.T) {
 		memoryItems:        memory.NewMemoryItemRepository(),
 		skills:             memory.NewSkillRepository(),
 		mcpServers:         memory.NewMCPServerRepository(),
+		mcpCapabilities:    memory.NewMCPCapabilityRepository(),
 		results:            memory.NewResultRepository(),
 		artifacts:          memory.NewArtifactRepository(),
 		eventRecords:       memory.NewEventRecordRepository(),
@@ -296,6 +309,7 @@ func TestRepositoryBundleContract_File(t *testing.T) {
 			memoryItems:        file.NewMemoryItemRepository(filepath.Join(dir, "memory_item.json")),
 			skills:             file.NewSkillRepository(filepath.Join(dir, "skill.json")),
 			mcpServers:         file.NewMCPServerRepository(filepath.Join(dir, "mcp_server.json")),
+			mcpCapabilities:    file.NewMCPCapabilityRepository(filepath.Join(dir, "mcp_capability.json")),
 			results:            file.NewResultRepository(filepath.Join(dir, "result.json")),
 			artifacts:          file.NewArtifactRepository(filepath.Join(dir, "artifact.json")),
 			eventRecords:       file.NewEventRecordRepository(filepath.Join(dir, "event_record.json")),
@@ -321,6 +335,7 @@ type repositoryBundle struct {
 	memoryItems        repository.MemoryItemRepository
 	skills             repository.SkillRepository
 	mcpServers         repository.MCPServerRepository
+	mcpCapabilities    repository.MCPCapabilityRepository
 	results            repository.ResultRepository
 	artifacts          repository.ArtifactRepository
 	eventRecords       repository.EventRecordRepository
@@ -344,16 +359,17 @@ func testSkillRepositoryContract(t *testing.T, factory func() repository.SkillRe
 	repo := factory()
 
 	item := &skillmodel.Skill{
-		ID:                    common.SkillID("skill-contract"),
-		Name:                  "go service delivery",
-		Version:               "v1",
-		Description:           "deliver Go service changes",
-		TriggerRules:          []string{"go", "service"},
-		Instruction:           "Keep changes small and verified.",
-		ReferenceRefs:         []string{"docs/structure.md"},
-		RequiredToolKinds:     []string{"shell/command"},
-		RequiredMCPServerRefs: []string{"mcp-contract"},
-		Constraints:           []string{"cite evidence"},
+		ID:                     common.SkillID("skill-contract"),
+		Name:                   "go service delivery",
+		Version:                "v1",
+		Description:            "deliver Go service changes",
+		TriggerRules:           []string{"go", "service"},
+		Instruction:            "Keep changes small and verified.",
+		ReferenceRefs:          []string{"docs/structure.md"},
+		RequiredToolKinds:      []string{"shell/command"},
+		RequiredMCPServerRefs:  []string{"mcp-contract"},
+		RequiredCapabilityRefs: []string{"mcp-contract:tool:repo.summary"},
+		Constraints:            []string{"cite evidence"},
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create skill: %v", err)
@@ -366,12 +382,16 @@ func testSkillRepositoryContract(t *testing.T, factory func() repository.SkillRe
 		t.Fatalf("get skill: %v", err)
 	}
 	got.TriggerRules[0] = "mutated"
+	got.RequiredCapabilityRefs[0] = "mutated"
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get skill fresh: %v", err)
 	}
 	if fresh.TriggerRules[0] != "go" {
 		t.Fatalf("skill clone isolation failed, triggerRules = %+v", fresh.TriggerRules)
+	}
+	if fresh.RequiredCapabilityRefs[0] != "mcp-contract:tool:repo.summary" {
+		t.Fatalf("skill clone isolation failed, requiredCapabilityRefs = %+v", fresh.RequiredCapabilityRefs)
 	}
 	fresh.Description = "updated skill"
 	if err := repo.Update(ctx, fresh); err != nil {
@@ -442,6 +462,65 @@ func testMCPServerRepositoryContract(t *testing.T, factory func() repository.MCP
 	}
 	if _, err := repo.Get(ctx, common.MCPServerID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("get missing mcp server err = %v, want not found", err)
+	}
+}
+
+func testMCPCapabilityRepositoryContract(t *testing.T, factory func() repository.MCPCapabilityRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &mcpmodel.Capability{
+		ID:             common.MCPCapabilityID("mcp-contract:tool:repo.summary"),
+		ServerID:       common.MCPServerID("mcp-contract"),
+		Kind:           "tool",
+		Name:           "repo.summary",
+		DisplayName:    "仓库摘要",
+		Description:    "获取代码仓库结构、关键文件和当前变更概览。",
+		Category:       "代码仓库",
+		Tags:           []string{"repo", "summary"},
+		UsageHint:      "规划前收集上下文。",
+		InputSummary:   "可选仓库路径。",
+		OutputSummary:  "返回仓库结构和变更摘要。",
+		StageHints:     []string{"planning"},
+		RiskLevel:      "read_only",
+		Schema:         map[string]any{"type": "object"},
+		Enabled:        true,
+		ApprovalPolicy: "operator",
+		Status:         "draft",
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create mcp capability: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate mcp capability create err = %v, want conflict", err)
+	}
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get mcp capability: %v", err)
+	}
+	got.Tags[0] = "mutated"
+	got.Schema["type"] = "mutated"
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get mcp capability fresh: %v", err)
+	}
+	if fresh.Tags[0] != "repo" || fresh.Schema["type"] != "object" {
+		t.Fatalf("mcp capability clone isolation failed: %+v", fresh)
+	}
+	fresh.Enabled = false
+	if err := repo.Update(ctx, fresh); err != nil {
+		t.Fatalf("update mcp capability: %v", err)
+	}
+	list, err := repo.List(ctx)
+	if err != nil {
+		t.Fatalf("list mcp capabilities: %v", err)
+	}
+	if len(list) != 1 || list[0].Enabled {
+		t.Fatalf("mcp capabilities = %+v, want disabled capability", list)
+	}
+	if _, err := repo.Get(ctx, common.MCPCapabilityID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get missing mcp capability err = %v, want not found", err)
 	}
 }
 
@@ -784,14 +863,16 @@ func testSoulRepositoryContract(t *testing.T, factory func() repository.SoulRepo
 	repo := factory()
 
 	item := &soulmodel.Soul{
-		ID:                   common.SoulID("soul-contract"),
-		Name:                 "engineering delivery",
-		Description:          "drives engineering delivery",
-		BusinessDomains:      []string{"engineering"},
-		SoulMD:               "# Engineering Delivery\n\nPlan and verify before completion.\n\n## Planning\n\nUse small steps.\n\n## Decision\n\nAsk when information is missing.\n\n## Approval\n\nRequest approval for risky actions.\n\n## Validation\n\nRequire evidence.\n",
-		AllowedSkillRefs:     []string{"skill-go"},
-		AllowedMCPServerRefs: []string{"mcp-repo"},
-		AllowedToolKinds:     []string{"shell/command"},
+		ID:                          common.SoulID("soul-contract"),
+		Name:                        "engineering delivery",
+		Description:                 "drives engineering delivery",
+		BusinessDomains:             []string{"engineering"},
+		SoulMD:                      "# Engineering Delivery\n\nPlan and verify before completion.\n\n## Planning\n\nUse small steps.\n\n## Decision\n\nAsk when information is missing.\n\n## Approval\n\nRequest approval for risky actions.\n\n## Validation\n\nRequire evidence.\n",
+		AllowedSkillRefs:            []string{"skill-go"},
+		AllowedMCPServerRefs:        []string{"mcp-repo"},
+		AllowedCapabilityRefs:       []string{"mcp-repo:tool:repo.summary"},
+		AllowedCapabilityCategories: []string{"代码仓库"},
+		AllowedToolKinds:            []string{"shell/command"},
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create soul: %v", err)
@@ -806,6 +887,8 @@ func testSoulRepositoryContract(t *testing.T, factory func() repository.SoulRepo
 	}
 	got.Name = "mutated"
 	got.AllowedSkillRefs[0] = "mutated"
+	got.AllowedCapabilityRefs[0] = "mutated"
+	got.AllowedCapabilityCategories[0] = "mutated"
 
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
@@ -816,6 +899,9 @@ func testSoulRepositoryContract(t *testing.T, factory func() repository.SoulRepo
 	}
 	if fresh.AllowedSkillRefs[0] != "skill-go" {
 		t.Fatalf("skill refs clone isolation failed, refs = %+v", fresh.AllowedSkillRefs)
+	}
+	if fresh.AllowedCapabilityRefs[0] != "mcp-repo:tool:repo.summary" || fresh.AllowedCapabilityCategories[0] != "代码仓库" {
+		t.Fatalf("capability refs clone isolation failed, refs/categories = %+v/%+v", fresh.AllowedCapabilityRefs, fresh.AllowedCapabilityCategories)
 	}
 
 	fresh.Description = "updated description"
@@ -1920,6 +2006,20 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	if err := bundle.mcpServers.Create(ctx, mcpServer); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("duplicate mcp server create err = %v, want conflict", err)
 	}
+	mcpCapability := &mcpmodel.Capability{
+		ID:          common.MCPCapabilityID("mcp-bundle-contract:tool:repo.summary"),
+		ServerID:    mcpServerID,
+		Kind:        "tool",
+		Name:        "repo.summary",
+		DisplayName: "仓库摘要",
+		Enabled:     true,
+	}
+	if err := bundle.mcpCapabilities.Create(ctx, mcpCapability); err != nil {
+		t.Fatalf("create mcp capability: %v", err)
+	}
+	if err := bundle.mcpCapabilities.Create(ctx, mcpCapability); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate mcp capability create err = %v, want conflict", err)
+	}
 
 	workspace := &workspacemodel.Workspace{
 		ID:    workspaceID,
@@ -2242,6 +2342,13 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		reloadedMCPServer.SessionPolicy != "long_lived" {
 		t.Fatalf("reloaded mcp server = %+v, want bundle mcp", reloadedMCPServer)
 	}
+	reloadedMCPCapability, err := reloaded.mcpCapabilities.Get(ctx, mcpCapability.ID)
+	if err != nil {
+		t.Fatalf("reload mcp capability: %v", err)
+	}
+	if reloadedMCPCapability.DisplayName != "仓库摘要" || !reloadedMCPCapability.Enabled {
+		t.Fatalf("reloaded mcp capability = %+v, want enabled 仓库摘要", reloadedMCPCapability)
+	}
 
 	reloadedWorkspace, err := reloaded.workspaces.Get(ctx, workspaceID)
 	if err != nil {
@@ -2388,6 +2495,9 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	}
 	if _, err := reloaded.mcpServers.Get(ctx, common.MCPServerID("mcp-missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing mcp server get err = %v, want not found", err)
+	}
+	if _, err := reloaded.mcpCapabilities.Get(ctx, common.MCPCapabilityID("mcp-capability-missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing mcp capability get err = %v, want not found", err)
 	}
 	if _, err := reloaded.goals.Get(ctx, common.GoalID("goal-missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing goal get err = %v, want not found", err)

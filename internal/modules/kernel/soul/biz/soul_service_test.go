@@ -16,14 +16,16 @@ func TestServiceCreateSoulAndValidateCapabilitySelection(t *testing.T) {
 	service := NewService(memory.NewSoulRepository())
 
 	cmd := soulservice.CreateSoulCommand{
-		SoulID:               common.SoulID("soul-engineering"),
-		Name:                 "engineering delivery",
-		Description:          "delivery-focused engineering soul",
-		BusinessDomains:      []string{"engineering"},
-		SoulMD:               "# Engineering Delivery\n\nPlan, execute, and cite evidence before completion.\n\n## Output Contract\n\nReturn LLMExecutionDecision JSON.\n",
-		AllowedSkillRefs:     []string{"skill-go"},
-		AllowedMCPServerRefs: []string{"mcp-repo"},
-		AllowedToolKinds:     []string{"shell/command", "patch/apply"},
+		SoulID:                      common.SoulID("soul-engineering"),
+		Name:                        "engineering delivery",
+		Description:                 "delivery-focused engineering soul",
+		BusinessDomains:             []string{"engineering"},
+		SoulMD:                      "# Engineering Delivery\n\nPlan, execute, and cite evidence before completion.\n\n## Output Contract\n\nReturn LLMExecutionDecision JSON.\n",
+		AllowedSkillRefs:            []string{"skill-go"},
+		AllowedMCPServerRefs:        []string{"mcp-repo"},
+		AllowedCapabilityRefs:       []string{"mcp-repo:tool:repo.summary"},
+		AllowedCapabilityCategories: []string{"代码仓库"},
+		AllowedToolKinds:            []string{"shell/command", "patch/apply"},
 	}
 	if err := service.CreateSoul(ctx, cmd); err != nil {
 		t.Fatalf("create soul: %v", err)
@@ -38,10 +40,12 @@ func TestServiceCreateSoulAndValidateCapabilitySelection(t *testing.T) {
 	}
 
 	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
-		SoulID:        cmd.SoulID,
-		SkillRefs:     []string{"skill-go"},
-		MCPServerRefs: []string{"mcp-repo"},
-		ToolKinds:     []string{"shell/command"},
+		SoulID:               cmd.SoulID,
+		SkillRefs:            []string{"skill-go"},
+		MCPServerRefs:        []string{"mcp-repo"},
+		CapabilityRefs:       []string{"mcp-repo:tool:repo.summary"},
+		CapabilityCategories: []string{"代码仓库"},
+		ToolKinds:            []string{"shell/command"},
 	}); err != nil {
 		t.Fatalf("validate allowed capability selection: %v", err)
 	}
@@ -65,6 +69,13 @@ func TestServiceCreateSoulAndValidateCapabilitySelection(t *testing.T) {
 		ToolKinds: []string{"shell/ssh"},
 	}); !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "shell/ssh") {
 		t.Fatalf("validate disallowed tool kind err = %v, want invalid argument with tool kind", err)
+	}
+
+	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
+		SoulID:         cmd.SoulID,
+		CapabilityRefs: []string{"mcp-repo:tool:write.file"},
+	}); !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "write.file") {
+		t.Fatalf("validate disallowed capability err = %v, want invalid argument with capability ref", err)
 	}
 
 	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{

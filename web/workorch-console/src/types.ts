@@ -132,6 +132,7 @@ export type WorkspaceExecutionActivationRequest = {
   soulBindings?: Record<string, string>;
   skillIds?: string[];
   mcpServerIds?: string[];
+  capabilityIds?: string[];
   memoryIds?: string[];
   priority?: number;
 };
@@ -144,6 +145,8 @@ export type Soul = {
   soulMd?: string;
   allowedSkillRefs?: string[];
   allowedMCPServerRefs?: string[];
+  allowedCapabilityRefs?: string[];
+  allowedCapabilityCategories?: string[];
   allowedToolKinds?: string[];
 };
 
@@ -190,6 +193,7 @@ export type Skill = {
   managedBy?: string;
   sourceSkillId?: string;
   requiredMCPServerRefs?: string[];
+  requiredCapabilityRefs?: string[];
   requiredToolKinds?: string[];
 };
 
@@ -220,6 +224,27 @@ export type MCPResource = {
 export type MCPPrompt = {
   serverId: string;
   name: string;
+};
+
+export type MCPCapability = {
+  id: string;
+  serverId: string;
+  kind: 'tool' | 'resource' | 'prompt' | string;
+  name: string;
+  displayName: string;
+  description?: string;
+  category?: string;
+  tags?: string[];
+  usageHint?: string;
+  inputSummary?: string;
+  outputSummary?: string;
+  stageHints?: string[];
+  riskLevel?: string;
+  schema?: Record<string, unknown>;
+  uri?: string;
+  enabled: boolean;
+  approvalPolicy?: string;
+  status?: string;
 };
 
 export type MemoryItem = {
@@ -254,8 +279,10 @@ export type ToolCall = {
   runId: string;
   stepId?: string;
   toolName: string;
+  arguments?: Record<string, unknown>;
   state: string;
   exitSummary?: string;
+  output?: Record<string, unknown>;
   error?: string;
 };
 
@@ -373,6 +400,23 @@ export type RuntimeTimelineItem = {
   occurredAt?: string;
   data?: Record<string, unknown>;
   output?: Record<string, unknown>;
+};
+
+export type RuntimeCapability = {
+  id: string;
+  serverId?: string;
+  kind?: string;
+  name?: string;
+  displayName?: string;
+  description?: string;
+  category?: string;
+  tags?: string[];
+  riskLevel?: string;
+  enabled: boolean;
+  approvalPolicy?: string;
+  status?: string;
+  useCount?: number;
+  evidenceRefs?: string[];
 };
 
 export type TaskProgress = {
@@ -532,6 +576,8 @@ export type RunObservability = {
   taskDecompositions?: TaskDecomposition[];
   evidence: RuntimeEvidenceSummary;
   latestCheckpoint?: RuntimeCheckpoint;
+  selectedCapabilities?: RuntimeCapability[];
+  usedCapabilities?: RuntimeCapability[];
   timeline?: RuntimeTimelineItem[];
 };
 
@@ -547,6 +593,8 @@ export type RunSnapshot = {
   runtimeCheckpoints?: RuntimeCheckpoint[];
   results?: Result[];
   artifacts?: Artifact[];
+  selectedCapabilities?: RuntimeCapability[];
+  usedCapabilities?: RuntimeCapability[];
   eventRecords?: EventRecord[];
   decisions?: Decision[];
   approvals?: Approval[];

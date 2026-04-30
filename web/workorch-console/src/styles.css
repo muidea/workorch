@@ -198,6 +198,11 @@ body {
   white-space: nowrap;
 }
 
+.workorch-inline-filter {
+  gap: 8px 12px;
+  margin-bottom: 16px;
+}
+
 .goal-outcome-summary {
   margin-bottom: 0 !important;
   padding: 10px 12px;

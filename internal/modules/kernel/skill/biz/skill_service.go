@@ -50,6 +50,7 @@ func validateSkillCommand(cmd skillservice.CreateSkillCommand) error {
 		hasBlank(cmd.ReferenceRefs) ||
 		hasBlank(cmd.RequiredToolKinds) ||
 		hasBlank(cmd.RequiredMCPServerRefs) ||
+		hasBlank(cmd.RequiredCapabilityRefs) ||
 		hasBlank(cmd.Constraints) {
 		return common.ErrInvalidArgument
 	}
@@ -58,16 +59,17 @@ func validateSkillCommand(cmd skillservice.CreateSkillCommand) error {
 
 func skillFromCommand(cmd skillservice.CreateSkillCommand) *skillmodel.Skill {
 	return &skillmodel.Skill{
-		ID:                    cmd.SkillID,
-		Name:                  cmd.Name,
-		Version:               cmd.Version,
-		Description:           cmd.Description,
-		TriggerRules:          cloneStrings(cmd.TriggerRules),
-		Instruction:           cmd.Instruction,
-		ReferenceRefs:         cloneStrings(cmd.ReferenceRefs),
-		RequiredToolKinds:     cloneStrings(cmd.RequiredToolKinds),
-		RequiredMCPServerRefs: cloneStrings(cmd.RequiredMCPServerRefs),
-		Constraints:           cloneStrings(cmd.Constraints),
+		ID:                     cmd.SkillID,
+		Name:                   cmd.Name,
+		Version:                cmd.Version,
+		Description:            cmd.Description,
+		TriggerRules:           cloneStrings(cmd.TriggerRules),
+		Instruction:            cmd.Instruction,
+		ReferenceRefs:          cloneStrings(cmd.ReferenceRefs),
+		RequiredToolKinds:      cloneStrings(cmd.RequiredToolKinds),
+		RequiredMCPServerRefs:  cloneStrings(cmd.RequiredMCPServerRefs),
+		RequiredCapabilityRefs: cloneStrings(cmd.RequiredCapabilityRefs),
+		Constraints:            cloneStrings(cmd.Constraints),
 	}
 }
 

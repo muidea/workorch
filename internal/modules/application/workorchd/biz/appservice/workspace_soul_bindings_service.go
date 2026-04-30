@@ -182,7 +182,7 @@ func isSoulBindingStage(stage string) bool {
 	return false
 }
 
-func validateSoulCapabilitySelection(ctx context.Context, service soulmodule.Service, soulID common.SoulID, skillIDs []string, mcpServerIDs []string, toolKinds []string) error {
+func validateSoulCapabilitySelection(ctx context.Context, service soulmodule.Service, soulID common.SoulID, skillIDs []string, mcpServerIDs []string, capabilityIDs []string, capabilityCategories []string, toolKinds []string) error {
 	if soulID == "" {
 		return nil
 	}
@@ -190,9 +190,11 @@ func validateSoulCapabilitySelection(ctx context.Context, service soulmodule.Ser
 		return common.ErrInvalidArgument
 	}
 	return service.ValidateCapabilitySelection(ctx, soulmodule.ValidateCapabilitySelectionCommand{
-		SoulID:        soulID,
-		SkillRefs:     skillIDs,
-		MCPServerRefs: mcpServerIDs,
-		ToolKinds:     toolKinds,
+		SoulID:               soulID,
+		SkillRefs:            skillIDs,
+		MCPServerRefs:        mcpServerIDs,
+		CapabilityRefs:       capabilityIDs,
+		CapabilityCategories: capabilityCategories,
+		ToolKinds:            toolKinds,
 	})
 }

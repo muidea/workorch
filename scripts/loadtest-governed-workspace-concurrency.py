@@ -29,7 +29,9 @@ TOTAL = int(os.environ.get("WORKORCH_LOAD_TOTAL", "10"))
 MOCK_ADDR = os.environ.get("WORKORCH_LOAD_MOCK_ADDR", "127.0.0.1:18191")
 PROVIDER_ID = os.environ.get("WORKORCH_LOAD_PROVIDER_ID", "")
 BATCH_ID = os.environ.get("WORKORCH_LOAD_BATCH_ID", f"load-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}")
+ROOT_DIR = Path(__file__).resolve().parents[1]
 ARTIFACT_DIR = Path(os.environ.get("WORKORCH_LOAD_ARTIFACT_DIR", tempfile.mkdtemp(prefix=f"workorch-loadtest-{BATCH_ID}-")))
+MCP_ENDPOINT_ROOT = Path(os.environ.get("WORKORCH_MCP_ENDPOINT_DIR", ROOT_DIR / ".workorch-data" / "system" / "mcp-endpoints"))
 KEEP_ARTIFACTS = os.environ.get("WORKORCH_LOAD_KEEP_ARTIFACTS", "1") == "1"
 CURL_MAX_TIME = os.environ.get("WORKORCH_LOAD_CURL_MAX_TIME", "300")
 COUNTRY = os.environ.get("WORKORCH_LOAD_COUNTRY", "中国")
@@ -1015,7 +1017,9 @@ def main() -> int:
                 "increase [server].maxConcurrentRuns and redeploy before this capacity run"
             )
 
-        helper_path = ARTIFACT_DIR / "loadtest_mcp_helper.py"
+        endpoint_dir = MCP_ENDPOINT_ROOT / mcp_server_id
+        endpoint_dir.mkdir(parents=True, exist_ok=True)
+        helper_path = endpoint_dir / "loadtest_mcp_helper.py"
         create_mcp_helper(helper_path)
         if LLM_MODE == "mock":
             mock_server = MockLLMServer(MOCK_ADDR, mcp_server_id)
@@ -1024,21 +1028,23 @@ def main() -> int:
         else:
             provider_id = select_real_provider()
 
-        mcp_server = run_curl(
-            "POST",
-            "/api/v1/workorch/mcp/servers",
-            {
-                "id": mcp_server_id,
-                "name": f"Governed Load Test MCP {BATCH_ID}",
-                "transport": "stdio",
-                "endpoint": str(helper_path),
-                "enabled": True,
-                "allowedTools": ["loadtest.governed_result"],
-                "defaultApprovalPolicy": "operator",
-                "sessionPolicy": MCP_SESSION_POLICY,
-                "timeoutMillis": 30000,
-            },
-        )
+        mcp_server_payload = {
+            "id": mcp_server_id,
+            "name": f"Governed Load Test MCP {BATCH_ID}",
+            "transport": "stdio",
+            "endpoint": str(helper_path),
+            "enabled": True,
+            "allowedTools": ["loadtest.governed_result"],
+            "defaultApprovalPolicy": "operator",
+            "sessionPolicy": MCP_SESSION_POLICY,
+            "timeoutMillis": 30000,
+        }
+        try:
+            mcp_server = run_curl("POST", "/api/v1/workorch/mcp/servers", mcp_server_payload)
+        except HTTPError as exc:
+            if exc.http_status != 409:
+                raise
+            mcp_server = run_curl("PUT", f"/api/v1/workorch/mcp/servers/{url_quote(mcp_server_id)}", mcp_server_payload)
         write_json(ARTIFACT_DIR / "mcp-server.json", mcp_server)
 
         results: list[WorkspaceResult] = []

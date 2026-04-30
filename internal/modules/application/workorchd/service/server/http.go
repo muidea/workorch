@@ -301,6 +301,20 @@ type mcpPromptsResponse struct {
 	Prompts  []appservice.MCPPrompt `json:"prompts"`
 }
 
+type mcpCapabilityResponse struct {
+	Service    string                   `json:"service"`
+	Backend    string                   `json:"backend,omitempty"`
+	DataRoot   string                   `json:"dataRoot,omitempty"`
+	Capability appservice.MCPCapability `json:"capability"`
+}
+
+type mcpCapabilitiesResponse struct {
+	Service      string                     `json:"service"`
+	Backend      string                     `json:"backend,omitempty"`
+	DataRoot     string                     `json:"dataRoot,omitempty"`
+	Capabilities []appservice.MCPCapability `json:"capabilities"`
+}
+
 type memoryItemResponse struct {
 	Service  string                `json:"service"`
 	Backend  string                `json:"backend,omitempty"`
@@ -338,6 +352,7 @@ type activateWorkspaceExecutionRequest struct {
 	SoulBindings  map[string]string `json:"soulBindings,omitempty"`
 	SkillIDs      []string          `json:"skillIds,omitempty"`
 	MCPServerIDs  []string          `json:"mcpServerIds,omitempty"`
+	CapabilityIDs []string          `json:"capabilityIds,omitempty"`
 	MemoryIDs     []string          `json:"memoryIds,omitempty"`
 	Priority      int               `json:"priority,omitempty"`
 }
@@ -346,6 +361,8 @@ type createSoulRequest = appservice.CreateSoulCommand
 type createWorkspaceTemplateRequest = appservice.WorkspaceTemplate
 type createSkillRequest = appservice.CreateSkillCommand
 type createMCPServerRequest = appservice.CreateMCPServerCommand
+type updateMCPServerRequest = appservice.UpdateMCPServerCommand
+type createMCPCapabilityRequest = appservice.CreateMCPCapabilityCommand
 type createMemoryItemRequest = appservice.CreateMemoryItemCommand
 
 type resolveDecisionRequest struct {
@@ -429,11 +446,16 @@ type createSkillFunc func(context.Context, string, string, appservice.CreateSkil
 type readSkillFunc func(context.Context, string, string, string, appservice.SkillQuery) (appservice.Skill, error)
 type listSkillsFunc func(context.Context, string, string, appservice.SkillQuery) ([]appservice.Skill, error)
 type createMCPServerFunc func(context.Context, string, string, appservice.CreateMCPServerCommand) (appservice.MCPServer, error)
+type updateMCPServerFunc func(context.Context, string, string, string, appservice.UpdateMCPServerCommand) (appservice.MCPServer, error)
 type readMCPServerFunc func(context.Context, string, string, string) (appservice.MCPServer, error)
 type listMCPServersFunc func(context.Context, string, string) ([]appservice.MCPServer, error)
 type listMCPServerToolsFunc func(context.Context, string, string, string) ([]appservice.MCPTool, error)
 type listMCPServerResourcesFunc func(context.Context, string, string, string) ([]appservice.MCPResource, error)
 type listMCPServerPromptsFunc func(context.Context, string, string, string) ([]appservice.MCPPrompt, error)
+type createMCPCapabilityFunc func(context.Context, string, string, appservice.CreateMCPCapabilityCommand) (appservice.MCPCapability, error)
+type updateMCPCapabilityFunc func(context.Context, string, string, string, appservice.UpdateMCPCapabilityCommand) (appservice.MCPCapability, error)
+type readMCPCapabilityFunc func(context.Context, string, string, string) (appservice.MCPCapability, error)
+type listMCPCapabilitiesFunc func(context.Context, string, string, appservice.MCPCapabilityQuery) ([]appservice.MCPCapability, error)
 type createMemoryItemFunc func(context.Context, string, string, string, appservice.CreateMemoryItemCommand) (appservice.MemoryItem, error)
 type listMemoryByWorkspaceFunc func(context.Context, string, string, string, string) ([]appservice.MemoryItem, error)
 type validateFunc func(context.Context, string, string) error
@@ -498,11 +520,16 @@ type serverState struct {
 	readSkill                       readSkillFunc
 	listSkills                      listSkillsFunc
 	createMCPServer                 createMCPServerFunc
+	updateMCPServer                 updateMCPServerFunc
 	readMCPServer                   readMCPServerFunc
 	listMCPServers                  listMCPServersFunc
 	listMCPServerTools              listMCPServerToolsFunc
 	listMCPServerResources          listMCPServerResourcesFunc
 	listMCPServerPrompts            listMCPServerPromptsFunc
+	createMCPCapability             createMCPCapabilityFunc
+	updateMCPCapability             updateMCPCapabilityFunc
+	readMCPCapability               readMCPCapabilityFunc
+	listMCPCapabilities             listMCPCapabilitiesFunc
 	createMemoryItem                createMemoryItemFunc
 	listMemoryByWorkspace           listMemoryByWorkspaceFunc
 	readConfiguration               readConfigurationFunc
@@ -573,6 +600,10 @@ type serverMetrics struct {
 	mcpToolListRequests                atomic.Uint64
 	mcpResourceListRequests            atomic.Uint64
 	mcpPromptListRequests              atomic.Uint64
+	mcpCapabilityCreateRequests        atomic.Uint64
+	mcpCapabilityUpdateRequests        atomic.Uint64
+	mcpCapabilityListRequests          atomic.Uint64
+	mcpCapabilityGetRequests           atomic.Uint64
 	memoryCreateRequests               atomic.Uint64
 	memoryListRequests                 atomic.Uint64
 	configurationReadRequests          atomic.Uint64
@@ -1406,6 +1437,41 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Servers:  items,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/mcp/capabilities", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.mcpCapabilityListRequests.Add(1)
+		items, err := state.listMCPCapabilities(r.Context(), state.config.Backend, state.config.DataRoot, mcpCapabilityQueryFromRequest(r))
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, mcpCapabilitiesResponse{
+			Service:      "workorch",
+			Backend:      state.config.Backend,
+			DataRoot:     state.config.DataRoot,
+			Capabilities: items,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/mcp/capabilities/:capabilityId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		capabilityID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/mcp/capabilities/")
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.mcpCapabilityGetRequests.Add(1)
+		item, err := state.readMCPCapability(r.Context(), state.config.Backend, state.config.DataRoot, capabilityID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, mcpCapabilityResponse{
+			Service:    "workorch",
+			Backend:    state.config.Backend,
+			DataRoot:   state.config.DataRoot,
+			Capability: item,
+		})
+	})
 	router.AddHandler("/api/v1/workorch/mcp/servers/:serverId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		serverID, action, ok := mcpServerActionFromPath(r.URL.Path)
@@ -1624,6 +1690,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			SoulBindings:  req.SoulBindings,
 			SkillIDs:      req.SkillIDs,
 			MCPServerIDs:  req.MCPServerIDs,
+			CapabilityIDs: req.CapabilityIDs,
 			MemoryIDs:     req.MemoryIDs,
 			Priority:      priority,
 		})
@@ -1930,6 +1997,75 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			Server:   item,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/mcp/servers/:serverId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		serverID, action, ok := mcpServerActionFromPath(r.URL.Path)
+		if !ok || action != "" {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: common.ErrNotFound.Error()})
+			return
+		}
+		var req updateMCPServerRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.updateMCPServer(r.Context(), state.config.Backend, state.config.DataRoot, serverID, req)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, mcpServerResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Server:   item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/mcp/capabilities", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.mcpCapabilityCreateRequests.Add(1)
+		var req createMCPCapabilityRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.createMCPCapability(r.Context(), state.config.Backend, state.config.DataRoot, req)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, mcpCapabilityResponse{
+			Service:    "workorch",
+			Backend:    state.config.Backend,
+			DataRoot:   state.config.DataRoot,
+			Capability: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/mcp/capabilities/:capabilityId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		capabilityID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/mcp/capabilities/")
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.mcpCapabilityUpdateRequests.Add(1)
+		var req createMCPCapabilityRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.updateMCPCapability(r.Context(), state.config.Backend, state.config.DataRoot, capabilityID, req)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, mcpCapabilityResponse{
+			Service:    "workorch",
+			Backend:    state.config.Backend,
+			DataRoot:   state.config.DataRoot,
+			Capability: item,
+		})
+	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs", http.MethodGet, func(_ context.Context, w http.ResponseWriter, _ *http.Request) {
 		writeMethodNotAllowed(w)
 	})
@@ -2213,11 +2349,16 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		readSkill:                       defaultReadSkill,
 		listSkills:                      defaultListSkills,
 		createMCPServer:                 defaultCreateMCPServer,
+		updateMCPServer:                 defaultUpdateMCPServer,
 		readMCPServer:                   defaultReadMCPServer,
 		listMCPServers:                  defaultListMCPServers,
 		listMCPServerTools:              defaultListMCPServerTools,
 		listMCPServerResources:          defaultListMCPServerResources,
 		listMCPServerPrompts:            defaultListMCPServerPrompts,
+		createMCPCapability:             defaultCreateMCPCapability,
+		updateMCPCapability:             defaultUpdateMCPCapability,
+		readMCPCapability:               defaultReadMCPCapability,
+		listMCPCapabilities:             defaultListMCPCapabilities,
 		createMemoryItem:                defaultCreateMemoryItem,
 		listMemoryByWorkspace:           defaultListMemoryByWorkspace,
 		readConfiguration:               defaultReadConfiguration,
@@ -2730,6 +2871,15 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		})
 		return ret, err
 	}
+	s.updateMCPServer = func(ctx context.Context, _, _ string, serverID string, cmd appservice.UpdateMCPServerCommand) (appservice.MCPServer, error) {
+		var ret appservice.MCPServer
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.UpdateMCPServerWithSession(ctx, session, serverID, cmd)
+			return err
+		})
+		return ret, err
+	}
 	s.readMCPServer = func(ctx context.Context, _, _, serverID string) (appservice.MCPServer, error) {
 		var ret appservice.MCPServer
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
@@ -2771,6 +2921,42 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ListMCPServerPromptsWithSession(ctx, session, serverID)
+			return err
+		})
+		return ret, err
+	}
+	s.createMCPCapability = func(ctx context.Context, _, _ string, cmd appservice.CreateMCPCapabilityCommand) (appservice.MCPCapability, error) {
+		var ret appservice.MCPCapability
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.CreateMCPCapabilityWithSession(ctx, session, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.updateMCPCapability = func(ctx context.Context, _, _, capabilityID string, cmd appservice.UpdateMCPCapabilityCommand) (appservice.MCPCapability, error) {
+		var ret appservice.MCPCapability
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.UpdateMCPCapabilityWithSession(ctx, session, capabilityID, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.readMCPCapability = func(ctx context.Context, _, _, capabilityID string) (appservice.MCPCapability, error) {
+		var ret appservice.MCPCapability
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadMCPCapabilityWithSession(ctx, session, capabilityID)
+			return err
+		})
+		return ret, err
+	}
+	s.listMCPCapabilities = func(ctx context.Context, _, _ string, query appservice.MCPCapabilityQuery) ([]appservice.MCPCapability, error) {
+		var ret []appservice.MCPCapability
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListMCPCapabilitiesWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
@@ -3037,6 +3223,10 @@ func defaultCreateMCPServer(ctx context.Context, backend string, dataRoot string
 	return appservice.CreateMCPServerWithBackend(ctx, backend, dataRoot, cmd)
 }
 
+func defaultUpdateMCPServer(ctx context.Context, backend string, dataRoot string, serverID string, cmd appservice.UpdateMCPServerCommand) (appservice.MCPServer, error) {
+	return appservice.UpdateMCPServerWithBackend(ctx, backend, dataRoot, serverID, cmd)
+}
+
 func defaultReadMCPServer(ctx context.Context, backend string, dataRoot string, serverID string) (appservice.MCPServer, error) {
 	return appservice.ReadMCPServerWithBackend(ctx, backend, dataRoot, serverID)
 }
@@ -3055,6 +3245,22 @@ func defaultListMCPServerResources(ctx context.Context, backend string, dataRoot
 
 func defaultListMCPServerPrompts(ctx context.Context, backend string, dataRoot string, serverID string) ([]appservice.MCPPrompt, error) {
 	return appservice.ListMCPServerPromptsWithBackend(ctx, backend, dataRoot, serverID)
+}
+
+func defaultCreateMCPCapability(ctx context.Context, backend string, dataRoot string, cmd appservice.CreateMCPCapabilityCommand) (appservice.MCPCapability, error) {
+	return appservice.CreateMCPCapabilityWithBackend(ctx, backend, dataRoot, cmd)
+}
+
+func defaultUpdateMCPCapability(ctx context.Context, backend string, dataRoot string, capabilityID string, cmd appservice.UpdateMCPCapabilityCommand) (appservice.MCPCapability, error) {
+	return appservice.UpdateMCPCapabilityWithBackend(ctx, backend, dataRoot, capabilityID, cmd)
+}
+
+func defaultReadMCPCapability(ctx context.Context, backend string, dataRoot string, capabilityID string) (appservice.MCPCapability, error) {
+	return appservice.ReadMCPCapabilityWithBackend(ctx, backend, dataRoot, capabilityID)
+}
+
+func defaultListMCPCapabilities(ctx context.Context, backend string, dataRoot string, query appservice.MCPCapabilityQuery) ([]appservice.MCPCapability, error) {
+	return appservice.ListMCPCapabilitiesWithBackend(ctx, backend, dataRoot, query)
 }
 
 func defaultCreateMemoryItem(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd appservice.CreateMemoryItemCommand) (appservice.MemoryItem, error) {
@@ -3205,6 +3411,25 @@ func eventRecordQueryFromRequest(r *http.Request) appservice.EventRecordQuery {
 		OccurredAfter:  values.Get("occurredAfter"),
 		OccurredBefore: values.Get("occurredBefore"),
 		Limit:          limit,
+	}
+}
+
+func mcpCapabilityQueryFromRequest(r *http.Request) appservice.MCPCapabilityQuery {
+	values := r.URL.Query()
+	var enabled *bool
+	if raw := strings.TrimSpace(values.Get("enabled")); raw != "" {
+		if parsed, err := strconv.ParseBool(raw); err == nil {
+			enabled = &parsed
+		}
+	}
+	return appservice.MCPCapabilityQuery{
+		ServerID:  values.Get("serverId"),
+		Kind:      values.Get("kind"),
+		Category:  values.Get("category"),
+		Stage:     values.Get("stage"),
+		RiskLevel: values.Get("riskLevel"),
+		Enabled:   enabled,
+		Query:     values.Get("q"),
 	}
 }
 

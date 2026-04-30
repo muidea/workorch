@@ -8,16 +8,17 @@ import (
 )
 
 type CreateSkillCommand struct {
-	SkillID               common.SkillID
-	Name                  string
-	Version               string
-	Description           string
-	TriggerRules          []string
-	Instruction           string
-	ReferenceRefs         []string
-	RequiredToolKinds     []string
-	RequiredMCPServerRefs []string
-	Constraints           []string
+	SkillID                common.SkillID
+	Name                   string
+	Version                string
+	Description            string
+	TriggerRules           []string
+	Instruction            string
+	ReferenceRefs          []string
+	RequiredToolKinds      []string
+	RequiredMCPServerRefs  []string
+	RequiredCapabilityRefs []string
+	Constraints            []string
 }
 
 type UpdateSkillCommand = CreateSkillCommand
