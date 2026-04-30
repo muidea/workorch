@@ -228,7 +228,7 @@ func TestResumeRunWithBackendReturnsFailedRunAfterApprovalRejected(t *testing.T)
 	}
 }
 
-func TestResumeRunWithBackendReturnsFailedRunForFailedRunAfterReload(t *testing.T) {
+func TestResumeRunWithBackendReturnsConflictForFailedRunAfterReload(t *testing.T) {
 	dataRoot := t.TempDir()
 	runID := "run-approval-rejected-restart"
 	started := prepareApprovalRun(t, dataRoot, "ws-run-resume-failed", runID)
@@ -239,12 +239,8 @@ func TestResumeRunWithBackendReturnsFailedRunForFailedRunAfterReload(t *testing.
 		t.Fatalf("first ResumeRunWithBackend: %v", err)
 	}
 
-	item, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("second ResumeRunWithBackend: %v", err)
-	}
-	if item.ID != runID || item.State != "failed" || item.FailureReason == "" {
-		t.Fatalf("run = %+v, want failed with failure reason", item)
+	if _, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("second ResumeRunWithBackend err = %v, want conflict for failed run", err)
 	}
 }
 

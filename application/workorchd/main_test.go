@@ -376,7 +376,7 @@ func TestWorkorchdServerRetainsFileBackedTerminalStateAcrossRestart(t *testing.T
 		[]string{blockedApprovalID},
 	)
 	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed/start", "conflict")
-	assertRunResumeAvailable(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+approvalRunID+"/resume", approvalRunID, "failed")
+	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+approvalRunID+"/resume", "conflict")
 	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+approvalRunID+"/start", "conflict")
 }
 

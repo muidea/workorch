@@ -6,6 +6,8 @@ type ProviderRequest struct {
 	StepID              string                 `json:"stepId"`
 	Kind                string                 `json:"kind"`
 	Model               string                 `json:"model"`
+	SystemLocale        string                 `json:"systemLocale,omitempty"`
+	DialogLanguage      string                 `json:"dialogLanguage,omitempty"`
 	Input               map[string]any         `json:"input,omitempty"`
 	Schema              string                 `json:"schema"`
 	RuntimeCapabilities RuntimeCapabilities    `json:"runtimeCapabilities,omitempty"`

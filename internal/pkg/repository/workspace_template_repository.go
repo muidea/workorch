@@ -17,4 +17,5 @@ type WorkspaceTemplateRepository interface {
 	Get(context.Context, string) (*WorkspaceTemplate, error)
 	List(context.Context) ([]*WorkspaceTemplate, error)
 	Update(context.Context, *WorkspaceTemplate) error
+	Delete(context.Context, string) error
 }

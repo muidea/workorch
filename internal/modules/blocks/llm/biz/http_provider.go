@@ -362,6 +362,7 @@ func systemPrompt() string {
 		"Do not execute tools directly. Request shell, patch, MCP, Decision, Approval, Memory, DoD assessment, or ExecutionGraph through the JSON fields only.",
 		"Do not invent a workorch CLI. workorch is a service exposed through HTTP APIs and runtime blocks; there is no shell command named workorch unless the provider request explicitly lists it as available.",
 		"Use only runtime block kinds and service APIs declared in runtimeCapabilities. Do not invent local service endpoints.",
+		"Use the provider request dialogLanguage for every user-facing text value, while keeping JSON field names and schema enum values unchanged.",
 		"The word json is intentional because some providers require it when response_format is json_object.",
 	}, "\n")
 }
@@ -375,6 +376,7 @@ func userPrompt(request llmmodels.ProviderRequest) string {
 		return strings.Join([]string{
 			"Repair the invalid workorch.llmExecutionDecision.v1 json output.",
 			"Return only the corrected JSON object. Do not change the business intent except where required to satisfy the schema.",
+			dialogLanguageInstruction(request),
 			decisionContractPrompt(),
 			"",
 			"Invalid provider request and repair context:",
@@ -383,10 +385,19 @@ func userPrompt(request llmmodels.ProviderRequest) string {
 	}
 	return strings.Join([]string{
 		"Plan the next workspace execution step from this provider request.",
+		dialogLanguageInstruction(request),
 		decisionContractPrompt(),
 		"",
 		string(body),
 	}, "\n")
+}
+
+func dialogLanguageInstruction(request llmmodels.ProviderRequest) string {
+	language := strings.TrimSpace(request.DialogLanguage)
+	if language == "" {
+		language = "English"
+	}
+	return fmt.Sprintf("Conversation language: %s. Use this language for all user-facing text, including thoughtSummary, plan entries, decision questions, approval reasons, memory summaries, DoD item labels, DoD summaries, result summaries, and artifact-facing summaries. Keep JSON keys, enum values, block kinds, commands, file paths, identifiers, and evidence refs unchanged.", language)
 }
 
 func decisionContractPrompt() string {
@@ -396,15 +407,22 @@ func decisionContractPrompt() string {
 		"- Use executionGraph when the next work contains multiple blocks, dependencies, or future parallel-ready work.",
 		"- executionGraph.nodes items require id and kind; dependsOn is a list of node ids; input carries block input.",
 		"- executionGraph.nodes kind values must be selected from runtimeCapabilities.blockKinds only.",
+		"- Use executionGraph node kind patch/apply for file writes or diffs that must participate in graph dependencies. Do not use patchRequests as an executionGraph node kind.",
 		"- Use shellCommands, patchRequests, mcpToolCalls, requiredDecision, requiredApproval, memoryWrites, or dodAssessment as appropriate.",
-		"- patchRequests items may use only patchType, targetRef, content, diff, and summary. patchType must be file_write or unified_diff. Do not include an operation field.",
+		"- Top-level patchRequests are immediate patch side effects of the current LLM step and may use only patchType, targetRef, content, diff, and summary. patchType must be file_write or unified_diff. Do not include an operation field.",
 		"- Shell command names must be real commands available in the local process environment. Do not use a command named workorch.",
+		"- Shell command arguments must be encoded only as args arrays. For example use {\"command\":\"find\",\"args\":[\".\",\"-maxdepth\",\"3\"]}; never place positional arguments as object properties after command.",
+		"- shell/command.command must contain only the executable name or path. For shell syntax such as redirection, heredoc, cd, pipes, &&, ||, or multi-line scripts, use {\"command\":\"sh\",\"args\":[\"-c\",\"...\"]} or use patchRequests to write files.",
 		"- Do not use commands listed in runtimeCapabilities.shellPolicy.unavailableCommands, including inside sh -c, bash -c, or other nested shell scripts.",
 		"- Shell command input may include timeoutMillis for commands expected to take longer than the default; keep commands non-interactive and bounded.",
 		"- Do not assume remote host access credentials, SSH users, keys, or passwords. If a goal requires remote host configuration and no access method is present in the request, return blocked_on_decision with decisionKind provide_missing_info and ask for the access method or credentials.",
+		"- If input.executionContext.governanceHistory contains resolved decisions, treat their resolutionPayload as confirmed workspace context. Do not ask the same question again; continue from that confirmed decision unless it conflicts with the current Goal or DoD.",
 		"- When remote SSH credentials are explicitly available, prefer the ssh/command block kind from runtimeCapabilities.blockKinds. Do not emulate password SSH with sshpass or expect through shell/command.",
 		"- ssh/command input supports host, port, username, password, privateKey, privateKeyPath, command, and timeoutMillis. Keep the remote command non-interactive and bounded.",
 		"- Shell commands may call local workorchd HTTP only through runtimeCapabilities.serviceAPIs. Do not use /runs, /observability, /metrics?run=..., or any endpoint that is not explicitly declared.",
+		"- When input.runtimeRepairFollowUp is true, use input.failedStepInput, input.failedStepOutput, failureReason, runtimeDiagnostics, graphEvidence, workspaceFileManifest, and completed graph nodes as repair evidence. Plan the smallest safe patch or command sequence that fixes the failure, then rerun the failed validation or an equivalent verification step.",
+		"- If runtimeDiagnostics.kind is workspace_path_conflict, the conflictRef already exists as a file and must not be used as a directory. Choose a different targetRef or write/update files at the existing project root.",
+		"- For software development repair, if Go, Node, Python, or similar dependency metadata changed or a dependency checksum/lock file is missing, include the appropriate bounded dependency preparation command such as go mod tidy, npm install, or pip install before rerunning tests. Do not hardcode this unless the workspace files indicate the ecosystem.",
 		"- When input.graphFollowUp is true, use input.graphEvidence as the collected execution graph evidence. Return completed with dodAssessment when the DoD can be assessed; request more work only when evidence is insufficient.",
 		"- When input.completionFollowUp is true, use input.previousStepOutput as the latest execution evidence. Return completed with dodAssessment when the DoD can be assessed; otherwise plan only the missing verification work.",
 		"- For completed, include dodAssessment.summary as a non-empty user-facing final result, and evidenceRefs for every satisfied item.",

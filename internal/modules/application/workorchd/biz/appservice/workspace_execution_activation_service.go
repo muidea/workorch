@@ -22,16 +22,17 @@ import (
 )
 
 type ActivateWorkspaceExecutionCommand struct {
-	GoalID        string            `json:"goalId,omitempty"`
-	DoDID         string            `json:"doDId,omitempty"`
-	LLMProviderID string            `json:"llmProviderId,omitempty"`
-	SoulID        string            `json:"soulId,omitempty"`
-	SoulBindings  map[string]string `json:"soulBindings,omitempty"`
-	SkillIDs      []string          `json:"skillIds,omitempty"`
-	MCPServerIDs  []string          `json:"mcpServerIds,omitempty"`
-	CapabilityIDs []string          `json:"capabilityIds,omitempty"`
-	MemoryIDs     []string          `json:"memoryIds,omitempty"`
-	Priority      int               `json:"priority,omitempty"`
+	GoalID         string            `json:"goalId,omitempty"`
+	DoDID          string            `json:"doDId,omitempty"`
+	LLMProviderID  string            `json:"llmProviderId,omitempty"`
+	SoulID         string            `json:"soulId,omitempty"`
+	SoulBindings   map[string]string `json:"soulBindings,omitempty"`
+	SkillIDs       []string          `json:"skillIds,omitempty"`
+	MCPServerIDs   []string          `json:"mcpServerIds,omitempty"`
+	CapabilityIDs  []string          `json:"capabilityIds,omitempty"`
+	MemoryIDs      []string          `json:"memoryIds,omitempty"`
+	DialogLanguage string            `json:"dialogLanguage,omitempty"`
+	Priority       int               `json:"priority,omitempty"`
 }
 
 type WorkspaceExecutionActivation struct {
@@ -215,6 +216,9 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 	}
 	contextData["goal"] = goalContext(goal)
 	contextData["dod"] = dodContext(dod)
+	if dialogLanguage := strings.TrimSpace(cmd.DialogLanguage); dialogLanguage != "" {
+		contextData["dialogLanguage"] = dialogLanguage
+	}
 	if llmProviderID := strings.TrimSpace(cmd.LLMProviderID); llmProviderID != "" {
 		contextData[llmcommon.ExecutionContextLLMProviderID] = llmProviderID
 	}
@@ -308,8 +312,65 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 		contextData["memoryIds"] = memoryItemIDs(memories)
 		contextData["memories"] = memoryContexts(memories)
 	}
+	if governanceHistory := workspaceGovernanceHistory(ctx, exports.Repositories.Tickets, exports.Repositories.Resolutions, exports.Repositories.Runs, workspaceID, goalID, dodID, 10); len(governanceHistory) > 0 {
+		contextData["governanceHistory"] = governanceHistory
+	}
 
 	return contextData, nil
+}
+
+func workspaceGovernanceHistory(
+	ctx context.Context,
+	tickets repository.DecisionTicketRepository,
+	resolutions repository.DecisionResolutionRepository,
+	runs repository.RunRepository,
+	workspaceID common.WorkspaceID,
+	goalID common.GoalID,
+	dodID common.DoDID,
+	limit int,
+) []map[string]any {
+	if tickets == nil || resolutions == nil || runs == nil || workspaceID == "" || limit <= 0 {
+		return nil
+	}
+	allTickets, err := tickets.List(ctx)
+	if err != nil {
+		return nil
+	}
+	ret := make([]map[string]any, 0, min(limit, len(allTickets)))
+	for _, ticket := range allTickets {
+		if ticket == nil || ticket.WorkspaceID != workspaceID || ticket.State != common.DecisionTicketStateResolved {
+			continue
+		}
+		run, err := runs.Get(ctx, ticket.RunID)
+		if err != nil || run == nil || run.WorkspaceID != workspaceID {
+			continue
+		}
+		if goalID != "" && run.GoalID != goalID {
+			continue
+		}
+		if dodID != "" && run.DoDID != dodID {
+			continue
+		}
+		resolution, err := resolutions.GetByTicketID(ctx, ticket.ID)
+		if err != nil || resolution == nil {
+			continue
+		}
+		ret = append(ret, map[string]any{
+			"ticketId":          string(ticket.ID),
+			"runId":             string(ticket.RunID),
+			"stepId":            string(ticket.StepID),
+			"decisionKind":      ticket.DecisionKind,
+			"reason":            ticket.Reason,
+			"question":          ticket.Question,
+			"resolutionId":      string(resolution.ID),
+			"resolutionType":    resolution.Type,
+			"resolutionPayload": cloneDecisionPayload(resolution.Payload),
+		})
+		if len(ret) >= limit {
+			break
+		}
+	}
+	return ret
 }
 
 func selectedSkills(ctx context.Context, session *RuntimeSession, ids []string, workspaceID string) ([]Skill, error) {

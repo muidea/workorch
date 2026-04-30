@@ -50,7 +50,10 @@ const (
 	stepInputKeyGraphCompletedNodes    = "graphCompletedNodes"
 	stepInputKeyGraphBatch             = "graphBatch"
 	stepInputKeyGraphEvidence          = "graphEvidence"
+	stepInputKeyWorkspaceFileManifest  = "workspaceFileManifest"
 	stepInputKeySoulStage              = "soulStage"
+	stepInputKeyRuntimeRepairFollowUp  = "runtimeRepairFollowUp"
+	stepInputKeyRuntimeRepairAttempt   = "runtimeRepairAttempt"
 	stepOutputKeyBlockDecisionReason   = "blockDecisionReason"
 	stepOutputKeyBlockDecisionTicketID = "blockDecisionTicketId"
 	stepOutputKeyBlockDecisionKind     = "blockDecisionKind"
@@ -65,6 +68,7 @@ const (
 	soulStageDecision                  = "decision"
 	soulStageApproval                  = "approval"
 	soulStageValidation                = "validation"
+	maxRuntimeRepairAttempts           = 3
 )
 
 type RuntimeOrchestrator struct {
@@ -318,6 +322,16 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 		default:
 			return common.ErrBlocked
 		}
+	case common.RunStateRunning:
+		recoverStepID, recoverInput, err := o.runningDecisionRecoveryContext(ctx, r)
+		if err != nil {
+			return err
+		}
+		if recoverStepID == "" {
+			return nil
+		}
+		resumeAfterStepID = recoverStepID
+		resumeInput = recoverInput
 	default:
 		return common.ErrConflict
 	}
@@ -332,6 +346,9 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 	}
 	specs, err := o.nextDispatchSpecsAfterStep(ctx, r, resumeAfterStepID)
 	if err != nil {
+		if current, getErr := o.runs.Get(ctx, runID); getErr == nil && current.State == common.RunStateRunning {
+			_ = o.FailRun(ctx, runID, err.Error())
+		}
 		return err
 	}
 	mergeResumeInput(specs, resumeInput)
@@ -342,6 +359,65 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 		return err
 	}
 	return nil
+}
+
+func (o *RuntimeOrchestrator) runningDecisionRecoveryContext(
+	ctx context.Context,
+	run *runModel.Run,
+) (common.StepID, map[string]any, error) {
+	if o == nil || run == nil || o.steps == nil || o.tickets == nil || o.resolutions == nil {
+		return "", nil, common.ErrConflict
+	}
+	if run.BlockingTicketID != "" || run.BlockingApprovalID != "" {
+		return "", nil, common.ErrConflict
+	}
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil {
+		return "", nil, err
+	}
+	last := terminalExecutionStep(steps)
+	if last == nil || last.State != common.StepStateFailed {
+		return "", nil, common.ErrConflict
+	}
+	ticket, resolution, err := o.resolvedDecisionForStep(ctx, run.ID, last.ID)
+	if err != nil {
+		return "", nil, err
+	}
+	switch resolution.Type {
+	case decisioncommon.ResolutionTypeProvideMissingInfo:
+		return last.ID, decisionResolutionInput(ticket, resolution), nil
+	case decisioncommon.ResolutionTypeRejectCurrentPath:
+		return "", nil, o.FailRun(ctx, run.ID, fmt.Sprintf("decision ticket %s rejected", ticket.ID))
+	case decisioncommon.ResolutionTypeReplan:
+		return "", nil, o.SupersedeRun(ctx, run.ID)
+	default:
+		return "", nil, common.ErrInvalidArgument
+	}
+}
+
+func (o *RuntimeOrchestrator) resolvedDecisionForStep(
+	ctx context.Context,
+	runID common.RunID,
+	stepID common.StepID,
+) (*decisionmodel.Ticket, *decisionmodel.Resolution, error) {
+	tickets, err := o.tickets.List(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, ticket := range tickets {
+		if ticket == nil ||
+			ticket.RunID != runID ||
+			ticket.StepID != stepID ||
+			ticket.State != common.DecisionTicketStateResolved {
+			continue
+		}
+		resolution, err := o.resolutions.GetByTicketID(ctx, ticket.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		return ticket, resolution, nil
+	}
+	return nil, nil, common.ErrConflict
 }
 
 func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunID) error {
@@ -600,36 +676,15 @@ func (o *RuntimeOrchestrator) dispatchStep(
 		Input:                     cloneStepPayload(step.Input),
 	})
 	if err != nil {
-		step.State = common.StepStateFailed
-		step.Output = runtimeFailureOutput(result.Output, err)
-		_ = o.recordToolCallFailed(ctx, toolCall, err, step.Output)
-		_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, "runtime step failed", string(toolCall.ID), err.Error())
-		_ = o.recordStepCheckpoint(ctx, run, step, "step_failed")
-		_ = o.steps.Update(ctx, step)
-		_ = o.publishStepState(ctx, run, step, events.TopicStepStateChanged)
-		return o.FailRun(ctx, run.ID, err.Error())
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, result.Output, "runtime step failed", err)
 	}
 	output := result.Output
 	if err := o.applyRuntimePatches(ctx, run, step, toolCall, output); err != nil {
-		step.State = common.StepStateFailed
-		step.Output = runtimeFailureOutput(output, err)
-		_ = o.recordToolCallFailed(ctx, toolCall, err, step.Output)
-		_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, "runtime patch application failed", string(toolCall.ID), err.Error())
-		_ = o.recordStepCheckpoint(ctx, run, step, "step_failed")
-		_ = o.steps.Update(ctx, step)
-		_ = o.publishStepState(ctx, run, step, events.TopicStepStateChanged)
-		return o.FailRun(ctx, run.ID, err.Error())
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch application failed", err)
 	}
 	memoryRefs, err := o.recordMemoryWrites(ctx, run, step, output)
 	if err != nil {
-		step.State = common.StepStateFailed
-		step.Output = runtimeFailureOutput(output, err)
-		_ = o.recordToolCallFailed(ctx, toolCall, err, step.Output)
-		_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, "runtime memory write failed", string(toolCall.ID), err.Error())
-		_ = o.recordStepCheckpoint(ctx, run, step, "step_failed")
-		_ = o.steps.Update(ctx, step)
-		_ = o.publishStepState(ctx, run, step, events.TopicStepStateChanged)
-		return o.FailRun(ctx, run.ID, err.Error())
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime memory write failed", err)
 	}
 	if len(memoryRefs) > 0 {
 		output[stepOutputKeyMemoryRefs] = memoryRefs
@@ -696,14 +751,7 @@ func (o *RuntimeOrchestrator) dispatchStep(
 		return o.dispatchStep(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), llmCompletionFollowUpStepInput(run, step))
 	}
 	if err := completionDoDAssessmentError(run, output); err != nil {
-		step.State = common.StepStateFailed
-		step.Output = runtimeFailureOutput(output, err)
-		_ = o.recordToolCallFailed(ctx, toolCall, err, step.Output)
-		_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, "runtime completion gate failed", string(toolCall.ID), err.Error())
-		_ = o.recordStepCheckpoint(ctx, run, step, "step_failed")
-		_ = o.steps.Update(ctx, step)
-		_ = o.publishStepState(ctx, run, step, events.TopicStepStateChanged)
-		return o.FailRun(ctx, run.ID, err.Error())
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
 	if err := o.recordRunResultFromDoDAssessment(ctx, run, step, output); err != nil {
 		return err
@@ -723,6 +771,46 @@ type runtimePatchRequest struct {
 	Diff      string
 	Summary   string
 	PatchType string
+}
+
+type runtimeFailureDiagnosticError interface {
+	RuntimeFailureDiagnostics() map[string]any
+}
+
+type workspacePathConflictError struct {
+	Operation    string
+	TargetRef    string
+	ConflictRef  string
+	ConflictKind string
+}
+
+func (e *workspacePathConflictError) Error() string {
+	if e == nil {
+		return ""
+	}
+	operation := strings.TrimSpace(e.Operation)
+	if operation == "" {
+		operation = "workspace patch"
+	}
+	conflictKind := strings.TrimSpace(e.ConflictKind)
+	if conflictKind == "" {
+		conflictKind = "file"
+	}
+	return fmt.Sprintf("%s path conflict: target %q requires %q as a directory, but it is an existing %s", operation, e.TargetRef, e.ConflictRef, conflictKind)
+}
+
+func (e *workspacePathConflictError) RuntimeFailureDiagnostics() map[string]any {
+	if e == nil {
+		return nil
+	}
+	return map[string]any{
+		"kind":         "workspace_path_conflict",
+		"operation":    e.Operation,
+		"targetRef":    e.TargetRef,
+		"conflictRef":  e.ConflictRef,
+		"conflictKind": e.ConflictKind,
+		"guidance":     "Choose a targetRef whose parent path is a directory, or write the file at the existing project root. Do not treat an existing file as a directory.",
+	}
 }
 
 func (o *RuntimeOrchestrator) applyRuntimePatches(
@@ -960,11 +1048,19 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 	diff, _ := item["diff"].(string)
 	summary, _ := item["summary"].(string)
 	patchType, _ := item["patchType"].(string)
+	operation, _ := item["operation"].(string)
 	targetRef = strings.TrimSpace(targetRef)
 	if targetRef == "" {
 		return runtimePatchRequest{}, common.ErrInvalidArgument
 	}
 	if patchType == "" {
+		patchType = strings.TrimSpace(operation)
+	}
+	if patchType == "" {
+		patchType = "file_write"
+	}
+	switch patchType {
+	case "create", "write", "replace", "file":
 		patchType = "file_write"
 	}
 	if patchType != "file_write" && patchType != "unified_diff" {
@@ -1001,10 +1097,53 @@ func applyWorkspaceFileWrite(workingDirectory string, targetRef string, content 
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := ensureWorkspacePatchParentDirectory(workingDirectory, targetRef, target, "file_write"); err != nil {
 		return err
 	}
 	return os.WriteFile(target, []byte(content), 0o644)
+}
+
+func ensureWorkspacePatchParentDirectory(workingDirectory string, targetRef string, target string, operation string) error {
+	base, err := filepath.Abs(workingDirectory)
+	if err != nil {
+		return err
+	}
+	parent := filepath.Dir(target)
+	if parent == base {
+		return nil
+	}
+	relParent, err := filepath.Rel(base, parent)
+	if err != nil {
+		return err
+	}
+	current := base
+	for _, part := range strings.Split(relParent, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, statErr := os.Stat(current)
+		if statErr == nil {
+			if !info.IsDir() {
+				conflictRef, relErr := filepath.Rel(base, current)
+				if relErr != nil {
+					conflictRef = filepath.Clean(targetRef)
+				}
+				return &workspacePathConflictError{
+					Operation:    operation,
+					TargetRef:    filepath.ToSlash(filepath.Clean(targetRef)),
+					ConflictRef:  filepath.ToSlash(conflictRef),
+					ConflictKind: "file",
+				}
+			}
+			continue
+		}
+		if !os.IsNotExist(statErr) {
+			return statErr
+		}
+		break
+	}
+	return os.MkdirAll(parent, 0o755)
 }
 
 func workspaceTargetPath(workingDirectory string, targetRef string) (string, error) {
@@ -1069,7 +1208,7 @@ func applyWorkspaceUnifiedDiff(workingDirectory string, targetRef string, diff s
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := ensureWorkspacePatchParentDirectory(workingDirectory, targetRef, target, "unified_diff"); err != nil {
 		return err
 	}
 	return os.WriteFile(target, []byte(nextContent), 0o644)
@@ -1334,8 +1473,273 @@ func runtimeFailureOutput(output map[string]any, execErr error) map[string]any {
 	if execErr != nil {
 		ret["reason"] = execErr.Error()
 		ret["error"] = execErr.Error()
+		var diagnosticErr runtimeFailureDiagnosticError
+		if errors.As(execErr, &diagnosticErr) {
+			if diagnostics := diagnosticErr.RuntimeFailureDiagnostics(); len(diagnostics) > 0 {
+				ret["runtimeDiagnostics"] = diagnostics
+			}
+		}
 	}
 	return ret
+}
+
+func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	toolCall *runModel.ToolCall,
+	output map[string]any,
+	summary string,
+	execErr error,
+) error {
+	if run == nil || step == nil {
+		return common.ErrInvalidArgument
+	}
+	step.State = common.StepStateFailed
+	step.Output = runtimeFailureOutput(output, execErr)
+	_ = o.recordToolCallFailed(ctx, toolCall, execErr, step.Output)
+	errText := ""
+	if execErr != nil {
+		errText = execErr.Error()
+	}
+	evidenceRef := ""
+	if toolCall != nil {
+		evidenceRef = string(toolCall.ID)
+	}
+	_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, summary, evidenceRef, errText)
+	_ = o.recordStepCheckpoint(ctx, run, step, "step_failed")
+	_ = o.steps.Update(ctx, step)
+	_ = o.publishStepState(ctx, run, step, events.TopicStepStateChanged)
+	if graphBatchStep(step) {
+		if execErr != nil {
+			return execErr
+		}
+		return common.ErrInvalidArgument
+	}
+	return o.dispatchRuntimeRepairFollowUp(ctx, run, step, execErr)
+}
+
+func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	execErr error,
+) error {
+	if o.shouldEscalateRuntimeRepairExhaustion(ctx, run, failedStep) {
+		return o.blockOnRuntimeRepairExhaustion(ctx, run, failedStep, execErr)
+	}
+	if !o.shouldAttemptRuntimeRepair(ctx, run, failedStep) {
+		reason := "runtime step failed"
+		if execErr != nil {
+			reason = execErr.Error()
+		} else if failedStep != nil && failedStep.Output != nil {
+			reason = stringFromMap(failedStep.Output, "error")
+			if reason == "" {
+				reason = stringFromMap(failedStep.Output, "reason")
+			}
+		}
+		return o.FailRun(ctx, run.ID, reason)
+	}
+	attempt := o.runtimeRepairAttemptCount(ctx, run.ID) + 1
+	input := o.runtimeRepairFollowUpStepInput(ctx, run, failedStep, attempt, execErr)
+	return o.dispatchStep(ctx, run, runtimeRepairFollowUpStepID(run.ID, failedStep, attempt), initialStepKind(run), input)
+}
+
+func (o *RuntimeOrchestrator) shouldEscalateRuntimeRepairExhaustion(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
+	if o == nil || run == nil || failedStep == nil || o.tickets == nil {
+		return false
+	}
+	if !requiresDoDAssessmentCompletionGate(run) || isLLMProviderRuntimeFailure(run, failedStep) {
+		return false
+	}
+	return o.runtimeRepairAttemptCount(ctx, run.ID) >= maxRuntimeRepairAttempts
+}
+
+func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	execErr error,
+) error {
+	if run == nil || failedStep == nil {
+		return common.ErrInvalidArgument
+	}
+	reason := fmt.Sprintf("runtime repair attempts exhausted after %d attempts", maxRuntimeRepairAttempts)
+	if execErr != nil {
+		reason = fmt.Sprintf("%s: %s", reason, execErr.Error())
+	}
+	spec := runtimeDecisionBlockSpec{
+		TicketID:     common.TicketID(runtimeChildID(failedStep.ID, "repair-exhausted-decision")),
+		Reason:       reason,
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Automatic runtime repair attempts were exhausted. Provide missing implementation guidance, choose replan, or reject the current path.",
+		Context: map[string]any{
+			"attempts":         maxRuntimeRepairAttempts,
+			"failedStepId":     string(failedStep.ID),
+			"failedStepKind":   failedStep.Kind,
+			"failedStepInput":  cloneStepPayload(failedStep.Input),
+			"failedStepOutput": cloneStepPayload(failedStep.Output),
+		},
+	}
+	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
+		return err
+	}
+	return o.BlockOnDecision(ctx, run.ID, spec.TicketID)
+}
+
+func (o *RuntimeOrchestrator) shouldAttemptRuntimeRepair(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
+	if o == nil || run == nil || failedStep == nil || o.runtime == nil || o.steps == nil {
+		return false
+	}
+	if !requiresDoDAssessmentCompletionGate(run) {
+		return false
+	}
+	if o.runtimeRepairAttemptCount(ctx, run.ID) >= maxRuntimeRepairAttempts {
+		return false
+	}
+	if boolValue(failedStep.Input[stepInputKeyRuntimeRepairFollowUp]) && failedStep.Kind == initialStepKind(run) {
+		return false
+	}
+	return !isLLMProviderRuntimeFailure(run, failedStep)
+}
+
+func isLLMProviderRuntimeFailure(run *runModel.Run, step *runModel.Step) bool {
+	if run == nil || step == nil || step.Kind != initialStepKind(run) {
+		return false
+	}
+	stage := stringFromMap(step.Output, "stage")
+	switch stage {
+	case "llm_provider_unavailable",
+		"llm_provider_client_unavailable",
+		"llm_provider_operation_unsupported",
+		"llm_provider_error",
+		"llm_provider_stream_error",
+		"llm_provider_request_failed",
+		"llm_schema_invalid",
+		"llm_decision_invalid",
+		"llm_failed":
+		return true
+	default:
+		return false
+	}
+}
+
+func (o *RuntimeOrchestrator) runtimeRepairAttemptCount(ctx context.Context, runID common.RunID) int {
+	if o == nil || o.steps == nil || runID == "" {
+		return 0
+	}
+	steps, err := o.steps.ListByRun(ctx, runID)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, step := range steps {
+		if step != nil && boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) {
+			count++
+		}
+	}
+	return count
+}
+
+func runtimeRepairFollowUpStepID(runID common.RunID, failedStep *runModel.Step, attempt int) common.StepID {
+	base := ""
+	if failedStep != nil {
+		base = runtimeChildID(failedStep.ID, "repair")
+	}
+	if base == "" {
+		base = "repair"
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	return common.StepID(fmt.Sprintf("%s/zz-llm-repair-%s-%d", runID, base, attempt))
+}
+
+func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	attempt int,
+	execErr error,
+) map[string]any {
+	previousStepID := common.StepID("")
+	if failedStep != nil {
+		previousStepID = failedStep.ID
+	}
+	input := nextStepInput(run, previousStepID)
+	input[stepInputKeySoulStage] = soulStageExecution
+	input[stepInputKeyRuntimeRepairFollowUp] = true
+	input[stepInputKeyRuntimeRepairAttempt] = attempt
+	input["maxRuntimeRepairAttempts"] = maxRuntimeRepairAttempts
+	if execErr != nil {
+		input["failureReason"] = execErr.Error()
+	}
+	if failedStep == nil {
+		return input
+	}
+	input["failedStepId"] = string(failedStep.ID)
+	input["failedStepKind"] = failedStep.Kind
+	input["failedStepState"] = string(failedStep.State)
+	input["failedStepInput"] = cloneStepPayload(failedStep.Input)
+	input["failedStepOutput"] = cloneStepPayload(failedStep.Output)
+	input["previousStepKind"] = failedStep.Kind
+	input["previousStepOutput"] = cloneStepPayload(failedStep.Output)
+	if nodeID := graphNodeID(failedStep); nodeID != "" {
+		input[stepInputKeyGraphPreviousNodeID] = nodeID
+		input["failedGraphNodeId"] = nodeID
+	}
+	if completed := graphCompletedNodesFromStep(failedStep); len(completed) > 0 {
+		input[stepInputKeyGraphCompletedNodes] = completed
+	}
+	if branch := graphBranch(failedStep); branch != "" {
+		input[stepOutputKeyGraphBranch] = branch
+	}
+	if graph, ok := runtimeGraphSpecFromStep(failedStep); ok {
+		input[stepOutputKeyExecutionGraph] = graph
+		input[stepInputKeyGraphRootStepID] = string(graphRootStepID(failedStep))
+	}
+	if evidence := o.completedGraphEvidence(ctx, run, failedStep); len(evidence) > 0 {
+		input[stepInputKeyGraphEvidence] = evidence
+	}
+	if manifest := o.workspaceFileManifest(ctx, run); len(manifest) > 0 {
+		input[stepInputKeyWorkspaceFileManifest] = manifest
+	}
+	return input
+}
+
+func (o *RuntimeOrchestrator) workspaceFileManifest(ctx context.Context, run *runModel.Run) []map[string]any {
+	if o == nil || o.workspaces == nil || run == nil {
+		return nil
+	}
+	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
+	if err != nil || workspace == nil {
+		return nil
+	}
+	files, err := workspaceManifestFiles(workspace.WorkingDirectory)
+	if err != nil || len(files) == 0 {
+		return nil
+	}
+	manifest := make([]map[string]any, 0, len(files))
+	for _, file := range files {
+		item := map[string]any{
+			"path": file.Path,
+			"kind": "file",
+			"size": file.Size,
+		}
+		if file.Executable {
+			item["executable"] = true
+		}
+		manifest = append(manifest, item)
+	}
+	return manifest
+}
+
+func stringFromMap(input map[string]any, key string) string {
+	if input == nil {
+		return ""
+	}
+	value, _ := input[key].(string)
+	return strings.TrimSpace(value)
 }
 
 func (o *RuntimeOrchestrator) recordValidationResult(
@@ -1398,6 +1802,13 @@ func (o *RuntimeOrchestrator) recordRunResultFromDoDAssessment(
 	artifactRefs, err := o.recordResultSummaryArtifact(ctx, run, step, summary, assessment, now)
 	if err != nil {
 		return err
+	}
+	manifestRef, err := o.recordWorkspaceDeliverableManifestArtifact(ctx, run, step, assessment, now)
+	if err != nil {
+		return err
+	}
+	if manifestRef != "" {
+		artifactRefs = append(artifactRefs, manifestRef)
 	}
 	item := &resultmodel.Result{
 		ID:           common.ResultID(fmt.Sprintf("%s/result/dod-assessment", run.ID)),
@@ -1567,6 +1978,167 @@ func (o *RuntimeOrchestrator) recordResultSummaryArtifact(
 		return []common.ArtifactID{existing.ID}, o.publishArtifactCreated(ctx, existing)
 	}
 	return []common.ArtifactID{item.ID}, o.publishArtifactCreated(ctx, item)
+}
+
+func (o *RuntimeOrchestrator) recordWorkspaceDeliverableManifestArtifact(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	assessment map[string]any,
+	now string,
+) (common.ArtifactID, error) {
+	if run == nil || step == nil || o.evidence.Artifacts == nil {
+		return "", nil
+	}
+	manifest := o.workspaceDeliverableManifestContent(ctx, run, step, assessment)
+	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
+	item := &resultmodel.Artifact{
+		ID:           common.ArtifactID(fmt.Sprintf("%s/artifact/deliverable-manifest", run.ID)),
+		WorkspaceID:  run.WorkspaceID,
+		RunID:        run.ID,
+		ResultID:     common.ResultID(fmt.Sprintf("%s/result/dod-assessment", run.ID)),
+		StepID:       step.ID,
+		ArtifactType: resultcommon.ArtifactTypeReport,
+		Name:         "Workspace Deliverable Manifest",
+		Summary:      manifest,
+		URI:          fmt.Sprintf("workorch://runs/%s/results/dod-assessment/deliverable-manifest", run.ID),
+		ContentType:  "text/markdown; charset=utf-8",
+		State:        common.ArtifactStateAvailable,
+		EvidenceRefs: evidenceRefs,
+		Metadata: map[string]any{
+			"sourceType":   resultcommon.SourceTypeDoDAssessment,
+			"sourceRef":    string(step.ID),
+			"manifestType": "workspace_deliverables",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := o.evidence.Artifacts.Create(ctx, item); err != nil {
+		if err != common.ErrConflict {
+			return "", err
+		}
+		existing, getErr := o.evidence.Artifacts.Get(ctx, item.ID)
+		if getErr != nil {
+			return "", getErr
+		}
+		existing.WorkspaceID = item.WorkspaceID
+		existing.RunID = item.RunID
+		existing.ResultID = item.ResultID
+		existing.StepID = item.StepID
+		existing.ArtifactType = item.ArtifactType
+		existing.Name = item.Name
+		existing.Summary = item.Summary
+		existing.URI = item.URI
+		existing.ContentType = item.ContentType
+		existing.State = item.State
+		existing.EvidenceRefs = item.EvidenceRefs
+		existing.Metadata = item.Metadata
+		existing.UpdatedAt = now
+		if err := o.evidence.Artifacts.Update(ctx, existing); err != nil {
+			return "", err
+		}
+		return existing.ID, o.publishArtifactCreated(ctx, existing)
+	}
+	return item.ID, o.publishArtifactCreated(ctx, item)
+}
+
+func (o *RuntimeOrchestrator) workspaceDeliverableManifestContent(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	assessment map[string]any,
+) string {
+	var builder strings.Builder
+	builder.WriteString("# Workspace Deliverable Manifest\n\n")
+	builder.WriteString(fmt.Sprintf("- Workspace: `%s`\n", run.WorkspaceID))
+	builder.WriteString(fmt.Sprintf("- Run: `%s`\n", run.ID))
+	builder.WriteString(fmt.Sprintf("- Result: `%s`\n", fmt.Sprintf("%s/result/dod-assessment", run.ID)))
+	builder.WriteString(fmt.Sprintf("- Source step: `%s`\n", step.ID))
+	if summary, _ := assessment["summary"].(string); strings.TrimSpace(summary) != "" {
+		builder.WriteString(fmt.Sprintf("- DoD summary: %s\n", strings.TrimSpace(summary)))
+	}
+	builder.WriteString("\n## Deliverable Files\n\n")
+	workingDirectory := ""
+	if o != nil && o.workspaces != nil {
+		if workspace, err := o.workspaces.Get(ctx, run.WorkspaceID); err == nil && workspace != nil {
+			workingDirectory = strings.TrimSpace(workspace.WorkingDirectory)
+		}
+	}
+	files, listErr := workspaceDeliverableFiles(workingDirectory)
+	if listErr != nil {
+		builder.WriteString(fmt.Sprintf("- Unable to inspect workspace working directory: %s\n", listErr.Error()))
+	} else if len(files) == 0 {
+		builder.WriteString("- No files were found in the workspace working directory.\n")
+	} else {
+		for _, file := range files {
+			builder.WriteString(fmt.Sprintf("- `%s` (%d bytes)\n", file.Path, file.Size))
+		}
+	}
+	builder.WriteString("\n## Acceptance Evidence\n\n")
+	for _, ref := range doDAssessmentEvidenceRefs(step.ID, assessment) {
+		builder.WriteString(fmt.Sprintf("- `%s`\n", ref))
+	}
+	return strings.TrimSpace(builder.String())
+}
+
+type workspaceDeliverableFile struct {
+	Path       string
+	Size       int64
+	Executable bool
+}
+
+func workspaceDeliverableFiles(workingDirectory string) ([]workspaceDeliverableFile, error) {
+	return workspaceManifestFiles(workingDirectory)
+}
+
+func workspaceManifestFiles(workingDirectory string) ([]workspaceDeliverableFile, error) {
+	workingDirectory = strings.TrimSpace(workingDirectory)
+	if workingDirectory == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	root, err := filepath.Abs(workingDirectory)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, common.ErrInvalidArgument
+	}
+	const maxManifestFiles = 200
+	files := make([]workspaceDeliverableFile, 0)
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if len(files) >= maxManifestFiles {
+			return filepath.SkipAll
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		files = append(files, workspaceDeliverableFile{
+			Path:       filepath.ToSlash(rel),
+			Size:       info.Size(),
+			Executable: info.Mode().Perm()&0o111 != 0,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	return files, nil
 }
 
 func (o *RuntimeOrchestrator) publishResultAccepted(ctx context.Context, item *resultmodel.Result) error {
@@ -1853,6 +2425,18 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			Input: cloneStepPayload(last.Input),
 		}}, nil
 	}
+	if last.State == common.StepStateFailed && requiresDoDAssessmentCompletionGate(run) {
+		attempt := o.runtimeRepairAttemptCount(ctx, run.ID) + 1
+		stepID, err := o.uniqueDispatchStepID(ctx, run.ID, runtimeRepairFollowUpStepID(run.ID, last, attempt))
+		if err != nil {
+			return nil, err
+		}
+		return []stepDispatchSpec{{
+			ID:    stepID,
+			Kind:  initialStepKind(run),
+			Input: o.runtimeRepairFollowUpStepInput(ctx, run, last, attempt, nil),
+		}}, nil
+	}
 	return nil, common.ErrConflict
 }
 
@@ -2069,9 +2653,12 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatch(ctx context.Context, run *r
 	}
 	wg.Wait()
 	close(errCh)
+	var firstErr error
 	for err := range errCh {
 		if err != nil && !errors.Is(err, common.ErrConflict) {
-			return err
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
 
@@ -2085,6 +2672,12 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatch(ctx context.Context, run *r
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil {
 		return err
+	}
+	if firstErr != nil {
+		if failed := latestFailedRepairableGraphStep(steps); failed != nil {
+			return o.dispatchRuntimeRepairFollowUp(ctx, currentRun, failed, firstErr)
+		}
+		return o.FailRun(ctx, currentRun.ID, firstErr.Error())
 	}
 	last := latestCompletedGraphStep(steps)
 	if last == nil {
@@ -2407,6 +3000,16 @@ func latestCompletedGraphStep(steps []*runModel.Step) *runModel.Step {
 	return nil
 }
 
+func latestFailedRepairableGraphStep(steps []*runModel.Step) *runModel.Step {
+	for idx := len(steps) - 1; idx >= 0; idx-- {
+		step := steps[idx]
+		if step != nil && step.State == common.StepStateFailed && graphNodeID(step) != "" {
+			return step
+		}
+	}
+	return nil
+}
+
 func completedGraphNodeList(completed map[string]bool) []string {
 	ret := make([]string, 0, len(completed))
 	for nodeID := range completed {
@@ -2459,6 +3062,11 @@ func outputItemCount(value any) int {
 	default:
 		return 0
 	}
+}
+
+func boolValue(value any) bool {
+	typed, _ := value.(bool)
+	return typed
 }
 
 func llmCompletionFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {

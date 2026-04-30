@@ -3,6 +3,7 @@ package bootstrap
 import (
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
@@ -98,11 +99,13 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	}))
 
 	orchestratorModule := orchestratormodule.New()
-	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry()
-	mustSetup("runtime-registry", runtimeRegistry.Register(shellmodule.StepKindCommand, shellModule.RuntimeAdapter()))
-	mustSetup("runtime-registry", runtimeRegistry.Register(sshmodule.StepKindCommand, sshModule.RuntimeAdapter()))
-	mustSetup("runtime-registry", runtimeRegistry.Register(mcpblockmodule.StepKindToolCall, mcpBlockModule.RuntimeAdapter()))
-	mustSetup("runtime-registry", runtimeRegistry.Register(llmmodule.StepKindWorkspaceExecution, llmModule.RuntimeAdapter()))
+	runtimeRegistry, err := buildRuntimeAdapterRegistry(
+		shellModule.RuntimeAdapter(),
+		sshModule.RuntimeAdapter(),
+		mcpBlockModule.RuntimeAdapter(),
+		llmModule.RuntimeAdapter(),
+	)
+	mustSetup("runtime-registry", err)
 	mustSetup("orchestrator", orchestratorModule.Setup(orchestratormodule.Dependencies{
 		Runtime:            runtimeRegistry,
 		Runs:               repos.run,
@@ -198,4 +201,35 @@ func mustSetup(name string, err error) {
 	if err != nil {
 		panic("setup module " + name + ": " + err.Error())
 	}
+}
+
+func buildRuntimeAdapterRegistry(
+	shellAdapter orchestratorbiz.RuntimeAdapter,
+	sshAdapter orchestratorbiz.RuntimeAdapter,
+	mcpAdapter orchestratorbiz.RuntimeAdapter,
+	llmAdapter orchestratorbiz.RuntimeAdapter,
+) (*orchestratorbiz.RuntimeAdapterRegistry, error) {
+	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry()
+	if err := runtimeRegistry.Register(shellmodule.StepKindCommand, shellAdapter); err != nil {
+		return nil, err
+	}
+	if err := runtimeRegistry.Register(sshmodule.StepKindCommand, sshAdapter); err != nil {
+		return nil, err
+	}
+	for _, stepKind := range []string{
+		mcpblockmodule.StepKindToolCall,
+		mcpblockmodule.StepKindResourceRead,
+		mcpblockmodule.StepKindPromptGet,
+	} {
+		if err := runtimeRegistry.Register(stepKind, mcpAdapter); err != nil {
+			return nil, err
+		}
+	}
+	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchApply, orchestratorbiz.NewPatchRuntimeAdapter()); err != nil {
+		return nil, err
+	}
+	if err := runtimeRegistry.Register(llmmodule.StepKindWorkspaceExecution, llmAdapter); err != nil {
+		return nil, err
+	}
+	return runtimeRegistry, nil
 }

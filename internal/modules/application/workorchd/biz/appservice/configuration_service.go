@@ -161,7 +161,7 @@ func DefaultLLMProviderTemplates() []LLMProviderTemplate {
 		{
 			TemplateID:      llmcommon.ProviderOpenAI,
 			Name:            "OpenAI API",
-			Description:     "使用 OpenAI 官方 SDK 调用 Chat Completions；如需向量记忆，建议单独配置 text-embedding-3-small Provider。",
+			Description:     "使用 OpenAI 官方 SDK 调用 Chat Completions；DeepSeek、MiniMax 等可直接使用 OpenAI SDK 的服务应选择该模式并配置各自 baseURL。",
 			ID:              "openai-main",
 			Provider:        llmcommon.ProviderOpenAI,
 			BaseURL:         "https://api.openai.com/v1",
@@ -183,7 +183,7 @@ func DefaultLLMProviderTemplates() []LLMProviderTemplate {
 		{
 			TemplateID:      llmcommon.ProviderCompatible,
 			Name:            "OpenAI Compatible API",
-			Description:     "用于 DeepSeek、MiniMax、Ollama 或本地 OpenAI-compatible 服务，继续走轻量 HTTP 兼容实现。",
+			Description:     "用于未接入官方 SDK、但暴露 OpenAI-compatible HTTP 接口的本地或自定义服务，继续走轻量 HTTP 兼容实现。",
 			ID:              "compatible-main",
 			Provider:        llmcommon.ProviderCompatible,
 			BaseURL:         "http://127.0.0.1:11434/v1",

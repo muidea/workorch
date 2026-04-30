@@ -875,8 +875,12 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
+	eventRecordItems, err := deps.eventRecords.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID})
+	if err != nil {
+		return WorkspaceSnapshot{}, err
+	}
 	runs := make([]Run, 0, len(runItems))
-	projectionRun := selectWorkspaceProjectionRun(item, runItems, resultItems)
+	projectionRun := selectWorkspaceProjectionRun(item, runItems, resultItems, eventRecordItems)
 	for _, runItem := range runItems {
 		if runItem.WorkspaceID != workspaceID {
 			continue
@@ -884,10 +888,6 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		runs = append(runs, mapRun(runItem))
 	}
 	artifactItems, err := deps.artifacts.ListByWorkspace(ctx, workspaceID)
-	if err != nil {
-		return WorkspaceSnapshot{}, err
-	}
-	eventRecordItems, err := deps.eventRecords.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID})
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
@@ -993,7 +993,7 @@ func readWorkspaceTaskDecompositions(ctx context.Context, deps readModelDependen
 	return runSnapshot.TaskDecompositions, nil
 }
 
-func selectWorkspaceProjectionRun(workspace *workspacemodel.Workspace, runs []*runmodel.Run, results []*resultmodel.Result) *runmodel.Run {
+func selectWorkspaceProjectionRun(workspace *workspacemodel.Workspace, runs []*runmodel.Run, results []*resultmodel.Result, eventRecords []*eventstreammodel.EventRecord) *runmodel.Run {
 	if workspace == nil || len(runs) == 0 {
 		return nil
 	}
@@ -1015,6 +1015,9 @@ func selectWorkspaceProjectionRun(workspace *workspacemodel.Workspace, runs []*r
 	if active != nil && !isTerminalProjectionRunState(active.State) {
 		return active
 	}
+	if latestByEvent := selectLatestRunByEvent(workspace.ID, runsByID, eventRecords); latestByEvent != nil {
+		return latestByEvent
+	}
 	if resultRun := selectAcceptedResultRun(workspace.ID, runsByID, results); resultRun != nil {
 		return resultRun
 	}
@@ -1022,6 +1025,30 @@ func selectWorkspaceProjectionRun(workspace *workspacemodel.Workspace, runs []*r
 		return active
 	}
 	return latest
+}
+
+func selectLatestRunByEvent(workspaceID common.WorkspaceID, runs map[common.RunID]*runmodel.Run, eventRecords []*eventstreammodel.EventRecord) *runmodel.Run {
+	var selected *eventstreammodel.EventRecord
+	for _, item := range eventRecords {
+		if item == nil || item.WorkspaceID != workspaceID || item.RunID == "" {
+			continue
+		}
+		if _, ok := runs[item.RunID]; !ok {
+			continue
+		}
+		switch item.Topic {
+		case events.TopicRunCreated, events.TopicRunStateChanged:
+		default:
+			continue
+		}
+		if selected == nil || item.OccurredAt >= selected.OccurredAt {
+			selected = item
+		}
+	}
+	if selected == nil {
+		return nil
+	}
+	return runs[selected.RunID]
 }
 
 func mapWorkspaceWithRunProjection(workspace *workspacemodel.Workspace, run *runmodel.Run) Workspace {
@@ -1711,6 +1738,8 @@ func mapWorkspaceTaskProgress(snapshot WorkspaceSnapshot) TaskProgress {
 
 func mapTaskProgress(snapshot RunSnapshot) TaskProgress {
 	latestCheckpoint := latestRuntimeCheckpoint(snapshot.RuntimeCheckpoints)
+	results := runScopedResults(snapshot)
+	artifacts := runScopedArtifacts(snapshot)
 	ret := TaskProgress{
 		WorkspaceID: snapshot.Run.WorkspaceID,
 		RunID:       snapshot.Run.ID,
@@ -1734,7 +1763,7 @@ func mapTaskProgress(snapshot RunSnapshot) TaskProgress {
 		{ID: "execution_steps", Title: "Execution steps", State: stepProgressState(snapshot), EvidenceRefs: idsFromSteps(snapshot.Steps)},
 		{ID: "governance", Title: "Decision and approval governance", State: governanceProgressState(snapshot), EvidenceRefs: governanceEvidenceRefs(snapshot)},
 		{ID: "validation", Title: "Validation", State: validationProgressState(snapshot), EvidenceRefs: idsFromValidations(snapshot.ValidationResults)},
-		{ID: "formal_result", Title: "Formal result", State: resultProgressState(snapshot), EvidenceRefs: append(idsFromResults(snapshot.Results), idsFromArtifacts(snapshot.Artifacts)...)},
+		{ID: "formal_result", Title: "Formal result", State: resultProgressState(snapshot), EvidenceRefs: append(idsFromResults(results), idsFromArtifacts(artifacts)...)},
 	}
 	ret.Items = taskProgressItems(snapshot)
 	ret.CurrentMilestone = currentProgressMilestone(ret.Milestones)
@@ -2181,7 +2210,9 @@ func contextGovernanceSection(snapshot RunSnapshot) ContextSection {
 }
 
 func contextFormalOutputSection(snapshot RunSnapshot) ContextSection {
-	if len(snapshot.Results) == 0 && len(snapshot.Artifacts) == 0 {
+	results := runScopedResults(snapshot)
+	artifacts := runScopedArtifacts(snapshot)
+	if len(results) == 0 && len(artifacts) == 0 {
 		return ContextSection{}
 	}
 	return ContextSection{
@@ -2190,11 +2221,11 @@ func contextFormalOutputSection(snapshot RunSnapshot) ContextSection {
 		Title:        "Formal outputs",
 		Priority:     90,
 		State:        resultProgressState(snapshot),
-		Summary:      formalOutputSummary(snapshot.Results),
-		EvidenceRefs: append(idsFromResults(snapshot.Results), idsFromArtifacts(snapshot.Artifacts)...),
+		Summary:      formalOutputSummary(results),
+		EvidenceRefs: append(idsFromResults(results), idsFromArtifacts(artifacts)...),
 		Data: map[string]any{
-			"results":   snapshot.Results,
-			"artifacts": snapshot.Artifacts,
+			"results":   results,
+			"artifacts": artifacts,
 		},
 	}
 }
@@ -2417,7 +2448,9 @@ func taskProgressBlockers(snapshot RunSnapshot) []ProgressBlocker {
 }
 
 func taskProgressItems(snapshot RunSnapshot) []ProgressItem {
-	ret := make([]ProgressItem, 0, len(snapshot.Steps)+len(snapshot.ToolCalls)+len(snapshot.ValidationResults)+len(snapshot.Results)+len(snapshot.Artifacts)+len(snapshot.Decisions)+len(snapshot.Approvals))
+	results := runScopedResults(snapshot)
+	artifacts := runScopedArtifacts(snapshot)
+	ret := make([]ProgressItem, 0, len(snapshot.Steps)+len(snapshot.ToolCalls)+len(snapshot.ValidationResults)+len(results)+len(artifacts)+len(snapshot.Decisions)+len(snapshot.Approvals))
 	for _, item := range snapshot.Steps {
 		ret = append(ret, ProgressItem{ID: item.ID, Kind: "step", Title: firstNonEmptyReadModel(item.Kind, item.ID), State: item.State, EvidenceRefs: []string{item.ID}})
 	}
@@ -2430,10 +2463,10 @@ func taskProgressItems(snapshot RunSnapshot) []ProgressItem {
 	for _, item := range snapshot.ValidationResults {
 		ret = append(ret, ProgressItem{ID: item.ID, Kind: "validation_result", Title: firstNonEmptyReadModel(item.ValidationKind, item.TargetRef, item.ID), State: item.State, EvidenceRefs: []string{item.ID, item.EvidenceRef, item.StepID}})
 	}
-	for _, item := range snapshot.Results {
+	for _, item := range results {
 		ret = append(ret, ProgressItem{ID: item.ID, Kind: "result", Title: firstNonEmptyReadModel(item.Title, item.SourceType, item.ID), State: item.State, EvidenceRefs: compactUniqueStrings(append([]string{item.ID, item.SourceRef}, item.EvidenceRefs...))})
 	}
-	for _, item := range snapshot.Artifacts {
+	for _, item := range artifacts {
 		ret = append(ret, ProgressItem{ID: item.ID, Kind: "artifact", Title: firstNonEmptyReadModel(item.Name, item.URI, item.ArtifactType, item.ID), State: item.State, EvidenceRefs: compactUniqueStrings(append([]string{item.ID, item.ResultID, item.StepID, item.ToolCallID, item.PatchID, item.ValidationResultID}, item.EvidenceRefs...))})
 	}
 	for _, item := range snapshot.Decisions {
@@ -2578,18 +2611,20 @@ func validationProgressState(snapshot RunSnapshot) string {
 }
 
 func resultProgressState(snapshot RunSnapshot) string {
-	if len(snapshot.Results) == 0 && len(snapshot.Artifacts) == 0 {
+	results := runScopedResults(snapshot)
+	artifacts := runScopedArtifacts(snapshot)
+	if len(results) == 0 && len(artifacts) == 0 {
 		if isTerminalRunState(snapshot.Run.State) {
 			return "failed"
 		}
 		return "pending"
 	}
-	for _, item := range snapshot.Results {
+	for _, item := range results {
 		if item.State == string(common.ResultStateAccepted) {
 			return "completed"
 		}
 	}
-	return progressStateFromCount(len(snapshot.Results)+len(snapshot.Artifacts), false, false)
+	return progressStateFromCount(len(results)+len(artifacts), false, false)
 }
 
 func progressStateFromCount(count int, failed bool, completed bool) string {
@@ -2615,6 +2650,8 @@ func currentProgressMilestone(items []ProgressMilestone) string {
 }
 
 func taskProgressEvidenceRefs(snapshot RunSnapshot) []string {
+	results := runScopedResults(snapshot)
+	artifacts := runScopedArtifacts(snapshot)
 	refs := []string{snapshot.Run.ID}
 	if snapshot.Step != nil {
 		refs = append(refs, snapshot.Step.ID)
@@ -2624,10 +2661,36 @@ func taskProgressEvidenceRefs(snapshot RunSnapshot) []string {
 	refs = append(refs, idsFromPatches(snapshot.Patches)...)
 	refs = append(refs, idsFromValidations(snapshot.ValidationResults)...)
 	refs = append(refs, idsFromCheckpoints(snapshot.RuntimeCheckpoints)...)
-	refs = append(refs, idsFromResults(snapshot.Results)...)
-	refs = append(refs, idsFromArtifacts(snapshot.Artifacts)...)
+	refs = append(refs, idsFromResults(results)...)
+	refs = append(refs, idsFromArtifacts(artifacts)...)
 	refs = append(refs, governanceEvidenceRefs(snapshot)...)
 	return compactUniqueStrings(refs)
+}
+
+func runScopedResults(snapshot RunSnapshot) []Result {
+	if snapshot.Run.ID == "" {
+		return snapshot.Results
+	}
+	ret := make([]Result, 0, len(snapshot.Results))
+	for _, item := range snapshot.Results {
+		if item.RunID == snapshot.Run.ID {
+			ret = append(ret, item)
+		}
+	}
+	return ret
+}
+
+func runScopedArtifacts(snapshot RunSnapshot) []Artifact {
+	if snapshot.Run.ID == "" {
+		return snapshot.Artifacts
+	}
+	ret := make([]Artifact, 0, len(snapshot.Artifacts))
+	for _, item := range snapshot.Artifacts {
+		if item.RunID == snapshot.Run.ID {
+			ret = append(ret, item)
+		}
+	}
+	return ret
 }
 
 func governanceEvidenceRefs(snapshot RunSnapshot) []string {

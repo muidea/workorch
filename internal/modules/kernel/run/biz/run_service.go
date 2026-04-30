@@ -138,7 +138,9 @@ func (s *Service) ResumeRun(ctx context.Context, cmd runservice.ResumeRunCommand
 	if err != nil {
 		return err
 	}
-	if r.State != common.RunStateBlockedOnDecision && r.State != common.RunStateBlockedOnApproval {
+	if r.State != common.RunStateBlockedOnDecision &&
+		r.State != common.RunStateBlockedOnApproval &&
+		r.State != common.RunStateRunning {
 		return common.ErrConflict
 	}
 
@@ -160,7 +162,9 @@ func (s *Service) EnsureResumed(ctx context.Context, cmd runservice.ResumeRunCom
 	if isTerminalRunState(r.State) {
 		return nil
 	}
-	if r.State != common.RunStateBlockedOnDecision && r.State != common.RunStateBlockedOnApproval {
+	if r.State != common.RunStateBlockedOnDecision &&
+		r.State != common.RunStateBlockedOnApproval &&
+		r.State != common.RunStateRunning {
 		return common.ErrConflict
 	}
 	return s.ResumeRun(ctx, cmd)

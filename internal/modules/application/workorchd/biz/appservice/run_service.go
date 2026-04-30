@@ -134,7 +134,7 @@ func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID st
 	if err := attachCompressedContextToRun(ctx, session, id); err != nil {
 		return Run{}, err
 	}
-	if err := service.EnsureResumed(ctx, runmodule.ResumeRunCommand{RunID: id}); err != nil {
+	if err := service.ResumeRun(ctx, runmodule.ResumeRunCommand{RunID: id}); err != nil {
 		return Run{}, err
 	}
 

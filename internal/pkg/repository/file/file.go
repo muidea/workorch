@@ -942,6 +942,21 @@ func (r *WorkspaceTemplateRepository) Update(_ context.Context, item *repository
 	return saveMap(r.path, items)
 }
 
+func (r *WorkspaceTemplateRepository) Delete(_ context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items, err := loadMap[string, repository.WorkspaceTemplate](r.path)
+	if err != nil {
+		return err
+	}
+	if _, ok := items[id]; !ok {
+		return common.ErrNotFound
+	}
+	delete(items, id)
+	return saveMap(r.path, items)
+}
+
 type GoalRepository struct {
 	mu   sync.RWMutex
 	path string

@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"os/exec"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -473,7 +475,15 @@ func ParseLLMExecutionDecision(payload []byte) (llmmodels.LLMExecutionDecision, 
 	decoder := json.NewDecoder(bytes.NewReader(normalized))
 	var raw map[string]json.RawMessage
 	if err := decoder.Decode(&raw); err != nil {
-		return llmmodels.LLMExecutionDecision{}, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
+		repaired := repairMalformedShellCommandArgsJSON(normalized)
+		if bytes.Equal(repaired, normalized) {
+			return llmmodels.LLMExecutionDecision{}, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
+		}
+		normalized = repaired
+		decoder = json.NewDecoder(bytes.NewReader(normalized))
+		if repairErr := decoder.Decode(&raw); repairErr != nil {
+			return llmmodels.LLMExecutionDecision{}, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
+		}
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err == nil {
@@ -488,6 +498,7 @@ func ParseLLMExecutionDecision(payload []byte) (llmmodels.LLMExecutionDecision, 
 	if err := json.Unmarshal(normalized, &decision); err != nil {
 		return llmmodels.LLMExecutionDecision{}, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
 	}
+	normalizeDecisionExecutionGraph(&decision)
 	if err := validateDecision(decision); err != nil {
 		return llmmodels.LLMExecutionDecision{}, err
 	}
@@ -587,6 +598,193 @@ func extractFirstJSONObject(text string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func repairMalformedShellCommandArgsJSON(payload []byte) []byte {
+	text := string(payload)
+	var builder strings.Builder
+	last := 0
+	searchFrom := 0
+	for {
+		idx := strings.Index(text[searchFrom:], `"command"`)
+		if idx < 0 {
+			break
+		}
+		idx += searchFrom
+		start, end, replacement, ok := malformedShellCommandArgsReplacement(text, idx)
+		if !ok {
+			searchFrom = idx + len(`"command"`)
+			continue
+		}
+		builder.WriteString(text[last:start])
+		builder.WriteString(replacement)
+		last = end
+		searchFrom = end
+	}
+	if last == 0 {
+		return payload
+	}
+	builder.WriteString(text[last:])
+	return []byte(builder.String())
+}
+
+func malformedShellCommandArgsReplacement(text string, commandKeyStart int) (int, int, string, bool) {
+	keyEnd, ok := scanJSONStringEnd(text, commandKeyStart)
+	if !ok {
+		return 0, 0, "", false
+	}
+	key, err := strconv.Unquote(text[commandKeyStart:keyEnd])
+	if err != nil || key != "command" {
+		return 0, 0, "", false
+	}
+	pos := skipJSONSpaces(text, keyEnd)
+	if pos >= len(text) || text[pos] != ':' {
+		return 0, 0, "", false
+	}
+	pos = skipJSONSpaces(text, pos+1)
+	commandValueEnd, ok := scanJSONStringEnd(text, pos)
+	if !ok {
+		return 0, 0, "", false
+	}
+	firstComma := skipJSONSpaces(text, commandValueEnd)
+	if firstComma >= len(text) || text[firstComma] != ',' {
+		return 0, 0, "", false
+	}
+	pos = skipJSONSpaces(text, firstComma+1)
+	tokenEnd, ok := scanJSONStringEnd(text, pos)
+	if !ok {
+		return 0, 0, "", false
+	}
+	afterToken := skipJSONSpaces(text, tokenEnd)
+	if afterToken < len(text) && text[afterToken] == ':' {
+		return 0, 0, "", false
+	}
+
+	extras := []string{}
+	for {
+		tokenEnd, ok := scanJSONStringEnd(text, pos)
+		if !ok {
+			return 0, 0, "", false
+		}
+		token := text[pos:tokenEnd]
+		afterToken = skipJSONSpaces(text, tokenEnd)
+		if afterToken < len(text) && text[afterToken] == ':' {
+			key, err := strconv.Unquote(token)
+			if err != nil || len(extras) == 0 {
+				return 0, 0, "", false
+			}
+			if key == "args" {
+				arrayStart := skipJSONSpaces(text, afterToken+1)
+				if arrayStart >= len(text) || text[arrayStart] != '[' {
+					return 0, 0, "", false
+				}
+				arrayEnd, ok := findJSONClosingDelimiter(text, arrayStart, '[', ']')
+				if !ok {
+					return 0, 0, "", false
+				}
+				return firstComma, arrayEnd + 1, "," + shellArgsArrayWithExisting(extras, text[arrayStart+1:arrayEnd]), true
+			}
+			return firstComma, pos, "," + shellArgsArray(extras) + ",", true
+		}
+		extras = append(extras, token)
+		if afterToken >= len(text) {
+			return 0, 0, "", false
+		}
+		switch text[afterToken] {
+		case ',':
+			pos = skipJSONSpaces(text, afterToken+1)
+		case ']':
+			return firstComma, afterToken + 1, "," + shellArgsArray(extras), true
+		case '}':
+			return firstComma, afterToken + 1, "," + shellArgsArray(extras) + "}", true
+		default:
+			return 0, 0, "", false
+		}
+	}
+}
+
+func shellArgsArray(args []string) string {
+	return `"args":[` + strings.Join(args, ",") + `]`
+}
+
+func shellArgsArrayWithExisting(args []string, existing string) string {
+	existing = strings.TrimSpace(existing)
+	if existing == "" {
+		return shellArgsArray(args)
+	}
+	return `"args":[` + strings.Join(args, ",") + "," + existing + `]`
+}
+
+func scanJSONStringEnd(text string, start int) (int, bool) {
+	if start >= len(text) || text[start] != '"' {
+		return 0, false
+	}
+	escaped := false
+	for idx := start + 1; idx < len(text); idx++ {
+		ch := text[idx]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			return idx + 1, true
+		}
+	}
+	return 0, false
+}
+
+func skipJSONSpaces(text string, start int) int {
+	for start < len(text) {
+		switch text[start] {
+		case ' ', '\n', '\r', '\t':
+			start++
+		default:
+			return start
+		}
+	}
+	return start
+}
+
+func findJSONClosingDelimiter(text string, start int, open byte, close byte) (int, bool) {
+	if start >= len(text) || text[start] != open {
+		return 0, false
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for idx := start; idx < len(text); idx++ {
+		ch := text[idx]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case open:
+			depth++
+		case close:
+			depth--
+			if depth == 0 {
+				return idx, true
+			}
+		}
+	}
+	return 0, false
 }
 
 func NormalizeDecisionOutput(request runtimemodel.StepExecutionRequest, decision llmmodels.LLMExecutionDecision) (map[string]any, error) {
@@ -732,11 +930,15 @@ func validateExecutionGraph(graph llmmodels.BlockExecutionGraph) error {
 	if len(graph.Nodes) == 0 {
 		return fmt.Errorf("%w: executionGraph.nodes is required", common.ErrInvalidArgument)
 	}
+	allowedKinds := declaredRuntimeBlockKinds()
 	known := map[string]bool{}
 	for _, node := range graph.Nodes {
 		nodeID := strings.TrimSpace(node.ID)
 		if nodeID == "" || strings.TrimSpace(node.Kind) == "" {
 			return fmt.Errorf("%w: executionGraph node id and kind are required", common.ErrInvalidArgument)
+		}
+		if !allowedKinds[strings.TrimSpace(node.Kind)] {
+			return fmt.Errorf("%w: executionGraph node kind %q is not declared in runtimeCapabilities.blockKinds", common.ErrInvalidArgument, strings.TrimSpace(node.Kind))
 		}
 		if strings.TrimSpace(node.Kind) == shellcommon.StepKindCommand {
 			if command, _ := node.Input["command"].(string); strings.TrimSpace(command) != "" {
@@ -768,8 +970,34 @@ func validateExecutionGraph(graph llmmodels.BlockExecutionGraph) error {
 	return nil
 }
 
+func normalizeDecisionExecutionGraph(decision *llmmodels.LLMExecutionDecision) {
+	if decision == nil || decision.ExecutionGraph == nil {
+		return
+	}
+	for idx := range decision.ExecutionGraph.Nodes {
+		switch strings.TrimSpace(decision.ExecutionGraph.Nodes[idx].Kind) {
+		case "patchRequests", "patch/request":
+			decision.ExecutionGraph.Nodes[idx].Kind = llmcommon.RuntimeBlockKindPatchApply
+		}
+	}
+}
+
+func declaredRuntimeBlockKinds() map[string]bool {
+	capabilities := declaredRuntimeCapabilities()
+	ret := make(map[string]bool, len(capabilities.BlockKinds))
+	for _, block := range capabilities.BlockKinds {
+		if kind := strings.TrimSpace(block.Kind); kind != "" {
+			ret[kind] = true
+		}
+	}
+	return ret
+}
+
 func validateShellCommandBoundary(command string, args []string, field string) error {
 	command = strings.TrimSpace(command)
+	if reason := invalidDirectShellCommandNameReason(command); reason != "" {
+		return fmt.Errorf("%w: %s command must be an executable name or path only; %s; use args, sh -c, or patchRequests for shell syntax", common.ErrInvalidArgument, field, reason)
+	}
 	commandLine := shellCommandLine(command, args)
 	for _, unavailable := range unavailableRuntimeCommands() {
 		if commandReferencesShellCommand(command, commandLine, unavailable) {
@@ -782,6 +1010,19 @@ func validateShellCommandBoundary(command string, args []string, field string) e
 		}
 	}
 	return nil
+}
+
+func invalidDirectShellCommandNameReason(command string) string {
+	if command == "" {
+		return ""
+	}
+	if strings.ContainsAny(command, " \t\r\n") {
+		return "command contains whitespace"
+	}
+	if strings.ContainsAny(command, "<>|&;`$") {
+		return "command contains shell metacharacters"
+	}
+	return ""
 }
 
 func unavailableRuntimeCommands() []string {
@@ -1001,12 +1242,16 @@ func hasExecutionGraphCycle(graph llmmodels.BlockExecutionGraph) bool {
 func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels.ProviderConfig) llmmodels.ProviderRequest {
 	input := cloneMap(request.Input)
 	enrichProviderInputWithSoulRouting(input)
+	systemLocale := currentSystemLocale()
+	dialogLanguage := inferDialogLanguage(input, systemLocale)
 	return llmmodels.ProviderRequest{
 		WorkspaceID:         string(request.WorkspaceID),
 		RunID:               string(request.RunID),
 		StepID:              string(request.StepID),
 		Kind:                request.Kind,
 		Model:               config.Model,
+		SystemLocale:        systemLocale,
+		DialogLanguage:      dialogLanguage,
 		Input:               input,
 		Schema:              decisionSchemaName,
 		RuntimeCapabilities: declaredRuntimeCapabilities(),
@@ -1016,6 +1261,94 @@ func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels
 			"stepId":      string(request.StepID),
 		},
 		Config: RedactedProviderConfig(config),
+	}
+}
+
+func currentSystemLocale() string {
+	for _, key := range []string{"LC_ALL", "LC_MESSAGES", "LANGUAGE", "LANG"} {
+		value := strings.TrimSpace(os.Getenv(key))
+		if value == "" {
+			continue
+		}
+		if key == "LANGUAGE" {
+			value = strings.TrimSpace(strings.Split(value, ":")[0])
+		}
+		if value != "" {
+			return value
+		}
+	}
+	return "C"
+}
+
+func inferDialogLanguage(input map[string]any, systemLocale string) string {
+	for _, value := range []any{
+		input["dialogLanguage"],
+		input["language"],
+		input["locale"],
+	} {
+		if language := languageNameFromLocale(stringValue(value)); language != "" {
+			return language
+		}
+	}
+	executionContext := recordFromAny(input["executionContext"])
+	for _, value := range []any{
+		executionContext["dialogLanguage"],
+		executionContext["language"],
+		executionContext["locale"],
+		executionContext["systemLanguage"],
+		executionContext["systemLocale"],
+	} {
+		if language := languageNameFromLocale(stringValue(value)); language != "" {
+			return language
+		}
+	}
+	if language := languageNameFromLocale(systemLocale); language != "" {
+		return language
+	}
+	return "English"
+}
+
+func languageNameFromLocale(locale string) string {
+	locale = strings.TrimSpace(locale)
+	if locale == "" {
+		return ""
+	}
+	locale = strings.Split(locale, ":")[0]
+	locale = strings.Split(locale, ".")[0]
+	normalized := strings.ToLower(strings.ReplaceAll(locale, "_", "-"))
+	if normalized == "" {
+		return ""
+	}
+	switch {
+	case normalized == "c" || normalized == "posix":
+		return "English"
+	case strings.HasPrefix(normalized, "zh-hant") ||
+		strings.HasPrefix(normalized, "zh-tw") ||
+		strings.HasPrefix(normalized, "zh-hk") ||
+		strings.HasPrefix(normalized, "zh-mo"):
+		return "Chinese (Traditional)"
+	case strings.HasPrefix(normalized, "zh"):
+		return "Chinese (Simplified)"
+	case strings.HasPrefix(normalized, "en"):
+		return "English"
+	case strings.HasPrefix(normalized, "ja"):
+		return "Japanese"
+	case strings.HasPrefix(normalized, "ko"):
+		return "Korean"
+	case strings.HasPrefix(normalized, "fr"):
+		return "French"
+	case strings.HasPrefix(normalized, "de"):
+		return "German"
+	case strings.HasPrefix(normalized, "es"):
+		return "Spanish"
+	case strings.HasPrefix(normalized, "pt"):
+		return "Portuguese"
+	case strings.HasPrefix(normalized, "it"):
+		return "Italian"
+	case strings.HasPrefix(normalized, "ru"):
+		return "Russian"
+	default:
+		return locale
 	}
 }
 
@@ -1138,6 +1471,11 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 				Input:       map[string]any{"host": "string", "port": "number", "username": "string", "password": "string", "privateKey": "string", "privateKeyPath": "string", "command": "string", "timeoutMillis": "number"},
 			},
 			{
+				Kind:        llmcommon.RuntimeBlockKindPatchApply,
+				Description: "Apply one file_write or unified_diff patch inside the workspace working directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory.",
+				Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string"},
+			},
+			{
 				Kind:        mcpcommon.StepKindToolCall,
 				Description: "Call an explicitly configured MCP server tool.",
 				Input:       map[string]any{"serverId": "string", "tool": "string", "input": "object"},
@@ -1184,12 +1522,44 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 
 func failureOutput(request runtimemodel.StepExecutionRequest, stage string, reason string, config llmmodels.ProviderConfig) map[string]any {
 	return map[string]any{
-		"runId":    string(request.RunID),
-		"stepId":   string(request.StepID),
-		"status":   "failed",
-		"stage":    stage,
-		"error":    reason,
-		"provider": RedactedProviderConfig(config),
+		"runId":           string(request.RunID),
+		"stepId":          string(request.StepID),
+		"status":          "failed",
+		"stage":           stage,
+		"error":           reason,
+		"failureCategory": llmFailureCategory(stage),
+		"resolutionHint":  llmFailureResolutionHint(stage),
+		"provider":        RedactedProviderConfig(config),
+	}
+}
+
+func llmFailureCategory(stage string) string {
+	switch stage {
+	case "llm_provider_unavailable",
+		"llm_provider_client_unavailable",
+		"llm_provider_operation_unsupported",
+		"llm_provider_error",
+		"llm_provider_stream_error":
+		return "llm_provider"
+	case "llm_schema_invalid", "llm_decision_invalid", "llm_failed":
+		return "llm_decision"
+	default:
+		return "llm_runtime"
+	}
+}
+
+func llmFailureResolutionHint(stage string) string {
+	switch stage {
+	case "llm_provider_unavailable",
+		"llm_provider_client_unavailable",
+		"llm_provider_operation_unsupported",
+		"llm_provider_error",
+		"llm_provider_stream_error":
+		return "check LLM provider baseURL, model, API key, protocol compatibility, and network availability before rerunning the workspace"
+	case "llm_schema_invalid", "llm_decision_invalid":
+		return "check LLM decision JSON format and schema constraints"
+	default:
+		return "check runtime step output and execution evidence"
 	}
 }
 

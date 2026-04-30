@@ -101,6 +101,28 @@ func UpdateWorkspaceTemplateWithSession(ctx context.Context, session *RuntimeSes
 	return item, nil
 }
 
+func DeleteWorkspaceTemplateWithBackend(ctx context.Context, backend string, dataRoot string, templateID string) error {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return err
+	}
+	return DeleteWorkspaceTemplateWithSession(ctx, session, templateID)
+}
+
+func DeleteWorkspaceTemplateWithSession(ctx context.Context, session *RuntimeSession, templateID string) (err error) {
+	repo, err := workspaceTemplateRepositoryFromSession(session)
+	if err != nil {
+		return err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	templateID = strings.TrimSpace(templateID)
+	if templateID == "" {
+		return common.ErrInvalidArgument
+	}
+	return repo.Delete(ctx, templateID)
+}
+
 func workspaceTemplateRepositoryFromSession(session *RuntimeSession) (repository.WorkspaceTemplateRepository, error) {
 	exports, err := session.Exports()
 	if err != nil {

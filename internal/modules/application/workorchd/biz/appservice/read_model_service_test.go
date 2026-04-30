@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -1005,6 +1006,91 @@ func TestReadWorkspaceSnapshotProjectsAcceptedResultOverStaleTerminalActiveRun(t
 	}
 	if len(snapshot.Results) != 1 || snapshot.Results[0].RunID != string(completedRunID) || snapshot.Results[0].Summary != "formal result" {
 		t.Fatalf("results = %+v, want accepted formal result for completed run", snapshot.Results)
+	}
+}
+
+func TestReadWorkspaceSnapshotProjectsLatestRunFailureOverHistoricalAcceptedResult(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-latest-failure-projection")
+	completedRunID := common.RunID("run-completed-with-result")
+	failedRunID := common.RunID("run-latest-provider-failed")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:    workspaceID,
+		Title: "latest failure projection",
+		State: common.WorkspaceStateCompleted,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          completedRunID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateCompleted,
+	}); err != nil {
+		t.Fatalf("create completed run: %v", err)
+	}
+	if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
+		ID:          common.ResultID(string(completedRunID) + "/result/dod-assessment"),
+		WorkspaceID: workspaceID,
+		RunID:       completedRunID,
+		State:       common.ResultStateAccepted,
+		Summary:     "historical formal result",
+		CreatedAt:   "2026-04-29T10:00:00Z",
+	}); err != nil {
+		t.Fatalf("create historical result: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:            failedRunID,
+		WorkspaceID:   workspaceID,
+		State:         common.RunStateFailed,
+		FailureReason: "llm provider returned html",
+	}); err != nil {
+		t.Fatalf("create failed run: %v", err)
+	}
+	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
+		ID:          common.EventRecordID("evt-run-completed-created"),
+		Version:     events.WorkorchEventVersion,
+		Topic:       events.TopicRunCreated,
+		OccurredAt:  "2026-04-29T10:00:00Z",
+		SubjectType: "run",
+		SubjectID:   string(completedRunID),
+		WorkspaceID: workspaceID,
+		RunID:       completedRunID,
+		Payload:     map[string]any{events.PayloadKeyState: string(common.RunStateCompleted)},
+	}); err != nil {
+		t.Fatalf("append completed event: %v", err)
+	}
+	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
+		ID:          common.EventRecordID("evt-run-latest-failed"),
+		Version:     events.WorkorchEventVersion,
+		Topic:       events.TopicRunStateChanged,
+		OccurredAt:  "2026-04-30T10:00:00Z",
+		SubjectType: "run",
+		SubjectID:   string(failedRunID),
+		WorkspaceID: workspaceID,
+		RunID:       failedRunID,
+		Payload:     map[string]any{events.PayloadKeyState: string(common.RunStateFailed), events.PayloadKeyFailureReason: "llm provider returned html"},
+	}); err != nil {
+		t.Fatalf("append failed event: %v", err)
+	}
+
+	snapshot, err := ReadWorkspaceSnapshotWithBackend(context.Background(), "file", dataRoot, string(workspaceID))
+	if err != nil {
+		t.Fatalf("ReadWorkspaceSnapshotWithBackend: %v", err)
+	}
+	if snapshot.Workspace.State != string(common.WorkspaceStateFailed) {
+		t.Fatalf("workspace state = %q, want failed from latest run", snapshot.Workspace.State)
+	}
+	if snapshot.TaskProgress.RunID != string(failedRunID) || snapshot.TaskProgress.State != string(common.RunStateFailed) {
+		t.Fatalf("task progress = %+v, want latest failed run", snapshot.TaskProgress)
+	}
+	if !progressContainsMilestone(snapshot.TaskProgress, "formal_result", "failed") {
+		t.Fatalf("milestones = %+v, want formal_result failed for latest run without result", snapshot.TaskProgress.Milestones)
+	}
+	if len(snapshot.Results) != 1 || snapshot.Results[0].RunID != string(completedRunID) {
+		t.Fatalf("results = %+v, want historical result still visible", snapshot.Results)
 	}
 }
 

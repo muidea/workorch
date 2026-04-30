@@ -85,6 +85,7 @@ curl -fsS "$BASE_URL/console/assets/workorch-console.js" >"$TMP_DIR/workorch-con
 grep '执行人格（Soul）' "$TMP_DIR/workorch-console.js" >/dev/null
 grep 'Workspace 模板' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '删除 Soul' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '删除 Workspace 模板' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '调整工作空间 Soul' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '执行人格配置已保存' "$TMP_DIR/workorch-console.js" >/dev/null
 
@@ -171,6 +172,29 @@ if [[ "$invalid_status" != "404" && "$invalid_status" != "400" ]]; then
   echo "invalid template status=$invalid_status, want 400 or 404" >&2
   exit 1
 fi
+
+DELETE_TEMPLATE_ID="workspace-template-e2e-delete-$VERIFY_SUFFIX"
+cat >"$TMP_DIR/template-delete-create.json" <<JSON
+{
+  "id": "$DELETE_TEMPLATE_ID",
+  "name": "Template E2E Delete Workspace $VERIFY_SUFFIX",
+  "description": "Temporary workspace template used to verify delete.",
+  "goalText": "This template is deleted by e2e.",
+  "doDItems": ["Template can be deleted"],
+  "defaultSoulId": "$SOUL_ID"
+}
+JSON
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspace-templates" \
+  -H 'Content-Type: application/json' \
+  -d @"$TMP_DIR/template-delete-create.json" >"$TMP_DIR/template-delete-created.json"
+delete_template_status="$(curl -sS -o "$TMP_DIR/template-delete-response.json" -w '%{http_code}' \
+  -X DELETE "$BASE_URL/api/v1/workorch/workspace-templates/$DELETE_TEMPLATE_ID")"
+if [[ "$delete_template_status" != "204" ]]; then
+  echo "delete workspace template status=$delete_template_status, want 204" >&2
+  exit 1
+fi
+curl -fsS "$BASE_URL/api/v1/workorch/workspace-templates" >"$TMP_DIR/templates-after-delete.json"
+assert_json "$TMP_DIR/templates-after-delete.json" "deleted template not listed" "not any(item.get('id') == '$DELETE_TEMPLATE_ID' for item in data.get('workspaceTemplates', []))"
 
 cat >"$TMP_DIR/template-create.json" <<JSON
 {

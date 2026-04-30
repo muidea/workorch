@@ -12,7 +12,9 @@ import (
 	"testing"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -193,15 +195,16 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	}
 
 	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
-		GoalID:        goal.ID,
-		DoDID:         dod.ID,
-		LLMProviderID: "reasoning",
-		SoulID:        "soul-activation-context",
-		SkillIDs:      []string{"skill-activation-context"},
-		MCPServerIDs:  []string{"mcp-activation-context"},
-		CapabilityIDs: []string{"mcp-activation-context:tool:repo.summary"},
-		MemoryIDs:     []string{memory.ID},
-		Priority:      7,
+		GoalID:         goal.ID,
+		DoDID:          dod.ID,
+		LLMProviderID:  "reasoning",
+		SoulID:         "soul-activation-context",
+		SkillIDs:       []string{"skill-activation-context"},
+		MCPServerIDs:   []string{"mcp-activation-context"},
+		CapabilityIDs:  []string{"mcp-activation-context:tool:repo.summary"},
+		MemoryIDs:      []string{memory.ID},
+		DialogLanguage: "zh-CN",
+		Priority:       7,
 	})
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
@@ -215,6 +218,9 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	}
 	if executionContext[llmcommon.ExecutionContextLLMProviderID] != "reasoning" {
 		t.Fatalf("executionContext = %+v, want selected llm provider", executionContext)
+	}
+	if executionContext["dialogLanguage"] != "zh-CN" {
+		t.Fatalf("executionContext = %+v, want dialog language", executionContext)
 	}
 	goalContext, _ := executionContext["goal"].(map[string]any)
 	if goalContext["text"] != "activation context goal" {
@@ -247,6 +253,97 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	}
 	if stepContext[llmcommon.ExecutionContextLLMProviderID] != "reasoning" {
 		t.Fatalf("first step input = %+v, want llm provider propagated", runSnapshot.Steps[0].Input)
+	}
+	if stepContext["dialogLanguage"] != "zh-CN" {
+		t.Fatalf("first step input = %+v, want dialog language propagated", runSnapshot.Steps[0].Input)
+	}
+}
+
+func TestActivateWorkspaceExecutionWithBackendCarriesResolvedDecisionHistory(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-governance-history", "activation governance history", "", "workspaces/activation-governance-history")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "build a new proxy project")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"proxy project is implemented"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+
+	session, err := newRuntimeSessionWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("session exports: %v", err)
+	}
+	priorRunID := common.RunID("run-prior-governance-history")
+	priorTicketID := common.TicketID("ticket-prior-governance-history")
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          priorRunID,
+		WorkspaceID: common.WorkspaceID(workspace.ID),
+		GoalID:      common.GoalID(goal.ID),
+		DoDID:       common.DoDID(dod.ID),
+		State:       common.RunStateFailed,
+	}); err != nil {
+		t.Fatalf("create prior run: %v", err)
+	}
+	if err := exports.Repositories.Tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:           priorTicketID,
+		WorkspaceID:  common.WorkspaceID(workspace.ID),
+		RunID:        priorRunID,
+		StepID:       "run-prior-governance-history/step-1",
+		Reason:       "workspace is empty",
+		DecisionKind: "provide_missing_info",
+		Question:     "Should we start from scratch?",
+		State:        common.DecisionTicketStateResolved,
+	}); err != nil {
+		t.Fatalf("create prior ticket: %v", err)
+	}
+	if err := exports.Repositories.Resolutions.Create(ctx, &decisionmodel.Resolution{
+		ID:       "resolution-prior-governance-history",
+		TicketID: priorTicketID,
+		Type:     "provide_missing_info",
+		Payload: map[string]any{
+			"resumeInstruction": "Start from scratch and implement the MVP artifacts in this workspace.",
+		},
+	}); err != nil {
+		t.Fatalf("create prior resolution: %v", err)
+	}
+	_ = session.Close(ctx)
+
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	history := contextMapSliceFromValue(t, item.Run.ExecutionContext["governanceHistory"])
+	if len(history) != 1 {
+		t.Fatalf("governanceHistory = %#v, want one resolved decision", item.Run.ExecutionContext["governanceHistory"])
+	}
+	if history[0]["ticketId"] != string(priorTicketID) || history[0]["resolutionType"] != "provide_missing_info" {
+		t.Fatalf("governanceHistory[0] = %+v, want prior resolved ticket", history[0])
+	}
+	payload := contextMapFromValue(t, history[0]["resolutionPayload"])
+	if payload["resumeInstruction"] != "Start from scratch and implement the MVP artifacts in this workspace." {
+		t.Fatalf("resolutionPayload = %+v, want resume instruction", payload)
+	}
+	runSnapshot, err := ReadRunSnapshotWithBackend(ctx, "file", dataRoot, item.Run.ID)
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
+	}
+	stepContext, _ := runSnapshot.Steps[0].Input["executionContext"].(map[string]any)
+	if len(contextMapSliceFromValue(t, stepContext["governanceHistory"])) != 1 {
+		t.Fatalf("first step input = %+v, want governance history propagated", runSnapshot.Steps[0].Input)
 	}
 }
 
@@ -698,6 +795,25 @@ func contextMapFromValue(t *testing.T, value any) map[string]any {
 	var ret map[string]any
 	if err := json.Unmarshal(payload, &ret); err != nil {
 		t.Fatalf("unmarshal context value: %v", err)
+	}
+	return ret
+}
+
+func contextMapSliceFromValue(t *testing.T, value any) []map[string]any {
+	t.Helper()
+	if value == nil {
+		return nil
+	}
+	if typed, ok := value.([]map[string]any); ok {
+		return typed
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal context slice value: %v", err)
+	}
+	var ret []map[string]any
+	if err := json.Unmarshal(payload, &ret); err != nil {
+		t.Fatalf("unmarshal context slice value: %v", err)
 	}
 	return ret
 }

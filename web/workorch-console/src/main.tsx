@@ -1223,10 +1223,11 @@ function SoulDefinitionManager({ souls, onSoulsChange }: { souls: Soul[]; onSoul
 }
 
 function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }: { souls: Soul[]; templates: WorkspaceTemplate[]; onTemplatesChange: (templates: WorkspaceTemplate[]) => void }) {
-  const { message } = AntApp.useApp();
+  const { message, modal } = AntApp.useApp();
   const [form] = Form.useForm<WorkspaceTemplateFormValues>();
   const [editingTemplate, setEditingTemplate] = useState<WorkspaceTemplate | undefined>(undefined);
   const [saving, setSaving] = useState(false);
+  const [deletingTemplateId, setDeletingTemplateId] = useState<string | undefined>(undefined);
   const stages = defaultSoulBindingStages;
   const soulOptions = souls.map((item) => ({ value: item.id, label: `${item.name || item.id} (${item.id})` }));
 
@@ -1271,6 +1272,32 @@ function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }: { sou
     }
   };
 
+  const deleteTemplate = (template: WorkspaceTemplate) => {
+    modal.confirm({
+      title: '删除 Workspace 模板',
+      content: `确认删除「${template.name || template.id}」？删除模板不会删除已创建的工作空间。`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        setDeletingTemplateId(template.id);
+        try {
+          await workorchApi.deleteWorkspaceTemplate(template.id);
+          const nextTemplates = await workorchApi.listWorkspaceTemplates();
+          onTemplatesChange(nextTemplates);
+          if (editingTemplate?.id === template.id) {
+            editTemplate(undefined);
+          }
+          message.success('Workspace 模板已删除');
+        } catch (error) {
+          message.error(errorMessage(error));
+        } finally {
+          setDeletingTemplateId(undefined);
+        }
+      }
+    });
+  };
+
   return (
     <ProCard title="Workspace 模板" className="workorch-section">
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -1284,7 +1311,10 @@ function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }: { sou
               dataSource={templates}
               locale={{ emptyText: <Empty description="暂无 Workspace 模板" /> }}
               renderItem={(item) => (
-                <List.Item actions={[<Button key="edit" type="link" size="small" onClick={() => editTemplate(item)}>编辑</Button>]}>
+                <List.Item actions={[
+                  <Button key="edit" type="link" size="small" onClick={() => editTemplate(item)}>编辑</Button>,
+                  <Button key="delete" type="link" danger size="small" loading={deletingTemplateId === item.id} onClick={() => deleteTemplate(item)}>删除</Button>
+                ]}>
                   <List.Item.Meta
                     title={<Typography.Text strong>{item.name || item.id}</Typography.Text>}
                     description={
@@ -1359,6 +1389,38 @@ type WorkspaceBoardItem = {
   dods: DoD[];
 };
 
+function readyDoDs(dods: DoD[]) {
+  return dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
+}
+
+function workspaceBoardActivationRequest(item: WorkspaceBoardItem): WorkspaceExecutionActivationRequest | undefined {
+  const latestRun = runStateSummary(item.snapshot.runs).latest;
+  if (latestRun && isTerminalRunState(latestRun.state) && latestRun.goalId && latestRun.doDId) {
+    return { goalId: latestRun.goalId, doDId: latestRun.doDId };
+  }
+
+  const availableDoDs = readyDoDs(item.dods);
+  if (item.goals.length === 1 && availableDoDs.length === 1) {
+    return { goalId: item.goals[0].id, doDId: availableDoDs[0].id };
+  }
+
+  return undefined;
+}
+
+function workspaceBoardActivationHint(item: WorkspaceBoardItem) {
+  if (item.goals.length === 0) {
+    return '当前工作空间尚未定义目标，请进入工作空间补齐 Goal 后再启动执行';
+  }
+  const availableDoDs = readyDoDs(item.dods);
+  if (availableDoDs.length === 0) {
+    return '当前工作空间尚无可用验收标准，请进入工作空间补齐 DoD 后再启动执行';
+  }
+  if (item.goals.length > 1 || availableDoDs.length > 1) {
+    return '当前工作空间存在多个目标或验收标准，请进入工作空间选择明确的 Goal/DoD 后再启动执行';
+  }
+  return '当前工作空间无法确定启动上下文，请进入工作空间核对后再启动执行';
+}
+
 function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
   const { message } = AntApp.useApp();
   const [boardItems, setBoardItems] = useState<WorkspaceBoardItem[]>([]);
@@ -1388,8 +1450,8 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
     void loadBoard();
   }, []);
 
-  const trackWorkspaceActivationInBackground = (workspaceId: string) => {
-    void workorchApi.activateWorkspaceExecution(workspaceId)
+  const trackWorkspaceActivationInBackground = (workspaceId: string, request: WorkspaceExecutionActivationRequest) => {
+    void workorchApi.activateWorkspaceExecution(workspaceId, request)
       .then(() => {
         message.success('工作空间执行已在后台启动');
         void loadBoard();
@@ -1400,9 +1462,14 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
       });
   };
 
-  const activateWorkspaceExecution = async (workspaceId: string) => {
+  const activateWorkspaceExecution = async (item: WorkspaceBoardItem) => {
+    const request = workspaceBoardActivationRequest(item);
+    if (!request) {
+      message.warning(workspaceBoardActivationHint(item));
+      return;
+    }
     message.info('工作空间执行已提交，正在后台启动');
-    trackWorkspaceActivationInBackground(workspaceId);
+    trackWorkspaceActivationInBackground(item.snapshot.workspace.id, request);
   };
 
   return (
@@ -1415,7 +1482,8 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
         <Empty description="暂无工作空间" />
       ) : (
         <ProCard gutter={16} wrap loading={loading}>
-          {boardItems.map(({ snapshot, goals, dods }) => {
+          {boardItems.map((item) => {
+            const { snapshot, goals, dods } = item;
             const activeRun = snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId);
             const currentRun = activeRun ?? runStateSummary(snapshot.runs).latest;
             const runSummary = runStateSummary(snapshot.runs);
@@ -1466,7 +1534,7 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
                 />
                 <Space className="workorch-section" wrap>
                   <Button type="primary" onClick={() => onOpenWorkspace(snapshot.workspace.id)}>进入工作空间</Button>
-                  {canStartRun ? <Button onClick={() => void activateWorkspaceExecution(snapshot.workspace.id)}>启动执行</Button> : null}
+                  {canStartRun ? <Button onClick={() => void activateWorkspaceExecution(item)}>{currentRun ? '重新启动执行' : '启动执行'}</Button> : null}
                   {currentRun && !isTerminalRunState(currentRun.state) ? <Button onClick={() => void workorchApi.resumeRun(currentRun.id).then(loadBoard).catch((error: unknown) => message.error(errorMessage(error)))}>继续运行</Button> : null}
                 </Space>
               </ProCard>
@@ -4233,7 +4301,7 @@ function ConfigurationPage() {
             )}
           >
             <Typography.Paragraph type="secondary">
-              配置模板按 provider 模式生成草稿：OpenAI 与 Anthropic 使用官方 SDK；compatible 用于 DeepSeek、MiniMax、Ollama 或本地兼容服务。
+              配置模板按 provider 模式生成草稿：OpenAI 与 Anthropic 使用官方 SDK；DeepSeek、MiniMax 等支持 OpenAI SDK 的服务请选择 OpenAI 并配置 baseURL，compatible 仅用于轻量 HTTP 兼容端点。
             </Typography.Paragraph>
             <Form.Item label="默认 LLM 服务商">
               <Select

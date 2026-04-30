@@ -55,12 +55,15 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	}
 	if !strings.Contains(gotPayload.Messages[0].Content, "Do not invent a workorch CLI") ||
 		!strings.Contains(gotPayload.Messages[0].Content, "runtimeCapabilities") ||
+		!strings.Contains(gotPayload.Messages[0].Content, "dialogLanguage") ||
 		!strings.Contains(gotPayload.Messages[1].Content, "Do not use a command named workorch") ||
 		!strings.Contains(gotPayload.Messages[1].Content, "runtimeCapabilities.shellPolicy.unavailableCommands") ||
 		!strings.Contains(gotPayload.Messages[1].Content, "runtimeCapabilities.serviceAPIs") ||
 		!strings.Contains(gotPayload.Messages[1].Content, "Do not assume remote host access credentials") ||
 		!strings.Contains(gotPayload.Messages[1].Content, "ssh/command") ||
 		!strings.Contains(gotPayload.Messages[1].Content, "timeoutMillis") ||
+		!strings.Contains(gotPayload.Messages[1].Content, "Conversation language: Chinese (Simplified)") ||
+		!strings.Contains(gotPayload.Messages[1].Content, "DoD summaries") ||
 		!strings.Contains(gotPayload.Messages[1].Content, "runtimeCapabilities") {
 		t.Fatalf("messages = %+v, want runtime capability boundary", gotPayload.Messages)
 	}
@@ -185,6 +188,8 @@ func llmProviderRequest() llmmodels.ProviderRequest {
 		StepID:              "run-1/step-1",
 		Kind:                llmcommon.StepKindWorkspaceExecution,
 		Model:               "test-model",
+		SystemLocale:        "zh_CN.UTF-8",
+		DialogLanguage:      "Chinese (Simplified)",
 		Input:               map[string]any{"goalId": "goal-1", "doDId": "dod-1"},
 		Schema:              decisionSchemaName,
 		RuntimeCapabilities: declaredRuntimeCapabilities(),

@@ -55,6 +55,9 @@ func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 			}
 		}
 	}
+	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchApply, orchestratorbiz.NewPatchRuntimeAdapter()); err != nil {
+		return cd.NewError(cd.Unexpected, err.Error())
+	}
 	if runtime.LLMRuntimeAdapter() != nil {
 		if err := runtimeRegistry.Register(llmcommon.StepKindWorkspaceExecution, runtime.LLMRuntimeAdapter()); err != nil {
 			return cd.NewError(cd.Unexpected, err.Error())

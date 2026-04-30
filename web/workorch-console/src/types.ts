@@ -134,6 +134,7 @@ export type WorkspaceExecutionActivationRequest = {
   mcpServerIds?: string[];
   capabilityIds?: string[];
   memoryIds?: string[];
+  dialogLanguage?: string;
   priority?: number;
 };
 

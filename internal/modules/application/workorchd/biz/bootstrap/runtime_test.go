@@ -10,10 +10,16 @@ import (
 	"testing"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
+	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
+	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -31,6 +37,17 @@ type testLifecycle struct {
 	teardownSeq *[]string
 	runErr      error
 	teardownErr error
+}
+
+type echoRuntimeAdapter struct{}
+
+func (a echoRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
+	return runtimemodel.StepExecutionResult{
+		Output: map[string]any{
+			"status": "completed",
+			"kind":   request.Kind,
+		},
+	}, nil
 }
 
 func (l testLifecycle) ID() string { return l.id }
@@ -70,6 +87,50 @@ func TestNewWithBackendMemoryBuildsRuntime(t *testing.T) {
 	}
 	if got.Title != "bootstrap memory backend" {
 		t.Fatalf("workspace title mismatch: %s", got.Title)
+	}
+}
+
+func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T) {
+	registry, err := buildRuntimeAdapterRegistry(
+		echoRuntimeAdapter{},
+		echoRuntimeAdapter{},
+		echoRuntimeAdapter{},
+		echoRuntimeAdapter{},
+	)
+	if err != nil {
+		t.Fatalf("build registry: %v", err)
+	}
+
+	for _, kind := range []string{
+		shellmodule.StepKindCommand,
+		sshmodule.StepKindCommand,
+		mcpblockmodule.StepKindToolCall,
+		mcpblockmodule.StepKindResourceRead,
+		mcpblockmodule.StepKindPromptGet,
+		llmmodule.StepKindWorkspaceExecution,
+	} {
+		result, err := registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{Kind: kind})
+		if err != nil {
+			t.Fatalf("execute registered kind %s: %v", kind, err)
+		}
+		if result.Output["kind"] != kind {
+			t.Fatalf("registered kind %s output = %+v", kind, result.Output)
+		}
+	}
+
+	result, err := registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		Kind: llmcommon.RuntimeBlockKindPatchApply,
+		Input: map[string]any{
+			"patchType": "file_write",
+			"targetRef": "result.txt",
+			"content":   "ready\n",
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute patch/apply: %v", err)
+	}
+	if result.Output["stage"] != "patch_apply" {
+		t.Fatalf("patch/apply output = %+v, want patch_apply stage", result.Output)
 	}
 }
 

@@ -193,7 +193,7 @@ module files from `config.d/`.
 LLM-driven Workspace execution is enabled by configuring a provider before
 starting `workorchd`.
 
-OpenAI-compatible default:
+OpenAI SDK provider:
 
 ```toml
 [llm]
@@ -201,11 +201,15 @@ defaultProvider = "reasoning"
 
 [llm.providers.reasoning]
 provider = "openai"
+baseURL = "https://api.openai.com/v1"
 apiKey = "..."
 model = "..."
 timeout = "60s"
 disabled = false
 ```
+
+DeepSeek, MiniMax, and other services confirmed to work with the OpenAI SDK
+should also use `provider = "openai"` with their own `baseURL`.
 
 Custom OpenAI-compatible endpoint:
 
@@ -226,7 +230,7 @@ Supported LLM fields:
 
 - `defaultProvider`: provider ID used when activation does not specify `llmProviderId`
 - `providers.<id>.provider`: `openai` or `compatible`
-- `providers.<id>.baseURL`: required for `compatible`; defaults to `https://api.openai.com/v1` for `openai`
+- `providers.<id>.baseURL`: optional for `openai` and passed to the OpenAI SDK when set; required for `compatible`
 - `providers.<id>.apiKey`: bearer token used only inside `blocks/llm`
 - `providers.<id>.model`: model name sent to `/chat/completions`
 - `providers.<id>.timeout`: request timeout, default `60s`

@@ -342,6 +342,14 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 		"defaultSoulId":"soul-engineering-delivery",
 		"soulBindings":{"planning":"soul-engineering-delivery","validation":"soul-engineering-delivery"}
 	}`, http.StatusOK)
+	postAndExpect(t, mux, "/api/v1/workorch/workspace-templates", `{
+		"id":"workspace-template-delete-http",
+		"name":"delete workspace template",
+		"goalText":"Delete this template after creation",
+		"doDItems":["Template can be deleted"],
+		"defaultSoulId":"soul-engineering-delivery"
+	}`, http.StatusCreated)
+	deleteAndExpect(t, mux, "/api/v1/workorch/workspace-templates/workspace-template-delete-http", http.StatusNoContent)
 	postAndExpect(t, mux, "/api/v1/workorch/skills", `{
 		"id":"skill-local-go-service",
 		"name":"local go service",
@@ -394,13 +402,15 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 	}`, http.StatusCreated)
 
 	for _, spec := range []struct {
-		path string
-		want string
+		path       string
+		want       string
+		wantAbsent string
 	}{
 		{path: "/api/v1/workorch/souls", want: `"id": "soul-engineering-delivery"`},
 		{path: "/api/v1/workorch/souls/soul-engineering-delivery", want: `"name": "engineering delivery updated"`},
 		{path: "/api/v1/workorch/souls/soul-delete-http", want: `"error": "not found"`},
 		{path: "/api/v1/workorch/workspace-templates", want: `"id": "workspace-template-delivery"`},
+		{path: "/api/v1/workorch/workspace-templates", want: `"id": "workspace-template-delivery"`, wantAbsent: `"workspace-template-delete-http"`},
 		{path: "/api/v1/workorch/skills", want: `"id": "skill-local-go-service"`},
 		{path: "/api/v1/workorch/skills/skill-local-go-service", want: `"requiredMCPServerRefs": [`},
 		{path: "/api/v1/workorch/mcp/servers", want: `".workorch-data/system/mcp-endpoints/mcp-local-context/context-helper.py"`},
@@ -423,6 +433,9 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 		}
 		if !strings.Contains(rec.Body.String(), spec.want) {
 			t.Fatalf("%s body = %s, want %q", spec.path, rec.Body.String(), spec.want)
+		}
+		if spec.wantAbsent != "" && strings.Contains(rec.Body.String(), spec.wantAbsent) {
+			t.Fatalf("%s body = %s, want to not contain %q", spec.path, rec.Body.String(), spec.wantAbsent)
 		}
 	}
 }
@@ -636,6 +649,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/souls/:soulId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspace-templates"},
 		{method: http.MethodPut, pattern: "/api/v1/workorch/workspace-templates/:templateId"},
+		{method: http.MethodDelete, pattern: "/api/v1/workorch/workspace-templates/:templateId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspace-templates"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/skills"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/skills"},
@@ -952,6 +966,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 			cmd.DoDID != "dod-native" ||
 			cmd.SoulID != "soul-native" ||
 			cmd.SoulBindings["validation"] != "soul-native-validation" ||
+			cmd.DialogLanguage != "zh-CN" ||
 			cmd.Priority != 9 ||
 			!stringSliceEqual(cmd.SkillIDs, []string{"skill-native"}) ||
 			!stringSliceEqual(cmd.MCPServerIDs, []string{"mcp-native"}) ||
@@ -1038,7 +1053,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/task-decompositions", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/start", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/resume", status: http.StatusOK},
-		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native","soulId":"soul-native","soulBindings":{"validation":"soul-native-validation"},"skillIds":["skill-native"],"mcpServerIds":["mcp-native"],"memoryIds":["memory-native"],"priority":9}`, status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native","soulId":"soul-native","soulBindings":{"validation":"soul-native-validation"},"skillIds":["skill-native"],"mcpServerIds":["mcp-native"],"memoryIds":["memory-native"],"dialogLanguage":"zh-CN","priority":9}`, status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions?workspaceId=ws-native-read&runId=run-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions/ticket-native-read", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/decisions/ticket-native-read/resolve", status: http.StatusOK},

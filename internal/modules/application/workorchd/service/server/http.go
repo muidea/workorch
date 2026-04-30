@@ -345,16 +345,17 @@ type createRunRequest struct {
 }
 
 type activateWorkspaceExecutionRequest struct {
-	GoalID        string            `json:"goalId,omitempty"`
-	DoDID         string            `json:"doDId,omitempty"`
-	LLMProviderID string            `json:"llmProviderId,omitempty"`
-	SoulID        string            `json:"soulId,omitempty"`
-	SoulBindings  map[string]string `json:"soulBindings,omitempty"`
-	SkillIDs      []string          `json:"skillIds,omitempty"`
-	MCPServerIDs  []string          `json:"mcpServerIds,omitempty"`
-	CapabilityIDs []string          `json:"capabilityIds,omitempty"`
-	MemoryIDs     []string          `json:"memoryIds,omitempty"`
-	Priority      int               `json:"priority,omitempty"`
+	GoalID         string            `json:"goalId,omitempty"`
+	DoDID          string            `json:"doDId,omitempty"`
+	LLMProviderID  string            `json:"llmProviderId,omitempty"`
+	SoulID         string            `json:"soulId,omitempty"`
+	SoulBindings   map[string]string `json:"soulBindings,omitempty"`
+	SkillIDs       []string          `json:"skillIds,omitempty"`
+	MCPServerIDs   []string          `json:"mcpServerIds,omitempty"`
+	CapabilityIDs  []string          `json:"capabilityIds,omitempty"`
+	MemoryIDs      []string          `json:"memoryIds,omitempty"`
+	DialogLanguage string            `json:"dialogLanguage,omitempty"`
+	Priority       int               `json:"priority,omitempty"`
 }
 
 type createSoulRequest = appservice.CreateSoulCommand
@@ -441,6 +442,7 @@ type readSoulFunc func(context.Context, string, string, string) (appservice.Soul
 type listSoulsFunc func(context.Context, string, string) ([]appservice.Soul, error)
 type createWorkspaceTemplateFunc func(context.Context, string, string, appservice.WorkspaceTemplate) (appservice.WorkspaceTemplate, error)
 type updateWorkspaceTemplateFunc func(context.Context, string, string, string, appservice.WorkspaceTemplate) (appservice.WorkspaceTemplate, error)
+type deleteWorkspaceTemplateFunc func(context.Context, string, string, string) error
 type listWorkspaceTemplatesFunc func(context.Context, string, string) ([]appservice.WorkspaceTemplate, error)
 type createSkillFunc func(context.Context, string, string, appservice.CreateSkillCommand) (appservice.Skill, error)
 type readSkillFunc func(context.Context, string, string, string, appservice.SkillQuery) (appservice.Skill, error)
@@ -515,6 +517,7 @@ type serverState struct {
 	listSouls                       listSoulsFunc
 	createWorkspaceTemplate         createWorkspaceTemplateFunc
 	updateWorkspaceTemplate         updateWorkspaceTemplateFunc
+	deleteWorkspaceTemplate         deleteWorkspaceTemplateFunc
 	listWorkspaceTemplates          listWorkspaceTemplatesFunc
 	createSkill                     createSkillFunc
 	readSkill                       readSkillFunc
@@ -1683,16 +1686,17 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 		}
 		defer release()
 		item, err := state.activateWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, appservice.ActivateWorkspaceExecutionCommand{
-			GoalID:        req.GoalID,
-			DoDID:         req.DoDID,
-			LLMProviderID: req.LLMProviderID,
-			SoulID:        req.SoulID,
-			SoulBindings:  req.SoulBindings,
-			SkillIDs:      req.SkillIDs,
-			MCPServerIDs:  req.MCPServerIDs,
-			CapabilityIDs: req.CapabilityIDs,
-			MemoryIDs:     req.MemoryIDs,
-			Priority:      priority,
+			GoalID:         req.GoalID,
+			DoDID:          req.DoDID,
+			LLMProviderID:  req.LLMProviderID,
+			SoulID:         req.SoulID,
+			SoulBindings:   req.SoulBindings,
+			SkillIDs:       req.SkillIDs,
+			MCPServerIDs:   req.MCPServerIDs,
+			CapabilityIDs:  req.CapabilityIDs,
+			MemoryIDs:      req.MemoryIDs,
+			DialogLanguage: req.DialogLanguage,
+			Priority:       priority,
 		})
 		if err != nil {
 			writeBusinessError(w, err)
@@ -1956,6 +1960,19 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			DataRoot:          state.config.DataRoot,
 			WorkspaceTemplate: item,
 		})
+	})
+	router.AddHandler("/api/v1/workorch/workspace-templates/:templateId", http.MethodDelete, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		templateID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/workspace-templates/")
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if err := state.deleteWorkspaceTemplate(r.Context(), state.config.Backend, state.config.DataRoot, templateID); err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	router.AddHandler("/api/v1/workorch/skills", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
@@ -2344,6 +2361,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		listSouls:                       defaultListSouls,
 		createWorkspaceTemplate:         defaultCreateWorkspaceTemplate,
 		updateWorkspaceTemplate:         defaultUpdateWorkspaceTemplate,
+		deleteWorkspaceTemplate:         defaultDeleteWorkspaceTemplate,
 		listWorkspaceTemplates:          defaultListWorkspaceTemplates,
 		createSkill:                     defaultCreateSkill,
 		readSkill:                       defaultReadSkill,
@@ -2790,6 +2808,11 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 			return appservice.DeleteSoulWithSession(ctx, session, soulID)
 		})
 	}
+	s.deleteWorkspaceTemplate = func(ctx context.Context, _, _, templateID string) error {
+		return s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			return appservice.DeleteWorkspaceTemplateWithSession(ctx, session, templateID)
+		})
+	}
 	s.readSoul = func(ctx context.Context, _, _, soulID string) (appservice.Soul, error) {
 		var ret appservice.Soul
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
@@ -3201,6 +3224,10 @@ func defaultCreateWorkspaceTemplate(ctx context.Context, backend string, dataRoo
 
 func defaultUpdateWorkspaceTemplate(ctx context.Context, backend string, dataRoot string, templateID string, cmd appservice.WorkspaceTemplate) (appservice.WorkspaceTemplate, error) {
 	return appservice.UpdateWorkspaceTemplateWithBackend(ctx, backend, dataRoot, templateID, cmd)
+}
+
+func defaultDeleteWorkspaceTemplate(ctx context.Context, backend string, dataRoot string, templateID string) error {
+	return appservice.DeleteWorkspaceTemplateWithBackend(ctx, backend, dataRoot, templateID)
 }
 
 func defaultListWorkspaceTemplates(ctx context.Context, backend string, dataRoot string) ([]appservice.WorkspaceTemplate, error) {

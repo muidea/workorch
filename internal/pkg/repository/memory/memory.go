@@ -183,6 +183,16 @@ func (r *WorkspaceTemplateRepository) Update(_ context.Context, item *repository
 	return nil
 }
 
+func (r *WorkspaceTemplateRepository) Delete(_ context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[id]; !ok {
+		return common.ErrNotFound
+	}
+	delete(r.items, id)
+	return nil
+}
+
 func NewMemoryItemRepository() *MemoryItemRepository {
 	return &MemoryItemRepository{items: map[common.MemoryID]*memorymodel.MemoryItem{}}
 }

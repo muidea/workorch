@@ -89,6 +89,9 @@ func TestRuntimeAdapterFailsClearlyWhenProviderUnavailable(t *testing.T) {
 	if result.Output["status"] != "failed" || result.Output["stage"] != "llm_provider_unavailable" {
 		t.Fatalf("output = %+v, want provider unavailable failure", result.Output)
 	}
+	if result.Output["failureCategory"] != "llm_provider" || result.Output["resolutionHint"] == "" {
+		t.Fatalf("output = %+v, want provider diagnostics", result.Output)
+	}
 }
 
 func TestRuntimeAdapterRepairsInvalidDecisionOnce(t *testing.T) {
@@ -241,11 +244,11 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 	if !runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.StepKindWorkspaceExecution) ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "shell/command") ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "ssh/command") ||
+		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchApply) ||
 		!runtimeCapabilitiesContainServiceAPI(provider.request.RuntimeCapabilities, "GET", "/api/v1/workorch/runs/{runId}/snapshot") {
 		t.Fatalf("runtime capabilities = %+v, want declared block and service API catalog", provider.request.RuntimeCapabilities)
 	}
 	for _, kind := range []string{
-		llmcommon.RuntimeBlockKindPatchApply,
 		llmcommon.RuntimeBlockKindDecisionRequest,
 		llmcommon.RuntimeBlockKindApprovalRequest,
 		llmcommon.RuntimeBlockKindMemoryWrite,
@@ -397,6 +400,9 @@ func TestRuntimeAdapterFailsStreamingErrorClearly(t *testing.T) {
 	if result.Output["stage"] != "llm_provider_stream_error" || result.Output["streamEvents"] == nil {
 		t.Fatalf("output = %+v, want stream error with events", result.Output)
 	}
+	if result.Output["failureCategory"] != "llm_provider" || result.Output["resolutionHint"] == "" {
+		t.Fatalf("output = %+v, want provider diagnostics", result.Output)
+	}
 }
 
 func TestRuntimeAdapterRejectsUndeclaredNonChatOperation(t *testing.T) {
@@ -514,6 +520,47 @@ func TestRuntimeAdapterSelectsRequestedProvider(t *testing.T) {
 	}
 	if reasoningProvider.request.Model != "reasoning-model" || result.Output["nextKind"] != "shell/command" {
 		t.Fatalf("reasoning request=%+v output=%+v, want selected reasoning provider", reasoningProvider.request, result.Output)
+	}
+}
+
+func TestRuntimeAdapterInjectsDialogLanguageFromSystemLocale(t *testing.T) {
+	t.Setenv("LC_ALL", "zh_CN.UTF-8")
+	provider := &staticProvider{payload: []byte(`{"completionState":"continue"}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+
+	if _, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest()); err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	if provider.request.SystemLocale != "zh_CN.UTF-8" {
+		t.Fatalf("systemLocale = %q, want zh_CN.UTF-8", provider.request.SystemLocale)
+	}
+	if provider.request.DialogLanguage != "Chinese (Simplified)" {
+		t.Fatalf("dialogLanguage = %q, want Chinese (Simplified)", provider.request.DialogLanguage)
+	}
+}
+
+func TestRuntimeAdapterDialogLanguageContextOverridesSystemLocale(t *testing.T) {
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+	provider := &staticProvider{payload: []byte(`{"completionState":"continue"}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+	request := llmStepRequest()
+	request.Input["executionContext"] = map[string]any{
+		"dialogLanguage": "ja_JP.UTF-8",
+	}
+
+	if _, err := adapter.ExecuteRuntimeStep(context.Background(), request); err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	if provider.request.DialogLanguage != "Japanese" {
+		t.Fatalf("dialogLanguage = %q, want Japanese", provider.request.DialogLanguage)
 	}
 }
 
@@ -744,6 +791,39 @@ func TestRuntimeAdapterExposesExecutionGraph(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterNormalizesPatchRequestsGraphNodeKind(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{
+		"completionState":"continue",
+		"executionGraph":{
+			"nodes":[
+				{"id":"write-result","kind":"patchRequests","input":{"patchType":"file_write","targetRef":"result.txt","content":"ready"}},
+				{"id":"verify","kind":"shell/command","dependsOn":["write-result"],"input":{"command":"test","args":["-f","result.txt"]}}
+			]
+		}
+	}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	graph, ok := result.Output["executionGraph"].(map[string]any)
+	if result.Output["stage"] != "llm_execution_graph_plan" || !ok {
+		t.Fatalf("output = %+v, want execution graph plan", result.Output)
+	}
+	nodes, ok := graph["nodes"].([]map[string]any)
+	if !ok || len(nodes) != 2 {
+		t.Fatalf("nodes = %+v, want two graph nodes", graph["nodes"])
+	}
+	if nodes[0]["kind"] != llmcommon.RuntimeBlockKindPatchApply {
+		t.Fatalf("first node kind = %v, want %s", nodes[0]["kind"], llmcommon.RuntimeBlockKindPatchApply)
+	}
+}
+
 func TestRuntimeAdapterReturnsErrorForFailedDecision(t *testing.T) {
 	provider := &staticProvider{payload: []byte(`{
 		"thoughtSummary":"DoD cannot be satisfied with current context",
@@ -880,6 +960,21 @@ func TestParseLLMExecutionDecisionRejectsUnavailableWorkorchCLI(t *testing.T) {
 	}
 }
 
+func TestParseLLMExecutionDecisionRejectsShellSyntaxInCommandName(t *testing.T) {
+	for _, payload := range []string{
+		`{"completionState":"continue","shellCommands":[{"command":"mkdir -p llm-proxy && cd llm-proxy"}]}`,
+		`{"completionState":"continue","executionGraph":{"nodes":[{"id":"write","kind":"shell/command","input":{"command":"cat > llm-proxy/config.yaml << 'EOF'"}}]}}`,
+	} {
+		_, err := ParseLLMExecutionDecision([]byte(payload))
+		if !errors.Is(err, common.ErrInvalidArgument) {
+			t.Fatalf("parse err = %v, want invalid argument for payload %s", err, payload)
+		}
+		if !strings.Contains(err.Error(), "command must be an executable name or path only") {
+			t.Fatalf("parse err = %v, want executable name validation", err)
+		}
+	}
+}
+
 func TestParseLLMExecutionDecisionRejectsUndeclaredLocalWorkorchServiceAPI(t *testing.T) {
 	for _, payload := range []string{
 		`{"completionState":"continue","shellCommands":[{"command":"bash","args":["-c","curl -s -X POST -H 'Content-Type: application/json' -d '{\"priority\":1}' http://localhost:8080/runs"]}]}`,
@@ -908,6 +1003,25 @@ func TestParseLLMExecutionDecisionAcceptsDeclaredLocalWorkorchServiceAPI(t *test
 		if decision.CompletionState != "continue" {
 			t.Fatalf("completionState = %q, want continue", decision.CompletionState)
 		}
+	}
+}
+
+func TestParseLLMExecutionDecisionRepairsMalformedShellCommandArgs(t *testing.T) {
+	payload := `{"completionState":"continue","executionGraph":{"nodes":[{"id":"explore_workspace","kind":"shell/command","input":{"command":"ls","args":["-la"]}},{"id":"detect_structure","kind":"shell/command","dependsOn":["explore_workspace"],"input":{"command":"find",".","-maxdepth","3","-type","f","-name","*.go"]}},{"id":"detect_existing","kind":"shell/command","dependsOn":["detect_structure"],"input":{"command":"find",".","args":["-type","f","-name","*proxy*"]}}]}}`
+	decision, err := ParseLLMExecutionDecision([]byte(payload))
+	if err != nil {
+		t.Fatalf("parse repaired decision: %v", err)
+	}
+	if decision.ExecutionGraph == nil || len(decision.ExecutionGraph.Nodes) != 3 {
+		t.Fatalf("executionGraph = %+v, want three nodes", decision.ExecutionGraph)
+	}
+	structureArgs := stringSliceValue(decision.ExecutionGraph.Nodes[1].Input["args"])
+	if strings.Join(structureArgs, " ") != ". -maxdepth 3 -type f -name *.go" {
+		t.Fatalf("structure args = %#v, want repaired positional args", structureArgs)
+	}
+	existingArgs := stringSliceValue(decision.ExecutionGraph.Nodes[2].Input["args"])
+	if strings.Join(existingArgs, " ") != ". -type f -name *proxy*" {
+		t.Fatalf("existing args = %#v, want prepended positional arg", existingArgs)
 	}
 }
 

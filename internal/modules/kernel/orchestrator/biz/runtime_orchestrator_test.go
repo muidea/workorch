@@ -17,6 +17,7 @@ import (
 	"time"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpblockbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
 	mcpblockcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
@@ -28,6 +29,7 @@ import (
 	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -771,6 +773,564 @@ func TestRuntimeOrchestrator_StartRunAppliesRuntimePatchEvidence(t *testing.T) {
 	}
 	if len(patches) != 1 || patches[0].State != common.PatchStateApplied || patches[0].TargetRef != "docs/result.txt" || patches[0].ToolCallID == "" {
 		t.Fatalf("patches = %+v, want one applied patch linked to tool call", patches)
+	}
+}
+
+func TestRuntimeOrchestrator_StartRunDispatchesPatchApplyGraphNode(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	patchRepo := memory.NewPatchRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	checkpointRepo := memory.NewRuntimeCheckpointRepository()
+	toolCallRepo := memory.NewToolCallRepository()
+	workingDirectory := t.TempDir()
+
+	llmRuntime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		switch request.StepID {
+		case "run-patch-graph/step-1":
+			return map[string]any{
+				"status": "completed",
+				"stage":  "llm_execution_graph_plan",
+				"executionGraph": map[string]any{
+					"nodes": []map[string]any{
+						{
+							"id":   "write-result",
+							"kind": llmcommon.RuntimeBlockKindPatchApply,
+							"input": map[string]any{
+								"patchType": "file_write",
+								"targetRef": "docs/result.txt",
+								"content":   "graph patch applied\n",
+								"summary":   "write graph result",
+							},
+						},
+						{
+							"id":        "verify-result",
+							"kind":      shellcommon.StepKindCommand,
+							"dependsOn": []string{"write-result"},
+							"input": map[string]any{
+								"command": "test",
+								"args":    []string{"-f", "docs/result.txt"},
+							},
+						},
+					},
+				},
+			}, nil
+		case "run-patch-graph/zz-llm-after-graph-run-patch-graph-step-1-verify-result":
+			return map[string]any{
+				"status": "completed",
+				"dodAssessment": map[string]any{
+					"satisfied": true,
+					"summary":   "patch graph completed",
+					"items": []map[string]any{
+						{
+							"item":         "result written",
+							"state":        "satisfied",
+							"evidenceRefs": []string{"run-patch-graph/block/write-result/patch/1"},
+						},
+					},
+				},
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected llm step %s", request.StepID)
+		}
+	}}
+	shellRuntime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		if _, err := os.Stat(filepath.Join(request.WorkspaceWorkingDirectory, "docs", "result.txt")); err != nil {
+			return map[string]any{"status": "failed", "error": err.Error()}, err
+		}
+		return map[string]any{"status": "completed", "stage": "shell_command_completed"}, nil
+	}}
+	registry := NewRuntimeAdapterRegistry()
+	if err := registry.Register(llmcommon.StepKindWorkspaceExecution, llmRuntime); err != nil {
+		t.Fatalf("register llm runtime: %v", err)
+	}
+	if err := registry.Register(llmcommon.RuntimeBlockKindPatchApply, NewPatchRuntimeAdapter()); err != nil {
+		t.Fatalf("register patch runtime: %v", err)
+	}
+	if err := registry.Register(shellcommon.StepKindCommand, shellRuntime); err != nil {
+		t.Fatalf("register shell runtime: %v", err)
+	}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		registry,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          toolCallRepo,
+			Patches:            patchRepo,
+			ValidationResults:  validationRepo,
+			RuntimeCheckpoints: checkpointRepo,
+			MemoryItems:        memory.NewMemoryItemRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-patch-graph")
+	runID := common.RunID("run-patch-graph")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-patch-graph"),
+		State:           common.RunStateCreated,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(workingDirectory, "docs", "result.txt"))
+	if err != nil {
+		t.Fatalf("read graph patch file: %v", err)
+	}
+	if string(content) != "graph patch applied\n" {
+		t.Fatalf("graph patch file = %q, want applied content", string(content))
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s, want completed", runItem.State)
+	}
+	patches, err := patchRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list patches: %v", err)
+	}
+	if len(patches) != 1 || patches[0].State != common.PatchStateApplied || patches[0].TargetRef != "docs/result.txt" {
+		t.Fatalf("patches = %+v, want applied graph patch", patches)
+	}
+}
+
+func TestApplyWorkspaceFileWriteReportsPathConflict(t *testing.T) {
+	workingDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workingDirectory, "llm-proxy"), []byte("binary"), 0o755); err != nil {
+		t.Fatalf("seed executable file: %v", err)
+	}
+
+	err := applyWorkspaceFileWrite(workingDirectory, "llm-proxy/config.yaml", "config")
+	if err == nil {
+		t.Fatalf("applyWorkspaceFileWrite should fail for file-as-directory path conflict")
+	}
+	var conflict *workspacePathConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("err = %T %[1]v, want workspacePathConflictError", err)
+	}
+	if conflict.TargetRef != "llm-proxy/config.yaml" || conflict.ConflictRef != "llm-proxy" || conflict.ConflictKind != "file" {
+		t.Fatalf("conflict = %+v, want target and conflict refs", conflict)
+	}
+	diagnostics := conflict.RuntimeFailureDiagnostics()
+	if diagnostics["kind"] != "workspace_path_conflict" || diagnostics["conflictRef"] != "llm-proxy" {
+		t.Fatalf("diagnostics = %+v, want structured path conflict diagnostics", diagnostics)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchConflictDiagnosticsAndWorkspaceManifest(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	patchRepo := memory.NewPatchRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	checkpointRepo := memory.NewRuntimeCheckpointRepository()
+	toolCallRepo := memory.NewToolCallRepository()
+	var repairInput map[string]any
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		switch {
+		case request.StepID == "run-patch-conflict-repair/step-1":
+			return map[string]any{
+				"status": "completed",
+				"patches": []map[string]any{
+					{
+						"patchType": "file_write",
+						"targetRef": "llm-proxy/config.yaml",
+						"content":   "config",
+						"summary":   "write nested config",
+					},
+				},
+			}, nil
+		case strings.Contains(string(request.StepID), "/zz-llm-repair-"):
+			repairInput = request.Input
+			return map[string]any{
+				"status": "completed",
+				"dodAssessment": map[string]any{
+					"satisfied": true,
+					"summary":   "repair received path diagnostics",
+					"items": []map[string]any{
+						{"item": "diagnostics available", "state": "satisfied", "evidenceRefs": []string{string(request.StepID)}},
+					},
+				},
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected step %s", request.StepID)
+		}
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			Results:            memory.NewResultRepository(),
+			Artifacts:          memory.NewArtifactRepository(),
+			ToolCalls:          toolCallRepo,
+			Patches:            patchRepo,
+			ValidationResults:  validationRepo,
+			RuntimeCheckpoints: checkpointRepo,
+			MemoryItems:        memory.NewMemoryItemRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workingDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workingDirectory, "llm-proxy"), []byte("binary"), 0o755); err != nil {
+		t.Fatalf("seed executable file: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-patch-conflict-repair")
+	runID := common.RunID("run-patch-conflict-repair")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-patch-conflict-repair"),
+		State:           common.RunStateCreated,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	if repairInput == nil {
+		t.Fatalf("repair input was not captured")
+	}
+	failedOutput, ok := repairInput["failedStepOutput"].(map[string]any)
+	if !ok {
+		t.Fatalf("failedStepOutput = %#v, want map", repairInput["failedStepOutput"])
+	}
+	diagnostics, ok := failedOutput["runtimeDiagnostics"].(map[string]any)
+	if !ok || diagnostics["kind"] != "workspace_path_conflict" || diagnostics["conflictRef"] != "llm-proxy" {
+		t.Fatalf("runtimeDiagnostics = %#v, want workspace path conflict", failedOutput["runtimeDiagnostics"])
+	}
+	manifest, ok := repairInput[stepInputKeyWorkspaceFileManifest].([]map[string]any)
+	if !ok || len(manifest) != 1 || manifest[0]["path"] != "llm-proxy" || manifest[0]["executable"] != true {
+		t.Fatalf("workspaceFileManifest = %#v, want executable llm-proxy file", repairInput[stepInputKeyWorkspaceFileManifest])
+	}
+}
+
+func TestRuntimeOrchestrator_DispatchesLLMRepairAfterGraphNodeFailure(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	var repairInput map[string]any
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		switch {
+		case request.StepID == "run-runtime-repair/step-1":
+			return map[string]any{
+				"status": "completed",
+				"stage":  "llm_execution_graph_plan",
+				"executionGraph": map[string]any{
+					"nodes": []map[string]any{
+						{
+							"id":   "write-source",
+							"kind": llmcommon.RuntimeBlockKindPatchApply,
+							"input": map[string]any{
+								"patchType": "file_write",
+								"targetRef": "main.go",
+								"content":   "package main\n",
+							},
+						},
+						{
+							"id":        "run-tests",
+							"kind":      shellcommon.StepKindCommand,
+							"dependsOn": []string{"write-source"},
+							"input": map[string]any{
+								"command": "go",
+								"args":    []string{"test", "./..."},
+							},
+						},
+					},
+				},
+			}, nil
+		case strings.Contains(string(request.StepID), "/block/write-source"):
+			return map[string]any{
+				"status": "completed",
+				"patches": []map[string]any{
+					{
+						"patchType": "file_write",
+						"targetRef": "main.go",
+						"content":   "package main\n",
+						"summary":   "write source",
+					},
+				},
+			}, nil
+		case strings.Contains(string(request.StepID), "/block/run-tests"):
+			return map[string]any{
+				"status":    "failed",
+				"stage":     "shell_command_completed",
+				"exitCode":  1,
+				"stderr":    "missing go.sum entry for module providing package github.com/spf13/viper",
+				"graphHint": "dependency metadata missing",
+			}, errors.New("exit status 1")
+		case strings.Contains(string(request.StepID), "/zz-llm-repair-"):
+			repairInput = request.Input
+			return map[string]any{
+				"status": "completed",
+				"dodAssessment": map[string]any{
+					"satisfied": true,
+					"summary":   "repair evidence handled and verification passed",
+					"items": []map[string]any{
+						{
+							"item":         "tests pass",
+							"state":        "satisfied",
+							"evidenceRefs": []string{string(request.StepID)},
+						},
+					},
+				},
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected step %s", request.StepID)
+		}
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			Results:            memory.NewResultRepository(),
+			Artifacts:          memory.NewArtifactRepository(),
+			ToolCalls:          memory.NewToolCallRepository(),
+			Patches:            memory.NewPatchRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+			MemoryItems:        memory.NewMemoryItemRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-runtime-repair")
+	runID := common.RunID("run-runtime-repair")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-runtime-repair"),
+		State:           common.RunStateCreated,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s failureReason=%q, want completed", runItem.State, runItem.FailureReason)
+	}
+	if repairInput == nil || repairInput[stepInputKeyRuntimeRepairFollowUp] != true || repairInput[stepInputKeyRuntimeRepairAttempt] != 1 {
+		t.Fatalf("repair input = %+v, want runtime repair follow-up attempt 1", repairInput)
+	}
+	failedOutput, ok := repairInput["failedStepOutput"].(map[string]any)
+	if !ok || !strings.Contains(fmt.Sprint(failedOutput["stderr"]), "missing go.sum") {
+		t.Fatalf("failedStepOutput = %+v, want stderr evidence", repairInput["failedStepOutput"])
+	}
+	failedStep, err := stepRepo.Get(ctx, "run-runtime-repair/block/run-tests")
+	if err != nil {
+		t.Fatalf("get failed step: %v", err)
+	}
+	if failedStep.State != common.StepStateFailed {
+		t.Fatalf("failed step state = %s, want failed evidence retained", failedStep.State)
+	}
+}
+
+func TestRuntimeOrchestrator_DoesNotRepairLLMProviderError(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		if strings.Contains(string(request.StepID), "/zz-llm-repair-") {
+			t.Fatalf("unexpected runtime repair step for provider failure: %s", request.StepID)
+		}
+		return map[string]any{
+			"status": "failed",
+			"stage":  "llm_provider_error",
+			"error":  "invalid argument: llm provider http status 404",
+		}, fmt.Errorf("%w: llm provider http status 404", common.ErrInvalidArgument)
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-llm-provider-error")
+	runID := common.RunID("run-llm-provider-error")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-llm-provider-error"),
+		State:           common.RunStateCreated,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateFailed || !strings.Contains(runItem.FailureReason, "llm provider http status 404") {
+		t.Fatalf("run = %+v, want failed with provider reason", runItem)
+	}
+	steps, err := stepRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	if len(steps) != 1 || steps[0].ID != common.StepID("run-llm-provider-error/step-1") {
+		t.Fatalf("steps = %+v, want only initial failed provider step", steps)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairExhaustionFailsRun(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-runtime-repair-exhausted")
+	runID := common.RunID("run-runtime-repair-exhausted")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-runtime-repair-exhausted"),
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	for attempt := 1; attempt <= maxRuntimeRepairAttempts; attempt++ {
+		stepID := common.StepID(fmt.Sprintf("%s/seed-repair-%d", runID, attempt))
+		if err := stepRepo.Create(ctx, &runmodel.Step{
+			ID:    stepID,
+			RunID: runID,
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: common.StepStateCompleted,
+			Input: map[string]any{stepInputKeyRuntimeRepairFollowUp: true},
+		}); err != nil {
+			t.Fatalf("seed repair step: %v", err)
+		}
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(fmt.Sprintf("%s/block/run-tests", runID)),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID: "run-tests",
+		},
+		Output: map[string]any{"status": "failed", "stderr": "still failing"},
+	}
+
+	if err := orch.dispatchRuntimeRepairFollowUp(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-runtime-repair-exhausted"),
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}, failedStep, errors.New("exit status 1")); err != nil {
+		t.Fatalf("repair exhaustion should close run without returning error: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateBlockedOnDecision || runItem.BlockingTicketID == "" {
+		t.Fatalf("run = %+v, want blocked on decision after repair exhaustion", runItem)
+	}
+	ticket, err := ticketRepo.Get(ctx, runItem.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("get repair exhaustion ticket: %v", err)
+	}
+	if ticket.State != common.DecisionTicketStateOpen ||
+		!strings.Contains(ticket.Reason, "runtime repair attempts exhausted") ||
+		ticket.Context["attempts"] != maxRuntimeRepairAttempts {
+		t.Fatalf("ticket = %+v, want repair exhaustion decision context", ticket)
 	}
 }
 
@@ -2298,7 +2858,14 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 
 	workspaceID := common.WorkspaceID("ws-dod-gate-complete")
 	runID := common.RunID("run-dod-gate-complete")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+	workingDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workingDirectory, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write deliverable: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workingDirectory, "README.md"), []byte("# Delivery\n"), 0o644); err != nil {
+		t.Fatalf("write deliverable readme: %v", err)
+	}
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -2345,22 +2912,43 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 	if !reflect.DeepEqual(result.EvidenceRefs, []string{"run-dod-gate-complete/step-1", "run-dod-gate-complete/step-1/validation/runtime-step"}) {
 		t.Fatalf("result evidence = %+v, want step and validation refs", result.EvidenceRefs)
 	}
-	if !reflect.DeepEqual(result.ArtifactRefs, []common.ArtifactID{"run-dod-gate-complete/artifact/result-summary"}) {
-		t.Fatalf("result artifacts = %+v, want summary artifact ref", result.ArtifactRefs)
+	if !reflect.DeepEqual(result.ArtifactRefs, []common.ArtifactID{
+		"run-dod-gate-complete/artifact/result-summary",
+		"run-dod-gate-complete/artifact/deliverable-manifest",
+	}) {
+		t.Fatalf("result artifacts = %+v, want summary and deliverable manifest artifact refs", result.ArtifactRefs)
 	}
 	artifacts, err := artifactRepo.ListByRun(ctx, runID)
 	if err != nil {
 		t.Fatalf("list artifacts: %v", err)
 	}
-	if len(artifacts) != 1 {
-		t.Fatalf("artifacts = %+v, want one summary artifact", artifacts)
+	if len(artifacts) != 2 {
+		t.Fatalf("artifacts = %+v, want summary and deliverable manifest artifacts", artifacts)
 	}
-	artifact := artifacts[0]
-	if artifact.ResultID != result.ID || artifact.ArtifactType != "text" || artifact.State != common.ArtifactStateAvailable {
-		t.Fatalf("artifact = %+v, want available text artifact linked to result", artifact)
+	var summaryArtifact *resultmodel.Artifact
+	var manifestArtifact *resultmodel.Artifact
+	for _, artifact := range artifacts {
+		switch artifact.ID {
+		case "run-dod-gate-complete/artifact/result-summary":
+			summaryArtifact = artifact
+		case "run-dod-gate-complete/artifact/deliverable-manifest":
+			manifestArtifact = artifact
+		}
 	}
-	if artifact.Summary != "DoD satisfied" || artifact.ContentType != "text/plain; charset=utf-8" {
-		t.Fatalf("artifact content = %+v, want DoD summary text artifact", artifact)
+	if summaryArtifact == nil || summaryArtifact.ResultID != result.ID || summaryArtifact.ArtifactType != "text" || summaryArtifact.State != common.ArtifactStateAvailable {
+		t.Fatalf("summary artifact = %+v, want available text artifact linked to result", summaryArtifact)
+	}
+	if summaryArtifact.Summary != "DoD satisfied" || summaryArtifact.ContentType != "text/plain; charset=utf-8" {
+		t.Fatalf("summary artifact content = %+v, want DoD summary text artifact", summaryArtifact)
+	}
+	if manifestArtifact == nil || manifestArtifact.ResultID != result.ID || manifestArtifact.ArtifactType != "report" || manifestArtifact.State != common.ArtifactStateAvailable {
+		t.Fatalf("manifest artifact = %+v, want available report artifact linked to result", manifestArtifact)
+	}
+	if !strings.Contains(manifestArtifact.Summary, "Workspace Deliverable Manifest") ||
+		!strings.Contains(manifestArtifact.Summary, "`main.go`") ||
+		!strings.Contains(manifestArtifact.Summary, "`README.md`") ||
+		!strings.Contains(manifestArtifact.Summary, "run-dod-gate-complete/step-1/validation/runtime-step") {
+		t.Fatalf("manifest summary = %q, want deliverable files and evidence refs", manifestArtifact.Summary)
 	}
 	memories, err := memoryRepo.ListByWorkspaceID(ctx, workspaceID)
 	if err != nil {
@@ -2790,6 +3378,203 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeDecisionR
 	}
 	if len(runtime.calls) != 2 || runtime.calls[0] != "run-runtime-resume/step-1" || runtime.calls[1] != "run-runtime-resume/step-2" {
 		t.Fatalf("runtime calls = %#v, want [run-runtime-resume/step-1 run-runtime-resume/step-2]", runtime.calls)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeRunContinuesFromFailedStepAfterRepairDecisionResolved(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	var capturedInput map[string]any
+	runtime := &stubRuntimeAdapter{
+		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			if !strings.Contains(string(request.StepID), "zz-llm-repair-") {
+				return nil, fmt.Errorf("unexpected step %s", request.StepID)
+			}
+			capturedInput = request.Input
+			return map[string]any{
+				"status": "completed",
+				"dodAssessment": map[string]any{
+					"satisfied": true,
+					"summary":   "repair completed after operator guidance",
+					"items": []map[string]any{
+						{
+							"item":         "repair completed",
+							"state":        "satisfied",
+							"evidenceRefs": []string{string(request.StepID)},
+						},
+					},
+				},
+			}, nil
+		},
+	}
+	hub := events.NewMemoryHub()
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, hub)
+
+	workspaceID := common.WorkspaceID("ws-repair-decision-resume")
+	runID := common.RunID("run-repair-decision-resume")
+	failedStepID := common.StepID("run-repair-decision-resume/block/write_config")
+	ticketID := common.TicketID("ticket-repair-decision-resume")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		GoalID:           common.GoalID("goal-repair-decision-resume"),
+		DoDID:            common.DoDID("dod-repair-decision-resume"),
+		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    failedStepID,
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{"targetRef": "llm-proxy/config.yaml"},
+		Output: map[string]any{
+			"error": "workspace patch path conflict",
+			"runtimeDiagnostics": map[string]any{
+				"kind":        "workspace_path_conflict",
+				"targetRef":   "llm-proxy/config.yaml",
+				"conflictRef": "llm-proxy",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed failed step: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      failedStepID,
+		State:       common.DecisionTicketStateResolved,
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       common.ResolutionID("resolution-repair-decision-resume"),
+		TicketID: ticketID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:  map[string]any{"resumeInstruction": "continue from the root project"},
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume run: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s, want completed", runItem.State)
+	}
+	if capturedInput == nil {
+		t.Fatalf("captured input is nil")
+	}
+	if capturedInput["failedStepId"] != string(failedStepID) {
+		t.Fatalf("failedStepId = %v, want %s", capturedInput["failedStepId"], failedStepID)
+	}
+	if _, ok := capturedInput["decisionResolution"].(map[string]any); !ok {
+		t.Fatalf("decisionResolution missing from resume input: %#v", capturedInput)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeRunRecoversRunningRunWithResolvedFailedStepDecision(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{
+		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			if request.Input["decisionResolution"] == nil {
+				return nil, errors.New("decision resolution input is required")
+			}
+			return map[string]any{
+				"status": "completed",
+				"dodAssessment": map[string]any{
+					"satisfied": true,
+					"summary":   "stale running run recovered",
+					"items": []map[string]any{
+						{
+							"item":         "stale running run recovered",
+							"state":        "satisfied",
+							"evidenceRefs": []string{string(request.StepID)},
+						},
+					},
+				},
+			}, nil
+		},
+	}
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-running-recovery")
+	runID := common.RunID("run-running-recovery")
+	failedStepID := common.StepID("run-running-recovery/block/write_config")
+	ticketID := common.TicketID("ticket-running-recovery")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		GoalID:          common.GoalID("goal-running-recovery"),
+		DoDID:           common.DoDID("dod-running-recovery"),
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		State:           common.RunStateRunning,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     failedStepID,
+		RunID:  runID,
+		Kind:   "patch/apply",
+		State:  common.StepStateFailed,
+		Output: map[string]any{"error": "workspace patch path conflict"},
+	}); err != nil {
+		t.Fatalf("seed failed step: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      failedStepID,
+		State:       common.DecisionTicketStateResolved,
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       common.ResolutionID("resolution-running-recovery"),
+		TicketID: ticketID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:  map[string]any{"resumeInstruction": "continue from existing files"},
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume running run: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s, want completed", runItem.State)
 	}
 }
 

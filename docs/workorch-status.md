@@ -93,10 +93,10 @@
 - Missing or disabled LLM provider configuration fails the LLM Step and Run
   with observable runtime evidence instead of silently completing through an
   alternate runtime path.
-- Ready LLM provider configuration now creates a real OpenAI-compatible
-  Chat Completions HTTP client inside `blocks/llm`; `openai` defaults to
-  `https://api.openai.com/v1`, while `compatible` requires
-  `[llm.providers.<id>].baseURL`.
+- Ready LLM provider configuration now creates a real provider client inside
+  `blocks/llm`; `openai` uses the OpenAI SDK and accepts custom `baseURL`
+  values for SDK-compatible providers such as DeepSeek or MiniMax, while
+  `compatible` remains the lightweight HTTP fallback for custom endpoints.
 - LLM provider configuration now declares formal provider capabilities:
   `chatCompletions`, `streaming`, and `nonChatOperations`. Web Console can edit
   these fields, configuration reads expose them, and runtime selection will not
@@ -423,6 +423,7 @@ HTTP endpoints:
 - `GET /api/v1/workorch/souls/{soulId}`
 - `POST /api/v1/workorch/workspace-templates`
 - `PUT /api/v1/workorch/workspace-templates/{templateId}`
+- `DELETE /api/v1/workorch/workspace-templates/{templateId}`
 - `GET /api/v1/workorch/workspace-templates`
 - `POST /api/v1/workorch/skills`
 - `GET /api/v1/workorch/skills`

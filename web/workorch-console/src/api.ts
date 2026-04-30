@@ -200,9 +200,12 @@ export const workorchApi = {
     const requestBody: WorkspaceExecutionActivationRequest = typeof goalIdOrRequest === 'object'
       ? goalIdOrRequest
       : { goalId: goalIdOrRequest, doDId };
+    const activationRequest: WorkspaceExecutionActivationRequest = !requestBody.dialogLanguage && typeof navigator !== 'undefined'
+      ? { ...requestBody, dialogLanguage: navigator.language }
+      : requestBody;
     const body = await request<{ activation: WorkspaceExecutionActivation }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/execution-activations`, {
       method: 'POST',
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(activationRequest)
     });
     return body.activation;
   },
@@ -246,6 +249,11 @@ export const workorchApi = {
       body: JSON.stringify(template)
     });
     return body.workspaceTemplate;
+  },
+  deleteWorkspaceTemplate: async (templateId: string) => {
+    await request<Record<string, never>>(`${apiBase}/workspace-templates/${encodeURIComponent(templateId)}`, {
+      method: 'DELETE'
+    });
   },
   listSkills: async (workspaceId?: string) => {
     const search = new URLSearchParams();
