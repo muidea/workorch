@@ -4,12 +4,13 @@ import {
   CheckCircleOutlined,
   ClusterOutlined,
   DashboardOutlined,
+  DownOutlined,
   ExceptionOutlined,
   ProfileOutlined,
   SettingOutlined
 } from '@ant-design/icons';
 import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-components';
-import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
+import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, Goal, LLMProviderTemplate, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
@@ -2328,22 +2329,57 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       title="工作空间"
       subTitle="围绕 Workspace 管理目标、验收标准、执行过程、治理阻塞和运行证据"
       extra={
-        <Space wrap>
-          <Button onClick={() => void openWorkspaceSetup()}>创建工作空间</Button>
-          <Button disabled={!workspaceId} onClick={() => openGoalDefinition()}>定义目标</Button>
-          <Button disabled={!workspaceId} onClick={() => openDoDDefinition()}>定义验收标准</Button>
-          <Button disabled={!workspaceId} onClick={openSoulBindingEditor}>调整 Soul</Button>
-          <Button type="primary" disabled={!workspaceId} onClick={requestWorkspaceActivation}>启动执行</Button>
-          <Button danger disabled={!workspaceId} onClick={openWorkspaceDelete}>删除工作空间</Button>
-          {activationTracking ? <Tag color="processing">后台跟踪中</Tag> : null}
-          <Select
-            style={{ width: 360 }}
-            placeholder="选择工作空间"
-            value={workspaceId}
-            onChange={setWorkspaceId}
-            options={workspaces.map((item) => ({ value: item.id, label: `${item.title || item.id} (${item.id})` }))}
-          />
-        </Space>
+        <div className="workspace-page-header-actions">
+          <div className="workspace-header-context">
+            <Typography.Text type="secondary" className="workspace-header-context-label">当前工作空间</Typography.Text>
+            <Select
+              className="workspace-header-select"
+              placeholder="选择工作空间"
+              value={workspaceId}
+              onChange={setWorkspaceId}
+              options={workspaces.map((item) => ({ value: item.id, label: `${item.title || item.id} (${item.id})` }))}
+            />
+            {activationTracking ? <Tag color="processing">后台跟踪中</Tag> : null}
+          </div>
+          <div className="workspace-header-actions-main">
+            <Button type="primary" disabled={!workspaceId} onClick={requestWorkspaceActivation}>启动执行</Button>
+            <Button onClick={() => void openWorkspaceSetup()}>创建工作空间</Button>
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'goal', label: '定义目标', disabled: !workspaceId },
+                  { key: 'dod', label: '定义验收标准', disabled: !workspaceId },
+                  { key: 'soul', label: '调整 Soul', disabled: !workspaceId }
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'goal') {
+                    openGoalDefinition();
+                  } else if (key === 'dod') {
+                    openDoDDefinition();
+                  } else if (key === 'soul') {
+                    openSoulBindingEditor();
+                  }
+                }
+              }}
+            >
+              <Button disabled={!workspaceId}>完善定义 <DownOutlined /></Button>
+            </Dropdown>
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'delete', label: '删除工作空间', danger: true, disabled: !workspaceId }
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'delete') {
+                    openWorkspaceDelete();
+                  }
+                }
+              }}
+            >
+              <Button disabled={!workspaceId}>更多操作 <DownOutlined /></Button>
+            </Dropdown>
+          </div>
+        </div>
       }
     >
       {snapshot ? (

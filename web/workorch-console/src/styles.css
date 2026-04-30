@@ -12,6 +12,39 @@ body {
   margin-top: 16px;
 }
 
+.workspace-page-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px 12px;
+  max-width: 900px;
+}
+
+.workspace-header-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: min(100%, 420px);
+}
+
+.workspace-header-context-label {
+  flex: none;
+  font-size: 12px;
+}
+
+.workspace-header-select {
+  width: 320px;
+  max-width: 100%;
+}
+
+.workspace-header-actions-main {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .workorch-card-summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
