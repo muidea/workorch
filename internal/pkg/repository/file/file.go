@@ -2024,7 +2024,20 @@ func cloneResult(item *resultmodel.Result) *resultmodel.Result {
 	if item.ArtifactRefs != nil {
 		cloned.ArtifactRefs = append([]common.ArtifactID(nil), item.ArtifactRefs...)
 	}
+	cloned.DoDAssessment = cloneResultDoDAssessment(item.DoDAssessment)
 	return &cloned
+}
+
+func cloneResultDoDAssessment(item resultmodel.DoDAssessment) resultmodel.DoDAssessment {
+	cloned := item
+	if item.Items != nil {
+		cloned.Items = make([]resultmodel.DoDAssessmentItem, 0, len(item.Items))
+		for _, assessmentItem := range item.Items {
+			assessmentItem.EvidenceRefs = cloneStringSlice(assessmentItem.EvidenceRefs)
+			cloned.Items = append(cloned.Items, assessmentItem)
+		}
+	}
+	return cloned
 }
 
 func cloneArtifact(item *resultmodel.Artifact) *resultmodel.Artifact {

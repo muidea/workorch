@@ -12,6 +12,7 @@ type Artifact struct {
 	PatchID            common.PatchID
 	ValidationResultID common.ValidationResultID
 	ArtifactType       string
+	Category           string
 	Name               string
 	Summary            string
 	URI                string

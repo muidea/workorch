@@ -410,5 +410,6 @@ make ci
 - `docs/advanced-runtime-scheduling-plan.md`: completed advanced MCP and priority scheduling scope
 - `docs/mcp-capability-management-design.md`: MCP tool/resource/prompt capability recognition, management, binding, and evidence design
 - `docs/workspace-concurrency-loadtest-plan.md`: workspace concurrency load test scope and completed pressure-test findings for mock and real LLM governed execution
+- `docs/run-closure-quality-improvement-plan.md`: active quality-improvement tracker for stable Run closure, strict DoD acceptance, recovery, efficiency, task decomposition, and Result / Artifact summary quality
 - `docs/next-stage-p1-development-plan.md`: completed P1 runtime context, provider capability, vector Memory, and lifecycle scope
 - `docs/next-stage-demand-candidates.md`: future demand candidates that are not active MVP leftovers

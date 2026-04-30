@@ -15,3 +15,12 @@ const (
 	ArtifactTypeExternalRef = "external_ref"
 	ArtifactTypeReport      = "report"
 )
+
+const (
+	ArtifactCategorySource          = "source"
+	ArtifactCategoryConfiguration   = "configuration"
+	ArtifactCategoryDocumentation   = "documentation"
+	ArtifactCategoryTestReport      = "test_report"
+	ArtifactCategoryRuntimeEvidence = "runtime_evidence"
+	ArtifactCategoryFinalSummary    = "final_summary"
+)

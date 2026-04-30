@@ -140,6 +140,26 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 		SourceType:   "dod_assessment",
 		SourceRef:    string(stepID),
 		EvidenceRefs: []string{string(stepID), "validation-evidence-snapshot"},
+		DoDAssessment: resultmodel.DoDAssessment{
+			Satisfied: true,
+			Summary:   "formal outcome",
+			Items: []resultmodel.DoDAssessmentItem{
+				{
+					Item:         "go test passes",
+					State:        "satisfied",
+					EvidenceRefs: []string{"validation-evidence-snapshot"},
+				},
+			},
+		},
+		SummaryDetail: resultmodel.ResultSummary{
+			GoalOutcome:           "formal outcome",
+			ImplementationSummary: "implemented requested changes",
+			VerificationSummary:   "validation evidence passed",
+			EvidenceRefs:          []string{string(stepID), "validation-evidence-snapshot"},
+			ArtifactRefs:          []common.ArtifactID{"artifact-evidence-snapshot"},
+			ResidualRisks:         []string{"none reported"},
+			NextActions:           []string{"review artifact"},
+		},
 	}); err != nil {
 		t.Fatalf("create result: %v", err)
 	}
@@ -150,6 +170,7 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 		ResultID:     resultID,
 		StepID:       stepID,
 		ArtifactType: "report",
+		Category:     "final_summary",
 		Name:         "outcome.md",
 		Summary:      "formal artifact",
 		State:        common.ArtifactStateAvailable,
@@ -186,7 +207,20 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 	if len(first.Results) != 1 || first.Results[0].Summary != "formal outcome" {
 		t.Fatalf("results = %+v, want formal outcome", first.Results)
 	}
-	if len(first.Artifacts) != 1 || first.Artifacts[0].ResultID != string(resultID) || first.Artifacts[0].Metadata["format"] != "markdown" {
+	if first.Results[0].DoDAssessment == nil || !first.Results[0].DoDAssessment.Satisfied || len(first.Results[0].DoDAssessment.Items) != 1 {
+		t.Fatalf("result DoD assessment = %+v, want item-level assessment", first.Results[0].DoDAssessment)
+	}
+	if first.Results[0].DoDAssessment.Items[0].Item != "go test passes" ||
+		first.Results[0].DoDAssessment.Items[0].State != "satisfied" ||
+		!reflect.DeepEqual(first.Results[0].DoDAssessment.Items[0].EvidenceRefs, []string{"validation-evidence-snapshot"}) {
+		t.Fatalf("result DoD assessment items = %+v, want satisfied evidence item", first.Results[0].DoDAssessment.Items)
+	}
+	if first.Results[0].SummaryDetail == nil ||
+		first.Results[0].SummaryDetail.ImplementationSummary != "implemented requested changes" ||
+		!reflect.DeepEqual(first.Results[0].SummaryDetail.ArtifactRefs, []string{"artifact-evidence-snapshot"}) {
+		t.Fatalf("result summary detail = %+v, want structured summary detail", first.Results[0].SummaryDetail)
+	}
+	if len(first.Artifacts) != 1 || first.Artifacts[0].ResultID != string(resultID) || first.Artifacts[0].Category != "final_summary" || first.Artifacts[0].Metadata["format"] != "markdown" {
 		t.Fatalf("artifacts = %+v, want result-linked artifact", first.Artifacts)
 	}
 	if !reflect.DeepEqual(first, second) {
@@ -427,6 +461,7 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 	workspaceID := common.WorkspaceID("ws-task-progress-result")
 	runID := common.RunID("run-task-progress-result")
 	stepID := common.StepID("run-task-progress-result/step-1")
+	failedStepID := common.StepID("run-task-progress-result/step-failed-before-repair")
 	resultID := common.ResultID("result-task-progress")
 	artifactID := common.ArtifactID("artifact-task-progress")
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "task progress", State: common.WorkspaceStateActive}); err != nil {
@@ -438,6 +473,9 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateCompleted}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: failedStepID, RunID: runID, Kind: "patch/apply", State: common.StepStateFailed}); err != nil {
+		t.Fatalf("create failed historical step: %v", err)
+	}
 	if err := exports.Repositories.ValidationResults.Create(ctx, &runmodel.ValidationResult{
 		ID:          common.ValidationResultID("validation-task-progress"),
 		WorkspaceID: workspaceID,
@@ -447,6 +485,16 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 		Summary:     "validation passed",
 	}); err != nil {
 		t.Fatalf("create validation: %v", err)
+	}
+	if err := exports.Repositories.ValidationResults.Create(ctx, &runmodel.ValidationResult{
+		ID:          common.ValidationResultID("validation-task-progress-failed-before-repair"),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      failedStepID,
+		State:       common.ValidationResultStateFailed,
+		Summary:     "historical repair validation failed",
+	}); err != nil {
+		t.Fatalf("create historical failed validation: %v", err)
 	}
 	if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
 		ID:           resultID,
@@ -485,11 +533,58 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 	if progress.Summary != "formal task outcome" {
 		t.Fatalf("summary = %q, want formal task outcome", progress.Summary)
 	}
+	snapshot, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
+	}
+	if snapshot.Outcome.State != "accepted" || !snapshot.Outcome.Accepted || snapshot.Outcome.ResultID != string(resultID) {
+		t.Fatalf("outcome = %+v, want accepted result outcome", snapshot.Outcome)
+	}
 	if !progressContainsMilestone(progress, "formal_result", "completed") {
 		t.Fatalf("milestones = %+v, want completed formal result", progress.Milestones)
 	}
+	if !progressContainsMilestone(progress, "execution_steps", "completed") || !progressContainsMilestone(progress, "validation", "completed") {
+		t.Fatalf("milestones = %+v, want accepted result to complete execution and validation milestones", progress.Milestones)
+	}
 	if !progressContainsItem(progress, string(resultID), "result", "accepted") || !progressContainsItem(progress, string(artifactID), "artifact", "available") {
 		t.Fatalf("items = %+v, want result and artifact items", progress.Items)
+	}
+}
+
+func TestReadRunSnapshotWithBackendProjectsCompletedRunWithoutResultAsFailedOutcome(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-completed-without-result")
+	runID := common.RunID("run-completed-without-result")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:    workspaceID,
+		Title: "completed without result",
+		State: common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateCompleted,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	snapshot, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
+	}
+	if snapshot.Outcome.State != "failed" || snapshot.Outcome.Accepted || !snapshot.Outcome.Terminal {
+		t.Fatalf("outcome = %+v, want failed terminal outcome without accepted result", snapshot.Outcome)
+	}
+	if snapshot.Outcome.Reason != "run completed without accepted result" {
+		t.Fatalf("outcome reason = %q, want missing accepted result reason", snapshot.Outcome.Reason)
+	}
+	if !progressContainsMilestone(snapshot.TaskProgress, "formal_result", "failed") {
+		t.Fatalf("milestones = %+v, want failed formal result milestone", snapshot.TaskProgress.Milestones)
 	}
 }
 
@@ -667,6 +762,63 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 	}); err != nil {
 		t.Fatalf("create inspect step: %v", err)
 	}
+	if err := exports.Repositories.ToolCalls.Create(ctx, &runmodel.ToolCall{
+		ID:          common.ToolCallID("tool-task-decomposition-inspect"),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      common.StepID("run-task-decomposition/block/inspect"),
+		ToolName:    "shell/command",
+		State:       common.ToolCallStateCompleted,
+	}); err != nil {
+		t.Fatalf("create tool call: %v", err)
+	}
+	if err := exports.Repositories.Patches.Create(ctx, &runmodel.Patch{
+		ID:          common.PatchID("patch-task-decomposition-inspect"),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      common.StepID("run-task-decomposition/block/inspect"),
+		ToolCallID:  common.ToolCallID("tool-task-decomposition-inspect"),
+		PatchType:   "file_write",
+		TargetRef:   "report.md",
+		State:       common.PatchStateApplied,
+	}); err != nil {
+		t.Fatalf("create patch: %v", err)
+	}
+	if err := exports.Repositories.ValidationResults.Create(ctx, &runmodel.ValidationResult{
+		ID:             common.ValidationResultID("validation-task-decomposition-inspect"),
+		WorkspaceID:    workspaceID,
+		RunID:          runID,
+		StepID:         common.StepID("run-task-decomposition/block/inspect"),
+		ValidationKind: "runtime_step",
+		State:          common.ValidationResultStatePassed,
+		EvidenceRef:    "tool-task-decomposition-inspect",
+	}); err != nil {
+		t.Fatalf("create validation: %v", err)
+	}
+	if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
+		ID:           common.ResultID("result-task-decomposition-inspect"),
+		WorkspaceID:  workspaceID,
+		RunID:        runID,
+		DoDID:        "dod-task-decomposition",
+		State:        common.ResultStateAccepted,
+		SourceType:   "dod_assessment",
+		SourceRef:    "run-task-decomposition/block/inspect",
+		Summary:      "inspect result accepted",
+		EvidenceRefs: []string{"run-task-decomposition/block/inspect"},
+	}); err != nil {
+		t.Fatalf("create result: %v", err)
+	}
+	if err := exports.Repositories.Artifacts.Create(ctx, &resultmodel.Artifact{
+		ID:          common.ArtifactID("artifact-task-decomposition-inspect"),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		ResultID:    common.ResultID("result-task-decomposition-inspect"),
+		StepID:      common.StepID("run-task-decomposition/block/inspect"),
+		Name:        "Inspect report",
+		State:       common.ArtifactStateAvailable,
+	}); err != nil {
+		t.Fatalf("create artifact: %v", err)
+	}
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
 		ID:    common.StepID("run-task-decomposition/block/verify"),
 		RunID: runID,
@@ -697,6 +849,24 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 	if len(item.Nodes[1].DependsOn) != 1 || item.Nodes[1].DependsOn[0] != "inspect" {
 		t.Fatalf("verify dependsOn = %+v, want inspect", item.Nodes[1].DependsOn)
 	}
+	snapshot, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
+	}
+	if len(snapshot.ExecutionSections) != 2 {
+		t.Fatalf("executionSections = %+v, want two sections", snapshot.ExecutionSections)
+	}
+	inspectSection := snapshot.ExecutionSections[0]
+	if inspectSection.GraphNodeID != "inspect" || inspectSection.State != "completed" || inspectSection.StepID != "run-task-decomposition/block/inspect" {
+		t.Fatalf("inspect section = %+v, want linked completed inspect step", inspectSection)
+	}
+	if !stringSliceContains(inspectSection.ToolCallRefs, "tool-task-decomposition-inspect") ||
+		!stringSliceContains(inspectSection.PatchRefs, "patch-task-decomposition-inspect") ||
+		!stringSliceContains(inspectSection.ValidationRefs, "validation-task-decomposition-inspect") ||
+		!stringSliceContains(inspectSection.ResultRefs, "result-task-decomposition-inspect") ||
+		!stringSliceContains(inspectSection.ArtifactRefs, "artifact-task-decomposition-inspect") {
+		t.Fatalf("inspect section = %+v, want linked evidence refs", inspectSection)
+	}
 
 	bundle, err := ReadRunContextBundleWithBackend(context.Background(), "file", dataRoot, string(runID))
 	if err != nil {
@@ -704,6 +874,9 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 	}
 	if !contextBundleContainsSection(bundle, "task_decomposition") {
 		t.Fatalf("context bundle sections = %+v, want task_decomposition", bundle.Sections)
+	}
+	if !contextBundleContainsSection(bundle, "execution_sections") {
+		t.Fatalf("context bundle sections = %+v, want execution_sections", bundle.Sections)
 	}
 }
 
@@ -719,6 +892,15 @@ func progressContainsMilestone(progress TaskProgress, id string, state string) b
 func contextBundleContainsSection(bundle ContextBundle, id string) bool {
 	for _, item := range bundle.Sections {
 		if item.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSliceContains(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
 			return true
 		}
 	}
@@ -1001,6 +1183,9 @@ func TestReadWorkspaceSnapshotProjectsAcceptedResultOverStaleTerminalActiveRun(t
 	if snapshot.Workspace.State != string(common.WorkspaceStateCompleted) {
 		t.Fatalf("workspace state = %q, want completed", snapshot.Workspace.State)
 	}
+	if snapshot.Outcome.State != "accepted" || !snapshot.Outcome.Accepted || snapshot.Outcome.RunID != string(completedRunID) {
+		t.Fatalf("workspace outcome = %+v, want accepted completed run", snapshot.Outcome)
+	}
 	if snapshot.Workspace.ActiveRunID != "" {
 		t.Fatalf("activeRunId = %q, want empty for terminal projection", snapshot.Workspace.ActiveRunID)
 	}
@@ -1085,6 +1270,9 @@ func TestReadWorkspaceSnapshotProjectsLatestRunFailureOverHistoricalAcceptedResu
 	}
 	if snapshot.TaskProgress.RunID != string(failedRunID) || snapshot.TaskProgress.State != string(common.RunStateFailed) {
 		t.Fatalf("task progress = %+v, want latest failed run", snapshot.TaskProgress)
+	}
+	if snapshot.Outcome.State != "failed" || snapshot.Outcome.RunID != string(failedRunID) || snapshot.Outcome.Accepted {
+		t.Fatalf("workspace outcome = %+v, want failed latest run outcome", snapshot.Outcome)
 	}
 	if !progressContainsMilestone(snapshot.TaskProgress, "formal_result", "failed") {
 		t.Fatalf("milestones = %+v, want formal_result failed for latest run without result", snapshot.TaskProgress.Milestones)

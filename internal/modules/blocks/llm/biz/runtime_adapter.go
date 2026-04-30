@@ -1626,9 +1626,15 @@ func doDAssessmentOutput(assessment *llmmodels.DoDAssessment) map[string]any {
 		})
 	}
 	return map[string]any{
-		"satisfied": assessment.Satisfied,
-		"items":     items,
-		"summary":   assessment.Summary,
+		"satisfied":             assessment.Satisfied,
+		"items":                 items,
+		"summary":               assessment.Summary,
+		"goalOutcome":           assessment.GoalOutcome,
+		"implementationSummary": assessment.ImplementationSummary,
+		"verificationSummary":   assessment.VerificationSummary,
+		"knownLimitations":      append([]string(nil), assessment.KnownLimitations...),
+		"residualRisks":         append([]string(nil), assessment.ResidualRisks...),
+		"nextActions":           append([]string(nil), assessment.NextActions...),
 	}
 }
 

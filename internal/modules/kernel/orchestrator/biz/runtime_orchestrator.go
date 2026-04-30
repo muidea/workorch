@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -346,17 +347,28 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 	}
 	specs, err := o.nextDispatchSpecsAfterStep(ctx, r, resumeAfterStepID)
 	if err != nil {
-		if current, getErr := o.runs.Get(ctx, runID); getErr == nil && current.State == common.RunStateRunning {
-			_ = o.FailRun(ctx, runID, err.Error())
-		}
-		return err
+		return o.failRunningResume(ctx, runID, err)
 	}
 	mergeResumeInput(specs, resumeInput)
 	if err := o.dispatchStepSpecs(ctx, r, specs); err != nil {
-		if current, getErr := o.runs.Get(ctx, runID); getErr == nil && current.State == common.RunStateRunning {
-			_ = o.FailRun(ctx, runID, err.Error())
-		}
-		return err
+		return o.failRunningResume(ctx, runID, err)
+	}
+	return nil
+}
+
+func (o *RuntimeOrchestrator) failRunningResume(ctx context.Context, runID common.RunID, cause error) error {
+	if cause == nil {
+		return nil
+	}
+	current, getErr := o.runs.Get(ctx, runID)
+	if getErr != nil {
+		return errors.Join(cause, getErr)
+	}
+	if current.State != common.RunStateRunning {
+		return cause
+	}
+	if err := o.FailRun(ctx, runID, cause.Error()); err != nil {
+		return errors.Join(cause, err)
 	}
 	return nil
 }
@@ -651,6 +663,9 @@ func (o *RuntimeOrchestrator) dispatchStep(
 		if err := o.steps.Update(ctx, step); err != nil {
 			return err
 		}
+	}
+	if err := o.enrichLLMStepInputContext(ctx, run, step); err != nil {
+		return err
 	}
 	if err := o.publishStepState(ctx, run, step, events.TopicStepDispatched); err != nil {
 		return err
@@ -1497,6 +1512,8 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 	}
 	step.State = common.StepStateFailed
 	step.Output = runtimeFailureOutput(output, execErr)
+	classification := classifyRuntimeFailure(step, step.Output, summary, execErr)
+	attachRuntimeFailureClassification(step.Output, classification)
 	_ = o.recordToolCallFailed(ctx, toolCall, execErr, step.Output)
 	errText := ""
 	if execErr != nil {
@@ -1525,6 +1542,9 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 	failedStep *runModel.Step,
 	execErr error,
 ) error {
+	if o.shouldBlockOnDuplicateRuntimeFailure(ctx, run, failedStep) {
+		return o.blockOnDuplicateRuntimeFailure(ctx, run, failedStep, execErr)
+	}
 	if o.shouldEscalateRuntimeRepairExhaustion(ctx, run, failedStep) {
 		return o.blockOnRuntimeRepairExhaustion(ctx, run, failedStep, execErr)
 	}
@@ -1575,6 +1595,8 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		Question:     "Automatic runtime repair attempts were exhausted. Provide missing implementation guidance, choose replan, or reject the current path.",
 		Context: map[string]any{
 			"attempts":         maxRuntimeRepairAttempts,
+			"failureClass":     stringFromMap(failedStep.Output, failureOutputKeyClass),
+			"failureSignature": stringFromMap(failedStep.Output, failureOutputKeySignature),
 			"failedStepId":     string(failedStep.ID),
 			"failedStepKind":   failedStep.Kind,
 			"failedStepInput":  cloneStepPayload(failedStep.Input),
@@ -1682,6 +1704,12 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	input["failedStepState"] = string(failedStep.State)
 	input["failedStepInput"] = cloneStepPayload(failedStep.Input)
 	input["failedStepOutput"] = cloneStepPayload(failedStep.Output)
+	if class := stringFromMap(failedStep.Output, failureOutputKeyClass); class != "" {
+		input[failureOutputKeyClass] = class
+	}
+	if signature := stringFromMap(failedStep.Output, failureOutputKeySignature); signature != "" {
+		input[failureOutputKeySignature] = signature
+	}
 	input["previousStepKind"] = failedStep.Kind
 	input["previousStepOutput"] = cloneStepPayload(failedStep.Output)
 	if nodeID := graphNodeID(failedStep); nodeID != "" {
@@ -1810,21 +1838,25 @@ func (o *RuntimeOrchestrator) recordRunResultFromDoDAssessment(
 	if manifestRef != "" {
 		artifactRefs = append(artifactRefs, manifestRef)
 	}
+	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
+	dodAssessment := resultDoDAssessmentFromMap(assessment)
 	item := &resultmodel.Result{
-		ID:           common.ResultID(fmt.Sprintf("%s/result/dod-assessment", run.ID)),
-		WorkspaceID:  run.WorkspaceID,
-		RunID:        run.ID,
-		GoalID:       run.GoalID,
-		DoDID:        run.DoDID,
-		State:        common.ResultStateAccepted,
-		Title:        "Accepted Result",
-		Summary:      summary,
-		SourceType:   resultcommon.SourceTypeDoDAssessment,
-		SourceRef:    string(step.ID),
-		EvidenceRefs: doDAssessmentEvidenceRefs(step.ID, assessment),
-		ArtifactRefs: artifactRefs,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:            common.ResultID(fmt.Sprintf("%s/result/dod-assessment", run.ID)),
+		WorkspaceID:   run.WorkspaceID,
+		RunID:         run.ID,
+		GoalID:        run.GoalID,
+		DoDID:         run.DoDID,
+		State:         common.ResultStateAccepted,
+		Title:         "Accepted Result",
+		Summary:       summary,
+		SourceType:    resultcommon.SourceTypeDoDAssessment,
+		SourceRef:     string(step.ID),
+		EvidenceRefs:  evidenceRefs,
+		ArtifactRefs:  artifactRefs,
+		DoDAssessment: dodAssessment,
+		SummaryDetail: resultSummaryFromDoDAssessment(run, summary, assessment, dodAssessment, evidenceRefs, artifactRefs),
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 	if err := o.evidence.Results.Create(ctx, item); err != nil {
 		if err != common.ErrConflict {
@@ -1845,6 +1877,8 @@ func (o *RuntimeOrchestrator) recordRunResultFromDoDAssessment(
 		existing.SourceRef = item.SourceRef
 		existing.EvidenceRefs = item.EvidenceRefs
 		existing.ArtifactRefs = item.ArtifactRefs
+		existing.DoDAssessment = item.DoDAssessment
+		existing.SummaryDetail = item.SummaryDetail
 		existing.UpdatedAt = now
 		if err := o.evidence.Results.Update(ctx, existing); err != nil {
 			return err
@@ -1938,15 +1972,17 @@ func (o *RuntimeOrchestrator) recordResultSummaryArtifact(
 		ResultID:     common.ResultID(fmt.Sprintf("%s/result/dod-assessment", run.ID)),
 		StepID:       step.ID,
 		ArtifactType: resultcommon.ArtifactTypeText,
+		Category:     resultcommon.ArtifactCategoryFinalSummary,
 		Name:         "Accepted Result Summary",
-		Summary:      summary,
+		Summary:      resultSummaryArtifactContent(run, summary, assessment, evidenceRefs),
 		URI:          fmt.Sprintf("workorch://runs/%s/results/dod-assessment/summary", run.ID),
-		ContentType:  "text/plain; charset=utf-8",
+		ContentType:  "text/markdown; charset=utf-8",
 		State:        common.ArtifactStateAvailable,
 		EvidenceRefs: evidenceRefs,
 		Metadata: map[string]any{
 			"sourceType": resultcommon.SourceTypeDoDAssessment,
 			"sourceRef":  string(step.ID),
+			"category":   resultcommon.ArtifactCategoryFinalSummary,
 		},
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -1964,6 +2000,7 @@ func (o *RuntimeOrchestrator) recordResultSummaryArtifact(
 		existing.ResultID = item.ResultID
 		existing.StepID = item.StepID
 		existing.ArtifactType = item.ArtifactType
+		existing.Category = item.Category
 		existing.Name = item.Name
 		existing.Summary = item.Summary
 		existing.URI = item.URI
@@ -1999,6 +2036,7 @@ func (o *RuntimeOrchestrator) recordWorkspaceDeliverableManifestArtifact(
 		ResultID:     common.ResultID(fmt.Sprintf("%s/result/dod-assessment", run.ID)),
 		StepID:       step.ID,
 		ArtifactType: resultcommon.ArtifactTypeReport,
+		Category:     resultcommon.ArtifactCategoryRuntimeEvidence,
 		Name:         "Workspace Deliverable Manifest",
 		Summary:      manifest,
 		URI:          fmt.Sprintf("workorch://runs/%s/results/dod-assessment/deliverable-manifest", run.ID),
@@ -2009,6 +2047,7 @@ func (o *RuntimeOrchestrator) recordWorkspaceDeliverableManifestArtifact(
 			"sourceType":   resultcommon.SourceTypeDoDAssessment,
 			"sourceRef":    string(step.ID),
 			"manifestType": "workspace_deliverables",
+			"category":     resultcommon.ArtifactCategoryRuntimeEvidence,
 		},
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -2026,6 +2065,7 @@ func (o *RuntimeOrchestrator) recordWorkspaceDeliverableManifestArtifact(
 		existing.ResultID = item.ResultID
 		existing.StepID = item.StepID
 		existing.ArtifactType = item.ArtifactType
+		existing.Category = item.Category
 		existing.Name = item.Name
 		existing.Summary = item.Summary
 		existing.URI = item.URI
@@ -2040,6 +2080,198 @@ func (o *RuntimeOrchestrator) recordWorkspaceDeliverableManifestArtifact(
 		return existing.ID, o.publishArtifactCreated(ctx, existing)
 	}
 	return item.ID, o.publishArtifactCreated(ctx, item)
+}
+
+func resultSummaryFromDoDAssessment(
+	run *runModel.Run,
+	summary string,
+	assessment map[string]any,
+	dodAssessment resultmodel.DoDAssessment,
+	evidenceRefs []string,
+	artifactRefs []common.ArtifactID,
+) resultmodel.ResultSummary {
+	ret := resultmodel.ResultSummary{
+		GoalOutcome:           firstNonEmptyOrchestratorString(stringFromMap(assessment, "goalOutcome"), summary),
+		DoDItems:              append([]resultmodel.DoDAssessmentItem(nil), dodAssessment.Items...),
+		ImplementationSummary: firstNonEmptyOrchestratorString(stringFromMap(assessment, "implementationSummary"), summary),
+		VerificationSummary:   firstNonEmptyOrchestratorString(stringFromMap(assessment, "verificationSummary"), verificationSummaryFromEvidence(runDialogLanguage(run), evidenceRefs)),
+		EvidenceRefs:          append([]string(nil), evidenceRefs...),
+		ArtifactRefs:          append([]common.ArtifactID(nil), artifactRefs...),
+		KnownLimitations:      stringSliceFromValue(assessment["knownLimitations"]),
+		ResidualRisks:         stringSliceFromValue(assessment["residualRisks"]),
+		NextActions:           stringSliceFromValue(assessment["nextActions"]),
+	}
+	if len(ret.ResidualRisks) == 0 {
+		ret.ResidualRisks = localizedDefaultList(runDialogLanguage(run), "residual_risks")
+	}
+	if len(ret.NextActions) == 0 {
+		ret.NextActions = localizedDefaultList(runDialogLanguage(run), "next_actions")
+	}
+	return ret
+}
+
+func resultSummaryArtifactContent(run *runModel.Run, summary string, assessment map[string]any, evidenceRefs []string) string {
+	var builder strings.Builder
+	language := runDialogLanguage(run)
+	builder.WriteString("# ")
+	builder.WriteString(localizedSummaryLabel(language, "title"))
+	builder.WriteString("\n\n## ")
+	builder.WriteString(localizedSummaryLabel(language, "goal_outcome"))
+	builder.WriteString("\n\n")
+	builder.WriteString(firstNonEmptyOrchestratorString(stringFromMap(assessment, "goalOutcome"), summary))
+	builder.WriteString("\n\n## ")
+	builder.WriteString(localizedSummaryLabel(language, "implementation_summary"))
+	builder.WriteString("\n\n")
+	builder.WriteString(firstNonEmptyOrchestratorString(stringFromMap(assessment, "implementationSummary"), summary))
+	builder.WriteString("\n\n## ")
+	builder.WriteString(localizedSummaryLabel(language, "verification_summary"))
+	builder.WriteString("\n\n")
+	builder.WriteString(firstNonEmptyOrchestratorString(stringFromMap(assessment, "verificationSummary"), verificationSummaryFromEvidence(language, evidenceRefs)))
+	if items, ok := doDAssessmentItemMaps(assessment["items"]); ok && len(items) > 0 {
+		builder.WriteString("\n\n## ")
+		builder.WriteString(localizedSummaryLabel(language, "dod_items"))
+		builder.WriteString("\n\n")
+		builder.WriteString(localizedSummaryLabel(language, "dod_table_header"))
+		builder.WriteString("\n")
+		builder.WriteString("| --- | --- | --- |\n")
+		for _, item := range items {
+			builder.WriteString(fmt.Sprintf(
+				"| %s | %s | %s |\n",
+				markdownTableCell(stringFromMap(item, "item")),
+				markdownTableCell(stringFromMap(item, "state")),
+				markdownTableCell(strings.Join(evidenceRefsFromValue(item["evidenceRefs"]), ", ")),
+			))
+		}
+	}
+	writeStringListSection(&builder, localizedSummaryLabel(language, "evidence_refs"), evidenceRefs)
+	writeStringListSection(&builder, localizedSummaryLabel(language, "known_limitations"), stringSliceFromValue(assessment["knownLimitations"]))
+	writeStringListSection(&builder, localizedSummaryLabel(language, "residual_risks"), stringSliceFromValue(assessment["residualRisks"]))
+	writeStringListSection(&builder, localizedSummaryLabel(language, "next_actions"), stringSliceFromValue(assessment["nextActions"]))
+	return strings.TrimSpace(builder.String())
+}
+
+func verificationSummaryFromEvidence(language string, evidenceRefs []string) string {
+	if len(evidenceRefs) == 0 {
+		if prefersChinese(language) {
+			return "验收评估未报告明确的证据引用。"
+		}
+		return "The acceptance assessment did not report explicit evidence references."
+	}
+	if prefersChinese(language) {
+		return fmt.Sprintf("验收结论由 %d 个证据引用支撑。", len(evidenceRefs))
+	}
+	return fmt.Sprintf("Acceptance is backed by %d evidence reference(s).", len(evidenceRefs))
+}
+
+func localizedDefaultList(language string, kind string) []string {
+	switch kind {
+	case "residual_risks":
+		if prefersChinese(language) {
+			return []string{"验收评估未报告剩余风险。"}
+		}
+		return []string{"No residual risks were reported by the acceptance assessment."}
+	case "next_actions":
+		if prefersChinese(language) {
+			return []string{"使用生成的交付物和证据引用进行验收确认。"}
+		}
+		return []string{"Use the generated Artifact and evidence refs for user acceptance review."}
+	default:
+		return nil
+	}
+}
+
+func localizedSummaryLabel(language string, key string) string {
+	if prefersChinese(language) {
+		switch key {
+		case "title":
+			return "已验收目标成果摘要"
+		case "goal_outcome":
+			return "目标成果"
+		case "implementation_summary":
+			return "实现摘要"
+		case "verification_summary":
+			return "验证摘要"
+		case "dod_items":
+			return "验收项确认"
+		case "dod_table_header":
+			return "| 验收项 | 状态 | 证据 |"
+		case "evidence_refs":
+			return "证据引用"
+		case "known_limitations":
+			return "已知限制"
+		case "residual_risks":
+			return "剩余风险"
+		case "next_actions":
+			return "后续动作"
+		}
+	}
+	switch key {
+	case "title":
+		return "Accepted Result Summary"
+	case "goal_outcome":
+		return "Goal Outcome"
+	case "implementation_summary":
+		return "Implementation Summary"
+	case "verification_summary":
+		return "Verification Summary"
+	case "dod_items":
+		return "DoD Items"
+	case "dod_table_header":
+		return "| Item | State | Evidence |"
+	case "evidence_refs":
+		return "Evidence Refs"
+	case "known_limitations":
+		return "Known Limitations"
+	case "residual_risks":
+		return "Residual Risks"
+	case "next_actions":
+		return "Next Actions"
+	default:
+		return key
+	}
+}
+
+func runDialogLanguage(run *runModel.Run) string {
+	if run == nil {
+		return ""
+	}
+	return strings.TrimSpace(stringFromMap(run.ExecutionContext, "dialogLanguage"))
+}
+
+func prefersChinese(language string) bool {
+	language = strings.ToLower(strings.TrimSpace(language))
+	return strings.Contains(language, "zh") || strings.Contains(language, "chinese") || strings.Contains(language, "中文") || strings.Contains(language, "汉语")
+}
+
+func writeStringListSection(builder *strings.Builder, title string, values []string) {
+	if builder == nil || len(values) == 0 {
+		return
+	}
+	builder.WriteString(fmt.Sprintf("\n\n## %s\n\n", title))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		builder.WriteString(fmt.Sprintf("- %s\n", value))
+	}
+}
+
+func markdownTableCell(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "|", "\\|")
+	value = strings.ReplaceAll(value, "\n", " ")
+	return value
+}
+
+func firstNonEmptyOrchestratorString(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (o *RuntimeOrchestrator) workspaceDeliverableManifestContent(
@@ -2070,9 +2302,32 @@ func (o *RuntimeOrchestrator) workspaceDeliverableManifestContent(
 	} else if len(files) == 0 {
 		builder.WriteString("- No files were found in the workspace working directory.\n")
 	} else {
+		builder.WriteString("| Path | Category | Purpose | Size |\n")
+		builder.WriteString("| --- | --- | --- | ---: |\n")
 		for _, file := range files {
-			builder.WriteString(fmt.Sprintf("- `%s` (%d bytes)\n", file.Path, file.Size))
+			builder.WriteString(fmt.Sprintf(
+				"| `%s` | %s | %s | %d bytes |\n",
+				markdownTableCell(file.Path),
+				markdownTableCell(file.Category),
+				markdownTableCell(artifactPurposeForCategory(file.Category)),
+				file.Size,
+			))
 		}
+	}
+	builder.WriteString("\n## DoD Relation\n\n")
+	if items, ok := doDAssessmentItemMaps(assessment["items"]); ok && len(items) > 0 {
+		builder.WriteString("| DoD Item | State | Evidence |\n")
+		builder.WriteString("| --- | --- | --- |\n")
+		for _, item := range items {
+			builder.WriteString(fmt.Sprintf(
+				"| %s | %s | %s |\n",
+				markdownTableCell(stringFromMap(item, "item")),
+				markdownTableCell(stringFromMap(item, "state")),
+				markdownTableCell(strings.Join(evidenceRefsFromValue(item["evidenceRefs"]), ", ")),
+			))
+		}
+	} else {
+		builder.WriteString("- No item-level DoD relation was reported by the assessment.\n")
 	}
 	builder.WriteString("\n## Acceptance Evidence\n\n")
 	for _, ref := range doDAssessmentEvidenceRefs(step.ID, assessment) {
@@ -2085,6 +2340,7 @@ type workspaceDeliverableFile struct {
 	Path       string
 	Size       int64
 	Executable bool
+	Category   string
 }
 
 func workspaceDeliverableFiles(workingDirectory string) ([]workspaceDeliverableFile, error) {
@@ -2131,6 +2387,7 @@ func workspaceManifestFiles(workingDirectory string) ([]workspaceDeliverableFile
 			Path:       filepath.ToSlash(rel),
 			Size:       info.Size(),
 			Executable: info.Mode().Perm()&0o111 != 0,
+			Category:   artifactCategoryForWorkspaceFile(rel),
 		})
 		return nil
 	})
@@ -2139,6 +2396,61 @@ func workspaceManifestFiles(workingDirectory string) ([]workspaceDeliverableFile
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, nil
+}
+
+func artifactCategoryForWorkspaceFile(path string) string {
+	normalized := strings.ToLower(filepath.ToSlash(path))
+	base := pathBaseLower(normalized)
+	switch {
+	case strings.Contains(normalized, "/testdata/"),
+		strings.HasSuffix(base, "_test.go"),
+		strings.HasSuffix(base, ".test.js"),
+		strings.HasSuffix(base, ".spec.js"),
+		strings.Contains(base, "test-report"),
+		strings.Contains(base, "coverage"):
+		return resultcommon.ArtifactCategoryTestReport
+	case strings.HasSuffix(base, ".md"),
+		strings.HasSuffix(base, ".adoc"),
+		strings.HasSuffix(base, ".rst"),
+		strings.HasPrefix(base, "readme"),
+		strings.HasPrefix(base, "docs"):
+		return resultcommon.ArtifactCategoryDocumentation
+	case strings.HasSuffix(base, ".toml"),
+		strings.HasSuffix(base, ".yaml"),
+		strings.HasSuffix(base, ".yml"),
+		strings.HasSuffix(base, ".json"),
+		strings.HasSuffix(base, ".env"),
+		strings.Contains(base, "config"),
+		strings.Contains(base, "lock"):
+		return resultcommon.ArtifactCategoryConfiguration
+	default:
+		return resultcommon.ArtifactCategorySource
+	}
+}
+
+func artifactPurposeForCategory(category string) string {
+	switch category {
+	case resultcommon.ArtifactCategoryConfiguration:
+		return "Configuration required to run or integrate the deliverable."
+	case resultcommon.ArtifactCategoryDocumentation:
+		return "Documentation or usage guidance for acceptance review."
+	case resultcommon.ArtifactCategoryTestReport:
+		return "Verification material related to the DoD."
+	case resultcommon.ArtifactCategoryRuntimeEvidence:
+		return "Runtime evidence produced during execution."
+	case resultcommon.ArtifactCategoryFinalSummary:
+		return "Final user-facing acceptance summary."
+	default:
+		return "Source or implementation artifact for the accepted outcome."
+	}
+}
+
+func pathBaseLower(path string) string {
+	path = filepath.ToSlash(path)
+	if idx := strings.LastIndex(path, "/"); idx >= 0 {
+		return path[idx+1:]
+	}
+	return path
 }
 
 func (o *RuntimeOrchestrator) publishResultAccepted(ctx context.Context, item *resultmodel.Result) error {
@@ -2231,6 +2543,56 @@ func doDAssessmentEvidenceRefs(stepID common.StepID, assessment map[string]any) 
 	return ret
 }
 
+func resultDoDAssessmentFromMap(assessment map[string]any) resultmodel.DoDAssessment {
+	if assessment == nil {
+		return resultmodel.DoDAssessment{}
+	}
+	summary, _ := assessment["summary"].(string)
+	satisfied, _ := assessment["satisfied"].(bool)
+	ret := resultmodel.DoDAssessment{
+		Satisfied: satisfied,
+		Summary:   strings.TrimSpace(summary),
+	}
+	items, ok := doDAssessmentItemMaps(assessment["items"])
+	if !ok {
+		return ret
+	}
+	ret.Items = make([]resultmodel.DoDAssessmentItem, 0, len(items))
+	for _, item := range items {
+		name, _ := item["item"].(string)
+		state, _ := item["state"].(string)
+		failureReason, _ := item["failureReason"].(string)
+		sourceNote, _ := item["sourceNote"].(string)
+		ret.Items = append(ret.Items, resultmodel.DoDAssessmentItem{
+			Item:          strings.TrimSpace(name),
+			State:         strings.TrimSpace(state),
+			EvidenceRefs:  evidenceRefsFromValue(item["evidenceRefs"]),
+			FailureReason: strings.TrimSpace(failureReason),
+			Confidence:    floatFromValue(item["confidence"]),
+			SourceNote:    strings.TrimSpace(sourceNote),
+		})
+	}
+	return ret
+}
+
+func floatFromValue(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case json.Number:
+		ret, _ := typed.Float64()
+		return ret
+	default:
+		return 0
+	}
+}
+
 func (o *RuntimeOrchestrator) recordRunCheckpoint(ctx context.Context, run *runModel.Run) error {
 	if run == nil || o.evidence.RuntimeCheckpoints == nil {
 		return nil
@@ -2254,6 +2616,12 @@ func (o *RuntimeOrchestrator) recordStepCheckpoint(ctx context.Context, run *run
 		"event":     event,
 		"stepState": string(step.State),
 		"stepKind":  step.Kind,
+	}
+	if class := stringFromMap(step.Output, failureOutputKeyClass); class != "" {
+		data[failureOutputKeyClass] = class
+	}
+	if signature := stringFromMap(step.Output, failureOutputKeySignature); signature != "" {
+		data[failureOutputKeySignature] = signature
 	}
 	if nodeID := graphNodeID(step); nodeID != "" {
 		data[stepInputKeyGraphNodeID] = nodeID

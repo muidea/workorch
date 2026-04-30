@@ -911,6 +911,16 @@ Artifact 与 observability 回查。
 - `S3 最小事件总线路径正式化` 已完成
 - 当前活跃待办项：无
 
+## Run Closure Quality Improvement Plan
+
+下一轮运行闭环质量改进计划已固化，见：
+
+- `docs/run-closure-quality-improvement-plan.md`
+
+该计划聚焦当前已落地能力的质量收口：统一 `RunOutcome` / `WorkspaceOutcome`
+投影、严格按 DoD 验收 Goal、强化 Decision / Approval / repair 恢复稳定性、
+提升执行效率、补全任务拆分与正式 Result / Artifact 汇总质量。
+
 ## Framework Alignment Closure Record
 
 当前 framework 对齐进度：

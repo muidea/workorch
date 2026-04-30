@@ -542,8 +542,19 @@ func testResultRepositoryContract(t *testing.T, factory func() repository.Result
 		SourceRef:    "step-contract",
 		EvidenceRefs: []string{"step-contract", "validation-contract"},
 		ArtifactRefs: []common.ArtifactID{common.ArtifactID("artifact-contract")},
-		CreatedAt:    "2026-04-28T00:00:00Z",
-		UpdatedAt:    "2026-04-28T00:00:00Z",
+		DoDAssessment: resultmodel.DoDAssessment{
+			Satisfied: true,
+			Summary:   "Run completed with evidence-backed result.",
+			Items: []resultmodel.DoDAssessmentItem{
+				{
+					Item:         "validation passes",
+					State:        "satisfied",
+					EvidenceRefs: []string{"validation-contract"},
+				},
+			},
+		},
+		CreatedAt: "2026-04-28T00:00:00Z",
+		UpdatedAt: "2026-04-28T00:00:00Z",
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create result: %v", err)
@@ -557,11 +568,14 @@ func testResultRepositoryContract(t *testing.T, factory func() repository.Result
 	}
 	got.EvidenceRefs[0] = "mutated"
 	got.ArtifactRefs[0] = common.ArtifactID("mutated")
+	got.DoDAssessment.Items[0].EvidenceRefs[0] = "mutated"
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get result fresh: %v", err)
 	}
-	if fresh.EvidenceRefs[0] != "step-contract" || fresh.ArtifactRefs[0] != "artifact-contract" {
+	if fresh.EvidenceRefs[0] != "step-contract" ||
+		fresh.ArtifactRefs[0] != "artifact-contract" ||
+		fresh.DoDAssessment.Items[0].EvidenceRefs[0] != "validation-contract" {
 		t.Fatalf("result clone isolation failed: %+v", fresh)
 	}
 	fresh.Summary = "updated accepted outcome"

@@ -425,12 +425,12 @@ func decisionContractPrompt() string {
 		"- For software development repair, if Go, Node, Python, or similar dependency metadata changed or a dependency checksum/lock file is missing, include the appropriate bounded dependency preparation command such as go mod tidy, npm install, or pip install before rerunning tests. Do not hardcode this unless the workspace files indicate the ecosystem.",
 		"- When input.graphFollowUp is true, use input.graphEvidence as the collected execution graph evidence. Return completed with dodAssessment when the DoD can be assessed; request more work only when evidence is insufficient.",
 		"- When input.completionFollowUp is true, use input.previousStepOutput as the latest execution evidence. Return completed with dodAssessment when the DoD can be assessed; otherwise plan only the missing verification work.",
-		"- For completed, include dodAssessment.summary as a non-empty user-facing final result, and evidenceRefs for every satisfied item.",
+		"- For completed, include dodAssessment.summary as a non-empty user-facing final result, evidenceRefs for every satisfied item, and when known include goalOutcome, implementationSummary, verificationSummary, knownLimitations, residualRisks, and nextActions.",
 		"- Do not include workspaceId, runId, stepId, schema, traceRefs, config, or any unknown top-level field in the decision JSON.",
 		"Minimal examples:",
 		`{"completionState":"continue","executionGraph":{"nodes":[{"id":"inspect","kind":"shell/command","input":{"command":"ls","args":["-la"]}},{"id":"test","kind":"shell/command","dependsOn":["inspect"],"input":{"command":"go","args":["test","./..."]}}]}}`,
 		`{"completionState":"blocked_on_decision","requiredDecision":{"reason":"missing product choice","decisionKind":"provide_missing_info","question":"Which runtime adapter should be used?"}}`,
-		`{"completionState":"completed","dodAssessment":{"satisfied":true,"summary":"Tests passed and the requested artifact is ready.","items":[{"item":"tests pass","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}]}}`,
+		`{"completionState":"completed","dodAssessment":{"satisfied":true,"summary":"Tests passed and the requested artifact is ready.","goalOutcome":"The requested implementation is complete.","implementationSummary":"Implemented the requested behavior.","verificationSummary":"go test ./... passed.","items":[{"item":"tests pass","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}],"knownLimitations":[],"residualRisks":[],"nextActions":["Review the generated artifacts."]}}`,
 	}, "\n")
 }
 

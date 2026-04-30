@@ -13,7 +13,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, Goal, LLMProviderTemplate, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMProviderTemplate, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -35,6 +35,7 @@ const stateLabels: Record<string, string> = {
   running: '运行中',
   validating: '验收中',
   completed: '已完成',
+  accepted: '已接受',
   failed: '失败',
   cancelled: '已取消',
   superseded: '已替代',
@@ -174,6 +175,21 @@ function runStateSummary(runs?: Run[]) {
   };
 }
 
+function workspaceProjectionRun(snapshot?: WorkspaceSnapshot) {
+  if (!snapshot) {
+    return undefined;
+  }
+  const activeRun = snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId);
+  if (activeRun) {
+    return activeRun;
+  }
+  const progressRun = snapshot.runs?.find((item) => item.id === snapshot.taskProgress?.runId);
+  if (progressRun) {
+    return progressRun;
+  }
+  return runStateSummary(snapshot.runs).latest;
+}
+
 function isBlockedRunState(state?: string) {
   return state === 'blocked_on_decision' || state === 'blocked_on_approval';
 }
@@ -191,11 +207,7 @@ function isTerminalRunState(state?: string) {
 }
 
 function activeOrLatestRun(snapshot?: WorkspaceSnapshot) {
-  if (!snapshot) {
-    return undefined;
-  }
-  const activeRun = snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId);
-  return activeRun ?? runStateSummary(snapshot.runs).latest;
+  return workspaceProjectionRun(snapshot);
 }
 
 function workspaceProcessItems(snapshot?: WorkspaceSnapshot, goals?: Goal[], dods?: DoD[]) {
@@ -390,6 +402,57 @@ function taskDecompositionCard(items?: TaskDecomposition[]) {
             </Space>
           )
         }))}
+      />
+    </Space>
+  );
+}
+
+function executionSectionsCard(items?: ExecutionSection[]) {
+  const sections = items ?? [];
+  if (sections.length === 0) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无执行分区" />;
+  }
+  const completed = sections.filter((item) => item.state === 'completed').length;
+  const failed = sections.filter((item) => item.state === 'failed').length;
+  const running = sections.filter((item) => item.state === 'running').length;
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      {metricGrid([
+        { key: 'total', label: '分区总数', value: sections.length, color: '#1668dc' },
+        { key: 'completed', label: '已完成', value: completed, color: '#389e0d' },
+        { key: 'running', label: '执行中', value: running, color: '#0958d9' },
+        { key: 'failed', label: '失败', value: failed, color: '#cf1322' }
+      ])}
+      <ProTable<ExecutionSection>
+        rowKey="id"
+        search={false}
+        options={false}
+        pagination={{ pageSize: 8 }}
+        size="small"
+        columns={[
+          { title: '分区', dataIndex: 'title', ellipsis: true, render: (_, item) => boundedParagraph(item.title || item.id, { rows: 2 }) },
+          { title: '状态', dataIndex: 'state', width: 110, render: (_, item) => stateTag(item.state) },
+          { title: '图节点', dataIndex: 'graphNodeId', copyable: true, ellipsis: true },
+          { title: '步骤', dataIndex: 'stepId', copyable: true, ellipsis: true },
+          { title: '证据', dataIndex: 'actualEvidenceRefs', width: 220, render: (_, item) => compactTags(item.actualEvidenceRefs ?? [], 4) }
+        ]}
+        expandable={{
+          expandedRowRender: (item) => (
+            <Descriptions
+              column={1}
+              size="small"
+              items={[
+                { key: 'summary', label: '摘要', children: boundedParagraph(item.summary, { rows: 2 }) },
+                { key: 'dod', label: '关联验收项', children: compactTags(item.relatedDoDItems ?? [], 6) },
+                { key: 'planned', label: '计划引用', children: compactTags(item.plannedStepRefs ?? [], 6) },
+                { key: 'governance', label: '治理工单', children: compactTags([...(item.decisionRefs ?? []), ...(item.approvalRefs ?? [])], 6) },
+                { key: 'runtime', label: '运行证据', children: compactTags([...(item.toolCallRefs ?? []), ...(item.patchRefs ?? []), ...(item.validationRefs ?? [])], 6) },
+                { key: 'outputs', label: '结果交付', children: compactTags([...(item.resultRefs ?? []), ...(item.artifactRefs ?? [])], 6) }
+              ]}
+            />
+          )
+        }}
+        dataSource={sections}
       />
     </Space>
   );
@@ -768,6 +831,10 @@ function asStringArray(value: unknown): string[] {
 }
 
 function dodAssessment(snapshot?: RunSnapshot) {
+  const resultAssessment = (primaryAcceptedResult(snapshot) ?? primaryResult(snapshot))?.doDAssessment;
+  if (resultAssessment) {
+    return resultAssessment as Record<string, unknown>;
+  }
   const steps = snapshot?.steps ?? [];
   for (let index = steps.length - 1; index >= 0; index -= 1) {
     const assessment = asRecord(steps[index].output?.dodAssessment);
@@ -784,7 +851,8 @@ function dodAssessmentItems(snapshot?: RunSnapshot) {
     key: `dod-${index}`,
     item: asRecord(item)?.item ? String(asRecord(item)?.item) : compactJSON(item),
     state: asRecord(item)?.state ? String(asRecord(item)?.state) : '-',
-    evidenceRefs: asStringArray(asRecord(item)?.evidenceRefs)
+    evidenceRefs: asStringArray(asRecord(item)?.evidenceRefs),
+    failureReason: asRecord(item)?.failureReason ? String(asRecord(item)?.failureReason) : ''
   })) : [];
 }
 
@@ -810,12 +878,27 @@ function primaryResult(snapshot?: RunSnapshot) {
 	return [...results].sort((left, right) => resultTimeValue(right).localeCompare(resultTimeValue(left)))[0];
 }
 
+function primaryAcceptedResult(snapshot?: RunSnapshot) {
+	const results = (snapshot?.results ?? []).filter((item) => item.state === 'accepted');
+	if (!results.length) {
+		return undefined;
+	}
+	return [...results].sort((left, right) => resultTimeValue(right).localeCompare(resultTimeValue(left)))[0];
+}
+
 function goalOutcomeSummary(snapshot?: RunSnapshot) {
-	const summary = primaryResult(snapshot)?.summary || snapshot?.run.failureReason;
+	const result = primaryAcceptedResult(snapshot) ?? primaryResult(snapshot);
+	const summary = snapshot?.outcome?.summary || result?.summaryDetail?.goalOutcome || result?.doDAssessment?.summary || result?.summary || snapshot?.run.failureReason;
 	return summary ? String(summary) : '尚未形成可确认的目标成果';
 }
 
 function goalOutcomeState(snapshot?: RunSnapshot) {
+	if (snapshot?.outcome?.accepted || snapshot?.outcome?.state === 'accepted') {
+		return <Tag color="green">Result 已接受</Tag>;
+	}
+	if (snapshot?.outcome?.state === 'failed') {
+		return <Tag color="red">验收未通过</Tag>;
+	}
 	const result = primaryResult(snapshot);
 	if (result?.state === 'accepted') {
 		return <Tag color="green">Result 已接受</Tag>;
@@ -831,6 +914,14 @@ function goalOutcomeState(snapshot?: RunSnapshot) {
     return <Tag color="red">DoD 未满足</Tag>;
   }
   return snapshot ? stateTag(snapshot.run.state) : <Tag>未选择 Run</Tag>;
+}
+
+function runOutcomeState(snapshot?: RunSnapshot, observability?: RunObservability) {
+  return observability?.outcome?.state || snapshot?.outcome?.state || snapshot?.run.state || 'unknown';
+}
+
+function runRawState(snapshot?: RunSnapshot, observability?: RunObservability) {
+  return observability?.outcome?.rawState || snapshot?.outcome?.rawState || snapshot?.run.state || 'unknown';
 }
 
 function boundedParagraph(value?: React.ReactNode, options?: { rows?: number; copyText?: string; className?: string }) {
@@ -1394,9 +1485,9 @@ function readyDoDs(dods: DoD[]) {
 }
 
 function workspaceBoardActivationRequest(item: WorkspaceBoardItem): WorkspaceExecutionActivationRequest | undefined {
-  const latestRun = runStateSummary(item.snapshot.runs).latest;
-  if (latestRun && isTerminalRunState(latestRun.state) && latestRun.goalId && latestRun.doDId) {
-    return { goalId: latestRun.goalId, doDId: latestRun.doDId };
+  const projectedRun = workspaceProjectionRun(item.snapshot);
+  if (projectedRun && isTerminalRunState(projectedRun.state) && projectedRun.goalId && projectedRun.doDId) {
+    return { goalId: projectedRun.goalId, doDId: projectedRun.doDId };
   }
 
   const availableDoDs = readyDoDs(item.dods);
@@ -1485,7 +1576,7 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
           {boardItems.map((item) => {
             const { snapshot, goals, dods } = item;
             const activeRun = snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId);
-            const currentRun = activeRun ?? runStateSummary(snapshot.runs).latest;
+            const currentRun = workspaceProjectionRun(snapshot);
             const runSummary = runStateSummary(snapshot.runs);
             const pendingDecisions = pendingCount(snapshot.decisions);
             const pendingApprovals = pendingCount(snapshot.approvals);
@@ -1497,7 +1588,7 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
                 subTitle={snapshot.workspace.id}
                 colSpan={{ xs: 24, md: 12, xl: 8 }}
                 bordered
-                extra={stateTag(snapshot.workspace.state)}
+                extra={stateTag(snapshot.outcome?.state ?? snapshot.workspace.state)}
               >
                 <Space direction="vertical" size="middle" style={{ width: '100%' }}>
                   <div className="workorch-card-summary">
@@ -1523,6 +1614,7 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
                     items={[
                       { key: 'workingDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.workingDirectory, { rows: 1, copyText: snapshot.workspace.workingDirectory }) },
                       { key: 'activeRun', label: '活跃运行', children: activeRun ? `${activeRun.id} / ${stateLabel(activeRun.state)}` : '-' },
+                      { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : stateLabel(snapshot.outcome?.state ?? snapshot.workspace.state) },
                       { key: 'runtimeSummary', label: '运行摘要', children: runtimeSummaryTags(snapshot.runs) }
                     ]}
                   />
@@ -1554,24 +1646,11 @@ function DecisionQueuePage() {
   const [decisionSubmitting, setDecisionSubmitting] = useState(false);
   const [decisionForm] = Form.useForm();
 
-  const resumeRunInBackground = (runId: string) => {
-    void workorchApi.resumeRun(runId)
-      .then(() => {
-        message.success(`Run ${runId} 已在后台继续执行`);
-        actionRef.current?.reload();
-      })
-      .catch((error: unknown) => {
-        message.error(`Run ${runId} 后台继续失败：${errorMessage(error)}`);
-        actionRef.current?.reload();
-      });
-  };
-
   const resolve = async (item: Decision, resolutionType: string, payload?: Record<string, unknown>) => {
     try {
       await workorchApi.resolveDecision(item.id, resolutionType, payload);
-      message.success(`决策已按 ${resolutionType} 处理，Run 已转入后台继续`);
+      message.success(`决策已按 ${resolutionType} 处理，Run 已由服务端转入后台继续`);
       actionRef.current?.reload();
-      resumeRunInBackground(item.runId);
     } catch (error) {
       message.error(errorMessage(error));
     }
@@ -1599,9 +1678,8 @@ function DecisionQueuePage() {
       await workorchApi.resolveDecision(target.item.id, target.resolutionType, payload);
       setDecisionTarget(undefined);
       decisionForm.resetFields();
-      message.success(`决策已按 ${target.resolutionType} 处理，Run 已转入后台继续`);
+      message.success(`决策已按 ${target.resolutionType} 处理，Run 已由服务端转入后台继续`);
       actionRef.current?.reload();
-      resumeRunInBackground(target.item.runId);
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
@@ -1616,13 +1694,10 @@ function DecisionQueuePage() {
       return;
     }
     try {
-      const decisions = await workorchApi.listDecisions();
-      const selectedDecisions = decisions.filter((item) => ticketIds.includes(item.id));
       await workorchApi.batchResolveDecisions(ticketIds, resolutionType, { operator: 'console', mode: 'batch' });
-      message.success(`${ticketIds.length} 个决策工单已按 ${resolutionType} 处理，相关 Run 已转入后台继续`);
+      message.success(`${ticketIds.length} 个决策工单已按 ${resolutionType} 处理，相关 Run 已由服务端转入后台继续`);
       setSelectedDecisionKeys([]);
       actionRef.current?.reload();
-      Array.from(new Set(selectedDecisions.map((item) => item.runId))).forEach(resumeRunInBackground);
     } catch (error) {
       message.error(errorMessage(error));
     }
@@ -1774,18 +1849,6 @@ function ApprovalQueuePage() {
   const [approvalForm] = Form.useForm<{ operator?: string; comment?: string }>();
   const actionLabel = (action: 'approve' | 'reject') => action === 'approve' ? '已批准' : '已拒绝';
 
-  const resumeRunInBackground = (runId: string) => {
-    void workorchApi.resumeRun(runId)
-      .then(() => {
-        message.success(`Run ${runId} 已在后台继续执行`);
-        actionRef.current?.reload();
-      })
-      .catch((error: unknown) => {
-        message.error(`Run ${runId} 后台继续失败：${errorMessage(error)}`);
-        actionRef.current?.reload();
-      });
-  };
-
   const openApprovalResolution = async (item: Approval, action: 'approve' | 'reject') => {
     approvalForm.resetFields();
     approvalForm.setFieldsValue({ operator: 'console' });
@@ -1815,9 +1878,8 @@ function ApprovalQueuePage() {
       const target = approvalTarget;
       setApprovalTarget(undefined);
       approvalForm.resetFields();
-      message.success(`审批${actionLabel(target.action)}，Run 已转入后台继续`);
+      message.success(`审批${actionLabel(target.action)}，Run 已由服务端转入后台继续`);
       actionRef.current?.reload();
-      resumeRunInBackground(target.item.runId);
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
@@ -1832,13 +1894,10 @@ function ApprovalQueuePage() {
       return;
     }
     try {
-      const approvals = await workorchApi.listApprovals();
-      const selectedApprovals = approvals.filter((item) => approvalIds.includes(item.id));
       await workorchApi.batchResolveApprovals(approvalIds, action);
-      message.success(`${approvalIds.length} 个审批项${actionLabel(action)}，相关 Run 已转入后台继续`);
+      message.success(`${approvalIds.length} 个审批项${actionLabel(action)}，相关 Run 已由服务端转入后台继续`);
       setSelectedApprovalKeys([]);
       actionRef.current?.reload();
-      Array.from(new Set(selectedApprovals.map((item) => item.runId))).forEach(resumeRunInBackground);
     } catch (error) {
       message.error(errorMessage(error));
     }
@@ -2126,12 +2185,12 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     setMCPCapabilities(nextMCPCapabilities);
     setMemoryItems(nextMemoryItems);
     setConfiguration(nextConfiguration);
-    const latestRun = runStateSummary(nextSnapshot.runs).latest;
-    if (latestRun) {
+    const projectedRun = workspaceProjectionRun(nextSnapshot);
+    if (projectedRun) {
       const [nextRunSnapshot, nextRunObservability, nextRunContextBundle] = await Promise.all([
-        workorchApi.readRunSnapshot(latestRun.id),
-        workorchApi.readRunObservability(latestRun.id),
-        workorchApi.readRunContextBundle(latestRun.id)
+        workorchApi.readRunSnapshot(projectedRun.id),
+        workorchApi.readRunObservability(projectedRun.id),
+        workorchApi.readRunContextBundle(projectedRun.id)
       ]);
       if (requestSeq !== workspaceContextRequestSeq.current) {
         return;
@@ -2424,7 +2483,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const outcomeRun = runSnapshot?.run;
   const outcomeGoal = goals.find((item) => item.id === outcomeRun?.goalId);
   const outcomeDoD = dods.find((item) => item.id === outcomeRun?.doDId);
-  const outcomeResult = primaryResult(runSnapshot);
+  const outcomeResult = primaryAcceptedResult(runSnapshot) ?? primaryResult(runSnapshot);
+  const outcomeSummary = outcomeResult?.summaryDetail;
   const outcomeArtifacts = outcomeResult
     ? (runSnapshot?.artifacts ?? []).filter((item) => item.resultId === outcomeResult.id || !item.resultId)
     : (runSnapshot?.artifacts ?? []);
@@ -2499,12 +2559,13 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     >
       {snapshot ? (
         <>
-          <ProCard loading={loading} title={snapshot.workspace.title || snapshot.workspace.id} extra={stateTag(snapshot.workspace.state)}>
+          <ProCard loading={loading} title={snapshot.workspace.title || snapshot.workspace.id} extra={stateTag(snapshot.outcome?.state ?? snapshot.workspace.state)}>
             <Descriptions
               column={2}
               items={[
                 { key: 'id', label: '工作空间 ID', children: snapshot.workspace.id },
                 { key: 'activeRun', label: '活跃运行', children: snapshot.workspace.activeRunId || '-' },
+                { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : stateLabel(snapshot.outcome?.state ?? snapshot.workspace.state) },
                 { key: 'description', label: '描述', children: boundedParagraph(snapshot.workspace.description, { rows: 2 }) },
                 { key: 'workingDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.workingDirectory, { rows: 1, copyText: snapshot.workspace.workingDirectory }) },
                 { key: 'defaultSoul', label: '默认 Soul', children: workspaceDefaultSoulLabel },
@@ -2553,7 +2614,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                 column={1}
                 size="small"
                 items={[
-                  { key: 'latestRun', label: '最近运行', children: runSummary.latest ? `${runSummary.latest.id} / ${stateLabel(runSummary.latest.state)}` : '-' }
+                  { key: 'latestRun', label: '最近运行', children: runSummary.latest ? `${runSummary.latest.id} / ${stateLabel(runSummary.latest.state)}` : '-' },
+                  { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : '-' }
                 ]}
               />
             </Space>
@@ -2627,11 +2689,16 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                 <Descriptions
                   column={2}
                   items={[
-                    { key: 'run', label: '关联 Run', children: `${runSnapshot.run.id} / ${stateLabel(runSnapshot.run.state)}` },
+                    { key: 'run', label: '关联 Run', children: `${runSnapshot.run.id} / ${stateLabel(runOutcomeState(runSnapshot))}` },
+                    { key: 'rawRunState', label: '原始 Run 状态', children: stateLabel(runRawState(runSnapshot)) },
                     { key: 'result', label: '正式 Result', children: outcomeResult ? boundedParagraph(outcomeResult.id, { rows: 1, copyText: outcomeResult.id }) : '-' },
                     { key: 'goal', label: '目标', children: boundedParagraph(outcomeGoal?.text || runSnapshot.run.goalId, { rows: 2 }) },
                     { key: 'dod', label: '验收标准', children: outcomeDoD?.items?.length ? compactTags(outcomeDoD.items) : runSnapshot.run.doDId || '-' },
                     { key: 'summary', label: '成果结论', children: boundedParagraph(goalOutcomeSummary(runSnapshot), { rows: 3, className: 'goal-outcome-summary' }) },
+                    { key: 'implementation', label: '实现摘要', children: outcomeSummary?.implementationSummary ? boundedParagraph(outcomeSummary.implementationSummary, { rows: 3 }) : '-' },
+                    { key: 'verification', label: '验证摘要', children: outcomeSummary?.verificationSummary ? boundedParagraph(outcomeSummary.verificationSummary, { rows: 3 }) : '-' },
+                    { key: 'risks', label: '剩余风险', children: outcomeSummary?.residualRisks?.length ? compactTags(outcomeSummary.residualRisks, 4) : '-' },
+                    { key: 'nextActions', label: '后续动作', children: outcomeSummary?.nextActions?.length ? compactTags(outcomeSummary.nextActions, 4) : '-' },
                     { key: 'source', label: '结果来源', children: outcomeResult ? `${outcomeResult.sourceType || '-'} / ${outcomeResult.sourceRef || '-'}` : '-' },
                     { key: 'evidence', label: '结果证据', children: outcomeResult?.evidenceRefs?.length ? compactTags(outcomeResult.evidenceRefs) : '-' }
                   ]}
@@ -2648,7 +2715,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                         columns={[
                           { title: '验收项', dataIndex: 'item', ellipsis: true },
                           { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(String(item.state)) },
-                          { title: '证据', dataIndex: 'evidenceRefs', ellipsis: true, render: (_, item) => (item.evidenceRefs as string[]).join(', ') || '-' }
+                          { title: '证据', dataIndex: 'evidenceRefs', ellipsis: true, render: (_, item) => (item.evidenceRefs as string[]).join(', ') || '-' },
+                          { title: '未满足原因', dataIndex: 'failureReason', ellipsis: true, render: (_, item) => item.failureReason || '-' }
                         ]}
                         dataSource={outcomeDoDItems}
                       />
@@ -2667,6 +2735,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                         columns={[
                           { title: '名称/URI', ellipsis: true, render: (_, item) => item.name || item.uri || item.id },
                           { title: '类型', dataIndex: 'artifactType', width: 120 },
+                          { title: '分类', dataIndex: 'category', width: 130, render: (_, item) => item.category || '-' },
                           { title: '状态', dataIndex: 'state', width: 110, render: (_, item) => stateTag(item.state) },
                           { title: '摘要', dataIndex: 'summary', ellipsis: true },
                           {
@@ -2751,6 +2820,13 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             {taskDecompositionCard(runObservability?.taskDecompositions ?? runSnapshot?.taskDecompositions ?? snapshot.taskDecompositions)}
           </ProCard>
           <ProCard
+            title="执行分区"
+            className="workorch-section"
+            extra={<Tag>{(runObservability?.executionSections ?? runSnapshot?.executionSections ?? snapshot.executionSections ?? []).length} 个分区</Tag>}
+          >
+            {executionSectionsCard(runObservability?.executionSections ?? runSnapshot?.executionSections ?? snapshot.executionSections)}
+          </ProCard>
+          <ProCard
             title="上下文恢复包"
             className="workorch-section"
             extra={<Tag>{contextBundle?.mode || '未生成'}</Tag>}
@@ -2791,10 +2867,10 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                 <Steps
                   size="small"
                   items={[
-                    { title: '调度', description: stateLabel(runSnapshot.run.state), status: 'finish' },
+                    { title: '调度', description: stateLabel(runOutcomeState(runSnapshot, runObservability)), status: 'finish' },
                     { title: '步骤', description: `${runObservability?.progress.stepCompleted ?? 0}/${runObservability?.progress.stepTotal ?? runSnapshot.steps?.length ?? 0}`, status: runObservability?.progress.stepFailed ? 'error' : 'finish' },
                     { title: '工具调用', description: `${runObservability?.evidence.toolCallCompleted ?? 0}/${runObservability?.evidence.toolCallTotal ?? runSnapshot.toolCalls?.length ?? 0}`, status: 'finish' },
-                    { title: '校验', description: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? runSnapshot.validationResults?.length ?? 0}`, status: runSnapshot.run.state === 'failed' ? 'error' : 'finish' },
+                    { title: '校验', description: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? runSnapshot.validationResults?.length ?? 0}`, status: runOutcomeState(runSnapshot, runObservability) === 'failed' ? 'error' : 'finish' },
                     { title: '终态', description: runObservability?.progress.terminal ? '已进入终态' : '尚未终态', status: runObservability?.progress.terminal ? 'finish' : 'process' }
                   ]}
                 />
@@ -2809,7 +2885,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                 <Descriptions
                   column={3}
                   items={[
-                    { key: 'run', label: '运行', children: `${runSnapshot.run.id} / ${stateLabel(runSnapshot.run.state)}` },
+                    { key: 'run', label: '运行', children: `${runSnapshot.run.id} / ${stateLabel(runOutcomeState(runSnapshot, runObservability))}` },
+                    { key: 'rawRunState', label: '原始 Run 状态', children: stateLabel(runRawState(runSnapshot, runObservability)) },
                     { key: 'currentStep', label: '当前步骤', children: runObservability?.progress.currentStepId || runSnapshot.steps?.at(-1)?.id || '-' },
                     { key: 'terminal', label: '是否终态', children: runObservability ? (runObservability.progress.terminal ? '是' : '否') : '-' },
                     { key: 'steps', label: '步骤', children: `${runObservability?.progress.stepCompleted ?? 0}/${runObservability?.progress.stepTotal ?? runSnapshot.steps?.length ?? 0} 已完成` },
@@ -3028,6 +3105,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                           columns={[
                             { title: 'Artifact', dataIndex: 'id', copyable: true, ellipsis: true },
                             { title: '类型', dataIndex: 'artifactType', width: 140 },
+                            { title: '分类', dataIndex: 'category', width: 140, render: (_, item) => item.category || '-' },
                             { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
                             { title: '名称/URI', render: (_, item) => item.name || item.uri || '-', ellipsis: true },
                             { title: '摘要', dataIndex: 'summary', ellipsis: true },

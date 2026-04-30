@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -284,6 +285,74 @@ func TestResumeRunWithBackendReturnsConflictForCreatedRun(t *testing.T) {
 
 	if _, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, "run-resume-conflict"); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("err = %v, want conflict", err)
+	}
+}
+
+func TestRecoverStuckRunningRunsWithBackendFailsRunningRunWithoutContinuationCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	if _, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-stuck-running", "stuck running workspace", "", "workspaces/stuck-running"); err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend stuck: %v", err)
+	}
+	if _, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-continuation-running", "continuation running workspace", "", "workspaces/continuation-running"); err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend continuation: %v", err)
+	}
+	if _, err := CreateRunWithBackend(ctx, "file", dataRoot, "ws-stuck-running", "run-stuck-running", "", ""); err != nil {
+		t.Fatalf("CreateRunWithBackend stuck: %v", err)
+	}
+	if _, err := CreateRunWithBackend(ctx, "file", dataRoot, "ws-continuation-running", "run-continuation-running", "", ""); err != nil {
+		t.Fatalf("CreateRunWithBackend continuation: %v", err)
+	}
+
+	session, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("Exports: %v", err)
+	}
+	for _, runID := range []common.RunID{"run-stuck-running", "run-continuation-running"} {
+		item, err := exports.Repositories.Runs.Get(ctx, runID)
+		if err != nil {
+			t.Fatalf("get run %s: %v", runID, err)
+		}
+		item.State = common.RunStateRunning
+		if err := exports.Repositories.Runs.Update(ctx, item); err != nil {
+			t.Fatalf("update run %s: %v", runID, err)
+		}
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:               "checkpoint-continuation-running",
+		WorkspaceID:      "ws-continuation-running",
+		RunID:            "run-continuation-running",
+		CheckpointType:   common.CheckpointTypeRecovery,
+		RunStateSnapshot: common.RunStateRunning,
+		OccurredAt:       "2026-04-30T13:00:00Z",
+		Data:             map[string]any{"continuationAction": "resume_from_checkpoint"},
+	}); err != nil {
+		t.Fatalf("create continuation checkpoint: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close seed session: %v", err)
+	}
+
+	recovered, err := RecoverStuckRunningRunsWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("RecoverStuckRunningRunsWithBackend: %v", err)
+	}
+	if len(recovered) != 1 || recovered[0].ID != "run-stuck-running" || recovered[0].State != "failed" {
+		t.Fatalf("recovered = %+v, want only run-stuck-running failed", recovered)
+	}
+	if recovered[0].FailureReason != stuckRunningRunFailureReason {
+		t.Fatalf("failure reason = %q, want %q", recovered[0].FailureReason, stuckRunningRunFailureReason)
+	}
+	continued, err := ReadRunWithBackend(ctx, "file", dataRoot, "run-continuation-running")
+	if err != nil {
+		t.Fatalf("ReadRunWithBackend continuation: %v", err)
+	}
+	if continued.State != "running" {
+		t.Fatalf("continued run = %+v, want running", continued)
 	}
 }
 

@@ -124,6 +124,33 @@ export type Run = {
   failureReason?: string;
 };
 
+export type RunOutcome = {
+  runId?: string;
+  state: string;
+  rawState?: string;
+  accepted: boolean;
+  terminal: boolean;
+  resultId?: string;
+  summary?: string;
+  reason?: string;
+  evidenceRefs?: string[];
+  artifactRefs?: string[];
+};
+
+export type WorkspaceOutcome = {
+  workspaceId?: string;
+  state: string;
+  rawWorkspaceState?: string;
+  runId?: string;
+  resultId?: string;
+  accepted: boolean;
+  terminal: boolean;
+  summary?: string;
+  reason?: string;
+  evidenceRefs?: string[];
+  artifactRefs?: string[];
+};
+
 export type WorkspaceExecutionActivationRequest = {
   goalId?: string;
   doDId?: string;
@@ -333,8 +360,37 @@ export type Result = {
   sourceRef?: string;
   evidenceRefs?: string[];
   artifactRefs?: string[];
+  doDAssessment?: DoDAssessment;
+  summaryDetail?: ResultSummary;
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type ResultSummary = {
+  goalOutcome?: string;
+  doDItems?: DoDAssessmentItem[];
+  implementationSummary?: string;
+  verificationSummary?: string;
+  evidenceRefs?: string[];
+  artifactRefs?: string[];
+  knownLimitations?: string[];
+  residualRisks?: string[];
+  nextActions?: string[];
+};
+
+export type DoDAssessment = {
+  satisfied: boolean;
+  items?: DoDAssessmentItem[];
+  summary?: string;
+};
+
+export type DoDAssessmentItem = {
+  item: string;
+  state: string;
+  evidenceRefs?: string[];
+  failureReason?: string;
+  confidence?: number;
+  sourceNote?: string;
 };
 
 export type Artifact = {
@@ -347,6 +403,7 @@ export type Artifact = {
   patchId?: string;
   validationResultId?: string;
   artifactType: string;
+  category?: string;
   name?: string;
   summary?: string;
   uri?: string;
@@ -462,6 +519,29 @@ export type TaskDecompositionNode = {
   input?: Record<string, unknown>;
 };
 
+export type ExecutionSection = {
+  id: string;
+  workspaceId: string;
+  runId: string;
+  title: string;
+  state: string;
+  graphRootStepId?: string;
+  graphNodeId?: string;
+  stepId?: string;
+  stepKind?: string;
+  relatedDoDItems?: string[];
+  plannedStepRefs?: string[];
+  actualEvidenceRefs?: string[];
+  decisionRefs?: string[];
+  approvalRefs?: string[];
+  toolCallRefs?: string[];
+  patchRefs?: string[];
+  validationRefs?: string[];
+  resultRefs?: string[];
+  artifactRefs?: string[];
+  summary?: string;
+};
+
 export type ProgressMilestone = {
   id: string;
   title: string;
@@ -572,9 +652,11 @@ export type EventRecord = {
 
 export type RunObservability = {
   run: Run;
+  outcome?: RunOutcome;
   progress: RunProgress;
   taskProgress: TaskProgress;
   taskDecompositions?: TaskDecomposition[];
+  executionSections?: ExecutionSection[];
   evidence: RuntimeEvidenceSummary;
   latestCheckpoint?: RuntimeCheckpoint;
   selectedCapabilities?: RuntimeCapability[];
@@ -585,8 +667,10 @@ export type RunObservability = {
 export type RunSnapshot = {
   workspace: Workspace;
   run: Run;
+  outcome?: RunOutcome;
   taskProgress: TaskProgress;
   taskDecompositions?: TaskDecomposition[];
+  executionSections?: ExecutionSection[];
   steps?: StepView[];
   toolCalls?: ToolCall[];
   patches?: Patch[];
@@ -603,8 +687,10 @@ export type RunSnapshot = {
 
 export type WorkspaceSnapshot = {
   workspace: Workspace;
+  outcome?: WorkspaceOutcome;
   taskProgress: TaskProgress;
   taskDecompositions?: TaskDecomposition[];
+  executionSections?: ExecutionSection[];
   runs?: Run[];
   results?: Result[];
   artifacts?: Artifact[];

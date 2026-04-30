@@ -24,6 +24,7 @@ import (
 type RunSnapshot struct {
 	Workspace            Workspace                `json:"workspace"`
 	Run                  Run                      `json:"run"`
+	Outcome              RunOutcome               `json:"outcome"`
 	TaskProgress         TaskProgress             `json:"taskProgress"`
 	TaskDecompositions   []TaskDecomposition      `json:"taskDecompositions,omitempty"`
 	Step                 *presenter.StepView      `json:"step,omitempty"`
@@ -34,6 +35,7 @@ type RunSnapshot struct {
 	RuntimeCheckpoints   []RuntimeCheckpoint      `json:"runtimeCheckpoints,omitempty"`
 	Results              []Result                 `json:"results,omitempty"`
 	Artifacts            []Artifact               `json:"artifacts,omitempty"`
+	ExecutionSections    []ExecutionSection       `json:"executionSections,omitempty"`
 	SelectedCapabilities []RuntimeCapability      `json:"selectedCapabilities,omitempty"`
 	UsedCapabilities     []RuntimeCapability      `json:"usedCapabilities,omitempty"`
 	EventRecords         []EventRecord            `json:"eventRecords,omitempty"`
@@ -59,9 +61,11 @@ type RunStatus struct {
 
 type RunObservability struct {
 	Run                  Run                    `json:"run"`
+	Outcome              RunOutcome             `json:"outcome"`
 	Progress             RunProgress            `json:"progress"`
 	TaskProgress         TaskProgress           `json:"taskProgress"`
 	TaskDecompositions   []TaskDecomposition    `json:"taskDecompositions,omitempty"`
+	ExecutionSections    []ExecutionSection     `json:"executionSections,omitempty"`
 	Evidence             RuntimeEvidenceSummary `json:"evidence"`
 	LatestCheckpoint     *RuntimeCheckpoint     `json:"latestCheckpoint,omitempty"`
 	SelectedCapabilities []RuntimeCapability    `json:"selectedCapabilities,omitempty"`
@@ -80,6 +84,33 @@ type TaskProgress struct {
 	Blockers         []ProgressBlocker   `json:"blockers,omitempty"`
 	Recovery         RecoveryPlan        `json:"recovery"`
 	EvidenceRefs     []string            `json:"evidenceRefs,omitempty"`
+}
+
+type RunOutcome struct {
+	RunID        string   `json:"runId,omitempty"`
+	State        string   `json:"state"`
+	RawState     string   `json:"rawState,omitempty"`
+	Accepted     bool     `json:"accepted"`
+	Terminal     bool     `json:"terminal"`
+	ResultID     string   `json:"resultId,omitempty"`
+	Summary      string   `json:"summary,omitempty"`
+	Reason       string   `json:"reason,omitempty"`
+	EvidenceRefs []string `json:"evidenceRefs,omitempty"`
+	ArtifactRefs []string `json:"artifactRefs,omitempty"`
+}
+
+type WorkspaceOutcome struct {
+	WorkspaceID       string   `json:"workspaceId,omitempty"`
+	State             string   `json:"state"`
+	RawWorkspaceState string   `json:"rawWorkspaceState,omitempty"`
+	RunID             string   `json:"runId,omitempty"`
+	ResultID          string   `json:"resultId,omitempty"`
+	Accepted          bool     `json:"accepted"`
+	Terminal          bool     `json:"terminal"`
+	Summary           string   `json:"summary,omitempty"`
+	Reason            string   `json:"reason,omitempty"`
+	EvidenceRefs      []string `json:"evidenceRefs,omitempty"`
+	ArtifactRefs      []string `json:"artifactRefs,omitempty"`
 }
 
 type ProgressMilestone struct {
@@ -113,6 +144,8 @@ type RecoveryPlan struct {
 	BlockingTicketID   string `json:"blockingTicketId,omitempty"`
 	BlockingApprovalID string `json:"blockingApprovalId,omitempty"`
 	CheckpointID       string `json:"checkpointId,omitempty"`
+	FailureClass       string `json:"failureClass,omitempty"`
+	FailureSignature   string `json:"failureSignature,omitempty"`
 	Reason             string `json:"reason,omitempty"`
 }
 
@@ -203,6 +236,29 @@ type TaskDecompositionNode struct {
 	StepState    string         `json:"stepState,omitempty"`
 	EvidenceRefs []string       `json:"evidenceRefs,omitempty"`
 	Input        map[string]any `json:"input,omitempty"`
+}
+
+type ExecutionSection struct {
+	ID                 string   `json:"id"`
+	WorkspaceID        string   `json:"workspaceId"`
+	RunID              string   `json:"runId"`
+	Title              string   `json:"title"`
+	State              string   `json:"state"`
+	GraphRootStepID    string   `json:"graphRootStepId,omitempty"`
+	GraphNodeID        string   `json:"graphNodeId,omitempty"`
+	StepID             string   `json:"stepId,omitempty"`
+	StepKind           string   `json:"stepKind,omitempty"`
+	RelatedDoDItems    []string `json:"relatedDoDItems,omitempty"`
+	PlannedStepRefs    []string `json:"plannedStepRefs,omitempty"`
+	ActualEvidenceRefs []string `json:"actualEvidenceRefs,omitempty"`
+	DecisionRefs       []string `json:"decisionRefs,omitempty"`
+	ApprovalRefs       []string `json:"approvalRefs,omitempty"`
+	ToolCallRefs       []string `json:"toolCallRefs,omitempty"`
+	PatchRefs          []string `json:"patchRefs,omitempty"`
+	ValidationRefs     []string `json:"validationRefs,omitempty"`
+	ResultRefs         []string `json:"resultRefs,omitempty"`
+	ArtifactRefs       []string `json:"artifactRefs,omitempty"`
+	Summary            string   `json:"summary,omitempty"`
 }
 
 type RunProgress struct {
@@ -352,20 +408,49 @@ type RuntimeCheckpoint struct {
 }
 
 type Result struct {
-	ID           string   `json:"id"`
-	WorkspaceID  string   `json:"workspaceId"`
-	RunID        string   `json:"runId"`
-	GoalID       string   `json:"goalId,omitempty"`
-	DoDID        string   `json:"doDId,omitempty"`
-	State        string   `json:"state"`
-	Title        string   `json:"title,omitempty"`
-	Summary      string   `json:"summary,omitempty"`
-	SourceType   string   `json:"sourceType,omitempty"`
-	SourceRef    string   `json:"sourceRef,omitempty"`
-	EvidenceRefs []string `json:"evidenceRefs,omitempty"`
-	ArtifactRefs []string `json:"artifactRefs,omitempty"`
-	CreatedAt    string   `json:"createdAt,omitempty"`
-	UpdatedAt    string   `json:"updatedAt,omitempty"`
+	ID            string         `json:"id"`
+	WorkspaceID   string         `json:"workspaceId"`
+	RunID         string         `json:"runId"`
+	GoalID        string         `json:"goalId,omitempty"`
+	DoDID         string         `json:"doDId,omitempty"`
+	State         string         `json:"state"`
+	Title         string         `json:"title,omitempty"`
+	Summary       string         `json:"summary,omitempty"`
+	SourceType    string         `json:"sourceType,omitempty"`
+	SourceRef     string         `json:"sourceRef,omitempty"`
+	EvidenceRefs  []string       `json:"evidenceRefs,omitempty"`
+	ArtifactRefs  []string       `json:"artifactRefs,omitempty"`
+	DoDAssessment *DoDAssessment `json:"doDAssessment,omitempty"`
+	SummaryDetail *ResultSummary `json:"summaryDetail,omitempty"`
+	CreatedAt     string         `json:"createdAt,omitempty"`
+	UpdatedAt     string         `json:"updatedAt,omitempty"`
+}
+
+type ResultSummary struct {
+	GoalOutcome           string              `json:"goalOutcome,omitempty"`
+	DoDItems              []DoDAssessmentItem `json:"doDItems,omitempty"`
+	ImplementationSummary string              `json:"implementationSummary,omitempty"`
+	VerificationSummary   string              `json:"verificationSummary,omitempty"`
+	EvidenceRefs          []string            `json:"evidenceRefs,omitempty"`
+	ArtifactRefs          []string            `json:"artifactRefs,omitempty"`
+	KnownLimitations      []string            `json:"knownLimitations,omitempty"`
+	ResidualRisks         []string            `json:"residualRisks,omitempty"`
+	NextActions           []string            `json:"nextActions,omitempty"`
+}
+
+type DoDAssessment struct {
+	Satisfied bool                `json:"satisfied"`
+	Items     []DoDAssessmentItem `json:"items,omitempty"`
+	Summary   string              `json:"summary,omitempty"`
+}
+
+type DoDAssessmentItem struct {
+	Item          string   `json:"item"`
+	State         string   `json:"state"`
+	EvidenceRefs  []string `json:"evidenceRefs,omitempty"`
+	FailureReason string   `json:"failureReason,omitempty"`
+	Confidence    float64  `json:"confidence,omitempty"`
+	SourceNote    string   `json:"sourceNote,omitempty"`
 }
 
 type Artifact struct {
@@ -378,6 +463,7 @@ type Artifact struct {
 	PatchID            string         `json:"patchId,omitempty"`
 	ValidationResultID string         `json:"validationResultId,omitempty"`
 	ArtifactType       string         `json:"artifactType"`
+	Category           string         `json:"category,omitempty"`
 	Name               string         `json:"name,omitempty"`
 	Summary            string         `json:"summary,omitempty"`
 	URI                string         `json:"uri,omitempty"`
@@ -391,8 +477,10 @@ type Artifact struct {
 
 type WorkspaceSnapshot struct {
 	Workspace          Workspace           `json:"workspace"`
+	Outcome            WorkspaceOutcome    `json:"outcome"`
 	TaskProgress       TaskProgress        `json:"taskProgress"`
 	TaskDecompositions []TaskDecomposition `json:"taskDecompositions,omitempty"`
+	ExecutionSections  []ExecutionSection  `json:"executionSections,omitempty"`
 	Runs               []Run               `json:"runs,omitempty"`
 	Results            []Result            `json:"results,omitempty"`
 	Artifacts          []Artifact          `json:"artifacts,omitempty"`
@@ -854,10 +942,12 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		Approvals:          approvals,
 		Observed:           presenter.MapObserved(observedItems),
 	}
+	ret.Outcome = mapRunOutcome(ret)
 	ret.SelectedCapabilities = selectedRuntimeCapabilities(ctx, deps, ret.Run.ExecutionContext)
 	ret.UsedCapabilities = usedRuntimeCapabilities(ctx, deps, ret)
 	ret.TaskProgress = mapTaskProgress(ret)
 	ret.TaskDecompositions = mapTaskDecompositions(ret)
+	ret.ExecutionSections = mapExecutionSections(ret)
 	return ret, nil
 }
 
@@ -937,7 +1027,9 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		}
 		ret.TaskProgress = runSnapshot.TaskProgress
 		ret.TaskDecompositions = runSnapshot.TaskDecompositions
+		ret.ExecutionSections = runSnapshot.ExecutionSections
 	}
+	ret.Outcome = mapWorkspaceOutcome(ret)
 	return ret, nil
 }
 
@@ -1470,24 +1562,94 @@ func mapResults(items []*resultmodel.Result) []Result {
 			}
 		}
 		ret = append(ret, Result{
-			ID:           string(item.ID),
-			WorkspaceID:  string(item.WorkspaceID),
-			RunID:        string(item.RunID),
-			GoalID:       string(item.GoalID),
-			DoDID:        string(item.DoDID),
-			State:        string(item.State),
-			Title:        item.Title,
-			Summary:      item.Summary,
-			SourceType:   item.SourceType,
-			SourceRef:    item.SourceRef,
-			EvidenceRefs: cloneReadModelStringSlice(item.EvidenceRefs),
-			ArtifactRefs: artifactRefs,
-			CreatedAt:    item.CreatedAt,
-			UpdatedAt:    item.UpdatedAt,
+			ID:            string(item.ID),
+			WorkspaceID:   string(item.WorkspaceID),
+			RunID:         string(item.RunID),
+			GoalID:        string(item.GoalID),
+			DoDID:         string(item.DoDID),
+			State:         string(item.State),
+			Title:         item.Title,
+			Summary:       item.Summary,
+			SourceType:    item.SourceType,
+			SourceRef:     item.SourceRef,
+			EvidenceRefs:  cloneReadModelStringSlice(item.EvidenceRefs),
+			ArtifactRefs:  artifactRefs,
+			DoDAssessment: mapDoDAssessment(item.DoDAssessment),
+			SummaryDetail: mapResultSummary(item.SummaryDetail),
+			CreatedAt:     item.CreatedAt,
+			UpdatedAt:     item.UpdatedAt,
 		})
 	}
 	if len(ret) == 0 {
 		return nil
+	}
+	return ret
+}
+
+func mapResultSummary(item resultmodel.ResultSummary) *ResultSummary {
+	if item.GoalOutcome == "" &&
+		len(item.DoDItems) == 0 &&
+		item.ImplementationSummary == "" &&
+		item.VerificationSummary == "" &&
+		len(item.EvidenceRefs) == 0 &&
+		len(item.ArtifactRefs) == 0 &&
+		len(item.KnownLimitations) == 0 &&
+		len(item.ResidualRisks) == 0 &&
+		len(item.NextActions) == 0 {
+		return nil
+	}
+	artifactRefs := make([]string, 0, len(item.ArtifactRefs))
+	for _, ref := range item.ArtifactRefs {
+		if ref != "" {
+			artifactRefs = append(artifactRefs, string(ref))
+		}
+	}
+	ret := &ResultSummary{
+		GoalOutcome:           item.GoalOutcome,
+		ImplementationSummary: item.ImplementationSummary,
+		VerificationSummary:   item.VerificationSummary,
+		EvidenceRefs:          cloneReadModelStringSlice(item.EvidenceRefs),
+		ArtifactRefs:          artifactRefs,
+		KnownLimitations:      cloneReadModelStringSlice(item.KnownLimitations),
+		ResidualRisks:         cloneReadModelStringSlice(item.ResidualRisks),
+		NextActions:           cloneReadModelStringSlice(item.NextActions),
+	}
+	if len(item.DoDItems) > 0 {
+		ret.DoDItems = make([]DoDAssessmentItem, 0, len(item.DoDItems))
+		for _, assessmentItem := range item.DoDItems {
+			ret.DoDItems = append(ret.DoDItems, DoDAssessmentItem{
+				Item:          assessmentItem.Item,
+				State:         assessmentItem.State,
+				EvidenceRefs:  cloneReadModelStringSlice(assessmentItem.EvidenceRefs),
+				FailureReason: assessmentItem.FailureReason,
+				Confidence:    assessmentItem.Confidence,
+				SourceNote:    assessmentItem.SourceNote,
+			})
+		}
+	}
+	return ret
+}
+
+func mapDoDAssessment(item resultmodel.DoDAssessment) *DoDAssessment {
+	if item.Summary == "" && len(item.Items) == 0 && !item.Satisfied {
+		return nil
+	}
+	ret := &DoDAssessment{
+		Satisfied: item.Satisfied,
+		Summary:   item.Summary,
+	}
+	if len(item.Items) > 0 {
+		ret.Items = make([]DoDAssessmentItem, 0, len(item.Items))
+		for _, assessmentItem := range item.Items {
+			ret.Items = append(ret.Items, DoDAssessmentItem{
+				Item:          assessmentItem.Item,
+				State:         assessmentItem.State,
+				EvidenceRefs:  cloneReadModelStringSlice(assessmentItem.EvidenceRefs),
+				FailureReason: assessmentItem.FailureReason,
+				Confidence:    assessmentItem.Confidence,
+				SourceNote:    assessmentItem.SourceNote,
+			})
+		}
 	}
 	return ret
 }
@@ -1511,6 +1673,7 @@ func mapArtifacts(items []*resultmodel.Artifact) []Artifact {
 			PatchID:            string(item.PatchID),
 			ValidationResultID: string(item.ValidationResultID),
 			ArtifactType:       item.ArtifactType,
+			Category:           item.Category,
 			Name:               item.Name,
 			Summary:            item.Summary,
 			URI:                item.URI,
@@ -1655,9 +1818,11 @@ func mapRunObservability(snapshot RunSnapshot) RunObservability {
 	timeline := runtimeTimeline(snapshot)
 	return RunObservability{
 		Run:                  snapshot.Run,
+		Outcome:              snapshot.Outcome,
 		Progress:             runtimeProgress(snapshot),
 		TaskProgress:         mapTaskProgress(snapshot),
 		TaskDecompositions:   mapTaskDecompositions(snapshot),
+		ExecutionSections:    mapExecutionSections(snapshot),
 		Evidence:             runtimeEvidenceSummary(snapshot, len(timelineEvents(timeline))),
 		LatestCheckpoint:     latestRuntimeCheckpoint(snapshot.RuntimeCheckpoints),
 		SelectedCapabilities: snapshot.SelectedCapabilities,
@@ -1834,6 +1999,7 @@ func mapRunContextBundle(snapshot RunSnapshot) ContextBundle {
 		contextExecutionContextSection(snapshot),
 		contextTaskProgressSection(progress),
 		contextTaskDecompositionSection(snapshot.TaskDecompositions),
+		contextExecutionSectionsSection(snapshot.ExecutionSections),
 		contextGovernanceSection(snapshot),
 		contextFormalOutputSection(snapshot),
 		contextRecentEvidenceSection(recentEvidence),
@@ -2021,6 +2187,159 @@ func taskDecompositionState(item TaskDecomposition) string {
 	return "pending"
 }
 
+func mapExecutionSections(snapshot RunSnapshot) []ExecutionSection {
+	if len(snapshot.TaskDecompositions) == 0 {
+		return nil
+	}
+	dodItems := runDoDItems(snapshot)
+	refs := executionEvidenceRefsByStep(snapshot)
+	ret := make([]ExecutionSection, 0)
+	for _, decomposition := range snapshot.TaskDecompositions {
+		for _, node := range decomposition.Nodes {
+			section := ExecutionSection{
+				ID:              decomposition.ID + "/section/" + node.ID,
+				WorkspaceID:     snapshot.Run.WorkspaceID,
+				RunID:           snapshot.Run.ID,
+				Title:           firstNonEmptyReadModel(node.Title, node.ID, node.Kind),
+				State:           node.State,
+				GraphRootStepID: decomposition.RootStepID,
+				GraphNodeID:     node.ID,
+				StepID:          node.StepID,
+				StepKind:        node.Kind,
+				RelatedDoDItems: relatedDoDItemsForSection(node, dodItems),
+				PlannedStepRefs: compactUniqueStrings([]string{decomposition.RootStepID, node.ID}),
+				Summary:         executionSectionSummary(node),
+			}
+			section.ActualEvidenceRefs = compactUniqueStrings(append(cloneReadModelStringSlice(node.EvidenceRefs), refs.evidenceByStep[node.StepID]...))
+			section.DecisionRefs = compactUniqueStrings(refs.decisionsByStep[node.StepID])
+			section.ApprovalRefs = compactUniqueStrings(refs.approvalsByStep[node.StepID])
+			section.ToolCallRefs = compactUniqueStrings(refs.toolCallsByStep[node.StepID])
+			section.PatchRefs = compactUniqueStrings(refs.patchesByStep[node.StepID])
+			section.ValidationRefs = compactUniqueStrings(refs.validationsByStep[node.StepID])
+			section.ResultRefs = compactUniqueStrings(refs.resultsByStep[node.StepID])
+			section.ArtifactRefs = compactUniqueStrings(refs.artifactsByStep[node.StepID])
+			ret = append(ret, section)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+type executionEvidenceRefs struct {
+	evidenceByStep    map[string][]string
+	decisionsByStep   map[string][]string
+	approvalsByStep   map[string][]string
+	toolCallsByStep   map[string][]string
+	patchesByStep     map[string][]string
+	validationsByStep map[string][]string
+	resultsByStep     map[string][]string
+	artifactsByStep   map[string][]string
+}
+
+func executionEvidenceRefsByStep(snapshot RunSnapshot) executionEvidenceRefs {
+	ret := executionEvidenceRefs{
+		evidenceByStep:    map[string][]string{},
+		decisionsByStep:   map[string][]string{},
+		approvalsByStep:   map[string][]string{},
+		toolCallsByStep:   map[string][]string{},
+		patchesByStep:     map[string][]string{},
+		validationsByStep: map[string][]string{},
+		resultsByStep:     map[string][]string{},
+		artifactsByStep:   map[string][]string{},
+	}
+	add := func(target map[string][]string, stepID string, refs ...string) {
+		stepID = strings.TrimSpace(stepID)
+		if stepID == "" {
+			return
+		}
+		for _, ref := range refs {
+			ref = strings.TrimSpace(ref)
+			if ref == "" {
+				continue
+			}
+			target[stepID] = append(target[stepID], ref)
+			ret.evidenceByStep[stepID] = append(ret.evidenceByStep[stepID], ref)
+		}
+	}
+	for _, item := range snapshot.Decisions {
+		add(ret.decisionsByStep, item.StepID, item.ID)
+	}
+	for _, item := range snapshot.Approvals {
+		add(ret.approvalsByStep, item.StepID, item.ID)
+	}
+	for _, item := range snapshot.ToolCalls {
+		add(ret.toolCallsByStep, item.StepID, item.ID)
+	}
+	for _, item := range snapshot.Patches {
+		add(ret.patchesByStep, item.StepID, item.ID)
+	}
+	for _, item := range snapshot.ValidationResults {
+		add(ret.validationsByStep, item.StepID, item.ID, item.EvidenceRef)
+	}
+	for _, item := range snapshot.Results {
+		if item.SourceType == "dod_assessment" {
+			add(ret.resultsByStep, item.SourceRef, append([]string{item.ID}, item.EvidenceRefs...)...)
+		}
+	}
+	for _, item := range snapshot.Artifacts {
+		add(ret.artifactsByStep, item.StepID, item.ID)
+	}
+	for stepID, refs := range ret.evidenceByStep {
+		ret.evidenceByStep[stepID] = compactUniqueStrings(refs)
+	}
+	return ret
+}
+
+func runDoDItems(snapshot RunSnapshot) []string {
+	if snapshot.Run.DoDID == "" {
+		return nil
+	}
+	for _, item := range snapshot.Results {
+		if item.DoDID != snapshot.Run.DoDID || item.DoDAssessment == nil {
+			continue
+		}
+		ret := make([]string, 0, len(item.DoDAssessment.Items))
+		for _, assessmentItem := range item.DoDAssessment.Items {
+			if strings.TrimSpace(assessmentItem.Item) != "" {
+				ret = append(ret, assessmentItem.Item)
+			}
+		}
+		if len(ret) > 0 {
+			return ret
+		}
+	}
+	return nil
+}
+
+func relatedDoDItemsForSection(node TaskDecompositionNode, dodItems []string) []string {
+	if len(dodItems) == 0 {
+		return nil
+	}
+	haystack := strings.ToLower(strings.Join([]string{node.ID, node.Title, node.Kind}, " "))
+	ret := make([]string, 0)
+	for _, item := range dodItems {
+		if strings.Contains(haystack, strings.ToLower(strings.TrimSpace(item))) {
+			ret = append(ret, item)
+		}
+	}
+	return ret
+}
+
+func executionSectionSummary(node TaskDecompositionNode) string {
+	switch node.State {
+	case "completed":
+		return "section completed with linked runtime evidence"
+	case "failed":
+		return "section failed; inspect linked evidence and governance records"
+	case "running":
+		return "section is running"
+	default:
+		return "section is planned"
+	}
+}
+
 func graphRootStepIDFromStepID(stepID string) string {
 	idx := strings.Index(stepID, "/block/")
 	if idx <= 0 {
@@ -2186,6 +2505,36 @@ func contextTaskDecompositionSection(items []TaskDecomposition) ContextSection {
 		EvidenceRefs: refs,
 		Data: map[string]any{
 			"taskDecompositions": items,
+		},
+	}
+}
+
+func contextExecutionSectionsSection(items []ExecutionSection) ContextSection {
+	if len(items) == 0 {
+		return ContextSection{}
+	}
+	refs := make([]string, 0)
+	state := "completed"
+	for _, item := range items {
+		refs = append(refs, item.ActualEvidenceRefs...)
+		if item.State == "failed" {
+			state = "failed"
+			continue
+		}
+		if item.State != "completed" && state != "failed" {
+			state = "running"
+		}
+	}
+	return ContextSection{
+		ID:           "execution_sections",
+		Kind:         "execution_sections",
+		Title:        "Execution sections",
+		Priority:     84,
+		State:        state,
+		Summary:      strconv.Itoa(len(items)) + " execution sections",
+		EvidenceRefs: compactUniqueStrings(refs),
+		Data: map[string]any{
+			"executionSections": items,
 		},
 	}
 }
@@ -2497,6 +2846,12 @@ func taskProgressRecovery(snapshot RunSnapshot, latestCheckpoint *RuntimeCheckpo
 		if ret.BlockingApprovalID == "" {
 			ret.BlockingApprovalID = latestCheckpoint.BlockingApprovalID
 		}
+		if ret.FailureClass == "" {
+			ret.FailureClass = strings.TrimSpace(readModelStringValue(latestCheckpoint.Data["failureClass"]))
+		}
+		if ret.FailureSignature == "" {
+			ret.FailureSignature = strings.TrimSpace(readModelStringValue(latestCheckpoint.Data["failureSignature"]))
+		}
 	}
 	if ret.BlockingTicketID != "" {
 		ret.Mode = "wait_decision"
@@ -2564,6 +2919,9 @@ func stepProgressState(snapshot RunSnapshot) string {
 	if len(snapshot.Steps) == 0 {
 		return "pending"
 	}
+	if hasAcceptedRunResult(snapshot) && snapshot.Run.State == string(common.RunStateCompleted) {
+		return "completed"
+	}
 	for _, item := range snapshot.Steps {
 		if item.State == string(common.StepStateFailed) {
 			return "failed"
@@ -2602,6 +2960,9 @@ func validationProgressState(snapshot RunSnapshot) string {
 		}
 		return "pending"
 	}
+	if hasAcceptedRunResult(snapshot) && snapshot.Run.State == string(common.RunStateCompleted) {
+		return "completed"
+	}
 	for _, item := range snapshot.ValidationResults {
 		if item.State == string(common.ValidationResultStateFailed) {
 			return "failed"
@@ -2625,6 +2986,127 @@ func resultProgressState(snapshot RunSnapshot) string {
 		}
 	}
 	return progressStateFromCount(len(results)+len(artifacts), false, false)
+}
+
+func mapRunOutcome(snapshot RunSnapshot) RunOutcome {
+	ret := RunOutcome{
+		RunID:    snapshot.Run.ID,
+		State:    snapshot.Run.State,
+		RawState: snapshot.Run.State,
+		Terminal: isTerminalRunState(snapshot.Run.State),
+	}
+	if result := primaryAcceptedResult(runScopedResults(snapshot)); result != nil {
+		ret.State = "accepted"
+		ret.Accepted = true
+		ret.Terminal = true
+		ret.ResultID = result.ID
+		ret.Summary = result.Summary
+		ret.EvidenceRefs = compactUniqueStrings(result.EvidenceRefs)
+		ret.ArtifactRefs = compactUniqueStrings(result.ArtifactRefs)
+		return ret
+	}
+	switch common.RunState(snapshot.Run.State) {
+	case common.RunStateCompleted:
+		ret.State = "failed"
+		ret.Terminal = true
+		ret.Reason = "run completed without accepted result"
+	case common.RunStateFailed:
+		ret.State = "failed"
+		ret.Terminal = true
+		ret.Reason = snapshot.Run.FailureReason
+	case common.RunStateCancelled:
+		ret.State = string(common.RunStateCancelled)
+		ret.Terminal = true
+		ret.Reason = "run cancelled"
+	case common.RunStateSuperseded:
+		ret.State = string(common.RunStateSuperseded)
+		ret.Terminal = true
+		ret.Reason = "run superseded"
+	}
+	if ret.Summary == "" {
+		ret.Summary = ret.Reason
+	}
+	return ret
+}
+
+func mapWorkspaceOutcome(snapshot WorkspaceSnapshot) WorkspaceOutcome {
+	ret := WorkspaceOutcome{
+		WorkspaceID:       snapshot.Workspace.ID,
+		State:             snapshot.Workspace.State,
+		RawWorkspaceState: snapshot.Workspace.State,
+	}
+	var selectedRun *Run
+	if snapshot.TaskProgress.RunID != "" {
+		for idx := range snapshot.Runs {
+			if snapshot.Runs[idx].ID == snapshot.TaskProgress.RunID {
+				selectedRun = &snapshot.Runs[idx]
+				break
+			}
+		}
+	}
+	if selectedRun == nil && snapshot.Workspace.ActiveRunID != "" {
+		for idx := range snapshot.Runs {
+			if snapshot.Runs[idx].ID == snapshot.Workspace.ActiveRunID {
+				selectedRun = &snapshot.Runs[idx]
+				break
+			}
+		}
+	}
+	if selectedRun == nil && len(snapshot.Runs) > 0 {
+		selectedRun = &snapshot.Runs[len(snapshot.Runs)-1]
+	}
+	if selectedRun == nil {
+		return ret
+	}
+	runSnapshot := RunSnapshot{
+		Workspace: snapshot.Workspace,
+		Run:       *selectedRun,
+		Results:   snapshot.Results,
+		Artifacts: snapshot.Artifacts,
+	}
+	outcome := mapRunOutcome(runSnapshot)
+	ret.State = outcome.State
+	ret.RunID = outcome.RunID
+	ret.ResultID = outcome.ResultID
+	ret.Accepted = outcome.Accepted
+	ret.Terminal = outcome.Terminal
+	ret.Summary = outcome.Summary
+	ret.Reason = outcome.Reason
+	ret.EvidenceRefs = outcome.EvidenceRefs
+	ret.ArtifactRefs = outcome.ArtifactRefs
+	return ret
+}
+
+func primaryAcceptedResult(items []Result) *Result {
+	var selected *Result
+	for idx := range items {
+		if items[idx].State != string(common.ResultStateAccepted) {
+			continue
+		}
+		if selected == nil || resultTimeValue(items[idx]) >= resultTimeValue(*selected) {
+			selected = &items[idx]
+		}
+	}
+	return selected
+}
+
+func resultTimeValue(item Result) string {
+	if item.UpdatedAt != "" {
+		return item.UpdatedAt
+	}
+	if item.CreatedAt != "" {
+		return item.CreatedAt
+	}
+	return item.ID
+}
+
+func hasAcceptedRunResult(snapshot RunSnapshot) bool {
+	for _, item := range runScopedResults(snapshot) {
+		if item.State == string(common.ResultStateAccepted) {
+			return true
+		}
+	}
+	return false
 }
 
 func progressStateFromCount(count int, failed bool, completed bool) string {

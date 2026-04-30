@@ -125,9 +125,15 @@ type MemoryWriteRequest struct {
 }
 
 type DoDAssessment struct {
-	Satisfied bool                `json:"satisfied"`
-	Items     []DoDAssessmentItem `json:"items,omitempty"`
-	Summary   string              `json:"summary,omitempty"`
+	Satisfied             bool                `json:"satisfied"`
+	Items                 []DoDAssessmentItem `json:"items,omitempty"`
+	Summary               string              `json:"summary,omitempty"`
+	GoalOutcome           string              `json:"goalOutcome,omitempty"`
+	ImplementationSummary string              `json:"implementationSummary,omitempty"`
+	VerificationSummary   string              `json:"verificationSummary,omitempty"`
+	KnownLimitations      []string            `json:"knownLimitations,omitempty"`
+	ResidualRisks         []string            `json:"residualRisks,omitempty"`
+	NextActions           []string            `json:"nextActions,omitempty"`
 }
 
 type DoDAssessmentItem struct {

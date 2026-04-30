@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"mime"
 	"net/http"
 	"path"
@@ -787,7 +788,10 @@ func (s *HTTPServer) Validate(ctx context.Context) error {
 		return errors.New("http server is not configured")
 	}
 	ctx = appservice.ContextWithEventHub(ctx, s.state.eventHub)
-	return s.state.validate(ctx, s.config.Backend, s.config.DataRoot)
+	if err := s.state.validate(ctx, s.config.Backend, s.config.DataRoot); err != nil {
+		return err
+	}
+	return s.state.recoverStuckRunningRuns(ctx)
 }
 
 func (s *HTTPServer) Shutdown(ctx context.Context) error {
@@ -2163,6 +2167,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			writeBusinessError(w, err)
 			return
 		}
+		state.scheduleGovernanceRunResumes([]string{item.RunID}, runPriorityFromRequest(r, 0))
 		writeJSON(w, http.StatusOK, decisionResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -2187,6 +2192,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			writeBusinessError(w, err)
 			return
 		}
+		state.scheduleGovernanceRunResumes(runIDsFromDecisions(items), runPriorityFromRequest(r, 0))
 		writeJSON(w, http.StatusOK, decisionsResponse{
 			Service:   "workorch",
 			Backend:   state.config.Backend,
@@ -2207,6 +2213,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			writeBusinessError(w, err)
 			return
 		}
+		state.scheduleGovernanceRunResumes([]string{item.RunID}, runPriorityFromRequest(r, 0))
 		writeJSON(w, http.StatusOK, approvalResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -2227,6 +2234,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			writeBusinessError(w, err)
 			return
 		}
+		state.scheduleGovernanceRunResumes([]string{item.RunID}, runPriorityFromRequest(r, 0))
 		writeJSON(w, http.StatusOK, approvalResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -2254,6 +2262,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			writeBusinessError(w, err)
 			return
 		}
+		state.scheduleGovernanceRunResumes(runIDsFromApprovals(items), runPriorityFromRequest(r, 0))
 		writeJSON(w, http.StatusOK, approvalsResponse{
 			Service:   "workorch",
 			Backend:   state.config.Backend,
@@ -3026,6 +3035,34 @@ func (s *serverState) close(ctx context.Context) error {
 	return err
 }
 
+func (s *serverState) recoverStuckRunningRuns(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	var recovered []appservice.Run
+	var err error
+	if s.sharedSession != nil {
+		err = s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var recoverErr error
+			recovered, recoverErr = appservice.RecoverStuckRunningRunsWithSession(ctx, session)
+			return recoverErr
+		})
+	} else {
+		recovered, err = appservice.RecoverStuckRunningRunsWithBackend(ctx, s.config.Backend, s.config.DataRoot)
+	}
+	if err != nil {
+		return err
+	}
+	if len(recovered) > 0 {
+		runIDs := make([]string, 0, len(recovered))
+		for _, item := range recovered {
+			runIDs = append(runIDs, item.ID)
+		}
+		slog.Warn("workorch recovered stuck running runs", "runIDs", runIDs)
+	}
+	return nil
+}
+
 func defaultValidate(ctx context.Context, backend string, dataRoot string) error {
 	session, err := appservice.NewRuntimeSessionWithBackend(backend, dataRoot)
 	if err != nil {
@@ -3304,6 +3341,63 @@ func defaultReadConfiguration() (appservice.ServiceConfiguration, error) {
 
 func (s *serverState) acquireRunSlot(ctx context.Context) (func(), error) {
 	return s.acquireRunSlotWithPriority(ctx, 0)
+}
+
+func (s *serverState) scheduleGovernanceRunResumes(runIDs []string, priority int) {
+	runIDs = uniqueNonEmptyStrings(runIDs)
+	for _, runID := range runIDs {
+		runID := runID
+		go func() {
+			ctx := appservice.ContextWithEventHub(context.Background(), s.eventHub)
+			s.metrics.runResumeRequests.Add(1)
+			release, err := s.acquireRunSlotWithPriority(ctx, priority)
+			if err != nil {
+				s.metrics.runCanceled.Add(1)
+				slog.Warn("workorch governance resume queue failed", "runID", runID, "err", err)
+				return
+			}
+			defer release()
+			item, err := s.resumeRun(ctx, s.config.Backend, s.config.DataRoot, runID)
+			if err != nil {
+				slog.Warn("workorch governance resume failed", "runID", runID, "err", err)
+				return
+			}
+			s.metrics.observeRunOutcome(item)
+		}()
+	}
+}
+
+func runIDsFromDecisions(items []appservice.Decision) []string {
+	ret := make([]string, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, item.RunID)
+	}
+	return ret
+}
+
+func runIDsFromApprovals(items []appservice.Approval) []string {
+	ret := make([]string, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, item.RunID)
+	}
+	return ret
+}
+
+func uniqueNonEmptyStrings(items []string) []string {
+	seen := map[string]struct{}{}
+	ret := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		ret = append(ret, item)
+	}
+	return ret
 }
 
 func (s *serverState) acquireRunSlotWithPriority(ctx context.Context, priority int) (func(), error) {

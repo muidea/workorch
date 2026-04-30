@@ -29,6 +29,7 @@ import (
 	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
+	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -1032,9 +1033,196 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchConflictDiagnosticsA
 	if !ok || diagnostics["kind"] != "workspace_path_conflict" || diagnostics["conflictRef"] != "llm-proxy" {
 		t.Fatalf("runtimeDiagnostics = %#v, want workspace path conflict", failedOutput["runtimeDiagnostics"])
 	}
+	if failedOutput["failureClass"] != failureClassWorkspacePath || !strings.Contains(fmt.Sprint(failedOutput["failureSignature"]), "conflictRef=llm-proxy") {
+		t.Fatalf("failure classification = class:%#v signature:%#v, want workspace path conflict signature", failedOutput["failureClass"], failedOutput["failureSignature"])
+	}
 	manifest, ok := repairInput[stepInputKeyWorkspaceFileManifest].([]map[string]any)
 	if !ok || len(manifest) != 1 || manifest[0]["path"] != "llm-proxy" || manifest[0]["executable"] != true {
 		t.Fatalf("workspaceFileManifest = %#v, want executable llm-proxy file", repairInput[stepInputKeyWorkspaceFileManifest])
+	}
+	checkpoints, err := checkpointRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list checkpoints: %v", err)
+	}
+	if !hasCheckpointFailureClass(checkpoints, failureClassWorkspacePath) {
+		t.Fatalf("checkpoints = %+v, want workspace path failure class checkpoint", checkpoints)
+	}
+}
+
+func TestRuntimeOrchestrator_LLMInputIncludesExecutionContextPackage(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	resultRepo := memory.NewResultRepository()
+	artifactRepo := memory.NewArtifactRepository()
+	var capturedInput map[string]any
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		capturedInput = request.Input
+		return map[string]any{
+			"status": "completed",
+			"dodAssessment": map[string]any{
+				"satisfied": true,
+				"summary":   "context package received",
+				"items": []map[string]any{
+					{"item": "context package available", "state": "satisfied", "evidenceRefs": []string{string(request.StepID)}},
+				},
+			},
+		}, nil
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			Results:            resultRepo,
+			Artifacts:          artifactRepo,
+			ToolCalls:          memory.NewToolCallRepository(),
+			Patches:            memory.NewPatchRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+			MemoryItems:        memory.NewMemoryItemRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workingDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workingDirectory, "README.md"), []byte("workspace"), 0o644); err != nil {
+		t.Fatalf("seed workspace file: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-context-package")
+	runID := common.RunID("run-context-package")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := resultRepo.Create(ctx, &resultmodel.Result{
+		ID:           "result-context-package-accepted",
+		WorkspaceID:  workspaceID,
+		RunID:        "run-context-package-old",
+		GoalID:       "goal-context-package",
+		DoDID:        "dod-context-package",
+		State:        common.ResultStateAccepted,
+		Title:        "Historical Accepted Result",
+		Summary:      "previous accepted delivery",
+		EvidenceRefs: []string{"evidence-old"},
+		ArtifactRefs: []common.ArtifactID{"artifact-context-package-old"},
+		UpdatedAt:    "2026-04-30T01:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed result: %v", err)
+	}
+	if err := artifactRepo.Create(ctx, &resultmodel.Artifact{
+		ID:          "artifact-context-package-old",
+		WorkspaceID: workspaceID,
+		RunID:       "run-context-package-old",
+		ResultID:    "result-context-package-accepted",
+		StepID:      "step-old",
+		Name:        "Accepted summary",
+		Summary:     "accepted artifact summary",
+		URI:         "workorch://runs/run-context-package-old/results/summary",
+		State:       common.ArtifactStateAvailable,
+		UpdatedAt:   "2026-04-30T01:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed artifact: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		GoalID:          "goal-context-package",
+		DoDID:           "dod-context-package",
+		State:           common.RunStateCreated,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: map[string]any{
+			"skills": []map[string]any{
+				{"id": "skill-context", "name": "Context Skill", "instruction": "Use packaged context."},
+			},
+			"mcpCapabilities": []map[string]any{
+				{"id": "mcp-context:tool:repo.summary", "serverId": "mcp-context", "kind": "tool", "name": "repo.summary", "usageHint": "Summarize repository."},
+			},
+			"memories": []map[string]any{
+				{"id": "memory-context", "memoryType": "project_context", "summary": "Use context package", "content": "Package must include selected memory."},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	pkg := mapFromValue(capturedInput[stepInputKeyExecutionContextPackage])
+	if pkg["version"] != executionContextPackageVersion {
+		t.Fatalf("executionContextPackage = %+v, want version %s", pkg, executionContextPackageVersion)
+	}
+	if manifest := mapSliceFromValue(pkg["workspaceFileManifest"]); len(manifest) != 1 || manifest[0]["path"] != "README.md" {
+		t.Fatalf("workspaceFileManifest = %+v, want README.md", pkg["workspaceFileManifest"])
+	}
+	accepted := mapFromValue(pkg["latestAcceptedResult"])
+	if accepted["id"] != "result-context-package-accepted" {
+		t.Fatalf("latestAcceptedResult = %+v, want historical accepted result", accepted)
+	}
+	if deliverables := mapSliceFromValue(pkg["currentDeliverables"]); len(deliverables) != 1 || deliverables[0]["id"] != "artifact-context-package-old" {
+		t.Fatalf("currentDeliverables = %+v, want historical artifact", pkg["currentDeliverables"])
+	}
+	selected := mapFromValue(pkg["selectedContext"])
+	if len(mapSliceFromValue(selected["skills"])) != 1 || len(mapSliceFromValue(selected["mcpCapabilities"])) != 1 || len(mapSliceFromValue(selected["memories"])) != 1 {
+		t.Fatalf("selectedContext = %+v, want selected skill, mcp capability, and memory", selected)
+	}
+}
+
+func TestRuntimeOrchestrator_ExecutionContextPackageIncludesRecentFailureSummary(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-context-package-failure")
+	runID := common.RunID("run-context-package-failure")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-context-package-failure",
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateRunning}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	failed := duplicateShellFailureStep(runID, "failed-before-context")
+	if err := stepRepo.Create(ctx, failed); err != nil {
+		t.Fatalf("seed failed step: %v", err)
+	}
+
+	pkg := orch.runExecutionContextPackage(ctx, run, &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-context"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{stepInputKeySoulStage: soulStageExecution},
+	})
+	failures := mapSliceFromValue(pkg["recentFailureSummary"])
+	if len(failures) != 1 || failures[0]["failureClass"] != failureClassShellCommand || failures[0]["failureSignature"] == "" {
+		t.Fatalf("recentFailureSummary = %+v, want shell failure signature", failures)
 	}
 }
 
@@ -1168,6 +1356,9 @@ func TestRuntimeOrchestrator_DispatchesLLMRepairAfterGraphNodeFailure(t *testing
 	if !ok || !strings.Contains(fmt.Sprint(failedOutput["stderr"]), "missing go.sum") {
 		t.Fatalf("failedStepOutput = %+v, want stderr evidence", repairInput["failedStepOutput"])
 	}
+	if repairInput["failureClass"] != failureClassShellCommand || !strings.Contains(fmt.Sprint(repairInput["failureSignature"]), "kind=shell/command") {
+		t.Fatalf("repair failure classification = class:%#v signature:%#v, want shell command signature", repairInput["failureClass"], repairInput["failureSignature"])
+	}
 	failedStep, err := stepRepo.Get(ctx, "run-runtime-repair/block/run-tests")
 	if err != nil {
 		t.Fatalf("get failed step: %v", err)
@@ -1242,6 +1433,87 @@ func TestRuntimeOrchestrator_DoesNotRepairLLMProviderError(t *testing.T) {
 	}
 	if len(steps) != 1 || steps[0].ID != common.StepID("run-llm-provider-error/step-1") {
 		t.Fatalf("steps = %+v, want only initial failed provider step", steps)
+	}
+	if steps[0].Output["failureClass"] != failureClassProviderUnavailable {
+		t.Fatalf("failureClass = %#v, want provider unavailable", steps[0].Output["failureClass"])
+	}
+}
+
+func TestRuntimeOrchestrator_BlocksOnDuplicateRuntimeFailureSignature(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-duplicate-failure")
+	runID := common.RunID("run-duplicate-failure")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-duplicate-failure"),
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-1"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateCompleted,
+		Input: map[string]any{stepInputKeyRuntimeRepairFollowUp: true},
+	}); err != nil {
+		t.Fatalf("seed repair step: %v", err)
+	}
+	previousFailed := duplicateShellFailureStep(runID, "previous-shell-failure")
+	if err := stepRepo.Create(ctx, previousFailed); err != nil {
+		t.Fatalf("seed previous failed step: %v", err)
+	}
+	currentFailed := duplicateShellFailureStep(runID, "current-shell-failure")
+
+	if err := orch.dispatchRuntimeRepairFollowUp(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-duplicate-failure"),
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}, currentFailed, errors.New("exit status 1")); err != nil {
+		t.Fatalf("duplicate failure should block on decision without returning error: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateBlockedOnDecision || runItem.BlockingTicketID == "" {
+		t.Fatalf("run = %+v, want blocked on duplicate failure decision", runItem)
+	}
+	ticket, err := ticketRepo.Get(ctx, runItem.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("get duplicate failure ticket: %v", err)
+	}
+	if ticket.Context["failureClass"] != failureClassShellCommand || ticket.Context["failureSignature"] == "" {
+		t.Fatalf("ticket context = %+v, want shell failure signature", ticket.Context)
 	}
 }
 
@@ -2188,6 +2460,83 @@ func TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterDecision(
 	}
 }
 
+func TestRuntimeOrchestrator_ResumeRunFailsResolvedDecisionWithoutContinuation(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	orch := NewRuntimeOrchestratorWithResolutions(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		resolutionRepo,
+		approvalRepo,
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-decision-no-continuation")
+	runID := common.RunID("run-decision-no-continuation")
+	stepID := common.StepID("run-decision-no-continuation/step-1")
+	ticketID := common.TicketID("ticket-decision-no-continuation")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     stepID,
+		RunID:  runID,
+		Kind:   llmWorkspaceExecutionStepKind,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"stage": "blocked_on_decision"},
+	}); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		State:       common.DecisionTicketStateResolved,
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       common.ResolutionID("resolution-decision-no-continuation"),
+		TicketID: ticketID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:  map[string]any{"operator": "tester"},
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume run: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateFailed {
+		t.Fatalf("run state = %s, want failed terminal state", runItem.State)
+	}
+	if runItem.BlockingTicketID != "" || !strings.Contains(runItem.FailureReason, common.ErrConflict.Error()) {
+		t.Fatalf("run terminal details = %+v, want cleared blocker and conflict reason", runItem)
+	}
+}
+
 func TestRuntimeOrchestrator_CreatesDecisionTicketWithStructuredFields(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -2912,6 +3261,23 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 	if !reflect.DeepEqual(result.EvidenceRefs, []string{"run-dod-gate-complete/step-1", "run-dod-gate-complete/step-1/validation/runtime-step"}) {
 		t.Fatalf("result evidence = %+v, want step and validation refs", result.EvidenceRefs)
 	}
+	if !result.DoDAssessment.Satisfied || result.DoDAssessment.Summary != "DoD satisfied" || len(result.DoDAssessment.Items) != 1 {
+		t.Fatalf("result DoD assessment = %+v, want satisfied item-level assessment", result.DoDAssessment)
+	}
+	if result.SummaryDetail.GoalOutcome != "DoD satisfied" ||
+		result.SummaryDetail.ImplementationSummary != "DoD satisfied" ||
+		!reflect.DeepEqual(result.SummaryDetail.ArtifactRefs, []common.ArtifactID{
+			"run-dod-gate-complete/artifact/result-summary",
+			"run-dod-gate-complete/artifact/deliverable-manifest",
+		}) ||
+		!reflect.DeepEqual(result.SummaryDetail.EvidenceRefs, []string{"run-dod-gate-complete/step-1", "run-dod-gate-complete/step-1/validation/runtime-step"}) {
+		t.Fatalf("result summary detail = %+v, want structured accepted result summary", result.SummaryDetail)
+	}
+	if result.DoDAssessment.Items[0].Item != "tests pass" ||
+		result.DoDAssessment.Items[0].State != "satisfied" ||
+		!reflect.DeepEqual(result.DoDAssessment.Items[0].EvidenceRefs, []string{"run-dod-gate-complete/step-1/validation/runtime-step"}) {
+		t.Fatalf("result DoD assessment items = %+v, want item state with evidence", result.DoDAssessment.Items)
+	}
 	if !reflect.DeepEqual(result.ArtifactRefs, []common.ArtifactID{
 		"run-dod-gate-complete/artifact/result-summary",
 		"run-dod-gate-complete/artifact/deliverable-manifest",
@@ -2938,15 +3304,22 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 	if summaryArtifact == nil || summaryArtifact.ResultID != result.ID || summaryArtifact.ArtifactType != "text" || summaryArtifact.State != common.ArtifactStateAvailable {
 		t.Fatalf("summary artifact = %+v, want available text artifact linked to result", summaryArtifact)
 	}
-	if summaryArtifact.Summary != "DoD satisfied" || summaryArtifact.ContentType != "text/plain; charset=utf-8" {
+	if summaryArtifact.Category != resultcommon.ArtifactCategoryFinalSummary ||
+		!strings.Contains(summaryArtifact.Summary, "Accepted Result Summary") ||
+		!strings.Contains(summaryArtifact.Summary, "DoD satisfied") ||
+		summaryArtifact.ContentType != "text/markdown; charset=utf-8" {
 		t.Fatalf("summary artifact content = %+v, want DoD summary text artifact", summaryArtifact)
 	}
 	if manifestArtifact == nil || manifestArtifact.ResultID != result.ID || manifestArtifact.ArtifactType != "report" || manifestArtifact.State != common.ArtifactStateAvailable {
 		t.Fatalf("manifest artifact = %+v, want available report artifact linked to result", manifestArtifact)
 	}
+	if manifestArtifact.Category != resultcommon.ArtifactCategoryRuntimeEvidence {
+		t.Fatalf("manifest artifact category = %q, want runtime evidence", manifestArtifact.Category)
+	}
 	if !strings.Contains(manifestArtifact.Summary, "Workspace Deliverable Manifest") ||
-		!strings.Contains(manifestArtifact.Summary, "`main.go`") ||
-		!strings.Contains(manifestArtifact.Summary, "`README.md`") ||
+		!strings.Contains(manifestArtifact.Summary, "| `main.go` | source |") ||
+		!strings.Contains(manifestArtifact.Summary, "| `README.md` | documentation |") ||
+		!strings.Contains(manifestArtifact.Summary, "## DoD Relation") ||
 		!strings.Contains(manifestArtifact.Summary, "run-dod-gate-complete/step-1/validation/runtime-step") {
 		t.Fatalf("manifest summary = %q, want deliverable files and evidence refs", manifestArtifact.Summary)
 	}
@@ -5258,6 +5631,39 @@ func hasCheckpointGraphBranch(items []*runmodel.RuntimeCheckpoint, branch string
 		}
 	}
 	return false
+}
+
+func hasCheckpointFailureClass(items []*runmodel.RuntimeCheckpoint, class string) bool {
+	for _, item := range items {
+		if item == nil || item.Data == nil {
+			continue
+		}
+		if item.Data["failureClass"] == class {
+			return true
+		}
+	}
+	return false
+}
+
+func duplicateShellFailureStep(runID common.RunID, suffix string) *runmodel.Step {
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/" + suffix),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{stepInputKeyGraphNodeID: "verify"},
+		Output: map[string]any{
+			"status":   "failed",
+			"command":  "go",
+			"args":     []string{"test", "./..."},
+			"exitCode": 1,
+			"stderr":   "same compiler error",
+			"error":    "exit status 1",
+		},
+	}
+	classification := classifyRuntimeFailure(step, step.Output, "runtime step failed", errors.New("exit status 1"))
+	attachRuntimeFailureClassification(step.Output, classification)
+	return step
 }
 
 func hasMemoryItem(items []*memorymodel.MemoryItem, runID common.RunID, memoryType string, summary string) bool {

@@ -1796,7 +1796,7 @@ func TestRunStartEndpointReturnsBlockedDecisionRun(t *testing.T) {
 	}
 }
 
-func TestRunResumeEndpointReturnsCompletedRunAfterDecisionResolved(t *testing.T) {
+func TestRunResumeEndpointReturnsFailedRunAfterDecisionResolvedWithoutContinuation(t *testing.T) {
 	dataRoot := t.TempDir()
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-decision-resume-http"
@@ -1812,12 +1812,19 @@ func TestRunResumeEndpointReturnsCompletedRunAfterDecisionResolved(t *testing.T)
 	resumeRec := httptest.NewRecorder()
 	handler.ServeHTTP(resumeRec, resumeReq)
 
-	if resumeRec.Code != http.StatusConflict {
-		t.Fatalf("resume status = %d, want 409 for synthetic gate without follow-up step, body=%s", resumeRec.Code, resumeRec.Body.String())
+	if resumeRec.Code != http.StatusOK {
+		t.Fatalf("resume status = %d, want 200 with terminal failed run, body=%s", resumeRec.Code, resumeRec.Body.String())
+	}
+	var body runInstanceResponse
+	if err := json.Unmarshal(resumeRec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal resumed run: %v", err)
+	}
+	if body.Run.State != "failed" || body.Run.BlockingTicketID != "" {
+		t.Fatalf("run = %+v, want failed with cleared decision blocker", body.Run)
 	}
 }
 
-func TestRunResumeEndpointReturnsCompletedRunAfterApprovalApproved(t *testing.T) {
+func TestRunResumeEndpointReturnsFailedRunAfterApprovalApprovedWithoutContinuation(t *testing.T) {
 	dataRoot := t.TempDir()
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-approval-resume-http"
@@ -1833,8 +1840,15 @@ func TestRunResumeEndpointReturnsCompletedRunAfterApprovalApproved(t *testing.T)
 	resumeRec := httptest.NewRecorder()
 	handler.ServeHTTP(resumeRec, resumeReq)
 
-	if resumeRec.Code != http.StatusConflict {
-		t.Fatalf("resume status = %d, want 409 for synthetic gate without follow-up step, body=%s", resumeRec.Code, resumeRec.Body.String())
+	if resumeRec.Code != http.StatusOK {
+		t.Fatalf("resume status = %d, want 200 with terminal failed run, body=%s", resumeRec.Code, resumeRec.Body.String())
+	}
+	var body runInstanceResponse
+	if err := json.Unmarshal(resumeRec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal resumed run: %v", err)
+	}
+	if body.Run.State != "failed" || body.Run.BlockingApprovalID != "" {
+		t.Fatalf("run = %+v, want failed with cleared approval blocker", body.Run)
 	}
 }
 
@@ -1971,11 +1985,9 @@ func TestDecisionResolveEndpointResolvesTicketAndAllowsRunResume(t *testing.T) {
 		t.Fatalf("decision = %+v, want resolved provide_missing_info", resolved.Decision)
 	}
 
-	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/"+runID+"/resume", nil)
-	resumeRec := httptest.NewRecorder()
-	handler.ServeHTTP(resumeRec, resumeReq)
-	if resumeRec.Code != http.StatusConflict {
-		t.Fatalf("run resume status = %d, want 409 for synthetic gate without follow-up step, body=%s", resumeRec.Code, resumeRec.Body.String())
+	resumed := waitRunStateForHTTP(t, dataRoot, runID, string(common.RunStateFailed))
+	if resumed.BlockingTicketID != "" {
+		t.Fatalf("resumed run = %+v, want cleared decision blocker", resumed)
 	}
 }
 
@@ -2004,18 +2016,9 @@ func TestDecisionResolveEndpointRejectCurrentPathAndRunResumeFailsTerminally(t *
 		t.Fatalf("resolution payload = %+v, want operator tester", rejected.Decision.ResolutionPayload)
 	}
 
-	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/"+runID+"/resume", nil)
-	resumeRec := httptest.NewRecorder()
-	handler.ServeHTTP(resumeRec, resumeReq)
-	if resumeRec.Code != http.StatusOK {
-		t.Fatalf("run resume status = %d, want 200, body=%s", resumeRec.Code, resumeRec.Body.String())
-	}
-	var resumed runInstanceResponse
-	if err := json.Unmarshal(resumeRec.Body.Bytes(), &resumed); err != nil {
-		t.Fatalf("unmarshal resumed rejected run: %v", err)
-	}
-	if resumed.Run.State != "failed" || resumed.Run.FailureReason == "" {
-		t.Fatalf("run = %+v, want failed with reason", resumed.Run)
+	resumed := waitRunStateForHTTP(t, dataRoot, runID, string(common.RunStateFailed))
+	if resumed.FailureReason == "" {
+		t.Fatalf("run = %+v, want failed with reason", resumed)
 	}
 }
 
@@ -2185,11 +2188,9 @@ func TestApprovalApproveEndpointApprovesApprovalAndAllowsRunResume(t *testing.T)
 		t.Fatalf("approval = %+v, want approved", approved.Approval)
 	}
 
-	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/"+runID+"/resume", nil)
-	resumeRec := httptest.NewRecorder()
-	handler.ServeHTTP(resumeRec, resumeReq)
-	if resumeRec.Code != http.StatusConflict {
-		t.Fatalf("run resume status = %d, want 409 for synthetic gate without follow-up step, body=%s", resumeRec.Code, resumeRec.Body.String())
+	resumed := waitRunStateForHTTP(t, dataRoot, runID, string(common.RunStateFailed))
+	if resumed.BlockingApprovalID != "" {
+		t.Fatalf("run = %+v, want cleared approval blocker", resumed)
 	}
 }
 
@@ -2214,18 +2215,9 @@ func TestApprovalRejectEndpointRejectsApprovalAndRunResumeFailsTerminally(t *tes
 		t.Fatalf("approval = %+v, want rejected", rejected.Approval)
 	}
 
-	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/"+runID+"/resume", nil)
-	resumeRec := httptest.NewRecorder()
-	handler.ServeHTTP(resumeRec, resumeReq)
-	if resumeRec.Code != http.StatusOK {
-		t.Fatalf("run resume status = %d, want 200, body=%s", resumeRec.Code, resumeRec.Body.String())
-	}
-	var resumed runInstanceResponse
-	if err := json.Unmarshal(resumeRec.Body.Bytes(), &resumed); err != nil {
-		t.Fatalf("unmarshal resumed rejected approval run: %v", err)
-	}
-	if resumed.Run.State != "failed" || resumed.Run.FailureReason == "" {
-		t.Fatalf("run = %+v, want failed with reason", resumed.Run)
+	resumed := waitRunStateForHTTP(t, dataRoot, runID, string(common.RunStateFailed))
+	if resumed.FailureReason == "" {
+		t.Fatalf("run = %+v, want failed with reason", resumed)
 	}
 }
 
@@ -2279,12 +2271,7 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 	if resolveDecisionRec.Code != http.StatusOK {
 		t.Fatalf("decision resolve status = %d, want 200", resolveDecisionRec.Code)
 	}
-	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/"+blockedRunID+"/resume", nil)
-	resumeRec := httptest.NewRecorder()
-	handler.ServeHTTP(resumeRec, resumeReq)
-	if resumeRec.Code != http.StatusConflict {
-		t.Fatalf("run resume status = %d, want 409", resumeRec.Code)
-	}
+	waitRunStateForHTTP(t, dataRoot, blockedRunID, string(common.RunStateFailed))
 
 	for _, path := range []string{"/healthz", "/readyz", "/api/v1/workorch/workspaces", "/api/v1/workorch/workspaces/" + workspace.ID, "/api/v1/workorch/runs", "/api/v1/workorch/runs/run-metrics"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -2345,13 +2332,67 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 		`workorch_run_queue_waiting 0`,
 		`workorch_run_queue_total 0`,
 		`workorch_run_outcomes_total{status="succeeded"} 0`,
-		`workorch_run_outcomes_total{status="failed"} 1`,
+		`workorch_run_outcomes_total{status="failed"} 2`,
 		`workorch_run_outcomes_total{status="canceled"} 0`,
 		`workorch_server_max_concurrent_runs 1`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics body missing %q\nbody:\n%s", want, body)
 		}
+	}
+}
+
+func TestHTTPServerValidateRecoversFileBackedStuckRunningRun(t *testing.T) {
+	dataRoot := t.TempDir()
+	ctx := context.Background()
+	first := NewHTTPServer(Config{Backend: "file", DataRoot: dataRoot})
+	firstHandler := first.http.Handler
+	workspace := createWorkspaceForHTTP(t, firstHandler, "stuck running validation workspace", "workspaces/stuck-running-validation")
+	goalID, dodID := defineGoalAndDoDForHTTP(t, firstHandler, workspace.ID)
+	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-stuck-validation","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
+	runReq.Header.Set("Content-Type", "application/json")
+	runRec := httptest.NewRecorder()
+	firstHandler.ServeHTTP(runRec, runReq)
+	if runRec.Code != http.StatusCreated {
+		t.Fatalf("run create status = %d, want 201, body=%s", runRec.Code, runRec.Body.String())
+	}
+
+	session, err := appservice.NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("new runtime session: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+	runItem, err := exports.Repositories.Runs.Get(ctx, "run-stuck-validation")
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	runItem.State = common.RunStateRunning
+	if err := exports.Repositories.Runs.Update(ctx, runItem); err != nil {
+		t.Fatalf("update run: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close seed session: %v", err)
+	}
+
+	second := NewHTTPServer(Config{Backend: "file", DataRoot: dataRoot})
+	if err := second.Validate(ctx); err != nil {
+		t.Fatalf("validate second server: %v", err)
+	}
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-stuck-validation", nil)
+	getRec := httptest.NewRecorder()
+	second.http.Handler.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("run get status = %d, want 200, body=%s", getRec.Code, getRec.Body.String())
+	}
+	var body runInstanceResponse
+	if err := json.Unmarshal(getRec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal run: %v", err)
+	}
+	if body.Run.State != "failed" || body.Run.FailureReason == "" {
+		t.Fatalf("run = %+v, want failed recovered run", body.Run)
 	}
 }
 
@@ -2665,6 +2706,30 @@ func startRunForHTTP(t *testing.T, handler http.Handler, runID string) appservic
 		t.Fatalf("unmarshal started run: %v", err)
 	}
 	return body.Run
+}
+
+func waitRunStateForHTTP(t *testing.T, dataRoot string, runID string, wantState string) appservice.Run {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	var last appservice.Run
+	var lastErr error
+	for time.Now().Before(deadline) {
+		item, err := appservice.ReadRunWithBackend(context.Background(), "file", dataRoot, runID)
+		if err == nil {
+			last = item
+			if item.State == wantState {
+				return item
+			}
+		} else {
+			lastErr = err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if lastErr != nil {
+		t.Fatalf("run %s did not reach %s: last error %v", runID, wantState, lastErr)
+	}
+	t.Fatalf("run %s state = %s, want %s; run=%+v", runID, last.State, wantState, last)
+	return last
 }
 
 func resolveDecisionForHTTP(t *testing.T, dataRoot string, ticketID string, reject bool) {
