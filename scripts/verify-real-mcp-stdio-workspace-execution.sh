@@ -9,7 +9,7 @@ MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 PROVIDER_ID="${WORKORCH_REAL_MCP_STDIO_PROVIDER_ID:-verify_mcp_stdio_$$}"
 MCP_SERVER_ID="${WORKORCH_REAL_MCP_STDIO_SERVER_ID:-mcp-stdio-real-verify-$$}"
 TMP_DIR="${WORKORCH_REAL_MCP_STDIO_ARTIFACT_DIR:-$(mktemp -d)}"
-MCP_ENDPOINT_ROOT="${WORKORCH_MCP_ENDPOINT_DIR:-$ROOT_DIR/.workorch-data/system/mcp-endpoints}"
+MCP_ENDPOINT_ROOT="${WORKORCH_MCP_ENDPOINT_DIR:-.workorch-data/system/mcp-endpoints}"
 MCP_ENDPOINT_DIR="$MCP_ENDPOINT_ROOT/$MCP_SERVER_ID"
 KEEP_ARTIFACTS="${WORKORCH_REAL_MCP_STDIO_KEEP_ARTIFACTS:-1}"
 MOCK_PID=""
@@ -344,6 +344,7 @@ trap report_failure ERR
 trap cleanup EXIT
 
 mkdir -p "$TMP_DIR"
+cd "$ROOT_DIR"
 create_mcp_helper
 start_mock_provider
 wait_mock

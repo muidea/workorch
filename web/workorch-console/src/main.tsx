@@ -3444,6 +3444,13 @@ function mcpServerPayload(values: MCPServerFormValues): MCPServer {
   };
 }
 
+function displayMCPEndpoint(endpoint?: string) {
+  const value = endpoint?.trim() ?? '';
+  const marker = '.workorch-data/system/mcp-endpoints/';
+  const index = value.indexOf(marker);
+  return index >= 0 ? value.slice(index) : value;
+}
+
 function RuntimeControlPage() {
   const { message } = AntApp.useApp();
   const [serverForm] = Form.useForm<MCPServerFormValues>();
@@ -3539,7 +3546,7 @@ function RuntimeControlPage() {
       id: server.id,
       name: server.name,
       transport: server.transport,
-      endpoint: server.endpoint,
+      endpoint: displayMCPEndpoint(server.endpoint),
       enabled: server.enabled,
       allowedTools: joinLines(server.allowedTools),
       allowedResources: joinLines(server.allowedResources),
@@ -3821,7 +3828,7 @@ function RuntimeControlPage() {
                 column={1}
                 items={[
                   { key: 'id', label: '服务 ID', children: selectedServer.id },
-                  { key: 'endpoint', label: '端点', children: selectedServer.endpoint || '-' },
+                  { key: 'endpoint', label: '端点', children: displayMCPEndpoint(selectedServer.endpoint) || '-' },
                   { key: 'approval', label: '默认审批策略', children: selectedServer.defaultApprovalPolicy || '-' },
                   { key: 'timeout', label: '超时毫秒', children: selectedServer.timeoutMillis ?? '-' }
                 ]}

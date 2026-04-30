@@ -29,7 +29,7 @@ PROVINCE="${WORKORCH_WEATHER_PROVINCE:-浙江}"
 CITY="${WORKORCH_WEATHER_CITY:-杭州}"
 LOOKUP_NAME="${WORKORCH_WEATHER_LOOKUP_NAME:-Hangzhou}"
 TMP_DIR="${WORKORCH_WEATHER_GOVERNANCE_ARTIFACT_DIR:-$(mktemp -d)}"
-MCP_ENDPOINT_ROOT="${WORKORCH_MCP_ENDPOINT_DIR:-$ROOT_DIR/.workorch-data/system/mcp-endpoints}"
+MCP_ENDPOINT_ROOT="${WORKORCH_MCP_ENDPOINT_DIR:-.workorch-data/system/mcp-endpoints}"
 MCP_ENDPOINT_DIR="$MCP_ENDPOINT_ROOT/$MCP_SERVER_ID"
 KEEP_ARTIFACTS="${WORKORCH_WEATHER_GOVERNANCE_KEEP_ARTIFACTS:-1}"
 MOCK_PID=""
@@ -726,6 +726,7 @@ trap report_failure ERR
 trap cleanup EXIT
 
 mkdir -p "$TMP_DIR"
+cd "$ROOT_DIR"
 create_weather_helper
 
 curl -fsS "$BASE_URL/readyz" >"$TMP_DIR/readyz.json"

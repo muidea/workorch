@@ -30,8 +30,9 @@ MOCK_ADDR = os.environ.get("WORKORCH_LOAD_MOCK_ADDR", "127.0.0.1:18191")
 PROVIDER_ID = os.environ.get("WORKORCH_LOAD_PROVIDER_ID", "")
 BATCH_ID = os.environ.get("WORKORCH_LOAD_BATCH_ID", f"load-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}")
 ROOT_DIR = Path(__file__).resolve().parents[1]
+os.chdir(ROOT_DIR)
 ARTIFACT_DIR = Path(os.environ.get("WORKORCH_LOAD_ARTIFACT_DIR", tempfile.mkdtemp(prefix=f"workorch-loadtest-{BATCH_ID}-")))
-MCP_ENDPOINT_ROOT = Path(os.environ.get("WORKORCH_MCP_ENDPOINT_DIR", ROOT_DIR / ".workorch-data" / "system" / "mcp-endpoints"))
+MCP_ENDPOINT_ROOT = Path(os.environ.get("WORKORCH_MCP_ENDPOINT_DIR", ".workorch-data/system/mcp-endpoints"))
 KEEP_ARTIFACTS = os.environ.get("WORKORCH_LOAD_KEEP_ARTIFACTS", "1") == "1"
 CURL_MAX_TIME = os.environ.get("WORKORCH_LOAD_CURL_MAX_TIME", "300")
 COUNTRY = os.environ.get("WORKORCH_LOAD_COUNTRY", "中国")
