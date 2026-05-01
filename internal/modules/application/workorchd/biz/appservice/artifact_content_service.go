@@ -18,6 +18,14 @@ type ArtifactContent struct {
 }
 
 func ReadArtifactContentWithSession(ctx context.Context, session *RuntimeSession, artifactURI string) (ret ArtifactContent, err error) {
+	return readArtifactContentWithSession(ctx, session, artifactURI, nil)
+}
+
+func ReadArtifactContentWithRunSnapshotWithSession(ctx context.Context, session *RuntimeSession, artifactURI string, snapshot RunSnapshot) (ret ArtifactContent, err error) {
+	return readArtifactContentWithSession(ctx, session, artifactURI, snapshot.Artifacts)
+}
+
+func readArtifactContentWithSession(ctx context.Context, session *RuntimeSession, artifactURI string, cachedArtifacts []Artifact) (ret ArtifactContent, err error) {
 	exports, err := session.Exports()
 	if err != nil {
 		return ArtifactContent{}, err
@@ -30,11 +38,14 @@ func ReadArtifactContentWithSession(ctx context.Context, session *RuntimeSession
 	if err != nil {
 		return ArtifactContent{}, err
 	}
-	artifacts, err := exports.Repositories.Artifacts.ListByRun(ctx, ref.RunID)
-	if err != nil {
-		return ArtifactContent{}, err
+	artifact := findArtifactDTOByURI(cachedArtifacts, ref)
+	if artifact == nil {
+		artifacts, err := exports.Repositories.Artifacts.ListByRun(ctx, ref.RunID)
+		if err != nil {
+			return ArtifactContent{}, err
+		}
+		artifact = artifactContentDescriptorFromModel(findArtifactByURI(artifacts, ref.URI))
 	}
-	artifact := findArtifactByURI(artifacts, ref.URI)
 	if artifact == nil {
 		return ArtifactContent{}, common.ErrNotFound
 	}
@@ -121,6 +132,31 @@ func findArtifactByURI(items []*resultmodel.Artifact, uri string) *resultmodel.A
 		}
 	}
 	return nil
+}
+
+type artifactContentDescriptor struct {
+	ContentType string
+}
+
+func findArtifactDTOByURI(items []Artifact, ref artifactContentRef) *artifactContentDescriptor {
+	if len(items) == 0 {
+		return nil
+	}
+	for _, item := range items {
+		if strings.TrimSpace(item.URI) == ref.URI &&
+			common.WorkspaceID(item.WorkspaceID) == ref.WorkspaceID &&
+			common.RunID(item.RunID) == ref.RunID {
+			return &artifactContentDescriptor{ContentType: item.ContentType}
+		}
+	}
+	return nil
+}
+
+func artifactContentDescriptorFromModel(item *resultmodel.Artifact) *artifactContentDescriptor {
+	if item == nil {
+		return nil
+	}
+	return &artifactContentDescriptor{ContentType: item.ContentType}
 }
 
 func firstNonEmptyArtifactContent(values ...string) string {

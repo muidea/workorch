@@ -198,7 +198,11 @@ func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) 
 	if err := o.publishWorkspaceStateChanged(ctx, ws, runID); err != nil {
 		return err
 	}
-	return o.DispatchNextStep(ctx, runID)
+	specs, err := o.nextDispatchSpecs(ctx, r)
+	if err != nil {
+		return err
+	}
+	return o.dispatchStepSpecs(ctx, r, specs)
 }
 
 func (o *RuntimeOrchestrator) DispatchNextStep(ctx context.Context, runID common.RunID) error {
@@ -228,6 +232,13 @@ func (o *RuntimeOrchestrator) BlockOnDecision(ctx context.Context, runID common.
 	if err != nil {
 		return err
 	}
+	return o.blockOnDecision(ctx, r, nil, ticketID)
+}
+
+func (o *RuntimeOrchestrator) blockOnDecision(ctx context.Context, r *runModel.Run, workspace *workspaceModel.Workspace, ticketID common.TicketID) error {
+	if r == nil || r.ID == "" || ticketID == "" {
+		return common.ErrInvalidArgument
+	}
 	if r.State != common.RunStateCreated && r.State != common.RunStateRunning {
 		return common.ErrConflict
 	}
@@ -241,7 +252,7 @@ func (o *RuntimeOrchestrator) BlockOnDecision(ctx context.Context, runID common.
 	if err := o.publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
-	return o.syncWorkspaceForActiveRun(ctx, r, common.WorkspaceStateWaitingDecision)
+	return o.syncWorkspaceForActiveRunWithWorkspace(ctx, r, common.WorkspaceStateWaitingDecision, workspace)
 }
 
 func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.RunID, approvalID common.ApprovalID) error {
@@ -251,6 +262,13 @@ func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.
 	r, err := o.runs.Get(ctx, runID)
 	if err != nil {
 		return err
+	}
+	return o.blockOnApproval(ctx, r, nil, approvalID)
+}
+
+func (o *RuntimeOrchestrator) blockOnApproval(ctx context.Context, r *runModel.Run, workspace *workspaceModel.Workspace, approvalID common.ApprovalID) error {
+	if r == nil || r.ID == "" || approvalID == "" {
+		return common.ErrInvalidArgument
 	}
 	if r.State != common.RunStateCreated && r.State != common.RunStateRunning {
 		return common.ErrConflict
@@ -265,7 +283,7 @@ func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.
 	if err := o.publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
-	return o.syncWorkspaceForActiveRun(ctx, r, common.WorkspaceStateBlocked)
+	return o.syncWorkspaceForActiveRunWithWorkspace(ctx, r, common.WorkspaceStateBlocked, workspace)
 }
 
 func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID) error {
@@ -487,6 +505,51 @@ func (o *RuntimeOrchestrator) ValidateRun(ctx context.Context, runID common.RunI
 	return o.syncWorkspaceForActiveRun(ctx, r, common.WorkspaceStateValidating)
 }
 
+func (o *RuntimeOrchestrator) validateAndCompleteRun(ctx context.Context, run *runModel.Run, currentStepID common.StepID) error {
+	return o.validateAndCompleteRunWithWorkspace(ctx, run, currentStepID, nil)
+}
+
+func (o *RuntimeOrchestrator) validateAndCompleteRunWithWorkspace(ctx context.Context, run *runModel.Run, currentStepID common.StepID, workspace *workspaceModel.Workspace) error {
+	if run == nil || run.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if run.State != common.RunStateRunning {
+		return common.ErrConflict
+	}
+	run.State = common.RunStateValidating
+	run.FailureReason = ""
+	if err := o.runs.Update(ctx, run); err != nil {
+		return err
+	}
+	if err := o.publishRunStateChangedAtStep(ctx, run, currentStepID); err != nil {
+		return err
+	}
+	workspace, err := o.syncWorkspaceForActiveRunStateWithWorkspace(ctx, run, common.WorkspaceStateValidating, workspace)
+	if err != nil {
+		return err
+	}
+	if err := o.publishWorkspaceStateChanged(ctx, workspace, run.ID); err != nil {
+		return err
+	}
+
+	run.State = common.RunStateCompleted
+	run.BlockingTicketID = ""
+	run.BlockingApprovalID = ""
+	run.FailureReason = ""
+	if err := o.runs.Update(ctx, run); err != nil {
+		return err
+	}
+	if err := o.publishRunStateChangedAtStep(ctx, run, currentStepID); err != nil {
+		return err
+	}
+	workspace.ActiveRunID = ""
+	workspace.State = common.WorkspaceStateCompleted
+	if err := o.workspaces.Update(ctx, workspace); err != nil {
+		return err
+	}
+	return o.publishWorkspaceStateChanged(ctx, workspace, run.ID)
+}
+
 func (o *RuntimeOrchestrator) CancelRun(ctx context.Context, runID common.RunID) error {
 	if runID == "" {
 		return common.ErrInvalidArgument
@@ -554,28 +617,54 @@ func (o *RuntimeOrchestrator) releaseWorkspaceForTerminalRun(ctx context.Context
 }
 
 func (o *RuntimeOrchestrator) syncWorkspaceForActiveRun(ctx context.Context, run *runModel.Run, state common.WorkspaceState) error {
-	if run == nil {
-		return common.ErrInvalidArgument
-	}
-	ws, err := o.workspaces.Get(ctx, run.WorkspaceID)
+	ws, err := o.syncWorkspaceForActiveRunState(ctx, run, state)
 	if err != nil {
 		return err
+	}
+	return o.publishWorkspaceStateChanged(ctx, ws, run.ID)
+}
+
+func (o *RuntimeOrchestrator) syncWorkspaceForActiveRunWithWorkspace(ctx context.Context, run *runModel.Run, state common.WorkspaceState, workspace *workspaceModel.Workspace) error {
+	ws, err := o.syncWorkspaceForActiveRunStateWithWorkspace(ctx, run, state, workspace)
+	if err != nil {
+		return err
+	}
+	return o.publishWorkspaceStateChanged(ctx, ws, run.ID)
+}
+
+func (o *RuntimeOrchestrator) syncWorkspaceForActiveRunState(ctx context.Context, run *runModel.Run, state common.WorkspaceState) (*workspaceModel.Workspace, error) {
+	return o.syncWorkspaceForActiveRunStateWithWorkspace(ctx, run, state, nil)
+}
+
+func (o *RuntimeOrchestrator) syncWorkspaceForActiveRunStateWithWorkspace(ctx context.Context, run *runModel.Run, state common.WorkspaceState, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {
+	if run == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	ws := workspace
+	if ws == nil {
+		var err error
+		ws, err = o.workspaces.Get(ctx, run.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+	} else if ws.ID != run.WorkspaceID {
+		return nil, common.ErrConflict
 	}
 	if ws.ActiveRunID != "" && ws.ActiveRunID != run.ID {
 		activeRun, err := o.runs.Get(ctx, ws.ActiveRunID)
 		if err != nil && !errors.Is(err, common.ErrNotFound) {
-			return err
+			return nil, err
 		}
 		if activeRun != nil && activeRun.WorkspaceID == ws.ID && !isTerminalRunState(activeRun.State) {
-			return common.ErrConflict
+			return nil, common.ErrConflict
 		}
 	}
 	ws.ActiveRunID = run.ID
 	ws.State = state
 	if err := o.workspaces.Update(ctx, ws); err != nil {
-		return err
+		return nil, err
 	}
-	return o.publishWorkspaceStateChanged(ctx, ws, run.ID)
+	return ws, nil
 }
 
 func (o *RuntimeOrchestrator) canTerminalRunReleaseWorkspace(ctx context.Context, workspace *workspaceModel.Workspace, run *runModel.Run) (bool, error) {
@@ -640,7 +729,11 @@ func canCloseRunAs(current common.RunState, target common.RunState) bool {
 }
 
 func (o *RuntimeOrchestrator) publishRunStateChanged(ctx context.Context, run *runModel.Run) error {
-	if err := o.recordRunCheckpoint(ctx, run); err != nil {
+	return o.publishRunStateChangedAtStep(ctx, run, "")
+}
+
+func (o *RuntimeOrchestrator) publishRunStateChangedAtStep(ctx context.Context, run *runModel.Run, currentStepID common.StepID) error {
+	if err := o.recordRunCheckpointAtStep(ctx, run, currentStepID); err != nil {
 		return err
 	}
 	if o.eventHub == nil || run == nil {
@@ -701,9 +794,11 @@ func (o *RuntimeOrchestrator) dispatchStep(
 			return err
 		}
 	}
-	if err := o.enrichLLMStepInputContext(ctx, run, step); err != nil {
+	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
+	if err != nil {
 		return err
 	}
+	o.enrichLLMStepInputContext(ctx, run, step, workspace)
 	if err := o.publishStepState(ctx, run, step, events.TopicStepDispatched); err != nil {
 		return err
 	}
@@ -715,10 +810,6 @@ func (o *RuntimeOrchestrator) dispatchStep(
 		return err
 	}
 
-	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
-	if err != nil {
-		return err
-	}
 	result, err := o.runtime.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
 		WorkspaceID:               run.WorkspaceID,
 		WorkspaceWorkingDirectory: workspace.WorkingDirectory,
@@ -731,7 +822,7 @@ func (o *RuntimeOrchestrator) dispatchStep(
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, result.Output, "runtime step failed", err)
 	}
 	output := result.Output
-	if err := o.applyRuntimePatches(ctx, run, step, toolCall, output); err != nil {
+	if err := o.applyRuntimePatches(ctx, run, step, toolCall, output, workspace.WorkingDirectory); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch application failed", err)
 	}
 	memoryRefs, err := o.recordMemoryWrites(ctx, run, step, output)
@@ -773,7 +864,7 @@ func (o *RuntimeOrchestrator) dispatchStep(
 		if err := o.createDecisionTicket(ctx, run, step, decisionSpec); err != nil {
 			return err
 		}
-		return o.BlockOnDecision(ctx, run.ID, ticketID)
+		return o.blockOnDecision(ctx, run, workspace, ticketID)
 	}
 	if reason, approvalID := approvalBlockSpec(output); reason != "" {
 		if nextStepID == "" && !o.hasGraphContinuation(ctx, run, step) {
@@ -785,7 +876,7 @@ func (o *RuntimeOrchestrator) dispatchStep(
 		if err := o.createApproval(ctx, run, step, approvalID, reason); err != nil {
 			return err
 		}
-		return o.BlockOnApproval(ctx, run.ID, approvalID)
+		return o.blockOnApproval(ctx, run, workspace, approvalID)
 	}
 	if graphBatchStep(step) {
 		return nil
@@ -805,16 +896,13 @@ func (o *RuntimeOrchestrator) dispatchStep(
 	if err := completionDoDAssessmentError(run, output); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
-	if err := o.recordRunResultFromDoDAssessment(ctx, run, step, output); err != nil {
+	if err := o.recordRunResultFromDoDAssessment(ctx, run, step, output, workspace); err != nil {
 		return err
 	}
 	if err := o.recordSkillFeedbackMemory(ctx, run, step, output); err != nil {
 		return err
 	}
-	if err := o.ValidateRun(ctx, run.ID); err != nil {
-		return err
-	}
-	return o.CompleteRun(ctx, run.ID)
+	return o.validateAndCompleteRunWithWorkspace(ctx, run, step.ID, workspace)
 }
 
 type runtimePatchRequest struct {
@@ -871,6 +959,7 @@ func (o *RuntimeOrchestrator) applyRuntimePatches(
 	step *runModel.Step,
 	toolCall *runModel.ToolCall,
 	output map[string]any,
+	workingDirectory string,
 ) error {
 	requests, err := runtimePatchRequests(output)
 	if err != nil {
@@ -881,10 +970,6 @@ func (o *RuntimeOrchestrator) applyRuntimePatches(
 	}
 	if o.evidence.Patches == nil {
 		return common.ErrInvalidArgument
-	}
-	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
-	if err != nil {
-		return err
 	}
 	for idx, request := range requests {
 		patchID := common.PatchID(fmt.Sprintf("%s/patch/%d", step.ID, idx+1))
@@ -908,7 +993,7 @@ func (o *RuntimeOrchestrator) applyRuntimePatches(
 				return err
 			}
 		}
-		if err := applyWorkspacePatch(workspace.WorkingDirectory, request); err != nil {
+		if err := applyWorkspacePatch(workingDirectory, request); err != nil {
 			patch.State = common.PatchStateFailed
 			_ = o.evidence.Patches.Update(ctx, patch)
 			return err
@@ -1780,7 +1865,11 @@ func (o *RuntimeOrchestrator) workspaceFileManifest(ctx context.Context, run *ru
 	if err != nil || workspace == nil {
 		return nil
 	}
-	files, err := workspaceManifestFiles(workspace.WorkingDirectory)
+	return workspaceFileManifestFromDirectory(workspace.WorkingDirectory)
+}
+
+func workspaceFileManifestFromDirectory(workingDirectory string) []map[string]any {
+	files, err := workspaceManifestFiles(workingDirectory)
 	if err != nil || len(files) == 0 {
 		return nil
 	}
@@ -1850,6 +1939,7 @@ func (o *RuntimeOrchestrator) recordRunResultFromDoDAssessment(
 	run *runModel.Run,
 	step *runModel.Step,
 	output map[string]any,
+	workspace *workspaceModel.Workspace,
 ) error {
 	if run == nil || step == nil || o.evidence.Results == nil || !requiresDoDAssessmentCompletionGate(run) {
 		return nil
@@ -1868,7 +1958,7 @@ func (o *RuntimeOrchestrator) recordRunResultFromDoDAssessment(
 	if err != nil {
 		return err
 	}
-	manifestRef, err := o.recordWorkspaceDeliverableManifestArtifact(ctx, run, step, assessment, now)
+	manifestRef, err := o.recordWorkspaceDeliverableManifestArtifact(ctx, run, step, assessment, now, workspace)
 	if err != nil {
 		return err
 	}
@@ -2060,11 +2150,12 @@ func (o *RuntimeOrchestrator) recordWorkspaceDeliverableManifestArtifact(
 	step *runModel.Step,
 	assessment map[string]any,
 	now string,
+	workspace *workspaceModel.Workspace,
 ) (common.ArtifactID, error) {
 	if run == nil || step == nil || o.evidence.Artifacts == nil {
 		return "", nil
 	}
-	manifest := o.workspaceDeliverableManifestContent(ctx, run, step, assessment)
+	manifest := o.workspaceDeliverableManifestContent(ctx, run, step, assessment, workspace)
 	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
 	item := &resultmodel.Artifact{
 		ID:           common.ArtifactID(fmt.Sprintf("%s/artifact/deliverable-manifest", run.ID)),
@@ -2316,6 +2407,7 @@ func (o *RuntimeOrchestrator) workspaceDeliverableManifestContent(
 	run *runModel.Run,
 	step *runModel.Step,
 	assessment map[string]any,
+	workspace *workspaceModel.Workspace,
 ) string {
 	var builder strings.Builder
 	builder.WriteString("# Workspace Deliverable Manifest\n\n")
@@ -2328,7 +2420,10 @@ func (o *RuntimeOrchestrator) workspaceDeliverableManifestContent(
 	}
 	builder.WriteString("\n## Deliverable Files\n\n")
 	workingDirectory := ""
-	if o != nil && o.workspaces != nil {
+	if workspace != nil {
+		workingDirectory = strings.TrimSpace(workspace.WorkingDirectory)
+	}
+	if workingDirectory == "" && o != nil && o.workspaces != nil {
 		if workspace, err := o.workspaces.Get(ctx, run.WorkspaceID); err == nil && workspace != nil {
 			workingDirectory = strings.TrimSpace(workspace.WorkingDirectory)
 		}
@@ -2631,10 +2726,16 @@ func floatFromValue(value any) float64 {
 }
 
 func (o *RuntimeOrchestrator) recordRunCheckpoint(ctx context.Context, run *runModel.Run) error {
+	return o.recordRunCheckpointAtStep(ctx, run, "")
+}
+
+func (o *RuntimeOrchestrator) recordRunCheckpointAtStep(ctx context.Context, run *runModel.Run, currentStepID common.StepID) error {
 	if run == nil || o.evidence.RuntimeCheckpoints == nil {
 		return nil
 	}
-	currentStepID := o.latestStepID(ctx, run.ID)
+	if currentStepID == "" {
+		currentStepID = o.latestStepID(ctx, run.ID)
+	}
 	checkpointType := common.CheckpointTypeRunState
 	if run.BlockingTicketID != "" || run.BlockingApprovalID != "" {
 		checkpointType = common.CheckpointTypeBlocked
@@ -2793,7 +2894,8 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 		return nil, common.ErrInvalidArgument
 	}
 	if last.State == common.StepStateCompleted {
-		if specs := o.readyGraphStepSpecs(ctx, run, last); len(specs) > 0 {
+		specs, steps := o.readyGraphStepSpecsWithSteps(ctx, run, last)
+		if len(specs) > 0 {
 			return specs, nil
 		}
 		nextStepID, nextKind := nextStepSpec(last.Output)
@@ -2809,10 +2911,16 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			}}, nil
 		}
 		if shouldDispatchGraphFollowUp(run, last, last.Output) {
+			var input map[string]any
+			if len(steps) > 0 {
+				input = o.graphFollowUpStepInputFromSteps(run, last, steps)
+			} else {
+				input = o.graphFollowUpStepInput(ctx, run, last)
+			}
 			return []stepDispatchSpec{{
 				ID:    graphFollowUpStepID(run.ID, last),
 				Kind:  initialStepKind(run),
-				Input: o.graphFollowUpStepInput(ctx, run, last),
+				Input: input,
 			}}, nil
 		}
 		if shouldDispatchLLMCompletionFollowUp(run, last, last.Output) {
@@ -2995,17 +3103,36 @@ func (o *RuntimeOrchestrator) readyGraphStepSpecs(
 	run *runModel.Run,
 	last *runModel.Step,
 ) []stepDispatchSpec {
+	specs, _ := o.readyGraphStepSpecsWithSteps(ctx, run, last)
+	return specs
+}
+
+func (o *RuntimeOrchestrator) readyGraphStepSpecsWithSteps(
+	ctx context.Context,
+	run *runModel.Run,
+	last *runModel.Step,
+) ([]stepDispatchSpec, []*runModel.Step) {
 	if o == nil || run == nil || last == nil {
-		return nil
+		return nil, nil
 	}
 	graph, ok := runtimeGraphSpecFromStep(last)
 	if !ok || len(graph.Nodes) == 0 {
-		return nil
+		return nil, nil
 	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
+	return o.readyGraphStepSpecsFromSteps(ctx, run, last, graph, steps), steps
+}
+
+func (o *RuntimeOrchestrator) readyGraphStepSpecsFromSteps(
+	ctx context.Context,
+	run *runModel.Run,
+	last *runModel.Step,
+	graph runtimemodel.BlockExecutionGraph,
+	steps []*runModel.Step,
+) []stepDispatchSpec {
 	rootStepID := graphDispatchRootStepID(last)
 	completed := completedGraphNodes(steps, rootStepID)
 	started := startedGraphNodes(steps, rootStepID)
@@ -3088,11 +3215,13 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatch(ctx context.Context, run *r
 	if last == nil {
 		return common.ErrConflict
 	}
-	if nextSpecs := o.readyGraphStepSpecs(ctx, currentRun, last); len(nextSpecs) > 0 {
-		return o.dispatchGraphStepBatch(ctx, currentRun, nextSpecs)
+	if graph, ok := runtimeGraphSpecFromStep(last); ok {
+		if nextSpecs := o.readyGraphStepSpecsFromSteps(ctx, currentRun, last, graph, steps); len(nextSpecs) > 0 {
+			return o.dispatchGraphStepBatch(ctx, currentRun, nextSpecs)
+		}
 	}
 	if shouldDispatchGraphFollowUp(currentRun, last, last.Output) {
-		return o.dispatchStep(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphFollowUpStepInput(ctx, currentRun, last))
+		return o.dispatchStep(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphFollowUpStepInputFromSteps(currentRun, last, steps))
 	}
 	if shouldDispatchLLMCompletionFollowUp(currentRun, last, last.Output) {
 		return o.dispatchStep(ctx, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInput(currentRun, last))
@@ -3103,16 +3232,13 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatch(ctx context.Context, run *r
 		_ = o.steps.Update(ctx, last)
 		return o.FailRun(ctx, currentRun.ID, err.Error())
 	}
-	if err := o.recordRunResultFromDoDAssessment(ctx, currentRun, last, last.Output); err != nil {
+	if err := o.recordRunResultFromDoDAssessment(ctx, currentRun, last, last.Output, nil); err != nil {
 		return err
 	}
 	if err := o.recordSkillFeedbackMemory(ctx, currentRun, last, last.Output); err != nil {
 		return err
 	}
-	if err := o.ValidateRun(ctx, currentRun.ID); err != nil {
-		return err
-	}
-	return o.CompleteRun(ctx, currentRun.ID)
+	return o.validateAndCompleteRun(ctx, currentRun, last.ID)
 }
 
 func runtimeGraphSpecFromStep(step *runModel.Step) (runtimemodel.BlockExecutionGraph, bool) {
@@ -3509,6 +3635,16 @@ func graphFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID 
 func (o *RuntimeOrchestrator) graphFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
 	input := graphFollowUpStepInput(run, step)
 	evidence := o.completedGraphEvidence(ctx, run, step)
+	return enrichGraphFollowUpInputWithEvidence(input, evidence)
+}
+
+func (o *RuntimeOrchestrator) graphFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step) map[string]any {
+	input := graphFollowUpStepInput(run, step)
+	evidence := o.completedGraphEvidenceFromSteps(step, steps)
+	return enrichGraphFollowUpInputWithEvidence(input, evidence)
+}
+
+func enrichGraphFollowUpInputWithEvidence(input map[string]any, evidence []map[string]any) map[string]any {
 	if len(evidence) == 0 {
 		return input
 	}
@@ -3554,12 +3690,16 @@ func (o *RuntimeOrchestrator) completedGraphEvidence(ctx context.Context, run *r
 	if o == nil || run == nil || anchor == nil {
 		return nil
 	}
-	graph, ok := runtimeGraphSpecFromStep(anchor)
-	if !ok || len(graph.Nodes) == 0 {
-		return nil
-	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil {
+		return nil
+	}
+	return o.completedGraphEvidenceFromSteps(anchor, steps)
+}
+
+func (o *RuntimeOrchestrator) completedGraphEvidenceFromSteps(anchor *runModel.Step, steps []*runModel.Step) []map[string]any {
+	graph, ok := runtimeGraphSpecFromStep(anchor)
+	if !ok || len(graph.Nodes) == 0 {
 		return nil
 	}
 	completedByNode := map[string]*runModel.Step{}

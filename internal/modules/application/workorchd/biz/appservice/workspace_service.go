@@ -128,7 +128,7 @@ func ReadWorkspaceWithSession(ctx context.Context, session *RuntimeSession, work
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	snapshot, err := readWorkspaceSnapshot(ctx, deps, common.WorkspaceID(workspaceID))
+	snapshot, err := readWorkspaceSnapshot(ctx, deps, common.WorkspaceID(workspaceID), nil)
 	if err != nil {
 		return Workspace{}, err
 	}

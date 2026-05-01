@@ -35,6 +35,8 @@ ARTIFACT_DIR = Path(os.environ.get("WORKORCH_LOAD_ARTIFACT_DIR", tempfile.mkdtem
 MCP_ENDPOINT_ROOT = Path(os.environ.get("WORKORCH_MCP_ENDPOINT_DIR", ".workorch-data/system/mcp-endpoints"))
 KEEP_ARTIFACTS = os.environ.get("WORKORCH_LOAD_KEEP_ARTIFACTS", "1") == "1"
 CURL_MAX_TIME = os.environ.get("WORKORCH_LOAD_CURL_MAX_TIME", "300")
+POLL_INTERVAL_SECONDS = float(os.environ.get("WORKORCH_LOAD_POLL_INTERVAL_SECONDS", "1"))
+STATUS_WAIT_TIMEOUT_SECONDS = float(os.environ.get("WORKORCH_LOAD_STATUS_WAIT_TIMEOUT_SECONDS", "0"))
 COUNTRY = os.environ.get("WORKORCH_LOAD_COUNTRY", "中国")
 PROVINCE = os.environ.get("WORKORCH_LOAD_PROVINCE", "浙江")
 CITY = os.environ.get("WORKORCH_LOAD_CITY", "杭州")
@@ -51,6 +53,10 @@ if MCP_SESSION_POLICY not in {"transient", "long_lived"}:
     raise SystemExit(f"WORKORCH_LOAD_MCP_SESSION_POLICY must be transient or long_lived, got {MCP_SESSION_POLICY!r}")
 if MIN_SUCCESS_RATE < 0 or MIN_SUCCESS_RATE > 1:
     raise SystemExit(f"WORKORCH_LOAD_MIN_SUCCESS_RATE must be between 0 and 1, got {MIN_SUCCESS_RATE!r}")
+if POLL_INTERVAL_SECONDS <= 0:
+    raise SystemExit(f"WORKORCH_LOAD_POLL_INTERVAL_SECONDS must be positive, got {POLL_INTERVAL_SECONDS!r}")
+if STATUS_WAIT_TIMEOUT_SECONDS < 0:
+    raise SystemExit(f"WORKORCH_LOAD_STATUS_WAIT_TIMEOUT_SECONDS must not be negative, got {STATUS_WAIT_TIMEOUT_SECONDS!r}")
 
 
 class HTTPError(RuntimeError):
@@ -394,11 +400,12 @@ def extract_run_status(response: dict[str, Any]) -> dict[str, Any]:
     return response.get("status") or response.get("run") or nested(response, "activation.run", {}) or {}
 
 
-def wait_run_state(run_id: str, expected_state: str, *, timeout_seconds: float = 180, interval_seconds: float = 1) -> dict[str, Any]:
+def wait_run_state(run_id: str, expected_state: str, *, timeout_seconds: float = 180, interval_seconds: float = POLL_INTERVAL_SECONDS) -> dict[str, Any]:
     return wait_run_status(
         run_id,
         lambda status: status.get("state") == expected_state,
         f"state {expected_state}",
+        wait_state=expected_state,
         timeout_seconds=timeout_seconds,
         interval_seconds=interval_seconds,
     )
@@ -409,13 +416,21 @@ def wait_run_status(
     predicate,
     description: str,
     *,
+    wait_state: str = "",
     timeout_seconds: float = 180,
-    interval_seconds: float = 1,
+    interval_seconds: float = POLL_INTERVAL_SECONDS,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
     last_status: dict[str, Any] = {}
     while time.monotonic() <= deadline:
-        response = run_curl("GET", f"/api/v1/workorch/runs/{url_quote(run_id)}/status")
+        path = f"/api/v1/workorch/runs/{url_quote(run_id)}/status"
+        if wait_state and STATUS_WAIT_TIMEOUT_SECONDS > 0:
+            path += (
+                f"?waitState={url_quote(wait_state)}"
+                f"&waitTimeoutMillis={int(STATUS_WAIT_TIMEOUT_SECONDS * 1000)}"
+                f"&waitIntervalMillis={max(1, int(interval_seconds * 1000))}"
+            )
+        response = run_curl("GET", path)
         last_status = extract_run_status(response)
         if predicate(last_status):
             return response
@@ -831,6 +846,7 @@ def execute_workspace(seq: int, provider_id: str, mcp_server_id: str) -> Workspa
                 and bool(status.get("blockingTicketId"))
                 and status.get("blockingTicketId") != ticket1,
                 f"state blocked_on_decision with a new blockingTicketId after {ticket1}",
+                wait_state="blocked_on_decision",
             )
         write_json(case_dir / "decision2-status.json", decision2_status)
         run2 = extract_run_status(decision2_status)
@@ -861,6 +877,7 @@ def execute_workspace(seq: int, provider_id: str, mcp_server_id: str) -> Workspa
                 result.run_id,
                 lambda status: status.get("state") == "blocked_on_approval" and bool(status.get("blockingApprovalId")),
                 "state blocked_on_approval with blockingApprovalId",
+                wait_state="blocked_on_approval",
             )
         write_json(case_dir / "approval-status.json", approval_status)
         run3 = extract_run_status(approval_status)
@@ -1035,6 +1052,8 @@ def build_summary(
         "baseUrl": BASE_URL,
         "llmMode": LLM_MODE,
         "mcpSessionPolicy": MCP_SESSION_POLICY,
+        "pollIntervalSeconds": POLL_INTERVAL_SECONDS,
+        "statusWaitTimeoutSeconds": STATUS_WAIT_TIMEOUT_SECONDS,
         "total": TOTAL,
         "concurrency": CONCURRENCY,
         "serverMaxConcurrentRuns": server_max_concurrent_runs,
@@ -1076,6 +1095,8 @@ def write_markdown_report(summary: dict[str, Any]) -> None:
         f"- baseUrl: `{summary['baseUrl']}`",
         f"- llmMode: `{summary['llmMode']}`",
         f"- mcpSessionPolicy: `{summary['mcpSessionPolicy']}`",
+        f"- pollIntervalSeconds: `{summary['pollIntervalSeconds']}`",
+        f"- statusWaitTimeoutSeconds: `{summary['statusWaitTimeoutSeconds']}`",
         f"- total: `{summary['total']}`",
         f"- concurrency: `{summary['concurrency']}`",
         f"- serverMaxConcurrentRuns: `{summary['serverMaxConcurrentRuns']}`",

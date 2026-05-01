@@ -895,5 +895,5 @@ func readWorkspaceSnapshotFromExports(ctx context.Context, session *RuntimeSessi
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
-	return readWorkspaceSnapshot(ctx, deps, workspaceID)
+	return readWorkspaceSnapshot(ctx, deps, workspaceID, nil)
 }

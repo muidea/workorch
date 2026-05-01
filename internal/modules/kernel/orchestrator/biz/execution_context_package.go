@@ -7,6 +7,7 @@ import (
 
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -15,21 +16,17 @@ const (
 	executionContextPackageVersion      = "workorch.execution_context.v1"
 )
 
-func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
+func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run *runModel.Run, step *runModel.Step, workspace *workspaceModel.Workspace) {
 	if o == nil || run == nil || step == nil || step.Kind != llmWorkspaceExecutionStepKind {
-		return nil
+		return
 	}
 	if step.Input == nil {
 		step.Input = map[string]any{}
 	}
-	step.Input[stepInputKeyExecutionContextPackage] = o.runExecutionContextPackage(ctx, run, step)
-	if o.steps == nil {
-		return nil
-	}
-	return o.steps.Update(ctx, step)
+	step.Input[stepInputKeyExecutionContextPackage] = o.runExecutionContextPackage(ctx, run, step, workspace)
 }
 
-func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
+func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, run *runModel.Run, step *runModel.Step, workspace *workspaceModel.Workspace) map[string]any {
 	if run == nil || step == nil {
 		return nil
 	}
@@ -44,7 +41,7 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		"stepId":      string(step.ID),
 		"stage":       stringFromMap(step.Input, stepInputKeySoulStage),
 	}
-	if manifest := o.workspaceFileManifest(ctx, run); len(manifest) > 0 {
+	if manifest := o.executionContextWorkspaceFileManifest(ctx, run, step, workspace); len(manifest) > 0 {
 		ret["workspaceFileManifest"] = manifest
 	}
 	if result := o.latestAcceptedResultContext(ctx, run); result != nil {
@@ -63,6 +60,18 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		ret["governanceHistory"] = limitedMapSlice(governanceHistory, 6)
 	}
 	return ret
+}
+
+func (o *RuntimeOrchestrator) executionContextWorkspaceFileManifest(ctx context.Context, run *runModel.Run, step *runModel.Step, workspace *workspaceModel.Workspace) []map[string]any {
+	if step != nil {
+		if manifest := mapSliceFromValue(step.Input[stepInputKeyWorkspaceFileManifest]); len(manifest) > 0 {
+			return manifest
+		}
+	}
+	if workspace != nil {
+		return workspaceFileManifestFromDirectory(workspace.WorkingDirectory)
+	}
+	return o.workspaceFileManifest(ctx, run)
 }
 
 func (o *RuntimeOrchestrator) latestAcceptedResultContext(ctx context.Context, run *runModel.Run) map[string]any {

@@ -1143,6 +1143,56 @@ func TestReadWorkspaceSnapshotProjectsWorkspaceStateFromRun(t *testing.T) {
 	}
 }
 
+func TestReadWorkspaceSnapshotWithRunSnapshotReusesProjectionSections(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-cached-run-projection")
+	runID := common.RunID("run-cached-run-projection")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "cached run projection",
+		State:       common.WorkspaceStateCompleted,
+		ActiveRunID: runID,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateCompleted,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	cached := RunSnapshot{
+		Workspace: Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateCompleted)},
+		Run:       Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateCompleted)},
+		TaskProgress: TaskProgress{
+			WorkspaceID: string(workspaceID),
+			RunID:       string(runID),
+			State:       string(common.RunStateCompleted),
+			Summary:     "cached run task progress",
+		},
+		TaskDecompositions: []TaskDecomposition{{ID: "cached-decomposition", Summary: "cached decomposition"}},
+		ExecutionSections:  []ExecutionSection{{ID: "cached-section", Title: "cached section"}},
+	}
+	snapshot, err := ReadWorkspaceSnapshotWithRunSnapshotWithSession(ctx, session.Borrow(), string(workspaceID), cached)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceSnapshotWithRunSnapshotWithSession: %v", err)
+	}
+	if snapshot.TaskProgress.Summary != cached.TaskProgress.Summary {
+		t.Fatalf("task progress summary = %q, want cached summary", snapshot.TaskProgress.Summary)
+	}
+	if len(snapshot.TaskDecompositions) != 1 || snapshot.TaskDecompositions[0].ID != "cached-decomposition" {
+		t.Fatalf("task decompositions = %+v, want cached decomposition", snapshot.TaskDecompositions)
+	}
+	if len(snapshot.ExecutionSections) != 1 || snapshot.ExecutionSections[0].ID != "cached-section" {
+		t.Fatalf("execution sections = %+v, want cached section", snapshot.ExecutionSections)
+	}
+}
+
 func TestReadWorkspaceSnapshotProjectsAcceptedResultOverStaleTerminalActiveRun(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)

@@ -77,6 +77,102 @@ func (a *requestCapturingRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, r
 	return runtimemodel.StepExecutionResult{Output: a.output}, nil
 }
 
+type countingStepRepository struct {
+	inner       *memory.StepRepository
+	listCount   atomic.Int64
+	updateCount atomic.Int64
+}
+
+func newCountingStepRepository() *countingStepRepository {
+	return &countingStepRepository{inner: memory.NewStepRepository()}
+}
+
+func (r *countingStepRepository) Create(ctx context.Context, item *runmodel.Step) error {
+	return r.inner.Create(ctx, item)
+}
+
+func (r *countingStepRepository) Get(ctx context.Context, id common.StepID) (*runmodel.Step, error) {
+	return r.inner.Get(ctx, id)
+}
+
+func (r *countingStepRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.Step, error) {
+	r.listCount.Add(1)
+	return r.inner.ListByRun(ctx, runID)
+}
+
+func (r *countingStepRepository) Update(ctx context.Context, item *runmodel.Step) error {
+	r.updateCount.Add(1)
+	return r.inner.Update(ctx, item)
+}
+
+func (r *countingStepRepository) Delete(ctx context.Context, id common.StepID) error {
+	return r.inner.Delete(ctx, id)
+}
+
+type countingRunRepository struct {
+	inner    *memory.RunRepository
+	getCount atomic.Int64
+}
+
+func newCountingRunRepository() *countingRunRepository {
+	return &countingRunRepository{inner: memory.NewRunRepository()}
+}
+
+func (r *countingRunRepository) Create(ctx context.Context, item *runmodel.Run) error {
+	return r.inner.Create(ctx, item)
+}
+
+func (r *countingRunRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
+	r.getCount.Add(1)
+	return r.inner.Get(ctx, id)
+}
+
+func (r *countingRunRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
+	return r.inner.List(ctx)
+}
+
+func (r *countingRunRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
+	return r.inner.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r *countingRunRepository) Update(ctx context.Context, item *runmodel.Run) error {
+	return r.inner.Update(ctx, item)
+}
+
+func (r *countingRunRepository) Delete(ctx context.Context, id common.RunID) error {
+	return r.inner.Delete(ctx, id)
+}
+
+type countingWorkspaceRepository struct {
+	inner    *memory.WorkspaceRepository
+	getCount atomic.Int64
+}
+
+func newCountingWorkspaceRepository() *countingWorkspaceRepository {
+	return &countingWorkspaceRepository{inner: memory.NewWorkspaceRepository()}
+}
+
+func (r *countingWorkspaceRepository) Create(ctx context.Context, item *workspacemodel.Workspace) error {
+	return r.inner.Create(ctx, item)
+}
+
+func (r *countingWorkspaceRepository) Get(ctx context.Context, id common.WorkspaceID) (*workspacemodel.Workspace, error) {
+	r.getCount.Add(1)
+	return r.inner.Get(ctx, id)
+}
+
+func (r *countingWorkspaceRepository) List(ctx context.Context) ([]*workspacemodel.Workspace, error) {
+	return r.inner.List(ctx)
+}
+
+func (r *countingWorkspaceRepository) Update(ctx context.Context, item *workspacemodel.Workspace) error {
+	return r.inner.Update(ctx, item)
+}
+
+func (r *countingWorkspaceRepository) Delete(ctx context.Context, id common.WorkspaceID) error {
+	return r.inner.Delete(ctx, id)
+}
+
 func newRuntimeAdapterRegistryForTest(defaultAdapter RuntimeAdapter) *RuntimeAdapterRegistry {
 	registry := NewRuntimeAdapterRegistry()
 	if defaultAdapter != nil {
@@ -1175,6 +1271,271 @@ func TestRuntimeOrchestrator_LLMInputIncludesExecutionContextPackage(t *testing.
 	}
 }
 
+func TestRuntimeOrchestrator_EnrichLLMStepInputContextDoesNotPersistIntermediateStep(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := newCountingStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-context-package-efficiency")
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: "ws-context-package-efficiency",
+		ExecutionContext: map[string]any{
+			"skills": []map[string]any{
+				{"id": "skill-efficiency", "name": "Efficiency Skill", "instruction": "Keep context available."},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/step-1"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{stepInputKeySoulStage: soulStageExecution},
+	}
+
+	orch.enrichLLMStepInputContext(ctx, run, step, nil)
+
+	if got := stepRepo.updateCount.Load(); got != 0 {
+		t.Fatalf("step update count = %d, want 0 redundant intermediate updates", got)
+	}
+	pkg := mapFromValue(step.Input[stepInputKeyExecutionContextPackage])
+	if pkg["version"] != executionContextPackageVersion {
+		t.Fatalf("executionContextPackage = %+v, want version %s", pkg, executionContextPackageVersion)
+	}
+	selected := mapFromValue(pkg["selectedContext"])
+	if skills := mapSliceFromValue(selected["skills"]); len(skills) != 1 || skills[0]["id"] != "skill-efficiency" {
+		t.Fatalf("selected skills = %+v, want injected skill context", selected["skills"])
+	}
+}
+
+func TestRuntimeOrchestrator_ExecutionContextPackageReusesInputWorkspaceManifest(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{}
+	runID := common.RunID("run-context-package-manifest-reuse")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-context-package-manifest-reuse"}
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeyWorkspaceFileManifest: []map[string]any{
+				{"path": "README.md", "kind": "file", "size": float64(12)},
+			},
+		},
+	}
+
+	pkg := orch.runExecutionContextPackage(ctx, run, step, nil)
+
+	manifest := mapSliceFromValue(pkg["workspaceFileManifest"])
+	if len(manifest) != 1 || manifest[0]["path"] != "README.md" {
+		t.Fatalf("workspaceFileManifest = %+v, want manifest from step input", pkg["workspaceFileManifest"])
+	}
+}
+
+func TestRuntimeOrchestrator_ExecutionContextPackageReusesProvidedWorkspace(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := newCountingWorkspaceRepository()
+	workspaceID := common.WorkspaceID("ws-context-package-workspace-reuse")
+	workingDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workingDir, "README.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("seed workspace file: %v", err)
+	}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDir, State: common.WorkspaceStateRunning}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo}
+	runID := common.RunID("run-context-package-workspace-reuse")
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID}
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/step-1"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{stepInputKeySoulStage: soulStageExecution},
+	}
+
+	pkg := orch.runExecutionContextPackage(ctx, run, step, workspace)
+
+	if got := workspaceRepo.getCount.Load(); got != 0 {
+		t.Fatalf("workspace Get count = %d, want 0 when workspace is already provided", got)
+	}
+	manifest := mapSliceFromValue(pkg["workspaceFileManifest"])
+	if len(manifest) != 1 || manifest[0]["path"] != "README.md" {
+		t.Fatalf("workspaceFileManifest = %+v, want manifest from provided workspace", pkg["workspaceFileManifest"])
+	}
+}
+
+func TestRuntimeOrchestrator_ResultManifestReusesProvidedWorkspace(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := newCountingWorkspaceRepository()
+	workspaceID := common.WorkspaceID("ws-result-manifest-workspace-reuse")
+	workingDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workingDir, "README.md"), []byte("accepted"), 0o644); err != nil {
+		t.Fatalf("seed workspace file: %v", err)
+	}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDir, State: common.WorkspaceStateRunning}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	runID := common.RunID("run-result-manifest-workspace-reuse")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		GoalID:          "goal-result-manifest-workspace-reuse",
+		DoDID:           "dod-result-manifest-workspace-reuse",
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/validation"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+	}
+	orch := &RuntimeOrchestrator{
+		workspaces: workspaceRepo,
+		evidence: RuntimeEvidenceRepositories{
+			Results:   memory.NewResultRepository(),
+			Artifacts: memory.NewArtifactRepository(),
+		},
+	}
+
+	err := orch.recordRunResultFromDoDAssessment(ctx, run, step, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "accepted with reusable workspace",
+			"items": []map[string]any{
+				{"item": "workspace reused", "state": "satisfied", "evidenceRefs": []string{string(step.ID)}},
+			},
+		},
+	}, workspace)
+	if err != nil {
+		t.Fatalf("record result: %v", err)
+	}
+
+	if got := workspaceRepo.getCount.Load(); got != 0 {
+		t.Fatalf("workspace Get count = %d, want 0 when result manifest receives workspace", got)
+	}
+	artifacts, err := orch.evidence.Artifacts.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	}
+	if len(artifacts) != 2 {
+		t.Fatalf("artifacts = %+v, want result summary and deliverable manifest", artifacts)
+	}
+}
+
+func TestRuntimeOrchestrator_RunStateTransitionsReuseProvidedWorkspace(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := newCountingWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	workspaceID := common.WorkspaceID("ws-state-transition-workspace-reuse")
+	runID := common.RunID("run-state-transition-workspace-reuse")
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		runs:       runRepo,
+		workspaces: workspaceRepo,
+	}
+
+	if err := orch.blockOnDecision(ctx, run, workspace, common.TicketID("ticket-state-transition-workspace-reuse")); err != nil {
+		t.Fatalf("block on decision: %v", err)
+	}
+	if got := workspaceRepo.getCount.Load(); got != 0 {
+		t.Fatalf("workspace Get count after decision block = %d, want 0 when workspace is already provided", got)
+	}
+	if workspace.State != common.WorkspaceStateWaitingDecision {
+		t.Fatalf("workspace state = %s, want waiting decision", workspace.State)
+	}
+
+	run.State = common.RunStateRunning
+	run.BlockingTicketID = ""
+	workspace.State = common.WorkspaceStateRunning
+	if err := runRepo.Update(ctx, run); err != nil {
+		t.Fatalf("reset run: %v", err)
+	}
+	if err := workspaceRepo.Update(ctx, workspace); err != nil {
+		t.Fatalf("reset workspace: %v", err)
+	}
+	if err := orch.blockOnApproval(ctx, run, workspace, common.ApprovalID("approval-state-transition-workspace-reuse")); err != nil {
+		t.Fatalf("block on approval: %v", err)
+	}
+	if got := workspaceRepo.getCount.Load(); got != 0 {
+		t.Fatalf("workspace Get count after approval block = %d, want 0 when workspace is already provided", got)
+	}
+	if workspace.State != common.WorkspaceStateBlocked {
+		t.Fatalf("workspace state = %s, want blocked", workspace.State)
+	}
+}
+
+func TestRuntimeOrchestrator_ValidateCompleteReusesProvidedWorkspace(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := newCountingWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	workspaceID := common.WorkspaceID("ws-complete-workspace-reuse")
+	runID := common.RunID("run-complete-workspace-reuse")
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		runs:       runRepo,
+		workspaces: workspaceRepo,
+	}
+
+	if err := orch.validateAndCompleteRunWithWorkspace(ctx, run, common.StepID("run-complete-workspace-reuse/step-1"), workspace); err != nil {
+		t.Fatalf("validate and complete: %v", err)
+	}
+	if got := workspaceRepo.getCount.Load(); got != 0 {
+		t.Fatalf("workspace Get count = %d, want 0 when workspace is already provided", got)
+	}
+	if run.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s, want completed", run.State)
+	}
+	if workspace.State != common.WorkspaceStateCompleted || workspace.ActiveRunID != "" {
+		t.Fatalf("workspace = %+v, want completed and released", workspace)
+	}
+}
+
+func TestRuntimeOrchestrator_StartRunDispatchReusesLoadedRun(t *testing.T) {
+	ctx := context.Background()
+	runRepo := newCountingRunRepository()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	stepRepo := memory.NewStepRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "ok"}}
+	orch := NewRuntimeOrchestrator(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+	workspaceID := common.WorkspaceID("ws-start-run-loaded-run-reuse")
+	runID := common.RunID("run-start-run-loaded-run-reuse")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	if got := runRepo.getCount.Load(); got != 1 {
+		t.Fatalf("run Get count = %d, want only initial StartRun read", got)
+	}
+}
+
 func TestRuntimeOrchestrator_ExecutionContextPackageIncludesRecentFailureSummary(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -1219,7 +1580,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageIncludesRecentFailureSummary
 		RunID: runID,
 		Kind:  llmcommon.StepKindWorkspaceExecution,
 		Input: map[string]any{stepInputKeySoulStage: soulStageExecution},
-	})
+	}, nil)
 	failures := mapSliceFromValue(pkg["recentFailureSummary"])
 	if len(failures) != 1 || failures[0]["failureClass"] != failureClassShellCommand || failures[0]["failureSignature"] == "" {
 		t.Fatalf("recentFailureSummary = %+v, want shell failure signature", failures)
@@ -3021,6 +3382,64 @@ func TestRuntimeOrchestrator_GraphFollowUpIncludesAllCompletedParallelEvidence(t
 	}
 	if !reflect.DeepEqual(followUpInput["graphCompletedNodes"], []string{"cpu", "memory"}) {
 		t.Fatalf("graphCompletedNodes = %#v, want both completed nodes", followUpInput["graphCompletedNodes"])
+	}
+}
+
+func TestRuntimeOrchestrator_GraphFollowUpReusesLoadedStepsForEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := newCountingStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-graph-follow-up-efficiency")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-graph-follow-up-efficiency"}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "cpu", Kind: "graph/mock"},
+		{ID: "memory", Kind: "graph/mock"},
+	}}
+	anchor := &runmodel.Step{
+		ID:     common.StepID(string(runID) + "/step-1"),
+		RunID:  runID,
+		Kind:   llmcommon.StepKindWorkspaceExecution,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
+	}
+	for _, step := range []*runmodel.Step{
+		anchor,
+		{
+			ID:     common.StepID(string(runID) + "/block/cpu"),
+			RunID:  runID,
+			Kind:   "graph/mock",
+			State:  common.StepStateCompleted,
+			Input:  map[string]any{stepInputKeyGraphNodeID: "cpu", stepInputKeyGraphRootStepID: string(anchor.ID)},
+			Output: map[string]any{"stdout": "cpu ok"},
+		},
+		{
+			ID:     common.StepID(string(runID) + "/block/memory"),
+			RunID:  runID,
+			Kind:   "graph/mock",
+			State:  common.StepStateCompleted,
+			Input:  map[string]any{stepInputKeyGraphNodeID: "memory", stepInputKeyGraphRootStepID: string(anchor.ID)},
+			Output: map[string]any{"stdout": "memory ok"},
+		},
+	} {
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+	}
+
+	specs, steps := orch.readyGraphStepSpecsWithSteps(ctx, run, anchor)
+	if len(specs) != 0 {
+		t.Fatalf("ready specs = %+v, want no remaining graph node", specs)
+	}
+	input := orch.graphFollowUpStepInputFromSteps(run, anchor, steps)
+
+	if got := stepRepo.listCount.Load(); got != 1 {
+		t.Fatalf("step ListByRun count = %d, want 1 reused read", got)
+	}
+	if evidence := mapSliceFromValue(input[stepInputKeyGraphEvidence]); len(evidence) != 2 {
+		t.Fatalf("graphEvidence = %+v, want two evidence items", input[stepInputKeyGraphEvidence])
+	}
+	if !reflect.DeepEqual(input[stepInputKeyGraphCompletedNodes], []string{"cpu", "memory"}) {
+		t.Fatalf("graphCompletedNodes = %#v, want cpu and memory", input[stepInputKeyGraphCompletedNodes])
 	}
 }
 

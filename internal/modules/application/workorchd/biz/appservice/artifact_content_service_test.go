@@ -52,6 +52,50 @@ func TestReadArtifactContentWithBackendReturnsStoredArtifactFile(t *testing.T) {
 	}
 }
 
+func TestReadArtifactContentWithRunSnapshotReusesCachedArtifactMetadata(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	workspaceID := "ws-artifact-cache"
+	runID := "run-artifact-cache"
+	artifactURI := "workorch://workspaces/ws-artifact-cache/artifacts/run-artifact-cache/result-summary.txt"
+	artifactDir := filepath.Join(dataRoot, "workspaces", workspaceID, "artifacts", runID)
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "result-summary.txt"), []byte("cached artifact payload"), 0o600); err != nil {
+		t.Fatalf("write artifact file: %v", err)
+	}
+	session, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	defer func() {
+		if err := session.Close(ctx); err != nil {
+			t.Fatalf("Close session: %v", err)
+		}
+	}()
+
+	item, err := ReadArtifactContentWithRunSnapshotWithSession(ctx, session.Borrow(), artifactURI, RunSnapshot{
+		Run: Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateCompleted)},
+		Artifacts: []Artifact{{
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			URI:         artifactURI,
+			ContentType: "text/markdown; charset=utf-8",
+			State:       string(common.ArtifactStateAvailable),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ReadArtifactContentWithRunSnapshotWithSession: %v", err)
+	}
+	if item.ContentType != "text/markdown; charset=utf-8" {
+		t.Fatalf("content type = %q, want cached artifact metadata", item.ContentType)
+	}
+	if string(item.Content) != "cached artifact payload" {
+		t.Fatalf("content = %q, want cached artifact payload", string(item.Content))
+	}
+}
+
 func TestReadArtifactContentWithBackendRejectsUnknownOrUnsafeURI(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()

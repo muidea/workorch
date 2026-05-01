@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
@@ -679,6 +680,14 @@ func ReadRunObservabilityFromEnv(ctx context.Context, runID string) (RunObservab
 	return ReadRunObservabilityWithSession(ctx, session, runID)
 }
 
+func RunStatusFromSnapshot(snapshot RunSnapshot) RunStatus {
+	return mapRunStatus(snapshot)
+}
+
+func RunObservabilityFromSnapshot(snapshot RunSnapshot) RunObservability {
+	return mapRunObservability(snapshot)
+}
+
 func ListEventRecordsWithSession(ctx context.Context, session *RuntimeSession, query EventRecordQuery) (ret []EventRecord, err error) {
 	deps, err := readModelDependenciesFromSession(session)
 	if err != nil {
@@ -726,7 +735,17 @@ func ReadWorkspaceSnapshotWithSession(ctx context.Context, session *RuntimeSessi
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	return readWorkspaceSnapshot(ctx, deps, common.WorkspaceID(workspaceID))
+	return readWorkspaceSnapshot(ctx, deps, common.WorkspaceID(workspaceID), nil)
+}
+
+func ReadWorkspaceSnapshotWithRunSnapshotWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, runSnapshot RunSnapshot) (ret WorkspaceSnapshot, err error) {
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		return WorkspaceSnapshot{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	return readWorkspaceSnapshot(ctx, deps, common.WorkspaceID(workspaceID), &runSnapshot)
 }
 
 func ReadWorkspaceTaskProgressWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret TaskProgress, err error) {
@@ -878,43 +897,71 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 	if err != nil {
 		return RunSnapshot{}, err
 	}
-	steps, err := deps.steps.ListByRun(ctx, item.ID)
-	if err != nil {
-		return RunSnapshot{}, err
-	}
-	toolCalls, err := deps.toolCalls.ListByRun(ctx, item.ID)
-	if err != nil {
-		return RunSnapshot{}, err
-	}
-	patches, err := deps.patches.ListByRun(ctx, item.ID)
-	if err != nil {
-		return RunSnapshot{}, err
-	}
-	validations, err := deps.validations.ListByRun(ctx, item.ID)
-	if err != nil {
-		return RunSnapshot{}, err
-	}
-	checkpoints, err := deps.checkpoints.ListByRun(ctx, item.ID)
-	if err != nil {
-		return RunSnapshot{}, err
-	}
-	results, err := deps.results.ListByRun(ctx, item.ID)
-	if err != nil {
-		return RunSnapshot{}, err
-	}
-	artifacts, err := deps.artifacts.ListByRun(ctx, item.ID)
-	if err != nil {
-		return RunSnapshot{}, err
-	}
-	eventRecords, err := deps.eventRecords.List(ctx, repository.EventRecordQuery{RunID: item.ID})
-	if err != nil {
-		return RunSnapshot{}, err
-	}
-	decisions, selectedTicket, selectedResolution, err := decisionsForRun(ctx, deps, item)
-	if err != nil {
-		return RunSnapshot{}, err
-	}
-	approvals, selectedApproval, err := approvalsForRun(ctx, deps, item)
+	var steps []*runmodel.Step
+	var toolCalls []*runmodel.ToolCall
+	var patches []*runmodel.Patch
+	var validations []*runmodel.ValidationResult
+	var checkpoints []*runmodel.RuntimeCheckpoint
+	var results []*resultmodel.Result
+	var artifacts []*resultmodel.Artifact
+	var eventRecords []*eventstreammodel.EventRecord
+	var decisions []Decision
+	var selectedTicket *decisionmodel.Ticket
+	var selectedResolution *decisionmodel.Resolution
+	var approvals []Approval
+	var selectedApproval *approvalmodel.Approval
+	err = runReadModelTasks(
+		func() error {
+			var err error
+			steps, err = deps.steps.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			toolCalls, err = deps.toolCalls.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			patches, err = deps.patches.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			validations, err = deps.validations.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			checkpoints, err = deps.checkpoints.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			results, err = deps.results.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			artifacts, err = deps.artifacts.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			eventRecords, err = deps.eventRecords.List(ctx, repository.EventRecordQuery{RunID: item.ID})
+			return err
+		},
+		func() error {
+			var err error
+			decisions, selectedTicket, selectedResolution, err = decisionsForRun(ctx, deps, item)
+			return err
+		},
+		func() error {
+			var err error
+			approvals, selectedApproval, err = approvalsForRun(ctx, deps, item)
+			return err
+		},
+	)
 	if err != nil {
 		return RunSnapshot{}, err
 	}
@@ -952,15 +999,26 @@ func readRunStatus(ctx context.Context, deps readModelDependencies, runID common
 	if err != nil {
 		return RunStatus{}, err
 	}
-	steps, err := deps.steps.ListByRun(ctx, item.ID)
-	if err != nil {
-		return RunStatus{}, err
-	}
-	decisions, err := deps.tickets.ListByRunID(ctx, item.ID)
-	if err != nil {
-		return RunStatus{}, err
-	}
-	approvals, err := deps.approvals.ListByRunID(ctx, item.ID)
+	var steps []*runmodel.Step
+	var decisions []*decisionmodel.Ticket
+	var approvals []*approvalmodel.Approval
+	err = runReadModelTasks(
+		func() error {
+			var err error
+			steps, err = deps.steps.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			decisions, err = deps.tickets.ListByRunID(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			approvals, err = deps.approvals.ListByRunID(ctx, item.ID)
+			return err
+		},
+	)
 	if err != nil {
 		return RunStatus{}, err
 	}
@@ -983,21 +1041,78 @@ func readRunStatus(ctx context.Context, deps readModelDependencies, runID common
 	return ret, nil
 }
 
-func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID) (WorkspaceSnapshot, error) {
+func runReadModelTasks(tasks ...func() error) error {
+	var wg sync.WaitGroup
+	var errMu sync.Mutex
+	var ret error
+	recordErr := func(err error) {
+		if err == nil {
+			return
+		}
+		errMu.Lock()
+		defer errMu.Unlock()
+		if ret == nil {
+			ret = err
+		}
+	}
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(task func() error) {
+			defer wg.Done()
+			recordErr(task())
+		}(task)
+	}
+	wg.Wait()
+	return ret
+}
+
+func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID, cachedRunSnapshot *RunSnapshot) (WorkspaceSnapshot, error) {
 	item, err := deps.workspaces.Get(ctx, workspaceID)
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
 
-	runItems, err := deps.runs.ListByWorkspaceID(ctx, workspaceID)
-	if err != nil {
-		return WorkspaceSnapshot{}, err
-	}
-	resultItems, err := deps.results.ListByWorkspace(ctx, workspaceID)
-	if err != nil {
-		return WorkspaceSnapshot{}, err
-	}
-	eventRecordItems, err := deps.eventRecords.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID})
+	var runItems []*runmodel.Run
+	var resultItems []*resultmodel.Result
+	var eventRecordItems []*eventstreammodel.EventRecord
+	var artifactItems []*resultmodel.Artifact
+	var ticketItems []*decisionmodel.Ticket
+	var approvalItems []*approvalmodel.Approval
+	err = runReadModelTasks(
+		func() error {
+			var err error
+			runItems, err = deps.runs.ListByWorkspaceID(ctx, workspaceID)
+			return err
+		},
+		func() error {
+			var err error
+			resultItems, err = deps.results.ListByWorkspace(ctx, workspaceID)
+			return err
+		},
+		func() error {
+			var err error
+			eventRecordItems, err = deps.eventRecords.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID})
+			return err
+		},
+		func() error {
+			var err error
+			artifactItems, err = deps.artifacts.ListByWorkspace(ctx, workspaceID)
+			return err
+		},
+		func() error {
+			var err error
+			ticketItems, err = deps.tickets.ListByWorkspaceID(ctx, workspaceID)
+			return err
+		},
+		func() error {
+			var err error
+			approvalItems, err = deps.approvals.ListByWorkspaceID(ctx, workspaceID)
+			return err
+		},
+	)
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
@@ -1008,15 +1123,6 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 			continue
 		}
 		runs = append(runs, mapRun(runItem))
-	}
-	artifactItems, err := deps.artifacts.ListByWorkspace(ctx, workspaceID)
-	if err != nil {
-		return WorkspaceSnapshot{}, err
-	}
-
-	ticketItems, err := deps.tickets.ListByWorkspaceID(ctx, workspaceID)
-	if err != nil {
-		return WorkspaceSnapshot{}, err
 	}
 	decisions := make([]Decision, 0, len(ticketItems))
 	for _, ticket := range ticketItems {
@@ -1030,10 +1136,6 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		decisions = append(decisions, mapDecision(ticket, resolution))
 	}
 
-	approvalItems, err := deps.approvals.ListByWorkspaceID(ctx, workspaceID)
-	if err != nil {
-		return WorkspaceSnapshot{}, err
-	}
 	approvals := make([]Approval, 0, len(approvalItems))
 	for _, approval := range approvalItems {
 		if approval.WorkspaceID != workspaceID {
@@ -1053,9 +1155,17 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 	}
 	ret.TaskProgress = mapWorkspaceTaskProgress(ret)
 	if projectionRun != nil {
-		runSnapshot, err := readRunSnapshot(ctx, deps, projectionRun.ID)
-		if err != nil {
-			return WorkspaceSnapshot{}, err
+		var runSnapshot RunSnapshot
+		if cachedRunSnapshot != nil &&
+			cachedRunSnapshot.Run.ID == string(projectionRun.ID) &&
+			cachedRunSnapshot.Run.WorkspaceID == string(workspaceID) {
+			runSnapshot = *cachedRunSnapshot
+		} else {
+			var err error
+			runSnapshot, err = readRunSnapshot(ctx, deps, projectionRun.ID)
+			if err != nil {
+				return WorkspaceSnapshot{}, err
+			}
 		}
 		ret.TaskProgress = runSnapshot.TaskProgress
 		ret.TaskDecompositions = runSnapshot.TaskDecompositions
@@ -1066,7 +1176,7 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 }
 
 func readWorkspaceTaskProgress(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID) (TaskProgress, error) {
-	snapshot, err := readWorkspaceSnapshot(ctx, deps, workspaceID)
+	snapshot, err := readWorkspaceSnapshot(ctx, deps, workspaceID, nil)
 	if err != nil {
 		return TaskProgress{}, err
 	}
@@ -1085,7 +1195,7 @@ func readRunTaskProgress(ctx context.Context, deps readModelDependencies, runID 
 }
 
 func readWorkspaceContextBundle(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID) (ContextBundle, error) {
-	snapshot, err := readWorkspaceSnapshot(ctx, deps, workspaceID)
+	snapshot, err := readWorkspaceSnapshot(ctx, deps, workspaceID, nil)
 	if err != nil {
 		return ContextBundle{}, err
 	}
@@ -1100,7 +1210,7 @@ func readWorkspaceContextBundle(ctx context.Context, deps readModelDependencies,
 }
 
 func readWorkspaceTaskDecompositions(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID) ([]TaskDecomposition, error) {
-	snapshot, err := readWorkspaceSnapshot(ctx, deps, workspaceID)
+	snapshot, err := readWorkspaceSnapshot(ctx, deps, workspaceID, nil)
 	if err != nil {
 		return nil, err
 	}

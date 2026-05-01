@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,6 +48,19 @@ import (
 	_ "github.com/muidea/workorch/internal/modules/kernel/soul"
 	_ "github.com/muidea/workorch/internal/modules/kernel/workspace"
 )
+
+func newFileMuxWithCleanup(t *testing.T, dataRoot string) http.Handler {
+	t.Helper()
+	state := newServerState(normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := state.close(ctx); err != nil {
+			t.Fatalf("close server state: %v", err)
+		}
+	})
+	return newMuxWithState(state)
+}
 
 func TestHealthzReturnsOK(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -1181,6 +1195,58 @@ func TestArtifactContentEndpointReturnsStoredArtifactFile(t *testing.T) {
 	}
 }
 
+func TestArtifactContentEndpointReusesCachedRunSnapshotArtifacts(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	workspaceID := "ws-http-artifact-cache"
+	runID := "run-http-artifact-cache"
+	artifactURI := "workorch://workspaces/ws-http-artifact-cache/artifacts/run-http-artifact-cache/result-summary.txt"
+	artifactDir := filepath.Join(dataRoot, "workspaces", workspaceID, "artifacts", runID)
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "result-summary.txt"), []byte("cached HTTP artifact payload"), 0o600); err != nil {
+		t.Fatalf("write artifact file: %v", err)
+	}
+	session, err := appservice.NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	state := newServerState(normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}), nil)
+	state.configureSessionBackedOperations(session)
+	state.cacheRunSnapshot(appservice.RunSnapshot{
+		Run: appservice.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateCompleted)},
+		Artifacts: []appservice.Artifact{{
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			URI:         artifactURI,
+			ContentType: "text/markdown; charset=utf-8",
+			State:       string(common.ArtifactStateAvailable),
+		}},
+	})
+	t.Cleanup(func() {
+		closeCtx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		if err := state.close(closeCtx); err != nil {
+			t.Fatalf("close server state: %v", err)
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/artifacts/content?uri="+url.QueryEscape(artifactURI), nil)
+	rec := httptest.NewRecorder()
+	newMuxWithState(state).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/markdown; charset=utf-8" {
+		t.Fatalf("content-type = %q, want cached metadata content type", got)
+	}
+	if rec.Body.String() != "cached HTTP artifact payload" {
+		t.Fatalf("body = %q, want cached artifact payload", rec.Body.String())
+	}
+}
+
 func TestWorkspaceListAndGetEndpointsReturnPersistedWorkspaces(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 
@@ -1647,6 +1713,131 @@ func TestRunStatusEndpointReturnsPersistedRunStatus(t *testing.T) {
 	}
 }
 
+func TestRunStatusEndpointCanWaitForTargetState(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	var calls atomic.Int32
+	state.readRunStatus = func(_ context.Context, _, _, runID string) (appservice.RunStatus, error) {
+		call := calls.Add(1)
+		status := "running"
+		if call >= 2 {
+			status = "completed"
+		}
+		return appservice.RunStatus{ID: runID, WorkspaceID: "ws-wait-status", State: status}, nil
+	}
+	handler := newMuxWithState(state)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-wait-status/status?waitState=completed&waitTimeoutMillis=200&waitIntervalMillis=10", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var body runStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal run status: %v", err)
+	}
+	if body.Status.State != "completed" || !body.WaitMatched {
+		t.Fatalf("status response = %+v, want completed wait match", body)
+	}
+	if calls.Load() < 2 {
+		t.Fatalf("readRunStatus calls = %d, want repeated wait polling", calls.Load())
+	}
+}
+
+func TestRunStatusWaitUsesStatusChangeNotification(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	var completed atomic.Bool
+	state.readRunStatus = func(_ context.Context, _, _, runID string) (appservice.RunStatus, error) {
+		status := "running"
+		if completed.Load() {
+			status = "completed"
+		}
+		return appservice.RunStatus{ID: runID, WorkspaceID: "ws-notified-status", State: status}, nil
+	}
+
+	done := make(chan struct{})
+	var got appservice.RunStatus
+	var matched bool
+	var err error
+	started := time.Now()
+	go func() {
+		defer close(done)
+		got, matched, err = state.readRunStatusWithWait(context.Background(), "run-notified-status", url.Values{
+			"waitState":          []string{"completed"},
+			"waitTimeoutMillis":  []string{"1000"},
+			"waitIntervalMillis": []string{"900"},
+		})
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	completed.Store(true)
+	state.notifyRunStatusChanged()
+
+	select {
+	case <-done:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("status wait did not wake from notification")
+	}
+	if err != nil {
+		t.Fatalf("readRunStatusWithWait error = %v", err)
+	}
+	if !matched || got.State != "completed" {
+		t.Fatalf("status = %+v matched=%v, want completed match", got, matched)
+	}
+	if elapsed := time.Since(started); elapsed >= 300*time.Millisecond {
+		t.Fatalf("status wait elapsed = %v, want notification wake before poll interval", elapsed)
+	}
+}
+
+func TestTerminalRunSnapshotCacheReusesSnapshotForReadViews(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	var snapshotReads atomic.Int32
+	var observabilityReads atomic.Int32
+	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
+		snapshotReads.Add(1)
+		return appservice.RunSnapshot{
+			Workspace: appservice.Workspace{ID: "ws-cache", State: string(common.WorkspaceStateCompleted)},
+			Run:       appservice.Run{ID: runID, WorkspaceID: "ws-cache", State: string(common.RunStateCompleted)},
+		}, nil
+	}
+	state.readRunObservability = func(context.Context, string, string, string) (appservice.RunObservability, error) {
+		observabilityReads.Add(1)
+		return appservice.RunObservability{}, nil
+	}
+	handler := newMuxWithState(state)
+
+	for _, path := range []string{
+		"/api/v1/workorch/runs/run-cache/snapshot",
+		"/api/v1/workorch/runs/run-cache/status",
+		"/api/v1/workorch/runs/run-cache/observability",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200, body=%s", path, rec.Code, rec.Body.String())
+		}
+	}
+	if snapshotReads.Load() != 1 {
+		t.Fatalf("snapshot reads = %d, want cached single read", snapshotReads.Load())
+	}
+	if observabilityReads.Load() != 0 {
+		t.Fatalf("observability reads = %d, want cached snapshot projection", observabilityReads.Load())
+	}
+
+	state.notifyRunStatusChanged()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-cache/snapshot", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("snapshot after invalidation status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if snapshotReads.Load() != 2 {
+		t.Fatalf("snapshot reads after invalidation = %d, want 2", snapshotReads.Load())
+	}
+}
+
 func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.T) {
 	dataRoot := t.TempDir()
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
@@ -1966,7 +2157,7 @@ func TestDecisionListAndGetEndpointsReturnPersistedTickets(t *testing.T) {
 
 func TestDecisionResolveEndpointResolvesTicketAndAllowsRunResume(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newFileMuxWithCleanup(t, dataRoot)
 	runID := "run-decision-resolve-http"
 
 	_, started := seedBlockedDecisionRunForHTTP(t, dataRoot, "decision resolve http workspace", runID)
@@ -1993,7 +2184,7 @@ func TestDecisionResolveEndpointResolvesTicketAndAllowsRunResume(t *testing.T) {
 
 func TestDecisionResolveEndpointRejectCurrentPathAndRunResumeFailsTerminally(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newFileMuxWithCleanup(t, dataRoot)
 	runID := "run-decision-reject-http"
 
 	_, started := seedBlockedDecisionRunForHTTP(t, dataRoot, "decision reject http workspace", runID)
@@ -2024,7 +2215,7 @@ func TestDecisionResolveEndpointRejectCurrentPathAndRunResumeFailsTerminally(t *
 
 func TestDecisionResolveEndpointReturnsConflictForOppositeResolution(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newFileMuxWithCleanup(t, dataRoot)
 	runID := "run-decision-conflict-http"
 
 	_, started := seedBlockedDecisionRunForHTTP(t, dataRoot, "decision conflict http workspace", runID)
@@ -2041,7 +2232,7 @@ func TestDecisionResolveEndpointReturnsConflictForOppositeResolution(t *testing.
 
 func TestDecisionBatchResolveEndpointResolvesOpenTickets(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newFileMuxWithCleanup(t, dataRoot)
 	firstRunID := "run-decision-batch-a"
 	secondRunID := "run-decision-batch-b"
 
@@ -2075,7 +2266,7 @@ func TestDecisionBatchResolveEndpointResolvesOpenTickets(t *testing.T) {
 
 func TestApprovalBatchResolveEndpointApprovesPendingApprovals(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newFileMuxWithCleanup(t, dataRoot)
 	firstRunID := "run-approval-batch-a"
 	secondRunID := "run-approval-batch-b"
 
@@ -2174,7 +2365,7 @@ func TestApprovalListAndGetEndpointsReturnPersistedApprovals(t *testing.T) {
 
 func TestApprovalApproveEndpointApprovesApprovalAndAllowsRunResume(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newFileMuxWithCleanup(t, dataRoot)
 	runID := "run-approval-approve-http"
 
 	_, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "approval approve http workspace", runID)
@@ -2201,7 +2392,7 @@ func TestApprovalApproveEndpointApprovesApprovalAndAllowsRunResume(t *testing.T)
 
 func TestApprovalRejectEndpointRejectsApprovalAndRunResumeFailsTerminally(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newFileMuxWithCleanup(t, dataRoot)
 	runID := "run-approval-reject-http"
 
 	_, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "approval reject http workspace", runID)
@@ -2228,7 +2419,7 @@ func TestApprovalRejectEndpointRejectsApprovalAndRunResumeFailsTerminally(t *tes
 
 func TestApprovalApproveEndpointReturnsConflictForOppositeResolution(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newFileMuxWithCleanup(t, dataRoot)
 	runID := "run-approval-conflict-http"
 
 	_, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "approval conflict http workspace", runID)
