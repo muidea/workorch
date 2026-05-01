@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
@@ -72,11 +73,24 @@ type ProviderRuntime struct {
 }
 
 type ProviderConfigLoader func() (string, map[string]llmmodels.ProviderConfig, error)
+type ProviderConfigRevision func() uint64
+type ProviderFactory func(llmmodels.ProviderConfig) Provider
+
+type providerRuntimeCache struct {
+	ready             bool
+	revision          uint64
+	defaultProviderID string
+	providers         map[string]ProviderRuntime
+}
 
 type RuntimeAdapter struct {
 	defaultProviderID string
 	providers         map[string]ProviderRuntime
 	configLoader      ProviderConfigLoader
+	configRevision    ProviderConfigRevision
+	providerFactory   ProviderFactory
+	cacheMu           sync.RWMutex
+	cache             providerRuntimeCache
 }
 
 func NewRuntimeAdapter(config llmmodels.ProviderConfig, provider Provider) *RuntimeAdapter {
@@ -111,7 +125,7 @@ func NewRuntimeAdapterWithProviders(defaultProviderID string, providers map[stri
 		runtime.Config.Capabilities = effectiveProviderCapabilities(runtime.Config.Capabilities)
 		normalized[id] = runtime
 	}
-	return &RuntimeAdapter{defaultProviderID: defaultProviderID, providers: normalized}
+	return &RuntimeAdapter{defaultProviderID: defaultProviderID, providers: normalized, providerFactory: NewProviderFromConfig}
 }
 
 func NewRuntimeAdapterFromConfig(config llmmodels.ProviderConfig) *RuntimeAdapter {
@@ -130,10 +144,24 @@ func NewRuntimeAdapterFromConfigLoader(loader ProviderConfigLoader) *RuntimeAdap
 	return &RuntimeAdapter{
 		defaultProviderID: llmcommon.DefaultProviderID,
 		configLoader:      loader,
+		providerFactory:   NewProviderFromConfig,
 	}
 }
 
+func NewRuntimeAdapterFromConfigLoaderWithRevision(loader ProviderConfigLoader, revision ProviderConfigRevision) *RuntimeAdapter {
+	adapter := NewRuntimeAdapterFromConfigLoader(loader)
+	adapter.configRevision = revision
+	return adapter
+}
+
 func providerRuntimesFromConfigs(configs map[string]llmmodels.ProviderConfig) map[string]ProviderRuntime {
+	return providerRuntimesFromConfigsWithFactory(configs, NewProviderFromConfig)
+}
+
+func providerRuntimesFromConfigsWithFactory(configs map[string]llmmodels.ProviderConfig, factory ProviderFactory) map[string]ProviderRuntime {
+	if factory == nil {
+		factory = NewProviderFromConfig
+	}
 	providers := make(map[string]ProviderRuntime, len(configs))
 	for id, config := range configs {
 		id = strings.TrimSpace(id)
@@ -146,7 +174,7 @@ func providerRuntimesFromConfigs(configs map[string]llmmodels.ProviderConfig) ma
 		config.ID = id
 		var provider Provider
 		if !config.Unavailable {
-			provider = NewProviderFromConfig(config)
+			provider = newLazyProvider(config, factory)
 		}
 		config.Capabilities = effectiveProviderCapabilities(config.Capabilities)
 		providers[id] = ProviderRuntime{
@@ -155,6 +183,58 @@ func providerRuntimesFromConfigs(configs map[string]llmmodels.ProviderConfig) ma
 		}
 	}
 	return providers
+}
+
+type lazyProvider struct {
+	config   llmmodels.ProviderConfig
+	factory  ProviderFactory
+	mu       sync.Mutex
+	provider Provider
+}
+
+func newLazyProvider(config llmmodels.ProviderConfig, factory ProviderFactory) *lazyProvider {
+	if factory == nil {
+		factory = NewProviderFromConfig
+	}
+	return &lazyProvider{config: config, factory: factory}
+}
+
+func (p *lazyProvider) Complete(ctx context.Context, request llmmodels.ProviderRequest) ([]byte, error) {
+	provider := p.runtimeProvider()
+	if provider == nil {
+		return nil, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
+	}
+	return provider.Complete(ctx, request)
+}
+
+func (p *lazyProvider) StreamComplete(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) ([]byte, error) {
+	provider := p.runtimeProvider()
+	streaming, ok := provider.(StreamingProvider)
+	if !ok {
+		return nil, fmt.Errorf("%w: llm provider does not implement streaming", common.ErrInvalidArgument)
+	}
+	return streaming.StreamComplete(ctx, request, emit)
+}
+
+func (p *lazyProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbeddingRequest) (llmmodels.ProviderEmbeddingResult, error) {
+	provider := p.runtimeProvider()
+	embedding, ok := provider.(EmbeddingProvider)
+	if !ok {
+		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: llm provider does not implement embeddings", common.ErrInvalidArgument)
+	}
+	return embedding.Embed(ctx, request)
+}
+
+func (p *lazyProvider) runtimeProvider() Provider {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.provider == nil {
+		p.provider = p.factory(p.config)
+	}
+	return p.provider
 }
 
 func NewProviderFromConfig(config llmmodels.ProviderConfig) Provider {
@@ -374,19 +454,10 @@ func repairLLMExecutionDecision(
 }
 
 func (a *RuntimeAdapter) selectProviderRuntime(request runtimemodel.StepExecutionRequest) (ProviderRuntime, string, error) {
-	defaultProviderID := a.defaultProviderID
-	providers := a.providers
-	if a.configLoader != nil {
-		loadedDefaultProviderID, configs, err := a.configLoader()
-		if err != nil {
-			providerID := requestedProviderID(request.Input, defaultProviderID)
-			return ProviderRuntime{}, providerID, err
-		}
-		defaultProviderID = strings.TrimSpace(loadedDefaultProviderID)
-		if defaultProviderID == "" {
-			defaultProviderID = llmcommon.DefaultProviderID
-		}
-		providers = providerRuntimesFromConfigs(configs)
+	defaultProviderID, providers, err := a.providerRuntimes()
+	if err != nil {
+		providerID := requestedProviderID(request.Input, defaultProviderID)
+		return ProviderRuntime{}, providerID, err
 	}
 	providerID := requestedProviderID(request.Input, defaultProviderID)
 	if providerID == "" {
@@ -400,18 +471,9 @@ func (a *RuntimeAdapter) selectProviderRuntime(request runtimemodel.StepExecutio
 }
 
 func (a *RuntimeAdapter) selectProviderRuntimeByID(providerID string) (ProviderRuntime, string, error) {
-	defaultProviderID := a.defaultProviderID
-	providers := a.providers
-	if a.configLoader != nil {
-		loadedDefaultProviderID, configs, err := a.configLoader()
-		if err != nil {
-			return ProviderRuntime{}, strings.TrimSpace(providerID), err
-		}
-		defaultProviderID = strings.TrimSpace(loadedDefaultProviderID)
-		if defaultProviderID == "" {
-			defaultProviderID = llmcommon.DefaultProviderID
-		}
-		providers = providerRuntimesFromConfigs(configs)
+	defaultProviderID, providers, err := a.providerRuntimes()
+	if err != nil {
+		return ProviderRuntime{}, strings.TrimSpace(providerID), err
 	}
 	selectedProviderID := strings.TrimSpace(providerID)
 	if selectedProviderID == "" {
@@ -425,6 +487,58 @@ func (a *RuntimeAdapter) selectProviderRuntimeByID(providerID string) (ProviderR
 		return ProviderRuntime{}, selectedProviderID, fmt.Errorf("%w: llm provider %q is not configured", common.ErrInvalidArgument, selectedProviderID)
 	}
 	return runtime, selectedProviderID, nil
+}
+
+func (a *RuntimeAdapter) providerRuntimes() (string, map[string]ProviderRuntime, error) {
+	defaultProviderID := a.defaultProviderID
+	providers := a.providers
+	if a.configLoader == nil {
+		return defaultProviderID, providers, nil
+	}
+	if a.configRevision != nil {
+		revision := a.configRevision()
+		a.cacheMu.RLock()
+		if a.cache.ready && a.cache.revision == revision {
+			cachedDefaultProviderID := a.cache.defaultProviderID
+			cachedProviders := a.cache.providers
+			a.cacheMu.RUnlock()
+			return cachedDefaultProviderID, cachedProviders, nil
+		}
+		a.cacheMu.RUnlock()
+
+		a.cacheMu.Lock()
+		defer a.cacheMu.Unlock()
+		if a.cache.ready && a.cache.revision == revision {
+			return a.cache.defaultProviderID, a.cache.providers, nil
+		}
+		loadedDefaultProviderID, configs, err := a.configLoader()
+		if err != nil {
+			return defaultProviderID, nil, err
+		}
+		loadedDefaultProviderID = normalizedRuntimeDefaultProviderID(loadedDefaultProviderID)
+		loadedProviders := providerRuntimesFromConfigsWithFactory(configs, a.providerFactory)
+		a.cache = providerRuntimeCache{
+			ready:             true,
+			revision:          revision,
+			defaultProviderID: loadedDefaultProviderID,
+			providers:         loadedProviders,
+		}
+		return loadedDefaultProviderID, loadedProviders, nil
+	}
+	loadedDefaultProviderID, configs, err := a.configLoader()
+	if err != nil {
+		return defaultProviderID, nil, err
+	}
+	defaultProviderID = normalizedRuntimeDefaultProviderID(loadedDefaultProviderID)
+	return defaultProviderID, providerRuntimesFromConfigsWithFactory(configs, a.providerFactory), nil
+}
+
+func normalizedRuntimeDefaultProviderID(providerID string) string {
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" {
+		return llmcommon.DefaultProviderID
+	}
+	return providerID
 }
 
 func requestedProviderID(input map[string]any, defaultProviderID string) string {

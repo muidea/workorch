@@ -713,6 +713,114 @@ func TestRuntimeAdapterLoadsProviderConfigAtExecutionTime(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterCachesProviderConfigUntilRevisionChanges(t *testing.T) {
+	firstProviderCalls := 0
+	firstProvider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		firstProviderCalls++
+		writeChatCompletion(t, w, `{"completionState":"continue","shellCommands":[{"command":"echo","args":["first"]}]}`)
+	}))
+	defer firstProvider.Close()
+	secondProviderCalls := 0
+	secondProvider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondProviderCalls++
+		writeChatCompletion(t, w, `{"completionState":"continue","shellCommands":[{"command":"echo","args":["second"]}]}`)
+	}))
+	defer secondProvider.Close()
+
+	revision := uint64(1)
+	baseURL := firstProvider.URL + "/v1"
+	loaderCalls := 0
+	adapter := NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]llmmodels.ProviderConfig, error) {
+		loaderCalls++
+		return "local", map[string]llmmodels.ProviderConfig{
+			"local": {
+				ID:       "local",
+				Provider: llmcommon.ProviderCompatible,
+				BaseURL:  baseURL,
+				APIKey:   "secret-value",
+				Model:    "test-model",
+				Timeout:  time.Second,
+			},
+		}, nil
+	}, func() uint64 { return revision })
+
+	firstResult, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("first execute runtime step: %v", err)
+	}
+	baseURL = secondProvider.URL + "/v1"
+	secondResult, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("second execute runtime step: %v", err)
+	}
+	if loaderCalls != 1 || firstProviderCalls != 2 || secondProviderCalls != 0 {
+		t.Fatalf("calls loader=%d firstProvider=%d secondProvider=%d, want cached runtime before revision change", loaderCalls, firstProviderCalls, secondProviderCalls)
+	}
+	if firstResult.Output["nextInput"].(map[string]any)["args"].([]string)[0] != "first" ||
+		secondResult.Output["nextInput"].(map[string]any)["args"].([]string)[0] != "first" {
+		t.Fatalf("outputs first=%+v second=%+v, want cached provider result", firstResult.Output, secondResult.Output)
+	}
+
+	revision++
+	thirdResult, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("third execute runtime step: %v", err)
+	}
+	if loaderCalls != 2 || secondProviderCalls != 1 {
+		t.Fatalf("calls loader=%d secondProvider=%d, want reload after revision change", loaderCalls, secondProviderCalls)
+	}
+	if thirdResult.Output["nextInput"].(map[string]any)["args"].([]string)[0] != "second" {
+		t.Fatalf("third output = %+v, want refreshed provider result", thirdResult.Output)
+	}
+}
+
+func TestRuntimeAdapterLazilyConstructsOnlySelectedProvider(t *testing.T) {
+	revision := uint64(1)
+	factoryCalls := map[string]int{}
+	adapter := NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]llmmodels.ProviderConfig, error) {
+		return "selected", map[string]llmmodels.ProviderConfig{
+			"selected": {
+				ID:       "selected",
+				Provider: llmcommon.ProviderCompatible,
+				BaseURL:  "http://selected.test/v1",
+				APIKey:   "secret-value",
+				Model:    "selected-model",
+				Timeout:  time.Second,
+			},
+			"unused": {
+				ID:       "unused",
+				Provider: llmcommon.ProviderOpenAI,
+				BaseURL:  "http://unused.test/v1",
+				APIKey:   "secret-value",
+				Model:    "unused-model",
+				Timeout:  time.Second,
+			},
+		}, nil
+	}, func() uint64 { return revision })
+	adapter.providerFactory = func(config llmmodels.ProviderConfig) Provider {
+		factoryCalls[config.ID]++
+		return &staticProvider{payload: []byte(`{"completionState":"continue"}`)}
+	}
+
+	if _, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest()); err != nil {
+		t.Fatalf("first execute runtime step: %v", err)
+	}
+	if _, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest()); err != nil {
+		t.Fatalf("second execute runtime step: %v", err)
+	}
+	if factoryCalls["selected"] != 1 || factoryCalls["unused"] != 0 {
+		t.Fatalf("factory calls = %+v, want only selected provider constructed once", factoryCalls)
+	}
+
+	revision++
+	if _, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest()); err != nil {
+		t.Fatalf("third execute runtime step after revision: %v", err)
+	}
+	if factoryCalls["selected"] != 2 || factoryCalls["unused"] != 0 {
+		t.Fatalf("factory calls = %+v, want selected provider reconstructed after revision only", factoryCalls)
+	}
+}
+
 func writeChatCompletion(t *testing.T, w http.ResponseWriter, content string) {
 	t.Helper()
 

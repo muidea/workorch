@@ -75,29 +75,30 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 		}, nil
 	}
 
-	goalID, dodID, err := selectWorkspaceExecutionDefinitions(ctx, session, common.WorkspaceID(workspaceID), cmd)
+	goal, dod, err := selectWorkspaceExecutionDefinitions(ctx, session, common.WorkspaceID(workspaceID), cmd)
 	if err != nil {
 		return WorkspaceExecutionActivation{}, err
 	}
-	if err := validateRunDefinitions(ctx, session, workspaceID, string(goalID), string(dodID)); err != nil {
-		return WorkspaceExecutionActivation{}, err
-	}
-	executionContext, err := buildWorkspaceExecutionContext(ctx, session, common.WorkspaceID(workspaceID), goalID, dodID, cmd)
+	executionContext, err := buildWorkspaceExecutionContextWithDefinitions(ctx, session, workspace, goal, dod, cmd)
 	if err != nil {
 		return WorkspaceExecutionActivation{}, err
 	}
 
-	run, err := createAndStartWorkspaceExecutionRun(ctx, session, common.WorkspaceID(workspaceID), goalID, dodID, executionContext, cmd.Priority)
+	runID, err := createAndStartWorkspaceExecutionRun(ctx, session, common.WorkspaceID(workspaceID), goal.ID, dod.ID, executionContext, cmd.Priority)
 	if err != nil {
 		return WorkspaceExecutionActivation{}, err
 	}
-	snapshot, err := readWorkspaceSnapshotFromExports(ctx, session, common.WorkspaceID(workspaceID))
+	runSnapshot, err := readRunSnapshotFromExports(ctx, session, runID)
+	if err != nil {
+		return WorkspaceExecutionActivation{}, err
+	}
+	snapshot, err := readWorkspaceSnapshotFromExportsWithRunSnapshot(ctx, session, common.WorkspaceID(workspaceID), &runSnapshot)
 	if err != nil {
 		return WorkspaceExecutionActivation{}, err
 	}
 	return WorkspaceExecutionActivation{
 		Workspace: snapshot.Workspace,
-		Run:       mapRun(run),
+		Run:       runSnapshot.Run,
 		Snapshot:  snapshot,
 	}, nil
 }
@@ -118,21 +119,30 @@ func ActivateWorkspaceExecutionFromEnv(ctx context.Context, workspaceID string, 
 	return ActivateWorkspaceExecutionWithSession(ctx, session, workspaceID, cmd)
 }
 
-func selectWorkspaceExecutionDefinitions(ctx context.Context, session *RuntimeSession, workspaceID common.WorkspaceID, cmd ActivateWorkspaceExecutionCommand) (common.GoalID, common.DoDID, error) {
+func selectWorkspaceExecutionDefinitions(ctx context.Context, session *RuntimeSession, workspaceID common.WorkspaceID, cmd ActivateWorkspaceExecutionCommand) (*workspacemodel.Goal, *workspacemodel.DoD, error) {
 	exports, err := session.Exports()
 	if err != nil {
-		return "", "", err
+		return nil, nil, err
 	}
 
-	goalID, err := selectWorkspaceExecutionGoal(ctx, exports.Repositories.Goals.ListByWorkspaceID, workspaceID, common.GoalID(cmd.GoalID))
+	var goal *workspacemodel.Goal
+	var dod *workspacemodel.DoD
+	err = activationContextReadTasks(
+		func() error {
+			var err error
+			goal, err = selectWorkspaceExecutionGoal(ctx, exports.Repositories.Goals.ListByWorkspaceID, workspaceID, common.GoalID(cmd.GoalID))
+			return err
+		},
+		func() error {
+			var err error
+			dod, err = selectWorkspaceExecutionDoD(ctx, exports.Repositories.DoDs.ListByWorkspaceID, workspaceID, common.DoDID(cmd.DoDID))
+			return err
+		},
+	)
 	if err != nil {
-		return "", "", err
+		return nil, nil, err
 	}
-	dodID, err := selectWorkspaceExecutionDoD(ctx, exports.Repositories.DoDs.ListByWorkspaceID, workspaceID, common.DoDID(cmd.DoDID))
-	if err != nil {
-		return "", "", err
-	}
-	return goalID, dodID, nil
+	return goal, dod, nil
 }
 
 func selectWorkspaceExecutionGoal(
@@ -140,26 +150,29 @@ func selectWorkspaceExecutionGoal(
 	listByWorkspaceID func(context.Context, common.WorkspaceID) ([]*workspacemodel.Goal, error),
 	workspaceID common.WorkspaceID,
 	requestedID common.GoalID,
-) (common.GoalID, error) {
+) (*workspacemodel.Goal, error) {
 	items, err := listByWorkspaceID(ctx, workspaceID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if requestedID != "" {
 		for _, item := range items {
-			if item.ID == requestedID {
-				return requestedID, nil
+			if item != nil && item.ID == requestedID {
+				return item, nil
 			}
 		}
-		return "", common.ErrConflict
+		return nil, common.ErrConflict
 	}
 	if len(items) == 0 {
-		return "", common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
 	if len(items) > 1 {
-		return "", common.ErrConflict
+		return nil, common.ErrConflict
 	}
-	return items[0].ID, nil
+	if items[0] == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return items[0], nil
 }
 
 func selectWorkspaceExecutionDoD(
@@ -167,44 +180,38 @@ func selectWorkspaceExecutionDoD(
 	listByWorkspaceID func(context.Context, common.WorkspaceID) ([]*workspacemodel.DoD, error),
 	workspaceID common.WorkspaceID,
 	requestedID common.DoDID,
-) (common.DoDID, error) {
+) (*workspacemodel.DoD, error) {
 	items, err := listByWorkspaceID(ctx, workspaceID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	readyItems := make([]*workspacemodel.DoD, 0, len(items))
 	for _, item := range items {
-		if item.State == common.DoDStateReady || item.State == common.DoDStateSatisfied {
+		if item != nil && (item.State == common.DoDStateReady || item.State == common.DoDStateSatisfied) {
 			readyItems = append(readyItems, item)
 		}
 	}
 	if requestedID != "" {
 		for _, item := range readyItems {
 			if item.ID == requestedID {
-				return requestedID, nil
+				return item, nil
 			}
 		}
-		return "", common.ErrConflict
+		return nil, common.ErrConflict
 	}
 	if len(readyItems) == 0 {
-		return "", common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
 	if len(readyItems) > 1 {
-		return "", common.ErrConflict
+		return nil, common.ErrConflict
 	}
-	return readyItems[0].ID, nil
+	return readyItems[0], nil
 }
 
 func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, cmd ActivateWorkspaceExecutionCommand) (map[string]any, error) {
 	exports, err := session.Exports()
 	if err != nil {
 		return nil, err
-	}
-	contextData := map[string]any{
-		"activation":  "workspace_execution",
-		"workspaceId": string(workspaceID),
-		"goalId":      string(goalID),
-		"doDId":       string(dodID),
 	}
 	goal, err := exports.Repositories.Goals.Get(ctx, goalID)
 	if err != nil {
@@ -213,6 +220,27 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 	dod, err := exports.Repositories.DoDs.Get(ctx, dodID)
 	if err != nil {
 		return nil, err
+	}
+	workspace, err := exports.Repositories.Workspaces.Get(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return buildWorkspaceExecutionContextWithDefinitions(ctx, session, workspace, goal, dod, cmd)
+}
+
+func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session *RuntimeSession, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD, cmd ActivateWorkspaceExecutionCommand) (map[string]any, error) {
+	if workspace == nil || goal == nil || dod == nil || goal.WorkspaceID != workspace.ID || dod.WorkspaceID != workspace.ID {
+		return nil, common.ErrInvalidArgument
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		return nil, err
+	}
+	contextData := map[string]any{
+		"activation":  "workspace_execution",
+		"workspaceId": string(workspace.ID),
+		"goalId":      string(goal.ID),
+		"doDId":       string(dod.ID),
 	}
 	contextData["goal"] = goalContext(goal)
 	contextData["dod"] = dodContext(dod)
@@ -227,11 +255,28 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 	capabilityIDs := normalizeStringIDs(cmd.CapabilityIDs)
 	memoryIDs := normalizeStringIDs(cmd.MemoryIDs)
 
-	workspace, err := exports.Repositories.Workspaces.Get(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defaultSoul, soulRouting, effectiveSoulIDs, err := resolveWorkspaceSoulRouting(ctx, exports, workspace, cmd)
+	var defaultSoul *soulmodel.Soul
+	var soulRouting SoulRouting
+	var effectiveSoulIDs []common.SoulID
+	var memories []*memorymodel.MemoryItem
+	var retrievalEvidence map[string]any
+	var governanceHistory []map[string]any
+	err = activationContextReadTasks(
+		func() error {
+			var err error
+			defaultSoul, soulRouting, effectiveSoulIDs, err = resolveWorkspaceSoulRouting(ctx, exports, workspace, cmd)
+			return err
+		},
+		func() error {
+			var err error
+			memories, retrievalEvidence, err = selectedMemoryItems(ctx, workspace.ID, exports.Services.MemoryService, memoryIDs, goal, dod)
+			return err
+		},
+		func() error {
+			governanceHistory = workspaceGovernanceHistory(ctx, exports.Repositories.Tickets, exports.Repositories.Resolutions, exports.Repositories.Runs, workspace.ID, goal.ID, dod.ID, 10)
+			return nil
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +286,7 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 	}
 	contextData["soulRouting"] = soulRouting
 
-	skills, skillIDs, skillSelection, err := selectSkillsForWorkspaceExecution(ctx, session, workspaceID, goal, dod, cmd.SkillIDs, defaultSoul)
+	skills, skillIDs, skillSelection, err := selectSkillsForWorkspaceExecution(ctx, session, workspace.ID, goal, dod, cmd.SkillIDs, defaultSoul)
 	if err != nil {
 		return nil, err
 	}
@@ -267,10 +312,6 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 			autoBoundCapabilityIDs = append(autoBoundCapabilityIDs, id)
 		}
 	}
-	mcpServers, err := selectedMCPServers(ctx, exports.Services.MCPService, mcpServerIDs)
-	if err != nil {
-		return nil, err
-	}
 	contextData["mcpSelection"] = map[string]any{
 		"policy":                 "skill_required_mcp_auto_bind",
 		"requestedMCPServerIds":  normalizeStringIDs(cmd.MCPServerIDs),
@@ -282,13 +323,26 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 		"autoBoundCapabilityIds": autoBoundCapabilityIDs,
 		"selectedCapabilityIds":  capabilityIDs,
 	}
+	var mcpServers []*mcpmodel.Server
+	var mcpCapabilities []*mcpmodel.Capability
+	err = activationContextReadTasks(
+		func() error {
+			var err error
+			mcpServers, err = selectedMCPServers(ctx, exports.Services.MCPService, mcpServerIDs)
+			return err
+		},
+		func() error {
+			var err error
+			mcpCapabilities, err = selectedMCPCapabilities(ctx, exports.Services.MCPService, capabilityIDs)
+			return err
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
 	if len(mcpServers) > 0 {
 		contextData["mcpServerIds"] = mcpServerIDs
 		contextData["mcpServers"] = mcpServerContexts(mcpServers)
-	}
-	mcpCapabilities, err := selectedMCPCapabilities(ctx, exports.Services.MCPService, capabilityIDs)
-	if err != nil {
-		return nil, err
 	}
 	if len(mcpCapabilities) > 0 {
 		contextData["capabilityIds"] = capabilityIDs
@@ -301,10 +355,6 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 		}
 	}
 
-	memories, retrievalEvidence, err := selectedMemoryItems(ctx, workspaceID, exports.Services.MemoryService, memoryIDs, goal, dod)
-	if err != nil {
-		return nil, err
-	}
 	if retrievalEvidence != nil {
 		contextData["memoryRetrieval"] = retrievalEvidence
 	}
@@ -312,11 +362,15 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 		contextData["memoryIds"] = memoryItemIDs(memories)
 		contextData["memories"] = memoryContexts(memories)
 	}
-	if governanceHistory := workspaceGovernanceHistory(ctx, exports.Repositories.Tickets, exports.Repositories.Resolutions, exports.Repositories.Runs, workspaceID, goalID, dodID, 10); len(governanceHistory) > 0 {
+	if len(governanceHistory) > 0 {
 		contextData["governanceHistory"] = governanceHistory
 	}
 
 	return contextData, nil
+}
+
+func activationContextReadTasks(tasks ...func() error) error {
+	return runReadModelTasks(tasks...)
 }
 
 func workspaceGovernanceHistory(
@@ -332,13 +386,13 @@ func workspaceGovernanceHistory(
 	if tickets == nil || resolutions == nil || runs == nil || workspaceID == "" || limit <= 0 {
 		return nil
 	}
-	allTickets, err := tickets.List(ctx)
+	workspaceTickets, err := tickets.ListByWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return nil
 	}
-	ret := make([]map[string]any, 0, min(limit, len(allTickets)))
-	for _, ticket := range allTickets {
-		if ticket == nil || ticket.WorkspaceID != workspaceID || ticket.State != common.DecisionTicketStateResolved {
+	ret := make([]map[string]any, 0, min(limit, len(workspaceTickets)))
+	for _, ticket := range workspaceTickets {
+		if ticket == nil || ticket.State != common.DecisionTicketStateResolved {
 			continue
 		}
 		run, err := runs.Get(ctx, ticket.RunID)
@@ -858,10 +912,10 @@ func memoryContexts(items []*memorymodel.MemoryItem) []map[string]any {
 	return ret
 }
 
-func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSession, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any, priority int) (*runmodel.Run, error) {
+func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSession, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any, priority int) (common.RunID, error) {
 	exports, err := session.Exports()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	for attempt := 0; attempt < 8; attempt++ {
 		runID := common.RunID(generateBusinessID("run"))
@@ -877,23 +931,49 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 			if errors.Is(err, common.ErrConflict) {
 				continue
 			}
-			return nil, err
+			return "", err
 		}
-		if err := attachCompressedContextToRun(ctx, session, runID); err != nil {
-			return nil, err
+		createdRun := &runmodel.Run{
+			ID:               runID,
+			WorkspaceID:      workspaceID,
+			GoalID:           goalID,
+			DoDID:            dodID,
+			InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
+			ExecutionContext: cloneContextMap(executionContext),
+			State:            common.RunStateCreated,
+			Priority:         priority,
+		}
+		deps, err := readModelDependenciesFromSession(session)
+		if err != nil {
+			return "", err
+		}
+		if err := attachCompressedContextToLoadedRun(ctx, deps, createdRun); err != nil {
+			return "", err
 		}
 		if err := exports.Services.RunService.EnsureStarted(ctx, runmodule.StartRunCommand{RunID: runID}); err != nil {
-			return nil, err
+			return "", err
 		}
-		return exports.Repositories.Runs.Get(ctx, runID)
+		return runID, nil
 	}
-	return nil, common.ErrConflict
+	return "", common.ErrConflict
 }
 
 func readWorkspaceSnapshotFromExports(ctx context.Context, session *RuntimeSession, workspaceID common.WorkspaceID) (WorkspaceSnapshot, error) {
+	return readWorkspaceSnapshotFromExportsWithRunSnapshot(ctx, session, workspaceID, nil)
+}
+
+func readWorkspaceSnapshotFromExportsWithRunSnapshot(ctx context.Context, session *RuntimeSession, workspaceID common.WorkspaceID, runSnapshot *RunSnapshot) (WorkspaceSnapshot, error) {
 	deps, err := readModelDependenciesFromSession(session)
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
-	return readWorkspaceSnapshot(ctx, deps, workspaceID, nil)
+	return readWorkspaceSnapshot(ctx, deps, workspaceID, runSnapshot)
+}
+
+func readRunSnapshotFromExports(ctx context.Context, session *RuntimeSession, runID common.RunID) (RunSnapshot, error) {
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		return RunSnapshot{}, err
+	}
+	return readRunSnapshot(ctx, deps, runID)
 }

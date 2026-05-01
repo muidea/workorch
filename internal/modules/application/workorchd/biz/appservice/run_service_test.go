@@ -5,10 +5,14 @@ import (
 	"errors"
 	"testing"
 
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/common"
+	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
 func TestCreateRunWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing.T) {
@@ -91,6 +95,121 @@ func TestStartRunWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing.
 func TestResumeRunWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing.T) {
 	if _, err := ResumeRunWithSession(context.Background(), nil, "run-1"); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid argument", err)
+	}
+}
+
+func TestCompressedContextForRunStartUsesLightweightCreatedRunProjection(t *testing.T) {
+	compressed := compressedContextForRunStart(&runmodel.Run{
+		ID:          "run-lightweight-start",
+		WorkspaceID: "ws-lightweight-start",
+		State:       common.RunStateCreated,
+	})
+	if compressed == nil {
+		t.Fatalf("compressedContext nil, want lightweight projection")
+	}
+	if compressed["version"] != "workorch.compressedContext.v1" ||
+		compressed["mode"] != "deterministic_recovery_summary" ||
+		compressed["runId"] != "run-lightweight-start" ||
+		compressed["workspaceId"] != "ws-lightweight-start" {
+		t.Fatalf("compressedContext = %+v, want created run identity", compressed)
+	}
+	if compressed["currentMilestone"] != "execution_steps" {
+		t.Fatalf("currentMilestone = %v, want execution_steps", compressed["currentMilestone"])
+	}
+	if compressedContextForRunStart(&runmodel.Run{
+		ID:          "run-lightweight-start",
+		WorkspaceID: "ws-lightweight-start",
+		State:       common.RunStateRunning,
+	}) != nil {
+		t.Fatalf("running run should use full snapshot-based compressed context")
+	}
+}
+
+func TestCompressedContextForBlockedRunResumeUsesLightweightGovernanceProjection(t *testing.T) {
+	ctx := context.Background()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	deps := readModelDependencies{
+		tickets:     ticketRepo,
+		resolutions: resolutionRepo,
+		approvals:   approvalRepo,
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          "ticket-lightweight-resume",
+		WorkspaceID: "ws-lightweight-decision-resume",
+		RunID:       "run-lightweight-decision-resume",
+		State:       common.DecisionTicketStateResolved,
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       "resolution-lightweight-resume",
+		TicketID: "ticket-lightweight-resume",
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+	if err := approvalRepo.Create(ctx, &approvalmodel.Approval{
+		ID:          "approval-lightweight-resume",
+		WorkspaceID: "ws-lightweight-approval-resume",
+		RunID:       "run-lightweight-approval-resume",
+		State:       common.ApprovalStateApproved,
+	}); err != nil {
+		t.Fatalf("seed approval: %v", err)
+	}
+
+	decision, err := compressedContextForBlockedRunResume(ctx, deps, &runmodel.Run{
+		ID:               "run-lightweight-decision-resume",
+		WorkspaceID:      "ws-lightweight-decision-resume",
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: "ticket-lightweight-resume",
+	})
+	if err != nil {
+		t.Fatalf("decision compressedContext: %v", err)
+	}
+	if decision == nil {
+		t.Fatalf("decision compressedContext nil, want lightweight blocked resume projection")
+	}
+	if decision["runId"] != "run-lightweight-decision-resume" ||
+		decision["workspaceId"] != "ws-lightweight-decision-resume" ||
+		decision["currentMilestone"] != "execution_steps" {
+		t.Fatalf("decision compressedContext = %+v, want run identity and execution milestone", decision)
+	}
+	decisionRecovery, _ := decision["recovery"].(map[string]any)
+	if decisionRecovery["blockingTicketId"] != "ticket-lightweight-resume" ||
+		decisionRecovery["nextAction"] != "continue_run" {
+		t.Fatalf("decision recovery = %+v, want resolved ticket resume", decisionRecovery)
+	}
+
+	approval, err := compressedContextForBlockedRunResume(ctx, deps, &runmodel.Run{
+		ID:                 "run-lightweight-approval-resume",
+		WorkspaceID:        "ws-lightweight-approval-resume",
+		State:              common.RunStateBlockedOnApproval,
+		BlockingApprovalID: "approval-lightweight-resume",
+	})
+	if err != nil {
+		t.Fatalf("approval compressedContext: %v", err)
+	}
+	if approval == nil {
+		t.Fatalf("approval compressedContext nil, want lightweight blocked resume projection")
+	}
+	approvalRecovery, _ := approval["recovery"].(map[string]any)
+	if approvalRecovery["blockingApprovalId"] != "approval-lightweight-resume" ||
+		approvalRecovery["nextAction"] != "continue_run" {
+		t.Fatalf("approval recovery = %+v, want approved approval resume", approvalRecovery)
+	}
+
+	nonBlocked, err := compressedContextForBlockedRunResume(ctx, deps, &runmodel.Run{
+		ID:          "run-lightweight-running",
+		WorkspaceID: "ws-lightweight-running",
+		State:       common.RunStateRunning,
+	})
+	if err != nil {
+		t.Fatalf("running compressedContext: %v", err)
+	}
+	if nonBlocked != nil {
+		t.Fatalf("running run should use snapshot-based compressed context")
 	}
 }
 
@@ -226,6 +345,9 @@ func TestResumeRunWithBackendReturnsFailedRunAfterApprovalRejected(t *testing.T)
 	}
 	if _, ok := compressed["recentEvidence"].([]any); !ok {
 		t.Fatalf("compressedContext = %+v, want recent evidence for resumed run", compressed)
+	}
+	if refs, ok := compressed["sourceSectionRefs"].([]any); !ok || len(refs) == 0 {
+		t.Fatalf("compressedContext = %+v, want source section refs for resumed run", compressed)
 	}
 }
 

@@ -2,6 +2,7 @@ package appservice
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"sort"
 	"strconv"
@@ -994,6 +995,105 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 	return ret, nil
 }
 
+func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, runID common.RunID) (RunSnapshot, error) {
+	item, err := deps.runs.Get(ctx, runID)
+	if err != nil {
+		return RunSnapshot{}, err
+	}
+	workspace, err := deps.workspaces.Get(ctx, item.WorkspaceID)
+	if err != nil {
+		return RunSnapshot{}, err
+	}
+	var steps []*runmodel.Step
+	var toolCalls []*runmodel.ToolCall
+	var patches []*runmodel.Patch
+	var validations []*runmodel.ValidationResult
+	var checkpoints []*runmodel.RuntimeCheckpoint
+	var results []*resultmodel.Result
+	var artifacts []*resultmodel.Artifact
+	var eventRecords []*eventstreammodel.EventRecord
+	var decisions []Decision
+	var approvals []Approval
+	err = runReadModelTasks(
+		func() error {
+			var err error
+			steps, err = deps.steps.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			toolCalls, err = deps.toolCalls.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			patches, err = deps.patches.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			validations, err = deps.validations.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			checkpoints, err = deps.checkpoints.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			results, err = deps.results.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			artifacts, err = deps.artifacts.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			eventRecords, err = deps.eventRecords.List(ctx, repository.EventRecordQuery{RunID: item.ID})
+			return err
+		},
+		func() error {
+			var selectedTicket *decisionmodel.Ticket
+			var selectedResolution *decisionmodel.Resolution
+			var err error
+			decisions, selectedTicket, selectedResolution, err = decisionsForRun(ctx, deps, item)
+			_, _ = selectedTicket, selectedResolution
+			return err
+		},
+		func() error {
+			var selectedApproval *approvalmodel.Approval
+			var err error
+			approvals, selectedApproval, err = approvalsForRun(ctx, deps, item)
+			_ = selectedApproval
+			return err
+		},
+	)
+	if err != nil {
+		return RunSnapshot{}, err
+	}
+	ret := RunSnapshot{
+		Workspace:          mapWorkspaceWithRunProjection(workspace, item),
+		Run:                mapRun(item),
+		Step:               presenter.MapStep(lastStep(steps)),
+		Steps:              presenter.MapSteps(steps),
+		ToolCalls:          mapToolCalls(toolCalls),
+		Patches:            mapPatches(patches),
+		ValidationResults:  mapValidationResults(validations),
+		RuntimeCheckpoints: mapRuntimeCheckpoints(checkpoints),
+		Results:            mapResults(results),
+		Artifacts:          mapArtifacts(artifacts),
+		EventRecords:       mapEventRecords(eventRecords),
+		Decisions:          decisions,
+		Approvals:          approvals,
+	}
+	ret.Outcome = mapRunOutcome(ret)
+	ret.TaskProgress = mapTaskProgress(ret)
+	return ret, nil
+}
+
 func readRunStatus(ctx context.Context, deps readModelDependencies, runID common.RunID) (RunStatus, error) {
 	item, err := deps.runs.Get(ctx, runID)
 	if err != nil {
@@ -1070,9 +1170,15 @@ func runReadModelTasks(tasks ...func() error) error {
 }
 
 func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID, cachedRunSnapshot *RunSnapshot) (WorkspaceSnapshot, error) {
-	item, err := deps.workspaces.Get(ctx, workspaceID)
-	if err != nil {
-		return WorkspaceSnapshot{}, err
+	var item *workspacemodel.Workspace
+	var err error
+	if cachedRunSnapshot != nil && cachedRunSnapshot.Workspace.ID == string(workspaceID) {
+		item = workspaceModelFromView(cachedRunSnapshot.Workspace)
+	} else {
+		item, err = deps.workspaces.Get(ctx, workspaceID)
+		if err != nil {
+			return WorkspaceSnapshot{}, err
+		}
 	}
 
 	var runItems []*runmodel.Run
@@ -1125,15 +1231,15 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		runs = append(runs, mapRun(runItem))
 	}
 	decisions := make([]Decision, 0, len(ticketItems))
+	resolutions, err := resolutionsForTickets(ctx, deps.resolutions, ticketItems)
+	if err != nil {
+		return WorkspaceSnapshot{}, err
+	}
 	for _, ticket := range ticketItems {
 		if ticket.WorkspaceID != workspaceID {
 			continue
 		}
-		resolution, err := resolutionForTicket(ctx, deps.resolutions, ticket)
-		if err != nil {
-			return WorkspaceSnapshot{}, err
-		}
-		decisions = append(decisions, mapDecision(ticket, resolution))
+		decisions = append(decisions, mapDecision(ticket, resolutions[ticket.ID]))
 	}
 
 	approvals := make([]Approval, 0, len(approvalItems))
@@ -1173,6 +1279,38 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 	}
 	ret.Outcome = mapWorkspaceOutcome(ret)
 	return ret, nil
+}
+
+func workspaceModelFromView(item Workspace) *workspacemodel.Workspace {
+	return &workspacemodel.Workspace{
+		ID:               common.WorkspaceID(item.ID),
+		Title:            item.Title,
+		Description:      item.Description,
+		WorkingDirectory: item.WorkingDirectory,
+		State:            common.WorkspaceState(item.State),
+		ActiveRunID:      common.RunID(item.ActiveRunID),
+		DefaultSoulID:    common.SoulID(item.DefaultSoulID),
+		SoulBindings:     workspaceSoulBindingsFromView(item.SoulBindings),
+	}
+}
+
+func workspaceSoulBindingsFromView(input map[string]string) map[string]common.SoulID {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make(map[string]common.SoulID, len(input))
+	for key, value := range input {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		ret[key] = common.SoulID(value)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func readWorkspaceTaskProgress(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID) (TaskProgress, error) {
@@ -1364,6 +1502,10 @@ func decisionsForRun(ctx context.Context, deps readModelDependencies, run *runmo
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	resolutions, err := resolutionsForTickets(ctx, deps.resolutions, items)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
 	ret := make([]Decision, 0, len(items))
 	var selectedTicket *decisionmodel.Ticket
@@ -1372,10 +1514,7 @@ func decisionsForRun(ctx context.Context, deps readModelDependencies, run *runmo
 		if item.RunID != run.ID {
 			continue
 		}
-		resolution, err := resolutionForTicket(ctx, deps.resolutions, item)
-		if err != nil {
-			return nil, nil, nil, err
-		}
+		resolution := resolutions[item.ID]
 		ret = append(ret, mapDecision(item, resolution))
 		if run.BlockingTicketID != "" && item.ID == run.BlockingTicketID {
 			selectedTicket = item
@@ -1388,6 +1527,47 @@ func decisionsForRun(ctx context.Context, deps readModelDependencies, run *runmo
 		}
 	}
 	return ret, selectedTicket, selectedResolution, nil
+}
+
+func resolutionsForTickets(ctx context.Context, resolutions repository.DecisionResolutionRepository, items []*decisionmodel.Ticket) (map[common.TicketID]*decisionmodel.Resolution, error) {
+	ret := make(map[common.TicketID]*decisionmodel.Resolution)
+	if resolutions == nil || len(items) == 0 {
+		return ret, nil
+	}
+	var mu sync.Mutex
+	err := runReadModelTasks(funcsForResolvedTickets(items, func(item *decisionmodel.Ticket) func() error {
+		return func() error {
+			resolution, err := resolutions.GetByTicketID(ctx, item.ID)
+			if errors.Is(err, common.ErrNotFound) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			ret[item.ID] = resolution
+			mu.Unlock()
+			return nil
+		}
+	})...)
+	if err != nil {
+		return nil, err
+	}
+	return ret, nil
+}
+
+func funcsForResolvedTickets(items []*decisionmodel.Ticket, build func(*decisionmodel.Ticket) func() error) []func() error {
+	if len(items) == 0 || build == nil {
+		return nil
+	}
+	ret := make([]func() error, 0, len(items))
+	for _, item := range items {
+		if item == nil || item.State != common.DecisionTicketStateResolved {
+			continue
+		}
+		ret = append(ret, build(item))
+	}
+	return ret
 }
 
 func approvalsForRun(ctx context.Context, deps readModelDependencies, run *runmodel.Run) ([]Approval, *approvalmodel.Approval, error) {
@@ -1898,6 +2078,15 @@ func readModelBoolValue(value any) bool {
 	}
 }
 
+func readModelMapValue(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneReadModelMap(typed)
+	default:
+		return nil
+	}
+}
+
 func readModelMapSliceValue(value any) []map[string]any {
 	switch typed := value.(type) {
 	case []map[string]any:
@@ -2175,6 +2364,77 @@ func compressedContextFromBundle(bundle ContextBundle) CompressedContext {
 		SourceEvidenceRefs: sourceEvidenceRefs,
 		RetentionPolicy:    "retain recovery, blockers, milestones, latest evidence summaries, and formal result refs; reload full evidence by source refs when needed",
 	}
+}
+
+func compressedContextFromRunSnapshot(snapshot RunSnapshot) CompressedContext {
+	progress := mapTaskProgress(snapshot)
+	timeline := runtimeTimeline(snapshot)
+	recentEvidence := contextRecentEvidence(timeline, 12)
+	sourceEvidenceRefs := compactUniqueStrings(append(progress.EvidenceRefs, contextEvidenceRefs(recentEvidence)...))
+	return CompressedContext{
+		Version:            "workorch.compressedContext.v1",
+		Mode:               "deterministic_recovery_summary",
+		WorkspaceID:        snapshot.Run.WorkspaceID,
+		RunID:              snapshot.Run.ID,
+		Summary:            contextBundleSummary(snapshot, progress),
+		CurrentMilestone:   progress.CurrentMilestone,
+		Milestones:         progress.Milestones,
+		Blockers:           progress.Blockers,
+		Recovery:           progress.Recovery,
+		RecentEvidence:     lastContextEvidence(recentEvidence, 6),
+		ResultRefs:         resultRefsFromTaskProgress(progress),
+		SourceSectionRefs:  compressedContextSourceSectionRefs(snapshot, recentEvidence),
+		SourceEvidenceRefs: sourceEvidenceRefs,
+		RetentionPolicy:    "retain recovery, blockers, milestones, latest evidence summaries, and formal result refs; reload full evidence by source refs when needed",
+	}
+}
+
+func compressedContextSourceSectionRefs(snapshot RunSnapshot, recentEvidence []ContextEvidence) []string {
+	sections := []ContextSection{
+		{ID: "workspace", Priority: 100},
+		{ID: "run", Priority: 100},
+	}
+	if len(readModelMapValue(snapshot.Run.ExecutionContext["goal"])) > 0 {
+		sections = append(sections, ContextSection{ID: "goal", Priority: 95})
+	}
+	if len(readModelMapValue(snapshot.Run.ExecutionContext["dod"])) > 0 {
+		sections = append(sections, ContextSection{ID: "dod", Priority: 95})
+	}
+	if hasNonDefinitionExecutionContext(snapshot.Run.ExecutionContext) {
+		sections = append(sections, ContextSection{ID: "execution_context", Priority: 85})
+	}
+	sections = append(sections, ContextSection{ID: "task_progress", Priority: 90})
+	if len(snapshot.TaskDecompositions) > 0 {
+		sections = append(sections, ContextSection{ID: "task_decomposition", Priority: 85})
+	}
+	if len(snapshot.ExecutionSections) > 0 {
+		sections = append(sections, ContextSection{ID: "execution_sections", Priority: 84})
+	}
+	if len(snapshot.Decisions) > 0 || len(snapshot.Approvals) > 0 {
+		sections = append(sections, ContextSection{ID: "governance", Priority: 80})
+	}
+	if len(runScopedResults(snapshot)) > 0 || len(runScopedArtifacts(snapshot)) > 0 {
+		sections = append(sections, ContextSection{ID: "formal_outputs", Priority: 90})
+	}
+	if len(recentEvidence) > 0 {
+		sections = append(sections, ContextSection{ID: "recent_evidence", Priority: 70})
+	}
+	sections = append(sections, ContextSection{ID: "recovery", Priority: 100})
+	sections = compactContextSections(sections)
+	refs := make([]string, 0, len(sections))
+	for _, section := range sections {
+		refs = append(refs, section.ID)
+	}
+	return compactUniqueStrings(refs)
+}
+
+func hasNonDefinitionExecutionContext(executionContext map[string]any) bool {
+	for key := range executionContext {
+		if key != "goal" && key != "dod" && key != "compressedContext" {
+			return true
+		}
+	}
+	return false
 }
 
 func mapTaskDecompositions(snapshot RunSnapshot) []TaskDecomposition {

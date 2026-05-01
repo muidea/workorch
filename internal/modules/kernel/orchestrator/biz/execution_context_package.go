@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"sync"
 
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -41,16 +42,43 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		"stepId":      string(step.ID),
 		"stage":       stringFromMap(step.Input, stepInputKeySoulStage),
 	}
-	if manifest := o.executionContextWorkspaceFileManifest(ctx, run, step, workspace); len(manifest) > 0 {
+
+	var (
+		manifest     []map[string]any
+		result       map[string]any
+		deliverables []map[string]any
+		failures     []map[string]any
+		wg           sync.WaitGroup
+	)
+	wg.Add(4)
+	go func() {
+		defer wg.Done()
+		manifest = o.executionContextWorkspaceFileManifest(ctx, run, step, workspace)
+	}()
+	go func() {
+		defer wg.Done()
+		result = o.latestAcceptedResultContext(ctx, run)
+	}()
+	go func() {
+		defer wg.Done()
+		deliverables = o.currentDeliverableContexts(ctx, run)
+	}()
+	go func() {
+		defer wg.Done()
+		failures = o.recentFailureContexts(ctx, run, step.ID, 6)
+	}()
+	wg.Wait()
+
+	if len(manifest) > 0 {
 		ret["workspaceFileManifest"] = manifest
 	}
-	if result := o.latestAcceptedResultContext(ctx, run); result != nil {
+	if result != nil {
 		ret["latestAcceptedResult"] = result
 	}
-	if deliverables := o.currentDeliverableContexts(ctx, run); len(deliverables) > 0 {
+	if len(deliverables) > 0 {
 		ret["currentDeliverables"] = deliverables
 	}
-	if failures := o.recentFailureContexts(ctx, run, step.ID, 6); len(failures) > 0 {
+	if len(failures) > 0 {
 		ret["recentFailureSummary"] = failures
 	}
 	if selected := selectedContextPackage(executionContext); len(selected) > 0 {
@@ -144,6 +172,9 @@ func (o *RuntimeOrchestrator) recentFailureContexts(ctx context.Context, run *ru
 	if o == nil || run == nil || o.steps == nil || limit <= 0 {
 		return nil
 	}
+	if currentStepID == initialStepID(run.ID) {
+		return nil
+	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil || len(steps) == 0 {
 		return nil
@@ -160,6 +191,13 @@ func (o *RuntimeOrchestrator) recentFailureContexts(ctx context.Context, run *ru
 		}
 	}
 	return ret
+}
+
+func initialStepID(runID common.RunID) common.StepID {
+	if runID == "" {
+		return ""
+	}
+	return common.StepID(string(runID) + "/step-1")
 }
 
 func failureContextFromStep(step *runModel.Step) map[string]any {

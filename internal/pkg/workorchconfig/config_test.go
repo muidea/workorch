@@ -127,6 +127,33 @@ disabled = false
 	}
 }
 
+func TestReloadAdvancesRevision(t *testing.T) {
+	configDir := writeApplicationConfig(t, `
+endpointName = "workorchd"
+
+[server]
+addr = "127.0.0.1:18080"
+
+[repository]
+backend = "memory"
+	`)
+	_ = Close()
+	t.Setenv(EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = Close() })
+
+	if _, err := Current(); err != nil {
+		t.Fatalf("current config: %v", err)
+	}
+	before := Revision()
+	if err := Reload(); err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	after := Revision()
+	if after <= before {
+		t.Fatalf("revision before=%d after=%d, want reload to advance revision", before, after)
+	}
+}
+
 func TestConfigureDirectorySetsFrameworkConfigPath(t *testing.T) {
 	configDir := t.TempDir()
 	ConfigureDirectory(configDir)

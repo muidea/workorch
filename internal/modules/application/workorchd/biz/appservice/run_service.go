@@ -131,10 +131,11 @@ func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID st
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.RunID(runID)
-	if err := attachCompressedContextToRun(ctx, session, id); err != nil {
+	patch, err := compressedContextPatchForRun(ctx, session, id)
+	if err != nil {
 		return Run{}, err
 	}
-	if err := service.ResumeRun(ctx, runmodule.ResumeRunCommand{RunID: id}); err != nil {
+	if err := service.ResumeRun(ctx, runmodule.ResumeRunCommand{RunID: id, ExecutionContextPatch: patch}); err != nil {
 		return Run{}, err
 	}
 
@@ -233,11 +234,34 @@ func attachCompressedContextToRun(ctx context.Context, session *RuntimeSession, 
 	if err != nil {
 		return err
 	}
-	bundle, err := readRunContextBundle(ctx, deps, runID)
+	item, err := deps.runs.Get(ctx, runID)
 	if err != nil {
 		return err
 	}
+	return attachCompressedContextToLoadedRun(ctx, deps, item)
+}
+
+func compressedContextPatchForRun(ctx context.Context, session *RuntimeSession, runID common.RunID) (map[string]any, error) {
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		return nil, err
+	}
 	item, err := deps.runs.Get(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	compressed, err := compressedContextForLoadedRun(ctx, deps, item)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"compressedContext": compressed}, nil
+}
+
+func attachCompressedContextToLoadedRun(ctx context.Context, deps readModelDependencies, item *runmodel.Run) error {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	compressed, err := compressedContextForLoadedRun(ctx, deps, item)
 	if err != nil {
 		return err
 	}
@@ -245,9 +269,145 @@ func attachCompressedContextToRun(ctx context.Context, session *RuntimeSession, 
 	if executionContext == nil {
 		executionContext = map[string]any{}
 	}
-	executionContext["compressedContext"] = compressedContextMap(bundle.CompressedContext)
+	executionContext["compressedContext"] = compressed
 	item.ExecutionContext = executionContext
 	return deps.runs.Update(ctx, item)
+}
+
+func compressedContextForLoadedRun(ctx context.Context, deps readModelDependencies, item *runmodel.Run) (map[string]any, error) {
+	if item == nil || item.ID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	compressed := compressedContextForRunStart(item)
+	if compressed != nil {
+		return compressed, nil
+	}
+	compressed, err := compressedContextForBlockedRunResume(ctx, deps, item)
+	if err != nil {
+		return nil, err
+	}
+	if compressed != nil {
+		return compressed, nil
+	}
+	snapshot, err := readRunRecoverySnapshot(ctx, deps, item.ID)
+	if err != nil {
+		return nil, err
+	}
+	return compressedContextMap(compressedContextFromRunSnapshot(snapshot)), nil
+}
+
+func compressedContextForRunStart(item *runmodel.Run) map[string]any {
+	if item == nil || item.State != common.RunStateCreated || item.ID == "" || item.WorkspaceID == "" {
+		return nil
+	}
+	return compressedContextMap(CompressedContext{
+		Version:          "workorch.compressedContext.v1",
+		Mode:             "deterministic_recovery_summary",
+		WorkspaceID:      string(item.WorkspaceID),
+		RunID:            string(item.ID),
+		Summary:          "run created with no execution evidence yet",
+		CurrentMilestone: "execution_steps",
+		Milestones: []ProgressMilestone{
+			{ID: "run_created", Title: "Run created", State: "completed", EvidenceRefs: []string{string(item.ID)}},
+			{ID: "execution_steps", Title: "Execution steps", State: "pending"},
+			{ID: "governance", Title: "Decision and approval governance", State: "pending"},
+			{ID: "validation", Title: "Validation", State: "pending"},
+			{ID: "formal_result", Title: "Formal result", State: "pending"},
+		},
+		Recovery: RecoveryPlan{
+			Mode:       "continue",
+			NextAction: "continue_run",
+			RunID:      string(item.ID),
+		},
+		SourceEvidenceRefs: []string{string(item.ID)},
+		RetentionPolicy:    "retain recovery, blockers, milestones, latest evidence summaries, and formal result refs; reload full evidence by source refs when needed",
+	})
+}
+
+func compressedContextForBlockedRunResume(ctx context.Context, deps readModelDependencies, item *runmodel.Run) (map[string]any, error) {
+	if item == nil || item.ID == "" || item.WorkspaceID == "" {
+		return nil, nil
+	}
+	var blocker ProgressBlocker
+	recovery := RecoveryPlan{
+		Mode:       "continue",
+		NextAction: "continue_run",
+		RunID:      string(item.ID),
+	}
+	summary := ""
+	switch item.State {
+	case common.RunStateBlockedOnDecision:
+		if item.BlockingTicketID == "" || deps.tickets == nil || deps.resolutions == nil {
+			return nil, nil
+		}
+		ticket, err := deps.tickets.Get(ctx, item.BlockingTicketID)
+		if err != nil {
+			return nil, err
+		}
+		if ticket.State != common.DecisionTicketStateResolved {
+			return nil, nil
+		}
+		resolution, err := deps.resolutions.GetByTicketID(ctx, item.BlockingTicketID)
+		if err != nil {
+			return nil, err
+		}
+		if resolution.Type != "provide_missing_info" {
+			return nil, nil
+		}
+		blocker = ProgressBlocker{
+			ID:          string(item.BlockingTicketID),
+			Kind:        "decision",
+			State:       string(common.DecisionTicketStateResolved),
+			Reason:      "decision ticket was resolved; resume run execution",
+			EvidenceRef: string(item.BlockingTicketID),
+		}
+		recovery.BlockingTicketID = string(item.BlockingTicketID)
+		recovery.Reason = "decision ticket was resolved; resume run execution"
+		summary = "run is resuming after a resolved Decision Ticket"
+	case common.RunStateBlockedOnApproval:
+		if item.BlockingApprovalID == "" || deps.approvals == nil {
+			return nil, nil
+		}
+		approval, err := deps.approvals.Get(ctx, item.BlockingApprovalID)
+		if err != nil {
+			return nil, err
+		}
+		if approval.State != common.ApprovalStateApproved {
+			return nil, nil
+		}
+		blocker = ProgressBlocker{
+			ID:          string(item.BlockingApprovalID),
+			Kind:        "approval",
+			State:       string(common.ApprovalStateApproved),
+			Reason:      "approval was resolved; resume run execution",
+			EvidenceRef: string(item.BlockingApprovalID),
+		}
+		recovery.BlockingApprovalID = string(item.BlockingApprovalID)
+		recovery.Reason = "approval was resolved; resume run execution"
+		summary = "run is resuming after an approved Approval"
+	default:
+		return nil, nil
+	}
+	return compressedContextMap(CompressedContext{
+		Version:          "workorch.compressedContext.v1",
+		Mode:             "deterministic_recovery_summary",
+		WorkspaceID:      string(item.WorkspaceID),
+		RunID:            string(item.ID),
+		Summary:          summary,
+		CurrentMilestone: "execution_steps",
+		Milestones: []ProgressMilestone{
+			{ID: "run_created", Title: "Run created", State: "completed", EvidenceRefs: []string{string(item.ID)}},
+			{ID: "execution_steps", Title: "Execution steps", State: "in_progress"},
+			{ID: "governance", Title: "Decision and approval governance", State: "in_progress", EvidenceRefs: []string{blocker.ID}},
+			{ID: "validation", Title: "Validation", State: "pending"},
+			{ID: "formal_result", Title: "Formal result", State: "pending"},
+		},
+		Blockers:           []ProgressBlocker{blocker},
+		Recovery:           recovery,
+		SourceSectionRefs:  []string{"run", "governance", "task_progress"},
+		SourceEvidenceRefs: []string{string(item.ID), blocker.ID},
+		RetentionPolicy:    "retain recovery, blockers, milestones, latest evidence summaries, and formal result refs; reload full evidence by source refs when needed",
+	}), nil
 }
 
 func readRunContextBundle(ctx context.Context, deps readModelDependencies, runID common.RunID) (ContextBundle, error) {

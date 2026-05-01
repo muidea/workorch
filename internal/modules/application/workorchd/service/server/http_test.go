@@ -49,6 +49,18 @@ import (
 	_ "github.com/muidea/workorch/internal/modules/kernel/workspace"
 )
 
+func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("condition was not met within %v", timeout)
+}
+
 func newFileMuxWithCleanup(t *testing.T, dataRoot string) http.Handler {
 	t.Helper()
 	state := newServerState(normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}), nil)
@@ -837,13 +849,22 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.Run{ID: runID, WorkspaceID: "ws-native-read", State: "created"}, nil
 	}
 	state.readRunSnapshot = func(ctx context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
-			t.Fatalf("run snapshot event hub = %#v, want injected hub", got)
+		if runID == "run-native-read" {
+			got := appservice.EventHubFromContext(ctx)
+			if got != nil && got != hub {
+				t.Fatalf("run snapshot event hub = %#v, want injected hub", got)
+			}
+			state := "created"
+			if got == nil {
+				state = "completed"
+			}
+			return appservice.RunSnapshot{Run: appservice.Run{ID: runID, WorkspaceID: "ws-native-read", State: state}}, nil
 		}
-		if runID != "run-native-read" {
-			t.Fatalf("runID = %q, want run-native-read", runID)
+		if runID == "run-native-activation" {
+			return appservice.RunSnapshot{Run: appservice.Run{ID: runID, WorkspaceID: "ws-native-read", State: "completed"}}, nil
 		}
-		return appservice.RunSnapshot{Run: appservice.Run{ID: runID}}, nil
+		t.Fatalf("runID = %q, want run-native-read or run-native-activation", runID)
+		return appservice.RunSnapshot{}, nil
 	}
 	state.readRunStatus = func(ctx context.Context, _, _, runID string) (appservice.RunStatus, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
@@ -1835,6 +1856,132 @@ func TestTerminalRunSnapshotCacheReusesSnapshotForReadViews(t *testing.T) {
 	}
 	if snapshotReads.Load() != 2 {
 		t.Fatalf("snapshot reads after invalidation = %d, want 2", snapshotReads.Load())
+	}
+}
+
+func TestRunStatusWaitWarmsTerminalRunSnapshotCache(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	var snapshotReads atomic.Int32
+	state.readRunStatus = func(_ context.Context, _, _, runID string) (appservice.RunStatus, error) {
+		return appservice.RunStatus{ID: runID, WorkspaceID: "ws-status-warm-cache", State: string(common.RunStateCompleted)}, nil
+	}
+	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
+		snapshotReads.Add(1)
+		return appservice.RunSnapshot{
+			Workspace: appservice.Workspace{ID: "ws-status-warm-cache", State: string(common.WorkspaceStateCompleted)},
+			Run:       appservice.Run{ID: runID, WorkspaceID: "ws-status-warm-cache", State: string(common.RunStateCompleted)},
+		}, nil
+	}
+	handler := newMuxWithState(state)
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-status-warm-cache/status?waitState=completed&waitTimeoutMillis=1000", nil)
+	statusRec := httptest.NewRecorder()
+	handler.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", statusRec.Code, statusRec.Body.String())
+	}
+	waitForCondition(t, time.Second, func() bool {
+		_, ok := state.cachedRunSnapshot("run-status-warm-cache")
+		return ok
+	})
+
+	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-status-warm-cache/snapshot", nil)
+	snapshotRec := httptest.NewRecorder()
+	handler.ServeHTTP(snapshotRec, snapshotReq)
+	if snapshotRec.Code != http.StatusOK {
+		t.Fatalf("snapshot = %d, want 200, body=%s", snapshotRec.Code, snapshotRec.Body.String())
+	}
+	if snapshotReads.Load() != 1 {
+		t.Fatalf("snapshot reads = %d, want one background warm read reused by snapshot endpoint", snapshotReads.Load())
+	}
+}
+
+func TestRunStatusNotificationForTerminalRunWarmsSnapshotCache(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	var snapshotReads atomic.Int32
+	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
+		snapshotReads.Add(1)
+		return appservice.RunSnapshot{
+			Workspace: appservice.Workspace{ID: "ws-notify-warm-cache", State: string(common.WorkspaceStateCompleted)},
+			Run:       appservice.Run{ID: runID, WorkspaceID: "ws-notify-warm-cache", State: string(common.RunStateCompleted)},
+		}, nil
+	}
+	handler := newMuxWithState(state)
+
+	state.notifyRunStatusChangedForRun(appservice.Run{
+		ID:          "run-notify-warm-cache",
+		WorkspaceID: "ws-notify-warm-cache",
+		State:       string(common.RunStateCompleted),
+	})
+	waitForCondition(t, time.Second, func() bool {
+		_, ok := state.cachedRunSnapshot("run-notify-warm-cache")
+		return ok
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-notify-warm-cache/snapshot", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("snapshot = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if snapshotReads.Load() != 1 {
+		t.Fatalf("snapshot reads = %d, want notification warm read reused by snapshot endpoint", snapshotReads.Load())
+	}
+}
+
+func TestRunSnapshotReadWaitsForTerminalStatusWarmupInflight(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	var snapshotReads atomic.Int32
+	releaseRead := make(chan struct{})
+	readStarted := make(chan struct{})
+	state.readRunStatus = func(_ context.Context, _, _, runID string) (appservice.RunStatus, error) {
+		return appservice.RunStatus{ID: runID, WorkspaceID: "ws-status-inflight-cache", State: string(common.RunStateCompleted)}, nil
+	}
+	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
+		snapshotReads.Add(1)
+		close(readStarted)
+		<-releaseRead
+		return appservice.RunSnapshot{
+			Workspace: appservice.Workspace{ID: "ws-status-inflight-cache", State: string(common.WorkspaceStateCompleted)},
+			Run:       appservice.Run{ID: runID, WorkspaceID: "ws-status-inflight-cache", State: string(common.RunStateCompleted)},
+		}, nil
+	}
+	handler := newMuxWithState(state)
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-status-inflight-cache/status?waitState=completed&waitTimeoutMillis=1000", nil)
+	statusRec := httptest.NewRecorder()
+	handler.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", statusRec.Code, statusRec.Body.String())
+	}
+	select {
+	case <-readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("background snapshot warmup did not start")
+	}
+
+	snapshotDone := make(chan struct{})
+	go func() {
+		defer close(snapshotDone)
+		snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-status-inflight-cache/snapshot", nil)
+		snapshotRec := httptest.NewRecorder()
+		handler.ServeHTTP(snapshotRec, snapshotReq)
+		if snapshotRec.Code != http.StatusOK {
+			t.Errorf("snapshot = %d, want 200, body=%s", snapshotRec.Code, snapshotRec.Body.String())
+		}
+	}()
+	time.Sleep(20 * time.Millisecond)
+	if snapshotReads.Load() != 1 {
+		t.Fatalf("snapshot reads before warmup release = %d, want only background read in flight", snapshotReads.Load())
+	}
+	close(releaseRead)
+	select {
+	case <-snapshotDone:
+	case <-time.After(time.Second):
+		t.Fatal("snapshot endpoint did not complete from warmup in-flight read")
+	}
+	if snapshotReads.Load() != 1 {
+		t.Fatalf("snapshot reads = %d, want in-flight warm read reused by snapshot endpoint", snapshotReads.Load())
 	}
 }
 

@@ -202,7 +202,7 @@ func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) 
 	if err != nil {
 		return err
 	}
-	return o.dispatchStepSpecs(ctx, r, specs)
+	return o.dispatchStepSpecsWithWorkspace(ctx, r, specs, ws)
 }
 
 func (o *RuntimeOrchestrator) DispatchNextStep(ctx context.Context, runID common.RunID) error {
@@ -287,6 +287,10 @@ func (o *RuntimeOrchestrator) blockOnApproval(ctx context.Context, r *runModel.R
 }
 
 func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID) error {
+	return o.ResumeRunWithExecutionContextPatch(ctx, runID, nil)
+}
+
+func (o *RuntimeOrchestrator) ResumeRunWithExecutionContextPatch(ctx context.Context, runID common.RunID, executionContextPatch map[string]any) error {
 	if runID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -320,9 +324,11 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 				resumeInput = decisionResolutionInput(ticket, resolution)
 				r.BlockingTicketID = ""
 			case decisioncommon.ResolutionTypeRejectCurrentPath:
-				return o.FailRun(ctx, runID, fmt.Sprintf("decision ticket %s rejected", ticket.ID))
+				mergeRunExecutionContextPatch(r, executionContextPatch)
+				return o.failLoadedRun(ctx, r, fmt.Sprintf("decision ticket %s rejected", ticket.ID))
 			case decisioncommon.ResolutionTypeReplan:
-				return o.SupersedeRun(ctx, runID)
+				mergeRunExecutionContextPatch(r, executionContextPatch)
+				return o.supersedeLoadedRun(ctx, r)
 			default:
 				return common.ErrInvalidArgument
 			}
@@ -343,7 +349,8 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 			resumeInput = approvalResolutionInput(approval)
 			r.BlockingApprovalID = ""
 		case common.ApprovalStateRejected:
-			return o.FailRun(ctx, runID, fmt.Sprintf("approval %s rejected", approval.ID))
+			mergeRunExecutionContextPatch(r, executionContextPatch)
+			return o.failLoadedRun(ctx, r, fmt.Sprintf("approval %s rejected", approval.ID))
 		default:
 			return common.ErrBlocked
 		}
@@ -363,13 +370,18 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 
 	r.State = common.RunStateRunning
 	r.FailureReason = ""
+	mergeRunExecutionContextPatch(r, executionContextPatch)
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
 	if err := o.publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
-	if err := o.syncWorkspaceForActiveRun(ctx, r, common.WorkspaceStateRunning); err != nil {
+	workspace, err := o.syncWorkspaceForActiveRunState(ctx, r, common.WorkspaceStateRunning)
+	if err != nil {
+		return err
+	}
+	if err := o.publishWorkspaceStateChanged(ctx, workspace, r.ID); err != nil {
 		return err
 	}
 	specs, err := o.nextDispatchSpecsAfterStep(ctx, r, resumeAfterStepID)
@@ -377,7 +389,7 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 		return o.failRunningResume(ctx, runID, err)
 	}
 	mergeResumeInput(specs, resumeInput)
-	if err := o.dispatchStepSpecs(ctx, r, specs); err != nil {
+	if err := o.dispatchStepSpecsWithWorkspace(ctx, r, specs, workspace); err != nil {
 		return o.failRunningResume(ctx, runID, err)
 	}
 	return nil
@@ -439,13 +451,12 @@ func (o *RuntimeOrchestrator) resolvedDecisionForStep(
 	runID common.RunID,
 	stepID common.StepID,
 ) (*decisionmodel.Ticket, *decisionmodel.Resolution, error) {
-	tickets, err := o.tickets.List(ctx)
+	tickets, err := o.tickets.ListByRunID(ctx, runID)
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, ticket := range tickets {
 		if ticket == nil ||
-			ticket.RunID != runID ||
 			ticket.StepID != stepID ||
 			ticket.State != common.DecisionTicketStateResolved {
 			continue
@@ -516,16 +527,12 @@ func (o *RuntimeOrchestrator) validateAndCompleteRunWithWorkspace(ctx context.Co
 	if run.State != common.RunStateRunning {
 		return common.ErrConflict
 	}
-	run.State = common.RunStateValidating
-	run.FailureReason = ""
-	if err := o.runs.Update(ctx, run); err != nil {
+	var err error
+	workspace, err = o.syncRunAndWorkspaceForValidation(ctx, run, workspace)
+	if err != nil {
 		return err
 	}
 	if err := o.publishRunStateChangedAtStep(ctx, run, currentStepID); err != nil {
-		return err
-	}
-	workspace, err := o.syncWorkspaceForActiveRunStateWithWorkspace(ctx, run, common.WorkspaceStateValidating, workspace)
-	if err != nil {
 		return err
 	}
 	if err := o.publishWorkspaceStateChanged(ctx, workspace, run.ID); err != nil {
@@ -536,18 +543,62 @@ func (o *RuntimeOrchestrator) validateAndCompleteRunWithWorkspace(ctx context.Co
 	run.BlockingTicketID = ""
 	run.BlockingApprovalID = ""
 	run.FailureReason = ""
-	if err := o.runs.Update(ctx, run); err != nil {
+	workspace.ActiveRunID = ""
+	workspace.State = common.WorkspaceStateCompleted
+	if err := runParallel(
+		func() error {
+			return o.runs.Update(ctx, run)
+		},
+		func() error {
+			return o.workspaces.Update(ctx, workspace)
+		},
+	); err != nil {
 		return err
 	}
 	if err := o.publishRunStateChangedAtStep(ctx, run, currentStepID); err != nil {
 		return err
 	}
-	workspace.ActiveRunID = ""
-	workspace.State = common.WorkspaceStateCompleted
-	if err := o.workspaces.Update(ctx, workspace); err != nil {
-		return err
-	}
 	return o.publishWorkspaceStateChanged(ctx, workspace, run.ID)
+}
+
+func (o *RuntimeOrchestrator) syncRunAndWorkspaceForValidation(ctx context.Context, run *runModel.Run, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {
+	if run == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	ws := workspace
+	if ws == nil {
+		var err error
+		ws, err = o.workspaces.Get(ctx, run.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+	} else if ws.ID != run.WorkspaceID {
+		return nil, common.ErrConflict
+	}
+	if ws.ActiveRunID != "" && ws.ActiveRunID != run.ID {
+		activeRun, err := o.runs.Get(ctx, ws.ActiveRunID)
+		if err != nil && !errors.Is(err, common.ErrNotFound) {
+			return nil, err
+		}
+		if activeRun != nil && activeRun.WorkspaceID == ws.ID && !isTerminalRunState(activeRun.State) {
+			return nil, common.ErrConflict
+		}
+	}
+	run.State = common.RunStateValidating
+	run.FailureReason = ""
+	ws.ActiveRunID = run.ID
+	ws.State = common.WorkspaceStateValidating
+	if err := runParallel(
+		func() error {
+			return o.runs.Update(ctx, run)
+		},
+		func() error {
+			return o.workspaces.Update(ctx, ws)
+		},
+	); err != nil {
+		return nil, err
+	}
+	return ws, nil
 }
 
 func (o *RuntimeOrchestrator) CancelRun(ctx context.Context, runID common.RunID) error {
@@ -571,10 +622,28 @@ func (o *RuntimeOrchestrator) FailRun(ctx context.Context, runID common.RunID, r
 	return o.closeRun(ctx, runID, common.RunStateFailed, reason)
 }
 
+func (o *RuntimeOrchestrator) failLoadedRun(ctx context.Context, run *runModel.Run, reason string) error {
+	if reason == "" {
+		return common.ErrInvalidArgument
+	}
+	return o.closeLoadedRun(ctx, run, common.RunStateFailed, reason)
+}
+
+func (o *RuntimeOrchestrator) supersedeLoadedRun(ctx context.Context, run *runModel.Run) error {
+	return o.closeLoadedRun(ctx, run, common.RunStateSuperseded, "")
+}
+
 func (o *RuntimeOrchestrator) closeRun(ctx context.Context, runID common.RunID, state common.RunState, reason string) error {
 	r, err := o.runs.Get(ctx, runID)
 	if err != nil {
 		return err
+	}
+	return o.closeLoadedRun(ctx, r, state, reason)
+}
+
+func (o *RuntimeOrchestrator) closeLoadedRun(ctx context.Context, r *runModel.Run, state common.RunState, reason string) error {
+	if r == nil || r.ID == "" {
+		return common.ErrInvalidArgument
 	}
 	if !canCloseRunAs(r.State, state) {
 		return common.ErrConflict
@@ -591,6 +660,21 @@ func (o *RuntimeOrchestrator) closeRun(ctx context.Context, runID common.RunID, 
 	}
 
 	return o.releaseWorkspaceForTerminalRun(ctx, r, workspaceStateForTerminalRun(state))
+}
+
+func mergeRunExecutionContextPatch(run *runModel.Run, patch map[string]any) {
+	if run == nil || len(patch) == 0 {
+		return
+	}
+	if run.ExecutionContext == nil {
+		run.ExecutionContext = map[string]any{}
+	}
+	for key, value := range patch {
+		if key == "" {
+			continue
+		}
+		run.ExecutionContext[key] = value
+	}
 }
 
 func (o *RuntimeOrchestrator) releaseWorkspaceForTerminalRun(ctx context.Context, run *runModel.Run, state common.WorkspaceState) error {
@@ -707,6 +791,34 @@ func isTerminalRunState(state common.RunState) bool {
 	}
 }
 
+func runParallel(tasks ...func() error) error {
+	var wg sync.WaitGroup
+	var errMu sync.Mutex
+	var ret error
+	recordErr := func(err error) {
+		if err == nil {
+			return
+		}
+		errMu.Lock()
+		defer errMu.Unlock()
+		if ret == nil {
+			ret = err
+		}
+	}
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(task func() error) {
+			defer wg.Done()
+			recordErr(task())
+		}(task)
+	}
+	wg.Wait()
+	return ret
+}
+
 func canCloseRunAs(current common.RunState, target common.RunState) bool {
 	switch target {
 	case common.RunStateFailed:
@@ -765,6 +877,17 @@ func (o *RuntimeOrchestrator) dispatchStep(
 	kind string,
 	input map[string]any,
 ) error {
+	return o.dispatchStepWithWorkspace(ctx, run, stepID, kind, input, nil)
+}
+
+func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
+	ctx context.Context,
+	run *runModel.Run,
+	stepID common.StepID,
+	kind string,
+	input map[string]any,
+	workspace *workspaceModel.Workspace,
+) error {
 	step, err := o.steps.Get(ctx, stepID)
 	if err != nil {
 		if err != common.ErrNotFound {
@@ -794,9 +917,13 @@ func (o *RuntimeOrchestrator) dispatchStep(
 			return err
 		}
 	}
-	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
-	if err != nil {
-		return err
+	if workspace == nil {
+		workspace, err = o.workspaces.Get(ctx, run.WorkspaceID)
+		if err != nil {
+			return err
+		}
+	} else if workspace.ID != run.WorkspaceID {
+		return common.ErrConflict
 	}
 	o.enrichLLMStepInputContext(ctx, run, step, workspace)
 	if err := o.publishStepState(ctx, run, step, events.TopicStepDispatched); err != nil {
@@ -835,10 +962,7 @@ func (o *RuntimeOrchestrator) dispatchStep(
 
 	step.State = common.StepStateCompleted
 	step.Output = output
-	if err := o.recordToolCallCompleted(ctx, toolCall, output); err != nil {
-		return err
-	}
-	if err := o.recordValidationResult(ctx, run, step, common.ValidationResultStatePassed, "runtime step completed", string(toolCall.ID), ""); err != nil {
+	if err := o.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, output); err != nil {
 		return err
 	}
 	if err := o.steps.Update(ctx, step); err != nil {
@@ -882,16 +1006,16 @@ func (o *RuntimeOrchestrator) dispatchStep(
 		return nil
 	}
 	if nextStepID != "" {
-		return o.dispatchStep(ctx, run, nextStepID, nextKind, nextStepInputFromOutput(run, step))
+		return o.dispatchStepWithWorkspace(ctx, run, nextStepID, nextKind, nextStepInputFromOutput(run, step), workspace)
 	}
 	if graphSpecs := o.readyGraphStepSpecs(ctx, run, step); len(graphSpecs) > 0 {
-		return o.dispatchGraphStepBatch(ctx, run, graphSpecs)
+		return o.dispatchGraphStepBatchWithWorkspace(ctx, run, graphSpecs, workspace)
 	}
 	if shouldDispatchGraphFollowUp(run, step, output) {
-		return o.dispatchStep(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), o.graphFollowUpStepInput(ctx, run, step))
+		return o.dispatchStepWithWorkspace(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), o.graphFollowUpStepInput(ctx, run, step), workspace)
 	}
 	if shouldDispatchLLMCompletionFollowUp(run, step, output) {
-		return o.dispatchStep(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), llmCompletionFollowUpStepInput(run, step))
+		return o.dispatchStepWithWorkspace(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), llmCompletionFollowUpStepInput(run, step), workspace)
 	}
 	if err := completionDoDAssessmentError(run, output); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
@@ -1582,6 +1706,21 @@ func (o *RuntimeOrchestrator) recordToolCallCompleted(ctx context.Context, toolC
 	return nil
 }
 
+func (o *RuntimeOrchestrator) recordCompletedRuntimeStepEvidence(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any) error {
+	evidenceRef := ""
+	if toolCall != nil {
+		evidenceRef = string(toolCall.ID)
+	}
+	return runParallel(
+		func() error {
+			return o.recordToolCallCompleted(ctx, toolCall, output)
+		},
+		func() error {
+			return o.recordValidationResult(ctx, run, step, common.ValidationResultStatePassed, "runtime step completed", evidenceRef, "")
+		},
+	)
+}
+
 func (o *RuntimeOrchestrator) recordToolCallFailed(ctx context.Context, toolCall *runModel.ToolCall, execErr error, output map[string]any) error {
 	if toolCall == nil || toolCall.ID == "" || o.evidence.ToolCalls == nil {
 		return nil
@@ -1954,18 +2093,41 @@ func (o *RuntimeOrchestrator) recordRunResultFromDoDAssessment(
 		return nil
 	}
 	now := runtimeEvidenceTimestamp()
-	artifactRefs, err := o.recordResultSummaryArtifact(ctx, run, step, summary, assessment, now)
-	if err != nil {
-		return err
-	}
-	manifestRef, err := o.recordWorkspaceDeliverableManifestArtifact(ctx, run, step, assessment, now, workspace)
-	if err != nil {
-		return err
-	}
-	if manifestRef != "" {
-		artifactRefs = append(artifactRefs, manifestRef)
-	}
 	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
+	manifestCh := make(chan string, 1)
+	go func() {
+		manifestCh <- o.workspaceDeliverableManifestContent(ctx, run, step, assessment, evidenceRefs, workspace)
+	}()
+	type artifactWriteResult struct {
+		refs []common.ArtifactID
+		err  error
+	}
+	summaryArtifactCh := make(chan artifactWriteResult, 1)
+	go func() {
+		refs, err := o.recordResultSummaryArtifact(ctx, run, step, summary, assessment, evidenceRefs, now)
+		summaryArtifactCh <- artifactWriteResult{refs: refs, err: err}
+	}()
+	manifest := <-manifestCh
+	manifestArtifactCh := make(chan artifactWriteResult, 1)
+	go func() {
+		ref, err := o.recordWorkspaceDeliverableManifestArtifact(ctx, run, step, manifest, evidenceRefs, now)
+		var refs []common.ArtifactID
+		if ref != "" {
+			refs = []common.ArtifactID{ref}
+		}
+		manifestArtifactCh <- artifactWriteResult{refs: refs, err: err}
+	}()
+	summaryArtifact := <-summaryArtifactCh
+	if summaryArtifact.err != nil {
+		<-manifestArtifactCh
+		return summaryArtifact.err
+	}
+	manifestArtifact := <-manifestArtifactCh
+	if manifestArtifact.err != nil {
+		return manifestArtifact.err
+	}
+	artifactRefs := append([]common.ArtifactID(nil), summaryArtifact.refs...)
+	artifactRefs = append(artifactRefs, manifestArtifact.refs...)
 	dodAssessment := resultDoDAssessmentFromMap(assessment)
 	item := &resultmodel.Result{
 		ID:            common.ResultID(fmt.Sprintf("%s/result/dod-assessment", run.ID)),
@@ -2086,12 +2248,12 @@ func (o *RuntimeOrchestrator) recordResultSummaryArtifact(
 	step *runModel.Step,
 	summary string,
 	assessment map[string]any,
+	evidenceRefs []string,
 	now string,
 ) ([]common.ArtifactID, error) {
 	if run == nil || step == nil || o.evidence.Artifacts == nil {
 		return nil, nil
 	}
-	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
 	item := &resultmodel.Artifact{
 		ID:           common.ArtifactID(fmt.Sprintf("%s/artifact/result-summary", run.ID)),
 		WorkspaceID:  run.WorkspaceID,
@@ -2148,15 +2310,13 @@ func (o *RuntimeOrchestrator) recordWorkspaceDeliverableManifestArtifact(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
-	assessment map[string]any,
+	manifest string,
+	evidenceRefs []string,
 	now string,
-	workspace *workspaceModel.Workspace,
 ) (common.ArtifactID, error) {
 	if run == nil || step == nil || o.evidence.Artifacts == nil {
 		return "", nil
 	}
-	manifest := o.workspaceDeliverableManifestContent(ctx, run, step, assessment, workspace)
-	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
 	item := &resultmodel.Artifact{
 		ID:           common.ArtifactID(fmt.Sprintf("%s/artifact/deliverable-manifest", run.ID)),
 		WorkspaceID:  run.WorkspaceID,
@@ -2407,6 +2567,7 @@ func (o *RuntimeOrchestrator) workspaceDeliverableManifestContent(
 	run *runModel.Run,
 	step *runModel.Step,
 	assessment map[string]any,
+	evidenceRefs []string,
 	workspace *workspaceModel.Workspace,
 ) string {
 	var builder strings.Builder
@@ -2428,7 +2589,10 @@ func (o *RuntimeOrchestrator) workspaceDeliverableManifestContent(
 			workingDirectory = strings.TrimSpace(workspace.WorkingDirectory)
 		}
 	}
-	files, listErr := workspaceDeliverableFiles(workingDirectory)
+	files, listErr := workspaceDeliverableFilesFromStepContext(step)
+	if listErr != nil || len(files) == 0 {
+		files, listErr = workspaceDeliverableFiles(workingDirectory)
+	}
 	if listErr != nil {
 		builder.WriteString(fmt.Sprintf("- Unable to inspect workspace working directory: %s\n", listErr.Error()))
 	} else if len(files) == 0 {
@@ -2462,10 +2626,43 @@ func (o *RuntimeOrchestrator) workspaceDeliverableManifestContent(
 		builder.WriteString("- No item-level DoD relation was reported by the assessment.\n")
 	}
 	builder.WriteString("\n## Acceptance Evidence\n\n")
-	for _, ref := range doDAssessmentEvidenceRefs(step.ID, assessment) {
+	for _, ref := range evidenceRefs {
 		builder.WriteString(fmt.Sprintf("- `%s`\n", ref))
 	}
 	return strings.TrimSpace(builder.String())
+}
+
+func workspaceDeliverableFilesFromStepContext(step *runModel.Step) ([]workspaceDeliverableFile, error) {
+	if step == nil {
+		return nil, common.ErrNotFound
+	}
+	patches, err := runtimePatchRequests(step.Output)
+	if err != nil || len(patches) > 0 {
+		return nil, common.ErrNotFound
+	}
+	pkg := mapFromValue(step.Input[stepInputKeyExecutionContextPackage])
+	manifest := mapSliceFromValue(pkg["workspaceFileManifest"])
+	if len(manifest) == 0 {
+		return nil, common.ErrNotFound
+	}
+	files := make([]workspaceDeliverableFile, 0, len(manifest))
+	for _, item := range manifest {
+		path := strings.TrimSpace(stringFromMap(item, "path"))
+		if path == "" {
+			continue
+		}
+		files = append(files, workspaceDeliverableFile{
+			Path:       filepath.ToSlash(path),
+			Size:       int64FromValue(item["size"]),
+			Executable: boolFromValue(item["executable"]),
+			Category:   artifactCategoryForWorkspaceFile(path),
+		})
+	}
+	if len(files) == 0 {
+		return nil, common.ErrNotFound
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	return files, nil
 }
 
 type workspaceDeliverableFile struct {
@@ -2723,6 +2920,31 @@ func floatFromValue(value any) float64 {
 	default:
 		return 0
 	}
+}
+
+func int64FromValue(value any) int64 {
+	switch typed := value.(type) {
+	case int64:
+		return typed
+	case int:
+		return int64(typed)
+	case int32:
+		return int64(typed)
+	case float64:
+		return int64(typed)
+	case float32:
+		return int64(typed)
+	case json.Number:
+		ret, _ := typed.Int64()
+		return ret
+	default:
+		return 0
+	}
+}
+
+func boolFromValue(value any) bool {
+	typed, _ := value.(bool)
+	return typed
 }
 
 func (o *RuntimeOrchestrator) recordRunCheckpoint(ctx context.Context, run *runModel.Run) error {
@@ -3025,13 +3247,17 @@ func previousExecutionStepID(step *runModel.Step) common.StepID {
 }
 
 func (o *RuntimeOrchestrator) dispatchStepSpecs(ctx context.Context, run *runModel.Run, specs []stepDispatchSpec) error {
+	return o.dispatchStepSpecsWithWorkspace(ctx, run, specs, nil)
+}
+
+func (o *RuntimeOrchestrator) dispatchStepSpecsWithWorkspace(ctx context.Context, run *runModel.Run, specs []stepDispatchSpec, workspace *workspaceModel.Workspace) error {
 	if len(specs) == 0 {
 		return common.ErrConflict
 	}
 	if len(specs) == 1 {
-		return o.dispatchStep(ctx, run, specs[0].ID, specs[0].Kind, specs[0].Input)
+		return o.dispatchStepWithWorkspace(ctx, run, specs[0].ID, specs[0].Kind, specs[0].Input, workspace)
 	}
-	return o.dispatchGraphStepBatch(ctx, run, specs)
+	return o.dispatchGraphStepBatchWithWorkspace(ctx, run, specs, workspace)
 }
 
 func mergeResumeInput(specs []stepDispatchSpec, resumeInput map[string]any) {
@@ -3160,11 +3386,15 @@ func (o *RuntimeOrchestrator) readyGraphStepSpecsFromSteps(
 }
 
 func (o *RuntimeOrchestrator) dispatchGraphStepBatch(ctx context.Context, run *runModel.Run, specs []stepDispatchSpec) error {
+	return o.dispatchGraphStepBatchWithWorkspace(ctx, run, specs, nil)
+}
+
+func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Context, run *runModel.Run, specs []stepDispatchSpec, workspace *workspaceModel.Workspace) error {
 	if len(specs) == 0 {
 		return common.ErrConflict
 	}
 	if len(specs) == 1 {
-		return o.dispatchStep(ctx, run, specs[0].ID, specs[0].Kind, specs[0].Input)
+		return o.dispatchStepWithWorkspace(ctx, run, specs[0].ID, specs[0].Kind, specs[0].Input, workspace)
 	}
 
 	errCh := make(chan error, len(specs))
@@ -3180,7 +3410,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatch(ctx context.Context, run *r
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errCh <- o.dispatchStep(ctx, &runCopy, spec.ID, spec.Kind, spec.Input)
+			errCh <- o.dispatchStepWithWorkspace(ctx, &runCopy, spec.ID, spec.Kind, spec.Input, workspace)
 		}()
 	}
 	wg.Wait()
@@ -3217,14 +3447,14 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatch(ctx context.Context, run *r
 	}
 	if graph, ok := runtimeGraphSpecFromStep(last); ok {
 		if nextSpecs := o.readyGraphStepSpecsFromSteps(ctx, currentRun, last, graph, steps); len(nextSpecs) > 0 {
-			return o.dispatchGraphStepBatch(ctx, currentRun, nextSpecs)
+			return o.dispatchGraphStepBatchWithWorkspace(ctx, currentRun, nextSpecs, workspace)
 		}
 	}
 	if shouldDispatchGraphFollowUp(currentRun, last, last.Output) {
-		return o.dispatchStep(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphFollowUpStepInputFromSteps(currentRun, last, steps))
+		return o.dispatchStepWithWorkspace(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
 	}
 	if shouldDispatchLLMCompletionFollowUp(currentRun, last, last.Output) {
-		return o.dispatchStep(ctx, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInput(currentRun, last))
+		return o.dispatchStepWithWorkspace(ctx, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInput(currentRun, last), workspace)
 	}
 	if err := completionDoDAssessmentError(currentRun, last.Output); err != nil {
 		last.State = common.StepStateFailed
@@ -3232,13 +3462,13 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatch(ctx context.Context, run *r
 		_ = o.steps.Update(ctx, last)
 		return o.FailRun(ctx, currentRun.ID, err.Error())
 	}
-	if err := o.recordRunResultFromDoDAssessment(ctx, currentRun, last, last.Output, nil); err != nil {
+	if err := o.recordRunResultFromDoDAssessment(ctx, currentRun, last, last.Output, workspace); err != nil {
 		return err
 	}
 	if err := o.recordSkillFeedbackMemory(ctx, currentRun, last, last.Output); err != nil {
 		return err
 	}
-	return o.validateAndCompleteRun(ctx, currentRun, last.ID)
+	return o.validateAndCompleteRunWithWorkspace(ctx, currentRun, last.ID, workspace)
 }
 
 func runtimeGraphSpecFromStep(step *runModel.Step) (runtimemodel.BlockExecutionGraph, bool) {
@@ -3612,6 +3842,7 @@ func llmCompletionFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[
 	input := nextStepInput(run, step.ID)
 	input[stepInputKeySoulStage] = soulStageValidation
 	input["completionFollowUp"] = true
+	inheritWorkspaceFileManifest(input, step)
 	if step.Kind != "" {
 		input["previousStepKind"] = step.Kind
 	}
@@ -3667,6 +3898,7 @@ func graphFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]a
 	input := nextStepInput(run, step.ID)
 	input[stepInputKeySoulStage] = soulStageValidation
 	input["graphFollowUp"] = true
+	inheritWorkspaceFileManifest(input, step)
 	if nodeID := graphNodeID(step); nodeID != "" {
 		input[stepInputKeyGraphPreviousNodeID] = nodeID
 	}
@@ -3761,12 +3993,29 @@ func nextStepInputFromOutput(run *runModel.Run, previousStep *runModel.Step) map
 		return nextStepInput(run, "")
 	}
 	input := nextStepInput(run, previousStep.ID)
+	inheritWorkspaceFileManifest(input, previousStep)
 	if nextInput := mapFromValue(previousStep.Output[stepOutputKeyNextInput]); nextInput != nil {
 		for key, value := range nextInput {
 			input[key] = value
 		}
 	}
 	return input
+}
+
+func inheritWorkspaceFileManifest(input map[string]any, previousStep *runModel.Step) {
+	if input == nil || previousStep == nil {
+		return
+	}
+	manifest := mapSliceFromValue(previousStep.Input[stepInputKeyWorkspaceFileManifest])
+	if len(manifest) == 0 {
+		if pkg := mapFromValue(previousStep.Input[stepInputKeyExecutionContextPackage]); pkg != nil {
+			manifest = mapSliceFromValue(pkg[stepInputKeyWorkspaceFileManifest])
+		}
+	}
+	if len(manifest) == 0 {
+		return
+	}
+	input[stepInputKeyWorkspaceFileManifest] = limitedMapSlice(manifest, len(manifest))
 }
 
 type runtimeDecisionBlockSpec struct {

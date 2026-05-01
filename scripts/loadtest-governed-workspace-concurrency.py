@@ -955,6 +955,9 @@ def latency_stats(values: list[float]) -> dict[str, float]:
 
 
 def result_to_dict(result: WorkspaceResult) -> dict[str, Any]:
+    timing_by_stage: dict[str, float] = {}
+    for item in result.timings:
+        timing_by_stage[item.name] = timing_by_stage.get(item.name, 0) + item.duration_ms
     return {
         "index": result.index,
         "workspaceId": result.workspace_id,
@@ -976,6 +979,7 @@ def result_to_dict(result: WorkspaceResult) -> dict[str, Any]:
         "httpStatus": result.http_status,
         "curlCode": result.curl_code,
         "failureClass": result.failure_class,
+        "timingByStage": timing_by_stage,
         "timings": [{"name": item.name, "durationMs": item.duration_ms} for item in result.timings],
     }
 
@@ -1047,6 +1051,17 @@ def build_summary(
         "snapshotRead": stage_stats.get("snapshot_read", latency_stats([])),
         "observabilityRead": stage_stats.get("observability_read", latency_stats([])),
     }
+    result_items = [result_to_dict(item) for item in results]
+    diagnostic_stage_names = [
+        "activation_to_decision1",
+        "decision1_to_decision2",
+        "decision2_to_approval",
+        "approval_to_completed",
+        "snapshot_read",
+        "workspace_snapshot_read",
+        "observability_read",
+        "artifact_content_read",
+    ]
     return {
         "batchId": BATCH_ID,
         "baseUrl": BASE_URL,
@@ -1076,7 +1091,9 @@ def build_summary(
         "timelineMissingRunStateTotal": sum(item.timeline_missing_run_state for item in results),
         "metricsBefore": metrics_before,
         "metricsAfter": collect_metrics(),
-        "results": [result_to_dict(item) for item in results],
+        "slowestWorkspaces": slowest_results(result_items),
+        "stageSamples": stage_samples(result_items, diagnostic_stage_names),
+        "results": result_items,
     }
 
 
@@ -1084,6 +1101,44 @@ def count_by_key(values: list[str]) -> dict[str, int]:
     ret: dict[str, int] = {}
     for value in values:
         ret[value] = ret.get(value, 0) + 1
+    return ret
+
+
+def slowest_results(results: list[dict[str, Any]], limit: int = 5) -> list[dict[str, Any]]:
+    ret = []
+    for item in sorted(results, key=lambda value: float(value.get("e2eMs") or 0), reverse=True)[:limit]:
+        timings = item.get("timingByStage") or {}
+        top_stages = sorted(timings.items(), key=lambda pair: float(pair[1] or 0), reverse=True)[:5]
+        ret.append(
+            {
+                "index": item.get("index"),
+                "workspaceId": item.get("workspaceId", ""),
+                "runId": item.get("runId", ""),
+                "success": item.get("success", False),
+                "e2eMs": item.get("e2eMs", 0),
+                "topStages": [{"name": name, "durationMs": duration} for name, duration in top_stages],
+            }
+        )
+    return ret
+
+
+def stage_samples(results: list[dict[str, Any]], stage_names: list[str], limit: int = 5) -> dict[str, list[dict[str, Any]]]:
+    ret: dict[str, list[dict[str, Any]]] = {}
+    for stage in stage_names:
+        samples = []
+        for item in results:
+            timings = item.get("timingByStage") or {}
+            if stage not in timings:
+                continue
+            samples.append(
+                {
+                    "index": item.get("index"),
+                    "workspaceId": item.get("workspaceId", ""),
+                    "runId": item.get("runId", ""),
+                    "durationMs": timings[stage],
+                }
+            )
+        ret[stage] = sorted(samples, key=lambda value: float(value.get("durationMs") or 0), reverse=True)[:limit]
     return ret
 
 
@@ -1134,6 +1189,18 @@ def write_markdown_report(summary: dict[str, Any]) -> None:
         "",
         "```json",
         json.dumps(summary["businessLatency"], ensure_ascii=False, indent=2),
+        "```",
+        "",
+        "## Slowest Workspaces",
+        "",
+        "```json",
+        json.dumps(summary["slowestWorkspaces"], ensure_ascii=False, indent=2),
+        "```",
+        "",
+        "## Stage Samples",
+        "",
+        "```json",
+        json.dumps(summary["stageSamples"], ensure_ascii=False, indent=2),
         "```",
         "",
         "## Failed Workspaces",

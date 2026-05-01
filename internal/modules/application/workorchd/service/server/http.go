@@ -551,12 +551,19 @@ type serverState struct {
 	runStatusNotify                 chan struct{}
 	runSnapshotCacheMu              sync.Mutex
 	runSnapshotCache                map[string]cachedRunSnapshot
+	runSnapshotInflight             map[string]*runSnapshotInflight
 	sharedSession                   *appservice.RuntimeSession
 }
 
 type cachedRunSnapshot struct {
 	snapshot appservice.RunSnapshot
 	cachedAt time.Time
+}
+
+type runSnapshotInflight struct {
+	done     chan struct{}
+	snapshot appservice.RunSnapshot
+	err      error
 }
 
 type runQueueWaiter struct {
@@ -1733,7 +1740,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		state.metrics.observeRunOutcome(item.Run)
-		state.notifyRunStatusChanged()
+		state.notifyRunStatusChangedForRun(item.Run)
 		writeJSON(w, http.StatusOK, workspaceExecutionActivationResponse{
 			Service:    "workorch",
 			Backend:    state.config.Backend,
@@ -2138,7 +2145,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		state.metrics.observeRunOutcome(item)
-		state.notifyRunStatusChanged()
+		state.notifyRunStatusChangedForRun(item)
 		writeJSON(w, http.StatusOK, runInstanceResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -2167,7 +2174,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		state.metrics.observeRunOutcome(item)
-		state.notifyRunStatusChanged()
+		state.notifyRunStatusChangedForRun(item)
 		writeJSON(w, http.StatusOK, runInstanceResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -3410,7 +3417,11 @@ func (s *serverState) readRunStatusWithWait(ctx context.Context, runID string, v
 	}
 	if waitState == "" || timeout <= 0 {
 		item, err := s.readRunStatus(ctx, s.config.Backend, s.config.DataRoot, runID)
-		return item, waitState == "" || item.State == waitState, err
+		matched := waitState == "" || item.State == waitState
+		if err == nil && matched {
+			s.warmRunSnapshotCache(ctx, runID, item.State)
+		}
+		return item, matched, err
 	}
 	deadline := time.Now().Add(timeout)
 	for {
@@ -3420,6 +3431,7 @@ func (s *serverState) readRunStatusWithWait(ctx context.Context, runID string, v
 			return appservice.RunStatus{}, false, err
 		}
 		if item.State == waitState {
+			s.warmRunSnapshotCache(ctx, runID, item.State)
 			return item, true, nil
 		}
 		remaining := time.Until(deadline)
@@ -3442,9 +3454,40 @@ func (s *serverState) readRunStatusWithWait(ctx context.Context, runID string, v
 	}
 }
 
+func (s *serverState) warmRunSnapshotCache(ctx context.Context, runID string, state string) {
+	if s == nil || strings.TrimSpace(runID) == "" || !terminalRunState(state) {
+		return
+	}
+	if _, ok := s.cachedRunSnapshot(runID); ok {
+		return
+	}
+	if ctx != nil {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+	}
+	if _, ok := s.ensureRunSnapshotInflight(runID); ok {
+		return
+	}
+	s.backgroundWG.Add(1)
+	go func() {
+		defer s.backgroundWG.Done()
+		defer s.finishRunSnapshotInflight(runID)
+		warmCtx, cancel := context.WithTimeout(context.Background(), runSnapshotCacheTTL)
+		defer cancel()
+		item, err := s.readRunSnapshot(warmCtx, s.config.Backend, s.config.DataRoot, runID)
+		s.completeRunSnapshotInflight(runID, item, err)
+	}()
+}
+
 func (s *serverState) readRunSnapshotCached(ctx context.Context, runID string) (appservice.RunSnapshot, error) {
 	if cached, ok := s.cachedRunSnapshot(runID); ok {
 		return cached, nil
+	}
+	if item, err, ok := s.waitRunSnapshotInflight(ctx, runID); ok {
+		return item, err
 	}
 	item, err := s.readRunSnapshot(ctx, s.config.Backend, s.config.DataRoot, runID)
 	if err != nil {
@@ -3526,6 +3569,71 @@ func (s *serverState) cachedRunSnapshotByWorkspace(workspaceID string) (appservi
 	return appservice.RunSnapshot{}, false
 }
 
+func (s *serverState) ensureRunSnapshotInflight(runID string) (*runSnapshotInflight, bool) {
+	if s == nil || strings.TrimSpace(runID) == "" {
+		return nil, true
+	}
+	s.runSnapshotCacheMu.Lock()
+	defer s.runSnapshotCacheMu.Unlock()
+	if s.runSnapshotInflight == nil {
+		s.runSnapshotInflight = map[string]*runSnapshotInflight{}
+	}
+	if current, ok := s.runSnapshotInflight[runID]; ok {
+		return current, true
+	}
+	current := &runSnapshotInflight{done: make(chan struct{})}
+	s.runSnapshotInflight[runID] = current
+	return current, false
+}
+
+func (s *serverState) waitRunSnapshotInflight(ctx context.Context, runID string) (appservice.RunSnapshot, error, bool) {
+	if s == nil || strings.TrimSpace(runID) == "" {
+		return appservice.RunSnapshot{}, nil, false
+	}
+	s.runSnapshotCacheMu.Lock()
+	current, ok := s.runSnapshotInflight[runID]
+	s.runSnapshotCacheMu.Unlock()
+	if !ok {
+		return appservice.RunSnapshot{}, nil, false
+	}
+	select {
+	case <-ctx.Done():
+		return appservice.RunSnapshot{}, ctx.Err(), true
+	case <-current.done:
+		return current.snapshot, current.err, true
+	}
+}
+
+func (s *serverState) completeRunSnapshotInflight(runID string, snapshot appservice.RunSnapshot, err error) {
+	if s == nil || strings.TrimSpace(runID) == "" {
+		return
+	}
+	s.runSnapshotCacheMu.Lock()
+	defer s.runSnapshotCacheMu.Unlock()
+	current, ok := s.runSnapshotInflight[runID]
+	if !ok {
+		return
+	}
+	current.snapshot = snapshot
+	current.err = err
+	if err == nil && snapshot.Run.ID != "" && terminalRunState(snapshot.Run.State) {
+		if s.runSnapshotCache == nil {
+			s.runSnapshotCache = map[string]cachedRunSnapshot{}
+		}
+		s.runSnapshotCache[snapshot.Run.ID] = cachedRunSnapshot{snapshot: snapshot, cachedAt: time.Now()}
+	}
+	close(current.done)
+}
+
+func (s *serverState) finishRunSnapshotInflight(runID string) {
+	if s == nil || strings.TrimSpace(runID) == "" {
+		return
+	}
+	s.runSnapshotCacheMu.Lock()
+	defer s.runSnapshotCacheMu.Unlock()
+	delete(s.runSnapshotInflight, runID)
+}
+
 func (s *serverState) cachedRunSnapshotByArtifactURI(artifactURI string) (appservice.RunSnapshot, bool) {
 	if s == nil || strings.TrimSpace(artifactURI) == "" {
 		return appservice.RunSnapshot{}, false
@@ -3585,6 +3693,22 @@ func (s *serverState) notifyRunStatusChanged() {
 		return
 	}
 	s.clearRunSnapshotCache()
+	s.notifyRunStatusWaiters()
+}
+
+func (s *serverState) notifyRunStatusChangedForRun(run appservice.Run) {
+	if s == nil {
+		return
+	}
+	s.clearRunSnapshotCache()
+	s.warmRunSnapshotCache(context.Background(), run.ID, run.State)
+	s.notifyRunStatusWaiters()
+}
+
+func (s *serverState) notifyRunStatusWaiters() {
+	if s == nil {
+		return
+	}
 	s.runStatusNotifyMu.Lock()
 	defer s.runStatusNotifyMu.Unlock()
 	if s.runStatusNotify == nil {
@@ -3624,7 +3748,14 @@ func (s *serverState) scheduleGovernanceRunResumes(runIDs []string, priority int
 		s.backgroundWG.Add(1)
 		go func() {
 			defer s.backgroundWG.Done()
-			defer s.notifyRunStatusChanged()
+			var resumedRun appservice.Run
+			defer func() {
+				if resumedRun.ID != "" {
+					s.notifyRunStatusChangedForRun(resumedRun)
+					return
+				}
+				s.notifyRunStatusChanged()
+			}()
 			ctx := appservice.ContextWithEventHub(context.Background(), s.eventHub)
 			s.metrics.runResumeRequests.Add(1)
 			release, err := s.acquireRunSlotWithPriority(ctx, priority)
@@ -3640,6 +3771,7 @@ func (s *serverState) scheduleGovernanceRunResumes(runIDs []string, priority int
 				return
 			}
 			s.metrics.observeRunOutcome(item)
+			resumedRun = item
 		}()
 	}
 }

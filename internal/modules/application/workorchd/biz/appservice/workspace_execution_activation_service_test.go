@@ -9,15 +9,488 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
+	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
 	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory/service"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
+
+type workspaceScopedDecisionTicketRepository struct {
+	items                 []*decisionmodel.Ticket
+	listCalled            bool
+	listByWorkspaceCalled bool
+}
+
+func (r *workspaceScopedDecisionTicketRepository) Create(context.Context, *decisionmodel.Ticket) error {
+	return common.ErrInvalidArgument
+}
+
+func (r *workspaceScopedDecisionTicketRepository) Get(context.Context, common.TicketID) (*decisionmodel.Ticket, error) {
+	return nil, common.ErrNotFound
+}
+
+func (r *workspaceScopedDecisionTicketRepository) List(context.Context) ([]*decisionmodel.Ticket, error) {
+	r.listCalled = true
+	return r.items, nil
+}
+
+func (r *workspaceScopedDecisionTicketRepository) ListByRunID(context.Context, common.RunID) ([]*decisionmodel.Ticket, error) {
+	return nil, nil
+}
+
+func (r *workspaceScopedDecisionTicketRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*decisionmodel.Ticket, error) {
+	r.listByWorkspaceCalled = true
+	ret := make([]*decisionmodel.Ticket, 0, len(r.items))
+	for _, item := range r.items {
+		if item.WorkspaceID == workspaceID {
+			ret = append(ret, item)
+		}
+	}
+	return ret, nil
+}
+
+func (r *workspaceScopedDecisionTicketRepository) Update(context.Context, *decisionmodel.Ticket) error {
+	return common.ErrInvalidArgument
+}
+
+func (r *workspaceScopedDecisionTicketRepository) Delete(context.Context, common.TicketID) error {
+	return common.ErrInvalidArgument
+}
+
+type staticDecisionResolutionRepository map[common.TicketID]*decisionmodel.Resolution
+
+func (r staticDecisionResolutionRepository) Create(context.Context, *decisionmodel.Resolution) error {
+	return common.ErrInvalidArgument
+}
+
+func (r staticDecisionResolutionRepository) GetByTicketID(_ context.Context, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
+	item, ok := r[ticketID]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return item, nil
+}
+
+func (r staticDecisionResolutionRepository) DeleteByTicketID(context.Context, common.TicketID) error {
+	return common.ErrInvalidArgument
+}
+
+type staticRunRepository map[common.RunID]*runmodel.Run
+
+func (r staticRunRepository) Create(context.Context, *runmodel.Run) error {
+	return common.ErrInvalidArgument
+}
+
+func (r staticRunRepository) Get(_ context.Context, runID common.RunID) (*runmodel.Run, error) {
+	item, ok := r[runID]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return item, nil
+}
+
+func (r staticRunRepository) List(context.Context) ([]*runmodel.Run, error) {
+	return nil, nil
+}
+
+func (r staticRunRepository) ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*runmodel.Run, error) {
+	return nil, nil
+}
+
+func (r staticRunRepository) Update(context.Context, *runmodel.Run) error {
+	return common.ErrInvalidArgument
+}
+
+func (r staticRunRepository) Delete(context.Context, common.RunID) error {
+	return common.ErrInvalidArgument
+}
+
+type countingRunRepository struct {
+	base     repository.RunRepository
+	getCalls int
+}
+
+func (r *countingRunRepository) Create(ctx context.Context, item *runmodel.Run) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *countingRunRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
+	r.getCalls++
+	return r.base.Get(ctx, id)
+}
+
+func (r *countingRunRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
+	return r.base.List(ctx)
+}
+
+func (r *countingRunRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
+	return r.base.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r *countingRunRepository) Update(ctx context.Context, item *runmodel.Run) error {
+	return r.base.Update(ctx, item)
+}
+
+func (r *countingRunRepository) Delete(ctx context.Context, id common.RunID) error {
+	return r.base.Delete(ctx, id)
+}
+
+type countingWorkspaceRepository struct {
+	base     repository.WorkspaceRepository
+	getCalls int
+}
+
+func (r *countingWorkspaceRepository) Create(ctx context.Context, item *workspacemodel.Workspace) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *countingWorkspaceRepository) Get(ctx context.Context, id common.WorkspaceID) (*workspacemodel.Workspace, error) {
+	r.getCalls++
+	return r.base.Get(ctx, id)
+}
+
+func (r *countingWorkspaceRepository) List(ctx context.Context) ([]*workspacemodel.Workspace, error) {
+	return r.base.List(ctx)
+}
+
+func (r *countingWorkspaceRepository) Update(ctx context.Context, item *workspacemodel.Workspace) error {
+	return r.base.Update(ctx, item)
+}
+
+func (r *countingWorkspaceRepository) Delete(ctx context.Context, id common.WorkspaceID) error {
+	return r.base.Delete(ctx, id)
+}
+
+var _ repository.DecisionTicketRepository = (*workspaceScopedDecisionTicketRepository)(nil)
+var _ repository.DecisionResolutionRepository = staticDecisionResolutionRepository{}
+var _ repository.RunRepository = staticRunRepository{}
+var _ repository.RunRepository = (*countingRunRepository)(nil)
+var _ repository.WorkspaceRepository = (*countingWorkspaceRepository)(nil)
+
+type blockingSoulRepository struct {
+	base    repository.SoulRepository
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (r *blockingSoulRepository) Create(ctx context.Context, item *soulmodel.Soul) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *blockingSoulRepository) Get(ctx context.Context, id common.SoulID) (*soulmodel.Soul, error) {
+	if r.started != nil {
+		r.started <- "soul"
+	}
+	if r.release != nil {
+		select {
+		case <-r.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return r.base.Get(ctx, id)
+}
+
+func (r *blockingSoulRepository) List(ctx context.Context) ([]*soulmodel.Soul, error) {
+	return r.base.List(ctx)
+}
+
+func (r *blockingSoulRepository) Update(ctx context.Context, item *soulmodel.Soul) error {
+	return r.base.Update(ctx, item)
+}
+
+func (r *blockingSoulRepository) Delete(ctx context.Context, id common.SoulID) error {
+	return r.base.Delete(ctx, id)
+}
+
+type blockingMemoryService struct {
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (s *blockingMemoryService) CreateMemoryItem(context.Context, memorymodule.CreateMemoryItemCommand) error {
+	return common.ErrInvalidArgument
+}
+
+func (s *blockingMemoryService) UpdateMemoryItem(context.Context, memorymodule.UpdateMemoryItemCommand) error {
+	return common.ErrInvalidArgument
+}
+
+func (s *blockingMemoryService) GetMemoryItem(context.Context, common.MemoryID) (*memorymodel.MemoryItem, error) {
+	return nil, common.ErrNotFound
+}
+
+func (s *blockingMemoryService) ListMemoryByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
+	if s.started != nil {
+		s.started <- "memory"
+	}
+	if s.release != nil {
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return nil, nil
+}
+
+func (s *blockingMemoryService) SearchMemory(context.Context, repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
+	return nil, nil
+}
+
+type blockingDecisionTicketRepository struct {
+	base    repository.DecisionTicketRepository
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (r *blockingDecisionTicketRepository) Create(ctx context.Context, item *decisionmodel.Ticket) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *blockingDecisionTicketRepository) Get(ctx context.Context, id common.TicketID) (*decisionmodel.Ticket, error) {
+	return r.base.Get(ctx, id)
+}
+
+func (r *blockingDecisionTicketRepository) List(ctx context.Context) ([]*decisionmodel.Ticket, error) {
+	return r.base.List(ctx)
+}
+
+func (r *blockingDecisionTicketRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*decisionmodel.Ticket, error) {
+	return r.base.ListByRunID(ctx, runID)
+}
+
+func (r *blockingDecisionTicketRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*decisionmodel.Ticket, error) {
+	if r.started != nil {
+		r.started <- "governance"
+	}
+	if r.release != nil {
+		select {
+		case <-r.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return r.base.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r *blockingDecisionTicketRepository) Update(ctx context.Context, item *decisionmodel.Ticket) error {
+	return r.base.Update(ctx, item)
+}
+
+func (r *blockingDecisionTicketRepository) Delete(ctx context.Context, id common.TicketID) error {
+	return r.base.Delete(ctx, id)
+}
+
+var _ repository.SoulRepository = (*blockingSoulRepository)(nil)
+var _ repository.DecisionTicketRepository = (*blockingDecisionTicketRepository)(nil)
+
+type blockingMCPService struct {
+	base    mcpmodule.Service
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (s *blockingMCPService) CreateServer(ctx context.Context, cmd mcpmodule.CreateServerCommand) error {
+	return s.base.CreateServer(ctx, cmd)
+}
+
+func (s *blockingMCPService) UpdateServer(ctx context.Context, cmd mcpmodule.UpdateServerCommand) error {
+	return s.base.UpdateServer(ctx, cmd)
+}
+
+func (s *blockingMCPService) GetServer(ctx context.Context, id common.MCPServerID) (*mcpmodel.Server, error) {
+	if s.started != nil {
+		s.started <- "mcp-server"
+	}
+	if s.release != nil {
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return s.base.GetServer(ctx, id)
+}
+
+func (s *blockingMCPService) ListServers(ctx context.Context) ([]*mcpmodel.Server, error) {
+	return s.base.ListServers(ctx)
+}
+
+func (s *blockingMCPService) CreateCapability(ctx context.Context, cmd mcpmodule.CreateCapabilityCommand) (*mcpmodel.Capability, error) {
+	return s.base.CreateCapability(ctx, cmd)
+}
+
+func (s *blockingMCPService) UpdateCapability(ctx context.Context, cmd mcpmodule.UpdateCapabilityCommand) (*mcpmodel.Capability, error) {
+	return s.base.UpdateCapability(ctx, cmd)
+}
+
+func (s *blockingMCPService) GetCapability(ctx context.Context, id common.MCPCapabilityID) (*mcpmodel.Capability, error) {
+	if s.started != nil {
+		s.started <- "mcp-capability"
+	}
+	if s.release != nil {
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return s.base.GetCapability(ctx, id)
+}
+
+func (s *blockingMCPService) ListCapabilities(ctx context.Context, query mcpmodule.CapabilityQuery) ([]*mcpmodel.Capability, error) {
+	return s.base.ListCapabilities(ctx, query)
+}
+
+var _ mcpmodule.Service = (*blockingMCPService)(nil)
+
+type countingGoalRepository struct {
+	base      repository.GoalRepository
+	getCalls  int
+	listCalls int
+}
+
+func (r *countingGoalRepository) Create(ctx context.Context, item *workspacemodel.Goal) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *countingGoalRepository) Get(ctx context.Context, id common.GoalID) (*workspacemodel.Goal, error) {
+	r.getCalls++
+	return r.base.Get(ctx, id)
+}
+
+func (r *countingGoalRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
+	r.listCalls++
+	return r.base.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r *countingGoalRepository) Update(ctx context.Context, item *workspacemodel.Goal) error {
+	return r.base.Update(ctx, item)
+}
+
+func (r *countingGoalRepository) Delete(ctx context.Context, id common.GoalID) error {
+	return r.base.Delete(ctx, id)
+}
+
+type countingDoDRepository struct {
+	base      repository.DoDRepository
+	getCalls  int
+	listCalls int
+}
+
+func (r *countingDoDRepository) Create(ctx context.Context, item *workspacemodel.DoD) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *countingDoDRepository) Get(ctx context.Context, id common.DoDID) (*workspacemodel.DoD, error) {
+	r.getCalls++
+	return r.base.Get(ctx, id)
+}
+
+func (r *countingDoDRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
+	r.listCalls++
+	return r.base.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r *countingDoDRepository) Update(ctx context.Context, item *workspacemodel.DoD) error {
+	return r.base.Update(ctx, item)
+}
+
+func (r *countingDoDRepository) Delete(ctx context.Context, id common.DoDID) error {
+	return r.base.Delete(ctx, id)
+}
+
+var _ repository.GoalRepository = (*countingGoalRepository)(nil)
+var _ repository.DoDRepository = (*countingDoDRepository)(nil)
+
+type blockingGoalRepository struct {
+	base    repository.GoalRepository
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (r *blockingGoalRepository) Create(ctx context.Context, item *workspacemodel.Goal) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *blockingGoalRepository) Get(ctx context.Context, id common.GoalID) (*workspacemodel.Goal, error) {
+	return r.base.Get(ctx, id)
+}
+
+func (r *blockingGoalRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
+	if r.started != nil {
+		r.started <- "goal"
+	}
+	if r.release != nil {
+		select {
+		case <-r.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return r.base.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r *blockingGoalRepository) Update(ctx context.Context, item *workspacemodel.Goal) error {
+	return r.base.Update(ctx, item)
+}
+
+func (r *blockingGoalRepository) Delete(ctx context.Context, id common.GoalID) error {
+	return r.base.Delete(ctx, id)
+}
+
+type blockingDoDRepository struct {
+	base    repository.DoDRepository
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (r *blockingDoDRepository) Create(ctx context.Context, item *workspacemodel.DoD) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *blockingDoDRepository) Get(ctx context.Context, id common.DoDID) (*workspacemodel.DoD, error) {
+	return r.base.Get(ctx, id)
+}
+
+func (r *blockingDoDRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
+	if r.started != nil {
+		r.started <- "dod"
+	}
+	if r.release != nil {
+		select {
+		case <-r.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return r.base.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r *blockingDoDRepository) Update(ctx context.Context, item *workspacemodel.DoD) error {
+	return r.base.Update(ctx, item)
+}
+
+func (r *blockingDoDRepository) Delete(ctx context.Context, id common.DoDID) error {
+	return r.base.Delete(ctx, id)
+}
+
+var _ repository.GoalRepository = (*blockingGoalRepository)(nil)
+var _ repository.DoDRepository = (*blockingDoDRepository)(nil)
 
 func TestActivateWorkspaceExecutionWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing.T) {
 	if _, err := ActivateWorkspaceExecutionWithSession(context.Background(), nil, "ws-activation", ActivateWorkspaceExecutionCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
@@ -344,6 +817,444 @@ func TestActivateWorkspaceExecutionWithBackendCarriesResolvedDecisionHistory(t *
 	stepContext, _ := runSnapshot.Steps[0].Input["executionContext"].(map[string]any)
 	if len(contextMapSliceFromValue(t, stepContext["governanceHistory"])) != 1 {
 		t.Fatalf("first step input = %+v, want governance history propagated", runSnapshot.Steps[0].Input)
+	}
+}
+
+func TestWorkspaceGovernanceHistoryUsesWorkspaceScopedTicketRead(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-governance-scope")
+	goalID := common.GoalID("goal-governance-scope")
+	dodID := common.DoDID("dod-governance-scope")
+	ticketID := common.TicketID("ticket-governance-scope")
+	runID := common.RunID("run-governance-scope")
+	tickets := &workspaceScopedDecisionTicketRepository{items: []*decisionmodel.Ticket{
+		{
+			ID:          "ticket-other-workspace",
+			WorkspaceID: "ws-other",
+			RunID:       "run-other",
+			State:       common.DecisionTicketStateResolved,
+		},
+		{
+			ID:           ticketID,
+			WorkspaceID:  workspaceID,
+			RunID:        runID,
+			StepID:       "run-governance-scope/step-1",
+			Reason:       "needs guidance",
+			DecisionKind: "provide_missing_info",
+			Question:     "What guidance should be used?",
+			State:        common.DecisionTicketStateResolved,
+		},
+	}}
+	resolutions := staticDecisionResolutionRepository{
+		ticketID: {
+			ID:       "resolution-governance-scope",
+			TicketID: ticketID,
+			Type:     "provide_missing_info",
+			Payload:  map[string]any{"resumeInstruction": "continue with the generic plan"},
+		},
+	}
+	runs := staticRunRepository{
+		runID: {
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			GoalID:      goalID,
+			DoDID:       dodID,
+			State:       common.RunStateFailed,
+		},
+	}
+
+	history := workspaceGovernanceHistory(ctx, tickets, resolutions, runs, workspaceID, goalID, dodID, 10)
+	if !tickets.listByWorkspaceCalled {
+		t.Fatalf("ListByWorkspaceID was not called")
+	}
+	if tickets.listCalled {
+		t.Fatalf("List was called, want workspace-scoped ticket read")
+	}
+	if len(history) != 1 || history[0]["ticketId"] != string(ticketID) {
+		t.Fatalf("history = %+v, want one workspace-scoped ticket", history)
+	}
+}
+
+func TestActivationContextUsesSelectedGoalAndDoDWithoutReload(t *testing.T) {
+	ctx := context.Background()
+	session, _ := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+	workspace := &workspacemodel.Workspace{
+		ID:    "ws-activation-definition-reuse",
+		Title: "activation definition reuse",
+		State: common.WorkspaceStateReady,
+	}
+	goal := &workspacemodel.Goal{
+		ID:          "goal-activation-definition-reuse",
+		WorkspaceID: workspace.ID,
+		Text:        "reuse selected goal",
+	}
+	dod := &workspacemodel.DoD{
+		ID:          "dod-activation-definition-reuse",
+		WorkspaceID: workspace.ID,
+		Items:       []string{"reuse selected dod"},
+		State:       common.DoDStateReady,
+	}
+	if err := exports.Repositories.Workspaces.Create(ctx, workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Goals.Create(ctx, goal); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+	if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
+		t.Fatalf("create dod: %v", err)
+	}
+	countingGoals := &countingGoalRepository{base: exports.Repositories.Goals}
+	countingDoDs := &countingDoDRepository{base: exports.Repositories.DoDs}
+	exports.Repositories.Goals = countingGoals
+	exports.Repositories.DoDs = countingDoDs
+	borrowed, err := NewRuntimeSessionFromExports(exports)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
+	}
+
+	selectedGoal, selectedDoD, err := selectWorkspaceExecutionDefinitions(ctx, borrowed, workspace.ID, ActivateWorkspaceExecutionCommand{})
+	if err != nil {
+		t.Fatalf("selectWorkspaceExecutionDefinitions: %v", err)
+	}
+	if _, err := buildWorkspaceExecutionContextWithDefinitions(ctx, borrowed, workspace, selectedGoal, selectedDoD, ActivateWorkspaceExecutionCommand{}); err != nil {
+		t.Fatalf("buildWorkspaceExecutionContextWithDefinitions: %v", err)
+	}
+	if countingGoals.listCalls != 1 || countingDoDs.listCalls != 1 {
+		t.Fatalf("list calls goals=%d dods=%d, want one list each", countingGoals.listCalls, countingDoDs.listCalls)
+	}
+	if countingGoals.getCalls != 0 || countingDoDs.getCalls != 0 {
+		t.Fatalf("get calls goals=%d dods=%d, want no definition reload", countingGoals.getCalls, countingDoDs.getCalls)
+	}
+}
+
+func TestActivationDefinitionSelectionReadsGoalAndDoDConcurrently(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	session, _ := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+	workspace := &workspacemodel.Workspace{
+		ID:    "ws-activation-definition-parallel",
+		Title: "activation definition parallel",
+		State: common.WorkspaceStateReady,
+	}
+	goal := &workspacemodel.Goal{
+		ID:          "goal-activation-definition-parallel",
+		WorkspaceID: workspace.ID,
+		Text:        "select goal concurrently",
+	}
+	dod := &workspacemodel.DoD{
+		ID:          "dod-activation-definition-parallel",
+		WorkspaceID: workspace.ID,
+		Items:       []string{"select dod concurrently"},
+		State:       common.DoDStateReady,
+	}
+	if err := exports.Repositories.Workspaces.Create(ctx, workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Goals.Create(ctx, goal); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+	if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
+		t.Fatalf("create dod: %v", err)
+	}
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	exports.Repositories.Goals = &blockingGoalRepository{base: exports.Repositories.Goals, started: started, release: release}
+	exports.Repositories.DoDs = &blockingDoDRepository{base: exports.Repositories.DoDs, started: started, release: release}
+	borrowed, err := NewRuntimeSessionFromExports(exports)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		selectedGoal, selectedDoD, err := selectWorkspaceExecutionDefinitions(ctx, borrowed, workspace.ID, ActivateWorkspaceExecutionCommand{})
+		if err == nil && (selectedGoal.ID != goal.ID || selectedDoD.ID != dod.ID) {
+			err = errors.New("selected unexpected goal or dod")
+		}
+		errCh <- err
+	}()
+
+	seen := map[string]bool{}
+	for len(seen) < 2 {
+		select {
+		case name := <-started:
+			seen[name] = true
+		case err := <-errCh:
+			t.Fatalf("selectWorkspaceExecutionDefinitions returned before both reads started: %v", err)
+		case <-ctx.Done():
+			t.Fatalf("started reads = %+v, want goal and dod before release: %v", seen, ctx.Err())
+		}
+	}
+	close(release)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("selectWorkspaceExecutionDefinitions: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("selectWorkspaceExecutionDefinitions did not complete after release: %v", ctx.Err())
+	}
+}
+
+func TestActivationResponseReusesRunSnapshotRun(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	session, _ := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+	workspace := &workspacemodel.Workspace{
+		ID:    "ws-activation-run-snapshot-reuse",
+		Title: "activation run snapshot reuse",
+		State: common.WorkspaceStateReady,
+	}
+	goal := &workspacemodel.Goal{
+		ID:          "goal-activation-run-snapshot-reuse",
+		WorkspaceID: workspace.ID,
+		Text:        "reuse run from snapshot",
+	}
+	dod := &workspacemodel.DoD{
+		ID:          "dod-activation-run-snapshot-reuse",
+		WorkspaceID: workspace.ID,
+		Items:       []string{"reuse run snapshot run"},
+		State:       common.DoDStateReady,
+	}
+	if err := exports.Repositories.Workspaces.Create(ctx, workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Goals.Create(ctx, goal); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+	if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
+		t.Fatalf("create dod: %v", err)
+	}
+	countingRuns := &countingRunRepository{base: exports.Repositories.Runs}
+	exports.Repositories.Runs = countingRuns
+	borrowed, err := NewRuntimeSessionFromExports(exports)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithSession(ctx, borrowed, string(workspace.ID), ActivateWorkspaceExecutionCommand{})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithSession: %v", err)
+	}
+	if item.Run.ID == "" || item.Run.ID != item.Snapshot.TaskProgress.RunID {
+		t.Fatalf("activation run=%+v taskProgress=%+v, want response run from run snapshot", item.Run, item.Snapshot.TaskProgress)
+	}
+	if countingRuns.getCalls != 1 {
+		t.Fatalf("run Get calls = %d, want RunSnapshot read only", countingRuns.getCalls)
+	}
+}
+
+func TestActivationResponseWorkspaceSnapshotReusesRunSnapshotWorkspace(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	session, _ := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+	workspace := &workspacemodel.Workspace{
+		ID:    "ws-activation-workspace-snapshot-reuse",
+		Title: "activation workspace snapshot reuse",
+		State: common.WorkspaceStateReady,
+	}
+	goal := &workspacemodel.Goal{
+		ID:          "goal-activation-workspace-snapshot-reuse",
+		WorkspaceID: workspace.ID,
+		Text:        "reuse workspace from run snapshot",
+	}
+	dod := &workspacemodel.DoD{
+		ID:          "dod-activation-workspace-snapshot-reuse",
+		WorkspaceID: workspace.ID,
+		Items:       []string{"reuse workspace snapshot workspace"},
+		State:       common.DoDStateReady,
+	}
+	if err := exports.Repositories.Workspaces.Create(ctx, workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Goals.Create(ctx, goal); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+	if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
+		t.Fatalf("create dod: %v", err)
+	}
+	countingWorkspaces := &countingWorkspaceRepository{base: exports.Repositories.Workspaces}
+	exports.Repositories.Workspaces = countingWorkspaces
+	borrowed, err := NewRuntimeSessionFromExports(exports)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithSession(ctx, borrowed, string(workspace.ID), ActivateWorkspaceExecutionCommand{})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithSession: %v", err)
+	}
+	if item.Snapshot.Workspace.ID != string(workspace.ID) {
+		t.Fatalf("activation snapshot workspace=%+v, want selected workspace", item.Snapshot.Workspace)
+	}
+	if countingWorkspaces.getCalls != 3 {
+		t.Fatalf("workspace Get calls = %d, want activation/start/run snapshot reads without extra WorkspaceSnapshot Get", countingWorkspaces.getCalls)
+	}
+}
+
+func TestBuildWorkspaceExecutionContextStartsIndependentReadsConcurrently(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	session, _ := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+	workspace := &workspacemodel.Workspace{
+		ID:            "ws-activation-context-parallel",
+		Title:         "activation context parallel",
+		State:         common.WorkspaceStateReady,
+		DefaultSoulID: "soul-activation-context-parallel",
+	}
+	goal := &workspacemodel.Goal{
+		ID:          "goal-activation-context-parallel",
+		WorkspaceID: workspace.ID,
+		Text:        "build activation context with independent reads",
+	}
+	dod := &workspacemodel.DoD{
+		ID:          "dod-activation-context-parallel",
+		WorkspaceID: workspace.ID,
+		Items:       []string{"independent reads start concurrently"},
+		State:       common.DoDStateReady,
+	}
+	soul := &soulmodel.Soul{
+		ID:     "soul-activation-context-parallel",
+		Name:   "Activation Context Parallel Soul",
+		SoulMD: "# Activation Context Parallel Soul\n",
+	}
+	if err := exports.Repositories.Workspaces.Create(ctx, workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Goals.Create(ctx, goal); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+	if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
+		t.Fatalf("create dod: %v", err)
+	}
+	if err := exports.Repositories.Souls.Create(ctx, soul); err != nil {
+		t.Fatalf("create soul: %v", err)
+	}
+
+	started := make(chan string, 3)
+	release := make(chan struct{})
+	exports.Repositories.Souls = &blockingSoulRepository{base: exports.Repositories.Souls, started: started, release: release}
+	exports.Services.MemoryService = &blockingMemoryService{started: started, release: release}
+	exports.Repositories.Tickets = &blockingDecisionTicketRepository{base: exports.Repositories.Tickets, started: started, release: release}
+	borrowed, err := NewRuntimeSessionFromExports(exports)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
+	}
+
+	var completed atomic.Bool
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := buildWorkspaceExecutionContextWithDefinitions(ctx, borrowed, workspace, goal, dod, ActivateWorkspaceExecutionCommand{})
+		completed.Store(true)
+		errCh <- err
+	}()
+
+	seen := map[string]bool{}
+	for len(seen) < 3 {
+		select {
+		case name := <-started:
+			seen[name] = true
+		case <-ctx.Done():
+			t.Fatalf("started reads = %+v, want soul, memory, and governance before release: %v", seen, ctx.Err())
+		}
+	}
+	if completed.Load() {
+		t.Fatalf("activation context completed before blocked reads were released; test no longer verifies concurrent start")
+	}
+	close(release)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("buildWorkspaceExecutionContextWithDefinitions: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("activation context did not complete after release: %v", ctx.Err())
+	}
+}
+
+func TestActivationContextReadsMCPServersAndCapabilitiesConcurrently(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	session, _ := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+	workspace := &workspacemodel.Workspace{
+		ID:    "ws-activation-mcp-parallel",
+		Title: "activation mcp parallel",
+		State: common.WorkspaceStateReady,
+	}
+	goal := &workspacemodel.Goal{
+		ID:          "goal-activation-mcp-parallel",
+		WorkspaceID: workspace.ID,
+		Text:        "build activation context with mcp reads",
+	}
+	dod := &workspacemodel.DoD{
+		ID:          "dod-activation-mcp-parallel",
+		WorkspaceID: workspace.ID,
+		Items:       []string{"mcp server and capability reads start concurrently"},
+		State:       common.DoDStateReady,
+	}
+	if err := exports.Repositories.Workspaces.Create(ctx, workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Goals.Create(ctx, goal); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+	if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
+		t.Fatalf("create dod: %v", err)
+	}
+	if err := exports.Services.MCPService.CreateServer(ctx, mcpmodule.CreateServerCommand{
+		ServerID:     "mcp-activation-mcp-parallel",
+		Name:         "Activation MCP Parallel",
+		Transport:    "stdio",
+		Enabled:      true,
+		AllowedTools: []string{"repo.summary"},
+	}); err != nil {
+		t.Fatalf("create mcp server: %v", err)
+	}
+
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	exports.Services.MCPService = &blockingMCPService{base: exports.Services.MCPService, started: started, release: release}
+	borrowed, err := NewRuntimeSessionFromExports(exports)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := buildWorkspaceExecutionContextWithDefinitions(ctx, borrowed, workspace, goal, dod, ActivateWorkspaceExecutionCommand{
+			MCPServerIDs:  []string{"mcp-activation-mcp-parallel"},
+			CapabilityIDs: []string{"mcp-activation-mcp-parallel:tool:repo.summary"},
+		})
+		errCh <- err
+	}()
+
+	seen := map[string]bool{}
+	for len(seen) < 2 {
+		select {
+		case name := <-started:
+			seen[name] = true
+		case err := <-errCh:
+			t.Fatalf("buildWorkspaceExecutionContextWithDefinitions returned before both MCP reads started: %v", err)
+		case <-ctx.Done():
+			t.Fatalf("started reads = %+v, want mcp-server and mcp-capability before release: %v", seen, ctx.Err())
+		}
+	}
+	close(release)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("buildWorkspaceExecutionContextWithDefinitions: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("activation context did not complete after release: %v", ctx.Err())
 	}
 }
 

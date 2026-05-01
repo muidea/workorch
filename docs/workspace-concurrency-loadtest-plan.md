@@ -939,3 +939,60 @@ MCP sessionPolicy = transient
 - 后续普通功能开发只需执行快速回归 `c10/t50` 或高压验收 `c20/t100`。
 - 只有当持久化后端、事件流或 summary read model 发生实质变更时，才重新开启容量曲线压测。
 - `c30+` 后续只作为专项性能实验，不作为常规验收阻塞项。
+
+## 20. 2026-05-01 QC29/QC30 后全量回归与并发复测
+
+部署参数：
+
+```text
+repository.backend = file
+server.maxConcurrentRuns = 100
+LLM 容量基线 = mock
+MCP sessionPolicy = transient
+```
+
+本轮复测目标是在继续单 Workspace 优化前，确认最近的 Approval /
+Decision governance 读复用优化没有影响整体功能和并发能力。
+
+全量回归结果：
+
+- `go test ./... -count=1 -p 1` 通过。
+- `make verify-boundary-contract` 通过；期间清理了 Web 通用占位文案中的具体业务词，避免 runtime/Web 边界检查误报。
+- `make verify-deployed-full` 通过，覆盖已部署实例的健康检查、Workspace Template / Soul、mock LLM、MCP stdio、SkillHub、真实 LLM、真实天气查询、多轮 Ticket + Approval、真实 MCP stdio、向量 Memory recall。
+- 真实 LLM provider：`miniMax`。
+- 真实多轮治理样本：`workspace=ws-2574db0bb97bdaf4`，`run=run-e0ad2a8a4f40a6f4`，最终 `completed`，包含 1 个 Ticket、1 个 Approval、5 个 Step、5 个 ToolCall、5 个 ValidationResult、17 个 RuntimeCheckpoint、1 个 Result、2 个 Artifact。
+
+并发复测结果：
+
+| 批次 | LLM | client 并发 | 总量 | 成功 | 失败 | 吞吐 workspace/min | e2e avg | e2e p95 | approval_to_completed p95 | snapshot p95 | workspace snapshot p95 | observability p95 | 结论 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `/tmp/workorch-loadtest-load-20260501081203-dozcd5u8` | mock | 10 | 30 | 30 | 0 | 305.59 | 1.78s | 2.04s | 0.44s | 0.23s | 0.16s | 0.16s | 快速并发冒烟通过，完整治理闭环稳定 |
+| `/tmp/workorch-loadtest-load-20260501081248-iu5vtgtp` | mock | 20 | 50 | 50 | 0 | 114.89 | 9.33s | 12.26s | 3.20s | 1.26s | 0.74s | 0.80s | 中等样本通过，暴露高压下 file backend 尾延迟 |
+| `/tmp/workorch-loadtest-load-20260501081428-ux6t_kpd` | mock | 20 | 100 | 100 | 0 | 68.13 | 17.06s | 23.22s | 5.31s | 1.69s | 1.56s | 1.39s | 高压验收基线通过，最近修改未造成并发回归 |
+
+错误统计：
+
+| 批次 | HTTP 4xx | HTTP 5xx | curl error | LLM protocol error | timeline missing runState | failure class |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `load-20260501081203` | 0 | 0 | 0 | 0 | 0 | `{}` |
+| `load-20260501081248` | 0 | 0 | 0 | 0 | 0 | `{}` |
+| `load-20260501081428` | 0 | 0 | 0 | 0 | 0 | `{}` |
+
+高压验收批次 `load-20260501081428` 的每个 Workspace 均包含：
+
+- 2 个 Decision Ticket。
+- 1 个 Approval。
+- 5 个 LLM Step。
+- 6 个 Step / ToolCall / ValidationResult。
+- 21 个 RuntimeCheckpoint。
+- 1 个 accepted Result。
+- 2 个 linked Artifact。
+- timeline `runState` 完整。
+
+结论：
+
+- 最近的 `Approval ensure loaded Approval reuse` 与 `Decision ensure loaded Ticket reuse` 没有引入功能回归或并发回归。
+- 当前已部署实例在 file backend、`maxConcurrentRuns=100`、mock LLM、transient MCP 下仍满足既定高压验收基线 `c20/t100`。
+- 与前期最佳 `c20/t100` 批次相比，本轮吞吐 `68.13 workspace/min` 高于收尾基线 `65.70 workspace/min`，e2e p95 `23.22s` 与历史 `23.40s` 基本持平。
+- 当前主要性能约束仍是高并发下 file backend 写入/读模型回查放大，`approval_to_completed` p95 `5.31s`、snapshot p95 `1.69s`、workspace snapshot p95 `1.56s`、observability p95 `1.39s`。这不属于 QC29/QC30 引入的新问题。
+- 可以进入下一步单 Workspace 从 Goal 到 DoD 通过的效率优化；该优化应继续使用单 workspace governed 基线量化，不应与本轮并发容量复测混淆。

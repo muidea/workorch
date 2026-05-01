@@ -90,7 +90,7 @@ func (s *Service) EnsureApproved(ctx context.Context, cmd approvalservice.Resolv
 	if item.State == common.ApprovalStateRejected {
 		return common.ErrConflict
 	}
-	return s.Approve(ctx, cmd)
+	return s.resolveItem(ctx, item, common.ApprovalStateApproved)
 }
 
 func (s *Service) Reject(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) error {
@@ -112,7 +112,7 @@ func (s *Service) EnsureRejected(ctx context.Context, cmd approvalservice.Resolv
 	if item.State == common.ApprovalStateApproved {
 		return common.ErrConflict
 	}
-	return s.Reject(ctx, cmd)
+	return s.resolveItem(ctx, item, common.ApprovalStateRejected)
 }
 
 func (s *Service) resolve(ctx context.Context, approvalID common.ApprovalID, target common.ApprovalState) error {
@@ -128,6 +128,16 @@ func (s *Service) resolve(ctx context.Context, approvalID common.ApprovalID, tar
 		return common.ErrConflict
 	}
 
+	return s.resolveItem(ctx, item, target)
+}
+
+func (s *Service) resolveItem(ctx context.Context, item *approvalModel.Approval, target common.ApprovalState) error {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if item.State != common.ApprovalStatePending {
+		return common.ErrConflict
+	}
 	item.State = target
 	if err := s.approvals.Update(ctx, item); err != nil {
 		return err

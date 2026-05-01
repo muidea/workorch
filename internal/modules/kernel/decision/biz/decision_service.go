@@ -98,6 +98,17 @@ func (s *Service) ResolveTicket(ctx context.Context, cmd decisionservice.Resolve
 		return common.ErrConflict
 	}
 
+	return s.resolveTicketItem(ctx, ticket, cmd)
+}
+
+func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.Ticket, cmd decisionservice.ResolveTicketCommand) error {
+	if ticket == nil || ticket.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if ticket.State != common.DecisionTicketStateOpen {
+		return common.ErrConflict
+	}
+
 	resolution := &decisionModel.Resolution{
 		ID:       cmd.ResolutionID,
 		TicketID: cmd.TicketID,
@@ -156,7 +167,10 @@ func (s *Service) EnsureResolvedTicket(ctx context.Context, cmd decisionservice.
 		}
 		return nil
 	}
-	return s.ResolveTicket(ctx, cmd)
+	if ticket.State != common.DecisionTicketStateOpen {
+		return common.ErrConflict
+	}
+	return s.resolveTicketItem(ctx, ticket, cmd)
 }
 
 func sameResolutionPayload(left map[string]any, right map[string]any) bool {

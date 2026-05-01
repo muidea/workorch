@@ -25,6 +25,10 @@ type Orchestrator interface {
 	FailRun(context.Context, common.RunID, string) error
 }
 
+type ExecutionContextPatchOrchestrator interface {
+	ResumeRunWithExecutionContextPatch(context.Context, common.RunID, map[string]any) error
+}
+
 type Service struct {
 	runs         repository.RunRepository
 	workspaces   repository.WorkspaceRepository
@@ -133,17 +137,11 @@ func (s *Service) ResumeRun(ctx context.Context, cmd runservice.ResumeRunCommand
 	if s.orchestrator == nil {
 		return common.ErrInvalidArgument
 	}
-
-	r, err := s.runs.Get(ctx, cmd.RunID)
-	if err != nil {
-		return err
+	if len(cmd.ExecutionContextPatch) > 0 {
+		if patcher, ok := s.orchestrator.(ExecutionContextPatchOrchestrator); ok {
+			return patcher.ResumeRunWithExecutionContextPatch(ctx, cmd.RunID, cloneExecutionContext(cmd.ExecutionContextPatch))
+		}
 	}
-	if r.State != common.RunStateBlockedOnDecision &&
-		r.State != common.RunStateBlockedOnApproval &&
-		r.State != common.RunStateRunning {
-		return common.ErrConflict
-	}
-
 	return s.orchestrator.ResumeRun(ctx, cmd.RunID)
 }
 

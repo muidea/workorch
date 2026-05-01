@@ -4,12 +4,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/muidea/magicCommon/framework/configuration"
 	"github.com/pelletier/go-toml/v2"
 )
 
 const EnvConfigDir = "CONFIG_PATH"
+
+var configRevision atomic.Uint64
 
 type Config struct {
 	EndpointName string           `json:"endpointName" toml:"endpointName"`
@@ -62,6 +65,7 @@ func ConfigureDirectory(configDir string) {
 		return
 	}
 	_ = os.Setenv(EnvConfigDir, configDir)
+	configRevision.Add(1)
 }
 
 func Current() (Config, error) {
@@ -126,9 +130,21 @@ func Save(next Config) error {
 
 func Reload() error {
 	if !configuration.IsConfigManagerInitialized() {
-		return configuration.InitDefaultConfigManager("")
+		if err := configuration.InitDefaultConfigManager(""); err != nil {
+			return err
+		}
+		configRevision.Add(1)
+		return nil
 	}
-	return configuration.ReloadConfig()
+	if err := configuration.ReloadConfig(); err != nil {
+		return err
+	}
+	configRevision.Add(1)
+	return nil
+}
+
+func Revision() uint64 {
+	return configRevision.Load()
 }
 
 func (c Config) LLMProviderValues() map[string]string {
@@ -214,5 +230,6 @@ func Close() error {
 		return err
 	}
 	configuration.DefaultConfigManager = nil
+	configRevision.Add(1)
 	return nil
 }

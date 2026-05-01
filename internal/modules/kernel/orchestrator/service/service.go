@@ -12,6 +12,7 @@ type Service interface {
 	BlockOnDecision(context.Context, common.RunID, common.TicketID) error
 	BlockOnApproval(context.Context, common.RunID, common.ApprovalID) error
 	ResumeRun(context.Context, common.RunID) error
+	ResumeRunWithExecutionContextPatch(context.Context, common.RunID, map[string]any) error
 	ValidateRun(context.Context, common.RunID) error
 	CompleteRun(context.Context, common.RunID) error
 	CancelRun(context.Context, common.RunID) error
@@ -25,6 +26,7 @@ type Module struct {
 	blockOnDecision  func(context.Context, common.RunID, common.TicketID) error
 	blockOnApproval  func(context.Context, common.RunID, common.ApprovalID) error
 	resumeRun        func(context.Context, common.RunID) error
+	resumeRunPatch   func(context.Context, common.RunID, map[string]any) error
 	validateRun      func(context.Context, common.RunID) error
 	completeRun      func(context.Context, common.RunID) error
 	cancelRun        func(context.Context, common.RunID) error
@@ -38,6 +40,7 @@ type Dependencies struct {
 	BlockOnDecision  func(context.Context, common.RunID, common.TicketID) error
 	BlockOnApproval  func(context.Context, common.RunID, common.ApprovalID) error
 	ResumeRun        func(context.Context, common.RunID) error
+	ResumeRunPatch   func(context.Context, common.RunID, map[string]any) error
 	ValidateRun      func(context.Context, common.RunID) error
 	CompleteRun      func(context.Context, common.RunID) error
 	CancelRun        func(context.Context, common.RunID) error
@@ -52,6 +55,7 @@ func New(deps Dependencies) *Module {
 		blockOnDecision:  deps.BlockOnDecision,
 		blockOnApproval:  deps.BlockOnApproval,
 		resumeRun:        deps.ResumeRun,
+		resumeRunPatch:   deps.ResumeRunPatch,
 		validateRun:      deps.ValidateRun,
 		completeRun:      deps.CompleteRun,
 		cancelRun:        deps.CancelRun,
@@ -93,6 +97,13 @@ func (m *Module) ResumeRun(ctx context.Context, runID common.RunID) error {
 		return common.ErrInvalidArgument
 	}
 	return m.resumeRun(ctx, runID)
+}
+
+func (m *Module) ResumeRunWithExecutionContextPatch(ctx context.Context, runID common.RunID, executionContextPatch map[string]any) error {
+	if m == nil || m.resumeRunPatch == nil {
+		return common.ErrInvalidArgument
+	}
+	return m.resumeRunPatch(ctx, runID, executionContextPatch)
 }
 
 func (m *Module) CompleteRun(ctx context.Context, runID common.RunID) error {

@@ -143,6 +143,130 @@ func (r *countingRunRepository) Delete(ctx context.Context, id common.RunID) err
 	return r.inner.Delete(ctx, id)
 }
 
+type blockingCompletedRunRepository struct {
+	inner   *memory.RunRepository
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (r *blockingCompletedRunRepository) Create(ctx context.Context, item *runmodel.Run) error {
+	return r.inner.Create(ctx, item)
+}
+
+func (r *blockingCompletedRunRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
+	return r.inner.Get(ctx, id)
+}
+
+func (r *blockingCompletedRunRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
+	return r.inner.List(ctx)
+}
+
+func (r *blockingCompletedRunRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
+	return r.inner.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r *blockingCompletedRunRepository) Update(ctx context.Context, item *runmodel.Run) error {
+	if item != nil && item.State == common.RunStateCompleted {
+		if r.started != nil {
+			r.started <- "run-completed-update"
+		}
+		if r.release != nil {
+			select {
+			case <-r.release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return r.inner.Update(ctx, item)
+}
+
+func (r *blockingCompletedRunRepository) Delete(ctx context.Context, id common.RunID) error {
+	return r.inner.Delete(ctx, id)
+}
+
+type blockingValidatingRunRepository struct {
+	inner   *memory.RunRepository
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (r *blockingValidatingRunRepository) Create(ctx context.Context, item *runmodel.Run) error {
+	return r.inner.Create(ctx, item)
+}
+
+func (r *blockingValidatingRunRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
+	return r.inner.Get(ctx, id)
+}
+
+func (r *blockingValidatingRunRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
+	return r.inner.List(ctx)
+}
+
+func (r *blockingValidatingRunRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
+	return r.inner.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r *blockingValidatingRunRepository) Update(ctx context.Context, item *runmodel.Run) error {
+	if item != nil && item.State == common.RunStateValidating {
+		if r.started != nil {
+			r.started <- "run-validating-update"
+		}
+		if r.release != nil {
+			select {
+			case <-r.release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return r.inner.Update(ctx, item)
+}
+
+func (r *blockingValidatingRunRepository) Delete(ctx context.Context, id common.RunID) error {
+	return r.inner.Delete(ctx, id)
+}
+
+type countingDecisionTicketRepository struct {
+	inner            *memory.DecisionTicketRepository
+	listCount        atomic.Int64
+	listByRunIDCount atomic.Int64
+}
+
+func newCountingDecisionTicketRepository() *countingDecisionTicketRepository {
+	return &countingDecisionTicketRepository{inner: memory.NewDecisionTicketRepository()}
+}
+
+func (r *countingDecisionTicketRepository) Create(ctx context.Context, item *decisionmodel.Ticket) error {
+	return r.inner.Create(ctx, item)
+}
+
+func (r *countingDecisionTicketRepository) Get(ctx context.Context, id common.TicketID) (*decisionmodel.Ticket, error) {
+	return r.inner.Get(ctx, id)
+}
+
+func (r *countingDecisionTicketRepository) List(ctx context.Context) ([]*decisionmodel.Ticket, error) {
+	r.listCount.Add(1)
+	return r.inner.List(ctx)
+}
+
+func (r *countingDecisionTicketRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*decisionmodel.Ticket, error) {
+	r.listByRunIDCount.Add(1)
+	return r.inner.ListByRunID(ctx, runID)
+}
+
+func (r *countingDecisionTicketRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*decisionmodel.Ticket, error) {
+	return r.inner.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r *countingDecisionTicketRepository) Update(ctx context.Context, item *decisionmodel.Ticket) error {
+	return r.inner.Update(ctx, item)
+}
+
+func (r *countingDecisionTicketRepository) Delete(ctx context.Context, id common.TicketID) error {
+	return r.inner.Delete(ctx, id)
+}
+
 type countingWorkspaceRepository struct {
 	inner    *memory.WorkspaceRepository
 	getCount atomic.Int64
@@ -170,6 +294,267 @@ func (r *countingWorkspaceRepository) Update(ctx context.Context, item *workspac
 }
 
 func (r *countingWorkspaceRepository) Delete(ctx context.Context, id common.WorkspaceID) error {
+	return r.inner.Delete(ctx, id)
+}
+
+type blockingWorkspaceRepository struct {
+	inner         *memory.WorkspaceRepository
+	started       chan<- string
+	release       <-chan struct{}
+	updateRelease <-chan struct{}
+}
+
+func (r *blockingWorkspaceRepository) Create(ctx context.Context, item *workspacemodel.Workspace) error {
+	return r.inner.Create(ctx, item)
+}
+
+func (r *blockingWorkspaceRepository) Get(ctx context.Context, id common.WorkspaceID) (*workspacemodel.Workspace, error) {
+	if r.started != nil {
+		r.started <- "workspace-get"
+	}
+	if r.release != nil {
+		select {
+		case <-r.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return r.inner.Get(ctx, id)
+}
+
+func (r *blockingWorkspaceRepository) List(ctx context.Context) ([]*workspacemodel.Workspace, error) {
+	return r.inner.List(ctx)
+}
+
+func (r *blockingWorkspaceRepository) Update(ctx context.Context, item *workspacemodel.Workspace) error {
+	if item != nil && item.State == common.WorkspaceStateCompleted && item.ActiveRunID == "" {
+		if r.started != nil {
+			r.started <- "workspace-completed-update"
+		}
+		if r.updateRelease != nil {
+			select {
+			case <-r.updateRelease:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return r.inner.Update(ctx, item)
+}
+
+func (r *blockingWorkspaceRepository) Delete(ctx context.Context, id common.WorkspaceID) error {
+	return r.inner.Delete(ctx, id)
+}
+
+type blockingValidatingWorkspaceRepository struct {
+	inner   *memory.WorkspaceRepository
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (r *blockingValidatingWorkspaceRepository) Create(ctx context.Context, item *workspacemodel.Workspace) error {
+	return r.inner.Create(ctx, item)
+}
+
+func (r *blockingValidatingWorkspaceRepository) Get(ctx context.Context, id common.WorkspaceID) (*workspacemodel.Workspace, error) {
+	return r.inner.Get(ctx, id)
+}
+
+func (r *blockingValidatingWorkspaceRepository) List(ctx context.Context) ([]*workspacemodel.Workspace, error) {
+	return r.inner.List(ctx)
+}
+
+func (r *blockingValidatingWorkspaceRepository) Update(ctx context.Context, item *workspacemodel.Workspace) error {
+	if item != nil && item.State == common.WorkspaceStateValidating {
+		if r.started != nil {
+			r.started <- "workspace-validating-update"
+		}
+		if r.release != nil {
+			select {
+			case <-r.release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return r.inner.Update(ctx, item)
+}
+
+func (r *blockingValidatingWorkspaceRepository) Delete(ctx context.Context, id common.WorkspaceID) error {
+	return r.inner.Delete(ctx, id)
+}
+
+type blockingResultRepository struct {
+	inner   *memory.ResultRepository
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (r *blockingResultRepository) Create(ctx context.Context, item *resultmodel.Result) error {
+	return r.inner.Create(ctx, item)
+}
+
+func (r *blockingResultRepository) Get(ctx context.Context, id common.ResultID) (*resultmodel.Result, error) {
+	return r.inner.Get(ctx, id)
+}
+
+func (r *blockingResultRepository) ListByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Result, error) {
+	r.started <- "results"
+	select {
+	case <-r.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return r.inner.ListByWorkspace(ctx, workspaceID)
+}
+
+func (r *blockingResultRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*resultmodel.Result, error) {
+	return r.inner.ListByRun(ctx, runID)
+}
+
+func (r *blockingResultRepository) Update(ctx context.Context, item *resultmodel.Result) error {
+	return r.inner.Update(ctx, item)
+}
+
+func (r *blockingResultRepository) Delete(ctx context.Context, id common.ResultID) error {
+	return r.inner.Delete(ctx, id)
+}
+
+type blockingArtifactRepository struct {
+	inner   *memory.ArtifactRepository
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (r *blockingArtifactRepository) Create(ctx context.Context, item *resultmodel.Artifact) error {
+	if r.started != nil {
+		r.started <- "artifact-create:" + string(item.ID)
+	}
+	if r.release != nil {
+		select {
+		case <-r.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return r.inner.Create(ctx, item)
+}
+
+func (r *blockingArtifactRepository) Get(ctx context.Context, id common.ArtifactID) (*resultmodel.Artifact, error) {
+	return r.inner.Get(ctx, id)
+}
+
+func (r *blockingArtifactRepository) ListByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Artifact, error) {
+	if r.started != nil {
+		r.started <- "artifacts"
+	}
+	if r.release != nil {
+		select {
+		case <-r.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return r.inner.ListByWorkspace(ctx, workspaceID)
+}
+
+func (r *blockingArtifactRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*resultmodel.Artifact, error) {
+	return r.inner.ListByRun(ctx, runID)
+}
+
+func (r *blockingArtifactRepository) ListByResult(ctx context.Context, resultID common.ResultID) ([]*resultmodel.Artifact, error) {
+	return r.inner.ListByResult(ctx, resultID)
+}
+
+func (r *blockingArtifactRepository) Update(ctx context.Context, item *resultmodel.Artifact) error {
+	return r.inner.Update(ctx, item)
+}
+
+func (r *blockingArtifactRepository) Delete(ctx context.Context, id common.ArtifactID) error {
+	return r.inner.Delete(ctx, id)
+}
+
+type blockingToolCallRepository struct {
+	inner   *memory.ToolCallRepository
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (r *blockingToolCallRepository) Create(ctx context.Context, item *runmodel.ToolCall) error {
+	return r.inner.Create(ctx, item)
+}
+
+func (r *blockingToolCallRepository) Get(ctx context.Context, id common.ToolCallID) (*runmodel.ToolCall, error) {
+	return r.inner.Get(ctx, id)
+}
+
+func (r *blockingToolCallRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.ToolCall, error) {
+	return r.inner.ListByRun(ctx, runID)
+}
+
+func (r *blockingToolCallRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*runmodel.ToolCall, error) {
+	return r.inner.ListByStep(ctx, stepID)
+}
+
+func (r *blockingToolCallRepository) Update(ctx context.Context, item *runmodel.ToolCall) error {
+	if item != nil && item.State == common.ToolCallStateCompleted {
+		if r.started != nil {
+			r.started <- "tool-call-completed-update"
+		}
+		if r.release != nil {
+			select {
+			case <-r.release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return r.inner.Update(ctx, item)
+}
+
+func (r *blockingToolCallRepository) Delete(ctx context.Context, id common.ToolCallID) error {
+	return r.inner.Delete(ctx, id)
+}
+
+type blockingValidationResultRepository struct {
+	inner   *memory.ValidationResultRepository
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (r *blockingValidationResultRepository) Create(ctx context.Context, item *runmodel.ValidationResult) error {
+	if item != nil && item.State == common.ValidationResultStatePassed {
+		if r.started != nil {
+			r.started <- "validation-passed-create"
+		}
+		if r.release != nil {
+			select {
+			case <-r.release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return r.inner.Create(ctx, item)
+}
+
+func (r *blockingValidationResultRepository) Get(ctx context.Context, id common.ValidationResultID) (*runmodel.ValidationResult, error) {
+	return r.inner.Get(ctx, id)
+}
+
+func (r *blockingValidationResultRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.ValidationResult, error) {
+	return r.inner.ListByRun(ctx, runID)
+}
+
+func (r *blockingValidationResultRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*runmodel.ValidationResult, error) {
+	return r.inner.ListByStep(ctx, stepID)
+}
+
+func (r *blockingValidationResultRepository) Update(ctx context.Context, item *runmodel.ValidationResult) error {
+	return r.inner.Update(ctx, item)
+}
+
+func (r *blockingValidationResultRepository) Delete(ctx context.Context, id common.ValidationResultID) error {
 	return r.inner.Delete(ctx, id)
 }
 
@@ -1331,6 +1716,38 @@ func TestRuntimeOrchestrator_ExecutionContextPackageReusesInputWorkspaceManifest
 	}
 }
 
+func TestRuntimeOrchestrator_FollowUpInputInheritsWorkspaceManifest(t *testing.T) {
+	runID := common.RunID("run-follow-up-manifest-reuse")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-follow-up-manifest-reuse"}
+	previousStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/step-1"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeyExecutionContextPackage: map[string]any{
+				stepInputKeyWorkspaceFileManifest: []map[string]any{
+					{"path": "README.md", "kind": "file", "size": float64(12)},
+				},
+			},
+		},
+		Output: map[string]any{
+			stepOutputKeyNextStep: "follow-up",
+			stepOutputKeyNextKind: llmcommon.StepKindWorkspaceExecution,
+		},
+	}
+
+	input := nextStepInputFromOutput(run, previousStep)
+	manifest := mapSliceFromValue(input[stepInputKeyWorkspaceFileManifest])
+	if len(manifest) != 1 || manifest[0]["path"] != "README.md" {
+		t.Fatalf("workspaceFileManifest = %+v, want inherited manifest", input[stepInputKeyWorkspaceFileManifest])
+	}
+	manifest[0]["path"] = "mutated.md"
+	previousManifest := mapSliceFromValue(mapFromValue(previousStep.Input[stepInputKeyExecutionContextPackage])[stepInputKeyWorkspaceFileManifest])
+	if previousManifest[0]["path"] != "README.md" {
+		t.Fatalf("previous manifest mutated to %+v, want cloned follow-up manifest", previousManifest)
+	}
+}
+
 func TestRuntimeOrchestrator_ExecutionContextPackageReusesProvidedWorkspace(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := newCountingWorkspaceRepository()
@@ -1420,6 +1837,95 @@ func TestRuntimeOrchestrator_ResultManifestReusesProvidedWorkspace(t *testing.T)
 	if len(artifacts) != 2 {
 		t.Fatalf("artifacts = %+v, want result summary and deliverable manifest", artifacts)
 	}
+	for _, artifact := range artifacts {
+		if !reflect.DeepEqual(artifact.EvidenceRefs, []string{string(step.ID)}) {
+			t.Fatalf("artifact %s evidence refs = %+v, want assessment refs", artifact.ID, artifact.EvidenceRefs)
+		}
+		if artifact.Category == resultcommon.ArtifactCategoryRuntimeEvidence && !strings.Contains(artifact.Summary, fmt.Sprintf("- `%s`", step.ID)) {
+			t.Fatalf("manifest summary = %q, want acceptance evidence ref", artifact.Summary)
+		}
+	}
+}
+
+func TestRuntimeOrchestrator_ResultManifestReusesStepContextManifestWhenNoPatch(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-result-manifest-step-context-reuse")
+	workingDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workingDir, "from-disk.md"), []byte("stale disk content"), 0o644); err != nil {
+		t.Fatalf("seed workspace file: %v", err)
+	}
+	runID := common.RunID("run-result-manifest-step-context-reuse")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		GoalID:          "goal-result-manifest-step-context-reuse",
+		DoDID:           "dod-result-manifest-step-context-reuse",
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/validation"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeyExecutionContextPackage: map[string]any{
+				stepInputKeyWorkspaceFileManifest: []map[string]any{
+					{"path": "from-context.md", "kind": "file", "size": float64(12)},
+				},
+			},
+		},
+	}
+	orch := &RuntimeOrchestrator{}
+
+	manifest := orch.workspaceDeliverableManifestContent(ctx, run, step, map[string]any{
+		"summary": "accepted with context manifest",
+	}, []string{string(step.ID)}, &workspacemodel.Workspace{ID: workspaceID, WorkingDirectory: workingDir})
+
+	if !strings.Contains(manifest, "`from-context.md`") || strings.Contains(manifest, "`from-disk.md`") {
+		t.Fatalf("manifest = %q, want reused step context manifest without disk rescan", manifest)
+	}
+}
+
+func TestRuntimeOrchestrator_ResultManifestRescansWorkspaceWhenStepHasPatch(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-result-manifest-patch-rescan")
+	workingDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workingDir, "from-disk.md"), []byte("fresh disk content"), 0o644); err != nil {
+		t.Fatalf("seed workspace file: %v", err)
+	}
+	runID := common.RunID("run-result-manifest-patch-rescan")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		GoalID:          "goal-result-manifest-patch-rescan",
+		DoDID:           "dod-result-manifest-patch-rescan",
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/validation"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeyExecutionContextPackage: map[string]any{
+				stepInputKeyWorkspaceFileManifest: []map[string]any{
+					{"path": "from-context.md", "kind": "file", "size": float64(12)},
+				},
+			},
+		},
+		Output: map[string]any{
+			stepOutputKeyPatches: []map[string]any{
+				{"targetRef": "from-disk.md", "content": "fresh disk content"},
+			},
+		},
+	}
+	orch := &RuntimeOrchestrator{}
+
+	manifest := orch.workspaceDeliverableManifestContent(ctx, run, step, map[string]any{
+		"summary": "accepted after patch",
+	}, []string{string(step.ID)}, &workspacemodel.Workspace{ID: workspaceID, WorkingDirectory: workingDir})
+
+	if !strings.Contains(manifest, "`from-disk.md`") || strings.Contains(manifest, "`from-context.md`") {
+		t.Fatalf("manifest = %q, want disk rescan when final step has patches", manifest)
+	}
 }
 
 func TestRuntimeOrchestrator_RunStateTransitionsReuseProvidedWorkspace(t *testing.T) {
@@ -1504,6 +2010,145 @@ func TestRuntimeOrchestrator_ValidateCompleteReusesProvidedWorkspace(t *testing.
 	}
 }
 
+func TestRuntimeOrchestrator_ValidationRunAndWorkspaceWritesConcurrently(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	started := make(chan string, 4)
+	release := make(chan struct{})
+	runRepo := &blockingValidatingRunRepository{
+		inner:   memory.NewRunRepository(),
+		started: started,
+		release: release,
+	}
+	workspaceRepo := &blockingValidatingWorkspaceRepository{
+		inner:   memory.NewWorkspaceRepository(),
+		started: started,
+		release: release,
+	}
+	workspaceID := common.WorkspaceID("ws-validating-write-parallel")
+	runID := common.RunID("run-validating-write-parallel")
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		runs:       runRepo,
+		workspaces: workspaceRepo,
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := orch.syncRunAndWorkspaceForValidation(ctx, run, workspace)
+		done <- err
+	}()
+
+	seen := map[string]bool{}
+	for !seen["run-validating-update"] || !seen["workspace-validating-update"] {
+		select {
+		case name := <-started:
+			seen[name] = true
+		case <-ctx.Done():
+			t.Fatalf("validation updates before release = %+v, want run and workspace writes started: %v", seen, ctx.Err())
+		}
+	}
+	close(release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("sync validation state: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("sync validation state did not finish after release: %v", ctx.Err())
+	}
+	if run.State != common.RunStateValidating {
+		t.Fatalf("run state = %s, want validating", run.State)
+	}
+	if workspace.State != common.WorkspaceStateValidating || workspace.ActiveRunID != runID {
+		t.Fatalf("workspace = %+v, want validating with active run", workspace)
+	}
+}
+
+func TestRuntimeOrchestrator_CompletedStepEvidenceWritesConcurrently(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	started := make(chan string, 4)
+	release := make(chan struct{})
+	toolCallRepo := &blockingToolCallRepository{
+		inner:   memory.NewToolCallRepository(),
+		started: started,
+		release: release,
+	}
+	validationRepo := &blockingValidationResultRepository{
+		inner:   memory.NewValidationResultRepository(),
+		started: started,
+		release: release,
+	}
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{
+			ToolCalls:         toolCallRepo,
+			ValidationResults: validationRepo,
+		},
+	}
+	workspaceID := common.WorkspaceID("ws-completed-step-evidence-parallel")
+	runID := common.RunID("run-completed-step-evidence-parallel")
+	stepID := common.StepID("run-completed-step-evidence-parallel/step-1")
+	toolCallID := common.ToolCallID("run-completed-step-evidence-parallel/step-1/tool-call")
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	step := &runmodel.Step{ID: stepID, RunID: runID, State: common.StepStateCompleted}
+	toolCall := &runmodel.ToolCall{
+		ID:          toolCallID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		State:       common.ToolCallStateRunning,
+	}
+	if err := toolCallRepo.Create(ctx, toolCall); err != nil {
+		t.Fatalf("seed tool call: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- orch.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, map[string]any{"status": "ok"})
+	}()
+
+	seen := map[string]bool{}
+	for !seen["tool-call-completed-update"] || !seen["validation-passed-create"] {
+		select {
+		case name := <-started:
+			seen[name] = true
+		case <-ctx.Done():
+			t.Fatalf("evidence writes before release = %+v, want tool call and validation writes started: %v", seen, ctx.Err())
+		}
+	}
+	close(release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("record completed evidence: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("record completed evidence did not finish after release: %v", ctx.Err())
+	}
+	updatedToolCall, err := toolCallRepo.Get(ctx, toolCallID)
+	if err != nil {
+		t.Fatalf("get tool call: %v", err)
+	}
+	if updatedToolCall.State != common.ToolCallStateCompleted {
+		t.Fatalf("tool call state = %s, want completed", updatedToolCall.State)
+	}
+	validations, err := validationRepo.ListByStep(ctx, stepID)
+	if err != nil {
+		t.Fatalf("list validations: %v", err)
+	}
+	if len(validations) != 1 || validations[0].State != common.ValidationResultStatePassed || validations[0].EvidenceRef != string(toolCallID) {
+		t.Fatalf("validations = %+v, want passed validation with tool call evidence", validations)
+	}
+}
+
 func TestRuntimeOrchestrator_StartRunDispatchReusesLoadedRun(t *testing.T) {
 	ctx := context.Background()
 	runRepo := newCountingRunRepository()
@@ -1533,6 +2178,201 @@ func TestRuntimeOrchestrator_StartRunDispatchReusesLoadedRun(t *testing.T) {
 	}
 	if got := runRepo.getCount.Load(); got != 1 {
 		t.Fatalf("run Get count = %d, want only initial StartRun read", got)
+	}
+}
+
+func TestRuntimeOrchestrator_StartRunDispatchReusesLoadedWorkspace(t *testing.T) {
+	ctx := context.Background()
+	runRepo := memory.NewRunRepository()
+	workspaceRepo := newCountingWorkspaceRepository()
+	stepRepo := memory.NewStepRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "ok"}}
+	orch := NewRuntimeOrchestrator(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+	workspaceID := common.WorkspaceID("ws-start-run-loaded-workspace-reuse")
+	runID := common.RunID("run-start-run-loaded-workspace-reuse")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	if got := workspaceRepo.getCount.Load(); got != 1 {
+		t.Fatalf("workspace Get count = %d, want only initial StartRun read", got)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeRunDispatchReusesSyncedWorkspace(t *testing.T) {
+	ctx := context.Background()
+	runRepo := memory.NewRunRepository()
+	workspaceRepo := newCountingWorkspaceRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	workspaceID := common.WorkspaceID("ws-resume-run-loaded-workspace-reuse")
+	runID := common.RunID("run-resume-run-loaded-workspace-reuse")
+	blockStepID := common.StepID(string(runID) + "/step-1")
+	nextStepID := common.StepID(string(runID) + "/step-2")
+	ticketID := common.TicketID(string(blockStepID) + "-decision")
+	runtime := &stubRuntimeAdapter{output: map[string]any{
+		"completionState": "completed",
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "accepted after resume",
+			"items": []map[string]any{
+				{"item": "resume workspace reused", "state": "satisfied", "evidenceRefs": []string{string(nextStepID)}},
+			},
+		},
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		resolutionRepo,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			Results:            memory.NewResultRepository(),
+			Artifacts:          memory.NewArtifactRepository(),
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:               workspaceID,
+		Title:            "ws",
+		WorkingDirectory: t.TempDir(),
+		State:            common.WorkspaceStateWaitingDecision,
+		ActiveRunID:      runID,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		DoDID:            "dod-resume-run-loaded-workspace-reuse",
+		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    blockStepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			stepOutputKeyNextStep: string(nextStepID),
+			stepOutputKeyNextKind: llmcommon.StepKindWorkspaceExecution,
+		},
+	}); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      blockStepID,
+		Reason:      "resume",
+		State:       common.DecisionTicketStateResolved,
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       "resolution-resume-run-loaded-workspace-reuse",
+		TicketID: ticketID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:  map[string]any{"answer": "continue"},
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume run: %v", err)
+	}
+	if got := workspaceRepo.getCount.Load(); got != 1 {
+		t.Fatalf("workspace Get count = %d, want only resume state sync read", got)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s, want completed", runItem.State)
+	}
+}
+
+func TestRuntimeOrchestrator_GraphBatchDispatchReusesLoadedWorkspace(t *testing.T) {
+	ctx := context.Background()
+	runRepo := memory.NewRunRepository()
+	workspaceRepo := newCountingWorkspaceRepository()
+	stepRepo := memory.NewStepRepository()
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		switch {
+		case request.StepID == "run-graph-batch-workspace-reuse/step-1":
+			return map[string]any{
+				"status": "completed",
+				"executionGraph": map[string]any{
+					"nodes": []map[string]any{
+						{"id": "node-a", "kind": "test/node"},
+						{"id": "node-b", "kind": "test/node"},
+					},
+				},
+			}, nil
+		case strings.Contains(string(request.StepID), "/block/node-a"):
+			return map[string]any{"status": "completed", "node": "a"}, nil
+		case strings.Contains(string(request.StepID), "/block/node-b"):
+			return map[string]any{"status": "completed", "node": "b"}, nil
+		default:
+			return nil, fmt.Errorf("unexpected step %s", request.StepID)
+		}
+	}}
+	orch := NewRuntimeOrchestrator(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+	workspaceID := common.WorkspaceID("ws-graph-batch-workspace-reuse")
+	runID := common.RunID("run-graph-batch-workspace-reuse")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	if got := workspaceRepo.getCount.Load(); got != 1 {
+		t.Fatalf("workspace Get count = %d, want graph batch to reuse the initial StartRun workspace", got)
+	}
+	steps, err := stepRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	if len(steps) != 3 {
+		t.Fatalf("step count = %d, want initial graph step plus two batch nodes", len(steps))
 	}
 }
 
@@ -1584,6 +2424,105 @@ func TestRuntimeOrchestrator_ExecutionContextPackageIncludesRecentFailureSummary
 	failures := mapSliceFromValue(pkg["recentFailureSummary"])
 	if len(failures) != 1 || failures[0]["failureClass"] != failureClassShellCommand || failures[0]["failureSignature"] == "" {
 		t.Fatalf("recentFailureSummary = %+v, want shell failure signature", failures)
+	}
+}
+
+func TestRuntimeOrchestrator_ExecutionContextPackageSkipsInitialStepFailureHistoryRead(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := newCountingStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-context-package-initial")
+	runID := common.RunID("run-context-package-initial")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-context-package-initial",
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateRunning}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	pkg := orch.runExecutionContextPackage(ctx, run, &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/step-1"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{stepInputKeySoulStage: soulStagePlanning},
+	}, nil)
+	if got := stepRepo.listCount.Load(); got != 0 {
+		t.Fatalf("step ListByRun count = %d, want no failure-history read for initial step", got)
+	}
+	if failures := mapSliceFromValue(pkg["recentFailureSummary"]); len(failures) != 0 {
+		t.Fatalf("recentFailureSummary = %+v, want empty for initial step", failures)
+	}
+}
+
+func TestRuntimeOrchestrator_ExecutionContextPackageBuildsIndependentContextReadsConcurrently(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	resultRepo := &blockingResultRepository{inner: memory.NewResultRepository(), started: started, release: release}
+	artifactRepo := &blockingArtifactRepository{inner: memory.NewArtifactRepository(), started: started, release: release}
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{
+			Results:   resultRepo,
+			Artifacts: artifactRepo,
+		},
+	}
+	run := &runmodel.Run{
+		ID:          "run-context-package-concurrent",
+		WorkspaceID: "ws-context-package-concurrent",
+		State:       common.RunStateRunning,
+	}
+	step := &runmodel.Step{
+		ID:    "run-context-package-concurrent/step-1",
+		RunID: run.ID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+	}
+
+	done := make(chan map[string]any, 1)
+	go func() {
+		done <- orch.runExecutionContextPackage(ctx, run, step, &workspacemodel.Workspace{ID: run.WorkspaceID, WorkingDirectory: t.TempDir()})
+	}()
+
+	seen := map[string]bool{}
+	for len(seen) < 2 {
+		select {
+		case name := <-started:
+			seen[name] = true
+		case <-ctx.Done():
+			t.Fatalf("context package reads did not start concurrently before release: seen=%v err=%v", seen, ctx.Err())
+		}
+	}
+	close(release)
+	select {
+	case pkg := <-done:
+		if pkg["version"] != executionContextPackageVersion {
+			t.Fatalf("executionContextPackage = %+v, want version %s", pkg, executionContextPackageVersion)
+		}
+	case <-ctx.Done():
+		t.Fatalf("context package did not finish after release: %v", ctx.Err())
 	}
 }
 
@@ -3754,6 +4693,218 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 	}
 }
 
+func TestRuntimeOrchestrator_FinalRunAndWorkspaceCompletionWritesConcurrently(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	started := make(chan string, 4)
+	release := make(chan struct{})
+	workspaceInner := memory.NewWorkspaceRepository()
+	runInner := memory.NewRunRepository()
+	workspaceRepo := &blockingWorkspaceRepository{inner: workspaceInner, started: started, updateRelease: release}
+	runRepo := &blockingCompletedRunRepository{inner: runInner, started: started, release: release}
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	resultRepo := memory.NewResultRepository()
+	artifactRepo := memory.NewArtifactRepository()
+	hub := events.NewMemoryHub()
+	runtime := &stubRuntimeAdapter{output: map[string]any{
+		"status": "completed",
+		"dodAssessment": map[string]any{
+			"satisfied": true,
+			"items": []map[string]any{
+				{
+					"item":         "completion writes are concurrent",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-terminal-write-concurrent/step-1/validation/runtime-step"},
+				},
+			},
+			"summary": "DoD satisfied",
+		},
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			Results:   resultRepo,
+			Artifacts: artifactRepo,
+		},
+		hub,
+	)
+
+	workspaceID := common.WorkspaceID("ws-terminal-write-concurrent")
+	runID := common.RunID("run-terminal-write-concurrent")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-terminal-write-concurrent"),
+		State:           common.RunStateCreated,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- orch.StartRun(ctx, runID)
+	}()
+
+	seen := map[string]bool{}
+	for !seen["run-completed-update"] || !seen["workspace-completed-update"] {
+		select {
+		case name := <-started:
+			seen[name] = true
+		case err := <-done:
+			t.Fatalf("StartRun returned before both terminal writes started: %v", err)
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for concurrent terminal writes, saw %+v: %v", seen, ctx.Err())
+		}
+	}
+	publishedBeforeRelease := hub.Published()
+	for _, item := range publishedBeforeRelease {
+		if item.Topic == events.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateCompleted) {
+			t.Fatalf("published completed run event before terminal writes were released: %+v", publishedBeforeRelease)
+		}
+	}
+	close(release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("StartRun: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("StartRun did not complete after releasing terminal writes: %v", ctx.Err())
+	}
+	published := hub.Published()
+	var completedRunIndex = -1
+	var completedWorkspaceIndex = -1
+	for idx, item := range published {
+		if item.Topic == events.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateCompleted) {
+			completedRunIndex = idx
+		}
+		if item.Topic == events.TopicWorkspaceStateChanged && item.Payload[events.PayloadKeyState] == string(common.WorkspaceStateCompleted) {
+			completedWorkspaceIndex = idx
+		}
+	}
+	if completedRunIndex < 0 || completedWorkspaceIndex < 0 || completedRunIndex > completedWorkspaceIndex {
+		t.Fatalf("published events = %+v, want run completed before workspace completed", published)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s, want completed", runItem.State)
+	}
+	workspaceItem, err := workspaceRepo.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if workspaceItem.State != common.WorkspaceStateCompleted || workspaceItem.ActiveRunID != "" {
+		t.Fatalf("workspace = %+v, want completed with active run cleared", workspaceItem)
+	}
+}
+
+func TestRuntimeOrchestrator_ResultArtifactsWriteConcurrentlyBeforeAcceptedResult(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	started := make(chan string, 4)
+	artifactRelease := make(chan struct{})
+	resultRepo := memory.NewResultRepository()
+	artifactRepo := &blockingArtifactRepository{inner: memory.NewArtifactRepository(), started: started, release: artifactRelease}
+	orch := &RuntimeOrchestrator{
+		workspaces: memory.NewWorkspaceRepository(),
+		evidence: RuntimeEvidenceRepositories{
+			Results:   resultRepo,
+			Artifacts: artifactRepo,
+		},
+	}
+
+	workspaceID := common.WorkspaceID("ws-result-manifest-prefetch")
+	runID := common.RunID("run-result-manifest-prefetch")
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-result-manifest-prefetch"),
+		State:           common.RunStateRunning,
+		InitialStepKind: "llm/workspace_execution",
+	}
+	step := &runmodel.Step{
+		ID:    "run-result-manifest-prefetch/step-1",
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeyExecutionContextPackage: map[string]any{
+				stepInputKeyWorkspaceFileManifest: []map[string]any{
+					{"path": "README.md", "size": 32},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"dodAssessment": map[string]any{
+			"satisfied": true,
+			"items": []map[string]any{
+				{
+					"item":         "manifest generated while summary artifact is writing",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-result-manifest-prefetch/step-1/validation/runtime-step"},
+				},
+			},
+			"summary": "DoD satisfied",
+		},
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- orch.recordRunResultFromDoDAssessment(ctx, run, step, output, workspace)
+	}()
+
+	seen := map[string]bool{}
+	for !seen["artifact-create:run-result-manifest-prefetch/artifact/result-summary"] ||
+		!seen["artifact-create:run-result-manifest-prefetch/artifact/deliverable-manifest"] {
+		select {
+		case name := <-started:
+			seen[name] = true
+		case <-ctx.Done():
+			t.Fatalf("events before release = %+v, want both artifact writes: %v", seen, ctx.Err())
+		}
+	}
+	close(artifactRelease)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("recordRunResultFromDoDAssessment: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("recordRunResultFromDoDAssessment did not complete after release: %v", ctx.Err())
+	}
+	artifacts, err := artifactRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	}
+	if len(artifacts) != 2 {
+		t.Fatalf("artifacts = %+v, want summary and manifest artifacts", artifacts)
+	}
+	results, err := resultRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list results: %v", err)
+	}
+	if len(results) != 1 || results[0].State != common.ResultStateAccepted || len(results[0].ArtifactRefs) != 2 {
+		t.Fatalf("results = %+v, want one accepted result with both artifact refs", results)
+	}
+}
+
 func TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterApproval(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -4173,6 +5324,106 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeDecisionR
 	}
 	if len(runtime.calls) != 2 || runtime.calls[0] != "run-runtime-resume/step-1" || runtime.calls[1] != "run-runtime-resume/step-2" {
 		t.Fatalf("runtime calls = %#v, want [run-runtime-resume/step-1 run-runtime-resume/step-2]", runtime.calls)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeRunResolvedDecisionUsesRunScopedTicketRead(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := newCountingDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{
+		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			if !strings.Contains(string(request.StepID), "zz-llm-repair-") {
+				return nil, fmt.Errorf("unexpected step %s", request.StepID)
+			}
+			return map[string]any{
+				"status": "completed",
+				"dodAssessment": map[string]any{
+					"satisfied": true,
+					"summary":   "repair completed after operator guidance",
+					"items": []map[string]any{
+						{
+							"item":         "repair completed",
+							"state":        "satisfied",
+							"evidenceRefs": []string{string(request.StepID)},
+						},
+					},
+				},
+			}, nil
+		},
+	}
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, nil)
+
+	workspaceID := common.WorkspaceID("ws-runtime-ticket-scope")
+	runID := common.RunID("run-runtime-ticket-scope")
+	failedStepID := common.StepID("run-runtime-ticket-scope/block/write_config")
+	ticketID := common.TicketID("ticket-runtime-ticket-scope")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		GoalID:          common.GoalID("goal-runtime-ticket-scope"),
+		DoDID:           common.DoDID("dod-runtime-ticket-scope"),
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		State:           common.RunStateRunning,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    failedStepID,
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{"targetRef": "llm-proxy/config.yaml"},
+		Output: map[string]any{
+			"error": "workspace patch path conflict",
+		},
+	}); err != nil {
+		t.Fatalf("seed failed step: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      failedStepID,
+		Reason:      "operator guidance required",
+		State:       common.DecisionTicketStateResolved,
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          common.TicketID("ticket-other-run"),
+		WorkspaceID: workspaceID,
+		RunID:       common.RunID("run-other"),
+		StepID:      common.StepID("run-other/step-1"),
+		Reason:      "other run ticket",
+		State:       common.DecisionTicketStateResolved,
+	}); err != nil {
+		t.Fatalf("seed unrelated ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       common.ResolutionID("resolution-runtime-ticket-scope"),
+		TicketID: ticketID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:  map[string]any{"operator": "tester"},
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume run: %v", err)
+	}
+	if got := ticketRepo.listCount.Load(); got != 0 {
+		t.Fatalf("ticket List count = %d, want no full ticket scan", got)
+	}
+	if got := ticketRepo.listByRunIDCount.Load(); got != 1 {
+		t.Fatalf("ticket ListByRunID count = %d, want one run scoped ticket read", got)
 	}
 }
 

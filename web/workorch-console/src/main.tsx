@@ -4117,7 +4117,7 @@ function RuntimeControlPage() {
             <Input.TextArea rows={3} placeholder="说明该 Tool / Resource / Prompt 做什么、何时使用" />
           </Form.Item>
           <Form.Item name="category" label="业务分类">
-            <Input placeholder="例如：代码仓库、验收、天气查询" />
+            <Input placeholder="例如：代码仓库、验收、数据查询" />
           </Form.Item>
           <Form.Item name="tags" label="标签">
             <Select mode="tags" placeholder="输入后回车生成标签" options={[]} />

@@ -3,14 +3,54 @@ package decision
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisionModel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
+
+type countingDecisionTicketRepository struct {
+	inner    *memory.DecisionTicketRepository
+	getCount atomic.Int64
+}
+
+func newCountingDecisionTicketRepository() *countingDecisionTicketRepository {
+	return &countingDecisionTicketRepository{inner: memory.NewDecisionTicketRepository()}
+}
+
+func (r *countingDecisionTicketRepository) Create(ctx context.Context, item *decisionModel.Ticket) error {
+	return r.inner.Create(ctx, item)
+}
+
+func (r *countingDecisionTicketRepository) Get(ctx context.Context, id common.TicketID) (*decisionModel.Ticket, error) {
+	r.getCount.Add(1)
+	return r.inner.Get(ctx, id)
+}
+
+func (r *countingDecisionTicketRepository) List(ctx context.Context) ([]*decisionModel.Ticket, error) {
+	return r.inner.List(ctx)
+}
+
+func (r *countingDecisionTicketRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*decisionModel.Ticket, error) {
+	return r.inner.ListByRunID(ctx, runID)
+}
+
+func (r *countingDecisionTicketRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*decisionModel.Ticket, error) {
+	return r.inner.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r *countingDecisionTicketRepository) Update(ctx context.Context, item *decisionModel.Ticket) error {
+	return r.inner.Update(ctx, item)
+}
+
+func (r *countingDecisionTicketRepository) Delete(ctx context.Context, id common.TicketID) error {
+	return r.inner.Delete(ctx, id)
+}
 
 func TestService_CreateTicket_SeedsOpenState(t *testing.T) {
 	ctx := context.Background()
@@ -285,6 +325,36 @@ func TestService_EnsureResolvedTicket_IsIdempotentAndRejectsResolutionMismatch(t
 	}
 	if resolution.ID != cmd.ResolutionID {
 		t.Fatalf("persisted resolution id = %q, want %q", resolution.ID, cmd.ResolutionID)
+	}
+}
+
+func TestService_EnsureResolvedTicketReusesLoadedTicket(t *testing.T) {
+	ctx := context.Background()
+	ticketRepo := newCountingDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	service := NewService(ticketRepo, resolutionRepo, nil)
+
+	createCmd := decisionservice.CreateTicketCommand{
+		TicketID:    common.TicketID("ticket-ensure-loaded"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		RunID:       common.RunID("run-1"),
+		StepID:      common.StepID("run-1/step-1"),
+		Reason:      "need operator decision",
+	}
+	if err := service.CreateTicket(ctx, createCmd); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	if err := service.EnsureResolvedTicket(ctx, decisionservice.ResolveTicketCommand{
+		ResolutionID: common.ResolutionID("resolution-ensure-loaded"),
+		TicketID:     createCmd.TicketID,
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:      map[string]any{"operator": "workorch"},
+	}); err != nil {
+		t.Fatalf("ensure resolved ticket: %v", err)
+	}
+	if got := ticketRepo.getCount.Load(); got != 1 {
+		t.Fatalf("ticket Get count = %d, want one read reused for transition", got)
 	}
 }
 

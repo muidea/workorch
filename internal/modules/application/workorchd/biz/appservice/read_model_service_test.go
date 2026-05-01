@@ -5,9 +5,12 @@ import (
 	"errors"
 	"reflect"
 	"strconv"
+	"sync"
 	"testing"
+	"time"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
@@ -15,7 +18,74 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
+
+type countingStepRepository struct {
+	base           repository.StepRepository
+	listByRunCalls int
+}
+
+func (r *countingStepRepository) Create(ctx context.Context, item *runmodel.Step) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *countingStepRepository) Get(ctx context.Context, id common.StepID) (*runmodel.Step, error) {
+	return r.base.Get(ctx, id)
+}
+
+func (r *countingStepRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.Step, error) {
+	r.listByRunCalls++
+	return r.base.ListByRun(ctx, runID)
+}
+
+func (r *countingStepRepository) Update(ctx context.Context, item *runmodel.Step) error {
+	return r.base.Update(ctx, item)
+}
+
+func (r *countingStepRepository) Delete(ctx context.Context, id common.StepID) error {
+	return r.base.Delete(ctx, id)
+}
+
+var _ repository.StepRepository = (*countingStepRepository)(nil)
+
+type blockingDecisionResolutionRepository struct {
+	base    repository.DecisionResolutionRepository
+	needed  int
+	started chan common.TicketID
+	release chan struct{}
+	mu      sync.Mutex
+	current int
+}
+
+func (r *blockingDecisionResolutionRepository) Create(ctx context.Context, item *decisionmodel.Resolution) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *blockingDecisionResolutionRepository) GetByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
+	r.mu.Lock()
+	r.current++
+	current := r.current
+	r.mu.Unlock()
+	select {
+	case r.started <- ticketID:
+	default:
+	}
+	if current <= r.needed {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-r.release:
+		}
+	}
+	return r.base.GetByTicketID(ctx, ticketID)
+}
+
+func (r *blockingDecisionResolutionRepository) DeleteByTicketID(ctx context.Context, ticketID common.TicketID) error {
+	return r.base.DeleteByTicketID(ctx, ticketID)
+}
+
+var _ repository.DecisionResolutionRepository = (*blockingDecisionResolutionRepository)(nil)
 
 func TestReadRunSnapshotWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing.T) {
 	if _, err := ReadRunSnapshotWithSession(context.Background(), nil, "run-1"); !errors.Is(err, common.ErrInvalidArgument) {
@@ -46,6 +116,93 @@ func TestReadRunSnapshotWithBackendReturnsBlockedDecisionReadModel(t *testing.T)
 	}
 	if len(item.Decisions) != 1 || item.Decisions[0].ID != started.BlockingTicketID {
 		t.Fatalf("decisions = %+v, want decision %s", item.Decisions, started.BlockingTicketID)
+	}
+}
+
+func TestReadRunSnapshotReadsDecisionResolutionsConcurrently(t *testing.T) {
+	session, ctx := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-concurrent-resolution-read")
+	runID := common.RunID("run-concurrent-resolution-read")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:    workspaceID,
+		Title: "concurrent resolution read",
+		State: common.WorkspaceStateWaitingDecision,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateBlockedOnDecision,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for i := 1; i <= 3; i++ {
+		ticketID := common.TicketID("ticket-concurrent-resolution-" + strconv.Itoa(i))
+		if err := exports.Repositories.Tickets.Create(ctx, &decisionmodel.Ticket{
+			ID:          ticketID,
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			Question:    "question " + strconv.Itoa(i),
+			State:       common.DecisionTicketStateResolved,
+		}); err != nil {
+			t.Fatalf("create ticket %d: %v", i, err)
+		}
+		if err := exports.Repositories.Resolutions.Create(ctx, &decisionmodel.Resolution{
+			ID:       common.ResolutionID("resolution-concurrent-" + strconv.Itoa(i)),
+			TicketID: ticketID,
+			Type:     "provide_missing_info",
+			Payload:  map[string]any{"answer": "answer " + strconv.Itoa(i)},
+		}); err != nil {
+			t.Fatalf("create resolution %d: %v", i, err)
+		}
+	}
+
+	release := make(chan struct{})
+	started := make(chan common.TicketID, 3)
+	deps, err := readModelDependenciesFromSession(session.Borrow())
+	if err != nil {
+		t.Fatalf("readModelDependenciesFromSession: %v", err)
+	}
+	deps.resolutions = &blockingDecisionResolutionRepository{
+		base:    deps.resolutions,
+		needed:  3,
+		started: started,
+		release: release,
+	}
+
+	errCh := make(chan error, 1)
+	var snapshot RunSnapshot
+	go func() {
+		var err error
+		snapshot, err = readRunSnapshot(ctx, deps, runID)
+		errCh <- err
+	}()
+
+	seen := map[common.TicketID]struct{}{}
+	for len(seen) < 3 {
+		select {
+		case ticketID := <-started:
+			seen[ticketID] = struct{}{}
+		case err := <-errCh:
+			t.Fatalf("readRunSnapshot returned before all resolution reads started: %v", err)
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for concurrent resolution reads, saw %d", len(seen))
+		}
+	}
+	close(release)
+	if err := <-errCh; err != nil {
+		t.Fatalf("readRunSnapshot: %v", err)
+	}
+	if len(snapshot.Decisions) != 3 {
+		t.Fatalf("decisions = %+v, want 3 resolved decisions", snapshot.Decisions)
+	}
+	for _, item := range snapshot.Decisions {
+		if item.ResolutionID == "" || item.ResolutionType != "provide_missing_info" {
+			t.Fatalf("decision = %+v, want mapped resolution", item)
+		}
 	}
 }
 
@@ -713,6 +870,29 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 	if len(bundle.CompressedContext.RecentEvidence) != 6 {
 		t.Fatalf("compressed recentEvidence = %d, want 6", len(bundle.CompressedContext.RecentEvidence))
 	}
+	snapshot, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
+	}
+	lightweight := compressedContextFromRunSnapshot(snapshot)
+	if !reflect.DeepEqual(lightweight, bundle.CompressedContext) {
+		t.Fatalf("lightweight compressedContext = %+v, want full bundle compressed context %+v", lightweight, bundle.CompressedContext)
+	}
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		t.Fatalf("readModelDependenciesFromSession: %v", err)
+	}
+	recoverySnapshot, err := readRunRecoverySnapshot(context.Background(), deps, runID)
+	if err != nil {
+		t.Fatalf("readRunRecoverySnapshot: %v", err)
+	}
+	recoveryCompressed := compressedContextFromRunSnapshot(recoverySnapshot)
+	if !reflect.DeepEqual(recoveryCompressed, bundle.CompressedContext) {
+		t.Fatalf("recovery compressedContext = %+v, want full bundle compressed context %+v", recoveryCompressed, bundle.CompressedContext)
+	}
+	if len(recoverySnapshot.TaskDecompositions) != 0 || len(recoverySnapshot.ExecutionSections) != 0 || len(recoverySnapshot.SelectedCapabilities) != 0 || len(recoverySnapshot.UsedCapabilities) != 0 {
+		t.Fatalf("recovery snapshot loaded display projections: taskDecompositions=%d executionSections=%d selected=%d used=%d", len(recoverySnapshot.TaskDecompositions), len(recoverySnapshot.ExecutionSections), len(recoverySnapshot.SelectedCapabilities), len(recoverySnapshot.UsedCapabilities))
+	}
 	if !contextBundleContainsCompressionCandidate(bundle, "recent_evidence") || !contextBundleContainsCompressionCandidate(bundle, "task_progress") {
 		t.Fatalf("compressionCandidates = %+v, want recent evidence and task progress candidates", bundle.CompressionCandidates)
 	}
@@ -1190,6 +1370,65 @@ func TestReadWorkspaceSnapshotWithRunSnapshotReusesProjectionSections(t *testing
 	}
 	if len(snapshot.ExecutionSections) != 1 || snapshot.ExecutionSections[0].ID != "cached-section" {
 		t.Fatalf("execution sections = %+v, want cached section", snapshot.ExecutionSections)
+	}
+}
+
+func TestReadWorkspaceSnapshotWithRunSnapshotAvoidsProjectionRunStepRead(t *testing.T) {
+	session, ctx := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-cached-run-no-step-read")
+	runID := common.RunID("run-cached-run-no-step-read")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "cached run no step read",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: runID,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateBlockedOnDecision,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/step-1"),
+		RunID: runID,
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateFailed,
+	}); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+
+	deps, err := readModelDependenciesFromSession(session.Borrow())
+	if err != nil {
+		t.Fatalf("readModelDependenciesFromSession: %v", err)
+	}
+	countingSteps := &countingStepRepository{base: deps.steps}
+	deps.steps = countingSteps
+	cached := RunSnapshot{
+		Workspace: Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateRunning), ActiveRunID: string(runID)},
+		Run:       Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateBlockedOnDecision)},
+		TaskProgress: TaskProgress{
+			WorkspaceID: string(workspaceID),
+			RunID:       string(runID),
+			State:       string(common.RunStateBlockedOnDecision),
+			Summary:     "cached activation progress",
+		},
+	}
+
+	snapshot, err := readWorkspaceSnapshot(ctx, deps, workspaceID, &cached)
+	if err != nil {
+		t.Fatalf("readWorkspaceSnapshot: %v", err)
+	}
+	if countingSteps.listByRunCalls != 0 {
+		t.Fatalf("ListByRun calls = %d, want 0 with cached projection RunSnapshot", countingSteps.listByRunCalls)
+	}
+	if snapshot.TaskProgress.Summary != "cached activation progress" {
+		t.Fatalf("task progress summary = %q, want cached progress", snapshot.TaskProgress.Summary)
 	}
 }
 

@@ -3,13 +3,53 @@ package approval
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
+	approvalModel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
+
+type countingApprovalRepository struct {
+	inner    *memory.ApprovalRepository
+	getCount atomic.Int64
+}
+
+func newCountingApprovalRepository() *countingApprovalRepository {
+	return &countingApprovalRepository{inner: memory.NewApprovalRepository()}
+}
+
+func (r *countingApprovalRepository) Create(ctx context.Context, item *approvalModel.Approval) error {
+	return r.inner.Create(ctx, item)
+}
+
+func (r *countingApprovalRepository) Get(ctx context.Context, id common.ApprovalID) (*approvalModel.Approval, error) {
+	r.getCount.Add(1)
+	return r.inner.Get(ctx, id)
+}
+
+func (r *countingApprovalRepository) List(ctx context.Context) ([]*approvalModel.Approval, error) {
+	return r.inner.List(ctx)
+}
+
+func (r *countingApprovalRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*approvalModel.Approval, error) {
+	return r.inner.ListByRunID(ctx, runID)
+}
+
+func (r *countingApprovalRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*approvalModel.Approval, error) {
+	return r.inner.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r *countingApprovalRepository) Update(ctx context.Context, item *approvalModel.Approval) error {
+	return r.inner.Update(ctx, item)
+}
+
+func (r *countingApprovalRepository) Delete(ctx context.Context, id common.ApprovalID) error {
+	return r.inner.Delete(ctx, id)
+}
 
 func TestService_CreateApproval_SeedsPendingState(t *testing.T) {
 	ctx := context.Background()
@@ -304,6 +344,29 @@ func TestService_EnsureApprovalResolution_IsIdempotentAndRejectsOppositeTerminal
 				t.Fatalf("approval state = %q, want %q", approval.State, tc.wantState)
 			}
 		})
+	}
+}
+
+func TestService_EnsureApprovalResolutionReusesLoadedApproval(t *testing.T) {
+	ctx := context.Background()
+	repo := newCountingApprovalRepository()
+	service := NewService(repo, nil)
+	approvalID := common.ApprovalID("approval-ensure-loaded")
+	if err := service.CreateApproval(ctx, approvalservice.CreateApprovalCommand{
+		ApprovalID:  approvalID,
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		RunID:       common.RunID("run-1"),
+		StepID:      common.StepID("run-1/step-1"),
+		Reason:      "need human approval",
+	}); err != nil {
+		t.Fatalf("create approval: %v", err)
+	}
+
+	if err := service.EnsureApproved(ctx, approvalservice.ResolveApprovalCommand{ApprovalID: approvalID}); err != nil {
+		t.Fatalf("ensure approved: %v", err)
+	}
+	if got := repo.getCount.Load(); got != 1 {
+		t.Fatalf("approval Get count = %d, want one read reused for transition", got)
 	}
 }
 

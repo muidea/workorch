@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	approvalModel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -16,6 +17,40 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
+
+type countingRunRepository struct {
+	base     *memory.RunRepository
+	getCalls atomic.Int32
+}
+
+func newCountingRunRepository() *countingRunRepository {
+	return &countingRunRepository{base: memory.NewRunRepository()}
+}
+
+func (r *countingRunRepository) Create(ctx context.Context, item *runmodel.Run) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *countingRunRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
+	r.getCalls.Add(1)
+	return r.base.Get(ctx, id)
+}
+
+func (r *countingRunRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
+	return r.base.List(ctx)
+}
+
+func (r *countingRunRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
+	return r.base.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r *countingRunRepository) Update(ctx context.Context, item *runmodel.Run) error {
+	return r.base.Update(ctx, item)
+}
+
+func (r *countingRunRepository) Delete(ctx context.Context, id common.RunID) error {
+	return r.base.Delete(ctx, id)
+}
 
 func TestService_CreateRunStartRunCompleteRun_Mainline(t *testing.T) {
 	ctx := context.Background()
@@ -657,6 +692,41 @@ func TestService_ResumeRun_RejectsNonBlockedStates(t *testing.T) {
 				t.Fatalf("resume err = %v, want conflict", err)
 			}
 		})
+	}
+}
+
+func TestService_ResumeRunDelegatesStateReadToOrchestrator(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := newCountingRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	orch := orchestratorbiz.NewRuntimeOrchestrator(
+		&serviceRuntimeAdapter{output: map[string]any{"status": "ok"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		approvalRepo,
+		nil,
+	)
+	service := NewService(runRepo, workspaceRepo, orch, nil)
+
+	workspaceID := common.WorkspaceID("ws-resume-delegates-read")
+	runID := common.RunID("run-resume-delegates-read")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := service.ResumeRun(ctx, runservice.ResumeRunCommand{RunID: runID}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("resume err = %v, want conflict from orchestrator", err)
+	}
+	if runRepo.getCalls.Load() != 1 {
+		t.Fatalf("run Get calls = %d, want one orchestrator read without service pre-read", runRepo.getCalls.Load())
 	}
 }
 

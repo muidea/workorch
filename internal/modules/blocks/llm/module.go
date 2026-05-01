@@ -21,7 +21,7 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 func (m *Module) Setup() error {
-	m.runtimeAdapter = llmbiz.NewRuntimeAdapterFromConfigLoader(loadProviderConfigsFromWorkorchConfig)
+	m.runtimeAdapter = llmbiz.NewRuntimeAdapterFromConfigLoaderWithRevision(loadProviderConfigsFromWorkorchConfig, workorchconfig.Revision)
 	return nil
 }
 

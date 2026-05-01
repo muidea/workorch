@@ -17,7 +17,10 @@ type CreateRunCommand struct {
 }
 
 type StartRunCommand struct{ RunID common.RunID }
-type ResumeRunCommand struct{ RunID common.RunID }
+type ResumeRunCommand struct {
+	RunID                 common.RunID
+	ExecutionContextPatch map[string]any
+}
 
 type BlockOnDecisionCommand struct {
 	RunID    common.RunID
