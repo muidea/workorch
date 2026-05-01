@@ -1302,6 +1302,20 @@ func testRunRepositoryContract(t *testing.T, factory func() repository.RunReposi
 	if listed[0].ID != item.ID || listed[1].ID != second.ID {
 		t.Fatalf("listed ids = %q/%q, want %q/%q", listed[0].ID, listed[1].ID, item.ID, second.ID)
 	}
+	byWorkspace, err := repo.ListByWorkspaceID(ctx, item.WorkspaceID)
+	if err != nil {
+		t.Fatalf("list runs by workspace: %v", err)
+	}
+	if len(byWorkspace) != 2 || byWorkspace[0].ID != item.ID || byWorkspace[1].ID != second.ID {
+		t.Fatalf("runs by workspace = %+v, want %q/%q", byWorkspace, item.ID, second.ID)
+	}
+	missingWorkspace, err := repo.ListByWorkspaceID(ctx, common.WorkspaceID("ws-missing"))
+	if err != nil {
+		t.Fatalf("list runs by missing workspace: %v", err)
+	}
+	if len(missingWorkspace) != 0 {
+		t.Fatalf("runs by missing workspace = %+v, want empty", missingWorkspace)
+	}
 
 	if _, err := repo.Get(ctx, common.RunID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing get err = %v, want not found", err)
@@ -1821,6 +1835,20 @@ func testDecisionTicketRepositoryContract(t *testing.T, factory func() repositor
 	if listed[0].ID != item.ID || listed[1].ID != second.ID {
 		t.Fatalf("listed ids = %q/%q, want %q/%q", listed[0].ID, listed[1].ID, item.ID, second.ID)
 	}
+	byRun, err := repo.ListByRunID(ctx, item.RunID)
+	if err != nil {
+		t.Fatalf("list tickets by run: %v", err)
+	}
+	if len(byRun) != 1 || byRun[0].ID != item.ID {
+		t.Fatalf("tickets by run = %+v, want %q", byRun, item.ID)
+	}
+	byWorkspace, err := repo.ListByWorkspaceID(ctx, item.WorkspaceID)
+	if err != nil {
+		t.Fatalf("list tickets by workspace: %v", err)
+	}
+	if len(byWorkspace) != 2 || byWorkspace[0].ID != item.ID || byWorkspace[1].ID != second.ID {
+		t.Fatalf("tickets by workspace = %+v, want %q/%q", byWorkspace, item.ID, second.ID)
+	}
 
 	if _, err := repo.Get(ctx, common.TicketID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing get err = %v, want not found", err)
@@ -1928,6 +1956,20 @@ func testApprovalRepositoryContract(t *testing.T, factory func() repository.Appr
 	}
 	if listed[0].ID != item.ID || listed[1].ID != second.ID {
 		t.Fatalf("listed ids = %q/%q, want %q/%q", listed[0].ID, listed[1].ID, item.ID, second.ID)
+	}
+	byRun, err := repo.ListByRunID(ctx, item.RunID)
+	if err != nil {
+		t.Fatalf("list approvals by run: %v", err)
+	}
+	if len(byRun) != 1 || byRun[0].ID != item.ID {
+		t.Fatalf("approvals by run = %+v, want %q", byRun, item.ID)
+	}
+	byWorkspace, err := repo.ListByWorkspaceID(ctx, item.WorkspaceID)
+	if err != nil {
+		t.Fatalf("list approvals by workspace: %v", err)
+	}
+	if len(byWorkspace) != 2 || byWorkspace[0].ID != item.ID || byWorkspace[1].ID != second.ID {
+		t.Fatalf("approvals by workspace = %+v, want %q/%q", byWorkspace, item.ID, second.ID)
 	}
 
 	if _, err := repo.Get(ctx, common.ApprovalID("missing")); !errors.Is(err, common.ErrNotFound) {

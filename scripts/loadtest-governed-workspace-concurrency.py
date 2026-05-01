@@ -41,6 +41,7 @@ CITY = os.environ.get("WORKORCH_LOAD_CITY", "杭州")
 LOOKUP_NAME = os.environ.get("WORKORCH_LOAD_LOOKUP_NAME", "Hangzhou")
 EXPECTED_MAX_CONCURRENT_RUNS = int(os.environ.get("WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS", "0"))
 MCP_SESSION_POLICY = os.environ.get("WORKORCH_LOAD_MCP_SESSION_POLICY", "transient").strip().lower()
+MIN_SUCCESS_RATE = float(os.environ.get("WORKORCH_LOAD_MIN_SUCCESS_RATE", "1.0"))
 
 if LLM_MODE not in {"mock", "real"}:
     raise SystemExit(f"WORKORCH_LOAD_LLM_MODE must be mock or real, got {LLM_MODE!r}")
@@ -48,6 +49,8 @@ if CONCURRENCY <= 0 or TOTAL <= 0:
     raise SystemExit("WORKORCH_LOAD_CONCURRENCY and WORKORCH_LOAD_TOTAL must be positive")
 if MCP_SESSION_POLICY not in {"transient", "long_lived"}:
     raise SystemExit(f"WORKORCH_LOAD_MCP_SESSION_POLICY must be transient or long_lived, got {MCP_SESSION_POLICY!r}")
+if MIN_SUCCESS_RATE < 0 or MIN_SUCCESS_RATE > 1:
+    raise SystemExit(f"WORKORCH_LOAD_MIN_SUCCESS_RATE must be between 0 and 1, got {MIN_SUCCESS_RATE!r}")
 
 
 class HTTPError(RuntimeError):
@@ -109,6 +112,9 @@ class WorkspaceResult:
     timeline_missing_run_state: int = 0
     llm_step_count: int = 0
     llm_protocol_errors: list[str] = field(default_factory=list)
+    http_status: int = 0
+    curl_code: int = 0
+    failure_class: str = ""
 
     @property
     def e2e_ms(self) -> float:
@@ -220,11 +226,17 @@ class MockLLMServer:
                 "dodAssessment": {
                     "satisfied": True,
                     "summary": f"{PROVINCE}{CITY} governed load test completed with two Decision Tickets, one Approval, and MCP tool evidence.",
+                    "goalOutcome": f"{PROVINCE}{CITY} governed load test produced accepted MCP evidence.",
+                    "implementationSummary": "The run completed the required governance sequence and executed the configured MCP tool.",
+                    "verificationSummary": "The final DoD assessment references the MCP evidence step after two Decision Tickets and one Approval.",
                     "items": [
                         {"item": "两轮 Decision Ticket 已处理", "state": "satisfied", "evidenceRefs": [previous_step_id]},
                         {"item": "Approval 已审批", "state": "satisfied", "evidenceRefs": [previous_step_id]},
                         {"item": "MCP ToolCall 已完成", "state": "satisfied", "evidenceRefs": [previous_step_id]},
                     ],
+                    "knownLimitations": [],
+                    "residualRisks": [],
+                    "nextActions": ["Review the load test report and retained workspace artifacts."],
                 },
             }
 
@@ -376,6 +388,39 @@ def timed(result: WorkspaceResult, name: str):
         yield
     finally:
         result.timings.append(StageTiming(name=name, started_at=started, ended_at=time.monotonic()))
+
+
+def extract_run_status(response: dict[str, Any]) -> dict[str, Any]:
+    return response.get("status") or response.get("run") or nested(response, "activation.run", {}) or {}
+
+
+def wait_run_state(run_id: str, expected_state: str, *, timeout_seconds: float = 180, interval_seconds: float = 1) -> dict[str, Any]:
+    return wait_run_status(
+        run_id,
+        lambda status: status.get("state") == expected_state,
+        f"state {expected_state}",
+        timeout_seconds=timeout_seconds,
+        interval_seconds=interval_seconds,
+    )
+
+
+def wait_run_status(
+    run_id: str,
+    predicate,
+    description: str,
+    *,
+    timeout_seconds: float = 180,
+    interval_seconds: float = 1,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    last_status: dict[str, Any] = {}
+    while time.monotonic() <= deadline:
+        response = run_curl("GET", f"/api/v1/workorch/runs/{url_quote(run_id)}/status")
+        last_status = extract_run_status(response)
+        if predicate(last_status):
+            return response
+        time.sleep(interval_seconds)
+    raise RuntimeError(f"run {run_id} status={last_status}, want {description}")
 
 
 def clean_provider(item: dict[str, Any]) -> dict[str, Any]:
@@ -553,7 +598,7 @@ def create_payloads(seq: int) -> tuple[dict[str, Any], dict[str, Any], dict[str,
             "requiredDecision 只允许 reason, decisionKind, question, context 字段，其中 decisionKind 必须是 provide_missing_info。"
             "requiredApproval 只允许 reason, action, context 字段，禁止输出 question, details, title, approvalQuestion 等额外字段。"
             "executionGraph.nodes[].kind 必须是 mcp/tool_call，禁止 shell/command。"
-            "dodAssessment 只允许 satisfied, summary, items 字段，items[].evidenceRefs 必须使用 previousStepId。"
+            "dodAssessment 允许 satisfied, summary, items, goalOutcome, implementationSummary, verificationSummary, knownLimitations, residualRisks, nextActions 字段，items[].evidenceRefs 必须使用 previousStepId。"
             "第一轮不要调用工具，必须返回 completionState=blocked_on_decision 和 requiredDecision，询问目标城市；"
             "收到第一轮 Decision resolution 后，第二轮仍不要调用工具，必须再次返回 completionState=blocked_on_decision 和 requiredDecision，询问输出格式和风险确认；"
             "收到第二轮 Decision resolution 后，第三轮不要调用工具，必须返回 completionState=blocked_on_approval 和 requiredApproval，"
@@ -589,6 +634,7 @@ def validate_final_state(result: WorkspaceResult, snapshot: dict[str, Any], work
     ws_snap = workspace_snapshot.get("snapshot") or {}
     run = snap.get("run") or {}
     workspace = ws_snap.get("workspace") or {}
+    outcome = ws_snap.get("outcome") or {}
     steps = snap.get("steps") or ([] if not snap.get("step") else [snap["step"]])
     decisions = snap.get("decisions") or []
     approvals = snap.get("approvals") or []
@@ -604,8 +650,11 @@ def validate_final_state(result: WorkspaceResult, snapshot: dict[str, Any], work
     errors: list[str] = []
     if workspace.get("state") != "completed":
         errors.append(f"workspace state={workspace.get('state')!r}, want completed")
-    if workspace.get("activeRunId") != result.run_id:
+    active_run_id = workspace.get("activeRunId")
+    if active_run_id and active_run_id != result.run_id:
         errors.append(f"workspace activeRunId={workspace.get('activeRunId')!r}, want {result.run_id}")
+    if outcome.get("runId") != result.run_id or outcome.get("accepted") is not True:
+        errors.append(f"workspace outcome invalid: {outcome}, want accepted runId={result.run_id}")
     if run.get("state") != "completed":
         errors.append(f"run state={run.get('state')!r}, want completed: {run.get('failureReason', '')}")
     if run_status.get("state") != "completed":
@@ -634,12 +683,41 @@ def validate_final_state(result: WorkspaceResult, snapshot: dict[str, Any], work
         accepted = accepted_results[-1]
         if not str(accepted.get("summary") or "").strip():
             errors.append(f"accepted Result summary empty: {accepted}")
+        summary_detail = accepted.get("summaryDetail") or {}
+        if not summary_detail:
+            errors.append(f"accepted Result summaryDetail missing: {accepted}")
+        else:
+            for key in ("goalOutcome", "implementationSummary", "verificationSummary"):
+                if not str(summary_detail.get(key) or "").strip():
+                    errors.append(f"accepted Result summaryDetail.{key} empty: {summary_detail}")
+            if not summary_detail.get("doDItems"):
+                errors.append(f"accepted Result summaryDetail.doDItems missing: {summary_detail}")
+            if not summary_detail.get("evidenceRefs"):
+                errors.append(f"accepted Result summaryDetail.evidenceRefs missing: {summary_detail}")
         artifact_refs = set(accepted.get("artifactRefs") or [])
         linked = [item for item in artifacts if item.get("resultId") == accepted.get("id")]
         if not linked:
             errors.append(f"Artifact linked to Result {accepted.get('id')} missing")
         elif not artifact_refs.intersection({item.get("id") for item in linked}):
             errors.append(f"Result artifactRefs do not reference linked Artifact: result={accepted} artifacts={linked}")
+        linked_categories = {item.get("category") for item in linked if item.get("category")}
+        required_categories = {"final_summary", "runtime_evidence"}
+        if not required_categories.issubset(linked_categories):
+            errors.append(f"linked Artifact categories={sorted(linked_categories)}, want {sorted(required_categories)}")
+        for artifact in linked:
+            uri = str(artifact.get("uri") or "")
+            if not uri.startswith("workorch://"):
+                errors.append(f"artifact uri must use workorch:// only: {artifact}")
+            if re.search(r"(^|\s)/(home|tmp|var|opt|usr)/", uri):
+                errors.append(f"artifact uri leaks local absolute path: {uri}")
+            if artifact.get("category") == "final_summary" and uri:
+                try:
+                    with timed(result, "artifact_content_read"):
+                        content = run_curl_text(f"/api/v1/workorch/artifacts/content?uri={url_quote(uri)}")
+                    if "Result Summary" not in content and "目标成果" not in content:
+                        errors.append(f"final summary artifact content missing expected heading: {uri}")
+                except Exception as exc:
+                    errors.append(f"final summary artifact content read failed: {exc}")
 
     missing_run_state = [item for item in timeline if item.get("source") in ("step", "step_stream") and not item.get("runState")]
     if missing_run_state:
@@ -746,10 +824,16 @@ def execute_workspace(seq: int, provider_id: str, mcp_server_id: str) -> Workspa
             )
         write_json(case_dir / "decision1-resolved.json", decision1)
 
-        with timed(result, "resume_to_decision2"):
-            decision2_activation = run_curl("POST", f"/api/v1/workorch/runs/{url_quote(result.run_id)}/resume")
-        write_json(case_dir / "decision2-activation.json", decision2_activation)
-        run2 = decision2_activation.get("run") or nested(decision2_activation, "activation.run", {})
+        with timed(result, "decision1_to_decision2"):
+            decision2_status = wait_run_status(
+                result.run_id,
+                lambda status: status.get("state") == "blocked_on_decision"
+                and bool(status.get("blockingTicketId"))
+                and status.get("blockingTicketId") != ticket1,
+                f"state blocked_on_decision with a new blockingTicketId after {ticket1}",
+            )
+        write_json(case_dir / "decision2-status.json", decision2_status)
+        run2 = extract_run_status(decision2_status)
         if run2.get("state") != "blocked_on_decision":
             raise RuntimeError(f"second run state={run2.get('state')!r}, want blocked_on_decision")
         ticket2 = run2.get("blockingTicketId", "")
@@ -772,10 +856,14 @@ def execute_workspace(seq: int, provider_id: str, mcp_server_id: str) -> Workspa
             )
         write_json(case_dir / "decision2-resolved.json", decision2)
 
-        with timed(result, "resume_to_approval"):
-            approval_activation = run_curl("POST", f"/api/v1/workorch/runs/{url_quote(result.run_id)}/resume")
-        write_json(case_dir / "approval-activation.json", approval_activation)
-        run3 = approval_activation.get("run") or nested(approval_activation, "activation.run", {})
+        with timed(result, "decision2_to_approval"):
+            approval_status = wait_run_status(
+                result.run_id,
+                lambda status: status.get("state") == "blocked_on_approval" and bool(status.get("blockingApprovalId")),
+                "state blocked_on_approval with blockingApprovalId",
+            )
+        write_json(case_dir / "approval-status.json", approval_status)
+        run3 = extract_run_status(approval_status)
         if run3.get("state") != "blocked_on_approval":
             raise RuntimeError(f"third run state={run3.get('state')!r}, want blocked_on_approval")
         result.approval_id = run3.get("blockingApprovalId", "")
@@ -788,10 +876,10 @@ def execute_workspace(seq: int, provider_id: str, mcp_server_id: str) -> Workspa
         if nested(approval, "approval.state", "") != "approved":
             raise RuntimeError(f"approval state={nested(approval, 'approval.state', None)!r}, want approved")
 
-        with timed(result, "resume_to_completed"):
-            completed = run_curl("POST", f"/api/v1/workorch/runs/{url_quote(result.run_id)}/resume")
-        write_json(case_dir / "run-completed.json", completed)
-        run4 = completed.get("run") or nested(completed, "activation.run", {})
+        with timed(result, "approval_to_completed"):
+            completed = wait_run_state(result.run_id, "completed")
+        write_json(case_dir / "run-completed-status.json", completed)
+        run4 = extract_run_status(completed)
         if run4.get("state") != "completed":
             raise RuntimeError(f"final run state={run4.get('state')!r}, want completed")
 
@@ -813,8 +901,11 @@ def execute_workspace(seq: int, provider_id: str, mcp_server_id: str) -> Workspa
     except Exception as exc:
         result.error = str(exc)
         if isinstance(exc, HTTPError):
+            result.http_status = exc.http_status
+            result.curl_code = exc.curl_code
             write_json(case_dir / "http-error.json", exc.to_dict())
         collect_failure_evidence(result, case_dir)
+        result.failure_class = classify_failure(result)
         write_text(case_dir / "error.txt", result.error + "\n")
     finally:
         result.ended_at = time.monotonic()
@@ -865,8 +956,35 @@ def result_to_dict(result: WorkspaceResult) -> dict[str, Any]:
         "timelineMissingRunState": result.timeline_missing_run_state,
         "llmStepCount": result.llm_step_count,
         "llmProtocolErrors": result.llm_protocol_errors,
+        "httpStatus": result.http_status,
+        "curlCode": result.curl_code,
+        "failureClass": result.failure_class,
         "timings": [{"name": item.name, "durationMs": item.duration_ms} for item in result.timings],
     }
+
+
+def classify_failure(result: WorkspaceResult) -> str:
+    if result.success:
+        return ""
+    if result.http_status:
+        if 400 <= result.http_status < 500:
+            return "http_4xx"
+        if result.http_status >= 500:
+            return "http_5xx"
+    if result.curl_code:
+        if result.curl_code == 28:
+            return "http_timeout"
+        if result.curl_code == 52:
+            return "http_empty_reply"
+        return "curl_error"
+    if result.llm_protocol_errors:
+        return "llm_protocol_error"
+    error_text = result.error.lower()
+    if "provider" in error_text or "eof" in error_text or "429" in error_text:
+        return "provider_error"
+    if "accepted result" in error_text or "artifact" in error_text or "summarydetail" in error_text:
+        return "evidence_integrity_error"
+    return "business_state_error"
 
 
 def collect_metrics() -> dict[str, float]:
@@ -899,15 +1017,16 @@ def build_summary(
 ) -> dict[str, Any]:
     success = [item for item in results if item.success]
     failed = [item for item in results if not item.success]
+    success_rate = len(success) / TOTAL if TOTAL else 0
     duration_s = max(ended_at - started_at, 0.001)
     stage_names = sorted({timing.name for item in results for timing in item.timings})
     stage_stats = {name: latency_stats([item.timing_ms(name) for item in results if item.timing_ms(name) > 0]) for name in stage_names}
     business_latency = {
         "queueWaitProxy": stage_stats.get("activation_to_decision1", latency_stats([])),
-        "decisionRound1": stage_stats.get("resume_to_decision2", latency_stats([])),
-        "decisionRound2": stage_stats.get("resume_to_approval", latency_stats([])),
+        "decisionRound1": stage_stats.get("decision1_to_decision2", stage_stats.get("resume_to_decision2", latency_stats([]))),
+        "decisionRound2": stage_stats.get("decision2_to_approval", stage_stats.get("resume_to_approval", latency_stats([]))),
         "approval": stage_stats.get("approval_approve", latency_stats([])),
-        "toolExecutionAndResultMaterialization": stage_stats.get("resume_to_completed", latency_stats([])),
+        "toolExecutionAndResultMaterialization": stage_stats.get("approval_to_completed", stage_stats.get("resume_to_completed", latency_stats([]))),
         "snapshotRead": stage_stats.get("snapshot_read", latency_stats([])),
         "observabilityRead": stage_stats.get("observability_read", latency_stats([])),
     }
@@ -921,7 +1040,9 @@ def build_summary(
         "serverMaxConcurrentRuns": server_max_concurrent_runs,
         "workspaceSuccessTotal": len(success),
         "workspaceFailedTotal": len(failed),
-        "successRate": len(success) / TOTAL if TOTAL else 0,
+        "successRate": success_rate,
+        "minSuccessRate": MIN_SUCCESS_RATE,
+        "pass": success_rate >= MIN_SUCCESS_RATE,
         "durationSeconds": duration_s,
         "throughputWorkspacesPerMin": len(success) / duration_s * 60,
         "e2eLatency": latency_stats([item.e2e_ms for item in results]),
@@ -929,11 +1050,22 @@ def build_summary(
         "businessLatency": business_latency,
         "llmCallCountPerWorkspace": latency_stats([float(item.llm_step_count) for item in results]),
         "llmProtocolErrorTotal": sum(len(item.llm_protocol_errors) for item in results),
+        "http4xxTotal": len([item for item in failed if 400 <= item.http_status < 500]),
+        "http5xxTotal": len([item for item in failed if item.http_status >= 500]),
+        "curlErrorTotal": len([item for item in failed if item.curl_code and not item.http_status]),
+        "failureClassTotal": count_by_key([item.failure_class or "unknown" for item in failed]),
         "timelineMissingRunStateTotal": sum(item.timeline_missing_run_state for item in results),
         "metricsBefore": metrics_before,
         "metricsAfter": collect_metrics(),
         "results": [result_to_dict(item) for item in results],
     }
+
+
+def count_by_key(values: list[str]) -> dict[str, int]:
+    ret: dict[str, int] = {}
+    for value in values:
+        ret[value] = ret.get(value, 0) + 1
+    return ret
 
 
 def write_markdown_report(summary: dict[str, Any]) -> None:
@@ -950,9 +1082,20 @@ def write_markdown_report(summary: dict[str, Any]) -> None:
         f"- success: `{summary['workspaceSuccessTotal']}`",
         f"- failed: `{summary['workspaceFailedTotal']}`",
         f"- successRate: `{summary['successRate']:.4f}`",
+        f"- minSuccessRate: `{summary['minSuccessRate']:.4f}`",
+        f"- pass: `{summary['pass']}`",
         f"- throughputWorkspacesPerMin: `{summary['throughputWorkspacesPerMin']:.2f}`",
+        f"- http4xxTotal: `{summary['http4xxTotal']}`",
+        f"- http5xxTotal: `{summary['http5xxTotal']}`",
+        f"- curlErrorTotal: `{summary['curlErrorTotal']}`",
         f"- llmProtocolErrorTotal: `{summary['llmProtocolErrorTotal']}`",
         f"- timelineMissingRunStateTotal: `{summary['timelineMissingRunStateTotal']}`",
+        "",
+        "## Failure Classes",
+        "",
+        "```json",
+        json.dumps(summary["failureClassTotal"], ensure_ascii=False, indent=2),
+        "```",
         "",
         "## E2E Latency",
         "",
@@ -1061,9 +1204,9 @@ def main() -> int:
         summary = build_summary(results, started_at, ended_at, metrics_before, server_max_concurrent_runs)
         write_json(ARTIFACT_DIR / "summary.json", summary)
         write_markdown_report(summary)
-        print(json.dumps({k: summary[k] for k in ["batchId", "llmMode", "mcpSessionPolicy", "total", "concurrency", "serverMaxConcurrentRuns", "workspaceSuccessTotal", "workspaceFailedTotal", "successRate", "throughputWorkspacesPerMin", "llmProtocolErrorTotal", "timelineMissingRunStateTotal"]}, ensure_ascii=False, indent=2))
+        print(json.dumps({k: summary[k] for k in ["batchId", "llmMode", "mcpSessionPolicy", "total", "concurrency", "serverMaxConcurrentRuns", "workspaceSuccessTotal", "workspaceFailedTotal", "successRate", "minSuccessRate", "pass", "throughputWorkspacesPerMin", "http4xxTotal", "http5xxTotal", "curlErrorTotal", "llmProtocolErrorTotal", "timelineMissingRunStateTotal"]}, ensure_ascii=False, indent=2))
         print(f"artifacts={ARTIFACT_DIR}")
-        return 0 if summary["workspaceFailedTotal"] == 0 else 1
+        return 0 if summary["pass"] else 1
     except KeyboardInterrupt:
         print("load test interrupted", file=sys.stderr)
         return 130 if interrupted else 1

@@ -238,7 +238,10 @@ func (o *RuntimeOrchestrator) BlockOnDecision(ctx context.Context, runID common.
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
-	return o.publishRunStateChanged(ctx, r)
+	if err := o.publishRunStateChanged(ctx, r); err != nil {
+		return err
+	}
+	return o.syncWorkspaceForActiveRun(ctx, r, common.WorkspaceStateWaitingDecision)
 }
 
 func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.RunID, approvalID common.ApprovalID) error {
@@ -259,7 +262,10 @@ func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
-	return o.publishRunStateChanged(ctx, r)
+	if err := o.publishRunStateChanged(ctx, r); err != nil {
+		return err
+	}
+	return o.syncWorkspaceForActiveRun(ctx, r, common.WorkspaceStateBlocked)
 }
 
 func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID) error {
@@ -343,6 +349,9 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 		return err
 	}
 	if err := o.publishRunStateChanged(ctx, r); err != nil {
+		return err
+	}
+	if err := o.syncWorkspaceForActiveRun(ctx, r, common.WorkspaceStateRunning); err != nil {
 		return err
 	}
 	specs, err := o.nextDispatchSpecsAfterStep(ctx, r, resumeAfterStepID)
@@ -472,7 +481,10 @@ func (o *RuntimeOrchestrator) ValidateRun(ctx context.Context, runID common.RunI
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
-	return o.publishRunStateChanged(ctx, r)
+	if err := o.publishRunStateChanged(ctx, r); err != nil {
+		return err
+	}
+	return o.syncWorkspaceForActiveRun(ctx, r, common.WorkspaceStateValidating)
 }
 
 func (o *RuntimeOrchestrator) CancelRun(ctx context.Context, runID common.RunID) error {
@@ -534,6 +546,31 @@ func (o *RuntimeOrchestrator) releaseWorkspaceForTerminalRun(ctx context.Context
 		return nil
 	}
 	ws.ActiveRunID = ""
+	ws.State = state
+	if err := o.workspaces.Update(ctx, ws); err != nil {
+		return err
+	}
+	return o.publishWorkspaceStateChanged(ctx, ws, run.ID)
+}
+
+func (o *RuntimeOrchestrator) syncWorkspaceForActiveRun(ctx context.Context, run *runModel.Run, state common.WorkspaceState) error {
+	if run == nil {
+		return common.ErrInvalidArgument
+	}
+	ws, err := o.workspaces.Get(ctx, run.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	if ws.ActiveRunID != "" && ws.ActiveRunID != run.ID {
+		activeRun, err := o.runs.Get(ctx, ws.ActiveRunID)
+		if err != nil && !errors.Is(err, common.ErrNotFound) {
+			return err
+		}
+		if activeRun != nil && activeRun.WorkspaceID == ws.ID && !isTerminalRunState(activeRun.State) {
+			return common.ErrConflict
+		}
+	}
+	ws.ActiveRunID = run.ID
 	ws.State = state
 	if err := o.workspaces.Update(ctx, ws); err != nil {
 		return err

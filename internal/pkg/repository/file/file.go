@@ -3,6 +3,7 @@ package file
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -78,6 +79,14 @@ type EventRecordRepository struct {
 	mu   sync.RWMutex
 	path string
 }
+
+type mapFileCacheEntry struct {
+	mu     sync.RWMutex
+	loaded bool
+	items  any
+}
+
+var mapFileCache sync.Map
 
 func NewSoulRepository(path string) *SoulRepository {
 	return &SoulRepository{path: path}
@@ -1187,6 +1196,31 @@ func (r *RunRepository) List(_ context.Context) ([]*run.Run, error) {
 	return ret, nil
 }
 
+func (r *RunRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*run.Run, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.RunID, run.Run](r.path)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]string, 0, len(items))
+	for id, item := range items {
+		if item.WorkspaceID == workspaceID {
+			ids = append(ids, string(id))
+		}
+	}
+	sort.Strings(ids)
+
+	ret := make([]*run.Run, 0, len(ids))
+	for _, id := range ids {
+		item := items[common.RunID(id)]
+		ret = append(ret, cloneRun(&item))
+	}
+	return ret, nil
+}
+
 func (r *RunRepository) Update(_ context.Context, item *run.Run) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1762,6 +1796,56 @@ func (r *DecisionTicketRepository) List(_ context.Context) ([]*decision.Ticket, 
 	return ret, nil
 }
 
+func (r *DecisionTicketRepository) ListByRunID(_ context.Context, runID common.RunID) ([]*decision.Ticket, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.TicketID, decision.Ticket](r.path)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]string, 0, len(items))
+	for id, item := range items {
+		if item.RunID == runID {
+			ids = append(ids, string(id))
+		}
+	}
+	sort.Strings(ids)
+
+	ret := make([]*decision.Ticket, 0, len(ids))
+	for _, id := range ids {
+		item := items[common.TicketID(id)]
+		ret = append(ret, cloneDecisionTicket(&item))
+	}
+	return ret, nil
+}
+
+func (r *DecisionTicketRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*decision.Ticket, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.TicketID, decision.Ticket](r.path)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]string, 0, len(items))
+	for id, item := range items {
+		if item.WorkspaceID == workspaceID {
+			ids = append(ids, string(id))
+		}
+	}
+	sort.Strings(ids)
+
+	ret := make([]*decision.Ticket, 0, len(ids))
+	for _, id := range ids {
+		item := items[common.TicketID(id)]
+		ret = append(ret, cloneDecisionTicket(&item))
+	}
+	return ret, nil
+}
+
 func (r *DecisionTicketRepository) Update(_ context.Context, item *decision.Ticket) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1890,6 +1974,56 @@ func (r *ApprovalRepository) List(_ context.Context) ([]*approval.Approval, erro
 	return ret, nil
 }
 
+func (r *ApprovalRepository) ListByRunID(_ context.Context, runID common.RunID) ([]*approval.Approval, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.ApprovalID, approval.Approval](r.path)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]string, 0, len(items))
+	for id, item := range items {
+		if item.RunID == runID {
+			ids = append(ids, string(id))
+		}
+	}
+	sort.Strings(ids)
+
+	ret := make([]*approval.Approval, 0, len(ids))
+	for _, id := range ids {
+		item := items[common.ApprovalID(id)]
+		ret = append(ret, cloneApproval(&item))
+	}
+	return ret, nil
+}
+
+func (r *ApprovalRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*approval.Approval, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.ApprovalID, approval.Approval](r.path)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]string, 0, len(items))
+	for id, item := range items {
+		if item.WorkspaceID == workspaceID {
+			ids = append(ids, string(id))
+		}
+	}
+	sort.Strings(ids)
+
+	ret := make([]*approval.Approval, 0, len(ids))
+	for _, id := range ids {
+		item := items[common.ApprovalID(id)]
+		ret = append(ret, cloneApproval(&item))
+	}
+	return ret, nil
+}
+
 func (r *ApprovalRepository) Update(_ context.Context, item *approval.Approval) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1912,21 +2046,48 @@ func (r *ApprovalRepository) Delete(_ context.Context, id common.ApprovalID) err
 }
 
 func loadMap[K comparable, V any](path string) (map[K]V, error) {
+	cache := mapCacheEntry(path)
+	cache.mu.RLock()
+	if cache.loaded {
+		items, ok := cache.items.(map[K]V)
+		cache.mu.RUnlock()
+		if !ok {
+			return nil, fmt.Errorf("file repository cache type mismatch for %s", path)
+		}
+		return cloneStoredMap(items), nil
+	}
+	cache.mu.RUnlock()
+
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if cache.loaded {
+		items, ok := cache.items.(map[K]V)
+		if !ok {
+			return nil, fmt.Errorf("file repository cache type mismatch for %s", path)
+		}
+		return cloneStoredMap(items), nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			cache.items = map[K]V{}
+			cache.loaded = true
 			return map[K]V{}, nil
 		}
 		return nil, err
 	}
 	if len(data) == 0 {
+		cache.items = map[K]V{}
+		cache.loaded = true
 		return map[K]V{}, nil
 	}
 	items := map[K]V{}
 	if err := json.Unmarshal(data, &items); err != nil {
 		return nil, err
 	}
-	return items, nil
+	cache.items = cloneStoredMap(items)
+	cache.loaded = true
+	return cloneStoredMap(items), nil
 }
 
 func deleteMapItem[K comparable, V any](path string, id K) error {
@@ -1945,11 +2106,32 @@ func saveMap[K comparable, V any](path string, items map[K]V) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(items, "", "  ")
+	data, err := json.Marshal(items)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return err
+	}
+	cache := mapCacheEntry(path)
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	cache.items = cloneStoredMap(items)
+	cache.loaded = true
+	return nil
+}
+
+func mapCacheEntry(path string) *mapFileCacheEntry {
+	item, _ := mapFileCache.LoadOrStore(path, &mapFileCacheEntry{})
+	return item.(*mapFileCacheEntry)
+}
+
+func cloneStoredMap[K comparable, V any](items map[K]V) map[K]V {
+	cloned := make(map[K]V, len(items))
+	for key, value := range items {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {

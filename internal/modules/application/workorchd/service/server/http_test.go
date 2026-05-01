@@ -2036,6 +2036,7 @@ func TestDecisionResolveEndpointReturnsConflictForOppositeResolution(t *testing.
 	if resolveRec.Code != http.StatusConflict {
 		t.Fatalf("decision resolve status = %d, want 409, body=%s", resolveRec.Code, resolveRec.Body.String())
 	}
+	waitRunStateForHTTP(t, dataRoot, runID, string(common.RunStateFailed))
 }
 
 func TestDecisionBatchResolveEndpointResolvesOpenTickets(t *testing.T) {
@@ -2068,6 +2069,8 @@ func TestDecisionBatchResolveEndpointResolvesOpenTickets(t *testing.T) {
 			t.Fatalf("decision = %+v, want resolved replan with payload", item)
 		}
 	}
+	waitRunStateForHTTP(t, dataRoot, firstRunID, string(common.RunStateSuperseded))
+	waitRunStateForHTTP(t, dataRoot, secondRunID, string(common.RunStateSuperseded))
 }
 
 func TestApprovalBatchResolveEndpointApprovesPendingApprovals(t *testing.T) {
@@ -2100,6 +2103,8 @@ func TestApprovalBatchResolveEndpointApprovesPendingApprovals(t *testing.T) {
 			t.Fatalf("approval = %+v, want approved", item)
 		}
 	}
+	waitRunStateForHTTP(t, dataRoot, firstRunID, string(common.RunStateFailed))
+	waitRunStateForHTTP(t, dataRoot, secondRunID, string(common.RunStateFailed))
 }
 
 func TestApprovalListAndGetEndpointsReturnPersistedApprovals(t *testing.T) {
@@ -2241,6 +2246,7 @@ func TestApprovalApproveEndpointReturnsConflictForOppositeResolution(t *testing.
 	if approveRec.Code != http.StatusConflict {
 		t.Fatalf("approval approve status = %d, want 409, body=%s", approveRec.Code, approveRec.Body.String())
 	}
+	waitRunStateForHTTP(t, dataRoot, runID, string(common.RunStateFailed))
 }
 
 func TestMetricsEndpointReportsCounters(t *testing.T) {

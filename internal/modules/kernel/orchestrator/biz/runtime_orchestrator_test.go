@@ -1989,8 +1989,8 @@ func TestRuntimeOrchestrator_StartRunPublishesRunAndStepEvents(t *testing.T) {
 	}
 
 	published := hub.Published()
-	if len(published) < 6 {
-		t.Fatalf("published events = %d, want at least 6", len(published))
+	if len(published) < 7 {
+		t.Fatalf("published events = %d, want at least 7", len(published))
 	}
 	if published[0].Version != events.WorkorchEventVersion {
 		t.Fatalf("first event version = %s, want %s", published[0].Version, events.WorkorchEventVersion)
@@ -2013,8 +2013,11 @@ func TestRuntimeOrchestrator_StartRunPublishesRunAndStepEvents(t *testing.T) {
 	if published[4].Topic != events.TopicRunStateChanged || published[4].Payload[events.PayloadKeyState] != string(common.RunStateValidating) {
 		t.Fatalf("fifth event = %#v, want run validating", published[4])
 	}
-	if published[5].Topic != events.TopicRunStateChanged || published[5].Payload[events.PayloadKeyState] != string(common.RunStateCompleted) {
-		t.Fatalf("sixth event = %#v, want run completed", published[5])
+	if published[5].Topic != events.TopicWorkspaceStateChanged || published[5].Payload[events.PayloadKeyState] != string(common.WorkspaceStateValidating) {
+		t.Fatalf("sixth event = %#v, want workspace validating", published[5])
+	}
+	if published[6].Topic != events.TopicRunStateChanged || published[6].Payload[events.PayloadKeyState] != string(common.RunStateCompleted) {
+		t.Fatalf("seventh event = %#v, want run completed", published[6])
 	}
 	last := published[len(published)-1]
 	if last.Topic != events.TopicWorkspaceStateChanged || last.Payload[events.PayloadKeyActiveRunID] != "" {
@@ -5108,15 +5111,15 @@ func TestRuntimeOrchestrator_BlockCommands_ValidateArgumentsAndSetExpectedRefs(t
 		t.Fatalf("block on approval empty approval err = %v, want invalid argument", err)
 	}
 
-	workspaceID := common.WorkspaceID("ws-block")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+	decisionWorkspaceID := common.WorkspaceID("ws-block-decision")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: decisionWorkspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 
 	decisionRunID := common.RunID("run-block-decision")
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          decisionRunID,
-		WorkspaceID: workspaceID,
+		WorkspaceID: decisionWorkspaceID,
 		State:       common.RunStateCreated,
 	}); err != nil {
 		t.Fatalf("seed decision run: %v", err)
@@ -5131,11 +5134,22 @@ func TestRuntimeOrchestrator_BlockCommands_ValidateArgumentsAndSetExpectedRefs(t
 	if blockedDecision.BlockingTicketID != common.TicketID("ticket-1") || blockedDecision.BlockingApprovalID != "" {
 		t.Fatalf("unexpected decision block refs: %+v", blockedDecision)
 	}
+	decisionWorkspace, err := workspaceRepo.Get(ctx, decisionWorkspaceID)
+	if err != nil {
+		t.Fatalf("get decision-blocked workspace: %v", err)
+	}
+	if decisionWorkspace.State != common.WorkspaceStateWaitingDecision || decisionWorkspace.ActiveRunID != decisionRunID {
+		t.Fatalf("decision workspace = %+v, want waiting_decision with active run", decisionWorkspace)
+	}
 
+	approvalWorkspaceID := common.WorkspaceID("ws-block-approval")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: approvalWorkspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed approval workspace: %v", err)
+	}
 	approvalRunID := common.RunID("run-block-approval")
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          approvalRunID,
-		WorkspaceID: workspaceID,
+		WorkspaceID: approvalWorkspaceID,
 		State:       common.RunStateRunning,
 	}); err != nil {
 		t.Fatalf("seed approval run: %v", err)
@@ -5149,6 +5163,13 @@ func TestRuntimeOrchestrator_BlockCommands_ValidateArgumentsAndSetExpectedRefs(t
 	}
 	if blockedApproval.BlockingApprovalID != common.ApprovalID("approval-1") || blockedApproval.BlockingTicketID != "" {
 		t.Fatalf("unexpected approval block refs: %+v", blockedApproval)
+	}
+	approvalWorkspace, err := workspaceRepo.Get(ctx, approvalWorkspaceID)
+	if err != nil {
+		t.Fatalf("get approval-blocked workspace: %v", err)
+	}
+	if approvalWorkspace.State != common.WorkspaceStateBlocked || approvalWorkspace.ActiveRunID != approvalRunID {
+		t.Fatalf("approval workspace = %+v, want blocked with active run", approvalWorkspace)
 	}
 }
 
@@ -5216,6 +5237,81 @@ func TestRuntimeOrchestrator_BlockCommandsRejectBlockedOrTerminalRun(t *testing.
 				t.Fatalf("block on approval err = %v, want conflict", err)
 			}
 		})
+	}
+}
+
+func TestRuntimeOrchestrator_ValidateRunProjectsWorkspaceState(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	hub := events.NewMemoryHub()
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"status": "ok"}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
+
+	workspaceID := common.WorkspaceID("ws-validating")
+	runID := common.RunID("run-validating")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.ValidateRun(ctx, runID); err != nil {
+		t.Fatalf("validate run: %v", err)
+	}
+
+	ws, err := workspaceRepo.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if ws.State != common.WorkspaceStateValidating || ws.ActiveRunID != runID {
+		t.Fatalf("workspace = %+v, want validating with active run", ws)
+	}
+	published := hub.Published()
+	if len(published) < 2 {
+		t.Fatalf("published events = %d, want run and workspace state events", len(published))
+	}
+	last := published[len(published)-1]
+	if last.Topic != events.TopicWorkspaceStateChanged || last.Payload[events.PayloadKeyState] != string(common.WorkspaceStateValidating) {
+		t.Fatalf("last event = %#v, want workspace validating event", last)
+	}
+}
+
+func TestRuntimeOrchestrator_BlockRunCanReplaceStaleTerminalActiveRun(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"status": "ok"}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, nil)
+
+	workspaceID := common.WorkspaceID("ws-stale-terminal-active")
+	staleRunID := common.RunID("run-stale-terminal-active")
+	currentRunID := common.RunID("run-current-block")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: staleRunID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: staleRunID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
+		t.Fatalf("seed stale run: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: currentRunID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed current run: %v", err)
+	}
+
+	if err := orch.BlockOnApproval(ctx, currentRunID, common.ApprovalID("approval-current-block")); err != nil {
+		t.Fatalf("block on approval with stale terminal active run: %v", err)
+	}
+
+	ws, err := workspaceRepo.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if ws.State != common.WorkspaceStateBlocked || ws.ActiveRunID != currentRunID {
+		t.Fatalf("workspace = %+v, want current blocked run projection", ws)
 	}
 }
 

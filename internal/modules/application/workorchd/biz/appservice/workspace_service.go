@@ -122,17 +122,17 @@ func CreateWorkspaceFromEnv(ctx context.Context, title string, description strin
 }
 
 func ReadWorkspaceWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret Workspace, err error) {
-	_, repo, err := workspaceDependenciesFromSession(session)
+	deps, err := readModelDependenciesFromSession(session)
 	if err != nil {
 		return Workspace{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	item, err := repo.Get(ctx, common.WorkspaceID(workspaceID))
+	snapshot, err := readWorkspaceSnapshot(ctx, deps, common.WorkspaceID(workspaceID))
 	if err != nil {
 		return Workspace{}, err
 	}
-	return mapWorkspace(item), nil
+	return snapshot.Workspace, nil
 }
 
 func ReadWorkspaceWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (Workspace, error) {
@@ -152,19 +152,32 @@ func ReadWorkspaceFromEnv(ctx context.Context, workspaceID string) (Workspace, e
 }
 
 func ListWorkspacesWithSession(ctx context.Context, session *RuntimeSession) (ret []Workspace, err error) {
-	_, repo, err := workspaceDependenciesFromSession(session)
+	deps, err := readModelDependenciesFromSession(session)
 	if err != nil {
 		return nil, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	items, err := repo.List(ctx)
+	items, err := deps.workspaces.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	runItems, err := deps.runs.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	eventRecordItems, err := deps.eventRecords.List(ctx, repository.EventRecordQuery{})
 	if err != nil {
 		return nil, err
 	}
 	ret = make([]Workspace, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, mapWorkspace(item))
+		resultItems, err := deps.results.ListByWorkspace(ctx, item.ID)
+		if err != nil {
+			return nil, err
+		}
+		projectionRun := selectWorkspaceProjectionRun(item, runItems, resultItems, eventRecordItems)
+		ret = append(ret, mapWorkspaceWithRunProjection(item, projectionRun))
 	}
 	return ret, nil
 }

@@ -184,6 +184,8 @@ server.maxConcurrentRuns = 1
 - `workspace_success_total`。
 - `workspace_failed_total`。
 - `success_rate`。
+- `min_success_rate`。
+- `pass`。
 - `server_max_concurrent_runs`。
 - `throughput_workspaces_per_min`。
 - `workspace_e2e_latency_p50/p95/p99`。
@@ -197,6 +199,8 @@ server.maxConcurrentRuns = 1
 - `observability_read_latency_p50/p95/p99`。
 - `http_4xx_total`。
 - `http_5xx_total`。
+- `curl_error_total`。
+- `failure_class_total`。
 - `workorch_run_queue_waiting`。
 - `workorch_run_queue_total`。
 - `workorch_run_requests_in_flight`。
@@ -260,6 +264,9 @@ scripts/loadtest-governed-workspace-concurrency.sh
 - 报告当前部署实例的 `serverMaxConcurrentRuns`、压测前后 metrics。
 - 可通过 `WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS` 在容量曲线压测前校验服务端执行槽，避免把单执行槽排队压测误判为真实并行压测。
 - 可通过 `WORKORCH_LOAD_MCP_SESSION_POLICY=long_lived` 显式验证长会话；默认使用 `transient`，避免反复压测后遗留多批次 stdio helper 进程污染容量结论。
+- 可通过 `WORKORCH_LOAD_MIN_SUCCESS_RATE` 设置回归门禁成功率，默认 `1.0`，报告中输出 `pass`。
+- 对每个成功 workspace 断言正式 Result `summaryDetail`、Artifact 分类、`workorch://` URI、Artifact 内容读取、Result/Artifact 关联和 timeline `runState`。
+- 对失败 workspace 归类输出 `http_4xx`、`http_5xx`、`http_timeout`、`http_empty_reply`、`llm_protocol_error`、`provider_error`、`evidence_integrity_error` 等失败类型。
 
 当前入口：
 
@@ -422,3 +429,513 @@ server.maxConcurrentRuns = 1
 - 共享 file repository 实例可以通过实例内 mutex 保护同一文件写入。
 - 多个 file repository 实例并发写同一文件会破坏 JSON 持久化文件，例如出现 `invalid character '"' after top-level value`。
 - 因此 file backend 的稳定性要求是：运行中必须复用同一组 repository 实例；如果未来存在跨进程、多服务实例、或未走 shared runtime 的 fallback 路径，必须引入跨实例文件锁或升级持久化后端。
+
+## 13. 2026-05-01 压测复盘与优化
+
+当前部署实例：
+
+```text
+repository.backend = file
+server.maxConcurrentRuns = 100
+```
+
+本轮先修正压测控制器与运行期语义不一致的问题：Decision resolve 与 Approval approve 已经触发后台续跑，压测脚本不再显式调用 `/runs/{runId}/resume`，而是按 Run status 轮询阻塞对象切换和终态完成。
+
+已完成压测：
+
+| 批次 | LLM | client 并发 | 总量 | 成功 | 失败 | 吞吐 workspace/min | e2e p95 | snapshot p95 | observability p95 | 结论 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `/tmp/workorch-loadtest-load-20260501012005-as45pjvy` | mock | 2 | 5 | 5 | 0 | 18.49 | 5.74s | 0.22s | 0.22s | 小规模完整业务闭环通过 |
+| `/tmp/workorch-loadtest-load-20260501012027-7avmcd7f` | mock | 5 | 20 | 20 | 0 | 20.03 | 19.26s | 1.07s | 0.88s | 中等并发完整业务闭环通过 |
+| `/tmp/workorch-loadtest-load-20260501012135-afnyn31c` | mock | 10 | 50 | 50 | 0 | 14.38 | 54.11s | 2.50s | 2.35s | 高并发业务正确，但读模型和持久化延迟明显放大 |
+| `/tmp/workorch-loadtest-load-20260501012523-adj084hg` | real | 1 | 2 | 1 | 1 | 0.22 | 187.07s | 0.79s | 0.62s | 真实 LLM 样本可完成，但存在模型跳过第二轮 Decision 的协议波动 |
+
+关键结论：
+
+- Mock 压测已经覆盖两轮 Decision、一次 Approval、MCP tool call、ValidationResult、RuntimeCheckpoint、accepted Result、linked Artifact 和 timeline runState，业务正确性通过。
+- `server.maxConcurrentRuns=100` 下，失败不再来自调度槽不足；在 mock `concurrency=10,total=50` 下吞吐反而低于 `concurrency=5,total=20`，说明主要瓶颈转向 file backend 与读模型回查。
+- 状态推进阶段延迟随数据规模增长明显放大：`toolExecutionAndResultMaterialization` 从并发 2 的 p95 1.45s 上升到并发 10 的 p95 18.46s。
+- Snapshot / observability 查询延迟也随数据规模上升：snapshot p95 从 0.22s 上升到 2.50s，observability p95 从 0.22s 上升到 2.35s。
+- 真实 LLM 的失败样本进入 `blocked_on_approval`，但压测协议期望第二轮 Decision；这属于 provider 输出协议稳定性问题，不应作为 workorch 内部并发容量失败。
+
+已落实优化：
+
+- 在 repository 层补充正式窄查询能力：`RunRepository.ListByWorkspaceID`、`DecisionTicketRepository.ListByRunID/ListByWorkspaceID`、`ApprovalRepository.ListByRunID/ListByWorkspaceID`。
+- 在 workspace-scoped file backend 中按 workspace/run 根目录读取相关数据，避免 workspace snapshot 扫描所有 workspace 的 Run/Ticket/Approval。
+- 在 application read model 中让 `/runs/{runId}/status` 走轻量状态读取，不再构造完整 Run snapshot。
+- `readWorkspaceSnapshot`、`decisionsForRun`、`approvalsForRun` 改用 repository 窄查询，保持业务组合在 appservice，数据选择在 repository，未把业务解析下沉到 orchestrator 或 runtime block。
+
+待重新部署后复测：
+
+```bash
+WORKORCH_LOAD_LLM_MODE=mock \
+WORKORCH_LOAD_CONCURRENCY=10 \
+WORKORCH_LOAD_TOTAL=50 \
+WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS=100 \
+WORKORCH_LOAD_MIN_SUCCESS_RATE=1.0 \
+./scripts/loadtest-governed-workspace-concurrency.sh
+```
+
+优化方向：
+
+- repository/file：继续补齐 workspace/run scoped index，减少 `Get(id)` 和 `ListByRunID(id)` 对全量 run roots 的扫描。
+- application/read-model：为 Workspace Board 提供摘要专用查询，避免列表页读取完整 snapshot、timeline 和 artifact 明细。
+- eventstream：对观测时间线增加按 run/workspace 的增量 cursor 和 limit，避免每次全量重建 timeline。
+- mcp block：对 transient 与 long_lived session 分别压测；若选择 long_lived，需要同步实现可观测 session 生命周期和清理能力。
+- llm block：真实 LLM 压测需单独统计 provider latency、schema repair 次数和 workflow protocol violation，不应混入框架吞吐基准。
+
+## 14. 2026-05-01 部署后复测与第二轮优化
+
+部署参数：
+
+```text
+repository.backend = file
+server.maxConcurrentRuns = 100
+```
+
+本轮复测基于已部署实例，覆盖完整业务闭环：Workspace 创建、Goal/DoD、两轮 Decision、一次 Approval、MCP tool call、ValidationResult、RuntimeCheckpoint、accepted Result、linked Artifact、Run snapshot、Workspace snapshot、observability timeline。
+
+已完成压测：
+
+| 批次 | LLM | client 并发 | 总量 | 成功 | 失败 | 吞吐 workspace/min | e2e avg | e2e p95 | snapshot p95 | observability p95 | 结论 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `/tmp/workorch-loadtest-load-20260501020545-an6do_9m` | mock | 10 | 50 | 50 | 0 | 25.04 | 23.01s | 37.34s | 2.54s | 2.38s | 第一轮读模型窄查询优化后，同规模吞吐明显提升 |
+| `/tmp/workorch-loadtest-load-20260501020937-gbhh7kl7` | mock | 20 | 100 | 100 | 0 | 10.10 | 116.85s | 160.38s | 10.49s | 8.47s | 业务正确性稳定，但已超过效率拐点 |
+
+与上一轮同规模 `concurrency=10,total=50` 对比：
+
+| 指标 | 优化前 `/tmp/workorch-loadtest-load-20260501012135-afnyn31c` | 优化后 `/tmp/workorch-loadtest-load-20260501020545-an6do_9m` | 变化 |
+| --- | ---: | ---: | ---: |
+| 成功率 | 100% | 100% | 持平 |
+| 吞吐 | 14.38 workspace/min | 25.04 workspace/min | +74.1% |
+| 总耗时 | 208.55s | 119.83s | -42.5% |
+| e2e avg | 41.18s | 23.01s | -44.1% |
+| e2e p95 | 54.11s | 37.34s | -31.0% |
+| queueWaitProxy p95 | 8.23s | 6.95s | -15.6% |
+| decisionRound1 p95 | 10.08s | 6.84s | -32.2% |
+| decisionRound2 p95 | 10.95s | 6.51s | -40.5% |
+| toolExecutionAndResultMaterialization p95 | 18.46s | 11.96s | -35.2% |
+
+关键约束：
+
+- `concurrency=10,total=50` 已能稳定通过，并且吞吐优于上一轮；第一轮优化有效。
+- `concurrency=20,total=100` 虽然 100% 通过，但吞吐下降到 `10.10 workspace/min`，说明继续增加 client 并发会导致 file backend 和读模型访问竞争，整体效率反而下降。
+- 在 `concurrency=20,total=100` 下，snapshot p95 达到 `10.49s`，observability p95 达到 `8.47s`；这些读路径已经成为用户侧过程可视化的主要约束。
+- Run 队列指标在压测前后均为 0，说明瓶颈不在 `maxConcurrentRuns` 调度槽，而在 repository/file 与 read-model 访问放大。
+
+本轮继续落实的第二轮代码优化：
+
+- 在 workspace-scoped file store 中增加 runID 到 run root 的内存定位缓存。
+- `RunRepository.Get` 优先通过 runID 定位 run 目录，避免跨所有 workspace/run 目录扫描。
+- `StepRepository.ListByRun`、`ToolCallRepository.ListByRun`、`PatchRepository.ListByRun`、`ValidationResultRepository.ListByRun`、`RuntimeCheckpointRepository.ListByRun`、`ResultRepository.ListByRun`、`ArtifactRepository.ListByRun` 改为按 runID 直接读取单个 run 目录。
+- `DecisionTicketRepository.ListByRunID`、`ApprovalRepository.ListByRunID` 改为按 runID 直接读取单个 run 目录。
+- `EventRecordRepository.List` 在 query 包含 runID 时只读取对应 run 目录和 system event 文件，不再扫描所有 run 目录。
+- 该优化仍位于 `internal/modules/application/workorchd/biz/bootstrap` 的 file repository adapter 层，不改变 kernel/orchestrator、runtime block 或业务模型边界。
+
+验证：
+
+```bash
+go test ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/application/workorchd/biz/appservice ./internal/pkg/repository -count=1
+go test ./... -count=1 -p 1
+```
+
+待重新部署后复测：
+
+```bash
+WORKORCH_LOAD_LLM_MODE=mock \
+WORKORCH_LOAD_CONCURRENCY=10 \
+WORKORCH_LOAD_TOTAL=50 \
+WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS=100 \
+WORKORCH_LOAD_MIN_SUCCESS_RATE=1.0 \
+./scripts/loadtest-governed-workspace-concurrency.sh
+
+WORKORCH_LOAD_LLM_MODE=mock \
+WORKORCH_LOAD_CONCURRENCY=20 \
+WORKORCH_LOAD_TOTAL=100 \
+WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS=100 \
+WORKORCH_LOAD_MIN_SUCCESS_RATE=1.0 \
+./scripts/loadtest-governed-workspace-concurrency.sh
+```
+
+后续优化建议：
+
+- 若第二轮 run root 缓存复测后 `snapshot/observability` p95 仍超过 3s，应继续推进 read-model summary endpoint，专门服务 Workspace Board 和运行过程列表，避免 UI 常规刷新读取完整 evidence 明细。
+- 若 `toolExecutionAndResultMaterialization` p95 仍超过 10s，应对 Result/Artifact/EventRecord 写入做批量化或 append-only compaction，减少单 run 完成阶段的多文件写放大。
+- 若真实 LLM 并发继续扩展，应单独限制 provider 并发与重试策略，把 provider latency/protocol violation 与 workorch 内部容量指标分开记录。
+
+## 15. 2026-05-01 run root 缓存部署后复测
+
+部署参数：
+
+```text
+repository.backend = file
+server.maxConcurrentRuns = 100
+```
+
+本轮复测基于已部署实例，部署内容包含 runID -> run root 缓存和 `ListByRun/ListByRunID` 单 run 目录读取优化。所有压测仍覆盖两轮 Decision、一次 Approval、MCP tool call、ValidationResult、RuntimeCheckpoint、accepted Result、linked Artifact、Run snapshot、Workspace snapshot、observability timeline。
+
+已完成压测：
+
+| 批次 | LLM | client 并发 | 总量 | 成功 | 失败 | 吞吐 workspace/min | e2e avg | e2e p95 | snapshot p95 | observability p95 | 结论 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `/tmp/workorch-loadtest-load-20260501034758-z_2mb4xg` | mock | 10 | 50 | 50 | 0 | 93.56 | 6.05s | 7.75s | 0.30s | 0.28s | 当前最优效率区间，业务闭环稳定 |
+| `/tmp/workorch-loadtest-load-20260501034840-2yxmyil9` | mock | 20 | 100 | 100 | 0 | 35.39 | 32.87s | 42.31s | 1.66s | 1.47s | 高压稳定性通过，但效率明显下降 |
+| `/tmp/workorch-loadtest-load-20260501035210-d8puc3pl` | mock | 15 | 75 | 75 | 0 | 30.85 | 28.61s | 32.49s | 0.90s | 0.86s | 在已累积更多 file 数据后仍稳定，但吞吐低于 c10 |
+
+与上一轮部署后同规模对比：
+
+| 指标 | c10/t50 优化前 `/tmp/workorch-loadtest-load-20260501020545-an6do_9m` | c10/t50 优化后 `/tmp/workorch-loadtest-load-20260501034758-z_2mb4xg` | 变化 |
+| --- | ---: | ---: | ---: |
+| 成功率 | 100% | 100% | 持平 |
+| 吞吐 | 25.04 workspace/min | 93.56 workspace/min | +273.6% |
+| 总耗时 | 119.83s | 32.07s | -73.2% |
+| e2e avg | 23.01s | 6.05s | -73.7% |
+| e2e p95 | 37.34s | 7.75s | -79.2% |
+| snapshot p95 | 2.54s | 0.30s | -88.2% |
+| observability p95 | 2.38s | 0.28s | -88.3% |
+
+| 指标 | c20/t100 优化前 `/tmp/workorch-loadtest-load-20260501020937-gbhh7kl7` | c20/t100 优化后 `/tmp/workorch-loadtest-load-20260501034840-2yxmyil9` | 变化 |
+| --- | ---: | ---: | ---: |
+| 成功率 | 100% | 100% | 持平 |
+| 吞吐 | 10.10 workspace/min | 35.39 workspace/min | +250.4% |
+| 总耗时 | 593.88s | 169.56s | -71.4% |
+| e2e avg | 116.85s | 32.87s | -71.9% |
+| e2e p95 | 160.38s | 42.31s | -73.6% |
+| snapshot p95 | 10.49s | 1.66s | -84.2% |
+| observability p95 | 8.47s | 1.47s | -82.7% |
+
+关键约束：
+
+- run root 缓存优化显著降低了读模型和运行证据回查成本，`snapshot/observability` 已从 10 秒级下降到 1 秒级以内或附近。
+- 当前最优吞吐出现在 `concurrency=10,total=50`，达到 `93.56 workspace/min`。
+- `concurrency=15/20` 仍能 100% 完成业务目标，但吞吐明显下降，说明继续增加客户端并发会触发 file backend 多文件写入、事件写入、Result/Artifact 物化和后台续跑竞争。
+- `toolExecutionAndResultMaterialization` 仍是最大阶段：c20/t100 p95 为 `15.98s`，c15/t75 p95 为 `11.88s`，后续优化应优先处理完成阶段的写入和证据物化。
+
+本轮追加代码优化：
+
+- `EventRecordRepository.List` 在 query 包含 runID 时不再读取 system event 文件，避免 Run snapshot/observability 的无效系统事件扫描。
+- `ToolCallRepository.ListByStep`、`PatchRepository.ListByStep`、`ValidationResultRepository.ListByStep` 从 stepID 推导 runID 后直接定位单个 run 目录，避免未来按 step 查询时退化为全量 run root 扫描。
+- 该补丁仍位于 `internal/modules/application/workorchd/biz/bootstrap` file repository adapter 层，不改变业务模型、不修改 orchestrator、不让 runtime block 解析业务目标。
+
+验证：
+
+```bash
+go test ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/application/workorchd/biz/appservice ./internal/pkg/repository -count=1
+go test ./... -count=1 -p 1
+```
+
+待重新部署后复测：
+
+```bash
+WORKORCH_LOAD_LLM_MODE=mock \
+WORKORCH_LOAD_CONCURRENCY=10 \
+WORKORCH_LOAD_TOTAL=50 \
+WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS=100 \
+WORKORCH_LOAD_MIN_SUCCESS_RATE=1.0 \
+./scripts/loadtest-governed-workspace-concurrency.sh
+```
+
+后续优化建议：
+
+- application/read-model：为 Workspace Board 和运行过程列表增加 summary 专用接口，避免 UI 高频刷新触发完整 evidence 明细读取。
+- repository/file：对 Result、Artifact、EventRecord 完成阶段写入做批量提交或 append-only compaction，降低 `toolExecutionAndResultMaterialization` 尾延迟。
+- runtime/orchestrator：保持后台续跑语义，不恢复同步长请求；继续通过 metrics 观察 in-flight 与 queue，但不要把调度器改成解析业务目标的优化点。
+- blocks/mcp：如需要进一步提升工具阶段吞吐，单独压测 transient 与 long_lived session policy，长会话必须配套生命周期清理和隔离。
+
+## 16. 2026-05-01 event/step 查询优化部署后复测
+
+部署参数：
+
+```text
+repository.backend = file
+server.maxConcurrentRuns = 100
+```
+
+本轮复测基于已部署实例，部署内容包含 run root 缓存、run 级 event 查询跳过 system event 文件、`ListByStep` 通过 stepID 定位 run root 等优化。压测仍覆盖完整业务闭环：两轮 Decision、一次 Approval、MCP tool call、ValidationResult、RuntimeCheckpoint、accepted Result、linked Artifact、Run snapshot、Workspace snapshot、observability timeline。
+
+已完成压测：
+
+| 批次 | LLM | client 并发 | 总量 | 成功 | 失败 | 吞吐 workspace/min | e2e avg | e2e p95 | snapshot p95 | observability p95 | 结论 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `/tmp/workorch-loadtest-load-20260501035945-72ra_5xi` | mock | 10 | 50 | 50 | 0 | 101.51 | 5.64s | 7.18s | 0.28s | 0.25s | 当前最佳效率区间继续提升 |
+| `/tmp/workorch-loadtest-load-20260501040028-674z9h5s` | mock | 20 | 100 | 100 | 0 | 48.82 | 23.26s | 35.18s | 1.27s | 1.18s | 高压吞吐和尾延迟继续改善 |
+
+与上一轮同规模对比：
+
+| 指标 | c10/t50 上一轮 `/tmp/workorch-loadtest-load-20260501034758-z_2mb4xg` | c10/t50 本轮 `/tmp/workorch-loadtest-load-20260501035945-72ra_5xi` | 变化 |
+| --- | ---: | ---: | ---: |
+| 成功率 | 100% | 100% | 持平 |
+| 吞吐 | 93.56 workspace/min | 101.51 workspace/min | +8.5% |
+| 总耗时 | 32.07s | 29.55s | -7.9% |
+| e2e avg | 6.05s | 5.64s | -6.7% |
+| e2e p95 | 7.75s | 7.18s | -7.3% |
+| snapshot p95 | 0.30s | 0.28s | -5.2% |
+| observability p95 | 0.28s | 0.25s | -11.9% |
+
+| 指标 | c20/t100 上一轮 `/tmp/workorch-loadtest-load-20260501034840-2yxmyil9` | c20/t100 本轮 `/tmp/workorch-loadtest-load-20260501040028-674z9h5s` | 变化 |
+| --- | ---: | ---: | ---: |
+| 成功率 | 100% | 100% | 持平 |
+| 吞吐 | 35.39 workspace/min | 48.82 workspace/min | +37.9% |
+| 总耗时 | 169.56s | 122.91s | -27.5% |
+| e2e avg | 32.87s | 23.26s | -29.2% |
+| e2e p95 | 42.31s | 35.18s | -16.9% |
+| snapshot p95 | 1.66s | 1.27s | -23.6% |
+| observability p95 | 1.47s | 1.18s | -19.7% |
+| toolExecutionAndResultMaterialization p95 | 15.98s | 13.39s | -16.2% |
+
+当前关键约束：
+
+- `c10/t50` 已达到 `101.51 workspace/min`，继续作为当前推荐本地 file backend 压测并发基线。
+- `c20/t100` 仍 100% 正确完成，但 e2e p95 为 `35.18s`，说明高并发下完成阶段仍有写入/物化放大。
+- `toolExecutionAndResultMaterialization` 仍是最大阶段，c20/t100 p95 为 `13.39s`；主要风险点是 Result、Artifact、EventRecord、Checkpoint 等 run 级 JSON 文件多次重写。
+- snapshot/observability 已稳定在 1 秒级左右，不再是当前首要瓶颈。
+
+本轮新增代码优化：
+
+- `internal/pkg/repository/file.saveMap` 从 `json.MarshalIndent` 改为 `json.Marshal`，减少 file backend 每次写入的数据量、序列化 CPU 和磁盘 IO。
+- 该优化只改变 file repository 的落盘编码格式，不改变模型结构、仓储接口或业务语义；历史缩进 JSON 仍可由 `json.Unmarshal` 读取。
+- 优化边界在 `internal/pkg/repository/file`，不涉及 orchestrator、runtime block 或业务目标解析。
+
+验证：
+
+```bash
+go test ./internal/pkg/repository/file ./internal/pkg/repository ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/application/workorchd/biz/appservice -count=1
+go test ./... -count=1 -p 1
+```
+
+待重新部署后复测：
+
+```bash
+WORKORCH_LOAD_LLM_MODE=mock \
+WORKORCH_LOAD_CONCURRENCY=10 \
+WORKORCH_LOAD_TOTAL=50 \
+WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS=100 \
+WORKORCH_LOAD_MIN_SUCCESS_RATE=1.0 \
+./scripts/loadtest-governed-workspace-concurrency.sh
+
+WORKORCH_LOAD_LLM_MODE=mock \
+WORKORCH_LOAD_CONCURRENCY=20 \
+WORKORCH_LOAD_TOTAL=100 \
+WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS=100 \
+WORKORCH_LOAD_MIN_SUCCESS_RATE=1.0 \
+./scripts/loadtest-governed-workspace-concurrency.sh
+```
+
+后续优化建议：
+
+- 若紧凑 JSON 部署后 `toolExecutionAndResultMaterialization` p95 仍超过 10s，应进一步评估 run 级 EventRecord append-only JSONL 或 per-run event index，避免每次 append 都重写完整 event map。
+- 若 UI 高频刷新继续产生压力，应优先开发 Workspace Board summary read model，而不是在页面端继续读取完整 snapshot。
+- 若需要继续提升 c20 以上吞吐，应把 file backend 视为 MVP 本地部署后端上限，并准备 SQLite/Badger 等正式持久化后端方案。
+
+## 17. 2026-05-01 紧凑 JSON 部署后复测与 workspace index 优化
+
+部署参数：
+
+```text
+repository.backend = file
+server.maxConcurrentRuns = 100
+```
+
+本轮复测基于已部署实例，部署内容包含 `saveMap` 紧凑 JSON 写入。压测仍覆盖完整业务闭环：两轮 Decision、一次 Approval、MCP tool call、ValidationResult、RuntimeCheckpoint、accepted Result、linked Artifact、Run snapshot、Workspace snapshot、observability timeline。
+
+已完成压测：
+
+| 批次 | LLM | client 并发 | 总量 | 成功 | 失败 | 吞吐 workspace/min | e2e avg | e2e p95 | snapshot p95 | workspace snapshot p95 | observability p95 | 结论 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `/tmp/workorch-loadtest-load-20260501040659-x2ep4yu1` | mock | 10 | 50 | 50 | 0 | 101.60 | 5.47s | 6.69s | 0.28s | 0.26s | 0.23s | c10 仍为当前最高效率区间，业务闭环稳定 |
+| `/tmp/workorch-loadtest-load-20260501040822-84qs1lsl` | mock | 20 | 100 | 100 | 0 | 42.49 | 27.17s | 35.94s | 1.56s | 1.82s | 1.47s | 高压业务正确性通过，但吞吐低于上一轮 |
+
+与上一轮同规模对比：
+
+| 指标 | c10/t50 上一轮 `/tmp/workorch-loadtest-load-20260501035945-72ra_5xi` | c10/t50 本轮 `/tmp/workorch-loadtest-load-20260501040659-x2ep4yu1` | 变化 |
+| --- | ---: | ---: | ---: |
+| 成功率 | 100% | 100% | 持平 |
+| 吞吐 | 101.51 workspace/min | 101.60 workspace/min | +0.1% |
+| e2e avg | 5.64s | 5.47s | -3.0% |
+| e2e p95 | 7.18s | 6.69s | -6.8% |
+| snapshot p95 | 0.28s | 0.28s | 基本持平 |
+| observability p95 | 0.25s | 0.23s | -9.1% |
+
+| 指标 | c20/t100 上一轮 `/tmp/workorch-loadtest-load-20260501040028-674z9h5s` | c20/t100 本轮 `/tmp/workorch-loadtest-load-20260501040822-84qs1lsl` | 变化 |
+| --- | ---: | ---: | ---: |
+| 成功率 | 100% | 100% | 持平 |
+| 吞吐 | 48.82 workspace/min | 42.49 workspace/min | -13.0% |
+| e2e avg | 23.26s | 27.17s | +16.8% |
+| e2e p95 | 35.18s | 35.94s | +2.2% |
+| snapshot p95 | 1.27s | 1.56s | +23.2% |
+| workspace snapshot p95 | 未记录 | 1.82s | 本轮暴露为读模型约束 |
+| observability p95 | 1.18s | 1.47s | +25.0% |
+| toolExecutionAndResultMaterialization p95 | 13.39s | 11.75s | -12.3% |
+
+当前判断：
+
+- `saveMap` 紧凑 JSON 对 c10 基本持平，对 c20 的完成阶段物化有局部收益，`toolExecutionAndResultMaterialization` p95 从 `13.39s` 降到 `11.75s`。
+- c20 整体吞吐下降，且 workspace snapshot、snapshot、observability p95 上升，不能把紧凑 JSON 判定为整体容量提升；更可能是当前 file backend 数据量累计后，全局索引和读模型读取被放大。
+- 分阶段 p95 显示 `workspace_create=0.98s`、`goal_create=1.21s`、`dod_create=1.03s`、`approval_to_completed=11.75s`、`workspace_snapshot_read=1.82s`，说明瓶颈已经从单纯 Run 证据读取扩展到 workspace 索引和全局文件写入。
+- 当前本地 `.workorch-data/system/workspace_index.json` 样本包含 `150` 个 workspace entry，缩进 JSON 为 `41562` bytes，紧凑 JSON 为 `34054` bytes，约减少 `18.1%` 索引写入体积。
+- 本轮仍保持 100% 成功率、0 HTTP 4xx/5xx、0 curl error、0 LLM protocol error、0 timeline missing runState，业务正确性符合压测要求。
+
+本轮新增代码优化：
+
+- `internal/modules/application/workorchd/biz/bootstrap.workspaceScopedFileStore` 增加 `workspace_index.json` 进程内缓存，避免每次 workspace create/update/list/delete 都重新读取和反序列化完整索引。
+- `workspace_index.json` 写入从 `json.MarshalIndent` 改为 `json.Marshal`，降低全局索引文件写入大小、序列化 CPU 和磁盘 IO。
+- 该优化位于 application/workorchd 的 file repository adapter 层，只处理本地 file backend 的索引读写性能；不改变 kernel/orchestrator、runtime block、业务模型或业务目标解析边界。
+
+验证：
+
+```bash
+go test ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/application/workorchd/biz/appservice ./internal/pkg/repository/file -count=1
+go test ./... -count=1 -p 1
+```
+
+待重新部署后复测：
+
+```bash
+WORKORCH_LOAD_LLM_MODE=mock \
+WORKORCH_LOAD_CONCURRENCY=10 \
+WORKORCH_LOAD_TOTAL=50 \
+WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS=100 \
+WORKORCH_LOAD_MIN_SUCCESS_RATE=1.0 \
+./scripts/loadtest-governed-workspace-concurrency.sh
+
+WORKORCH_LOAD_LLM_MODE=mock \
+WORKORCH_LOAD_CONCURRENCY=20 \
+WORKORCH_LOAD_TOTAL=100 \
+WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS=100 \
+WORKORCH_LOAD_MIN_SUCCESS_RATE=1.0 \
+./scripts/loadtest-governed-workspace-concurrency.sh
+```
+
+下一步优化备选：
+
+- 若 workspace index 缓存复测后 c20/t100 的 create/update 阶段 p95 仍超过 1s，应将全局 `workspace_index.json` 进一步拆成 append-only index event 或 per-workspace index entry，避免全局文件随 workspace 数量增长反复重写。
+- 若 `approval_to_completed` p95 仍超过 10s，应推进 run 级 EventRecord append-only JSONL 或批量写入，减少完成阶段 Result、Artifact、EventRecord、Checkpoint 多文件重写。
+- 若 UI 高频读取继续影响压测，应新增 Workspace Board summary read model，让总览页读取轻量投影，而不是完整 Run/Workspace snapshot。
+
+## 18. 2026-05-01 workspace index 缓存部署后复测与 file map 缓存优化
+
+部署参数：
+
+```text
+repository.backend = file
+server.maxConcurrentRuns = 100
+```
+
+本轮复测基于已部署实例，部署内容包含 `workspace_index.json` 进程内缓存和紧凑写入。压测继续覆盖两轮 Decision、一次 Approval、MCP tool call、ValidationResult、RuntimeCheckpoint、accepted Result、linked Artifact、Run snapshot、Workspace snapshot、observability timeline。
+
+已完成压测：
+
+| 批次 | LLM | client 并发 | 总量 | 成功 | 失败 | 吞吐 workspace/min | e2e avg | e2e p95 | approval_to_completed p95 | snapshot p95 | workspace snapshot p95 | observability p95 | 结论 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `/tmp/workorch-loadtest-load-20260501042732-f896s2eh` | mock | 10 | 50 | 50 | 0 | 100.99 | 5.68s | 8.24s | 3.45s | 0.34s | 0.44s | 0.26s | c10 仍稳定，吞吐与上一轮基本持平 |
+| `/tmp/workorch-loadtest-load-20260501042810-84cymxg3` | mock | 20 | 100 | 100 | 0 | 65.70 | 17.46s | 23.40s | 7.75s | 0.98s | 1.08s | 0.96s | c20 明显改善，是当前 file backend 推荐压测上限 |
+| `/tmp/workorch-loadtest-load-20260501043011-sda957zc` | mock | 30 | 150 | 150 | 0 | 22.28 | 77.99s | 120.81s | 37.71s | 5.75s | 5.60s | 5.03s | c30 正确性通过，但效率严重退化 |
+
+与上一轮 `c20/t100` 对比：
+
+| 指标 | index 缓存前 `/tmp/workorch-loadtest-load-20260501040822-84qs1lsl` | index 缓存后 `/tmp/workorch-loadtest-load-20260501042810-84cymxg3` | 变化 |
+| --- | ---: | ---: | ---: |
+| 成功率 | 100% | 100% | 持平 |
+| 吞吐 | 42.49 workspace/min | 65.70 workspace/min | +54.6% |
+| e2e avg | 27.17s | 17.46s | -35.8% |
+| e2e p95 | 35.94s | 23.40s | -34.9% |
+| workspace_create p95 | 0.98s | 0.65s | -33.9% |
+| goal_create p95 | 1.21s | 0.65s | -46.4% |
+| dod_create p95 | 1.03s | 0.73s | -28.5% |
+| approval_to_completed p95 | 11.75s | 7.75s | -34.1% |
+| snapshot p95 | 1.56s | 0.98s | -37.4% |
+| workspace snapshot p95 | 1.82s | 1.08s | -40.8% |
+| observability p95 | 1.47s | 0.96s | -34.7% |
+
+当前判断：
+
+- workspace index 缓存对高并发有明确收益，`c20/t100` 吞吐提升 `54.6%`，且所有关键 p95 均下降。
+- `c30/t150` 虽然 100% 完成业务目标，但吞吐下降到 `22.28 workspace/min`，e2e p95 达到 `120.81s`；说明 file backend 在当前实现下不适合继续提高 client 并发。
+- `c30` 下所有阶段同步放大，最大瓶颈仍是 `approval_to_completed` p95 `37.71s`，同时 create/update/read p95 也达到 4-6 秒级；主要约束是 JSON map 文件反复读取、反序列化和重写造成的 IO/CPU 放大。
+- 当前推荐容量基线：本地 file backend、mock LLM、transient MCP 下以 `concurrency=20,total=100` 作为高压验收基线；`concurrency=10,total=50` 作为快速回归基线。
+
+本轮新增代码优化：
+
+- `internal/pkg/repository/file` 为 JSON map 文件增加进程内解码缓存，`loadMap` 首次读取后缓存已解码 map，`saveMap` 成功写盘后同步刷新缓存。
+- 缓存返回 map 副本，避免调用方直接修改缓存对象；各 repository 仍保持自身读写锁。
+- 该优化位于 file repository 基础仓储层，不改变 repository 接口、业务模型、orchestrator、runtime block 或业务目标解析边界。
+- 边界约束：file backend 仍按当前服务进程作为本地数据管理者设计；不把外部进程直接修改 JSON 文件后的即时可见性作为高并发路径优化目标。
+
+验证：
+
+```bash
+go test ./internal/pkg/repository/file ./internal/pkg/repository ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/application/workorchd/biz/appservice -count=1
+go test ./... -count=1 -p 1
+```
+
+待重新部署后复测：
+
+```bash
+WORKORCH_LOAD_LLM_MODE=mock \
+WORKORCH_LOAD_CONCURRENCY=20 \
+WORKORCH_LOAD_TOTAL=100 \
+WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS=100 \
+WORKORCH_LOAD_MIN_SUCCESS_RATE=1.0 \
+./scripts/loadtest-governed-workspace-concurrency.sh
+
+WORKORCH_LOAD_LLM_MODE=mock \
+WORKORCH_LOAD_CONCURRENCY=30 \
+WORKORCH_LOAD_TOTAL=150 \
+WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS=100 \
+WORKORCH_LOAD_MIN_SUCCESS_RATE=1.0 \
+./scripts/loadtest-governed-workspace-concurrency.sh
+```
+
+后续优化建议：
+
+- 如果 file map 缓存部署后 `c30` 仍吞吐低于 `c20`，不要继续扩大并发，应把 `c20` 固化为 file backend 的当前推荐上限。
+- 如果 `approval_to_completed` p95 仍超过 10s，应推进 run 级 EventRecord append-only JSONL 或批量写入，避免完成阶段多次重写 run 级 JSON map。
+- 如果 snapshot/observability p95 仍超过 1s，应新增 Workspace Board summary read model，让 Web 高频读取轻量投影。
+
+## 19. 2026-05-01 并发压测阶段性收尾结论
+
+本轮并发压测阶段性收尾。结论适用于当前 MVP 本地部署形态：
+
+```text
+repository.backend = file
+server.maxConcurrentRuns = 100
+LLM 容量基线 = mock
+MCP sessionPolicy = transient
+```
+
+最终验收基线：
+
+| 用途 | LLM | client 并发 | 总量 | 通过标准 | 说明 |
+| --- | --- | ---: | ---: | --- | --- |
+| 快速回归 | mock | 10 | 50 | 成功率 100%，无 HTTP/LLM/timeline 异常 | 用于日常代码变更后快速确认完整治理闭环 |
+| 高压验收 | mock | 20 | 100 | 成功率 100%，无 HTTP/LLM/timeline 异常 | 当前 file backend 推荐容量上限 |
+| 真实端到端抽检 | real | 1-2 | 小批量 | 成功完成业务闭环，单独记录 provider 协议问题 | 不作为 workorch 内部容量基准，不进入 CI |
+
+不再作为常规验收项：
+
+| 场景 | 结论 | 原因 |
+| --- | --- | --- |
+| `concurrency >= 30` 的常规容量压测 | 阶段性停止 | `c30/t150` 虽 100% 完成，但吞吐下降到 `22.28 workspace/min`，e2e p95 达到 `120.81s` |
+| 单纯继续提高 `server.maxConcurrentRuns` | 阶段性停止 | Run 队列执行槽不是当前主瓶颈；瓶颈在 file backend JSON map 读写、Result/Artifact/EventRecord 物化和读模型回查 |
+| 用真实 LLM 作为容量基准 | 阶段性停止 | provider latency、限流和协议稳定性会污染 workorch 内部容量判断 |
+
+已确认能力：
+
+- Mock 容量压测完整覆盖两轮 Decision Ticket、一次 Approval、MCP ToolCall、ValidationResult、RuntimeCheckpoint、accepted Result、linked Artifact、Run snapshot、Workspace snapshot、observability timeline。
+- 在当前 file backend 下，`c20/t100` 是业务正确性与效率的平衡点；最近有效批次 `/tmp/workorch-loadtest-load-20260501042810-84cymxg3` 达到 `65.70 workspace/min`。
+- `c30/t150` 验证了业务正确性和稳定性仍可保持，但效率严重退化，因此不应作为 MVP 常规验收目标。
+- 本轮优化保持模块边界：性能治理集中在 `internal/pkg/repository/file`、`internal/modules/application/workorchd/biz/bootstrap` 和 read-model 使用路径，不向 `kernel/orchestrator` 或 runtime blocks 注入具体业务解析逻辑。
+
+已识别的下一阶段性能专项，而非本轮并发压测遗留：
+
+- 持久化事件流：将 run 级 `EventRecord` 从 JSON map 多次重写推进为 append-only JSONL、per-run event index 或正式持久化后端。
+- 正式持久化后端：若目标继续提升 `c20` 以上吞吐，应引入 SQLite、Badger、Postgres 等后端，而不是继续压榨 file backend。
+- 轻量读模型：为 Workspace Board / 运行过程列表增加 summary read model，避免 Web 高频刷新完整 snapshot / observability。
+- 完成阶段批量物化：对 Result、Artifact、RuntimeCheckpoint、EventRecord 的完成阶段写入做批量提交或异步投影，降低 `approval_to_completed` p95。
+
+收尾决策：
+
+- 当前并发压测作为 MVP file backend 容量验证已完成。
+- 后续普通功能开发只需执行快速回归 `c10/t50` 或高压验收 `c20/t100`。
+- 只有当持久化后端、事件流或 summary read model 发生实质变更时，才重新开启容量曲线压测。
+- `c30+` 后续只作为专项性能实验，不作为常规验收阻塞项。

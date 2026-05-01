@@ -1011,6 +1011,15 @@ func TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems(t *t
 	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
+	workspaceAfterDecision, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspaceID))
+	if err != nil {
+		t.Fatalf("get workspace after decision: %v", err)
+	}
+	workspaceAfterDecision.ActiveRunID = ""
+	workspaceAfterDecision.State = common.WorkspaceStateActive
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceAfterDecision); err != nil {
+		t.Fatalf("clear decision active run: %v", err)
+	}
 
 	approvalRunID := "run-approval-workspace-snapshot"
 	approvalRun := prepareApprovalRun(t, dataRoot, workspaceID, approvalRunID)

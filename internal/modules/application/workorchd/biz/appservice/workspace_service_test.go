@@ -49,6 +49,63 @@ func TestReadWorkspaceWithBackendReturnsPersistedWorkspace(t *testing.T) {
 	}
 }
 
+func TestReadAndListWorkspacesProjectActiveRunState(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	created, err := CreateWorkspaceWithBackend(ctx, "file", dataRoot, "projected workspace", "", "workspaces/projected")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	run, err := CreateRunWithBackend(ctx, "file", dataRoot, created.ID, "run-project-workspace", "", "")
+	if err != nil {
+		t.Fatalf("CreateRunWithBackend: %v", err)
+	}
+	session, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("Exports: %v", err)
+	}
+	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(created.ID))
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.ActiveRunID = common.RunID(run.ID)
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("update workspace: %v", err)
+	}
+	runItem, err := exports.Repositories.Runs.Get(ctx, common.RunID(run.ID))
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	runItem.State = common.RunStateBlockedOnApproval
+	runItem.BlockingApprovalID = common.ApprovalID("approval-project-workspace")
+	if err := exports.Repositories.Runs.Update(ctx, runItem); err != nil {
+		t.Fatalf("update run: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
+
+	readBack, err := ReadWorkspaceWithBackend(ctx, "file", dataRoot, created.ID)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
+	}
+	if readBack.State != string(common.WorkspaceStateBlocked) || readBack.ActiveRunID != run.ID {
+		t.Fatalf("read workspace = %+v, want blocked projection with active run", readBack)
+	}
+	items, err := ListWorkspacesWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("ListWorkspacesWithBackend: %v", err)
+	}
+	if len(items) != 1 || items[0].State != string(common.WorkspaceStateBlocked) || items[0].ActiveRunID != run.ID {
+		t.Fatalf("listed workspaces = %+v, want blocked projection with active run", items)
+	}
+}
+
 func TestCreateWorkspaceWithBackendDefaultsWorkingDirectory(t *testing.T) {
 	dataRoot := t.TempDir()
 	item, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "appservice default directory workspace", "", "")

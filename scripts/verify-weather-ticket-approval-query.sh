@@ -609,6 +609,24 @@ print(provider_id)
 PY
 }
 
+wait_run_state() {
+  local run_id="$1"
+  local expected_state="$2"
+  local output_file="$3"
+  local deadline=$((SECONDS + 180))
+
+  while (( SECONDS <= deadline )); do
+    curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" >"$output_file"
+    if grep '"state": "'"$expected_state"'"' "$output_file" >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  cat "$output_file" >&2
+  return 1
+}
+
 validate_snapshot() {
   python3 - "$TMP_DIR/snapshot.json" "$TMP_DIR/observability.json" "$ticket_id" "$approval_id" "$COUNTRY" "$PROVINCE" "$CITY" <<'PY'
 import json
@@ -805,9 +823,24 @@ curl -fsS -H "Content-Type: application/json" -X POST \
   -d @"$TMP_DIR/decision-resolution.json" >"$TMP_DIR/decision-resolved.json"
 grep '"resolutionType": "provide_missing_info"' "$TMP_DIR/decision-resolved.json" >/dev/null
 
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$run_id/resume" >"$TMP_DIR/approval-activation.json"
-grep '"state": "blocked_on_approval"' "$TMP_DIR/approval-activation.json" >/dev/null
-approval_id="$(json_path "$TMP_DIR/approval-activation.json" "run.blockingApprovalId")"
+wait_run_state "$run_id" "blocked_on_approval" "$TMP_DIR/approval-status.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces" >"$TMP_DIR/workspaces-blocked.json"
+python3 - "$TMP_DIR/workspaces-blocked.json" "$workspace_id" "$run_id" <<'PY'
+import json
+import sys
+
+path, workspace_id, run_id = sys.argv[1:]
+data = json.load(open(path, encoding="utf-8"))
+for item in data.get("workspaces") or []:
+    if item.get("id") != workspace_id:
+        continue
+    if item.get("state") != "blocked" or item.get("activeRunId") != run_id:
+        raise SystemExit(f"workspace list projection = {item}, want blocked activeRunId={run_id}")
+    break
+else:
+    raise SystemExit(f"workspace {workspace_id} missing from workspace list")
+PY
+approval_id="$(json_path "$TMP_DIR/approval-status.json" "status.blockingApprovalId")"
 approval_path="$(url_encode "$approval_id")"
 curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_path" >"$TMP_DIR/approval-pending.json"
 grep '"state": "pending"' "$TMP_DIR/approval-pending.json" >/dev/null
@@ -815,8 +848,7 @@ grep "$CITY" "$TMP_DIR/approval-pending.json" >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_path/approve" >"$TMP_DIR/approval-approved.json"
 grep '"state": "approved"' "$TMP_DIR/approval-approved.json" >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$run_id/resume" >"$TMP_DIR/run-completed.json"
-grep '"state": "completed"' "$TMP_DIR/run-completed.json" >/dev/null
+wait_run_state "$run_id" "completed" "$TMP_DIR/run-completed-status.json"
 
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/observability.json"

@@ -281,7 +281,7 @@ Acceptance criteria:
 | QC8 | Stronger LLM execution context package | P1 | implemented | Orchestrator context package tests; pending deployed real workspace repair regression |
 | QC9 | WorkPlan / ExecutionSection projection | P1 | implemented | Web build and API snapshot test |
 | QC10 | Rich Result / Artifact summary schema | P1 | implemented | Orchestrator, read-model, LLM adapter tests and Web build |
-| QC11 | Performance regression scenario for concurrent governance Runs | P1 | planned | Load test with ticket and approval |
+| QC11 | Performance regression scenario for concurrent governance Runs | P1 | implemented | Governed load test controller with pass gate, failure classes, Result/Artifact integrity assertions |
 
 ## Recommended Delivery Order
 
@@ -366,6 +366,12 @@ Acceptance criteria:
   generated final summary uses the configured dialog language where available,
   and the workspace deliverable manifest groups files by category with DoD
   relation and evidence refs without exposing local absolute paths.
+- 2026-04-30: Hardened the governed workspace concurrency load test controller
+  for performance regression use. Reports now include success-rate pass gates,
+  HTTP / curl failure totals, failure class totals, and per-workspace checks
+  for formal Result `summaryDetail`, Artifact categories, `workorch://` URI
+  discipline, downloadable final summary content, Result / Artifact linkage,
+  governance records, MCP evidence, checkpoints, and timeline `runState`.
 - Completed items should be marked in this document with verification evidence.
 - Broad future demand candidates remain in `docs/next-stage-demand-candidates.md`.
 - Previously closed MVP scope remains in `docs/mvp-backlog.md` and should not be

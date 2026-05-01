@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,7 +48,11 @@ type workspaceScopedFileStore struct {
 	dataRoot string
 
 	indexMu            sync.Mutex
+	indexLoaded        bool
+	indexCache         workspaceIndex
 	mu                 sync.Mutex
+	runRootMu          sync.RWMutex
+	runRootsByID       map[common.RunID]string
 	workspaces         map[string]*fileRepo.WorkspaceRepository
 	goals              map[string]*fileRepo.GoalRepository
 	dods               map[string]*fileRepo.DoDRepository
@@ -131,6 +136,7 @@ func NewWorkspaceScopedFileRepositorySet(dataRoot string) WorkspaceScopedFileRep
 func newWorkspaceScopedFileStore(dataRoot string) *workspaceScopedFileStore {
 	return &workspaceScopedFileStore{
 		dataRoot:           dataRoot,
+		runRootsByID:       map[common.RunID]string{},
 		workspaces:         map[string]*fileRepo.WorkspaceRepository{},
 		goals:              map[string]*fileRepo.GoalRepository{},
 		dods:               map[string]*fileRepo.DoDRepository{},
@@ -159,7 +165,9 @@ func (s *workspaceScopedFileStore) workspaceSoulBindingsPath(workspaceID common.
 }
 
 func (s *workspaceScopedFileStore) runRoot(workspaceID common.WorkspaceID, runID common.RunID) string {
-	return filepath.Join(s.dataRoot, "workspaces", string(workspaceID), "runs", string(runID))
+	root := filepath.Join(s.dataRoot, "workspaces", string(workspaceID), "runs", string(runID))
+	s.rememberRunRoot(runID, root)
+	return root
 }
 
 func (s *workspaceScopedFileStore) systemPath(name string) string {
@@ -187,6 +195,7 @@ func (s *workspaceScopedFileStore) allWorkspaceRoots() []string {
 func (s *workspaceScopedFileStore) allRunRoots() []string {
 	matches, _ := filepath.Glob(filepath.Join(s.dataRoot, "workspaces", "*", "runs", "*"))
 	sort.Strings(matches)
+	s.rememberRunRoots(matches)
 	return matches
 }
 
@@ -196,7 +205,53 @@ func (s *workspaceScopedFileStore) workspaceRunRoots(workspaceID common.Workspac
 	}
 	matches, _ := filepath.Glob(filepath.Join(s.dataRoot, "workspaces", string(workspaceID), "runs", "*"))
 	sort.Strings(matches)
+	s.rememberRunRoots(matches)
 	return matches
+}
+
+func (s *workspaceScopedFileStore) rememberRunRoot(runID common.RunID, root string) {
+	if runID == "" || root == "" {
+		return
+	}
+	s.runRootMu.Lock()
+	defer s.runRootMu.Unlock()
+	s.runRootsByID[runID] = root
+}
+
+func (s *workspaceScopedFileStore) rememberRunRoots(roots []string) {
+	for _, root := range roots {
+		runID := common.RunID(filepath.Base(root))
+		if runID != "" {
+			s.rememberRunRoot(runID, root)
+		}
+	}
+}
+
+func (s *workspaceScopedFileStore) runRootByID(runID common.RunID) (string, bool) {
+	if runID == "" {
+		return "", false
+	}
+	s.runRootMu.RLock()
+	root, ok := s.runRootsByID[runID]
+	s.runRootMu.RUnlock()
+	if ok {
+		return root, true
+	}
+	matches, _ := filepath.Glob(filepath.Join(s.dataRoot, "workspaces", "*", "runs", string(runID)))
+	sort.Strings(matches)
+	if len(matches) == 0 {
+		return "", false
+	}
+	s.rememberRunRoot(runID, matches[0])
+	return matches[0], true
+}
+
+func runIDFromStepID(stepID common.StepID) common.RunID {
+	prefix, _, ok := strings.Cut(string(stepID), "/")
+	if !ok || prefix == "" {
+		return ""
+	}
+	return common.RunID(prefix)
 }
 
 func (s *workspaceScopedFileStore) workspaceRepo(path string) *fileRepo.WorkspaceRepository {
@@ -376,29 +431,38 @@ func (s *workspaceScopedFileStore) approvalRepo(path string) *fileRepo.ApprovalR
 }
 
 func (s *workspaceScopedFileStore) loadWorkspaceIndexLocked() (workspaceIndex, error) {
+	if s.indexLoaded {
+		return cloneWorkspaceIndex(s.indexCache), nil
+	}
 	path := s.workspaceIndexPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			s.indexCache = workspaceIndex{}
+			s.indexLoaded = true
 			return workspaceIndex{}, nil
 		}
 		return workspaceIndex{}, err
 	}
 	if len(data) == 0 {
+		s.indexCache = workspaceIndex{}
+		s.indexLoaded = true
 		return workspaceIndex{}, nil
 	}
 	var idx workspaceIndex
 	if err := json.Unmarshal(data, &idx); err != nil {
 		return workspaceIndex{}, err
 	}
-	return idx, nil
+	s.indexCache = cloneWorkspaceIndex(idx)
+	s.indexLoaded = true
+	return cloneWorkspaceIndex(idx), nil
 }
 
 func (s *workspaceScopedFileStore) saveWorkspaceIndexLocked(idx workspaceIndex) error {
 	sort.Slice(idx.Workspaces, func(i, j int) bool {
 		return string(idx.Workspaces[i].WorkspaceID) < string(idx.Workspaces[j].WorkspaceID)
 	})
-	data, err := json.MarshalIndent(idx, "", "  ")
+	data, err := json.Marshal(idx)
 	if err != nil {
 		return err
 	}
@@ -406,7 +470,12 @@ func (s *workspaceScopedFileStore) saveWorkspaceIndexLocked(idx workspaceIndex) 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return err
+	}
+	s.indexCache = cloneWorkspaceIndex(idx)
+	s.indexLoaded = true
+	return nil
 }
 
 func (s *workspaceScopedFileStore) upsertWorkspaceIndex(item *workspacemodel.Workspace) error {
@@ -478,6 +547,12 @@ func (s *workspaceScopedFileStore) deleteWorkspaceIndexEntry(workspaceID common.
 	}
 	idx.Workspaces = next
 	return s.saveWorkspaceIndexLocked(idx)
+}
+
+func cloneWorkspaceIndex(idx workspaceIndex) workspaceIndex {
+	return workspaceIndex{
+		Workspaces: append([]workspaceIndexEntry(nil), idx.Workspaces...),
+	}
 }
 
 type workspaceScopedWorkspaceRepository struct {
@@ -884,9 +959,19 @@ func (r *workspaceScopedRunRepository) Get(ctx context.Context, id common.RunID)
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
+	if root, ok := r.store.runRootByID(id); ok {
+		item, err := r.store.runRepo(r.store.runPath(root, workspaceScopedRunFile)).Get(ctx, id)
+		if err == nil {
+			return item, nil
+		}
+		if err != common.ErrNotFound {
+			return nil, err
+		}
+	}
 	for _, root := range r.store.allRunRoots() {
 		item, err := r.store.runRepo(r.store.runPath(root, workspaceScopedRunFile)).Get(ctx, id)
 		if err == nil {
+			r.store.rememberRunRoot(id, root)
 			return item, nil
 		}
 		if err != common.ErrNotFound {
@@ -900,6 +985,19 @@ func (r *workspaceScopedRunRepository) List(ctx context.Context) ([]*runmodel.Ru
 	ret := []*runmodel.Run{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.runRepo(r.store.runPath(root, workspaceScopedRunFile)).List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, items...)
+	}
+	sortRuns(ret)
+	return ret, nil
+}
+
+func (r *workspaceScopedRunRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
+	ret := []*runmodel.Run{}
+	for _, root := range r.store.workspaceRunRoots(workspaceID) {
+		items, err := r.store.runRepo(r.store.runPath(root, workspaceScopedRunFile)).ListByWorkspaceID(ctx, workspaceID)
 		if err != nil {
 			return nil, err
 		}
@@ -980,6 +1078,14 @@ func (r *workspaceScopedStepRepository) Get(ctx context.Context, id common.StepI
 }
 
 func (r *workspaceScopedStepRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.Step, error) {
+	if root, ok := r.store.runRootByID(runID); ok {
+		items, err := r.store.stepRepo(r.store.runPath(root, workspaceScopedStepFile)).ListByRun(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		sortSteps(items)
+		return nilIfEmpty(items), nil
+	}
 	ret := []*runmodel.Step{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.stepRepo(r.store.runPath(root, workspaceScopedStepFile)).ListByRun(ctx, runID)
@@ -1060,6 +1166,14 @@ func (r *workspaceScopedToolCallRepository) Get(ctx context.Context, id common.T
 }
 
 func (r *workspaceScopedToolCallRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.ToolCall, error) {
+	if root, ok := r.store.runRootByID(runID); ok {
+		items, err := r.store.toolCallRepo(r.store.runPath(root, workspaceScopedToolCallFile)).ListByRun(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		sortToolCalls(items)
+		return nilIfEmpty(items), nil
+	}
 	ret := []*runmodel.ToolCall{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.toolCallRepo(r.store.runPath(root, workspaceScopedToolCallFile)).ListByRun(ctx, runID)
@@ -1073,6 +1187,16 @@ func (r *workspaceScopedToolCallRepository) ListByRun(ctx context.Context, runID
 }
 
 func (r *workspaceScopedToolCallRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*runmodel.ToolCall, error) {
+	if runID := runIDFromStepID(stepID); runID != "" {
+		if root, ok := r.store.runRootByID(runID); ok {
+			items, err := r.store.toolCallRepo(r.store.runPath(root, workspaceScopedToolCallFile)).ListByStep(ctx, stepID)
+			if err != nil {
+				return nil, err
+			}
+			sortToolCalls(items)
+			return nilIfEmpty(items), nil
+		}
+	}
 	ret := []*runmodel.ToolCall{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.toolCallRepo(r.store.runPath(root, workspaceScopedToolCallFile)).ListByStep(ctx, stepID)
@@ -1144,6 +1268,14 @@ func (r *workspaceScopedPatchRepository) Get(ctx context.Context, id common.Patc
 }
 
 func (r *workspaceScopedPatchRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.Patch, error) {
+	if root, ok := r.store.runRootByID(runID); ok {
+		items, err := r.store.patchRepo(r.store.runPath(root, workspaceScopedPatchFile)).ListByRun(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		sortPatches(items)
+		return nilIfEmpty(items), nil
+	}
 	ret := []*runmodel.Patch{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.patchRepo(r.store.runPath(root, workspaceScopedPatchFile)).ListByRun(ctx, runID)
@@ -1157,6 +1289,16 @@ func (r *workspaceScopedPatchRepository) ListByRun(ctx context.Context, runID co
 }
 
 func (r *workspaceScopedPatchRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*runmodel.Patch, error) {
+	if runID := runIDFromStepID(stepID); runID != "" {
+		if root, ok := r.store.runRootByID(runID); ok {
+			items, err := r.store.patchRepo(r.store.runPath(root, workspaceScopedPatchFile)).ListByStep(ctx, stepID)
+			if err != nil {
+				return nil, err
+			}
+			sortPatches(items)
+			return nilIfEmpty(items), nil
+		}
+	}
 	ret := []*runmodel.Patch{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.patchRepo(r.store.runPath(root, workspaceScopedPatchFile)).ListByStep(ctx, stepID)
@@ -1228,6 +1370,14 @@ func (r *workspaceScopedValidationResultRepository) Get(ctx context.Context, id 
 }
 
 func (r *workspaceScopedValidationResultRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.ValidationResult, error) {
+	if root, ok := r.store.runRootByID(runID); ok {
+		items, err := r.store.validationResultRepo(r.store.runPath(root, workspaceScopedValidationResultFile)).ListByRun(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		sortValidationResults(items)
+		return nilIfEmpty(items), nil
+	}
 	ret := []*runmodel.ValidationResult{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.validationResultRepo(r.store.runPath(root, workspaceScopedValidationResultFile)).ListByRun(ctx, runID)
@@ -1241,6 +1391,16 @@ func (r *workspaceScopedValidationResultRepository) ListByRun(ctx context.Contex
 }
 
 func (r *workspaceScopedValidationResultRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*runmodel.ValidationResult, error) {
+	if runID := runIDFromStepID(stepID); runID != "" {
+		if root, ok := r.store.runRootByID(runID); ok {
+			items, err := r.store.validationResultRepo(r.store.runPath(root, workspaceScopedValidationResultFile)).ListByStep(ctx, stepID)
+			if err != nil {
+				return nil, err
+			}
+			sortValidationResults(items)
+			return nilIfEmpty(items), nil
+		}
+	}
 	ret := []*runmodel.ValidationResult{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.validationResultRepo(r.store.runPath(root, workspaceScopedValidationResultFile)).ListByStep(ctx, stepID)
@@ -1312,6 +1472,14 @@ func (r *workspaceScopedRuntimeCheckpointRepository) Get(ctx context.Context, id
 }
 
 func (r *workspaceScopedRuntimeCheckpointRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.RuntimeCheckpoint, error) {
+	if root, ok := r.store.runRootByID(runID); ok {
+		items, err := r.store.runtimeCheckpointRepo(r.store.runPath(root, workspaceScopedRuntimeCheckpointFile)).ListByRun(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		sortRuntimeCheckpoints(items)
+		return nilIfEmpty(items), nil
+	}
 	ret := []*runmodel.RuntimeCheckpoint{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.runtimeCheckpointRepo(r.store.runPath(root, workspaceScopedRuntimeCheckpointFile)).ListByRun(ctx, runID)
@@ -1396,6 +1564,14 @@ func (r *workspaceScopedResultRepository) ListByWorkspace(ctx context.Context, w
 }
 
 func (r *workspaceScopedResultRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*resultmodel.Result, error) {
+	if root, ok := r.store.runRootByID(runID); ok {
+		items, err := r.store.resultRepo(r.store.runPath(root, workspaceScopedResultFile)).ListByRun(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		sortResults(items)
+		return nilIfEmpty(items), nil
+	}
 	ret := []*resultmodel.Result{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.resultRepo(r.store.runPath(root, workspaceScopedResultFile)).ListByRun(ctx, runID)
@@ -1480,6 +1656,14 @@ func (r *workspaceScopedArtifactRepository) ListByWorkspace(ctx context.Context,
 }
 
 func (r *workspaceScopedArtifactRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*resultmodel.Artifact, error) {
+	if root, ok := r.store.runRootByID(runID); ok {
+		items, err := r.store.artifactRepo(r.store.runPath(root, workspaceScopedArtifactFile)).ListByRun(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		sortArtifacts(items)
+		return nilIfEmpty(items), nil
+	}
 	ret := []*resultmodel.Artifact{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.artifactRepo(r.store.runPath(root, workspaceScopedArtifactFile)).ListByRun(ctx, runID)
@@ -1578,12 +1762,21 @@ func (r *workspaceScopedEventRecordRepository) List(ctx context.Context, query r
 	listQuery.CursorAfterID = ""
 	listQuery.Limit = 0
 	ret := []*eventstreammodel.EventRecord{}
-	systemItems, err := r.store.eventRecordRepo(r.store.systemPath(workspaceScopedEventRecordFile)).List(ctx, listQuery)
-	if err != nil {
-		return nil, err
+	if query.RunID == "" {
+		systemItems, err := r.store.eventRecordRepo(r.store.systemPath(workspaceScopedEventRecordFile)).List(ctx, listQuery)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, systemItems...)
 	}
-	ret = append(ret, systemItems...)
-	for _, root := range r.store.workspaceRunRoots(query.WorkspaceID) {
+	runRoots := r.store.workspaceRunRoots(query.WorkspaceID)
+	if query.RunID != "" {
+		runRoots = nil
+		if root, ok := r.store.runRootByID(query.RunID); ok {
+			runRoots = []string{root}
+		}
+	}
+	for _, root := range runRoots {
 		items, err := r.store.eventRecordRepo(r.store.runPath(root, workspaceScopedEventRecordFile)).List(ctx, listQuery)
 		if err != nil {
 			return nil, err
@@ -1641,6 +1834,44 @@ func (r *workspaceScopedDecisionTicketRepository) List(ctx context.Context) ([]*
 	ret := []*decisionmodel.Ticket{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.ticketRepo(r.store.runPath(root, workspaceScopedTicketFile)).List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, items...)
+	}
+	sortTickets(ret)
+	return ret, nil
+}
+
+func (r *workspaceScopedDecisionTicketRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*decisionmodel.Ticket, error) {
+	if runID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	if root, ok := r.store.runRootByID(runID); ok {
+		items, err := r.store.ticketRepo(r.store.runPath(root, workspaceScopedTicketFile)).ListByRunID(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		sortTickets(items)
+		return nilIfEmpty(items), nil
+	}
+	for _, root := range r.store.allRunRoots() {
+		items, err := r.store.ticketRepo(r.store.runPath(root, workspaceScopedTicketFile)).ListByRunID(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		if len(items) > 0 {
+			sortTickets(items)
+			return items, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *workspaceScopedDecisionTicketRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*decisionmodel.Ticket, error) {
+	ret := []*decisionmodel.Ticket{}
+	for _, root := range r.store.workspaceRunRoots(workspaceID) {
+		items, err := r.store.ticketRepo(r.store.runPath(root, workspaceScopedTicketFile)).ListByWorkspaceID(ctx, workspaceID)
 		if err != nil {
 			return nil, err
 		}
@@ -1780,6 +2011,44 @@ func (r *workspaceScopedApprovalRepository) List(ctx context.Context) ([]*approv
 	ret := []*approvalmodel.Approval{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.approvalRepo(r.store.runPath(root, workspaceScopedApprovalFile)).List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, items...)
+	}
+	sortApprovals(ret)
+	return ret, nil
+}
+
+func (r *workspaceScopedApprovalRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*approvalmodel.Approval, error) {
+	if runID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	if root, ok := r.store.runRootByID(runID); ok {
+		items, err := r.store.approvalRepo(r.store.runPath(root, workspaceScopedApprovalFile)).ListByRunID(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		sortApprovals(items)
+		return nilIfEmpty(items), nil
+	}
+	for _, root := range r.store.allRunRoots() {
+		items, err := r.store.approvalRepo(r.store.runPath(root, workspaceScopedApprovalFile)).ListByRunID(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		if len(items) > 0 {
+			sortApprovals(items)
+			return items, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *workspaceScopedApprovalRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*approvalmodel.Approval, error) {
+	ret := []*approvalmodel.Approval{}
+	for _, root := range r.store.workspaceRunRoots(workspaceID) {
+		items, err := r.store.approvalRepo(r.store.runPath(root, workspaceScopedApprovalFile)).ListByWorkspaceID(ctx, workspaceID)
 		if err != nil {
 			return nil, err
 		}

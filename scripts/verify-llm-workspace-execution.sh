@@ -349,6 +349,24 @@ activate_workspace_execution_with_auto_memory() {
     -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
 }
 
+wait_run_state() {
+  local run_id="$1"
+  local expected_state="$2"
+  local output_file="$3"
+  local deadline=$((SECONDS + 30))
+
+  while (( SECONDS <= deadline )); do
+    curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" >"$output_file"
+    if grep '"state": "'"$expected_state"'"' "$output_file" >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  cat "$output_file" >&2
+  return 1
+}
+
 assert_run_recovery_read_models() {
   local run_id="$1"
   local label="$2"
@@ -565,7 +583,7 @@ curl -fsS "$BASE_URL/api/v1/workorch/decisions?runId=$decision_run_id" | grep "\
 curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path" | grep '"decisionKind": "provide_missing_info"' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve" -H 'Content-Type: application/json' \
   -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance"}}' | grep '"resolutionType": "provide_missing_info"' >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$decision_run_id/resume" | grep '"state": "completed"' >/dev/null
+wait_run_state "$decision_run_id" "completed" "$TMP_DIR/decision-after-resolve-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id/observability" | grep '"terminal": true' >/dev/null
 assert_run_recovery_read_models "$decision_run_id" "decision" "completed"
 
@@ -578,7 +596,7 @@ curl -fsS "$BASE_URL/api/v1/workorch/runs/$approval_run_id/status" | grep '"stat
 curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id" | grep "\"id\": \"$approval_id\"" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/approvals?runId=$approval_run_id" | grep "\"id\": \"$approval_id\"" >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_path/reject" | grep '"state": "rejected"' >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$approval_run_id/resume" | grep '"state": "failed"' >/dev/null
+wait_run_state "$approval_run_id" "failed" "$TMP_DIR/approval-rejected-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$approval_run_id/observability" | grep '"terminal": true' >/dev/null
 assert_run_recovery_read_models "$approval_run_id" "approval-rejected" "failed"
 
@@ -590,13 +608,12 @@ multi_gate_ticket_path="$(url_encode "$multi_gate_ticket_id")"
 curl -fsS "$BASE_URL/api/v1/workorch/decisions/$multi_gate_ticket_path" | grep '"decisionKind": "provide_missing_info"' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$multi_gate_ticket_path/resolve" -H 'Content-Type: application/json' \
   -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance","nextGate":"approval"}}' | grep '"resolutionType": "provide_missing_info"' >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/resume" >"$TMP_DIR/multi-gate-approval-activation.json"
-grep '"state": "blocked_on_approval"' "$TMP_DIR/multi-gate-approval-activation.json" >/dev/null
-multi_gate_approval_id="$(json_path "$TMP_DIR/multi-gate-approval-activation.json" "run.blockingApprovalId")"
+wait_run_state "$multi_gate_run_id" "blocked_on_approval" "$TMP_DIR/multi-gate-approval-status.json"
+multi_gate_approval_id="$(json_path "$TMP_DIR/multi-gate-approval-status.json" "status.blockingApprovalId")"
 multi_gate_approval_path="$(url_encode "$multi_gate_approval_id")"
 curl -fsS "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path" | grep '"state": "pending"' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path/approve" | grep '"state": "approved"' >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/resume" | grep '"state": "completed"' >/dev/null
+wait_run_state "$multi_gate_run_id" "completed" "$TMP_DIR/multi-gate-completed-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/snapshot" >"$TMP_DIR/multi-gate-snapshot.json"
 grep "\"id\": \"$multi_gate_ticket_id\"" "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
 grep "\"id\": \"$multi_gate_approval_id\"" "$TMP_DIR/multi-gate-snapshot.json" >/dev/null

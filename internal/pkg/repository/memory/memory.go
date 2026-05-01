@@ -893,6 +893,25 @@ func (r *RunRepository) List(_ context.Context) ([]*run.Run, error) {
 	return ret, nil
 }
 
+func (r *RunRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*run.Run, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := make([]string, 0, len(r.items))
+	for id, item := range r.items {
+		if item.WorkspaceID == workspaceID {
+			ids = append(ids, string(id))
+		}
+	}
+	sort.Strings(ids)
+
+	ret := make([]*run.Run, 0, len(ids))
+	for _, id := range ids {
+		ret = append(ret, cloneRun(r.items[common.RunID(id)]))
+	}
+	return ret, nil
+}
+
 func (r *RunRepository) Update(_ context.Context, item *run.Run) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1375,6 +1394,44 @@ func (r *DecisionTicketRepository) List(_ context.Context) ([]*decision.Ticket, 
 	return ret, nil
 }
 
+func (r *DecisionTicketRepository) ListByRunID(_ context.Context, runID common.RunID) ([]*decision.Ticket, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := make([]string, 0, len(r.items))
+	for id, item := range r.items {
+		if item.RunID == runID {
+			ids = append(ids, string(id))
+		}
+	}
+	sort.Strings(ids)
+
+	ret := make([]*decision.Ticket, 0, len(ids))
+	for _, id := range ids {
+		ret = append(ret, cloneDecisionTicket(r.items[common.TicketID(id)]))
+	}
+	return ret, nil
+}
+
+func (r *DecisionTicketRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*decision.Ticket, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := make([]string, 0, len(r.items))
+	for id, item := range r.items {
+		if item.WorkspaceID == workspaceID {
+			ids = append(ids, string(id))
+		}
+	}
+	sort.Strings(ids)
+
+	ret := make([]*decision.Ticket, 0, len(ids))
+	for _, id := range ids {
+		ret = append(ret, cloneDecisionTicket(r.items[common.TicketID(id)]))
+	}
+	return ret, nil
+}
+
 func (r *DecisionTicketRepository) Update(_ context.Context, item *decision.Ticket) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1474,6 +1531,46 @@ func (r *ApprovalRepository) List(_ context.Context) ([]*approval.Approval, erro
 	ids := make([]string, 0, len(r.items))
 	for id := range r.items {
 		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+
+	ret := make([]*approval.Approval, 0, len(ids))
+	for _, id := range ids {
+		cloned := *r.items[common.ApprovalID(id)]
+		ret = append(ret, &cloned)
+	}
+	return ret, nil
+}
+
+func (r *ApprovalRepository) ListByRunID(_ context.Context, runID common.RunID) ([]*approval.Approval, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := make([]string, 0, len(r.items))
+	for id, item := range r.items {
+		if item.RunID == runID {
+			ids = append(ids, string(id))
+		}
+	}
+	sort.Strings(ids)
+
+	ret := make([]*approval.Approval, 0, len(ids))
+	for _, id := range ids {
+		cloned := *r.items[common.ApprovalID(id)]
+		ret = append(ret, &cloned)
+	}
+	return ret, nil
+}
+
+func (r *ApprovalRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*approval.Approval, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := make([]string, 0, len(r.items))
+	for id, item := range r.items {
+		if item.WorkspaceID == workspaceID {
+			ids = append(ids, string(id))
+		}
 	}
 	sort.Strings(ids)
 

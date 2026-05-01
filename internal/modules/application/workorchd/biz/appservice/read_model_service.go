@@ -540,11 +540,7 @@ func ReadRunStatusWithSession(ctx context.Context, session *RuntimeSession, runI
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	snapshot, err := readRunSnapshot(ctx, deps, common.RunID(runID))
-	if err != nil {
-		return RunStatus{}, err
-	}
-	return mapRunStatus(snapshot), nil
+	return readRunStatus(ctx, deps, common.RunID(runID))
 }
 
 func ReadRunStatusWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (RunStatus, error) {
@@ -951,13 +947,49 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 	return ret, nil
 }
 
+func readRunStatus(ctx context.Context, deps readModelDependencies, runID common.RunID) (RunStatus, error) {
+	item, err := deps.runs.Get(ctx, runID)
+	if err != nil {
+		return RunStatus{}, err
+	}
+	steps, err := deps.steps.ListByRun(ctx, item.ID)
+	if err != nil {
+		return RunStatus{}, err
+	}
+	decisions, err := deps.tickets.ListByRunID(ctx, item.ID)
+	if err != nil {
+		return RunStatus{}, err
+	}
+	approvals, err := deps.approvals.ListByRunID(ctx, item.ID)
+	if err != nil {
+		return RunStatus{}, err
+	}
+	ret := RunStatus{
+		ID:                 string(item.ID),
+		WorkspaceID:        string(item.WorkspaceID),
+		State:              string(item.State),
+		StepCount:          len(steps),
+		DecisionCount:      len(decisions),
+		ApprovalCount:      len(approvals),
+		BlockingTicketID:   string(item.BlockingTicketID),
+		BlockingApprovalID: string(item.BlockingApprovalID),
+		FailureReason:      item.FailureReason,
+	}
+	if currentStep := lastStep(steps); currentStep != nil {
+		ret.CurrentStepID = string(currentStep.ID)
+		ret.CurrentStepKind = currentStep.Kind
+		ret.CurrentStepState = string(currentStep.State)
+	}
+	return ret, nil
+}
+
 func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID) (WorkspaceSnapshot, error) {
 	item, err := deps.workspaces.Get(ctx, workspaceID)
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
 
-	runItems, err := deps.runs.List(ctx)
+	runItems, err := deps.runs.ListByWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
@@ -982,7 +1014,7 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		return WorkspaceSnapshot{}, err
 	}
 
-	ticketItems, err := deps.tickets.List(ctx)
+	ticketItems, err := deps.tickets.ListByWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
@@ -998,7 +1030,7 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		decisions = append(decisions, mapDecision(ticket, resolution))
 	}
 
-	approvalItems, err := deps.approvals.List(ctx)
+	approvalItems, err := deps.approvals.ListByWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
@@ -1218,7 +1250,7 @@ func isTerminalProjectionRunState(state common.RunState) bool {
 }
 
 func decisionsForRun(ctx context.Context, deps readModelDependencies, run *runmodel.Run) ([]Decision, *decisionmodel.Ticket, *decisionmodel.Resolution, error) {
-	items, err := deps.tickets.List(ctx)
+	items, err := deps.tickets.ListByRunID(ctx, run.ID)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -1249,7 +1281,7 @@ func decisionsForRun(ctx context.Context, deps readModelDependencies, run *runmo
 }
 
 func approvalsForRun(ctx context.Context, deps readModelDependencies, run *runmodel.Run) ([]Approval, *approvalmodel.Approval, error) {
-	items, err := deps.approvals.List(ctx)
+	items, err := deps.approvals.ListByRunID(ctx, run.ID)
 	if err != nil {
 		return nil, nil, err
 	}

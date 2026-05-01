@@ -898,6 +898,13 @@ workspace 并发压测方案已固化，见：
 Decision Ticket、Approval、MCP / ToolCall、RuntimeCheckpoint、ValidationResult、Result、
 Artifact 与 observability 回查。
 
+阶段性收尾结论：
+
+- 当前 MVP file backend 的快速回归基线为 `concurrency=10,total=50`。
+- 当前 MVP file backend 的高压验收基线为 `concurrency=20,total=100`。
+- `concurrency>=30` 不再作为常规验收项；最近 `c30/t150` 业务正确性通过，但吞吐和尾延迟严重退化。
+- 后续容量继续提升应作为持久化后端、append-only 事件流、summary read model 或完成阶段批量物化专项推进，不再通过单纯扩大并发收口。
+
 当前进度：
 
 - `B1 workspace 实例接口` 已完成
