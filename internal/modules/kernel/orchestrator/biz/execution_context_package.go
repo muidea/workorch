@@ -50,7 +50,7 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		result             map[string]any
 		deliverables       []map[string]any
 		failures           []map[string]any
-		currentGovernance    []map[string]any
+		currentGovernance  []map[string]any
 		acceptedResultRead bool
 		deliverablesRead   bool
 		wg                 sync.WaitGroup
