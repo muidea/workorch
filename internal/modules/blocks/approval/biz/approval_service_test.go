@@ -347,26 +347,50 @@ func TestService_EnsureApprovalResolution_IsIdempotentAndRejectsOppositeTerminal
 	}
 }
 
-func TestService_EnsureApprovalResolutionReusesLoadedApproval(t *testing.T) {
+func TestService_EnsureApprovalResolutionReturnsLoadedApproval(t *testing.T) {
 	ctx := context.Background()
-	repo := newCountingApprovalRepository()
-	service := NewService(repo, nil)
-	approvalID := common.ApprovalID("approval-ensure-loaded")
-	if err := service.CreateApproval(ctx, approvalservice.CreateApprovalCommand{
-		ApprovalID:  approvalID,
-		WorkspaceID: common.WorkspaceID("ws-1"),
-		RunID:       common.RunID("run-1"),
-		StepID:      common.StepID("run-1/step-1"),
-		Reason:      "need human approval",
-	}); err != nil {
-		t.Fatalf("create approval: %v", err)
-	}
 
-	if err := service.EnsureApproved(ctx, approvalservice.ResolveApprovalCommand{ApprovalID: approvalID}); err != nil {
-		t.Fatalf("ensure approved: %v", err)
-	}
-	if got := repo.getCount.Load(); got != 1 {
-		t.Fatalf("approval Get count = %d, want one read reused for transition", got)
+	for _, tc := range []struct {
+		name      string
+		resolve   func(*Service, context.Context, approvalservice.ResolveApprovalCommand) (*approvalModel.Approval, error)
+		wantState common.ApprovalState
+	}{
+		{
+			name:      "approved",
+			resolve:   (*Service).EnsureApprovedAndReturn,
+			wantState: common.ApprovalStateApproved,
+		},
+		{
+			name:      "rejected",
+			resolve:   (*Service).EnsureRejectedAndReturn,
+			wantState: common.ApprovalStateRejected,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newCountingApprovalRepository()
+			service := NewService(repo, nil)
+			approvalID := common.ApprovalID("approval-ensure-loaded-" + tc.name)
+			if err := service.CreateApproval(ctx, approvalservice.CreateApprovalCommand{
+				ApprovalID:  approvalID,
+				WorkspaceID: common.WorkspaceID("ws-1"),
+				RunID:       common.RunID("run-1"),
+				StepID:      common.StepID("run-1/step-1"),
+				Reason:      "need human approval",
+			}); err != nil {
+				t.Fatalf("create approval: %v", err)
+			}
+
+			item, err := tc.resolve(service, ctx, approvalservice.ResolveApprovalCommand{ApprovalID: approvalID})
+			if err != nil {
+				t.Fatalf("ensure %s: %v", tc.name, err)
+			}
+			if item == nil || item.ID != approvalID || item.State != tc.wantState {
+				t.Fatalf("returned approval = %+v, want %s", item, tc.wantState)
+			}
+			if got := repo.getCount.Load(); got != 1 {
+				t.Fatalf("approval Get count = %d, want one read reused for transition and response", got)
+			}
+		})
 	}
 }
 

@@ -184,15 +184,11 @@ func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) 
 
 	r.State = common.RunStateRunning
 	r.FailureReason = ""
-	if err := o.runs.Update(ctx, r); err != nil {
+	ws, err = o.syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, ws)
+	if err != nil {
 		return err
 	}
 	if err := o.publishRunStateChanged(ctx, r); err != nil {
-		return err
-	}
-	ws.ActiveRunID = runID
-	ws.State = common.WorkspaceStateRunning
-	if err := o.workspaces.Update(ctx, ws); err != nil {
 		return err
 	}
 	if err := o.publishWorkspaceStateChanged(ctx, ws, runID); err != nil {
@@ -236,6 +232,10 @@ func (o *RuntimeOrchestrator) BlockOnDecision(ctx context.Context, runID common.
 }
 
 func (o *RuntimeOrchestrator) blockOnDecision(ctx context.Context, r *runModel.Run, workspace *workspaceModel.Workspace, ticketID common.TicketID) error {
+	return o.blockOnDecisionAtStep(ctx, r, workspace, ticketID, "")
+}
+
+func (o *RuntimeOrchestrator) blockOnDecisionAtStep(ctx context.Context, r *runModel.Run, workspace *workspaceModel.Workspace, ticketID common.TicketID, currentStepID common.StepID) error {
 	if r == nil || r.ID == "" || ticketID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -246,13 +246,14 @@ func (o *RuntimeOrchestrator) blockOnDecision(ctx context.Context, r *runModel.R
 	r.BlockingTicketID = ticketID
 	r.BlockingApprovalID = ""
 	r.FailureReason = ""
-	if err := o.runs.Update(ctx, r); err != nil {
+	workspace, err := o.syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateWaitingDecision, workspace)
+	if err != nil {
 		return err
 	}
-	if err := o.publishRunStateChanged(ctx, r); err != nil {
+	if err := o.publishRunStateChangedAtStep(ctx, r, currentStepID); err != nil {
 		return err
 	}
-	return o.syncWorkspaceForActiveRunWithWorkspace(ctx, r, common.WorkspaceStateWaitingDecision, workspace)
+	return o.publishWorkspaceStateChanged(ctx, workspace, r.ID)
 }
 
 func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.RunID, approvalID common.ApprovalID) error {
@@ -267,6 +268,10 @@ func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.
 }
 
 func (o *RuntimeOrchestrator) blockOnApproval(ctx context.Context, r *runModel.Run, workspace *workspaceModel.Workspace, approvalID common.ApprovalID) error {
+	return o.blockOnApprovalAtStep(ctx, r, workspace, approvalID, "")
+}
+
+func (o *RuntimeOrchestrator) blockOnApprovalAtStep(ctx context.Context, r *runModel.Run, workspace *workspaceModel.Workspace, approvalID common.ApprovalID, currentStepID common.StepID) error {
 	if r == nil || r.ID == "" || approvalID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -277,13 +282,14 @@ func (o *RuntimeOrchestrator) blockOnApproval(ctx context.Context, r *runModel.R
 	r.BlockingApprovalID = approvalID
 	r.BlockingTicketID = ""
 	r.FailureReason = ""
-	if err := o.runs.Update(ctx, r); err != nil {
+	workspace, err := o.syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateBlocked, workspace)
+	if err != nil {
 		return err
 	}
-	if err := o.publishRunStateChanged(ctx, r); err != nil {
+	if err := o.publishRunStateChangedAtStep(ctx, r, currentStepID); err != nil {
 		return err
 	}
-	return o.syncWorkspaceForActiveRunWithWorkspace(ctx, r, common.WorkspaceStateBlocked, workspace)
+	return o.publishWorkspaceStateChanged(ctx, workspace, r.ID)
 }
 
 func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID) error {
@@ -298,7 +304,13 @@ func (o *RuntimeOrchestrator) ResumeRunWithExecutionContextPatch(ctx context.Con
 	if err != nil {
 		return err
 	}
+	return o.ResumeLoadedRunWithExecutionContextPatch(ctx, r, executionContextPatch)
+}
 
+func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx context.Context, r *runModel.Run, executionContextPatch map[string]any) error {
+	if r == nil || r.ID == "" {
+		return common.ErrInvalidArgument
+	}
 	var resumeAfterStepID common.StepID
 	var resumeInput map[string]any
 	switch r.State {
@@ -371,14 +383,11 @@ func (o *RuntimeOrchestrator) ResumeRunWithExecutionContextPatch(ctx context.Con
 	r.State = common.RunStateRunning
 	r.FailureReason = ""
 	mergeRunExecutionContextPatch(r, executionContextPatch)
-	if err := o.runs.Update(ctx, r); err != nil {
+	workspace, err := o.syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, nil)
+	if err != nil {
 		return err
 	}
 	if err := o.publishRunStateChanged(ctx, r); err != nil {
-		return err
-	}
-	workspace, err := o.syncWorkspaceForActiveRunState(ctx, r, common.WorkspaceStateRunning)
-	if err != nil {
 		return err
 	}
 	if err := o.publishWorkspaceStateChanged(ctx, workspace, r.ID); err != nil {
@@ -386,11 +395,11 @@ func (o *RuntimeOrchestrator) ResumeRunWithExecutionContextPatch(ctx context.Con
 	}
 	specs, err := o.nextDispatchSpecsAfterStep(ctx, r, resumeAfterStepID)
 	if err != nil {
-		return o.failRunningResume(ctx, runID, err)
+		return o.failRunningResume(ctx, r.ID, err)
 	}
 	mergeResumeInput(specs, resumeInput)
 	if err := o.dispatchStepSpecsWithWorkspace(ctx, r, specs, workspace); err != nil {
-		return o.failRunningResume(ctx, runID, err)
+		return o.failRunningResume(ctx, r.ID, err)
 	}
 	return nil
 }
@@ -751,6 +760,44 @@ func (o *RuntimeOrchestrator) syncWorkspaceForActiveRunStateWithWorkspace(ctx co
 	return ws, nil
 }
 
+func (o *RuntimeOrchestrator) syncRunAndWorkspaceForActiveState(ctx context.Context, run *runModel.Run, state common.WorkspaceState, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {
+	if run == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	ws := workspace
+	if ws == nil {
+		var err error
+		ws, err = o.workspaces.Get(ctx, run.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+	} else if ws.ID != run.WorkspaceID {
+		return nil, common.ErrConflict
+	}
+	if ws.ActiveRunID != "" && ws.ActiveRunID != run.ID {
+		activeRun, err := o.runs.Get(ctx, ws.ActiveRunID)
+		if err != nil && !errors.Is(err, common.ErrNotFound) {
+			return nil, err
+		}
+		if activeRun != nil && activeRun.WorkspaceID == ws.ID && !isTerminalRunState(activeRun.State) {
+			return nil, common.ErrConflict
+		}
+	}
+	ws.ActiveRunID = run.ID
+	ws.State = state
+	if err := runParallel(
+		func() error {
+			return o.runs.Update(ctx, run)
+		},
+		func() error {
+			return o.workspaces.Update(ctx, ws)
+		},
+	); err != nil {
+		return nil, err
+	}
+	return ws, nil
+}
+
 func (o *RuntimeOrchestrator) canTerminalRunReleaseWorkspace(ctx context.Context, workspace *workspaceModel.Workspace, run *runModel.Run) (bool, error) {
 	if workspace == nil || run == nil || workspace.ID != run.WorkspaceID {
 		return false, nil
@@ -929,11 +976,8 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if err := o.publishStepState(ctx, run, step, events.TopicStepDispatched); err != nil {
 		return err
 	}
-	toolCall, err := o.recordToolCallStarted(ctx, run, step)
+	toolCall, err := o.recordStepDispatchEvidence(ctx, run, step)
 	if err != nil {
-		return err
-	}
-	if err := o.recordStepCheckpoint(ctx, run, step, "step_dispatched"); err != nil {
 		return err
 	}
 
@@ -965,13 +1009,10 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if err := o.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, output); err != nil {
 		return err
 	}
-	if err := o.steps.Update(ctx, step); err != nil {
+	if err := o.persistCompletedStepState(ctx, run, step); err != nil {
 		return err
 	}
 	if err := o.publishStepState(ctx, run, step, events.TopicStepStateChanged); err != nil {
-		return err
-	}
-	if err := o.recordStepCheckpoint(ctx, run, step, "step_completed"); err != nil {
 		return err
 	}
 
@@ -988,7 +1029,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		if err := o.createDecisionTicket(ctx, run, step, decisionSpec); err != nil {
 			return err
 		}
-		return o.blockOnDecision(ctx, run, workspace, ticketID)
+		return o.blockOnDecisionAtStep(ctx, run, workspace, ticketID, step.ID)
 	}
 	if reason, approvalID := approvalBlockSpec(output); reason != "" {
 		if nextStepID == "" && !o.hasGraphContinuation(ctx, run, step) {
@@ -1000,7 +1041,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		if err := o.createApproval(ctx, run, step, approvalID, reason); err != nil {
 			return err
 		}
-		return o.blockOnApproval(ctx, run, workspace, approvalID)
+		return o.blockOnApprovalAtStep(ctx, run, workspace, approvalID, step.ID)
 	}
 	if graphBatchStep(step) {
 		return nil
@@ -1008,22 +1049,27 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if nextStepID != "" {
 		return o.dispatchStepWithWorkspace(ctx, run, nextStepID, nextKind, nextStepInputFromOutput(run, step), workspace)
 	}
-	if graphSpecs := o.readyGraphStepSpecs(ctx, run, step); len(graphSpecs) > 0 {
+	graphSpecs, graphSteps := o.readyGraphStepSpecsWithSteps(ctx, run, step)
+	if len(graphSpecs) > 0 {
 		return o.dispatchGraphStepBatchWithWorkspace(ctx, run, graphSpecs, workspace)
 	}
 	if shouldDispatchGraphFollowUp(run, step, output) {
-		return o.dispatchStepWithWorkspace(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), o.graphFollowUpStepInput(ctx, run, step), workspace)
+		var input map[string]any
+		if len(graphSteps) > 0 {
+			input = o.graphFollowUpStepInputFromSteps(run, step, graphSteps)
+		} else {
+			input = o.graphFollowUpStepInput(ctx, run, step)
+		}
+		return o.dispatchStepWithWorkspace(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), input, workspace)
 	}
 	if shouldDispatchLLMCompletionFollowUp(run, step, output) {
 		return o.dispatchStepWithWorkspace(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), llmCompletionFollowUpStepInput(run, step), workspace)
 	}
-	if err := completionDoDAssessmentError(run, output); err != nil {
+	assessment, summary, err := validatedCompletionDoDAssessment(run, output)
+	if err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
-	if err := o.recordRunResultFromDoDAssessment(ctx, run, step, output, workspace); err != nil {
-		return err
-	}
-	if err := o.recordSkillFeedbackMemory(ctx, run, step, output); err != nil {
+	if err := o.recordCompletionEvidenceFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace); err != nil {
 		return err
 	}
 	return o.validateAndCompleteRunWithWorkspace(ctx, run, step.ID, workspace)
@@ -1154,7 +1200,8 @@ func (o *RuntimeOrchestrator) recordMemoryWrites(
 	if o.evidence.MemoryItems == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	refs := make([]string, 0, len(requests))
+	refs := make([]string, len(requests))
+	tasks := make([]func() error, 0, len(requests))
 	for idx, request := range requests {
 		memoryID := common.MemoryID(fmt.Sprintf("%s/memory/%d", step.ID, idx+1))
 		item := &memorymodel.MemoryItem{
@@ -1171,15 +1218,21 @@ func (o *RuntimeOrchestrator) recordMemoryWrites(
 			Confidence:  50,
 			Visibility:  "workspace",
 		}
-		if err := o.evidence.MemoryItems.Create(ctx, item); err != nil {
-			if err != common.ErrConflict {
-				return nil, err
+		refs[idx] = string(memoryID)
+		tasks = append(tasks, func() error {
+			if err := o.evidence.MemoryItems.Create(ctx, item); err != nil {
+				if err != common.ErrConflict {
+					return err
+				}
+				if err := o.evidence.MemoryItems.Update(ctx, item); err != nil {
+					return err
+				}
 			}
-			if err := o.evidence.MemoryItems.Update(ctx, item); err != nil {
-				return nil, err
-			}
-		}
-		refs = append(refs, string(memoryID))
+			return nil
+		})
+	}
+	if err := runParallel(tasks...); err != nil {
+		return nil, err
 	}
 	return refs, nil
 }
@@ -1688,6 +1741,30 @@ func (o *RuntimeOrchestrator) recordToolCallStarted(ctx context.Context, run *ru
 	return toolCall, nil
 }
 
+func (o *RuntimeOrchestrator) recordStepDispatchEvidence(ctx context.Context, run *runModel.Run, step *runModel.Step) (*runModel.ToolCall, error) {
+	var toolCall *runModel.ToolCall
+	var toolCallMu sync.Mutex
+	err := runParallel(
+		func() error {
+			item, err := o.recordToolCallStarted(ctx, run, step)
+			toolCallMu.Lock()
+			toolCall = item
+			toolCallMu.Unlock()
+			return err
+		},
+		func() error {
+			return o.recordStepCheckpoint(ctx, run, step, "step_dispatched")
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if toolCall == nil {
+		return &runModel.ToolCall{}, nil
+	}
+	return toolCall, nil
+}
+
 func (o *RuntimeOrchestrator) recordToolCallCompleted(ctx context.Context, toolCall *runModel.ToolCall, output map[string]any) error {
 	if toolCall == nil || toolCall.ID == "" || o.evidence.ToolCalls == nil {
 		return nil
@@ -1717,6 +1794,17 @@ func (o *RuntimeOrchestrator) recordCompletedRuntimeStepEvidence(ctx context.Con
 		},
 		func() error {
 			return o.recordValidationResult(ctx, run, step, common.ValidationResultStatePassed, "runtime step completed", evidenceRef, "")
+		},
+	)
+}
+
+func (o *RuntimeOrchestrator) persistCompletedStepState(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
+	return runParallel(
+		func() error {
+			return o.steps.Update(ctx, step)
+		},
+		func() error {
+			return o.recordStepCheckpoint(ctx, run, step, "step_completed")
 		},
 	)
 }
@@ -2092,6 +2180,24 @@ func (o *RuntimeOrchestrator) recordRunResultFromDoDAssessment(
 	if summary == "" {
 		return nil
 	}
+	return o.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace)
+}
+
+func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	assessment map[string]any,
+	summary string,
+	workspace *workspaceModel.Workspace,
+) error {
+	if run == nil || step == nil || o.evidence.Results == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
+		return nil
+	}
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return nil
+	}
 	now := runtimeEvidenceTimestamp()
 	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
 	manifestCh := make(chan string, 1)
@@ -2177,17 +2283,31 @@ func (o *RuntimeOrchestrator) recordRunResultFromDoDAssessment(
 	return o.publishResultAccepted(ctx, item)
 }
 
+func (o *RuntimeOrchestrator) recordCompletionEvidenceFromValidatedDoDAssessment(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	assessment map[string]any,
+	summary string,
+	workspace *workspaceModel.Workspace,
+) error {
+	return runParallel(
+		func() error {
+			return o.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace)
+		},
+		func() error {
+			return o.recordSkillFeedbackMemoryFromValidatedDoDAssessment(ctx, run, step, assessment, summary)
+		},
+	)
+}
+
 func (o *RuntimeOrchestrator) recordSkillFeedbackMemory(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
 	output map[string]any,
 ) error {
-	if run == nil || step == nil || o.evidence.MemoryItems == nil || !requiresDoDAssessmentCompletionGate(run) {
-		return nil
-	}
-	skillIDs := stringSliceFromValue(run.ExecutionContext["skillIds"])
-	if len(skillIDs) == 0 {
+	if run == nil || step == nil || !requiresDoDAssessmentCompletionGate(run) {
 		return nil
 	}
 	assessment := doDAssessmentFromOutput(output)
@@ -2195,6 +2315,27 @@ func (o *RuntimeOrchestrator) recordSkillFeedbackMemory(
 		return nil
 	}
 	summary, _ := assessment["summary"].(string)
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return nil
+	}
+	return o.recordSkillFeedbackMemoryFromValidatedDoDAssessment(ctx, run, step, assessment, summary)
+}
+
+func (o *RuntimeOrchestrator) recordSkillFeedbackMemoryFromValidatedDoDAssessment(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	assessment map[string]any,
+	summary string,
+) error {
+	if run == nil || step == nil || o.evidence.MemoryItems == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
+		return nil
+	}
+	skillIDs := stringSliceFromValue(run.ExecutionContext["skillIds"])
+	if len(skillIDs) == 0 {
+		return nil
+	}
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
 		return nil
@@ -3377,7 +3518,7 @@ func (o *RuntimeOrchestrator) readyGraphStepSpecsFromSteps(
 		input := nextGraphStepInput(run, last, graph, node, completed, branch)
 		input[stepInputKeyGraphRootStepID] = string(rootStepID)
 		ret = append(ret, stepDispatchSpec{
-			ID:    graphStepIDForRoot(ctx, o.steps, run.ID, rootStepID, node.ID),
+			ID:    graphStepIDForRootFromSteps(steps, run.ID, rootStepID, node.ID),
 			Kind:  node.Kind,
 			Input: input,
 		})
@@ -3456,16 +3597,14 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	if shouldDispatchLLMCompletionFollowUp(currentRun, last, last.Output) {
 		return o.dispatchStepWithWorkspace(ctx, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInput(currentRun, last), workspace)
 	}
-	if err := completionDoDAssessmentError(currentRun, last.Output); err != nil {
+	assessment, summary, err := validatedCompletionDoDAssessment(currentRun, last.Output)
+	if err != nil {
 		last.State = common.StepStateFailed
 		last.Output = runtimeFailureOutput(last.Output, err)
 		_ = o.steps.Update(ctx, last)
 		return o.FailRun(ctx, currentRun.ID, err.Error())
 	}
-	if err := o.recordRunResultFromDoDAssessment(ctx, currentRun, last, last.Output, workspace); err != nil {
-		return err
-	}
-	if err := o.recordSkillFeedbackMemory(ctx, currentRun, last, last.Output); err != nil {
+	if err := o.recordCompletionEvidenceFromValidatedDoDAssessment(ctx, currentRun, last, assessment, summary, workspace); err != nil {
 		return err
 	}
 	return o.validateAndCompleteRunWithWorkspace(ctx, currentRun, last.ID, workspace)
@@ -3717,6 +3856,27 @@ func graphStepIDForRoot(ctx context.Context, steps repository.StepRepository, ru
 	return common.StepID(fmt.Sprintf("%s/block/%s", runID, rootSuffix))
 }
 
+func graphStepIDForRootFromSteps(steps []*runModel.Step, runID common.RunID, rootStepID common.StepID, nodeID string) common.StepID {
+	base := graphStepID(runID, nodeID)
+	if rootStepID == "" {
+		return base
+	}
+	for _, step := range steps {
+		if step == nil || step.ID != base {
+			continue
+		}
+		if graphRootStepID(step) == rootStepID {
+			return base
+		}
+		rootSuffix := runtimeChildID(rootStepID, nodeID)
+		if rootSuffix == "" {
+			return base
+		}
+		return common.StepID(fmt.Sprintf("%s/block/%s", runID, rootSuffix))
+	}
+	return base
+}
+
 func graphNodeID(step *runModel.Step) string {
 	if step == nil {
 		return ""
@@ -3843,6 +4003,7 @@ func llmCompletionFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[
 	input[stepInputKeySoulStage] = soulStageValidation
 	input["completionFollowUp"] = true
 	inheritWorkspaceFileManifest(input, step)
+	inheritStableExecutionContextPackage(input, step)
 	if step.Kind != "" {
 		input["previousStepKind"] = step.Kind
 	}
@@ -3899,6 +4060,7 @@ func graphFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]a
 	input[stepInputKeySoulStage] = soulStageValidation
 	input["graphFollowUp"] = true
 	inheritWorkspaceFileManifest(input, step)
+	inheritStableExecutionContextPackage(input, step)
 	if nodeID := graphNodeID(step); nodeID != "" {
 		input[stepInputKeyGraphPreviousNodeID] = nodeID
 	}
@@ -3911,9 +4073,6 @@ func graphFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]a
 	if graph, ok := runtimeGraphSpecFromStep(step); ok {
 		input[stepOutputKeyExecutionGraph] = graph
 		input[stepInputKeyGraphRootStepID] = string(graphRootStepID(step))
-	}
-	if step.Output != nil {
-		input["previousStepOutput"] = cloneStepPayload(step.Output)
 	}
 	return input
 }
@@ -3994,6 +4153,7 @@ func nextStepInputFromOutput(run *runModel.Run, previousStep *runModel.Step) map
 	}
 	input := nextStepInput(run, previousStep.ID)
 	inheritWorkspaceFileManifest(input, previousStep)
+	inheritStableExecutionContextPackage(input, previousStep)
 	if nextInput := mapFromValue(previousStep.Output[stepOutputKeyNextInput]); nextInput != nil {
 		for key, value := range nextInput {
 			input[key] = value
@@ -4016,6 +4176,17 @@ func inheritWorkspaceFileManifest(input map[string]any, previousStep *runModel.S
 		return
 	}
 	input[stepInputKeyWorkspaceFileManifest] = limitedMapSlice(manifest, len(manifest))
+}
+
+func inheritStableExecutionContextPackage(input map[string]any, previousStep *runModel.Step) {
+	if input == nil || previousStep == nil {
+		return
+	}
+	stablePayload := stableExecutionContextPackagePayload(stableExecutionContextPackageFromStep(previousStep))
+	if len(stablePayload) == 0 {
+		return
+	}
+	input[stepInputKeyExecutionContextPackage] = stablePayload
 }
 
 type runtimeDecisionBlockSpec struct {
@@ -4066,27 +4237,34 @@ func runtimeChildID(parent common.StepID, suffix string) string {
 }
 
 func completionDoDAssessmentError(run *runModel.Run, output map[string]any) error {
+	_, _, err := validatedCompletionDoDAssessment(run, output)
+	return err
+}
+
+func validatedCompletionDoDAssessment(run *runModel.Run, output map[string]any) (map[string]any, string, error) {
 	if !requiresDoDAssessmentCompletionGate(run) {
-		return nil
+		return nil, "", nil
 	}
 	assessment := doDAssessmentFromOutput(output)
 	if assessment == nil {
-		return fmt.Errorf("%w: dodAssessment is required for llm-driven completion", common.ErrInvalidArgument)
+		return nil, "", fmt.Errorf("%w: dodAssessment is required for llm-driven completion", common.ErrInvalidArgument)
 	}
 	satisfied, ok := assessment["satisfied"].(bool)
 	if !ok {
-		return fmt.Errorf("%w: dodAssessment.satisfied is required", common.ErrInvalidArgument)
+		return nil, "", fmt.Errorf("%w: dodAssessment.satisfied is required", common.ErrInvalidArgument)
 	}
 	if !satisfied {
-		return fmt.Errorf("%w: dodAssessment is not satisfied", common.ErrInvalidArgument)
+		return nil, "", fmt.Errorf("%w: dodAssessment is not satisfied", common.ErrInvalidArgument)
 	}
-	if summary, _ := assessment["summary"].(string); strings.TrimSpace(summary) == "" {
-		return fmt.Errorf("%w: dodAssessment.summary is required for llm-driven completion", common.ErrInvalidArgument)
+	summary, _ := assessment["summary"].(string)
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return nil, "", fmt.Errorf("%w: dodAssessment.summary is required for llm-driven completion", common.ErrInvalidArgument)
 	}
 	if err := validateDoDAssessmentItems(assessment["items"]); err != nil {
-		return err
+		return nil, "", err
 	}
-	return nil
+	return assessment, summary, nil
 }
 
 func requiresDoDAssessmentCompletionGate(run *runModel.Run) bool {

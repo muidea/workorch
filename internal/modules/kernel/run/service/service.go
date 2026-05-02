@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -19,6 +20,7 @@ type CreateRunCommand struct {
 type StartRunCommand struct{ RunID common.RunID }
 type ResumeRunCommand struct {
 	RunID                 common.RunID
+	LoadedRun             *runmodel.Run
 	ExecutionContextPatch map[string]any
 }
 

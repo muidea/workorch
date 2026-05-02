@@ -333,8 +333,34 @@ Acceptance criteria:
 | QC60 | Resolved governance resume lightweight compressed context | P1 | implemented | Appservice tests verify resolved `provide_missing_info` Decision and approved Approval resume can skip full recovery snapshot while rejected / non-continuing paths keep full context; deployed batch `load-20260501143821` keeps 5/5 success and improves approval completion p95 |
 | QC61 | Activation MCP context read parallelization | P1 | implemented | Appservice test verifies selected MCP Server and Capability reads start concurrently; deployed batch `load-20260501145030` keeps 5/5 success but activation p95 benefit is not stable because the first cold sample dominates |
 | QC62 | Resume dispatch synced Workspace reuse | P1 | implemented | Orchestrator test verifies resumed dispatch reuses the Workspace already loaded during running-state sync; deployed batch `load-20260501150322` keeps 5/5 success and improves governance resume stage p95 |
-| QC63 | Validating Run / Workspace write parallelization | P1 | implemented | Orchestrator test verifies final validation state writes enter concurrently while Run event then Workspace event publication order stays unchanged; deployed quantification pending next rebuild |
-| QC64 | Completed Step evidence write parallelization | P1 | implemented | Orchestrator test verifies ToolCall completed and ValidationResult passed evidence writes enter concurrently before Step completed persistence/event publication; deployed quantification pending next rebuild |
+| QC63 | Validating Run / Workspace write parallelization | P1 | implemented | Orchestrator test verifies final validation state writes enter concurrently while Run event then Workspace event publication order stays unchanged; deployed batch `load-20260501151952` keeps 5/5 success and improves closeout p95 |
+| QC64 | Completed Step evidence write parallelization | P1 | implemented | Orchestrator test verifies ToolCall completed and ValidationResult passed evidence writes enter concurrently before Step completed persistence/event publication; deployed batch `load-20260501151952` keeps 5/5 success and contributes to successful step segment p95 |
+| QC65 | Active Run / Workspace resume write parallelization | P1 | implemented | Orchestrator test verifies governance resume writes Run running and Workspace running projection concurrently while preserving Run event then Workspace event publication order; deployed batch `load-20260501152651` keeps 5/5 success and improves `decision2_to_approval` p95 |
+| QC66 | Blocked Run / Workspace projection write parallelization | P1 | implemented | Orchestrator test verifies Decision and Approval block transitions write Run blocked state and Workspace blocked projection concurrently while preserving event order; deployed batch `load-20260501153506` keeps 5/5 success and improves e2e / governance / closeout p95 |
+| QC67 | Block checkpoint current StepID reuse | P1 | implemented | Orchestrator test verifies runtime Decision block checkpoint uses the known current StepID and avoids Step ListByRun latest-step scan; deployed batch `load-20260501154152` keeps 5/5 success but does not improve overall p95 |
+| QC68 | Approval resolution loaded entity reuse | P1 | implemented | Approval block / appservice tests verify approve / reject response mapping reuses the entity already loaded by resolution transition and removes the post-resolution Approval repository Get; deployed batch `load-20260501155915` keeps 5/5 success and improves `approval_approve` p95 |
+| QC69 | Graph follow-up loaded Steps reuse | P1 | implemented | Orchestrator tests verify graph follow-up evidence reuses the Steps already loaded for ready-node evaluation instead of issuing an extra Step ListByRun scan; deployed batch `load-20260501162419` keeps 5/5 success |
+| QC70 | Step dispatch evidence write parallelization | P1 | implemented | Orchestrator test verifies ToolCall started and step-dispatched checkpoint writes start concurrently after StepDispatched event publication; deployed batch `load-20260501163624` keeps 5/5 success but no stable p95 gain |
+| QC71 | Normal LLM follow-up failure-history read skip | P1 | implemented | Orchestrator tests verify normal Decision / Approval / graph follow-up LLM context skips failed Step history scan while repair steps still include recent failure summary; deployed quantification pending next rebuild |
+| QC72 | Activation created Run compressed context inline create | P1 | implemented | Appservice tests verify activation persists created Run compressed context through `CreateRun`; deployed batch `load-20260501225936` keeps 5/5 success but cold activation sample remains dominant |
+| QC73 | DoD completion assessment reuse | P1 | implemented | Orchestrator tests verify validated DoD assessment and summary are reused for Result / Artifact and Skill feedback evidence instead of reparsing output in the closeout path; deployed batch `load-20260501231045` keeps 5/5 success and improves `approval_to_completed` p95 |
+| QC74 | Completion evidence Result / Memory write parallelization | P1 | implemented | Orchestrator tests verify accepted Result / Artifact materialization and Skill feedback memory write start concurrently while completion still waits for both; deployed batch `load-20260502003117` keeps 5/5 success and slightly improves `approval_to_completed` p95 |
+| QC75 | Decision resolution loaded entity reuse | P1 | implemented | Decision and appservice tests verify resolve response mapping reuses the loaded Ticket / Resolution returned by the Decision service; deployed batch `load-20260502010217` keeps 5/5 success with small governed-stage variance |
+| QC76 | Graph follow-up duplicate evidence payload trim | P1 | implemented | Orchestrator tests verify graph follow-up uses `graphEvidence` without duplicating `previousStepOutput`; deployed batch `load-20260502011247` keeps 5/5 success and improves `approval_to_completed` p95 |
+| QC77 | Stable execution context package reuse | P1 | implemented | Orchestrator tests verify normal LLM follow-up reuses stable Result / Artifact / selected context without re-reading repositories while current step identity and governance history are rebuilt from the active Run context; deployed batch `load-20260502012905` keeps 5/5 success and improves `decision2_to_approval` p95 |
+| QC78 | StartRun active projection write parallelization | P1 | implemented | Orchestrator test verifies StartRun writes Run running state and Workspace running projection concurrently while preserving Run event then Workspace event publication order; deployed batch `load-20260502014022` keeps 5/5 success and improves activation / e2e p95 |
+| QC79 | Completed Step state/checkpoint write parallelization | P1 | implemented | Orchestrator test verifies completed Step state persistence and `step_completed` RuntimeCheckpoint creation start concurrently while Step completed event publication still waits for both writes; deployed batch `load-20260502020648` keeps 5/5 success and improves `approval_to_completed` p95 |
+| QC80 | Runtime memory writes parallelization | P1 | implemented | Orchestrator test verifies multiple runtime MemoryItem writes start concurrently while `memoryRefs` remain ordered by the original request index; deployed batch `load-20260502021847` keeps 5/5 success but benefit is not stable in the governed mock scenario |
+| QC81 | Run snapshot capability catalog reuse | P1 | implemented | Appservice test verifies Run Snapshot loads MCP Capability catalog once and reuses it for selected / used capability projections without per-capability `Get` calls; deployed batch `load-20260502022815` keeps 5/5 success and improves read-model target metrics |
+| QC82 | Observability projection reuse | P1 | implemented | Appservice test verifies Run Observability reuses TaskProgress / TaskDecompositions / ExecutionSections already built in Run Snapshot instead of recomputing those projections; deployed batch `load-20260502023352` keeps 5/5 success but small-sample p95 benefit is not stable |
+| QC83 | Run derived projection reuse | P1 | implemented | Appservice tests verify Run ContextBundle / compressed context / task progress / task decomposition readers reuse derived projections already built in Run Snapshot instead of recomputing them; deployed batch `load-20260502024554` keeps 5/5 success and improves readback p95 metrics |
+| QC84 | Observability terminal snapshot inflight reuse | P1 | implemented | HTTP service test verifies Run Observability waits for an in-flight terminal RunSnapshot warmup and maps from that snapshot instead of issuing an independent observability read; deployed batch `load-20260502025954` keeps 5/5 success but small-sample readback p95 benefit is not stable |
+| QC85 | Run snapshot Workspace read parallelization | P1 | implemented | Appservice test verifies RunSnapshot starts Workspace Get and run-scoped evidence reads concurrently after Run Get; deployed batch `load-20260502030706` keeps 5/5 success and improves `snapshot_read` p95 |
+| QC86 | Workspace snapshot Workspace read parallelization | P1 | implemented | Appservice test verifies WorkspaceSnapshot starts Workspace Get and workspace-scoped Run list concurrently when no cached RunSnapshot is supplied; deployed quantification pending next rebuild |
+| QC87 | Graph step ID loaded-step reuse | P1 | implemented | Orchestrator tests verify graph step ID generation reuses already loaded Run steps instead of per-ready-node Step `Get`; deployed batch `load-20260502032508` keeps 5/5 success and improves `approval_to_completed` p95 |
+| QC88 | Loaded Run reuse for governance resume | P1 | implemented | Run / orchestrator / appservice tests verify governance resume can pass the already loaded Run into the orchestrator while preserving blocker validation and state-machine ownership; deployed batch `load-20260502033411` keeps 5/5 success and improves `decision1_to_decision2` p95 |
+| QC89 | Execution-context empty history check reuse | P1 | implemented | Orchestrator tests verify explicit empty workspace-history metadata can be reused by follow-up LLM steps without skipping reads when metadata is absent; deployed batch `load-20260502034105` keeps 5/5 success but is not a validated governed-stage performance win |
+| QC90 | Artifact storage run directory cache | P1 | implemented | Bootstrap tests verify file backend Artifact storage caches the run artifact directory after first preparation so result summary and deliverable manifest avoid repeated `MkdirAll`; deployed quantification pending next rebuild |
 
 ## Recommended Delivery Order
 
@@ -1694,6 +1720,910 @@ Acceptance criteria:
   Deployed quantification is pending the next rebuild; expected impact is
   distributed across each successful step segment and should be visible in
   governance transition p95 plus `approval_to_completed`.
+- 2026-05-01: Quantified deployed QC63 / QC64 together with governed mock
+  `concurrency=1,total=5` batch `load-20260501151952`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1348.37ms`, throughput `54.05` workspace/min,
+  `activation_to_decision1` p95 `486.84ms`, `decision1->decision2` p95
+  `138.86ms`, `decision2->approval` p95 `185.43ms`,
+  `approval->completed` p95 `203.16ms`, `snapshot_read` p95 `52.40ms`,
+  `workspace_snapshot_read` p95 `47.16ms`, `observability_read` p95
+  `19.13ms`, and `artifact_content_read` p95 `13.46ms`. Compared with QC62
+  batch `load-20260501150322`, e2e p95 improved by about `51.35ms`,
+  `approval->completed` improved by about `16.72ms`,
+  `workspace_snapshot_read` improved by about `4.32ms`,
+  `artifact_content_read` improved by about `7.33ms`, and throughput improved
+  slightly by about `0.09` workspace/min. `decision1->decision2` regressed by
+  about `27.74ms` and `decision2->approval` regressed by about `49.85ms`, so
+  the next safe optimization should inspect governance resume / step evidence
+  closeout for intermediate LLM stages rather than activation or readback
+  micro-optimizations. The first activation sample is still cold-path dominant
+  at `579.92ms`; activation should not be optimized further without more
+  cold-start attribution.
+- 2026-05-01: Added QC65 active Run / Workspace resume write parallelization.
+  Governance resume now writes the Run `running` state and Workspace `running`
+  projection concurrently, then publishes events in the original external
+  order: Run state changed before Workspace state changed. This preserves
+  blocker validation, Decision / Approval resolution semantics, execution
+  context patching, Workspace active-run conflict checks, subsequent dispatch,
+  DoD validation, Result / Artifact materialization, and RuntimeCheckpoint
+  behavior; it only removes serial file backend write latency from the resume
+  state projection. Local verification passed with
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_ActiveRunAndWorkspaceWritesConcurrently|TestRuntimeOrchestrator_ResumeRunDispatchReusesSyncedWorkspace|TestRuntimeOrchestrator_StartRunDispatchReusesLoadedWorkspace|TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment' -count=1`.
+  Deployed quantification is pending the next rebuild; expected impact is
+  limited to governance resume stages (`decision1_to_decision2` and
+  `decision2_to_approval`) on file backend.
+- 2026-05-01: Quantified deployed QC65 with governed mock
+  `concurrency=1,total=5` batch `load-20260501152651`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1505.02ms`, throughput `53.58` workspace/min,
+  `activation_to_decision1` p95 `502.20ms`, `decision1->decision2` p95
+  `136.37ms`, `decision2->approval` p95 `152.33ms`,
+  `approval->completed` p95 `254.60ms`, `snapshot_read` p95 `68.34ms`,
+  `workspace_snapshot_read` p95 `46.57ms`, `observability_read` p95
+  `16.57ms`, and `artifact_content_read` p95 `20.08ms`. Compared with
+  `load-20260501151952`, target governance resume improved:
+  `decision1->decision2` by about `2.49ms` and `decision2->approval` by about
+  `33.10ms`; however e2e p95 regressed by about `156.65ms` because the first
+  activation sample remained cold-path dominated at `604.62ms` and
+  `approval->completed` regressed by about `51.43ms`. Treat QC65 as a
+  correctness-preserving governance resume optimization with a targeted
+  `decision2->approval` win. The next optimization should inspect final
+  closeout materialization and terminal readback cost; activation should still
+  wait for cold-start attribution instead of more blind micro-optimizations.
+- 2026-05-01: Added QC66 blocked Run / Workspace projection write
+  parallelization. Decision and Approval block transitions now write the Run
+  blocked state and Workspace waiting / blocked projection concurrently, then
+  publish events in the original external order: Run state changed before
+  Workspace state changed. This preserves Ticket / Approval creation, blocker
+  IDs, Workspace active-run conflict checks, governance semantics, subsequent
+  resume behavior, DoD validation, Result / Artifact materialization, and
+  RuntimeCheckpoint behavior; it only removes serial file backend write latency
+  from the block projection. Local verification passed with
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_BlockedRunAndWorkspaceWritesConcurrently|TestRuntimeOrchestrator_RunStateTransitionsReuseProvidedWorkspace|TestRuntimeOrchestrator_StartRunToComplete_Mainline|TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment' -count=1`.
+  Deployed quantification is pending the next rebuild; expected impact is
+  distributed across `activation_to_decision1`, `decision1_to_decision2`, and
+  `decision2_to_approval` because each stage includes a governance block
+  transition on the mock governed path.
+- 2026-05-01: Quantified deployed QC66 with governed mock
+  `concurrency=1,total=5` batch `load-20260501153506`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1427.54ms`, throughput `54.83` workspace/min,
+  `activation_to_decision1` p95 `504.68ms`, `decision1->decision2` p95
+  `142.64ms`, `decision2->approval` p95 `137.07ms`,
+  `approval->completed` p95 `204.25ms`, `snapshot_read` p95 `57.55ms`,
+  `workspace_snapshot_read` p95 `61.09ms`, `observability_read` p95
+  `21.29ms`, and `artifact_content_read` p95 `14.61ms`. Compared with
+  `load-20260501152651`, e2e p95 improved by about `77.48ms`, throughput
+  improved by about `1.25` workspace/min, `decision2->approval` improved by
+  about `15.27ms`, `approval->completed` improved by about `50.35ms`,
+  `snapshot_read` improved by about `10.78ms`, and `artifact_content_read`
+  improved by about `5.46ms`. `decision1->decision2` regressed by about
+  `6.27ms` and `workspace_snapshot_read` regressed by about `14.52ms`; the
+  regression is readback / sample-variance local, while the governed execution
+  path improved. The next safe optimization should remove avoidable Step-list
+  scans during block checkpoint emission by carrying the current StepID into
+  the Run state changed checkpoint when the caller already has it.
+- 2026-05-01: Added QC67 block checkpoint current StepID reuse. Runtime
+  Decision / Approval block paths already know the Step that produced the
+  blocker, so they now pass that StepID into Run state changed checkpoint
+  emission instead of letting `recordRunCheckpointAtStep` call `latestStepID`
+  and scan all Steps in the Run. External `BlockOnDecision` / `BlockOnApproval`
+  API paths without Step context keep the previous fallback behavior. This
+  preserves Ticket / Approval creation, blocker IDs, Run / Workspace state
+  transitions, event publication order, resume behavior, DoD validation,
+  Result / Artifact materialization, and RuntimeCheckpoint semantics while
+  removing a redundant Step repository scan from runtime governance block
+  transitions. Local verification passed with
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_BlockCheckpointUsesProvidedStepID|TestRuntimeOrchestrator_BlockedRunAndWorkspaceWritesConcurrently|TestRuntimeOrchestrator_RunStateTransitionsReuseProvidedWorkspace|TestRuntimeOrchestrator_StartRunToComplete_Mainline|TestRuntimeOrchestrator_ResumeRunDispatchReusesSyncedWorkspace' -count=1`.
+  Deployed quantification is pending the next rebuild; expected impact is
+  limited to governance block stages (`activation_to_decision1`,
+  `decision1_to_decision2`, and `decision2_to_approval`) on file backend.
+- 2026-05-01: Quantified deployed QC67 with governed mock
+  `concurrency=1,total=5` batch `load-20260501154152`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1519.21ms`, throughput `52.45` workspace/min,
+  `activation_to_decision1` p95 `521.18ms`, `decision1->decision2` p95
+  `132.11ms`, `decision2->approval` p95 `162.94ms`,
+  `approval->completed` p95 `239.90ms`, `snapshot_read` p95 `46.35ms`,
+  `workspace_snapshot_read` p95 `49.84ms`, `observability_read` p95
+  `17.04ms`, and `artifact_content_read` p95 `12.52ms`. Compared with
+  `load-20260501153506`, `decision1->decision2` improved by about `10.54ms`,
+  `snapshot_read` improved by about `11.20ms`, `workspace_snapshot_read`
+  improved by about `11.25ms`, and `artifact_content_read` improved by about
+  `2.09ms`; however e2e p95 regressed by about `91.68ms`,
+  `decision2->approval` regressed by about `25.87ms`, and
+  `approval->completed` regressed by about `35.65ms`. Treat QC67 as a
+  correctness-preserving scan-removal improvement with no stable overall p95
+  win. The next optimization should inspect approval resolution / resume
+  response handling, because this batch shows `approval_approve` p95
+  `130.84ms` and closeout remains the largest non-cold stage.
+- 2026-05-01: Added QC68 Approval resolution loaded entity reuse. The Approval
+  block service now exposes `EnsureApprovedAndReturn` and
+  `EnsureRejectedAndReturn`, returning the Approval entity already loaded for
+  the state transition. Appservice approve / reject and batch approval
+  resolution now map the response from that returned entity instead of issuing
+  a second `ApprovalRepository.Get` after the transition. This preserves
+  Approval state transitions, idempotency, conflict behavior, event
+  publication, batch prevalidation, request ordering, Run resume semantics,
+  DoD validation, Result / Artifact materialization, and evidence chain; it
+  only removes response-path read amplification from approval handling. Local
+  verification passed with
+  `go test ./internal/modules/blocks/approval/... -count=1`,
+  `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestApproveApprovalWithSessionReusesReturnedApproval|TestBatchResolveApprovalsWithSessionReusesReturnedApprovals|TestApproveApprovalWithBackendReturnsApprovedApproval|TestRejectApprovalWithBackendReturnsRejectedApproval|TestBatchResolveApprovalsWithBackendApprovesInRequestOrder' -count=1`,
+  `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/run/biz -count=1`,
+  and `go test ./... -count=1 -p 1`. Deployed quantification is pending the
+  next rebuild; expected impact is limited to `approval_approve` and the
+  beginning of `approval_to_completed` on file backend.
+- 2026-05-01: Quantified deployed QC68 with governed mock
+  `concurrency=1,total=5` batch `load-20260501155915`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1585.03ms`, throughput `51.39` workspace/min,
+  `activation_to_decision1` p95 `586.19ms`, `decision1->decision2` p95
+  `153.51ms`, `decision2->approval` p95 `167.21ms`,
+  `approval_approve` p95 `54.91ms`, `approval->completed` p95 `239.31ms`,
+  `snapshot_read` p95 `51.54ms`, `workspace_snapshot_read` p95 `51.88ms`,
+  `observability_read` p95 `21.50ms`, and `artifact_content_read` p95
+  `16.79ms`. Compared with `load-20260501154152`, target
+  `approval_approve` improved by about `75.93ms`. The overall e2e p95
+  regressed by about `65.82ms`, dominated by the cold first
+  `activation_to_decision1` sample at `708.33ms`, while the non-cold samples
+  finished in about `944ms` to `1064ms`. Treat QC68 as a targeted approval
+  response-path win. Current dominant non-cold execution stage is
+  `approval_to_completed`; event checkpoints show this stage includes graph
+  plan, MCP tool execution, graph follow-up DoD assessment, Result / Artifact
+  materialization, and terminal state writes, not just final closeout.
+- 2026-05-01: Added QC69 graph follow-up loaded Steps reuse. After a graph node
+  completes, the orchestrator already loads the Run's Steps to determine ready
+  nodes. When there are no more ready graph nodes and a graph follow-up LLM
+  step is required, it now reuses that same loaded Step set to build
+  `graphEvidence` instead of calling `completedGraphEvidence` and scanning
+  Steps again. This preserves graph dependency semantics, selected branch
+  behavior, graph evidence content, DoD assessment, Result / Artifact
+  materialization, RuntimeCheckpoint behavior, and event order; it only
+  removes a duplicate file-backend Step list read from the successful graph
+  follow-up path. Local verification passed with
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_DispatchStepGraphFollowUpReusesLoadedStepsForEvidence|TestRuntimeOrchestrator_GraphFollowUpReusesLoadedStepsForEvidence|TestRuntimeOrchestrator_GraphFollowUpIncludesAllCompletedParallelEvidence|TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterApproval' -count=1`
+  and
+  `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/run/biz -count=1`.
+  Deployed quantification is pending the next rebuild; expected impact is
+  limited to `approval_to_completed` graph follow-up preparation on file
+  backend.
+- 2026-05-02: Quantified deployed QC69 with governed mock
+  `concurrency=1,total=5` batch `load-20260501162419`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1068.69ms`, throughput `60.36` workspace/min,
+  `activation_to_decision1` p95 `112.70ms`, `decision1->decision2` p95
+  `130.61ms`, `decision2->approval` p95 `173.10ms`,
+  `approval_approve` p95 `33.32ms`, `approval->completed` p95 `212.10ms`,
+  `snapshot_read` p95 `47.14ms`, `workspace_snapshot_read` p95 `48.59ms`,
+  `observability_read` p95 `17.78ms`, and `artifact_content_read` p95
+  `11.42ms`. Compared with QC68, the deployment no longer showed the previous
+  cold activation spike and overall p95 improved, but `approval->completed`
+  remained the largest stable stage. Checkpoint evidence from the slowest run
+  shows server-side approval resume to completed took about `162ms`, while the
+  client stage measured about `213ms`; the difference is expected HTTP status
+  wait / readback observation cost rather than a business state-machine delay.
+  QC69 is therefore retained as a correctness-preserving duplicate scan removal
+  and not treated as the dominant remaining optimization.
+- 2026-05-02: Added QC70 step dispatch evidence write parallelization. After
+  `StepDispatched` is published in the original external event order, the
+  orchestrator now writes the runtime ToolCall started record and the
+  `step_dispatched` RuntimeCheckpoint concurrently before executing the
+  runtime step. This preserves Step creation/update, StepDispatched event
+  ordering, ToolCall identity, checkpoint semantics, runtime input,
+  Decision / Approval blocking, DoD validation, Result / Artifact creation,
+  and terminal state transitions; it only removes serial file-backend evidence
+  write latency from every runtime step dispatch. Local verification passed
+  with
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_StepDispatchEvidenceWritesConcurrently|TestRuntimeOrchestrator_StartRunPublishesStructuredEvents|TestRuntimeOrchestrator_StartRunToComplete_Mainline|TestRuntimeOrchestrator_CompletedStepEvidenceWritesConcurrently|TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment' -count=1`
+  and
+  `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/run/biz -count=1`.
+  Deployed quantification is pending the next rebuild; expected impact is
+  distributed across all runtime step stages, especially
+  `approval_to_completed` where the governed path dispatches an LLM graph
+  plan step, an MCP tool step, and a DoD assessment follow-up step.
+- 2026-05-02: Quantified deployed QC70 with governed mock
+  `concurrency=1,total=5` batch `load-20260501163624`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1384.39ms`, throughput `56.06` workspace/min,
+  `activation_to_decision1` p95 `491.76ms`, `decision1->decision2` p95
+  `105.03ms`, `decision2->approval` p95 `137.17ms`,
+  `approval_approve` p95 `33.82ms`, `approval->completed` p95 `230.70ms`,
+  `snapshot_read` p95 `57.83ms`, `workspace_snapshot_read` p95 `48.76ms`,
+  `observability_read` p95 `19.05ms`, and `artifact_content_read` p95
+  `10.54ms`. The first activation sample was cold-path dominated at about
+  `588ms`, so e2e p95 is not comparable to the previous non-cold batch. The
+  target `approval->completed` stage did not improve against QC69
+  (`212.10ms` p95), so QC70 is retained as a correctness-preserving IO
+  parallelization but not counted as a stable deployed p95 win.
+- 2026-05-02: Added QC71 normal LLM follow-up failure-history read skip.
+  `executionContextPackage` still includes recent failed Step summaries for
+  runtime repair or explicit failure-aware LLM steps, but normal successful
+  Decision / Approval / graph follow-up LLM steps no longer scan all Steps just
+  to produce an empty `recentFailureSummary`. This preserves repair guidance,
+  duplicate failure handling, failure classifications, graph follow-up inputs,
+  DoD validation, Result / Artifact materialization, and runtime state-machine
+  semantics; it only removes unnecessary `StepRepository.ListByRun` reads from
+  the successful governed path. Local verification passed with
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_ExecutionContextPackageIncludesRecentFailureSummary|TestRuntimeOrchestrator_ExecutionContextPackageSkipsInitialStepFailureHistoryRead|TestRuntimeOrchestrator_ExecutionContextPackageSkipsFailureHistoryForNormalFollowUp|TestRuntimeOrchestrator_FollowUpInputInheritsWorkspaceManifest|TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterApproval|TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment' -count=1`
+  and
+  `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/run/biz -count=1`.
+  Deployed quantification is pending the next rebuild; expected impact is
+  distributed across normal LLM follow-up dispatch stages and should be most
+  visible in `decision1_to_decision2`, `decision2_to_approval`, and
+  `approval_to_completed`.
+- 2026-05-02: Added QC72 activation created Run compressed context inline
+  create. Workspace activation now builds the deterministic created-Run
+  `compressedContext` before calling `RunService.CreateRun`, so the created Run
+  is persisted with the same start recovery context that previously required a
+  separate `RunRepository.Update` between `CreateRun` and `EnsureStarted`.
+  This preserves activation API semantics, Run identity, selected Goal / DoD,
+  priority, Run state-machine transitions, first LLM step input,
+  Decision / Approval governance, DoD validation, Result / Artifact
+  materialization, and manual `StartRunWithSession` behavior; it only removes
+  one activation-path file-backend write from the generated Run start path.
+  Local verification passed with
+  `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext|TestActivateWorkspaceExecutionWithBackendCreatesAndStartsRun|TestActivationResponseReusesRunSnapshotRun' -count=1`
+  and
+  `go test ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz ./internal/modules/kernel/run/biz -count=1`.
+  Expected impact is limited to `activation_to_decision1`, especially cold
+  activation samples on file backend.
+- 2026-05-02: Quantified deployed QC72 with governed mock
+  `concurrency=1,total=5` batch `load-20260501225936`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1401.96ms`, throughput `53.39` workspace/min,
+  `activation_to_decision1` p95 `482.10ms`, `decision1->decision2` p95
+  `153.98ms`, `decision2->approval` p95 `188.04ms`,
+  `approval_approve` p95 `42.15ms`, `approval->completed` p95 `261.77ms`,
+  `snapshot_read` p95 `55.94ms`, `workspace_snapshot_read` p95 `44.37ms`,
+  `observability_read` p95 `19.03ms`, and `artifact_content_read` p95
+  `15.92ms`. The first workspace still had a cold `activation_to_decision1`
+  sample at about `580.04ms`, while the non-cold activation samples were about
+  `82ms` to `90ms`. Treat QC72 as a correctness-preserving write-amplification
+  removal; it did not eliminate the cold activation sample. The dominant stable
+  post-warm stage is now `approval->completed`, which includes graph follow-up
+  LLM execution, DoD assessment gate, Result / Artifact materialization,
+  Skill feedback memory, validation projection, and terminal state writes.
+- 2026-05-02: Added QC73 DoD completion assessment reuse. The orchestrator now
+  validates the final DoD assessment once at the completion gate and passes the
+  validated assessment plus trimmed summary into Result / Artifact creation and
+  Skill feedback memory recording. This preserves DoD acceptance rules,
+  satisfied-item evidence validation, Result / Artifact content, Skill feedback
+  memory semantics, failure handling, and Run / Workspace terminal transitions;
+  it only removes repeated `dodAssessment` extraction and summary trimming from
+  the successful closeout path. Local verification passed with
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_ReusesValidatedDoDAssessmentForCompletionEvidence|TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment|TestRuntimeOrchestrator_GraphFollowUpIncludesAllCompletedParallelEvidence|TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterApproval' -count=1`
+  and
+  `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/run/biz -count=1`.
+  Expected impact is limited to `approval_to_completed` closeout CPU /
+  allocation overhead and is not expected to change external business timing by
+  a large amount on file backend.
+- 2026-05-02: Quantified deployed QC73 with governed mock
+  `concurrency=1,total=5` batch `load-20260501231045`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1436.92ms`, throughput `55.61` workspace/min,
+  `activation_to_decision1` p95 `515.29ms`, `decision1->decision2` p95
+  `130.50ms`, `decision2->approval` p95 `150.50ms`,
+  `approval_approve` p95 `34.70ms`, `approval->completed` p95 `221.12ms`,
+  `snapshot_read` p95 `48.50ms`, `workspace_snapshot_read` p95 `50.36ms`,
+  `observability_read` p95 `16.95ms`, and `artifact_content_read` p95
+  `13.12ms`. Compared with `load-20260501225936`, target
+  `approval->completed` improved by about `40.66ms`, throughput improved by
+  about `2.23` workspace/min, and both governance continuation stages improved
+  (`decision1->decision2` by about `23.48ms`, `decision2->approval` by about
+  `37.54ms`). The first activation sample remained cold-path dominated at
+  about `620.85ms`; non-cold activation samples were about `77ms` to `93ms`.
+  Treat QC73 as a stable closeout improvement. The remaining stable bottleneck
+  is still `approval->completed`, now mostly bounded by graph follow-up LLM /
+  MCP execution, final Result / Artifact materialization, Skill feedback
+  memory, validation projection, and terminal state writes.
+- 2026-05-02: Added QC74 completion evidence Result / Memory write
+  parallelization. After the DoD assessment is validated, the orchestrator now
+  starts accepted Result / Artifact materialization and Skill feedback memory
+  recording concurrently, then waits for both before transitioning the Run and
+  Workspace to completed. This preserves DoD acceptance rules, accepted
+  Result / Artifact contents, Skill feedback memory semantics, failure
+  behavior, terminal state writes, and event ordering; it only removes a
+  serial file-backend write dependency between final business result
+  materialization and skill feedback persistence. Local verification passed
+  with
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_CompletionEvidenceWritesResultAndSkillFeedbackConcurrently|TestRuntimeOrchestrator_ReusesValidatedDoDAssessmentForCompletionEvidence|TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment|TestRuntimeOrchestrator_ResultArtifactsWriteConcurrentlyBeforeAcceptedResult|TestRuntimeOrchestrator_FinalRunAndWorkspaceCompletionWritesConcurrently|TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterApproval' -count=1`
+  and
+  `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/run/biz -count=1`.
+  Expected impact is limited to `approval_to_completed` on runs with selected
+  Skills and therefore Skill feedback memory.
+- 2026-05-02: Quantified deployed QC74 with governed mock
+  `concurrency=1,total=5` batch `load-20260502003117`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1478.86ms`, throughput `53.72` workspace/min,
+  `activation_to_decision1` p95 `507.29ms`, `decision1->decision2` p95
+  `150.28ms`, `decision2->approval` p95 `155.59ms`,
+  `approval_approve` p95 `41.01ms`, `approval->completed` p95 `213.19ms`,
+  `snapshot_read` p95 `46.31ms`, `workspace_snapshot_read` p95 `40.76ms`,
+  `observability_read` p95 `17.35ms`, and `artifact_content_read` p95
+  `9.92ms`. Compared with `load-20260501231045`, target
+  `approval->completed` improved by about `7.93ms`, while throughput and
+  governance stages regressed within sample variance. Treat QC74 as a small,
+  correctness-preserving closeout improvement, not a broad throughput win.
+  The remaining stable bottleneck is still the actual post-approval execution
+  and closeout sequence: graph follow-up LLM / MCP execution, final
+  Result / Artifact materialization, validation projection, and terminal state
+  writes. Further optimization should focus on removing proven duplicate reads
+  or write amplification only; changing event order or completing the Run
+  before required evidence is persisted is out of scope.
+- 2026-05-02: Added QC75 Decision resolution loaded entity reuse. The Decision
+  service now exposes `EnsureResolvedTicketAndReturn`, returning the resolved
+  Ticket and Resolution already loaded or created during the formal state
+  transition. Appservice Decision resolve and batch resolve response mapping
+  reuse those returned entities instead of reading the Ticket and Resolution
+  again after a successful transition. This preserves supported resolution
+  type validation, batch prevalidation, idempotent conflict checks, event
+  publication, Run continuation behavior, and existing runtime action ports;
+  it only removes response-path read amplification from operator Decision
+  resolution. Local verification passed with
+  `go test ./internal/modules/kernel/decision/biz -run 'TestService_EnsureResolvedTicket' -count=1`,
+  `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestResolveDecisionWithSessionReusesReturnedEntitiesForResponse|TestBatchResolveDecisionsWithSessionReusesReturnedEntitiesAfterPrevalidation' -count=1`,
+  `go test ./internal/modules/kernel/decision/... -count=1`,
+  `go test ./internal/modules/application/workorchd/biz/appservice -run 'Test.*Decision' -count=1`,
+  `go test ./internal/modules/kernel/decision/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz ./internal/modules/kernel/run/biz -count=1`,
+  and `go test ./... -count=1 -p 1`. Deployed quantification should compare
+  `decision1_resolve`, `decision2_resolve`, `decision1_to_decision2`, and
+  `decision2_to_approval` against batch `load-20260502003117`; expected
+  impact is small but should reduce file-backend pressure on governed
+  multi-decision paths.
+- 2026-05-02: Quantified deployed QC75 with governed mock
+  `concurrency=1,total=5` batch `load-20260502010217`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1405.06ms`, throughput `55.90` workspace/min,
+  `activation_to_decision1` p95 `505.68ms`, `decision1_resolve` p95
+  `52.15ms`, `decision1->decision2` p95 `133.36ms`,
+  `decision2_resolve` p95 `54.36ms`, `decision2->approval` p95 `152.73ms`,
+  `approval_approve` p95 `51.53ms`, `approval->completed` p95 `276.87ms`,
+  `snapshot_read` p95 `66.42ms`, `workspace_snapshot_read` p95 `45.76ms`,
+  `observability_read` p95 `19.89ms`, and `artifact_content_read` p95
+  `15.28ms`. Compared with `load-20260502003117`, throughput improved by
+  about `2.18` workspace/min and e2e p95 improved by about `73.80ms`, while
+  `approval->completed` regressed by about `63.68ms` and Decision resolve
+  stages stayed in the expected small-write/read range. Treat QC75 as a
+  correctness-preserving file-backend pressure reduction rather than a stable
+  broad throughput win. The dominant remaining deployed stage is still
+  `approval->completed`; further changes should target proven duplicate reads
+  or write amplification in post-approval execution and closeout only.
+- 2026-05-02: Added QC76 graph follow-up duplicate evidence payload trim.
+  Graph follow-up LLM input already carries formal `graphEvidence` containing
+  completed node IDs, Step IDs, kinds, and outputs. The generic
+  `previousStepOutput` copy duplicated the latest node output and increased
+  the follow-up Step input body and persistence size without adding a distinct
+  evidence source. Graph follow-up now uses `graphEvidence` only, matching the
+  provider prompt contract for `input.graphFollowUp`; normal completion
+  follow-up still keeps `previousStepOutput` because that path has no
+  graph-level evidence bundle. This preserves execution graph evidence,
+  DoD assessment, Result / Artifact materialization, repair behavior,
+  state-machine transitions, and event ordering; it only trims duplicate
+  payload from the post-graph validation LLM input. Local verification passed
+  with
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterExecutionGraphCompletes|TestRuntimeOrchestrator_GraphFollowUpIncludesAllCompletedParallelEvidence|TestRuntimeOrchestrator_GraphFollowUpReusesLoadedStepsForEvidence|TestRuntimeOrchestrator_DispatchStepGraphFollowUpReusesLoadedStepsForEvidence|TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterLLMPlannedShellLeaf|TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment' -count=1`,
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterApproval|TestRuntimeOrchestrator_CompletionEvidenceWritesResultAndSkillFeedbackConcurrently|TestRuntimeOrchestrator_ResultArtifactsWriteConcurrentlyBeforeAcceptedResult' -count=1`,
+  `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server -count=1`,
+  `go test ./internal/modules/kernel/orchestrator/... -count=1`, and
+  `go test ./... -count=1 -p 1`. Deployed quantification should compare
+  `approval_to_completed` and LLM follow-up payload-heavy graph scenarios
+  against `load-20260502010217`; expected impact is limited but should reduce
+  file-backend write volume and LLM request payload size on graph follow-up
+  paths.
+- 2026-05-02: Quantified deployed QC76 with governed mock
+  `concurrency=1,total=5` batch `load-20260502011247`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1467.88ms`, throughput `55.12` workspace/min,
+  `activation_to_decision1` p95 `567.33ms`, `decision1_resolve` p95
+  `56.96ms`, `decision1->decision2` p95 `143.18ms`,
+  `decision2_resolve` p95 `63.22ms`, `decision2->approval` p95 `147.09ms`,
+  `approval_approve` p95 `33.65ms`, `approval->completed` p95 `240.37ms`,
+  `snapshot_read` p95 `52.22ms`, `workspace_snapshot_read` p95 `41.70ms`,
+  `observability_read` p95 `17.95ms`, and `artifact_content_read` p95
+  `11.36ms`. Compared with `load-20260502010217`, target
+  `approval->completed` improved by about `36.49ms`,
+  `approval_approve` improved by about `17.88ms`, `snapshot_read` improved by
+  about `14.20ms`, and `workspace_snapshot_read` improved by about `4.06ms`.
+  E2E p95 regressed by about `62.82ms` because the first cold
+  `activation_to_decision1` sample rose to about `683.90ms`; non-cold
+  workspaces stayed near `921ms` to `963ms` e2e. Treat QC76 as a validated
+  post-approval payload and persistence-size improvement. The remaining
+  steady-stage bottlenecks are still post-approval graph follow-up and final
+  materialization, while cold activation remains a separate attribution topic.
+- 2026-05-02: Added QC77 stable execution context package reuse. Normal LLM
+  follow-up inputs now carry only stable execution-context subdocuments from
+  the previous LLM package: latest accepted Result, current deliverables, and
+  selected Skill / MCP / Memory context. The next LLM step still rebuilds the
+  package envelope with the current `workspaceId`, `runId`, `stepId`, and
+  `stage`; `governanceHistory` is intentionally rebuilt from the active Run
+  execution context so newly supplied Decision / Approval information is never
+  masked by stale Step input. Repair follow-up behavior is unchanged and still
+  reads recent failure history when failure context is present. This preserves
+  DoD validation, Result / Artifact materialization, graph evidence,
+  governance resolution semantics, and state-machine transitions while
+  removing duplicate Result / Artifact repository reads from normal follow-up
+  context construction. Local verification passed with
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_FollowUpInputInheritsStableExecutionContextPackage|TestRuntimeOrchestrator_ExecutionContextPackageReusesStableFollowUpPackage|TestRuntimeOrchestrator_ExecutionContextPackageReusesInputWorkspaceManifest|TestRuntimeOrchestrator_FollowUpInputInheritsWorkspaceManifest|TestRuntimeOrchestrator_ExecutionContextPackageIncludesRecentFailureSummary|TestRuntimeOrchestrator_ExecutionContextPackageSkipsFailureHistoryForNormalFollowUp|TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterDecision|TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterApproval' -count=1`
+  and
+  `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server -count=1`.
+  Deployed quantification should compare `decision1_to_decision2`,
+  `decision2_to_approval`, and `approval_to_completed` against
+  `load-20260502011247`; expected gain is small but directly targets
+  file-backend read amplification in multi-stage LLM follow-up paths.
+- 2026-05-02: Quantified deployed QC77 with governed mock
+  `concurrency=1,total=5` batch `load-20260502012905`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1573.18ms`, throughput `51.85` workspace/min,
+  `activation_to_decision1` p95 `662.58ms`, `decision1_resolve` p95
+  `78.78ms`, `decision1->decision2` p95 `153.77ms`,
+  `decision2_resolve` p95 `58.32ms`, `decision2->approval` p95 `134.74ms`,
+  `approval_approve` p95 `38.34ms`, `approval->completed` p95 `277.62ms`,
+  `snapshot_read` p95 `45.77ms`, `workspace_snapshot_read` p95 `56.59ms`,
+  `observability_read` p95 `27.96ms`, and `artifact_content_read` p95
+  `17.18ms`. Compared with `load-20260502011247`, target
+  `decision2->approval` improved by about `12.35ms`, `approval_approve`
+  improved by about `4.69ms`, and `snapshot_read` improved by about `6.45ms`.
+  E2E p95 regressed by about `105.30ms` because the first cold
+  `activation_to_decision1` sample rose to about `803.92ms`; non-cold
+  activation samples stayed near `93ms` to `97ms`. `approval->completed`
+  regressed by about `37.25ms`, so QC77 should be treated as a small
+  governance follow-up read-amplification improvement rather than a broad
+  closeout win. The next safe optimization should target StartRun / activation
+  write amplification or post-approval closeout only when a duplicate read or
+  serial projection write is proven.
+- 2026-05-02: Added QC78 StartRun active projection write parallelization.
+  StartRun now reuses the same active-state synchronization helper used by
+  resume paths, writing the Run `running` state and Workspace `running`
+  projection concurrently before publishing events in the original external
+  order: Run state changed before Workspace state changed. This preserves
+  active-run conflict checks, dispatch spec calculation, loaded Workspace
+  reuse, step dispatch, DoD validation, Result / Artifact materialization,
+  RuntimeCheckpoint behavior, and event ordering; it only removes serial
+  file-backend write latency from the activation path. Local verification
+  passed with
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_StartRunActiveWritesConcurrently|TestRuntimeOrchestrator_StartRunDispatchReusesLoadedWorkspace|TestRuntimeOrchestrator_StartRunDispatchReusesLoadedRun|TestRuntimeOrchestrator_ActiveRunAndWorkspaceWritesConcurrently|TestRuntimeOrchestrator_StartRunToComplete_Mainline|TestRuntimeOrchestrator_StartRunPublishesRunAndStepEvents' -count=1`.
+  Deployed quantification should compare `activation_to_decision1` against
+  `load-20260502012905`, with cold first-sample attribution kept separate from
+  non-cold activation samples.
+- 2026-05-02: Quantified deployed QC78 with governed mock
+  `concurrency=1,total=5` batch `load-20260502014022`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1479.73ms`, throughput `52.54` workspace/min,
+  `activation_to_decision1` p95 `531.10ms`, `decision1_resolve` p95
+  `77.53ms`, `decision1->decision2` p95 `161.64ms`,
+  `decision2_resolve` p95 `92.19ms`, `decision2->approval` p95 `174.16ms`,
+  `approval_approve` p95 `42.29ms`, `approval->completed` p95 `233.67ms`,
+  `snapshot_read` p95 `61.95ms`, `workspace_snapshot_read` p95 `51.37ms`,
+  `observability_read` p95 `21.35ms`, and `artifact_content_read` p95
+  `17.31ms`. Compared with `load-20260502012905`, target
+  `activation_to_decision1` improved by about `131.48ms`, e2e p95 improved by
+  about `93.45ms`, throughput improved by about `0.70` workspace/min, and
+  `approval->completed` improved by about `43.95ms`. Non-cold activation
+  samples stayed between about `79ms` and `129ms`, while the first cold sample
+  remained dominant at about `631.67ms`. `decision2->approval` regressed by
+  about `39.42ms`, so QC78 should be treated as a validated activation
+  projection-write optimization, not a governance-stage improvement. The next
+  safe optimization should inspect post-approval graph follow-up / closeout
+  evidence persistence for proven duplicate reads or serial writes.
+- 2026-05-02: Added QC79 Completed Step state/checkpoint write
+  parallelization. Runtime step completion now records ToolCall /
+  ValidationResult evidence first as before, then writes the completed Step
+  state and `step_completed` RuntimeCheckpoint concurrently, and only publishes
+  the Step completed event after both writes succeed. This keeps Step,
+  RuntimeCheckpoint, ToolCall, ValidationResult, Result, Artifact, Memory,
+  graph follow-up, Decision / Approval, and DoD acceptance semantics unchanged;
+  it only removes serial file-backend write latency from every completed
+  runtime step. Local verification passed with
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_CompletedStepStateAndCheckpointWritesConcurrently|TestRuntimeOrchestrator_CompletedStepEvidenceWritesConcurrently|TestRuntimeOrchestrator_StartRunToComplete_Mainline|TestRuntimeOrchestrator_StartRunPublishesRunAndStepEvents|TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment|TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterApproval' -count=1`.
+  Deployed quantification should compare `approval_to_completed` and graph
+  follow-up segments against `load-20260502014022`, while still separating cold
+  first-sample noise from non-cold governed samples.
+- 2026-05-02: Quantified deployed QC79 with governed mock
+  `concurrency=1,total=5` batch `load-20260502020648`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1499.48ms`, throughput `55.16` workspace/min,
+  `activation_to_decision1` p95 `538.60ms`, `decision1_resolve` p95
+  `58.56ms`, `decision1->decision2` p95 `136.53ms`,
+  `decision2_resolve` p95 `47.29ms`, `decision2->approval` p95 `172.56ms`,
+  `approval_approve` p95 `52.89ms`, `approval->completed` p95 `217.68ms`,
+  `snapshot_read` p95 `53.18ms`, `workspace_snapshot_read` p95 `72.52ms`,
+  `observability_read` p95 `19.08ms`, and `artifact_content_read` p95
+  `12.89ms`. Compared with `load-20260502014022`, target
+  `approval->completed` improved by about `15.99ms`, throughput improved by
+  about `2.62` workspace/min, and `decision1->decision2` improved by about
+  `25.11ms`. E2E p95 regressed by about `19.75ms` because the first cold
+  `activation_to_decision1` sample stayed dominant at about `649.66ms`;
+  non-cold activation samples stayed between about `81ms` and `94ms`.
+  `decision2->approval` stayed roughly flat against QC78, so the next safe
+  optimization should inspect governance resume / follow-up projection writes
+  or repeated read-model work only when a concrete serial operation is found.
+- 2026-05-02: Added QC80 Runtime memory writes parallelization. Runtime
+  `memoryWrites` and the automatically appended DoD `run_summary` memory item
+  are now materialized as a fixed ordered item list first, then persisted
+  concurrently through the Memory repository. The returned `memoryRefs` remain
+  ordered by the original request index, supported memory type validation is
+  unchanged, conflict update behavior is unchanged, and any failed MemoryItem
+  write still fails the runtime step. Local verification passed with
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_RuntimeMemoryWritesConcurrently|TestRuntimeOrchestrator_StartRunPersistsRuntimeMemoryWrites|TestRuntimeOrchestrator_CompletionEvidenceWritesResultAndSkillFeedbackConcurrently|TestRuntimeOrchestrator_StartRunToComplete_Mainline|TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterApproval' -count=1`.
+  Deployed quantification should compare governed follow-up and
+  `approval_to_completed` against `load-20260502020648`; expected impact is
+  limited but safe because it only removes serial MemoryItem file writes.
+- 2026-05-02: Quantified deployed QC80 with governed mock
+  `concurrency=1,total=5` batch `load-20260502021847`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1470.47ms`, throughput `54.91` workspace/min,
+  `activation_to_decision1` p95 `545.05ms`, `decision1_resolve` p95
+  `62.34ms`, `decision1->decision2` p95 `142.95ms`,
+  `decision2_resolve` p95 `50.11ms`, `decision2->approval` p95 `174.96ms`,
+  `approval_approve` p95 `39.11ms`, `approval->completed` p95 `232.07ms`,
+  `snapshot_read` p95 `49.41ms`, `workspace_snapshot_read` p95 `52.95ms`,
+  `observability_read` p95 `19.20ms`, and `artifact_content_read` p95
+  `14.76ms`. Compared with `load-20260502020648`, e2e p95 improved by about
+  `29.01ms`, `decision2->approval` regressed by about `2.40ms`, and target
+  `approval->completed` regressed by about `14.39ms`. Non-cold activation
+  samples stayed between about `80ms` and `99ms`, while the first cold sample
+  remained dominant at about `656.57ms`. Treat QC80 as a correctness-preserving
+  write-parallelization cleanup whose benefit is scenario-dependent rather
+  than a validated closeout improvement. Further optimization should require a
+  proven duplicate read/write or coarse-grained read-model bottleneck before
+  touching runtime semantics again.
+- 2026-05-02: Added QC81 Run snapshot capability catalog reuse. Run Snapshot
+  now loads the MCP Capability catalog at most once per snapshot when
+  `capabilityIds` or capability-bearing ToolCalls are present, and reuses that
+  catalog for both selected and used capability projections. Missing capability
+  IDs still render as ID / displayName fallback, selected capability metadata
+  embedded directly in execution context is still honored, and runtime
+  orchestration / evidence semantics are unchanged. Local verification passed
+  with
+  `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestReadRunSnapshotLoadsCapabilityCatalogOnce|TestReadRunSnapshotWithBackendReturnsSelectedAndUsedCapabilities|TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress|TestReadWorkspaceSnapshotWithRunSnapshotReusesProjectionSections|TestReadRunStatusWithBackendReturnsBlockedApprovalSummary' -count=1`.
+  Deployed quantification should compare `snapshot_read`,
+  `workspace_snapshot_read`, `observability_read`, and
+  `artifact_content_read` against `load-20260502021847`; this is a read-model
+  optimization and should not be judged primarily by `approval_to_completed`.
+- 2026-05-02: Quantified deployed QC81 with governed mock
+  `concurrency=1,total=5` batch `load-20260502022815`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1587.57ms`, throughput `51.01` workspace/min,
+  `activation_to_decision1` p95 `589.22ms`, `decision1_resolve` p95
+  `71.12ms`, `decision1->decision2` p95 `158.90ms`,
+  `decision2_resolve` p95 `62.17ms`, `decision2->approval` p95 `179.47ms`,
+  `approval_approve` p95 `54.42ms`, `approval->completed` p95 `302.49ms`,
+  `snapshot_read` p95 `57.15ms`, `workspace_snapshot_read` p95 `51.03ms`,
+  `observability_read` p95 `16.56ms`, and `artifact_content_read` p95
+  `8.36ms`. Compared with `load-20260502021847`, target
+  `workspace_snapshot_read` improved by about `1.92ms`,
+  `observability_read` improved by about `2.64ms`, and
+  `artifact_content_read` improved by about `6.40ms`; `snapshot_read`
+  regressed by about `7.74ms` and should be retested with a larger sample
+  before attributing. Runtime stages regressed in this small batch, especially
+  `approval->completed`, but QC81 only changes read-model capability catalog
+  projection after completion. Treat QC81 as a safe read-model improvement with
+  mixed small-sample read latency results, not as a runtime closeout
+  optimization.
+- 2026-05-02: Added QC82 Observability projection reuse. `mapRunObservability`
+  now reuses `TaskProgress`, `TaskDecompositions`, and `ExecutionSections`
+  already built by `readRunSnapshot`, instead of recomputing these read-model
+  projections when the observability endpoint maps the same snapshot. Runtime
+  state transitions, evidence, timeline generation, checkpoint handling,
+  Result / Artifact materialization, and HTTP cache semantics are unchanged.
+  Local verification passed with
+  `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestMapRunObservabilityReusesSnapshotProjection|TestReadRunSnapshotLoadsCapabilityCatalogOnce|TestReadRunSnapshotWithBackendReturnsSelectedAndUsedCapabilities|TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress|TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection' -count=1`.
+  Deployed quantification should compare `observability_read` against
+  `load-20260502022815`; this is a read-model mapping optimization and should
+  not be judged by runtime `approval_to_completed`.
+- 2026-05-02: Quantified deployed QC82 with governed mock
+  `concurrency=1,total=5` batch `load-20260502023352`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1095.93ms`, throughput `58.59` workspace/min,
+  `activation_to_decision1` p95 `116.96ms`, `decision1_resolve` p95
+  `55.40ms`, `decision1->decision2` p95 `139.19ms`,
+  `decision2_resolve` p95 `53.64ms`, `decision2->approval` p95 `176.16ms`,
+  `approval_approve` p95 `43.69ms`, `approval->completed` p95 `236.31ms`,
+  `snapshot_read` p95 `86.00ms`, `workspace_snapshot_read` p95 `55.59ms`,
+  `observability_read` p95 `30.80ms`, and `artifact_content_read` p95
+  `18.58ms`. Compared with `load-20260502022815`, e2e p95 improved by about
+  `491.64ms` and runtime closeout recovered, but the target
+  `observability_read` p95 regressed by about `14.24ms` because one sample
+  read took `35.09ms` while the remaining observability samples stayed around
+  `11ms` to `14ms`. Treat QC82 as a safe duplicate-projection cleanup with
+  unstable small-sample read latency, not as a validated p95 read-performance
+  win. Further read-model optimization should continue only where repeated
+  projection or repository reads are directly visible in code.
+- 2026-05-02: Added QC83 Run derived projection reuse.
+  `mapRunContextBundle`, `compressedContextFromRunSnapshot`,
+  `ReadRunTaskProgressWithSession`, `readRunTaskProgress`, and
+  `ReadRunTaskDecompositionsWithSession` now reuse derived projections already
+  present in `RunSnapshot` when they match the Run / Workspace identity,
+  instead of recalculating `mapTaskProgress` or `mapTaskDecompositions` from
+  the same snapshot. If the snapshot does not carry a matching projection, the
+  existing formal mapper remains the builder. Runtime state transitions,
+  evidence, timeline generation, checkpoint handling, Result / Artifact
+  materialization, and repository contracts are unchanged. Local verification
+  passed with
+  `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestRunProjectionHelpersReuseSnapshotDerivedViews|TestRunContextBundleReusesSnapshotTaskProgress|TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection' -count=1`,
+  `go test ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz -count=1`,
+  `go test ./... -count=1 -p 1`, and
+  `go build -o /tmp/workorchd-qc83 ./application/workorchd`. Deployed
+  quantification should compare context / compressed-context /
+  task-decomposition readback latency where available, while keeping runtime
+  completion metrics as
+  secondary correctness signals.
+- 2026-05-02: Quantified deployed QC83 with governed mock
+  `concurrency=1,total=5` batch `load-20260502024554`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1466.91ms`, throughput `54.66` workspace/min,
+  `activation_to_decision1` p95 `551.26ms`, `decision1_resolve` p95
+  `76.33ms`, `decision1->decision2` p95 `160.54ms`,
+  `decision2_resolve` p95 `49.63ms`, `decision2->approval` p95 `151.10ms`,
+  `approval_approve` p95 `43.45ms`, `approval->completed` p95 `222.56ms`,
+  `snapshot_read` p95 `58.00ms`, `workspace_snapshot_read` p95 `47.05ms`,
+  `observability_read` p95 `17.26ms`, and `artifact_content_read` p95
+  `12.13ms`. Compared with `load-20260502023352`, `snapshot_read` improved by
+  about `28.00ms`, `workspace_snapshot_read` improved by about `8.54ms`,
+  `observability_read` improved by about `13.54ms`, `artifact_content_read`
+  improved by about `6.44ms`, and `approval->completed` improved by about
+  `13.75ms`. E2E p95 regressed by about `370.97ms` because the first cold
+  `activation_to_decision1` sample rose to about `661.38ms`; non-cold
+  activation samples stayed around `94ms` to `111ms`. Treat QC83 as a
+  validated duplicate read-model projection cleanup with improved readback
+  stability, not as a cold-start optimization.
+- 2026-05-02: Added QC84 Observability terminal snapshot inflight reuse. The
+  HTTP `run observability` endpoint now first checks terminal RunSnapshot cache
+  as before, then waits for an existing terminal snapshot warmup in-flight
+  read, and maps observability from that snapshot. Only when neither cache nor
+  in-flight snapshot exists does it perform the independent observability
+  read. This keeps RunSnapshot TTL, status wait behavior, runtime state,
+  evidence, timeline, Result / Artifact, and repository contracts unchanged;
+  it only removes a duplicate file-backend read during the common status-wait
+  -> snapshot / workspace snapshot / status / observability readback sequence.
+  Local verification passed with
+  `go test ./internal/modules/application/workorchd/service/server -run 'TestRunObservabilityReadWaitsForTerminalStatusWarmupInflight|TestRunSnapshotReadWaitsForTerminalStatusWarmupInflight|TestTerminalRunSnapshotCacheReusesSnapshotForReadViews|TestRunStatusWaitWarmsTerminalRunSnapshotCache' -count=1`,
+  `go test ./internal/modules/application/workorchd/service/server ./internal/modules/application/workorchd/biz/appservice ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz -count=1`,
+  `go test ./... -count=1 -p 1`, and
+  `go build -o /tmp/workorchd-qc84 ./application/workorchd`. Deployed
+  quantification should compare `observability_read`, `snapshot_read`, and
+  `workspace_snapshot_read` against `load-20260502024554`; runtime completion
+  metrics remain secondary because this is an HTTP readback optimization.
+- 2026-05-02: Quantified deployed QC84 with governed mock
+  `concurrency=1,total=5` batch `load-20260502025954`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1543.94ms`, throughput `52.20` workspace/min,
+  `activation_to_decision1` p95 `607.64ms`, `decision1_resolve` p95
+  `70.51ms`, `decision1->decision2` p95 `144.90ms`,
+  `decision2_resolve` p95 `59.74ms`, `decision2->approval` p95 `180.05ms`,
+  `approval_approve` p95 `42.58ms`, `approval->completed` p95 `221.52ms`,
+  `snapshot_read` p95 `85.25ms`, `workspace_snapshot_read` p95 `56.79ms`,
+  `observability_read` p95 `20.57ms`, and `artifact_content_read` p95
+  `16.53ms`. Compared with `load-20260502024554`, `approval->completed`
+  improved slightly by about `1.05ms`, `decision1->decision2` improved by
+  about `15.64ms`, but target readback metrics regressed:
+  `observability_read` by about `3.31ms`, `snapshot_read` by about `27.25ms`,
+  and `workspace_snapshot_read` by about `9.74ms`. E2E p95 also regressed by
+  about `77.03ms` because the first cold `activation_to_decision1` sample rose
+  to about `733.72ms`; non-cold activation samples stayed around `87ms` to
+  `103ms`. Treat QC84 as a correctness-preserving duplicate-read guard for
+  overlapping status warmup / observability requests, not as a validated p95
+  readback optimization. Do not continue stacking changes on this path without
+  a larger sample or direct duplicate-read evidence.
+- 2026-05-02: Added QC85 Run snapshot Workspace read parallelization.
+  `readRunSnapshot` and `readRunRecoverySnapshot` now load Workspace metadata
+  in the same read-model task group as run-scoped Step / ToolCall / Patch /
+  ValidationResult / RuntimeCheckpoint / Result / Artifact / Event /
+  governance reads after the Run itself has been loaded. This removes a
+  serial Workspace repository read from RunSnapshot construction while keeping
+  snapshot fields, observed projection, recovery snapshot shape, Result /
+  Artifact visibility, runtime state, evidence, and repository contracts
+  unchanged. Local verification passed with
+  `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestReadRunSnapshotReadsWorkspaceAndRunScopedEvidenceConcurrently|TestReadRunSnapshotWithBackendReturnsBlockedDecisionReadModel|TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCandidates' -count=1`,
+  `go test ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz -count=1`,
+  `go test ./... -count=1 -p 1`, and
+  `go build -o /tmp/workorchd-qc85 ./application/workorchd`. Deployed
+  quantification should compare `snapshot_read`, `workspace_snapshot_read`,
+  `observability_read`, and recovery / resume behavior against
+  `load-20260502025954`; runtime completion metrics remain secondary because
+  this is a read-model optimization.
+- 2026-05-02: Quantified deployed QC85 with governed mock
+  `concurrency=1,total=5` batch `load-20260502030706`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1564.11ms`, throughput `50.52` workspace/min,
+  `activation_to_decision1` p95 `520.03ms`, `decision1_resolve` p95
+  `66.83ms`, `decision1->decision2` p95 `146.78ms`,
+  `decision2_resolve` p95 `73.92ms`, `decision2->approval` p95 `187.91ms`,
+  `approval_approve` p95 `44.93ms`, `approval->completed` p95 `287.19ms`,
+  `snapshot_read` p95 `66.12ms`, `workspace_snapshot_read` p95 `55.12ms`,
+  `observability_read` p95 `22.29ms`, and `artifact_content_read` p95
+  `13.78ms`. Compared with `load-20260502025954`, target `snapshot_read`
+  improved by about `19.13ms`, `workspace_snapshot_read` improved by about
+  `1.67ms`, and `activation_to_decision1` improved by about `87.60ms`.
+  `observability_read` regressed by about `1.72ms`, e2e p95 regressed by
+  about `20.17ms`, and `approval->completed` regressed by about `65.67ms`.
+  Because QC85 only changes RunSnapshot / recovery snapshot read-model
+  loading, do not attribute runtime closeout regression to this change without
+  separate evidence. Treat QC85 as a targeted RunSnapshot read improvement
+  with small-sample variance elsewhere. Next optimization should require direct
+  evidence of a serial completion-chain operation or a repeated repository
+  read outside this RunSnapshot path.
+- 2026-05-02: Added QC86 Workspace snapshot Workspace read parallelization.
+  `readWorkspaceSnapshot` now loads Workspace metadata in the same read-model
+  task group as workspace-scoped Run / Result / Artifact / Event / Decision /
+  Approval reads when no cached RunSnapshot supplies the Workspace projection.
+  Cached RunSnapshot behavior is unchanged and still avoids an extra
+  Workspace Get. This removes a serial Workspace repository read from
+  WorkspaceSnapshot construction while keeping projection Run selection,
+  Decision / Approval mapping, Result / Artifact visibility, TaskProgress,
+  WorkspaceOutcome, runtime state, evidence, and repository contracts
+  unchanged. Local verification passed with
+  `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestReadWorkspaceSnapshotReadsWorkspaceAndWorkspaceScopedItemsConcurrently|TestReadWorkspaceSnapshotWithRunSnapshotAvoidsProjectionRunStepRead|TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems' -count=1`,
+  `go test ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz -count=1`,
+  `go test ./... -count=1 -p 1`, and
+  `go build -o /tmp/workorchd-qc86 ./application/workorchd`. Deployed
+  quantification should compare `workspace_snapshot_read`, `snapshot_read`,
+  and `observability_read` against `load-20260502030706`; runtime completion
+  metrics remain secondary because this is a read-model optimization.
+- 2026-05-02: Quantified deployed QC86 with governed mock
+  `concurrency=1,total=5` batch `load-20260502031422`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1108.79ms`, throughput `56.75` workspace/min,
+  `activation_to_decision1` p95 `112.34ms`, `decision1_resolve` p95
+  `61.85ms`, `decision1->decision2` p95 `195.83ms`,
+  `decision2_resolve` p95 `55.86ms`, `decision2->approval` p95 `190.76ms`,
+  `approval_approve` p95 `45.04ms`, `approval->completed` p95 `255.53ms`,
+  `snapshot_read` p95 `77.77ms`, `workspace_snapshot_read` p95 `54.74ms`,
+  `observability_read` p95 `23.10ms`, and `artifact_content_read` p95
+  `18.06ms`. Compared with `load-20260502030706`, target
+  `workspace_snapshot_read` improved slightly by about `0.39ms`, e2e p95
+  improved by about `455.31ms` because this batch had no cold activation
+  outlier, and throughput improved by about `6.23` workspace/min. However
+  `snapshot_read` regressed by about `11.65ms`, `observability_read` regressed
+  by about `0.81ms`, and `approval->completed` remained dominant at about
+  `255.53ms`. Treat QC86 as a correctness-preserving WorkspaceSnapshot serial
+  read cleanup with only marginal deployed p95 readback gain. Further
+  optimization should move back to proven graph / runtime closeout duplicate
+  reads or write amplification rather than continuing to stack generic
+  readback micro-optimizations.
+- 2026-05-02: Added QC87 graph step ID loaded-step reuse.
+  `readyGraphStepSpecsWithSteps` already loads all Run steps to calculate
+  completed / started graph nodes and graph branch state. Graph step ID
+  generation now reuses that loaded step slice to detect whether the base
+  `run/block/<node>` ID is already occupied by a different graph root, instead
+  of calling the Step repository `Get` once per ready node. This keeps graph
+  node dependency checks, repeated node ID scoping, dispatch IDs, graph
+  follow-up evidence, DoD validation, Result / Artifact materialization,
+  RuntimeCheckpoint emission, and event ordering unchanged; it only removes a
+  duplicate file-backend read from graph dispatch preparation. Local
+  verification passed with
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_ReadyGraphStepSpecsReusesLoadedStepsForStepID|TestRuntimeOrchestrator_GraphFollowUpReusesLoadedStepsForEvidence|TestRuntimeOrchestrator_DispatchStepGraphFollowUpReusesLoadedStepsForEvidence|TestRuntimeOrchestrator_DispatchesRepeatedGraphNodeIDInNewGraphScope' -count=1`
+  and
+  `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/blocks/llm/biz -count=1`.
+  Deployed quantification should compare `decision2_to_approval`,
+  `approval_to_completed`, and graph follow-up dispatch gaps against
+  `load-20260502031422`; expected impact is small but directly targets a
+  proven duplicate repository read in the graph execution path.
+- 2026-05-02: Quantified deployed QC87 with governed mock
+  `concurrency=1,total=5` batch `load-20260502032508`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1601.13ms`, throughput `50.94` workspace/min,
+  `activation_to_decision1` p95 `548.20ms`, `decision1_resolve` p95
+  `80.98ms`, `decision1->decision2` p95 `189.76ms`,
+  `decision2_resolve` p95 `53.59ms`, `decision2->approval` p95 `206.96ms`,
+  `approval_approve` p95 `46.29ms`, `approval->completed` p95 `230.44ms`,
+  `snapshot_read` p95 `61.38ms`, `workspace_snapshot_read` p95 `68.54ms`,
+  `observability_read` p95 `20.86ms`, and `artifact_content_read` p95
+  `8.59ms`. Compared with `load-20260502031422`, the target
+  `approval->completed` stage improved by about `25.08ms`, `snapshot_read`
+  improved by about `16.39ms`, `observability_read` improved by about
+  `2.24ms`, and `artifact_content_read` improved by about `9.47ms`.
+  `decision2->approval` regressed by about `16.19ms`,
+  `workspace_snapshot_read` regressed by about `13.80ms`, and e2e p95
+  regressed because the first activation sample was cold-path dominated at
+  about `660.36ms` while non-cold activation samples stayed around `83ms` to
+  `100ms`. Treat QC87 as a correctness-preserving graph dispatch duplicate
+  read cleanup with a useful post-approval stage signal, not as a broad e2e
+  win. The next safe optimization should inspect governance resume /
+  follow-up preparation in `decision2_to_approval` and avoid further generic
+  readback changes unless a concrete duplicate read is proven.
+- 2026-05-02: Added QC88 loaded Run reuse for governance resume. Appservice
+  already loads the Run to build the compressed context patch before resume;
+  `ResumeRunCommand` can now carry that loaded Run through the kernel Run
+  service into the RuntimeOrchestrator, and the orchestrator exposes
+  `ResumeLoadedRunWithExecutionContextPatch` for the same state-machine path.
+  This removes the duplicate initial Run repository read from governance
+  resume while preserving orchestrator ownership of Decision Ticket /
+  Approval state validation, execution context patch merge timing, Workspace
+  active-run validation, Run / Workspace projection writes, dispatch,
+  DoD validation, Result / Artifact materialization, RuntimeCheckpoint
+  emission, and event ordering. Local verification passed with
+  `go test ./internal/modules/kernel/run/biz ./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/appservice -run 'TestService_ResumeRunReusesLoadedRunForOrchestrator|TestService_ResumeRunDelegatesStateReadToOrchestrator|TestResumeRunWithSession|TestCompressedContextForBlockedRunResumeUsesLightweightGovernanceProjection|TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterDecision|TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterApproval' -count=1`
+  and
+  `go test ./internal/modules/kernel/run/biz ./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/blocks/llm/biz -count=1`.
+  Deployed quantification should compare `decision1_to_decision2`,
+  `decision2_to_approval`, and `approval_to_completed` against
+  `load-20260502032508`; expected impact is small but directly targets a
+  proven appservice -> orchestrator duplicate Run read on every governance
+  resume.
+- 2026-05-02: Quantified deployed QC88 with governed mock
+  `concurrency=1,total=5` batch `load-20260502033411`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1706.02ms`, throughput `47.50` workspace/min,
+  `activation_to_decision1` p95 `651.78ms`, `decision1_resolve` p95
+  `70.69ms`, `decision1->decision2` p95 `157.78ms`,
+  `decision2_resolve` p95 `76.90ms`, `decision2->approval` p95 `207.41ms`,
+  `approval_approve` p95 `40.15ms`, `approval->completed` p95 `249.73ms`,
+  `snapshot_read` p95 `66.53ms`, `workspace_snapshot_read` p95 `50.13ms`,
+  `observability_read` p95 `29.61ms`, and `artifact_content_read` p95
+  `18.15ms`. Compared with `load-20260502032508`, target
+  `decision1->decision2` improved by about `31.98ms`, `approval_approve`
+  improved by about `6.15ms`, and `workspace_snapshot_read` improved by about
+  `18.41ms`. `decision2->approval` stayed essentially flat, while
+  `approval->completed`, `snapshot_read`, `observability_read`, and artifact
+  readback regressed. E2E p95 was again dominated by the first activation
+  sample at about `774.07ms`, with non-cold activation samples around
+  `117ms` to `163ms`. Treat QC88 as a useful governance resume duplicate Run
+  read cleanup for the first decision resume path, not as a final closeout
+  improvement. Further optimization should focus on post-approval graph/tool
+  execution and terminal evidence materialization only when a concrete
+  duplicate read/write or serial persistence section is found.
+- 2026-05-02: Added QC89 execution-context empty history check reuse. The LLM
+  execution context package now carries explicit `workspaceHistoryChecked`
+  metadata for `latestAcceptedResult` and `currentDeliverables` after those
+  workspace-level Result / Artifact reads have been performed. Follow-up LLM
+  steps can inherit that formal metadata from the previous step and avoid
+  repeating `ListByWorkspace` reads when the prior package already established
+  that no historical accepted Result or current deliverable exists. This does
+  not introduce an implicit fallback or skip business context arbitrarily:
+  if the metadata is missing, the existing repository reads still run; if a
+  Result or Artifact exists, the existing stable package reuse still carries
+  the actual data. Runtime state transitions, Decision / Approval governance,
+  Skill / MCP selection, DoD validation, Result / Artifact materialization,
+  RuntimeCheckpoint emission, and event ordering are unchanged. Local
+  verification passed with
+  `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_ExecutionContextPackageReusesEmptyHistoryChecks|TestRuntimeOrchestrator_FollowUpInputInheritsStableExecutionContextPackage|TestRuntimeOrchestrator_ExecutionContextPackageReusesStableFollowUpPackage|TestRuntimeOrchestrator_LLMInputIncludesExecutionContextPackage|TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterApproval' -count=1`
+  and
+  `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/blocks/llm/biz -count=1`.
+  Deployed quantification should compare `decision1_to_decision2`,
+  `decision2_to_approval`, and `approval_to_completed` against
+  `load-20260502033411`; expected impact is bounded to multi-LLM-step runs
+  where workspace history is empty or already carried by the previous package.
+- 2026-05-02: Quantified deployed QC89 with governed mock
+  `concurrency=1,total=5` batch `load-20260502034105`. The batch kept 5/5
+  success with no HTTP / curl / LLM protocol / timeline runState errors,
+  measured e2e p95 `1934.93ms`, throughput `43.92` workspace/min,
+  `activation_to_decision1` p95 `735.72ms`, `decision1_resolve` p95
+  `81.05ms`, `decision1->decision2` p95 `190.59ms`,
+  `decision2_resolve` p95 `73.43ms`, `decision2->approval` p95 `263.49ms`,
+  `approval_approve` p95 `46.72ms`, `approval->completed` p95 `304.87ms`,
+  `snapshot_read` p95 `63.13ms`, `workspace_snapshot_read` p95 `66.25ms`,
+  `observability_read` p95 `18.87ms`, and `artifact_content_read` p95
+  `14.18ms`. Compared with `load-20260502033411`, only `snapshot_read`,
+  `observability_read`, and `artifact_content_read` improved; target governed
+  execution stages regressed, especially `decision2->approval` by about
+  `56.08ms` and `approval->completed` by about `55.13ms`. E2E p95 was again
+  dominated by the first activation sample at about `886.39ms`, while non-cold
+  activation samples stayed around `109ms` to `133ms`. Treat QC89 as a
+  correctness-preserving explicit context metadata cleanup, not as a validated
+  deployed performance win. Do not continue optimizing generic LLM context
+  package reads without more direct profiling; next work should target
+  terminal delivery persistence or graph/tool execution where a concrete
+  duplicate write/read is visible.
+- 2026-05-02: Added QC90 Artifact storage run directory cache. File backend
+  Artifact storage now caches the prepared
+  `.workorch-data/workspaces/{workspace}/artifacts/{run}` directory inside
+  the `artifactStorageRepository`, so the accepted Result Summary artifact and
+  Deliverable Manifest artifact for the same Run do not each pay a repeated
+  `os.MkdirAll` call during terminal materialization. This is limited to the
+  Artifact storage adapter and does not change Result / Artifact models,
+  URIs, file names, content type assignment, write order, DoD validation,
+  RuntimeCheckpoint emission, event ordering, workspace purge behavior, or
+  read-model projection. Local verification passed with
+  `go test ./internal/modules/application/workorchd/biz/bootstrap -run 'TestArtifactStorageRepositoryCachesRunArtifactDirectory|TestNewWithBackendFileStoresAvailableArtifactContent' -count=1`
+  and
+  `go test ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server -count=1`.
+  Deployed quantification should compare `approval_to_completed`,
+  `artifact_content_read`, and terminal readback metrics against
+  `load-20260502034105`; expected impact is small and specifically bounded to
+  terminal Artifact materialization on file backend.
 - Completed items should be marked in this document with verification evidence.
 - Broad future demand candidates remain in `docs/next-stage-demand-candidates.md`.
 - Previously closed MVP scope remains in `docs/mvp-backlog.md` and should not be

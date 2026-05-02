@@ -3,6 +3,7 @@ package decision
 import (
 	"context"
 
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -29,28 +30,32 @@ type Service interface {
 	EnsureTicket(context.Context, CreateTicketCommand) error
 	ResolveTicket(context.Context, ResolveTicketCommand) error
 	EnsureResolvedTicket(context.Context, ResolveTicketCommand) error
+	EnsureResolvedTicketAndReturn(context.Context, ResolveTicketCommand) (*decisionmodel.Ticket, *decisionmodel.Resolution, error)
 }
 
 type Module struct {
-	createTicket         func(context.Context, CreateTicketCommand) error
-	ensureTicket         func(context.Context, CreateTicketCommand) error
-	resolveTicket        func(context.Context, ResolveTicketCommand) error
-	ensureResolvedTicket func(context.Context, ResolveTicketCommand) error
+	createTicket                  func(context.Context, CreateTicketCommand) error
+	ensureTicket                  func(context.Context, CreateTicketCommand) error
+	resolveTicket                 func(context.Context, ResolveTicketCommand) error
+	ensureResolvedTicket          func(context.Context, ResolveTicketCommand) error
+	ensureResolvedTicketAndReturn func(context.Context, ResolveTicketCommand) (*decisionmodel.Ticket, *decisionmodel.Resolution, error)
 }
 
 type Dependencies struct {
-	CreateTicket         func(context.Context, CreateTicketCommand) error
-	EnsureTicket         func(context.Context, CreateTicketCommand) error
-	ResolveTicket        func(context.Context, ResolveTicketCommand) error
-	EnsureResolvedTicket func(context.Context, ResolveTicketCommand) error
+	CreateTicket                  func(context.Context, CreateTicketCommand) error
+	EnsureTicket                  func(context.Context, CreateTicketCommand) error
+	ResolveTicket                 func(context.Context, ResolveTicketCommand) error
+	EnsureResolvedTicket          func(context.Context, ResolveTicketCommand) error
+	EnsureResolvedTicketAndReturn func(context.Context, ResolveTicketCommand) (*decisionmodel.Ticket, *decisionmodel.Resolution, error)
 }
 
 func New(deps Dependencies) *Module {
 	return &Module{
-		createTicket:         deps.CreateTicket,
-		ensureTicket:         deps.EnsureTicket,
-		resolveTicket:        deps.ResolveTicket,
-		ensureResolvedTicket: deps.EnsureResolvedTicket,
+		createTicket:                  deps.CreateTicket,
+		ensureTicket:                  deps.EnsureTicket,
+		resolveTicket:                 deps.ResolveTicket,
+		ensureResolvedTicket:          deps.EnsureResolvedTicket,
+		ensureResolvedTicketAndReturn: deps.EnsureResolvedTicketAndReturn,
 	}
 }
 
@@ -80,4 +85,11 @@ func (m *Module) EnsureResolvedTicket(ctx context.Context, cmd ResolveTicketComm
 		return common.ErrInvalidArgument
 	}
 	return m.ensureResolvedTicket(ctx, cmd)
+}
+
+func (m *Module) EnsureResolvedTicketAndReturn(ctx context.Context, cmd ResolveTicketCommand) (*decisionmodel.Ticket, *decisionmodel.Resolution, error) {
+	if m == nil || m.ensureResolvedTicketAndReturn == nil {
+		return nil, nil, common.ErrInvalidArgument
+	}
+	return m.ensureResolvedTicketAndReturn(ctx, cmd)
 }

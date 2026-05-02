@@ -3,11 +3,131 @@ package appservice
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
+	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
+	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
+
+type countingAppDecisionTicketRepository struct {
+	base     *memory.DecisionTicketRepository
+	getCount atomic.Int64
+}
+
+func newCountingAppDecisionTicketRepository() *countingAppDecisionTicketRepository {
+	return &countingAppDecisionTicketRepository{base: memory.NewDecisionTicketRepository()}
+}
+
+func (r *countingAppDecisionTicketRepository) Create(ctx context.Context, item *decisionmodel.Ticket) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *countingAppDecisionTicketRepository) Get(ctx context.Context, id common.TicketID) (*decisionmodel.Ticket, error) {
+	r.getCount.Add(1)
+	return r.base.Get(ctx, id)
+}
+
+func (r *countingAppDecisionTicketRepository) List(ctx context.Context) ([]*decisionmodel.Ticket, error) {
+	return r.base.List(ctx)
+}
+
+func (r *countingAppDecisionTicketRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*decisionmodel.Ticket, error) {
+	return r.base.ListByRunID(ctx, runID)
+}
+
+func (r *countingAppDecisionTicketRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*decisionmodel.Ticket, error) {
+	return r.base.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r *countingAppDecisionTicketRepository) Update(ctx context.Context, item *decisionmodel.Ticket) error {
+	return r.base.Update(ctx, item)
+}
+
+func (r *countingAppDecisionTicketRepository) Delete(ctx context.Context, id common.TicketID) error {
+	return r.base.Delete(ctx, id)
+}
+
+type countingAppDecisionResolutionRepository struct {
+	base               *memory.DecisionResolutionRepository
+	getByTicketIDCount atomic.Int64
+}
+
+func newCountingAppDecisionResolutionRepository() *countingAppDecisionResolutionRepository {
+	return &countingAppDecisionResolutionRepository{base: memory.NewDecisionResolutionRepository()}
+}
+
+func (r *countingAppDecisionResolutionRepository) Create(ctx context.Context, item *decisionmodel.Resolution) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *countingAppDecisionResolutionRepository) GetByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
+	r.getByTicketIDCount.Add(1)
+	return r.base.GetByTicketID(ctx, ticketID)
+}
+
+func (r *countingAppDecisionResolutionRepository) DeleteByTicketID(ctx context.Context, ticketID common.TicketID) error {
+	return r.base.DeleteByTicketID(ctx, ticketID)
+}
+
+func newCountingDecisionRuntimeSession(t *testing.T) (*RuntimeSession, *countingAppDecisionTicketRepository, *countingAppDecisionResolutionRepository) {
+	t.Helper()
+
+	tickets := newCountingAppDecisionTicketRepository()
+	resolutions := newCountingAppDecisionResolutionRepository()
+	decisionModule := decisionmodule.New()
+	if err := decisionModule.Setup(decisionmodule.Dependencies{Tickets: tickets, Resolutions: resolutions}); err != nil {
+		t.Fatalf("setup decision module: %v", err)
+	}
+	workspaceModule := workspacemodule.New()
+	if err := workspaceModule.Setup(workspacemodule.Dependencies{
+		Workspaces: memory.NewWorkspaceRepository(),
+		Goals:      memory.NewGoalRepository(),
+		DoDs:       memory.NewDoDRepository(),
+	}); err != nil {
+		t.Fatalf("setup workspace module: %v", err)
+	}
+	approvalModule := approvalmodule.New()
+	if err := approvalModule.Setup(approvalmodule.Dependencies{Approvals: memory.NewApprovalRepository()}); err != nil {
+		t.Fatalf("setup approval module: %v", err)
+	}
+
+	session, err := NewRuntimeSessionFromExports(bootstrap.Exports{
+		Repositories: bootstrap.RepositoryExports{
+			Workspaces:         memory.NewWorkspaceRepository(),
+			Runs:               memory.NewRunRepository(),
+			Steps:              memory.NewStepRepository(),
+			Results:            memory.NewResultRepository(),
+			Artifacts:          memory.NewArtifactRepository(),
+			EventRecords:       memory.NewEventRecordRepository(),
+			MCPCapabilities:    memory.NewMCPCapabilityRepository(),
+			ToolCalls:          memory.NewToolCallRepository(),
+			Patches:            memory.NewPatchRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+			Tickets:            tickets,
+			Resolutions:        resolutions,
+			Approvals:          memory.NewApprovalRepository(),
+		},
+		Services: bootstrap.ServiceExports{
+			WorkspaceService: workspaceModule.Service(),
+			RunService:       runservice.New(runservice.Dependencies{}),
+			DecisionService:  decisionModule.Service(),
+			ApprovalService:  approvalModule.Service(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
+	}
+	return session, tickets, resolutions
+}
 
 func TestReadDecisionWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing.T) {
 	if _, err := ReadDecisionWithSession(context.Background(), nil, "ticket-1"); !errors.Is(err, common.ErrInvalidArgument) {
@@ -91,6 +211,41 @@ func TestResolveDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 	}
 }
 
+func TestResolveDecisionWithSessionReusesReturnedEntitiesForResponse(t *testing.T) {
+	session, tickets, resolutions := newCountingDecisionRuntimeSession(t)
+	ctx := context.Background()
+
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          common.TicketID("ticket-app-return-loaded"),
+		WorkspaceID: common.WorkspaceID("ws-app-return-loaded"),
+		RunID:       common.RunID("run-app-return-loaded"),
+		StepID:      common.StepID("run-app-return-loaded/step-1"),
+		Reason:      "need operator decision",
+		State:       common.DecisionTicketStateOpen,
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	tickets.getCount.Store(0)
+	resolutions.getByTicketIDCount.Store(0)
+
+	item, err := ResolveDecisionWithSession(ctx, session, "ticket-app-return-loaded", ResolveDecisionCommand{
+		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
+		ResolutionPayload: map[string]any{"operator": "tester"},
+	})
+	if err != nil {
+		t.Fatalf("ResolveDecisionWithSession: %v", err)
+	}
+	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo || item.ResolutionPayload["operator"] != "tester" {
+		t.Fatalf("decision = %+v, want resolved response from returned entities", item)
+	}
+	if got := tickets.getCount.Load(); got != 1 {
+		t.Fatalf("ticket Get count = %d, want one service read without app response reread", got)
+	}
+	if got := resolutions.getByTicketIDCount.Load(); got != 0 {
+		t.Fatalf("resolution GetByTicketID count = %d, want no app response reread on first resolve", got)
+	}
+}
+
 func TestResolveDecisionWithBackendSupportsRejectCurrentPath(t *testing.T) {
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-reject", "run-decision-reject")
@@ -160,6 +315,49 @@ func TestBatchResolveDecisionsWithBackendResolvesTicketsInRequestOrder(t *testin
 		if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan || item.ResolutionPayload["operator"] != "batch-tester" {
 			t.Fatalf("item = %+v, want resolved replan with payload", item)
 		}
+	}
+}
+
+func TestBatchResolveDecisionsWithSessionReusesReturnedEntitiesAfterPrevalidation(t *testing.T) {
+	session, tickets, resolutions := newCountingDecisionRuntimeSession(t)
+	ctx := context.Background()
+
+	for _, ticketID := range []common.TicketID{"ticket-app-batch-a", "ticket-app-batch-b"} {
+		if err := tickets.Create(ctx, &decisionmodel.Ticket{
+			ID:          ticketID,
+			WorkspaceID: common.WorkspaceID("ws-app-batch"),
+			RunID:       common.RunID("run-app-batch"),
+			StepID:      common.StepID("run-app-batch/step"),
+			Reason:      "need operator decision",
+			State:       common.DecisionTicketStateOpen,
+		}); err != nil {
+			t.Fatalf("create ticket %s: %v", ticketID, err)
+		}
+	}
+	tickets.getCount.Store(0)
+	resolutions.getByTicketIDCount.Store(0)
+
+	items, err := BatchResolveDecisionsWithSession(ctx, session, BatchResolveDecisionCommand{
+		TicketIDs:         []string{"ticket-app-batch-b", "ticket-app-batch-a"},
+		ResolutionType:    decisioncommon.ResolutionTypeReplan,
+		ResolutionPayload: map[string]any{"operator": "batch-tester"},
+	})
+	if err != nil {
+		t.Fatalf("BatchResolveDecisionsWithSession: %v", err)
+	}
+	if len(items) != 2 || items[0].ID != "ticket-app-batch-b" || items[1].ID != "ticket-app-batch-a" {
+		t.Fatalf("items = %+v, want request order", items)
+	}
+	for _, item := range items {
+		if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan || item.ResolutionPayload["operator"] != "batch-tester" {
+			t.Fatalf("item = %+v, want resolved replan response", item)
+		}
+	}
+	if got := tickets.getCount.Load(); got != 4 {
+		t.Fatalf("ticket Get count = %d, want prevalidation plus one service read per ticket", got)
+	}
+	if got := resolutions.getByTicketIDCount.Load(); got != 0 {
+		t.Fatalf("resolution GetByTicketID count = %d, want no response reread on first batch resolve", got)
 	}
 }
 

@@ -1985,6 +1985,73 @@ func TestRunSnapshotReadWaitsForTerminalStatusWarmupInflight(t *testing.T) {
 	}
 }
 
+func TestRunObservabilityReadWaitsForTerminalStatusWarmupInflight(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	var snapshotReads atomic.Int32
+	var observabilityReads atomic.Int32
+	releaseRead := make(chan struct{})
+	readStarted := make(chan struct{})
+	state.readRunStatus = func(_ context.Context, _, _, runID string) (appservice.RunStatus, error) {
+		return appservice.RunStatus{ID: runID, WorkspaceID: "ws-observability-inflight-cache", State: string(common.RunStateCompleted)}, nil
+	}
+	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
+		snapshotReads.Add(1)
+		close(readStarted)
+		<-releaseRead
+		return appservice.RunSnapshot{
+			Workspace: appservice.Workspace{ID: "ws-observability-inflight-cache", State: string(common.WorkspaceStateCompleted)},
+			Run:       appservice.Run{ID: runID, WorkspaceID: "ws-observability-inflight-cache", State: string(common.RunStateCompleted)},
+		}, nil
+	}
+	state.readRunObservability = func(context.Context, string, string, string) (appservice.RunObservability, error) {
+		observabilityReads.Add(1)
+		return appservice.RunObservability{}, nil
+	}
+	handler := newMuxWithState(state)
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-observability-inflight-cache/status?waitState=completed&waitTimeoutMillis=1000", nil)
+	statusRec := httptest.NewRecorder()
+	handler.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", statusRec.Code, statusRec.Body.String())
+	}
+	select {
+	case <-readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("background snapshot warmup did not start")
+	}
+
+	observabilityDone := make(chan struct{})
+	go func() {
+		defer close(observabilityDone)
+		observabilityReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-observability-inflight-cache/observability", nil)
+		observabilityRec := httptest.NewRecorder()
+		handler.ServeHTTP(observabilityRec, observabilityReq)
+		if observabilityRec.Code != http.StatusOK {
+			t.Errorf("observability = %d, want 200, body=%s", observabilityRec.Code, observabilityRec.Body.String())
+		}
+	}()
+	time.Sleep(20 * time.Millisecond)
+	if snapshotReads.Load() != 1 {
+		t.Fatalf("snapshot reads before warmup release = %d, want only background read in flight", snapshotReads.Load())
+	}
+	if observabilityReads.Load() != 0 {
+		t.Fatalf("observability reads before warmup release = %d, want snapshot inflight reuse", observabilityReads.Load())
+	}
+	close(releaseRead)
+	select {
+	case <-observabilityDone:
+	case <-time.After(time.Second):
+		t.Fatal("observability endpoint did not complete from warmup in-flight read")
+	}
+	if snapshotReads.Load() != 1 {
+		t.Fatalf("snapshot reads = %d, want in-flight warm read reused by observability endpoint", snapshotReads.Load())
+	}
+	if observabilityReads.Load() != 0 {
+		t.Fatalf("observability reads = %d, want cached snapshot projection", observabilityReads.Load())
+	}
+}
+
 func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.T) {
 	dataRoot := t.TempDir()
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})

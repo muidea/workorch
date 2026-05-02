@@ -37,12 +37,14 @@ func (m *Module) Setup(deps Dependencies) error {
 	}
 	m.bizPtr = approvalbiz.NewService(deps.Approvals, deps.EventHub)
 	m.servicePtr = approvalservice.New(approvalservice.Dependencies{
-		CreateApproval: m.bizPtr.CreateApproval,
-		EnsureApproval: m.bizPtr.EnsureApproval,
-		Approve:        m.bizPtr.Approve,
-		EnsureApproved: m.bizPtr.EnsureApproved,
-		Reject:         m.bizPtr.Reject,
-		EnsureRejected: m.bizPtr.EnsureRejected,
+		CreateApproval:          m.bizPtr.CreateApproval,
+		EnsureApproval:          m.bizPtr.EnsureApproval,
+		Approve:                 m.bizPtr.Approve,
+		EnsureApproved:          m.bizPtr.EnsureApproved,
+		EnsureApprovedAndReturn: m.bizPtr.EnsureApprovedAndReturn,
+		Reject:                  m.bizPtr.Reject,
+		EnsureRejected:          m.bizPtr.EnsureRejected,
+		EnsureRejectedAndReturn: m.bizPtr.EnsureRejectedAndReturn,
 	})
 	return nil
 }

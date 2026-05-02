@@ -52,6 +52,28 @@ func (r *countingDecisionTicketRepository) Delete(ctx context.Context, id common
 	return r.inner.Delete(ctx, id)
 }
 
+type countingDecisionResolutionRepository struct {
+	inner              *memory.DecisionResolutionRepository
+	getByTicketIDCount atomic.Int64
+}
+
+func newCountingDecisionResolutionRepository() *countingDecisionResolutionRepository {
+	return &countingDecisionResolutionRepository{inner: memory.NewDecisionResolutionRepository()}
+}
+
+func (r *countingDecisionResolutionRepository) Create(ctx context.Context, item *decisionModel.Resolution) error {
+	return r.inner.Create(ctx, item)
+}
+
+func (r *countingDecisionResolutionRepository) GetByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionModel.Resolution, error) {
+	r.getByTicketIDCount.Add(1)
+	return r.inner.GetByTicketID(ctx, ticketID)
+}
+
+func (r *countingDecisionResolutionRepository) DeleteByTicketID(ctx context.Context, ticketID common.TicketID) error {
+	return r.inner.DeleteByTicketID(ctx, ticketID)
+}
+
 func TestService_CreateTicket_SeedsOpenState(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
@@ -355,6 +377,90 @@ func TestService_EnsureResolvedTicketReusesLoadedTicket(t *testing.T) {
 	}
 	if got := ticketRepo.getCount.Load(); got != 1 {
 		t.Fatalf("ticket Get count = %d, want one read reused for transition", got)
+	}
+}
+
+func TestService_EnsureResolvedTicketAndReturnReturnsResolvedEntitiesWithoutExtraRead(t *testing.T) {
+	ctx := context.Background()
+	ticketRepo := newCountingDecisionTicketRepository()
+	resolutionRepo := newCountingDecisionResolutionRepository()
+	service := NewService(ticketRepo, resolutionRepo, nil)
+
+	createCmd := decisionservice.CreateTicketCommand{
+		TicketID:    common.TicketID("ticket-return-loaded"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		RunID:       common.RunID("run-1"),
+		StepID:      common.StepID("run-1/step-1"),
+		Reason:      "need operator decision",
+	}
+	if err := service.CreateTicket(ctx, createCmd); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	cmd := decisionservice.ResolveTicketCommand{
+		ResolutionID: common.ResolutionID("resolution-return-loaded"),
+		TicketID:     createCmd.TicketID,
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:      map[string]any{"operator": "workorch"},
+	}
+	ticket, resolution, err := service.EnsureResolvedTicketAndReturn(ctx, cmd)
+	if err != nil {
+		t.Fatalf("ensure resolved ticket and return: %v", err)
+	}
+	if ticket == nil || resolution == nil {
+		t.Fatalf("ticket/resolution = %v/%v, want returned entities", ticket, resolution)
+	}
+	if ticket.ID != createCmd.TicketID || ticket.State != common.DecisionTicketStateResolved {
+		t.Fatalf("ticket = %+v, want resolved %s", ticket, createCmd.TicketID)
+	}
+	if resolution.ID != cmd.ResolutionID || resolution.Type != cmd.Type || resolution.Payload["operator"] != "workorch" {
+		t.Fatalf("resolution = %+v, want command payload", resolution)
+	}
+	if got := ticketRepo.getCount.Load(); got != 1 {
+		t.Fatalf("ticket Get count = %d, want one read reused for response", got)
+	}
+	if got := resolutionRepo.getByTicketIDCount.Load(); got != 0 {
+		t.Fatalf("resolution GetByTicketID count = %d, want created resolution reused for response", got)
+	}
+}
+
+func TestService_EnsureResolvedTicketAndReturnIdempotentReturnsPersistedResolution(t *testing.T) {
+	ctx := context.Background()
+	ticketRepo := newCountingDecisionTicketRepository()
+	resolutionRepo := newCountingDecisionResolutionRepository()
+	service := NewService(ticketRepo, resolutionRepo, nil)
+
+	createCmd := decisionservice.CreateTicketCommand{
+		TicketID:    common.TicketID("ticket-return-idempotent"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		RunID:       common.RunID("run-1"),
+		StepID:      common.StepID("run-1/step-1"),
+		Reason:      "need operator decision",
+	}
+	if err := service.CreateTicket(ctx, createCmd); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	cmd := decisionservice.ResolveTicketCommand{
+		ResolutionID: common.ResolutionID("resolution-return-idempotent"),
+		TicketID:     createCmd.TicketID,
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
+	}
+	if _, _, err := service.EnsureResolvedTicketAndReturn(ctx, cmd); err != nil {
+		t.Fatalf("first ensure resolved ticket and return: %v", err)
+	}
+	ticket, resolution, err := service.EnsureResolvedTicketAndReturn(ctx, cmd)
+	if err != nil {
+		t.Fatalf("second ensure resolved ticket and return: %v", err)
+	}
+	if ticket == nil || ticket.State != common.DecisionTicketStateResolved || resolution == nil || resolution.ID != cmd.ResolutionID {
+		t.Fatalf("ticket/resolution = %+v/%+v, want idempotent persisted entities", ticket, resolution)
+	}
+	if got := ticketRepo.getCount.Load(); got != 2 {
+		t.Fatalf("ticket Get count = %d, want one per ensure call", got)
+	}
+	if got := resolutionRepo.getByTicketIDCount.Load(); got != 1 {
+		t.Fatalf("resolution GetByTicketID count = %d, want only idempotent lookup", got)
 	}
 }
 

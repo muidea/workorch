@@ -730,6 +730,38 @@ func TestService_ResumeRunDelegatesStateReadToOrchestrator(t *testing.T) {
 	}
 }
 
+func TestService_ResumeRunReusesLoadedRunForOrchestrator(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := newCountingRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	orch := orchestratorbiz.NewRuntimeOrchestrator(
+		&serviceRuntimeAdapter{output: map[string]any{"status": "ok"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		approvalRepo,
+		nil,
+	)
+	service := NewService(runRepo, workspaceRepo, orch, nil)
+
+	loaded := &runmodel.Run{
+		ID:          common.RunID("run-resume-loaded-run"),
+		WorkspaceID: common.WorkspaceID("ws-resume-loaded-run"),
+		State:       common.RunStateCreated,
+	}
+
+	if err := service.ResumeRun(ctx, runservice.ResumeRunCommand{RunID: loaded.ID, LoadedRun: loaded}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("resume err = %v, want conflict from orchestrator", err)
+	}
+	if runRepo.getCalls.Load() != 0 {
+		t.Fatalf("run Get calls = %d, want loaded run resume without repository pre-read", runRepo.getCalls.Load())
+	}
+}
+
 func TestService_CompleteRun_WithoutOrchestrator(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

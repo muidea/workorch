@@ -15,6 +15,7 @@ import (
 const (
 	stepInputKeyExecutionContextPackage = "executionContextPackage"
 	executionContextPackageVersion      = "workorch.execution_context.v1"
+	executionContextPackageHistoryKey   = "workspaceHistoryChecked"
 )
 
 func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run *runModel.Run, step *runModel.Step, workspace *workspaceModel.Workspace) {
@@ -42,13 +43,16 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		"stepId":      string(step.ID),
 		"stage":       stringFromMap(step.Input, stepInputKeySoulStage),
 	}
+	stableContext := stableExecutionContextPackageFromStep(step)
 
 	var (
-		manifest     []map[string]any
-		result       map[string]any
-		deliverables []map[string]any
-		failures     []map[string]any
-		wg           sync.WaitGroup
+		manifest             []map[string]any
+		result               map[string]any
+		deliverables         []map[string]any
+		failures             []map[string]any
+		acceptedResultRead   bool
+		deliverablesRead     bool
+		wg                   sync.WaitGroup
 	)
 	wg.Add(4)
 	go func() {
@@ -57,15 +61,27 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	}()
 	go func() {
 		defer wg.Done()
+		if stableContext.latestAcceptedResult != nil || stableContext.latestAcceptedResultChecked {
+			result = stableContext.latestAcceptedResult
+			return
+		}
 		result = o.latestAcceptedResultContext(ctx, run)
+		acceptedResultRead = true
 	}()
 	go func() {
 		defer wg.Done()
+		if len(stableContext.currentDeliverables) > 0 || stableContext.currentDeliverablesChecked {
+			deliverables = stableContext.currentDeliverables
+			return
+		}
 		deliverables = o.currentDeliverableContexts(ctx, run)
+		deliverablesRead = true
 	}()
 	go func() {
 		defer wg.Done()
-		failures = o.recentFailureContexts(ctx, run, step.ID, 6)
+		if shouldReadRecentFailureHistory(step) {
+			failures = o.recentFailureContexts(ctx, run, step.ID, 6)
+		}
 	}()
 	wg.Wait()
 
@@ -78,14 +94,82 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	if len(deliverables) > 0 {
 		ret["currentDeliverables"] = deliverables
 	}
+	historyChecked := workspaceHistoryCheckedPackage(stableContext, acceptedResultRead, deliverablesRead)
+	if len(historyChecked) > 0 {
+		ret[executionContextPackageHistoryKey] = historyChecked
+	}
 	if len(failures) > 0 {
 		ret["recentFailureSummary"] = failures
 	}
-	if selected := selectedContextPackage(executionContext); len(selected) > 0 {
+	if selected := stableContext.selectedContext; len(selected) > 0 {
+		ret["selectedContext"] = selected
+	} else if selected := selectedContextPackage(executionContext); len(selected) > 0 {
 		ret["selectedContext"] = selected
 	}
 	if governanceHistory := mapSliceFromValue(executionContext["governanceHistory"]); len(governanceHistory) > 0 {
 		ret["governanceHistory"] = limitedMapSlice(governanceHistory, 6)
+	}
+	return ret
+}
+
+type stableExecutionContextPackage struct {
+	latestAcceptedResult        map[string]any
+	latestAcceptedResultChecked bool
+	currentDeliverables         []map[string]any
+	currentDeliverablesChecked  bool
+	selectedContext             map[string]any
+}
+
+func stableExecutionContextPackageFromStep(step *runModel.Step) stableExecutionContextPackage {
+	if step == nil || step.Input == nil {
+		return stableExecutionContextPackage{}
+	}
+	pkg := mapFromValue(step.Input[stepInputKeyExecutionContextPackage])
+	if len(pkg) == 0 {
+		return stableExecutionContextPackage{}
+	}
+	return stableExecutionContextPackageFromPackage(pkg)
+}
+
+func stableExecutionContextPackageFromPackage(pkg map[string]any) stableExecutionContextPackage {
+	if len(pkg) == 0 {
+		return stableExecutionContextPackage{}
+	}
+	historyChecked := mapFromValue(pkg[executionContextPackageHistoryKey])
+	return stableExecutionContextPackage{
+		latestAcceptedResult:        mapFromValue(pkg["latestAcceptedResult"]),
+		latestAcceptedResultChecked: boolFromValue(historyChecked["latestAcceptedResult"]),
+		currentDeliverables:         mapSliceFromValue(pkg["currentDeliverables"]),
+		currentDeliverablesChecked:  boolFromValue(historyChecked["currentDeliverables"]),
+		selectedContext:             mapFromValue(pkg["selectedContext"]),
+	}
+}
+
+func stableExecutionContextPackagePayload(pkg stableExecutionContextPackage) map[string]any {
+	ret := map[string]any{}
+	if len(pkg.latestAcceptedResult) > 0 {
+		ret["latestAcceptedResult"] = cloneStepPayload(pkg.latestAcceptedResult)
+	}
+	if len(pkg.currentDeliverables) > 0 {
+		ret["currentDeliverables"] = limitedMapSlice(pkg.currentDeliverables, len(pkg.currentDeliverables))
+	}
+	historyChecked := workspaceHistoryCheckedPackage(pkg, false, false)
+	if len(historyChecked) > 0 {
+		ret[executionContextPackageHistoryKey] = historyChecked
+	}
+	if len(pkg.selectedContext) > 0 {
+		ret["selectedContext"] = cloneStepPayload(pkg.selectedContext)
+	}
+	return ret
+}
+
+func workspaceHistoryCheckedPackage(pkg stableExecutionContextPackage, acceptedResultRead bool, deliverablesRead bool) map[string]any {
+	ret := map[string]any{}
+	if acceptedResultRead || pkg.latestAcceptedResultChecked || len(pkg.latestAcceptedResult) > 0 {
+		ret["latestAcceptedResult"] = true
+	}
+	if deliverablesRead || pkg.currentDeliverablesChecked || len(pkg.currentDeliverables) > 0 {
+		ret["currentDeliverables"] = true
 	}
 	return ret
 }
@@ -191,6 +275,29 @@ func (o *RuntimeOrchestrator) recentFailureContexts(ctx context.Context, run *ru
 		}
 	}
 	return ret
+}
+
+func shouldReadRecentFailureHistory(step *runModel.Step) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	if boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) {
+		return true
+	}
+	for _, key := range []string{
+		"failedStepId",
+		"failedStepKind",
+		"failedStepState",
+		"failedStepOutput",
+		"failureReason",
+		failureOutputKeyClass,
+		failureOutputKeySignature,
+	} {
+		if value, ok := step.Input[key]; ok && value != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func initialStepID(runID common.RunID) common.StepID {

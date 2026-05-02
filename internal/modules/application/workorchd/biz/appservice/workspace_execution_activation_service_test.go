@@ -20,6 +20,7 @@ import (
 	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory/service"
+	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -119,11 +120,46 @@ func (r staticRunRepository) Delete(context.Context, common.RunID) error {
 }
 
 type countingRunRepository struct {
-	base     repository.RunRepository
-	getCalls int
+	base        repository.RunRepository
+	createRuns  []*runmodel.Run
+	getCalls    int
+	updateCalls int
+}
+
+type countingRunService struct {
+	runmodule.Service
+	createCommands []runmodule.CreateRunCommand
+}
+
+func (s *countingRunService) CreateRun(ctx context.Context, cmd runmodule.CreateRunCommand) error {
+	s.createCommands = append(s.createCommands, runmodule.CreateRunCommand{
+		RunID:            cmd.RunID,
+		WorkspaceID:      cmd.WorkspaceID,
+		GoalID:           cmd.GoalID,
+		DoDID:            cmd.DoDID,
+		InitialStepKind:  cmd.InitialStepKind,
+		ExecutionContext: cloneContextMap(cmd.ExecutionContext),
+		Priority:         cmd.Priority,
+	})
+	return s.Service.CreateRun(ctx, cmd)
 }
 
 func (r *countingRunRepository) Create(ctx context.Context, item *runmodel.Run) error {
+	if item != nil {
+		r.createRuns = append(r.createRuns, &runmodel.Run{
+			ID:                 item.ID,
+			WorkspaceID:        item.WorkspaceID,
+			GoalID:             item.GoalID,
+			DoDID:              item.DoDID,
+			InitialStepKind:    item.InitialStepKind,
+			ExecutionContext:   cloneContextMap(item.ExecutionContext),
+			State:              item.State,
+			Priority:           item.Priority,
+			BlockingTicketID:   item.BlockingTicketID,
+			BlockingApprovalID: item.BlockingApprovalID,
+			FailureReason:      item.FailureReason,
+		})
+	}
 	return r.base.Create(ctx, item)
 }
 
@@ -141,6 +177,7 @@ func (r *countingRunRepository) ListByWorkspaceID(ctx context.Context, workspace
 }
 
 func (r *countingRunRepository) Update(ctx context.Context, item *runmodel.Run) error {
+	r.updateCalls++
 	return r.base.Update(ctx, item)
 }
 
@@ -1044,6 +1081,77 @@ func TestActivationResponseReusesRunSnapshotRun(t *testing.T) {
 	}
 	if countingRuns.getCalls != 1 {
 		t.Fatalf("run Get calls = %d, want RunSnapshot read only", countingRuns.getCalls)
+	}
+}
+
+func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	session, _ := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+	workspace := &workspacemodel.Workspace{
+		ID:    "ws-activation-inline-compressed",
+		Title: "activation inline compressed",
+		State: common.WorkspaceStateReady,
+	}
+	goal := &workspacemodel.Goal{
+		ID:          "goal-activation-inline-compressed",
+		WorkspaceID: workspace.ID,
+		Text:        "create run with inline compressed context",
+	}
+	dod := &workspacemodel.DoD{
+		ID:          "dod-activation-inline-compressed",
+		WorkspaceID: workspace.ID,
+		Items:       []string{"created run context contains compressed context before start"},
+		State:       common.DoDStateReady,
+	}
+	if err := exports.Repositories.Workspaces.Create(ctx, workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Goals.Create(ctx, goal); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+	if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
+		t.Fatalf("create dod: %v", err)
+	}
+	countingRuns := &countingRunRepository{base: exports.Repositories.Runs}
+	countingService := &countingRunService{Service: exports.Services.RunService}
+	exports.Repositories.Runs = countingRuns
+	exports.Services.RunService = countingService
+	borrowed, err := NewRuntimeSessionFromExports(exports)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithSession(ctx, borrowed, string(workspace.ID), ActivateWorkspaceExecutionCommand{Priority: 7})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithSession: %v", err)
+	}
+	if len(countingService.createCommands) != 1 {
+		t.Fatalf("create commands = %d, want one activation CreateRun command", len(countingService.createCommands))
+	}
+	createCommand := countingService.createCommands[0]
+	compressed, ok := createCommand.ExecutionContext["compressedContext"].(map[string]any)
+	if !ok {
+		t.Fatalf("create executionContext = %+v, want inline compressedContext", createCommand.ExecutionContext)
+	}
+	if compressed["runId"] != string(createCommand.RunID) ||
+		compressed["runId"] != item.Run.ID ||
+		compressed["workspaceId"] != string(workspace.ID) ||
+		compressed["mode"] != "deterministic_recovery_summary" {
+		t.Fatalf("create compressedContext = %+v, want created activation run identity", compressed)
+	}
+	if createCommand.GoalID != goal.ID || createCommand.DoDID != dod.ID {
+		t.Fatalf("create command goal/dod = %s/%s, want activation definitions", createCommand.GoalID, createCommand.DoDID)
+	}
+	if createCommand.Priority != 7 {
+		t.Fatalf("create priority = %d, want activation priority", createCommand.Priority)
+	}
+	if len(countingRuns.createRuns) > 0 {
+		runCompressed := runCompressedContext(t, mapRun(countingRuns.createRuns[0]))
+		if runCompressed["runId"] != item.Run.ID || runCompressed["mode"] != "deterministic_recovery_summary" {
+			t.Fatalf("repository create compressedContext = %+v, want created run context", runCompressed)
+		}
 	}
 }
 

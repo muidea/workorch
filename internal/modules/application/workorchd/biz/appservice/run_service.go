@@ -131,11 +131,11 @@ func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID st
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.RunID(runID)
-	patch, err := compressedContextPatchForRun(ctx, session, id)
+	patch, loadedRun, err := compressedContextPatchForRun(ctx, session, id)
 	if err != nil {
 		return Run{}, err
 	}
-	if err := service.ResumeRun(ctx, runmodule.ResumeRunCommand{RunID: id, ExecutionContextPatch: patch}); err != nil {
+	if err := service.ResumeRun(ctx, runmodule.ResumeRunCommand{RunID: id, LoadedRun: loadedRun, ExecutionContextPatch: patch}); err != nil {
 		return Run{}, err
 	}
 
@@ -241,20 +241,20 @@ func attachCompressedContextToRun(ctx context.Context, session *RuntimeSession, 
 	return attachCompressedContextToLoadedRun(ctx, deps, item)
 }
 
-func compressedContextPatchForRun(ctx context.Context, session *RuntimeSession, runID common.RunID) (map[string]any, error) {
+func compressedContextPatchForRun(ctx context.Context, session *RuntimeSession, runID common.RunID) (map[string]any, *runmodel.Run, error) {
 	deps, err := readModelDependenciesFromSession(session)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	item, err := deps.runs.Get(ctx, runID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	compressed, err := compressedContextForLoadedRun(ctx, deps, item)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return map[string]any{"compressedContext": compressed}, nil
+	return map[string]any{"compressedContext": compressed}, item, nil
 }
 
 func attachCompressedContextToLoadedRun(ctx context.Context, deps readModelDependencies, item *runmodel.Run) error {

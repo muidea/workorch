@@ -190,6 +190,48 @@ func TestNewWithBackendFileStoresAvailableArtifactContent(t *testing.T) {
 	}
 }
 
+func TestArtifactStorageRepositoryCachesRunArtifactDirectory(t *testing.T) {
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	rt := NewWithBackend("file", dataDir)
+	exports := rt.Exports()
+	artifactRepo, ok := exports.Repositories.Artifacts.(*artifactStorageRepository)
+	if !ok {
+		t.Fatalf("artifact repository = %T, want artifactStorageRepository", exports.Repositories.Artifacts)
+	}
+	for _, item := range []*resultmodel.Artifact{
+		{
+			ID:           common.ArtifactID("run-bootstrap-artifact-cache/artifact/result-summary"),
+			WorkspaceID:  common.WorkspaceID("ws-bootstrap-artifact-cache"),
+			RunID:        common.RunID("run-bootstrap-artifact-cache"),
+			ResultID:     common.ResultID("run-bootstrap-artifact-cache/result/dod-assessment"),
+			ArtifactType: resultcommon.ArtifactTypeText,
+			Name:         "Accepted Result Summary",
+			Summary:      "Cached summary artifact",
+			State:        common.ArtifactStateAvailable,
+		},
+		{
+			ID:           common.ArtifactID("run-bootstrap-artifact-cache/artifact/deliverable-manifest"),
+			WorkspaceID:  common.WorkspaceID("ws-bootstrap-artifact-cache"),
+			RunID:        common.RunID("run-bootstrap-artifact-cache"),
+			ResultID:     common.ResultID("run-bootstrap-artifact-cache/result/dod-assessment"),
+			ArtifactType: resultcommon.ArtifactTypeReport,
+			Name:         "Workspace Deliverable Manifest",
+			Summary:      "Cached manifest artifact",
+			State:        common.ArtifactStateAvailable,
+		},
+	} {
+		if err := artifactRepo.Create(ctx, item); err != nil {
+			t.Fatalf("create artifact %s: %v", item.ID, err)
+		}
+	}
+	artifactRepo.dirCacheMu.Lock()
+	defer artifactRepo.dirCacheMu.Unlock()
+	if len(artifactRepo.dirCache) != 1 {
+		t.Fatalf("artifact dir cache = %+v, want one cached run artifact directory", artifactRepo.dirCache)
+	}
+}
+
 func TestNewWithBackendFilePartitionsWorkspaceScopedRepositories(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()

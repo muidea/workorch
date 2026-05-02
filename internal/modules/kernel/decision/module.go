@@ -38,10 +38,11 @@ func (m *Module) Setup(deps Dependencies) error {
 	}
 	m.bizPtr = decisionbiz.NewService(deps.Tickets, deps.Resolutions, deps.EventHub)
 	m.servicePtr = decisionservice.New(decisionservice.Dependencies{
-		CreateTicket:         m.bizPtr.CreateTicket,
-		EnsureTicket:         m.bizPtr.EnsureTicket,
-		ResolveTicket:        m.bizPtr.ResolveTicket,
-		EnsureResolvedTicket: m.bizPtr.EnsureResolvedTicket,
+		CreateTicket:                  m.bizPtr.CreateTicket,
+		EnsureTicket:                  m.bizPtr.EnsureTicket,
+		ResolveTicket:                 m.bizPtr.ResolveTicket,
+		EnsureResolvedTicket:          m.bizPtr.EnsureResolvedTicket,
+		EnsureResolvedTicketAndReturn: m.bizPtr.EnsureResolvedTicketAndReturn,
 	})
 	return nil
 }

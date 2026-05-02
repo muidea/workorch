@@ -116,7 +116,7 @@ func ListDecisionsFromEnv(ctx context.Context, workspaceID string, runID string)
 }
 
 func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ticketID string, cmd ResolveDecisionCommand) (ret Decision, err error) {
-	service, tickets, resolutions, err := decisionDependenciesFromSession(session)
+	service, _, _, err := decisionDependenciesFromSession(session)
 	if err != nil {
 		return Decision{}, err
 	}
@@ -129,28 +129,21 @@ func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 		return Decision{}, common.ErrInvalidArgument
 	}
 
-	if err := service.EnsureResolvedTicket(ctx, decisionmodule.ResolveTicketCommand{
+	item, resolution, err := service.EnsureResolvedTicketAndReturn(ctx, decisionmodule.ResolveTicketCommand{
 		ResolutionID: common.ResolutionID("resolution-" + ticketID + "-" + cmd.ResolutionType),
 		TicketID:     common.TicketID(ticketID),
 		Type:         cmd.ResolutionType,
 		Payload:      cloneDecisionPayload(cmd.ResolutionPayload),
-	}); err != nil {
+	})
+	if err != nil {
 		return Decision{}, err
 	}
 
-	item, err := tickets.Get(ctx, common.TicketID(ticketID))
-	if err != nil {
-		return Decision{}, err
-	}
-	resolution, err := resolutionForTicket(ctx, resolutions, item)
-	if err != nil {
-		return Decision{}, err
-	}
 	return mapDecision(item, resolution), nil
 }
 
 func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSession, cmd BatchResolveDecisionCommand) (ret []Decision, err error) {
-	service, tickets, resolutions, err := decisionDependenciesFromSession(session)
+	service, tickets, _, err := decisionDependenciesFromSession(session)
 	if err != nil {
 		return nil, err
 	}
@@ -183,19 +176,12 @@ func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSessi
 
 	ret = make([]Decision, 0, len(cmd.TicketIDs))
 	for _, ticketID := range cmd.TicketIDs {
-		if err := service.EnsureResolvedTicket(ctx, decisionmodule.ResolveTicketCommand{
+		item, resolution, err := service.EnsureResolvedTicketAndReturn(ctx, decisionmodule.ResolveTicketCommand{
 			ResolutionID: common.ResolutionID("resolution-" + ticketID + "-" + resolutionType),
 			TicketID:     common.TicketID(ticketID),
 			Type:         resolutionType,
 			Payload:      cloneDecisionPayload(cmd.ResolutionPayload),
-		}); err != nil {
-			return nil, err
-		}
-		item, err := tickets.Get(ctx, common.TicketID(ticketID))
-		if err != nil {
-			return nil, err
-		}
-		resolution, err := resolutionForTicket(ctx, resolutions, item)
+		})
 		if err != nil {
 			return nil, err
 		}

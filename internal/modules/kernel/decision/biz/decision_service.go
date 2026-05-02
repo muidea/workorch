@@ -98,15 +98,16 @@ func (s *Service) ResolveTicket(ctx context.Context, cmd decisionservice.Resolve
 		return common.ErrConflict
 	}
 
-	return s.resolveTicketItem(ctx, ticket, cmd)
+	_, err = s.resolveTicketItem(ctx, ticket, cmd)
+	return err
 }
 
-func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.Ticket, cmd decisionservice.ResolveTicketCommand) error {
+func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.Ticket, cmd decisionservice.ResolveTicketCommand) (*decisionModel.Resolution, error) {
 	if ticket == nil || ticket.ID == "" {
-		return common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
 	if ticket.State != common.DecisionTicketStateOpen {
-		return common.ErrConflict
+		return nil, common.ErrConflict
 	}
 
 	resolution := &decisionModel.Resolution{
@@ -116,17 +117,17 @@ func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.T
 		Payload:  clonePayload(cmd.Payload),
 	}
 	if err := s.resolutions.Create(ctx, resolution); err != nil {
-		return err
+		return nil, err
 	}
 
 	ticket.State = common.DecisionTicketStateResolved
 	if err := s.tickets.Update(ctx, ticket); err != nil {
-		return err
+		return nil, err
 	}
 	if s.eventHub == nil {
-		return nil
+		return resolution, nil
 	}
-	return s.eventHub.Publish(ctx, events.Envelope{
+	if err := s.eventHub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        events.TopicTicketResolved,
 		SourceModule: modulecommon.ModuleID,
@@ -142,35 +143,47 @@ func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.T
 			resolution.Type,
 			resolution.Payload,
 		),
-	})
+	}); err != nil {
+		return nil, err
+	}
+	return resolution, nil
 }
 
 func (s *Service) EnsureResolvedTicket(ctx context.Context, cmd decisionservice.ResolveTicketCommand) error {
+	_, _, err := s.EnsureResolvedTicketAndReturn(ctx, cmd)
+	return err
+}
+
+func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisionservice.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, error) {
 	if cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
-		return common.ErrInvalidArgument
+		return nil, nil, common.ErrInvalidArgument
 	}
 	if !modulecommon.IsSupportedResolutionType(cmd.Type) {
-		return common.ErrInvalidArgument
+		return nil, nil, common.ErrInvalidArgument
 	}
 
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if ticket.State == common.DecisionTicketStateResolved {
 		resolution, err := s.resolutions.GetByTicketID(ctx, cmd.TicketID)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		if resolution.ID != cmd.ResolutionID || resolution.Type != cmd.Type || !sameResolutionPayload(resolution.Payload, cmd.Payload) {
-			return common.ErrConflict
+			return nil, nil, common.ErrConflict
 		}
-		return nil
+		return ticket, resolution, nil
 	}
 	if ticket.State != common.DecisionTicketStateOpen {
-		return common.ErrConflict
+		return nil, nil, common.ErrConflict
 	}
-	return s.resolveTicketItem(ctx, ticket, cmd)
+	resolution, err := s.resolveTicketItem(ctx, ticket, cmd)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ticket, resolution, nil
 }
 
 func sameResolutionPayload(left map[string]any, right map[string]any) bool {

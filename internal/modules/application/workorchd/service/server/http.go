@@ -3527,6 +3527,12 @@ func (s *serverState) readRunObservabilityCached(ctx context.Context, runID stri
 	if cached, ok := s.cachedRunSnapshot(runID); ok {
 		return appservice.RunObservabilityFromSnapshot(cached), nil
 	}
+	if item, err, ok := s.waitRunSnapshotInflight(ctx, runID); ok {
+		if err != nil {
+			return appservice.RunObservability{}, err
+		}
+		return appservice.RunObservabilityFromSnapshot(item), nil
+	}
 	item, err := s.readRunObservability(ctx, s.config.Backend, s.config.DataRoot, runID)
 	if err != nil {
 		return appservice.RunObservability{}, err

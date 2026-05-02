@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
@@ -13,8 +14,10 @@ import (
 )
 
 type artifactStorageRepository struct {
-	base     repository.ArtifactRepository
-	dataRoot string
+	base       repository.ArtifactRepository
+	dataRoot   string
+	dirCacheMu sync.Mutex
+	dirCache   map[string]struct{}
 }
 
 func NewArtifactStorageRepository(base repository.ArtifactRepository, dataRoot string) repository.ArtifactRepository {
@@ -70,7 +73,7 @@ func (r *artifactStorageRepository) prepareStoredArtifact(item *resultmodel.Arti
 	}
 	fileName := artifactFileName(item)
 	dir := filepath.Join(r.dataRoot, "workspaces", string(item.WorkspaceID), "artifacts", string(item.RunID))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := r.ensureArtifactDir(dir); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(dir, fileName), []byte(strings.TrimSpace(item.Summary)+"\n"), 0o644); err != nil {
@@ -80,6 +83,31 @@ func (r *artifactStorageRepository) prepareStoredArtifact(item *resultmodel.Arti
 	if strings.TrimSpace(item.ContentType) == "" {
 		item.ContentType = "text/plain; charset=utf-8"
 	}
+	return nil
+}
+
+func (r *artifactStorageRepository) ensureArtifactDir(dir string) error {
+	dir = filepath.Clean(strings.TrimSpace(dir))
+	if dir == "" || dir == "." {
+		return common.ErrInvalidArgument
+	}
+	r.dirCacheMu.Lock()
+	if r.dirCache != nil {
+		if _, ok := r.dirCache[dir]; ok {
+			r.dirCacheMu.Unlock()
+			return nil
+		}
+	}
+	r.dirCacheMu.Unlock()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	r.dirCacheMu.Lock()
+	if r.dirCache == nil {
+		r.dirCache = map[string]struct{}{}
+	}
+	r.dirCache[dir] = struct{}{}
+	r.dirCacheMu.Unlock()
 	return nil
 }
 

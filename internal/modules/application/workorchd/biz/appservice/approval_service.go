@@ -94,18 +94,14 @@ func ListApprovalsFromEnv(ctx context.Context, workspaceID string, runID string)
 }
 
 func ApproveApprovalWithSession(ctx context.Context, session *RuntimeSession, approvalID string) (ret Approval, err error) {
-	service, repo, err := approvalDependenciesFromSession(session)
+	service, _, err := approvalDependenciesFromSession(session)
 	if err != nil {
 		return Approval{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.ApprovalID(approvalID)
-	if err := service.EnsureApproved(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id}); err != nil {
-		return Approval{}, err
-	}
-
-	item, err := repo.Get(ctx, id)
+	item, err := service.EnsureApprovedAndReturn(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})
 	if err != nil {
 		return Approval{}, err
 	}
@@ -129,18 +125,14 @@ func ApproveApprovalFromEnv(ctx context.Context, approvalID string) (Approval, e
 }
 
 func RejectApprovalWithSession(ctx context.Context, session *RuntimeSession, approvalID string) (ret Approval, err error) {
-	service, repo, err := approvalDependenciesFromSession(session)
+	service, _, err := approvalDependenciesFromSession(session)
 	if err != nil {
 		return Approval{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.ApprovalID(approvalID)
-	if err := service.EnsureRejected(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id}); err != nil {
-		return Approval{}, err
-	}
-
-	item, err := repo.Get(ctx, id)
+	item, err := service.EnsureRejectedAndReturn(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})
 	if err != nil {
 		return Approval{}, err
 	}
@@ -178,16 +170,15 @@ func BatchResolveApprovalsWithSession(ctx context.Context, session *RuntimeSessi
 	ret = make([]Approval, 0, len(cmd.ApprovalIDs))
 	for _, approvalID := range cmd.ApprovalIDs {
 		id := common.ApprovalID(approvalID)
-		var err error
+		var (
+			item *approvalmodel.Approval
+			err  error
+		)
 		if cmd.Action == "approve" {
-			err = service.EnsureApproved(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})
+			item, err = service.EnsureApprovedAndReturn(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})
 		} else {
-			err = service.EnsureRejected(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})
+			item, err = service.EnsureRejectedAndReturn(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})
 		}
-		if err != nil {
-			return nil, err
-		}
-		item, err := repo.Get(ctx, id)
 		if err != nil {
 			return nil, err
 		}

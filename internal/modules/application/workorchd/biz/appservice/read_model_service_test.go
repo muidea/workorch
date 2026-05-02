@@ -19,6 +19,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
 type countingStepRepository struct {
@@ -48,6 +49,147 @@ func (r *countingStepRepository) Delete(ctx context.Context, id common.StepID) e
 }
 
 var _ repository.StepRepository = (*countingStepRepository)(nil)
+
+type blockingWorkspaceRepository struct {
+	base    repository.WorkspaceRepository
+	started chan string
+	release chan struct{}
+}
+
+func (r *blockingWorkspaceRepository) Create(ctx context.Context, item *workspacemodel.Workspace) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *blockingWorkspaceRepository) Get(ctx context.Context, id common.WorkspaceID) (*workspacemodel.Workspace, error) {
+	select {
+	case r.started <- string(id):
+	default:
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-r.release:
+	}
+	return r.base.Get(ctx, id)
+}
+
+func (r *blockingWorkspaceRepository) List(ctx context.Context) ([]*workspacemodel.Workspace, error) {
+	return r.base.List(ctx)
+}
+
+func (r *blockingWorkspaceRepository) Update(ctx context.Context, item *workspacemodel.Workspace) error {
+	return r.base.Update(ctx, item)
+}
+
+func (r *blockingWorkspaceRepository) Delete(ctx context.Context, id common.WorkspaceID) error {
+	return r.base.Delete(ctx, id)
+}
+
+var _ repository.WorkspaceRepository = (*blockingWorkspaceRepository)(nil)
+
+type blockingStepRepository struct {
+	base    repository.StepRepository
+	started chan string
+	release chan struct{}
+}
+
+func (r *blockingStepRepository) Create(ctx context.Context, item *runmodel.Step) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *blockingStepRepository) Get(ctx context.Context, id common.StepID) (*runmodel.Step, error) {
+	return r.base.Get(ctx, id)
+}
+
+func (r *blockingStepRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.Step, error) {
+	select {
+	case r.started <- string(runID):
+	default:
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-r.release:
+	}
+	return r.base.ListByRun(ctx, runID)
+}
+
+func (r *blockingStepRepository) Update(ctx context.Context, item *runmodel.Step) error {
+	return r.base.Update(ctx, item)
+}
+
+func (r *blockingStepRepository) Delete(ctx context.Context, id common.StepID) error {
+	return r.base.Delete(ctx, id)
+}
+
+var _ repository.StepRepository = (*blockingStepRepository)(nil)
+
+type blockingRunListRepository struct {
+	base    repository.RunRepository
+	started chan string
+	release chan struct{}
+}
+
+func (r *blockingRunListRepository) Create(ctx context.Context, item *runmodel.Run) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *blockingRunListRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
+	return r.base.Get(ctx, id)
+}
+
+func (r *blockingRunListRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
+	return r.base.List(ctx)
+}
+
+func (r *blockingRunListRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
+	select {
+	case r.started <- string(workspaceID):
+	default:
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-r.release:
+	}
+	return r.base.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r *blockingRunListRepository) Update(ctx context.Context, item *runmodel.Run) error {
+	return r.base.Update(ctx, item)
+}
+
+func (r *blockingRunListRepository) Delete(ctx context.Context, id common.RunID) error {
+	return r.base.Delete(ctx, id)
+}
+
+var _ repository.RunRepository = (*blockingRunListRepository)(nil)
+
+type countingMCPCapabilityRepository struct {
+	base      repository.MCPCapabilityRepository
+	getCalls  int
+	listCalls int
+}
+
+func (r *countingMCPCapabilityRepository) Create(ctx context.Context, item *mcpmodel.Capability) error {
+	return r.base.Create(ctx, item)
+}
+
+func (r *countingMCPCapabilityRepository) Get(ctx context.Context, id common.MCPCapabilityID) (*mcpmodel.Capability, error) {
+	r.getCalls++
+	return r.base.Get(ctx, id)
+}
+
+func (r *countingMCPCapabilityRepository) List(ctx context.Context) ([]*mcpmodel.Capability, error) {
+	r.listCalls++
+	return r.base.List(ctx)
+}
+
+func (r *countingMCPCapabilityRepository) Update(ctx context.Context, item *mcpmodel.Capability) error {
+	return r.base.Update(ctx, item)
+}
+
+var _ repository.MCPCapabilityRepository = (*countingMCPCapabilityRepository)(nil)
 
 type blockingDecisionResolutionRepository struct {
 	base    repository.DecisionResolutionRepository
@@ -203,6 +345,82 @@ func TestReadRunSnapshotReadsDecisionResolutionsConcurrently(t *testing.T) {
 		if item.ResolutionID == "" || item.ResolutionType != "provide_missing_info" {
 			t.Fatalf("decision = %+v, want mapped resolution", item)
 		}
+	}
+}
+
+func TestReadRunSnapshotReadsWorkspaceAndRunScopedEvidenceConcurrently(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	workspaceID := common.WorkspaceID("ws-run-snapshot-concurrent")
+	runID := common.RunID("run-snapshot-concurrent")
+	baseWorkspaces := memory.NewWorkspaceRepository()
+	baseSteps := memory.NewStepRepository()
+	if err := baseWorkspaces.Create(context.Background(), &workspacemodel.Workspace{
+		ID:               workspaceID,
+		Title:            "run snapshot concurrent",
+		State:            common.WorkspaceStateActive,
+		WorkingDirectory: "workspaces/run-snapshot-concurrent",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := baseSteps.Create(context.Background(), &runmodel.Step{
+		ID:     common.StepID("run-snapshot-concurrent/step-1"),
+		RunID:  runID,
+		Kind:   "llm/workspace_execution",
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"summary": "done"},
+	}); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	workspaceStarted := make(chan string, 1)
+	stepStarted := make(chan string, 1)
+	release := make(chan struct{})
+	deps := readModelDependencies{
+		workspaces: &blockingWorkspaceRepository{base: baseWorkspaces, started: workspaceStarted, release: release},
+		runs: func() repository.RunRepository {
+			repo := memory.NewRunRepository()
+			if err := repo.Create(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
+				t.Fatalf("create run: %v", err)
+			}
+			return repo
+		}(),
+		steps:           &blockingStepRepository{base: baseSteps, started: stepStarted, release: release},
+		results:         memory.NewResultRepository(),
+		artifacts:       memory.NewArtifactRepository(),
+		eventRecords:    memory.NewEventRecordRepository(),
+		toolCalls:       memory.NewToolCallRepository(),
+		mcpCapabilities: memory.NewMCPCapabilityRepository(),
+		patches:         memory.NewPatchRepository(),
+		validations:     memory.NewValidationResultRepository(),
+		checkpoints:     memory.NewRuntimeCheckpointRepository(),
+		tickets:         memory.NewDecisionTicketRepository(),
+		resolutions:     memory.NewDecisionResolutionRepository(),
+		approvals:       memory.NewApprovalRepository(),
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := readRunSnapshot(ctx, deps, runID)
+		done <- err
+	}()
+
+	for _, ch := range []<-chan string{workspaceStarted, stepStarted} {
+		select {
+		case <-ch:
+		case err := <-done:
+			t.Fatalf("readRunSnapshot returned before both reads started: %v", err)
+		case <-ctx.Done():
+			t.Fatal("timed out waiting for concurrent workspace and step reads")
+		}
+	}
+	close(release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("readRunSnapshot: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for readRunSnapshot")
 	}
 }
 
@@ -469,6 +687,206 @@ func TestReadRunSnapshotWithBackendReturnsSelectedAndUsedCapabilities(t *testing
 	}
 	if len(observability.SelectedCapabilities) != 1 || len(observability.UsedCapabilities) != 1 {
 		t.Fatalf("observability capabilities = selected:%+v used:%+v, want capability refs", observability.SelectedCapabilities, observability.UsedCapabilities)
+	}
+}
+
+func TestReadRunSnapshotLoadsCapabilityCatalogOnce(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-run-capability-catalog")
+	runID := common.RunID("run-capability-catalog")
+	stepID := common.StepID("run-capability-catalog/block/repo-summary")
+	capabilityID := common.MCPCapabilityID("mcp-capability-catalog:tool:repo.summary")
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	toolCallRepo := memory.NewToolCallRepository()
+	capabilityRepo := &countingMCPCapabilityRepository{base: memory.NewMCPCapabilityRepository()}
+
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "capability catalog", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := capabilityRepo.Create(ctx, &mcpmodel.Capability{
+		ID:             capabilityID,
+		ServerID:       common.MCPServerID("mcp-capability-catalog"),
+		Kind:           mcpmodel.CapabilityKindTool,
+		Name:           "repo.summary",
+		DisplayName:    "仓库摘要能力",
+		Category:       "代码仓库",
+		RiskLevel:      "read_only",
+		Enabled:        true,
+		ApprovalPolicy: "operator",
+		Status:         "active",
+	}); err != nil {
+		t.Fatalf("create capability: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateCompleted,
+		ExecutionContext: map[string]any{
+			"capabilityIds": []string{string(capabilityID)},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "mcp/tool_call",
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"operation": "mcp/tool_call",
+			"serverId":  "mcp-capability-catalog",
+			"tool":      "repo.summary",
+			"status":    "completed",
+		},
+	}); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	if err := toolCallRepo.Create(ctx, &runmodel.ToolCall{
+		ID:          common.ToolCallID("tool-call-capability-catalog"),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		ToolName:    "mcp/tool_call",
+		State:       common.ToolCallStateCompleted,
+		Output: map[string]any{
+			"operation": "mcp/tool_call",
+			"serverId":  "mcp-capability-catalog",
+			"tool":      "repo.summary",
+			"status":    "completed",
+		},
+	}); err != nil {
+		t.Fatalf("create tool call: %v", err)
+	}
+
+	snapshot, err := readRunSnapshot(ctx, readModelDependencies{
+		workspaces:      workspaceRepo,
+		runs:            runRepo,
+		steps:           stepRepo,
+		results:         memory.NewResultRepository(),
+		artifacts:       memory.NewArtifactRepository(),
+		eventRecords:    memory.NewEventRecordRepository(),
+		toolCalls:       toolCallRepo,
+		mcpCapabilities: capabilityRepo,
+		patches:         memory.NewPatchRepository(),
+		validations:     memory.NewValidationResultRepository(),
+		checkpoints:     memory.NewRuntimeCheckpointRepository(),
+		tickets:         memory.NewDecisionTicketRepository(),
+		resolutions:     memory.NewDecisionResolutionRepository(),
+		approvals:       memory.NewApprovalRepository(),
+	}, runID)
+	if err != nil {
+		t.Fatalf("readRunSnapshot: %v", err)
+	}
+	if capabilityRepo.listCalls != 1 || capabilityRepo.getCalls != 0 {
+		t.Fatalf("capability reads = list:%d get:%d, want one catalog list and no per-id get", capabilityRepo.listCalls, capabilityRepo.getCalls)
+	}
+	if len(snapshot.SelectedCapabilities) != 1 || snapshot.SelectedCapabilities[0].DisplayName != "仓库摘要能力" {
+		t.Fatalf("selected capabilities = %+v, want catalog metadata", snapshot.SelectedCapabilities)
+	}
+	if len(snapshot.UsedCapabilities) != 1 || snapshot.UsedCapabilities[0].ID != string(capabilityID) || snapshot.UsedCapabilities[0].UseCount != 1 {
+		t.Fatalf("used capabilities = %+v, want catalog metadata with use count", snapshot.UsedCapabilities)
+	}
+}
+
+func TestMapRunObservabilityReusesSnapshotProjection(t *testing.T) {
+	snapshot := RunSnapshot{
+		Workspace: Workspace{ID: "ws-observability-projection"},
+		Run:       Run{ID: "run-observability-projection", WorkspaceID: "ws-observability-projection", State: string(common.RunStateCompleted)},
+		TaskProgress: TaskProgress{
+			WorkspaceID: "ws-observability-projection",
+			RunID:       "run-observability-projection",
+			State:       string(common.RunStateCompleted),
+			Summary:     "cached task progress",
+		},
+		TaskDecompositions: []TaskDecomposition{{
+			ID:      "cached-decomposition",
+			RunID:   "run-observability-projection",
+			State:   "completed",
+			Summary: "cached decomposition",
+		}},
+		ExecutionSections: []ExecutionSection{{
+			ID:      "cached-section",
+			RunID:   "run-observability-projection",
+			Title:   "cached section",
+			State:   "completed",
+			Summary: "cached section summary",
+		}},
+	}
+
+	observability := mapRunObservability(snapshot)
+
+	if observability.TaskProgress.Summary != "cached task progress" {
+		t.Fatalf("task progress = %+v, want cached projection", observability.TaskProgress)
+	}
+	if len(observability.TaskDecompositions) != 1 || observability.TaskDecompositions[0].ID != "cached-decomposition" {
+		t.Fatalf("task decompositions = %+v, want cached projection", observability.TaskDecompositions)
+	}
+	if len(observability.ExecutionSections) != 1 || observability.ExecutionSections[0].ID != "cached-section" {
+		t.Fatalf("execution sections = %+v, want cached projection", observability.ExecutionSections)
+	}
+}
+
+func TestRunContextBundleReusesSnapshotTaskProgress(t *testing.T) {
+	snapshot := RunSnapshot{
+		Workspace: Workspace{ID: "ws-context-progress-reuse"},
+		Run:       Run{ID: "run-context-progress-reuse", WorkspaceID: "ws-context-progress-reuse", State: string(common.RunStateCompleted)},
+		TaskProgress: TaskProgress{
+			WorkspaceID:      "ws-context-progress-reuse",
+			RunID:            "run-context-progress-reuse",
+			State:            string(common.RunStateCompleted),
+			Summary:          "cached progress reused",
+			CurrentMilestone: "formal_result",
+			EvidenceRefs:     []string{"cached-progress-evidence"},
+			Recovery: RecoveryPlan{
+				Mode:       "complete",
+				NextAction: "inspect_result",
+				RunID:      "run-context-progress-reuse",
+			},
+		},
+	}
+
+	bundle := mapRunContextBundle(snapshot)
+	compressed := compressedContextFromRunSnapshot(snapshot)
+	progress := runSnapshotTaskProgress(snapshot)
+
+	if bundle.TaskProgress.Summary != "cached progress reused" || bundle.Recovery.Mode != "complete" {
+		t.Fatalf("bundle progress/recovery = %+v/%+v, want cached task progress", bundle.TaskProgress, bundle.Recovery)
+	}
+	if compressed.Summary != "cached progress reused" || compressed.CurrentMilestone != "formal_result" {
+		t.Fatalf("compressed context = %+v, want cached progress-derived summary and milestone", compressed)
+	}
+	if progress.Summary != "cached progress reused" || progress.EvidenceRefs[0] != "cached-progress-evidence" {
+		t.Fatalf("run snapshot task progress = %+v, want cached projection", progress)
+	}
+}
+
+func TestRunProjectionHelpersReuseSnapshotDerivedViews(t *testing.T) {
+	snapshot := RunSnapshot{
+		Workspace: Workspace{ID: "ws-derived-view-reuse"},
+		Run:       Run{ID: "run-derived-view-reuse", WorkspaceID: "ws-derived-view-reuse", State: string(common.RunStateRunning)},
+		TaskProgress: TaskProgress{
+			WorkspaceID: "ws-derived-view-reuse",
+			RunID:       "run-derived-view-reuse",
+			State:       string(common.RunStateRunning),
+			Summary:     "cached derived progress",
+		},
+		TaskDecompositions: []TaskDecomposition{{
+			ID:    "cached-derived-decomposition",
+			RunID: "run-derived-view-reuse",
+			State: "running",
+		}},
+	}
+
+	progress := runSnapshotTaskProgress(snapshot)
+	decompositions := runSnapshotTaskDecompositions(snapshot)
+
+	if progress.Summary != "cached derived progress" {
+		t.Fatalf("progress = %+v, want cached snapshot progress", progress)
+	}
+	if len(decompositions) != 1 || decompositions[0].ID != "cached-derived-decomposition" {
+		t.Fatalf("decompositions = %+v, want cached snapshot decomposition", decompositions)
 	}
 }
 
@@ -1429,6 +1847,70 @@ func TestReadWorkspaceSnapshotWithRunSnapshotAvoidsProjectionRunStepRead(t *test
 	}
 	if snapshot.TaskProgress.Summary != "cached activation progress" {
 		t.Fatalf("task progress summary = %q, want cached progress", snapshot.TaskProgress.Summary)
+	}
+}
+
+func TestReadWorkspaceSnapshotReadsWorkspaceAndWorkspaceScopedItemsConcurrently(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	workspaceID := common.WorkspaceID("ws-workspace-snapshot-concurrent")
+	runID := common.RunID("run-workspace-snapshot-concurrent")
+	baseWorkspaces := memory.NewWorkspaceRepository()
+	baseRuns := memory.NewRunRepository()
+	if err := baseWorkspaces.Create(context.Background(), &workspacemodel.Workspace{
+		ID:               workspaceID,
+		Title:            "workspace snapshot concurrent",
+		State:            common.WorkspaceStateActive,
+		WorkingDirectory: "workspaces/workspace-snapshot-concurrent",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := baseRuns.Create(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	workspaceStarted := make(chan string, 1)
+	runListStarted := make(chan string, 1)
+	release := make(chan struct{})
+	deps := readModelDependencies{
+		workspaces:      &blockingWorkspaceRepository{base: baseWorkspaces, started: workspaceStarted, release: release},
+		runs:            &blockingRunListRepository{base: baseRuns, started: runListStarted, release: release},
+		steps:           memory.NewStepRepository(),
+		results:         memory.NewResultRepository(),
+		artifacts:       memory.NewArtifactRepository(),
+		eventRecords:    memory.NewEventRecordRepository(),
+		toolCalls:       memory.NewToolCallRepository(),
+		mcpCapabilities: memory.NewMCPCapabilityRepository(),
+		patches:         memory.NewPatchRepository(),
+		validations:     memory.NewValidationResultRepository(),
+		checkpoints:     memory.NewRuntimeCheckpointRepository(),
+		tickets:         memory.NewDecisionTicketRepository(),
+		resolutions:     memory.NewDecisionResolutionRepository(),
+		approvals:       memory.NewApprovalRepository(),
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := readWorkspaceSnapshot(ctx, deps, workspaceID, nil)
+		done <- err
+	}()
+
+	for _, ch := range []<-chan string{workspaceStarted, runListStarted} {
+		select {
+		case <-ch:
+		case err := <-done:
+			t.Fatalf("readWorkspaceSnapshot returned before both reads started: %v", err)
+		case <-ctx.Done():
+			t.Fatal("timed out waiting for concurrent workspace and run list reads")
+		}
+	}
+	close(release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("readWorkspaceSnapshot: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for readWorkspaceSnapshot")
 	}
 }
 

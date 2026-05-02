@@ -586,7 +586,7 @@ func ReadRunTaskProgressWithSession(ctx context.Context, session *RuntimeSession
 	if err != nil {
 		return TaskProgress{}, err
 	}
-	return mapTaskProgress(snapshot), nil
+	return runSnapshotTaskProgress(snapshot), nil
 }
 
 func ReadRunTaskProgressWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (TaskProgress, error) {
@@ -646,7 +646,7 @@ func ReadRunTaskDecompositionsWithSession(ctx context.Context, session *RuntimeS
 	if err != nil {
 		return nil, err
 	}
-	return mapTaskDecompositions(snapshot), nil
+	return runSnapshotTaskDecompositions(snapshot), nil
 }
 
 func ReadRunTaskDecompositionsWithBackend(ctx context.Context, backend string, dataRoot string, runID string) ([]TaskDecomposition, error) {
@@ -894,10 +894,7 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 	if err != nil {
 		return RunSnapshot{}, err
 	}
-	workspace, err := deps.workspaces.Get(ctx, item.WorkspaceID)
-	if err != nil {
-		return RunSnapshot{}, err
-	}
+	var workspace *workspacemodel.Workspace
 	var steps []*runmodel.Step
 	var toolCalls []*runmodel.ToolCall
 	var patches []*runmodel.Patch
@@ -912,6 +909,11 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 	var approvals []Approval
 	var selectedApproval *approvalmodel.Approval
 	err = runReadModelTasks(
+		func() error {
+			var err error
+			workspace, err = deps.workspaces.Get(ctx, item.WorkspaceID)
+			return err
+		},
 		func() error {
 			var err error
 			steps, err = deps.steps.ListByRun(ctx, item.ID)
@@ -987,8 +989,9 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		Observed:           presenter.MapObserved(observedItems),
 	}
 	ret.Outcome = mapRunOutcome(ret)
-	ret.SelectedCapabilities = selectedRuntimeCapabilities(ctx, deps, ret.Run.ExecutionContext)
-	ret.UsedCapabilities = usedRuntimeCapabilities(ctx, deps, ret)
+	capabilityCatalog := runtimeCapabilityCatalog(ctx, deps, ret.Run.ExecutionContext, ret.ToolCalls)
+	ret.SelectedCapabilities = selectedRuntimeCapabilities(ret.Run.ExecutionContext, capabilityCatalog)
+	ret.UsedCapabilities = usedRuntimeCapabilities(ret, capabilityCatalog)
 	ret.TaskProgress = mapTaskProgress(ret)
 	ret.TaskDecompositions = mapTaskDecompositions(ret)
 	ret.ExecutionSections = mapExecutionSections(ret)
@@ -1000,10 +1003,7 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 	if err != nil {
 		return RunSnapshot{}, err
 	}
-	workspace, err := deps.workspaces.Get(ctx, item.WorkspaceID)
-	if err != nil {
-		return RunSnapshot{}, err
-	}
+	var workspace *workspacemodel.Workspace
 	var steps []*runmodel.Step
 	var toolCalls []*runmodel.ToolCall
 	var patches []*runmodel.Patch
@@ -1015,6 +1015,11 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 	var decisions []Decision
 	var approvals []Approval
 	err = runReadModelTasks(
+		func() error {
+			var err error
+			workspace, err = deps.workspaces.Get(ctx, item.WorkspaceID)
+			return err
+		},
 		func() error {
 			var err error
 			steps, err = deps.steps.ListByRun(ctx, item.ID)
@@ -1171,14 +1176,8 @@ func runReadModelTasks(tasks ...func() error) error {
 
 func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID, cachedRunSnapshot *RunSnapshot) (WorkspaceSnapshot, error) {
 	var item *workspacemodel.Workspace
-	var err error
 	if cachedRunSnapshot != nil && cachedRunSnapshot.Workspace.ID == string(workspaceID) {
 		item = workspaceModelFromView(cachedRunSnapshot.Workspace)
-	} else {
-		item, err = deps.workspaces.Get(ctx, workspaceID)
-		if err != nil {
-			return WorkspaceSnapshot{}, err
-		}
 	}
 
 	var runItems []*runmodel.Run
@@ -1187,7 +1186,7 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 	var artifactItems []*resultmodel.Artifact
 	var ticketItems []*decisionmodel.Ticket
 	var approvalItems []*approvalmodel.Approval
-	err = runReadModelTasks(
+	tasks := []func() error{
 		func() error {
 			var err error
 			runItems, err = deps.runs.ListByWorkspaceID(ctx, workspaceID)
@@ -1218,7 +1217,15 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 			approvalItems, err = deps.approvals.ListByWorkspaceID(ctx, workspaceID)
 			return err
 		},
-	)
+	}
+	if item == nil {
+		tasks = append(tasks, func() error {
+			var err error
+			item, err = deps.workspaces.Get(ctx, workspaceID)
+			return err
+		})
+	}
+	err := runReadModelTasks(tasks...)
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
@@ -1329,7 +1336,7 @@ func readRunTaskProgress(ctx context.Context, deps readModelDependencies, runID 
 	if err != nil {
 		return TaskProgress{}, err
 	}
-	return mapTaskProgress(snapshot), nil
+	return runSnapshotTaskProgress(snapshot), nil
 }
 
 func readWorkspaceContextBundle(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID) (ContextBundle, error) {
@@ -1631,7 +1638,7 @@ func mapToolCalls(items []*runmodel.ToolCall) []ToolCall {
 	return ret
 }
 
-func selectedRuntimeCapabilities(ctx context.Context, deps readModelDependencies, executionContext map[string]any) []RuntimeCapability {
+func selectedRuntimeCapabilities(executionContext map[string]any, catalog map[string]RuntimeCapability) []RuntimeCapability {
 	if len(executionContext) == 0 {
 		return nil
 	}
@@ -1652,8 +1659,8 @@ func selectedRuntimeCapabilities(ctx context.Context, deps readModelDependencies
 		if _, ok := seen[id]; ok {
 			continue
 		}
-		if item, err := deps.mcpCapabilities.Get(ctx, common.MCPCapabilityID(id)); err == nil {
-			ret = append(ret, runtimeCapabilityFromModel(item))
+		if item, ok := catalog[id]; ok {
+			ret = append(ret, item)
 		} else {
 			ret = append(ret, RuntimeCapability{ID: id, DisplayName: id})
 		}
@@ -1665,7 +1672,7 @@ func selectedRuntimeCapabilities(ctx context.Context, deps readModelDependencies
 	return ret
 }
 
-func usedRuntimeCapabilities(ctx context.Context, deps readModelDependencies, snapshot RunSnapshot) []RuntimeCapability {
+func usedRuntimeCapabilities(snapshot RunSnapshot, catalog map[string]RuntimeCapability) []RuntimeCapability {
 	if len(snapshot.ToolCalls) == 0 {
 		return nil
 	}
@@ -1682,8 +1689,8 @@ func usedRuntimeCapabilities(ctx context.Context, deps readModelDependencies, sn
 		}
 		item, ok := used[identity.ID]
 		if !ok {
-			if loaded, err := deps.mcpCapabilities.Get(ctx, common.MCPCapabilityID(identity.ID)); err == nil {
-				item = runtimeCapabilityFromModel(loaded)
+			if loaded, exists := catalog[identity.ID]; exists {
+				item = loaded
 			} else if selectedItem, exists := selected[identity.ID]; exists {
 				item = selectedItem
 			} else {
@@ -1703,6 +1710,37 @@ func usedRuntimeCapabilities(ctx context.Context, deps readModelDependencies, sn
 		return nil
 	}
 	return ret
+}
+
+func runtimeCapabilityCatalog(ctx context.Context, deps readModelDependencies, executionContext map[string]any, toolCalls []ToolCall) map[string]RuntimeCapability {
+	if deps.mcpCapabilities == nil || !requiresRuntimeCapabilityCatalog(executionContext, toolCalls) {
+		return nil
+	}
+	items, err := deps.mcpCapabilities.List(ctx)
+	if err != nil {
+		return nil
+	}
+	ret := make(map[string]RuntimeCapability, len(items))
+	for _, item := range items {
+		capability := runtimeCapabilityFromModel(item)
+		if capability.ID == "" {
+			continue
+		}
+		ret[capability.ID] = capability
+	}
+	return ret
+}
+
+func requiresRuntimeCapabilityCatalog(executionContext map[string]any, toolCalls []ToolCall) bool {
+	if len(readModelStringSliceValue(executionContext["capabilityIds"])) > 0 {
+		return true
+	}
+	for _, toolCall := range toolCalls {
+		if runtimeCapabilityIdentity(toolCall).ID != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeCapabilityIdentity(toolCall ToolCall) RuntimeCapability {
@@ -2151,9 +2189,9 @@ func mapRunObservability(snapshot RunSnapshot) RunObservability {
 		Run:                  snapshot.Run,
 		Outcome:              snapshot.Outcome,
 		Progress:             runtimeProgress(snapshot),
-		TaskProgress:         mapTaskProgress(snapshot),
-		TaskDecompositions:   mapTaskDecompositions(snapshot),
-		ExecutionSections:    mapExecutionSections(snapshot),
+		TaskProgress:         snapshot.TaskProgress,
+		TaskDecompositions:   snapshot.TaskDecompositions,
+		ExecutionSections:    snapshot.ExecutionSections,
 		Evidence:             runtimeEvidenceSummary(snapshot, len(timelineEvents(timeline))),
 		LatestCheckpoint:     latestRuntimeCheckpoint(snapshot.RuntimeCheckpoints),
 		SelectedCapabilities: snapshot.SelectedCapabilities,
@@ -2309,7 +2347,7 @@ func mapWorkspaceContextBundle(snapshot WorkspaceSnapshot) ContextBundle {
 }
 
 func mapRunContextBundle(snapshot RunSnapshot) ContextBundle {
-	progress := mapTaskProgress(snapshot)
+	progress := runSnapshotTaskProgress(snapshot)
 	timeline := runtimeTimeline(snapshot)
 	recentEvidence := contextRecentEvidence(timeline, 12)
 	ret := ContextBundle{
@@ -2367,7 +2405,7 @@ func compressedContextFromBundle(bundle ContextBundle) CompressedContext {
 }
 
 func compressedContextFromRunSnapshot(snapshot RunSnapshot) CompressedContext {
-	progress := mapTaskProgress(snapshot)
+	progress := runSnapshotTaskProgress(snapshot)
 	timeline := runtimeTimeline(snapshot)
 	recentEvidence := contextRecentEvidence(timeline, 12)
 	sourceEvidenceRefs := compactUniqueStrings(append(progress.EvidenceRefs, contextEvidenceRefs(recentEvidence)...))
@@ -2387,6 +2425,20 @@ func compressedContextFromRunSnapshot(snapshot RunSnapshot) CompressedContext {
 		SourceEvidenceRefs: sourceEvidenceRefs,
 		RetentionPolicy:    "retain recovery, blockers, milestones, latest evidence summaries, and formal result refs; reload full evidence by source refs when needed",
 	}
+}
+
+func runSnapshotTaskProgress(snapshot RunSnapshot) TaskProgress {
+	if snapshot.TaskProgress.RunID == snapshot.Run.ID && snapshot.TaskProgress.WorkspaceID == snapshot.Run.WorkspaceID {
+		return snapshot.TaskProgress
+	}
+	return mapTaskProgress(snapshot)
+}
+
+func runSnapshotTaskDecompositions(snapshot RunSnapshot) []TaskDecomposition {
+	if len(snapshot.TaskDecompositions) > 0 {
+		return snapshot.TaskDecompositions
+	}
+	return mapTaskDecompositions(snapshot)
 }
 
 func compressedContextSourceSectionRefs(snapshot RunSnapshot, recentEvidence []ContextEvidence) []string {

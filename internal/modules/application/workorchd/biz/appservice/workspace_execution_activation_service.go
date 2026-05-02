@@ -919,35 +919,19 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 	}
 	for attempt := 0; attempt < 8; attempt++ {
 		runID := common.RunID(generateBusinessID("run"))
+		createExecutionContext := executionContextForCreatedWorkspaceRun(runID, workspaceID, goalID, dodID, executionContext, priority)
 		if err := exports.Services.RunService.CreateRun(ctx, runmodule.CreateRunCommand{
 			RunID:            runID,
 			WorkspaceID:      workspaceID,
 			GoalID:           goalID,
 			DoDID:            dodID,
 			InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
-			ExecutionContext: executionContext,
+			ExecutionContext: createExecutionContext,
 			Priority:         priority,
 		}); err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				continue
 			}
-			return "", err
-		}
-		createdRun := &runmodel.Run{
-			ID:               runID,
-			WorkspaceID:      workspaceID,
-			GoalID:           goalID,
-			DoDID:            dodID,
-			InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
-			ExecutionContext: cloneContextMap(executionContext),
-			State:            common.RunStateCreated,
-			Priority:         priority,
-		}
-		deps, err := readModelDependenciesFromSession(session)
-		if err != nil {
-			return "", err
-		}
-		if err := attachCompressedContextToLoadedRun(ctx, deps, createdRun); err != nil {
 			return "", err
 		}
 		if err := exports.Services.RunService.EnsureStarted(ctx, runmodule.StartRunCommand{RunID: runID}); err != nil {
@@ -956,6 +940,27 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 		return runID, nil
 	}
 	return "", common.ErrConflict
+}
+
+func executionContextForCreatedWorkspaceRun(runID common.RunID, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any, priority int) map[string]any {
+	createdRun := &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		GoalID:           goalID,
+		DoDID:            dodID,
+		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: cloneContextMap(executionContext),
+		State:            common.RunStateCreated,
+		Priority:         priority,
+	}
+	ret := cloneContextMap(executionContext)
+	if ret == nil {
+		ret = map[string]any{}
+	}
+	if compressed := compressedContextForRunStart(createdRun); compressed != nil {
+		ret["compressedContext"] = compressed
+	}
+	return ret
 }
 
 func readWorkspaceSnapshotFromExports(ctx context.Context, session *RuntimeSession, workspaceID common.WorkspaceID) (WorkspaceSnapshot, error) {

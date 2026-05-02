@@ -29,6 +29,10 @@ type ExecutionContextPatchOrchestrator interface {
 	ResumeRunWithExecutionContextPatch(context.Context, common.RunID, map[string]any) error
 }
 
+type LoadedRunExecutionContextPatchOrchestrator interface {
+	ResumeLoadedRunWithExecutionContextPatch(context.Context, *runModel.Run, map[string]any) error
+}
+
 type Service struct {
 	runs         repository.RunRepository
 	workspaces   repository.WorkspaceRepository
@@ -136,6 +140,14 @@ func (s *Service) ResumeRun(ctx context.Context, cmd runservice.ResumeRunCommand
 	}
 	if s.orchestrator == nil {
 		return common.ErrInvalidArgument
+	}
+	if cmd.LoadedRun != nil {
+		if cmd.LoadedRun.ID != cmd.RunID {
+			return common.ErrConflict
+		}
+		if patcher, ok := s.orchestrator.(LoadedRunExecutionContextPatchOrchestrator); ok {
+			return patcher.ResumeLoadedRunWithExecutionContextPatch(ctx, cmd.LoadedRun, cloneExecutionContext(cmd.ExecutionContextPatch))
+		}
 	}
 	if len(cmd.ExecutionContextPatch) > 0 {
 		if patcher, ok := s.orchestrator.(ExecutionContextPatchOrchestrator); ok {

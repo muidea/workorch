@@ -76,21 +76,29 @@ func (s *Service) Approve(ctx context.Context, cmd approvalservice.ResolveApprov
 }
 
 func (s *Service) EnsureApproved(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) error {
+	_, err := s.EnsureApprovedAndReturn(ctx, cmd)
+	return err
+}
+
+func (s *Service) EnsureApprovedAndReturn(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) (*approvalModel.Approval, error) {
 	if cmd.ApprovalID == "" {
-		return common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
 
 	item, err := s.approvals.Get(ctx, cmd.ApprovalID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if item.State == common.ApprovalStateApproved {
-		return nil
+		return item, nil
 	}
 	if item.State == common.ApprovalStateRejected {
-		return common.ErrConflict
+		return nil, common.ErrConflict
 	}
-	return s.resolveItem(ctx, item, common.ApprovalStateApproved)
+	if err := s.resolveItem(ctx, item, common.ApprovalStateApproved); err != nil {
+		return nil, err
+	}
+	return item, nil
 }
 
 func (s *Service) Reject(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) error {
@@ -98,21 +106,29 @@ func (s *Service) Reject(ctx context.Context, cmd approvalservice.ResolveApprova
 }
 
 func (s *Service) EnsureRejected(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) error {
+	_, err := s.EnsureRejectedAndReturn(ctx, cmd)
+	return err
+}
+
+func (s *Service) EnsureRejectedAndReturn(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) (*approvalModel.Approval, error) {
 	if cmd.ApprovalID == "" {
-		return common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
 
 	item, err := s.approvals.Get(ctx, cmd.ApprovalID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if item.State == common.ApprovalStateRejected {
-		return nil
+		return item, nil
 	}
 	if item.State == common.ApprovalStateApproved {
-		return common.ErrConflict
+		return nil, common.ErrConflict
 	}
-	return s.resolveItem(ctx, item, common.ApprovalStateRejected)
+	if err := s.resolveItem(ctx, item, common.ApprovalStateRejected); err != nil {
+		return nil, err
+	}
+	return item, nil
 }
 
 func (s *Service) resolve(ctx context.Context, approvalID common.ApprovalID, target common.ApprovalState) error {
