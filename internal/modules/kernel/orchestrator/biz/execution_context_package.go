@@ -50,11 +50,12 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		result             map[string]any
 		deliverables       []map[string]any
 		failures           []map[string]any
+		currentGovernance    []map[string]any
 		acceptedResultRead bool
 		deliverablesRead   bool
 		wg                 sync.WaitGroup
 	)
-	wg.Add(4)
+	wg.Add(5)
 	go func() {
 		defer wg.Done()
 		manifest = o.executionContextWorkspaceFileManifest(ctx, run, step, workspace)
@@ -106,9 +107,62 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	} else if selected := selectedContextPackage(executionContext); len(selected) > 0 {
 		ret["selectedContext"] = selected
 	}
-	if governanceHistory := mapSliceFromValue(executionContext["governanceHistory"]); len(governanceHistory) > 0 {
+	governanceHistory := mapSliceFromValue(executionContext["governanceHistory"])
+	if len(currentGovernance) > 0 {
+		governanceHistory = append(currentGovernance, governanceHistory...)
+	}
+	if len(governanceHistory) > 0 {
 		ret["governanceHistory"] = limitedMapSlice(governanceHistory, 6)
 	}
+	return ret
+}
+
+func (o *RuntimeOrchestrator) currentRunGovernanceHistory(ctx context.Context, run *runModel.Run) []map[string]any {
+	if o == nil || run == nil || run.ID == "" {
+		return nil
+	}
+	var ret []map[string]any
+
+	if o.tickets != nil {
+		tickets, err := o.tickets.ListByRunID(ctx, run.ID)
+		if err == nil {
+			for _, t := range tickets {
+				if t == nil {
+					continue
+				}
+				item := map[string]any{
+					"id":           string(t.ID),
+					"kind":         "decision",
+					"state":        string(t.State),
+					"reason":       t.Reason,
+					"decisionKind": string(t.DecisionKind),
+					"question":     t.Question,
+					"stepId":       string(t.StepID),
+				}
+				ret = append(ret, item)
+			}
+		}
+	}
+
+	if o.approvals != nil {
+		approvals, err := o.approvals.ListByRunID(ctx, run.ID)
+		if err == nil {
+			for _, a := range approvals {
+				if a == nil {
+					continue
+				}
+				item := map[string]any{
+					"id":     string(a.ID),
+					"kind":   "approval",
+					"state":  string(a.State),
+					"reason": a.Reason,
+					"stepId": string(a.StepID),
+				}
+				ret = append(ret, item)
+			}
+		}
+	}
+
 	return ret
 }
 
