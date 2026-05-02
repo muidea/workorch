@@ -254,11 +254,11 @@
   {
     "id": "soul-doc-generator-validation",
     "name": "文档生成-验证",
-    "description": "检查文档完整性和格式正确性。",
+    "description": "检查文档完整性和格式正确性。只读，禁止执行工具。",
     "businessDomains": ["文档", "技术写作"],
-    "allowedToolKinds": ["shell/command"],
+    "allowedToolKinds": [],
     "allowedCapabilityCategories": [],
-    "soulMD": "# 文档生成验证\n\n## 验证检查项\n- [ ] Markdown 语法正确（无断链、无错误标题层级）\n- [ ] 代码示例语言标记正确\n- [ ] 所有声称的 API 端点都有文档\n- [ ] OpenAPI/GraphQL schema 可解析\n- [ ] 文档覆盖所有目标模块"
+    "soulMD": "# 文档生成验证\n\nDoD 逐项评估。只读，禁止修改文件。\n\n## 验证检查项\n- [ ] Markdown 语法正确（基于 execution 阶段 lint 工具的证据）\n- [ ] 代码示例语言标记正确\n- [ ] 所有声称的 API 端点都有文档\n- [ ] OpenAPI/GraphQL schema 可解析\n- [ ] 文档覆盖所有目标模块\n\n## 禁止\n- 不要执行 shell 命令（格式校验应在 execution 阶段完成）\n- 不要修改任何文件"
   },
   {
     "id": "soul-doc-generator-artifact",
