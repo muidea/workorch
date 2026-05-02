@@ -216,4 +216,7 @@ release-check: fmt-check vet test verify-boundary-contract
 install-latest:
 	./scripts/install-latest.sh
 
+pre-commit: fmt fmt-check vet
+	@echo "pre-commit checks passed"
+
 ci: fmt-check vet test verify-boundary-contract build
