@@ -1765,13 +1765,13 @@ func (o *RuntimeOrchestrator) recordStepDispatchEvidence(ctx context.Context, ru
 	return toolCall, nil
 }
 
-func (o *RuntimeOrchestrator) recordToolCallCompleted(ctx context.Context, toolCall *runModel.ToolCall, output map[string]any) error {
+func (o *RuntimeOrchestrator) recordToolCallCompleted(ctx context.Context, toolCall *runModel.ToolCall, output map[string]any, dialogLanguage string) error {
 	if toolCall == nil || toolCall.ID == "" || o.evidence.ToolCalls == nil {
 		return nil
 	}
 	toolCall.State = common.ToolCallStateCompleted
 	toolCall.EndedAt = runtimeEvidenceTimestamp()
-	toolCall.ExitSummary = "runtime step completed"
+	toolCall.ExitSummary = localizedStepCompletionSummary(dialogLanguage)
 	toolCall.Output = cloneStepPayload(output)
 	toolCall.Error = ""
 	if err := o.evidence.ToolCalls.Update(ctx, toolCall); err != nil {
@@ -1788,12 +1788,13 @@ func (o *RuntimeOrchestrator) recordCompletedRuntimeStepEvidence(ctx context.Con
 	if toolCall != nil {
 		evidenceRef = string(toolCall.ID)
 	}
+	language := runDialogLanguage(run)
 	return runParallel(
 		func() error {
-			return o.recordToolCallCompleted(ctx, toolCall, output)
+			return o.recordToolCallCompleted(ctx, toolCall, output, language)
 		},
 		func() error {
-			return o.recordValidationResult(ctx, run, step, common.ValidationResultStatePassed, "runtime step completed", evidenceRef, "")
+			return o.recordValidationResult(ctx, run, step, common.ValidationResultStatePassed, localizedStepCompletionSummary(language), evidenceRef, "")
 		},
 	)
 }
@@ -2590,6 +2591,13 @@ func verificationSummaryFromEvidence(language string, evidenceRefs []string) str
 		return fmt.Sprintf("验收结论由 %d 个证据引用支撑。", len(evidenceRefs))
 	}
 	return fmt.Sprintf("Acceptance is backed by %d evidence reference(s).", len(evidenceRefs))
+}
+
+func localizedStepCompletionSummary(language string) string {
+	if prefersChinese(language) {
+		return "runtime 步骤已完成"
+	}
+	return "runtime step completed"
 }
 
 func localizedDefaultList(language string, kind string) []string {

@@ -2216,6 +2216,7 @@ func mapRunObservability(snapshot RunSnapshot) RunObservability {
 }
 
 func mapWorkspaceTaskProgress(snapshot WorkspaceSnapshot) TaskProgress {
+	language := "" // WorkspaceSnapshot does not carry dialogLanguage; use default
 	ret := TaskProgress{
 		WorkspaceID: snapshot.Workspace.ID,
 		State:       snapshot.Workspace.State,
@@ -2272,7 +2273,7 @@ func mapWorkspaceTaskProgress(snapshot WorkspaceSnapshot) TaskProgress {
 	}
 	ret.Milestones = []ProgressMilestone{
 		{ID: "workspace_defined", Title: "Workspace defined", State: "completed", EvidenceRefs: []string{snapshot.Workspace.ID}},
-		{ID: "formal_result", Title: "Formal result", State: progressStateFromCount(len(snapshot.Results), false, snapshot.Workspace.State == string(common.WorkspaceStateCompleted)), EvidenceRefs: idsFromResults(snapshot.Results)},
+		{ID: "formal_result", Title: localizedMilestoneTitle(language, "formal_result"), State: progressStateFromCount(len(snapshot.Results), false, snapshot.Workspace.State == string(common.WorkspaceStateCompleted)), EvidenceRefs: idsFromResults(snapshot.Results)},
 	}
 	ret.Items = []ProgressItem{
 		{ID: "runs", Kind: "run", Title: "Runs", State: progressStateFromCount(len(snapshot.Runs), false, false)},
@@ -2286,6 +2287,7 @@ func mapWorkspaceTaskProgress(snapshot WorkspaceSnapshot) TaskProgress {
 }
 
 func mapTaskProgress(snapshot RunSnapshot) TaskProgress {
+	language := snapshotLanguage(snapshot)
 	latestCheckpoint := latestRuntimeCheckpoint(snapshot.RuntimeCheckpoints)
 	results := runScopedResults(snapshot)
 	artifacts := runScopedArtifacts(snapshot)
@@ -2295,7 +2297,7 @@ func mapTaskProgress(snapshot RunSnapshot) TaskProgress {
 		State:       snapshot.Run.State,
 		Recovery: RecoveryPlan{
 			Mode:       "continue",
-			NextAction: "continue_run",
+			NextAction: localizedRecoveryNextAction(language),
 			RunID:      snapshot.Run.ID,
 		},
 	}
@@ -2308,11 +2310,11 @@ func mapTaskProgress(snapshot RunSnapshot) TaskProgress {
 
 	ret.Blockers = taskProgressBlockers(snapshot)
 	ret.Milestones = []ProgressMilestone{
-		{ID: "run_created", Title: "Run created", State: "completed", EvidenceRefs: []string{snapshot.Run.ID}},
-		{ID: "execution_steps", Title: "Execution steps", State: stepProgressState(snapshot), EvidenceRefs: idsFromSteps(snapshot.Steps)},
-		{ID: "governance", Title: "Decision and approval governance", State: governanceProgressState(snapshot), EvidenceRefs: governanceEvidenceRefs(snapshot)},
-		{ID: "validation", Title: "Validation", State: validationProgressState(snapshot), EvidenceRefs: idsFromValidations(snapshot.ValidationResults)},
-		{ID: "formal_result", Title: "Formal result", State: resultProgressState(snapshot), EvidenceRefs: append(idsFromResults(results), idsFromArtifacts(artifacts)...)},
+		{ID: "run_created", Title: localizedMilestoneTitle(language, "run_created"), State: "completed", EvidenceRefs: []string{snapshot.Run.ID}},
+		{ID: "execution_steps", Title: localizedMilestoneTitle(language, "execution_steps"), State: stepProgressState(snapshot), EvidenceRefs: idsFromSteps(snapshot.Steps)},
+		{ID: "governance", Title: localizedMilestoneTitle(language, "governance"), State: governanceProgressState(snapshot), EvidenceRefs: governanceEvidenceRefs(snapshot)},
+		{ID: "validation", Title: localizedMilestoneTitle(language, "validation"), State: validationProgressState(snapshot), EvidenceRefs: idsFromValidations(snapshot.ValidationResults)},
+		{ID: "formal_result", Title: localizedMilestoneTitle(language, "formal_result"), State: resultProgressState(snapshot), EvidenceRefs: append(idsFromResults(results), idsFromArtifacts(artifacts)...)},
 	}
 	ret.Items = taskProgressItems(snapshot)
 	ret.CurrentMilestone = currentProgressMilestone(ret.Milestones)
@@ -2396,6 +2398,7 @@ func mapRunContextBundle(snapshot RunSnapshot) ContextBundle {
 }
 
 func compressedContextFromBundle(bundle ContextBundle) CompressedContext {
+	language := "" // bundle does not carry dialogLanguage; localized defaults use English
 	sectionRefs := make([]string, 0, len(bundle.Sections))
 	for _, section := range bundle.Sections {
 		sectionRefs = append(sectionRefs, section.ID)
@@ -2415,11 +2418,12 @@ func compressedContextFromBundle(bundle ContextBundle) CompressedContext {
 		ResultRefs:         resultRefsFromTaskProgress(bundle.TaskProgress),
 		SourceSectionRefs:  compactUniqueStrings(sectionRefs),
 		SourceEvidenceRefs: sourceEvidenceRefs,
-		RetentionPolicy:    "retain recovery, blockers, milestones, latest evidence summaries, and formal result refs; reload full evidence by source refs when needed",
+		RetentionPolicy:    localizedRetentionPolicy(language),
 	}
 }
 
 func compressedContextFromRunSnapshot(snapshot RunSnapshot) CompressedContext {
+	language := snapshotLanguage(snapshot)
 	progress := runSnapshotTaskProgress(snapshot)
 	timeline := runtimeTimeline(snapshot)
 	recentEvidence := contextRecentEvidence(timeline, 12)
@@ -2438,7 +2442,7 @@ func compressedContextFromRunSnapshot(snapshot RunSnapshot) CompressedContext {
 		ResultRefs:         resultRefsFromTaskProgress(progress),
 		SourceSectionRefs:  compressedContextSourceSectionRefs(snapshot, recentEvidence),
 		SourceEvidenceRefs: sourceEvidenceRefs,
-		RetentionPolicy:    "retain recovery, blockers, milestones, latest evidence summaries, and formal result refs; reload full evidence by source refs when needed",
+		RetentionPolicy:    localizedRetentionPolicy(language),
 	}
 }
 
@@ -3009,13 +3013,14 @@ func contextExecutionSectionsSection(items []ExecutionSection) ContextSection {
 }
 
 func contextGovernanceSection(snapshot RunSnapshot) ContextSection {
+	language := snapshotLanguage(snapshot)
 	if len(snapshot.Decisions) == 0 && len(snapshot.Approvals) == 0 {
 		return ContextSection{}
 	}
 	return ContextSection{
 		ID:           "governance",
 		Kind:         "governance",
-		Title:        "Decision and approval governance",
+		Title:        localizedMilestoneTitle(language, "governance"),
 		Priority:     80,
 		State:        governanceProgressState(snapshot),
 		Summary:      "decision tickets and approvals that affected run progress",
@@ -4028,3 +4033,14 @@ func isTerminalRunState(state string) bool {
 		return false
 	}
 }
+
+func snapshotLanguage(snapshot RunSnapshot) string {
+	if snapshot.Run.ExecutionContext == nil {
+		return ""
+	}
+	if lang, ok := snapshot.Run.ExecutionContext["dialogLanguage"].(string); ok {
+		return strings.TrimSpace(lang)
+	}
+	return ""
+}
+

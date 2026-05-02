@@ -84,6 +84,10 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 			failures = o.recentFailureContexts(ctx, run, step.ID, 6)
 		}
 	}()
+	go func() {
+		defer wg.Done()
+		currentGovernance = o.currentRunGovernanceHistory(ctx, run)
+	}()
 	wg.Wait()
 
 	if len(manifest) > 0 {

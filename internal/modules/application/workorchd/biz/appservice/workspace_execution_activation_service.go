@@ -255,7 +255,11 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	}
 	contextData["goal"] = goalContext(goal)
 	contextData["dod"] = dodContext(dod)
-	if dialogLanguage := strings.TrimSpace(cmd.DialogLanguage); dialogLanguage != "" {
+	dialogLanguage := strings.TrimSpace(cmd.DialogLanguage)
+	if dialogLanguage == "" {
+		dialogLanguage = detectSystemLocale()
+	}
+	if dialogLanguage != "" {
 		contextData["dialogLanguage"] = dialogLanguage
 	}
 	if llmProviderID := strings.TrimSpace(cmd.LLMProviderID); llmProviderID != "" {

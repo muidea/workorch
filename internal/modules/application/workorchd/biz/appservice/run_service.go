@@ -3,6 +3,7 @@ package appservice
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
@@ -302,28 +303,29 @@ func compressedContextForRunStart(item *runmodel.Run) map[string]any {
 	if item == nil || item.State != common.RunStateCreated || item.ID == "" || item.WorkspaceID == "" {
 		return nil
 	}
+	language := runDialogLanguage(item)
 	return compressedContextMap(CompressedContext{
 		Version:          "workorch.compressedContext.v1",
 		Mode:             "deterministic_recovery_summary",
 		WorkspaceID:      string(item.WorkspaceID),
 		RunID:            string(item.ID),
-		Summary:          "run created with no execution evidence yet",
+		Summary:          localizedCreatedRunSummary(language),
 		CurrentMilestone: "execution_steps",
 		Milestones: []ProgressMilestone{
-			{ID: "run_created", Title: "Run created", State: "completed", EvidenceRefs: []string{string(item.ID)}},
-			{ID: "execution_steps", Title: "Execution steps", State: "pending"},
-			{ID: "governance", Title: "Decision and approval governance", State: "pending"},
-			{ID: "validation", Title: "Validation", State: "pending"},
-			{ID: "formal_result", Title: "Formal result", State: "pending"},
+			{ID: "run_created", Title: localizedMilestoneTitle(language, "run_created"), State: "completed", EvidenceRefs: []string{string(item.ID)}},
+			{ID: "execution_steps", Title: localizedMilestoneTitle(language, "execution_steps"), State: "pending"},
+			{ID: "governance", Title: localizedMilestoneTitle(language, "governance"), State: "pending"},
+			{ID: "validation", Title: localizedMilestoneTitle(language, "validation"), State: "pending"},
+			{ID: "formal_result", Title: localizedMilestoneTitle(language, "formal_result"), State: "pending"},
 		},
 		Recovery: RecoveryPlan{
 			Mode:       "continue",
-			NextAction: "continue_run",
+			NextAction: localizedRecoveryNextAction(language),
 			RunID:      string(item.ID),
 		},
 		SourceSectionRefs:  []string{"workspace", "run", "task_progress", "recovery"},
 		SourceEvidenceRefs: []string{string(item.ID)},
-		RetentionPolicy:    "retain recovery, blockers, milestones, latest evidence summaries, and formal result refs; reload full evidence by source refs when needed",
+		RetentionPolicy:    localizedRetentionPolicy(language),
 	})
 }
 
@@ -331,6 +333,7 @@ func compressedContextForBlockedRunResume(ctx context.Context, deps readModelDep
 	if item == nil || item.ID == "" || item.WorkspaceID == "" {
 		return nil, nil
 	}
+	language := runDialogLanguage(item)
 	var blocker ProgressBlocker
 	recovery := RecoveryPlan{
 		Mode:       "continue",
@@ -361,12 +364,12 @@ func compressedContextForBlockedRunResume(ctx context.Context, deps readModelDep
 			ID:          string(item.BlockingTicketID),
 			Kind:        "decision",
 			State:       string(common.DecisionTicketStateResolved),
-			Reason:      "decision ticket was resolved; resume run execution",
+			Reason:      localizedBlockerReason(language, "decision", "resolved"),
 			EvidenceRef: string(item.BlockingTicketID),
 		}
 		recovery.BlockingTicketID = string(item.BlockingTicketID)
-		recovery.Reason = "decision ticket was resolved; resume run execution"
-		summary = "run is resuming after a resolved Decision Ticket"
+		recovery.Reason = localizedBlockerReason(language, "decision", "resolved")
+		summary = localizedBlockerReason(language, "decision", "resumed")
 	case common.RunStateBlockedOnApproval:
 		if item.BlockingApprovalID == "" || deps.approvals == nil {
 			return nil, nil
@@ -382,12 +385,12 @@ func compressedContextForBlockedRunResume(ctx context.Context, deps readModelDep
 			ID:          string(item.BlockingApprovalID),
 			Kind:        "approval",
 			State:       string(common.ApprovalStateApproved),
-			Reason:      "approval was resolved; resume run execution",
+			Reason:      localizedBlockerReason(language, "approval", "approved"),
 			EvidenceRef: string(item.BlockingApprovalID),
 		}
 		recovery.BlockingApprovalID = string(item.BlockingApprovalID)
-		recovery.Reason = "approval was resolved; resume run execution"
-		summary = "run is resuming after an approved Approval"
+		recovery.Reason = localizedBlockerReason(language, "approval", "approved")
+		summary = localizedBlockerReason(language, "approval", "resumed")
 	default:
 		return nil, nil
 	}
@@ -399,17 +402,17 @@ func compressedContextForBlockedRunResume(ctx context.Context, deps readModelDep
 		Summary:          summary,
 		CurrentMilestone: "execution_steps",
 		Milestones: []ProgressMilestone{
-			{ID: "run_created", Title: "Run created", State: "completed", EvidenceRefs: []string{string(item.ID)}},
-			{ID: "execution_steps", Title: "Execution steps", State: "in_progress"},
-			{ID: "governance", Title: "Decision and approval governance", State: "in_progress", EvidenceRefs: []string{blocker.ID}},
-			{ID: "validation", Title: "Validation", State: "pending"},
-			{ID: "formal_result", Title: "Formal result", State: "pending"},
+			{ID: "run_created", Title: localizedMilestoneTitle(language, "run_created"), State: "completed", EvidenceRefs: []string{string(item.ID)}},
+			{ID: "execution_steps", Title: localizedMilestoneTitle(language, "execution_steps"), State: "in_progress"},
+			{ID: "governance", Title: localizedMilestoneTitle(language, "governance"), State: "in_progress", EvidenceRefs: []string{blocker.ID}},
+			{ID: "validation", Title: localizedMilestoneTitle(language, "validation"), State: "pending"},
+			{ID: "formal_result", Title: localizedMilestoneTitle(language, "formal_result"), State: "pending"},
 		},
 		Blockers:           []ProgressBlocker{blocker},
 		Recovery:           recovery,
 		SourceSectionRefs:  []string{"run", "governance", "task_progress"},
 		SourceEvidenceRefs: []string{string(item.ID), blocker.ID},
-		RetentionPolicy:    "retain recovery, blockers, milestones, latest evidence summaries, and formal result refs; reload full evidence by source refs when needed",
+		RetentionPolicy:    localizedRetentionPolicy(language),
 	}), nil
 }
 
@@ -529,4 +532,14 @@ func mapRun(item *runmodel.Run) Run {
 		BlockingApprovalID: string(item.BlockingApprovalID),
 		FailureReason:      item.FailureReason,
 	}
+}
+
+func runDialogLanguage(item *runmodel.Run) string {
+	if item == nil || item.ExecutionContext == nil {
+		return ""
+	}
+	if lang, ok := item.ExecutionContext["dialogLanguage"].(string); ok {
+		return strings.TrimSpace(lang)
+	}
+	return ""
 }
