@@ -9,7 +9,7 @@ GOTEST_FLAGS ?=
 BUILD_OUT ?= ./bin/workorchd
 CONSOLE_WEB := ./web/workorch-console
 
-.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file ci
+.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file release release-check install-latest ci
 
 help:
 	@echo "Targets:"
@@ -53,17 +53,20 @@ help:
 	@echo "  docker-run-file - run workorchd container with file-backed repository"
 	@echo "  docker-verify      - container image packaging verification; not a deployed-instance e2e target"
 	@echo "  docker-verify-file - container image packaging verification with file-backed container data"
+	@echo "  release     - build cross-platform release binaries into $(RELEASE_OUT)/"
+	@echo "  release-check - fmt-check + vet + test + verify-boundary-contract + release"
+	@echo "  install-latest - install latest release binary from GitHub via install script"
 	@echo "  ci         - fmt-check + vet + test + build + file-backed service verification"
 
 fmt:
-	@files="$$(find . -type f -name '*.go' -not -path './.git/*' -not -path './vendor/*' -not -path './web/workorch-console/node_modules/*')"; \
+	@files="$$(find . -type f -name '*.go' -not -path './.git/*' -not -path './.workorch-data/*' -not -path './.claude/*' -not -path './vendor/*' -not -path './web/workorch-console/node_modules/*')"; \
 	if [[ -n "$$files" ]]; then \
 		$(GOFMT) -w $$files; \
 	fi
 	$(GO) fmt $(PKGS)
 
 fmt-check:
-	@files="$$(find . -type f -name '*.go' -not -path './.git/*' -not -path './vendor/*' -not -path './web/workorch-console/node_modules/*')"; \
+	@files="$$(find . -type f -name '*.go' -not -path './.git/*' -not -path './.workorch-data/*' -not -path './.claude/*' -not -path './vendor/*' -not -path './web/workorch-console/node_modules/*')"; \
 	if [[ -z "$$files" ]]; then \
 		exit 0; \
 	fi; \
@@ -187,5 +190,30 @@ docker-verify:
 
 docker-verify-file:
 	WORKORCH_VERIFY_PORT=18083 WORKORCH_VERIFY_BACKEND=file ./scripts/verify-workorchd-container.sh
+
+RELEASE_OUT ?= ./dist
+RELEASE_TAG ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.0.0-dev")
+RELEASE_PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+
+release: console-build
+	@rm -rf $(RELEASE_OUT)
+	@mkdir -p $(RELEASE_OUT)
+	@for platform in $(RELEASE_PLATFORMS); do \
+		os=$$(echo $$platform | cut -d/ -f1); \
+		arch=$$(echo $$platform | cut -d/ -f2); \
+		out=$(RELEASE_OUT)/workorchd-$(RELEASE_TAG)-$$os-$$arch; \
+		echo "building $$platform -> $$out"; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -o $$out $(APP); \
+		tar -czf $$out.tar.gz -C $(RELEASE_OUT) $$(basename $$out); \
+		rm -f $$out; \
+	done
+	@cd $(RELEASE_OUT) && sha256sum *.tar.gz > checksums.txt
+	@echo "release $(RELEASE_TAG) built into $(RELEASE_OUT)"
+
+release-check: fmt-check vet test verify-boundary-contract
+	$(MAKE) release
+
+install-latest:
+	./scripts/install-latest.sh
 
 ci: fmt-check vet test verify-boundary-contract build

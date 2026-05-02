@@ -46,13 +46,13 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	stableContext := stableExecutionContextPackageFromStep(step)
 
 	var (
-		manifest             []map[string]any
-		result               map[string]any
-		deliverables         []map[string]any
-		failures             []map[string]any
-		acceptedResultRead   bool
-		deliverablesRead     bool
-		wg                   sync.WaitGroup
+		manifest           []map[string]any
+		result             map[string]any
+		deliverables       []map[string]any
+		failures           []map[string]any
+		acceptedResultRead bool
+		deliverablesRead   bool
+		wg                 sync.WaitGroup
 	)
 	wg.Add(4)
 	go func() {

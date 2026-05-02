@@ -458,11 +458,11 @@ func validateRunDefinitions(ctx context.Context, session *RuntimeSession, worksp
 		return common.ErrInvalidArgument
 	}
 	var (
-		goal   *workspacemodel.Goal
-		dod    *workspacemodel.DoD
-		wsErr  error
+		goal    *workspacemodel.Goal
+		dod     *workspacemodel.DoD
+		wsErr   error
 		goalErr error
-		dodErr error
+		dodErr  error
 	)
 	var wg sync.WaitGroup
 	wg.Add(3)

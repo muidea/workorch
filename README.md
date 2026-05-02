@@ -83,6 +83,24 @@ Current boundary:
 - blocks: `approval`, `llm`, `mcp`, `shell`, `ssh`
 - shared common/events/repository primitives moved under `internal/pkg`
 
+## Quick Install
+
+Install the latest release from GitHub:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/muidea/workorch/main/scripts/install-latest.sh | bash
+```
+
+Or with custom options:
+
+```bash
+export WORKORCH_VERSION=v0.1.0
+export WORKORCH_INSTALL_DIR=/usr/local/bin
+curl -fsSL https://raw.githubusercontent.com/muidea/workorch/main/scripts/install-latest.sh | bash
+```
+
+The script auto-detects OS and architecture (linux/darwin, amd64/arm64) and downloads the matching binary.
+
 ## Development workflow
 
 This repository is still a single `go.mod` codebase. Here, `go-multi-module-dev` means module-oriented directory organization and dependency boundaries inside one repository, not a split into multiple Go modules yet.
@@ -114,6 +132,49 @@ Notes:
 - default memory-backed service state is shared within the running `workorchd` process; use `make run-file` for restart persistence
 - file-backed service execution is repeatable against the same data directory for the shipped workorch IDs
 - `make ci` is the local equivalent of the GitHub Actions baseline
+
+## Release
+
+Build cross-platform release binaries:
+
+```bash
+make release
+```
+
+This produces `dist/workorchd-{tag}-{os}-{arch}.tar.gz` for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, plus a `checksums.txt`.
+
+Run full pre-release checks before building:
+
+```bash
+make release-check
+```
+
+Release version is derived from `git describe --tags --always`. Override with `RELEASE_TAG`:
+
+```bash
+make release RELEASE_TAG=v0.2.0
+```
+
+Manual install from a local release build:
+
+```bash
+tar -xzf dist/workorchd-*-linux-amd64.tar.gz -C /usr/local/bin/
+```
+
+## Built-in Templates and Souls
+
+workorch ships with 6 built-in workspace templates and 36 per-stage Souls, loaded automatically on first startup:
+
+| Template | Description |
+|----------|-------------|
+| `generic-governed` | Full decision + approval governance, unrestricted tools |
+| `weather-query` | MCP weather tool query with decision + approval gates |
+| `software-dev` | Software development: git, build, test, lint, diff |
+| `code-review` | Read-only code analysis with security/best-practice checks |
+| `doc-generator` | Technical documentation generation from source code |
+| `data-analysis` | Data query, Python/R scripting, statistical modeling |
+
+Each template has 6 Souls (planning, execution, decision, approval, validation, artifact). Users can customize templates and Souls after creation through the Web Console or API. See `docs/builtin-templates-and-souls-design.md` for details.
 
 ## Workorch Service
 

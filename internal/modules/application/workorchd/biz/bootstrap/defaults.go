@@ -26,16 +26,16 @@ type embeddedTemplate struct {
 }
 
 type embeddedSoul struct {
-	ID                        string   `json:"id"`
-	Name                      string   `json:"name"`
-	Description               string   `json:"description"`
-	BusinessDomains           []string `json:"businessDomains"`
-	AllowedSkillRefs          []string `json:"allowedSkillRefs,omitempty"`
-	AllowedMCPServerRefs      []string `json:"allowedMCPServerRefs,omitempty"`
-	AllowedCapabilityRefs     []string `json:"allowedCapabilityRefs,omitempty"`
+	ID                          string   `json:"id"`
+	Name                        string   `json:"name"`
+	Description                 string   `json:"description"`
+	BusinessDomains             []string `json:"businessDomains"`
+	AllowedSkillRefs            []string `json:"allowedSkillRefs,omitempty"`
+	AllowedMCPServerRefs        []string `json:"allowedMCPServerRefs,omitempty"`
+	AllowedCapabilityRefs       []string `json:"allowedCapabilityRefs,omitempty"`
 	AllowedCapabilityCategories []string `json:"allowedCapabilityCategories,omitempty"`
-	AllowedToolKinds          []string `json:"allowedToolKinds,omitempty"`
-	SoulMD                    string   `json:"soulMD"`
+	AllowedToolKinds            []string `json:"allowedToolKinds,omitempty"`
+	SoulMD                      string   `json:"soulMD"`
 }
 
 func loadEmbeddedTemplates() ([]embeddedTemplate, error) {
@@ -81,16 +81,16 @@ func EnsureBuiltinDefaults(ctx context.Context, soulRepo repository.SoulReposito
 			return err
 		}
 		item := &soulmodel.Soul{
-			ID:                        common.SoulID(s.ID),
-			Name:                      s.Name,
-			Description:               s.Description,
-			BusinessDomains:           s.BusinessDomains,
-			SoulMD:                    s.SoulMD,
-			AllowedSkillRefs:          s.AllowedSkillRefs,
-			AllowedMCPServerRefs:      s.AllowedMCPServerRefs,
-			AllowedCapabilityRefs:     s.AllowedCapabilityRefs,
+			ID:                          common.SoulID(s.ID),
+			Name:                        s.Name,
+			Description:                 s.Description,
+			BusinessDomains:             s.BusinessDomains,
+			SoulMD:                      s.SoulMD,
+			AllowedSkillRefs:            s.AllowedSkillRefs,
+			AllowedMCPServerRefs:        s.AllowedMCPServerRefs,
+			AllowedCapabilityRefs:       s.AllowedCapabilityRefs,
 			AllowedCapabilityCategories: s.AllowedCapabilityCategories,
-			AllowedToolKinds:          s.AllowedToolKinds,
+			AllowedToolKinds:            s.AllowedToolKinds,
 		}
 		if err := soulRepo.Create(ctx, item); err != nil {
 			return err
@@ -111,11 +111,11 @@ func EnsureBuiltinDefaults(ctx context.Context, soulRepo repository.SoulReposito
 			return err
 		}
 		item := &repository.WorkspaceTemplate{
-			ID:          t.ID,
-			Name:        t.Name,
-			Description: t.Description,
-			GoalText:    t.GoalText,
-			DoDItems:    filterEmptyStrings(t.DoDItems),
+			ID:           t.ID,
+			Name:         t.Name,
+			Description:  t.Description,
+			GoalText:     t.GoalText,
+			DoDItems:     filterEmptyStrings(t.DoDItems),
 			SoulBindings: t.SoulBindings,
 		}
 		if err := templateRepo.Create(ctx, item); err != nil {
