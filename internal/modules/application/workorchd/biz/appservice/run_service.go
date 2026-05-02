@@ -321,6 +321,7 @@ func compressedContextForRunStart(item *runmodel.Run) map[string]any {
 			NextAction: "continue_run",
 			RunID:      string(item.ID),
 		},
+		SourceSectionRefs:  []string{"workspace", "run", "task_progress", "recovery"},
 		SourceEvidenceRefs: []string{string(item.ID)},
 		RetentionPolicy:    "retain recovery, blockers, milestones, latest evidence summaries, and formal result refs; reload full evidence by source refs when needed",
 	})
