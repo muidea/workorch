@@ -3,10 +3,12 @@ package appservice
 import (
 	"context"
 	"encoding/json"
+	"sync"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -455,19 +457,39 @@ func validateRunDefinitions(ctx context.Context, session *RuntimeSession, worksp
 	if exports.Repositories.Workspaces == nil || exports.Repositories.Goals == nil || exports.Repositories.DoDs == nil {
 		return common.ErrInvalidArgument
 	}
-	if _, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspaceID)); err != nil {
-		return err
+	var (
+		goal   *workspacemodel.Goal
+		dod    *workspacemodel.DoD
+		wsErr  error
+		goalErr error
+		dodErr error
+	)
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		_, wsErr = exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspaceID))
+	}()
+	go func() {
+		defer wg.Done()
+		goal, goalErr = exports.Repositories.Goals.Get(ctx, common.GoalID(goalID))
+	}()
+	go func() {
+		defer wg.Done()
+		dod, dodErr = exports.Repositories.DoDs.Get(ctx, common.DoDID(dodID))
+	}()
+	wg.Wait()
+	if wsErr != nil {
+		return wsErr
 	}
-	goal, err := exports.Repositories.Goals.Get(ctx, common.GoalID(goalID))
-	if err != nil {
-		return err
+	if goalErr != nil {
+		return goalErr
 	}
 	if goal.WorkspaceID != common.WorkspaceID(workspaceID) {
 		return common.ErrConflict
 	}
-	dod, err := exports.Repositories.DoDs.Get(ctx, common.DoDID(dodID))
-	if err != nil {
-		return err
+	if dodErr != nil {
+		return dodErr
 	}
 	if dod.WorkspaceID != common.WorkspaceID(workspaceID) {
 		return common.ErrConflict

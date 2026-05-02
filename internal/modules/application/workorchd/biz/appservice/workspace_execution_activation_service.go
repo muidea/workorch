@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
@@ -213,16 +214,26 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 	if err != nil {
 		return nil, err
 	}
-	goal, err := exports.Repositories.Goals.Get(ctx, goalID)
-	if err != nil {
-		return nil, err
-	}
-	dod, err := exports.Repositories.DoDs.Get(ctx, dodID)
-	if err != nil {
-		return nil, err
-	}
-	workspace, err := exports.Repositories.Workspaces.Get(ctx, workspaceID)
-	if err != nil {
+	var goal *workspacemodel.Goal
+	var dod *workspacemodel.DoD
+	var workspace *workspacemodel.Workspace
+	if err := activationContextReadTasks(
+		func() error {
+			var err error
+			goal, err = exports.Repositories.Goals.Get(ctx, goalID)
+			return err
+		},
+		func() error {
+			var err error
+			dod, err = exports.Repositories.DoDs.Get(ctx, dodID)
+			return err
+		},
+		func() error {
+			var err error
+			workspace, err = exports.Repositories.Workspaces.Get(ctx, workspaceID)
+			return err
+		},
+	); err != nil {
 		return nil, err
 	}
 	return buildWorkspaceExecutionContextWithDefinitions(ctx, session, workspace, goal, dod, cmd)
@@ -441,21 +452,35 @@ func selectedSkills(ctx context.Context, session *RuntimeSession, ids []string, 
 	if exports.Repositories.Skills == nil {
 		return nil, common.ErrInvalidArgument
 	}
+	type skillResult struct {
+		item Skill
+		err  error
+	}
+	results := make([]skillResult, len(ids))
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		wg.Add(1)
+		go func(idx int, sid string) {
+			defer wg.Done()
+			item, err := exports.Repositories.Skills.Get(ctx, common.SkillID(sid))
+			if err == nil {
+				results[idx].item = mapSkill(item)
+				return
+			}
+			if !errors.Is(err, common.ErrNotFound) {
+				results[idx].err = err
+				return
+			}
+			results[idx].item, results[idx].err = readSkillHubSkill(ctx, session, sid, SkillQuery{WorkspaceID: workspaceID})
+		}(i, id)
+	}
+	wg.Wait()
 	ret := make([]Skill, 0, len(ids))
-	for _, id := range ids {
-		item, err := exports.Repositories.Skills.Get(ctx, common.SkillID(id))
-		if err == nil {
-			ret = append(ret, mapSkill(item))
-			continue
+	for _, r := range results {
+		if r.err != nil {
+			return nil, r.err
 		}
-		if !errors.Is(err, common.ErrNotFound) {
-			return nil, err
-		}
-		skill, err := readSkillHubSkill(ctx, session, id, SkillQuery{WorkspaceID: workspaceID})
-		if err != nil {
-			return nil, err
-		}
-		ret = append(ret, skill)
+		ret = append(ret, r.item)
 	}
 	return ret, nil
 }
@@ -469,16 +494,29 @@ func selectedMCPServers(ctx context.Context, service interface {
 	if service == nil {
 		return nil, common.ErrInvalidArgument
 	}
+	type serverResult struct {
+		item *mcpmodel.Server
+		err  error
+	}
+	results := make([]serverResult, len(ids))
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		wg.Add(1)
+		go func(idx int, sid string) {
+			defer wg.Done()
+			results[idx].item, results[idx].err = service.GetServer(ctx, common.MCPServerID(sid))
+		}(i, id)
+	}
+	wg.Wait()
 	ret := make([]*mcpmodel.Server, 0, len(ids))
-	for _, id := range ids {
-		item, err := service.GetServer(ctx, common.MCPServerID(id))
-		if err != nil {
-			return nil, err
+	for _, r := range results {
+		if r.err != nil {
+			return nil, r.err
 		}
-		if !item.Enabled {
+		if !r.item.Enabled {
 			return nil, common.ErrConflict
 		}
-		ret = append(ret, item)
+		ret = append(ret, r.item)
 	}
 	return ret, nil
 }
@@ -492,16 +530,29 @@ func selectedMCPCapabilities(ctx context.Context, service interface {
 	if service == nil {
 		return nil, common.ErrInvalidArgument
 	}
+	type capResult struct {
+		item *mcpmodel.Capability
+		err  error
+	}
+	results := make([]capResult, len(ids))
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		wg.Add(1)
+		go func(idx int, cid string) {
+			defer wg.Done()
+			results[idx].item, results[idx].err = service.GetCapability(ctx, common.MCPCapabilityID(cid))
+		}(i, id)
+	}
+	wg.Wait()
 	ret := make([]*mcpmodel.Capability, 0, len(ids))
-	for _, id := range ids {
-		item, err := service.GetCapability(ctx, common.MCPCapabilityID(id))
-		if err != nil {
-			return nil, err
+	for _, r := range results {
+		if r.err != nil {
+			return nil, r.err
 		}
-		if !item.Enabled {
+		if !r.item.Enabled {
 			return nil, common.ErrConflict
 		}
-		ret = append(ret, item)
+		ret = append(ret, r.item)
 	}
 	return ret, nil
 }
@@ -518,16 +569,29 @@ func selectedMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, se
 		return nil, nil, nil
 	}
 	if len(ids) > 0 {
+		type memResult struct {
+			item *memorymodel.MemoryItem
+			err  error
+		}
+		results := make([]memResult, len(ids))
+		var wg sync.WaitGroup
+		for i, id := range ids {
+			wg.Add(1)
+			go func(idx int, mid string) {
+				defer wg.Done()
+				results[idx].item, results[idx].err = service.GetMemoryItem(ctx, common.MemoryID(mid))
+			}(i, id)
+		}
+		wg.Wait()
 		ret := make([]*memorymodel.MemoryItem, 0, len(ids))
-		for _, id := range ids {
-			item, err := service.GetMemoryItem(ctx, common.MemoryID(id))
-			if err != nil {
-				return nil, nil, err
+		for _, r := range results {
+			if r.err != nil {
+				return nil, nil, r.err
 			}
-			if item.WorkspaceID != workspaceID {
+			if r.item.WorkspaceID != workspaceID {
 				return nil, nil, common.ErrConflict
 			}
-			ret = append(ret, item)
+			ret = append(ret, r.item)
 		}
 		return ret, map[string]any{
 			"policy":             "explicit_memory_selection",

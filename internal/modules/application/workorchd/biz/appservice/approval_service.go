@@ -2,6 +2,7 @@ package appservice
 
 import (
 	"context"
+	"sync"
 
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -158,11 +159,26 @@ func BatchResolveApprovalsWithSession(ctx context.Context, session *RuntimeSessi
 			return nil, common.ErrInvalidArgument
 		}
 		seen[approvalID] = struct{}{}
-		item, err := repo.Get(ctx, common.ApprovalID(approvalID))
-		if err != nil {
-			return nil, err
+	}
+	type approvalRead struct {
+		item *approvalmodel.Approval
+		err  error
+	}
+	reads := make([]approvalRead, len(cmd.ApprovalIDs))
+	var wg sync.WaitGroup
+	for i, approvalID := range cmd.ApprovalIDs {
+		wg.Add(1)
+		go func(idx int, aID string) {
+			defer wg.Done()
+			reads[idx].item, reads[idx].err = repo.Get(ctx, common.ApprovalID(aID))
+		}(i, approvalID)
+	}
+	wg.Wait()
+	for _, r := range reads {
+		if r.err != nil {
+			return nil, r.err
 		}
-		if item.State != common.ApprovalStatePending {
+		if r.item.State != common.ApprovalStatePending {
 			return nil, common.ErrConflict
 		}
 	}

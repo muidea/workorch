@@ -3,6 +3,7 @@ package appservice
 import (
 	"context"
 	"errors"
+	"sync"
 
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
@@ -82,7 +83,7 @@ func ListDecisionsWithSession(ctx context.Context, session *RuntimeSession, work
 	if err != nil {
 		return nil, err
 	}
-	ret = make([]Decision, 0, len(items))
+	candidates := make([]*decisionmodel.Ticket, 0, len(items))
 	for _, item := range items {
 		if workspaceID != "" && string(item.WorkspaceID) != workspaceID {
 			continue
@@ -90,11 +91,30 @@ func ListDecisionsWithSession(ctx context.Context, session *RuntimeSession, work
 		if runID != "" && string(item.RunID) != runID {
 			continue
 		}
-		resolution, err := resolutionForTicket(ctx, resolutions, item)
-		if err != nil {
-			return nil, err
+		candidates = append(candidates, item)
+	}
+	type decisionRead struct {
+		item       *decisionmodel.Ticket
+		resolution *decisionmodel.Resolution
+		err        error
+	}
+	reads := make([]decisionRead, len(candidates))
+	var wg sync.WaitGroup
+	for i, item := range candidates {
+		wg.Add(1)
+		go func(idx int, t *decisionmodel.Ticket) {
+			defer wg.Done()
+			reads[idx].item = t
+			reads[idx].resolution, reads[idx].err = resolutionForTicket(ctx, resolutions, t)
+		}(i, item)
+	}
+	wg.Wait()
+	ret = make([]Decision, 0, len(candidates))
+	for _, r := range reads {
+		if r.err != nil {
+			return nil, r.err
 		}
-		ret = append(ret, mapDecision(item, resolution))
+		ret = append(ret, mapDecision(r.item, r.resolution))
 	}
 	return ret, nil
 }
@@ -165,11 +185,26 @@ func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSessi
 			return nil, common.ErrInvalidArgument
 		}
 		seen[ticketID] = struct{}{}
-		item, err := tickets.Get(ctx, common.TicketID(ticketID))
-		if err != nil {
-			return nil, err
+	}
+	type ticketRead struct {
+		item *decisionmodel.Ticket
+		err  error
+	}
+	reads := make([]ticketRead, len(cmd.TicketIDs))
+	var wg sync.WaitGroup
+	for i, ticketID := range cmd.TicketIDs {
+		wg.Add(1)
+		go func(idx int, tID string) {
+			defer wg.Done()
+			reads[idx].item, reads[idx].err = tickets.Get(ctx, common.TicketID(tID))
+		}(i, ticketID)
+	}
+	wg.Wait()
+	for _, r := range reads {
+		if r.err != nil {
+			return nil, r.err
 		}
-		if item.State != common.DecisionTicketStateOpen {
+		if r.item.State != common.DecisionTicketStateOpen {
 			return nil, common.ErrConflict
 		}
 	}

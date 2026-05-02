@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -158,16 +160,26 @@ func ListWorkspacesWithSession(ctx context.Context, session *RuntimeSession) (re
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	items, err := deps.workspaces.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	runItems, err := deps.runs.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	eventRecordItems, err := deps.eventRecords.List(ctx, repository.EventRecordQuery{})
-	if err != nil {
+	var items []*workspacemodel.Workspace
+	var runItems []*runmodel.Run
+	var eventRecordItems []*eventstreammodel.EventRecord
+	if err := runReadModelTasks(
+		func() error {
+			var err error
+			items, err = deps.workspaces.List(ctx)
+			return err
+		},
+		func() error {
+			var err error
+			runItems, err = deps.runs.List(ctx)
+			return err
+		},
+		func() error {
+			var err error
+			eventRecordItems, err = deps.eventRecords.List(ctx, repository.EventRecordQuery{})
+			return err
+		},
+	); err != nil {
 		return nil, err
 	}
 	ret = make([]Workspace, 0, len(items))

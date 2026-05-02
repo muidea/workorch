@@ -908,7 +908,8 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 	var selectedResolution *decisionmodel.Resolution
 	var approvals []Approval
 	var selectedApproval *approvalmodel.Approval
-	err = runReadModelTasks(
+	var mcpCapabilityItems []*mcpmodel.Capability
+	tasks := []func() error{
 		func() error {
 			var err error
 			workspace, err = deps.workspaces.Get(ctx, item.WorkspaceID)
@@ -964,8 +965,15 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 			approvals, selectedApproval, err = approvalsForRun(ctx, deps, item)
 			return err
 		},
-	)
-	if err != nil {
+	}
+	if deps.mcpCapabilities != nil {
+		tasks = append(tasks, func() error {
+			var err error
+			mcpCapabilityItems, err = deps.mcpCapabilities.List(ctx)
+			return err
+		})
+	}
+	if err := runReadModelTasks(tasks...); err != nil {
 		return RunSnapshot{}, err
 	}
 
@@ -989,7 +997,7 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		Observed:           presenter.MapObserved(observedItems),
 	}
 	ret.Outcome = mapRunOutcome(ret)
-	capabilityCatalog := runtimeCapabilityCatalog(ctx, deps, ret.Run.ExecutionContext, ret.ToolCalls)
+	capabilityCatalog := runtimeCapabilityCatalogFromItems(ret.Run.ExecutionContext, ret.ToolCalls, mcpCapabilityItems)
 	ret.SelectedCapabilities = selectedRuntimeCapabilities(ret.Run.ExecutionContext, capabilityCatalog)
 	ret.UsedCapabilities = usedRuntimeCapabilities(ret, capabilityCatalog)
 	ret.TaskProgress = mapTaskProgress(ret)
@@ -1718,6 +1726,13 @@ func runtimeCapabilityCatalog(ctx context.Context, deps readModelDependencies, e
 	}
 	items, err := deps.mcpCapabilities.List(ctx)
 	if err != nil {
+		return nil
+	}
+	return runtimeCapabilityCatalogFromItems(executionContext, toolCalls, items)
+}
+
+func runtimeCapabilityCatalogFromItems(executionContext map[string]any, toolCalls []ToolCall, items []*mcpmodel.Capability) map[string]RuntimeCapability {
+	if items == nil || !requiresRuntimeCapabilityCatalog(executionContext, toolCalls) {
 		return nil
 	}
 	ret := make(map[string]RuntimeCapability, len(items))
