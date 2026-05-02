@@ -1,6 +1,7 @@
 package workorchruntime
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 
@@ -78,6 +79,9 @@ func (r *Runtime) Setup(eventHub event.Hub, _ task.BackgroundRoutine) *cd.Error 
 }
 
 func (r *Runtime) Run() *cd.Error {
+	if err := appbootstrap.EnsureBuiltinDefaults(context.Background(), r.repositories.Souls, r.repositories.WorkspaceTemplates); err != nil {
+		return cd.NewError(cd.IllegalParam, "ensure builtin defaults: "+err.Error())
+	}
 	return nil
 }
 
