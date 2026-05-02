@@ -257,6 +257,11 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	contextData["dod"] = dodContext(dod)
 	dialogLanguage := strings.TrimSpace(cmd.DialogLanguage)
 	if dialogLanguage == "" {
+		if cfg, err := workorchconfig.Current(); err == nil {
+			dialogLanguage = strings.TrimSpace(cfg.Server.DefaultDialogLanguage)
+		}
+	}
+	if dialogLanguage == "" {
 		dialogLanguage = detectSystemLocale()
 	}
 	if dialogLanguage != "" {

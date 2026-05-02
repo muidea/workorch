@@ -23,13 +23,14 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Addr              string `json:"addr" toml:"addr"`
-	ReadHeaderTimeout string `json:"readHeaderTimeout" toml:"readHeaderTimeout"`
-	ReadTimeout       string `json:"readTimeout" toml:"readTimeout"`
-	WriteTimeout      string `json:"writeTimeout" toml:"writeTimeout"`
-	IdleTimeout       string `json:"idleTimeout" toml:"idleTimeout"`
-	ShutdownTimeout   string `json:"shutdownTimeout" toml:"shutdownTimeout"`
-	MaxConcurrentRuns int64  `json:"maxConcurrentRuns" toml:"maxConcurrentRuns"`
+	Addr                  string `json:"addr" toml:"addr"`
+	ReadHeaderTimeout     string `json:"readHeaderTimeout" toml:"readHeaderTimeout"`
+	ReadTimeout           string `json:"readTimeout" toml:"readTimeout"`
+	WriteTimeout          string `json:"writeTimeout" toml:"writeTimeout"`
+	IdleTimeout           string `json:"idleTimeout" toml:"idleTimeout"`
+	ShutdownTimeout       string `json:"shutdownTimeout" toml:"shutdownTimeout"`
+	MaxConcurrentRuns     int64  `json:"maxConcurrentRuns" toml:"maxConcurrentRuns"`
+	DefaultDialogLanguage string `json:"defaultDialogLanguage" toml:"defaultDialogLanguage"`
 }
 
 type RepositoryConfig struct {
