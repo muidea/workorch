@@ -244,8 +244,58 @@ func (a *Agent) executeWithBackend(ctx context.Context, workspaceID string, goal
 		WorkspaceID: workspaceID,
 	}})
 
-	// EventHub subscriptions drive progress; poll as fallback.
-	return a.pollRun(ctx, string(run.ID))
+	// EventHub subscriptions drive progress with backend.
+	return a.pollRunWithBackend(ctx, string(run.ID))
+}
+
+// pollRunWithBackend uses the backend's Status() API exclusively — no direct repository access.
+func (a *Agent) pollRunWithBackend(ctx context.Context, runID string) error {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			a.Send(Event{Type: EventCancelled, Error: ctx.Err()})
+			return ctx.Err()
+		case <-ticker.C:
+			status, err := a.be.Run().Status(ctx, common.RunID(runID))
+			if err != nil {
+				return err
+			}
+			switch status.State {
+			case common.RunStateCompleted:
+				a.Send(Event{Type: EventRunCompleted})
+				return nil
+			case common.RunStateFailed:
+				a.Send(Event{Type: EventRunFailed, Error: fmt.Errorf("%s", status.FailureReason)})
+				return fmt.Errorf("run failed: %s", status.FailureReason)
+			case common.RunStateBlockedOnDecision:
+				ticketID := string(status.BlockingTicketID)
+				if ticketID != a.notifiedDecision {
+					a.notifiedDecision = ticketID
+					dec, err := a.be.Decision().Get(ctx, common.TicketID(ticketID))
+					if err == nil {
+						a.Send(Event{Type: EventDecision, Payload: DecisionInfo{
+							TicketID: ticketID, Question: dec.Question, Reason: dec.Reason, RunID: runID,
+						}})
+					}
+				}
+			case common.RunStateBlockedOnApproval:
+				approvalID := string(status.BlockingApprovalID)
+				if approvalID != a.notifiedApproval {
+					a.notifiedApproval = approvalID
+					appr, err := a.be.Approval().Get(ctx, common.ApprovalID(approvalID))
+					if err == nil {
+						a.Send(Event{Type: EventApproval, Payload: ApprovalInfo{
+							ApprovalID: approvalID, Reason: appr.Reason, RunID: runID,
+						}})
+					}
+				}
+			default:
+				a.Send(Event{Type: EventProgress})
+			}
+		}
+	}
 }
 
 func (a *Agent) pollRun(ctx context.Context, runID string) error {
@@ -259,46 +309,6 @@ func (a *Agent) pollRun(ctx context.Context, runID string) error {
 			return ctx.Err()
 
 		case <-ticker.C:
-			if a.be != nil {
-				status, err := a.be.Run().Status(ctx, common.RunID(runID))
-				if err != nil {
-					return err
-				}
-				switch status.State {
-				case common.RunStateCompleted:
-					a.Send(Event{Type: EventRunCompleted})
-					return nil
-				case common.RunStateFailed:
-					a.Send(Event{Type: EventRunFailed, Error: fmt.Errorf("%s", status.FailureReason)})
-					return fmt.Errorf("run failed: %s", status.FailureReason)
-				case common.RunStateBlockedOnDecision:
-					ticketID := string(status.BlockingTicketID)
-					if ticketID != a.notifiedDecision {
-						a.notifiedDecision = ticketID
-						dec, err := a.be.Decision().Get(ctx, common.TicketID(ticketID))
-						if err == nil {
-							a.Send(Event{Type: EventDecision, Payload: DecisionInfo{
-								TicketID: ticketID, Question: dec.Question, Reason: dec.Reason, RunID: runID,
-							}})
-						}
-					}
-				case common.RunStateBlockedOnApproval:
-					approvalID := string(status.BlockingApprovalID)
-					if approvalID != a.notifiedApproval {
-						a.notifiedApproval = approvalID
-						appr, err := a.be.Approval().Get(ctx, common.ApprovalID(approvalID))
-						if err == nil {
-							a.Send(Event{Type: EventApproval, Payload: ApprovalInfo{
-								ApprovalID: approvalID, Reason: appr.Reason, RunID: runID,
-							}})
-						}
-					}
-				default:
-					a.Send(Event{Type: EventProgress})
-				}
-				continue
-			}
-
 			// Legacy session-based polling.
 			session := a.session.Borrow()
 			exports, err := session.Exports()

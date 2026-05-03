@@ -24,11 +24,7 @@ check_no_import() {
 echo "=== CLI Architecture Guards ==="
 
 # 1. Forbidden imports in local-mode packages.
-if grep -rq '"biz/client"' "$CLI_ROOT/$MODULE_BASE/service/tui" 2>/dev/null; then
-  echo "  ⚠ WARN: TUI still imports biz/client (pending CLI-AGENT-07)"
-else
-  pass "TUI: no HTTP client import"
-fi
+check_no_import "service/tui" "biz/client" "TUI: no HTTP client import"
 check_no_import "biz/agent" "biz/client" "Agent: no HTTP client import"
 check_no_import "service/cli" "biz/local" "CLI commands: no launcher import"
 
@@ -39,9 +35,9 @@ else
   pass "CLI: biz/local directory removed"
 fi
 
-# 3. TUI must not use fixed polling (tracked in CLI-AGENT-07).
+# 3. TUI must not use fixed polling.
 if grep -rq 'time\.Tick\|time\.Ticker\|tea\.Tick\|pollInterval\|PollTick' "$CLI_ROOT/$MODULE_BASE/service/tui" 2>/dev/null; then
-  echo "  ⚠ WARN: TUI still uses polling (pending CLI-AGENT-07)"
+  fail "TUI: uses fixed-interval polling"
 else
   pass "TUI: no fixed-interval polling"
 fi
