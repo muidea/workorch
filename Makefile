@@ -7,9 +7,11 @@ PKGS := ./...
 GOFMT ?= gofmt
 GOTEST_FLAGS ?=
 BUILD_OUT ?= ./bin/workorchd
+CLI_BUILD_OUT ?= ./bin/workorch
+CLI_APP := ./application/workorch
 CONSOLE_WEB := ./web/workorch-console
 
-.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file release release-check install-latest ci
+.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean release release-check install-latest ci
 
 help:
 	@echo "Targets:"
@@ -19,8 +21,8 @@ help:
 	@echo "  test-race  - go test -race $(PKGS)"
 	@echo "  vet        - go vet $(PKGS)"
 	@echo "  console-build - build the embedded workorch management console assets"
-	@echo "  build      - go build -o $(BUILD_OUT) $(APP)"
-	@echo "  clean      - remove build/demo artifacts"
+	@echo "  build      - build workorchd + CLI into $(BUILD_OUT) and $(CLI_BUILD_OUT)"
+	@echo "  clean      - remove both workorchd and CLI build artifacts"
 	@echo "  run        - go run $(APP) as HTTP service"
 	@echo "  run-file   - clean data, then run $(APP) as HTTP service with file-backed repository"
 	@echo "  verify-boundary-contract - fail if generic runtime/Web code contains business-specific fallback logic"
@@ -53,6 +55,9 @@ help:
 	@echo "  docker-run-file - run workorchd container with file-backed repository"
 	@echo "  docker-verify      - container image packaging verification; not a deployed-instance e2e target"
 	@echo "  docker-verify-file - container image packaging verification with file-backed container data"
+	@echo "  cli-build  - build the workorch CLI binary into $(CLI_BUILD_OUT)"
+	@echo "  cli-test   - run CLI tests"
+	@echo "  cli-clean  - remove CLI build artifact"
 	@echo "  release     - build cross-platform release binaries into $(RELEASE_OUT)/"
 	@echo "  release-check - fmt-check + vet + test + verify-boundary-contract + release"
 	@echo "  install-latest - install latest release binary from GitHub via install script"
@@ -91,7 +96,7 @@ console-build:
 	if [[ ! -d node_modules ]]; then $(NPM) install; fi && \
 	$(NPM) run build
 
-build: console-build
+build: console-build cli-build
 	@mkdir -p $(dir $(BUILD_OUT))
 	$(GO) build -o $(BUILD_OUT) $(APP)
 
@@ -219,4 +224,17 @@ install-latest:
 pre-commit: fmt fmt-check vet
 	@echo "pre-commit checks passed"
 
-ci: fmt-check vet test verify-boundary-contract build
+cli-build:
+	@mkdir -p $(dir $(CLI_BUILD_OUT))
+	$(GO) build -o $(CLI_BUILD_OUT) $(CLI_APP)
+
+cli-test:
+	$(GO) test ./internal/modules/application/workorch/... --count 1
+
+cli-clean:
+	rm -f $(CLI_BUILD_OUT)
+
+verify-cli:
+	./scripts/verify-cli.sh $(CLI_BUILD_OUT)
+
+ci: fmt-check vet test verify-boundary-contract build cli-test
