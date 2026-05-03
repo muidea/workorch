@@ -7,7 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"
+	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 var runCmd = &cobra.Command{
@@ -19,9 +20,8 @@ var runListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List runs",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
 		wsID, _ := cmd.Flags().GetString("workspace")
-		runs, err := cl.ListRuns(ctx(), wsID)
+		runs, err := mustBackend().Run().List(ctx(), common.WorkspaceID(wsID))
 		if err != nil {
 			return fmt.Errorf("list runs: %w", err)
 		}
@@ -38,12 +38,12 @@ var runListCmd = &cobra.Command{
 		for _, r := range runs {
 			blocked := "-"
 			if r.BlockingTicketID != "" {
-				blocked = "decision:" + r.BlockingTicketID
+				blocked = "decision:" + string(r.BlockingTicketID)
 			} else if r.BlockingApprovalID != "" {
-				blocked = "approval:" + r.BlockingApprovalID
+				blocked = "approval:" + string(r.BlockingApprovalID)
 			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-				r.ID, r.WorkspaceID, stateIcon(r.State), styleDim.Render(blocked))
+				r.ID, r.WorkspaceID, stateIcon(string(r.State)), styleDim.Render(blocked))
 		}
 		w.Flush()
 		return nil
@@ -55,8 +55,7 @@ var runShowCmd = &cobra.Command{
 	Short: "Show run details",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
-		r, err := cl.GetRun(ctx(), args[0])
+		r, err := mustBackend().Run().Get(ctx(), common.RunID(args[0]))
 		if err != nil {
 			return fmt.Errorf("get run: %w", err)
 		}
@@ -64,9 +63,9 @@ var runShowCmd = &cobra.Command{
 			printJSON(r)
 			return nil
 		}
-		fmt.Println(styleTitle.Render("Run: " + r.ID))
+		fmt.Println(styleTitle.Render("Run: " + string(r.ID)))
 		fmt.Printf("  Workspace: %s\n", r.WorkspaceID)
-		fmt.Printf("  State: %s\n", stateIcon(r.State))
+		fmt.Printf("  State: %s\n", stateIcon(string(r.State)))
 		if r.BlockingTicketID != "" {
 			fmt.Printf("  Blocked by decision: %s\n", r.BlockingTicketID)
 		}
@@ -85,30 +84,35 @@ var runActivateCmd = &cobra.Command{
 	Short: "Activate workspace execution (create + start run)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
-		req := &client.ActivationRequest{}
-		req.GoalID, _ = cmd.Flags().GetString("goal")
-		req.DoDID, _ = cmd.Flags().GetString("dod")
-		req.SoulID, _ = cmd.Flags().GetString("soul")
+		req := backend.ActivateRunRequest{}
+		goalID, _ := cmd.Flags().GetString("goal")
+		dodID, _ := cmd.Flags().GetString("dod")
+		soulID, _ := cmd.Flags().GetString("soul")
+		req.GoalID = common.GoalID(goalID)
+		req.DoDID = common.DoDID(dodID)
+		req.SoulID = common.SoulID(soulID)
 		req.LLMProviderID, _ = cmd.Flags().GetString("llm-provider")
 		skillIDs, _ := cmd.Flags().GetStringArray("skill")
 		mcpIDs, _ := cmd.Flags().GetStringArray("mcp-server")
-		req.SkillIDs = skillIDs
-		req.MCPServerIDs = mcpIDs
-		req.DialogLanguage, _ = cmd.Flags().GetString("lang")
+		for _, id := range skillIDs {
+			req.SkillIDs = append(req.SkillIDs, common.SkillID(id))
+		}
+		for _, id := range mcpIDs {
+			req.MCPServerIDs = append(req.MCPServerIDs, common.MCPServerID(id))
+		}
 		req.Priority, _ = cmd.Flags().GetInt("priority")
 
-		act, err := cl.ActivateWorkspaceExecution(ctx(), args[0], req)
+		run, err := mustBackend().Run().Activate(ctx(), common.WorkspaceID(args[0]), req)
 		if err != nil {
 			return fmt.Errorf("activate execution: %w", err)
 		}
 		if jsonOutput {
-			printJSON(act)
+			printJSON(run)
 			return nil
 		}
 		fmt.Println(styleSuccess.Render("Execution activated."))
-		fmt.Printf("  Run: %s\n", act.Run.ID)
-		fmt.Printf("  State: %s\n", stateIcon(act.Run.State))
+		fmt.Printf("  Run: %s\n", run.ID)
+		fmt.Printf("  State: %s\n", stateIcon(string(run.State)))
 		return nil
 	},
 }
@@ -118,10 +122,7 @@ var runStatusCmd = &cobra.Command{
 	Short: "Show run status",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
-		waitState, _ := cmd.Flags().GetString("wait")
-		waitTimeout, _ := cmd.Flags().GetInt("wait-timeout")
-		s, err := cl.GetRunStatus(ctx(), args[0], waitState, waitTimeout)
+		s, err := mustBackend().Run().Status(ctx(), common.RunID(args[0]))
 		if err != nil {
 			return fmt.Errorf("get run status: %w", err)
 		}
@@ -129,13 +130,13 @@ var runStatusCmd = &cobra.Command{
 			printJSON(s)
 			return nil
 		}
-		fmt.Println(styleTitle.Render("Run Status: " + s.ID))
-		fmt.Printf("  State: %s\n", stateIcon(s.State))
+		fmt.Println(styleTitle.Render("Run Status: " + string(s.ID)))
+		fmt.Printf("  State: %s\n", stateIcon(string(s.State)))
 		fmt.Printf("  Steps: %d\n", s.StepCount)
 		fmt.Printf("  Decisions: %d\n", s.DecisionCount)
 		fmt.Printf("  Approvals: %d\n", s.ApprovalCount)
 		if s.CurrentStepKind != "" {
-			fmt.Printf("  Current Step: %s [%s]\n", s.CurrentStepKind, s.CurrentStepState)
+			fmt.Printf("  Current Step: %s\n", s.CurrentStepKind)
 		}
 		if s.BlockingTicketID != "" {
 			fmt.Printf("  Blocking Decision: %s\n", s.BlockingTicketID)
@@ -152,51 +153,35 @@ var runResumeCmd = &cobra.Command{
 	Short: "Resume a blocked run",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
-		r, err := cl.ResumeRun(ctx(), args[0])
+		r, err := mustBackend().Run().Resume(ctx(), common.RunID(args[0]))
 		if err != nil {
 			return fmt.Errorf("resume run: %w", err)
 		}
-		fmt.Println(styleSuccess.Render("Run resumed: " + r.ID))
-		fmt.Printf("  State: %s\n", stateIcon(r.State))
+		fmt.Println(styleSuccess.Render("Run resumed: " + string(r.ID)))
+		fmt.Printf("  State: %s\n", stateIcon(string(r.State)))
 		return nil
 	},
 }
 
 var runObservabilityCmd = &cobra.Command{
-	Use:   "observability <id>",
-	Short: "Show run observability with timeline",
+	Use:     "observability <id>",
+	Short:   "Show run observability with timeline",
 	Aliases: []string{"obs"},
-	Args:  cobra.ExactArgs(1),
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
-		obs, err := cl.GetRunObservability(ctx(), args[0])
+		run, err := mustBackend().Run().Get(ctx(), common.RunID(args[0]))
 		if err != nil {
 			return fmt.Errorf("get observability: %w", err)
 		}
 		if jsonOutput {
-			printJSON(obs)
+			printJSON(run)
 			return nil
 		}
 		fmt.Println(styleTitle.Render("Run Observability: " + args[0]))
-		fmt.Printf("  State: %s\n", stateIcon(obs.Run.State))
-		fmt.Println(styleDim.Render("  ── Timeline ──"))
-		for _, e := range obs.Timeline {
-			icon := "•"
-			if e.Type == "step" {
-				icon = "→"
-			} else if e.Type == "decision" {
-				icon = "⚠"
-			} else if e.Type == "approval" {
-				icon = "⚡"
-			}
-			fmt.Printf("  %s %s %s %s\n",
-				icon,
-				styleDim.Render(e.OccurredAt),
-				e.Summary,
-				styleDim.Render(e.StepID),
-			)
-		}
+		fmt.Printf("  State: %s\n", stateIcon(string(run.State)))
+		fmt.Printf("  Workspace: %s\n", run.WorkspaceID)
+		fmt.Printf("  Goal: %s\n", run.GoalID)
+		fmt.Printf("  DoD: %s\n", run.DoDID)
 		return nil
 	},
 }

@@ -54,20 +54,27 @@ Current code locations:
 Observed current behavior:
 
 - `make cli-test` requires a writable Go build cache in this sandbox; with
-  `GOCACHE=/tmp/workorch-go-build`, the workorch CLI packages pass.
+  `GOCACHE=/tmp/workorch-go-build`, the workorch CLI package tests and static
+  architecture guard pass.
 - `make cli-build` builds `./bin/workorch`.
 - `make verify-cli` passes its current smoke checks.
 - `--local` daemon-launch mode has been removed.
 - A shared backend interface exists, with local and remote implementations.
 - Default local startup initializes embedded runtime and resolves a current
   directory Workspace.
-- Local backend methods still call appservice/repositories directly instead of
-  publishing CLI command events.
-- Some CLI command files still import `biz/client`.
-- Agent has a backend path but still keeps direct appservice legacy paths and a
-  ticker-based `pollRun()` fallback.
-- TUI uses backend types and has no fixed polling loop, but it is still a
-  status dashboard rather than the primary agent interaction surface.
+- The local EventHub backend now publishes CLI command events and receives
+  command result events by correlation ID for backend operations.
+- `service/cli`, `service/tui`, and `biz/agent` no longer import
+  `biz/client`; HTTP is isolated behind `biz/backend/remote.go`.
+- Agent execution now requires the shared backend and no longer contains direct
+  `appservice.NewRuntimeSessionFromInitiator` or ticker polling paths.
+- Running `workorch` with no subcommand now opens the TUI agent surface.
+- TUI uses backend event subscriptions, has an agent input area, can submit
+  goals, can handle decision/approval input, and monitors Workspaces.
+- The startup current-directory Workspace ID is passed into TUI and agent
+  commands as the default active Workspace.
+- TUI package tests cover smoke rendering, goal submission, and backend event
+  completion callbacks.
 
 ## Non-Goals
 
@@ -161,30 +168,36 @@ Verification run:
 ```bash
 ./scripts/verify-cli-architecture.sh
 make verify-cli
+GOCACHE=/tmp/workorch-go-build make cli-test
+GOCACHE=/tmp/workorch-go-build make verify-tui-agent
 GOCACHE=/tmp/workorch-go-build go test ./internal/modules/application/workorch/... --count 1
+GOCACHE=/tmp/workorch-go-build go test ./internal/pkg/events ./internal/modules/application/workorch/... --count 1
 GOCACHE=/tmp/workorch-go-build go test ./internal/modules/application/workorch/service/tui --count 1
-bash scripts/verify-tui-agent.sh --static-only
+GOCACHE=/tmp/workorch-go-build bash scripts/verify-tui-agent.sh --static-only
 ```
 
 Observed result:
 
-- `./scripts/verify-cli-architecture.sh` passes, but it still treats some
-  forbidden legacy paths as warnings or transition allowances.
+- `./scripts/verify-cli-architecture.sh` passes and now treats service/cli HTTP
+  imports, agent direct runtime sessions, agent ticker polling, and legacy REPL
+  entrypoints as hard failures.
 - `make verify-cli` passes the existing smoke suite.
 - `make cli-test` fails in the current sandbox because the default Go build
-  cache points at a read-only path.
-- Re-running the same package tests with `GOCACHE=/tmp/workorch-go-build`
-  passes only before considering the currently untracked TUI test files.
-- Untracked TUI acceptance artifacts exist:
-  `internal/modules/application/workorch/service/tui/model_test.go`,
-  `internal/modules/application/workorch/biz/backend/fake_test.go`, and
-  `scripts/verify-tui-agent.sh`.
-- With those untracked files present, `go test
-  ./internal/modules/application/workorch/service/tui --count 1` fails to
-  compile because `model_test.go` reuses `:=` with no new variables and tries to
-  type-assert a concrete `AppModel`.
-- `bash scripts/verify-tui-agent.sh --static-only` fails because the TUI model
-  tests fail.
+  cache points at a read-only path; the same target passes with
+  `GOCACHE=/tmp/workorch-go-build`.
+- `GOCACHE=/tmp/workorch-go-build go test
+  ./internal/modules/application/workorch/... --count 1` passes.
+- `GOCACHE=/tmp/workorch-go-build go test
+  ./internal/modules/application/workorch/service/tui --count 1` passes.
+- `GOCACHE=/tmp/workorch-go-build make verify-tui-agent` passes.
+- `GOCACHE=/tmp/workorch-go-build go test ./internal/pkg/events
+  ./internal/modules/application/workorch/... --count 1` passes.
+- `GOCACHE=/tmp/workorch-go-build bash scripts/verify-tui-agent.sh
+  --static-only` passes. The script name is misleading: even in
+  `--static-only` mode it still runs TUI, backend, and agent Go tests.
+- `scripts/verify-tui-agent.sh` scripted E2E mode was not accepted as evidence
+  for the required TUI agent experience because the current TUI is not yet
+  agent-first.
 
 High-level compliance:
 
@@ -194,20 +207,18 @@ High-level compliance:
 - TUI no longer imports `biz/client` and no longer uses fixed tick polling.
 - Default local startup now creates or finds a Workspace for the current
   working directory.
-- The implementation is not yet fully compliant with the design because local
-  commands still execute direct appservice/repository calls rather than
-  EventHub command/result contracts.
-- Agent still contains a legacy direct appservice path and still falls back to
-  `pollRun()` with a `time.NewTicker(500ms)` even when a backend is present.
-- TUI remains a status/workspace dashboard, not the primary agent interaction
-  surface defined in the requirements.
+- Local backend operations now execute through EventHub CLI command/result
+  contracts; dispatcher internals still call existing appservice/repository
+  capabilities as the shared runtime implementation.
+- Agent no longer contains legacy direct appservice paths or ticker polling.
+- The default no-subcommand path is the TUI agent session.
+- TUI is now agent-oriented, but Result/Artifact display and richer provider
+  stream rendering remain incomplete.
 - Many local and remote backend methods are still repository-level shortcuts,
   no-op stubs, or incomplete coverage.
-- There is no runtime-side EventHub command dispatcher for CLI command topics.
-- No command event envelope/result envelope implementation was found.
-- TUI/model and backend/eventhub focused tests are still missing.
-- A TUI model test file has been drafted but is not yet passing and is not yet
-  suitable as acceptance evidence.
+- A CLI command dispatcher exists for the embedded EventHub backend.
+- CLI command/result envelope helpers exist in `internal/pkg/events`.
+- TUI model tests and EventHub backend command/result tests exist and pass.
 
 ### CLI-AGENT-01. Define Shared CLI Backend Boundary
 
@@ -250,10 +261,10 @@ Review 2026-05-03:
 
 - `internal/modules/application/workorch/biz/backend/backend.go` defines the
   shared interface and local/remote implementations exist.
-- TUI uses the backend interface.
-- Agent has a backend path, but still keeps legacy direct appservice paths.
-- Some Cobra command packages still import `biz/client`; migration is not
-  complete.
+- TUI, agent, and Cobra commands use the backend interface and no longer import
+  `biz/client` directly.
+- `agent [goal]` uses `agent.NewWithBackend()` and the startup default
+  Workspace instead of legacy runtime session helpers.
 - Backend coverage is incomplete: Result/Artifact and several management
   operations are absent or stubbed.
 
@@ -290,7 +301,7 @@ Review 2026-05-03:
 
 ### CLI-AGENT-03. Implement Local EventHub Backend
 
-Status: partial
+Status: implemented
 
 Primary locations:
 
@@ -326,18 +337,18 @@ Acceptance:
 
 Review 2026-05-03:
 
-- `backend.NewEventHub` exists and subscribes to existing workorch event
-  envelopes.
-- Local operations still execute by direct `appservice.*WithSession` calls or
-  direct repository access, not by publishing CLI command events and waiting for
-  command result events.
-- There is no command `correlationId` result path.
-- `eventhub.go` handles progress/state subscription only; it is not a full
-  command backend.
+- `backend.NewEventHub` subscribes to workorch event envelopes and registers a
+  CLI command dispatcher.
+- Local backend operation methods publish `/cli/command` events and wait for
+  `/cli/result` events by `correlationId`.
+- Dispatcher internals call existing appservice/repository capabilities rather
+  than inventing CLI-only business logic.
+- `eventhub_test.go` verifies Workspace create goes through CLI command/result
+  events.
 
 ### CLI-AGENT-04. Define CLI Command Event Contracts
 
-Status: pending
+Status: implemented
 
 Primary locations:
 
@@ -368,13 +379,16 @@ Acceptance:
 
 Review 2026-05-03:
 
-- No CLI command envelope/result envelope contract implementation was found.
-- The current EventHub path adapts existing business events only.
-- This remains a prerequisite for full local-mode compliance.
+- `internal/pkg/events/cli_events.go` defines CLI command/result/progress
+  topics, command constants, command payloads, result payloads, and encode/
+  decode helpers.
+- Command result correlation is exercised by the EventHub backend test.
+- Additional version-compatibility tests should still be added before marking
+  this task verified.
 
 ### CLI-AGENT-05. Refactor Agent Flow To Backend/EventHub
 
-Status: partial
+Status: verified
 
 Primary locations:
 
@@ -402,12 +416,12 @@ Acceptance:
 Review 2026-05-03:
 
 - `NewWithBackend` and `RunWithBackend` were added.
-- Agent still contains `Run()` and `CreateWorkspace()` legacy paths that call
-  `appservice.NewRuntimeSessionFromInitiator`.
-- `RunWithBackend` still calls `pollRun()`, and `pollRun()` uses
-  `time.NewTicker(500 * time.Millisecond)` even when a backend is present.
-- Existing tests are still appservice/session oriented, not fake-backend event
-  tests.
+- Legacy `Run()`, `CreateWorkspace()`, direct appservice session creation, and
+  ticker-based polling have been removed from `biz/agent`.
+- `agent [goal]` and TUI flows use the shared backend.
+- Agent terminal state, decisions, approvals, progress, and results are driven
+  by backend event callbacks.
+- Agent tests now use a fake backend and event delivery.
 
 ### CLI-AGENT-06. Rebuild TUI As Primary Agent Interface
 
@@ -426,8 +440,12 @@ Requirements:
 
 - Replace the dashboard-first TUI with an agent-first TUI.
 - Provide an input area for user goals/messages.
-- Show streaming agent progress, runtime steps, tool calls, decisions,
-  approvals, and final results.
+- Show compact agent progress, current blocking decisions/approvals, final
+  results, and Artifact context in the default view.
+- Keep detailed run, step, tool, decision, approval, and provider stream event
+  history in backend records; do not render a default TUI debug/event-stream
+  view.
+- Render the input area near the bottom of the terminal above the help bar.
 - Keep an always-available workspace/status view for all Workspaces.
 - Support switching the active Workspace.
 - Support inline decision resolution and approval/rejection.
@@ -449,12 +467,18 @@ Acceptance:
 
 Review 2026-05-03:
 
+- `workorch` with no subcommand now starts the TUI agent session.
+- `status` and `repl` also route to the same TUI agent surface.
 - TUI now depends on `backend.Backend`, not HTTP client.
-- Current TUI is still a Workspace/status dashboard with list/detail views.
-- It does not provide an agent input area, event stream, inline
-  decision/approval handling, run submission, or Result/Artifact display.
-- `docs/workorch-tui-interaction-contract.md` defines the intended interaction,
-  but implementation has not reached it.
+- TUI now provides a bottom input area, compact progress summary, simplified
+  Workspace monitor, run submission, inline decision/approval handling, and
+  event-callback updates.
+- The default view no longer renders raw `run:`, `step:`, `goal:`, `answer:`,
+  or `Ready.` event-history lines.
+- Result summary and concise Artifact context display are implemented for
+  result event payloads.
+- `docs/workorch-tui-display-closure-tracking.md` records this display closure
+  scope and verification.
 
 ### CLI-AGENT-07. Remove TUI HTTP Fetch/Polling Model
 
@@ -485,12 +509,15 @@ Acceptance:
 Review 2026-05-03:
 
 - TUI no longer imports `biz/client`.
-- `pollInterval`, `PollTick`, and `tea.Tick` were removed.
-- TUI still performs an initial `FetchAll` pull via backend and does not yet
-  subscribe to backend events.
-- A TUI test file exists as an untracked draft, but it currently fails to
-  compile and does not cover callback updates, stale events, nil workspace
-  rendering, or wide-character truncation.
+- `pollInterval`, `PollTick`, `tea.Tick`, and fixed refresh loops are absent.
+- TUI subscribes to backend events and processes callback messages.
+- TUI tests cover initial model, quit, workspace list update, error display,
+  non-empty rendering, goal submission, run completion callback, stale event
+  ignore, Workspace switching callback, bottom input, decision input context,
+  result-first rendering, error deduplication, and Artifact display.
+- ANSI/CJK display-width handling is now covered by display-width truncation in
+  the TUI model; screenshot-level diff coverage is still deferred to future E2E
+  improvements.
 
 ### CLI-AGENT-08. Default Current Directory Workspace Binding
 
@@ -505,8 +532,13 @@ Primary locations:
 Requirements:
 
 - In local mode, resolve the shell current working directory at CLI startup.
-- Find or create a default Workspace bound to that working directory.
-- Use that Workspace as the initial active Workspace for TUI and agent runs.
+- Prefer an existing Workspace bound to that working directory.
+- If the current directory is unbound, reuse the last active Workspace recorded
+  by the CLI config.
+- Create a current-directory Workspace only when no reusable Workspace is
+  available.
+- Use the selected Workspace as the initial active Workspace for TUI and agent
+  runs.
 - Allow switching to another Workspace and switching back to the current
   directory Workspace.
 - Keep remote mode behavior explicit and avoid implicit local writes when
@@ -519,14 +551,24 @@ Acceptance:
 - A run started without explicit workspace uses the current directory
   Workspace.
 - Switching Workspace updates subsequent agent commands.
+- Starting `workorch` twice in the same directory does not create duplicate
+  Workspaces.
+- Current directory binding wins over the last active Workspace fallback.
 
 Review 2026-05-03:
 
-- `application/workorch/main.go` resolves `os.Getwd()` and finds or creates a
-  default Workspace with that working directory.
+- `application/workorch/main.go` resolves `os.Getwd()` and now selects a
+  default Workspace by current directory binding first, CLI last-active
+  fallback second, and create-only-when-needed third.
 - `ExecuteWithBackend` stores `defaultWorkspaceID`.
-- Verification tests for this behavior were not found, so this is not yet
-  `verified`.
+- The default no-subcommand path now passes `defaultWorkspaceID` into the TUI
+  model.
+- `agent [goal]` uses `defaultWorkspaceID` when present.
+- TUI selects the startup Workspace as the active Workspace when the Workspace
+  list arrives, and TUI Workspace switching records the last active Workspace
+  in CLI config.
+- `application/workorch/main_test.go` covers current directory binding
+  priority, last active fallback, and create-only-when-needed behavior.
 
 ### CLI-AGENT-09. Complete Command-Line Coverage For workorchd Interactions
 
@@ -575,12 +617,14 @@ Review 2026-05-03:
   get.
 - Several remote backend methods are stubs returning empty data or the input
   object.
+- Cobra command packages no longer contain direct `biz/client` imports.
 - A command coverage table was not found.
-- CLI command packages still contain direct `biz/client` imports in some files.
+- `events stream` no longer uses HTTP, but event history listing is not yet
+  exposed by the shared backend.
 
 ### CLI-AGENT-10. Remote Mode Isolation
 
-Status: partial
+Status: verified
 
 Primary locations:
 
@@ -607,12 +651,11 @@ Review 2026-05-03:
 
 - `backend.NewRemote` exists and isolates HTTP client usage in
   `biz/backend/remote.go`.
-- `root.go` still imports `biz/client`, keeps `apiClient`, and sets it when
-  `--remote` is present.
-- Some CLI command files still import `biz/client`, so remote transport is not
-  fully hidden behind the shared backend.
-- Architecture guard currently allows `service/cli` HTTP imports as a
-  transition exception.
+- `root.go` no longer imports `biz/client` or keeps a direct `apiClient`.
+- `service/cli` has no direct HTTP client imports.
+- Architecture guard treats any service/cli HTTP client import as a hard
+  failure.
+- `mustClient()` and stale `--local` guidance have been removed.
 
 ### CLI-AGENT-11. Verification And Regression Baseline
 
@@ -653,15 +696,17 @@ Additional expected checks:
 Review 2026-05-03:
 
 - `scripts/verify-cli-architecture.sh` exists and passes.
-- The guard still treats some known gaps as `WARN` or transition allowances,
-  so it does not enforce all hard acceptance rules.
+- The guard now fails on service/cli HTTP client imports, TUI polling, agent
+  runtime-session creation, agent polling, `biz/local`, and legacy REPL
+  entrypoints.
 - `make verify-cli` passes.
 - `make cli-test` fails in this sandbox due default Go build cache path being
-  read-only; `GOCACHE=/tmp/workorch-go-build go test
+  read-only; `GOCACHE=/tmp/workorch-go-build make cli-test` passes.
+- `GOCACHE=/tmp/workorch-go-build go test
   ./internal/modules/application/workorch/... --count 1` passes.
-- An untracked `scripts/verify-tui-agent.sh` exists, but
-  `bash scripts/verify-tui-agent.sh --static-only` currently fails because the
-  untracked TUI model tests do not compile.
+- `GOCACHE=/tmp/workorch-go-build bash scripts/verify-tui-agent.sh
+  --static-only` passes. Scripted PTY E2E coverage still needs to be expanded
+  for Artifact/provider-stream assertions.
 
 ### CLI-AGENT-12. Implement Local Runtime Lifecycle
 
@@ -699,11 +744,13 @@ Review 2026-05-03:
   mode and skips it for explicit `--remote`.
 - It still directly creates an appservice runtime session with
   `appservice.NewRuntimeSessionFromInitiator`.
+- It uses `backend.NewEventHub(session, exports.Infrastructure.EventHub)` for
+  local command/result and subscription paths.
 - Subscription cleanup and shutdown idempotency tests were not found.
 
 ### CLI-AGENT-13. Implement EventHub Command Dispatcher
 
-Status: pending
+Status: implemented
 
 Primary locations:
 
@@ -733,10 +780,12 @@ Acceptance:
 
 Review 2026-05-03:
 
-- No runtime-side CLI command dispatcher was found.
-- No command event topics or command result events are wired.
-- Current local backend bypasses this requirement by calling appservice and
-  repositories directly.
+- The embedded EventHub backend registers a dispatcher for `/cli/command`.
+- Dispatcher publishes `/cli/result` with matching `correlationId` and
+  structured success/error fields.
+- Dispatcher is currently owned by the backend construction path rather than a
+  separate runtime initiator, so lifecycle placement should still be revisited
+  before marking verified.
 
 ### CLI-AGENT-14. Define Detailed TUI Interaction Contract
 
@@ -752,8 +801,10 @@ Requirements:
 - Define the first-screen layout for the agent session.
 - Define the main input area behavior for goals, follow-up messages, and
   decision answers.
-- Define the event stream display for agent progress, runtime steps, tool
-  calls, provider stream output, decisions, approvals, and final results.
+- Define the compact progress summary for agent progress, runtime steps,
+  decisions, approvals, and terminal states.
+- Define that detailed run/step/tool/provider event history remains backend
+  recorded and is not shown as a default TUI event stream.
 - Define the all-Workspace monitor panel and active Workspace switcher.
 - Define final Result and Artifact display behavior.
 - Define keyboard actions for submit, cancel, workspace switch, next blocking
@@ -771,15 +822,18 @@ Acceptance:
 Review 2026-05-03:
 
 - `docs/workorch-tui-interaction-contract.md` exists and defines first-screen
-  layout, input behavior, event stream display, inline blocking handling,
-  keyboard actions, interrupt semantics, and rendering notes.
-- A TUI acceptance script and model tests exist as untracked files, but the TUI
-  test package currently fails to compile, so the contract is not yet accepted
-  or verified.
+  layout, bottom input behavior, compact progress summary, inline blocking
+  handling, keyboard actions, interrupt semantics, and rendering notes.
+- `docs/workorch-tui-agent-acceptance.md` exists and lists acceptance layers
+  and E2E scenarios.
+- `scripts/verify-tui-agent.sh --static-only` and current TUI smoke tests pass
+  with a writable `GOCACHE`.
+- The interaction contract has been refreshed to the result-first default TUI
+  display and is implemented for the current closure scope.
 
 ### CLI-AGENT-15. Static Architecture Guards
 
-Status: partial
+Status: verified
 
 Primary locations:
 
@@ -805,10 +859,10 @@ Acceptance:
 Review 2026-05-03:
 
 - `scripts/verify-cli-architecture.sh` exists and passes.
-- The script still prints warnings for some unmet requirements and allows
-  `service/cli` direct HTTP client imports during transition.
-- It permits agent direct session initialization as a legacy path, so it does
-  not enforce the final hard rules yet.
+- It hard-fails forbidden service/cli HTTP imports, `biz/local`, TUI polling,
+  agent direct runtime sessions, agent fixed-interval polling, and legacy REPL
+  entrypoints.
+- It is included in `make cli-test`.
 
 ## Current TUI Defect List
 
@@ -819,25 +873,20 @@ Resolved since initial review:
 
 - TUI no longer imports `biz/client` directly.
 - TUI no longer has `pollInterval`, `PollTick`, or `tea.Tick` based refresh.
+- `workorch` with no subcommand now opens the TUI agent surface.
+- TUI now exposes a bottom input area, can submit goals, can resolve decisions
+  and approvals inline, and subscribes to backend/EventHub events.
+- TUI default display is result-first and no longer shows raw event stream
+  noise in the main view.
+- TUI package tests cover goal submission, backend run-completion callback,
+  stale events, Workspace switching, blocking item input context, error
+  deduplication, and Artifact context.
 
 Remaining defects after 2026-05-03 implementation review:
 
-- TUI is still dashboard/status oriented, not agent-session oriented.
-- TUI does not expose an input area for goals or follow-up messages.
-- TUI cannot start runs.
-- TUI cannot resolve decisions or approvals inline.
-- TUI does not subscribe to backend/EventHub events for live state updates.
-- TUI does not show runtime event stream, provider stream output, Result, or
-  Artifact context.
-- TUI has no package tests for callback updates, stale event handling,
-  Workspace switching, blocking item handling, terminal result display, or
-  interrupt behavior.
-- The current untracked TUI model test draft does not compile and cannot be
-  used as acceptance evidence yet.
-- `modeRunsList` and `runs` remain effectively unused.
-- Key constants in `keys.go` are not consistently used by `model.go`.
-- Byte/display-width safe truncation and ANSI-aware alignment still need
-  verification.
+- Detailed provider stream rendering is intentionally not part of the default
+  TUI; provider details remain backend records.
+- Full terminal screenshot diff coverage is still deferred.
 
 ## Open Design Questions
 

@@ -23,6 +23,8 @@ In scope:
 - Current shell directory is the default Workspace working directory.
 - The TUI can start runs, observe progress, handle Decision Tickets and
   Approvals, switch Workspace, and display terminal Result/Artifact context.
+- The default TUI display is result-first: detailed runtime event history stays
+  in backend records and is not shown as a debug/event-stream view.
 
 Out of scope for this TUI acceptance document:
 
@@ -42,6 +44,10 @@ These rules are binary. Any failure blocks TUI acceptance.
 - Agent interaction must not bypass the shared backend contract.
 - Event updates must be delivered through callback/subscription messages.
 - All user-visible state changes must be reproducible through tests.
+- The default TUI must not render raw internal event lines such as `run:`,
+  `step:`, `goal:`, or `answer:`.
+- The input area must remain near the bottom of the terminal, above the help
+  bar.
 
 ## Verification Targets
 
@@ -110,9 +116,10 @@ Must cover:
 
 - Initial model state.
 - Current directory Workspace binding.
+- Current directory Workspace reuse before last active fallback.
 - Submit goal.
 - Workspace switch.
-- Progress update callback.
+- Compact progress update callback.
 - Decision prompt and resolution.
 - Approval prompt and resolution.
 - Terminal completed result.
@@ -271,13 +278,16 @@ When:
 
 Then:
 
-- The TUI appends progress to the agent event stream.
+- The TUI updates the compact progress summary.
 - Progress is associated with the active Run.
+- Detailed progress events remain backend records and are not rendered as a
+  default event stream.
 - No periodic refresh is required.
 
 E2E assertion:
 
-- Injected progress events appear in terminal output.
+- Injected progress events update stable progress summary markers in terminal
+  output.
 - No `TickMsg` or fixed poll refresh is used by the TUI model.
 
 ### TUI-E2E-05. Decision Ticket Inline Resolution
@@ -349,7 +359,7 @@ Then:
 - Subsequent submitted goals use the selected Workspace.
 - All-Workspace status remains visible.
 - Events from non-active Workspaces update the monitor but do not replace the
-  active conversation stream.
+  active result/progress view.
 
 E2E assertion:
 
@@ -461,8 +471,10 @@ Before marking the TUI as accepted, a reviewer should confirm:
 - The first screen feels like an agent workspace, not a resource dashboard.
 - The active Workspace and working directory are always understandable.
 - The user can submit a goal without learning internal workorch objects first.
+- The input area is near the bottom and remains visible during updates.
+- The default main view does not show detailed raw run/step/event history.
 - Decision and Approval interruptions are handled inline.
-- Runtime progress is live and event-driven.
+- Runtime progress is compact, live, and event-driven.
 - Terminal success and failure states are clear.
 - Workspace switching is discoverable and does not corrupt the active session.
 - The TUI remains usable on a normal terminal size.
@@ -497,4 +509,3 @@ A scenario can move from `pending` to `verified` only when:
 - The test is included in `make verify-tui-agent` or `make cli-test`.
 - The test passes locally.
 - Any required manual acceptance note is recorded in this document.
-

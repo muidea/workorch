@@ -6,7 +6,7 @@ It remains a single `go.mod` repository. The current normalization target is mod
 
 ## Mapping
 
-- `application/workorchd/main.go` -> thin process entry that starts `magicCommon/framework/service.DefaultService` and explicitly loads `workorchruntime`, `internal/modules/kernel/*`, and `internal/modules/blocks/*`
+- `application/workorch/main.go` -> thin process entry that starts `magicCommon/framework/service.DefaultService` and explicitly loads `workorchruntime`, `internal/modules/kernel/*`, and `internal/modules/blocks/*`
 - `internal/initiators/workorchruntime` -> magicCommon initiator that provides repository, event hub, and cross-module service wiring for plugin-loaded workorch modules
 - `internal/modules/application/workorchd` -> application plugin module loaded by the magicCommon module lifecycle
 - `internal/modules/application/workorchd/biz/bootstrap` -> repository/backend wiring, runtime assembly, and a thin `Runtime` shell around grouped `Exports()` plus module lifecycle teardown
@@ -20,7 +20,7 @@ It remains a single `go.mod` repository. The current normalization target is mod
 - old `domain/shared` + `workorchcommon` -> `internal/pkg/common`
 - old `workorchevents` -> `internal/pkg/events` including shared workorch event payload builders/keys, typed workorch event helpers, strict workorch version rules, and topic-scoped contract lookup
 - old `repository` -> `internal/pkg/repository`
-- old `main.go` -> `application/workorchd/main.go`
+- old `main.go` -> `application/workorch/main.go`
 
 ## Module Shape
 

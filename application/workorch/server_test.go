@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -224,26 +225,28 @@ type workorchErrorResponse struct {
 	Error string `json:"error"`
 }
 
-func TestWorkorchdServerServesHealthAndRunEndpoints(t *testing.T) {
+var testPortCounter atomic.Uint32
+
+func TestWorkorchServerModeServesHealthAndRunEndpoints(t *testing.T) {
 	addr := reserveLoopbackAddr(t)
-	bin := buildWorkorchdBinary(t)
-	cmd := startWorkorchdProcess(t, bin, addr, nil)
-	defer stopWorkorchdProcess(t, cmd)
+	bin := buildWorkorchBinary(t)
+	cmd := startWorkorchServerProcess(t, bin, addr, nil)
+	defer stopWorkorchProcess(t, cmd)
 
 	waitForHealthy(t, "http://"+addr+"/healthz")
 	assertMetricsAvailable(t, "http://"+addr+"/metrics")
 	createWorkspace(t, "http://"+addr+"/api/v1/workorch/workspaces", "main memory workspace")
 }
 
-func TestWorkorchdServerSupportsFileRepositoryBackend(t *testing.T) {
+func TestWorkorchServerModeSupportsFileRepositoryBackend(t *testing.T) {
 	addr := reserveLoopbackAddr(t)
 	dataDir := filepath.Join(t.TempDir(), "workorch-data")
-	bin := buildWorkorchdBinary(t)
-	cmd := startWorkorchdProcess(t, bin, addr, []string{
+	bin := buildWorkorchBinary(t)
+	cmd := startWorkorchServerProcess(t, bin, addr, []string{
 		"repository.backend=file",
 		"repository.dataDir=" + dataDir,
 	})
-	defer stopWorkorchdProcess(t, cmd)
+	defer stopWorkorchProcess(t, cmd)
 
 	waitForHealthy(t, "http://"+addr+"/healthz")
 
@@ -315,16 +318,16 @@ func TestWorkorchdServerSupportsFileRepositoryBackend(t *testing.T) {
 	}
 }
 
-func TestWorkorchdServerRetainsFileBackedTerminalStateAcrossRestart(t *testing.T) {
+func TestWorkorchServerModeRetainsFileBackedTerminalStateAcrossRestart(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "workorch-restart-data")
-	bin := buildWorkorchdBinary(t)
+	bin := buildWorkorchBinary(t)
 	env := []string{
 		"repository.backend=file",
 		"repository.dataDir=" + dataDir,
 	}
 
 	firstAddr := reserveLoopbackAddr(t)
-	first := startWorkorchdProcess(t, bin, firstAddr, env)
+	first := startWorkorchServerProcess(t, bin, firstAddr, env)
 	waitForHealthy(t, "http://"+firstAddr+"/healthz")
 
 	workspaceID := createWorkspace(t, "http://"+firstAddr+"/api/v1/workorch/workspaces", "restart file workspace")
@@ -343,11 +346,11 @@ func TestWorkorchdServerRetainsFileBackedTerminalStateAcrossRestart(t *testing.T
 	assertApprovalRejectAvailable(t, "http://"+firstAddr+"/api/v1/workorch/approvals/"+blockedApprovalID+"/reject", blockedApprovalID, "rejected")
 	waitForRunStatusAvailable(t, "http://"+firstAddr+"/api/v1/workorch/runs/"+approvalRunID+"/status", approvalRunID, "failed")
 
-	stopWorkorchdProcess(t, first)
+	stopWorkorchProcess(t, first)
 
 	secondAddr := reserveLoopbackAddr(t)
-	second := startWorkorchdProcess(t, bin, secondAddr, env)
-	defer stopWorkorchdProcess(t, second)
+	second := startWorkorchServerProcess(t, bin, secondAddr, env)
+	defer stopWorkorchProcess(t, second)
 
 	waitForHealthy(t, "http://"+secondAddr+"/healthz")
 
@@ -381,19 +384,19 @@ func TestWorkorchdServerRetainsFileBackedTerminalStateAcrossRestart(t *testing.T
 	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+approvalRunID+"/start", "conflict")
 }
 
-func TestWorkorchdServerFailsWithUnsupportedRepositoryBackend(t *testing.T) {
+func TestWorkorchServerModeFailsWithUnsupportedRepositoryBackend(t *testing.T) {
 	addr := reserveLoopbackAddr(t)
-	bin := buildWorkorchdBinary(t)
-	configDir := writeWorkorchdTestConfig(t, addr, []string{
+	bin := buildWorkorchBinary(t)
+	configDir := writeWorkorchTestConfig(t, addr, []string{
 		"repository.backend=unsupported",
 		"repository.dataDir=" + t.TempDir(),
 	})
-	cmd := exec.Command(bin, "-config-dir", configDir)
+	cmd := exec.Command(bin, "--server", "-config-dir", configDir)
 	cmd.Env = os.Environ()
 
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("expected go run workorchd to fail\noutput:\n%s", string(out))
+		t.Fatalf("expected workorch --server to fail\noutput:\n%s", string(out))
 	}
 
 	text := string(out)
@@ -407,18 +410,18 @@ func TestWorkorchdServerFailsWithUnsupportedRepositoryBackend(t *testing.T) {
 	}
 }
 
-func TestWorkorchdServerFailsWithInvalidServerTimeout(t *testing.T) {
+func TestWorkorchServerModeFailsWithInvalidServerTimeout(t *testing.T) {
 	addr := reserveLoopbackAddr(t)
-	bin := buildWorkorchdBinary(t)
-	configDir := writeWorkorchdTestConfig(t, addr, []string{
+	bin := buildWorkorchBinary(t)
+	configDir := writeWorkorchTestConfig(t, addr, []string{
 		"server.readTimeout=not-a-duration",
 	})
-	cmd := exec.Command(bin, "-config-dir", configDir)
+	cmd := exec.Command(bin, "--server", "-config-dir", configDir)
 	cmd.Env = os.Environ()
 
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("expected workorchd to fail with invalid server timeout\noutput:\n%s", string(out))
+		t.Fatalf("expected workorch --server to fail with invalid server timeout\noutput:\n%s", string(out))
 	}
 
 	text := string(out)
@@ -435,40 +438,49 @@ func TestWorkorchdServerFailsWithInvalidServerTimeout(t *testing.T) {
 func reserveLoopbackAddr(t *testing.T) string {
 	t.Helper()
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen loopback: %v", err)
+	// Avoid :0 here. It returns an ephemeral port that the health-check client
+	// can immediately reuse as a local source port before the child process
+	// binds, making the child fail with "address already in use".
+	base := 18000 + int(testPortCounter.Add(1)%4000)
+	for offset := 0; offset < 4000; offset++ {
+		port := 18000 + ((base + offset) % 4000)
+		addr := fmt.Sprintf("127.0.0.1:%d", port)
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			_ = ln.Close()
+			return addr
+		}
 	}
-	defer ln.Close()
-	return ln.Addr().String()
+	t.Fatal("no available loopback test port")
+	return ""
 }
 
-func buildWorkorchdBinary(t *testing.T) string {
+func buildWorkorchBinary(t *testing.T) string {
 	t.Helper()
 
-	bin := filepath.Join(t.TempDir(), "workorchd")
+	bin := filepath.Join(t.TempDir(), "workorch")
 	cmd := exec.Command("go", "build", "-o", bin, ".")
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("build workorchd: %v\noutput:\n%s", err, string(out))
+		t.Fatalf("build workorch: %v\noutput:\n%s", err, string(out))
 	}
 	return bin
 }
 
-func startWorkorchdProcess(t *testing.T, bin string, addr string, extraEnv []string) *exec.Cmd {
+func startWorkorchServerProcess(t *testing.T, bin string, addr string, extraEnv []string) *exec.Cmd {
 	t.Helper()
 
-	configDir := writeWorkorchdTestConfig(t, addr, extraEnv)
-	cmd := exec.Command(bin, "-config-dir", configDir)
+	configDir := writeWorkorchTestConfig(t, addr, extraEnv)
+	cmd := exec.Command(bin, "--server", "-config-dir", configDir)
 	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("start workorchd: %v", err)
+		t.Fatalf("start workorch --server: %v", err)
 	}
 	return cmd
 }
 
-func writeWorkorchdTestConfig(t *testing.T, addr string, extraEnv []string) string {
+func writeWorkorchTestConfig(t *testing.T, addr string, extraEnv []string) string {
 	t.Helper()
 
 	values := map[string]string{
@@ -483,7 +495,7 @@ func writeWorkorchdTestConfig(t *testing.T, addr string, extraEnv []string) stri
 		}
 	}
 	configDir := t.TempDir()
-	content := fmt.Sprintf(`endpointName = "workorchd"
+	content := fmt.Sprintf(`endpointName = "workorch"
 
 [server]
 addr = %q
@@ -503,12 +515,12 @@ timeout = "60s"
 disabled = false
 `, addr, values["server.readTimeout"], values["repository.backend"], values["repository.dataDir"])
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
-		t.Fatalf("write workorchd config: %v", err)
+		t.Fatalf("write workorch config: %v", err)
 	}
 	return configDir
 }
 
-func stopWorkorchdProcess(t *testing.T, cmd *exec.Cmd) {
+func stopWorkorchProcess(t *testing.T, cmd *exec.Cmd) {
 	t.Helper()
 	if cmd == nil || cmd.Process == nil {
 		return
@@ -521,11 +533,11 @@ func stopWorkorchdProcess(t *testing.T, cmd *exec.Cmd) {
 	select {
 	case err := <-done:
 		if err != nil && !isInterruptExit(err) {
-			t.Fatalf("wait workorchd: %v", err)
+			t.Fatalf("wait workorch: %v", err)
 		}
 	case <-time.After(5 * time.Second):
 		_ = cmd.Process.Kill()
-		t.Fatal("timed out waiting for workorchd to exit")
+		t.Fatal("timed out waiting for workorch to exit")
 	}
 }
 
@@ -1231,11 +1243,11 @@ func assertConflictAction(t *testing.T, endpoint string, expectedError string) {
 	}
 }
 
-func TestWorkorchdServerRejectsUnsupportedMethodOnWorkspaceRunCreateEndpoint(t *testing.T) {
+func TestWorkorchServerModeRejectsUnsupportedMethodOnWorkspaceRunCreateEndpoint(t *testing.T) {
 	addr := reserveLoopbackAddr(t)
-	bin := buildWorkorchdBinary(t)
-	cmd := startWorkorchdProcess(t, bin, addr, nil)
-	defer stopWorkorchdProcess(t, cmd)
+	bin := buildWorkorchBinary(t)
+	cmd := startWorkorchServerProcess(t, bin, addr, nil)
+	defer stopWorkorchProcess(t, cmd)
 
 	waitForHealthy(t, "http://"+addr+"/healthz")
 
@@ -1249,14 +1261,14 @@ func TestWorkorchdServerRejectsUnsupportedMethodOnWorkspaceRunCreateEndpoint(t *
 	}
 }
 
-func TestWorkorchdServerReadyzReflectsConfiguration(t *testing.T) {
+func TestWorkorchServerModeReadyzReflectsConfiguration(t *testing.T) {
 	addr := reserveLoopbackAddr(t)
-	bin := buildWorkorchdBinary(t)
-	cmd := startWorkorchdProcess(t, bin, addr, []string{
+	bin := buildWorkorchBinary(t)
+	cmd := startWorkorchServerProcess(t, bin, addr, []string{
 		"repository.backend=file",
 		"repository.dataDir=" + filepath.Join(t.TempDir(), "workorch-data"),
 	})
-	defer stopWorkorchdProcess(t, cmd)
+	defer stopWorkorchProcess(t, cmd)
 
 	waitForHealthy(t, "http://"+addr+"/healthz")
 
@@ -1271,6 +1283,6 @@ func TestWorkorchdServerReadyzReflectsConfiguration(t *testing.T) {
 }
 
 func Example_main() {
-	fmt.Println("workorchd serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/runs, /api/v1/workorch/runs/{runId}, /api/v1/workorch/runs/{runId}/snapshot, /api/v1/workorch/runs/{runId}/status, /api/v1/workorch/runs/{runId}/observability, /api/v1/workorch/runs/{runId}/start, /api/v1/workorch/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject")
-	// Output: workorchd serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/runs, /api/v1/workorch/runs/{runId}, /api/v1/workorch/runs/{runId}/snapshot, /api/v1/workorch/runs/{runId}/status, /api/v1/workorch/runs/{runId}/observability, /api/v1/workorch/runs/{runId}/start, /api/v1/workorch/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject
+	fmt.Println("workorch --server serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/runs, /api/v1/workorch/runs/{runId}, /api/v1/workorch/runs/{runId}/snapshot, /api/v1/workorch/runs/{runId}/status, /api/v1/workorch/runs/{runId}/observability, /api/v1/workorch/runs/{runId}/start, /api/v1/workorch/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject")
+	// Output: workorch --server serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/runs, /api/v1/workorch/runs/{runId}, /api/v1/workorch/runs/{runId}/snapshot, /api/v1/workorch/runs/{runId}/status, /api/v1/workorch/runs/{runId}/observability, /api/v1/workorch/runs/{runId}/start, /api/v1/workorch/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject
 }

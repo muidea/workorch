@@ -16,7 +16,7 @@ Current authoritative documents:
 
 Current authoritative source layout:
 
-- `application/workorchd`
+- `application/workorch`
 - `internal/initiators/workorchruntime`
 - `internal/modules/application/workorchd`
 - `internal/modules/kernel`

@@ -270,6 +270,10 @@ func (s *blockingMemoryService) GetMemoryItem(context.Context, common.MemoryID) 
 	return nil, common.ErrNotFound
 }
 
+func (s *blockingMemoryService) DeleteMemoryItem(context.Context, common.MemoryID) error {
+	return common.ErrInvalidArgument
+}
+
 func (s *blockingMemoryService) ListMemoryByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
 	if s.started != nil {
 		s.started <- "memory"
@@ -1872,7 +1876,7 @@ func useActivationLLMConfig(t *testing.T, baseURL string, embeddingProviderID st
 	t.Helper()
 	configDir := t.TempDir()
 	content := strings.ReplaceAll(`
-endpointName = "workorchd"
+endpointName = "workorch"
 
 [repository]
 backend = "file"
@@ -1905,7 +1909,7 @@ func useSystemDefaultSoulConfig(t *testing.T, defaultSoulID string) {
 	t.Helper()
 	configDir := t.TempDir()
 	content := strings.ReplaceAll(`
-endpointName = "workorchd"
+endpointName = "workorch"
 
 [repository]
 backend = "file"

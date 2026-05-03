@@ -32,6 +32,12 @@ const (
 	PayloadKeyName               = "name"
 	PayloadKeyURI                = "uri"
 	PayloadKeyContentType        = "contentType"
+	PayloadKeyMemoryType         = "memoryType"
+	PayloadKeyContent            = "content"
+	PayloadKeyTags               = "tags"
+	PayloadKeyImportance         = "importance"
+	PayloadKeyConfidence         = "confidence"
+	PayloadKeyVisibility         = "visibility"
 )
 
 type WorkspacePayloadData struct {
@@ -122,6 +128,18 @@ type ArtifactPayloadData struct {
 	ContentType        string
 	State              common.ArtifactState
 	EvidenceRefs       []string
+}
+
+type MemoryPayloadData struct {
+	MemoryType string
+	Summary    string
+	Content    string
+	SourceType string
+	SourceRef  string
+	Tags       []string
+	Importance int
+	Confidence int
+	Visibility string
 }
 
 func WorkspacePayload(title string, description string, workingDirectory string, state common.WorkspaceState, activeRunID common.RunID) map[string]any {
@@ -290,6 +308,25 @@ func ArtifactPayload(
 	}
 	if contentType != "" {
 		payload[PayloadKeyContentType] = contentType
+	}
+	return payload
+}
+
+func MemoryPayload(memoryType string, summary string, content string, sourceType string, sourceRef string, tags []string, importance int, confidence int, visibility string) map[string]any {
+	payload := map[string]any{
+		PayloadKeyMemoryType: memoryType,
+		PayloadKeySummary:    summary,
+		PayloadKeySourceType: sourceType,
+		PayloadKeyTags:       append([]string(nil), tags...),
+		PayloadKeyImportance: importance,
+		PayloadKeyConfidence: confidence,
+		PayloadKeyVisibility: visibility,
+	}
+	if content != "" {
+		payload[PayloadKeyContent] = content
+	}
+	if sourceRef != "" {
+		payload[PayloadKeySourceRef] = sourceRef
 	}
 	return payload
 }
@@ -567,6 +604,56 @@ func DecodeArtifactPayload(payload map[string]any) (ArtifactPayloadData, bool) {
 	}, true
 }
 
+func DecodeMemoryPayload(payload map[string]any) (MemoryPayloadData, bool) {
+	memoryType, ok := stringField(payload, PayloadKeyMemoryType)
+	if !ok {
+		return MemoryPayloadData{}, false
+	}
+	summary, ok := stringField(payload, PayloadKeySummary)
+	if !ok {
+		return MemoryPayloadData{}, false
+	}
+	sourceType, ok := stringField(payload, PayloadKeySourceType)
+	if !ok {
+		return MemoryPayloadData{}, false
+	}
+	content, ok := optionalStringField(payload, PayloadKeyContent)
+	if !ok {
+		return MemoryPayloadData{}, false
+	}
+	sourceRef, ok := optionalStringField(payload, PayloadKeySourceRef)
+	if !ok {
+		return MemoryPayloadData{}, false
+	}
+	tags, ok := optionalStringSliceField(payload, PayloadKeyTags)
+	if !ok {
+		return MemoryPayloadData{}, false
+	}
+	importance, ok := optionalIntField(payload, PayloadKeyImportance)
+	if !ok {
+		return MemoryPayloadData{}, false
+	}
+	confidence, ok := optionalIntField(payload, PayloadKeyConfidence)
+	if !ok {
+		return MemoryPayloadData{}, false
+	}
+	visibility, ok := optionalStringField(payload, PayloadKeyVisibility)
+	if !ok {
+		return MemoryPayloadData{}, false
+	}
+	return MemoryPayloadData{
+		MemoryType: memoryType,
+		Summary:    summary,
+		Content:    content,
+		SourceType: sourceType,
+		SourceRef:  sourceRef,
+		Tags:       tags,
+		Importance: importance,
+		Confidence: confidence,
+		Visibility: visibility,
+	}, true
+}
+
 func stringField(payload map[string]any, key string) (string, bool) {
 	if payload == nil {
 		return "", false
@@ -635,5 +722,31 @@ func optionalStringSliceField(payload map[string]any, key string) ([]string, boo
 		return ret, true
 	default:
 		return nil, false
+	}
+}
+
+func optionalIntField(payload map[string]any, key string) (int, bool) {
+	if payload == nil {
+		return 0, true
+	}
+	value, ok := payload[key]
+	if !ok || value == nil {
+		return 0, true
+	}
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int8:
+		return int(typed), true
+	case int16:
+		return int(typed), true
+	case int32:
+		return int(typed), true
+	case int64:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	default:
+		return 0, false
 	}
 }

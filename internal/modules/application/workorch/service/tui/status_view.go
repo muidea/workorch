@@ -42,6 +42,9 @@ func StatusView(workspaces []backend.WorkspaceInfo, cursor, width int) string {
 
 func WorkspaceDetailView(ws *backend.WorkspaceInfo, cursor, width int) string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Padding(0, 1)
+	if ws == nil {
+		return titleStyle.Render("Workspace") + "\n" + Dim.Render("  No workspace selected.") + "\n"
+	}
 	header := titleStyle.Render(fmt.Sprintf("Workspace: %s - %s", string(ws.ID), ws.Title)) + "\n"
 
 	stateLine := fmt.Sprintf("  State: %s", StateStyle(string(ws.State)))
@@ -78,8 +81,12 @@ func filterPendingApprovals(items []backend.ApprovalInfo) []backend.ApprovalInfo
 }
 
 func truncateStr(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	if maxLen <= 3 {
+		return string(runes[:maxLen])
+	}
+	return string(runes[:maxLen-3]) + "..."
 }

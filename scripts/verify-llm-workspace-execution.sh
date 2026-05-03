@@ -20,7 +20,7 @@ report_failure() {
   if [[ $status -eq 0 ]]; then
     return
   fi
-  echo "workorchd LLM workspace execution verification failed for deployed service $BASE_URL" >&2
+  echo "workorch LLM workspace execution verification failed for deployed workorch service $BASE_URL" >&2
   if [[ -f "$MOCK_LOG" ]]; then
     echo "--- llm-mock.log ---" >&2
     tail -n 200 "$MOCK_LOG" >&2 || true
@@ -652,4 +652,4 @@ grep 'workorch_http_requests_total{endpoint="run_observability"}' "$TMP_DIR/metr
 grep 'workorch_http_requests_total{endpoint="approval_approve"}' "$TMP_DIR/metrics.txt" >/dev/null
 grep 'workorch_http_requests_total{endpoint="approval_reject"}' "$TMP_DIR/metrics.txt" >/dev/null
 
-echo "workorchd LLM workspace execution verification passed for deployed service $BASE_URL"
+echo "workorch LLM workspace execution verification passed for deployed workorch service $BASE_URL"

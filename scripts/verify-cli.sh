@@ -110,19 +110,19 @@ AGENT_ERR=$(echo "/quit" | timeout 5 "$BINARY" -config-dir "$CONFIG_DIR" agent "
 assert_not_contains "$AGENT_ERR" "panic" "agent doesn't panic on error"
 assert_not_contains "$AGENT_ERR" "SIGSEGV" "agent doesn't segfault"
 
-# ── 7. REPL mode accepts input ──
+# ── 7. Default TUI mode ──
 echo ""
-echo "── 7. REPL mode ──"
+echo "── 7. Default TUI mode ──"
 
-REPL=$(printf "/quit\n" | timeout 5 "$BINARY" -config-dir "$CONFIG_DIR" 2>&1) || true
-assert_contains "$REPL" "Agent\|agent" "REPL shows banner"
-assert_contains "$REPL" "bye\|Bye" "REPL /quit works"
+TUI=$(timeout 3 "$BINARY" -config-dir "$CONFIG_DIR" 2>&1) || true
+assert_contains "$TUI" "WorkOrch Agent" "default opens TUI agent"
+assert_not_contains "$TUI" "bye\|Bye" "default no longer opens legacy REPL"
 
 # ── 8. Unknown subcommand fallback to agent ──
 echo ""
 echo "── 8. Fallback mode ──"
 
-FALLBACK=$(echo "/quit" | timeout 5 "$BINARY" -config-dir "$CONFIG_DIR" 查询一下 2>&1) || true
+FALLBACK=$(printf "q" | timeout 5 "$BINARY" -config-dir "$CONFIG_DIR" 查询一下 2>&1) || true
 assert_not_contains "$FALLBACK" "unknown command" "unknown command doesn't appear (falls back to agent)"
 
 # ── Summary ──

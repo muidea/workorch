@@ -33,6 +33,7 @@ type Service interface {
 	CreateMemoryItem(context.Context, CreateMemoryItemCommand) error
 	UpdateMemoryItem(context.Context, UpdateMemoryItemCommand) error
 	GetMemoryItem(context.Context, common.MemoryID) (*memorymodel.MemoryItem, error)
+	DeleteMemoryItem(context.Context, common.MemoryID) error
 	ListMemoryByWorkspace(context.Context, common.WorkspaceID) ([]*memorymodel.MemoryItem, error)
 	SearchMemory(context.Context, repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error)
 }
@@ -41,6 +42,7 @@ type Dependencies struct {
 	CreateMemoryItem      func(context.Context, CreateMemoryItemCommand) error
 	UpdateMemoryItem      func(context.Context, UpdateMemoryItemCommand) error
 	GetMemoryItem         func(context.Context, common.MemoryID) (*memorymodel.MemoryItem, error)
+	DeleteMemoryItem      func(context.Context, common.MemoryID) error
 	ListMemoryByWorkspace func(context.Context, common.WorkspaceID) ([]*memorymodel.MemoryItem, error)
 	SearchMemory          func(context.Context, repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error)
 }
@@ -49,6 +51,7 @@ type Module struct {
 	createMemoryItem      func(context.Context, CreateMemoryItemCommand) error
 	updateMemoryItem      func(context.Context, UpdateMemoryItemCommand) error
 	getMemoryItem         func(context.Context, common.MemoryID) (*memorymodel.MemoryItem, error)
+	deleteMemoryItem      func(context.Context, common.MemoryID) error
 	listMemoryByWorkspace func(context.Context, common.WorkspaceID) ([]*memorymodel.MemoryItem, error)
 	searchMemory          func(context.Context, repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error)
 }
@@ -58,6 +61,7 @@ func New(deps Dependencies) *Module {
 		createMemoryItem:      deps.CreateMemoryItem,
 		updateMemoryItem:      deps.UpdateMemoryItem,
 		getMemoryItem:         deps.GetMemoryItem,
+		deleteMemoryItem:      deps.DeleteMemoryItem,
 		listMemoryByWorkspace: deps.ListMemoryByWorkspace,
 		searchMemory:          deps.SearchMemory,
 	}
@@ -82,6 +86,13 @@ func (m *Module) GetMemoryItem(ctx context.Context, id common.MemoryID) (*memory
 		return nil, common.ErrInvalidArgument
 	}
 	return m.getMemoryItem(ctx, id)
+}
+
+func (m *Module) DeleteMemoryItem(ctx context.Context, id common.MemoryID) error {
+	if m == nil || m.deleteMemoryItem == nil {
+		return common.ErrInvalidArgument
+	}
+	return m.deleteMemoryItem(ctx, id)
 }
 
 func (m *Module) ListMemoryByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {

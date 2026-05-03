@@ -5,7 +5,7 @@
 Build the image:
 
 ```bash
-docker build -t workorchd:local .
+docker build -t workorch:local .
 ```
 
 Or use the repository target:
@@ -17,7 +17,7 @@ make docker-build
 Run with the in-memory repository backend:
 
 ```bash
-docker run --rm -p 8080:8080 workorchd:local
+docker run --rm -p 8080:8080 workorch:local
 ```
 
 Run with the file-backed repository backend:
@@ -29,12 +29,12 @@ docker run --rm \
   -p 8080:8080 \
   -v "$(pwd)/config/container-file/application.toml:/etc/workorch/application.toml:ro" \
   -v "$(pwd)/.workorch-data:/var/lib/workorch" \
-  workorchd:local
+  workorch:local
 ```
 
 The image starts with `/etc/workorch/application.toml` through the magicCommon
 configuration manager. Runtime parameters should be managed through a
-configuration directory and passed with `workorchd -config-dir <dir>` for local
+configuration directory and passed with `workorch --server -config-dir <dir>` for local
 runs, or by mounting a replacement `application.toml` file in containers.
 
 ## Verification
@@ -167,14 +167,14 @@ and prints that path on completion.
 Use `config/application.toml` as the baseline local configuration:
 
 ```bash
-go run ./application/workorchd -config-dir config
+go run ./application/workorch --server -config-dir config
 ```
 
 Use `config/file/application.toml` for the local file-backed backend:
 
 ```bash
 rm -rf .workorch-data
-go run ./application/workorchd -config-dir config/file
+go run ./application/workorch --server -config-dir config/file
 ```
 
 Main sections:

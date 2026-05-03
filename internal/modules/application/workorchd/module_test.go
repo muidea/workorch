@@ -86,7 +86,7 @@ func useWorkorchModuleTestConfig(t *testing.T, addr string, backend string, data
 
 	_ = workorchconfig.Close()
 	configDir := t.TempDir()
-	content := fmt.Sprintf(`endpointName = "workorchd"
+	content := fmt.Sprintf(`endpointName = "workorch"
 
 [server]
 addr = %q

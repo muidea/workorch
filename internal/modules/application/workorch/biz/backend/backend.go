@@ -47,6 +47,71 @@ type WorkspaceInfo struct {
 	SoulBindings     map[string]common.SoulID
 }
 
+type WorkspaceOutcomeInfo struct {
+	WorkspaceID  common.WorkspaceID
+	State        string
+	RunID        common.RunID
+	ResultID     common.ResultID
+	Accepted     bool
+	Terminal     bool
+	Summary      string
+	Reason       string
+	EvidenceRefs []string
+	ArtifactRefs []string
+}
+
+type ResultSummaryInfo struct {
+	GoalOutcome           string
+	ImplementationSummary string
+	VerificationSummary   string
+	EvidenceRefs          []string
+	ArtifactRefs          []string
+	KnownLimitations      []string
+	ResidualRisks         []string
+	NextActions           []string
+}
+
+type ResultInfo struct {
+	ID            common.ResultID
+	WorkspaceID   common.WorkspaceID
+	RunID         common.RunID
+	GoalID        common.GoalID
+	DoDID         common.DoDID
+	State         common.ResultState
+	Title         string
+	Summary       string
+	SourceType    string
+	SourceRef     string
+	EvidenceRefs  []string
+	ArtifactRefs  []string
+	SummaryDetail *ResultSummaryInfo
+}
+
+type ArtifactInfo struct {
+	ID           common.ArtifactID
+	WorkspaceID  common.WorkspaceID
+	RunID        common.RunID
+	ResultID     common.ResultID
+	ArtifactType string
+	Category     string
+	Name         string
+	Summary      string
+	URI          string
+	ContentType  string
+	State        common.ArtifactState
+	EvidenceRefs []string
+}
+
+type WorkspaceSnapshotInfo struct {
+	Workspace WorkspaceInfo
+	Outcome   WorkspaceOutcomeInfo
+	Runs      []RunInfo
+	Results   []ResultInfo
+	Artifacts []ArtifactInfo
+	Decisions []DecisionInfo
+	Approvals []ApprovalInfo
+}
+
 type WorkspaceBackend interface {
 	Create(ctx context.Context, req CreateWorkspaceRequest) (*WorkspaceInfo, error)
 	Get(ctx context.Context, id common.WorkspaceID) (*WorkspaceInfo, error)
@@ -100,13 +165,13 @@ type RunInfo struct {
 }
 
 type ActivateRunRequest struct {
-	GoalID         common.GoalID
-	DoDID          common.DoDID
-	LLMProviderID  string
-	SoulID         common.SoulID
-	SkillIDs       []common.SkillID
-	MCPServerIDs   []common.MCPServerID
-	Priority       int
+	GoalID        common.GoalID
+	DoDID         common.DoDID
+	LLMProviderID string
+	SoulID        common.SoulID
+	SkillIDs      []common.SkillID
+	MCPServerIDs  []common.MCPServerID
+	Priority      int
 }
 
 type RunStatusInfo struct {
@@ -237,16 +302,41 @@ type MCPBackend interface {
 // ── Memory ──
 
 type MemoryItemInfo struct {
-	ID          common.MemoryID
-	WorkspaceID common.WorkspaceID
-	MemoryType  string
-	Content     string
-	Summary     string
+	ID                  common.MemoryID
+	WorkspaceID         common.WorkspaceID
+	RunID               common.RunID
+	SourceType          string
+	SourceRef           string
+	MemoryType          string
+	Content             string
+	Summary             string
+	Tags                []string
+	Importance          int
+	Confidence          int
+	Visibility          string
+	EmbeddingProviderID string
+	EmbeddingModel      string
+	EmbeddingText       string
+	VectorReady         bool
+	VectorDimension     int
+	VectorScore         float64
+	Vector              []float64
+}
+
+type MemorySearchRequest struct {
+	Query string
+	Tags  []string
+	Types []string
+	Limit int
 }
 
 type MemoryBackend interface {
 	Create(ctx context.Context, wsID common.WorkspaceID, m *MemoryItemInfo) (*MemoryItemInfo, error)
+	Get(ctx context.Context, id common.MemoryID) (*MemoryItemInfo, error)
+	Update(ctx context.Context, id common.MemoryID, m *MemoryItemInfo) (*MemoryItemInfo, error)
+	Delete(ctx context.Context, id common.MemoryID) error
 	List(ctx context.Context, wsID common.WorkspaceID) ([]MemoryItemInfo, error)
+	Search(ctx context.Context, wsID common.WorkspaceID, req MemorySearchRequest) ([]MemoryItemInfo, error)
 }
 
 // ── Template ──
@@ -299,7 +389,9 @@ type ConfigBackend interface {
 type EventType string
 
 const (
+	EventWorkspaceCreated      EventType = "workspace/created"
 	EventWorkspaceStateChanged EventType = "workspace/state/changed"
+	EventWorkspaceDeleted      EventType = "workspace/deleted"
 	EventRunStateChanged       EventType = "run/state/changed"
 	EventStepDispatched        EventType = "step/dispatched"
 	EventStepCompleted         EventType = "step/completed"
@@ -308,6 +400,9 @@ const (
 	EventApprovalCreated       EventType = "approval/created"
 	EventApprovalResolved      EventType = "approval/resolved"
 	EventResultAccepted        EventType = "result/accepted"
+	EventMemoryCreated         EventType = "memory/created"
+	EventMemoryUpdated         EventType = "memory/updated"
+	EventMemoryDeleted         EventType = "memory/deleted"
 )
 
 type Event struct {

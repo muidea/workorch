@@ -3,6 +3,8 @@ package client
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strconv"
 )
 
 func (c *Client) ListSouls(ctx context.Context) ([]Soul, error) {
@@ -143,19 +145,62 @@ func (c *Client) CreateMCPCapability(ctx context.Context, cap *MCPCapability) (*
 }
 
 func (c *Client) ListMemory(ctx context.Context, workspaceID string) ([]MemoryItem, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/memory?workspaceId=%s", workspaceID), nil)
+	return c.SearchMemory(ctx, MemorySearchQuery{WorkspaceID: workspaceID})
+}
+
+func (c *Client) SearchMemory(ctx context.Context, query MemorySearchQuery) ([]MemoryItem, error) {
+	values := url.Values{}
+	values.Set("workspaceId", query.WorkspaceID)
+	if query.Query != "" {
+		values.Set("q", query.Query)
+	}
+	for _, tag := range query.Tags {
+		values.Add("tag", tag)
+	}
+	for _, typ := range query.Types {
+		values.Add("type", typ)
+	}
+	if query.Limit > 0 {
+		values.Set("limit", strconv.Itoa(query.Limit))
+	}
+	resp, err := c.do(ctx, "GET", "/api/v1/workorch/memory?"+values.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
 	return decodeEnvelopeSlice[MemoryItem](resp, "memory")
 }
 
-func (c *Client) CreateMemory(ctx context.Context, workspaceID string, item *MemoryItem) (*MemoryItem, error) {
-	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/workspaces/%s/memory", workspaceID), item)
+func (c *Client) GetMemory(ctx context.Context, memoryID string) (*MemoryItem, error) {
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/memory/%s", url.PathEscape(memoryID)), nil)
 	if err != nil {
 		return nil, err
 	}
 	return decodeEnvelope[MemoryItem](resp, "memory")
+}
+
+func (c *Client) CreateMemory(ctx context.Context, workspaceID string, item *MemoryItem) (*MemoryItem, error) {
+	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/workspaces/%s/memory", url.PathEscape(workspaceID)), item)
+	if err != nil {
+		return nil, err
+	}
+	return decodeEnvelope[MemoryItem](resp, "memory")
+}
+
+func (c *Client) UpdateMemory(ctx context.Context, memoryID string, item *MemoryItem) (*MemoryItem, error) {
+	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/memory/%s", url.PathEscape(memoryID)), item)
+	if err != nil {
+		return nil, err
+	}
+	return decodeEnvelope[MemoryItem](resp, "memory")
+}
+
+func (c *Client) DeleteMemory(ctx context.Context, memoryID string) error {
+	resp, err := c.do(ctx, "DELETE", fmt.Sprintf("/api/v1/workorch/memory/%s", url.PathEscape(memoryID)), nil)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
 }
 
 func (c *Client) ListWorkspaceTemplates(ctx context.Context) ([]WorkspaceTemplate, error) {

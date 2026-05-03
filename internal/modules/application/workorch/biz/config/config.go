@@ -20,8 +20,9 @@ type LocalConfig struct {
 }
 
 type DefaultsConfig struct {
-	PollInterval  string `toml:"pollInterval"`
-	DefaultSoulID string `toml:"defaultSoulId"`
+	PollInterval          string `toml:"pollInterval"`
+	DefaultSoulID         string `toml:"defaultSoulId"`
+	LastActiveWorkspaceID string `toml:"lastActiveWorkspaceId"`
 }
 
 type Config struct {

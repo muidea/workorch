@@ -2,16 +2,16 @@ SHELL := /usr/bin/env bash
 
 GO ?= go
 NPM ?= npm
-APP := ./application/workorchd
+APP := ./application/workorch
 PKGS := ./...
 GOFMT ?= gofmt
 GOTEST_FLAGS ?=
-BUILD_OUT ?= ./bin/workorchd
-CLI_BUILD_OUT ?= ./bin/workorch
-CLI_APP := ./application/workorch
+BUILD_OUT ?= ./bin/workorch
+CLI_BUILD_OUT ?= $(BUILD_OUT)
+CLI_APP := $(APP)
 CONSOLE_WEB := ./web/workorch-console
 
-.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean release release-check install-latest ci
+.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent release release-check install-latest ci
 
 help:
 	@echo "Targets:"
@@ -21,12 +21,12 @@ help:
 	@echo "  test-race  - go test -race $(PKGS)"
 	@echo "  vet        - go vet $(PKGS)"
 	@echo "  console-build - build the embedded workorch management console assets"
-	@echo "  build      - build workorchd + CLI into $(BUILD_OUT) and $(CLI_BUILD_OUT)"
-	@echo "  clean      - remove both workorchd and CLI build artifacts"
+	@echo "  build      - build workorch into $(BUILD_OUT)"
+	@echo "  clean      - remove workorch build artifacts"
 	@echo "  run        - go run $(APP) as HTTP service"
 	@echo "  run-file   - clean data, then run $(APP) as HTTP service with file-backed repository"
 	@echo "  verify-boundary-contract - fail if generic runtime/Web code contains business-specific fallback logic"
-	@echo "  verify-service      - verify the deployed workorchd HTTP service at WORKORCH_BASE_URL"
+	@echo "  verify-service      - verify the deployed workorch --server HTTP service at WORKORCH_BASE_URL"
 	@echo "  verify-service-file - alias of verify-service; e2e uses the deployed instance only"
 	@echo "  verify-workspace-template-soul      - verify deployed Soul, Workspace Template, and template-based Workspace setup"
 	@echo "  verify-workspace-template-soul-file - alias of verify-workspace-template-soul; e2e uses the deployed instance only"
@@ -40,24 +40,25 @@ help:
 	@echo "  verify-ci-mvp-file - alias of verify-ci-mvp; e2e uses the deployed instance only"
 	@echo "  verify-mvp      - verify deployed service with local real LLM MVP checks"
 	@echo "  verify-mvp-file - alias of verify-mvp; e2e uses the deployed instance only"
-	@echo "  verify-real-llm - verify a running workorchd against its configured real LLM provider"
-	@echo "  verify-real-mcp-stdio - verify a running workorchd can execute MCP stdio through LLM graph"
-	@echo "  verify-real-vector-memory - verify vector Memory recall on a running workorchd"
+	@echo "  verify-real-llm - verify a running workorch --server against its configured real LLM provider"
+	@echo "  verify-real-mcp-stdio - verify a running workorch --server can execute MCP stdio through LLM graph"
+	@echo "  verify-real-vector-memory - verify vector Memory recall on a running workorch --server"
 	@echo "  verify-real-weather - verify real LLM + MCP stdio current weather query for Zhejiang Hangzhou"
 	@echo "  verify-weather-ticket-approval - verify specified city weather governance with the configured real LLM"
 	@echo "  verify-weather-ticket-approval-mock - CI-only deterministic mock LLM weather governance check"
-	@echo "  verify-real-mvp - verify a running workorchd with real LLM, MCP stdio, and vector Memory checks"
+	@echo "  verify-real-mvp - verify a running workorch --server with real LLM, MCP stdio, and vector Memory checks"
 	@echo "  verify-deployed-full - verify deployed service with mock, SkillHub, and real LLM e2e checks"
 	@echo "  loadtest-governed - run governed workspace concurrency load test with deterministic mock LLM"
 	@echo "  loadtest-governed-real - run governed workspace concurrency load test with configured real LLM"
-	@echo "  docker-build    - docker build local workorchd image"
-	@echo "  docker-run      - run workorchd container with in-memory repository"
-	@echo "  docker-run-file - run workorchd container with file-backed repository"
+	@echo "  docker-build    - docker build local workorch image"
+	@echo "  docker-run      - run workorch --server container with in-memory repository"
+	@echo "  docker-run-file - run workorch --server container with file-backed repository"
 	@echo "  docker-verify      - container image packaging verification; not a deployed-instance e2e target"
 	@echo "  docker-verify-file - container image packaging verification with file-backed container data"
 	@echo "  cli-build  - build the workorch CLI binary into $(CLI_BUILD_OUT)"
 	@echo "  cli-test   - run CLI tests"
 	@echo "  cli-clean  - remove CLI build artifact"
+	@echo "  verify-tui-agent - run TUI agent acceptance checks"
 	@echo "  release     - build cross-platform release binaries into $(RELEASE_OUT)/"
 	@echo "  release-check - fmt-check + vet + test + verify-boundary-contract + release"
 	@echo "  install-latest - install latest release binary from GitHub via install script"
@@ -96,25 +97,25 @@ console-build:
 	if [[ ! -d node_modules ]]; then $(NPM) install; fi && \
 	$(NPM) run build
 
-build: console-build cli-build
+build: console-build
 	@mkdir -p $(dir $(BUILD_OUT))
 	$(GO) build -o $(BUILD_OUT) $(APP)
 
 clean:
-	rm -rf ./bin ./.workorch-data ./workorchd
+	rm -rf ./bin ./.workorch-data ./workorch
 
 run:
-	$(GO) run $(APP) -config-dir config
+	$(GO) run $(APP) --server -config-dir config
 
 run-file:
 	rm -rf ./.workorch-data
-	$(GO) run $(APP) -config-dir config/file
+	$(GO) run $(APP) --server -config-dir config/file
 
 verify-boundary-contract:
 	./scripts/verify-boundary-contract.sh
 
 verify-service:
-	./scripts/verify-workorchd-http.sh
+	./scripts/verify-workorch-http.sh
 
 verify-service-file: verify-service
 
@@ -177,10 +178,10 @@ loadtest-governed-real:
 	WORKORCH_LOAD_LLM_MODE=real ./scripts/loadtest-governed-workspace-concurrency.sh
 
 docker-build:
-	docker build -t workorchd:local .
+	docker build -t workorch:local .
 
 docker-run:
-	docker run --rm -p 8080:8080 workorchd:local
+	docker run --rm -p 8080:8080 workorch:local
 
 docker-run-file:
 	mkdir -p ./.workorch-data
@@ -188,13 +189,13 @@ docker-run-file:
 	docker run --rm -p 8080:8080 \
 		-v $(CURDIR)/config/container-file/application.toml:/etc/workorch/application.toml:ro \
 		-v $(CURDIR)/.workorch-data:/var/lib/workorch \
-		workorchd:local
+		workorch:local
 
 docker-verify:
-	WORKORCH_VERIFY_PORT=18081 ./scripts/verify-workorchd-container.sh
+	WORKORCH_VERIFY_PORT=18081 ./scripts/verify-workorch-container.sh
 
 docker-verify-file:
-	WORKORCH_VERIFY_PORT=18083 WORKORCH_VERIFY_BACKEND=file ./scripts/verify-workorchd-container.sh
+	WORKORCH_VERIFY_PORT=18083 WORKORCH_VERIFY_BACKEND=file ./scripts/verify-workorch-container.sh
 
 RELEASE_OUT ?= ./dist
 RELEASE_TAG ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.0.0-dev")
@@ -206,7 +207,7 @@ release: console-build
 	@for platform in $(RELEASE_PLATFORMS); do \
 		os=$$(echo $$platform | cut -d/ -f1); \
 		arch=$$(echo $$platform | cut -d/ -f2); \
-		out=$(RELEASE_OUT)/workorchd-$(RELEASE_TAG)-$$os-$$arch; \
+		out=$(RELEASE_OUT)/workorch-$(RELEASE_TAG)-$$os-$$arch; \
 		echo "building $$platform -> $$out"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -o $$out $(APP); \
 		tar -czf $$out.tar.gz -C $(RELEASE_OUT) $$(basename $$out); \
@@ -237,5 +238,8 @@ cli-clean:
 
 verify-cli:
 	./scripts/verify-cli.sh $(CLI_BUILD_OUT)
+
+verify-tui-agent:
+	./scripts/verify-tui-agent.sh
 
 ci: fmt-check vet test verify-boundary-contract build cli-test

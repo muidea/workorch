@@ -4061,6 +4061,31 @@ func TestRuntimeOrchestrator_StartRunPersistsRuntimeMemoryWrites(t *testing.T) {
 	}
 }
 
+func TestRuntimeOrchestrator_RunSummaryMemoryUsesDoDAssessmentSummary(t *testing.T) {
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_dod_assessment",
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied":             true,
+			"summary":               "目标已完成，成功查询到服务配置信息",
+			"goalOutcome":           "已成功查询远程服务器配置信息。",
+			"implementationSummary": "通过 SSH 获取 CPU、内存、磁盘和 Docker 版本。",
+			"verificationSummary":   "命令执行成功，exit code 0。",
+		},
+	}
+
+	requests := runtimeRunSummaryMemoryWrite(output)
+	if len(requests) != 1 {
+		t.Fatalf("memory requests = %+v, want one run summary", requests)
+	}
+	got := requests[0]
+	if got.MemoryType != memorycommon.MemoryTypeRunSummary ||
+		got.Summary != "目标已完成，成功查询到服务配置信息" ||
+		!strings.Contains(got.Content, "通过 SSH 获取 CPU、内存、磁盘和 Docker 版本。") {
+		t.Fatalf("run summary memory = %+v, want DoD assessment summary/content", got)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeMemoryWritesConcurrently(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -6107,6 +6132,97 @@ func TestRuntimeOrchestrator_ReusesValidatedDoDAssessmentForCompletionEvidence(t
 	}
 	if !hasSkillFeedbackMemory(memories, runID, "skill-dod-assessment-reuse") {
 		t.Fatalf("memories = %+v, want skill feedback from same validated assessment", memories)
+	}
+}
+
+func TestRuntimeOrchestrator_ResultSummaryIncludesRuntimeEvidenceOutput(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-result-summary-evidence-output")
+	workspaceID := common.WorkspaceID("ws-result-summary-evidence-output")
+	evidenceStepID := common.StepID("run-result-summary-evidence-output/block/query_server_config")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-result-summary-evidence-output",
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: map[string]any{
+			"dialogLanguage": "zh-CN",
+		},
+	}
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/validation"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+	}
+	stepRepo := memory.NewStepRepository()
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    evidenceStepID,
+		RunID: runID,
+		Kind:  "ssh/command",
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"command":  "lscpu && free -h && df -h && docker --version",
+			"exitCode": 0,
+			"stdout": strings.Join([]string{
+				"Model name:                              Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz",
+				"CPU(s):                                  12",
+				"Mem:            15Gi       1.5Gi        11Gi       1.8Mi       3.0Gi        14Gi",
+				"/dev/mapper/ubuntu--vg-ubuntu--lv  466G   23G  419G   6% /",
+				"Docker version 29.2.1, build a5c7197",
+			}, "\n"),
+		},
+	}); err != nil {
+		t.Fatalf("seed evidence step: %v", err)
+	}
+	assessment := map[string]any{
+		"satisfied": true,
+		"items": []map[string]any{
+			{
+				"item":         "输出包含服务器配置",
+				"state":        "satisfied",
+				"evidenceRefs": []string{string(evidenceStepID)},
+			},
+		},
+		"summary":               "目标已完成，成功查询到服务配置信息（CPU、内存、磁盘、Docker版本）。",
+		"goalOutcome":           "已成功查询远程服务器配置信息。",
+		"implementationSummary": "通过 SSH 获取 CPU、内存、磁盘和 Docker 版本。",
+		"verificationSummary":   "命令执行成功，exit code 0。",
+	}
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			Results:   memory.NewResultRepository(),
+			Artifacts: memory.NewArtifactRepository(),
+		},
+	}
+
+	if err := orch.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, "目标已完成，成功查询到服务配置信息（CPU、内存、磁盘、Docker版本）。", nil); err != nil {
+		t.Fatalf("record result from validated assessment: %v", err)
+	}
+	artifacts, err := orch.evidence.Artifacts.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	}
+	var summaryArtifact *resultmodel.Artifact
+	for _, artifact := range artifacts {
+		if artifact.ID == common.ArtifactID(string(runID)+"/artifact/result-summary") {
+			summaryArtifact = artifact
+			break
+		}
+	}
+	if summaryArtifact == nil {
+		t.Fatalf("artifacts = %+v, want result summary artifact", artifacts)
+	}
+	for _, want := range []string{
+		"## 证据输出",
+		"Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz",
+		"Mem:            15Gi",
+		"/dev/mapper/ubuntu--vg-ubuntu--lv  466G",
+		"Docker version 29.2.1",
+	} {
+		if !strings.Contains(summaryArtifact.Summary, want) {
+			t.Fatalf("summary artifact missing %q:\n%s", want, summaryArtifact.Summary)
+		}
 	}
 }
 

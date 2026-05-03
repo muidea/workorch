@@ -1,4 +1,4 @@
-endpointName = "workorchd"
+endpointName = "workorch"
 
 [server]
 addr = ":8080"

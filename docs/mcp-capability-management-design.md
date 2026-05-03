@@ -292,7 +292,7 @@ prompt 示例：
 | `kernel/soul` | Soul 限制 allowed capability / category / server | 从 soulMd 隐式授权 |
 | `kernel/orchestrator` | 根据 Run context 和策略形成候选能力集合，调度 block | 根据具体业务文本硬编码选择工具 |
 | `blocks/mcp` | 执行已批准的 tool call、resource read、prompt get，并归一化输出 | 绕过策略选择能力 |
-| `application/workorchd` | API/Web 管理、执行激活、读模型聚合 | 直接执行 MCP 协议 |
+| `application/workorch` | API/Web 管理、执行激活、读模型聚合 | 直接执行 MCP 协议 |
 | `observability/result` | 记录实际能力使用证据和结果引用 | 把原始 tool 输出直接当最终业务结果 |
 
 边界约束：

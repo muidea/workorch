@@ -124,7 +124,7 @@ The implementation must preserve these ownership boundaries.
 
 | Component | Owns | May Read | Must Not Do |
 | --- | --- | --- | --- |
-| `application/workorchd` | HTTP/Web contract, request validation, execution activation use cases | Workspace, Goal, DoD, Soul, Skill, MCP catalog, Memory, Run snapshots | Provider-specific LLM calls, MCP protocol calls, direct Run state mutation outside appservice contracts |
+| `application/workorch` | HTTP/Web contract, request validation, execution activation use cases | Workspace, Goal, DoD, Soul, Skill, MCP catalog, Memory, Run snapshots | Provider-specific LLM calls, MCP protocol calls, direct Run state mutation outside appservice contracts |
 | `kernel/workspace` | Workspace lifecycle and workspace projection state | Run summary and formal workspace events through stable contracts | Dispatch runtime steps or mutate evidence directly |
 | `kernel/run` | Run, Step, Patch, ToolCall, ValidationResult, RuntimeCheckpoint persistence | Workspace/Goal/DoD references needed for validation | Select LLM provider or execute external tools |
 | `kernel/orchestrator` | Run state machine, Step dispatch, evidence mapping, Decision/Approval blocking | Runtime adapter registry, Run context, normalized Step output | Import provider clients, call MCP directly, concatenate prompt context |
@@ -220,7 +220,7 @@ execution.
 
 ```text
 HTTP/Web request
--> application/workorchd validates workspaceId, goalId, doDId, soulId,
+-> application/workorch validates workspaceId, goalId, doDId, soulId,
    skillIds, and mcpServerIds
 -> kernel/workspace loads Workspace
 -> kernel/workspace or appservice loads active Goal and DoD
@@ -725,7 +725,7 @@ New boundary:
 - Orchestrator must not import or depend on concrete provider clients.
 - Orchestrator consumes only normalized Step output.
 
-### `application/workorchd`
+### `application/workorch`
 
 Responsibilities:
 

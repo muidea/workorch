@@ -9,8 +9,8 @@ import (
 
 // remoteBackend implements Backend using an HTTP client to a running workorchd.
 type remoteBackend struct {
-	cl  *client.Client
-	ws  *remoteWorkspaceBackend
+	cl   *client.Client
+	ws   *remoteWorkspaceBackend
 	goal *remoteGoalBackend
 	dod  *remoteDoDBackend
 	run  *remoteRunBackend
@@ -46,18 +46,18 @@ func NewRemote(addr string) Backend {
 }
 
 func (b *remoteBackend) Workspace() WorkspaceBackend { return b.ws }
-func (b *remoteBackend) Goal() GoalBackend            { return b.goal }
-func (b *remoteBackend) DoD() DoDBackend              { return b.dod }
-func (b *remoteBackend) Run() RunBackend              { return b.run }
-func (b *remoteBackend) Decision() DecisionBackend     { return b.dec }
-func (b *remoteBackend) Approval() ApprovalBackend     { return b.appr }
-func (b *remoteBackend) Soul() SoulBackend             { return b.soul }
-func (b *remoteBackend) Skill() SkillBackend           { return b.sk }
-func (b *remoteBackend) MCP() MCPBackend               { return b.mcp }
-func (b *remoteBackend) Memory() MemoryBackend         { return b.mem }
-func (b *remoteBackend) Template() TemplateBackend     { return b.tmpl }
-func (b *remoteBackend) Config() ConfigBackend         { return b.cfg }
-func (b *remoteBackend) Events() EventsBackend         { return b.evt }
+func (b *remoteBackend) Goal() GoalBackend           { return b.goal }
+func (b *remoteBackend) DoD() DoDBackend             { return b.dod }
+func (b *remoteBackend) Run() RunBackend             { return b.run }
+func (b *remoteBackend) Decision() DecisionBackend   { return b.dec }
+func (b *remoteBackend) Approval() ApprovalBackend   { return b.appr }
+func (b *remoteBackend) Soul() SoulBackend           { return b.soul }
+func (b *remoteBackend) Skill() SkillBackend         { return b.sk }
+func (b *remoteBackend) MCP() MCPBackend             { return b.mcp }
+func (b *remoteBackend) Memory() MemoryBackend       { return b.mem }
+func (b *remoteBackend) Template() TemplateBackend   { return b.tmpl }
+func (b *remoteBackend) Config() ConfigBackend       { return b.cfg }
+func (b *remoteBackend) Events() EventsBackend       { return b.evt }
 
 // ── Remote Workspace ──
 
@@ -101,6 +101,14 @@ func (b *remoteWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, err
 		})
 	}
 	return result, nil
+}
+
+func (b *remoteWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*WorkspaceSnapshotInfo, error) {
+	snapshot, err := b.cl.GetWorkspaceSnapshot(ctx, string(id))
+	if err != nil {
+		return nil, err
+	}
+	return decodeSnapshotInfo(snapshot)
 }
 
 func (b *remoteWorkspaceBackend) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
@@ -224,9 +232,9 @@ func (b *remoteRunBackend) Status(ctx context.Context, id common.RunID) (*RunSta
 		ID: common.RunID(s.ID), WorkspaceID: common.WorkspaceID(s.WorkspaceID),
 		State: common.RunState(s.State), StepCount: s.StepCount,
 		DecisionCount: s.DecisionCount, ApprovalCount: s.ApprovalCount,
-		BlockingTicketID: common.TicketID(s.BlockingTicketID),
+		BlockingTicketID:   common.TicketID(s.BlockingTicketID),
 		BlockingApprovalID: common.ApprovalID(s.BlockingApprovalID),
-		FailureReason: s.FailureReason,
+		FailureReason:      s.FailureReason,
 	}, nil
 }
 
@@ -331,7 +339,9 @@ func (b *remoteApprovalBackend) Get(ctx context.Context, id common.ApprovalID) (
 
 type remoteSoulBackend struct{ cl *client.Client }
 
-func (b *remoteSoulBackend) Create(ctx context.Context, s *SoulInfo) (*SoulInfo, error) { return s, nil }
+func (b *remoteSoulBackend) Create(ctx context.Context, s *SoulInfo) (*SoulInfo, error) {
+	return s, nil
+}
 func (b *remoteSoulBackend) Get(ctx context.Context, id common.SoulID) (*SoulInfo, error) {
 	return &SoulInfo{ID: id}, nil
 }
@@ -343,7 +353,9 @@ func (b *remoteSoulBackend) Delete(ctx context.Context, id common.SoulID) error 
 
 type remoteSkillBackend struct{ cl *client.Client }
 
-func (b *remoteSkillBackend) Create(ctx context.Context, s *SkillInfo) (*SkillInfo, error) { return s, nil }
+func (b *remoteSkillBackend) Create(ctx context.Context, s *SkillInfo) (*SkillInfo, error) {
+	return s, nil
+}
 func (b *remoteSkillBackend) Get(ctx context.Context, id common.SkillID) (*SkillInfo, error) {
 	return &SkillInfo{ID: id}, nil
 }
@@ -361,20 +373,114 @@ func (b *remoteMCPBackend) ListServers(ctx context.Context) ([]MCPServerInfo, er
 func (b *remoteMCPBackend) UpdateServer(ctx context.Context, id common.MCPServerID, s *MCPServerInfo) (*MCPServerInfo, error) {
 	return s, nil
 }
-func (b *remoteMCPBackend) ListCapabilities(ctx context.Context) ([]MCPCapabilityInfo, error) { return nil, nil }
+func (b *remoteMCPBackend) ListCapabilities(ctx context.Context) ([]MCPCapabilityInfo, error) {
+	return nil, nil
+}
 
 type remoteMemoryBackend struct{ cl *client.Client }
 
 func (b *remoteMemoryBackend) Create(ctx context.Context, wsID common.WorkspaceID, m *MemoryItemInfo) (*MemoryItemInfo, error) {
-	return m, nil
+	item, err := b.cl.CreateMemory(ctx, string(wsID), clientMemoryFromInfo(m))
+	if err != nil {
+		return nil, err
+	}
+	return memoryInfoFromClient(item), nil
+}
+func (b *remoteMemoryBackend) Get(ctx context.Context, id common.MemoryID) (*MemoryItemInfo, error) {
+	item, err := b.cl.GetMemory(ctx, string(id))
+	if err != nil {
+		return nil, err
+	}
+	return memoryInfoFromClient(item), nil
+}
+func (b *remoteMemoryBackend) Update(ctx context.Context, id common.MemoryID, m *MemoryItemInfo) (*MemoryItemInfo, error) {
+	item, err := b.cl.UpdateMemory(ctx, string(id), clientMemoryFromInfo(m))
+	if err != nil {
+		return nil, err
+	}
+	return memoryInfoFromClient(item), nil
+}
+func (b *remoteMemoryBackend) Delete(ctx context.Context, id common.MemoryID) error {
+	return b.cl.DeleteMemory(ctx, string(id))
 }
 func (b *remoteMemoryBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]MemoryItemInfo, error) {
-	return nil, nil
+	return b.Search(ctx, wsID, MemorySearchRequest{})
+}
+func (b *remoteMemoryBackend) Search(ctx context.Context, wsID common.WorkspaceID, req MemorySearchRequest) ([]MemoryItemInfo, error) {
+	items, err := b.cl.SearchMemory(ctx, client.MemorySearchQuery{
+		WorkspaceID: string(wsID),
+		Query:       req.Query,
+		Tags:        append([]string(nil), req.Tags...),
+		Types:       append([]string(nil), req.Types...),
+		Limit:       req.Limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]MemoryItemInfo, 0, len(items))
+	for _, item := range items {
+		info := memoryInfoFromClient(&item)
+		ret = append(ret, *info)
+	}
+	return ret, nil
+}
+
+func clientMemoryFromInfo(info *MemoryItemInfo) *client.MemoryItem {
+	if info == nil {
+		return &client.MemoryItem{}
+	}
+	return &client.MemoryItem{
+		ID:                  string(info.ID),
+		WorkspaceID:         string(info.WorkspaceID),
+		RunID:               string(info.RunID),
+		SourceType:          info.SourceType,
+		SourceRef:           info.SourceRef,
+		MemoryType:          info.MemoryType,
+		Content:             info.Content,
+		Summary:             info.Summary,
+		Tags:                append([]string(nil), info.Tags...),
+		Importance:          info.Importance,
+		Confidence:          info.Confidence,
+		Visibility:          info.Visibility,
+		EmbeddingProviderID: info.EmbeddingProviderID,
+		EmbeddingModel:      info.EmbeddingModel,
+		EmbeddingText:       info.EmbeddingText,
+		Vector:              append([]float64(nil), info.Vector...),
+	}
+}
+
+func memoryInfoFromClient(item *client.MemoryItem) *MemoryItemInfo {
+	if item == nil {
+		return nil
+	}
+	return &MemoryItemInfo{
+		ID:                  common.MemoryID(item.ID),
+		WorkspaceID:         common.WorkspaceID(item.WorkspaceID),
+		RunID:               common.RunID(item.RunID),
+		SourceType:          item.SourceType,
+		SourceRef:           item.SourceRef,
+		MemoryType:          item.MemoryType,
+		Content:             item.Content,
+		Summary:             item.Summary,
+		Tags:                append([]string(nil), item.Tags...),
+		Importance:          item.Importance,
+		Confidence:          item.Confidence,
+		Visibility:          item.Visibility,
+		EmbeddingProviderID: item.EmbeddingProviderID,
+		EmbeddingModel:      item.EmbeddingModel,
+		EmbeddingText:       item.EmbeddingText,
+		VectorReady:         item.VectorReady,
+		VectorDimension:     item.VectorDimension,
+		VectorScore:         item.VectorScore,
+		Vector:              append([]float64(nil), item.Vector...),
+	}
 }
 
 type remoteTemplateBackend struct{ cl *client.Client }
 
-func (b *remoteTemplateBackend) Create(ctx context.Context, t *TemplateInfo) (*TemplateInfo, error) { return t, nil }
+func (b *remoteTemplateBackend) Create(ctx context.Context, t *TemplateInfo) (*TemplateInfo, error) {
+	return t, nil
+}
 func (b *remoteTemplateBackend) Get(ctx context.Context, id string) (*TemplateInfo, error) {
 	return &TemplateInfo{ID: id}, nil
 }

@@ -19,7 +19,7 @@ report_failure() {
   if [[ $status -eq 0 ]]; then
     return
   fi
-  echo "workorchd SkillHub workspace execution verification failed for deployed service $BASE_URL" >&2
+  echo "workorch SkillHub workspace execution verification failed for deployed workorch service $BASE_URL" >&2
   if [[ -f "$MOCK_LOG" ]]; then
     echo "--- llm-mock.log ---" >&2
     tail -n 200 "$MOCK_LOG" >&2 || true
@@ -294,4 +294,4 @@ curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DI
 grep 'Selected skills completed run' "$TMP_DIR/memory.json" >/dev/null
 grep "$REPOSITORY_SKILL_ID" "$TMP_DIR/memory.json" >/dev/null
 
-echo "workorchd SkillHub workspace execution verification passed for deployed service $BASE_URL"
+echo "workorch SkillHub workspace execution verification passed for deployed workorch service $BASE_URL"

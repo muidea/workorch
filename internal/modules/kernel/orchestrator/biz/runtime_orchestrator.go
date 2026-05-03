@@ -1184,6 +1184,16 @@ type runtimeMemoryWriteRequest struct {
 	Tags       []string
 }
 
+type resultEvidenceDetail struct {
+	Ref      string
+	Kind     string
+	Command  string
+	ExitCode string
+	Stdout   string
+	Stderr   string
+	Summary  string
+}
+
 func (o *RuntimeOrchestrator) recordMemoryWrites(
 	ctx context.Context,
 	run *runModel.Run,
@@ -1220,6 +1230,7 @@ func (o *RuntimeOrchestrator) recordMemoryWrites(
 		}
 		refs[idx] = string(memoryID)
 		tasks = append(tasks, func() error {
+			topic := events.TopicMemoryCreated
 			if err := o.evidence.MemoryItems.Create(ctx, item); err != nil {
 				if err != common.ErrConflict {
 					return err
@@ -1227,8 +1238,9 @@ func (o *RuntimeOrchestrator) recordMemoryWrites(
 				if err := o.evidence.MemoryItems.Update(ctx, item); err != nil {
 					return err
 				}
+				topic = events.TopicMemoryUpdated
 			}
-			return nil
+			return o.publishMemoryChanged(ctx, topic, item)
 		})
 	}
 	if err := runParallel(tasks...); err != nil {
@@ -1300,17 +1312,44 @@ func appendRunSummaryMemoryWrite(requests []runtimeMemoryWriteRequest, output ma
 	if stage != "llm_dod_assessment" || hasRunSummaryMemoryWrite(requests) {
 		return requests
 	}
-	summary, _ := output["summary"].(string)
-	summary = strings.TrimSpace(summary)
+	summary := runSummaryMemorySummary(output)
 	if summary == "" {
 		return requests
 	}
 	return append(requests, runtimeMemoryWriteRequest{
 		MemoryType: memorycommon.MemoryTypeRunSummary,
 		Summary:    summary,
-		Content:    summary,
+		Content:    runSummaryMemoryContent(output, summary),
 		Tags:       []string{"run_summary"},
 	})
+}
+
+func runSummaryMemorySummary(output map[string]any) string {
+	if output == nil {
+		return ""
+	}
+	if summary := strings.TrimSpace(stringFromMap(output, "summary")); summary != "" {
+		return summary
+	}
+	if assessment := doDAssessmentFromOutput(output); assessment != nil {
+		return strings.TrimSpace(stringFromMap(assessment, "summary"))
+	}
+	return ""
+}
+
+func runSummaryMemoryContent(output map[string]any, summary string) string {
+	assessment := doDAssessmentFromOutput(output)
+	if assessment == nil {
+		return summary
+	}
+	parts := []string{summary}
+	for _, key := range []string{"goalOutcome", "implementationSummary", "verificationSummary"} {
+		value := strings.TrimSpace(stringFromMap(assessment, key))
+		if value != "" && value != summary {
+			parts = append(parts, value)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func hasRunSummaryMemoryWrite(requests []runtimeMemoryWriteRequest) bool {
@@ -2379,9 +2418,12 @@ func (o *RuntimeOrchestrator) recordSkillFeedbackMemoryFromValidatedDoDAssessmen
 		existing.Importance = item.Importance
 		existing.Confidence = item.Confidence
 		existing.Visibility = item.Visibility
-		return o.evidence.MemoryItems.Update(ctx, existing)
+		if err := o.evidence.MemoryItems.Update(ctx, existing); err != nil {
+			return err
+		}
+		return o.publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
 	}
-	return nil
+	return o.publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
 }
 
 func (o *RuntimeOrchestrator) recordResultSummaryArtifact(
@@ -2405,7 +2447,7 @@ func (o *RuntimeOrchestrator) recordResultSummaryArtifact(
 		ArtifactType: resultcommon.ArtifactTypeText,
 		Category:     resultcommon.ArtifactCategoryFinalSummary,
 		Name:         "Accepted Result Summary",
-		Summary:      resultSummaryArtifactContent(run, summary, assessment, evidenceRefs),
+		Summary:      resultSummaryArtifactContent(run, summary, assessment, evidenceRefs, o.resultEvidenceDetails(ctx, evidenceRefs)),
 		URI:          fmt.Sprintf("workorch://runs/%s/results/dod-assessment/summary", run.ID),
 		ContentType:  "text/markdown; charset=utf-8",
 		State:        common.ArtifactStateAvailable,
@@ -2544,7 +2586,38 @@ func resultSummaryFromDoDAssessment(
 	return ret
 }
 
-func resultSummaryArtifactContent(run *runModel.Run, summary string, assessment map[string]any, evidenceRefs []string) string {
+func (o *RuntimeOrchestrator) resultEvidenceDetails(ctx context.Context, evidenceRefs []string) []resultEvidenceDetail {
+	if o == nil || o.steps == nil || len(evidenceRefs) == 0 {
+		return nil
+	}
+	ret := make([]resultEvidenceDetail, 0, len(evidenceRefs))
+	for _, ref := range evidenceRefs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		step, err := o.steps.Get(ctx, common.StepID(ref))
+		if err != nil || step == nil || len(step.Output) == 0 {
+			continue
+		}
+		detail := resultEvidenceDetail{
+			Ref:      ref,
+			Kind:     step.Kind,
+			Command:  strings.TrimSpace(stringFromMap(step.Output, "command")),
+			ExitCode: evidenceValueString(step.Output["exitCode"]),
+			Stdout:   boundedEvidenceText(stringFromMap(step.Output, "stdout")),
+			Stderr:   boundedEvidenceText(stringFromMap(step.Output, "stderr")),
+			Summary:  strings.TrimSpace(stringFromMap(step.Output, "summary")),
+		}
+		if detail.Stdout == "" && detail.Stderr == "" && detail.Summary == "" {
+			continue
+		}
+		ret = append(ret, detail)
+	}
+	return ret
+}
+
+func resultSummaryArtifactContent(run *runModel.Run, summary string, assessment map[string]any, evidenceRefs []string, evidenceDetails []resultEvidenceDetail) string {
 	var builder strings.Builder
 	language := runDialogLanguage(run)
 	builder.WriteString("# ")
@@ -2561,6 +2634,7 @@ func resultSummaryArtifactContent(run *runModel.Run, summary string, assessment 
 	builder.WriteString(localizedSummaryLabel(language, "verification_summary"))
 	builder.WriteString("\n\n")
 	builder.WriteString(firstNonEmptyOrchestratorString(stringFromMap(assessment, "verificationSummary"), verificationSummaryFromEvidence(language, evidenceRefs)))
+	writeEvidenceDetailSection(&builder, language, evidenceDetails)
 	if items, ok := doDAssessmentItemMaps(assessment["items"]); ok && len(items) > 0 {
 		builder.WriteString("\n\n## ")
 		builder.WriteString(localizedSummaryLabel(language, "dod_items"))
@@ -2582,6 +2656,54 @@ func resultSummaryArtifactContent(run *runModel.Run, summary string, assessment 
 	writeStringListSection(&builder, localizedSummaryLabel(language, "residual_risks"), stringSliceFromValue(assessment["residualRisks"]))
 	writeStringListSection(&builder, localizedSummaryLabel(language, "next_actions"), stringSliceFromValue(assessment["nextActions"]))
 	return strings.TrimSpace(builder.String())
+}
+
+func writeEvidenceDetailSection(builder *strings.Builder, language string, details []resultEvidenceDetail) {
+	if builder == nil || len(details) == 0 {
+		return
+	}
+	builder.WriteString("\n\n## ")
+	builder.WriteString(localizedSummaryLabel(language, "evidence_details"))
+	builder.WriteString("\n")
+	for _, detail := range details {
+		builder.WriteString("\n### ")
+		builder.WriteString(markdownHeadingText(firstNonEmptyOrchestratorString(detail.Ref, detail.Kind)))
+		builder.WriteString("\n")
+		if detail.Kind != "" {
+			builder.WriteString("\n- Kind: `")
+			builder.WriteString(markdownInlineCode(detail.Kind))
+			builder.WriteString("`\n")
+		}
+		if detail.ExitCode != "" {
+			builder.WriteString("- Exit Code: `")
+			builder.WriteString(markdownInlineCode(detail.ExitCode))
+			builder.WriteString("`\n")
+		}
+		if detail.Command != "" {
+			builder.WriteString("- Command: `")
+			builder.WriteString(markdownInlineCode(detail.Command))
+			builder.WriteString("`\n")
+		}
+		if detail.Summary != "" {
+			builder.WriteString("\n")
+			builder.WriteString(detail.Summary)
+			builder.WriteString("\n")
+		}
+		if detail.Stdout != "" {
+			builder.WriteString("\n")
+			builder.WriteString(localizedSummaryLabel(language, "stdout"))
+			builder.WriteString(":\n\n```text\n")
+			builder.WriteString(detail.Stdout)
+			builder.WriteString("\n```\n")
+		}
+		if detail.Stderr != "" {
+			builder.WriteString("\n")
+			builder.WriteString(localizedSummaryLabel(language, "stderr"))
+			builder.WriteString(":\n\n```text\n")
+			builder.WriteString(detail.Stderr)
+			builder.WriteString("\n```\n")
+		}
+	}
 }
 
 func verificationSummaryFromEvidence(language string, evidenceRefs []string) string {
@@ -2632,6 +2754,12 @@ func localizedSummaryLabel(language string, key string) string {
 			return "实现摘要"
 		case "verification_summary":
 			return "验证摘要"
+		case "evidence_details":
+			return "证据输出"
+		case "stdout":
+			return "标准输出"
+		case "stderr":
+			return "标准错误"
 		case "dod_items":
 			return "验收项确认"
 		case "dod_table_header":
@@ -2655,6 +2783,12 @@ func localizedSummaryLabel(language string, key string) string {
 		return "Implementation Summary"
 	case "verification_summary":
 		return "Verification Summary"
+	case "evidence_details":
+		return "Evidence Output"
+	case "stdout":
+		return "Stdout"
+	case "stderr":
+		return "Stderr"
 	case "dod_items":
 		return "DoD Items"
 	case "dod_table_header":
@@ -2703,6 +2837,50 @@ func markdownTableCell(value string) string {
 	value = strings.ReplaceAll(value, "|", "\\|")
 	value = strings.ReplaceAll(value, "\n", " ")
 	return value
+}
+
+func markdownInlineCode(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "`", "'")
+	value = strings.ReplaceAll(value, "\n", " ")
+	return value
+}
+
+func markdownHeadingText(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "\n", " ")
+	return value
+}
+
+func evidenceValueString(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(typed)
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	case float64:
+		if typed == float64(int64(typed)) {
+			return strconv.FormatInt(int64(typed), 10)
+		}
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	default:
+		return strings.TrimSpace(fmt.Sprint(value))
+	}
+}
+
+func boundedEvidenceText(value string) string {
+	value = strings.TrimSpace(value)
+	const limit = 12000
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "\n... truncated ..."
 }
 
 func firstNonEmptyOrchestratorString(values ...string) string {
@@ -2995,6 +3173,22 @@ func (o *RuntimeOrchestrator) publishArtifactCreated(ctx context.Context, item *
 			item.State,
 			item.EvidenceRefs,
 		),
+	})
+}
+
+func (o *RuntimeOrchestrator) publishMemoryChanged(ctx context.Context, topic string, item *memorymodel.MemoryItem) error {
+	if item == nil || o.eventHub == nil {
+		return nil
+	}
+	return o.eventHub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        topic,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "memory",
+		SubjectID:    string(item.ID),
+		WorkspaceID:  string(item.WorkspaceID),
+		RunID:        string(item.RunID),
+		Payload:      events.MemoryPayload(item.MemoryType, item.Summary, item.Content, item.SourceType, item.SourceRef, item.Tags, item.Importance, item.Confidence, item.Visibility),
 	})
 }
 

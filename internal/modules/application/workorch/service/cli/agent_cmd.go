@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/agent"
+	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
 )
 
 var agentCmd = &cobra.Command{
@@ -27,18 +28,24 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	goalText := strings.Join(args, " ")
 	ctx := context.Background()
 	llmProvider, _ := cmd.Flags().GetString("llm-provider")
-
-	wsID, err := agent.CreateWorkspace(ctx, "agent-"+truncateForID(goalText), goalText)
-	if err != nil {
-		return fmt.Errorf("create workspace: %w", err)
+	wsID := defaultWorkspaceID
+	if wsID == "" {
+		created, err := mustBackend().Workspace().Create(ctx, backend.CreateWorkspaceRequest{
+			Title:       "agent-" + truncateForID(goalText),
+			Description: goalText,
+		})
+		if err != nil {
+			return fmt.Errorf("create workspace: %w", err)
+		}
+		wsID = string(created.ID)
 	}
-	fmt.Fprintf(os.Stderr, "Workspace created: %s\n", wsID)
+	fmt.Fprintf(os.Stderr, "Workspace: %s\n", wsID)
 
-	a := agent.New()
+	a := agent.NewWithBackend(mustBackend())
 	defer a.Close()
 
 	go func() {
-		_ = a.Run(ctx, wsID, goalText, llmProvider)
+		_ = a.RunWithBackend(ctx, wsID, goalText, llmProvider)
 	}()
 
 	for evt := range a.Events() {

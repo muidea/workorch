@@ -70,7 +70,7 @@ Target:
 
 - Evaluate and implement a formal lifecycle path for long-lived workorch runtime
   units using `magicCommon/framework/plugin/module.Register` where appropriate.
-- Keep `application/workorchd` as the explicit owner of which modules are loaded
+- Keep `application/workorch` as the explicit owner of which modules are loaded
   for this service.
 - Avoid duplicating request-scoped runtime session behavior; long-lived runtime
   units must have clear ownership, startup, teardown, health, and failure

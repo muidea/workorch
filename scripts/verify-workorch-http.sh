@@ -11,7 +11,7 @@ report_failure() {
   if [[ $status -eq 0 ]]; then
     return
   fi
-  echo "workorchd HTTP verification failed for deployed service $BASE_URL" >&2
+  echo "workorch HTTP verification failed for deployed workorch service $BASE_URL" >&2
   echo "artifacts=$TMP_DIR" >&2
   for file in "$TMP_DIR"/*.json; do
     [[ -f "$file" ]] || continue
@@ -73,4 +73,4 @@ grep '"runs"' "$TMP_DIR/runs.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/events?limit=20" >"$TMP_DIR/events.json"
 grep '"eventRecords"' "$TMP_DIR/events.json" >/dev/null
 
-echo "workorchd HTTP verification passed for deployed service $BASE_URL"
+echo "workorch HTTP verification passed for deployed workorch service $BASE_URL"

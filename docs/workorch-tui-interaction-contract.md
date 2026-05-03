@@ -5,56 +5,64 @@
 ```
 ╔══════════════════════════════════════════════════════════╦═════════════╗
 ║                    WorkOrch Agent                         ║  Workspaces ║
-║  ws-xxx ▸ _                                              ║  ▸ ws-xxx   ║
-║                                                          ║    ws-yyy   ║
-║  ── Event Stream ──────────────────────────────────────  ║    ws-zzz   ║
-║  run: run-xxx  |  ⏳ step: shell/command                  ║             ║
-║  ⚠ Decision: provide API key                             ║  ⚠ 1 open   ║
-║  ✓ Done (15s)                                            ║  ⚡ 1 pending║
+║  Workspace: project  /repo/project                       ║  ▸ project  ║
+║  Running - llm/workspace_execution                       ║    ops      ║
+║  ──────────────────────────────────────────────────────  ║    docs     ║
 ║                                                          ║             ║
 ║  ── Result ──                                            ║             ║
 ║  天气查询完成：多云 +21°C                                  ║             ║
+║                                                          ║             ║
+║  Goal > _                                                ║  0 decisions║
 ╚══════════════════════════════════════════════════════════╩═════════════╝
 ```
 
 ### Key areas
-1. **Top bar**: title + active workspace ID
-2. **Input area** (row 2): `ws-xxx ▸ [cursor]` — user types goals here
-3. **Event stream** (rows 3-8): scrollable live agent progress
-4. **Result area** (rows 9-12): terminal result after run completes
-5. **Right panel**: all-workspace monitor + alert counts
+1. **Top bar**: title + active Workspace title/path context
+2. **Progress summary**: compact state such as idle, running, waiting,
+   completed, or failed
+3. **Result area**: terminal result and Artifact references after completion
+4. **Right panel**: bounded all-Workspace monitor + alert counts
+5. **Bottom input area**: current goal, decision answer, or approval response
 6. **Bottom bar**: keyboard shortcuts help
 
 ## Input Area Behavior
 
 - Accepts free-text goals (same as current REPL).
+- The input area is fixed near the bottom of the terminal, above the help bar.
 - Press Enter to submit.
 - Press Ctrl+C to interrupt the active Run.
 - Press ESC to clear current input.
 - `/` commands supported: `/quit`, `/help`, `/new`, `/retry`.
 
-## Event Stream Display
+## Progress Summary Display
 
-Each event appears as a non-scrolling entry:
+The default TUI does not render a detailed event stream. Detailed run, step,
+decision, approval, and provider stream events remain backend records only.
+The visible progress area is a compact summary:
 
-| Event | Display |
+| State | Display |
 |-------|---------|
-| Run created | `run: run-xxx` |
-| Step dispatched | `⏳ step: shell/command [args]` |
-| Step completed | `✓ step: shell/command (2s)` |
-| Decision required | `⚠ Decision: question text` |
-| Approval required | `⚡ Approval: reason text` |
-| Run completed | `✓ Done (15s)` |
-| Run failed | `✗ error message` |
+| Idle | `Idle` |
+| Submitting | `Submitting - Submitting goal` |
+| Running | `Running - <current step kind>` |
+| Decision required | `Waiting for decision - <question>` |
+| Approval required | `Waiting for approval - <reason>` |
+| Completed | `Completed - Completed` |
+| Failed | `Failed - <failure reason>` |
+| Interrupted | `Interrupted - Interrupted` |
 
-Events scroll up as new ones arrive. At most 20 visible entries.
+The progress summary is updated by EventHub callbacks and must not be refreshed
+by polling.
 
 ## Decision/Approval Inline Handling
 
-When a decision arrives, the input area changes context:
+When a decision arrives, the current blocking prompt is shown in the main area
+and the bottom input area changes context:
 ```
-  ⚠ Decision: How should I query the weather?
-  ▸ [type your answer here]
+  Decision required
+  How should I query the weather?
+
+  Decision answer > _
 ```
 User answer is sent via Enter. No modal dialog.
 
@@ -64,6 +72,10 @@ User answer is sent via Enter. No modal dialog.
 - Active workspace highlighted.
 - Up/Down arrows switch active workspace.
 - Alert counts for blocking items.
+- Workspace labels prefer title or working directory, with short ID only as
+  supporting context.
+- The monitor is bounded and must not fill the screen with long raw Workspace
+  IDs.
 
 ## Keyboard Actions
 
@@ -81,16 +93,16 @@ User answer is sent via Enter. No modal dialog.
 ## Interrupt Semantics
 
 - Ctrl+C during a Run: cancel the Run context.
-- Event stream shows "Interrupted.".
+- Progress summary shows "Interrupted.".
 - Result area shows partial output if available.
 - Agent returns to input prompt.
 
 ## Post-Run Display
 
 After Run completes:
-- Event stream shows final entry: `✓ Done (15s)` or `✗ error`.
-- Result area shows SummaryDetail.GoalOutcome.
-- Step outputs (shell/mcp) displayed below the summary.
+- Progress summary shows completed or failed state.
+- Result area shows SummaryDetail.GoalOutcome or the accepted Result summary.
+- Artifact references are displayed when provided by backend result events.
 - Input prompt returns for next goal.
 - The same Workspace remains active.
 
@@ -106,6 +118,8 @@ Idle → Submitting → Running → (Decision/Approval) → Running → Complete
 
 - All state arrives via EventHub callbacks (no polling).
 - Workspace list updates when `EventWorkspaceStateChanged` fires.
-- Event stream entries added on `EventRunStateChanged`, `EventStepDispatched`, etc.
+- Progress summary updates on `EventRunStateChanged`, `EventStepDispatched`,
+  blocking item, and terminal result callbacks.
 - Right panel alert counts update on decision/approval events.
-- Input cursor always visible except during decision/approval inline mode (where it changes context).
+- Input cursor remains in the bottom input area and changes prompt for
+  decision/approval inline modes.

@@ -6,6 +6,8 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 var approvalCmd = &cobra.Command{
@@ -18,10 +20,8 @@ var approvalListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List approval gates",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
 		wsID, _ := cmd.Flags().GetString("workspace")
-		runID, _ := cmd.Flags().GetString("run")
-		approvals, err := cl.ListApprovals(ctx(), wsID, runID)
+		approvals, err := mustBackend().Approval().List(ctx(), common.WorkspaceID(wsID))
 		if err != nil {
 			return fmt.Errorf("list approvals: %w", err)
 		}
@@ -49,8 +49,7 @@ var approvalShowCmd = &cobra.Command{
 	Short: "Show approval gate details",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
-		a, err := cl.GetApproval(ctx(), args[0])
+		a, err := mustBackend().Approval().Get(ctx(), common.ApprovalID(args[0]))
 		if err != nil {
 			return fmt.Errorf("get approval: %w", err)
 		}
@@ -58,7 +57,7 @@ var approvalShowCmd = &cobra.Command{
 			printJSON(a)
 			return nil
 		}
-		fmt.Println(styleTitle.Render("Approval: " + a.ID))
+		fmt.Println(styleTitle.Render("Approval: " + string(a.ID)))
 		fmt.Printf("  Workspace: %s\n", a.WorkspaceID)
 		fmt.Printf("  Run: %s\n", a.RunID)
 		fmt.Printf("  State: %s\n", stateIcon(a.State))
@@ -72,12 +71,11 @@ var approvalApproveCmd = &cobra.Command{
 	Short: "Approve an approval gate",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
-		a, err := cl.Approve(ctx(), args[0])
+		a, err := mustBackend().Approval().Approve(ctx(), common.ApprovalID(args[0]))
 		if err != nil {
 			return fmt.Errorf("approve: %w", err)
 		}
-		fmt.Println(styleSuccess.Render("Approved: " + a.ID))
+		fmt.Println(styleSuccess.Render("Approved: " + string(a.ID)))
 		fmt.Printf("  New state: %s\n", stateIcon(a.State))
 		return nil
 	},
@@ -88,12 +86,11 @@ var approvalRejectCmd = &cobra.Command{
 	Short: "Reject an approval gate",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
-		a, err := cl.Reject(ctx(), args[0])
+		a, err := mustBackend().Approval().Reject(ctx(), common.ApprovalID(args[0]))
 		if err != nil {
 			return fmt.Errorf("reject: %w", err)
 		}
-		fmt.Println(styleError.Render("Rejected: " + a.ID))
+		fmt.Println(styleError.Render("Rejected: " + string(a.ID)))
 		fmt.Printf("  New state: %s\n", stateIcon(a.State))
 		return nil
 	},

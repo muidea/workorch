@@ -26,6 +26,7 @@ echo "=== CLI Architecture Guards ==="
 # 1. Forbidden imports in local-mode packages.
 check_no_import "service/tui" "biz/client" "TUI: no HTTP client import"
 check_no_import "biz/agent" "biz/client" "Agent: no HTTP client import"
+check_no_import "service/cli" "biz/client" "CLI commands: no HTTP client import"
 check_no_import "service/cli" "biz/local" "CLI commands: no launcher import"
 
 # 2. biz/local directory must not exist.
@@ -42,10 +43,10 @@ else
   pass "TUI: no fixed-interval polling"
 fi
 
-# 4. No HTTP client outside biz/client, biz/backend/remote, and service/cli (transition).
+# 4. No HTTP client outside biz/client and biz/backend/remote.
 echo "  → Checking no HTTP client leakage outside allowed packages..."
 HTTP_LEAKS=$(grep -rn '"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"' \
-  "$CLI_ROOT/$MODULE_BASE/" 2>/dev/null | grep -v 'biz/client/' | grep -v 'biz/backend/remote.go' | grep -v 'service/cli/' | grep -v 'service/tui/' || true)
+  "$CLI_ROOT/$MODULE_BASE/" 2>/dev/null | grep -v 'biz/client/' | grep -v 'biz/backend/remote.go' || true)
 if [ -n "$HTTP_LEAKS" ]; then
   fail "HTTP client leaked outside allowed packages: $HTTP_LEAKS"
 else
@@ -55,14 +56,25 @@ fi
 # 5. Local backend must not import biz/client.
 check_no_import "biz/backend" "biz/client" "Local backend: no HTTP client import"
 
-# 6. No agent direct appservice.NewRuntimeSessionFromInitiator calls outside legacy path.
-# (Agent has both legacy and backend paths — allowed during transition.)
-AGENT_SESSION_CALLS=$(grep -rn 'NewRuntimeSessionFromInitiator' \
-  "$CLI_ROOT/$MODULE_BASE/biz/agent/agent.go" 2>/dev/null | wc -l)
-if [ "$AGENT_SESSION_CALLS" -le 3 ]; then
-  pass "Agent: session init limited to legacy path"
+# 6. Agent must not create runtime sessions or use fixed-interval polling.
+AGENT_SESSION_CALLS=$(grep -c 'NewRuntimeSessionFromInitiator' \
+  "$CLI_ROOT/$MODULE_BASE/biz/agent/agent.go" 2>/dev/null || true)
+if [ "$AGENT_SESSION_CALLS" -eq 0 ]; then
+  pass "Agent: no direct runtime session initialization"
 else
-  fail "Agent: too many direct session initializations ($AGENT_SESSION_CALLS)"
+  fail "Agent: direct runtime session initialization found"
+fi
+
+if grep -rq 'time\.NewTicker\|time\.Ticker\|time\.Tick\|pollRun' "$CLI_ROOT/$MODULE_BASE/biz/agent" 2>/dev/null; then
+  fail "Agent: uses fixed-interval polling"
+else
+  pass "Agent: no fixed-interval polling"
+fi
+
+if grep -rq 'startAgentREPL\|runAgentREPL' "$CLI_ROOT/$MODULE_BASE/service/cli" 2>/dev/null; then
+  fail "CLI: legacy REPL entrypoint remains"
+else
+  pass "CLI: default entrypoint is TUI-backed"
 fi
 
 echo ""

@@ -2,7 +2,10 @@ package backend
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -15,6 +18,7 @@ type eventHubBackend struct {
 	*localBackend
 	eventHub events.Hub
 	evtImpl  *eventHubEventsBackend
+	unsubCmd func()
 }
 
 // NewEventHub creates a Backend using EventHub for progress events.
@@ -25,11 +29,303 @@ func NewEventHub(session *appservice.RuntimeSession, eventHub events.Hub) Backen
 		eventHub:     eventHub,
 	}
 	b.evtImpl = &eventHubEventsBackend{parent: b}
+	b.registerCommandDispatcher()
 	return b
 }
 
+func (b *eventHubBackend) Workspace() WorkspaceBackend { return &eventHubWorkspaceBackend{parent: b} }
+func (b *eventHubBackend) Goal() GoalBackend           { return &eventHubGoalBackend{parent: b} }
+func (b *eventHubBackend) DoD() DoDBackend             { return &eventHubDoDBackend{parent: b} }
+func (b *eventHubBackend) Run() RunBackend             { return &eventHubRunBackend{parent: b} }
+func (b *eventHubBackend) Decision() DecisionBackend   { return &eventHubDecisionBackend{parent: b} }
+func (b *eventHubBackend) Approval() ApprovalBackend   { return &eventHubApprovalBackend{parent: b} }
+func (b *eventHubBackend) Soul() SoulBackend           { return &eventHubSoulBackend{parent: b} }
+func (b *eventHubBackend) Skill() SkillBackend         { return &eventHubSkillBackend{parent: b} }
+func (b *eventHubBackend) MCP() MCPBackend             { return &eventHubMCPBackend{parent: b} }
+func (b *eventHubBackend) Memory() MemoryBackend       { return &eventHubMemoryBackend{parent: b} }
+func (b *eventHubBackend) Template() TemplateBackend   { return &eventHubTemplateBackend{parent: b} }
+func (b *eventHubBackend) Config() ConfigBackend       { return &eventHubConfigBackend{parent: b} }
+
 // Events overrides the stub to provide EventHub-driven subscriptions.
 func (b *eventHubBackend) Events() EventsBackend { return b.evtImpl }
+
+func (b *eventHubBackend) registerCommandDispatcher() {
+	if b == nil || b.eventHub == nil {
+		return
+	}
+	b.unsubCmd = b.eventHub.Subscribe(events.TopicCLICommand, func(ctx context.Context, envelope events.Envelope) error {
+		cmd, ok := events.DecodeCLICommandPayload(envelope.Payload)
+		if !ok {
+			return common.ErrInvalidArgument
+		}
+		result := b.dispatchCommand(ctx, cmd)
+		return b.eventHub.Publish(ctx, events.Envelope{
+			Topic:        events.TopicCLIResult,
+			SourceModule: "workorch-cli-dispatcher",
+			SubjectType:  cmd.SubjectType,
+			SubjectID:    cmd.SubjectID,
+			WorkspaceID:  string(cmd.WorkspaceID),
+			RunID:        string(cmd.RunID),
+			Payload:      events.CLIResultPayloadMap(result),
+		})
+	})
+}
+
+func (b *eventHubBackend) dispatchCommand(ctx context.Context, cmd events.CLICommandPayload) events.CLIResultPayload {
+	result := events.CLIResultPayload{
+		CorrelationID: cmd.CorrelationID,
+		CommandID:     cmd.CommandID,
+		OccurredAt:    time.Now().UTC(),
+		WorkspaceID:   cmd.WorkspaceID,
+		RunID:         cmd.RunID,
+	}
+	resource, resources, err := b.handleCommand(appservice.ContextWithEventHub(ctx, b.eventHub), cmd)
+	if err != nil {
+		result.OK = false
+		result.Error = err.Error()
+		return result
+	}
+	result.OK = true
+	result.Resource = resource
+	result.Resources = resources
+	return result
+}
+
+func (b *eventHubBackend) handleCommand(ctx context.Context, cmd events.CLICommandPayload) (map[string]any, []map[string]any, error) {
+	switch cmd.Command {
+	case events.CommandWorkspaceCreate:
+		ws, err := b.localBackend.ws.Create(ctx, CreateWorkspaceRequest{
+			Title:            stringValue(cmd.Payload, "title"),
+			Description:      stringValue(cmd.Payload, "description"),
+			WorkingDirectory: stringValue(cmd.Payload, "workingDirectory"),
+		})
+		return resourceMap(ws), nil, err
+	case events.CommandWorkspaceGet:
+		ws, err := b.localBackend.ws.Get(ctx, common.WorkspaceID(cmd.SubjectID))
+		return resourceMap(ws), nil, err
+	case events.CommandWorkspaceList:
+		items, err := b.localBackend.ws.List(ctx)
+		return nil, resourceMaps(items), err
+	case events.CommandWorkspaceSnapshot:
+		snapshot, err := b.localBackend.ws.Snapshot(ctx, common.WorkspaceID(cmd.SubjectID))
+		return resourceMap(snapshot), nil, err
+	case events.CommandWorkspaceDelete:
+		err := b.localBackend.ws.Delete(ctx, common.WorkspaceID(cmd.SubjectID), boolValue(cmd.Payload, "purge"))
+		return nil, nil, err
+	case events.CommandGoalDefine:
+		item, err := b.localBackend.goal.Define(ctx, cmd.WorkspaceID, stringValue(cmd.Payload, "text"))
+		return resourceMap(item), nil, err
+	case events.CommandGoalList:
+		items, err := b.localBackend.goal.List(ctx, cmd.WorkspaceID)
+		return nil, resourceMaps(items), err
+	case events.CommandGoalGet:
+		item, err := b.localBackend.goal.Get(ctx, common.GoalID(cmd.SubjectID))
+		return resourceMap(item), nil, err
+	case events.CommandGoalUpdate:
+		item, err := b.localBackend.goal.Update(ctx, common.GoalID(cmd.SubjectID), stringValue(cmd.Payload, "text"))
+		return resourceMap(item), nil, err
+	case events.CommandDoDDefine:
+		item, err := b.localBackend.dod.Define(ctx, cmd.WorkspaceID, stringSliceValue(cmd.Payload, "items"))
+		return resourceMap(item), nil, err
+	case events.CommandDoDList:
+		items, err := b.localBackend.dod.List(ctx, cmd.WorkspaceID)
+		return nil, resourceMaps(items), err
+	case events.CommandDoDGet:
+		item, err := b.localBackend.dod.Get(ctx, common.DoDID(cmd.SubjectID))
+		return resourceMap(item), nil, err
+	case events.CommandDoDUpdate:
+		item, err := b.localBackend.dod.Update(ctx, common.DoDID(cmd.SubjectID), stringSliceValue(cmd.Payload, "items"))
+		return resourceMap(item), nil, err
+	case events.CommandRunActivate:
+		item, err := b.localBackend.run.Activate(ctx, cmd.WorkspaceID, ActivateRunRequest{
+			GoalID:        common.GoalID(stringValue(cmd.Payload, "goalId")),
+			DoDID:         common.DoDID(stringValue(cmd.Payload, "doDId")),
+			LLMProviderID: stringValue(cmd.Payload, "llmProviderId"),
+			SoulID:        common.SoulID(stringValue(cmd.Payload, "soulId")),
+			SkillIDs:      skillIDsValue(cmd.Payload, "skillIds"),
+			MCPServerIDs:  mcpServerIDsValue(cmd.Payload, "mcpServerIds"),
+			Priority:      intValue(cmd.Payload, "priority"),
+		})
+		return resourceMap(item), nil, err
+	case events.CommandRunResume:
+		item, err := b.localBackend.run.Resume(ctx, common.RunID(cmd.SubjectID))
+		return resourceMap(item), nil, err
+	case events.CommandRunGet:
+		item, err := b.localBackend.run.Get(ctx, common.RunID(cmd.SubjectID))
+		return resourceMap(item), nil, err
+	case events.CommandRunList:
+		items, err := b.localBackend.run.List(ctx, cmd.WorkspaceID)
+		return nil, resourceMaps(items), err
+	case events.CommandRunStatus:
+		item, err := b.localBackend.run.Status(ctx, common.RunID(cmd.SubjectID))
+		return resourceMap(item), nil, err
+	case events.CommandDecisionResolve:
+		item, err := b.localBackend.dec.Resolve(ctx, ResolveDecisionRequest{
+			TicketID:       common.TicketID(cmd.SubjectID),
+			ResolutionType: stringValue(cmd.Payload, "resolutionType"),
+			Payload:        mapValue(cmd.Payload, "payload"),
+		})
+		return resourceMap(item), nil, err
+	case events.CommandDecisionList:
+		items, err := b.localBackend.dec.List(ctx, cmd.WorkspaceID)
+		return nil, resourceMaps(items), err
+	case events.CommandDecisionGet:
+		item, err := b.localBackend.dec.Get(ctx, common.TicketID(cmd.SubjectID))
+		return resourceMap(item), nil, err
+	case events.CommandDecisionBatch:
+		items, err := b.localBackend.dec.BatchResolve(ctx, ticketIDsValue(cmd.Payload, "ticketIds"), stringValue(cmd.Payload, "resolutionType"), mapValue(cmd.Payload, "payload"))
+		return nil, resourceMaps(items), err
+	case events.CommandApprovalApprove:
+		item, err := b.localBackend.appr.Approve(ctx, common.ApprovalID(cmd.SubjectID))
+		return resourceMap(item), nil, err
+	case events.CommandApprovalReject:
+		item, err := b.localBackend.appr.Reject(ctx, common.ApprovalID(cmd.SubjectID))
+		return resourceMap(item), nil, err
+	case events.CommandApprovalList:
+		items, err := b.localBackend.appr.List(ctx, cmd.WorkspaceID)
+		return nil, resourceMaps(items), err
+	case events.CommandApprovalGet:
+		item, err := b.localBackend.appr.Get(ctx, common.ApprovalID(cmd.SubjectID))
+		return resourceMap(item), nil, err
+	case events.CommandApprovalBatch:
+		items, err := b.localBackend.appr.BatchResolve(ctx, approvalIDsValue(cmd.Payload, "approvalIds"), stringValue(cmd.Payload, "action"))
+		return nil, resourceMaps(items), err
+	case events.CommandSoulCreate:
+		item, err := b.localBackend.soul.Create(ctx, decodeOrZero[SoulInfo](cmd.Payload))
+		return resourceMap(item), nil, err
+	case events.CommandSoulGet:
+		item, err := b.localBackend.soul.Get(ctx, common.SoulID(cmd.SubjectID))
+		return resourceMap(item), nil, err
+	case events.CommandSoulList:
+		items, err := b.localBackend.soul.List(ctx)
+		return nil, resourceMaps(items), err
+	case events.CommandSoulUpdate:
+		item, err := b.localBackend.soul.Update(ctx, common.SoulID(cmd.SubjectID), decodeOrZero[SoulInfo](cmd.Payload))
+		return resourceMap(item), nil, err
+	case events.CommandSoulDelete:
+		err := b.localBackend.soul.Delete(ctx, common.SoulID(cmd.SubjectID))
+		return nil, nil, err
+	case events.CommandSkillCreate:
+		item, err := b.localBackend.skill.Create(ctx, decodeOrZero[SkillInfo](cmd.Payload))
+		return resourceMap(item), nil, err
+	case events.CommandSkillGet:
+		item, err := b.localBackend.skill.Get(ctx, common.SkillID(cmd.SubjectID))
+		return resourceMap(item), nil, err
+	case events.CommandSkillList:
+		items, err := b.localBackend.skill.List(ctx)
+		return nil, resourceMaps(items), err
+	case events.CommandMCPServerCreate:
+		item, err := b.localBackend.mcp.CreateServer(ctx, decodeOrZero[MCPServerInfo](cmd.Payload))
+		return resourceMap(item), nil, err
+	case events.CommandMCPServerGet:
+		item, err := b.localBackend.mcp.GetServer(ctx, common.MCPServerID(cmd.SubjectID))
+		return resourceMap(item), nil, err
+	case events.CommandMCPServerList:
+		items, err := b.localBackend.mcp.ListServers(ctx)
+		return nil, resourceMaps(items), err
+	case events.CommandMCPServerUpdate:
+		item, err := b.localBackend.mcp.UpdateServer(ctx, common.MCPServerID(cmd.SubjectID), decodeOrZero[MCPServerInfo](cmd.Payload))
+		return resourceMap(item), nil, err
+	case events.CommandMCPCapabilityList:
+		items, err := b.localBackend.mcp.ListCapabilities(ctx)
+		return nil, resourceMaps(items), err
+	case events.CommandMemoryCreate:
+		item, err := b.localBackend.mem.Create(ctx, cmd.WorkspaceID, decodeOrZero[MemoryItemInfo](cmd.Payload))
+		return resourceMap(item), nil, err
+	case events.CommandMemoryGet:
+		item, err := b.localBackend.mem.Get(ctx, common.MemoryID(cmd.SubjectID))
+		return resourceMap(item), nil, err
+	case events.CommandMemoryUpdate:
+		item, err := b.localBackend.mem.Update(ctx, common.MemoryID(cmd.SubjectID), decodeOrZero[MemoryItemInfo](cmd.Payload))
+		return resourceMap(item), nil, err
+	case events.CommandMemoryDelete:
+		err := b.localBackend.mem.Delete(ctx, common.MemoryID(cmd.SubjectID))
+		return nil, nil, err
+	case events.CommandMemoryList:
+		items, err := b.localBackend.mem.List(ctx, cmd.WorkspaceID)
+		return nil, resourceMaps(items), err
+	case events.CommandMemorySearch:
+		req := decodeOrZero[MemorySearchRequest](cmd.Payload)
+		items, err := b.localBackend.mem.Search(ctx, cmd.WorkspaceID, *req)
+		return nil, resourceMaps(items), err
+	case events.CommandTemplateCreate:
+		item, err := b.localBackend.tmpl.Create(ctx, decodeOrZero[TemplateInfo](cmd.Payload))
+		return resourceMap(item), nil, err
+	case events.CommandTemplateGet:
+		item, err := b.localBackend.tmpl.Get(ctx, cmd.SubjectID)
+		return resourceMap(item), nil, err
+	case events.CommandTemplateList:
+		items, err := b.localBackend.tmpl.List(ctx)
+		return nil, resourceMaps(items), err
+	case events.CommandTemplateUpdate:
+		item, err := b.localBackend.tmpl.Update(ctx, cmd.SubjectID, decodeOrZero[TemplateInfo](cmd.Payload))
+		return resourceMap(item), nil, err
+	case events.CommandTemplateDelete:
+		err := b.localBackend.tmpl.Delete(ctx, cmd.SubjectID)
+		return nil, nil, err
+	case events.CommandConfigurationGet:
+		item, err := b.localBackend.cfg.Get(ctx)
+		return resourceMap(item), nil, err
+	default:
+		return nil, nil, fmt.Errorf("unsupported CLI command %q", cmd.Command)
+	}
+}
+
+func (b *eventHubBackend) sendCommand(ctx context.Context, command string, wsID common.WorkspaceID, runID common.RunID, subjectType string, subjectID string, payload map[string]any) (events.CLIResultPayload, error) {
+	if b == nil || b.eventHub == nil {
+		return events.CLIResultPayload{}, common.ErrInvalidArgument
+	}
+	commandID := fmt.Sprintf("cmd-%d", time.Now().UTC().UnixNano())
+	correlationID := fmt.Sprintf("corr-%d", time.Now().UTC().UnixNano())
+	resultCh := make(chan events.CLIResultPayload, 1)
+
+	unsubscribe := b.eventHub.Subscribe(events.TopicCLIResult, func(_ context.Context, envelope events.Envelope) error {
+		result, ok := events.DecodeCLIResultPayload(envelope.Payload)
+		if !ok || result.CorrelationID != correlationID {
+			return nil
+		}
+		select {
+		case resultCh <- result:
+		default:
+		}
+		return nil
+	})
+	defer unsubscribe()
+
+	cmd := events.CLICommandPayload{
+		CommandID:     commandID,
+		CorrelationID: correlationID,
+		Actor:         "workorch-cli",
+		IssuedAt:      time.Now().UTC(),
+		WorkspaceID:   wsID,
+		RunID:         runID,
+		SubjectType:   subjectType,
+		SubjectID:     subjectID,
+		Command:       command,
+		Payload:       payload,
+	}
+	if err := b.eventHub.Publish(ctx, events.Envelope{
+		Topic:        events.TopicCLICommand,
+		SourceModule: "workorch-cli",
+		SubjectType:  subjectType,
+		SubjectID:    subjectID,
+		WorkspaceID:  string(wsID),
+		RunID:        string(runID),
+		Payload:      events.CLICommandPayloadMap(cmd),
+	}); err != nil {
+		return events.CLIResultPayload{}, err
+	}
+
+	select {
+	case <-ctx.Done():
+		return events.CLIResultPayload{}, ctx.Err()
+	case result := <-resultCh:
+		if !result.OK {
+			return result, fmt.Errorf("%s", result.Error)
+		}
+		return result, nil
+	}
+}
 
 // ── EventHub Events Backend ──
 
@@ -43,7 +339,7 @@ func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler EventHand
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	unsub := b.parent.eventHub.Subscribe("/", func(ctx context.Context, envelope events.Envelope) error {
+	unsub := b.parent.eventHub.Subscribe("*", func(ctx context.Context, envelope events.Envelope) error {
 		evt := convertEnvelope(envelope)
 		if evt.Type == "" {
 			return nil
@@ -58,8 +354,12 @@ func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler EventHand
 
 func convertEnvelope(envelope events.Envelope) Event {
 	switch envelope.Topic {
+	case events.TopicWorkspaceCreated:
+		return Event{Type: EventWorkspaceCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
 	case events.TopicWorkspaceStateChanged:
 		return Event{Type: EventWorkspaceStateChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
+	case events.TopicWorkspaceDeleted:
+		return Event{Type: EventWorkspaceDeleted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
 	case events.TopicRunCreated, events.TopicRunStateChanged:
 		return Event{Type: EventRunStateChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
 	case events.TopicStepDispatched:
@@ -67,16 +367,494 @@ func convertEnvelope(envelope events.Envelope) Event {
 	case events.TopicStepStateChanged:
 		return Event{Type: EventStepCompleted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
 	case events.TopicTicketCreated:
-		return Event{Type: EventDecisionCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
+		return Event{Type: EventDecisionCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "ticketId", envelope.SubjectID)}
 	case events.TopicTicketResolved:
-		return Event{Type: EventDecisionResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
+		return Event{Type: EventDecisionResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "ticketId", envelope.SubjectID)}
 	case events.TopicApprovalCreated:
-		return Event{Type: EventApprovalCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
+		return Event{Type: EventApprovalCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "approvalId", envelope.SubjectID)}
 	case events.TopicApprovalResolved:
-		return Event{Type: EventApprovalResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
+		return Event{Type: EventApprovalResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "approvalId", envelope.SubjectID)}
 	case events.TopicResultAccepted:
 		return Event{Type: EventResultAccepted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
+	case events.TopicMemoryCreated:
+		return Event{Type: EventMemoryCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "memoryId", envelope.SubjectID)}
+	case events.TopicMemoryUpdated:
+		return Event{Type: EventMemoryUpdated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "memoryId", envelope.SubjectID)}
+	case events.TopicMemoryDeleted:
+		return Event{Type: EventMemoryDeleted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "memoryId", envelope.SubjectID)}
 	default:
 		return Event{}
 	}
+}
+
+func enrichSubjectPayload(payload map[string]any, key string, subjectID string) map[string]any {
+	if subjectID == "" {
+		return payload
+	}
+	if value, ok := payload[key].(string); ok && value != "" {
+		return payload
+	}
+	next := make(map[string]any, len(payload)+1)
+	for k, v := range payload {
+		next[k] = v
+	}
+	next[key] = subjectID
+	return next
+}
+
+// ── EventHub command backends ──
+
+type eventHubWorkspaceBackend struct{ parent *eventHubBackend }
+
+func (b *eventHubWorkspaceBackend) Create(ctx context.Context, req CreateWorkspaceRequest) (*WorkspaceInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandWorkspaceCreate, "", "", "workspace", "", map[string]any{
+		"title":            req.Title,
+		"description":      req.Description,
+		"workingDirectory": req.WorkingDirectory,
+	})
+	return decodeResultResource[WorkspaceInfo](result, err)
+}
+func (b *eventHubWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*WorkspaceInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandWorkspaceGet, "", "", "workspace", string(id), nil)
+	return decodeResultResource[WorkspaceInfo](result, err)
+}
+func (b *eventHubWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandWorkspaceList, "", "", "workspace", "", nil)
+	return decodeResultResources[WorkspaceInfo](result, err)
+}
+func (b *eventHubWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*WorkspaceSnapshotInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandWorkspaceSnapshot, id, "", "workspace", string(id), nil)
+	return decodeResultResource[WorkspaceSnapshotInfo](result, err)
+}
+func (b *eventHubWorkspaceBackend) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
+	_, err := b.parent.sendCommand(ctx, events.CommandWorkspaceDelete, "", "", "workspace", string(id), map[string]any{"purge": purge})
+	return err
+}
+
+type eventHubGoalBackend struct{ parent *eventHubBackend }
+
+func (b *eventHubGoalBackend) Define(ctx context.Context, wsID common.WorkspaceID, text string) (*GoalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandGoalDefine, wsID, "", "goal", "", map[string]any{"text": text})
+	return decodeResultResource[GoalInfo](result, err)
+}
+func (b *eventHubGoalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]GoalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandGoalList, wsID, "", "goal", "", nil)
+	return decodeResultResources[GoalInfo](result, err)
+}
+func (b *eventHubGoalBackend) Get(ctx context.Context, id common.GoalID) (*GoalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandGoalGet, "", "", "goal", string(id), nil)
+	return decodeResultResource[GoalInfo](result, err)
+}
+func (b *eventHubGoalBackend) Update(ctx context.Context, id common.GoalID, text string) (*GoalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandGoalUpdate, "", "", "goal", string(id), map[string]any{"text": text})
+	return decodeResultResource[GoalInfo](result, err)
+}
+
+type eventHubDoDBackend struct{ parent *eventHubBackend }
+
+func (b *eventHubDoDBackend) Define(ctx context.Context, wsID common.WorkspaceID, items []string) (*DoDInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandDoDDefine, wsID, "", "dod", "", map[string]any{"items": items})
+	return decodeResultResource[DoDInfo](result, err)
+}
+func (b *eventHubDoDBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]DoDInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandDoDList, wsID, "", "dod", "", nil)
+	return decodeResultResources[DoDInfo](result, err)
+}
+func (b *eventHubDoDBackend) Get(ctx context.Context, id common.DoDID) (*DoDInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandDoDGet, "", "", "dod", string(id), nil)
+	return decodeResultResource[DoDInfo](result, err)
+}
+func (b *eventHubDoDBackend) Update(ctx context.Context, id common.DoDID, items []string) (*DoDInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandDoDUpdate, "", "", "dod", string(id), map[string]any{"items": items})
+	return decodeResultResource[DoDInfo](result, err)
+}
+
+type eventHubRunBackend struct{ parent *eventHubBackend }
+
+func (b *eventHubRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandRunActivate, wsID, "", "run", "", map[string]any{
+		"goalId":        string(req.GoalID),
+		"doDId":         string(req.DoDID),
+		"llmProviderId": req.LLMProviderID,
+		"soulId":        string(req.SoulID),
+		"skillIds":      skillIDStrings(req.SkillIDs),
+		"mcpServerIds":  mcpServerIDStrings(req.MCPServerIDs),
+		"priority":      req.Priority,
+	})
+	return decodeResultResource[RunInfo](result, err)
+}
+func (b *eventHubRunBackend) Resume(ctx context.Context, id common.RunID) (*RunInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandRunResume, "", id, "run", string(id), nil)
+	return decodeResultResource[RunInfo](result, err)
+}
+func (b *eventHubRunBackend) Get(ctx context.Context, id common.RunID) (*RunInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandRunGet, "", id, "run", string(id), nil)
+	return decodeResultResource[RunInfo](result, err)
+}
+func (b *eventHubRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]RunInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandRunList, wsID, "", "run", "", nil)
+	return decodeResultResources[RunInfo](result, err)
+}
+func (b *eventHubRunBackend) Status(ctx context.Context, id common.RunID) (*RunStatusInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandRunStatus, "", id, "run", string(id), nil)
+	return decodeResultResource[RunStatusInfo](result, err)
+}
+
+type eventHubDecisionBackend struct{ parent *eventHubBackend }
+
+func (b *eventHubDecisionBackend) Resolve(ctx context.Context, req ResolveDecisionRequest) (*DecisionInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandDecisionResolve, "", "", "decision", string(req.TicketID), map[string]any{"resolutionType": req.ResolutionType, "payload": req.Payload})
+	return decodeResultResource[DecisionInfo](result, err)
+}
+func (b *eventHubDecisionBackend) BatchResolve(ctx context.Context, ticketIDs []common.TicketID, resolutionType string, payload map[string]any) ([]DecisionInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandDecisionBatch, "", "", "decision", "", map[string]any{"ticketIds": ticketIDStrings(ticketIDs), "resolutionType": resolutionType, "payload": payload})
+	return decodeResultResources[DecisionInfo](result, err)
+}
+func (b *eventHubDecisionBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]DecisionInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandDecisionList, wsID, "", "decision", "", nil)
+	return decodeResultResources[DecisionInfo](result, err)
+}
+func (b *eventHubDecisionBackend) Get(ctx context.Context, id common.TicketID) (*DecisionInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandDecisionGet, "", "", "decision", string(id), nil)
+	return decodeResultResource[DecisionInfo](result, err)
+}
+
+type eventHubApprovalBackend struct{ parent *eventHubBackend }
+
+func (b *eventHubApprovalBackend) Approve(ctx context.Context, id common.ApprovalID) (*ApprovalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandApprovalApprove, "", "", "approval", string(id), nil)
+	return decodeResultResource[ApprovalInfo](result, err)
+}
+func (b *eventHubApprovalBackend) Reject(ctx context.Context, id common.ApprovalID) (*ApprovalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandApprovalReject, "", "", "approval", string(id), nil)
+	return decodeResultResource[ApprovalInfo](result, err)
+}
+func (b *eventHubApprovalBackend) BatchResolve(ctx context.Context, ids []common.ApprovalID, action string) ([]ApprovalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandApprovalBatch, "", "", "approval", "", map[string]any{"approvalIds": approvalIDStrings(ids), "action": action})
+	return decodeResultResources[ApprovalInfo](result, err)
+}
+func (b *eventHubApprovalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]ApprovalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandApprovalList, wsID, "", "approval", "", nil)
+	return decodeResultResources[ApprovalInfo](result, err)
+}
+func (b *eventHubApprovalBackend) Get(ctx context.Context, id common.ApprovalID) (*ApprovalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandApprovalGet, "", "", "approval", string(id), nil)
+	return decodeResultResource[ApprovalInfo](result, err)
+}
+
+type eventHubSoulBackend struct{ parent *eventHubBackend }
+
+func (b *eventHubSoulBackend) Create(ctx context.Context, s *SoulInfo) (*SoulInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandSoulCreate, "", "", "soul", string(s.ID), resourceMap(s))
+	return decodeResultResource[SoulInfo](result, err)
+}
+func (b *eventHubSoulBackend) Get(ctx context.Context, id common.SoulID) (*SoulInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandSoulGet, "", "", "soul", string(id), nil)
+	return decodeResultResource[SoulInfo](result, err)
+}
+func (b *eventHubSoulBackend) List(ctx context.Context) ([]SoulInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandSoulList, "", "", "soul", "", nil)
+	return decodeResultResources[SoulInfo](result, err)
+}
+func (b *eventHubSoulBackend) Update(ctx context.Context, id common.SoulID, s *SoulInfo) (*SoulInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandSoulUpdate, "", "", "soul", string(id), resourceMap(s))
+	return decodeResultResource[SoulInfo](result, err)
+}
+func (b *eventHubSoulBackend) Delete(ctx context.Context, id common.SoulID) error {
+	_, err := b.parent.sendCommand(ctx, events.CommandSoulDelete, "", "", "soul", string(id), nil)
+	return err
+}
+
+type eventHubSkillBackend struct{ parent *eventHubBackend }
+
+func (b *eventHubSkillBackend) Create(ctx context.Context, s *SkillInfo) (*SkillInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandSkillCreate, "", "", "skill", string(s.ID), resourceMap(s))
+	return decodeResultResource[SkillInfo](result, err)
+}
+func (b *eventHubSkillBackend) Get(ctx context.Context, id common.SkillID) (*SkillInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandSkillGet, "", "", "skill", string(id), nil)
+	return decodeResultResource[SkillInfo](result, err)
+}
+func (b *eventHubSkillBackend) List(ctx context.Context) ([]SkillInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandSkillList, "", "", "skill", "", nil)
+	return decodeResultResources[SkillInfo](result, err)
+}
+
+type eventHubMCPBackend struct{ parent *eventHubBackend }
+
+func (b *eventHubMCPBackend) CreateServer(ctx context.Context, s *MCPServerInfo) (*MCPServerInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandMCPServerCreate, "", "", "mcp-server", string(s.ID), resourceMap(s))
+	return decodeResultResource[MCPServerInfo](result, err)
+}
+func (b *eventHubMCPBackend) GetServer(ctx context.Context, id common.MCPServerID) (*MCPServerInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandMCPServerGet, "", "", "mcp-server", string(id), nil)
+	return decodeResultResource[MCPServerInfo](result, err)
+}
+func (b *eventHubMCPBackend) ListServers(ctx context.Context) ([]MCPServerInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandMCPServerList, "", "", "mcp-server", "", nil)
+	return decodeResultResources[MCPServerInfo](result, err)
+}
+func (b *eventHubMCPBackend) UpdateServer(ctx context.Context, id common.MCPServerID, s *MCPServerInfo) (*MCPServerInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandMCPServerUpdate, "", "", "mcp-server", string(id), resourceMap(s))
+	return decodeResultResource[MCPServerInfo](result, err)
+}
+func (b *eventHubMCPBackend) ListCapabilities(ctx context.Context) ([]MCPCapabilityInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandMCPCapabilityList, "", "", "mcp-capability", "", nil)
+	return decodeResultResources[MCPCapabilityInfo](result, err)
+}
+
+type eventHubMemoryBackend struct{ parent *eventHubBackend }
+
+func (b *eventHubMemoryBackend) Create(ctx context.Context, wsID common.WorkspaceID, m *MemoryItemInfo) (*MemoryItemInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandMemoryCreate, wsID, "", "memory", string(m.ID), resourceMap(m))
+	return decodeResultResource[MemoryItemInfo](result, err)
+}
+func (b *eventHubMemoryBackend) Get(ctx context.Context, id common.MemoryID) (*MemoryItemInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandMemoryGet, "", "", "memory", string(id), nil)
+	return decodeResultResource[MemoryItemInfo](result, err)
+}
+func (b *eventHubMemoryBackend) Update(ctx context.Context, id common.MemoryID, m *MemoryItemInfo) (*MemoryItemInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandMemoryUpdate, "", "", "memory", string(id), resourceMap(m))
+	return decodeResultResource[MemoryItemInfo](result, err)
+}
+func (b *eventHubMemoryBackend) Delete(ctx context.Context, id common.MemoryID) error {
+	_, err := b.parent.sendCommand(ctx, events.CommandMemoryDelete, "", "", "memory", string(id), nil)
+	return err
+}
+func (b *eventHubMemoryBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]MemoryItemInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandMemoryList, wsID, "", "memory", "", nil)
+	return decodeResultResources[MemoryItemInfo](result, err)
+}
+func (b *eventHubMemoryBackend) Search(ctx context.Context, wsID common.WorkspaceID, req MemorySearchRequest) ([]MemoryItemInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandMemorySearch, wsID, "", "memory", "", resourceMap(req))
+	return decodeResultResources[MemoryItemInfo](result, err)
+}
+
+type eventHubTemplateBackend struct{ parent *eventHubBackend }
+
+func (b *eventHubTemplateBackend) Create(ctx context.Context, t *TemplateInfo) (*TemplateInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandTemplateCreate, "", "", "template", t.ID, resourceMap(t))
+	return decodeResultResource[TemplateInfo](result, err)
+}
+func (b *eventHubTemplateBackend) Get(ctx context.Context, id string) (*TemplateInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandTemplateGet, "", "", "template", id, nil)
+	return decodeResultResource[TemplateInfo](result, err)
+}
+func (b *eventHubTemplateBackend) List(ctx context.Context) ([]TemplateInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandTemplateList, "", "", "template", "", nil)
+	return decodeResultResources[TemplateInfo](result, err)
+}
+func (b *eventHubTemplateBackend) Update(ctx context.Context, id string, t *TemplateInfo) (*TemplateInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandTemplateUpdate, "", "", "template", id, resourceMap(t))
+	return decodeResultResource[TemplateInfo](result, err)
+}
+func (b *eventHubTemplateBackend) Delete(ctx context.Context, id string) error {
+	_, err := b.parent.sendCommand(ctx, events.CommandTemplateDelete, "", "", "template", id, nil)
+	return err
+}
+
+type eventHubConfigBackend struct{ parent *eventHubBackend }
+
+func (b *eventHubConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandConfigurationGet, "", "", "configuration", "", nil)
+	return decodeResultResource[ServiceConfig](result, err)
+}
+
+func resourceMap(v any) map[string]any {
+	if v == nil {
+		return nil
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func resourceMaps[T any](items []T) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		out = append(out, resourceMap(item))
+	}
+	return out
+}
+
+func decodeResultResource[T any](result events.CLIResultPayload, err error) (*T, error) {
+	if err != nil {
+		return nil, err
+	}
+	if result.Resource == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(result.Resource)
+	if err != nil {
+		return nil, err
+	}
+	var out T
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func decodeResultResources[T any](result events.CLIResultPayload, err error) ([]T, error) {
+	if err != nil {
+		return nil, err
+	}
+	out := make([]T, 0, len(result.Resources))
+	for _, resource := range result.Resources {
+		item, err := decodeResultResource[T](events.CLIResultPayload{Resource: resource}, nil)
+		if err != nil {
+			return nil, err
+		}
+		if item != nil {
+			out = append(out, *item)
+		}
+	}
+	return out, nil
+}
+
+func decodeOrZero[T any](payload map[string]any) *T {
+	data, _ := json.Marshal(payload)
+	var out T
+	_ = json.Unmarshal(data, &out)
+	return &out
+}
+
+func stringValue(payload map[string]any, key string) string {
+	if payload == nil {
+		return ""
+	}
+	if v, ok := payload[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func boolValue(payload map[string]any, key string) bool {
+	if payload == nil {
+		return false
+	}
+	if v, ok := payload[key].(bool); ok {
+		return v
+	}
+	return false
+}
+
+func intValue(payload map[string]any, key string) int {
+	if payload == nil {
+		return 0
+	}
+	switch v := payload[key].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+func mapValue(payload map[string]any, key string) map[string]any {
+	if payload == nil {
+		return nil
+	}
+	if v, ok := payload[key].(map[string]any); ok {
+		return v
+	}
+	return nil
+}
+
+func stringSliceValue(payload map[string]any, key string) []string {
+	if payload == nil {
+		return nil
+	}
+	switch v := payload[key].(type) {
+	case []string:
+		return append([]string(nil), v...)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func ticketIDsValue(payload map[string]any, key string) []common.TicketID {
+	values := stringSliceValue(payload, key)
+	out := make([]common.TicketID, 0, len(values))
+	for _, value := range values {
+		out = append(out, common.TicketID(value))
+	}
+	return out
+}
+
+func approvalIDsValue(payload map[string]any, key string) []common.ApprovalID {
+	values := stringSliceValue(payload, key)
+	out := make([]common.ApprovalID, 0, len(values))
+	for _, value := range values {
+		out = append(out, common.ApprovalID(value))
+	}
+	return out
+}
+
+func skillIDsValue(payload map[string]any, key string) []common.SkillID {
+	values := stringSliceValue(payload, key)
+	out := make([]common.SkillID, 0, len(values))
+	for _, value := range values {
+		out = append(out, common.SkillID(value))
+	}
+	return out
+}
+
+func mcpServerIDsValue(payload map[string]any, key string) []common.MCPServerID {
+	values := stringSliceValue(payload, key)
+	out := make([]common.MCPServerID, 0, len(values))
+	for _, value := range values {
+		out = append(out, common.MCPServerID(value))
+	}
+	return out
+}
+
+func ticketIDStrings(ids []common.TicketID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, string(id))
+	}
+	return out
+}
+
+func approvalIDStrings(ids []common.ApprovalID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, string(id))
+	}
+	return out
+}
+
+func skillIDStrings(ids []common.SkillID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, string(id))
+	}
+	return out
+}
+
+func mcpServerIDStrings(ids []common.MCPServerID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, string(id))
+	}
+	return out
 }

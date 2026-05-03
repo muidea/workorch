@@ -13,7 +13,7 @@ import (
 func TestReadServiceConfigurationRedactsLLMProviders(t *testing.T) {
 	configDir := t.TempDir()
 	content := `
-endpointName = "workorchd"
+endpointName = "workorch"
 
 [server]
 addr = "127.0.0.1:18080"
@@ -78,7 +78,7 @@ nonChatOperations = ["embeddings"]
 func TestUpdateLLMConfigurationPersistsAndReloadsProviders(t *testing.T) {
 	configDir := t.TempDir()
 	content := `
-endpointName = "workorchd"
+endpointName = "workorch"
 
 [server]
 addr = "127.0.0.1:18080"
@@ -146,7 +146,7 @@ disabled = false
 
 func TestUpdateLLMConfigurationRejectsMissingDefaultProvider(t *testing.T) {
 	configDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`endpointName = "workorchd"`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`endpointName = "workorch"`), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	_ = workorchconfig.Close()
@@ -167,7 +167,7 @@ func TestUpdateLLMConfigurationRejectsMissingDefaultProvider(t *testing.T) {
 
 func TestUpdateLLMConfigurationRejectsEmbeddingProviderWithoutCapability(t *testing.T) {
 	configDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`endpointName = "workorchd"`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`endpointName = "workorch"`), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	_ = workorchconfig.Close()
@@ -189,7 +189,7 @@ func TestUpdateLLMConfigurationRejectsEmbeddingProviderWithoutCapability(t *test
 
 func TestUpdateLLMConfigurationRejectsUnavailableEmbeddingProvider(t *testing.T) {
 	configDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`endpointName = "workorchd"`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`endpointName = "workorch"`), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	_ = workorchconfig.Close()

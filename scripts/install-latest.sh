@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="${WORKORCH_REPO:-muidea/workorch}"
-BIN_NAME="${WORKORCH_BIN_NAME:-workorchd}"
+BIN_NAME="${WORKORCH_BIN_NAME:-workorch}"
 INSTALL_DIR="${WORKORCH_INSTALL_DIR:-/usr/local/bin}"
 VERSION="${WORKORCH_VERSION:-latest}"
 TMP_DIR="$(mktemp -d)"
@@ -50,7 +50,7 @@ else
   fi
   echo "fetching release info from $api_url..."
   download_url="$(curl -fsS "$api_url" \
-    | grep -o "https://[^\"]*workorchd-[^\"]*-$os-$arch.tar.gz" \
+    | grep -o "https://[^\"]*workorch-[^\"]*-$os-$arch.tar.gz" \
     | head -n1)"
   if [[ -z "$download_url" ]]; then
     echo "no release asset found for $os/$arch" >&2
@@ -70,8 +70,7 @@ echo "extracting $tarball..."
 tar -xzf "$tarball" -C "$TMP_DIR"
 binary="$(find "$TMP_DIR" -name "$BIN_NAME" -type f | head -n1)"
 if [[ -z "$binary" ]]; then
-  # The tarball contains workorchd-<tag>-<os>-<arch>
-  binary="$(find "$TMP_DIR" -name "workorchd-*" -type f | head -n1)"
+  binary="$(find "$TMP_DIR" -name "workorch-*" -type f | head -n1)"
 fi
 if [[ -z "$binary" ]]; then
   echo "binary not found in tarball" >&2

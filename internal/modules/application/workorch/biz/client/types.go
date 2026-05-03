@@ -222,6 +222,14 @@ type MemoryItem struct {
 	Vector              []float64 `json:"vector,omitempty"`
 }
 
+type MemorySearchQuery struct {
+	WorkspaceID string
+	Query       string
+	Tags        []string
+	Types       []string
+	Limit       int
+}
+
 // Workspace template type.
 type WorkspaceTemplate struct {
 	ID            string            `json:"id"`
@@ -265,16 +273,16 @@ type RunStatus struct {
 }
 
 type RunOutcome struct {
-	WorkspaceID    string   `json:"workspaceId,omitempty"`
-	State          string   `json:"state"`
-	RunID          string   `json:"runId,omitempty"`
-	ResultID       string   `json:"resultId,omitempty"`
-	Accepted       bool     `json:"accepted"`
-	Terminal       bool     `json:"terminal"`
-	Summary        string   `json:"summary,omitempty"`
-	Reason         string   `json:"reason,omitempty"`
-	EvidenceRefs   []string `json:"evidenceRefs,omitempty"`
-	ArtifactRefs   []string `json:"artifactRefs,omitempty"`
+	WorkspaceID  string   `json:"workspaceId,omitempty"`
+	State        string   `json:"state"`
+	RunID        string   `json:"runId,omitempty"`
+	ResultID     string   `json:"resultId,omitempty"`
+	Accepted     bool     `json:"accepted"`
+	Terminal     bool     `json:"terminal"`
+	Summary      string   `json:"summary,omitempty"`
+	Reason       string   `json:"reason,omitempty"`
+	EvidenceRefs []string `json:"evidenceRefs,omitempty"`
+	ArtifactRefs []string `json:"artifactRefs,omitempty"`
 }
 
 type DoDAssessmentItem struct {
@@ -287,9 +295,9 @@ type DoDAssessmentItem struct {
 }
 
 type DoDAssessment struct {
-	Satisfied bool                 `json:"satisfied"`
-	Items     []DoDAssessmentItem  `json:"items,omitempty"`
-	Summary   string               `json:"summary,omitempty"`
+	Satisfied bool                `json:"satisfied"`
+	Items     []DoDAssessmentItem `json:"items,omitempty"`
+	Summary   string              `json:"summary,omitempty"`
 }
 
 type ResultSummary struct {
@@ -305,22 +313,22 @@ type ResultSummary struct {
 }
 
 type Result struct {
-	ID            string         `json:"id"`
-	WorkspaceID   string         `json:"workspaceId"`
-	RunID         string         `json:"runId"`
-	GoalID        string         `json:"goalId,omitempty"`
-	DoDID         string         `json:"doDId,omitempty"`
-	State         string         `json:"state"`
-	Title         string         `json:"title,omitempty"`
-	Summary       string         `json:"summary,omitempty"`
-	SourceType    string         `json:"sourceType,omitempty"`
-	SourceRef     string         `json:"sourceRef,omitempty"`
-	EvidenceRefs  []string       `json:"evidenceRefs,omitempty"`
-	ArtifactRefs  []string       `json:"artifactRefs,omitempty"`
-	DoDAssessment DoDAssessment  `json:"doDAssessment,omitempty"`
-	SummaryDetail ResultSummary  `json:"summaryDetail,omitempty"`
-	CreatedAt     string         `json:"createdAt,omitempty"`
-	UpdatedAt     string         `json:"updatedAt,omitempty"`
+	ID            string        `json:"id"`
+	WorkspaceID   string        `json:"workspaceId"`
+	RunID         string        `json:"runId"`
+	GoalID        string        `json:"goalId,omitempty"`
+	DoDID         string        `json:"doDId,omitempty"`
+	State         string        `json:"state"`
+	Title         string        `json:"title,omitempty"`
+	Summary       string        `json:"summary,omitempty"`
+	SourceType    string        `json:"sourceType,omitempty"`
+	SourceRef     string        `json:"sourceRef,omitempty"`
+	EvidenceRefs  []string      `json:"evidenceRefs,omitempty"`
+	ArtifactRefs  []string      `json:"artifactRefs,omitempty"`
+	DoDAssessment DoDAssessment `json:"doDAssessment,omitempty"`
+	SummaryDetail ResultSummary `json:"summaryDetail,omitempty"`
+	CreatedAt     string        `json:"createdAt,omitempty"`
+	UpdatedAt     string        `json:"updatedAt,omitempty"`
 }
 
 type Artifact struct {
@@ -362,19 +370,19 @@ type RuntimeCheckpoint struct {
 
 // Snapshot is the full workspace/run snapshot returned by the read model.
 type WorkspaceSnapshot struct {
-	Workspace            Workspace            `json:"workspace"`
-	Outcome              RunOutcome           `json:"outcome"`
-	Runs                 []Run                `json:"runs,omitempty"`
-	Results              []Result             `json:"results,omitempty"`
-	Artifacts            []Artifact           `json:"artifacts,omitempty"`
-	Decisions            []Decision           `json:"decisions,omitempty"`
-	Approvals            []Approval           `json:"approvals,omitempty"`
-	Steps                []Step               `json:"steps,omitempty"`
-	ToolCalls            []ToolCall           `json:"toolCalls,omitempty"`
-	Patches              []Patch              `json:"patches,omitempty"`
-	ValidationResults    []ValidationResult   `json:"validationResults,omitempty"`
-	RuntimeCheckpoints   []RuntimeCheckpoint  `json:"runtimeCheckpoints,omitempty"`
-	EventRecords         []EventRecord        `json:"eventRecords,omitempty"`
+	Workspace          Workspace           `json:"workspace"`
+	Outcome            RunOutcome          `json:"outcome"`
+	Runs               []Run               `json:"runs,omitempty"`
+	Results            []Result            `json:"results,omitempty"`
+	Artifacts          []Artifact          `json:"artifacts,omitempty"`
+	Decisions          []Decision          `json:"decisions,omitempty"`
+	Approvals          []Approval          `json:"approvals,omitempty"`
+	Steps              []Step              `json:"steps,omitempty"`
+	ToolCalls          []ToolCall          `json:"toolCalls,omitempty"`
+	Patches            []Patch             `json:"patches,omitempty"`
+	ValidationResults  []ValidationResult  `json:"validationResults,omitempty"`
+	RuntimeCheckpoints []RuntimeCheckpoint `json:"runtimeCheckpoints,omitempty"`
+	EventRecords       []EventRecord       `json:"eventRecords,omitempty"`
 }
 
 type RunSnapshot struct {
@@ -394,14 +402,14 @@ type RunSnapshot struct {
 }
 
 type Activation struct {
-	Workspace Workspace          `json:"workspace"`
-	Run       Run                `json:"run"`
-	Snapshot  WorkspaceSnapshot  `json:"snapshot"`
+	Workspace Workspace         `json:"workspace"`
+	Run       Run               `json:"run"`
+	Snapshot  WorkspaceSnapshot `json:"snapshot"`
 }
 
 type RunObservability struct {
-	Run    Run       `json:"run"`
-	Outcome RunOutcome `json:"outcome"`
+	Run      Run             `json:"run"`
+	Outcome  RunOutcome      `json:"outcome"`
 	Timeline []TimelineEntry `json:"timeline,omitempty"`
 }
 
@@ -430,20 +438,20 @@ type WorkspaceSoulBindings struct {
 
 // Configuration types.
 type LLMProviderConfig struct {
-	ID                 string   `json:"id"`
-	Provider           string   `json:"provider"`
-	BaseURL            string   `json:"baseUrl,omitempty"`
-	APIKey             string   `json:"apiKey,omitempty"`
-	Model              string   `json:"model,omitempty"`
-	Timeout            string   `json:"timeout,omitempty"`
-	Disabled           bool     `json:"disabled"`
-	Ready              bool     `json:"ready"`
-	Reason             string   `json:"reason,omitempty"`
-	Default            bool     `json:"default"`
-	APIKeyConfigured   bool     `json:"apiKeyConfigured"`
-	ChatCompletions    bool     `json:"chatCompletions"`
-	Streaming          bool     `json:"streaming"`
-	NonChatOperations  []string `json:"nonChatOperations,omitempty"`
+	ID                string   `json:"id"`
+	Provider          string   `json:"provider"`
+	BaseURL           string   `json:"baseUrl,omitempty"`
+	APIKey            string   `json:"apiKey,omitempty"`
+	Model             string   `json:"model,omitempty"`
+	Timeout           string   `json:"timeout,omitempty"`
+	Disabled          bool     `json:"disabled"`
+	Ready             bool     `json:"ready"`
+	Reason            string   `json:"reason,omitempty"`
+	Default           bool     `json:"default"`
+	APIKeyConfigured  bool     `json:"apiKeyConfigured"`
+	ChatCompletions   bool     `json:"chatCompletions"`
+	Streaming         bool     `json:"streaming"`
+	NonChatOperations []string `json:"nonChatOperations,omitempty"`
 }
 
 type ServiceConfiguration struct {

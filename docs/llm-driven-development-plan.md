@@ -93,7 +93,7 @@ Status:
 - verification:
   `go test ./internal/modules/kernel/soul/... -count 1`,
   `go test ./internal/pkg/repository/... -count 1`,
-  `go test ./internal/initiators/workorchruntime/... ./application/workorchd -count 1`
+  `go test ./internal/initiators/workorchruntime/... ./application/workorch -count 1`
 
 ### L2 Memory Model And Repository
 
@@ -128,7 +128,7 @@ Status:
 - verification:
   `go test ./internal/modules/kernel/memory/... -count 1`,
   `go test ./internal/pkg/repository/... -count 1`,
-  `go test ./internal/initiators/workorchruntime/... ./application/workorchd -count 1`
+  `go test ./internal/initiators/workorchruntime/... ./application/workorch -count 1`
 
 ### L3 Skill And MCP Registry Baseline
 
@@ -165,7 +165,7 @@ Status:
 - verification:
   `go test ./internal/modules/kernel/skill/... ./internal/modules/kernel/mcp/... -count 1`,
   `go test ./internal/pkg/repository/... -count 1`,
-  `go test ./internal/initiators/workorchruntime/... ./application/workorchd -count 1`
+  `go test ./internal/initiators/workorchruntime/... ./application/workorch -count 1`
 
 ### L4 LLM Provider Configuration
 
@@ -238,7 +238,7 @@ Status:
   provider-declared streaming and non-chat operations were completed later in
   the P1 delivery scope
 - verification:
-  `go test ./internal/modules/blocks/llm/... ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/kernel/orchestrator/... ./application/workorchd -count 1`,
+  `go test ./internal/modules/blocks/llm/... ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/kernel/orchestrator/... ./application/workorch -count 1`,
   `go test ./... -count 1`
 
 ### L6 Workspace Execution Activation Context

@@ -45,18 +45,18 @@ func NewLocal(session *appservice.RuntimeSession) Backend {
 }
 
 func (b *localBackend) Workspace() WorkspaceBackend { return b.ws }
-func (b *localBackend) Goal() GoalBackend            { return b.goal }
-func (b *localBackend) DoD() DoDBackend              { return b.dod }
-func (b *localBackend) Run() RunBackend              { return b.run }
-func (b *localBackend) Decision() DecisionBackend     { return b.dec }
-func (b *localBackend) Approval() ApprovalBackend     { return b.appr }
-func (b *localBackend) Soul() SoulBackend             { return b.soul }
-func (b *localBackend) Skill() SkillBackend           { return b.skill }
-func (b *localBackend) MCP() MCPBackend               { return b.mcp }
-func (b *localBackend) Memory() MemoryBackend         { return b.mem }
-func (b *localBackend) Template() TemplateBackend     { return b.tmpl }
-func (b *localBackend) Config() ConfigBackend         { return b.cfg }
-func (b *localBackend) Events() EventsBackend         { return b.evt }
+func (b *localBackend) Goal() GoalBackend           { return b.goal }
+func (b *localBackend) DoD() DoDBackend             { return b.dod }
+func (b *localBackend) Run() RunBackend             { return b.run }
+func (b *localBackend) Decision() DecisionBackend   { return b.dec }
+func (b *localBackend) Approval() ApprovalBackend   { return b.appr }
+func (b *localBackend) Soul() SoulBackend           { return b.soul }
+func (b *localBackend) Skill() SkillBackend         { return b.skill }
+func (b *localBackend) MCP() MCPBackend             { return b.mcp }
+func (b *localBackend) Memory() MemoryBackend       { return b.mem }
+func (b *localBackend) Template() TemplateBackend   { return b.tmpl }
+func (b *localBackend) Config() ConfigBackend       { return b.cfg }
+func (b *localBackend) Events() EventsBackend       { return b.evt }
 
 // ── Workspace ──
 
@@ -125,6 +125,15 @@ func (b *localWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, erro
 		})
 	}
 	return result, nil
+}
+
+func (b *localWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*WorkspaceSnapshotInfo, error) {
+	s := b.parent.session.Borrow()
+	snapshot, err := appservice.ReadWorkspaceSnapshotWithSession(ctx, s, string(id))
+	if err != nil {
+		return nil, err
+	}
+	return decodeSnapshotInfo(snapshot)
 }
 
 func (b *localWorkspaceBackend) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
@@ -283,9 +292,9 @@ func (b *localRunBackend) Resume(ctx context.Context, id common.RunID) (*RunInfo
 		return nil, err
 	}
 	return &RunInfo{
-		ID:          common.RunID(r.ID),
-		WorkspaceID: common.WorkspaceID(r.WorkspaceID),
-		State:       common.RunState(r.State),
+		ID:                 common.RunID(r.ID),
+		WorkspaceID:        common.WorkspaceID(r.WorkspaceID),
+		State:              common.RunState(r.State),
 		BlockingTicketID:   common.TicketID(r.BlockingTicketID),
 		BlockingApprovalID: common.ApprovalID(r.BlockingApprovalID),
 	}, nil
@@ -327,9 +336,9 @@ func (b *localRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]
 	result := make([]RunInfo, 0, len(list))
 	for _, r := range list {
 		result = append(result, RunInfo{
-			ID:          r.ID,
-			WorkspaceID: r.WorkspaceID,
-			State:       r.State,
+			ID:                 r.ID,
+			WorkspaceID:        r.WorkspaceID,
+			State:              r.State,
 			BlockingTicketID:   r.BlockingTicketID,
 			BlockingApprovalID: r.BlockingApprovalID,
 		})
@@ -589,14 +598,18 @@ type localSkillBackend struct{ parent *localBackend }
 func (b *localSkillBackend) Create(ctx context.Context, info *SkillInfo) (*SkillInfo, error) {
 	s := b.parent.session.Borrow()
 	sl, err := appservice.CreateSkillWithSession(ctx, s, appservice.CreateSkillCommand{ID: string(info.ID), Name: info.Name, Version: info.Version, Instruction: info.Instruction})
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return &SkillInfo{ID: common.SkillID(sl.ID), Name: sl.Name, Version: sl.Version, Instruction: sl.Instruction}, nil
 }
 func (b *localSkillBackend) Get(ctx context.Context, id common.SkillID) (*SkillInfo, error) {
 	s := b.parent.session.Borrow()
 	e, _ := s.Exports()
 	sl, err := e.Repositories.Skills.Get(ctx, id)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return &SkillInfo{ID: sl.ID, Name: sl.Name, Version: sl.Version, Instruction: sl.Instruction}, nil
 }
 func (b *localSkillBackend) List(ctx context.Context) ([]SkillInfo, error) {
@@ -612,12 +625,16 @@ func (b *localSkillBackend) List(ctx context.Context) ([]SkillInfo, error) {
 
 type localMCPBackend struct{ parent *localBackend }
 
-func (b *localMCPBackend) CreateServer(ctx context.Context, info *MCPServerInfo) (*MCPServerInfo, error) { return info, nil }
+func (b *localMCPBackend) CreateServer(ctx context.Context, info *MCPServerInfo) (*MCPServerInfo, error) {
+	return info, nil
+}
 func (b *localMCPBackend) GetServer(ctx context.Context, id common.MCPServerID) (*MCPServerInfo, error) {
 	s := b.parent.session.Borrow()
 	e, _ := s.Exports()
 	m, err := e.Repositories.MCPServers.Get(ctx, id)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return &MCPServerInfo{ID: m.ID, Name: m.Name, Transport: m.Transport, Endpoint: m.Endpoint, Enabled: m.Enabled}, nil
 }
 func (b *localMCPBackend) ListServers(ctx context.Context) ([]MCPServerInfo, error) {
@@ -646,17 +663,119 @@ func (b *localMCPBackend) ListCapabilities(ctx context.Context) ([]MCPCapability
 
 type localMemoryBackend struct{ parent *localBackend }
 
-func (b *localMemoryBackend) Create(ctx context.Context, wsID common.WorkspaceID, info *MemoryItemInfo) (*MemoryItemInfo, error) { return info, nil }
-func (b *localMemoryBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]MemoryItemInfo, error) { return nil, nil }
+func (b *localMemoryBackend) Create(ctx context.Context, wsID common.WorkspaceID, info *MemoryItemInfo) (*MemoryItemInfo, error) {
+	s := b.parent.session.Borrow()
+	item, err := appservice.CreateMemoryItemWithSession(ctx, s, string(wsID), memoryCreateCommandFromInfo(info))
+	if err != nil {
+		return nil, err
+	}
+	return memoryInfoFromApp(item), nil
+}
+func (b *localMemoryBackend) Get(ctx context.Context, id common.MemoryID) (*MemoryItemInfo, error) {
+	s := b.parent.session.Borrow()
+	item, err := appservice.ReadMemoryItemWithSession(ctx, s, string(id))
+	if err != nil {
+		return nil, err
+	}
+	return memoryInfoFromApp(item), nil
+}
+func (b *localMemoryBackend) Update(ctx context.Context, id common.MemoryID, info *MemoryItemInfo) (*MemoryItemInfo, error) {
+	s := b.parent.session.Borrow()
+	item, err := appservice.UpdateMemoryItemWithSession(ctx, s, string(id), memoryCreateCommandFromInfo(info))
+	if err != nil {
+		return nil, err
+	}
+	return memoryInfoFromApp(item), nil
+}
+func (b *localMemoryBackend) Delete(ctx context.Context, id common.MemoryID) error {
+	s := b.parent.session.Borrow()
+	return appservice.DeleteMemoryItemWithSession(ctx, s, string(id))
+}
+func (b *localMemoryBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]MemoryItemInfo, error) {
+	return b.Search(ctx, wsID, MemorySearchRequest{})
+}
+func (b *localMemoryBackend) Search(ctx context.Context, wsID common.WorkspaceID, req MemorySearchRequest) ([]MemoryItemInfo, error) {
+	s := b.parent.session.Borrow()
+	items, err := appservice.SearchMemoryWithSession(ctx, s, appservice.MemoryQuery{
+		WorkspaceID: string(wsID),
+		Query:       req.Query,
+		Tags:        append([]string(nil), req.Tags...),
+		Types:       append([]string(nil), req.Types...),
+		Limit:       req.Limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return memoryInfosFromApp(items), nil
+}
+
+func memoryCreateCommandFromInfo(info *MemoryItemInfo) appservice.CreateMemoryItemCommand {
+	if info == nil {
+		return appservice.CreateMemoryItemCommand{}
+	}
+	return appservice.CreateMemoryItemCommand{
+		MemoryID:            string(info.ID),
+		RunID:               string(info.RunID),
+		SourceType:          info.SourceType,
+		SourceRef:           info.SourceRef,
+		MemoryType:          info.MemoryType,
+		Content:             info.Content,
+		Summary:             info.Summary,
+		Tags:                append([]string(nil), info.Tags...),
+		Importance:          info.Importance,
+		Confidence:          info.Confidence,
+		Visibility:          info.Visibility,
+		EmbeddingProviderID: info.EmbeddingProviderID,
+		EmbeddingModel:      info.EmbeddingModel,
+		EmbeddingText:       info.EmbeddingText,
+		Vector:              append([]float64(nil), info.Vector...),
+	}
+}
+
+func memoryInfoFromApp(item appservice.MemoryItem) *MemoryItemInfo {
+	return &MemoryItemInfo{
+		ID:                  common.MemoryID(item.ID),
+		WorkspaceID:         common.WorkspaceID(item.WorkspaceID),
+		RunID:               common.RunID(item.RunID),
+		SourceType:          item.SourceType,
+		SourceRef:           item.SourceRef,
+		MemoryType:          item.MemoryType,
+		Content:             item.Content,
+		Summary:             item.Summary,
+		Tags:                append([]string(nil), item.Tags...),
+		Importance:          item.Importance,
+		Confidence:          item.Confidence,
+		Visibility:          item.Visibility,
+		EmbeddingProviderID: item.EmbeddingProviderID,
+		EmbeddingModel:      item.EmbeddingModel,
+		EmbeddingText:       item.EmbeddingText,
+		VectorReady:         item.VectorReady,
+		VectorDimension:     item.VectorDimension,
+		VectorScore:         item.VectorScore,
+	}
+}
+
+func memoryInfosFromApp(items []appservice.MemoryItem) []MemoryItemInfo {
+	ret := make([]MemoryItemInfo, 0, len(items))
+	for _, item := range items {
+		info := memoryInfoFromApp(item)
+		ret = append(ret, *info)
+	}
+	return ret
+}
 
 type localTemplateBackend struct{ parent *localBackend }
 
-func (b *localTemplateBackend) Create(ctx context.Context, info *TemplateInfo) (*TemplateInfo, error) { return info, nil }
+func (b *localTemplateBackend) Create(ctx context.Context, info *TemplateInfo) (*TemplateInfo, error) {
+	return info, nil
+}
 func (b *localTemplateBackend) Get(ctx context.Context, id string) (*TemplateInfo, error) {
 	s := b.parent.session.Borrow()
 	e, _ := s.Exports()
 	t, err := e.Repositories.WorkspaceTemplates.Get(ctx, id)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return &TemplateInfo{ID: t.ID, Name: t.Name, Description: t.Description, GoalText: t.GoalText, DoDItems: t.DoDItems, DefaultSoulID: common.SoulID(t.DefaultSoulID)}, nil
 }
 func (b *localTemplateBackend) List(ctx context.Context) ([]TemplateInfo, error) {
@@ -669,12 +788,16 @@ func (b *localTemplateBackend) List(ctx context.Context) ([]TemplateInfo, error)
 	}
 	return result, nil
 }
-func (b *localTemplateBackend) Update(ctx context.Context, id string, info *TemplateInfo) (*TemplateInfo, error) { return info, nil }
+func (b *localTemplateBackend) Update(ctx context.Context, id string, info *TemplateInfo) (*TemplateInfo, error) {
+	return info, nil
+}
 func (b *localTemplateBackend) Delete(ctx context.Context, id string) error { return nil }
 
 type localConfigBackend struct{ parent *localBackend }
 
-func (b *localConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) { return &ServiceConfig{}, nil }
+func (b *localConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
+	return &ServiceConfig{}, nil
+}
 
 type localEventsBackend struct{ parent *localBackend }
 

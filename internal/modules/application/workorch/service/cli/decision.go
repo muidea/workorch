@@ -6,6 +6,9 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+
+	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 var decisionCmd = &cobra.Command{
@@ -18,10 +21,8 @@ var decisionListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List decision tickets",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
 		wsID, _ := cmd.Flags().GetString("workspace")
-		runID, _ := cmd.Flags().GetString("run")
-		decisions, err := cl.ListDecisions(ctx(), wsID, runID)
+		decisions, err := mustBackend().Decision().List(ctx(), common.WorkspaceID(wsID))
 		if err != nil {
 			return fmt.Errorf("list decisions: %w", err)
 		}
@@ -53,8 +54,7 @@ var decisionShowCmd = &cobra.Command{
 	Short: "Show decision ticket details",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
-		d, err := cl.GetDecision(ctx(), args[0])
+		d, err := mustBackend().Decision().Get(ctx(), common.TicketID(args[0]))
 		if err != nil {
 			return fmt.Errorf("get decision: %w", err)
 		}
@@ -62,11 +62,10 @@ var decisionShowCmd = &cobra.Command{
 			printJSON(d)
 			return nil
 		}
-		fmt.Println(styleTitle.Render("Decision: " + d.ID))
+		fmt.Println(styleTitle.Render("Decision: " + string(d.ID)))
 		fmt.Printf("  Workspace: %s\n", d.WorkspaceID)
 		fmt.Printf("  Run: %s\n", d.RunID)
 		fmt.Printf("  State: %s\n", stateIcon(d.State))
-		fmt.Printf("  Kind: %s\n", d.DecisionKind)
 		if d.Reason != "" {
 			fmt.Printf("  Reason: %s\n", d.Reason)
 		}
@@ -82,18 +81,21 @@ var decisionResolveCmd = &cobra.Command{
 	Short: "Resolve a decision ticket",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
 		resType, _ := cmd.Flags().GetString("type")
 		payloadStr, _ := cmd.Flags().GetString("payload")
 		var payload map[string]any
 		if payloadStr != "" {
 			payload = map[string]any{"value": payloadStr}
 		}
-		d, err := cl.ResolveDecision(ctx(), args[0], resType, payload)
+		d, err := mustBackend().Decision().Resolve(ctx(), backend.ResolveDecisionRequest{
+			TicketID:       common.TicketID(args[0]),
+			ResolutionType: resType,
+			Payload:        payload,
+		})
 		if err != nil {
 			return fmt.Errorf("resolve decision: %w", err)
 		}
-		fmt.Println(styleSuccess.Render("Decision resolved: " + d.ID))
+		fmt.Println(styleSuccess.Render("Decision resolved: " + string(d.ID)))
 		fmt.Printf("  New state: %s\n", stateIcon(d.State))
 		return nil
 	},

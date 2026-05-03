@@ -561,7 +561,7 @@ func useWorkorchRuntimeTestConfig(t *testing.T, backend string, dataRoot string)
 
 	_ = workorchconfig.Close()
 	configDir := t.TempDir()
-	content := fmt.Sprintf(`endpointName = "workorchd"
+	content := fmt.Sprintf(`endpointName = "workorch"
 
 [server]
 addr = "127.0.0.1:0"

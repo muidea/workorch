@@ -53,6 +53,20 @@ if $STATIC_ONLY; then
   else
     pass "CLI: biz/local removed"
   fi
+
+  # 1d. CLI commands must not import HTTP client directly.
+  if grep -rq '"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"' "$CLI_ROOT/$MODULE_BASE/service/cli" 2>/dev/null; then
+    fail "CLI commands import biz/client"
+  else
+    pass "CLI: no direct biz/client import"
+  fi
+
+  # 1e. Agent must not use direct sessions or polling.
+  if grep -rq 'NewRuntimeSessionFromInitiator\|time\.NewTicker\|time\.Ticker\|time\.Tick\|pollRun' "$CLI_ROOT/$MODULE_BASE/biz/agent" 2>/dev/null; then
+    fail "Agent uses direct runtime session or polling"
+  else
+    pass "Agent: backend/event-driven only"
+  fi
 fi
 
 # ── Layer 2+3: Go tests ──
@@ -93,27 +107,28 @@ if $SCRIPTED; then
   else
     pass "Binary exists"
 
-    # TUI-E2E-01: Opens agent TUI by default (no --remote).
+    # TUI-E2E-01: Default mode requires an interactive TUI and gives clear
+    # guidance in non-TTY environments.
     OUTPUT=$(timeout 3 "$BINARY" </dev/null 2>&1) || true
-    if echo "$OUTPUT" | grep -q "Agent\|agent\|WorkOrch"; then
-      pass "TUI-E2E-01: opens agent session by default"
+    if echo "$OUTPUT" | grep -q "TUI requires an interactive terminal" && echo "$OUTPUT" | grep -q -- "--server"; then
+      pass "TUI-E2E-01: default mode is TUI and non-TTY suggests --server"
     else
-      fail "TUI-E2E-01: no agent session markers found"
+      fail "TUI-E2E-01: default non-TTY guidance missing"
     fi
 
-    # TUI-E2E-03: Submit goal starts run (via REPL mode).
-    REPL_OUT=$(printf "/quit\n" | timeout 5 "$BINARY" 2>&1) || true
-    if echo "$REPL_OUT" | grep -q "bye\|Bye"; then
-      pass "TUI-E2E-03: REPL accepts input and quits cleanly"
+    # TUI-E2E-03: No legacy REPL marker in default mode.
+    REPL_OUT=$(timeout 3 "$BINARY" 2>&1) || true
+    if ! echo "$REPL_OUT" | grep -q "bye\|Bye"; then
+      pass "TUI-E2E-03: default mode is not legacy REPL"
     else
-      fail "TUI-E2E-03: REPL did not quit cleanly"
+      fail "TUI-E2E-03: legacy REPL marker found"
     fi
 
-    # TUI-E2E-10: Interrupt and cleanup (no child processes).
-    if ! pgrep -f "workorchd" >/dev/null 2>&1; then
-      pass "TUI-E2E-10: no workorchd child process"
+    # TUI-E2E-10: Interrupt and cleanup (no server child process).
+    if ! pgrep -f "workorch --server" >/dev/null 2>&1; then
+      pass "TUI-E2E-10: no server child process"
     else
-      fail "TUI-E2E-10: workorchd process detected"
+      fail "TUI-E2E-10: server child process detected"
     fi
   fi
 fi

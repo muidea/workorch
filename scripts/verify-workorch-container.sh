@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ADDR_PORT="${WORKORCH_VERIFY_PORT:-18081}"
 BASE_URL="http://127.0.0.1:$ADDR_PORT"
-IMAGE_TAG="${WORKORCH_VERIFY_IMAGE:-workorchd:verify}"
+IMAGE_TAG="${WORKORCH_VERIFY_IMAGE:-workorch:verify}"
 BACKEND="${WORKORCH_VERIFY_BACKEND:-memory}"
 TMP_DIR="$(mktemp -d)"
 DATA_DIR="$TMP_DIR/workorch-data"
@@ -18,7 +18,7 @@ report_failure() {
   if [[ $status -eq 0 ]]; then
     return
   fi
-  echo "workorchd container verification failed for backend=$BACKEND" >&2
+  echo "workorch container verification failed for backend=$BACKEND" >&2
   if [[ -n "$CID" ]]; then
     echo "--- docker logs ---" >&2
     docker logs "$CID" >&2 || true
@@ -37,7 +37,7 @@ start_container() {
 	local data_dir="/var/lib/workorch"
   mkdir -p "$CONFIG_DIR"
   cat >"$CONFIG_DIR/application.toml" <<EOF
-endpointName = "workorchd"
+endpointName = "workorch"
 
 [server]
 addr = ":8080"
@@ -208,4 +208,4 @@ if [[ "$BACKEND" == "file" ]]; then
   curl -fsS "$BASE_URL/api/v1/workorch/approvals/$reject_approval_id" | grep '"state": "rejected"' >/dev/null
 fi
 
-echo "workorchd container verification passed for backend=$BACKEND"
+echo "workorch container verification passed for backend=$BACKEND"

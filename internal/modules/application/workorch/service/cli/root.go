@@ -13,14 +13,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
-	"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/config"
 )
 
 var (
-	cfg       *config.Config
-	apiClient *client.Client
-	cfgPath   string
+	cfg        *config.Config
+	cfgPath    string
 	cliBackend backend.Backend
 
 	remoteAddr         string
@@ -52,17 +50,20 @@ to a running workorchd service.`,
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
-		if remoteAddr != "" {
-			apiClient = client.New(remoteAddr)
+		if remoteAddr != "" && cliBackend == nil {
 			cliBackend = backend.NewRemote(remoteAddr)
 		}
 		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) > 0 {
-			runAgentREPL(strings.Join(args, " "), "")
+			if err := runTUI(strings.Join(args, " ")); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
 		} else {
-			startAgentREPL()
+			if err := runTUI(""); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
 		}
 	},
 }
@@ -82,8 +83,7 @@ func ExecuteWithBackend(be backend.Backend, defaultWS backend.WorkspaceInfo) err
 
 	if err != nil && isUnknownCommandError(err) {
 		goal := strings.Join(os.Args[1:], " ")
-		runAgentREPL(goal, "")
-		return nil
+		return runTUI(goal)
 	}
 
 	return err
@@ -103,12 +103,12 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Output as raw JSON")
 }
 
-func mustClient() *client.Client {
-	if apiClient == nil {
-		fmt.Fprintln(os.Stderr, "Error: no workorchd connection. Use --remote or --local flag.")
+func mustBackend() backend.Backend {
+	if cliBackend == nil {
+		fmt.Fprintln(os.Stderr, "Error: workorch backend is not initialized.")
 		os.Exit(1)
 	}
-	return apiClient
+	return cliBackend
 }
 
 func printJSON(v any) {

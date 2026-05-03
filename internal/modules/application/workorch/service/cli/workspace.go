@@ -7,12 +7,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"
+	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 var workspaceCmd = &cobra.Command{
-	Use:   "workspace",
-	Short: "Manage workspaces",
+	Use:     "workspace",
+	Short:   "Manage workspaces",
 	Aliases: []string{"ws"},
 }
 
@@ -20,8 +21,7 @@ var workspaceListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all workspaces",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
-		workspaces, err := cl.ListWorkspaces(ctx())
+		workspaces, err := mustBackend().Workspace().List(ctx())
 		if err != nil {
 			return fmt.Errorf("list workspaces: %w", err)
 		}
@@ -39,8 +39,8 @@ var workspaceListCmd = &cobra.Command{
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 				ws.ID,
 				ws.Title,
-				stateIcon(ws.State),
-				styleDim.Render(ws.ActiveRunID),
+				stateIcon(string(ws.State)),
+				styleDim.Render(string(ws.ActiveRunID)),
 			)
 		}
 		w.Flush()
@@ -52,11 +52,14 @@ var workspaceCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new workspace",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
 		title, _ := cmd.Flags().GetString("title")
 		desc, _ := cmd.Flags().GetString("description")
 		dir, _ := cmd.Flags().GetString("working-dir")
-		ws, err := cl.CreateWorkspace(ctx(), title, desc, dir)
+		ws, err := mustBackend().Workspace().Create(ctx(), backend.CreateWorkspaceRequest{
+			Title:            title,
+			Description:      desc,
+			WorkingDirectory: dir,
+		})
 		if err != nil {
 			return fmt.Errorf("create workspace: %w", err)
 		}
@@ -64,7 +67,7 @@ var workspaceCreateCmd = &cobra.Command{
 			printJSON(ws)
 			return nil
 		}
-		fmt.Printf("Workspace created: %s\n", styleTitle.Render(ws.ID))
+		fmt.Printf("Workspace created: %s\n", styleTitle.Render(string(ws.ID)))
 		fmt.Printf("  Title: %s\n", ws.Title)
 		if ws.Description != "" {
 			fmt.Printf("  Description: %s\n", ws.Description)
@@ -78,8 +81,7 @@ var workspaceShowCmd = &cobra.Command{
 	Short: "Show workspace details",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
-		ws, err := cl.GetWorkspace(ctx(), args[0])
+		ws, err := mustBackend().Workspace().Get(ctx(), common.WorkspaceID(args[0]))
 		if err != nil {
 			return fmt.Errorf("get workspace: %w", err)
 		}
@@ -97,9 +99,8 @@ var workspaceDeleteCmd = &cobra.Command{
 	Short: "Delete a workspace",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
 		purge, _ := cmd.Flags().GetBool("purge")
-		if err := cl.DeleteWorkspace(ctx(), args[0], purge); err != nil {
+		if err := mustBackend().Workspace().Delete(ctx(), common.WorkspaceID(args[0]), purge); err != nil {
 			return fmt.Errorf("delete workspace: %w", err)
 		}
 		fmt.Println(styleSuccess.Render("Workspace deleted."))
@@ -112,35 +113,28 @@ var workspaceSnapshotCmd = &cobra.Command{
 	Short: "Show workspace snapshot",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
-		snap, err := cl.GetWorkspaceSnapshot(ctx(), args[0])
+		ws, err := mustBackend().Workspace().Get(ctx(), common.WorkspaceID(args[0]))
 		if err != nil {
 			return fmt.Errorf("get snapshot: %w", err)
 		}
 		if jsonOutput {
-			printJSON(snap)
+			printJSON(ws)
 			return nil
 		}
 		fmt.Println(styleTitle.Render("Workspace Snapshot: " + args[0]))
-		fmt.Printf("  State: %s\n", stateIcon(snap.Outcome.State))
-		fmt.Printf("  Runs: %d\n", len(snap.Runs))
-		if len(snap.Decisions) > 0 {
-			fmt.Printf("  Open Decisions: %d\n", len(snap.Decisions))
-		}
-		if len(snap.Approvals) > 0 {
-			fmt.Printf("  Pending Approvals: %d\n", len(snap.Approvals))
-		}
+		fmt.Printf("  State: %s\n", stateIcon(string(ws.State)))
+		fmt.Printf("  Active Run: %s\n", styleDim.Render(string(ws.ActiveRunID)))
 		return nil
 	},
 }
 
-func printWorkspaceDetail(ws *client.Workspace) {
-	fmt.Println(styleTitle.Render("Workspace: " + ws.ID))
+func printWorkspaceDetail(ws *backend.WorkspaceInfo) {
+	fmt.Println(styleTitle.Render("Workspace: " + string(ws.ID)))
 	fmt.Printf("  Title: %s\n", ws.Title)
 	if ws.Description != "" {
 		fmt.Printf("  Description: %s\n", ws.Description)
 	}
-	fmt.Printf("  State: %s\n", stateIcon(ws.State))
+	fmt.Printf("  State: %s\n", stateIcon(string(ws.State)))
 	if ws.ActiveRunID != "" {
 		fmt.Printf("  Active Run: %s\n", ws.ActiveRunID)
 	}
