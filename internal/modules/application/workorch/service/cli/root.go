@@ -54,6 +54,7 @@ to a running workorchd service.`,
 		}
 		if remoteAddr != "" {
 			apiClient = client.New(remoteAddr)
+			cliBackend = backend.NewRemote(remoteAddr)
 		}
 		return nil
 	},

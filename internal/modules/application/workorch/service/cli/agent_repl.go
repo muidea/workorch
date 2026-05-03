@@ -21,7 +21,7 @@ func startAgentREPL() {
 	var lastGoal string
 
 	ctx := context.Background()
-	wsID, err := agent.CreateWorkspace(ctx, "agent-session", "interactive agent session")
+	wsID, err := agent.CreateWorkspaceWithBackend(ctx, cliBackend, "agent-session", "interactive agent session", "")
 	if err == nil {
 		currentWS = wsID
 		fmt.Fprintf(os.Stderr, "\r  workspace: %s\r\n", styleDim.Render(wsID))
@@ -48,7 +48,7 @@ func startAgentREPL() {
 		case input == "/new":
 			currentWS = ""
 			lastGoal = ""
-			wsID, err := agent.CreateWorkspace(ctx, "agent-session", "interactive agent session")
+			wsID, err := agent.CreateWorkspaceWithBackend(ctx, cliBackend, "agent-session", "interactive agent session", "")
 			if err == nil {
 				currentWS = wsID
 				fmt.Fprintf(os.Stderr, "\r  workspace: %s\r\n", styleDim.Render(wsID))
@@ -92,14 +92,14 @@ func runAgentREPL(goalText string, currentWS string) string {
 
 	fmt.Fprintf(os.Stderr, "\r→ %s\r\n", styleDim.Render(goalText))
 
-	a := agent.New()
+	a := agent.NewWithBackend(cliBackend)
 	defer a.Close()
 
 	startedAt := time.Now()
 	tickCount := 0
 
 	go func() {
-		_ = a.Run(ctx, currentWS, goalText, "")
+		_ = a.RunWithBackend(ctx, currentWS, goalText, "")
 	}()
 
 	for evt := range a.Events() {
