@@ -15,18 +15,15 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/config"
-	"github.com/muidea/workorch/internal/modules/application/workorch/biz/local"
 )
 
 var (
 	cfg       *config.Config
 	apiClient *client.Client
 	cfgPath   string
-	launcher  *local.Launcher
 	cliBackend backend.Backend
 
 	remoteAddr string
-	localMode  bool
 	jsonOutput bool
 
 	styleTitle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Padding(0, 1)
@@ -44,8 +41,8 @@ var rootCmd = &cobra.Command{
 	Short: "WorkOrch CLI - AI workspace orchestration terminal",
 	Long: `WorkOrch CLI provides terminal-based management for AI workspace orchestration.
 
-Connect to a workorchd service in local or remote mode to manage
-workspaces, runs, decisions, approvals, and more.`,
+Runs in local embedded mode by default. Use --remote <addr> to connect
+to a running workorchd service.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -54,26 +51,8 @@ workspaces, runs, decisions, approvals, and more.`,
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
-
-		if localMode {
-			launcher = local.NewLauncher(local.Config{
-				BinaryPath: cfg.Local.BinaryPath,
-				ConfigDir:  cfg.Local.ConfigDir,
-				DataDir:    cfg.Local.DataDir,
-				Port:       cfg.Local.Port,
-			})
-			addr, err := launcher.Start(cmd.Context())
-			if err != nil {
-				return fmt.Errorf("start local workorchd: %w", err)
-			}
-			apiClient = client.New(addr)
-			fmt.Fprintf(os.Stderr, "%s workorchd started on %s\n", styleInfo.Render("→"), addr)
-		} else {
-			addr := remoteAddr
-			if addr == "" {
-				addr = cfg.Remote.DefaultAddr
-			}
-			apiClient = client.New(addr)
+		if remoteAddr != "" {
+			apiClient = client.New(remoteAddr)
 		}
 		return nil
 	},
@@ -100,9 +79,6 @@ func ExecuteWithBackend(be backend.Backend) error {
 		return nil
 	}
 
-	if launcher != nil {
-		launcher.Stop()
-	}
 	return err
 }
 
@@ -116,7 +92,6 @@ func init() {
 	cfgPath, _ = config.Path()
 
 	rootCmd.PersistentFlags().StringVar(&remoteAddr, "remote", "", "Remote workorchd address (e.g. http://192.168.1.100:8080)")
-	rootCmd.PersistentFlags().BoolVar(&localMode, "local", false, "Start a local workorchd instance")
 	rootCmd.PersistentFlags().StringVar(&cfgPath, "config", "", "CLI config file path")
 	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Output as raw JSON")
 }
