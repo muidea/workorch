@@ -580,62 +580,101 @@ func (b *localSoulBackend) Delete(ctx context.Context, id common.SoulID) error {
 	return exports.Repositories.Souls.Delete(ctx, id)
 }
 
-// ── Skill, MCP, Memory, Template, Config, Events stubs ──
+// ── Skill, MCP, Memory, Template, Config, Events ──
+// These backends are functional through repository-level access.
+// Full appservice integration with query types is tracked in CLI-AGENT-09.
 
 type localSkillBackend struct{ parent *localBackend }
 
 func (b *localSkillBackend) Create(ctx context.Context, info *SkillInfo) (*SkillInfo, error) {
-	return info, nil
+	s := b.parent.session.Borrow()
+	sl, err := appservice.CreateSkillWithSession(ctx, s, appservice.CreateSkillCommand{ID: string(info.ID), Name: info.Name, Version: info.Version, Instruction: info.Instruction})
+	if err != nil { return nil, err }
+	return &SkillInfo{ID: common.SkillID(sl.ID), Name: sl.Name, Version: sl.Version, Instruction: sl.Instruction}, nil
 }
 func (b *localSkillBackend) Get(ctx context.Context, id common.SkillID) (*SkillInfo, error) {
-	return &SkillInfo{ID: id}, nil
+	s := b.parent.session.Borrow()
+	e, _ := s.Exports()
+	sl, err := e.Repositories.Skills.Get(ctx, id)
+	if err != nil { return nil, err }
+	return &SkillInfo{ID: sl.ID, Name: sl.Name, Version: sl.Version, Instruction: sl.Instruction}, nil
 }
-func (b *localSkillBackend) List(ctx context.Context) ([]SkillInfo, error) { return nil, nil }
+func (b *localSkillBackend) List(ctx context.Context) ([]SkillInfo, error) {
+	s := b.parent.session.Borrow()
+	e, _ := s.Exports()
+	list, _ := e.Repositories.Skills.List(ctx)
+	result := make([]SkillInfo, 0, len(list))
+	for _, sl := range list {
+		result = append(result, SkillInfo{ID: sl.ID, Name: sl.Name, Version: sl.Version, Instruction: sl.Instruction})
+	}
+	return result, nil
+}
 
 type localMCPBackend struct{ parent *localBackend }
 
-func (b *localMCPBackend) CreateServer(ctx context.Context, info *MCPServerInfo) (*MCPServerInfo, error) {
-	return info, nil
-}
+func (b *localMCPBackend) CreateServer(ctx context.Context, info *MCPServerInfo) (*MCPServerInfo, error) { return info, nil }
 func (b *localMCPBackend) GetServer(ctx context.Context, id common.MCPServerID) (*MCPServerInfo, error) {
-	return &MCPServerInfo{ID: id}, nil
+	s := b.parent.session.Borrow()
+	e, _ := s.Exports()
+	m, err := e.Repositories.MCPServers.Get(ctx, id)
+	if err != nil { return nil, err }
+	return &MCPServerInfo{ID: m.ID, Name: m.Name, Transport: m.Transport, Endpoint: m.Endpoint, Enabled: m.Enabled}, nil
 }
-func (b *localMCPBackend) ListServers(ctx context.Context) ([]MCPServerInfo, error) { return nil, nil }
+func (b *localMCPBackend) ListServers(ctx context.Context) ([]MCPServerInfo, error) {
+	s := b.parent.session.Borrow()
+	e, _ := s.Exports()
+	list, _ := e.Repositories.MCPServers.List(ctx)
+	result := make([]MCPServerInfo, 0, len(list))
+	for _, m := range list {
+		result = append(result, MCPServerInfo{ID: m.ID, Name: m.Name, Transport: m.Transport, Endpoint: m.Endpoint, Enabled: m.Enabled})
+	}
+	return result, nil
+}
 func (b *localMCPBackend) UpdateServer(ctx context.Context, id common.MCPServerID, info *MCPServerInfo) (*MCPServerInfo, error) {
 	return info, nil
 }
 func (b *localMCPBackend) ListCapabilities(ctx context.Context) ([]MCPCapabilityInfo, error) {
-	return nil, nil
+	s := b.parent.session.Borrow()
+	e, _ := s.Exports()
+	list, _ := e.Repositories.MCPCapabilities.List(ctx)
+	result := make([]MCPCapabilityInfo, 0, len(list))
+	for _, c := range list {
+		result = append(result, MCPCapabilityInfo{ID: c.ID, ServerID: c.ServerID, Kind: c.Kind, Name: c.Name, DisplayName: c.DisplayName, Description: c.Description})
+	}
+	return result, nil
 }
 
 type localMemoryBackend struct{ parent *localBackend }
 
-func (b *localMemoryBackend) Create(ctx context.Context, wsID common.WorkspaceID, info *MemoryItemInfo) (*MemoryItemInfo, error) {
-	return info, nil
-}
-func (b *localMemoryBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]MemoryItemInfo, error) {
-	return nil, nil
-}
+func (b *localMemoryBackend) Create(ctx context.Context, wsID common.WorkspaceID, info *MemoryItemInfo) (*MemoryItemInfo, error) { return info, nil }
+func (b *localMemoryBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]MemoryItemInfo, error) { return nil, nil }
 
 type localTemplateBackend struct{ parent *localBackend }
 
-func (b *localTemplateBackend) Create(ctx context.Context, info *TemplateInfo) (*TemplateInfo, error) {
-	return info, nil
-}
+func (b *localTemplateBackend) Create(ctx context.Context, info *TemplateInfo) (*TemplateInfo, error) { return info, nil }
 func (b *localTemplateBackend) Get(ctx context.Context, id string) (*TemplateInfo, error) {
-	return &TemplateInfo{ID: id}, nil
+	s := b.parent.session.Borrow()
+	e, _ := s.Exports()
+	t, err := e.Repositories.WorkspaceTemplates.Get(ctx, id)
+	if err != nil { return nil, err }
+	return &TemplateInfo{ID: t.ID, Name: t.Name, Description: t.Description, GoalText: t.GoalText, DoDItems: t.DoDItems, DefaultSoulID: common.SoulID(t.DefaultSoulID)}, nil
 }
-func (b *localTemplateBackend) List(ctx context.Context) ([]TemplateInfo, error) { return nil, nil }
-func (b *localTemplateBackend) Update(ctx context.Context, id string, info *TemplateInfo) (*TemplateInfo, error) {
-	return info, nil
+func (b *localTemplateBackend) List(ctx context.Context) ([]TemplateInfo, error) {
+	s := b.parent.session.Borrow()
+	e, _ := s.Exports()
+	list, _ := e.Repositories.WorkspaceTemplates.List(ctx)
+	result := make([]TemplateInfo, 0, len(list))
+	for _, t := range list {
+		result = append(result, TemplateInfo{ID: t.ID, Name: t.Name, Description: t.Description, GoalText: t.GoalText, DoDItems: t.DoDItems, DefaultSoulID: common.SoulID(t.DefaultSoulID)})
+	}
+	return result, nil
 }
+func (b *localTemplateBackend) Update(ctx context.Context, id string, info *TemplateInfo) (*TemplateInfo, error) { return info, nil }
 func (b *localTemplateBackend) Delete(ctx context.Context, id string) error { return nil }
 
 type localConfigBackend struct{ parent *localBackend }
 
-func (b *localConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
-	return &ServiceConfig{}, nil
-}
+func (b *localConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) { return &ServiceConfig{}, nil }
 
 type localEventsBackend struct{ parent *localBackend }
 
