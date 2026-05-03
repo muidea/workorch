@@ -13,10 +13,7 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show interactive status dashboard",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
-		watch, _ := cmd.Flags().GetBool("watch")
-
-		m := tui.NewAppModel(cl, watch)
+		m := tui.NewAppModel(cliBackend)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("tui error: %w", err)
@@ -27,5 +24,4 @@ var statusCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(statusCmd)
-	statusCmd.Flags().BoolP("watch", "w", true, "Enable live polling of workspace status")
 }

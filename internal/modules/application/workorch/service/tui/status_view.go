@@ -6,10 +6,10 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"
+	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
 )
 
-func StatusView(workspaces []client.Workspace, cursor, width int) string {
+func StatusView(workspaces []backend.WorkspaceInfo, cursor, width int) string {
 	header := Title.Render("WorkOrch Status Dashboard") + "\n\n"
 
 	if len(workspaces) == 0 {
@@ -24,10 +24,10 @@ func StatusView(workspaces []client.Workspace, cursor, width int) string {
 		}
 		line := fmt.Sprintf("%s%-24s %-30s %-28s %s",
 			prefix,
-			truncateStr(ws.ID, 22),
+			truncateStr(string(ws.ID), 22),
 			truncateStr(ws.Title, 28),
-			StateStyle(ws.State),
-			Dim.Render(truncateStr(ws.ActiveRunID, 16)),
+			StateStyle(string(ws.State)),
+			Dim.Render(truncateStr(string(ws.ActiveRunID), 16)),
 		)
 		rows = append(rows, line)
 	}
@@ -40,68 +40,25 @@ func StatusView(workspaces []client.Workspace, cursor, width int) string {
 	return header + table + strings.Join(rows, "\n") + "\n"
 }
 
-func WorkspaceDetailView(ws *client.Workspace, snap *client.WorkspaceSnapshot, cursor, width int) string {
+func WorkspaceDetailView(ws *backend.WorkspaceInfo, cursor, width int) string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Padding(0, 1)
-	header := titleStyle.Render(fmt.Sprintf("Workspace: %s - %s", ws.ID, ws.Title)) + "\n"
+	header := titleStyle.Render(fmt.Sprintf("Workspace: %s - %s", string(ws.ID), ws.Title)) + "\n"
 
-	stateLine := fmt.Sprintf("  State: %s", StateStyle(ws.State))
-	if ws.ActiveRunID != "" {
-		stateLine += fmt.Sprintf("  |  Active Run: %s", ws.ActiveRunID)
+	stateLine := fmt.Sprintf("  State: %s", StateStyle(string(ws.State)))
+	if string(ws.ActiveRunID) != "" {
+		stateLine += fmt.Sprintf("  |  Active Run: %s", string(ws.ActiveRunID))
 	}
 	header += stateLine + "\n\n"
 
-	if snap == nil {
-		return header + Dim.Render("  Loading...") + "\n"
+	if ws.ActiveRunID != "" {
+		header += Heading.Render("  Active Run:") + fmt.Sprintf(" %s\n", string(ws.ActiveRunID))
 	}
-
-	if len(snap.Steps) > 0 {
-		header += Heading.Render("  Recent Steps:") + "\n"
-		for _, s := range snap.Steps {
-			icon := "•"
-			switch s.State {
-			case "completed":
-				icon = Success.Render("✓")
-			case "failed":
-				icon = Error.Render("✗")
-			case "dispatched", "pending":
-				icon = Warning.Render("⏳")
-			}
-			header += fmt.Sprintf("    %s %-30s %s\n", icon, s.Kind, Dim.Render(s.State))
-		}
-		header += "\n"
-	}
-
-	openDecisions := filterOpenDecisions(snap.Decisions)
-	if len(openDecisions) > 0 {
-		header += Warning.Render(fmt.Sprintf("  ⚠ Decisions (%d open):", len(openDecisions))) + "\n"
-		for i, d := range openDecisions {
-			prefix := "   "
-			if i == cursor {
-				prefix = Selection.Render(" ▶ ")
-			}
-			header += fmt.Sprintf("%s%s: %s\n", prefix, d.ID, truncateStr(d.Question, 60))
-		}
-		header += "\n"
-	}
-
-	pendingApprovals := filterPendingApprovals(snap.Approvals)
-	if len(pendingApprovals) > 0 {
-		header += Alert.Render(fmt.Sprintf("  ⚡ Approvals (%d pending):", len(pendingApprovals))) + "\n"
-		for i, a := range pendingApprovals {
-			prefix := "   "
-			if i+len(openDecisions) == cursor {
-				prefix = Selection.Render(" ▶ ")
-			}
-			header += fmt.Sprintf("%s%s: %s\n", prefix, a.ID, truncateStr(a.Reason, 60))
-		}
-		header += "\n"
-	}
-
+	header += Dim.Render("  (Run details available via 'workorch run show')\n")
 	return header
 }
 
-func filterOpenDecisions(items []client.Decision) []client.Decision {
-	var out []client.Decision
+func filterOpenDecisions(items []backend.DecisionInfo) []backend.DecisionInfo {
+	var out []backend.DecisionInfo
 	for _, d := range items {
 		if d.State == "open" {
 			out = append(out, d)
@@ -110,8 +67,8 @@ func filterOpenDecisions(items []client.Decision) []client.Decision {
 	return out
 }
 
-func filterPendingApprovals(items []client.Approval) []client.Approval {
-	var out []client.Approval
+func filterPendingApprovals(items []backend.ApprovalInfo) []backend.ApprovalInfo {
+	var out []backend.ApprovalInfo
 	for _, a := range items {
 		if a.State == "pending" {
 			out = append(out, a)

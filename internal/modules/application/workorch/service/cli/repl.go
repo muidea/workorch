@@ -14,9 +14,8 @@ var replCmd = &cobra.Command{
 	Short: "Enter interactive REPL mode",
 	Long:  "Start an interactive terminal session for managing workorch workspaces, runs, decisions, and approvals.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cl := mustClient()
 
-		m := tui.NewAppModel(cl, true)
+		m := tui.NewAppModel(cliBackend)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("repl error: %w", err)

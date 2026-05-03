@@ -6,10 +6,10 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"
+	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
 )
 
-func AlertView(workspaces []client.Workspace, decisions []client.Decision, approvals []client.Approval, visible bool, width int) string {
+func AlertView(workspaces []backend.WorkspaceInfo, decisions []backend.DecisionInfo, approvals []backend.ApprovalInfo, visible bool, width int) string {
 	if !visible {
 		return ""
 	}
@@ -23,16 +23,16 @@ func AlertView(workspaces []client.Workspace, decisions []client.Decision, appro
 	counts := map[string]alertCount{}
 	for _, d := range decisions {
 		if d.State == "open" {
-			c := counts[d.WorkspaceID]
+			c := counts[string(string(d.WorkspaceID))]
 			c.decisions++
-			counts[d.WorkspaceID] = c
+			counts[string(string(d.WorkspaceID))] = c
 		}
 	}
 	for _, a := range approvals {
 		if a.State == "pending" {
-			c := counts[a.WorkspaceID]
+			c := counts[string(string(a.WorkspaceID))]
 			c.approvals++
-			counts[a.WorkspaceID] = c
+			counts[string(string(a.WorkspaceID))] = c
 		}
 	}
 
@@ -42,11 +42,11 @@ func AlertView(workspaces []client.Workspace, decisions []client.Decision, appro
 
 	var lines []string
 	for _, ws := range workspaces {
-		c, ok := counts[ws.ID]
+		c, ok := counts[string(string(ws.ID))]
 		if !ok {
 			continue
 		}
-		shortID := ws.ID
+		shortID := string(string(ws.ID))
 		if len(shortID) > 6 {
 			shortID = shortID[:6]
 		}
