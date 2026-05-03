@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -9,7 +10,9 @@ import (
 	"github.com/muidea/magicCommon/framework/application"
 	"github.com/muidea/magicCommon/framework/service"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
 	"github.com/muidea/workorch/internal/modules/application/workorch/service/cli"
+	appservice "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 
 	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
@@ -35,7 +38,6 @@ func main() {
 	if err := configure(configDir); err != nil {
 		log.Fatal(err)
 	}
-	// Override os.Args so cobra only sees its own flags
 	os.Args = append([]string{os.Args[0]}, cobraArgs...)
 
 	if err := application.Startup(service.DefaultService()); err != nil {
@@ -48,7 +50,15 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err := cli.Execute(); err != nil {
+	session, err := appservice.NewRuntimeSessionFromInitiator()
+	if err != nil {
+		log.Fatalf("create runtime session: %v", err)
+	}
+	defer session.Close(context.Background())
+
+	be := backend.NewLocal(session)
+
+	if err := cli.ExecuteWithBackend(be); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -75,10 +85,6 @@ func configure(configDir string) error {
 	return ensureConfigFile(dir)
 }
 
-// resolveConfigDir determines the config directory in priority order:
-// 1. --config-dir flag
-// 2. WORKORCH_CONFIG_DIR env var
-// 3. ~/.workorch/ (global user config)
 func resolveConfigDir(flagDir string) string {
 	if flagDir != "" {
 		return flagDir
@@ -92,14 +98,13 @@ func resolveConfigDir(flagDir string) string {
 	return ""
 }
 
-// ensureConfigFile creates a minimal default config if none exists.
 func ensureConfigFile(dir string) error {
 	if dir == "" {
 		return nil
 	}
 	configPath := filepath.Join(dir, "application.toml")
 	if _, err := os.Stat(configPath); err == nil {
-		return nil // config exists
+		return nil
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create config dir %s: %w", dir, err)

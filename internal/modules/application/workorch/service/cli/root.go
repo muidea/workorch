@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
+	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/config"
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/local"
@@ -22,6 +23,7 @@ var (
 	apiClient *client.Client
 	cfgPath   string
 	launcher  *local.Launcher
+	cliBackend backend.Backend
 
 	remoteAddr string
 	localMode  bool
@@ -84,7 +86,9 @@ workspaces, runs, decisions, approvals, and more.`,
 	},
 }
 
-func Execute() error {
+func ExecuteWithBackend(be backend.Backend) error {
+	cliBackend = be
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
