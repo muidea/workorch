@@ -230,6 +230,7 @@ cli-build:
 
 cli-test:
 	$(GO) test ./internal/modules/application/workorch/... --count 1
+	./scripts/verify-cli-architecture.sh
 
 cli-clean:
 	rm -f $(CLI_BUILD_OUT)
