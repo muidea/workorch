@@ -2521,7 +2521,11 @@ func resultSummaryFromDoDAssessment(
 	artifactRefs []common.ArtifactID,
 ) resultmodel.ResultSummary {
 	ret := resultmodel.ResultSummary{
-		GoalOutcome:           firstNonEmptyOrchestratorString(stringFromMap(assessment, "goalOutcome"), summary),
+		GoalOutcome: firstNonEmptyOrchestratorString(
+			stringFromMap(assessment, "goalOutcome"),
+			stringFromMap(assessment, "implementationSummary"),
+			summary,
+		),
 		DoDItems:              append([]resultmodel.DoDAssessmentItem(nil), dodAssessment.Items...),
 		ImplementationSummary: firstNonEmptyOrchestratorString(stringFromMap(assessment, "implementationSummary"), summary),
 		VerificationSummary:   firstNonEmptyOrchestratorString(stringFromMap(assessment, "verificationSummary"), verificationSummaryFromEvidence(runDialogLanguage(run), evidenceRefs)),
