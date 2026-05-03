@@ -56,7 +56,8 @@ func main() {
 	}
 	defer session.Close(context.Background())
 
-	be := backend.NewLocal(session)
+	exports, _ := session.Exports()
+	be := backend.NewEventHub(session, exports.Infrastructure.EventHub)
 
 	if err := cli.ExecuteWithBackend(be); err != nil {
 		log.Fatal(err)
