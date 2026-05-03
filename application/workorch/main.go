@@ -40,6 +40,17 @@ func main() {
 	}
 	os.Args = append([]string{os.Args[0]}, cobraArgs...)
 
+	// Check if remote mode was requested before initializing local runtime.
+	remoteAddr := extractRemoteAddr(os.Args[1:])
+	if remoteAddr != "" {
+		be := backend.NewRemote(remoteAddr)
+		if err := cli.ExecuteWithBackend(be, backend.WorkspaceInfo{}); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
+	// Local mode: initialize embedded runtime.
 	if err := application.Startup(service.DefaultService()); err != nil {
 		log.Fatal(err)
 	}
@@ -66,6 +77,15 @@ func main() {
 	if err := cli.ExecuteWithBackend(be, defaultWS); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func extractRemoteAddr(args []string) string {
+	for i, a := range args {
+		if a == "--remote" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 func extractConfigDir(args []string) (string, []string) {
