@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
@@ -14,6 +15,7 @@ import (
 
 type Agent struct {
 	session          *appservice.RuntimeSession
+	be               backend.Backend
 	mu               sync.Mutex
 	events           chan Event
 	closeOnce        sync.Once
@@ -71,9 +73,11 @@ type StepOutput struct {
 }
 
 func New() *Agent {
-	return &Agent{
-		events: make(chan Event, 64),
-	}
+	return &Agent{events: make(chan Event, 64)}
+}
+
+func NewWithBackend(be backend.Backend) *Agent {
+	return &Agent{be: be, events: make(chan Event, 64)}
 }
 
 func (a *Agent) Events() <-chan Event { return a.events }
@@ -95,17 +99,88 @@ func (a *Agent) Close() {
 	})
 }
 
+// Run executes the agent loop using the embedded runtime session (legacy path).
 func (a *Agent) Run(ctx context.Context, workspaceID string, goalText string, llmProviderID string) error {
 	defer close(a.events)
-
 	session, err := appservice.NewRuntimeSessionFromInitiator()
 	if err != nil {
 		return fmt.Errorf("create runtime session: %w", err)
 	}
 	a.session = session
+	return a.execute(ctx, workspaceID, goalText, llmProviderID)
+}
+
+// RunWithBackend executes the agent loop using the shared Backend.
+// Progress is driven by EventHub subscriptions instead of fixed-interval polling.
+func (a *Agent) RunWithBackend(ctx context.Context, workspaceID string, goalText string, llmProviderID string) error {
+	defer close(a.events)
+
+	// Subscribe to backend events for real-time progress.
+	eventCtx, unsub := context.WithCancel(ctx)
+	defer unsub()
+
+	unsubscribe, err := a.be.Events().Subscribe(eventCtx, func(_ context.Context, evt backend.Event) {
+		if evt.WorkspaceID != common.WorkspaceID(workspaceID) && evt.RunID == "" {
+			return
+		}
+		switch evt.Type {
+		case backend.EventDecisionCreated:
+			if ticketID, ok := evt.Payload["ticketId"].(string); ok {
+				if ticketID != a.notifiedDecision {
+					a.notifiedDecision = ticketID
+					question, _ := evt.Payload["question"].(string)
+					reason, _ := evt.Payload["reason"].(string)
+					a.Send(Event{Type: EventDecision, Payload: DecisionInfo{
+						TicketID: ticketID, Question: question, Reason: reason, RunID: workspaceID,
+					}})
+				}
+			}
+		case backend.EventApprovalCreated:
+			if approvalID, ok := evt.Payload["approvalId"].(string); ok {
+				if approvalID != a.notifiedApproval {
+					a.notifiedApproval = approvalID
+					reason, _ := evt.Payload["reason"].(string)
+					a.Send(Event{Type: EventApproval, Payload: ApprovalInfo{
+						ApprovalID: approvalID, Reason: reason, RunID: workspaceID,
+					}})
+				}
+			}
+		case backend.EventRunStateChanged:
+			if state, ok := evt.Payload["state"].(string); ok {
+				if state == "completed" {
+					a.Send(Event{Type: EventRunCompleted})
+				} else if state == "failed" {
+					msg, _ := evt.Payload["failureReason"].(string)
+					a.Send(Event{Type: EventRunFailed, Error: fmt.Errorf("%s", msg)})
+				}
+			}
+		}
+	})
+	if err == nil {
+		defer unsubscribe()
+	}
+
+	return a.execute(ctx, workspaceID, goalText, llmProviderID)
+}
+
+func (a *Agent) execute(ctx context.Context, workspaceID string, goalText string, llmProviderID string) error {
+	// Use backend if available; fall back to session.
+	if a.be != nil {
+		return a.executeWithBackend(ctx, workspaceID, goalText, llmProviderID)
+	}
 
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+
+	session := a.session
+	if session == nil {
+		var err error
+		session, err = appservice.NewRuntimeSessionFromInitiator()
+		if err != nil {
+			return fmt.Errorf("create runtime session: %w", err)
+		}
+		a.session = session
 	}
 
 	goal, err := appservice.DefineGoalWithSession(ctx, session.Borrow(), workspaceID, goalText)
@@ -138,6 +213,41 @@ func (a *Agent) Run(ctx context.Context, workspaceID string, goalText string, ll
 	return a.pollRun(ctx, activation.Run.ID)
 }
 
+func (a *Agent) executeWithBackend(ctx context.Context, workspaceID string, goalText string, llmProviderID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	wsID := common.WorkspaceID(workspaceID)
+
+	goal, err := a.be.Goal().Define(ctx, wsID, goalText)
+	if err != nil {
+		return fmt.Errorf("define goal: %w", err)
+	}
+
+	dod, err := a.be.DoD().Define(ctx, wsID, []string{"目标已完成，输出包含明确的执行结果"})
+	if err != nil {
+		return fmt.Errorf("define dod: %w", err)
+	}
+
+	run, err := a.be.Run().Activate(ctx, wsID, backend.ActivateRunRequest{
+		GoalID:        goal.ID,
+		DoDID:         dod.ID,
+		LLMProviderID: llmProviderID,
+	})
+	if err != nil {
+		return fmt.Errorf("activate execution: %w", err)
+	}
+
+	a.Send(Event{Type: EventRunCreated, Payload: RunCreatedInfo{
+		RunID:       string(run.ID),
+		WorkspaceID: workspaceID,
+	}})
+
+	// EventHub subscriptions drive progress; poll as fallback.
+	return a.pollRun(ctx, string(run.ID))
+}
+
 func (a *Agent) pollRun(ctx context.Context, runID string) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -149,23 +259,60 @@ func (a *Agent) pollRun(ctx context.Context, runID string) error {
 			return ctx.Err()
 
 		case <-ticker.C:
-			a.Send(Event{Type: EventProgress})
+			if a.be != nil {
+				status, err := a.be.Run().Status(ctx, common.RunID(runID))
+				if err != nil {
+					return err
+				}
+				switch status.State {
+				case common.RunStateCompleted:
+					a.Send(Event{Type: EventRunCompleted})
+					return nil
+				case common.RunStateFailed:
+					a.Send(Event{Type: EventRunFailed, Error: fmt.Errorf("%s", status.FailureReason)})
+					return fmt.Errorf("run failed: %s", status.FailureReason)
+				case common.RunStateBlockedOnDecision:
+					ticketID := string(status.BlockingTicketID)
+					if ticketID != a.notifiedDecision {
+						a.notifiedDecision = ticketID
+						dec, err := a.be.Decision().Get(ctx, common.TicketID(ticketID))
+						if err == nil {
+							a.Send(Event{Type: EventDecision, Payload: DecisionInfo{
+								TicketID: ticketID, Question: dec.Question, Reason: dec.Reason, RunID: runID,
+							}})
+						}
+					}
+				case common.RunStateBlockedOnApproval:
+					approvalID := string(status.BlockingApprovalID)
+					if approvalID != a.notifiedApproval {
+						a.notifiedApproval = approvalID
+						appr, err := a.be.Approval().Get(ctx, common.ApprovalID(approvalID))
+						if err == nil {
+							a.Send(Event{Type: EventApproval, Payload: ApprovalInfo{
+								ApprovalID: approvalID, Reason: appr.Reason, RunID: runID,
+							}})
+						}
+					}
+				default:
+					a.Send(Event{Type: EventProgress})
+				}
+				continue
+			}
+
+			// Legacy session-based polling.
 			session := a.session.Borrow()
 			exports, err := session.Exports()
 			if err != nil {
 				return err
 			}
-
 			run, err := exports.Repositories.Runs.Get(ctx, common.RunID(runID))
 			if err != nil {
 				return err
 			}
-
 			switch run.State {
 			case common.RunStateCompleted:
 				a.Send(Event{Type: EventRunCompleted, Payload: a.buildCompletedInfo(ctx, runID)})
 				return nil
-
 			case common.RunStateFailed:
 				msg := run.FailureReason
 				if msg == "" {
@@ -173,7 +320,6 @@ func (a *Agent) pollRun(ctx context.Context, runID string) error {
 				}
 				a.Send(Event{Type: EventRunFailed, Error: fmt.Errorf("%s", msg)})
 				return fmt.Errorf("run failed: %s", msg)
-
 			case common.RunStateBlockedOnDecision:
 				ticketID := string(run.BlockingTicketID)
 				if ticketID != a.notifiedDecision {
@@ -181,14 +327,10 @@ func (a *Agent) pollRun(ctx context.Context, runID string) error {
 					ticket, err := exports.Repositories.Tickets.Get(ctx, run.BlockingTicketID)
 					if err == nil {
 						a.Send(Event{Type: EventDecision, Payload: DecisionInfo{
-							TicketID: ticketID,
-							Question: ticket.Question,
-							Reason:   ticket.Reason,
-							RunID:    runID,
+							TicketID: ticketID, Question: ticket.Question, Reason: ticket.Reason, RunID: runID,
 						}})
 					}
 				}
-
 			case common.RunStateBlockedOnApproval:
 				approvalID := string(run.BlockingApprovalID)
 				if approvalID != a.notifiedApproval {
@@ -196,27 +338,41 @@ func (a *Agent) pollRun(ctx context.Context, runID string) error {
 					approval, err := exports.Repositories.Approvals.Get(ctx, run.BlockingApprovalID)
 					if err == nil {
 						a.Send(Event{Type: EventApproval, Payload: ApprovalInfo{
-							ApprovalID: approvalID,
-							Reason:     approval.Reason,
-							RunID:      runID,
+							ApprovalID: approvalID, Reason: approval.Reason, RunID: runID,
 						}})
 					}
 				}
+			default:
+				a.Send(Event{Type: EventProgress})
 			}
 		}
 	}
 }
 
 func (a *Agent) ResolveDecision(ctx context.Context, ticketID string, resolutionType string, note string) error {
+	if a.be != nil {
+		_, err := a.be.Decision().Resolve(ctx, backend.ResolveDecisionRequest{
+			TicketID: common.TicketID(ticketID), ResolutionType: resolutionType,
+			Payload: map[string]any{"note": note},
+		})
+		return err
+	}
 	session := a.session.Borrow()
 	_, err := appservice.ResolveDecisionWithSession(ctx, session, ticketID, appservice.ResolveDecisionCommand{
-		ResolutionType: resolutionType,
-		ResolutionPayload: map[string]any{"note": note},
+		ResolutionType: resolutionType, ResolutionPayload: map[string]any{"note": note},
 	})
 	return err
 }
 
 func (a *Agent) ResolveApproval(ctx context.Context, approvalID string, approved bool) error {
+	if a.be != nil {
+		if approved {
+			_, err := a.be.Approval().Approve(ctx, common.ApprovalID(approvalID))
+			return err
+		}
+		_, err := a.be.Approval().Reject(ctx, common.ApprovalID(approvalID))
+		return err
+	}
 	session := a.session.Borrow()
 	if approved {
 		_, err := appservice.ApproveApprovalWithSession(ctx, session, approvalID)
@@ -232,9 +388,13 @@ func (a *Agent) ClearNotified() {
 }
 
 func (a *Agent) ResumeRun(ctx context.Context, runID string) error {
-	session := a.session.Borrow()
 	a.notifiedDecision = ""
 	a.notifiedApproval = ""
+	if a.be != nil {
+		_, err := a.be.Run().Resume(ctx, common.RunID(runID))
+		return err
+	}
+	session := a.session.Borrow()
 	_, err := appservice.ResumeRunWithSession(ctx, session, runID)
 	return err
 }
@@ -263,7 +423,6 @@ func (a *Agent) buildCompletedInfo(ctx context.Context, runID string) RunComplet
 		}
 	}
 
-	// Retry result fetch up to 3 times (results may not be persisted when run completes).
 	var results []*resultmodel.Result
 	for attempt := 0; attempt < 3; attempt++ {
 		results, _ = exports.Repositories.Results.ListByRun(ctx, common.RunID(runID))
@@ -272,7 +431,6 @@ func (a *Agent) buildCompletedInfo(ctx context.Context, runID string) RunComplet
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-
 	for _, r := range results {
 		if r.State == "accepted" {
 			if r.SummaryDetail.GoalOutcome != "" {
@@ -289,8 +447,6 @@ func (a *Agent) buildCompletedInfo(ctx context.Context, runID string) RunComplet
 			}
 		}
 	}
-
-	// Fall back to non-LLM step outputs.
 	if info.Summary == "" {
 		for _, s := range steps {
 			if s.State == "completed" && s.Output != nil && !strings.HasPrefix(s.Kind, "llm/") {
@@ -301,7 +457,6 @@ func (a *Agent) buildCompletedInfo(ctx context.Context, runID string) RunComplet
 			}
 		}
 	}
-
 	return info
 }
 
@@ -320,10 +475,19 @@ func CreateWorkspace(ctx context.Context, title string, description string) (str
 		return "", fmt.Errorf("create runtime session: %w", err)
 	}
 	defer session.Close(ctx)
-
 	ws, err := appservice.CreateWorkspaceWithSession(ctx, session.Borrow(), title, description, "")
 	if err != nil {
 		return "", err
 	}
 	return ws.ID, nil
+}
+
+func CreateWorkspaceWithBackend(ctx context.Context, be backend.Backend, title string, description string, workingDir string) (string, error) {
+	ws, err := be.Workspace().Create(ctx, backend.CreateWorkspaceRequest{
+		Title: title, Description: description, WorkingDirectory: workingDir,
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(ws.ID), nil
 }
