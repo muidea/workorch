@@ -23,8 +23,9 @@ var (
 	cfgPath   string
 	cliBackend backend.Backend
 
-	remoteAddr string
-	jsonOutput bool
+	remoteAddr         string
+	jsonOutput         bool
+	defaultWorkspaceID string
 
 	styleTitle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Padding(0, 1)
 	styleHeader  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("240"))
@@ -65,8 +66,13 @@ to a running workorchd service.`,
 	},
 }
 
-func ExecuteWithBackend(be backend.Backend) error {
+func ExecuteWithBackend(be backend.Backend, defaultWS backend.WorkspaceInfo) error {
 	cliBackend = be
+
+	// Store default workspace for TUI/agent use.
+	if defaultWS.ID != "" {
+		defaultWorkspaceID = string(defaultWS.ID)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()

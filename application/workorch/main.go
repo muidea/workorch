@@ -59,7 +59,11 @@ func main() {
 	exports, _ := session.Exports()
 	be := backend.NewEventHub(session, exports.Infrastructure.EventHub)
 
-	if err := cli.ExecuteWithBackend(be); err != nil {
+	// Resolve default workspace from current working directory.
+	cwd, _ := os.Getwd()
+	defaultWS := resolveDefaultWorkspace(context.Background(), be, cwd)
+
+	if err := cli.ExecuteWithBackend(be, defaultWS); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -97,6 +101,28 @@ func resolveConfigDir(flagDir string) string {
 		return filepath.Join(home, ".workorch")
 	}
 	return ""
+}
+
+// resolveDefaultWorkspace finds or creates a Workspace bound to the given directory.
+func resolveDefaultWorkspace(ctx context.Context, be backend.Backend, workingDir string) backend.WorkspaceInfo {
+	if workingDir == "" {
+		return backend.WorkspaceInfo{}
+	}
+	list, _ := be.Workspace().List(ctx)
+	for _, ws := range list {
+		if ws.WorkingDirectory == workingDir {
+			return ws
+		}
+	}
+	ws, err := be.Workspace().Create(ctx, backend.CreateWorkspaceRequest{
+		Title:            filepath.Base(workingDir),
+		Description:      workingDir,
+		WorkingDirectory: workingDir,
+	})
+	if err != nil {
+		return backend.WorkspaceInfo{}
+	}
+	return *ws
 }
 
 func ensureConfigFile(dir string) error {
