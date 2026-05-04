@@ -31,7 +31,22 @@ type Workspace struct {
 	SoulBindings     map[string]string `json:"soulBindings,omitempty"`
 }
 
+type CreateWorkspaceCommand struct {
+	Title            string `json:"title"`
+	Description      string `json:"description,omitempty"`
+	WorkingDirectory string `json:"workingDirectory,omitempty"`
+	TemplateID       string `json:"templateId,omitempty"`
+}
+
 func CreateWorkspaceWithSession(ctx context.Context, session *RuntimeSession, title string, description string, workingDirectory string) (ret Workspace, err error) {
+	return CreateWorkspaceWithTemplateWithSession(ctx, session, CreateWorkspaceCommand{
+		Title:            title,
+		Description:      description,
+		WorkingDirectory: workingDirectory,
+	})
+}
+
+func CreateWorkspaceWithTemplateWithSession(ctx context.Context, session *RuntimeSession, cmd CreateWorkspaceCommand) (ret Workspace, err error) {
 	service, repo, err := workspaceDependenciesFromSession(session)
 	if err != nil {
 		return Workspace{}, err
@@ -40,7 +55,7 @@ func CreateWorkspaceWithSession(ctx context.Context, session *RuntimeSession, ti
 
 	for attempt := 0; attempt < 8; attempt++ {
 		id := generateWorkspaceID()
-		layout, err := resolveWorkspaceDirectoryLayout(session, id, workingDirectory)
+		layout, err := resolveWorkspaceDirectoryLayout(session, id, cmd.WorkingDirectory)
 		if err != nil {
 			return Workspace{}, err
 		}
@@ -49,8 +64,8 @@ func CreateWorkspaceWithSession(ctx context.Context, session *RuntimeSession, ti
 		}
 		if err := service.CreateWorkspace(ctx, workspacemodule.CreateWorkspaceCommand{
 			WorkspaceID:      id,
-			Title:            title,
-			Description:      description,
+			Title:            cmd.Title,
+			Description:      cmd.Description,
 			WorkingDirectory: layout.WorkingDirectory,
 		}); err != nil {
 			if errors.Is(err, common.ErrConflict) {
@@ -60,6 +75,10 @@ func CreateWorkspaceWithSession(ctx context.Context, session *RuntimeSession, ti
 		}
 
 		item, err := repo.Get(ctx, id)
+		if err != nil {
+			return Workspace{}, err
+		}
+		item, err = applyWorkspaceTemplateOnCreate(ctx, session, repo, item, cmd.TemplateID)
 		if err != nil {
 			return Workspace{}, err
 		}
@@ -105,6 +124,46 @@ func CreateWorkspaceWithBackend(ctx context.Context, backend string, dataRoot st
 		return Workspace{}, err
 	}
 	return CreateWorkspaceWithSession(ctx, session, title, description, workingDirectory)
+}
+
+func CreateWorkspaceWithTemplateWithBackend(ctx context.Context, backend string, dataRoot string, cmd CreateWorkspaceCommand) (Workspace, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return Workspace{}, err
+	}
+	return CreateWorkspaceWithTemplateWithSession(ctx, session, cmd)
+}
+
+func applyWorkspaceTemplateOnCreate(ctx context.Context, session *RuntimeSession, workspaces repository.WorkspaceRepository, item *workspacemodel.Workspace, templateID string) (*workspacemodel.Workspace, error) {
+	templateID = strings.TrimSpace(templateID)
+	if templateID == "" {
+		return item, nil
+	}
+	if workspaces == nil || item == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	templateRepo, err := workspaceTemplateRepositoryFromSession(session)
+	if err != nil {
+		return nil, err
+	}
+	templateItem, err := templateRepo.Get(ctx, templateID)
+	if err != nil {
+		return nil, err
+	}
+	template := workspaceTemplateFromRepository(templateItem)
+	if err := validateWorkspaceTemplateSouls(ctx, session, template); err != nil {
+		return nil, err
+	}
+	bindings, err := normalizeSoulBindings(template.SoulBindings)
+	if err != nil {
+		return nil, err
+	}
+	item.DefaultSoulID = common.SoulID(strings.TrimSpace(template.DefaultSoulID))
+	item.SoulBindings = bindings
+	if err := workspaces.Update(ctx, item); err != nil {
+		return nil, err
+	}
+	return workspaces.Get(ctx, item.ID)
 }
 
 func createWorkspaceWithIDWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, title string, description string, workingDirectory string) (Workspace, error) {

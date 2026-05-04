@@ -20,7 +20,7 @@ report_failure() {
   if [[ $status -eq 0 ]]; then
     return
   fi
-  echo "workorchd LLM workspace execution verification failed for deployed service $BASE_URL" >&2
+  echo "workorch LLM workspace execution verification failed for deployed workorch service $BASE_URL" >&2
   if [[ -f "$MOCK_LOG" ]]; then
     echo "--- llm-mock.log ---" >&2
     tail -n 200 "$MOCK_LOG" >&2 || true
@@ -595,6 +595,9 @@ approval_path="$(url_encode "$approval_id")"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$approval_run_id/status" | grep '"state": "blocked_on_approval"' >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id" | grep "\"id\": \"$approval_id\"" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/approvals?runId=$approval_run_id" | grep "\"id\": \"$approval_id\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_path" >"$TMP_DIR/approval-detail.json"
+[[ "$(json_path "$TMP_DIR/approval-detail.json" "approval.action")" == "continue risky test path" ]]
+[[ "$(json_path "$TMP_DIR/approval-detail.json" "approval.context.scenario")" == "approval" ]]
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_path/reject" | grep '"state": "rejected"' >/dev/null
 wait_run_state "$approval_run_id" "failed" "$TMP_DIR/approval-rejected-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$approval_run_id/observability" | grep '"terminal": true' >/dev/null
@@ -611,7 +614,10 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$multi_gate_ticket_path/r
 wait_run_state "$multi_gate_run_id" "blocked_on_approval" "$TMP_DIR/multi-gate-approval-status.json"
 multi_gate_approval_id="$(json_path "$TMP_DIR/multi-gate-approval-status.json" "status.blockingApprovalId")"
 multi_gate_approval_path="$(url_encode "$multi_gate_approval_id")"
-curl -fsS "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path" | grep '"state": "pending"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path" >"$TMP_DIR/multi-gate-approval-detail.json"
+grep '"state": "pending"' "$TMP_DIR/multi-gate-approval-detail.json" >/dev/null
+[[ "$(json_path "$TMP_DIR/multi-gate-approval-detail.json" "approval.action")" == "complete multi-gate LLM path" ]]
+[[ "$(json_path "$TMP_DIR/multi-gate-approval-detail.json" "approval.context.scenario")" == "decision_then_approval" ]]
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path/approve" | grep '"state": "approved"' >/dev/null
 wait_run_state "$multi_gate_run_id" "completed" "$TMP_DIR/multi-gate-completed-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/snapshot" >"$TMP_DIR/multi-gate-snapshot.json"
@@ -652,4 +658,4 @@ grep 'workorch_http_requests_total{endpoint="run_observability"}' "$TMP_DIR/metr
 grep 'workorch_http_requests_total{endpoint="approval_approve"}' "$TMP_DIR/metrics.txt" >/dev/null
 grep 'workorch_http_requests_total{endpoint="approval_reject"}' "$TMP_DIR/metrics.txt" >/dev/null
 
-echo "workorchd LLM workspace execution verification passed for deployed service $BASE_URL"
+echo "workorch LLM workspace execution verification passed for deployed workorch service $BASE_URL"

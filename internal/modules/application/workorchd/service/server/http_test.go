@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -150,7 +151,10 @@ func TestServerStatePrefersApplicationRuntimeSession(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	workspace, err := state.createWorkspace(ctx, "", "", "application runtime", "", "workspaces/application-runtime")
+	workspace, err := state.createWorkspace(ctx, "", "", appservice.CreateWorkspaceCommand{
+		Title:            "application runtime",
+		WorkingDirectory: "workspaces/application-runtime",
+	})
 	if err != nil {
 		t.Fatalf("create workspace through server state: %v", err)
 	}
@@ -561,7 +565,7 @@ func useWorkorchRuntimeTestConfig(t *testing.T, backend string, dataRoot string)
 
 	_ = workorchconfig.Close()
 	configDir := t.TempDir()
-	content := fmt.Sprintf(`endpointName = "workorchd"
+	content := fmt.Sprintf(`endpointName = "workorch"
 
 [server]
 addr = "127.0.0.1:0"
@@ -659,6 +663,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/task-decompositions"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/runs/:runId/start"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/runs/:runId/resume"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/events/stream"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/decisions"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/decisions/:ticketId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/decisions/:ticketId/resolve"},
@@ -696,6 +701,79 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/console"},
 		{method: http.MethodGet, pattern: "/console/"},
 		{method: http.MethodGet, pattern: "/console/**"},
+	}
+}
+
+func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
+	hub := events.NewMemoryHub()
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	server := httptest.NewServer(newMuxWithState(state))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "text/event-stream") {
+		t.Fatalf("content type = %q, want text/event-stream", got)
+	}
+
+	lines := make(chan string, 16)
+	readErr := make(chan error, 1)
+	go func() {
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		readErr <- scanner.Err()
+	}()
+
+	if err := hub.Publish(context.Background(), events.Envelope{
+		Topic:       events.TopicWorkspaceCreated,
+		WorkspaceID: "ws-other",
+		Payload:     events.WorkspacePayload("other", "", "/tmp/other", common.WorkspaceStateActive, ""),
+	}); err != nil {
+		t.Fatalf("publish nonmatching event: %v", err)
+	}
+	if err := hub.Publish(context.Background(), events.Envelope{
+		Topic:       events.TopicWorkspaceCreated,
+		WorkspaceID: "ws-stream",
+		Payload:     events.WorkspacePayload("stream workspace", "", "/tmp/stream", common.WorkspaceStateActive, ""),
+	}); err != nil {
+		t.Fatalf("publish matching event: %v", err)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case line := <-lines:
+			if !strings.HasPrefix(line, "data:") {
+				continue
+			}
+			var envelope events.Envelope
+			if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &envelope); err != nil {
+				t.Fatalf("decode stream data %q: %v", line, err)
+			}
+			if envelope.WorkspaceID != "ws-stream" || envelope.Topic != events.TopicWorkspaceCreated {
+				t.Fatalf("stream envelope = %+v, want filtered workspace-created event", envelope)
+			}
+			return
+		case err := <-readErr:
+			t.Fatalf("stream closed before event: %v", err)
+		case <-deadline:
+			t.Fatal("timed out waiting for streamed event")
+		}
 	}
 }
 
@@ -947,14 +1025,14 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}
 		return appservice.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "pending"}, nil
 	}
-	state.createWorkspace = func(ctx context.Context, _, _, title, description, workingDirectory string) (appservice.Workspace, error) {
+	state.createWorkspace = func(ctx context.Context, _, _ string, cmd appservice.CreateWorkspaceCommand) (appservice.Workspace, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("workspace create event hub = %#v, want injected hub", got)
 		}
-		if title != "native write" || description != "native description" || workingDirectory != "workspaces/native-write" {
-			t.Fatalf("workspace create input = %q/%q/%q, want native write/native description/workspaces/native-write", title, description, workingDirectory)
+		if cmd.Title != "native write" || cmd.Description != "native description" || cmd.WorkingDirectory != "workspaces/native-write" || cmd.TemplateID != "software-dev" {
+			t.Fatalf("workspace create input = %q/%q/%q/%q, want native write/native description/workspaces/native-write/software-dev", cmd.Title, cmd.Description, cmd.WorkingDirectory, cmd.TemplateID)
 		}
-		return appservice.Workspace{ID: "ws-native-write", Title: title, Description: description, WorkingDirectory: workingDirectory, State: "active"}, nil
+		return appservice.Workspace{ID: "ws-native-write", Title: cmd.Title, Description: cmd.Description, WorkingDirectory: cmd.WorkingDirectory, State: "active"}, nil
 	}
 	state.deleteWorkspace = func(ctx context.Context, _, _, workspaceID string, cmd appservice.DeleteWorkspaceCommand) error {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
@@ -1068,7 +1146,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		status int
 	}{
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces", status: http.StatusOK},
-		{method: http.MethodPost, path: "/api/v1/workorch/workspaces", body: `{"title":"native write","description":"native description","workingDirectory":"workspaces/native-write"}`, status: http.StatusCreated},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces", body: `{"title":"native write","description":"native description","workingDirectory":"workspaces/native-write","templateId":"software-dev"}`, status: http.StatusCreated},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read", status: http.StatusOK},
 		{method: http.MethodDelete, path: "/api/v1/workorch/workspaces/ws-native-read?purge=true", status: http.StatusNoContent},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/snapshot", status: http.StatusOK},

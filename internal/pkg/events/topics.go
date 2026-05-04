@@ -16,4 +16,7 @@ const (
 	TopicApprovalResolved      = "/approval/resolved"
 	TopicResultAccepted        = "/result/accepted"
 	TopicArtifactCreated       = "/artifact/created"
+	TopicMemoryCreated         = "/memory/created"
+	TopicMemoryUpdated         = "/memory/updated"
+	TopicMemoryDeleted         = "/memory/deleted"
 )

@@ -3,6 +3,7 @@ package approval
 import (
 	"context"
 	"errors"
+	"reflect"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
 	approvalModel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -32,6 +33,8 @@ func (s *Service) CreateApproval(ctx context.Context, cmd approvalservice.Create
 		RunID:       cmd.RunID,
 		StepID:      cmd.StepID,
 		Reason:      cmd.Reason,
+		Action:      cmd.Action,
+		Context:     cloneApprovalContext(cmd.Context),
 		State:       common.ApprovalStatePending,
 	}
 	if err := s.approvals.Create(ctx, item); err != nil {
@@ -49,7 +52,7 @@ func (s *Service) CreateApproval(ctx context.Context, cmd approvalservice.Create
 		WorkspaceID:  string(item.WorkspaceID),
 		RunID:        string(item.RunID),
 		StepID:       string(item.StepID),
-		Payload:      events.ApprovalPayload(item.Reason, item.State),
+		Payload:      events.ApprovalPayload(item.Reason, item.Action, item.Context, item.State),
 	})
 }
 
@@ -60,7 +63,12 @@ func (s *Service) EnsureApproval(ctx context.Context, cmd approvalservice.Create
 
 	item, err := s.approvals.Get(ctx, cmd.ApprovalID)
 	if err == nil {
-		if item.WorkspaceID != cmd.WorkspaceID || item.RunID != cmd.RunID || item.StepID != cmd.StepID || item.Reason != cmd.Reason {
+		if item.WorkspaceID != cmd.WorkspaceID ||
+			item.RunID != cmd.RunID ||
+			item.StepID != cmd.StepID ||
+			item.Reason != cmd.Reason ||
+			item.Action != cmd.Action ||
+			!approvalContextEqual(item.Context, cmd.Context) {
 			return common.ErrConflict
 		}
 		return nil
@@ -170,6 +178,21 @@ func (s *Service) resolveItem(ctx context.Context, item *approvalModel.Approval,
 		WorkspaceID:  string(item.WorkspaceID),
 		RunID:        string(item.RunID),
 		StepID:       string(item.StepID),
-		Payload:      events.ApprovalPayload(item.Reason, item.State),
+		Payload:      events.ApprovalPayload(item.Reason, item.Action, item.Context, item.State),
 	})
+}
+
+func cloneApprovalContext(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
+}
+
+func approvalContextEqual(left map[string]any, right map[string]any) bool {
+	return reflect.DeepEqual(left, right)
 }

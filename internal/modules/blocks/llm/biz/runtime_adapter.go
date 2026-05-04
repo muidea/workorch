@@ -33,6 +33,8 @@ const (
 	outputKeyBlockDecisionKind     = "blockDecisionKind"
 	outputKeyBlockDecisionQuestion = "blockDecisionQuestion"
 	outputKeyBlockDecisionContext  = "blockDecisionContext"
+	outputKeyBlockApprovalAction   = "blockApprovalAction"
+	outputKeyBlockApprovalContext  = "blockApprovalContext"
 	outputKeyExecutionGraph        = "executionGraph"
 	maxLLMOutputPreviewBytes       = 4096
 	unavailableWorkorchCLICommand  = "workorch"
@@ -944,6 +946,12 @@ func NormalizeDecisionOutput(request runtimemodel.StepExecutionRequest, decision
 	if decision.RequiredApproval != nil {
 		output["stage"] = "llm_approval_required"
 		output["blockApprovalReason"] = decision.RequiredApproval.Reason
+		if strings.TrimSpace(decision.RequiredApproval.Action) != "" {
+			output[outputKeyBlockApprovalAction] = decision.RequiredApproval.Action
+		}
+		if len(decision.RequiredApproval.Context) > 0 {
+			output[outputKeyBlockApprovalContext] = cloneMap(decision.RequiredApproval.Context)
+		}
 		output["nextStep"] = fmt.Sprintf("%s/llm-after-approval", request.RunID)
 		output["nextKind"] = llmcommon.StepKindWorkspaceExecution
 		return output, nil

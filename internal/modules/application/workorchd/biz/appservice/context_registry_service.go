@@ -15,6 +15,7 @@ import (
 	soulmodule "github.com/muidea/workorch/internal/modules/kernel/soul"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -168,6 +169,16 @@ type CreateMemoryItemCommand struct {
 	EmbeddingModel      string    `json:"embeddingModel,omitempty"`
 	EmbeddingText       string    `json:"embeddingText,omitempty"`
 	Vector              []float64 `json:"vector,omitempty"`
+}
+
+type UpdateMemoryItemCommand = CreateMemoryItemCommand
+
+type MemoryQuery struct {
+	WorkspaceID string
+	Query       string
+	Tags        []string
+	Types       []string
+	Limit       int
 }
 
 func CreateSoulWithSession(ctx context.Context, session *RuntimeSession, cmd CreateSoulCommand) (ret Soul, err error) {
@@ -855,6 +866,9 @@ func CreateMemoryItemWithSession(ctx context.Context, session *RuntimeSession, w
 	if err != nil {
 		return MemoryItem{}, err
 	}
+	if err := publishMemoryEvent(ctx, events.TopicMemoryCreated, item); err != nil {
+		return MemoryItem{}, err
+	}
 	return mapMemoryItem(item), nil
 }
 
@@ -864,6 +878,124 @@ func CreateMemoryItemWithBackend(ctx context.Context, backend string, dataRoot s
 		return MemoryItem{}, err
 	}
 	return CreateMemoryItemWithSession(ctx, session, workspaceID, cmd)
+}
+
+func ReadMemoryItemWithSession(ctx context.Context, session *RuntimeSession, memoryID string) (ret MemoryItem, err error) {
+	exports, err := session.Exports()
+	if err != nil {
+		return MemoryItem{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+	if exports.Repositories.MemoryItems == nil {
+		return MemoryItem{}, common.ErrInvalidArgument
+	}
+	memoryID = strings.TrimSpace(memoryID)
+	if memoryID == "" {
+		return MemoryItem{}, common.ErrInvalidArgument
+	}
+	item, err := exports.Repositories.MemoryItems.Get(ctx, common.MemoryID(memoryID))
+	if err != nil {
+		return MemoryItem{}, err
+	}
+	return mapMemoryItem(item), nil
+}
+
+func ReadMemoryItemWithBackend(ctx context.Context, backend string, dataRoot string, memoryID string) (MemoryItem, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return MemoryItem{}, err
+	}
+	return ReadMemoryItemWithSession(ctx, session, memoryID)
+}
+
+func UpdateMemoryItemWithSession(ctx context.Context, session *RuntimeSession, memoryID string, cmd UpdateMemoryItemCommand) (ret MemoryItem, err error) {
+	exports, err := session.Exports()
+	if err != nil {
+		return MemoryItem{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+	if exports.Services.MemoryService == nil || exports.Repositories.MemoryItems == nil {
+		return MemoryItem{}, common.ErrInvalidArgument
+	}
+	memoryID = strings.TrimSpace(memoryID)
+	if memoryID == "" {
+		return MemoryItem{}, common.ErrInvalidArgument
+	}
+	if strings.TrimSpace(cmd.MemoryID) != "" && strings.TrimSpace(cmd.MemoryID) != memoryID {
+		return MemoryItem{}, common.ErrInvalidArgument
+	}
+	existing, err := exports.Repositories.MemoryItems.Get(ctx, common.MemoryID(memoryID))
+	if err != nil {
+		return MemoryItem{}, err
+	}
+	merged := mergeMemoryUpdateCommand(existing, cmd)
+	if err := exports.Services.MemoryService.UpdateMemoryItem(ctx, memorymodule.UpdateMemoryItemCommand{
+		MemoryID:            common.MemoryID(memoryID),
+		WorkspaceID:         existing.WorkspaceID,
+		RunID:               common.RunID(merged.RunID),
+		SourceType:          merged.SourceType,
+		SourceRef:           merged.SourceRef,
+		MemoryType:          merged.MemoryType,
+		Content:             merged.Content,
+		Summary:             merged.Summary,
+		Tags:                cloneStrings(merged.Tags),
+		Importance:          merged.Importance,
+		Confidence:          merged.Confidence,
+		Visibility:          merged.Visibility,
+		EmbeddingProviderID: merged.EmbeddingProviderID,
+		EmbeddingModel:      merged.EmbeddingModel,
+		EmbeddingText:       merged.EmbeddingText,
+		Vector:              cloneFloats(merged.Vector),
+	}); err != nil {
+		return MemoryItem{}, err
+	}
+	item, err := exports.Repositories.MemoryItems.Get(ctx, common.MemoryID(memoryID))
+	if err != nil {
+		return MemoryItem{}, err
+	}
+	if err := publishMemoryEvent(ctx, events.TopicMemoryUpdated, item); err != nil {
+		return MemoryItem{}, err
+	}
+	return mapMemoryItem(item), nil
+}
+
+func UpdateMemoryItemWithBackend(ctx context.Context, backend string, dataRoot string, memoryID string, cmd UpdateMemoryItemCommand) (MemoryItem, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return MemoryItem{}, err
+	}
+	return UpdateMemoryItemWithSession(ctx, session, memoryID, cmd)
+}
+
+func DeleteMemoryItemWithSession(ctx context.Context, session *RuntimeSession, memoryID string) (err error) {
+	exports, err := session.Exports()
+	if err != nil {
+		return err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+	if exports.Services.MemoryService == nil || exports.Repositories.MemoryItems == nil {
+		return common.ErrInvalidArgument
+	}
+	memoryID = strings.TrimSpace(memoryID)
+	if memoryID == "" {
+		return common.ErrInvalidArgument
+	}
+	item, err := exports.Repositories.MemoryItems.Get(ctx, common.MemoryID(memoryID))
+	if err != nil {
+		return err
+	}
+	if err := exports.Services.MemoryService.DeleteMemoryItem(ctx, common.MemoryID(memoryID)); err != nil {
+		return err
+	}
+	return publishMemoryEvent(ctx, events.TopicMemoryDeleted, item)
+}
+
+func DeleteMemoryItemWithBackend(ctx context.Context, backend string, dataRoot string, memoryID string) error {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return err
+	}
+	return DeleteMemoryItemWithSession(ctx, session, memoryID)
 }
 
 func ListMemoryByWorkspaceWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, query string) (ret []MemoryItem, err error) {
@@ -900,6 +1032,126 @@ func ListMemoryByWorkspaceWithBackend(ctx context.Context, backend string, dataR
 		return nil, err
 	}
 	return ListMemoryByWorkspaceWithSession(ctx, session, workspaceID, query)
+}
+
+func SearchMemoryWithSession(ctx context.Context, session *RuntimeSession, query MemoryQuery) (ret []MemoryItem, err error) {
+	exports, err := session.Exports()
+	if err != nil {
+		return nil, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+	if exports.Services.MemoryService == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	if strings.TrimSpace(query.WorkspaceID) == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	items, err := exports.Services.MemoryService.SearchMemory(ctx, repository.MemorySearchQuery{
+		WorkspaceID: common.WorkspaceID(strings.TrimSpace(query.WorkspaceID)),
+		Query:       strings.TrimSpace(query.Query),
+		Tags:        cloneStrings(query.Tags),
+		Types:       cloneStrings(query.Types),
+		Limit:       query.Limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	ret = make([]MemoryItem, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, mapMemoryItem(item))
+	}
+	return ret, nil
+}
+
+func SearchMemoryWithBackend(ctx context.Context, backend string, dataRoot string, query MemoryQuery) ([]MemoryItem, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return nil, err
+	}
+	return SearchMemoryWithSession(ctx, session, query)
+}
+
+func mergeMemoryUpdateCommand(existing *memorymodel.MemoryItem, cmd UpdateMemoryItemCommand) UpdateMemoryItemCommand {
+	if existing == nil {
+		return cmd
+	}
+	ret := UpdateMemoryItemCommand{
+		MemoryID:            string(existing.ID),
+		RunID:               string(existing.RunID),
+		SourceType:          existing.SourceType,
+		SourceRef:           existing.SourceRef,
+		MemoryType:          existing.MemoryType,
+		Content:             existing.Content,
+		Summary:             existing.Summary,
+		Tags:                cloneStrings(existing.Tags),
+		Importance:          existing.Importance,
+		Confidence:          existing.Confidence,
+		Visibility:          existing.Visibility,
+		EmbeddingProviderID: existing.EmbeddingProviderID,
+		EmbeddingModel:      existing.EmbeddingModel,
+		EmbeddingText:       existing.EmbeddingText,
+		Vector:              cloneFloats(existing.Vector),
+	}
+	if strings.TrimSpace(cmd.RunID) != "" {
+		ret.RunID = strings.TrimSpace(cmd.RunID)
+	}
+	if strings.TrimSpace(cmd.SourceType) != "" {
+		ret.SourceType = strings.TrimSpace(cmd.SourceType)
+	}
+	if strings.TrimSpace(cmd.SourceRef) != "" {
+		ret.SourceRef = strings.TrimSpace(cmd.SourceRef)
+	}
+	if strings.TrimSpace(cmd.MemoryType) != "" {
+		ret.MemoryType = strings.TrimSpace(cmd.MemoryType)
+	}
+	if cmd.Content != "" {
+		ret.Content = cmd.Content
+	}
+	if strings.TrimSpace(cmd.Summary) != "" {
+		ret.Summary = strings.TrimSpace(cmd.Summary)
+	}
+	if cmd.Tags != nil {
+		ret.Tags = cloneStrings(cmd.Tags)
+	}
+	if cmd.Importance != 0 {
+		ret.Importance = cmd.Importance
+	}
+	if cmd.Confidence != 0 {
+		ret.Confidence = cmd.Confidence
+	}
+	if strings.TrimSpace(cmd.Visibility) != "" {
+		ret.Visibility = strings.TrimSpace(cmd.Visibility)
+	}
+	if strings.TrimSpace(cmd.EmbeddingProviderID) != "" {
+		ret.EmbeddingProviderID = strings.TrimSpace(cmd.EmbeddingProviderID)
+	}
+	if strings.TrimSpace(cmd.EmbeddingModel) != "" {
+		ret.EmbeddingModel = strings.TrimSpace(cmd.EmbeddingModel)
+	}
+	if strings.TrimSpace(cmd.EmbeddingText) != "" {
+		ret.EmbeddingText = strings.TrimSpace(cmd.EmbeddingText)
+	}
+	if cmd.Vector != nil {
+		ret.Vector = cloneFloats(cmd.Vector)
+	}
+	return ret
+}
+
+func publishMemoryEvent(ctx context.Context, topic string, item *memorymodel.MemoryItem) error {
+	eventHub := EventHubFromContext(ctx)
+	if eventHub == nil || item == nil {
+		return nil
+	}
+	return eventHub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        topic,
+		SourceModule: "workorchd/appservice",
+		SubjectType:  "memory",
+		SubjectID:    string(item.ID),
+		WorkspaceID:  string(item.WorkspaceID),
+		RunID:        string(item.RunID),
+		Payload:      events.MemoryPayload(item.MemoryType, item.Summary, item.Content, item.SourceType, item.SourceRef, item.Tags, item.Importance, item.Confidence, item.Visibility),
+	})
 }
 
 func mapSoul(item *soulmodel.Soul) Soul {

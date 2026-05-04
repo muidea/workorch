@@ -38,6 +38,7 @@ func (m *Module) Setup(deps Dependencies) error {
 		CreateMemoryItem:      m.bizPtr.CreateMemoryItem,
 		UpdateMemoryItem:      m.bizPtr.UpdateMemoryItem,
 		GetMemoryItem:         m.bizPtr.GetMemoryItem,
+		DeleteMemoryItem:      m.bizPtr.DeleteMemoryItem,
 		ListMemoryByWorkspace: m.bizPtr.ListMemoryByWorkspace,
 		SearchMemory:          m.bizPtr.SearchMemory,
 	})

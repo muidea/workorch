@@ -6,7 +6,7 @@
 
 ```
 workorch/
-├── application/workorchd/     # 应用入口点
+├── application/workorch/     # 应用入口点
 │   └── main.go                # 解析 -config-dir，启动 magicCommon 生命周期
 ├── config/
 │   └── application.toml       # 运行时配置

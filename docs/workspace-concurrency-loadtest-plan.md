@@ -779,7 +779,7 @@ server.maxConcurrentRuns = 100
 
 - `internal/modules/application/workorchd/biz/bootstrap.workspaceScopedFileStore` 增加 `workspace_index.json` 进程内缓存，避免每次 workspace create/update/list/delete 都重新读取和反序列化完整索引。
 - `workspace_index.json` 写入从 `json.MarshalIndent` 改为 `json.Marshal`，降低全局索引文件写入大小、序列化 CPU 和磁盘 IO。
-- 该优化位于 application/workorchd 的 file repository adapter 层，只处理本地 file backend 的索引读写性能；不改变 kernel/orchestrator、runtime block、业务模型或业务目标解析边界。
+- 该优化位于 application/workorch 的 file repository adapter 层，只处理本地 file backend 的索引读写性能；不改变 kernel/orchestrator、runtime block、业务模型或业务目标解析边界。
 
 验证：
 

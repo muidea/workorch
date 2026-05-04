@@ -22,11 +22,11 @@ Soul，同时保持现有单一 `soulId` 启动方式可继续作为本次 Run �
 
 ## Implementation Constraints
 
-- `application/workorchd` 是 Soul Routing 的唯一策略解析层，负责在 Run 创建或恢复前解析 Workspace/Run/System 的 Soul 配置并写入 `executionContext.soulRouting`。
+- `application/workorch` 是 Soul Routing 的唯一策略解析层，负责在 Run 创建或恢复前解析 Workspace/Run/System 的 Soul 配置并写入 `executionContext.soulRouting`。
 - `kernel/orchestrator` 只消费和透传 execution context，不允许根据 Goal、DoD 或其他业务目标文本选择 Soul。
 - `blocks/llm` 只根据 Step input 和 `executionContext.soulRouting` 选择当前阶段的 Soul 上下文，不允许读取 Workspace/Soul 仓储，也不允许修改 Soul 绑定。
 - `soulMd` 是提示词定义内容，不是授权源；Skill、MCP 和 Tool 权限只能来自结构化字段 `allowedSkillRefs`、`allowedMCPServerRefs`、`allowedToolKinds`。
-- 阶段级 Soul 选择不违反以上约束；只要选择结果由 `application/workorchd` 解析并固化到 Run context，运行期 block 只消费该结果即可。
+- 阶段级 Soul 选择不违反以上约束；只要选择结果由 `application/workorch` 解析并固化到 Run context，运行期 block 只消费该结果即可。
 
 ## Task Stages
 
@@ -41,7 +41,7 @@ Soul，同时保持现有单一 `soulId` 启动方式可继续作为本次 Run �
 | `validation` | DoD 验证与证据核对 | 检查验收项、判断 satisfied/failed |
 | `artifact` | 正式交付物整理 | 结果摘要、交付报告、发布稿、patch/report |
 
-阶段枚举属于 workorch 业务执行语义，由 `application/workorchd` 负责管理和解释。
+阶段枚举属于 workorch 业务执行语义，由 `application/workorch` 负责管理和解释。
 
 ## Directory Layout
 
@@ -235,7 +235,7 @@ LLM Step 应根据当前任务意图选择阶段：
 
 实现边界：
 
-- `application/workorchd` 在 Run 创建前解析并持久化完整 `soulRouting`。
+- `application/workorch` 在 Run 创建前解析并持久化完整 `soulRouting`。
 - `kernel/orchestrator` 只透传 execution context，不理解 Soul 业务策略。
 - `blocks/llm` 根据 Step input 中的阶段标记和 `soulRouting` 选择当前有效 Soul 上下文，不读取仓储、不修改绑定。
 - 如果无法识别阶段，使用 `effectiveDefaultSoulId`；若仍不存在则按 `unbound` 执行。

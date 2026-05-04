@@ -5,3 +5,4 @@
 /web/workorch-console/node_modules/
 /config/application.toml
 /dist
+/workorch

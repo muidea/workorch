@@ -39,6 +39,13 @@ func (s *Service) GetMemoryItem(ctx context.Context, id common.MemoryID) (*memor
 	return s.items.Get(ctx, id)
 }
 
+func (s *Service) DeleteMemoryItem(ctx context.Context, id common.MemoryID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	return s.items.Delete(ctx, id)
+}
+
 func (s *Service) ListMemoryByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
 	if workspaceID == "" {
 		return nil, common.ErrInvalidArgument

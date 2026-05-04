@@ -110,7 +110,7 @@ func ApplicationConfigPath() (string, error) {
 
 func Save(next Config) error {
 	if strings.TrimSpace(next.EndpointName) == "" {
-		next.EndpointName = "workorchd"
+		next.EndpointName = "workorch"
 	}
 	if next.LLM.Providers == nil {
 		next.LLM.Providers = map[string]LLMProviderConfig{}

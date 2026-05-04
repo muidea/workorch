@@ -8,7 +8,7 @@ import (
 
 func TestCurrentReadsMagicCommonApplicationConfig(t *testing.T) {
 	configDir := writeApplicationConfig(t, `
-endpointName = "workorchd"
+endpointName = "workorch"
 
 [server]
 addr = "127.0.0.1:18080"
@@ -70,7 +70,7 @@ nonChatOperations = ["embeddings"]
 
 func TestSaveWritesApplicationConfigAndReloadsFrameworkConfig(t *testing.T) {
 	configDir := writeApplicationConfig(t, `
-endpointName = "workorchd"
+endpointName = "workorch"
 
 [server]
 addr = "127.0.0.1:18080"
@@ -129,7 +129,7 @@ disabled = false
 
 func TestReloadAdvancesRevision(t *testing.T) {
 	configDir := writeApplicationConfig(t, `
-endpointName = "workorchd"
+endpointName = "workorch"
 
 [server]
 addr = "127.0.0.1:18080"

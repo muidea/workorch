@@ -2345,7 +2345,7 @@ Acceptance criteria:
   `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestRunProjectionHelpersReuseSnapshotDerivedViews|TestRunContextBundleReusesSnapshotTaskProgress|TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection' -count=1`,
   `go test ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz -count=1`,
   `go test ./... -count=1 -p 1`, and
-  `go build -o /tmp/workorchd-qc83 ./application/workorchd`. Deployed
+  `go build -o /tmp/workorch-qc83 ./application/workorch`. Deployed
   quantification should compare context / compressed-context /
   task-decomposition readback latency where available, while keeping runtime
   completion metrics as
@@ -2382,7 +2382,7 @@ Acceptance criteria:
   `go test ./internal/modules/application/workorchd/service/server -run 'TestRunObservabilityReadWaitsForTerminalStatusWarmupInflight|TestRunSnapshotReadWaitsForTerminalStatusWarmupInflight|TestTerminalRunSnapshotCacheReusesSnapshotForReadViews|TestRunStatusWaitWarmsTerminalRunSnapshotCache' -count=1`,
   `go test ./internal/modules/application/workorchd/service/server ./internal/modules/application/workorchd/biz/appservice ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz -count=1`,
   `go test ./... -count=1 -p 1`, and
-  `go build -o /tmp/workorchd-qc84 ./application/workorchd`. Deployed
+  `go build -o /tmp/workorch-qc84 ./application/workorch`. Deployed
   quantification should compare `observability_read`, `snapshot_read`, and
   `workspace_snapshot_read` against `load-20260502024554`; runtime completion
   metrics remain secondary because this is an HTTP readback optimization.
@@ -2419,7 +2419,7 @@ Acceptance criteria:
   `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestReadRunSnapshotReadsWorkspaceAndRunScopedEvidenceConcurrently|TestReadRunSnapshotWithBackendReturnsBlockedDecisionReadModel|TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCandidates' -count=1`,
   `go test ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz -count=1`,
   `go test ./... -count=1 -p 1`, and
-  `go build -o /tmp/workorchd-qc85 ./application/workorchd`. Deployed
+  `go build -o /tmp/workorch-qc85 ./application/workorch`. Deployed
   quantification should compare `snapshot_read`, `workspace_snapshot_read`,
   `observability_read`, and recovery / resume behavior against
   `load-20260502025954`; runtime completion metrics remain secondary because
@@ -2458,7 +2458,7 @@ Acceptance criteria:
   `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestReadWorkspaceSnapshotReadsWorkspaceAndWorkspaceScopedItemsConcurrently|TestReadWorkspaceSnapshotWithRunSnapshotAvoidsProjectionRunStepRead|TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems' -count=1`,
   `go test ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz -count=1`,
   `go test ./... -count=1 -p 1`, and
-  `go build -o /tmp/workorchd-qc86 ./application/workorchd`. Deployed
+  `go build -o /tmp/workorch-qc86 ./application/workorch`. Deployed
   quantification should compare `workspace_snapshot_read`, `snapshot_read`,
   and `observability_read` against `load-20260502030706`; runtime completion
   metrics remain secondary because this is a read-model optimization.

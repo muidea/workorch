@@ -21,7 +21,7 @@ report_failure() {
   if [[ $status -eq 0 ]]; then
     return
   fi
-  echo "workorchd MCP stdio verification failed for deployed service $BASE_URL" >&2
+  echo "workorch MCP stdio verification failed for deployed workorch service $BASE_URL" >&2
   if [[ -f "$MOCK_LOG" ]]; then
     echo "--- llm-mock.log ---" >&2
     tail -n 200 "$MOCK_LOG" >&2 || true
@@ -448,4 +448,4 @@ echo "workspaceId=$workspace_id"
 echo "runId=$run_id"
 validate_snapshot "$TMP_DIR/snapshot.json"
 
-echo "workorchd MCP stdio verification passed for deployed service $BASE_URL"
+echo "workorch MCP stdio verification passed for deployed workorch service $BASE_URL"

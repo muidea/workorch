@@ -8,5 +8,7 @@ type Approval struct {
 	RunID       common.RunID
 	StepID      common.StepID
 	Reason      string
+	Action      string
+	Context     map[string]any
 	State       common.ApprovalState
 }

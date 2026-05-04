@@ -339,6 +339,7 @@ type createWorkspaceRequest struct {
 	Title            string `json:"title"`
 	Description      string `json:"description"`
 	WorkingDirectory string `json:"workingDirectory"`
+	TemplateID       string `json:"templateId,omitempty"`
 }
 
 type deleteWorkspaceRequest = appservice.DeleteWorkspaceCommand
@@ -399,7 +400,7 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
-type createWorkspaceFunc func(context.Context, string, string, string, string, string) (appservice.Workspace, error)
+type createWorkspaceFunc func(context.Context, string, string, appservice.CreateWorkspaceCommand) (appservice.Workspace, error)
 type deleteWorkspaceFunc func(context.Context, string, string, string, appservice.DeleteWorkspaceCommand) error
 type readWorkspaceFunc func(context.Context, string, string, string) (appservice.Workspace, error)
 type readWorkspaceSnapshotFunc func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error)
@@ -464,7 +465,11 @@ type updateMCPCapabilityFunc func(context.Context, string, string, string, appse
 type readMCPCapabilityFunc func(context.Context, string, string, string) (appservice.MCPCapability, error)
 type listMCPCapabilitiesFunc func(context.Context, string, string, appservice.MCPCapabilityQuery) ([]appservice.MCPCapability, error)
 type createMemoryItemFunc func(context.Context, string, string, string, appservice.CreateMemoryItemCommand) (appservice.MemoryItem, error)
+type readMemoryItemFunc func(context.Context, string, string, string) (appservice.MemoryItem, error)
+type updateMemoryItemFunc func(context.Context, string, string, string, appservice.UpdateMemoryItemCommand) (appservice.MemoryItem, error)
+type deleteMemoryItemFunc func(context.Context, string, string, string) error
 type listMemoryByWorkspaceFunc func(context.Context, string, string, string, string) ([]appservice.MemoryItem, error)
+type searchMemoryFunc func(context.Context, string, string, appservice.MemoryQuery) ([]appservice.MemoryItem, error)
 type validateFunc func(context.Context, string, string) error
 type readConfigurationFunc func() (appservice.ServiceConfiguration, error)
 type updateLLMConfigurationFunc func(appservice.UpdateLLMConfigurationCommand) (appservice.ServiceConfiguration, error)
@@ -539,7 +544,11 @@ type serverState struct {
 	readMCPCapability               readMCPCapabilityFunc
 	listMCPCapabilities             listMCPCapabilitiesFunc
 	createMemoryItem                createMemoryItemFunc
+	readMemoryItem                  readMemoryItemFunc
+	updateMemoryItem                updateMemoryItemFunc
+	deleteMemoryItem                deleteMemoryItemFunc
 	listMemoryByWorkspace           listMemoryByWorkspaceFunc
+	searchMemory                    searchMemoryFunc
 	readConfiguration               readConfigurationFunc
 	updateLLMConfiguration          updateLLMConfigurationFunc
 	runQueueMu                      sync.Mutex
@@ -1306,6 +1315,54 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			EventRecords: items,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/events/stream", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		if state.eventHub == nil {
+			writeBusinessError(w, common.ErrNotFound)
+			return
+		}
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "streaming unsupported"})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		workspaceID := strings.TrimSpace(r.URL.Query().Get("workspaceId"))
+		runID := strings.TrimSpace(r.URL.Query().Get("runId"))
+		eventCh := make(chan events.Envelope, 128)
+		unsubscribe := state.eventHub.Subscribe("*", func(_ context.Context, envelope events.Envelope) error {
+			if workspaceID != "" && envelope.WorkspaceID != workspaceID {
+				return nil
+			}
+			if runID != "" && envelope.RunID != runID {
+				return nil
+			}
+			select {
+			case eventCh <- envelope:
+			default:
+			}
+			return nil
+		})
+		defer unsubscribe()
+		_, _ = fmt.Fprint(w, ": connected\n\n")
+		flusher.Flush()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case envelope := <-eventCh:
+				data, err := json.Marshal(envelope)
+				if err != nil {
+					continue
+				}
+				_, _ = fmt.Fprintf(w, "event: workorch\n")
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+			}
+		}
+	})
 	router.AddHandler("/api/v1/workorch/decisions", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		state.metrics.decisionListRequests.Add(1)
@@ -1598,13 +1655,14 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 	})
 	router.AddHandler("/api/v1/workorch/memory", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		workspaceID := r.URL.Query().Get("workspaceId")
+		query := memoryQueryFromValues(r.URL.Query())
+		workspaceID := query.WorkspaceID
 		if workspaceID == "" {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "workspaceId is required"})
 			return
 		}
 		state.metrics.memoryListRequests.Add(1)
-		items, err := state.listMemoryByWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, r.URL.Query().Get("q"))
+		items, err := state.searchMemory(r.Context(), state.config.Backend, state.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1614,6 +1672,65 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Backend:  state.config.Backend,
 			DataRoot: state.config.DataRoot,
 			Memory:   items,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/memory/:memoryId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		memoryID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/memory/")
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		item, err := state.readMemoryItem(r.Context(), state.config.Backend, state.config.DataRoot, memoryID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, memoryItemResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Memory:   item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/memory/:memoryId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		memoryID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/memory/")
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		var req createMemoryItemRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.updateMemoryItem(r.Context(), state.config.Backend, state.config.DataRoot, memoryID, req)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, memoryItemResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Memory:   item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/memory/:memoryId", http.MethodDelete, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		memoryID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/memory/")
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if err := state.deleteMemoryItem(r.Context(), state.config.Backend, state.config.DataRoot, memoryID); err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"service": "workorch",
+			"deleted": true,
 		})
 	})
 }
@@ -1631,7 +1748,12 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "workspaceId is generated by workorch"})
 			return
 		}
-		item, err := state.createWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, req.Title, req.Description, req.WorkingDirectory)
+		item, err := state.createWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, appservice.CreateWorkspaceCommand{
+			Title:            req.Title,
+			Description:      req.Description,
+			WorkingDirectory: req.WorkingDirectory,
+			TemplateID:       req.TemplateID,
+		})
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -2423,7 +2545,11 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		readMCPCapability:               defaultReadMCPCapability,
 		listMCPCapabilities:             defaultListMCPCapabilities,
 		createMemoryItem:                defaultCreateMemoryItem,
+		readMemoryItem:                  defaultReadMemoryItem,
+		updateMemoryItem:                defaultUpdateMemoryItem,
+		deleteMemoryItem:                defaultDeleteMemoryItem,
 		listMemoryByWorkspace:           defaultListMemoryByWorkspace,
+		searchMemory:                    defaultSearchMemory,
 		readConfiguration:               defaultReadConfiguration,
 		updateLLMConfiguration:          appservice.UpdateLLMConfiguration,
 	}
@@ -2465,11 +2591,11 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 			return err
 		})
 	}
-	s.createWorkspace = func(ctx context.Context, _, _, title, description, workingDirectory string) (appservice.Workspace, error) {
+	s.createWorkspace = func(ctx context.Context, _, _ string, cmd appservice.CreateWorkspaceCommand) (appservice.Workspace, error) {
 		var ret appservice.Workspace
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
-			ret, err = appservice.CreateWorkspaceWithSession(ctx, session, title, description, workingDirectory)
+			ret, err = appservice.CreateWorkspaceWithTemplateWithSession(ctx, session, cmd)
 			return err
 		})
 		return ret, err
@@ -3038,11 +3164,43 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		})
 		return ret, err
 	}
+	s.readMemoryItem = func(ctx context.Context, _, _, memoryID string) (appservice.MemoryItem, error) {
+		var ret appservice.MemoryItem
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadMemoryItemWithSession(ctx, session, memoryID)
+			return err
+		})
+		return ret, err
+	}
+	s.updateMemoryItem = func(ctx context.Context, _, _, memoryID string, cmd appservice.UpdateMemoryItemCommand) (appservice.MemoryItem, error) {
+		var ret appservice.MemoryItem
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.UpdateMemoryItemWithSession(ctx, session, memoryID, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.deleteMemoryItem = func(ctx context.Context, _, _, memoryID string) error {
+		return s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			return appservice.DeleteMemoryItemWithSession(ctx, session, memoryID)
+		})
+	}
 	s.listMemoryByWorkspace = func(ctx context.Context, _, _, workspaceID string, query string) ([]appservice.MemoryItem, error) {
 		var ret []appservice.MemoryItem
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ListMemoryByWorkspaceWithSession(ctx, session, workspaceID, query)
+			return err
+		})
+		return ret, err
+	}
+	s.searchMemory = func(ctx context.Context, _, _ string, query appservice.MemoryQuery) ([]appservice.MemoryItem, error) {
+		var ret []appservice.MemoryItem
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.SearchMemoryWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
@@ -3130,8 +3288,8 @@ func defaultValidate(ctx context.Context, backend string, dataRoot string) error
 	return session.Close(ctx)
 }
 
-func defaultCreateWorkspace(ctx context.Context, backend string, dataRoot string, title string, description string, workingDirectory string) (appservice.Workspace, error) {
-	return appservice.CreateWorkspaceWithBackend(ctx, backend, dataRoot, title, description, workingDirectory)
+func defaultCreateWorkspace(ctx context.Context, backend string, dataRoot string, cmd appservice.CreateWorkspaceCommand) (appservice.Workspace, error) {
+	return appservice.CreateWorkspaceWithTemplateWithBackend(ctx, backend, dataRoot, cmd)
 }
 
 func defaultDeleteWorkspace(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd appservice.DeleteWorkspaceCommand) error {
@@ -3390,8 +3548,24 @@ func defaultCreateMemoryItem(ctx context.Context, backend string, dataRoot strin
 	return appservice.CreateMemoryItemWithBackend(ctx, backend, dataRoot, workspaceID, cmd)
 }
 
+func defaultReadMemoryItem(ctx context.Context, backend string, dataRoot string, memoryID string) (appservice.MemoryItem, error) {
+	return appservice.ReadMemoryItemWithBackend(ctx, backend, dataRoot, memoryID)
+}
+
+func defaultUpdateMemoryItem(ctx context.Context, backend string, dataRoot string, memoryID string, cmd appservice.UpdateMemoryItemCommand) (appservice.MemoryItem, error) {
+	return appservice.UpdateMemoryItemWithBackend(ctx, backend, dataRoot, memoryID, cmd)
+}
+
+func defaultDeleteMemoryItem(ctx context.Context, backend string, dataRoot string, memoryID string) error {
+	return appservice.DeleteMemoryItemWithBackend(ctx, backend, dataRoot, memoryID)
+}
+
 func defaultListMemoryByWorkspace(ctx context.Context, backend string, dataRoot string, workspaceID string, query string) ([]appservice.MemoryItem, error) {
 	return appservice.ListMemoryByWorkspaceWithBackend(ctx, backend, dataRoot, workspaceID, query)
+}
+
+func defaultSearchMemory(ctx context.Context, backend string, dataRoot string, query appservice.MemoryQuery) ([]appservice.MemoryItem, error) {
+	return appservice.SearchMemoryWithBackend(ctx, backend, dataRoot, query)
 }
 
 func defaultReadConfiguration() (appservice.ServiceConfiguration, error) {
@@ -4083,6 +4257,32 @@ func resourceIDFromPath(path string, prefix string) (string, bool) {
 		return "", false
 	}
 	return trimmed, true
+}
+
+func memoryQueryFromValues(values url.Values) appservice.MemoryQuery {
+	limit, _ := strconv.Atoi(strings.TrimSpace(values.Get("limit")))
+	return appservice.MemoryQuery{
+		WorkspaceID: strings.TrimSpace(values.Get("workspaceId")),
+		Query:       strings.TrimSpace(values.Get("q")),
+		Tags:        compactQueryValues(values["tag"]),
+		Types:       compactQueryValues(values["type"]),
+		Limit:       limit,
+	}
+}
+
+func compactQueryValues(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		ret = append(ret, value)
+	}
+	return ret
 }
 
 func workspaceActionFromPath(path string) (workspaceID string, action string, ok bool) {

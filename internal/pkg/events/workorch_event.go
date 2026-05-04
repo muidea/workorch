@@ -59,6 +59,11 @@ type ArtifactEvent struct {
 	Data     ArtifactPayloadData
 }
 
+type MemoryEvent struct {
+	envelope Envelope
+	Data     MemoryPayloadData
+}
+
 var workorchTopics = []string{
 	TopicWorkspaceCreated,
 	TopicWorkspaceStateChanged,
@@ -75,6 +80,9 @@ var workorchTopics = []string{
 	TopicApprovalResolved,
 	TopicResultAccepted,
 	TopicArtifactCreated,
+	TopicMemoryCreated,
+	TopicMemoryUpdated,
+	TopicMemoryDeleted,
 }
 
 func WorkorchTopics() []string {
@@ -160,6 +168,12 @@ func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 		return event, true
 	case TopicArtifactCreated:
 		event, ok := DecodeArtifactEvent(envelope)
+		if !ok {
+			return nil, false
+		}
+		return event, true
+	case TopicMemoryCreated, TopicMemoryUpdated, TopicMemoryDeleted:
+		event, ok := DecodeMemoryEvent(envelope)
 		if !ok {
 			return nil, false
 		}
@@ -314,7 +328,7 @@ func DecodeApprovalEvent(envelope Envelope) (ApprovalEvent, bool) {
 	}
 	envelope = cloneEnvelope(envelope)
 	envelope.Version = spec.CurrentVersion
-	envelope.Payload = ApprovalPayload(data.Reason, data.State)
+	envelope.Payload = ApprovalPayload(data.Reason, data.Action, data.Context, data.State)
 	return ApprovalEvent{envelope: envelope, Data: data}, true
 }
 
@@ -352,6 +366,24 @@ func DecodeArtifactEvent(envelope Envelope) (ArtifactEvent, bool) {
 	envelope.Version = spec.CurrentVersion
 	envelope.Payload = ArtifactPayload(data.ResultID, data.StepID, data.ToolCallID, data.PatchID, data.ValidationResultID, data.ArtifactType, data.Name, data.Summary, data.URI, data.ContentType, data.State, data.EvidenceRefs)
 	return ArtifactEvent{envelope: envelope, Data: data}, true
+}
+
+func DecodeMemoryEvent(envelope Envelope) (MemoryEvent, bool) {
+	if envelope.Topic != TopicMemoryCreated && envelope.Topic != TopicMemoryUpdated && envelope.Topic != TopicMemoryDeleted {
+		return MemoryEvent{}, false
+	}
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
+		return MemoryEvent{}, false
+	}
+	data, ok := DecodeMemoryPayload(envelope.Payload)
+	if !ok {
+		return MemoryEvent{}, false
+	}
+	envelope = cloneEnvelope(envelope)
+	envelope.Version = spec.CurrentVersion
+	envelope.Payload = MemoryPayload(data.MemoryType, data.Summary, data.Content, data.SourceType, data.SourceRef, data.Tags, data.Importance, data.Confidence, data.Visibility)
+	return MemoryEvent{envelope: envelope, Data: data}, true
 }
 
 func (e WorkspaceEvent) Envelope() Envelope {
@@ -423,5 +455,13 @@ func (e ArtifactEvent) Envelope() Envelope {
 }
 
 func (e ArtifactEvent) Topic() string {
+	return e.envelope.Topic
+}
+
+func (e MemoryEvent) Envelope() Envelope {
+	return cloneEnvelope(e.envelope)
+}
+
+func (e MemoryEvent) Topic() string {
 	return e.envelope.Topic
 }

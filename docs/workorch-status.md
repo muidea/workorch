@@ -3,9 +3,9 @@
 ## Current repository state
 
 - module: `github.com/muidea/workorch`
-- executable entry: `application/workorchd`
+- executable entry: `application/workorch`
 - framework baseline:
-  - `application/workorchd/main.go` starts through `magicCommon/framework/application` and explicitly imports the selected `workorchruntime`, `kernel`, and `blocks` units
+  - `application/workorch/main.go` starts through `magicCommon/framework/application` and explicitly imports the selected `workorchruntime`, `kernel`, and `blocks` units
   - `internal/initiators/workorchruntime` provides repository, event hub, and cross-module service wiring for plugin-loaded modules
   - `internal/modules/application/workorchd` attaches `internal/modules/application/workorchd/service/server.Service` to the `magicCommon/framework/plugin/module` lifecycle
   - HTTP requests pass through `magicEngine/http` `RouteRegistry` / `HTTPServer`; current acceptance API endpoints are registered as explicit native routes
@@ -128,7 +128,7 @@
   successful repair exposes `llmRepair` metadata on Step output; a failed repair
   keeps the original schema failure and exposes parse/repair diagnostics.
 - `workorchd` now loads runtime parameters through magicCommon
-  `framework/configuration` via `workorchd -config-dir <dir>`;
+  `framework/configuration` via `workorch --server -config-dir <dir>`;
   `config/application.toml` is the default local template and
   `config/file/application.toml` is the file-backed local template.
 - Web Console Configuration now updates LLM provider definitions through
@@ -370,13 +370,13 @@ The current service MVP is closed. The next product-aligned MVP acceptance scope
 ### Command
 
 ```bash
-go run ./application/workorchd -config-dir config
+go run ./application/workorch --server -config-dir config
 ```
 
 Optional file-backed service run:
 
 ```bash
-go run ./application/workorchd -config-dir config/file
+go run ./application/workorch --server -config-dir config/file
 ```
 
 ### Expected service behavior
@@ -540,7 +540,7 @@ restart `workorchd`.
 Verified with:
 
 ```bash
-go run ./application/workorchd -config-dir config/file
+go run ./application/workorch --server -config-dir config/file
 ```
 
 Observed persisted files:
@@ -608,7 +608,7 @@ Validated coverage currently includes:
 - corrupt file-backed persisted JSON boundary returns explicit errors
 - workorch formal business event contract now covers `workspace / run / step / decision / approval`
 - run-created and enriched run/workspace event payloads are covered by `events` / `run` / `observed` tests
-- framework entry adaptation is covered by `application/workorchd` and `internal/modules/application/workorchd/service/server` tests plus deployed-instance `make verify-service-file`
+- framework entry adaptation is covered by `application/workorch` and `internal/modules/application/workorchd/service/server` tests plus deployed-instance `make verify-service-file`
 - magicCommon-backed event adapter is covered by `internal/pkg/events` and appservice / observed integration tests
 - application-level EventHub injection is covered by appservice runtime-session tests and service-level verification
 - local plugin lifecycle integration is covered by bootstrap lifecycle tests
@@ -750,7 +750,7 @@ LLM 驱动 Workspace 执行的设计文档已补齐，范围、边界与交互�
 - Soul / Skill / MCP / Persistent Memory 是正式业务上下文，不是简单 prompt 拼接
 - LLM 只输出结构化 `LLMExecutionDecision`，不直接执行 shell、patch 或 MCP tool
 - Orchestrator 继续消费标准 Step output 并负责 Run 状态、Evidence、Decision、Approval
-- application/workorchd 只负责 HTTP/Web、执行激活和上下文装配，不承载 provider 或 MCP 协议实现
+- `application/workorch --server` / `internal/modules/application/workorchd` 负责 HTTP/Web、执行激活和上下文装配，不承载 provider 或 MCP 协议实现
 - blocks/llm 只负责 provider request、provider call、schema parsing 和 normalized Step output
 - Web Console 只通过 HTTP API 交互，不暴露 provider secret 或低层 adapter 直接执行入口
 - 未配置 LLM provider 时，LLM-driven execution 必须明确失败，不能回落到旧运行时形成假完成
@@ -932,7 +932,7 @@ Artifact 与 observability 回查。
 
 当前 framework 对齐进度：
 
-- completed: `application/workorchd` 通过 `magicCommon/framework/application` 启动
+- completed: `application/workorch` 通过 `magicCommon/framework/application` 启动
 - completed: `internal/modules/application/workorchd/service/server.Service` 接入 `magicCommon/framework/service.Service` 生命周期
 - completed: 默认 runtime EventHub 接入 `magicCommon/event.Hub` backed adapter
 - completed: request-scoped runtime modules 接入本地 magicCommon plugin manager 生命周期
