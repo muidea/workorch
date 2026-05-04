@@ -150,7 +150,10 @@ func TestServerStatePrefersApplicationRuntimeSession(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	workspace, err := state.createWorkspace(ctx, "", "", "application runtime", "", "workspaces/application-runtime")
+	workspace, err := state.createWorkspace(ctx, "", "", appservice.CreateWorkspaceCommand{
+		Title:            "application runtime",
+		WorkingDirectory: "workspaces/application-runtime",
+	})
 	if err != nil {
 		t.Fatalf("create workspace through server state: %v", err)
 	}
@@ -947,14 +950,14 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}
 		return appservice.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "pending"}, nil
 	}
-	state.createWorkspace = func(ctx context.Context, _, _, title, description, workingDirectory string) (appservice.Workspace, error) {
+	state.createWorkspace = func(ctx context.Context, _, _ string, cmd appservice.CreateWorkspaceCommand) (appservice.Workspace, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("workspace create event hub = %#v, want injected hub", got)
 		}
-		if title != "native write" || description != "native description" || workingDirectory != "workspaces/native-write" {
-			t.Fatalf("workspace create input = %q/%q/%q, want native write/native description/workspaces/native-write", title, description, workingDirectory)
+		if cmd.Title != "native write" || cmd.Description != "native description" || cmd.WorkingDirectory != "workspaces/native-write" || cmd.TemplateID != "software-dev" {
+			t.Fatalf("workspace create input = %q/%q/%q/%q, want native write/native description/workspaces/native-write/software-dev", cmd.Title, cmd.Description, cmd.WorkingDirectory, cmd.TemplateID)
 		}
-		return appservice.Workspace{ID: "ws-native-write", Title: title, Description: description, WorkingDirectory: workingDirectory, State: "active"}, nil
+		return appservice.Workspace{ID: "ws-native-write", Title: cmd.Title, Description: cmd.Description, WorkingDirectory: cmd.WorkingDirectory, State: "active"}, nil
 	}
 	state.deleteWorkspace = func(ctx context.Context, _, _, workspaceID string, cmd appservice.DeleteWorkspaceCommand) error {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
@@ -1068,7 +1071,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		status int
 	}{
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces", status: http.StatusOK},
-		{method: http.MethodPost, path: "/api/v1/workorch/workspaces", body: `{"title":"native write","description":"native description","workingDirectory":"workspaces/native-write"}`, status: http.StatusCreated},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces", body: `{"title":"native write","description":"native description","workingDirectory":"workspaces/native-write","templateId":"software-dev"}`, status: http.StatusCreated},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read", status: http.StatusOK},
 		{method: http.MethodDelete, path: "/api/v1/workorch/workspaces/ws-native-read?purge=true", status: http.StatusNoContent},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/snapshot", status: http.StatusOK},

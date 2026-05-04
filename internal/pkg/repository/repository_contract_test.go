@@ -1539,6 +1539,7 @@ func testPatchRepositoryContract(t *testing.T, factory func() repository.PatchRe
 		ToolCallID:  common.ToolCallID("tool-call-contract-1"),
 		PatchType:   "unified_diff",
 		TargetRef:   "internal/example.go",
+		Diff:        "--- a/internal/example.go\n+++ b/internal/example.go\n@@ -1 +1 @@\n-before\n+after\n",
 		Summary:     "initial patch",
 		State:       common.PatchStateCreated,
 		CreatedAt:   "2026-04-25T00:00:00Z",
@@ -1566,6 +1567,9 @@ func testPatchRepositoryContract(t *testing.T, factory func() repository.PatchRe
 	if updated.State != common.PatchStateApplied || updated.AppliedAt == "" {
 		t.Fatalf("patch = %+v, want applied", updated)
 	}
+	if updated.Diff != item.Diff {
+		t.Fatalf("patch diff = %q, want persisted diff", updated.Diff)
+	}
 
 	second := &runmodel.Patch{
 		ID:          common.PatchID("patch-contract-2"),
@@ -1573,6 +1577,7 @@ func testPatchRepositoryContract(t *testing.T, factory func() repository.PatchRe
 		RunID:       item.RunID,
 		StepID:      common.StepID("run-contract/step-2"),
 		PatchType:   "file_replace",
+		Content:     "replacement content\n",
 		State:       common.PatchStateCreated,
 	}
 	if err := repo.Create(ctx, second); err != nil {
@@ -1909,6 +1914,8 @@ func testApprovalRepositoryContract(t *testing.T, factory func() repository.Appr
 		RunID:       common.RunID("run-contract"),
 		StepID:      common.StepID("run-contract/manual-approval"),
 		Reason:      "manual approval",
+		Action:      "apply risky code patch",
+		Context:     map[string]any{"risk": "public_api_change", "files": []any{"api.go"}},
 		State:       common.ApprovalStatePending,
 	}
 	if err := repo.Create(ctx, item); err != nil {
@@ -1922,6 +1929,15 @@ func testApprovalRepositoryContract(t *testing.T, factory func() repository.Appr
 	if err != nil {
 		t.Fatalf("get approval: %v", err)
 	}
+	got.Context["risk"] = "mutated"
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get fresh approval: %v", err)
+	}
+	if fresh.Action != "apply risky code patch" || fresh.Context["risk"] != "public_api_change" {
+		t.Fatalf("approval action/context = %q/%+v, want original values", fresh.Action, fresh.Context)
+	}
+	got = fresh
 	got.State = common.ApprovalStateApproved
 	if err := repo.Update(ctx, got); err != nil {
 		t.Fatalf("update approval: %v", err)
@@ -1931,8 +1947,8 @@ func testApprovalRepositoryContract(t *testing.T, factory func() repository.Appr
 	if err != nil {
 		t.Fatalf("get updated approval: %v", err)
 	}
-	if updated.State != common.ApprovalStateApproved {
-		t.Fatalf("approval state = %q, want approved", updated.State)
+	if updated.State != common.ApprovalStateApproved || updated.Action != "apply risky code patch" || updated.Context["risk"] != "public_api_change" {
+		t.Fatalf("approval state/action/context = %q/%q/%+v, want approved with original action/context", updated.State, updated.Action, updated.Context)
 	}
 
 	second := &approvalmodel.Approval{

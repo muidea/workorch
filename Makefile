@@ -11,7 +11,7 @@ CLI_BUILD_OUT ?= $(BUILD_OUT)
 CLI_APP := $(APP)
 CONSOLE_WEB := ./web/workorch-console
 
-.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent release release-check install-latest ci
+.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-software-dev-code-agent verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent release release-check install-latest ci
 
 help:
 	@echo "Targets:"
@@ -32,6 +32,7 @@ help:
 	@echo "  verify-workspace-template-soul-file - alias of verify-workspace-template-soul; e2e uses the deployed instance only"
 	@echo "  verify-llm      - verify deployed LLM-driven execution using a local mock provider"
 	@echo "  verify-llm-file - alias of verify-llm; e2e uses the deployed instance only"
+	@echo "  verify-software-dev-code-agent - verify software-dev Code Agent closure contract"
 	@echo "  verify-skillhub      - verify deployed SkillHub global/workspace Skill auto-selection"
 	@echo "  verify-skillhub-file - alias of verify-skillhub; e2e uses the deployed instance only"
 	@echo "  verify-mcp-stdio      - verify deployed MCP stdio execution through LLM graph"
@@ -128,6 +129,9 @@ verify-llm:
 	WORKORCH_LLM_VERIFY_MOCK_ADDR=127.0.0.1:18181 ./scripts/verify-llm-workspace-execution.sh
 
 verify-llm-file: verify-llm
+
+verify-software-dev-code-agent:
+	./scripts/verify-software-dev-code-agent.sh
 
 verify-skillhub:
 	WORKORCH_SKILLHUB_VERIFY_MOCK_ADDR=127.0.0.1:18191 ./scripts/verify-skillhub-workspace-execution.sh

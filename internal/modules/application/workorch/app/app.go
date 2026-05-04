@@ -50,6 +50,8 @@ type Options struct {
 	ForceServer bool
 }
 
+const softwareDevTemplateID = "software-dev"
+
 type StartupArgs struct {
 	ConfigDir string
 	CobraArgs []string
@@ -219,11 +221,41 @@ func ResolveDefaultWorkspace(ctx context.Context, be backend.Backend, workingDir
 		Title:            filepath.Base(workingDir),
 		Description:      workingDir,
 		WorkingDirectory: workingDir,
+		TemplateID:       defaultWorkspaceTemplateID(workingDir),
 	})
 	if err != nil {
 		return backend.WorkspaceInfo{}
 	}
 	return *ws
+}
+
+func defaultWorkspaceTemplateID(workingDir string) string {
+	if isCodeWorkspaceDirectory(workingDir) {
+		return softwareDevTemplateID
+	}
+	return ""
+}
+
+func isCodeWorkspaceDirectory(workingDir string) bool {
+	if workingDir == "" {
+		return false
+	}
+	markers := []string{
+		".git",
+		"go.mod",
+		"package.json",
+		"pyproject.toml",
+		"Cargo.toml",
+		"pom.xml",
+		"build.gradle",
+		"Makefile",
+	}
+	for _, marker := range markers {
+		if _, err := os.Stat(filepath.Join(workingDir, marker)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func EnsureConfigFile(dir string) error {

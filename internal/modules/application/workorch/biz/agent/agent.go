@@ -49,6 +49,8 @@ type DecisionInfo struct {
 type ApprovalInfo struct {
 	ApprovalID string
 	Reason     string
+	Action     string
+	Context    map[string]any
 	RunID      string
 }
 
@@ -126,7 +128,8 @@ func (a *Agent) RunWithBackend(ctx context.Context, workspaceID string, goalText
 	if err != nil {
 		return fmt.Errorf("define goal: %w", err)
 	}
-	dod, err := a.be.DoD().Define(ctx, common.WorkspaceID(workspaceID), []string{"目标已完成，输出包含明确的执行结果"})
+	dodItems := backend.DefaultDoDItemsForWorkspace(ctx, a.be, common.WorkspaceID(workspaceID))
+	dod, err := a.be.DoD().Define(ctx, common.WorkspaceID(workspaceID), dodItems)
 	if err != nil {
 		return fmt.Errorf("define dod: %w", err)
 	}
@@ -190,6 +193,8 @@ func (a *Agent) handleBackendEvent(evt backend.Event, runDone chan<- error) {
 		a.Send(Event{Type: EventApproval, Payload: ApprovalInfo{
 			ApprovalID: approvalID,
 			Reason:     firstString(evt.Payload, "reason", "Reason", events.PayloadKeyReason),
+			Action:     firstString(evt.Payload, "action", "Action", events.PayloadKeyAction),
+			Context:    mapFromPayload(evt.Payload, "context", "Context", events.PayloadKeyContext),
 			RunID:      string(evt.RunID),
 		}})
 	case backend.EventResultAccepted:
@@ -287,4 +292,19 @@ func firstString(payload map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func mapFromPayload(payload map[string]any, keys ...string) map[string]any {
+	for _, key := range keys {
+		value, ok := payload[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		out := make(map[string]any, len(value))
+		for k, v := range value {
+			out[k] = v
+		}
+		return out
+	}
+	return nil
 }

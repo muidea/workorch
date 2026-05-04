@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -45,15 +46,37 @@ func TestResolveDefaultWorkspaceUsesLastActiveWhenCurrentDirectoryUnbound(t *tes
 
 func TestResolveDefaultWorkspaceCreatesOnlyWhenNoReusableWorkspace(t *testing.T) {
 	cfgPath := writeCLIConfig(t, "")
+	workingDir := t.TempDir()
 	be := &startupFakeBackend{}
 
-	got := resolveDefaultWorkspace(context.Background(), be, "/project", cfgPath)
+	got := resolveDefaultWorkspace(context.Background(), be, workingDir, cfgPath)
 
 	if got.ID != "ws-created" {
 		t.Fatalf("workspace = %s, want ws-created", got.ID)
 	}
 	if be.created != 1 {
 		t.Fatalf("created = %d, want 1", be.created)
+	}
+	if be.lastCreate.TemplateID != "" {
+		t.Fatalf("templateID = %q, want empty for non-code directory", be.lastCreate.TemplateID)
+	}
+}
+
+func TestResolveDefaultWorkspaceCreatesSoftwareDevWorkspaceForCodeDirectory(t *testing.T) {
+	cfgPath := writeCLIConfig(t, "")
+	workingDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workingDir, "go.mod"), []byte("module example.com/app\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	be := &startupFakeBackend{}
+
+	got := resolveDefaultWorkspace(context.Background(), be, workingDir, cfgPath)
+
+	if got.ID != "ws-created" {
+		t.Fatalf("workspace = %s, want ws-created", got.ID)
+	}
+	if be.lastCreate.TemplateID != "software-dev" {
+		t.Fatalf("templateID = %q, want software-dev", be.lastCreate.TemplateID)
 	}
 }
 
@@ -71,6 +94,7 @@ func writeCLIConfig(t *testing.T, lastActive string) string {
 type startupFakeBackend struct {
 	workspaces []backend.WorkspaceInfo
 	created    int
+	lastCreate backend.CreateWorkspaceRequest
 }
 
 func (b *startupFakeBackend) Workspace() backend.WorkspaceBackend {
@@ -93,6 +117,7 @@ type startupFakeWorkspace struct{ parent *startupFakeBackend }
 
 func (b *startupFakeWorkspace) Create(ctx context.Context, req backend.CreateWorkspaceRequest) (*backend.WorkspaceInfo, error) {
 	b.parent.created++
+	b.parent.lastCreate = req
 	ws := backend.WorkspaceInfo{ID: "ws-created", Title: req.Title, WorkingDirectory: req.WorkingDirectory}
 	b.parent.workspaces = append(b.parent.workspaces, ws)
 	return &ws, nil

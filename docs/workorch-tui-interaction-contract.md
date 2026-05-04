@@ -30,9 +30,23 @@
 - Accepts free-text goals (same as current REPL).
 - The input area is fixed near the bottom of the terminal, above the help bar.
 - Press Enter to submit.
+- Press Alt+Enter to insert a newline in the input buffer.
+- Press Ctrl+P / Ctrl+N to navigate local input history.
+- Press Tab while typing a slash command to complete the command name.
 - Press Ctrl+C to interrupt the active Run.
 - Press ESC to clear current input.
-- `/` commands supported: `/quit`, `/help`, `/new`, `/retry`.
+- `/` commands supported in the default TUI: `/help`, `/clear`,
+  `/workspace`, `/dod`, `/result`, `/exit`.
+- `/dod item1; item2` sets the pending DoD for the next submitted Goal.
+  If no custom DoD is set, the next Goal uses the active Workspace template
+  DoD when the Workspace was initialized from a matching template; otherwise
+  it uses the generic default DoD.
+- `/workspace create <title> --template <templateId> [--dir <path>]` creates
+  a Workspace and applies the template only at creation time. After creation
+  the TUI switches to that Workspace and refreshes the Workspace list.
+- TUI does not provide a normal workspaceTemplate rebind command. Template
+  selection is a Workspace creation-time concern; existing Workspace
+  template migration must be handled as a separate advanced migration flow.
 
 ## Progress Summary Display
 
@@ -76,19 +90,28 @@ User answer is sent via Enter. No modal dialog.
   supporting context.
 - The monitor is bounded and must not fill the screen with long raw Workspace
   IDs.
+- The main Workspace context may show default soul and stage binding summaries
+  as read-only template initialization evidence.
 
 ## Keyboard Actions
 
 | Key | Action |
 |-----|--------|
 | Enter | Submit input |
+| Alt+Enter | Insert newline |
 | Ctrl+C | Interrupt active Run |
 | ESC | Clear input |
-| Ctrl+W | Switch to next Workspace |
-| Ctrl+T | Jump to next blocking item |
-| Ctrl+R | Show recent Run results |
+| Ctrl+W | Enter/leave Workspace selection |
 | Ctrl+H | Toggle help |
+| Ctrl+P / Ctrl+N | Previous/next input history |
+| Tab | Complete slash command |
+| PgUp / PgDn | Scroll main result area |
 | Ctrl+Q / q | Quit |
+
+Mouse drag is reserved for the terminal emulator's native text selection and
+copy behavior. The TUI must not enable Bubble Tea mouse reporting by default,
+because that captures drag events and prevents selecting visible Result,
+Conversation, and Workspace text.
 
 ## Interrupt Semantics
 
@@ -102,6 +125,8 @@ User answer is sent via Enter. No modal dialog.
 After Run completes:
 - Progress summary shows completed or failed state.
 - Result area shows SummaryDetail.GoalOutcome or the accepted Result summary.
+- Markdown-like final Result / Artifact text is rendered in a lightweight
+  terminal-friendly form for headings, bullets, and code blocks.
 - Artifact references are displayed when provided by backend result events.
 - Input prompt returns for next goal.
 - The same Workspace remains active.

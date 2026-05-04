@@ -10,6 +10,8 @@ type Patch struct {
 	ToolCallID  common.ToolCallID
 	PatchType   string
 	TargetRef   string
+	Content     string
+	Diff        string
 	Summary     string
 	State       common.PatchState
 	CreatedAt   string

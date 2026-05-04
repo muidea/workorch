@@ -64,7 +64,7 @@ func (b *remoteBackend) Events() EventsBackend       { return b.evt }
 type remoteWorkspaceBackend struct{ cl *client.Client }
 
 func (b *remoteWorkspaceBackend) Create(ctx context.Context, req CreateWorkspaceRequest) (*WorkspaceInfo, error) {
-	ws, err := b.cl.CreateWorkspace(ctx, req.Title, req.Description, req.WorkingDirectory)
+	ws, err := b.cl.CreateWorkspace(ctx, req.Title, req.Description, req.WorkingDirectory, req.TemplateID)
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +72,7 @@ func (b *remoteWorkspaceBackend) Create(ctx context.Context, req CreateWorkspace
 		ID: common.WorkspaceID(ws.ID), Title: ws.Title, Description: ws.Description,
 		WorkingDirectory: ws.WorkingDirectory, State: common.WorkspaceState(ws.State),
 		ActiveRunID: common.RunID(ws.ActiveRunID), DefaultSoulID: common.SoulID(ws.DefaultSoulID),
+		SoulBindings: commonSoulBindings(ws.SoulBindings),
 	}, nil
 }
 
@@ -83,7 +84,9 @@ func (b *remoteWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID)
 	return &WorkspaceInfo{
 		ID: common.WorkspaceID(ws.ID), Title: ws.Title, Description: ws.Description,
 		WorkingDirectory: ws.WorkingDirectory, State: common.WorkspaceState(ws.State),
-		ActiveRunID: common.RunID(ws.ActiveRunID),
+		ActiveRunID:   common.RunID(ws.ActiveRunID),
+		DefaultSoulID: common.SoulID(ws.DefaultSoulID),
+		SoulBindings:  commonSoulBindings(ws.SoulBindings),
 	}, nil
 }
 
@@ -97,7 +100,9 @@ func (b *remoteWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, err
 		result = append(result, WorkspaceInfo{
 			ID: common.WorkspaceID(ws.ID), Title: ws.Title, Description: ws.Description,
 			WorkingDirectory: ws.WorkingDirectory, State: common.WorkspaceState(ws.State),
-			ActiveRunID: common.RunID(ws.ActiveRunID),
+			ActiveRunID:   common.RunID(ws.ActiveRunID),
+			DefaultSoulID: common.SoulID(ws.DefaultSoulID),
+			SoulBindings:  commonSoulBindings(ws.SoulBindings),
 		})
 	}
 	return result, nil
@@ -292,14 +297,14 @@ func (b *remoteApprovalBackend) Approve(ctx context.Context, id common.ApprovalI
 	if err != nil {
 		return nil, err
 	}
-	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, State: a.State}, nil
+	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State}, nil
 }
 func (b *remoteApprovalBackend) Reject(ctx context.Context, id common.ApprovalID) (*ApprovalInfo, error) {
 	a, err := b.cl.Reject(ctx, string(id))
 	if err != nil {
 		return nil, err
 	}
-	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, State: a.State}, nil
+	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State}, nil
 }
 func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, ids []common.ApprovalID, action string) ([]ApprovalInfo, error) {
 	_idStrings := make([]string, len(ids))
@@ -312,7 +317,7 @@ func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, ids []common.A
 	}
 	result := make([]ApprovalInfo, 0, len(list))
 	for _, a := range list {
-		result = append(result, ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, State: a.State})
+		result = append(result, ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State})
 	}
 	return result, nil
 }
@@ -323,7 +328,7 @@ func (b *remoteApprovalBackend) List(ctx context.Context, wsID common.WorkspaceI
 	}
 	result := make([]ApprovalInfo, 0, len(list))
 	for _, a := range list {
-		result = append(result, ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, State: a.State})
+		result = append(result, ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State})
 	}
 	return result, nil
 }
@@ -332,7 +337,7 @@ func (b *remoteApprovalBackend) Get(ctx context.Context, id common.ApprovalID) (
 	if err != nil {
 		return nil, err
 	}
-	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, State: a.State}, nil
+	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State}, nil
 }
 
 // ── Stub remote backends ──
@@ -479,16 +484,72 @@ func memoryInfoFromClient(item *client.MemoryItem) *MemoryItemInfo {
 type remoteTemplateBackend struct{ cl *client.Client }
 
 func (b *remoteTemplateBackend) Create(ctx context.Context, t *TemplateInfo) (*TemplateInfo, error) {
-	return t, nil
+	item, err := b.cl.CreateWorkspaceTemplate(ctx, clientTemplateFromInfo(t))
+	if err != nil {
+		return nil, err
+	}
+	return templateInfoFromClient(item), nil
 }
 func (b *remoteTemplateBackend) Get(ctx context.Context, id string) (*TemplateInfo, error) {
-	return &TemplateInfo{ID: id}, nil
+	item, err := b.cl.GetWorkspaceTemplate(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return templateInfoFromClient(item), nil
 }
-func (b *remoteTemplateBackend) List(ctx context.Context) ([]TemplateInfo, error) { return nil, nil }
+func (b *remoteTemplateBackend) List(ctx context.Context) ([]TemplateInfo, error) {
+	items, err := b.cl.ListWorkspaceTemplates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]TemplateInfo, 0, len(items))
+	for i := range items {
+		if info := templateInfoFromClient(&items[i]); info != nil {
+			ret = append(ret, *info)
+		}
+	}
+	return ret, nil
+}
 func (b *remoteTemplateBackend) Update(ctx context.Context, id string, t *TemplateInfo) (*TemplateInfo, error) {
-	return t, nil
+	item, err := b.cl.UpdateWorkspaceTemplate(ctx, id, clientTemplateFromInfo(t))
+	if err != nil {
+		return nil, err
+	}
+	return templateInfoFromClient(item), nil
 }
-func (b *remoteTemplateBackend) Delete(ctx context.Context, id string) error { return nil }
+func (b *remoteTemplateBackend) Delete(ctx context.Context, id string) error {
+	return b.cl.DeleteWorkspaceTemplate(ctx, id)
+}
+
+func clientTemplateFromInfo(info *TemplateInfo) *client.WorkspaceTemplate {
+	if info == nil {
+		return &client.WorkspaceTemplate{}
+	}
+	return &client.WorkspaceTemplate{
+		ID:            info.ID,
+		Name:          info.Name,
+		Description:   info.Description,
+		GoalText:      info.GoalText,
+		DoDItems:      append([]string(nil), info.DoDItems...),
+		DefaultSoulID: string(info.DefaultSoulID),
+		SoulBindings:  cloneStringMap(info.SoulBindings),
+	}
+}
+
+func templateInfoFromClient(item *client.WorkspaceTemplate) *TemplateInfo {
+	if item == nil {
+		return nil
+	}
+	return &TemplateInfo{
+		ID:            item.ID,
+		Name:          item.Name,
+		Description:   item.Description,
+		GoalText:      item.GoalText,
+		DoDItems:      append([]string(nil), item.DoDItems...),
+		DefaultSoulID: common.SoulID(item.DefaultSoulID),
+		SoulBindings:  cloneStringMap(item.SoulBindings),
+	}
+}
 
 type remoteConfigBackend struct{ cl *client.Client }
 

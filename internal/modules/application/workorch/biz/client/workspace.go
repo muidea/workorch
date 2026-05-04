@@ -24,12 +24,13 @@ func (c *Client) GetWorkspace(ctx context.Context, id string) (*Workspace, error
 }
 
 // CreateWorkspace creates a new workspace.
-func (c *Client) CreateWorkspace(ctx context.Context, title, description, workingDir string) (*Workspace, error) {
+func (c *Client) CreateWorkspace(ctx context.Context, title, description, workingDir string, templateID string) (*Workspace, error) {
 	req := struct {
 		Title            string `json:"title"`
 		Description      string `json:"description,omitempty"`
 		WorkingDirectory string `json:"workingDirectory,omitempty"`
-	}{Title: title, Description: description, WorkingDirectory: workingDir}
+		TemplateID       string `json:"templateId,omitempty"`
+	}{Title: title, Description: description, WorkingDirectory: workingDir, TemplateID: templateID}
 	resp, err := c.do(ctx, "POST", "/api/v1/workorch/workspaces", req)
 	if err != nil {
 		return nil, err

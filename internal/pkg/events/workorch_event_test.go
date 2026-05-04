@@ -82,7 +82,7 @@ func TestSubscribeWorkorchSkipsInvalidPayload(t *testing.T) {
 		Topic:     TopicApprovalResolved,
 		RunID:     "run-1",
 		SubjectID: "approval-1",
-		Payload:   ApprovalPayload("gate", common.ApprovalStateApproved),
+		Payload:   ApprovalPayload("gate", "deploy", map[string]any{"risk": "external"}, common.ApprovalStateApproved),
 	}); err != nil {
 		t.Fatalf("publish valid approval event: %v", err)
 	}

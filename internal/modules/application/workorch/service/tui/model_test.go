@@ -155,6 +155,24 @@ func TestModelRunStartedDoesNotOverwriteDecisionProgress(t *testing.T) {
 	}
 }
 
+func TestModelWorkspaceStateChangedUpdatesMainProgress(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.activeRunID = "run-1"
+	next, _ := m.Update(BackendEventMsg{Event: backend.Event{
+		Type:        backend.EventWorkspaceStateChanged,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload:     map[string]any{"state": string(common.WorkspaceStateFailed), "activeRunId": "run-1"},
+	}})
+	m = asModel(next)
+	if m.running {
+		t.Fatal("expected running=false after workspace failed event")
+	}
+	if m.progress != progressFailed {
+		t.Fatalf("progress = %s, want failed", m.progress)
+	}
+}
+
 func TestModelBackendRunCompletionCallback(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	next, _ := m.Update(BackendEventMsg{Event: backend.Event{
@@ -169,6 +187,40 @@ func TestModelBackendRunCompletionCallback(t *testing.T) {
 	}
 	if m.progress != progressCompleted {
 		t.Fatalf("progress = %s, want completed", m.progress)
+	}
+}
+
+func TestModelRunFailurePrefersActionableHintOverTimeout(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.activeWorkspaceID = "ws-1"
+	m.activeRunID = "run-1"
+	m.applyBackendEvent(backend.Event{
+		Type:        backend.EventStepCompleted,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload: map[string]any{
+			"state": "failed",
+			"kind":  "llm/workspace_execution",
+			"output": map[string]any{
+				"reason": "invalid argument: ssh/command requires password or privateKey/privateKeyPath",
+			},
+		},
+	})
+	next, _ := m.Update(BackendEventMsg{Event: backend.Event{
+		Type:        backend.EventRunStateChanged,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload: map[string]any{
+			"state":         string(common.RunStateFailed),
+			"failureReason": "context deadline exceeded (Client.Timeout or context cancellation while reading body)",
+		},
+	}})
+	m = asModel(next)
+	if strings.Contains(strings.ToLower(m.failureReason), "context deadline exceeded") {
+		t.Fatalf("failure reason should hide timeout noise:\n%s", m.failureReason)
+	}
+	if !strings.Contains(m.failureReason, "SSH 命令缺少 password 或 privateKey/privateKeyPath") {
+		t.Fatalf("failure reason should surface actionable hint, got %q", m.failureReason)
 	}
 }
 
@@ -253,6 +305,126 @@ func TestModelInputEditingSupportsSpacesAndArrowKeys(t *testing.T) {
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "ws-1 > ab XcY|") {
 		t.Fatalf("view missing edited input and cursor:\n%s", view)
+	}
+}
+
+func TestModelInputHistoryAndMultilineEditing(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.input = "first goal"
+	m.inputCursor = len([]rune(m.input))
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = asModel(next)
+	m.input = "second goal"
+	m.inputCursor = len([]rune(m.input))
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = asModel(next)
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = asModel(next)
+	if m.input != "second goal" {
+		t.Fatalf("history previous = %q, want second goal", m.input)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = asModel(next)
+	if m.input != "first goal" {
+		t.Fatalf("history previous twice = %q, want first goal", m.input)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	m = asModel(next)
+	if m.input != "second goal" {
+		t.Fatalf("history next = %q, want second goal", m.input)
+	}
+
+	m.clearInput()
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("line one")})
+	m = asModel(next)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	m = asModel(next)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("line two")})
+	m = asModel(next)
+	if m.input != "line one\nline two" {
+		t.Fatalf("multiline input = %q", m.input)
+	}
+	m.width = 80
+	m.height = 16
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "line one") || !strings.Contains(view, "line two") {
+		t.Fatalf("view missing multiline input:\n%s", view)
+	}
+}
+
+func TestModelSlashCompletionHelpAndClearCommands(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.input = "/he"
+	m.inputCursor = len([]rune(m.input))
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = asModel(next)
+	if m.input != "/help" {
+		t.Fatalf("completion = %q, want /help", m.input)
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = asModel(next)
+	if cmd != nil || !m.helpOpen {
+		t.Fatalf("help command state cmd/help = %v/%v, want open help without cmd", cmd != nil, m.helpOpen)
+	}
+	m.width = 80
+	m.height = 20
+	if view := stripANSI(m.View()); !strings.Contains(view, "WorkOrch Help") || !strings.Contains(view, "Ctrl+P / Ctrl+N") {
+		t.Fatalf("help overlay missing content:\n%s", view)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = asModel(next)
+	if m.helpOpen {
+		t.Fatal("esc should close help overlay")
+	}
+
+	m.result = "old result"
+	m.appendTranscript("Goal", "old goal")
+	m.input = "/clear"
+	m.inputCursor = len([]rune(m.input))
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = asModel(next)
+	if m.result != "" || len(m.transcript) != 0 {
+		t.Fatalf("clear command did not clear display result/transcript = %q/%+v", m.result, m.transcript)
+	}
+}
+
+func TestModelScrollableResultViewport(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	var lines []string
+	for i := 0; i < 40; i++ {
+		lines = append(lines, "result line "+string(rune('A'+i)))
+	}
+	m.result = strings.Join(lines, "\n")
+	m.width = 80
+	m.height = 14
+	initial := stripANSI(m.View())
+	if strings.Contains(initial, "result line Z") {
+		t.Fatalf("initial viewport should not show later result lines:\n%s", initial)
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	m = asModel(next)
+	scrolled := stripANSI(m.View())
+	if !strings.Contains(scrolled, "result line G") {
+		t.Fatalf("pgdown should scroll main content:\n%s", scrolled)
+	}
+}
+
+func TestModelResultMarkdownRendering(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.result = "# Final Result\n\n**Done** with `code`.\n\n```text\nstdout payload\n```"
+	m.width = 80
+	m.height = 18
+	view := stripANSI(m.View())
+	for _, want := range []string{"# Final Result", "Done with code.", "stdout payload"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view missing %q:\n%s", want, view)
+		}
+	}
+	for _, forbidden := range []string{"**", "```"} {
+		if strings.Contains(view, forbidden) {
+			t.Fatalf("view still contains raw markdown %q:\n%s", forbidden, view)
+		}
 	}
 }
 
@@ -1027,6 +1199,54 @@ func TestModelResultArtifacts(t *testing.T) {
 	}
 }
 
+func TestModelDodSlashCommandSetsPendingDoD(t *testing.T) {
+	model := NewAppModel(newFake(t), "ws-1", "")
+	model.width = 100
+	model.height = 20
+	model.setInput("/dod tests pass; diff is delivered")
+
+	updated, _ := model.submitInput()
+	got := updated.(*AppModel)
+	view := stripANSI(got.View())
+
+	if !strings.Contains(view, "Pending DoD") || !strings.Contains(view, "tests pass") || !strings.Contains(view, "diff is delivered") {
+		t.Fatalf("DoD command view missing items:\n%s", view)
+	}
+}
+
+func TestModelWorkspaceCreateCommandUsesTemplateAndActivatesWorkspace(t *testing.T) {
+	be := &workspaceCreateFake{fakeBE: newFake(t)}
+	model := NewAppModel(be, "", "")
+	model.width = 120
+	model.height = 24
+	model.setInput("/workspace create code agent --template software-dev --dir /tmp/code-agent")
+
+	updated, cmd := model.submitInput()
+	if cmd == nil {
+		t.Fatal("workspace create command returned nil cmd")
+	}
+	msg, ok := cmd().(WorkspaceCreatedMsg)
+	if !ok || msg.Error != nil || msg.Workspace == nil {
+		t.Fatalf("workspace create msg = %#v, want created workspace", msg)
+	}
+	if be.createReq.Title != "code agent" || be.createReq.TemplateID != "software-dev" || be.createReq.WorkingDirectory != "/tmp/code-agent" {
+		t.Fatalf("create request = %+v, want title/template/dir", be.createReq)
+	}
+
+	next, refresh := updated.(*AppModel).Update(msg)
+	if refresh == nil {
+		t.Fatal("expected workspace create to refresh list/context")
+	}
+	got := next.(AppModel)
+	if got.activeWorkspaceID != "ws-created" {
+		t.Fatalf("active workspace = %q, want ws-created", got.activeWorkspaceID)
+	}
+	view := stripANSI(got.View())
+	if !strings.Contains(view, "bindings: planning,execution") {
+		t.Fatalf("view missing workspace binding summary:\n%s", view)
+	}
+}
+
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func stripANSI(value string) string {
@@ -1051,6 +1271,50 @@ func (b *fakeBE) Memory() backend.MemoryBackend       { return &fakeMM{} }
 func (b *fakeBE) Template() backend.TemplateBackend   { return &fakeT{} }
 func (b *fakeBE) Config() backend.ConfigBackend       { return &fakeC{} }
 func (b *fakeBE) Events() backend.EventsBackend       { return &fakeE{} }
+
+type workspaceCreateFake struct {
+	*fakeBE
+	createReq backend.CreateWorkspaceRequest
+	workspace *backend.WorkspaceInfo
+}
+
+func (b *workspaceCreateFake) Workspace() backend.WorkspaceBackend {
+	return &workspaceCreateWS{parent: b}
+}
+
+type workspaceCreateWS struct{ parent *workspaceCreateFake }
+
+func (f *workspaceCreateWS) Create(ctx context.Context, req backend.CreateWorkspaceRequest) (*backend.WorkspaceInfo, error) {
+	f.parent.createReq = req
+	ws := &backend.WorkspaceInfo{
+		ID:               "ws-created",
+		Title:            req.Title,
+		Description:      req.Description,
+		WorkingDirectory: req.WorkingDirectory,
+		State:            common.WorkspaceStateActive,
+		SoulBindings: map[string]common.SoulID{
+			"planning":  "soul-planning",
+			"execution": "soul-execution",
+		},
+	}
+	f.parent.workspace = ws
+	return ws, nil
+}
+func (f *workspaceCreateWS) Get(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceInfo, error) {
+	if f.parent.workspace != nil && f.parent.workspace.ID == id {
+		return f.parent.workspace, nil
+	}
+	return nil, common.ErrNotFound
+}
+func (f *workspaceCreateWS) List(ctx context.Context) ([]backend.WorkspaceInfo, error) {
+	if f.parent.workspace == nil {
+		return nil, nil
+	}
+	return []backend.WorkspaceInfo{*f.parent.workspace}, nil
+}
+func (f *workspaceCreateWS) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
+	return nil
+}
 
 type conflictApprovalBE struct {
 	*fakeBE

@@ -2520,7 +2520,7 @@ func TestRuntimeOrchestrator_ResultManifestReusesStepContextManifestWhenNoPatch(
 
 	manifest := orch.workspaceDeliverableManifestContent(ctx, run, step, map[string]any{
 		"summary": "accepted with context manifest",
-	}, []string{string(step.ID)}, &workspacemodel.Workspace{ID: workspaceID, WorkingDirectory: workingDir})
+	}, []string{string(step.ID)}, &workspacemodel.Workspace{ID: workspaceID, WorkingDirectory: workingDir}, nil)
 
 	if !strings.Contains(manifest, "`from-context.md`") || strings.Contains(manifest, "`from-disk.md`") {
 		t.Fatalf("manifest = %q, want reused step context manifest without disk rescan", manifest)
@@ -2563,7 +2563,7 @@ func TestRuntimeOrchestrator_ResultManifestRescansWorkspaceWhenStepHasPatch(t *t
 
 	manifest := orch.workspaceDeliverableManifestContent(ctx, run, step, map[string]any{
 		"summary": "accepted after patch",
-	}, []string{string(step.ID)}, &workspacemodel.Workspace{ID: workspaceID, WorkingDirectory: workingDir})
+	}, []string{string(step.ID)}, &workspacemodel.Workspace{ID: workspaceID, WorkingDirectory: workingDir}, nil)
 
 	if !strings.Contains(manifest, "`from-disk.md`") || strings.Contains(manifest, "`from-context.md`") {
 		t.Fatalf("manifest = %q, want disk rescan when final step has patches", manifest)
@@ -3749,6 +3749,237 @@ func TestRuntimeOrchestrator_DispatchesLLMRepairAfterGraphNodeFailure(t *testing
 	}
 }
 
+func TestRuntimeOrchestrator_SoftwareDevCodeAgentRepairsTestFailureAndDeliversDiff(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	resultRepo := memory.NewResultRepository()
+	artifactRepo := memory.NewArtifactRepository()
+	patchRepo := memory.NewPatchRepository()
+	memoryRepo := memory.NewMemoryItemRepository()
+	workingDirectory := t.TempDir()
+	targetPath := filepath.Join(workingDirectory, "calculator.go")
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		stepID := string(request.StepID)
+		switch {
+		case stepID == "run-software-dev-code-agent/step-1":
+			return map[string]any{
+				"status": "completed",
+				"stage":  "llm_execution_graph_plan",
+				"executionGraph": map[string]any{
+					"nodes": []map[string]any{
+						{
+							"id":   "write-buggy-source",
+							"kind": llmcommon.RuntimeBlockKindPatchApply,
+							"input": map[string]any{
+								"patchType": "file_write",
+								"targetRef": "calculator.go",
+								"content":   "package calculator\n\nfunc Add(a, b int) int { return a - b }\n",
+							},
+						},
+						{
+							"id":        "run-tests",
+							"kind":      shellcommon.StepKindCommand,
+							"dependsOn": []string{"write-buggy-source"},
+							"input": map[string]any{
+								"command": "go",
+								"args":    []string{"test", "./..."},
+							},
+						},
+					},
+				},
+			}, nil
+		case strings.Contains(stepID, "/block/write-buggy-source"):
+			return map[string]any{
+				"status": "completed",
+				"patches": []map[string]any{{
+					"patchType": "file_write",
+					"targetRef": "calculator.go",
+					"content":   "package calculator\n\nfunc Add(a, b int) int { return a - b }\n",
+					"summary":   "write initial implementation",
+				}},
+			}, nil
+		case strings.Contains(stepID, "/block/run-tests-fixed"):
+			return map[string]any{
+				"status":   "completed",
+				"stage":    "shell_command_completed",
+				"command":  "go test ./...",
+				"exitCode": 0,
+				"stdout":   "ok calculator 0.003s",
+			}, nil
+		case strings.Contains(stepID, "/block/run-tests"):
+			return map[string]any{
+				"status":   "failed",
+				"stage":    "shell_command_completed",
+				"command":  "go test ./...",
+				"exitCode": 1,
+				"stderr":   "calculator_test.go: Add(2,3)= -1, want 5",
+			}, errors.New("exit status 1")
+		case strings.Contains(stepID, "/zz-llm-repair-"):
+			return map[string]any{
+				"status": "completed",
+				"stage":  "llm_execution_graph_repair",
+				"executionGraph": map[string]any{
+					"nodes": []map[string]any{
+						{
+							"id":   "fix-source",
+							"kind": llmcommon.RuntimeBlockKindPatchApply,
+							"input": map[string]any{
+								"patchType": "unified_diff",
+								"targetRef": "calculator.go",
+								"diff":      "--- a/calculator.go\n+++ b/calculator.go\n@@ -1,3 +1,3 @@\n package calculator\n \n-func Add(a, b int) int { return a - b }\n+func Add(a, b int) int { return a + b }\n",
+							},
+						},
+						{
+							"id":        "run-tests-fixed",
+							"kind":      shellcommon.StepKindCommand,
+							"dependsOn": []string{"fix-source"},
+							"input": map[string]any{
+								"command": "go",
+								"args":    []string{"test", "./..."},
+							},
+						},
+					},
+				},
+			}, nil
+		case strings.Contains(stepID, "/block/fix-source"):
+			return map[string]any{
+				"status": "completed",
+				"patches": []map[string]any{{
+					"patchType": "unified_diff",
+					"targetRef": "calculator.go",
+					"diff":      "--- a/calculator.go\n+++ b/calculator.go\n@@ -1,3 +1,3 @@\n package calculator\n \n-func Add(a, b int) int { return a - b }\n+func Add(a, b int) int { return a + b }\n",
+					"summary":   "fix Add implementation",
+				}},
+			}, nil
+		case strings.Contains(stepID, "/zz-llm-after-graph-"):
+			return map[string]any{
+				"status": "completed",
+				"stage":  "llm_dod_assessment",
+				"dodAssessment": map[string]any{
+					"satisfied":             true,
+					"summary":               "Software development DoD satisfied after automatic repair.",
+					"goalOutcome":           "Add now returns the sum of two integers.",
+					"implementationSummary": "Fixed calculator.go with a unified diff.",
+					"verificationSummary":   "go test ./... passed after the repair.",
+					"items": []map[string]any{
+						{
+							"item":         "implementation fixed",
+							"state":        "satisfied",
+							"evidenceRefs": []string{"run-software-dev-code-agent/block/fix-source"},
+						},
+						{
+							"item":         "tests pass",
+							"state":        "satisfied",
+							"evidenceRefs": []string{"run-software-dev-code-agent/block/run-tests-fixed"},
+						},
+					},
+				},
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected software-dev step %s", request.StepID)
+		}
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			Results:            resultRepo,
+			Artifacts:          artifactRepo,
+			ToolCalls:          memory.NewToolCallRepository(),
+			Patches:            patchRepo,
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+			MemoryItems:        memoryRepo,
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-software-dev-code-agent")
+	runID := common.RunID("run-software-dev-code-agent")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "software-dev", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-software-dev-code-agent"),
+		State:           common.RunStateCreated,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s failureReason=%q, want completed", runItem.State, runItem.FailureReason)
+	}
+	content, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if !strings.Contains(string(content), "return a + b") {
+		t.Fatalf("target content = %q, want repaired implementation", string(content))
+	}
+	patches, err := patchRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list patches: %v", err)
+	}
+	var repairPatch *runmodel.Patch
+	for _, patch := range patches {
+		if patch.PatchType == "unified_diff" {
+			repairPatch = patch
+			break
+		}
+	}
+	if len(patches) != 2 || repairPatch == nil || !strings.Contains(repairPatch.Diff, "+func Add(a, b int) int { return a + b }") {
+		t.Fatalf("patches = %+v, want initial write and repair unified diff", patches)
+	}
+	results, err := resultRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list results: %v", err)
+	}
+	if len(results) != 1 || results[0].State != common.ResultStateAccepted {
+		t.Fatalf("results = %+v, want accepted result", results)
+	}
+	artifacts, err := artifactRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	}
+	var diffArtifact *resultmodel.Artifact
+	for _, artifact := range artifacts {
+		if artifact.ID == common.ArtifactID("run-software-dev-code-agent/artifact/code-change-diff") {
+			diffArtifact = artifact
+			break
+		}
+	}
+	if diffArtifact == nil || !strings.Contains(diffArtifact.Summary, "```diff") || !strings.Contains(diffArtifact.Summary, "+func Add(a, b int) int { return a + b }") {
+		t.Fatalf("diff artifact = %+v, want full repair diff", diffArtifact)
+	}
+	memories, err := memoryRepo.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("list memories: %v", err)
+	}
+	if !hasRunSummaryContent(memories, runID, "Patch targets:", "go test ./...") {
+		t.Fatalf("memories = %+v, want run summary memory with patch and verification context", memories)
+	}
+}
+
 func TestRuntimeOrchestrator_DoesNotRepairLLMProviderError(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -4260,6 +4491,9 @@ func TestRuntimeOrchestrator_StartRunAppliesUnifiedDiffPatchEvidence(t *testing.
 	if len(patches) != 1 || patches[0].PatchType != "unified_diff" || patches[0].State != common.PatchStateApplied {
 		t.Fatalf("patches = %+v, want applied unified diff patch", patches)
 	}
+	if !strings.Contains(patches[0].Diff, "-before\n+after") {
+		t.Fatalf("patch diff = %q, want persisted unified diff", patches[0].Diff)
+	}
 }
 
 func TestRuntimeOrchestrator_StartRunPersistsUnifiedDiffPatchEvidenceWithFileBackend(t *testing.T) {
@@ -4327,6 +4561,9 @@ func TestRuntimeOrchestrator_StartRunPersistsUnifiedDiffPatchEvidenceWithFileBac
 	}
 	if len(patches) != 1 || patches[0].PatchType != "unified_diff" || patches[0].State != common.PatchStateApplied || patches[0].TargetRef != "docs/result.txt" {
 		t.Fatalf("reloaded patches = %+v, want persisted applied unified diff patch", patches)
+	}
+	if !strings.Contains(patches[0].Diff, "-before\n+after") {
+		t.Fatalf("reloaded patch diff = %q, want persisted unified diff", patches[0].Diff)
 	}
 }
 
@@ -6119,6 +6356,9 @@ func TestRuntimeOrchestrator_ReusesValidatedDoDAssessmentForCompletionEvidence(t
 	if err := orch.recordSkillFeedbackMemoryFromValidatedDoDAssessment(ctx, run, step, validated, summary); err != nil {
 		t.Fatalf("record skill feedback from validated assessment: %v", err)
 	}
+	if err := orch.recordRunSummaryMemoryFromValidatedDoDAssessment(ctx, run, step, validated, summary); err != nil {
+		t.Fatalf("record run summary memory from validated assessment: %v", err)
+	}
 	results, err := orch.evidence.Results.ListByRun(ctx, runID)
 	if err != nil {
 		t.Fatalf("list results: %v", err)
@@ -6132,6 +6372,9 @@ func TestRuntimeOrchestrator_ReusesValidatedDoDAssessmentForCompletionEvidence(t
 	}
 	if !hasSkillFeedbackMemory(memories, runID, "skill-dod-assessment-reuse") {
 		t.Fatalf("memories = %+v, want skill feedback from same validated assessment", memories)
+	}
+	if !hasCompletionRunSummaryMemory(memories, runID, step.ID, "validated DoD summary") {
+		t.Fatalf("memories = %+v, want completion run summary memory from same validated assessment", memories)
 	}
 }
 
@@ -6223,6 +6466,112 @@ func TestRuntimeOrchestrator_ResultSummaryIncludesRuntimeEvidenceOutput(t *testi
 		if !strings.Contains(summaryArtifact.Summary, want) {
 			t.Fatalf("summary artifact missing %q:\n%s", want, summaryArtifact.Summary)
 		}
+	}
+}
+
+func TestRuntimeOrchestrator_ResultArtifactsIncludePatchDiff(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-result-patch-diff")
+	workspaceID := common.WorkspaceID("ws-result-patch-diff")
+	stepID := common.StepID(string(runID) + "/validation")
+	patchID := common.PatchID(string(runID) + "/step-1/patch/1")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-result-patch-diff",
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}
+	step := &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+	}
+	patchRepo := memory.NewPatchRepository()
+	if err := patchRepo.Create(ctx, &runmodel.Patch{
+		ID:          patchID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      common.StepID(string(runID) + "/step-1"),
+		PatchType:   "unified_diff",
+		TargetRef:   "internal/example.go",
+		Diff:        "--- a/internal/example.go\n+++ b/internal/example.go\n@@ -1 +1 @@\n-before\n+after\n",
+		Summary:     "update example",
+		State:       common.PatchStateApplied,
+		CreatedAt:   "2026-05-04T00:00:00Z",
+		AppliedAt:   "2026-05-04T00:00:01Z",
+	}); err != nil {
+		t.Fatalf("seed patch: %v", err)
+	}
+	assessment := map[string]any{
+		"satisfied": true,
+		"items": []map[string]any{
+			{
+				"item":         "代码变更可追溯",
+				"state":        "satisfied",
+				"evidenceRefs": []string{string(stepID)},
+			},
+		},
+		"summary":               "DoD satisfied with patch diff",
+		"implementationSummary": "Updated internal/example.go.",
+		"verificationSummary":   "Patch was applied and captured as evidence.",
+	}
+	artifactRepo := memory.NewArtifactRepository()
+	resultRepo := memory.NewResultRepository()
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{
+			Results:   resultRepo,
+			Artifacts: artifactRepo,
+			Patches:   patchRepo,
+		},
+	}
+
+	if err := orch.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied with patch diff", nil); err != nil {
+		t.Fatalf("record result from validated assessment: %v", err)
+	}
+	results, err := resultRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list results: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %+v, want one accepted result", results)
+	}
+	if !reflect.DeepEqual(results[0].ArtifactRefs, []common.ArtifactID{
+		common.ArtifactID(string(runID) + "/artifact/result-summary"),
+		common.ArtifactID(string(runID) + "/artifact/deliverable-manifest"),
+		common.ArtifactID(string(runID) + "/artifact/code-change-diff"),
+	}) {
+		t.Fatalf("result artifact refs = %+v, want summary, manifest and patch diff", results[0].ArtifactRefs)
+	}
+	artifacts, err := artifactRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	}
+	var summaryArtifact *resultmodel.Artifact
+	var manifestArtifact *resultmodel.Artifact
+	var diffArtifact *resultmodel.Artifact
+	for _, artifact := range artifacts {
+		switch artifact.ID {
+		case common.ArtifactID(string(runID) + "/artifact/result-summary"):
+			summaryArtifact = artifact
+		case common.ArtifactID(string(runID) + "/artifact/deliverable-manifest"):
+			manifestArtifact = artifact
+		case common.ArtifactID(string(runID) + "/artifact/code-change-diff"):
+			diffArtifact = artifact
+		}
+	}
+	if diffArtifact == nil || diffArtifact.ArtifactType != resultcommon.ArtifactTypePatch || diffArtifact.PatchID != patchID {
+		t.Fatalf("diff artifact = %+v, want patch artifact linked to patch", diffArtifact)
+	}
+	for _, want := range []string{"```diff", "--- a/internal/example.go", "+after"} {
+		if !strings.Contains(diffArtifact.Summary, want) {
+			t.Fatalf("diff artifact missing %q:\n%s", want, diffArtifact.Summary)
+		}
+	}
+	if summaryArtifact == nil || !strings.Contains(summaryArtifact.Summary, string(diffArtifact.ID)) {
+		t.Fatalf("summary artifact = %+v, want patch diff artifact ref", summaryArtifact)
+	}
+	if manifestArtifact == nil || !strings.Contains(manifestArtifact.Summary, "## Code Change Evidence") || !strings.Contains(manifestArtifact.Summary, string(patchID)) {
+		t.Fatalf("manifest artifact = %+v, want patch evidence section", manifestArtifact)
 	}
 }
 
@@ -7466,10 +7815,15 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeApprovalA
 			case "run-runtime-approval/step-1":
 				return map[string]any{
 					"status":                         "completed",
-					stepOutputKeyBlockApprovalReason: "runtime approval gate",
+					stepOutputKeyBlockApprovalReason: "risky operation requires approval",
 					stepOutputKeyBlockApprovalID:     "approval-runtime-approval",
-					stepOutputKeyNextStep:            "run-runtime-approval/step-2",
-					stepOutputKeyNextKind:            "runtime/test",
+					stepOutputKeyBlockApprovalAction: "remove public API",
+					stepOutputKeyBlockApprovalContext: map[string]any{
+						"risk":       "breaking_change",
+						"targetFile": "internal/api.go",
+					},
+					stepOutputKeyNextStep: "run-runtime-approval/step-2",
+					stepOutputKeyNextKind: "runtime/test",
 				}, nil
 			case "run-runtime-approval/step-2":
 				return map[string]any{
@@ -7501,6 +7855,17 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeApprovalA
 	if err != nil {
 		t.Fatalf("get approval: %v", err)
 	}
+	if approval.Reason != "risky operation requires approval" ||
+		approval.Action != "remove public API" ||
+		approval.Context["risk"] != "breaking_change" {
+		t.Fatalf("approval = %+v, want persisted risk operation metadata", approval)
+	}
+	if _, err := stepRepo.Get(ctx, "run-runtime-approval/step-2"); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("step2 before approval err = %v, want not found", err)
+	}
+	if len(runtime.calls) != 1 || runtime.calls[0] != "run-runtime-approval/step-1" {
+		t.Fatalf("runtime calls before approval = %#v, want only step-1", runtime.calls)
+	}
 	approval.State = common.ApprovalStateApproved
 	if err := approvalRepo.Update(ctx, approval); err != nil {
 		t.Fatalf("update approval: %v", err)
@@ -7528,6 +7893,17 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeApprovalA
 	if step2.Input["previousStepId"] != "run-runtime-approval/step-1" {
 		t.Fatalf("step2 previousStepId = %v, want run-runtime-approval/step-1", step2.Input["previousStepId"])
 	}
+	approvalResolution, ok := step2.Input["approvalResolution"].(map[string]any)
+	if !ok {
+		t.Fatalf("step2 approvalResolution = %#v, want map", step2.Input["approvalResolution"])
+	}
+	if approvalResolution["action"] != "remove public API" {
+		t.Fatalf("approvalResolution action = %v, want remove public API", approvalResolution["action"])
+	}
+	approvalContext, ok := approvalResolution["context"].(map[string]any)
+	if !ok || approvalContext["risk"] != "breaking_change" || approvalContext["targetFile"] != "internal/api.go" {
+		t.Fatalf("approvalResolution context = %#v, want risk metadata", approvalResolution["context"])
+	}
 	if len(runtime.calls) != 2 || runtime.calls[0] != "run-runtime-approval/step-1" || runtime.calls[1] != "run-runtime-approval/step-2" {
 		t.Fatalf("runtime calls = %#v, want [run-runtime-approval/step-1 run-runtime-approval/step-2]", runtime.calls)
 	}
@@ -7546,10 +7922,14 @@ func TestRuntimeOrchestrator_ResumeRunRejectsRuntimeApprovalWithoutDispatchingNe
 			case "run-runtime-approval-reject/step-1":
 				return map[string]any{
 					"status":                         "completed",
-					stepOutputKeyBlockApprovalReason: "runtime approval gate",
+					stepOutputKeyBlockApprovalReason: "risky operation requires approval",
 					stepOutputKeyBlockApprovalID:     "approval-runtime-approval-reject",
-					stepOutputKeyNextStep:            "run-runtime-approval-reject/step-2",
-					stepOutputKeyNextKind:            "runtime/test",
+					stepOutputKeyBlockApprovalAction: "delete production data",
+					stepOutputKeyBlockApprovalContext: map[string]any{
+						"risk": "data_loss",
+					},
+					stepOutputKeyNextStep: "run-runtime-approval-reject/step-2",
+					stepOutputKeyNextKind: "runtime/test",
 				}, nil
 			default:
 				return nil, errors.New("unexpected step")
@@ -7575,6 +7955,9 @@ func TestRuntimeOrchestrator_ResumeRunRejectsRuntimeApprovalWithoutDispatchingNe
 	approval, err := approvalRepo.Get(ctx, "approval-runtime-approval-reject")
 	if err != nil {
 		t.Fatalf("get approval: %v", err)
+	}
+	if approval.Action != "delete production data" || approval.Context["risk"] != "data_loss" {
+		t.Fatalf("approval = %+v, want persisted risky action metadata", approval)
 	}
 	approval.State = common.ApprovalStateRejected
 	if err := approvalRepo.Update(ctx, approval); err != nil {
@@ -9078,6 +9461,40 @@ func hasSkillFeedbackMemory(items []*memorymodel.MemoryItem, runID common.RunID,
 			item.SourceType == "run" &&
 			item.MemoryType == memorycommon.MemoryTypeSkillFeedback &&
 			strings.Contains(item.Summary, skillID) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCompletionRunSummaryMemory(items []*memorymodel.MemoryItem, runID common.RunID, sourceRef common.StepID, summary string) bool {
+	for _, item := range items {
+		if item != nil &&
+			item.RunID == runID &&
+			item.SourceType == "run" &&
+			item.SourceRef == string(sourceRef) &&
+			item.MemoryType == memorycommon.MemoryTypeRunSummary &&
+			item.Summary == summary &&
+			strings.Contains(item.Content, "DoD items:") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRunSummaryContent(items []*memorymodel.MemoryItem, runID common.RunID, parts ...string) bool {
+	for _, item := range items {
+		if item == nil || item.RunID != runID || item.MemoryType != memorycommon.MemoryTypeRunSummary {
+			continue
+		}
+		missing := false
+		for _, part := range parts {
+			if !strings.Contains(item.Content, part) {
+				missing = true
+				break
+			}
+		}
+		if !missing {
 			return true
 		}
 	}

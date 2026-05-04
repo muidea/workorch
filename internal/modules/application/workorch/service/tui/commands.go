@@ -110,6 +110,15 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 	}
 }
 
+func CreateWorkspace(be backend.Backend, req backend.CreateWorkspaceRequest) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		ws, err := be.Workspace().Create(ctx, req)
+		return WorkspaceCreatedMsg{Workspace: ws, Error: err}
+	}
+}
+
 func FetchDecisions(be backend.Backend, workspaceID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -185,7 +194,7 @@ func WaitForBackendEvent(ch <-chan backend.Event) tea.Cmd {
 	}
 }
 
-func SubmitGoal(be backend.Backend, workspaceID string, text string) tea.Cmd {
+func SubmitGoal(be backend.Backend, workspaceID string, text string, dodItems []string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -193,7 +202,10 @@ func SubmitGoal(be backend.Backend, workspaceID string, text string) tea.Cmd {
 		if err != nil {
 			return RunStartedMsg{Error: err}
 		}
-		dod, err := be.DoD().Define(ctx, common.WorkspaceID(workspaceID), []string{"目标已完成，输出包含明确的执行结果"})
+		if len(dodItems) == 0 {
+			dodItems = backend.DefaultDoDItemsForWorkspace(ctx, be, common.WorkspaceID(workspaceID))
+		}
+		dod, err := be.DoD().Define(ctx, common.WorkspaceID(workspaceID), dodItems)
 		if err != nil {
 			return RunStartedMsg{Error: err}
 		}

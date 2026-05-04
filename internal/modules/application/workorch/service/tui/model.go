@@ -44,6 +44,11 @@ type transcriptItem struct {
 	Text string
 }
 
+const (
+	maxInputHistory = 100
+	maxResultLines  = 1000
+)
+
 type AppModel struct {
 	be backend.Backend
 
@@ -62,17 +67,23 @@ type AppModel struct {
 
 	input         string
 	inputCursor   int
+	inputHistory  []string
+	historyCursor int
 	currentTask   string
+	dodItems      []string
 	transcript    []transcriptItem
 	result        string
 	artifacts     []string
 	progress      progressState
 	progressText  string
 	failureReason string
+	failureHint   string
 	running       bool
 
 	blockingDecision *backend.DecisionInfo
 	blockingApproval *backend.ApprovalInfo
+	helpOpen         bool
+	scrollOffset     int
 
 	eventCh     chan backend.Event
 	unsubscribe func()
@@ -115,13 +126,14 @@ func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initi
 		transcript:          initialTranscript(initialGoal),
 		options:             options,
 		progress:            progressIdle,
+		historyCursor:       -1,
 	}
 }
 
 func (m AppModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{FetchAll(m.be), WaitForBackendEvent(m.eventCh)}
 	if m.initialGoal != "" && m.activeWorkspaceID != "" {
-		cmds = append(cmds, SubmitGoal(m.be, m.activeWorkspaceID, m.initialGoal))
+		cmds = append(cmds, SubmitGoal(m.be, m.activeWorkspaceID, m.initialGoal, m.dodItems))
 	}
 	return tea.Batch(cmds...)
 }
@@ -149,6 +161,21 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.applyWorkspaceContext(msg)
 		return m, m.fetchActiveBlockerDetails()
+	case WorkspaceCreatedMsg:
+		if msg.Error != nil {
+			m.setLastError(msg.Error)
+			return m, nil
+		}
+		if msg.Workspace != nil {
+			m.upsertWorkspace(*msg.Workspace)
+			m.setActiveWorkspace(string(msg.Workspace.ID))
+			m.progress = progressIdle
+			m.progressText = "Workspace created"
+			m.result = fmt.Sprintf("Workspace created: %s", workspaceLabel(*msg.Workspace))
+			m.lastError = nil
+			return m, tea.Batch(FetchAll(m.be), FetchWorkspaceContext(m.be, string(msg.Workspace.ID)))
+		}
+		return m, nil
 	case DecisionListMsg:
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
@@ -241,6 +268,21 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+	if m.helpOpen {
+		switch key {
+		case "esc", "ctrl+h", KeyQuit, KeyEnter:
+			m.helpOpen = false
+			return m, nil
+		case "pgup":
+			m.scroll(-6)
+			return m, nil
+		case "pgdown":
+			m.scroll(6)
+			return m, nil
+		default:
+			return m, nil
+		}
+	}
 	switch key {
 	case KeyQuit, "ctrl+q":
 		m.mode = modeQuit
@@ -264,7 +306,10 @@ func (m *AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clearInput()
 		m.lastError = nil
 		return m, nil
-	case "backspace", "ctrl+h":
+	case "ctrl+h":
+		m.helpOpen = true
+		return m, nil
+	case "backspace":
 		m.deleteBeforeCursor()
 		return m, nil
 	case "delete":
@@ -284,6 +329,21 @@ func (m *AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case " ", "space":
 		m.insertInput(" ")
+		return m, nil
+	case "tab":
+		m.completeSlashCommand()
+		return m, nil
+	case "ctrl+p":
+		m.previousInputHistory()
+		return m, nil
+	case "ctrl+n":
+		m.nextInputHistory()
+		return m, nil
+	case "pgup":
+		m.scroll(-6)
+		return m, nil
+	case "pgdown":
+		m.scroll(6)
 		return m, nil
 	case KeyShowWSList:
 		m.toggleWorkspaceSelectMode()
@@ -312,7 +372,14 @@ func (m *AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.insertInput(KeyUp)
 		return m, nil
+	case "alt+enter":
+		m.insertInput("\n")
+		return m, nil
 	case KeyEnter:
+		if msg.Alt {
+			m.insertInput("\n")
+			return m, nil
+		}
 		return m.submitInput()
 	default:
 		if msg.Type == tea.KeyRunes {
@@ -330,11 +397,12 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if strings.EqualFold(text, "/exit") {
-		m.mode = modeQuit
-		m.unsubscribe()
-		return m, tea.Quit
+	if strings.HasPrefix(text, "/") {
+		if handledModel, cmd, handled := m.handleSlashCommand(text); handled {
+			return handledModel, cmd
+		}
 	}
+	m.addInputHistory(text)
 	if m.blockingDecision != nil {
 		ticketID := string(m.blockingDecision.ID)
 		m.clearInput()
@@ -371,7 +439,89 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 	m.running = true
 	m.progress = progressSubmitting
 	m.progressText = "Submitting goal; waiting for backend acknowledgment"
-	return m, SubmitGoal(m.be, m.activeWorkspaceID, text)
+	m.scrollOffset = 0
+	return m, SubmitGoal(m.be, m.activeWorkspaceID, text, m.dodItems)
+}
+
+func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
+	cmd := strings.TrimSpace(strings.TrimPrefix(text, "/"))
+	if cmd == "" {
+		return m, nil, false
+	}
+	name := strings.ToLower(strings.Fields(cmd)[0])
+	switch name {
+	case "exit", "quit", "q":
+		m.addInputHistory(text)
+		m.mode = modeQuit
+		m.unsubscribe()
+		return m, tea.Quit, true
+	case "help", "h", "?":
+		m.addInputHistory(text)
+		m.clearInput()
+		m.helpOpen = true
+		return m, nil, true
+	case "clear", "reset":
+		m.addInputHistory(text)
+		m.clearInput()
+		m.transcript = nil
+		m.result = ""
+		m.artifacts = nil
+		m.failureReason = ""
+		m.lastError = nil
+		m.scrollOffset = 0
+		return m, nil, true
+	case "workspace", "ws":
+		m.addInputHistory(text)
+		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
+		if strings.HasPrefix(strings.ToLower(args), "create") {
+			req, err := parseWorkspaceCreateArgs(strings.TrimSpace(strings.TrimPrefix(args, strings.Fields(args)[0])))
+			if err != nil {
+				m.lastError = err
+				return m, nil, true
+			}
+			m.clearInput()
+			m.cancelWorkspaceSelection()
+			m.progress = progressSubmitting
+			m.progressText = "Creating workspace"
+			m.lastError = nil
+			return m, CreateWorkspace(m.be, req), true
+		}
+		m.clearInput()
+		m.toggleWorkspaceSelectMode()
+		return m, nil, true
+	case "result", "refresh":
+		m.addInputHistory(text)
+		m.clearInput()
+		m.scrollOffset = 0
+		m.progressText = "Refreshing workspace result"
+		return m, FetchWorkspaceContext(m.be, m.activeWorkspaceID), true
+	case "dod":
+		m.addInputHistory(text)
+		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
+		if args == "" {
+			m.clearInput()
+			m.result = renderPendingDoDResult(m.dodItems)
+			m.scrollOffset = 0
+			m.progressText = "Showing pending DoD"
+			return m, nil, true
+		}
+		items := parseDoDItems(args)
+		if len(items) == 0 {
+			m.lastError = fmt.Errorf("dod requires at least one non-empty item")
+			return m, nil, true
+		}
+		m.dodItems = items
+		m.clearInput()
+		m.lastError = nil
+		m.appendTranscript("DoD", strings.Join(items, "; "))
+		m.result = renderPendingDoDResult(items)
+		m.progressText = "DoD updated for next goal"
+		m.scrollOffset = 0
+		return m, nil, true
+	default:
+		m.lastError = fmt.Errorf("unknown slash command: /%s", name)
+		return m, nil, true
+	}
 }
 
 func (m AppModel) View() string {
@@ -385,6 +535,9 @@ func (m AppModel) View() string {
 	height := m.height
 	if height == 0 {
 		height = 24
+	}
+	if m.helpOpen {
+		return m.renderHelpOverlay(width, height)
 	}
 
 	input := m.renderInput(width)
@@ -401,10 +554,11 @@ func (m AppModel) renderContent(width, height int) string {
 	if width >= 96 {
 		rightWidth := 30
 		mainWidth := width - rightWidth - 2
-		return joinColumns(m.renderMain(mainWidth, height), m.renderWorkspacePanel(rightWidth, height), mainWidth+2)
+		main := m.clipLines(m.renderMain(mainWidth, 0), height)
+		return joinColumns(main, m.renderWorkspacePanel(rightWidth, height), mainWidth+2)
 	}
 
-	content := strings.TrimRight(m.renderMain(width, height), "\n")
+	content := strings.TrimRight(m.clipLines(m.renderMain(width, 0), height), "\n")
 	if len(m.workspaces) > 1 {
 		remaining := height - lineCount(content) - 1
 		if remaining >= 4 {
@@ -420,6 +574,10 @@ func (m AppModel) renderMain(width, height int) string {
 	b.WriteString("\n")
 	b.WriteString(m.renderActiveWorkspace(width))
 	b.WriteString("\n")
+	if line := m.renderWorkspaceTemplateInfo(width); line != "" {
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
 	b.WriteString(m.renderProgress(width))
 	b.WriteString("\n")
 	if len(m.transcript) > 0 {
@@ -428,6 +586,9 @@ func (m AppModel) renderMain(width, height int) string {
 	if m.currentTask != "" {
 		b.WriteString(truncateDisplay("Task: "+m.currentTask, width-2))
 		b.WriteString("\n")
+	}
+	if len(m.dodItems) > 0 {
+		b.WriteString(renderDoDItems(m.dodItems, width-2, 4))
 	}
 	b.WriteString(Dim.Render(strings.Repeat("-", max(10, width-2))))
 	b.WriteString("\n")
@@ -450,7 +611,7 @@ func (m AppModel) renderMain(width, height int) string {
 	resultLines := m.resultLineLimit(height, lineCount(b.String()))
 	switch {
 	case m.result != "":
-		b.WriteString(wrapLines(m.result, width-2, resultLines))
+		b.WriteString(renderRichText(m.result, width-2, resultLines))
 		b.WriteString("\n")
 	case m.failureReason != "":
 		b.WriteString(Error.Render(truncateDisplay(m.failureReason, width-2)))
@@ -479,7 +640,7 @@ func (m AppModel) renderMain(width, height int) string {
 
 func (m AppModel) resultLineLimit(height int, usedLines int) int {
 	if height <= 0 {
-		return 8
+		return maxResultLines
 	}
 	reserved := 0
 	if len(m.artifacts) > 0 {
@@ -505,6 +666,24 @@ func (m AppModel) renderActiveWorkspace(width int) string {
 		label += "  " + ws.WorkingDirectory
 	}
 	return truncateDisplay("Workspace: "+label, width-2)
+}
+
+func (m AppModel) renderWorkspaceTemplateInfo(width int) string {
+	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
+	if ws == nil {
+		return ""
+	}
+	parts := make([]string, 0, 2)
+	if ws.DefaultSoulID != "" {
+		parts = append(parts, "default soul: "+string(ws.DefaultSoulID))
+	}
+	if len(ws.SoulBindings) > 0 {
+		parts = append(parts, "bindings: "+workspaceBindingSummary(ws.SoulBindings))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return Dim.Render(truncateDisplay(strings.Join(parts, " | "), width-2))
 }
 
 func (m AppModel) renderProgress(width int) string {
@@ -578,15 +757,46 @@ func (m AppModel) renderInput(width int) string {
 	} else if m.blockingApproval != nil {
 		prompt += " approval"
 	}
-	return truncateDisplay(fmt.Sprintf("%s > %s", prompt, m.renderEditableInput()), width-2)
+	return m.renderInputBuffer(prompt, width)
 }
 
 func (m AppModel) renderHelp(width int) string {
-	help := "enter: submit | /exit: quit | ctrl+w: ws select | esc: clear | ctrl+c: interrupt"
+	help := "enter: submit | /help: help | /workspace: select/create ws | /dod: update DoD | /clear: clear | /exit: quit | ctrl+c: interrupt"
 	if m.workspaceSelectMode {
 		help = "ws select: up/down/j/k move | enter confirm | ctrl+w cancel | esc cancel"
 	}
 	return Dim.Render(truncateDisplay(help, width-2))
+}
+
+func (m AppModel) renderHelpOverlay(width, height int) string {
+	lines := []string{
+		"WorkOrch Help",
+		"",
+		"Enter: submit current goal or response",
+		"Alt+Enter: insert newline",
+		"Ctrl+P / Ctrl+N: input history",
+		"Tab: slash command completion",
+		"Ctrl+W: workspace selector",
+		"Ctrl+H: help",
+		"PgUp / PgDn: scroll result",
+		"Esc: clear input or close help",
+		"/help /clear /workspace /workspace create /dod /result /exit",
+	}
+	panelWidth := min(width-4, 72)
+	if panelWidth < 30 {
+		panelWidth = max(20, width-2)
+	}
+	panelHeight := len(lines) + 4
+	if panelHeight > height-2 {
+		panelHeight = height - 2
+	}
+	b := strings.Builder{}
+	padTop := max(0, (height-panelHeight)/2)
+	for i := 0; i < padTop; i++ {
+		b.WriteString("\n")
+	}
+	b.WriteString(Border.Width(panelWidth).Render(strings.Join(lines[:min(len(lines), panelHeight-4)], "\n")))
+	return b.String()
 }
 
 func initialTranscript(initialGoal string) []transcriptItem {
@@ -624,6 +834,133 @@ func renderTranscript(items []transcriptItem, width int, limit int) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func parseDoDItems(value string) []string {
+	fields := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ';' || r == '；' || r == '\n'
+	})
+	items := make([]string, 0, len(fields))
+	for _, field := range fields {
+		item := strings.TrimSpace(field)
+		if item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func renderPendingDoDResult(items []string) string {
+	if len(items) == 0 {
+		return "No custom DoD set. The next goal will use the Workspace template DoD when available, otherwise the default generic DoD."
+	}
+	var b strings.Builder
+	b.WriteString("Pending DoD\n")
+	for _, item := range items {
+		b.WriteString("- ")
+		b.WriteString(item)
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func renderDoDItems(items []string, width int, limit int) string {
+	if len(items) == 0 || width <= 0 || limit <= 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(Heading.Render("DoD"))
+	b.WriteString("\n")
+	for idx, item := range items {
+		if idx >= limit {
+			b.WriteString(truncateDisplay(fmt.Sprintf("+%d more DoD items", len(items)-idx), width))
+			b.WriteString("\n")
+			break
+		}
+		b.WriteString(truncateDisplay("- "+item, width))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func parseWorkspaceCreateArgs(value string) (backend.CreateWorkspaceRequest, error) {
+	fields := strings.Fields(value)
+	req := backend.CreateWorkspaceRequest{}
+	titleParts := make([]string, 0, len(fields))
+	for idx := 0; idx < len(fields); idx++ {
+		field := fields[idx]
+		switch {
+		case field == "--template" || field == "-template":
+			idx++
+			if idx >= len(fields) {
+				return req, fmt.Errorf("workspace create requires a template value")
+			}
+			req.TemplateID = fields[idx]
+		case strings.HasPrefix(field, "--template="):
+			req.TemplateID = strings.TrimPrefix(field, "--template=")
+		case strings.HasPrefix(field, "template="):
+			req.TemplateID = strings.TrimPrefix(field, "template=")
+		case field == "--dir" || field == "--working-dir" || field == "-dir":
+			idx++
+			if idx >= len(fields) {
+				return req, fmt.Errorf("workspace create requires a directory value")
+			}
+			req.WorkingDirectory = fields[idx]
+		case strings.HasPrefix(field, "--dir="):
+			req.WorkingDirectory = strings.TrimPrefix(field, "--dir=")
+		case strings.HasPrefix(field, "--working-dir="):
+			req.WorkingDirectory = strings.TrimPrefix(field, "--working-dir=")
+		case strings.HasPrefix(field, "dir="):
+			req.WorkingDirectory = strings.TrimPrefix(field, "dir=")
+		case field == "--description" || field == "--desc":
+			idx++
+			if idx >= len(fields) {
+				return req, fmt.Errorf("workspace create requires a description value")
+			}
+			req.Description = fields[idx]
+		case strings.HasPrefix(field, "--description="):
+			req.Description = strings.TrimPrefix(field, "--description=")
+		case strings.HasPrefix(field, "--desc="):
+			req.Description = strings.TrimPrefix(field, "--desc=")
+		case strings.HasPrefix(field, "description="):
+			req.Description = strings.TrimPrefix(field, "description=")
+		default:
+			titleParts = append(titleParts, field)
+		}
+	}
+	req.Title = strings.TrimSpace(strings.Join(titleParts, " "))
+	if req.Title == "" {
+		return req, fmt.Errorf("workspace create requires a title")
+	}
+	if req.Description == "" {
+		req.Description = req.Title
+	}
+	return req, nil
+}
+
+func workspaceBindingSummary(bindings map[string]common.SoulID) string {
+	stages := []string{"planning", "execution", "decision", "approval", "validation", "artifact"}
+	parts := make([]string, 0, len(bindings))
+	for _, stage := range stages {
+		if bindings[stage] != "" {
+			parts = append(parts, stage)
+		}
+	}
+	for stage := range bindings {
+		if !stringInSlice(stage, stages) {
+			parts = append(parts, stage)
+		}
+	}
+	return strings.Join(parts, ",")
+}
+
+func stringInSlice(value string, items []string) bool {
+	for _, item := range items {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }
 
 func parseApprovalInput(value string) (bool, bool) {
@@ -746,6 +1083,7 @@ func (m *AppModel) insertInput(value string) {
 	next = append(next, runes[m.inputCursor:]...)
 	m.input = string(next)
 	m.inputCursor += len(inserted)
+	m.historyCursor = -1
 }
 
 func (m *AppModel) deleteBeforeCursor() {
@@ -782,6 +1120,7 @@ func (m *AppModel) moveInputCursor(delta int) {
 func (m *AppModel) clearInput() {
 	m.input = ""
 	m.inputCursor = 0
+	m.historyCursor = -1
 }
 
 func (m *AppModel) clampInputCursor(length int) {
@@ -805,6 +1144,118 @@ func (m AppModel) renderEditableInput() string {
 	return string(runes[:cursor]) + "|" + string(runes[cursor:])
 }
 
+func (m AppModel) renderInputBuffer(prompt string, width int) string {
+	prefix := prompt + " > "
+	editable := strings.ReplaceAll(m.renderEditableInput(), "\r\n", "\n")
+	lines := strings.Split(editable, "\n")
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	limit := 4
+	if len(lines) > limit {
+		lines = append([]string{"..."}, lines[len(lines)-limit+1:]...)
+	}
+	indent := strings.Repeat(" ", lipgloss.Width(prefix))
+	out := make([]string, 0, len(lines))
+	for idx, line := range lines {
+		linePrefix := indent
+		if idx == 0 {
+			linePrefix = prefix
+		}
+		out = append(out, truncateDisplay(linePrefix+line, width-2))
+	}
+	return strings.Join(out, "\n")
+}
+
+func (m *AppModel) addInputHistory(value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	if len(m.inputHistory) > 0 && m.inputHistory[len(m.inputHistory)-1] == value {
+		m.historyCursor = -1
+		return
+	}
+	m.inputHistory = append(m.inputHistory, value)
+	if len(m.inputHistory) > maxInputHistory {
+		m.inputHistory = append([]string(nil), m.inputHistory[len(m.inputHistory)-maxInputHistory:]...)
+	}
+	m.historyCursor = -1
+}
+
+func (m *AppModel) previousInputHistory() {
+	if len(m.inputHistory) == 0 {
+		return
+	}
+	if m.historyCursor < 0 {
+		m.historyCursor = len(m.inputHistory) - 1
+	} else if m.historyCursor > 0 {
+		m.historyCursor--
+	}
+	m.setInput(m.inputHistory[m.historyCursor])
+}
+
+func (m *AppModel) nextInputHistory() {
+	if len(m.inputHistory) == 0 || m.historyCursor < 0 {
+		return
+	}
+	if m.historyCursor >= len(m.inputHistory)-1 {
+		m.historyCursor = -1
+		m.setInput("")
+		return
+	}
+	m.historyCursor++
+	m.setInput(m.inputHistory[m.historyCursor])
+}
+
+func (m *AppModel) setInput(value string) {
+	m.input = value
+	m.inputCursor = len([]rune(value))
+}
+
+func (m *AppModel) completeSlashCommand() {
+	trimmed := strings.TrimSpace(m.input)
+	if !strings.HasPrefix(trimmed, "/") {
+		return
+	}
+	prefix := strings.ToLower(strings.TrimPrefix(trimmed, "/"))
+	commands := []string{"/help", "/clear", "/workspace", "/workspace create", "/dod", "/result", "/exit"}
+	for _, command := range commands {
+		if strings.HasPrefix(strings.TrimPrefix(command, "/"), prefix) {
+			m.setInput(command)
+			return
+		}
+	}
+}
+
+func (m *AppModel) scroll(delta int) {
+	m.scrollOffset += delta
+	if m.scrollOffset < 0 {
+		m.scrollOffset = 0
+	}
+}
+
+func (m AppModel) clipLines(value string, height int) string {
+	value = strings.TrimRight(value, "\n")
+	if height <= 0 || value == "" {
+		return value
+	}
+	lines := strings.Split(value, "\n")
+	maxStart := len(lines) - height
+	if maxStart < 0 {
+		maxStart = 0
+	}
+	start := m.scrollOffset
+	if start > maxStart {
+		start = maxStart
+	}
+	end := start + height
+	if end > len(lines) {
+		end = len(lines)
+	}
+	return strings.Join(lines[start:end], "\n")
+}
+
 func (m *AppModel) setBlockingDecision(id common.TicketID, workspaceID common.WorkspaceID, runID common.RunID, reason string, question string) {
 	if id == "" {
 		return
@@ -821,7 +1272,7 @@ func (m *AppModel) setBlockingDecision(id common.TicketID, workspaceID common.Wo
 	m.upsertDecision(item)
 }
 
-func (m *AppModel) setBlockingApproval(id common.ApprovalID, workspaceID common.WorkspaceID, runID common.RunID, reason string) {
+func (m *AppModel) setBlockingApproval(id common.ApprovalID, workspaceID common.WorkspaceID, runID common.RunID, reason string, action string, context map[string]any) {
 	if id == "" {
 		return
 	}
@@ -830,6 +1281,8 @@ func (m *AppModel) setBlockingApproval(id common.ApprovalID, workspaceID common.
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		Reason:      reason,
+		Action:      action,
+		Context:     clonePayloadMap(context),
 		State:       "pending",
 	}
 	m.blockingApproval = &item
@@ -983,6 +1436,19 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		return nil
 	}
 	switch evt.Type {
+	case backend.EventWorkspaceStateChanged:
+		state := common.WorkspaceState(firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState))
+		activeRunID := firstPayloadString(evt.Payload, "activeRunId", "ActiveRunID", events.PayloadKeyActiveRunID)
+		if activeRunID != "" {
+			m.activeRunID = activeRunID
+		}
+		m.applyWorkspaceProgress(state)
+		switch state {
+		case common.WorkspaceStateCompleted, common.WorkspaceStateFailed, common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked:
+			return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+		default:
+			return nil
+		}
 	case backend.EventRunStateChanged:
 		state := firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)
 		if evt.RunID != "" {
@@ -995,6 +1461,9 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		kind := firstPayloadString(evt.Payload, "kind", "Kind", events.PayloadKeyKind)
 		m.progressText = stepProgressText("Working", kind, "Working; waiting for final result")
 	case backend.EventStepCompleted:
+		if state := common.StepState(firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)); state == common.StepStateFailed {
+			m.rememberFailureHint(failureMessageFromPayload(evt.Payload))
+		}
 		if m.progress == progressRunning {
 			kind := firstPayloadString(evt.Payload, "kind", "Kind", events.PayloadKeyKind)
 			m.progressText = stepProgressText("Step completed", kind, "Step completed; waiting for next update")
@@ -1020,13 +1489,15 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 			WorkspaceID: evt.WorkspaceID,
 			RunID:       evt.RunID,
 			Reason:      firstPayloadString(evt.Payload, "reason", "Reason", events.PayloadKeyReason),
+			Action:      firstPayloadString(evt.Payload, "action", "Action", events.PayloadKeyAction),
+			Context:     payloadMapValue(evt.Payload, "context", "Context", events.PayloadKeyContext),
 			State:       "pending",
 		}
 		m.blockingApproval = &approval
 		m.upsertApproval(approval)
 		m.running = false
 		m.progress = progressWaitingApproval
-		m.progressText = nonEmpty(m.blockingApproval.Reason, string(m.blockingApproval.ID))
+		m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), string(m.blockingApproval.ID))
 		return m.fetchActiveBlockerDetails()
 	case backend.EventDecisionResolved:
 		m.blockingDecision = nil
@@ -1041,6 +1512,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 	case backend.EventResultAccepted:
 		m.result = firstPayloadString(evt.Payload, "summary", "Summary", events.PayloadKeySummary)
 		m.artifacts = artifactPayloadStrings(evt.Payload)
+		m.scrollOffset = 0
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventMemoryCreated, backend.EventMemoryUpdated, backend.EventMemoryDeleted:
 		m.progressText = "Workspace memory changed; refreshing context"
@@ -1062,7 +1534,7 @@ func (m *AppModel) applyRunState(state common.RunState, payload map[string]any) 
 		m.blockingDecision = nil
 		m.blockingApproval = nil
 		m.progress = progressFailed
-		m.failureReason = firstPayloadString(payload, "failureReason", "FailureReason", events.PayloadKeyFailureReason)
+		m.failureReason = nonEmpty(failureMessageFromPayload(payload), m.failureHint)
 		m.progressText = nonEmpty(m.failureReason, "Run failed")
 	case common.RunStateBlockedOnDecision:
 		m.running = false
@@ -1075,7 +1547,7 @@ func (m *AppModel) applyRunState(state common.RunState, payload map[string]any) 
 		m.running = false
 		m.progress = progressWaitingApproval
 		if approvalID := common.ApprovalID(firstPayloadString(payload, "approvalId", "ID", "id", events.PayloadKeyBlockingApprovalID)); approvalID != "" {
-			m.setBlockingApproval(approvalID, common.WorkspaceID(m.activeWorkspaceID), common.RunID(m.activeRunID), "")
+			m.setBlockingApproval(approvalID, common.WorkspaceID(m.activeWorkspaceID), common.RunID(m.activeRunID), "", "", nil)
 		}
 		m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
 	default:
@@ -1369,6 +1841,7 @@ func (m *AppModel) resetWorkspaceView() {
 	m.result = ""
 	m.artifacts = nil
 	m.failureReason = ""
+	m.failureHint = ""
 	m.blockingDecision = nil
 	m.blockingApproval = nil
 	m.decisions = nil
@@ -1377,6 +1850,7 @@ func (m *AppModel) resetWorkspaceView() {
 	m.progress = progressIdle
 	m.progressText = ""
 	m.lastError = nil
+	m.scrollOffset = 0
 	m.clearInput()
 }
 
@@ -1532,6 +2006,79 @@ func firstPayloadString(payload map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func payloadMap(payload map[string]any, keys ...string) map[string]any {
+	for _, key := range keys {
+		if value, ok := payload[key].(map[string]any); ok {
+			return value
+		}
+	}
+	return nil
+}
+
+func payloadMapValue(payload map[string]any, keys ...string) map[string]any {
+	return clonePayloadMap(payloadMap(payload, keys...))
+}
+
+func clonePayloadMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
+}
+
+func (m *AppModel) rememberFailureHint(value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	if m.failureHint == "" || !isTransientFailureText(value) {
+		m.failureHint = value
+	}
+}
+
+func failureMessageFromPayload(payload map[string]any) string {
+	if payload == nil {
+		return ""
+	}
+	if output := payloadMap(payload, "output", "Output", events.PayloadKeyOutput); output != nil {
+		if value := failureMessageFromPayload(output); value != "" {
+			return value
+		}
+	}
+	reason := firstPayloadString(payload, "reason", "Reason", "error", "Error", "failureReason", "FailureReason", events.PayloadKeyReason, events.PayloadKeyFailureReason)
+	if sshMissingCredentialFailure(reason) {
+		return "SSH 命令缺少 password 或 privateKey/privateKeyPath，请补充凭证后重试。"
+	}
+	if isTransientFailureText(reason) {
+		if hint := firstPayloadString(payload, "resolutionHint", "ResolutionHint"); strings.TrimSpace(hint) != "" {
+			return "LLM provider timeout. " + strings.TrimSpace(hint)
+		}
+		return ""
+	}
+	return strings.TrimSpace(reason)
+}
+
+func sshMissingCredentialFailure(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	return strings.Contains(normalized, "ssh/command") &&
+		strings.Contains(normalized, "requires password") &&
+		strings.Contains(normalized, "privatekey")
+}
+
+func isTransientFailureText(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return false
+	}
+	return strings.Contains(normalized, "context deadline exceeded") ||
+		strings.Contains(normalized, "context cancellation while reading body") ||
+		strings.Contains(normalized, "client.timeout")
 }
 
 func hasPayloadKey(payload map[string]any, keys ...string) bool {
@@ -1905,7 +2452,13 @@ func blockingApprovalLabel(item *backend.ApprovalInfo) string {
 	if item == nil {
 		return ""
 	}
-	return nonEmpty(item.Reason, string(item.ID))
+	if strings.TrimSpace(item.Action) == "" {
+		return nonEmpty(item.Reason, string(item.ID))
+	}
+	if strings.TrimSpace(item.Reason) == "" {
+		return item.Action
+	}
+	return item.Reason + " | " + item.Action
 }
 
 func mergeDecisionInfo(existing backend.DecisionInfo, next backend.DecisionInfo) backend.DecisionInfo {
@@ -1940,10 +2493,83 @@ func mergeApprovalInfo(existing backend.ApprovalInfo, next backend.ApprovalInfo)
 	if next.Reason != "" {
 		existing.Reason = next.Reason
 	}
+	if next.Action != "" {
+		existing.Action = next.Action
+	}
+	if next.Context != nil {
+		existing.Context = clonePayloadMap(next.Context)
+	}
 	if next.State != "" {
 		existing.State = next.State
 	}
 	return existing
+}
+
+func renderRichText(value string, width int, maxLines int) string {
+	if width <= 0 || maxLines <= 0 {
+		return ""
+	}
+	var out []string
+	inCode := false
+	for _, raw := range strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(raw)
+		if strings.HasPrefix(trimmed, "```") {
+			inCode = !inCode
+			continue
+		}
+		line := raw
+		if !inCode {
+			line = renderMarkdownLine(raw)
+		} else if strings.TrimSpace(line) != "" {
+			line = "  " + line
+		}
+		for _, wrapped := range splitDisplayLine(line, width) {
+			if inCode && strings.TrimSpace(wrapped) != "" {
+				out = append(out, Dim.Render(wrapped))
+			} else {
+				out = append(out, wrapped)
+			}
+			if len(out) >= maxLines {
+				return strings.Join(out, "\n")
+			}
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+func renderMarkdownLine(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if level, title, ok := markdownHeading(trimmed); ok {
+		prefix := strings.Repeat("#", level) + " "
+		return Heading.Render(prefix + title)
+	}
+	if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
+		return "  " + trimmed
+	}
+	return stripInlineMarkdown(value)
+}
+
+func stripInlineMarkdown(value string) string {
+	replacements := []string{"**", "__", "~~", "`"}
+	for _, old := range replacements {
+		value = strings.ReplaceAll(value, old, "")
+	}
+	return value
+}
+
+func splitDisplayLine(value string, width int) []string {
+	if lipgloss.Width(value) <= width {
+		return []string{value}
+	}
+	var lines []string
+	remaining := value
+	for lipgloss.Width(remaining) > width {
+		part := takeDisplayPrefix(remaining, width)
+		lines = append(lines, part)
+		remaining = strings.TrimPrefix(remaining, part)
+	}
+	lines = append(lines, remaining)
+	return lines
 }
 
 func wrapLines(value string, width int, maxLines int) string {
@@ -2025,6 +2651,13 @@ func padLines(value string, target int) string {
 
 func max(a, b int) int {
 	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b int) int {
+	if a < b {
 		return a
 	}
 	return b

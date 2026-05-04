@@ -19,6 +19,8 @@ const (
 	PayloadKeyInput              = "input"
 	PayloadKeyOutput             = "output"
 	PayloadKeyReason             = "reason"
+	PayloadKeyAction             = "action"
+	PayloadKeyContext            = "context"
 	PayloadKeyResolutionID       = "resolutionId"
 	PayloadKeyType               = "type"
 	PayloadKeyPayload            = "payload"
@@ -99,8 +101,10 @@ type DecisionResolutionPayloadData struct {
 }
 
 type ApprovalPayloadData struct {
-	Reason string
-	State  common.ApprovalState
+	Reason  string
+	Action  string
+	Context map[string]any
+	State   common.ApprovalState
 }
 
 type ResultPayloadData struct {
@@ -219,11 +223,18 @@ func DecisionResolutionPayload(
 	return ret
 }
 
-func ApprovalPayload(reason string, state common.ApprovalState) map[string]any {
-	return map[string]any{
+func ApprovalPayload(reason string, action string, context map[string]any, state common.ApprovalState) map[string]any {
+	ret := map[string]any{
 		PayloadKeyReason: reason,
 		PayloadKeyState:  string(state),
 	}
+	if action != "" {
+		ret[PayloadKeyAction] = action
+	}
+	if len(context) > 0 {
+		ret[PayloadKeyContext] = clonePayloadMap(context)
+	}
+	return ret
 }
 
 func ResultPayload(
@@ -483,9 +494,19 @@ func DecodeApprovalPayload(payload map[string]any) (ApprovalPayloadData, bool) {
 	if !ok {
 		return ApprovalPayloadData{}, false
 	}
+	action, ok := optionalStringField(payload, PayloadKeyAction)
+	if !ok {
+		return ApprovalPayloadData{}, false
+	}
+	context, ok := optionalMapField(payload, PayloadKeyContext)
+	if !ok {
+		return ApprovalPayloadData{}, false
+	}
 	return ApprovalPayloadData{
-		Reason: reason,
-		State:  common.ApprovalState(state),
+		Reason:  reason,
+		Action:  action,
+		Context: context,
+		State:   common.ApprovalState(state),
 	}, true
 }
 

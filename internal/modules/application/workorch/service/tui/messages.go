@@ -21,6 +21,11 @@ type WorkspaceContextMsg struct {
 	Error     error
 }
 
+type WorkspaceCreatedMsg struct {
+	Workspace *backend.WorkspaceInfo
+	Error     error
+}
+
 type DecisionListMsg struct {
 	Decisions []backend.DecisionInfo
 	Error     error

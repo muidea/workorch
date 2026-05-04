@@ -98,6 +98,7 @@ func (b *eventHubBackend) handleCommand(ctx context.Context, cmd events.CLIComma
 			Title:            stringValue(cmd.Payload, "title"),
 			Description:      stringValue(cmd.Payload, "description"),
 			WorkingDirectory: stringValue(cmd.Payload, "workingDirectory"),
+			TemplateID:       stringValue(cmd.Payload, "templateId"),
 		})
 		return resourceMap(ws), nil, err
 	case events.CommandWorkspaceGet:
@@ -411,6 +412,7 @@ func (b *eventHubWorkspaceBackend) Create(ctx context.Context, req CreateWorkspa
 		"title":            req.Title,
 		"description":      req.Description,
 		"workingDirectory": req.WorkingDirectory,
+		"templateId":       req.TemplateID,
 	})
 	return decodeResultResource[WorkspaceInfo](result, err)
 }

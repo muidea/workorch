@@ -2251,6 +2251,7 @@ func cloneDecisionResolution(item *decision.Resolution) *decision.Resolution {
 
 func cloneApproval(item *approval.Approval) *approval.Approval {
 	cloned := *item
+	cloned.Context = cloneMap(item.Context)
 	return &cloned
 }
 

@@ -1106,7 +1106,7 @@ func (r *PatchRepository) Create(_ context.Context, item *run.Patch) error {
 	if _, ok := r.items[item.ID]; ok {
 		return common.ErrConflict
 	}
-	cloned := *item
+	cloned := clonePatch(item)
 	r.items[item.ID] = &cloned
 	return nil
 }
@@ -1118,7 +1118,7 @@ func (r *PatchRepository) Get(_ context.Context, id common.PatchID) (*run.Patch,
 	if !ok {
 		return nil, common.ErrNotFound
 	}
-	cloned := *item
+	cloned := clonePatch(item)
 	return &cloned, nil
 }
 
@@ -1131,7 +1131,7 @@ func (r *PatchRepository) ListByRun(_ context.Context, runID common.RunID) ([]*r
 		if item.RunID != runID {
 			continue
 		}
-		cloned := *item
+		cloned := clonePatch(item)
 		items = append(items, &cloned)
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -1152,7 +1152,7 @@ func (r *PatchRepository) ListByStep(_ context.Context, stepID common.StepID) ([
 		if item.StepID != stepID {
 			continue
 		}
-		cloned := *item
+		cloned := clonePatch(item)
 		items = append(items, &cloned)
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -1170,7 +1170,7 @@ func (r *PatchRepository) Update(_ context.Context, item *run.Patch) error {
 	if _, ok := r.items[item.ID]; !ok {
 		return common.ErrNotFound
 	}
-	cloned := *item
+	cloned := clonePatch(item)
 	r.items[item.ID] = &cloned
 	return nil
 }
@@ -1508,7 +1508,7 @@ func (r *ApprovalRepository) Create(_ context.Context, item *approval.Approval) 
 	if _, ok := r.items[item.ID]; ok {
 		return common.ErrConflict
 	}
-	cloned := *item
+	cloned := cloneApproval(item)
 	r.items[item.ID] = &cloned
 	return nil
 }
@@ -1520,7 +1520,7 @@ func (r *ApprovalRepository) Get(_ context.Context, id common.ApprovalID) (*appr
 	if !ok {
 		return nil, common.ErrNotFound
 	}
-	cloned := *item
+	cloned := cloneApproval(item)
 	return &cloned, nil
 }
 
@@ -1536,7 +1536,7 @@ func (r *ApprovalRepository) List(_ context.Context) ([]*approval.Approval, erro
 
 	ret := make([]*approval.Approval, 0, len(ids))
 	for _, id := range ids {
-		cloned := *r.items[common.ApprovalID(id)]
+		cloned := cloneApproval(r.items[common.ApprovalID(id)])
 		ret = append(ret, &cloned)
 	}
 	return ret, nil
@@ -1556,7 +1556,7 @@ func (r *ApprovalRepository) ListByRunID(_ context.Context, runID common.RunID) 
 
 	ret := make([]*approval.Approval, 0, len(ids))
 	for _, id := range ids {
-		cloned := *r.items[common.ApprovalID(id)]
+		cloned := cloneApproval(r.items[common.ApprovalID(id)])
 		ret = append(ret, &cloned)
 	}
 	return ret, nil
@@ -1576,7 +1576,7 @@ func (r *ApprovalRepository) ListByWorkspaceID(_ context.Context, workspaceID co
 
 	ret := make([]*approval.Approval, 0, len(ids))
 	for _, id := range ids {
-		cloned := *r.items[common.ApprovalID(id)]
+		cloned := cloneApproval(r.items[common.ApprovalID(id)])
 		ret = append(ret, &cloned)
 	}
 	return ret, nil
@@ -1588,7 +1588,7 @@ func (r *ApprovalRepository) Update(_ context.Context, item *approval.Approval) 
 	if _, ok := r.items[item.ID]; !ok {
 		return common.ErrNotFound
 	}
-	cloned := *item
+	cloned := cloneApproval(item)
 	r.items[item.ID] = &cloned
 	return nil
 }
@@ -1915,6 +1915,16 @@ func cloneStringSlice(input []string) []string {
 		return nil
 	}
 	return append([]string(nil), input...)
+}
+
+func clonePatch(item *run.Patch) run.Patch {
+	return *item
+}
+
+func cloneApproval(item *approval.Approval) approval.Approval {
+	cloned := *item
+	cloned.Context = cloneMap(item.Context)
+	return cloned
 }
 
 func cloneMap(input map[string]any) map[string]any {

@@ -18,6 +18,7 @@ type fakeBackend struct {
 	runs       []backend.RunInfo
 	decisions  []backend.DecisionInfo
 	approvals  []backend.ApprovalInfo
+	templates  []backend.TemplateInfo
 
 	// Recorded commands for assertion.
 	ActivateCalls        []backend.ActivateRunRequest
@@ -56,7 +57,7 @@ func (b *fakeBackend) Soul() backend.SoulBackend           { return &fakeSoul{} 
 func (b *fakeBackend) Skill() backend.SkillBackend         { return &fakeSkill{} }
 func (b *fakeBackend) MCP() backend.MCPBackend             { return &fakeMCP{} }
 func (b *fakeBackend) Memory() backend.MemoryBackend       { return &fakeMem{} }
-func (b *fakeBackend) Template() backend.TemplateBackend   { return &fakeTmpl{} }
+func (b *fakeBackend) Template() backend.TemplateBackend   { return &fakeTmpl{b} }
 func (b *fakeBackend) Config() backend.ConfigBackend       { return &fakeCfg{} }
 func (b *fakeBackend) Events() backend.EventsBackend       { return &fakeEvents{b} }
 
@@ -273,16 +274,25 @@ func (f *fakeMem) Search(ctx context.Context, wsID common.WorkspaceID, req backe
 	return nil, nil
 }
 
-type fakeTmpl struct{}
+type fakeTmpl struct{ b *fakeBackend }
 
 func (f *fakeTmpl) Create(ctx context.Context, t *backend.TemplateInfo) (*backend.TemplateInfo, error) {
+	f.b.templates = append(f.b.templates, *t)
 	return t, nil
 }
 func (f *fakeTmpl) Get(ctx context.Context, id string) (*backend.TemplateInfo, error) {
+	for _, item := range f.b.templates {
+		if item.ID == id {
+			return &item, nil
+		}
+	}
 	return &backend.TemplateInfo{ID: id}, nil
 }
-func (f *fakeTmpl) List(ctx context.Context) ([]backend.TemplateInfo, error) { return nil, nil }
+func (f *fakeTmpl) List(ctx context.Context) ([]backend.TemplateInfo, error) {
+	return f.b.templates, nil
+}
 func (f *fakeTmpl) Update(ctx context.Context, id string, t *backend.TemplateInfo) (*backend.TemplateInfo, error) {
+	t.ID = id
 	return t, nil
 }
 func (f *fakeTmpl) Delete(ctx context.Context, id string) error { return nil }

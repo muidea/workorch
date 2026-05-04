@@ -378,3 +378,36 @@ Follow-up fix 2026-05-03:
   `invalid argument`.
 - Additional tests cover submitted task context rendering, Decision
   `blockingTicketId` parsing, and EventHub subject ID enrichment.
+
+Agent TUI review absorption 2026-05-03:
+
+- Absorbed main-result scrolling with PgUp/PgDn while keeping detailed event
+  streams backend-only. Mouse reporting is intentionally disabled by default so
+  the terminal can use normal mouse drag selection and copy for visible TUI
+  text.
+- Absorbed input history navigation with Ctrl+P/Ctrl+N and multiline input via
+  Alt+Enter while preserving the dynamic Workspace/Decision/Approval prompt.
+- Absorbed slash command completion and default commands `/help`, `/clear`,
+  `/workspace`, `/dod`, `/result`, and `/exit`.
+- Absorbed a help overlay for complete key and command reference; Decision and
+  Approval remain inline instead of moving to modal overlays.
+- Absorbed lightweight Markdown-style rendering for final Result / Artifact
+  text, scoped to terminal-friendly headings, bullets, inline markers, and code
+  blocks.
+- Explicitly rejected direct local `!command` execution, default tool-event
+  panels, token-level chat streams, and permission modals for the default TUI.
+
+Code Agent DoD follow-up 2026-05-03:
+
+- Added `/dod item1; item2` as the first TUI path for setting pending
+  Goal-specific DoD without introducing a separate guided workflow.
+- When no pending DoD is set, TUI Goal submission uses the active Workspace
+  template DoD when the Workspace's persisted Soul routing matches a template;
+  otherwise it falls back to the generic DoD.
+- Confirmed that TUI does not provide a normal workspaceTemplate rebind flow.
+  Template selection remains a Workspace creation-time concern.
+- Added `/workspace create <title> --template <templateId> [--dir <path>]`
+  so TUI can create a Workspace with a template without introducing a guided
+  wizard or step-by-step flow.
+- The main view now shows read-only default soul / SoulBindings summary when
+  the active Workspace carries template-initialized routing.

@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 // localBackend implements Backend using the embedded workorch runtime directly.
@@ -64,7 +65,12 @@ type localWorkspaceBackend struct{ parent *localBackend }
 
 func (b *localWorkspaceBackend) Create(ctx context.Context, req CreateWorkspaceRequest) (*WorkspaceInfo, error) {
 	s := b.parent.session.Borrow()
-	ws, err := appservice.CreateWorkspaceWithSession(ctx, s, req.Title, req.Description, req.WorkingDirectory)
+	ws, err := appservice.CreateWorkspaceWithTemplateWithSession(ctx, s, appservice.CreateWorkspaceCommand{
+		Title:            req.Title,
+		Description:      req.Description,
+		WorkingDirectory: req.WorkingDirectory,
+		TemplateID:       req.TemplateID,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +82,7 @@ func (b *localWorkspaceBackend) Create(ctx context.Context, req CreateWorkspaceR
 		State:            common.WorkspaceState(ws.State),
 		ActiveRunID:      common.RunID(ws.ActiveRunID),
 		DefaultSoulID:    common.SoulID(ws.DefaultSoulID),
+		SoulBindings:     commonSoulBindings(ws.SoulBindings),
 	}, nil
 }
 
@@ -271,6 +278,8 @@ func (b *localRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID,
 		DoDID:         string(req.DoDID),
 		LLMProviderID: req.LLMProviderID,
 		SoulID:        string(req.SoulID),
+		SkillIDs:      skillIDStringSlice(req.SkillIDs),
+		MCPServerIDs:  mcpServerIDStringSlice(req.MCPServerIDs),
 		Priority:      req.Priority,
 	})
 	if err != nil {
@@ -449,7 +458,7 @@ func (b *localApprovalBackend) Approve(ctx context.Context, id common.ApprovalID
 	}
 	return &ApprovalInfo{
 		ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID),
-		RunID: common.RunID(a.RunID), Reason: a.Reason, State: a.State,
+		RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State,
 	}, nil
 }
 
@@ -461,7 +470,7 @@ func (b *localApprovalBackend) Reject(ctx context.Context, id common.ApprovalID)
 	}
 	return &ApprovalInfo{
 		ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID),
-		RunID: common.RunID(a.RunID), Reason: a.Reason, State: a.State,
+		RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State,
 	}, nil
 }
 
@@ -481,7 +490,7 @@ func (b *localApprovalBackend) BatchResolve(ctx context.Context, ids []common.Ap
 	for _, a := range list {
 		result = append(result, ApprovalInfo{
 			ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID),
-			RunID: common.RunID(a.RunID), Reason: a.Reason, State: a.State,
+			RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State,
 		})
 	}
 	return result, nil
@@ -497,7 +506,7 @@ func (b *localApprovalBackend) List(ctx context.Context, wsID common.WorkspaceID
 	for _, a := range list {
 		result = append(result, ApprovalInfo{
 			ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID),
-			RunID: common.RunID(a.RunID), Reason: a.Reason, State: a.State,
+			RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State,
 		})
 	}
 	return result, nil
@@ -511,7 +520,7 @@ func (b *localApprovalBackend) Get(ctx context.Context, id common.ApprovalID) (*
 	}
 	return &ApprovalInfo{
 		ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID),
-		RunID: common.RunID(a.RunID), Reason: a.Reason, State: a.State,
+		RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State,
 	}, nil
 }
 
@@ -767,7 +776,12 @@ func memoryInfosFromApp(items []appservice.MemoryItem) []MemoryItemInfo {
 type localTemplateBackend struct{ parent *localBackend }
 
 func (b *localTemplateBackend) Create(ctx context.Context, info *TemplateInfo) (*TemplateInfo, error) {
-	return info, nil
+	s := b.parent.session.Borrow()
+	item, err := appservice.CreateWorkspaceTemplateWithSession(ctx, s, appTemplateFromInfo(info))
+	if err != nil {
+		return nil, err
+	}
+	return templateInfoFromApp(item), nil
 }
 func (b *localTemplateBackend) Get(ctx context.Context, id string) (*TemplateInfo, error) {
 	s := b.parent.session.Borrow()
@@ -776,7 +790,7 @@ func (b *localTemplateBackend) Get(ctx context.Context, id string) (*TemplateInf
 	if err != nil {
 		return nil, err
 	}
-	return &TemplateInfo{ID: t.ID, Name: t.Name, Description: t.Description, GoalText: t.GoalText, DoDItems: t.DoDItems, DefaultSoulID: common.SoulID(t.DefaultSoulID)}, nil
+	return templateInfoFromRepository(t), nil
 }
 func (b *localTemplateBackend) List(ctx context.Context) ([]TemplateInfo, error) {
 	s := b.parent.session.Borrow()
@@ -784,14 +798,120 @@ func (b *localTemplateBackend) List(ctx context.Context) ([]TemplateInfo, error)
 	list, _ := e.Repositories.WorkspaceTemplates.List(ctx)
 	result := make([]TemplateInfo, 0, len(list))
 	for _, t := range list {
-		result = append(result, TemplateInfo{ID: t.ID, Name: t.Name, Description: t.Description, GoalText: t.GoalText, DoDItems: t.DoDItems, DefaultSoulID: common.SoulID(t.DefaultSoulID)})
+		if info := templateInfoFromRepository(t); info != nil {
+			result = append(result, *info)
+		}
 	}
 	return result, nil
 }
 func (b *localTemplateBackend) Update(ctx context.Context, id string, info *TemplateInfo) (*TemplateInfo, error) {
-	return info, nil
+	s := b.parent.session.Borrow()
+	item, err := appservice.UpdateWorkspaceTemplateWithSession(ctx, s, id, appTemplateFromInfo(info))
+	if err != nil {
+		return nil, err
+	}
+	return templateInfoFromApp(item), nil
 }
-func (b *localTemplateBackend) Delete(ctx context.Context, id string) error { return nil }
+func (b *localTemplateBackend) Delete(ctx context.Context, id string) error {
+	s := b.parent.session.Borrow()
+	return appservice.DeleteWorkspaceTemplateWithSession(ctx, s, id)
+}
+
+func templateInfoFromRepository(t *repository.WorkspaceTemplate) *TemplateInfo {
+	if t == nil {
+		return nil
+	}
+	return &TemplateInfo{
+		ID:            t.ID,
+		Name:          t.Name,
+		Description:   t.Description,
+		GoalText:      t.GoalText,
+		DoDItems:      append([]string(nil), t.DoDItems...),
+		DefaultSoulID: common.SoulID(t.DefaultSoulID),
+		SoulBindings:  cloneStringMap(t.SoulBindings),
+	}
+}
+
+func appTemplateFromInfo(info *TemplateInfo) appservice.WorkspaceTemplate {
+	if info == nil {
+		return appservice.WorkspaceTemplate{}
+	}
+	return appservice.WorkspaceTemplate{
+		ID:            info.ID,
+		Name:          info.Name,
+		Description:   info.Description,
+		GoalText:      info.GoalText,
+		DoDItems:      append([]string(nil), info.DoDItems...),
+		DefaultSoulID: string(info.DefaultSoulID),
+		SoulBindings:  cloneStringMap(info.SoulBindings),
+	}
+}
+
+func templateInfoFromApp(item appservice.WorkspaceTemplate) *TemplateInfo {
+	return &TemplateInfo{
+		ID:            item.ID,
+		Name:          item.Name,
+		Description:   item.Description,
+		GoalText:      item.GoalText,
+		DoDItems:      append([]string(nil), item.DoDItems...),
+		DefaultSoulID: common.SoulID(item.DefaultSoulID),
+		SoulBindings:  cloneStringMap(item.SoulBindings),
+	}
+}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make(map[string]string, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
+}
+
+func commonSoulBindings(input map[string]string) map[string]common.SoulID {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make(map[string]common.SoulID, len(input))
+	for key, value := range input {
+		if value == "" {
+			continue
+		}
+		ret[key] = common.SoulID(value)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func skillIDStringSlice(input []common.SkillID) []string {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, len(input))
+	for _, item := range input {
+		if item != "" {
+			ret = append(ret, string(item))
+		}
+	}
+	return ret
+}
+
+func mcpServerIDStringSlice(input []common.MCPServerID) []string {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, len(input))
+	for _, item := range input {
+		if item != "" {
+			ret = append(ret, string(item))
+		}
+	}
+	return ret
+}
 
 type localConfigBackend struct{ parent *localBackend }
 

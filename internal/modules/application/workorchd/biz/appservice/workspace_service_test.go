@@ -33,6 +33,58 @@ func TestCreateWorkspaceWithBackendReturnsCreatedWorkspace(t *testing.T) {
 	}
 }
 
+func TestCreateWorkspaceWithTemplateBindsWorkspaceSouls(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	for _, id := range []string{"soul-template-default", "soul-template-planning", "soul-template-execution"} {
+		if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
+			ID:     id,
+			Name:   id,
+			SoulMD: "test soul",
+		}); err != nil {
+			t.Fatalf("CreateSoulWithBackend %s: %v", id, err)
+		}
+	}
+	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+		ID:            "template-code-agent",
+		Name:          "code agent",
+		DefaultSoulID: "soul-template-default",
+		SoulBindings: map[string]string{
+			"planning":  "soul-template-planning",
+			"execution": "soul-template-execution",
+		},
+		DoDItems: []string{"tests pass"},
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
+	}
+
+	item, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title:            "software workspace",
+		WorkingDirectory: "workspaces/software",
+		TemplateID:       "template-code-agent",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+
+	if item.DefaultSoulID != "soul-template-default" {
+		t.Fatalf("defaultSoulId = %q, want soul-template-default", item.DefaultSoulID)
+	}
+	for _, stage := range []string{"planning", "execution"} {
+		if item.SoulBindings[stage] == "" {
+			t.Fatalf("soul binding %q missing in %+v", stage, item.SoulBindings)
+		}
+	}
+
+	readBack, err := ReadWorkspaceWithBackend(ctx, "file", dataRoot, item.ID)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
+	}
+	if readBack.DefaultSoulID != item.DefaultSoulID || readBack.SoulBindings["execution"] != item.SoulBindings["execution"] {
+		t.Fatalf("read workspace soul bindings = %+v, want %+v", readBack, item)
+	}
+}
+
 func TestReadWorkspaceWithBackendReturnsPersistedWorkspace(t *testing.T) {
 	dataRoot := t.TempDir()
 	created, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "appservice read workspace", "read description", "workspaces/appservice read workspace")

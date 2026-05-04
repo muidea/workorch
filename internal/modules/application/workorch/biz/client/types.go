@@ -108,12 +108,14 @@ type Decision struct {
 }
 
 type Approval struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspaceId"`
-	RunID       string `json:"runId"`
-	StepID      string `json:"stepId,omitempty"`
-	Reason      string `json:"reason"`
-	State       string `json:"state"`
+	ID          string         `json:"id"`
+	WorkspaceID string         `json:"workspaceId"`
+	RunID       string         `json:"runId"`
+	StepID      string         `json:"stepId,omitempty"`
+	Reason      string         `json:"reason"`
+	Action      string         `json:"action,omitempty"`
+	Context     map[string]any `json:"context,omitempty"`
+	State       string         `json:"state"`
 }
 
 // Soul & Skill types.

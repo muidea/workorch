@@ -235,7 +235,7 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 		SubjectID:   "approval-1",
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
-		Payload:     events.ApprovalPayload("approve shell", "pending"),
+		Payload:     events.ApprovalPayload("approve shell", "run command", map[string]any{"risk": "shell"}, "pending"),
 	})
 	if approval.Type != EventApprovalCreated || approval.Payload["approvalId"] != "approval-1" {
 		t.Fatalf("approval event = %+v, want approvalId from subject", approval)

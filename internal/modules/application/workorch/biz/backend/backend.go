@@ -34,6 +34,7 @@ type CreateWorkspaceRequest struct {
 	Title            string
 	Description      string
 	WorkingDirectory string
+	TemplateID       string
 }
 
 type WorkspaceInfo struct {
@@ -227,6 +228,8 @@ type ApprovalInfo struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
 	Reason      string
+	Action      string
+	Context     map[string]any
 	State       string
 }
 
@@ -348,6 +351,7 @@ type TemplateInfo struct {
 	GoalText      string
 	DoDItems      []string
 	DefaultSoulID common.SoulID
+	SoulBindings  map[string]string
 }
 
 type TemplateBackend interface {

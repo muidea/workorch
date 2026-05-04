@@ -48,6 +48,9 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	if err := os.MkdirAll(workingDirectory, 0o755); err != nil {
 		return runtimemodel.StepExecutionResult{}, err
 	}
+	if err := validateShellCommandPolicy(command, args, workingDirectory); err != nil {
+		return runtimemodel.StepExecutionResult{}, err
+	}
 
 	timeout, err := shellCommandTimeout(request.Input, a.timeout)
 	if err != nil {
@@ -189,4 +192,117 @@ func shellCommandArgs(input any) ([]string, error) {
 	default:
 		return nil, common.ErrInvalidArgument
 	}
+}
+
+func validateShellCommandPolicy(command string, args []string, workingDirectory string) error {
+	base := filepath.Base(strings.TrimSpace(command))
+	if base == "" {
+		return common.ErrInvalidArgument
+	}
+	switch base {
+	case "sudo", "su", "shutdown", "reboot", "poweroff", "halt", "mkfs", "mount", "umount":
+		return fmt.Errorf("%w: shell command %q is not allowed", common.ErrInvalidArgument, base)
+	case "rm":
+		if rmCommandIsDangerous(args, workingDirectory) {
+			return fmt.Errorf("%w: destructive rm command is not allowed", common.ErrInvalidArgument)
+		}
+	case "chmod":
+		if chmodCommandIsDangerous(args) {
+			return fmt.Errorf("%w: chmod 777 is not allowed", common.ErrInvalidArgument)
+		}
+	case "git":
+		if gitCommandIsDangerous(args) {
+			return fmt.Errorf("%w: git force push is not allowed", common.ErrInvalidArgument)
+		}
+	case "sh", "bash", "zsh":
+		if shellScriptIsDangerous(args) {
+			return fmt.Errorf("%w: destructive shell script is not allowed", common.ErrInvalidArgument)
+		}
+	}
+	return nil
+}
+
+func rmCommandIsDangerous(args []string, workingDirectory string) bool {
+	recursiveForce := false
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") && strings.Contains(arg, "r") && strings.Contains(arg, "f") {
+			recursiveForce = true
+			break
+		}
+	}
+	if !recursiveForce {
+		return false
+	}
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		target := strings.TrimSpace(arg)
+		switch target {
+		case "", "/", ".", "..", "*", ".git", "./.git":
+			return true
+		}
+		if filepath.IsAbs(target) {
+			cleanTarget := filepath.Clean(target)
+			cleanWorking := filepath.Clean(workingDirectory)
+			if cleanTarget == cleanWorking || !strings.HasPrefix(cleanTarget, cleanWorking+string(os.PathSeparator)) {
+				return true
+			}
+		}
+		if strings.Contains(target, "..") {
+			return true
+		}
+	}
+	return false
+}
+
+func chmodCommandIsDangerous(args []string) bool {
+	for _, arg := range args {
+		if strings.TrimSpace(arg) == "777" {
+			return true
+		}
+	}
+	return false
+}
+
+func gitCommandIsDangerous(args []string) bool {
+	if len(args) < 2 || args[0] != "push" {
+		return false
+	}
+	for _, arg := range args[1:] {
+		if arg == "--force" || arg == "-f" || strings.HasPrefix(arg, "--force-") {
+			return true
+		}
+	}
+	return false
+}
+
+func shellScriptIsDangerous(args []string) bool {
+	for idx, arg := range args {
+		if arg != "-c" || idx+1 >= len(args) {
+			continue
+		}
+		script := strings.ToLower(args[idx+1])
+		dangerousMarkers := []string{
+			"rm -rf /",
+			"rm -fr /",
+			"rm -rf .git",
+			"rm -fr .git",
+			"sudo ",
+			" shutdown",
+			" reboot",
+			" poweroff",
+			" mkfs",
+			"git push --force",
+			"git push -f",
+			"chmod 777",
+		}
+		padded := " " + script
+		for _, marker := range dangerousMarkers {
+			if strings.Contains(padded, marker) {
+				return true
+			}
+		}
+	}
+	return false
 }

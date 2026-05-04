@@ -154,3 +154,34 @@ func TestRuntimeAdapter_ExecuteRuntimeStepRejectsInvalidInputTimeoutMillis(t *te
 		t.Fatal("ExecuteRuntimeStep err = nil, want invalid argument")
 	}
 }
+
+func TestRuntimeAdapter_ExecuteRuntimeStepRejectsDangerousCommands(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	cases := []struct {
+		name    string
+		command string
+		args    []any
+	}{
+		{name: "sudo", command: "sudo", args: []any{"true"}},
+		{name: "rm root", command: "rm", args: []any{"-rf", "/"}},
+		{name: "rm git", command: "rm", args: []any{"-rf", ".git"}},
+		{name: "chmod 777", command: "chmod", args: []any{"777", "file.txt"}},
+		{name: "git force push", command: "git", args: []any{"push", "--force"}},
+		{name: "shell script", command: "sh", args: []any{"-c", "rm -rf /tmp/project/.git"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+				WorkspaceWorkingDirectory: t.TempDir(),
+				Kind:                      "shell/command",
+				Input: map[string]any{
+					"command": tc.command,
+					"args":    tc.args,
+				},
+			})
+			if err == nil {
+				t.Fatal("ExecuteRuntimeStep err = nil, want invalid argument")
+			}
+		})
+	}
+}

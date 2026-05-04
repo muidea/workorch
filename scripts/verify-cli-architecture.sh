@@ -43,6 +43,13 @@ else
   pass "TUI: no fixed-interval polling"
 fi
 
+# 3b. TUI must preserve terminal-native mouse selection/copy by default.
+if grep -rq 'WithMouse' "$CLI_ROOT/$MODULE_BASE/service/cli" "$CLI_ROOT/$MODULE_BASE/service/tui" 2>/dev/null; then
+  fail "TUI: enables mouse reporting and blocks terminal selection"
+else
+  pass "TUI: mouse selection/copy preserved"
+fi
+
 # 4. No HTTP client outside biz/client and biz/backend/remote.
 echo "  → Checking no HTTP client leakage outside allowed packages..."
 HTTP_LEAKS=$(grep -rn '"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"' \

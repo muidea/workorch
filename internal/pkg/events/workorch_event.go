@@ -328,7 +328,7 @@ func DecodeApprovalEvent(envelope Envelope) (ApprovalEvent, bool) {
 	}
 	envelope = cloneEnvelope(envelope)
 	envelope.Version = spec.CurrentVersion
-	envelope.Payload = ApprovalPayload(data.Reason, data.State)
+	envelope.Payload = ApprovalPayload(data.Reason, data.Action, data.Context, data.State)
 	return ApprovalEvent{envelope: envelope, Data: data}, true
 }
 

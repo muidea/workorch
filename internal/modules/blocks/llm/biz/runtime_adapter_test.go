@@ -1037,6 +1037,34 @@ func TestParseLLMExecutionDecisionAllowsNestedGovernanceExtraFields(t *testing.T
 	if decision.RequiredApproval == nil || decision.RequiredApproval.Reason != "operator approval is required" {
 		t.Fatalf("requiredApproval = %+v, want parsed approval", decision.RequiredApproval)
 	}
+	if decision.RequiredApproval.Action != "query external weather tool" || decision.RequiredApproval.Context["risk"] != "external_tool_call" {
+		t.Fatalf("requiredApproval action/context = %q/%+v, want parsed risk metadata", decision.RequiredApproval.Action, decision.RequiredApproval.Context)
+	}
+}
+
+func TestNormalizeDecisionOutputPreservesRequiredApprovalActionContext(t *testing.T) {
+	output, err := NormalizeDecisionOutput(runtimemodel.StepExecutionRequest{
+		RunID:  common.RunID("run-approval"),
+		StepID: common.StepID("run-approval/llm-1"),
+	}, llmmodels.LLMExecutionDecision{
+		CompletionState: "blocked_on_approval",
+		RequiredApproval: &llmmodels.RequiredApproval{
+			Reason:  "risky operation requires approval",
+			Action:  "remove public API",
+			Context: map[string]any{"risk": "breaking_change"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalize decision output: %v", err)
+	}
+	if output["blockApprovalReason"] != "risky operation requires approval" ||
+		output["blockApprovalAction"] != "remove public API" {
+		t.Fatalf("approval output = %+v, want reason/action", output)
+	}
+	contextMap, ok := output["blockApprovalContext"].(map[string]any)
+	if !ok || contextMap["risk"] != "breaking_change" {
+		t.Fatalf("blockApprovalContext = %+v, want risk metadata", output["blockApprovalContext"])
+	}
 }
 
 func TestParseLLMExecutionDecisionRejectsInvalidExecutionGraph(t *testing.T) {

@@ -53,8 +53,10 @@ type DecisionTicketPayload struct {
 }
 
 type ApprovalPayload struct {
-	Reason string
-	State  string
+	Reason  string
+	Action  string
+	Context map[string]any
+	State   string
 }
 
 func FromEnvelope(envelope events.Envelope) (SnapshotItem, bool) {
@@ -168,10 +170,17 @@ func (p DecisionTicketPayload) EnvelopePayload() map[string]any {
 }
 
 func (p ApprovalPayload) EnvelopePayload() map[string]any {
-	return map[string]any{
+	payload := map[string]any{
 		events.PayloadKeyReason: p.Reason,
 		events.PayloadKeyState:  p.State,
 	}
+	if p.Action != "" {
+		payload["action"] = p.Action
+	}
+	if p.Context != nil {
+		payload["context"] = cloneSnapshotMap(p.Context)
+	}
+	return payload
 }
 
 func decodeSnapshotPayload(topic string, payload map[string]any) (SnapshotPayload, bool) {
@@ -236,8 +245,10 @@ func decodeSnapshotPayload(topic string, payload map[string]any) (SnapshotPayloa
 			return nil, false
 		}
 		return ApprovalPayload{
-			Reason: item.Reason,
-			State:  string(item.State),
+			Reason:  item.Reason,
+			Action:  item.Action,
+			Context: item.Context,
+			State:   string(item.State),
 		}, true
 	default:
 		return nil, false
