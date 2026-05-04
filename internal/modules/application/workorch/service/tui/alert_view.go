@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
 )
 
@@ -59,5 +57,5 @@ func AlertView(workspaces []backend.WorkspaceInfo, decisions []backend.DecisionI
 	}
 
 	content := strings.Join(lines, "\n") + "\n" + Dim.Render(" Ctrl+T")
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("208")).Width(width).Render(content)
+	return AlertBorder.Width(width).Render(content)
 }

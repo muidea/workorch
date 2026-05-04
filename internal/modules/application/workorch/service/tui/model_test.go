@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -389,6 +390,48 @@ func TestModelSlashCompletionHelpAndClearCommands(t *testing.T) {
 	}
 }
 
+func TestModelSlashCompletionSuggestionsVisible(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.input = "/w"
+	m.inputCursor = len([]rune(m.input))
+	m.width = 80
+	m.height = 16
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "Commands:") || !strings.Contains(view, "/workspace") {
+		t.Fatalf("slash completion suggestions missing:\n%s", view)
+	}
+}
+
+func TestModelCtrlCRequiresSecondPressToQuitWhenIdle(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = asModel(next)
+	if cmd != nil || m.mode == modeQuit {
+		t.Fatalf("first ctrl+c should not quit, cmd=%v mode=%v", cmd != nil, m.mode)
+	}
+	if !strings.Contains(m.progressText, "Press Ctrl+C again") {
+		t.Fatalf("first ctrl+c hint = %q", m.progressText)
+	}
+	m.lastCtrlC = time.Now()
+	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = asModel(next)
+	if cmd == nil || m.mode != modeQuit {
+		t.Fatalf("second ctrl+c should quit, cmd=%v mode=%v", cmd != nil, m.mode)
+	}
+}
+
+func TestModelEmptyWorkspaceGuidance(t *testing.T) {
+	m := NewAppModel(newFake(t), "", "")
+	m.width = 90
+	m.height = 18
+	view := stripANSI(m.View())
+	for _, want := range []string{"No workspaces found", "/workspace create", "--template software-dev", "/dod"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("empty workspace guidance missing %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestModelScrollableResultViewport(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	var lines []string
@@ -421,10 +464,29 @@ func TestModelResultMarkdownRendering(t *testing.T) {
 			t.Fatalf("view missing %q:\n%s", want, view)
 		}
 	}
+	if !strings.Contains(view, "Code") || !strings.Contains(view, "| stdout payload") {
+		t.Fatalf("code block rendering missing visual marker:\n%s", view)
+	}
 	for _, forbidden := range []string{"**", "```"} {
 		if strings.Contains(view, forbidden) {
 			t.Fatalf("view still contains raw markdown %q:\n%s", forbidden, view)
 		}
+	}
+}
+
+func TestDetectThemeHonorsEnvironment(t *testing.T) {
+	t.Setenv("WORKORCH_THEME", "light")
+	if DetectTheme().Primary != lightTheme().Primary {
+		t.Fatal("WORKORCH_THEME=light should select light theme")
+	}
+	t.Setenv("WORKORCH_THEME", "dark")
+	if DetectTheme().Primary != darkTheme().Primary {
+		t.Fatal("WORKORCH_THEME=dark should select dark theme")
+	}
+	t.Setenv("WORKORCH_THEME", "auto")
+	t.Setenv("COLORFGBG", "0;15")
+	if DetectTheme().Primary != lightTheme().Primary {
+		t.Fatal("WORKORCH_THEME=auto should use terminal color detection")
 	}
 }
 

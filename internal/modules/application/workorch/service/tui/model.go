@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -47,6 +48,7 @@ type transcriptItem struct {
 const (
 	maxInputHistory = 100
 	maxResultLines  = 1000
+	ctrlCQuitWindow = 750 * time.Millisecond
 )
 
 type AppModel struct {
@@ -94,6 +96,7 @@ type AppModel struct {
 	height int
 
 	lastError error
+	lastCtrlC time.Time
 }
 
 func NewAppModel(be backend.Backend, defaultWorkspaceID string, initialGoal string) AppModel {
@@ -293,6 +296,13 @@ func (m *AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.running = false
 			m.progress = progressInterrupted
 			m.progressText = "Interrupted"
+			return m, nil
+		}
+		now := time.Now()
+		if m.lastCtrlC.IsZero() || now.Sub(m.lastCtrlC) > ctrlCQuitWindow {
+			m.lastCtrlC = now
+			m.progressText = "Press Ctrl+C again to quit, or use /exit"
+			m.lastError = nil
 			return m, nil
 		}
 		m.mode = modeQuit
@@ -757,11 +767,18 @@ func (m AppModel) renderInput(width int) string {
 	} else if m.blockingApproval != nil {
 		prompt += " approval"
 	}
-	return m.renderInputBuffer(prompt, width)
+	input := m.renderInputBuffer(prompt, width)
+	if suggestions := m.renderSlashCommandSuggestions(width); suggestions != "" {
+		return suggestions + "\n" + input
+	}
+	return input
 }
 
 func (m AppModel) renderHelp(width int) string {
-	help := "enter: submit | /help: help | /workspace: select/create ws | /dod: update DoD | /clear: clear | /exit: quit | ctrl+c: interrupt"
+	help := "enter: submit | /help: help | /workspace: select/create ws | /dod: update DoD | /exit: quit | ctrl+c: interrupt/quit x2"
+	if width < 120 {
+		help = "enter: submit | /help | /workspace | /dod | /exit | ctrl+c x2 quit"
+	}
 	if m.workspaceSelectMode {
 		help = "ws select: up/down/j/k move | enter confirm | ctrl+w cancel | esc cancel"
 	}
@@ -778,6 +795,7 @@ func (m AppModel) renderHelpOverlay(width, height int) string {
 		"Tab: slash command completion",
 		"Ctrl+W: workspace selector",
 		"Ctrl+H: help",
+		"Ctrl+C: interrupt active run; press twice outside a run to quit",
 		"PgUp / PgDn: scroll result",
 		"Esc: clear input or close help",
 		"/help /clear /workspace /workspace create /dod /result /exit",
@@ -1218,14 +1236,48 @@ func (m *AppModel) completeSlashCommand() {
 	if !strings.HasPrefix(trimmed, "/") {
 		return
 	}
+	matches := slashCommandMatches(trimmed)
+	if len(matches) > 0 {
+		m.setInput(matches[0])
+	}
+}
+
+func (m AppModel) renderSlashCommandSuggestions(width int) string {
+	trimmed := strings.TrimSpace(m.input)
+	if !strings.HasPrefix(trimmed, "/") {
+		return ""
+	}
+	matches := slashCommandMatches(trimmed)
+	if len(matches) == 0 {
+		return ""
+	}
+	limit := min(4, len(matches))
+	lines := make([]string, 0, limit+1)
+	lines = append(lines, Dim.Render("Commands:"))
+	for idx, command := range matches[:limit] {
+		line := "  " + command
+		if idx == 0 {
+			line = Selection.Render("  " + command + "  ")
+		}
+		lines = append(lines, truncateDisplay(line, width-2))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func slashCommandMatches(input string) []string {
+	trimmed := strings.TrimSpace(input)
+	if !strings.HasPrefix(trimmed, "/") {
+		return nil
+	}
 	prefix := strings.ToLower(strings.TrimPrefix(trimmed, "/"))
 	commands := []string{"/help", "/clear", "/workspace", "/workspace create", "/dod", "/result", "/exit"}
+	matches := make([]string, 0, len(commands))
 	for _, command := range commands {
 		if strings.HasPrefix(strings.TrimPrefix(command, "/"), prefix) {
-			m.setInput(command)
-			return
+			matches = append(matches, command)
 		}
 	}
+	return matches
 }
 
 func (m *AppModel) scroll(delta int) {
@@ -1590,6 +1642,9 @@ func (m *AppModel) applyRunStarted(run *backend.RunInfo) {
 }
 
 func (m AppModel) emptyResultText() string {
+	if len(m.workspaces) == 0 && strings.TrimSpace(m.activeWorkspaceID) == "" {
+		return "No workspaces found.\n\nCreate one from this TUI:\n  /workspace create <title> --template software-dev --dir <path>\n\nUseful commands:\n  /help     Show commands\n  /dod      Set acceptance criteria\n  /exit     Quit"
+	}
 	switch m.progress {
 	case progressSubmitting:
 		return "Submitting goal. Waiting for backend acknowledgment..."
@@ -2515,13 +2570,19 @@ func renderRichText(value string, width int, maxLines int) string {
 		trimmed := strings.TrimSpace(raw)
 		if strings.HasPrefix(trimmed, "```") {
 			inCode = !inCode
+			if inCode {
+				out = append(out, Dim.Render("  Code"))
+			}
+			if len(out) >= maxLines {
+				return strings.Join(out[:maxLines], "\n")
+			}
 			continue
 		}
 		line := raw
 		if !inCode {
 			line = renderMarkdownLine(raw)
 		} else if strings.TrimSpace(line) != "" {
-			line = "  " + line
+			line = "  | " + line
 		}
 		for _, wrapped := range splitDisplayLine(line, width) {
 			if inCode && strings.TrimSpace(wrapped) != "" {
