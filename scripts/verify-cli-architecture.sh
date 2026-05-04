@@ -60,8 +60,15 @@ else
   pass "HTTP client contained in allowed packages"
 fi
 
-# 5. Local backend must not import biz/client.
-check_no_import "biz/backend" "biz/client" "Local backend: no HTTP client import"
+# 5. Local/eventhub backend must not import biz/client; remote backend is the
+# only backend transport allowed to use the HTTP client.
+LOCAL_BACKEND_LEAKS=$(grep -rn '"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"\|"biz/client"' \
+  "$CLI_ROOT/$MODULE_BASE/biz/backend/" 2>/dev/null | grep -v 'biz/backend/remote.go' || true)
+if [ -n "$LOCAL_BACKEND_LEAKS" ]; then
+  fail "Local/eventhub backend imports HTTP client: $LOCAL_BACKEND_LEAKS"
+else
+  pass "Local/eventhub backend: no HTTP client import"
+fi
 
 # 6. Agent must not create runtime sessions or use fixed-interval polling.
 AGENT_SESSION_CALLS=$(grep -c 'NewRuntimeSessionFromInitiator' \

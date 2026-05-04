@@ -502,6 +502,32 @@ Deployed-service long-output fixture:
 - The script prints the generated workspace and run IDs for manual TUI
   confirmation with `PgDown` / `PgUp`.
 
+### TUI-E2E-13. Workspace List Live Refresh
+
+Status: verified
+
+Given:
+
+- The TUI is connected to a backend that emits workspace lifecycle events.
+- A workspace is created or deleted outside the current active workspace.
+
+When:
+
+- The backend publishes workspace created, deleted, or state-changed events.
+
+Then:
+
+- The workspace monitor refreshes asynchronously through EventHub callbacks.
+- The active result view is only refreshed when the current workspace needs it.
+- No periodic poll is needed to keep the workspace list current.
+
+E2E assertion:
+
+- `go test ./internal/modules/application/workorch/service/tui --count 1`
+  runs `TestTUIE2EWorkspaceListLiveRefreshFromBackendEvents`.
+- `go test ./internal/modules/application/workorch/biz/backend ./internal/modules/application/workorchd/service/server --count 1`
+  verifies the remote SSE bridge and `/api/v1/workorch/events/stream` route.
+
 ## Manual Acceptance Checklist
 
 Before marking the TUI as accepted, a reviewer should confirm:

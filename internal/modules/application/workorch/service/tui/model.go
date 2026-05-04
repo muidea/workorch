@@ -88,6 +88,9 @@ type AppModel struct {
 	helpOpen         bool
 	mainViewport     *viewport.Model
 
+	workspaceListRefreshInFlight bool
+	workspaceListRefreshPending  bool
+
 	eventCh     chan backend.Event
 	unsubscribe func()
 	initialGoal string
@@ -152,13 +155,24 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	case WorkspaceListMsg:
+		pendingRefresh := m.workspaceListRefreshPending
+		m.workspaceListRefreshInFlight = false
+		m.workspaceListRefreshPending = false
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
 			return m, nil
 		}
+		previousActive := m.activeWorkspaceID
 		m.workspaces = msg.Workspaces
 		m.ensureActiveWorkspace()
-		return m, FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+		cmds := []tea.Cmd{}
+		if m.activeWorkspaceID != "" && (previousActive != m.activeWorkspaceID || m.activeRunID != "" || len(msg.Workspaces) > 0) {
+			cmds = append(cmds, FetchWorkspaceContext(m.be, m.activeWorkspaceID))
+		}
+		if pendingRefresh {
+			cmds = append(cmds, m.requestWorkspaceListRefresh())
+		}
+		return m, tea.Batch(cmds...)
 	case WorkspaceContextMsg:
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
@@ -1528,7 +1542,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 	switch evt.Type {
 	case backend.EventWorkspaceCreated:
 		m.upsertWorkspaceFromEvent(evt)
-		return FetchAll(m.be)
+		return m.requestWorkspaceListRefresh()
 	case backend.EventWorkspaceDeleted:
 		m.removeWorkspace(evt.WorkspaceID)
 		if string(evt.WorkspaceID) == m.activeWorkspaceID {
@@ -1539,12 +1553,16 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 			m.ensureActiveWorkspace()
 			m.progressText = "Workspace removed; refreshing state"
 		}
-		return FetchAll(m.be)
+		return m.requestWorkspaceListRefresh()
 	}
+	knownWorkspace := evt.WorkspaceID == "" || workspaceIndex(m.workspaces, string(evt.WorkspaceID)) >= 0
 	if evt.WorkspaceID != "" {
 		m.upsertWorkspaceFromEvent(evt)
 	}
 	if evt.WorkspaceID != "" && m.activeWorkspaceID != "" && string(evt.WorkspaceID) != m.activeWorkspaceID {
+		if !knownWorkspace {
+			return m.requestWorkspaceListRefresh()
+		}
 		return nil
 	}
 	if evt.RunID != "" && m.activeRunID != "" && string(evt.RunID) != m.activeRunID {
@@ -1558,6 +1576,9 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 			m.activeRunID = activeRunID
 		}
 		m.applyWorkspaceProgress(state)
+		if !knownWorkspace {
+			return m.requestWorkspaceListRefresh()
+		}
 		switch state {
 		case common.WorkspaceStateCompleted, common.WorkspaceStateFailed, common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked:
 			return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
@@ -1634,6 +1655,15 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	}
 	return nil
+}
+
+func (m *AppModel) requestWorkspaceListRefresh() tea.Cmd {
+	if m.workspaceListRefreshInFlight {
+		m.workspaceListRefreshPending = true
+		return nil
+	}
+	m.workspaceListRefreshInFlight = true
+	return FetchAll(m.be)
 }
 
 func (m *AppModel) applyRunState(state common.RunState, payload map[string]any) {

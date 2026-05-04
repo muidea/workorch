@@ -63,6 +63,11 @@ The absorption must preserve the confirmed workorch boundaries:
 - The workspace monitor renders each workspace as a single compact line. When
   workspace titles collide, the short workspace ID is kept visible before the
   state so duplicate names remain distinguishable in the narrow right panel.
+- The workspace monitor now refreshes from backend workspace lifecycle events.
+  Created/deleted workspaces are reflected immediately and coalesced into a
+  single async list refresh when another refresh is already in flight. Known
+  non-active workspace state events update the monitor without replacing the
+  active result/progress view.
 - Main result display uses Bubble viewport for keyboard scrolling only. No
   Bubble Tea mouse reporting, local HTTP client, or fixed-interval polling was
   introduced; viewport mouse wheel handling is explicitly disabled.
@@ -121,6 +126,21 @@ GOCACHE=/tmp/workorch-go-build make verify-tui-agent
 
 Result: passed with `TUI-E2E-12`, which verifies keyboard viewport scrolling,
 fixed workspace monitor rendering, and disabled viewport mouse wheel reporting.
+
+2026-05-04:
+
+```bash
+GOCACHE=/tmp/workorch-go-build go test ./internal/modules/application/workorch/service/tui -count=1
+GOCACHE=/tmp/workorch-go-build go test ./internal/modules/application/workorch/biz/backend -count=1
+GOCACHE=/tmp/workorch-go-build go test ./internal/modules/application/workorchd/service/server -count=1
+./scripts/verify-cli-architecture.sh
+GOCACHE=/tmp/workorch-go-build make verify-tui-agent
+```
+
+Result: passed with `TUI-E2E-13`, which verifies workspace list live refresh
+from backend events. Backend tests cover remote SSE subscription parsing, and
+server tests cover `/api/v1/workorch/events/stream` delivery with workspace
+filtering.
 
 Long-output manual confirmation fixture:
 

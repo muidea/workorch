@@ -1315,6 +1315,54 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			EventRecords: items,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/events/stream", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		if state.eventHub == nil {
+			writeBusinessError(w, common.ErrNotFound)
+			return
+		}
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "streaming unsupported"})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		workspaceID := strings.TrimSpace(r.URL.Query().Get("workspaceId"))
+		runID := strings.TrimSpace(r.URL.Query().Get("runId"))
+		eventCh := make(chan events.Envelope, 128)
+		unsubscribe := state.eventHub.Subscribe("*", func(_ context.Context, envelope events.Envelope) error {
+			if workspaceID != "" && envelope.WorkspaceID != workspaceID {
+				return nil
+			}
+			if runID != "" && envelope.RunID != runID {
+				return nil
+			}
+			select {
+			case eventCh <- envelope:
+			default:
+			}
+			return nil
+		})
+		defer unsubscribe()
+		_, _ = fmt.Fprint(w, ": connected\n\n")
+		flusher.Flush()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case envelope := <-eventCh:
+				data, err := json.Marshal(envelope)
+				if err != nil {
+					continue
+				}
+				_, _ = fmt.Fprintf(w, "event: workorch\n")
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+			}
+		}
+	})
 	router.AddHandler("/api/v1/workorch/decisions", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		state.metrics.decisionListRequests.Add(1)

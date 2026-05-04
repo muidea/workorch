@@ -1369,6 +1369,55 @@ func TestModelWorkspaceCreatedEventRefreshesWorkspaceList(t *testing.T) {
 	}
 }
 
+func TestModelWorkspaceListRefreshCoalescesWhileInFlight(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: "active"},
+	}})
+	m = asModel(next)
+	m.workspaceListRefreshInFlight = true
+	cmd := m.applyBackendEvent(backend.Event{
+		Type:        backend.EventWorkspaceCreated,
+		WorkspaceID: "ws-b",
+		Payload:     map[string]any{"title": "B", "state": "active"},
+	})
+	if cmd != nil {
+		t.Fatal("refresh should be coalesced while list refresh is in flight")
+	}
+	if !m.workspaceListRefreshPending {
+		t.Fatal("expected pending refresh marker")
+	}
+	next, cmd = m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: "active"},
+		{ID: "ws-b", Title: "B", State: "active"},
+	}})
+	m = asModel(next)
+	if cmd == nil || !m.workspaceListRefreshInFlight || m.workspaceListRefreshPending {
+		t.Fatalf("pending refresh not released correctly: cmd=%v inFlight=%v pending=%v", cmd != nil, m.workspaceListRefreshInFlight, m.workspaceListRefreshPending)
+	}
+}
+
+func TestModelNonActiveWorkspaceStateEventOnlyUpdatesMonitor(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: "active"},
+		{ID: "ws-b", Title: "B", State: "active"},
+	}})
+	m = asModel(next)
+	m.progressText = "active progress"
+	cmd := m.applyBackendEvent(backend.Event{
+		Type:        backend.EventWorkspaceStateChanged,
+		WorkspaceID: "ws-b",
+		Payload:     map[string]any{"state": "running"},
+	})
+	if cmd != nil {
+		t.Fatal("known non-active workspace state event should not refresh active context")
+	}
+	if m.workspaces[1].State != "running" || m.progressText != "active progress" {
+		t.Fatalf("non-active state update leaked into active view: ws=%+v progress=%q", m.workspaces[1], m.progressText)
+	}
+}
+
 func TestModelWorkspaceDeletedEventClearsActiveWorkspaceView(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
@@ -1392,6 +1441,55 @@ func TestModelWorkspaceDeletedEventClearsActiveWorkspaceView(t *testing.T) {
 	}
 	if len(m.workspaces) != 1 || m.workspaces[0].ID != "ws-b" {
 		t.Fatalf("workspaces = %+v, want deleted workspace removed before full refresh", m.workspaces)
+	}
+}
+
+func TestTUIE2EWorkspaceListLiveRefreshFromBackendEvents(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
+	}})
+	m = asModel(next)
+	createCmd := m.applyBackendEvent(backend.Event{
+		Type:        backend.EventWorkspaceCreated,
+		WorkspaceID: "ws-b",
+		Payload: map[string]any{
+			"title":            "B",
+			"workingDirectory": "/tmp/b",
+			"state":            string(common.WorkspaceStateActive),
+		},
+	})
+	if createCmd == nil || !m.workspaceListRefreshInFlight {
+		t.Fatalf("created event should trigger async list refresh: cmd=%v inFlight=%v", createCmd != nil, m.workspaceListRefreshInFlight)
+	}
+	if len(m.workspaces) != 2 || m.workspaces[1].ID != "ws-b" {
+		t.Fatalf("created workspace not visible before full refresh: %+v", m.workspaces)
+	}
+
+	next, _ = m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive},
+	}})
+	m = asModel(next)
+	m.progressText = "active progress"
+	stateCmd := m.applyBackendEvent(backend.Event{
+		Type:        backend.EventWorkspaceStateChanged,
+		WorkspaceID: "ws-b",
+		Payload:     map[string]any{"state": string(common.WorkspaceStateRunning)},
+	})
+	if stateCmd != nil || m.workspaces[1].State != common.WorkspaceStateRunning || m.progressText != "active progress" {
+		t.Fatalf("non-active state event leaked into active view: cmd=%v ws=%+v progress=%q", stateCmd != nil, m.workspaces[1], m.progressText)
+	}
+
+	deleteCmd := m.applyBackendEvent(backend.Event{
+		Type:        backend.EventWorkspaceDeleted,
+		WorkspaceID: "ws-b",
+	})
+	if deleteCmd == nil || !m.workspaceListRefreshInFlight {
+		t.Fatalf("deleted event should trigger async list refresh: cmd=%v inFlight=%v", deleteCmd != nil, m.workspaceListRefreshInFlight)
+	}
+	if len(m.workspaces) != 1 || m.workspaces[0].ID != "ws-a" || m.activeWorkspaceID != "ws-a" {
+		t.Fatalf("deleted workspace not removed from monitor: workspaces=%+v active=%q", m.workspaces, m.activeWorkspaceID)
 	}
 }
 

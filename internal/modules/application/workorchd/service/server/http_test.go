@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -662,6 +663,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/task-decompositions"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/runs/:runId/start"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/runs/:runId/resume"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/events/stream"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/decisions"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/decisions/:ticketId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/decisions/:ticketId/resolve"},
@@ -699,6 +701,79 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/console"},
 		{method: http.MethodGet, pattern: "/console/"},
 		{method: http.MethodGet, pattern: "/console/**"},
+	}
+}
+
+func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
+	hub := events.NewMemoryHub()
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	server := httptest.NewServer(newMuxWithState(state))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "text/event-stream") {
+		t.Fatalf("content type = %q, want text/event-stream", got)
+	}
+
+	lines := make(chan string, 16)
+	readErr := make(chan error, 1)
+	go func() {
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		readErr <- scanner.Err()
+	}()
+
+	if err := hub.Publish(context.Background(), events.Envelope{
+		Topic:       events.TopicWorkspaceCreated,
+		WorkspaceID: "ws-other",
+		Payload:     events.WorkspacePayload("other", "", "/tmp/other", common.WorkspaceStateActive, ""),
+	}); err != nil {
+		t.Fatalf("publish nonmatching event: %v", err)
+	}
+	if err := hub.Publish(context.Background(), events.Envelope{
+		Topic:       events.TopicWorkspaceCreated,
+		WorkspaceID: "ws-stream",
+		Payload:     events.WorkspacePayload("stream workspace", "", "/tmp/stream", common.WorkspaceStateActive, ""),
+	}); err != nil {
+		t.Fatalf("publish matching event: %v", err)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case line := <-lines:
+			if !strings.HasPrefix(line, "data:") {
+				continue
+			}
+			var envelope events.Envelope
+			if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &envelope); err != nil {
+				t.Fatalf("decode stream data %q: %v", line, err)
+			}
+			if envelope.WorkspaceID != "ws-stream" || envelope.Topic != events.TopicWorkspaceCreated {
+				t.Fatalf("stream envelope = %+v, want filtered workspace-created event", envelope)
+			}
+			return
+		case err := <-readErr:
+			t.Fatalf("stream closed before event: %v", err)
+		case <-deadline:
+			t.Fatal("timed out waiting for streamed event")
+		}
 	}
 }
 

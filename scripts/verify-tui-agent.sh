@@ -139,6 +139,14 @@ if $SCRIPTED; then
     else
       fail "TUI-E2E-12: keyboard viewport scroll or mouse-copy contract failed"
     fi
+
+    # TUI-E2E-13: Workspace lifecycle events update the right monitor through
+    # backend callbacks without fixed polling.
+    if go test ./internal/modules/application/workorch/service/tui -run '^TestTUIE2EWorkspaceListLiveRefreshFromBackendEvents$' --count 1 2>&1; then
+      pass "TUI-E2E-13: workspace list live refresh from backend events"
+    else
+      fail "TUI-E2E-13: workspace list live refresh failed"
+    fi
   fi
 fi
 

@@ -1,10 +1,16 @@
 package backend
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"net/http"
+	"strings"
+	"sync"
 
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 // remoteBackend implements Backend using an HTTP client to a running workorchd.
@@ -41,7 +47,7 @@ func NewRemote(addr string) Backend {
 	b.mem = &remoteMemoryBackend{cl: cl}
 	b.tmpl = &remoteTemplateBackend{cl: cl}
 	b.cfg = &remoteConfigBackend{cl: cl}
-	b.evt = &remoteEventsBackend{}
+	b.evt = &remoteEventsBackend{cl: cl}
 	return b
 }
 
@@ -557,10 +563,70 @@ func (b *remoteConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
 	return &ServiceConfig{}, nil
 }
 
-type remoteEventsBackend struct{}
+type remoteEventsBackend struct {
+	cl *client.Client
+}
 
 func (b *remoteEventsBackend) Subscribe(ctx context.Context, handler EventHandler) (func(), error) {
-	return func() {}, nil
+	if b == nil || b.cl == nil || handler == nil {
+		return func() {}, nil
+	}
+	streamCtx, cancel := context.WithCancel(ctx)
+	var once sync.Once
+	go b.streamEvents(streamCtx, handler)
+	return func() {
+		once.Do(cancel)
+	}, nil
+}
+
+func (b *remoteEventsBackend) streamEvents(ctx context.Context, handler EventHandler) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.cl.BaseURL()+"/api/v1/workorch/events/stream", nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return
+	}
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
+	var dataLines []string
+	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		line := scanner.Text()
+		if line == "" {
+			b.dispatchSSEData(ctx, dataLines, handler)
+			dataLines = nil
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+}
+
+func (b *remoteEventsBackend) dispatchSSEData(ctx context.Context, lines []string, handler EventHandler) {
+	if len(lines) == 0 {
+		return
+	}
+	var envelope events.Envelope
+	if err := json.Unmarshal([]byte(strings.Join(lines, "\n")), &envelope); err != nil {
+		return
+	}
+	evt := convertEnvelope(envelope)
+	if evt.Type == "" {
+		return
+	}
+	handler(ctx, evt)
 }
 
 // Ensure remoteBackend implements Backend.
