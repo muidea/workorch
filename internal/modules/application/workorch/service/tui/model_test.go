@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -95,14 +96,31 @@ func TestModelWorkspacePanelKeepsStateVisible(t *testing.T) {
 	m.width = 100
 	m.height = 16
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "> workorch") {
+	if !strings.Contains(view, "> workorch  completed") {
 		t.Fatalf("workspace panel missing selected workspace name:\n%s", view)
-	}
-	if !strings.Contains(view, "ws-f2e4da0  completed") {
-		t.Fatalf("workspace panel missing complete id/state line:\n%s", view)
 	}
 	if strings.Contains(view, "c...") {
 		t.Fatalf("workspace panel still truncates state:\n%s", view)
+	}
+}
+
+func TestModelWorkspacePanelDisambiguatesDuplicateNames(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1111111111111111", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-1111111111111111", Title: "llm acceptance workspace", State: "completed"},
+		{ID: "ws-2222222222222222", Title: "llm acceptance workspace", State: "failed"},
+	}})
+	m = asModel(next)
+	m.width = 100
+	m.height = 16
+	view := stripANSI(m.View())
+	for _, want := range []string{
+		"> ll... ws-1111111  completed",
+		"  llm a... ws-2222222  failed",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("workspace panel missing disambiguated line %q:\n%s", want, view)
+		}
 	}
 }
 
@@ -453,7 +471,93 @@ func TestModelScrollableResultViewport(t *testing.T) {
 	}
 }
 
+func TestModelScrollableResultKeepsWorkspacePanelFixed(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-1", Title: "Project", State: "active"},
+		{ID: "ws-2", Title: "Other", State: "completed"},
+	}})
+	m = asModel(next)
+	var lines []string
+	for i := 0; i < 50; i++ {
+		lines = append(lines, "result line "+string(rune('A'+i)))
+	}
+	m.result = strings.Join(lines, "\n")
+	m.width = 120
+	m.height = 16
+	initial := stripANSI(m.View())
+	if !strings.Contains(initial, "> Project  active") || !strings.Contains(initial, "  Other  completed") {
+		t.Fatalf("initial view missing fixed workspace panel:\n%s", initial)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	m = asModel(next)
+	scrolled := stripANSI(m.View())
+	if !strings.Contains(scrolled, "result line G") {
+		t.Fatalf("pgdown should scroll main content:\n%s", scrolled)
+	}
+	if !strings.Contains(scrolled, "> Project  active") || !strings.Contains(scrolled, "  Other  completed") {
+		t.Fatalf("workspace panel should remain visible after main scroll:\n%s", scrolled)
+	}
+	if m.mainViewport == nil || m.mainViewport.MouseWheelEnabled {
+		t.Fatalf("main viewport must not enable mouse wheel reporting")
+	}
+}
+
+func TestTUIE2EViewportKeyboardScrollAndMouseSelectionContract(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-viewport", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-viewport", Title: "Viewport Workspace", State: common.WorkspaceStateCompleted},
+		{ID: "ws-other", Title: "Other Workspace", State: common.WorkspaceStateRunning},
+	}})
+	m = asModel(next)
+	next, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 16})
+	m = asModel(next)
+
+	lines := make([]string, 0, 60)
+	for i := 0; i < 60; i++ {
+		lines = append(lines, fmt.Sprintf("viewport-result-line-%02d", i))
+	}
+	m.result = strings.Join(lines, "\n")
+
+	firstScreen := stripANSI(m.View())
+	if !strings.Contains(firstScreen, "viewport-result-line-00") {
+		t.Fatalf("first screen missing initial result line:\n%s", firstScreen)
+	}
+	if strings.Contains(firstScreen, "viewport-result-line-35") {
+		t.Fatalf("first screen should not expose later result lines before scrolling:\n%s", firstScreen)
+	}
+	if !strings.Contains(firstScreen, "> Viewport Work...  completed") ||
+		!strings.Contains(firstScreen, "Other Workspace  running") {
+		t.Fatalf("first screen missing workspace monitor:\n%s", firstScreen)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	m = asModel(next)
+	scrolledScreen := stripANSI(m.View())
+	if !strings.Contains(scrolledScreen, "viewport-result-line-06") {
+		t.Fatalf("PgDown should scroll the main display area:\n%s", scrolledScreen)
+	}
+	if strings.Contains(scrolledScreen, "viewport-result-line-00") {
+		t.Fatalf("PgDown should move the main display viewport away from the first line:\n%s", scrolledScreen)
+	}
+	if !strings.Contains(scrolledScreen, "> Viewport Work...  completed") ||
+		!strings.Contains(scrolledScreen, "Other Workspace  running") {
+		t.Fatalf("workspace monitor must stay fixed while main display scrolls:\n%s", scrolledScreen)
+	}
+	if m.mainViewport == nil || m.mainViewport.MouseWheelEnabled {
+		t.Fatalf("TUI e2e contract requires viewport mouse wheel reporting disabled")
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m = asModel(next)
+	topScreen := stripANSI(m.View())
+	if !strings.Contains(topScreen, "viewport-result-line-00") {
+		t.Fatalf("PgUp should return the main display area to the top:\n%s", topScreen)
+	}
+}
+
 func TestModelResultMarkdownRendering(t *testing.T) {
+	t.Setenv(markdownRendererEnv, "plain")
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.result = "# Final Result\n\n**Done** with `code`.\n\n```text\nstdout payload\n```"
 	m.width = 80
@@ -470,6 +574,55 @@ func TestModelResultMarkdownRendering(t *testing.T) {
 	for _, forbidden := range []string{"**", "```"} {
 		if strings.Contains(view, forbidden) {
 			t.Fatalf("view still contains raw markdown %q:\n%s", forbidden, view)
+		}
+	}
+}
+
+func TestModelResultGlamourMarkdownRendering(t *testing.T) {
+	t.Setenv(markdownRendererEnv, "glamour")
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.result = "# Final Result\n\n**Done** with `code`.\n\n```text\nstdout payload\n```"
+	m.width = 80
+	m.height = 18
+	view := stripANSI(m.View())
+	for _, want := range []string{"Final Result", "Done", "code", "stdout payload"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("glamour view missing %q:\n%s", want, view)
+		}
+	}
+	for _, forbidden := range []string{"**", "```"} {
+		if strings.Contains(view, forbidden) {
+			t.Fatalf("glamour view still contains raw markdown %q:\n%s", forbidden, view)
+		}
+	}
+	if strings.Contains(view, "##") || strings.Contains(view, "Final Result\n\n") {
+		t.Fatalf("glamour view should be compact and suppress heading markers:\n%s", view)
+	}
+}
+
+func TestModelResultGlamourChineseHeadingsAreCompact(t *testing.T) {
+	t.Setenv(markdownRendererEnv, "glamour")
+	rendered, ok := renderGlamourRichText("## 目标成果\n\nMemory recall DoD satisfied.", 88, 20)
+	if !ok {
+		t.Fatal("glamour renderer failed")
+	}
+	plainRendered := stripANSI(rendered)
+	if strings.Contains(plainRendered, "目标成果\n\n") || !strings.Contains(plainRendered, "目标成果\nMemory recall DoD satisfied.") {
+		t.Fatalf("raw glamour render should be compact:\n%q", plainRendered)
+	}
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.result = "## 目标成果\n\nMemory recall DoD satisfied.\n\n## 实现摘要\n\nMemory recall DoD satisfied.\n\n## 验证摘要\n\n验收结论由 1 个证据引用支撑。"
+	m.width = 90
+	m.height = 24
+	view := stripANSI(m.View())
+	for _, forbidden := range []string{"##", "目标成果\n\n", "实现摘要\n\n", "验证摘要\n\n"} {
+		if strings.Contains(view, forbidden) {
+			t.Fatalf("glamour Chinese headings should be compact, found %q:\n%s", forbidden, view)
+		}
+	}
+	for _, want := range []string{"目标成果\nMemory recall DoD satisfied.", "实现摘要\nMemory recall DoD satisfied.", "验证摘要\n验收结论由 1 个证据引用支撑。"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("compact Chinese heading view missing %q:\n%s", want, view)
 		}
 	}
 }
@@ -1258,6 +1411,18 @@ func TestModelResultArtifacts(t *testing.T) {
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "report.md") || !strings.Contains(view, "data.json") {
 		t.Fatalf("artifact context missing:\n%s", view)
+	}
+}
+
+func TestModelResultArtifactsHiddenWhenResultContainsArtifactIndex(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.result = "交付物索引\n• run-1/artifact/result-summary"
+	m.artifacts = []string{"run-1/artifact/result-summary"}
+	m.width = 80
+	m.height = 16
+	view := stripANSI(m.View())
+	if strings.Contains(view, "Artifacts") {
+		t.Fatalf("duplicate Artifacts section should be hidden when result has artifact index:\n%s", view)
 	}
 }
 

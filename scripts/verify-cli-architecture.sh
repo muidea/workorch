@@ -44,10 +44,10 @@ else
 fi
 
 # 3b. TUI must preserve terminal-native mouse selection/copy by default.
-if grep -rq 'WithMouse' "$CLI_ROOT/$MODULE_BASE/service/cli" "$CLI_ROOT/$MODULE_BASE/service/tui" 2>/dev/null; then
-  fail "TUI: enables mouse reporting and blocks terminal selection"
+if grep -rEq 'WithMouse|tea\.MouseMsg|MouseWheelEnabled[[:space:]]*=[[:space:]]*true' "$CLI_ROOT/$MODULE_BASE/service/cli" "$CLI_ROOT/$MODULE_BASE/service/tui" 2>/dev/null; then
+	fail "TUI: enables mouse reporting and blocks terminal selection"
 else
-  pass "TUI: mouse selection/copy preserved"
+	pass "TUI: mouse selection/copy preserved"
 fi
 
 # 4. No HTTP client outside biz/client and biz/backend/remote.

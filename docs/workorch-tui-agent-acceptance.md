@@ -464,6 +464,44 @@ E2E assertion:
 - Fake remote backend records the command.
 - Static checks confirm no direct TUI HTTP client import.
 
+### TUI-E2E-12. Keyboard Viewport Scroll And Native Mouse Copy
+
+Status: verified
+
+Given:
+
+- The TUI has a long terminal Result that does not fit on one screen.
+- The workspace monitor is visible on the right.
+
+When:
+
+- The user presses `PgDown` and `PgUp`.
+
+Then:
+
+- Only the main display area scrolls.
+- The right workspace monitor remains visible and fixed.
+- The bottom input and help rows remain fixed.
+- Bubble Tea mouse reporting and viewport mouse wheel handling remain disabled
+  so terminal-native mouse selection/copy is preserved.
+
+E2E assertion:
+
+- `make verify-tui-agent` runs
+  `TestTUIE2EViewportKeyboardScrollAndMouseSelectionContract`.
+- The test asserts visible result line movement, fixed workspace monitor
+  markers, and disabled viewport mouse wheel reporting.
+
+Deployed-service long-output fixture:
+
+- `make verify-tui-long-output` connects to the deployed workorch service,
+  installs a temporary mock LLM provider, creates a dedicated long-output
+  workspace, activates a completed Run, and verifies the accepted Result plus
+  final-summary Artifact contain more than one screen of deterministic
+  `LONG-IMPLEMENTATION` lines.
+- The script prints the generated workspace and run IDs for manual TUI
+  confirmation with `PgDown` / `PgUp`.
+
 ## Manual Acceptance Checklist
 
 Before marking the TUI as accepted, a reviewer should confirm:

@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -85,7 +86,7 @@ type AppModel struct {
 	blockingDecision *backend.DecisionInfo
 	blockingApproval *backend.ApprovalInfo
 	helpOpen         bool
-	scrollOffset     int
+	mainViewport     *viewport.Model
 
 	eventCh     chan backend.Event
 	unsubscribe func()
@@ -130,6 +131,7 @@ func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initi
 		options:             options,
 		progress:            progressIdle,
 		historyCursor:       -1,
+		mainViewport:        newMainViewport(),
 	}
 }
 
@@ -277,15 +279,16 @@ func (m *AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.helpOpen = false
 			return m, nil
 		case "pgup":
-			m.scroll(-6)
+			m.scrollMain(-6)
 			return m, nil
 		case "pgdown":
-			m.scroll(6)
+			m.scrollMain(6)
 			return m, nil
 		default:
 			return m, nil
 		}
 	}
+	width, contentHeight := m.contentDimensions()
 	switch key {
 	case KeyQuit, "ctrl+q":
 		m.mode = modeQuit
@@ -350,10 +353,12 @@ func (m *AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.nextInputHistory()
 		return m, nil
 	case "pgup":
-		m.scroll(-6)
+		m.refreshMainViewport(width, contentHeight)
+		m.scrollMain(-6)
 		return m, nil
 	case "pgdown":
-		m.scroll(6)
+		m.refreshMainViewport(width, contentHeight)
+		m.scrollMain(6)
 		return m, nil
 	case KeyShowWSList:
 		m.toggleWorkspaceSelectMode()
@@ -449,7 +454,7 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 	m.running = true
 	m.progress = progressSubmitting
 	m.progressText = "Submitting goal; waiting for backend acknowledgment"
-	m.scrollOffset = 0
+	m.resetMainViewport()
 	return m, SubmitGoal(m.be, m.activeWorkspaceID, text, m.dodItems)
 }
 
@@ -478,7 +483,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.artifacts = nil
 		m.failureReason = ""
 		m.lastError = nil
-		m.scrollOffset = 0
+		m.resetMainViewport()
 		return m, nil, true
 	case "workspace", "ws":
 		m.addInputHistory(text)
@@ -502,7 +507,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 	case "result", "refresh":
 		m.addInputHistory(text)
 		m.clearInput()
-		m.scrollOffset = 0
+		m.resetMainViewport()
 		m.progressText = "Refreshing workspace result"
 		return m, FetchWorkspaceContext(m.be, m.activeWorkspaceID), true
 	case "dod":
@@ -511,7 +516,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		if args == "" {
 			m.clearInput()
 			m.result = renderPendingDoDResult(m.dodItems)
-			m.scrollOffset = 0
+			m.resetMainViewport()
 			m.progressText = "Showing pending DoD"
 			return m, nil, true
 		}
@@ -526,7 +531,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.appendTranscript("DoD", strings.Join(items, "; "))
 		m.result = renderPendingDoDResult(items)
 		m.progressText = "DoD updated for next goal"
-		m.scrollOffset = 0
+		m.resetMainViewport()
 		return m, nil, true
 	default:
 		m.lastError = fmt.Errorf("unknown slash command: /%s", name)
@@ -538,14 +543,7 @@ func (m AppModel) View() string {
 	if m.mode == modeQuit {
 		return ""
 	}
-	width := m.width
-	if width == 0 {
-		width = 100
-	}
-	height := m.height
-	if height == 0 {
-		height = 24
-	}
+	width, height := m.viewSize()
 	if m.helpOpen {
 		return m.renderHelpOverlay(width, height)
 	}
@@ -560,15 +558,49 @@ func (m AppModel) View() string {
 	return padLines(content, contentHeight) + "\n" + input + "\n" + help
 }
 
+func (m AppModel) viewSize() (int, int) {
+	width := m.width
+	if width == 0 {
+		width = 100
+	}
+	height := m.height
+	if height == 0 {
+		height = 24
+	}
+	return width, height
+}
+
+func (m AppModel) contentDimensions() (int, int) {
+	width, height := m.viewSize()
+	input := m.renderInput(width)
+	help := m.renderHelp(width)
+	contentHeight := height - lineCount(input) - lineCount(help) - 1
+	if contentHeight < 8 {
+		contentHeight = 8
+	}
+	if width >= 96 {
+		return width - 32, contentHeight
+	}
+	return width, contentHeight
+}
+
+func (m *AppModel) refreshMainViewport(width int, height int) {
+	vp := m.ensureMainViewport()
+	vp.Width = width
+	vp.Height = height
+	vp.MouseWheelEnabled = false
+	vp.SetContent(strings.TrimRight(m.renderMain(width, 0), "\n"))
+}
+
 func (m AppModel) renderContent(width, height int) string {
 	if width >= 96 {
 		rightWidth := 30
 		mainWidth := width - rightWidth - 2
-		main := m.clipLines(m.renderMain(mainWidth, 0), height)
+		main := m.renderMainViewport(m.renderMain(mainWidth, 0), mainWidth, height)
 		return joinColumns(main, m.renderWorkspacePanel(rightWidth, height), mainWidth+2)
 	}
 
-	content := strings.TrimRight(m.clipLines(m.renderMain(width, 0), height), "\n")
+	content := strings.TrimRight(m.renderMainViewport(m.renderMain(width, 0), width, height), "\n")
 	if len(m.workspaces) > 1 {
 		remaining := height - lineCount(content) - 1
 		if remaining >= 4 {
@@ -576,6 +608,28 @@ func (m AppModel) renderContent(width, height int) string {
 		}
 	}
 	return content + "\n"
+}
+
+func (m AppModel) renderMainViewport(content string, width int, height int) string {
+	vp := m.mainViewport
+	if vp == nil {
+		v := viewport.New(width, height)
+		v.MouseWheelEnabled = false
+		vp = &v
+	}
+	vp.Width = width
+	vp.Height = height
+	vp.MouseWheelEnabled = false
+	vp.SetContent(strings.TrimRight(content, "\n"))
+	return trimRightDisplaySpaceLines(vp.View())
+}
+
+func trimRightDisplaySpaceLines(value string) string {
+	lines := strings.Split(value, "\n")
+	for i := range lines {
+		lines[i] = trimRightDisplaySpace(lines[i])
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m AppModel) renderMain(width, height int) string {
@@ -631,11 +685,11 @@ func (m AppModel) renderMain(width, height int) string {
 		b.WriteString("\n")
 	}
 
-	if len(m.artifacts) > 0 {
+	if artifacts := m.visibleArtifacts(); len(artifacts) > 0 {
 		b.WriteString("\n")
 		b.WriteString(Heading.Render("Artifacts"))
 		b.WriteString("\n")
-		for _, artifact := range m.artifacts {
+		for _, artifact := range artifacts {
 			b.WriteString(truncateDisplay("- "+artifact, width-2))
 			b.WriteString("\n")
 		}
@@ -653,8 +707,8 @@ func (m AppModel) resultLineLimit(height int, usedLines int) int {
 		return maxResultLines
 	}
 	reserved := 0
-	if len(m.artifacts) > 0 {
-		reserved += 2 + len(m.artifacts)
+	if artifacts := m.visibleArtifacts(); len(artifacts) > 0 {
+		reserved += 2 + len(artifacts)
 	}
 	if m.lastError != nil {
 		reserved += 2
@@ -664,6 +718,17 @@ func (m AppModel) resultLineLimit(height int, usedLines int) int {
 		return 4
 	}
 	return limit
+}
+
+func (m AppModel) visibleArtifacts() []string {
+	if len(m.artifacts) == 0 {
+		return nil
+	}
+	result := strings.ToLower(m.result)
+	if strings.Contains(result, "交付物索引") || strings.Contains(result, "artifact index") || strings.Contains(result, "artifacts") {
+		return nil
+	}
+	return m.artifacts
 }
 
 func (m AppModel) renderActiveWorkspace(width int) string {
@@ -730,6 +795,7 @@ func (m AppModel) renderWorkspacePanel(width, height int) string {
 	if limit > len(m.workspaces) {
 		limit = len(m.workspaces)
 	}
+	counts := workspaceNameCounts(m.workspaces)
 	for _, ws := range visibleWorkspaces(m.workspaces, m.cursor, limit) {
 		prefix := "  "
 		if m.workspaceSelectMode && string(ws.ID) == m.selectedWorkspaceID {
@@ -737,9 +803,7 @@ func (m AppModel) renderWorkspacePanel(width, height int) string {
 		} else if !m.workspaceSelectMode && string(ws.ID) == m.activeWorkspaceID {
 			prefix = "> "
 		}
-		b.WriteString(truncateDisplay(prefix+workspaceName(ws), width-1))
-		b.WriteString("\n")
-		b.WriteString(truncateDisplay("  "+workspaceStatusLine(ws), width-1))
+		b.WriteString(workspacePanelLine(prefix, ws, counts, width-1))
 		b.WriteString("\n")
 	}
 	if len(m.workspaces) > limit {
@@ -1280,32 +1344,31 @@ func slashCommandMatches(input string) []string {
 	return matches
 }
 
-func (m *AppModel) scroll(delta int) {
-	m.scrollOffset += delta
-	if m.scrollOffset < 0 {
-		m.scrollOffset = 0
-	}
+func newMainViewport() *viewport.Model {
+	vp := viewport.New(0, 0)
+	vp.MouseWheelEnabled = false
+	return &vp
 }
 
-func (m AppModel) clipLines(value string, height int) string {
-	value = strings.TrimRight(value, "\n")
-	if height <= 0 || value == "" {
-		return value
+func (m *AppModel) ensureMainViewport() *viewport.Model {
+	if m.mainViewport == nil {
+		m.mainViewport = newMainViewport()
 	}
-	lines := strings.Split(value, "\n")
-	maxStart := len(lines) - height
-	if maxStart < 0 {
-		maxStart = 0
+	m.mainViewport.MouseWheelEnabled = false
+	return m.mainViewport
+}
+
+func (m *AppModel) resetMainViewport() {
+	m.ensureMainViewport().GotoTop()
+}
+
+func (m *AppModel) scrollMain(delta int) {
+	vp := m.ensureMainViewport()
+	if delta < 0 {
+		vp.ScrollUp(-delta)
+		return
 	}
-	start := m.scrollOffset
-	if start > maxStart {
-		start = maxStart
-	}
-	end := start + height
-	if end > len(lines) {
-		end = len(lines)
-	}
-	return strings.Join(lines[start:end], "\n")
+	vp.ScrollDown(delta)
 }
 
 func (m *AppModel) setBlockingDecision(id common.TicketID, workspaceID common.WorkspaceID, runID common.RunID, reason string, question string) {
@@ -1564,7 +1627,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 	case backend.EventResultAccepted:
 		m.result = firstPayloadString(evt.Payload, "summary", "Summary", events.PayloadKeySummary)
 		m.artifacts = artifactPayloadStrings(evt.Payload)
-		m.scrollOffset = 0
+		m.resetMainViewport()
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventMemoryCreated, backend.EventMemoryUpdated, backend.EventMemoryDeleted:
 		m.progressText = "Workspace memory changed; refreshing context"
@@ -1905,7 +1968,7 @@ func (m *AppModel) resetWorkspaceView() {
 	m.progress = progressIdle
 	m.progressText = ""
 	m.lastError = nil
-	m.scrollOffset = 0
+	m.resetMainViewport()
 	m.clearInput()
 }
 
@@ -2021,6 +2084,32 @@ func workspaceName(ws backend.WorkspaceInfo) string {
 		return parts[len(parts)-1]
 	}
 	return shortID(string(ws.ID))
+}
+
+func workspaceNameCounts(items []backend.WorkspaceInfo) map[string]int {
+	counts := map[string]int{}
+	for _, ws := range items {
+		counts[workspaceName(ws)]++
+	}
+	return counts
+}
+
+func workspacePanelLine(prefix string, ws backend.WorkspaceInfo, counts map[string]int, width int) string {
+	name := workspaceName(ws)
+	state := string(ws.State)
+	if strings.TrimSpace(state) == "" {
+		state = "unknown"
+	}
+	id := shortID(string(ws.ID))
+	suffix := "  " + state
+	if counts[name] > 1 || name == id {
+		suffix = " " + id + suffix
+	}
+	nameWidth := width - lipgloss.Width(prefix) - lipgloss.Width(suffix)
+	if nameWidth < 4 {
+		return truncateDisplay(prefix+id+"  "+state, width)
+	}
+	return prefix + truncateDisplay(name, nameWidth) + suffix
 }
 
 func workspaceStatusLine(ws backend.WorkspaceInfo) string {
@@ -2563,6 +2652,11 @@ func mergeApprovalInfo(existing backend.ApprovalInfo, next backend.ApprovalInfo)
 func renderRichText(value string, width int, maxLines int) string {
 	if width <= 0 || maxLines <= 0 {
 		return ""
+	}
+	if useGlamourMarkdownRenderer() {
+		if rendered, ok := renderGlamourRichText(value, width, maxLines); ok {
+			return rendered
+		}
 	}
 	var out []string
 	inCode := false

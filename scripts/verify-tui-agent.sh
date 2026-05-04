@@ -130,6 +130,15 @@ if $SCRIPTED; then
     else
       fail "TUI-E2E-10: server child process detected"
     fi
+
+    # TUI-E2E-12: Keyboard-only viewport scroll keeps side panels fixed and
+    # preserves terminal-native mouse selection/copy by disabling mouse wheel
+    # reporting.
+    if go test ./internal/modules/application/workorch/service/tui -run '^TestTUIE2EViewportKeyboardScrollAndMouseSelectionContract$' --count 1 2>&1; then
+      pass "TUI-E2E-12: keyboard viewport scroll and mouse-copy contract"
+    else
+      fail "TUI-E2E-12: keyboard viewport scroll or mouse-copy contract failed"
+    fi
   fi
 fi
 
