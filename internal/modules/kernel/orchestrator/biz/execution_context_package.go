@@ -2,14 +2,18 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const (
@@ -25,7 +29,9 @@ func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run
 	if step.Input == nil {
 		step.Input = map[string]any{}
 	}
-	step.Input[stepInputKeyExecutionContextPackage] = o.runExecutionContextPackage(ctx, run, step, workspace)
+	pkg := o.runExecutionContextPackage(ctx, run, step, workspace)
+	step.Input[stepInputKeyExecutionContextPackage] = pkg
+	_ = o.recordLLMStepInputMemoryRecallTrace(ctx, run, step, pkg)
 }
 
 func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, run *runModel.Run, step *runModel.Step, workspace *workspaceModel.Workspace) map[string]any {
@@ -232,16 +238,13 @@ func workspaceHistoryCheckedPackage(pkg stableExecutionContextPackage, acceptedR
 	return ret
 }
 
-func (o *RuntimeOrchestrator) executionContextWorkspaceFileManifest(ctx context.Context, run *runModel.Run, step *runModel.Step, workspace *workspaceModel.Workspace) []map[string]any {
+func (o *RuntimeOrchestrator) executionContextWorkspaceFileManifest(_ context.Context, _ *runModel.Run, step *runModel.Step, _ *workspaceModel.Workspace) []map[string]any {
 	if step != nil {
 		if manifest := mapSliceFromValue(step.Input[stepInputKeyWorkspaceFileManifest]); len(manifest) > 0 {
-			return manifest
+			return compactWorkspaceFileManifest(manifest)
 		}
 	}
-	if workspace != nil {
-		return workspaceFileManifestFromDirectory(workspace.WorkingDirectory)
-	}
-	return o.workspaceFileManifest(ctx, run)
+	return nil
 }
 
 func (o *RuntimeOrchestrator) latestAcceptedResultContext(ctx context.Context, run *runModel.Run) map[string]any {
@@ -395,6 +398,168 @@ func selectedContextPackage(executionContext map[string]any) map[string]any {
 		ret["memoryRetrieval"] = retrieval
 	}
 	return ret
+}
+
+func (o *RuntimeOrchestrator) recordLLMStepInputMemoryRecallTrace(ctx context.Context, run *runModel.Run, step *runModel.Step, pkg map[string]any) error {
+	if o == nil || o.evidence.MemoryRecallTraces == nil || run == nil || step == nil || run.ID == "" || run.WorkspaceID == "" || step.ID == "" {
+		return nil
+	}
+	selected := mapFromValue(pkg["selectedContext"])
+	retrieval := mapFromValue(selected["memoryRetrieval"])
+	if len(retrieval) == 0 {
+		return nil
+	}
+	memories := mapSliceFromValue(selected["memories"])
+	traceID := common.MemoryRecallTraceID(fmt.Sprintf("%s/memory-recall/step-input", step.ID))
+	stage := firstNonEmptyString(
+		stringFromMap(pkg, "stage"),
+		stringFromMap(step.Input, stepInputKeySoulStage),
+		soulStageExecution,
+	)
+	trace := &memorymodel.MemoryRecallTrace{
+		ID:                  traceID,
+		WorkspaceID:         run.WorkspaceID,
+		RunID:               run.ID,
+		StepID:              step.ID,
+		GraphNodeID:         stringFromMap(step.Input, stepInputKeyGraphNodeID),
+		Stage:               stage,
+		Source:              "step_input",
+		Policy:              memoryRecallTraceStringValue(retrieval["policy"]),
+		Status:              memoryRecallTraceStringValue(retrieval["status"]),
+		ProviderID:          memoryRecallTraceStringValue(retrieval["providerId"]),
+		Operation:           memoryRecallTraceStringValue(retrieval["operation"]),
+		QueryTextPreview:    memoryRecallTraceStringValue(retrieval["queryTextPreview"]),
+		QueryTextSha256:     memoryRecallTraceStringValue(retrieval["queryTextSha256"]),
+		MinScore:            floatFromValue(retrieval["minScore"]),
+		Limit:               int(int64FromValue(retrieval["limit"])),
+		EmbeddingModel:      memoryRecallTraceStringValue(retrieval["embeddingModel"]),
+		VectorDimension:     int(int64FromValue(retrieval["vectorDimension"])),
+		RetrievedMemoryIDs:  memoryRecallTraceIDs(retrieval["retrievedMemoryIds"]),
+		RetrievedMemoryHits: memoryRecallTraceHits(retrieval["retrievedMemoryHits"]),
+		Reason:              memoryRecallTraceStringValue(retrieval["reason"]),
+		OccurredAt:          time.Now().UTC().Format(time.RFC3339Nano),
+		EvidenceRef:         string(traceID),
+	}
+	if len(trace.RetrievedMemoryIDs) == 0 {
+		trace.RetrievedMemoryIDs = memoryRecallTraceMemoryIDsFromContexts(memories)
+	}
+	if len(trace.RetrievedMemoryHits) == 0 {
+		trace.RetrievedMemoryHits = memoryRecallTraceHitsFromContexts(memories)
+	}
+	if err := o.evidence.MemoryRecallTraces.Upsert(ctx, trace); err != nil {
+		return err
+	}
+	if o.eventHub == nil {
+		return nil
+	}
+	return o.eventHub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        events.TopicMemoryRecallRecorded,
+		OccurredAt:   trace.OccurredAt,
+		SourceModule: "kernel/orchestrator",
+		SubjectType:  "memory_recall",
+		SubjectID:    string(trace.ID),
+		WorkspaceID:  string(trace.WorkspaceID),
+		RunID:        string(trace.RunID),
+		StepID:       string(trace.StepID),
+		Payload: events.MemoryRecallPayload(
+			trace.ID,
+			trace.Stage,
+			trace.Source,
+			trace.Policy,
+			trace.Status,
+			trace.ProviderID,
+			trace.Operation,
+			trace.RetrievedMemoryIDs,
+			trace.Reason,
+		),
+	})
+}
+
+func memoryRecallTraceIDs(value any) []common.MemoryID {
+	switch typed := value.(type) {
+	case []common.MemoryID:
+		return append([]common.MemoryID(nil), typed...)
+	case []string:
+		ret := make([]common.MemoryID, 0, len(typed))
+		for _, item := range typed {
+			item = strings.TrimSpace(item)
+			if item != "" {
+				ret = append(ret, common.MemoryID(item))
+			}
+		}
+		return ret
+	case []any:
+		ret := make([]common.MemoryID, 0, len(typed))
+		for _, item := range typed {
+			if text := memoryRecallTraceStringValue(item); text != "" {
+				ret = append(ret, common.MemoryID(text))
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
+}
+
+func memoryRecallTraceHits(value any) []memorymodel.MemoryRecallHit {
+	items := mapSliceFromValue(value)
+	ret := make([]memorymodel.MemoryRecallHit, 0, len(items))
+	for _, item := range items {
+		id := common.MemoryID(memoryRecallTraceStringValue(item["id"]))
+		if id == "" {
+			continue
+		}
+		ret = append(ret, memorymodel.MemoryRecallHit{
+			ID:              id,
+			Summary:         memoryRecallTraceStringValue(item["summary"]),
+			VectorScore:     floatFromValue(item["vectorScore"]),
+			VectorDimension: int(int64FromValue(item["vectorDimension"])),
+		})
+	}
+	return ret
+}
+
+func memoryRecallTraceMemoryIDsFromContexts(items []map[string]any) []common.MemoryID {
+	ret := make([]common.MemoryID, 0, len(items))
+	for _, item := range items {
+		id := common.MemoryID(memoryRecallTraceStringValue(item["id"]))
+		if id != "" {
+			ret = append(ret, id)
+		}
+	}
+	return ret
+}
+
+func memoryRecallTraceHitsFromContexts(items []map[string]any) []memorymodel.MemoryRecallHit {
+	ret := make([]memorymodel.MemoryRecallHit, 0, len(items))
+	for _, item := range items {
+		id := common.MemoryID(memoryRecallTraceStringValue(item["id"]))
+		if id == "" {
+			continue
+		}
+		ret = append(ret, memorymodel.MemoryRecallHit{
+			ID:              id,
+			Summary:         memoryRecallTraceStringValue(item["summary"]),
+			VectorScore:     floatFromValue(item["vectorScore"]),
+			VectorDimension: int(int64FromValue(item["vectorDimension"])),
+		})
+	}
+	return ret
+}
+
+func memoryRecallTraceStringValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	default:
+		return strings.TrimSpace(fmt.Sprintf("%v", value))
+	}
 }
 
 func compactSkillContexts(items []map[string]any) []map[string]any {

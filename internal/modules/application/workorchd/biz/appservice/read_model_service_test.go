@@ -13,6 +13,7 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -1417,6 +1418,19 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 	}); err != nil {
 		t.Fatalf("create artifact: %v", err)
 	}
+	if err := exports.Repositories.MemoryRecallTraces.Create(ctx, &memorymodel.MemoryRecallTrace{
+		ID:                 common.MemoryRecallTraceID("memory-recall-task-decomposition-inspect"),
+		WorkspaceID:        workspaceID,
+		RunID:              runID,
+		StepID:             common.StepID("run-task-decomposition/block/inspect"),
+		Stage:              "execution",
+		Source:             "step_input",
+		Status:             "selected",
+		RetrievedMemoryIDs: []common.MemoryID{"memory-task-decomposition-inspect"},
+		EvidenceRef:        "memory-recall-task-decomposition-inspect",
+	}); err != nil {
+		t.Fatalf("create memory recall trace: %v", err)
+	}
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
 		ID:    common.StepID("run-task-decomposition/block/verify"),
 		RunID: runID,
@@ -1462,7 +1476,9 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 		!stringSliceContains(inspectSection.PatchRefs, "patch-task-decomposition-inspect") ||
 		!stringSliceContains(inspectSection.ValidationRefs, "validation-task-decomposition-inspect") ||
 		!stringSliceContains(inspectSection.ResultRefs, "result-task-decomposition-inspect") ||
-		!stringSliceContains(inspectSection.ArtifactRefs, "artifact-task-decomposition-inspect") {
+		!stringSliceContains(inspectSection.ArtifactRefs, "artifact-task-decomposition-inspect") ||
+		!stringSliceContains(inspectSection.MemoryRecallRefs, "memory-recall-task-decomposition-inspect") ||
+		!stringSliceContains(inspectSection.MemoryIDs, "memory-task-decomposition-inspect") {
 		t.Fatalf("inspect section = %+v, want linked evidence refs", inspectSection)
 	}
 

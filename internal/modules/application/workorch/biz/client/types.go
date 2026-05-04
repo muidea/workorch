@@ -370,6 +370,38 @@ type RuntimeCheckpoint struct {
 	Data               map[string]any `json:"data,omitempty"`
 }
 
+type MemoryRecallHit struct {
+	ID              string  `json:"id"`
+	Summary         string  `json:"summary,omitempty"`
+	VectorScore     float64 `json:"vectorScore,omitempty"`
+	VectorDimension int     `json:"vectorDimension,omitempty"`
+}
+
+type MemoryRecallTrace struct {
+	ID                  string            `json:"id"`
+	WorkspaceID         string            `json:"workspaceId"`
+	RunID               string            `json:"runId"`
+	StepID              string            `json:"stepId,omitempty"`
+	GraphNodeID         string            `json:"graphNodeId,omitempty"`
+	Stage               string            `json:"stage,omitempty"`
+	Source              string            `json:"source"`
+	Policy              string            `json:"policy,omitempty"`
+	Status              string            `json:"status"`
+	ProviderID          string            `json:"providerId,omitempty"`
+	Operation           string            `json:"operation,omitempty"`
+	QueryTextPreview    string            `json:"queryTextPreview,omitempty"`
+	QueryTextSha256     string            `json:"queryTextSha256,omitempty"`
+	MinScore            float64           `json:"minScore,omitempty"`
+	Limit               int               `json:"limit,omitempty"`
+	EmbeddingModel      string            `json:"embeddingModel,omitempty"`
+	VectorDimension     int               `json:"vectorDimension,omitempty"`
+	RetrievedMemoryIDs  []string          `json:"retrievedMemoryIds,omitempty"`
+	RetrievedMemoryHits []MemoryRecallHit `json:"retrievedMemoryHits,omitempty"`
+	Reason              string            `json:"reason,omitempty"`
+	OccurredAt          string            `json:"occurredAt,omitempty"`
+	EvidenceRef         string            `json:"evidenceRef,omitempty"`
+}
+
 // Snapshot is the full workspace/run snapshot returned by the read model.
 type WorkspaceSnapshot struct {
 	Workspace          Workspace           `json:"workspace"`
@@ -384,6 +416,7 @@ type WorkspaceSnapshot struct {
 	Patches            []Patch             `json:"patches,omitempty"`
 	ValidationResults  []ValidationResult  `json:"validationResults,omitempty"`
 	RuntimeCheckpoints []RuntimeCheckpoint `json:"runtimeCheckpoints,omitempty"`
+	MemoryRecallTraces []MemoryRecallTrace `json:"memoryRecallTraces,omitempty"`
 	EventRecords       []EventRecord       `json:"eventRecords,omitempty"`
 }
 
@@ -400,6 +433,7 @@ type RunSnapshot struct {
 	Artifacts          []Artifact          `json:"artifacts,omitempty"`
 	Decisions          []Decision          `json:"decisions,omitempty"`
 	Approvals          []Approval          `json:"approvals,omitempty"`
+	MemoryRecallTraces []MemoryRecallTrace `json:"memoryRecallTraces,omitempty"`
 	EventRecords       []EventRecord       `json:"eventRecords,omitempty"`
 }
 

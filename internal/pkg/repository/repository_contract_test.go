@@ -65,6 +65,18 @@ func TestMemoryItemRepositoryContract_File(t *testing.T) {
 	})
 }
 
+func TestMemoryRecallTraceRepositoryContract_Memory(t *testing.T) {
+	testMemoryRecallTraceRepositoryContract(t, func() repository.MemoryRecallTraceRepository {
+		return memory.NewMemoryRecallTraceRepository()
+	})
+}
+
+func TestMemoryRecallTraceRepositoryContract_File(t *testing.T) {
+	testMemoryRecallTraceRepositoryContract(t, func() repository.MemoryRecallTraceRepository {
+		return file.NewMemoryRecallTraceRepository(filepath.Join(t.TempDir(), "memory_recall_trace.json"))
+	})
+}
+
 func TestSkillRepositoryContract_Memory(t *testing.T) {
 	testSkillRepositoryContract(t, func() repository.SkillRepository {
 		return memory.NewSkillRepository()
@@ -279,6 +291,7 @@ func TestRepositoryBundleContract_Memory(t *testing.T) {
 	bundle := repositoryBundle{
 		souls:              memory.NewSoulRepository(),
 		memoryItems:        memory.NewMemoryItemRepository(),
+		memoryRecallTraces: memory.NewMemoryRecallTraceRepository(),
 		skills:             memory.NewSkillRepository(),
 		mcpServers:         memory.NewMCPServerRepository(),
 		mcpCapabilities:    memory.NewMCPCapabilityRepository(),
@@ -307,6 +320,7 @@ func TestRepositoryBundleContract_File(t *testing.T) {
 		return repositoryBundle{
 			souls:              file.NewSoulRepository(filepath.Join(dir, "souls")),
 			memoryItems:        file.NewMemoryItemRepository(filepath.Join(dir, "memory_item.json")),
+			memoryRecallTraces: file.NewMemoryRecallTraceRepository(filepath.Join(dir, "memory_recall_trace.json")),
 			skills:             file.NewSkillRepository(filepath.Join(dir, "skill.json")),
 			mcpServers:         file.NewMCPServerRepository(filepath.Join(dir, "mcp_server.json")),
 			mcpCapabilities:    file.NewMCPCapabilityRepository(filepath.Join(dir, "mcp_capability.json")),
@@ -333,6 +347,7 @@ func TestRepositoryBundleContract_File(t *testing.T) {
 type repositoryBundle struct {
 	souls              repository.SoulRepository
 	memoryItems        repository.MemoryItemRepository
+	memoryRecallTraces repository.MemoryRecallTraceRepository
 	skills             repository.SkillRepository
 	mcpServers         repository.MCPServerRepository
 	mcpCapabilities    repository.MCPCapabilityRepository
@@ -868,6 +883,95 @@ func testMemoryItemRepositoryContract(t *testing.T, factory func() repository.Me
 	}
 	if err := repo.Update(ctx, &memorymodel.MemoryItem{ID: common.MemoryID("missing")}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("update missing memory err = %v, want not found", err)
+	}
+}
+
+func testMemoryRecallTraceRepositoryContract(t *testing.T, factory func() repository.MemoryRecallTraceRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &memorymodel.MemoryRecallTrace{
+		ID:                 common.MemoryRecallTraceID("memory-recall-contract"),
+		WorkspaceID:        common.WorkspaceID("ws-contract"),
+		RunID:              common.RunID("run-contract"),
+		StepID:             common.StepID("run-contract/step-1"),
+		GraphNodeID:        "node-planning",
+		Stage:              "planning",
+		Source:             "activation",
+		Policy:             "semantic_vector_search",
+		Status:             "selected",
+		ProviderID:         "embedding-contract",
+		Operation:          "embeddings",
+		QueryTextPreview:   "Goal: use memory",
+		QueryTextSha256:    "sha-contract",
+		MinScore:           0.1,
+		Limit:              8,
+		EmbeddingModel:     "embedding-model",
+		VectorDimension:    3,
+		RetrievedMemoryIDs: []common.MemoryID{common.MemoryID("memory-contract")},
+		RetrievedMemoryHits: []memorymodel.MemoryRecallHit{
+			{
+				ID:              common.MemoryID("memory-contract"),
+				Summary:         "contract memory",
+				VectorScore:     0.98,
+				VectorDimension: 3,
+			},
+		},
+		OccurredAt:  "2026-05-04T00:00:00Z",
+		EvidenceRef: "memory-recall-contract",
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create memory recall trace: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate memory recall create err = %v, want conflict", err)
+	}
+
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get memory recall trace: %v", err)
+	}
+	got.RetrievedMemoryIDs[0] = common.MemoryID("mutated")
+	got.RetrievedMemoryHits[0].Summary = "mutated"
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get memory recall trace fresh: %v", err)
+	}
+	if fresh.RetrievedMemoryIDs[0] != "memory-contract" || fresh.RetrievedMemoryHits[0].Summary != "contract memory" {
+		t.Fatalf("memory recall clone isolation failed: %+v", fresh)
+	}
+
+	fresh.Source = "step_input"
+	fresh.Stage = "execution"
+	fresh.Status = "degraded"
+	fresh.Reason = "provider unavailable"
+	if err := repo.Upsert(ctx, fresh); err != nil {
+		t.Fatalf("upsert memory recall trace: %v", err)
+	}
+	byRun, err := repo.List(ctx, repository.MemoryRecallTraceQuery{RunID: item.RunID})
+	if err != nil {
+		t.Fatalf("list memory recall by run: %v", err)
+	}
+	if len(byRun) != 1 || byRun[0].Source != "step_input" {
+		t.Fatalf("memory recall by run = %+v, want updated trace", byRun)
+	}
+	byStage, err := repo.List(ctx, repository.MemoryRecallTraceQuery{WorkspaceID: item.WorkspaceID, Stage: "execution", Source: "step_input", Status: "degraded"})
+	if err != nil {
+		t.Fatalf("list memory recall by stage/source/status: %v", err)
+	}
+	if len(byStage) != 1 || byStage[0].Reason != "provider unavailable" {
+		t.Fatalf("memory recall by stage = %+v, want degraded trace", byStage)
+	}
+
+	if _, err := repo.Get(ctx, common.MemoryRecallTraceID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get missing memory recall err = %v, want not found", err)
+	}
+	if err := repo.Delete(ctx, item.ID); err != nil {
+		t.Fatalf("delete memory recall trace: %v", err)
+	}
+	if _, err := repo.Get(ctx, item.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get deleted memory recall err = %v, want not found", err)
 	}
 }
 
@@ -2017,6 +2121,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	approvalID := common.ApprovalID("approval-bundle-contract")
 	soulID := common.SoulID("soul-bundle-contract")
 	memoryID := common.MemoryID("memory-bundle-contract")
+	memoryRecallTraceID := common.MemoryRecallTraceID("memory-recall-bundle-contract")
 	skillID := common.SkillID("skill-bundle-contract")
 	mcpServerID := common.MCPServerID("mcp-bundle-contract")
 
@@ -2055,6 +2160,29 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	}
 	if err := bundle.memoryItems.Create(ctx, memoryItem); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("duplicate memory item create err = %v, want conflict", err)
+	}
+
+	memoryRecallTrace := &memorymodel.MemoryRecallTrace{
+		ID:                 memoryRecallTraceID,
+		WorkspaceID:        workspaceID,
+		RunID:              runID,
+		StepID:             stepID,
+		Stage:              "planning",
+		Source:             "activation",
+		Policy:             "semantic_vector_search",
+		Status:             "selected",
+		RetrievedMemoryIDs: []common.MemoryID{memoryID},
+		RetrievedMemoryHits: []memorymodel.MemoryRecallHit{
+			{ID: memoryID, Summary: "bundle run summary", VectorScore: 0.99, VectorDimension: 3},
+		},
+		OccurredAt:  "2026-05-04T00:00:00Z",
+		EvidenceRef: string(memoryRecallTraceID),
+	}
+	if err := bundle.memoryRecallTraces.Create(ctx, memoryRecallTrace); err != nil {
+		t.Fatalf("create memory recall trace: %v", err)
+	}
+	if err := bundle.memoryRecallTraces.Create(ctx, memoryRecallTrace); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate memory recall trace create err = %v, want conflict", err)
 	}
 
 	skill := &skillmodel.Skill{
@@ -2403,6 +2531,22 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		reloadedVectorMemory[0].EmbeddingProviderID != "embedding-bundle" ||
 		reloadedVectorMemory[0].VectorScore < 0.99 {
 		t.Fatalf("reloaded vector memory = %+v, want preserved vector metadata", reloadedVectorMemory)
+	}
+	reloadedRecallTraces, err := reloaded.memoryRecallTraces.List(ctx, repository.MemoryRecallTraceQuery{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		Stage:       "planning",
+		Source:      "activation",
+		Status:      "selected",
+	})
+	if err != nil {
+		t.Fatalf("reload memory recall traces: %v", err)
+	}
+	if len(reloadedRecallTraces) != 1 ||
+		reloadedRecallTraces[0].ID != memoryRecallTraceID ||
+		len(reloadedRecallTraces[0].RetrievedMemoryIDs) != 1 ||
+		reloadedRecallTraces[0].RetrievedMemoryIDs[0] != memoryID {
+		t.Fatalf("reloaded memory recall traces = %+v, want %q -> %q", reloadedRecallTraces, memoryRecallTraceID, memoryID)
 	}
 
 	reloadedSkill, err := reloaded.skills.Get(ctx, skillID)

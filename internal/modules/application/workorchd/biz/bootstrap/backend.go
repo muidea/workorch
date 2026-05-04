@@ -13,6 +13,7 @@ type repositorySet struct {
 	soul              repository.SoulRepository
 	workspaceTemplate repository.WorkspaceTemplateRepository
 	memoryItem        repository.MemoryItemRepository
+	memoryRecallTrace repository.MemoryRecallTraceRepository
 	skill             repository.SkillRepository
 	mcpServer         repository.MCPServerRepository
 	mcpCapability     repository.MCPCapabilityRepository
@@ -40,6 +41,7 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 			soul:              memory.NewSoulRepository(),
 			workspaceTemplate: memory.NewWorkspaceTemplateRepository(),
 			memoryItem:        memory.NewMemoryItemRepository(),
+			memoryRecallTrace: memory.NewMemoryRecallTraceRepository(),
 			skill:             memory.NewSkillRepository(),
 			mcpServer:         memory.NewMCPServerRepository(),
 			mcpCapability:     memory.NewMCPCapabilityRepository(),
@@ -66,6 +68,7 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 			soul:              fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "souls")),
 			workspaceTemplate: fileRepo.NewWorkspaceTemplateRepository(filepath.Join(dataRoot, "system", "workspace_templates.json")),
 			memoryItem:        workspaceScopedRepos.MemoryItems,
+			memoryRecallTrace: workspaceScopedRepos.MemoryRecallTraces,
 			skill:             fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
 			mcpServer:         fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "system", "mcp_server.json")),
 			mcpCapability:     fileRepo.NewMCPCapabilityRepository(filepath.Join(dataRoot, "system", "mcp_capability.json")),

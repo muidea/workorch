@@ -41,6 +41,11 @@ type MemoryItemRepository struct {
 	items map[common.MemoryID]*memorymodel.MemoryItem
 }
 
+type MemoryRecallTraceRepository struct {
+	mu    sync.RWMutex
+	items map[common.MemoryRecallTraceID]*memorymodel.MemoryRecallTrace
+}
+
 type SkillRepository struct {
 	mu    sync.RWMutex
 	items map[common.SkillID]*skillmodel.Skill
@@ -281,6 +286,79 @@ func (r *MemoryItemRepository) Update(_ context.Context, item *memorymodel.Memor
 }
 
 func (r *MemoryItemRepository) Delete(_ context.Context, id common.MemoryID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[id]; !ok {
+		return common.ErrNotFound
+	}
+	delete(r.items, id)
+	return nil
+}
+
+func NewMemoryRecallTraceRepository() *MemoryRecallTraceRepository {
+	return &MemoryRecallTraceRepository{items: map[common.MemoryRecallTraceID]*memorymodel.MemoryRecallTrace{}}
+}
+
+func (r *MemoryRecallTraceRepository) Create(_ context.Context, item *memorymodel.MemoryRecallTrace) error {
+	if item == nil || item.ID == "" || item.WorkspaceID == "" || item.RunID == "" {
+		return common.ErrInvalidArgument
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ID]; ok {
+		return common.ErrConflict
+	}
+	r.items[item.ID] = cloneMemoryRecallTrace(item)
+	return nil
+}
+
+func (r *MemoryRecallTraceRepository) Upsert(_ context.Context, item *memorymodel.MemoryRecallTrace) error {
+	if item == nil || item.ID == "" || item.WorkspaceID == "" || item.RunID == "" {
+		return common.ErrInvalidArgument
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.items[item.ID] = cloneMemoryRecallTrace(item)
+	return nil
+}
+
+func (r *MemoryRecallTraceRepository) Get(_ context.Context, id common.MemoryRecallTraceID) (*memorymodel.MemoryRecallTrace, error) {
+	if id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneMemoryRecallTrace(item), nil
+}
+
+func (r *MemoryRecallTraceRepository) List(_ context.Context, query repository.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ret := make([]*memorymodel.MemoryRecallTrace, 0)
+	for _, item := range r.items {
+		if !memoryRecallTraceMatches(item, query) {
+			continue
+		}
+		ret = append(ret, cloneMemoryRecallTrace(item))
+	}
+	sortMemoryRecallTraces(ret)
+	if query.Limit > 0 && len(ret) > query.Limit {
+		ret = ret[:query.Limit]
+	}
+	if len(ret) == 0 {
+		return nil, nil
+	}
+	return ret, nil
+}
+
+func (r *MemoryRecallTraceRepository) Delete(_ context.Context, id common.MemoryRecallTraceID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.items[id]; !ok {
@@ -1719,6 +1797,17 @@ func cloneMemoryItem(item *memorymodel.MemoryItem) *memorymodel.MemoryItem {
 	return &cloned
 }
 
+func cloneMemoryRecallTrace(item *memorymodel.MemoryRecallTrace) *memorymodel.MemoryRecallTrace {
+	cloned := *item
+	if item.RetrievedMemoryIDs != nil {
+		cloned.RetrievedMemoryIDs = append([]common.MemoryID(nil), item.RetrievedMemoryIDs...)
+	}
+	if item.RetrievedMemoryHits != nil {
+		cloned.RetrievedMemoryHits = append([]memorymodel.MemoryRecallHit(nil), item.RetrievedMemoryHits...)
+	}
+	return &cloned
+}
+
 func cloneSkill(item *skillmodel.Skill) *skillmodel.Skill {
 	cloned := *item
 	cloned.TriggerRules = cloneStringSlice(item.TriggerRules)
@@ -1867,6 +1956,40 @@ func memoryItemMatches(item *memorymodel.MemoryItem, query repository.MemorySear
 		strings.Contains(strings.ToLower(item.Content), needle) ||
 		strings.Contains(strings.ToLower(item.MemoryType), needle) ||
 		containsTagText(item.Tags, needle)
+}
+
+func memoryRecallTraceMatches(item *memorymodel.MemoryRecallTrace, query repository.MemoryRecallTraceQuery) bool {
+	if item == nil {
+		return false
+	}
+	if query.WorkspaceID != "" && item.WorkspaceID != query.WorkspaceID {
+		return false
+	}
+	if query.RunID != "" && item.RunID != query.RunID {
+		return false
+	}
+	if query.StepID != "" && item.StepID != query.StepID {
+		return false
+	}
+	if query.Stage != "" && item.Stage != query.Stage {
+		return false
+	}
+	if query.Source != "" && item.Source != query.Source {
+		return false
+	}
+	if query.Status != "" && item.Status != query.Status {
+		return false
+	}
+	return true
+}
+
+func sortMemoryRecallTraces(items []*memorymodel.MemoryRecallTrace) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].OccurredAt != items[j].OccurredAt {
+			return items[i].OccurredAt < items[j].OccurredAt
+		}
+		return string(items[i].ID) < string(items[j].ID)
+	})
 }
 
 func cloneFloatSlice(input []float64) []float64 {

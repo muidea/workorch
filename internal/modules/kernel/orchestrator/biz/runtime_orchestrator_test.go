@@ -1877,6 +1877,80 @@ func TestApplyWorkspaceFileWriteReportsPathConflict(t *testing.T) {
 	}
 }
 
+func TestRuntimePatchRequestRejectsReservedDeliverableTarget(t *testing.T) {
+	_, err := runtimePatchRequestFromMap(map[string]any{
+		"patchType": "file_write",
+		"targetRef": "delivery/weather.md",
+		"content":   "weather",
+	})
+	if err == nil || !strings.Contains(err.Error(), "reserved for WorkOrch-managed artifacts") {
+		t.Fatalf("runtimePatchRequestFromMap error = %v, want reserved target error", err)
+	}
+}
+
+func TestRuntimePatchRequestRejectsReservedGovernanceReportTarget(t *testing.T) {
+	_, err := runtimePatchRequestFromMap(map[string]any{
+		"patchType": "file_write",
+		"targetRef": "decision_record.md",
+		"content":   "decision",
+	})
+	if err == nil || !strings.Contains(err.Error(), "reserved for WorkOrch-managed artifacts") {
+		t.Fatalf("runtimePatchRequestFromMap error = %v, want reserved governance target error", err)
+	}
+}
+
+func TestRuntimePatchRequestRejectsUnresolvedTemplateContent(t *testing.T) {
+	_, err := runtimePatchRequestFromMap(map[string]any{
+		"patchType": "file_write",
+		"targetRef": "docs/weather.md",
+		"content":   "{{ get_weather.stdout }}",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unresolved runtime template") {
+		t.Fatalf("runtimePatchRequestFromMap error = %v, want unresolved template error", err)
+	}
+}
+
+func TestNextGraphStepInputRendersDependencyOutputTemplates(t *testing.T) {
+	rootStepID := common.StepID("run-render/step-1")
+	completedStep := &runmodel.Step{
+		ID:    "run-render/block/get-weather",
+		RunID: "run-render",
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphRootStepID: string(rootStepID),
+			stepInputKeyGraphNodeID:     "get_weather",
+		},
+		Output: map[string]any{
+			"stdout": "Clear +21C",
+			"nested": map[string]any{
+				"value": "ok",
+			},
+		},
+	}
+	input := nextGraphStepInput(
+		&runmodel.Run{ID: "run-render"},
+		&runmodel.Step{ID: rootStepID},
+		runtimemodel.BlockExecutionGraph{},
+		runtimemodel.BlockExecutionNode{
+			ID:   "write_report",
+			Kind: llmcommon.RuntimeBlockKindPatchApply,
+			Input: map[string]any{
+				"patchType": "file_write",
+				"targetRef": "docs/weather.md",
+				"content":   "Weather: {{ get_weather.stdout }} / {{ get_weather.nested.value }}",
+			},
+		},
+		map[string]bool{"get_weather": true},
+		"",
+		[]*runmodel.Step{completedStep},
+		rootStepID,
+	)
+	if input["content"] != "Weather: Clear +21C / ok" {
+		t.Fatalf("content = %q, want rendered dependency output", input["content"])
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchConflictDiagnosticsAndWorkspaceManifest(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -1985,6 +2059,40 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchConflictDiagnosticsA
 	}
 	if !hasCheckpointFailureClass(checkpoints, failureClassWorkspacePath) {
 		t.Fatalf("checkpoints = %+v, want workspace path failure class checkpoint", checkpoints)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairInputSkipsWorkspaceManifestForDoDFailure(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	workingDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workingDirectory, "README.md"), []byte("workspace"), 0o644); err != nil {
+		t.Fatalf("seed workspace file: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-dod-repair-no-manifest")
+	runID := common.RunID("run-dod-repair-no-manifest")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/validation"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"status": "completed",
+			"dodAssessment": map[string]any{
+				"satisfied": false,
+				"summary":   "needs more evidence",
+			},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 1, common.ErrInvalidArgument)
+
+	if manifest := mapSliceFromValue(input[stepInputKeyWorkspaceFileManifest]); len(manifest) != 0 {
+		t.Fatalf("workspaceFileManifest = %+v, want no manifest for non-path DoD repair", input[stepInputKeyWorkspaceFileManifest])
 	}
 }
 
@@ -2098,8 +2206,8 @@ func TestRuntimeOrchestrator_LLMInputIncludesExecutionContextPackage(t *testing.
 	if pkg["version"] != executionContextPackageVersion {
 		t.Fatalf("executionContextPackage = %+v, want version %s", pkg, executionContextPackageVersion)
 	}
-	if manifest := mapSliceFromValue(pkg["workspaceFileManifest"]); len(manifest) != 1 || manifest[0]["path"] != "README.md" {
-		t.Fatalf("workspaceFileManifest = %+v, want README.md", pkg["workspaceFileManifest"])
+	if manifest := mapSliceFromValue(pkg["workspaceFileManifest"]); len(manifest) != 0 {
+		t.Fatalf("workspaceFileManifest = %+v, want no default workspace scan in LLM context package", pkg["workspaceFileManifest"])
 	}
 	accepted := mapFromValue(pkg["latestAcceptedResult"])
 	if accepted["id"] != "result-context-package-accepted" {
@@ -2171,6 +2279,71 @@ func TestRuntimeOrchestrator_ExecutionContextPackageReusesInputWorkspaceManifest
 	manifest := mapSliceFromValue(pkg["workspaceFileManifest"])
 	if len(manifest) != 1 || manifest[0]["path"] != "README.md" {
 		t.Fatalf("workspaceFileManifest = %+v, want manifest from step input", pkg["workspaceFileManifest"])
+	}
+}
+
+func TestWorkspaceFileManifestSkipsRepositoryAndRuntimeNoise(t *testing.T) {
+	workingDirectory := t.TempDir()
+	for _, path := range []string{
+		".git/objects/aa/object",
+		".workorch-data/system/event_record.json",
+		"node_modules/pkg/index.js",
+		"dist/bundle.js",
+		"README.md",
+		"cmd/workorch/main.go",
+	} {
+		target := filepath.Join(workingDirectory, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(target, []byte("content"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	manifest := workspaceFileManifestFromDirectory(workingDirectory)
+	var paths []string
+	for _, item := range manifest {
+		paths = append(paths, fmt.Sprint(item["path"]))
+	}
+	if !reflect.DeepEqual(paths, []string{"README.md", "cmd/workorch/main.go"}) {
+		t.Fatalf("manifest paths = %+v, want only source-facing files", paths)
+	}
+}
+
+func TestCompactLLMContextDropsHeavyTransportFields(t *testing.T) {
+	input := compactStepInputForLLMContext(map[string]any{
+		stepInputKeyExecutionContextPackage: map[string]any{"workspaceFileManifest": []map[string]any{{"path": ".git/object"}}},
+		stepInputKeyWorkspaceFileManifest:   []map[string]any{{"path": ".git/object"}},
+		"failedStepId":                      "run-1/block/test",
+		"failureReason":                     strings.Repeat("x", maxLLMContextStringBytes+16),
+	})
+	if _, ok := input[stepInputKeyExecutionContextPackage]; ok {
+		t.Fatalf("executionContextPackage should be dropped from compact input")
+	}
+	if _, ok := input[stepInputKeyWorkspaceFileManifest]; ok {
+		t.Fatalf("workspaceFileManifest should be dropped from compact input")
+	}
+	if got := fmt.Sprint(input["failureReason"]); len(got) > maxLLMContextStringBytes+3 {
+		t.Fatalf("failureReason length = %d, want truncated", len(got))
+	}
+
+	output := compactStepOutputForLLMContext(map[string]any{
+		"stderr":       strings.Repeat("e", maxLLMContextStringBytes+10),
+		"failureClass": failureClassShellCommand,
+		"nested": map[string]any{
+			stepInputKeyExecutionContextPackage: map[string]any{"large": "value"},
+		},
+	})
+	if output["failureClass"] != failureClassShellCommand {
+		t.Fatalf("failureClass = %v, want preserved", output["failureClass"])
+	}
+	if got := fmt.Sprint(output["stderr"]); len(got) > maxLLMContextStringBytes+3 {
+		t.Fatalf("stderr length = %d, want truncated", len(got))
+	}
+	nested := mapFromValue(output["nested"])
+	if _, ok := nested[stepInputKeyExecutionContextPackage]; ok {
+		t.Fatalf("nested executionContextPackage should be dropped")
 	}
 }
 
@@ -2390,7 +2563,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageReusesStableFollowUpPackage(
 	}
 }
 
-func TestRuntimeOrchestrator_ExecutionContextPackageReusesProvidedWorkspace(t *testing.T) {
+func TestRuntimeOrchestrator_ExecutionContextPackageDoesNotScanProvidedWorkspaceByDefault(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := newCountingWorkspaceRepository()
 	workspaceID := common.WorkspaceID("ws-context-package-workspace-reuse")
@@ -2417,9 +2590,8 @@ func TestRuntimeOrchestrator_ExecutionContextPackageReusesProvidedWorkspace(t *t
 	if got := workspaceRepo.getCount.Load(); got != 0 {
 		t.Fatalf("workspace Get count = %d, want 0 when workspace is already provided", got)
 	}
-	manifest := mapSliceFromValue(pkg["workspaceFileManifest"])
-	if len(manifest) != 1 || manifest[0]["path"] != "README.md" {
-		t.Fatalf("workspaceFileManifest = %+v, want manifest from provided workspace", pkg["workspaceFileManifest"])
+	if manifest := mapSliceFromValue(pkg["workspaceFileManifest"]); len(manifest) != 0 {
+		t.Fatalf("workspaceFileManifest = %+v, want no default workspace scan in LLM context package", pkg["workspaceFileManifest"])
 	}
 }
 
@@ -2489,7 +2661,7 @@ func TestRuntimeOrchestrator_ResultManifestReusesProvidedWorkspace(t *testing.T)
 	}
 }
 
-func TestRuntimeOrchestrator_ResultManifestReusesStepContextManifestWhenNoPatch(t *testing.T) {
+func TestRuntimeOrchestrator_ResultManifestDoesNotListWorkspaceFilesWhenNoPatch(t *testing.T) {
 	ctx := context.Background()
 	workspaceID := common.WorkspaceID("ws-result-manifest-step-context-reuse")
 	workingDir := t.TempDir()
@@ -2522,12 +2694,14 @@ func TestRuntimeOrchestrator_ResultManifestReusesStepContextManifestWhenNoPatch(
 		"summary": "accepted with context manifest",
 	}, []string{string(step.ID)}, &workspacemodel.Workspace{ID: workspaceID, WorkingDirectory: workingDir}, nil)
 
-	if !strings.Contains(manifest, "`from-context.md`") || strings.Contains(manifest, "`from-disk.md`") {
-		t.Fatalf("manifest = %q, want reused step context manifest without disk rescan", manifest)
+	if !strings.Contains(manifest, "No workspace file deliverables were produced in this run.") ||
+		strings.Contains(manifest, "`from-context.md`") ||
+		strings.Contains(manifest, "`from-disk.md`") {
+		t.Fatalf("manifest = %q, want no workspace file deliverables without explicit patches", manifest)
 	}
 }
 
-func TestRuntimeOrchestrator_ResultManifestRescansWorkspaceWhenStepHasPatch(t *testing.T) {
+func TestRuntimeOrchestrator_ResultManifestListsOnlyPatchTargets(t *testing.T) {
 	ctx := context.Background()
 	workspaceID := common.WorkspaceID("ws-result-manifest-patch-rescan")
 	workingDir := t.TempDir()
@@ -2563,10 +2737,17 @@ func TestRuntimeOrchestrator_ResultManifestRescansWorkspaceWhenStepHasPatch(t *t
 
 	manifest := orch.workspaceDeliverableManifestContent(ctx, run, step, map[string]any{
 		"summary": "accepted after patch",
-	}, []string{string(step.ID)}, &workspacemodel.Workspace{ID: workspaceID, WorkingDirectory: workingDir}, nil)
+	}, []string{string(step.ID)}, &workspacemodel.Workspace{ID: workspaceID, WorkingDirectory: workingDir}, []resultPatchDetail{
+		{TargetRef: "from-disk.md", PatchType: "file_write", Content: "fresh disk content", State: common.PatchStateApplied},
+		{TargetRef: "from-disk.md", PatchType: "file_write", Content: "fresh disk content", State: common.PatchStateApplied},
+	})
 
 	if !strings.Contains(manifest, "`from-disk.md`") || strings.Contains(manifest, "`from-context.md`") {
-		t.Fatalf("manifest = %q, want disk rescan when final step has patches", manifest)
+		t.Fatalf("manifest = %q, want only explicit patch target deliverables", manifest)
+	}
+	deliverableSection := strings.Split(manifest, "## Code Change Evidence")[0]
+	if got := strings.Count(deliverableSection, "`from-disk.md`"); got != 1 {
+		t.Fatalf("manifest = %q, deliverable file row count = %d, want deduplicated row", manifest, got)
 	}
 }
 
@@ -6289,11 +6470,12 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 		t.Fatalf("manifest artifact category = %q, want runtime evidence", manifestArtifact.Category)
 	}
 	if !strings.Contains(manifestArtifact.Summary, "Workspace Deliverable Manifest") ||
-		!strings.Contains(manifestArtifact.Summary, "| `main.go` | source |") ||
-		!strings.Contains(manifestArtifact.Summary, "| `README.md` | documentation |") ||
+		!strings.Contains(manifestArtifact.Summary, "No workspace file deliverables were produced in this run.") ||
+		strings.Contains(manifestArtifact.Summary, "| `main.go` | source |") ||
+		strings.Contains(manifestArtifact.Summary, "| `README.md` | documentation |") ||
 		!strings.Contains(manifestArtifact.Summary, "## DoD Relation") ||
 		!strings.Contains(manifestArtifact.Summary, "run-dod-gate-complete/step-1/validation/runtime-step") {
-		t.Fatalf("manifest summary = %q, want deliverable files and evidence refs", manifestArtifact.Summary)
+		t.Fatalf("manifest summary = %q, want scoped manifest and evidence refs", manifestArtifact.Summary)
 	}
 	memories, err := memoryRepo.ListByWorkspaceID(ctx, workspaceID)
 	if err != nil {

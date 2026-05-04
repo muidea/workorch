@@ -94,6 +94,7 @@ type RuntimeEvidenceRepositories struct {
 	ValidationResults  repository.ValidationResultRepository
 	RuntimeCheckpoints repository.RuntimeCheckpointRepository
 	MemoryItems        repository.MemoryItemRepository
+	MemoryRecallTraces repository.MemoryRecallTraceRepository
 }
 
 type stepDispatchSpec struct {
@@ -1476,6 +1477,9 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 	if targetRef == "" {
 		return runtimePatchRequest{}, common.ErrInvalidArgument
 	}
+	if isReservedWorkspacePatchTarget(targetRef) {
+		return runtimePatchRequest{}, fmt.Errorf("%w: patch targetRef %q is reserved for WorkOrch-managed artifacts; return final query/report content in dodAssessment instead of writing report-only deliverables into the workspace", common.ErrInvalidArgument, targetRef)
+	}
 	if patchType == "" {
 		patchType = strings.TrimSpace(operation)
 	}
@@ -1492,6 +1496,12 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 	if patchType == "unified_diff" && strings.TrimSpace(diff) == "" {
 		return runtimePatchRequest{}, common.ErrInvalidArgument
 	}
+	if patchType == "file_write" && containsUnresolvedRuntimeTemplate(content) {
+		return runtimePatchRequest{}, fmt.Errorf("%w: patch content contains unresolved runtime template placeholders", common.ErrInvalidArgument)
+	}
+	if patchType == "unified_diff" && containsUnresolvedRuntimeTemplate(diff) {
+		return runtimePatchRequest{}, fmt.Errorf("%w: patch diff contains unresolved runtime template placeholders", common.ErrInvalidArgument)
+	}
 	if summary == "" {
 		summary = "workspace patch apply"
 	}
@@ -1502,6 +1512,75 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 		Summary:   summary,
 		PatchType: patchType,
 	}, nil
+}
+
+func isReservedWorkspacePatchTarget(targetRef string) bool {
+	cleanTarget := filepath.ToSlash(filepath.Clean(strings.TrimSpace(targetRef)))
+	cleanTarget = strings.TrimPrefix(cleanTarget, "./")
+	if cleanTarget == "." || cleanTarget == "" {
+		return false
+	}
+	parts := strings.Split(strings.ToLower(cleanTarget), "/")
+	if len(parts) == 0 {
+		return false
+	}
+	switch parts[0] {
+	case ".workorch-data", "delivery":
+		return true
+	default:
+		return isReservedWorkspaceReportPatchTarget(cleanTarget)
+	}
+}
+
+func isReservedWorkspaceReportPatchTarget(cleanTarget string) bool {
+	base := strings.ToLower(pathBaseLower(cleanTarget))
+	ext := strings.ToLower(filepath.Ext(base))
+	switch ext {
+	case ".md", ".txt", ".adoc", ".rst", ".json":
+	default:
+		return false
+	}
+	stem := strings.TrimSuffix(base, ext)
+	stem = strings.NewReplacer("-", "_", " ", "_", ".", "_").Replace(stem)
+	reportTerms := strings.FieldsFunc(stem, func(r rune) bool { return r == '_' })
+	hasTerm := func(term string) bool {
+		for _, item := range reportTerms {
+			if item == term {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case hasTerm("decision") && hasTerm("record"):
+		return true
+	case hasTerm("approval") && hasTerm("record"):
+		return true
+	case hasTerm("delivery") && hasTerm("summary"):
+		return true
+	case hasTerm("deliverable") && hasTerm("manifest"):
+		return true
+	case hasTerm("workspace") && hasTerm("deliverable") && hasTerm("manifest"):
+		return true
+	case hasTerm("result") && hasTerm("summary"):
+		return true
+	case hasTerm("run") && hasTerm("summary"):
+		return true
+	case hasTerm("acceptance") && hasTerm("evidence"):
+		return true
+	case hasTerm("evidence") && hasTerm("chain"):
+		return true
+	case hasTerm("dod") && hasTerm("assessment"):
+		return true
+	case hasTerm("final") && (hasTerm("summary") || hasTerm("result") || hasTerm("report")):
+		return true
+	default:
+		return false
+	}
+}
+
+func containsUnresolvedRuntimeTemplate(value string) bool {
+	return strings.Contains(value, "{{") && strings.Contains(value, "}}")
 }
 
 func applyWorkspacePatch(workingDirectory string, request runtimePatchRequest) error {
@@ -2058,8 +2137,8 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 			"failureSignature": stringFromMap(failedStep.Output, failureOutputKeySignature),
 			"failedStepId":     string(failedStep.ID),
 			"failedStepKind":   failedStep.Kind,
-			"failedStepInput":  cloneStepPayload(failedStep.Input),
-			"failedStepOutput": cloneStepPayload(failedStep.Output),
+			"failedStepInput":  compactStepInputForLLMContext(failedStep.Input),
+			"failedStepOutput": compactStepOutputForLLMContext(failedStep.Output),
 		},
 	}
 	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
@@ -2161,8 +2240,8 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	input["failedStepId"] = string(failedStep.ID)
 	input["failedStepKind"] = failedStep.Kind
 	input["failedStepState"] = string(failedStep.State)
-	input["failedStepInput"] = cloneStepPayload(failedStep.Input)
-	input["failedStepOutput"] = cloneStepPayload(failedStep.Output)
+	input["failedStepInput"] = compactStepInputForLLMContext(failedStep.Input)
+	input["failedStepOutput"] = compactStepOutputForLLMContext(failedStep.Output)
 	if class := stringFromMap(failedStep.Output, failureOutputKeyClass); class != "" {
 		input[failureOutputKeyClass] = class
 	}
@@ -2170,7 +2249,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input[failureOutputKeySignature] = signature
 	}
 	input["previousStepKind"] = failedStep.Kind
-	input["previousStepOutput"] = cloneStepPayload(failedStep.Output)
+	input["previousStepOutput"] = compactStepOutputForLLMContext(failedStep.Output)
 	if nodeID := graphNodeID(failedStep); nodeID != "" {
 		input[stepInputKeyGraphPreviousNodeID] = nodeID
 		input["failedGraphNodeId"] = nodeID
@@ -2182,16 +2261,40 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input[stepOutputKeyGraphBranch] = branch
 	}
 	if graph, ok := runtimeGraphSpecFromStep(failedStep); ok {
-		input[stepOutputKeyExecutionGraph] = graph
+		input[stepOutputKeyExecutionGraph] = compactExecutionGraphForLLMContext(graph)
 		input[stepInputKeyGraphRootStepID] = string(graphRootStepID(failedStep))
 	}
 	if evidence := o.completedGraphEvidence(ctx, run, failedStep); len(evidence) > 0 {
 		input[stepInputKeyGraphEvidence] = evidence
 	}
-	if manifest := o.workspaceFileManifest(ctx, run); len(manifest) > 0 {
-		input[stepInputKeyWorkspaceFileManifest] = manifest
+	if shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep) {
+		manifest := o.workspaceFileManifest(ctx, run)
+		if len(manifest) > 0 {
+			input[stepInputKeyWorkspaceFileManifest] = manifest
+		}
 	}
 	return input
+}
+
+func shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep *runModel.Step) bool {
+	if failedStep == nil || failedStep.Output == nil {
+		return false
+	}
+	if stringFromMap(failedStep.Output, failureOutputKeyClass) == failureClassWorkspacePath {
+		return true
+	}
+	diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"])
+	if stringFromMap(diagnostics, "kind") == "workspace_path_conflict" {
+		return true
+	}
+	failedOutput := mapFromValue(failedStep.Output["failedStepOutput"])
+	if stringFromMap(failedOutput, failureOutputKeyClass) == failureClassWorkspacePath {
+		return true
+	}
+	if diagnostics := mapFromValue(failedOutput["runtimeDiagnostics"]); stringFromMap(diagnostics, "kind") == "workspace_path_conflict" {
+		return true
+	}
+	return false
 }
 
 func (o *RuntimeOrchestrator) workspaceFileManifest(ctx context.Context, run *runModel.Run) []map[string]any {
@@ -3201,23 +3304,9 @@ func (o *RuntimeOrchestrator) workspaceDeliverableManifestContent(
 		builder.WriteString(fmt.Sprintf("- DoD summary: %s\n", strings.TrimSpace(summary)))
 	}
 	builder.WriteString("\n## Deliverable Files\n\n")
-	workingDirectory := ""
-	if workspace != nil {
-		workingDirectory = strings.TrimSpace(workspace.WorkingDirectory)
-	}
-	if workingDirectory == "" && o != nil && o.workspaces != nil {
-		if workspace, err := o.workspaces.Get(ctx, run.WorkspaceID); err == nil && workspace != nil {
-			workingDirectory = strings.TrimSpace(workspace.WorkingDirectory)
-		}
-	}
-	files, listErr := workspaceDeliverableFilesFromStepContext(step)
-	if listErr != nil || len(files) == 0 {
-		files, listErr = workspaceDeliverableFiles(workingDirectory)
-	}
-	if listErr != nil {
-		builder.WriteString(fmt.Sprintf("- Unable to inspect workspace working directory: %s\n", listErr.Error()))
-	} else if len(files) == 0 {
-		builder.WriteString("- No files were found in the workspace working directory.\n")
+	files := workspaceDeliverableFilesFromPatchDetails(patchDetails)
+	if len(files) == 0 {
+		builder.WriteString("- No workspace file deliverables were produced in this run.\n")
 	} else {
 		builder.WriteString("| Path | Category | Purpose | Size |\n")
 		builder.WriteString("| --- | --- | --- | ---: |\n")
@@ -3252,6 +3341,36 @@ func (o *RuntimeOrchestrator) workspaceDeliverableManifestContent(
 		builder.WriteString(fmt.Sprintf("- `%s`\n", ref))
 	}
 	return strings.TrimSpace(builder.String())
+}
+
+func workspaceDeliverableFilesFromPatchDetails(patchDetails []resultPatchDetail) []workspaceDeliverableFile {
+	if len(patchDetails) == 0 {
+		return nil
+	}
+	files := make([]workspaceDeliverableFile, 0, len(patchDetails))
+	seen := map[string]struct{}{}
+	for _, patch := range patchDetails {
+		target := strings.TrimSpace(patch.TargetRef)
+		if target == "" {
+			continue
+		}
+		target = filepath.ToSlash(filepath.Clean(target))
+		if _, ok := seen[target]; ok {
+			continue
+		}
+		seen[target] = struct{}{}
+		size := int64(len(strings.TrimSpace(patch.Content)))
+		if size == 0 {
+			size = int64(len(strings.TrimSpace(patch.Diff)))
+		}
+		files = append(files, workspaceDeliverableFile{
+			Path:     target,
+			Size:     size,
+			Category: artifactCategoryForWorkspaceFile(target),
+		})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	return files
 }
 
 func writePatchEvidenceSection(builder *strings.Builder, patchDetails []resultPatchDetail) {
@@ -3336,48 +3455,11 @@ func patchDiffArtifactContent(patchDetails []resultPatchDetail) string {
 	return strings.TrimSpace(builder.String())
 }
 
-func workspaceDeliverableFilesFromStepContext(step *runModel.Step) ([]workspaceDeliverableFile, error) {
-	if step == nil {
-		return nil, common.ErrNotFound
-	}
-	patches, err := runtimePatchRequests(step.Output)
-	if err != nil || len(patches) > 0 {
-		return nil, common.ErrNotFound
-	}
-	pkg := mapFromValue(step.Input[stepInputKeyExecutionContextPackage])
-	manifest := mapSliceFromValue(pkg["workspaceFileManifest"])
-	if len(manifest) == 0 {
-		return nil, common.ErrNotFound
-	}
-	files := make([]workspaceDeliverableFile, 0, len(manifest))
-	for _, item := range manifest {
-		path := strings.TrimSpace(stringFromMap(item, "path"))
-		if path == "" {
-			continue
-		}
-		files = append(files, workspaceDeliverableFile{
-			Path:       filepath.ToSlash(path),
-			Size:       int64FromValue(item["size"]),
-			Executable: boolFromValue(item["executable"]),
-			Category:   artifactCategoryForWorkspaceFile(path),
-		})
-	}
-	if len(files) == 0 {
-		return nil, common.ErrNotFound
-	}
-	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	return files, nil
-}
-
 type workspaceDeliverableFile struct {
 	Path       string
 	Size       int64
 	Executable bool
 	Category   string
-}
-
-func workspaceDeliverableFiles(workingDirectory string) ([]workspaceDeliverableFile, error) {
-	return workspaceManifestFiles(workingDirectory)
 }
 
 func workspaceManifestFiles(workingDirectory string) ([]workspaceDeliverableFile, error) {
@@ -3402,15 +3484,21 @@ func workspaceManifestFiles(workingDirectory string) ([]workspaceDeliverableFile
 		if walkErr != nil {
 			return walkErr
 		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if shouldSkipWorkspaceManifestPath(rel, entry) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if entry.IsDir() {
 			return nil
 		}
 		if len(files) >= maxManifestFiles {
 			return filepath.SkipAll
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
 		}
 		info, err := entry.Info()
 		if err != nil {
@@ -3429,6 +3517,27 @@ func workspaceManifestFiles(workingDirectory string) ([]workspaceDeliverableFile
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, nil
+}
+
+func shouldSkipWorkspaceManifestPath(rel string, entry os.DirEntry) bool {
+	normalized := strings.ToLower(filepath.ToSlash(strings.TrimSpace(rel)))
+	if normalized == "." || normalized == "" {
+		return false
+	}
+	parts := strings.Split(normalized, "/")
+	for _, part := range parts {
+		switch part {
+		case ".git", ".workorch-data", "node_modules", "vendor", "dist", "build", ".next", ".cache", "coverage", "tmp", "temp":
+			return true
+		}
+	}
+	if entry != nil && entry.IsDir() {
+		base := filepath.Base(normalized)
+		if strings.HasPrefix(base, ".git") {
+			return true
+		}
+	}
+	return false
 }
 
 func artifactCategoryForWorkspaceFile(path string) string {
@@ -3459,6 +3568,178 @@ func artifactCategoryForWorkspaceFile(path string) string {
 	default:
 		return resultcommon.ArtifactCategorySource
 	}
+}
+
+const (
+	maxLLMContextStringBytes = 4096
+	maxLLMContextSliceItems  = 20
+	maxLLMContextMapEntries  = 32
+)
+
+func compactStepInputForLLMContext(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := compactLLMContextMap(input, 0)
+	delete(ret, stepInputKeyExecutionContextPackage)
+	delete(ret, stepInputKeyWorkspaceFileManifest)
+	return ret
+}
+
+func compactStepOutputForLLMContext(output map[string]any) map[string]any {
+	if len(output) == 0 {
+		return nil
+	}
+	return compactLLMContextMap(output, 0)
+}
+
+func compactWorkspaceFileManifest(manifest []map[string]any) []map[string]any {
+	if len(manifest) == 0 {
+		return nil
+	}
+	limit := min(len(manifest), maxLLMContextSliceItems)
+	ret := make([]map[string]any, 0, limit)
+	for idx := 0; idx < limit; idx++ {
+		ret = append(ret, compactLLMContextMap(manifest[idx], 0))
+	}
+	return ret
+}
+
+func compactExecutionGraphForLLMContext(graph runtimemodel.BlockExecutionGraph) runtimemodel.BlockExecutionGraph {
+	if len(graph.Nodes) == 0 {
+		return graph
+	}
+	nodes := make([]runtimemodel.BlockExecutionNode, 0, len(graph.Nodes))
+	for _, node := range graph.Nodes {
+		compactNode := runtimemodel.BlockExecutionNode{
+			ID:   strings.TrimSpace(node.ID),
+			Kind: strings.TrimSpace(node.Kind),
+		}
+		if len(node.DependsOn) > 0 {
+			limit := min(len(node.DependsOn), 10)
+			compactNode.DependsOn = append([]string(nil), node.DependsOn[:limit]...)
+		}
+		if branch := strings.TrimSpace(node.Branch); branch != "" {
+			compactNode.Branch = truncateLLMContextString(branch)
+		}
+		if len(node.Input) > 0 {
+			compactNode.Input = compactLLMContextMap(node.Input, 0)
+		}
+		nodes = append(nodes, compactNode)
+	}
+	return runtimemodel.BlockExecutionGraph{Nodes: nodes}
+}
+
+func compactLLMContextMap(input map[string]any, depth int) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make(map[string]any, min(len(input), maxLLMContextMapEntries))
+	keys := make([]string, 0, len(input))
+	for key := range input {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if len(ret) >= maxLLMContextMapEntries {
+			break
+		}
+		if shouldSkipLLMContextKey(key) {
+			continue
+		}
+		ret[key] = compactLLMContextValue(input[key], depth+1)
+	}
+	return ret
+}
+
+func compactLLMContextValue(value any, depth int) any {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case string:
+		return truncateLLMContextString(v)
+	case map[string]any:
+		if depth >= 3 {
+			return compactLLMContextLeafSummary(v)
+		}
+		return compactLLMContextMap(v, depth)
+	case []map[string]any:
+		if depth >= 3 {
+			return compactLLMContextLeafSummary(map[string]any{"items": len(v)})
+		}
+		limit := min(len(v), maxLLMContextSliceItems)
+		ret := make([]any, 0, limit)
+		for idx := 0; idx < limit; idx++ {
+			ret = append(ret, compactLLMContextMap(v[idx], depth))
+		}
+		return ret
+	case []any:
+		if depth >= 3 {
+			return compactLLMContextLeafSummary(map[string]any{"items": len(v)})
+		}
+		limit := min(len(v), maxLLMContextSliceItems)
+		ret := make([]any, 0, limit)
+		for idx := 0; idx < limit; idx++ {
+			ret = append(ret, compactLLMContextValue(v[idx], depth))
+		}
+		return ret
+	case []string:
+		limit := min(len(v), maxLLMContextSliceItems)
+		ret := make([]string, 0, limit)
+		for idx := 0; idx < limit; idx++ {
+			ret = append(ret, truncateLLMContextString(v[idx]))
+		}
+		return ret
+	default:
+		return v
+	}
+}
+
+func compactLLMContextLeafSummary(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make(map[string]any, min(len(input), maxLLMContextMapEntries))
+	for key, value := range input {
+		if shouldSkipLLMContextKey(key) {
+			continue
+		}
+		switch v := value.(type) {
+		case string:
+			ret[key] = truncateLLMContextString(v)
+		case []string:
+			ret[key] = len(v)
+		case []any:
+			ret[key] = len(v)
+		case []map[string]any:
+			ret[key] = len(v)
+		case map[string]any:
+			ret[key] = len(v)
+		default:
+			ret[key] = v
+		}
+		if len(ret) >= maxLLMContextMapEntries {
+			break
+		}
+	}
+	return ret
+}
+
+func shouldSkipLLMContextKey(key string) bool {
+	switch key {
+	case stepInputKeyExecutionContextPackage, stepInputKeyWorkspaceFileManifest:
+		return true
+	default:
+		return false
+	}
+}
+
+func truncateLLMContextString(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= maxLLMContextStringBytes {
+		return value
+	}
+	return value[:maxLLMContextStringBytes] + "..."
 }
 
 func artifactPurposeForCategory(category string) string {
@@ -4096,7 +4377,7 @@ func (o *RuntimeOrchestrator) readyGraphStepSpecsFromSteps(
 		if !graphNodeDependenciesSatisfied(node, completed) {
 			continue
 		}
-		input := nextGraphStepInput(run, last, graph, node, completed, branch)
+		input := nextGraphStepInput(run, last, graph, node, completed, branch, steps, rootStepID)
 		input[stepInputKeyGraphRootStepID] = string(rootStepID)
 		ret = append(ret, stepDispatchSpec{
 			ID:    graphStepIDForRootFromSteps(steps, run.ID, rootStepID, node.ID),
@@ -4400,9 +4681,12 @@ func nextGraphStepInput(
 	node runtimemodel.BlockExecutionNode,
 	completed map[string]bool,
 	branch string,
+	steps []*runModel.Step,
+	rootStepID common.StepID,
 ) map[string]any {
 	input := nextStepInput(run, last.ID)
-	for key, value := range node.Input {
+	renderedNodeInput, _ := renderRuntimeTemplateValue(node.Input, graphRuntimeTemplateContext(steps, rootStepID)).(map[string]any)
+	for key, value := range renderedNodeInput {
 		input[key] = value
 	}
 	input[stepInputKeySoulStage] = soulStageExecution
@@ -4415,6 +4699,103 @@ func nextGraphStepInput(
 		input[stepOutputKeyGraphBranch] = branch
 	}
 	return input
+}
+
+var runtimeTemplatePattern = regexp.MustCompile(`\{\{\s*([A-Za-z0-9_-]+)\.([A-Za-z0-9_.-]+)\s*\}\}`)
+
+func graphRuntimeTemplateContext(steps []*runModel.Step, rootStepID common.StepID) map[string]map[string]any {
+	ret := make(map[string]map[string]any)
+	for _, step := range steps {
+		if step == nil || step.State != common.StepStateCompleted {
+			continue
+		}
+		if rootStepID != "" && !sameGraphRoot(step, rootStepID) {
+			continue
+		}
+		nodeID := graphNodeID(step)
+		if nodeID == "" || step.Output == nil {
+			continue
+		}
+		ret[nodeID] = cloneStepPayload(step.Output)
+	}
+	return ret
+}
+
+func renderRuntimeTemplateValue(value any, context map[string]map[string]any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		ret := make(map[string]any, len(typed))
+		for key, item := range typed {
+			ret[key] = renderRuntimeTemplateValue(item, context)
+		}
+		return ret
+	case []any:
+		ret := make([]any, 0, len(typed))
+		for _, item := range typed {
+			ret = append(ret, renderRuntimeTemplateValue(item, context))
+		}
+		return ret
+	case []map[string]any:
+		ret := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			rendered, _ := renderRuntimeTemplateValue(item, context).(map[string]any)
+			ret = append(ret, rendered)
+		}
+		return ret
+	case []string:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			ret = append(ret, renderRuntimeTemplateString(item, context))
+		}
+		return ret
+	case string:
+		return renderRuntimeTemplateString(typed, context)
+	default:
+		return value
+	}
+}
+
+func renderRuntimeTemplateString(value string, context map[string]map[string]any) string {
+	if strings.TrimSpace(value) == "" || len(context) == 0 {
+		return value
+	}
+	return runtimeTemplatePattern.ReplaceAllStringFunc(value, func(match string) string {
+		parts := runtimeTemplatePattern.FindStringSubmatch(match)
+		if len(parts) != 3 {
+			return match
+		}
+		output := context[parts[1]]
+		if output == nil {
+			return match
+		}
+		resolved, ok := nestedMapValue(output, strings.Split(parts[2], "."))
+		if !ok {
+			return match
+		}
+		return evidenceValueString(resolved)
+	})
+}
+
+func nestedMapValue(input map[string]any, path []string) (any, bool) {
+	if len(path) == 0 {
+		return nil, false
+	}
+	var current any = input
+	for _, part := range path {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil, false
+		}
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		current, ok = mapped[part]
+		if !ok {
+			return nil, false
+		}
+	}
+	return current, true
 }
 
 func graphStepID(runID common.RunID, nodeID string) common.StepID {
@@ -4589,7 +4970,7 @@ func llmCompletionFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[
 		input["previousStepKind"] = step.Kind
 	}
 	if step.Output != nil {
-		input["previousStepOutput"] = cloneStepPayload(step.Output)
+		input["previousStepOutput"] = compactStepOutputForLLMContext(step.Output)
 	}
 	return input
 }
@@ -4652,7 +5033,7 @@ func graphFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]a
 		input[stepOutputKeyGraphBranch] = branch
 	}
 	if graph, ok := runtimeGraphSpecFromStep(step); ok {
-		input[stepOutputKeyExecutionGraph] = graph
+		input[stepOutputKeyExecutionGraph] = compactExecutionGraphForLLMContext(graph)
 		input[stepInputKeyGraphRootStepID] = string(graphRootStepID(step))
 	}
 	return input
@@ -4695,7 +5076,7 @@ func (o *RuntimeOrchestrator) completedGraphEvidenceFromSteps(anchor *runModel.S
 			"nodeId": node.ID,
 			"stepId": string(step.ID),
 			"kind":   step.Kind,
-			"output": cloneStepPayload(step.Output),
+			"output": compactStepOutputForLLMContext(step.Output),
 		})
 	}
 	return evidence
@@ -4756,7 +5137,7 @@ func inheritWorkspaceFileManifest(input map[string]any, previousStep *runModel.S
 	if len(manifest) == 0 {
 		return
 	}
-	input[stepInputKeyWorkspaceFileManifest] = limitedMapSlice(manifest, len(manifest))
+	input[stepInputKeyWorkspaceFileManifest] = compactWorkspaceFileManifest(manifest)
 }
 
 func inheritStableExecutionContextPackage(input map[string]any, previousStep *runModel.Step) {

@@ -77,6 +77,7 @@ type AppModel struct {
 	transcript    []transcriptItem
 	result        string
 	artifacts     []string
+	memoryRecalls []backend.MemoryRecallTraceInfo
 	progress      progressState
 	progressText  string
 	failureReason string
@@ -524,6 +525,13 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.resetMainViewport()
 		m.progressText = "Refreshing workspace result"
 		return m, FetchWorkspaceContext(m.be, m.activeWorkspaceID), true
+	case "memory", "mem":
+		m.addInputHistory(text)
+		m.clearInput()
+		m.result = renderMemoryRecallSummary(m.memoryRecalls)
+		m.resetMainViewport()
+		m.progressText = "Showing memory recall summary"
+		return m, nil, true
 	case "dod":
 		m.addInputHistory(text)
 		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
@@ -853,9 +861,9 @@ func (m AppModel) renderInput(width int) string {
 }
 
 func (m AppModel) renderHelp(width int) string {
-	help := "enter: submit | /help: help | /workspace: select/create ws | /dod: update DoD | /exit: quit | ctrl+c: interrupt/quit x2"
+	help := "enter: submit | /help: help | /workspace: select/create ws | /dod: update DoD | /memory: recall | /exit: quit | ctrl+c: interrupt/quit x2"
 	if width < 120 {
-		help = "enter: submit | /help | /workspace | /dod | /exit | ctrl+c x2 quit"
+		help = "enter: submit | /help | /workspace | /dod | /memory | /exit | ctrl+c x2 quit"
 	}
 	if m.workspaceSelectMode {
 		help = "ws select: up/down/j/k move | enter confirm | ctrl+w cancel | esc cancel"
@@ -876,7 +884,7 @@ func (m AppModel) renderHelpOverlay(width, height int) string {
 		"Ctrl+C: interrupt active run; press twice outside a run to quit",
 		"PgUp / PgDn: scroll result",
 		"Esc: clear input or close help",
-		"/help /clear /workspace /workspace create /dod /result /exit",
+		"/help /clear /workspace /workspace create /dod /memory /result /exit",
 	}
 	panelWidth := min(width-4, 72)
 	if panelWidth < 30 {
@@ -958,6 +966,51 @@ func renderPendingDoDResult(items []string) string {
 		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func renderMemoryRecallSummary(items []backend.MemoryRecallTraceInfo) string {
+	if len(items) == 0 {
+		return "No memory recall traces recorded for the current run."
+	}
+	var b strings.Builder
+	b.WriteString("Memory recall traces\n\n")
+	for idx, item := range items {
+		if idx >= 12 {
+			b.WriteString(fmt.Sprintf("- +%d more traces\n", len(items)-idx))
+			break
+		}
+		status := nonEmpty(item.Status, "unknown")
+		source := nonEmpty(item.Source, "unknown")
+		stage := nonEmpty(item.Stage, "unknown")
+		b.WriteString(fmt.Sprintf("- %s/%s: %s", source, stage, status))
+		if len(item.RetrievedMemoryIDs) > 0 {
+			b.WriteString(fmt.Sprintf(" (%d memories)", len(item.RetrievedMemoryIDs)))
+		}
+		if item.Reason != "" {
+			b.WriteString(" - ")
+			b.WriteString(item.Reason)
+		}
+		b.WriteString("\n")
+		for _, memoryID := range item.RetrievedMemoryIDs {
+			b.WriteString("  - ")
+			b.WriteString(string(memoryID))
+			if summary := memoryRecallHitSummary(item.RetrievedMemoryHits, memoryID); summary != "" {
+				b.WriteString(": ")
+				b.WriteString(summary)
+			}
+			b.WriteString("\n")
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func memoryRecallHitSummary(items []backend.MemoryRecallHitInfo, memoryID common.MemoryID) string {
+	for _, item := range items {
+		if item.ID == memoryID {
+			return item.Summary
+		}
+	}
+	return ""
 }
 
 func renderDoDItems(items []string, width int, limit int) string {
@@ -1348,7 +1401,7 @@ func slashCommandMatches(input string) []string {
 		return nil
 	}
 	prefix := strings.ToLower(strings.TrimPrefix(trimmed, "/"))
-	commands := []string{"/help", "/clear", "/workspace", "/workspace create", "/dod", "/result", "/exit"}
+	commands := []string{"/help", "/clear", "/workspace", "/workspace create", "/dod", "/memory", "/result", "/exit"}
 	matches := make([]string, 0, len(commands))
 	for _, command := range commands {
 		if strings.HasPrefix(strings.TrimPrefix(command, "/"), prefix) {
@@ -1650,6 +1703,15 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.artifacts = artifactPayloadStrings(evt.Payload)
 		m.resetMainViewport()
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+	case backend.EventMemoryRecallRecorded:
+		status := firstPayloadString(evt.Payload, "status", "Status", events.PayloadKeyStatus)
+		ids := payloadStringSliceValue(evt.Payload, "retrievedMemoryIds", "RetrievedMemoryIDs", events.PayloadKeyRetrievedMemoryIDs)
+		if status == "degraded" {
+			m.progressText = "Memory recall: degraded"
+		} else {
+			m.progressText = fmt.Sprintf("Memory recall: %s %d", nonEmpty(status, "selected"), len(ids))
+		}
+		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventMemoryCreated, backend.EventMemoryUpdated, backend.EventMemoryDeleted:
 		m.progressText = "Workspace memory changed; refreshing context"
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
@@ -1736,7 +1798,7 @@ func (m *AppModel) applyRunStarted(run *backend.RunInfo) {
 
 func (m AppModel) emptyResultText() string {
 	if len(m.workspaces) == 0 && strings.TrimSpace(m.activeWorkspaceID) == "" {
-		return "No workspaces found.\n\nCreate one from this TUI:\n  /workspace create <title> --template software-dev --dir <path>\n\nUseful commands:\n  /help     Show commands\n  /dod      Set acceptance criteria\n  /exit     Quit"
+		return "No workspaces found.\n\nCreate one from this TUI:\n  /workspace create <title> --dir <path>\n  /workspace create <title> --template generic-governed --dir <path>\n  /workspace create <title> --template software-dev --dir <path>\n\nUseful commands:\n  /help     Show commands\n  /dod      Set acceptance criteria\n  /exit     Quit"
 	}
 	switch m.progress {
 	case progressSubmitting:
@@ -1957,6 +2019,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if msg.Snapshot != nil {
 		m.result = snapshotDisplayResult(msg.Snapshot, run.ID)
 		m.artifacts = snapshotArtifactLabels(msg.Snapshot, run.ID)
+		m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), msg.Snapshot.MemoryRecallTraces...)
 	}
 
 	state := run.State
@@ -1988,6 +2051,7 @@ func (m *AppModel) resetWorkspaceView() {
 	m.transcript = nil
 	m.result = ""
 	m.artifacts = nil
+	m.memoryRecalls = nil
 	m.failureReason = ""
 	m.failureHint = ""
 	m.blockingDecision = nil
@@ -2180,6 +2244,38 @@ func firstPayloadString(payload map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func payloadStringSliceValue(payload map[string]any, keys ...string) []string {
+	for _, key := range keys {
+		value, ok := payload[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case []string:
+			return compactStrings(typed)
+		case []common.MemoryID:
+			ret := make([]string, 0, len(typed))
+			for _, item := range typed {
+				ret = append(ret, string(item))
+			}
+			return compactStrings(ret)
+		case []any:
+			ret := make([]string, 0, len(typed))
+			for _, item := range typed {
+				if text := strings.TrimSpace(fmt.Sprint(item)); text != "" {
+					ret = append(ret, text)
+				}
+			}
+			return compactStrings(ret)
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				return []string{strings.TrimSpace(typed)}
+			}
+		}
+	}
+	return nil
 }
 
 func payloadMap(payload map[string]any, keys ...string) map[string]any {

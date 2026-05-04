@@ -64,6 +64,11 @@ type MemoryEvent struct {
 	Data     MemoryPayloadData
 }
 
+type MemoryRecallEvent struct {
+	envelope Envelope
+	Data     MemoryRecallPayloadData
+}
+
 var workorchTopics = []string{
 	TopicWorkspaceCreated,
 	TopicWorkspaceStateChanged,
@@ -83,6 +88,7 @@ var workorchTopics = []string{
 	TopicMemoryCreated,
 	TopicMemoryUpdated,
 	TopicMemoryDeleted,
+	TopicMemoryRecallRecorded,
 }
 
 func WorkorchTopics() []string {
@@ -174,6 +180,12 @@ func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 		return event, true
 	case TopicMemoryCreated, TopicMemoryUpdated, TopicMemoryDeleted:
 		event, ok := DecodeMemoryEvent(envelope)
+		if !ok {
+			return nil, false
+		}
+		return event, true
+	case TopicMemoryRecallRecorded:
+		event, ok := DecodeMemoryRecallEvent(envelope)
 		if !ok {
 			return nil, false
 		}
@@ -386,6 +398,24 @@ func DecodeMemoryEvent(envelope Envelope) (MemoryEvent, bool) {
 	return MemoryEvent{envelope: envelope, Data: data}, true
 }
 
+func DecodeMemoryRecallEvent(envelope Envelope) (MemoryRecallEvent, bool) {
+	if envelope.Topic != TopicMemoryRecallRecorded {
+		return MemoryRecallEvent{}, false
+	}
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
+		return MemoryRecallEvent{}, false
+	}
+	data, ok := DecodeMemoryRecallPayload(envelope.Payload)
+	if !ok {
+		return MemoryRecallEvent{}, false
+	}
+	envelope = cloneEnvelope(envelope)
+	envelope.Version = spec.CurrentVersion
+	envelope.Payload = MemoryRecallPayload(data.TraceID, data.Stage, data.Source, data.Policy, data.Status, data.ProviderID, data.Operation, data.RetrievedMemoryIDs, data.Reason)
+	return MemoryRecallEvent{envelope: envelope, Data: data}, true
+}
+
 func (e WorkspaceEvent) Envelope() Envelope {
 	return cloneEnvelope(e.envelope)
 }
@@ -463,5 +493,13 @@ func (e MemoryEvent) Envelope() Envelope {
 }
 
 func (e MemoryEvent) Topic() string {
+	return e.envelope.Topic
+}
+
+func (e MemoryRecallEvent) Envelope() Envelope {
+	return cloneEnvelope(e.envelope)
+}
+
+func (e MemoryRecallEvent) Topic() string {
 	return e.envelope.Topic
 }

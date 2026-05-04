@@ -3,14 +3,18 @@ package appservice
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -257,7 +261,132 @@ func compressedContextPatchForRun(ctx context.Context, session *RuntimeSession, 
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := recordRecoveryMemoryRecallTrace(ctx, session, deps, item, compressed); err != nil {
+		return nil, nil, err
+	}
 	return map[string]any{"compressedContext": compressed}, item, nil
+}
+
+func recordRecoveryMemoryRecallTrace(ctx context.Context, session *RuntimeSession, deps readModelDependencies, item *runmodel.Run, compressed map[string]any) error {
+	if item == nil || item.ID == "" || item.WorkspaceID == "" || deps.memoryRecalls == nil || len(compressed) == 0 {
+		return nil
+	}
+	sourceRefs := stringSliceFromAny(compressed["sourceSectionRefs"])
+	if !containsString(sourceRefs, "memory_recall") {
+		return nil
+	}
+	existing, err := deps.memoryRecalls.List(ctx, repository.MemoryRecallTraceQuery{RunID: item.ID})
+	if err != nil {
+		return err
+	}
+	memoryIDs := make([]common.MemoryID, 0)
+	sourceTraceIDs := make([]string, 0)
+	status := "inherited"
+	for _, trace := range existing {
+		if trace == nil || trace.Source == "recovery" {
+			continue
+		}
+		sourceTraceIDs = append(sourceTraceIDs, string(trace.ID), trace.EvidenceRef)
+		memoryIDs = append(memoryIDs, trace.RetrievedMemoryIDs...)
+		if trace.Status == "degraded" {
+			status = "degraded"
+		}
+	}
+	memoryIDs = compactMemoryIDs(memoryIDs)
+	if len(memoryIDs) == 0 && status != "degraded" {
+		return nil
+	}
+	traceID := common.MemoryRecallTraceID(fmt.Sprintf("%s/memory-recall/recovery", item.ID))
+	trace := &memorymodel.MemoryRecallTrace{
+		ID:                 traceID,
+		WorkspaceID:        item.WorkspaceID,
+		RunID:              item.ID,
+		Stage:              "recovery",
+		Source:             "recovery",
+		Policy:             "inherit_compressed_context",
+		Status:             status,
+		RetrievedMemoryIDs: compactMemoryIDs(memoryIDs),
+		Reason:             "compressed context inherited memory recall evidence",
+		OccurredAt:         time.Now().UTC().Format(time.RFC3339Nano),
+		EvidenceRef:        string(traceID),
+	}
+	if len(sourceTraceIDs) > 0 {
+		trace.Reason += ": " + strings.Join(compactUniqueStrings(sourceTraceIDs), ", ")
+	}
+	if err := deps.memoryRecalls.Upsert(ctx, trace); err != nil {
+		return err
+	}
+	exports, err := session.Exports()
+	if err != nil || exports.Infrastructure.EventHub == nil {
+		return err
+	}
+	return exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        events.TopicMemoryRecallRecorded,
+		OccurredAt:   trace.OccurredAt,
+		SourceModule: "application/workorchd",
+		SubjectType:  "memory_recall",
+		SubjectID:    string(trace.ID),
+		WorkspaceID:  string(trace.WorkspaceID),
+		RunID:        string(trace.RunID),
+		Payload: events.MemoryRecallPayload(
+			trace.ID,
+			trace.Stage,
+			trace.Source,
+			trace.Policy,
+			trace.Status,
+			trace.ProviderID,
+			trace.Operation,
+			trace.RetrievedMemoryIDs,
+			trace.Reason,
+		),
+	})
+}
+
+func stringSliceFromAny(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text := strings.TrimSpace(fmt.Sprint(item))
+			if text != "" {
+				ret = append(ret, text)
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
+}
+
+func compactMemoryIDs(input []common.MemoryID) []common.MemoryID {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make([]common.MemoryID, 0, len(input))
+	seen := map[common.MemoryID]struct{}{}
+	for _, item := range input {
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func containsString(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }
 
 func attachCompressedContextToLoadedRun(ctx context.Context, deps readModelDependencies, item *runmodel.Run) error {

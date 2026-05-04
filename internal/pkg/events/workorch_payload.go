@@ -40,6 +40,13 @@ const (
 	PayloadKeyImportance         = "importance"
 	PayloadKeyConfidence         = "confidence"
 	PayloadKeyVisibility         = "visibility"
+	PayloadKeyTraceID            = "traceId"
+	PayloadKeyStage              = "stage"
+	PayloadKeyPolicy             = "policy"
+	PayloadKeyStatus             = "status"
+	PayloadKeyProviderID         = "providerId"
+	PayloadKeyOperation          = "operation"
+	PayloadKeyRetrievedMemoryIDs = "retrievedMemoryIds"
 )
 
 type WorkspacePayloadData struct {
@@ -144,6 +151,18 @@ type MemoryPayloadData struct {
 	Importance int
 	Confidence int
 	Visibility string
+}
+
+type MemoryRecallPayloadData struct {
+	TraceID            common.MemoryRecallTraceID
+	Stage              string
+	Source             string
+	Policy             string
+	Status             string
+	ProviderID         string
+	Operation          string
+	RetrievedMemoryIDs []common.MemoryID
+	Reason             string
 }
 
 func WorkspacePayload(title string, description string, workingDirectory string, state common.WorkspaceState, activeRunID common.RunID) map[string]any {
@@ -338,6 +357,27 @@ func MemoryPayload(memoryType string, summary string, content string, sourceType
 	}
 	if sourceRef != "" {
 		payload[PayloadKeySourceRef] = sourceRef
+	}
+	return payload
+}
+
+func MemoryRecallPayload(traceID common.MemoryRecallTraceID, stage string, source string, policy string, status string, providerID string, operation string, retrievedMemoryIDs []common.MemoryID, reason string) map[string]any {
+	payload := map[string]any{
+		PayloadKeyTraceID:            string(traceID),
+		PayloadKeyStage:              stage,
+		PayloadKeySourceType:         source,
+		PayloadKeyPolicy:             policy,
+		PayloadKeyStatus:             status,
+		PayloadKeyRetrievedMemoryIDs: memoryIDsToStrings(retrievedMemoryIDs),
+	}
+	if providerID != "" {
+		payload[PayloadKeyProviderID] = providerID
+	}
+	if operation != "" {
+		payload[PayloadKeyOperation] = operation
+	}
+	if reason != "" {
+		payload[PayloadKeyReason] = reason
 	}
 	return payload
 }
@@ -673,6 +713,72 @@ func DecodeMemoryPayload(payload map[string]any) (MemoryPayloadData, bool) {
 		Confidence: confidence,
 		Visibility: visibility,
 	}, true
+}
+
+func DecodeMemoryRecallPayload(payload map[string]any) (MemoryRecallPayloadData, bool) {
+	traceID, ok := stringField(payload, PayloadKeyTraceID)
+	if !ok {
+		return MemoryRecallPayloadData{}, false
+	}
+	stage, ok := stringField(payload, PayloadKeyStage)
+	if !ok {
+		return MemoryRecallPayloadData{}, false
+	}
+	source, ok := stringField(payload, PayloadKeySourceType)
+	if !ok {
+		return MemoryRecallPayloadData{}, false
+	}
+	policy, ok := stringField(payload, PayloadKeyPolicy)
+	if !ok {
+		return MemoryRecallPayloadData{}, false
+	}
+	status, ok := stringField(payload, PayloadKeyStatus)
+	if !ok {
+		return MemoryRecallPayloadData{}, false
+	}
+	providerID, ok := optionalStringField(payload, PayloadKeyProviderID)
+	if !ok {
+		return MemoryRecallPayloadData{}, false
+	}
+	operation, ok := optionalStringField(payload, PayloadKeyOperation)
+	if !ok {
+		return MemoryRecallPayloadData{}, false
+	}
+	retrievedMemoryIDs, ok := optionalStringSliceField(payload, PayloadKeyRetrievedMemoryIDs)
+	if !ok {
+		return MemoryRecallPayloadData{}, false
+	}
+	reason, ok := optionalStringField(payload, PayloadKeyReason)
+	if !ok {
+		return MemoryRecallPayloadData{}, false
+	}
+	return MemoryRecallPayloadData{
+		TraceID:            common.MemoryRecallTraceID(traceID),
+		Stage:              stage,
+		Source:             source,
+		Policy:             policy,
+		Status:             status,
+		ProviderID:         providerID,
+		Operation:          operation,
+		RetrievedMemoryIDs: stringSliceToMemoryIDs(retrievedMemoryIDs),
+		Reason:             reason,
+	}, true
+}
+
+func memoryIDsToStrings(input []common.MemoryID) []string {
+	ret := make([]string, 0, len(input))
+	for _, item := range input {
+		ret = append(ret, string(item))
+	}
+	return ret
+}
+
+func stringSliceToMemoryIDs(input []string) []common.MemoryID {
+	ret := make([]common.MemoryID, 0, len(input))
+	for _, item := range input {
+		ret = append(ret, common.MemoryID(item))
+	}
+	return ret
 }
 
 func stringField(payload map[string]any, key string) (string, bool) {

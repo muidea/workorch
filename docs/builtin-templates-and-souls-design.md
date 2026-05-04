@@ -39,10 +39,9 @@
   "description": "完整的决策与审批双门控流程，适用于各类通用任务。不限制工具类型，由 Soul 按阶段约束能力。",
   "goalText": "完成任务目标并产出结构化交付物。",
   "doDItems": [
-    "任务目标已达成",
-    "中间决策已记录并可追溯",
-    "审批流程已完成",
-    "最终交付物包含完整证据链"
+    "目标已完成，输出包含明确的执行结果",
+    "如发生决策或审批，必须通过后端 Ticket/Approval 记录并可追溯",
+    "最终结果通过 dodAssessment 和 runtime artifact 记录，不要求写入 workspace 报告文件"
   ],
   "soulBindings": {
     "planning": "soul-generic-governed-planning",
@@ -197,8 +196,8 @@ soulMD: |
   生成最终的结构化交付物。
 
   ## 交付物要求
-  - final_summary: 包含 goalOutcome, implementationSummary, verificationSummary
-  - deliverable_manifest: 列出所有产出文件及其用途
+  - final_summary 由 runtime artifact 记录，包含 goalOutcome, implementationSummary, verificationSummary
+  - deliverable_manifest 由 runtime artifact 记录，列出所有产出文件及其用途
   - 每个交付物关联到对应的 evidenceRefs
   - knownLimitations 和 residualRisks 如实记录
 ```
@@ -539,14 +538,15 @@ soulMD: |
   - source: unified_diff 格式的代码变更
   - test_report: JSON 格式的测试结果报告
   - configuration: 如有配置变更一并提交
-  - final_summary: 实现总结和已知限制
-  - deliverable_manifest: 所有交付物索引
+  - final_summary 由 runtime artifact 记录：实现总结和已知限制
+  - deliverable_manifest 由 runtime artifact 记录：所有交付物索引
 
   ## 交付物质量要求
   - unified_diff 只能包含项目相关的文件变更
   - 测试报告包含 total/passed/failed/skipped 统计
   - 不要包含 build 产物二进制文件
   - 不要包含 node_modules、vendor 等第三方代码
+  - 不要额外写入 result_summary.md、final_summary.md、deliverable_manifest.md、evidence_chain.md 等 runtime 管理的报告文件
 ```
 
 ---
@@ -777,12 +777,13 @@ soulMD: |
   ## 交付物类别
   - documentation: README.md, API_REFERENCE.md, ARCHITECTURE.md
   - configuration: OpenAPI spec, GraphQL schema
-  - final_summary: 文档生成总结
-  - deliverable_manifest: 所有文档文件索引
+  - final_summary 由 runtime artifact 记录：文档生成总结
+  - deliverable_manifest 由 runtime artifact 记录：所有文档文件索引
 
   ## 格式要求
   - 每个文档文件在 manifest 中列出用途和受众
   - 文档 URI 使用 workorch:// 前缀
+  - 不要额外写入 result_summary.md、final_summary.md、deliverable_manifest.md、evidence_chain.md 等 runtime 管理的报告文件
 ```
 
 ---

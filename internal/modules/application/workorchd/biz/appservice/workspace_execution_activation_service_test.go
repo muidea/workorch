@@ -1641,6 +1641,25 @@ func TestActivateWorkspaceExecutionWithBackendUsesSemanticMemoryRecall(t *testin
 		!contextNumericEquals(retrieval["vectorDimension"], 3) {
 		t.Fatalf("memoryRetrieval = %+v, want semantic evidence", retrieval)
 	}
+	runSnapshot, err := ReadRunSnapshotWithBackend(ctx, "file", dataRoot, item.Run.ID)
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
+	}
+	activationTrace := memoryRecallTraceBySource(runSnapshot.MemoryRecallTraces, "activation")
+	stepInputTrace := memoryRecallTraceBySource(runSnapshot.MemoryRecallTraces, "step_input")
+	if activationTrace == nil ||
+		activationTrace.Status != "selected" ||
+		len(activationTrace.RetrievedMemoryIDs) != 1 ||
+		activationTrace.RetrievedMemoryIDs[0] != "memory-semantic-match" {
+		t.Fatalf("memory recall traces = %+v, want selected activation trace", runSnapshot.MemoryRecallTraces)
+	}
+	if stepInputTrace == nil ||
+		stepInputTrace.Status != "selected" ||
+		stepInputTrace.StepID == "" ||
+		len(stepInputTrace.RetrievedMemoryIDs) != 1 ||
+		stepInputTrace.RetrievedMemoryIDs[0] != "memory-semantic-match" {
+		t.Fatalf("memory recall traces = %+v, want selected step input trace", runSnapshot.MemoryRecallTraces)
+	}
 }
 
 func TestActivateWorkspaceExecutionWithBackendReportsSemanticMemoryDegradation(t *testing.T) {
@@ -1692,6 +1711,32 @@ func TestActivateWorkspaceExecutionWithBackendReportsSemanticMemoryDegradation(t
 	if retrieval["policy"] != "semantic_vector_search" || retrieval["status"] != "degraded" || retrieval["reason"] == "" {
 		t.Fatalf("memoryRetrieval = %+v, want explicit degradation evidence", retrieval)
 	}
+	runSnapshot, err := ReadRunSnapshotWithBackend(ctx, "file", dataRoot, item.Run.ID)
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
+	}
+	activationTrace := memoryRecallTraceBySource(runSnapshot.MemoryRecallTraces, "activation")
+	stepInputTrace := memoryRecallTraceBySource(runSnapshot.MemoryRecallTraces, "step_input")
+	if activationTrace == nil ||
+		activationTrace.Status != "degraded" ||
+		activationTrace.Reason == "" {
+		t.Fatalf("memory recall traces = %+v, want degraded activation trace", runSnapshot.MemoryRecallTraces)
+	}
+	if stepInputTrace == nil ||
+		stepInputTrace.Status != "degraded" ||
+		stepInputTrace.StepID == "" ||
+		stepInputTrace.Reason == "" {
+		t.Fatalf("memory recall traces = %+v, want degraded step input trace", runSnapshot.MemoryRecallTraces)
+	}
+}
+
+func memoryRecallTraceBySource(items []MemoryRecallTrace, source string) *MemoryRecallTrace {
+	for idx := range items {
+		if items[idx].Source == source {
+			return &items[idx]
+		}
+	}
+	return nil
 }
 
 func TestActivateWorkspaceExecutionWithBackendRejectsSoulDisallowedSkill(t *testing.T) {

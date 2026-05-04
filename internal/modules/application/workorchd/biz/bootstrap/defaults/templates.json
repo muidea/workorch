@@ -5,10 +5,9 @@
     "description": "完整的决策与审批双门控流程，适用于各类通用任务。不限制工具类型，由 Soul 按阶段约束能力。",
     "goalText": "完成任务目标并产出结构化交付物。",
     "doDItems": [
-      "任务目标已达成",
-      "中间决策已记录并可追溯",
-      "审批流程已完成",
-      "最终交付物包含完整证据链"
+      "目标已完成，输出包含明确的执行结果",
+      "如发生决策或审批，必须通过后端 Ticket/Approval 记录并可追溯",
+      "最终结果通过 dodAssessment 和 runtime artifact 记录，不要求写入 workspace 报告文件"
     ],
     "soulBindings": {
       "planning": "soul-generic-governed-planning",

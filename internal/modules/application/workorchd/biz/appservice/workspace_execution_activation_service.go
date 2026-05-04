@@ -8,7 +8,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
+	appbootstrap "github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
@@ -18,6 +20,7 @@ import (
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -1007,12 +1010,194 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 			}
 			return "", err
 		}
+		if err := recordActivationMemoryRecallTrace(ctx, exports, runID, workspaceID, createExecutionContext); err != nil {
+			return "", err
+		}
 		if err := exports.Services.RunService.EnsureStarted(ctx, runmodule.StartRunCommand{RunID: runID}); err != nil {
 			return "", err
 		}
 		return runID, nil
 	}
 	return "", common.ErrConflict
+}
+
+func recordActivationMemoryRecallTrace(ctx context.Context, exports appbootstrap.Exports, runID common.RunID, workspaceID common.WorkspaceID, executionContext map[string]any) error {
+	if exports.Repositories.MemoryRecallTraces == nil || runID == "" || workspaceID == "" {
+		return nil
+	}
+	retrieval, _ := executionContext["memoryRetrieval"].(map[string]any)
+	if len(retrieval) == 0 {
+		return nil
+	}
+	traceID := common.MemoryRecallTraceID(fmt.Sprintf("%s/memory-recall/activation", runID))
+	trace := &memorymodel.MemoryRecallTrace{
+		ID:                  traceID,
+		WorkspaceID:         workspaceID,
+		RunID:               runID,
+		Stage:               "planning",
+		Source:              "activation",
+		Policy:              traceStringValue(retrieval["policy"]),
+		Status:              traceStringValue(retrieval["status"]),
+		ProviderID:          traceStringValue(retrieval["providerId"]),
+		Operation:           traceStringValue(retrieval["operation"]),
+		QueryTextPreview:    traceStringValue(retrieval["queryTextPreview"]),
+		QueryTextSha256:     traceStringValue(retrieval["queryTextSha256"]),
+		MinScore:            traceFloatValue(retrieval["minScore"]),
+		Limit:               traceIntValue(retrieval["limit"]),
+		EmbeddingModel:      traceStringValue(retrieval["embeddingModel"]),
+		VectorDimension:     traceIntValue(retrieval["vectorDimension"]),
+		RetrievedMemoryIDs:  traceMemoryIDs(retrieval["retrievedMemoryIds"]),
+		RetrievedMemoryHits: traceMemoryHits(retrieval["retrievedMemoryHits"]),
+		Reason:              traceStringValue(retrieval["reason"]),
+		OccurredAt:          time.Now().UTC().Format(time.RFC3339Nano),
+		EvidenceRef:         string(traceID),
+	}
+	if len(trace.RetrievedMemoryIDs) == 0 {
+		trace.RetrievedMemoryIDs = traceMemoryIDs(executionContext["memoryIds"])
+	}
+	if err := exports.Repositories.MemoryRecallTraces.Upsert(ctx, trace); err != nil {
+		return err
+	}
+	if exports.Infrastructure.EventHub == nil {
+		return nil
+	}
+	return exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        events.TopicMemoryRecallRecorded,
+		OccurredAt:   trace.OccurredAt,
+		SourceModule: "application/workorchd",
+		SubjectType:  "memory_recall",
+		SubjectID:    string(trace.ID),
+		WorkspaceID:  string(trace.WorkspaceID),
+		RunID:        string(trace.RunID),
+		Payload: events.MemoryRecallPayload(
+			trace.ID,
+			trace.Stage,
+			trace.Source,
+			trace.Policy,
+			trace.Status,
+			trace.ProviderID,
+			trace.Operation,
+			trace.RetrievedMemoryIDs,
+			trace.Reason,
+		),
+	})
+}
+
+func traceMemoryIDs(value any) []common.MemoryID {
+	switch typed := value.(type) {
+	case []common.MemoryID:
+		return append([]common.MemoryID(nil), typed...)
+	case []string:
+		ret := make([]common.MemoryID, 0, len(typed))
+		for _, item := range typed {
+			if item != "" {
+				ret = append(ret, common.MemoryID(item))
+			}
+		}
+		return ret
+	case []any:
+		ret := make([]common.MemoryID, 0, len(typed))
+		for _, item := range typed {
+			if text := traceStringValue(item); text != "" {
+				ret = append(ret, common.MemoryID(text))
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
+}
+
+func traceMemoryHits(value any) []memorymodel.MemoryRecallHit {
+	items := traceMapSlice(value)
+	ret := make([]memorymodel.MemoryRecallHit, 0, len(items))
+	for _, item := range items {
+		id := common.MemoryID(traceStringValue(item["id"]))
+		if id == "" {
+			continue
+		}
+		ret = append(ret, memorymodel.MemoryRecallHit{
+			ID:              id,
+			Summary:         traceStringValue(item["summary"]),
+			VectorScore:     traceFloatValue(item["vectorScore"]),
+			VectorDimension: traceIntValue(item["vectorDimension"]),
+		})
+	}
+	return ret
+}
+
+func traceMapSlice(value any) []map[string]any {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return append([]map[string]any(nil), typed...)
+	case []any:
+		ret := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if mapped, ok := item.(map[string]any); ok {
+				ret = append(ret, mapped)
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
+}
+
+func traceStringValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case fmt.Stringer:
+		return typed.String()
+	default:
+		return fmt.Sprintf("%v", value)
+	}
+}
+
+func traceIntValue(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int8:
+		return int(typed)
+	case int16:
+		return int(typed)
+	case int32:
+		return int(typed)
+	case int64:
+		return int(typed)
+	case float32:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return 0
+	}
+}
+
+func traceFloatValue(value any) float64 {
+	switch typed := value.(type) {
+	case float32:
+		return float64(typed)
+	case float64:
+		return typed
+	case int:
+		return float64(typed)
+	case int8:
+		return float64(typed)
+	case int16:
+		return float64(typed)
+	case int32:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	default:
+		return 0
+	}
 }
 
 func executionContextForCreatedWorkspaceRun(runID common.RunID, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any, priority int) map[string]any {

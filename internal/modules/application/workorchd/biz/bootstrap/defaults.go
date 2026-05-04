@@ -110,19 +110,22 @@ func EnsureBuiltinDefaults(ctx context.Context, soulRepo repository.SoulReposito
 		} else if !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
-		item := &repository.WorkspaceTemplate{
-			ID:           t.ID,
-			Name:         t.Name,
-			Description:  t.Description,
-			GoalText:     t.GoalText,
-			DoDItems:     filterEmptyStrings(t.DoDItems),
-			SoulBindings: t.SoulBindings,
-		}
-		if err := templateRepo.Create(ctx, item); err != nil {
+		if err := templateRepo.Create(ctx, workspaceTemplateFromEmbedded(t)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func workspaceTemplateFromEmbedded(t embeddedTemplate) *repository.WorkspaceTemplate {
+	return &repository.WorkspaceTemplate{
+		ID:           t.ID,
+		Name:         t.Name,
+		Description:  t.Description,
+		GoalText:     t.GoalText,
+		DoDItems:     filterEmptyStrings(t.DoDItems),
+		SoulBindings: t.SoulBindings,
+	}
 }
 
 func filterEmptyStrings(items []string) []string {

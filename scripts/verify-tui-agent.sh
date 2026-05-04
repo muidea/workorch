@@ -147,6 +147,12 @@ if $SCRIPTED; then
     else
       fail "TUI-E2E-13: workspace list live refresh failed"
     fi
+
+    if go test ./internal/modules/application/workorch/service/tui -run '^(TestModelMemoryCommandShowsRecallSummary|TestModelMemoryRecallEventRefreshesContext)$' --count 1 2>&1; then
+      pass "TUI-E2E-14: memory recall compact summary and event refresh"
+    else
+      fail "TUI-E2E-14: memory recall compact summary or event refresh failed"
+    fi
   fi
 fi
 

@@ -239,6 +239,7 @@ func exportsFromRuntimeHelper(runtime runtimecommon.Helper) bootstrap.Exports {
 			Souls:              repos.Souls,
 			WorkspaceTemplates: repos.WorkspaceTemplates,
 			MemoryItems:        repos.MemoryItems,
+			MemoryRecallTraces: repos.MemoryRecallTraces,
 			Skills:             repos.Skills,
 			MCPServers:         repos.MCPServers,
 			MCPCapabilities:    repos.MCPCapabilities,

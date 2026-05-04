@@ -648,7 +648,88 @@ curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/snapshot" >"$TMP_DIR/me
 grep '"memories"' "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
 grep '"memoryRetrieval"' "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
 grep "\"$MEMORY_ID\"" "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/observability" | grep '"terminal": true' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/observability" >"$TMP_DIR/memory-recall-observability.json"
+grep '"terminal": true' "$TMP_DIR/memory-recall-observability.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/context-bundle" >"$TMP_DIR/memory-recall-context-bundle.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/memory-recalls" >"$TMP_DIR/memory-recall-run-api.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory-recalls" >"$TMP_DIR/memory-recall-workspace-api.json"
+curl -fsS "$BASE_URL/api/v1/workorch/events?runId=$memory_run_id" >"$TMP_DIR/memory-recall-events.json"
+python3 - "$TMP_DIR/memory-recall-snapshot.json" \
+  "$TMP_DIR/memory-recall-observability.json" \
+  "$TMP_DIR/memory-recall-context-bundle.json" \
+  "$TMP_DIR/memory-recall-run-api.json" \
+  "$TMP_DIR/memory-recall-workspace-api.json" \
+  "$TMP_DIR/memory-recall-events.json" \
+  "$MEMORY_ID" <<'PY'
+import json
+import sys
+
+snapshot = json.load(open(sys.argv[1], encoding="utf-8"))["snapshot"]
+observability = json.load(open(sys.argv[2], encoding="utf-8"))["observability"]
+bundle = json.load(open(sys.argv[3], encoding="utf-8"))["contextBundle"]
+run_api = json.load(open(sys.argv[4], encoding="utf-8")).get("memoryRecallTraces") or []
+workspace_api = json.load(open(sys.argv[5], encoding="utf-8")).get("memoryRecallTraces") or []
+events = json.load(open(sys.argv[6], encoding="utf-8")).get("eventRecords") or []
+memory_id = sys.argv[7]
+
+errors = []
+snapshot_traces = snapshot.get("memoryRecallTraces") or []
+observability_traces = observability.get("memoryRecallTraces") or []
+if not snapshot_traces:
+    errors.append("snapshot missing memoryRecallTraces")
+if not observability_traces:
+    errors.append("observability missing memoryRecallTraces")
+if not run_api:
+    errors.append("run memory-recalls API returned no traces")
+if not workspace_api:
+    errors.append("workspace memory-recalls API returned no traces")
+
+def trace_ids(items):
+    return {item.get("id") for item in items if item.get("id")}
+
+run_trace_ids = trace_ids(run_api)
+for label, items in [
+    ("snapshot", snapshot_traces),
+    ("observability", observability_traces),
+    ("workspace_api", workspace_api),
+]:
+    missing = run_trace_ids - trace_ids(items)
+    if missing:
+        errors.append(f"{label} missing trace ids from run API: {sorted(missing)}")
+
+sources = {item.get("source") for item in run_api}
+for required in ["activation", "step_input"]:
+    if required not in sources:
+        errors.append(f"run memory-recalls API missing source {required!r}: {sources}")
+
+if not any(memory_id in (item.get("retrievedMemoryIds") or []) for item in run_api):
+    errors.append(f"run memory-recalls API missing recalled memory {memory_id}")
+
+section = next((item for item in (bundle.get("sections") or []) if item.get("id") == "memory_recall"), None)
+if not section:
+    errors.append("context bundle missing memory_recall section")
+else:
+    section_refs = set(section.get("evidenceRefs") or [])
+    if memory_id not in section_refs:
+        errors.append(f"context bundle memory_recall section missing memory id {memory_id}: {section_refs}")
+    section_traces = ((section.get("data") or {}).get("memoryRecallTraces") or [])
+    missing = run_trace_ids - trace_ids(section_traces)
+    if missing:
+        errors.append(f"context bundle memory_recall section missing trace ids: {sorted(missing)}")
+
+timeline_sources = {item.get("source") for item in (observability.get("timeline") or [])}
+if "memory_recall" not in timeline_sources:
+    errors.append(f"observability timeline missing memory_recall source: {timeline_sources}")
+
+event_topics = {item.get("topic") for item in events}
+if "/memory/recall/recorded" not in event_topics:
+    errors.append(f"event stream missing /memory/recall/recorded: {event_topics}")
+
+if errors:
+    for item in errors:
+        print(item, file=sys.stderr)
+    raise SystemExit(1)
+PY
 assert_run_recovery_read_models "$memory_run_id" "memory-recall" "completed"
 assert_workspace_recovery_read_models "final"
 curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics.txt"

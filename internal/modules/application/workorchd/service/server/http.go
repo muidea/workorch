@@ -334,6 +334,13 @@ type memoryItemsResponse struct {
 	Memory   []appservice.MemoryItem `json:"memory"`
 }
 
+type memoryRecallTracesResponse struct {
+	Service            string                         `json:"service"`
+	Backend            string                         `json:"backend,omitempty"`
+	DataRoot           string                         `json:"dataRoot,omitempty"`
+	MemoryRecallTraces []appservice.MemoryRecallTrace `json:"memoryRecallTraces"`
+}
+
 type createWorkspaceRequest struct {
 	WorkspaceID      string `json:"workspaceId"`
 	Title            string `json:"title"`
@@ -427,6 +434,7 @@ type readRunContextBundleFunc func(context.Context, string, string, string) (app
 type readWorkspaceContextBundleFunc func(context.Context, string, string, string) (appservice.ContextBundle, error)
 type readRunTaskDecompositionsFunc func(context.Context, string, string, string) ([]appservice.TaskDecomposition, error)
 type readWorkspaceTaskDecompositionsFunc func(context.Context, string, string, string) ([]appservice.TaskDecomposition, error)
+type listMemoryRecallTracesFunc func(context.Context, string, string, appservice.MemoryRecallTraceQuery) ([]appservice.MemoryRecallTrace, error)
 type listEventRecordsFunc func(context.Context, string, string, appservice.EventRecordQuery) ([]appservice.EventRecord, error)
 type listRunInstancesFunc func(context.Context, string, string, string) ([]appservice.Run, error)
 type startRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
@@ -506,6 +514,7 @@ type serverState struct {
 	readWorkspaceContextBundle      readWorkspaceContextBundleFunc
 	readRunTaskDecompositions       readRunTaskDecompositionsFunc
 	readWorkspaceTaskDecompositions readWorkspaceTaskDecompositionsFunc
+	listMemoryRecallTraces          listMemoryRecallTracesFunc
 	listEventRecords                listEventRecordsFunc
 	listRuns                        listRunInstancesFunc
 	startRun                        startRunInstanceFunc
@@ -1048,6 +1057,27 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			TaskDecompositions: items,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/memory-recalls", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "memory-recalls" {
+			http.NotFound(w, r)
+			return
+		}
+		query := memoryRecallTraceQueryFromValues(r.URL.Query())
+		query.WorkspaceID = workspaceID
+		items, err := state.listMemoryRecallTraces(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, memoryRecallTracesResponse{
+			Service:            "workorch",
+			Backend:            state.config.Backend,
+			DataRoot:           state.config.DataRoot,
+			MemoryRecallTraces: items,
+		})
+	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/soul-bindings", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
@@ -1228,6 +1258,27 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Backend:       state.config.Backend,
 			DataRoot:      state.config.DataRoot,
 			Observability: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/memory-recalls", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "memory-recalls" {
+			http.NotFound(w, r)
+			return
+		}
+		query := memoryRecallTraceQueryFromValues(r.URL.Query())
+		query.RunID = runID
+		items, err := state.listMemoryRecallTraces(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, memoryRecallTracesResponse{
+			Service:            "workorch",
+			Backend:            state.config.Backend,
+			DataRoot:           state.config.DataRoot,
+			MemoryRecallTraces: items,
 		})
 	})
 	router.AddHandler("/api/v1/workorch/artifacts/content", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -2507,6 +2558,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		readWorkspaceContextBundle:      defaultReadWorkspaceContextBundle,
 		readRunTaskDecompositions:       defaultReadRunTaskDecompositions,
 		readWorkspaceTaskDecompositions: defaultReadWorkspaceTaskDecompositions,
+		listMemoryRecallTraces:          defaultListMemoryRecallTraces,
 		listEventRecords:                defaultListEventRecords,
 		listRuns:                        defaultListRuns,
 		startRun:                        defaultStartRun,
@@ -3205,6 +3257,15 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		})
 		return ret, err
 	}
+	s.listMemoryRecallTraces = func(ctx context.Context, _, _ string, query appservice.MemoryRecallTraceQuery) ([]appservice.MemoryRecallTrace, error) {
+		var ret []appservice.MemoryRecallTrace
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListMemoryRecallTracesWithSession(ctx, session, query)
+			return err
+		})
+		return ret, err
+	}
 }
 
 func isMemoryBackend(backend string) bool {
@@ -3566,6 +3627,10 @@ func defaultListMemoryByWorkspace(ctx context.Context, backend string, dataRoot 
 
 func defaultSearchMemory(ctx context.Context, backend string, dataRoot string, query appservice.MemoryQuery) ([]appservice.MemoryItem, error) {
 	return appservice.SearchMemoryWithBackend(ctx, backend, dataRoot, query)
+}
+
+func defaultListMemoryRecallTraces(ctx context.Context, backend string, dataRoot string, query appservice.MemoryRecallTraceQuery) ([]appservice.MemoryRecallTrace, error) {
+	return appservice.ListMemoryRecallTracesWithBackend(ctx, backend, dataRoot, query)
 }
 
 func defaultReadConfiguration() (appservice.ServiceConfiguration, error) {
@@ -4266,6 +4331,19 @@ func memoryQueryFromValues(values url.Values) appservice.MemoryQuery {
 		Query:       strings.TrimSpace(values.Get("q")),
 		Tags:        compactQueryValues(values["tag"]),
 		Types:       compactQueryValues(values["type"]),
+		Limit:       limit,
+	}
+}
+
+func memoryRecallTraceQueryFromValues(values url.Values) appservice.MemoryRecallTraceQuery {
+	limit, _ := strconv.Atoi(strings.TrimSpace(values.Get("limit")))
+	return appservice.MemoryRecallTraceQuery{
+		WorkspaceID: strings.TrimSpace(values.Get("workspaceId")),
+		RunID:       strings.TrimSpace(values.Get("runId")),
+		StepID:      strings.TrimSpace(values.Get("stepId")),
+		Stage:       strings.TrimSpace(values.Get("stage")),
+		Source:      strings.TrimSpace(values.Get("source")),
+		Status:      strings.TrimSpace(values.Get("status")),
 		Limit:       limit,
 	}
 }

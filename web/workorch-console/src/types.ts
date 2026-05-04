@@ -292,6 +292,38 @@ export type MemoryItem = {
   vectorScore?: number;
 };
 
+export type MemoryRecallHit = {
+  id: string;
+  summary?: string;
+  vectorScore?: number;
+  vectorDimension?: number;
+};
+
+export type MemoryRecallTrace = {
+  id: string;
+  workspaceId: string;
+  runId: string;
+  stepId?: string;
+  graphNodeId?: string;
+  stage?: string;
+  source: string;
+  policy?: string;
+  status: string;
+  providerId?: string;
+  operation?: string;
+  queryTextPreview?: string;
+  queryTextSha256?: string;
+  minScore?: number;
+  limit?: number;
+  embeddingModel?: string;
+  vectorDimension?: number;
+  retrievedMemoryIds?: string[];
+  retrievedMemoryHits?: MemoryRecallHit[];
+  reason?: string;
+  occurredAt?: string;
+  evidenceRef?: string;
+};
+
 export type StepView = {
   id: string;
   runId: string;
@@ -539,6 +571,8 @@ export type ExecutionSection = {
   validationRefs?: string[];
   resultRefs?: string[];
   artifactRefs?: string[];
+  memoryRecallRefs?: string[];
+  memoryIds?: string[];
   summary?: string;
 };
 
@@ -657,6 +691,7 @@ export type RunObservability = {
   taskProgress: TaskProgress;
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];
+  memoryRecallTraces?: MemoryRecallTrace[];
   evidence: RuntimeEvidenceSummary;
   latestCheckpoint?: RuntimeCheckpoint;
   selectedCapabilities?: RuntimeCapability[];
@@ -671,6 +706,7 @@ export type RunSnapshot = {
   taskProgress: TaskProgress;
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];
+  memoryRecallTraces?: MemoryRecallTrace[];
   steps?: StepView[];
   toolCalls?: ToolCall[];
   patches?: Patch[];

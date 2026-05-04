@@ -8,10 +8,13 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -210,6 +213,63 @@ func TestCompressedContextForBlockedRunResumeUsesLightweightGovernanceProjection
 	}
 	if nonBlocked != nil {
 		t.Fatalf("running run should use snapshot-based compressed context")
+	}
+}
+
+func TestCompressedContextPatchRecordsRecoveryMemoryRecallTrace(t *testing.T) {
+	ctx := context.Background()
+	session, err := NewRuntimeSessionWithBackend("memory", "")
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	defer session.Close(ctx)
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-recovery-memory")
+	runID := common.RunID("run-recovery-memory")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "recovery memory", State: common.WorkspaceStateRunning}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := exports.Repositories.MemoryRecallTraces.Create(ctx, &memorymodel.MemoryRecallTrace{
+		ID:                 "trace-recovery-source",
+		WorkspaceID:        workspaceID,
+		RunID:              runID,
+		Stage:              "planning",
+		Source:             "activation",
+		Status:             "selected",
+		RetrievedMemoryIDs: []common.MemoryID{"memory-recovery-source"},
+		EvidenceRef:        "trace-recovery-source",
+	}); err != nil {
+		t.Fatalf("seed memory recall trace: %v", err)
+	}
+
+	patch, _, err := compressedContextPatchForRun(ctx, session, runID)
+	if err != nil {
+		t.Fatalf("compressedContextPatchForRun: %v", err)
+	}
+	compressed, _ := patch["compressedContext"].(map[string]any)
+	if !containsString(stringSliceFromAny(compressed["sourceSectionRefs"]), "memory_recall") {
+		t.Fatalf("compressed context = %+v, want memory_recall source section", compressed)
+	}
+	traces, err := exports.Repositories.MemoryRecallTraces.List(ctx, repository.MemoryRecallTraceQuery{RunID: runID, Source: "recovery"})
+	if err != nil {
+		t.Fatalf("list recovery traces: %v", err)
+	}
+	if len(traces) != 1 ||
+		traces[0].Policy != "inherit_compressed_context" ||
+		traces[0].Status != "inherited" ||
+		len(traces[0].RetrievedMemoryIDs) != 1 ||
+		traces[0].RetrievedMemoryIDs[0] != "memory-recovery-source" {
+		t.Fatalf("recovery traces = %+v, want inherited memory recall trace", traces)
 	}
 }
 

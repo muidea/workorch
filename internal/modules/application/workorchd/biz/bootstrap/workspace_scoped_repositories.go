@@ -30,6 +30,7 @@ const (
 	workspaceScopedGoalFile              = "goals.json"
 	workspaceScopedDoDFile               = "dods.json"
 	workspaceScopedMemoryItemFile        = "memory_item.json"
+	workspaceScopedMemoryRecallTraceFile = "memory_recall_trace.json"
 	workspaceScopedRunFile               = "run.json"
 	workspaceScopedStepFile              = "step.json"
 	workspaceScopedToolCallFile          = "tool_call.json"
@@ -57,6 +58,7 @@ type workspaceScopedFileStore struct {
 	goals              map[string]*fileRepo.GoalRepository
 	dods               map[string]*fileRepo.DoDRepository
 	memoryItems        map[string]*fileRepo.MemoryItemRepository
+	memoryRecallTraces map[string]*fileRepo.MemoryRecallTraceRepository
 	runs               map[string]*fileRepo.RunRepository
 	steps              map[string]*fileRepo.StepRepository
 	toolCalls          map[string]*fileRepo.ToolCallRepository
@@ -73,6 +75,7 @@ type workspaceScopedFileStore struct {
 
 type WorkspaceScopedFileRepositorySet struct {
 	MemoryItems        repository.MemoryItemRepository
+	MemoryRecallTraces repository.MemoryRecallTraceRepository
 	Workspaces         repository.WorkspaceRepository
 	Goals              repository.GoalRepository
 	DoDs               repository.DoDRepository
@@ -115,6 +118,7 @@ func NewWorkspaceScopedFileRepositorySet(dataRoot string) WorkspaceScopedFileRep
 	artifacts := NewArtifactStorageRepository(newWorkspaceScopedArtifactRepository(store), dataRoot)
 	return WorkspaceScopedFileRepositorySet{
 		MemoryItems:        newWorkspaceScopedMemoryItemRepository(store),
+		MemoryRecallTraces: newWorkspaceScopedMemoryRecallTraceRepository(store),
 		Workspaces:         newWorkspaceScopedWorkspaceRepository(store),
 		Goals:              newWorkspaceScopedGoalRepository(store),
 		DoDs:               newWorkspaceScopedDoDRepository(store),
@@ -141,6 +145,7 @@ func newWorkspaceScopedFileStore(dataRoot string) *workspaceScopedFileStore {
 		goals:              map[string]*fileRepo.GoalRepository{},
 		dods:               map[string]*fileRepo.DoDRepository{},
 		memoryItems:        map[string]*fileRepo.MemoryItemRepository{},
+		memoryRecallTraces: map[string]*fileRepo.MemoryRecallTraceRepository{},
 		runs:               map[string]*fileRepo.RunRepository{},
 		steps:              map[string]*fileRepo.StepRepository{},
 		toolCalls:          map[string]*fileRepo.ToolCallRepository{},
@@ -294,6 +299,17 @@ func (s *workspaceScopedFileStore) memoryItemRepo(path string) *fileRepo.MemoryI
 	if !ok {
 		repo = fileRepo.NewMemoryItemRepository(path)
 		s.memoryItems[path] = repo
+	}
+	return repo
+}
+
+func (s *workspaceScopedFileStore) memoryRecallTraceRepo(path string) *fileRepo.MemoryRecallTraceRepository {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	repo, ok := s.memoryRecallTraces[path]
+	if !ok {
+		repo = fileRepo.NewMemoryRecallTraceRepository(path)
+		s.memoryRecallTraces[path] = repo
 	}
 	return repo
 }
@@ -938,6 +954,74 @@ func (r *workspaceScopedMemoryItemRepository) Delete(ctx context.Context, id com
 		return err
 	}
 	return r.store.memoryItemRepo(filepath.Join(r.store.workspaceRoot(current.WorkspaceID), workspaceScopedMemoryItemFile)).Delete(ctx, id)
+}
+
+type workspaceScopedMemoryRecallTraceRepository struct {
+	store *workspaceScopedFileStore
+}
+
+func newWorkspaceScopedMemoryRecallTraceRepository(store *workspaceScopedFileStore) *workspaceScopedMemoryRecallTraceRepository {
+	return &workspaceScopedMemoryRecallTraceRepository{store: store}
+}
+
+func (r *workspaceScopedMemoryRecallTraceRepository) Create(ctx context.Context, item *memorymodel.MemoryRecallTrace) error {
+	if item == nil || item.WorkspaceID == "" || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	return r.store.memoryRecallTraceRepo(filepath.Join(r.store.workspaceRoot(item.WorkspaceID), workspaceScopedMemoryRecallTraceFile)).Create(ctx, item)
+}
+
+func (r *workspaceScopedMemoryRecallTraceRepository) Upsert(ctx context.Context, item *memorymodel.MemoryRecallTrace) error {
+	if item == nil || item.WorkspaceID == "" || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	return r.store.memoryRecallTraceRepo(filepath.Join(r.store.workspaceRoot(item.WorkspaceID), workspaceScopedMemoryRecallTraceFile)).Upsert(ctx, item)
+}
+
+func (r *workspaceScopedMemoryRecallTraceRepository) Get(ctx context.Context, id common.MemoryRecallTraceID) (*memorymodel.MemoryRecallTrace, error) {
+	if id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	for _, root := range r.store.allWorkspaceRoots() {
+		item, err := r.store.memoryRecallTraceRepo(filepath.Join(root, workspaceScopedMemoryRecallTraceFile)).Get(ctx, id)
+		if err == nil {
+			return item, nil
+		}
+		if err != common.ErrNotFound {
+			return nil, err
+		}
+	}
+	return nil, common.ErrNotFound
+}
+
+func (r *workspaceScopedMemoryRecallTraceRepository) List(ctx context.Context, query repository.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
+	if query.WorkspaceID != "" {
+		return r.store.memoryRecallTraceRepo(filepath.Join(r.store.workspaceRoot(query.WorkspaceID), workspaceScopedMemoryRecallTraceFile)).List(ctx, query)
+	}
+	ret := []*memorymodel.MemoryRecallTrace{}
+	for _, root := range r.store.allWorkspaceRoots() {
+		items, err := r.store.memoryRecallTraceRepo(filepath.Join(root, workspaceScopedMemoryRecallTraceFile)).List(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, items...)
+	}
+	sortMemoryRecallTraces(ret)
+	if query.Limit > 0 && len(ret) > query.Limit {
+		ret = ret[:query.Limit]
+	}
+	return nilIfEmpty(ret), nil
+}
+
+func (r *workspaceScopedMemoryRecallTraceRepository) Delete(ctx context.Context, id common.MemoryRecallTraceID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.store.memoryRecallTraceRepo(filepath.Join(r.store.workspaceRoot(current.WorkspaceID), workspaceScopedMemoryRecallTraceFile)).Delete(ctx, id)
 }
 
 type workspaceScopedRunRepository struct {
@@ -2110,6 +2194,15 @@ func sortMemoryItems(items []*memorymodel.MemoryItem, query repository.MemorySea
 		}
 		if items[i].Importance != items[j].Importance {
 			return items[i].Importance > items[j].Importance
+		}
+		return string(items[i].ID) < string(items[j].ID)
+	})
+}
+
+func sortMemoryRecallTraces(items []*memorymodel.MemoryRecallTrace) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].OccurredAt != items[j].OccurredAt {
+			return items[i].OccurredAt < items[j].OccurredAt
 		}
 		return string(items[i].ID) < string(items[j].ID)
 	})

@@ -640,6 +640,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/task-progress"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/context-bundle"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/task-decompositions"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/memory-recalls"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/soul-bindings"},
 		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/soul-bindings"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
@@ -658,6 +659,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/snapshot"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/status"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/observability"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/memory-recalls"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/task-progress"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/context-bundle"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/task-decompositions"},
@@ -701,6 +703,53 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/console"},
 		{method: http.MethodGet, pattern: "/console/"},
 		{method: http.MethodGet, pattern: "/console/**"},
+	}
+}
+
+func TestMemoryRecallTraceEndpointsReturnFilteredTraces(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := state.close(ctx); err != nil {
+			t.Fatalf("close server state: %v", err)
+		}
+	})
+	state.listMemoryRecallTraces = func(_ context.Context, _, _ string, query appservice.MemoryRecallTraceQuery) ([]appservice.MemoryRecallTrace, error) {
+		if query.RunID != "run-recall-http" && query.WorkspaceID != "ws-recall-http" {
+			t.Fatalf("memory recall query = %+v, want run or workspace filter", query)
+		}
+		return []appservice.MemoryRecallTrace{
+			{
+				ID:                 "run-recall-http/memory-recall/activation",
+				WorkspaceID:        "ws-recall-http",
+				RunID:              "run-recall-http",
+				Stage:              "planning",
+				Source:             "activation",
+				Status:             "selected",
+				RetrievedMemoryIDs: []string{"memory-recall-http"},
+			},
+		}, nil
+	}
+	handler := newMuxWithState(state)
+
+	for _, path := range []string{
+		"/api/v1/workorch/runs/run-recall-http/memory-recalls",
+		"/api/v1/workorch/workspaces/ws-recall-http/memory-recalls",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, body=%s", path, rec.Code, rec.Body.String())
+		}
+		var body memoryRecallTracesResponse
+		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+			t.Fatalf("decode %s response: %v", path, err)
+		}
+		if len(body.MemoryRecallTraces) != 1 || body.MemoryRecallTraces[0].RetrievedMemoryIDs[0] != "memory-recall-http" {
+			t.Fatalf("%s memoryRecallTraces = %+v, want recalled memory", path, body.MemoryRecallTraces)
+		}
 	}
 }
 

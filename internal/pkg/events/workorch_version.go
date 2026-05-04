@@ -30,6 +30,7 @@ var (
 		TopicMemoryCreated:         newWorkorchEventContract(TopicMemoryCreated),
 		TopicMemoryUpdated:         newWorkorchEventContract(TopicMemoryUpdated),
 		TopicMemoryDeleted:         newWorkorchEventContract(TopicMemoryDeleted),
+		TopicMemoryRecallRecorded:  newWorkorchEventContract(TopicMemoryRecallRecorded),
 	}
 	workorchSnapshotContracts = map[string]WorkorchContractSpec{
 		"/workspace/snapshot":       newWorkorchSnapshotContract("/workspace/snapshot"),

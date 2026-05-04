@@ -13,7 +13,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMProviderTemplate, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMProviderTemplate, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -415,13 +415,17 @@ function executionSectionsCard(items?: ExecutionSection[]) {
   const completed = sections.filter((item) => item.state === 'completed').length;
   const failed = sections.filter((item) => item.state === 'failed').length;
   const running = sections.filter((item) => item.state === 'running').length;
+  const memoryRecallRefs = new Set(sections.flatMap((item) => item.memoryRecallRefs ?? [])).size;
+  const memoryIds = new Set(sections.flatMap((item) => item.memoryIds ?? [])).size;
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       {metricGrid([
         { key: 'total', label: '分区总数', value: sections.length, color: '#1668dc' },
         { key: 'completed', label: '已完成', value: completed, color: '#389e0d' },
         { key: 'running', label: '执行中', value: running, color: '#0958d9' },
-        { key: 'failed', label: '失败', value: failed, color: '#cf1322' }
+        { key: 'failed', label: '失败', value: failed, color: '#cf1322' },
+        { key: 'memoryRecallRefs', label: 'Memory Recall', value: memoryRecallRefs, color: '#08979c' },
+        { key: 'memoryIds', label: 'Memory 引用', value: memoryIds, color: '#531dab' }
       ])}
       <ProTable<ExecutionSection>
         rowKey="id"
@@ -434,6 +438,8 @@ function executionSectionsCard(items?: ExecutionSection[]) {
           { title: '状态', dataIndex: 'state', width: 110, render: (_, item) => stateTag(item.state) },
           { title: '图节点', dataIndex: 'graphNodeId', copyable: true, ellipsis: true },
           { title: '步骤', dataIndex: 'stepId', copyable: true, ellipsis: true },
+          { title: 'Memory Recall', dataIndex: 'memoryRecallRefs', width: 180, render: (_, item) => compactTags(item.memoryRecallRefs ?? [], 3) },
+          { title: 'Memory', dataIndex: 'memoryIds', width: 160, render: (_, item) => compactTags(item.memoryIds ?? [], 3) },
           { title: '证据', dataIndex: 'actualEvidenceRefs', width: 220, render: (_, item) => compactTags(item.actualEvidenceRefs ?? [], 4) }
         ]}
         expandable={{
@@ -447,12 +453,124 @@ function executionSectionsCard(items?: ExecutionSection[]) {
                 { key: 'planned', label: '计划引用', children: compactTags(item.plannedStepRefs ?? [], 6) },
                 { key: 'governance', label: '治理工单', children: compactTags([...(item.decisionRefs ?? []), ...(item.approvalRefs ?? [])], 6) },
                 { key: 'runtime', label: '运行证据', children: compactTags([...(item.toolCallRefs ?? []), ...(item.patchRefs ?? []), ...(item.validationRefs ?? [])], 6) },
-                { key: 'outputs', label: '结果交付', children: compactTags([...(item.resultRefs ?? []), ...(item.artifactRefs ?? [])], 6) }
+                { key: 'outputs', label: '结果交付', children: compactTags([...(item.resultRefs ?? []), ...(item.artifactRefs ?? [])], 6) },
+                { key: 'memoryRecall', label: 'Memory Recall 证据', children: compactTags(item.memoryRecallRefs ?? [], 8) },
+                { key: 'memoryIds', label: 'Memory 引用', children: compactTags(item.memoryIds ?? [], 8) }
               ]}
             />
           )
         }}
         dataSource={sections}
+      />
+    </Space>
+  );
+}
+
+type MemoryRecallGroup = {
+  key: string;
+  source: string;
+  stage: string;
+  status: string;
+  traces: MemoryRecallTrace[];
+  memoryIds: string[];
+};
+
+function memoryRecallGroups(items: MemoryRecallTrace[]) {
+  const grouped = new Map<string, MemoryRecallTrace[]>();
+  for (const item of items) {
+    const source = item.source || 'unknown';
+    const stage = item.stage || 'unknown';
+    const key = `${source}/${stage}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), item]);
+  }
+  return Array.from(grouped.entries())
+    .map(([key, traces]) => {
+      const [source, stage] = key.split('/');
+      const status = traces.some((item) => item.status === 'degraded') ? 'degraded' : traces.some((item) => item.status === 'selected') ? 'selected' : traces[0]?.status || 'unknown';
+      const memoryIds = Array.from(new Set(traces.flatMap((item) => item.retrievedMemoryIds ?? [])));
+      return { key, source, stage, status, traces, memoryIds };
+    })
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function memoryRecallQueryPanel(item: MemoryRecallTrace) {
+  return compactJSON({
+    policy: item.policy,
+    providerId: item.providerId,
+    operation: item.operation,
+    queryTextPreview: item.queryTextPreview,
+    queryTextSha256: item.queryTextSha256,
+    minScore: item.minScore,
+    limit: item.limit,
+    embeddingModel: item.embeddingModel,
+    vectorDimension: item.vectorDimension,
+    occurredAt: item.occurredAt,
+    evidenceRef: item.evidenceRef
+  });
+}
+
+function memoryRecallCard(items?: MemoryRecallTrace[]) {
+  const traces = items ?? [];
+  if (traces.length === 0) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 未记录 Memory Recall 证据" />;
+  }
+  const groups = memoryRecallGroups(traces);
+  const memoryIds = new Set(traces.flatMap((item) => item.retrievedMemoryIds ?? [])).size;
+  const degraded = traces.filter((item) => item.status === 'degraded').length;
+  const selected = traces.filter((item) => item.status === 'selected').length;
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      {metricGrid([
+        { key: 'traces', label: 'Trace', value: traces.length, color: '#1668dc' },
+        { key: 'groups', label: '阶段分组', value: groups.length, color: '#08979c' },
+        { key: 'selected', label: 'Selected', value: selected, color: '#389e0d' },
+        { key: 'degraded', label: 'Degraded', value: degraded, color: degraded ? '#cf1322' : undefined },
+        { key: 'memoryIds', label: 'Memory', value: memoryIds, color: '#531dab' }
+      ])}
+      <ProTable<MemoryRecallGroup>
+        rowKey="key"
+        search={false}
+        options={false}
+        pagination={false}
+        size="small"
+        columns={[
+          { title: '分组', dataIndex: 'key', render: (_, item) => <Space><Tag color="blue">{item.source}</Tag><Tag>{item.stage}</Tag></Space> },
+          { title: '状态', dataIndex: 'status', width: 110, render: (_, item) => stateTag(item.status) },
+          { title: 'Trace', width: 90, render: (_, item) => item.traces.length },
+          { title: '命中 Memory', dataIndex: 'memoryIds', ellipsis: true, render: (_, item) => compactTags(item.memoryIds, 5) }
+        ]}
+        expandable={{
+          expandedRowRender: (group) => (
+            <ProTable<MemoryRecallTrace>
+              rowKey="id"
+              search={false}
+              options={false}
+              pagination={false}
+              size="small"
+              columns={[
+                { title: 'Trace', dataIndex: 'id', copyable: true, ellipsis: true },
+                { title: '策略', dataIndex: 'policy', ellipsis: true },
+                { title: '状态', dataIndex: 'status', width: 100, render: (_, item) => stateTag(item.status) },
+                { title: '命中 Memory', dataIndex: 'retrievedMemoryIds', ellipsis: true, render: (_, item) => compactTags(item.retrievedMemoryIds ?? [], 5) },
+                { title: '原因', dataIndex: 'reason', ellipsis: true, render: (_, item) => boundedParagraph(item.reason || item.queryTextPreview || '-', { rows: 2 }) }
+              ]}
+              dataSource={group.traces}
+              expandable={{
+                expandedRowRender: (item) => (
+                  <ProCard gutter={16} wrap ghost>
+                    <ProCard title="查询" colSpan={{ xs: 24, lg: 12 }}>
+                      <pre className="json-panel json-panel-large">{memoryRecallQueryPanel(item)}</pre>
+                    </ProCard>
+                    <ProCard title="命中详情" colSpan={{ xs: 24, lg: 12 }}>
+                      <pre className="json-panel json-panel-large">{compactJSON(item.retrievedMemoryHits ?? [])}</pre>
+                    </ProCard>
+                  </ProCard>
+                )
+              }}
+            />
+          )
+        }}
+        dataSource={groups}
       />
     </Space>
   );
@@ -2776,7 +2894,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                       <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 未产生工具调用" />
                     )}
                   </ProCard>
-                  <ProCard title="Memory 输出" colSpan={{ xs: 24, lg: 12 }}>
+                  <ProCard title="Memory 写入/引用" colSpan={{ xs: 24, lg: 12 }}>
                     {outcomeMemories.length ? (
                       <ProTable<MemoryItem>
                         rowKey="id"
@@ -2795,6 +2913,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     ) : (
                       <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 未产生或引用 Memory 成果" />
                     )}
+                  </ProCard>
+                  <ProCard title="Memory Recall" colSpan={{ xs: 24, lg: 12 }}>
+                    {memoryRecallCard(runSnapshot.memoryRecallTraces)}
                   </ProCard>
                 </ProCard>
               </Space>

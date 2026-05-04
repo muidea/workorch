@@ -8,6 +8,21 @@
 
 ## 当前核对结论
 
+### 当前落实状态（2026-05-04）
+
+- 已完成 CLI 分支合并到本地 `master`，本轮后续实现基于合并后的 `master` 开展。
+- 已新增一等过程证据模型 `MemoryRecallTrace` / `MemoryRecallHit`，并新增 `MemoryRecallTraceID`。
+- 已新增 `MemoryRecallTraceRepository`，并完成 memory/file/workspace scoped file 三类后端。
+- 已新增 EventHub 主题 `/memory/recall/recorded`，并补齐 payload、decode、contract 注册。
+- 已完成 `source=activation` trace：Run 创建后从 activation `executionContext.memoryRetrieval/memoryIds/memories` 生成确定性 trace。
+- 已完成 `source=step_input` trace：LLM step 输入包构建完成后，将当前 step 实际注入的 `selectedContext.memoryRetrieval/memories` 记录为 trace 并发布 EventHub 事件。
+- 已完成 `source=recovery` 继承型 trace：Run resume 生成 compressed context 时，如果上下文继承了 memory recall section，则记录 `policy=inherit_compressed_context` 的 recovery trace。
+- 已完成读模型/API 投影：`RunSnapshot.memoryRecallTraces`、`RunObservability.memoryRecallTraces`、timeline `memory_recall`、`ContextBundle.memory_recall`、`ExecutionSection.memoryRecallRefs/memoryIds`、run/workspace 两个 memory-recalls 查询 API。
+- 已完成 Web 展示：Run 详情按 source/stage 分组展示 Memory Recall，将 Memory 写入/引用与 Memory Recall 分离，并在执行分区展示 `memoryRecallRefs/memoryIds`。
+- 已完成 TUI 基础展示：`/memory` 显示当前 run compact recall 摘要，EventHub `/memory/recall/recorded` 事件会刷新当前 workspace context 并更新进度栏。
+- 已扩展 deployed e2e 脚本：`scripts/verify-llm-workspace-execution.sh` 的 memory recall 场景会验证 snapshot、observability、context-bundle、run/workspace memory-recalls API 和 EventStream，并已在部署环境验证通过。
+- 已通过受影响 Go 测试：`go test ./internal/modules/kernel/orchestrator/... ./internal/pkg/events ./internal/pkg/repository ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server -count=1`。
+
 ### 已存在能力
 
 - Memory 作为业务知识模型已经存在，核心模型是 `MemoryItem`。
@@ -25,15 +40,11 @@
 - Web 已能读取 `RunSnapshot`、`RunObservability`、`ContextBundle` 和 Memory 列表。
 - 当前 e2e 已能验证第二轮 Run 召回 Memory，并在 snapshot/observability 的部分上下文中可见。
 
-### 主要缺口
+### 剩余缺口
 
-- 缺少一等过程证据模型。`MemoryItem` 是知识内容，不是 recall 过程记录；`Run.ExecutionContext` 是启动上下文，不适合作为完整审计日志。
-- 缺少独立持久化仓储。当前没有 `MemoryRecallTraceRepository` 或等价结构，不能按 workspace/run/step/stage 查询 recall 证据。
-- 缺少事件流。当前 EventStream 可持久化 Workorch 事件，但没有 memory recall recorded 事件主题。
-- 缺少阶段投影。无法直接回答“planning/execution/decision/approval/validation/artifact 阶段分别 recall 了哪些 memory”。
-- `RunSnapshot`、`RunObservability`、`ContextBundle`、`ExecutionSection` 没有明确字段承载 memory recall trace。
-- Web 当前更接近 raw JSON 展示，无法稳定表达 recall 来源、阶段、策略、命中分数和 evidence refs。
-- TUI 当前保持 result-first 是合理的，但缺少显式命令查看当前 run 的 recall 摘要。
+- Recovery recall trace 已完成继承型记录；如后续引入 recovery 阶段重新检索 memory，需要继续记录重新检索型 `source=recovery` trace。
+- TUI `/memory` 与 EventHub 刷新已完成基础能力；当前已纳入 TUI acceptance 脚本，部署后还需执行实际服务验收。
+- Deployed full e2e 脚本已补齐 traceability 断言，仍需在重新部署后执行确认。
 
 ## 目标模型
 
@@ -96,13 +107,23 @@
 
 ### Recovery recall trace
 
+状态：已完成继承型记录。
+
 当 recovery 或 compressed context 重新装配 selected context 时，记录 `source=recovery`。
 
 如果 recovery 当前只是复用已有 selected context，也需要能通过 trace 说明该阶段没有重新检索，而是继承了已有 recall evidence。
 
+当前实现：
+
+- Run resume 生成 compressed context 时，如果 `sourceSectionRefs` 包含 `memory_recall`，则写入确定性 ID：`{runId}/memory-recall/recovery`。
+- `policy=inherit_compressed_context`，表示没有重新检索，而是继承已有 recall evidence。
+- 通过 EventHub 发布 `/memory/recall/recorded`。
+
 ## 持久化与事件
 
 ### Repository
+
+状态：已完成。
 
 新增 repository interface：
 
@@ -126,9 +147,11 @@ file backend 建议落地到 workspace scoped 数据目录，例如：
 
 ### EventHub/EventStream
 
-新增事件主题，例如：
+状态：已完成 EventHub 事件主题和 payload 合约，并已通过部署环境 e2e 确认 EventStream 对该主题的持久化可查询性。
 
-- `/workorch/memory/recall/recorded`
+新增事件主题：
+
+- `/memory/recall/recorded`
 
 事件 payload 包含 trace 摘要：
 
@@ -149,6 +172,8 @@ file backend 建议落地到 workspace scoped 数据目录，例如：
 
 ### RunSnapshot
 
+状态：已完成。
+
 新增：
 
 - `MemoryRecallTraces []MemoryRecallTrace`
@@ -156,6 +181,8 @@ file backend 建议落地到 workspace scoped 数据目录，例如：
 用于完整展示当前 run 的 recall 证据。
 
 ### RunObservability
+
+状态：已完成。
 
 新增：
 
@@ -172,6 +199,8 @@ timeline 条目要能展示：
 
 ### ContextBundle
 
+状态：已完成。
+
 新增 `memory_recall` section：
 
 - `kind=memory_recall`
@@ -179,6 +208,8 @@ timeline 条目要能展示：
 - `data` 包含按 source/stage 聚合后的 trace 列表
 
 ### ExecutionSection
+
+状态：已完成。
 
 新增：
 
@@ -188,6 +219,8 @@ timeline 条目要能展示：
 用于把每个执行段和 recall 证据关联起来，而不是让前端反查 raw step input。
 
 ### HTTP API
+
+状态：已完成。
 
 建议新增只读 API：
 
@@ -200,17 +233,21 @@ timeline 条目要能展示：
 
 ### Web
 
+状态：已完成。
+
 Web 应展示正式 `MemoryRecallTrace`，而不是只展示 raw `executionContext`。
 
 需要补齐：
 
-- Run 详情增加 Memory Recall 卡片或 tab。
+- Run 详情增加 Memory Recall 卡片。
 - 按 source/stage 分组展示 recall 记录。
 - 展示 recall 策略、状态、命中 memory、score、reason。
 - 将现有“Memory 输出”改名为“Memory 写入/引用”，避免与 recall 混淆。
-- step 展开区域可以展示关联 trace refs，但不应该依赖 raw input 作为唯一数据源。
+- 执行分区展示 `memoryRecallRefs` 和 `memoryIds`，不依赖 raw input 作为唯一数据源。
 
 ### TUI
+
+状态：已完成基础能力。
 
 TUI 默认仍保持结果优先，不展示详细 recall trace，避免干扰主交互。
 
@@ -219,6 +256,12 @@ TUI 默认仍保持结果优先，不展示详细 recall trace，避免干扰主
 - `/memory` 或 `/context memory` 显示当前 run 的 compact recall 摘要。
 - 长任务进度栏可显示 `Memory recall: selected N` 或 `Memory recall: degraded`。
 - 当 EventHub 收到 memory recall recorded 事件时刷新相关视图。
+
+当前已落地：
+
+- `/memory` 显示当前 run 的 compact recall 摘要。
+- EventHub `/memory/recall/recorded` 事件会刷新当前 workspace context。
+- 进度栏会显示 `Memory recall: selected N` 或 `Memory recall: degraded`。
 
 ## 验收清单
 
@@ -275,6 +318,24 @@ TUI 默认仍保持结果优先，不展示详细 recall trace，避免干扰主
 ## 当前状态
 
 - requirement status: confirmed
-- implementation status: not started
+- implementation status: implemented, deployed verification passed
+- completed:
+  - CLI branch merged into local `master`
+  - `MemoryRecallTrace` model/repository/storage
+  - activation trace
+  - step input trace
+  - recovery inherited trace
+  - EventHub topic `/memory/recall/recorded`
+  - RunSnapshot/RunObservability/ContextBundle/ExecutionSection projection
+  - run/workspace HTTP query APIs
+  - Web grouped Memory Recall display and ExecutionSection refs
+  - TUI `/memory` compact recall summary and EventHub refresh
+  - deployed e2e script traceability assertions
+  - affected Go/TUI/console build verification
+  - deployed verification: `./scripts/verify-tui-agent.sh --static-only --scripted`
+  - deployed verification: `./scripts/verify-llm-workspace-execution.sh`
+  - deployed verification: `make verify-deployed-full`
+- remaining:
+  - none
 - temporary workaround accepted: no
 - tracking owner: workorch memory recall traceability

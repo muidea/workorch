@@ -443,7 +443,7 @@ func TestModelEmptyWorkspaceGuidance(t *testing.T) {
 	m.width = 90
 	m.height = 18
 	view := stripANSI(m.View())
-	for _, want := range []string{"No workspaces found", "/workspace create", "--template software-dev", "/dod"} {
+	for _, want := range []string{"No workspaces found", "/workspace create <title> --dir <path>", "--template generic-governed", "--template software-dev", "/dod"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("empty workspace guidance missing %q:\n%s", want, view)
 		}
@@ -1158,6 +1158,66 @@ func TestModelWorkspaceContextHydratesFreshSnapshot(t *testing.T) {
 	view := stripANSI(m.View())
 	if strings.Contains(view, "old task") || strings.Contains(view, "old result") || !strings.Contains(view, "fresh result") || !strings.Contains(view, "fresh goal") {
 		t.Fatalf("view not fully refreshed:\n%s", view)
+	}
+}
+
+func TestModelMemoryCommandShowsRecallSummary(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	next, _ := m.Update(WorkspaceContextMsg{
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+			Runs:      []backend.RunInfo{{ID: "run-a", WorkspaceID: "ws-a", GoalID: "goal-a", State: common.RunStateRunning}},
+			MemoryRecallTraces: []backend.MemoryRecallTraceInfo{{
+				ID:                 "trace-a",
+				WorkspaceID:        "ws-a",
+				RunID:              "run-a",
+				StepID:             "run-a/step-1",
+				Stage:              "planning",
+				Source:             "activation",
+				Status:             "selected",
+				RetrievedMemoryIDs: []common.MemoryID{"memory-a"},
+				RetrievedMemoryHits: []backend.MemoryRecallHitInfo{{
+					ID:      "memory-a",
+					Summary: "project context",
+				}},
+			}},
+		},
+		ActiveRun: &backend.RunInfo{ID: "run-a", WorkspaceID: "ws-a", GoalID: "goal-a", State: common.RunStateRunning},
+		Goal:      &backend.GoalInfo{ID: "goal-a", Text: "use memory"},
+	})
+	m = asModel(next)
+	m.input = "/memory"
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("memory command should render from current snapshot without command")
+	}
+	m = asModel(next)
+	if !strings.Contains(m.result, "activation/planning: selected") || !strings.Contains(m.result, "memory-a: project context") {
+		t.Fatalf("memory result = %q, want compact recall summary", m.result)
+	}
+}
+
+func TestModelMemoryRecallEventRefreshesContext(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	m.activeRunID = "run-a"
+	next, cmd := m.Update(BackendEventMsg{Event: backend.Event{
+		Type:        backend.EventMemoryRecallRecorded,
+		WorkspaceID: "ws-a",
+		RunID:       "run-a",
+		Payload: map[string]any{
+			"status":             "selected",
+			"retrievedMemoryIds": []string{"memory-a", "memory-b"},
+		},
+	}})
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("memory recall event should refresh workspace context")
+	}
+	if m.progressText != "Memory recall: selected 2" {
+		t.Fatalf("progress text = %q, want memory recall summary", m.progressText)
 	}
 }
 

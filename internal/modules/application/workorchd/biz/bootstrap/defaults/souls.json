@@ -51,7 +51,7 @@
     "businessDomains": ["通用"],
     "allowedToolKinds": [],
     "allowedCapabilityCategories": [],
-    "soulMD": "# 交付物阶段\n\n生成最终的结构化交付物。\n\n## 交付物要求\n- final_summary: 包含 goalOutcome, implementationSummary, verificationSummary\n- deliverable_manifest: 列出所有产出文件及其用途\n- 每个交付物关联到对应的 evidenceRefs\n- knownLimitations 和 residualRisks 如实记录"
+    "soulMD": "# 交付物阶段\n\n生成最终的结构化交付物。\n\n## 交付物要求\n- final_summary 由 runtime artifact 记录，包含 goalOutcome, implementationSummary, verificationSummary\n- deliverable_manifest 由 runtime artifact 记录，列出所有产出文件及其用途\n- 每个交付物关联到对应的 evidenceRefs\n- knownLimitations 和 residualRisks 如实记录\n\n## 禁止\n- 不要通过 patch/apply 或 patchRequests 写入 decision_record.md、approval_record.md、delivery_summary.md、result_summary.md、final_summary.md、deliverable_manifest.md、evidence_chain.md 等治理/报告文件\n- 最终用户可见结果应放入 dodAssessment，由 runtime 生成 result summary 和 manifest artifact"
   },
   {
     "id": "soul-weather-query-planning",
@@ -105,7 +105,7 @@
     "businessDomains": ["天气", "数据查询"],
     "allowedToolKinds": [],
     "allowedCapabilityCategories": [],
-    "soulMD": "# 天气查询交付物\n\n## 交付物要求\n- final_summary: 包含天气查询结果摘要\n- deliverable_manifest: 列出所有产出文件\n- 证据引用 Decision Ticket、Approval 和 MCP 工具调用\n- 记录天气数据的时间戳和来源 API"
+    "soulMD": "# 天气查询交付物\n\n## 交付物要求\n- final_summary 由 runtime artifact 记录，包含天气查询结果摘要\n- deliverable_manifest 由 runtime artifact 记录，引用 Decision Ticket、Approval、MCP 工具调用或 shell/MCP 证据\n- 记录天气数据的时间戳和来源 API\n\n## 禁止\n- 不要通过 patch/apply 或 patchRequests 写入 decision_record.md、approval_record.md、delivery_summary.md、result_summary.md、final_summary.md、deliverable_manifest.md、evidence_chain.md 等治理/报告文件\n- 查询结果应放入 dodAssessment，由 runtime 生成最终 artifact"
   },
   {
     "id": "soul-software-dev-planning",
@@ -159,7 +159,7 @@
     "businessDomains": ["软件开发"],
     "allowedToolKinds": [],
     "allowedCapabilityCategories": [],
-    "soulMD": "# 软件开发交付物\n\n产出结构化交付物，面向最终交付而不是过程日志。\n\n## 交付物清单\n- source: unified_diff 或 patch artifact，说明修改文件和关键变更\n- test_report: 测试命令、退出码、pass/fail/skipped 或等价摘要\n- configuration: 如有配置变更一并提交并说明影响\n- final_summary: Goal 达成情况、实现总结、验证总结、已知限制和残余风险\n- deliverable_manifest: 所有交付物索引、证据引用和可追溯 URI\n\n## 交付物质量要求\n- unified_diff 只能包含项目相关的文件变更\n- 测试报告必须说明实际运行命令；未运行或跳过时必须说明原因\n- 不要包含 build 产物二进制文件\n- 不要包含 node_modules、vendor 等第三方代码\n- 最终 Result 必须包含真实交付内容，不要只写“已完成”"
+    "soulMD": "# 软件开发交付物\n\n产出结构化交付物，面向最终交付而不是过程日志。\n\n## 交付物清单\n- source: unified_diff 或 patch artifact，说明修改文件和关键变更\n- test_report: 测试命令、退出码、pass/fail/skipped 或等价摘要\n- configuration: 如有配置变更一并提交并说明影响\n- final_summary 由 runtime artifact 记录：Goal 达成情况、实现总结、验证总结、已知限制和残余风险\n- deliverable_manifest 由 runtime artifact 记录：所有交付物索引、证据引用和可追溯 URI\n\n## 交付物质量要求\n- unified_diff 只能包含项目相关的文件变更\n- 测试报告必须说明实际运行命令；未运行或跳过时必须说明原因\n- 不要包含 build 产物二进制文件\n- 不要包含 node_modules、vendor 等第三方代码\n- 最终 Result 必须包含真实交付内容，不要只写“已完成”\n\n## 禁止\n- 不要通过 patch/apply 或 patchRequests 写入 result_summary.md、final_summary.md、deliverable_manifest.md、evidence_chain.md 等 runtime 管理的报告文件"
   },
   {
     "id": "soul-code-review-planning",
@@ -213,7 +213,7 @@
     "businessDomains": ["软件开发", "代码审查"],
     "allowedToolKinds": [],
     "allowedCapabilityCategories": [],
-    "soulMD": "# 代码审查交付物\n\n## 交付物清单\n- test_report: 代码审查报告（JSON 格式，包含所有发现的问题）\n- final_summary: 审查总结（通过/不通过/需改进）\n- deliverable_manifest: 所有交付物索引\n\n## 审查报告格式\n- 每个问题：location, category, severity, description, suggestion\n- 统计：按严重程度和分类的问题数量\n- 总体评估：pass / pass_with_suggestions / needs_improvement / fail"
+    "soulMD": "# 代码审查交付物\n\n## 交付物清单\n- test_report: 代码审查报告（结构化内容，包含所有发现的问题）\n- final_summary 由 runtime artifact 记录：审查总结（通过/不通过/需改进）\n- deliverable_manifest 由 runtime artifact 记录：所有交付物索引\n\n## 审查报告格式\n- 每个问题：location, category, severity, description, suggestion\n- 统计：按严重程度和分类的问题数量\n- 总体评估：pass / pass_with_suggestions / needs_improvement / fail\n\n## 禁止\n- 代码审查模板是只读流程，不要通过 patch/apply 或 patchRequests 写入 workspace 文件\n- 不要写入 result_summary.md、final_summary.md、deliverable_manifest.md、evidence_chain.md 等 runtime 管理的报告文件"
   },
   {
     "id": "soul-doc-generator-planning",
@@ -267,7 +267,7 @@
     "businessDomains": ["文档", "技术写作"],
     "allowedToolKinds": [],
     "allowedCapabilityCategories": [],
-    "soulMD": "# 文档生成交付物\n\n## 交付物类别\n- documentation: README.md, API_REFERENCE.md, ARCHITECTURE.md\n- configuration: OpenAPI spec, GraphQL schema\n- final_summary: 文档生成总结\n- deliverable_manifest: 所有文档文件索引\n\n## 格式要求\n- 每个文档文件在 manifest 中列出用途和受众\n- 文档 URI 使用 workorch:// 前缀"
+    "soulMD": "# 文档生成交付物\n\n## 交付物类别\n- documentation: README.md, API_REFERENCE.md, ARCHITECTURE.md 等用户明确需要的文档文件\n- configuration: OpenAPI spec, GraphQL schema 等用户明确需要的配置交付物\n- final_summary 由 runtime artifact 记录：文档生成总结\n- deliverable_manifest 由 runtime artifact 记录：所有文档文件索引\n\n## 格式要求\n- 每个文档文件在 manifest 中列出用途和受众\n- 文档 URI 使用 workorch:// 前缀\n\n## 禁止\n- 不要额外写入 result_summary.md、final_summary.md、deliverable_manifest.md、evidence_chain.md 等 runtime 管理的报告文件"
   },
   {
     "id": "soul-data-analysis-planning",
@@ -321,6 +321,6 @@
     "businessDomains": ["数据分析", "数据科学"],
     "allowedToolKinds": [],
     "allowedCapabilityCategories": [],
-    "soulMD": "# 数据分析交付物\n\n## 交付物清单\n- test_report: 分析报告（方法、结果、结论）\n- source: 分析脚本（Python/R）\n- runtime_evidence: 中间数据和图表\n- final_summary: 分析总结\n- deliverable_manifest: 所有交付物索引\n\n## 复现性要求\n- 分析脚本可从原始数据完全复现结果\n- 依赖和版本已记录\n- 随机种子已固定"
+    "soulMD": "# 数据分析交付物\n\n## 交付物清单\n- test_report: 分析报告（方法、结果、结论），仅在用户目标需要文件交付时写入 workspace\n- source: 分析脚本（Python/R），仅在需要可复现脚本时写入 workspace\n- runtime_evidence: 中间数据和图表证据\n- final_summary 由 runtime artifact 记录：分析总结\n- deliverable_manifest 由 runtime artifact 记录：所有交付物索引\n\n## 复现性要求\n- 分析脚本可从原始数据完全复现结果\n- 依赖和版本已记录\n- 随机种子已固定\n\n## 禁止\n- 不要额外写入 result_summary.md、final_summary.md、deliverable_manifest.md、evidence_chain.md 等 runtime 管理的报告文件"
   }
 ]

@@ -347,6 +347,27 @@ func TestRuntimeAdapterNormalizesPatchTypeCreateProviderDrift(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterRejectsReservedGovernanceReportPatchTarget(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{
+		"completionState":"continue",
+		"patchRequests":[{
+			"patchType":"file_write",
+			"targetRef":"decision_record.md",
+			"content":"decision"
+		}]
+	}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+
+	_, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err == nil || !strings.Contains(err.Error(), "reserved for runtime governance/report artifacts") {
+		t.Fatalf("ExecuteRuntimeStep err = %v, want reserved patch target error", err)
+	}
+}
+
 func TestRuntimeAdapterUsesStreamingProviderWhenCapabilityDeclared(t *testing.T) {
 	provider := &streamingProvider{
 		payload: []byte(`{"completionState":"continue","shellCommands":[{"command":"echo","args":["stream"]}]}`),
@@ -896,6 +917,27 @@ func TestRuntimeAdapterExposesExecutionGraph(t *testing.T) {
 	nodes, ok := graph["nodes"].([]map[string]any)
 	if !ok || len(nodes) != 2 || nodes[1]["kind"] != "shell/command" {
 		t.Fatalf("nodes = %+v, want shell command graph nodes", graph["nodes"])
+	}
+}
+
+func TestRuntimeAdapterRejectsReservedGovernanceReportGraphPatchTarget(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{
+		"completionState":"continue",
+		"executionGraph":{
+			"nodes":[
+				{"id":"write-report","kind":"patch/apply","input":{"patchType":"file_write","targetRef":"approval_record.md","content":"approval"}}
+			]
+		}
+	}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+
+	_, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err == nil || !strings.Contains(err.Error(), "reserved for runtime governance/report artifacts") {
+		t.Fatalf("ExecuteRuntimeStep err = %v, want reserved graph patch target error", err)
 	}
 }
 

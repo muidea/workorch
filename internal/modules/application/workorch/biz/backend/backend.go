@@ -103,14 +103,47 @@ type ArtifactInfo struct {
 	EvidenceRefs []string
 }
 
+type MemoryRecallHitInfo struct {
+	ID              common.MemoryID
+	Summary         string
+	VectorScore     float64
+	VectorDimension int
+}
+
+type MemoryRecallTraceInfo struct {
+	ID                  common.MemoryRecallTraceID
+	WorkspaceID         common.WorkspaceID
+	RunID               common.RunID
+	StepID              common.StepID
+	GraphNodeID         string
+	Stage               string
+	Source              string
+	Policy              string
+	Status              string
+	ProviderID          string
+	Operation           string
+	QueryTextPreview    string
+	QueryTextSha256     string
+	MinScore            float64
+	Limit               int
+	EmbeddingModel      string
+	VectorDimension     int
+	RetrievedMemoryIDs  []common.MemoryID
+	RetrievedMemoryHits []MemoryRecallHitInfo
+	Reason              string
+	OccurredAt          string
+	EvidenceRef         string
+}
+
 type WorkspaceSnapshotInfo struct {
-	Workspace WorkspaceInfo
-	Outcome   WorkspaceOutcomeInfo
-	Runs      []RunInfo
-	Results   []ResultInfo
-	Artifacts []ArtifactInfo
-	Decisions []DecisionInfo
-	Approvals []ApprovalInfo
+	Workspace          WorkspaceInfo
+	Outcome            WorkspaceOutcomeInfo
+	Runs               []RunInfo
+	Results            []ResultInfo
+	Artifacts          []ArtifactInfo
+	MemoryRecallTraces []MemoryRecallTraceInfo
+	Decisions          []DecisionInfo
+	Approvals          []ApprovalInfo
 }
 
 type WorkspaceBackend interface {
@@ -407,6 +440,7 @@ const (
 	EventMemoryCreated         EventType = "memory/created"
 	EventMemoryUpdated         EventType = "memory/updated"
 	EventMemoryDeleted         EventType = "memory/deleted"
+	EventMemoryRecallRecorded  EventType = "memory/recall/recorded"
 )
 
 type Event struct {

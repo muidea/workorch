@@ -121,6 +121,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 		ValidationResults:  repos.validationResult,
 		RuntimeCheckpoints: repos.runtimeCheckpoint,
 		MemoryItems:        repos.memoryItem,
+		MemoryRecallTraces: repos.memoryRecallTrace,
 		EventHub:           eventHub,
 	}))
 
@@ -158,6 +159,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 				Souls:              repos.soul,
 				WorkspaceTemplates: repos.workspaceTemplate,
 				MemoryItems:        repos.memoryItem,
+				MemoryRecallTraces: repos.memoryRecallTrace,
 				Skills:             repos.skill,
 				MCPServers:         repos.mcpServer,
 				MCPCapabilities:    repos.mcpCapability,

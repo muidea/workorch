@@ -23,6 +23,7 @@ type RepositorySet struct {
 	Souls              repository.SoulRepository
 	WorkspaceTemplates repository.WorkspaceTemplateRepository
 	MemoryItems        repository.MemoryItemRepository
+	MemoryRecallTraces repository.MemoryRecallTraceRepository
 	Skills             repository.SkillRepository
 	MCPServers         repository.MCPServerRepository
 	MCPCapabilities    repository.MCPCapabilityRepository

@@ -79,6 +79,7 @@ func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 		ValidationResults:  repos.ValidationResults,
 		RuntimeCheckpoints: repos.RuntimeCheckpoints,
 		MemoryItems:        repos.MemoryItems,
+		MemoryRecallTraces: repos.MemoryRecallTraces,
 		EventHub:           runtime.EventHub(),
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())

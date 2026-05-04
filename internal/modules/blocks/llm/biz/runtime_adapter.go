@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -1016,6 +1017,9 @@ func validateDecision(decision llmmodels.LLMExecutionDecision) error {
 		if strings.TrimSpace(patch.TargetRef) == "" {
 			return fmt.Errorf("%w: patchRequests.targetRef is required", common.ErrInvalidArgument)
 		}
+		if isReservedLLMReportPatchTarget(patch.TargetRef) {
+			return fmt.Errorf("%w: patchRequests.targetRef %q is reserved for runtime governance/report artifacts", common.ErrInvalidArgument, patch.TargetRef)
+		}
 	}
 	for _, write := range decision.MemoryWrites {
 		if strings.TrimSpace(write.MemoryType) == "" || strings.TrimSpace(write.Summary) == "" {
@@ -1067,6 +1071,15 @@ func validateExecutionGraph(graph llmmodels.BlockExecutionGraph) error {
 				if err := validateShellCommandBoundary(command, stringSliceValue(node.Input["args"]), "executionGraph shell command"); err != nil {
 					return err
 				}
+			}
+		}
+		if strings.TrimSpace(node.Kind) == llmcommon.RuntimeBlockKindPatchApply {
+			targetRef, _ := node.Input["targetRef"].(string)
+			if strings.TrimSpace(targetRef) == "" {
+				return fmt.Errorf("%w: executionGraph patch/apply targetRef is required", common.ErrInvalidArgument)
+			}
+			if isReservedLLMReportPatchTarget(targetRef) {
+				return fmt.Errorf("%w: executionGraph patch/apply targetRef %q is reserved for runtime governance/report artifacts", common.ErrInvalidArgument, targetRef)
 			}
 		}
 		if !isSafeGraphNodeID(nodeID) {
@@ -1594,7 +1607,7 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 			},
 			{
 				Kind:        llmcommon.RuntimeBlockKindPatchApply,
-				Description: "Apply one file_write or unified_diff patch inside the workspace working directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory.",
+				Description: "Apply one file_write or unified_diff patch inside the workspace working directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory. Governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md are reserved for runtime artifacts and must not be written through patch/apply.",
 				Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string"},
 			},
 			{
@@ -1719,6 +1732,62 @@ func normalizedPatchType(request llmmodels.PatchRequest) string {
 		return "file_write"
 	default:
 		return patchType
+	}
+}
+
+func isReservedLLMReportPatchTarget(targetRef string) bool {
+	cleanTarget := strings.TrimSpace(filepath.ToSlash(filepath.Clean(strings.TrimSpace(targetRef))))
+	cleanTarget = strings.TrimPrefix(cleanTarget, "./")
+	if cleanTarget == "" || cleanTarget == "." {
+		return false
+	}
+	lowerTarget := strings.ToLower(cleanTarget)
+	if strings.HasPrefix(lowerTarget, ".workorch-data/") || strings.HasPrefix(lowerTarget, "delivery/") {
+		return true
+	}
+	base := strings.ToLower(filepath.Base(cleanTarget))
+	ext := strings.ToLower(filepath.Ext(base))
+	switch ext {
+	case ".md", ".txt", ".adoc", ".rst", ".json":
+	default:
+		return false
+	}
+	stem := strings.TrimSuffix(base, ext)
+	stem = strings.NewReplacer("-", "_", " ", "_", ".", "_").Replace(stem)
+	terms := strings.FieldsFunc(stem, func(r rune) bool { return r == '_' })
+	has := func(term string) bool {
+		for _, item := range terms {
+			if item == term {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case has("decision") && has("record"):
+		return true
+	case has("approval") && has("record"):
+		return true
+	case has("delivery") && has("summary"):
+		return true
+	case has("deliverable") && has("manifest"):
+		return true
+	case has("workspace") && has("deliverable") && has("manifest"):
+		return true
+	case has("result") && has("summary"):
+		return true
+	case has("run") && has("summary"):
+		return true
+	case has("acceptance") && has("evidence"):
+		return true
+	case has("evidence") && has("chain"):
+		return true
+	case has("dod") && has("assessment"):
+		return true
+	case has("final") && (has("summary") || has("result") || has("report")):
+		return true
+	default:
+		return false
 	}
 }
 

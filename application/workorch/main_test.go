@@ -57,12 +57,12 @@ func TestResolveDefaultWorkspaceCreatesOnlyWhenNoReusableWorkspace(t *testing.T)
 	if be.created != 1 {
 		t.Fatalf("created = %d, want 1", be.created)
 	}
-	if be.lastCreate.TemplateID != "" {
-		t.Fatalf("templateID = %q, want empty for non-code directory", be.lastCreate.TemplateID)
+	if be.lastCreate.TemplateID != "generic-governed" {
+		t.Fatalf("templateID = %q, want generic-governed for fresh startup", be.lastCreate.TemplateID)
 	}
 }
 
-func TestResolveDefaultWorkspaceCreatesSoftwareDevWorkspaceForCodeDirectory(t *testing.T) {
+func TestResolveDefaultWorkspaceCreatesGenericGovernedWorkspaceForCodeDirectory(t *testing.T) {
 	cfgPath := writeCLIConfig(t, "")
 	workingDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workingDir, "go.mod"), []byte("module example.com/app\n"), 0o644); err != nil {
@@ -75,8 +75,8 @@ func TestResolveDefaultWorkspaceCreatesSoftwareDevWorkspaceForCodeDirectory(t *t
 	if got.ID != "ws-created" {
 		t.Fatalf("workspace = %s, want ws-created", got.ID)
 	}
-	if be.lastCreate.TemplateID != "software-dev" {
-		t.Fatalf("templateID = %q, want software-dev", be.lastCreate.TemplateID)
+	if be.lastCreate.TemplateID != "generic-governed" {
+		t.Fatalf("templateID = %q, want generic-governed for fresh startup", be.lastCreate.TemplateID)
 	}
 }
 

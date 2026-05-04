@@ -1,4 +1,4 @@
-import type { Approval, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, TaskDecomposition, TaskProgress, UpdateLLMConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, TaskDecomposition, TaskProgress, UpdateLLMConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -156,6 +156,14 @@ export const workorchApi = {
   readRunObservability: async (runId: string) => {
     const body = await request<{ observability: RunObservability }>(`${apiBase}/runs/${encodeURIComponent(runId)}/observability`);
     return body.observability;
+  },
+  readRunMemoryRecalls: async (runId: string) => {
+    const body = await request<{ memoryRecallTraces: MemoryRecallTrace[] }>(`${apiBase}/runs/${encodeURIComponent(runId)}/memory-recalls`);
+    return body.memoryRecallTraces ?? [];
+  },
+  readWorkspaceMemoryRecalls: async (workspaceId: string) => {
+    const body = await request<{ memoryRecallTraces: MemoryRecallTrace[] }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/memory-recalls`);
+    return body.memoryRecallTraces ?? [];
   },
   artifactContentURL: (uri: string) => `${apiBase}/artifacts/content?${new URLSearchParams({ uri }).toString()}`,
   readRunTaskProgress: async (runId: string) => {

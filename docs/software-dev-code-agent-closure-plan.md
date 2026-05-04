@@ -79,7 +79,10 @@ Soul、MCP、Memory、Run、Goal、DoD、Ticket、Approval 等能力，演进为
 ### TUI template 能力边界
 
 - TUI 必须支持创建 Workspace 时选择 template。
-- 代码仓目录自动创建 Workspace 时应默认选择 `software-dev`。
+- TUI/CLI 首启为当前目录自动创建默认 Workspace 时使用通用治理模板
+  `generic-governed`，避免全新部署首次启动直接进入软件开发模板。需要软件开发
+  能力时，用户应在创建 Workspace 时显式选择 `software-dev` template，或通过
+  Web 创建时选择对应 template。
 - TUI 应展示当前 Workspace 的 template 初始化结果，例如 default soul 和阶段
   SoulBindings。
 - TUI 不提供普通“重新绑定 workspaceTemplate”入口。
@@ -118,7 +121,7 @@ Soul、MCP、Memory、Run、Goal、DoD、Ticket、Approval 等能力，演进为
 | --- | --- | --- | --- | --- | --- |
 | DEV-01 | 固化软件开发 Code Agent 独立需求和验收范围 | 文档 | P0 | verified | 文档明确 Goal/DoD 输入、自治流程、交付物、Ticket/Approval 使用边界 |
 | DEV-02 | TUI 支持开发 Goal + DoD 输入 | TUI | P0 | verified | 可在 TUI 中通过 `/dod` 定义或更新 DoD，并用该 DoD 启动开发 Run；未显式输入 DoD 时使用 Workspace template 默认 DoD |
-| DEV-03 | 当前目录代码仓库默认以 `software-dev` 模板创建 Workspace | TUI/后端 | P0 | verified | 当前目录无绑定且需要创建 Workspace 时，代码仓目录自动传入 `templateId=software-dev`；已有 Workspace 不被重新绑定 |
+| DEV-03 | 当前目录默认 Workspace 使用 `generic-governed` 模板 | TUI/后端 | P0 | verified | 当前目录无绑定且需要自动创建 Workspace 时传 `templateId=generic-governed`；`software-dev` 只在显式创建选择 template 时绑定；已有 Workspace 不被重新绑定 |
 | DEV-04 | 强化 `software-dev` Soul 自治开发约束 | Soul/模板 | P0 | verified | Soul 明确要求自动分解、开发、测试、修复、验收；只在必要时创建 Ticket/Approval |
 | DEV-05 | 补齐 shell 安全策略 | 后端 | P0 | verified | shell runtime 已具备环境白名单、超时限制和危险命令 deny 策略；破坏性命令阻断路径有测试覆盖；secret/redaction 策略仍需在后续细化 |
 | DEV-06 | 补齐代码变更交付证据 | 后端/Artifact | P0 | verified | 最终 Result/Artifact 包含实际 unified diff 或可追溯 diff artifact |
@@ -179,7 +182,7 @@ Soul、MCP、Memory、Run、Goal、DoD、Ticket、Approval 等能力，演进为
 | ID | 问题 | 默认建议 |
 | --- | --- | --- |
 | Q1 | TUI 中 DoD 输入采用命令还是专用编辑区？ | 先支持 `/dod` 命令和模板默认 DoD，后续再做专用编辑区 |
-| Q2 | `software-dev` 是否应成为代码仓目录默认模板？ | 是，当前目录存在 `go.mod`、`package.json`、`pyproject.toml`、`.git` 等信号时优先使用 |
+| Q2 | `software-dev` 是否应成为代码仓目录默认模板？ | 否。全新部署首次启动默认使用 `generic-governed` 通用治理模板；代码任务需要通过显式创建 Workspace 选择 `software-dev` |
 | Q3 | lint 命令如何确定？ | 优先使用项目脚本或 Makefile；不存在时跳过并在 Result 中说明 |
 | Q4 | 是否允许 agent 自动安装依赖？ | 默认需要 Approval，除非项目已有明确本地缓存或 CI 脚本约定 |
 | Q5 | 最终 diff 是否必须写入 Artifact？ | 是，作为 software-dev 任务的核心交付证据 |
@@ -192,7 +195,8 @@ Soul、MCP、Memory、Run、Goal、DoD、Ticket、Approval 等能力，演进为
 | --- | --- |
 | 2026-05-03 | 初始创建。基于当前 `software-dev` 模板、Soul、Run/Goal/DoD、Ticket/Approval、Memory、Result/Artifact 能力核对结果形成任务清单。 |
 | 2026-05-03 | 补充确认：workspaceTemplate 只在 Workspace 创建期绑定；Web 创建 Workspace 符合约束但必须复用统一 appservice；TUI 不提供常规 template 重新绑定入口；本地 TUI/CLI 继续使用 EventHub 且禁止轮询。 |
-| 2026-05-03 | 已实现 Workspace 创建期 `templateId` 传递和绑定：appservice、本地 EventHub backend、远端 backend、Web handler、CLI workspace create 均接入；当前代码仓目录自动创建 Workspace 时默认使用 `software-dev`；Run activation 默认路径不再携带 template SoulBindings；TUI 增加 `/dod` 命令并在提交 Goal 时使用用户 DoD 或 Workspace template 默认 DoD；workspace-template CRUD 已从 no-op 收口为持久化 appservice/client 调用。 |
+| 2026-05-03 | 已实现 Workspace 创建期 `templateId` 传递和绑定：appservice、本地 EventHub backend、远端 backend、Web handler、CLI workspace create 均接入；Run activation 默认路径不再携带 template SoulBindings；TUI 增加 `/dod` 命令并在提交 Goal 时使用用户 DoD 或 Workspace template 默认 DoD；workspace-template CRUD 已从 no-op 收口为持久化 appservice/client 调用。 |
+| 2026-05-04 | 调整首启默认 Workspace 策略：全新部署首次启动绑定当前目录并使用 `generic-governed`，不隐式选择 `software-dev`；软件开发模板仍通过显式 Workspace 创建时的 `templateId` 绑定。 |
 | 2026-05-03 | shell runtime 增加危险命令阻断策略：拒绝 sudo/su/shutdown/reboot/mkfs/mount 等系统级命令，拒绝 `rm -rf` 针对根目录、`.git`、当前目录或 workspace 外绝对路径，拒绝 `chmod 777` 和 `git push --force`；新增测试覆盖阻断路径。 |
 | 2026-05-04 | TUI 新增 `/workspace create <title> --template <templateId> [--dir <path>]` 创建路径，并在主视图中展示当前 Workspace 的 default soul 与 SoulBindings 摘要；创建后会切换到新 Workspace 并刷新清单。 |
 | 2026-05-04 | 强化内置 `software-dev` 六个阶段 Soul：明确自治开发闭环、自动修复、DoD 证据、Ticket/Approval 使用边界和最终交付物要求。 |

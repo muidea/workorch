@@ -19,4 +19,5 @@ const (
 	TopicMemoryCreated         = "/memory/created"
 	TopicMemoryUpdated         = "/memory/updated"
 	TopicMemoryDeleted         = "/memory/deleted"
+	TopicMemoryRecallRecorded  = "/memory/recall/recorded"
 )

@@ -15,6 +15,7 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -38,6 +39,7 @@ type RunSnapshot struct {
 	Results              []Result                 `json:"results,omitempty"`
 	Artifacts            []Artifact               `json:"artifacts,omitempty"`
 	ExecutionSections    []ExecutionSection       `json:"executionSections,omitempty"`
+	MemoryRecallTraces   []MemoryRecallTrace      `json:"memoryRecallTraces,omitempty"`
 	SelectedCapabilities []RuntimeCapability      `json:"selectedCapabilities,omitempty"`
 	UsedCapabilities     []RuntimeCapability      `json:"usedCapabilities,omitempty"`
 	EventRecords         []EventRecord            `json:"eventRecords,omitempty"`
@@ -68,6 +70,7 @@ type RunObservability struct {
 	TaskProgress         TaskProgress           `json:"taskProgress"`
 	TaskDecompositions   []TaskDecomposition    `json:"taskDecompositions,omitempty"`
 	ExecutionSections    []ExecutionSection     `json:"executionSections,omitempty"`
+	MemoryRecallTraces   []MemoryRecallTrace    `json:"memoryRecallTraces,omitempty"`
 	Evidence             RuntimeEvidenceSummary `json:"evidence"`
 	LatestCheckpoint     *RuntimeCheckpoint     `json:"latestCheckpoint,omitempty"`
 	SelectedCapabilities []RuntimeCapability    `json:"selectedCapabilities,omitempty"`
@@ -260,6 +263,8 @@ type ExecutionSection struct {
 	ValidationRefs     []string `json:"validationRefs,omitempty"`
 	ResultRefs         []string `json:"resultRefs,omitempty"`
 	ArtifactRefs       []string `json:"artifactRefs,omitempty"`
+	MemoryRecallRefs   []string `json:"memoryRecallRefs,omitempty"`
+	MemoryIDs          []string `json:"memoryIds,omitempty"`
 	Summary            string   `json:"summary,omitempty"`
 }
 
@@ -306,6 +311,48 @@ type RuntimeTimelineItem struct {
 	OccurredAt string         `json:"occurredAt,omitempty"`
 	Data       map[string]any `json:"data,omitempty"`
 	Output     map[string]any `json:"output,omitempty"`
+}
+
+type MemoryRecallTrace struct {
+	ID                  string            `json:"id"`
+	WorkspaceID         string            `json:"workspaceId"`
+	RunID               string            `json:"runId"`
+	StepID              string            `json:"stepId,omitempty"`
+	GraphNodeID         string            `json:"graphNodeId,omitempty"`
+	Stage               string            `json:"stage,omitempty"`
+	Source              string            `json:"source"`
+	Policy              string            `json:"policy,omitempty"`
+	Status              string            `json:"status"`
+	ProviderID          string            `json:"providerId,omitempty"`
+	Operation           string            `json:"operation,omitempty"`
+	QueryTextPreview    string            `json:"queryTextPreview,omitempty"`
+	QueryTextSha256     string            `json:"queryTextSha256,omitempty"`
+	MinScore            float64           `json:"minScore,omitempty"`
+	Limit               int               `json:"limit,omitempty"`
+	EmbeddingModel      string            `json:"embeddingModel,omitempty"`
+	VectorDimension     int               `json:"vectorDimension,omitempty"`
+	RetrievedMemoryIDs  []string          `json:"retrievedMemoryIds,omitempty"`
+	RetrievedMemoryHits []MemoryRecallHit `json:"retrievedMemoryHits,omitempty"`
+	Reason              string            `json:"reason,omitempty"`
+	OccurredAt          string            `json:"occurredAt,omitempty"`
+	EvidenceRef         string            `json:"evidenceRef,omitempty"`
+}
+
+type MemoryRecallHit struct {
+	ID              string  `json:"id"`
+	Summary         string  `json:"summary,omitempty"`
+	VectorScore     float64 `json:"vectorScore,omitempty"`
+	VectorDimension int     `json:"vectorDimension,omitempty"`
+}
+
+type MemoryRecallTraceQuery struct {
+	WorkspaceID string
+	RunID       string
+	StepID      string
+	Stage       string
+	Source      string
+	Status      string
+	Limit       int
 }
 
 type RuntimeCapability struct {
@@ -483,6 +530,7 @@ type WorkspaceSnapshot struct {
 	TaskProgress       TaskProgress        `json:"taskProgress"`
 	TaskDecompositions []TaskDecomposition `json:"taskDecompositions,omitempty"`
 	ExecutionSections  []ExecutionSection  `json:"executionSections,omitempty"`
+	MemoryRecallTraces []MemoryRecallTrace `json:"memoryRecallTraces,omitempty"`
 	Runs               []Run               `json:"runs,omitempty"`
 	Results            []Result            `json:"results,omitempty"`
 	Artifacts          []Artifact          `json:"artifacts,omitempty"`
@@ -498,6 +546,7 @@ type readModelDependencies struct {
 	results         repository.ResultRepository
 	artifacts       repository.ArtifactRepository
 	eventRecords    repository.EventRecordRepository
+	memoryRecalls   repository.MemoryRecallTraceRepository
 	toolCalls       repository.ToolCallRepository
 	mcpCapabilities repository.MCPCapabilityRepository
 	patches         repository.PatchRepository
@@ -633,6 +682,35 @@ func ReadRunContextBundleFromEnv(ctx context.Context, runID string) (ContextBund
 		return ContextBundle{}, err
 	}
 	return ReadRunContextBundleWithSession(ctx, session, runID)
+}
+
+func ListMemoryRecallTracesWithSession(ctx context.Context, session *RuntimeSession, query MemoryRecallTraceQuery) (ret []MemoryRecallTrace, err error) {
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		return nil, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+	items, err := deps.memoryRecalls.List(ctx, repository.MemoryRecallTraceQuery{
+		WorkspaceID: common.WorkspaceID(strings.TrimSpace(query.WorkspaceID)),
+		RunID:       common.RunID(strings.TrimSpace(query.RunID)),
+		StepID:      common.StepID(strings.TrimSpace(query.StepID)),
+		Stage:       strings.TrimSpace(query.Stage),
+		Source:      strings.TrimSpace(query.Source),
+		Status:      strings.TrimSpace(query.Status),
+		Limit:       query.Limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapMemoryRecallTraces(items), nil
+}
+
+func ListMemoryRecallTracesWithBackend(ctx context.Context, backend string, dataRoot string, query MemoryRecallTraceQuery) ([]MemoryRecallTrace, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return nil, err
+	}
+	return ListMemoryRecallTracesWithSession(ctx, session, query)
 }
 
 func ReadRunTaskDecompositionsWithSession(ctx context.Context, session *RuntimeSession, runID string) (ret []TaskDecomposition, err error) {
@@ -854,6 +932,7 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 		exports.Repositories.Results == nil ||
 		exports.Repositories.Artifacts == nil ||
 		exports.Repositories.EventRecords == nil ||
+		exports.Repositories.MemoryRecallTraces == nil ||
 		exports.Repositories.ToolCalls == nil ||
 		exports.Repositories.MCPCapabilities == nil ||
 		exports.Repositories.Patches == nil ||
@@ -877,6 +956,7 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 		results:         exports.Repositories.Results,
 		artifacts:       exports.Repositories.Artifacts,
 		eventRecords:    exports.Repositories.EventRecords,
+		memoryRecalls:   exports.Repositories.MemoryRecallTraces,
 		toolCalls:       exports.Repositories.ToolCalls,
 		mcpCapabilities: exports.Repositories.MCPCapabilities,
 		patches:         exports.Repositories.Patches,
@@ -903,6 +983,7 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 	var results []*resultmodel.Result
 	var artifacts []*resultmodel.Artifact
 	var eventRecords []*eventstreammodel.EventRecord
+	var memoryRecallTraces []*memorymodel.MemoryRecallTrace
 	var decisions []Decision
 	var selectedTicket *decisionmodel.Ticket
 	var selectedResolution *decisionmodel.Resolution
@@ -957,6 +1038,13 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		},
 		func() error {
 			var err error
+			if deps.memoryRecalls != nil {
+				memoryRecallTraces, err = deps.memoryRecalls.List(ctx, repository.MemoryRecallTraceQuery{RunID: item.ID})
+			}
+			return err
+		},
+		func() error {
+			var err error
 			decisions, selectedTicket, selectedResolution, err = decisionsForRun(ctx, deps, item)
 			return err
 		},
@@ -991,6 +1079,7 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		RuntimeCheckpoints: mapRuntimeCheckpoints(checkpoints),
 		Results:            mapResults(results),
 		Artifacts:          mapArtifacts(artifacts),
+		MemoryRecallTraces: mapMemoryRecallTraces(memoryRecallTraces),
 		EventRecords:       mapEventRecords(eventRecords),
 		Decisions:          decisions,
 		Approvals:          approvals,
@@ -1020,6 +1109,7 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 	var results []*resultmodel.Result
 	var artifacts []*resultmodel.Artifact
 	var eventRecords []*eventstreammodel.EventRecord
+	var memoryRecallTraces []*memorymodel.MemoryRecallTrace
 	var decisions []Decision
 	var approvals []Approval
 	err = runReadModelTasks(
@@ -1069,6 +1159,13 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 			return err
 		},
 		func() error {
+			var err error
+			if deps.memoryRecalls != nil {
+				memoryRecallTraces, err = deps.memoryRecalls.List(ctx, repository.MemoryRecallTraceQuery{RunID: item.ID})
+			}
+			return err
+		},
+		func() error {
 			var selectedTicket *decisionmodel.Ticket
 			var selectedResolution *decisionmodel.Resolution
 			var err error
@@ -1098,6 +1195,7 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 		RuntimeCheckpoints: mapRuntimeCheckpoints(checkpoints),
 		Results:            mapResults(results),
 		Artifacts:          mapArtifacts(artifacts),
+		MemoryRecallTraces: mapMemoryRecallTraces(memoryRecallTraces),
 		EventRecords:       mapEventRecords(eventRecords),
 		Decisions:          decisions,
 		Approvals:          approvals,
@@ -1291,6 +1389,7 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		ret.TaskProgress = runSnapshot.TaskProgress
 		ret.TaskDecompositions = runSnapshot.TaskDecompositions
 		ret.ExecutionSections = runSnapshot.ExecutionSections
+		ret.MemoryRecallTraces = runSnapshot.MemoryRecallTraces
 	}
 	ret.Outcome = mapWorkspaceOutcome(ret)
 	return ret, nil
@@ -2095,6 +2194,73 @@ func mapEventRecords(items []*eventstreammodel.EventRecord) []EventRecord {
 	return ret
 }
 
+func mapMemoryRecallTraces(items []*memorymodel.MemoryRecallTrace) []MemoryRecallTrace {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]MemoryRecallTrace, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		ret = append(ret, MemoryRecallTrace{
+			ID:                  string(item.ID),
+			WorkspaceID:         string(item.WorkspaceID),
+			RunID:               string(item.RunID),
+			StepID:              string(item.StepID),
+			GraphNodeID:         item.GraphNodeID,
+			Stage:               item.Stage,
+			Source:              item.Source,
+			Policy:              item.Policy,
+			Status:              item.Status,
+			ProviderID:          item.ProviderID,
+			Operation:           item.Operation,
+			QueryTextPreview:    item.QueryTextPreview,
+			QueryTextSha256:     item.QueryTextSha256,
+			MinScore:            item.MinScore,
+			Limit:               item.Limit,
+			EmbeddingModel:      item.EmbeddingModel,
+			VectorDimension:     item.VectorDimension,
+			RetrievedMemoryIDs:  memoryIDsToReadModelStrings(item.RetrievedMemoryIDs),
+			RetrievedMemoryHits: mapMemoryRecallHits(item.RetrievedMemoryHits),
+			Reason:              item.Reason,
+			OccurredAt:          item.OccurredAt,
+			EvidenceRef:         item.EvidenceRef,
+		})
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func mapMemoryRecallHits(items []memorymodel.MemoryRecallHit) []MemoryRecallHit {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]MemoryRecallHit, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, MemoryRecallHit{
+			ID:              string(item.ID),
+			Summary:         item.Summary,
+			VectorScore:     item.VectorScore,
+			VectorDimension: item.VectorDimension,
+		})
+	}
+	return ret
+}
+
+func memoryIDsToReadModelStrings(input []common.MemoryID) []string {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, len(input))
+	for _, item := range input {
+		ret = append(ret, string(item))
+	}
+	return ret
+}
+
 func cloneReadModelMap(input map[string]any) map[string]any {
 	if input == nil {
 		return nil
@@ -2207,6 +2373,7 @@ func mapRunObservability(snapshot RunSnapshot) RunObservability {
 		TaskProgress:         snapshot.TaskProgress,
 		TaskDecompositions:   snapshot.TaskDecompositions,
 		ExecutionSections:    snapshot.ExecutionSections,
+		MemoryRecallTraces:   snapshot.MemoryRecallTraces,
 		Evidence:             runtimeEvidenceSummary(snapshot, len(timelineEvents(timeline))),
 		LatestCheckpoint:     latestRuntimeCheckpoint(snapshot.RuntimeCheckpoints),
 		SelectedCapabilities: snapshot.SelectedCapabilities,
@@ -2386,6 +2553,7 @@ func mapRunContextBundle(snapshot RunSnapshot) ContextBundle {
 		contextTaskProgressSection(progress),
 		contextTaskDecompositionSection(snapshot.TaskDecompositions),
 		contextExecutionSectionsSection(snapshot.ExecutionSections),
+		contextMemoryRecallSection(snapshot.MemoryRecallTraces),
 		contextGovernanceSection(snapshot),
 		contextFormalOutputSection(snapshot),
 		contextRecentEvidenceSection(recentEvidence),
@@ -2480,6 +2648,9 @@ func compressedContextSourceSectionRefs(snapshot RunSnapshot, recentEvidence []C
 	}
 	if len(snapshot.ExecutionSections) > 0 {
 		sections = append(sections, ContextSection{ID: "execution_sections", Priority: 84})
+	}
+	if len(snapshot.MemoryRecallTraces) > 0 {
+		sections = append(sections, ContextSection{ID: "memory_recall", Priority: 83})
 	}
 	if len(snapshot.Decisions) > 0 || len(snapshot.Approvals) > 0 {
 		sections = append(sections, ContextSection{ID: "governance", Priority: 80})
@@ -2691,6 +2862,8 @@ func mapExecutionSections(snapshot RunSnapshot) []ExecutionSection {
 			section.ValidationRefs = compactUniqueStrings(refs.validationsByStep[node.StepID])
 			section.ResultRefs = compactUniqueStrings(refs.resultsByStep[node.StepID])
 			section.ArtifactRefs = compactUniqueStrings(refs.artifactsByStep[node.StepID])
+			section.MemoryRecallRefs = compactUniqueStrings(refs.memoryRecallsByStep[node.StepID])
+			section.MemoryIDs = compactUniqueStrings(refs.memoryIDsByStep[node.StepID])
 			ret = append(ret, section)
 		}
 	}
@@ -2701,26 +2874,30 @@ func mapExecutionSections(snapshot RunSnapshot) []ExecutionSection {
 }
 
 type executionEvidenceRefs struct {
-	evidenceByStep    map[string][]string
-	decisionsByStep   map[string][]string
-	approvalsByStep   map[string][]string
-	toolCallsByStep   map[string][]string
-	patchesByStep     map[string][]string
-	validationsByStep map[string][]string
-	resultsByStep     map[string][]string
-	artifactsByStep   map[string][]string
+	evidenceByStep      map[string][]string
+	decisionsByStep     map[string][]string
+	approvalsByStep     map[string][]string
+	toolCallsByStep     map[string][]string
+	patchesByStep       map[string][]string
+	validationsByStep   map[string][]string
+	resultsByStep       map[string][]string
+	artifactsByStep     map[string][]string
+	memoryRecallsByStep map[string][]string
+	memoryIDsByStep     map[string][]string
 }
 
 func executionEvidenceRefsByStep(snapshot RunSnapshot) executionEvidenceRefs {
 	ret := executionEvidenceRefs{
-		evidenceByStep:    map[string][]string{},
-		decisionsByStep:   map[string][]string{},
-		approvalsByStep:   map[string][]string{},
-		toolCallsByStep:   map[string][]string{},
-		patchesByStep:     map[string][]string{},
-		validationsByStep: map[string][]string{},
-		resultsByStep:     map[string][]string{},
-		artifactsByStep:   map[string][]string{},
+		evidenceByStep:      map[string][]string{},
+		decisionsByStep:     map[string][]string{},
+		approvalsByStep:     map[string][]string{},
+		toolCallsByStep:     map[string][]string{},
+		patchesByStep:       map[string][]string{},
+		validationsByStep:   map[string][]string{},
+		resultsByStep:       map[string][]string{},
+		artifactsByStep:     map[string][]string{},
+		memoryRecallsByStep: map[string][]string{},
+		memoryIDsByStep:     map[string][]string{},
 	}
 	add := func(target map[string][]string, stepID string, refs ...string) {
 		stepID = strings.TrimSpace(stepID)
@@ -2758,6 +2935,10 @@ func executionEvidenceRefsByStep(snapshot RunSnapshot) executionEvidenceRefs {
 	}
 	for _, item := range snapshot.Artifacts {
 		add(ret.artifactsByStep, item.StepID, item.ID)
+	}
+	for _, item := range snapshot.MemoryRecallTraces {
+		add(ret.memoryRecallsByStep, item.StepID, item.ID, item.EvidenceRef)
+		add(ret.memoryIDsByStep, item.StepID, item.RetrievedMemoryIDs...)
 	}
 	for stepID, refs := range ret.evidenceByStep {
 		ret.evidenceByStep[stepID] = compactUniqueStrings(refs)
@@ -3008,6 +3189,35 @@ func contextExecutionSectionsSection(items []ExecutionSection) ContextSection {
 		EvidenceRefs: compactUniqueStrings(refs),
 		Data: map[string]any{
 			"executionSections": items,
+		},
+	}
+}
+
+func contextMemoryRecallSection(items []MemoryRecallTrace) ContextSection {
+	if len(items) == 0 {
+		return ContextSection{}
+	}
+	refs := make([]string, 0)
+	memoryIDs := make([]string, 0)
+	status := "selected"
+	for _, item := range items {
+		refs = append(refs, item.ID, item.EvidenceRef)
+		memoryIDs = append(memoryIDs, item.RetrievedMemoryIDs...)
+		if item.Status == "degraded" {
+			status = "degraded"
+		}
+	}
+	return ContextSection{
+		ID:           "memory_recall",
+		Kind:         "memory_recall",
+		Title:        "Memory recall",
+		Priority:     83,
+		State:        status,
+		Summary:      strconv.Itoa(len(items)) + " memory recall traces",
+		EvidenceRefs: compactUniqueStrings(append(refs, memoryIDs...)),
+		Data: map[string]any{
+			"memoryRecallTraces": items,
+			"memoryIds":          compactUniqueStrings(memoryIDs),
 		},
 	}
 }
@@ -3846,6 +4056,25 @@ func latestRuntimeCheckpoint(items []RuntimeCheckpoint) *RuntimeCheckpoint {
 func runtimeTimeline(snapshot RunSnapshot) []RuntimeTimelineItem {
 	items := make([]RuntimeTimelineItem, 0, len(snapshot.Steps)+len(snapshot.RuntimeCheckpoints)+len(snapshot.Observed))
 	stepOccurrences := timelineStepOccurrences(snapshot)
+	for _, trace := range snapshot.MemoryRecallTraces {
+		items = append(items, RuntimeTimelineItem{
+			Source:     "memory_recall",
+			Type:       trace.Source,
+			ID:         trace.ID,
+			RunState:   snapshot.Run.State,
+			StepID:     trace.StepID,
+			Summary:    memoryRecallTimelineSummary(trace),
+			OccurredAt: trace.OccurredAt,
+			Data: map[string]any{
+				"stage":              trace.Stage,
+				"source":             trace.Source,
+				"policy":             trace.Policy,
+				"status":             trace.Status,
+				"retrievedMemoryIds": append([]string(nil), trace.RetrievedMemoryIDs...),
+				"reason":             trace.Reason,
+			},
+		})
+	}
 	for _, step := range snapshot.Steps {
 		occurredAt := stepOccurrences[step.ID]
 		items = append(items, RuntimeTimelineItem{
@@ -4013,6 +4242,17 @@ func timelineStepSummary(output map[string]any) string {
 		return status
 	}
 	return ""
+}
+
+func memoryRecallTimelineSummary(trace MemoryRecallTrace) string {
+	count := len(trace.RetrievedMemoryIDs)
+	if trace.Status == "degraded" && trace.Reason != "" {
+		return "memory recall degraded: " + trace.Reason
+	}
+	if count == 0 {
+		return "memory recall " + trace.Status
+	}
+	return "memory recall " + trace.Status + ": " + strconv.Itoa(count) + " memories"
 }
 
 func timelineEvents(items []RuntimeTimelineItem) []RuntimeTimelineItem {

@@ -89,6 +89,34 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReturnsOutputForNonZeroExit(t *testing
 	}
 }
 
+func TestSanitizeSuccessfulCommandStderrStripsCurlProgressMeter(t *testing.T) {
+	progress := "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n" +
+		"                                 Dload  Upload   Total   Spent    Left  Speed\n" +
+		"\r100    10  100    10    0     0     33      0 --:--:-- --:--:-- --:--:--    33\n"
+	got := sanitizeSuccessfulCommandStderr("curl", []string{"wttr.in/Hangzhou?format=%C+%t"}, 0, "Clear +21C\n", progress)
+	if got != "" {
+		t.Fatalf("stderr = %q, want curl progress meter stripped", got)
+	}
+}
+
+func TestSanitizeSuccessfulCommandStderrPreservesRealCurlWarnings(t *testing.T) {
+	progress := "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n" +
+		"curl: warning: example warning\n" +
+		"\r100    10  100    10    0     0     33      0 --:--:-- --:--:-- --:--:--    33\n"
+	got := sanitizeSuccessfulCommandStderr("sh", []string{"-c", "curl http://example.test"}, 0, "ok\n", progress)
+	if got != "curl: warning: example warning" {
+		t.Fatalf("stderr = %q, want non-progress curl stderr preserved", got)
+	}
+}
+
+func TestSanitizeSuccessfulCommandStderrPreservesFailedCommandStderr(t *testing.T) {
+	progress := "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\ncurl: (6) Could not resolve host\n"
+	got := sanitizeSuccessfulCommandStderr("curl", []string{"http://missing.invalid"}, 6, "", progress)
+	if got != progress {
+		t.Fatalf("stderr = %q, want failed command stderr unchanged", got)
+	}
+}
+
 func TestRuntimeAdapter_ExecuteRuntimeStepReturnsTimeoutOutput(t *testing.T) {
 	adapter := NewRuntimeAdapterWithTimeout(10 * time.Millisecond)
 	workingDirectory := t.TempDir()
