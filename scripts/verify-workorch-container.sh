@@ -111,7 +111,11 @@ workspace_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/workspace.json" 
 [[ -n "$workspace_id" ]]
 grep '"title": "verify workspace"' "$TMP_DIR/workspace.json" >/dev/null
 grep '"description": "verify workspace description"' "$TMP_DIR/workspace.json" >/dev/null
-grep "\"workingDirectory\": \".*/workspaces/$workspace_id/working\"" "$TMP_DIR/workspace.json" >/dev/null
+if [[ "$BACKEND" == "file" ]]; then
+  grep "\"workingDirectory\": \".*/workspaces/$workspace_id/working\"" "$TMP_DIR/workspace.json" >/dev/null
+else
+  grep "\"workingDirectory\": \".*/workspaces/$workspace_id\"" "$TMP_DIR/workspace.json" >/dev/null
+fi
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" -H 'Content-Type: application/json' \
   -d '{"text":"verify workorch service delivery"}' >"$TMP_DIR/goal.json"
 goal_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/goal.json" | head -n1)"

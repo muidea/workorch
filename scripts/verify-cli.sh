@@ -115,7 +115,7 @@ echo ""
 echo "── 7. Default TUI mode ──"
 
 TUI=$(timeout 3 "$BINARY" -config-dir "$CONFIG_DIR" 2>&1) || true
-assert_contains "$TUI" "WorkOrch Agent" "default opens TUI agent"
+assert_contains "$TUI" "TUI requires an interactive terminal" "default mode is TUI and non-TTY suggests --server"
 assert_not_contains "$TUI" "bye\|Bye" "default no longer opens legacy REPL"
 
 # ── 8. Unknown subcommand fallback to agent ──

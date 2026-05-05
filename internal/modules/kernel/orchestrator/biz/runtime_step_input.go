@@ -1,0 +1,132 @@
+package orchestrator
+
+import (
+	"strings"
+
+	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
+)
+
+func nextStepSpec(output map[string]any) (common.StepID, string) {
+	if output == nil {
+		return "", ""
+	}
+	nextStep, _ := output[stepOutputKeyNextStep].(string)
+	nextKind, _ := output[stepOutputKeyNextKind].(string)
+	return common.StepID(nextStep), nextKind
+}
+
+func initialStepKind(run *runModel.Run) string {
+	if run != nil && strings.TrimSpace(run.InitialStepKind) != "" {
+		return strings.TrimSpace(run.InitialStepKind)
+	}
+	return defaultInitialStepKind
+}
+
+func initialStepInput(run *runModel.Run) map[string]any {
+	input := nextStepInput(run, "")
+	if input == nil {
+		return nil
+	}
+	if initialStepKind(run) == llmWorkspaceExecutionStepKind {
+		input[stepInputKeySoulStage] = soulStagePlanning
+	}
+	return input
+}
+
+func nextStepInputFromOutput(run *runModel.Run, previousStep *runModel.Step) map[string]any {
+	if previousStep == nil {
+		return nextStepInput(run, "")
+	}
+	input := nextStepInput(run, previousStep.ID)
+	inheritWorkspaceFileManifest(input, previousStep)
+	inheritStableExecutionContextPackage(input, previousStep)
+	if nextInput := mapFromValue(previousStep.Output[stepOutputKeyNextInput]); nextInput != nil {
+		for key, value := range nextInput {
+			input[key] = value
+		}
+	}
+	return input
+}
+
+func inheritWorkspaceFileManifest(input map[string]any, previousStep *runModel.Step) {
+	if input == nil || previousStep == nil {
+		return
+	}
+	manifest := mapSliceFromValue(previousStep.Input[stepInputKeyWorkspaceFileManifest])
+	if len(manifest) == 0 {
+		if pkg := mapFromValue(previousStep.Input[stepInputKeyExecutionContextPackage]); pkg != nil {
+			manifest = mapSliceFromValue(pkg[stepInputKeyWorkspaceFileManifest])
+		}
+	}
+	if len(manifest) == 0 {
+		return
+	}
+	input[stepInputKeyWorkspaceFileManifest] = compactWorkspaceFileManifest(manifest)
+}
+
+func inheritStableExecutionContextPackage(input map[string]any, previousStep *runModel.Step) {
+	if input == nil || previousStep == nil {
+		return
+	}
+	stablePayload := stableExecutionContextPackagePayload(stableExecutionContextPackageFromStep(previousStep))
+	if len(stablePayload) == 0 {
+		return
+	}
+	input[stepInputKeyExecutionContextPackage] = stablePayload
+}
+
+func runtimeChildID(parent common.StepID, suffix string) string {
+	base := strings.TrimSpace(string(parent))
+	base = strings.NewReplacer("/", "-", "\\", "-", ":", "-").Replace(base)
+	suffix = strings.TrimSpace(suffix)
+	if base == "" {
+		return suffix
+	}
+	if suffix == "" {
+		return base
+	}
+	return base + "-" + suffix
+}
+
+func nextStepInput(run *runModel.Run, previousStepID common.StepID) map[string]any {
+	input := runExecutionInput(run, previousStepID)
+	if input == nil {
+		return nil
+	}
+	if previousStepID == "" {
+		delete(input, "previousStepId")
+	}
+	return input
+}
+
+func runExecutionInput(run *runModel.Run, previousStepID common.StepID) map[string]any {
+	if run == nil {
+		return nil
+	}
+	input := map[string]any{
+		"workspaceId":    string(run.WorkspaceID),
+		"previousStepId": string(previousStepID),
+	}
+	if run.GoalID != "" {
+		input["goalId"] = string(run.GoalID)
+	}
+	if run.DoDID != "" {
+		input["doDId"] = string(run.DoDID)
+	}
+	if len(run.ExecutionContext) > 0 {
+		input["executionContext"] = cloneStepPayload(run.ExecutionContext)
+	}
+	return input
+}
+
+func cloneStepPayload(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	for k, v := range input {
+		out[k] = v
+	}
+	return out
+}

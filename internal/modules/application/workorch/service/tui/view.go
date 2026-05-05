@@ -1,0 +1,385 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/viewport"
+	"github.com/charmbracelet/lipgloss"
+)
+
+func (m AppModel) View() string {
+	if m.mode == modeQuit {
+		return ""
+	}
+	width, height := m.viewSize()
+	if m.helpOpen {
+		return m.renderHelpOverlay(width, height)
+	}
+
+	input := m.renderInput(width)
+	help := m.renderHelp(width)
+	contentHeight := height - lineCount(input) - lineCount(help) - 1
+	if contentHeight < 8 {
+		contentHeight = 8
+	}
+	content := m.renderContent(width, contentHeight)
+	return padLines(content, contentHeight) + "\n" + input + "\n" + help
+}
+
+func (m AppModel) viewSize() (int, int) {
+	width := m.width
+	if width == 0 {
+		width = 100
+	}
+	height := m.height
+	if height == 0 {
+		height = 24
+	}
+	return width, height
+}
+
+func (m AppModel) contentDimensions() (int, int) {
+	width, height := m.viewSize()
+	input := m.renderInput(width)
+	help := m.renderHelp(width)
+	contentHeight := height - lineCount(input) - lineCount(help) - 1
+	if contentHeight < 8 {
+		contentHeight = 8
+	}
+	if width >= 96 {
+		return width - 32, contentHeight
+	}
+	return width, contentHeight
+}
+
+func (m *AppModel) refreshMainViewport(width int, height int) {
+	vp := m.ensureMainViewport()
+	vp.Width = width
+	vp.Height = height
+	vp.MouseWheelEnabled = false
+	vp.SetContent(strings.TrimRight(m.renderMain(width, 0), "\n"))
+}
+
+func (m AppModel) renderContent(width, height int) string {
+	if width >= 96 {
+		rightWidth := 30
+		mainWidth := width - rightWidth - 2
+		main := m.renderMainViewport(m.renderMain(mainWidth, 0), mainWidth, height)
+		return joinColumns(main, m.renderWorkspacePanel(rightWidth, height), mainWidth+2)
+	}
+
+	content := strings.TrimRight(m.renderMainViewport(m.renderMain(width, 0), width, height), "\n")
+	if len(m.workspaces) > 1 {
+		remaining := height - lineCount(content) - 1
+		if remaining >= 4 {
+			content += "\n\n" + strings.TrimRight(m.renderWorkspacePanel(width, remaining), "\n")
+		}
+	}
+	return content + "\n"
+}
+
+func (m AppModel) renderMainViewport(content string, width int, height int) string {
+	vp := m.mainViewport
+	if vp == nil {
+		v := viewport.New(width, height)
+		v.MouseWheelEnabled = false
+		vp = &v
+	}
+	vp.Width = width
+	vp.Height = height
+	vp.MouseWheelEnabled = false
+	vp.SetContent(strings.TrimRight(content, "\n"))
+	return trimRightDisplaySpaceLines(vp.View())
+}
+
+func trimRightDisplaySpaceLines(value string) string {
+	lines := strings.Split(value, "\n")
+	for i := range lines {
+		lines[i] = trimRightDisplaySpace(lines[i])
+	}
+	return strings.Join(lines, "\n")
+}
+
+func joinColumns(left, right string, leftWidth int) string {
+	leftLines := strings.Split(strings.TrimRight(left, "\n"), "\n")
+	rightLines := strings.Split(strings.TrimRight(right, "\n"), "\n")
+	lineCount := len(leftLines)
+	if len(rightLines) > lineCount {
+		lineCount = len(rightLines)
+	}
+	var b strings.Builder
+	for i := 0; i < lineCount; i++ {
+		leftLine := ""
+		if i < len(leftLines) {
+			leftLine = leftLines[i]
+		}
+		rightLine := ""
+		if i < len(rightLines) {
+			rightLine = rightLines[i]
+		}
+		b.WriteString(padDisplay(leftLine, leftWidth))
+		b.WriteString(rightLine)
+		if i < lineCount-1 {
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+func padDisplay(value string, width int) string {
+	padding := width - lipgloss.Width(value)
+	if padding <= 0 {
+		return value
+	}
+	return value + strings.Repeat(" ", padding)
+}
+
+func (m AppModel) renderMain(width, height int) string {
+	var b strings.Builder
+	b.WriteString(Title.Render("WorkOrch Agent"))
+	b.WriteString("\n")
+	b.WriteString(m.renderActiveWorkspace(width))
+	b.WriteString("\n")
+	if line := m.renderWorkspaceTemplateInfo(width); line != "" {
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	b.WriteString(m.renderProgress(width))
+	b.WriteString("\n")
+	if len(m.transcript) > 0 {
+		b.WriteString(renderTranscript(m.transcript, width-2, 5))
+	}
+	if m.currentTask != "" {
+		b.WriteString(truncateDisplay("Task: "+m.currentTask, width-2))
+		b.WriteString("\n")
+	}
+	if len(m.dodItems) > 0 {
+		b.WriteString(renderDoDItems(m.dodItems, width-2, 4))
+	}
+	b.WriteString(Dim.Render(strings.Repeat("-", max(10, width-2))))
+	b.WriteString("\n")
+
+	if m.blockingDecision != nil {
+		b.WriteString(Warning.Render("Decision required"))
+		b.WriteString("\n")
+		b.WriteString(truncateDisplay(blockingDecisionLabel(m.blockingDecision), width-2))
+		b.WriteString("\n\n")
+	}
+	if m.blockingApproval != nil {
+		b.WriteString(Alert.Render("Approval required"))
+		b.WriteString("\n")
+		b.WriteString(truncateDisplay(blockingApprovalLabel(m.blockingApproval), width-2))
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString(Heading.Render("Result"))
+	b.WriteString("\n")
+	resultLines := m.resultLineLimit(height, lineCount(b.String()))
+	switch {
+	case m.result != "":
+		b.WriteString(renderRichText(m.result, width-2, resultLines))
+		b.WriteString("\n")
+	case m.failureReason != "":
+		b.WriteString(Error.Render(truncateDisplay(m.failureReason, width-2)))
+		b.WriteString("\n")
+	default:
+		b.WriteString(Dim.Render(m.emptyResultText()))
+		b.WriteString("\n")
+	}
+
+	if artifacts := m.visibleArtifacts(); len(artifacts) > 0 {
+		b.WriteString("\n")
+		b.WriteString(Heading.Render("Artifacts"))
+		b.WriteString("\n")
+		for _, artifact := range artifacts {
+			b.WriteString(truncateDisplay("- "+artifact, width-2))
+			b.WriteString("\n")
+		}
+	}
+	if m.lastError != nil {
+		b.WriteString("\n")
+		b.WriteString(Error.Render("Error: " + m.lastError.Error()))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func (m AppModel) resultLineLimit(height int, usedLines int) int {
+	if height <= 0 {
+		return maxResultLines
+	}
+	reserved := 0
+	if artifacts := m.visibleArtifacts(); len(artifacts) > 0 {
+		reserved += 2 + len(artifacts)
+	}
+	if m.lastError != nil {
+		reserved += 2
+	}
+	limit := height - usedLines - reserved
+	if limit < 4 {
+		return 4
+	}
+	return limit
+}
+
+func (m AppModel) visibleArtifacts() []string {
+	if len(m.artifacts) == 0 {
+		return nil
+	}
+	result := strings.ToLower(m.result)
+	if strings.Contains(result, "交付物索引") || strings.Contains(result, "artifact index") || strings.Contains(result, "artifacts") {
+		return nil
+	}
+	return m.artifacts
+}
+
+func (m AppModel) renderActiveWorkspace(width int) string {
+	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
+	if ws == nil {
+		return Dim.Render("Workspace: " + shortID(m.activeWorkspaceID))
+	}
+	label := workspaceLabel(*ws)
+	if ws.WorkingDirectory != "" {
+		label += "  " + ws.WorkingDirectory
+	}
+	return truncateDisplay("Workspace: "+label, width-2)
+}
+
+func (m AppModel) renderWorkspaceTemplateInfo(width int) string {
+	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
+	if ws == nil {
+		return ""
+	}
+	parts := make([]string, 0, 2)
+	if ws.DefaultSoulID != "" {
+		parts = append(parts, "default soul: "+string(ws.DefaultSoulID))
+	}
+	if len(ws.SoulBindings) > 0 {
+		parts = append(parts, "bindings: "+workspaceBindingSummary(ws.SoulBindings))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return Dim.Render(truncateDisplay(strings.Join(parts, " | "), width-2))
+}
+
+func (m AppModel) renderProgress(width int) string {
+	label := progressLabel(m.progress)
+	if m.progressText != "" && !strings.EqualFold(m.progressText, label) {
+		label += " - " + m.progressText
+	}
+	label = truncateDisplay(label, width-2)
+	switch m.progress {
+	case progressCompleted:
+		return Success.Render(label)
+	case progressFailed:
+		return Error.Render(label)
+	case progressWaitingDecision:
+		return Warning.Render(label)
+	case progressWaitingApproval:
+		return Alert.Render(label)
+	default:
+		return Info.Render(label)
+	}
+}
+
+func (m AppModel) renderWorkspacePanel(width, height int) string {
+	var b strings.Builder
+	b.WriteString(Heading.Render("Workspaces"))
+	b.WriteString("\n")
+	if len(m.workspaces) == 0 {
+		b.WriteString(Dim.Render("No workspaces"))
+		b.WriteString("\n")
+		return b.String()
+	}
+
+	limit := max(2, (height-5)/2)
+	if limit > len(m.workspaces) {
+		limit = len(m.workspaces)
+	}
+	counts := workspaceNameCounts(m.workspaces)
+	for _, ws := range visibleWorkspaces(m.workspaces, m.cursor, limit) {
+		prefix := "  "
+		if m.workspaceSelectMode && string(ws.ID) == m.selectedWorkspaceID {
+			prefix = "> "
+		} else if !m.workspaceSelectMode && string(ws.ID) == m.activeWorkspaceID {
+			prefix = "> "
+		}
+		b.WriteString(workspacePanelLine(prefix, ws, counts, width-1))
+		b.WriteString("\n")
+	}
+	if len(m.workspaces) > limit {
+		b.WriteString(Dim.Render(fmt.Sprintf("+%d more", len(m.workspaces)-limit)))
+		b.WriteString("\n")
+	}
+
+	openDecisions := len(filterOpenDecisions(m.decisions))
+	pendingApprovals := len(filterPendingApprovals(m.approvals))
+	b.WriteString("\n")
+	b.WriteString(Warning.Render(fmt.Sprintf("%d decisions", openDecisions)))
+	b.WriteString("\n")
+	b.WriteString(Alert.Render(fmt.Sprintf("%d approvals", pendingApprovals)))
+	b.WriteString("\n")
+	return b.String()
+}
+
+func (m AppModel) renderInput(width int) string {
+	prompt := shortID(m.activeWorkspaceID)
+	if prompt == "none" {
+		prompt = "workspace"
+	}
+	if m.blockingDecision != nil {
+		prompt += " decision"
+	} else if m.blockingApproval != nil {
+		prompt += " approval"
+	}
+	input := m.renderInputBuffer(prompt, width)
+	if suggestions := m.renderSlashCommandSuggestions(width); suggestions != "" {
+		return suggestions + "\n" + input
+	}
+	return input
+}
+
+func (m AppModel) renderHelp(width int) string {
+	help := "enter: submit | /help: help | /workspace: select/create ws | /dod: update DoD | /memory: recall | /exit: quit | ctrl+c: interrupt/quit x2"
+	if width < 120 {
+		help = "enter: submit | /help | /workspace | /dod | /memory | /exit | ctrl+c x2 quit"
+	}
+	if m.workspaceSelectMode {
+		help = "ws select: up/down/j/k move | enter confirm | ctrl+w cancel | esc cancel"
+	}
+	return Dim.Render(truncateDisplay(help, width-2))
+}
+
+func (m AppModel) renderHelpOverlay(width, height int) string {
+	lines := []string{
+		"WorkOrch Help",
+		"",
+		"Enter: submit current goal or response",
+		"Alt+Enter: insert newline",
+		"Ctrl+P / Ctrl+N: input history",
+		"Tab: slash command completion",
+		"Ctrl+W: workspace selector",
+		"Ctrl+H: help",
+		"Ctrl+C: interrupt active run; press twice outside a run to quit",
+		"PgUp / PgDn: scroll result",
+		"Esc: clear input or close help",
+		"/help /clear /workspace /workspace create /dod /memory /result /exit",
+	}
+	panelWidth := min(width-4, 72)
+	if panelWidth < 30 {
+		panelWidth = max(20, width-2)
+	}
+	panelHeight := len(lines) + 4
+	if panelHeight > height-2 {
+		panelHeight = height - 2
+	}
+	b := strings.Builder{}
+	padTop := max(0, (height-panelHeight)/2)
+	for i := 0; i < padTop; i++ {
+		b.WriteString("\n")
+	}
+	b.WriteString(Border.Width(panelWidth).Render(strings.Join(lines[:min(len(lines), panelHeight-4)], "\n")))
+	return b.String()
+}
