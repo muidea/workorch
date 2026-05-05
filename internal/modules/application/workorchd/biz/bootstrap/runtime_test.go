@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
@@ -96,12 +97,16 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 		echoRuntimeAdapter{},
 		echoRuntimeAdapter{},
 		echoRuntimeAdapter{},
+		echoRuntimeAdapter{},
 	)
 	if err != nil {
 		t.Fatalf("build registry: %v", err)
 	}
 
 	for _, kind := range []string{
+		filemodule.StepKindList,
+		filemodule.StepKindRead,
+		filemodule.StepKindEdit,
 		shellmodule.StepKindCommand,
 		sshmodule.StepKindCommand,
 		mcpblockmodule.StepKindToolCall,
@@ -131,6 +136,33 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 	}
 	if result.Output["stage"] != "patch_apply" {
 		t.Fatalf("patch/apply output = %+v, want patch_apply stage", result.Output)
+	}
+	result, err = registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		Kind:                      llmcommon.RuntimeBlockKindPatchPreview,
+		WorkspaceWorkingDirectory: t.TempDir(),
+		Input: map[string]any{
+			"patchType": "file_write",
+			"targetRef": "result.txt",
+			"content":   "ready\n",
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute patch/preview: %v", err)
+	}
+	if result.Output["stage"] != "patch_preview" {
+		t.Fatalf("patch/preview output = %+v, want patch_preview stage", result.Output)
+	}
+	result, err = registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		Kind: llmcommon.RuntimeBlockKindPatchRevert,
+		Input: map[string]any{
+			"patchId": "run-1/step-1/patch/1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute patch/revert: %v", err)
+	}
+	if result.Output["stage"] != "patch_revert" {
+		t.Fatalf("patch/revert output = %+v, want patch_revert stage", result.Output)
 	}
 }
 
@@ -560,7 +592,7 @@ func TestNewWithBackendFilePartitionsRunScopedRepositories(t *testing.T) {
 
 func TestNewWithBackendFileUsesDefaultDataRootWhenUnset(t *testing.T) {
 	tempRoot := t.TempDir()
-	defaultDataDir := filepath.Join(tempRoot, "workorchd-data")
+	defaultDataDir := filepath.Join(tempRoot, "workorch-data")
 	t.Setenv("TMPDIR", tempRoot)
 
 	rt := NewWithBackend("file", "")

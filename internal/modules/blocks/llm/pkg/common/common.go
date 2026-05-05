@@ -8,6 +8,8 @@ const DefaultProviderID = "default"
 
 const (
 	RuntimeBlockKindPatchApply      = "patch/apply"
+	RuntimeBlockKindPatchPreview    = "patch/preview"
+	RuntimeBlockKindPatchRevert     = "patch/revert"
 	RuntimeBlockKindDecisionRequest = "decision/request"
 	RuntimeBlockKindApprovalRequest = "approval/request"
 	RuntimeBlockKindMemoryWrite     = "memory/write"

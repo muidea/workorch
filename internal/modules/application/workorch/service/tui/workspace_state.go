@@ -229,6 +229,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if msg.Snapshot != nil {
 		m.result = snapshotDisplayResult(msg.Snapshot, run.ID)
 		m.artifacts = snapshotArtifactLabels(msg.Snapshot, run.ID)
+		m.patches = snapshotPatches(msg.Snapshot, run.ID)
 		m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), msg.Snapshot.MemoryRecallTraces...)
 	}
 
@@ -261,6 +262,7 @@ func (m *AppModel) resetWorkspaceView() {
 	m.transcript = nil
 	m.result = ""
 	m.artifacts = nil
+	m.patches = nil
 	m.memoryRecalls = nil
 	m.failureReason = ""
 	m.failureHint = ""

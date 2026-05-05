@@ -2,23 +2,42 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type runtimePatchRequest struct {
-	TargetRef string
-	Content   string
-	Diff      string
-	Summary   string
-	PatchType string
+	TargetRef  string
+	Content    string
+	Diff       string
+	Summary    string
+	PatchType  string
+	BaseHash   string
+	ApprovalID common.ApprovalID
+}
+
+type runtimePatchRevertRequest struct {
+	PatchID    common.PatchID
+	ApprovalID common.ApprovalID
+	Strict     bool
+}
+
+type workspacePatchBeforeState struct {
+	Exists  bool
+	Content string
+	Hash    string
 }
 
 type runtimeFailureDiagnosticError interface {
@@ -87,6 +106,7 @@ func (o *RuntimeOrchestrator) applyRuntimePatches(
 			RunID:       run.ID,
 			StepID:      step.ID,
 			ToolCallID:  toolCall.ID,
+			ApprovalID:  request.ApprovalID,
 			PatchType:   request.PatchType,
 			TargetRef:   request.TargetRef,
 			Content:     request.Content,
@@ -103,18 +123,149 @@ func (o *RuntimeOrchestrator) applyRuntimePatches(
 				return err
 			}
 		}
+		beforeState, err := workspacePatchBeforeStateForRequest(workingDirectory, request)
+		if err != nil {
+			patch.State = common.PatchStateFailed
+			_ = o.evidence.Patches.Update(ctx, patch)
+			if publishErr := o.publishPatchChanged(ctx, run, step, toolCall, patch, events.TopicPatchFailed, err); publishErr != nil {
+				return errors.Join(err, publishErr)
+			}
+			return err
+		}
+		patch.BeforeHash = beforeState.Hash
+		patch.OriginalContent = beforeState.Content
+		patch.OriginalExists = beforeState.Exists
 		if err := applyWorkspacePatch(workingDirectory, request); err != nil {
 			patch.State = common.PatchStateFailed
 			_ = o.evidence.Patches.Update(ctx, patch)
+			if publishErr := o.publishPatchChanged(ctx, run, step, toolCall, patch, events.TopicPatchFailed, err); publishErr != nil {
+				return errors.Join(err, publishErr)
+			}
+			return err
+		}
+		afterHash, err := workspacePatchAfterHash(workingDirectory, request.TargetRef)
+		if err != nil {
+			patch.State = common.PatchStateFailed
+			_ = o.evidence.Patches.Update(ctx, patch)
+			if publishErr := o.publishPatchChanged(ctx, run, step, toolCall, patch, events.TopicPatchFailed, err); publishErr != nil {
+				return errors.Join(err, publishErr)
+			}
 			return err
 		}
 		patch.State = common.PatchStateApplied
+		patch.AfterHash = afterHash
+		patch.ReverseDiff = reverseDiffForPatch(request.TargetRef, beforeState.Content, beforeState.Exists)
 		patch.AppliedAt = runtimeEvidenceTimestamp()
 		if err := o.evidence.Patches.Update(ctx, patch); err != nil {
 			return err
 		}
+		if err := o.publishPatchChanged(ctx, run, step, toolCall, patch, events.TopicPatchApplied, nil); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func (o *RuntimeOrchestrator) applyRuntimePatchRevert(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	toolCall *runModel.ToolCall,
+	output map[string]any,
+	workingDirectory string,
+) error {
+	request, ok, err := runtimePatchRevertRequestFromOutput(output)
+	if err != nil || !ok {
+		return err
+	}
+	if o.evidence.Patches == nil {
+		return common.ErrInvalidArgument
+	}
+	patch, err := o.evidence.Patches.Get(ctx, request.PatchID)
+	if err != nil {
+		return err
+	}
+	if patch.WorkspaceID != run.WorkspaceID || patch.RunID != run.ID {
+		return common.ErrConflict
+	}
+	if patch.State != common.PatchStateApplied {
+		return fmt.Errorf("%w: patch %s is not applied", common.ErrInvalidArgument, patch.ID)
+	}
+	if patch.AfterHash == "" {
+		return fmt.Errorf("%w: patch %s has no afterHash and cannot be reverted", common.ErrInvalidArgument, patch.ID)
+	}
+	currentHash, err := workspacePatchAfterHash(workingDirectory, patch.TargetRef)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(currentHash, patch.AfterHash) {
+		return fmt.Errorf("%w: patch revert hash mismatch", common.ErrConflict)
+	}
+	if patch.OriginalExists {
+		target, err := workspaceTargetPath(workingDirectory, patch.TargetRef)
+		if err != nil {
+			return err
+		}
+		if err := ensureWorkspacePatchParentDirectory(workingDirectory, patch.TargetRef, target, "patch_revert"); err != nil {
+			return err
+		}
+		if err := os.WriteFile(target, []byte(patch.OriginalContent), 0o644); err != nil {
+			return err
+		}
+	} else {
+		target, err := workspaceTargetPath(workingDirectory, patch.TargetRef)
+		if err != nil {
+			return err
+		}
+		if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	patch.State = common.PatchStateReverted
+	patch.RevertApprovalID = request.ApprovalID
+	patch.RevertedAt = runtimeEvidenceTimestamp()
+	if err := o.evidence.Patches.Update(ctx, patch); err != nil {
+		return err
+	}
+	output["patchRevert"] = map[string]any{
+		"patchId":    string(patch.ID),
+		"state":      string(patch.State),
+		"targetRef":  patch.TargetRef,
+		"beforeHash": patch.AfterHash,
+		"afterHash":  patch.BeforeHash,
+		"approvalId": string(request.ApprovalID),
+	}
+	return o.publishPatchChanged(ctx, run, step, toolCall, patch, events.TopicPatchReverted, nil)
+}
+
+func runtimePatchRevertRequestFromOutput(output map[string]any) (runtimePatchRevertRequest, bool, error) {
+	if output == nil || output["patchRevert"] == nil {
+		return runtimePatchRevertRequest{}, false, nil
+	}
+	value := mapFromValue(output["patchRevert"])
+	if len(value) == 0 {
+		return runtimePatchRevertRequest{}, false, common.ErrInvalidArgument
+	}
+	patchID := common.PatchID(strings.TrimSpace(stringFromAny(value["patchId"])))
+	if patchID == "" {
+		return runtimePatchRevertRequest{}, false, common.ErrInvalidArgument
+	}
+	return runtimePatchRevertRequest{
+		PatchID:    patchID,
+		ApprovalID: common.ApprovalID(strings.TrimSpace(stringFromAny(value["approvalId"]))),
+		Strict:     boolFromAnyDefault(value["strict"], true),
+	}, true, nil
+}
+
+func (o *RuntimeOrchestrator) publishPatchPreviewFromOutput(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any) error {
+	if output == nil {
+		return nil
+	}
+	preview := mapFromValue(output["patchPreview"])
+	if len(preview) == 0 {
+		return nil
+	}
+	return o.publishPatchPreview(ctx, run, step, toolCall, preview)
 }
 
 func runtimePatchRequests(output map[string]any) ([]runtimePatchRequest, error) {
@@ -158,6 +309,8 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 	summary, _ := item["summary"].(string)
 	patchType, _ := item["patchType"].(string)
 	operation, _ := item["operation"].(string)
+	baseHash, _ := item["baseHash"].(string)
+	approvalID, _ := item["approvalId"].(string)
 	targetRef = strings.TrimSpace(targetRef)
 	if targetRef == "" {
 		return runtimePatchRequest{}, common.ErrInvalidArgument
@@ -191,11 +344,13 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 		summary = "workspace patch apply"
 	}
 	return runtimePatchRequest{
-		TargetRef: targetRef,
-		Content:   content,
-		Diff:      diff,
-		Summary:   summary,
-		PatchType: patchType,
+		TargetRef:  targetRef,
+		Content:    content,
+		Diff:       diff,
+		Summary:    summary,
+		PatchType:  patchType,
+		BaseHash:   strings.TrimSpace(baseHash),
+		ApprovalID: common.ApprovalID(strings.TrimSpace(approvalID)),
 	}, nil
 }
 
@@ -271,17 +426,82 @@ func containsUnresolvedRuntimeTemplate(value string) bool {
 func applyWorkspacePatch(workingDirectory string, request runtimePatchRequest) error {
 	switch request.PatchType {
 	case "file_write":
-		return applyWorkspaceFileWrite(workingDirectory, request.TargetRef, request.Content)
+		return applyWorkspaceFileWrite(workingDirectory, request.TargetRef, request.Content, request.BaseHash)
 	case "unified_diff":
-		return applyWorkspaceUnifiedDiff(workingDirectory, request.TargetRef, request.Diff)
+		return applyWorkspaceUnifiedDiff(workingDirectory, request.TargetRef, request.Diff, request.BaseHash)
 	default:
 		return common.ErrInvalidArgument
 	}
 }
 
-func applyWorkspaceFileWrite(workingDirectory string, targetRef string, content string) error {
+func workspacePatchBeforeStateForRequest(workingDirectory string, request runtimePatchRequest) (workspacePatchBeforeState, error) {
+	target, err := workspaceTargetPath(workingDirectory, request.TargetRef)
+	if err != nil {
+		return workspacePatchBeforeState{}, err
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) {
+			return workspacePatchBeforeState{Exists: false}, nil
+		}
+		return workspacePatchBeforeState{}, err
+	}
+	return workspacePatchBeforeState{
+		Exists:  true,
+		Content: string(data),
+		Hash:    sha256HexBytes(data),
+	}, nil
+}
+
+func workspacePatchAfterHash(workingDirectory string, targetRef string) (string, error) {
 	target, err := workspaceTargetPath(workingDirectory, targetRef)
 	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return "", err
+	}
+	return sha256HexBytes(data), nil
+}
+
+func reverseDiffForPatch(targetRef string, originalContent string, originalExists bool) string {
+	if !originalExists {
+		return fmt.Sprintf("--- a/%s\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-\n", filepath.ToSlash(filepath.Clean(targetRef)))
+	}
+	return fmt.Sprintf("--- a/%s\n+++ b/%s\n@@ -1,0 +1,%d @@\n%s",
+		filepath.ToSlash(filepath.Clean(targetRef)),
+		filepath.ToSlash(filepath.Clean(targetRef)),
+		countTextLines(originalContent),
+		prefixDiffLines(originalContent, "+"),
+	)
+}
+
+func prefixDiffLines(content string, prefix string) string {
+	if content == "" {
+		return ""
+	}
+	lines, _ := splitTextLines(content)
+	var b strings.Builder
+	for _, line := range lines {
+		b.WriteString(prefix)
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func sha256HexBytes(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func applyWorkspaceFileWrite(workingDirectory string, targetRef string, content string, baseHash string) error {
+	target, err := workspaceTargetPath(workingDirectory, targetRef)
+	if err != nil {
+		return err
+	}
+	if err := verifyWorkspacePatchBaseHash(target, baseHash); err != nil {
 		return err
 	}
 	if err := ensureWorkspacePatchParentDirectory(workingDirectory, targetRef, target, "file_write"); err != nil {
@@ -293,6 +513,9 @@ func applyWorkspaceFileWrite(workingDirectory string, targetRef string, content 
 func ensureWorkspacePatchParentDirectory(workingDirectory string, targetRef string, target string, operation string) error {
 	base, err := filepath.Abs(workingDirectory)
 	if err != nil {
+		return err
+	}
+	if base, err = filepath.EvalSymlinks(base); err != nil {
 		return err
 	}
 	parent := filepath.Dir(target)
@@ -348,14 +571,77 @@ func workspaceTargetPath(workingDirectory string, targetRef string) (string, err
 	if err != nil {
 		return "", err
 	}
+	base, err = filepath.EvalSymlinks(base)
+	if err != nil {
+		return "", err
+	}
 	target, err := filepath.Abs(filepath.Join(base, cleanTarget))
 	if err != nil {
 		return "", err
 	}
-	if target != base && !strings.HasPrefix(target, base+string(filepath.Separator)) {
+	if existing := nearestExistingWorkspacePatchPath(target); existing != "" {
+		resolvedExisting, evalErr := filepath.EvalSymlinks(existing)
+		if evalErr != nil {
+			return "", evalErr
+		}
+		if !workspacePatchPathInside(base, resolvedExisting) {
+			return "", common.ErrInvalidArgument
+		}
+		if existing == target {
+			target = resolvedExisting
+		}
+	}
+	if !workspacePatchPathInside(base, target) {
 		return "", common.ErrInvalidArgument
 	}
 	return target, nil
+}
+
+func nearestExistingWorkspacePatchPath(path string) string {
+	current := path
+	for {
+		if _, err := os.Lstat(current); err == nil {
+			return current
+		}
+		next := filepath.Dir(current)
+		if next == current {
+			return ""
+		}
+		current = next
+	}
+}
+
+func workspacePatchPathInside(base string, target string) bool {
+	base = filepath.Clean(base)
+	target = filepath.Clean(target)
+	return target == base || strings.HasPrefix(target, base+string(filepath.Separator))
+}
+
+func verifyWorkspacePatchBaseHash(target string, baseHash string) error {
+	baseHash = strings.TrimSpace(baseHash)
+	if baseHash == "" {
+		return nil
+	}
+	currentHash, err := fileSHA256(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: patch baseHash mismatch: target does not exist", common.ErrConflict)
+		}
+		return err
+	}
+	if !strings.EqualFold(currentHash, baseHash) {
+		return fmt.Errorf("%w: patch baseHash mismatch", common.ErrConflict)
+	}
+	return nil
+}
+
+func fileSHA256(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 var unifiedDiffHunkHeaderPattern = regexp.MustCompile(`^@@ -([0-9]+)(?:,([0-9]+))? \+([0-9]+)(?:,([0-9]+))? @@`)
@@ -371,7 +657,7 @@ type unifiedDiffHunk struct {
 	Lines    []string
 }
 
-func applyWorkspaceUnifiedDiff(workingDirectory string, targetRef string, diff string) error {
+func applyWorkspaceUnifiedDiff(workingDirectory string, targetRef string, diff string, baseHash string) error {
 	target, err := workspaceTargetPath(workingDirectory, targetRef)
 	if err != nil {
 		return err
@@ -391,6 +677,9 @@ func applyWorkspaceUnifiedDiff(workingDirectory string, targetRef string, diff s
 		}
 		currentContent = nil
 	}
+	if err := verifyWorkspacePatchBaseHashBytes(target, currentContent, baseHash); err != nil {
+		return err
+	}
 	nextContent, err := applyUnifiedDiffFilePatch(string(currentContent), filePatch)
 	if err != nil {
 		return err
@@ -399,6 +688,128 @@ func applyWorkspaceUnifiedDiff(workingDirectory string, targetRef string, diff s
 		return err
 	}
 	return os.WriteFile(target, []byte(nextContent), 0o644)
+}
+
+func verifyWorkspacePatchBaseHashBytes(target string, content []byte, baseHash string) error {
+	baseHash = strings.TrimSpace(baseHash)
+	if baseHash == "" {
+		return nil
+	}
+	if content == nil {
+		if _, err := os.Stat(target); os.IsNotExist(err) {
+			return fmt.Errorf("%w: patch baseHash mismatch: target does not exist", common.ErrConflict)
+		}
+	}
+	sum := sha256.Sum256(content)
+	if !strings.EqualFold(hex.EncodeToString(sum[:]), baseHash) {
+		return fmt.Errorf("%w: patch baseHash mismatch", common.ErrConflict)
+	}
+	return nil
+}
+
+func previewWorkspacePatch(workingDirectory string, request runtimePatchRequest) (map[string]any, error) {
+	target, err := workspaceTargetPath(workingDirectory, request.TargetRef)
+	if err != nil {
+		return nil, err
+	}
+	if err := verifyWorkspacePatchBaseHash(target, request.BaseHash); err != nil {
+		if request.PatchType != "unified_diff" {
+			return nil, err
+		}
+	}
+	preview := map[string]any{
+		"targetRef": request.TargetRef,
+		"patchType": request.PatchType,
+		"summary":   request.Summary,
+		"baseHash":  request.BaseHash,
+		"willWrite": false,
+	}
+	switch request.PatchType {
+	case "file_write":
+		if err := ensureWorkspacePatchParentDirectoryPreview(workingDirectory, request.TargetRef, target, "file_write"); err != nil {
+			return nil, err
+		}
+		sum := sha256.Sum256([]byte(request.Content))
+		preview["contentHash"] = hex.EncodeToString(sum[:])
+		preview["addedLines"] = countTextLines(request.Content)
+		preview["deletedLines"] = 0
+		preview["bytes"] = len([]byte(request.Content))
+	case "unified_diff":
+		filePatch, err := parseSingleFileUnifiedDiff(request.Diff)
+		if err != nil {
+			return nil, err
+		}
+		if !diffTargetMatches(request.TargetRef, filePatch) {
+			return nil, common.ErrInvalidArgument
+		}
+		currentContent, err := os.ReadFile(target)
+		if err != nil {
+			if !os.IsNotExist(err) || filePatch.OldRef != "/dev/null" {
+				return nil, err
+			}
+			currentContent = nil
+		}
+		if err := verifyWorkspacePatchBaseHashBytes(target, currentContent, request.BaseHash); err != nil {
+			return nil, err
+		}
+		if _, err := applyUnifiedDiffFilePatch(string(currentContent), filePatch); err != nil {
+			return nil, err
+		}
+		added, deleted := unifiedDiffStats(filePatch)
+		sum := sha256.Sum256([]byte(request.Diff))
+		preview["diffHash"] = hex.EncodeToString(sum[:])
+		preview["addedLines"] = added
+		preview["deletedLines"] = deleted
+	default:
+		return nil, common.ErrInvalidArgument
+	}
+	return preview, nil
+}
+
+func ensureWorkspacePatchParentDirectoryPreview(workingDirectory string, targetRef string, target string, operation string) error {
+	base, err := filepath.Abs(workingDirectory)
+	if err != nil {
+		return err
+	}
+	if base, err = filepath.EvalSymlinks(base); err != nil {
+		return err
+	}
+	parent := filepath.Dir(target)
+	if parent == base {
+		return nil
+	}
+	relParent, err := filepath.Rel(base, parent)
+	if err != nil {
+		return err
+	}
+	current := base
+	for _, part := range strings.Split(relParent, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, statErr := os.Stat(current)
+		if statErr == nil {
+			if !info.IsDir() {
+				conflictRef, relErr := filepath.Rel(base, current)
+				if relErr != nil {
+					conflictRef = filepath.Clean(targetRef)
+				}
+				return &workspacePathConflictError{
+					Operation:    operation,
+					TargetRef:    filepath.ToSlash(filepath.Clean(targetRef)),
+					ConflictRef:  filepath.ToSlash(conflictRef),
+					ConflictKind: "file",
+				}
+			}
+			continue
+		}
+		if !os.IsNotExist(statErr) {
+			return statErr
+		}
+		return nil
+	}
+	return nil
 }
 
 func parseSingleFileUnifiedDiff(diff string) (unifiedDiffFilePatch, error) {
@@ -545,6 +956,36 @@ func joinTextLines(lines []string, finalNewline bool) string {
 		ret += "\n"
 	}
 	return ret
+}
+
+func countTextLines(content string) int {
+	if content == "" {
+		return 0
+	}
+	count := strings.Count(content, "\n")
+	if !strings.HasSuffix(content, "\n") {
+		count++
+	}
+	return count
+}
+
+func unifiedDiffStats(filePatch unifiedDiffFilePatch) (int, int) {
+	added := 0
+	deleted := 0
+	for _, hunk := range filePatch.Hunks {
+		for _, line := range hunk.Lines {
+			if line == "" {
+				continue
+			}
+			switch line[0] {
+			case '+':
+				added++
+			case '-':
+				deleted++
+			}
+		}
+	}
+	return added, deleted
 }
 
 func normalizeUnifiedDiffPath(input string) string {

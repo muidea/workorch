@@ -41,7 +41,7 @@ var rootCmd = &cobra.Command{
 	Long: `WorkOrch CLI provides terminal-based management for AI workspace orchestration.
 
 Runs in local embedded mode by default. Use --remote <addr> to connect
-to a running workorchd service.`,
+to a running workorch --server service.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -98,7 +98,7 @@ func init() {
 	cfg = config.Default()
 	cfgPath, _ = config.Path()
 
-	rootCmd.PersistentFlags().StringVar(&remoteAddr, "remote", "", "Remote workorchd address (e.g. http://192.168.1.100:8080)")
+	rootCmd.PersistentFlags().StringVar(&remoteAddr, "remote", "", "Remote workorch --server address (e.g. http://192.168.1.100:8080)")
 	rootCmd.PersistentFlags().StringVar(&cfgPath, "config", "", "CLI config file path")
 	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Output as raw JSON")
 }

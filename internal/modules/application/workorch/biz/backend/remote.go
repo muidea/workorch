@@ -13,7 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-// remoteBackend implements Backend using an HTTP client to a running workorchd.
+// remoteBackend implements Backend using an HTTP client to a running workorch --server.
 type remoteBackend struct {
 	cl   *client.Client
 	ws   *remoteWorkspaceBackend
@@ -31,7 +31,7 @@ type remoteBackend struct {
 	evt  *remoteEventsBackend
 }
 
-// NewRemote creates a Backend that communicates with a remote workorchd via HTTP.
+// NewRemote creates a Backend that communicates with a remote workorch --server via HTTP.
 func NewRemote(addr string) Backend {
 	cl := client.New(addr)
 	b := &remoteBackend{cl: cl}

@@ -190,7 +190,7 @@ func normalizePublishedSnapshot(item events.Envelope, snapshotTopic, subjectType
 		Version:      events.WorkorchSnapshotVersion,
 		Topic:        snapshotTopic,
 		OccurredAt:   envelope.OccurredAt,
-		SourceModule: workorchdcommon.ModuleID,
+		SourceModule: workorchdcommon.EventSourceModuleID,
 		SubjectType:  subjectType,
 		SubjectID:    envelope.SubjectID,
 		WorkspaceID:  envelope.WorkspaceID,

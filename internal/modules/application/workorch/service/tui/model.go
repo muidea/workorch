@@ -77,6 +77,7 @@ type AppModel struct {
 	transcript    []transcriptItem
 	result        string
 	artifacts     []string
+	patches       []backend.PatchInfo
 	memoryRecalls []backend.MemoryRecallTraceInfo
 	progress      progressState
 	progressText  string
@@ -460,6 +461,7 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 	}
 	m.result = ""
 	m.artifacts = nil
+	m.patches = nil
 	m.failureReason = ""
 	m.lastError = nil
 	m.clearInput()
@@ -496,6 +498,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.transcript = nil
 		m.result = ""
 		m.artifacts = nil
+		m.patches = nil
 		m.failureReason = ""
 		m.lastError = nil
 		m.resetMainViewport()
@@ -1141,6 +1144,15 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.result = firstPayloadString(evt.Payload, "summary", "Summary", events.PayloadKeySummary)
 		m.artifacts = artifactPayloadStrings(evt.Payload)
 		m.resetMainViewport()
+		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+	case backend.EventPatchPreviewed, backend.EventPatchApplied, backend.EventPatchFailed, backend.EventPatchReverted:
+		targetRef := firstPayloadString(evt.Payload, "targetRef", "TargetRef", events.PayloadKeyTargetRef)
+		state := firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)
+		if targetRef != "" || state != "" {
+			m.progressText = strings.TrimSpace("Patch " + nonEmpty(state, string(evt.Type)) + " " + targetRef)
+		} else {
+			m.progressText = string(evt.Type)
+		}
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventMemoryRecallRecorded:
 		status := firstPayloadString(evt.Payload, "status", "Status", events.PayloadKeyStatus)
@@ -1796,6 +1808,47 @@ func snapshotArtifactLabels(snapshot *backend.WorkspaceSnapshotInfo, runID commo
 		}
 	}
 	return out
+}
+
+func snapshotPatches(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.PatchInfo {
+	if snapshot == nil || len(snapshot.Patches) == 0 {
+		return nil
+	}
+	out := make([]backend.PatchInfo, 0, len(snapshot.Patches))
+	for _, item := range snapshot.Patches {
+		if runID != "" && item.RunID != "" && item.RunID != runID {
+			continue
+		}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func patchDisplayLabel(item backend.PatchInfo) string {
+	parts := make([]string, 0, 5)
+	if item.State != "" {
+		parts = append(parts, string(item.State))
+	}
+	if item.TargetRef != "" {
+		parts = append(parts, item.TargetRef)
+	} else if item.ID != "" {
+		parts = append(parts, string(item.ID))
+	}
+	if item.AddedLines != 0 || item.DeletedLines != 0 {
+		parts = append(parts, fmt.Sprintf("+%d/-%d", item.AddedLines, item.DeletedLines))
+	}
+	if item.ApprovalID != "" {
+		parts = append(parts, "approval:"+string(item.ApprovalID))
+	} else if item.RevertApprovalID != "" {
+		parts = append(parts, "approval:"+string(item.RevertApprovalID))
+	}
+	if item.Summary != "" {
+		parts = append(parts, item.Summary)
+	}
+	return strings.Join(parts, "  ")
 }
 
 func compactStrings(items []string) []string {

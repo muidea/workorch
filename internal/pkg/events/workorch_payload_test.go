@@ -120,3 +120,40 @@ func TestDecodeDecisionResolutionPayloadRoundTrip(t *testing.T) {
 		t.Fatalf("payload operator = %v, want workorch", decoded.Payload["operator"])
 	}
 }
+
+func TestDecodePatchPayloadRoundTrip(t *testing.T) {
+	payload := PatchPayload(
+		common.PatchID("patch-1"),
+		common.StepID("run-1/step-1"),
+		common.ToolCallID("run-1/step-1/tool-call"),
+		"unified_diff",
+		"main.go",
+		"update main",
+		common.PatchStateApplied,
+		2,
+		1,
+		"",
+		"diff-sha",
+		common.ApprovalID("approval-1"),
+		"sensitive",
+		"",
+	)
+
+	decoded, ok := DecodePatchPayload(payload)
+	if !ok {
+		t.Fatalf("DecodePatchPayload returned !ok")
+	}
+	if decoded.PatchID != "patch-1" ||
+		decoded.StepID != "run-1/step-1" ||
+		decoded.ToolCallID != "run-1/step-1/tool-call" ||
+		decoded.PatchType != "unified_diff" ||
+		decoded.TargetRef != "main.go" ||
+		decoded.State != common.PatchStateApplied ||
+		decoded.AddedLines != 2 ||
+		decoded.DeletedLines != 1 ||
+		decoded.DiffHash != "diff-sha" ||
+		decoded.ApprovalID != "approval-1" ||
+		decoded.Risk != "sensitive" {
+		t.Fatalf("decoded patch payload = %+v", decoded)
+	}
+}

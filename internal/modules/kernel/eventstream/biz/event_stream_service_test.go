@@ -50,6 +50,55 @@ func TestServicePersistsWorkorchEventsFromHub(t *testing.T) {
 	}
 }
 
+func TestServicePersistsPatchEventsFromHub(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewEventRecordRepository()
+	hub := events.NewMemoryHub()
+	service := NewService(repo, hub)
+	if err := service.Start(); err != nil {
+		t.Fatalf("start event stream service: %v", err)
+	}
+	defer service.Stop()
+
+	if err := hub.Publish(ctx, events.Envelope{
+		ID:           "event-stream-patch-applied",
+		Version:      events.WorkorchEventVersion,
+		Topic:        events.TopicPatchApplied,
+		SourceModule: "kernel/orchestrator",
+		SubjectType:  "patch",
+		SubjectID:    "patch-event-stream",
+		WorkspaceID:  "ws-event-stream",
+		RunID:        "run-event-stream",
+		StepID:       "run-event-stream/step-1",
+		Payload: events.PatchPayload(
+			common.PatchID("patch-event-stream"),
+			common.StepID("run-event-stream/step-1"),
+			common.ToolCallID("run-event-stream/step-1/tool-call"),
+			"file_write",
+			"result.txt",
+			"write result",
+			common.PatchStateApplied,
+			1,
+			0,
+			"content-sha",
+			"",
+			"",
+			"",
+			"",
+		),
+	}); err != nil {
+		t.Fatalf("publish patch event: %v", err)
+	}
+
+	records, err := repo.List(ctx, repository.EventRecordQuery{RunID: "run-event-stream"})
+	if err != nil {
+		t.Fatalf("list event records: %v", err)
+	}
+	if len(records) != 1 || records[0].Topic != events.TopicPatchApplied || records[0].Payload[events.PayloadKeyTargetRef] != "result.txt" {
+		t.Fatalf("records = %+v, want persisted patch event", records)
+	}
+}
+
 func TestServiceIgnoresNonWorkorchEvents(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewEventRecordRepository()

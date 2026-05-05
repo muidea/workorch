@@ -829,6 +829,45 @@ func TestMapRunObservabilityReusesSnapshotProjection(t *testing.T) {
 	}
 }
 
+func TestMapRunObservabilityProjectsPatchEventsIntoTimeline(t *testing.T) {
+	snapshot := RunSnapshot{
+		Workspace: Workspace{ID: "ws-observability-patch-event"},
+		Run:       Run{ID: "run-observability-patch-event", WorkspaceID: "ws-observability-patch-event", State: string(common.RunStateCompleted)},
+		EventRecords: []EventRecord{{
+			ID:          "event-patch-applied",
+			Topic:       events.TopicPatchApplied,
+			SubjectType: "patch",
+			SubjectID:   "patch-observability-event",
+			WorkspaceID: "ws-observability-patch-event",
+			RunID:       "run-observability-patch-event",
+			StepID:      "run-observability-patch-event/step-1",
+			OccurredAt:  "2026-04-25T10:00:00Z",
+			Payload: events.PatchPayload(
+				common.PatchID("patch-observability-event"),
+				common.StepID("run-observability-patch-event/step-1"),
+				common.ToolCallID("run-observability-patch-event/step-1/tool-call"),
+				"file_write",
+				"result.txt",
+				"write result",
+				common.PatchStateApplied,
+				1,
+				0,
+				"content-sha",
+				"",
+				"",
+				"",
+				"",
+			),
+		}},
+	}
+
+	observability := mapRunObservability(snapshot)
+
+	if observability.Evidence.EventTotal != 1 || !timelineContainsPersistedEvent(observability.Timeline, events.TopicPatchApplied) {
+		t.Fatalf("observability = %+v, want patch event in timeline", observability)
+	}
+}
+
 func TestRunContextBundleReusesSnapshotTaskProgress(t *testing.T) {
 	snapshot := RunSnapshot{
 		Workspace: Workspace{ID: "ws-context-progress-reuse"},
@@ -1579,6 +1618,15 @@ func timelineContainsStepOccurredAt(items []RuntimeTimelineItem, source string, 
 	return false
 }
 
+func timelineContainsPersistedEvent(items []RuntimeTimelineItem, topic string) bool {
+	for _, item := range items {
+		if item.Source == "persisted_event" && item.Topic == topic {
+			return true
+		}
+	}
+	return false
+}
+
 func TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems(t *testing.T) {
 	dataRoot := t.TempDir()
 	workspaceID := "ws-workspace-snapshot"
@@ -1791,6 +1839,7 @@ func TestReadWorkspaceSnapshotWithRunSnapshotReusesProjectionSections(t *testing
 		},
 		TaskDecompositions: []TaskDecomposition{{ID: "cached-decomposition", Summary: "cached decomposition"}},
 		ExecutionSections:  []ExecutionSection{{ID: "cached-section", Title: "cached section"}},
+		Patches:            []Patch{{ID: "patch-cached", WorkspaceID: string(workspaceID), RunID: string(runID), TargetRef: "main.go", State: "applied", AddedLines: 2, DeletedLines: 1}},
 	}
 	snapshot, err := ReadWorkspaceSnapshotWithRunSnapshotWithSession(ctx, session.Borrow(), string(workspaceID), cached)
 	if err != nil {
@@ -1804,6 +1853,9 @@ func TestReadWorkspaceSnapshotWithRunSnapshotReusesProjectionSections(t *testing
 	}
 	if len(snapshot.ExecutionSections) != 1 || snapshot.ExecutionSections[0].ID != "cached-section" {
 		t.Fatalf("execution sections = %+v, want cached section", snapshot.ExecutionSections)
+	}
+	if len(snapshot.Patches) != 1 || snapshot.Patches[0].ID != "patch-cached" || snapshot.Patches[0].AddedLines != 2 {
+		t.Fatalf("patches = %+v, want cached patch projection", snapshot.Patches)
 	}
 }
 

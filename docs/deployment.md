@@ -122,9 +122,9 @@ make docker-verify-file
 ```
 
 All non-docker e2e verification targets connect to the currently deployed
-`workorchd` instance through `WORKORCH_BASE_URL` and must not build, start,
-stop, or restart `workorchd`. The `*-file` targets are retained as aliases for
-the same deployed-instance checks.
+`workorch --server` instance through `WORKORCH_BASE_URL` and must not build,
+start, stop, or restart the service. The `*-file` targets are retained as
+aliases for the same deployed-instance checks.
 
 `make verify-workspace-template-soul` and
 `make verify-workspace-template-soul-file` verify deployed Soul management,
@@ -135,7 +135,7 @@ DoD, and Workspace Soul binding read models.
 OpenAI-compatible mock provider and verify the LLM-driven Workspace execution
 loop through the deployed service API.
 
-`make verify-real-llm` verifies an already running `workorchd` service against
+`make verify-real-llm` verifies an already running `workorch --server` service against
 its configured real LLM provider. By default it targets
 `http://127.0.0.1:8080`, reads the default ready provider from
 `/api/v1/workorch/configuration`, creates a new Workspace / Goal / DoD, and
@@ -191,7 +191,7 @@ module files from `config.d/`.
 ## LLM provider configuration
 
 LLM-driven Workspace execution is enabled by configuring a provider before
-starting `workorchd`.
+starting `workorch --server`.
 
 OpenAI SDK provider:
 
@@ -263,7 +263,7 @@ MCP runtime boundary:
   newline-delimited JSON-RPC over stdin/stdout, and performs `initialize`,
   `notifications/initialized`, then `tools/call`.
 - `stdio` endpoint parsing is command plus whitespace-separated args. Shell
-  expansion is not applied by `workorchd`; use an explicit wrapper command when
+  expansion is not applied by workorch; use an explicit wrapper command when
   complex environment setup is required.
 - Local verification and load-test scripts write managed MCP `stdio` endpoint
   helpers under `.workorch-data/system/mcp-endpoints/{mcpServerId}/` by default.
@@ -274,7 +274,7 @@ MCP runtime boundary:
 
 ## Acceptance expectation
 
-A deployable `workorchd` instance is acceptable when:
+A deployable `workorch --server` instance is acceptable when:
 
 - `GET /healthz` returns `200`
 - `GET /readyz` returns `200`
@@ -291,7 +291,7 @@ A deployable `workorchd` instance is acceptable when:
 - `make verify-mvp` and `make verify-mvp-file` pass as the grouped local
   deployed-instance MVP verification bundles with the configured real LLM
   provider. CI uses `make verify-ci-mvp-file` instead.
-- after deploying `workorchd`, `make verify-real-llm` and
+- after deploying `workorch --server`, `make verify-real-llm` and
   `make verify-real-mcp-stdio` pass against the running service. The real MCP
   stdio check temporarily appends a local mock provider through the
   configuration API, restores provider config on exit, creates a governed MCP
@@ -346,7 +346,7 @@ A deployable `workorchd` instance is acceptable when:
 - with file-backed repository config, `POST /api/v1/workorch/approvals/resolve-batch` resolves multiple pending approval items after prevalidating the whole batch
 - with file-backed repository config, `POST /api/v1/workorch/runs/{runId}/resume` can complete after approval approve or fail terminally after approval reject
 - with file-backed repository config, repository state is persisted under the configured `dataDir`
-- with file-backed repository config, restarting `workorchd` on the same `dataDir` preserves workspace / run / decision / approval terminal read paths
+- with file-backed repository config, restarting `workorch --server` on the same `dataDir` preserves workspace / run / decision / approval terminal read paths
 - with configured real LLM provider, `make verify-real-llm` completes a
   graph-backed Workspace execution with shell evidence and a satisfied
   evidence-backed `dodAssessment`

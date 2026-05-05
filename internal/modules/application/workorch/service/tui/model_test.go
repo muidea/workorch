@@ -1134,6 +1134,7 @@ func TestModelWorkspaceContextHydratesFreshSnapshot(t *testing.T) {
 			Runs:      []backend.RunInfo{{ID: "run-b", WorkspaceID: "ws-b", GoalID: "goal-b", State: common.RunStateCompleted}},
 			Results:   []backend.ResultInfo{{ID: "result-b", RunID: "run-b", Summary: "fresh result", ArtifactRefs: []string{"result-artifact"}}},
 			Artifacts: []backend.ArtifactInfo{{ID: "artifact-b", RunID: "run-b", Name: "artifact name"}},
+			Patches:   []backend.PatchInfo{{ID: "patch-b", RunID: "run-b", TargetRef: "main.go", State: common.PatchStateApplied, AddedLines: 3, DeletedLines: 1, ApprovalID: "approval-b"}},
 		},
 		ActiveRun: &backend.RunInfo{ID: "run-b", WorkspaceID: "ws-b", GoalID: "goal-b", State: common.RunStateCompleted},
 		Goal:      &backend.GoalInfo{ID: "goal-b", Text: "fresh goal"},
@@ -1153,10 +1154,13 @@ func TestModelWorkspaceContextHydratesFreshSnapshot(t *testing.T) {
 			t.Fatalf("artifacts = %+v, missing %q", m.artifacts, want)
 		}
 	}
+	if len(m.patches) != 1 || m.patches[0].ID != "patch-b" {
+		t.Fatalf("patches = %+v, want hydrated patch", m.patches)
+	}
 	m.width = 100
-	m.height = 18
+	m.height = 24
 	view := stripANSI(m.View())
-	if strings.Contains(view, "old task") || strings.Contains(view, "old result") || !strings.Contains(view, "fresh result") || !strings.Contains(view, "fresh goal") {
+	if strings.Contains(view, "old task") || strings.Contains(view, "old result") || !strings.Contains(view, "fresh result") || !strings.Contains(view, "fresh goal") || !strings.Contains(view, "main.go") {
 		t.Fatalf("view not fully refreshed:\n%s", view)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
@@ -324,7 +325,7 @@ func recordRecoveryMemoryRecallTrace(ctx context.Context, session *RuntimeSessio
 		Version:      events.WorkorchEventVersion,
 		Topic:        events.TopicMemoryRecallRecorded,
 		OccurredAt:   trace.OccurredAt,
-		SourceModule: "application/workorchd",
+		SourceModule: modulecommon.EventSourceModuleID,
 		SubjectType:  "memory_recall",
 		SubjectID:    string(trace.ID),
 		WorkspaceID:  string(trace.WorkspaceID),

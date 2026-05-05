@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
+	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
@@ -39,6 +40,8 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	if eventHub == nil {
 		eventHub = events.NewMagicHub()
 	}
+	fileModule := filemodule.New()
+	mustSetup("file", fileModule.Setup())
 	shellModule := shellmodule.New()
 	mustSetup("shell", shellModule.Setup())
 	sshModule := sshmodule.New()
@@ -100,6 +103,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 
 	orchestratorModule := orchestratormodule.New()
 	runtimeRegistry, err := buildRuntimeAdapterRegistry(
+		fileModule.RuntimeAdapter(),
 		shellModule.RuntimeAdapter(),
 		sshModule.RuntimeAdapter(),
 		mcpBlockModule.RuntimeAdapter(),
@@ -134,6 +138,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	}))
 
 	modules := []lifecycle{
+		fileModule,
 		shellModule,
 		sshModule,
 		llmModule,
@@ -206,12 +211,22 @@ func mustSetup(name string, err error) {
 }
 
 func buildRuntimeAdapterRegistry(
+	fileAdapter orchestratorbiz.RuntimeAdapter,
 	shellAdapter orchestratorbiz.RuntimeAdapter,
 	sshAdapter orchestratorbiz.RuntimeAdapter,
 	mcpAdapter orchestratorbiz.RuntimeAdapter,
 	llmAdapter orchestratorbiz.RuntimeAdapter,
 ) (*orchestratorbiz.RuntimeAdapterRegistry, error) {
 	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry()
+	for _, stepKind := range []string{
+		filemodule.StepKindList,
+		filemodule.StepKindRead,
+		filemodule.StepKindEdit,
+	} {
+		if err := runtimeRegistry.Register(stepKind, fileAdapter); err != nil {
+			return nil, err
+		}
+	}
 	if err := runtimeRegistry.Register(shellmodule.StepKindCommand, shellAdapter); err != nil {
 		return nil, err
 	}
@@ -228,6 +243,12 @@ func buildRuntimeAdapterRegistry(
 		}
 	}
 	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchApply, orchestratorbiz.NewPatchRuntimeAdapter()); err != nil {
+		return nil, err
+	}
+	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchPreview, orchestratorbiz.NewPatchRuntimeAdapter()); err != nil {
+		return nil, err
+	}
+	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchRevert, orchestratorbiz.NewPatchRuntimeAdapter()); err != nil {
 		return nil, err
 	}
 	if err := runtimeRegistry.Register(llmmodule.StepKindWorkspaceExecution, llmAdapter); err != nil {

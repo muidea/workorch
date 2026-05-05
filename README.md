@@ -1,6 +1,6 @@
 # workorch
 
-workorch is a local-first workspace orchestration service for defining Goals and DoD, activating execution Runs, observing runtime progress, and managing LLM / MCP / memory context through a bundled web console.
+workorch is a local-first workspace orchestration agent and service for defining Goals and DoD, activating execution Runs, observing runtime progress, and managing LLM / MCP / memory context through a TUI-first CLI and bundled web console.
 
 Current LLM provider management supports explicit provider capabilities for
 chat completions, streaming, and declared non-chat operations. Streaming output
@@ -14,11 +14,11 @@ configured.
 
 ## Structure
 
-- `application/workorchd`: executable entry
+- `application/workorch`: executable entry; default mode starts the TUI, and `--server` starts the HTTP/Web service
 - `internal/initiators/workorchruntime`: workorch runtime initiator that provides repository, event hub, and cross-module service wiring to plugin-loaded modules
-- `internal/modules/application/workorchd`: workorchd plugin module plus `biz` / `service` / `pkg` implementation packages
-- `web/workorch-console`: React/TypeScript management console source, built into `workorchd` assets
-- `internal/modules/application/workorchd/service/server/consoleassets`: embedded management console build output served by `workorchd`
+- `internal/modules/application/workorchd`: server-side application module plus `biz` / `service` / `pkg` implementation packages
+- `web/workorch-console`: React/TypeScript management console source, built into workorch server assets
+- `internal/modules/application/workorchd/service/server/consoleassets`: embedded management console build output served by `workorch --server`
 - `internal/modules/kernel/{workspace,run,decision,orchestrator,eventstream,mcp,memory,skill,soul}`: workorch kernel modules
 - `internal/modules/kernel/result`: formal Result / Artifact business outcome models
 - `internal/modules/blocks/{approval,llm,mcp,shell,ssh}`: reusable/block modules
@@ -38,8 +38,8 @@ Each module is now normalized around the go-multi-module-dev minimum shape:
 
 The application layer is also split by responsibility:
 
-- `application/workorchd/main.go`: thin process entry that starts the magicCommon default service and explicitly imports the selected `workorchruntime` initiator plus the required `kernel` and `blocks` modules
-- `internal/modules/application/workorchd`: plugin module registration plus `Setup` / `Run` / `Teardown` bridge for the workorchd HTTP service
+- `application/workorch/main.go`: thin process entry that starts the TUI by default, or starts the magicCommon service with `--server`; it explicitly imports the selected `workorchruntime` initiator plus the required `kernel` and `blocks` modules
+- `internal/modules/application/workorchd`: plugin module registration plus `Setup` / `Run` / `Teardown` bridge for the workorch HTTP service
 - `internal/initiators/workorchruntime`: application runtime dependency provider used by plugin-loaded modules
 - `internal/modules/application/workorchd/biz/bootstrap`: backend assembly, repository wiring, and runtime construction
 - `internal/modules/application/workorchd/biz/appservice`: application-level business orchestration, service read/write flows, runtime activation, and runtime adapter
@@ -124,12 +124,12 @@ make ci
 
 Notes:
 
-- `make build` writes the binary to `./bin/workorchd`
+- `make build` writes the binary to `./bin/workorch`
 - `make console-build` rebuilds the embedded management console assets from `web/workorch-console`
-- `make verify-service` and `make verify-service-file` verify the currently deployed HTTP service at `WORKORCH_BASE_URL` without starting or stopping `workorchd`
+- `make verify-service` and `make verify-service-file` verify the currently deployed `workorch --server` HTTP service at `WORKORCH_BASE_URL` without starting or stopping it
 - `make verify-service-file` is kept as an alias for the same deployed-instance check
 - `make run-file` runs the service with the file-backed repository backend
-- default memory-backed service state is shared within the running `workorchd` process; use `make run-file` for restart persistence
+- default memory-backed service state is shared within the running `workorch --server` process; use `make run-file` for restart persistence
 - file-backed service execution is repeatable against the same data directory for the shipped workorch IDs
 - `make ci` is the local equivalent of the GitHub Actions baseline
 
@@ -141,7 +141,7 @@ Build cross-platform release binaries:
 make release
 ```
 
-This produces `dist/workorchd-{tag}-{os}-{arch}.tar.gz` for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, plus a `checksums.txt`.
+This produces `dist/workorch-{tag}-{os}-{arch}.tar.gz` for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, plus a `checksums.txt`.
 
 Run full pre-release checks before building:
 
@@ -158,7 +158,7 @@ make release RELEASE_TAG=v0.2.0
 Manual install from a local release build:
 
 ```bash
-tar -xzf dist/workorchd-*-linux-amd64.tar.gz -C /usr/local/bin/
+tar -xzf dist/workorch-*-linux-amd64.tar.gz -C /usr/local/bin/
 ```
 
 ## Built-in Templates and Souls
@@ -183,7 +183,7 @@ Start the service:
 ```bash
 make run
 # or
-go run ./application/workorchd -config-dir config
+go run ./application/workorch --server -config-dir config
 ```
 
 Optional file-backed service run:
@@ -191,14 +191,14 @@ Optional file-backed service run:
 ```bash
 make run-file
 # or
-go run ./application/workorchd -config-dir config/file
+go run ./application/workorch --server -config-dir config/file
 ```
 
 Container build and run:
 
 ```bash
-docker build -t workorchd:local .
-docker run --rm -p 8080:8080 workorchd:local
+docker build -t workorch:local .
+docker run --rm -p 8080:8080 workorch:local
 ```
 
 Optional file-backed container run:
@@ -210,7 +210,7 @@ docker run --rm \
   -p 8080:8080 \
   -v "$(pwd)/config/container-file/application.toml:/etc/workorch/application.toml:ro" \
   -v "$(pwd)/.workorch-data:/var/lib/workorch" \
-  workorchd:local
+  workorch:local
 ```
 
 The mounted data directory must be writable by the non-root `workorch` user inside the container.
@@ -287,7 +287,7 @@ Available endpoints:
 The Web Console Configuration page can update LLM providers. The service writes
 the change to `application.toml`, reloads magicCommon framework configuration,
 and the next LLM runtime step resolves providers from the latest config without
-restarting `workorchd`. Read responses redact provider API keys.
+restarting `workorch --server`. Read responses redact provider API keys.
 
 Minimal deployment verification:
 
@@ -359,7 +359,7 @@ curl http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}
 Deployment-oriented validation:
 
 ```bash
-go run ./application/workorchd -config-dir config
+go run ./application/workorch --server -config-dir config
 ```
 
 Then verify:
@@ -447,7 +447,7 @@ make docker-verify
 make docker-verify-file
 ```
 
-All `verify-*` e2e scripts target the currently deployed `workorchd` instance through `WORKORCH_BASE_URL` and do not build, start, stop, or restart the service. `make verify-workspace-template-soul` covers deployed Soul management, Workspace Template management, and template-based Workspace setup with Soul bindings. Local MVP acceptance uses the configured real LLM provider: `make verify-mvp` runs service smoke, real LLM execution, real LLM weather query, and real LLM weather governance checks against that deployed instance; `make verify-mvp-file` is an alias for the same check. CI uses only mock-provider checks through `make verify-ci-mvp` / `make verify-ci-mvp-file` to avoid external LLM credentials and provider/network false negatives. `make verify-real-vector-memory` targets an already running `workorchd`, temporarily registers an embedding-capable mock provider, verifies vector Memory recall evidence, and restores the original LLM configuration. `make verify-real-weather` uses the configured real LLM provider plus a managed local MCP `stdio` weather endpoint to query Zhejiang Hangzhou current weather from Open-Meteo and validate the Run snapshot evidence. `make verify-weather-ticket-approval` uses the configured real LLM provider plus a managed local MCP `stdio` weather endpoint to verify a specified city weather query through Decision Ticket and Approval gates. The default managed endpoint root is `.workorch-data/system/mcp-endpoints`, and it can be overridden with `WORKORCH_MCP_ENDPOINT_DIR`. `make verify-weather-ticket-approval-mock` is the deterministic mock LLM variant reserved for CI-style checks. `make verify-real-mvp` targets an already running `workorchd`; it combines the configured real LLM check, deployed MCP `stdio` runtime check, and deployed vector Memory recall check.
+All `verify-*` e2e scripts target the currently deployed `workorch --server` instance through `WORKORCH_BASE_URL` and do not build, start, stop, or restart the service. `make verify-workspace-template-soul` covers deployed Soul management, Workspace Template management, and template-based Workspace setup with Soul bindings. Local MVP acceptance uses the configured real LLM provider: `make verify-mvp` runs service smoke, real LLM execution, real LLM weather query, and real LLM weather governance checks against that deployed instance; `make verify-mvp-file` is an alias for the same check. CI uses only mock-provider checks through `make verify-ci-mvp` / `make verify-ci-mvp-file` to avoid external LLM credentials and provider/network false negatives. `make verify-real-vector-memory` targets an already running `workorch --server`, temporarily registers an embedding-capable mock provider, verifies vector Memory recall evidence, and restores the original LLM configuration. `make verify-real-weather` uses the configured real LLM provider plus a managed local MCP `stdio` weather endpoint to query Zhejiang Hangzhou current weather from Open-Meteo and validate the Run snapshot evidence. `make verify-weather-ticket-approval` uses the configured real LLM provider plus a managed local MCP `stdio` weather endpoint to verify a specified city weather query through Decision Ticket and Approval gates. The default managed endpoint root is `.workorch-data/system/mcp-endpoints`, and it can be overridden with `WORKORCH_MCP_ENDPOINT_DIR`. `make verify-weather-ticket-approval-mock` is the deterministic mock LLM variant reserved for CI-style checks. `make verify-real-mvp` targets an already running `workorch --server`; it combines the configured real LLM check, deployed MCP `stdio` runtime check, and deployed vector Memory recall check.
 
 Governed workspace concurrency load tests also target the currently deployed instance. `make loadtest-governed` uses a deterministic mock LLM to measure workorch scheduling, Ticket / Approval, MCP, evidence, and file-backed read-model capacity. The current MVP file backend acceptance baseline is `concurrency=10,total=50` for quick regression and `concurrency=20,total=100` for high-pressure acceptance; `concurrency>=30` is no longer a regular acceptance target because the latest `c30/t150` run kept 100% correctness but had severe throughput and tail-latency regression. `make loadtest-governed-real` uses the configured real LLM provider for small-scale end-to-end pressure checks; do not run the real target in CI or treat it as the internal capacity baseline. Capacity runs can set `WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS` so the controller fails fast when the deployed `server.maxConcurrentRuns` is lower than the intended parallel execution slot count. Load-test MCP helper endpoints also use `WORKORCH_MCP_ENDPOINT_DIR` so persisted MCP server definitions do not point at deleted `/tmp` files.
 

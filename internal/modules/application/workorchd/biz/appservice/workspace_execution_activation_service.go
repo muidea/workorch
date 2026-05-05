@@ -11,6 +11,7 @@ import (
 	"time"
 
 	appbootstrap "github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
@@ -1060,7 +1061,7 @@ func recordActivationMemoryRecallTrace(ctx context.Context, exports appbootstrap
 		Version:      events.WorkorchEventVersion,
 		Topic:        events.TopicMemoryRecallRecorded,
 		OccurredAt:   trace.OccurredAt,
-		SourceModule: "application/workorchd",
+		SourceModule: modulecommon.EventSourceModuleID,
 		SubjectType:  "memory_recall",
 		SubjectID:    string(trace.ID),
 		WorkspaceID:  string(trace.WorkspaceID),

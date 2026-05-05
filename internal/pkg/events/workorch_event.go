@@ -59,6 +59,11 @@ type ArtifactEvent struct {
 	Data     ArtifactPayloadData
 }
 
+type PatchEvent struct {
+	envelope Envelope
+	Data     PatchPayloadData
+}
+
 type MemoryEvent struct {
 	envelope Envelope
 	Data     MemoryPayloadData
@@ -85,6 +90,10 @@ var workorchTopics = []string{
 	TopicApprovalResolved,
 	TopicResultAccepted,
 	TopicArtifactCreated,
+	TopicPatchPreviewed,
+	TopicPatchApplied,
+	TopicPatchFailed,
+	TopicPatchReverted,
 	TopicMemoryCreated,
 	TopicMemoryUpdated,
 	TopicMemoryDeleted,
@@ -174,6 +183,12 @@ func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 		return event, true
 	case TopicArtifactCreated:
 		event, ok := DecodeArtifactEvent(envelope)
+		if !ok {
+			return nil, false
+		}
+		return event, true
+	case TopicPatchPreviewed, TopicPatchApplied, TopicPatchFailed, TopicPatchReverted:
+		event, ok := DecodePatchEvent(envelope)
 		if !ok {
 			return nil, false
 		}
@@ -380,6 +395,24 @@ func DecodeArtifactEvent(envelope Envelope) (ArtifactEvent, bool) {
 	return ArtifactEvent{envelope: envelope, Data: data}, true
 }
 
+func DecodePatchEvent(envelope Envelope) (PatchEvent, bool) {
+	if envelope.Topic != TopicPatchPreviewed && envelope.Topic != TopicPatchApplied && envelope.Topic != TopicPatchFailed && envelope.Topic != TopicPatchReverted {
+		return PatchEvent{}, false
+	}
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
+		return PatchEvent{}, false
+	}
+	data, ok := DecodePatchPayload(envelope.Payload)
+	if !ok {
+		return PatchEvent{}, false
+	}
+	envelope = cloneEnvelope(envelope)
+	envelope.Version = spec.CurrentVersion
+	envelope.Payload = PatchPayload(data.PatchID, data.StepID, data.ToolCallID, data.PatchType, data.TargetRef, data.Summary, data.State, data.AddedLines, data.DeletedLines, data.ContentHash, data.DiffHash, data.ApprovalID, data.Risk, data.Error)
+	return PatchEvent{envelope: envelope, Data: data}, true
+}
+
 func DecodeMemoryEvent(envelope Envelope) (MemoryEvent, bool) {
 	if envelope.Topic != TopicMemoryCreated && envelope.Topic != TopicMemoryUpdated && envelope.Topic != TopicMemoryDeleted {
 		return MemoryEvent{}, false
@@ -485,6 +518,14 @@ func (e ArtifactEvent) Envelope() Envelope {
 }
 
 func (e ArtifactEvent) Topic() string {
+	return e.envelope.Topic
+}
+
+func (e PatchEvent) Envelope() Envelope {
+	return cloneEnvelope(e.envelope)
+}
+
+func (e PatchEvent) Topic() string {
 	return e.envelope.Topic
 }
 

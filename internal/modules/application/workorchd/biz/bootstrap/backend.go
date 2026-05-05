@@ -98,7 +98,7 @@ func ResolveRepositoryDataRoot(backend string, dataRoot string) string {
 		return ""
 	}
 	if dataRoot == "" {
-		return filepath.Join(os.TempDir(), "workorchd-data")
+		return filepath.Join(os.TempDir(), "workorch-data")
 	}
 	return dataRoot
 }

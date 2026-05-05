@@ -17,7 +17,7 @@ func TestMapObservedPreservesEnvelopeShape(t *testing.T) {
 			Version:      "workorch.v1",
 			Topic:        "/run/snapshot",
 			OccurredAt:   "2026-04-22T00:00:00Z",
-			SourceModule: workorchdcommon.ModuleID,
+			SourceModule: workorchdcommon.EventSourceModuleID,
 			SubjectType:  "run",
 			SubjectID:    "run-1",
 			WorkspaceID:  "ws-1",

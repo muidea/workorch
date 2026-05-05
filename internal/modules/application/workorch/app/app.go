@@ -12,7 +12,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
 	cliconfig "github.com/muidea/workorch/internal/modules/application/workorch/biz/config"
 	"github.com/muidea/workorch/internal/modules/application/workorch/service/cli"
-	workorchdmodule "github.com/muidea/workorch/internal/modules/application/workorchd"
+	workorchserver "github.com/muidea/workorch/internal/modules/application/workorchd"
 	appservice "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -21,6 +21,7 @@ import (
 	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
 	_ "github.com/muidea/workorch/internal/modules/application/workorch"
 	_ "github.com/muidea/workorch/internal/modules/blocks/approval"
+	_ "github.com/muidea/workorch/internal/modules/blocks/file"
 	_ "github.com/muidea/workorch/internal/modules/blocks/llm"
 	_ "github.com/muidea/workorch/internal/modules/blocks/mcp"
 	_ "github.com/muidea/workorch/internal/modules/blocks/shell"
@@ -160,7 +161,7 @@ func runLocal(ctx context.Context, programName string, args StartupArgs) (err er
 
 func waitServer(ctx context.Context) error {
 	select {
-	case err, ok := <-workorchdmodule.Done():
+	case err, ok := <-workorchserver.Done():
 		if ok {
 			return err
 		}
@@ -241,7 +242,7 @@ func EnsureConfigFile(dir string) error {
 		return fmt.Errorf("create config dir %s: %w", dir, err)
 	}
 	defaultCfg := map[string]any{
-		"endpointName": "workorchd",
+		"endpointName": "workorch",
 		"server": map[string]any{
 			"addr":              ":8080",
 			"readHeaderTimeout": "5s",

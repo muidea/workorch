@@ -6,6 +6,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
 )
 
 func (m AppModel) View() string {
@@ -197,6 +199,15 @@ func (m AppModel) renderMain(width, height int) string {
 			b.WriteString("\n")
 		}
 	}
+	if patches := m.visiblePatches(); len(patches) > 0 {
+		b.WriteString("\n")
+		b.WriteString(Heading.Render("Patches"))
+		b.WriteString("\n")
+		for _, patch := range patches {
+			b.WriteString(truncateDisplay("- "+patchDisplayLabel(patch), width-2))
+			b.WriteString("\n")
+		}
+	}
 	if m.lastError != nil {
 		b.WriteString("\n")
 		b.WriteString(Error.Render("Error: " + m.lastError.Error()))
@@ -212,6 +223,9 @@ func (m AppModel) resultLineLimit(height int, usedLines int) int {
 	reserved := 0
 	if artifacts := m.visibleArtifacts(); len(artifacts) > 0 {
 		reserved += 2 + len(artifacts)
+	}
+	if patches := m.visiblePatches(); len(patches) > 0 {
+		reserved += 2 + len(patches)
 	}
 	if m.lastError != nil {
 		reserved += 2
@@ -232,6 +246,13 @@ func (m AppModel) visibleArtifacts() []string {
 		return nil
 	}
 	return m.artifacts
+}
+
+func (m AppModel) visiblePatches() []backend.PatchInfo {
+	if len(m.patches) <= 8 {
+		return m.patches
+	}
+	return m.patches[len(m.patches)-8:]
 }
 
 func (m AppModel) renderActiveWorkspace(width int) string {

@@ -42,6 +42,44 @@ func TestDecodeWorkorchEventReturnsTypedRunEvent(t *testing.T) {
 	}
 }
 
+func TestDecodeWorkorchEventReturnsTypedPatchEvent(t *testing.T) {
+	event, ok := DecodeWorkorchEvent(Envelope{
+		Version: WorkorchEventVersion,
+		Topic:   TopicPatchApplied,
+		RunID:   "run-1",
+		StepID:  "run-1/step-1",
+		Payload: PatchPayload(
+			common.PatchID("patch-1"),
+			common.StepID("run-1/step-1"),
+			common.ToolCallID("run-1/step-1/tool-call"),
+			"file_write",
+			"result.txt",
+			"write result",
+			common.PatchStateApplied,
+			1,
+			0,
+			"content-sha",
+			"",
+			"",
+			"",
+			"",
+		),
+	})
+	if !ok {
+		t.Fatalf("DecodeWorkorchEvent returned !ok")
+	}
+	patchEvent, ok := event.(PatchEvent)
+	if !ok {
+		t.Fatalf("event type = %T, want PatchEvent", event)
+	}
+	if patchEvent.Data.PatchID != "patch-1" || patchEvent.Data.TargetRef != "result.txt" || patchEvent.Data.State != common.PatchStateApplied {
+		t.Fatalf("patch data = %+v, want applied patch data", patchEvent.Data)
+	}
+	if patchEvent.Envelope().Payload[PayloadKeyPatchID] != "patch-1" {
+		t.Fatalf("normalized payload = %+v, want patch id", patchEvent.Envelope().Payload)
+	}
+}
+
 func TestDecodeWorkorchEventRejectsIncompatibleVersion(t *testing.T) {
 	_, ok := DecodeWorkorchEvent(Envelope{
 		Version: "workorch.event.v2",

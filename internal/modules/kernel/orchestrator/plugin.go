@@ -9,6 +9,7 @@ import (
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
 	"github.com/muidea/magicCommon/task"
 	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
+	filecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
 	sshcommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
@@ -38,6 +39,13 @@ func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 	}
 	repos := runtime.Repositories()
 	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry()
+	if runtime.FileRuntimeAdapter() != nil {
+		for _, stepKind := range []string{filecommon.StepKindList, filecommon.StepKindRead, filecommon.StepKindEdit} {
+			if err := runtimeRegistry.Register(stepKind, runtime.FileRuntimeAdapter()); err != nil {
+				return cd.NewError(cd.Unexpected, err.Error())
+			}
+		}
+	}
 	if runtime.ShellRuntimeAdapter() != nil {
 		if err := runtimeRegistry.Register("shell/command", runtime.ShellRuntimeAdapter()); err != nil {
 			return cd.NewError(cd.Unexpected, err.Error())
@@ -56,6 +64,12 @@ func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 		}
 	}
 	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchApply, orchestratorbiz.NewPatchRuntimeAdapter()); err != nil {
+		return cd.NewError(cd.Unexpected, err.Error())
+	}
+	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchPreview, orchestratorbiz.NewPatchRuntimeAdapter()); err != nil {
+		return cd.NewError(cd.Unexpected, err.Error())
+	}
+	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchRevert, orchestratorbiz.NewPatchRuntimeAdapter()); err != nil {
 		return cd.NewError(cd.Unexpected, err.Error())
 	}
 	if runtime.LLMRuntimeAdapter() != nil {

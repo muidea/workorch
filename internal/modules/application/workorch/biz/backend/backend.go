@@ -103,6 +103,27 @@ type ArtifactInfo struct {
 	EvidenceRefs []string
 }
 
+type PatchInfo struct {
+	ID               common.PatchID
+	WorkspaceID      common.WorkspaceID
+	RunID            common.RunID
+	StepID           common.StepID
+	ToolCallID       common.ToolCallID
+	ApprovalID       common.ApprovalID
+	RevertApprovalID common.ApprovalID
+	PatchType        string
+	TargetRef        string
+	Summary          string
+	State            common.PatchState
+	AddedLines       int
+	DeletedLines     int
+	BeforeHash       string
+	AfterHash        string
+	CreatedAt        string
+	AppliedAt        string
+	RevertedAt       string
+}
+
 type MemoryRecallHitInfo struct {
 	ID              common.MemoryID
 	Summary         string
@@ -141,6 +162,7 @@ type WorkspaceSnapshotInfo struct {
 	Runs               []RunInfo
 	Results            []ResultInfo
 	Artifacts          []ArtifactInfo
+	Patches            []PatchInfo
 	MemoryRecallTraces []MemoryRecallTraceInfo
 	Decisions          []DecisionInfo
 	Approvals          []ApprovalInfo
@@ -442,6 +464,10 @@ const (
 	EventMemoryUpdated         EventType = "memory/updated"
 	EventMemoryDeleted         EventType = "memory/deleted"
 	EventMemoryRecallRecorded  EventType = "memory/recall/recorded"
+	EventPatchPreviewed        EventType = "patch/previewed"
+	EventPatchApplied          EventType = "patch/applied"
+	EventPatchFailed           EventType = "patch/failed"
+	EventPatchReverted         EventType = "patch/reverted"
 )
 
 type Event struct {

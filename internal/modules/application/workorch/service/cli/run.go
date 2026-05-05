@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -187,6 +188,54 @@ var runObservabilityCmd = &cobra.Command{
 	},
 }
 
+var runPatchesCmd = &cobra.Command{
+	Use:   "patches <id>",
+	Short: "Show patch evidence for a run",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		run, err := mustBackend().Run().Get(ctx(), common.RunID(args[0]))
+		if err != nil {
+			return fmt.Errorf("get run: %w", err)
+		}
+		snapshotBackend, ok := mustBackend().Workspace().(interface {
+			Snapshot(context.Context, common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error)
+		})
+		if !ok {
+			return fmt.Errorf("workspace snapshot is unavailable")
+		}
+		snapshot, err := snapshotBackend.Snapshot(ctx(), run.WorkspaceID)
+		if err != nil {
+			return fmt.Errorf("get workspace snapshot: %w", err)
+		}
+		patches := patchesForRun(snapshot, run.ID)
+		if jsonOutput {
+			printJSON(patches)
+			return nil
+		}
+		if len(patches) == 0 {
+			fmt.Println(styleDim.Render("No patches found."))
+			return nil
+		}
+		fmt.Println(styleTitle.Render("Run Patches: " + args[0]))
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, styleHeader.Render("ID\tState\tType\tTarget\tLines\tApproval\tSummary"))
+		for _, item := range patches {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t+%d/-%d\t%s\t%s\n",
+				item.ID,
+				stateIcon(string(item.State)),
+				item.PatchType,
+				emptyDash(item.TargetRef),
+				item.AddedLines,
+				item.DeletedLines,
+				emptyDash(nonEmptyApprovalID(item.ApprovalID, item.RevertApprovalID)),
+				emptyDash(item.Summary),
+			)
+		}
+		w.Flush()
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(runCmd)
 	runCmd.AddCommand(runListCmd)
@@ -195,6 +244,7 @@ func init() {
 	runCmd.AddCommand(runStatusCmd)
 	runCmd.AddCommand(runResumeCmd)
 	runCmd.AddCommand(runObservabilityCmd)
+	runCmd.AddCommand(runPatchesCmd)
 
 	runListCmd.Flags().String("workspace", "", "Filter by workspace ID")
 
@@ -209,4 +259,34 @@ func init() {
 
 	runStatusCmd.Flags().String("wait", "", "Wait for run to reach this state")
 	runStatusCmd.Flags().Int("wait-timeout", 30000, "Wait timeout in ms")
+}
+
+func patchesForRun(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.PatchInfo {
+	if snapshot == nil || len(snapshot.Patches) == 0 {
+		return nil
+	}
+	out := make([]backend.PatchInfo, 0, len(snapshot.Patches))
+	for _, item := range snapshot.Patches {
+		if item.RunID != runID {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func emptyDash(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func nonEmptyApprovalID(values ...common.ApprovalID) string {
+	for _, value := range values {
+		if value != "" {
+			return string(value)
+		}
+	}
+	return ""
 }

@@ -17,6 +17,7 @@ import (
 	"sync"
 	"unicode"
 
+	filecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	mcpcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
@@ -1074,13 +1075,34 @@ func validateExecutionGraph(graph llmmodels.BlockExecutionGraph) error {
 				}
 			}
 		}
-		if strings.TrimSpace(node.Kind) == llmcommon.RuntimeBlockKindPatchApply {
+		switch strings.TrimSpace(node.Kind) {
+		case filecommon.StepKindRead:
+			path, _ := node.Input["path"].(string)
+			if strings.TrimSpace(path) == "" {
+				return fmt.Errorf("%w: executionGraph file/read path is required", common.ErrInvalidArgument)
+			}
+		case filecommon.StepKindEdit:
+			path, _ := node.Input["path"].(string)
+			oldText, _ := node.Input["oldText"].(string)
+			if strings.TrimSpace(path) == "" || oldText == "" {
+				return fmt.Errorf("%w: executionGraph file/edit path and oldText are required", common.ErrInvalidArgument)
+			}
+		case filecommon.StepKindList:
+			if path, ok := node.Input["path"].(string); ok && filepath.IsAbs(strings.TrimSpace(path)) {
+				return fmt.Errorf("%w: executionGraph file/list path must be workspace relative", common.ErrInvalidArgument)
+			}
+		case llmcommon.RuntimeBlockKindPatchApply, llmcommon.RuntimeBlockKindPatchPreview:
 			targetRef, _ := node.Input["targetRef"].(string)
 			if strings.TrimSpace(targetRef) == "" {
-				return fmt.Errorf("%w: executionGraph patch/apply targetRef is required", common.ErrInvalidArgument)
+				return fmt.Errorf("%w: executionGraph %s targetRef is required", common.ErrInvalidArgument, strings.TrimSpace(node.Kind))
 			}
 			if isReservedLLMReportPatchTarget(targetRef) {
-				return fmt.Errorf("%w: executionGraph patch/apply targetRef %q is reserved for runtime governance/report artifacts", common.ErrInvalidArgument, targetRef)
+				return fmt.Errorf("%w: executionGraph %s targetRef %q is reserved for runtime governance/report artifacts", common.ErrInvalidArgument, strings.TrimSpace(node.Kind), targetRef)
+			}
+		case llmcommon.RuntimeBlockKindPatchRevert:
+			patchID, _ := node.Input["patchId"].(string)
+			if strings.TrimSpace(patchID) == "" {
+				return fmt.Errorf("%w: executionGraph patch/revert patchId is required", common.ErrInvalidArgument)
 			}
 		}
 		if !isSafeGraphNodeID(nodeID) {
@@ -1565,14 +1587,39 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 				Input:       map[string]any{"command": "string", "args": "[]string"},
 			},
 			{
+				Kind:        filecommon.StepKindList,
+				Description: "List files and directories under the workspace working directory without modifying workspace state. Paths must be workspace-relative; large generated directories are skipped.",
+				Input:       map[string]any{"path": "relative directory path", "recursive": "boolean", "maxEntries": "number"},
+			},
+			{
+				Kind:        filecommon.StepKindRead,
+				Description: "Read bounded UTF-8 text content or binary metadata for one workspace-relative file. Use contentHash as the baseHash for later patch/apply or patch/preview when guarding against stale writes.",
+				Input:       map[string]any{"path": "relative file path", "startLine": "number", "endLine": "number", "maxBytes": "number"},
+			},
+			{
+				Kind:        filecommon.StepKindEdit,
+				Description: "Create a non-mutating unified_diff patch preview by replacing a unique oldText with newText in one workspace-relative text file. This does not write files and must be followed by patch/preview or patch/apply to persist changes.",
+				Input:       map[string]any{"path": "relative file path", "oldText": "exact text to replace", "newText": "replacement text", "baseHash": "sha256 content hash", "occurrence": "number when oldText is not unique"},
+			},
+			{
 				Kind:        sshcommon.StepKindCommand,
 				Description: "Execute one bounded non-interactive SSH command on a remote host using supplied password or private key credentials.",
 				Input:       map[string]any{"host": "string", "port": "number", "username": "string", "password": "string", "privateKey": "string", "privateKeyPath": "string", "command": "string", "timeoutMillis": "number"},
 			},
 			{
 				Kind:        llmcommon.RuntimeBlockKindPatchApply,
-				Description: "Apply one file_write or unified_diff patch inside the workspace working directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory. Governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md are reserved for WorkOrch-managed Artifact records and must not be written through patch/apply.",
-				Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string"},
+				Description: "Apply one file_write or unified_diff patch inside the workspace working directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory. Include baseHash from file/read when changing an existing file. Governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md are reserved for WorkOrch-managed Artifact records and must not be written through patch/apply.",
+				Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string", "baseHash": "sha256 content hash", "approvalId": "approved approval id when required"},
+			},
+			{
+				Kind:        llmcommon.RuntimeBlockKindPatchPreview,
+				Description: "Validate and summarize one file_write or unified_diff patch without writing files. Use this before high-risk edits when the user or approval flow needs a non-mutating diff preview.",
+				Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string", "baseHash": "sha256 content hash", "approvalId": "approved approval id when required"},
+			},
+			{
+				Kind:        llmcommon.RuntimeBlockKindPatchRevert,
+				Description: "Revert a WorkOrch-applied patch by patchId only when the current file hash still matches the original patch afterHash. Sensitive or destructive reverts may require approvalId.",
+				Input:       map[string]any{"patchId": "WorkOrch patch id", "approvalId": "approved approval id when required", "strict": "boolean"},
 			},
 			{
 				Kind:        mcpcommon.StepKindToolCall,
@@ -1666,11 +1713,13 @@ func patchOutput(requests []llmmodels.PatchRequest) []map[string]any {
 	ret := make([]map[string]any, 0, len(requests))
 	for _, request := range normalizedPatchRequests(requests) {
 		ret = append(ret, map[string]any{
-			"patchType": request.PatchType,
-			"targetRef": request.TargetRef,
-			"content":   request.Content,
-			"diff":      request.Diff,
-			"summary":   request.Summary,
+			"patchType":  request.PatchType,
+			"targetRef":  request.TargetRef,
+			"content":    request.Content,
+			"diff":       request.Diff,
+			"summary":    request.Summary,
+			"baseHash":   request.BaseHash,
+			"approvalId": request.ApprovalID,
 		})
 	}
 	return ret

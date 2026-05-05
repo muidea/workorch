@@ -77,9 +77,11 @@ const (
 )
 
 const (
-	PatchStateCreated PatchState = "created"
-	PatchStateApplied PatchState = "applied"
-	PatchStateFailed  PatchState = "failed"
+	PatchStateCreated   PatchState = "created"
+	PatchStatePreviewed PatchState = "previewed"
+	PatchStateApplied   PatchState = "applied"
+	PatchStateFailed    PatchState = "failed"
+	PatchStateReverted  PatchState = "reverted"
 )
 
 const (

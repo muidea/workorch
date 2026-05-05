@@ -777,6 +777,7 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 	var artifactItems []*resultmodel.Artifact
 	var ticketItems []*decisionmodel.Ticket
 	var approvalItems []*approvalmodel.Approval
+	var patchItems []*runmodel.Patch
 	tasks := []func() error{
 		func() error {
 			var err error
@@ -827,6 +828,13 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 			continue
 		}
 		runs = append(runs, mapRun(runItem))
+		if deps.patches != nil {
+			items, err := deps.patches.ListByRun(ctx, runItem.ID)
+			if err != nil {
+				return WorkspaceSnapshot{}, err
+			}
+			patchItems = append(patchItems, items...)
+		}
 	}
 	decisions := make([]Decision, 0, len(ticketItems))
 	resolutions, err := resolutionsForTickets(ctx, deps.resolutions, ticketItems)
@@ -853,6 +861,7 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		Runs:         runs,
 		Results:      mapResults(resultItems),
 		Artifacts:    mapArtifacts(artifactItems),
+		Patches:      mapPatches(patchItems),
 		EventRecords: mapEventRecords(eventRecordItems),
 		Decisions:    decisions,
 		Approvals:    approvals,
@@ -875,6 +884,7 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		ret.TaskDecompositions = runSnapshot.TaskDecompositions
 		ret.ExecutionSections = runSnapshot.ExecutionSections
 		ret.MemoryRecallTraces = runSnapshot.MemoryRecallTraces
+		ret.Patches = mergeWorkspaceSnapshotPatches(ret.Patches, runSnapshot.Patches)
 	}
 	ret.Outcome = mapWorkspaceOutcome(ret)
 	return ret, nil
@@ -1426,24 +1436,79 @@ func mapPatches(items []*runmodel.Patch) []Patch {
 		if item == nil {
 			continue
 		}
+		addedLines, deletedLines := readModelPatchLineStats(item)
 		ret = append(ret, Patch{
-			ID:          string(item.ID),
-			WorkspaceID: string(item.WorkspaceID),
-			RunID:       string(item.RunID),
-			StepID:      string(item.StepID),
-			ToolCallID:  string(item.ToolCallID),
-			PatchType:   item.PatchType,
-			TargetRef:   item.TargetRef,
-			Summary:     item.Summary,
-			State:       string(item.State),
-			CreatedAt:   item.CreatedAt,
-			AppliedAt:   item.AppliedAt,
+			ID:               string(item.ID),
+			WorkspaceID:      string(item.WorkspaceID),
+			RunID:            string(item.RunID),
+			StepID:           string(item.StepID),
+			ToolCallID:       string(item.ToolCallID),
+			ApprovalID:       string(item.ApprovalID),
+			RevertApprovalID: string(item.RevertApprovalID),
+			PatchType:        item.PatchType,
+			TargetRef:        item.TargetRef,
+			Summary:          item.Summary,
+			State:            string(item.State),
+			AddedLines:       addedLines,
+			DeletedLines:     deletedLines,
+			BeforeHash:       item.BeforeHash,
+			AfterHash:        item.AfterHash,
+			CreatedAt:        item.CreatedAt,
+			AppliedAt:        item.AppliedAt,
+			RevertedAt:       item.RevertedAt,
 		})
 	}
 	if len(ret) == 0 {
 		return nil
 	}
 	return ret
+}
+
+func readModelPatchLineStats(item *runmodel.Patch) (int, int) {
+	if item == nil {
+		return 0, 0
+	}
+	text := item.Diff
+	if strings.TrimSpace(text) == "" {
+		text = item.Content
+	}
+	added := 0
+	deleted := 0
+	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		switch {
+		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
+			continue
+		case strings.HasPrefix(line, "+"):
+			added++
+		case strings.HasPrefix(line, "-"):
+			deleted++
+		}
+	}
+	return added, deleted
+}
+
+func mergeWorkspaceSnapshotPatches(existing []Patch, latest []Patch) []Patch {
+	if len(existing) == 0 {
+		return latest
+	}
+	if len(latest) == 0 {
+		return existing
+	}
+	seen := make(map[string]int, len(existing)+len(latest))
+	out := make([]Patch, 0, len(existing)+len(latest))
+	for _, item := range existing {
+		seen[item.ID] = len(out)
+		out = append(out, item)
+	}
+	for _, item := range latest {
+		if idx, ok := seen[item.ID]; ok {
+			out[idx] = item
+			continue
+		}
+		seen[item.ID] = len(out)
+		out = append(out, item)
+	}
+	return out
 }
 
 func mapValidationResults(items []*runmodel.ValidationResult) []ValidationResult {

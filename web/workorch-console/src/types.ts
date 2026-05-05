@@ -356,10 +356,20 @@ export type Patch = {
   workspaceId: string;
   runId: string;
   stepId?: string;
+  toolCallId?: string;
+  approvalId?: string;
+  revertApprovalId?: string;
   patchType: string;
   targetRef?: string;
   summary?: string;
   state: string;
+  addedLines?: number;
+  deletedLines?: number;
+  beforeHash?: string;
+  afterHash?: string;
+  createdAt?: string;
+  appliedAt?: string;
+  revertedAt?: string;
 };
 
 export type ValidationResult = {
@@ -735,6 +745,7 @@ export type WorkspaceSnapshot = {
   runs?: Run[];
   results?: Result[];
   artifacts?: Artifact[];
+  patches?: Patch[];
   eventRecords?: EventRecord[];
   decisions?: Decision[];
   approvals?: Approval[];

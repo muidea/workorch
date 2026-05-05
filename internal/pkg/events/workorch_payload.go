@@ -47,6 +47,18 @@ const (
 	PayloadKeyProviderID         = "providerId"
 	PayloadKeyOperation          = "operation"
 	PayloadKeyRetrievedMemoryIDs = "retrievedMemoryIds"
+	PayloadKeyPatchID            = "patchId"
+	PayloadKeyStepID             = "stepId"
+	PayloadKeyToolCallID         = "toolCallId"
+	PayloadKeyPatchType          = "patchType"
+	PayloadKeyTargetRef          = "targetRef"
+	PayloadKeyAddedLines         = "addedLines"
+	PayloadKeyDeletedLines       = "deletedLines"
+	PayloadKeyContentHash        = "contentHash"
+	PayloadKeyDiffHash           = "diffHash"
+	PayloadKeyApprovalID         = "approvalId"
+	PayloadKeyRisk               = "risk"
+	PayloadKeyError              = "error"
 )
 
 type WorkspacePayloadData struct {
@@ -139,6 +151,23 @@ type ArtifactPayloadData struct {
 	ContentType        string
 	State              common.ArtifactState
 	EvidenceRefs       []string
+}
+
+type PatchPayloadData struct {
+	PatchID      common.PatchID
+	StepID       common.StepID
+	ToolCallID   common.ToolCallID
+	PatchType    string
+	TargetRef    string
+	Summary      string
+	State        common.PatchState
+	AddedLines   int
+	DeletedLines int
+	ContentHash  string
+	DiffHash     string
+	ApprovalID   common.ApprovalID
+	Risk         string
+	Error        string
 }
 
 type MemoryPayloadData struct {
@@ -338,6 +367,59 @@ func ArtifactPayload(
 	}
 	if contentType != "" {
 		payload[PayloadKeyContentType] = contentType
+	}
+	return payload
+}
+
+func PatchPayload(
+	patchID common.PatchID,
+	stepID common.StepID,
+	toolCallID common.ToolCallID,
+	patchType string,
+	targetRef string,
+	summary string,
+	state common.PatchState,
+	addedLines int,
+	deletedLines int,
+	contentHash string,
+	diffHash string,
+	approvalID common.ApprovalID,
+	risk string,
+	errText string,
+) map[string]any {
+	payload := map[string]any{
+		PayloadKeyState:        string(state),
+		PayloadKeyPatchType:    patchType,
+		PayloadKeyTargetRef:    targetRef,
+		PayloadKeyAddedLines:   addedLines,
+		PayloadKeyDeletedLines: deletedLines,
+	}
+	if patchID != "" {
+		payload[PayloadKeyPatchID] = string(patchID)
+	}
+	if stepID != "" {
+		payload[PayloadKeyStepID] = string(stepID)
+	}
+	if toolCallID != "" {
+		payload[PayloadKeyToolCallID] = string(toolCallID)
+	}
+	if summary != "" {
+		payload[PayloadKeySummary] = summary
+	}
+	if contentHash != "" {
+		payload[PayloadKeyContentHash] = contentHash
+	}
+	if diffHash != "" {
+		payload[PayloadKeyDiffHash] = diffHash
+	}
+	if approvalID != "" {
+		payload[PayloadKeyApprovalID] = string(approvalID)
+	}
+	if risk != "" {
+		payload[PayloadKeyRisk] = risk
+	}
+	if errText != "" {
+		payload[PayloadKeyError] = errText
 	}
 	return payload
 }
@@ -662,6 +744,81 @@ func DecodeArtifactPayload(payload map[string]any) (ArtifactPayloadData, bool) {
 		ContentType:        contentType,
 		State:              common.ArtifactState(state),
 		EvidenceRefs:       evidenceRefs,
+	}, true
+}
+
+func DecodePatchPayload(payload map[string]any) (PatchPayloadData, bool) {
+	state, ok := stringField(payload, PayloadKeyState)
+	if !ok {
+		return PatchPayloadData{}, false
+	}
+	patchType, ok := optionalStringField(payload, PayloadKeyPatchType)
+	if !ok {
+		return PatchPayloadData{}, false
+	}
+	targetRef, ok := optionalStringField(payload, PayloadKeyTargetRef)
+	if !ok {
+		return PatchPayloadData{}, false
+	}
+	patchID, ok := optionalStringField(payload, PayloadKeyPatchID)
+	if !ok {
+		return PatchPayloadData{}, false
+	}
+	stepID, ok := optionalStringField(payload, PayloadKeyStepID)
+	if !ok {
+		return PatchPayloadData{}, false
+	}
+	toolCallID, ok := optionalStringField(payload, PayloadKeyToolCallID)
+	if !ok {
+		return PatchPayloadData{}, false
+	}
+	summary, ok := optionalStringField(payload, PayloadKeySummary)
+	if !ok {
+		return PatchPayloadData{}, false
+	}
+	addedLines, ok := optionalIntField(payload, PayloadKeyAddedLines)
+	if !ok {
+		return PatchPayloadData{}, false
+	}
+	deletedLines, ok := optionalIntField(payload, PayloadKeyDeletedLines)
+	if !ok {
+		return PatchPayloadData{}, false
+	}
+	contentHash, ok := optionalStringField(payload, PayloadKeyContentHash)
+	if !ok {
+		return PatchPayloadData{}, false
+	}
+	diffHash, ok := optionalStringField(payload, PayloadKeyDiffHash)
+	if !ok {
+		return PatchPayloadData{}, false
+	}
+	approvalID, ok := optionalStringField(payload, PayloadKeyApprovalID)
+	if !ok {
+		return PatchPayloadData{}, false
+	}
+	risk, ok := optionalStringField(payload, PayloadKeyRisk)
+	if !ok {
+		return PatchPayloadData{}, false
+	}
+	errText, ok := optionalStringField(payload, PayloadKeyError)
+	if !ok {
+		return PatchPayloadData{}, false
+	}
+	return PatchPayloadData{
+		PatchID:      common.PatchID(patchID),
+		StepID:       common.StepID(stepID),
+		ToolCallID:   common.ToolCallID(toolCallID),
+		PatchType:    patchType,
+		TargetRef:    targetRef,
+		Summary:      summary,
+		State:        common.PatchState(state),
+		AddedLines:   addedLines,
+		DeletedLines: deletedLines,
+		ContentHash:  contentHash,
+		DiffHash:     diffHash,
+		ApprovalID:   common.ApprovalID(approvalID),
+		Risk:         risk,
+		Error:        errText,
 	}, true
 }
 

@@ -242,9 +242,14 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 		t.Fatalf("provider request = %+v, want schema and ready redacted config", provider.request)
 	}
 	if !runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.StepKindWorkspaceExecution) ||
+		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "file/list") ||
+		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "file/read") ||
+		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "file/edit") ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "shell/command") ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "ssh/command") ||
+		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchPreview) ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchApply) ||
+		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchRevert) ||
 		!runtimeCapabilitiesContainServiceAPI(provider.request.RuntimeCapabilities, "GET", "/api/v1/workorch/runs/{runId}/snapshot") {
 		t.Fatalf("runtime capabilities = %+v, want declared block and service API catalog", provider.request.RuntimeCapabilities)
 	}
@@ -271,7 +276,8 @@ func TestRuntimeAdapterToleratesPatchOperationProviderDrift(t *testing.T) {
 		"patchRequests":[{
 			"operation":"create",
 			"targetRef":"workorch-runtime-output.txt",
-			"content":"run=run-patch-drift"
+			"content":"run=run-patch-drift",
+			"baseHash":"abc123"
 		}]
 	}`)}
 	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
@@ -293,6 +299,9 @@ func TestRuntimeAdapterToleratesPatchOperationProviderDrift(t *testing.T) {
 	}
 	if patches[0]["patchType"] != "file_write" {
 		t.Fatalf("patch = %+v, want operation drift normalized to file_write", patches[0])
+	}
+	if patches[0]["baseHash"] != "abc123" {
+		t.Fatalf("patch = %+v, want baseHash propagated", patches[0])
 	}
 	if _, exists := patches[0]["operation"]; exists {
 		t.Fatalf("patch = %+v, operation is provider drift and must not leak to runtime output", patches[0])

@@ -392,17 +392,24 @@ type ToolCall struct {
 }
 
 type Patch struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspaceId"`
-	RunID       string `json:"runId"`
-	StepID      string `json:"stepId,omitempty"`
-	ToolCallID  string `json:"toolCallId,omitempty"`
-	PatchType   string `json:"patchType"`
-	TargetRef   string `json:"targetRef,omitempty"`
-	Summary     string `json:"summary,omitempty"`
-	State       string `json:"state"`
-	CreatedAt   string `json:"createdAt,omitempty"`
-	AppliedAt   string `json:"appliedAt,omitempty"`
+	ID               string `json:"id"`
+	WorkspaceID      string `json:"workspaceId"`
+	RunID            string `json:"runId"`
+	StepID           string `json:"stepId,omitempty"`
+	ToolCallID       string `json:"toolCallId,omitempty"`
+	ApprovalID       string `json:"approvalId,omitempty"`
+	RevertApprovalID string `json:"revertApprovalId,omitempty"`
+	PatchType        string `json:"patchType"`
+	TargetRef        string `json:"targetRef,omitempty"`
+	Summary          string `json:"summary,omitempty"`
+	State            string `json:"state"`
+	AddedLines       int    `json:"addedLines,omitempty"`
+	DeletedLines     int    `json:"deletedLines,omitempty"`
+	BeforeHash       string `json:"beforeHash,omitempty"`
+	AfterHash        string `json:"afterHash,omitempty"`
+	CreatedAt        string `json:"createdAt,omitempty"`
+	AppliedAt        string `json:"appliedAt,omitempty"`
+	RevertedAt       string `json:"revertedAt,omitempty"`
 }
 
 type ValidationResult struct {
@@ -512,6 +519,7 @@ type WorkspaceSnapshot struct {
 	Runs               []Run               `json:"runs,omitempty"`
 	Results            []Result            `json:"results,omitempty"`
 	Artifacts          []Artifact          `json:"artifacts,omitempty"`
+	Patches            []Patch             `json:"patches,omitempty"`
 	EventRecords       []EventRecord       `json:"eventRecords,omitempty"`
 	Decisions          []Decision          `json:"decisions,omitempty"`
 	Approvals          []Approval          `json:"approvals,omitempty"`

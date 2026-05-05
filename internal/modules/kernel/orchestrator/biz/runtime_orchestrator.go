@@ -953,8 +953,26 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, result.Output, "runtime step failed", err)
 	}
 	output := result.Output
-	if err := o.applyRuntimePatches(ctx, run, step, toolCall, output, workspace.WorkingDirectory); err != nil {
+	if err := o.publishPatchPreviewFromOutput(ctx, run, step, toolCall, output); err != nil {
+		return err
+	}
+	patchApproval, err := o.patchApprovalBlockSpec(ctx, run.ID, output)
+	if err != nil {
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch approval gate failed", err)
+	}
+	if patchApproval.Reason != "" {
+		applyPatchApprovalBlockOutput(output, patchApproval)
+	} else if err := o.applyRuntimePatches(ctx, run, step, toolCall, output, workspace.WorkingDirectory); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch application failed", err)
+	}
+	patchRevertApproval, err := o.patchRevertApprovalBlockSpec(ctx, run.ID, output)
+	if err != nil {
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch revert approval gate failed", err)
+	}
+	if patchRevertApproval.Reason != "" {
+		applyPatchRevertApprovalBlockOutput(output, patchRevertApproval)
+	} else if err := o.applyRuntimePatchRevert(ctx, run, step, toolCall, output, workspace.WorkingDirectory); err != nil {
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch revert failed", err)
 	}
 	memoryRefs, err := o.recordMemoryWrites(ctx, run, step, output)
 	if err != nil {

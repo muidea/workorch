@@ -2,7 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strings"
 
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
@@ -104,6 +107,168 @@ func (o *RuntimeOrchestrator) publishArtifactCreated(ctx context.Context, item *
 			item.EvidenceRefs,
 		),
 	})
+}
+
+func (o *RuntimeOrchestrator) publishPatchChanged(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, patch *runModel.Patch, topic string, failure error) error {
+	if o.eventHub == nil || run == nil || patch == nil {
+		return nil
+	}
+	var stepID common.StepID
+	var toolCallID common.ToolCallID
+	if step != nil {
+		stepID = step.ID
+	}
+	if toolCall != nil {
+		toolCallID = toolCall.ID
+	}
+	if stepID == "" {
+		stepID = patch.StepID
+	}
+	if toolCallID == "" {
+		toolCallID = patch.ToolCallID
+	}
+	addedLines, deletedLines := patchLineStats(patch)
+	contentHash, diffHash := patchContentHashes(patch)
+	approvalID := patch.ApprovalID
+	if topic == events.TopicPatchReverted && patch.RevertApprovalID != "" {
+		approvalID = patch.RevertApprovalID
+	}
+	errText := ""
+	if failure != nil {
+		errText = failure.Error()
+	}
+	return o.eventHub.Publish(ctx, events.Envelope{
+		ID:           fmt.Sprintf("%s/event/%s", patch.ID, patchEventName(topic)),
+		Version:      events.WorkorchEventVersion,
+		Topic:        topic,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "patch",
+		SubjectID:    string(patch.ID),
+		WorkspaceID:  string(patch.WorkspaceID),
+		RunID:        string(patch.RunID),
+		StepID:       string(stepID),
+		Payload: events.PatchPayload(
+			patch.ID,
+			stepID,
+			toolCallID,
+			patch.PatchType,
+			patch.TargetRef,
+			patch.Summary,
+			patch.State,
+			addedLines,
+			deletedLines,
+			contentHash,
+			diffHash,
+			approvalID,
+			"",
+			errText,
+		),
+	})
+}
+
+func (o *RuntimeOrchestrator) publishPatchPreview(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, preview map[string]any) error {
+	if o.eventHub == nil || run == nil || step == nil || len(preview) == 0 {
+		return nil
+	}
+	toolCallID := common.ToolCallID("")
+	if toolCall != nil {
+		toolCallID = toolCall.ID
+	}
+	targetRef := stringFromAny(preview["targetRef"])
+	patchType := stringFromAny(preview["patchType"])
+	subjectID := fmt.Sprintf("%s/patch-preview", step.ID)
+	return o.eventHub.Publish(ctx, events.Envelope{
+		ID:           fmt.Sprintf("%s/event/patch-previewed", subjectID),
+		Version:      events.WorkorchEventVersion,
+		Topic:        events.TopicPatchPreviewed,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "patch",
+		SubjectID:    subjectID,
+		WorkspaceID:  string(run.WorkspaceID),
+		RunID:        string(run.ID),
+		StepID:       string(step.ID),
+		Payload: events.PatchPayload(
+			"",
+			step.ID,
+			toolCallID,
+			patchType,
+			targetRef,
+			stringFromAny(preview["summary"]),
+			common.PatchStatePreviewed,
+			intFromAny(preview["addedLines"]),
+			intFromAny(preview["deletedLines"]),
+			stringFromAny(preview["contentHash"]),
+			stringFromAny(preview["diffHash"]),
+			common.ApprovalID(stringFromAny(preview["approvalId"])),
+			stringFromAny(preview["risk"]),
+			"",
+		),
+	})
+}
+
+func patchEventName(topic string) string {
+	topic = strings.TrimPrefix(strings.TrimSpace(topic), "/patch/")
+	if topic == "" {
+		return "changed"
+	}
+	return topic
+}
+
+func patchLineStats(patch *runModel.Patch) (int, int) {
+	if patch == nil {
+		return 0, 0
+	}
+	if strings.TrimSpace(patch.Diff) != "" {
+		filePatch, err := parseSingleFileUnifiedDiff(patch.Diff)
+		if err == nil {
+			return unifiedDiffStats(filePatch)
+		}
+	}
+	if strings.TrimSpace(patch.Content) != "" {
+		return countTextLines(patch.Content), 0
+	}
+	return 0, 0
+}
+
+func patchContentHashes(patch *runModel.Patch) (string, string) {
+	if patch == nil {
+		return "", ""
+	}
+	contentHash := ""
+	diffHash := ""
+	if patch.Content != "" {
+		sum := sha256.Sum256([]byte(patch.Content))
+		contentHash = hex.EncodeToString(sum[:])
+	}
+	if patch.Diff != "" {
+		sum := sha256.Sum256([]byte(patch.Diff))
+		diffHash = hex.EncodeToString(sum[:])
+	}
+	return contentHash, diffHash
+}
+
+func stringFromAny(value any) string {
+	text, _ := value.(string)
+	return text
+}
+
+func intFromAny(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int8:
+		return int(typed)
+	case int16:
+		return int(typed)
+	case int32:
+		return int(typed)
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return 0
+	}
 }
 
 func (o *RuntimeOrchestrator) publishMemoryChanged(ctx context.Context, topic string, item *memorymodel.MemoryItem) error {

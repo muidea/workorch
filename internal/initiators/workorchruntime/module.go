@@ -36,6 +36,7 @@ func init() {
 type Runtime struct {
 	repositories        common.RepositorySet
 	eventHub            workorchevents.Hub
+	fileRuntimeAdapter  orchestratorbiz.RuntimeAdapter
 	shellRuntimeAdapter orchestratorbiz.RuntimeAdapter
 	sshRuntimeAdapter   orchestratorbiz.RuntimeAdapter
 	mcpRuntimeAdapter   orchestratorbiz.RuntimeAdapter
@@ -88,6 +89,7 @@ func (r *Runtime) Run() *cd.Error {
 func (r *Runtime) Teardown() {
 	r.repositories = common.RepositorySet{}
 	r.eventHub = nil
+	r.fileRuntimeAdapter = nil
 	r.shellRuntimeAdapter = nil
 	r.sshRuntimeAdapter = nil
 	r.mcpRuntimeAdapter = nil
@@ -115,6 +117,19 @@ func (r *Runtime) EventHub() workorchevents.Hub {
 		return nil
 	}
 	return r.eventHub
+}
+
+func (r *Runtime) FileRuntimeAdapter() orchestratorbiz.RuntimeAdapter {
+	if r == nil {
+		return nil
+	}
+	return r.fileRuntimeAdapter
+}
+
+func (r *Runtime) SetFileRuntimeAdapter(adapter orchestratorbiz.RuntimeAdapter) {
+	if r != nil {
+		r.fileRuntimeAdapter = adapter
+	}
 }
 
 func (r *Runtime) ShellRuntimeAdapter() orchestratorbiz.RuntimeAdapter {

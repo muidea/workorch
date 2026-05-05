@@ -39,12 +39,12 @@ func (m *Module) Setup(eventHub event.Hub, backgroundRoutine task.BackgroundRout
 		return cd.NewError(cd.IllegalParam, err.Error())
 	}
 	m.service = server.NewService(config)
-	return m.service.Startup("workorchd", eventHub, backgroundRoutine)
+	return m.service.Startup(modulecommon.ServiceName, eventHub, backgroundRoutine)
 }
 
 func (m *Module) Run() *cd.Error {
 	if m == nil || m.service == nil {
-		return cd.NewError(cd.IllegalParam, "workorchd module is not configured")
+		return cd.NewError(cd.IllegalParam, "workorch module is not configured")
 	}
 	return m.service.Run()
 }

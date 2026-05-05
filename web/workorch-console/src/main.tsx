@@ -3195,6 +3195,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                             { title: '类型', dataIndex: 'patchType', width: 140 },
                             { title: '目标', dataIndex: 'targetRef', ellipsis: true },
                             { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+                            { title: '增删行', width: 100, render: (_, item) => `+${item.addedLines ?? 0}/-${item.deletedLines ?? 0}` },
+                            { title: '审批', dataIndex: 'approvalId', copyable: true, ellipsis: true, render: (_, item) => item.approvalId || item.revertApprovalId || '-' },
                             { title: '摘要', dataIndex: 'summary', ellipsis: true }
                           ]}
                           dataSource={runSnapshot.patches ?? []}

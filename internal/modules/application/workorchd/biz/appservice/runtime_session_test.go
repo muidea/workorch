@@ -321,7 +321,7 @@ func TestNewRuntimeSessionFromEnvReturnsInvalidArgumentWhenBackendUnsupported(t 
 
 func TestNewRuntimeSessionWithBackendFileUsesDefaultDataRootWhenUnset(t *testing.T) {
 	tempRoot := t.TempDir()
-	defaultDataDir := filepath.Join(tempRoot, "workorchd-data")
+	defaultDataDir := filepath.Join(tempRoot, "workorch-data")
 	t.Setenv("TMPDIR", tempRoot)
 
 	session, err := NewRuntimeSessionWithBackend("file", "")
