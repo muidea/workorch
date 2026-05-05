@@ -83,10 +83,10 @@ assert_json "$TMP_DIR/readyz.json" "readyz status" 'data.get("status") == "ready
 
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" >"$TMP_DIR/workorch-console.js"
 grep '执行人格（Soul）' "$TMP_DIR/workorch-console.js" >/dev/null
-grep 'Workspace 模板' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '删除 Soul' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '删除 Workspace 模板' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '调整工作空间 Soul' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '工作空间模板（Workspace Template）' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '执行人格定义已删除' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '删除工作空间模板' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '调整工作空间执行人格（Soul）' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '执行人格配置已保存' "$TMP_DIR/workorch-console.js" >/dev/null
 
 cat >"$TMP_DIR/soul-create.json" <<JSON
