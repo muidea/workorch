@@ -18,6 +18,7 @@ export type ServerConfiguration = {
   idleTimeout?: string;
   shutdownTimeout?: string;
   maxConcurrentRuns?: number;
+  defaultDialogLanguage?: string;
 };
 
 export type RepositoryConfiguration = {
@@ -71,6 +72,10 @@ export type UpdateLLMConfigurationRequest = {
   defaultProviderId?: string;
   defaultEmbeddingProviderId?: string;
   providers: UpdateLLMProviderConfiguration[];
+};
+
+export type UpdateServerConfigurationRequest = {
+  defaultDialogLanguage?: string;
 };
 
 export type UpdateLLMProviderConfiguration = {

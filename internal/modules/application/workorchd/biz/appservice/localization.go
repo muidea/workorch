@@ -1,46 +1,36 @@
 package appservice
 
 import (
-	"os"
-	"strings"
+	"github.com/muidea/workorch/internal/pkg/dialoglanguage"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 func detectSystemLocale() string {
-	for _, env := range []string{"LANG", "LC_ALL", "LC_MESSAGES"} {
-		if locale := os.Getenv(env); locale != "" {
-			if lang := languageNameFromLocale(locale); lang != "" {
-				return lang
-			}
-		}
-	}
-	return ""
+	return dialoglanguage.FromEnvironment()
 }
 
 func languageNameFromLocale(locale string) string {
-	locale = strings.ToLower(strings.TrimSpace(locale))
-	locale = strings.SplitN(locale, ".", 2)[0]
-	if strings.HasPrefix(locale, "zh") {
-		return "zh-CN"
-	}
-	if strings.HasPrefix(locale, "ja") {
-		return "ja"
-	}
-	if strings.HasPrefix(locale, "ko") {
-		return "ko"
-	}
-	return ""
+	return dialoglanguage.NormalizeTag(locale)
 }
 
 func prefersChinese(language string) bool {
-	lang := strings.ToLower(strings.TrimSpace(language))
-	return lang == "zh-cn" || lang == "zh" || lang == "chinese" || strings.HasPrefix(lang, "zh-")
+	return dialoglanguage.PrefersChinese(language)
+}
+
+func defaultDialogLanguage() string {
+	if cfg, err := workorchconfig.Current(); err == nil {
+		if lang := dialoglanguage.NormalizeTag(cfg.Server.DefaultDialogLanguage); lang != "" {
+			return lang
+		}
+	}
+	return detectSystemLocale()
 }
 
 func localizedMilestoneTitle(language string, milestoneID string) string {
 	if prefersChinese(language) {
 		switch milestoneID {
 		case "run_created":
-			return "Run 已创建"
+			return "运行（Run）已创建"
 		case "execution_steps":
 			return "执行步骤"
 		case "governance":
@@ -48,7 +38,7 @@ func localizedMilestoneTitle(language string, milestoneID string) string {
 		case "validation":
 			return "验证"
 		case "formal_result":
-			return "正式交付物"
+			return "结果（Result）/交付物（Artifact）"
 		}
 	}
 	switch milestoneID {
@@ -61,7 +51,7 @@ func localizedMilestoneTitle(language string, milestoneID string) string {
 	case "validation":
 		return "Validation"
 	case "formal_result":
-		return "Formal result"
+		return "Result / Artifact"
 	default:
 		return milestoneID
 	}
@@ -69,16 +59,16 @@ func localizedMilestoneTitle(language string, milestoneID string) string {
 
 func localizedCreatedRunSummary(language string) string {
 	if prefersChinese(language) {
-		return "Run 已创建，尚无执行证据"
+		return "运行（Run）已创建，尚无执行证据"
 	}
 	return "run created with no execution evidence yet"
 }
 
 func localizedRetentionPolicy(language string) string {
 	if prefersChinese(language) {
-		return "保留恢复点、阻塞项、里程碑、最新证据摘要及正式交付物引用；需要时按源引用重新加载完整证据"
+		return "保留恢复点、阻塞项、里程碑、最新证据摘要及结果（Result）/交付物（Artifact）引用；需要时按源引用重新加载完整证据"
 	}
-	return "retain recovery, blockers, milestones, latest evidence summaries, and formal result refs; reload full evidence by source refs when needed"
+	return "retain recovery, blockers, milestones, latest evidence summaries, and Result/Artifact refs; reload full evidence by source refs when needed"
 }
 
 func localizedRecoveryNextAction(language string) string {
@@ -92,13 +82,13 @@ func localizedBlockerReason(language string, kind string, state string) string {
 	if prefersChinese(language) {
 		switch {
 		case kind == "approval" && state == "approved":
-			return "审批已通过；恢复 Run 执行"
+			return "审批已通过；恢复运行（Run）执行"
 		case kind == "approval" && state == "rejected":
 			return "审批已拒绝"
 		case kind == "decision" && state == "resolved":
-			return "决策已解决；恢复 Run 执行"
+			return "决策已解决；恢复运行（Run）执行"
 		default:
-			return "阻塞项已解决；恢复 Run 执行"
+			return "阻塞项已解决；恢复运行（Run）执行"
 		}
 	}
 	switch {

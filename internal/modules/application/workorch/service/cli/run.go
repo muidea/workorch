@@ -92,6 +92,7 @@ var runActivateCmd = &cobra.Command{
 		req.DoDID = common.DoDID(dodID)
 		req.SoulID = common.SoulID(soulID)
 		req.LLMProviderID, _ = cmd.Flags().GetString("llm-provider")
+		req.DialogLanguage, _ = cmd.Flags().GetString("lang")
 		skillIDs, _ := cmd.Flags().GetStringArray("skill")
 		mcpIDs, _ := cmd.Flags().GetStringArray("mcp-server")
 		for _, id := range skillIDs {

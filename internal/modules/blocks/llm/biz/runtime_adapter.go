@@ -24,6 +24,7 @@ import (
 	sshcommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/dialoglanguage"
 )
 
 const decisionSchemaName = "workorch.llmExecutionDecision.v1"
@@ -1444,47 +1445,10 @@ func inferDialogLanguage(input map[string]any, systemLocale string) string {
 }
 
 func languageNameFromLocale(locale string) string {
-	locale = strings.TrimSpace(locale)
-	if locale == "" {
+	if strings.TrimSpace(locale) == "" {
 		return ""
 	}
-	locale = strings.Split(locale, ":")[0]
-	locale = strings.Split(locale, ".")[0]
-	normalized := strings.ToLower(strings.ReplaceAll(locale, "_", "-"))
-	if normalized == "" {
-		return ""
-	}
-	switch {
-	case normalized == "c" || normalized == "posix":
-		return "English"
-	case strings.HasPrefix(normalized, "zh-hant") ||
-		strings.HasPrefix(normalized, "zh-tw") ||
-		strings.HasPrefix(normalized, "zh-hk") ||
-		strings.HasPrefix(normalized, "zh-mo"):
-		return "Chinese (Traditional)"
-	case strings.HasPrefix(normalized, "zh"):
-		return "Chinese (Simplified)"
-	case strings.HasPrefix(normalized, "en"):
-		return "English"
-	case strings.HasPrefix(normalized, "ja"):
-		return "Japanese"
-	case strings.HasPrefix(normalized, "ko"):
-		return "Korean"
-	case strings.HasPrefix(normalized, "fr"):
-		return "French"
-	case strings.HasPrefix(normalized, "de"):
-		return "German"
-	case strings.HasPrefix(normalized, "es"):
-		return "Spanish"
-	case strings.HasPrefix(normalized, "pt"):
-		return "Portuguese"
-	case strings.HasPrefix(normalized, "it"):
-		return "Italian"
-	case strings.HasPrefix(normalized, "ru"):
-		return "Russian"
-	default:
-		return locale
-	}
+	return dialoglanguage.DisplayName(locale)
 }
 
 func enrichProviderInputWithSoulRouting(input map[string]any) {
@@ -1607,7 +1571,7 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 			},
 			{
 				Kind:        llmcommon.RuntimeBlockKindPatchApply,
-				Description: "Apply one file_write or unified_diff patch inside the workspace working directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory. Governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md are reserved for runtime artifacts and must not be written through patch/apply.",
+				Description: "Apply one file_write or unified_diff patch inside the workspace working directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory. Governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md are reserved for WorkOrch-managed Artifact records and must not be written through patch/apply.",
 				Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string"},
 			},
 			{

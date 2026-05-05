@@ -161,7 +161,7 @@ func runFlagMode(cmd *cobra.Command, providerID string) error {
 
 func runWizardMode(providerID string) error {
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Fprintln(os.Stderr, styleTitle.Render(fmt.Sprintf("  LLM Provider Setup: %s\n", providerID)))
+	fmt.Fprintln(os.Stderr, styleTitle.Render(fmt.Sprintf("  LLM 服务商（Provider）配置: %s\n", providerID)))
 
 	// Check if existing provider to update
 	cfg, _ := workorchconfig.Current()

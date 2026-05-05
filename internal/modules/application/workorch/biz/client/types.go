@@ -492,13 +492,14 @@ type LLMProviderConfig struct {
 
 type ServiceConfiguration struct {
 	Server struct {
-		Addr              string `json:"addr"`
-		ReadHeaderTimeout string `json:"readHeaderTimeout"`
-		ReadTimeout       string `json:"readTimeout"`
-		WriteTimeout      string `json:"writeTimeout"`
-		IdleTimeout       string `json:"idleTimeout"`
-		ShutdownTimeout   string `json:"shutdownTimeout"`
-		MaxConcurrentRuns int64  `json:"maxConcurrentRuns"`
+		Addr                  string `json:"addr"`
+		ReadHeaderTimeout     string `json:"readHeaderTimeout"`
+		ReadTimeout           string `json:"readTimeout"`
+		WriteTimeout          string `json:"writeTimeout"`
+		IdleTimeout           string `json:"idleTimeout"`
+		ShutdownTimeout       string `json:"shutdownTimeout"`
+		MaxConcurrentRuns     int64  `json:"maxConcurrentRuns"`
+		DefaultDialogLanguage string `json:"defaultDialogLanguage,omitempty"`
 	} `json:"server"`
 	Repository struct {
 		Backend string `json:"backend"`

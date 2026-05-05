@@ -574,14 +574,14 @@ func TestRuntimeAdapterDialogLanguageContextOverridesSystemLocale(t *testing.T) 
 	}, provider)
 	request := llmStepRequest()
 	request.Input["executionContext"] = map[string]any{
-		"dialogLanguage": "ja_JP.UTF-8",
+		"dialogLanguage": "zh-CN",
 	}
 
 	if _, err := adapter.ExecuteRuntimeStep(context.Background(), request); err != nil {
 		t.Fatalf("execute runtime step: %v", err)
 	}
-	if provider.request.DialogLanguage != "Japanese" {
-		t.Fatalf("dialogLanguage = %q, want Japanese", provider.request.DialogLanguage)
+	if provider.request.DialogLanguage != "Chinese (Simplified)" {
+		t.Fatalf("dialogLanguage = %q, want Chinese (Simplified)", provider.request.DialogLanguage)
 	}
 }
 

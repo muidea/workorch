@@ -480,6 +480,7 @@ type listMemoryByWorkspaceFunc func(context.Context, string, string, string, str
 type searchMemoryFunc func(context.Context, string, string, appservice.MemoryQuery) ([]appservice.MemoryItem, error)
 type validateFunc func(context.Context, string, string) error
 type readConfigurationFunc func() (appservice.ServiceConfiguration, error)
+type updateServerConfigurationFunc func(appservice.UpdateServerConfigurationCommand) (appservice.ServiceConfiguration, error)
 type updateLLMConfigurationFunc func(appservice.UpdateLLMConfigurationCommand) (appservice.ServiceConfiguration, error)
 
 type serverState struct {
@@ -559,6 +560,7 @@ type serverState struct {
 	listMemoryByWorkspace           listMemoryByWorkspaceFunc
 	searchMemory                    searchMemoryFunc
 	readConfiguration               readConfigurationFunc
+	updateServerConfiguration       updateServerConfigurationFunc
 	updateLLMConfiguration          updateLLMConfigurationFunc
 	runQueueMu                      sync.Mutex
 	runQueueWaiters                 []*runQueueWaiter
@@ -897,6 +899,24 @@ func registerSystemRoutes(router engine.RouteRegistry, state *serverState) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		state.metrics.configurationReadRequests.Add(1)
 		item, err := state.readConfiguration()
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, configurationResponse{
+			Service:       "workorch",
+			Configuration: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/configuration/server", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.configurationUpdateRequests.Add(1)
+		var req appservice.UpdateServerConfigurationCommand
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.updateServerConfiguration(req)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -2603,6 +2623,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		listMemoryByWorkspace:           defaultListMemoryByWorkspace,
 		searchMemory:                    defaultSearchMemory,
 		readConfiguration:               defaultReadConfiguration,
+		updateServerConfiguration:       appservice.UpdateServerConfiguration,
 		updateLLMConfiguration:          appservice.UpdateLLMConfiguration,
 	}
 	state.configureApplicationRuntimeSession()

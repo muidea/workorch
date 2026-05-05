@@ -13,7 +13,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMProviderTemplate, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMProviderTemplate, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -55,10 +55,10 @@ const stateLabels: Record<string, string> = {
 const progressKindLabels: Record<string, string> = {
   step: '步骤',
   tool_call: '工具调用',
-  patch: 'Patch',
+  patch: '补丁（Patch）',
   validation_result: '校验结果',
-  result: '正式结果',
-  artifact: '交付物',
+  result: '结果（Result）',
+  artifact: '交付物（Artifact）',
   decision: '决策工单',
   approval: '审批工单'
 };
@@ -80,7 +80,7 @@ const recoveryActionLabels: Record<string, string> = {
   continue_validation: '继续验收',
   resolve_decision_ticket: '补充或处理决策工单',
   resolve_approval: '处理审批工单',
-  inspect_result: '查看正式交付物',
+  inspect_result: '查看结果（Result）/交付物（Artifact）',
   inspect_failure_reason_and_evidence: '查看失败原因和运行证据',
   start_new_run: '启动新的运行'
 };
@@ -94,6 +94,37 @@ const soulBindingStageLabels: Record<string, string> = {
   approval: '审批',
   validation: '验收',
   artifact: '交付物'
+};
+
+const modelLabels = {
+  workspace: '工作空间（Workspace）',
+  goal: '目标（Goal）',
+  dod: '验收标准（DoD）',
+  doDAssessment: 'DoD 验收评估',
+  doDItem: 'DoD 验收项',
+  run: '运行（Run）',
+  decision: '决策工单（Decision）',
+  approval: '审批工单（Approval）',
+  result: '结果（Result）',
+  artifact: '交付物（Artifact）',
+  memory: '记忆（Memory）',
+  memoryRecall: '记忆召回（Memory Recall）',
+  memoryRecallTrace: '记忆召回轨迹',
+  executionSection: '执行分区（Execution Section）',
+  soul: '执行人格（Soul）',
+  skill: '技能（Skill）',
+  mcpServer: 'MCP 服务（MCP Server）',
+  mcpCapability: 'MCP 能力（Tool / Resource / Prompt）',
+  mcpTool: '工具（Tool）',
+  mcpResource: '资源（Resource）',
+  mcpPrompt: '提示词（Prompt）',
+  step: '步骤（Step）',
+  patch: '补丁（Patch）',
+  toolCall: '工具调用（Tool Call）',
+  validationResult: '校验结果（Validation Result）',
+  runtimeCheckpoint: '运行检查点（Runtime Checkpoint）',
+  llmProvider: 'LLM 服务商（Provider）',
+  metrics: '运行指标（Metrics）'
 };
 
 function stateLabel(state?: string) {
@@ -213,7 +244,7 @@ function activeOrLatestRun(snapshot?: WorkspaceSnapshot) {
 function workspaceProcessItems(snapshot?: WorkspaceSnapshot, goals?: Goal[], dods?: DoD[]) {
   const currentRun = activeOrLatestRun(snapshot);
   const hasDefinition = Boolean((goals?.length ?? 0) > 0 && (dods?.length ?? 0) > 0);
-  const missingDefinition = !goals?.length ? '需要定义 Goal' : !dods?.length ? '需要定义 DoD' : '需要补齐 Goal / DoD';
+  const missingDefinition = !goals?.length ? `需要定义${modelLabels.goal}` : !dods?.length ? `需要定义${modelLabels.dod}` : `需要补齐${modelLabels.goal} / ${modelLabels.dod}`;
   const pendingDecisions = pendingCount(snapshot?.decisions);
   const pendingApprovals = pendingCount(snapshot?.approvals);
   const blocked = isBlockedRunState(currentRun?.state) || pendingDecisions > 0 || pendingApprovals > 0;
@@ -226,12 +257,12 @@ function workspaceProcessItems(snapshot?: WorkspaceSnapshot, goals?: Goal[], dod
   const evidenceDescription = completed
     ? stateLabel(currentRun?.state)
     : failed ? stateLabel(currentRun?.state)
-      : currentRun?.state === 'validating' ? '正在执行 DoD 验收'
-        : currentRun ? '等待运行证据闭环' : '尚未启动 Run';
+      : currentRun?.state === 'validating' ? `正在执行${modelLabels.doDAssessment}`
+        : currentRun ? '等待运行证据闭环' : `尚未启动${modelLabels.run}`;
   return [
     { title: '工作空间', description: snapshot?.workspace ? stateLabel(snapshot.workspace.state) : '未选择', status: snapshot?.workspace ? 'finish' as const : 'wait' as const },
-    { title: '目标与验收', description: hasDefinition ? 'Goal / DoD 已定义' : missingDefinition, status: hasDefinition ? 'finish' as const : 'process' as const },
-    { title: '启动执行', description: currentRun ? `${currentRun.id} / ${stateLabel(currentRun.state)}` : '尚未启动 Run', status: currentRun ? 'finish' as const : 'wait' as const },
+    { title: '目标与验收', description: hasDefinition ? `${modelLabels.goal} / ${modelLabels.dod} 已定义` : missingDefinition, status: hasDefinition ? 'finish' as const : 'process' as const },
+    { title: '启动执行', description: currentRun ? `${currentRun.id} / ${stateLabel(currentRun.state)}` : `尚未启动${modelLabels.run}`, status: currentRun ? 'finish' as const : 'wait' as const },
     { title: '治理处理', description: governanceDescription, status: blocked ? 'process' as const : currentRun ? 'finish' as const : 'wait' as const },
     { title: '证据验收', description: evidenceDescription, status: failed ? 'error' as const : completed ? 'finish' as const : terminal ? 'finish' as const : currentRun ? 'process' as const : 'wait' as const }
   ];
@@ -410,7 +441,7 @@ function taskDecompositionCard(items?: TaskDecomposition[]) {
 function executionSectionsCard(items?: ExecutionSection[]) {
   const sections = items ?? [];
   if (sections.length === 0) {
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无执行分区" />;
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`暂无${modelLabels.executionSection}`} />;
   }
   const completed = sections.filter((item) => item.state === 'completed').length;
   const failed = sections.filter((item) => item.state === 'failed').length;
@@ -424,8 +455,8 @@ function executionSectionsCard(items?: ExecutionSection[]) {
         { key: 'completed', label: '已完成', value: completed, color: '#389e0d' },
         { key: 'running', label: '执行中', value: running, color: '#0958d9' },
         { key: 'failed', label: '失败', value: failed, color: '#cf1322' },
-        { key: 'memoryRecallRefs', label: 'Memory Recall', value: memoryRecallRefs, color: '#08979c' },
-        { key: 'memoryIds', label: 'Memory 引用', value: memoryIds, color: '#531dab' }
+        { key: 'memoryRecallRefs', label: modelLabels.memoryRecall, value: memoryRecallRefs, color: '#08979c' },
+        { key: 'memoryIds', label: `${modelLabels.memory}引用`, value: memoryIds, color: '#531dab' }
       ])}
       <ProTable<ExecutionSection>
         rowKey="id"
@@ -438,8 +469,8 @@ function executionSectionsCard(items?: ExecutionSection[]) {
           { title: '状态', dataIndex: 'state', width: 110, render: (_, item) => stateTag(item.state) },
           { title: '图节点', dataIndex: 'graphNodeId', copyable: true, ellipsis: true },
           { title: '步骤', dataIndex: 'stepId', copyable: true, ellipsis: true },
-          { title: 'Memory Recall', dataIndex: 'memoryRecallRefs', width: 180, render: (_, item) => compactTags(item.memoryRecallRefs ?? [], 3) },
-          { title: 'Memory', dataIndex: 'memoryIds', width: 160, render: (_, item) => compactTags(item.memoryIds ?? [], 3) },
+          { title: modelLabels.memoryRecall, dataIndex: 'memoryRecallRefs', width: 180, render: (_, item) => compactTags(item.memoryRecallRefs ?? [], 3) },
+          { title: modelLabels.memory, dataIndex: 'memoryIds', width: 160, render: (_, item) => compactTags(item.memoryIds ?? [], 3) },
           { title: '证据', dataIndex: 'actualEvidenceRefs', width: 220, render: (_, item) => compactTags(item.actualEvidenceRefs ?? [], 4) }
         ]}
         expandable={{
@@ -453,9 +484,9 @@ function executionSectionsCard(items?: ExecutionSection[]) {
                 { key: 'planned', label: '计划引用', children: compactTags(item.plannedStepRefs ?? [], 6) },
                 { key: 'governance', label: '治理工单', children: compactTags([...(item.decisionRefs ?? []), ...(item.approvalRefs ?? [])], 6) },
                 { key: 'runtime', label: '运行证据', children: compactTags([...(item.toolCallRefs ?? []), ...(item.patchRefs ?? []), ...(item.validationRefs ?? [])], 6) },
-                { key: 'outputs', label: '结果交付', children: compactTags([...(item.resultRefs ?? []), ...(item.artifactRefs ?? [])], 6) },
-                { key: 'memoryRecall', label: 'Memory Recall 证据', children: compactTags(item.memoryRecallRefs ?? [], 8) },
-                { key: 'memoryIds', label: 'Memory 引用', children: compactTags(item.memoryIds ?? [], 8) }
+                { key: 'outputs', label: `${modelLabels.result}/${modelLabels.artifact}`, children: compactTags([...(item.resultRefs ?? []), ...(item.artifactRefs ?? [])], 6) },
+                { key: 'memoryRecall', label: `${modelLabels.memoryRecall}证据`, children: compactTags(item.memoryRecallRefs ?? [], 8) },
+                { key: 'memoryIds', label: `${modelLabels.memory}引用`, children: compactTags(item.memoryIds ?? [], 8) }
               ]}
             />
           )
@@ -512,7 +543,7 @@ function memoryRecallQueryPanel(item: MemoryRecallTrace) {
 function memoryRecallCard(items?: MemoryRecallTrace[]) {
   const traces = items ?? [];
   if (traces.length === 0) {
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 未记录 Memory Recall 证据" />;
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`当前${modelLabels.run}未记录${modelLabels.memoryRecall}证据`} />;
   }
   const groups = memoryRecallGroups(traces);
   const memoryIds = new Set(traces.flatMap((item) => item.retrievedMemoryIds ?? [])).size;
@@ -521,11 +552,11 @@ function memoryRecallCard(items?: MemoryRecallTrace[]) {
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       {metricGrid([
-        { key: 'traces', label: 'Trace', value: traces.length, color: '#1668dc' },
+        { key: 'traces', label: modelLabels.memoryRecallTrace, value: traces.length, color: '#1668dc' },
         { key: 'groups', label: '阶段分组', value: groups.length, color: '#08979c' },
-        { key: 'selected', label: 'Selected', value: selected, color: '#389e0d' },
-        { key: 'degraded', label: 'Degraded', value: degraded, color: degraded ? '#cf1322' : undefined },
-        { key: 'memoryIds', label: 'Memory', value: memoryIds, color: '#531dab' }
+        { key: 'selected', label: '已选中', value: selected, color: '#389e0d' },
+        { key: 'degraded', label: '降级', value: degraded, color: degraded ? '#cf1322' : undefined },
+        { key: 'memoryIds', label: modelLabels.memory, value: memoryIds, color: '#531dab' }
       ])}
       <ProTable<MemoryRecallGroup>
         rowKey="key"
@@ -536,8 +567,8 @@ function memoryRecallCard(items?: MemoryRecallTrace[]) {
         columns={[
           { title: '分组', dataIndex: 'key', render: (_, item) => <Space><Tag color="blue">{item.source}</Tag><Tag>{item.stage}</Tag></Space> },
           { title: '状态', dataIndex: 'status', width: 110, render: (_, item) => stateTag(item.status) },
-          { title: 'Trace', width: 90, render: (_, item) => item.traces.length },
-          { title: '命中 Memory', dataIndex: 'memoryIds', ellipsis: true, render: (_, item) => compactTags(item.memoryIds, 5) }
+          { title: modelLabels.memoryRecallTrace, width: 140, render: (_, item) => item.traces.length },
+          { title: `命中${modelLabels.memory}`, dataIndex: 'memoryIds', ellipsis: true, render: (_, item) => compactTags(item.memoryIds, 5) }
         ]}
         expandable={{
           expandedRowRender: (group) => (
@@ -548,20 +579,20 @@ function memoryRecallCard(items?: MemoryRecallTrace[]) {
               pagination={false}
               size="small"
               columns={[
-                { title: 'Trace', dataIndex: 'id', copyable: true, ellipsis: true },
+                { title: modelLabels.memoryRecallTrace, dataIndex: 'id', copyable: true, ellipsis: true },
                 { title: '策略', dataIndex: 'policy', ellipsis: true },
                 { title: '状态', dataIndex: 'status', width: 100, render: (_, item) => stateTag(item.status) },
-                { title: '命中 Memory', dataIndex: 'retrievedMemoryIds', ellipsis: true, render: (_, item) => compactTags(item.retrievedMemoryIds ?? [], 5) },
+                { title: `命中${modelLabels.memory}`, dataIndex: 'retrievedMemoryIds', ellipsis: true, render: (_, item) => compactTags(item.retrievedMemoryIds ?? [], 5) },
                 { title: '原因', dataIndex: 'reason', ellipsis: true, render: (_, item) => boundedParagraph(item.reason || item.queryTextPreview || '-', { rows: 2 }) }
               ]}
               dataSource={group.traces}
               expandable={{
                 expandedRowRender: (item) => (
                   <ProCard gutter={16} wrap ghost>
-                    <ProCard title="查询" colSpan={{ xs: 24, lg: 12 }}>
+                    <ProCard title="召回查询" colSpan={{ xs: 24, lg: 12 }}>
                       <pre className="json-panel json-panel-large">{memoryRecallQueryPanel(item)}</pre>
                     </ProCard>
-                    <ProCard title="命中详情" colSpan={{ xs: 24, lg: 12 }}>
+                    <ProCard title={`命中${modelLabels.memory}详情`} colSpan={{ xs: 24, lg: 12 }}>
                       <pre className="json-panel json-panel-large">{compactJSON(item.retrievedMemoryHits ?? [])}</pre>
                     </ProCard>
                   </ProCard>
@@ -588,7 +619,7 @@ function contextBundleCard(bundle?: ContextBundle) {
         items={[
           { key: 'mode', label: '上下文模式', children: bundle.mode },
           { key: 'compressedMode', label: '压缩模式', children: bundle.compressedContext?.mode || '-' },
-          { key: 'run', label: '关联 Run', children: bundle.runId || '-' },
+          { key: 'run', label: `关联${modelLabels.run}`, children: bundle.runId || '-' },
           { key: 'summary', label: '摘要', children: boundedParagraph(bundle.summary, { rows: 2 }) },
           { key: 'recovery', label: '恢复建议', children: recoveryActionLabel(bundle.recovery?.nextAction) },
           { key: 'checkpoint', label: '恢复检查点', children: bundle.latestCheckpoint?.id ? boundedParagraph(bundle.latestCheckpoint.id, { rows: 1, copyText: bundle.latestCheckpoint.id }) : '-' },
@@ -690,9 +721,9 @@ function contextBundleCard(bundle?: ContextBundle) {
 
 function skillScopeLabel(skill: Skill) {
   if (skill.source === 'skill-hub') {
-    return skill.scope === 'workspace' ? '工作区 SkillHub' : '全局 SkillHub';
+    return skill.scope === 'workspace' ? '工作空间 SkillHub 技能' : '全局 SkillHub 技能';
   }
-  return '内置 Skill';
+  return '内置技能';
 }
 
 function skillDisplayLabel(skill: Skill) {
@@ -749,9 +780,9 @@ function runtimeCapabilityTable(items: RuntimeCapability[] | undefined, emptyTex
 }
 
 function capabilityKindTag(kind?: string) {
-  if (kind === 'tool') return <Tag color="blue">Tool</Tag>;
-  if (kind === 'resource') return <Tag color="cyan">Resource</Tag>;
-  if (kind === 'prompt') return <Tag color="geekblue">Prompt</Tag>;
+  if (kind === 'tool') return <Tag color="blue">{modelLabels.mcpTool}</Tag>;
+  if (kind === 'resource') return <Tag color="cyan">{modelLabels.mcpResource}</Tag>;
+  if (kind === 'prompt') return <Tag color="geekblue">{modelLabels.mcpPrompt}</Tag>;
   return kind ? <Tag>{kind}</Tag> : '-';
 }
 
@@ -1012,26 +1043,26 @@ function goalOutcomeSummary(snapshot?: RunSnapshot) {
 
 function goalOutcomeState(snapshot?: RunSnapshot) {
 	if (snapshot?.outcome?.accepted || snapshot?.outcome?.state === 'accepted') {
-		return <Tag color="green">Result 已接受</Tag>;
+		return <Tag color="green">结果已接受</Tag>;
 	}
 	if (snapshot?.outcome?.state === 'failed') {
 		return <Tag color="red">验收未通过</Tag>;
 	}
 	const result = primaryResult(snapshot);
 	if (result?.state === 'accepted') {
-		return <Tag color="green">Result 已接受</Tag>;
+		return <Tag color="green">结果已接受</Tag>;
 	}
 	if (result) {
 		return stateTag(result.state);
 	}
 	const assessment = dodAssessment(snapshot);
 	if (assessment?.satisfied === true) {
-		return <Tag color="green">DoD 已满足</Tag>;
+		return <Tag color="green">验收标准（DoD）已满足</Tag>;
   }
   if (assessment?.satisfied === false) {
-    return <Tag color="red">DoD 未满足</Tag>;
+    return <Tag color="red">验收标准（DoD）未满足</Tag>;
   }
-  return snapshot ? stateTag(snapshot.run.state) : <Tag>未选择 Run</Tag>;
+  return snapshot ? stateTag(snapshot.run.state) : <Tag>未选择运行（Run）</Tag>;
 }
 
 function runOutcomeState(snapshot?: RunSnapshot, observability?: RunObservability) {
@@ -1197,7 +1228,7 @@ function runtimeTarget(output?: Record<string, unknown>) {
 
 function checkpointTypeLabel(type?: string) {
   const labels: Record<string, string> = {
-    run_state: 'Run 状态',
+    run_state: '运行状态',
     runtime_step: '运行步骤',
     graph_state: '执行图',
     validation: '验收校验'
@@ -1311,7 +1342,7 @@ function SoulDefinitionManager({ souls, onSoulsChange }: { souls: Soul[]; onSoul
   const saveSoul = async (values: SoulDefinitionFormValues) => {
     const soulID = (editingSoul?.id || values.id || '').trim();
     if (!soulID) {
-      message.error('请填写 Soul ID');
+      message.error('请填写执行人格 ID');
       return;
     }
     setSaving(true);
@@ -1323,7 +1354,7 @@ function SoulDefinitionManager({ souls, onSoulsChange }: { souls: Soul[]; onSoul
       const nextSouls = await workorchApi.listSouls();
       onSoulsChange(nextSouls);
       editSoul(saved);
-      message.success(editingSoul ? 'Soul 定义已更新' : 'Soul 定义已创建');
+      message.success(editingSoul ? '执行人格定义已更新' : '执行人格定义已创建');
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
@@ -1333,8 +1364,8 @@ function SoulDefinitionManager({ souls, onSoulsChange }: { souls: Soul[]; onSoul
 
   const deleteSoul = (soul: Soul) => {
     modal.confirm({
-      title: '删除 Soul',
-      content: `确认删除「${soul.name || soul.id}」？删除后，仍引用该 Soul 的工作空间或模板需要重新调整执行人格配置。`,
+      title: `删除${modelLabels.soul}`,
+      content: `确认删除「${soul.name || soul.id}」？删除后，仍引用该执行人格的工作空间或模板需要重新调整执行配置。`,
       okText: '删除',
       okType: 'danger',
       cancelText: '取消',
@@ -1347,7 +1378,7 @@ function SoulDefinitionManager({ souls, onSoulsChange }: { souls: Soul[]; onSoul
           if (editingSoul?.id === soul.id) {
             editSoul(undefined);
           }
-          message.success('Soul 定义已删除');
+          message.success('执行人格定义已删除');
         } catch (error) {
           message.error(errorMessage(error));
           throw error;
@@ -1359,17 +1390,17 @@ function SoulDefinitionManager({ souls, onSoulsChange }: { souls: Soul[]; onSoul
   };
 
   return (
-    <ProCard title="执行人格（Soul）" className="workorch-section">
+    <ProCard title={modelLabels.soul} className="workorch-section">
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <Typography.Text type="secondary">
-          Soul 是系统级执行人格配置，定义人格、阶段策略和输出契约；Skill、MCP、Tool 权限必须通过结构化字段显式维护。
+          执行人格（Soul）是系统级执行配置，定义人格、阶段策略和输出契约；技能（Skill）、MCP 服务和工具（Tool）权限必须通过结构化字段显式维护。
         </Typography.Text>
         <ProCard split="vertical" bordered={false}>
           <ProCard colSpan={{ xs: 24, lg: 8 }} ghost>
             <List
               size="small"
               dataSource={souls}
-              locale={{ emptyText: <Empty description="暂无 Soul 定义" /> }}
+              locale={{ emptyText: <Empty description="暂无执行人格定义" /> }}
               renderItem={(item) => (
                 <List.Item
                   actions={[
@@ -1389,37 +1420,37 @@ function SoulDefinitionManager({ souls, onSoulsChange }: { souls: Soul[]; onSoul
                 </List.Item>
               )}
             />
-            <Button style={{ marginTop: 12 }} onClick={() => editSoul(undefined)}>新增 Soul</Button>
+            <Button style={{ marginTop: 12 }} onClick={() => editSoul(undefined)}>新增执行人格</Button>
           </ProCard>
           <ProCard colSpan={{ xs: 24, lg: 16 }} ghost>
             <Form form={form} layout="vertical" onFinish={(values) => void saveSoul(values)}>
-              <Form.Item name="id" label="Soul ID" rules={[{ required: !editingSoul, message: '请输入 Soul ID' }]}>
+              <Form.Item name="id" label="执行人格 ID" rules={[{ required: !editingSoul, message: '请输入执行人格 ID' }]}>
                 <Input disabled={Boolean(editingSoul)} placeholder="例如 soul-engineering-delivery" />
               </Form.Item>
               <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
                 <Input placeholder="例如 Engineering Delivery" />
               </Form.Item>
               <Form.Item name="description" label="描述">
-                <Input.TextArea rows={2} placeholder="说明该 Soul 的适用场景" />
+                <Input.TextArea rows={2} placeholder="说明该执行人格的适用场景" />
               </Form.Item>
               <Form.Item name="businessDomains" label="业务域">
                 <Input.TextArea rows={2} placeholder="每行或逗号分隔，例如 engineering, validation" />
               </Form.Item>
-              <Form.Item name="soulMd" label="soul.md" rules={[{ required: true, message: '请输入 Soul 定义内容' }]}>
+              <Form.Item name="soulMd" label="soul.md" rules={[{ required: true, message: '请输入执行人格（Soul）定义内容' }]}>
                 <Input.TextArea rows={8} placeholder="# Soul\n\n定义人格、阶段策略和输出契约" />
               </Form.Item>
-              <Form.Item name="allowedSkillRefs" label="允许 Skill">
+              <Form.Item name="allowedSkillRefs" label="允许技能（Skill）">
                 <Input.TextArea rows={2} placeholder="每行或逗号分隔" />
               </Form.Item>
-              <Form.Item name="allowedMCPServerRefs" label="允许 MCP Server">
+              <Form.Item name="allowedMCPServerRefs" label="允许 MCP 服务（MCP Server）">
                 <Input.TextArea rows={2} placeholder="每行或逗号分隔" />
               </Form.Item>
-              <Form.Item name="allowedToolKinds" label="允许 Tool Kind">
+              <Form.Item name="allowedToolKinds" label="允许工具类型（Tool Kind）">
                 <Input.TextArea rows={2} placeholder="每行或逗号分隔，例如 llm/chat" />
               </Form.Item>
               <Space>
                 <Button type="primary" htmlType="submit" loading={saving}>
-                  {editingSoul ? '保存 Soul' : '创建 Soul'}
+                  {editingSoul ? '保存执行人格' : '创建执行人格'}
                 </Button>
                 <Button onClick={() => editSoul(undefined)}>清空</Button>
               </Space>
@@ -1473,7 +1504,7 @@ function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }: { sou
       const nextTemplates = await workorchApi.listWorkspaceTemplates();
       onTemplatesChange(nextTemplates);
       editTemplate(saved);
-      message.success(editingTemplate ? 'Workspace 模板已更新' : 'Workspace 模板已创建');
+      message.success(editingTemplate ? '工作空间模板已更新' : '工作空间模板已创建');
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
@@ -1483,7 +1514,7 @@ function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }: { sou
 
   const deleteTemplate = (template: WorkspaceTemplate) => {
     modal.confirm({
-      title: '删除 Workspace 模板',
+      title: '删除工作空间模板',
       content: `确认删除「${template.name || template.id}」？删除模板不会删除已创建的工作空间。`,
       okText: '删除',
       okButtonProps: { danger: true },
@@ -1497,7 +1528,7 @@ function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }: { sou
           if (editingTemplate?.id === template.id) {
             editTemplate(undefined);
           }
-          message.success('Workspace 模板已删除');
+          message.success('工作空间模板已删除');
         } catch (error) {
           message.error(errorMessage(error));
         } finally {
@@ -1508,17 +1539,17 @@ function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }: { sou
   };
 
   return (
-    <ProCard title="Workspace 模板" className="workorch-section">
+    <ProCard title="工作空间模板（Workspace Template）" className="workorch-section">
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <Typography.Text type="secondary">
-          模板用于复用新建工作空间时的 Goal、DoD、默认 Soul 与阶段 Soul 绑定；实际工作空间仍通过正式业务 API 创建和写入定义。
+          模板用于复用新建工作空间时的目标（Goal）、验收标准（DoD）、默认执行人格（Soul）与阶段执行人格绑定；实际工作空间仍通过正式业务 API 创建和写入定义。
         </Typography.Text>
         <ProCard split="vertical" bordered={false}>
           <ProCard colSpan={{ xs: 24, lg: 8 }} ghost>
             <List
               size="small"
               dataSource={templates}
-              locale={{ emptyText: <Empty description="暂无 Workspace 模板" /> }}
+              locale={{ emptyText: <Empty description="暂无工作空间模板" /> }}
               renderItem={(item) => (
                 <List.Item actions={[
                   <Button key="edit" type="link" size="small" onClick={() => editTemplate(item)}>编辑</Button>,
@@ -1530,9 +1561,9 @@ function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }: { sou
                       <Space direction="vertical" size={2}>
                         <Typography.Text type="secondary">{item.id}</Typography.Text>
                         <Space wrap size={[4, 4]}>
-                          {item.goalText ? <Tag color="blue">Goal</Tag> : null}
-                          {(item.doDItems?.length ?? 0) > 0 ? <Tag color="green">DoD {item.doDItems?.length}</Tag> : null}
-                          {item.defaultSoulId ? <Tag color="cyan">默认 Soul</Tag> : null}
+                          {item.goalText ? <Tag color="blue">{modelLabels.goal}</Tag> : null}
+                          {(item.doDItems?.length ?? 0) > 0 ? <Tag color="green">{modelLabels.dod} {item.doDItems?.length}</Tag> : null}
+                          {item.defaultSoulId ? <Tag color="cyan">默认执行人格</Tag> : null}
                         </Space>
                       </Space>
                     }
@@ -1559,17 +1590,17 @@ function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }: { sou
               <Form.Item name="doDItems" label="默认验收标准（DoD）">
                 <Input.TextArea rows={4} placeholder={'每行一个验收标准\n创建工作空间时自动带入，可在向导中修改'} />
               </Form.Item>
-              <Form.Item name="defaultSoulId" label="默认 Soul">
-                <Select allowClear placeholder="不设置默认 Soul" options={soulOptions} />
+              <Form.Item name="defaultSoulId" label="默认执行人格（Soul）">
+                <Select allowClear placeholder="不设置默认执行人格" options={soulOptions} />
               </Form.Item>
               <Space className="workorch-section">
-                <Typography.Text type="secondary">阶段 Soul 绑定</Typography.Text>
-                <Button size="small" onClick={applyDefaultSoulToStages}>默认 Soul 应用到全部阶段</Button>
+                <Typography.Text type="secondary">阶段执行人格绑定</Typography.Text>
+                <Button size="small" onClick={applyDefaultSoulToStages}>默认执行人格应用到全部阶段</Button>
               </Space>
               <div className="soul-binding-grid">
                 {stages.map((stage) => (
                   <Form.Item key={stage} name={['soulBindings', stage]} label={soulBindingStageLabel(stage)}>
-                    <Select allowClear placeholder="继承默认 Soul" options={soulOptions} />
+                    <Select allowClear placeholder="继承默认执行人格" options={soulOptions} />
                   </Form.Item>
                 ))}
               </div>
@@ -1618,14 +1649,14 @@ function workspaceBoardActivationRequest(item: WorkspaceBoardItem): WorkspaceExe
 
 function workspaceBoardActivationHint(item: WorkspaceBoardItem) {
   if (item.goals.length === 0) {
-    return '当前工作空间尚未定义目标，请进入工作空间补齐 Goal 后再启动执行';
+    return `当前工作空间尚未定义目标，请进入工作空间补齐${modelLabels.goal}后再启动执行`;
   }
   const availableDoDs = readyDoDs(item.dods);
   if (availableDoDs.length === 0) {
-    return '当前工作空间尚无可用验收标准，请进入工作空间补齐 DoD 后再启动执行';
+    return `当前工作空间尚无可用验收标准，请进入工作空间补齐${modelLabels.dod}后再启动执行`;
   }
   if (item.goals.length > 1 || availableDoDs.length > 1) {
-    return '当前工作空间存在多个目标或验收标准，请进入工作空间选择明确的 Goal/DoD 后再启动执行';
+    return `当前工作空间存在多个目标或验收标准，请进入工作空间选择明确的${modelLabels.goal}/${modelLabels.dod}后再启动执行`;
   }
   return '当前工作空间无法确定启动上下文，请进入工作空间核对后再启动执行';
 }
@@ -1711,7 +1742,7 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
                 <Space direction="vertical" size="middle" style={{ width: '100%' }}>
                   <div className="workorch-card-summary">
                     <div>
-                      <Typography.Text type="secondary">最近 Run</Typography.Text>
+                      <Typography.Text type="secondary">最近运行（Run）</Typography.Text>
                       <div>{runSummary.latest ? <Space>{shortId(runSummary.latest.id)}{stateTag(runSummary.latest.state)}</Space> : '-'}</div>
                     </div>
                     <div>
@@ -1720,9 +1751,9 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
                     </div>
                   </div>
                   {metricGrid([
-                    { key: 'goal', label: 'Goal', value: goals.length },
-                    { key: 'dod', label: 'DoD', value: dods.length },
-                    { key: 'run', label: 'Run', value: runSummary.total },
+                    { key: 'goal', label: modelLabels.goal, value: goals.length },
+                    { key: 'dod', label: modelLabels.dod, value: dods.length },
+                    { key: 'run', label: modelLabels.run, value: runSummary.total },
                     { key: 'completed', label: '完成', value: runSummary.completed, color: '#389e0d' },
                     { key: 'failed', label: '失败', value: runSummary.failed, color: '#cf1322' }
                   ])}
@@ -1767,7 +1798,7 @@ function DecisionQueuePage() {
   const resolve = async (item: Decision, resolutionType: string, payload?: Record<string, unknown>) => {
     try {
       await workorchApi.resolveDecision(item.id, resolutionType, payload);
-      message.success(`决策已按 ${resolutionType} 处理，Run 已由服务端转入后台继续`);
+      message.success(`决策已按 ${resolutionType} 处理，${modelLabels.run} 已由服务端转入后台继续`);
       actionRef.current?.reload();
     } catch (error) {
       message.error(errorMessage(error));
@@ -1796,7 +1827,7 @@ function DecisionQueuePage() {
       await workorchApi.resolveDecision(target.item.id, target.resolutionType, payload);
       setDecisionTarget(undefined);
       decisionForm.resetFields();
-      message.success(`决策已按 ${target.resolutionType} 处理，Run 已由服务端转入后台继续`);
+      message.success(`决策已按 ${target.resolutionType} 处理，${modelLabels.run} 已由服务端转入后台继续`);
       actionRef.current?.reload();
     } catch (error) {
       message.error(errorMessage(error));
@@ -1813,7 +1844,7 @@ function DecisionQueuePage() {
     }
     try {
       await workorchApi.batchResolveDecisions(ticketIds, resolutionType, { operator: 'console', mode: 'batch' });
-      message.success(`${ticketIds.length} 个决策工单已按 ${resolutionType} 处理，相关 Run 已由服务端转入后台继续`);
+      message.success(`${ticketIds.length} 个决策工单已按 ${resolutionType} 处理，相关${modelLabels.run}已由服务端转入后台继续`);
       setSelectedDecisionKeys([]);
       actionRef.current?.reload();
     } catch (error) {
@@ -1846,7 +1877,7 @@ function DecisionQueuePage() {
   return (
     <PageContainer
       title="决策工单"
-      subTitle="处理阻塞 Run 的 Decision Ticket，支持补充信息、重新规划和拒绝当前路径"
+      subTitle={`处理阻塞${modelLabels.run}的${modelLabels.decision}，支持补充信息、重新规划和拒绝当前路径`}
       extra={(
         <Space wrap>
           <Button disabled={selectedDecisionKeys.length === 0} onClick={() => void batchResolve('replan')}>批量重新规划</Button>
@@ -1898,7 +1929,7 @@ function DecisionQueuePage() {
               size="small"
               items={[
                 { key: 'ticket', label: '决策工单', children: decisionTarget.item.id },
-                { key: 'run', label: '关联 Run', children: decisionTarget.item.runId },
+                { key: 'run', label: `关联${modelLabels.run}`, children: decisionTarget.item.runId },
                 { key: 'question', label: '问题', children: decisionTarget.item.question || '-' },
                 { key: 'reason', label: '原因', children: decisionTarget.item.reason || '-' }
               ]}
@@ -1996,7 +2027,7 @@ function ApprovalQueuePage() {
       const target = approvalTarget;
       setApprovalTarget(undefined);
       approvalForm.resetFields();
-      message.success(`审批${actionLabel(target.action)}，Run 已由服务端转入后台继续`);
+      message.success(`审批${actionLabel(target.action)}，${modelLabels.run} 已由服务端转入后台继续`);
       actionRef.current?.reload();
     } catch (error) {
       message.error(errorMessage(error));
@@ -2013,7 +2044,7 @@ function ApprovalQueuePage() {
     }
     try {
       await workorchApi.batchResolveApprovals(approvalIds, action);
-      message.success(`${approvalIds.length} 个审批项${actionLabel(action)}，相关 Run 已由服务端转入后台继续`);
+      message.success(`${approvalIds.length} 个审批项${actionLabel(action)}，相关${modelLabels.run}已由服务端转入后台继续`);
       setSelectedApprovalKeys([]);
       actionRef.current?.reload();
     } catch (error) {
@@ -2043,7 +2074,7 @@ function ApprovalQueuePage() {
   return (
     <PageContainer
       title="审批队列"
-      subTitle="处理阻塞 Run 的 Approval，批准后 Run 可继续推进，拒绝后 Run 失败收口"
+      subTitle={`处理阻塞${modelLabels.run}的${modelLabels.approval}，批准后运行可继续推进，拒绝后运行失败收口`}
       extra={(
         <Space wrap>
           <Button disabled={selectedApprovalKeys.length === 0} onClick={() => void batchResolve('approve')}>批量批准</Button>
@@ -2084,7 +2115,7 @@ function ApprovalQueuePage() {
               size="small"
               items={[
                 { key: 'approval', label: '审批 ID', children: approvalTarget.item.id },
-                { key: 'run', label: '关联 Run', children: approvalTarget.item.runId },
+                { key: 'run', label: `关联${modelLabels.run}`, children: approvalTarget.item.runId },
                 { key: 'step', label: '步骤', children: approvalTarget.item.stepId || '-' },
                 { key: 'reason', label: '审批原因', children: approvalTarget.item.reason || '-' }
               ]}
@@ -2110,7 +2141,7 @@ function GovernanceQueuePage() {
   return (
     <PageContainer
       title="治理队列"
-      subTitle="统一处理人工决策与审批，确保阻塞 Run 能按正式业务语义继续、失败或重新规划"
+      subTitle={`统一处理人工决策与审批，确保阻塞${modelLabels.run}能按正式业务语义继续、失败或重新规划`}
     >
       <Tabs
         items={[
@@ -2562,7 +2593,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   };
 
   const runColumns: ProColumns<Run>[] = [
-    { title: 'Run ID', dataIndex: 'id', copyable: true },
+    { title: '运行 ID（Run ID）', dataIndex: 'id', copyable: true },
     { title: '目标', dataIndex: 'goalId', copyable: true },
     { title: '验收标准', dataIndex: 'doDId', copyable: true },
     { title: '优先级', render: (_, item) => runPriority(item), width: 100 },
@@ -2620,7 +2651,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   return (
     <PageContainer
       title="工作空间"
-      subTitle="围绕 Workspace 管理目标、验收标准、执行过程、治理阻塞和运行证据"
+      subTitle="围绕工作空间（Workspace）管理目标、验收标准、执行过程、治理阻塞和运行证据"
       extra={
         <div className="workspace-page-header-actions">
           <div className="workspace-header-context">
@@ -2642,7 +2673,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                 items: [
                   { key: 'goal', label: '定义目标', disabled: !workspaceId },
                   { key: 'dod', label: '定义验收标准', disabled: !workspaceId },
-                  { key: 'soul', label: '调整 Soul', disabled: !workspaceId }
+                  { key: 'soul', label: '调整执行人格', disabled: !workspaceId }
                 ],
                 onClick: ({ key }) => {
                   if (key === 'goal') {
@@ -2686,8 +2717,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                 { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : stateLabel(snapshot.outcome?.state ?? snapshot.workspace.state) },
                 { key: 'description', label: '描述', children: boundedParagraph(snapshot.workspace.description, { rows: 2 }) },
                 { key: 'workingDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.workingDirectory, { rows: 1, copyText: snapshot.workspace.workingDirectory }) },
-                { key: 'defaultSoul', label: '默认 Soul', children: workspaceDefaultSoulLabel },
-                { key: 'stageSouls', label: '阶段 Soul', children: compactTags(stageBindingTags, 4) }
+                { key: 'defaultSoul', label: '默认执行人格', children: workspaceDefaultSoulLabel },
+                { key: 'stageSouls', label: '阶段执行人格', children: compactTags(stageBindingTags, 4) }
               ]}
             />
           </ProCard>
@@ -2696,29 +2727,29 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           </ProCard>
           <ProCard title="主要业务模型" className="workorch-section">
             {metricGrid([
-              { key: 'workspace', label: 'Workspace', value: 1, color: '#1668dc' },
-              { key: 'goal', label: 'Goal', value: goals.length },
-              { key: 'dod', label: 'DoD', value: dods.length },
-              { key: 'run', label: 'Run', value: snapshot.runs?.length ?? 0, color: '#0958d9' },
-              { key: 'decision', label: 'Decision', value: snapshot.decisions?.length ?? 0 },
-              { key: 'approval', label: 'Approval', value: snapshot.approvals?.length ?? 0 },
-              { key: 'soul', label: 'Soul', value: souls.length },
-              { key: 'skill', label: 'Skill', value: skills.length },
-              { key: 'mcp', label: 'MCP Server', value: mcpServers.length },
-              { key: 'memory', label: 'Memory', value: memoryItems.length },
-              { key: 'step', label: 'Step', value: runSnapshot?.steps?.length ?? 0 },
-              { key: 'result', label: 'Result', value: snapshot.results?.length ?? runSnapshot?.results?.length ?? 0, color: '#389e0d' },
-              { key: 'artifact', label: 'Artifact', value: snapshot.artifacts?.length ?? runSnapshot?.artifacts?.length ?? 0 },
-              { key: 'tool', label: 'ToolCall', value: runSnapshot?.toolCalls?.length ?? 0 },
-              { key: 'patch', label: 'Patch', value: runSnapshot?.patches?.length ?? 0 },
-              { key: 'validation', label: 'Validation', value: runSnapshot?.validationResults?.length ?? 0 },
-              { key: 'checkpoint', label: 'Checkpoint', value: runSnapshot?.runtimeCheckpoints?.length ?? 0 }
+              { key: 'workspace', label: modelLabels.workspace, value: 1, color: '#1668dc' },
+              { key: 'goal', label: modelLabels.goal, value: goals.length },
+              { key: 'dod', label: modelLabels.dod, value: dods.length },
+              { key: 'run', label: modelLabels.run, value: snapshot.runs?.length ?? 0, color: '#0958d9' },
+              { key: 'decision', label: modelLabels.decision, value: snapshot.decisions?.length ?? 0 },
+              { key: 'approval', label: modelLabels.approval, value: snapshot.approvals?.length ?? 0 },
+              { key: 'soul', label: modelLabels.soul, value: souls.length },
+              { key: 'skill', label: modelLabels.skill, value: skills.length },
+              { key: 'mcp', label: modelLabels.mcpServer, value: mcpServers.length },
+              { key: 'memory', label: modelLabels.memory, value: memoryItems.length },
+              { key: 'step', label: modelLabels.step, value: runSnapshot?.steps?.length ?? 0 },
+              { key: 'result', label: modelLabels.result, value: snapshot.results?.length ?? runSnapshot?.results?.length ?? 0, color: '#389e0d' },
+              { key: 'artifact', label: modelLabels.artifact, value: snapshot.artifacts?.length ?? runSnapshot?.artifacts?.length ?? 0 },
+              { key: 'tool', label: modelLabels.toolCall, value: runSnapshot?.toolCalls?.length ?? 0 },
+              { key: 'patch', label: modelLabels.patch, value: runSnapshot?.patches?.length ?? 0 },
+              { key: 'validation', label: modelLabels.validationResult, value: runSnapshot?.validationResults?.length ?? 0 },
+              { key: 'checkpoint', label: modelLabels.runtimeCheckpoint, value: runSnapshot?.runtimeCheckpoints?.length ?? 0 }
             ])}
           </ProCard>
           <ProCard title="运行摘要" className="workorch-section">
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
               {metricGrid([
-                { key: 'runs', label: 'Run 总数', value: runSummary.total },
+                { key: 'runs', label: '运行（Run）总数', value: runSummary.total },
                 { key: 'created', label: '已创建', value: runSummary.created },
                 { key: 'active', label: '运行中', value: runSummary.active, color: '#0958d9' },
                 { key: 'blocked', label: '阻塞中', value: runSummary.blocked, color: '#d48806' },
@@ -2783,13 +2814,13 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             <ProCard title="执行配置（Soul）" colSpan={{ xs: 24, lg: 6 }} extra={<Button size="small" onClick={openSoulBindingEditor}>调整</Button>}>
               <Space direction="vertical" size="middle" style={{ width: '100%' }}>
                 <Typography.Text type="secondary">
-                  Soul 作为工作空间执行配置参与规划、执行、决策、审批、验收和交付物阶段，不改变 Goal / DoD 主体定义。
+                  执行人格（Soul）作为工作空间执行配置参与规划、执行、决策、审批、验收和交付物阶段，不改变目标（Goal）/验收标准（DoD）主体定义。
                 </Typography.Text>
                 <Descriptions
                   size="small"
                   column={1}
                   items={[
-                    { key: 'defaultSoul', label: '默认 Soul', children: workspaceDefaultSoulLabel },
+                    { key: 'defaultSoul', label: '默认执行人格', children: workspaceDefaultSoulLabel },
                     { key: 'stageSoul', label: '阶段覆盖', children: compactTags(stageBindingTags, 3) },
                     { key: 'priority', label: '启用优先级', children: compactTags(soulBindings?.priorityPolicy ?? []) }
                   ]}
@@ -2807,9 +2838,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                 <Descriptions
                   column={2}
                   items={[
-                    { key: 'run', label: '关联 Run', children: `${runSnapshot.run.id} / ${stateLabel(runOutcomeState(runSnapshot))}` },
-                    { key: 'rawRunState', label: '原始 Run 状态', children: stateLabel(runRawState(runSnapshot)) },
-                    { key: 'result', label: '正式 Result', children: outcomeResult ? boundedParagraph(outcomeResult.id, { rows: 1, copyText: outcomeResult.id }) : '-' },
+                    { key: 'run', label: `关联${modelLabels.run}`, children: `${runSnapshot.run.id} / ${stateLabel(runOutcomeState(runSnapshot))}` },
+                    { key: 'rawRunState', label: '原始运行状态', children: stateLabel(runRawState(runSnapshot)) },
+                    { key: 'result', label: modelLabels.result, children: outcomeResult ? boundedParagraph(outcomeResult.id, { rows: 1, copyText: outcomeResult.id }) : '-' },
                     { key: 'goal', label: '目标', children: boundedParagraph(outcomeGoal?.text || runSnapshot.run.goalId, { rows: 2 }) },
                     { key: 'dod', label: '验收标准', children: outcomeDoD?.items?.length ? compactTags(outcomeDoD.items) : runSnapshot.run.doDId || '-' },
                     { key: 'summary', label: '成果结论', children: boundedParagraph(goalOutcomeSummary(runSnapshot), { rows: 3, className: 'goal-outcome-summary' }) },
@@ -2822,7 +2853,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                   ]}
                 />
                 <ProCard gutter={16} wrap>
-                  <ProCard title="验收项确认" colSpan={{ xs: 24, lg: 12 }}>
+                  <ProCard title={modelLabels.doDAssessment} colSpan={{ xs: 24, lg: 12 }}>
                     {outcomeDoDItems.length ? (
                       <ProTable
                         rowKey="key"
@@ -2831,18 +2862,18 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                         pagination={false}
                         size="small"
                         columns={[
-                          { title: '验收项', dataIndex: 'item', ellipsis: true },
+                          { title: modelLabels.doDItem, dataIndex: 'item', ellipsis: true },
                           { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(String(item.state)) },
-                          { title: '证据', dataIndex: 'evidenceRefs', ellipsis: true, render: (_, item) => (item.evidenceRefs as string[]).join(', ') || '-' },
+                          { title: '证据', dataIndex: 'evidenceRefs', ellipsis: true, render: (_, item) => compactTags((item.evidenceRefs as string[]) ?? [], 4) },
                           { title: '未满足原因', dataIndex: 'failureReason', ellipsis: true, render: (_, item) => item.failureReason || '-' }
                         ]}
                         dataSource={outcomeDoDItems}
                       />
                     ) : (
-                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 尚未输出 DoD 评估" />
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`当前${modelLabels.run}尚未输出${modelLabels.doDAssessment}`} />
                     )}
                   </ProCard>
-                  <ProCard title="正式交付物（Artifact）" colSpan={{ xs: 24, lg: 12 }}>
+                  <ProCard title={modelLabels.artifact} colSpan={{ xs: 24, lg: 12 }}>
                     {outcomeArtifacts.length > 0 ? (
                       <ProTable<Artifact>
                         rowKey="id"
@@ -2869,12 +2900,12 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                         dataSource={outcomeArtifacts}
                       />
                     ) : (
-                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 尚未形成正式 Artifact" />
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`当前${modelLabels.run}尚未形成${modelLabels.artifact}`} />
                     )}
                   </ProCard>
                 </ProCard>
                 <ProCard gutter={16} wrap>
-                  <ProCard title="工具调用成果" colSpan={{ xs: 24, lg: 12 }}>
+                  <ProCard title={modelLabels.toolCall} colSpan={{ xs: 24, lg: 12 }}>
                     {(runSnapshot.toolCalls?.length ?? 0) > 0 ? (
                       <ProTable<ToolCall>
                         rowKey="id"
@@ -2891,10 +2922,10 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                         dataSource={runSnapshot.toolCalls ?? []}
                       />
                     ) : (
-                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 未产生工具调用" />
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`当前${modelLabels.run}未产生${modelLabels.toolCall}`} />
                     )}
                   </ProCard>
-                  <ProCard title="Memory 写入/引用" colSpan={{ xs: 24, lg: 12 }}>
+                  <ProCard title={modelLabels.memory} colSpan={{ xs: 24, lg: 12 }}>
                     {outcomeMemories.length ? (
                       <ProTable<MemoryItem>
                         rowKey="id"
@@ -2903,24 +2934,24 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                         pagination={{ pageSize: 5 }}
                         size="small"
                         columns={[
-                          { title: '记忆', dataIndex: 'summary', ellipsis: true },
-                          { title: '类型', dataIndex: 'memoryType', width: 130 },
-                          { title: '来源', dataIndex: 'sourceType', width: 100 },
-                          { title: '向量', width: 90, render: (_, item) => item.vectorReady ? <Tag color="cyan">{item.vectorDimension}</Tag> : '-' }
+                          { title: '记忆摘要', dataIndex: 'summary', ellipsis: true },
+                          { title: '记忆类型', dataIndex: 'memoryType', width: 130 },
+                          { title: '来源类型', dataIndex: 'sourceType', width: 110 },
+                          { title: '向量状态', width: 100, render: (_, item) => item.vectorReady ? <Tag color="cyan">{item.vectorDimension}</Tag> : '-' }
                         ]}
                         dataSource={outcomeMemories}
                       />
                     ) : (
-                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 未产生或引用 Memory 成果" />
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`当前${modelLabels.run}未产生或引用${modelLabels.memory}`} />
                     )}
                   </ProCard>
-                  <ProCard title="Memory Recall" colSpan={{ xs: 24, lg: 12 }}>
+                  <ProCard title={modelLabels.memoryRecall} colSpan={{ xs: 24, lg: 12 }}>
                     {memoryRecallCard(runSnapshot.memoryRecallTraces)}
                   </ProCard>
                 </ProCard>
               </Space>
             ) : (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先启动或选择一个 Run 查看目标成果" />
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先启动或选择一个运行（Run）查看目标成果" />
             )}
           </ProCard>
           <ProCard title="运行记录（Run）" className="workorch-section">
@@ -2999,24 +3030,24 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                   { key: 'steps', label: '步骤完成', value: `${runObservability?.progress.stepCompleted ?? 0}/${runObservability?.progress.stepTotal ?? runSnapshot.steps?.length ?? 0}`, color: runObservability?.progress.stepFailed ? '#cf1322' : '#0958d9' },
                   { key: 'tools', label: '工具完成', value: `${runObservability?.evidence.toolCallCompleted ?? 0}/${runObservability?.evidence.toolCallTotal ?? runSnapshot.toolCalls?.length ?? 0}` },
                   { key: 'validations', label: '校验通过', value: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? runSnapshot.validationResults?.length ?? 0}`, color: runObservability?.evidence.validationFailed ? '#cf1322' : '#389e0d' },
-                  { key: 'patches', label: 'Patch 应用', value: `${runObservability?.evidence.patchApplied ?? 0}/${runObservability?.evidence.patchTotal ?? runSnapshot.patches?.length ?? 0}` },
-                  { key: 'results', label: 'Result', value: runObservability?.evidence.resultTotal ?? runSnapshot.results?.length ?? 0, color: '#389e0d' },
-                  { key: 'artifacts', label: 'Artifact', value: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 }
+                  { key: 'patches', label: '补丁（Patch）应用', value: `${runObservability?.evidence.patchApplied ?? 0}/${runObservability?.evidence.patchTotal ?? runSnapshot.patches?.length ?? 0}` },
+                  { key: 'results', label: modelLabels.result, value: runObservability?.evidence.resultTotal ?? runSnapshot.results?.length ?? 0, color: '#389e0d' },
+                  { key: 'artifacts', label: modelLabels.artifact, value: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 }
                 ])}
                 <Descriptions
                   column={3}
                   items={[
                     { key: 'run', label: '运行', children: `${runSnapshot.run.id} / ${stateLabel(runOutcomeState(runSnapshot, runObservability))}` },
-                    { key: 'rawRunState', label: '原始 Run 状态', children: stateLabel(runRawState(runSnapshot, runObservability)) },
+                    { key: 'rawRunState', label: '原始运行状态', children: stateLabel(runRawState(runSnapshot, runObservability)) },
                     { key: 'currentStep', label: '当前步骤', children: runObservability?.progress.currentStepId || runSnapshot.steps?.at(-1)?.id || '-' },
                     { key: 'terminal', label: '是否终态', children: runObservability ? (runObservability.progress.terminal ? '是' : '否') : '-' },
                     { key: 'steps', label: '步骤', children: `${runObservability?.progress.stepCompleted ?? 0}/${runObservability?.progress.stepTotal ?? runSnapshot.steps?.length ?? 0} 已完成` },
                     { key: 'toolCalls', label: '工具调用', children: `${runObservability?.evidence.toolCallCompleted ?? 0}/${runObservability?.evidence.toolCallTotal ?? runSnapshot.toolCalls?.length ?? 0} 已完成` },
-                    { key: 'patches', label: 'Patch', children: `${runObservability?.evidence.patchApplied ?? 0}/${runObservability?.evidence.patchTotal ?? runSnapshot.patches?.length ?? 0} 已应用` },
-                    { key: 'validations', label: '校验结果', children: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? runSnapshot.validationResults?.length ?? 0} 通过` },
-                    { key: 'checkpoints', label: '运行检查点', children: runObservability?.evidence.runtimeCheckpointTotal ?? runSnapshot.runtimeCheckpoints?.length ?? 0 },
-                    { key: 'results', label: '正式 Result', children: runObservability?.evidence.resultTotal ?? runSnapshot.results?.length ?? 0 },
-                    { key: 'artifacts', label: '正式 Artifact', children: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 },
+                    { key: 'patches', label: modelLabels.patch, children: `${runObservability?.evidence.patchApplied ?? 0}/${runObservability?.evidence.patchTotal ?? runSnapshot.patches?.length ?? 0} 已应用` },
+                    { key: 'validations', label: modelLabels.validationResult, children: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? runSnapshot.validationResults?.length ?? 0} 通过` },
+                    { key: 'checkpoints', label: modelLabels.runtimeCheckpoint, children: runObservability?.evidence.runtimeCheckpointTotal ?? runSnapshot.runtimeCheckpoints?.length ?? 0 },
+                    { key: 'results', label: modelLabels.result, children: runObservability?.evidence.resultTotal ?? runSnapshot.results?.length ?? 0 },
+                    { key: 'artifacts', label: modelLabels.artifact, children: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 },
                     { key: 'selectedCapabilities', label: '选择能力', children: runObservability?.selectedCapabilities?.length ?? runSnapshot.selectedCapabilities?.length ?? 0 },
                     { key: 'usedCapabilities', label: '使用能力', children: runObservability?.usedCapabilities?.length ?? runSnapshot.usedCapabilities?.length ?? 0 },
                     { key: 'events', label: '事件', children: runObservability?.evidence.eventTotal ?? 0 },
@@ -3025,10 +3056,10 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                 />
                 <ProCard gutter={16} wrap>
                   <ProCard title="已选择 MCP 能力" colSpan={{ xs: 24, lg: 12 }}>
-                    {runtimeCapabilityTable(runObservability?.selectedCapabilities ?? runSnapshot.selectedCapabilities, '当前 Run 未显式选择 MCP 能力')}
+                    {runtimeCapabilityTable(runObservability?.selectedCapabilities ?? runSnapshot.selectedCapabilities, `当前${modelLabels.run}未显式选择${modelLabels.mcpCapability}`)}
                   </ProCard>
                   <ProCard title="实际使用 MCP 能力" colSpan={{ xs: 24, lg: 12 }}>
-                    {runtimeCapabilityTable(runObservability?.usedCapabilities ?? runSnapshot.usedCapabilities, '当前 Run 未产生 MCP 能力使用证据')}
+                    {runtimeCapabilityTable(runObservability?.usedCapabilities ?? runSnapshot.usedCapabilities, `当前${modelLabels.run}未产生${modelLabels.mcpCapability}使用证据`)}
                   </ProCard>
                 </ProCard>
                 <ProCard
@@ -3043,13 +3074,13 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                       column={{ xs: 1, sm: 2, md: 4 }}
                       items={[
                         { key: 'type', label: '检查点类型', children: checkpointTypeLabel(runObservability.latestCheckpoint.checkpointType) },
-                        { key: 'state', label: 'Run 状态', children: stateLabel(runObservability.latestCheckpoint.runStateSnapshot) },
+                        { key: 'state', label: '运行状态', children: stateLabel(runObservability.latestCheckpoint.runStateSnapshot) },
                         { key: 'step', label: '当前步骤', children: boundedParagraph(runObservability.latestCheckpoint.currentStepId, { rows: 1, copyText: runObservability.latestCheckpoint.currentStepId }) },
                         { key: 'blocked', label: '阻塞信息', children: runObservability.latestCheckpoint.blockingTicketId || runObservability.latestCheckpoint.blockingApprovalId || '无阻塞' }
                       ]}
                     />
                   ) : (
-                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前 Run 尚未记录检查点" />
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`当前${modelLabels.run}尚未记录${modelLabels.runtimeCheckpoint}`} />
                   )}
                 </ProCard>
                 <Tabs
@@ -3067,7 +3098,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                           columns={[
                             { title: '来源', dataIndex: 'source', width: 110 },
                             { title: '事件', render: (_, item) => timelineLabel(item), ellipsis: true },
-                            { title: 'Run 状态', dataIndex: 'runState', width: 130, render: (_, item) => stateLabel(item.runState) },
+                            { title: '运行状态', dataIndex: 'runState', width: 130, render: (_, item) => stateLabel(item.runState) },
                             { title: '步骤', dataIndex: 'stepId', ellipsis: true },
                             { title: '摘要', dataIndex: 'summary', ellipsis: true },
                             { title: '流式事件', render: (_, item) => timelineStreamContent(item), ellipsis: true },
@@ -3109,7 +3140,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     },
                     {
                       key: 'toolCalls',
-                      label: `工具 ${runSnapshot.toolCalls?.length ?? 0}`,
+                      label: `工具调用 ${runSnapshot.toolCalls?.length ?? 0}`,
                       children: (
                         <ProTable<ToolCall>
                           rowKey="id"
@@ -3118,7 +3149,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                           pagination={{ pageSize: 8 }}
                           size="small"
                           columns={[
-                            { title: '工具调用', dataIndex: 'id', copyable: true, ellipsis: true },
+                            { title: modelLabels.toolCall, dataIndex: 'id', copyable: true, ellipsis: true },
                             { title: '工具', dataIndex: 'toolName', ellipsis: true },
                             { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
                             { title: '摘要', dataIndex: 'exitSummary', ellipsis: true },
@@ -3130,7 +3161,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     },
                     {
                       key: 'validations',
-                      label: `校验 ${runSnapshot.validationResults?.length ?? 0}`,
+                      label: `校验结果 ${runSnapshot.validationResults?.length ?? 0}`,
                       children: (
                         <ProTable<ValidationResult>
                           rowKey="id"
@@ -3139,7 +3170,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                           pagination={{ pageSize: 8 }}
                           size="small"
                           columns={[
-                            { title: '校验', dataIndex: 'id', copyable: true, ellipsis: true },
+                            { title: modelLabels.validationResult, dataIndex: 'id', copyable: true, ellipsis: true },
                             { title: '类型', dataIndex: 'validationKind', width: 160 },
                             { title: '目标', dataIndex: 'targetRef', ellipsis: true },
                             { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
@@ -3151,7 +3182,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     },
                     {
                       key: 'patches',
-                      label: `Patch ${runSnapshot.patches?.length ?? 0}`,
+                      label: `${modelLabels.patch} ${runSnapshot.patches?.length ?? 0}`,
                       children: (
                         <ProTable<Patch>
                           rowKey="id"
@@ -3160,7 +3191,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                           pagination={{ pageSize: 8 }}
                           size="small"
                           columns={[
-                            { title: 'Patch', dataIndex: 'id', copyable: true, ellipsis: true },
+                            { title: modelLabels.patch, dataIndex: 'id', copyable: true, ellipsis: true },
                             { title: '类型', dataIndex: 'patchType', width: 140 },
                             { title: '目标', dataIndex: 'targetRef', ellipsis: true },
                             { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
@@ -3172,7 +3203,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     },
                     {
                       key: 'checkpoints',
-                      label: `检查点 ${runSnapshot.runtimeCheckpoints?.length ?? 0}`,
+                      label: `${modelLabels.runtimeCheckpoint} ${runSnapshot.runtimeCheckpoints?.length ?? 0}`,
                       children: (
                         <ProTable<RuntimeCheckpoint>
                           rowKey="id"
@@ -3181,9 +3212,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                           pagination={{ pageSize: 8 }}
                           size="small"
                           columns={[
-                            { title: '检查点', dataIndex: 'id', copyable: true, ellipsis: true },
+                            { title: modelLabels.runtimeCheckpoint, dataIndex: 'id', copyable: true, ellipsis: true },
                             { title: '类型', dataIndex: 'checkpointType', width: 180 },
-                            { title: 'Run 状态', dataIndex: 'runStateSnapshot', width: 140, render: (_, item) => stateTag(item.runStateSnapshot) },
+                            { title: '运行状态', dataIndex: 'runStateSnapshot', width: 140, render: (_, item) => stateTag(item.runStateSnapshot) },
                             { title: '当前步骤', dataIndex: 'currentStepId', ellipsis: true },
                             { title: '决策', dataIndex: 'blockingTicketId', ellipsis: true },
                             { title: '审批', dataIndex: 'blockingApprovalId', ellipsis: true }
@@ -3194,7 +3225,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     },
                     {
                       key: 'results',
-                      label: `Result ${runSnapshot.results?.length ?? 0}`,
+                      label: `结果 ${runSnapshot.results?.length ?? 0}`,
                       children: (
                         <ProTable<Result>
                           rowKey="id"
@@ -3203,7 +3234,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                           pagination={{ pageSize: 8 }}
                           size="small"
                           columns={[
-                            { title: 'Result', dataIndex: 'id', copyable: true, ellipsis: true },
+                            { title: modelLabels.result, dataIndex: 'id', copyable: true, ellipsis: true },
                             { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
                             { title: '标题', dataIndex: 'title', ellipsis: true },
                             { title: '摘要', dataIndex: 'summary', ellipsis: true },
@@ -3215,7 +3246,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     },
                     {
                       key: 'artifacts',
-                      label: `Artifact ${runSnapshot.artifacts?.length ?? 0}`,
+                      label: `交付物 ${runSnapshot.artifacts?.length ?? 0}`,
                       children: (
                         <ProTable<Artifact>
                           rowKey="id"
@@ -3224,7 +3255,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                           pagination={{ pageSize: 8 }}
                           size="small"
                           columns={[
-                            { title: 'Artifact', dataIndex: 'id', copyable: true, ellipsis: true },
+                            { title: modelLabels.artifact, dataIndex: 'id', copyable: true, ellipsis: true },
                             { title: '类型', dataIndex: 'artifactType', width: 140 },
                             { title: '分类', dataIndex: 'category', width: 140, render: (_, item) => item.category || '-' },
                             { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
@@ -3256,7 +3287,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
         <Empty description={loading ? '正在加载工作空间详情' : '未选择工作空间'} />
       )}
       <Modal
-        title="调整工作空间 Soul"
+        title="调整工作空间执行人格（Soul）"
         open={soulBindingEditorOpen}
         confirmLoading={soulBindingSaving}
         onCancel={() => setSoulBindingEditorOpen(false)}
@@ -3267,7 +3298,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       >
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <Typography.Paragraph type="secondary">
-            Soul 是工作空间的执行配置。先维护 Goal 和 DoD，再按需设置默认 Soul 与阶段覆盖；启动执行时仍可做单次覆盖。
+            执行人格（Soul）是工作空间的执行配置。先维护目标（Goal）和验收标准（DoD），再按需设置默认执行人格与阶段覆盖；启动执行时仍可做单次覆盖。
           </Typography.Paragraph>
           <Descriptions
             size="small"
@@ -3283,28 +3314,28 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
               layout="vertical"
               onFinish={(values) => void saveWorkspaceSoulBindings(values as { defaultSoulId?: string; bindings?: Record<string, string> })}
             >
-              <Form.Item name="defaultSoulId" label="工作空间默认 Soul">
-                <Select allowClear placeholder="未绑定时不注入默认 Soul" options={soulOptions} />
+              <Form.Item name="defaultSoulId" label="工作空间默认执行人格（Soul）">
+                <Select allowClear placeholder="未绑定时不注入默认执行人格" options={soulOptions} />
               </Form.Item>
               <Space className="workorch-section">
-                <Typography.Text type="secondary">阶段 Soul 绑定</Typography.Text>
+                <Typography.Text type="secondary">阶段执行人格绑定</Typography.Text>
                 <Button
                   size="small"
                   onClick={() => soulBindingsForm.setFieldsValue({ bindings: stageBindings(soulBindingStages, soulBindingsForm.getFieldValue('defaultSoulId')) })}
                 >
-                  默认 Soul 应用到全部阶段
+                  默认执行人格应用到全部阶段
                 </Button>
               </Space>
               <div className="soul-binding-grid">
                 {soulBindingStages.map((stage) => (
                   <Form.Item key={stage} name={['bindings', stage]} label={soulBindingStageLabel(stage)}>
-                    <Select allowClear placeholder="继承默认 Soul" options={soulOptions} />
+                    <Select allowClear placeholder="继承默认执行人格" options={soulOptions} />
                   </Form.Item>
                 ))}
               </div>
             </Form>
           ) : (
-            <Empty description="暂无可用 Soul，可先到系统配置创建 Soul" />
+            <Empty description="暂无可用执行人格，可先到系统配置创建执行人格" />
           )}
         </Space>
       </Modal>
@@ -3337,10 +3368,10 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           layout="vertical"
           style={{ display: setupStep === 0 ? 'block' : 'none' }}
         >
-          <Form.Item name="templateId" label="Workspace 模板">
+          <Form.Item name="templateId" label="工作空间模板（Workspace Template）">
             <Select
               allowClear
-              placeholder="可选。选择后自动带入目标、验收标准和 Soul 绑定"
+              placeholder="可选。选择后自动带入目标、验收标准和执行人格绑定"
               onChange={applyWorkspaceTemplate}
               options={workspaceTemplates.map((item) => ({ value: item.id, label: `${item.name || item.id} (${item.id})` }))}
             />
@@ -3388,38 +3419,38 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             <Input value={workspaceForm.getFieldValue('title') || '待创建，最终确认提交后生成'} disabled />
           </Form.Item>
           <Typography.Paragraph type="secondary">
-            可选。用于设置该工作空间默认 Soul 和各任务阶段 Soul；后续可在工作空间详情中修改。
+            可选。用于设置该工作空间默认执行人格（Soul）和各任务阶段执行人格；后续可在工作空间详情中修改。
           </Typography.Paragraph>
           {souls.length ? (
             <>
-              <Form.Item name="defaultSoulId" label="工作空间默认 Soul">
-                <Select allowClear placeholder="未绑定时不注入默认 Soul" options={soulOptions} />
+              <Form.Item name="defaultSoulId" label="工作空间默认执行人格（Soul）">
+                <Select allowClear placeholder="未绑定时不注入默认执行人格" options={soulOptions} />
               </Form.Item>
               <Space className="workorch-section">
-                <Typography.Text type="secondary">阶段 Soul 绑定</Typography.Text>
+                <Typography.Text type="secondary">阶段执行人格绑定</Typography.Text>
                 <Button
                   size="small"
                   onClick={() => setupSoulBindingsForm.setFieldsValue({ bindings: stageBindings(soulBindingStages, setupSoulBindingsForm.getFieldValue('defaultSoulId')) })}
                 >
-                  默认 Soul 应用到全部阶段
+                  默认执行人格应用到全部阶段
                 </Button>
               </Space>
               <div className="soul-binding-grid">
                 {soulBindingStages.map((stage) => (
                   <Form.Item key={stage} name={['bindings', stage]} label={soulBindingStageLabel(stage)}>
-                    <Select allowClear placeholder="继承默认 Soul" options={soulOptions} />
+                    <Select allowClear placeholder="继承默认执行人格" options={soulOptions} />
                   </Form.Item>
                 ))}
               </div>
             </>
           ) : (
-            <Empty description="暂无 Soul，可先到系统配置创建，或直接完成后续配置" />
+            <Empty description="暂无执行人格，可先到系统配置创建，或直接完成后续配置" />
           )}
         </Form>
         <div style={{ display: setupStep === 4 ? 'block' : 'none' }}>
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
             <Typography.Paragraph type="secondary">
-              请确认以下信息。点击“确认提交”后，workorch 会按顺序创建 Workspace、写入 Goal、写入 DoD，并保存工作空间 Soul 配置。
+              请确认以下信息。点击“确认提交”后，workorch 会按顺序创建工作空间（Workspace）、写入目标（Goal）、写入验收标准（DoD），并保存工作空间执行人格（Soul）配置。
             </Typography.Paragraph>
             <Descriptions
               bordered
@@ -3433,14 +3464,14 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                 { key: 'dod', label: '验收标准', children: compactTags(setupDoDItems(setupDoDForm.getFieldValue('items')), 6) },
                 {
                   key: 'defaultSoul',
-                  label: '默认 Soul',
+                  label: '默认执行人格',
                   children: setupSoulBindingsForm.getFieldValue('defaultSoulId')
                     ? soulNameById.get(setupSoulBindingsForm.getFieldValue('defaultSoulId')) || setupSoulBindingsForm.getFieldValue('defaultSoulId')
                     : '未配置'
                 },
                 {
                   key: 'stageSouls',
-                  label: '阶段 Soul',
+                  label: '阶段执行人格',
                   children: compactTags(
                     Object.entries(setupSoulBindingsForm.getFieldValue('bindings') ?? {})
                       .filter(([, soulId]) => Boolean(soulId))
@@ -3468,11 +3499,11 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           </Typography.Paragraph>
           <Form.Item name="purge" valuePropName="checked">
             <Checkbox>
-              同时删除该工作空间的目标、验收标准、运行数据、治理记录、交付物索引、Memory 和工作目录
+              同时删除该工作空间的目标、验收标准、运行数据、治理记录、交付物索引、记忆（Memory）和工作目录
             </Checkbox>
           </Form.Item>
           <Typography.Paragraph type="secondary">
-            勾选后会清理 file backend 下该工作空间的数据目录，并删除 Workspace 的工作目录。该操作不可恢复。
+            勾选后会清理 file backend 下该工作空间的数据目录，并删除工作空间（Workspace）的工作目录。该操作不可恢复。
           </Typography.Paragraph>
         </Form>
       </Modal>
@@ -3593,9 +3624,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             />
           </Form.Item>
           <Form.Item name="soulId" label="执行人格（Soul）">
-            <Select allowClear placeholder="使用工作空间默认 Soul" options={soulOptions} />
+            <Select allowClear placeholder="使用工作空间默认执行人格" options={soulOptions} />
           </Form.Item>
-          <Typography.Text type="secondary">本次执行阶段 Soul 覆盖</Typography.Text>
+          <Typography.Text type="secondary">本次执行阶段执行人格覆盖</Typography.Text>
           <div className="soul-binding-grid soul-binding-grid-compact">
             {soulBindingStages.map((stage) => (
               <Form.Item key={stage} name={['soulBindings', stage]} label={soulBindingStageLabel(stage)}>
@@ -3950,7 +3981,7 @@ function RuntimeControlPage() {
   return (
     <PageContainer
       title="运行控制"
-      subTitle="管理 MCP 运行能力，并观察本地运行队列与并发压力"
+      subTitle={`管理${modelLabels.mcpCapability}，并观察本地运行队列与并发压力`}
       extra={<Button onClick={() => void loadRuntime()} loading={loading}>刷新</Button>}
     >
       <ProCard gutter={16} wrap loading={loading}>
@@ -3958,7 +3989,7 @@ function RuntimeControlPage() {
           <Descriptions
             column={1}
             items={[
-              { key: 'max', label: '最大并发 Run', children: metricValue(metrics, 'workorch_server_max_concurrent_runs') },
+              { key: 'max', label: '最大并发运行（Run）', children: metricValue(metrics, 'workorch_server_max_concurrent_runs') },
               { key: 'inFlight', label: '执行中', children: metricValue(metrics, 'workorch_run_requests_in_flight') },
               { key: 'waiting', label: '队列等待', children: metricValue(metrics, 'workorch_run_queue_waiting') },
               { key: 'total', label: '队列总量', children: metricValue(metrics, 'workorch_run_queue_total') }
@@ -3979,7 +4010,7 @@ function RuntimeControlPage() {
 
       <ProCard
         title="MCP 能力目录"
-        subTitle="以业务名称统一识别 Tool / Resource / Prompt，同时保留技术标识"
+        subTitle="以业务名称统一识别工具（Tool）、资源（Resource）和提示词（Prompt），同时保留技术标识"
         className="workorch-section"
       >
         <Form
@@ -4005,9 +4036,9 @@ function RuntimeControlPage() {
               placeholder="全部"
               style={{ width: 140 }}
               options={[
-                { value: 'tool', label: 'Tool' },
-                { value: 'resource', label: 'Resource' },
-                { value: 'prompt', label: 'Prompt' }
+                { value: 'tool', label: modelLabels.mcpTool },
+                { value: 'resource', label: modelLabels.mcpResource },
+                { value: 'prompt', label: modelLabels.mcpPrompt }
               ]}
             />
           </Form.Item>
@@ -4235,7 +4266,7 @@ function RuntimeControlPage() {
             <Input placeholder="便于用户识别的能力名称" />
           </Form.Item>
           <Form.Item name="description" label="能力说明">
-            <Input.TextArea rows={3} placeholder="说明该 Tool / Resource / Prompt 做什么、何时使用" />
+            <Input.TextArea rows={3} placeholder="说明该工具、资源或提示词做什么、何时使用" />
           </Form.Item>
           <Form.Item name="category" label="业务分类">
             <Input placeholder="例如：代码仓库、验收、数据查询" />
@@ -4247,7 +4278,7 @@ function RuntimeControlPage() {
             <Select mode="tags" placeholder="例如：planning、execution、validation" options={[]} />
           </Form.Item>
           <Form.Item name="usageHint" label="使用建议">
-            <Input.TextArea rows={2} placeholder="给 Workspace / Skill 选择该能力时的提示" />
+            <Input.TextArea rows={2} placeholder="给工作空间（Workspace）或技能（Skill）选择该能力时的提示" />
           </Form.Item>
           <Form.Item name="inputSummary" label="输入摘要">
             <Input.TextArea rows={2} placeholder="说明需要哪些输入" />
@@ -4292,6 +4323,7 @@ function RuntimeControlPage() {
 
 function ConfigurationPage() {
   const { message } = AntApp.useApp();
+  const [serverForm] = Form.useForm<UpdateServerConfigurationRequest>();
   const [providerEditorForm] = Form.useForm<UpdateLLMProviderConfiguration>();
   const [configuration, setConfiguration] = useState<ServiceConfiguration | undefined>(undefined);
   const [souls, setSouls] = useState<Soul[]>([]);
@@ -4302,6 +4334,7 @@ function ConfigurationPage() {
   const [selectedProviderIndex, setSelectedProviderIndex] = useState(0);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
+  const [serverSaving, setServerSaving] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const loadConfiguration = async () => {
@@ -4321,6 +4354,7 @@ function ConfigurationPage() {
       setProviderDrafts(nextFormValues.providers);
       setSelectedProviderIndex(0);
       setSelectedTemplateId(nextConfiguration.llm.providerTemplates?.[0]?.templateId);
+      serverForm.setFieldsValue({ defaultDialogLanguage: nextConfiguration.server.defaultDialogLanguage || '' });
       providerEditorForm.setFieldsValue(nextFormValues.providers[0] ?? nextProviderDraft([]));
     } catch (error) {
       message.error(errorMessage(error));
@@ -4364,6 +4398,22 @@ function ConfigurationPage() {
       message.error(errorMessage(error));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveServerConfiguration = async (values: UpdateServerConfigurationRequest) => {
+    setServerSaving(true);
+    try {
+      const nextConfiguration = await workorchApi.updateServerConfiguration({
+        defaultDialogLanguage: values.defaultDialogLanguage || ''
+      });
+      setConfiguration(nextConfiguration);
+      serverForm.setFieldsValue({ defaultDialogLanguage: nextConfiguration.server.defaultDialogLanguage || '' });
+      message.success('服务配置已更新');
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setServerSaving(false);
     }
   };
 
@@ -4444,24 +4494,41 @@ function ConfigurationPage() {
   return (
     <PageContainer
       title="系统配置"
-      subTitle="管理服务配置、Soul、Workspace 模板和运行期生效的 LLM Provider"
+      subTitle="管理服务配置、执行人格（Soul）、工作空间模板（Workspace Template）和运行期生效的 LLM 服务商（Provider）"
       extra={<Button onClick={() => void loadConfiguration()} loading={loading}>刷新</Button>}
     >
       <ProCard gutter={16} wrap loading={loading}>
         <ProCard title="服务参数" colSpan="50%">
-          <Descriptions
-            column={1}
-            items={[
-              { key: 'addr', label: '监听地址', children: configuration?.server.addr || '-' },
-              { key: 'readHeaderTimeout', label: '读 Header 超时', children: configuration?.server.readHeaderTimeout || '-' },
-              { key: 'readTimeout', label: '读超时', children: configuration?.server.readTimeout || '-' },
-              { key: 'writeTimeout', label: '写超时', children: configuration?.server.writeTimeout || '-' },
-              { key: 'idleTimeout', label: '空闲超时', children: configuration?.server.idleTimeout || '-' },
-              { key: 'shutdownTimeout', label: '关闭超时', children: configuration?.server.shutdownTimeout || '-' },
-              { key: 'maxConcurrentRuns', label: '最大并发 Run', children: configuration?.server.maxConcurrentRuns ?? '-' },
-              { key: 'defaultSoulId', label: '系统默认 Soul', children: configuration?.runtime.defaultSoulId || '-' }
-            ]}
-          />
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Descriptions
+              column={1}
+              items={[
+                { key: 'addr', label: '监听地址', children: configuration?.server.addr || '-' },
+                { key: 'readHeaderTimeout', label: '读 Header 超时', children: configuration?.server.readHeaderTimeout || '-' },
+                { key: 'readTimeout', label: '读超时', children: configuration?.server.readTimeout || '-' },
+                { key: 'writeTimeout', label: '写超时', children: configuration?.server.writeTimeout || '-' },
+                { key: 'idleTimeout', label: '空闲超时', children: configuration?.server.idleTimeout || '-' },
+                { key: 'shutdownTimeout', label: '关闭超时', children: configuration?.server.shutdownTimeout || '-' },
+                { key: 'maxConcurrentRuns', label: '最大并发运行（Run）', children: configuration?.server.maxConcurrentRuns ?? '-' },
+                { key: 'defaultSoulId', label: '系统默认执行人格（Soul）', children: configuration?.runtime.defaultSoulId || '-' }
+              ]}
+            />
+            <Form form={serverForm} layout="inline" onFinish={(values) => void saveServerConfiguration(values)}>
+              <Form.Item name="defaultDialogLanguage" label="默认交互语言">
+                <Select
+                  style={{ width: 180 }}
+                  options={[
+                    { value: '', label: '跟随系统语言' },
+                    { value: 'zh-CN', label: '中文' },
+                    { value: 'en', label: 'English' }
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item>
+                <Button type="primary" htmlType="submit" loading={serverSaving}>保存服务配置</Button>
+              </Form.Item>
+            </Form>
+          </Space>
         </ProCard>
         <ProCard title="仓储" colSpan="50%">
           <Descriptions
@@ -4481,7 +4548,7 @@ function ConfigurationPage() {
         extra={<Button type="primary" onClick={() => void providerEditorForm.validateFields().then(() => saveLLMConfiguration())} loading={saving}>保存 LLM 服务商</Button>}
       >
         <Typography.Paragraph type="secondary">
-          API 密钥读取时会被隐藏。编辑时留空表示保留已有密钥；保存后的服务商配置会由 workorchd 运行期重新加载，并用于后续 LLM 步骤。
+          API 密钥读取时会被隐藏。编辑时留空表示保留已有密钥；保存后的服务商配置会由 workorch 运行期重新加载，并用于后续 LLM 步骤。
         </Typography.Paragraph>
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <ProCard
@@ -4640,7 +4707,7 @@ function ServicePage() {
   }, []);
 
   return (
-    <PageContainer title="服务状态" subTitle="查看 workorchd 健康状态、就绪状态和运行指标">
+    <PageContainer title="服务状态" subTitle="查看 workorch 健康状态、就绪状态和运行指标">
       <ProCard gutter={16} wrap>
         <ProCard title="健康检查" colSpan="50%">
           <Descriptions items={Object.entries(health).map(([key, value]) => ({ key, label: key, children: value }))} column={1} />
@@ -4649,7 +4716,7 @@ function ServicePage() {
           <Descriptions items={Object.entries(ready).map(([key, value]) => ({ key, label: key, children: value }))} column={1} />
         </ProCard>
       </ProCard>
-      <ProCard title="运行指标（Metrics）" className="workorch-section">
+      <ProCard title={modelLabels.metrics} className="workorch-section">
         <pre className="metrics-panel">{metrics}</pre>
       </ProCard>
     </PageContainer>

@@ -1868,14 +1868,14 @@ func mapRunObservability(snapshot RunSnapshot) RunObservability {
 }
 
 func mapWorkspaceTaskProgress(snapshot WorkspaceSnapshot) TaskProgress {
-	language := "" // WorkspaceSnapshot does not carry dialogLanguage; use default
+	language := workspaceSnapshotLanguage(snapshot)
 	ret := TaskProgress{
 		WorkspaceID: snapshot.Workspace.ID,
 		State:       snapshot.Workspace.State,
 		Recovery: RecoveryPlan{
 			Mode:       "idle",
 			NextAction: "start_workspace_execution",
-			Reason:     "workspace has no active run",
+			Reason:     localizedWorkspaceProgressText(language, "no_active_run"),
 		},
 	}
 	if snapshot.Workspace.ActiveRunID != "" {
@@ -1883,7 +1883,7 @@ func mapWorkspaceTaskProgress(snapshot WorkspaceSnapshot) TaskProgress {
 		ret.Recovery.RunID = snapshot.Workspace.ActiveRunID
 		ret.Recovery.Mode = "continue"
 		ret.Recovery.NextAction = "inspect_active_run"
-		ret.Recovery.Reason = "workspace has an active run projection"
+		ret.Recovery.Reason = localizedWorkspaceProgressText(language, "active_run")
 	}
 	for _, item := range snapshot.Decisions {
 		if isResolvedDecisionState(item.State) {
@@ -1924,13 +1924,13 @@ func mapWorkspaceTaskProgress(snapshot WorkspaceSnapshot) TaskProgress {
 		}
 	}
 	ret.Milestones = []ProgressMilestone{
-		{ID: "workspace_defined", Title: "Workspace defined", State: "completed", EvidenceRefs: []string{snapshot.Workspace.ID}},
+		{ID: "workspace_defined", Title: localizedWorkspaceProgressText(language, "workspace_defined"), State: "completed", EvidenceRefs: []string{snapshot.Workspace.ID}},
 		{ID: "formal_result", Title: localizedMilestoneTitle(language, "formal_result"), State: progressStateFromCount(len(snapshot.Results), false, snapshot.Workspace.State == string(common.WorkspaceStateCompleted)), EvidenceRefs: idsFromResults(snapshot.Results)},
 	}
 	ret.Items = []ProgressItem{
-		{ID: "runs", Kind: "run", Title: "Runs", State: progressStateFromCount(len(snapshot.Runs), false, false)},
-		{ID: "results", Kind: "result", Title: "Results", State: progressStateFromCount(len(snapshot.Results), false, false), EvidenceRefs: idsFromResults(snapshot.Results)},
-		{ID: "artifacts", Kind: "artifact", Title: "Artifacts", State: progressStateFromCount(len(snapshot.Artifacts), false, false), EvidenceRefs: idsFromArtifacts(snapshot.Artifacts)},
+		{ID: "runs", Kind: "run", Title: localizedWorkspaceProgressText(language, "runs"), State: progressStateFromCount(len(snapshot.Runs), false, false)},
+		{ID: "results", Kind: "result", Title: localizedWorkspaceProgressText(language, "results"), State: progressStateFromCount(len(snapshot.Results), false, false), EvidenceRefs: idsFromResults(snapshot.Results)},
+		{ID: "artifacts", Kind: "artifact", Title: localizedWorkspaceProgressText(language, "artifacts"), State: progressStateFromCount(len(snapshot.Artifacts), false, false), EvidenceRefs: idsFromArtifacts(snapshot.Artifacts)},
 	}
 	ret.CurrentMilestone = currentProgressMilestone(ret.Milestones)
 	ret.EvidenceRefs = compactUniqueStrings(append(idsFromResults(snapshot.Results), idsFromArtifacts(snapshot.Artifacts)...))
@@ -1977,18 +1977,19 @@ func mapTaskProgress(snapshot RunSnapshot) TaskProgress {
 }
 
 func mapWorkspaceContextBundle(snapshot WorkspaceSnapshot) ContextBundle {
+	language := workspaceSnapshotLanguage(snapshot)
 	progress := snapshot.TaskProgress
 	ret := ContextBundle{
 		WorkspaceID:  snapshot.Workspace.ID,
 		Mode:         "workspace",
-		Summary:      "workspace context bundle without active run",
+		Summary:      localizedWorkspaceProgressText(language, "context_summary"),
 		TaskProgress: progress,
 		Recovery:     progress.Recovery,
 		Sections: []ContextSection{
 			{
 				ID:       "workspace",
 				Kind:     "workspace",
-				Title:    "Workspace",
+				Title:    localizedWorkspaceProgressText(language, "workspace"),
 				Priority: 100,
 				State:    snapshot.Workspace.State,
 				Summary:  snapshot.Workspace.Title,
@@ -2002,7 +2003,7 @@ func mapWorkspaceContextBundle(snapshot WorkspaceSnapshot) ContextBundle {
 			{
 				ID:           "task_progress",
 				Kind:         "task_progress",
-				Title:        "Task progress",
+				Title:        localizedWorkspaceProgressText(language, "task_progress"),
 				Priority:     90,
 				State:        progress.State,
 				Summary:      progress.Summary,
@@ -2011,7 +2012,7 @@ func mapWorkspaceContextBundle(snapshot WorkspaceSnapshot) ContextBundle {
 		},
 	}
 	ret.CompressionCandidates = contextCompressionCandidates(ret)
-	ret.CompressedContext = compressedContextFromBundle(ret)
+	ret.CompressedContext = compressedContextFromBundle(ret, language)
 	return ret
 }
 
@@ -2046,12 +2047,11 @@ func mapRunContextBundle(snapshot RunSnapshot) ContextBundle {
 	}
 	ret.Sections = compactContextSections(ret.Sections)
 	ret.CompressionCandidates = contextCompressionCandidates(ret)
-	ret.CompressedContext = compressedContextFromBundle(ret)
+	ret.CompressedContext = compressedContextFromBundle(ret, snapshotLanguage(snapshot))
 	return ret
 }
 
-func compressedContextFromBundle(bundle ContextBundle) CompressedContext {
-	language := "" // bundle does not carry dialogLanguage; localized defaults use English
+func compressedContextFromBundle(bundle ContextBundle, language string) CompressedContext {
 	sectionRefs := make([]string, 0, len(bundle.Sections))
 	for _, section := range bundle.Sections {
 		sectionRefs = append(sectionRefs, section.ID)
@@ -3495,10 +3495,85 @@ func isTerminalRunState(state string) bool {
 
 func snapshotLanguage(snapshot RunSnapshot) string {
 	if snapshot.Run.ExecutionContext == nil {
-		return ""
+		return defaultDialogLanguage()
 	}
 	if lang, ok := snapshot.Run.ExecutionContext["dialogLanguage"].(string); ok {
-		return strings.TrimSpace(lang)
+		if normalized := languageNameFromLocale(lang); normalized != "" {
+			return normalized
+		}
+	}
+	return defaultDialogLanguage()
+}
+
+func workspaceSnapshotLanguage(snapshot WorkspaceSnapshot) string {
+	if snapshot.Workspace.ActiveRunID != "" {
+		for _, item := range snapshot.Runs {
+			if item.ID == snapshot.Workspace.ActiveRunID {
+				return languageFromExecutionContext(item.ExecutionContext)
+			}
+		}
+	}
+	for idx := len(snapshot.Runs) - 1; idx >= 0; idx-- {
+		if lang := languageFromExecutionContext(snapshot.Runs[idx].ExecutionContext); lang != "" {
+			return lang
+		}
+	}
+	return defaultDialogLanguage()
+}
+
+func languageFromExecutionContext(executionContext map[string]any) string {
+	if executionContext == nil {
+		return ""
+	}
+	if lang, ok := executionContext["dialogLanguage"].(string); ok {
+		return languageNameFromLocale(lang)
 	}
 	return ""
+}
+
+func localizedWorkspaceProgressText(language string, key string) string {
+	if prefersChinese(language) {
+		switch key {
+		case "no_active_run":
+			return "工作空间尚无活跃运行（Run）"
+		case "active_run":
+			return "工作空间存在活跃运行（Run）投影"
+		case "workspace_defined":
+			return "工作空间（Workspace）已定义"
+		case "runs":
+			return "运行（Run）"
+		case "results":
+			return "结果（Result）"
+		case "artifacts":
+			return "交付物（Artifact）"
+		case "context_summary":
+			return "无活跃运行（Run）的工作空间上下文包"
+		case "workspace":
+			return "工作空间（Workspace）"
+		case "task_progress":
+			return "任务进度"
+		}
+	}
+	switch key {
+	case "no_active_run":
+		return "workspace has no active Run"
+	case "active_run":
+		return "workspace has an active Run projection"
+	case "workspace_defined":
+		return "Workspace defined"
+	case "runs":
+		return "Runs"
+	case "results":
+		return "Results"
+	case "artifacts":
+		return "Artifacts"
+	case "context_summary":
+		return "workspace context bundle without active Run"
+	case "workspace":
+		return "Workspace"
+	case "task_progress":
+		return "Task progress"
+	default:
+		return key
+	}
 }

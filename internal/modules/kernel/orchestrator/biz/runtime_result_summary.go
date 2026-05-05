@@ -7,6 +7,7 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/dialoglanguage"
 )
 
 func resultSummaryArtifactContent(run *runModel.Run, summary string, assessment map[string]any, evidenceRefs []string, artifactRefs []common.ArtifactID, evidenceDetails []resultEvidenceDetail) string {
@@ -186,9 +187,9 @@ func localizedSummaryLabel(language string, key string) string {
 		case "stderr":
 			return "标准错误"
 		case "dod_items":
-			return "验收项确认"
+			return "DoD 验收评估"
 		case "dod_table_header":
-			return "| 验收项 | 状态 | 证据 |"
+			return "| DoD 验收项 | 状态 | 证据 |"
 		case "evidence_refs":
 			return "证据引用"
 		case "artifact_refs":
@@ -217,9 +218,9 @@ func localizedSummaryLabel(language string, key string) string {
 	case "stderr":
 		return "Stderr"
 	case "dod_items":
-		return "DoD Items"
+		return "DoD Assessment"
 	case "dod_table_header":
-		return "| Item | State | Evidence |"
+		return "| DoD Item | State | Evidence |"
 	case "evidence_refs":
 		return "Evidence Refs"
 	case "artifact_refs":
@@ -239,12 +240,11 @@ func runDialogLanguage(run *runModel.Run) string {
 	if run == nil {
 		return ""
 	}
-	return strings.TrimSpace(stringFromMap(run.ExecutionContext, "dialogLanguage"))
+	return dialoglanguage.NormalizeTag(stringFromMap(run.ExecutionContext, "dialogLanguage"))
 }
 
 func prefersChinese(language string) bool {
-	language = strings.ToLower(strings.TrimSpace(language))
-	return strings.Contains(language, "zh") || strings.Contains(language, "chinese") || strings.Contains(language, "中文") || strings.Contains(language, "汉语")
+	return dialoglanguage.PrefersChinese(language)
 }
 
 func writeStringListSection(builder *strings.Builder, title string, values []string) {

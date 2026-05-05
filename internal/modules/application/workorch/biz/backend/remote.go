@@ -199,7 +199,7 @@ type remoteRunBackend struct{ cl *client.Client }
 func (b *remoteRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
 	act, err := b.cl.ActivateWorkspaceExecution(ctx, string(wsID), &client.ActivationRequest{
 		GoalID: string(req.GoalID), DoDID: string(req.DoDID), LLMProviderID: req.LLMProviderID,
-		SoulID: string(req.SoulID), Priority: req.Priority,
+		DialogLanguage: req.DialogLanguage, SoulID: string(req.SoulID), Priority: req.Priority,
 	})
 	if err != nil {
 		return nil, err

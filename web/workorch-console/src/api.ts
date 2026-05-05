@@ -1,4 +1,4 @@
-import type { Approval, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, TaskDecomposition, TaskProgress, UpdateLLMConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, TaskDecomposition, TaskProgress, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -60,6 +60,13 @@ export const workorchApi = {
   },
   updateLLMConfiguration: async (configuration: UpdateLLMConfigurationRequest) => {
     const body = await request<{ configuration: ServiceConfiguration }>(`${apiBase}/configuration/llm`, {
+      method: 'PUT',
+      body: JSON.stringify(configuration)
+    });
+    return body.configuration;
+  },
+  updateServerConfiguration: async (configuration: UpdateServerConfigurationRequest) => {
+    const body = await request<{ configuration: ServiceConfiguration }>(`${apiBase}/configuration/server`, {
       method: 'PUT',
       body: JSON.stringify(configuration)
     });

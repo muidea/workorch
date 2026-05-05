@@ -665,10 +665,12 @@ func mapRun(item *runmodel.Run) Run {
 
 func runDialogLanguage(item *runmodel.Run) string {
 	if item == nil || item.ExecutionContext == nil {
-		return ""
+		return defaultDialogLanguage()
 	}
 	if lang, ok := item.ExecutionContext["dialogLanguage"].(string); ok {
-		return strings.TrimSpace(lang)
+		if normalized := languageNameFromLocale(lang); normalized != "" {
+			return normalized
+		}
 	}
-	return ""
+	return defaultDialogLanguage()
 }

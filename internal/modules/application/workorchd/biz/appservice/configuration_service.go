@@ -9,6 +9,7 @@ import (
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/dialoglanguage"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
@@ -20,13 +21,14 @@ type ServiceConfiguration struct {
 }
 
 type ServerConfiguration struct {
-	Addr              string `json:"addr"`
-	ReadHeaderTimeout string `json:"readHeaderTimeout"`
-	ReadTimeout       string `json:"readTimeout"`
-	WriteTimeout      string `json:"writeTimeout"`
-	IdleTimeout       string `json:"idleTimeout"`
-	ShutdownTimeout   string `json:"shutdownTimeout"`
-	MaxConcurrentRuns int64  `json:"maxConcurrentRuns"`
+	Addr                  string `json:"addr"`
+	ReadHeaderTimeout     string `json:"readHeaderTimeout"`
+	ReadTimeout           string `json:"readTimeout"`
+	WriteTimeout          string `json:"writeTimeout"`
+	IdleTimeout           string `json:"idleTimeout"`
+	ShutdownTimeout       string `json:"shutdownTimeout"`
+	MaxConcurrentRuns     int64  `json:"maxConcurrentRuns"`
+	DefaultDialogLanguage string `json:"defaultDialogLanguage,omitempty"`
 }
 
 type RepositoryConfiguration struct {
@@ -82,6 +84,10 @@ type UpdateLLMConfigurationCommand struct {
 	Providers                  []UpdateLLMProviderConfiguration `json:"providers"`
 }
 
+type UpdateServerConfigurationCommand struct {
+	DefaultDialogLanguage string `json:"defaultDialogLanguage"`
+}
+
 type UpdateLLMProviderConfiguration struct {
 	ID                string   `json:"id"`
 	Provider          string   `json:"provider,omitempty"`
@@ -132,13 +138,14 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 	})
 	return ServiceConfiguration{
 		Server: ServerConfiguration{
-			Addr:              cfg.Server.Addr,
-			ReadHeaderTimeout: cfg.Server.ReadHeaderTimeout,
-			ReadTimeout:       cfg.Server.ReadTimeout,
-			WriteTimeout:      cfg.Server.WriteTimeout,
-			IdleTimeout:       cfg.Server.IdleTimeout,
-			ShutdownTimeout:   cfg.Server.ShutdownTimeout,
-			MaxConcurrentRuns: cfg.Server.MaxConcurrentRuns,
+			Addr:                  cfg.Server.Addr,
+			ReadHeaderTimeout:     cfg.Server.ReadHeaderTimeout,
+			ReadTimeout:           cfg.Server.ReadTimeout,
+			WriteTimeout:          cfg.Server.WriteTimeout,
+			IdleTimeout:           cfg.Server.IdleTimeout,
+			ShutdownTimeout:       cfg.Server.ShutdownTimeout,
+			MaxConcurrentRuns:     cfg.Server.MaxConcurrentRuns,
+			DefaultDialogLanguage: strings.TrimSpace(cfg.Server.DefaultDialogLanguage),
 		},
 		Repository: RepositoryConfiguration{
 			Backend: cfg.Repository.Backend,
@@ -192,6 +199,28 @@ func DefaultLLMProviderTemplates() []LLMProviderTemplate {
 			ChatCompletions: true,
 		},
 	}
+}
+
+func UpdateServerConfiguration(cmd UpdateServerConfigurationCommand) (ServiceConfiguration, error) {
+	cfg, err := workorchconfig.Current()
+	if err != nil {
+		return ServiceConfiguration{}, err
+	}
+	language := strings.TrimSpace(cmd.DefaultDialogLanguage)
+	if language != "" {
+		if !dialoglanguage.IsSupported(language) {
+			return ServiceConfiguration{}, fmt.Errorf("%w: defaultDialogLanguage only supports zh-CN or en", common.ErrInvalidArgument)
+		}
+		language = dialoglanguage.NormalizeTag(language)
+	}
+	cfg.Server.DefaultDialogLanguage = language
+	if err := workorchconfig.Save(cfg); err != nil {
+		return ServiceConfiguration{}, err
+	}
+	if err := workorchconfig.Reload(); err != nil {
+		return ServiceConfiguration{}, err
+	}
+	return ReadServiceConfiguration()
 }
 
 func UpdateLLMConfiguration(cmd UpdateLLMConfigurationCommand) (ServiceConfiguration, error) {
