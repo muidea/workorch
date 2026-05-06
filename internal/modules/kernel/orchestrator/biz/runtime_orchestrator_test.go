@@ -4796,9 +4796,9 @@ func TestRuntimeOrchestrator_StartRunPersistsRuntimeMemoryWrites(t *testing.T) {
 		"summary": "Run completed with targeted tests",
 		"memoryWrites": []map[string]any{
 			{
-				"memoryType": "execution_lesson",
-				"summary":    "Prefer running targeted tests before full suite",
-				"content":    "Targeted tests made the feedback loop shorter.",
+				"memoryType": "user_preference",
+				"summary":    "Default test command preference: go test ./...",
+				"content":    "Prefer go test ./... for final verification.",
 				"tags":       []string{"testing", "workflow"},
 			},
 		},
@@ -4839,11 +4839,11 @@ func TestRuntimeOrchestrator_StartRunPersistsRuntimeMemoryWrites(t *testing.T) {
 		t.Fatalf("list memory items: %v", err)
 	}
 	if len(items) != 2 {
-		t.Fatalf("memory items = %+v, want execution lesson and run summary", items)
+		t.Fatalf("memory items = %+v, want user preference and run summary", items)
 	}
-	if !hasMemoryItem(items, runID, "execution_lesson", "Prefer running targeted tests before full suite") ||
+	if !hasMemoryItem(items, runID, "user_preference", "Default test command preference: go test ./...") ||
 		!hasMemoryItem(items, runID, "run_summary", "Run completed with targeted tests") {
-		t.Fatalf("memory items = %+v, want persisted execution lesson and run summary", items)
+		t.Fatalf("memory items = %+v, want persisted user preference and run summary", items)
 	}
 	step, err := stepRepo.Get(ctx, common.StepID("run-memory-write/step-1"))
 	if err != nil {
@@ -4906,14 +4906,15 @@ func TestRuntimeOrchestrator_RuntimeMemoryWritesConcurrently(t *testing.T) {
 		"summary": "parallel memory write summary",
 		stepOutputKeyMemoryWrites: []map[string]any{
 			{
-				"memoryType": "execution_lesson",
-				"summary":    "first memory write",
+				"memoryType": "user_preference",
+				"summary":    "first default preference",
 				"content":    "first content",
 			},
 			{
 				"memoryType": "project_context",
-				"summary":    "second memory write",
+				"summary":    "second confirmed project convention",
 				"content":    "second content",
+				"tags":       []string{"confirmed"},
 			},
 		},
 	}
@@ -4970,6 +4971,81 @@ func TestRuntimeOrchestrator_RuntimeMemoryWritesConcurrently(t *testing.T) {
 	}
 	if len(items) != 3 {
 		t.Fatalf("memory items = %+v, want 3", items)
+	}
+}
+
+func TestRuntimeOrchestrator_FiltersDisallowedRuntimeMemoryWrites(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	memoryRepo := memory.NewMemoryItemRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{
+		"status": "completed",
+		"stage":  "runtime_step",
+		"memoryWrites": []map[string]any{
+			{
+				"memoryType": "decision",
+				"summary":    "approval transcript",
+				"content":    "single approval raw text",
+			},
+			{
+				"memoryType": "project_context",
+				"summary":    "confirmed workspace convention",
+				"content":    "Prefer workspace-local commands.",
+				"tags":       []string{"confirmed"},
+			},
+			{
+				"memoryType": "user_preference",
+				"summary":    "deployment secret",
+				"content":    "api key: should not persist",
+			},
+		},
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		resolutionRepo,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          memory.NewToolCallRepository(),
+			Patches:            memory.NewPatchRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+			MemoryItems:        memoryRepo,
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-memory-filter")
+	runID := common.RunID("run-memory-filter")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	items, err := memoryRepo.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("list memory items: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("memory items = %+v, want only one allowed write", items)
+	}
+	if items[0].MemoryType != memorycommon.MemoryTypeProjectContext ||
+		items[0].Summary != "confirmed workspace convention" {
+		t.Fatalf("memory item = %+v, want persisted project context only", items[0])
 	}
 }
 

@@ -17,22 +17,23 @@ type Service = orchestratorservice.Service
 type RuntimeAdapter = orchestratorbiz.RuntimeAdapter
 
 type Dependencies struct {
-	Runtime            orchestratorbiz.RuntimeAdapter
-	Runs               repository.RunRepository
-	Steps              repository.StepRepository
-	Workspaces         repository.WorkspaceRepository
-	Tickets            repository.DecisionTicketRepository
-	Resolutions        repository.DecisionResolutionRepository
-	Approvals          repository.ApprovalRepository
-	Results            repository.ResultRepository
-	Artifacts          repository.ArtifactRepository
-	ToolCalls          repository.ToolCallRepository
-	Patches            repository.PatchRepository
-	ValidationResults  repository.ValidationResultRepository
-	RuntimeCheckpoints repository.RuntimeCheckpointRepository
-	MemoryItems        repository.MemoryItemRepository
-	MemoryRecallTraces repository.MemoryRecallTraceRepository
-	EventHub           events.Hub
+	Runtime              orchestratorbiz.RuntimeAdapter
+	Runs                 repository.RunRepository
+	Steps                repository.StepRepository
+	Workspaces           repository.WorkspaceRepository
+	Tickets              repository.DecisionTicketRepository
+	Resolutions          repository.DecisionResolutionRepository
+	Approvals            repository.ApprovalRepository
+	Results              repository.ResultRepository
+	Artifacts            repository.ArtifactRepository
+	ToolCalls            repository.ToolCallRepository
+	Patches              repository.PatchRepository
+	ValidationResults    repository.ValidationResultRepository
+	RuntimeCheckpoints   repository.RuntimeCheckpointRepository
+	MemoryItems          repository.MemoryItemRepository
+	MemoryRecallTraces   repository.MemoryRecallTraceRepository
+	AutoGovernanceTraces repository.AutoGovernanceTraceRepository
+	EventHub             events.Hub
 }
 
 type Module struct {
@@ -59,7 +60,8 @@ func (m *Module) Setup(deps Dependencies) error {
 		deps.ValidationResults == nil ||
 		deps.RuntimeCheckpoints == nil ||
 		deps.MemoryItems == nil ||
-		deps.MemoryRecallTraces == nil {
+		deps.MemoryRecallTraces == nil ||
+		deps.AutoGovernanceTraces == nil {
 		return common.ErrInvalidArgument
 	}
 	m.bizPtr = orchestratorbiz.NewRuntimeOrchestratorWithResolutionsAndEvidence(
@@ -71,14 +73,15 @@ func (m *Module) Setup(deps Dependencies) error {
 		deps.Resolutions,
 		deps.Approvals,
 		orchestratorbiz.RuntimeEvidenceRepositories{
-			Results:            deps.Results,
-			Artifacts:          deps.Artifacts,
-			ToolCalls:          deps.ToolCalls,
-			Patches:            deps.Patches,
-			ValidationResults:  deps.ValidationResults,
-			RuntimeCheckpoints: deps.RuntimeCheckpoints,
-			MemoryItems:        deps.MemoryItems,
-			MemoryRecallTraces: deps.MemoryRecallTraces,
+			Results:              deps.Results,
+			Artifacts:            deps.Artifacts,
+			ToolCalls:            deps.ToolCalls,
+			Patches:              deps.Patches,
+			ValidationResults:    deps.ValidationResults,
+			RuntimeCheckpoints:   deps.RuntimeCheckpoints,
+			MemoryItems:          deps.MemoryItems,
+			MemoryRecallTraces:   deps.MemoryRecallTraces,
+			AutoGovernanceTraces: deps.AutoGovernanceTraces,
 		},
 		deps.EventHub,
 	)

@@ -6,6 +6,9 @@ func TestValidateWorkorchEventVersionUsesTopicMatrix(t *testing.T) {
 	if !ValidateWorkorchEventVersion(TopicRunStateChanged, WorkorchEventVersion) {
 		t.Fatalf("ValidateWorkorchEventVersion should accept exact current version")
 	}
+	if !ValidateWorkorchEventVersion(TopicGovernanceAutoEvaluated, WorkorchEventVersion) {
+		t.Fatalf("ValidateWorkorchEventVersion should include governance auto topics")
+	}
 }
 
 func TestValidateWorkorchEventVersionRejectsUnknownTopic(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
+	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
@@ -65,6 +66,55 @@ func TestReadApprovalWithBackendReturnsRejectedApproval(t *testing.T) {
 	}
 	if item.ID != started.BlockingApprovalID || item.State != "rejected" {
 		t.Fatalf("approval = %+v, want rejected approval", item)
+	}
+}
+
+func TestReadApprovalWithBackendIncludesAutoGovernanceSummary(t *testing.T) {
+	dataRoot := t.TempDir()
+	workspaceID := "ws-approval-autogov"
+	runID := "run-approval-autogov"
+	started := prepareApprovalRun(t, dataRoot, workspaceID, runID)
+
+	session, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("new runtime session: %v", err)
+	}
+	ctx := context.Background()
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("session exports: %v", err)
+	}
+	if err := exports.Repositories.AutoGovernanceTraces.Upsert(ctx, &governancemodel.AutoGovernanceTrace{
+		ID:                common.AutoGovernanceTraceID("trace-approval-autogov"),
+		WorkspaceID:       common.WorkspaceID(workspaceID),
+		RunID:             common.RunID(runID),
+		ItemType:          "approval",
+		ItemID:            started.BlockingApprovalID,
+		Action:            "approve",
+		RiskLevel:         "L1",
+		Confidence:        0.95,
+		PolicyMatched:     "read_only",
+		Reason:            "action classified as read-only",
+		EvidenceRefs:      []string{"step-1"},
+		PromptFingerprint: "fingerprint-a",
+		Status:            "resolved",
+		OccurredAt:        "2026-05-06T10:10:00Z",
+	}); err != nil {
+		t.Fatalf("upsert auto governance trace: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
+
+	item, err := ReadApprovalWithBackend(ctx, "file", dataRoot, started.BlockingApprovalID)
+	if err != nil {
+		t.Fatalf("ReadApprovalWithBackend: %v", err)
+	}
+	if item.AutoGovernance == nil ||
+		item.AutoGovernance.Action != "approve" ||
+		item.AutoGovernance.Status != "resolved" ||
+		item.AutoGovernance.PolicyMatched != "read_only" {
+		t.Fatalf("auto governance summary = %+v, want resolved approval summary", item.AutoGovernance)
 	}
 }
 

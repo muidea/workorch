@@ -22,6 +22,7 @@ type Config struct {
 	Runtime      RuntimeConfig    `json:"runtime" toml:"runtime"`
 	LLM          LLMConfig        `json:"llm" toml:"llm"`
 	WebSearch    WebSearchConfig  `json:"webSearch" toml:"webSearch"`
+	Governance   GovernanceConfig `json:"governance" toml:"governance"`
 }
 
 type ServerConfig struct {
@@ -82,6 +83,32 @@ type WebSearchProviderConfig struct {
 	Disabled       *bool             `json:"disabled" toml:"disabled"`
 }
 
+type GovernanceConfig struct {
+	AutoTicket   GovernanceAutoTicketConfig   `json:"autoTicket" toml:"autoTicket"`
+	AutoApproval GovernanceAutoApprovalConfig `json:"autoApproval" toml:"autoApproval"`
+	Budget       GovernanceBudgetConfig       `json:"budget" toml:"budget"`
+}
+
+type GovernanceAutoTicketConfig struct {
+	Enabled       *bool   `json:"enabled" toml:"enabled"`
+	MinConfidence float64 `json:"minConfidence" toml:"minConfidence"`
+	MaxPerRun     int     `json:"maxPerRun" toml:"maxPerRun"`
+}
+
+type GovernanceAutoApprovalConfig struct {
+	Enabled             *bool    `json:"enabled" toml:"enabled"`
+	MinConfidence       float64  `json:"minConfidence" toml:"minConfidence"`
+	MaxPerRun           int      `json:"maxPerRun" toml:"maxPerRun"`
+	AllowReadOnly       *bool    `json:"allowReadOnly" toml:"allowReadOnly"`
+	AllowWorkspaceWrite *bool    `json:"allowWorkspaceWrite" toml:"allowWorkspaceWrite"`
+	RequireHumanFor     []string `json:"requireHumanFor" toml:"requireHumanFor"`
+}
+
+type GovernanceBudgetConfig struct {
+	MaxConsecutiveFailures int `json:"maxConsecutiveFailures" toml:"maxConsecutiveFailures"`
+	MaxRepeatedSamePrompt  int `json:"maxRepeatedSamePrompt" toml:"maxRepeatedSamePrompt"`
+}
+
 func ConfigureDirectory(configDir string) {
 	configDir = strings.TrimSpace(configDir)
 	if configDir == "" {
@@ -118,6 +145,9 @@ func Current() (Config, error) {
 	if err := loadSection("webSearch", &cfg.WebSearch); err != nil {
 		return Config{}, err
 	}
+	if err := loadSection("governance", &cfg.Governance); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
 }
 
@@ -142,6 +172,9 @@ func Save(next Config) error {
 	}
 	if next.WebSearch.Providers == nil {
 		next.WebSearch.Providers = map[string]WebSearchProviderConfig{}
+	}
+	if next.Governance.AutoApproval.RequireHumanFor == nil {
+		next.Governance.AutoApproval.RequireHumanFor = []string{}
 	}
 	configPath, err := ApplicationConfigPath()
 	if err != nil {

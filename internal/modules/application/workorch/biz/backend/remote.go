@@ -258,7 +258,7 @@ func (b *remoteDecisionBackend) Resolve(ctx context.Context, req ResolveDecision
 	if err != nil {
 		return nil, err
 	}
-	return &DecisionInfo{ID: common.TicketID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State}, nil
+	return &DecisionInfo{ID: common.TicketID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State, AutoGovernance: mapRemoteAutoGovernanceSummary(d.AutoGovernance)}, nil
 }
 func (b *remoteDecisionBackend) BatchResolve(ctx context.Context, ticketIDs []common.TicketID, resolutionType string, payload map[string]any) ([]DecisionInfo, error) {
 	ids := make([]string, len(ticketIDs))
@@ -271,7 +271,7 @@ func (b *remoteDecisionBackend) BatchResolve(ctx context.Context, ticketIDs []co
 	}
 	result := make([]DecisionInfo, 0, len(list))
 	for _, d := range list {
-		result = append(result, DecisionInfo{ID: common.TicketID(d.ID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State})
+		result = append(result, DecisionInfo{ID: common.TicketID(d.ID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State, AutoGovernance: mapRemoteAutoGovernanceSummary(d.AutoGovernance)})
 	}
 	return result, nil
 }
@@ -282,7 +282,7 @@ func (b *remoteDecisionBackend) List(ctx context.Context, wsID common.WorkspaceI
 	}
 	result := make([]DecisionInfo, 0, len(list))
 	for _, d := range list {
-		result = append(result, DecisionInfo{ID: common.TicketID(d.ID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State})
+		result = append(result, DecisionInfo{ID: common.TicketID(d.ID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State, AutoGovernance: mapRemoteAutoGovernanceSummary(d.AutoGovernance)})
 	}
 	return result, nil
 }
@@ -291,7 +291,7 @@ func (b *remoteDecisionBackend) Get(ctx context.Context, id common.TicketID) (*D
 	if err != nil {
 		return nil, err
 	}
-	return &DecisionInfo{ID: common.TicketID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State}, nil
+	return &DecisionInfo{ID: common.TicketID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State, AutoGovernance: mapRemoteAutoGovernanceSummary(d.AutoGovernance)}, nil
 }
 
 // ── Remote Approval ──
@@ -303,14 +303,14 @@ func (b *remoteApprovalBackend) Approve(ctx context.Context, id common.ApprovalI
 	if err != nil {
 		return nil, err
 	}
-	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State}, nil
+	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
 }
 func (b *remoteApprovalBackend) Reject(ctx context.Context, id common.ApprovalID) (*ApprovalInfo, error) {
 	a, err := b.cl.Reject(ctx, string(id))
 	if err != nil {
 		return nil, err
 	}
-	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State}, nil
+	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
 }
 func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, ids []common.ApprovalID, action string) ([]ApprovalInfo, error) {
 	_idStrings := make([]string, len(ids))
@@ -323,7 +323,7 @@ func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, ids []common.A
 	}
 	result := make([]ApprovalInfo, 0, len(list))
 	for _, a := range list {
-		result = append(result, ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State})
+		result = append(result, ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)})
 	}
 	return result, nil
 }
@@ -334,7 +334,7 @@ func (b *remoteApprovalBackend) List(ctx context.Context, wsID common.WorkspaceI
 	}
 	result := make([]ApprovalInfo, 0, len(list))
 	for _, a := range list {
-		result = append(result, ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State})
+		result = append(result, ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)})
 	}
 	return result, nil
 }
@@ -343,7 +343,29 @@ func (b *remoteApprovalBackend) Get(ctx context.Context, id common.ApprovalID) (
 	if err != nil {
 		return nil, err
 	}
-	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State}, nil
+	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
+}
+
+func mapRemoteAutoGovernanceSummary(summary *client.AutoGovernanceSummary) *AutoGovernanceSummaryInfo {
+	if summary == nil {
+		return nil
+	}
+	ret := &AutoGovernanceSummaryInfo{
+		TraceID:           summary.TraceID,
+		Action:            summary.Action,
+		Status:            summary.Status,
+		RiskLevel:         summary.RiskLevel,
+		PolicyMatched:     summary.PolicyMatched,
+		PolicyBlocked:     summary.PolicyBlocked,
+		Confidence:        summary.Confidence,
+		Reason:            summary.Reason,
+		PromptFingerprint: summary.PromptFingerprint,
+		OccurredAt:        summary.OccurredAt,
+	}
+	if len(summary.EvidenceRefs) > 0 {
+		ret.EvidenceRefs = append([]string(nil), summary.EvidenceRefs...)
+	}
+	return ret
 }
 
 // ── Stub remote backends ──

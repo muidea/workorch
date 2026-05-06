@@ -295,6 +295,7 @@ type DecisionInfo struct {
 	Question       string
 	State          string
 	ResolutionType string
+	AutoGovernance *AutoGovernanceSummaryInfo
 }
 
 type ResolveDecisionRequest struct {
@@ -313,13 +314,28 @@ type DecisionBackend interface {
 // ── Approval ──
 
 type ApprovalInfo struct {
-	ID          common.ApprovalID
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	Reason      string
-	Action      string
-	Context     map[string]any
-	State       string
+	ID             common.ApprovalID
+	WorkspaceID    common.WorkspaceID
+	RunID          common.RunID
+	Reason         string
+	Action         string
+	Context        map[string]any
+	State          string
+	AutoGovernance *AutoGovernanceSummaryInfo
+}
+
+type AutoGovernanceSummaryInfo struct {
+	TraceID           string
+	Action            string
+	Status            string
+	RiskLevel         string
+	PolicyMatched     string
+	PolicyBlocked     string
+	Confidence        float64
+	Reason            string
+	EvidenceRefs      []string
+	PromptFingerprint string
+	OccurredAt        string
 }
 
 type ApprovalBackend interface {
@@ -501,6 +517,10 @@ const (
 	EventPatchApplied          EventType = "patch/applied"
 	EventPatchFailed           EventType = "patch/failed"
 	EventPatchReverted         EventType = "patch/reverted"
+	EventGovernanceEvaluated   EventType = "governance/auto/evaluated"
+	EventGovernanceResolved    EventType = "governance/auto/resolved"
+	EventGovernanceEscalated   EventType = "governance/auto/escalated"
+	EventGovernanceBlocked     EventType = "governance/auto/blocked"
 )
 
 type Event struct {

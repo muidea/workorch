@@ -13,18 +13,19 @@ import (
 )
 
 type Decision struct {
-	ID                string         `json:"id"`
-	WorkspaceID       string         `json:"workspaceId"`
-	RunID             string         `json:"runId"`
-	StepID            string         `json:"stepId,omitempty"`
-	Reason            string         `json:"reason"`
-	DecisionKind      string         `json:"decisionKind,omitempty"`
-	Question          string         `json:"question,omitempty"`
-	Context           map[string]any `json:"context,omitempty"`
-	State             string         `json:"state"`
-	ResolutionID      string         `json:"resolutionId,omitempty"`
-	ResolutionType    string         `json:"resolutionType,omitempty"`
-	ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
+	ID                string                 `json:"id"`
+	WorkspaceID       string                 `json:"workspaceId"`
+	RunID             string                 `json:"runId"`
+	StepID            string                 `json:"stepId,omitempty"`
+	Reason            string                 `json:"reason"`
+	DecisionKind      string                 `json:"decisionKind,omitempty"`
+	Question          string                 `json:"question,omitempty"`
+	Context           map[string]any         `json:"context,omitempty"`
+	State             string                 `json:"state"`
+	ResolutionID      string                 `json:"resolutionId,omitempty"`
+	ResolutionType    string                 `json:"resolutionType,omitempty"`
+	ResolutionPayload map[string]any         `json:"resolutionPayload,omitempty"`
+	AutoGovernance    *AutoGovernanceSummary `json:"autoGovernance,omitempty"`
 }
 
 type ResolveDecisionCommand struct {
@@ -43,6 +44,7 @@ func ReadDecisionWithSession(ctx context.Context, session *RuntimeSession, ticke
 	if err != nil {
 		return Decision{}, err
 	}
+	traces := autoGovernanceTraceRepositoryFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
 	item, err := tickets.Get(ctx, common.TicketID(ticketID))
@@ -53,7 +55,11 @@ func ReadDecisionWithSession(ctx context.Context, session *RuntimeSession, ticke
 	if err != nil {
 		return Decision{}, err
 	}
-	return mapDecision(item, resolution), nil
+	autoGovernance, err := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "ticket", string(item.ID))
+	if err != nil {
+		return Decision{}, err
+	}
+	return mapDecision(item, resolution, autoGovernance), nil
 }
 
 func ReadDecisionWithBackend(ctx context.Context, backend string, dataRoot string, ticketID string) (Decision, error) {
@@ -77,6 +83,7 @@ func ListDecisionsWithSession(ctx context.Context, session *RuntimeSession, work
 	if err != nil {
 		return nil, err
 	}
+	traces := autoGovernanceTraceRepositoryFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
 	items, err := tickets.List(ctx)
@@ -114,7 +121,11 @@ func ListDecisionsWithSession(ctx context.Context, session *RuntimeSession, work
 		if r.err != nil {
 			return nil, r.err
 		}
-		ret = append(ret, mapDecision(r.item, r.resolution))
+		autoGovernance, autoErr := latestAutoGovernanceSummary(ctx, traces, r.item.WorkspaceID, r.item.RunID, "ticket", string(r.item.ID))
+		if autoErr != nil {
+			return nil, autoErr
+		}
+		ret = append(ret, mapDecision(r.item, r.resolution, autoGovernance))
 	}
 	return ret, nil
 }
@@ -140,6 +151,7 @@ func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 	if err != nil {
 		return Decision{}, err
 	}
+	traces := autoGovernanceTraceRepositoryFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
 	if cmd.ResolutionType == "" {
@@ -159,7 +171,11 @@ func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 		return Decision{}, err
 	}
 
-	return mapDecision(item, resolution), nil
+	autoGovernance, err := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "ticket", string(item.ID))
+	if err != nil {
+		return Decision{}, err
+	}
+	return mapDecision(item, resolution, autoGovernance), nil
 }
 
 func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSession, cmd BatchResolveDecisionCommand) (ret []Decision, err error) {
@@ -167,6 +183,7 @@ func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSessi
 	if err != nil {
 		return nil, err
 	}
+	traces := autoGovernanceTraceRepositoryFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
 	resolutionType := cmd.ResolutionType
@@ -220,7 +237,11 @@ func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSessi
 		if err != nil {
 			return nil, err
 		}
-		ret = append(ret, mapDecision(item, resolution))
+		autoGovernance, autoErr := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "ticket", string(item.ID))
+		if autoErr != nil {
+			return nil, autoErr
+		}
+		ret = append(ret, mapDecision(item, resolution, autoGovernance))
 	}
 	return ret, nil
 }
@@ -282,20 +303,21 @@ func resolutionForTicket(ctx context.Context, resolutions repository.DecisionRes
 	return resolution, nil
 }
 
-func mapDecision(item *decisionmodel.Ticket, resolution *decisionmodel.Resolution) Decision {
+func mapDecision(item *decisionmodel.Ticket, resolution *decisionmodel.Resolution, autoGovernance *AutoGovernanceSummary) Decision {
 	if item == nil {
 		return Decision{}
 	}
 	ret := Decision{
-		ID:           string(item.ID),
-		WorkspaceID:  string(item.WorkspaceID),
-		RunID:        string(item.RunID),
-		StepID:       string(item.StepID),
-		Reason:       item.Reason,
-		DecisionKind: item.DecisionKind,
-		Question:     item.Question,
-		Context:      cloneDecisionPayload(item.Context),
-		State:        string(item.State),
+		ID:             string(item.ID),
+		WorkspaceID:    string(item.WorkspaceID),
+		RunID:          string(item.RunID),
+		StepID:         string(item.StepID),
+		Reason:         item.Reason,
+		DecisionKind:   item.DecisionKind,
+		Question:       item.Question,
+		Context:        cloneDecisionPayload(item.Context),
+		State:          string(item.State),
+		AutoGovernance: autoGovernance,
 	}
 	if resolution != nil {
 		ret.ResolutionID = string(resolution.ID)

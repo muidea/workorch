@@ -1225,6 +1225,51 @@ func TestModelMemoryRecallEventRefreshesContext(t *testing.T) {
 	}
 }
 
+func TestModelGovernanceResolvedEventShowsCompactStatus(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	m.activeRunID = "run-a"
+
+	next, cmd := m.Update(BackendEventMsg{Event: backend.Event{
+		Type:        backend.EventGovernanceResolved,
+		WorkspaceID: "ws-a",
+		RunID:       "run-a",
+		Payload: map[string]any{
+			"itemType": "approval",
+			"action":   "approve",
+			"status":   "resolved",
+			"risk":     "L1",
+		},
+	}})
+	m = asModel(next)
+	_ = cmd
+	if m.progressText != "Auto governance resolved: approval/approve (L1)" {
+		t.Fatalf("progress text = %q, want compact governance resolved status", m.progressText)
+	}
+}
+
+func TestModelGovernanceEscalatedEventRefreshesBlockers(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	m.activeRunID = "run-a"
+
+	next, cmd := m.Update(BackendEventMsg{Event: backend.Event{
+		Type:        backend.EventGovernanceEscalated,
+		WorkspaceID: "ws-a",
+		RunID:       "run-a",
+		Payload: map[string]any{
+			"itemType": "ticket",
+			"action":   "escalate",
+			"status":   "escalated",
+		},
+	}})
+	m = asModel(next)
+	_ = cmd
+	if m.progressText != "Auto governance escalated: ticket/escalate" {
+		t.Fatalf("progress text = %q, want compact governance escalated status", m.progressText)
+	}
+}
+
 func TestModelWorkspaceContextPrefersFinalSummaryArtifactOutput(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.activeWorkspaceID = "ws-a"

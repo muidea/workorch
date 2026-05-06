@@ -864,6 +864,7 @@ export type Decision = {
   resolutionId?: string;
   resolutionType?: string;
   resolutionPayload?: Record<string, unknown>;
+  autoGovernance?: AutoGovernanceSummary;
 };
 
 export type Approval = {
@@ -873,4 +874,19 @@ export type Approval = {
   stepId?: string;
   reason: string;
   state: string;
+  autoGovernance?: AutoGovernanceSummary;
+};
+
+export type AutoGovernanceSummary = {
+  traceId: string;
+  action: string;
+  status: string;
+  riskLevel?: string;
+  policyMatched?: string;
+  policyBlocked?: string;
+  confidence?: number;
+  reason?: string;
+  evidenceRefs?: string[];
+  promptFingerprint?: string;
+  occurredAt?: string;
 };

@@ -18,6 +18,7 @@ type EventRecordID string
 type SoulID string
 type MemoryID string
 type MemoryRecallTraceID string
+type AutoGovernanceTraceID string
 type SkillID string
 type MCPServerID string
 type MCPCapabilityID string

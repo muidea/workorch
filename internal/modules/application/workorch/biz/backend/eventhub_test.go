@@ -240,4 +240,20 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 	if approval.Type != EventApprovalCreated || approval.Payload["approvalId"] != "approval-1" {
 		t.Fatalf("approval event = %+v, want approvalId from subject", approval)
 	}
+
+	governance := convertEnvelope(events.Envelope{
+		Topic:       events.TopicGovernanceAutoResolved,
+		SubjectID:   "trace-1",
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload: map[string]any{
+			"itemType": "approval",
+			"itemId":   "approval-1",
+			"action":   "approve",
+			"status":   "resolved",
+		},
+	})
+	if governance.Type != EventGovernanceResolved || governance.Payload["traceId"] != "trace-1" {
+		t.Fatalf("governance event = %+v, want governance resolved with trace id", governance)
+	}
 }

@@ -1141,6 +1141,16 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.progress = progressRunning
 		m.progressText = "Approval resolved; resuming run"
 		m.markApprovalResolved(common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ID", "id", events.PayloadKeyBlockingApprovalID)))
+	case backend.EventGovernanceResolved:
+		m.progressText = governanceProgressText("resolved", evt.Payload)
+	case backend.EventGovernanceEscalated:
+		m.progressText = governanceProgressText("escalated", evt.Payload)
+		return m.fetchActiveBlockerDetails()
+	case backend.EventGovernanceBlocked:
+		m.progressText = governanceProgressText("blocked", evt.Payload)
+		return m.fetchActiveBlockerDetails()
+	case backend.EventGovernanceEvaluated:
+		m.progressText = governanceProgressText("evaluated", evt.Payload)
 	case backend.EventResultAccepted:
 		m.result = firstPayloadString(evt.Payload, "summary", "Summary", events.PayloadKeySummary)
 		m.artifacts = artifactPayloadStrings(evt.Payload)
@@ -1277,6 +1287,27 @@ func workspaceLabel(ws backend.WorkspaceInfo) string {
 		return name + " (" + shortID(string(ws.ID)) + ")"
 	}
 	return shortID(string(ws.ID))
+}
+
+func governanceProgressText(fallbackStatus string, payload map[string]any) string {
+	itemType := strings.TrimSpace(firstPayloadString(payload, events.PayloadKeyItemType, "itemType", "ItemType"))
+	action := strings.TrimSpace(firstPayloadString(payload, events.PayloadKeyAction, "action", "Action"))
+	status := strings.TrimSpace(firstPayloadString(payload, events.PayloadKeyStatus, "status", "Status"))
+	risk := strings.TrimSpace(firstPayloadString(payload, events.PayloadKeyRisk, "risk", "Risk"))
+	if status == "" {
+		status = fallbackStatus
+	}
+	if itemType == "" {
+		itemType = "item"
+	}
+	if action == "" {
+		action = "process"
+	}
+	base := fmt.Sprintf("Auto governance %s: %s/%s", status, itemType, action)
+	if risk != "" {
+		base += " (" + risk + ")"
+	}
+	return base
 }
 
 func workspaceName(ws backend.WorkspaceInfo) string {
@@ -1971,6 +2002,9 @@ func mergeDecisionInfo(existing backend.DecisionInfo, next backend.DecisionInfo)
 	if next.ResolutionType != "" {
 		existing.ResolutionType = next.ResolutionType
 	}
+	if next.AutoGovernance != nil {
+		existing.AutoGovernance = next.AutoGovernance
+	}
 	return existing
 }
 
@@ -1992,6 +2026,9 @@ func mergeApprovalInfo(existing backend.ApprovalInfo, next backend.ApprovalInfo)
 	}
 	if next.State != "" {
 		existing.State = next.State
+	}
+	if next.AutoGovernance != nil {
+		existing.AutoGovernance = next.AutoGovernance
 	}
 	return existing
 }

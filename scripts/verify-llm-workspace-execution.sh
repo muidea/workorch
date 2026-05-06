@@ -98,10 +98,10 @@ def decision_payload(request):
             "thoughtSummary": "Decision information provided; DoD is now satisfied.",
             "completionState": "completed",
             "memoryWrites": [{
-                "memoryType": "decision",
-                "summary": "Operator provided missing implementation direction.",
-                "content": "Decision ticket was resolved through the LLM acceptance script.",
-                "tags": ["decision", "acceptance"]
+                "memoryType": "project_context",
+                "summary": "Confirmed implementation convention after decision.",
+                "content": "Adopted implementation convention from resolved decision.",
+                "tags": ["confirmed", "acceptance"]
             }],
             "dodAssessment": {
                 "satisfied": True,
@@ -131,10 +131,10 @@ def decision_payload(request):
             "thoughtSummary": "Happy path completed with evidence.",
             "completionState": "completed",
             "memoryWrites": [{
-                "memoryType": "execution_lesson",
-                "summary": "LLM happy path acceptance produced reusable workspace memory.",
-                "content": "The first LLM-driven run completed and wrote memory for future recall.",
-                "tags": ["llm", "happy-path"]
+                "memoryType": "user_preference",
+                "summary": "Default verification preference: use go test ./...",
+                "content": "Operator preference is to use go test ./... as default verification command.",
+                "tags": ["preference", "happy-path"]
             }],
             "dodAssessment": {
                 "satisfied": True,
@@ -554,6 +554,16 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory" -H
 grep "\"id\": \"$MEMORY_ID\"" "$TMP_DIR/memory-seed.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" | grep "\"$MEMORY_ID\"" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id&q=Seeded" | grep "\"$MEMORY_ID\"" >/dev/null
+if curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory" -H 'Content-Type: application/json' \
+  -d '{"memoryId":"memory-invalid-user-run-summary-'"$VERIFY_SUFFIX"'","sourceType":"user","memoryType":"run_summary","summary":"should be rejected"}' >"$TMP_DIR/memory-invalid-user.json" 2>/dev/null; then
+  echo "expected user run_summary memory write to be rejected" >&2
+  exit 1
+fi
+if curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory" -H 'Content-Type: application/json' \
+  -d '{"memoryId":"memory-invalid-run-decision-'"$VERIFY_SUFFIX"'","sourceType":"run","sourceRef":"run-invalid-'"$VERIFY_SUFFIX"'","memoryType":"decision","summary":"single approval raw text","content":"approval transcript"}' >"$TMP_DIR/memory-invalid-run.json" 2>/dev/null; then
+  echo "expected runtime decision memory write to be rejected" >&2
+  exit 1
+fi
 
 activate_workspace_execution "$TMP_DIR/happy-activation.json"
 grep '"state": "completed"' "$TMP_DIR/happy-activation.json" >/dev/null
@@ -570,7 +580,7 @@ curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id/observability" >"$TMP_DI
 grep '"terminal": true' "$TMP_DIR/happy-observability.json" >/dev/null
 assert_run_recovery_read_models "$happy_run_id" "happy" "completed"
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DIR/memory-after-happy.json"
-grep 'LLM happy path acceptance produced reusable workspace memory' "$TMP_DIR/memory-after-happy.json" >/dev/null
+grep 'Default verification preference: use go test ./...' "$TMP_DIR/memory-after-happy.json" >/dev/null
 
 activate_workspace_execution "$TMP_DIR/decision-activation.json"
 grep '"state": "blocked_on_decision"' "$TMP_DIR/decision-activation.json" >/dev/null
@@ -586,6 +596,8 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve" -H 
 wait_run_state "$decision_run_id" "completed" "$TMP_DIR/decision-after-resolve-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id/observability" | grep '"terminal": true' >/dev/null
 assert_run_recovery_read_models "$decision_run_id" "decision" "completed"
+curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DIR/memory-after-decision.json"
+grep 'Confirmed implementation convention after decision.' "$TMP_DIR/memory-after-decision.json" >/dev/null
 
 activate_workspace_execution "$TMP_DIR/approval-activation.json"
 grep '"state": "blocked_on_approval"' "$TMP_DIR/approval-activation.json" >/dev/null

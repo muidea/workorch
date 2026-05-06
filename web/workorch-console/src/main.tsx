@@ -2047,6 +2047,7 @@ function DecisionQueuePage() {
     { title: '类型', dataIndex: 'decisionKind' },
     { title: '问题', dataIndex: 'question', ellipsis: true, render: (_, item) => boundedParagraph(item.question, { rows: 2 }) },
     { title: '原因', dataIndex: 'reason', ellipsis: true },
+    { title: '自动治理', dataIndex: 'autoGovernance', render: (_, item) => item.autoGovernance ? stateTag(`${item.autoGovernance.status}:${item.autoGovernance.action}`) : '-' },
     { title: '解决方式', dataIndex: 'resolutionType', width: 140, render: (_, item) => item.resolutionType ? stateTag(item.resolutionType) : '-' },
     { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
     {
@@ -2096,6 +2097,9 @@ function DecisionQueuePage() {
               </ProCard>
               <ProCard title="解决内容" colSpan={{ xs: 24, lg: 12 }}>
                 <pre className="json-panel json-panel-large">{compactJSON(item.resolutionPayload)}</pre>
+              </ProCard>
+              <ProCard title="自动治理摘要" colSpan={{ xs: 24, lg: 12 }}>
+                <pre className="json-panel json-panel-large">{compactJSON(item.autoGovernance)}</pre>
               </ProCard>
             </ProCard>
           )
@@ -2246,6 +2250,7 @@ function ApprovalQueuePage() {
     { title: '运行', dataIndex: 'runId', copyable: true },
     { title: '步骤', dataIndex: 'stepId', copyable: true, ellipsis: true },
     { title: '原因', dataIndex: 'reason', ellipsis: true },
+    { title: '自动治理', dataIndex: 'autoGovernance', render: (_, item) => item.autoGovernance ? stateTag(`${item.autoGovernance.status}:${item.autoGovernance.action}`) : '-' },
     { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
     {
       title: '操作',
@@ -2310,6 +2315,8 @@ function ApprovalQueuePage() {
             />
             <Typography.Text type="secondary">已补充的决策信息</Typography.Text>
             <pre className="json-panel">{compactJSON(approvalTarget.relatedDecision?.resolutionPayload)}</pre>
+            <Typography.Text type="secondary">自动治理摘要</Typography.Text>
+            <pre className="json-panel">{compactJSON(approvalTarget.item.autoGovernance)}</pre>
             <Form form={approvalForm} layout="vertical">
               <Form.Item name="operator" label="审批人" rules={[{ required: true, message: '请填写审批人' }]}>
                 <Input />
@@ -3181,30 +3188,54 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
           </ProCard>
           <ProCard gutter={16} wrap className="workorch-section">
             <ProCard title="决策工单（Decision）" colSpan="50%">
-              <ProTable<Decision> rowKey="id" search={false} options={false} pagination={false} columns={[
-                { title: '工单', dataIndex: 'id', copyable: true },
-                { title: '类型', dataIndex: 'decisionKind', width: 150 },
-                { title: '问题', dataIndex: 'question', ellipsis: true, render: (_, item) => boundedParagraph(item.question, { rows: 2 }) },
-                { title: '原因', dataIndex: 'reason', ellipsis: true },
-                { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
-                { title: '解决方式', dataIndex: 'resolutionType' }
-              ]} dataSource={snapshot.decisions ?? []} expandable={{
-                expandedRowRender: (item) => (
-                  <ProCard gutter={16} wrap ghost>
-                    <ProCard title="上下文" colSpan={{ xs: 24, lg: 12 }}><pre className="json-panel json-panel-large">{compactJSON(item.context)}</pre></ProCard>
-                    <ProCard title="解决内容" colSpan={{ xs: 24, lg: 12 }}><pre className="json-panel json-panel-large">{compactJSON(item.resolutionPayload)}</pre></ProCard>
-                  </ProCard>
-                )
-              }} />
+              <ProTable<Decision>
+                rowKey="id"
+                search={false}
+                options={false}
+                pagination={false}
+                columns={[
+                  { title: '工单', dataIndex: 'id', copyable: true },
+                  { title: '类型', dataIndex: 'decisionKind', width: 150 },
+                  { title: '问题', dataIndex: 'question', ellipsis: true, render: (_, item) => boundedParagraph(item.question, { rows: 2 }) },
+                  { title: '原因', dataIndex: 'reason', ellipsis: true },
+                  { title: '自动治理', dataIndex: 'autoGovernance', render: (_, item) => item.autoGovernance ? stateTag(`${item.autoGovernance.status}:${item.autoGovernance.action}`) : '-' },
+                  { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
+                  { title: '解决方式', dataIndex: 'resolutionType' }
+                ]}
+                dataSource={snapshot.decisions ?? []}
+                expandable={{
+                  expandedRowRender: (item) => (
+                    <ProCard gutter={16} wrap ghost>
+                      <ProCard title="上下文" colSpan={{ xs: 24, lg: 12 }}>
+                        <pre className="json-panel json-panel-large">{compactJSON(item.context)}</pre>
+                      </ProCard>
+                      <ProCard title="解决内容" colSpan={{ xs: 24, lg: 12 }}>
+                        <pre className="json-panel json-panel-large">{compactJSON(item.resolutionPayload)}</pre>
+                      </ProCard>
+                      <ProCard title="自动治理摘要" colSpan={{ xs: 24, lg: 12 }}>
+                        <pre className="json-panel json-panel-large">{compactJSON(item.autoGovernance)}</pre>
+                      </ProCard>
+                    </ProCard>
+                  )
+                }}
+              />
             </ProCard>
             <ProCard title="审批工单（Approval）" colSpan="50%">
-              <ProTable<Approval> rowKey="id" search={false} options={false} pagination={false} columns={[
-                { title: '审批', dataIndex: 'id', copyable: true },
-                { title: '运行', dataIndex: 'runId', copyable: true, ellipsis: true },
-                { title: '步骤', dataIndex: 'stepId', copyable: true, ellipsis: true },
-                { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
-                { title: '原因', dataIndex: 'reason' }
-              ]} dataSource={snapshot.approvals ?? []} />
+              <ProTable<Approval>
+                rowKey="id"
+                search={false}
+                options={false}
+                pagination={false}
+                columns={[
+                  { title: '审批', dataIndex: 'id', copyable: true },
+                  { title: '运行', dataIndex: 'runId', copyable: true, ellipsis: true },
+                  { title: '步骤', dataIndex: 'stepId', copyable: true, ellipsis: true },
+                  { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
+                  { title: '原因', dataIndex: 'reason' },
+                  { title: '自动治理', dataIndex: 'autoGovernance', render: (_, item) => item.autoGovernance ? stateTag(`${item.autoGovernance.status}:${item.autoGovernance.action}`) : '-' }
+                ]}
+                dataSource={snapshot.approvals ?? []}
+              />
             </ProCard>
           </ProCard>
           <ProCard title="运行过程与证据" className="workorch-section" extra={runSnapshot ? <Tag>{evidenceCount(runSnapshot)} 条证据</Tag> : null}>

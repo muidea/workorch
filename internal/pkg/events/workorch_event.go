@@ -74,6 +74,11 @@ type MemoryRecallEvent struct {
 	Data     MemoryRecallPayloadData
 }
 
+type AutoGovernanceEvent struct {
+	envelope Envelope
+	Data     AutoGovernancePayloadData
+}
+
 var workorchTopics = []string{
 	TopicWorkspaceCreated,
 	TopicWorkspaceStateChanged,
@@ -98,6 +103,10 @@ var workorchTopics = []string{
 	TopicMemoryUpdated,
 	TopicMemoryDeleted,
 	TopicMemoryRecallRecorded,
+	TopicGovernanceAutoEvaluated,
+	TopicGovernanceAutoResolved,
+	TopicGovernanceAutoEscalated,
+	TopicGovernanceAutoBlocked,
 }
 
 func WorkorchTopics() []string {
@@ -201,6 +210,12 @@ func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 		return event, true
 	case TopicMemoryRecallRecorded:
 		event, ok := DecodeMemoryRecallEvent(envelope)
+		if !ok {
+			return nil, false
+		}
+		return event, true
+	case TopicGovernanceAutoEvaluated, TopicGovernanceAutoResolved, TopicGovernanceAutoEscalated, TopicGovernanceAutoBlocked:
+		event, ok := DecodeAutoGovernanceEvent(envelope)
 		if !ok {
 			return nil, false
 		}
@@ -449,6 +464,44 @@ func DecodeMemoryRecallEvent(envelope Envelope) (MemoryRecallEvent, bool) {
 	return MemoryRecallEvent{envelope: envelope, Data: data}, true
 }
 
+func DecodeAutoGovernanceEvent(envelope Envelope) (AutoGovernanceEvent, bool) {
+	switch envelope.Topic {
+	case TopicGovernanceAutoEvaluated, TopicGovernanceAutoResolved, TopicGovernanceAutoEscalated, TopicGovernanceAutoBlocked:
+	default:
+		return AutoGovernanceEvent{}, false
+	}
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
+		return AutoGovernanceEvent{}, false
+	}
+	data, ok := DecodeAutoGovernancePayload(envelope.Payload)
+	if !ok {
+		return AutoGovernanceEvent{}, false
+	}
+	envelope = cloneEnvelope(envelope)
+	envelope.Version = spec.CurrentVersion
+	envelope.Payload = AutoGovernancePayload(
+		data.TraceID,
+		data.ItemType,
+		data.ItemID,
+		data.Action,
+		data.RiskLevel,
+		data.Confidence,
+		data.PolicyMatched,
+		data.PolicyBlocked,
+		data.BudgetBefore,
+		data.BudgetAfter,
+		data.LLMProviderID,
+		data.LLMModel,
+		data.LLMDecisionPreview,
+		data.PromptFingerprint,
+		data.Status,
+		data.Reason,
+		data.EscalationReason,
+	)
+	return AutoGovernanceEvent{envelope: envelope, Data: data}, true
+}
+
 func (e WorkspaceEvent) Envelope() Envelope {
 	return cloneEnvelope(e.envelope)
 }
@@ -542,5 +595,13 @@ func (e MemoryRecallEvent) Envelope() Envelope {
 }
 
 func (e MemoryRecallEvent) Topic() string {
+	return e.envelope.Topic
+}
+
+func (e AutoGovernanceEvent) Envelope() Envelope {
+	return cloneEnvelope(e.envelope)
+}
+
+func (e AutoGovernanceEvent) Topic() string {
 	return e.envelope.Topic
 }

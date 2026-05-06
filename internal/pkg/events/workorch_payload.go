@@ -1,6 +1,10 @@
 package events
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"encoding/json"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+)
 
 const (
 	PayloadKeyTitle              = "title"
@@ -46,6 +50,19 @@ const (
 	PayloadKeyStatus             = "status"
 	PayloadKeyProviderID         = "providerId"
 	PayloadKeyOperation          = "operation"
+	PayloadKeyItemType           = "itemType"
+	PayloadKeyItemID             = "itemId"
+	PayloadKeyConfidenceScore    = "confidence"
+	PayloadKeyPolicyMatched      = "policyMatched"
+	PayloadKeyPolicyBlocked      = "policyBlocked"
+	PayloadKeyBudgetBefore       = "budgetBefore"
+	PayloadKeyBudgetAfter        = "budgetAfter"
+	PayloadKeyLLMProviderID      = "llmProviderId"
+	PayloadKeyLLMModel           = "llmModel"
+	PayloadKeyLLMDecisionPreview = "llmDecisionPreview"
+	PayloadKeyPromptFingerprint  = "promptFingerprint"
+	PayloadKeyResolvedAt         = "resolvedAt"
+	PayloadKeyEscalationReason   = "escalationReason"
 	PayloadKeyRetrievedMemoryIDs = "retrievedMemoryIds"
 	PayloadKeyPatchID            = "patchId"
 	PayloadKeyStepID             = "stepId"
@@ -192,6 +209,26 @@ type MemoryRecallPayloadData struct {
 	Operation          string
 	RetrievedMemoryIDs []common.MemoryID
 	Reason             string
+}
+
+type AutoGovernancePayloadData struct {
+	TraceID            common.AutoGovernanceTraceID
+	ItemType           string
+	ItemID             string
+	Action             string
+	RiskLevel          string
+	Confidence         float64
+	PolicyMatched      string
+	PolicyBlocked      string
+	BudgetBefore       int
+	BudgetAfter        int
+	PromptFingerprint  string
+	LLMProviderID      string
+	LLMModel           string
+	LLMDecisionPreview string
+	Status             string
+	Reason             string
+	EscalationReason   string
 }
 
 func WorkspacePayload(title string, description string, workingDirectory string, state common.WorkspaceState, activeRunID common.RunID) map[string]any {
@@ -460,6 +497,51 @@ func MemoryRecallPayload(traceID common.MemoryRecallTraceID, stage string, sourc
 	}
 	if reason != "" {
 		payload[PayloadKeyReason] = reason
+	}
+	return payload
+}
+
+func AutoGovernancePayload(
+	traceID common.AutoGovernanceTraceID,
+	itemType string,
+	itemID string,
+	action string,
+	riskLevel string,
+	confidence float64,
+	policyMatched string,
+	policyBlocked string,
+	budgetBefore int,
+	budgetAfter int,
+	llmProviderID string,
+	llmModel string,
+	llmDecisionPreview string,
+	promptFingerprint string,
+	status string,
+	reason string,
+	escalationReason string,
+) map[string]any {
+	payload := map[string]any{
+		PayloadKeyTraceID:            string(traceID),
+		PayloadKeyItemType:           itemType,
+		PayloadKeyItemID:             itemID,
+		PayloadKeyAction:             action,
+		PayloadKeyRisk:               riskLevel,
+		PayloadKeyConfidenceScore:    confidence,
+		PayloadKeyPolicyMatched:      policyMatched,
+		PayloadKeyPolicyBlocked:      policyBlocked,
+		PayloadKeyBudgetBefore:       budgetBefore,
+		PayloadKeyBudgetAfter:        budgetAfter,
+		PayloadKeyLLMProviderID:      llmProviderID,
+		PayloadKeyLLMModel:           llmModel,
+		PayloadKeyLLMDecisionPreview: llmDecisionPreview,
+		PayloadKeyPromptFingerprint:  promptFingerprint,
+		PayloadKeyStatus:             status,
+	}
+	if reason != "" {
+		payload[PayloadKeyReason] = reason
+	}
+	if escalationReason != "" {
+		payload[PayloadKeyEscalationReason] = escalationReason
 	}
 	return payload
 }
@@ -922,6 +1004,96 @@ func DecodeMemoryRecallPayload(payload map[string]any) (MemoryRecallPayloadData,
 	}, true
 }
 
+func DecodeAutoGovernancePayload(payload map[string]any) (AutoGovernancePayloadData, bool) {
+	traceID, ok := stringField(payload, PayloadKeyTraceID)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	itemType, ok := stringField(payload, PayloadKeyItemType)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	itemID, ok := stringField(payload, PayloadKeyItemID)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	action, ok := stringField(payload, PayloadKeyAction)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	riskLevel, ok := stringField(payload, PayloadKeyRisk)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	confidence, ok := optionalFloatField(payload, PayloadKeyConfidenceScore)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	policyMatched, ok := optionalStringField(payload, PayloadKeyPolicyMatched)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	policyBlocked, ok := optionalStringField(payload, PayloadKeyPolicyBlocked)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	budgetBefore, ok := optionalIntField(payload, PayloadKeyBudgetBefore)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	budgetAfter, ok := optionalIntField(payload, PayloadKeyBudgetAfter)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	llmProviderID, ok := optionalStringField(payload, PayloadKeyLLMProviderID)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	llmModel, ok := optionalStringField(payload, PayloadKeyLLMModel)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	llmDecisionPreview, ok := optionalStringField(payload, PayloadKeyLLMDecisionPreview)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	promptFingerprint, ok := optionalStringField(payload, PayloadKeyPromptFingerprint)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	status, ok := stringField(payload, PayloadKeyStatus)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	reason, ok := optionalStringField(payload, PayloadKeyReason)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	escalationReason, ok := optionalStringField(payload, PayloadKeyEscalationReason)
+	if !ok {
+		return AutoGovernancePayloadData{}, false
+	}
+	return AutoGovernancePayloadData{
+		TraceID:            common.AutoGovernanceTraceID(traceID),
+		ItemType:           itemType,
+		ItemID:             itemID,
+		Action:             action,
+		RiskLevel:          riskLevel,
+		Confidence:         confidence,
+		PolicyMatched:      policyMatched,
+		PolicyBlocked:      policyBlocked,
+		BudgetBefore:       budgetBefore,
+		BudgetAfter:        budgetAfter,
+		PromptFingerprint:  promptFingerprint,
+		LLMProviderID:      llmProviderID,
+		LLMModel:           llmModel,
+		LLMDecisionPreview: llmDecisionPreview,
+		Status:             status,
+		Reason:             reason,
+		EscalationReason:   escalationReason,
+	}, true
+}
+
 func memoryIDsToStrings(input []common.MemoryID) []string {
 	ret := make([]string, 0, len(input))
 	for _, item := range input {
@@ -981,6 +1153,34 @@ func optionalMapField(payload map[string]any, key string) (map[string]any, bool)
 		return nil, false
 	}
 	return clonePayloadMap(ret), true
+}
+
+func optionalFloatField(payload map[string]any, key string) (float64, bool) {
+	if payload == nil {
+		return 0, true
+	}
+	value, ok := payload[key]
+	if !ok || value == nil {
+		return 0, true
+	}
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case json.Number:
+		f, err := v.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return f, true
+	default:
+		return 0, false
+	}
 }
 
 func optionalStringSliceField(payload map[string]any, key string) ([]string, bool) {

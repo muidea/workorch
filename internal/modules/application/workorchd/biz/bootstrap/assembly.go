@@ -1,6 +1,8 @@
 package bootstrap
 
 import (
+	"context"
+
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
@@ -10,15 +12,20 @@ import (
 	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
 	webmodule "github.com/muidea/workorch/internal/modules/blocks/web"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
+	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
 	eventstreammodule "github.com/muidea/workorch/internal/modules/kernel/eventstream"
+	governancemodule "github.com/muidea/workorch/internal/modules/kernel/governance"
 	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp"
 	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory"
 	orchestratormodule "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
+	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
 	skillmodule "github.com/muidea/workorch/internal/modules/kernel/skill"
 	soulmodule "github.com/muidea/workorch/internal/modules/kernel/soul"
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -117,22 +124,23 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	)
 	mustSetup("runtime-registry", err)
 	mustSetup("orchestrator", orchestratorModule.Setup(orchestratormodule.Dependencies{
-		Runtime:            runtimeRegistry,
-		Runs:               repos.run,
-		Steps:              repos.step,
-		Workspaces:         repos.workspace,
-		Tickets:            repos.ticket,
-		Resolutions:        repos.resolution,
-		Approvals:          repos.approval,
-		Results:            repos.result,
-		Artifacts:          repos.artifact,
-		ToolCalls:          repos.toolCall,
-		Patches:            repos.patch,
-		ValidationResults:  repos.validationResult,
-		RuntimeCheckpoints: repos.runtimeCheckpoint,
-		MemoryItems:        repos.memoryItem,
-		MemoryRecallTraces: repos.memoryRecallTrace,
-		EventHub:           eventHub,
+		Runtime:              runtimeRegistry,
+		Runs:                 repos.run,
+		Steps:                repos.step,
+		Workspaces:           repos.workspace,
+		Tickets:              repos.ticket,
+		Resolutions:          repos.resolution,
+		Approvals:            repos.approval,
+		Results:              repos.result,
+		Artifacts:            repos.artifact,
+		ToolCalls:            repos.toolCall,
+		Patches:              repos.patch,
+		ValidationResults:    repos.validationResult,
+		RuntimeCheckpoints:   repos.runtimeCheckpoint,
+		MemoryItems:          repos.memoryItem,
+		MemoryRecallTraces:   repos.memoryRecallTrace,
+		AutoGovernanceTraces: repos.autoGovernanceTrace,
+		EventHub:             eventHub,
 	}))
 
 	runModule := runmodule.New()
@@ -141,6 +149,33 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 		Workspaces:   repos.workspace,
 		Orchestrator: orchestratorModule.Service(),
 		EventHub:     eventHub,
+	}))
+	governanceModule := governancemodule.New()
+	mustSetup("governance", governanceModule.Setup(governancemodule.Dependencies{
+		Tickets:              repos.ticket,
+		Resolutions:          repos.resolution,
+		Approvals:            repos.approval,
+		Runs:                 repos.run,
+		Goals:                repos.goal,
+		DoDs:                 repos.dod,
+		MemoryItems:          repos.memoryItem,
+		AutoGovernanceTraces: repos.autoGovernanceTrace,
+		EventHub:             eventHub,
+		ResolveDecision: func(ctx context.Context, ticketID common.TicketID, payload map[string]any) error {
+			return decisionModule.Service().EnsureResolvedTicket(ctx, decisionservice.ResolveTicketCommand{
+				ResolutionID: common.ResolutionID("resolution-" + string(ticketID) + "-auto-governance"),
+				TicketID:     ticketID,
+				Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
+				Payload:      payload,
+			})
+		},
+		ResolveApproval: func(ctx context.Context, approvalID common.ApprovalID) error {
+			return approvalModule.Service().EnsureApproved(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: approvalID})
+		},
+		ResumeRun: func(ctx context.Context, runID common.RunID) error {
+			return runModule.Service().EnsureResumed(ctx, runservice.ResumeRunCommand{RunID: runID})
+		},
+		LoadConfig: workorchconfig.Current,
 	}))
 
 	modules := []lifecycle{
@@ -160,6 +195,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 		approvalModule,
 		orchestratorModule,
 		runModule,
+		governanceModule,
 	}
 	moduleLifecycle, err := newModulePluginLifecycle(modules)
 	mustSetup("module-lifecycle", err)
@@ -168,28 +204,29 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	return &Runtime{
 		exports: Exports{
 			Repositories: RepositoryExports{
-				Souls:              repos.soul,
-				WorkspaceTemplates: repos.workspaceTemplate,
-				MemoryItems:        repos.memoryItem,
-				MemoryRecallTraces: repos.memoryRecallTrace,
-				Skills:             repos.skill,
-				MCPServers:         repos.mcpServer,
-				MCPCapabilities:    repos.mcpCapability,
-				Results:            repos.result,
-				Artifacts:          repos.artifact,
-				EventRecords:       repos.eventRecord,
-				Workspaces:         repos.workspace,
-				Goals:              repos.goal,
-				DoDs:               repos.dod,
-				Runs:               repos.run,
-				Steps:              repos.step,
-				ToolCalls:          repos.toolCall,
-				Patches:            repos.patch,
-				ValidationResults:  repos.validationResult,
-				RuntimeCheckpoints: repos.runtimeCheckpoint,
-				Tickets:            repos.ticket,
-				Resolutions:        repos.resolution,
-				Approvals:          repos.approval,
+				Souls:                repos.soul,
+				WorkspaceTemplates:   repos.workspaceTemplate,
+				MemoryItems:          repos.memoryItem,
+				MemoryRecallTraces:   repos.memoryRecallTrace,
+				AutoGovernanceTraces: repos.autoGovernanceTrace,
+				Skills:               repos.skill,
+				MCPServers:           repos.mcpServer,
+				MCPCapabilities:      repos.mcpCapability,
+				Results:              repos.result,
+				Artifacts:            repos.artifact,
+				EventRecords:         repos.eventRecord,
+				Workspaces:           repos.workspace,
+				Goals:                repos.goal,
+				DoDs:                 repos.dod,
+				Runs:                 repos.run,
+				Steps:                repos.step,
+				ToolCalls:            repos.toolCall,
+				Patches:              repos.patch,
+				ValidationResults:    repos.validationResult,
+				RuntimeCheckpoints:   repos.runtimeCheckpoint,
+				Tickets:              repos.ticket,
+				Resolutions:          repos.resolution,
+				Approvals:            repos.approval,
 			},
 			Services: ServiceExports{
 				WorkspaceService:   workspaceModule.Service(),

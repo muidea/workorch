@@ -157,3 +157,46 @@ func TestDecodePatchPayloadRoundTrip(t *testing.T) {
 		t.Fatalf("decoded patch payload = %+v", decoded)
 	}
 }
+
+func TestDecodeAutoGovernancePayloadRoundTrip(t *testing.T) {
+	payload := AutoGovernancePayload(
+		common.AutoGovernanceTraceID("gov-trace-1"),
+		"approval",
+		"approval-1",
+		"approve",
+		"L1",
+		0.91,
+		"read_only",
+		"",
+		2,
+		1,
+		"local",
+		"qwen",
+		"allow read-only action",
+		"prompt-fingerprint",
+		"resolved",
+		"policy accepted",
+		"",
+	)
+
+	decoded, ok := DecodeAutoGovernancePayload(payload)
+	if !ok {
+		t.Fatalf("DecodeAutoGovernancePayload returned !ok")
+	}
+	if decoded.TraceID != "gov-trace-1" ||
+		decoded.ItemType != "approval" ||
+		decoded.ItemID != "approval-1" ||
+		decoded.Action != "approve" ||
+		decoded.RiskLevel != "L1" ||
+		decoded.Confidence != 0.91 ||
+		decoded.PolicyMatched != "read_only" ||
+		decoded.BudgetBefore != 2 ||
+		decoded.BudgetAfter != 1 ||
+		decoded.PromptFingerprint != "prompt-fingerprint" ||
+		decoded.LLMProviderID != "local" ||
+		decoded.LLMModel != "qwen" ||
+		decoded.Status != "resolved" ||
+		decoded.Reason != "policy accepted" {
+		t.Fatalf("decoded auto governance payload = %+v", decoded)
+	}
+}

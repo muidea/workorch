@@ -11,6 +11,7 @@ import (
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -186,6 +187,55 @@ func TestReadDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 	}
 	if item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
 		t.Fatalf("resolutionType = %q, want provide_missing_info", item.ResolutionType)
+	}
+}
+
+func TestReadDecisionWithBackendIncludesAutoGovernanceSummary(t *testing.T) {
+	dataRoot := t.TempDir()
+	workspaceID := "ws-decision-autogov"
+	runID := "run-decision-autogov"
+	started := prepareDecisionRun(t, dataRoot, workspaceID, runID)
+
+	session, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("new runtime session: %v", err)
+	}
+	ctx := context.Background()
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("session exports: %v", err)
+	}
+	if err := exports.Repositories.AutoGovernanceTraces.Upsert(ctx, &governancemodel.AutoGovernanceTrace{
+		ID:                common.AutoGovernanceTraceID("trace-decision-autogov"),
+		WorkspaceID:       common.WorkspaceID(workspaceID),
+		RunID:             common.RunID(runID),
+		ItemType:          "ticket",
+		ItemID:            started.BlockingTicketID,
+		Action:            "answer",
+		RiskLevel:         "L1",
+		Confidence:        0.92,
+		PolicyMatched:     "goal_context",
+		Reason:            "derived from structured context",
+		EvidenceRefs:      []string{"memory-recall-1"},
+		PromptFingerprint: "fingerprint-1",
+		Status:            "resolved",
+		OccurredAt:        "2026-05-06T10:00:00Z",
+	}); err != nil {
+		t.Fatalf("upsert auto governance trace: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
+
+	item, err := ReadDecisionWithBackend(ctx, "file", dataRoot, started.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("ReadDecisionWithBackend: %v", err)
+	}
+	if item.AutoGovernance == nil ||
+		item.AutoGovernance.Action != "answer" ||
+		item.AutoGovernance.Status != "resolved" ||
+		item.AutoGovernance.RiskLevel != "L1" {
+		t.Fatalf("auto governance summary = %+v, want resolved ticket summary", item.AutoGovernance)
 	}
 }
 

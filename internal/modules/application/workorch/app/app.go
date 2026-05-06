@@ -29,6 +29,7 @@ import (
 	_ "github.com/muidea/workorch/internal/modules/blocks/web"
 	_ "github.com/muidea/workorch/internal/modules/kernel/decision"
 	_ "github.com/muidea/workorch/internal/modules/kernel/eventstream"
+	_ "github.com/muidea/workorch/internal/modules/kernel/governance"
 	_ "github.com/muidea/workorch/internal/modules/kernel/mcp"
 	_ "github.com/muidea/workorch/internal/modules/kernel/memory"
 	_ "github.com/muidea/workorch/internal/modules/kernel/orchestrator"

@@ -26,22 +26,23 @@ import (
 )
 
 type readModelDependencies struct {
-	workspaces      repository.WorkspaceRepository
-	runs            repository.RunRepository
-	steps           repository.StepRepository
-	results         repository.ResultRepository
-	artifacts       repository.ArtifactRepository
-	eventRecords    repository.EventRecordRepository
-	memoryRecalls   repository.MemoryRecallTraceRepository
-	toolCalls       repository.ToolCallRepository
-	mcpCapabilities repository.MCPCapabilityRepository
-	patches         repository.PatchRepository
-	validations     repository.ValidationResultRepository
-	checkpoints     repository.RuntimeCheckpointRepository
-	tickets         repository.DecisionTicketRepository
-	resolutions     repository.DecisionResolutionRepository
-	approvals       repository.ApprovalRepository
-	published       []events.WorkorchEvent
+	workspaces           repository.WorkspaceRepository
+	runs                 repository.RunRepository
+	steps                repository.StepRepository
+	results              repository.ResultRepository
+	artifacts            repository.ArtifactRepository
+	eventRecords         repository.EventRecordRepository
+	memoryRecalls        repository.MemoryRecallTraceRepository
+	toolCalls            repository.ToolCallRepository
+	mcpCapabilities      repository.MCPCapabilityRepository
+	patches              repository.PatchRepository
+	validations          repository.ValidationResultRepository
+	checkpoints          repository.RuntimeCheckpointRepository
+	autoGovernanceTraces repository.AutoGovernanceTraceRepository
+	tickets              repository.DecisionTicketRepository
+	resolutions          repository.DecisionResolutionRepository
+	approvals            repository.ApprovalRepository
+	published            []events.WorkorchEvent
 }
 
 func ReadRunSnapshotWithSession(ctx context.Context, session *RuntimeSession, runID string) (ret RunSnapshot, err error) {
@@ -436,22 +437,23 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 	}
 
 	return readModelDependencies{
-		workspaces:      exports.Repositories.Workspaces,
-		runs:            exports.Repositories.Runs,
-		steps:           exports.Repositories.Steps,
-		results:         exports.Repositories.Results,
-		artifacts:       exports.Repositories.Artifacts,
-		eventRecords:    exports.Repositories.EventRecords,
-		memoryRecalls:   exports.Repositories.MemoryRecallTraces,
-		toolCalls:       exports.Repositories.ToolCalls,
-		mcpCapabilities: exports.Repositories.MCPCapabilities,
-		patches:         exports.Repositories.Patches,
-		validations:     exports.Repositories.ValidationResults,
-		checkpoints:     exports.Repositories.RuntimeCheckpoints,
-		tickets:         exports.Repositories.Tickets,
-		resolutions:     exports.Repositories.Resolutions,
-		approvals:       exports.Repositories.Approvals,
-		published:       published,
+		workspaces:           exports.Repositories.Workspaces,
+		runs:                 exports.Repositories.Runs,
+		steps:                exports.Repositories.Steps,
+		results:              exports.Repositories.Results,
+		artifacts:            exports.Repositories.Artifacts,
+		eventRecords:         exports.Repositories.EventRecords,
+		memoryRecalls:        exports.Repositories.MemoryRecallTraces,
+		toolCalls:            exports.Repositories.ToolCalls,
+		mcpCapabilities:      exports.Repositories.MCPCapabilities,
+		patches:              exports.Repositories.Patches,
+		validations:          exports.Repositories.ValidationResults,
+		checkpoints:          exports.Repositories.RuntimeCheckpoints,
+		autoGovernanceTraces: exports.Repositories.AutoGovernanceTraces,
+		tickets:              exports.Repositories.Tickets,
+		resolutions:          exports.Repositories.Resolutions,
+		approvals:            exports.Repositories.Approvals,
+		published:            published,
 	}, nil
 }
 
@@ -847,7 +849,11 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		if ticket.WorkspaceID != workspaceID {
 			continue
 		}
-		decisions = append(decisions, mapDecision(ticket, resolutions[ticket.ID]))
+		summary, err := latestAutoGovernanceSummary(ctx, deps.autoGovernanceTraces, ticket.WorkspaceID, ticket.RunID, "ticket", string(ticket.ID))
+		if err != nil {
+			return WorkspaceSnapshot{}, err
+		}
+		decisions = append(decisions, mapDecision(ticket, resolutions[ticket.ID], summary))
 	}
 
 	approvals := make([]Approval, 0, len(approvalItems))
@@ -855,7 +861,11 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		if approval.WorkspaceID != workspaceID {
 			continue
 		}
-		approvals = append(approvals, mapApproval(approval))
+		summary, err := latestAutoGovernanceSummary(ctx, deps.autoGovernanceTraces, approval.WorkspaceID, approval.RunID, "approval", string(approval.ID))
+		if err != nil {
+			return WorkspaceSnapshot{}, err
+		}
+		approvals = append(approvals, mapApproval(approval, summary))
 	}
 
 	ret := WorkspaceSnapshot{
@@ -1127,7 +1137,11 @@ func decisionsForRun(ctx context.Context, deps readModelDependencies, run *runmo
 			continue
 		}
 		resolution := resolutions[item.ID]
-		ret = append(ret, mapDecision(item, resolution))
+		summary, err := latestAutoGovernanceSummary(ctx, deps.autoGovernanceTraces, item.WorkspaceID, item.RunID, "ticket", string(item.ID))
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		ret = append(ret, mapDecision(item, resolution, summary))
 		if run.BlockingTicketID != "" && item.ID == run.BlockingTicketID {
 			selectedTicket = item
 			selectedResolution = resolution
@@ -1194,7 +1208,11 @@ func approvalsForRun(ctx context.Context, deps readModelDependencies, run *runmo
 		if item.RunID != run.ID {
 			continue
 		}
-		ret = append(ret, mapApproval(item))
+		summary, err := latestAutoGovernanceSummary(ctx, deps.autoGovernanceTraces, item.WorkspaceID, item.RunID, "approval", string(item.ID))
+		if err != nil {
+			return nil, nil, err
+		}
+		ret = append(ret, mapApproval(item, summary))
 		if run.BlockingApprovalID != "" && item.ID == run.BlockingApprovalID {
 			selectedApproval = item
 			continue

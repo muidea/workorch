@@ -101,3 +101,37 @@ func TestServiceRejectsUnsupportedMemoryType(t *testing.T) {
 		t.Fatalf("create unsupported memory type err = %v, want invalid argument", err)
 	}
 }
+
+func TestServiceRejectsMemoryTypeNotAllowedForSource(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(backend.NewMemoryItemRepository())
+
+	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryItemCommand{
+		MemoryID:    common.MemoryID("memory-source-type-invalid"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		SourceType:  modulecommon.MemorySourceRun,
+		SourceRef:   "run-1",
+		MemoryType:  modulecommon.MemoryTypeDecision,
+		Summary:     "single decision text",
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("create memory type not allowed for source err = %v, want invalid argument", err)
+	}
+}
+
+func TestServiceRejectsSensitiveMemoryText(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(backend.NewMemoryItemRepository())
+
+	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryItemCommand{
+		MemoryID:    common.MemoryID("memory-sensitive"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		SourceType:  modulecommon.MemorySourceUser,
+		MemoryType:  modulecommon.MemoryTypeProjectContext,
+		Summary:     "api key for deployment",
+		Content:     "api key: sk-test-secret",
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("create sensitive memory err = %v, want invalid argument", err)
+	}
+}

@@ -393,6 +393,7 @@ func (b *localDecisionBackend) Resolve(ctx context.Context, req ResolveDecisionR
 		ID: common.TicketID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID),
 		RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question,
 		State: d.State, ResolutionType: d.ResolutionType,
+		AutoGovernance: mapAutoGovernanceSummaryInfo(d.AutoGovernance),
 	}, nil
 }
 
@@ -414,6 +415,7 @@ func (b *localDecisionBackend) BatchResolve(ctx context.Context, ticketIDs []com
 			ID: common.TicketID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID),
 			RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question,
 			State: d.State, ResolutionType: d.ResolutionType,
+			AutoGovernance: mapAutoGovernanceSummaryInfo(d.AutoGovernance),
 		})
 	}
 	return result, nil
@@ -429,6 +431,7 @@ func (b *localDecisionBackend) List(ctx context.Context, wsID common.WorkspaceID
 	for _, d := range list {
 		result = append(result, DecisionInfo{
 			ID: common.TicketID(d.ID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State,
+			AutoGovernance: mapAutoGovernanceSummaryInfo(d.AutoGovernance),
 		})
 	}
 	return result, nil
@@ -444,6 +447,7 @@ func (b *localDecisionBackend) Get(ctx context.Context, id common.TicketID) (*De
 		ID: common.TicketID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID),
 		RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question,
 		State: d.State, ResolutionType: d.ResolutionType,
+		AutoGovernance: mapAutoGovernanceSummaryInfo(d.AutoGovernance),
 	}, nil
 }
 
@@ -460,6 +464,7 @@ func (b *localApprovalBackend) Approve(ctx context.Context, id common.ApprovalID
 	return &ApprovalInfo{
 		ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID),
 		RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State,
+		AutoGovernance: mapAutoGovernanceSummaryInfo(a.AutoGovernance),
 	}, nil
 }
 
@@ -472,6 +477,7 @@ func (b *localApprovalBackend) Reject(ctx context.Context, id common.ApprovalID)
 	return &ApprovalInfo{
 		ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID),
 		RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State,
+		AutoGovernance: mapAutoGovernanceSummaryInfo(a.AutoGovernance),
 	}, nil
 }
 
@@ -492,6 +498,7 @@ func (b *localApprovalBackend) BatchResolve(ctx context.Context, ids []common.Ap
 		result = append(result, ApprovalInfo{
 			ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID),
 			RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State,
+			AutoGovernance: mapAutoGovernanceSummaryInfo(a.AutoGovernance),
 		})
 	}
 	return result, nil
@@ -508,6 +515,7 @@ func (b *localApprovalBackend) List(ctx context.Context, wsID common.WorkspaceID
 		result = append(result, ApprovalInfo{
 			ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID),
 			RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State,
+			AutoGovernance: mapAutoGovernanceSummaryInfo(a.AutoGovernance),
 		})
 	}
 	return result, nil
@@ -522,7 +530,30 @@ func (b *localApprovalBackend) Get(ctx context.Context, id common.ApprovalID) (*
 	return &ApprovalInfo{
 		ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID),
 		RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State,
+		AutoGovernance: mapAutoGovernanceSummaryInfo(a.AutoGovernance),
 	}, nil
+}
+
+func mapAutoGovernanceSummaryInfo(summary *appservice.AutoGovernanceSummary) *AutoGovernanceSummaryInfo {
+	if summary == nil {
+		return nil
+	}
+	ret := &AutoGovernanceSummaryInfo{
+		TraceID:           summary.TraceID,
+		Action:            summary.Action,
+		Status:            summary.Status,
+		RiskLevel:         summary.RiskLevel,
+		PolicyMatched:     summary.PolicyMatched,
+		PolicyBlocked:     summary.PolicyBlocked,
+		Confidence:        summary.Confidence,
+		Reason:            summary.Reason,
+		PromptFingerprint: summary.PromptFingerprint,
+		OccurredAt:        summary.OccurredAt,
+	}
+	if len(summary.EvidenceRefs) > 0 {
+		ret.EvidenceRefs = append([]string(nil), summary.EvidenceRefs...)
+	}
+	return ret
 }
 
 // ── Soul ──

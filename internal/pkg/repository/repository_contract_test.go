@@ -10,6 +10,7 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
@@ -74,6 +75,18 @@ func TestMemoryRecallTraceRepositoryContract_Memory(t *testing.T) {
 func TestMemoryRecallTraceRepositoryContract_File(t *testing.T) {
 	testMemoryRecallTraceRepositoryContract(t, func() repository.MemoryRecallTraceRepository {
 		return file.NewMemoryRecallTraceRepository(filepath.Join(t.TempDir(), "memory_recall_trace.json"))
+	})
+}
+
+func TestAutoGovernanceTraceRepositoryContract_Memory(t *testing.T) {
+	testAutoGovernanceTraceRepositoryContract(t, func() repository.AutoGovernanceTraceRepository {
+		return memory.NewAutoGovernanceTraceRepository()
+	})
+}
+
+func TestAutoGovernanceTraceRepositoryContract_File(t *testing.T) {
+	testAutoGovernanceTraceRepositoryContract(t, func() repository.AutoGovernanceTraceRepository {
+		return file.NewAutoGovernanceTraceRepository(filepath.Join(t.TempDir(), "auto_governance_trace.json"))
 	})
 }
 
@@ -289,27 +302,28 @@ func TestApprovalRepositoryContract_File(t *testing.T) {
 
 func TestRepositoryBundleContract_Memory(t *testing.T) {
 	bundle := repositoryBundle{
-		souls:              memory.NewSoulRepository(),
-		memoryItems:        memory.NewMemoryItemRepository(),
-		memoryRecallTraces: memory.NewMemoryRecallTraceRepository(),
-		skills:             memory.NewSkillRepository(),
-		mcpServers:         memory.NewMCPServerRepository(),
-		mcpCapabilities:    memory.NewMCPCapabilityRepository(),
-		results:            memory.NewResultRepository(),
-		artifacts:          memory.NewArtifactRepository(),
-		eventRecords:       memory.NewEventRecordRepository(),
-		workspaces:         memory.NewWorkspaceRepository(),
-		goals:              memory.NewGoalRepository(),
-		dods:               memory.NewDoDRepository(),
-		runs:               memory.NewRunRepository(),
-		steps:              memory.NewStepRepository(),
-		toolCalls:          memory.NewToolCallRepository(),
-		patches:            memory.NewPatchRepository(),
-		validationResults:  memory.NewValidationResultRepository(),
-		runtimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		tickets:            memory.NewDecisionTicketRepository(),
-		resolutions:        memory.NewDecisionResolutionRepository(),
-		approvals:          memory.NewApprovalRepository(),
+		souls:                memory.NewSoulRepository(),
+		memoryItems:          memory.NewMemoryItemRepository(),
+		memoryRecallTraces:   memory.NewMemoryRecallTraceRepository(),
+		autoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
+		skills:               memory.NewSkillRepository(),
+		mcpServers:           memory.NewMCPServerRepository(),
+		mcpCapabilities:      memory.NewMCPCapabilityRepository(),
+		results:              memory.NewResultRepository(),
+		artifacts:            memory.NewArtifactRepository(),
+		eventRecords:         memory.NewEventRecordRepository(),
+		workspaces:           memory.NewWorkspaceRepository(),
+		goals:                memory.NewGoalRepository(),
+		dods:                 memory.NewDoDRepository(),
+		runs:                 memory.NewRunRepository(),
+		steps:                memory.NewStepRepository(),
+		toolCalls:            memory.NewToolCallRepository(),
+		patches:              memory.NewPatchRepository(),
+		validationResults:    memory.NewValidationResultRepository(),
+		runtimeCheckpoints:   memory.NewRuntimeCheckpointRepository(),
+		tickets:              memory.NewDecisionTicketRepository(),
+		resolutions:          memory.NewDecisionResolutionRepository(),
+		approvals:            memory.NewApprovalRepository(),
 	}
 	testRepositoryBundleContract(t, bundle, func() repositoryBundle { return bundle })
 }
@@ -318,54 +332,56 @@ func TestRepositoryBundleContract_File(t *testing.T) {
 	dir := t.TempDir()
 	build := func() repositoryBundle {
 		return repositoryBundle{
-			souls:              file.NewSoulRepository(filepath.Join(dir, "souls")),
-			memoryItems:        file.NewMemoryItemRepository(filepath.Join(dir, "memory_item.json")),
-			memoryRecallTraces: file.NewMemoryRecallTraceRepository(filepath.Join(dir, "memory_recall_trace.json")),
-			skills:             file.NewSkillRepository(filepath.Join(dir, "skill.json")),
-			mcpServers:         file.NewMCPServerRepository(filepath.Join(dir, "mcp_server.json")),
-			mcpCapabilities:    file.NewMCPCapabilityRepository(filepath.Join(dir, "mcp_capability.json")),
-			results:            file.NewResultRepository(filepath.Join(dir, "result.json")),
-			artifacts:          file.NewArtifactRepository(filepath.Join(dir, "artifact.json")),
-			eventRecords:       file.NewEventRecordRepository(filepath.Join(dir, "event_record.json")),
-			workspaces:         file.NewWorkspaceRepository(filepath.Join(dir, "workspace.json")),
-			goals:              file.NewGoalRepository(filepath.Join(dir, "goal.json")),
-			dods:               file.NewDoDRepository(filepath.Join(dir, "dod.json")),
-			runs:               file.NewRunRepository(filepath.Join(dir, "run.json")),
-			steps:              file.NewStepRepository(filepath.Join(dir, "step.json")),
-			toolCalls:          file.NewToolCallRepository(filepath.Join(dir, "tool_call.json")),
-			patches:            file.NewPatchRepository(filepath.Join(dir, "patch.json")),
-			validationResults:  file.NewValidationResultRepository(filepath.Join(dir, "validation_result.json")),
-			runtimeCheckpoints: file.NewRuntimeCheckpointRepository(filepath.Join(dir, "runtime_checkpoint.json")),
-			tickets:            file.NewDecisionTicketRepository(filepath.Join(dir, "ticket.json")),
-			resolutions:        file.NewDecisionResolutionRepository(filepath.Join(dir, "resolution.json")),
-			approvals:          file.NewApprovalRepository(filepath.Join(dir, "approval.json")),
+			souls:                file.NewSoulRepository(filepath.Join(dir, "souls")),
+			memoryItems:          file.NewMemoryItemRepository(filepath.Join(dir, "memory_item.json")),
+			memoryRecallTraces:   file.NewMemoryRecallTraceRepository(filepath.Join(dir, "memory_recall_trace.json")),
+			autoGovernanceTraces: file.NewAutoGovernanceTraceRepository(filepath.Join(dir, "auto_governance_trace.json")),
+			skills:               file.NewSkillRepository(filepath.Join(dir, "skill.json")),
+			mcpServers:           file.NewMCPServerRepository(filepath.Join(dir, "mcp_server.json")),
+			mcpCapabilities:      file.NewMCPCapabilityRepository(filepath.Join(dir, "mcp_capability.json")),
+			results:              file.NewResultRepository(filepath.Join(dir, "result.json")),
+			artifacts:            file.NewArtifactRepository(filepath.Join(dir, "artifact.json")),
+			eventRecords:         file.NewEventRecordRepository(filepath.Join(dir, "event_record.json")),
+			workspaces:           file.NewWorkspaceRepository(filepath.Join(dir, "workspace.json")),
+			goals:                file.NewGoalRepository(filepath.Join(dir, "goal.json")),
+			dods:                 file.NewDoDRepository(filepath.Join(dir, "dod.json")),
+			runs:                 file.NewRunRepository(filepath.Join(dir, "run.json")),
+			steps:                file.NewStepRepository(filepath.Join(dir, "step.json")),
+			toolCalls:            file.NewToolCallRepository(filepath.Join(dir, "tool_call.json")),
+			patches:              file.NewPatchRepository(filepath.Join(dir, "patch.json")),
+			validationResults:    file.NewValidationResultRepository(filepath.Join(dir, "validation_result.json")),
+			runtimeCheckpoints:   file.NewRuntimeCheckpointRepository(filepath.Join(dir, "runtime_checkpoint.json")),
+			tickets:              file.NewDecisionTicketRepository(filepath.Join(dir, "ticket.json")),
+			resolutions:          file.NewDecisionResolutionRepository(filepath.Join(dir, "resolution.json")),
+			approvals:            file.NewApprovalRepository(filepath.Join(dir, "approval.json")),
 		}
 	}
 	testRepositoryBundleContract(t, build(), build)
 }
 
 type repositoryBundle struct {
-	souls              repository.SoulRepository
-	memoryItems        repository.MemoryItemRepository
-	memoryRecallTraces repository.MemoryRecallTraceRepository
-	skills             repository.SkillRepository
-	mcpServers         repository.MCPServerRepository
-	mcpCapabilities    repository.MCPCapabilityRepository
-	results            repository.ResultRepository
-	artifacts          repository.ArtifactRepository
-	eventRecords       repository.EventRecordRepository
-	workspaces         repository.WorkspaceRepository
-	goals              repository.GoalRepository
-	dods               repository.DoDRepository
-	runs               repository.RunRepository
-	steps              repository.StepRepository
-	toolCalls          repository.ToolCallRepository
-	patches            repository.PatchRepository
-	validationResults  repository.ValidationResultRepository
-	runtimeCheckpoints repository.RuntimeCheckpointRepository
-	tickets            repository.DecisionTicketRepository
-	resolutions        repository.DecisionResolutionRepository
-	approvals          repository.ApprovalRepository
+	souls                repository.SoulRepository
+	memoryItems          repository.MemoryItemRepository
+	memoryRecallTraces   repository.MemoryRecallTraceRepository
+	autoGovernanceTraces repository.AutoGovernanceTraceRepository
+	skills               repository.SkillRepository
+	mcpServers           repository.MCPServerRepository
+	mcpCapabilities      repository.MCPCapabilityRepository
+	results              repository.ResultRepository
+	artifacts            repository.ArtifactRepository
+	eventRecords         repository.EventRecordRepository
+	workspaces           repository.WorkspaceRepository
+	goals                repository.GoalRepository
+	dods                 repository.DoDRepository
+	runs                 repository.RunRepository
+	steps                repository.StepRepository
+	toolCalls            repository.ToolCallRepository
+	patches              repository.PatchRepository
+	validationResults    repository.ValidationResultRepository
+	runtimeCheckpoints   repository.RuntimeCheckpointRepository
+	tickets              repository.DecisionTicketRepository
+	resolutions          repository.DecisionResolutionRepository
+	approvals            repository.ApprovalRepository
 }
 
 func testSkillRepositoryContract(t *testing.T, factory func() repository.SkillRepository) {
@@ -972,6 +988,84 @@ func testMemoryRecallTraceRepositoryContract(t *testing.T, factory func() reposi
 	}
 	if _, err := repo.Get(ctx, item.ID); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("get deleted memory recall err = %v, want not found", err)
+	}
+}
+
+func testAutoGovernanceTraceRepositoryContract(t *testing.T, factory func() repository.AutoGovernanceTraceRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &governancemodel.AutoGovernanceTrace{
+		ID:                 common.AutoGovernanceTraceID("auto-governance-contract"),
+		WorkspaceID:        common.WorkspaceID("ws-contract"),
+		RunID:              common.RunID("run-contract"),
+		StepID:             common.StepID("run-contract/step-1"),
+		ItemType:           "approval",
+		ItemID:             "approval-contract",
+		Action:             "approve",
+		RiskLevel:          "L1",
+		Confidence:         0.96,
+		PolicyMatched:      "read_only",
+		PolicyBlocked:      "",
+		BudgetBefore:       3,
+		BudgetAfter:        2,
+		Reason:             "auto-approved read-only operation",
+		EvidenceRefs:       []string{"memory-recall-contract"},
+		LLMProviderID:      "local",
+		LLMModel:           "contract-model",
+		LLMDecisionPreview: "approve read-only",
+		Status:             "resolved",
+		OccurredAt:         "2026-05-06T00:00:00Z",
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create auto governance trace: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate auto governance trace create err = %v, want conflict", err)
+	}
+
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get auto governance trace: %v", err)
+	}
+	got.EvidenceRefs[0] = "mutated"
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get auto governance trace fresh: %v", err)
+	}
+	if len(fresh.EvidenceRefs) != 1 || fresh.EvidenceRefs[0] != "memory-recall-contract" {
+		t.Fatalf("auto governance clone isolation failed: %+v", fresh)
+	}
+
+	fresh.Status = "blocked"
+	fresh.PolicyBlocked = "budget_exhausted"
+	fresh.Confidence = 0.31
+	if err := repo.Upsert(ctx, fresh); err != nil {
+		t.Fatalf("upsert auto governance trace: %v", err)
+	}
+	byStatus, err := repo.List(ctx, repository.AutoGovernanceTraceQuery{
+		WorkspaceID: item.WorkspaceID,
+		RunID:       item.RunID,
+		ItemType:    "approval",
+		ItemID:      "approval-contract",
+		Status:      "blocked",
+	})
+	if err != nil {
+		t.Fatalf("list auto governance traces by status: %v", err)
+	}
+	if len(byStatus) != 1 || byStatus[0].PolicyBlocked != "budget_exhausted" {
+		t.Fatalf("auto governance by status = %+v, want blocked trace", byStatus)
+	}
+
+	if _, err := repo.Get(ctx, common.AutoGovernanceTraceID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get missing auto governance trace err = %v, want not found", err)
+	}
+	if err := repo.Delete(ctx, item.ID); err != nil {
+		t.Fatalf("delete auto governance trace: %v", err)
+	}
+	if _, err := repo.Get(ctx, item.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get deleted auto governance trace err = %v, want not found", err)
 	}
 }
 
@@ -2122,6 +2216,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	soulID := common.SoulID("soul-bundle-contract")
 	memoryID := common.MemoryID("memory-bundle-contract")
 	memoryRecallTraceID := common.MemoryRecallTraceID("memory-recall-bundle-contract")
+	autoGovernanceTraceID := common.AutoGovernanceTraceID("auto-governance-bundle-contract")
 	skillID := common.SkillID("skill-bundle-contract")
 	mcpServerID := common.MCPServerID("mcp-bundle-contract")
 
@@ -2183,6 +2278,34 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	}
 	if err := bundle.memoryRecallTraces.Create(ctx, memoryRecallTrace); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("duplicate memory recall trace create err = %v, want conflict", err)
+	}
+
+	autoGovernanceTrace := &governancemodel.AutoGovernanceTrace{
+		ID:                 autoGovernanceTraceID,
+		WorkspaceID:        workspaceID,
+		RunID:              runID,
+		StepID:             stepID,
+		ItemType:           "approval",
+		ItemID:             string(approvalID),
+		Action:             "approve",
+		RiskLevel:          "L1",
+		Confidence:         0.95,
+		PolicyMatched:      "read_only",
+		BudgetBefore:       3,
+		BudgetAfter:        2,
+		Reason:             "auto-approved read-only action",
+		EvidenceRefs:       []string{string(memoryRecallTraceID)},
+		LLMProviderID:      "local",
+		LLMModel:           "bundle-model",
+		LLMDecisionPreview: "approve read-only action",
+		Status:             "resolved",
+		OccurredAt:         "2026-05-04T00:00:01Z",
+	}
+	if err := bundle.autoGovernanceTraces.Create(ctx, autoGovernanceTrace); err != nil {
+		t.Fatalf("create auto governance trace: %v", err)
+	}
+	if err := bundle.autoGovernanceTraces.Create(ctx, autoGovernanceTrace); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate auto governance trace create err = %v, want conflict", err)
 	}
 
 	skill := &skillmodel.Skill{
@@ -2547,6 +2670,22 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		len(reloadedRecallTraces[0].RetrievedMemoryIDs) != 1 ||
 		reloadedRecallTraces[0].RetrievedMemoryIDs[0] != memoryID {
 		t.Fatalf("reloaded memory recall traces = %+v, want %q -> %q", reloadedRecallTraces, memoryRecallTraceID, memoryID)
+	}
+
+	reloadedAutoGovernanceTraces, err := reloaded.autoGovernanceTraces.List(ctx, repository.AutoGovernanceTraceQuery{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		ItemType:    "approval",
+		ItemID:      string(approvalID),
+		Status:      "resolved",
+	})
+	if err != nil {
+		t.Fatalf("reload auto governance traces: %v", err)
+	}
+	if len(reloadedAutoGovernanceTraces) != 1 ||
+		reloadedAutoGovernanceTraces[0].ID != autoGovernanceTraceID ||
+		reloadedAutoGovernanceTraces[0].PolicyMatched != "read_only" {
+		t.Fatalf("reloaded auto governance traces = %+v, want %q", reloadedAutoGovernanceTraces, autoGovernanceTraceID)
 	}
 
 	reloadedSkill, err := reloaded.skills.Get(ctx, skillID)

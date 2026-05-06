@@ -74,14 +74,15 @@ type RuntimeOrchestrator struct {
 }
 
 type RuntimeEvidenceRepositories struct {
-	Results            repository.ResultRepository
-	Artifacts          repository.ArtifactRepository
-	ToolCalls          repository.ToolCallRepository
-	Patches            repository.PatchRepository
-	ValidationResults  repository.ValidationResultRepository
-	RuntimeCheckpoints repository.RuntimeCheckpointRepository
-	MemoryItems        repository.MemoryItemRepository
-	MemoryRecallTraces repository.MemoryRecallTraceRepository
+	Results              repository.ResultRepository
+	Artifacts            repository.ArtifactRepository
+	ToolCalls            repository.ToolCallRepository
+	Patches              repository.PatchRepository
+	ValidationResults    repository.ValidationResultRepository
+	RuntimeCheckpoints   repository.RuntimeCheckpointRepository
+	MemoryItems          repository.MemoryItemRepository
+	MemoryRecallTraces   repository.MemoryRecallTraceRepository
+	AutoGovernanceTraces repository.AutoGovernanceTraceRepository
 }
 
 type stepDispatchSpec struct {

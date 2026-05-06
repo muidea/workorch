@@ -11,14 +11,15 @@ import (
 )
 
 type Approval struct {
-	ID          string         `json:"id"`
-	WorkspaceID string         `json:"workspaceId"`
-	RunID       string         `json:"runId"`
-	StepID      string         `json:"stepId,omitempty"`
-	Reason      string         `json:"reason"`
-	Action      string         `json:"action,omitempty"`
-	Context     map[string]any `json:"context,omitempty"`
-	State       string         `json:"state"`
+	ID             string                 `json:"id"`
+	WorkspaceID    string                 `json:"workspaceId"`
+	RunID          string                 `json:"runId"`
+	StepID         string                 `json:"stepId,omitempty"`
+	Reason         string                 `json:"reason"`
+	Action         string                 `json:"action,omitempty"`
+	Context        map[string]any         `json:"context,omitempty"`
+	State          string                 `json:"state"`
+	AutoGovernance *AutoGovernanceSummary `json:"autoGovernance,omitempty"`
 }
 
 type BatchResolveApprovalCommand struct {
@@ -31,13 +32,18 @@ func ReadApprovalWithSession(ctx context.Context, session *RuntimeSession, appro
 	if err != nil {
 		return Approval{}, err
 	}
+	traces := autoGovernanceTraceRepositoryFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
 	item, err := repo.Get(ctx, common.ApprovalID(approvalID))
 	if err != nil {
 		return Approval{}, err
 	}
-	return mapApproval(item), nil
+	autoGovernance, err := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "approval", string(item.ID))
+	if err != nil {
+		return Approval{}, err
+	}
+	return mapApproval(item, autoGovernance), nil
 }
 
 func ReadApprovalWithBackend(ctx context.Context, backend string, dataRoot string, approvalID string) (Approval, error) {
@@ -61,6 +67,7 @@ func ListApprovalsWithSession(ctx context.Context, session *RuntimeSession, work
 	if err != nil {
 		return nil, err
 	}
+	traces := autoGovernanceTraceRepositoryFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
 	items, err := repo.List(ctx)
@@ -75,7 +82,11 @@ func ListApprovalsWithSession(ctx context.Context, session *RuntimeSession, work
 		if runID != "" && string(item.RunID) != runID {
 			continue
 		}
-		ret = append(ret, mapApproval(item))
+		autoGovernance, autoErr := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "approval", string(item.ID))
+		if autoErr != nil {
+			return nil, autoErr
+		}
+		ret = append(ret, mapApproval(item, autoGovernance))
 	}
 	return ret, nil
 }
@@ -101,6 +112,7 @@ func ApproveApprovalWithSession(ctx context.Context, session *RuntimeSession, ap
 	if err != nil {
 		return Approval{}, err
 	}
+	traces := autoGovernanceTraceRepositoryFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.ApprovalID(approvalID)
@@ -108,7 +120,11 @@ func ApproveApprovalWithSession(ctx context.Context, session *RuntimeSession, ap
 	if err != nil {
 		return Approval{}, err
 	}
-	return mapApproval(item), nil
+	autoGovernance, err := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "approval", string(item.ID))
+	if err != nil {
+		return Approval{}, err
+	}
+	return mapApproval(item, autoGovernance), nil
 }
 
 func ApproveApprovalWithBackend(ctx context.Context, backend string, dataRoot string, approvalID string) (Approval, error) {
@@ -132,6 +148,7 @@ func RejectApprovalWithSession(ctx context.Context, session *RuntimeSession, app
 	if err != nil {
 		return Approval{}, err
 	}
+	traces := autoGovernanceTraceRepositoryFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.ApprovalID(approvalID)
@@ -139,7 +156,11 @@ func RejectApprovalWithSession(ctx context.Context, session *RuntimeSession, app
 	if err != nil {
 		return Approval{}, err
 	}
-	return mapApproval(item), nil
+	autoGovernance, err := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "approval", string(item.ID))
+	if err != nil {
+		return Approval{}, err
+	}
+	return mapApproval(item, autoGovernance), nil
 }
 
 func BatchResolveApprovalsWithSession(ctx context.Context, session *RuntimeSession, cmd BatchResolveApprovalCommand) (ret []Approval, err error) {
@@ -147,6 +168,7 @@ func BatchResolveApprovalsWithSession(ctx context.Context, session *RuntimeSessi
 	if err != nil {
 		return nil, err
 	}
+	traces := autoGovernanceTraceRepositoryFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
 	if len(cmd.ApprovalIDs) == 0 || (cmd.Action != "approve" && cmd.Action != "reject") {
@@ -200,7 +222,11 @@ func BatchResolveApprovalsWithSession(ctx context.Context, session *RuntimeSessi
 		if err != nil {
 			return nil, err
 		}
-		ret = append(ret, mapApproval(item))
+		autoGovernance, autoErr := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "approval", string(item.ID))
+		if autoErr != nil {
+			return nil, autoErr
+		}
+		ret = append(ret, mapApproval(item, autoGovernance))
 	}
 	return ret, nil
 }
@@ -248,19 +274,20 @@ func approvalDependenciesFromSession(session *RuntimeSession) (approvalmodule.Se
 	return exports.Services.ApprovalService, exports.Repositories.Approvals, nil
 }
 
-func mapApproval(item *approvalmodel.Approval) Approval {
+func mapApproval(item *approvalmodel.Approval, autoGovernance *AutoGovernanceSummary) Approval {
 	if item == nil {
 		return Approval{}
 	}
 	return Approval{
-		ID:          string(item.ID),
-		WorkspaceID: string(item.WorkspaceID),
-		RunID:       string(item.RunID),
-		StepID:      string(item.StepID),
-		Reason:      item.Reason,
-		Action:      item.Action,
-		Context:     cloneApprovalMap(item.Context),
-		State:       string(item.State),
+		ID:             string(item.ID),
+		WorkspaceID:    string(item.WorkspaceID),
+		RunID:          string(item.RunID),
+		StepID:         string(item.StepID),
+		Reason:         item.Reason,
+		Action:         item.Action,
+		Context:        cloneApprovalMap(item.Context),
+		State:          string(item.State),
+		AutoGovernance: autoGovernance,
 	}
 }
 

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"strings"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
@@ -67,6 +68,9 @@ func validateMemoryCommand(cmd memoryservice.CreateMemoryItemCommand) error {
 	if !modulecommon.IsSupportedSourceType(cmd.SourceType) || !modulecommon.IsSupportedMemoryType(cmd.MemoryType) {
 		return common.ErrInvalidArgument
 	}
+	if !modulecommon.IsWritableMemoryTypeForSource(cmd.SourceType, cmd.MemoryType) {
+		return common.ErrInvalidArgument
+	}
 	if hasBlank(cmd.Tags) {
 		return common.ErrInvalidArgument
 	}
@@ -77,6 +81,9 @@ func validateMemoryCommand(cmd memoryservice.CreateMemoryItemCommand) error {
 		cmd.SourceRef == "" &&
 		cmd.MemoryType != modulecommon.MemoryTypeProjectContext &&
 		cmd.MemoryType != modulecommon.MemoryTypeUserPreference {
+		return common.ErrInvalidArgument
+	}
+	if modulecommon.ContainsSensitiveMemoryText(cmd.Summary, cmd.Content, cmd.EmbeddingText, strings.Join(cmd.Tags, " ")) {
 		return common.ErrInvalidArgument
 	}
 	return nil

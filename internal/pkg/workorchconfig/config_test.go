@@ -56,6 +56,23 @@ disabled = false
 
 [webSearch.providers.search.headers]
 X-WorkOrch-Client = "workorch"
+
+[governance.autoTicket]
+enabled = true
+minConfidence = 0.82
+maxPerRun = 5
+
+[governance.autoApproval]
+enabled = true
+minConfidence = 0.9
+maxPerRun = 3
+allowReadOnly = true
+allowWorkspaceWrite = true
+requireHumanFor = ["ssh_write", "secret_access"]
+
+[governance.budget]
+maxConsecutiveFailures = 2
+maxRepeatedSamePrompt = 1
 	`)
 	_ = Close()
 	t.Setenv(EnvConfigDir, configDir)
@@ -89,6 +106,14 @@ X-WorkOrch-Client = "workorch"
 		cfg.WebSearch.Providers["search"].SearchEndpoint != "https://search.example.test/search" ||
 		cfg.WebSearch.Providers["search"].Headers["X-WorkOrch-Client"] != "workorch" {
 		t.Fatalf("web search config = %+v, want provider config", cfg.WebSearch)
+	}
+	if cfg.Governance.AutoTicket.Enabled == nil || !*cfg.Governance.AutoTicket.Enabled ||
+		cfg.Governance.AutoTicket.MinConfidence != 0.82 ||
+		cfg.Governance.AutoApproval.Enabled == nil || !*cfg.Governance.AutoApproval.Enabled ||
+		cfg.Governance.AutoApproval.AllowReadOnly == nil || !*cfg.Governance.AutoApproval.AllowReadOnly ||
+		len(cfg.Governance.AutoApproval.RequireHumanFor) != 2 ||
+		cfg.Governance.Budget.MaxConsecutiveFailures != 2 {
+		t.Fatalf("governance config = %+v, want auto governance settings", cfg.Governance)
 	}
 }
 
@@ -144,6 +169,24 @@ disabled = false
 			MaxResults:     8,
 		},
 	}
+	trueValue := true
+	cfg.Governance.AutoTicket = GovernanceAutoTicketConfig{
+		Enabled:       &trueValue,
+		MinConfidence: 0.85,
+		MaxPerRun:     4,
+	}
+	cfg.Governance.AutoApproval = GovernanceAutoApprovalConfig{
+		Enabled:             &trueValue,
+		MinConfidence:       0.92,
+		MaxPerRun:           2,
+		AllowReadOnly:       &trueValue,
+		AllowWorkspaceWrite: &trueValue,
+		RequireHumanFor:     []string{"ssh_write", "production_operation"},
+	}
+	cfg.Governance.Budget = GovernanceBudgetConfig{
+		MaxConsecutiveFailures: 3,
+		MaxRepeatedSamePrompt:  1,
+	}
 	if err := Save(cfg); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
@@ -163,6 +206,13 @@ disabled = false
 	if next.WebSearch.DefaultProvider != "search" ||
 		next.WebSearch.Providers["search"].FetchEndpoint != "https://search.example.test/fetch" {
 		t.Fatalf("next web search config = %+v, want saved web search provider", next.WebSearch)
+	}
+	if next.Governance.AutoTicket.Enabled == nil || !*next.Governance.AutoTicket.Enabled ||
+		next.Governance.AutoTicket.MaxPerRun != 4 ||
+		next.Governance.AutoApproval.MaxPerRun != 2 ||
+		len(next.Governance.AutoApproval.RequireHumanFor) != 2 ||
+		next.Governance.Budget.MaxConsecutiveFailures != 3 {
+		t.Fatalf("next governance config = %+v, want saved governance config", next.Governance)
 	}
 }
 

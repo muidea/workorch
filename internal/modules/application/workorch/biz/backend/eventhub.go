@@ -394,6 +394,14 @@ func convertEnvelope(envelope events.Envelope) Event {
 		return Event{Type: EventPatchFailed, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
 	case events.TopicPatchReverted:
 		return Event{Type: EventPatchReverted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
+	case events.TopicGovernanceAutoEvaluated:
+		return Event{Type: EventGovernanceEvaluated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
+	case events.TopicGovernanceAutoResolved:
+		return Event{Type: EventGovernanceResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
+	case events.TopicGovernanceAutoEscalated:
+		return Event{Type: EventGovernanceEscalated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
+	case events.TopicGovernanceAutoBlocked:
+		return Event{Type: EventGovernanceBlocked, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
 	default:
 		return Event{}
 	}

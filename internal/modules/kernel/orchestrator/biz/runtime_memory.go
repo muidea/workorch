@@ -19,6 +19,16 @@ type runtimeMemoryWriteRequest struct {
 	Tags       []string
 }
 
+var runtimeMemoryLongTermPreferenceKeywords = []string{
+	"preference", "prefer", "default", "always", "habit", "convention", "policy",
+	"偏好", "默认", "习惯", "优先", "长期",
+}
+
+var runtimeMemoryConfirmedConventionKeywords = []string{
+	"confirmed", "agreed", "adopted", "convention", "rule", "guideline",
+	"已确认", "确认", "约定", "规范", "规则", "统一",
+}
+
 func (o *RuntimeOrchestrator) recordMemoryWrites(
 	ctx context.Context,
 	run *runModel.Run,
@@ -78,19 +88,19 @@ func runtimeMemoryWriteRequests(output map[string]any) ([]runtimeMemoryWriteRequ
 	if output == nil || output[stepOutputKeyMemoryWrites] == nil {
 		return runtimeRunSummaryMemoryWrite(output), nil
 	}
-	var ret []runtimeMemoryWriteRequest
+	ret := []runtimeMemoryWriteRequest{}
 	switch items := output[stepOutputKeyMemoryWrites].(type) {
 	case []map[string]any:
-		ret = make([]runtimeMemoryWriteRequest, 0, len(items)+1)
 		for _, item := range items {
 			request, err := runtimeMemoryWriteRequestFromMap(item)
 			if err != nil {
 				return nil, err
 			}
-			ret = append(ret, request)
+			if shouldPersistRuntimeMemoryWrite(request) {
+				ret = append(ret, request)
+			}
 		}
 	case []any:
-		ret = make([]runtimeMemoryWriteRequest, 0, len(items)+1)
 		for _, item := range items {
 			mapped, ok := item.(map[string]any)
 			if !ok {
@@ -100,7 +110,9 @@ func runtimeMemoryWriteRequests(output map[string]any) ([]runtimeMemoryWriteRequ
 			if err != nil {
 				return nil, err
 			}
-			ret = append(ret, request)
+			if shouldPersistRuntimeMemoryWrite(request) {
+				ret = append(ret, request)
+			}
 		}
 	default:
 		return nil, common.ErrInvalidArgument
@@ -120,9 +132,46 @@ func runtimeMemoryWriteRequestFromMap(item map[string]any) (runtimeMemoryWriteRe
 	return runtimeMemoryWriteRequest{
 		MemoryType: memoryType,
 		Summary:    summary,
-		Content:    content,
+		Content:    strings.TrimSpace(content),
 		Tags:       stringSliceFromValue(item["tags"]),
 	}, nil
+}
+
+func shouldPersistRuntimeMemoryWrite(request runtimeMemoryWriteRequest) bool {
+	request.MemoryType = strings.TrimSpace(request.MemoryType)
+	request.Summary = strings.TrimSpace(request.Summary)
+	request.Content = strings.TrimSpace(request.Content)
+	if request.MemoryType == "" || request.Summary == "" {
+		return false
+	}
+	if !memorycommon.IsWritableMemoryTypeForSource(memorycommon.MemorySourceRun, request.MemoryType) {
+		return false
+	}
+	if request.MemoryType != memorycommon.MemoryTypeProjectContext &&
+		request.MemoryType != memorycommon.MemoryTypeUserPreference {
+		return false
+	}
+	joinedTags := strings.ToLower(strings.Join(request.Tags, " "))
+	if memorycommon.ContainsSensitiveMemoryText(request.Summary, request.Content, joinedTags) {
+		return false
+	}
+	if request.MemoryType == memorycommon.MemoryTypeProjectContext {
+		return containsAnyKeyword(request.Summary, request.Content, joinedTags, runtimeMemoryConfirmedConventionKeywords)
+	}
+	return containsAnyKeyword(request.Summary, request.Content, joinedTags, runtimeMemoryLongTermPreferenceKeywords)
+}
+
+func containsAnyKeyword(summary string, content string, tags string, keywords []string) bool {
+	text := strings.ToLower(strings.TrimSpace(strings.Join([]string{summary, content, tags}, "\n")))
+	if text == "" {
+		return false
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(text, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeRunSummaryMemoryWrite(output map[string]any) []runtimeMemoryWriteRequest {

@@ -101,28 +101,44 @@ type ValidationResult struct {
 
 // Decision & Approval types.
 type Decision struct {
-	ID             string         `json:"id"`
-	WorkspaceID    string         `json:"workspaceId"`
-	RunID          string         `json:"runId"`
-	StepID         string         `json:"stepId,omitempty"`
-	Reason         string         `json:"reason"`
-	DecisionKind   string         `json:"decisionKind,omitempty"`
-	Question       string         `json:"question,omitempty"`
-	Context        map[string]any `json:"context,omitempty"`
-	State          string         `json:"state"`
-	ResolutionID   string         `json:"resolutionId,omitempty"`
-	ResolutionType string         `json:"resolutionType,omitempty"`
+	ID             string                 `json:"id"`
+	WorkspaceID    string                 `json:"workspaceId"`
+	RunID          string                 `json:"runId"`
+	StepID         string                 `json:"stepId,omitempty"`
+	Reason         string                 `json:"reason"`
+	DecisionKind   string                 `json:"decisionKind,omitempty"`
+	Question       string                 `json:"question,omitempty"`
+	Context        map[string]any         `json:"context,omitempty"`
+	State          string                 `json:"state"`
+	ResolutionID   string                 `json:"resolutionId,omitempty"`
+	ResolutionType string                 `json:"resolutionType,omitempty"`
+	AutoGovernance *AutoGovernanceSummary `json:"autoGovernance,omitempty"`
 }
 
 type Approval struct {
-	ID          string         `json:"id"`
-	WorkspaceID string         `json:"workspaceId"`
-	RunID       string         `json:"runId"`
-	StepID      string         `json:"stepId,omitempty"`
-	Reason      string         `json:"reason"`
-	Action      string         `json:"action,omitempty"`
-	Context     map[string]any `json:"context,omitempty"`
-	State       string         `json:"state"`
+	ID             string                 `json:"id"`
+	WorkspaceID    string                 `json:"workspaceId"`
+	RunID          string                 `json:"runId"`
+	StepID         string                 `json:"stepId,omitempty"`
+	Reason         string                 `json:"reason"`
+	Action         string                 `json:"action,omitempty"`
+	Context        map[string]any         `json:"context,omitempty"`
+	State          string                 `json:"state"`
+	AutoGovernance *AutoGovernanceSummary `json:"autoGovernance,omitempty"`
+}
+
+type AutoGovernanceSummary struct {
+	TraceID           string   `json:"traceId"`
+	Action            string   `json:"action"`
+	Status            string   `json:"status"`
+	RiskLevel         string   `json:"riskLevel,omitempty"`
+	PolicyMatched     string   `json:"policyMatched,omitempty"`
+	PolicyBlocked     string   `json:"policyBlocked,omitempty"`
+	Confidence        float64  `json:"confidence,omitempty"`
+	Reason            string   `json:"reason,omitempty"`
+	EvidenceRefs      []string `json:"evidenceRefs,omitempty"`
+	PromptFingerprint string   `json:"promptFingerprint,omitempty"`
+	OccurredAt        string   `json:"occurredAt,omitempty"`
 }
 
 // Soul & Skill types.
