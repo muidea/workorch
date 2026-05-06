@@ -593,6 +593,15 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 		!reflect.DeepEqual(first.Results[0].DoDAssessment.Items[0].EvidenceRefs, []string{"validation-evidence-snapshot"}) {
 		t.Fatalf("result DoD assessment items = %+v, want satisfied evidence item", first.Results[0].DoDAssessment.Items)
 	}
+	if len(first.DoDEvidence) != 1 ||
+		first.DoDEvidence[0].ResultID != string(resultID) ||
+		first.DoDEvidence[0].DoDID != "dod-evidence-snapshot" ||
+		!first.DoDEvidence[0].Satisfied ||
+		len(first.DoDEvidence[0].Items) != 1 ||
+		first.DoDEvidence[0].Items[0].EvidenceStatus != "linked" ||
+		len(first.DoDEvidence[0].Items[0].MissingEvidenceRefs) != 0 {
+		t.Fatalf("dod evidence = %+v, want item-level trace with linked evidence refs", first.DoDEvidence)
+	}
 	if first.Results[0].SummaryDetail == nil ||
 		first.Results[0].SummaryDetail.ImplementationSummary != "implemented requested changes" ||
 		!reflect.DeepEqual(first.Results[0].SummaryDetail.ArtifactRefs, []string{"artifact-evidence-snapshot"}) {
@@ -603,6 +612,24 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 	}
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("snapshot mismatch after reload: first=%+v second=%+v", first, second)
+	}
+	if len(first.ResultQuality) != 1 ||
+		first.ResultQuality[0].ResultID != string(resultID) ||
+		first.ResultQuality[0].State != "passed" {
+		t.Fatalf("result quality = %+v, want one passed trace", first.ResultQuality)
+	}
+	if len(first.ResultQuality[0].Issues) != 0 {
+		t.Fatalf("result quality issues = %+v, want no quality issues", first.ResultQuality[0].Issues)
+	}
+	observability, err := ReadRunObservabilityWithBackend(context.Background(), "file", dataRoot, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunObservabilityWithBackend: %v", err)
+	}
+	if len(observability.DoDEvidence) != 1 || len(observability.DoDEvidence[0].Items) != 1 || observability.DoDEvidence[0].Items[0].EvidenceStatus != "linked" {
+		t.Fatalf("observability dod evidence = %+v, want dod evidence trace", observability.DoDEvidence)
+	}
+	if len(observability.ResultQuality) != 1 || observability.ResultQuality[0].State != "passed" {
+		t.Fatalf("observability result quality = %+v, want passed result quality trace", observability.ResultQuality)
 	}
 }
 
@@ -690,6 +717,56 @@ func TestReadRunSnapshotWithBackendReturnsSelectedAndUsedCapabilities(t *testing
 	}
 	if len(observability.SelectedCapabilities) != 1 || len(observability.UsedCapabilities) != 1 {
 		t.Fatalf("observability capabilities = selected:%+v used:%+v, want capability refs", observability.SelectedCapabilities, observability.UsedCapabilities)
+	}
+}
+
+func TestMapResultQualityFlagsWeakResult(t *testing.T) {
+	snapshot := RunSnapshot{
+		Run: Run{
+			ID:              "run-quality-weak",
+			WorkspaceID:     "ws-quality-weak",
+			DoDID:           "dod-quality-weak",
+			State:           "completed",
+			InitialStepKind: "llm/workspace_execution",
+		},
+		Results: []Result{
+			{
+				ID:          "result-quality-weak",
+				WorkspaceID: "ws-quality-weak",
+				RunID:       "run-quality-weak",
+				DoDID:       "dod-quality-weak",
+				State:       "accepted",
+				Summary:     "too thin",
+				DoDAssessment: &DoDAssessment{
+					Satisfied: true,
+					Summary:   "too thin",
+					Items: []DoDAssessmentItem{
+						{Item: "tests pass", State: "satisfied", EvidenceRefs: []string{"step-1"}},
+					},
+				},
+				SummaryDetail: &ResultSummary{
+					DoDItems: []DoDAssessmentItem{
+						{Item: "tests pass", State: "satisfied", EvidenceRefs: []string{"step-1"}},
+					},
+				},
+			},
+		},
+	}
+	quality := mapResultQuality(snapshot)
+	if len(quality) != 1 {
+		t.Fatalf("result quality = %+v, want one trace", quality)
+	}
+	if quality[0].State != "failed" {
+		t.Fatalf("result quality state = %q, want failed", quality[0].State)
+	}
+	codes := map[string]bool{}
+	for _, issue := range quality[0].Issues {
+		codes[issue.Code] = true
+	}
+	for _, want := range []string{"missing_goal_outcome", "missing_verification_summary", "missing_evidence_refs", "missing_risk_disclosure"} {
+		if !codes[want] {
+			t.Fatalf("result quality issues = %+v, missing %s", quality[0].Issues, want)
+		}
 	}
 }
 
@@ -809,6 +886,16 @@ func TestMapRunObservabilityReusesSnapshotProjection(t *testing.T) {
 			State:   "completed",
 			Summary: "cached decomposition",
 		}},
+		TaskPlans: []TaskPlan{{
+			ID:             "cached-root/plan/1",
+			RunID:          "run-observability-projection",
+			AnchorStepID:   "cached-root",
+			RevisionStepID: "cached-root",
+			Revision:       1,
+			State:          "accepted",
+			Summary:        "cached plan",
+			NodeTotal:      1,
+		}},
 		ExecutionSections: []ExecutionSection{{
 			ID:      "cached-section",
 			RunID:   "run-observability-projection",
@@ -825,6 +912,9 @@ func TestMapRunObservabilityReusesSnapshotProjection(t *testing.T) {
 	}
 	if len(observability.TaskDecompositions) != 1 || observability.TaskDecompositions[0].ID != "cached-decomposition" {
 		t.Fatalf("task decompositions = %+v, want cached projection", observability.TaskDecompositions)
+	}
+	if len(observability.TaskPlans) != 1 || observability.TaskPlans[0].ID != "cached-root/plan/1" {
+		t.Fatalf("task plans = %+v, want cached projection", observability.TaskPlans)
 	}
 	if len(observability.ExecutionSections) != 1 || observability.ExecutionSections[0].ID != "cached-section" {
 		t.Fatalf("execution sections = %+v, want cached projection", observability.ExecutionSections)
@@ -1349,6 +1439,126 @@ func TestReadRunTaskProgressWithBackendReturnsDecisionRecovery(t *testing.T) {
 	}
 }
 
+func TestMapTaskProgressProjectsRepairLoopState(t *testing.T) {
+	snapshot := RunSnapshot{
+		Workspace: Workspace{ID: "ws-repair-loop"},
+		Run: Run{
+			ID:          "run-repair-loop",
+			WorkspaceID: "ws-repair-loop",
+			State:       string(common.RunStateRunning),
+		},
+		Steps: []presenter.StepView{
+			{
+				ID:    "run-repair-loop/block/run-tests",
+				Kind:  "shell/command",
+				State: string(common.StepStateFailed),
+				Output: map[string]any{
+					"failureClass":     "shell_command_failed",
+					"failureSignature": "kind=shell/command",
+				},
+			},
+			{
+				ID:    "run-repair-loop/zz-llm-repair-run-tests-1",
+				Kind:  "llm/workspace_execution",
+				State: string(common.StepStateCompleted),
+				Input: map[string]any{
+					"runtimeRepairFollowUp": true,
+					"runtimeRepairAttempt":  1,
+				},
+			},
+			{
+				ID:    "run-repair-loop/zz-llm-repair-run-tests-2",
+				Kind:  "llm/workspace_execution",
+				State: string(common.StepStateDispatched),
+				Input: map[string]any{
+					"runtimeRepairFollowUp": true,
+					"runtimeRepairAttempt":  2,
+				},
+			},
+		},
+		RuntimeCheckpoints: []RuntimeCheckpoint{
+			{
+				ID:            "checkpoint-repair-failure-2",
+				RunID:         "run-repair-loop",
+				CurrentStepID: "run-repair-loop/block/run-tests",
+				OccurredAt:    "2026-05-06T10:00:02Z",
+				Data: map[string]any{
+					"event":            "step_failed",
+					"failureClass":     "shell_command_failed",
+					"failureSignature": "kind=shell/command",
+				},
+			},
+		},
+	}
+
+	progress := mapTaskProgress(snapshot)
+	if progress.RepairLoop.State != "repairing" ||
+		progress.RepairLoop.AttemptCount != 2 ||
+		progress.RepairLoop.LastAttempt != 2 ||
+		progress.RepairLoop.LastRepairStepID != "run-repair-loop/zz-llm-repair-run-tests-2" ||
+		progress.RepairLoop.LastFailureClass != "shell_command_failed" ||
+		progress.RepairLoop.LastFailureSignature != "kind=shell/command" ||
+		progress.RepairLoop.LastFailureStepID != "run-repair-loop/block/run-tests" ||
+		progress.RepairLoop.NextAction != "continue_run" {
+		t.Fatalf("repairLoop = %+v, want repairing projection with attempts/failure/next action", progress.RepairLoop)
+	}
+}
+
+func TestMapTaskProgressProjectsRepairLoopEscalation(t *testing.T) {
+	snapshot := RunSnapshot{
+		Workspace: Workspace{ID: "ws-repair-escalation"},
+		Run: Run{
+			ID:               "run-repair-escalation",
+			WorkspaceID:      "ws-repair-escalation",
+			State:            string(common.RunStateBlockedOnDecision),
+			BlockingTicketID: "ticket-repair-exhausted",
+		},
+		Steps: []presenter.StepView{
+			{
+				ID:    "run-repair-escalation/zz-llm-repair-run-tests-1",
+				Kind:  "llm/workspace_execution",
+				State: string(common.StepStateCompleted),
+				Input: map[string]any{
+					"runtimeRepairFollowUp": true,
+					"runtimeRepairAttempt":  1,
+				},
+			},
+			{
+				ID:    "run-repair-escalation/zz-llm-repair-run-tests-2",
+				Kind:  "llm/workspace_execution",
+				State: string(common.StepStateCompleted),
+				Input: map[string]any{
+					"runtimeRepairFollowUp": true,
+					"runtimeRepairAttempt":  2,
+				},
+			},
+		},
+		Decisions: []Decision{
+			{
+				ID:     "ticket-repair-exhausted",
+				RunID:  "run-repair-escalation",
+				Reason: "runtime repair attempts exhausted after 2 attempts",
+				State:  string(common.DecisionTicketStateOpen),
+				Context: map[string]any{
+					"attempts":         2,
+					"failureClass":     "shell_command_failed",
+					"failureSignature": "kind=shell/command",
+				},
+			},
+		},
+	}
+
+	progress := mapTaskProgress(snapshot)
+	if progress.RepairLoop.State != "escalated_decision" ||
+		!progress.RepairLoop.Escalated ||
+		progress.RepairLoop.EscalationTicketID != "ticket-repair-exhausted" ||
+		progress.RepairLoop.EscalationReason == "" ||
+		progress.RepairLoop.AttemptCount != 2 ||
+		progress.RepairLoop.NextAction != "resolve_decision_ticket" {
+		t.Fatalf("repairLoop = %+v, want escalated decision projection", progress.RepairLoop)
+	}
+}
+
 func TestReadWorkspaceTaskProgressWithBackendReturnsActiveRunProgress(t *testing.T) {
 	dataRoot := t.TempDir()
 	workspaceID := "ws-task-progress-approval"
@@ -1632,6 +1842,13 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 	}
 	if len(snapshot.ExecutionSections) != 2 {
 		t.Fatalf("executionSections = %+v, want two sections", snapshot.ExecutionSections)
+	}
+	if len(snapshot.TaskPlans) != 1 ||
+		snapshot.TaskPlans[0].AnchorStepID != string(rootStepID) ||
+		snapshot.TaskPlans[0].Revision != 1 ||
+		snapshot.TaskPlans[0].State != "accepted" ||
+		snapshot.TaskPlans[0].NodeTotal != 2 {
+		t.Fatalf("taskPlans = %+v, want one accepted plan revision", snapshot.TaskPlans)
 	}
 	inspectSection := snapshot.ExecutionSections[0]
 	if inspectSection.GraphNodeID != "inspect" || inspectSection.State != "completed" || inspectSection.StepID != "run-task-decomposition/block/inspect" {

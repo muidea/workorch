@@ -227,3 +227,174 @@ func (o *RuntimeOrchestrator) recordRunSummaryMemoryFromValidatedDoDAssessment(
 	}
 	return o.publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
 }
+
+func (o *RuntimeOrchestrator) recordValidationCommandMemoriesFromValidatedDoDAssessment(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	assessment map[string]any,
+) error {
+	if run == nil || step == nil || o.evidence.MemoryItems == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
+		return nil
+	}
+	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
+	evidenceDetails := o.resultEvidenceDetails(ctx, evidenceRefs)
+	commands := validationCommandMemoryEntries(evidenceDetails)
+	if len(commands) == 0 {
+		return nil
+	}
+	if err := o.upsertRunMemoryItem(ctx, &memorymodel.MemoryItem{
+		ID:          common.MemoryID(fmt.Sprintf("%s/memory/validation-commands", run.ID)),
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		SourceType:  memorycommon.MemorySourceRun,
+		SourceRef:   string(step.ID),
+		MemoryType:  memorycommon.MemoryTypeProjectContext,
+		Summary:     "Validation command baseline captured",
+		Content:     validationCommandMemoryContent(run, commands),
+		Tags:        []string{"validation_command", "verification", "provenance"},
+		Importance:  65,
+		Confidence:  70,
+		Visibility:  "workspace",
+	}); err != nil {
+		return err
+	}
+	lessons := validationFailureMemoryEntries(commands)
+	if len(lessons) == 0 {
+		return nil
+	}
+	return o.upsertRunMemoryItem(ctx, &memorymodel.MemoryItem{
+		ID:          common.MemoryID(fmt.Sprintf("%s/memory/validation-failure-lessons", run.ID)),
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		SourceType:  memorycommon.MemorySourceRun,
+		SourceRef:   string(step.ID),
+		MemoryType:  memorycommon.MemoryTypeExecutionLesson,
+		Summary:     "Validation failure signals captured for repair",
+		Content:     validationFailureLessonContent(run, lessons),
+		Tags:        []string{"validation_failure", "repair_loop", "provenance"},
+		Importance:  70,
+		Confidence:  70,
+		Visibility:  "workspace",
+	})
+}
+
+type validationCommandEntry struct {
+	Command  string
+	ExitCode string
+	Ref      string
+	Stderr   string
+}
+
+func validationCommandMemoryEntries(details []resultEvidenceDetail) []validationCommandEntry {
+	if len(details) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	ret := make([]validationCommandEntry, 0, len(details))
+	for _, detail := range details {
+		command := strings.TrimSpace(detail.Command)
+		if command == "" {
+			continue
+		}
+		ref := strings.TrimSpace(detail.Ref)
+		exitCode := strings.TrimSpace(detail.ExitCode)
+		key := command + "|" + exitCode + "|" + ref
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		ret = append(ret, validationCommandEntry{
+			Command:  command,
+			ExitCode: firstNonEmptyOrchestratorString(exitCode, "unknown"),
+			Ref:      ref,
+			Stderr:   strings.TrimSpace(detail.Stderr),
+		})
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func validationCommandMemoryContent(run *runModel.Run, items []validationCommandEntry) string {
+	var builder strings.Builder
+	builder.WriteString("Validation commands with provenance evidence:\n")
+	for _, item := range items {
+		builder.WriteString(fmt.Sprintf("- %s | exitCode=%s | evidence=%s\n", item.Command, item.ExitCode, firstNonEmptyOrchestratorString(item.Ref, "n/a")))
+	}
+	if run != nil {
+		builder.WriteString(fmt.Sprintf("\nRun: %s\n", run.ID))
+		if run.GoalID != "" {
+			builder.WriteString(fmt.Sprintf("Goal: %s\n", run.GoalID))
+		}
+		if run.DoDID != "" {
+			builder.WriteString(fmt.Sprintf("DoD: %s\n", run.DoDID))
+		}
+	}
+	return strings.TrimSpace(builder.String())
+}
+
+func validationFailureMemoryEntries(items []validationCommandEntry) []validationCommandEntry {
+	ret := make([]validationCommandEntry, 0)
+	for _, item := range items {
+		if strings.TrimSpace(item.ExitCode) != "" && strings.TrimSpace(item.ExitCode) != "0" {
+			ret = append(ret, item)
+			continue
+		}
+		if strings.TrimSpace(item.Stderr) != "" {
+			ret = append(ret, item)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func validationFailureLessonContent(run *runModel.Run, items []validationCommandEntry) string {
+	var builder strings.Builder
+	builder.WriteString("Validation failures observed during execution and used for repair:\n")
+	for _, item := range items {
+		builder.WriteString(fmt.Sprintf("- %s | exitCode=%s | evidence=%s", item.Command, item.ExitCode, firstNonEmptyOrchestratorString(item.Ref, "n/a")))
+		if item.Stderr != "" {
+			builder.WriteString(fmt.Sprintf(" | stderr=%s", item.Stderr))
+		}
+		builder.WriteString("\n")
+	}
+	if run != nil {
+		builder.WriteString(fmt.Sprintf("\nRun: %s", run.ID))
+	}
+	return strings.TrimSpace(builder.String())
+}
+
+func (o *RuntimeOrchestrator) upsertRunMemoryItem(ctx context.Context, item *memorymodel.MemoryItem) error {
+	if o == nil || o.evidence.MemoryItems == nil || item == nil {
+		return nil
+	}
+	if err := o.evidence.MemoryItems.Create(ctx, item); err != nil {
+		if err != common.ErrConflict {
+			return err
+		}
+		existing, getErr := o.evidence.MemoryItems.Get(ctx, item.ID)
+		if getErr != nil {
+			return getErr
+		}
+		existing.WorkspaceID = item.WorkspaceID
+		existing.RunID = item.RunID
+		existing.SourceType = item.SourceType
+		existing.SourceRef = item.SourceRef
+		existing.MemoryType = item.MemoryType
+		existing.Content = item.Content
+		existing.Summary = item.Summary
+		existing.Tags = item.Tags
+		existing.Importance = item.Importance
+		existing.Confidence = item.Confidence
+		existing.Visibility = item.Visibility
+		if err := o.evidence.MemoryItems.Update(ctx, existing); err != nil {
+			return err
+		}
+		return o.publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
+	}
+	return o.publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
+}

@@ -16,6 +16,7 @@ type WorkspaceContextMsg struct {
 	ActiveRun *backend.RunInfo
 	Status    *backend.RunStatusInfo
 	Goal      *backend.GoalInfo
+	DoD       *backend.DoDInfo
 	Decisions []backend.DecisionInfo
 	Approvals []backend.ApprovalInfo
 	Error     error

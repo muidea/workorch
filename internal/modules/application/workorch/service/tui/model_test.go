@@ -1310,8 +1310,21 @@ Docker version 29.2.1, build a5c7197
 		Snapshot: &backend.WorkspaceSnapshotInfo{
 			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateCompleted, ActiveRunID: "run-1"},
 			Outcome:   backend.WorkspaceOutcomeInfo{RunID: "run-1", Summary: "目标已完成，成功查询到远程服务器配置信息。"},
-			Runs:      []backend.RunInfo{{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: common.RunStateCompleted}},
-			Results:   []backend.ResultInfo{{ID: "result-1", RunID: "run-1", Summary: "目标已完成，成功查询到远程服务器配置信息。"}},
+			TaskProgress: backend.TaskProgressInfo{
+				State: "running",
+				Recovery: backend.RecoveryPlanInfo{
+					Mode:       "continue",
+					NextAction: "continue_run",
+				},
+				RepairLoop: backend.RepairLoopInfo{
+					State:        "repairing",
+					AttemptCount: 2,
+					LastAttempt:  2,
+					NextAction:   "continue_run",
+				},
+			},
+			Runs:    []backend.RunInfo{{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: common.RunStateCompleted}},
+			Results: []backend.ResultInfo{{ID: "result-1", RunID: "run-1", Summary: "目标已完成，成功查询到远程服务器配置信息。"}},
 			Artifacts: []backend.ArtifactInfo{{
 				ID:       "run-1/artifact/result-summary",
 				RunID:    "run-1",
@@ -1338,6 +1351,9 @@ Docker version 29.2.1, build a5c7197
 	if strings.Contains(m.result, "very long flags line") {
 		t.Fatalf("result should compact noisy stdout lines:\n%s", m.result)
 	}
+	if !strings.Contains(stripANSI(m.View()), "repair #2") {
+		t.Fatalf("view should render repair loop summary:\n%s", stripANSI(m.View()))
+	}
 	m.width = 100
 	m.height = 34
 	view := stripANSI(m.View())
@@ -1360,6 +1376,76 @@ func TestModelResultAcceptedRefreshesWorkspaceContext(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("expected result accepted event to refresh workspace snapshot")
+	}
+}
+
+func TestModelWorkspaceContextRendersBusinessSectionsFromSnapshot(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	next, _ := m.Update(WorkspaceContextMsg{
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-1"},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-1"},
+			TaskProgress: backend.TaskProgressInfo{
+				State: "running",
+			},
+			TaskDecompositions: []backend.TaskDecompositionInfo{
+				{
+					ID:            "td-1",
+					RunID:         "run-1",
+					State:         "running",
+					Summary:       "分解代码任务并执行验证",
+					NodeTotal:     3,
+					NodeCompleted: 1,
+					NodeRunning:   1,
+				},
+			},
+			MemoryRecallTraces: []backend.MemoryRecallTraceInfo{
+				{
+					ID:                 "mr-1",
+					RunID:              "run-1",
+					Source:             "vector",
+					Stage:              "execution",
+					Status:             "selected",
+					RetrievedMemoryIDs: []common.MemoryID{"memory-1"},
+				},
+			},
+			Decisions: []backend.DecisionInfo{
+				{ID: "ticket-1", RunID: "run-1", Question: "需要补充部署目标环境", State: "open"},
+			},
+			Approvals: []backend.ApprovalInfo{
+				{ID: "approval-1", RunID: "run-1", Reason: "准备执行潜在风险命令", State: "pending"},
+			},
+		},
+		ActiveRun: &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", DoDID: "dod-1", State: common.RunStateRunning},
+		Goal:      &backend.GoalInfo{ID: "goal-1", Text: "完成服务配置修复"},
+		DoD:       &backend.DoDInfo{ID: "dod-1", Items: []string{"变更最小化", "验证通过"}},
+		Decisions: []backend.DecisionInfo{
+			{ID: "ticket-1", RunID: "run-1", Question: "需要补充部署目标环境", State: "open"},
+		},
+		Approvals: []backend.ApprovalInfo{
+			{ID: "approval-1", RunID: "run-1", Reason: "准备执行潜在风险命令", State: "pending"},
+		},
+	})
+	m = asModel(next)
+	m.width = 140
+	m.height = 48
+	view := stripANSI(m.View())
+	for _, want := range []string{
+		"Goal: 完成服务配置修复",
+		"DoD",
+		"变更最小化",
+		"Task Decomposition",
+		"分解代码任务并执行验证",
+		"Memory Recall",
+		"vector/execution: selected",
+		"Governance",
+		"decision",
+		"approval",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view missing %q:\n%s", want, view)
+		}
 	}
 }
 

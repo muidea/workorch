@@ -86,6 +86,49 @@ func TestServiceCreateSoulAndValidateCapabilitySelection(t *testing.T) {
 	}
 }
 
+func TestServiceValidateCapabilitySelectionAllowsWildcardRefs(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(memory.NewSoulRepository())
+
+	if err := service.CreateSoul(ctx, soulservice.CreateSoulCommand{
+		SoulID:                      common.SoulID("soul-wildcard"),
+		Name:                        "wildcard execution",
+		SoulMD:                      "# Wildcard Execution\n\nAllow dynamic refs while constraining capability categories and tool kinds.\n",
+		AllowedSkillRefs:            []string{"*"},
+		AllowedMCPServerRefs:        []string{"*"},
+		AllowedCapabilityRefs:       []string{"*"},
+		AllowedCapabilityCategories: []string{"tool"},
+		AllowedToolKinds:            []string{"mcp/tool_call"},
+	}); err != nil {
+		t.Fatalf("create soul: %v", err)
+	}
+
+	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
+		SoulID:               common.SoulID("soul-wildcard"),
+		SkillRefs:            []string{"skill-dynamic"},
+		MCPServerRefs:        []string{"mcp-dynamic"},
+		CapabilityRefs:       []string{"mcp-dynamic:tool:weather.current"},
+		CapabilityCategories: []string{"tool"},
+		ToolKinds:            []string{"mcp/tool_call"},
+	}); err != nil {
+		t.Fatalf("validate wildcard capability selection: %v", err)
+	}
+
+	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
+		SoulID:    common.SoulID("soul-wildcard"),
+		SkillRefs: []string{" "},
+	}); !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "selected skill is blank") {
+		t.Fatalf("validate wildcard blank skill err = %v, want invalid argument", err)
+	}
+
+	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
+		SoulID:               common.SoulID("soul-wildcard"),
+		CapabilityCategories: []string{"resource"},
+	}); !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "resource") {
+		t.Fatalf("validate wildcard disallowed category err = %v, want invalid argument", err)
+	}
+}
+
 func TestServiceRejectsInvalidSoul(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(memory.NewSoulRepository())

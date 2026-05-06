@@ -159,6 +159,15 @@ func (m AppModel) renderMain(width, height int) string {
 	if len(m.dodItems) > 0 {
 		b.WriteString(renderDoDItems(m.dodItems, width-2, 4))
 	}
+	if section := renderTaskDecompositionSummary(m.taskDecomp, width-2, 3); section != "" {
+		b.WriteString(section)
+	}
+	if section := renderMemoryRecallCompact(m.memoryRecalls, width-2, 3); section != "" {
+		b.WriteString(section)
+	}
+	if section := renderGovernanceCompact(m.decisions, m.approvals, width-2, 2); section != "" {
+		b.WriteString(section)
+	}
 	b.WriteString(Dim.Render(strings.Repeat("-", max(10, width-2))))
 	b.WriteString("\n")
 
@@ -274,6 +283,87 @@ func (m AppModel) visiblePatches() []backend.PatchInfo {
 	return m.patches[len(m.patches)-8:]
 }
 
+func renderTaskDecompositionSummary(items []backend.TaskDecompositionInfo, width int, limit int) string {
+	if len(items) == 0 || width <= 0 || limit <= 0 {
+		return ""
+	}
+	if limit > len(items) {
+		limit = len(items)
+	}
+	var b strings.Builder
+	b.WriteString(Heading.Render("Task Decomposition"))
+	b.WriteString("\n")
+	for i := 0; i < limit; i++ {
+		item := items[i]
+		title := nonEmpty(item.Summary, item.ID)
+		nodes := ""
+		if item.NodeTotal > 0 {
+			nodes = fmt.Sprintf(" [%d/%d/%d/%d]", item.NodeCompleted, item.NodeRunning, item.NodeFailed, item.NodeTotal)
+		}
+		line := strings.TrimSpace(item.State + " " + title + nodes)
+		b.WriteString(truncateDisplay("- "+line, width))
+		b.WriteString("\n")
+	}
+	if len(items) > limit {
+		b.WriteString(truncateDisplay(fmt.Sprintf("+%d more decompositions", len(items)-limit), width))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func renderMemoryRecallCompact(items []backend.MemoryRecallTraceInfo, width int, limit int) string {
+	if len(items) == 0 || width <= 0 || limit <= 0 {
+		return ""
+	}
+	if limit > len(items) {
+		limit = len(items)
+	}
+	var b strings.Builder
+	b.WriteString(Heading.Render("Memory Recall"))
+	b.WriteString("\n")
+	for i := 0; i < limit; i++ {
+		item := items[i]
+		status := nonEmpty(item.Status, "unknown")
+		source := nonEmpty(item.Source, "unknown")
+		stage := nonEmpty(item.Stage, "unknown")
+		line := fmt.Sprintf("%s/%s: %s (%d)", source, stage, status, len(item.RetrievedMemoryIDs))
+		b.WriteString(truncateDisplay("- "+line, width))
+		b.WriteString("\n")
+	}
+	if len(items) > limit {
+		b.WriteString(truncateDisplay(fmt.Sprintf("+%d more memory recalls", len(items)-limit), width))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func renderGovernanceCompact(decisions []backend.DecisionInfo, approvals []backend.ApprovalInfo, width int, limit int) string {
+	openDecisions := filterOpenDecisions(decisions)
+	pendingApprovals := filterPendingApprovals(approvals)
+	if len(openDecisions) == 0 && len(pendingApprovals) == 0 {
+		return ""
+	}
+	if limit <= 0 {
+		limit = 1
+	}
+	var b strings.Builder
+	b.WriteString(Heading.Render("Governance"))
+	b.WriteString("\n")
+	for i := 0; i < len(openDecisions) && i < limit; i++ {
+		item := openDecisions[i]
+		line := fmt.Sprintf("decision %s %s", shortID(string(item.ID)), nonEmpty(item.State, item.Question, item.Reason))
+		b.WriteString(truncateDisplay("- "+line, width))
+		b.WriteString("\n")
+	}
+	for i := 0; i < len(pendingApprovals) && i < limit; i++ {
+		item := pendingApprovals[i]
+		line := fmt.Sprintf("approval %s %s", shortID(string(item.ID)), nonEmpty(item.State, item.Reason, item.Action))
+		b.WriteString(truncateDisplay("- "+line, width))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 func (m AppModel) renderActiveWorkspace(width int) string {
 	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
 	if ws == nil {
@@ -308,6 +398,9 @@ func (m AppModel) renderProgress(width int) string {
 	label := progressLabel(m.progress)
 	if m.progressText != "" && !strings.EqualFold(m.progressText, label) {
 		label += " - " + m.progressText
+	}
+	if m.repairLoop != "" {
+		label += " | " + m.repairLoop
 	}
 	label = truncateDisplay(label, width-2)
 	switch m.progress {

@@ -281,6 +281,9 @@ import sys
 snapshot = json.load(open(sys.argv[1], encoding="utf-8"))["snapshot"]
 observability = json.load(open(sys.argv[2], encoding="utf-8"))["observability"]
 run = snapshot["run"]
+routing = (run.get("executionContext") or {}).get("soulRouting") or {}
+bindings = routing.get("bindings") or {}
+execution_binding = bindings.get("execution") or {}
 steps = snapshot.get("steps") or ([] if not snapshot.get("step") else [snapshot["step"]])
 tool_calls = snapshot.get("toolCalls") or []
 validations = snapshot.get("validationResults") or []
@@ -291,6 +294,10 @@ errors = []
 
 if run.get("state") != "completed":
     errors.append(f"run state is {run.get('state')!r}, want completed: {run.get('failureReason', '')}")
+if routing.get("status") != "resolved":
+    errors.append(f"soulRouting.status is {routing.get('status')!r}, want resolved")
+if execution_binding.get("soulId") != "soul-weather-query-execution":
+    errors.append(f"execution soul binding is {execution_binding!r}, want soul-weather-query-execution")
 
 mcp_steps = [item for item in steps if item.get("kind") == "mcp/tool_call"]
 if not mcp_steps:
@@ -403,7 +410,7 @@ upsert_json "$BASE_URL/api/v1/workorch/mcp/servers" \
   "$TMP_DIR/mcp-server.json"
 
 post_json "$BASE_URL/api/v1/workorch/workspaces" \
-  '{"title":"真实天气查询验收","description":"通过真实 LLM 和 MCP stdio 天气工具查询浙江杭州当前天气。"}' \
+  '{"title":"真实天气查询验收","description":"通过真实 LLM 和 MCP stdio 天气工具查询浙江杭州当前天气。","templateId":"weather-query"}' \
   "$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]

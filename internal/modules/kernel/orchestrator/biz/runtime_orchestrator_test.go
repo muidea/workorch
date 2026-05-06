@@ -7018,6 +7018,90 @@ func TestRuntimeOrchestrator_ReusesValidatedDoDAssessmentForCompletionEvidence(t
 	}
 }
 
+func TestRuntimeOrchestrator_RecordsValidationCommandMemoriesFromDoDAssessment(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-validation-command-memory")
+	workspaceID := common.WorkspaceID("ws-validation-command-memory")
+	evidenceStepID := common.StepID(string(runID) + "/block/verify")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-validation-command-memory",
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/validation"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+	}
+	stepRepo := memory.NewStepRepository()
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    evidenceStepID,
+		RunID: runID,
+		Kind:  "shell/command",
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"command":  "go test ./...",
+			"exitCode": 1,
+			"stderr":   "compile error in internal/app.go",
+		},
+	}); err != nil {
+		t.Fatalf("seed evidence step: %v", err)
+	}
+	assessment := map[string]any{
+		"satisfied": true,
+		"summary":   "DoD satisfied after repair",
+		"items": []map[string]any{
+			{
+				"item":         "verification command tracked",
+				"state":        "satisfied",
+				"evidenceRefs": []string{string(evidenceStepID)},
+			},
+		},
+	}
+	memoryRepo := memory.NewMemoryItemRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			MemoryItems: memoryRepo,
+		},
+	}
+	if err := orch.recordValidationCommandMemoriesFromValidatedDoDAssessment(ctx, run, step, assessment); err != nil {
+		t.Fatalf("recordValidationCommandMemoriesFromValidatedDoDAssessment: %v", err)
+	}
+	memories, err := memoryRepo.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("list memories: %v", err)
+	}
+	var commandMemory *memorymodel.MemoryItem
+	var lessonMemory *memorymodel.MemoryItem
+	for _, item := range memories {
+		if item == nil || item.RunID != runID {
+			continue
+		}
+		switch item.MemoryType {
+		case memorycommon.MemoryTypeProjectContext:
+			if item.Summary == "Validation command baseline captured" {
+				commandMemory = item
+			}
+		case memorycommon.MemoryTypeExecutionLesson:
+			if item.Summary == "Validation failure signals captured for repair" {
+				lessonMemory = item
+			}
+		}
+	}
+	if commandMemory == nil ||
+		!strings.Contains(commandMemory.Content, "go test ./...") ||
+		!strings.Contains(commandMemory.Content, string(evidenceStepID)) {
+		t.Fatalf("command memory = %+v, want command with provenance evidence", commandMemory)
+	}
+	if lessonMemory == nil ||
+		!strings.Contains(lessonMemory.Content, "compile error in internal/app.go") ||
+		!strings.Contains(lessonMemory.Content, "exitCode=1") {
+		t.Fatalf("lesson memory = %+v, want failure lesson content", lessonMemory)
+	}
+}
+
 func TestRuntimeOrchestrator_ResultSummaryIncludesRuntimeEvidenceOutput(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-result-summary-evidence-output")

@@ -625,6 +625,7 @@ export type TaskProgress = {
   items?: ProgressItem[];
   blockers?: ProgressBlocker[];
   recovery: RecoveryPlan;
+  repairLoop: RepairLoop;
   evidenceRefs?: string[];
 };
 
@@ -713,7 +714,25 @@ export type RecoveryPlan = {
   blockingTicketId?: string;
   blockingApprovalId?: string;
   checkpointId?: string;
+  failureClass?: string;
+  failureSignature?: string;
   reason?: string;
+};
+
+export type RepairLoop = {
+  state: string;
+  attemptCount: number;
+  lastAttempt?: number;
+  lastRepairStepId?: string;
+  lastFailureStepId?: string;
+  lastFailureClass?: string;
+  lastFailureSignature?: string;
+  lastFailureAt?: string;
+  nextAction?: string;
+  escalated: boolean;
+  escalationReason?: string;
+  escalationTicketId?: string;
+  evidenceRefs?: string[];
 };
 
 export type ContextBundle = {
@@ -795,6 +814,7 @@ export type RunObservability = {
   outcome?: RunOutcome;
   progress: RunProgress;
   taskProgress: TaskProgress;
+  repairLoop: RepairLoop;
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];
   memoryRecallTraces?: MemoryRecallTrace[];
@@ -811,6 +831,7 @@ export type RunSnapshot = {
   run: Run;
   outcome?: RunOutcome;
   taskProgress: TaskProgress;
+  repairLoop: RepairLoop;
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];
   memoryRecallTraces?: MemoryRecallTrace[];

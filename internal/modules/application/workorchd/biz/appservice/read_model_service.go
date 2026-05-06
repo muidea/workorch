@@ -3,6 +3,7 @@ package appservice
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"sort"
 	"strconv"
@@ -579,7 +580,11 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 	ret.SelectedCapabilities = selectedRuntimeCapabilities(ret.Run.ExecutionContext, capabilityCatalog)
 	ret.UsedCapabilities = usedRuntimeCapabilities(ret, capabilityCatalog)
 	ret.TaskProgress = mapTaskProgress(ret)
+	ret.RepairLoop = ret.TaskProgress.RepairLoop
 	ret.TaskDecompositions = mapTaskDecompositions(ret)
+	ret.TaskPlans = mapTaskPlans(ret)
+	ret.DoDEvidence = mapDoDEvidence(ret)
+	ret.ResultQuality = mapResultQuality(ret)
 	ret.ExecutionSections = mapExecutionSections(ret)
 	return ret, nil
 }
@@ -691,6 +696,10 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 	}
 	ret.Outcome = mapRunOutcome(ret)
 	ret.TaskProgress = mapTaskProgress(ret)
+	ret.RepairLoop = ret.TaskProgress.RepairLoop
+	ret.TaskPlans = mapTaskPlans(ret)
+	ret.DoDEvidence = mapDoDEvidence(ret)
+	ret.ResultQuality = mapResultQuality(ret)
 	return ret, nil
 }
 
@@ -1782,6 +1791,202 @@ func mapDoDAssessment(item resultmodel.DoDAssessment) *DoDAssessment {
 	return ret
 }
 
+func mapDoDEvidence(snapshot RunSnapshot) []DoDEvidenceTrace {
+	evidenceIndex := runEvidenceRefIndex(snapshot)
+	results := runScopedResults(snapshot)
+	if len(results) == 0 {
+		return nil
+	}
+	ret := make([]DoDEvidenceTrace, 0, len(results))
+	for _, item := range results {
+		if item.DoDAssessment == nil {
+			continue
+		}
+		if snapshot.Run.DoDID != "" && item.DoDID != snapshot.Run.DoDID {
+			continue
+		}
+		trace := DoDEvidenceTrace{
+			ResultID:  item.ID,
+			DoDID:     item.DoDID,
+			Satisfied: item.DoDAssessment.Satisfied,
+			Summary:   item.DoDAssessment.Summary,
+		}
+		assessmentItems := item.DoDAssessment.Items
+		if len(assessmentItems) == 0 && item.SummaryDetail != nil && len(item.SummaryDetail.DoDItems) > 0 {
+			assessmentItems = item.SummaryDetail.DoDItems
+		}
+		if len(assessmentItems) > 0 {
+			trace.Items = make([]DoDEvidenceItem, 0, len(assessmentItems))
+			for _, assessmentItem := range assessmentItems {
+				refs := compactUniqueStrings(cloneReadModelStringSlice(assessmentItem.EvidenceRefs))
+				missing := make([]string, 0)
+				for _, ref := range refs {
+					if _, ok := evidenceIndex[ref]; !ok {
+						missing = append(missing, ref)
+					}
+				}
+				status := "missing"
+				if len(refs) > 0 && len(missing) == 0 {
+					status = "linked"
+				} else if len(refs) > 0 && len(missing) < len(refs) {
+					status = "partial"
+				}
+				trace.Items = append(trace.Items, DoDEvidenceItem{
+					Item:                assessmentItem.Item,
+					State:               assessmentItem.State,
+					FailureReason:       assessmentItem.FailureReason,
+					Confidence:          assessmentItem.Confidence,
+					SourceNote:          assessmentItem.SourceNote,
+					EvidenceRefs:        refs,
+					EvidenceStatus:      status,
+					MissingEvidenceRefs: missing,
+				})
+			}
+		}
+		ret = append(ret, trace)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func mapResultQuality(snapshot RunSnapshot) []ResultQualityTrace {
+	results := runScopedResults(snapshot)
+	if len(results) == 0 {
+		return nil
+	}
+	ret := make([]ResultQualityTrace, 0, len(results))
+	for _, item := range results {
+		quality := ResultQualityTrace{
+			ResultID:     item.ID,
+			DoDID:        item.DoDID,
+			State:        "passed",
+			Summary:      strings.TrimSpace(item.Summary),
+			EvidenceRefs: compactUniqueStrings(cloneReadModelStringSlice(item.EvidenceRefs)),
+		}
+		addIssue := func(code string, severity string, message string, suggestion string, refs ...string) {
+			issue := ResultQualityIssue{
+				Code:         code,
+				Severity:     severity,
+				Message:      message,
+				Suggestion:   suggestion,
+				EvidenceRefs: compactUniqueStrings(refs),
+			}
+			quality.Issues = append(quality.Issues, issue)
+			if severity == "error" {
+				quality.State = "failed"
+			} else if quality.State != "failed" {
+				quality.State = "warning"
+			}
+		}
+		var evidenceRefs []string
+		var goalOutcome string
+		var verificationSummary string
+		var knownLimitations []string
+		var residualRisks []string
+		var nextActions []string
+		if item.SummaryDetail != nil {
+			goalOutcome = strings.TrimSpace(item.SummaryDetail.GoalOutcome)
+			verificationSummary = strings.TrimSpace(item.SummaryDetail.VerificationSummary)
+			knownLimitations = compactUniqueStrings(cloneReadModelStringSlice(item.SummaryDetail.KnownLimitations))
+			residualRisks = compactUniqueStrings(cloneReadModelStringSlice(item.SummaryDetail.ResidualRisks))
+			nextActions = compactUniqueStrings(cloneReadModelStringSlice(item.SummaryDetail.NextActions))
+			evidenceRefs = compactUniqueStrings(cloneReadModelStringSlice(item.SummaryDetail.EvidenceRefs))
+		}
+		if len(evidenceRefs) == 0 {
+			evidenceRefs = compactUniqueStrings(cloneReadModelStringSlice(item.EvidenceRefs))
+		}
+		quality.EvidenceRefs = evidenceRefs
+		if goalOutcome == "" {
+			addIssue("missing_goal_outcome", "error", "result is missing a concrete goal outcome summary", "populate summaryDetail.goalOutcome with the delivered outcome", evidenceRefs...)
+		}
+		if verificationSummary == "" {
+			addIssue("missing_verification_summary", "error", "result is missing verification summary", "populate summaryDetail.verificationSummary with verification scope and conclusions", evidenceRefs...)
+		}
+		if len(evidenceRefs) == 0 {
+			addIssue("missing_evidence_refs", "error", "result is missing evidence references", "attach validation, patch, tool call or artifact evidence refs")
+		}
+		if len(knownLimitations) == 0 && len(residualRisks) == 0 {
+			addIssue("missing_risk_disclosure", "error", "result is missing known limitations and residual risks", "populate summaryDetail.knownLimitations or summaryDetail.residualRisks", evidenceRefs...)
+		}
+		if len(nextActions) == 0 {
+			addIssue("missing_next_actions", "warning", "result is missing next actions", "populate summaryDetail.nextActions for follow-up guidance", evidenceRefs...)
+		}
+		if item.DoDAssessment == nil || len(item.DoDAssessment.Items) == 0 {
+			addIssue("missing_dod_item_assessment", "warning", "result is missing DoD item-level assessment", "attach DoD item states and evidence refs", evidenceRefs...)
+		}
+		ret = append(ret, quality)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func runEvidenceRefIndex(snapshot RunSnapshot) map[string]struct{} {
+	ret := map[string]struct{}{}
+	add := func(ref string) {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			return
+		}
+		ret[ref] = struct{}{}
+	}
+	add(snapshot.Run.ID)
+	for _, item := range snapshot.Steps {
+		add(item.ID)
+	}
+	for _, item := range snapshot.ToolCalls {
+		add(item.ID)
+		add(item.StepID)
+	}
+	for _, item := range snapshot.Patches {
+		add(item.ID)
+		add(item.StepID)
+	}
+	for _, item := range snapshot.ValidationResults {
+		add(item.ID)
+		add(item.StepID)
+		add(item.EvidenceRef)
+	}
+	for _, item := range snapshot.RuntimeCheckpoints {
+		add(item.ID)
+		add(item.CurrentStepID)
+	}
+	for _, item := range snapshot.Results {
+		add(item.ID)
+		for _, ref := range item.EvidenceRefs {
+			add(ref)
+		}
+	}
+	for _, item := range snapshot.Artifacts {
+		add(item.ID)
+		add(item.StepID)
+		add(item.ResultID)
+		add(item.ToolCallID)
+		add(item.PatchID)
+		add(item.ValidationResultID)
+		for _, ref := range item.EvidenceRefs {
+			add(ref)
+		}
+	}
+	for _, item := range snapshot.Decisions {
+		add(item.ID)
+		add(item.StepID)
+	}
+	for _, item := range snapshot.Approvals {
+		add(item.ID)
+		add(item.StepID)
+	}
+	for _, item := range snapshot.MemoryRecallTraces {
+		add(item.ID)
+		add(item.StepID)
+		add(item.EvidenceRef)
+	}
+	return ret
+}
+
 func mapArtifacts(items []*resultmodel.Artifact) []Artifact {
 	if len(items) == 0 {
 		return nil
@@ -2049,10 +2254,14 @@ func mapRunObservability(snapshot RunSnapshot) RunObservability {
 		Outcome:              snapshot.Outcome,
 		Progress:             runtimeProgress(snapshot),
 		TaskProgress:         snapshot.TaskProgress,
+		RepairLoop:           snapshot.RepairLoop,
 		TaskDecompositions:   snapshot.TaskDecompositions,
+		TaskPlans:            snapshot.TaskPlans,
 		ExecutionSections:    snapshot.ExecutionSections,
 		MemoryRecallTraces:   snapshot.MemoryRecallTraces,
 		WebSources:           snapshot.WebSources,
+		DoDEvidence:          snapshot.DoDEvidence,
+		ResultQuality:        snapshot.ResultQuality,
 		Evidence:             runtimeEvidenceSummary(snapshot, len(timelineEvents(timeline))),
 		LatestCheckpoint:     latestRuntimeCheckpoint(snapshot.RuntimeCheckpoints),
 		SelectedCapabilities: snapshot.SelectedCapabilities,
@@ -2070,6 +2279,9 @@ func mapWorkspaceTaskProgress(snapshot WorkspaceSnapshot) TaskProgress {
 			Mode:       "idle",
 			NextAction: "start_workspace_execution",
 			Reason:     localizedWorkspaceProgressText(language, "no_active_run"),
+		},
+		RepairLoop: RepairLoop{
+			State: "inactive",
 		},
 	}
 	if snapshot.Workspace.ActiveRunID != "" {
@@ -2166,6 +2378,7 @@ func mapTaskProgress(snapshot RunSnapshot) TaskProgress {
 	ret.CurrentMilestone = currentProgressMilestone(ret.Milestones)
 	ret.EvidenceRefs = taskProgressEvidenceRefs(snapshot)
 	ret.Recovery = taskProgressRecovery(snapshot, latestCheckpoint, ret.Blockers, ret.Recovery)
+	ret.RepairLoop = mapTaskProgressRepairLoop(snapshot, ret.Recovery)
 	ret.Summary = taskProgressSummary(ret, &snapshot)
 	return ret
 }
@@ -2406,6 +2619,119 @@ func mapTaskDecompositions(snapshot RunSnapshot) []TaskDecomposition {
 		return nil
 	}
 	return ret
+}
+
+func mapTaskPlans(snapshot RunSnapshot) []TaskPlan {
+	decompositions := runSnapshotTaskDecompositions(snapshot)
+	if len(decompositions) == 0 {
+		return nil
+	}
+	stepByID := map[string]presenter.StepView{}
+	for _, step := range snapshot.Steps {
+		stepByID[step.ID] = step
+	}
+	occurrences := timelineStepOccurrences(snapshot)
+	grouped := map[string][]TaskPlan{}
+	for _, decomposition := range decompositions {
+		if strings.TrimSpace(decomposition.RootStepID) == "" {
+			continue
+		}
+		step, hasStep := stepByID[decomposition.RootStepID]
+		anchorStepID := strings.TrimSpace(decomposition.RootStepID)
+		stage := ""
+		state := taskPlanStateFromDecomposition(decomposition.State)
+		occurredAt := strings.TrimSpace(occurrences[decomposition.RootStepID])
+		if hasStep {
+			if root := strings.TrimSpace(readModelStringValue(step.Input["graphRootStepId"])); root != "" {
+				anchorStepID = root
+			}
+			stage = strings.TrimSpace(readModelStringValue(step.Output["stage"]))
+			if stage == "" {
+				stage = strings.TrimSpace(readModelStringValue(step.Input["stage"]))
+			}
+			state = taskPlanStateFromStep(step.State)
+		}
+		plan := TaskPlan{
+			WorkspaceID:      snapshot.Run.WorkspaceID,
+			RunID:            snapshot.Run.ID,
+			AnchorStepID:     anchorStepID,
+			RevisionStepID:   decomposition.RootStepID,
+			State:            state,
+			Stage:            stage,
+			Summary:          decomposition.Summary,
+			GraphBranch:      decomposition.GraphBranch,
+			NodeTotal:        decomposition.NodeTotal,
+			NodeCompleted:    decomposition.NodeCompleted,
+			NodeFailed:       decomposition.NodeFailed,
+			NodeRunning:      decomposition.NodeRunning,
+			EvidenceRefs:     compactUniqueStrings(append([]string{decomposition.RootStepID}, decomposition.EvidenceRefs...)),
+			OccurredAt:       occurredAt,
+			SourceProjection: "task_decomposition",
+		}
+		grouped[anchorStepID] = append(grouped[anchorStepID], plan)
+	}
+	if len(grouped) == 0 {
+		return nil
+	}
+	ret := make([]TaskPlan, 0)
+	anchors := make([]string, 0, len(grouped))
+	for anchor := range grouped {
+		anchors = append(anchors, anchor)
+	}
+	sort.Strings(anchors)
+	for _, anchor := range anchors {
+		plans := grouped[anchor]
+		sort.SliceStable(plans, func(i, j int) bool {
+			leftAt := strings.TrimSpace(plans[i].OccurredAt)
+			rightAt := strings.TrimSpace(plans[j].OccurredAt)
+			if leftAt == rightAt {
+				return plans[i].RevisionStepID < plans[j].RevisionStepID
+			}
+			if leftAt == "" {
+				return false
+			}
+			if rightAt == "" {
+				return true
+			}
+			return leftAt < rightAt
+		})
+		for idx := range plans {
+			plans[idx].Revision = idx + 1
+			plans[idx].ID = fmt.Sprintf("%s/plan/%d", plans[idx].AnchorStepID, plans[idx].Revision)
+			if plans[idx].Revision > 1 && plans[idx].State == "accepted" {
+				plans[idx].State = "revised"
+			}
+			ret = append(ret, plans[idx])
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func taskPlanStateFromStep(state string) string {
+	switch strings.TrimSpace(state) {
+	case string(common.StepStateCompleted):
+		return "accepted"
+	case string(common.StepStateFailed):
+		return "rejected"
+	case string(common.StepStateDispatched):
+		return "proposed"
+	default:
+		return "proposed"
+	}
+}
+
+func taskPlanStateFromDecomposition(state string) string {
+	switch strings.TrimSpace(state) {
+	case "completed":
+		return "accepted"
+	case "failed":
+		return "rejected"
+	default:
+		return "proposed"
+	}
 }
 
 func taskExecutionStepsByRoot(steps []presenter.StepView) map[string]map[string]presenter.StepView {
@@ -3264,6 +3590,141 @@ func taskProgressSummary(progress TaskProgress, snapshot *RunSnapshot) string {
 		return "run " + snapshot.Run.State + " with " + strconv.Itoa(len(snapshot.Steps)) + " steps, " + strconv.Itoa(len(snapshot.Results)) + " results, " + strconv.Itoa(len(snapshot.Artifacts)) + " artifacts"
 	}
 	return "workspace " + progress.State + " with " + strconv.Itoa(len(progress.Blockers)) + " open blockers"
+}
+
+func mapTaskProgressRepairLoop(snapshot RunSnapshot, recovery RecoveryPlan) RepairLoop {
+	ret := RepairLoop{
+		State:      "inactive",
+		NextAction: recovery.NextAction,
+	}
+	attemptCount, lastAttempt, lastRepairStepID := repairAttemptProjection(snapshot.Steps)
+	ret.AttemptCount = attemptCount
+	ret.LastAttempt = lastAttempt
+	ret.LastRepairStepID = lastRepairStepID
+
+	lastFailure := latestRepairFailureProjection(snapshot)
+	if lastFailure != nil {
+		ret.LastFailureStepID = lastFailure.stepID
+		ret.LastFailureClass = lastFailure.class
+		ret.LastFailureSignature = lastFailure.signature
+		ret.LastFailureAt = lastFailure.occurredAt
+		ret.EvidenceRefs = append(ret.EvidenceRefs, lastFailure.evidenceRef)
+	}
+
+	if ticketID, reason, ok := repairEscalationProjection(snapshot, recovery); ok {
+		ret.Escalated = true
+		ret.EscalationTicketID = ticketID
+		ret.EscalationReason = reason
+		ret.EvidenceRefs = append(ret.EvidenceRefs, ticketID)
+		ret.State = "escalated_decision"
+	} else {
+		switch recovery.Mode {
+		case "wait_decision":
+			ret.State = "awaiting_decision"
+		case "wait_approval":
+			ret.State = "awaiting_approval"
+		case "none":
+			if attemptCount > 0 {
+				ret.State = "completed_after_repair"
+			}
+		case "inspect_failure", "restart":
+			ret.State = "terminated"
+		default:
+			if attemptCount > 0 || lastFailure != nil {
+				ret.State = "repairing"
+			}
+		}
+	}
+
+	ret.EvidenceRefs = compactUniqueStrings(append(ret.EvidenceRefs, ret.LastRepairStepID, ret.LastFailureStepID))
+	return ret
+}
+
+type repairFailureProjection struct {
+	stepID      string
+	class       string
+	signature   string
+	occurredAt  string
+	evidenceRef string
+}
+
+func repairAttemptProjection(steps []presenter.StepView) (count int, lastAttempt int, lastStepID string) {
+	for _, step := range steps {
+		if !readModelBoolValue(step.Input["runtimeRepairFollowUp"]) {
+			continue
+		}
+		count++
+		attempt := readModelIntValue(step.Input["runtimeRepairAttempt"])
+		if attempt <= 0 {
+			attempt = 1
+		}
+		if attempt > lastAttempt || (attempt == lastAttempt && step.ID > lastStepID) {
+			lastAttempt = attempt
+			lastStepID = step.ID
+		}
+	}
+	if count > 0 && lastAttempt == 0 {
+		lastAttempt = count
+	}
+	return count, lastAttempt, lastStepID
+}
+
+func latestRepairFailureProjection(snapshot RunSnapshot) *repairFailureProjection {
+	var latest *repairFailureProjection
+	for _, checkpoint := range snapshot.RuntimeCheckpoints {
+		class := strings.TrimSpace(readModelStringValue(checkpoint.Data["failureClass"]))
+		signature := strings.TrimSpace(readModelStringValue(checkpoint.Data["failureSignature"]))
+		event := strings.TrimSpace(readModelStringValue(checkpoint.Data["event"]))
+		if class == "" && signature == "" && event != "step_failed" {
+			continue
+		}
+		candidate := &repairFailureProjection{
+			stepID:      checkpoint.CurrentStepID,
+			class:       class,
+			signature:   signature,
+			occurredAt:  checkpoint.OccurredAt,
+			evidenceRef: checkpoint.ID,
+		}
+		if latest == nil || candidate.occurredAt > latest.occurredAt || (candidate.occurredAt == latest.occurredAt && candidate.evidenceRef > latest.evidenceRef) {
+			latest = candidate
+		}
+	}
+	if latest != nil {
+		return latest
+	}
+	for _, step := range snapshot.Steps {
+		class := strings.TrimSpace(readModelStringValue(step.Output["failureClass"]))
+		signature := strings.TrimSpace(readModelStringValue(step.Output["failureSignature"]))
+		if class == "" && signature == "" {
+			continue
+		}
+		latest = &repairFailureProjection{
+			stepID:      step.ID,
+			class:       class,
+			signature:   signature,
+			evidenceRef: step.ID,
+		}
+	}
+	return latest
+}
+
+func repairEscalationProjection(snapshot RunSnapshot, recovery RecoveryPlan) (ticketID string, reason string, ok bool) {
+	if recovery.BlockingTicketID == "" {
+		return "", "", false
+	}
+	for _, item := range snapshot.Decisions {
+		if item.ID != recovery.BlockingTicketID {
+			continue
+		}
+		context := readModelMapValue(item.Context)
+		if readModelIntValue(context["attempts"]) > 0 ||
+			strings.TrimSpace(readModelStringValue(context["failureClass"])) != "" ||
+			strings.TrimSpace(readModelStringValue(context["failureSignature"])) != "" {
+			return item.ID, firstNonEmptyReadModel(item.Reason, item.Question), true
+		}
+		return "", "", false
+	}
+	return "", "", false
 }
 
 func primaryTaskProgressResult(items []Result) *Result {

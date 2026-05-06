@@ -11,7 +11,7 @@ CLI_BUILD_OUT ?= $(BUILD_OUT)
 CLI_APP := $(APP)
 CONSOLE_WEB := ./web/workorch-console
 
-.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-software-dev-code-agent verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-long-output release release-check install-latest ci
+.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-long-output release release-check install-latest ci
 
 help:
 	@echo "Targets:"
@@ -33,10 +33,18 @@ help:
 	@echo "  verify-llm      - verify deployed LLM-driven execution using a local mock provider"
 	@echo "  verify-llm-file - alias of verify-llm; e2e uses the deployed instance only"
 	@echo "  verify-software-dev-code-agent - verify software-dev Code Agent closure contract"
+	@echo "  verify-software-dev-goal-dod-e2e - verify deployed software-dev Goal/DoD auto repair and repair-escalation loop"
+	@echo "  verify-software-requirement-orchestration - verify SRD-10~19 orchestration closure"
+	@echo "  verify-software-requirement-orchestration-deployed - verify SRD-10~19 closure with deployed e2e enabled"
 	@echo "  verify-skillhub      - verify deployed SkillHub global/workspace Skill auto-selection"
 	@echo "  verify-skillhub-file - alias of verify-skillhub; e2e uses the deployed instance only"
 	@echo "  verify-mcp-stdio      - verify deployed MCP stdio execution through LLM graph"
 	@echo "  verify-mcp-stdio-file - alias of verify-mcp-stdio; e2e uses the deployed instance only"
+	@echo "  verify-auto-governance-ticket-approval - verify auto governance ticket/approval closure"
+	@echo "  verify-workspace-file-diff-patch - verify file/diff/patch capability closure"
+	@echo "  verify-workspace-web-search - verify Web Search contract tests"
+	@echo "  verify-workspace-web-search-e2e - verify deployed Web Search source traceability"
+	@echo "  verify-e2e-template-contract - verify all e2e workspace creation requests declare templateId"
 	@echo "  verify-ci-mvp      - verify deployed service with CI-safe mock LLM/MCP checks"
 	@echo "  verify-ci-mvp-file - alias of verify-ci-mvp; e2e uses the deployed instance only"
 	@echo "  verify-mvp      - verify deployed service with local real LLM MVP checks"
@@ -49,6 +57,7 @@ help:
 	@echo "  verify-weather-ticket-approval-mock - CI-only deterministic mock LLM weather governance check"
 	@echo "  verify-real-mvp - verify a running workorch --server with real LLM, MCP stdio, and vector Memory checks"
 	@echo "  verify-deployed-full - verify deployed service with mock, SkillHub, and real LLM e2e checks"
+	@echo "  verify-e2e-full - verify all currently tracked deployed/local e2e closure scripts"
 	@echo "  loadtest-governed - run governed workspace concurrency load test with deterministic mock LLM"
 	@echo "  loadtest-governed-real - run governed workspace concurrency load test with configured real LLM"
 	@echo "  docker-build    - docker build local workorch image"
@@ -133,6 +142,15 @@ verify-llm-file: verify-llm
 verify-software-dev-code-agent:
 	./scripts/verify-software-dev-code-agent.sh
 
+verify-software-dev-goal-dod-e2e:
+	./scripts/verify-software-dev-goal-dod-e2e.sh
+
+verify-software-requirement-orchestration:
+	./scripts/verify-software-requirement-development-orchestration.sh
+
+verify-software-requirement-orchestration-deployed:
+	WORKORCH_SRD_VERIFY_DEPLOYED_E2E=1 ./scripts/verify-software-requirement-development-orchestration.sh
+
 verify-skillhub:
 	WORKORCH_SKILLHUB_VERIFY_MOCK_ADDR=127.0.0.1:18191 ./scripts/verify-skillhub-workspace-execution.sh
 
@@ -142,6 +160,21 @@ verify-mcp-stdio:
 	WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR=127.0.0.1:18185 ./scripts/verify-mcp-stdio-workspace-execution.sh
 
 verify-mcp-stdio-file: verify-mcp-stdio
+
+verify-auto-governance-ticket-approval:
+	./scripts/verify-auto-governance-ticket-approval.sh
+
+verify-workspace-file-diff-patch:
+	./scripts/verify-workspace-file-diff-patch.sh
+
+verify-workspace-web-search:
+	./scripts/verify-workspace-web-search.sh
+
+verify-workspace-web-search-e2e:
+	./scripts/verify-workspace-web-search-e2e.sh
+
+verify-e2e-template-contract:
+	./scripts/verify-e2e-template-contract.sh
 
 verify-ci-mvp: verify-service verify-workspace-template-soul verify-llm verify-mcp-stdio
 
@@ -172,6 +205,8 @@ verify-weather-ticket-approval-mock:
 verify-real-mvp: verify-real-llm verify-real-mcp-stdio verify-real-vector-memory
 
 verify-deployed-full: verify-ci-mvp verify-skillhub verify-mvp verify-real-mcp-stdio verify-real-vector-memory
+
+verify-e2e-full: verify-e2e-template-contract verify-service verify-workspace-template-soul verify-llm verify-mcp-stdio verify-skillhub verify-auto-governance-ticket-approval verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration-deployed verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-weather-ticket-approval-mock verify-tui-agent verify-tui-long-output
 
 verify-deployed-full-file: verify-deployed-full
 

@@ -339,14 +339,14 @@ activate_workspace_execution() {
   local output_file="$1"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"memoryIds":["'"$MEMORY_ID"'"],"priority":2}' >"$output_file"
+    -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"memoryIds":["'"$MEMORY_ID"'"],"priority":2}' >"$output_file"
 }
 
 activate_workspace_execution_with_auto_memory() {
   local output_file="$1"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
+    -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
 }
 
 wait_run_state() {
@@ -506,7 +506,7 @@ curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type:
 grep '"apiKeyConfigured": true' "$TMP_DIR/configuration-updated.json" >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
-  -d '{"title":"llm acceptance workspace","description":"verify LLM driven workspace execution"}' >"$TMP_DIR/workspace.json"
+  -d '{"title":"llm acceptance workspace","description":"verify LLM driven workspace execution","templateId":"generic-governed"}' >"$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces" | grep "\"id\": \"$workspace_id\"" >/dev/null
@@ -574,6 +574,8 @@ curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id/status" | grep '"state":
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id/snapshot" >"$TMP_DIR/happy-snapshot.json"
 grep '"dodAssessment"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"memoryRefs"' "$TMP_DIR/happy-snapshot.json" >/dev/null
+grep '"soulRouting"' "$TMP_DIR/happy-snapshot.json" >/dev/null
+grep '"status": "resolved"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep "\"soulId\": \"$SOUL_ID\"" "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"skillIds"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id/observability" >"$TMP_DIR/happy-observability.json"

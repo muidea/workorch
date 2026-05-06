@@ -64,7 +64,16 @@ post_json() {
   local url="$1"
   local body="$2"
   local output="$3"
-  curl -fsS -H "Content-Type: application/json" -X POST "$url" -d "$body" >"$output"
+  local status
+  status="$(curl -sS -H "Content-Type: application/json" -X POST "$url" -d "$body" -o "$output" -w "%{http_code}" || true)"
+  case "$status" in
+    200|201)
+      ;;
+    *)
+      cat "$output" >&2 || true
+      return 1
+      ;;
+  esac
 }
 
 upsert_json() {
@@ -329,6 +338,13 @@ used_capabilities = snapshot.get("usedCapabilities") or []
 errors = []
 if run.get("state") != "completed":
     errors.append(f"run state is {run.get('state')!r}, want completed: {run.get('failureReason', '')}")
+routing = (run.get("executionContext") or {}).get("soulRouting") or {}
+bindings = routing.get("bindings") or {}
+execution_binding = bindings.get("execution") or {}
+if routing.get("status") != "resolved":
+    errors.append(f"soulRouting.status is {routing.get('status')!r}, want resolved")
+if execution_binding.get("soulId") != "soul-generic-governed-execution":
+    errors.append(f"execution soul binding is {execution_binding!r}, want soul-generic-governed-execution")
 
 mcp_steps = [s for s in steps if s.get("kind") == "mcp/tool_call"]
 if not mcp_steps:
@@ -417,7 +433,7 @@ curl -fsS "$BASE_URL/api/v1/workorch/mcp/capabilities?category=%E4%BB%A3%E7%A0%8
 grep "\"id\": \"$MCP_CAPABILITY_ID\"" "$TMP_DIR/mcp-capabilities-filtered.json" >/dev/null
 
 post_json "$BASE_URL/api/v1/workorch/workspaces" \
-  '{"title":"mcp stdio verification","description":"verify MCP stdio transport through LLM execution graph"}' \
+  '{"title":"mcp stdio verification","description":"verify MCP stdio transport through LLM execution graph","templateId":"generic-governed"}' \
   "$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]

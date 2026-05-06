@@ -201,6 +201,9 @@ context = activation["run"].get("executionContext") or {}
 retrieval = context.get("memoryRetrieval") or {}
 memory_ids = context.get("memoryIds") or []
 run = snapshot.get("run") or {}
+routing = (run.get("executionContext") or {}).get("soulRouting") or {}
+bindings = routing.get("bindings") or {}
+execution_binding = bindings.get("execution") or {}
 errors = []
 
 if retrieval.get("policy") != "semantic_vector_search":
@@ -221,6 +224,10 @@ if other_memory_id in memory_ids:
     errors.append(f"{other_memory_id} unexpectedly selected memoryIds={memory_ids}")
 if run.get("state") != "completed":
     errors.append(f"run state is {run.get('state')!r}, want completed: {run.get('failureReason', '')}")
+if routing.get("status") != "resolved":
+    errors.append(f"soulRouting.status is {routing.get('status')!r}, want resolved")
+if execution_binding.get("soulId") != "soul-generic-governed-execution":
+    errors.append(f"execution soul binding is {execution_binding!r}, want soul-generic-governed-execution")
 
 if errors:
     for item in errors:
@@ -260,7 +267,7 @@ curl -fsS -H "Content-Type: application/json" -X PUT \
   -d @"$TMP_DIR/verify-llm-update.json" >"$TMP_DIR/configuration-updated.json"
 
 post_json "$BASE_URL/api/v1/workorch/workspaces" \
-  '{"title":"vector Memory recall verification","description":"Verify deployed vector Memory recall through default embedding provider."}' \
+  '{"title":"vector Memory recall verification","description":"Verify deployed vector Memory recall through default embedding provider.","templateId":"generic-governed"}' \
   "$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]

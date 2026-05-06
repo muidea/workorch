@@ -13,7 +13,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMProviderTemplate, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMProviderTemplate, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, ProgressBlocker, ProgressItem, RepairLoop, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -83,6 +83,16 @@ const recoveryActionLabels: Record<string, string> = {
   inspect_result: '查看结果（Result）/交付物（Artifact）',
   inspect_failure_reason_and_evidence: '查看失败原因和运行证据',
   start_new_run: '启动新的运行'
+};
+
+const repairLoopStateLabels: Record<string, string> = {
+  inactive: '未进入修复',
+  repairing: '自动修复中',
+  awaiting_decision: '等待决策',
+  awaiting_approval: '等待审批',
+  completed_after_repair: '修复后完成',
+  escalated_decision: '已升级决策',
+  terminated: '修复终止'
 };
 
 const defaultSoulBindingStages = ['planning', 'execution', 'decision', 'approval', 'validation', 'artifact'];
@@ -157,6 +167,13 @@ function recoveryActionLabel(action?: string) {
     return '-';
   }
   return recoveryActionLabels[action] ?? action;
+}
+
+function repairLoopStateLabel(state?: string) {
+  if (!state) {
+    return '未知';
+  }
+  return repairLoopStateLabels[state] ? `${repairLoopStateLabels[state]} (${state})` : state;
 }
 
 function stateTag(state?: string) {
@@ -295,12 +312,18 @@ function taskProgressStepStatus(state?: string) {
   return 'wait' as const;
 }
 
-function taskProgressCard(progress?: TaskProgress) {
+function taskProgressCard(progress?: TaskProgress, repairLoopOverride?: RepairLoop) {
   if (!progress) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无任务进度投影" />;
   }
   const blockers = progress.blockers ?? [];
   const recovery = progress.recovery ?? { mode: 'unknown' };
+  const repairLoop = repairLoopOverride ?? progress.repairLoop;
+  const repairAttempt = repairLoop?.attemptCount ?? 0;
+  const repairFailure = [repairLoop?.lastFailureClass, repairLoop?.lastFailureSignature].filter(Boolean).join(' / ');
+  const repairEscalation = repairLoop?.escalated
+    ? [repairLoop.escalationTicketId, repairLoop.escalationReason].filter(Boolean).join(' / ')
+    : '-';
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Steps
@@ -322,7 +345,13 @@ function taskProgressCard(progress?: TaskProgress) {
           { key: 'nextAction', label: '建议动作', children: recoveryActionLabel(recovery.nextAction) },
           { key: 'checkpoint', label: '恢复检查点', children: recovery.checkpointId ? boundedParagraph(recovery.checkpointId, { rows: 1, copyText: recovery.checkpointId }) : '-' },
           { key: 'blockingTicket', label: '阻塞决策', children: recovery.blockingTicketId || '-' },
-          { key: 'blockingApproval', label: '阻塞审批', children: recovery.blockingApprovalId || '-' }
+          { key: 'blockingApproval', label: '阻塞审批', children: recovery.blockingApprovalId || '-' },
+          { key: 'repairState', label: '修复状态', children: repairLoop ? repairLoopStateLabel(repairLoop.state) : '-' },
+          { key: 'repairAttempt', label: '修复轮次', children: repairAttempt || '-' },
+          { key: 'repairFailure', label: '最近失败', children: repairFailure || '-' },
+          { key: 'repairNextAction', label: '修复下一步', children: repairLoop?.nextAction || '-' },
+          { key: 'repairEscalation', label: '升级信息', children: repairEscalation },
+          { key: 'repairEvidence', label: '修复证据', children: compactTags(repairLoop?.evidenceRefs ?? [], 4) }
         ]}
       />
       {blockers.length ? (
@@ -3163,7 +3192,10 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             className="workorch-section"
             extra={stateTag((runObservability?.taskProgress ?? runSnapshot?.taskProgress ?? snapshot.taskProgress)?.state)}
           >
-            {taskProgressCard(runObservability?.taskProgress ?? runSnapshot?.taskProgress ?? snapshot.taskProgress)}
+            {taskProgressCard(
+              runObservability?.taskProgress ?? runSnapshot?.taskProgress ?? snapshot.taskProgress,
+              runObservability?.repairLoop ?? runSnapshot?.repairLoop
+            )}
           </ProCard>
           <ProCard
             title="任务拆分图"

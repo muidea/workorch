@@ -198,3 +198,15 @@ func validateSoulCapabilitySelection(ctx context.Context, service soulmodule.Ser
 		ToolKinds:            toolKinds,
 	})
 }
+
+func validateSoulRoutingCapabilitySelection(ctx context.Context, service soulmodule.Service, routing SoulRouting, skillIDs []string, mcpServerIDs []string, capabilityIDs []string, capabilityCategories []string, toolKinds []string) error {
+	if routing.Status != "resolved" {
+		return nil
+	}
+	execution := routing.Bindings[SoulBindingStageExecution]
+	soulID := common.SoulID(strings.TrimSpace(execution.SoulID))
+	if soulID == "" {
+		soulID = common.SoulID(strings.TrimSpace(routing.EffectiveDefaultSoulID))
+	}
+	return validateSoulCapabilitySelection(ctx, service, soulID, skillIDs, mcpServerIDs, capabilityIDs, capabilityCategories, toolKinds)
+}

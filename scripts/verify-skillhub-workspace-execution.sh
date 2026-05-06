@@ -200,11 +200,11 @@ PY
 }
 
 validate_snapshot() {
-  python3 - "$TMP_DIR/run-snapshot.json" "$workspace_id" "$GLOBAL_SKILL_ID" "$REPOSITORY_SKILL_ID" "$MCP_SERVER_ID" <<'PY'
+  python3 - "$TMP_DIR/run-snapshot.json" "$workspace_id" "$GLOBAL_SKILL_ID" "$REPOSITORY_SKILL_ID" "$MCP_SERVER_ID" "$SOUL_ID" <<'PY'
 import json
 import sys
 
-snapshot_path, workspace_id, global_skill_id, repo_skill_id, mcp_server_id = sys.argv[1:]
+snapshot_path, workspace_id, global_skill_id, repo_skill_id, mcp_server_id, expected_soul_id = sys.argv[1:]
 data = json.load(open(snapshot_path, encoding="utf-8"))
 run = data.get("snapshot", {}).get("run", {})
 ctx = run.get("executionContext") or {}
@@ -212,11 +212,18 @@ skill_ids = ctx.get("skillIds") or []
 mcp_ids = ctx.get("mcpServerIds") or []
 selection = ctx.get("skillSelection") or {}
 mcp_selection = ctx.get("mcpSelection") or {}
+routing = ctx.get("soulRouting") or {}
+bindings = routing.get("bindings") or {}
+execution_binding = bindings.get("execution") or {}
 expected_global = f"skillhub:global:{global_skill_id}"
 expected_workspace = f"skillhub:workspace:{workspace_id}:{global_skill_id}"
 errors = []
 if run.get("state") != "completed":
     errors.append(f"run state is {run.get('state')!r}, want completed")
+if routing.get("status") != "resolved":
+    errors.append(f"soulRouting.status is {routing.get('status')!r}, want resolved")
+if execution_binding.get("soulId") != expected_soul_id:
+    errors.append(f"execution soul binding is {execution_binding!r}, want {expected_soul_id}")
 for expected in [expected_global, expected_workspace, repo_skill_id]:
     if expected not in skill_ids:
         errors.append(f"missing selected skill {expected!r}: {skill_ids}")
@@ -252,7 +259,7 @@ curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type:
 grep '"apiKeyConfigured": true' "$TMP_DIR/configuration-updated.json" >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
-  -d '{"title":"skillhub execution workspace","description":"verify SkillHub global and workspace Skill selection"}' >"$TMP_DIR/workspace.json"
+  -d '{"title":"skillhub execution workspace","description":"verify SkillHub global and workspace Skill selection","templateId":"generic-governed"}' >"$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 working_directory="$(json_path "$TMP_DIR/workspace.json" "workspace.workingDirectory")"
 [[ -n "$workspace_id" ]]
@@ -285,7 +292,7 @@ dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
   -H 'Content-Type: application/json' \
-  -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify-skillhub","soulId":"'"$SOUL_ID"'","priority":2}' >"$TMP_DIR/activation.json"
+  -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify-skillhub","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"priority":2}' >"$TMP_DIR/activation.json"
 grep '"state": "completed"' "$TMP_DIR/activation.json" >/dev/null
 run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/run-snapshot.json"

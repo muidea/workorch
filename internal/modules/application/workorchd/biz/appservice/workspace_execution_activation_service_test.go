@@ -1484,6 +1484,70 @@ func TestActivateWorkspaceExecutionWithBackendUsesSystemDefaultSoul(t *testing.T
 	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageValidation, "soul-system-default", "system_default")
 }
 
+func TestActivateWorkspaceExecutionWithBackendValidatesExecutionSoulOnly(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-stage-capability-validation", "stage capability validation", "", "workspaces/stage-capability-validation")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "stage capability validation goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"stage capability validation dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	if _, err := CreateSkillWithBackend(ctx, "file", dataRoot, CreateSkillCommand{
+		ID:                "skill-stage-execution",
+		Name:              "Stage Execution Skill",
+		Version:           "1.0.0",
+		Instruction:       "Used only by the execution stage.",
+		RequiredToolKinds: []string{"shell/command"},
+	}); err != nil {
+		t.Fatalf("CreateSkillWithBackend: %v", err)
+	}
+	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
+		ID:     "soul-stage-planning",
+		Name:   "Stage Planning Soul",
+		SoulMD: "# Stage Planning Soul\n\nPlanning must not authorize execution capabilities.\n",
+	}); err != nil {
+		t.Fatalf("CreateSoulWithBackend planning: %v", err)
+	}
+	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
+		ID:               "soul-stage-execution",
+		Name:             "Stage Execution Soul",
+		SoulMD:           "# Stage Execution Soul\n\nExecution authorizes selected run capabilities.\n",
+		AllowedSkillRefs: []string{"skill-stage-execution"},
+		AllowedToolKinds: []string{"shell/command"},
+	}); err != nil {
+		t.Fatalf("CreateSoulWithBackend execution: %v", err)
+	}
+	if _, err := UpdateWorkspaceSoulBindingsWithBackend(ctx, "file", dataRoot, workspace.ID, WorkspaceSoulBindings{
+		Bindings: map[string]string{
+			SoulBindingStagePlanning:  "soul-stage-planning",
+			SoulBindingStageExecution: "soul-stage-execution",
+		},
+	}); err != nil {
+		t.Fatalf("UpdateWorkspaceSoulBindingsWithBackend: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID:   goal.ID,
+		DoDID:    dod.ID,
+		SkillIDs: []string{"skill-stage-execution"},
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	routing := contextMapFromValue(t, item.Run.ExecutionContext["soulRouting"])
+	bindings := contextMapFromValue(t, routing["bindings"])
+	assertSoulRoutingBinding(t, bindings, SoulBindingStagePlanning, "soul-stage-planning", "workspace_stage_binding")
+	assertSoulRoutingBinding(t, bindings, SoulBindingStageExecution, "soul-stage-execution", "workspace_stage_binding")
+}
+
 func TestWorkspaceSoulBindingsWithBackendRejectsInvalidBinding(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()

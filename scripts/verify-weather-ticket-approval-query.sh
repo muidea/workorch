@@ -147,6 +147,7 @@ if kind == "workspace":
     payload = {
         "title": f"{province}{city}天气治理验收",
         "description": "通过 Decision Ticket 和 Approval 治理门后查询指定城市当前天气。",
+        "templateId": "weather-query",
     }
 elif kind == "goal":
     payload = {
@@ -636,6 +637,9 @@ snapshot = json.load(open(sys.argv[1], encoding="utf-8"))["snapshot"]
 observability = json.load(open(sys.argv[2], encoding="utf-8"))["observability"]
 ticket_id, approval_id, country, province, city = sys.argv[3:]
 run = snapshot["run"]
+routing = (run.get("executionContext") or {}).get("soulRouting") or {}
+bindings = routing.get("bindings") or {}
+execution_binding = bindings.get("execution") or {}
 steps = snapshot.get("steps") or ([] if not snapshot.get("step") else [snapshot["step"]])
 tool_calls = snapshot.get("toolCalls") or []
 validations = snapshot.get("validationResults") or []
@@ -648,6 +652,10 @@ errors = []
 
 if run.get("state") != "completed":
     errors.append(f"run state is {run.get('state')!r}, want completed: {run.get('failureReason', '')}")
+if routing.get("status") != "resolved":
+    errors.append(f"soulRouting.status is {routing.get('status')!r}, want resolved")
+if execution_binding.get("soulId") != "soul-weather-query-execution":
+    errors.append(f"execution soul binding is {execution_binding!r}, want soul-weather-query-execution")
 if not any(item.get("id") == ticket_id and item.get("state") == "resolved" for item in decisions):
     errors.append(f"resolved Decision Ticket {ticket_id} missing from snapshot decisions={decisions}")
 if not any(item.get("id") == approval_id and item.get("state") == "approved" for item in approvals):

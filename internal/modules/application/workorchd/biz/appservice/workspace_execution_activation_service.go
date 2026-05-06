@@ -276,14 +276,13 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 
 	var defaultSoul *soulmodel.Soul
 	var soulRouting SoulRouting
-	var effectiveSoulIDs []common.SoulID
 	var memories []*memorymodel.MemoryItem
 	var retrievalEvidence map[string]any
 	var governanceHistory []map[string]any
 	err = activationContextReadTasks(
 		func() error {
 			var err error
-			defaultSoul, soulRouting, effectiveSoulIDs, err = resolveWorkspaceSoulRouting(ctx, exports, workspace, cmd)
+			defaultSoul, soulRouting, _, err = resolveWorkspaceSoulRouting(ctx, exports, workspace, cmd)
 			return err
 		},
 		func() error {
@@ -368,10 +367,8 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 		contextData["mcpCapabilities"] = mcpCapabilityContexts(mcpCapabilities)
 	}
 
-	for _, soulID := range effectiveSoulIDs {
-		if err := validateSoulCapabilitySelection(ctx, exports.Services.SoulService, soulID, skillIDs, mcpServerIDs, capabilityIDs, capabilityCategories(mcpCapabilities), requiredToolKinds(skills)); err != nil {
-			return nil, err
-		}
+	if err := validateSoulRoutingCapabilitySelection(ctx, exports.Services.SoulService, soulRouting, skillIDs, mcpServerIDs, capabilityIDs, capabilityCategories(mcpCapabilities), requiredToolKinds(skills)); err != nil {
+		return nil, err
 	}
 
 	if retrievalEvidence != nil {

@@ -125,6 +125,14 @@ func soulFromCommand(cmd soulservice.CreateSoulCommand) *soulmodel.Soul {
 }
 
 func firstInvalidSelection(selected []string, allowed []string) (string, string, bool) {
+	if slices.Contains(allowed, "*") {
+		for _, value := range selected {
+			if strings.TrimSpace(value) == "" {
+				return value, "blank", true
+			}
+		}
+		return "", "", false
+	}
 	for _, value := range selected {
 		if strings.TrimSpace(value) == "" {
 			return value, "blank", true

@@ -404,6 +404,13 @@ errors = []
 run = snapshot.get("run") or {}
 if run.get("id") != run_id or run.get("state") != "completed":
     errors.append(f"run state invalid: {run}")
+routing = (run.get("executionContext") or {}).get("soulRouting") or {}
+bindings = routing.get("bindings") or {}
+execution_binding = bindings.get("execution") or {}
+if routing.get("status") != "resolved":
+    errors.append(f"soulRouting.status is {routing.get('status')!r}, want resolved")
+if execution_binding.get("soulId") != "soul-generic-governed-execution":
+    errors.append(f"execution soul binding is {execution_binding!r}, want soul-generic-governed-execution")
 
 sources = snapshot.get("webSources") or []
 observed_sources = observability.get("webSources") or []
@@ -460,7 +467,7 @@ curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/web-search" -H 'Conten
   -d @"$TMP_DIR/updated-web-search.json" >"$TMP_DIR/configuration-web-search-updated.json"
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
-  -d '{"title":"web search e2e workspace","description":"verify governed Web Search source traceability"}' >"$TMP_DIR/workspace.json"
+  -d '{"title":"web search e2e workspace","description":"verify governed Web Search source traceability","templateId":"generic-governed"}' >"$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
 

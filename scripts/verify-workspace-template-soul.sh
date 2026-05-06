@@ -261,6 +261,7 @@ template = next(item for item in templates if item["id"] == template_id)
 workspace = {
     "title": title,
     "description": template.get("description", ""),
+    "templateId": template_id,
 }
 with open(output_path, "w", encoding="utf-8") as fh:
     json.dump(workspace, fh, ensure_ascii=False)
@@ -275,11 +276,11 @@ if [[ -z "$workspace_id" || "$workspace_id" != ws-* ]]; then
   exit 1
 fi
 
-python3 - "$TMP_DIR/templates.json" "$TEMPLATE_ID" "$TMP_DIR/goal-create.json" "$TMP_DIR/dod-create.json" "$TMP_DIR/bindings-update.json" <<'PY'
+python3 - "$TMP_DIR/templates.json" "$TEMPLATE_ID" "$TMP_DIR/goal-create.json" "$TMP_DIR/dod-create.json" <<'PY'
 import json
 import sys
 
-templates_path, template_id, goal_path, dod_path, bindings_path = sys.argv[1:6]
+templates_path, template_id, goal_path, dod_path = sys.argv[1:5]
 with open(templates_path, "r", encoding="utf-8") as fh:
     templates = json.load(fh).get("workspaceTemplates", [])
 template = next(item for item in templates if item["id"] == template_id)
@@ -287,11 +288,6 @@ with open(goal_path, "w", encoding="utf-8") as fh:
     json.dump({"text": template["goalText"]}, fh, ensure_ascii=False)
 with open(dod_path, "w", encoding="utf-8") as fh:
     json.dump({"items": template["doDItems"]}, fh, ensure_ascii=False)
-with open(bindings_path, "w", encoding="utf-8") as fh:
-    json.dump({
-        "defaultSoulId": template.get("defaultSoulId", ""),
-        "bindings": template.get("soulBindings", {}),
-    }, fh, ensure_ascii=False)
 PY
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" \
@@ -303,14 +299,10 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" \
   -d @"$TMP_DIR/dod-create.json" >"$TMP_DIR/dod-created.json"
 dod_id="$(json_get "$TMP_DIR/dod-created.json" "dod.id")"
 
-curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/soul-bindings" \
-  -H 'Content-Type: application/json' \
-  -d @"$TMP_DIR/bindings-update.json" >"$TMP_DIR/bindings-updated.json"
-assert_json "$TMP_DIR/bindings-updated.json" "workspace default soul" "data['soulBindings']['defaultSoulId'] == '$SOUL_ID'"
-assert_json "$TMP_DIR/bindings-updated.json" "workspace validation soul" "data['soulBindings']['bindings'].get('validation') == '$SOUL_ID'"
-
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/soul-bindings" >"$TMP_DIR/bindings-read.json"
+assert_json "$TMP_DIR/bindings-read.json" "workspace default soul from template" "data['soulBindings']['defaultSoulId'] == '$SOUL_ID'"
 assert_json "$TMP_DIR/bindings-read.json" "workspace bindings readable" "data['soulBindings']['bindings'].get('execution') == '$SOUL_ID'"
+assert_json "$TMP_DIR/bindings-read.json" "workspace validation soul from template" "data['soulBindings']['bindings'].get('validation') == '$SOUL_ID'"
 
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" >"$TMP_DIR/goals.json"
 assert_json "$TMP_DIR/goals.json" "goal listed" "any(item.get('id') == '$goal_id' for item in data.get('goals', []))"

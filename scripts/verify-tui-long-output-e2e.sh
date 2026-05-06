@@ -240,11 +240,11 @@ PY
 }
 
 assert_long_result() {
-  python3 - "$TMP_DIR/snapshot.json" "$workspace_id" "$run_id" <<'PY'
+  python3 - "$TMP_DIR/snapshot.json" "$workspace_id" "$run_id" "$SOUL_ID" <<'PY'
 import json
 import sys
 
-snapshot_path, workspace_id, run_id = sys.argv[1:]
+snapshot_path, workspace_id, run_id, expected_soul_id = sys.argv[1:]
 data = json.load(open(snapshot_path, encoding="utf-8")).get("snapshot", {})
 errors = []
 run = data.get("run") or {}
@@ -252,6 +252,13 @@ if run.get("id") != run_id or run.get("workspaceId") != workspace_id:
     errors.append(f"snapshot identity mismatch: run={run}")
 if run.get("state") != "completed":
     errors.append(f"run state is {run.get('state')!r}, want completed")
+routing = (run.get("executionContext") or {}).get("soulRouting") or {}
+bindings = routing.get("bindings") or {}
+execution_binding = bindings.get("execution") or {}
+if routing.get("status") != "resolved":
+    errors.append(f"soulRouting.status is {routing.get('status')!r}, want resolved")
+if execution_binding.get("soulId") != expected_soul_id:
+    errors.append(f"execution soul binding is {execution_binding!r}, want {expected_soul_id}")
 results = [item for item in data.get("results", []) if item.get("runId") == run_id and item.get("state") == "accepted"]
 if not results:
     errors.append("accepted result missing")
@@ -293,7 +300,7 @@ curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type:
 grep '"apiKeyConfigured": true' "$TMP_DIR/configuration-updated.json" >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
-  -d '{"title":"'"$WORKSPACE_TITLE"'","description":"TUI viewport long output e2e workspace"}' >"$TMP_DIR/workspace.json"
+  -d '{"title":"'"$WORKSPACE_TITLE"'","description":"TUI viewport long output e2e workspace","templateId":"generic-governed"}' >"$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
 
@@ -313,7 +320,7 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/souls" -H 'Content-Type: applicatio
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
   -H 'Content-Type: application/json' \
-  -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"'"$PROVIDER_ID"'","soulId":"'"$SOUL_ID"'","skillIds":["'"$SKILL_ID"'"],"priority":2}' >"$TMP_DIR/activation.json"
+  -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"'"$PROVIDER_ID"'","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"priority":2}' >"$TMP_DIR/activation.json"
 run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
 [[ -n "$run_id" ]]
 

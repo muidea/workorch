@@ -226,12 +226,17 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.currentTask = strings.TrimSpace(msg.Goal.Text)
 		m.transcript = initialTranscript(msg.Goal.Text)
 	}
+	if msg.DoD != nil && len(msg.DoD.Items) > 0 {
+		m.dodItems = append([]string(nil), msg.DoD.Items...)
+	}
 	if msg.Snapshot != nil {
 		m.result = snapshotDisplayResult(msg.Snapshot, run.ID)
 		m.artifacts = snapshotArtifactLabels(msg.Snapshot, run.ID)
 		m.sources = snapshotWebSourceLabels(msg.Snapshot, run.ID)
 		m.patches = snapshotPatches(msg.Snapshot, run.ID)
+		m.taskDecomp = snapshotTaskDecompositions(msg.Snapshot, run.ID)
 		m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), msg.Snapshot.MemoryRecallTraces...)
+		m.repairLoop = repairLoopSummary(msg.Snapshot.TaskProgress)
 	}
 
 	state := run.State
@@ -253,6 +258,9 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if msg.Status != nil && msg.Status.CurrentStepKind != "" && m.progress == progressRunning {
 		m.progressText = stepProgressText("Working", msg.Status.CurrentStepKind, "Working; waiting for final result")
 	}
+	if msg.Snapshot != nil && strings.TrimSpace(msg.Snapshot.TaskProgress.Summary) != "" && m.progress == progressRunning {
+		m.progressText = strings.TrimSpace(msg.Snapshot.TaskProgress.Summary)
+	}
 	m.syncBlockingDecisionFromList()
 	m.syncBlockingApprovalFromList()
 }
@@ -264,7 +272,9 @@ func (m *AppModel) resetWorkspaceView() {
 	m.result = ""
 	m.artifacts = nil
 	m.patches = nil
+	m.taskDecomp = nil
 	m.memoryRecalls = nil
+	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""
 	m.blockingDecision = nil

@@ -48,10 +48,14 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 				activeRun := selectWorkspaceRun(activeRunID, snapshot.Runs)
 				var status *backend.RunStatusInfo
 				var goal *backend.GoalInfo
+				var dod *backend.DoDInfo
 				if activeRun != nil {
 					status, _ = be.Run().Status(ctx, activeRun.ID)
 					if activeRun.GoalID != "" {
 						goal, _ = be.Goal().Get(ctx, activeRun.GoalID)
+					}
+					if activeRun.DoDID != "" {
+						dod, _ = be.DoD().Get(ctx, activeRun.DoDID)
 					}
 				}
 				return WorkspaceContextMsg{
@@ -61,6 +65,7 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 					ActiveRun: activeRun,
 					Status:    status,
 					Goal:      goal,
+					DoD:       dod,
 					Decisions: snapshot.Decisions,
 					Approvals: snapshot.Approvals,
 				}
@@ -84,10 +89,14 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 		}
 		var status *backend.RunStatusInfo
 		var goal *backend.GoalInfo
+		var dod *backend.DoDInfo
 		if run != nil {
 			status, _ = be.Run().Status(ctx, run.ID)
 			if run.GoalID != "" {
 				goal, _ = be.Goal().Get(ctx, run.GoalID)
+			}
+			if run.DoDID != "" {
+				dod, _ = be.DoD().Get(ctx, run.DoDID)
 			}
 		}
 		decisions, err := be.Decision().List(ctx, wsID)
@@ -104,6 +113,7 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 			ActiveRun: run,
 			Status:    status,
 			Goal:      goal,
+			DoD:       dod,
 			Decisions: decisions,
 			Approvals: approvals,
 		}

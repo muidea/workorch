@@ -7,7 +7,9 @@ type RunSnapshot struct {
 	Run                  Run                      `json:"run"`
 	Outcome              RunOutcome               `json:"outcome"`
 	TaskProgress         TaskProgress             `json:"taskProgress"`
+	RepairLoop           RepairLoop               `json:"repairLoop"`
 	TaskDecompositions   []TaskDecomposition      `json:"taskDecompositions,omitempty"`
+	TaskPlans            []TaskPlan               `json:"taskPlans,omitempty"`
 	Step                 *presenter.StepView      `json:"step,omitempty"`
 	Steps                []presenter.StepView     `json:"steps,omitempty"`
 	ToolCalls            []ToolCall               `json:"toolCalls,omitempty"`
@@ -16,6 +18,8 @@ type RunSnapshot struct {
 	ValidationResults    []ValidationResult       `json:"validationResults,omitempty"`
 	RuntimeCheckpoints   []RuntimeCheckpoint      `json:"runtimeCheckpoints,omitempty"`
 	Results              []Result                 `json:"results,omitempty"`
+	DoDEvidence          []DoDEvidenceTrace       `json:"doDEvidence,omitempty"`
+	ResultQuality        []ResultQualityTrace     `json:"resultQuality,omitempty"`
 	Artifacts            []Artifact               `json:"artifacts,omitempty"`
 	ExecutionSections    []ExecutionSection       `json:"executionSections,omitempty"`
 	MemoryRecallTraces   []MemoryRecallTrace      `json:"memoryRecallTraces,omitempty"`
@@ -47,10 +51,14 @@ type RunObservability struct {
 	Outcome              RunOutcome             `json:"outcome"`
 	Progress             RunProgress            `json:"progress"`
 	TaskProgress         TaskProgress           `json:"taskProgress"`
+	RepairLoop           RepairLoop             `json:"repairLoop"`
 	TaskDecompositions   []TaskDecomposition    `json:"taskDecompositions,omitempty"`
+	TaskPlans            []TaskPlan             `json:"taskPlans,omitempty"`
 	ExecutionSections    []ExecutionSection     `json:"executionSections,omitempty"`
 	MemoryRecallTraces   []MemoryRecallTrace    `json:"memoryRecallTraces,omitempty"`
 	WebSources           []WebSourceTrace       `json:"webSources,omitempty"`
+	DoDEvidence          []DoDEvidenceTrace     `json:"doDEvidence,omitempty"`
+	ResultQuality        []ResultQualityTrace   `json:"resultQuality,omitempty"`
 	Evidence             RuntimeEvidenceSummary `json:"evidence"`
 	LatestCheckpoint     *RuntimeCheckpoint     `json:"latestCheckpoint,omitempty"`
 	SelectedCapabilities []RuntimeCapability    `json:"selectedCapabilities,omitempty"`
@@ -68,6 +76,7 @@ type TaskProgress struct {
 	Items            []ProgressItem      `json:"items,omitempty"`
 	Blockers         []ProgressBlocker   `json:"blockers,omitempty"`
 	Recovery         RecoveryPlan        `json:"recovery"`
+	RepairLoop       RepairLoop          `json:"repairLoop"`
 	EvidenceRefs     []string            `json:"evidenceRefs,omitempty"`
 }
 
@@ -132,6 +141,22 @@ type RecoveryPlan struct {
 	FailureClass       string `json:"failureClass,omitempty"`
 	FailureSignature   string `json:"failureSignature,omitempty"`
 	Reason             string `json:"reason,omitempty"`
+}
+
+type RepairLoop struct {
+	State                string   `json:"state"`
+	AttemptCount         int      `json:"attemptCount"`
+	LastAttempt          int      `json:"lastAttempt,omitempty"`
+	LastRepairStepID     string   `json:"lastRepairStepId,omitempty"`
+	LastFailureStepID    string   `json:"lastFailureStepId,omitempty"`
+	LastFailureClass     string   `json:"lastFailureClass,omitempty"`
+	LastFailureSignature string   `json:"lastFailureSignature,omitempty"`
+	LastFailureAt        string   `json:"lastFailureAt,omitempty"`
+	NextAction           string   `json:"nextAction,omitempty"`
+	Escalated            bool     `json:"escalated"`
+	EscalationReason     string   `json:"escalationReason,omitempty"`
+	EscalationTicketID   string   `json:"escalationTicketId,omitempty"`
+	EvidenceRefs         []string `json:"evidenceRefs,omitempty"`
 }
 
 type ContextBundle struct {
@@ -221,6 +246,26 @@ type TaskDecompositionNode struct {
 	StepState    string         `json:"stepState,omitempty"`
 	EvidenceRefs []string       `json:"evidenceRefs,omitempty"`
 	Input        map[string]any `json:"input,omitempty"`
+}
+
+type TaskPlan struct {
+	ID               string   `json:"id"`
+	WorkspaceID      string   `json:"workspaceId"`
+	RunID            string   `json:"runId"`
+	AnchorStepID     string   `json:"anchorStepId"`
+	RevisionStepID   string   `json:"revisionStepId"`
+	Revision         int      `json:"revision"`
+	State            string   `json:"state"`
+	Stage            string   `json:"stage,omitempty"`
+	Summary          string   `json:"summary,omitempty"`
+	GraphBranch      string   `json:"graphBranch,omitempty"`
+	NodeTotal        int      `json:"nodeTotal"`
+	NodeCompleted    int      `json:"nodeCompleted"`
+	NodeFailed       int      `json:"nodeFailed"`
+	NodeRunning      int      `json:"nodeRunning"`
+	EvidenceRefs     []string `json:"evidenceRefs,omitempty"`
+	OccurredAt       string   `json:"occurredAt,omitempty"`
+	SourceProjection string   `json:"sourceProjection,omitempty"`
 }
 
 type ExecutionSection struct {
@@ -519,6 +564,42 @@ type DoDAssessmentItem struct {
 	FailureReason string   `json:"failureReason,omitempty"`
 	Confidence    float64  `json:"confidence,omitempty"`
 	SourceNote    string   `json:"sourceNote,omitempty"`
+}
+
+type DoDEvidenceTrace struct {
+	ResultID  string            `json:"resultId"`
+	DoDID     string            `json:"doDId,omitempty"`
+	Satisfied bool              `json:"satisfied"`
+	Summary   string            `json:"summary,omitempty"`
+	Items     []DoDEvidenceItem `json:"items,omitempty"`
+}
+
+type DoDEvidenceItem struct {
+	Item                string   `json:"item"`
+	State               string   `json:"state"`
+	FailureReason       string   `json:"failureReason,omitempty"`
+	Confidence          float64  `json:"confidence,omitempty"`
+	SourceNote          string   `json:"sourceNote,omitempty"`
+	EvidenceRefs        []string `json:"evidenceRefs,omitempty"`
+	EvidenceStatus      string   `json:"evidenceStatus,omitempty"`
+	MissingEvidenceRefs []string `json:"missingEvidenceRefs,omitempty"`
+}
+
+type ResultQualityTrace struct {
+	ResultID     string               `json:"resultId"`
+	DoDID        string               `json:"doDId,omitempty"`
+	State        string               `json:"state"`
+	Summary      string               `json:"summary,omitempty"`
+	EvidenceRefs []string             `json:"evidenceRefs,omitempty"`
+	Issues       []ResultQualityIssue `json:"issues,omitempty"`
+}
+
+type ResultQualityIssue struct {
+	Code         string   `json:"code"`
+	Severity     string   `json:"severity"`
+	Message      string   `json:"message"`
+	Suggestion   string   `json:"suggestion,omitempty"`
+	EvidenceRefs []string `json:"evidenceRefs,omitempty"`
 }
 
 type Artifact struct {

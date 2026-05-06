@@ -297,6 +297,44 @@ type RunStatus struct {
 	FailureReason      string `json:"failureReason,omitempty"`
 }
 
+type RecoveryPlan struct {
+	Mode               string `json:"mode"`
+	NextAction         string `json:"nextAction,omitempty"`
+	RunID              string `json:"runId,omitempty"`
+	StepID             string `json:"stepId,omitempty"`
+	BlockingTicketID   string `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID string `json:"blockingApprovalId,omitempty"`
+	CheckpointID       string `json:"checkpointId,omitempty"`
+	FailureClass       string `json:"failureClass,omitempty"`
+	FailureSignature   string `json:"failureSignature,omitempty"`
+	Reason             string `json:"reason,omitempty"`
+}
+
+type RepairLoop struct {
+	State                string   `json:"state"`
+	AttemptCount         int      `json:"attemptCount"`
+	LastAttempt          int      `json:"lastAttempt,omitempty"`
+	LastRepairStepID     string   `json:"lastRepairStepId,omitempty"`
+	LastFailureStepID    string   `json:"lastFailureStepId,omitempty"`
+	LastFailureClass     string   `json:"lastFailureClass,omitempty"`
+	LastFailureSignature string   `json:"lastFailureSignature,omitempty"`
+	LastFailureAt        string   `json:"lastFailureAt,omitempty"`
+	NextAction           string   `json:"nextAction,omitempty"`
+	Escalated            bool     `json:"escalated"`
+	EscalationReason     string   `json:"escalationReason,omitempty"`
+	EscalationTicketID   string   `json:"escalationTicketId,omitempty"`
+	EvidenceRefs         []string `json:"evidenceRefs,omitempty"`
+}
+
+type TaskProgress struct {
+	WorkspaceID string       `json:"workspaceId"`
+	RunID       string       `json:"runId,omitempty"`
+	State       string       `json:"state"`
+	Summary     string       `json:"summary,omitempty"`
+	Recovery    RecoveryPlan `json:"recovery"`
+	RepairLoop  RepairLoop   `json:"repairLoop"`
+}
+
 type RunOutcome struct {
 	WorkspaceID  string   `json:"workspaceId,omitempty"`
 	State        string   `json:"state"`
@@ -429,6 +467,7 @@ type MemoryRecallTrace struct {
 type WorkspaceSnapshot struct {
 	Workspace          Workspace           `json:"workspace"`
 	Outcome            RunOutcome          `json:"outcome"`
+	TaskProgress       TaskProgress        `json:"taskProgress"`
 	Runs               []Run               `json:"runs,omitempty"`
 	Results            []Result            `json:"results,omitempty"`
 	Artifacts          []Artifact          `json:"artifacts,omitempty"`
@@ -447,6 +486,8 @@ type RunSnapshot struct {
 	Workspace          Workspace           `json:"workspace"`
 	Run                Run                 `json:"run"`
 	Outcome            RunOutcome          `json:"outcome"`
+	TaskProgress       TaskProgress        `json:"taskProgress"`
+	RepairLoop         RepairLoop          `json:"repairLoop"`
 	Steps              []Step              `json:"steps,omitempty"`
 	ToolCalls          []ToolCall          `json:"toolCalls,omitempty"`
 	Patches            []Patch             `json:"patches,omitempty"`
@@ -467,9 +508,11 @@ type Activation struct {
 }
 
 type RunObservability struct {
-	Run      Run             `json:"run"`
-	Outcome  RunOutcome      `json:"outcome"`
-	Timeline []TimelineEntry `json:"timeline,omitempty"`
+	Run          Run             `json:"run"`
+	Outcome      RunOutcome      `json:"outcome"`
+	TaskProgress TaskProgress    `json:"taskProgress"`
+	RepairLoop   RepairLoop      `json:"repairLoop"`
+	Timeline     []TimelineEntry `json:"timeline,omitempty"`
 }
 
 type TimelineEntry struct {

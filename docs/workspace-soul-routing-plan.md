@@ -13,6 +13,10 @@ Soul，同时保持现有单一 `soulId` 启动方式可继续作为本次 Run �
 - Run execution context 必须记录最终 Soul 路由结果和来源，便于审计、调试和恢复。
 - LLM 相关 Step 能根据当前任务环节选择合适的 Soul 作为上下文。
 - Soul 能力校验继续约束 Skill、MCP 和 Tool，不允许绕过已有 capability 边界。
+  Run 激活时选择的 Skill/MCP/Capability 属于执行能力集合，统一由最终
+  `execution` 阶段 Soul 校验；`planning`、`decision`、`approval`、
+  `validation`、`artifact` 等非工具阶段只通过自身 `allowedToolKinds` 和
+  `soulMd` 限制当前阶段行为，不因执行阶段选择了 MCP/Skill 而阻断 Run 启动。
 
 ## Non-Goals
 
@@ -25,7 +29,11 @@ Soul，同时保持现有单一 `soulId` 启动方式可继续作为本次 Run �
 - `application/workorch` 是 Soul Routing 的唯一策略解析层，负责在 Run 创建或恢复前解析 Workspace/Run/System 的 Soul 配置并写入 `executionContext.soulRouting`。
 - `kernel/orchestrator` 只消费和透传 execution context，不允许根据 Goal、DoD 或其他业务目标文本选择 Soul。
 - `blocks/llm` 只根据 Step input 和 `executionContext.soulRouting` 选择当前阶段的 Soul 上下文，不允许读取 Workspace/Soul 仓储，也不允许修改 Soul 绑定。
-- `soulMd` 是提示词定义内容，不是授权源；Skill、MCP 和 Tool 权限只能来自结构化字段 `allowedSkillRefs`、`allowedMCPServerRefs`、`allowedToolKinds`。
+- `soulMd` 是提示词定义内容，不是授权源；Skill、MCP 和 Tool 权限只能来自结构化字段 `allowedSkillRefs`、`allowedMCPServerRefs`、`allowedCapabilityRefs`、`allowedCapabilityCategories`、`allowedToolKinds`。
+- `allowedSkillRefs`、`allowedMCPServerRefs`、`allowedCapabilityRefs` 和
+  `allowedCapabilityCategories` 支持 `"*"`。ID 通配用于允许运行期动态注册的
+  Skill/MCP/Capability；Capability Category 是业务分类，可由专用 Soul 收窄，
+  内置通用模板默认接纳动态分类，并主要通过 `allowedToolKinds` 约束工具边界。
 - 阶段级 Soul 选择不违反以上约束；只要选择结果由 `application/workorch` 解析并固化到 Run context，运行期 block 只消费该结果即可。
 
 ## Task Stages
@@ -247,7 +255,9 @@ LLM Step 应根据当前任务意图选择阶段：
 - 已落地 `GET/PUT /api/v1/workorch/workspaces/{workspaceId}/soul-bindings`。
 - 已落地 Run `executionContext.soulRouting`，并在 Web Console 暴露 Workspace 级配置和启动执行时的阶段覆盖。
 - 已落地 LLM provider request 的 `currentSoulStage`、`currentSoulBinding`、`currentSoul` 注入；当前可识别初始规划、graph 节点执行、Decision resolution、Approval resolution、graph/completion follow-up 验收上下文，并支持 Step input 通过 `soulStage` 显式指定 `planning/execution/decision/approval/validation/artifact`。
-- 已落地 Soul capability 校验诊断：Run 启动前会明确返回不被允许的 Skill、MCP server 或 Tool kind，便于在 API/Web 验收时定位绑定问题。
+- 已落地 Soul capability 校验诊断：Run 启动前会使用最终 `execution`
+  阶段 Soul 明确返回不被允许的 Skill、MCP server、Capability、Capability
+  Category 或 Tool kind，便于在 API/Web 验收时定位绑定问题。
 - `execution` 阶段已由 execution graph 节点调度上下文消费；`artifact` 阶段已支持显式 LLM Step 输入消费，默认 Result Summary Artifact 仍由 DoD assessment 确定性生成。
 - `system_default` 已接入 `[runtime].defaultSoulId` 配置源；服务配置响应和 Web Console 会展示当前系统默认 Soul。后续目录规划落地后，可将该值迁移或同步到 `system/runtime_profile.json`。
 

@@ -191,6 +191,8 @@ type FetchedWebSourceInfo struct {
 type WorkspaceSnapshotInfo struct {
 	Workspace          WorkspaceInfo
 	Outcome            WorkspaceOutcomeInfo
+	TaskProgress       TaskProgressInfo
+	TaskDecompositions []TaskDecompositionInfo
 	Runs               []RunInfo
 	Results            []ResultInfo
 	Artifacts          []ArtifactInfo
@@ -199,6 +201,73 @@ type WorkspaceSnapshotInfo struct {
 	WebSources         []WebSourceTraceInfo
 	Decisions          []DecisionInfo
 	Approvals          []ApprovalInfo
+}
+
+type RecoveryPlanInfo struct {
+	Mode               string
+	NextAction         string
+	RunID              common.RunID
+	StepID             common.StepID
+	BlockingTicketID   common.TicketID
+	BlockingApprovalID common.ApprovalID
+	CheckpointID       common.CheckpointID
+	FailureClass       string
+	FailureSignature   string
+	Reason             string
+}
+
+type RepairLoopInfo struct {
+	State                string
+	AttemptCount         int
+	LastAttempt          int
+	LastRepairStepID     common.StepID
+	LastFailureStepID    common.StepID
+	LastFailureClass     string
+	LastFailureSignature string
+	LastFailureAt        string
+	NextAction           string
+	Escalated            bool
+	EscalationReason     string
+	EscalationTicketID   common.TicketID
+	EvidenceRefs         []string
+}
+
+type TaskProgressInfo struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	State       string
+	Summary     string
+	Recovery    RecoveryPlanInfo
+	RepairLoop  RepairLoopInfo
+}
+
+type TaskDecompositionNodeInfo struct {
+	ID           string
+	Kind         string
+	Title        string
+	State        string
+	DependsOn    []string
+	Branch       string
+	StepID       common.StepID
+	StepState    string
+	EvidenceRefs []string
+	Input        map[string]any
+}
+
+type TaskDecompositionInfo struct {
+	ID            string
+	WorkspaceID   common.WorkspaceID
+	RunID         common.RunID
+	RootStepID    common.StepID
+	State         string
+	Summary       string
+	GraphBranch   string
+	NodeTotal     int
+	NodeCompleted int
+	NodeFailed    int
+	NodeRunning   int
+	Nodes         []TaskDecompositionNodeInfo
+	EvidenceRefs  []string
 }
 
 type WorkspaceBackend interface {

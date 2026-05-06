@@ -651,6 +651,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/dods/:dodId"},
 		{method: http.MethodPut, pattern: "/api/v1/workorch/dods/:dodId"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goal-dod-quality-check"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-activations"},
@@ -939,6 +940,24 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		cmd.WorkspaceID = workspaceID
 		return cmd, nil
 	}
+	state.checkGoalDoDQuality = func(ctx context.Context, _, _ string, cmd appservice.GoalDoDQualityCheckCommand) (appservice.GoalDoDQualityCheck, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("goal/dod quality check event hub = %#v, want injected hub", got)
+		}
+		if cmd.WorkspaceID != "ws-native-read" || cmd.GoalID != "goal-native" || cmd.DoDID != "dod-native" {
+			t.Fatalf("quality check cmd = %+v, want ws-native-read/goal-native/dod-native", cmd)
+		}
+		return appservice.GoalDoDQualityCheck{
+			WorkspaceID:       cmd.WorkspaceID,
+			GoalID:            cmd.GoalID,
+			DoDID:             cmd.DoDID,
+			Executable:        true,
+			Verifiable:        true,
+			ExecutionScore:    92,
+			VerificationScore: 90,
+			Status:            "ready",
+		}, nil
+	}
 	state.readWorkspaceTaskProgress = func(ctx context.Context, _, _, workspaceID string) (appservice.TaskProgress, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("workspace task progress event hub = %#v, want injected hub", got)
@@ -1204,6 +1223,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/task-decompositions", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/soul-bindings", status: http.StatusOK},
 		{method: http.MethodPut, path: "/api/v1/workorch/workspaces/ws-native-read/soul-bindings", body: `{"defaultSoulId":"soul-native","bindings":{"execution":"soul-native-execution"}}`, status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/goal-dod-quality-check", body: `{"goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs", body: `{"runId":"run-native-write","goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusCreated},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs?workspaceId=ws-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read", status: http.StatusOK},

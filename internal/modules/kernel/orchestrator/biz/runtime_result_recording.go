@@ -184,5 +184,8 @@ func (o *RuntimeOrchestrator) recordCompletionEvidenceFromValidatedDoDAssessment
 		func() error {
 			return o.recordRunSummaryMemoryFromValidatedDoDAssessment(ctx, run, step, assessment, summary)
 		},
+		func() error {
+			return o.recordValidationCommandMemoriesFromValidatedDoDAssessment(ctx, run, step, assessment)
+		},
 	)
 }

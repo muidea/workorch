@@ -105,7 +105,7 @@ Soul、MCP、Memory、Run、Goal、DoD、Ticket、Approval 等能力，演进为
 | 能力 | 当前结论 | 后续要求 |
 | --- | --- | --- |
 | Run / Goal / DoD | 可复用 | software-dev 路径必须继续使用，不新增并行状态机 |
-| workspaceTemplate | 可复用 | 当前目录代码仓库应默认优先绑定 `software-dev` |
+| workspaceTemplate | 可复用 | 当前目录自动创建默认 Workspace 使用 `generic-governed`；需要软件开发能力时在创建 Workspace 时显式选择 `software-dev` |
 | Soul | 可复用但需强化 | 补充自治开发、验收、风险边界提示 |
 | MCP | 可复用 | 用于外部工具、仓库服务、测试服务等能力扩展 |
 | Memory | 可复用 | 用于项目约定、历史决策、失败修复经验 |

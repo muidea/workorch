@@ -115,6 +115,13 @@ type dodsResponse struct {
 	DoDs     []appservice.DoD `json:"dods"`
 }
 
+type goalDoDQualityCheckResponse struct {
+	Service      string                         `json:"service"`
+	Backend      string                         `json:"backend,omitempty"`
+	DataRoot     string                         `json:"dataRoot,omitempty"`
+	QualityCheck appservice.GoalDoDQualityCheck `json:"qualityCheck"`
+}
+
 type runInstanceResponse struct {
 	Service  string         `json:"service"`
 	Backend  string         `json:"backend,omitempty"`
@@ -403,6 +410,13 @@ type defineDoDRequest struct {
 	Items []string `json:"items"`
 }
 
+type goalDoDQualityCheckRequest struct {
+	GoalID   string   `json:"goalId,omitempty"`
+	DoDID    string   `json:"doDId,omitempty"`
+	GoalText string   `json:"goalText,omitempty"`
+	DoDItems []string `json:"doDItems,omitempty"`
+}
+
 type errorResponse struct {
 	Error string `json:"error"`
 }
@@ -422,6 +436,7 @@ type defineDoDFunc func(context.Context, string, string, string, []string) (apps
 type updateDoDFunc func(context.Context, string, string, string, []string) (appservice.DoD, error)
 type readDoDFunc func(context.Context, string, string, string) (appservice.DoD, error)
 type listDoDsFunc func(context.Context, string, string, string) ([]appservice.DoD, error)
+type checkGoalDoDQualityFunc func(context.Context, string, string, appservice.GoalDoDQualityCheckCommand) (appservice.GoalDoDQualityCheck, error)
 type createRunInstanceFunc func(context.Context, string, string, string, string, string, string) (appservice.Run, error)
 type readRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
 type readRunSnapshotFunc func(context.Context, string, string, string) (appservice.RunSnapshot, error)
@@ -504,6 +519,7 @@ type serverState struct {
 	updateDoD                       updateDoDFunc
 	readDoD                         readDoDFunc
 	listDoDs                        listDoDsFunc
+	checkGoalDoDQuality             checkGoalDoDQualityFunc
 	createRun                       createRunInstanceFunc
 	readRun                         readRunInstanceFunc
 	readRunSnapshot                 readRunSnapshotFunc
@@ -609,6 +625,7 @@ type serverMetrics struct {
 	dodDefineRequests                  atomic.Uint64
 	dodListRequests                    atomic.Uint64
 	dodGetRequests                     atomic.Uint64
+	goalDoDQualityCheckRequests        atomic.Uint64
 	runCreateRequests                  atomic.Uint64
 	runListRequests                    atomic.Uint64
 	runGetRequests                     atomic.Uint64
@@ -2085,6 +2102,37 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			DoD:      item,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goal-dod-quality-check", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "goal-dod-quality-check" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.goalDoDQualityCheckRequests.Add(1)
+		var req goalDoDQualityCheckRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.checkGoalDoDQuality(r.Context(), state.config.Backend, state.config.DataRoot, appservice.GoalDoDQualityCheckCommand{
+			WorkspaceID: workspaceID,
+			GoalID:      req.GoalID,
+			DoDID:       req.DoDID,
+			GoalText:    req.GoalText,
+			DoDItems:    req.DoDItems,
+		})
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, goalDoDQualityCheckResponse{
+			Service:      "workorch",
+			Backend:      state.config.Backend,
+			DataRoot:     state.config.DataRoot,
+			QualityCheck: item,
+		})
+	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/memory", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
@@ -2586,6 +2634,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		updateDoD:                       defaultUpdateDoD,
 		readDoD:                         defaultReadDoD,
 		listDoDs:                        defaultListDoDs,
+		checkGoalDoDQuality:             defaultCheckGoalDoDQuality,
 		createRun:                       defaultCreateRun,
 		readRun:                         defaultReadRun,
 		readRunSnapshot:                 defaultReadRunSnapshot,
@@ -2839,6 +2888,15 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ListDoDsWithSession(ctx, session, workspaceID)
+			return err
+		})
+		return ret, err
+	}
+	s.checkGoalDoDQuality = func(ctx context.Context, _, _ string, cmd appservice.GoalDoDQualityCheckCommand) (appservice.GoalDoDQualityCheck, error) {
+		var ret appservice.GoalDoDQualityCheck
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.CheckGoalDoDQualityWithSession(ctx, session, cmd)
 			return err
 		})
 		return ret, err
@@ -3429,6 +3487,10 @@ func defaultReadDoD(ctx context.Context, backend string, dataRoot string, dodID 
 
 func defaultListDoDs(ctx context.Context, backend string, dataRoot string, workspaceID string) ([]appservice.DoD, error) {
 	return appservice.ListDoDsWithBackend(ctx, backend, dataRoot, workspaceID)
+}
+
+func defaultCheckGoalDoDQuality(ctx context.Context, backend string, dataRoot string, cmd appservice.GoalDoDQualityCheckCommand) (appservice.GoalDoDQualityCheck, error) {
+	return appservice.CheckGoalDoDQualityWithBackend(ctx, backend, dataRoot, cmd)
 }
 
 func defaultCreateRun(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string, goalID string, dodID string) (appservice.Run, error) {

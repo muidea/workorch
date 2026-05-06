@@ -89,8 +89,11 @@ soulMD: |
 name: "通用治理-执行"
 description: "执行计划中的操作步骤。根据 Skill 指令调用工具，修改文件，产出中间交付物。"
 businessDomains: ["通用"]
+allowedSkillRefs: ["*"]
+allowedMCPServerRefs: ["*"]
+allowedCapabilityRefs: ["*"]
 allowedToolKinds: ["shell/command", "mcp/tool_call", "mcp/resource_read", "mcp/prompt_get", "patch/apply"]
-allowedCapabilityCategories: ["tool", "resource", "prompt"]
+allowedCapabilityCategories: ["*"]
 soulMD: |
   # 执行阶段 Soul
 
@@ -261,8 +264,11 @@ soulMD: |
 name: "天气查询-执行"
 description: "在获得审批后执行 MCP weather.current 工具调用。"
 businessDomains: ["天气", "数据查询"]
+allowedSkillRefs: ["*"]
+allowedMCPServerRefs: ["*"]
+allowedCapabilityRefs: ["*"]
 allowedToolKinds: ["mcp/tool_call", "mcp/resource_read"]
-allowedCapabilityCategories: ["tool"]
+allowedCapabilityCategories: ["*"]
 soulMD: |
   # 天气查询执行 Soul
 
@@ -356,11 +362,12 @@ soulMD: |
   "description": "编码实现、运行测试、修复缺陷的完整软件开发流程。支持 git、构建工具和测试框架。",
   "goalText": "根据需求完成软件开发任务：编码实现、运行测试、修复缺陷、产出交付物。",
   "doDItems": [
-    "代码实现完成且可通过编译",
-    "所有测试通过",
-    "lint/静态检查无错误",
-    "代码变更以 unified_diff 形式提交",
-    "测试报告和构建产物已生成"
+    "目标（Goal）对应的需求能力已实现，并与验收范围保持一致",
+    "代码和配置变更保持最小且与目标直接相关，并提供 unified_diff 证据",
+    "相关 build/test 验证已执行并通过；无法执行时记录跳过原因和影响评估",
+    "lint/静态检查按项目约定执行；缺失命令时记录替代检查或跳过原因",
+    "最终结果包含改动摘要、验证命令、验证结果、失败/跳过说明、残余风险和后续建议",
+    "DoD 验收评估逐项给出 evidenceRefs，并在交付物索引中可追溯"
   ],
   "soulBindings": {
     "planning": "soul-software-dev-planning",
@@ -406,12 +413,15 @@ soulMD: |
 name: "软件开发-执行"
 description: "编码实现、运行构建和测试。允许 shell 命令、文件写入和补丁。"
 businessDomains: ["软件开发"]
+allowedSkillRefs: ["*"]
+allowedMCPServerRefs: ["*"]
+allowedCapabilityRefs: ["*"]
 allowedToolKinds:
   - "shell/command"
   - "mcp/tool_call"
   - "mcp/resource_read"
   - "patch/apply"
-allowedCapabilityCategories: ["tool", "resource"]
+allowedCapabilityCategories: ["*"]
 soulMD: |
   # 软件开发执行 Soul
 
@@ -610,8 +620,11 @@ soulMD: |
 name: "代码审查-执行"
 description: "执行静态分析工具，读取代码，识别问题。只读模式，不允许任何文件修改。"
 businessDomains: ["软件开发", "代码审查"]
+allowedSkillRefs: ["*"]
+allowedMCPServerRefs: ["*"]
+allowedCapabilityRefs: ["*"]
 allowedToolKinds: ["shell/command", "mcp/resource_read"]
-allowedCapabilityCategories: ["resource"]
+allowedCapabilityCategories: ["*"]
 soulMD: |
   # 代码审查执行 Soul
 
@@ -720,8 +733,11 @@ soulMD: |
 name: "文档生成-执行"
 description: "读取源代码，生成文档文件。允许文件写入和只读 shell 命令。"
 businessDomains: ["文档", "技术写作"]
+allowedSkillRefs: ["*"]
+allowedMCPServerRefs: ["*"]
+allowedCapabilityRefs: ["*"]
 allowedToolKinds: ["shell/command", "mcp/resource_read", "patch/apply"]
-allowedCapabilityCategories: ["resource"]
+allowedCapabilityCategories: ["*"]
 soulMD: |
   # 文档生成执行 Soul
 
@@ -788,7 +804,34 @@ soulMD: |
 
 ---
 
-## 六、data-analysis（数据分析）
+## 六、软件开发相关模板协作边界
+
+本节用于明确 `software-dev`、`code-review`、`doc-generator` 的边界，避免功能混合和流程歧义。
+
+### 设计原则
+
+- `software-dev` 负责实现、验证、修复和代码交付，不承担只读审查或文档模板的隐式切换。
+- `code-review` 保持严格只读，不修改代码，不承担实现任务。
+- `doc-generator` 负责文档交付，不修改源代码，不承担代码实现任务。
+- 第一版不做模板自动串联；组合使用必须由用户显式创建对应 Workspace 并提交 Goal / DoD。
+
+### 推荐组合方式
+
+| 阶段目标 | 推荐模板 | 说明 |
+| --- | --- | --- |
+| 功能实现与修复 | `software-dev` | 主开发流程，包含 build/test/lint 与 diff 交付 |
+| 变更质量复核 | `code-review` | 对已完成变更执行独立只读审查 |
+| 文档交付补充 | `doc-generator` | 基于实现结果生成 README/API/架构文档 |
+
+### 禁止行为
+
+- 不要在 `software-dev` Run 中隐式切换到 `code-review` 或 `doc-generator`。
+- 不要把 `code-review` 的问题发现直接当作自动代码修复执行。
+- 不要在 `doc-generator` 流程中写入源代码文件。
+
+---
+
+## 七、data-analysis（数据分析）
 
 ### 模板配置
 
@@ -825,12 +868,15 @@ soulMD: |
 name: "数据分析-执行"
 description: "查询数据源，执行 Python/R 分析脚本。支持长运行时间。"
 businessDomains: ["数据分析", "数据科学"]
+allowedSkillRefs: ["*"]
+allowedMCPServerRefs: ["*"]
+allowedCapabilityRefs: ["*"]
 allowedToolKinds:
   - "shell/command"
   - "mcp/tool_call"
   - "mcp/resource_read"
   - "patch/apply"
-allowedCapabilityCategories: ["tool", "resource"]
+allowedCapabilityCategories: ["*"]
 soulMD: |
   # 数据分析执行 Soul
 
@@ -898,6 +944,15 @@ soulMD: |
 | data-analysis approval | 触发条件 | — | — | — | 数据库写入/外部发布 |
 
 ---
+
+说明：内置 execution 阶段 Soul 的 `allowedSkillRefs`、
+`allowedMCPServerRefs`、`allowedCapabilityRefs` 使用 `"*"` 支持运行期动态
+注册的 Skill、MCP server 和 MCP capability。MCP capability `category` 是
+业务分类（例如“代码仓库”），内置通用模板默认使用 `"*"` 接纳动态分类；真正
+的工具边界由 `allowedToolKinds` 控制。需要限制业务分类的专用 Soul 可以把
+`allowedCapabilityCategories` 收窄为明确列表。planning、decision、approval、
+validation、artifact 阶段不配置动态 ID 通配，且不参与 Run 激活时执行能力集合
+的校验。
 
 ## Soul 命名与依赖约定
 

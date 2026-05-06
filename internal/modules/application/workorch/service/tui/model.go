@@ -79,9 +79,11 @@ type AppModel struct {
 	artifacts     []string
 	sources       []string
 	patches       []backend.PatchInfo
+	taskDecomp    []backend.TaskDecompositionInfo
 	memoryRecalls []backend.MemoryRecallTraceInfo
 	progress      progressState
 	progressText  string
+	repairLoop    string
 	failureReason string
 	failureHint   string
 	running       bool
@@ -1910,6 +1912,23 @@ func snapshotPatches(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID
 	return out
 }
 
+func snapshotTaskDecompositions(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.TaskDecompositionInfo {
+	if snapshot == nil || len(snapshot.TaskDecompositions) == 0 {
+		return nil
+	}
+	out := make([]backend.TaskDecompositionInfo, 0, len(snapshot.TaskDecompositions))
+	for _, item := range snapshot.TaskDecompositions {
+		if runID != "" && item.RunID != "" && item.RunID != runID {
+			continue
+		}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func patchDisplayLabel(item backend.PatchInfo) string {
 	parts := make([]string, 0, 5)
 	if item.State != "" {
@@ -1961,6 +1980,31 @@ func stepProgressText(prefix string, kind string, fallback string) string {
 		return kind
 	}
 	return prefix + ": " + kind
+}
+
+func repairLoopSummary(progress backend.TaskProgressInfo) string {
+	loop := progress.RepairLoop
+	parts := make([]string, 0, 4)
+	if loop.AttemptCount > 0 {
+		attempt := loop.LastAttempt
+		if attempt <= 0 {
+			attempt = loop.AttemptCount
+		}
+		parts = append(parts, fmt.Sprintf("repair #%d", attempt))
+	}
+	if loop.LastFailureClass != "" {
+		parts = append(parts, loop.LastFailureClass)
+	}
+	if loop.NextAction != "" {
+		parts = append(parts, loop.NextAction)
+	}
+	if loop.Escalated {
+		parts = append(parts, "escalated")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " | ")
 }
 
 func blockingDecisionLabel(item *backend.DecisionInfo) string {

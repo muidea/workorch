@@ -299,6 +299,13 @@ errors = []
 
 if run.get("state") != "completed":
     errors.append(f"run state is {run.get('state')!r}, want completed: {run.get('failureReason', '')}")
+routing = (run.get("executionContext") or {}).get("soulRouting") or {}
+bindings = routing.get("bindings") or {}
+execution_binding = bindings.get("execution") or {}
+if routing.get("status") != "resolved":
+    errors.append(f"soulRouting.status is {routing.get('status')!r}, want resolved")
+if execution_binding.get("soulId") != "soul-generic-governed-execution":
+    errors.append(f"execution soul binding is {execution_binding!r}, want soul-generic-governed-execution")
 mcp_steps = [s for s in steps if s.get("kind") == "mcp/tool_call"]
 if not mcp_steps:
     errors.append("missing mcp/tool_call step")
@@ -371,7 +378,7 @@ upsert_json "$BASE_URL/api/v1/workorch/mcp/servers" \
   "$TMP_DIR/mcp-server.json"
 
 post_json "$BASE_URL/api/v1/workorch/workspaces" \
-  '{"title":"real service mcp stdio verification","description":"verify deployed service MCP stdio transport through LLM execution graph"}' \
+  '{"title":"real service mcp stdio verification","description":"verify deployed service MCP stdio transport through LLM execution graph","templateId":"generic-governed"}' \
   "$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]

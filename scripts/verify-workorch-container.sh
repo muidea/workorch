@@ -300,7 +300,7 @@ curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep '业务总览' >
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep '治理队列' >/dev/null
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" | grep '工作空间详情' >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
-  -d '{"title":"verify workspace","description":"verify workspace description"}' >"$TMP_DIR/workspace.json"
+  -d '{"title":"verify workspace","description":"verify workspace description","templateId":"generic-governed"}' >"$TMP_DIR/workspace.json"
 workspace_id="$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' "$TMP_DIR/workspace.json" | head -n1)"
 [[ -n "$workspace_id" ]]
 grep '"title": "verify workspace"' "$TMP_DIR/workspace.json" >/dev/null
