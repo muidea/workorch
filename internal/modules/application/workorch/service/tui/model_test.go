@@ -1588,6 +1588,18 @@ func TestModelResultArtifactsHiddenWhenResultContainsArtifactIndex(t *testing.T)
 	}
 }
 
+func TestModelResultWebSources(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.result = "完成"
+	m.sources = []string{"fetch: Go Downloads - https://go.dev/dl/ (run-1/step-fetch)"}
+	m.width = 100
+	m.height = 20
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "Sources") || !strings.Contains(view, "https://go.dev/dl/") || strings.Contains(view, "Download Go snippet") {
+		t.Fatalf("source context missing or too verbose:\n%s", view)
+	}
+}
+
 func TestModelDodSlashCommandSetsPendingDoD(t *testing.T) {
 	model := NewAppModel(newFake(t), "ws-1", "")
 	model.width = 100

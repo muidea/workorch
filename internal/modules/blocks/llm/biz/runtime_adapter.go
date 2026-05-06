@@ -23,6 +23,7 @@ import (
 	mcpcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	sshcommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
+	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/dialoglanguage"
@@ -1605,6 +1606,16 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 				Kind:        sshcommon.StepKindCommand,
 				Description: "Execute one bounded non-interactive SSH command on a remote host using supplied password or private key credentials.",
 				Input:       map[string]any{"host": "string", "port": "number", "username": "string", "password": "string", "privateKey": "string", "privateKeyPath": "string", "command": "string", "timeoutMillis": "number"},
+			},
+			{
+				Kind:        webcommon.StepKindSearch,
+				Description: "Search external web sources through a governed Web Search provider. Search results are candidate sources only; important facts should be verified by web/fetch before final use.",
+				Input:       map[string]any{"query": "string", "locale": "string", "recency": "day|week|month|year", "domains": "[]string", "excludeDomains": "[]string", "maxResults": "number", "safeSearch": "boolean", "reason": "string", "approvalId": "approved approval id when required"},
+			},
+			{
+				Kind:        webcommon.StepKindFetch,
+				Description: "Fetch one HTTP(S) URL through a governed Web Search provider and return bounded content or metadata. Include approvalId when the source requires approval.",
+				Input:       map[string]any{"url": "string", "maxBytes": "number", "extractMode": "text|metadata|summary", "reason": "string", "approvalId": "approved approval id when required"},
 			},
 			{
 				Kind:        llmcommon.RuntimeBlockKindPatchApply,

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -219,6 +220,70 @@ func (o *RuntimeOrchestrator) recordPatchDiffArtifact(
 	return []common.ArtifactID{item.ID}, o.publishArtifactCreated(ctx, item)
 }
 
+func (o *RuntimeOrchestrator) recordWebSourceIndexArtifact(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	sourceDetails []resultWebSourceDetail,
+	now string,
+) (common.ArtifactID, error) {
+	if run == nil || step == nil || o.evidence.Artifacts == nil || len(sourceDetails) == 0 {
+		return "", nil
+	}
+	evidenceRefs := resultWebSourceEvidenceRefs(sourceDetails)
+	item := &resultmodel.Artifact{
+		ID:           webSourceIndexArtifactID(run),
+		WorkspaceID:  run.WorkspaceID,
+		RunID:        run.ID,
+		ResultID:     common.ResultID(fmt.Sprintf("%s/result/dod-assessment", run.ID)),
+		StepID:       step.ID,
+		ArtifactType: resultcommon.ArtifactTypeReport,
+		Category:     resultcommon.ArtifactCategorySource,
+		Name:         "Web Source Index",
+		Summary:      webSourceIndexArtifactContent(sourceDetails),
+		URI:          fmt.Sprintf("workorch://runs/%s/results/dod-assessment/web-source-index", run.ID),
+		ContentType:  "text/markdown; charset=utf-8",
+		State:        common.ArtifactStateAvailable,
+		EvidenceRefs: evidenceRefs,
+		Metadata: map[string]any{
+			"sourceType":   resultcommon.SourceTypeDoDAssessment,
+			"sourceRef":    string(step.ID),
+			"category":     resultcommon.ArtifactCategorySource,
+			"artifactKind": "web_source_index",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := o.evidence.Artifacts.Create(ctx, item); err != nil {
+		if err != common.ErrConflict {
+			return "", err
+		}
+		existing, getErr := o.evidence.Artifacts.Get(ctx, item.ID)
+		if getErr != nil {
+			return "", getErr
+		}
+		existing.WorkspaceID = item.WorkspaceID
+		existing.RunID = item.RunID
+		existing.ResultID = item.ResultID
+		existing.StepID = item.StepID
+		existing.ArtifactType = item.ArtifactType
+		existing.Category = item.Category
+		existing.Name = item.Name
+		existing.Summary = item.Summary
+		existing.URI = item.URI
+		existing.ContentType = item.ContentType
+		existing.State = item.State
+		existing.EvidenceRefs = item.EvidenceRefs
+		existing.Metadata = item.Metadata
+		existing.UpdatedAt = now
+		if err := o.evidence.Artifacts.Update(ctx, existing); err != nil {
+			return "", err
+		}
+		return existing.ID, o.publishArtifactCreated(ctx, existing)
+	}
+	return item.ID, o.publishArtifactCreated(ctx, item)
+}
+
 func resultSummaryFromDoDAssessment(
 	run *runModel.Run,
 	summary string,
@@ -278,6 +343,147 @@ func (o *RuntimeOrchestrator) resultPatchDetails(ctx context.Context, runID comm
 		})
 	}
 	return ret
+}
+
+func (o *RuntimeOrchestrator) resultWebSourceDetails(ctx context.Context, runID common.RunID) []resultWebSourceDetail {
+	if o == nil || o.steps == nil || runID == "" {
+		return nil
+	}
+	steps, err := o.steps.ListByRun(ctx, runID)
+	if err != nil || len(steps) == 0 {
+		return nil
+	}
+	ret := make([]resultWebSourceDetail, 0)
+	for _, step := range steps {
+		if step == nil || len(step.Output) == 0 {
+			continue
+		}
+		switch step.Kind {
+		case webcommon.StepKindSearch:
+			ret = append(ret, resultWebSearchDetails(step)...)
+		case webcommon.StepKindFetch:
+			if detail, ok := resultWebFetchDetail(step); ok {
+				ret = append(ret, detail)
+			}
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func resultWebSearchDetails(step *runModel.Step) []resultWebSourceDetail {
+	results := mapSliceFromValue(step.Output["results"])
+	if len(results) == 0 {
+		return nil
+	}
+	ret := make([]resultWebSourceDetail, 0, len(results))
+	for _, result := range results {
+		url := stringFromMap(result, "url")
+		if url == "" {
+			continue
+		}
+		ret = append(ret, resultWebSourceDetail{
+			StepID:         step.ID,
+			Kind:           step.Kind,
+			ProviderID:     stringFromMap(step.Output, "provider"),
+			Query:          stringFromMap(step.Output, "query"),
+			SearchedAt:     stringFromMap(step.Output, "searchedAt"),
+			Title:          stringFromMap(result, "title"),
+			URL:            url,
+			Source:         stringFromMap(result, "source"),
+			PublishedAt:    stringFromMap(result, "publishedAt"),
+			Rank:           int(int64FromValue(result["rank"])),
+			ContentHash:    stringFromMap(result, "contentHash"),
+			PolicyDecision: resultPolicyDecision(step.Output),
+		})
+	}
+	return ret
+}
+
+func resultWebFetchDetail(step *runModel.Step) (resultWebSourceDetail, bool) {
+	url := stringFromMap(step.Output, "url")
+	finalURL := stringFromMap(step.Output, "finalUrl")
+	if url == "" && finalURL == "" {
+		return resultWebSourceDetail{}, false
+	}
+	return resultWebSourceDetail{
+		StepID:         step.ID,
+		Kind:           step.Kind,
+		ProviderID:     stringFromMap(step.Output, "provider"),
+		URL:            url,
+		FinalURL:       finalURL,
+		Title:          stringFromMap(step.Output, "title"),
+		Source:         stringFromMap(step.Output, "source"),
+		RetrievedAt:    stringFromMap(step.Output, "retrievedAt"),
+		PublishedAt:    stringFromMap(step.Output, "publishedAt"),
+		ContentHash:    stringFromMap(step.Output, "contentHash"),
+		Truncated:      boolFromValue(step.Output["truncated"]),
+		PolicyDecision: resultPolicyDecision(step.Output),
+	}, true
+}
+
+func resultPolicyDecision(output map[string]any) string {
+	policy := mapFromValue(output["policy"])
+	return stringFromMap(policy, "decision")
+}
+
+func resultWebSourceEvidenceRefs(sourceDetails []resultWebSourceDetail) []string {
+	ret := make([]string, 0, len(sourceDetails))
+	for _, item := range sourceDetails {
+		if item.StepID != "" {
+			ret = append(ret, string(item.StepID))
+		}
+	}
+	return compactUniqueStrings(ret)
+}
+
+func webSourceIndexArtifactID(run *runModel.Run) common.ArtifactID {
+	if run == nil {
+		return ""
+	}
+	return common.ArtifactID(fmt.Sprintf("%s/artifact/web-source-index", run.ID))
+}
+
+func webSourceIndexArtifactContent(sourceDetails []resultWebSourceDetail) string {
+	var builder strings.Builder
+	builder.WriteString("# Web Source Index\n\n")
+	builder.WriteString("| Evidence | Kind | Source | URL | Retrieved | Policy |\n")
+	builder.WriteString("| --- | --- | --- | --- | --- | --- |\n")
+	for _, item := range sourceDetails {
+		source := firstNonEmptyOrchestratorString(item.Source, item.Title, item.ProviderID)
+		sourceURL := firstNonEmptyOrchestratorString(item.FinalURL, item.URL)
+		retrieved := firstNonEmptyOrchestratorString(item.RetrievedAt, item.SearchedAt, item.PublishedAt)
+		builder.WriteString(fmt.Sprintf(
+			"| `%s` | `%s` | %s | %s | %s | %s |\n",
+			markdownInlineCode(string(item.StepID)),
+			markdownInlineCode(item.Kind),
+			markdownTableCell(source),
+			markdownTableCell(sourceURL),
+			markdownTableCell(retrieved),
+			markdownTableCell(item.PolicyDecision),
+		))
+	}
+	return strings.TrimSpace(builder.String())
+}
+
+type resultWebSourceDetail struct {
+	StepID         common.StepID
+	Kind           string
+	ProviderID     string
+	Query          string
+	SearchedAt     string
+	Title          string
+	URL            string
+	FinalURL       string
+	Source         string
+	PublishedAt    string
+	RetrievedAt    string
+	ContentHash    string
+	Rank           int
+	Truncated      bool
+	PolicyDecision string
 }
 
 func (o *RuntimeOrchestrator) resultEvidenceDetails(ctx context.Context, evidenceRefs []string) []resultEvidenceDetail {

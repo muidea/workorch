@@ -13,7 +13,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMProviderTemplate, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, ValidationResult, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMProviderTemplate, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, ProgressBlocker, ProgressItem, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -602,6 +602,112 @@ function memoryRecallCard(items?: MemoryRecallTrace[]) {
           )
         }}
         dataSource={groups}
+      />
+    </Space>
+  );
+}
+
+type WebSourceRow = {
+  key: string;
+  kind: 'search' | 'fetch';
+  providerId?: string;
+  query?: string;
+  title?: string;
+  url: string;
+  finalUrl?: string;
+  source?: string;
+  occurredAt?: string;
+  contentHash?: string;
+  truncated?: boolean;
+  evidenceRef?: string;
+  approvalId?: string;
+  policyDecision?: string;
+};
+
+function webSourceRows(items?: WebSourceTrace[]) {
+  const rows: WebSourceRow[] = [];
+  for (const trace of items ?? []) {
+    for (const source of trace.sources ?? []) {
+      rows.push({
+        key: `search-${source.evidenceRef || source.url}-${rows.length}`,
+        kind: 'search',
+        providerId: trace.providerId,
+        query: trace.query,
+        title: source.title,
+        url: source.url,
+        source: source.source,
+        occurredAt: trace.searchedAt || source.publishedAt,
+        evidenceRef: source.evidenceRef || trace.evidenceRefs?.[0],
+        approvalId: trace.approvalId,
+        policyDecision: trace.policyDecision
+      });
+    }
+    for (const source of trace.fetchedSources ?? []) {
+      rows.push({
+        key: `fetch-${source.evidenceRef || source.finalUrl || source.url}-${rows.length}`,
+        kind: 'fetch',
+        providerId: trace.providerId,
+        title: source.title,
+        url: source.url,
+        finalUrl: source.finalUrl,
+        source: source.source,
+        occurredAt: source.retrievedAt,
+        contentHash: source.contentHash,
+        truncated: source.truncated,
+        evidenceRef: source.evidenceRef || trace.evidenceRefs?.[0],
+        approvalId: trace.approvalId,
+        policyDecision: trace.policyDecision
+      });
+    }
+  }
+  return rows;
+}
+
+function webSourceCard(items?: WebSourceTrace[]) {
+  const rows = webSourceRows(items);
+  if (rows.length === 0) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前运行未记录 Web 来源证据" />;
+  }
+  const fetched = rows.filter((item) => item.kind === 'fetch').length;
+  const approvals = new Set(rows.map((item) => item.approvalId).filter(Boolean)).size;
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      {metricGrid([
+        { key: 'sources', label: '来源总数', value: rows.length, color: '#1668dc' },
+        { key: 'fetched', label: '已读取来源', value: fetched, color: fetched ? '#389e0d' : undefined },
+        { key: 'approvals', label: modelLabels.approval, value: approvals, color: approvals ? '#d48806' : undefined }
+      ])}
+      <ProTable<WebSourceRow>
+        rowKey="key"
+        search={false}
+        options={false}
+        pagination={{ pageSize: 6 }}
+        size="small"
+        columns={[
+          { title: '类型', dataIndex: 'kind', width: 90, render: (_, item) => <Tag color={item.kind === 'fetch' ? 'green' : 'blue'}>{item.kind === 'fetch' ? 'Fetch' : 'Search'}</Tag> },
+          { title: '来源', render: (_, item) => boundedParagraph(item.title || item.source || item.url, { rows: 2, copyText: item.url }) },
+          { title: 'URL', render: (_, item) => <Typography.Link href={item.finalUrl || item.url} target="_blank" rel="noreferrer">{item.finalUrl || item.url}</Typography.Link>, ellipsis: true },
+          { title: '证据', dataIndex: 'evidenceRef', ellipsis: true, render: (_, item) => item.evidenceRef ? compactTags([item.evidenceRef], 1) : '-' },
+          { title: '策略', dataIndex: 'policyDecision', width: 110, render: (_, item) => item.policyDecision || '-' },
+          { title: '时间', dataIndex: 'occurredAt', width: 180, ellipsis: true },
+          { title: 'Hash', dataIndex: 'contentHash', ellipsis: true, render: (_, item) => item.contentHash || '-' }
+        ]}
+        expandable={{
+          expandedRowRender: (item) => (
+            <Descriptions
+              size="small"
+              column={1}
+              items={[
+                { key: 'query', label: '查询', children: item.query || '-' },
+                { key: 'provider', label: 'Provider', children: item.providerId || '-' },
+                { key: 'approval', label: modelLabels.approval, children: item.approvalId || '-' },
+                { key: 'truncated', label: '是否截断', children: item.truncated ? '是' : '否' },
+                { key: 'url', label: '原始 URL', children: boundedParagraph(item.url, { rows: 1, copyText: item.url }) }
+              ]}
+            />
+          )
+        }}
+        dataSource={rows}
       />
     </Space>
   );
@@ -1315,6 +1421,88 @@ function nextProviderDraft(existing: UpdateLLMProviderConfiguration[], template?
     chatCompletions: true,
     streaming: false,
     nonChatOperations: []
+  };
+}
+
+type WebSearchProviderFormValues = Omit<Partial<UpdateWebSearchProviderConfiguration>, 'allowDomains' | 'denyDomains'> & {
+  allowDomains?: string;
+  denyDomains?: string;
+};
+
+function webSearchConfigurationFormValues(configuration: ServiceConfiguration): UpdateWebSearchConfigurationRequest {
+  return {
+    defaultProviderId: configuration.webSearch.defaultProviderId,
+    providers: (configuration.webSearch.providers ?? []).map((item) => ({
+      id: item.id,
+      provider: item.provider,
+      searchEndpoint: item.searchEndpoint,
+      fetchEndpoint: item.fetchEndpoint,
+      apiKey: '',
+      timeout: item.timeout,
+      maxResults: item.maxResults,
+      maxFetchBytes: item.maxFetchBytes,
+      maxRedirects: item.maxRedirects,
+      allowDomains: item.allowDomains ?? [],
+      denyDomains: item.denyDomains ?? [],
+      disabled: item.disabled
+    }))
+  };
+}
+
+function webSearchProviderFormValues(provider?: UpdateWebSearchProviderConfiguration): WebSearchProviderFormValues {
+  return {
+    ...provider,
+    allowDomains: joinLines(provider?.allowDomains),
+    denyDomains: joinLines(provider?.denyDomains)
+  };
+}
+
+function webSearchProviderDraftFromTemplate(template: WebSearchProviderTemplate, existing: UpdateWebSearchProviderConfiguration[], current?: UpdateWebSearchProviderConfiguration): UpdateWebSearchProviderConfiguration {
+  let id = current?.id?.trim() || template.id;
+  const currentID = current?.id?.trim();
+  const existingIDs = new Set(existing.map((item) => item.id?.trim()).filter((item) => item && item !== currentID));
+  if (existingIDs.has(id)) {
+    let index = existing.length + 1;
+    id = `${template.provider}-${index}`;
+    while (existingIDs.has(id)) {
+      index += 1;
+      id = `${template.provider}-${index}`;
+    }
+  }
+  return {
+    ...current,
+    id,
+    provider: template.provider,
+    searchEndpoint: template.searchEndpoint ?? current?.searchEndpoint,
+    fetchEndpoint: template.fetchEndpoint ?? current?.fetchEndpoint,
+    timeout: template.timeout || current?.timeout || '20s',
+    maxResults: template.maxResults ?? current?.maxResults ?? 8,
+    maxFetchBytes: template.maxFetchBytes ?? current?.maxFetchBytes ?? 262144,
+    maxRedirects: template.maxRedirects ?? current?.maxRedirects ?? 3,
+    disabled: current?.disabled === true,
+    apiKey: current?.apiKey ?? ''
+  };
+}
+
+function nextWebSearchProviderDraft(existing: UpdateWebSearchProviderConfiguration[], template?: WebSearchProviderTemplate): UpdateWebSearchProviderConfiguration {
+  if (template) {
+    return webSearchProviderDraftFromTemplate(template, existing);
+  }
+  let index = existing.length + 1;
+  let id = `web-provider-${index}`;
+  const existingIDs = new Set(existing.map((item) => item.id));
+  while (existingIDs.has(id)) {
+    index += 1;
+    id = `web-provider-${index}`;
+  }
+  return {
+    id,
+    provider: 'http',
+    timeout: '20s',
+    maxResults: 8,
+    maxFetchBytes: 262144,
+    maxRedirects: 3,
+    disabled: false
   };
 }
 
@@ -2640,6 +2828,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const outcomeMemoryRefs = memoryRefIDs(runSnapshot);
   const outcomeMemories = memoryItems.filter((item) => item.runId === outcomeRun?.id || outcomeMemoryRefs.has(item.id));
   const outcomeDoDItems = dodAssessmentItems(runSnapshot);
+  const runWebSources = runObservability?.webSources ?? runSnapshot?.webSources ?? snapshot?.webSources;
+  const webSourceCount = webSourceRows(runWebSources).length;
   const dodDefinitionRows = dods.flatMap((dod) => dod.items.map((text, index) => ({
     key: `${dod.id}-${index}`,
     id: dod.id,
@@ -2740,6 +2930,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
               { key: 'step', label: modelLabels.step, value: runSnapshot?.steps?.length ?? 0 },
               { key: 'result', label: modelLabels.result, value: snapshot.results?.length ?? runSnapshot?.results?.length ?? 0, color: '#389e0d' },
               { key: 'artifact', label: modelLabels.artifact, value: snapshot.artifacts?.length ?? runSnapshot?.artifacts?.length ?? 0 },
+              { key: 'webSources', label: 'Web 来源', value: webSourceCount, color: webSourceCount ? '#08979c' : undefined },
               { key: 'tool', label: modelLabels.toolCall, value: runSnapshot?.toolCalls?.length ?? 0 },
               { key: 'patch', label: modelLabels.patch, value: runSnapshot?.patches?.length ?? 0 },
               { key: 'validation', label: modelLabels.validationResult, value: runSnapshot?.validationResults?.length ?? 0 },
@@ -2948,6 +3139,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                   <ProCard title={modelLabels.memoryRecall} colSpan={{ xs: 24, lg: 12 }}>
                     {memoryRecallCard(runSnapshot.memoryRecallTraces)}
                   </ProCard>
+                  <ProCard title="Web 来源" colSpan={{ xs: 24, lg: 12 }}>
+                    {webSourceCard(runWebSources)}
+                  </ProCard>
                 </ProCard>
               </Space>
             ) : (
@@ -3032,7 +3226,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                   { key: 'validations', label: '校验通过', value: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? runSnapshot.validationResults?.length ?? 0}`, color: runObservability?.evidence.validationFailed ? '#cf1322' : '#389e0d' },
                   { key: 'patches', label: '补丁（Patch）应用', value: `${runObservability?.evidence.patchApplied ?? 0}/${runObservability?.evidence.patchTotal ?? runSnapshot.patches?.length ?? 0}` },
                   { key: 'results', label: modelLabels.result, value: runObservability?.evidence.resultTotal ?? runSnapshot.results?.length ?? 0, color: '#389e0d' },
-                  { key: 'artifacts', label: modelLabels.artifact, value: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 }
+                  { key: 'artifacts', label: modelLabels.artifact, value: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 },
+                  { key: 'webSources', label: 'Web 来源', value: webSourceCount, color: webSourceCount ? '#08979c' : undefined }
                 ])}
                 <Descriptions
                   column={3}
@@ -3048,6 +3243,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     { key: 'checkpoints', label: modelLabels.runtimeCheckpoint, children: runObservability?.evidence.runtimeCheckpointTotal ?? runSnapshot.runtimeCheckpoints?.length ?? 0 },
                     { key: 'results', label: modelLabels.result, children: runObservability?.evidence.resultTotal ?? runSnapshot.results?.length ?? 0 },
                     { key: 'artifacts', label: modelLabels.artifact, children: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 },
+                    { key: 'webSources', label: 'Web 来源', children: webSourceCount },
                     { key: 'selectedCapabilities', label: '选择能力', children: runObservability?.selectedCapabilities?.length ?? runSnapshot.selectedCapabilities?.length ?? 0 },
                     { key: 'usedCapabilities', label: '使用能力', children: runObservability?.usedCapabilities?.length ?? runSnapshot.usedCapabilities?.length ?? 0 },
                     { key: 'events', label: '事件', children: runObservability?.evidence.eventTotal ?? 0 },
@@ -3110,6 +3306,11 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                           dataSource={runObservability?.timeline ?? []}
                         />
                       )
+                    },
+                    {
+                      key: 'webSources',
+                      label: `Web 来源 ${webSourceCount}`,
+                      children: webSourceCard(runWebSources)
                     },
                     {
                       key: 'steps',
@@ -4327,6 +4528,7 @@ function ConfigurationPage() {
   const { message } = AntApp.useApp();
   const [serverForm] = Form.useForm<UpdateServerConfigurationRequest>();
   const [providerEditorForm] = Form.useForm<UpdateLLMProviderConfiguration>();
+  const [webSearchProviderEditorForm] = Form.useForm<WebSearchProviderFormValues>();
   const [configuration, setConfiguration] = useState<ServiceConfiguration | undefined>(undefined);
   const [souls, setSouls] = useState<Soul[]>([]);
   const [workspaceTemplates, setWorkspaceTemplates] = useState<WorkspaceTemplate[]>([]);
@@ -4335,9 +4537,14 @@ function ConfigurationPage() {
   const [providerDrafts, setProviderDrafts] = useState<UpdateLLMProviderConfiguration[]>([]);
   const [selectedProviderIndex, setSelectedProviderIndex] = useState(0);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>(undefined);
+  const [defaultWebSearchProviderId, setDefaultWebSearchProviderId] = useState<string | undefined>(undefined);
+  const [webSearchProviderDrafts, setWebSearchProviderDrafts] = useState<UpdateWebSearchProviderConfiguration[]>([]);
+  const [selectedWebSearchProviderIndex, setSelectedWebSearchProviderIndex] = useState(0);
+  const [selectedWebSearchTemplateId, setSelectedWebSearchTemplateId] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [serverSaving, setServerSaving] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [webSearchSaving, setWebSearchSaving] = useState(false);
 
   const loadConfiguration = async () => {
     setLoading(true);
@@ -4348,6 +4555,7 @@ function ConfigurationPage() {
         workorchApi.listWorkspaceTemplates()
       ]);
       const nextFormValues = llmConfigurationFormValues(nextConfiguration);
+      const nextWebSearchFormValues = webSearchConfigurationFormValues(nextConfiguration);
       setConfiguration(nextConfiguration);
       setSouls(nextSouls);
       setWorkspaceTemplates(nextWorkspaceTemplates);
@@ -4356,8 +4564,13 @@ function ConfigurationPage() {
       setProviderDrafts(nextFormValues.providers);
       setSelectedProviderIndex(0);
       setSelectedTemplateId(nextConfiguration.llm.providerTemplates?.[0]?.templateId);
+      setDefaultWebSearchProviderId(nextWebSearchFormValues.defaultProviderId);
+      setWebSearchProviderDrafts(nextWebSearchFormValues.providers);
+      setSelectedWebSearchProviderIndex(0);
+      setSelectedWebSearchTemplateId(nextConfiguration.webSearch.providerTemplates?.[0]?.templateId);
       serverForm.setFieldsValue({ defaultDialogLanguage: nextConfiguration.server.defaultDialogLanguage || '' });
       providerEditorForm.setFieldsValue(nextFormValues.providers[0] ?? nextProviderDraft([]));
+      webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(nextWebSearchFormValues.providers[0] ?? nextWebSearchProviderDraft([])));
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
@@ -4416,6 +4629,40 @@ function ConfigurationPage() {
       message.error(errorMessage(error));
     } finally {
       setServerSaving(false);
+    }
+  };
+
+  const saveWebSearchConfiguration = async () => {
+    setWebSearchSaving(true);
+    try {
+      const nextConfiguration = await workorchApi.updateWebSearchConfiguration({
+        defaultProviderId: defaultWebSearchProviderId,
+        providers: webSearchProviderDrafts.map((item) => ({
+          id: item.id?.trim(),
+          provider: item.provider?.trim(),
+          searchEndpoint: item.searchEndpoint?.trim(),
+          fetchEndpoint: item.fetchEndpoint?.trim(),
+          apiKey: item.apiKey?.trim(),
+          timeout: item.timeout?.trim(),
+          maxResults: item.maxResults,
+          maxFetchBytes: item.maxFetchBytes,
+          maxRedirects: item.maxRedirects,
+          allowDomains: item.allowDomains ?? [],
+          denyDomains: item.denyDomains ?? [],
+          disabled: item.disabled === true
+        }))
+      });
+      const nextFormValues = webSearchConfigurationFormValues(nextConfiguration);
+      setConfiguration(nextConfiguration);
+      setDefaultWebSearchProviderId(nextFormValues.defaultProviderId);
+      setWebSearchProviderDrafts(nextFormValues.providers);
+      setSelectedWebSearchProviderIndex(0);
+      webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(nextFormValues.providers[0] ?? nextWebSearchProviderDraft([])));
+      message.success('Web Search 配置已更新');
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setWebSearchSaving(false);
     }
   };
 
@@ -4493,10 +4740,87 @@ function ConfigurationPage() {
   const statusByProviderID = new Map((configuration?.llm.providers ?? []).map((item) => [item.id, item]));
   const selectedProvider = providerDrafts[selectedProviderIndex];
   const selectedProviderStatus = selectedProvider ? statusByProviderID.get(selectedProvider.id) : undefined;
+  const webSearchProviderTemplates = configuration?.webSearch.providerTemplates ?? [];
+  const webSearchProviderTemplateByID = new Map(webSearchProviderTemplates.map((item) => [item.templateId, item]));
+  const webSearchStatusByProviderID = new Map((configuration?.webSearch.providers ?? []).map((item) => [item.id, item]));
+  const selectedWebSearchProvider = webSearchProviderDrafts[selectedWebSearchProviderIndex];
+  const selectedWebSearchProviderStatus = selectedWebSearchProvider ? webSearchStatusByProviderID.get(selectedWebSearchProvider.id) : undefined;
+
+  const selectWebSearchProvider = (index: number) => {
+    const item = webSearchProviderDrafts[index];
+    if (!item) {
+      return;
+    }
+    setSelectedWebSearchProviderIndex(index);
+    webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(item));
+  };
+
+  const addWebSearchProvider = () => {
+    const draft = nextWebSearchProviderDraft(webSearchProviderDrafts, selectedWebSearchTemplateId ? webSearchProviderTemplateByID.get(selectedWebSearchTemplateId) : undefined);
+    setWebSearchProviderDrafts((items) => [...items, draft]);
+    setSelectedWebSearchProviderIndex(webSearchProviderDrafts.length);
+    webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(draft));
+    if (!defaultWebSearchProviderId) {
+      setDefaultWebSearchProviderId(draft.id);
+    }
+  };
+
+  const removeSelectedWebSearchProvider = () => {
+    if (webSearchProviderDrafts.length <= 1) {
+      return;
+    }
+    const nextDrafts = webSearchProviderDrafts.filter((_, index) => index !== selectedWebSearchProviderIndex);
+    const nextIndex = Math.min(selectedWebSearchProviderIndex, nextDrafts.length - 1);
+    setWebSearchProviderDrafts(nextDrafts);
+    setSelectedWebSearchProviderIndex(nextIndex);
+    webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(nextDrafts[nextIndex]));
+    if (!nextDrafts.some((item) => item.id === defaultWebSearchProviderId)) {
+      setDefaultWebSearchProviderId(nextDrafts[0]?.id);
+    }
+  };
+
+  const updateSelectedWebSearchProvider = (changedValues: Partial<WebSearchProviderFormValues>, values: WebSearchProviderFormValues) => {
+    const currentDraft = webSearchProviderDrafts[selectedWebSearchProviderIndex];
+    if (changedValues.provider) {
+      const template = webSearchProviderTemplates.find((item) => item.provider === changedValues.provider);
+      if (template) {
+        const templated = webSearchProviderDraftFromTemplate(template, webSearchProviderDrafts, {
+          ...currentDraft,
+          ...values,
+          allowDomains: splitLines(values.allowDomains),
+          denyDomains: splitLines(values.denyDomains),
+          apiKey: values.apiKey
+        });
+        webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(templated));
+        setWebSearchProviderDrafts((items) => {
+          const nextItems = [...items];
+          nextItems[selectedWebSearchProviderIndex] = templated;
+          return nextItems;
+        });
+        return;
+      }
+    }
+    setWebSearchProviderDrafts((items) => {
+      const previousID = items[selectedWebSearchProviderIndex]?.id;
+      const nextItems = [...items];
+      nextItems[selectedWebSearchProviderIndex] = {
+        ...nextItems[selectedWebSearchProviderIndex],
+        ...values,
+        allowDomains: splitLines(values.allowDomains),
+        denyDomains: splitLines(values.denyDomains)
+      };
+      const nextID = values.id?.trim();
+      if (defaultWebSearchProviderId === previousID && nextID && nextID !== previousID) {
+        setDefaultWebSearchProviderId(nextID);
+      }
+      return nextItems;
+    });
+  };
+
   return (
     <PageContainer
       title="系统配置"
-      subTitle="管理服务配置、执行人格（Soul）、工作空间模板（Workspace Template）和运行期生效的 LLM 服务商（Provider）"
+      subTitle="管理服务配置、执行人格（Soul）、工作空间模板（Workspace Template）、LLM 服务商和 Web Search Provider"
       extra={<Button onClick={() => void loadConfiguration()} loading={loading}>刷新</Button>}
     >
       <ProCard gutter={16} wrap loading={loading}>
@@ -4541,6 +4865,134 @@ function ConfigurationPage() {
             ]}
           />
         </ProCard>
+      </ProCard>
+      <ProCard
+        title="Web Search Provider"
+        className="workorch-section"
+        extra={<Button type="primary" onClick={() => void webSearchProviderEditorForm.validateFields().then(() => saveWebSearchConfiguration())} loading={webSearchSaving}>保存 Web Search Provider</Button>}
+      >
+        <Typography.Paragraph type="secondary">
+          Web Search Provider 由 workorch 运行期统一治理，提供 web/search 与 web/fetch；API 密钥读取时隐藏，编辑时留空表示保留已有密钥。
+        </Typography.Paragraph>
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <ProCard
+            title="Provider 列表"
+            extra={(
+              <Space>
+                <Select
+                  style={{ width: 240 }}
+                  value={selectedWebSearchTemplateId}
+                  onChange={setSelectedWebSearchTemplateId}
+                  placeholder="选择配置模板"
+                  options={webSearchProviderTemplates.map((item) => ({ value: item.templateId, label: item.name }))}
+                />
+                <Button onClick={addWebSearchProvider}>按模板新增</Button>
+              </Space>
+            )}
+          >
+            <Form.Item label="默认 Web Search Provider">
+              <Select
+                value={defaultWebSearchProviderId}
+                onChange={setDefaultWebSearchProviderId}
+                placeholder="选择默认 Web Search Provider"
+                options={webSearchProviderDrafts
+                  .map((item) => item.id?.trim())
+                  .filter(Boolean)
+                  .map((id) => ({ value: id, label: id }))}
+              />
+            </Form.Item>
+            <Space direction="vertical" size="small" className="llm-provider-list">
+              {webSearchProviderDrafts.map((item, index) => {
+                const status = webSearchStatusByProviderID.get(item.id);
+                const selected = index === selectedWebSearchProviderIndex;
+                return (
+                  <button
+                    key={`${item.id || 'web-provider'}-${index}`}
+                    type="button"
+                    className={`llm-provider-list-item${selected ? ' llm-provider-list-item-selected' : ''}`}
+                    onClick={() => selectWebSearchProvider(index)}
+                  >
+                    <span className="llm-provider-list-main">
+                      <Typography.Text strong>{item.id || '新 Provider'}</Typography.Text>
+                      <Typography.Text type="secondary">{item.searchEndpoint || item.provider || '搜索端点未配置'}</Typography.Text>
+                    </span>
+                    <span className="llm-provider-list-tags">
+                      {item.id === defaultWebSearchProviderId ? <Tag color="blue">默认</Tag> : null}
+                      {status?.apiKeyConfigured ? <Tag color="green">密钥</Tag> : null}
+                      {status?.ready ? <Tag color="green">就绪</Tag> : <Tag color="red">{status?.reason || '未保存'}</Tag>}
+                    </span>
+                  </button>
+                );
+              })}
+            </Space>
+          </ProCard>
+          <ProCard
+            title={selectedWebSearchProvider ? `编辑 Provider：${selectedWebSearchProvider.id || '新 Provider'}` : '编辑 Provider'}
+            extra={<Button danger onClick={removeSelectedWebSearchProvider} disabled={webSearchProviderDrafts.length <= 1}>移除</Button>}
+          >
+            {selectedWebSearchProvider ? (
+              <Form
+                form={webSearchProviderEditorForm}
+                layout="vertical"
+                onValuesChange={updateSelectedWebSearchProvider}
+              >
+                <Form.Item name="id" label="Provider 标识" rules={[{ required: true }]}>
+                  <Input placeholder="web-http-main" />
+                </Form.Item>
+                <Form.Item name="provider" label="Provider 类型" rules={[{ required: true }]}>
+                  <Select
+                    options={webSearchProviderTemplates.map((item) => ({ value: item.provider, label: `${item.provider} / ${item.name}` }))}
+                  />
+                </Form.Item>
+                <Form.Item name="searchEndpoint" label="Search Endpoint" rules={[{ required: true }]}>
+                  <Input placeholder="https://search-gateway.example/api/search" />
+                </Form.Item>
+                <Form.Item name="fetchEndpoint" label="Fetch Endpoint">
+                  <Input placeholder="https://search-gateway.example/api/fetch" />
+                </Form.Item>
+                <Form.Item name="timeout" label="超时">
+                  <Input placeholder="20s" />
+                </Form.Item>
+                <Form.Item name="maxResults" label="最大搜索结果">
+                  <InputNumber min={1} max={20} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name="maxFetchBytes" label="最大读取字节数">
+                  <InputNumber min={1024} max={1048576} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name="maxRedirects" label="最大重定向次数">
+                  <InputNumber min={0} max={5} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name="allowDomains" label="允许域名">
+                  <Input.TextArea rows={2} placeholder="每行一个域名，留空表示不限制" />
+                </Form.Item>
+                <Form.Item name="denyDomains" label="拒绝域名">
+                  <Input.TextArea rows={2} placeholder="每行一个域名" />
+                </Form.Item>
+                <Form.Item name="disabled" label="是否禁用">
+                  <Select
+                    options={[
+                      { value: false, label: '否' },
+                      { value: true, label: '是' }
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item name="apiKey" label="API 密钥">
+                  <Input.Password placeholder="留空表示保留已有 API 密钥" autoComplete="new-password" />
+                </Form.Item>
+                <Descriptions
+                  column={1}
+                  items={[
+                    { key: 'apiKey', label: '已保存 API 密钥', children: selectedWebSearchProviderStatus?.apiKeyConfigured ? <Tag color="green">已配置</Tag> : <Tag>未配置</Tag> },
+                    { key: 'status', label: '已保存状态', children: selectedWebSearchProviderStatus?.ready ? <Tag color="green">就绪</Tag> : <Tag color="red">{selectedWebSearchProviderStatus?.reason || '未保存'}</Tag> },
+                    { key: 'fetch', label: '读取端点', children: selectedWebSearchProviderStatus?.fetchEndpoint || '-' }
+                  ]}
+                />
+              </Form>
+            ) : (
+              <Empty description="请选择或新增 Web Search Provider" />
+            )}
+          </ProCard>
+        </Space>
       </ProCard>
       <SoulDefinitionManager souls={souls} onSoulsChange={setSouls} />
       <WorkspaceTemplateManager souls={souls} templates={workspaceTemplates} onTemplatesChange={setWorkspaceTemplates} />

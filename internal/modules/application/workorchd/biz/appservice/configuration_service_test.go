@@ -44,6 +44,20 @@ timeout = "60s"
 disabled = false
 streaming = true
 nonChatOperations = ["embeddings"]
+
+[webSearch]
+defaultProvider = "search"
+
+[webSearch.providers.search]
+provider = "http"
+searchEndpoint = "https://search.example.test/search"
+fetchEndpoint = "https://search.example.test/fetch"
+apiKey = "web-secret"
+timeout = "30s"
+maxResults = 7
+maxFetchBytes = 131072
+maxRedirects = 2
+allowDomains = ["example.test"]
 `
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -72,6 +86,16 @@ nonChatOperations = ["embeddings"]
 	if !provider.Ready || !provider.Default || !provider.APIKeyConfigured || provider.Model != "local-model" ||
 		!provider.ChatCompletions || !provider.Streaming || len(provider.NonChatOperations) != 1 || provider.NonChatOperations[0] != "embeddings" {
 		t.Fatalf("provider = %+v, want ready redacted local provider", provider)
+	}
+	if cfg.WebSearch.DefaultProviderID != "search" || len(cfg.WebSearch.Providers) != 1 || len(cfg.WebSearch.ProviderTemplates) != 1 {
+		t.Fatalf("web search configuration = %+v, want search provider and template", cfg.WebSearch)
+	}
+	webProvider := cfg.WebSearch.Providers[0]
+	if !webProvider.Ready || !webProvider.Default || !webProvider.APIKeyConfigured ||
+		webProvider.SearchEndpoint != "https://search.example.test/search" ||
+		webProvider.FetchEndpoint != "https://search.example.test/fetch" ||
+		webProvider.MaxResults != 7 || webProvider.MaxFetchBytes != 131072 || len(webProvider.AllowDomains) != 1 {
+		t.Fatalf("web provider = %+v, want ready redacted web provider", webProvider)
 	}
 }
 
@@ -208,5 +232,120 @@ func TestUpdateLLMConfigurationRejectsUnavailableEmbeddingProvider(t *testing.T)
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("update err = %v, want invalid argument", err)
+	}
+}
+
+func TestUpdateWebSearchConfigurationPersistsAndReloadsProviders(t *testing.T) {
+	configDir := t.TempDir()
+	content := `
+endpointName = "workorch"
+
+[server]
+addr = "127.0.0.1:18080"
+
+[repository]
+backend = "memory"
+
+[webSearch]
+defaultProvider = "search"
+
+[webSearch.providers.search]
+provider = "http"
+searchEndpoint = "https://old.example.test/search"
+fetchEndpoint = "https://old.example.test/fetch"
+apiKey = "web-secret"
+timeout = "20s"
+maxResults = 5
+`
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+
+	cfg, err := UpdateWebSearchConfiguration(UpdateWebSearchConfigurationCommand{
+		DefaultProviderID: "search",
+		Providers: []UpdateWebSearchProviderConfiguration{{
+			ID:             "search",
+			Provider:       "http",
+			SearchEndpoint: "https://search.example.test/search",
+			FetchEndpoint:  "https://search.example.test/fetch",
+			Timeout:        "25s",
+			MaxResults:     9,
+			MaxFetchBytes:  262144,
+			MaxRedirects:   3,
+			AllowDomains:   []string{"example.test", "example.test"},
+			DenyDomains:    []string{"blocked.example.test"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("update web search configuration: %v", err)
+	}
+	if cfg.WebSearch.DefaultProviderID != "search" || len(cfg.WebSearch.Providers) != 1 {
+		t.Fatalf("configuration = %+v, want search provider", cfg.WebSearch)
+	}
+	provider := cfg.WebSearch.Providers[0]
+	if !provider.Ready || !provider.APIKeyConfigured || provider.SearchEndpoint != "https://search.example.test/search" ||
+		provider.MaxResults != 9 || len(provider.AllowDomains) != 1 {
+		t.Fatalf("provider = %+v, want updated provider and preserved api key", provider)
+	}
+
+	current, err := workorchconfig.Current()
+	if err != nil {
+		t.Fatalf("current config: %v", err)
+	}
+	if current.WebSearch.Providers["search"].APIKey != "web-secret" ||
+		current.WebSearch.Providers["search"].SearchEndpoint != "https://search.example.test/search" {
+		t.Fatalf("current web search config = %+v, want persisted provider update", current.WebSearch.Providers["search"])
+	}
+}
+
+func TestUpdateWebSearchConfigurationRejectsUnavailableDefaultProvider(t *testing.T) {
+	configDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`endpointName = "workorch"`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+
+	_, err := UpdateWebSearchConfiguration(UpdateWebSearchConfigurationCommand{
+		DefaultProviderID: "search",
+		Providers: []UpdateWebSearchProviderConfiguration{{
+			ID:       "search",
+			Provider: "http",
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("update err = %v, want invalid argument", err)
+	}
+}
+
+func TestUpdateWebSearchConfigurationCanClearOptionalProviders(t *testing.T) {
+	configDir := t.TempDir()
+	content := `
+endpointName = "workorch"
+
+[webSearch]
+defaultProvider = "search"
+
+[webSearch.providers.search]
+provider = "http"
+searchEndpoint = "https://search.example.test/search"
+`
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+
+	cfg, err := UpdateWebSearchConfiguration(UpdateWebSearchConfigurationCommand{})
+	if err != nil {
+		t.Fatalf("clear web search configuration: %v", err)
+	}
+	if cfg.WebSearch.DefaultProviderID != "" || len(cfg.WebSearch.Providers) != 0 {
+		t.Fatalf("web search configuration = %+v, want cleared optional providers", cfg.WebSearch)
 	}
 }

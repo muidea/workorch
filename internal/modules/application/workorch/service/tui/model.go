@@ -77,6 +77,7 @@ type AppModel struct {
 	transcript    []transcriptItem
 	result        string
 	artifacts     []string
+	sources       []string
 	patches       []backend.PatchInfo
 	memoryRecalls []backend.MemoryRecallTraceInfo
 	progress      progressState
@@ -1143,6 +1144,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 	case backend.EventResultAccepted:
 		m.result = firstPayloadString(evt.Payload, "summary", "Summary", events.PayloadKeySummary)
 		m.artifacts = artifactPayloadStrings(evt.Payload)
+		m.sources = nil
 		m.resetMainViewport()
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventPatchPreviewed, backend.EventPatchApplied, backend.EventPatchFailed, backend.EventPatchReverted:
@@ -1808,6 +1810,56 @@ func snapshotArtifactLabels(snapshot *backend.WorkspaceSnapshotInfo, runID commo
 		}
 	}
 	return out
+}
+
+func snapshotWebSourceLabels(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []string {
+	if snapshot == nil || len(snapshot.WebSources) == 0 {
+		return nil
+	}
+	out := make([]string, 0)
+	seen := map[string]struct{}{}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	_ = runID
+	for _, trace := range snapshot.WebSources {
+		for _, source := range trace.FetchedSources {
+			url := nonEmpty(source.FinalURL, source.URL)
+			if url == "" {
+				continue
+			}
+			add(webSourceLabel("fetch", source.Title, source.Source, url, source.EvidenceRef))
+		}
+		for _, source := range trace.Sources {
+			if source.URL == "" {
+				continue
+			}
+			add(webSourceLabel("search", source.Title, source.Source, source.URL, source.EvidenceRef))
+		}
+	}
+	if len(out) > 8 {
+		return out[:8]
+	}
+	return out
+}
+
+func webSourceLabel(kind string, title string, source string, url string, evidenceRef string) string {
+	label := strings.TrimSpace(nonEmpty(title, source, url))
+	if label != url {
+		label += " - " + url
+	}
+	if evidenceRef != "" {
+		label += " (" + evidenceRef + ")"
+	}
+	return kind + ": " + label
 }
 
 func snapshotPatches(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.PatchInfo {

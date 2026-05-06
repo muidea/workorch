@@ -8,6 +8,7 @@ import (
 	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
+	webmodule "github.com/muidea/workorch/internal/modules/blocks/web"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	eventstreammodule "github.com/muidea/workorch/internal/modules/kernel/eventstream"
 	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp"
@@ -46,6 +47,10 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 	mustSetup("shell", shellModule.Setup())
 	sshModule := sshmodule.New()
 	mustSetup("ssh", sshModule.Setup())
+	webModule := webmodule.New()
+	mustSetup("web", webModule.Setup(webmodule.Dependencies{
+		Approvals: repos.approval,
+	}))
 	llmModule := llmmodule.New()
 	mustSetup("llm", llmModule.Setup())
 
@@ -106,6 +111,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 		fileModule.RuntimeAdapter(),
 		shellModule.RuntimeAdapter(),
 		sshModule.RuntimeAdapter(),
+		webModule.RuntimeAdapter(),
 		mcpBlockModule.RuntimeAdapter(),
 		llmModule.RuntimeAdapter(),
 	)
@@ -141,6 +147,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 		fileModule,
 		shellModule,
 		sshModule,
+		webModule,
 		llmModule,
 		soulModule,
 		memoryModule,
@@ -214,6 +221,7 @@ func buildRuntimeAdapterRegistry(
 	fileAdapter orchestratorbiz.RuntimeAdapter,
 	shellAdapter orchestratorbiz.RuntimeAdapter,
 	sshAdapter orchestratorbiz.RuntimeAdapter,
+	webAdapter orchestratorbiz.RuntimeAdapter,
 	mcpAdapter orchestratorbiz.RuntimeAdapter,
 	llmAdapter orchestratorbiz.RuntimeAdapter,
 ) (*orchestratorbiz.RuntimeAdapterRegistry, error) {
@@ -232,6 +240,14 @@ func buildRuntimeAdapterRegistry(
 	}
 	if err := runtimeRegistry.Register(sshmodule.StepKindCommand, sshAdapter); err != nil {
 		return nil, err
+	}
+	for _, stepKind := range []string{
+		webmodule.StepKindSearch,
+		webmodule.StepKindFetch,
+	} {
+		if err := runtimeRegistry.Register(stepKind, webAdapter); err != nil {
+			return nil, err
+		}
 	}
 	for _, stepKind := range []string{
 		mcpblockmodule.StepKindToolCall,

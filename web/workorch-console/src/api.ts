@@ -1,4 +1,4 @@
-import type { Approval, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, TaskDecomposition, TaskProgress, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, TaskDecomposition, TaskProgress, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -67,6 +67,13 @@ export const workorchApi = {
   },
   updateServerConfiguration: async (configuration: UpdateServerConfigurationRequest) => {
     const body = await request<{ configuration: ServiceConfiguration }>(`${apiBase}/configuration/server`, {
+      method: 'PUT',
+      body: JSON.stringify(configuration)
+    });
+    return body.configuration;
+  },
+  updateWebSearchConfiguration: async (configuration: UpdateWebSearchConfigurationRequest) => {
+    const body = await request<{ configuration: ServiceConfiguration }>(`${apiBase}/configuration/web-search`, {
       method: 'PUT',
       body: JSON.stringify(configuration)
     });

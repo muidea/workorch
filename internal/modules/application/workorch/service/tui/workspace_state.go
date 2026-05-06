@@ -229,6 +229,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if msg.Snapshot != nil {
 		m.result = snapshotDisplayResult(msg.Snapshot, run.ID)
 		m.artifacts = snapshotArtifactLabels(msg.Snapshot, run.ID)
+		m.sources = snapshotWebSourceLabels(msg.Snapshot, run.ID)
 		m.patches = snapshotPatches(msg.Snapshot, run.ID)
 		m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), msg.Snapshot.MemoryRecallTraces...)
 	}

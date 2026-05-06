@@ -12,6 +12,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
@@ -560,6 +561,7 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		Steps:              presenter.MapSteps(steps),
 		ToolCalls:          mapToolCalls(toolCalls),
 		Patches:            mapPatches(patches),
+		WebSources:         mapWebSourceTraces(presenter.MapSteps(steps)),
 		ValidationResults:  mapValidationResults(validations),
 		RuntimeCheckpoints: mapRuntimeCheckpoints(checkpoints),
 		Results:            mapResults(results),
@@ -885,6 +887,7 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		ret.ExecutionSections = runSnapshot.ExecutionSections
 		ret.MemoryRecallTraces = runSnapshot.MemoryRecallTraces
 		ret.Patches = mergeWorkspaceSnapshotPatches(ret.Patches, runSnapshot.Patches)
+		ret.WebSources = runSnapshot.WebSources
 	}
 	ret.Outcome = mapWorkspaceOutcome(ret)
 	return ret, nil
@@ -1238,6 +1241,89 @@ func mapToolCalls(items []*runmodel.ToolCall) []ToolCall {
 		return nil
 	}
 	return ret
+}
+
+func mapWebSourceTraces(steps []presenter.StepView) []WebSourceTrace {
+	if len(steps) == 0 {
+		return nil
+	}
+	ret := make([]WebSourceTrace, 0)
+	for _, step := range steps {
+		if step.Output == nil {
+			continue
+		}
+		switch step.Kind {
+		case webcommon.StepKindSearch:
+			trace := webSearchTrace(step)
+			if len(trace.Sources) > 0 || trace.Query != "" {
+				ret = append(ret, trace)
+			}
+		case webcommon.StepKindFetch:
+			trace := webFetchTrace(step)
+			if len(trace.FetchedSources) > 0 || trace.ApprovalID != "" {
+				ret = append(ret, trace)
+			}
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func webSearchTrace(step presenter.StepView) WebSourceTrace {
+	output := step.Output
+	evidenceRef := step.ID
+	results := readModelMapSliceValue(output["results"])
+	sources := make([]WebSource, 0, len(results))
+	for _, result := range results {
+		item := WebSource{
+			Title:       readModelStringValue(result["title"]),
+			URL:         readModelStringValue(result["url"]),
+			Snippet:     readModelStringValue(result["snippet"]),
+			Source:      readModelStringValue(result["source"]),
+			PublishedAt: readModelStringValue(result["publishedAt"]),
+			Rank:        readModelIntValue(result["rank"]),
+			EvidenceRef: evidenceRef,
+		}
+		if item.URL != "" {
+			sources = append(sources, item)
+		}
+	}
+	return WebSourceTrace{
+		Query:          readModelStringValue(output["query"]),
+		ProviderID:     readModelStringValue(output["provider"]),
+		SearchedAt:     readModelStringValue(output["searchedAt"]),
+		Sources:        sources,
+		EvidenceRefs:   []string{evidenceRef},
+		PolicyDecision: readModelPolicyDecision(output["policy"]),
+	}
+}
+
+func webFetchTrace(step presenter.StepView) WebSourceTrace {
+	output := step.Output
+	evidenceRef := step.ID
+	fetched := FetchedWebSource{
+		URL:         readModelStringValue(output["url"]),
+		FinalURL:    readModelStringValue(output["finalUrl"]),
+		Title:       readModelStringValue(output["title"]),
+		Source:      readModelStringValue(output["source"]),
+		RetrievedAt: readModelStringValue(output["retrievedAt"]),
+		ContentHash: readModelStringValue(output["contentHash"]),
+		Truncated:   readModelBoolValue(output["truncated"]),
+		EvidenceRef: evidenceRef,
+	}
+	fetchedSources := []FetchedWebSource(nil)
+	if fetched.URL != "" {
+		fetchedSources = []FetchedWebSource{fetched}
+	}
+	return WebSourceTrace{
+		ProviderID:     readModelStringValue(output["provider"]),
+		FetchedSources: fetchedSources,
+		EvidenceRefs:   []string{evidenceRef},
+		ApprovalID:     readModelStringValue(output["approvalId"]),
+		PolicyDecision: readModelPolicyDecision(output["policy"]),
+	}
 }
 
 func selectedRuntimeCapabilities(executionContext map[string]any, catalog map[string]RuntimeCapability) []RuntimeCapability {
@@ -1847,6 +1933,22 @@ func readModelBoolValue(value any) bool {
 	}
 }
 
+func readModelIntValue(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		if typed == float64(int(typed)) {
+			return int(typed)
+		}
+	default:
+		return 0
+	}
+	return 0
+}
+
 func readModelMapValue(value any) map[string]any {
 	switch typed := value.(type) {
 	case map[string]any:
@@ -1894,6 +1996,14 @@ func readModelStringSliceValue(value any) []string {
 	}
 }
 
+func readModelPolicyDecision(value any) string {
+	policy := readModelMapValue(value)
+	if len(policy) == 0 {
+		return ""
+	}
+	return readModelStringValue(policy["decision"])
+}
+
 func mapRunStatus(snapshot RunSnapshot) RunStatus {
 	ret := RunStatus{
 		ID:                 snapshot.Run.ID,
@@ -1924,6 +2034,7 @@ func mapRunObservability(snapshot RunSnapshot) RunObservability {
 		TaskDecompositions:   snapshot.TaskDecompositions,
 		ExecutionSections:    snapshot.ExecutionSections,
 		MemoryRecallTraces:   snapshot.MemoryRecallTraces,
+		WebSources:           snapshot.WebSources,
 		Evidence:             runtimeEvidenceSummary(snapshot, len(timelineEvents(timeline))),
 		LatestCheckpoint:     latestRuntimeCheckpoint(snapshot.RuntimeCheckpoints),
 		SelectedCapabilities: snapshot.SelectedCapabilities,

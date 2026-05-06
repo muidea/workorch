@@ -12,6 +12,7 @@ type RunSnapshot struct {
 	Steps                []presenter.StepView     `json:"steps,omitempty"`
 	ToolCalls            []ToolCall               `json:"toolCalls,omitempty"`
 	Patches              []Patch                  `json:"patches,omitempty"`
+	WebSources           []WebSourceTrace         `json:"webSources,omitempty"`
 	ValidationResults    []ValidationResult       `json:"validationResults,omitempty"`
 	RuntimeCheckpoints   []RuntimeCheckpoint      `json:"runtimeCheckpoints,omitempty"`
 	Results              []Result                 `json:"results,omitempty"`
@@ -49,6 +50,7 @@ type RunObservability struct {
 	TaskDecompositions   []TaskDecomposition    `json:"taskDecompositions,omitempty"`
 	ExecutionSections    []ExecutionSection     `json:"executionSections,omitempty"`
 	MemoryRecallTraces   []MemoryRecallTrace    `json:"memoryRecallTraces,omitempty"`
+	WebSources           []WebSourceTrace       `json:"webSources,omitempty"`
 	Evidence             RuntimeEvidenceSummary `json:"evidence"`
 	LatestCheckpoint     *RuntimeCheckpoint     `json:"latestCheckpoint,omitempty"`
 	SelectedCapabilities []RuntimeCapability    `json:"selectedCapabilities,omitempty"`
@@ -412,6 +414,38 @@ type Patch struct {
 	RevertedAt       string `json:"revertedAt,omitempty"`
 }
 
+type WebSourceTrace struct {
+	Query          string             `json:"query,omitempty"`
+	ProviderID     string             `json:"providerId,omitempty"`
+	SearchedAt     string             `json:"searchedAt,omitempty"`
+	Sources        []WebSource        `json:"sources,omitempty"`
+	FetchedSources []FetchedWebSource `json:"fetchedSources,omitempty"`
+	EvidenceRefs   []string           `json:"evidenceRefs,omitempty"`
+	ApprovalID     string             `json:"approvalId,omitempty"`
+	PolicyDecision string             `json:"policyDecision,omitempty"`
+}
+
+type WebSource struct {
+	Title       string `json:"title,omitempty"`
+	URL         string `json:"url"`
+	Snippet     string `json:"snippet,omitempty"`
+	Source      string `json:"source,omitempty"`
+	PublishedAt string `json:"publishedAt,omitempty"`
+	Rank        int    `json:"rank,omitempty"`
+	EvidenceRef string `json:"evidenceRef,omitempty"`
+}
+
+type FetchedWebSource struct {
+	URL         string `json:"url"`
+	FinalURL    string `json:"finalUrl,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Source      string `json:"source,omitempty"`
+	RetrievedAt string `json:"retrievedAt,omitempty"`
+	ContentHash string `json:"contentHash,omitempty"`
+	Truncated   bool   `json:"truncated,omitempty"`
+	EvidenceRef string `json:"evidenceRef,omitempty"`
+}
+
 type ValidationResult struct {
 	ID             string `json:"id"`
 	WorkspaceID    string `json:"workspaceId"`
@@ -520,6 +554,7 @@ type WorkspaceSnapshot struct {
 	Results            []Result            `json:"results,omitempty"`
 	Artifacts          []Artifact          `json:"artifacts,omitempty"`
 	Patches            []Patch             `json:"patches,omitempty"`
+	WebSources         []WebSourceTrace    `json:"webSources,omitempty"`
 	EventRecords       []EventRecord       `json:"eventRecords,omitempty"`
 	Decisions          []Decision          `json:"decisions,omitempty"`
 	Approvals          []Approval          `json:"approvals,omitempty"`

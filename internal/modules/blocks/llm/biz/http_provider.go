@@ -419,6 +419,8 @@ func decisionContractPrompt() string {
 		"- Do not use commands listed in runtimeCapabilities.shellPolicy.unavailableCommands, including inside sh -c, bash -c, or other nested shell scripts.",
 		"- Shell command input may include timeoutMillis for commands expected to take longer than the default; keep commands non-interactive and bounded.",
 		"- For curl-based data queries, use quiet output such as curl -sS so progress meters do not become execution evidence or final result text.",
+		"- For current or external facts, prefer web/search and web/fetch from runtimeCapabilities instead of shell curl. Treat web/search results as candidate sources and use web/fetch for facts that affect the final answer.",
+		"- When writing memory from web-backed work, write only adopted fact summaries plus source URL, retrievedAt/contentHash, and evidenceRefs. Never write raw webpage bodies or unadopted search candidates into memoryWrites.",
 		"- Do not assume remote host access credentials, SSH users, keys, or passwords. If a goal requires remote host configuration and no access method is present in the request, return blocked_on_decision with decisionKind provide_missing_info and ask for the access method or credentials.",
 		"- If input.executionContext.governanceHistory contains resolved decisions, treat their resolutionPayload as confirmed workspace context. Do not ask the same question again; continue from that confirmed decision unless it conflicts with the current Goal or DoD.",
 		"- When remote SSH credentials are explicitly available, prefer the ssh/command block kind from runtimeCapabilities.blockKinds. Do not emulate password SSH with sshpass or expect through shell/command.",

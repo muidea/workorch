@@ -37,6 +37,25 @@ chatCompletions = true
 streaming = true
 nonChatOperations = ["embeddings"]
 	disabled = false
+
+[webSearch]
+defaultProvider = "search"
+
+[webSearch.providers.search]
+provider = "http"
+searchEndpoint = "https://search.example.test/search"
+fetchEndpoint = "https://search.example.test/fetch"
+apiKey = "search-key"
+timeout = "20s"
+maxResults = 8
+maxFetchBytes = 262144
+maxRedirects = 3
+allowDomains = ["example.test"]
+denyDomains = ["blocked.example.test"]
+disabled = false
+
+[webSearch.providers.search.headers]
+X-WorkOrch-Client = "workorch"
 	`)
 	_ = Close()
 	t.Setenv(EnvConfigDir, configDir)
@@ -65,6 +84,11 @@ nonChatOperations = ["embeddings"]
 		len(cfg.LLM.Providers["local"].NonChatOperations) != 1 ||
 		cfg.LLM.Providers["local"].NonChatOperations[0] != "embeddings" {
 		t.Fatalf("llm provider capabilities = %+v, want streaming embeddings", cfg.LLM.Providers["local"])
+	}
+	if cfg.WebSearch.DefaultProvider != "search" ||
+		cfg.WebSearch.Providers["search"].SearchEndpoint != "https://search.example.test/search" ||
+		cfg.WebSearch.Providers["search"].Headers["X-WorkOrch-Client"] != "workorch" {
+		t.Fatalf("web search config = %+v, want provider config", cfg.WebSearch)
 	}
 }
 
@@ -109,6 +133,17 @@ disabled = false
 			Disabled: &disabled,
 		},
 	}
+	cfg.WebSearch.DefaultProvider = "search"
+	cfg.WebSearch.Providers = map[string]WebSearchProviderConfig{
+		"search": {
+			Provider:       "http",
+			SearchEndpoint: "https://search.example.test/search",
+			FetchEndpoint:  "https://search.example.test/fetch",
+			APIKey:         "search-key",
+			Timeout:        "20s",
+			MaxResults:     8,
+		},
+	}
 	if err := Save(cfg); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
@@ -124,6 +159,10 @@ disabled = false
 		next.LLM.DefaultEmbeddingProvider != "reasoning" ||
 		next.LLM.Providers["reasoning"].Model != "reasoning-model" {
 		t.Fatalf("next config = %+v, want saved llm provider", next.LLM)
+	}
+	if next.WebSearch.DefaultProvider != "search" ||
+		next.WebSearch.Providers["search"].FetchEndpoint != "https://search.example.test/fetch" {
+		t.Fatalf("next web search config = %+v, want saved web search provider", next.WebSearch)
 	}
 }
 
@@ -190,6 +229,46 @@ func TestLLMProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 	valueSets := cfg.LLMProviderValueSets()
 	if valueSets["reasoning"]["model"] != "model" {
 		t.Fatalf("provider value sets = %+v, want reasoning model", valueSets)
+	}
+}
+
+func TestWebSearchProviderValuesUsesFrameworkConfigFields(t *testing.T) {
+	disabled := false
+	cfg := Config{
+		WebSearch: WebSearchConfig{
+			DefaultProvider: "search",
+			Providers: map[string]WebSearchProviderConfig{
+				"search": {
+					Provider:       "http",
+					SearchEndpoint: "https://search.example.test/search",
+					FetchEndpoint:  "https://search.example.test/fetch",
+					APIKey:         "secret",
+					Headers:        map[string]string{"X-Test": "true"},
+					Timeout:        "20s",
+					MaxResults:     8,
+					MaxFetchBytes:  262144,
+					MaxRedirects:   3,
+					AllowDomains:   []string{"example.test"},
+					DenyDomains:    []string{"blocked.example.test"},
+					Disabled:       &disabled,
+				},
+			},
+		},
+	}
+
+	values := cfg.WebSearchProviderValues()
+	if values["provider"] != "http" ||
+		values["searchEndpoint"] != "https://search.example.test/search" ||
+		values["fetchEndpoint"] != "https://search.example.test/fetch" ||
+		values["apiKey"] != "secret" ||
+		values["maxResults"] != "8" ||
+		values["maxFetchBytes"] != "262144" ||
+		values["maxRedirects"] != "3" ||
+		values["allowDomains"] != "example.test" ||
+		values["denyDomains"] != "blocked.example.test" ||
+		values["disabled"] != "false" ||
+		values["header.X-Test"] != "true" {
+		t.Fatalf("provider values = %+v, want web search provider bridge values", values)
 	}
 }
 

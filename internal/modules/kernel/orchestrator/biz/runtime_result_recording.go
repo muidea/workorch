@@ -52,7 +52,8 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 	now := runtimeEvidenceTimestamp()
 	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
 	patchDetails := o.resultPatchDetails(ctx, run.ID)
-	expectedArtifactRefs := expectedCompletionArtifactRefs(run, patchDetails)
+	webSourceDetails := o.resultWebSourceDetails(ctx, run.ID)
+	expectedArtifactRefs := expectedCompletionArtifactRefs(run, patchDetails, webSourceDetails)
 	manifestCh := make(chan string, 1)
 	go func() {
 		manifestCh <- o.workspaceDeliverableManifestContent(ctx, run, step, assessment, evidenceRefs, workspace, patchDetails)
@@ -81,24 +82,41 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 		refs, err := o.recordPatchDiffArtifact(ctx, run, step, patchDetails, now)
 		patchArtifactCh <- artifactWriteResult{refs: refs, err: err}
 	}()
+	webSourceArtifactCh := make(chan artifactWriteResult, 1)
+	go func() {
+		ref, err := o.recordWebSourceIndexArtifact(ctx, run, step, webSourceDetails, now)
+		var refs []common.ArtifactID
+		if ref != "" {
+			refs = []common.ArtifactID{ref}
+		}
+		webSourceArtifactCh <- artifactWriteResult{refs: refs, err: err}
+	}()
 	summaryArtifact := <-summaryArtifactCh
 	if summaryArtifact.err != nil {
 		<-manifestArtifactCh
 		<-patchArtifactCh
+		<-webSourceArtifactCh
 		return summaryArtifact.err
 	}
 	manifestArtifact := <-manifestArtifactCh
 	if manifestArtifact.err != nil {
 		<-patchArtifactCh
+		<-webSourceArtifactCh
 		return manifestArtifact.err
 	}
 	patchArtifact := <-patchArtifactCh
 	if patchArtifact.err != nil {
+		<-webSourceArtifactCh
 		return patchArtifact.err
+	}
+	webSourceArtifact := <-webSourceArtifactCh
+	if webSourceArtifact.err != nil {
+		return webSourceArtifact.err
 	}
 	artifactRefs := append([]common.ArtifactID(nil), summaryArtifact.refs...)
 	artifactRefs = append(artifactRefs, manifestArtifact.refs...)
 	artifactRefs = append(artifactRefs, patchArtifact.refs...)
+	artifactRefs = append(artifactRefs, webSourceArtifact.refs...)
 	dodAssessment := resultDoDAssessmentFromMap(assessment)
 	item := &resultmodel.Result{
 		ID:            common.ResultID(fmt.Sprintf("%s/result/dod-assessment", run.ID)),

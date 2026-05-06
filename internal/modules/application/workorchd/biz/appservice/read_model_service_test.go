@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
+	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
@@ -865,6 +867,130 @@ func TestMapRunObservabilityProjectsPatchEventsIntoTimeline(t *testing.T) {
 
 	if observability.Evidence.EventTotal != 1 || !timelineContainsPersistedEvent(observability.Timeline, events.TopicPatchApplied) {
 		t.Fatalf("observability = %+v, want patch event in timeline", observability)
+	}
+}
+
+func TestMapWebSourceTracesProjectsSearchAndFetchSteps(t *testing.T) {
+	items := mapWebSourceTraces([]presenter.StepView{
+		{
+			ID:    "run-web/step-search",
+			Kind:  webcommon.StepKindSearch,
+			State: string(common.StepStateCompleted),
+			Output: map[string]any{
+				"provider":   "default-http",
+				"query":      "golang latest",
+				"searchedAt": "2026-05-05T00:00:00Z",
+				"policy":     map[string]any{"decision": "allowed"},
+				"results": []map[string]any{{
+					"title":       "Go Downloads",
+					"url":         "https://go.dev/dl/",
+					"snippet":     "Download Go",
+					"source":      "go.dev",
+					"publishedAt": "2026-05-01",
+					"rank":        1,
+				}},
+			},
+		},
+		{
+			ID:    "run-web/step-fetch",
+			Kind:  webcommon.StepKindFetch,
+			State: string(common.StepStateCompleted),
+			Output: map[string]any{
+				"provider":    "default-http",
+				"url":         "https://go.dev/dl/",
+				"finalUrl":    "https://go.dev/dl/",
+				"title":       "Downloads",
+				"source":      "go.dev",
+				"retrievedAt": "2026-05-05T00:00:01Z",
+				"contentHash": "hash",
+				"truncated":   true,
+				"approvalId":  "approval-web",
+				"policy":      map[string]any{"decision": "allowed"},
+			},
+		},
+	})
+	if len(items) != 2 {
+		t.Fatalf("web sources = %+v, want search and fetch traces", items)
+	}
+	if items[0].Query != "golang latest" ||
+		len(items[0].Sources) != 1 ||
+		items[0].Sources[0].EvidenceRef != "run-web/step-search" ||
+		items[0].PolicyDecision != "allowed" {
+		t.Fatalf("search trace = %+v, want normalized source", items[0])
+	}
+	if len(items[1].FetchedSources) != 1 ||
+		items[1].FetchedSources[0].ContentHash != "hash" ||
+		!items[1].FetchedSources[0].Truncated ||
+		items[1].ApprovalID != "approval-web" {
+		t.Fatalf("fetch trace = %+v, want normalized fetched source", items[1])
+	}
+	observability := mapRunObservability(RunSnapshot{
+		Run:        Run{ID: "run-web", WorkspaceID: "ws-web"},
+		WebSources: items,
+	})
+	if len(observability.WebSources) != 2 || observability.WebSources[0].Sources[0].URL != "https://go.dev/dl/" {
+		t.Fatalf("observability web sources = %+v, want projected web sources", observability.WebSources)
+	}
+}
+
+func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
+	runID := "run-web-event"
+	stepID := "run-web-event/step-search"
+	snapshot := RunSnapshot{
+		Run: Run{ID: runID, WorkspaceID: "ws-web-event", State: string(common.RunStateCompleted)},
+		Steps: []presenter.StepView{{
+			ID:    stepID,
+			Kind:  webcommon.StepKindSearch,
+			State: string(common.StepStateCompleted),
+			Output: map[string]any{
+				"status":     "completed",
+				"stage":      "web_search",
+				"provider":   "default-http",
+				"query":      "golang latest",
+				"searchedAt": "2026-05-05T00:00:00Z",
+				"results": []map[string]any{{
+					"title": "Go Downloads",
+					"url":   "https://go.dev/dl/",
+				}},
+			},
+		}},
+		EventRecords: []EventRecord{{
+			ID:          "event-web-step-completed",
+			Topic:       events.TopicStepStateChanged,
+			SubjectType: "step",
+			SubjectID:   stepID,
+			WorkspaceID: "ws-web-event",
+			RunID:       runID,
+			StepID:      stepID,
+			OccurredAt:  "2026-05-05T00:00:02Z",
+			Payload: events.StepPayload(webcommon.StepKindSearch, common.StepStateCompleted, nil, map[string]any{
+				"status":     "completed",
+				"stage":      "web_search",
+				"provider":   "default-http",
+				"query":      "golang latest",
+				"searchedAt": "2026-05-05T00:00:00Z",
+				"results": []map[string]any{{
+					"title": "Go Downloads",
+					"url":   "https://go.dev/dl/",
+				}},
+			}),
+		}},
+		WebSources: []WebSourceTrace{{
+			Query:        "golang latest",
+			ProviderID:   "default-http",
+			EvidenceRefs: []string{stepID},
+			Sources:      []WebSource{{Title: "Go Downloads", URL: "https://go.dev/dl/", EvidenceRef: stepID}},
+		}},
+	}
+
+	observability := mapRunObservability(snapshot)
+
+	if observability.Evidence.EventTotal != 1 || len(observability.WebSources) != 1 {
+		t.Fatalf("observability = %+v, want event count and web source projection", observability)
+	}
+	if !timelineContainsPersistedEvent(observability.Timeline, events.TopicStepStateChanged) ||
+		!timelineContainsStepOccurredAt(observability.Timeline, "step", stepID, "2026-05-05T00:00:02Z") {
+		t.Fatalf("timeline = %+v, want persisted web step event and step occurrence", observability.Timeline)
 	}
 }
 

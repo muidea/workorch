@@ -23,6 +23,7 @@ import (
 	mcpblockcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	mcpbiz "github.com/muidea/workorch/internal/modules/kernel/mcp/biz"
@@ -7135,6 +7136,155 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludePatchDiff(t *testing.T) {
 	}
 	if manifestArtifact == nil || !strings.Contains(manifestArtifact.Summary, "## Code Change Evidence") || !strings.Contains(manifestArtifact.Summary, string(patchID)) {
 		t.Fatalf("manifest artifact = %+v, want patch evidence section", manifestArtifact)
+	}
+}
+
+func TestRuntimeOrchestrator_ResultArtifactsIncludeWebSourceIndex(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-result-web-source-index")
+	workspaceID := common.WorkspaceID("ws-result-web-source-index")
+	stepID := common.StepID(string(runID) + "/validation")
+	searchStepID := common.StepID(string(runID) + "/step-search")
+	fetchStepID := common.StepID(string(runID) + "/step-fetch")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-result-web-source-index",
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}
+	step := &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+	}
+	stepRepo := memory.NewStepRepository()
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    searchStepID,
+		RunID: runID,
+		Kind:  webcommon.StepKindSearch,
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"provider":   "default-http",
+			"query":      "golang latest",
+			"searchedAt": "2026-05-05T00:00:00Z",
+			"policy":     map[string]any{"decision": "allowed"},
+			"results": []map[string]any{{
+				"title":       "Go Downloads",
+				"url":         "https://go.dev/dl/",
+				"snippet":     "Download Go",
+				"source":      "go.dev",
+				"publishedAt": "2026-05-01",
+				"rank":        1,
+				"contentHash": "search-hash",
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("seed search step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    fetchStepID,
+		RunID: runID,
+		Kind:  webcommon.StepKindFetch,
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"provider":    "default-http",
+			"url":         "https://go.dev/dl/",
+			"finalUrl":    "https://go.dev/dl/",
+			"title":       "Downloads",
+			"source":      "go.dev",
+			"retrievedAt": "2026-05-05T00:00:01Z",
+			"contentHash": "fetch-hash",
+			"policy":      map[string]any{"decision": "allowed"},
+		},
+	}); err != nil {
+		t.Fatalf("seed fetch step: %v", err)
+	}
+	assessment := map[string]any{
+		"satisfied": true,
+		"items": []map[string]any{
+			{
+				"item":         "web source is cited",
+				"state":        "satisfied",
+				"evidenceRefs": []string{string(fetchStepID)},
+			},
+		},
+		"summary":               "DoD satisfied with web source",
+		"implementationSummary": "Verified the external source.",
+		"verificationSummary":   "Source was fetched and indexed.",
+	}
+	artifactRepo := memory.NewArtifactRepository()
+	resultRepo := memory.NewResultRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			Results:   resultRepo,
+			Artifacts: artifactRepo,
+		},
+	}
+
+	if err := orch.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied with web source", nil); err != nil {
+		t.Fatalf("record result from validated assessment: %v", err)
+	}
+	results, err := resultRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list results: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %+v, want one accepted result", results)
+	}
+	if !reflect.DeepEqual(results[0].ArtifactRefs, []common.ArtifactID{
+		common.ArtifactID(string(runID) + "/artifact/result-summary"),
+		common.ArtifactID(string(runID) + "/artifact/deliverable-manifest"),
+		common.ArtifactID(string(runID) + "/artifact/web-source-index"),
+	}) {
+		t.Fatalf("result artifact refs = %+v, want summary, manifest and web source index", results[0].ArtifactRefs)
+	}
+	artifacts, err := artifactRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	}
+	var sourceArtifact *resultmodel.Artifact
+	var summaryArtifact *resultmodel.Artifact
+	for _, artifact := range artifacts {
+		switch artifact.ID {
+		case common.ArtifactID(string(runID) + "/artifact/web-source-index"):
+			sourceArtifact = artifact
+		case common.ArtifactID(string(runID) + "/artifact/result-summary"):
+			summaryArtifact = artifact
+		}
+	}
+	if sourceArtifact == nil ||
+		sourceArtifact.Category != resultcommon.ArtifactCategorySource ||
+		sourceArtifact.ArtifactType != resultcommon.ArtifactTypeReport ||
+		!reflect.DeepEqual(sourceArtifact.EvidenceRefs, []string{string(fetchStepID), string(searchStepID)}) {
+		t.Fatalf("source artifact = %+v, want web source report linked to web evidence", sourceArtifact)
+	}
+	for _, want := range []string{"Web Source Index", "https://go.dev/dl/", string(searchStepID), string(fetchStepID)} {
+		if !strings.Contains(sourceArtifact.Summary, want) {
+			t.Fatalf("source artifact missing %q:\n%s", want, sourceArtifact.Summary)
+		}
+	}
+	if summaryArtifact == nil || !strings.Contains(summaryArtifact.Summary, string(sourceArtifact.ID)) {
+		t.Fatalf("summary artifact = %+v, want web source artifact ref", summaryArtifact)
+	}
+
+	memoryRepo := memory.NewMemoryItemRepository()
+	orch.evidence.MemoryItems = memoryRepo
+	if err := orch.recordRunSummaryMemoryFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied with web source"); err != nil {
+		t.Fatalf("record run summary memory: %v", err)
+	}
+	memories, err := memoryRepo.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("list memories: %v", err)
+	}
+	if len(memories) != 1 ||
+		!strings.Contains(memories[0].Content, "Web sources:") ||
+		!strings.Contains(memories[0].Content, "https://go.dev/dl/") ||
+		!strings.Contains(memories[0].Content, "fetch-hash") {
+		t.Fatalf("memory = %+v, want source summary refs", memories)
+	}
+	if strings.Contains(memories[0].Content, "Download Go") {
+		t.Fatalf("memory content = %q, must not store raw search snippet/page body", memories[0].Content)
 	}
 }
 

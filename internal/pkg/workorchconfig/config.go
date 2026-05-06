@@ -3,6 +3,7 @@ package workorchconfig
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -20,6 +21,7 @@ type Config struct {
 	Repository   RepositoryConfig `json:"repository" toml:"repository"`
 	Runtime      RuntimeConfig    `json:"runtime" toml:"runtime"`
 	LLM          LLMConfig        `json:"llm" toml:"llm"`
+	WebSearch    WebSearchConfig  `json:"webSearch" toml:"webSearch"`
 }
 
 type ServerConfig struct {
@@ -60,6 +62,26 @@ type LLMProviderConfig struct {
 	NonChatOperations []string `json:"nonChatOperations" toml:"nonChatOperations"`
 }
 
+type WebSearchConfig struct {
+	DefaultProvider string                             `json:"defaultProvider" toml:"defaultProvider"`
+	Providers       map[string]WebSearchProviderConfig `json:"providers" toml:"providers"`
+}
+
+type WebSearchProviderConfig struct {
+	Provider       string            `json:"provider" toml:"provider"`
+	SearchEndpoint string            `json:"searchEndpoint" toml:"searchEndpoint"`
+	FetchEndpoint  string            `json:"fetchEndpoint" toml:"fetchEndpoint"`
+	APIKey         string            `json:"apiKey" toml:"apiKey"`
+	Headers        map[string]string `json:"headers" toml:"headers"`
+	Timeout        string            `json:"timeout" toml:"timeout"`
+	MaxResults     int               `json:"maxResults" toml:"maxResults"`
+	MaxFetchBytes  int64             `json:"maxFetchBytes" toml:"maxFetchBytes"`
+	MaxRedirects   int               `json:"maxRedirects" toml:"maxRedirects"`
+	AllowDomains   []string          `json:"allowDomains" toml:"allowDomains"`
+	DenyDomains    []string          `json:"denyDomains" toml:"denyDomains"`
+	Disabled       *bool             `json:"disabled" toml:"disabled"`
+}
+
 func ConfigureDirectory(configDir string) {
 	configDir = strings.TrimSpace(configDir)
 	if configDir == "" {
@@ -93,6 +115,9 @@ func Current() (Config, error) {
 	if err := loadSection("llm", &cfg.LLM); err != nil {
 		return Config{}, err
 	}
+	if err := loadSection("webSearch", &cfg.WebSearch); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
 }
 
@@ -114,6 +139,9 @@ func Save(next Config) error {
 	}
 	if next.LLM.Providers == nil {
 		next.LLM.Providers = map[string]LLMProviderConfig{}
+	}
+	if next.WebSearch.Providers == nil {
+		next.WebSearch.Providers = map[string]WebSearchProviderConfig{}
 	}
 	configPath, err := ApplicationConfigPath()
 	if err != nil {
@@ -165,6 +193,23 @@ func (c Config) LLMProviderValueSets() map[string]map[string]string {
 	return ret
 }
 
+func (c Config) WebSearchProviderValues() map[string]string {
+	valuesByID := c.WebSearchProviderValueSets()
+	return valuesByID[strings.TrimSpace(c.WebSearch.DefaultProvider)]
+}
+
+func (c Config) WebSearchProviderValueSets() map[string]map[string]string {
+	ret := map[string]map[string]string{}
+	for id, provider := range c.WebSearch.Providers {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		ret[id] = webSearchProviderValues(provider)
+	}
+	return ret
+}
+
 func llmProviderValues(provider LLMProviderConfig) map[string]string {
 	values := map[string]string{}
 	set(values, "provider", provider.Provider)
@@ -187,6 +232,41 @@ func llmProviderValues(provider LLMProviderConfig) map[string]string {
 	}
 	if len(provider.NonChatOperations) > 0 {
 		values["nonChatOperations"] = strings.Join(provider.NonChatOperations, ",")
+	}
+	return values
+}
+
+func webSearchProviderValues(provider WebSearchProviderConfig) map[string]string {
+	values := map[string]string{}
+	set(values, "provider", provider.Provider)
+	set(values, "searchEndpoint", provider.SearchEndpoint)
+	set(values, "fetchEndpoint", provider.FetchEndpoint)
+	set(values, "apiKey", provider.APIKey)
+	set(values, "timeout", provider.Timeout)
+	if provider.MaxResults > 0 {
+		values["maxResults"] = intString(provider.MaxResults)
+	}
+	if provider.MaxFetchBytes > 0 {
+		values["maxFetchBytes"] = int64String(provider.MaxFetchBytes)
+	}
+	if provider.MaxRedirects > 0 {
+		values["maxRedirects"] = intString(provider.MaxRedirects)
+	}
+	if len(provider.AllowDomains) > 0 {
+		values["allowDomains"] = strings.Join(provider.AllowDomains, ",")
+	}
+	if len(provider.DenyDomains) > 0 {
+		values["denyDomains"] = strings.Join(provider.DenyDomains, ",")
+	}
+	if provider.Disabled != nil {
+		values["disabled"] = boolString(*provider.Disabled)
+	}
+	for key, value := range provider.Headers {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		set(values, "header."+key, value)
 	}
 	return values
 }
@@ -221,6 +301,18 @@ func boolString(value bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func intString(value int) string {
+	return strconv.Itoa(value)
+}
+
+func int64String(value int64) string {
+	return formatInt(value)
+}
+
+func formatInt(value int64) string {
+	return strconv.FormatInt(value, 10)
 }
 
 func Close() error {

@@ -156,6 +156,38 @@ type MemoryRecallTraceInfo struct {
 	EvidenceRef         string
 }
 
+type WebSourceTraceInfo struct {
+	Query          string
+	ProviderID     string
+	SearchedAt     string
+	Sources        []WebSourceInfo
+	FetchedSources []FetchedWebSourceInfo
+	EvidenceRefs   []string
+	ApprovalID     common.ApprovalID
+	PolicyDecision string
+}
+
+type WebSourceInfo struct {
+	Title       string
+	URL         string
+	Snippet     string
+	Source      string
+	PublishedAt string
+	Rank        int
+	EvidenceRef string
+}
+
+type FetchedWebSourceInfo struct {
+	URL         string
+	FinalURL    string
+	Title       string
+	Source      string
+	RetrievedAt string
+	ContentHash string
+	Truncated   bool
+	EvidenceRef string
+}
+
 type WorkspaceSnapshotInfo struct {
 	Workspace          WorkspaceInfo
 	Outcome            WorkspaceOutcomeInfo
@@ -164,6 +196,7 @@ type WorkspaceSnapshotInfo struct {
 	Artifacts          []ArtifactInfo
 	Patches            []PatchInfo
 	MemoryRecallTraces []MemoryRecallTraceInfo
+	WebSources         []WebSourceTraceInfo
 	Decisions          []DecisionInfo
 	Approvals          []ApprovalInfo
 }

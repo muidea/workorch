@@ -92,6 +92,12 @@ func runAgent(cmd *cobra.Command, args []string) error {
 				fmt.Println("── Result ──")
 				fmt.Println(info.Summary)
 			}
+			if len(info.Sources) > 0 {
+				fmt.Println("── Sources ──")
+				for _, source := range info.Sources {
+					fmt.Printf("  - %s\n", source)
+				}
+			}
 			for _, o := range info.Outputs {
 				fmt.Printf("  %s: %s\n", o.Kind, o.Summary)
 			}

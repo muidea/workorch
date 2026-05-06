@@ -19,6 +19,7 @@ func completionRunSummaryMemoryContent(
 	evidenceRefs []string,
 	patchDetails []resultPatchDetail,
 	evidenceDetails []resultEvidenceDetail,
+	webSourceDetails []resultWebSourceDetail,
 ) string {
 	parts := []string{summary}
 	if run != nil {
@@ -64,6 +65,24 @@ func completionRunSummaryMemoryContent(
 			lines = append(lines, fmt.Sprintf("- %s %s %s", patch.PatchType, patch.TargetRef, patch.State))
 		}
 		parts = append(parts, strings.Join(lines, "\n"))
+	}
+	if len(webSourceDetails) > 0 {
+		lines := []string{"Web sources:"}
+		for _, source := range webSourceDetails {
+			sourceURL := firstNonEmptyOrchestratorString(source.FinalURL, source.URL)
+			if sourceURL == "" {
+				continue
+			}
+			lines = append(lines, fmt.Sprintf(
+				"- %s evidence=%s hash=%s",
+				sourceURL,
+				source.StepID,
+				firstNonEmptyOrchestratorString(source.ContentHash, "unknown"),
+			))
+		}
+		if len(lines) > 1 {
+			parts = append(parts, strings.Join(lines, "\n"))
+		}
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -175,7 +194,7 @@ func (o *RuntimeOrchestrator) recordRunSummaryMemoryFromValidatedDoDAssessment(
 		SourceType:  memorycommon.MemorySourceRun,
 		SourceRef:   string(step.ID),
 		MemoryType:  memorycommon.MemoryTypeRunSummary,
-		Content:     completionRunSummaryMemoryContent(run, summary, assessment, evidenceRefs, o.resultPatchDetails(ctx, run.ID), o.resultEvidenceDetails(ctx, evidenceRefs)),
+		Content:     completionRunSummaryMemoryContent(run, summary, assessment, evidenceRefs, o.resultPatchDetails(ctx, run.ID), o.resultEvidenceDetails(ctx, evidenceRefs), o.resultWebSourceDetails(ctx, run.ID)),
 		Summary:     summary,
 		Tags:        []string{"run_summary", "dod_assessment", "code_agent"},
 		Importance:  70,

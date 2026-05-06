@@ -8,6 +8,8 @@ import (
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	webbiz "github.com/muidea/workorch/internal/modules/blocks/web/biz"
+	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/dialoglanguage"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -18,6 +20,7 @@ type ServiceConfiguration struct {
 	Repository RepositoryConfiguration `json:"repository"`
 	Runtime    RuntimeConfiguration    `json:"runtime"`
 	LLM        LLMConfiguration        `json:"llm"`
+	WebSearch  WebSearchConfiguration  `json:"webSearch"`
 }
 
 type ServerConfiguration struct {
@@ -78,6 +81,44 @@ type LLMProviderTemplate struct {
 	NonChatOperations []string `json:"nonChatOperations,omitempty"`
 }
 
+type WebSearchConfiguration struct {
+	DefaultProviderID string                           `json:"defaultProviderId"`
+	Providers         []WebSearchProviderConfiguration `json:"providers"`
+	ProviderTemplates []WebSearchProviderTemplate      `json:"providerTemplates"`
+}
+
+type WebSearchProviderConfiguration struct {
+	ID               string   `json:"id"`
+	Provider         string   `json:"provider"`
+	SearchEndpoint   string   `json:"searchEndpoint,omitempty"`
+	FetchEndpoint    string   `json:"fetchEndpoint,omitempty"`
+	Timeout          string   `json:"timeout,omitempty"`
+	MaxResults       int      `json:"maxResults,omitempty"`
+	MaxFetchBytes    int64    `json:"maxFetchBytes,omitempty"`
+	MaxRedirects     int      `json:"maxRedirects,omitempty"`
+	AllowDomains     []string `json:"allowDomains,omitempty"`
+	DenyDomains      []string `json:"denyDomains,omitempty"`
+	Disabled         bool     `json:"disabled"`
+	Ready            bool     `json:"ready"`
+	Reason           string   `json:"reason,omitempty"`
+	Default          bool     `json:"default"`
+	APIKeyConfigured bool     `json:"apiKeyConfigured"`
+}
+
+type WebSearchProviderTemplate struct {
+	TemplateID     string `json:"templateId"`
+	Name           string `json:"name"`
+	Description    string `json:"description,omitempty"`
+	ID             string `json:"id"`
+	Provider       string `json:"provider"`
+	Timeout        string `json:"timeout,omitempty"`
+	MaxResults     int    `json:"maxResults,omitempty"`
+	MaxFetchBytes  int64  `json:"maxFetchBytes,omitempty"`
+	MaxRedirects   int    `json:"maxRedirects,omitempty"`
+	SearchEndpoint string `json:"searchEndpoint,omitempty"`
+	FetchEndpoint  string `json:"fetchEndpoint,omitempty"`
+}
+
 type UpdateLLMConfigurationCommand struct {
 	DefaultProviderID          string                           `json:"defaultProviderId"`
 	DefaultEmbeddingProviderID string                           `json:"defaultEmbeddingProviderId,omitempty"`
@@ -99,6 +140,26 @@ type UpdateLLMProviderConfiguration struct {
 	ChatCompletions   *bool    `json:"chatCompletions,omitempty"`
 	Streaming         *bool    `json:"streaming,omitempty"`
 	NonChatOperations []string `json:"nonChatOperations,omitempty"`
+}
+
+type UpdateWebSearchConfigurationCommand struct {
+	DefaultProviderID string                                 `json:"defaultProviderId"`
+	Providers         []UpdateWebSearchProviderConfiguration `json:"providers"`
+}
+
+type UpdateWebSearchProviderConfiguration struct {
+	ID             string   `json:"id"`
+	Provider       string   `json:"provider,omitempty"`
+	SearchEndpoint string   `json:"searchEndpoint,omitempty"`
+	FetchEndpoint  string   `json:"fetchEndpoint,omitempty"`
+	APIKey         string   `json:"apiKey,omitempty"`
+	Timeout        string   `json:"timeout,omitempty"`
+	MaxResults     int      `json:"maxResults,omitempty"`
+	MaxFetchBytes  int64    `json:"maxFetchBytes,omitempty"`
+	MaxRedirects   int      `json:"maxRedirects,omitempty"`
+	AllowDomains   []string `json:"allowDomains,omitempty"`
+	DenyDomains    []string `json:"denyDomains,omitempty"`
+	Disabled       bool     `json:"disabled"`
 }
 
 func ReadServiceConfiguration() (ServiceConfiguration, error) {
@@ -136,6 +197,37 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 		}
 		return providers[i].ID < providers[j].ID
 	})
+	defaultWebProviderID, webProviderConfigs, err := webbiz.LoadProviderConfigs(cfg.WebSearch.DefaultProvider, cfg.WebSearchProviderValueSets())
+	if err != nil {
+		return ServiceConfiguration{}, err
+	}
+	webProviders := make([]WebSearchProviderConfiguration, 0, len(webProviderConfigs))
+	for id, providerConfig := range webProviderConfigs {
+		rawProvider := cfg.WebSearch.Providers[id]
+		webProviders = append(webProviders, WebSearchProviderConfiguration{
+			ID:               id,
+			Provider:         providerConfig.Provider,
+			SearchEndpoint:   providerConfig.SearchEndpoint,
+			FetchEndpoint:    providerConfig.FetchEndpoint,
+			Timeout:          rawProvider.Timeout,
+			MaxResults:       rawProvider.MaxResults,
+			MaxFetchBytes:    rawProvider.MaxFetchBytes,
+			MaxRedirects:     rawProvider.MaxRedirects,
+			AllowDomains:     append([]string(nil), rawProvider.AllowDomains...),
+			DenyDomains:      append([]string(nil), rawProvider.DenyDomains...),
+			Disabled:         rawProvider.Disabled != nil && *rawProvider.Disabled,
+			Ready:            !providerConfig.Unavailable,
+			Reason:           providerConfig.UnavailableReason,
+			Default:          id == defaultWebProviderID,
+			APIKeyConfigured: rawProvider.APIKey != "",
+		})
+	}
+	sort.Slice(webProviders, func(i, j int) bool {
+		if webProviders[i].Default != webProviders[j].Default {
+			return webProviders[i].Default
+		}
+		return webProviders[i].ID < webProviders[j].ID
+	})
 	return ServiceConfiguration{
 		Server: ServerConfiguration{
 			Addr:                  cfg.Server.Addr,
@@ -159,6 +251,11 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 			DefaultEmbeddingProviderID: strings.TrimSpace(cfg.LLM.DefaultEmbeddingProvider),
 			Providers:                  providers,
 			ProviderTemplates:          DefaultLLMProviderTemplates(),
+		},
+		WebSearch: WebSearchConfiguration{
+			DefaultProviderID: defaultWebProviderID,
+			Providers:         webProviders,
+			ProviderTemplates: DefaultWebSearchProviderTemplates(),
 		},
 	}, nil
 }
@@ -197,6 +294,22 @@ func DefaultLLMProviderTemplates() []LLMProviderTemplate {
 			Model:           "deepseek-chat",
 			Timeout:         "60s",
 			ChatCompletions: true,
+		},
+	}
+}
+
+func DefaultWebSearchProviderTemplates() []WebSearchProviderTemplate {
+	return []WebSearchProviderTemplate{
+		{
+			TemplateID:    webcommon.ProviderHTTP,
+			Name:          "HTTP Web Search Gateway",
+			Description:   "通过受治理的 HTTP 搜索/读取网关执行 web/search 与 web/fetch；网关负责真实搜索源和网页正文抽取。",
+			ID:            "web-http-main",
+			Provider:      webcommon.ProviderHTTP,
+			Timeout:       "20s",
+			MaxResults:    8,
+			MaxFetchBytes: 262144,
+			MaxRedirects:  3,
 		},
 	}
 }
@@ -259,6 +372,54 @@ func UpdateLLMConfiguration(cmd UpdateLLMConfigurationCommand) (ServiceConfigura
 	cfg.LLM.DefaultProvider = defaultProviderID
 	cfg.LLM.DefaultEmbeddingProvider = defaultEmbeddingProviderID
 	cfg.LLM.Providers = providers
+	if err := workorchconfig.Save(cfg); err != nil {
+		return ServiceConfiguration{}, err
+	}
+	if err := workorchconfig.Reload(); err != nil {
+		return ServiceConfiguration{}, err
+	}
+	return ReadServiceConfiguration()
+}
+
+func UpdateWebSearchConfiguration(cmd UpdateWebSearchConfigurationCommand) (ServiceConfiguration, error) {
+	cfg, err := workorchconfig.Current()
+	if err != nil {
+		return ServiceConfiguration{}, err
+	}
+	providers, err := updatedWebSearchProviders(cfg.WebSearch.Providers, cmd.Providers)
+	if err != nil {
+		return ServiceConfiguration{}, err
+	}
+	defaultProviderID := strings.TrimSpace(cmd.DefaultProviderID)
+	if len(providers) == 0 {
+		cfg.WebSearch.DefaultProvider = ""
+		cfg.WebSearch.Providers = map[string]workorchconfig.WebSearchProviderConfig{}
+		if err := workorchconfig.Save(cfg); err != nil {
+			return ServiceConfiguration{}, err
+		}
+		if err := workorchconfig.Reload(); err != nil {
+			return ServiceConfiguration{}, err
+		}
+		return ReadServiceConfiguration()
+	}
+	if defaultProviderID == "" {
+		return ServiceConfiguration{}, fmt.Errorf("%w: defaultProviderId is required", common.ErrInvalidArgument)
+	}
+	if _, ok := providers[defaultProviderID]; !ok {
+		return ServiceConfiguration{}, fmt.Errorf("%w: defaultProviderId must reference a Web Search provider", common.ErrInvalidArgument)
+	}
+	if _, loaded, err := webbiz.LoadProviderConfigs(defaultProviderID, workorchconfig.Config{
+		WebSearch: workorchconfig.WebSearchConfig{
+			DefaultProvider: defaultProviderID,
+			Providers:       providers,
+		},
+	}.WebSearchProviderValueSets()); err != nil {
+		return ServiceConfiguration{}, err
+	} else if provider := loaded[defaultProviderID]; provider.Unavailable {
+		return ServiceConfiguration{}, fmt.Errorf("%w: defaultProviderId references an unavailable Web Search provider: %s", common.ErrInvalidArgument, provider.UnavailableReason)
+	}
+	cfg.WebSearch.DefaultProvider = defaultProviderID
+	cfg.WebSearch.Providers = providers
 	if err := workorchconfig.Save(cfg); err != nil {
 		return ServiceConfiguration{}, err
 	}
@@ -349,4 +510,36 @@ func normalizedProviderOperations(values []string) []string {
 		ret = append(ret, value)
 	}
 	return ret
+}
+
+func updatedWebSearchProviders(existing map[string]workorchconfig.WebSearchProviderConfig, updates []UpdateWebSearchProviderConfiguration) (map[string]workorchconfig.WebSearchProviderConfig, error) {
+	ret := make(map[string]workorchconfig.WebSearchProviderConfig, len(updates))
+	for _, update := range updates {
+		id := strings.TrimSpace(update.ID)
+		if id == "" {
+			return nil, fmt.Errorf("%w: Web Search provider id is required", common.ErrInvalidArgument)
+		}
+		if _, exists := ret[id]; exists {
+			return nil, fmt.Errorf("%w: duplicate Web Search provider id %q", common.ErrInvalidArgument, id)
+		}
+		apiKey := strings.TrimSpace(update.APIKey)
+		if apiKey == "" && existing != nil {
+			apiKey = existing[id].APIKey
+		}
+		disabled := update.Disabled
+		ret[id] = workorchconfig.WebSearchProviderConfig{
+			Provider:       strings.TrimSpace(update.Provider),
+			SearchEndpoint: strings.TrimSpace(update.SearchEndpoint),
+			FetchEndpoint:  strings.TrimSpace(update.FetchEndpoint),
+			APIKey:         apiKey,
+			Timeout:        strings.TrimSpace(update.Timeout),
+			MaxResults:     update.MaxResults,
+			MaxFetchBytes:  update.MaxFetchBytes,
+			MaxRedirects:   update.MaxRedirects,
+			AllowDomains:   normalizedProviderOperations(update.AllowDomains),
+			DenyDomains:    normalizedProviderOperations(update.DenyDomains),
+			Disabled:       &disabled,
+		}
+	}
+	return ret, nil
 }

@@ -199,6 +199,15 @@ func (m AppModel) renderMain(width, height int) string {
 			b.WriteString("\n")
 		}
 	}
+	if sources := m.visibleSources(); len(sources) > 0 {
+		b.WriteString("\n")
+		b.WriteString(Heading.Render("Sources"))
+		b.WriteString("\n")
+		for _, source := range sources {
+			b.WriteString(truncateDisplay("- "+source, width-2))
+			b.WriteString("\n")
+		}
+	}
 	if patches := m.visiblePatches(); len(patches) > 0 {
 		b.WriteString("\n")
 		b.WriteString(Heading.Render("Patches"))
@@ -224,6 +233,9 @@ func (m AppModel) resultLineLimit(height int, usedLines int) int {
 	if artifacts := m.visibleArtifacts(); len(artifacts) > 0 {
 		reserved += 2 + len(artifacts)
 	}
+	if sources := m.visibleSources(); len(sources) > 0 {
+		reserved += 2 + len(sources)
+	}
 	if patches := m.visiblePatches(); len(patches) > 0 {
 		reserved += 2 + len(patches)
 	}
@@ -246,6 +258,13 @@ func (m AppModel) visibleArtifacts() []string {
 		return nil
 	}
 	return m.artifacts
+}
+
+func (m AppModel) visibleSources() []string {
+	if len(m.sources) <= 6 {
+		return m.sources
+	}
+	return m.sources[:6]
 }
 
 func (m AppModel) visiblePatches() []backend.PatchInfo {

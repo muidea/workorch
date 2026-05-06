@@ -482,6 +482,7 @@ type validateFunc func(context.Context, string, string) error
 type readConfigurationFunc func() (appservice.ServiceConfiguration, error)
 type updateServerConfigurationFunc func(appservice.UpdateServerConfigurationCommand) (appservice.ServiceConfiguration, error)
 type updateLLMConfigurationFunc func(appservice.UpdateLLMConfigurationCommand) (appservice.ServiceConfiguration, error)
+type updateWebSearchConfigurationFunc func(appservice.UpdateWebSearchConfigurationCommand) (appservice.ServiceConfiguration, error)
 
 type serverState struct {
 	config                          Config
@@ -562,6 +563,7 @@ type serverState struct {
 	readConfiguration               readConfigurationFunc
 	updateServerConfiguration       updateServerConfigurationFunc
 	updateLLMConfiguration          updateLLMConfigurationFunc
+	updateWebSearchConfiguration    updateWebSearchConfigurationFunc
 	runQueueMu                      sync.Mutex
 	runQueueWaiters                 []*runQueueWaiter
 	runQueueSequence                uint64
@@ -935,6 +937,24 @@ func registerSystemRoutes(router engine.RouteRegistry, state *serverState) {
 			return
 		}
 		item, err := state.updateLLMConfiguration(req)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, configurationResponse{
+			Service:       "workorch",
+			Configuration: item,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/configuration/web-search", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		state.metrics.configurationUpdateRequests.Add(1)
+		var req appservice.UpdateWebSearchConfigurationCommand
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		item, err := state.updateWebSearchConfiguration(req)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -2625,6 +2645,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		readConfiguration:               defaultReadConfiguration,
 		updateServerConfiguration:       appservice.UpdateServerConfiguration,
 		updateLLMConfiguration:          appservice.UpdateLLMConfiguration,
+		updateWebSearchConfiguration:    appservice.UpdateWebSearchConfiguration,
 	}
 	state.configureApplicationRuntimeSession()
 	state.configureSharedMemorySession()

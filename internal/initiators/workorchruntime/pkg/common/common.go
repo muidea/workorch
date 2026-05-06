@@ -53,6 +53,8 @@ type Helper interface {
 	SetShellRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
 	SSHRuntimeAdapter() orchestratorbiz.RuntimeAdapter
 	SetSSHRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
+	WebRuntimeAdapter() orchestratorbiz.RuntimeAdapter
+	SetWebRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
 	MCPRuntimeAdapter() orchestratorbiz.RuntimeAdapter
 	SetMCPRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
 	LLMRuntimeAdapter() *llmbiz.RuntimeAdapter

@@ -16,6 +16,7 @@ import (
 	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
+	webmodule "github.com/muidea/workorch/internal/modules/blocks/web"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
@@ -98,6 +99,7 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 		echoRuntimeAdapter{},
 		echoRuntimeAdapter{},
 		echoRuntimeAdapter{},
+		echoRuntimeAdapter{},
 	)
 	if err != nil {
 		t.Fatalf("build registry: %v", err)
@@ -109,6 +111,8 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 		filemodule.StepKindEdit,
 		shellmodule.StepKindCommand,
 		sshmodule.StepKindCommand,
+		webmodule.StepKindSearch,
+		webmodule.StepKindFetch,
 		mcpblockmodule.StepKindToolCall,
 		mcpblockmodule.StepKindResourceRead,
 		mcpblockmodule.StepKindPromptGet,

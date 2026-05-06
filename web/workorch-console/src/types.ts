@@ -8,6 +8,7 @@ export type ServiceConfiguration = {
   repository: RepositoryConfiguration;
   runtime: RuntimeConfiguration;
   llm: LLMConfiguration;
+  webSearch: WebSearchConfiguration;
 };
 
 export type ServerConfiguration = {
@@ -89,6 +90,64 @@ export type UpdateLLMProviderConfiguration = {
   chatCompletions?: boolean;
   streaming?: boolean;
   nonChatOperations?: string[];
+};
+
+export type WebSearchConfiguration = {
+  defaultProviderId?: string;
+  providers?: WebSearchProviderConfiguration[];
+  providerTemplates?: WebSearchProviderTemplate[];
+};
+
+export type WebSearchProviderConfiguration = {
+  id: string;
+  provider: string;
+  searchEndpoint?: string;
+  fetchEndpoint?: string;
+  timeout?: string;
+  maxResults?: number;
+  maxFetchBytes?: number;
+  maxRedirects?: number;
+  allowDomains?: string[];
+  denyDomains?: string[];
+  disabled: boolean;
+  ready: boolean;
+  reason?: string;
+  default: boolean;
+  apiKeyConfigured: boolean;
+};
+
+export type WebSearchProviderTemplate = {
+  templateId: string;
+  name: string;
+  description?: string;
+  id: string;
+  provider: string;
+  searchEndpoint?: string;
+  fetchEndpoint?: string;
+  timeout?: string;
+  maxResults?: number;
+  maxFetchBytes?: number;
+  maxRedirects?: number;
+};
+
+export type UpdateWebSearchConfigurationRequest = {
+  defaultProviderId?: string;
+  providers: UpdateWebSearchProviderConfiguration[];
+};
+
+export type UpdateWebSearchProviderConfiguration = {
+  id: string;
+  provider?: string;
+  searchEndpoint?: string;
+  fetchEndpoint?: string;
+  apiKey?: string;
+  timeout?: string;
+  maxResults?: number;
+  maxFetchBytes?: number;
+  maxRedirects?: number;
+  allowDomains?: string[];
+  denyDomains?: string[];
+  disabled?: boolean;
 };
 
 export type Workspace = {
@@ -462,6 +521,38 @@ export type Artifact = {
   updatedAt?: string;
 };
 
+export type WebSourceTrace = {
+  query?: string;
+  providerId?: string;
+  searchedAt?: string;
+  sources?: WebSource[];
+  fetchedSources?: FetchedWebSource[];
+  evidenceRefs?: string[];
+  approvalId?: string;
+  policyDecision?: string;
+};
+
+export type WebSource = {
+  title?: string;
+  url: string;
+  snippet?: string;
+  source?: string;
+  publishedAt?: string;
+  rank?: number;
+  evidenceRef?: string;
+};
+
+export type FetchedWebSource = {
+  url: string;
+  finalUrl?: string;
+  title?: string;
+  source?: string;
+  retrievedAt?: string;
+  contentHash?: string;
+  truncated?: boolean;
+  evidenceRef?: string;
+};
+
 export type RunProgress = {
   state: string;
   currentStepId?: string;
@@ -707,6 +798,7 @@ export type RunObservability = {
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];
   memoryRecallTraces?: MemoryRecallTrace[];
+  webSources?: WebSourceTrace[];
   evidence: RuntimeEvidenceSummary;
   latestCheckpoint?: RuntimeCheckpoint;
   selectedCapabilities?: RuntimeCapability[];
@@ -722,6 +814,7 @@ export type RunSnapshot = {
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];
   memoryRecallTraces?: MemoryRecallTrace[];
+  webSources?: WebSourceTrace[];
   steps?: StepView[];
   toolCalls?: ToolCall[];
   patches?: Patch[];
@@ -746,6 +839,7 @@ export type WorkspaceSnapshot = {
   results?: Result[];
   artifacts?: Artifact[];
   patches?: Patch[];
+  webSources?: WebSourceTrace[];
   eventRecords?: EventRecord[];
   decisions?: Decision[];
   approvals?: Approval[];

@@ -12,6 +12,7 @@ import (
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -247,6 +248,8 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "file/edit") ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "shell/command") ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "ssh/command") ||
+		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, webcommon.StepKindSearch) ||
+		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, webcommon.StepKindFetch) ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchPreview) ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchApply) ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchRevert) ||

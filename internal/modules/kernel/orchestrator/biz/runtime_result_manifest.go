@@ -124,7 +124,7 @@ func writePatchEvidenceSection(builder *strings.Builder, patchDetails []resultPa
 	}
 }
 
-func expectedCompletionArtifactRefs(run *runModel.Run, patchDetails []resultPatchDetail) []common.ArtifactID {
+func expectedCompletionArtifactRefs(run *runModel.Run, patchDetails []resultPatchDetail, webSourceDetails []resultWebSourceDetail) []common.ArtifactID {
 	if run == nil || run.ID == "" {
 		return nil
 	}
@@ -134,6 +134,9 @@ func expectedCompletionArtifactRefs(run *runModel.Run, patchDetails []resultPatc
 	}
 	if hasPatchDeliverableContent(patchDetails) {
 		ret = append(ret, patchDiffArtifactID(run))
+	}
+	if len(webSourceDetails) > 0 {
+		ret = append(ret, webSourceIndexArtifactID(run))
 	}
 	return ret
 }
