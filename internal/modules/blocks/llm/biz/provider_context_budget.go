@@ -1,0 +1,265 @@
+package llm
+
+import (
+	"encoding/json"
+	"sort"
+	"strings"
+
+	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+)
+
+const (
+	defaultProviderRequestBudgetBytes = 96 * 1024
+	providerBudgetStringBytes         = 2048
+	providerBudgetAggressiveBytes     = 768
+	providerBudgetSliceItems          = 12
+	providerBudgetAggressiveItems     = 6
+	providerBudgetMapEntries          = 24
+	providerBudgetAggressiveEntries   = 12
+)
+
+func enforceProviderRequestBudget(request llmmodels.ProviderRequest) llmmodels.ProviderRequest {
+	return enforceProviderRequestBudgetLimit(request, defaultProviderRequestBudgetBytes)
+}
+
+func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxBytes int) llmmodels.ProviderRequest {
+	if maxBytes <= 0 {
+		maxBytes = defaultProviderRequestBudgetBytes
+	}
+	rules := []string{"preserve identifiers, schema, config, runtime capabilities, goal, DoD, and governance decisions"}
+	request.ContextBudget = nil
+	if providerRequestJSONBytes(request) > maxBytes {
+		request.Input = budgetProviderInput(request.Input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
+		rules = append(rules, "compact provider input")
+	}
+	if providerRequestJSONBytes(request) > maxBytes {
+		request.Input = compactProviderExecutionContext(request.Input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries)
+		rules = append(rules, "summarize execution context transport fields")
+	}
+	if providerRequestJSONBytes(request) > maxBytes {
+		request.Input = budgetProviderInput(request.Input, providerBudgetAggressiveBytes, providerBudgetAggressiveItems, providerBudgetAggressiveEntries, 3)
+		rules = append(rules, "apply aggressive provider input budget")
+	}
+	if providerRequestJSONBytes(request) > maxBytes {
+		request.Input = minimalProviderInput(request.Input)
+		rules = append(rules, "fallback to minimal provider input")
+	}
+	actual := providerRequestJSONBytes(request)
+	request.ContextBudget = &llmmodels.ProviderContextBudget{
+		MaxBytes:    maxBytes,
+		ActualBytes: actual,
+		Truncated:   len(rules) > 1 || actual > maxBytes,
+		Rules:       rules,
+	}
+	return request
+}
+
+func providerRequestJSONBytes(request llmmodels.ProviderRequest) int {
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return 0
+	}
+	return len(payload)
+}
+
+func budgetProviderInput(input map[string]any, stringLimit, itemLimit, entryLimit, maxDepth int) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	value, _ := budgetProviderValue(input, 0, stringLimit, itemLimit, entryLimit, maxDepth).(map[string]any)
+	return value
+}
+
+func budgetProviderValue(value any, depth int, stringLimit, itemLimit, entryLimit, maxDepth int) any {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case string:
+		return truncateProviderBudgetString(typed, stringLimit)
+	case map[string]any:
+		if depth >= maxDepth {
+			return providerBudgetLeafSummary(typed, stringLimit, entryLimit)
+		}
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		out := make(map[string]any, min(len(keys), entryLimit))
+		for _, key := range keys {
+			if len(out) >= entryLimit {
+				break
+			}
+			out[key] = budgetProviderValue(typed[key], depth+1, stringLimit, itemLimit, entryLimit, maxDepth)
+		}
+		if len(keys) > entryLimit {
+			out["_truncatedEntryCount"] = len(keys) - entryLimit
+		}
+		return out
+	case []map[string]any:
+		limit := min(len(typed), itemLimit)
+		out := make([]any, 0, limit)
+		for idx := 0; idx < limit; idx++ {
+			out = append(out, budgetProviderValue(typed[idx], depth+1, stringLimit, itemLimit, entryLimit, maxDepth))
+		}
+		return out
+	case []any:
+		limit := min(len(typed), itemLimit)
+		out := make([]any, 0, limit)
+		for idx := 0; idx < limit; idx++ {
+			out = append(out, budgetProviderValue(typed[idx], depth+1, stringLimit, itemLimit, entryLimit, maxDepth))
+		}
+		return out
+	case []string:
+		limit := min(len(typed), itemLimit)
+		out := make([]string, 0, limit)
+		for idx := 0; idx < limit; idx++ {
+			out = append(out, truncateProviderBudgetString(typed[idx], stringLimit))
+		}
+		return out
+	default:
+		return typed
+	}
+}
+
+func providerBudgetLeafSummary(input map[string]any, stringLimit, entryLimit int) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(input))
+	for key := range input {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make(map[string]any, min(len(keys), entryLimit))
+	for _, key := range keys {
+		if len(out) >= entryLimit {
+			break
+		}
+		switch typed := input[key].(type) {
+		case string:
+			out[key] = truncateProviderBudgetString(typed, stringLimit)
+		case []string:
+			out[key] = len(typed)
+		case []any:
+			out[key] = len(typed)
+		case []map[string]any:
+			out[key] = len(typed)
+		case map[string]any:
+			out[key] = len(typed)
+		default:
+			out[key] = typed
+		}
+	}
+	return out
+}
+
+func compactProviderExecutionContext(input map[string]any, stringLimit, itemLimit, entryLimit int) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	out := budgetProviderInput(input, stringLimit, itemLimit, entryLimit, 4)
+	executionContext := recordFromAny(out["executionContext"])
+	if len(executionContext) > 0 {
+		compactSoulRouting(executionContext)
+		compactNamedMapSlice(executionContext, "governanceHistory", itemLimit)
+		compactNamedMapSlice(executionContext, "goals", itemLimit)
+		compactNamedMapSlice(executionContext, "dods", itemLimit)
+		out["executionContext"] = executionContext
+	}
+	compactSoulRouting(out)
+	return out
+}
+
+func compactSoulRouting(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	if soul := recordFromAny(input["currentSoul"]); len(soul) > 0 {
+		input["currentSoul"] = compactSoulMap(soul)
+	}
+	if soul := recordFromAny(input["soul"]); len(soul) > 0 {
+		input["soul"] = compactSoulMap(soul)
+	}
+	if binding := recordFromAny(input["currentSoulBinding"]); len(binding) > 0 {
+		if soul := recordFromAny(binding["soul"]); len(soul) > 0 {
+			binding["soul"] = compactSoulMap(soul)
+		}
+		input["currentSoulBinding"] = binding
+	}
+	routing := recordFromAny(input["soulRouting"])
+	if len(routing) == 0 {
+		return
+	}
+	bindings := recordFromAny(routing["bindings"])
+	for stage, value := range bindings {
+		binding := recordFromAny(value)
+		if len(binding) == 0 {
+			continue
+		}
+		if soul := recordFromAny(binding["soul"]); len(soul) > 0 {
+			binding["soul"] = compactSoulMap(soul)
+		}
+		bindings[stage] = binding
+	}
+	routing["bindings"] = bindings
+	input["soulRouting"] = routing
+}
+
+func compactSoulMap(soul map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, key := range []string{"id", "name", "description", "allowedToolKinds", "allowedMCPServerRefs", "allowedSkillRefs", "businessDomains"} {
+		if value, ok := soul[key]; ok {
+			out[key] = budgetProviderValue(value, 0, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 3)
+		}
+	}
+	if md := strings.TrimSpace(stringValue(soul["soulMd"])); md != "" {
+		out["soulMdSummary"] = truncateProviderBudgetString(md, 1024)
+	}
+	return out
+}
+
+func compactNamedMapSlice(input map[string]any, key string, limit int) {
+	items, ok := input[key].([]any)
+	if !ok || len(items) <= limit {
+		return
+	}
+	input[key] = items[:limit]
+	input[key+"TruncatedCount"] = len(items) - limit
+}
+
+func minimalProviderInput(input map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, key := range []string{
+		"workspaceId", "goalId", "doDId", "previousStepId", "currentSoulStage",
+		"runtimeRepairFollowUp", "runtimeRepairAttempt", "providerRetryFollowUp", "providerRetryAttempt",
+		"completionFollowUp", "graphFollowUp", "failureReason", "failureClass", "failureSignature",
+	} {
+		if value, ok := input[key]; ok {
+			out[key] = budgetProviderValue(value, 0, providerBudgetAggressiveBytes, providerBudgetAggressiveItems, providerBudgetAggressiveEntries, 2)
+		}
+	}
+	if executionContext := recordFromAny(input["executionContext"]); len(executionContext) > 0 {
+		compact := map[string]any{}
+		for _, key := range []string{"goal", "goals", "dod", "dods", "governanceHistory", "dialogLanguage", "goalDefinitionPolicy", "doDDefinitionPolicy", "memoryRetrieval", "skillSelection"} {
+			if value, ok := executionContext[key]; ok {
+				compact[key] = budgetProviderValue(value, 0, providerBudgetAggressiveBytes, providerBudgetAggressiveItems, providerBudgetAggressiveEntries, 2)
+			}
+		}
+		out["executionContext"] = compact
+	}
+	for _, key := range []string{"decisionResolution", "failedStepInput", "failedStepOutput", "failedExecutionGraph", "graphEvidence"} {
+		if value, ok := input[key]; ok {
+			out[key] = budgetProviderValue(value, 0, providerBudgetAggressiveBytes, providerBudgetAggressiveItems, providerBudgetAggressiveEntries, 2)
+		}
+	}
+	return out
+}
+
+func truncateProviderBudgetString(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "..."
+}

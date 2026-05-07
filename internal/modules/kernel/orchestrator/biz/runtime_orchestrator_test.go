@@ -4673,6 +4673,158 @@ func TestRuntimeOrchestrator_DoesNotRepairLLMProviderError(t *testing.T) {
 	}
 }
 
+func TestRuntimeOrchestrator_RetriesLLMProviderTimeoutBeforeFailingRun(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	attempts := 0
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		attempts++
+		if attempts <= maxProviderRetryAttempts {
+			return map[string]any{
+				"status": "failed",
+				"stage":  "llm_provider_error",
+				"error":  "invalid argument: openai llm provider error: context deadline exceeded",
+			}, fmt.Errorf("%w: openai llm provider error: context deadline exceeded", common.ErrInvalidArgument)
+		}
+		if request.Input[stepInputKeyProviderRetryFollowUp] != true || request.Input[stepInputKeyProviderRetryAttempt] != maxProviderRetryAttempts {
+			t.Fatalf("provider retry input = %+v, want final retry metadata", request.Input)
+		}
+		return map[string]any{
+			"status": "completed",
+			"dodAssessment": map[string]any{
+				"satisfied":   true,
+				"summary":     "provider recovered and work completed",
+				"goalOutcome": "provider recovered and work completed",
+				"items": []map[string]any{{
+					"item":         "work completes",
+					"state":        "satisfied",
+					"evidenceRefs": []string{string(request.StepID)},
+				}},
+			},
+		}, nil
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			Results:            memory.NewResultRepository(),
+			Artifacts:          memory.NewArtifactRepository(),
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-llm-provider-timeout-retry")
+	runID := common.RunID("run-llm-provider-timeout-retry")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-llm-provider-timeout-retry"),
+		State:           common.RunStateCreated,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run = %+v, want completed after provider retry", runItem)
+	}
+	if attempts != maxProviderRetryAttempts+1 {
+		t.Fatalf("attempts = %d, want initial + retries", attempts)
+	}
+}
+
+func TestRuntimeOrchestrator_BlocksOnDecisionAfterProviderTimeoutRetriesExhausted(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		return map[string]any{
+			"status": "failed",
+			"stage":  "llm_provider_error",
+			"error":  "invalid argument: openai llm provider error: context deadline exceeded",
+		}, fmt.Errorf("%w: openai llm provider error: context deadline exceeded", common.ErrInvalidArgument)
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-llm-provider-timeout-block")
+	runID := common.RunID("run-llm-provider-timeout-block")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-llm-provider-timeout-block"),
+		State:           common.RunStateCreated,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: map[string]any{
+			"dialogLanguage": "zh-CN",
+		},
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateBlockedOnDecision || runItem.BlockingTicketID == "" {
+		t.Fatalf("run = %+v, want blocked on provider recovery decision", runItem)
+	}
+	ticket, err := ticketRepo.Get(ctx, runItem.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("get ticket: %v", err)
+	}
+	if ticket.State != common.DecisionTicketStateOpen || ticket.Context["attempts"] != maxProviderRetryAttempts {
+		t.Fatalf("ticket = %+v, want provider retry exhaustion context", ticket)
+	}
+	if !strings.Contains(ticket.Question, "LLM provider") {
+		t.Fatalf("ticket question = %q, want provider recovery prompt", ticket.Question)
+	}
+}
+
 func TestRuntimeOrchestrator_BlocksOnDuplicateRuntimeFailureSignature(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

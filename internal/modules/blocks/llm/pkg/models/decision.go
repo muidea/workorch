@@ -13,7 +13,15 @@ type ProviderRequest struct {
 	RuntimeCapabilities RuntimeCapabilities    `json:"runtimeCapabilities,omitempty"`
 	TraceRefs           map[string]string      `json:"traceRefs,omitempty"`
 	Config              RedactedProviderConfig `json:"config"`
+	ContextBudget       *ProviderContextBudget `json:"contextBudget,omitempty"`
 	Repair              *ProviderRepairRequest `json:"repair,omitempty"`
+}
+
+type ProviderContextBudget struct {
+	MaxBytes    int      `json:"maxBytes"`
+	ActualBytes int      `json:"actualBytes"`
+	Truncated   bool     `json:"truncated"`
+	Rules       []string `json:"rules,omitempty"`
 }
 
 type ProviderRepairRequest struct {

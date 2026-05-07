@@ -73,6 +73,15 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 	failedStep *runModel.Step,
 	execErr error,
 ) error {
+	if o.shouldAttemptProviderRetry(ctx, run, failedStep) {
+		rootStepID := providerRetryRootStepID(failedStep)
+		attempt := o.providerRetryAttemptCount(ctx, run.ID, rootStepID) + 1
+		input := providerRetryStepInput(failedStep, attempt, execErr)
+		return o.dispatchStep(ctx, run, providerRetryStepID(rootStepID, attempt), failedStep.Kind, input)
+	}
+	if o.shouldBlockOnProviderRetryExhaustion(ctx, run, failedStep) {
+		return o.blockOnProviderRetryExhaustion(ctx, run, failedStep, execErr)
+	}
 	if o.shouldBlockOnDuplicateRuntimeFailure(ctx, run, failedStep) {
 		return o.blockOnDuplicateRuntimeFailure(ctx, run, failedStep, execErr)
 	}
@@ -152,6 +161,114 @@ func (o *RuntimeOrchestrator) shouldAttemptRuntimeRepair(ctx context.Context, ru
 		return false
 	}
 	return !isLLMProviderRuntimeFailure(run, failedStep)
+}
+
+func (o *RuntimeOrchestrator) shouldAttemptProviderRetry(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
+	if o == nil || run == nil || failedStep == nil || o.runtime == nil || o.steps == nil {
+		return false
+	}
+	if !isRetryableLLMProviderRuntimeFailure(run, failedStep) {
+		return false
+	}
+	return o.providerRetryAttemptCount(ctx, run.ID, providerRetryRootStepID(failedStep)) < maxProviderRetryAttempts
+}
+
+func (o *RuntimeOrchestrator) shouldBlockOnProviderRetryExhaustion(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
+	if o == nil || run == nil || failedStep == nil || o.tickets == nil {
+		return false
+	}
+	if !isRetryableLLMProviderRuntimeFailure(run, failedStep) {
+		return false
+	}
+	return o.providerRetryAttemptCount(ctx, run.ID, providerRetryRootStepID(failedStep)) >= maxProviderRetryAttempts
+}
+
+func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	execErr error,
+) error {
+	if run == nil || failedStep == nil {
+		return common.ErrInvalidArgument
+	}
+	language := runDialogLanguage(run)
+	spec := runtimeDecisionBlockSpec{
+		TicketID:     common.TicketID(runtimeChildID(failedStep.ID, "provider-retry-exhausted-decision")),
+		Reason:       localizedProviderRetryExhaustionReason(language, maxProviderRetryAttempts, execErr),
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     localizedProviderRetryExhaustionQuestion(language),
+		Context: map[string]any{
+			"attempts":         maxProviderRetryAttempts,
+			"failureClass":     stringFromMap(failedStep.Output, failureOutputKeyClass),
+			"failureSignature": stringFromMap(failedStep.Output, failureOutputKeySignature),
+			"failedStepId":     string(failedStep.ID),
+			"failedStepKind":   failedStep.Kind,
+			"failedStepInput":  compactStepInputForLLMContext(failedStep.Input),
+			"failedStepOutput": compactStepOutputForLLMContext(failedStep.Output),
+		},
+	}
+	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
+		return err
+	}
+	return o.BlockOnDecision(ctx, run.ID, spec.TicketID)
+}
+
+func (o *RuntimeOrchestrator) providerRetryAttemptCount(ctx context.Context, runID common.RunID, rootStepID common.StepID) int {
+	if o == nil || o.steps == nil || runID == "" || rootStepID == "" {
+		return 0
+	}
+	steps, err := o.steps.ListByRun(ctx, runID)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, step := range steps {
+		if step != nil && boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) && providerRetryRootStepID(step) == rootStepID {
+			count++
+		}
+	}
+	return count
+}
+
+func providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr error) map[string]any {
+	input := cloneStepPayload(failedStep.Input)
+	if input == nil {
+		input = map[string]any{}
+	}
+	rootStepID := providerRetryRootStepID(failedStep)
+	input[stepInputKeyProviderRetryFollowUp] = true
+	input[stepInputKeyProviderRetryAttempt] = attempt
+	input["maxProviderRetryAttempts"] = maxProviderRetryAttempts
+	input["failedStepId"] = string(rootStepID)
+	input["failedStepKind"] = failedStep.Kind
+	input["failedStepState"] = string(failedStep.State)
+	input["failedStepOutput"] = compactStepOutputForLLMContext(failedStep.Output)
+	input["failureReason"] = errorString(execErr)
+	input[failureOutputKeyClass] = stringFromMap(failedStep.Output, failureOutputKeyClass)
+	input[failureOutputKeySignature] = stringFromMap(failedStep.Output, failureOutputKeySignature)
+	return input
+}
+
+func providerRetryStepID(rootStepID common.StepID, attempt int) common.StepID {
+	return common.StepID(runtimeChildID(rootStepID, fmt.Sprintf("provider-retry-%d", attempt)))
+}
+
+func providerRetryRootStepID(step *runModel.Step) common.StepID {
+	if step == nil {
+		return ""
+	}
+	if root := common.StepID(stringFromMap(step.Input, "failedStepId")); root != "" {
+		return root
+	}
+	return step.ID
+}
+
+func isRetryableLLMProviderRuntimeFailure(run *runModel.Run, step *runModel.Step) bool {
+	if !isLLMProviderRuntimeFailure(run, step) {
+		return false
+	}
+	return stringFromMap(step.Output, failureOutputKeyClass) == failureClassProviderTimeout
 }
 
 func isLLMProviderRuntimeFailure(run *runModel.Run, step *runModel.Step) bool {

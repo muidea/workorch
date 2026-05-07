@@ -1403,7 +1403,7 @@ func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels
 	enrichProviderInputWithSoulRouting(input)
 	systemLocale := currentSystemLocale()
 	dialogLanguage := inferDialogLanguage(input, systemLocale)
-	return llmmodels.ProviderRequest{
+	providerReq := llmmodels.ProviderRequest{
 		WorkspaceID:         string(request.WorkspaceID),
 		RunID:               string(request.RunID),
 		StepID:              string(request.StepID),
@@ -1421,6 +1421,7 @@ func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels
 		},
 		Config: RedactedProviderConfig(config),
 	}
+	return enforceProviderRequestBudget(providerReq)
 }
 
 func currentSystemLocale() string {

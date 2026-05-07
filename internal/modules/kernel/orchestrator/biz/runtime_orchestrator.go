@@ -42,6 +42,8 @@ const (
 	stepInputKeySoulStage              = "soulStage"
 	stepInputKeyRuntimeRepairFollowUp  = "runtimeRepairFollowUp"
 	stepInputKeyRuntimeRepairAttempt   = "runtimeRepairAttempt"
+	stepInputKeyProviderRetryFollowUp  = "providerRetryFollowUp"
+	stepInputKeyProviderRetryAttempt   = "providerRetryAttempt"
 	stepOutputKeyBlockDecisionReason   = "blockDecisionReason"
 	stepOutputKeyBlockDecisionTicketID = "blockDecisionTicketId"
 	stepOutputKeyBlockDecisionKind     = "blockDecisionKind"
@@ -59,6 +61,7 @@ const (
 	soulStageApproval                  = "approval"
 	soulStageValidation                = "validation"
 	maxRuntimeRepairAttempts           = 3
+	maxProviderRetryAttempts           = 2
 )
 
 type RuntimeOrchestrator struct {
