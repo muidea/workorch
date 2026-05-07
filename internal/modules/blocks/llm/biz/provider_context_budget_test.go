@@ -140,6 +140,74 @@ func TestEnforceProviderRequestBudgetCompactsWhenTokenBudgetExceeded(t *testing.
 	}
 }
 
+func TestMinimalProviderInputUsesStageAwareExecutionContext(t *testing.T) {
+	input := map[string]any{
+		"currentSoulStage": "validation",
+		"executionContext": map[string]any{
+			"goal":              map[string]any{"text": "goal"},
+			"dod":               map[string]any{"items": []any{"must pass"}},
+			"dods":              []any{"d1", "d2"},
+			"governanceHistory": []any{map[string]any{"id": "g1"}, map[string]any{"id": "g2"}},
+			"workspaceManifest": map[string]any{"id": "manifest"},
+			"skillSelection":    map[string]any{"reason": "planner"},
+		},
+	}
+	out := minimalProviderInput(input)
+	exec := recordFromAny(out["executionContext"])
+	if len(recordFromAny(exec["goal"])) == 0 || len(recordFromAny(exec["dod"])) == 0 {
+		t.Fatalf("executionContext = %+v, want goal/dod preserved", exec)
+	}
+	if _, ok := exec["workspaceManifest"]; ok {
+		t.Fatalf("executionContext = %+v, workspaceManifest should be omitted for validation stage", exec)
+	}
+	if _, ok := exec["skillSelection"]; ok {
+		t.Fatalf("executionContext = %+v, skillSelection should be omitted for validation stage", exec)
+	}
+}
+
+func TestEnforceProviderRequestBudgetAdaptiveShrinkForProviderRetry(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-retry",
+		RunID:       "run-retry",
+		StepID:      "run-retry/step-1",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"currentSoulStage":      "execution",
+			"providerRetryFollowUp": true,
+			"providerRetryAttempt":  2,
+			"failureClass":          "provider_timeout",
+			"failedExecutionGraph":  repeatedBudgetItems(80),
+			"workspaceFileManifest": repeatedBudgetItems(80),
+			"executionContext": map[string]any{
+				"goal": strings.Repeat("goal ", 200),
+				"dod":  strings.Repeat("dod ", 200),
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    8192,
+				MaxInputTokens:         512,
+				ReservedOutputTokens:   1024,
+				SafetyRatio:            0.8,
+				BytesHardLimit:         256 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget metadata missing")
+	}
+	if got.ContextBudget.ShrinkLevel < 4 {
+		t.Fatalf("contextBudget = %+v, want adaptive shrink level >=4 on retry attempt 2", got.ContextBudget)
+	}
+	if len(got.ContextBudget.Rules) < 2 || got.ContextBudget.Rules[1] != "adaptive shrink based on provider retry" {
+		t.Fatalf("contextBudget rules = %+v, want adaptive shrink rule", got.ContextBudget.Rules)
+	}
+}
+
 func repeatedBudgetItems(count int) []any {
 	out := make([]any, 0, count)
 	for idx := 0; idx < count; idx++ {

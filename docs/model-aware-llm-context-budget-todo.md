@@ -39,6 +39,15 @@
   - 使用 `contextWindowTokens`、`reservedOutputTokens`、`maxInputTokens`、`safetyRatio`、`bytesHardLimit`
   - 使用 `estimatedTokensPerByte` 做保守 token 估算
   - token 超预算时触发同一套分层收缩
+- `CTX-03 Priority-Based Context Compaction` 已收口基础版：
+  - 收缩阶段引入 `P0/P1/P2` 优先级保留策略
+  - 在深度收缩阶段优先保留 Goal/DoD/治理与运行态关键字段
+- `CTX-04 Stage-Aware Context Budget` 已收口基础版：
+  - `planning/execution/decision/approval/validation/artifact` 使用不同的 executionContext 保留键集
+  - 深度收缩阶段保留 stage 关键上下文，避免无差别截断
+- `CTX-05 Adaptive Shrink on Provider Failure` 已收口基础版：
+  - `provider_timeout` 重试链路按 `providerRetryAttempt` 递进触发预收缩
+  - 第 2 次及以上重试默认直接进入更激进上下文收缩层级
 - 已补充受影响测试：
   - `internal/modules/blocks/llm/biz`
   - `internal/pkg/workorchconfig`
@@ -46,8 +55,6 @@
 ### 未完全收口，需要纳入下一轮
 
 - 当前仍未接入真实 tokenizer 或 provider 原生 token usage。
-- 当前压缩规则是基础启发式压缩，尚未形成明确的 P0/P1/P2/P3 优先级策略。
-- provider retry 时尚未根据失败次数递进 shrink level。
 - context budget 元数据尚未完整投影到 run snapshot、web、TUI 和可观测视图。
 - 被裁剪内容尚未统一生成结构化 sourceRefs，追溯能力还不完整。
 - 尚未支持 context-too-large 与 provider timeout 的差异化治理策略。
@@ -259,4 +266,4 @@
 - 已验证：受影响范围测试通过：
   - `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorch/service/tui -count=1`
 - 前置能力：固定 bytes 预算和 provider timeout retry 已完成基础收口。
-- 主要遗留：优先级压缩、adaptive shrink、sourceRefs 追溯、read model 投影、provider failover、多入口治理语义归一、streaming progress event、workspace usage/cost ledger、真实 tokenizer/原生 token usage。
+- 主要遗留：sourceRefs 追溯、read model 投影、provider failover、多入口治理语义归一、streaming progress event、workspace usage/cost ledger、真实 tokenizer/原生 token usage。
