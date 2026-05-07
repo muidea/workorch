@@ -39,10 +39,21 @@ func TestLoadProviderConfigAcceptsCompatibleProvider(t *testing.T) {
 	if !cfg.Capabilities.ChatCompletions || cfg.Capabilities.Streaming || len(cfg.Capabilities.NonChatOperations) != 0 {
 		t.Fatalf("capabilities = %+v, want default chat completions only", cfg.Capabilities)
 	}
+	if cfg.ContextProfile.ContextWindowTokens != defaultContextWindowTokens ||
+		cfg.ContextProfile.MaxInputTokens != defaultContextWindowTokens-defaultReservedOutputTokens ||
+		cfg.ContextProfile.ReservedOutputTokens != defaultReservedOutputTokens ||
+		cfg.ContextProfile.SafetyRatio != defaultContextSafetyRatio ||
+		cfg.ContextProfile.BytesHardLimit != defaultContextBytesHardLimit ||
+		cfg.ContextProfile.EstimatedTokensPerByte != defaultEstimatedTokensPerByte {
+		t.Fatalf("context profile = %+v, want normalized defaults", cfg.ContextProfile)
+	}
 
 	redacted := RedactedProviderConfig(cfg)
 	if !redacted.Ready || redacted.Model != "local-model" || !redacted.Capabilities.ChatCompletions {
 		t.Fatalf("redacted config = %+v, want ready local-model", redacted)
+	}
+	if redacted.ContextProfile.ContextWindowTokens != defaultContextWindowTokens {
+		t.Fatalf("redacted context profile = %+v, want exported profile", redacted.ContextProfile)
 	}
 }
 
@@ -115,6 +126,43 @@ func TestLoadProviderConfigRejectsInvalidTimeout(t *testing.T) {
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("load invalid timeout err = %v, want invalid argument", err)
+	}
+}
+
+func TestLoadProviderConfigParsesContextProfile(t *testing.T) {
+	cfg, err := LoadProviderConfig("reasoning", map[string]string{
+		llmcommon.EnvProvider:       llmcommon.ProviderOpenAI,
+		llmcommon.EnvAPIKey:         "reasoning-secret",
+		llmcommon.EnvModel:          "reasoning-model",
+		llmcommon.EnvContextWindow:  "128000",
+		llmcommon.EnvMaxInputTokens: "64000",
+		llmcommon.EnvReservedOutput: "8000",
+		llmcommon.EnvSafetyRatio:    "0.85",
+		llmcommon.EnvBytesHardLimit: "262144",
+		llmcommon.EnvTokensPerByte:  "0.22",
+	})
+	if err != nil {
+		t.Fatalf("load provider config: %v", err)
+	}
+	if cfg.ContextProfile.ContextWindowTokens != 128000 ||
+		cfg.ContextProfile.MaxInputTokens != 64000 ||
+		cfg.ContextProfile.ReservedOutputTokens != 8000 ||
+		cfg.ContextProfile.SafetyRatio != 0.85 ||
+		cfg.ContextProfile.BytesHardLimit != 262144 ||
+		cfg.ContextProfile.EstimatedTokensPerByte != 0.22 {
+		t.Fatalf("context profile = %+v, want parsed values", cfg.ContextProfile)
+	}
+}
+
+func TestLoadProviderConfigRejectsInvalidContextProfile(t *testing.T) {
+	_, err := LoadProviderConfig("reasoning", map[string]string{
+		llmcommon.EnvProvider:      llmcommon.ProviderOpenAI,
+		llmcommon.EnvAPIKey:        "reasoning-secret",
+		llmcommon.EnvModel:         "reasoning-model",
+		llmcommon.EnvContextWindow: "bad",
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("load invalid context profile err = %v, want invalid argument", err)
 	}
 }
 

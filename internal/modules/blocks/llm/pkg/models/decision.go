@@ -18,10 +18,32 @@ type ProviderRequest struct {
 }
 
 type ProviderContextBudget struct {
-	MaxBytes    int      `json:"maxBytes"`
-	ActualBytes int      `json:"actualBytes"`
-	Truncated   bool     `json:"truncated"`
-	Rules       []string `json:"rules,omitempty"`
+	MaxBytes              int                    `json:"maxBytes"`
+	ActualBytes           int                    `json:"actualBytes"`
+	MaxTokens             int                    `json:"maxTokens,omitempty"`
+	EstimatedInputTokens  int                    `json:"estimatedInputTokens,omitempty"`
+	EstimatedOutputTokens int                    `json:"estimatedOutputTokens,omitempty"`
+	ActualTokens          int                    `json:"actualTokens,omitempty"`
+	ShrinkLevel           int                    `json:"shrinkLevel,omitempty"`
+	Truncated             bool                   `json:"truncated"`
+	Rules                 []string               `json:"rules,omitempty"`
+	Estimator             string                 `json:"estimator,omitempty"`
+	Profile               ProviderContextProfile `json:"profile,omitempty"`
+}
+
+type ProviderContextProfile struct {
+	ContextWindowTokens    int     `json:"contextWindowTokens,omitempty"`
+	MaxInputTokens         int     `json:"maxInputTokens,omitempty"`
+	ReservedOutputTokens   int     `json:"reservedOutputTokens,omitempty"`
+	SafetyRatio            float64 `json:"safetyRatio,omitempty"`
+	BytesHardLimit         int     `json:"bytesHardLimit,omitempty"`
+	EstimatedTokensPerByte float64 `json:"estimatedTokensPerByte,omitempty"`
+}
+
+type ProviderUsage struct {
+	InputTokens  int `json:"inputTokens,omitempty"`
+	OutputTokens int `json:"outputTokens,omitempty"`
+	TotalTokens  int `json:"totalTokens,omitempty"`
 }
 
 type ProviderRepairRequest struct {

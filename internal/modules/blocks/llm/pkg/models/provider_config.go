@@ -11,6 +11,7 @@ type ProviderConfig struct {
 	Timeout           time.Duration
 	Disabled          bool
 	Capabilities      ProviderCapabilities
+	ContextProfile    ProviderContextProfile
 	Unavailable       bool
 	UnavailableReason string
 }
@@ -40,13 +41,14 @@ type ProviderEmbeddingResult struct {
 }
 
 type RedactedProviderConfig struct {
-	ID           string               `json:"id,omitempty"`
-	Provider     string               `json:"provider,omitempty"`
-	BaseURL      string               `json:"baseUrl,omitempty"`
-	Model        string               `json:"model,omitempty"`
-	Timeout      string               `json:"timeout,omitempty"`
-	Disabled     bool                 `json:"disabled"`
-	Ready        bool                 `json:"ready"`
-	Reason       string               `json:"reason,omitempty"`
-	Capabilities ProviderCapabilities `json:"capabilities"`
+	ID             string                 `json:"id,omitempty"`
+	Provider       string                 `json:"provider,omitempty"`
+	BaseURL        string                 `json:"baseUrl,omitempty"`
+	Model          string                 `json:"model,omitempty"`
+	Timeout        string                 `json:"timeout,omitempty"`
+	Disabled       bool                   `json:"disabled"`
+	Ready          bool                   `json:"ready"`
+	Reason         string                 `json:"reason,omitempty"`
+	Capabilities   ProviderCapabilities   `json:"capabilities"`
+	ContextProfile ProviderContextProfile `json:"contextProfile,omitempty"`
 }

@@ -36,6 +36,12 @@ timeout = "60s"
 chatCompletions = true
 streaming = true
 nonChatOperations = ["embeddings"]
+contextWindowTokens = 32768
+maxInputTokens = 16384
+reservedOutputTokens = 4096
+safetyRatio = 0.8
+bytesHardLimit = 98304
+estimatedTokensPerByte = 0.25
 	disabled = false
 
 [webSearch]
@@ -102,6 +108,14 @@ maxRepeatedSamePrompt = 1
 		cfg.LLM.Providers["local"].NonChatOperations[0] != "embeddings" {
 		t.Fatalf("llm provider capabilities = %+v, want streaming embeddings", cfg.LLM.Providers["local"])
 	}
+	if cfg.LLM.Providers["local"].ContextWindowTokens != 32768 ||
+		cfg.LLM.Providers["local"].MaxInputTokens != 16384 ||
+		cfg.LLM.Providers["local"].ReservedOutputTokens != 4096 ||
+		cfg.LLM.Providers["local"].SafetyRatio != 0.8 ||
+		cfg.LLM.Providers["local"].BytesHardLimit != 98304 ||
+		cfg.LLM.Providers["local"].EstimatedTokensPerByte != 0.25 {
+		t.Fatalf("llm provider profile = %+v, want context profile values", cfg.LLM.Providers["local"])
+	}
 	if cfg.WebSearch.DefaultProvider != "search" ||
 		cfg.WebSearch.Providers["search"].SearchEndpoint != "https://search.example.test/search" ||
 		cfg.WebSearch.Providers["search"].Headers["X-WorkOrch-Client"] != "workorch" {
@@ -136,6 +150,12 @@ baseURL = "http://127.0.0.1:11434/v1"
 apiKey = "local-key"
 model = "local-model"
 timeout = "60s"
+contextWindowTokens = 32768
+maxInputTokens = 16384
+reservedOutputTokens = 4096
+safetyRatio = 0.8
+bytesHardLimit = 98304
+estimatedTokensPerByte = 0.25
 disabled = false
 	`)
 	_ = Close()
@@ -151,11 +171,17 @@ disabled = false
 	cfg.LLM.DefaultEmbeddingProvider = "reasoning"
 	cfg.LLM.Providers = map[string]LLMProviderConfig{
 		"reasoning": {
-			Provider: "openai",
-			APIKey:   "reasoning-key",
-			Model:    "reasoning-model",
-			Timeout:  "45s",
-			Disabled: &disabled,
+			Provider:               "openai",
+			APIKey:                 "reasoning-key",
+			Model:                  "reasoning-model",
+			Timeout:                "45s",
+			Disabled:               &disabled,
+			ContextWindowTokens:    64000,
+			MaxInputTokens:         32000,
+			ReservedOutputTokens:   4096,
+			SafetyRatio:            0.8,
+			BytesHardLimit:         131072,
+			EstimatedTokensPerByte: 0.25,
 		},
 	}
 	cfg.WebSearch.DefaultProvider = "search"
@@ -202,6 +228,11 @@ disabled = false
 		next.LLM.DefaultEmbeddingProvider != "reasoning" ||
 		next.LLM.Providers["reasoning"].Model != "reasoning-model" {
 		t.Fatalf("next config = %+v, want saved llm provider", next.LLM)
+	}
+	if next.LLM.Providers["reasoning"].ContextWindowTokens != 64000 ||
+		next.LLM.Providers["reasoning"].MaxInputTokens != 32000 ||
+		next.LLM.Providers["reasoning"].BytesHardLimit != 131072 {
+		t.Fatalf("next llm provider profile = %+v, want saved context profile", next.LLM.Providers["reasoning"])
 	}
 	if next.WebSearch.DefaultProvider != "search" ||
 		next.WebSearch.Providers["search"].FetchEndpoint != "https://search.example.test/fetch" {
@@ -259,21 +290,36 @@ func TestLLMProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 			DefaultProvider: "reasoning",
 			Providers: map[string]LLMProviderConfig{
 				"reasoning": {
-					Provider:          "openai",
-					BaseURL:           "https://example.test/v1",
-					APIKey:            "secret",
-					Model:             "model",
-					Timeout:           "30s",
-					Disabled:          &disabled,
-					Streaming:         &disabled,
-					NonChatOperations: []string{"embeddings"},
+					Provider:               "openai",
+					BaseURL:                "https://example.test/v1",
+					APIKey:                 "secret",
+					Model:                  "model",
+					Timeout:                "30s",
+					Disabled:               &disabled,
+					Streaming:              &disabled,
+					NonChatOperations:      []string{"embeddings"},
+					ContextWindowTokens:    32768,
+					MaxInputTokens:         8192,
+					ReservedOutputTokens:   2048,
+					SafetyRatio:            0.8,
+					BytesHardLimit:         65536,
+					EstimatedTokensPerByte: 0.25,
 				},
 			},
 		},
 	}
 
 	values := cfg.LLMProviderValues()
-	if values["provider"] != "openai" || values["disabled"] != "true" || values["streaming"] != "true" || values["nonChatOperations"] != "embeddings" {
+	if values["provider"] != "openai" ||
+		values["disabled"] != "true" ||
+		values["streaming"] != "true" ||
+		values["nonChatOperations"] != "embeddings" ||
+		values["contextWindowTokens"] != "32768" ||
+		values["maxInputTokens"] != "8192" ||
+		values["reservedOutputTokens"] != "2048" ||
+		values["safetyRatio"] != "0.8" ||
+		values["bytesHardLimit"] != "65536" ||
+		values["estimatedTokensPerByte"] != "0.25" {
 		t.Fatalf("provider values = %+v, want llm provider bridge values", values)
 	}
 	valueSets := cfg.LLMProviderValueSets()

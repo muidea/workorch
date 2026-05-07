@@ -29,11 +29,23 @@
 - 当前实现未引入具体业务场景硬编码，仍保持 WorkOrch 基础调度和编排能力中立。
 - 已补充 provider context budget 与 provider timeout retry 的单元测试。
 
+### 本轮新增收口
+
+- `CTX-01 Provider/Model Context Profile` 已接入配置链路：
+  - `workorchconfig.LLMProviderConfig`
+  - `llm.ProviderConfig`
+  - `RedactedProviderConfig`
+- `CTX-02 Token Budget Estimation` 已接入预算链路：
+  - 使用 `contextWindowTokens`、`reservedOutputTokens`、`maxInputTokens`、`safetyRatio`、`bytesHardLimit`
+  - 使用 `estimatedTokensPerByte` 做保守 token 估算
+  - token 超预算时触发同一套分层收缩
+- 已补充受影响测试：
+  - `internal/modules/blocks/llm/biz`
+  - `internal/pkg/workorchconfig`
+
 ### 未完全收口，需要纳入下一轮
 
-- 当前仍是固定 bytes 上限，不是 provider/model aware 的 token budget。
-- 尚未建立 provider/model context profile 配置，无法按不同 LLM 的 context window 动态调整。
-- 尚未接入 tokenizer 或等价 token 估算能力，无法准确控制输入 token。
+- 当前仍未接入真实 tokenizer 或 provider 原生 token usage。
 - 当前压缩规则是基础启发式压缩，尚未形成明确的 P0/P1/P2/P3 优先级策略。
 - provider retry 时尚未根据失败次数递进 shrink level。
 - context budget 元数据尚未完整投影到 run snapshot、web、TUI 和可观测视图。
@@ -243,8 +255,8 @@
 
 ## 当前状态
 
-- 状态：基础防护已收口，模型感知 context budget 仍待下一轮需求推进。
+- 状态：基础防护已收口，CTX-01/CTX-02 已完成本轮收口，剩余项待下一轮需求推进。
 - 已验证：受影响范围测试通过：
   - `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorch/service/tui -count=1`
 - 前置能力：固定 bytes 预算和 provider timeout retry 已完成基础收口。
-- 主要遗留：provider/model profile、token budget、优先级压缩、adaptive shrink、sourceRefs 追溯、read model 投影、provider failover、多入口治理语义归一、streaming progress event、workspace usage/cost ledger。
+- 主要遗留：优先级压缩、adaptive shrink、sourceRefs 追溯、read model 投影、provider failover、多入口治理语义归一、streaming progress event、workspace usage/cost ledger、真实 tokenizer/原生 token usage。

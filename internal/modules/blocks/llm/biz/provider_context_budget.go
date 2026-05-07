@@ -10,6 +10,7 @@ import (
 
 const (
 	defaultProviderRequestBudgetBytes = 96 * 1024
+	defaultEstimatedTokensPerByte     = 0.25
 	providerBudgetStringBytes         = 2048
 	providerBudgetAggressiveBytes     = 768
 	providerBudgetSliceItems          = 12
@@ -19,39 +20,86 @@ const (
 )
 
 func enforceProviderRequestBudget(request llmmodels.ProviderRequest) llmmodels.ProviderRequest {
-	return enforceProviderRequestBudgetLimit(request, defaultProviderRequestBudgetBytes)
+	profile := normalizedProviderContextProfile(request.Config.ContextProfile)
+	return enforceProviderRequestBudgetLimit(request, profile.BytesHardLimit)
 }
 
 func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxBytes int) llmmodels.ProviderRequest {
+	profile := normalizedProviderContextProfile(request.Config.ContextProfile)
+	if maxBytes <= 0 {
+		maxBytes = profile.BytesHardLimit
+	}
 	if maxBytes <= 0 {
 		maxBytes = defaultProviderRequestBudgetBytes
 	}
+	maxTokens := profile.MaxInputTokens
 	rules := []string{"preserve identifiers, schema, config, runtime capabilities, goal, DoD, and governance decisions"}
 	request.ContextBudget = nil
-	if providerRequestJSONBytes(request) > maxBytes {
+	shrinkLevel := 0
+	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
 		request.Input = budgetProviderInput(request.Input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
 		rules = append(rules, "compact provider input")
+		shrinkLevel = 1
 	}
-	if providerRequestJSONBytes(request) > maxBytes {
+	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
 		request.Input = compactProviderExecutionContext(request.Input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries)
 		rules = append(rules, "summarize execution context transport fields")
+		shrinkLevel = 2
 	}
-	if providerRequestJSONBytes(request) > maxBytes {
+	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
 		request.Input = budgetProviderInput(request.Input, providerBudgetAggressiveBytes, providerBudgetAggressiveItems, providerBudgetAggressiveEntries, 3)
 		rules = append(rules, "apply aggressive provider input budget")
+		shrinkLevel = 3
 	}
-	if providerRequestJSONBytes(request) > maxBytes {
+	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
 		request.Input = minimalProviderInput(request.Input)
 		rules = append(rules, "fallback to minimal provider input")
+		shrinkLevel = 4
 	}
 	actual := providerRequestJSONBytes(request)
+	estimatedInputTokens := estimateInputTokens(actual, profile.EstimatedTokensPerByte)
+	estimatedOutputTokens := min(profile.ReservedOutputTokens, max(0, profile.ContextWindowTokens-estimatedInputTokens))
+	actualTokens := estimatedInputTokens + estimatedOutputTokens
+	truncated := len(rules) > 1 || actual > maxBytes || (maxTokens > 0 && estimatedInputTokens > maxTokens)
 	request.ContextBudget = &llmmodels.ProviderContextBudget{
-		MaxBytes:    maxBytes,
-		ActualBytes: actual,
-		Truncated:   len(rules) > 1 || actual > maxBytes,
-		Rules:       rules,
+		MaxBytes:              maxBytes,
+		ActualBytes:           actual,
+		MaxTokens:             maxTokens,
+		EstimatedInputTokens:  estimatedInputTokens,
+		EstimatedOutputTokens: estimatedOutputTokens,
+		ActualTokens:          actualTokens,
+		ShrinkLevel:           shrinkLevel,
+		Truncated:             truncated,
+		Rules:                 rules,
+		Estimator:             "bytes_ratio",
+		Profile:               profile,
 	}
 	return request
+}
+
+func exceedsProviderBudget(request llmmodels.ProviderRequest, maxBytes, maxTokens int, tokensPerByte float64) bool {
+	actualBytes := providerRequestJSONBytes(request)
+	if actualBytes > maxBytes {
+		return true
+	}
+	if maxTokens <= 0 {
+		return false
+	}
+	return estimateInputTokens(actualBytes, tokensPerByte) > maxTokens
+}
+
+func estimateInputTokens(actualBytes int, tokensPerByte float64) int {
+	if actualBytes <= 0 {
+		return 0
+	}
+	if tokensPerByte <= 0 {
+		tokensPerByte = defaultEstimatedTokensPerByte
+	}
+	ret := int(float64(actualBytes) * tokensPerByte)
+	if float64(ret) < float64(actualBytes)*tokensPerByte {
+		ret++
+	}
+	return max(ret, 1)
 }
 
 func providerRequestJSONBytes(request llmmodels.ProviderRequest) int {
@@ -262,4 +310,18 @@ func truncateProviderBudgetString(value string, limit int) string {
 		return value
 	}
 	return value[:limit] + "..."
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

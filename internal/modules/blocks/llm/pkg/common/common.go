@@ -32,6 +32,12 @@ const (
 	EnvChatCompletions   = "chatCompletions"
 	EnvStreaming         = "streaming"
 	EnvNonChatOperations = "nonChatOperations"
+	EnvContextWindow     = "contextWindowTokens"
+	EnvMaxInputTokens    = "maxInputTokens"
+	EnvReservedOutput    = "reservedOutputTokens"
+	EnvSafetyRatio       = "safetyRatio"
+	EnvBytesHardLimit    = "bytesHardLimit"
+	EnvTokensPerByte     = "estimatedTokensPerByte"
 )
 
 const (

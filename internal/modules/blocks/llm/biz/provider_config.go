@@ -14,6 +14,10 @@ import (
 const defaultProviderTimeout = 60 * time.Second
 const defaultOpenAIBaseURL = "https://api.openai.com/v1"
 const defaultAnthropicBaseURL = "https://api.anthropic.com"
+const defaultContextWindowTokens = 32768
+const defaultReservedOutputTokens = 4096
+const defaultContextSafetyRatio = 0.8
+const defaultContextBytesHardLimit = 96 * 1024
 
 func LoadProviderConfig(providerID string, values map[string]string) (llmmodels.ProviderConfig, error) {
 	timeout := defaultProviderTimeout
@@ -58,6 +62,11 @@ func LoadProviderConfig(providerID string, values map[string]string) (llmmodels.
 			NonChatOperations: normalizedOperations(values[llmcommon.EnvNonChatOperations]),
 		},
 	}
+	profile, err := providerContextProfileFromValues(values)
+	if err != nil {
+		return llmmodels.ProviderConfig{}, err
+	}
+	cfg.ContextProfile = profile
 	return withAvailability(cfg), nil
 }
 
@@ -87,15 +96,16 @@ func LoadProviderConfigs(defaultProviderID string, valueSets map[string]map[stri
 func RedactedProviderConfig(cfg llmmodels.ProviderConfig) llmmodels.RedactedProviderConfig {
 	capabilities := effectiveProviderCapabilities(cfg.Capabilities)
 	return llmmodels.RedactedProviderConfig{
-		ID:           cfg.ID,
-		Provider:     cfg.Provider,
-		BaseURL:      cfg.BaseURL,
-		Model:        cfg.Model,
-		Timeout:      cfg.Timeout.String(),
-		Disabled:     cfg.Disabled,
-		Ready:        !cfg.Unavailable,
-		Reason:       cfg.UnavailableReason,
-		Capabilities: capabilities,
+		ID:             cfg.ID,
+		Provider:       cfg.Provider,
+		BaseURL:        cfg.BaseURL,
+		Model:          cfg.Model,
+		Timeout:        cfg.Timeout.String(),
+		Disabled:       cfg.Disabled,
+		Ready:          !cfg.Unavailable,
+		Reason:         cfg.UnavailableReason,
+		Capabilities:   capabilities,
+		ContextProfile: cfg.ContextProfile,
 	}
 }
 
@@ -180,4 +190,87 @@ func parseBool(raw string) (bool, error) {
 		return false, nil
 	}
 	return strconv.ParseBool(raw)
+}
+
+func providerContextProfileFromValues(values map[string]string) (llmmodels.ProviderContextProfile, error) {
+	profile := llmmodels.ProviderContextProfile{}
+	var err error
+	profile.ContextWindowTokens, err = parseOptionalPositiveInt(values[llmcommon.EnvContextWindow], llmcommon.EnvContextWindow)
+	if err != nil {
+		return llmmodels.ProviderContextProfile{}, err
+	}
+	profile.MaxInputTokens, err = parseOptionalPositiveInt(values[llmcommon.EnvMaxInputTokens], llmcommon.EnvMaxInputTokens)
+	if err != nil {
+		return llmmodels.ProviderContextProfile{}, err
+	}
+	profile.ReservedOutputTokens, err = parseOptionalPositiveInt(values[llmcommon.EnvReservedOutput], llmcommon.EnvReservedOutput)
+	if err != nil {
+		return llmmodels.ProviderContextProfile{}, err
+	}
+	profile.BytesHardLimit, err = parseOptionalPositiveInt(values[llmcommon.EnvBytesHardLimit], llmcommon.EnvBytesHardLimit)
+	if err != nil {
+		return llmmodels.ProviderContextProfile{}, err
+	}
+	profile.SafetyRatio, err = parseOptionalPositiveFloat(values[llmcommon.EnvSafetyRatio], llmcommon.EnvSafetyRatio)
+	if err != nil {
+		return llmmodels.ProviderContextProfile{}, err
+	}
+	profile.EstimatedTokensPerByte, err = parseOptionalPositiveFloat(values[llmcommon.EnvTokensPerByte], llmcommon.EnvTokensPerByte)
+	if err != nil {
+		return llmmodels.ProviderContextProfile{}, err
+	}
+	return normalizedProviderContextProfile(profile), nil
+}
+
+func normalizedProviderContextProfile(profile llmmodels.ProviderContextProfile) llmmodels.ProviderContextProfile {
+	if profile.ContextWindowTokens <= 0 {
+		profile.ContextWindowTokens = defaultContextWindowTokens
+	}
+	if profile.ReservedOutputTokens <= 0 {
+		profile.ReservedOutputTokens = defaultReservedOutputTokens
+	}
+	if profile.ReservedOutputTokens >= profile.ContextWindowTokens {
+		profile.ReservedOutputTokens = max(1, profile.ContextWindowTokens/8)
+	}
+	maxInputByWindow := profile.ContextWindowTokens - profile.ReservedOutputTokens
+	if maxInputByWindow <= 0 {
+		maxInputByWindow = profile.ContextWindowTokens
+	}
+	if profile.MaxInputTokens <= 0 || profile.MaxInputTokens > maxInputByWindow {
+		profile.MaxInputTokens = maxInputByWindow
+	}
+	if profile.SafetyRatio <= 0 || profile.SafetyRatio > 1 {
+		profile.SafetyRatio = defaultContextSafetyRatio
+	}
+	if profile.BytesHardLimit <= 0 {
+		profile.BytesHardLimit = defaultContextBytesHardLimit
+	}
+	if profile.EstimatedTokensPerByte <= 0 {
+		profile.EstimatedTokensPerByte = defaultEstimatedTokensPerByte
+	}
+	return profile
+}
+
+func parseOptionalPositiveInt(raw, key string) (int, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%w: invalid %s", common.ErrInvalidArgument, key)
+	}
+	return parsed, nil
+}
+
+func parseOptionalPositiveFloat(raw, key string) (float64, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%w: invalid %s", common.ErrInvalidArgument, key)
+	}
+	return parsed, nil
 }

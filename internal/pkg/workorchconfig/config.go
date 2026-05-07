@@ -52,15 +52,21 @@ type LLMConfig struct {
 }
 
 type LLMProviderConfig struct {
-	Provider          string   `json:"provider" toml:"provider"`
-	BaseURL           string   `json:"baseURL" toml:"baseURL"`
-	APIKey            string   `json:"apiKey" toml:"apiKey"`
-	Model             string   `json:"model" toml:"model"`
-	Timeout           string   `json:"timeout" toml:"timeout"`
-	Disabled          *bool    `json:"disabled" toml:"disabled"`
-	ChatCompletions   *bool    `json:"chatCompletions" toml:"chatCompletions"`
-	Streaming         *bool    `json:"streaming" toml:"streaming"`
-	NonChatOperations []string `json:"nonChatOperations" toml:"nonChatOperations"`
+	Provider               string   `json:"provider" toml:"provider"`
+	BaseURL                string   `json:"baseURL" toml:"baseURL"`
+	APIKey                 string   `json:"apiKey" toml:"apiKey"`
+	Model                  string   `json:"model" toml:"model"`
+	Timeout                string   `json:"timeout" toml:"timeout"`
+	Disabled               *bool    `json:"disabled" toml:"disabled"`
+	ChatCompletions        *bool    `json:"chatCompletions" toml:"chatCompletions"`
+	Streaming              *bool    `json:"streaming" toml:"streaming"`
+	NonChatOperations      []string `json:"nonChatOperations" toml:"nonChatOperations"`
+	ContextWindowTokens    int      `json:"contextWindowTokens" toml:"contextWindowTokens"`
+	MaxInputTokens         int      `json:"maxInputTokens" toml:"maxInputTokens"`
+	ReservedOutputTokens   int      `json:"reservedOutputTokens" toml:"reservedOutputTokens"`
+	SafetyRatio            float64  `json:"safetyRatio" toml:"safetyRatio"`
+	BytesHardLimit         int      `json:"bytesHardLimit" toml:"bytesHardLimit"`
+	EstimatedTokensPerByte float64  `json:"estimatedTokensPerByte" toml:"estimatedTokensPerByte"`
 }
 
 type WebSearchConfig struct {
@@ -250,6 +256,24 @@ func llmProviderValues(provider LLMProviderConfig) map[string]string {
 	set(values, "apiKey", provider.APIKey)
 	set(values, "model", provider.Model)
 	set(values, "timeout", provider.Timeout)
+	if provider.ContextWindowTokens > 0 {
+		values["contextWindowTokens"] = intString(provider.ContextWindowTokens)
+	}
+	if provider.MaxInputTokens > 0 {
+		values["maxInputTokens"] = intString(provider.MaxInputTokens)
+	}
+	if provider.ReservedOutputTokens > 0 {
+		values["reservedOutputTokens"] = intString(provider.ReservedOutputTokens)
+	}
+	if provider.SafetyRatio > 0 {
+		values["safetyRatio"] = formatFloat(provider.SafetyRatio)
+	}
+	if provider.BytesHardLimit > 0 {
+		values["bytesHardLimit"] = intString(provider.BytesHardLimit)
+	}
+	if provider.EstimatedTokensPerByte > 0 {
+		values["estimatedTokensPerByte"] = formatFloat(provider.EstimatedTokensPerByte)
+	}
 	if provider.Disabled != nil {
 		if *provider.Disabled {
 			values["disabled"] = "true"
@@ -346,6 +370,10 @@ func int64String(value int64) string {
 
 func formatInt(value int64) string {
 	return strconv.FormatInt(value, 10)
+}
+
+func formatFloat(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func Close() error {
