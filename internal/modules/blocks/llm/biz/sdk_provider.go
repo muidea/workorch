@@ -46,29 +46,36 @@ func NewOpenAIProviderWithClient(config llmmodels.ProviderConfig, client *http.C
 	}
 }
 
-func (p *OpenAIProvider) Complete(ctx context.Context, request llmmodels.ProviderRequest) ([]byte, error) {
+func (p *OpenAIProvider) Complete(ctx context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
 	if p == nil {
-		return nil, common.ErrInvalidArgument
+		return llmmodels.ProviderCompletionResult{}, common.ErrInvalidArgument
 	}
 	completion, err := p.client.Chat.Completions.New(ctx, p.chatParams(request))
 	if err != nil {
-		return nil, providerSDKError("openai", err)
+		return llmmodels.ProviderCompletionResult{}, providerSDKError("openai", err)
 	}
 	content := strings.TrimSpace(firstOpenAIChoiceContent(completion))
 	if content == "" {
-		return nil, fmt.Errorf("%w: llm provider response content is empty", common.ErrInvalidArgument)
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response content is empty", common.ErrInvalidArgument)
 	}
-	return []byte(content), nil
+	return llmmodels.ProviderCompletionResult{
+		Payload: []byte(content),
+		Usage:   openAIUsage(completion),
+	}, nil
 }
 
-func (p *OpenAIProvider) StreamComplete(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) ([]byte, error) {
+func (p *OpenAIProvider) StreamComplete(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) (llmmodels.ProviderCompletionResult, error) {
 	if p == nil {
-		return nil, common.ErrInvalidArgument
+		return llmmodels.ProviderCompletionResult{}, common.ErrInvalidArgument
 	}
-	stream := p.client.Chat.Completions.NewStreaming(ctx, p.chatParams(request))
+	stream := p.client.Chat.Completions.NewStreaming(ctx, p.chatStreamParams(request))
 	var builder strings.Builder
+	var usage *llmmodels.ProviderUsage
 	for stream.Next() {
 		chunk := stream.Current()
+		if parsed := openAICompletionUsage(chunk.Usage); parsed != nil {
+			usage = parsed
+		}
 		for _, choice := range chunk.Choices {
 			delta := choice.Delta.Content
 			if delta == "" {
@@ -77,24 +84,27 @@ func (p *OpenAIProvider) StreamComplete(ctx context.Context, request llmmodels.P
 			builder.WriteString(delta)
 			if emit != nil {
 				if err := emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: delta}); err != nil {
-					return nil, err
+					return llmmodels.ProviderCompletionResult{}, err
 				}
 			}
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return nil, providerSDKError("openai", err)
+		return llmmodels.ProviderCompletionResult{}, providerSDKError("openai", err)
 	}
 	if emit != nil {
 		if err := emit(llmmodels.ProviderStreamEvent{Type: "done"}); err != nil {
-			return nil, err
+			return llmmodels.ProviderCompletionResult{}, err
 		}
 	}
 	content := strings.TrimSpace(builder.String())
 	if content == "" {
-		return nil, fmt.Errorf("%w: llm provider streamed response content is empty", common.ErrInvalidArgument)
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider streamed response content is empty", common.ErrInvalidArgument)
 	}
-	return []byte(content), nil
+	return llmmodels.ProviderCompletionResult{
+		Payload: []byte(content),
+		Usage:   usage,
+	}, nil
 }
 
 func (p *OpenAIProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbeddingRequest) (llmmodels.ProviderEmbeddingResult, error) {
@@ -141,6 +151,14 @@ func (p *OpenAIProvider) chatParams(request llmmodels.ProviderRequest) openai.Ch
 	}
 }
 
+func (p *OpenAIProvider) chatStreamParams(request llmmodels.ProviderRequest) openai.ChatCompletionNewParams {
+	params := p.chatParams(request)
+	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
+		IncludeUsage: openai.Bool(true),
+	}
+	return params
+}
+
 type AnthropicProvider struct {
 	config llmmodels.ProviderConfig
 	client anthropic.Client
@@ -168,24 +186,27 @@ func NewAnthropicProviderWithClient(config llmmodels.ProviderConfig, client *htt
 	}
 }
 
-func (p *AnthropicProvider) Complete(ctx context.Context, request llmmodels.ProviderRequest) ([]byte, error) {
+func (p *AnthropicProvider) Complete(ctx context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
 	if p == nil {
-		return nil, common.ErrInvalidArgument
+		return llmmodels.ProviderCompletionResult{}, common.ErrInvalidArgument
 	}
 	message, err := p.client.Messages.New(ctx, p.messageParams(request))
 	if err != nil {
-		return nil, providerSDKError("anthropic", err)
+		return llmmodels.ProviderCompletionResult{}, providerSDKError("anthropic", err)
 	}
 	content := strings.TrimSpace(firstAnthropicText(message))
 	if content == "" {
-		return nil, fmt.Errorf("%w: llm provider response content is empty", common.ErrInvalidArgument)
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response content is empty", common.ErrInvalidArgument)
 	}
-	return []byte(content), nil
+	return llmmodels.ProviderCompletionResult{
+		Payload: []byte(content),
+		Usage:   anthropicUsage(message),
+	}, nil
 }
 
-func (p *AnthropicProvider) StreamComplete(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) ([]byte, error) {
+func (p *AnthropicProvider) StreamComplete(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) (llmmodels.ProviderCompletionResult, error) {
 	if p == nil {
-		return nil, common.ErrInvalidArgument
+		return llmmodels.ProviderCompletionResult{}, common.ErrInvalidArgument
 	}
 	stream := p.client.Messages.NewStreaming(ctx, p.messageParams(request))
 	var message anthropic.Message
@@ -193,7 +214,7 @@ func (p *AnthropicProvider) StreamComplete(ctx context.Context, request llmmodel
 	for stream.Next() {
 		event := stream.Current()
 		if err := message.Accumulate(event); err != nil {
-			return nil, err
+			return llmmodels.ProviderCompletionResult{}, err
 		}
 		switch current := event.AsAny().(type) {
 		case anthropic.ContentBlockDeltaEvent:
@@ -201,18 +222,18 @@ func (p *AnthropicProvider) StreamComplete(ctx context.Context, request llmmodel
 				builder.WriteString(delta.Text)
 				if emit != nil {
 					if err := emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: delta.Text}); err != nil {
-						return nil, err
+						return llmmodels.ProviderCompletionResult{}, err
 					}
 				}
 			}
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return nil, providerSDKError("anthropic", err)
+		return llmmodels.ProviderCompletionResult{}, providerSDKError("anthropic", err)
 	}
 	if emit != nil {
 		if err := emit(llmmodels.ProviderStreamEvent{Type: "done"}); err != nil {
-			return nil, err
+			return llmmodels.ProviderCompletionResult{}, err
 		}
 	}
 	content := strings.TrimSpace(builder.String())
@@ -220,9 +241,12 @@ func (p *AnthropicProvider) StreamComplete(ctx context.Context, request llmmodel
 		content = strings.TrimSpace(firstAnthropicText(&message))
 	}
 	if content == "" {
-		return nil, fmt.Errorf("%w: llm provider streamed response content is empty", common.ErrInvalidArgument)
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider streamed response content is empty", common.ErrInvalidArgument)
 	}
-	return []byte(content), nil
+	return llmmodels.ProviderCompletionResult{
+		Payload: []byte(content),
+		Usage:   anthropicUsage(&message),
+	}, nil
 }
 
 func (p *AnthropicProvider) messageParams(request llmmodels.ProviderRequest) anthropic.MessageNewParams {
@@ -256,6 +280,47 @@ func firstAnthropicText(message *anthropic.Message) string {
 		}
 	}
 	return ""
+}
+
+func openAIUsage(completion *openai.ChatCompletion) *llmmodels.ProviderUsage {
+	if completion == nil {
+		return nil
+	}
+	return openAICompletionUsage(completion.Usage)
+}
+
+func openAICompletionUsage(usage openai.CompletionUsage) *llmmodels.ProviderUsage {
+	input := int(usage.PromptTokens)
+	output := int(usage.CompletionTokens)
+	total := int(usage.TotalTokens)
+	if input == 0 && output == 0 && total == 0 {
+		return nil
+	}
+	if total == 0 && (input > 0 || output > 0) {
+		total = input + output
+	}
+	return &llmmodels.ProviderUsage{
+		InputTokens:  input,
+		OutputTokens: output,
+		TotalTokens:  total,
+	}
+}
+
+func anthropicUsage(message *anthropic.Message) *llmmodels.ProviderUsage {
+	if message == nil {
+		return nil
+	}
+	input := int(message.Usage.InputTokens)
+	output := int(message.Usage.OutputTokens)
+	total := input + output
+	if input == 0 && output == 0 {
+		return nil
+	}
+	return &llmmodels.ProviderUsage{
+		InputTokens:  input,
+		OutputTokens: output,
+		TotalTokens:  total,
+	}
 }
 
 func effectiveProviderTimeout(config llmmodels.ProviderConfig) time.Duration {

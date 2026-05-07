@@ -553,6 +553,72 @@ export type FetchedWebSource = {
   evidenceRef?: string;
 };
 
+export type LLMUsageTrace = {
+  id: string;
+  workspaceId: string;
+  runId: string;
+  stepId?: string;
+  providerId?: string;
+  provider?: string;
+  model?: string;
+  operation?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  estimated: boolean;
+  usageSource?: string;
+  estimatedCost?: number;
+  costEstimated: boolean;
+  costSource?: string;
+  currency?: string;
+  requestBytes?: number;
+  responseBytes?: number;
+  streaming: boolean;
+  contextBudget?: Record<string, unknown>;
+  startedAt?: string;
+  completedAt?: string;
+  durationMs?: number;
+  status?: string;
+  failureClass?: string;
+  occurredAt?: string;
+  evidenceRef?: string;
+};
+
+export type LLMUsageSummary = {
+  entryTotal: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCost?: number;
+  currency?: string;
+  estimatedEntries: number;
+  providerNativeEntries: number;
+  costEstimatedEntries: number;
+  failedEntries: number;
+  costBreakdown?: LLMUsageCostBreakdown[];
+  providerModelBreakdown?: LLMUsageProviderModelBreakdown[];
+};
+
+export type LLMUsageCostBreakdown = {
+  currency: string;
+  estimatedCost: number;
+  entryTotal: number;
+};
+
+export type LLMUsageProviderModelBreakdown = {
+  providerId?: string;
+  provider?: string;
+  model?: string;
+  currency?: string;
+  entryTotal: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCost?: number;
+  estimatedEntries: number;
+  failedEntries: number;
+};
+
 export type RunProgress = {
   state: string;
   currentStepId?: string;
@@ -819,6 +885,8 @@ export type RunObservability = {
   executionSections?: ExecutionSection[];
   memoryRecallTraces?: MemoryRecallTrace[];
   webSources?: WebSourceTrace[];
+  llmUsageTraces?: LLMUsageTrace[];
+  llmUsageSummary: LLMUsageSummary;
   evidence: RuntimeEvidenceSummary;
   latestCheckpoint?: RuntimeCheckpoint;
   selectedCapabilities?: RuntimeCapability[];
@@ -836,6 +904,8 @@ export type RunSnapshot = {
   executionSections?: ExecutionSection[];
   memoryRecallTraces?: MemoryRecallTrace[];
   webSources?: WebSourceTrace[];
+  llmUsageTraces?: LLMUsageTrace[];
+  llmUsageSummary: LLMUsageSummary;
   steps?: StepView[];
   toolCalls?: ToolCall[];
   patches?: Patch[];
@@ -861,6 +931,8 @@ export type WorkspaceSnapshot = {
   artifacts?: Artifact[];
   patches?: Patch[];
   webSources?: WebSourceTrace[];
+  llmUsageTraces?: LLMUsageTrace[];
+  llmUsageSummary: LLMUsageSummary;
   eventRecords?: EventRecord[];
   decisions?: Decision[];
   approvals?: Approval[];

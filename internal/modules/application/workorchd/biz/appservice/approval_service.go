@@ -2,10 +2,12 @@ package appservice
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -171,7 +173,15 @@ func BatchResolveApprovalsWithSession(ctx context.Context, session *RuntimeSessi
 	traces := autoGovernanceTraceRepositoryFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
-	if len(cmd.ApprovalIDs) == 0 || (cmd.Action != "approve" && cmd.Action != "reject") {
+	if len(cmd.ApprovalIDs) == 0 {
+		return nil, common.ErrInvalidArgument
+	}
+	semantic := governancecommon.NormalizeApprovalAction(cmd.Action, cmd.Action, "")
+	action := strings.TrimSpace(strings.ToLower(cmd.Action))
+	if action != "approve" && action != "reject" {
+		action = semantic.Action
+	}
+	if action != "approve" && action != "reject" {
 		return nil, common.ErrInvalidArgument
 	}
 	seen := make(map[string]struct{}, len(cmd.ApprovalIDs))
@@ -214,7 +224,7 @@ func BatchResolveApprovalsWithSession(ctx context.Context, session *RuntimeSessi
 			item *approvalmodel.Approval
 			err  error
 		)
-		if cmd.Action == "approve" {
+		if action == "approve" {
 			item, err = service.EnsureApprovedAndReturn(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})
 		} else {
 			item, err = service.EnsureRejectedAndReturn(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})

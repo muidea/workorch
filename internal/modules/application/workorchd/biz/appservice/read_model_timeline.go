@@ -115,6 +115,10 @@ func runtimeTimeline(snapshot RunSnapshot) []RuntimeTimelineItem {
 		if item.RunID != "" && item.RunID != snapshot.Run.ID {
 			continue
 		}
+		if streamItem, ok := streamProgressTimelineItemFromPersistedEvent(item, snapshot.Run.State); ok {
+			items = append(items, streamItem)
+			continue
+		}
 		items = append(items, RuntimeTimelineItem{
 			Source:     "persisted_event",
 			Type:       item.SubjectType,
@@ -129,6 +133,10 @@ func runtimeTimeline(snapshot RunSnapshot) []RuntimeTimelineItem {
 	if len(snapshot.EventRecords) == 0 {
 		for _, item := range snapshot.Observed {
 			if item.RunID != "" && item.RunID != snapshot.Run.ID {
+				continue
+			}
+			if streamItem, ok := streamProgressTimelineItemFromObserved(item, snapshot.Run.State); ok {
+				items = append(items, streamItem)
 				continue
 			}
 			items = append(items, RuntimeTimelineItem{
@@ -162,16 +170,16 @@ func timelineStepOccurrences(snapshot RunSnapshot) map[string]string {
 		}
 	}
 	for _, item := range snapshot.EventRecords {
-		stepID := item.StepID
-		if stepID == "" && item.SubjectType == "step" {
-			stepID = item.SubjectID
+		stepID, ok := timelineStepIDFromEventRecord(item)
+		if !ok {
+			continue
 		}
 		remember(stepID, item.OccurredAt)
 	}
 	for _, item := range snapshot.Observed {
-		stepID := item.StepID
-		if stepID == "" && item.SubjectType == "step" {
-			stepID = item.SubjectID
+		stepID, ok := timelineStepIDFromObservedEvent(item)
+		if !ok {
+			continue
 		}
 		remember(stepID, item.OccurredAt)
 	}
@@ -193,6 +201,34 @@ func isStepRuntimeCheckpoint(checkpoint RuntimeCheckpoint) bool {
 	}
 	eventName := readModelStringValue(checkpoint.Data["event"])
 	return eventName == "step_dispatched" || eventName == "step_completed" || eventName == "step_failed"
+}
+
+func timelineStepIDFromEventRecord(item EventRecord) (string, bool) {
+	if item.Topic != events.TopicStepDispatched && item.Topic != events.TopicStepStateChanged && item.SubjectType != "step" {
+		return "", false
+	}
+	stepID := item.StepID
+	if stepID == "" && item.SubjectType == "step" {
+		stepID = item.SubjectID
+	}
+	if stepID == "" {
+		return "", false
+	}
+	return stepID, true
+}
+
+func timelineStepIDFromObservedEvent(item presenter.ObservedView) (string, bool) {
+	if item.Topic != events.TopicStepDispatched && item.Topic != events.TopicStepStateChanged && item.SubjectType != "step" {
+		return "", false
+	}
+	stepID := item.StepID
+	if stepID == "" && item.SubjectType == "step" {
+		stepID = item.SubjectID
+	}
+	if stepID == "" {
+		return "", false
+	}
+	return stepID, true
 }
 
 func streamTimelineItems(step presenter.StepView, runState string, stepOccurredAt string) []RuntimeTimelineItem {
@@ -239,6 +275,69 @@ func streamEventOccurredAt(event map[string]any) string {
 		}
 	}
 	return ""
+}
+
+func streamProgressTimelineItemFromPersistedEvent(item EventRecord, runState string) (RuntimeTimelineItem, bool) {
+	if item.Topic != events.TopicRunLLMStreamProgress {
+		return RuntimeTimelineItem{}, false
+	}
+	payload := cloneReadModelMap(item.Payload)
+	stepID := firstNonEmptyReadModel(item.StepID, readModelStringValue(payload[events.PayloadKeyStepID]))
+	itemType := firstNonEmptyReadModel(readModelStringValue(payload[events.PayloadKeyStatus]), "progress")
+	summary := readModelStringValue(payload[events.PayloadKeySummary])
+	if summary == "" {
+		summary = streamProgressSummaryFromPayload(payload)
+	}
+	return RuntimeTimelineItem{
+		Source:     "llm_stream_progress_event",
+		Type:       itemType,
+		ID:         firstNonEmptyReadModel(item.ID, stepID+"/llm-stream-progress"),
+		Topic:      item.Topic,
+		RunState:   firstNonEmptyReadModel(runState, readModelStringValue(payload[events.PayloadKeyStatus])),
+		StepID:     stepID,
+		Summary:    summary,
+		OccurredAt: item.OccurredAt,
+		Data:       payload,
+	}, true
+}
+
+func streamProgressTimelineItemFromObserved(item presenter.ObservedView, runState string) (RuntimeTimelineItem, bool) {
+	if item.Topic != events.TopicRunLLMStreamProgress {
+		return RuntimeTimelineItem{}, false
+	}
+	payload := cloneReadModelMap(item.Payload)
+	stepID := firstNonEmptyReadModel(item.StepID, readModelStringValue(payload[events.PayloadKeyStepID]))
+	itemType := firstNonEmptyReadModel(readModelStringValue(payload[events.PayloadKeyStatus]), "progress")
+	summary := readModelStringValue(payload[events.PayloadKeySummary])
+	if summary == "" {
+		summary = streamProgressSummaryFromPayload(payload)
+	}
+	return RuntimeTimelineItem{
+		Source:     "llm_stream_progress_event",
+		Type:       itemType,
+		ID:         firstNonEmptyReadModel(item.SubjectID, stepID+"/llm-stream-progress"),
+		Topic:      item.Topic,
+		RunState:   firstNonEmptyReadModel(runState, readModelStringValue(payload[events.PayloadKeyStatus])),
+		StepID:     stepID,
+		Summary:    summary,
+		OccurredAt: item.OccurredAt,
+		Data:       payload,
+	}, true
+}
+
+func streamProgressSummaryFromPayload(payload map[string]any) string {
+	chunkCount := readModelIntValue(payload[events.PayloadKeyChunkCount])
+	receivedBytes := readModelIntValue(payload[events.PayloadKeyReceivedBytes])
+	switch {
+	case chunkCount > 0 && receivedBytes > 0:
+		return "received " + strconv.Itoa(chunkCount) + " chunks (" + strconv.Itoa(receivedBytes) + " bytes)"
+	case chunkCount > 0:
+		return "received " + strconv.Itoa(chunkCount) + " chunks"
+	case receivedBytes > 0:
+		return "received " + strconv.Itoa(receivedBytes) + " bytes"
+	default:
+		return ""
+	}
 }
 
 func timelineStepSummary(output map[string]any) string {

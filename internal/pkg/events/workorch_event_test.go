@@ -80,6 +80,80 @@ func TestDecodeWorkorchEventReturnsTypedPatchEvent(t *testing.T) {
 	}
 }
 
+func TestDecodeWorkorchEventReturnsTypedLLMStreamProgressEvent(t *testing.T) {
+	event, ok := DecodeWorkorchEvent(Envelope{
+		Version: WorkorchEventVersion,
+		Topic:   TopicRunLLMStreamProgress,
+		RunID:   "run-1",
+		StepID:  "run-1/step-1",
+		Payload: LLMStreamProgressPayload(
+			common.WorkspaceID("ws-1"),
+			common.RunID("run-1"),
+			common.StepID("run-1/step-1"),
+			"provider-a",
+			"model-a",
+			4,
+			512,
+			120,
+			"completed",
+			"llm_execution_graph_plan - completed",
+		),
+	})
+	if !ok {
+		t.Fatalf("DecodeWorkorchEvent returned !ok")
+	}
+	streamEvent, ok := event.(LLMStreamProgressEvent)
+	if !ok {
+		t.Fatalf("event type = %T, want LLMStreamProgressEvent", event)
+	}
+	if streamEvent.Data.RunID != "run-1" ||
+		streamEvent.Data.StepID != "run-1/step-1" ||
+		streamEvent.Data.ProviderID != "provider-a" ||
+		streamEvent.Data.Model != "model-a" ||
+		streamEvent.Data.ChunkCount != 4 ||
+		streamEvent.Data.ReceivedBytes != 512 ||
+		streamEvent.Data.Status != "completed" {
+		t.Fatalf("stream data = %+v, want typed progress payload", streamEvent.Data)
+	}
+}
+
+func TestDecodeWorkorchEventReturnsTypedLLMUsageEvent(t *testing.T) {
+	event, ok := DecodeWorkorchEvent(Envelope{
+		Version: WorkorchEventVersion,
+		Topic:   TopicRunLLMUsageRecorded,
+		RunID:   "run-1",
+		StepID:  "run-1/step-1",
+		Payload: LLMUsagePayload(LLMUsagePayloadData{
+			WorkspaceID:   common.WorkspaceID("ws-1"),
+			RunID:         common.RunID("run-1"),
+			StepID:        common.StepID("run-1/step-1"),
+			ProviderID:    "provider-a",
+			Provider:      "compatible",
+			Model:         "model-a",
+			Operation:     "chat_completions",
+			InputTokens:   100,
+			OutputTokens:  20,
+			TotalTokens:   120,
+			Estimated:     true,
+			UsageSource:   "estimated",
+			RequestBytes:  1024,
+			ResponseBytes: 256,
+			Streaming:     true,
+			Status:        "completed",
+		}),
+	})
+	if !ok {
+		t.Fatalf("DecodeWorkorchEvent returned !ok")
+	}
+	usageEvent, ok := event.(LLMUsageEvent)
+	if !ok {
+		t.Fatalf("event type = %T, want LLMUsageEvent", event)
+	}
+	if usageEvent.Data.RunID != "run-1" || usageEvent.Data.StepID != "run-1/step-1" || usageEvent.Data.TotalTokens != 120 || usageEvent.Data.Status != "completed" || usageEvent.Data.UsageSource != "estimated" {
+		t.Fatalf("usage event data = %+v, want typed usage payload", usageEvent.Data)
+	}
+}
+
 func TestDecodeWorkorchEventRejectsIncompatibleVersion(t *testing.T) {
 	_, ok := DecodeWorkorchEvent(Envelope{
 		Version: "workorch.event.v2",

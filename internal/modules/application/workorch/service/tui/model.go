@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
+	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -81,6 +81,7 @@ type AppModel struct {
 	patches       []backend.PatchInfo
 	taskDecomp    []backend.TaskDecompositionInfo
 	memoryRecalls []backend.MemoryRecallTraceInfo
+	llmUsage      backend.LLMUsageSummaryInfo
 	progress      progressState
 	progressText  string
 	repairLoop    string
@@ -465,6 +466,7 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 	m.result = ""
 	m.artifacts = nil
 	m.patches = nil
+	m.llmUsage = backend.LLMUsageSummaryInfo{}
 	m.failureReason = ""
 	m.lastError = nil
 	m.clearInput()
@@ -502,6 +504,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.result = ""
 		m.artifacts = nil
 		m.patches = nil
+		m.llmUsage = backend.LLMUsageSummaryInfo{}
 		m.failureReason = ""
 		m.lastError = nil
 		m.resetMainViewport()
@@ -777,102 +780,27 @@ func stringInSlice(value string, items []string) bool {
 }
 
 func parseApprovalInput(value string) (bool, bool) {
-	normalized := semanticApprovalText(value)
-	if normalized == "" {
-		return false, false
-	}
-	negative := containsAnySemanticCue(normalized, []string{
-		"不同意", "不批准", "不确认", "不允许", "不是", "不要", "别执行", "不执行", "不继续", "不需要", "无需执行", "不能", "不可以", "不行", "拒绝", "取消", "停止", "终止", "驳回", "否决", "算了",
-		"reject", "rejected", "deny", "denied", "disapprove", "cancel", "stop", "abort", "refuse", "refused", "decline", "declined", "notapprove", "notagree", "notok", "nothanks",
-	})
-	positive := containsAnySemanticCue(normalized, []string{
-		"同意", "批准", "确认", "允许", "通过", "可以", "继续", "继续执行", "执行", "没问题", "没意见", "好的", "好", "是", "赞成", "请继续", "确认执行",
-		"yes", "approve", "approved", "allow", "allowed", "ok", "okay", "confirm", "confirmed", "accept", "accepted", "agree", "agreed", "proceed", "continue", "goahead", "noproblem",
-	})
-	switch {
-	case normalized == "n" || normalized == "no" || negative:
-		return false, true
-	case normalized == "y" || positive:
+	semantic := governancecommon.NormalizeApprovalAction("", value, "")
+	switch semantic.Action {
+	case "approve":
 		return true, true
+	case "reject":
+		return false, true
 	default:
 		return false, false
 	}
 }
 
 func parseApprovalInputWithContext(value string, reason string) (bool, bool) {
-	if approve, ok := parseApprovalInput(value); ok {
-		return approve, true
-	}
-	if !approvalReasonAsksForConfirmation(reason) || !looksLikeContextualApproval(value, reason) {
+	semantic := governancecommon.NormalizeApprovalAction("", value, reason)
+	switch semantic.Action {
+	case "approve":
+		return true, true
+	case "reject":
+		return false, true
+	default:
 		return false, false
 	}
-	return true, true
-}
-
-func approvalReasonAsksForConfirmation(reason string) bool {
-	normalized := semanticApprovalText(reason)
-	if normalized == "" {
-		return false
-	}
-	return containsAnySemanticCue(normalized, []string{
-		"确认", "核对", "检查", "参数", "目标", "信息", "上下文", "调用", "工具", "接口", "外部api", "mcp",
-		"confirm", "check", "parameter", "target", "context", "info", "call", "tool", "api",
-	})
-}
-
-func looksLikeContextualApproval(value string, reason string) bool {
-	normalized := semanticApprovalText(value)
-	if normalized == "" {
-		return false
-	}
-	if containsAnySemanticCue(normalized, []string{
-		"不同意", "不批准", "不确认", "不允许", "不要", "别", "拒绝", "取消", "停止", "终止",
-		"reject", "deny", "cancel", "stop", "abort", "refuse", "decline", "notapprove", "notagree", "notok",
-	}) {
-		return false
-	}
-	if containsAnySemanticCue(normalized, []string{
-		"查询", "调用", "使用", "执行", "继续", "参数", "目标", "信息", "上下文", "接口", "工具", "mcp", "api",
-		"query", "call", "use", "execute", "run", "continue", "parameter", "target", "context", "info", "tool",
-	}) {
-		return true
-	}
-	if containsAnySemanticCue(semanticApprovalText(reason), []string{
-		"参数", "目标", "信息", "上下文",
-		"parameter", "target", "context", "info",
-	}) {
-		return hasLettersOrDigits(value) && len([]rune(strings.TrimSpace(value))) >= 2
-	}
-	return false
-}
-
-func semanticApprovalText(value string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(strings.TrimSpace(value)) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-func containsAnySemanticCue(value string, cues []string) bool {
-	for _, cue := range cues {
-		normalizedCue := semanticApprovalText(cue)
-		if normalizedCue != "" && strings.Contains(value, normalizedCue) {
-			return true
-		}
-	}
-	return false
-}
-
-func hasLettersOrDigits(value string) bool {
-	for _, r := range value {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			return true
-		}
-	}
-	return false
 }
 
 func (m *AppModel) setLastError(err error) {
@@ -1183,6 +1111,9 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 			m.progressText = fmt.Sprintf("Memory recall: %s %d", nonEmpty(status, "selected"), len(ids))
 		}
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+	case backend.EventLLMUsageRecorded:
+		m.progressText = llmUsageProgressText(evt.Payload)
+		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventMemoryCreated, backend.EventMemoryUpdated, backend.EventMemoryDeleted:
 		m.progressText = "Workspace memory changed; refreshing context"
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
@@ -1445,6 +1376,26 @@ func payloadStringSliceValue(payload map[string]any, keys ...string) []string {
 		}
 	}
 	return nil
+}
+
+func payloadIntValue(payload map[string]any, keys ...string) int {
+	for _, key := range keys {
+		value, ok := payload[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case int:
+			return typed
+		case int64:
+			return int(typed)
+		case float64:
+			return int(typed)
+		case float32:
+			return int(typed)
+		}
+	}
+	return 0
 }
 
 func payloadMap(payload map[string]any, keys ...string) map[string]any {

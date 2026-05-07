@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -44,6 +45,9 @@ timeout = "60s"
 disabled = false
 streaming = true
 nonChatOperations = ["embeddings"]
+inputTokenPrice = 0.000001
+outputTokenPrice = 0.000002
+currency = "usd"
 
 [webSearch]
 defaultProvider = "search"
@@ -86,6 +90,11 @@ allowDomains = ["example.test"]
 	if !provider.Ready || !provider.Default || !provider.APIKeyConfigured || provider.Model != "local-model" ||
 		!provider.ChatCompletions || !provider.Streaming || len(provider.NonChatOperations) != 1 || provider.NonChatOperations[0] != "embeddings" {
 		t.Fatalf("provider = %+v, want ready redacted local provider", provider)
+	}
+	if provider.ContextProfile.Currency != "USD" ||
+		provider.ContextProfile.InputTokenPrice != 0.000001 ||
+		provider.ContextProfile.OutputTokenPrice != 0.000002 {
+		t.Fatalf("provider context profile = %+v, want pricing fields exposed", provider.ContextProfile)
 	}
 	if cfg.WebSearch.DefaultProviderID != "search" || len(cfg.WebSearch.Providers) != 1 || len(cfg.WebSearch.ProviderTemplates) != 1 {
 		t.Fatalf("web search configuration = %+v, want search provider and template", cfg.WebSearch)
@@ -138,6 +147,12 @@ disabled = false
 			Model:             "next-model",
 			Timeout:           "45s",
 			NonChatOperations: []string{"embeddings", "embeddings"},
+			ContextProfile: &llmmodels.ProviderContextProfile{
+				InputTokenPrice:        0.000001,
+				OutputTokenPrice:       0.000002,
+				Currency:               "USD",
+				EstimatedTokensPerByte: 0.25,
+			},
 		}},
 	})
 	if err != nil {
@@ -150,6 +165,12 @@ disabled = false
 	if provider.Model != "next-model" || !provider.APIKeyConfigured || !provider.ChatCompletions ||
 		len(provider.NonChatOperations) != 1 || provider.NonChatOperations[0] != "embeddings" {
 		t.Fatalf("provider = %+v, want updated model and preserved api key", provider)
+	}
+	if provider.ContextProfile.InputTokenPrice != 0.000001 ||
+		provider.ContextProfile.OutputTokenPrice != 0.000002 ||
+		provider.ContextProfile.Currency != "USD" ||
+		provider.ContextProfile.EstimatedTokensPerByte != 0.25 {
+		t.Fatalf("provider context profile = %+v, want updated profile pricing", provider.ContextProfile)
 	}
 
 	current, err := workorchconfig.Current()
@@ -165,6 +186,12 @@ disabled = false
 	if current.LLM.Providers["local"].ChatCompletions == nil || !*current.LLM.Providers["local"].ChatCompletions ||
 		len(current.LLM.Providers["local"].NonChatOperations) != 1 {
 		t.Fatalf("current llm capabilities = %+v, want persisted provider capabilities", current.LLM.Providers["local"])
+	}
+	if current.LLM.Providers["local"].InputTokenPrice != 0.000001 ||
+		current.LLM.Providers["local"].OutputTokenPrice != 0.000002 ||
+		current.LLM.Providers["local"].Currency != "USD" ||
+		current.LLM.Providers["local"].EstimatedTokensPerByte != 0.25 {
+		t.Fatalf("current llm context profile = %+v, want persisted profile pricing", current.LLM.Providers["local"])
 	}
 }
 

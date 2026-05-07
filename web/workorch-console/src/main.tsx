@@ -13,7 +13,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMProviderTemplate, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, ProgressBlocker, ProgressItem, RepairLoop, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, ProgressBlocker, ProgressItem, RepairLoop, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -134,6 +134,7 @@ const modelLabels = {
   validationResult: '校验结果（Validation Result）',
   runtimeCheckpoint: '运行检查点（Runtime Checkpoint）',
   llmProvider: 'LLM 服务商（Provider）',
+  llmUsage: 'LLM 使用量 / 费用',
   metrics: '运行指标（Metrics）'
 };
 
@@ -737,6 +738,149 @@ function webSourceCard(items?: WebSourceTrace[]) {
           )
         }}
         dataSource={rows}
+      />
+    </Space>
+  );
+}
+
+function numberText(value?: number) {
+  return new Intl.NumberFormat('zh-CN').format(value ?? 0);
+}
+
+function costText(value?: number, currency?: string) {
+  if (!value || value <= 0) {
+    return '-';
+  }
+  const formatted = new Intl.NumberFormat('zh-CN', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: value < 0.01 ? 8 : 4
+  }).format(value);
+  return currency ? `${formatted} ${currency}` : formatted;
+}
+
+function llmUsageCostSummary(summary?: LLMUsageSummary) {
+  if (!summary || summary.entryTotal === 0) {
+    return '-';
+  }
+  if (summary.currency && summary.estimatedCost) {
+    return costText(summary.estimatedCost, summary.currency);
+  }
+  const breakdown = summary.costBreakdown ?? [];
+  if (breakdown.length === 0) {
+    return '-';
+  }
+  return breakdown.map((item) => costText(item.estimatedCost, item.currency)).join(' / ');
+}
+
+function llmUsageProviderModelKey(item: LLMUsageProviderModelBreakdown, index?: number) {
+  return [item.providerId, item.provider, item.model, item.currency, index].filter(Boolean).join('|');
+}
+
+function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]) {
+  const usageSummary = summary ?? {
+    entryTotal: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    estimatedEntries: 0,
+    providerNativeEntries: 0,
+    costEstimatedEntries: 0,
+    failedEntries: 0
+  };
+  const usageTraces = traces ?? [];
+  if (usageSummary.entryTotal === 0 && usageTraces.length === 0) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`当前${modelLabels.run}未记录${modelLabels.llmUsage}`} />;
+  }
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      {metricGrid([
+        { key: 'calls', label: 'LLM 调用', value: numberText(usageSummary.entryTotal), color: '#1668dc' },
+        { key: 'tokens', label: 'Token 总量', value: numberText(usageSummary.totalTokens), color: '#0958d9' },
+        { key: 'input', label: '输入 Token', value: numberText(usageSummary.inputTokens) },
+        { key: 'output', label: '输出 Token', value: numberText(usageSummary.outputTokens) },
+        { key: 'cost', label: '估算费用', value: llmUsageCostSummary(usageSummary), color: usageSummary.costEstimatedEntries ? '#d48806' : undefined },
+        { key: 'failed', label: '失败调用', value: numberText(usageSummary.failedEntries), color: usageSummary.failedEntries ? '#cf1322' : undefined }
+      ])}
+      <Descriptions
+        column={{ xs: 1, md: 3 }}
+        size="small"
+        items={[
+          { key: 'native', label: 'Provider 原生 usage', children: numberText(usageSummary.providerNativeEntries) },
+          { key: 'estimated', label: '估算 usage', children: numberText(usageSummary.estimatedEntries) },
+          { key: 'costEstimated', label: '估算费用条目', children: numberText(usageSummary.costEstimatedEntries) },
+          { key: 'costBreakdown', label: '币种拆分', children: (usageSummary.costBreakdown ?? []).length ? compactTags((usageSummary.costBreakdown ?? []).map((item) => `${costText(item.estimatedCost, item.currency)} (${item.entryTotal})`), 4) : '-' },
+          { key: 'costSource', label: '费用口径', children: usageSummary.costEstimatedEntries ? '基于本地 provider profile pricing 估算，不代表实际账单' : '未配置价格或未产生费用估算' },
+          { key: 'providerModels', label: 'Provider/Model', children: numberText(usageSummary.providerModelBreakdown?.length ?? 0) }
+        ]}
+      />
+      <Tabs
+        items={[
+          {
+            key: 'providerModel',
+            label: `Provider/Model ${usageSummary.providerModelBreakdown?.length ?? 0}`,
+            children: (
+              <ProTable<LLMUsageProviderModelBreakdown>
+                rowKey={llmUsageProviderModelKey}
+                search={false}
+                options={false}
+                pagination={false}
+                size="small"
+                columns={[
+                  { title: 'Provider', render: (_, item) => `${item.providerId || '-'} / ${item.provider || '-'}`, ellipsis: true },
+                  { title: 'Model', dataIndex: 'model', ellipsis: true },
+                  { title: '币种', dataIndex: 'currency', width: 90, render: (_, item) => item.currency || '-' },
+                  { title: '调用', dataIndex: 'entryTotal', width: 90, render: (_, item) => numberText(item.entryTotal) },
+                  { title: '输入/输出', width: 150, render: (_, item) => `${numberText(item.inputTokens)} / ${numberText(item.outputTokens)}` },
+                  { title: 'Token', dataIndex: 'totalTokens', width: 120, render: (_, item) => numberText(item.totalTokens) },
+                  { title: '估算费用', width: 130, render: (_, item) => costText(item.estimatedCost, item.currency) },
+                  { title: '估算/失败', width: 120, render: (_, item) => `${numberText(item.estimatedEntries)} / ${numberText(item.failedEntries)}` }
+                ]}
+                dataSource={usageSummary.providerModelBreakdown ?? []}
+              />
+            )
+          },
+          {
+            key: 'traces',
+            label: `调用明细 ${usageTraces.length}`,
+            children: (
+              <ProTable<LLMUsageTrace>
+                rowKey="id"
+                search={false}
+                options={false}
+                pagination={{ pageSize: 8 }}
+                size="small"
+                columns={[
+                  { title: '调用', dataIndex: 'id', copyable: true, ellipsis: true },
+                  { title: 'Provider', render: (_, item) => `${item.providerId || '-'} / ${item.model || '-'}`, ellipsis: true },
+                  { title: '操作', dataIndex: 'operation', ellipsis: true },
+                  { title: '状态', dataIndex: 'status', width: 110, render: (_, item) => stateTag(item.status || 'unknown') },
+                  { title: 'usage 来源', dataIndex: 'usageSource', width: 140, render: (_, item) => item.usageSource || (item.estimated ? 'estimated' : 'provider_native') },
+                  { title: 'Token', width: 150, render: (_, item) => `${numberText(item.inputTokens)} / ${numberText(item.outputTokens)} / ${numberText(item.totalTokens)}` },
+                  { title: '估算费用', width: 130, render: (_, item) => costText(item.estimatedCost, item.currency) },
+                  { title: '耗时', dataIndex: 'durationMs', width: 100, render: (_, item) => item.durationMs ? `${numberText(item.durationMs)} ms` : '-' },
+                  { title: '流式', dataIndex: 'streaming', width: 80, render: (_, item) => item.streaming ? <Tag color="blue">stream</Tag> : '-' }
+                ]}
+                expandable={{
+                  expandedRowRender: (item) => (
+                    <Descriptions
+                      size="small"
+                      column={1}
+                      items={[
+                        { key: 'step', label: '步骤', children: item.stepId ? boundedParagraph(item.stepId, { rows: 1, copyText: item.stepId }) : '-' },
+                        { key: 'bytes', label: '请求/响应字节', children: `${numberText(item.requestBytes)} / ${numberText(item.responseBytes)}` },
+                        { key: 'cost', label: '费用语义', children: `${item.costEstimated ? '估算' : '未估算'} / ${item.costSource || '-'}` },
+                        { key: 'failure', label: '失败分类', children: item.failureClass || '-' },
+                        { key: 'time', label: '时间', children: [item.startedAt, item.completedAt || item.occurredAt].filter(Boolean).join(' → ') || '-' },
+                        { key: 'budget', label: 'Context Budget', children: <pre className="json-panel">{compactJSON(item.contextBudget)}</pre> }
+                      ]}
+                    />
+                  )
+                }}
+                dataSource={usageTraces}
+              />
+            )
+          }
+        ]}
       />
     </Space>
   );
@@ -2866,6 +3010,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const outcomeDoDItems = dodAssessmentItems(runSnapshot);
   const runWebSources = runObservability?.webSources ?? runSnapshot?.webSources ?? snapshot?.webSources;
   const webSourceCount = webSourceRows(runWebSources).length;
+  const runLLMUsageSummary = runObservability?.llmUsageSummary ?? runSnapshot?.llmUsageSummary ?? snapshot?.llmUsageSummary;
+  const runLLMUsageTraces = runObservability?.llmUsageTraces ?? runSnapshot?.llmUsageTraces ?? snapshot?.llmUsageTraces;
   const dodDefinitionRows = dods.flatMap((dod) => dod.items.map((text, index) => ({
     key: `${dod.id}-${index}`,
     id: dod.id,
@@ -2967,6 +3113,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
               { key: 'result', label: modelLabels.result, value: snapshot.results?.length ?? runSnapshot?.results?.length ?? 0, color: '#389e0d' },
               { key: 'artifact', label: modelLabels.artifact, value: snapshot.artifacts?.length ?? runSnapshot?.artifacts?.length ?? 0 },
               { key: 'webSources', label: 'Web 来源', value: webSourceCount, color: webSourceCount ? '#08979c' : undefined },
+              { key: 'llmUsage', label: modelLabels.llmUsage, value: runLLMUsageSummary?.entryTotal ?? 0, color: runLLMUsageSummary?.entryTotal ? '#d48806' : undefined },
               { key: 'tool', label: modelLabels.toolCall, value: runSnapshot?.toolCalls?.length ?? 0 },
               { key: 'patch', label: modelLabels.patch, value: runSnapshot?.patches?.length ?? 0 },
               { key: 'validation', label: modelLabels.validationResult, value: runSnapshot?.validationResults?.length ?? 0 },
@@ -2984,7 +3131,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                 { key: 'completed', label: '已完成', value: runSummary.completed, color: '#389e0d' },
                 { key: 'failed', label: '失败/终止', value: runSummary.failed, color: '#cf1322' },
                 { key: 'decisions', label: '待处理决策', value: pendingCount(snapshot.decisions), color: pendingCount(snapshot.decisions) ? '#d48806' : undefined },
-                { key: 'approvals', label: '待处理审批', value: pendingCount(snapshot.approvals), color: pendingCount(snapshot.approvals) ? '#d48806' : undefined }
+                { key: 'approvals', label: '待处理审批', value: pendingCount(snapshot.approvals), color: pendingCount(snapshot.approvals) ? '#d48806' : undefined },
+                { key: 'llmCost', label: 'LLM 估算费用', value: llmUsageCostSummary(runLLMUsageSummary), color: runLLMUsageSummary?.costEstimatedEntries ? '#d48806' : undefined }
               ])}
               <Descriptions
                 column={1}
@@ -3178,6 +3326,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                   <ProCard title="Web 来源" colSpan={{ xs: 24, lg: 12 }}>
                     {webSourceCard(runWebSources)}
                   </ProCard>
+                  <ProCard title={modelLabels.llmUsage} colSpan={{ xs: 24, lg: 12 }}>
+                    {llmUsageCard(runLLMUsageSummary, runLLMUsageTraces)}
+                  </ProCard>
                 </ProCard>
               </Space>
             ) : (
@@ -3290,7 +3441,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                   { key: 'patches', label: '补丁（Patch）应用', value: `${runObservability?.evidence.patchApplied ?? 0}/${runObservability?.evidence.patchTotal ?? runSnapshot.patches?.length ?? 0}` },
                   { key: 'results', label: modelLabels.result, value: runObservability?.evidence.resultTotal ?? runSnapshot.results?.length ?? 0, color: '#389e0d' },
                   { key: 'artifacts', label: modelLabels.artifact, value: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 },
-                  { key: 'webSources', label: 'Web 来源', value: webSourceCount, color: webSourceCount ? '#08979c' : undefined }
+                  { key: 'webSources', label: 'Web 来源', value: webSourceCount, color: webSourceCount ? '#08979c' : undefined },
+                  { key: 'llmUsage', label: modelLabels.llmUsage, value: runLLMUsageSummary?.entryTotal ?? 0, color: runLLMUsageSummary?.entryTotal ? '#d48806' : undefined }
                 ])}
                 <Descriptions
                   column={3}
@@ -3307,6 +3459,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     { key: 'results', label: modelLabels.result, children: runObservability?.evidence.resultTotal ?? runSnapshot.results?.length ?? 0 },
                     { key: 'artifacts', label: modelLabels.artifact, children: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 },
                     { key: 'webSources', label: 'Web 来源', children: webSourceCount },
+                    { key: 'llmUsage', label: modelLabels.llmUsage, children: `${numberText(runLLMUsageSummary?.entryTotal)} 次 / ${numberText(runLLMUsageSummary?.totalTokens)} tokens / ${llmUsageCostSummary(runLLMUsageSummary)}` },
                     { key: 'selectedCapabilities', label: '选择能力', children: runObservability?.selectedCapabilities?.length ?? runSnapshot.selectedCapabilities?.length ?? 0 },
                     { key: 'usedCapabilities', label: '使用能力', children: runObservability?.usedCapabilities?.length ?? runSnapshot.usedCapabilities?.length ?? 0 },
                     { key: 'events', label: '事件', children: runObservability?.evidence.eventTotal ?? 0 },
@@ -3374,6 +3527,11 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                       key: 'webSources',
                       label: `Web 来源 ${webSourceCount}`,
                       children: webSourceCard(runWebSources)
+                    },
+                    {
+                      key: 'llmUsage',
+                      label: `LLM 使用量 ${runLLMUsageSummary?.entryTotal ?? 0}`,
+                      children: llmUsageCard(runLLMUsageSummary, runLLMUsageTraces)
                     },
                     {
                       key: 'steps',

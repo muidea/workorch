@@ -76,6 +76,30 @@ const (
 	PayloadKeyApprovalID         = "approvalId"
 	PayloadKeyRisk               = "risk"
 	PayloadKeyError              = "error"
+	PayloadKeyWorkspaceID        = "workspaceId"
+	PayloadKeyRunID              = "runId"
+	PayloadKeyModel              = "model"
+	PayloadKeyChunkCount         = "chunkCount"
+	PayloadKeyReceivedBytes      = "receivedBytes"
+	PayloadKeyElapsedMs          = "elapsedMs"
+	PayloadKeyProvider           = "provider"
+	PayloadKeyInputTokens        = "inputTokens"
+	PayloadKeyOutputTokens       = "outputTokens"
+	PayloadKeyTotalTokens        = "totalTokens"
+	PayloadKeyEstimated          = "estimated"
+	PayloadKeyUsageSource        = "usageSource"
+	PayloadKeyEstimatedCost      = "estimatedCost"
+	PayloadKeyCostEstimated      = "costEstimated"
+	PayloadKeyCostSource         = "costSource"
+	PayloadKeyCurrency           = "currency"
+	PayloadKeyRequestBytes       = "requestBytes"
+	PayloadKeyResponseBytes      = "responseBytes"
+	PayloadKeyStreaming          = "streaming"
+	PayloadKeyContextBudget      = "contextBudget"
+	PayloadKeyStartedAt          = "startedAt"
+	PayloadKeyCompletedAt        = "completedAt"
+	PayloadKeyDurationMs         = "durationMs"
+	PayloadKeyFailureClass       = "failureClass"
 )
 
 type WorkspacePayloadData struct {
@@ -229,6 +253,47 @@ type AutoGovernancePayloadData struct {
 	Status             string
 	Reason             string
 	EscalationReason   string
+}
+
+type LLMStreamProgressPayloadData struct {
+	WorkspaceID   common.WorkspaceID
+	RunID         common.RunID
+	StepID        common.StepID
+	ProviderID    string
+	Model         string
+	ChunkCount    int
+	ReceivedBytes int
+	ElapsedMs     int
+	Status        string
+	Summary       string
+}
+
+type LLMUsagePayloadData struct {
+	WorkspaceID   common.WorkspaceID
+	RunID         common.RunID
+	StepID        common.StepID
+	ProviderID    string
+	Provider      string
+	Model         string
+	Operation     string
+	InputTokens   int
+	OutputTokens  int
+	TotalTokens   int
+	Estimated     bool
+	UsageSource   string
+	EstimatedCost float64
+	CostEstimated bool
+	CostSource    string
+	Currency      string
+	RequestBytes  int
+	ResponseBytes int
+	Streaming     bool
+	ContextBudget map[string]any
+	StartedAt     string
+	CompletedAt   string
+	DurationMs    int
+	Status        string
+	FailureClass  string
 }
 
 func WorkspacePayload(title string, description string, workingDirectory string, state common.WorkspaceState, activeRunID common.RunID) map[string]any {
@@ -542,6 +607,35 @@ func AutoGovernancePayload(
 	}
 	if escalationReason != "" {
 		payload[PayloadKeyEscalationReason] = escalationReason
+	}
+	return payload
+}
+
+func LLMStreamProgressPayload(
+	workspaceID common.WorkspaceID,
+	runID common.RunID,
+	stepID common.StepID,
+	providerID string,
+	model string,
+	chunkCount int,
+	receivedBytes int,
+	elapsedMs int,
+	status string,
+	summary string,
+) map[string]any {
+	payload := map[string]any{
+		PayloadKeyWorkspaceID:   string(workspaceID),
+		PayloadKeyRunID:         string(runID),
+		PayloadKeyStepID:        string(stepID),
+		PayloadKeyProviderID:    providerID,
+		PayloadKeyModel:         model,
+		PayloadKeyChunkCount:    chunkCount,
+		PayloadKeyReceivedBytes: receivedBytes,
+		PayloadKeyElapsedMs:     elapsedMs,
+		PayloadKeyStatus:        status,
+	}
+	if summary != "" {
+		payload[PayloadKeySummary] = summary
 	}
 	return payload
 }
@@ -1094,6 +1188,234 @@ func DecodeAutoGovernancePayload(payload map[string]any) (AutoGovernancePayloadD
 	}, true
 }
 
+func DecodeLLMStreamProgressPayload(payload map[string]any) (LLMStreamProgressPayloadData, bool) {
+	workspaceID, ok := stringField(payload, PayloadKeyWorkspaceID)
+	if !ok {
+		return LLMStreamProgressPayloadData{}, false
+	}
+	runID, ok := stringField(payload, PayloadKeyRunID)
+	if !ok {
+		return LLMStreamProgressPayloadData{}, false
+	}
+	stepID, ok := stringField(payload, PayloadKeyStepID)
+	if !ok {
+		return LLMStreamProgressPayloadData{}, false
+	}
+	providerID, ok := optionalStringField(payload, PayloadKeyProviderID)
+	if !ok {
+		return LLMStreamProgressPayloadData{}, false
+	}
+	model, ok := optionalStringField(payload, PayloadKeyModel)
+	if !ok {
+		return LLMStreamProgressPayloadData{}, false
+	}
+	chunkCount, ok := optionalIntField(payload, PayloadKeyChunkCount)
+	if !ok {
+		return LLMStreamProgressPayloadData{}, false
+	}
+	receivedBytes, ok := optionalIntField(payload, PayloadKeyReceivedBytes)
+	if !ok {
+		return LLMStreamProgressPayloadData{}, false
+	}
+	elapsedMs, ok := optionalIntField(payload, PayloadKeyElapsedMs)
+	if !ok {
+		return LLMStreamProgressPayloadData{}, false
+	}
+	status, ok := stringField(payload, PayloadKeyStatus)
+	if !ok {
+		return LLMStreamProgressPayloadData{}, false
+	}
+	summary, ok := optionalStringField(payload, PayloadKeySummary)
+	if !ok {
+		return LLMStreamProgressPayloadData{}, false
+	}
+	return LLMStreamProgressPayloadData{
+		WorkspaceID:   common.WorkspaceID(workspaceID),
+		RunID:         common.RunID(runID),
+		StepID:        common.StepID(stepID),
+		ProviderID:    providerID,
+		Model:         model,
+		ChunkCount:    chunkCount,
+		ReceivedBytes: receivedBytes,
+		ElapsedMs:     elapsedMs,
+		Status:        status,
+		Summary:       summary,
+	}, true
+}
+
+func LLMUsagePayload(data LLMUsagePayloadData) map[string]any {
+	payload := map[string]any{
+		PayloadKeyWorkspaceID:   string(data.WorkspaceID),
+		PayloadKeyRunID:         string(data.RunID),
+		PayloadKeyStepID:        string(data.StepID),
+		PayloadKeyProviderID:    data.ProviderID,
+		PayloadKeyProvider:      data.Provider,
+		PayloadKeyModel:         data.Model,
+		PayloadKeyOperation:     data.Operation,
+		PayloadKeyInputTokens:   data.InputTokens,
+		PayloadKeyOutputTokens:  data.OutputTokens,
+		PayloadKeyTotalTokens:   data.TotalTokens,
+		PayloadKeyEstimated:     data.Estimated,
+		PayloadKeyUsageSource:   data.UsageSource,
+		PayloadKeyRequestBytes:  data.RequestBytes,
+		PayloadKeyResponseBytes: data.ResponseBytes,
+		PayloadKeyStreaming:     data.Streaming,
+		PayloadKeyStartedAt:     data.StartedAt,
+		PayloadKeyCompletedAt:   data.CompletedAt,
+		PayloadKeyDurationMs:    data.DurationMs,
+		PayloadKeyStatus:        data.Status,
+	}
+	if data.EstimatedCost > 0 {
+		payload[PayloadKeyEstimatedCost] = data.EstimatedCost
+	}
+	if data.CostEstimated {
+		payload[PayloadKeyCostEstimated] = true
+	}
+	if data.CostSource != "" {
+		payload[PayloadKeyCostSource] = data.CostSource
+	}
+	if data.Currency != "" {
+		payload[PayloadKeyCurrency] = data.Currency
+	}
+	if data.FailureClass != "" {
+		payload[PayloadKeyFailureClass] = data.FailureClass
+	}
+	if len(data.ContextBudget) > 0 {
+		payload[PayloadKeyContextBudget] = clonePayloadMap(data.ContextBudget)
+	}
+	return payload
+}
+
+func DecodeLLMUsagePayload(payload map[string]any) (LLMUsagePayloadData, bool) {
+	workspaceID, ok := stringField(payload, PayloadKeyWorkspaceID)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	runID, ok := stringField(payload, PayloadKeyRunID)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	stepID, ok := stringField(payload, PayloadKeyStepID)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	providerID, ok := optionalStringField(payload, PayloadKeyProviderID)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	provider, ok := optionalStringField(payload, PayloadKeyProvider)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	model, ok := optionalStringField(payload, PayloadKeyModel)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	operation, ok := optionalStringField(payload, PayloadKeyOperation)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	inputTokens, ok := optionalIntField(payload, PayloadKeyInputTokens)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	outputTokens, ok := optionalIntField(payload, PayloadKeyOutputTokens)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	totalTokens, ok := optionalIntField(payload, PayloadKeyTotalTokens)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	estimated, ok := optionalBoolField(payload, PayloadKeyEstimated)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	usageSource, ok := optionalStringField(payload, PayloadKeyUsageSource)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	estimatedCost, ok := optionalFloatField(payload, PayloadKeyEstimatedCost)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	costEstimated, ok := optionalBoolField(payload, PayloadKeyCostEstimated)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	costSource, ok := optionalStringField(payload, PayloadKeyCostSource)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	currency, ok := optionalStringField(payload, PayloadKeyCurrency)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	requestBytes, ok := optionalIntField(payload, PayloadKeyRequestBytes)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	responseBytes, ok := optionalIntField(payload, PayloadKeyResponseBytes)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	streaming, ok := optionalBoolField(payload, PayloadKeyStreaming)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	contextBudget, ok := optionalMapField(payload, PayloadKeyContextBudget)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	startedAt, ok := optionalStringField(payload, PayloadKeyStartedAt)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	completedAt, ok := optionalStringField(payload, PayloadKeyCompletedAt)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	durationMs, ok := optionalIntField(payload, PayloadKeyDurationMs)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	status, ok := stringField(payload, PayloadKeyStatus)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	failureClass, ok := optionalStringField(payload, PayloadKeyFailureClass)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	return LLMUsagePayloadData{
+		WorkspaceID:   common.WorkspaceID(workspaceID),
+		RunID:         common.RunID(runID),
+		StepID:        common.StepID(stepID),
+		ProviderID:    providerID,
+		Provider:      provider,
+		Model:         model,
+		Operation:     operation,
+		InputTokens:   inputTokens,
+		OutputTokens:  outputTokens,
+		TotalTokens:   totalTokens,
+		Estimated:     estimated,
+		UsageSource:   usageSource,
+		EstimatedCost: estimatedCost,
+		CostEstimated: costEstimated,
+		CostSource:    costSource,
+		Currency:      currency,
+		RequestBytes:  requestBytes,
+		ResponseBytes: responseBytes,
+		Streaming:     streaming,
+		ContextBudget: contextBudget,
+		StartedAt:     startedAt,
+		CompletedAt:   completedAt,
+		DurationMs:    durationMs,
+		Status:        status,
+		FailureClass:  failureClass,
+	}, true
+}
+
 func memoryIDsToStrings(input []common.MemoryID) []string {
 	ret := make([]string, 0, len(input))
 	for _, item := range input {
@@ -1153,6 +1475,21 @@ func optionalMapField(payload map[string]any, key string) (map[string]any, bool)
 		return nil, false
 	}
 	return clonePayloadMap(ret), true
+}
+
+func optionalBoolField(payload map[string]any, key string) (bool, bool) {
+	if payload == nil {
+		return false, true
+	}
+	value, ok := payload[key]
+	if !ok || value == nil {
+		return false, true
+	}
+	typed, ok := value.(bool)
+	if !ok {
+		return false, false
+	}
+	return typed, true
 }
 
 func optionalFloatField(payload map[string]any, key string) (float64, bool) {

@@ -242,6 +242,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.patches = snapshotPatches(msg.Snapshot, run.ID)
 		m.taskDecomp = snapshotTaskDecompositions(msg.Snapshot, run.ID)
 		m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), msg.Snapshot.MemoryRecallTraces...)
+		m.llmUsage = msg.Snapshot.LLMUsageSummary
 		m.repairLoop = repairLoopSummary(msg.Snapshot.TaskProgress)
 	}
 
@@ -346,6 +347,7 @@ func (m *AppModel) resetWorkspaceView() {
 	m.patches = nil
 	m.taskDecomp = nil
 	m.memoryRecalls = nil
+	m.llmUsage = backend.LLMUsageSummaryInfo{}
 	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""

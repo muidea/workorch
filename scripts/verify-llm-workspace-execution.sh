@@ -186,6 +186,31 @@ def decision_payload(request):
         }
     }
 
+def usage_payload(request):
+    run_id = request.get("runId", "")
+    if run_id == "probe":
+        return None
+    scenario = initial_runs.index(run_id) if run_id in initial_runs else -1
+    # Keep scenario-0 without usage so e2e can assert estimated fallback path.
+    if scenario == 0:
+        return None
+    # Other scenarios return provider-native usage for coverage.
+    return {
+        "prompt_tokens": 64,
+        "completion_tokens": 16,
+        "total_tokens": 80
+    }
+
+def stream_usage_payload(model):
+    model = (model or "").strip()
+    if "stream-native" in model:
+        return {
+            "prompt_tokens": 72,
+            "completion_tokens": 18,
+            "total_tokens": 90
+        }
+    return None
+
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/v1/embeddings":
@@ -222,7 +247,43 @@ class Handler(BaseHTTPRequestHandler):
         }
         decision = decision_payload(provider_request)
         content = decision if isinstance(decision, str) else json.dumps(decision, separators=(",", ":"))
+        model = payload.get("model", "")
+        if payload.get("stream"):
+            stream_usage = stream_usage_payload(model)
+            midpoint = max(1, len(content) // 2)
+            chunks = [content[:midpoint], content[midpoint:]]
+            events = []
+            for chunk in chunks:
+                if chunk:
+                    events.append({
+                        "choices": [{"delta": {"content": chunk}}]
+                    })
+            if stream_usage is not None:
+                events.append({
+                    "choices": [],
+                    "usage": stream_usage
+                })
+            events.append("[DONE]")
+            encoded_events = []
+            for item in events:
+                if item == "[DONE]":
+                    encoded_events.append("data: [DONE]\n\n")
+                else:
+                    encoded_events.append("data: " + json.dumps(item, separators=(",", ":")) + "\n\n")
+            encoded = "".join(encoded_events).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
+
         response = {"choices": [{"message": {"content": content}}]}
+        usage = usage_payload(provider_request)
+        if usage is not None:
+            response["usage"] = usage
         encoded = json.dumps(response).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -278,7 +339,7 @@ default_provider = llm.get("defaultProviderId") or "verify"
 default_embedding_provider = llm.get("defaultEmbeddingProviderId") or ""
 
 def clean_provider(item):
-    return {
+    ret = {
         "id": item.get("id", ""),
         "provider": item.get("provider", ""),
         "baseUrl": item.get("baseUrl", ""),
@@ -289,6 +350,9 @@ def clean_provider(item):
         "streaming": bool(item.get("streaming", False)),
         "nonChatOperations": item.get("nonChatOperations") or [],
     }
+    if item.get("contextProfile"):
+        ret["contextProfile"] = item.get("contextProfile")
+    return ret
 
 original = {
     "defaultProviderId": default_provider,
@@ -324,6 +388,48 @@ updated_providers.append({
     "chatCompletions": True,
     "streaming": False,
     "nonChatOperations": ["embeddings"],
+    "contextProfile": {
+        "estimatedTokensPerByte": 0.25,
+        "inputTokenPrice": 0.000001,
+        "outputTokenPrice": 0.000002,
+        "currency": "USD",
+    },
+})
+updated_providers.append({
+    "id": "verify-stream-native",
+    "provider": "compatible",
+    "baseUrl": mock_base_url,
+    "apiKey": "verify-secret",
+    "model": "verify-stream-native-model",
+    "timeout": "60s",
+    "disabled": False,
+    "chatCompletions": True,
+    "streaming": True,
+    "nonChatOperations": ["embeddings"],
+    "contextProfile": {
+        "estimatedTokensPerByte": 0.25,
+        "inputTokenPrice": 0.000001,
+        "outputTokenPrice": 0.000002,
+        "currency": "USD",
+    },
+})
+updated_providers.append({
+    "id": "verify-stream-estimated",
+    "provider": "compatible",
+    "baseUrl": mock_base_url,
+    "apiKey": "verify-secret",
+    "model": "verify-stream-estimated-model",
+    "timeout": "60s",
+    "disabled": False,
+    "chatCompletions": True,
+    "streaming": True,
+    "nonChatOperations": ["embeddings"],
+    "contextProfile": {
+        "estimatedTokensPerByte": 0.25,
+        "inputTokenPrice": 0.000001,
+        "outputTokenPrice": 0.000002,
+        "currency": "USD",
+    },
 })
 update = {
     "defaultProviderId": "verify",
@@ -349,6 +455,14 @@ activate_workspace_execution_with_auto_memory() {
     -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
 }
 
+activate_workspace_execution_with_provider() {
+  local output_file="$1"
+  local provider_id="$2"
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
+    -H 'Content-Type: application/json' \
+    -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"'"$provider_id"'","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
+}
+
 wait_run_state() {
   local run_id="$1"
   local expected_state="$2"
@@ -371,6 +485,7 @@ assert_run_recovery_read_models() {
   local run_id="$1"
   local label="$2"
   local expected_state="$3"
+  local expected_usage_source="${4:-}"
 
   curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/$label-snapshot-read-model.json"
   curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/$label-observability-read-model.json"
@@ -382,7 +497,7 @@ assert_run_recovery_read_models() {
     "$TMP_DIR/$label-task-progress.json" \
     "$TMP_DIR/$label-context-bundle.json" \
     "$TMP_DIR/$label-events.json" \
-    "$run_id" "$workspace_id" "$expected_state" <<'PY'
+    "$run_id" "$workspace_id" "$expected_state" "$expected_usage_source" <<'PY'
 import json
 import sys
 
@@ -391,7 +506,7 @@ observability = json.load(open(sys.argv[2], encoding="utf-8"))["observability"]
 task_progress = json.load(open(sys.argv[3], encoding="utf-8"))["taskProgress"]
 bundle = json.load(open(sys.argv[4], encoding="utf-8"))["contextBundle"]
 events = json.load(open(sys.argv[5], encoding="utf-8")).get("eventRecords") or []
-run_id, workspace_id, expected_state = sys.argv[6:9]
+run_id, workspace_id, expected_state, expected_usage_source = sys.argv[6:10]
 
 errors = []
 run = snapshot.get("run") or {}
@@ -436,6 +551,56 @@ if not (task_progress.get("milestones") or []):
 observed_progress = observability.get("taskProgress") or {}
 if observed_progress.get("runId") != run_id:
     errors.append(f"observability taskProgress missing run id: {observed_progress}")
+
+usage_traces = observability.get("llmUsageTraces") or []
+if not usage_traces:
+    errors.append("observability missing llmUsageTraces")
+else:
+    estimated_entries = 0
+    native_entries = 0
+    cost_estimated_entries = 0
+    for trace in usage_traces:
+        estimated = bool(trace.get("estimated"))
+        usage_source = trace.get("usageSource")
+        if not usage_source:
+            errors.append(f"llm usage trace missing usageSource: {trace}")
+            continue
+        if estimated:
+            estimated_entries += 1
+            if usage_source != "estimated":
+                errors.append(f"llm usage trace estimated/source mismatch: {trace}")
+        else:
+            native_entries += 1
+            if usage_source != "provider_native":
+                errors.append(f"llm usage trace native/source mismatch: {trace}")
+        if trace.get("estimatedCost", 0) and not trace.get("costEstimated"):
+            errors.append(f"llm usage trace cost semantics mismatch: {trace}")
+        if trace.get("costEstimated"):
+            cost_estimated_entries += 1
+            if not trace.get("costSource"):
+                errors.append(f"llm usage trace missing costSource: {trace}")
+
+    summary = observability.get("llmUsageSummary") or {}
+    if summary.get("entryTotal") != len(usage_traces):
+        errors.append(f"llm usage summary entryTotal mismatch: {summary} vs traces={len(usage_traces)}")
+    if summary.get("estimatedEntries") != estimated_entries:
+        errors.append(f"llm usage summary estimatedEntries mismatch: {summary} vs {estimated_entries}")
+    if summary.get("providerNativeEntries") != native_entries:
+        errors.append(f"llm usage summary providerNativeEntries mismatch: {summary} vs {native_entries}")
+    if summary.get("costEstimatedEntries") != cost_estimated_entries:
+        errors.append(f"llm usage summary costEstimatedEntries mismatch: {summary} vs {cost_estimated_entries}")
+    if cost_estimated_entries > 0:
+        cost_breakdown = summary.get("costBreakdown") or []
+        if not cost_breakdown:
+            errors.append(f"llm usage summary missing costBreakdown for estimated costs: {summary}")
+        if len(cost_breakdown) == 1:
+            currency = cost_breakdown[0].get("currency")
+            estimated_cost = cost_breakdown[0].get("estimatedCost")
+            if summary.get("currency") != currency or summary.get("estimatedCost") != estimated_cost:
+                errors.append(f"llm usage single-currency summary mismatch: {summary}")
+    if expected_usage_source:
+        if not any((item.get("usageSource") or "") == expected_usage_source for item in usage_traces):
+            errors.append(f"llm usage traces missing expected usageSource={expected_usage_source!r}: {usage_traces}")
 
 topics = {item.get("topic") for item in events}
 if "/run/created" not in topics:
@@ -487,6 +652,73 @@ if errors:
     for item in errors:
         print(item, file=sys.stderr)
     raise SystemExit(1)
+PY
+}
+
+assert_run_llm_usage_semantics() {
+  local run_id="$1"
+  local expected_usage_source="$2"
+  local expected_streaming="$3"
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/$run_id-observability-usage.json"
+  python3 - "$TMP_DIR/$run_id-observability-usage.json" "$expected_usage_source" "$expected_streaming" <<'PY'
+import json
+import sys
+
+observability = json.load(open(sys.argv[1], encoding="utf-8")).get("observability") or {}
+expected_source = sys.argv[2]
+expected_streaming = sys.argv[3].lower() == "true"
+traces = observability.get("llmUsageTraces") or []
+
+if not traces:
+    raise SystemExit("observability llmUsageTraces is empty")
+
+matched = [item for item in traces if (item.get("usageSource") or "") == expected_source]
+if not matched:
+    raise SystemExit(f"missing usageSource={expected_source!r} in traces: {traces}")
+if not any(bool(item.get("streaming")) == expected_streaming for item in matched):
+    raise SystemExit(
+        f"usageSource={expected_source!r} has no trace with streaming={expected_streaming}: {matched}"
+    )
+PY
+}
+
+assert_workspace_llm_usage_breakdown() {
+  local workspace_id="$1"
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/workspace-llm-usage-snapshot.json"
+  python3 - "$TMP_DIR/workspace-llm-usage-snapshot.json" <<'PY'
+import json
+import sys
+
+snapshot = json.load(open(sys.argv[1], encoding="utf-8")).get("snapshot") or {}
+summary = snapshot.get("llmUsageSummary") or {}
+breakdown = summary.get("providerModelBreakdown") or []
+cost_breakdown = summary.get("costBreakdown") or []
+
+if not breakdown:
+    raise SystemExit(f"workspace llm usage summary missing providerModelBreakdown: {summary}")
+if not cost_breakdown:
+    raise SystemExit(f"workspace llm usage summary missing costBreakdown: {summary}")
+if len(cost_breakdown) == 1:
+    currency = cost_breakdown[0].get("currency")
+    estimated_cost = cost_breakdown[0].get("estimatedCost")
+    if summary.get("currency") != currency or summary.get("estimatedCost") != estimated_cost:
+        raise SystemExit(f"workspace single-currency cost summary mismatch: {summary}")
+
+required = {
+    ("verify", "verify-model"),
+    ("verify-stream-native", "verify-stream-native-model"),
+    ("verify-stream-estimated", "verify-stream-estimated-model"),
+}
+present = {(item.get("providerId"), item.get("model")) for item in breakdown}
+missing = required - present
+if missing:
+    raise SystemExit(f"workspace provider/model breakdown missing required entries: {sorted(missing)}; present={sorted(present)}")
+
+for item in breakdown:
+    if (item.get("providerId"), item.get("model")) in required and int(item.get("entryTotal") or 0) <= 0:
+        raise SystemExit(f"workspace provider/model breakdown has empty entryTotal: {item}")
+    if (item.get("providerId"), item.get("model")) in required and not item.get("currency"):
+        raise SystemExit(f"workspace provider/model breakdown missing currency for priced provider: {item}")
 PY
 }
 
@@ -580,7 +812,7 @@ grep "\"soulId\": \"$SOUL_ID\"" "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"skillIds"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id/observability" >"$TMP_DIR/happy-observability.json"
 grep '"terminal": true' "$TMP_DIR/happy-observability.json" >/dev/null
-assert_run_recovery_read_models "$happy_run_id" "happy" "completed"
+assert_run_recovery_read_models "$happy_run_id" "happy" "completed" "estimated"
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DIR/memory-after-happy.json"
 grep 'Default verification preference: use go test ./...' "$TMP_DIR/memory-after-happy.json" >/dev/null
 
@@ -597,7 +829,7 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve" -H 
   -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance"}}' | grep '"resolutionType": "provide_missing_info"' >/dev/null
 wait_run_state "$decision_run_id" "completed" "$TMP_DIR/decision-after-resolve-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id/observability" | grep '"terminal": true' >/dev/null
-assert_run_recovery_read_models "$decision_run_id" "decision" "completed"
+assert_run_recovery_read_models "$decision_run_id" "decision" "completed" "provider_native"
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DIR/memory-after-decision.json"
 grep 'Confirmed implementation convention after decision.' "$TMP_DIR/memory-after-decision.json" >/dev/null
 
@@ -615,7 +847,7 @@ curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_path" >"$TMP_DIR/approv
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_path/reject" | grep '"state": "rejected"' >/dev/null
 wait_run_state "$approval_run_id" "failed" "$TMP_DIR/approval-rejected-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$approval_run_id/observability" | grep '"terminal": true' >/dev/null
-assert_run_recovery_read_models "$approval_run_id" "approval-rejected" "failed"
+assert_run_recovery_read_models "$approval_run_id" "approval-rejected" "failed" "provider_native"
 
 activate_workspace_execution "$TMP_DIR/multi-gate-decision-activation.json"
 grep '"state": "blocked_on_decision"' "$TMP_DIR/multi-gate-decision-activation.json" >/dev/null
@@ -641,7 +873,7 @@ grep 'multi gate decision then approval can complete' "$TMP_DIR/multi-gate-snaps
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/status" | grep '"state": "completed"' >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/observability" >"$TMP_DIR/multi-gate-observability.json"
 grep '"terminal": true' "$TMP_DIR/multi-gate-observability.json" >/dev/null
-assert_run_recovery_read_models "$multi_gate_run_id" "multi-gate" "completed"
+assert_run_recovery_read_models "$multi_gate_run_id" "multi-gate" "completed" "provider_native"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/workspace-snapshot-after-governance.json"
 grep "\"id\": \"$multi_gate_run_id\"" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
 grep "\"id\": \"$multi_gate_ticket_id\"" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
@@ -653,7 +885,7 @@ schema_run_id="$(json_path "$TMP_DIR/schema-failure-activation.json" "activation
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_run_id/snapshot" >"$TMP_DIR/schema-failure-snapshot.json"
 grep '"llm_schema_invalid"' "$TMP_DIR/schema-failure-snapshot.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_run_id/observability" | grep '"terminal": true' >/dev/null
-assert_run_recovery_read_models "$schema_run_id" "schema-failure" "failed"
+assert_run_recovery_read_models "$schema_run_id" "schema-failure" "failed" "provider_native"
 
 activate_workspace_execution_with_auto_memory "$TMP_DIR/memory-recall-activation.json"
 grep '"state": "completed"' "$TMP_DIR/memory-recall-activation.json" >/dev/null
@@ -744,7 +976,21 @@ if errors:
         print(item, file=sys.stderr)
     raise SystemExit(1)
 PY
-assert_run_recovery_read_models "$memory_run_id" "memory-recall" "completed"
+assert_run_recovery_read_models "$memory_run_id" "memory-recall" "completed" "provider_native"
+
+activate_workspace_execution_with_provider "$TMP_DIR/stream-native-activation.json" "verify-stream-native"
+grep '"state": "completed"' "$TMP_DIR/stream-native-activation.json" >/dev/null
+stream_native_run_id="$(json_path "$TMP_DIR/stream-native-activation.json" "activation.run.id")"
+assert_run_recovery_read_models "$stream_native_run_id" "stream-native" "completed" "provider_native"
+assert_run_llm_usage_semantics "$stream_native_run_id" "provider_native" "true"
+
+activate_workspace_execution_with_provider "$TMP_DIR/stream-estimated-activation.json" "verify-stream-estimated"
+grep '"state": "completed"' "$TMP_DIR/stream-estimated-activation.json" >/dev/null
+stream_estimated_run_id="$(json_path "$TMP_DIR/stream-estimated-activation.json" "activation.run.id")"
+assert_run_recovery_read_models "$stream_estimated_run_id" "stream-estimated" "completed" "estimated"
+assert_run_llm_usage_semantics "$stream_estimated_run_id" "estimated" "true"
+
+assert_workspace_llm_usage_breakdown "$workspace_id"
 assert_workspace_recovery_read_models "final"
 curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics.txt"
 grep 'workorch_http_requests_total{endpoint="configuration_update"}' "$TMP_DIR/metrics.txt" >/dev/null

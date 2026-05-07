@@ -307,7 +307,7 @@ func (o *RuntimeOrchestrator) publishStepState(ctx context.Context, run *runMode
 	if o.eventHub == nil || run == nil || step == nil {
 		return nil
 	}
-	return o.eventHub.Publish(ctx, events.Envelope{
+	if err := o.eventHub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        topic,
 		SourceModule: modulecommon.ModuleID,
@@ -317,5 +317,153 @@ func (o *RuntimeOrchestrator) publishStepState(ctx context.Context, run *runMode
 		RunID:        string(run.ID),
 		StepID:       string(step.ID),
 		Payload:      events.StepPayload(step.Kind, step.State, step.Input, step.Output),
+	}); err != nil {
+		return err
+	}
+	if topic == events.TopicStepStateChanged {
+		if err := o.publishLLMStreamProgressFromStep(ctx, run, step); err != nil {
+			return err
+		}
+		if err := o.publishLLMUsageFromStep(ctx, run, step); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (o *RuntimeOrchestrator) publishLLMStreamProgressFromStep(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
+	if o.eventHub == nil || run == nil || step == nil || len(step.Output) == 0 {
+		return nil
+	}
+	if !strings.HasPrefix(strings.TrimSpace(step.Kind), "llm/") {
+		return nil
+	}
+	streamEvents := streamEventMapSlice(step.Output["streamEvents"])
+	if len(streamEvents) == 0 {
+		return nil
+	}
+	providerID, model := llmStreamProviderAndModel(step.Output)
+	chunkCount := len(streamEvents)
+	receivedBytes := 0
+	elapsedMs := 0
+	for _, item := range streamEvents {
+		receivedBytes += len(stringFromAny(item["delta"]))
+		if value := intFromAny(item["elapsedMs"]); value > elapsedMs {
+			elapsedMs = value
+		}
+		if payload, ok := item["payload"].(map[string]any); ok {
+			if value := intFromAny(payload["elapsedMs"]); value > elapsedMs {
+				elapsedMs = value
+			}
+		}
+	}
+	status := string(step.State)
+	if status == "" {
+		status = stringFromAny(step.Output["status"])
+	}
+	if status == "" {
+		status = "completed"
+	}
+	return o.eventHub.Publish(ctx, events.Envelope{
+		ID:           fmt.Sprintf("%s/event/llm-stream-progress", step.ID),
+		Version:      events.WorkorchEventVersion,
+		Topic:        events.TopicRunLLMStreamProgress,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "llm_stream_progress",
+		SubjectID:    string(step.ID),
+		WorkspaceID:  string(run.WorkspaceID),
+		RunID:        string(run.ID),
+		StepID:       string(step.ID),
+		Payload: events.LLMStreamProgressPayload(
+			run.WorkspaceID,
+			run.ID,
+			step.ID,
+			providerID,
+			model,
+			chunkCount,
+			receivedBytes,
+			elapsedMs,
+			status,
+			streamProgressSummary(step.Output),
+		),
+	})
+}
+
+func streamEventMapSlice(raw any) []map[string]any {
+	switch typed := raw.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		ret := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			mapped, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			ret = append(ret, mapped)
+		}
+		return ret
+	default:
+		return nil
+	}
+}
+
+func llmStreamProviderAndModel(output map[string]any) (string, string) {
+	contextBudget, ok := output["contextBudget"].(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	return stringFromAny(contextBudget["providerId"]), stringFromAny(contextBudget["model"])
+}
+
+func streamProgressSummary(output map[string]any) string {
+	if output == nil {
+		return ""
+	}
+	stage := stringFromAny(output["stage"])
+	status := stringFromAny(output["status"])
+	switch {
+	case stage != "" && status != "":
+		return stage + " - " + status
+	case stage != "":
+		return stage
+	default:
+		return status
+	}
+}
+
+func (o *RuntimeOrchestrator) publishLLMUsageFromStep(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
+	if o.eventHub == nil || run == nil || step == nil || len(step.Output) == 0 {
+		return nil
+	}
+	if !strings.HasPrefix(strings.TrimSpace(step.Kind), "llm/") {
+		return nil
+	}
+	usage, ok := step.Output["llmUsage"].(map[string]any)
+	if !ok || len(usage) == 0 {
+		return nil
+	}
+	usagePayload := cloneStepPayload(usage)
+	usagePayload[events.PayloadKeyWorkspaceID] = string(run.WorkspaceID)
+	usagePayload[events.PayloadKeyRunID] = string(run.ID)
+	usagePayload[events.PayloadKeyStepID] = string(step.ID)
+	if stringFromAny(usagePayload[events.PayloadKeyStatus]) == "" {
+		usagePayload[events.PayloadKeyStatus] = string(step.State)
+	}
+	usageData, ok := events.DecodeLLMUsagePayload(usagePayload)
+	if !ok {
+		return nil
+	}
+	return o.eventHub.Publish(ctx, events.Envelope{
+		ID:           fmt.Sprintf("%s/event/llm-usage-recorded", step.ID),
+		Version:      events.WorkorchEventVersion,
+		Topic:        events.TopicRunLLMUsageRecorded,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "llm_usage",
+		SubjectID:    string(step.ID),
+		WorkspaceID:  string(run.WorkspaceID),
+		RunID:        string(run.ID),
+		StepID:       string(step.ID),
+		Payload:      events.LLMUsagePayload(usageData),
 	})
 }

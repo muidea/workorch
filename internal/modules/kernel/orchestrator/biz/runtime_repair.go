@@ -268,7 +268,12 @@ func isRetryableLLMProviderRuntimeFailure(run *runModel.Run, step *runModel.Step
 	if !isLLMProviderRuntimeFailure(run, step) {
 		return false
 	}
-	return stringFromMap(step.Output, failureOutputKeyClass) == failureClassProviderTimeout
+	switch stringFromMap(step.Output, failureOutputKeyClass) {
+	case failureClassProviderTimeout, failureClassContextTooLarge, failureClassRateLimited:
+		return true
+	default:
+		return false
+	}
 }
 
 func isLLMProviderRuntimeFailure(run *runModel.Run, step *runModel.Step) bool {

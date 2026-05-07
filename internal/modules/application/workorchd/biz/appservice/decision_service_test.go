@@ -261,6 +261,29 @@ func TestResolveDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 	}
 }
 
+func TestResolveDecisionWithBackendNormalizesSemanticIntent(t *testing.T) {
+	dataRoot := t.TempDir()
+	started := prepareDecisionRun(t, dataRoot, "ws-decision-semantic", "run-decision-semantic")
+
+	item, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType: "auto",
+		ResolutionPayload: map[string]any{
+			"answer":   "请重新规划执行方案",
+			"operator": "tui",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveDecisionWithBackend: %v", err)
+	}
+	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan {
+		t.Fatalf("decision = %+v, want resolved replan", item)
+	}
+	semantic, _ := item.ResolutionPayload["governanceSemantic"].(map[string]any)
+	if semantic["intent"] != "request_replan" || semantic["source"] != "tui" || semantic["rawInput"] != "请重新规划执行方案" {
+		t.Fatalf("semantic payload = %+v, want normalized intent/source/rawInput", semantic)
+	}
+}
+
 func TestResolveDecisionWithSessionReusesReturnedEntitiesForResponse(t *testing.T) {
 	session, tickets, resolutions := newCountingDecisionRuntimeSession(t)
 	ctx := context.Background()

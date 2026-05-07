@@ -54,20 +54,55 @@
 - `CTX-07/CTX-10 Observability + Read Model Projection` 已收口基础版：
   - `llm/workspace_execution` step 输出包含结构化 `contextBudget`
   - `RunSnapshot/RunObservability` 增加 `llmContextBudgets` 投影，web/tui 共用同一读模型
+- `CTX-08 Provider Failure Policy and Failover` 已收口基础版：
+  - provider 失败细分类已扩展：`provider_timeout`、`context_too_large`、`rate_limited`、`auth_or_config_error`、`provider_unavailable`
+  - `RuntimeAdapter` 支持一次性 failover（按 provider 配置启用并记录 from/to provider 与失败原因）
+  - retryable provider failure 已扩展到 `provider_timeout` / `context_too_large` / `rate_limited`
+- `CTX-09 Multi-Client Governance Semantic Normalization` 已收口基础版：
+  - 新增治理语义归一能力（`kernel/governance/pkg/common`），统一推断 decision/approval 语义意图
+  - `appservice` 侧统一接入 decision resolution 归一，支持 `resolutionType=auto` + 文本意图推断
+  - 归一结果写入 `resolutionPayload.governanceSemantic`（`resolutionType/intent/confidence/rawInput/source/inferred`）
+  - TUI 本地 decision/approval 文本判断改为复用同一治理语义归一逻辑
+  - batch approval 支持语义 action 文本归一到 `approve/reject`
+- `CTX-12 Streaming LLM Progress Event Projection` 已收口基础版：
+  - 新增统一事件主题 `TopicRunLLMStreamProgress`（`/run/llm_stream/progress`）
+  - orchestrator 在 LLM step 完成/失败后从 `streamEvents` 聚合 `chunkCount/receivedBytes/elapsedMs/status` 并发布 EventHub 事件
+  - eventstream 持久化链路自动覆盖该主题，read-model timeline 新增 `llm_stream_progress_event` 投影
+  - 保持 streaming 仅用于进度观测，不改变最终 `LLMExecutionDecision` 业务决策边界
+- `CTX-13 Workspace LLM Usage and Cost Ledger` 已收口基础版：
+  - 新增统一事件主题 `TopicRunLLMUsageRecorded`（`/run/llm_usage/recorded`）
+  - LLM runtime 输出新增结构化 `llmUsage`（workspace/run/step/provider/model/operation/token/bytes/streaming/duration/status/failureClass/contextBudget）
+  - orchestrator 在 step 状态变更后将 `llmUsage` 投影为 EventHub 事件并进入 eventstream 持久化
+  - read-model 新增 `llmUsageTraces` + `llmUsageSummary`，支持 run/workspace 级追溯与汇总
+  - `llmUsageSummary` 已补充 `providerNativeEntries/costEstimatedEntries` 聚合指标
+  - `llmUsageSummary` 已补充 `providerModelBreakdown`（providerId/provider/model 维度 entry/token/cost 聚合）
+  - provider profile 已支持 `inputTokenPrice/outputTokenPrice/currency`，`llmUsage.estimatedCost` 按 usage token 自动计算
+  - `llmUsage` 新增 `usageSource/costEstimated/costSource` 语义字段，区分 token 统计来源与成本口径，避免 `estimated=false` 时误读成本语义
+  - read-model 已对缺失语义字段做统一归一（`usageSource` 与 `costEstimated/costSource` 推断），保障投影稳定
+  - fallback usage 估算已改为使用实际请求/响应体量，不再将 `contextBudget.actualTokens` 或 `reservedOutputTokens` 等预算字段误计为实际 usage
+  - read-model 成本汇总已按 currency 分组，单币种时才投影顶层 `estimatedCost/currency`，多币种时只通过 `costBreakdown` 展示，避免跨币种直接相加
+  - configuration API 已透出并支持更新 `contextProfile`，确保价格字段可通过统一配置框架管理
+  - 部署 e2e 脚本 `verify-llm-workspace-execution.sh` 已补充 `llmUsageTraces/llmUsageSummary` 语义一致性断言
+  - 部署 e2e mock 现已同时覆盖 `usageSource=estimated`（provider 无 usage 返回）与 `usageSource=provider_native`（provider 返回 usage）两条链路并逐 run 断言
+  - 部署 e2e 进一步覆盖 streaming 场景：`verify-stream-native`（SSE usage 返回）与 `verify-stream-estimated`（SSE 无 usage 返回）已纳入逐 run 断言
+  - 部署 e2e 已新增 workspace 级 provider/model breakdown 与 costBreakdown 断言（需部署包含该 read-model 投影的新版本后执行）
+  - 已在本地新实例（`127.0.0.1:18081`）执行 `verify-llm-workspace-execution.sh` 验证通过
+  - OpenAI/Anthropic/HTTP 非流式调用已接入 provider 原生 usage，runtime 优先写入 `estimated=false`
+  - streaming 场景已接入 provider 原生 usage 优先链路（provider 返回 usage 时 `estimated=false`；未返回时回退估算）
 - 已补充受影响测试：
   - `internal/modules/blocks/llm/biz`
   - `internal/pkg/workorchconfig`
   - `internal/modules/application/workorchd/biz/appservice`
+  - `internal/modules/kernel/orchestrator/biz`
 
 ### 未完全收口，需要纳入下一轮
 
 - 当前仍未接入真实 tokenizer 或 provider 原生 token usage。
 - context budget 元数据已完成基础投影；细粒度展示和聚合统计仍待补齐。
-- 尚未支持 context-too-large 与 provider timeout 的差异化治理策略。
-- 尚未支持 provider/model failover，provider 持续不可用时仍依赖治理阻塞处理。
-- HTTP/console 等非 TUI 客户端的 decision/approval 语义归一仍需统一，避免不同入口形成治理行为差异。
-- 当前 LLM streaming 能力已有 provider 层接口，但默认未启用，且 stream delta 尚未通过 eventhub 投影为 run progress。
-- 当前尚未以 workspace 为单位建立 LLM usage/cost ledger，无法对 provider/model 成本进行运行期追溯和汇总。
+- provider failover 当前为基础一跳策略（单次切换），尚未支持多级策略、权重或健康度感知。
+- approval 语义归一当前已覆盖 TUI 与 batch approval；单条 approve/reject endpoint 仍为显式动作接口，尚未扩展语义 payload 追溯字段。
+- 当前 LLM streaming 已完成 eventhub/run progress 基础投影；stream 记录上限策略与 UI 细粒度展示仍待补齐。
+- 当前已具备 workspace 维度 LLM usage ledger、价格配置驱动估算成本、usage/cost 语义区分、以及非流式/流式 provider 原生 usage 优先链路；剩余项聚焦 provider 侧覆盖率与精度提升。
 
 ## 待办项
 
@@ -147,6 +182,8 @@
 
 ### CTX-08 Provider Failure Policy and Failover
 
+状态：基础收口已完成（失败分类 + 单次 failover + 可追溯元数据），高级策略待补齐。
+
 - 区分不同 provider 失败类型：
   - `provider_timeout`
   - `context_too_large`
@@ -159,6 +196,8 @@
 - failover 后必须记录原 provider/model、目标 provider/model、失败原因和上下文预算变化。
 
 ### CTX-09 Multi-Client Governance Semantic Normalization
+
+状态：基础收口已完成（统一归一能力 + appservice/tui 接入 + payload 追溯字段），入口覆盖与治理记录细化待补齐。
 
 - TUI、HTTP、console、自动治理入口必须复用同一套 decision/approval 语义归一逻辑。
 - 用户输入的治理意图应根据语义识别为：
@@ -198,6 +237,8 @@
 
 ### CTX-12 Streaming LLM Progress Event Projection
 
+状态：基础收口已完成（EventHub 事件主题 + orchestrator 聚合发布 + eventstream 持久化 + read-model timeline 投影），高级展示与记录策略待补齐。
+
 - 支持按 provider/model capability 启用 LLM streaming。
 - streaming 只用于进度展示、运行期观测和故障排查，不直接驱动业务状态流转。
 - 最终仍以完整响应解析出的 `LLMExecutionDecision` 作为唯一业务决策输入。
@@ -222,6 +263,8 @@
   - streaming 中断时记录已收到的 progress，并进入统一 provider failure policy。
 
 ### CTX-13 Workspace LLM Usage and Cost Ledger
+
+状态：基础收口已完成并补齐估算成本与原生 usage 优先能力（runtime usage 输出 + EventHub 事件 + eventstream 持久化 + run/workspace read-model 投影 + profile 价格估算 + provider native usage 优先），高精度能力待补齐。
 
 - 建立独立的 LLM usage ledger，按 workspace/run/step 记录每次 LLM 调用。
 - usage ledger 必须保持基础能力中立，不绑定具体 workspaceTemplate。
@@ -251,9 +294,13 @@
 - provider 返回 usage 时优先使用真实 usage。
 - provider 未返回 usage 时，使用 provider/model context profile 的估算规则，并标记 `estimated=true`。
 - provider/model 价格信息放在配置或 profile 中，不硬编码在业务逻辑里。
+- `estimatedCost` 表示基于本地 provider profile 价格配置计算出的估算成本，不代表 provider 实际账单。
+- `costEstimated=true` 表示成本口径为估算；即使 token usage 来自 provider native，成本仍可能因为使用本地 profile pricing 而保持估算口径。
+- 成本汇总必须按 `currency` 分组；只有单一币种时才允许在 summary 顶层展示 `estimatedCost/currency`，多币种必须使用 `costBreakdown`。
 - 支持 workspace 维度聚合：
   - total input/output/total tokens
   - estimated cost
+  - currency-aware cost breakdown
   - provider/model 分布
   - run/step 级明细
   - failure cost and retry cost
@@ -272,4 +319,4 @@
 - 已验证：受影响范围测试通过：
   - `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorch/service/tui -count=1`
 - 前置能力：固定 bytes 预算和 provider timeout retry 已完成基础收口。
-- 主要遗留：provider failover、多入口治理语义归一、streaming progress event、workspace usage/cost ledger、真实 tokenizer/原生 token usage、context-too-large 差异化治理策略。
+- 主要遗留：provider failover 高级策略、多入口治理语义归一的剩余入口覆盖、真实 tokenizer/原生 token usage、provider 原生 usage 的跨模型覆盖率与精度提升、context-too-large 差异化治理策略。

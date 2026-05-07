@@ -39,12 +39,20 @@ type ProviderContextProfile struct {
 	SafetyRatio            float64 `json:"safetyRatio,omitempty"`
 	BytesHardLimit         int     `json:"bytesHardLimit,omitempty"`
 	EstimatedTokensPerByte float64 `json:"estimatedTokensPerByte,omitempty"`
+	InputTokenPrice        float64 `json:"inputTokenPrice,omitempty"`
+	OutputTokenPrice       float64 `json:"outputTokenPrice,omitempty"`
+	Currency               string  `json:"currency,omitempty"`
 }
 
 type ProviderUsage struct {
 	InputTokens  int `json:"inputTokens,omitempty"`
 	OutputTokens int `json:"outputTokens,omitempty"`
 	TotalTokens  int `json:"totalTokens,omitempty"`
+}
+
+type ProviderCompletionResult struct {
+	Payload []byte         `json:"payload,omitempty"`
+	Usage   *ProviderUsage `json:"usage,omitempty"`
 }
 
 type ProviderRepairRequest struct {

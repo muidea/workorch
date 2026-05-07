@@ -42,6 +42,9 @@ reservedOutputTokens = 4096
 safetyRatio = 0.8
 bytesHardLimit = 98304
 estimatedTokensPerByte = 0.25
+inputTokenPrice = 0.000001
+outputTokenPrice = 0.000002
+currency = "USD"
 	disabled = false
 
 [webSearch]
@@ -113,7 +116,10 @@ maxRepeatedSamePrompt = 1
 		cfg.LLM.Providers["local"].ReservedOutputTokens != 4096 ||
 		cfg.LLM.Providers["local"].SafetyRatio != 0.8 ||
 		cfg.LLM.Providers["local"].BytesHardLimit != 98304 ||
-		cfg.LLM.Providers["local"].EstimatedTokensPerByte != 0.25 {
+		cfg.LLM.Providers["local"].EstimatedTokensPerByte != 0.25 ||
+		cfg.LLM.Providers["local"].InputTokenPrice != 0.000001 ||
+		cfg.LLM.Providers["local"].OutputTokenPrice != 0.000002 ||
+		cfg.LLM.Providers["local"].Currency != "USD" {
 		t.Fatalf("llm provider profile = %+v, want context profile values", cfg.LLM.Providers["local"])
 	}
 	if cfg.WebSearch.DefaultProvider != "search" ||
@@ -156,6 +162,9 @@ reservedOutputTokens = 4096
 safetyRatio = 0.8
 bytesHardLimit = 98304
 estimatedTokensPerByte = 0.25
+inputTokenPrice = 0.000001
+outputTokenPrice = 0.000002
+currency = "USD"
 disabled = false
 	`)
 	_ = Close()
@@ -182,6 +191,9 @@ disabled = false
 			SafetyRatio:            0.8,
 			BytesHardLimit:         131072,
 			EstimatedTokensPerByte: 0.25,
+			InputTokenPrice:        0.000001,
+			OutputTokenPrice:       0.000002,
+			Currency:               "USD",
 		},
 	}
 	cfg.WebSearch.DefaultProvider = "search"
@@ -304,6 +316,9 @@ func TestLLMProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 					SafetyRatio:            0.8,
 					BytesHardLimit:         65536,
 					EstimatedTokensPerByte: 0.25,
+					InputTokenPrice:        0.000001,
+					OutputTokenPrice:       0.000002,
+					Currency:               "USD",
 				},
 			},
 		},
@@ -319,7 +334,10 @@ func TestLLMProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 		values["reservedOutputTokens"] != "2048" ||
 		values["safetyRatio"] != "0.8" ||
 		values["bytesHardLimit"] != "65536" ||
-		values["estimatedTokensPerByte"] != "0.25" {
+		values["estimatedTokensPerByte"] != "0.25" ||
+		values["inputTokenPrice"] != "0.000001" ||
+		values["outputTokenPrice"] != "0.000002" ||
+		values["currency"] != "USD" {
 		t.Fatalf("provider values = %+v, want llm provider bridge values", values)
 	}
 	valueSets := cfg.LLMProviderValueSets()

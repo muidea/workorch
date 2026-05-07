@@ -21,11 +21,15 @@ type staticProvider struct {
 	payload []byte
 	err     error
 	request llmmodels.ProviderRequest
+	usage   *llmmodels.ProviderUsage
 }
 
-func (p *staticProvider) Complete(_ context.Context, request llmmodels.ProviderRequest) ([]byte, error) {
+func (p *staticProvider) Complete(_ context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
 	p.request = request
-	return p.payload, p.err
+	return llmmodels.ProviderCompletionResult{
+		Payload: p.payload,
+		Usage:   p.usage,
+	}, p.err
 }
 
 type sequenceProvider struct {
@@ -33,33 +37,49 @@ type sequenceProvider struct {
 	requests []llmmodels.ProviderRequest
 }
 
-func (p *sequenceProvider) Complete(_ context.Context, request llmmodels.ProviderRequest) ([]byte, error) {
+func (p *sequenceProvider) Complete(_ context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
 	p.requests = append(p.requests, request)
 	if len(p.payloads) == 0 {
-		return nil, common.ErrInvalidArgument
+		return llmmodels.ProviderCompletionResult{}, common.ErrInvalidArgument
 	}
 	payload := p.payloads[0]
 	p.payloads = p.payloads[1:]
-	return payload, nil
+	return llmmodels.ProviderCompletionResult{Payload: payload}, nil
+}
+
+type failoverProvider struct {
+	payload  []byte
+	err      error
+	requests []llmmodels.ProviderRequest
+	usage    *llmmodels.ProviderUsage
+}
+
+func (p *failoverProvider) Complete(_ context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
+	p.requests = append(p.requests, request)
+	return llmmodels.ProviderCompletionResult{
+		Payload: p.payload,
+		Usage:   p.usage,
+	}, p.err
 }
 
 type streamingProvider struct {
 	payload []byte
 	events  []llmmodels.ProviderStreamEvent
+	usage   *llmmodels.ProviderUsage
 	err     error
 }
 
-func (p *streamingProvider) Complete(context.Context, llmmodels.ProviderRequest) ([]byte, error) {
-	return nil, common.ErrInvalidArgument
+func (p *streamingProvider) Complete(context.Context, llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
+	return llmmodels.ProviderCompletionResult{}, common.ErrInvalidArgument
 }
 
-func (p *streamingProvider) StreamComplete(_ context.Context, _ llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) ([]byte, error) {
+func (p *streamingProvider) StreamComplete(_ context.Context, _ llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) (llmmodels.ProviderCompletionResult, error) {
 	for _, event := range p.events {
 		if err := emit(event); err != nil {
-			return nil, err
+			return llmmodels.ProviderCompletionResult{}, err
 		}
 	}
-	return p.payload, p.err
+	return llmmodels.ProviderCompletionResult{Payload: p.payload, Usage: p.usage}, p.err
 }
 
 type embeddingStaticProvider struct {
@@ -68,8 +88,8 @@ type embeddingStaticProvider struct {
 	err     error
 }
 
-func (p *embeddingStaticProvider) Complete(context.Context, llmmodels.ProviderRequest) ([]byte, error) {
-	return nil, common.ErrInvalidArgument
+func (p *embeddingStaticProvider) Complete(context.Context, llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
+	return llmmodels.ProviderCompletionResult{}, common.ErrInvalidArgument
 }
 
 func (p *embeddingStaticProvider) Embed(_ context.Context, request llmmodels.ProviderEmbeddingRequest) (llmmodels.ProviderEmbeddingResult, error) {
@@ -112,6 +132,9 @@ func TestRuntimeAdapterProjectsContextBudgetToStepOutput(t *testing.T) {
 			SafetyRatio:            0.8,
 			BytesHardLimit:         64 * 1024,
 			EstimatedTokensPerByte: 0.25,
+			InputTokenPrice:        0.000001,
+			OutputTokenPrice:       0.000002,
+			Currency:               "usd",
 		},
 	}, provider)
 
@@ -128,6 +151,121 @@ func TestRuntimeAdapterProjectsContextBudgetToStepOutput(t *testing.T) {
 	}
 	if budget["maxBytes"] == nil || budget["actualBytes"] == nil || budget["truncated"] == nil {
 		t.Fatalf("contextBudget = %+v, want required budget fields", budget)
+	}
+	usage, ok := result.Output["llmUsage"].(map[string]any)
+	if !ok {
+		t.Fatalf("llmUsage = %#v, want usage metadata", result.Output["llmUsage"])
+	}
+	if usage["providerId"] != "reasoning" || usage["model"] != "test-model" || usage["estimated"] != true {
+		t.Fatalf("llmUsage = %+v, want provider/model usage projection", usage)
+	}
+	if usage["usageSource"] != llmcommon.UsageSourceEstimated {
+		t.Fatalf("llmUsage = %+v, want estimated usage source", usage)
+	}
+	outputTokens, ok := usage["outputTokens"].(int)
+	if !ok {
+		t.Fatalf("llmUsage = %+v, want integer outputTokens", usage)
+	}
+	expectedOutputTokens := estimateUsageTokensFromBytes(len(provider.payload), 0.25)
+	if outputTokens != expectedOutputTokens {
+		t.Fatalf("llmUsage = %+v, want outputTokens estimated from response bytes %d", usage, expectedOutputTokens)
+	}
+	inputTokens, ok := usage["inputTokens"].(int)
+	if !ok || inputTokens <= 0 {
+		t.Fatalf("llmUsage = %+v, want positive integer inputTokens", usage)
+	}
+	totalTokens, ok := usage["totalTokens"].(int)
+	if !ok || totalTokens != inputTokens+outputTokens {
+		t.Fatalf("llmUsage = %+v, want totalTokens=inputTokens+outputTokens", usage)
+	}
+	if usage["estimatedCost"] == nil || usage["currency"] != "USD" || usage["costEstimated"] != true || usage["costSource"] != llmcommon.CostSourceProfilePricing {
+		t.Fatalf("llmUsage = %+v, want estimated cost with currency", usage)
+	}
+}
+
+func TestRuntimeAdapterUsesNativeProviderUsageWhenAvailable(t *testing.T) {
+	provider := &staticProvider{
+		payload: []byte(`{
+			"completionState":"continue",
+			"shellCommands":[{"command":"echo","args":["ok"]}]
+		}`),
+		usage: &llmmodels.ProviderUsage{
+			InputTokens:  11,
+			OutputTokens: 7,
+			TotalTokens:  18,
+		},
+	}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		ID:       "reasoning",
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		ContextProfile: llmmodels.ProviderContextProfile{
+			EstimatedTokensPerByte: 0.25,
+		},
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	usage, ok := result.Output["llmUsage"].(map[string]any)
+	if !ok {
+		t.Fatalf("llmUsage = %#v, want usage metadata", result.Output["llmUsage"])
+	}
+	if usage["estimated"] != false ||
+		usage["inputTokens"] != 11 ||
+		usage["outputTokens"] != 7 ||
+		usage["totalTokens"] != 18 {
+		t.Fatalf("llmUsage = %+v, want native usage with estimated=false", usage)
+	}
+	if usage["usageSource"] != llmcommon.UsageSourceProviderNative {
+		t.Fatalf("llmUsage = %+v, want provider native usage source", usage)
+	}
+}
+
+func TestRuntimeAdapterUsesNativeProviderUsageForStreamingWhenAvailable(t *testing.T) {
+	provider := &streamingProvider{
+		events: []llmmodels.ProviderStreamEvent{
+			{Type: "delta", Delta: `{"completionState":"continue"`},
+			{Type: "delta", Delta: `,"shellCommands":[{"command":"echo","args":["ok"]}]}`},
+			{Type: "done"},
+		},
+		payload: []byte(`{"completionState":"continue","shellCommands":[{"command":"echo","args":["ok"]}]}`),
+		usage: &llmmodels.ProviderUsage{
+			InputTokens:  23,
+			OutputTokens: 9,
+			TotalTokens:  32,
+		},
+	}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		ID:       "streaming-provider",
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Capabilities: llmmodels.ProviderCapabilities{
+			ChatCompletions: true,
+			Streaming:       true,
+		},
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	usage, ok := result.Output["llmUsage"].(map[string]any)
+	if !ok {
+		t.Fatalf("llmUsage = %#v, want usage metadata", result.Output["llmUsage"])
+	}
+	if usage["estimated"] != false ||
+		usage["inputTokens"] != 23 ||
+		usage["outputTokens"] != 9 ||
+		usage["totalTokens"] != 32 ||
+		usage["streaming"] != true {
+		t.Fatalf("llmUsage = %+v, want native streaming usage with estimated=false", usage)
+	}
+	if usage["usageSource"] != llmcommon.UsageSourceProviderNative {
+		t.Fatalf("llmUsage = %+v, want provider native usage source", usage)
 	}
 }
 
@@ -733,6 +871,60 @@ func TestRuntimeAdapterFailsUnknownRequestedProvider(t *testing.T) {
 	provider, ok := result.Output["provider"].(llmmodels.RedactedProviderConfig)
 	if result.Output["stage"] != "llm_provider_unavailable" || !ok || provider.ID != "missing" {
 		t.Fatalf("output = %+v, want missing provider failure", result.Output)
+	}
+}
+
+func TestRuntimeAdapterFailoverOnRetryableProviderFailure(t *testing.T) {
+	primary := &failoverProvider{err: errors.New("http status 429: rate limit reached")}
+	backup := &failoverProvider{payload: []byte(`{
+		"completionState":"continue",
+		"shellCommands":[{"command":"echo","args":["fallback"]}]
+	}`)}
+	adapter := NewRuntimeAdapterWithProviders("primary", map[string]ProviderRuntime{
+		"primary": {
+			Config: llmmodels.ProviderConfig{
+				ID:                "primary",
+				Provider:          llmcommon.ProviderCompatible,
+				APIKey:            "primary-secret",
+				Model:             "primary-model",
+				FailoverEnabled:   true,
+				FailoverProviders: []string{"backup"},
+			},
+			Provider: primary,
+		},
+		"backup": {
+			Config: llmmodels.ProviderConfig{
+				ID:       "backup",
+				Provider: llmcommon.ProviderCompatible,
+				APIKey:   "backup-secret",
+				Model:    "backup-model",
+			},
+			Provider: backup,
+		},
+	})
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	if len(primary.requests) != 1 || len(backup.requests) != 1 {
+		t.Fatalf("provider calls primary=%d backup=%d, want one call each", len(primary.requests), len(backup.requests))
+	}
+	if result.Output["stage"] != "llm_shell_plan" {
+		t.Fatalf("output stage = %v, want llm_shell_plan from backup provider", result.Output["stage"])
+	}
+	budget, ok := result.Output["contextBudget"].(map[string]any)
+	if !ok || budget["providerId"] != "backup" || budget["model"] != "backup-model" {
+		t.Fatalf("contextBudget = %+v, want backup provider context projection", result.Output["contextBudget"])
+	}
+	failover, ok := result.Output["llmFailover"].(map[string]any)
+	if !ok ||
+		failover["attempted"] != true ||
+		failover["success"] != true ||
+		failover["failureClass"] != providerFailureClassRateLimited ||
+		failover["fromProviderId"] != "primary" ||
+		failover["toProviderId"] != "backup" {
+		t.Fatalf("llmFailover = %+v, want successful failover metadata", result.Output["llmFailover"])
 	}
 }
 

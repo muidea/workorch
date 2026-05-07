@@ -21,6 +21,16 @@ type RunEvent struct {
 	Data     RunPayloadData
 }
 
+type LLMStreamProgressEvent struct {
+	envelope Envelope
+	Data     LLMStreamProgressPayloadData
+}
+
+type LLMUsageEvent struct {
+	envelope Envelope
+	Data     LLMUsagePayloadData
+}
+
 type GoalEvent struct {
 	envelope Envelope
 	Data     GoalPayloadData
@@ -87,6 +97,8 @@ var workorchTopics = []string{
 	TopicDoDDefined,
 	TopicRunCreated,
 	TopicRunStateChanged,
+	TopicRunLLMStreamProgress,
+	TopicRunLLMUsageRecorded,
 	TopicStepDispatched,
 	TopicStepStateChanged,
 	TopicTicketCreated,
@@ -150,6 +162,18 @@ func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 		return event, true
 	case TopicRunCreated, TopicRunStateChanged:
 		event, ok := DecodeRunEvent(envelope)
+		if !ok {
+			return nil, false
+		}
+		return event, true
+	case TopicRunLLMStreamProgress:
+		event, ok := DecodeLLMStreamProgressEvent(envelope)
+		if !ok {
+			return nil, false
+		}
+		return event, true
+	case TopicRunLLMUsageRecorded:
+		event, ok := DecodeLLMUsageEvent(envelope)
 		if !ok {
 			return nil, false
 		}
@@ -266,6 +290,53 @@ func DecodeRunEvent(envelope Envelope) (RunEvent, bool) {
 		data.FailureReason,
 	)
 	return RunEvent{envelope: envelope, Data: data}, true
+}
+
+func DecodeLLMStreamProgressEvent(envelope Envelope) (LLMStreamProgressEvent, bool) {
+	if envelope.Topic != TopicRunLLMStreamProgress {
+		return LLMStreamProgressEvent{}, false
+	}
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
+		return LLMStreamProgressEvent{}, false
+	}
+	data, ok := DecodeLLMStreamProgressPayload(envelope.Payload)
+	if !ok {
+		return LLMStreamProgressEvent{}, false
+	}
+	envelope = cloneEnvelope(envelope)
+	envelope.Version = spec.CurrentVersion
+	envelope.Payload = LLMStreamProgressPayload(
+		data.WorkspaceID,
+		data.RunID,
+		data.StepID,
+		data.ProviderID,
+		data.Model,
+		data.ChunkCount,
+		data.ReceivedBytes,
+		data.ElapsedMs,
+		data.Status,
+		data.Summary,
+	)
+	return LLMStreamProgressEvent{envelope: envelope, Data: data}, true
+}
+
+func DecodeLLMUsageEvent(envelope Envelope) (LLMUsageEvent, bool) {
+	if envelope.Topic != TopicRunLLMUsageRecorded {
+		return LLMUsageEvent{}, false
+	}
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
+		return LLMUsageEvent{}, false
+	}
+	data, ok := DecodeLLMUsagePayload(envelope.Payload)
+	if !ok {
+		return LLMUsageEvent{}, false
+	}
+	envelope = cloneEnvelope(envelope)
+	envelope.Version = spec.CurrentVersion
+	envelope.Payload = LLMUsagePayload(data)
+	return LLMUsageEvent{envelope: envelope, Data: data}, true
 }
 
 func DecodeGoalEvent(envelope Envelope) (GoalEvent, bool) {
@@ -515,6 +586,22 @@ func (e RunEvent) Envelope() Envelope {
 }
 
 func (e RunEvent) Topic() string {
+	return e.envelope.Topic
+}
+
+func (e LLMStreamProgressEvent) Envelope() Envelope {
+	return cloneEnvelope(e.envelope)
+}
+
+func (e LLMStreamProgressEvent) Topic() string {
+	return e.envelope.Topic
+}
+
+func (e LLMUsageEvent) Envelope() Envelope {
+	return cloneEnvelope(e.envelope)
+}
+
+func (e LLMUsageEvent) Topic() string {
 	return e.envelope.Topic
 }
 

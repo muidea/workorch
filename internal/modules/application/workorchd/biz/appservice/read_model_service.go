@@ -568,6 +568,7 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		Patches:            mapPatches(patches),
 		WebSources:         mapWebSourceTraces(stepViews),
 		LLMContextBudgets:  mapLLMContextBudgetTraces(stepViews),
+		LLMUsageTraces:     mapLLMUsageTracesFromEventRecords(mapEventRecords(eventRecords), string(item.ID)),
 		ValidationResults:  mapValidationResults(validations),
 		RuntimeCheckpoints: mapRuntimeCheckpoints(checkpoints),
 		Results:            mapResults(results),
@@ -578,6 +579,7 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		Approvals:          approvals,
 		Observed:           presenter.MapObserved(observedItems),
 	}
+	ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
 	ret.Outcome = mapRunOutcome(ret)
 	capabilityCatalog := runtimeCapabilityCatalogFromItems(ret.Run.ExecutionContext, ret.ToolCalls, mcpCapabilityItems)
 	ret.SelectedCapabilities = selectedRuntimeCapabilities(ret.Run.ExecutionContext, capabilityCatalog)
@@ -690,6 +692,7 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 		ToolCalls:          mapToolCalls(toolCalls),
 		Patches:            mapPatches(patches),
 		LLMContextBudgets:  mapLLMContextBudgetTraces(stepViews),
+		LLMUsageTraces:     mapLLMUsageTracesFromEventRecords(mapEventRecords(eventRecords), string(item.ID)),
 		ValidationResults:  mapValidationResults(validations),
 		RuntimeCheckpoints: mapRuntimeCheckpoints(checkpoints),
 		Results:            mapResults(results),
@@ -699,6 +702,7 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 		Decisions:          decisions,
 		Approvals:          approvals,
 	}
+	ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
 	ret.Outcome = mapRunOutcome(ret)
 	ret.TaskProgress = mapTaskProgress(ret)
 	ret.RepairLoop = ret.TaskProgress.RepairLoop
@@ -892,6 +896,8 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		Decisions:    decisions,
 		Approvals:    approvals,
 	}
+	ret.LLMUsageTraces = mapLLMUsageTracesFromEventRecords(ret.EventRecords, "")
+	ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
 	ret.TaskProgress = mapWorkspaceTaskProgress(ret)
 	if projectionRun != nil {
 		var runSnapshot RunSnapshot
@@ -912,6 +918,8 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		ret.MemoryRecallTraces = runSnapshot.MemoryRecallTraces
 		ret.Patches = mergeWorkspaceSnapshotPatches(ret.Patches, runSnapshot.Patches)
 		ret.WebSources = runSnapshot.WebSources
+		ret.LLMUsageTraces = mergeWorkspaceLLMUsageTraces(ret.LLMUsageTraces, runSnapshot.LLMUsageTraces)
+		ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
 	}
 	ret.Outcome = mapWorkspaceOutcome(ret)
 	return ret, nil
@@ -1339,6 +1347,183 @@ func mapLLMContextBudgetTraces(steps []presenter.StepView) []LLMContextBudgetTra
 	return ret
 }
 
+func mapLLMUsageTracesFromEventRecords(records []EventRecord, runID string) []LLMUsageTrace {
+	if len(records) == 0 {
+		return nil
+	}
+	ret := make([]LLMUsageTrace, 0)
+	for _, item := range records {
+		if item.Topic != events.TopicRunLLMUsageRecorded {
+			continue
+		}
+		if runID != "" && item.RunID != runID {
+			continue
+		}
+		payload := cloneReadModelMap(item.Payload)
+		if len(payload) == 0 {
+			continue
+		}
+		estimated := readModelBoolValue(payload[events.PayloadKeyEstimated])
+		usageSource := readModelStringValue(payload[events.PayloadKeyUsageSource])
+		if strings.TrimSpace(usageSource) == "" {
+			if estimated {
+				usageSource = llmcommon.UsageSourceEstimated
+			} else {
+				usageSource = llmcommon.UsageSourceProviderNative
+			}
+		}
+		estimatedCost := readModelFloatValue(payload[events.PayloadKeyEstimatedCost])
+		costEstimated := readModelBoolValue(payload[events.PayloadKeyCostEstimated])
+		if !costEstimated && estimatedCost > 0 {
+			costEstimated = true
+		}
+		costSource := readModelStringValue(payload[events.PayloadKeyCostSource])
+		if costEstimated && strings.TrimSpace(costSource) == "" {
+			costSource = llmcommon.CostSourceProfilePricing
+		}
+		trace := LLMUsageTrace{
+			ID:            item.ID,
+			WorkspaceID:   firstNonEmptyReadModel(item.WorkspaceID, readModelStringValue(payload[events.PayloadKeyWorkspaceID])),
+			RunID:         firstNonEmptyReadModel(item.RunID, readModelStringValue(payload[events.PayloadKeyRunID])),
+			StepID:        firstNonEmptyReadModel(item.StepID, readModelStringValue(payload[events.PayloadKeyStepID])),
+			ProviderID:    readModelStringValue(payload[events.PayloadKeyProviderID]),
+			Provider:      readModelStringValue(payload[events.PayloadKeyProvider]),
+			Model:         readModelStringValue(payload[events.PayloadKeyModel]),
+			Operation:     readModelStringValue(payload[events.PayloadKeyOperation]),
+			InputTokens:   readModelIntValue(payload[events.PayloadKeyInputTokens]),
+			OutputTokens:  readModelIntValue(payload[events.PayloadKeyOutputTokens]),
+			TotalTokens:   readModelIntValue(payload[events.PayloadKeyTotalTokens]),
+			Estimated:     estimated,
+			UsageSource:   usageSource,
+			EstimatedCost: estimatedCost,
+			CostEstimated: costEstimated,
+			CostSource:    costSource,
+			Currency:      readModelStringValue(payload[events.PayloadKeyCurrency]),
+			RequestBytes:  readModelIntValue(payload[events.PayloadKeyRequestBytes]),
+			ResponseBytes: readModelIntValue(payload[events.PayloadKeyResponseBytes]),
+			Streaming:     readModelBoolValue(payload[events.PayloadKeyStreaming]),
+			ContextBudget: readModelMapValue(payload[events.PayloadKeyContextBudget]),
+			StartedAt:     readModelStringValue(payload[events.PayloadKeyStartedAt]),
+			CompletedAt:   readModelStringValue(payload[events.PayloadKeyCompletedAt]),
+			DurationMs:    readModelIntValue(payload[events.PayloadKeyDurationMs]),
+			Status:        readModelStringValue(payload[events.PayloadKeyStatus]),
+			FailureClass:  readModelStringValue(payload[events.PayloadKeyFailureClass]),
+			OccurredAt:    item.OccurredAt,
+			EvidenceRef:   firstNonEmptyReadModel(item.StepID, item.SubjectID),
+		}
+		ret = append(ret, trace)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	sort.SliceStable(ret, func(i, j int) bool {
+		if ret[i].OccurredAt == ret[j].OccurredAt {
+			return ret[i].ID < ret[j].ID
+		}
+		return ret[i].OccurredAt < ret[j].OccurredAt
+	})
+	return ret
+}
+
+func summarizeLLMUsage(items []LLMUsageTrace) LLMUsageSummary {
+	ret := LLMUsageSummary{}
+	breakdownByKey := map[string]*LLMUsageProviderModelBreakdown{}
+	costByCurrency := map[string]*LLMUsageCostBreakdown{}
+	for _, item := range items {
+		ret.EntryTotal++
+		ret.InputTokens += item.InputTokens
+		ret.OutputTokens += item.OutputTokens
+		ret.TotalTokens += item.TotalTokens
+		if item.Estimated {
+			ret.EstimatedEntries++
+		}
+		if strings.TrimSpace(item.UsageSource) == llmcommon.UsageSourceProviderNative {
+			ret.ProviderNativeEntries++
+		}
+		if item.CostEstimated {
+			ret.CostEstimatedEntries++
+		}
+		if item.Status == "failed" {
+			ret.FailedEntries++
+		}
+		currency := normalizedLLMUsageCurrency(item.Currency, item.EstimatedCost)
+		if item.EstimatedCost > 0 && currency != "" {
+			costEntry, ok := costByCurrency[currency]
+			if !ok {
+				costEntry = &LLMUsageCostBreakdown{Currency: currency}
+				costByCurrency[currency] = costEntry
+			}
+			costEntry.EstimatedCost += item.EstimatedCost
+			costEntry.EntryTotal++
+		}
+
+		key := strings.TrimSpace(item.ProviderID) + "|" + strings.TrimSpace(item.Provider) + "|" + strings.TrimSpace(item.Model) + "|" + currency
+		entry, ok := breakdownByKey[key]
+		if !ok {
+			entry = &LLMUsageProviderModelBreakdown{
+				ProviderID: strings.TrimSpace(item.ProviderID),
+				Provider:   strings.TrimSpace(item.Provider),
+				Model:      strings.TrimSpace(item.Model),
+				Currency:   currency,
+			}
+			breakdownByKey[key] = entry
+		}
+		entry.EntryTotal++
+		entry.InputTokens += item.InputTokens
+		entry.OutputTokens += item.OutputTokens
+		entry.TotalTokens += item.TotalTokens
+		entry.EstimatedCost += item.EstimatedCost
+		if item.Estimated {
+			entry.EstimatedEntries++
+		}
+		if item.Status == "failed" {
+			entry.FailedEntries++
+		}
+	}
+	if len(breakdownByKey) > 0 {
+		ret.ProviderModelBreakdown = make([]LLMUsageProviderModelBreakdown, 0, len(breakdownByKey))
+		for _, item := range breakdownByKey {
+			ret.ProviderModelBreakdown = append(ret.ProviderModelBreakdown, *item)
+		}
+		sort.SliceStable(ret.ProviderModelBreakdown, func(i, j int) bool {
+			left := ret.ProviderModelBreakdown[i]
+			right := ret.ProviderModelBreakdown[j]
+			if left.ProviderID != right.ProviderID {
+				return left.ProviderID < right.ProviderID
+			}
+			if left.Provider != right.Provider {
+				return left.Provider < right.Provider
+			}
+			if left.Model != right.Model {
+				return left.Model < right.Model
+			}
+			return left.Currency < right.Currency
+		})
+	}
+	if len(costByCurrency) > 0 {
+		ret.CostBreakdown = make([]LLMUsageCostBreakdown, 0, len(costByCurrency))
+		for _, item := range costByCurrency {
+			ret.CostBreakdown = append(ret.CostBreakdown, *item)
+		}
+		sort.SliceStable(ret.CostBreakdown, func(i, j int) bool {
+			return ret.CostBreakdown[i].Currency < ret.CostBreakdown[j].Currency
+		})
+		if len(ret.CostBreakdown) == 1 {
+			ret.Currency = ret.CostBreakdown[0].Currency
+			ret.EstimatedCost = ret.CostBreakdown[0].EstimatedCost
+		}
+	}
+	return ret
+}
+
+func normalizedLLMUsageCurrency(currency string, estimatedCost float64) string {
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	if currency == "" && estimatedCost > 0 {
+		return "USD"
+	}
+	return currency
+}
+
 func webSearchTrace(step presenter.StepView) WebSourceTrace {
 	output := step.Output
 	evidenceRef := step.ID
@@ -1662,6 +1847,38 @@ func mergeWorkspaceSnapshotPatches(existing []Patch, latest []Patch) []Patch {
 		seen[item.ID] = len(out)
 		out = append(out, item)
 	}
+	return out
+}
+
+func mergeWorkspaceLLMUsageTraces(existing []LLMUsageTrace, latest []LLMUsageTrace) []LLMUsageTrace {
+	if len(existing) == 0 {
+		return latest
+	}
+	if len(latest) == 0 {
+		return existing
+	}
+	seen := make(map[string]int, len(existing)+len(latest))
+	out := make([]LLMUsageTrace, 0, len(existing)+len(latest))
+	for _, item := range existing {
+		key := firstNonEmptyReadModel(item.ID, item.StepID+"|"+item.OccurredAt)
+		seen[key] = len(out)
+		out = append(out, item)
+	}
+	for _, item := range latest {
+		key := firstNonEmptyReadModel(item.ID, item.StepID+"|"+item.OccurredAt)
+		if idx, ok := seen[key]; ok {
+			out[idx] = item
+			continue
+		}
+		seen[key] = len(out)
+		out = append(out, item)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].OccurredAt == out[j].OccurredAt {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].OccurredAt < out[j].OccurredAt
+	})
 	return out
 }
 
@@ -2213,6 +2430,21 @@ func readModelIntValue(value any) int {
 	return 0
 }
 
+func readModelFloatValue(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	default:
+		return 0
+	}
+}
+
 func readModelMapValue(value any) map[string]any {
 	switch typed := value.(type) {
 	case map[string]any:
@@ -2300,6 +2532,8 @@ func mapRunObservability(snapshot RunSnapshot) RunObservability {
 		TaskPlans:            snapshot.TaskPlans,
 		ExecutionSections:    snapshot.ExecutionSections,
 		LLMContextBudgets:    snapshot.LLMContextBudgets,
+		LLMUsageTraces:       snapshot.LLMUsageTraces,
+		LLMUsageSummary:      snapshot.LLMUsageSummary,
 		MemoryRecallTraces:   snapshot.MemoryRecallTraces,
 		WebSources:           snapshot.WebSources,
 		DoDEvidence:          snapshot.DoDEvidence,

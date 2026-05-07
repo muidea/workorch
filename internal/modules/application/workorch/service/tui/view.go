@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func (m AppModel) View() string {
@@ -163,6 +164,9 @@ func (m AppModel) renderMain(width, height int) string {
 		b.WriteString(section)
 	}
 	if section := renderMemoryRecallCompact(m.memoryRecalls, width-2, 3); section != "" {
+		b.WriteString(section)
+	}
+	if section := renderLLMUsageCompact(m.llmUsage, width-2); section != "" {
 		b.WriteString(section)
 	}
 	if section := renderGovernanceCompact(m.decisions, m.approvals, width-2, 2); section != "" {
@@ -335,6 +339,63 @@ func renderMemoryRecallCompact(items []backend.MemoryRecallTraceInfo, width int,
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func renderLLMUsageCompact(summary backend.LLMUsageSummaryInfo, width int) string {
+	if summary.EntryTotal == 0 || width <= 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(Heading.Render("LLM Usage"))
+	b.WriteString("\n")
+	parts := []string{
+		fmt.Sprintf("calls %d", summary.EntryTotal),
+		fmt.Sprintf("tokens %d/%d/%d", summary.InputTokens, summary.OutputTokens, summary.TotalTokens),
+	}
+	if summary.ProviderNativeEntries > 0 || summary.EstimatedEntries > 0 {
+		parts = append(parts, fmt.Sprintf("native/estimated %d/%d", summary.ProviderNativeEntries, summary.EstimatedEntries))
+	}
+	if cost := llmUsageCostLabel(summary); cost != "" {
+		parts = append(parts, cost)
+	}
+	if summary.FailedEntries > 0 {
+		parts = append(parts, fmt.Sprintf("failed %d", summary.FailedEntries))
+	}
+	b.WriteString(truncateDisplay("- "+strings.Join(parts, " | "), width))
+	b.WriteString("\n")
+	return b.String()
+}
+
+func llmUsageProgressText(payload map[string]any) string {
+	provider := firstPayloadString(payload, events.PayloadKeyProviderID, "providerId", "ProviderID")
+	model := firstPayloadString(payload, events.PayloadKeyModel, "model", "Model")
+	total := payloadIntValue(payload, events.PayloadKeyTotalTokens, "totalTokens", "TotalTokens")
+	status := firstPayloadString(payload, events.PayloadKeyStatus, "status", "Status")
+	label := strings.TrimSpace(strings.Join([]string{nonEmpty(provider, "llm"), model}, "/"))
+	if total > 0 {
+		return fmt.Sprintf("LLM usage recorded: %s %d tokens", label, total)
+	}
+	return "LLM usage recorded: " + strings.TrimSpace(label+" "+status)
+}
+
+func llmUsageCostLabel(summary backend.LLMUsageSummaryInfo) string {
+	if summary.Currency != "" && summary.EstimatedCost > 0 {
+		return fmt.Sprintf("cost %.6g %s", summary.EstimatedCost, summary.Currency)
+	}
+	if len(summary.CostBreakdown) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(summary.CostBreakdown))
+	for _, item := range summary.CostBreakdown {
+		if item.EstimatedCost <= 0 || item.Currency == "" {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%.6g %s", item.EstimatedCost, item.Currency))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "cost " + strings.Join(parts, ", ")
 }
 
 func renderGovernanceCompact(decisions []backend.DecisionInfo, approvals []backend.ApprovalInfo, width int, limit int) string {

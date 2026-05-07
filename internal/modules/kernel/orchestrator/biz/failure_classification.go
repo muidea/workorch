@@ -16,6 +16,9 @@ const (
 	failureClassProviderUnavailable = "provider_unavailable"
 	failureClassProviderSchemaDrift = "provider_schema_drift"
 	failureClassProviderTimeout     = "provider_timeout"
+	failureClassContextTooLarge     = "context_too_large"
+	failureClassRateLimited         = "rate_limited"
+	failureClassAuthOrConfigError   = "auth_or_config_error"
 	failureClassWorkspacePath       = "workspace_path_conflict"
 	failureClassShellCommand        = "shell_command_failed"
 	failureClassPatchApply          = "patch_apply_failed"
@@ -47,6 +50,12 @@ func classifyRuntimeFailure(step *runModel.Step, output map[string]any, summary 
 	lowerSummary := strings.ToLower(strings.TrimSpace(summary))
 	if isLLMProviderTimeoutFailure(lowerStage, execErr, output) {
 		class = failureClassProviderTimeout
+	} else if isLLMContextTooLargeFailure(lowerStage, execErr, output) {
+		class = failureClassContextTooLarge
+	} else if isLLMProviderRateLimitedFailure(lowerStage, execErr, output) {
+		class = failureClassRateLimited
+	} else if isLLMProviderAuthOrConfigFailure(lowerStage, execErr, output) {
+		class = failureClassAuthOrConfigError
 	} else if isLLMProviderSchemaFailure(lowerStage) {
 		class = failureClassProviderSchemaDrift
 	} else if isLLMProviderUnavailableFailure(lowerStage) {
@@ -82,11 +91,58 @@ func isLLMProviderTimeoutFailure(lowerStage string, execErr error, output map[st
 	if !strings.HasPrefix(lowerStage, "llm_") {
 		return false
 	}
-	if strings.Contains(lowerStage, "timeout") {
+	if lowerStage == "llm_provider_timeout" || strings.Contains(lowerStage, "timeout") {
 		return true
 	}
-	errText := strings.ToLower(firstNonEmptyString(errorString(execErr), stringFromMap(output, "error"), stringFromMap(output, "reason")))
+	errText := providerFailureErrorText(execErr, output)
 	return strings.Contains(errText, "deadline exceeded") || strings.Contains(errText, "timeout")
+}
+
+func isLLMContextTooLargeFailure(lowerStage string, execErr error, output map[string]any) bool {
+	if !strings.HasPrefix(lowerStage, "llm_") {
+		return false
+	}
+	if lowerStage == "llm_provider_request_too_large" {
+		return true
+	}
+	errText := providerFailureErrorText(execErr, output)
+	return strings.Contains(errText, "context length") ||
+		strings.Contains(errText, "maximum context") ||
+		strings.Contains(errText, "context window") ||
+		strings.Contains(errText, "too many tokens") ||
+		strings.Contains(errText, "token limit") ||
+		strings.Contains(errText, "request too large") ||
+		strings.Contains(errText, "input is too long") ||
+		strings.Contains(errText, "prompt is too long")
+}
+
+func isLLMProviderRateLimitedFailure(lowerStage string, execErr error, output map[string]any) bool {
+	if !strings.HasPrefix(lowerStage, "llm_") {
+		return false
+	}
+	if lowerStage == "llm_provider_rate_limited" {
+		return true
+	}
+	errText := providerFailureErrorText(execErr, output)
+	return strings.Contains(errText, "rate limit") ||
+		strings.Contains(errText, "too many requests") ||
+		strings.Contains(errText, "quota exceeded") ||
+		strings.Contains(errText, "http status 429")
+}
+
+func isLLMProviderAuthOrConfigFailure(lowerStage string, execErr error, output map[string]any) bool {
+	if !strings.HasPrefix(lowerStage, "llm_") {
+		return false
+	}
+	if lowerStage == "llm_provider_auth_or_config_error" {
+		return true
+	}
+	errText := providerFailureErrorText(execErr, output)
+	return strings.Contains(errText, "unauthorized") ||
+		strings.Contains(errText, "forbidden") ||
+		strings.Contains(errText, "invalid api key") ||
+		strings.Contains(errText, "authentication") ||
+		strings.Contains(errText, "api key")
 }
 
 func isLLMProviderSchemaFailure(lowerStage string) bool {
@@ -103,6 +159,10 @@ func isLLMProviderUnavailableFailure(lowerStage string) bool {
 	case "llm_provider_unavailable",
 		"llm_provider_client_unavailable",
 		"llm_provider_operation_unsupported",
+		"llm_provider_timeout",
+		"llm_provider_request_too_large",
+		"llm_provider_rate_limited",
+		"llm_provider_auth_or_config_error",
 		"llm_provider_error",
 		"llm_provider_stream_error",
 		"llm_provider_request_failed":
@@ -110,6 +170,10 @@ func isLLMProviderUnavailableFailure(lowerStage string) bool {
 	default:
 		return false
 	}
+}
+
+func providerFailureErrorText(execErr error, output map[string]any) string {
+	return strings.ToLower(firstNonEmptyString(errorString(execErr), stringFromMap(output, "error"), stringFromMap(output, "reason")))
 }
 
 func isMCPRejectedFailure(lowerStage string) bool {

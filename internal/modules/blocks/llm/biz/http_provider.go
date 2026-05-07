@@ -41,13 +41,13 @@ func NewHTTPProviderWithClient(config llmmodels.ProviderConfig, client *http.Cli
 	return &HTTPProvider{config: config, client: client}
 }
 
-func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderRequest) ([]byte, error) {
+func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
 	if p == nil || p.client == nil {
-		return nil, common.ErrInvalidArgument
+		return llmmodels.ProviderCompletionResult{}, common.ErrInvalidArgument
 	}
 	endpoint, err := chatCompletionsURL(p.config.BaseURL)
 	if err != nil {
-		return nil, err
+		return llmmodels.ProviderCompletionResult{}, err
 	}
 	payload, err := json.Marshal(chatCompletionRequest{
 		Model: p.config.Model,
@@ -59,11 +59,11 @@ func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderR
 		ResponseFormat: map[string]string{"type": "json_object"},
 	})
 	if err != nil {
-		return nil, err
+		return llmmodels.ProviderCompletionResult{}, err
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return nil, err
+		return llmmodels.ProviderCompletionResult{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
@@ -71,35 +71,38 @@ func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderR
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return nil, err
+		return llmmodels.ProviderCompletionResult{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderErrorBodyBytes))
-		return nil, fmt.Errorf("%w: llm provider http status %d: %s", common.ErrInvalidArgument, resp.StatusCode, sanitizeProviderBody(body, p.config.APIKey))
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider http status %d: %s", common.ErrInvalidArgument, resp.StatusCode, sanitizeProviderBody(body, p.config.APIKey))
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return llmmodels.ProviderCompletionResult{}, err
 	}
 	var decoded chatCompletionResponse
 	if err := json.Unmarshal(body, &decoded); err != nil {
-		return nil, fmt.Errorf("%w: invalid llm provider response: %v", common.ErrInvalidArgument, err)
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: invalid llm provider response: %v", common.ErrInvalidArgument, err)
 	}
 	content := strings.TrimSpace(decoded.FirstContent())
 	if content == "" {
-		return nil, fmt.Errorf("%w: llm provider response content is empty", common.ErrInvalidArgument)
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response content is empty", common.ErrInvalidArgument)
 	}
-	return []byte(content), nil
+	return llmmodels.ProviderCompletionResult{
+		Payload: []byte(content),
+		Usage:   decoded.Usage.ProviderUsage(),
+	}, nil
 }
 
-func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) ([]byte, error) {
+func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) (llmmodels.ProviderCompletionResult, error) {
 	if p == nil || p.client == nil {
-		return nil, common.ErrInvalidArgument
+		return llmmodels.ProviderCompletionResult{}, common.ErrInvalidArgument
 	}
 	endpoint, err := chatCompletionsURL(p.config.BaseURL)
 	if err != nil {
-		return nil, err
+		return llmmodels.ProviderCompletionResult{}, err
 	}
 	payload, err := json.Marshal(chatCompletionRequest{
 		Model: p.config.Model,
@@ -110,13 +113,14 @@ func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.Pro
 		Temperature:    0,
 		ResponseFormat: map[string]string{"type": "json_object"},
 		Stream:         true,
+		StreamOptions:  &chatCompletionStreamOptions{IncludeUsage: true},
 	})
 	if err != nil {
-		return nil, err
+		return llmmodels.ProviderCompletionResult{}, err
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return nil, err
+		return llmmodels.ProviderCompletionResult{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
@@ -124,22 +128,25 @@ func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.Pro
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return nil, err
+		return llmmodels.ProviderCompletionResult{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderErrorBodyBytes))
-		return nil, fmt.Errorf("%w: llm provider http status %d: %s", common.ErrInvalidArgument, resp.StatusCode, sanitizeProviderBody(body, p.config.APIKey))
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider http status %d: %s", common.ErrInvalidArgument, resp.StatusCode, sanitizeProviderBody(body, p.config.APIKey))
 	}
-	content, err := readChatCompletionStream(resp.Body, emit)
+	content, usage, err := readChatCompletionStream(resp.Body, emit)
 	if err != nil {
-		return nil, err
+		return llmmodels.ProviderCompletionResult{}, err
 	}
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return nil, fmt.Errorf("%w: llm provider streamed response content is empty", common.ErrInvalidArgument)
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider streamed response content is empty", common.ErrInvalidArgument)
 	}
-	return []byte(content), nil
+	return llmmodels.ProviderCompletionResult{
+		Payload: []byte(content),
+		Usage:   usage,
+	}, nil
 }
 
 func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbeddingRequest) (llmmodels.ProviderEmbeddingResult, error) {
@@ -203,11 +210,12 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 }
 
 type chatCompletionRequest struct {
-	Model          string                  `json:"model"`
-	Messages       []chatCompletionMessage `json:"messages"`
-	Temperature    float64                 `json:"temperature"`
-	ResponseFormat map[string]string       `json:"response_format,omitempty"`
-	Stream         bool                    `json:"stream,omitempty"`
+	Model          string                       `json:"model"`
+	Messages       []chatCompletionMessage      `json:"messages"`
+	Temperature    float64                      `json:"temperature"`
+	ResponseFormat map[string]string            `json:"response_format,omitempty"`
+	Stream         bool                         `json:"stream,omitempty"`
+	StreamOptions  *chatCompletionStreamOptions `json:"stream_options,omitempty"`
 }
 
 type chatCompletionMessage struct {
@@ -221,6 +229,7 @@ type chatCompletionResponse struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
+	Usage chatCompletionUsage `json:"usage"`
 }
 
 type chatCompletionStreamChunk struct {
@@ -233,6 +242,19 @@ type chatCompletionStreamChunk struct {
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
+	Usage chatCompletionUsage `json:"usage"`
+}
+
+type chatCompletionUsage struct {
+	PromptTokens     int `json:"prompt_tokens,omitempty"`
+	CompletionTokens int `json:"completion_tokens,omitempty"`
+	TotalTokens      int `json:"total_tokens,omitempty"`
+	InputTokens      int `json:"input_tokens,omitempty"`
+	OutputTokens     int `json:"output_tokens,omitempty"`
+}
+
+type chatCompletionStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type embeddingRequest struct {
@@ -300,10 +322,11 @@ func chatCompletionsURL(baseURL string) (string, error) {
 	return parsed.String(), nil
 }
 
-func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error) (string, error) {
+func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error) (string, *llmmodels.ProviderUsage, error) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxProviderStreamLineBytes)
 	var builder strings.Builder
+	var usage *llmmodels.ProviderUsage
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, ":") {
@@ -316,14 +339,17 @@ func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStre
 		if data == "[DONE]" {
 			if emit != nil {
 				if err := emit(llmmodels.ProviderStreamEvent{Type: "done"}); err != nil {
-					return "", err
+					return "", nil, err
 				}
 			}
-			return builder.String(), nil
+			return builder.String(), usage, nil
 		}
 		var chunk chatCompletionStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			return "", fmt.Errorf("%w: invalid llm provider stream chunk: %v", common.ErrInvalidArgument, err)
+			return "", nil, fmt.Errorf("%w: invalid llm provider stream chunk: %v", common.ErrInvalidArgument, err)
+		}
+		if parsed := chunk.Usage.ProviderUsage(); parsed != nil {
+			usage = parsed
 		}
 		for _, choice := range chunk.Choices {
 			delta := choice.Delta.Content
@@ -336,15 +362,32 @@ func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStre
 			builder.WriteString(delta)
 			if emit != nil {
 				if err := emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: delta}); err != nil {
-					return "", err
+					return "", nil, err
 				}
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return builder.String(), nil
+	return builder.String(), usage, nil
+}
+
+func (u chatCompletionUsage) ProviderUsage() *llmmodels.ProviderUsage {
+	input := max(u.PromptTokens, u.InputTokens)
+	output := max(u.CompletionTokens, u.OutputTokens)
+	total := u.TotalTokens
+	if total == 0 && (input > 0 || output > 0) {
+		total = input + output
+	}
+	if input == 0 && output == 0 && total == 0 {
+		return nil
+	}
+	return &llmmodels.ProviderUsage{
+		InputTokens:  input,
+		OutputTokens: output,
+		TotalTokens:  total,
+	}
 }
 
 func trimmedJoin(basePath string, child string) string {

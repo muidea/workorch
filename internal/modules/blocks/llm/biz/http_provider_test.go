@@ -39,7 +39,7 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 		Model:    "test-model",
 		Timeout:  5 * time.Second,
 	})
-	payload, err := provider.Complete(context.Background(), llmProviderRequest())
+	result, err := provider.Complete(context.Background(), llmProviderRequest())
 	if err != nil {
 		t.Fatalf("complete: %v", err)
 	}
@@ -67,8 +67,11 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 		!strings.Contains(gotPayload.Messages[1].Content, "runtimeCapabilities") {
 		t.Fatalf("messages = %+v, want runtime capability boundary", gotPayload.Messages)
 	}
-	if !strings.Contains(string(payload), `"completionState":"completed"`) {
-		t.Fatalf("payload = %s, want decision json", payload)
+	if !strings.Contains(string(result.Payload), `"completionState":"completed"`) {
+		t.Fatalf("payload = %s, want decision json", result.Payload)
+	}
+	if result.Usage != nil {
+		t.Fatalf("usage = %+v, want nil when provider response has no usage", result.Usage)
 	}
 }
 
@@ -103,6 +106,7 @@ func TestHTTPProviderStreamCompleteParsesChatCompletionDeltas(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"completionState\\\":\\\"continue\\\"\"}}]}\n\n"))
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\",\\\"shellCommands\\\":[{\\\"command\\\":\\\"echo\\\",\\\"args\\\":[\\\"ok\\\"]}]}\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18}}\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
@@ -115,7 +119,7 @@ func TestHTTPProviderStreamCompleteParsesChatCompletionDeltas(t *testing.T) {
 		Timeout:  5 * time.Second,
 	})
 	events := []llmmodels.ProviderStreamEvent{}
-	payload, err := provider.StreamComplete(context.Background(), llmProviderRequest(), func(event llmmodels.ProviderStreamEvent) error {
+	result, err := provider.StreamComplete(context.Background(), llmProviderRequest(), func(event llmmodels.ProviderStreamEvent) error {
 		events = append(events, event)
 		return nil
 	})
@@ -125,8 +129,14 @@ func TestHTTPProviderStreamCompleteParsesChatCompletionDeltas(t *testing.T) {
 	if !gotPayload.Stream {
 		t.Fatalf("stream flag = false, want true")
 	}
-	if !strings.Contains(string(payload), `"completionState":"continue"`) || len(events) != 3 || events[0].Delta == "" || events[2].Type != "done" {
-		t.Fatalf("payload=%s events=%+v, want streamed decision and done event", payload, events)
+	if gotPayload.StreamOptions == nil || !gotPayload.StreamOptions.IncludeUsage {
+		t.Fatalf("stream options = %+v, want include_usage=true", gotPayload.StreamOptions)
+	}
+	if !strings.Contains(string(result.Payload), `"completionState":"continue"`) || len(events) != 3 || events[0].Delta == "" || events[2].Type != "done" {
+		t.Fatalf("payload=%s events=%+v, want streamed decision and done event", result.Payload, events)
+	}
+	if result.Usage == nil || result.Usage.InputTokens != 11 || result.Usage.OutputTokens != 7 || result.Usage.TotalTokens != 18 {
+		t.Fatalf("usage = %+v, want stream usage", result.Usage)
 	}
 }
 

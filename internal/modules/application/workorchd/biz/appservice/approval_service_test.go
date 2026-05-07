@@ -301,6 +301,22 @@ func TestBatchResolveApprovalsWithBackendRejectsAlreadyResolvedBeforeMutation(t 
 	}
 }
 
+func TestBatchResolveApprovalsWithBackendNormalizesSemanticAction(t *testing.T) {
+	dataRoot := t.TempDir()
+	first := prepareApprovalRun(t, dataRoot, "ws-approval-batch-semantic", "run-approval-batch-semantic")
+
+	items, err := BatchResolveApprovalsWithBackend(context.Background(), "file", dataRoot, BatchResolveApprovalCommand{
+		ApprovalIDs: []string{first.BlockingApprovalID},
+		Action:      "同意继续执行",
+	})
+	if err != nil {
+		t.Fatalf("BatchResolveApprovalsWithBackend: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != first.BlockingApprovalID || items[0].State != "approved" {
+		t.Fatalf("items = %+v, want semantic approve resolution", items)
+	}
+}
+
 type appserviceCountingApprovalRepository struct {
 	inner    *memory.ApprovalRepository
 	getCount atomic.Int64

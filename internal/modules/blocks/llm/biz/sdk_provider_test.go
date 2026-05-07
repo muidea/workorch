@@ -42,7 +42,7 @@ func TestOpenAIProviderCompleteUsesOfficialSDKChatCompletions(t *testing.T) {
 		Model:    "test-model",
 		Timeout:  5 * time.Second,
 	})
-	payload, err := provider.Complete(context.Background(), llmProviderRequest())
+	result, err := provider.Complete(context.Background(), llmProviderRequest())
 	if err != nil {
 		t.Fatalf("complete: %v", err)
 	}
@@ -55,8 +55,11 @@ func TestOpenAIProviderCompleteUsesOfficialSDKChatCompletions(t *testing.T) {
 	if gotPayload["model"] != "test-model" {
 		t.Fatalf("payload model = %v, want test-model", gotPayload["model"])
 	}
-	if !strings.Contains(string(payload), `"summary":"openai sdk done"`) {
-		t.Fatalf("payload = %s, want SDK decision content", payload)
+	if !strings.Contains(string(result.Payload), `"summary":"openai sdk done"`) {
+		t.Fatalf("payload = %s, want SDK decision content", result.Payload)
+	}
+	if result.Usage == nil || result.Usage.InputTokens != 1 || result.Usage.OutputTokens != 1 || result.Usage.TotalTokens != 2 {
+		t.Fatalf("usage = %+v, want native openai usage", result.Usage)
 	}
 }
 
@@ -132,7 +135,7 @@ func TestAnthropicProviderCompleteUsesOfficialSDKMessages(t *testing.T) {
 		Model:    "claude-test",
 		Timeout:  5 * time.Second,
 	})
-	payload, err := provider.Complete(context.Background(), llmProviderRequest())
+	result, err := provider.Complete(context.Background(), llmProviderRequest())
 	if err != nil {
 		t.Fatalf("complete: %v", err)
 	}
@@ -145,7 +148,10 @@ func TestAnthropicProviderCompleteUsesOfficialSDKMessages(t *testing.T) {
 	if gotPayload["model"] != "claude-test" || gotPayload["max_tokens"] == nil || gotPayload["system"] == nil {
 		t.Fatalf("payload = %+v, want messages request with system prompt", gotPayload)
 	}
-	if !strings.Contains(string(payload), `"summary":"anthropic sdk done"`) {
-		t.Fatalf("payload = %s, want SDK decision content", payload)
+	if !strings.Contains(string(result.Payload), `"summary":"anthropic sdk done"`) {
+		t.Fatalf("payload = %s, want SDK decision content", result.Payload)
+	}
+	if result.Usage == nil || result.Usage.InputTokens != 1 || result.Usage.OutputTokens != 1 || result.Usage.TotalTokens != 2 {
+		t.Fatalf("usage = %+v, want native anthropic usage", result.Usage)
 	}
 }

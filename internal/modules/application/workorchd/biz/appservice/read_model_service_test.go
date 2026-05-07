@@ -1309,6 +1309,64 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 	}); err != nil {
 		t.Fatalf("publish event: %v", err)
 	}
+	if err := exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        events.TopicRunLLMStreamProgress,
+		SourceModule: "test",
+		SubjectType:  "llm_stream_progress",
+		SubjectID:    string(stepID),
+		WorkspaceID:  string(workspaceID),
+		RunID:        string(runID),
+		StepID:       string(stepID),
+		Payload: events.LLMStreamProgressPayload(
+			workspaceID,
+			runID,
+			stepID,
+			"provider-a",
+			"model-a",
+			2,
+			28,
+			0,
+			"completed",
+			"llm_execution_graph_plan - completed",
+		),
+	}); err != nil {
+		t.Fatalf("publish llm stream progress event: %v", err)
+	}
+	if err := exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        events.TopicRunLLMUsageRecorded,
+		SourceModule: "test",
+		SubjectType:  "llm_usage",
+		SubjectID:    string(stepID),
+		WorkspaceID:  string(workspaceID),
+		RunID:        string(runID),
+		StepID:       string(stepID),
+		Payload: events.LLMUsagePayload(events.LLMUsagePayloadData{
+			WorkspaceID:   workspaceID,
+			RunID:         runID,
+			StepID:        stepID,
+			ProviderID:    "provider-a",
+			Provider:      "compatible",
+			Model:         "model-a",
+			Operation:     "chat_completions",
+			InputTokens:   128,
+			OutputTokens:  16,
+			TotalTokens:   144,
+			Estimated:     true,
+			EstimatedCost: 0.000288,
+			Currency:      "USD",
+			RequestBytes:  3000,
+			ResponseBytes: 400,
+			Streaming:     true,
+			StartedAt:     "2026-04-25T10:00:01Z",
+			CompletedAt:   "2026-04-25T10:00:02Z",
+			DurationMs:    1000,
+			Status:        "completed",
+		}),
+	}); err != nil {
+		t.Fatalf("publish llm usage event: %v", err)
+	}
 
 	item, err := ReadRunObservabilityWithSession(ctx, session, string(runID))
 	if err != nil {
@@ -1337,6 +1395,37 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 	}
 	if !timelineContainsStepOccurredAt(item.Timeline, "step_stream", string(stepID), "2026-04-25T10:00:00Z") {
 		t.Fatalf("timeline = %+v, want stream occurrence derived from step checkpoint", item.Timeline)
+	}
+	if !timelineContainsLLMStreamProgressEvent(item.Timeline, string(stepID), "completed", 2, 28) {
+		t.Fatalf("timeline = %+v, want llm stream progress projected from persisted event", item.Timeline)
+	}
+	if len(item.LLMUsageTraces) != 1 || item.LLMUsageSummary.EntryTotal != 1 || item.LLMUsageSummary.TotalTokens != 144 {
+		t.Fatalf("llm usage traces/summary = %+v / %+v, want one usage trace and totalTokens=144", item.LLMUsageTraces, item.LLMUsageSummary)
+	}
+	if item.LLMUsageTraces[0].UsageSource != llmcommon.UsageSourceEstimated ||
+		!item.LLMUsageTraces[0].CostEstimated ||
+		item.LLMUsageTraces[0].CostSource != llmcommon.CostSourceProfilePricing {
+		t.Fatalf("llm usage trace = %+v, want normalized usage/cost semantics", item.LLMUsageTraces[0])
+	}
+	if item.LLMUsageSummary.EstimatedEntries != 1 ||
+		item.LLMUsageSummary.ProviderNativeEntries != 0 ||
+		item.LLMUsageSummary.CostEstimatedEntries != 1 {
+		t.Fatalf("llm usage summary = %+v, want estimated=1 native=0 costEstimated=1", item.LLMUsageSummary)
+	}
+	if item.LLMUsageSummary.Currency != "USD" ||
+		item.LLMUsageSummary.EstimatedCost != 0.000288 ||
+		len(item.LLMUsageSummary.CostBreakdown) != 1 ||
+		item.LLMUsageSummary.CostBreakdown[0].Currency != "USD" ||
+		item.LLMUsageSummary.CostBreakdown[0].EstimatedCost != 0.000288 ||
+		item.LLMUsageSummary.CostBreakdown[0].EntryTotal != 1 {
+		t.Fatalf("llm usage summary = %+v, want single-currency estimated cost breakdown", item.LLMUsageSummary)
+	}
+	if len(item.LLMUsageSummary.ProviderModelBreakdown) != 1 ||
+		item.LLMUsageSummary.ProviderModelBreakdown[0].ProviderID != "provider-a" ||
+		item.LLMUsageSummary.ProviderModelBreakdown[0].Model != "model-a" ||
+		item.LLMUsageSummary.ProviderModelBreakdown[0].Currency != "USD" ||
+		item.LLMUsageSummary.ProviderModelBreakdown[0].EntryTotal != 1 {
+		t.Fatalf("llm usage provider/model breakdown = %+v, want provider-a/model-a one entry", item.LLMUsageSummary.ProviderModelBreakdown)
 	}
 }
 
@@ -1435,6 +1524,146 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 	}
 	if !progressContainsItem(progress, string(resultID), "result", "accepted") || !progressContainsItem(progress, string(artifactID), "artifact", "available") {
 		t.Fatalf("items = %+v, want result and artifact items", progress.Items)
+	}
+}
+
+func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *testing.T) {
+	records := []EventRecord{
+		{
+			ID:         "evt-1",
+			Topic:      events.TopicRunLLMUsageRecorded,
+			OccurredAt: "2026-05-07T10:00:00Z",
+			RunID:      "run-1",
+			StepID:     "run-1/step-1",
+			Payload: events.LLMUsagePayload(events.LLMUsagePayloadData{
+				WorkspaceID:   "ws-1",
+				RunID:         "run-1",
+				StepID:        "run-1/step-1",
+				ProviderID:    "provider-a",
+				Provider:      "compatible",
+				Model:         "model-a",
+				Operation:     "chat_completions",
+				InputTokens:   120,
+				OutputTokens:  30,
+				TotalTokens:   150,
+				Estimated:     true,
+				EstimatedCost: 0.0002,
+				Currency:      "USD",
+				Status:        "completed",
+			}),
+		},
+		{
+			ID:         "evt-2",
+			Topic:      events.TopicRunLLMUsageRecorded,
+			OccurredAt: "2026-05-07T10:00:01Z",
+			RunID:      "run-1",
+			StepID:     "run-1/step-2",
+			Payload: events.LLMUsagePayload(events.LLMUsagePayloadData{
+				WorkspaceID:  "ws-1",
+				RunID:        "run-1",
+				StepID:       "run-1/step-2",
+				ProviderID:   "provider-b",
+				Provider:     "compatible",
+				Model:        "model-b",
+				Operation:    "chat_completions",
+				InputTokens:  60,
+				OutputTokens: 10,
+				TotalTokens:  70,
+				Estimated:    false,
+				Status:       "completed",
+			}),
+		},
+	}
+
+	traces := mapLLMUsageTracesFromEventRecords(records, "run-1")
+	if len(traces) != 2 {
+		t.Fatalf("llm usage traces length = %d, want 2", len(traces))
+	}
+	if traces[0].UsageSource != llmcommon.UsageSourceEstimated ||
+		!traces[0].CostEstimated ||
+		traces[0].CostSource != llmcommon.CostSourceProfilePricing {
+		t.Fatalf("trace[0] = %+v, want normalized estimated usage/cost semantics", traces[0])
+	}
+	if traces[1].UsageSource != llmcommon.UsageSourceProviderNative ||
+		traces[1].CostEstimated {
+		t.Fatalf("trace[1] = %+v, want normalized provider_native usage semantics", traces[1])
+	}
+
+	summary := summarizeLLMUsage(traces)
+	if summary.EntryTotal != 2 ||
+		summary.EstimatedEntries != 1 ||
+		summary.ProviderNativeEntries != 1 ||
+		summary.CostEstimatedEntries != 1 {
+		t.Fatalf("summary = %+v, want entry=2 estimated=1 native=1 costEstimated=1", summary)
+	}
+	if len(summary.ProviderModelBreakdown) != 2 {
+		t.Fatalf("summary breakdown = %+v, want 2 provider/model entries", summary.ProviderModelBreakdown)
+	}
+	if summary.ProviderModelBreakdown[0].ProviderID != "provider-a" ||
+		summary.ProviderModelBreakdown[0].Model != "model-a" ||
+		summary.ProviderModelBreakdown[0].EntryTotal != 1 ||
+		summary.ProviderModelBreakdown[1].ProviderID != "provider-b" ||
+		summary.ProviderModelBreakdown[1].Model != "model-b" ||
+		summary.ProviderModelBreakdown[1].EntryTotal != 1 {
+		t.Fatalf("summary breakdown = %+v, want provider-a/model-a and provider-b/model-b", summary.ProviderModelBreakdown)
+	}
+}
+
+func TestSummarizeLLMUsageKeepsCostCurrencyAware(t *testing.T) {
+	summary := summarizeLLMUsage([]LLMUsageTrace{
+		{
+			ProviderID:    "provider-a",
+			Provider:      "compatible",
+			Model:         "model-a",
+			InputTokens:   100,
+			OutputTokens:  10,
+			TotalTokens:   110,
+			EstimatedCost: 0.10,
+			CostEstimated: true,
+			CostSource:    llmcommon.CostSourceProfilePricing,
+			Currency:      "usd",
+			Status:        "completed",
+			UsageSource:   llmcommon.UsageSourceEstimated,
+			Estimated:     true,
+		},
+		{
+			ProviderID:    "provider-a",
+			Provider:      "compatible",
+			Model:         "model-a",
+			InputTokens:   200,
+			OutputTokens:  20,
+			TotalTokens:   220,
+			EstimatedCost: 0.20,
+			CostEstimated: true,
+			CostSource:    llmcommon.CostSourceProfilePricing,
+			Currency:      "CNY",
+			Status:        "completed",
+			UsageSource:   llmcommon.UsageSourceProviderNative,
+		},
+	})
+
+	if summary.EstimatedCost != 0 || summary.Currency != "" {
+		t.Fatalf("summary = %+v, want no top-level cross-currency estimated cost", summary)
+	}
+	if len(summary.CostBreakdown) != 2 {
+		t.Fatalf("summary cost breakdown = %+v, want two currencies", summary.CostBreakdown)
+	}
+	if summary.CostBreakdown[0].Currency != "CNY" ||
+		summary.CostBreakdown[0].EstimatedCost != 0.20 ||
+		summary.CostBreakdown[0].EntryTotal != 1 ||
+		summary.CostBreakdown[1].Currency != "USD" ||
+		summary.CostBreakdown[1].EstimatedCost != 0.10 ||
+		summary.CostBreakdown[1].EntryTotal != 1 {
+		t.Fatalf("summary cost breakdown = %+v, want currency-separated costs", summary.CostBreakdown)
+	}
+	if len(summary.ProviderModelBreakdown) != 2 {
+		t.Fatalf("provider/model breakdown = %+v, want currency-separated entries", summary.ProviderModelBreakdown)
+	}
+	if summary.ProviderModelBreakdown[0].Currency != "CNY" ||
+		summary.ProviderModelBreakdown[0].EstimatedCost != 0.20 ||
+		summary.ProviderModelBreakdown[1].Currency != "USD" ||
+		summary.ProviderModelBreakdown[1].EstimatedCost != 0.10 {
+		t.Fatalf("provider/model breakdown = %+v, want same provider/model separated by currency", summary.ProviderModelBreakdown)
 	}
 }
 
@@ -2022,6 +2251,23 @@ func timelineContainsPersistedEvent(items []RuntimeTimelineItem, topic string) b
 		if item.Source == "persisted_event" && item.Topic == topic {
 			return true
 		}
+	}
+	return false
+}
+
+func timelineContainsLLMStreamProgressEvent(items []RuntimeTimelineItem, stepID string, status string, chunkCount int, receivedBytes int) bool {
+	for _, item := range items {
+		if item.Source != "llm_stream_progress_event" || item.Topic != events.TopicRunLLMStreamProgress || item.StepID != stepID {
+			continue
+		}
+		if item.Type != status {
+			continue
+		}
+		if readModelIntValue(item.Data[events.PayloadKeyChunkCount]) != chunkCount ||
+			readModelIntValue(item.Data[events.PayloadKeyReceivedBytes]) != receivedBytes {
+			continue
+		}
+		return true
 	}
 	return false
 }

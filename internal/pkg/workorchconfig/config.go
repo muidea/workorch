@@ -61,12 +61,17 @@ type LLMProviderConfig struct {
 	ChatCompletions        *bool    `json:"chatCompletions" toml:"chatCompletions"`
 	Streaming              *bool    `json:"streaming" toml:"streaming"`
 	NonChatOperations      []string `json:"nonChatOperations" toml:"nonChatOperations"`
+	FailoverEnabled        *bool    `json:"failoverEnabled" toml:"failoverEnabled"`
+	FailoverProviders      []string `json:"failoverProviders" toml:"failoverProviders"`
 	ContextWindowTokens    int      `json:"contextWindowTokens" toml:"contextWindowTokens"`
 	MaxInputTokens         int      `json:"maxInputTokens" toml:"maxInputTokens"`
 	ReservedOutputTokens   int      `json:"reservedOutputTokens" toml:"reservedOutputTokens"`
 	SafetyRatio            float64  `json:"safetyRatio" toml:"safetyRatio"`
 	BytesHardLimit         int      `json:"bytesHardLimit" toml:"bytesHardLimit"`
 	EstimatedTokensPerByte float64  `json:"estimatedTokensPerByte" toml:"estimatedTokensPerByte"`
+	InputTokenPrice        float64  `json:"inputTokenPrice" toml:"inputTokenPrice"`
+	OutputTokenPrice       float64  `json:"outputTokenPrice" toml:"outputTokenPrice"`
+	Currency               string   `json:"currency" toml:"currency"`
 }
 
 type WebSearchConfig struct {
@@ -274,6 +279,13 @@ func llmProviderValues(provider LLMProviderConfig) map[string]string {
 	if provider.EstimatedTokensPerByte > 0 {
 		values["estimatedTokensPerByte"] = formatFloat(provider.EstimatedTokensPerByte)
 	}
+	if provider.InputTokenPrice > 0 {
+		values["inputTokenPrice"] = formatFloat(provider.InputTokenPrice)
+	}
+	if provider.OutputTokenPrice > 0 {
+		values["outputTokenPrice"] = formatFloat(provider.OutputTokenPrice)
+	}
+	set(values, "currency", provider.Currency)
 	if provider.Disabled != nil {
 		if *provider.Disabled {
 			values["disabled"] = "true"
@@ -289,6 +301,12 @@ func llmProviderValues(provider LLMProviderConfig) map[string]string {
 	}
 	if len(provider.NonChatOperations) > 0 {
 		values["nonChatOperations"] = strings.Join(provider.NonChatOperations, ",")
+	}
+	if provider.FailoverEnabled != nil {
+		values["failoverEnabled"] = boolString(*provider.FailoverEnabled)
+	}
+	if len(provider.FailoverProviders) > 0 {
+		values["failoverProviders"] = strings.Join(provider.FailoverProviders, ",")
 	}
 	return values
 }

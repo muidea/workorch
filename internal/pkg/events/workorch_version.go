@@ -19,6 +19,8 @@ var (
 		TopicDoDDefined:              newWorkorchEventContract(TopicDoDDefined),
 		TopicRunCreated:              newWorkorchEventContract(TopicRunCreated),
 		TopicRunStateChanged:         newWorkorchEventContract(TopicRunStateChanged),
+		TopicRunLLMStreamProgress:    newWorkorchEventContract(TopicRunLLMStreamProgress),
+		TopicRunLLMUsageRecorded:     newWorkorchEventContract(TopicRunLLMUsageRecorded),
 		TopicStepDispatched:          newWorkorchEventContract(TopicStepDispatched),
 		TopicStepStateChanged:        newWorkorchEventContract(TopicStepStateChanged),
 		TopicTicketCreated:           newWorkorchEventContract(TopicTicketCreated),

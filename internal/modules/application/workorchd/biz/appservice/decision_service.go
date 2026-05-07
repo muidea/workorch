@@ -8,6 +8,7 @@ import (
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -154,18 +155,17 @@ func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 	traces := autoGovernanceTraceRepositoryFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
-	if cmd.ResolutionType == "" {
-		cmd.ResolutionType = decisioncommon.ResolutionTypeProvideMissingInfo
-	}
-	if !decisioncommon.IsSupportedResolutionType(cmd.ResolutionType) {
+	semantic := governancecommon.NormalizeDecisionResolution(cmd.ResolutionType, cmd.ResolutionPayload)
+	if !decisioncommon.IsSupportedResolutionType(semantic.ResolutionType) {
 		return Decision{}, common.ErrInvalidArgument
 	}
+	payload := withDecisionSemanticPayload(cmd.ResolutionPayload, semantic)
 
 	item, resolution, err := service.EnsureResolvedTicketAndReturn(ctx, decisionmodule.ResolveTicketCommand{
-		ResolutionID: common.ResolutionID("resolution-" + ticketID + "-" + cmd.ResolutionType),
+		ResolutionID: common.ResolutionID("resolution-" + ticketID + "-" + semantic.ResolutionType),
 		TicketID:     common.TicketID(ticketID),
-		Type:         cmd.ResolutionType,
-		Payload:      cloneDecisionPayload(cmd.ResolutionPayload),
+		Type:         semantic.ResolutionType,
+		Payload:      payload,
 	})
 	if err != nil {
 		return Decision{}, err
@@ -186,13 +186,12 @@ func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSessi
 	traces := autoGovernanceTraceRepositoryFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
-	resolutionType := cmd.ResolutionType
-	if resolutionType == "" {
-		resolutionType = decisioncommon.ResolutionTypeProvideMissingInfo
-	}
+	semantic := governancecommon.NormalizeDecisionResolution(cmd.ResolutionType, cmd.ResolutionPayload)
+	resolutionType := semantic.ResolutionType
 	if !decisioncommon.IsSupportedResolutionType(resolutionType) || len(cmd.TicketIDs) == 0 {
 		return nil, common.ErrInvalidArgument
 	}
+	payload := withDecisionSemanticPayload(cmd.ResolutionPayload, semantic)
 	seen := make(map[string]struct{}, len(cmd.TicketIDs))
 	for _, ticketID := range cmd.TicketIDs {
 		if ticketID == "" {
@@ -232,7 +231,7 @@ func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSessi
 			ResolutionID: common.ResolutionID("resolution-" + ticketID + "-" + resolutionType),
 			TicketID:     common.TicketID(ticketID),
 			Type:         resolutionType,
-			Payload:      cloneDecisionPayload(cmd.ResolutionPayload),
+			Payload:      cloneDecisionPayload(payload),
 		})
 		if err != nil {
 			return nil, err
@@ -244,6 +243,23 @@ func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSessi
 		ret = append(ret, mapDecision(item, resolution, autoGovernance))
 	}
 	return ret, nil
+}
+
+func withDecisionSemanticPayload(payload map[string]any, semantic governancecommon.DecisionSemanticNormalization) map[string]any {
+	ret := cloneDecisionPayload(payload)
+	if ret == nil {
+		ret = map[string]any{}
+	}
+	ret["governanceSemantic"] = map[string]any{
+		"resolutionType": semantic.ResolutionType,
+		"intent":         semantic.Intent,
+		"confidence":     semantic.Confidence,
+		"rawInput":       semantic.RawInput,
+		"source":         semantic.Source,
+		"inferred":       semantic.Inferred,
+		"version":        "v1",
+	}
+	return ret
 }
 
 func ResolveDecisionWithBackend(ctx context.Context, backend string, dataRoot string, ticketID string, cmd ResolveDecisionCommand) (Decision, error) {

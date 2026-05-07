@@ -47,6 +47,10 @@ func LoadProviderConfig(providerID string, values map[string]string) (llmmodels.
 	if err != nil {
 		return llmmodels.ProviderConfig{}, fmt.Errorf("%w: invalid %s", common.ErrInvalidArgument, llmcommon.EnvStreaming)
 	}
+	failoverEnabled, err := parseBool(values[llmcommon.EnvFailoverEnabled])
+	if err != nil {
+		return llmmodels.ProviderConfig{}, fmt.Errorf("%w: invalid %s", common.ErrInvalidArgument, llmcommon.EnvFailoverEnabled)
+	}
 
 	cfg := llmmodels.ProviderConfig{
 		ID:       normalizedProviderID(providerID),
@@ -61,6 +65,8 @@ func LoadProviderConfig(providerID string, values map[string]string) (llmmodels.
 			Streaming:         streaming,
 			NonChatOperations: normalizedOperations(values[llmcommon.EnvNonChatOperations]),
 		},
+		FailoverEnabled:   failoverEnabled,
+		FailoverProviders: normalizedOperations(values[llmcommon.EnvFailoverProviders]),
 	}
 	profile, err := providerContextProfileFromValues(values)
 	if err != nil {
@@ -106,6 +112,10 @@ func RedactedProviderConfig(cfg llmmodels.ProviderConfig) llmmodels.RedactedProv
 		Reason:         cfg.UnavailableReason,
 		Capabilities:   capabilities,
 		ContextProfile: cfg.ContextProfile,
+		Failover: llmmodels.ProviderFailoverConfig{
+			Enabled:   cfg.FailoverEnabled,
+			Providers: append([]string(nil), cfg.FailoverProviders...),
+		},
 	}
 }
 
@@ -219,6 +229,15 @@ func providerContextProfileFromValues(values map[string]string) (llmmodels.Provi
 	if err != nil {
 		return llmmodels.ProviderContextProfile{}, err
 	}
+	profile.InputTokenPrice, err = parseOptionalPositiveFloat(values[llmcommon.EnvInputTokenPrice], llmcommon.EnvInputTokenPrice)
+	if err != nil {
+		return llmmodels.ProviderContextProfile{}, err
+	}
+	profile.OutputTokenPrice, err = parseOptionalPositiveFloat(values[llmcommon.EnvOutputTokenPrice], llmcommon.EnvOutputTokenPrice)
+	if err != nil {
+		return llmmodels.ProviderContextProfile{}, err
+	}
+	profile.Currency = strings.TrimSpace(values[llmcommon.EnvCurrency])
 	return normalizedProviderContextProfile(profile), nil
 }
 
@@ -248,6 +267,7 @@ func normalizedProviderContextProfile(profile llmmodels.ProviderContextProfile) 
 	if profile.EstimatedTokensPerByte <= 0 {
 		profile.EstimatedTokensPerByte = defaultEstimatedTokensPerByte
 	}
+	profile.Currency = strings.ToUpper(strings.TrimSpace(profile.Currency))
 	return profile
 }
 

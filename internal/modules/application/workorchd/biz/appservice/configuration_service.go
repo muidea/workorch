@@ -51,19 +51,22 @@ type LLMConfiguration struct {
 }
 
 type LLMProviderConfiguration struct {
-	ID                string   `json:"id"`
-	Provider          string   `json:"provider,omitempty"`
-	BaseURL           string   `json:"baseUrl,omitempty"`
-	Model             string   `json:"model,omitempty"`
-	Timeout           string   `json:"timeout,omitempty"`
-	Disabled          bool     `json:"disabled"`
-	Ready             bool     `json:"ready"`
-	Reason            string   `json:"reason,omitempty"`
-	Default           bool     `json:"default"`
-	APIKeyConfigured  bool     `json:"apiKeyConfigured"`
-	ChatCompletions   bool     `json:"chatCompletions"`
-	Streaming         bool     `json:"streaming"`
-	NonChatOperations []string `json:"nonChatOperations,omitempty"`
+	ID                string                           `json:"id"`
+	Provider          string                           `json:"provider,omitempty"`
+	BaseURL           string                           `json:"baseUrl,omitempty"`
+	Model             string                           `json:"model,omitempty"`
+	Timeout           string                           `json:"timeout,omitempty"`
+	Disabled          bool                             `json:"disabled"`
+	Ready             bool                             `json:"ready"`
+	Reason            string                           `json:"reason,omitempty"`
+	Default           bool                             `json:"default"`
+	APIKeyConfigured  bool                             `json:"apiKeyConfigured"`
+	ChatCompletions   bool                             `json:"chatCompletions"`
+	Streaming         bool                             `json:"streaming"`
+	NonChatOperations []string                         `json:"nonChatOperations,omitempty"`
+	FailoverEnabled   bool                             `json:"failoverEnabled"`
+	FailoverProviders []string                         `json:"failoverProviders,omitempty"`
+	ContextProfile    llmmodels.ProviderContextProfile `json:"contextProfile,omitempty"`
 }
 
 type LLMProviderTemplate struct {
@@ -130,16 +133,19 @@ type UpdateServerConfigurationCommand struct {
 }
 
 type UpdateLLMProviderConfiguration struct {
-	ID                string   `json:"id"`
-	Provider          string   `json:"provider,omitempty"`
-	BaseURL           string   `json:"baseUrl,omitempty"`
-	APIKey            string   `json:"apiKey,omitempty"`
-	Model             string   `json:"model,omitempty"`
-	Timeout           string   `json:"timeout,omitempty"`
-	Disabled          bool     `json:"disabled"`
-	ChatCompletions   *bool    `json:"chatCompletions,omitempty"`
-	Streaming         *bool    `json:"streaming,omitempty"`
-	NonChatOperations []string `json:"nonChatOperations,omitempty"`
+	ID                string                            `json:"id"`
+	Provider          string                            `json:"provider,omitempty"`
+	BaseURL           string                            `json:"baseUrl,omitempty"`
+	APIKey            string                            `json:"apiKey,omitempty"`
+	Model             string                            `json:"model,omitempty"`
+	Timeout           string                            `json:"timeout,omitempty"`
+	Disabled          bool                              `json:"disabled"`
+	ChatCompletions   *bool                             `json:"chatCompletions,omitempty"`
+	Streaming         *bool                             `json:"streaming,omitempty"`
+	NonChatOperations []string                          `json:"nonChatOperations,omitempty"`
+	FailoverEnabled   *bool                             `json:"failoverEnabled,omitempty"`
+	FailoverProviders []string                          `json:"failoverProviders,omitempty"`
+	ContextProfile    *llmmodels.ProviderContextProfile `json:"contextProfile,omitempty"`
 }
 
 type UpdateWebSearchConfigurationCommand struct {
@@ -189,6 +195,9 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 			ChatCompletions:   redacted.Capabilities.ChatCompletions,
 			Streaming:         redacted.Capabilities.Streaming,
 			NonChatOperations: append([]string(nil), redacted.Capabilities.NonChatOperations...),
+			FailoverEnabled:   redacted.Failover.Enabled,
+			FailoverProviders: append([]string(nil), redacted.Failover.Providers...),
+			ContextProfile:    redacted.ContextProfile,
 		})
 	}
 	sort.Slice(providers, func(i, j int) bool {
@@ -477,22 +486,62 @@ func updatedLLMProviders(existing map[string]workorchconfig.LLMProviderConfig, u
 				streaming = *previous
 			}
 		}
+		failoverEnabled := false
+		if existing != nil && existing[id].FailoverEnabled != nil {
+			failoverEnabled = *existing[id].FailoverEnabled
+		}
+		failoverProviders := []string{}
+		if existing != nil {
+			failoverProviders = append([]string(nil), existing[id].FailoverProviders...)
+		}
 		if update.ChatCompletions != nil {
 			chatCompletions = *update.ChatCompletions
 		}
 		if update.Streaming != nil {
 			streaming = *update.Streaming
 		}
+		if update.FailoverEnabled != nil {
+			failoverEnabled = *update.FailoverEnabled
+		}
+		if len(update.FailoverProviders) > 0 {
+			failoverProviders = normalizedProviderOperations(update.FailoverProviders)
+		}
+		contextProfile := workorchconfig.LLMProviderConfig{}
+		if existing != nil {
+			contextProfile = existing[id]
+		}
+		if update.ContextProfile != nil {
+			contextProfile.ContextWindowTokens = update.ContextProfile.ContextWindowTokens
+			contextProfile.MaxInputTokens = update.ContextProfile.MaxInputTokens
+			contextProfile.ReservedOutputTokens = update.ContextProfile.ReservedOutputTokens
+			contextProfile.SafetyRatio = update.ContextProfile.SafetyRatio
+			contextProfile.BytesHardLimit = update.ContextProfile.BytesHardLimit
+			contextProfile.EstimatedTokensPerByte = update.ContextProfile.EstimatedTokensPerByte
+			contextProfile.InputTokenPrice = update.ContextProfile.InputTokenPrice
+			contextProfile.OutputTokenPrice = update.ContextProfile.OutputTokenPrice
+			contextProfile.Currency = update.ContextProfile.Currency
+		}
 		ret[id] = workorchconfig.LLMProviderConfig{
-			Provider:          strings.TrimSpace(update.Provider),
-			BaseURL:           strings.TrimSpace(update.BaseURL),
-			APIKey:            apiKey,
-			Model:             strings.TrimSpace(update.Model),
-			Timeout:           strings.TrimSpace(update.Timeout),
-			Disabled:          &disabled,
-			ChatCompletions:   &chatCompletions,
-			Streaming:         &streaming,
-			NonChatOperations: normalizedProviderOperations(update.NonChatOperations),
+			Provider:               strings.TrimSpace(update.Provider),
+			BaseURL:                strings.TrimSpace(update.BaseURL),
+			APIKey:                 apiKey,
+			Model:                  strings.TrimSpace(update.Model),
+			Timeout:                strings.TrimSpace(update.Timeout),
+			Disabled:               &disabled,
+			ChatCompletions:        &chatCompletions,
+			Streaming:              &streaming,
+			NonChatOperations:      normalizedProviderOperations(update.NonChatOperations),
+			FailoverEnabled:        &failoverEnabled,
+			FailoverProviders:      failoverProviders,
+			ContextWindowTokens:    contextProfile.ContextWindowTokens,
+			MaxInputTokens:         contextProfile.MaxInputTokens,
+			ReservedOutputTokens:   contextProfile.ReservedOutputTokens,
+			SafetyRatio:            contextProfile.SafetyRatio,
+			BytesHardLimit:         contextProfile.BytesHardLimit,
+			EstimatedTokensPerByte: contextProfile.EstimatedTokensPerByte,
+			InputTokenPrice:        contextProfile.InputTokenPrice,
+			OutputTokenPrice:       contextProfile.OutputTokenPrice,
+			Currency:               contextProfile.Currency,
 		}
 	}
 	return ret, nil

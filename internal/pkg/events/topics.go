@@ -8,6 +8,8 @@ const (
 	TopicDoDDefined              = "/dod/defined"
 	TopicRunCreated              = "/run/created"
 	TopicRunStateChanged         = "/run/state/changed"
+	TopicRunLLMStreamProgress    = "/run/llm_stream/progress"
+	TopicRunLLMUsageRecorded     = "/run/llm_usage/recorded"
 	TopicStepDispatched          = "/step/dispatched"
 	TopicStepStateChanged        = "/step/state/changed"
 	TopicTicketCreated           = "/ticket/created"

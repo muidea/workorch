@@ -38,9 +38,23 @@ const (
 	EnvSafetyRatio       = "safetyRatio"
 	EnvBytesHardLimit    = "bytesHardLimit"
 	EnvTokensPerByte     = "estimatedTokensPerByte"
+	EnvInputTokenPrice   = "inputTokenPrice"
+	EnvOutputTokenPrice  = "outputTokenPrice"
+	EnvCurrency          = "currency"
+	EnvFailoverEnabled   = "failoverEnabled"
+	EnvFailoverProviders = "failoverProviders"
 )
 
 const (
 	ProviderOperationChatCompletions = "chat_completions"
 	ProviderOperationEmbeddings      = "embeddings"
+)
+
+const (
+	UsageSourceEstimated      = "estimated"
+	UsageSourceProviderNative = "provider_native"
+)
+
+const (
+	CostSourceProfilePricing = "profile_pricing"
 )

@@ -9,6 +9,12 @@ func TestValidateWorkorchEventVersionUsesTopicMatrix(t *testing.T) {
 	if !ValidateWorkorchEventVersion(TopicGovernanceAutoEvaluated, WorkorchEventVersion) {
 		t.Fatalf("ValidateWorkorchEventVersion should include governance auto topics")
 	}
+	if !ValidateWorkorchEventVersion(TopicRunLLMStreamProgress, WorkorchEventVersion) {
+		t.Fatalf("ValidateWorkorchEventVersion should include llm stream progress topic")
+	}
+	if !ValidateWorkorchEventVersion(TopicRunLLMUsageRecorded, WorkorchEventVersion) {
+		t.Fatalf("ValidateWorkorchEventVersion should include llm usage topic")
+	}
 }
 
 func TestValidateWorkorchEventVersionRejectsUnknownTopic(t *testing.T) {

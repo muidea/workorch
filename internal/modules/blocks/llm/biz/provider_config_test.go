@@ -66,6 +66,8 @@ func TestLoadProviderConfigParsesDeclaredCapabilities(t *testing.T) {
 		llmcommon.EnvChatCompletions:   "false",
 		llmcommon.EnvStreaming:         "true",
 		llmcommon.EnvNonChatOperations: "embeddings, responses, embeddings",
+		llmcommon.EnvFailoverEnabled:   "true",
+		llmcommon.EnvFailoverProviders: "backup-a, backup-b, backup-a",
 	})
 	if err != nil {
 		t.Fatalf("load provider config: %v", err)
@@ -75,6 +77,14 @@ func TestLoadProviderConfigParsesDeclaredCapabilities(t *testing.T) {
 		cfg.Capabilities.NonChatOperations[0] != "embeddings" ||
 		cfg.Capabilities.NonChatOperations[1] != "responses" {
 		t.Fatalf("capabilities = %+v, want declared streaming and non-chat operations", cfg.Capabilities)
+	}
+	if !cfg.FailoverEnabled || len(cfg.FailoverProviders) != 2 ||
+		cfg.FailoverProviders[0] != "backup-a" || cfg.FailoverProviders[1] != "backup-b" {
+		t.Fatalf("failover = enabled:%v providers:%v, want normalized failover settings", cfg.FailoverEnabled, cfg.FailoverProviders)
+	}
+	redacted := RedactedProviderConfig(cfg)
+	if !redacted.Failover.Enabled || len(redacted.Failover.Providers) != 2 {
+		t.Fatalf("redacted failover = %+v, want exported failover config", redacted.Failover)
 	}
 }
 
@@ -131,15 +141,18 @@ func TestLoadProviderConfigRejectsInvalidTimeout(t *testing.T) {
 
 func TestLoadProviderConfigParsesContextProfile(t *testing.T) {
 	cfg, err := LoadProviderConfig("reasoning", map[string]string{
-		llmcommon.EnvProvider:       llmcommon.ProviderOpenAI,
-		llmcommon.EnvAPIKey:         "reasoning-secret",
-		llmcommon.EnvModel:          "reasoning-model",
-		llmcommon.EnvContextWindow:  "128000",
-		llmcommon.EnvMaxInputTokens: "64000",
-		llmcommon.EnvReservedOutput: "8000",
-		llmcommon.EnvSafetyRatio:    "0.85",
-		llmcommon.EnvBytesHardLimit: "262144",
-		llmcommon.EnvTokensPerByte:  "0.22",
+		llmcommon.EnvProvider:         llmcommon.ProviderOpenAI,
+		llmcommon.EnvAPIKey:           "reasoning-secret",
+		llmcommon.EnvModel:            "reasoning-model",
+		llmcommon.EnvContextWindow:    "128000",
+		llmcommon.EnvMaxInputTokens:   "64000",
+		llmcommon.EnvReservedOutput:   "8000",
+		llmcommon.EnvSafetyRatio:      "0.85",
+		llmcommon.EnvBytesHardLimit:   "262144",
+		llmcommon.EnvTokensPerByte:    "0.22",
+		llmcommon.EnvInputTokenPrice:  "0.000002",
+		llmcommon.EnvOutputTokenPrice: "0.000008",
+		llmcommon.EnvCurrency:         "usd",
 	})
 	if err != nil {
 		t.Fatalf("load provider config: %v", err)
@@ -149,7 +162,10 @@ func TestLoadProviderConfigParsesContextProfile(t *testing.T) {
 		cfg.ContextProfile.ReservedOutputTokens != 8000 ||
 		cfg.ContextProfile.SafetyRatio != 0.85 ||
 		cfg.ContextProfile.BytesHardLimit != 262144 ||
-		cfg.ContextProfile.EstimatedTokensPerByte != 0.22 {
+		cfg.ContextProfile.EstimatedTokensPerByte != 0.22 ||
+		cfg.ContextProfile.InputTokenPrice != 0.000002 ||
+		cfg.ContextProfile.OutputTokenPrice != 0.000008 ||
+		cfg.ContextProfile.Currency != "USD" {
 		t.Fatalf("context profile = %+v, want parsed values", cfg.ContextProfile)
 	}
 }

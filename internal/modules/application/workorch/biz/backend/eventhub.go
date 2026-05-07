@@ -390,6 +390,8 @@ func convertEnvelope(envelope events.Envelope) Event {
 		return Event{Type: EventMemoryDeleted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "memoryId", envelope.SubjectID)}
 	case events.TopicMemoryRecallRecorded:
 		return Event{Type: EventMemoryRecallRecorded, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
+	case events.TopicRunLLMUsageRecorded:
+		return Event{Type: EventLLMUsageRecorded, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
 	case events.TopicPatchPreviewed:
 		return Event{Type: EventPatchPreviewed, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
 	case events.TopicPatchApplied:

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	filecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
@@ -62,11 +64,11 @@ var providerSoulStages = map[string]struct{}{
 }
 
 type Provider interface {
-	Complete(context.Context, llmmodels.ProviderRequest) ([]byte, error)
+	Complete(context.Context, llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error)
 }
 
 type StreamingProvider interface {
-	StreamComplete(context.Context, llmmodels.ProviderRequest, func(llmmodels.ProviderStreamEvent) error) ([]byte, error)
+	StreamComplete(context.Context, llmmodels.ProviderRequest, func(llmmodels.ProviderStreamEvent) error) (llmmodels.ProviderCompletionResult, error)
 }
 
 type EmbeddingProvider interface {
@@ -205,19 +207,19 @@ func newLazyProvider(config llmmodels.ProviderConfig, factory ProviderFactory) *
 	return &lazyProvider{config: config, factory: factory}
 }
 
-func (p *lazyProvider) Complete(ctx context.Context, request llmmodels.ProviderRequest) ([]byte, error) {
+func (p *lazyProvider) Complete(ctx context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
 	provider := p.runtimeProvider()
 	if provider == nil {
-		return nil, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
 	}
 	return provider.Complete(ctx, request)
 }
 
-func (p *lazyProvider) StreamComplete(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) ([]byte, error) {
+func (p *lazyProvider) StreamComplete(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) (llmmodels.ProviderCompletionResult, error) {
 	provider := p.runtimeProvider()
 	streaming, ok := provider.(StreamingProvider)
 	if !ok {
-		return nil, fmt.Errorf("%w: llm provider does not implement streaming", common.ErrInvalidArgument)
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider does not implement streaming", common.ErrInvalidArgument)
 	}
 	return streaming.StreamComplete(ctx, request, emit)
 }
@@ -258,39 +260,54 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	if a == nil {
 		return runtimemodel.StepExecutionResult{}, common.ErrInvalidArgument
 	}
+	operation := requestedProviderOperation(request.Input)
+	invokeStartedAt := time.Now().UTC()
 	runtime, providerID, err := a.selectProviderRuntime(request)
 	if err != nil {
 		cfg := llmmodels.ProviderConfig{ID: providerID, Unavailable: true, UnavailableReason: err.Error()}
 		output := failureOutput(request, "llm_provider_unavailable", err.Error(), cfg)
+		attachLLMUsage(output, buildLLMUsageOutput(request, providerCallResult{
+			runtime: ProviderRuntime{Config: cfg},
+		}, operation, invokeStartedAt, time.Now().UTC(), providerFailureClassUnavailable, "failed"))
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 	if runtime.Config.Unavailable {
 		output := failureOutput(request, "llm_provider_unavailable", runtime.Config.UnavailableReason, runtime.Config)
+		attachLLMUsage(output, buildLLMUsageOutput(request, providerCallResult{
+			runtime: ProviderRuntime{Config: runtime.Config},
+		}, operation, invokeStartedAt, time.Now().UTC(), providerFailureClassUnavailable, "failed"))
 		return runtimemodel.StepExecutionResult{Output: output}, fmt.Errorf("%w: %s", common.ErrInvalidArgument, runtime.Config.UnavailableReason)
 	}
 	if runtime.Provider == nil {
 		output := failureOutput(request, "llm_provider_client_unavailable", "llm provider client is not configured", runtime.Config)
+		attachLLMUsage(output, buildLLMUsageOutput(request, providerCallResult{
+			runtime: ProviderRuntime{Config: runtime.Config},
+		}, operation, invokeStartedAt, time.Now().UTC(), providerFailureClassUnavailable, "failed"))
 		return runtimemodel.StepExecutionResult{Output: output}, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
 	}
-	operation := requestedProviderOperation(request.Input)
 	if err := validateProviderOperation(operation, runtime.Config.Capabilities); err != nil {
 		output := failureOutput(request, "llm_provider_operation_unsupported", err.Error(), runtime.Config)
 		output["operation"] = operation
+		attachLLMUsage(output, buildLLMUsageOutput(request, providerCallResult{
+			runtime: ProviderRuntime{Config: runtime.Config},
+		}, operation, invokeStartedAt, time.Now().UTC(), "operation_unsupported", "failed"))
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 
-	providerReq := providerRequest(request, runtime.Config)
-	payload, streamEvents, err := completeProvider(ctx, runtime, providerReq)
-	if err != nil {
-		stage := "llm_provider_error"
-		if len(streamEvents) > 0 {
-			stage = "llm_provider_stream_error"
-		}
-		output := failureOutput(request, stage, err.Error(), runtime.Config)
-		attachContextBudget(output, providerReq.ContextBudget, runtime.Config.ID, runtime.Config.Model)
-		attachStreamEvents(output, streamEvents)
-		return runtimemodel.StepExecutionResult{Output: output}, err
+	call := a.executeProviderWithFailover(ctx, request, runtime, providerID, operation)
+	invokeCompletedAt := time.Now().UTC()
+	if call.err != nil {
+		output := failureOutput(request, call.failureStage, call.err.Error(), call.runtime.Config)
+		attachContextBudget(output, call.request.ContextBudget, call.runtime.Config.ID, call.runtime.Config.Model)
+		attachStreamEvents(output, call.streamEvents)
+		attachFailoverMetadata(output, call.failover)
+		attachLLMUsage(output, buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, classifyProviderInvocationFailure(call.err), "failed"))
+		return runtimemodel.StepExecutionResult{Output: output}, call.err
 	}
+	payload := call.payload
+	streamEvents := call.streamEvents
+	providerReq := call.request
+	runtime = call.runtime
 	decision, err := ParseLLMExecutionDecision(payload)
 	var repairMetadata map[string]any
 	if err != nil {
@@ -307,6 +324,8 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 			}
 			attachContextBudget(output, providerReq.ContextBudget, runtime.Config.ID, runtime.Config.Model)
 			attachStreamEvents(output, streamEvents)
+			attachFailoverMetadata(output, call.failover)
+			attachLLMUsage(output, buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, "llm_schema_invalid", "failed"))
 			return runtimemodel.StepExecutionResult{Output: output}, parseErr
 		}
 		decision = repairedDecision
@@ -321,41 +340,271 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		failure := failureOutput(request, "llm_decision_invalid", err.Error(), runtime.Config)
 		attachContextBudget(failure, providerReq.ContextBudget, runtime.Config.ID, runtime.Config.Model)
 		attachStreamEvents(failure, streamEvents)
+		attachFailoverMetadata(failure, call.failover)
+		attachLLMUsage(failure, buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, "llm_decision_invalid", "failed"))
 		return runtimemodel.StepExecutionResult{Output: failure}, err
 	}
 	attachContextBudget(output, providerReq.ContextBudget, runtime.Config.ID, runtime.Config.Model)
 	attachStreamEvents(output, streamEvents)
+	attachFailoverMetadata(output, call.failover)
+	llmUsageStatus := "completed"
 	if repairMetadata != nil {
 		output["llmRepair"] = repairMetadata
 	}
-	if status, _ := output[outputKeyStatus].(string); status == "failed" {
+	if outputStatus, _ := output[outputKeyStatus].(string); strings.TrimSpace(outputStatus) != "" {
+		llmUsageStatus = outputStatus
+	}
+	if llmUsageStatus == "failed" {
 		reason, _ := output[outputKeyError].(string)
 		if strings.TrimSpace(reason) == "" {
 			reason = "llm decision reported failure"
 		}
+		attachLLMUsage(output, buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, "llm_decision_failed", "failed"))
 		return runtimemodel.StepExecutionResult{Output: output}, fmt.Errorf("%w: %s", common.ErrInvalidArgument, reason)
 	}
+	attachLLMUsage(output, buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, "", llmUsageStatus))
 	return runtimemodel.StepExecutionResult{Output: output}, nil
 }
 
-func completeProvider(ctx context.Context, runtime ProviderRuntime, request llmmodels.ProviderRequest) ([]byte, []llmmodels.ProviderStreamEvent, error) {
+const (
+	providerFailureClassTimeout      = "provider_timeout"
+	providerFailureClassContextLarge = "context_too_large"
+	providerFailureClassRateLimited  = "rate_limited"
+	providerFailureClassAuthOrConfig = "auth_or_config_error"
+	providerFailureClassUnavailable  = "provider_unavailable"
+)
+
+type providerCallResult struct {
+	runtime      ProviderRuntime
+	request      llmmodels.ProviderRequest
+	payload      []byte
+	usage        *llmmodels.ProviderUsage
+	streamEvents []llmmodels.ProviderStreamEvent
+	failover     map[string]any
+	failureStage string
+	err          error
+}
+
+func (a *RuntimeAdapter) executeProviderWithFailover(
+	ctx context.Context,
+	request runtimemodel.StepExecutionRequest,
+	primaryRuntime ProviderRuntime,
+	primaryProviderID string,
+	operation string,
+) providerCallResult {
+	providerReq := providerRequest(request, primaryRuntime.Config)
+	payload, usage, streamEvents, callErr := completeProvider(ctx, primaryRuntime, providerReq)
+	result := providerCallResult{
+		runtime:      primaryRuntime,
+		request:      providerReq,
+		payload:      payload,
+		usage:        usage,
+		streamEvents: streamEvents,
+	}
+	if callErr == nil {
+		return result
+	}
+
+	failureClass := classifyProviderInvocationFailure(callErr)
+	result.failureStage = providerFailureStage(failureClass, len(streamEvents) > 0)
+	result.err = callErr
+	if !shouldAttemptProviderFailover(primaryRuntime.Config, failureClass) {
+		return result
+	}
+
+	failover := map[string]any{
+		"attempted":       true,
+		"success":         false,
+		"failureClass":    failureClass,
+		"fromProviderId":  strings.TrimSpace(primaryRuntime.Config.ID),
+		"fromProvider":    strings.TrimSpace(primaryRuntime.Config.Provider),
+		"fromModel":       strings.TrimSpace(primaryRuntime.Config.Model),
+		"primaryError":    callErr.Error(),
+		"primaryStage":    result.failureStage,
+		"primaryBudget":   providerContextBudgetOutput(providerReq.ContextBudget, primaryRuntime.Config.ID, primaryRuntime.Config.Model),
+		"retryWithBackup": true,
+	}
+	backupRuntime, backupProviderID, ok := a.selectFailoverRuntime(primaryProviderID, primaryRuntime.Config, operation)
+	if !ok {
+		failover["reason"] = "no failover provider is available"
+		result.failover = failover
+		return result
+	}
+
+	backupReq := providerRequest(request, backupRuntime.Config)
+	backupPayload, backupUsage, backupEvents, backupErr := completeProvider(ctx, backupRuntime, backupReq)
+	failover["toProviderId"] = strings.TrimSpace(backupRuntime.Config.ID)
+	failover["toProvider"] = strings.TrimSpace(backupRuntime.Config.Provider)
+	failover["toModel"] = strings.TrimSpace(backupRuntime.Config.Model)
+	failover["toBudget"] = providerContextBudgetOutput(backupReq.ContextBudget, backupRuntime.Config.ID, backupRuntime.Config.Model)
+	if backupErr != nil {
+		failover["backupError"] = backupErr.Error()
+		failover["backupFailureClass"] = classifyProviderInvocationFailure(backupErr)
+		failover["backupStage"] = providerFailureStage(classifyProviderInvocationFailure(backupErr), len(backupEvents) > 0)
+		combinedEvents := append([]llmmodels.ProviderStreamEvent{}, streamEvents...)
+		combinedEvents = append(combinedEvents, backupEvents...)
+		result.runtime = backupRuntime
+		result.request = backupReq
+		result.streamEvents = combinedEvents
+		result.payload = backupPayload
+		result.usage = backupUsage
+		result.failureStage = providerFailureStage(classifyProviderInvocationFailure(backupErr), len(combinedEvents) > 0)
+		result.err = backupErr
+		result.failover = failover
+		return result
+	}
+
+	failover["success"] = true
+	failover["resolvedBy"] = backupProviderID
+	result.runtime = backupRuntime
+	result.request = backupReq
+	result.payload = backupPayload
+	result.usage = backupUsage
+	result.streamEvents = backupEvents
+	result.failover = failover
+	result.err = nil
+	result.failureStage = ""
+	return result
+}
+
+func shouldAttemptProviderFailover(config llmmodels.ProviderConfig, failureClass string) bool {
+	if !config.FailoverEnabled {
+		return false
+	}
+	switch strings.TrimSpace(failureClass) {
+	case providerFailureClassTimeout, providerFailureClassContextLarge, providerFailureClassRateLimited, providerFailureClassUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *RuntimeAdapter) selectFailoverRuntime(primaryProviderID string, primaryConfig llmmodels.ProviderConfig, operation string) (ProviderRuntime, string, bool) {
+	defaultProviderID, providers, err := a.providerRuntimes()
+	if err != nil || len(providers) == 0 {
+		return ProviderRuntime{}, "", false
+	}
+	primaryProviderID = strings.TrimSpace(primaryProviderID)
+	if primaryProviderID == "" {
+		primaryProviderID = strings.TrimSpace(primaryConfig.ID)
+	}
+	candidates := []string{}
+	seen := map[string]bool{}
+	for _, candidate := range primaryConfig.FailoverProviders {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		candidates = append(candidates, candidate)
+	}
+	if defaultProviderID != "" && !seen[defaultProviderID] {
+		seen[defaultProviderID] = true
+		candidates = append(candidates, defaultProviderID)
+	}
+	ids := make([]string, 0, len(providers))
+	for id := range providers {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if !seen[id] {
+			candidates = append(candidates, id)
+		}
+	}
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate) == "" || candidate == primaryProviderID {
+			continue
+		}
+		runtime, ok := providers[candidate]
+		if !ok || runtime.Config.Unavailable || runtime.Provider == nil {
+			continue
+		}
+		if validateProviderOperation(operation, runtime.Config.Capabilities) != nil {
+			continue
+		}
+		return runtime, candidate, true
+	}
+	return ProviderRuntime{}, "", false
+}
+
+func classifyProviderInvocationFailure(err error) string {
+	text := ""
+	if err != nil {
+		text = strings.ToLower(strings.TrimSpace(err.Error()))
+	}
+	switch {
+	case strings.Contains(text, "context length"),
+		strings.Contains(text, "maximum context"),
+		strings.Contains(text, "context window"),
+		strings.Contains(text, "too many tokens"),
+		strings.Contains(text, "token limit"),
+		strings.Contains(text, "request too large"),
+		strings.Contains(text, "input is too long"),
+		strings.Contains(text, "prompt is too long"),
+		strings.Contains(text, "413"):
+		return providerFailureClassContextLarge
+	case strings.Contains(text, "deadline exceeded"), strings.Contains(text, "timeout"):
+		return providerFailureClassTimeout
+	case strings.Contains(text, "rate limit"),
+		strings.Contains(text, "too many requests"),
+		strings.Contains(text, "quota exceeded"),
+		strings.Contains(text, "429"):
+		return providerFailureClassRateLimited
+	case strings.Contains(text, "unauthorized"),
+		strings.Contains(text, "forbidden"),
+		strings.Contains(text, "invalid api key"),
+		strings.Contains(text, "authentication"),
+		strings.Contains(text, "api key"),
+		strings.Contains(text, "401"),
+		strings.Contains(text, "403"):
+		return providerFailureClassAuthOrConfig
+	default:
+		return providerFailureClassUnavailable
+	}
+}
+
+func providerFailureStage(failureClass string, stream bool) string {
+	switch strings.TrimSpace(failureClass) {
+	case providerFailureClassTimeout:
+		return "llm_provider_timeout"
+	case providerFailureClassContextLarge:
+		return "llm_provider_request_too_large"
+	case providerFailureClassRateLimited:
+		return "llm_provider_rate_limited"
+	case providerFailureClassAuthOrConfig:
+		return "llm_provider_auth_or_config_error"
+	case providerFailureClassUnavailable:
+		if stream {
+			return "llm_provider_stream_error"
+		}
+		return "llm_provider_unavailable"
+	default:
+		if stream {
+			return "llm_provider_stream_error"
+		}
+		return "llm_provider_error"
+	}
+}
+
+func completeProvider(ctx context.Context, runtime ProviderRuntime, request llmmodels.ProviderRequest) ([]byte, *llmmodels.ProviderUsage, []llmmodels.ProviderStreamEvent, error) {
 	if runtime.Config.Capabilities.Streaming {
 		streaming, ok := runtime.Provider.(StreamingProvider)
 		if !ok {
-			return nil, nil, fmt.Errorf("%w: llm provider does not implement streaming", common.ErrInvalidArgument)
+			return nil, nil, nil, fmt.Errorf("%w: llm provider does not implement streaming", common.ErrInvalidArgument)
 		}
 		events := []llmmodels.ProviderStreamEvent{}
-		payload, err := streaming.StreamComplete(ctx, request, func(event llmmodels.ProviderStreamEvent) error {
+		completion, err := streaming.StreamComplete(ctx, request, func(event llmmodels.ProviderStreamEvent) error {
 			if strings.TrimSpace(event.Type) == "" {
 				event.Type = "delta"
 			}
 			events = append(events, event)
 			return nil
 		})
-		return payload, events, err
+		return completion.Payload, completion.Usage, events, err
 	}
-	payload, err := runtime.Provider.Complete(ctx, request)
-	return payload, nil, err
+	completion, err := runtime.Provider.Complete(ctx, request)
+	return completion.Payload, completion.Usage, nil, err
 }
 
 func (a *RuntimeAdapter) GenerateEmbedding(ctx context.Context, providerID string, input string) (llmmodels.ProviderEmbeddingResult, error) {
@@ -409,6 +658,13 @@ func attachContextBudget(output map[string]any, budget *llmmodels.ProviderContex
 	if output == nil || budget == nil {
 		return
 	}
+	output["contextBudget"] = providerContextBudgetOutput(budget, providerID, model)
+}
+
+func providerContextBudgetOutput(budget *llmmodels.ProviderContextBudget, providerID, model string) map[string]any {
+	if budget == nil {
+		return nil
+	}
 	item := map[string]any{
 		"maxBytes":              budget.MaxBytes,
 		"actualBytes":           budget.ActualBytes,
@@ -428,6 +684,9 @@ func attachContextBudget(output map[string]any, budget *llmmodels.ProviderContex
 			"safetyRatio":            budget.Profile.SafetyRatio,
 			"bytesHardLimit":         budget.Profile.BytesHardLimit,
 			"estimatedTokensPerByte": budget.Profile.EstimatedTokensPerByte,
+			"inputTokenPrice":        budget.Profile.InputTokenPrice,
+			"outputTokenPrice":       budget.Profile.OutputTokenPrice,
+			"currency":               budget.Profile.Currency,
 		},
 	}
 	if strings.TrimSpace(providerID) != "" {
@@ -436,7 +695,155 @@ func attachContextBudget(output map[string]any, budget *llmmodels.ProviderContex
 	if strings.TrimSpace(model) != "" {
 		item["model"] = strings.TrimSpace(model)
 	}
-	output["contextBudget"] = item
+	return item
+}
+
+func attachFailoverMetadata(output map[string]any, metadata map[string]any) {
+	if output == nil || len(metadata) == 0 {
+		return
+	}
+	output["llmFailover"] = cloneMap(metadata)
+}
+
+func attachLLMUsage(output map[string]any, usage map[string]any) {
+	if output == nil || len(usage) == 0 {
+		return
+	}
+	output["llmUsage"] = cloneMap(usage)
+}
+
+func buildLLMUsageOutput(
+	request runtimemodel.StepExecutionRequest,
+	call providerCallResult,
+	operation string,
+	startedAt time.Time,
+	completedAt time.Time,
+	failureClass string,
+	status string,
+) map[string]any {
+	if status == "" {
+		status = "completed"
+	}
+	requestBytes := 0
+	inputTokens := 0
+	outputTokens := 0
+	totalTokens := 0
+	estimated := true
+	usageSource := llmcommon.UsageSourceEstimated
+	responseBytes := len(call.payload)
+	if responseBytes == 0 {
+		responseBytes = streamResponseBytes(call.streamEvents)
+	}
+	contextBudget := providerContextBudgetOutput(call.request.ContextBudget, call.runtime.Config.ID, call.runtime.Config.Model)
+	if call.request.ContextBudget != nil {
+		requestBytes = call.request.ContextBudget.ActualBytes
+		if requestBytes == 0 {
+			requestBytes = call.request.ContextBudget.MaxBytes
+		}
+		inputTokens = call.request.ContextBudget.EstimatedInputTokens
+	}
+	if requestBytes == 0 {
+		requestBytes = providerRequestBytes(call.request)
+	}
+	if inputTokens == 0 && requestBytes > 0 {
+		inputTokens = estimateUsageTokensFromBytes(requestBytes, call.runtime.Config.ContextProfile.EstimatedTokensPerByte)
+	}
+	if call.usage != nil {
+		estimated = false
+		usageSource = llmcommon.UsageSourceProviderNative
+		inputTokens = max(0, call.usage.InputTokens)
+		outputTokens = max(0, call.usage.OutputTokens)
+		totalTokens = max(0, call.usage.TotalTokens)
+		if totalTokens == 0 && (inputTokens > 0 || outputTokens > 0) {
+			totalTokens = inputTokens + outputTokens
+		}
+	} else if responseBytes > 0 {
+		outputTokens = estimateUsageTokensFromBytes(responseBytes, call.runtime.Config.ContextProfile.EstimatedTokensPerByte)
+	}
+	if totalTokens == 0 && (inputTokens > 0 || outputTokens > 0) {
+		totalTokens = inputTokens + outputTokens
+	}
+	ret := map[string]any{
+		"workspaceId":   string(request.WorkspaceID),
+		"runId":         string(request.RunID),
+		"stepId":        string(request.StepID),
+		"providerId":    strings.TrimSpace(call.runtime.Config.ID),
+		"provider":      strings.TrimSpace(call.runtime.Config.Provider),
+		"model":         strings.TrimSpace(call.runtime.Config.Model),
+		"operation":     strings.TrimSpace(operation),
+		"inputTokens":   inputTokens,
+		"outputTokens":  outputTokens,
+		"totalTokens":   totalTokens,
+		"estimated":     estimated,
+		"usageSource":   usageSource,
+		"requestBytes":  requestBytes,
+		"responseBytes": responseBytes,
+		"streaming":     len(call.streamEvents) > 0,
+		"contextBudget": contextBudget,
+		"startedAt":     startedAt.UTC().Format(time.RFC3339Nano),
+		"completedAt":   completedAt.UTC().Format(time.RFC3339Nano),
+		"durationMs":    int(completedAt.Sub(startedAt).Milliseconds()),
+		"status":        status,
+	}
+	if estimatedCost, currency, ok := estimateUsageCost(inputTokens, outputTokens, call.runtime.Config.ContextProfile); ok {
+		ret["estimatedCost"] = estimatedCost
+		ret["currency"] = currency
+		ret["costEstimated"] = true
+		ret["costSource"] = llmcommon.CostSourceProfilePricing
+	}
+	if strings.TrimSpace(failureClass) != "" {
+		ret["failureClass"] = strings.TrimSpace(failureClass)
+	}
+	return ret
+}
+
+func providerRequestBytes(request llmmodels.ProviderRequest) int {
+	if request.WorkspaceID == "" && request.RunID == "" && request.StepID == "" && request.Kind == "" && request.Schema == "" && len(request.Input) == 0 {
+		return 0
+	}
+	raw, err := json.Marshal(request)
+	if err != nil {
+		return 0
+	}
+	return len(raw)
+}
+
+func streamResponseBytes(events []llmmodels.ProviderStreamEvent) int {
+	if len(events) == 0 {
+		return 0
+	}
+	ret := 0
+	for _, item := range events {
+		ret += len(item.Delta)
+	}
+	return ret
+}
+
+func estimateUsageTokensFromBytes(bytes int, tokensPerByte float64) int {
+	if bytes <= 0 {
+		return 0
+	}
+	if tokensPerByte <= 0 {
+		tokensPerByte = defaultEstimatedTokensPerByte
+	}
+	return int(math.Ceil(float64(bytes) * tokensPerByte))
+}
+
+func estimateUsageCost(inputTokens, outputTokens int, profile llmmodels.ProviderContextProfile) (float64, string, bool) {
+	inputPrice := profile.InputTokenPrice
+	outputPrice := profile.OutputTokenPrice
+	if inputPrice <= 0 && outputPrice <= 0 {
+		return 0, "", false
+	}
+	cost := float64(inputTokens)*inputPrice + float64(outputTokens)*outputPrice
+	if cost <= 0 {
+		return 0, "", false
+	}
+	currency := strings.ToUpper(strings.TrimSpace(profile.Currency))
+	if currency == "" {
+		currency = "USD"
+	}
+	return cost, currency, true
 }
 
 func validateNonChatProviderOperation(operation string, capabilities llmmodels.ProviderCapabilities) error {
@@ -486,7 +893,8 @@ func repairLLMExecutionDecision(
 		OriginalOutput: previewLLMOutput(originalPayload),
 		ParseError:     parseErr.Error(),
 	}
-	payload, err := provider.Complete(ctx, repairReq)
+	completion, err := provider.Complete(ctx, repairReq)
+	payload := completion.Payload
 	if err != nil {
 		return llmmodels.LLMExecutionDecision{}, payload, err
 	}
@@ -1734,6 +2142,10 @@ func llmFailureCategory(stage string) string {
 	case "llm_provider_unavailable",
 		"llm_provider_client_unavailable",
 		"llm_provider_operation_unsupported",
+		"llm_provider_timeout",
+		"llm_provider_request_too_large",
+		"llm_provider_rate_limited",
+		"llm_provider_auth_or_config_error",
 		"llm_provider_error",
 		"llm_provider_stream_error":
 		return "llm_provider"
@@ -1749,6 +2161,10 @@ func llmFailureResolutionHint(stage string) string {
 	case "llm_provider_unavailable",
 		"llm_provider_client_unavailable",
 		"llm_provider_operation_unsupported",
+		"llm_provider_timeout",
+		"llm_provider_request_too_large",
+		"llm_provider_rate_limited",
+		"llm_provider_auth_or_config_error",
 		"llm_provider_error",
 		"llm_provider_stream_error":
 		return "check LLM provider baseURL, model, API key, protocol compatibility, and network availability before rerunning the workspace"

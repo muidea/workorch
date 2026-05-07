@@ -3,13 +3,12 @@ package tui
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -253,26 +252,11 @@ func ResolveDecision(be backend.Backend, ticketID string, answer string) tea.Cmd
 }
 
 func inferDecisionResolutionType(answer string) string {
-	text := strings.ToLower(strings.TrimSpace(answer))
-	switch {
-	case text == "":
-		return decisioncommon.ResolutionTypeProvideMissingInfo
-	case containsAny(text, "reject", "reject current path", "abort", "stop", "cancel", "拒绝", "终止", "停止", "取消", "不要继续"):
-		return decisioncommon.ResolutionTypeRejectCurrentPath
-	case containsAny(text, "replan", "重新规划", "重新计划", "重新制定计划", "重做计划", "换方案", "重新构建", "重建"):
-		return decisioncommon.ResolutionTypeReplan
-	default:
-		return decisioncommon.ResolutionTypeProvideMissingInfo
-	}
-}
-
-func containsAny(text string, needles ...string) bool {
-	for _, needle := range needles {
-		if strings.Contains(text, strings.ToLower(needle)) {
-			return true
-		}
-	}
-	return false
+	semantic := governancecommon.NormalizeDecisionResolution("auto", map[string]any{
+		"answer":   answer,
+		"operator": "tui",
+	})
+	return semantic.ResolutionType
 }
 
 func ResolveApproval(be backend.Backend, approvalID string, approve bool) tea.Cmd {

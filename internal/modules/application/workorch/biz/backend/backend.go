@@ -167,6 +167,68 @@ type WebSourceTraceInfo struct {
 	PolicyDecision string
 }
 
+type LLMUsageTraceInfo struct {
+	ID            string
+	WorkspaceID   common.WorkspaceID
+	RunID         common.RunID
+	StepID        common.StepID
+	ProviderID    string
+	Provider      string
+	Model         string
+	Operation     string
+	InputTokens   int
+	OutputTokens  int
+	TotalTokens   int
+	Estimated     bool
+	UsageSource   string
+	EstimatedCost float64
+	CostEstimated bool
+	CostSource    string
+	Currency      string
+	RequestBytes  int
+	ResponseBytes int
+	Streaming     bool
+	Status        string
+	FailureClass  string
+	OccurredAt    string
+	EvidenceRef   string
+}
+
+type LLMUsageSummaryInfo struct {
+	EntryTotal             int
+	InputTokens            int
+	OutputTokens           int
+	TotalTokens            int
+	EstimatedCost          float64
+	Currency               string
+	EstimatedEntries       int
+	ProviderNativeEntries  int
+	CostEstimatedEntries   int
+	FailedEntries          int
+	CostBreakdown          []LLMUsageCostBreakdownInfo
+	ProviderModelBreakdown []LLMUsageProviderModelBreakdownInfo
+}
+
+type LLMUsageCostBreakdownInfo struct {
+	Currency      string
+	EstimatedCost float64
+	EntryTotal    int
+}
+
+type LLMUsageProviderModelBreakdownInfo struct {
+	ProviderID       string
+	Provider         string
+	Model            string
+	Currency         string
+	EntryTotal       int
+	InputTokens      int
+	OutputTokens     int
+	TotalTokens      int
+	EstimatedCost    float64
+	EstimatedEntries int
+	FailedEntries    int
+}
+
 type WebSourceInfo struct {
 	Title       string
 	URL         string
@@ -199,6 +261,8 @@ type WorkspaceSnapshotInfo struct {
 	Patches            []PatchInfo
 	MemoryRecallTraces []MemoryRecallTraceInfo
 	WebSources         []WebSourceTraceInfo
+	LLMUsageTraces     []LLMUsageTraceInfo
+	LLMUsageSummary    LLMUsageSummaryInfo
 	Decisions          []DecisionInfo
 	Approvals          []ApprovalInfo
 }
@@ -585,6 +649,7 @@ const (
 	EventMemoryUpdated         EventType = "memory/updated"
 	EventMemoryDeleted         EventType = "memory/deleted"
 	EventMemoryRecallRecorded  EventType = "memory/recall/recorded"
+	EventLLMUsageRecorded      EventType = "llm/usage/recorded"
 	EventPatchPreviewed        EventType = "patch/previewed"
 	EventPatchApplied          EventType = "patch/applied"
 	EventPatchFailed           EventType = "patch/failed"

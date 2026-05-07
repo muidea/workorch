@@ -479,6 +479,8 @@ type WorkspaceSnapshot struct {
 	ValidationResults  []ValidationResult  `json:"validationResults,omitempty"`
 	RuntimeCheckpoints []RuntimeCheckpoint `json:"runtimeCheckpoints,omitempty"`
 	MemoryRecallTraces []MemoryRecallTrace `json:"memoryRecallTraces,omitempty"`
+	LLMUsageTraces     []LLMUsageTrace     `json:"llmUsageTraces,omitempty"`
+	LLMUsageSummary    LLMUsageSummary     `json:"llmUsageSummary"`
 	EventRecords       []EventRecord       `json:"eventRecords,omitempty"`
 }
 
@@ -498,6 +500,8 @@ type RunSnapshot struct {
 	Decisions          []Decision          `json:"decisions,omitempty"`
 	Approvals          []Approval          `json:"approvals,omitempty"`
 	MemoryRecallTraces []MemoryRecallTrace `json:"memoryRecallTraces,omitempty"`
+	LLMUsageTraces     []LLMUsageTrace     `json:"llmUsageTraces,omitempty"`
+	LLMUsageSummary    LLMUsageSummary     `json:"llmUsageSummary"`
 	EventRecords       []EventRecord       `json:"eventRecords,omitempty"`
 }
 
@@ -508,11 +512,79 @@ type Activation struct {
 }
 
 type RunObservability struct {
-	Run          Run             `json:"run"`
-	Outcome      RunOutcome      `json:"outcome"`
-	TaskProgress TaskProgress    `json:"taskProgress"`
-	RepairLoop   RepairLoop      `json:"repairLoop"`
-	Timeline     []TimelineEntry `json:"timeline,omitempty"`
+	Run             Run             `json:"run"`
+	Outcome         RunOutcome      `json:"outcome"`
+	TaskProgress    TaskProgress    `json:"taskProgress"`
+	RepairLoop      RepairLoop      `json:"repairLoop"`
+	LLMUsageTraces  []LLMUsageTrace `json:"llmUsageTraces,omitempty"`
+	LLMUsageSummary LLMUsageSummary `json:"llmUsageSummary"`
+	Timeline        []TimelineEntry `json:"timeline,omitempty"`
+}
+
+type LLMUsageTrace struct {
+	ID            string         `json:"id"`
+	WorkspaceID   string         `json:"workspaceId"`
+	RunID         string         `json:"runId"`
+	StepID        string         `json:"stepId,omitempty"`
+	ProviderID    string         `json:"providerId,omitempty"`
+	Provider      string         `json:"provider,omitempty"`
+	Model         string         `json:"model,omitempty"`
+	Operation     string         `json:"operation,omitempty"`
+	InputTokens   int            `json:"inputTokens,omitempty"`
+	OutputTokens  int            `json:"outputTokens,omitempty"`
+	TotalTokens   int            `json:"totalTokens,omitempty"`
+	Estimated     bool           `json:"estimated"`
+	UsageSource   string         `json:"usageSource,omitempty"`
+	EstimatedCost float64        `json:"estimatedCost,omitempty"`
+	CostEstimated bool           `json:"costEstimated"`
+	CostSource    string         `json:"costSource,omitempty"`
+	Currency      string         `json:"currency,omitempty"`
+	RequestBytes  int            `json:"requestBytes,omitempty"`
+	ResponseBytes int            `json:"responseBytes,omitempty"`
+	Streaming     bool           `json:"streaming"`
+	ContextBudget map[string]any `json:"contextBudget,omitempty"`
+	StartedAt     string         `json:"startedAt,omitempty"`
+	CompletedAt   string         `json:"completedAt,omitempty"`
+	DurationMs    int            `json:"durationMs,omitempty"`
+	Status        string         `json:"status,omitempty"`
+	FailureClass  string         `json:"failureClass,omitempty"`
+	OccurredAt    string         `json:"occurredAt,omitempty"`
+	EvidenceRef   string         `json:"evidenceRef,omitempty"`
+}
+
+type LLMUsageSummary struct {
+	EntryTotal             int                              `json:"entryTotal"`
+	InputTokens            int                              `json:"inputTokens"`
+	OutputTokens           int                              `json:"outputTokens"`
+	TotalTokens            int                              `json:"totalTokens"`
+	EstimatedCost          float64                          `json:"estimatedCost,omitempty"`
+	Currency               string                           `json:"currency,omitempty"`
+	EstimatedEntries       int                              `json:"estimatedEntries"`
+	ProviderNativeEntries  int                              `json:"providerNativeEntries"`
+	CostEstimatedEntries   int                              `json:"costEstimatedEntries"`
+	FailedEntries          int                              `json:"failedEntries"`
+	CostBreakdown          []LLMUsageCostBreakdown          `json:"costBreakdown,omitempty"`
+	ProviderModelBreakdown []LLMUsageProviderModelBreakdown `json:"providerModelBreakdown,omitempty"`
+}
+
+type LLMUsageCostBreakdown struct {
+	Currency      string  `json:"currency"`
+	EstimatedCost float64 `json:"estimatedCost"`
+	EntryTotal    int     `json:"entryTotal"`
+}
+
+type LLMUsageProviderModelBreakdown struct {
+	ProviderID       string  `json:"providerId,omitempty"`
+	Provider         string  `json:"provider,omitempty"`
+	Model            string  `json:"model,omitempty"`
+	Currency         string  `json:"currency,omitempty"`
+	EntryTotal       int     `json:"entryTotal"`
+	InputTokens      int     `json:"inputTokens"`
+	OutputTokens     int     `json:"outputTokens"`
+	TotalTokens      int     `json:"totalTokens"`
+	EstimatedCost    float64 `json:"estimatedCost,omitempty"`
+	EstimatedEntries int     `json:"estimatedEntries"`
+	FailedEntries    int     `json:"failedEntries"`
 }
 
 type TimelineEntry struct {

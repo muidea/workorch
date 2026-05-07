@@ -5623,6 +5623,116 @@ func TestRuntimeOrchestrator_StartRunPublishesRunAndStepEvents(t *testing.T) {
 	}
 }
 
+func TestRuntimeOrchestrator_StartRunPublishesLLMStreamProgressEvent(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{
+		"status": "ok",
+		"stage":  "llm_execution_graph_plan",
+		"contextBudget": map[string]any{
+			"providerId": "provider-a",
+			"model":      "model-a",
+		},
+		"llmUsage": map[string]any{
+			"providerId":    "provider-a",
+			"provider":      "compatible",
+			"model":         "model-a",
+			"operation":     "chat_completions",
+			"inputTokens":   100,
+			"outputTokens":  20,
+			"totalTokens":   120,
+			"estimated":     true,
+			"requestBytes":  1024,
+			"responseBytes": 256,
+			"streaming":     true,
+			"status":        "completed",
+		},
+		"streamEvents": []map[string]any{
+			{"type": "delta", "delta": "abc"},
+			{"type": "delta", "delta": "def"},
+			{"type": "done"},
+		},
+	}}
+	hub := events.NewMemoryHub()
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
+
+	workspaceID := common.WorkspaceID("ws-evt-stream")
+	runID := common.RunID("run-evt-stream")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		State:           common.RunStateCreated,
+		InitialStepKind: "llm/workspace_execution",
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	var streamProgress events.Envelope
+	found := false
+	for _, item := range hub.Published() {
+		if item.Topic != events.TopicRunLLMStreamProgress {
+			continue
+		}
+		streamProgress = item
+		found = true
+		break
+	}
+	if !found {
+		t.Fatalf("published events missing %s", events.TopicRunLLMStreamProgress)
+	}
+	if streamProgress.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) ||
+		streamProgress.Payload[events.PayloadKeyRunID] != string(runID) {
+		t.Fatalf("stream payload workspace/run = %+v, want %s/%s", streamProgress.Payload, workspaceID, runID)
+	}
+	if streamProgress.Payload[events.PayloadKeyChunkCount] != 3 ||
+		streamProgress.Payload[events.PayloadKeyReceivedBytes] != 6 {
+		t.Fatalf("stream payload chunk/bytes = %+v, want 3/6", streamProgress.Payload)
+	}
+	if streamProgress.Payload[events.PayloadKeyProviderID] != "provider-a" ||
+		streamProgress.Payload[events.PayloadKeyModel] != "model-a" ||
+		streamProgress.Payload[events.PayloadKeyStatus] != string(common.StepStateCompleted) {
+		t.Fatalf("stream payload provider/model/status = %+v", streamProgress.Payload)
+	}
+
+	var usageRecorded events.Envelope
+	usageFound := false
+	for _, item := range hub.Published() {
+		if item.Topic != events.TopicRunLLMUsageRecorded {
+			continue
+		}
+		usageRecorded = item
+		usageFound = true
+		break
+	}
+	if !usageFound {
+		t.Fatalf("published events missing %s", events.TopicRunLLMUsageRecorded)
+	}
+	if usageRecorded.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) ||
+		usageRecorded.Payload[events.PayloadKeyRunID] != string(runID) ||
+		usageRecorded.Payload[events.PayloadKeyStepID] == "" {
+		t.Fatalf("usage payload workspace/run/step = %+v", usageRecorded.Payload)
+	}
+	if usageRecorded.Payload[events.PayloadKeyProviderID] != "provider-a" ||
+		usageRecorded.Payload[events.PayloadKeyModel] != "model-a" ||
+		usageRecorded.Payload[events.PayloadKeyStreaming] != true {
+		t.Fatalf("usage payload provider/model/streaming = %+v", usageRecorded.Payload)
+	}
+	if usageRecorded.Payload[events.PayloadKeyStatus] != "completed" || usageRecorded.Payload[events.PayloadKeyTotalTokens] == nil {
+		t.Fatalf("usage payload status/tokens = %+v", usageRecorded.Payload)
+	}
+}
+
 func TestRuntimeOrchestrator_CompleteRunClearsStaleTerminalActiveRun(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

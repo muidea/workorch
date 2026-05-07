@@ -200,3 +200,91 @@ func TestDecodeAutoGovernancePayloadRoundTrip(t *testing.T) {
 		t.Fatalf("decoded auto governance payload = %+v", decoded)
 	}
 }
+
+func TestDecodeLLMStreamProgressPayloadRoundTrip(t *testing.T) {
+	payload := LLMStreamProgressPayload(
+		common.WorkspaceID("ws-1"),
+		common.RunID("run-1"),
+		common.StepID("run-1/step-1"),
+		"provider-a",
+		"model-a",
+		6,
+		1024,
+		380,
+		"completed",
+		"llm_execution_graph_plan - completed",
+	)
+
+	decoded, ok := DecodeLLMStreamProgressPayload(payload)
+	if !ok {
+		t.Fatalf("DecodeLLMStreamProgressPayload returned !ok")
+	}
+	if decoded.WorkspaceID != "ws-1" ||
+		decoded.RunID != "run-1" ||
+		decoded.StepID != "run-1/step-1" ||
+		decoded.ProviderID != "provider-a" ||
+		decoded.Model != "model-a" ||
+		decoded.ChunkCount != 6 ||
+		decoded.ReceivedBytes != 1024 ||
+		decoded.ElapsedMs != 380 ||
+		decoded.Status != "completed" ||
+		decoded.Summary != "llm_execution_graph_plan - completed" {
+		t.Fatalf("decoded llm stream progress payload = %+v", decoded)
+	}
+}
+
+func TestDecodeLLMUsagePayloadRoundTrip(t *testing.T) {
+	payload := LLMUsagePayload(LLMUsagePayloadData{
+		WorkspaceID:   common.WorkspaceID("ws-1"),
+		RunID:         common.RunID("run-1"),
+		StepID:        common.StepID("run-1/step-1"),
+		ProviderID:    "provider-a",
+		Provider:      "compatible",
+		Model:         "model-a",
+		Operation:     "chat_completions",
+		InputTokens:   120,
+		OutputTokens:  32,
+		TotalTokens:   152,
+		Estimated:     true,
+		UsageSource:   "estimated",
+		EstimatedCost: 0.00031,
+		CostEstimated: true,
+		CostSource:    "profile_pricing",
+		Currency:      "USD",
+		RequestBytes:  2048,
+		ResponseBytes: 512,
+		Streaming:     true,
+		ContextBudget: map[string]any{"maxBytes": 4096},
+		StartedAt:     "2026-05-07T07:00:00Z",
+		CompletedAt:   "2026-05-07T07:00:01Z",
+		DurationMs:    1000,
+		Status:        "completed",
+	})
+	decoded, ok := DecodeLLMUsagePayload(payload)
+	if !ok {
+		t.Fatalf("DecodeLLMUsagePayload returned !ok")
+	}
+	if decoded.WorkspaceID != "ws-1" ||
+		decoded.RunID != "run-1" ||
+		decoded.StepID != "run-1/step-1" ||
+		decoded.ProviderID != "provider-a" ||
+		decoded.Provider != "compatible" ||
+		decoded.Model != "model-a" ||
+		decoded.Operation != "chat_completions" ||
+		decoded.InputTokens != 120 ||
+		decoded.OutputTokens != 32 ||
+		decoded.TotalTokens != 152 ||
+		!decoded.Estimated ||
+		decoded.UsageSource != "estimated" ||
+		decoded.EstimatedCost != 0.00031 ||
+		!decoded.CostEstimated ||
+		decoded.CostSource != "profile_pricing" ||
+		decoded.Currency != "USD" ||
+		decoded.RequestBytes != 2048 ||
+		decoded.ResponseBytes != 512 ||
+		!decoded.Streaming ||
+		decoded.DurationMs != 1000 ||
+		decoded.Status != "completed" {
+		t.Fatalf("decoded llm usage payload = %+v", decoded)
+	}
+}

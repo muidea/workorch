@@ -13,6 +13,7 @@ import (
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -178,6 +179,16 @@ func (s *Service) processTicketCreated(ctx context.Context, envelope events.Enve
 		"source":     "auto_governance",
 		"confidence": eval.confidence,
 		"reason":     eval.reason,
+	}
+	semantic := governancecommon.NormalizeDecisionResolution("", payload)
+	payload["governanceSemantic"] = map[string]any{
+		"resolutionType": semantic.ResolutionType,
+		"intent":         semantic.Intent,
+		"confidence":     semantic.Confidence,
+		"rawInput":       semantic.RawInput,
+		"source":         semantic.Source,
+		"inferred":       semantic.Inferred,
+		"version":        "v1",
 	}
 	if err := s.resolve(ctx, ticket.ID, payload); err != nil {
 		trace.Status = "blocked"

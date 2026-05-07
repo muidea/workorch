@@ -12,6 +12,8 @@ type ProviderConfig struct {
 	Disabled          bool
 	Capabilities      ProviderCapabilities
 	ContextProfile    ProviderContextProfile
+	FailoverEnabled   bool
+	FailoverProviders []string
 	Unavailable       bool
 	UnavailableReason string
 }
@@ -51,4 +53,10 @@ type RedactedProviderConfig struct {
 	Reason         string                 `json:"reason,omitempty"`
 	Capabilities   ProviderCapabilities   `json:"capabilities"`
 	ContextProfile ProviderContextProfile `json:"contextProfile,omitempty"`
+	Failover       ProviderFailoverConfig `json:"failover,omitempty"`
+}
+
+type ProviderFailoverConfig struct {
+	Enabled   bool     `json:"enabled"`
+	Providers []string `json:"providers,omitempty"`
 }
