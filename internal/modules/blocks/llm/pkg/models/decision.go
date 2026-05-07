@@ -27,6 +27,7 @@ type ProviderContextBudget struct {
 	ShrinkLevel           int                    `json:"shrinkLevel,omitempty"`
 	Truncated             bool                   `json:"truncated"`
 	Rules                 []string               `json:"rules,omitempty"`
+	SourceRefs            []string               `json:"sourceRefs,omitempty"`
 	Estimator             string                 `json:"estimator,omitempty"`
 	Profile               ProviderContextProfile `json:"profile,omitempty"`
 }

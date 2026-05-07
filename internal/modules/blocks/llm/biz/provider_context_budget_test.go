@@ -57,7 +57,8 @@ func TestEnforceProviderRequestBudgetCompactsLargeExecutionContext(t *testing.T)
 	}
 	if got.ContextBudget.Estimator != "bytes_ratio" ||
 		got.ContextBudget.MaxTokens != 1024 ||
-		got.ContextBudget.EstimatedInputTokens <= 0 {
+		got.ContextBudget.EstimatedInputTokens <= 0 ||
+		len(got.ContextBudget.SourceRefs) == 0 {
 		t.Fatalf("contextBudget = %+v, want token metadata", got.ContextBudget)
 	}
 	executionContext := recordFromAny(got.Input["executionContext"])

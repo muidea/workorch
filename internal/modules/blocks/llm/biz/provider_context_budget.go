@@ -50,29 +50,35 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	}
 	maxTokens := profile.MaxInputTokens
 	rules := []string{"preserve identifiers, schema, config, runtime capabilities, goal, DoD, and governance decisions"}
+	sourceRefs := []string{}
 	request.ContextBudget = nil
 	shrinkLevel := 0
 	if adaptiveLevel := adaptiveShrinkLevelFromInput(request.Input); adaptiveLevel > 0 {
+		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = applyAdaptiveShrinkLevel(request.Input, adaptiveLevel)
 		rules = append(rules, "adaptive shrink based on provider retry")
 		shrinkLevel = adaptiveLevel
 	}
 	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
+		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = budgetProviderInput(request.Input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
 		rules = append(rules, "compact provider input")
 		shrinkLevel = max(shrinkLevel, 1)
 	}
 	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
+		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = compactProviderExecutionContext(request.Input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries)
 		rules = append(rules, "summarize execution context transport fields")
 		shrinkLevel = max(shrinkLevel, 2)
 	}
 	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
+		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = prioritizedProviderInput(request.Input, true)
 		rules = append(rules, "apply priority compaction (P0/P1/P2)")
 		shrinkLevel = max(shrinkLevel, 3)
 	}
 	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
+		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = minimalProviderInput(request.Input)
 		rules = append(rules, "fallback to stage-aware minimal provider input (P0/P1)")
 		shrinkLevel = max(shrinkLevel, 4)
@@ -92,6 +98,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		ShrinkLevel:           shrinkLevel,
 		Truncated:             truncated,
 		Rules:                 rules,
+		SourceRefs:            uniqueStrings(sourceRefs),
 		Estimator:             "bytes_ratio",
 		Profile:               profile,
 	}
@@ -431,6 +438,30 @@ func uniqueStrings(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func providerInputSourceRefs(input map[string]any) []string {
+	if len(input) == 0 {
+		return nil
+	}
+	refs := make([]string, 0, 12)
+	for key := range input {
+		switch strings.TrimSpace(key) {
+		case "executionContext", "workspaceFileManifest", "workspaceManifest",
+			"graphEvidence", "failedExecutionGraph", "failedStepInput", "failedStepOutput",
+			"decisionResolution", "approvalResolution", "memoryRetrieval", "skillSelection":
+			refs = append(refs, "input."+key)
+		}
+	}
+	if executionContext := recordFromAny(input["executionContext"]); len(executionContext) > 0 {
+		for key := range executionContext {
+			switch strings.TrimSpace(key) {
+			case "goal", "goals", "dod", "dods", "governanceHistory", "memoryRetrieval", "skillSelection":
+				refs = append(refs, "input.executionContext."+key)
+			}
+		}
+	}
+	return uniqueStrings(refs)
 }
 
 func intValue(value any) int {

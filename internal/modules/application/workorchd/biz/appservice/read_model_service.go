@@ -13,6 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
@@ -556,15 +557,17 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 
 	currentStep := lastStep(steps)
 	observedItems := observed.BuildWorkorchSnapshot(workspace, item, steps, selectedTicket, selectedResolution, selectedApproval, deps.published)
+	stepViews := presenter.MapSteps(steps)
 
 	ret := RunSnapshot{
 		Workspace:          mapWorkspaceWithRunProjection(workspace, item),
 		Run:                mapRun(item),
 		Step:               presenter.MapStep(currentStep),
-		Steps:              presenter.MapSteps(steps),
+		Steps:              stepViews,
 		ToolCalls:          mapToolCalls(toolCalls),
 		Patches:            mapPatches(patches),
-		WebSources:         mapWebSourceTraces(presenter.MapSteps(steps)),
+		WebSources:         mapWebSourceTraces(stepViews),
+		LLMContextBudgets:  mapLLMContextBudgetTraces(stepViews),
 		ValidationResults:  mapValidationResults(validations),
 		RuntimeCheckpoints: mapRuntimeCheckpoints(checkpoints),
 		Results:            mapResults(results),
@@ -678,13 +681,15 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 	if err != nil {
 		return RunSnapshot{}, err
 	}
+	stepViews := presenter.MapSteps(steps)
 	ret := RunSnapshot{
 		Workspace:          mapWorkspaceWithRunProjection(workspace, item),
 		Run:                mapRun(item),
 		Step:               presenter.MapStep(lastStep(steps)),
-		Steps:              presenter.MapSteps(steps),
+		Steps:              stepViews,
 		ToolCalls:          mapToolCalls(toolCalls),
 		Patches:            mapPatches(patches),
+		LLMContextBudgets:  mapLLMContextBudgetTraces(stepViews),
 		ValidationResults:  mapValidationResults(validations),
 		RuntimeCheckpoints: mapRuntimeCheckpoints(checkpoints),
 		Results:            mapResults(results),
@@ -1291,6 +1296,42 @@ func mapWebSourceTraces(steps []presenter.StepView) []WebSourceTrace {
 				ret = append(ret, trace)
 			}
 		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func mapLLMContextBudgetTraces(steps []presenter.StepView) []LLMContextBudgetTrace {
+	if len(steps) == 0 {
+		return nil
+	}
+	ret := make([]LLMContextBudgetTrace, 0)
+	for _, step := range steps {
+		if step.Output == nil || step.Kind != llmcommon.StepKindWorkspaceExecution {
+			continue
+		}
+		budget := readModelMapValue(step.Output["contextBudget"])
+		if len(budget) == 0 {
+			continue
+		}
+		ret = append(ret, LLMContextBudgetTrace{
+			StepID:                step.ID,
+			ProviderID:            readModelStringValue(budget["providerId"]),
+			Model:                 readModelStringValue(budget["model"]),
+			MaxBytes:              readModelIntValue(budget["maxBytes"]),
+			ActualBytes:           readModelIntValue(budget["actualBytes"]),
+			MaxTokens:             readModelIntValue(budget["maxTokens"]),
+			EstimatedInputTokens:  readModelIntValue(budget["estimatedInputTokens"]),
+			EstimatedOutputTokens: readModelIntValue(budget["estimatedOutputTokens"]),
+			ActualTokens:          readModelIntValue(budget["actualTokens"]),
+			ShrinkLevel:           readModelIntValue(budget["shrinkLevel"]),
+			Truncated:             readModelBoolValue(budget["truncated"]),
+			Rules:                 readModelStringSliceValue(budget["rules"]),
+			SourceRefs:            readModelStringSliceValue(budget["sourceRefs"]),
+			Estimator:             readModelStringValue(budget["estimator"]),
+		})
 	}
 	if len(ret) == 0 {
 		return nil
@@ -2258,6 +2299,7 @@ func mapRunObservability(snapshot RunSnapshot) RunObservability {
 		TaskDecompositions:   snapshot.TaskDecompositions,
 		TaskPlans:            snapshot.TaskPlans,
 		ExecutionSections:    snapshot.ExecutionSections,
+		LLMContextBudgets:    snapshot.LLMContextBudgets,
 		MemoryRecallTraces:   snapshot.MemoryRecallTraces,
 		WebSources:           snapshot.WebSources,
 		DoDEvidence:          snapshot.DoDEvidence,

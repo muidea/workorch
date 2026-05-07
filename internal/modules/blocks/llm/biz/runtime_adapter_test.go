@@ -95,6 +95,42 @@ func TestRuntimeAdapterFailsClearlyWhenProviderUnavailable(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterProjectsContextBudgetToStepOutput(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{
+		"completionState":"continue",
+		"shellCommands":[{"command":"echo","args":["ok"]}]
+	}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		ID:       "reasoning",
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		ContextProfile: llmmodels.ProviderContextProfile{
+			ContextWindowTokens:    4096,
+			MaxInputTokens:         512,
+			ReservedOutputTokens:   512,
+			SafetyRatio:            0.8,
+			BytesHardLimit:         64 * 1024,
+			EstimatedTokensPerByte: 0.25,
+		},
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	budget, ok := result.Output["contextBudget"].(map[string]any)
+	if !ok {
+		t.Fatalf("contextBudget = %#v, want projected map", result.Output["contextBudget"])
+	}
+	if budget["providerId"] != "reasoning" || budget["model"] != "test-model" {
+		t.Fatalf("contextBudget = %+v, want provider/model projection", budget)
+	}
+	if budget["maxBytes"] == nil || budget["actualBytes"] == nil || budget["truncated"] == nil {
+		t.Fatalf("contextBudget = %+v, want required budget fields", budget)
+	}
+}
+
 func TestRuntimeAdapterRepairsInvalidDecisionOnce(t *testing.T) {
 	provider := &sequenceProvider{payloads: [][]byte{
 		[]byte(`{

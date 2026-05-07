@@ -22,6 +22,7 @@ type RunSnapshot struct {
 	ResultQuality        []ResultQualityTrace     `json:"resultQuality,omitempty"`
 	Artifacts            []Artifact               `json:"artifacts,omitempty"`
 	ExecutionSections    []ExecutionSection       `json:"executionSections,omitempty"`
+	LLMContextBudgets    []LLMContextBudgetTrace  `json:"llmContextBudgets,omitempty"`
 	MemoryRecallTraces   []MemoryRecallTrace      `json:"memoryRecallTraces,omitempty"`
 	SelectedCapabilities []RuntimeCapability      `json:"selectedCapabilities,omitempty"`
 	UsedCapabilities     []RuntimeCapability      `json:"usedCapabilities,omitempty"`
@@ -47,23 +48,24 @@ type RunStatus struct {
 }
 
 type RunObservability struct {
-	Run                  Run                    `json:"run"`
-	Outcome              RunOutcome             `json:"outcome"`
-	Progress             RunProgress            `json:"progress"`
-	TaskProgress         TaskProgress           `json:"taskProgress"`
-	RepairLoop           RepairLoop             `json:"repairLoop"`
-	TaskDecompositions   []TaskDecomposition    `json:"taskDecompositions,omitempty"`
-	TaskPlans            []TaskPlan             `json:"taskPlans,omitempty"`
-	ExecutionSections    []ExecutionSection     `json:"executionSections,omitempty"`
-	MemoryRecallTraces   []MemoryRecallTrace    `json:"memoryRecallTraces,omitempty"`
-	WebSources           []WebSourceTrace       `json:"webSources,omitempty"`
-	DoDEvidence          []DoDEvidenceTrace     `json:"doDEvidence,omitempty"`
-	ResultQuality        []ResultQualityTrace   `json:"resultQuality,omitempty"`
-	Evidence             RuntimeEvidenceSummary `json:"evidence"`
-	LatestCheckpoint     *RuntimeCheckpoint     `json:"latestCheckpoint,omitempty"`
-	SelectedCapabilities []RuntimeCapability    `json:"selectedCapabilities,omitempty"`
-	UsedCapabilities     []RuntimeCapability    `json:"usedCapabilities,omitempty"`
-	Timeline             []RuntimeTimelineItem  `json:"timeline,omitempty"`
+	Run                  Run                     `json:"run"`
+	Outcome              RunOutcome              `json:"outcome"`
+	Progress             RunProgress             `json:"progress"`
+	TaskProgress         TaskProgress            `json:"taskProgress"`
+	RepairLoop           RepairLoop              `json:"repairLoop"`
+	TaskDecompositions   []TaskDecomposition     `json:"taskDecompositions,omitempty"`
+	TaskPlans            []TaskPlan              `json:"taskPlans,omitempty"`
+	ExecutionSections    []ExecutionSection      `json:"executionSections,omitempty"`
+	LLMContextBudgets    []LLMContextBudgetTrace `json:"llmContextBudgets,omitempty"`
+	MemoryRecallTraces   []MemoryRecallTrace     `json:"memoryRecallTraces,omitempty"`
+	WebSources           []WebSourceTrace        `json:"webSources,omitempty"`
+	DoDEvidence          []DoDEvidenceTrace      `json:"doDEvidence,omitempty"`
+	ResultQuality        []ResultQualityTrace    `json:"resultQuality,omitempty"`
+	Evidence             RuntimeEvidenceSummary  `json:"evidence"`
+	LatestCheckpoint     *RuntimeCheckpoint      `json:"latestCheckpoint,omitempty"`
+	SelectedCapabilities []RuntimeCapability     `json:"selectedCapabilities,omitempty"`
+	UsedCapabilities     []RuntimeCapability     `json:"usedCapabilities,omitempty"`
+	Timeline             []RuntimeTimelineItem   `json:"timeline,omitempty"`
 }
 
 type TaskProgress struct {
@@ -468,6 +470,23 @@ type WebSourceTrace struct {
 	EvidenceRefs   []string           `json:"evidenceRefs,omitempty"`
 	ApprovalID     string             `json:"approvalId,omitempty"`
 	PolicyDecision string             `json:"policyDecision,omitempty"`
+}
+
+type LLMContextBudgetTrace struct {
+	StepID                string   `json:"stepId"`
+	ProviderID            string   `json:"providerId,omitempty"`
+	Model                 string   `json:"model,omitempty"`
+	MaxBytes              int      `json:"maxBytes"`
+	ActualBytes           int      `json:"actualBytes"`
+	MaxTokens             int      `json:"maxTokens,omitempty"`
+	EstimatedInputTokens  int      `json:"estimatedInputTokens,omitempty"`
+	EstimatedOutputTokens int      `json:"estimatedOutputTokens,omitempty"`
+	ActualTokens          int      `json:"actualTokens,omitempty"`
+	ShrinkLevel           int      `json:"shrinkLevel,omitempty"`
+	Truncated             bool     `json:"truncated"`
+	Rules                 []string `json:"rules,omitempty"`
+	SourceRefs            []string `json:"sourceRefs,omitempty"`
+	Estimator             string   `json:"estimator,omitempty"`
 }
 
 type WebSource struct {

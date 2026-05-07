@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -1081,6 +1083,60 @@ func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
 	if !timelineContainsPersistedEvent(observability.Timeline, events.TopicStepStateChanged) ||
 		!timelineContainsStepOccurredAt(observability.Timeline, "step", stepID, "2026-05-05T00:00:02Z") {
 		t.Fatalf("timeline = %+v, want persisted web step event and step occurrence", observability.Timeline)
+	}
+}
+
+func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
+	steps := []presenter.StepView{
+		{
+			ID:    "run-ctx/step-1",
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: string(common.StepStateCompleted),
+			Output: map[string]any{
+				"contextBudget": map[string]any{
+					"providerId":            "reasoning",
+					"model":                 "gpt-5",
+					"maxBytes":              98304,
+					"actualBytes":           72440,
+					"maxTokens":             16000,
+					"estimatedInputTokens":  12000,
+					"estimatedOutputTokens": 2048,
+					"actualTokens":          14048,
+					"shrinkLevel":           3,
+					"truncated":             true,
+					"rules":                 []string{"compact provider input", "apply priority compaction (P0/P1/P2)"},
+					"sourceRefs":            []string{"input.executionContext.goal", "input.graphEvidence"},
+					"estimator":             "bytes_ratio",
+				},
+			},
+		},
+		{
+			ID:    "run-ctx/step-shell",
+			Kind:  shellcommon.StepKindCommand,
+			State: string(common.StepStateCompleted),
+			Output: map[string]any{
+				"status": "completed",
+			},
+		},
+	}
+	traces := mapLLMContextBudgetTraces(steps)
+	if len(traces) != 1 {
+		t.Fatalf("traces = %+v, want one llm context budget trace", traces)
+	}
+	if traces[0].StepID != "run-ctx/step-1" ||
+		traces[0].ProviderID != "reasoning" ||
+		traces[0].Model != "gpt-5" ||
+		!traces[0].Truncated ||
+		traces[0].ShrinkLevel != 3 ||
+		len(traces[0].SourceRefs) != 2 {
+		t.Fatalf("trace = %+v, want projected context budget fields", traces[0])
+	}
+	observability := mapRunObservability(RunSnapshot{
+		Run:               Run{ID: "run-ctx", WorkspaceID: "ws-ctx"},
+		LLMContextBudgets: traces,
+	})
+	if len(observability.LLMContextBudgets) != 1 || observability.LLMContextBudgets[0].StepID != "run-ctx/step-1" {
+		t.Fatalf("observability budgets = %+v, want projected context budget traces", observability.LLMContextBudgets)
 	}
 }
 

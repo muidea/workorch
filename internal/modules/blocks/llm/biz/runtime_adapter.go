@@ -287,6 +287,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 			stage = "llm_provider_stream_error"
 		}
 		output := failureOutput(request, stage, err.Error(), runtime.Config)
+		attachContextBudget(output, providerReq.ContextBudget, runtime.Config.ID, runtime.Config.Model)
 		attachStreamEvents(output, streamEvents)
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
@@ -304,6 +305,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 			if len(repairPayload) > 0 {
 				output["repairRawContentPreview"] = previewLLMOutput(repairPayload)
 			}
+			attachContextBudget(output, providerReq.ContextBudget, runtime.Config.ID, runtime.Config.Model)
 			attachStreamEvents(output, streamEvents)
 			return runtimemodel.StepExecutionResult{Output: output}, parseErr
 		}
@@ -317,9 +319,11 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	output, err := NormalizeDecisionOutput(request, decision)
 	if err != nil {
 		failure := failureOutput(request, "llm_decision_invalid", err.Error(), runtime.Config)
+		attachContextBudget(failure, providerReq.ContextBudget, runtime.Config.ID, runtime.Config.Model)
 		attachStreamEvents(failure, streamEvents)
 		return runtimemodel.StepExecutionResult{Output: failure}, err
 	}
+	attachContextBudget(output, providerReq.ContextBudget, runtime.Config.ID, runtime.Config.Model)
 	attachStreamEvents(output, streamEvents)
 	if repairMetadata != nil {
 		output["llmRepair"] = repairMetadata
@@ -399,6 +403,40 @@ func attachStreamEvents(output map[string]any, events []llmmodels.ProviderStream
 		streamEvents = append(streamEvents, item)
 	}
 	output["streamEvents"] = streamEvents
+}
+
+func attachContextBudget(output map[string]any, budget *llmmodels.ProviderContextBudget, providerID, model string) {
+	if output == nil || budget == nil {
+		return
+	}
+	item := map[string]any{
+		"maxBytes":              budget.MaxBytes,
+		"actualBytes":           budget.ActualBytes,
+		"maxTokens":             budget.MaxTokens,
+		"estimatedInputTokens":  budget.EstimatedInputTokens,
+		"estimatedOutputTokens": budget.EstimatedOutputTokens,
+		"actualTokens":          budget.ActualTokens,
+		"shrinkLevel":           budget.ShrinkLevel,
+		"truncated":             budget.Truncated,
+		"rules":                 append([]string(nil), budget.Rules...),
+		"sourceRefs":            append([]string(nil), budget.SourceRefs...),
+		"estimator":             budget.Estimator,
+		"profile": map[string]any{
+			"contextWindowTokens":    budget.Profile.ContextWindowTokens,
+			"maxInputTokens":         budget.Profile.MaxInputTokens,
+			"reservedOutputTokens":   budget.Profile.ReservedOutputTokens,
+			"safetyRatio":            budget.Profile.SafetyRatio,
+			"bytesHardLimit":         budget.Profile.BytesHardLimit,
+			"estimatedTokensPerByte": budget.Profile.EstimatedTokensPerByte,
+		},
+	}
+	if strings.TrimSpace(providerID) != "" {
+		item["providerId"] = strings.TrimSpace(providerID)
+	}
+	if strings.TrimSpace(model) != "" {
+		item["model"] = strings.TrimSpace(model)
+	}
+	output["contextBudget"] = item
 }
 
 func validateNonChatProviderOperation(operation string, capabilities llmmodels.ProviderCapabilities) error {

@@ -48,15 +48,21 @@
 - `CTX-05 Adaptive Shrink on Provider Failure` 已收口基础版：
   - `provider_timeout` 重试链路按 `providerRetryAttempt` 递进触发预收缩
   - 第 2 次及以上重试默认直接进入更激进上下文收缩层级
+- `CTX-06 Traceable Context References` 已收口基础版：
+  - `contextBudget` 新增 `sourceRefs`
+  - 压缩阶段会记录关键输入段引用（`input.*` / `input.executionContext.*`）
+- `CTX-07/CTX-10 Observability + Read Model Projection` 已收口基础版：
+  - `llm/workspace_execution` step 输出包含结构化 `contextBudget`
+  - `RunSnapshot/RunObservability` 增加 `llmContextBudgets` 投影，web/tui 共用同一读模型
 - 已补充受影响测试：
   - `internal/modules/blocks/llm/biz`
   - `internal/pkg/workorchconfig`
+  - `internal/modules/application/workorchd/biz/appservice`
 
 ### 未完全收口，需要纳入下一轮
 
 - 当前仍未接入真实 tokenizer 或 provider 原生 token usage。
-- context budget 元数据尚未完整投影到 run snapshot、web、TUI 和可观测视图。
-- 被裁剪内容尚未统一生成结构化 sourceRefs，追溯能力还不完整。
+- context budget 元数据已完成基础投影；细粒度展示和聚合统计仍待补齐。
 - 尚未支持 context-too-large 与 provider timeout 的差异化治理策略。
 - 尚未支持 provider/model failover，provider 持续不可用时仍依赖治理阻塞处理。
 - HTTP/console 等非 TUI 客户端的 decision/approval 语义归一仍需统一，避免不同入口形成治理行为差异。
@@ -266,4 +272,4 @@
 - 已验证：受影响范围测试通过：
   - `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorch/service/tui -count=1`
 - 前置能力：固定 bytes 预算和 provider timeout retry 已完成基础收口。
-- 主要遗留：sourceRefs 追溯、read model 投影、provider failover、多入口治理语义归一、streaming progress event、workspace usage/cost ledger、真实 tokenizer/原生 token usage。
+- 主要遗留：provider failover、多入口治理语义归一、streaming progress event、workspace usage/cost ledger、真实 tokenizer/原生 token usage、context-too-large 差异化治理策略。
