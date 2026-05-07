@@ -815,8 +815,8 @@ func approvalReasonAsksForConfirmation(reason string) bool {
 		return false
 	}
 	return containsAnySemanticCue(normalized, []string{
-		"确认", "核对", "检查", "参数", "目标", "城市", "调用", "工具", "接口", "外部api", "mcp",
-		"confirm", "check", "parameter", "target", "city", "call", "tool", "api",
+		"确认", "核对", "检查", "参数", "目标", "信息", "上下文", "调用", "工具", "接口", "外部api", "mcp",
+		"confirm", "check", "parameter", "target", "context", "info", "call", "tool", "api",
 	})
 }
 
@@ -832,12 +832,15 @@ func looksLikeContextualApproval(value string, reason string) bool {
 		return false
 	}
 	if containsAnySemanticCue(normalized, []string{
-		"查询", "调用", "使用", "执行", "继续", "城市", "参数", "天气", "接口", "工具", "mcp", "api",
-		"query", "call", "use", "execute", "run", "continue", "city", "weather", "parameter", "tool",
+		"查询", "调用", "使用", "执行", "继续", "参数", "目标", "信息", "上下文", "接口", "工具", "mcp", "api",
+		"query", "call", "use", "execute", "run", "continue", "parameter", "target", "context", "info", "tool",
 	}) {
 		return true
 	}
-	if containsAnySemanticCue(semanticApprovalText(reason), []string{"城市", "city"}) {
+	if containsAnySemanticCue(semanticApprovalText(reason), []string{
+		"参数", "目标", "信息", "上下文",
+		"parameter", "target", "context", "info",
+	}) {
 		return hasLettersOrDigits(value) && len([]rune(strings.TrimSpace(value))) >= 2
 	}
 	return false
@@ -1083,6 +1086,9 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		default:
 			return nil
 		}
+	case backend.EventGoalDefined, backend.EventDoDDefined:
+		m.progressText = "Workspace definitions changed; refreshing context"
+		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventRunStateChanged:
 		state := firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)
 		if evt.RunID != "" {

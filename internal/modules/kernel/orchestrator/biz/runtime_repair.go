@@ -115,15 +115,13 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 	if run == nil || failedStep == nil {
 		return common.ErrInvalidArgument
 	}
-	reason := fmt.Sprintf("runtime repair attempts exhausted after %d attempts", maxRuntimeRepairAttempts)
-	if execErr != nil {
-		reason = fmt.Sprintf("%s: %s", reason, execErr.Error())
-	}
+	language := runDialogLanguage(run)
+	reason := localizedRuntimeRepairExhaustionReason(language, maxRuntimeRepairAttempts, execErr)
 	spec := runtimeDecisionBlockSpec{
 		TicketID:     common.TicketID(runtimeChildID(failedStep.ID, "repair-exhausted-decision")),
 		Reason:       reason,
 		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
-		Question:     "Automatic runtime repair attempts were exhausted. Provide missing implementation guidance, choose replan, or reject the current path.",
+		Question:     localizedRuntimeRepairExhaustionQuestion(language),
 		Context: map[string]any{
 			"attempts":         maxRuntimeRepairAttempts,
 			"failureClass":     stringFromMap(failedStep.Output, failureOutputKeyClass),
@@ -254,8 +252,11 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input[stepOutputKeyGraphBranch] = branch
 	}
 	if graph, ok := runtimeGraphSpecFromStep(failedStep); ok {
-		input[stepOutputKeyExecutionGraph] = compactExecutionGraphForLLMContext(graph)
+		input["failedExecutionGraph"] = compactExecutionGraphForLLMContext(graph)
 		input[stepInputKeyGraphRootStepID] = string(graphRootStepID(failedStep))
+	}
+	if history := o.currentGovernanceHistoryForLLMInput(ctx, run); len(history) > 0 {
+		input["governanceHistory"] = history
 	}
 	if evidence := o.completedGraphEvidence(ctx, run, failedStep); len(evidence) > 0 {
 		input[stepInputKeyGraphEvidence] = evidence

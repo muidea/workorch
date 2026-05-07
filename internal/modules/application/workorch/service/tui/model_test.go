@@ -165,11 +165,11 @@ func TestModelRunStartedDoesNotOverwriteDecisionProgress(t *testing.T) {
 		Type:        backend.EventDecisionCreated,
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
-		Payload:     map[string]any{"ticketId": "ticket-1", "reason": "缺少城市"},
+		Payload:     map[string]any{"ticketId": "ticket-1", "reason": "缺少必要参数"},
 	})
 	next, _ := m.Update(RunStartedMsg{Run: &backend.RunInfo{ID: "run-1", State: common.RunStateRunning}})
 	m = asModel(next)
-	if m.progress != progressWaitingDecision || m.progressText != "缺少城市" {
+	if m.progress != progressWaitingDecision || m.progressText != "缺少必要参数" {
 		t.Fatalf("progress = %s/%q, want decision state preserved", m.progress, m.progressText)
 	}
 }
@@ -660,25 +660,25 @@ func TestModelRunningEmptyResultText(t *testing.T) {
 
 func TestModelSubmittedInputRendersAsTaskContext(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
-	m.currentTask = "查询当前天气情况"
+	m.currentTask = "处理当前目标"
 	m.width = 80
 	m.height = 16
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "Task: 查询当前天气情况") {
+	if !strings.Contains(view, "Task: 处理当前目标") {
 		t.Fatalf("view missing submitted input context:\n%s", view)
 	}
 }
 
 func TestModelGoalRendersBeforeTask(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
-	m.currentTask = "张雪机车昨天夺冠了吗"
-	m.appendTranscript("Goal", "张雪机车昨天夺冠了吗")
+	m.currentTask = "完成目标并输出结果"
+	m.appendTranscript("Goal", "完成目标并输出结果")
 	m.appendTranscript("Decision", "需要我提供哪些信息")
 	m.width = 100
 	m.height = 20
 	view := stripANSI(m.View())
-	goalIndex := strings.Index(view, "Goal: 张雪机车昨天夺冠了吗")
-	taskIndex := strings.Index(view, "Task: 张雪机车昨天夺冠了吗")
+	goalIndex := strings.Index(view, "Goal: 完成目标并输出结果")
+	taskIndex := strings.Index(view, "Task: 完成目标并输出结果")
 	if goalIndex < 0 || taskIndex < 0 {
 		t.Fatalf("view missing goal/task:\n%s", view)
 	}
@@ -693,7 +693,7 @@ func TestModelDecisionUsesBottomInputContext(t *testing.T) {
 		Type:        backend.EventDecisionCreated,
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
-		Payload:     map[string]any{"ticketId": "ticket-1", "question": "缺少天气数据源"},
+		Payload:     map[string]any{"ticketId": "ticket-1", "question": "缺少必要信息"},
 	})
 	m.width = 80
 	m.height = 16
@@ -715,7 +715,7 @@ func TestModelDecisionCreatedAcceptsBlockingTicketIDPayload(t *testing.T) {
 		RunID:       "run-1",
 		Payload: map[string]any{
 			"blockingTicketId": "ticket-from-run-payload",
-			"reason":           "缺少城市",
+			"reason":           "缺少必要参数",
 		},
 	})
 	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-from-run-payload" {
@@ -756,7 +756,7 @@ func TestModelDecisionListRestoresBlockingInputContext(t *testing.T) {
 		ID:          "ticket-1",
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
-		Question:    "请问要查询哪个城市？",
+		Question:    "请补充目标参数。",
 		State:       "open",
 	}}})
 	m = asModel(next)
@@ -766,7 +766,7 @@ func TestModelDecisionListRestoresBlockingInputContext(t *testing.T) {
 	m.width = 80
 	m.height = 16
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "请问要查询哪个城市？") {
+	if !strings.Contains(view, "请补充目标参数。") {
 		t.Fatalf("view missing decision question:\n%s", view)
 	}
 	if !strings.Contains(view, "ws-1 decision >") {
@@ -786,17 +786,17 @@ func TestModelDecisionDetailReplacesBlockingTicketPlaceholder(t *testing.T) {
 	next, _ = m.Update(DecisionDetailMsg{Decision: &backend.DecisionInfo{
 		ID:       "ticket-1",
 		RunID:    "run-1",
-		Question: "请问要查询哪个城市？",
+		Question: "请补充目标参数。",
 		State:    "open",
 	}})
 	m = asModel(next)
-	if m.progressText != "请问要查询哪个城市？" {
+	if m.progressText != "请补充目标参数。" {
 		t.Fatalf("progressText = %q, want decision question", m.progressText)
 	}
 	m.width = 80
 	m.height = 16
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "请问要查询哪个城市？") || !strings.Contains(view, "ws-1 decision >") {
+	if !strings.Contains(view, "请补充目标参数。") || !strings.Contains(view, "ws-1 decision >") {
 		t.Fatalf("view missing detailed decision context:\n%s", view)
 	}
 }
@@ -852,7 +852,7 @@ func TestModelRunStartedBlockedOnApprovalCreatesInputContext(t *testing.T) {
 
 func TestApprovalInputUsesSemanticIntent(t *testing.T) {
 	positive := []string{
-		"同意继续调用天气接口",
+		"同意继续调用外部接口",
 		"可以，确认执行",
 		"没问题，请继续",
 		"I approve this request",
@@ -879,18 +879,18 @@ func TestApprovalInputUsesSemanticIntent(t *testing.T) {
 		}
 	}
 
-	if approve, ok := parseApprovalInput("天气看起来还不错"); ok {
+	if approve, ok := parseApprovalInput("这里补充一些上下文"); ok {
 		t.Fatalf("parseApprovalInput ambiguous = %v/%v, want no decision", approve, ok)
 	}
 
-	reason := "在调用天气查询 MCP 工具前需要确认目标城市和参数"
-	for _, input := range []string{"查询江苏南京天气", "江苏南京"} {
+	reason := "在调用外部工具前需要确认目标参数"
+	for _, input := range []string{"使用参数 value-1 调用工具", "value-1"} {
 		approve, ok := parseApprovalInputWithContext(input, reason)
 		if !ok || !approve {
 			t.Fatalf("parseApprovalInputWithContext(%q) = %v/%v, want contextual approve", input, approve, ok)
 		}
 	}
-	if approve, ok := parseApprovalInputWithContext("不要查询南京天气", reason); !ok || approve {
+	if approve, ok := parseApprovalInputWithContext("不要使用该参数", reason); !ok || approve {
 		t.Fatalf("contextual negative = %v/%v, want reject", approve, ok)
 	}
 }
@@ -898,7 +898,7 @@ func TestApprovalInputUsesSemanticIntent(t *testing.T) {
 func TestModelApprovalSemanticApproveSubmitsApprove(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.blockingApproval = &backend.ApprovalInfo{ID: "approval-1", WorkspaceID: "ws-1", RunID: "run-1", State: "pending"}
-	m.input = "同意继续调用天气接口"
+	m.input = "同意继续调用外部接口"
 	m.inputCursor = len([]rune(m.input))
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = asModel(next)
@@ -910,7 +910,7 @@ func TestModelApprovalSemanticApproveSubmitsApprove(t *testing.T) {
 	if !ok || resolved.Approval == nil || resolved.Approval.State != "approved" {
 		t.Fatalf("approval msg = %#v, want approved", msg)
 	}
-	if len(m.transcript) != 1 || m.transcript[0].Text != "同意继续调用天气接口" {
+	if len(m.transcript) != 1 || m.transcript[0].Text != "同意继续调用外部接口" {
 		t.Fatalf("transcript = %+v, want original approval text", m.transcript)
 	}
 }
@@ -918,14 +918,14 @@ func TestModelApprovalSemanticApproveSubmitsApprove(t *testing.T) {
 func TestModelApprovalAmbiguousInputDoesNotReject(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.blockingApproval = &backend.ApprovalInfo{ID: "approval-1", WorkspaceID: "ws-1", RunID: "run-1", State: "pending"}
-	m.input = "天气接口"
+	m.input = "外部上下文"
 	m.inputCursor = len([]rune(m.input))
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = asModel(next)
 	if cmd != nil {
 		t.Fatal("ambiguous approval input should not submit")
 	}
-	if m.blockingApproval == nil || m.input != "天气接口" {
+	if m.blockingApproval == nil || m.input != "外部上下文" {
 		t.Fatalf("approval/input = %+v/%q, want preserved", m.blockingApproval, m.input)
 	}
 	if !strings.Contains(m.progressText, "intent unclear") {
@@ -933,16 +933,16 @@ func TestModelApprovalAmbiguousInputDoesNotReject(t *testing.T) {
 	}
 }
 
-func TestModelApprovalContextualCityInputApproves(t *testing.T) {
+func TestModelApprovalContextualParameterInputApproves(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.blockingApproval = &backend.ApprovalInfo{
 		ID:          "approval-1",
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
-		Reason:      "在调用天气查询 MCP 工具前需要确认目标城市和参数",
+		Reason:      "在调用外部工具前需要确认目标参数",
 		State:       "pending",
 	}
-	m.input = "查询江苏南京天气"
+	m.input = "使用参数 value-1 调用工具"
 	m.inputCursor = len([]rune(m.input))
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = asModel(next)
@@ -954,7 +954,7 @@ func TestModelApprovalContextualCityInputApproves(t *testing.T) {
 	if !ok || resolved.Approval == nil || resolved.Approval.State != "approved" {
 		t.Fatalf("approval msg = %#v, want approved", msg)
 	}
-	if len(m.transcript) != 1 || m.transcript[0].Text != "查询江苏南京天气" {
+	if len(m.transcript) != 1 || m.transcript[0].Text != "使用参数 value-1 调用工具" {
 		t.Fatalf("transcript = %+v, want contextual approval text", m.transcript)
 	}
 }
@@ -985,17 +985,17 @@ func TestResolveApprovalSkipsResumeWhenRunAlreadyRunning(t *testing.T) {
 
 func TestModelConversationRendersMultipleSubmissions(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
-	m.appendTranscript("Goal", "查询当前天气")
-	m.appendTranscript("Decision", "江苏南京")
-	m.appendTranscript("Approval", "同意继续调用天气接口")
+	m.appendTranscript("Goal", "完成当前目标")
+	m.appendTranscript("Decision", "补充参数 value-1")
+	m.appendTranscript("Approval", "同意继续调用外部接口")
 	m.width = 100
 	m.height = 20
 	view := stripANSI(m.View())
 	for _, want := range []string{
 		"Conversation",
-		"Goal: 查询当前天气",
-		"Decision: 江苏南京",
-		"Approval: 同意继续调用天气接口",
+		"Goal: 完成当前目标",
+		"Decision: 补充参数 value-1",
+		"Approval: 同意继续调用外部接口",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q:\n%s", want, view)
@@ -1165,6 +1165,66 @@ func TestModelWorkspaceContextHydratesFreshSnapshot(t *testing.T) {
 	}
 }
 
+func TestModelWorkspaceContextUsesEffectiveGoalAndDoDFromRunContext(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceContextMsg{
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		ActiveRun: &backend.RunInfo{
+			ID:          "run-a",
+			WorkspaceID: "ws-a",
+			GoalID:      "goal-latest",
+			DoDID:       "dod-latest",
+			State:       common.RunStateRunning,
+			ExecutionContext: map[string]any{
+				"goal": map[string]any{
+					"id":   "goal-latest",
+					"text": "完成目标 A\n补充约束 B",
+				},
+				"goals": []any{
+					map[string]any{"id": "goal-base", "text": "完成目标 A"},
+					map[string]any{"id": "goal-latest", "text": "补充约束 B"},
+				},
+				"dod": map[string]any{
+					"id":    "dod-latest",
+					"items": []any{"验收项一满足", "验收项二满足"},
+				},
+			},
+		},
+		Goal: &backend.GoalInfo{ID: "goal-latest", Text: "补充约束 B"},
+		DoD:  &backend.DoDInfo{ID: "dod-latest", Items: []string{"验收项二满足"}},
+	})
+	m = asModel(next)
+	if m.currentTask != "完成目标 A\n补充约束 B" {
+		t.Fatalf("current task = %q, want effective cumulative goal", m.currentTask)
+	}
+	if len(m.transcript) != 2 || m.transcript[0].Text != "完成目标 A" || m.transcript[1].Text != "补充约束 B" {
+		t.Fatalf("transcript = %+v, want individual cumulative goals", m.transcript)
+	}
+	if len(m.dodItems) != 2 || m.dodItems[0] != "验收项一满足" || m.dodItems[1] != "验收项二满足" {
+		t.Fatalf("dod items = %+v, want effective cumulative DoD", m.dodItems)
+	}
+}
+
+func TestInferDecisionResolutionTypeUsesGovernanceIntent(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "replan english", text: "please replan this path", want: "replan"},
+		{name: "rebuild chinese", text: "要求重新构建项目", want: "replan"},
+		{name: "reject chinese", text: "拒绝当前路径", want: "reject_current_path"},
+		{name: "missing info", text: "使用本地配置继续执行", want: "provide_missing_info"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := inferDecisionResolutionType(tc.text); got != tc.want {
+				t.Fatalf("inferDecisionResolutionType(%q) = %q, want %q", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestModelMemoryCommandShowsRecallSummary(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.activeWorkspaceID = "ws-a"
@@ -1222,6 +1282,38 @@ func TestModelMemoryRecallEventRefreshesContext(t *testing.T) {
 	}
 	if m.progressText != "Memory recall: selected 2" {
 		t.Fatalf("progress text = %q, want memory recall summary", m.progressText)
+	}
+}
+
+func TestModelGoalAndDoDEventsRefreshActiveWorkspaceContext(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive}}
+
+	next, cmd := m.Update(BackendEventMsg{Event: backend.Event{
+		Type:        backend.EventGoalDefined,
+		WorkspaceID: "ws-a",
+		Payload:     map[string]any{"goalId": "goal-a", "text": "updated goal"},
+	}})
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("goal event should refresh active workspace context")
+	}
+	if m.progressText != "Workspace definitions changed; refreshing context" {
+		t.Fatalf("progress text = %q, want definition refresh status", m.progressText)
+	}
+
+	next, cmd = m.Update(BackendEventMsg{Event: backend.Event{
+		Type:        backend.EventDoDDefined,
+		WorkspaceID: "ws-a",
+		Payload:     map[string]any{"doDId": "dod-a", "items": []string{"tests pass"}},
+	}})
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("dod event should refresh active workspace context")
+	}
+	if m.progressText != "Workspace definitions changed; refreshing context" {
+		t.Fatalf("progress text = %q, want definition refresh status", m.progressText)
 	}
 }
 

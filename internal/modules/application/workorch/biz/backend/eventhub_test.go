@@ -104,6 +104,82 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 	t.Fatal("workspace snapshot did not publish CLI command")
 }
 
+func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
+	goalEvent := convertEnvelope(events.Envelope{
+		Topic:       events.TopicGoalDefined,
+		SubjectID:   "goal-1",
+		WorkspaceID: "ws-1",
+		Payload:     events.GoalPayload("updated goal"),
+	})
+	if goalEvent.Type != EventGoalDefined || goalEvent.WorkspaceID != "ws-1" || goalEvent.Payload["goalId"] != "goal-1" {
+		t.Fatalf("goal event = %+v, want converted goal definition event", goalEvent)
+	}
+	dodEvent := convertEnvelope(events.Envelope{
+		Topic:       events.TopicDoDDefined,
+		SubjectID:   "dod-1",
+		WorkspaceID: "ws-1",
+		Payload:     events.DoDPayload([]string{"tests pass"}, common.DoDStateReady),
+	})
+	if dodEvent.Type != EventDoDDefined || dodEvent.WorkspaceID != "ws-1" || dodEvent.Payload["doDId"] != "dod-1" {
+		t.Fatalf("dod event = %+v, want converted dod definition event", dodEvent)
+	}
+}
+
+func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
+	ctx := context.Background()
+	session, err := appservice.NewRuntimeSessionWithBackend("memory", "")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close(ctx)
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+
+	be := NewEventHub(session, exports.Infrastructure.EventHub)
+	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "definition refresh workspace"})
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	goal, err := be.Goal().Define(ctx, ws.ID, "initial goal")
+	if err != nil {
+		t.Fatalf("define goal: %v", err)
+	}
+	if _, err := be.Goal().Update(ctx, goal.ID, "updated goal"); err != nil {
+		t.Fatalf("update goal: %v", err)
+	}
+	dod, err := be.DoD().Define(ctx, ws.ID, []string{"initial dod"})
+	if err != nil {
+		t.Fatalf("define dod: %v", err)
+	}
+	if _, err := be.DoD().Update(ctx, dod.ID, []string{"updated dod"}); err != nil {
+		t.Fatalf("update dod: %v", err)
+	}
+
+	publishedHub, ok := exports.Infrastructure.EventHub.(interface{ Published() []events.Envelope })
+	if !ok {
+		t.Fatal("event hub does not expose published envelopes")
+	}
+	var sawUpdatedGoal, sawUpdatedDoD bool
+	for _, envelope := range publishedHub.Published() {
+		switch envelope.Topic {
+		case events.TopicGoalDefined:
+			if envelope.SubjectID == string(goal.ID) && envelope.WorkspaceID == string(ws.ID) && envelope.Payload[events.PayloadKeyText] == "updated goal" {
+				sawUpdatedGoal = true
+			}
+		case events.TopicDoDDefined:
+			items, _ := envelope.Payload[events.PayloadKeyItems].([]string)
+			if envelope.SubjectID == string(dod.ID) && envelope.WorkspaceID == string(ws.ID) && len(items) == 1 && items[0] == "updated dod" {
+				sawUpdatedDoD = true
+			}
+		}
+	}
+	if !sawUpdatedGoal || !sawUpdatedDoD {
+		t.Fatalf("published updated goal=%v dod=%v, want both definition update events", sawUpdatedGoal, sawUpdatedDoD)
+	}
+}
+
 func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 	ctx := context.Background()
 	session, err := appservice.NewRuntimeSessionWithBackend("memory", "")

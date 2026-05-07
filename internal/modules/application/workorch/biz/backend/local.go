@@ -196,19 +196,11 @@ func (b *localGoalBackend) Get(ctx context.Context, id common.GoalID) (*GoalInfo
 
 func (b *localGoalBackend) Update(ctx context.Context, id common.GoalID, text string) (*GoalInfo, error) {
 	s := b.parent.session.Borrow()
-	exports, err := s.Exports()
+	g, err := appservice.UpdateGoalWithSession(ctx, s, string(id), text)
 	if err != nil {
 		return nil, err
 	}
-	g, err := exports.Repositories.Goals.Get(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	g.Text = text
-	if err := exports.Repositories.Goals.Update(ctx, g); err != nil {
-		return nil, err
-	}
-	return &GoalInfo{ID: g.ID, WorkspaceID: g.WorkspaceID, Text: g.Text}, nil
+	return &GoalInfo{ID: common.GoalID(g.ID), WorkspaceID: common.WorkspaceID(g.WorkspaceID), Text: g.Text}, nil
 }
 
 // ── DoD ──
@@ -252,19 +244,11 @@ func (b *localDoDBackend) Get(ctx context.Context, id common.DoDID) (*DoDInfo, e
 
 func (b *localDoDBackend) Update(ctx context.Context, id common.DoDID, items []string) (*DoDInfo, error) {
 	s := b.parent.session.Borrow()
-	exports, err := s.Exports()
+	d, err := appservice.UpdateDoDWithSession(ctx, s, string(id), items)
 	if err != nil {
 		return nil, err
 	}
-	d, err := exports.Repositories.DoDs.Get(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	d.Items = items
-	if err := exports.Repositories.DoDs.Update(ctx, d); err != nil {
-		return nil, err
-	}
-	return &DoDInfo{ID: d.ID, WorkspaceID: d.WorkspaceID, Items: d.Items, State: string(d.State)}, nil
+	return &DoDInfo{ID: common.DoDID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), Items: d.Items, State: d.State}, nil
 }
 
 // ── Run ──
@@ -287,11 +271,12 @@ func (b *localRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID,
 		return nil, err
 	}
 	return &RunInfo{
-		ID:          common.RunID(act.Run.ID),
-		WorkspaceID: common.WorkspaceID(act.Run.WorkspaceID),
-		GoalID:      common.GoalID(act.Run.GoalID),
-		DoDID:       common.DoDID(act.Run.DoDID),
-		State:       common.RunState(act.Run.State),
+		ID:               common.RunID(act.Run.ID),
+		WorkspaceID:      common.WorkspaceID(act.Run.WorkspaceID),
+		GoalID:           common.GoalID(act.Run.GoalID),
+		DoDID:            common.DoDID(act.Run.DoDID),
+		ExecutionContext: act.Run.ExecutionContext,
+		State:            common.RunState(act.Run.State),
 	}, nil
 }
 
@@ -304,6 +289,9 @@ func (b *localRunBackend) Resume(ctx context.Context, id common.RunID) (*RunInfo
 	return &RunInfo{
 		ID:                 common.RunID(r.ID),
 		WorkspaceID:        common.WorkspaceID(r.WorkspaceID),
+		GoalID:             common.GoalID(r.GoalID),
+		DoDID:              common.DoDID(r.DoDID),
+		ExecutionContext:   r.ExecutionContext,
 		State:              common.RunState(r.State),
 		BlockingTicketID:   common.TicketID(r.BlockingTicketID),
 		BlockingApprovalID: common.ApprovalID(r.BlockingApprovalID),
@@ -325,6 +313,7 @@ func (b *localRunBackend) Get(ctx context.Context, id common.RunID) (*RunInfo, e
 		WorkspaceID:        r.WorkspaceID,
 		GoalID:             r.GoalID,
 		DoDID:              r.DoDID,
+		ExecutionContext:   r.ExecutionContext,
 		State:              r.State,
 		Priority:           r.Priority,
 		BlockingTicketID:   r.BlockingTicketID,
@@ -348,6 +337,9 @@ func (b *localRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]
 		result = append(result, RunInfo{
 			ID:                 r.ID,
 			WorkspaceID:        r.WorkspaceID,
+			GoalID:             r.GoalID,
+			DoDID:              r.DoDID,
+			ExecutionContext:   r.ExecutionContext,
 			State:              r.State,
 			BlockingTicketID:   r.BlockingTicketID,
 			BlockingApprovalID: r.BlockingApprovalID,

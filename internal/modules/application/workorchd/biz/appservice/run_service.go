@@ -56,6 +56,12 @@ func CreateRunWithSession(ctx context.Context, session *RuntimeSession, workspac
 		if err != nil {
 			return Run{}, err
 		}
+		if effectiveGoalID, ok := executionContext["goalId"].(string); ok && strings.TrimSpace(effectiveGoalID) != "" {
+			goalID = strings.TrimSpace(effectiveGoalID)
+		}
+		if effectiveDoDID, ok := executionContext["doDId"].(string); ok && strings.TrimSpace(effectiveDoDID) != "" {
+			dodID = strings.TrimSpace(effectiveDoDID)
+		}
 	}
 
 	id := common.RunID(runID)

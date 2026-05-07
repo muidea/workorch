@@ -112,7 +112,7 @@ func resolveGoalForQualityCheck(
 		}
 		return strings.TrimSpace(item.Text), item.ID, nil
 	}
-	item, err := selectWorkspaceExecutionGoal(ctx, repo.ListByWorkspaceID, workspaceID, "")
+	item, err := selectWorkspaceExecutionGoal(ctx, repo.ListByWorkspaceID, nil, workspaceID, "")
 	if err != nil {
 		if errors.Is(err, common.ErrInvalidArgument) || errors.Is(err, common.ErrConflict) {
 			return "", "", nil
@@ -149,7 +149,7 @@ func resolveDoDForQualityCheck(
 		}
 		return normalizeDoDItems(item.Items), item.ID, nil
 	}
-	item, err := selectWorkspaceExecutionDoD(ctx, repo.ListByWorkspaceID, workspaceID, "")
+	item, err := selectWorkspaceExecutionDoD(ctx, repo.ListByWorkspaceID, nil, workspaceID, "")
 	if err != nil {
 		if errors.Is(err, common.ErrInvalidArgument) || errors.Is(err, common.ErrConflict) {
 			return nil, "", nil

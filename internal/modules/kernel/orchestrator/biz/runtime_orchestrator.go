@@ -957,7 +957,8 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if err := o.publishPatchPreviewFromOutput(ctx, run, step, toolCall, output); err != nil {
 		return err
 	}
-	patchApproval, err := o.patchApprovalBlockSpec(ctx, run.ID, output)
+	language := runDialogLanguage(run)
+	patchApproval, err := o.patchApprovalBlockSpec(ctx, run.ID, language, output)
 	if err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch approval gate failed", err)
 	}
@@ -966,7 +967,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	} else if err := o.applyRuntimePatches(ctx, run, step, toolCall, output, workspace.WorkingDirectory); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch application failed", err)
 	}
-	patchRevertApproval, err := o.patchRevertApprovalBlockSpec(ctx, run.ID, output)
+	patchRevertApproval, err := o.patchRevertApprovalBlockSpec(ctx, run.ID, language, output)
 	if err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch revert approval gate failed", err)
 	}

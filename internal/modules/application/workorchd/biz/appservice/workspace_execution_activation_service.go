@@ -69,6 +69,37 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 		if err != nil {
 			return WorkspaceExecutionActivation{}, err
 		}
+		goal, dod, replaceErr := selectWorkspaceExecutionDefinitions(ctx, session, common.WorkspaceID(workspaceID), cmd)
+		if replaceErr != nil {
+			if strings.TrimSpace(cmd.GoalID) != "" || strings.TrimSpace(cmd.DoDID) != "" {
+				return WorkspaceExecutionActivation{}, replaceErr
+			}
+		} else if goal.ID != run.GoalID || dod.ID != run.DoDID {
+			executionContext, err := buildWorkspaceExecutionContextWithDefinitions(ctx, session, workspace, goal, dod, cmd)
+			if err != nil {
+				return WorkspaceExecutionActivation{}, err
+			}
+			if err := exports.Services.RunService.SupersedeRun(ctx, runmodule.SupersedeRunCommand{RunID: run.ID}); err != nil {
+				return WorkspaceExecutionActivation{}, err
+			}
+			runID, err := createAndStartWorkspaceExecutionRun(ctx, session, common.WorkspaceID(workspaceID), goal.ID, dod.ID, executionContext, cmd.Priority)
+			if err != nil {
+				return WorkspaceExecutionActivation{}, err
+			}
+			runSnapshot, err := readRunSnapshotFromExports(ctx, session, runID)
+			if err != nil {
+				return WorkspaceExecutionActivation{}, err
+			}
+			snapshot, err := readWorkspaceSnapshotFromExportsWithRunSnapshot(ctx, session, common.WorkspaceID(workspaceID), &runSnapshot)
+			if err != nil {
+				return WorkspaceExecutionActivation{}, err
+			}
+			return WorkspaceExecutionActivation{
+				Workspace: snapshot.Workspace,
+				Run:       runSnapshot.Run,
+				Snapshot:  snapshot,
+			}, nil
+		}
 		snapshot, err := readWorkspaceSnapshotFromExports(ctx, session, common.WorkspaceID(workspaceID))
 		if err != nil {
 			return WorkspaceExecutionActivation{}, err
@@ -108,6 +139,158 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 	}, nil
 }
 
+func latestWorkspaceGoal(items []*workspacemodel.Goal) *workspacemodel.Goal {
+	for i := len(items) - 1; i >= 0; i-- {
+		if items[i] != nil && strings.TrimSpace(items[i].Text) != "" {
+			return items[i]
+		}
+	}
+	return nil
+}
+
+func latestWorkspaceDoD(items []*workspacemodel.DoD) *workspacemodel.DoD {
+	for i := len(items) - 1; i >= 0; i-- {
+		if items[i] != nil && len(normalizeDoDItems(items[i].Items)) > 0 {
+			return items[i]
+		}
+	}
+	return nil
+}
+
+func orderedWorkspaceGoals(ctx context.Context, eventRecords repository.EventRecordRepository, workspaceID common.WorkspaceID, items []*workspacemodel.Goal) []*workspacemodel.Goal {
+	return orderedWorkspaceDefinitions(ctx, eventRecords, workspaceID, events.TopicGoalDefined, items, func(item *workspacemodel.Goal) common.GoalID {
+		if item == nil {
+			return ""
+		}
+		return item.ID
+	})
+}
+
+func orderedWorkspaceDoDs(ctx context.Context, eventRecords repository.EventRecordRepository, workspaceID common.WorkspaceID, items []*workspacemodel.DoD) []*workspacemodel.DoD {
+	return orderedWorkspaceDefinitions(ctx, eventRecords, workspaceID, events.TopicDoDDefined, items, func(item *workspacemodel.DoD) common.DoDID {
+		if item == nil {
+			return ""
+		}
+		return item.ID
+	})
+}
+
+func orderedWorkspaceDefinitions[T any, ID ~string](ctx context.Context, eventRecords repository.EventRecordRepository, workspaceID common.WorkspaceID, topic string, items []T, idOf func(T) ID) []T {
+	ordered := append([]T(nil), items...)
+	if eventRecords == nil || len(ordered) == 0 {
+		return ordered
+	}
+	records, err := eventRecords.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID, Topic: topic})
+	if err != nil || len(records) == 0 {
+		return ordered
+	}
+	byID := make(map[string]T, len(ordered))
+	for _, item := range ordered {
+		id := string(idOf(item))
+		if id != "" {
+			byID[id] = item
+		}
+	}
+	ret := make([]T, 0, len(ordered))
+	seen := map[string]struct{}{}
+	for _, record := range records {
+		if record == nil || record.SubjectID == "" {
+			continue
+		}
+		item, ok := byID[record.SubjectID]
+		if !ok {
+			continue
+		}
+		ret = append(ret, item)
+		seen[record.SubjectID] = struct{}{}
+	}
+	for _, item := range ordered {
+		id := string(idOf(item))
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func effectiveWorkspaceGoal(ctx context.Context, goals repository.GoalRepository, eventRecords repository.EventRecordRepository, workspaceID common.WorkspaceID, selected *workspacemodel.Goal) (*workspacemodel.Goal, []map[string]any, error) {
+	if goals == nil || selected == nil {
+		return selected, nil, nil
+	}
+	items, err := goals.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	items = orderedWorkspaceGoals(ctx, eventRecords, workspaceID, items)
+	contexts := make([]map[string]any, 0, len(items))
+	parts := make([]string, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		if item == nil || item.WorkspaceID != workspaceID {
+			continue
+		}
+		text := strings.TrimSpace(item.Text)
+		if text == "" {
+			continue
+		}
+		contexts = append(contexts, goalContext(item))
+		if _, ok := seen[text]; ok {
+			continue
+		}
+		seen[text] = struct{}{}
+		parts = append(parts, text)
+	}
+	effective := *selected
+	if latest := latestWorkspaceGoal(items); latest != nil {
+		effective = *latest
+	}
+	if len(parts) > 0 {
+		effective.Text = strings.Join(parts, "\n")
+	}
+	return &effective, contexts, nil
+}
+
+func effectiveWorkspaceDoD(ctx context.Context, dods repository.DoDRepository, eventRecords repository.EventRecordRepository, workspaceID common.WorkspaceID, selected *workspacemodel.DoD) (*workspacemodel.DoD, []map[string]any, error) {
+	if dods == nil || selected == nil {
+		return selected, nil, nil
+	}
+	items, err := dods.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	items = orderedWorkspaceDoDs(ctx, eventRecords, workspaceID, items)
+	contexts := make([]map[string]any, 0, len(items))
+	mergedItems := make([]string, 0)
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		if item == nil || item.WorkspaceID != workspaceID || (item.State != common.DoDStateReady && item.State != common.DoDStateSatisfied) {
+			continue
+		}
+		normalized := normalizeDoDItems(item.Items)
+		if len(normalized) == 0 {
+			continue
+		}
+		contexts = append(contexts, dodContext(item))
+		for _, entry := range normalized {
+			if _, ok := seen[entry]; ok {
+				continue
+			}
+			seen[entry] = struct{}{}
+			mergedItems = append(mergedItems, entry)
+		}
+	}
+	effective := *selected
+	if latest := latestWorkspaceDoD(items); latest != nil {
+		effective = *latest
+	}
+	if len(mergedItems) > 0 {
+		effective.Items = mergedItems
+		effective.State = common.DoDStateReady
+	}
+	return &effective, contexts, nil
+}
+
 func ActivateWorkspaceExecutionWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd ActivateWorkspaceExecutionCommand) (WorkspaceExecutionActivation, error) {
 	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
@@ -135,12 +318,12 @@ func selectWorkspaceExecutionDefinitions(ctx context.Context, session *RuntimeSe
 	err = activationContextReadTasks(
 		func() error {
 			var err error
-			goal, err = selectWorkspaceExecutionGoal(ctx, exports.Repositories.Goals.ListByWorkspaceID, workspaceID, common.GoalID(cmd.GoalID))
+			goal, err = selectWorkspaceExecutionGoal(ctx, exports.Repositories.Goals.ListByWorkspaceID, exports.Repositories.EventRecords, workspaceID, common.GoalID(cmd.GoalID))
 			return err
 		},
 		func() error {
 			var err error
-			dod, err = selectWorkspaceExecutionDoD(ctx, exports.Repositories.DoDs.ListByWorkspaceID, workspaceID, common.DoDID(cmd.DoDID))
+			dod, err = selectWorkspaceExecutionDoD(ctx, exports.Repositories.DoDs.ListByWorkspaceID, exports.Repositories.EventRecords, workspaceID, common.DoDID(cmd.DoDID))
 			return err
 		},
 	)
@@ -153,6 +336,7 @@ func selectWorkspaceExecutionDefinitions(ctx context.Context, session *RuntimeSe
 func selectWorkspaceExecutionGoal(
 	ctx context.Context,
 	listByWorkspaceID func(context.Context, common.WorkspaceID) ([]*workspacemodel.Goal, error),
+	eventRecords repository.EventRecordRepository,
 	workspaceID common.WorkspaceID,
 	requestedID common.GoalID,
 ) (*workspacemodel.Goal, error) {
@@ -160,29 +344,29 @@ func selectWorkspaceExecutionGoal(
 	if err != nil {
 		return nil, err
 	}
+	items = orderedWorkspaceGoals(ctx, eventRecords, workspaceID, items)
+	latest := latestWorkspaceGoal(items)
 	if requestedID != "" {
 		for _, item := range items {
 			if item != nil && item.ID == requestedID {
+				if latest != nil {
+					return latest, nil
+				}
 				return item, nil
 			}
 		}
 		return nil, common.ErrConflict
 	}
-	if len(items) == 0 {
+	if latest == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if len(items) > 1 {
-		return nil, common.ErrConflict
-	}
-	if items[0] == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	return items[0], nil
+	return latest, nil
 }
 
 func selectWorkspaceExecutionDoD(
 	ctx context.Context,
 	listByWorkspaceID func(context.Context, common.WorkspaceID) ([]*workspacemodel.DoD, error),
+	eventRecords repository.EventRecordRepository,
 	workspaceID common.WorkspaceID,
 	requestedID common.DoDID,
 ) (*workspacemodel.DoD, error) {
@@ -190,27 +374,29 @@ func selectWorkspaceExecutionDoD(
 	if err != nil {
 		return nil, err
 	}
+	items = orderedWorkspaceDoDs(ctx, eventRecords, workspaceID, items)
 	readyItems := make([]*workspacemodel.DoD, 0, len(items))
 	for _, item := range items {
 		if item != nil && (item.State == common.DoDStateReady || item.State == common.DoDStateSatisfied) {
 			readyItems = append(readyItems, item)
 		}
 	}
+	latest := latestWorkspaceDoD(readyItems)
 	if requestedID != "" {
 		for _, item := range readyItems {
 			if item.ID == requestedID {
+				if latest != nil {
+					return latest, nil
+				}
 				return item, nil
 			}
 		}
 		return nil, common.ErrConflict
 	}
-	if len(readyItems) == 0 {
+	if latest == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if len(readyItems) > 1 {
-		return nil, common.ErrConflict
-	}
-	return readyItems[0], nil
+	return latest, nil
 }
 
 func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, cmd ActivateWorkspaceExecutionCommand) (map[string]any, error) {
@@ -251,14 +437,30 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	if err != nil {
 		return nil, err
 	}
+	effectiveGoal, workspaceGoals, err := effectiveWorkspaceGoal(ctx, exports.Repositories.Goals, exports.Repositories.EventRecords, workspace.ID, goal)
+	if err != nil {
+		return nil, err
+	}
+	effectiveDoD, workspaceDoDs, err := effectiveWorkspaceDoD(ctx, exports.Repositories.DoDs, exports.Repositories.EventRecords, workspace.ID, dod)
+	if err != nil {
+		return nil, err
+	}
 	contextData := map[string]any{
 		"activation":  "workspace_execution",
 		"workspaceId": string(workspace.ID),
-		"goalId":      string(goal.ID),
-		"doDId":       string(dod.ID),
+		"goalId":      string(effectiveGoal.ID),
+		"doDId":       string(effectiveDoD.ID),
 	}
-	contextData["goal"] = goalContext(goal)
-	contextData["dod"] = dodContext(dod)
+	contextData["goal"] = goalContext(effectiveGoal)
+	if len(workspaceGoals) > 0 {
+		contextData["goals"] = workspaceGoals
+		contextData["goalDefinitionPolicy"] = "workspace_goals_are_cumulative_latest_refines_previous"
+	}
+	contextData["dod"] = dodContext(effectiveDoD)
+	if len(workspaceDoDs) > 0 {
+		contextData["dods"] = workspaceDoDs
+		contextData["doDDefinitionPolicy"] = "workspace_dods_are_cumulative_latest_refines_previous"
+	}
 	dialogLanguage := languageNameFromLocale(cmd.DialogLanguage)
 	if dialogLanguage == "" {
 		dialogLanguage = defaultDialogLanguage()
@@ -287,11 +489,11 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 		},
 		func() error {
 			var err error
-			memories, retrievalEvidence, err = selectedMemoryItems(ctx, workspace.ID, exports.Services.MemoryService, memoryIDs, goal, dod)
+			memories, retrievalEvidence, err = selectedMemoryItems(ctx, workspace.ID, exports.Services.MemoryService, memoryIDs, effectiveGoal, effectiveDoD)
 			return err
 		},
 		func() error {
-			governanceHistory = workspaceGovernanceHistory(ctx, exports.Repositories.Tickets, exports.Repositories.Resolutions, exports.Repositories.Runs, workspace.ID, goal.ID, dod.ID, 10)
+			governanceHistory = workspaceGovernanceHistory(ctx, exports.Repositories.Tickets, exports.Repositories.Resolutions, exports.Repositories.Runs, workspace.ID, effectiveGoal.ID, effectiveDoD.ID, 10)
 			return nil
 		},
 	)
@@ -304,7 +506,7 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	}
 	contextData["soulRouting"] = soulRouting
 
-	skills, skillIDs, skillSelection, err := selectSkillsForWorkspaceExecution(ctx, session, workspace.ID, goal, dod, cmd.SkillIDs, defaultSoul)
+	skills, skillIDs, skillSelection, err := selectSkillsForWorkspaceExecution(ctx, session, workspace.ID, effectiveGoal, effectiveDoD, cmd.SkillIDs, defaultSoul)
 	if err != nil {
 		return nil, err
 	}

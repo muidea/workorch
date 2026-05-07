@@ -21,7 +21,7 @@ type patchApprovalRequirement struct {
 	patches  []map[string]any
 }
 
-func (o *RuntimeOrchestrator) patchApprovalBlockSpec(ctx context.Context, runID common.RunID, output map[string]any) (runtimeApprovalBlockSpec, error) {
+func (o *RuntimeOrchestrator) patchApprovalBlockSpec(ctx context.Context, runID common.RunID, language string, output map[string]any) (runtimeApprovalBlockSpec, error) {
 	requests, err := runtimePatchRequests(output)
 	if err != nil || len(requests) == 0 {
 		return runtimeApprovalBlockSpec{}, err
@@ -53,9 +53,9 @@ func (o *RuntimeOrchestrator) patchApprovalBlockSpec(ctx context.Context, runID 
 		return runtimeApprovalBlockSpec{}, nil
 	}
 	return runtimeApprovalBlockSpec{
-		Reason:     "Patch requires approval before workspace files can be modified.",
+		Reason:     localizedPatchApprovalReason(language),
 		ApprovalID: "",
-		Action:     "Approve applying the pending workspace patch.",
+		Action:     localizedPatchApprovalAction(language),
 		Context:    patchApprovalContext(requirement),
 	}, nil
 }
@@ -88,7 +88,7 @@ func applyPatchApprovalBlockOutput(output map[string]any, spec runtimeApprovalBl
 	}
 }
 
-func (o *RuntimeOrchestrator) patchRevertApprovalBlockSpec(ctx context.Context, runID common.RunID, output map[string]any) (runtimeApprovalBlockSpec, error) {
+func (o *RuntimeOrchestrator) patchRevertApprovalBlockSpec(ctx context.Context, runID common.RunID, language string, output map[string]any) (runtimeApprovalBlockSpec, error) {
 	request, ok, err := runtimePatchRevertRequestFromOutput(output)
 	if err != nil || !ok {
 		return runtimeApprovalBlockSpec{}, err
@@ -115,8 +115,8 @@ func (o *RuntimeOrchestrator) patchRevertApprovalBlockSpec(ctx context.Context, 
 		return runtimeApprovalBlockSpec{}, fmt.Errorf("%w: patch revert approval %s is not approved", common.ErrBlocked, request.ApprovalID)
 	}
 	return runtimeApprovalBlockSpec{
-		Reason: "Patch revert requires approval before workspace files can be modified.",
-		Action: "Approve reverting the pending workspace patch.",
+		Reason: localizedPatchRevertApprovalReason(language),
+		Action: localizedPatchRevertApprovalAction(language),
 		Context: map[string]any{
 			"kind":           "patch_revert_approval_required",
 			"patchId":        string(request.PatchID),

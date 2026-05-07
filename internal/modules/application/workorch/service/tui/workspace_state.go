@@ -222,11 +222,17 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		return
 	}
 	m.activeRunID = string(run.ID)
-	if msg.Goal != nil && strings.TrimSpace(msg.Goal.Text) != "" {
-		m.currentTask = strings.TrimSpace(msg.Goal.Text)
-		m.transcript = initialTranscript(msg.Goal.Text)
+	goalText := effectiveGoalText(run)
+	if goalText == "" && msg.Goal != nil {
+		goalText = strings.TrimSpace(msg.Goal.Text)
 	}
-	if msg.DoD != nil && len(msg.DoD.Items) > 0 {
+	if goalText != "" {
+		m.currentTask = goalText
+		m.transcript = effectiveGoalTranscript(run, goalText)
+	}
+	if items := effectiveDoDItems(run); len(items) > 0 {
+		m.dodItems = items
+	} else if msg.DoD != nil && len(msg.DoD.Items) > 0 {
 		m.dodItems = append([]string(nil), msg.DoD.Items...)
 	}
 	if msg.Snapshot != nil {
@@ -263,6 +269,72 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	}
 	m.syncBlockingDecisionFromList()
 	m.syncBlockingApprovalFromList()
+}
+
+func effectiveGoalText(run *backend.RunInfo) string {
+	if run == nil {
+		return ""
+	}
+	goal := payloadMap(run.ExecutionContext, "goal")
+	if goal == nil {
+		return ""
+	}
+	return strings.TrimSpace(firstPayloadString(goal, "text", "Text"))
+}
+
+func effectiveGoalTranscript(run *backend.RunInfo, fallback string) []transcriptItem {
+	if run == nil {
+		return initialTranscript(fallback)
+	}
+	goals := contextGoalMaps(run.ExecutionContext["goals"])
+	if len(goals) == 0 {
+		return initialTranscript(fallback)
+	}
+	items := make([]transcriptItem, 0, len(goals))
+	seen := map[string]struct{}{}
+	for _, goal := range goals {
+		text := strings.TrimSpace(firstPayloadString(goal, "text", "Text"))
+		if text == "" {
+			continue
+		}
+		if _, ok := seen[text]; ok {
+			continue
+		}
+		seen[text] = struct{}{}
+		items = append(items, transcriptItem{Kind: "Goal", Text: text})
+	}
+	if len(items) == 0 {
+		return initialTranscript(fallback)
+	}
+	return items
+}
+
+func effectiveDoDItems(run *backend.RunInfo) []string {
+	if run == nil {
+		return nil
+	}
+	dod := payloadMap(run.ExecutionContext, "dod")
+	if dod == nil {
+		return nil
+	}
+	return payloadStringSliceValue(dod, "items", "Items")
+}
+
+func contextGoalMaps(value any) []map[string]any {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		ret := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if goal, ok := item.(map[string]any); ok {
+				ret = append(ret, goal)
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
 }
 
 func (m *AppModel) resetWorkspaceView() {

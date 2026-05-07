@@ -459,7 +459,7 @@ PY
 # Scenario-2: repair loop exhausted then escalated decision.
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
   -H 'Content-Type: application/json' \
-  -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","priority":2}' >"$TMP_DIR/scenario2-activation.json"
+  -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' >"$TMP_DIR/scenario2-activation.json"
 scenario2_run_id="$(json_path "$TMP_DIR/scenario2-activation.json" "activation.run.id")"
 wait_run_state "$scenario2_run_id" "blocked_on_decision" "$TMP_DIR/scenario2-status.json"
 scenario2_ticket_id="$(json_path "$TMP_DIR/scenario2-status.json" "status.blockingTicketId")"
@@ -495,8 +495,11 @@ execution = bindings.get("execution") or {}
 if execution.get("soulId") != "soul-software-dev-execution":
     errors.append(f"soulRouting.execution={execution!r}, want soul-software-dev-execution")
 reason = str(ticket.get("reason") or "")
-if "runtime repair attempts exhausted" not in reason:
+if "自动修复尝试已耗尽" not in reason:
     errors.append(f"decision reason missing repair exhaustion: {reason!r}")
+question = str(ticket.get("question") or "")
+if "请补充缺失的实现指导" not in question:
+    errors.append(f"decision question missing Chinese repair guidance: {question!r}")
 if ticket.get("state") != "open":
     errors.append(f"decision state={ticket.get('state')!r}, want open")
 if errors:

@@ -20,6 +20,7 @@ func compactStepInputForLLMContext(input map[string]any) map[string]any {
 	ret := compactLLMContextMap(input, 0)
 	delete(ret, stepInputKeyExecutionContextPackage)
 	delete(ret, stepInputKeyWorkspaceFileManifest)
+	delete(ret, stepOutputKeyExecutionGraph)
 	return ret
 }
 

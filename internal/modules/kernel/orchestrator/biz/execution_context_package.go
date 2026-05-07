@@ -149,6 +149,13 @@ func (o *RuntimeOrchestrator) currentRunGovernanceHistory(ctx context.Context, r
 					"question":     t.Question,
 					"stepId":       string(t.StepID),
 				}
+				if t.State == common.DecisionTicketStateResolved && o.resolutions != nil {
+					if resolution, err := o.resolutions.GetByTicketID(ctx, t.ID); err == nil && resolution != nil {
+						item["resolutionId"] = string(resolution.ID)
+						item["resolutionType"] = string(resolution.Type)
+						item["resolutionPayload"] = cloneStepPayload(resolution.Payload)
+					}
+				}
 				ret = append(ret, item)
 			}
 		}
@@ -174,6 +181,20 @@ func (o *RuntimeOrchestrator) currentRunGovernanceHistory(ctx context.Context, r
 	}
 
 	return ret
+}
+
+func (o *RuntimeOrchestrator) currentGovernanceHistoryForLLMInput(ctx context.Context, run *runModel.Run) []map[string]any {
+	if run == nil {
+		return nil
+	}
+	history := mapSliceFromValue(run.ExecutionContext["governanceHistory"])
+	if current := o.currentRunGovernanceHistory(ctx, run); len(current) > 0 {
+		history = append(current, history...)
+	}
+	if len(history) == 0 {
+		return nil
+	}
+	return limitedMapSlice(history, 6)
 }
 
 type stableExecutionContextPackage struct {

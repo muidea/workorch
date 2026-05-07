@@ -2222,7 +2222,7 @@ func TestRuntimeOrchestratorAllowsSensitivePatchWithApprovedApprovalID(t *testin
 		events.NewMemoryHub(),
 	)
 
-	spec, err := orch.patchApprovalBlockSpec(ctx, runID, map[string]any{
+	spec, err := orch.patchApprovalBlockSpec(ctx, runID, "", map[string]any{
 		stepOutputKeyPatches: []map[string]any{{
 			"patchType":  "file_write",
 			"targetRef":  ".env",
@@ -2475,6 +2475,65 @@ func TestRuntimeOrchestrator_RuntimeRepairInputSkipsWorkspaceManifestForDoDFailu
 
 	if manifest := mapSliceFromValue(input[stepInputKeyWorkspaceFileManifest]); len(manifest) != 0 {
 		t.Fatalf("workspaceFileManifest = %+v, want no manifest for non-path DoD repair", input[stepInputKeyWorkspaceFileManifest])
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairInputCarriesResolvedGovernanceAndFailedGraph(t *testing.T) {
+	ctx := context.Background()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	runID := common.RunID("run-repair-governance-context")
+	ticketID := common.TicketID("ticket-repair-governance-context")
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:           ticketID,
+		WorkspaceID:  "ws-repair-governance-context",
+		RunID:        runID,
+		StepID:       "run-repair-governance-context/block/failed",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Provide missing direction.",
+		State:        common.DecisionTicketStateResolved,
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       "resolution-repair-governance-context",
+		TicketID: ticketID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:  map[string]any{"answer": "confirmed direction"},
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+	orch := &RuntimeOrchestrator{tickets: ticketRepo, resolutions: resolutionRepo, steps: memory.NewStepRepository()}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "failed", Kind: shellcommon.StepKindCommand, Input: map[string]any{"command": "tool"}},
+	}}
+	failedStep := &runmodel.Step{
+		ID:    "run-repair-governance-context/block/failed",
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepOutputKeyExecutionGraph: graph,
+			stepInputKeyGraphNodeID:     "failed",
+		},
+		Output: map[string]any{"error": "failed"},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-governance-context"}, failedStep, 1, errors.New("failed"))
+
+	if _, ok := input[stepOutputKeyExecutionGraph]; ok {
+		t.Fatalf("executionGraph leaked into repair input: %+v", input[stepOutputKeyExecutionGraph])
+	}
+	if _, ok := input["failedExecutionGraph"].(runtimemodel.BlockExecutionGraph); !ok {
+		t.Fatalf("failedExecutionGraph = %#v, want compact failed graph", input["failedExecutionGraph"])
+	}
+	history := mapSliceFromValue(input["governanceHistory"])
+	if len(history) != 1 {
+		t.Fatalf("governanceHistory = %#v, want resolved decision", input["governanceHistory"])
+	}
+	payload := mapFromValue(history[0]["resolutionPayload"])
+	if history[0]["resolutionType"] != decisioncommon.ResolutionTypeProvideMissingInfo || payload["answer"] != "confirmed direction" {
+		t.Fatalf("governanceHistory[0] = %#v, want resolution payload", history[0])
 	}
 }
 
@@ -7325,14 +7384,14 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludeWebSourceIndex(t *testing.T) 
 		State: common.StepStateCompleted,
 		Output: map[string]any{
 			"provider":   "default-http",
-			"query":      "golang latest",
+			"query":      "reference latest",
 			"searchedAt": "2026-05-05T00:00:00Z",
 			"policy":     map[string]any{"decision": "allowed"},
 			"results": []map[string]any{{
-				"title":       "Go Downloads",
-				"url":         "https://go.dev/dl/",
-				"snippet":     "Download Go",
-				"source":      "go.dev",
+				"title":       "Reference Downloads",
+				"url":         "https://example.com/reference",
+				"snippet":     "Reference data",
+				"source":      "example.com",
 				"publishedAt": "2026-05-01",
 				"rank":        1,
 				"contentHash": "search-hash",

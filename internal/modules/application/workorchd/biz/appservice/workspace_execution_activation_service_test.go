@@ -617,7 +617,7 @@ func TestActivateWorkspaceExecutionWithBackendRequiresGoalAndDoD(t *testing.T) {
 	}
 }
 
-func TestActivateWorkspaceExecutionWithBackendRequiresExplicitDefinitionWhenAmbiguous(t *testing.T) {
+func TestActivateWorkspaceExecutionWithBackendUsesLatestGoalAndDoDDefinitions(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
 	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-ambiguous", "activation ambiguous workspace", "", "workspaces/activation-ambiguous")
@@ -628,26 +628,52 @@ func TestActivateWorkspaceExecutionWithBackendRequiresExplicitDefinitionWhenAmbi
 	if err != nil {
 		t.Fatalf("DefineGoalWithBackend first: %v", err)
 	}
-	if _, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "second activation goal"); err != nil {
+	secondGoal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "second activation goal")
+	if err != nil {
 		t.Fatalf("DefineGoalWithBackend second: %v", err)
 	}
-	dod, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"activation dod"})
+	firstDoD, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"first activation dod"})
 	if err != nil {
-		t.Fatalf("DefineDoDWithBackend: %v", err)
+		t.Fatalf("DefineDoDWithBackend first: %v", err)
+	}
+	secondDoD, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"second activation dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend second: %v", err)
 	}
 
-	if _, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{}); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("err = %v, want conflict when goal selection is ambiguous", err)
+	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend latest: %v", err)
 	}
-	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+	if item.Run.GoalID != secondGoal.ID || item.Run.DoDID != secondDoD.ID || item.Run.State != "failed" {
+		t.Fatalf("activation run = %+v, want latest goal/dod failed through llm provider validation", item.Run)
+	}
+	if item.Run.ExecutionContext["goalId"] != secondGoal.ID {
+		t.Fatalf("executionContext goalId = %+v, want latest goal", item.Run.ExecutionContext["goalId"])
+	}
+	if item.Run.ExecutionContext["doDId"] != secondDoD.ID {
+		t.Fatalf("executionContext doDId = %+v, want latest dod", item.Run.ExecutionContext["doDId"])
+	}
+	goalContext, _ := item.Run.ExecutionContext["goal"].(map[string]any)
+	goalText, _ := goalContext["text"].(string)
+	if !strings.Contains(goalText, "first activation goal") || !strings.Contains(goalText, "second activation goal") {
+		t.Fatalf("effective goal text = %q, want cumulative workspace goals", goalText)
+	}
+	dodContext, _ := item.Run.ExecutionContext["dod"].(map[string]any)
+	dodItems, _ := dodContext["items"].([]string)
+	if !stringSliceContains(dodItems, "first activation dod") || !stringSliceContains(dodItems, "second activation dod") {
+		t.Fatalf("effective dod items = %+v, want cumulative workspace dods", dodItems)
+	}
+
+	item, err = ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
 		GoalID: firstGoal.ID,
-		DoDID:  dod.ID,
+		DoDID:  firstDoD.ID,
 	})
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend explicit: %v", err)
 	}
-	if item.Run.GoalID != firstGoal.ID || item.Run.DoDID != dod.ID || item.Run.State != "failed" {
-		t.Fatalf("activation run = %+v, want explicit goal/dod failed through llm provider validation", item.Run)
+	if item.Run.GoalID != secondGoal.ID || item.Run.DoDID != secondDoD.ID || item.Run.State != "failed" {
+		t.Fatalf("activation run = %+v, want stale explicit goal/dod upgraded to latest definitions", item.Run)
 	}
 }
 
@@ -961,8 +987,8 @@ func TestActivationContextUsesSelectedGoalAndDoDWithoutReload(t *testing.T) {
 	if _, err := buildWorkspaceExecutionContextWithDefinitions(ctx, borrowed, workspace, selectedGoal, selectedDoD, ActivateWorkspaceExecutionCommand{}); err != nil {
 		t.Fatalf("buildWorkspaceExecutionContextWithDefinitions: %v", err)
 	}
-	if countingGoals.listCalls != 1 || countingDoDs.listCalls != 1 {
-		t.Fatalf("list calls goals=%d dods=%d, want one list each", countingGoals.listCalls, countingDoDs.listCalls)
+	if countingGoals.listCalls != 2 || countingDoDs.listCalls != 2 {
+		t.Fatalf("list calls goals=%d dods=%d, want selection plus effective definition lists", countingGoals.listCalls, countingDoDs.listCalls)
 	}
 	if countingGoals.getCalls != 0 || countingDoDs.getCalls != 0 {
 		t.Fatalf("get calls goals=%d dods=%d, want no definition reload", countingGoals.getCalls, countingDoDs.getCalls)
@@ -1878,6 +1904,75 @@ func TestActivateWorkspaceExecutionWithBackendReturnsActiveRun(t *testing.T) {
 	}
 	if len(item.Snapshot.Runs) != 1 || item.Snapshot.Workspace.ActiveRunID != activeRunID {
 		t.Fatalf("activation snapshot = %+v, want active run projection", item.Snapshot)
+	}
+}
+
+func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefinitionsChange(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-replace-active", "activation replace active workspace", "", "workspaces/activation-replace-active")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	oldGoal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "old activation goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend old: %v", err)
+	}
+	newGoal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "new activation goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend new: %v", err)
+	}
+	oldDoD, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"old activation dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend old: %v", err)
+	}
+	newDoD, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"new activation dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend new: %v", err)
+	}
+
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	oldRunID := common.RunID("run-activation-replace-active-old")
+	if err := exports.Services.RunService.CreateRun(ctx, runmodule.CreateRunCommand{
+		RunID:       oldRunID,
+		WorkspaceID: common.WorkspaceID(workspace.ID),
+		GoalID:      common.GoalID(oldGoal.ID),
+		DoDID:       common.DoDID(oldDoD.ID),
+	}); err != nil {
+		t.Fatalf("CreateRun old active: %v", err)
+	}
+	oldRun, err := exports.Repositories.Runs.Get(ctx, oldRunID)
+	if err != nil {
+		t.Fatalf("get old run: %v", err)
+	}
+	oldRun.State = common.RunStateRunning
+	if err := exports.Repositories.Runs.Update(ctx, oldRun); err != nil {
+		t.Fatalf("mark old run running: %v", err)
+	}
+	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.ActiveRunID = oldRunID
+	workspaceItem.State = common.WorkspaceStateRunning
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("update workspace active run: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	if item.Run.ID == string(oldRunID) || item.Run.GoalID != newGoal.ID || item.Run.DoDID != newDoD.ID {
+		t.Fatalf("activation run = %+v, want replacement run with new goal/dod", item.Run)
+	}
+	replaced, err := exports.Repositories.Runs.Get(ctx, oldRunID)
+	if err != nil {
+		t.Fatalf("get replaced run: %v", err)
+	}
+	if replaced.State != common.RunStateSuperseded {
+		t.Fatalf("old run state = %q, want superseded", replaced.State)
 	}
 }
 

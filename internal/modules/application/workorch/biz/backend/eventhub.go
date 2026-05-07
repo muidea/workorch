@@ -362,6 +362,10 @@ func convertEnvelope(envelope events.Envelope) Event {
 		return Event{Type: EventWorkspaceStateChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
 	case events.TopicWorkspaceDeleted:
 		return Event{Type: EventWorkspaceDeleted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
+	case events.TopicGoalDefined:
+		return Event{Type: EventGoalDefined, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: enrichSubjectPayload(envelope.Payload, "goalId", envelope.SubjectID)}
+	case events.TopicDoDDefined:
+		return Event{Type: EventDoDDefined, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: enrichSubjectPayload(envelope.Payload, "doDId", envelope.SubjectID)}
 	case events.TopicRunCreated, events.TopicRunStateChanged:
 		return Event{Type: EventRunStateChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
 	case events.TopicStepDispatched:

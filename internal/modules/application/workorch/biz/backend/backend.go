@@ -315,6 +315,7 @@ type RunInfo struct {
 	WorkspaceID        common.WorkspaceID
 	GoalID             common.GoalID
 	DoDID              common.DoDID
+	ExecutionContext   map[string]any
 	State              common.RunState
 	Priority           int
 	BlockingTicketID   common.TicketID
@@ -570,6 +571,8 @@ const (
 	EventWorkspaceCreated      EventType = "workspace/created"
 	EventWorkspaceStateChanged EventType = "workspace/state/changed"
 	EventWorkspaceDeleted      EventType = "workspace/deleted"
+	EventGoalDefined           EventType = "goal/defined"
+	EventDoDDefined            EventType = "dod/defined"
 	EventRunStateChanged       EventType = "run/state/changed"
 	EventStepDispatched        EventType = "step/dispatched"
 	EventStepCompleted         EventType = "step/completed"

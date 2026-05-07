@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -277,15 +276,16 @@ func (o *RuntimeOrchestrator) blockOnDuplicateRuntimeFailure(
 	}
 	class := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass))
 	signature := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeySignature))
-	reason := fmt.Sprintf("duplicate runtime failure signature detected: %s", signature)
+	language := runDialogLanguage(run)
+	var reasonErr error
 	if execErr != nil && !errors.Is(execErr, common.ErrInvalidArgument) {
-		reason = fmt.Sprintf("%s: %s", reason, execErr.Error())
+		reasonErr = execErr
 	}
 	spec := runtimeDecisionBlockSpec{
 		TicketID:     common.TicketID(runtimeChildID(failedStep.ID, "duplicate-failure-decision")),
-		Reason:       reason,
+		Reason:       localizedDuplicateRuntimeFailureReason(language, signature, reasonErr),
 		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
-		Question:     "The same runtime failure happened again after repair. Provide different guidance, choose replan, or reject the current path.",
+		Question:     localizedDuplicateRuntimeFailureQuestion(language),
 		Context: map[string]any{
 			"failureClass":     class,
 			"failureSignature": signature,

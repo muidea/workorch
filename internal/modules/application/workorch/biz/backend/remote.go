@@ -206,7 +206,8 @@ func (b *remoteRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID
 	}
 	return &RunInfo{
 		ID: common.RunID(act.Run.ID), WorkspaceID: common.WorkspaceID(act.Run.WorkspaceID),
-		State: common.RunState(act.Run.State),
+		GoalID: common.GoalID(act.Run.GoalID), DoDID: common.DoDID(act.Run.DoDID),
+		ExecutionContext: act.Run.ExecutionContext, State: common.RunState(act.Run.State),
 	}, nil
 }
 func (b *remoteRunBackend) Resume(ctx context.Context, id common.RunID) (*RunInfo, error) {
@@ -214,14 +215,22 @@ func (b *remoteRunBackend) Resume(ctx context.Context, id common.RunID) (*RunInf
 	if err != nil {
 		return nil, err
 	}
-	return &RunInfo{ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID), State: common.RunState(r.State)}, nil
+	return &RunInfo{
+		ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
+		GoalID: common.GoalID(r.GoalID), DoDID: common.DoDID(r.DoDID),
+		ExecutionContext: r.ExecutionContext, State: common.RunState(r.State),
+	}, nil
 }
 func (b *remoteRunBackend) Get(ctx context.Context, id common.RunID) (*RunInfo, error) {
 	r, err := b.cl.GetRun(ctx, string(id))
 	if err != nil {
 		return nil, err
 	}
-	return &RunInfo{ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID), State: common.RunState(r.State)}, nil
+	return &RunInfo{
+		ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
+		GoalID: common.GoalID(r.GoalID), DoDID: common.DoDID(r.DoDID),
+		ExecutionContext: r.ExecutionContext, State: common.RunState(r.State),
+	}, nil
 }
 func (b *remoteRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]RunInfo, error) {
 	list, err := b.cl.ListRuns(ctx, string(wsID))
@@ -230,7 +239,11 @@ func (b *remoteRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([
 	}
 	result := make([]RunInfo, 0, len(list))
 	for _, r := range list {
-		result = append(result, RunInfo{ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID), State: common.RunState(r.State)})
+		result = append(result, RunInfo{
+			ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
+			GoalID: common.GoalID(r.GoalID), DoDID: common.DoDID(r.DoDID),
+			ExecutionContext: r.ExecutionContext, State: common.RunState(r.State),
+		})
 	}
 	return result, nil
 }
