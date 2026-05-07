@@ -3,6 +3,8 @@ package appservice
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
@@ -11,6 +13,17 @@ import (
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+)
+
+const (
+	decisionContextKeyScope                 = "scope"
+	decisionContextScopeWorkorchRuntime     = "workorch_runtime"
+	decisionContextScopeTargetWorkspace     = "target_workspace"
+	decisionContextScopeExternalDependency  = "external_dependency"
+	decisionContextKeyDependency            = "dependency"
+	decisionContextDependencyLLMProvider    = "llm_provider"
+	decisionContextKeyRecoveryPolicy        = "recoveryPolicy"
+	decisionContextRecoveryPolicyConfigOnly = "system_config_required"
 )
 
 type Decision struct {
@@ -148,7 +161,7 @@ func ListDecisionsFromEnv(ctx context.Context, workspaceID string, runID string)
 }
 
 func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ticketID string, cmd ResolveDecisionCommand) (ret Decision, err error) {
-	service, _, _, err := decisionDependenciesFromSession(session)
+	service, tickets, _, err := decisionDependenciesFromSession(session)
 	if err != nil {
 		return Decision{}, err
 	}
@@ -160,6 +173,15 @@ func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 		return Decision{}, common.ErrInvalidArgument
 	}
 	payload := withDecisionSemanticPayload(cmd.ResolutionPayload, semantic)
+	if containsInlineLLMProviderConfig(payload) {
+		ticket, err := tickets.Get(ctx, common.TicketID(ticketID))
+		if err != nil {
+			return Decision{}, err
+		}
+		if err := validateDecisionResolutionPayloadForTicket(ticket, payload); err != nil {
+			return Decision{}, err
+		}
+	}
 
 	item, resolution, err := service.EnsureResolvedTicketAndReturn(ctx, decisionmodule.ResolveTicketCommand{
 		ResolutionID: common.ResolutionID("resolution-" + ticketID + "-" + semantic.ResolutionType),
@@ -223,6 +245,9 @@ func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSessi
 		if r.item.State != common.DecisionTicketStateOpen {
 			return nil, common.ErrConflict
 		}
+		if err := validateDecisionResolutionPayloadForTicket(r.item, payload); err != nil {
+			return nil, err
+		}
 	}
 
 	ret = make([]Decision, 0, len(cmd.TicketIDs))
@@ -260,6 +285,128 @@ func withDecisionSemanticPayload(payload map[string]any, semantic governancecomm
 		"version":        "v1",
 	}
 	return ret
+}
+
+func validateDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, payload map[string]any) error {
+	if ticket == nil || !isWorkorchRuntimeLLMProviderRecoveryTicket(ticket) || !containsInlineLLMProviderConfig(payload) {
+		return nil
+	}
+	return fmt.Errorf("%w: WorkOrch runtime LLM provider configuration must be changed in WorkOrch system configuration, not pasted into a decision answer", common.ErrInvalidArgument)
+}
+
+func isWorkorchRuntimeLLMProviderRecoveryTicket(ticket *decisionmodel.Ticket) bool {
+	if ticket == nil {
+		return false
+	}
+	scope := strings.TrimSpace(stringFromDecisionPayload(ticket.Context, decisionContextKeyScope))
+	if scope == decisionContextScopeTargetWorkspace || scope == decisionContextScopeExternalDependency {
+		return false
+	}
+	if scope == decisionContextScopeWorkorchRuntime {
+		return isLLMProviderRecoveryTicket(ticket)
+	}
+	// Older tickets did not carry a scope. Preserve provider recovery protection
+	// for those records while keeping scoped target-workspace tickets separate.
+	return isLLMProviderRecoveryTicket(ticket)
+}
+
+func isLLMProviderRecoveryTicket(ticket *decisionmodel.Ticket) bool {
+	if ticket == nil {
+		return false
+	}
+	if dependency := strings.TrimSpace(stringFromDecisionPayload(ticket.Context, decisionContextKeyDependency)); dependency != "" {
+		return dependency == decisionContextDependencyLLMProvider
+	}
+	if policy := strings.TrimSpace(stringFromDecisionPayload(ticket.Context, decisionContextKeyRecoveryPolicy)); policy != "" {
+		return policy == decisionContextRecoveryPolicyConfigOnly
+	}
+	class := strings.TrimSpace(stringFromDecisionPayload(ticket.Context, "failureClass"))
+	if strings.HasPrefix(class, "provider_") ||
+		class == "context_too_large" ||
+		class == "rate_limited" ||
+		class == "auth_or_config_error" {
+		return true
+	}
+	text := strings.ToLower(ticket.Question + "\n" + ticket.Reason)
+	return strings.Contains(text, "llm provider") || strings.Contains(text, "provider retry")
+}
+
+func containsInlineLLMProviderConfig(payload map[string]any) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	hits := map[string]bool{}
+	visitProviderConfigValue(payload, hits)
+	if hits["apiKey"] || hits["secret"] {
+		return true
+	}
+	configHits := 0
+	for _, key := range []string{"provider", "baseURL", "model"} {
+		if hits[key] {
+			configHits++
+		}
+	}
+	return configHits >= 2
+}
+
+func visitProviderConfigValue(value any, hits map[string]bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, nested := range typed {
+			recordProviderConfigKey(key, hits)
+			visitProviderConfigValue(nested, hits)
+		}
+	case []any:
+		for _, nested := range typed {
+			visitProviderConfigValue(nested, hits)
+		}
+	case []map[string]any:
+		for _, nested := range typed {
+			visitProviderConfigValue(nested, hits)
+		}
+	case string:
+		recordProviderConfigText(typed, hits)
+	}
+}
+
+func recordProviderConfigKey(key string, hits map[string]bool) {
+	normalized := normalizeProviderConfigText(key)
+	switch normalized {
+	case "provider":
+		hits["provider"] = true
+	case "baseurl", "baseuri", "endpoint", "apiurl":
+		hits["baseURL"] = true
+	case "model", "modelid":
+		hits["model"] = true
+	case "apikey", "token", "secret":
+		hits["apiKey"] = true
+	}
+}
+
+func recordProviderConfigText(value string, hits map[string]bool) {
+	lower := strings.ToLower(value)
+	if strings.Contains(lower, "sk-") || strings.Contains(lower, "api_key") || strings.Contains(lower, "apikey") || strings.Contains(lower, "api key") {
+		hits["apiKey"] = true
+	}
+	for _, marker := range []string{"provider", "baseurl", "base_url", "base url", "endpoint", "model"} {
+		if strings.Contains(lower, marker) {
+			recordProviderConfigKey(marker, hits)
+		}
+	}
+}
+
+func normalizeProviderConfigText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer("_", "", "-", "", " ", "", ".", "")
+	return replacer.Replace(value)
+}
+
+func stringFromDecisionPayload(payload map[string]any, key string) string {
+	if payload == nil {
+		return ""
+	}
+	value, _ := payload[key].(string)
+	return strings.TrimSpace(value)
 }
 
 func ResolveDecisionWithBackend(ctx context.Context, backend string, dataRoot string, ticketID string, cmd ResolveDecisionCommand) (Decision, error) {

@@ -39,12 +39,15 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, planning.SoulMD, "技术栈")
 	assertSoulContains(t, planning.SoulMD, "受影响文件")
 	assertSoulContains(t, planning.SoulMD, "DoD 条目")
+	assertSoulContains(t, planning.SoulMD, "workspace 文件清单为空不等于缺少源码")
+	assertSoulContains(t, planning.SoulMD, "新项目初始化场景")
 
 	execution := findEmbeddedSoulByID(souls, "soul-software-dev-execution")
 	if execution == nil {
 		t.Fatal("soul-software-dev-execution missing")
 	}
 	assertSoulContains(t, execution.SoulMD, "最小代码或配置变更")
+	assertSoulContains(t, execution.SoulMD, "workspace 为空且 Goal/DoD 未要求既有源码")
 	assertSoulContains(t, execution.SoulMD, "每轮修改后先执行最小相关验证")
 	assertSoulContains(t, execution.SoulMD, "失败命令")
 
@@ -62,6 +65,12 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	}
 	assertSoulContains(t, artifact.SoulMD, "DoD 条目证据引用")
 	assertSoulContains(t, artifact.SoulMD, "不要只写")
+
+	decision := findEmbeddedSoulByID(souls, "soul-software-dev-decision")
+	if decision == nil {
+		t.Fatal("soul-software-dev-decision missing")
+	}
+	assertSoulContains(t, decision.SoulMD, "不要因为 workspace 为空就直接请求源码")
 }
 
 func findEmbeddedTemplateByID(items []embeddedTemplate, id string) *embeddedTemplate {

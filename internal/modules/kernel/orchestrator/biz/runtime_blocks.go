@@ -11,6 +11,17 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
+const (
+	decisionContextKeyScope                 = "scope"
+	decisionContextScopeWorkorchRuntime     = "workorch_runtime"
+	decisionContextScopeTargetWorkspace     = "target_workspace"
+	decisionContextScopeExternalDependency  = "external_dependency"
+	decisionContextKeyDependency            = "dependency"
+	decisionContextDependencyLLMProvider    = "llm_provider"
+	decisionContextKeyRecoveryPolicy        = "recoveryPolicy"
+	decisionContextRecoveryPolicyConfigOnly = "system_config_required"
+)
+
 type runtimeDecisionBlockSpec struct {
 	Reason       string
 	TicketID     common.TicketID

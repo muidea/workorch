@@ -62,6 +62,8 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 		!strings.Contains(gotPayload.Messages[1].Content, "Do not assume remote host access credentials") ||
 		!strings.Contains(gotPayload.Messages[1].Content, "ssh/command") ||
 		!strings.Contains(gotPayload.Messages[1].Content, "timeoutMillis") ||
+		!strings.Contains(gotPayload.Messages[1].Content, "An empty workspace file listing is not by itself missing source code") ||
+		!strings.Contains(gotPayload.Messages[1].Content, "new-work initialization case") ||
 		!strings.Contains(gotPayload.Messages[1].Content, "Conversation language: Chinese (Simplified)") ||
 		!strings.Contains(gotPayload.Messages[1].Content, "DoD summaries") ||
 		!strings.Contains(gotPayload.Messages[1].Content, "runtimeCapabilities") {

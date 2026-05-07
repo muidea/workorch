@@ -1175,6 +1175,19 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 		}}, nil
 	}
 	if last.State == common.StepStateFailed && requiresDoDAssessmentCompletionGate(run) {
+		if isRetryableLLMProviderRuntimeFailure(run, last) {
+			rootStepID := providerRetryRootStepID(last)
+			attempt := o.providerRetryAttemptCount(ctx, run.ID, rootStepID) + 1
+			stepID, err := o.uniqueDispatchStepID(ctx, run.ID, providerRetryStepID(rootStepID, attempt))
+			if err != nil {
+				return nil, err
+			}
+			return []stepDispatchSpec{{
+				ID:    stepID,
+				Kind:  last.Kind,
+				Input: providerRetryStepInput(last, attempt, nil),
+			}}, nil
+		}
 		attempt := o.runtimeRepairAttemptCount(ctx, run.ID) + 1
 		stepID, err := o.uniqueDispatchStepID(ctx, run.ID, runtimeRepairFollowUpStepID(run.ID, last, attempt))
 		if err != nil {

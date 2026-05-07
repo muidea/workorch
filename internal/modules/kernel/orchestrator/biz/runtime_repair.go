@@ -199,13 +199,16 @@ func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
 		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
 		Question:     localizedProviderRetryExhaustionQuestion(language),
 		Context: map[string]any{
-			"attempts":         maxProviderRetryAttempts,
-			"failureClass":     stringFromMap(failedStep.Output, failureOutputKeyClass),
-			"failureSignature": stringFromMap(failedStep.Output, failureOutputKeySignature),
-			"failedStepId":     string(failedStep.ID),
-			"failedStepKind":   failedStep.Kind,
-			"failedStepInput":  compactStepInputForLLMContext(failedStep.Input),
-			"failedStepOutput": compactStepOutputForLLMContext(failedStep.Output),
+			decisionContextKeyScope:          decisionContextScopeWorkorchRuntime,
+			decisionContextKeyDependency:     decisionContextDependencyLLMProvider,
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyConfigOnly,
+			"attempts":                       maxProviderRetryAttempts,
+			"failureClass":                   stringFromMap(failedStep.Output, failureOutputKeyClass),
+			"failureSignature":               stringFromMap(failedStep.Output, failureOutputKeySignature),
+			"failedStepId":                   string(failedStep.ID),
+			"failedStepKind":                 failedStep.Kind,
+			"failedStepInput":                compactStepInputForLLMContext(failedStep.Input),
+			"failedStepOutput":               compactStepOutputForLLMContext(failedStep.Output),
 		},
 	}
 	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
@@ -224,11 +227,18 @@ func (o *RuntimeOrchestrator) providerRetryAttemptCount(ctx context.Context, run
 	}
 	count := 0
 	for _, step := range steps {
-		if step != nil && boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) && providerRetryRootStepID(step) == rootStepID {
+		if isFailedProviderRetryAttempt(rootStepID, step) {
 			count++
 		}
 	}
 	return count
+}
+
+func isFailedProviderRetryAttempt(rootStepID common.StepID, step *runModel.Step) bool {
+	if step == nil || rootStepID == "" || !boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) || providerRetryRootStepID(step) != rootStepID {
+		return false
+	}
+	return step.State == common.StepStateFailed && isLLMProviderFailureStage(stringFromMap(step.Output, "stage"))
 }
 
 func providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr error) map[string]any {
@@ -236,6 +246,8 @@ func providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr erro
 	if input == nil {
 		input = map[string]any{}
 	}
+	delete(input, stepInputKeyRuntimeRepairFollowUp)
+	delete(input, stepInputKeyRuntimeRepairAttempt)
 	rootStepID := providerRetryRootStepID(failedStep)
 	input[stepInputKeyProviderRetryFollowUp] = true
 	input[stepInputKeyProviderRetryAttempt] = attempt
@@ -280,21 +292,7 @@ func isLLMProviderRuntimeFailure(run *runModel.Run, step *runModel.Step) bool {
 	if run == nil || step == nil || step.Kind != initialStepKind(run) {
 		return false
 	}
-	stage := stringFromMap(step.Output, "stage")
-	switch stage {
-	case "llm_provider_unavailable",
-		"llm_provider_client_unavailable",
-		"llm_provider_operation_unsupported",
-		"llm_provider_error",
-		"llm_provider_stream_error",
-		"llm_provider_request_failed",
-		"llm_schema_invalid",
-		"llm_decision_invalid",
-		"llm_failed":
-		return true
-	default:
-		return false
-	}
+	return isLLMProviderFailureStage(stringFromMap(step.Output, "stage"))
 }
 
 func (o *RuntimeOrchestrator) runtimeRepairAttemptCount(ctx context.Context, runID common.RunID) int {
@@ -307,11 +305,60 @@ func (o *RuntimeOrchestrator) runtimeRepairAttemptCount(ctx context.Context, run
 	}
 	count := 0
 	for _, step := range steps {
-		if step != nil && boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) {
+		if isRuntimeRepairBudgetStep(runID, step) {
 			count++
 		}
 	}
 	return count
+}
+
+func isRuntimeRepairBudgetStep(runID common.RunID, step *runModel.Step) bool {
+	if step == nil || step.RunID != runID || !boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) {
+		return false
+	}
+	if boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) {
+		return false
+	}
+	if isProviderFailureClass(stringFromMap(step.Input, failureOutputKeyClass)) ||
+		isProviderFailureClass(stringFromMap(step.Output, failureOutputKeyClass)) {
+		return false
+	}
+	return !isLLMProviderFailureStage(stringFromMap(step.Output, "stage"))
+}
+
+func isProviderFailureClass(class string) bool {
+	switch class {
+	case failureClassProviderUnavailable,
+		failureClassProviderSchemaDrift,
+		failureClassProviderTimeout,
+		failureClassContextTooLarge,
+		failureClassRateLimited,
+		failureClassAuthOrConfigError:
+		return true
+	default:
+		return false
+	}
+}
+
+func isLLMProviderFailureStage(stage string) bool {
+	switch stage {
+	case "llm_provider_unavailable",
+		"llm_provider_client_unavailable",
+		"llm_provider_operation_unsupported",
+		"llm_provider_timeout",
+		"llm_provider_request_too_large",
+		"llm_provider_rate_limited",
+		"llm_provider_auth_or_config_error",
+		"llm_provider_error",
+		"llm_provider_stream_error",
+		"llm_provider_request_failed",
+		"llm_schema_invalid",
+		"llm_decision_invalid",
+		"llm_failed":
+		return true
+	default:
+		return false
+	}
 }
 
 func runtimeRepairFollowUpStepID(runID common.RunID, failedStep *runModel.Step, attempt int) common.StepID {

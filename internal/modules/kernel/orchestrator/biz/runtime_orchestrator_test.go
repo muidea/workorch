@@ -4686,7 +4686,7 @@ func TestRuntimeOrchestrator_RetriesLLMProviderTimeoutBeforeFailingRun(t *testin
 		if attempts <= maxProviderRetryAttempts {
 			return map[string]any{
 				"status": "failed",
-				"stage":  "llm_provider_error",
+				"stage":  "llm_provider_timeout",
 				"error":  "invalid argument: openai llm provider error: context deadline exceeded",
 			}, fmt.Errorf("%w: openai llm provider error: context deadline exceeded", common.ErrInvalidArgument)
 		}
@@ -4765,7 +4765,7 @@ func TestRuntimeOrchestrator_BlocksOnDecisionAfterProviderTimeoutRetriesExhauste
 	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
 		return map[string]any{
 			"status": "failed",
-			"stage":  "llm_provider_error",
+			"stage":  "llm_provider_timeout",
 			"error":  "invalid argument: openai llm provider error: context deadline exceeded",
 		}, fmt.Errorf("%w: openai llm provider error: context deadline exceeded", common.ErrInvalidArgument)
 	}}
@@ -4820,8 +4820,199 @@ func TestRuntimeOrchestrator_BlocksOnDecisionAfterProviderTimeoutRetriesExhauste
 	if ticket.State != common.DecisionTicketStateOpen || ticket.Context["attempts"] != maxProviderRetryAttempts {
 		t.Fatalf("ticket = %+v, want provider retry exhaustion context", ticket)
 	}
-	if !strings.Contains(ticket.Question, "LLM provider") {
-		t.Fatalf("ticket question = %q, want provider recovery prompt", ticket.Question)
+	if ticket.Context[decisionContextKeyScope] != decisionContextScopeWorkorchRuntime ||
+		ticket.Context[decisionContextKeyDependency] != decisionContextDependencyLLMProvider ||
+		ticket.Context[decisionContextKeyRecoveryPolicy] != decisionContextRecoveryPolicyConfigOnly {
+		t.Fatalf("ticket context = %+v, want WorkOrch runtime provider recovery scope", ticket.Context)
+	}
+	if !strings.Contains(ticket.Question, "WorkOrch runtime LLM provider") || !strings.Contains(ticket.Question, "WorkOrch 系统配置") || !strings.Contains(ticket.Question, "API Key") {
+		t.Fatalf("ticket question = %q, want provider configuration recovery prompt", ticket.Question)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairAttemptCountIgnoresProviderInfrastructureFailures(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-runtime-repair-budget-provider-failures")
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+
+	seedSteps := []*runmodel.Step{
+		{
+			ID:    common.StepID(runID + "/provider-misrouted-repair"),
+			RunID: runID,
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				failureOutputKeyClass:             failureClassProviderTimeout,
+			},
+			Output: map[string]any{"status": "completed"},
+		},
+		{
+			ID:    common.StepID(runID + "/repair-provider-timeout"),
+			RunID: runID,
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				failureOutputKeyClass:             failureClassRuntime,
+			},
+			Output: map[string]any{
+				"stage":               "llm_provider_timeout",
+				failureOutputKeyClass: failureClassProviderTimeout,
+			},
+		},
+		{
+			ID:    common.StepID(runID + "/real-runtime-repair"),
+			RunID: runID,
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				failureOutputKeyClass:             failureClassRuntime,
+			},
+			Output: map[string]any{
+				"stage":               "llm_execution_graph_plan",
+				failureOutputKeyClass: failureClassRuntime,
+			},
+		},
+	}
+	for _, step := range seedSteps {
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+	}
+
+	if got := orch.runtimeRepairAttemptCount(ctx, runID); got != 1 {
+		t.Fatalf("runtimeRepairAttemptCount = %d, want only real runtime repair attempt", got)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeDispatchForProviderFailureUsesProviderRetry(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-resume-provider-retry")
+	failedStepID := common.StepID(runID + "/llm-provider-step")
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     common.WorkspaceID("ws-resume-provider-retry"),
+		DoDID:           common.DoDID("dod-resume-provider-retry"),
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}
+	failedStep := &runmodel.Step{
+		ID:    failedStepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{},
+		Output: map[string]any{
+			"stage":               "llm_provider_timeout",
+			failureOutputKeyClass: failureClassProviderTimeout,
+		},
+	}
+	if err := stepRepo.Create(ctx, failedStep); err != nil {
+		t.Fatalf("seed failed step: %v", err)
+	}
+	for attempt := 1; attempt <= maxProviderRetryAttempts; attempt++ {
+		if err := stepRepo.Create(ctx, &runmodel.Step{
+			ID:    providerRetryStepID(failedStepID, attempt),
+			RunID: runID,
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyProviderRetryFollowUp: true,
+				stepInputKeyProviderRetryAttempt:  attempt,
+				"failedStepId":                    string(failedStepID),
+			},
+			Output: map[string]any{
+				"stage":               "llm_provider_timeout",
+				failureOutputKeyClass: failureClassProviderTimeout,
+			},
+		}); err != nil {
+			t.Fatalf("seed provider retry %d: %v", attempt, err)
+		}
+	}
+
+	specs, err := orch.nextDispatchSpecsFromStep(ctx, run, failedStep)
+	if err != nil {
+		t.Fatalf("nextDispatchSpecsFromStep: %v", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("specs = %+v, want one provider retry spec", specs)
+	}
+	if specs[0].Input[stepInputKeyProviderRetryFollowUp] != true ||
+		specs[0].Input[stepInputKeyProviderRetryAttempt] != maxProviderRetryAttempts+1 ||
+		specs[0].Input[stepInputKeyRuntimeRepairFollowUp] == true {
+		t.Fatalf("spec input = %+v, want provider retry after recovery", specs[0].Input)
+	}
+}
+
+func TestRuntimeOrchestrator_ProviderRetryAttemptCountIgnoresSuccessfulProviderRetries(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-provider-retry-budget-successful-retry")
+	rootStepID := common.StepID(runID + "/llm-provider-root")
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    providerRetryStepID(rootStepID, 1),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyProviderRetryFollowUp: true,
+			stepInputKeyProviderRetryAttempt:  1,
+			"failedStepId":                    string(rootStepID),
+		},
+		Output: map[string]any{"stage": "llm_execution_graph_plan"},
+	}); err != nil {
+		t.Fatalf("seed successful retry: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    providerRetryStepID(rootStepID, 2),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyProviderRetryFollowUp: true,
+			stepInputKeyProviderRetryAttempt:  2,
+			"failedStepId":                    string(rootStepID),
+		},
+		Output: map[string]any{
+			"stage":               "llm_provider_timeout",
+			failureOutputKeyClass: failureClassProviderTimeout,
+		},
+	}); err != nil {
+		t.Fatalf("seed failed retry: %v", err)
+	}
+
+	if got := orch.providerRetryAttemptCount(ctx, runID, rootStepID); got != 1 {
+		t.Fatalf("providerRetryAttemptCount = %d, want only failed provider retry attempts", got)
+	}
+}
+
+func TestRuntimeOrchestrator_ProviderRetryInputDoesNotCarryRuntimeRepairMarkers(t *testing.T) {
+	rootStepID := common.StepID("run-provider-retry-input/root")
+	input := providerRetryStepInput(&runmodel.Step{
+		ID:    rootStepID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  3,
+			"previousStepId":                  "previous",
+		},
+		Output: map[string]any{
+			"stage":               "llm_provider_timeout",
+			failureOutputKeyClass: failureClassProviderTimeout,
+		},
+	}, 1, errors.New("provider timeout"))
+
+	if input[stepInputKeyProviderRetryFollowUp] != true ||
+		input[stepInputKeyRuntimeRepairFollowUp] != nil ||
+		input[stepInputKeyRuntimeRepairAttempt] != nil {
+		t.Fatalf("provider retry input = %+v, want provider markers without runtime repair markers", input)
 	}
 }
 

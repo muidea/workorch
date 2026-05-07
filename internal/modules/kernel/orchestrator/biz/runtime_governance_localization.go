@@ -60,9 +60,9 @@ func localizedProviderRetryExhaustionReason(language string, attempts int, err e
 
 func localizedProviderRetryExhaustionQuestion(language string) string {
 	if prefersChinese(language) {
-		return "LLM provider 多次重试仍失败。请补充恢复指导、稍后继续、选择重新规划，或拒绝当前路径。"
+		return "WorkOrch runtime LLM provider 多次重试仍失败。请先在 WorkOrch 系统配置中修复或切换 runtime LLM provider，或稍后重试；不要在工单答案中粘贴 API Key。配置修复完成后再回复继续、选择重新规划，或拒绝当前路径。"
 	}
-	return "LLM provider retries were exhausted. Provide recovery guidance, continue later, choose replan, or reject the current path."
+	return "WorkOrch runtime LLM provider retries were exhausted. Fix or switch the runtime LLM provider in WorkOrch system configuration first, or retry later; do not paste API keys into the ticket answer. After configuration is fixed, continue, choose replan, or reject the current path."
 }
 
 func localizedPatchApprovalReason(language string) string {

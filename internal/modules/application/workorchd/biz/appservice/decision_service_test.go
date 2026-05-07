@@ -284,6 +284,120 @@ func TestResolveDecisionWithBackendNormalizesSemanticIntent(t *testing.T) {
 	}
 }
 
+func TestResolveDecisionWithSessionRejectsInlineProviderConfigForProviderRecoveryTicket(t *testing.T) {
+	session, tickets, resolutions := newCountingDecisionRuntimeSession(t)
+	ctx := context.Background()
+	ticketID := common.TicketID("ticket-provider-recovery")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: common.WorkspaceID("ws-provider-recovery"),
+		RunID:       common.RunID("run-provider-recovery"),
+		StepID:      common.StepID("run-provider-recovery/step-1"),
+		Reason:      "LLM provider retry attempts exhausted after 2 attempts",
+		Question:    "Fix or switch the LLM provider in system configuration first.",
+		Context: map[string]any{
+			"failureClass":                   "provider_timeout",
+			decisionContextKeyScope:          decisionContextScopeWorkorchRuntime,
+			decisionContextKeyDependency:     decisionContextDependencyLLMProvider,
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyConfigOnly,
+		},
+		State: common.DecisionTicketStateOpen,
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	_, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+		ResolutionPayload: map[string]any{
+			"answer": "provider = compatible\nbaseURL = https://api.example.com\napiKey = sk-secret\nmodel = model-a",
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("ResolveDecisionWithSession err = %v, want invalid argument", err)
+	}
+	item, getErr := tickets.Get(ctx, ticketID)
+	if getErr != nil {
+		t.Fatalf("get ticket: %v", getErr)
+	}
+	if item.State != common.DecisionTicketStateOpen {
+		t.Fatalf("ticket state = %s, want open", item.State)
+	}
+	if _, getErr = resolutions.GetByTicketID(ctx, ticketID); !errors.Is(getErr, common.ErrNotFound) {
+		t.Fatalf("resolution err = %v, want not found", getErr)
+	}
+}
+
+func TestResolveDecisionWithSessionAllowsProviderRecoveryConfirmationWithoutSecrets(t *testing.T) {
+	session, tickets, _ := newCountingDecisionRuntimeSession(t)
+	ctx := context.Background()
+	ticketID := common.TicketID("ticket-provider-recovery-confirmed")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: common.WorkspaceID("ws-provider-recovery-confirmed"),
+		RunID:       common.RunID("run-provider-recovery-confirmed"),
+		StepID:      common.StepID("run-provider-recovery-confirmed/step-1"),
+		Reason:      "LLM provider retry attempts exhausted after 2 attempts",
+		Question:    "Fix or switch the LLM provider in system configuration first.",
+		Context: map[string]any{
+			"failureClass":                   "provider_timeout",
+			decisionContextKeyScope:          decisionContextScopeWorkorchRuntime,
+			decisionContextKeyDependency:     decisionContextDependencyLLMProvider,
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyConfigOnly,
+		},
+		State: common.DecisionTicketStateOpen,
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+		ResolutionPayload: map[string]any{
+			"answer":   "已在系统配置中切换默认 LLM provider，继续执行",
+			"operator": "console",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveDecisionWithSession: %v", err)
+	}
+	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
+		t.Fatalf("decision = %+v, want resolved provider recovery confirmation", item)
+	}
+}
+
+func TestResolveDecisionWithSessionAllowsTargetWorkspaceExternalDependencyConfig(t *testing.T) {
+	session, tickets, _ := newCountingDecisionRuntimeSession(t)
+	ctx := context.Background()
+	ticketID := common.TicketID("ticket-target-workspace-test-config")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: common.WorkspaceID("ws-target-workspace-test-config"),
+		RunID:       common.RunID("run-target-workspace-test-config"),
+		StepID:      common.StepID("run-target-workspace-test-config/step-1"),
+		Reason:      "integration test configuration is missing",
+		Question:    "Provide the target workspace external dependency test configuration.",
+		Context: map[string]any{
+			decisionContextKeyScope: decisionContextScopeTargetWorkspace,
+			"dependencyKind":        "external_service",
+		},
+		State: common.DecisionTicketStateOpen,
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+		ResolutionPayload: map[string]any{
+			"answer": "provider = compatible\nbaseURL = https://api.example.com\napiKey = sk-secret\nmodel = model-a",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveDecisionWithSession: %v", err)
+	}
+	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
+		t.Fatalf("decision = %+v, want target workspace config accepted", item)
+	}
+}
+
 func TestResolveDecisionWithSessionReusesReturnedEntitiesForResponse(t *testing.T) {
 	session, tickets, resolutions := newCountingDecisionRuntimeSession(t)
 	ctx := context.Background()
