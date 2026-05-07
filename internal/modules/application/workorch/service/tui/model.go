@@ -269,21 +269,33 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setLastError(msg.Error)
 			return m, nil
 		}
+		if msg.Decision != nil {
+			if msg.Decision.RunID != "" {
+				m.activeRunID = string(msg.Decision.RunID)
+			}
+			m.markDecisionResolved(msg.Decision.ID)
+		}
 		m.blockingDecision = nil
 		m.clearInput()
 		m.progress = progressRunning
 		m.progressText = "Decision resolved; resuming run"
-		return m, nil
+		return m, m.refreshActiveWorkspaceState()
 	case ApprovalResolvedMsg:
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
 			return m, nil
 		}
+		if msg.Approval != nil {
+			if msg.Approval.RunID != "" {
+				m.activeRunID = string(msg.Approval.RunID)
+			}
+			m.markApprovalResolved(msg.Approval.ID)
+		}
 		m.blockingApproval = nil
 		m.clearInput()
 		m.progress = progressRunning
 		m.progressText = "Approval resolved; resuming run"
-		return m, nil
+		return m, m.refreshActiveWorkspaceState()
 	case ErrorMsg:
 		m.setLastError(msg.Error)
 		return m, nil
@@ -1072,11 +1084,13 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.progress = progressRunning
 		m.progressText = "Decision resolved; resuming run"
 		m.markDecisionResolved(common.TicketID(firstPayloadString(evt.Payload, "ticketId", "ID", "id", events.PayloadKeyBlockingTicketID)))
+		return m.refreshActiveWorkspaceState()
 	case backend.EventApprovalResolved:
 		m.blockingApproval = nil
 		m.progress = progressRunning
 		m.progressText = "Approval resolved; resuming run"
 		m.markApprovalResolved(common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ID", "id", events.PayloadKeyBlockingApprovalID)))
+		return m.refreshActiveWorkspaceState()
 	case backend.EventGovernanceResolved:
 		m.progressText = governanceProgressText("resolved", evt.Payload)
 	case backend.EventGovernanceEscalated:
@@ -1128,6 +1142,13 @@ func (m *AppModel) requestWorkspaceListRefresh() tea.Cmd {
 	}
 	m.workspaceListRefreshInFlight = true
 	return FetchAll(m.be)
+}
+
+func (m *AppModel) refreshActiveWorkspaceState() tea.Cmd {
+	return tea.Batch(
+		FetchWorkspaceContext(m.be, m.activeWorkspaceID),
+		m.requestWorkspaceListRefresh(),
+	)
 }
 
 func (m *AppModel) applyRunState(state common.RunState, payload map[string]any) {

@@ -1003,6 +1003,64 @@ func TestModelConversationRendersMultipleSubmissions(t *testing.T) {
 	}
 }
 
+func TestModelDecisionResolvedRefreshesWorkspaceState(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.decisions = []backend.DecisionInfo{{ID: "ticket-1", WorkspaceID: "ws-1", RunID: "run-1", State: "open"}}
+	m.blockingDecision = &m.decisions[0]
+	m.input = "补充上下文"
+	m.inputCursor = len([]rune(m.input))
+
+	next, cmd := m.Update(DecisionResolvedMsg{Decision: &backend.DecisionInfo{
+		ID:          "ticket-1",
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		State:       "resolved",
+	}})
+	m = asModel(next)
+
+	if cmd == nil || !m.workspaceListRefreshInFlight {
+		t.Fatalf("expected workspace refresh after decision resolve: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
+	}
+	if m.blockingDecision != nil || m.input != "" || m.activeRunID != "run-1" {
+		t.Fatalf("state not cleared/refreshed: blocker=%+v input=%q activeRun=%q", m.blockingDecision, m.input, m.activeRunID)
+	}
+	if m.decisions[0].State != "resolved" {
+		t.Fatalf("decision state = %q, want resolved", m.decisions[0].State)
+	}
+	if _, ok := cmd().(tea.BatchMsg); !ok {
+		t.Fatalf("refresh command should batch workspace context and list refresh")
+	}
+}
+
+func TestModelApprovalResolvedRefreshesWorkspaceState(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.approvals = []backend.ApprovalInfo{{ID: "approval-1", WorkspaceID: "ws-1", RunID: "run-1", State: "pending"}}
+	m.blockingApproval = &m.approvals[0]
+	m.input = "同意"
+	m.inputCursor = len([]rune(m.input))
+
+	next, cmd := m.Update(ApprovalResolvedMsg{Approval: &backend.ApprovalInfo{
+		ID:          "approval-1",
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		State:       "approved",
+	}})
+	m = asModel(next)
+
+	if cmd == nil || !m.workspaceListRefreshInFlight {
+		t.Fatalf("expected workspace refresh after approval resolve: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
+	}
+	if m.blockingApproval != nil || m.input != "" || m.activeRunID != "run-1" {
+		t.Fatalf("state not cleared/refreshed: blocker=%+v input=%q activeRun=%q", m.blockingApproval, m.input, m.activeRunID)
+	}
+	if m.approvals[0].State != "resolved" {
+		t.Fatalf("approval state = %q, want resolved", m.approvals[0].State)
+	}
+	if _, ok := cmd().(tea.BatchMsg); !ok {
+		t.Fatalf("refresh command should batch workspace context and list refresh")
+	}
+}
+
 func TestModelApprovalListClearsResolvedBlockingApproval(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.blockingApproval = &backend.ApprovalInfo{
@@ -1716,6 +1774,32 @@ func TestModelNonActiveWorkspaceStateEventOnlyUpdatesMonitor(t *testing.T) {
 	}
 	if m.workspaces[1].State != "running" || m.progressText != "active progress" {
 		t.Fatalf("non-active state update leaked into active view: ws=%+v progress=%q", m.workspaces[1], m.progressText)
+	}
+}
+
+func TestModelGovernanceResolvedEventRefreshesWorkspaceState(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateBlocked, ActiveRunID: "run-1"},
+	}})
+	m = asModel(next)
+	m.workspaceListRefreshInFlight = false
+	m.decisions = []backend.DecisionInfo{{ID: "ticket-1", WorkspaceID: "ws-a", RunID: "run-1", State: "open"}}
+	m.blockingDecision = &m.decisions[0]
+	m.activeRunID = "run-1"
+
+	cmd := m.applyBackendEvent(backend.Event{
+		Type:        backend.EventDecisionResolved,
+		WorkspaceID: "ws-a",
+		RunID:       "run-1",
+		Payload:     map[string]any{"ticketId": "ticket-1"},
+	})
+
+	if cmd == nil || !m.workspaceListRefreshInFlight {
+		t.Fatalf("resolved event should refresh workspace state: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
+	}
+	if m.blockingDecision != nil || m.decisions[0].State != "resolved" || m.progress != progressRunning {
+		t.Fatalf("resolved event not applied: blocker=%+v decision=%+v progress=%s", m.blockingDecision, m.decisions[0], m.progress)
 	}
 }
 
