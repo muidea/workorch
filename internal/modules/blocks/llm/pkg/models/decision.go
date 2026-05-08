@@ -28,6 +28,8 @@ type ProviderContextBudget struct {
 	Truncated             bool                   `json:"truncated"`
 	Rules                 []string               `json:"rules,omitempty"`
 	SourceRefs            []string               `json:"sourceRefs,omitempty"`
+	TracePolicy           string                 `json:"tracePolicy,omitempty"`
+	PromptCaptured        bool                   `json:"promptCaptured"`
 	Estimator             string                 `json:"estimator,omitempty"`
 	Profile               ProviderContextProfile `json:"profile,omitempty"`
 }

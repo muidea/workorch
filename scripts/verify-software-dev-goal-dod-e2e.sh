@@ -425,6 +425,21 @@ def response_for(run_id, step_id):
                     ]
                 }
             }
+        if "zz-llm-repair-" in step_id:
+            return {
+                "completionState": "completed",
+                "thoughtSummary": "Repair still reports weak verification as if it were enough.",
+                "dodAssessment": {
+                    "satisfied": True,
+                    "summary": "Weak evidence should still be rejected by the platform.",
+                    "goalOutcome": "No new implementation evidence.",
+                    "implementationSummary": "No files were changed during repair.",
+                    "verificationSummary": "go test ./... passed with [no test files].",
+                    "items": [
+                        {"item": "tests pass", "state": "satisfied", "evidenceRefs": [step_id]}
+                    ]
+                }
+            }
         return {"completionState": "continue", "thoughtSummary": "Continue execution."}
     return {"completionState": "continue", "thoughtSummary": "Continue execution."}
 
@@ -785,31 +800,42 @@ if errors:
     raise SystemExit(1)
 PY
 
-# Scenario-4: weak verification evidence must not satisfy DoD.
+# Scenario-4: weak verification evidence must not satisfy DoD and must enter repair/escalation.
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/execution-activations" \
   -H 'Content-Type: application/json' \
   -d '{"goalId":"'"$scenario3_goal_added_id"'","doDId":"'"$scenario3_dod_added_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' >"$TMP_DIR/scenario4-activation.json"
 scenario4_run_id="$(json_path "$TMP_DIR/scenario4-activation.json" "activation.run.id")"
-wait_run_state "$scenario4_run_id" "failed" "$TMP_DIR/scenario4-failed-status.json"
+wait_run_state "$scenario4_run_id" "blocked_on_decision" "$TMP_DIR/scenario4-blocked-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario4_run_id/snapshot" >"$TMP_DIR/scenario4-snapshot.json"
 
-python3 - "$TMP_DIR/scenario4-snapshot.json" <<'PY'
+python3 - "$TMP_DIR/scenario4-snapshot.json" "$TMP_DIR/scenario4-blocked-status.json" <<'PY'
 import json
 import sys
 
 snapshot = json.load(open(sys.argv[1], encoding="utf-8")).get("snapshot") or {}
+status = json.load(open(sys.argv[2], encoding="utf-8")).get("status") or {}
 errors = []
 run = snapshot.get("run") or {}
-if run.get("state") != "failed":
-    errors.append(f"run.state={run.get('state')!r}, want failed")
-failure = str(run.get("failureReason") or "")
-if "weak verification evidence" not in failure:
-    errors.append(f"failureReason={failure!r}, want weak verification evidence gate")
+if run.get("state") != "blocked_on_decision":
+    errors.append(f"run.state={run.get('state')!r}, want blocked_on_decision")
+if not status.get("blockingTicketId"):
+    errors.append(f"status.blockingTicketId={status.get('blockingTicketId')!r}, want repair escalation ticket")
+repair_loop = (snapshot.get("taskProgress") or {}).get("repairLoop") or {}
+if repair_loop.get("state") != "escalated_decision":
+    errors.append(f"repairLoop.state={repair_loop.get('state')!r}, want escalated_decision")
+if int(repair_loop.get("attemptCount") or 0) < 3:
+    errors.append(f"repairLoop.attemptCount={repair_loop.get('attemptCount')!r}, want >=3")
 results = snapshot.get("results") or []
-if not any(item.get("state") == "rejected" for item in results):
+rejected = [item for item in results if item.get("state") == "rejected"]
+if not rejected:
     errors.append(f"results={results!r}, want rejected result")
+elif not any("weak" in str((item.get("doDAssessment") or {}).get("summary") or "").lower() for item in rejected):
+    errors.append(f"rejected results={rejected!r}, want weak verification rejection summary")
 if any(((item.get("doDAssessment") or {}).get("satisfied") is True and item.get("state") == "accepted") for item in results):
     errors.append("weak satisfied DoD produced accepted result")
+steps = snapshot.get("steps") or []
+if not any("zz-llm-repair-" in str(item.get("id") or "") for item in steps):
+    errors.append("missing runtime repair follow-up step for weak verification evidence")
 if errors:
     for item in errors:
         print(item, file=sys.stderr)

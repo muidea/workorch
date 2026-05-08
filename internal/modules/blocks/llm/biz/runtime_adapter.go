@@ -676,6 +676,8 @@ func providerContextBudgetOutput(budget *llmmodels.ProviderContextBudget, provid
 		"truncated":             budget.Truncated,
 		"rules":                 append([]string(nil), budget.Rules...),
 		"sourceRefs":            append([]string(nil), budget.SourceRefs...),
+		"tracePolicy":           budget.TracePolicy,
+		"promptCaptured":        budget.PromptCaptured,
 		"estimator":             budget.Estimator,
 		"profile": map[string]any{
 			"contextWindowTokens":    budget.Profile.ContextWindowTokens,

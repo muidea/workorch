@@ -255,6 +255,8 @@ type WorkspaceSnapshotInfo struct {
 	Outcome            WorkspaceOutcomeInfo
 	TaskProgress       TaskProgressInfo
 	TaskDecompositions []TaskDecompositionInfo
+	Goals              []GoalInfo
+	DoDs               []DoDInfo
 	Runs               []RunInfo
 	Results            []ResultInfo
 	Artifacts          []ArtifactInfo

@@ -926,6 +926,8 @@ export type WorkspaceSnapshot = {
   taskProgress: TaskProgress;
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];
+  goals?: Goal[];
+  dods?: DoD[];
   runs?: Run[];
   results?: Result[];
   artifacts?: Artifact[];

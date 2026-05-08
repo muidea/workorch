@@ -490,6 +490,8 @@ type LLMContextBudgetTrace struct {
 	Truncated             bool     `json:"truncated"`
 	Rules                 []string `json:"rules,omitempty"`
 	SourceRefs            []string `json:"sourceRefs,omitempty"`
+	TracePolicy           string   `json:"tracePolicy,omitempty"`
+	PromptCaptured        bool     `json:"promptCaptured"`
 	Estimator             string   `json:"estimator,omitempty"`
 }
 
@@ -720,6 +722,8 @@ type WorkspaceSnapshot struct {
 	TaskDecompositions []TaskDecomposition `json:"taskDecompositions,omitempty"`
 	ExecutionSections  []ExecutionSection  `json:"executionSections,omitempty"`
 	MemoryRecallTraces []MemoryRecallTrace `json:"memoryRecallTraces,omitempty"`
+	Goals              []Goal              `json:"goals,omitempty"`
+	DoDs               []DoD               `json:"dods,omitempty"`
 	Runs               []Run               `json:"runs,omitempty"`
 	Results            []Result            `json:"results,omitempty"`
 	Artifacts          []Artifact          `json:"artifacts,omitempty"`

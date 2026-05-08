@@ -1106,6 +1106,8 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 					"truncated":             true,
 					"rules":                 []string{"compact provider input", "apply priority compaction (P0/P1/P2)"},
 					"sourceRefs":            []string{"input.executionContext.goal", "input.graphEvidence"},
+					"tracePolicy":           "summary_refs_only",
+					"promptCaptured":        false,
 					"estimator":             "bytes_ratio",
 				},
 			},
@@ -1128,7 +1130,9 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 		traces[0].Model != "gpt-5" ||
 		!traces[0].Truncated ||
 		traces[0].ShrinkLevel != 3 ||
-		len(traces[0].SourceRefs) != 2 {
+		len(traces[0].SourceRefs) != 2 ||
+		traces[0].TracePolicy != "summary_refs_only" ||
+		traces[0].PromptCaptured {
 		t.Fatalf("trace = %+v, want projected context budget fields", traces[0])
 	}
 	observability := mapRunObservability(RunSnapshot{
@@ -2560,6 +2564,54 @@ func TestReadWorkspaceSnapshotWithRunSnapshotAvoidsProjectionRunStepRead(t *test
 	}
 	if snapshot.TaskProgress.Summary != "cached activation progress" {
 		t.Fatalf("task progress summary = %q, want cached progress", snapshot.TaskProgress.Summary)
+	}
+}
+
+func TestReadWorkspaceSnapshotIncludesWorkspaceGoalsAndDoDs(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-snapshot-goal-dod")
+	goalID := common.GoalID("goal-snapshot")
+	dodID := common.DoDID("dod-snapshot")
+	workspaceRepo := memory.NewWorkspaceRepository()
+	goalRepo := memory.NewGoalRepository()
+	dodRepo := memory.NewDoDRepository()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "snapshot", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "goal text"}); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+	if err := dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"dod item"}, State: common.DoDStateReady}); err != nil {
+		t.Fatalf("create dod: %v", err)
+	}
+	deps := readModelDependencies{
+		workspaces:      workspaceRepo,
+		goals:           goalRepo,
+		dods:            dodRepo,
+		runs:            memory.NewRunRepository(),
+		steps:           memory.NewStepRepository(),
+		results:         memory.NewResultRepository(),
+		artifacts:       memory.NewArtifactRepository(),
+		eventRecords:    memory.NewEventRecordRepository(),
+		toolCalls:       memory.NewToolCallRepository(),
+		mcpCapabilities: memory.NewMCPCapabilityRepository(),
+		patches:         memory.NewPatchRepository(),
+		validations:     memory.NewValidationResultRepository(),
+		checkpoints:     memory.NewRuntimeCheckpointRepository(),
+		tickets:         memory.NewDecisionTicketRepository(),
+		resolutions:     memory.NewDecisionResolutionRepository(),
+		approvals:       memory.NewApprovalRepository(),
+	}
+
+	snapshot, err := readWorkspaceSnapshot(ctx, deps, workspaceID, nil)
+	if err != nil {
+		t.Fatalf("readWorkspaceSnapshot: %v", err)
+	}
+	if len(snapshot.Goals) != 1 || snapshot.Goals[0].ID != string(goalID) || snapshot.Goals[0].Text != "goal text" {
+		t.Fatalf("goals = %+v, want workspace goal", snapshot.Goals)
+	}
+	if len(snapshot.DoDs) != 1 || snapshot.DoDs[0].ID != string(dodID) || !reflect.DeepEqual(snapshot.DoDs[0].Items, []string{"dod item"}) {
+		t.Fatalf("dods = %+v, want workspace DoD", snapshot.DoDs)
 	}
 }
 

@@ -86,12 +86,12 @@ func shouldCloseCompletionGateFailureWithoutRepair(summary string, output map[st
 	}
 	assessment := doDAssessmentFromOutput(output)
 	if assessment == nil {
-		return false
-	}
-	if satisfied, _ := assessment["satisfied"].(bool); !satisfied {
 		return true
 	}
-	return containsWeakSatisfiedVerificationEvidence(assessment)
+	if strings.TrimSpace(stringFromMap(assessment, "summary")) == "" {
+		return true
+	}
+	return false
 }
 
 func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
@@ -184,9 +184,6 @@ func (o *RuntimeOrchestrator) shouldAttemptRuntimeRepair(ctx context.Context, ru
 		return false
 	}
 	if o.runtimeRepairAttemptCount(ctx, run.ID) >= maxRuntimeRepairAttempts {
-		return false
-	}
-	if boolValue(failedStep.Input[stepInputKeyRuntimeRepairFollowUp]) && failedStep.Kind == initialStepKind(run) {
 		return false
 	}
 	return !isLLMProviderRuntimeFailure(run, failedStep)

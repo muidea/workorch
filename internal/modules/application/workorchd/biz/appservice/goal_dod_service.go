@@ -333,6 +333,17 @@ func mapGoal(item *workspacemodel.Goal) Goal {
 	}
 }
 
+func mapGoals(items []*workspacemodel.Goal) []Goal {
+	ret := make([]Goal, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		ret = append(ret, mapGoal(item))
+	}
+	return ret
+}
+
 func mapDoD(item *workspacemodel.DoD) DoD {
 	if item == nil {
 		return DoD{}
@@ -343,6 +354,17 @@ func mapDoD(item *workspacemodel.DoD) DoD {
 		Items:       append([]string(nil), item.Items...),
 		State:       string(item.State),
 	}
+}
+
+func mapDoDs(items []*workspacemodel.DoD) []DoD {
+	ret := make([]DoD, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		ret = append(ret, mapDoD(item))
+	}
+	return ret
 }
 
 func normalizeDoDItems(items []string) []string {

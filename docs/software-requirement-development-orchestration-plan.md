@@ -174,6 +174,8 @@
 | RGD-08 | Decision resolution 和 ToolCall 中存在敏感信息持久化风险 | 目标项目测试 provider/API Key 信息会进入 resolution、step input、tool_call 和后续 LLM 上下文 |
 | RGD-09 | 目标项目外部依赖配置与 WorkOrch 自身 provider 配置边界需要更强约束 | 用户补充的 DeepSeek 信息是目标项目测试输入，不应被解释为替换 WorkOrch runtime LLM provider |
 | RGD-10 | 测试通过但无有效断言仍可能被弱化处理 | `go test ./...` 输出 `[no test files]` 不能证明 DoD 中流式、Token、异常透传、并发等能力满足 |
+| RGD-11 | 软件开发执行策略可吸收成熟 Code Agent 行为 | `ai-proxy/interactions` 显示 Codex 在 PRD 驱动新项目、路径覆盖、根因分析、测试补齐和交付摘要方面有可复用策略，但不能照搬完整历史 prompt 堆叠方式 |
+| RGD-12 | LLM prompt 可追溯应保持摘要化和脱敏 | Codex 请求会把完整多轮上下文、工具调用和工具输出堆入请求体，WorkOrch 应继续使用 contextBudget/sourceRefs，默认不持久化完整明文 prompt |
 
 ## 任务清单
 
@@ -242,8 +244,10 @@
 | SRD-30 | Ticket 语义边界 | Governance/通用 | P0 | verified | 目标项目测试 provider 信息可能被误读为 WorkOrch 自身 LLM provider 配置 | Ticket context 强制区分 `workorch_runtime`、`target_workspace`、`external_dependency`；校验和 prompt 按 scope 处理 | target workspace 外部依赖配置不会触发 WorkOrch runtime provider 替换语义，也不会要求用户配置 WorkOrch 自身 provider |
 | SRD-31 | 测试质量门控 | 后端/Soul/e2e | P0 | verified | `go test ./...` 通过但无测试文件，不能证明复杂 DoD 功能满足 | `software-dev` Soul 要求根据 DoD 生成有效验收测试；平台 resultQuality 识别“无有效断言/无测试文件”的弱证据 | 复杂软件开发 e2e 中必须包含功能测试、stream 测试、usage/异常/并发验证或明确跳过原因 |
 | SRD-32 | 最终交付物质量 | Artifact/通用 | P0 | verified | DoD 未满足时不应输出“已完成”或弱交付 | DoD 未满足时生成失败 Result，列出已完成项、未满足项、缺失证据、下一步计划和需要用户补充的信息 | 未满足 DoD 的 run 以明确失败交付结束；满足 DoD 的 run 输出完整 Result/Artifact/DoD evidence |
-| SRD-33 | 复杂软件开发 e2e 覆盖 | e2e | P0 | verified | 现有 e2e 未覆盖空 workspace、复杂 DoD、外部测试配置、secret 脱敏和 repair 恢复组合场景 | 新增 deployed e2e：创建空 `software-dev` workspace，提交复杂 Goal/DoD，补充目标测试 provider 信息，验证执行/脱敏/恢复/交付 | e2e 全量通过，并能防止 `ws-e1e310fd02e4375e` 同类回归 |
+| SRD-33 | 复杂软件开发 e2e 覆盖 | e2e | P0 | verified | 现有 e2e 未覆盖空 workspace、复杂 DoD、外部测试配置、secret 脱敏和 repair 恢复组合场景 | 新增 deployed e2e：创建空 `software-dev` workspace，提交复杂 Goal/DoD，补充目标测试 provider 信息，验证执行/脱敏/恢复/交付；弱验证证据必须先记录 rejected Result，再进入 repair，repair 耗尽后升级 Decision | e2e 全量通过，并能防止 `ws-e1e310fd02e4375e` 同类回归 |
 | SRD-34 | 当前未完成草稿清理 | 工程卫生 | P0 | verified | 工作区存在未完成 untracked redaction 草稿，可能影响测试和提交 | 开发前先删除草稿或补全为正式通用脱敏实现；不得留下半成品文件 | `git status` 无未确认草稿；`go test ./...` 不受半成品影响 |
+| SRD-35 | 吸收 Code Agent 工程执行策略 | 模板/Soul | P0 | verified | `ai-proxy/interactions` 显示 PRD 驱动新项目、DoD-to-test、路径覆盖、根因分析和交付摘要对复杂开发任务有效 | 增强 `software-dev` 默认 DoD 和 planning/execution/validation/artifact Soul：要求提取 PRD/需求文档、生成 DoD-to-test 映射、覆盖主路径/错误路径/关键分支、DoD 不满足时补实现/补测试、交付摘要包含变更文件和行为变化 | 内置默认值测试覆盖关键语义，重启后内置 `software-dev` template/Soul 可确定性刷新 |
+| SRD-36 | 摘要式 LLM context trace | LLM/通用 | P0 | verified | 需要追溯 LLM 请求上下文组织情况，但不能默认保存完整明文 prompt | 在 contextBudget trace 中显式输出 `tracePolicy=summary_refs_only` 和 `promptCaptured=false`，继续只记录预算、裁剪规则和 sourceRefs | Run Snapshot / Observability 可看到预算、sourceRefs 和 trace policy；无完整 prompt 明文落入默认 read model |
 
 ## 建议实施顺序
 
@@ -365,6 +369,8 @@
 | 2026-05-08 | 收口 SRD-28/SRD-29：补充通用脱敏工具，Decision/Ticket/Approval 持久化和事件链路统一脱敏；target workspace 外部依赖配置仍允许提交，但 API Key/token/password 不再明文进入 resolution payload。 |
 | 2026-05-08 | 收口 SRD-31/SRD-32：`software-dev` Validation Soul 和 LLM runtime 指令明确 no test files/no assertions 为弱证据；平台 DoD completion gate 拒绝用弱测试证据标记 satisfied；DoD 未满足时记录 `rejected` Result，避免输出“已完成”弱交付。 |
 | 2026-05-08 | 收口 SRD-33：扩展 `verify-software-dev-goal-dod-e2e.sh`，新增空 `software-dev` Workspace、累计 Goal/DoD、目标项目外部依赖 secret 脱敏、弱验证证据 rejected Result 场景；修复 e2e 状态等待只匹配 `status.state`。 |
-| 2026-05-08 | 回归发现并修复 SRD-32 补漏：已部署 8080 服务在弱测试证据场景中会进入 runtime repair 并丢失 `rejected Result`；当前代码已改为弱证据 DoD gate 失败直接记录 rejected Result 并失败收口，不再进入 repair。 |
+| 2026-05-08 | 回归发现并修复 SRD-32 补漏：DoD assessment 不完整（缺失 `dodAssessment` 或 `summary`）仍作为 LLM 输出契约错误直接失败；完整 DoD assessment 但未满足或弱证据时记录 rejected Result，并进入通用 runtime repair 继续补实现/补测试，repair 耗尽后升级 Decision。 |
 | 2026-05-08 | 验证结果：`WORKORCH_SRD_VERIFY_DEPLOYED_E2E=1 ./scripts/verify-software-requirement-development-orchestration.sh` 已在当前代码临时服务 `http://127.0.0.1:18089` 全量通过（SRD-10~34，含 SRD-33）；`go test ./... -count=1` 全量通过。 |
 | 2026-05-08 | 重新部署后回归：`WORKORCH_BASE_URL=http://127.0.0.1:8080 WORKORCH_SRD_VERIFY_DEPLOYED_E2E=1 ./scripts/verify-software-requirement-development-orchestration.sh` 通过；`WORKORCH_BASE_URL=http://127.0.0.1:8080 make verify-e2e-full` 通过，覆盖模板/Soul、LLM、MCP、SkillHub、自动治理、software-dev、SRD-10~34、文件补丁、Web Search、天气治理、TUI 与长输出。 |
+| 2026-05-08 | 基于 `/home/rangh/aispace/ai-proxy/interactions` 的 Codex 请求核对，收口 SRD-35/SRD-36：吸收 PRD 驱动新项目、DoD-to-test、路径覆盖、根因分析和交付摘要策略；LLM context trace 明确为 `summary_refs_only` 且 `promptCaptured=false`，避免默认保存完整 prompt 明文。 |
+| 2026-05-08 | 回归同步 SRD-33：`verify-software-dev-goal-dod-e2e.sh` 的弱验证证据场景改为验证 rejected Result + runtime repair + repair 耗尽 Decision 升级，避免继续使用“直接失败”旧预期。 |

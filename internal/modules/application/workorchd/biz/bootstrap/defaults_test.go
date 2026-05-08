@@ -25,8 +25,10 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	}
 
 	assertContainsAnyDoDItem(t, item.DoDItems, "Goal")
+	assertContainsAnyDoDItem(t, item.DoDItems, "PRD")
 	assertContainsAnyDoDItem(t, item.DoDItems, "unified_diff")
 	assertContainsAnyDoDItem(t, item.DoDItems, "build/test")
+	assertContainsAnyDoDItem(t, item.DoDItems, "主路径")
 	assertContainsAnyDoDItem(t, item.DoDItems, "lint/静态检查")
 	assertContainsAnyDoDItem(t, item.DoDItems, "残余风险")
 	assertContainsAnyDoDItem(t, item.DoDItems, "evidenceRefs")
@@ -43,8 +45,11 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 		t.Fatal("soul-software-dev-planning missing")
 	}
 	assertSoulContains(t, planning.SoulMD, "技术栈")
+	assertSoulContains(t, planning.SoulMD, "PRD")
 	assertSoulContains(t, planning.SoulMD, "受影响文件")
 	assertSoulContains(t, planning.SoulMD, "DoD 条目")
+	assertSoulContains(t, planning.SoulMD, "DoD-to-test")
+	assertSoulContains(t, planning.SoulMD, "主路径")
 	assertSoulContains(t, planning.SoulMD, "workspace 文件清单为空不等于缺少源码")
 	assertSoulContains(t, planning.SoulMD, "新项目初始化场景")
 
@@ -56,6 +61,9 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, execution.SoulMD, "workspace 为空且 Goal/DoD 未要求既有源码")
 	assertSoulContains(t, execution.SoulMD, "每轮修改后先执行最小相关验证")
 	assertSoulContains(t, execution.SoulMD, "失败命令")
+	assertSoulContains(t, execution.SoulMD, "DoD 不满足")
+	assertSoulContains(t, execution.SoulMD, "rootCause")
+	assertSoulContains(t, execution.SoulMD, "错误路径")
 
 	validation := findEmbeddedSoulByID(souls, "soul-software-dev-validation")
 	if validation == nil {
@@ -64,12 +72,16 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, validation.SoulMD, "satisfied/failed/skipped")
 	assertSoulContains(t, validation.SoulMD, "逐项")
 	assertSoulContains(t, validation.SoulMD, "evidenceRefs")
+	assertSoulContains(t, validation.SoulMD, "DoD-to-test")
+	assertSoulContains(t, validation.SoulMD, "关键分支")
 
 	artifact := findEmbeddedSoulByID(souls, "soul-software-dev-artifact")
 	if artifact == nil {
 		t.Fatal("soul-software-dev-artifact missing")
 	}
 	assertSoulContains(t, artifact.SoulMD, "DoD 条目证据引用")
+	assertSoulContains(t, artifact.SoulMD, "变更文件")
+	assertSoulContains(t, artifact.SoulMD, "行为变化")
 	assertSoulContains(t, artifact.SoulMD, "不要只写")
 
 	decision := findEmbeddedSoulByID(souls, "soul-software-dev-decision")

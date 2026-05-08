@@ -18,6 +18,7 @@ const (
 	providerBudgetAggressiveItems     = 6
 	providerBudgetMapEntries          = 24
 	providerBudgetAggressiveEntries   = 12
+	providerContextTracePolicy        = "summary_refs_only"
 )
 
 var providerP0InputKeys = []string{
@@ -99,6 +100,8 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		Truncated:             truncated,
 		Rules:                 rules,
 		SourceRefs:            uniqueStrings(sourceRefs),
+		TracePolicy:           providerContextTracePolicy,
+		PromptCaptured:        false,
 		Estimator:             "bytes_ratio",
 		Profile:               profile,
 	}

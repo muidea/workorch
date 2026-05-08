@@ -6552,7 +6552,7 @@ func TestRuntimeOrchestrator_FailsLLMRunCompletionWithoutDoDAssessment(t *testin
 	}
 }
 
-func TestRuntimeOrchestrator_FailsWeakSatisfiedDoDAssessmentWithoutRepair(t *testing.T) {
+func TestRuntimeOrchestrator_RepairsWeakSatisfiedDoDAssessmentBeforeEscalation(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -6560,21 +6560,27 @@ func TestRuntimeOrchestrator_FailsWeakSatisfiedDoDAssessmentWithoutRepair(t *tes
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	resultRepo := memory.NewResultRepository()
-	runtime := &stubRuntimeAdapter{output: map[string]any{
-		"status": "completed",
-		"dodAssessment": map[string]any{
-			"satisfied":           true,
-			"summary":             "go test ./... passed with [no test files]",
-			"goalOutcome":         "done",
-			"verificationSummary": "go test ./... returned [no test files]",
-			"items": []map[string]any{
-				{
-					"item":         "tests pass",
-					"state":        "satisfied",
-					"evidenceRefs": []string{"run-dod-weak-gate/step-1"},
+	var repairInputs []map[string]any
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		if boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]) {
+			repairInputs = append(repairInputs, request.Input)
+		}
+		return map[string]any{
+			"status": "completed",
+			"dodAssessment": map[string]any{
+				"satisfied":           true,
+				"summary":             "go test ./... passed with [no test files]",
+				"goalOutcome":         "done",
+				"verificationSummary": "go test ./... returned [no test files]",
+				"items": []map[string]any{
+					{
+						"item":         "tests pass",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-dod-weak-gate/step-1"},
+					},
 				},
 			},
-		},
+		}, nil
 	}}
 	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		runtime,
@@ -6604,18 +6610,21 @@ func TestRuntimeOrchestrator_FailsWeakSatisfiedDoDAssessmentWithoutRepair(t *tes
 	}
 
 	if err := orch.StartRun(ctx, runID); err != nil {
-		t.Fatalf("start run should close as failed without returning error: %v", err)
+		t.Fatalf("start run should repair and escalate without returning error: %v", err)
 	}
 
 	runItem, err := runRepo.Get(ctx, runID)
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if runItem.State != common.RunStateFailed || !strings.Contains(runItem.FailureReason, "weak verification evidence") {
-		t.Fatalf("run = %+v, want failed weak verification gate", runItem)
+	if runItem.State != common.RunStateBlockedOnDecision || runItem.BlockingTicketID == "" {
+		t.Fatalf("run = %+v, want blocked decision after repair exhaustion", runItem)
 	}
-	if len(runtime.calls) != 1 {
-		t.Fatalf("runtime calls = %+v, want no repair follow-up for rejected DoD assessment", runtime.calls)
+	if len(repairInputs) != maxRuntimeRepairAttempts {
+		t.Fatalf("repair inputs = %d, want %d", len(repairInputs), maxRuntimeRepairAttempts)
+	}
+	if repairInputs[0]["failedStepId"] == "" || repairInputs[0]["failedStepOutput"] == nil {
+		t.Fatalf("first repair input = %+v, want failed DoD context", repairInputs[0])
 	}
 	result, err := resultRepo.Get(ctx, common.ResultID(string(runID)+"/result/dod-assessment"))
 	if err != nil {
@@ -6623,6 +6632,14 @@ func TestRuntimeOrchestrator_FailsWeakSatisfiedDoDAssessmentWithoutRepair(t *tes
 	}
 	if result.State != common.ResultStateRejected || result.DoDAssessment.Satisfied {
 		t.Fatalf("result = %+v, want rejected unsatisfied DoD result", result)
+	}
+	ticket, err := ticketRepo.Get(ctx, runItem.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("get repair escalation ticket: %v", err)
+	}
+	if ticket.DecisionKind != decisioncommon.ResolutionTypeProvideMissingInfo ||
+		ticket.Context[decisionContextKeyRecoveryPolicy] != decisionContextRecoveryPolicyRepairPlan {
+		t.Fatalf("ticket = %+v, want repair-plan decision", ticket)
 	}
 }
 

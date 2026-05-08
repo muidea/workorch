@@ -29,6 +29,8 @@ import (
 
 type readModelDependencies struct {
 	workspaces           repository.WorkspaceRepository
+	goals                repository.GoalRepository
+	dods                 repository.DoDRepository
 	runs                 repository.RunRepository
 	steps                repository.StepRepository
 	results              repository.ResultRepository
@@ -440,6 +442,8 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 
 	return readModelDependencies{
 		workspaces:           exports.Repositories.Workspaces,
+		goals:                exports.Repositories.Goals,
+		dods:                 exports.Repositories.DoDs,
 		runs:                 exports.Repositories.Runs,
 		steps:                exports.Repositories.Steps,
 		results:              exports.Repositories.Results,
@@ -794,6 +798,8 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 	}
 
 	var runItems []*runmodel.Run
+	var goalItems []*workspacemodel.Goal
+	var dodItems []*workspacemodel.DoD
 	var resultItems []*resultmodel.Result
 	var eventRecordItems []*eventstreammodel.EventRecord
 	var artifactItems []*resultmodel.Artifact
@@ -831,6 +837,20 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 			approvalItems, err = deps.approvals.ListByWorkspaceID(ctx, workspaceID)
 			return err
 		},
+	}
+	if deps.goals != nil {
+		tasks = append(tasks, func() error {
+			var err error
+			goalItems, err = deps.goals.ListByWorkspaceID(ctx, workspaceID)
+			return err
+		})
+	}
+	if deps.dods != nil {
+		tasks = append(tasks, func() error {
+			var err error
+			dodItems, err = deps.dods.ListByWorkspaceID(ctx, workspaceID)
+			return err
+		})
 	}
 	if item == nil {
 		tasks = append(tasks, func() error {
@@ -888,6 +908,8 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 
 	ret := WorkspaceSnapshot{
 		Workspace:    mapWorkspaceWithRunProjection(item, projectionRun),
+		Goals:        mapGoals(goalItems),
+		DoDs:         mapDoDs(dodItems),
 		Runs:         runs,
 		Results:      mapResults(resultItems),
 		Artifacts:    mapArtifacts(artifactItems),
@@ -1338,6 +1360,8 @@ func mapLLMContextBudgetTraces(steps []presenter.StepView) []LLMContextBudgetTra
 			Truncated:             readModelBoolValue(budget["truncated"]),
 			Rules:                 readModelStringSliceValue(budget["rules"]),
 			SourceRefs:            readModelStringSliceValue(budget["sourceRefs"]),
+			TracePolicy:           readModelStringValue(budget["tracePolicy"]),
+			PromptCaptured:        readModelBoolValue(budget["promptCaptured"]),
 			Estimator:             readModelStringValue(budget["estimator"]),
 		})
 	}
