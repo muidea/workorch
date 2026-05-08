@@ -249,8 +249,9 @@ def response_for(run_id, step_id):
                     "implementationSummary": "Repaired calculator.go via unified diff.",
                     "verificationSummary": "go test ./... passed after repair.",
                     "items": [
-                        {"item": "implementation fixed", "state": "satisfied", "evidenceRefs": ["run-tests-fixed"]},
-                        {"item": "tests pass", "state": "satisfied", "evidenceRefs": ["run-tests-fixed"]}
+                        {"item": "代码修改通过 Patch 证据可追溯", "state": "satisfied", "evidenceRefs": ["fix-source"]},
+                        {"item": "go test ./... 最终通过", "state": "satisfied", "evidenceRefs": ["run-tests-fixed"]},
+                        {"item": "结果包含 DoD 评估和交付物索引", "state": "satisfied", "evidenceRefs": [step_id]}
                     ]
                 }
             }
@@ -347,10 +348,12 @@ def response_for(run_id, step_id):
                     "implementationSummary": "Generated go.mod, feature.go, feature_test.go, and README.md.",
                     "verificationSummary": "go test ./... passed with an effective assertion.",
                     "items": [
-                        {"item": "empty workspace initializes without source request", "state": "satisfied", "evidenceRefs": ["write-go-mod", "write-source"]},
-                        {"item": "external dependency config is scoped to target workspace", "state": "satisfied", "evidenceRefs": [step_id]},
-                        {"item": "tests include effective assertion", "state": "satisfied", "evidenceRefs": ["run-empty-project-tests"]},
-                        {"item": "deliverable evidence is indexed", "state": "satisfied", "evidenceRefs": ["write-readme", "run-empty-project-tests"]}
+                        {"item": "空 workspace 不要求用户提供源码来源", "state": "satisfied", "evidenceRefs": ["write-go-mod", "write-source"]},
+                        {"item": "生成最小可运行 Go 项目", "state": "satisfied", "evidenceRefs": ["write-go-mod", "write-source", "write-tests"]},
+                        {"item": "go test ./... 必须包含有效断言并通过", "state": "satisfied", "evidenceRefs": ["run-empty-project-tests"]},
+                        {"item": "README.md 必须作为交付物证据可追溯", "state": "satisfied", "evidenceRefs": ["write-readme"]},
+                        {"item": "目标项目外部依赖配置必须按 target_workspace/external_dependency 作用域处理", "state": "satisfied", "evidenceRefs": [step_id]},
+                        {"item": "敏感认证信息不得进入 snapshot、observability、event 或 LLM context", "state": "satisfied", "evidenceRefs": [step_id]}
                     ]
                 }
             }

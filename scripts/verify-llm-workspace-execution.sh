@@ -77,6 +77,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 initial_runs = []
 
+def full_dod_items(step_id):
+    return [
+        {"item": "happy path completes", "state": "satisfied", "evidenceRefs": [step_id]},
+        {"item": "decision can be resolved", "state": "satisfied", "evidenceRefs": [step_id]},
+        {"item": "approval rejection fails safely", "state": "satisfied", "evidenceRefs": [step_id]},
+        {"item": "multi gate decision then approval can complete", "state": "satisfied", "evidenceRefs": [step_id]},
+        {"item": "schema failure is observable", "state": "satisfied", "evidenceRefs": [step_id]},
+        {"item": "memory recall is visible", "state": "satisfied", "evidenceRefs": [step_id]},
+    ]
+
 def decision_payload(request):
     run_id = request.get("runId", "")
     step_id = request.get("stepId", "")
@@ -106,7 +116,7 @@ def decision_payload(request):
             "dodAssessment": {
                 "satisfied": True,
                 "summary": "Decision path completed.",
-                "items": [{"item": "decision can be resolved", "state": "satisfied", "evidenceRefs": [step_id]}]
+                "items": full_dod_items(step_id)
             }
         }
     if "llm-after-approval" in step_id and scenario == 3:
@@ -116,11 +126,7 @@ def decision_payload(request):
             "dodAssessment": {
                 "satisfied": True,
                 "summary": "Multi-gate path completed after Decision and Approval.",
-                "items": [{
-                    "item": "multi gate decision then approval can complete",
-                    "state": "satisfied",
-                    "evidenceRefs": [step_id]
-                }]
+                "items": full_dod_items(step_id)
             }
         }
     if run_id not in initial_runs:
@@ -139,7 +145,7 @@ def decision_payload(request):
             "dodAssessment": {
                 "satisfied": True,
                 "summary": "Happy path DoD satisfied.",
-                "items": [{"item": "happy path completes", "state": "satisfied", "evidenceRefs": [step_id]}]
+                "items": full_dod_items(step_id)
             }
         }
     if scenario == 1:
@@ -182,7 +188,7 @@ def decision_payload(request):
         "dodAssessment": {
             "satisfied": True,
             "summary": "Memory recall DoD satisfied.",
-            "items": [{"item": "memory recall is visible", "state": "satisfied", "evidenceRefs": [step_id]}]
+            "items": full_dod_items(step_id)
         }
     }
 

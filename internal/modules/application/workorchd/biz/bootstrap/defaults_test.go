@@ -71,6 +71,8 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	}
 	assertSoulContains(t, validation.SoulMD, "satisfied/failed/skipped")
 	assertSoulContains(t, validation.SoulMD, "逐项")
+	assertSoulContains(t, validation.SoulMD, "effective DoD")
+	assertSoulContains(t, validation.SoulMD, "不得只选择")
 	assertSoulContains(t, validation.SoulMD, "evidenceRefs")
 	assertSoulContains(t, validation.SoulMD, "DoD-to-test")
 	assertSoulContains(t, validation.SoulMD, "关键分支")

@@ -7514,6 +7514,82 @@ func TestValidatedCompletionDoDAssessmentRejectsWeakSatisfiedVerificationEvidenc
 	}
 }
 
+func TestValidatedCompletionDoDAssessmentRejectsMissingCurrentDoDCoverage(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-dod-coverage-validate",
+		WorkspaceID:     "ws-dod-coverage-validate",
+		DoDID:           "dod-coverage",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{
+					"### Acceptance",
+					"- [ ] **build passes**",
+					"- [ ] **error path covered**",
+				},
+			},
+		},
+	}
+	_, _, err := validatedCompletionDoDAssessment(run, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "build passed",
+			"items": []map[string]any{
+				{
+					"item":         "build passes",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-dod-coverage-validate/step-1"},
+				},
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "does not cover all current DoD items") || !strings.Contains(err.Error(), "error path covered") {
+		t.Fatalf("validatedCompletionDoDAssessment err = %v, want missing DoD coverage", err)
+	}
+}
+
+func TestValidatedCompletionDoDAssessmentCoversCurrentDoDWithMarkdownNormalization(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-dod-coverage-complete",
+		WorkspaceID:     "ws-dod-coverage-complete",
+		DoDID:           "dod-coverage",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{
+					"### Acceptance",
+					"- [ ] **build passes**",
+					"- [ ] **error path covered**",
+				},
+			},
+		},
+	}
+	_, summary, err := validatedCompletionDoDAssessment(run, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "all current DoD items passed",
+			"items": []map[string]any{
+				{
+					"item":         "Build passes with go test",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-dod-coverage-complete/step-1"},
+				},
+				{
+					"item":         "Error path covered by regression test",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-dod-coverage-complete/step-2"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+	if summary != "all current DoD items passed" {
+		t.Fatalf("summary = %q, want normalized summary", summary)
+	}
+}
+
 func TestRuntimeOrchestrator_RecordsRejectedResultForUnsatisfiedDoDAssessment(t *testing.T) {
 	ctx := context.Background()
 	resultRepo := memory.NewResultRepository()

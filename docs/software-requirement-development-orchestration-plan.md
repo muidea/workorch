@@ -176,6 +176,8 @@
 | RGD-10 | 测试通过但无有效断言仍可能被弱化处理 | `go test ./...` 输出 `[no test files]` 不能证明 DoD 中流式、Token、异常透传、并发等能力满足 |
 | RGD-11 | 软件开发执行策略可吸收成熟 Code Agent 行为 | `ai-proxy/interactions` 显示 Codex 在 PRD 驱动新项目、路径覆盖、根因分析、测试补齐和交付摘要方面有可复用策略，但不能照搬完整历史 prompt 堆叠方式 |
 | RGD-12 | LLM prompt 可追溯应保持摘要化和脱敏 | Codex 请求会把完整多轮上下文、工具调用和工具输出堆入请求体，WorkOrch 应继续使用 contextBudget/sourceRefs，默认不持久化完整明文 prompt |
+| RGD-13 | DoD completion gate 仍可能接受 DoD 子集 | `ws-e1e310fd02e4375e` 显示最终 accepted assessment 只覆盖了原始 DoD 的一部分，平台不能只信任 LLM 返回的 assessment 子集 |
+| RGD-14 | Workspace outcome 可能指向较早 accepted run | 同一 workspace 多次运行后，workspace outcome 可能被 stale taskProgress/旧结果影响，最终展示与最新有效终态 run 不一致 |
 
 ## 任务清单
 
@@ -248,6 +250,8 @@
 | SRD-34 | 当前未完成草稿清理 | 工程卫生 | P0 | verified | 工作区存在未完成 untracked redaction 草稿，可能影响测试和提交 | 开发前先删除草稿或补全为正式通用脱敏实现；不得留下半成品文件 | `git status` 无未确认草稿；`go test ./...` 不受半成品影响 |
 | SRD-35 | 吸收 Code Agent 工程执行策略 | 模板/Soul | P0 | verified | `ai-proxy/interactions` 显示 PRD 驱动新项目、DoD-to-test、路径覆盖、根因分析和交付摘要对复杂开发任务有效 | 增强 `software-dev` 默认 DoD 和 planning/execution/validation/artifact Soul：要求提取 PRD/需求文档、生成 DoD-to-test 映射、覆盖主路径/错误路径/关键分支、DoD 不满足时补实现/补测试、交付摘要包含变更文件和行为变化 | 内置默认值测试覆盖关键语义，重启后内置 `software-dev` template/Soul 可确定性刷新 |
 | SRD-36 | 摘要式 LLM context trace | LLM/通用 | P0 | verified | 需要追溯 LLM 请求上下文组织情况，但不能默认保存完整明文 prompt | 在 contextBudget trace 中显式输出 `tracePolicy=summary_refs_only` 和 `promptCaptured=false`，继续只记录预算、裁剪规则和 sourceRefs | Run Snapshot / Observability 可看到预算、sourceRefs 和 trace policy；无完整 prompt 明文落入默认 read model |
+| SRD-37 | DoD 全量覆盖门控 | Orchestrator/通用 | P0 | verified | LLM 返回 `satisfied=true` 时可能遗漏当前 effective DoD 的未完成条目 | completion gate 从 Run executionContext 的 effective DoD 提取非标题条目，对 LLM `dodAssessment.items` 做规范化覆盖对账；遗漏任一条目时记录 rejected Result 并进入 runtime repair | 单测覆盖 markdown/checklist 规范化、遗漏 DoD 子集拒绝和完整覆盖通过 |
+| SRD-38 | Workspace outcome 最新终态选择 | Read model/通用 | P0 | verified | Workspace 级 outcome 可能优先使用 stale taskProgress，导致展示较早 accepted run | terminal workspace 的 outcome 优先按 run 事件选择最新终态 run，无事件时回落到最新 accepted result，再回落到 run 列表；非终态仍保留 active/taskProgress 语义 | 单测覆盖 stale taskProgress 指向旧 run 时 outcome 仍选择最新 accepted terminal run |
 
 ## 建议实施顺序
 
@@ -374,3 +378,4 @@
 | 2026-05-08 | 重新部署后回归：`WORKORCH_BASE_URL=http://127.0.0.1:8080 WORKORCH_SRD_VERIFY_DEPLOYED_E2E=1 ./scripts/verify-software-requirement-development-orchestration.sh` 通过；`WORKORCH_BASE_URL=http://127.0.0.1:8080 make verify-e2e-full` 通过，覆盖模板/Soul、LLM、MCP、SkillHub、自动治理、software-dev、SRD-10~34、文件补丁、Web Search、天气治理、TUI 与长输出。 |
 | 2026-05-08 | 基于 `/home/rangh/aispace/ai-proxy/interactions` 的 Codex 请求核对，收口 SRD-35/SRD-36：吸收 PRD 驱动新项目、DoD-to-test、路径覆盖、根因分析和交付摘要策略；LLM context trace 明确为 `summary_refs_only` 且 `promptCaptured=false`，避免默认保存完整 prompt 明文。 |
 | 2026-05-08 | 回归同步 SRD-33：`verify-software-dev-goal-dod-e2e.sh` 的弱验证证据场景改为验证 rejected Result + runtime repair + repair 耗尽 Decision 升级，避免继续使用“直接失败”旧预期。 |
+| 2026-05-08 | 基于 `ws-e1e310fd02e4375e` 核对收口 SRD-37/SRD-38：DoD completion gate 增加当前 effective DoD 全量覆盖对账；workspace outcome 在终态下优先选择最新终态 run，避免旧 accepted result 覆盖最新结果。 |

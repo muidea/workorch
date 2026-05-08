@@ -2827,6 +2827,64 @@ func TestReadWorkspaceSnapshotProjectsLatestRunFailureOverHistoricalAcceptedResu
 	}
 }
 
+func TestMapWorkspaceOutcomePrefersLatestTerminalRunOverStaleTaskProgress(t *testing.T) {
+	olderRunID := "run-older-accepted"
+	latestRunID := "run-latest-accepted"
+	snapshot := WorkspaceSnapshot{
+		Workspace: Workspace{
+			ID:    "ws-latest-outcome",
+			State: string(common.WorkspaceStateCompleted),
+		},
+		TaskProgress: TaskProgress{
+			RunID: olderRunID,
+			State: string(common.RunStateCompleted),
+		},
+		Runs: []Run{
+			{ID: olderRunID, WorkspaceID: "ws-latest-outcome", State: string(common.RunStateCompleted)},
+			{ID: latestRunID, WorkspaceID: "ws-latest-outcome", State: string(common.RunStateCompleted)},
+		},
+		Results: []Result{
+			{
+				ID:          olderRunID + "/result/dod-assessment",
+				WorkspaceID: "ws-latest-outcome",
+				RunID:       olderRunID,
+				State:       string(common.ResultStateAccepted),
+				Summary:     "older accepted result",
+				CreatedAt:   "2026-05-08T10:00:00Z",
+			},
+			{
+				ID:          latestRunID + "/result/dod-assessment",
+				WorkspaceID: "ws-latest-outcome",
+				RunID:       latestRunID,
+				State:       string(common.ResultStateAccepted),
+				Summary:     "latest accepted result",
+				CreatedAt:   "2026-05-08T11:00:00Z",
+			},
+		},
+		EventRecords: []EventRecord{
+			{
+				ID:          "evt-older",
+				Topic:       events.TopicRunStateChanged,
+				OccurredAt:  "2026-05-08T10:00:00Z",
+				WorkspaceID: "ws-latest-outcome",
+				RunID:       olderRunID,
+			},
+			{
+				ID:          "evt-latest",
+				Topic:       events.TopicRunStateChanged,
+				OccurredAt:  "2026-05-08T11:00:00Z",
+				WorkspaceID: "ws-latest-outcome",
+				RunID:       latestRunID,
+			},
+		},
+	}
+
+	outcome := mapWorkspaceOutcome(snapshot)
+	if outcome.State != "accepted" || !outcome.Accepted || outcome.RunID != latestRunID || outcome.Summary != "latest accepted result" {
+		t.Fatalf("outcome = %+v, want latest accepted run despite stale task progress", outcome)
+	}
+}
+
 func TestReadTerminalRunModelsWithBackendRemainStableAcrossReloads(t *testing.T) {
 	dataRoot := t.TempDir()
 	workspaceID := "ws-run-terminal-reload"

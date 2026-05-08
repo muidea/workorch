@@ -4160,7 +4160,10 @@ func mapWorkspaceOutcome(snapshot WorkspaceSnapshot) WorkspaceOutcome {
 		RawWorkspaceState: snapshot.Workspace.State,
 	}
 	var selectedRun *Run
-	if snapshot.TaskProgress.RunID != "" {
+	if isTerminalProjectionState(snapshot.Workspace.State) {
+		selectedRun = latestWorkspaceRunForOutcome(snapshot)
+	}
+	if selectedRun == nil && snapshot.TaskProgress.RunID != "" {
 		for idx := range snapshot.Runs {
 			if snapshot.Runs[idx].ID == snapshot.TaskProgress.RunID {
 				selectedRun = &snapshot.Runs[idx]
@@ -4199,6 +4202,52 @@ func mapWorkspaceOutcome(snapshot WorkspaceSnapshot) WorkspaceOutcome {
 	ret.EvidenceRefs = outcome.EvidenceRefs
 	ret.ArtifactRefs = outcome.ArtifactRefs
 	return ret
+}
+
+func isTerminalProjectionState(state string) bool {
+	switch common.WorkspaceState(state) {
+	case common.WorkspaceStateCompleted, common.WorkspaceStateFailed, common.WorkspaceStateArchived:
+		return true
+	default:
+		return false
+	}
+}
+
+func latestWorkspaceRunForOutcome(snapshot WorkspaceSnapshot) *Run {
+	if len(snapshot.Runs) == 0 {
+		return nil
+	}
+	runsByID := make(map[string]*Run, len(snapshot.Runs))
+	for idx := range snapshot.Runs {
+		runsByID[snapshot.Runs[idx].ID] = &snapshot.Runs[idx]
+	}
+	var selectedEvent *EventRecord
+	for idx := range snapshot.EventRecords {
+		item := &snapshot.EventRecords[idx]
+		if item.WorkspaceID != snapshot.Workspace.ID || item.RunID == "" {
+			continue
+		}
+		if _, ok := runsByID[item.RunID]; !ok {
+			continue
+		}
+		switch item.Topic {
+		case events.TopicRunCreated, events.TopicRunStateChanged:
+		default:
+			continue
+		}
+		if selectedEvent == nil || item.OccurredAt >= selectedEvent.OccurredAt {
+			selectedEvent = item
+		}
+	}
+	if selectedEvent != nil {
+		return runsByID[selectedEvent.RunID]
+	}
+	if result := primaryAcceptedResult(snapshot.Results); result != nil {
+		if run := runsByID[result.RunID]; run != nil {
+			return run
+		}
+	}
+	return &snapshot.Runs[len(snapshot.Runs)-1]
 }
 
 func primaryAcceptedResult(items []Result) *Result {

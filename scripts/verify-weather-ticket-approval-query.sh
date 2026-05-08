@@ -424,6 +424,11 @@ def decision_payload(request):
                         "state": "satisfied",
                         "evidenceRefs": [previous_step_id],
                     },
+                    {
+                        "item": "Run snapshot 暴露 Decision、Approval、ToolCall、ValidationResult、RuntimeCheckpoint 和 DoD 评估证据",
+                        "state": "satisfied",
+                        "evidenceRefs": [previous_step_id],
+                    },
                 ],
             },
         }

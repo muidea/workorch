@@ -1072,9 +1072,6 @@ func (o *RuntimeOrchestrator) recordRejectedCompletionDoDAssessment(ctx context.
 		return nil
 	}
 	if satisfied, _ := assessment["satisfied"].(bool); satisfied {
-		if !containsWeakSatisfiedVerificationEvidence(assessment) {
-			return nil
-		}
 		rejected := cloneStepPayload(assessment)
 		rejected["satisfied"] = false
 		if summary := strings.TrimSpace(stringFromMap(rejected, "summary")); summary != "" {

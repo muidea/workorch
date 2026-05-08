@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -34,6 +35,9 @@ func validatedCompletionDoDAssessment(run *runModel.Run, output map[string]any) 
 		return nil, "", fmt.Errorf("%w: dodAssessment.summary is required for llm-driven completion", common.ErrInvalidArgument)
 	}
 	if err := validateDoDAssessmentItems(assessment["items"]); err != nil {
+		return nil, "", err
+	}
+	if err := validateDoDAssessmentCoversRunDoD(run, assessment); err != nil {
 		return nil, "", err
 	}
 	if containsWeakSatisfiedVerificationEvidence(assessment) {
@@ -78,6 +82,119 @@ func validateDoDAssessmentItems(value any) error {
 		}
 	}
 	return nil
+}
+
+func validateDoDAssessmentCoversRunDoD(run *runModel.Run, assessment map[string]any) error {
+	requiredItems := normalizedRunDoDItems(run)
+	if len(requiredItems) == 0 {
+		return nil
+	}
+	assessmentItems, ok := doDAssessmentItemMaps(assessment["items"])
+	if !ok || len(assessmentItems) == 0 {
+		return fmt.Errorf("%w: dodAssessment.items are required", common.ErrInvalidArgument)
+	}
+	normalizedAssessmentItems := make([]string, 0, len(assessmentItems))
+	for _, item := range assessmentItems {
+		if strings.TrimSpace(stringFromMap(item, "state")) != "satisfied" {
+			continue
+		}
+		normalized := normalizeDoDCoverageText(stringFromMap(item, "item"))
+		if normalized != "" {
+			normalizedAssessmentItems = append(normalizedAssessmentItems, normalized)
+		}
+	}
+	missing := make([]string, 0)
+	for _, required := range requiredItems {
+		if required.normalized == "" {
+			continue
+		}
+		matched := false
+		for _, actual := range normalizedAssessmentItems {
+			if actual == "" {
+				continue
+			}
+			if strings.Contains(actual, required.normalized) || strings.Contains(required.normalized, actual) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			missing = append(missing, required.raw)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: dodAssessment does not cover all current DoD items; missing: %s", common.ErrInvalidArgument, strings.Join(missing, "; "))
+}
+
+type normalizedDoDItem struct {
+	raw        string
+	normalized string
+}
+
+func normalizedRunDoDItems(run *runModel.Run) []normalizedDoDItem {
+	if run == nil || len(run.ExecutionContext) == 0 {
+		return nil
+	}
+	items := stringSliceFromValue(mapFromValue(run.ExecutionContext["dod"])["items"])
+	if len(items) == 0 {
+		for _, dod := range mapSliceFromValue(run.ExecutionContext["dods"]) {
+			items = append(items, stringSliceFromValue(dod["items"])...)
+		}
+	}
+	ret := make([]normalizedDoDItem, 0, len(items))
+	seen := map[string]bool{}
+	for _, raw := range items {
+		raw = strings.TrimSpace(raw)
+		if raw == "" || isDoDHeading(raw) {
+			continue
+		}
+		normalized := normalizeDoDCoverageText(raw)
+		if normalized == "" || seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		ret = append(ret, normalizedDoDItem{raw: raw, normalized: normalized})
+	}
+	return ret
+}
+
+func isDoDHeading(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	return strings.HasPrefix(trimmed, "#")
+}
+
+func normalizeDoDCoverageText(value string) string {
+	value = strings.TrimSpace(value)
+	for {
+		next := strings.TrimSpace(value)
+		lower := strings.ToLower(next)
+		switch {
+		case strings.HasPrefix(lower, "- [ ]"):
+			value = strings.TrimSpace(next[len("- [ ]"):])
+		case strings.HasPrefix(lower, "- [x]"):
+			value = strings.TrimSpace(next[len("- [x]"):])
+		case strings.HasPrefix(lower, "* [ ]"):
+			value = strings.TrimSpace(next[len("* [ ]"):])
+		case strings.HasPrefix(lower, "* [x]"):
+			value = strings.TrimSpace(next[len("* [x]"):])
+		case strings.HasPrefix(next, "-"), strings.HasPrefix(next, "*"), strings.HasPrefix(next, "•"):
+			value = strings.TrimSpace(next[1:])
+		default:
+			goto normalized
+		}
+	}
+normalized:
+	value = strings.NewReplacer("**", "", "__", "", "`", "", "（", "(", "）", ")").Replace(value)
+	var builder strings.Builder
+	for _, r := range strings.ToLower(value) {
+		if unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			continue
+		}
+		builder.WriteRune(r)
+	}
+	return builder.String()
 }
 
 func containsWeakSatisfiedVerificationEvidence(assessment map[string]any) bool {

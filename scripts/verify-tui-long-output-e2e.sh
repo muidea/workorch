@@ -95,11 +95,23 @@ def completion_payload(request):
             "goalOutcome": goal,
             "implementationSummary": implementation,
             "verificationSummary": verification,
-            "items": [{
-                "item": "TUI can display a long final result and keyboard-scroll the viewport",
-                "state": "satisfied",
-                "evidenceRefs": [step_id]
-            }],
+            "items": [
+                {
+                    "item": "Final Result contains LONG-IMPLEMENTATION 70",
+                    "state": "satisfied",
+                    "evidenceRefs": [step_id]
+                },
+                {
+                    "item": "Final Result is long enough to require PgDown/PgUp viewport scrolling",
+                    "state": "satisfied",
+                    "evidenceRefs": [step_id]
+                },
+                {
+                    "item": "Workspace monitor remains visible while main display scrolls",
+                    "state": "satisfied",
+                    "evidenceRefs": [step_id]
+                }
+            ],
             "knownLimitations": ["Manual terminal drag selection must be confirmed in the operator terminal."],
             "residualRisks": ["Terminal emulator key binding differences can affect PgUp/PgDown delivery."],
             "nextActions": ["Open the generated workspace in TUI, press PgDown/PgUp, and verify the side panel stays fixed."]

@@ -80,11 +80,28 @@ class Handler(BaseHTTPRequestHandler):
                 "dodAssessment": {
                     "satisfied": True,
                     "summary": "SkillHub global and workspace skills were selected automatically; required MCP was auto-bound.",
-                    "items": [{
-                        "item": "SkillHub automatic selection and MCP binding are visible in Run context",
-                        "state": "satisfied",
-                        "evidenceRefs": [step_id]
-                    }]
+                    "items": [
+                        {
+                            "item": "go multi module dev SkillHub global skill is selected",
+                            "state": "satisfied",
+                            "evidenceRefs": [step_id]
+                        },
+                        {
+                            "item": "go multi module dev SkillHub workspace skill is selected",
+                            "state": "satisfied",
+                            "evidenceRefs": [step_id]
+                        },
+                        {
+                            "item": "skillhub auto mcp required MCP is auto-bound",
+                            "state": "satisfied",
+                            "evidenceRefs": [step_id]
+                        },
+                        {
+                            "item": "skill feedback memory is written",
+                            "state": "satisfied",
+                            "evidenceRefs": [step_id]
+                        }
+                    ]
                 }
             }
             content = json.dumps(payload, ensure_ascii=False)
