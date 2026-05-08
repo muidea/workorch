@@ -2937,7 +2937,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       goalId: goals[0]?.id,
       doDId: readyDoDs[0]?.id,
       llmProviderId: configuration?.llm.defaultProviderId,
-      soulId: souls[0]?.id,
+      soulId: undefined,
       soulBindings: {},
       skillIds: [],
       mcpServerIds: [],
@@ -4047,8 +4047,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
               }))}
             />
           </Form.Item>
-          <Form.Item name="soulId" label="执行人格（Soul）">
-            <Select allowClear placeholder="使用工作空间默认执行人格" options={soulOptions} />
+          <Form.Item name="soulId" label="本次默认执行人格（Soul）">
+            <Select allowClear placeholder="继承工作空间默认和阶段执行人格配置" options={soulOptions} />
           </Form.Item>
           <Typography.Text type="secondary">本次执行阶段执行人格覆盖</Typography.Text>
           <div className="soul-binding-grid soul-binding-grid-compact">
