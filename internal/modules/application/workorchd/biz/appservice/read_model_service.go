@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
@@ -2138,6 +2139,9 @@ func mapResultQuality(snapshot RunSnapshot) []ResultQualityTrace {
 	if len(results) == 0 {
 		return nil
 	}
+	evidenceIndex := runEvidenceRefIndex(snapshot)
+	weakValidationRefs := weakValidationEvidenceRefIndex(snapshot)
+	requiredDoDLeafItems := runRequiredDoDLeafItems(snapshot)
 	ret := make([]ResultQualityTrace, 0, len(results))
 	for _, item := range results {
 		quality := ResultQualityTrace{
@@ -2197,6 +2201,56 @@ func mapResultQuality(snapshot RunSnapshot) []ResultQualityTrace {
 		}
 		if item.DoDAssessment == nil || len(item.DoDAssessment.Items) == 0 {
 			addIssue("missing_dod_item_assessment", "warning", "result is missing DoD item-level assessment", "attach DoD item states and evidence refs", evidenceRefs...)
+		} else {
+			if missingLeaf := missingRequiredDoDLeafItems(requiredDoDLeafItems, item.DoDAssessment.Items); len(missingLeaf) > 0 {
+				addIssue(
+					"missing_dod_leaf_coverage",
+					"error",
+					fmt.Sprintf("result dodAssessment does not cover required DoD leaf items: %s", strings.Join(missingLeaf, "; ")),
+					"include each missing DoD leaf item in dodAssessment.items with concrete evidenceRefs",
+					evidenceRefs...,
+				)
+			}
+			for _, assessmentItem := range item.DoDAssessment.Items {
+				if strings.TrimSpace(assessmentItem.State) != "satisfied" {
+					continue
+				}
+				itemName := strings.TrimSpace(assessmentItem.Item)
+				refs := compactUniqueStrings(cloneReadModelStringSlice(assessmentItem.EvidenceRefs))
+				if len(refs) == 0 {
+					addIssue(
+						"dod_item_missing_evidence_refs",
+						"error",
+						fmt.Sprintf("satisfied DoD item %q has no evidence refs", itemName),
+						"attach concrete validation/patch/tool evidence refs for every satisfied DoD item",
+					)
+					continue
+				}
+				missingRefs := make([]string, 0, len(refs))
+				for _, ref := range refs {
+					if _, ok := evidenceIndex[ref]; !ok {
+						missingRefs = append(missingRefs, ref)
+					}
+				}
+				if len(missingRefs) > 0 {
+					addIssue(
+						"dod_item_unlinked_evidence_refs",
+						"error",
+						fmt.Sprintf("satisfied DoD item %q references unlinked evidence: %s", itemName, strings.Join(missingRefs, ", ")),
+						"use evidence refs that exist in runtime steps, validations, patches, tool calls, checkpoints, or artifacts",
+						refs...,
+					)
+				}
+				if allEvidenceRefsWeakValidation(refs, weakValidationRefs) {
+					addIssue(
+						"dod_item_weak_verification_evidence",
+						"error",
+						fmt.Sprintf("satisfied DoD item %q relies only on weak verification evidence", itemName),
+						"add effective assertions/tests or mark the item failed/skipped with impact and residual risk",
+						refs...,
+					)
+				}
+			}
 		}
 		ret = append(ret, quality)
 	}
@@ -2204,6 +2258,179 @@ func mapResultQuality(snapshot RunSnapshot) []ResultQualityTrace {
 		return nil
 	}
 	return ret
+}
+
+func runRequiredDoDLeafItems(snapshot RunSnapshot) []string {
+	dod := readModelMapValue(snapshot.Run.ExecutionContext["dod"])
+	items := readModelStringSliceValue(dod["items"])
+	if len(items) == 0 {
+		for _, item := range readModelMapSliceValue(snapshot.Run.ExecutionContext["dods"]) {
+			items = append(items, readModelStringSliceValue(item["items"])...)
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, len(items))
+	seen := map[string]bool{}
+	for _, raw := range items {
+		raw = strings.TrimSpace(raw)
+		if raw == "" || !readModelDoDItemIsLeaf(raw) {
+			continue
+		}
+		normalized := normalizeReadModelDoDText(raw)
+		if normalized == "" || seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		ret = append(ret, raw)
+	}
+	return ret
+}
+
+func missingRequiredDoDLeafItems(required []string, assessed []DoDAssessmentItem) []string {
+	if len(required) == 0 {
+		return nil
+	}
+	covered := make([]string, 0, len(assessed))
+	for _, item := range assessed {
+		if strings.TrimSpace(item.State) != "satisfied" {
+			continue
+		}
+		normalized := normalizeReadModelDoDText(item.Item)
+		if normalized != "" {
+			covered = append(covered, normalized)
+		}
+	}
+	missing := make([]string, 0)
+	for _, raw := range required {
+		requiredNormalized := normalizeReadModelDoDText(raw)
+		if requiredNormalized == "" {
+			continue
+		}
+		matched := false
+		for _, actual := range covered {
+			if actual == "" {
+				continue
+			}
+			if strings.Contains(actual, requiredNormalized) || strings.Contains(requiredNormalized, actual) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			missing = append(missing, raw)
+		}
+	}
+	return compactUniqueStrings(missing)
+}
+
+func weakValidationEvidenceRefIndex(snapshot RunSnapshot) map[string]bool {
+	ret := map[string]bool{}
+	for _, item := range snapshot.ValidationResults {
+		if !validationSummaryLooksWeak(item.Summary) {
+			continue
+		}
+		if ref := strings.TrimSpace(item.ID); ref != "" {
+			ret[ref] = true
+		}
+		if ref := strings.TrimSpace(item.EvidenceRef); ref != "" {
+			ret[ref] = true
+		}
+		if ref := strings.TrimSpace(item.StepID); ref != "" {
+			ret[ref] = true
+		}
+	}
+	return ret
+}
+
+func allEvidenceRefsWeakValidation(refs []string, weakRefIndex map[string]bool) bool {
+	if len(refs) == 0 || len(weakRefIndex) == 0 {
+		return false
+	}
+	seen := false
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		seen = true
+		if !weakRefIndex[ref] {
+			return false
+		}
+	}
+	return seen
+}
+
+func validationSummaryLooksWeak(summary string) bool {
+	text := strings.ToLower(strings.TrimSpace(summary))
+	if text == "" {
+		return false
+	}
+	markers := []string{
+		"[no test files]",
+		"no test files",
+		"no tests to run",
+		"0 tests",
+		"without assertions",
+		"no assertions",
+		"无测试文件",
+		"没有测试",
+		"无有效断言",
+	}
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func readModelDoDItemIsLeaf(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	if strings.HasPrefix(trimmed, "#") {
+		return false
+	}
+	content := trimReadModelDoDItemText(trimmed)
+	return !(content == "" || strings.HasSuffix(content, ":") || strings.HasSuffix(content, "："))
+}
+
+func normalizeReadModelDoDText(value string) string {
+	value = trimReadModelDoDItemText(value)
+	value = strings.NewReplacer("**", "", "__", "", "`", "", "（", "(", "）", ")").Replace(value)
+	var builder strings.Builder
+	for _, r := range strings.ToLower(value) {
+		if unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			continue
+		}
+		builder.WriteRune(r)
+	}
+	return builder.String()
+}
+
+func trimReadModelDoDItemText(value string) string {
+	value = strings.TrimSpace(value)
+	for {
+		next := strings.TrimSpace(value)
+		lower := strings.ToLower(next)
+		switch {
+		case strings.HasPrefix(lower, "- [ ]"):
+			value = strings.TrimSpace(next[len("- [ ]"):])
+		case strings.HasPrefix(lower, "- [x]"):
+			value = strings.TrimSpace(next[len("- [x]"):])
+		case strings.HasPrefix(lower, "* [ ]"):
+			value = strings.TrimSpace(next[len("* [ ]"):])
+		case strings.HasPrefix(lower, "* [x]"):
+			value = strings.TrimSpace(next[len("* [x]"):])
+		case strings.HasPrefix(next, "-"), strings.HasPrefix(next, "*"), strings.HasPrefix(next, "•"):
+			value = strings.TrimSpace(next[1:])
+		default:
+			return strings.TrimSpace(value)
+		}
+	}
 }
 
 func runEvidenceRefIndex(snapshot RunSnapshot) map[string]struct{} {
@@ -3909,14 +4136,26 @@ func mapTaskProgressRepairLoop(snapshot RunSnapshot, recovery RecoveryPlan) Repa
 		ret.LastFailureSignature = lastFailure.signature
 		ret.LastFailureAt = lastFailure.occurredAt
 		ret.EvidenceRefs = append(ret.EvidenceRefs, lastFailure.evidenceRef)
+		if failedStep := stepByID(snapshot.Steps, lastFailure.stepID); failedStep != nil {
+			ret.MissingDoDItems = readModelMissingDoDItemsFromStepOutput(failedStep.Output)
+		}
 	}
 
-	if ticketID, reason, ok := repairEscalationProjection(snapshot, recovery); ok {
+	if ticketID, reason, escalationContext, ok := repairEscalationProjection(snapshot, recovery); ok {
 		ret.Escalated = true
 		ret.EscalationTicketID = ticketID
 		ret.EscalationReason = reason
 		ret.EvidenceRefs = append(ret.EvidenceRefs, ticketID)
 		ret.State = "escalated_decision"
+		if items := readModelMapSliceValue(escalationContext["missingDoDItems"]); len(items) > 0 {
+			ret.MissingDoDItems = items
+		}
+		if attempts := readModelMapSliceValue(escalationContext["recentRepairAttempts"]); len(attempts) > 0 {
+			ret.RecentAttempts = attempts
+		}
+		if suggestions := readModelStringSliceValue(escalationContext["recommendedNextActions"]); len(suggestions) > 0 {
+			ret.RecommendedNextSteps = suggestions
+		}
 	} else {
 		switch recovery.Mode {
 		case "wait_decision":
@@ -4008,9 +4247,38 @@ func latestRepairFailureProjection(snapshot RunSnapshot) *repairFailureProjectio
 	return latest
 }
 
-func repairEscalationProjection(snapshot RunSnapshot, recovery RecoveryPlan) (ticketID string, reason string, ok bool) {
+func stepByID(steps []presenter.StepView, stepID string) *presenter.StepView {
+	stepID = strings.TrimSpace(stepID)
+	if stepID == "" {
+		return nil
+	}
+	for idx := range steps {
+		if steps[idx].ID == stepID {
+			return &steps[idx]
+		}
+	}
+	return nil
+}
+
+func readModelMissingDoDItemsFromStepOutput(output map[string]any) []map[string]any {
+	if len(output) == 0 {
+		return nil
+	}
+	diagnostics := readModelMapValue(output["runtimeDiagnostics"])
+	if items := readModelMapSliceValue(diagnostics["missingDoDItems"]); len(items) > 0 {
+		return items
+	}
+	if failedOutput := readModelMapValue(output["failedStepOutput"]); len(failedOutput) > 0 {
+		if items := readModelMissingDoDItemsFromStepOutput(failedOutput); len(items) > 0 {
+			return items
+		}
+	}
+	return nil
+}
+
+func repairEscalationProjection(snapshot RunSnapshot, recovery RecoveryPlan) (ticketID string, reason string, context map[string]any, ok bool) {
 	if recovery.BlockingTicketID == "" {
-		return "", "", false
+		return "", "", nil, false
 	}
 	for _, item := range snapshot.Decisions {
 		if item.ID != recovery.BlockingTicketID {
@@ -4020,11 +4288,11 @@ func repairEscalationProjection(snapshot RunSnapshot, recovery RecoveryPlan) (ti
 		if readModelIntValue(context["attempts"]) > 0 ||
 			strings.TrimSpace(readModelStringValue(context["failureClass"])) != "" ||
 			strings.TrimSpace(readModelStringValue(context["failureSignature"])) != "" {
-			return item.ID, firstNonEmptyReadModel(item.Reason, item.Question), true
+			return item.ID, firstNonEmptyReadModel(item.Reason, item.Question), context, true
 		}
-		return "", "", false
+		return "", "", nil, false
 	}
-	return "", "", false
+	return "", "", nil, false
 }
 
 func primaryTaskProgressResult(items []Result) *Result {

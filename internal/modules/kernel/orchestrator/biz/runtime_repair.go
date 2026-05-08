@@ -168,6 +168,13 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 			"failedStepKind":                 failedStep.Kind,
 			"failedStepInput":                compactStepInputForLLMContext(failedStep.Input),
 			"failedStepOutput":               compactStepOutputForLLMContext(failedStep.Output),
+			"missingDoDItems":                missingDoDItemsFromFailureOutput(failedStep.Output),
+			"recentRepairAttempts":           o.recentRuntimeRepairAttemptSummaries(ctx, run.ID, maxRuntimeRepairAttempts),
+			"recommendedNextActions": []string{
+				"Map each missing DoD item to concrete affected files, patch operations, and verification commands.",
+				"Prioritize minimal implementation and test updates, then rerun targeted verification.",
+				"If key constraints remain unclear, provide a focused decision payload with only missing information.",
+			},
 		},
 	}
 	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
@@ -428,6 +435,12 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	input["failedStepState"] = string(failedStep.State)
 	input["failedStepInput"] = compactStepInputForLLMContext(failedStep.Input)
 	input["failedStepOutput"] = compactStepOutputForLLMContext(failedStep.Output)
+	if diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		input["runtimeDiagnostics"] = cloneStepPayload(diagnostics)
+	}
+	if missingDoD := missingDoDItemsFromFailureOutput(failedStep.Output); len(missingDoD) > 0 {
+		input["missingDoDItems"] = missingDoD
+	}
 	if class := stringFromMap(failedStep.Output, failureOutputKeyClass); class != "" {
 		input[failureOutputKeyClass] = class
 	}
@@ -484,6 +497,74 @@ func shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep *runModel.Step) bo
 		return true
 	}
 	return false
+}
+
+func missingDoDItemsFromFailureOutput(output map[string]any) []map[string]any {
+	if len(output) == 0 {
+		return nil
+	}
+	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		if items := mapSliceFromValue(diagnostics["missingDoDItems"]); len(items) > 0 {
+			return items
+		}
+	}
+	if failedOutput := mapFromValue(output["failedStepOutput"]); len(failedOutput) > 0 {
+		if items := missingDoDItemsFromFailureOutput(failedOutput); len(items) > 0 {
+			return items
+		}
+	}
+	return nil
+}
+
+func (o *RuntimeOrchestrator) recentRuntimeRepairAttemptSummaries(ctx context.Context, runID common.RunID, limit int) []map[string]any {
+	if o == nil || o.steps == nil || runID == "" || limit <= 0 {
+		return nil
+	}
+	steps, err := o.steps.ListByRun(ctx, runID)
+	if err != nil || len(steps) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, limit)
+	for _, step := range steps {
+		if !isRuntimeRepairBudgetStep(runID, step) {
+			continue
+		}
+		item := map[string]any{
+			"stepId":         string(step.ID),
+			"state":          string(step.State),
+			"attempt":        runtimeRepairAttemptValue(step),
+			"failureClass":   stringFromMap(step.Output, failureOutputKeyClass),
+			"failureStage":   stringFromMap(step.Output, "stage"),
+			"failureSummary": firstNonEmptyString(stringFromMap(step.Output, "summary"), stringFromMap(step.Output, "error"), stringFromMap(step.Output, "reason")),
+		}
+		if missing := missingDoDItemsFromFailureOutput(step.Output); len(missing) > 0 {
+			item["missingDoDItems"] = missing
+		}
+		ret = append(ret, item)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	if len(ret) > limit {
+		ret = ret[len(ret)-limit:]
+	}
+	return ret
+}
+
+func runtimeRepairAttemptValue(step *runModel.Step) int {
+	if step == nil {
+		return 0
+	}
+	switch typed := step.Input[stepInputKeyRuntimeRepairAttempt].(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return 0
+	}
 }
 
 func (o *RuntimeOrchestrator) workspaceFileManifest(ctx context.Context, run *runModel.Run) []map[string]any {

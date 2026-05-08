@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -769,6 +770,123 @@ func TestMapResultQualityFlagsWeakResult(t *testing.T) {
 		if !codes[want] {
 			t.Fatalf("result quality issues = %+v, missing %s", quality[0].Issues, want)
 		}
+	}
+}
+
+func TestMapResultQualityFlagsMissingDoDLeafCoverage(t *testing.T) {
+	snapshot := RunSnapshot{
+		Run: Run{
+			ID:          "run-quality-dod-leaf",
+			WorkspaceID: "ws-quality-dod-leaf",
+			DoDID:       "dod-quality-dod-leaf",
+			ExecutionContext: map[string]any{
+				"dod": map[string]any{
+					"items": []string{
+						"### 验收",
+						"- [ ] 结果质量：",
+						"- [ ] 覆盖主路径并可验证",
+						"- [ ] 覆盖错误路径并可验证",
+					},
+				},
+			},
+		},
+		Steps: []presenter.StepView{
+			{ID: "step-1"},
+		},
+		Results: []Result{
+			{
+				ID:          "result-quality-dod-leaf",
+				WorkspaceID: "ws-quality-dod-leaf",
+				RunID:       "run-quality-dod-leaf",
+				DoDID:       "dod-quality-dod-leaf",
+				State:       "accepted",
+				Summary:     "partial dod coverage",
+				DoDAssessment: &DoDAssessment{
+					Satisfied: true,
+					Summary:   "partial dod coverage",
+					Items: []DoDAssessmentItem{
+						{Item: "覆盖主路径并可验证", State: "satisfied", EvidenceRefs: []string{"step-1"}},
+					},
+				},
+				SummaryDetail: &ResultSummary{
+					GoalOutcome:         "main path covered",
+					VerificationSummary: "main path verified",
+					EvidenceRefs:        []string{"step-1"},
+					KnownLimitations:    []string{"error path not covered"},
+					NextActions:         []string{"cover error path"},
+				},
+				EvidenceRefs: []string{"step-1"},
+			},
+		},
+	}
+	quality := mapResultQuality(snapshot)
+	if len(quality) != 1 {
+		t.Fatalf("result quality = %+v, want one trace", quality)
+	}
+	if quality[0].State != "failed" {
+		t.Fatalf("result quality state = %q, want failed", quality[0].State)
+	}
+	if !containsResultQualityIssueCode(quality[0].Issues, "missing_dod_leaf_coverage") {
+		t.Fatalf("result quality issues = %+v, want missing_dod_leaf_coverage", quality[0].Issues)
+	}
+}
+
+func TestMapResultQualityFlagsWeakDoDItemEvidence(t *testing.T) {
+	snapshot := RunSnapshot{
+		Run: Run{
+			ID:          "run-quality-weak-evidence",
+			WorkspaceID: "ws-quality-weak-evidence",
+			DoDID:       "dod-quality-weak-evidence",
+			ExecutionContext: map[string]any{
+				"dod": map[string]any{
+					"items": []string{"- [ ] go test ./... 包含有效断言"},
+				},
+			},
+		},
+		ValidationResults: []ValidationResult{
+			{
+				ID:      "validation-1",
+				RunID:   "run-quality-weak-evidence",
+				State:   "passed",
+				Summary: "go test ./... [no test files]",
+			},
+		},
+		Results: []Result{
+			{
+				ID:          "result-quality-weak-evidence",
+				WorkspaceID: "ws-quality-weak-evidence",
+				RunID:       "run-quality-weak-evidence",
+				DoDID:       "dod-quality-weak-evidence",
+				State:       "accepted",
+				Summary:     "weak evidence",
+				DoDAssessment: &DoDAssessment{
+					Satisfied: true,
+					Summary:   "weak evidence",
+					Items: []DoDAssessmentItem{
+						{Item: "go test ./... 包含有效断言", State: "satisfied", EvidenceRefs: []string{"validation-1"}},
+					},
+				},
+				SummaryDetail: &ResultSummary{
+					GoalOutcome:         "tests completed",
+					VerificationSummary: "go test ./... executed",
+					EvidenceRefs:        []string{"validation-1"},
+					KnownLimitations:    []string{"none"},
+					ResidualRisks:       []string{"assertion strength uncertain"},
+					NextActions:         []string{"add assertion coverage"},
+				},
+				EvidenceRefs: []string{"validation-1"},
+			},
+		},
+	}
+	quality := mapResultQuality(snapshot)
+	if len(quality) != 1 {
+		t.Fatalf("result quality = %+v, want one trace", quality)
+	}
+	if quality[0].State != "failed" {
+		t.Fatalf("result quality state = %q, want failed", quality[0].State)
+	}
+	if !containsResultQualityIssueCode(quality[0].Issues, "dod_item_weak_verification_evidence") {
+		t.Fatalf("result quality issues = %+v, want dod_item_weak_verification_evidence", quality[0].Issues)
 	}
 }
 
@@ -2946,4 +3064,17 @@ func TestReadTerminalRunModelsWithBackendRemainStableAcrossReloads(t *testing.T)
 	if !reflect.DeepEqual(firstWorkspace, secondWorkspace) {
 		t.Fatalf("workspace snapshot mismatch after reload: first=%+v second=%+v", firstWorkspace, secondWorkspace)
 	}
+}
+
+func containsResultQualityIssueCode(items []ResultQualityIssue, code string) bool {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return false
+	}
+	for _, item := range items {
+		if strings.TrimSpace(item.Code) == code {
+			return true
+		}
+	}
+	return false
 }

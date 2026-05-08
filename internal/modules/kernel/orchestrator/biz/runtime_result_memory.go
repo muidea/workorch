@@ -12,6 +12,8 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
+const runSummaryDoDGateVersionTag = "dod_gate_version:v2"
+
 func completionRunSummaryMemoryContent(
 	run *runModel.Run,
 	summary string,
@@ -196,7 +198,7 @@ func (o *RuntimeOrchestrator) recordRunSummaryMemoryFromValidatedDoDAssessment(
 		MemoryType:  memorycommon.MemoryTypeRunSummary,
 		Content:     completionRunSummaryMemoryContent(run, summary, assessment, evidenceRefs, o.resultPatchDetails(ctx, run.ID), o.resultEvidenceDetails(ctx, evidenceRefs), o.resultWebSourceDetails(ctx, run.ID)),
 		Summary:     summary,
-		Tags:        []string{"run_summary", "dod_assessment", "code_agent"},
+		Tags:        []string{"run_summary", "dod_assessment", "code_agent", runSummaryDoDGateVersionTag},
 		Importance:  70,
 		Confidence:  70,
 		Visibility:  "workspace",

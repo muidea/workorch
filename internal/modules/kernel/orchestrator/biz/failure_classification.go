@@ -19,6 +19,7 @@ const (
 	failureClassContextTooLarge     = "context_too_large"
 	failureClassRateLimited         = "rate_limited"
 	failureClassAuthOrConfigError   = "auth_or_config_error"
+	failureClassDoDCoverageMissing  = "dod_coverage_missing"
 	failureClassWorkspacePath       = "workspace_path_conflict"
 	failureClassShellCommand        = "shell_command_failed"
 	failureClassPatchApply          = "patch_apply_failed"
@@ -54,6 +55,8 @@ func classifyRuntimeFailure(step *runModel.Step, output map[string]any, summary 
 		class = failureClassContextTooLarge
 	} else if isLLMProviderRateLimitedFailure(lowerStage, execErr, output) {
 		class = failureClassRateLimited
+	} else if isDoDCoverageMissingFailure(lowerStage, execErr, output) {
+		class = failureClassDoDCoverageMissing
 	} else if isLLMProviderAuthOrConfigFailure(lowerStage, execErr, output) {
 		class = failureClassAuthOrConfigError
 	} else if isLLMProviderSchemaFailure(lowerStage) {
@@ -128,6 +131,17 @@ func isLLMProviderRateLimitedFailure(lowerStage string, execErr error, output ma
 		strings.Contains(errText, "too many requests") ||
 		strings.Contains(errText, "quota exceeded") ||
 		strings.Contains(errText, "http status 429")
+}
+
+func isDoDCoverageMissingFailure(lowerStage string, execErr error, output map[string]any) bool {
+	if lowerStage != "llm_dod_assessment" {
+		return false
+	}
+	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); strings.TrimSpace(stringFromMap(diagnostics, "kind")) == failureClassDoDCoverageMissing {
+		return true
+	}
+	errText := strings.ToLower(firstNonEmptyString(errorString(execErr), stringFromMap(output, "error"), stringFromMap(output, "reason")))
+	return strings.Contains(errText, "dodassessment does not cover all current dod items")
 }
 
 func isLLMProviderAuthOrConfigFailure(lowerStage string, execErr error, output map[string]any) bool {

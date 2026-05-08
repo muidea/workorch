@@ -55,3 +55,19 @@ func TestClassifyRuntimeFailureProviderAuthOrConfig(t *testing.T) {
 		t.Fatalf("classification = %+v, want %s", classification, failureClassAuthOrConfigError)
 	}
 }
+
+func TestClassifyRuntimeFailureDoDCoverageMissingHasPriorityOverAuthKeywords(t *testing.T) {
+	step := &runModel.Step{
+		ID:    common.StepID("run-x/step-1"),
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage": "llm_dod_assessment",
+			"error": "invalid argument: dodAssessment does not cover all current DoD items; missing: API Key auth behavior",
+		},
+	}
+	classification := classifyRuntimeFailure(step, step.Output, "runtime completion gate failed", errors.New("invalid argument: dodAssessment does not cover all current DoD items; missing: API Key auth behavior"))
+	if classification.Class != failureClassDoDCoverageMissing {
+		t.Fatalf("classification = %+v, want %s", classification, failureClassDoDCoverageMissing)
+	}
+}

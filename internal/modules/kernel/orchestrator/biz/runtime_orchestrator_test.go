@@ -2468,6 +2468,17 @@ func TestRuntimeOrchestrator_RuntimeRepairInputSkipsWorkspaceManifestForDoDFailu
 				"satisfied": false,
 				"summary":   "needs more evidence",
 			},
+			"runtimeDiagnostics": map[string]any{
+				"kind": failureClassDoDCoverageMissing,
+				"missingDoDItems": []map[string]any{
+					{
+						"raw":                  "配置文件必须被代码真实加载并有测试断言",
+						"normalized":           "配置文件必须被代码真实加载并有测试断言",
+						"kind":                 "leaf",
+						"requiredEvidenceHint": "Provide implementation evidence and configuration-loading verification evidence for this DoD item.",
+					},
+				},
+			},
 		},
 	}
 
@@ -2475,6 +2486,12 @@ func TestRuntimeOrchestrator_RuntimeRepairInputSkipsWorkspaceManifestForDoDFailu
 
 	if manifest := mapSliceFromValue(input[stepInputKeyWorkspaceFileManifest]); len(manifest) != 0 {
 		t.Fatalf("workspaceFileManifest = %+v, want no manifest for non-path DoD repair", input[stepInputKeyWorkspaceFileManifest])
+	}
+	if _, ok := mapFromValue(input["runtimeDiagnostics"])["missingDoDItems"]; !ok {
+		t.Fatalf("runtimeDiagnostics = %#v, want missingDoDItems diagnostics", input["runtimeDiagnostics"])
+	}
+	if missing := mapSliceFromValue(input["missingDoDItems"]); len(missing) != 1 || missing[0]["kind"] != "leaf" {
+		t.Fatalf("missingDoDItems = %#v, want one leaf item", input["missingDoDItems"])
 	}
 }
 

@@ -627,15 +627,32 @@ func compactMCPCapabilityContexts(items []map[string]any) []map[string]any {
 func compactMemoryContexts(items []map[string]any) []map[string]any {
 	ret := make([]map[string]any, 0, min(len(items), 8))
 	for _, item := range items {
-		ret = append(ret, pickExecutionContextFields(item, []string{
+		compact := pickExecutionContextFields(item, []string{
 			"id", "runId", "sourceType", "sourceRef", "memoryType", "summary", "content",
 			"tags", "importance", "confidence", "visibility", "vectorScore",
-		}))
+		})
+		if isLegacyRunSummaryMemory(item) {
+			compact["evidenceTrust"] = "legacy_pre_dod_gate"
+			compact["evidenceTrustReason"] = "Run-summary memory was created before strict DoD gate version tagging; treat as historical reference only."
+		}
+		ret = append(ret, compact)
 		if len(ret) >= 8 {
 			break
 		}
 	}
 	return ret
+}
+
+func isLegacyRunSummaryMemory(item map[string]any) bool {
+	if strings.TrimSpace(stringFromMap(item, "memoryType")) != "run_summary" {
+		return false
+	}
+	for _, tag := range stringSliceFromValue(item["tags"]) {
+		if strings.TrimSpace(tag) == runSummaryDoDGateVersionTag {
+			return false
+		}
+	}
+	return true
 }
 
 func pickExecutionContextFields(input map[string]any, fields []string) map[string]any {

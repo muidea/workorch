@@ -158,6 +158,9 @@ type RepairLoop struct {
 	LastFailureClass     string   `json:"lastFailureClass,omitempty"`
 	LastFailureSignature string   `json:"lastFailureSignature,omitempty"`
 	LastFailureAt        string   `json:"lastFailureAt,omitempty"`
+	MissingDoDItems      []map[string]any `json:"missingDoDItems,omitempty"`
+	RecentAttempts       []map[string]any `json:"recentAttempts,omitempty"`
+	RecommendedNextSteps []string `json:"recommendedNextSteps,omitempty"`
 	NextAction           string   `json:"nextAction,omitempty"`
 	Escalated            bool     `json:"escalated"`
 	EscalationReason     string   `json:"escalationReason,omitempty"`
