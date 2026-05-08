@@ -3,6 +3,7 @@ package appservice
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -270,6 +271,90 @@ func TestCompressedContextPatchRecordsRecoveryMemoryRecallTrace(t *testing.T) {
 		len(traces[0].RetrievedMemoryIDs) != 1 ||
 		traces[0].RetrievedMemoryIDs[0] != "memory-recovery-source" {
 		t.Fatalf("recovery traces = %+v, want inherited memory recall trace", traces)
+	}
+}
+
+func TestCompressedContextPatchForRunRefreshesCumulativeGoalAndDoD(t *testing.T) {
+	ctx := context.Background()
+	session, err := NewRuntimeSessionWithBackend("memory", "")
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	defer session.Close(ctx)
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-recovery-definitions")
+	runID := common.RunID("run-recovery-definitions")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "recovery definitions", State: common.WorkspaceStateBlocked}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	for _, goal := range []*workspacemodel.Goal{
+		{ID: "goal-1", WorkspaceID: workspaceID, Text: "initial goal"},
+		{ID: "goal-2", WorkspaceID: workspaceID, Text: "additional goal"},
+	} {
+		if err := exports.Repositories.Goals.Create(ctx, goal); err != nil {
+			t.Fatalf("seed goal %s: %v", goal.ID, err)
+		}
+	}
+	for _, dod := range []*workspacemodel.DoD{
+		{ID: "dod-1", WorkspaceID: workspaceID, Items: []string{"initial dod"}, State: common.DoDStateReady},
+		{ID: "dod-2", WorkspaceID: workspaceID, Items: []string{"additional dod"}, State: common.DoDStateReady},
+	} {
+		if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
+			t.Fatalf("seed dod %s: %v", dod.ID, err)
+		}
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		GoalID:           "goal-1",
+		DoDID:            "dod-1",
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: "ticket-recovery-definitions",
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := exports.Repositories.Tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          "ticket-recovery-definitions",
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		State:       common.DecisionTicketStateResolved,
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := exports.Repositories.Resolutions.Create(ctx, &decisionmodel.Resolution{
+		ID:       "resolution-recovery-definitions",
+		TicketID: "ticket-recovery-definitions",
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+
+	patch, _, err := compressedContextPatchForRun(ctx, session, runID)
+	if err != nil {
+		t.Fatalf("compressedContextPatchForRun: %v", err)
+	}
+	if patch["goalId"] != "goal-2" || patch["doDId"] != "dod-2" {
+		t.Fatalf("definition patch = %+v, want latest goal/dod IDs", patch)
+	}
+	goalContext, _ := patch["goal"].(map[string]any)
+	goalText, _ := goalContext["text"].(string)
+	if !strings.Contains(goalText, "initial goal") || !strings.Contains(goalText, "additional goal") {
+		t.Fatalf("goal context = %+v, want cumulative goals", goalContext)
+	}
+	dodContext, _ := patch["dod"].(map[string]any)
+	dodItems := normalizeStringIDsFromAny(dodContext["items"])
+	if !stringSliceContains(dodItems, "initial dod") || !stringSliceContains(dodItems, "additional dod") {
+		t.Fatalf("dod context = %+v, want cumulative dods", dodContext)
+	}
+	if _, ok := patch["compressedContext"].(map[string]any); !ok {
+		t.Fatalf("definition patch = %+v, want compressedContext retained", patch)
+	}
+	revision, _ := patch["definitionRevision"].(map[string]any)
+	if revision["policy"] != "workspace_goal_dod_cumulative" {
+		t.Fatalf("definitionRevision = %+v, want cumulative policy", revision)
 	}
 }
 

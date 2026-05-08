@@ -271,7 +271,105 @@ func compressedContextPatchForRun(ctx context.Context, session *RuntimeSession, 
 	if err := recordRecoveryMemoryRecallTrace(ctx, session, deps, item, compressed); err != nil {
 		return nil, nil, err
 	}
-	return map[string]any{"compressedContext": compressed}, item, nil
+	patch, err := workspaceDefinitionContextPatchForRun(ctx, session, item)
+	if err != nil {
+		return nil, nil, err
+	}
+	if patch == nil {
+		patch = map[string]any{}
+	}
+	patch["compressedContext"] = compressed
+	return patch, item, nil
+}
+
+func workspaceDefinitionContextPatchForRun(ctx context.Context, session *RuntimeSession, item *runmodel.Run) (map[string]any, error) {
+	if session == nil || item == nil || item.WorkspaceID == "" || item.GoalID == "" || item.DoDID == "" {
+		return nil, nil
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		return nil, err
+	}
+	if exports.Repositories.Workspaces == nil || exports.Repositories.Goals == nil || exports.Repositories.DoDs == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	var (
+		workspace *workspacemodel.Workspace
+		goal      *workspacemodel.Goal
+		dod       *workspacemodel.DoD
+	)
+	if err := activationContextReadTasks(
+		func() error {
+			var err error
+			workspace, err = exports.Repositories.Workspaces.Get(ctx, item.WorkspaceID)
+			return err
+		},
+		func() error {
+			var err error
+			goal, err = selectWorkspaceExecutionGoal(ctx, exports.Repositories.Goals.ListByWorkspaceID, exports.Repositories.EventRecords, item.WorkspaceID, item.GoalID)
+			return err
+		},
+		func() error {
+			var err error
+			dod, err = selectWorkspaceExecutionDoD(ctx, exports.Repositories.DoDs.ListByWorkspaceID, exports.Repositories.EventRecords, item.WorkspaceID, item.DoDID)
+			return err
+		},
+	); err != nil {
+		return nil, err
+	}
+	if workspace == nil || goal == nil || dod == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	effectiveGoal, workspaceGoals, err := effectiveWorkspaceGoal(ctx, exports.Repositories.Goals, exports.Repositories.EventRecords, workspace.ID, goal)
+	if err != nil {
+		return nil, err
+	}
+	effectiveDoD, workspaceDoDs, err := effectiveWorkspaceDoD(ctx, exports.Repositories.DoDs, exports.Repositories.EventRecords, workspace.ID, dod)
+	if err != nil {
+		return nil, err
+	}
+	patch := map[string]any{
+		"goalId": string(effectiveGoal.ID),
+		"goal":   goalContext(effectiveGoal),
+		"doDId":  string(effectiveDoD.ID),
+		"dod":    dodContext(effectiveDoD),
+		"definitionRevision": map[string]any{
+			"policy":          "workspace_goal_dod_cumulative",
+			"effectiveGoalId": string(effectiveGoal.ID),
+			"effectiveDoDId":  string(effectiveDoD.ID),
+			"goalIds":         goalIDsFromContexts(workspaceGoals),
+			"doDIds":          doDIDsFromContexts(workspaceDoDs),
+		},
+	}
+	if len(workspaceGoals) > 0 {
+		patch["goals"] = workspaceGoals
+		patch["goalDefinitionPolicy"] = "workspace_goals_are_cumulative_latest_refines_previous"
+	}
+	if len(workspaceDoDs) > 0 {
+		patch["dods"] = workspaceDoDs
+		patch["doDDefinitionPolicy"] = "workspace_dods_are_cumulative_latest_refines_previous"
+	}
+	return patch, nil
+}
+
+func goalIDsFromContexts(items []map[string]any) []string {
+	ret := make([]string, 0, len(items))
+	for _, item := range items {
+		if id, _ := item["id"].(string); strings.TrimSpace(id) != "" {
+			ret = append(ret, strings.TrimSpace(id))
+		}
+	}
+	return ret
+}
+
+func doDIDsFromContexts(items []map[string]any) []string {
+	ret := make([]string, 0, len(items))
+	for _, item := range items {
+		if id, _ := item["id"].(string); strings.TrimSpace(id) != "" {
+			ret = append(ret, strings.TrimSpace(id))
+		}
+	}
+	return ret
 }
 
 func recordRecoveryMemoryRecallTrace(ctx context.Context, session *RuntimeSession, deps readModelDependencies, item *runmodel.Run, compressed map[string]any) error {

@@ -36,6 +36,9 @@ func validatedCompletionDoDAssessment(run *runModel.Run, output map[string]any) 
 	if err := validateDoDAssessmentItems(assessment["items"]); err != nil {
 		return nil, "", err
 	}
+	if containsWeakSatisfiedVerificationEvidence(assessment) {
+		return nil, "", fmt.Errorf("%w: satisfied dodAssessment cannot rely on weak verification evidence without an explicit skipped item and impact assessment", common.ErrInvalidArgument)
+	}
 	return assessment, summary, nil
 }
 
@@ -75,6 +78,32 @@ func validateDoDAssessmentItems(value any) error {
 		}
 	}
 	return nil
+}
+
+func containsWeakSatisfiedVerificationEvidence(assessment map[string]any) bool {
+	if len(assessment) == 0 {
+		return false
+	}
+	if satisfied, _ := assessment["satisfied"].(bool); !satisfied {
+		return false
+	}
+	text := strings.ToLower(fmt.Sprint(assessment))
+	for _, marker := range []string{
+		"[no test files]",
+		"no test files",
+		"no tests to run",
+		"0 tests",
+		"without assertions",
+		"no assertions",
+		"无测试文件",
+		"没有测试",
+		"无有效断言",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func doDAssessmentItemMaps(value any) ([]map[string]any, bool) {

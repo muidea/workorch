@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -64,7 +65,33 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 		}
 		return common.ErrInvalidArgument
 	}
+	if shouldCloseCompletionGateFailureWithoutRepair(summary, step.Output) {
+		reason := "runtime step failed"
+		if execErr != nil {
+			reason = execErr.Error()
+		} else if step.Output != nil {
+			reason = stringFromMap(step.Output, "error")
+			if reason == "" {
+				reason = stringFromMap(step.Output, "reason")
+			}
+		}
+		return o.FailRun(ctx, run.ID, reason)
+	}
 	return o.dispatchRuntimeRepairFollowUp(ctx, run, step, execErr)
+}
+
+func shouldCloseCompletionGateFailureWithoutRepair(summary string, output map[string]any) bool {
+	if strings.TrimSpace(summary) != "runtime completion gate failed" {
+		return false
+	}
+	assessment := doDAssessmentFromOutput(output)
+	if assessment == nil {
+		return false
+	}
+	if satisfied, _ := assessment["satisfied"].(bool); !satisfied {
+		return true
+	}
+	return containsWeakSatisfiedVerificationEvidence(assessment)
 }
 
 func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
@@ -132,13 +159,15 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
 		Question:     localizedRuntimeRepairExhaustionQuestion(language),
 		Context: map[string]any{
-			"attempts":         maxRuntimeRepairAttempts,
-			"failureClass":     stringFromMap(failedStep.Output, failureOutputKeyClass),
-			"failureSignature": stringFromMap(failedStep.Output, failureOutputKeySignature),
-			"failedStepId":     string(failedStep.ID),
-			"failedStepKind":   failedStep.Kind,
-			"failedStepInput":  compactStepInputForLLMContext(failedStep.Input),
-			"failedStepOutput": compactStepOutputForLLMContext(failedStep.Output),
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+			"allowedRecoveryActions":         []string{"retry_same_step", "replan", "provide_information", "terminate"},
+			"attempts":                       maxRuntimeRepairAttempts,
+			"failureClass":                   stringFromMap(failedStep.Output, failureOutputKeyClass),
+			"failureSignature":               stringFromMap(failedStep.Output, failureOutputKeySignature),
+			"failedStepId":                   string(failedStep.ID),
+			"failedStepKind":                 failedStep.Kind,
+			"failedStepInput":                compactStepInputForLLMContext(failedStep.Input),
+			"failedStepOutput":               compactStepOutputForLLMContext(failedStep.Output),
 		},
 	}
 	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {

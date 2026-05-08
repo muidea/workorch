@@ -3,6 +3,8 @@ package appservice
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -396,6 +398,85 @@ func TestResolveDecisionWithSessionAllowsTargetWorkspaceExternalDependencyConfig
 	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
 		t.Fatalf("decision = %+v, want target workspace config accepted", item)
 	}
+	if rendered := fmt.Sprintf("%#v", item.ResolutionPayload); strings.Contains(strings.ToLower(rendered), "sk-secret") {
+		t.Fatalf("resolutionPayload = %+v, want secret redacted", item.ResolutionPayload)
+	}
+}
+
+func TestResolveDecisionWithSessionRejectsAmbiguousRepairExhaustionContinue(t *testing.T) {
+	session, tickets, resolutions := newCountingDecisionRuntimeSession(t)
+	ctx := context.Background()
+	ticketID := common.TicketID("ticket-repair-exhaustion-ambiguous")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: common.WorkspaceID("ws-repair-exhaustion-ambiguous"),
+		RunID:       common.RunID("run-repair-exhaustion-ambiguous"),
+		StepID:      common.StepID("run-repair-exhaustion-ambiguous/step-1"),
+		Reason:      "runtime repair attempts exhausted after 3 attempts",
+		Question:    "Provide missing implementation guidance, choose replan, or reject the current path.",
+		Context: map[string]any{
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+		},
+		State: common.DecisionTicketStateOpen,
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	_, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+		ResolutionType: "auto",
+		ResolutionPayload: map[string]any{
+			"answer":   "继续",
+			"operator": "tui",
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("ResolveDecisionWithSession err = %v, want invalid argument", err)
+	}
+	item, getErr := tickets.Get(ctx, ticketID)
+	if getErr != nil {
+		t.Fatalf("get ticket: %v", getErr)
+	}
+	if item.State != common.DecisionTicketStateOpen {
+		t.Fatalf("ticket state = %s, want open", item.State)
+	}
+	if _, getErr = resolutions.GetByTicketID(ctx, ticketID); !errors.Is(getErr, common.ErrNotFound) {
+		t.Fatalf("resolution err = %v, want not found", getErr)
+	}
+}
+
+func TestResolveDecisionWithSessionAllowsExplicitRepairExhaustionRecoveryAction(t *testing.T) {
+	session, tickets, _ := newCountingDecisionRuntimeSession(t)
+	ctx := context.Background()
+	ticketID := common.TicketID("ticket-repair-exhaustion-explicit")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: common.WorkspaceID("ws-repair-exhaustion-explicit"),
+		RunID:       common.RunID("run-repair-exhaustion-explicit"),
+		StepID:      common.StepID("run-repair-exhaustion-explicit/step-1"),
+		Reason:      "runtime repair attempts exhausted after 3 attempts",
+		Question:    "Provide missing implementation guidance, choose replan, or reject the current path.",
+		Context: map[string]any{
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+		},
+		State: common.DecisionTicketStateOpen,
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+		ResolutionPayload: map[string]any{
+			"recoveryAction":    "retry_same_step",
+			"resumeInstruction": "retry the failed verification after applying the clarified constraint",
+			"operator":          "tui",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveDecisionWithSession: %v", err)
+	}
+	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
+		t.Fatalf("decision = %+v, want resolved explicit recovery action", item)
+	}
 }
 
 func TestResolveDecisionWithSessionReusesReturnedEntitiesForResponse(t *testing.T) {
@@ -425,8 +506,8 @@ func TestResolveDecisionWithSessionReusesReturnedEntitiesForResponse(t *testing.
 	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo || item.ResolutionPayload["operator"] != "tester" {
 		t.Fatalf("decision = %+v, want resolved response from returned entities", item)
 	}
-	if got := tickets.getCount.Load(); got != 1 {
-		t.Fatalf("ticket Get count = %d, want one service read without app response reread", got)
+	if got := tickets.getCount.Load(); got != 2 {
+		t.Fatalf("ticket Get count = %d, want validation read plus service resolve read without app response reread", got)
 	}
 	if got := resolutions.getByTicketIDCount.Load(); got != 0 {
 		t.Fatalf("resolution GetByTicketID count = %d, want no app response reread on first resolve", got)

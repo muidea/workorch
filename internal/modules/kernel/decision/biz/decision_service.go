@@ -114,7 +114,7 @@ func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.T
 		ID:       cmd.ResolutionID,
 		TicketID: cmd.TicketID,
 		Type:     cmd.Type,
-		Payload:  clonePayload(cmd.Payload),
+		Payload:  common.RedactSensitiveMap(clonePayload(cmd.Payload)),
 	}
 	if err := s.resolutions.Create(ctx, resolution); err != nil {
 		return nil, err

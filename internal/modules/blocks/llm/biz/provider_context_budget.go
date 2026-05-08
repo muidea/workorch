@@ -32,7 +32,7 @@ var providerP1InputKeys = []string{
 }
 
 var providerP2InputKeys = []string{
-	"failedExecutionGraph", "graphEvidence", "workspaceFileManifest", "workspaceManifest", "previousResults",
+	"failedExecutionGraph", "graphEvidence", "runEvidenceSummary", "workspaceFileManifest", "workspaceManifest", "previousResults",
 }
 
 func enforceProviderRequestBudget(request llmmodels.ProviderRequest) llmmodels.ProviderRequest {
@@ -396,7 +396,7 @@ func stageAwareExecutionContextKeys(stage string, includeP2 bool) []string {
 		keys = append(keys, "goals", "dods", "governanceHistory", "memoryRetrieval", "skillSelection")
 	}
 	if includeP2 {
-		keys = append(keys, "graphEvidence", "failedExecutionGraph")
+		keys = append(keys, "graphEvidence", "runEvidenceSummary", "failedExecutionGraph")
 	}
 	return uniqueStrings(keys)
 }
@@ -448,7 +448,7 @@ func providerInputSourceRefs(input map[string]any) []string {
 	for key := range input {
 		switch strings.TrimSpace(key) {
 		case "executionContext", "workspaceFileManifest", "workspaceManifest",
-			"graphEvidence", "failedExecutionGraph", "failedStepInput", "failedStepOutput",
+			"graphEvidence", "runEvidenceSummary", "failedExecutionGraph", "failedStepInput", "failedStepOutput",
 			"decisionResolution", "approvalResolution", "memoryRetrieval", "skillSelection":
 			refs = append(refs, "input."+key)
 		}

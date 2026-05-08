@@ -38,6 +38,7 @@ const (
 	stepInputKeyGraphCompletedNodes    = "graphCompletedNodes"
 	stepInputKeyGraphBatch             = "graphBatch"
 	stepInputKeyGraphEvidence          = "graphEvidence"
+	stepInputKeyRunEvidenceSummary     = "runEvidenceSummary"
 	stepInputKeyWorkspaceFileManifest  = "workspaceFileManifest"
 	stepInputKeySoulStage              = "soulStage"
 	stepInputKeyRuntimeRepairFollowUp  = "runtimeRepairFollowUp"
@@ -678,6 +679,12 @@ func mergeRunExecutionContextPatch(run *runModel.Run, patch map[string]any) {
 		}
 		run.ExecutionContext[key] = value
 	}
+	if goalID, _ := patch["goalId"].(string); strings.TrimSpace(goalID) != "" {
+		run.GoalID = common.GoalID(strings.TrimSpace(goalID))
+	}
+	if dodID, _ := patch["doDId"].(string); strings.TrimSpace(dodID) != "" {
+		run.DoDID = common.DoDID(strings.TrimSpace(dodID))
+	}
 }
 
 func (o *RuntimeOrchestrator) releaseWorkspaceForTerminalRun(ctx context.Context, run *runModel.Run, state common.WorkspaceState) error {
@@ -1046,16 +1053,39 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return o.dispatchStepWithWorkspace(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), input, workspace)
 	}
 	if shouldDispatchLLMCompletionFollowUp(run, step, output) {
-		return o.dispatchStepWithWorkspace(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), llmCompletionFollowUpStepInput(run, step), workspace)
+		return o.dispatchStepWithWorkspace(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.llmCompletionFollowUpStepInput(ctx, run, step), workspace)
 	}
 	assessment, summary, err := validatedCompletionDoDAssessment(run, output)
 	if err != nil {
+		_ = o.recordRejectedCompletionDoDAssessment(ctx, run, step, output)
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
 	if err := o.recordCompletionEvidenceFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace); err != nil {
 		return err
 	}
 	return o.validateAndCompleteRunWithWorkspace(ctx, run, step.ID, workspace)
+}
+
+func (o *RuntimeOrchestrator) recordRejectedCompletionDoDAssessment(ctx context.Context, run *runModel.Run, step *runModel.Step, output map[string]any) error {
+	assessment := doDAssessmentFromOutput(output)
+	if assessment == nil {
+		return nil
+	}
+	if satisfied, _ := assessment["satisfied"].(bool); satisfied {
+		if !containsWeakSatisfiedVerificationEvidence(assessment) {
+			return nil
+		}
+		rejected := cloneStepPayload(assessment)
+		rejected["satisfied"] = false
+		if summary := strings.TrimSpace(stringFromMap(rejected, "summary")); summary != "" {
+			rejected["summary"] = "DoD assessment rejected: " + summary
+		} else {
+			rejected["summary"] = "DoD assessment rejected because verification evidence is weak."
+		}
+		assessment = rejected
+	}
+	summary, _ := assessment["summary"].(string)
+	return o.recordRunResultFromRejectedDoDAssessment(ctx, run, step, assessment, summary)
 }
 
 func (o *RuntimeOrchestrator) nextDispatchSpec(
@@ -1163,7 +1193,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			return []stepDispatchSpec{{
 				ID:    llmCompletionFollowUpStepID(run.ID, last),
 				Kind:  initialStepKind(run),
-				Input: llmCompletionFollowUpStepInput(run, last),
+				Input: o.llmCompletionFollowUpStepInput(ctx, run, last),
 			}}, nil
 		}
 	}

@@ -75,11 +75,6 @@ func EnsureBuiltinDefaults(ctx context.Context, soulRepo repository.SoulReposito
 		if s.ID == "" {
 			continue
 		}
-		if _, err := soulRepo.Get(ctx, common.SoulID(s.ID)); err == nil {
-			continue // already exists
-		} else if !errors.Is(err, common.ErrNotFound) {
-			return err
-		}
 		item := &soulmodel.Soul{
 			ID:                          common.SoulID(s.ID),
 			Name:                        s.Name,
@@ -92,7 +87,7 @@ func EnsureBuiltinDefaults(ctx context.Context, soulRepo repository.SoulReposito
 			AllowedCapabilityCategories: s.AllowedCapabilityCategories,
 			AllowedToolKinds:            s.AllowedToolKinds,
 		}
-		if err := soulRepo.Create(ctx, item); err != nil {
+		if err := upsertBuiltinSoul(ctx, soulRepo, item); err != nil {
 			return err
 		}
 	}
@@ -105,26 +100,48 @@ func EnsureBuiltinDefaults(ctx context.Context, soulRepo repository.SoulReposito
 		if t.ID == "" {
 			continue
 		}
-		if _, err := templateRepo.Get(ctx, t.ID); err == nil {
-			continue // already exists, keep user version
-		} else if !errors.Is(err, common.ErrNotFound) {
-			return err
-		}
-		if err := templateRepo.Create(ctx, workspaceTemplateFromEmbedded(t)); err != nil {
+		if err := upsertBuiltinWorkspaceTemplate(ctx, templateRepo, workspaceTemplateFromEmbedded(t)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+func upsertBuiltinSoul(ctx context.Context, repo repository.SoulRepository, item *soulmodel.Soul) error {
+	if item == nil || item.ID == "" {
+		return nil
+	}
+	if err := repo.Update(ctx, item); err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return repo.Create(ctx, item)
+		}
+		return err
+	}
+	return nil
+}
+
+func upsertBuiltinWorkspaceTemplate(ctx context.Context, repo repository.WorkspaceTemplateRepository, item *repository.WorkspaceTemplate) error {
+	if item == nil || strings.TrimSpace(item.ID) == "" {
+		return nil
+	}
+	if err := repo.Update(ctx, item); err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return repo.Create(ctx, item)
+		}
+		return err
+	}
+	return nil
+}
+
 func workspaceTemplateFromEmbedded(t embeddedTemplate) *repository.WorkspaceTemplate {
 	return &repository.WorkspaceTemplate{
-		ID:           t.ID,
-		Name:         t.Name,
-		Description:  t.Description,
-		GoalText:     t.GoalText,
-		DoDItems:     filterEmptyStrings(t.DoDItems),
-		SoulBindings: t.SoulBindings,
+		ID:            t.ID,
+		Name:          t.Name,
+		Description:   t.Description,
+		GoalText:      t.GoalText,
+		DoDItems:      filterEmptyStrings(t.DoDItems),
+		DefaultSoulID: t.DefaultSoulID,
+		SoulBindings:  t.SoulBindings,
 	}
 }
 

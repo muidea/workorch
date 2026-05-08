@@ -20,6 +20,7 @@ const (
 	decisionContextDependencyLLMProvider    = "llm_provider"
 	decisionContextKeyRecoveryPolicy        = "recoveryPolicy"
 	decisionContextRecoveryPolicyConfigOnly = "system_config_required"
+	decisionContextRecoveryPolicyRepairPlan = "runtime_repair_exhausted_requires_strategy"
 )
 
 type runtimeDecisionBlockSpec struct {
@@ -87,10 +88,10 @@ func (o *RuntimeOrchestrator) createDecisionTicket(
 		WorkspaceID:  run.WorkspaceID,
 		RunID:        run.ID,
 		StepID:       step.ID,
-		Reason:       spec.Reason,
+		Reason:       common.RedactSensitiveString(spec.Reason),
 		DecisionKind: spec.DecisionKind,
-		Question:     spec.Question,
-		Context:      cloneStepPayload(spec.Context),
+		Question:     common.RedactSensitiveString(spec.Question),
+		Context:      common.RedactSensitiveMap(cloneStepPayload(spec.Context)),
 		State:        common.DecisionTicketStateOpen,
 	}
 	if err := o.tickets.Create(ctx, ticket); err != nil {
@@ -133,9 +134,9 @@ func (o *RuntimeOrchestrator) createApproval(
 		WorkspaceID: run.WorkspaceID,
 		RunID:       run.ID,
 		StepID:      step.ID,
-		Reason:      reason,
-		Action:      action,
-		Context:     cloneStepPayload(approvalContext),
+		Reason:      common.RedactSensitiveString(reason),
+		Action:      common.RedactSensitiveString(action),
+		Context:     common.RedactSensitiveMap(cloneStepPayload(approvalContext)),
 		State:       common.ApprovalStatePending,
 	}
 	if err := o.approvals.Create(ctx, approval); err != nil {

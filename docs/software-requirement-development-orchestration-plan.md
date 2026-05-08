@@ -156,6 +156,25 @@
 | GDP-06 | repair loop 可见性和控制粒度不足 | 需要让用户和前端知道当前修复轮次、失败原因、继续条件和升级 Decision 的原因 |
 | GDP-07 | 多端展示模型需要统一 | Web / TUI 对 Goal、DoD、TaskDecomposition、Memory Recall、Artifact、Approval、Decision 的展示应严格匹配业务模型 |
 
+### 最新运行回归差距
+
+基于 `ws-e1e310fd02e4375e` 的运行核对，当前 SRD-01 至 SRD-19 虽已完成原定
+验收，但复杂软件开发 Goal / DoD 闭环仍暴露出以下新增差距。这些差距需要进入
+下一轮逐项收口，避免继续把问题归因到单一 provider timeout 或单一提示词偏差。
+
+| ID | 差距 | 说明 |
+| --- | --- | --- |
+| RGD-01 | 内置模板和 Soul 默认值未稳定刷新 | 运行期仍使用缺少“空 workspace 不等于缺源码”约束的旧 `software-dev` Soul，说明嵌入默认值和系统数据之间存在漂移 |
+| RGD-02 | 空 workspace 新项目场景仍可能误触发源码缺失 Decision | 软件开发新项目应能从空目录创建最小可验证项目，而不是默认请求源码来源 |
+| RGD-03 | Stage Soul 绑定与默认 Soul 上下文存在不一致 | Workspace 阶段绑定为 `software-dev`，但 run context 中出现 `soul-code-review-approval` 作为默认 Soul 信息，容易污染 LLM 上下文 |
+| RGD-04 | 补充 Goal / DoD 后的重新规划不充分 | 后续执行需要基于累计 Goal / DoD 形成新的计划修订，而不是只沿用旧 graph 或局部 evidence |
+| RGD-05 | DoD 评估证据包不完整 | 最终评估只看到部分 build/test/patch 证据，缺少覆盖全部 DoD 的完整验证证据链 |
+| RGD-06 | repair / provider retry 边界不清晰 | provider timeout、DoD 不满足、repair exhausted 被嵌套处理，导致恢复链膨胀和重复 Ticket |
+| RGD-07 | LLM context 持续增长 | governanceHistory、graphEvidence、previousStepOutput 等反复进入上下文，导致请求体变大并放大 timeout 风险 |
+| RGD-08 | Decision resolution 和 ToolCall 中存在敏感信息持久化风险 | 目标项目测试 provider/API Key 信息会进入 resolution、step input、tool_call 和后续 LLM 上下文 |
+| RGD-09 | 目标项目外部依赖配置与 WorkOrch 自身 provider 配置边界需要更强约束 | 用户补充的 DeepSeek 信息是目标项目测试输入，不应被解释为替换 WorkOrch runtime LLM provider |
+| RGD-10 | 测试通过但无有效断言仍可能被弱化处理 | `go test ./...` 输出 `[no test files]` 不能证明 DoD 中流式、Token、异常透传、并发等能力满足 |
+
 ## 任务清单
 
 状态取值：
@@ -206,6 +225,26 @@
 | SRD-18 | 增加风险操作 e2e | e2e | P1 | verified | 依赖升级、破坏性接口变更、迁移或部署类操作触发 Approval |
 | SRD-19 | 增加修复失败升级 e2e | e2e | P1 | verified | 多轮 repair 仍失败时，系统输出失败证据并升级 Decision |
 
+### Phase 5：复杂软件开发闭环回归收口
+
+| ID | 改进项名称 | 类型 | 优先级 | 状态 | 原因 | 改进方案 | 验收标准 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| SRD-20 | 文档状态刷新与新增回归项 | 文档 | P0 | verified | SRD-01 至 SRD-19 的原验收结论不能覆盖 `ws-e1e310fd02e4375e` 暴露的新问题 | 将本轮新增问题作为 Phase 5 独立跟踪，不回写篡改历史验收结论 | 文档明确新增差距、任务、验收场景和跟踪记录 |
+| SRD-21 | 内置 template / Soul 默认刷新机制 | 后端/模板 | P0 | verified | 已部署数据可能继续使用旧内置 Soul，导致修复后的模板约束无法生效 | 当前阶段不考虑老数据兼容，内置默认 Soul/template 按内置 ID 做确定性 upsert；用户自定义能力需通过非内置 ID 表达 | 重启或重新部署后，系统内置 `software-dev` Soul/template 与嵌入默认值一致，并有单测覆盖 |
+| SRD-22 | 空 workspace 新项目初始化闭环 | Soul/e2e | P0 | verified | 空目录软件开发任务被错误升级为“需要源码来源” Decision | 在 `software-dev` Soul/template 中明确新项目初始化路径；平台只提供通用 template 刷新和阶段上下文，不在 kernel 写软件开发语义 | 空 workspace + `software-dev` + 新项目 Goal 不产生源码缺失 Ticket，可规划创建最小项目骨架和验证命令 |
+| SRD-23 | Workspace 默认 Soul 绑定一致性 | 后端/通用 | P0 | verified | run context 中出现无关 `code-review` Soul，可能干扰软件开发规划和审批判断 | 核对 workspace 创建、template 应用和 soul routing，确保阶段绑定、默认 Soul、run context 一致；无默认 Soul 时不注入无关 Soul | `software-dev` workspace 的 run context 不包含无关 template Soul，阶段路由仍按绑定正确解析 |
+| SRD-24 | Goal / DoD 累积上下文进入重新规划 | 后端/通用 | P0 | verified | 补充 Goal/DoD 后执行计划未稳定基于累计需求修正 | resume / repair / replan 统一读取当前 workspace 累计 Goal/DoD，并在 task plan revision 标明来源 Goal/DoD | 提交新 Goal/DoD 后，下一轮 plan revision 明确引用最新累计 Goal/DoD，并修正后续执行 graph |
+| SRD-25 | DoD 评估证据范围完整性 | 后端/通用 | P0 | verified | 最终 DoD 评估只基于局部 graph evidence，无法判断复杂 DoD 是否满足 | 为 graph/completion follow-up 输入生成当前 run 最新完整 evidence summary，覆盖 patch、shell、validation、tool_call、governance、artifact refs | DoD follow-up 能看到完整最新证据包；复杂 DoD 未满足时列出具体缺口，满足时每项均有 evidenceRefs |
+| SRD-26 | repair loop 继续策略 | 后端/通用 | P0 | verified | repair exhausted 后用户回复“继续”会形成多层嵌套 repair，恢复语义不清 | repair exhausted 后要求明确恢复策略：重试同一步、重新规划、补充信息或终止；禁止无边界嵌套 repair attempt | repair attempt 不再无限膨胀；恢复路径和下一步动作在 ticket/context/read model 中可追溯 |
+| SRD-27 | provider timeout 持续推进能力 | 后端/通用 | P1 | verified | provider timeout 与业务 DoD 失败混在同一 repair 链路中，导致错误恢复 | 将 provider timeout/failover/context shrink 与 DoD 不满足的 implementation repair 分流处理，分别记录 recovery policy | provider timeout 不直接污染业务 repair；timeout 耗尽后 Ticket 明确要求修复 runtime provider 或稍后重试 |
+| SRD-28 | LLM context 大小严控 | LLM/通用 | P0 | verified | governance/evidence 反复进入上下文，context 体积持续增长并放大 timeout 风险 | 按 provider/model context profile 和阶段预算裁剪输入；重复证据只传摘要和 refs；保留可追溯 sourceRefs | 后续 LLM 请求 `contextBudget` 在配置预算内，sourceRefs 可追溯，被裁剪字段可在 read model 中查看 |
+| SRD-29 | Decision payload 敏感信息治理 | 安全/通用 | P0 | verified | 目标项目测试 API Key 可能明文持久化到 resolution、step input、tool_call 并进入 LLM 上下文 | 引入领域中立 secret redaction / secretRef；持久化和 LLM 上下文只保留脱敏值，执行工具时按受控 env 注入 | resolution、tool_call、step、event、read model 中不出现 `sk-`、password、token 等明文敏感值 |
+| SRD-30 | Ticket 语义边界 | Governance/通用 | P0 | verified | 目标项目测试 provider 信息可能被误读为 WorkOrch 自身 LLM provider 配置 | Ticket context 强制区分 `workorch_runtime`、`target_workspace`、`external_dependency`；校验和 prompt 按 scope 处理 | target workspace 外部依赖配置不会触发 WorkOrch runtime provider 替换语义，也不会要求用户配置 WorkOrch 自身 provider |
+| SRD-31 | 测试质量门控 | 后端/Soul/e2e | P0 | verified | `go test ./...` 通过但无测试文件，不能证明复杂 DoD 功能满足 | `software-dev` Soul 要求根据 DoD 生成有效验收测试；平台 resultQuality 识别“无有效断言/无测试文件”的弱证据 | 复杂软件开发 e2e 中必须包含功能测试、stream 测试、usage/异常/并发验证或明确跳过原因 |
+| SRD-32 | 最终交付物质量 | Artifact/通用 | P0 | verified | DoD 未满足时不应输出“已完成”或弱交付 | DoD 未满足时生成失败 Result，列出已完成项、未满足项、缺失证据、下一步计划和需要用户补充的信息 | 未满足 DoD 的 run 以明确失败交付结束；满足 DoD 的 run 输出完整 Result/Artifact/DoD evidence |
+| SRD-33 | 复杂软件开发 e2e 覆盖 | e2e | P0 | verified | 现有 e2e 未覆盖空 workspace、复杂 DoD、外部测试配置、secret 脱敏和 repair 恢复组合场景 | 新增 deployed e2e：创建空 `software-dev` workspace，提交复杂 Goal/DoD，补充目标测试 provider 信息，验证执行/脱敏/恢复/交付 | e2e 全量通过，并能防止 `ws-e1e310fd02e4375e` 同类回归 |
+| SRD-34 | 当前未完成草稿清理 | 工程卫生 | P0 | verified | 工作区存在未完成 untracked redaction 草稿，可能影响测试和提交 | 开发前先删除草稿或补全为正式通用脱敏实现；不得留下半成品文件 | `git status` 无未确认草稿；`go test ./...` 不受半成品影响 |
+
 ## 建议实施顺序
 
 1. 先完成 `SRD-01` 至 `SRD-03`，确保本轮目标和历史文档没有冲突。
@@ -213,6 +252,10 @@
 3. 之后推进 `SRD-09`、`SRD-11`、`SRD-13`，优先补齐通用 Goal / DoD 质量闭环。
 4. 最后推进 `SRD-10`、`SRD-12`、`SRD-14`、`SRD-15` 至 `SRD-19`，完善计划事实、
    Memory 复用、修复可见性和 e2e 验收。
+5. 基于 `ws-e1e310fd02e4375e` 回归结果，先处理 `SRD-34`、`SRD-21`、`SRD-23`，
+   消除工程卫生、默认值漂移和 Soul 上下文污染。
+6. 再处理 `SRD-22`、`SRD-24`、`SRD-25`、`SRD-26`、`SRD-28`、`SRD-29`、
+   `SRD-30`、`SRD-31`、`SRD-32`，最后用 `SRD-33` 做 deployed e2e 闭环。
 
 ## 验收场景
 
@@ -263,6 +306,23 @@
 - 达到上限后升级 Decision 或输出明确失败 Result。
 - 不输出“已完成”弱摘要。
 
+### E2E-SRD-05：复杂软件开发 Goal / DoD 闭环
+
+给定一个空 `software-dev` Workspace，提交复杂软件开发 Goal 和细粒度 DoD，过程中
+通过 Ticket 补充目标项目测试所需的外部依赖配置。
+
+期望：
+
+- 空 workspace 被识别为新项目初始化场景，不产生“源码来源缺失” Ticket。
+- 系统根据累计 Goal / DoD 生成 task plan revision，并自动创建源码、配置和测试。
+- 目标项目外部测试配置按 `target_workspace` 或 `external_dependency` scope 处理，
+  不影响 WorkOrch 自身 runtime LLM provider。
+- resolution、step、tool_call、event、read model 中不持久化 API Key、token、
+  password 等明文敏感信息。
+- 执行证据覆盖 patch、build、test、stream、usage、异常透传、并发或明确跳过原因。
+- DoD 未满足时输出明确失败交付和下一步；DoD 满足时输出完整 Result / Artifact /
+  evidenceRefs。
+
 ## 待确认问题
 
 | ID | 问题 | 默认建议 |
@@ -272,6 +332,8 @@
 | Q3 | 验证命令 Memory 是否按 Workspace 还是项目路径复用？ | 建议以 Workspace 为主，记录项目路径、命令来源和成功证据 |
 | Q4 | companion template 是否需要自动串联？ | 第一版不自动串联，只在文档和 Soul 中明确可选关系 |
 | Q5 | Result 质量门控失败时如何处理？ | 建议触发 artifact/validation repair，仍失败再升级 Decision |
+| Q6 | 内置默认 upsert 是否会覆盖用户改过的同 ID Soul/template？ | 当前开发阶段不考虑老数据兼容；建议约定内置 ID 归系统管理，用户自定义使用新 ID |
+| Q7 | 目标项目测试 secret 是否允许进入 shell env？ | 允许以受控 secretRef/env 注入执行，不允许明文进入持久化记录、LLM 上下文或前端展示 |
 
 ## 跟踪记录
 
@@ -296,3 +358,13 @@
 | 2026-05-06 | 完成 SRD-16~19 验证闭环：新增 `scripts/verify-software-dev-goal-dod-e2e.sh`，在 deployed 服务上验证软件开发 Goal/DoD 自动改码修复闭环与 repair 耗尽升级 Decision；并通过 `WORKORCH_SRD_VERIFY_DEPLOYED_E2E=1 make verify-software-requirement-orchestration` 全量通过。 |
 | 2026-05-06 | 完成 SRD-10/12/13/14/15 验证闭环：扩展 `scripts/verify-software-requirement-development-orchestration.sh` 为 SRD-10~19 统一验收，新增对 deployed `scenario1` snapshot/observability 的 `taskPlans`、`resultQuality`、`doDEvidence`、`repairLoop`、`memoryRecallTraces` 断言，并执行 `WORKORCH_SRD_VERIFY_DEPLOYED_E2E=1 ./scripts/verify-software-requirement-development-orchestration.sh` 全量通过。 |
 | 2026-05-06 | 补齐 SRD-15 前端验收闭环：在统一验收脚本中纳入 `make console-build`，并再次执行 `WORKORCH_SRD_VERIFY_DEPLOYED_E2E=1 ./scripts/verify-software-requirement-development-orchestration.sh`，确认 Web 控制台资源构建与 Web/TUI read-model 展示链路均通过。 |
+| 2026-05-07 | 新增 Phase 5（SRD-20 至 SRD-34）：基于 `ws-e1e310fd02e4375e` 复杂软件开发运行核对，记录内置默认值漂移、空 workspace 误判、Soul 上下文污染、Goal/DoD 重新规划、DoD 完整证据包、repair/provider retry 分流、context 预算、敏感信息治理、Ticket scope、测试质量门控和复杂 e2e 覆盖等待收口项。 |
+| 2026-05-08 | 收口 SRD-21/SRD-23：内置 Soul/template 改为确定性 upsert；阶段 Soul 绑定存在时不再向 run context 注入无关系统默认 Soul；已补充 bootstrap/appservice 定向单测。 |
+| 2026-05-08 | 收口 SRD-24/SRD-25：blocked run 恢复时刷新当前 workspace 累计 Goal/DoD，并将最新定义写入 run context 与 run GoalID/DoDID；graph/completion follow-up 新增通用 `runEvidenceSummary`，provider context budget 纳入裁剪和 sourceRefs。 |
+| 2026-05-08 | 收口 SRD-26/SRD-27/SRD-30：repair exhausted Ticket 增加明确 recovery policy 和可选恢复动作；含糊“继续”类回答不再直接解决 repair exhausted Ticket；provider retry 与业务 repair 分流继续保留 `workorch_runtime` scope 与系统配置恢复约束。 |
+| 2026-05-08 | 收口 SRD-28/SRD-29：补充通用脱敏工具，Decision/Ticket/Approval 持久化和事件链路统一脱敏；target workspace 外部依赖配置仍允许提交，但 API Key/token/password 不再明文进入 resolution payload。 |
+| 2026-05-08 | 收口 SRD-31/SRD-32：`software-dev` Validation Soul 和 LLM runtime 指令明确 no test files/no assertions 为弱证据；平台 DoD completion gate 拒绝用弱测试证据标记 satisfied；DoD 未满足时记录 `rejected` Result，避免输出“已完成”弱交付。 |
+| 2026-05-08 | 收口 SRD-33：扩展 `verify-software-dev-goal-dod-e2e.sh`，新增空 `software-dev` Workspace、累计 Goal/DoD、目标项目外部依赖 secret 脱敏、弱验证证据 rejected Result 场景；修复 e2e 状态等待只匹配 `status.state`。 |
+| 2026-05-08 | 回归发现并修复 SRD-32 补漏：已部署 8080 服务在弱测试证据场景中会进入 runtime repair 并丢失 `rejected Result`；当前代码已改为弱证据 DoD gate 失败直接记录 rejected Result 并失败收口，不再进入 repair。 |
+| 2026-05-08 | 验证结果：`WORKORCH_SRD_VERIFY_DEPLOYED_E2E=1 ./scripts/verify-software-requirement-development-orchestration.sh` 已在当前代码临时服务 `http://127.0.0.1:18089` 全量通过（SRD-10~34，含 SRD-33）；`go test ./... -count=1` 全量通过。 |
+| 2026-05-08 | 重新部署后回归：`WORKORCH_BASE_URL=http://127.0.0.1:8080 WORKORCH_SRD_VERIFY_DEPLOYED_E2E=1 ./scripts/verify-software-requirement-development-orchestration.sh` 通过；`WORKORCH_BASE_URL=http://127.0.0.1:8080 make verify-e2e-full` 通过，覆盖模板/Soul、LLM、MCP、SkillHub、自动治理、software-dev、SRD-10~34、文件补丁、Web Search、天气治理、TUI 与长输出。 |

@@ -159,7 +159,7 @@
     "businessDomains": ["软件开发"],
     "allowedToolKinds": [],
     "allowedCapabilityCategories": [],
-    "soulMD": "# 软件开发验证\n\nDoD 必须逐项评估。只有证据充分时才允许标记 satisfied。\n\n## 验证检查项\n- [ ] 目标能力与 Goal 对齐，且没有超出验收范围的未说明变更\n- [ ] 代码编译通过（go build / npm run build / 项目约定命令）\n- [ ] 所有相关测试通过（go test / npm test / pytest / 项目约定命令）\n- [ ] lint/静态检查按项目约定执行；没有可用命令时必须说明跳过原因\n- [ ] unified_diff 或 patch 证据完整且与目标（Goal）相关\n- [ ] 结果说明验证命令、失败/跳过原因、残余风险和后续动作\n\n## DoD 评估要求\n- 每个 DoD 条目必须单独输出状态（satisfied/failed/skipped）\n- 每个 satisfied 条目必须引用具体的步骤（Step）ID 作为 evidenceRefs\n- skipped 条目必须说明原因、影响和残余风险\n- 不允许只给总体“已完成”而缺少逐项证据\n\n## evidenceRefs 提示\n- build 证据：shell/command 成功输出\n- test 证据：测试结果输出\n- lint 证据：lint 命令成功输出或明确的跳过说明\n- diff 证据：patch/apply 或 unified_diff 步骤（Step）ID\n\n## 禁止\n- 不要在测试失败、证据缺失或 DoD 未覆盖时标记整体 satisfied"
+    "soulMD": "# 软件开发验证\n\nDoD 必须逐项评估。只有证据充分时才允许标记 satisfied。\n\n## 验证检查项\n- [ ] 目标能力与 Goal 对齐，且没有超出验收范围的未说明变更\n- [ ] 代码编译通过（go build / npm run build / 项目约定命令）\n- [ ] 所有相关测试通过（go test / npm test / pytest / 项目约定命令）\n- [ ] lint/静态检查按项目约定执行；没有可用命令时必须说明跳过原因\n- [ ] unified_diff 或 patch 证据完整且与目标（Goal）相关\n- [ ] 结果说明验证命令、失败/跳过原因、残余风险和后续动作\n\n## DoD 评估要求\n- 每个 DoD 条目必须单独输出状态（satisfied/failed/skipped）\n- 每个 satisfied 条目必须引用具体的步骤（Step）ID 作为 evidenceRefs\n- skipped 条目必须说明原因、影响和残余风险\n- 不允许只给总体“已完成”而缺少逐项证据\n- 测试命令输出 no test files、no tests、0 tests、无测试文件或无有效断言时，只能作为弱证据；除非 DoD 明确允许，否则不得把相关测试条目标记为 satisfied，应补充有效测试/断言或标记 skipped/failed 并说明影响\n\n## evidenceRefs 提示\n- build 证据：shell/command 成功输出\n- test 证据：测试结果输出\n- lint 证据：lint 命令成功输出或明确的跳过说明\n- diff 证据：patch/apply 或 unified_diff 步骤（Step）ID\n\n## 禁止\n- 不要在测试失败、证据缺失、弱测试证据或 DoD 未覆盖时标记整体 satisfied"
   },
   {
     "id": "soul-software-dev-artifact",

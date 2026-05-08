@@ -162,10 +162,11 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		return o.dispatchStepWithWorkspace(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
 	}
 	if shouldDispatchLLMCompletionFollowUp(currentRun, last, last.Output) {
-		return o.dispatchStepWithWorkspace(ctx, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInput(currentRun, last), workspace)
+		return o.dispatchStepWithWorkspace(ctx, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
 	}
 	assessment, summary, err := validatedCompletionDoDAssessment(currentRun, last.Output)
 	if err != nil {
+		_ = o.recordRejectedCompletionDoDAssessment(ctx, currentRun, last, last.Output)
 		last.State = common.StepStateFailed
 		last.Output = runtimeFailureOutput(last.Output, err)
 		_ = o.steps.Update(ctx, last)
@@ -680,6 +681,23 @@ func llmCompletionFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[
 	return input
 }
 
+func llmCompletionFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step) map[string]any {
+	input := llmCompletionFollowUpStepInput(run, step)
+	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromSteps(steps))
+}
+
+func (o *RuntimeOrchestrator) llmCompletionFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
+	input := llmCompletionFollowUpStepInput(run, step)
+	if o == nil || o.steps == nil || run == nil {
+		return input
+	}
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil {
+		return input
+	}
+	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromSteps(steps))
+}
+
 func graphFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {
 	nodeID := runtimeChildID(common.StepID(graphNodeID(step)), "")
 	if nodeID == "" {
@@ -692,15 +710,21 @@ func graphFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID 
 }
 
 func (o *RuntimeOrchestrator) graphFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
-	input := graphFollowUpStepInput(run, step)
-	evidence := o.completedGraphEvidence(ctx, run, step)
-	return enrichGraphFollowUpInputWithEvidence(input, evidence)
+	if o == nil || o.steps == nil || run == nil {
+		return graphFollowUpStepInput(run, step)
+	}
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil {
+		return graphFollowUpStepInput(run, step)
+	}
+	return o.graphFollowUpStepInputFromSteps(run, step, steps)
 }
 
 func (o *RuntimeOrchestrator) graphFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step) map[string]any {
 	input := graphFollowUpStepInput(run, step)
 	evidence := o.completedGraphEvidenceFromSteps(step, steps)
-	return enrichGraphFollowUpInputWithEvidence(input, evidence)
+	input = enrichGraphFollowUpInputWithEvidence(input, evidence)
+	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromSteps(steps))
 }
 
 func enrichGraphFollowUpInputWithEvidence(input map[string]any, evidence []map[string]any) map[string]any {
@@ -785,4 +809,63 @@ func (o *RuntimeOrchestrator) completedGraphEvidenceFromSteps(anchor *runModel.S
 		})
 	}
 	return evidence
+}
+
+func enrichRunEvidenceSummaryInput(input map[string]any, evidence []map[string]any) map[string]any {
+	if len(input) == 0 || len(evidence) == 0 {
+		return input
+	}
+	input[stepInputKeyRunEvidenceSummary] = evidence
+	return input
+}
+
+func runEvidenceSummaryFromSteps(steps []*runModel.Step) []map[string]any {
+	if len(steps) == 0 {
+		return nil
+	}
+	items := make([]map[string]any, 0, min(len(steps), maxLLMContextSliceItems))
+	start := 0
+	if len(steps) > maxLLMContextSliceItems {
+		start = len(steps) - maxLLMContextSliceItems
+	}
+	for _, step := range steps[start:] {
+		if step == nil {
+			continue
+		}
+		if step.State != common.StepStateCompleted && step.State != common.StepStateFailed {
+			continue
+		}
+		item := map[string]any{
+			"stepId": string(step.ID),
+			"kind":   step.Kind,
+			"state":  string(step.State),
+		}
+		if nodeID := graphNodeID(step); nodeID != "" {
+			item["graphNodeId"] = nodeID
+		}
+		if rootStepID := graphRootStepID(step); rootStepID != "" && rootStepID != step.ID {
+			item["graphRootStepId"] = string(rootStepID)
+		}
+		if branch := graphBranch(step); branch != "" {
+			item["graphBranch"] = branch
+		}
+		if output := compactStepOutputForRunEvidenceSummary(step.Output); len(output) > 0 {
+			item["output"] = output
+		}
+		items = append(items, item)
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	return items
+}
+
+func compactStepOutputForRunEvidenceSummary(output map[string]any) map[string]any {
+	ret := compactStepOutputForLLMContext(output)
+	if len(ret) == 0 {
+		return nil
+	}
+	delete(ret, stepOutputKeyExecutionGraph)
+	delete(ret, stepOutputKeyNextInput)
+	return ret
 }

@@ -5181,6 +5181,9 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionFailsRun(t *testing.T) {
 		ticket.Context["attempts"] != maxRuntimeRepairAttempts {
 		t.Fatalf("ticket = %+v, want repair exhaustion decision context", ticket)
 	}
+	if ticket.Context[decisionContextKeyRecoveryPolicy] != decisionContextRecoveryPolicyRepairPlan {
+		t.Fatalf("ticket context = %+v, want explicit repair recovery policy", ticket.Context)
+	}
 }
 
 func TestRuntimeOrchestrator_StartRunPersistsRuntimeMemoryWrites(t *testing.T) {
@@ -6549,6 +6552,80 @@ func TestRuntimeOrchestrator_FailsLLMRunCompletionWithoutDoDAssessment(t *testin
 	}
 }
 
+func TestRuntimeOrchestrator_FailsWeakSatisfiedDoDAssessmentWithoutRepair(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	resultRepo := memory.NewResultRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{
+		"status": "completed",
+		"dodAssessment": map[string]any{
+			"satisfied":           true,
+			"summary":             "go test ./... passed with [no test files]",
+			"goalOutcome":         "done",
+			"verificationSummary": "go test ./... returned [no test files]",
+			"items": []map[string]any{
+				{
+					"item":         "tests pass",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-dod-weak-gate/step-1"},
+				},
+			},
+		},
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{Results: resultRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-dod-weak-gate")
+	runID := common.RunID("run-dod-weak-gate")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-weak"),
+		State:           common.RunStateCreated,
+		InitialStepKind: "llm/workspace_execution",
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run should close as failed without returning error: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateFailed || !strings.Contains(runItem.FailureReason, "weak verification evidence") {
+		t.Fatalf("run = %+v, want failed weak verification gate", runItem)
+	}
+	if len(runtime.calls) != 1 {
+		t.Fatalf("runtime calls = %+v, want no repair follow-up for rejected DoD assessment", runtime.calls)
+	}
+	result, err := resultRepo.Get(ctx, common.ResultID(string(runID)+"/result/dod-assessment"))
+	if err != nil {
+		t.Fatalf("get rejected result: %v", err)
+	}
+	if result.State != common.ResultStateRejected || result.DoDAssessment.Satisfied {
+		t.Fatalf("result = %+v, want rejected unsatisfied DoD result", result)
+	}
+}
+
 func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterExecutionGraphCompletes(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -6732,6 +6809,21 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterLLMPlannedShellLeaf(t *te
 	previousOutput, ok := followUpInput["previousStepOutput"].(map[string]any)
 	if !ok || previousOutput["stdout"] != "result ready" {
 		t.Fatalf("previousStepOutput = %+v, want shell output", followUpInput["previousStepOutput"])
+	}
+	runEvidence := mapSliceFromValue(followUpInput[stepInputKeyRunEvidenceSummary])
+	if len(runEvidence) == 0 {
+		t.Fatalf("runEvidenceSummary = %+v, want compact run evidence", followUpInput[stepInputKeyRunEvidenceSummary])
+	}
+	foundShellEvidence := false
+	for _, item := range runEvidence {
+		if item["stepId"] != "run-shell-follow-up/shell-1" {
+			continue
+		}
+		output, _ := item["output"].(map[string]any)
+		foundShellEvidence = output["stdout"] == "result ready"
+	}
+	if !foundShellEvidence {
+		t.Fatalf("runEvidenceSummary = %+v, want shell output evidence", runEvidence)
 	}
 }
 
@@ -6982,6 +7074,98 @@ func TestRuntimeOrchestrator_GraphFollowUpReusesLoadedStepsForEvidence(t *testin
 	}
 	if !reflect.DeepEqual(input[stepInputKeyGraphCompletedNodes], []string{"cpu", "memory"}) {
 		t.Fatalf("graphCompletedNodes = %#v, want cpu and memory", input[stepInputKeyGraphCompletedNodes])
+	}
+	runEvidence := mapSliceFromValue(input[stepInputKeyRunEvidenceSummary])
+	if len(runEvidence) != 3 {
+		t.Fatalf("runEvidenceSummary = %+v, want root and graph node evidence", input[stepInputKeyRunEvidenceSummary])
+	}
+	foundCPUEvidence := false
+	for _, item := range runEvidence {
+		if item["stepId"] != string(runID)+"/block/cpu" {
+			continue
+		}
+		output, _ := item["output"].(map[string]any)
+		foundCPUEvidence = item["graphNodeId"] == "cpu" && output["stdout"] == "cpu ok"
+	}
+	if !foundCPUEvidence {
+		t.Fatalf("runEvidenceSummary = %+v, want graph node evidence", runEvidence)
+	}
+}
+
+func TestRuntimeOrchestrator_GraphFollowUpRunEvidenceIncludesPriorCompletedSteps(t *testing.T) {
+	runID := common.RunID("run-graph-follow-up-run-evidence")
+	orch := &RuntimeOrchestrator{}
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-graph-follow-up-run-evidence"}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "verify", Kind: "shell/command"},
+	}}
+	priorStep := &runmodel.Step{
+		ID:     common.StepID(string(runID) + "/previous-validation"),
+		RunID:  runID,
+		Kind:   "shell/command",
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"stdout": "previous validation passed"},
+	}
+	anchor := &runmodel.Step{
+		ID:     common.StepID(string(runID) + "/step-1"),
+		RunID:  runID,
+		Kind:   llmcommon.StepKindWorkspaceExecution,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
+	}
+	graphStep := &runmodel.Step{
+		ID:     common.StepID(string(runID) + "/block/verify"),
+		RunID:  runID,
+		Kind:   "shell/command",
+		State:  common.StepStateCompleted,
+		Input:  map[string]any{stepInputKeyGraphNodeID: "verify", stepInputKeyGraphRootStepID: string(anchor.ID)},
+		Output: map[string]any{"stdout": "current graph validation passed"},
+	}
+
+	input := orch.graphFollowUpStepInputFromSteps(run, anchor, []*runmodel.Step{priorStep, anchor, graphStep})
+
+	graphEvidence := mapSliceFromValue(input[stepInputKeyGraphEvidence])
+	if len(graphEvidence) != 1 || graphEvidence[0]["nodeId"] != "verify" {
+		t.Fatalf("graphEvidence = %+v, want current graph evidence only", input[stepInputKeyGraphEvidence])
+	}
+	runEvidence := mapSliceFromValue(input[stepInputKeyRunEvidenceSummary])
+	if len(runEvidence) != 3 {
+		t.Fatalf("runEvidenceSummary = %+v, want prior, root, and current graph evidence", input[stepInputKeyRunEvidenceSummary])
+	}
+	foundPriorEvidence := false
+	for _, item := range runEvidence {
+		if item["stepId"] != string(priorStep.ID) {
+			continue
+		}
+		output, _ := item["output"].(map[string]any)
+		foundPriorEvidence = output["stdout"] == "previous validation passed"
+	}
+	if !foundPriorEvidence {
+		t.Fatalf("runEvidenceSummary = %+v, want prior completed evidence", runEvidence)
+	}
+}
+
+func TestMergeRunExecutionContextPatchRefreshesEffectiveDefinitionIDs(t *testing.T) {
+	run := &runmodel.Run{
+		ID:               "run-definition-patch",
+		WorkspaceID:      "ws-definition-patch",
+		GoalID:           "goal-old",
+		DoDID:            "dod-old",
+		ExecutionContext: map[string]any{"existing": "kept"},
+	}
+
+	mergeRunExecutionContextPatch(run, map[string]any{
+		"goalId": "goal-new",
+		"doDId":  "dod-new",
+		"goal":   map[string]any{"id": "goal-new"},
+		"dod":    map[string]any{"id": "dod-new"},
+	})
+
+	if run.GoalID != "goal-new" || run.DoDID != "dod-new" {
+		t.Fatalf("run definitions = %s/%s, want refreshed IDs", run.GoalID, run.DoDID)
+	}
+	if run.ExecutionContext["existing"] != "kept" || run.ExecutionContext["goalId"] != "goal-new" || run.ExecutionContext["doDId"] != "dod-new" {
+		t.Fatalf("executionContext = %+v, want merged definition patch", run.ExecutionContext)
 	}
 }
 
@@ -7283,6 +7467,119 @@ func TestRuntimeOrchestrator_FailsLLMRunCompletionWithoutDoDSummary(t *testing.T
 	}
 	if runItem.State != common.RunStateFailed || !strings.Contains(runItem.FailureReason, "dodAssessment.summary is required") {
 		t.Fatalf("run = %+v, want failed DoD summary gate", runItem)
+	}
+}
+
+func TestValidatedCompletionDoDAssessmentRejectsWeakSatisfiedVerificationEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-weak-verification",
+		WorkspaceID:     "ws-weak-verification",
+		DoDID:           "dod-weak-verification",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	_, _, err := validatedCompletionDoDAssessment(run, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied":           true,
+			"summary":             "go test ./... passed with [no test files]",
+			"goalOutcome":         "done",
+			"verificationSummary": "go test ./... returned [no test files]",
+			"items": []map[string]any{
+				{
+					"item":         "tests pass",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-weak-verification/step-1"},
+				},
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("validatedCompletionDoDAssessment err = %v, want invalid argument for weak evidence", err)
+	}
+}
+
+func TestRuntimeOrchestrator_RecordsRejectedResultForUnsatisfiedDoDAssessment(t *testing.T) {
+	ctx := context.Background()
+	resultRepo := memory.NewResultRepository()
+	orch := &RuntimeOrchestrator{evidence: RuntimeEvidenceRepositories{Results: resultRepo}}
+	runID := common.RunID("run-rejected-dod")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-rejected-dod",
+		GoalID:          "goal-rejected-dod",
+		DoDID:           "dod-rejected-dod",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{ID: common.StepID(string(runID) + "/step-1"), RunID: runID}
+
+	if err := orch.recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": false,
+			"summary":   "DoD not satisfied; missing effective tests.",
+			"items": []map[string]any{
+				{
+					"item":          "effective tests",
+					"state":         "failed",
+					"failureReason": "no effective assertions",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("record rejected result: %v", err)
+	}
+
+	result, err := resultRepo.Get(ctx, common.ResultID(string(runID)+"/result/dod-assessment"))
+	if err != nil {
+		t.Fatalf("get rejected result: %v", err)
+	}
+	if result.State != common.ResultStateRejected || result.Summary != "DoD not satisfied; missing effective tests." {
+		t.Fatalf("result = %+v, want rejected DoD result", result)
+	}
+	if result.DoDAssessment.Satisfied {
+		t.Fatalf("DoDAssessment = %+v, want unsatisfied", result.DoDAssessment)
+	}
+}
+
+func TestRuntimeOrchestrator_RecordsRejectedResultForWeakSatisfiedDoDAssessment(t *testing.T) {
+	ctx := context.Background()
+	resultRepo := memory.NewResultRepository()
+	orch := &RuntimeOrchestrator{evidence: RuntimeEvidenceRepositories{Results: resultRepo}}
+	runID := common.RunID("run-rejected-weak-dod")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-rejected-weak-dod",
+		GoalID:          "goal-rejected-weak-dod",
+		DoDID:           "dod-rejected-weak-dod",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{ID: common.StepID(string(runID) + "/step-1"), RunID: runID}
+
+	if err := orch.recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied":           true,
+			"summary":             "go test ./... passed with [no test files]",
+			"goalOutcome":         "done",
+			"verificationSummary": "go test ./... returned [no test files]",
+			"items": []map[string]any{
+				{
+					"item":         "tests pass",
+					"state":        "satisfied",
+					"evidenceRefs": []string{string(step.ID)},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("record rejected result: %v", err)
+	}
+
+	result, err := resultRepo.Get(ctx, common.ResultID(string(runID)+"/result/dod-assessment"))
+	if err != nil {
+		t.Fatalf("get rejected result: %v", err)
+	}
+	if result.State != common.ResultStateRejected || result.DoDAssessment.Satisfied {
+		t.Fatalf("result = %+v, want rejected unsatisfied DoD result", result)
+	}
+	if !strings.Contains(result.Summary, "DoD assessment rejected") {
+		t.Fatalf("result summary = %q, want rejected weak evidence summary", result.Summary)
 	}
 }
 

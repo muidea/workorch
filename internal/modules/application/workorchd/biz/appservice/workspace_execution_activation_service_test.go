@@ -1510,6 +1510,74 @@ func TestActivateWorkspaceExecutionWithBackendUsesSystemDefaultSoul(t *testing.T
 	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageValidation, "soul-system-default", "system_default")
 }
 
+func TestActivateWorkspaceExecutionWithBackendDoesNotInjectSystemDefaultSoulWhenStageBindingsExist(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	useSystemDefaultSoulConfig(t, "soul-system-default")
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-stage-bound-system-default", "stage-bound workspace", "", "workspaces/stage-bound")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "use stage bindings without default soul context pollution")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"stage bindings drive current soul"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	for _, id := range []string{
+		"soul-system-default",
+		"soul-stage-planning",
+		"soul-stage-execution",
+		"soul-stage-decision",
+		"soul-stage-approval",
+		"soul-stage-validation",
+		"soul-stage-artifact",
+	} {
+		if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
+			ID:     id,
+			Name:   id,
+			SoulMD: "# " + id + "\n\nUse " + id + ".\n",
+		}); err != nil {
+			t.Fatalf("CreateSoulWithBackend %s: %v", id, err)
+		}
+	}
+	_, err = UpdateWorkspaceSoulBindingsWithBackend(ctx, "file", dataRoot, workspace.ID, WorkspaceSoulBindings{
+		Bindings: map[string]string{
+			SoulBindingStagePlanning:   "soul-stage-planning",
+			SoulBindingStageExecution:  "soul-stage-execution",
+			SoulBindingStageDecision:   "soul-stage-decision",
+			SoulBindingStageApproval:   "soul-stage-approval",
+			SoulBindingStageValidation: "soul-stage-validation",
+			SoulBindingStageArtifact:   "soul-stage-artifact",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateWorkspaceSoulBindingsWithBackend: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	if item.Run.ExecutionContext["soulId"] != nil || item.Run.ExecutionContext["soul"] != nil {
+		t.Fatalf("executionContext default soul = %v/%v, want no system default top-level soul when stage bindings exist", item.Run.ExecutionContext["soulId"], item.Run.ExecutionContext["soul"])
+	}
+	routing := contextMapFromValue(t, item.Run.ExecutionContext["soulRouting"])
+	if routing["effectiveDefaultSoulId"] != "soul-system-default" {
+		t.Fatalf("soulRouting = %+v, want system default retained for missing-stage fallback metadata", routing)
+	}
+	routingBindings := contextMapFromValue(t, routing["bindings"])
+	assertSoulRoutingBinding(t, routingBindings, SoulBindingStagePlanning, "soul-stage-planning", "workspace_stage_binding")
+	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageExecution, "soul-stage-execution", "workspace_stage_binding")
+	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageValidation, "soul-stage-validation", "workspace_stage_binding")
+}
+
 func TestActivateWorkspaceExecutionWithBackendValidatesExecutionSoulOnly(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()

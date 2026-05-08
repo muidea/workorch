@@ -166,6 +166,65 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 	return o.publishResultAccepted(ctx, item)
 }
 
+func (o *RuntimeOrchestrator) recordRunResultFromRejectedDoDAssessment(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	assessment map[string]any,
+	summary string,
+) error {
+	if run == nil || step == nil || o.evidence.Results == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
+		return nil
+	}
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		summary = "DoD assessment was not satisfied."
+	}
+	now := runtimeEvidenceTimestamp()
+	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
+	dodAssessment := resultDoDAssessmentFromMap(assessment)
+	item := &resultmodel.Result{
+		ID:            common.ResultID(fmt.Sprintf("%s/result/dod-assessment", run.ID)),
+		WorkspaceID:   run.WorkspaceID,
+		RunID:         run.ID,
+		GoalID:        run.GoalID,
+		DoDID:         run.DoDID,
+		State:         common.ResultStateRejected,
+		Title:         "Rejected Result",
+		Summary:       summary,
+		SourceType:    resultcommon.SourceTypeDoDAssessment,
+		SourceRef:     string(step.ID),
+		EvidenceRefs:  evidenceRefs,
+		DoDAssessment: dodAssessment,
+		SummaryDetail: resultSummaryFromDoDAssessment(run, summary, assessment, dodAssessment, evidenceRefs, nil),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := o.evidence.Results.Create(ctx, item); err != nil {
+		if err != common.ErrConflict {
+			return err
+		}
+		existing, getErr := o.evidence.Results.Get(ctx, item.ID)
+		if getErr != nil {
+			return getErr
+		}
+		existing.State = item.State
+		existing.Title = item.Title
+		existing.Summary = item.Summary
+		existing.SourceType = item.SourceType
+		existing.SourceRef = item.SourceRef
+		existing.EvidenceRefs = item.EvidenceRefs
+		existing.DoDAssessment = item.DoDAssessment
+		existing.SummaryDetail = item.SummaryDetail
+		existing.UpdatedAt = now
+		if err := o.evidence.Results.Update(ctx, existing); err != nil {
+			return err
+		}
+		return o.publishResultAccepted(ctx, existing)
+	}
+	return o.publishResultAccepted(ctx, item)
+}
+
 func (o *RuntimeOrchestrator) recordCompletionEvidenceFromValidatedDoDAssessment(
 	ctx context.Context,
 	run *runModel.Run,

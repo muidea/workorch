@@ -1,8 +1,14 @@
 package bootstrap
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
 func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing.T) {
@@ -71,6 +77,52 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 		t.Fatal("soul-software-dev-decision missing")
 	}
 	assertSoulContains(t, decision.SoulMD, "不要因为 workspace 为空就直接请求源码")
+}
+
+func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
+	ctx := context.Background()
+	soulRepo := memory.NewSoulRepository()
+	templateRepo := memory.NewWorkspaceTemplateRepository()
+
+	if err := soulRepo.Create(ctx, &soulmodel.Soul{
+		ID:     common.SoulID("soul-software-dev-planning"),
+		Name:   "stale planning soul",
+		SoulMD: "# stale\n",
+	}); err != nil {
+		t.Fatalf("seed stale soul: %v", err)
+	}
+	if err := templateRepo.Create(ctx, &repository.WorkspaceTemplate{
+		ID:       "software-dev",
+		Name:     "stale template",
+		DoDItems: []string{"stale dod"},
+		SoulBindings: map[string]string{
+			"planning": "stale-soul",
+		},
+	}); err != nil {
+		t.Fatalf("seed stale template: %v", err)
+	}
+
+	if err := EnsureBuiltinDefaults(ctx, soulRepo, templateRepo); err != nil {
+		t.Fatalf("EnsureBuiltinDefaults: %v", err)
+	}
+
+	planning, err := soulRepo.Get(ctx, common.SoulID("soul-software-dev-planning"))
+	if err != nil {
+		t.Fatalf("get planning soul: %v", err)
+	}
+	assertSoulContains(t, planning.SoulMD, "workspace 文件清单为空不等于缺少源码")
+	if planning.Name == "stale planning soul" || strings.Contains(planning.SoulMD, "# stale") {
+		t.Fatalf("planning soul was not refreshed: %+v", planning)
+	}
+
+	template, err := templateRepo.Get(ctx, "software-dev")
+	if err != nil {
+		t.Fatalf("get software-dev template: %v", err)
+	}
+	if template.Name == "stale template" || template.SoulBindings["planning"] != "soul-software-dev-planning" {
+		t.Fatalf("software-dev template was not refreshed: %+v", template)
+	}
+	assertContainsAnyDoDItem(t, template.DoDItems, "evidenceRefs")
 }
 
 func findEmbeddedTemplateByID(items []embeddedTemplate, id string) *embeddedTemplate {

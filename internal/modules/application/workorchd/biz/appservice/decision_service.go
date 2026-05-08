@@ -24,6 +24,7 @@ const (
 	decisionContextDependencyLLMProvider    = "llm_provider"
 	decisionContextKeyRecoveryPolicy        = "recoveryPolicy"
 	decisionContextRecoveryPolicyConfigOnly = "system_config_required"
+	decisionContextRecoveryPolicyRepairPlan = "runtime_repair_exhausted_requires_strategy"
 )
 
 type Decision struct {
@@ -173,15 +174,17 @@ func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 		return Decision{}, common.ErrInvalidArgument
 	}
 	payload := withDecisionSemanticPayload(cmd.ResolutionPayload, semantic)
-	if containsInlineLLMProviderConfig(payload) {
-		ticket, err := tickets.Get(ctx, common.TicketID(ticketID))
-		if err != nil {
-			return Decision{}, err
-		}
-		if err := validateDecisionResolutionPayloadForTicket(ticket, payload); err != nil {
-			return Decision{}, err
-		}
+	ticket, err := tickets.Get(ctx, common.TicketID(ticketID))
+	if err != nil {
+		return Decision{}, err
 	}
+	if ticket.State != common.DecisionTicketStateOpen {
+		return Decision{}, common.ErrConflict
+	}
+	if err := validateDecisionResolutionPayloadForTicket(ticket, payload); err != nil {
+		return Decision{}, err
+	}
+	payload = common.RedactSensitiveMap(payload)
 
 	item, resolution, err := service.EnsureResolvedTicketAndReturn(ctx, decisionmodule.ResolveTicketCommand{
 		ResolutionID: common.ResolutionID("resolution-" + ticketID + "-" + semantic.ResolutionType),
@@ -249,6 +252,7 @@ func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSessi
 			return nil, err
 		}
 	}
+	payload = common.RedactSensitiveMap(payload)
 
 	ret = make([]Decision, 0, len(cmd.TicketIDs))
 	for _, ticketID := range cmd.TicketIDs {
@@ -288,10 +292,16 @@ func withDecisionSemanticPayload(payload map[string]any, semantic governancecomm
 }
 
 func validateDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, payload map[string]any) error {
-	if ticket == nil || !isWorkorchRuntimeLLMProviderRecoveryTicket(ticket) || !containsInlineLLMProviderConfig(payload) {
+	if ticket == nil {
 		return nil
 	}
-	return fmt.Errorf("%w: WorkOrch runtime LLM provider configuration must be changed in WorkOrch system configuration, not pasted into a decision answer", common.ErrInvalidArgument)
+	if isWorkorchRuntimeLLMProviderRecoveryTicket(ticket) && containsInlineLLMProviderConfig(payload) {
+		return fmt.Errorf("%w: WorkOrch runtime LLM provider configuration must be changed in WorkOrch system configuration, not pasted into a decision answer", common.ErrInvalidArgument)
+	}
+	if isRuntimeRepairExhaustionTicket(ticket) && isAmbiguousRuntimeRepairExhaustionResolution(payload) {
+		return fmt.Errorf("%w: runtime repair exhaustion requires an explicit recovery action: retry_same_step, replan, provide_information, or terminate", common.ErrInvalidArgument)
+	}
+	return nil
 }
 
 func isWorkorchRuntimeLLMProviderRecoveryTicket(ticket *decisionmodel.Ticket) bool {
@@ -329,6 +339,57 @@ func isLLMProviderRecoveryTicket(ticket *decisionmodel.Ticket) bool {
 	}
 	text := strings.ToLower(ticket.Question + "\n" + ticket.Reason)
 	return strings.Contains(text, "llm provider") || strings.Contains(text, "provider retry")
+}
+
+func isRuntimeRepairExhaustionTicket(ticket *decisionmodel.Ticket) bool {
+	if ticket == nil {
+		return false
+	}
+	return strings.TrimSpace(stringFromDecisionPayload(ticket.Context, decisionContextKeyRecoveryPolicy)) == decisionContextRecoveryPolicyRepairPlan
+}
+
+func isAmbiguousRuntimeRepairExhaustionResolution(payload map[string]any) bool {
+	if len(payload) == 0 {
+		return true
+	}
+	if action := strings.TrimSpace(stringFromDecisionPayload(payload, "recoveryAction")); action != "" {
+		switch action {
+		case "retry_same_step", "replan", "provide_information", "terminate":
+			return false
+		default:
+			return true
+		}
+	}
+	semantic := decisionPayloadMap(payload["governanceSemantic"])
+	intent := strings.TrimSpace(stringFromDecisionPayload(semantic, "intent"))
+	switch intent {
+	case governancecommon.GovernanceIntentRequestReplan,
+		governancecommon.GovernanceIntentRejectExecution,
+		governancecommon.GovernanceIntentRequestTerminate,
+		governancecommon.GovernanceIntentProvideMissingInfo:
+		return false
+	case governancecommon.GovernanceIntentApproveExecution:
+		return true
+	}
+	switch semanticTextForRepairResolution(payload) {
+	case "", "continue", "proceed", "goahead", "yes", "ok", "okay", "同意", "确认", "继续", "可以", "好的":
+		return true
+	default:
+		return false
+	}
+}
+
+func semanticTextForRepairResolution(payload map[string]any) string {
+	semantic := decisionPayloadMap(payload["governanceSemantic"])
+	if raw := strings.TrimSpace(stringFromDecisionPayload(semantic, "rawInput")); raw != "" {
+		return strings.ToLower(strings.ReplaceAll(raw, " ", ""))
+	}
+	for _, key := range []string{"answer", "value", "input", "resumeInstruction"} {
+		if raw := strings.TrimSpace(stringFromDecisionPayload(payload, key)); raw != "" {
+			return strings.ToLower(strings.ReplaceAll(raw, " ", ""))
+		}
+	}
+	return ""
 }
 
 func containsInlineLLMProviderConfig(payload map[string]any) bool {
@@ -399,6 +460,11 @@ func normalizeProviderConfigText(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	replacer := strings.NewReplacer("_", "", "-", "", " ", "", ".", "")
 	return replacer.Replace(value)
+}
+
+func decisionPayloadMap(value any) map[string]any {
+	typed, _ := value.(map[string]any)
+	return typed
 }
 
 func stringFromDecisionPayload(payload map[string]any, key string) string {

@@ -99,6 +99,7 @@ const (
 const (
 	ResultStateDraft      ResultState = "draft"
 	ResultStateAccepted   ResultState = "accepted"
+	ResultStateRejected   ResultState = "rejected"
 	ResultStateSuperseded ResultState = "superseded"
 )
 

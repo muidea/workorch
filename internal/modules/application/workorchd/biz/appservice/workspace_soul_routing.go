@@ -48,6 +48,7 @@ func resolveWorkspaceSoulRouting(ctx context.Context, exports bootstrap.Exports,
 
 	runDefaultSoulID := common.SoulID(strings.TrimSpace(cmd.SoulID))
 	workspaceDefaultSoulID := workspace.DefaultSoulID
+	hasStageBindings := len(runStageBindings) > 0 || len(workspace.SoulBindings) > 0
 	defaultSoulID := runDefaultSoulID
 	defaultSource := "run_default"
 	if defaultSoulID == "" {
@@ -58,7 +59,11 @@ func resolveWorkspaceSoulRouting(ctx context.Context, exports bootstrap.Exports,
 		defaultSoulID = systemDefaultSoulID
 		defaultSource = "system_default"
 	}
-	defaultSoul, err := loadSoul(defaultSoulID)
+	currentDefaultSoulID := defaultSoulID
+	if runDefaultSoulID == "" && workspaceDefaultSoulID == "" && hasStageBindings {
+		currentDefaultSoulID = ""
+	}
+	defaultSoul, err := loadSoul(currentDefaultSoulID)
 	if err != nil {
 		return nil, SoulRouting{}, nil, err
 	}

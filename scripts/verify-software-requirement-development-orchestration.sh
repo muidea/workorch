@@ -7,8 +7,9 @@ cd "$ROOT_DIR"
 
 GOCACHE="${GOCACHE:-/tmp/workorch-go-build}"
 export GOCACHE
+SRD_E2E_DIR=""
 
-echo "=== software requirement development orchestration verification (SRD-10~19) ==="
+echo "=== software requirement development orchestration verification (SRD-10~34) ==="
 
 echo "-> SRD-10/SRD-13/SRD-14: 计划事实、结果质量门控、repair loop 投影（read model）"
 go test ./internal/modules/application/workorchd/biz/appservice \
@@ -33,6 +34,7 @@ go test ./internal/modules/kernel/orchestrator/biz \
   -count=1
 if [[ "${WORKORCH_SRD_VERIFY_DEPLOYED_E2E:-0}" == "1" ]]; then
   e2e_dir="$(mktemp -d)"
+  SRD_E2E_DIR="$e2e_dir"
   WORKORCH_SOFTWARE_DEV_E2E_ARTIFACT_DIR="$e2e_dir" "${ROOT_DIR}/scripts/verify-software-dev-goal-dod-e2e.sh"
   python3 - "$e2e_dir/scenario1-snapshot.json" "$e2e_dir/scenario1-observability.json" <<'PY'
 import json
@@ -103,5 +105,26 @@ go test ./internal/modules/kernel/orchestrator/biz \
 go test ./internal/modules/application/workorchd/biz/appservice \
   -run 'TestMapTaskProgressProjectsRepairLoop(Escalation|State)$' \
   -count=1
+
+echo "-> SRD-21~32: Phase 5 默认值、上下文、repair/provider、脱敏、DoD 门控与失败交付回归"
+go test \
+  ./internal/pkg/common \
+  ./internal/modules/application/workorchd/biz/bootstrap \
+  ./internal/modules/application/workorchd/biz/appservice \
+  ./internal/modules/kernel/decision/biz \
+  ./internal/modules/kernel/orchestrator/biz \
+  ./internal/modules/blocks/llm/biz \
+  -count=1
+
+echo "-> SRD-33: 复杂软件开发闭环 deployed e2e（空 workspace、累积 Goal/DoD、secret 脱敏、弱证据拒绝）"
+if [[ "${WORKORCH_SRD_VERIFY_DEPLOYED_E2E:-0}" == "1" ]]; then
+  if [[ -z "$SRD_E2E_DIR" || ! -f "$SRD_E2E_DIR/scenario3-snapshot.json" || ! -f "$SRD_E2E_DIR/scenario4-snapshot.json" ]]; then
+    echo "SRD-33 artifacts missing from software-dev deployed e2e" >&2
+    exit 1
+  fi
+  echo "   SRD-33 covered by verify-software-dev-goal-dod-e2e artifacts in $SRD_E2E_DIR"
+else
+  echo "   skip deployed e2e (set WORKORCH_SRD_VERIFY_DEPLOYED_E2E=1 to run SRD-33 coverage)"
+fi
 
 echo "software requirement development orchestration verification passed"
