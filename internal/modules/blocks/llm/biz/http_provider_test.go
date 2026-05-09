@@ -66,12 +66,15 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 		!strings.Contains(joined, "Do not assume remote host access credentials") ||
 		!strings.Contains(joined, "ssh/command") ||
 		!strings.Contains(joined, "timeoutMillis") ||
-		!strings.Contains(joined, "An empty workspace file listing is not by itself missing source code") ||
-		!strings.Contains(joined, "new-work initialization case") ||
 		!strings.Contains(joined, "Conversation language: Chinese (Simplified)") ||
 		!strings.Contains(joined, "DoD summaries") ||
 		!strings.Contains(joined, "runtimeCapabilities") {
 		t.Fatalf("messages = %+v, want runtime capability boundary", gotPayload.Messages)
+	}
+	if strings.Contains(joined, "An empty workspace file listing is not by itself missing source code") ||
+		strings.Contains(joined, "new-work initialization case") ||
+		strings.Contains(joined, "A test command that reports no tests") {
+		t.Fatalf("messages = %+v, should not include software-dev template guidance in the core prompt", gotPayload.Messages)
 	}
 	if !strings.Contains(string(result.Payload), `"completionState":"completed"`) {
 		t.Fatalf("payload = %s, want decision json", result.Payload)

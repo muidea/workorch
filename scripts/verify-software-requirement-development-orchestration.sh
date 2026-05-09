@@ -32,11 +32,10 @@ echo "-> SRD-16: software-dev Goal/DoD 自动开发闭环（改码/验证/修复
 go test ./internal/modules/kernel/orchestrator/biz \
   -run 'Test(RuntimeOrchestrator_SoftwareDevCodeAgentRepairsTestFailureAndDeliversDiff|RuntimeOrchestrator_ResultArtifactsIncludePatchDiff|RuntimeOrchestrator_ResultManifestListsOnlyPatchTargets)$' \
   -count=1
-if [[ "${WORKORCH_SRD_VERIFY_DEPLOYED_E2E:-0}" == "1" ]]; then
-  e2e_dir="$(mktemp -d)"
-  SRD_E2E_DIR="$e2e_dir"
-  WORKORCH_SOFTWARE_DEV_E2E_ARTIFACT_DIR="$e2e_dir" "${ROOT_DIR}/scripts/verify-software-dev-goal-dod-e2e.sh"
-  python3 - "$e2e_dir/scenario1-snapshot.json" "$e2e_dir/scenario1-observability.json" <<'PY'
+e2e_dir="$(mktemp -d)"
+SRD_E2E_DIR="$e2e_dir"
+WORKORCH_SOFTWARE_DEV_E2E_ARTIFACT_DIR="$e2e_dir" "${ROOT_DIR}/scripts/verify-software-dev-goal-dod-e2e.sh"
+python3 - "$e2e_dir/scenario1-snapshot.json" "$e2e_dir/scenario1-observability.json" <<'PY'
 import json
 import sys
 
@@ -89,14 +88,9 @@ if errors:
         print(line, file=sys.stderr)
     raise SystemExit(1)
 PY
-fi
 
 echo "-> SRD-17/SRD-18: 需求歧义 Decision 与风险操作 Approval（deployed e2e）"
-if [[ "${WORKORCH_SRD_VERIFY_DEPLOYED_E2E:-0}" == "1" ]]; then
-  "${ROOT_DIR}/scripts/verify-llm-workspace-execution.sh"
-else
-  echo "   skip deployed e2e (set WORKORCH_SRD_VERIFY_DEPLOYED_E2E=1 to run verify-llm-workspace-execution.sh)"
-fi
+"${ROOT_DIR}/scripts/verify-llm-workspace-execution.sh"
 
 echo "-> SRD-19: repair loop 耗尽后升级 Decision 与可追溯投影"
 go test ./internal/modules/kernel/orchestrator/biz \
@@ -117,14 +111,10 @@ go test \
   -count=1
 
 echo "-> SRD-33: 复杂软件开发闭环 deployed e2e（空 workspace、累积 Goal/DoD、secret 脱敏、弱证据拒绝）"
-if [[ "${WORKORCH_SRD_VERIFY_DEPLOYED_E2E:-0}" == "1" ]]; then
-  if [[ -z "$SRD_E2E_DIR" || ! -f "$SRD_E2E_DIR/scenario3-snapshot.json" || ! -f "$SRD_E2E_DIR/scenario4-snapshot.json" ]]; then
-    echo "SRD-33 artifacts missing from software-dev deployed e2e" >&2
-    exit 1
-  fi
-  echo "   SRD-33 covered by verify-software-dev-goal-dod-e2e artifacts in $SRD_E2E_DIR"
-else
-  echo "   skip deployed e2e (set WORKORCH_SRD_VERIFY_DEPLOYED_E2E=1 to run SRD-33 coverage)"
+if [[ -z "$SRD_E2E_DIR" || ! -f "$SRD_E2E_DIR/scenario3-snapshot.json" || ! -f "$SRD_E2E_DIR/scenario4-snapshot.json" ]]; then
+  echo "SRD-33 artifacts missing from software-dev deployed e2e" >&2
+  exit 1
 fi
+echo "   SRD-33 covered by verify-software-dev-goal-dod-e2e artifacts in $SRD_E2E_DIR"
 
 echo "software requirement development orchestration verification passed"

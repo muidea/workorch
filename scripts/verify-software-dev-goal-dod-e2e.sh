@@ -444,6 +444,42 @@ def response_for(run_id, step_id):
                 }
             }
         return {"completionState": "continue", "thoughtSummary": "Continue execution."}
+    if scenario == 4:
+        if step_id.startswith(run_id + "/step-1"):
+            return {
+                "completionState": "continue",
+                "thoughtSummary": "Plan a bounded evidence collection graph.",
+                "executionGraph": {
+                    "nodes": [
+                        {
+                            "id": "collect-evidence",
+                            "kind": "shell/command",
+                            "input": {"command": "sh", "args": ["-c", "printf continuation-evidence"]}
+                        }
+                    ]
+                }
+            }
+        if "zz-llm-after-no-actionable-continuation-" in step_id:
+            return {
+                "completionState": "completed",
+                "thoughtSummary": "No-actionable continuation was converted into validation.",
+                "dodAssessment": {
+                    "satisfied": True,
+                    "summary": "Graph exhausted validation completed with available evidence.",
+                    "goalOutcome": "The run completed after graph exhaustion validation.",
+                    "implementationSummary": "No source change was required for this continuation contract scenario.",
+                    "verificationSummary": "The evidence collection command completed and the validation follow-up produced DoD evidence.",
+                    "items": [
+                        {"item": "no-actionable continuation 必须进入 validation follow-up 并完成 DoD 评估", "state": "satisfied", "evidenceRefs": ["collect-evidence", step_id]}
+                    ]
+                }
+            }
+        if "zz-llm-after-graph-" in step_id:
+            return {
+                "completionState": "continue",
+                "thoughtSummary": "Incorrectly requests continuation without a new actionable step."
+            }
+        return {"completionState": "continue", "thoughtSummary": "Continue execution."}
     return {"completionState": "continue", "thoughtSummary": "Continue execution."}
 
 class Handler(BaseHTTPRequestHandler):
@@ -883,6 +919,53 @@ if errors:
     raise SystemExit(1)
 PY
 
+# Scenario-5: continue without actionable continuation must enter validation follow-up instead of failing the run.
+scenario5_workspace_workdir="$TMP_DIR/no-actionable-continuation-workspace"
+mkdir -p "$scenario5_workspace_workdir"
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
+  -d '{"title":"software-dev no-actionable continuation","description":"verify graph exhausted validation follow-up","workingDirectory":"'"$scenario5_workspace_workdir"'","templateId":"software-dev"}' >"$TMP_DIR/scenario5-workspace.json"
+scenario5_workspace_id="$(json_path "$TMP_DIR/scenario5-workspace.json" "workspace.id")"
+[[ -n "$scenario5_workspace_id" ]]
+
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario5_workspace_id/goals" -H 'Content-Type: application/json' \
+  -d '{"text":"验证当 LLM 返回 continue 但没有可执行后续动作时，系统会进入 validation follow-up 并完成 DoD 评估。"}' >"$TMP_DIR/scenario5-goal.json"
+scenario5_goal_id="$(json_path "$TMP_DIR/scenario5-goal.json" "goal.id")"
+
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario5_workspace_id/dods" -H 'Content-Type: application/json' \
+  -d '{"items":["no-actionable continuation 必须进入 validation follow-up 并完成 DoD 评估"]}' >"$TMP_DIR/scenario5-dod.json"
+scenario5_dod_id="$(json_path "$TMP_DIR/scenario5-dod.json" "dod.id")"
+
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario5_workspace_id/execution-activations" \
+  -H 'Content-Type: application/json' \
+  -d '{"goalId":"'"$scenario5_goal_id"'","doDId":"'"$scenario5_dod_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' >"$TMP_DIR/scenario5-activation.json"
+scenario5_run_id="$(json_path "$TMP_DIR/scenario5-activation.json" "activation.run.id")"
+wait_run_state "$scenario5_run_id" "completed" "$TMP_DIR/scenario5-completed-status.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario5_run_id/snapshot" >"$TMP_DIR/scenario5-snapshot.json"
+
+python3 - "$TMP_DIR/scenario5-snapshot.json" <<'PY'
+import json
+import sys
+
+snapshot = json.load(open(sys.argv[1], encoding="utf-8")).get("snapshot") or {}
+errors = []
+run = snapshot.get("run") or {}
+if run.get("state") != "completed":
+    errors.append(f"run.state={run.get('state')!r}, want completed")
+failure_reason = str(run.get("failureReason") or "")
+if "completionState continue has no actionable continuation" in failure_reason:
+    errors.append(f"run failed with no-actionable continuation: {failure_reason}")
+steps = snapshot.get("steps") or []
+if not any("zz-llm-after-no-actionable-continuation-" in str(item.get("id") or "") for item in steps):
+    errors.append("missing no-actionable continuation validation follow-up step")
+results = snapshot.get("results") or []
+if not any(item.get("state") == "accepted" for item in results):
+    errors.append(f"results={results!r}, want accepted result")
+if errors:
+    for item in errors:
+        print(item, file=sys.stderr)
+    raise SystemExit(1)
+PY
+
 echo "software-dev goal/dod e2e passed for deployed workorch service $BASE_URL"
 echo "workspaceId=$workspace_id"
 echo "scenario1Run=$scenario1_run_id"
@@ -890,3 +973,4 @@ echo "scenario2Run=$scenario2_run_id"
 echo "scenario3Workspace=$scenario3_workspace_id"
 echo "scenario3Run=$scenario3_run_id"
 echo "scenario4Run=$scenario4_run_id"
+echo "scenario5Run=$scenario5_run_id"

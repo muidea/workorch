@@ -119,21 +119,21 @@ Decision resolution 写入时已有 redaction，但实际 `ai-proxy/interactions
 
 | ID | 任务 | 类型 | 优先级 | 状态 | 原因 | 收口方案 | 验收标准 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| FCA-01 | 定义 executionGraph continuation 终止契约 | Orchestrator/设计 | P0 | pending | `continue` 无 actionable continuation 当前直接失败 | 明确 `continue` 必须携带可执行 delta；无 delta 时进入 graph exhausted handling | 文档和单测覆盖 `continue` + 无新增节点 |
-| FCA-02 | 实现 graph exhausted 后的通用收口策略 | Orchestrator | P0 | pending | 图耗尽后缺少 DoD 评估/repair/replan 路径 | 当 graph 已无可执行节点且仍需 DoD gate 时，调度 validation follow-up 要求输出 `completed+dodAssessment` 或明确缺口 | `ws-e1e310fd02e4375e` 同类 run 不再因无 continuation 直接失败 |
-| FCA-03 | 调整现有硬失败单测 | Test | P0 | pending | 当前单测锁定旧行为 | 将旧测试改为覆盖：无 graph、无 DoD gate 时失败；有 DoD gate 时转 validation/replan | Orchestrator 单测能区分非法 continue 与 graph exhausted validation |
-| FCA-04 | prompt 契约分层 | LLM/设计 | P0 | pending | 全局 prompt 混入 software-dev / SSH / Web 等场景语义 | 拆分 core contract、capability contract、template/soul guidance | `blocks/llm` 基础 prompt 不含 template 专用规则 |
-| FCA-05 | 将软件开发规则回收到 `software-dev` Soul | Template/Soul | P0 | pending | 软件开发策略不应下沉到全局 LLM contract | 空 workspace、新项目初始化、弱测试证据、DoD-to-test 等放入 `software-dev` Soul 和默认 DoD | generic/weather/doc 等模板不会继承 software-dev 专用措辞 |
-| FCA-06 | capability 规则由 runtimeCapabilities 注入 | Blocks/LLM | P1 | pending | SSH/Web/Patch/Shell 规则混在全局 prompt 中 | block adapter 输出各自 capability contract，LLM prompt 只组合可用能力 | 只有启用的 block/capability 规则进入 prompt |
-| FCA-07 | LLM 出站 context 统一脱敏 | Security/LLM | P0 | pending | 旧治理历史或复制链路仍可能泄漏 secret | provider request 构建完成后统一执行 redaction，覆盖 input、promptContext、messages、trace refs | 出站 request 不包含 `sk-`、password、token 等明文 |
-| FCA-08 | 旧 governanceHistory secret 兜底处理 | Appservice/Orchestrator | P0 | pending | 旧 resolution payload 可能进入 context | context package、repair input、activation context 读取治理历史时统一 redaction | run snapshot、context bundle、LLM request 均不泄漏旧 secret |
-| FCA-09 | provider request redaction 观测 | Read Model/Test | P1 | pending | 脱敏后需要可排查 | contextBudget 或 trace 增加 `redactionApplied`、`redactedPaths` 摘要，不记录原文 | Web/TUI 可看到脱敏发生但不能看到 secret |
-| FCA-10 | 全量 e2e 禁止默认跳过关键项 | E2E | P0 | pending | SRD-17/18/33 deployed e2e 仍可默认 skip | 调整验证脚本：全量模式必须执行关键 deployed e2e；缺服务时 fail fast | 全量回归输出不出现关键 e2e skip |
-| FCA-11 | 增加 repeated graph / no actionable continuation e2e | E2E | P0 | pending | 当前问题未被 e2e 覆盖 | mock provider 返回重复 graph，验证系统进入 DoD follow-up 或 repair/replan | e2e 能阻断 `completionState continue has no actionable continuation` 回归 |
-| FCA-12 | 增加出站 LLM context secret e2e | E2E/Security | P0 | pending | 已发现实际交互日志有泄漏风险 | 构造历史明文 secret 决策，再触发新 run，检查 mock provider request | request log 中不含明文 secret |
-| FCA-13 | Web 轮询刷新核对与替换方案 | Web | P1 | pending | Web 侧存在 `setInterval` | 判断用途；如是状态刷新则切换 SSE/read model event，如果只是 UI 本地节流需标注 | Web workspace/run 状态能实时感知新增/删除/状态变化 |
-| FCA-14 | Read model 展示字段一致性复核 | Web/TUI | P1 | pending | 业务区展示需严格匹配模型 | 再次核对 Goal、DoD、TaskPlan、Memory、Artifact、Usage、RepairLoop 展示字段 | Web/TUI 均来自同一 read model，无自造字段语义 |
-| FCA-15 | `ws-e1e310fd02e4375e` 回归验收 | Runtime/E2E | P0 | pending | 该 workspace 是当前复杂链路样本 | 修复后重新执行同类复杂软件开发目标，核对每个阶段 | 不再重复 ticket/无效 repair；最终完成或给出结构化缺口 |
+| FCA-01 | 定义 executionGraph continuation 终止契约 | Orchestrator/设计 | P0 | verified | `continue` 无 actionable continuation 当前直接失败 | 已定义：无 DoD gate 仍非法失败；有 DoD gate 进入 no-actionable validation follow-up | `TestRuntimeOrchestrator_FailsContinueWithoutActionableContinuationWithoutDoDGate` 覆盖 |
+| FCA-02 | 实现 graph exhausted 后的通用收口策略 | Orchestrator | P0 | verified | 图耗尽后缺少 DoD 评估/repair/replan 路径 | 已实现 no-actionable continuation follow-up；重复无行动项进入既有 repair 路径 | Orchestrator 单测通过；deployed e2e 场景已补充待重部署后执行 |
+| FCA-03 | 调整现有硬失败单测 | Test | P0 | verified | 当前单测锁定旧行为 | 已拆分非法 continue 与 DoD-gated validation/repair 场景 | Orchestrator 单测能区分三类路径 |
+| FCA-04 | prompt 契约分层 | LLM/设计 | P0 | verified | 全局 prompt 混入 software-dev / SSH / Web 等场景语义 | 已拆分 core decision contract 与 runtime capability contract | `blocks/llm` 测试确认 core prompt 不含 software-dev 专用短语 |
+| FCA-05 | 将软件开发规则回收到 `software-dev` Soul | Template/Soul | P0 | verified | 软件开发策略不应下沉到全局 LLM contract | 已确认空 workspace、新项目初始化、弱测试证据、外部依赖 provider 作用域规则位于 `software-dev` Soul；全局 prompt 已移除对应措辞 | HTTP provider 测试确认 generic prompt 不再携带这些规则 |
+| FCA-06 | capability 规则由 runtimeCapabilities 注入 | Blocks/LLM | P1 | verified | SSH/Web/Patch/Shell 规则混在全局 prompt 中 | 已按 runtimeCapabilities 中实际声明的 block kind 注入 Shell/File/Patch/Web/SSH 能力规则 | `TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision` 覆盖 |
+| FCA-07 | LLM 出站 context 统一脱敏 | Security/LLM | P0 | verified | 旧治理历史或复制链路仍可能泄漏 secret | 已在 provider request 出口统一 redaction，覆盖 input、promptContext turns/sections、traceRefs | `TestRuntimeAdapterRedactsOutboundProviderRequest` 覆盖 |
+| FCA-08 | 旧 governanceHistory secret 兜底处理 | Appservice/Orchestrator | P0 | verified | 旧 resolution payload 可能进入 context | activation context、executionContextPackage、repair input 读取治理历史时统一 redaction | appservice/orchestrator/LLM 测试通过 |
+| FCA-09 | provider request redaction 观测 | Read Model/Test | P1 | verified | 脱敏后需要可排查 | `contextBudget` 增加 `redactionApplied`、`redactedPaths`，只记录路径不记录原文 | LLM 单测覆盖，read model 已沿用 contextBudget 投影 |
+| FCA-10 | 全量 e2e 禁止默认跳过关键项 | E2E | P0 | verified | SRD-17/18/33 deployed e2e 仍可默认 skip | `verify-software-requirement-development-orchestration.sh` 已取消默认 skip，关键 deployed e2e 缺服务时 fail fast | 全量 SRD 脚本已执行并通过，输出不含关键 e2e skip |
+| FCA-11 | 增加 repeated graph / no actionable continuation e2e | E2E | P0 | verified | 当前问题未被 e2e 覆盖 | `verify-software-dev-goal-dod-e2e.sh` 增加 Scenario-5，验证 no-actionable continuation validation follow-up | deployed e2e 已通过，Scenario-5 run 完成 |
+| FCA-12 | 增加出站 LLM context secret e2e | E2E/Security | P0 | verified | 已发现实际交互日志有泄漏风险 | 既有 SRD-33 secret 场景继续校验 snapshot/observability/event/LLM request；provider 出口增加单测兜底 | 单测与 deployed e2e 均已通过 |
+| FCA-13 | Web 轮询刷新核对与替换方案 | Web | P1 | verified | Web 侧存在 `setInterval` | Web 工作空间详情页已改为订阅 `/api/v1/workorch/events/stream`，事件触发 workspace list/context 刷新 | `make console-build` 和 server/backend/TUI 测试通过；源码不再存在该轮询 |
+| FCA-14 | Read model 展示字段一致性复核 | Web/TUI | P1 | verified | 业务区展示需严格匹配模型 | 本轮改动继续复用 snapshot/contextBudget/read model 投影，未新增 UI 自造业务字段 | appservice、backend、TUI 测试通过 |
+| FCA-15 | `ws-e1e310fd02e4375e` 回归验收 | Runtime/E2E | P0 | verified | 该 workspace 是当前复杂链路样本 | 同类根因已通过 continuation contract、prompt 分层、redaction、e2e 场景收口 | 已用同类复杂软件开发 deployed e2e 全链路回归验证 |
 
 ## 目标行为定义
 
@@ -242,3 +242,6 @@ Decision resolution 写入时已有 redaction，但实际 `ai-proxy/interactions
 | 日期 | 记录 |
 | --- | --- |
 | 2026-05-09 | 初始创建。基于 `ws-e1e310fd02e4375e`、orchestrator/LLM/appservice/TUI/Web/e2e 核对结果，形成全链路评估和收口任务清单。 |
+| 2026-05-09 | 完成第一轮代码收口：执行图 no-actionable continuation 进入 validation/repair；LLM prompt 拆分 core/capability/template 边界；provider request 出口统一脱敏并投影 redaction summary；Web workspace 刷新由轮询切换为 SSE；SRD 全量脚本取消关键 e2e 默认 skip；software-dev e2e 增加 Scenario-5 覆盖 no-actionable continuation。已通过 `go test ./... -count=1` 与 `make console-build`，deployed e2e 待最新服务重部署后执行。 |
+| 2026-05-09 | 最新服务重部署后执行收口验证：修正 deployed e2e mock 对多轮 prompt 的 `runId/stepId` 解析；隔离 Scenario-5 workspace；修复 MagicHub unsubscribe 阻塞 RuntimeSession teardown 的风险。`scripts/verify-software-requirement-development-orchestration.sh`、`scripts/verify-llm-workspace-execution.sh`、`scripts/verify-software-dev-goal-dod-e2e.sh` 与 `go test ./... -count=1` 均通过。 |
+| 2026-05-09 | 重新部署最新服务后再次复验：`scripts/verify-software-requirement-development-orchestration.sh` 全量通过，覆盖 SRD-16、SRD-17/18、SRD-33 deployed e2e 且无关键 e2e skip；随后执行 `go test ./... -count=1` 全量通过。 |

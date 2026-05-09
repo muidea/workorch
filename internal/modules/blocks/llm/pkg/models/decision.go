@@ -66,6 +66,8 @@ type ProviderContextBudget struct {
 	TracePolicy           string                 `json:"tracePolicy,omitempty"`
 	PromptCaptured        bool                   `json:"promptCaptured"`
 	Estimator             string                 `json:"estimator,omitempty"`
+	RedactionApplied      bool                   `json:"redactionApplied,omitempty"`
+	RedactedPaths         []string               `json:"redactedPaths,omitempty"`
 	Profile               ProviderContextProfile `json:"profile,omitempty"`
 }
 

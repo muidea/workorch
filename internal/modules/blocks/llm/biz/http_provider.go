@@ -459,6 +459,7 @@ func userPrompt(request llmmodels.ProviderRequest) string {
 			"Return only the corrected JSON object. Do not change the business intent except where required to satisfy the schema.",
 			dialogLanguageInstruction(request),
 			decisionContractPrompt(),
+			capabilityContractPrompt(request),
 			"",
 			"Invalid provider request and repair context:",
 			string(body),
@@ -468,6 +469,7 @@ func userPrompt(request llmmodels.ProviderRequest) string {
 		"Plan the next workspace execution step from this provider request.",
 		dialogLanguageInstruction(request),
 		decisionContractPrompt(),
+		capabilityContractPrompt(request),
 		"",
 		string(body),
 	}, "\n")
@@ -488,34 +490,19 @@ func decisionContractPrompt() string {
 		"- Use executionGraph when the next work contains multiple blocks, dependencies, or future parallel-ready work.",
 		"- executionGraph.nodes items require id and kind; dependsOn is a list of node ids; input carries block input.",
 		"- executionGraph.nodes kind values must be selected from runtimeCapabilities.blockKinds only.",
-		"- Prefer file/list and file/read for workspace file discovery and bounded file inspection. Use file/edit only to generate a non-mutating exact-text replacement patch preview; it does not write files. Use shell/command for build/test/lint or project tools, not as the default file reader.",
-		"- Use executionGraph node kind patch/preview to validate and summarize an intended patch without writing files. Use patch/apply for file writes or diffs that must participate in graph dependencies. Use patch/revert only for a WorkOrch patchId when reverting an already applied WorkOrch patch. Do not use patchRequests as an executionGraph node kind.",
 		"- Sensitive paths and large patches require Approval before apply. After approval is granted, include the approved approvalId in patch/apply or patchRequests.",
 		"- Use shellCommands, patchRequests, mcpToolCalls, requiredDecision, requiredApproval, memoryWrites, or dodAssessment as appropriate.",
 		"- Top-level patchRequests are immediate patch side effects of the current LLM step and may use only patchType, targetRef, content, diff, summary, baseHash, and approvalId. patchType must be file_write or unified_diff. Do not include an operation field.",
-		"- Do not use patch/apply or patchRequests to create report-only deliverables under delivery/, .workorch-data/, or other WorkOrch-managed artifact paths. Do not write governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md into the workspace. For final user-facing results in code-agent or query tasks, place the result in dodAssessment and let the runtime record artifacts.",
-		"- Shell command names must be real commands available in the local process environment. Do not use a command named workorch.",
-		"- Shell command arguments must be encoded only as args arrays. For example use {\"command\":\"find\",\"args\":[\".\",\"-maxdepth\",\"3\"]}; never place positional arguments as object properties after command.",
-		"- shell/command.command must contain only the executable name or path. For shell syntax such as redirection, heredoc, cd, pipes, &&, ||, or multi-line scripts, use {\"command\":\"sh\",\"args\":[\"-c\",\"...\"]} or use patchRequests to write files.",
-		"- Do not use commands listed in runtimeCapabilities.shellPolicy.unavailableCommands, including inside sh -c, bash -c, or other nested shell scripts.",
+		"- Do not use patch/apply or patchRequests to create report-only deliverables under delivery/, .workorch-data/, or other WorkOrch-managed artifact paths. Do not write governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md into the workspace. For final user-facing results, place the result in dodAssessment and let the runtime record artifacts.",
 		"- The effective Goal and DoD in input.executionContext are authoritative. Treat explicit constraints in them as hard constraints. Do not continue a previous plan, tool choice, validation command, or assumption that conflicts with the current Goal, DoD, or resolved governance decisions.",
-		"- Shell command input may include timeoutMillis for commands expected to take longer than the default; keep commands non-interactive and bounded.",
-		"- For curl-based data queries, use quiet output such as curl -sS so progress meters do not become execution evidence or final result text.",
-		"- For current or external facts, prefer web/search and web/fetch from runtimeCapabilities instead of shell curl. Treat web/search results as candidate sources and use web/fetch for facts that affect the final answer.",
-		"- When writing memory from web-backed work, write only adopted fact summaries plus source URL, retrievedAt/contentHash, and evidenceRefs. Never write raw webpage bodies or unadopted search candidates into memoryWrites.",
-		"- Do not assume remote host access credentials, SSH users, keys, or passwords. If a goal requires remote host configuration and no access method is present in the request, return blocked_on_decision with decisionKind provide_missing_info and ask for the access method or credentials.",
 		"- If input.decisionResolution, input.governanceHistory, input.executionContext.governanceHistory, or input.executionContextPackage.governanceHistory contains resolved decisions, treat their resolutionPayload as confirmed workspace context. Do not ask the same question again; continue from that confirmed decision unless it conflicts with the current Goal or DoD.",
-		"- When remote SSH credentials are explicitly available, prefer the ssh/command block kind from runtimeCapabilities.blockKinds. Do not emulate password SSH with sshpass or expect through shell/command.",
-		"- ssh/command input supports host, port, username, password, privateKey, privateKeyPath, command, and timeoutMillis. Keep the remote command non-interactive and bounded.",
-		"- Shell commands may call local workorchd HTTP only through runtimeCapabilities.serviceAPIs. Do not use /runs, /observability, /metrics?run=..., or any endpoint that is not explicitly declared.",
 		"- When input.runtimeRepairFollowUp is true, use input.failedStepInput, input.failedStepOutput, input.failedExecutionGraph, failureReason, runtimeDiagnostics, graphEvidence, workspaceFileManifest, and completed graph nodes as repair evidence. Reconcile that evidence with the current effective Goal, DoD, and resolved decisions before producing a new executionGraph; do not copy a failed graph unless it still matches all current constraints. Plan the smallest safe patch or command sequence that fixes the failure, then rerun the failed validation or an equivalent verification step.",
 		"- When input.failureClass is dod_coverage_missing or input.missingDoDItems is non-empty, produce a DoD-gap repair plan that maps each missing item to concrete affected files, patch/apply operations, and verification commands with expected assertions. Do not return generic inspection-only loops when implementation or verification gaps are already explicit.",
 		"- If runtimeDiagnostics.kind is workspace_path_conflict, the conflictRef already exists as a file and must not be used as a directory. Choose a different targetRef or write/update files at the existing project root.",
 		"- If workspace evidence shows that dependency metadata, lock data, generated indexes, or similar prerequisite files changed or are missing, include the appropriate bounded preparation step inferred from workspace files and runtimeCapabilities before rerunning verification. Do not infer an ecosystem from the task category alone.",
-		"- An empty workspace file listing is not by itself missing source code. If the current Goal and DoD can be satisfied by creating new workspace files and do not explicitly require modifying an existing repository, module, path, or codebase, treat the empty workspace as a new-work initialization case: plan bounded patch/apply file writes for the minimal project/artifact skeleton, then run the relevant verification commands. Return blocked_on_decision for missing source only when the Goal, DoD, Memory, or resolved governance decisions explicitly depend on existing source that is not visible.",
 		"- When input.graphFollowUp is true, use input.graphEvidence as the current execution graph evidence and input.runEvidenceSummary as the compact run-level evidence summary. Return completed with dodAssessment when the DoD can be assessed; request more work only when evidence is insufficient.",
 		"- When input.completionFollowUp is true, use input.previousStepOutput as the latest execution evidence and input.runEvidenceSummary as the compact run-level evidence summary. Return completed with dodAssessment when the DoD can be assessed; otherwise plan only the missing verification work.",
-		"- A test command that reports no tests, no test files, or no assertions is weak evidence. Do not mark related DoD items satisfied unless the DoD explicitly allows that; mark the item skipped or failed with impact and residual risk, or plan an effective assertion/verification step.",
+		"- When input.continuationFollowUp is true, the previous response requested continuation but did not provide an actionable next step. Use the current evidence to either complete with dodAssessment, produce only missing actionable work, request a real decision/approval, or fail with a non-recoverable reason.",
 		"- For completed, dodAssessment.items must cover every current effective DoD item from input.executionContext.dod/items. Do not omit DoD items that are not yet satisfied; instead return continue with the missing implementation or verification work, or mark the item failed/skipped with impact if completion is impossible.",
 		"- For completed, include dodAssessment.summary as a non-empty user-facing final result, dodAssessment.goalOutcome as a concise one-sentence result (always required), evidenceRefs for every satisfied item, and when known include implementationSummary, verificationSummary, knownLimitations, residualRisks, and nextActions.",
 		"- Do not include workspaceId, runId, stepId, schema, traceRefs, config, or any unknown top-level field in the decision JSON.",
@@ -524,6 +511,57 @@ func decisionContractPrompt() string {
 		`{"completionState":"blocked_on_decision","requiredDecision":{"reason":"missing product choice","decisionKind":"provide_missing_info","question":"Which runtime adapter should be used?"}}`,
 		`{"completionState":"completed","dodAssessment":{"satisfied":true,"summary":"Tests passed and the requested artifact is ready.","goalOutcome":"The requested implementation is complete.","implementationSummary":"Implemented the requested behavior.","verificationSummary":"go test ./... passed.","items":[{"item":"tests pass","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}],"knownLimitations":[],"residualRisks":[],"nextActions":["Review the generated artifacts."]}}`,
 	}, "\n")
+}
+
+func capabilityContractPrompt(request llmmodels.ProviderRequest) string {
+	lines := []string{"Runtime capability contract:"}
+	if requestHasBlockKind(request, "file/list") || requestHasBlockKind(request, "file/read") || requestHasBlockKind(request, "file/edit") {
+		lines = append(lines, "- Prefer file/list and file/read for workspace file discovery and bounded file inspection. Use file/edit only to generate a non-mutating exact-text replacement patch preview; it does not write files.")
+	}
+	if requestHasBlockKind(request, "patch/preview") || requestHasBlockKind(request, "patch/apply") || requestHasBlockKind(request, "patch/revert") {
+		lines = append(lines, "- Use executionGraph node kind patch/preview to validate and summarize an intended patch without writing files. Use patch/apply for file writes or diffs that must participate in graph dependencies. Use patch/revert only for a WorkOrch patchId when reverting an already applied WorkOrch patch. Do not use patchRequests as an executionGraph node kind.")
+	}
+	if requestHasBlockKind(request, "shell/command") {
+		lines = append(lines,
+			"- Shell command names must be real commands available in the local process environment. Do not use a command named workorch.",
+			"- Shell command arguments must be encoded only as args arrays. For example use {\"command\":\"find\",\"args\":[\".\",\"-maxdepth\",\"3\"]}; never place positional arguments as object properties after command.",
+			"- shell/command.command must contain only the executable name or path. For shell syntax such as redirection, heredoc, cd, pipes, &&, ||, or multi-line scripts, use {\"command\":\"sh\",\"args\":[\"-c\",\"...\"]} or use patchRequests to write files.",
+			"- Do not use commands listed in runtimeCapabilities.shellPolicy.unavailableCommands, including inside sh -c, bash -c, or other nested shell scripts.",
+			"- Shell command input may include timeoutMillis for commands expected to take longer than the default; keep commands non-interactive and bounded.",
+			"- For curl-based data queries, use quiet output such as curl -sS so progress meters do not become execution evidence or final result text.",
+			"- Shell commands may call local workorchd HTTP only through runtimeCapabilities.serviceAPIs. Do not use /runs, /observability, /metrics?run=..., or any endpoint that is not explicitly declared.",
+		)
+	}
+	if requestHasBlockKind(request, "web/search") || requestHasBlockKind(request, "web/fetch") {
+		lines = append(lines,
+			"- For current or external facts, prefer web/search and web/fetch from runtimeCapabilities instead of shell curl. Treat web/search results as candidate sources and use web/fetch for facts that affect the final answer.",
+			"- When writing memory from web-backed work, write only adopted fact summaries plus source URL, retrievedAt/contentHash, and evidenceRefs. Never write raw webpage bodies or unadopted search candidates into memoryWrites.",
+		)
+	}
+	if requestHasBlockKind(request, "ssh/command") {
+		lines = append(lines,
+			"- Do not assume remote host access credentials, SSH users, keys, or passwords. If a goal requires remote host configuration and no access method is present in the request, return blocked_on_decision with decisionKind provide_missing_info and ask for the access method or credentials.",
+			"- When remote SSH credentials are explicitly available, prefer the ssh/command block kind from runtimeCapabilities.blockKinds. Do not emulate password SSH with sshpass or expect through shell/command.",
+			"- ssh/command input supports host, port, username, password, privateKey, privateKeyPath, command, and timeoutMillis. Keep the remote command non-interactive and bounded.",
+		)
+	}
+	if len(lines) == 1 {
+		return "Runtime capability contract: use only runtimeCapabilities declared in this provider request."
+	}
+	return strings.Join(lines, "\n")
+}
+
+func requestHasBlockKind(request llmmodels.ProviderRequest, kind string) bool {
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return false
+	}
+	for _, item := range request.RuntimeCapabilities.BlockKinds {
+		if strings.TrimSpace(item.Kind) == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func sanitizeProviderBody(body []byte, secret string) string {

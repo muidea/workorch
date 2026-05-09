@@ -2,6 +2,17 @@ import type { Approval, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapa
 
 const apiBase = '/api/v1/workorch';
 
+export function createWorkorchEventStream(query?: { workspaceId?: string; runId?: string }) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(query ?? {})) {
+    if (value !== undefined && value !== null && value !== '') {
+      search.set(key, String(value));
+    }
+  }
+  const suffix = search.toString() ? `?${search.toString()}` : '';
+  return new EventSource(`${apiBase}/events/stream${suffix}`);
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,

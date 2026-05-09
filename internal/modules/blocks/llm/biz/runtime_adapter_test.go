@@ -902,6 +902,51 @@ func TestRuntimeAdapterBuildsPromptContextFromGovernanceAndGoalDoDHistory(t *tes
 	}
 }
 
+func TestRuntimeAdapterRedactsOutboundProviderRequest(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{"completionState":"continue"}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "provider-secret",
+		Model:    "test-model",
+	}, provider)
+	request := llmStepRequest()
+	request.Input["decisionResolution"] = map[string]any{
+		"resolutionPayload": map[string]any{
+			"apiKey": "sk-test-secret-123456",
+			"notes":  "authorization: bearer abcdefghijk",
+		},
+	}
+	request.Input["executionContext"] = map[string]any{
+		"governanceHistory": []any{
+			map[string]any{
+				"id":      "ticket-secret",
+				"payload": "token=secret-token-value",
+			},
+		},
+	}
+
+	if _, err := adapter.ExecuteRuntimeStep(context.Background(), request); err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+
+	encoded, err := json.Marshal(provider.request)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	serialized := string(encoded)
+	for _, leaked := range []string{"sk-test-secret-123456", "abcdefghijk", "secret-token-value"} {
+		if strings.Contains(serialized, leaked) {
+			t.Fatalf("provider request leaked %q: %s", leaked, serialized)
+		}
+	}
+	if !strings.Contains(serialized, "[REDACTED]") {
+		t.Fatalf("provider request = %s, want redacted markers", serialized)
+	}
+	if provider.request.ContextBudget == nil || !provider.request.ContextBudget.RedactionApplied || len(provider.request.ContextBudget.RedactedPaths) == 0 {
+		t.Fatalf("contextBudget = %+v, want redaction summary", provider.request.ContextBudget)
+	}
+}
+
 func TestRuntimeAdapterFailsUnknownRequestedProvider(t *testing.T) {
 	adapter := NewRuntimeAdapterWithProviders("local", map[string]ProviderRuntime{
 		"local": {

@@ -688,6 +688,8 @@ func providerContextBudgetOutput(budget *llmmodels.ProviderContextBudget, provid
 		"tracePolicy":           budget.TracePolicy,
 		"promptCaptured":        budget.PromptCaptured,
 		"estimator":             budget.Estimator,
+		"redactionApplied":      budget.RedactionApplied,
+		"redactedPaths":         append([]string(nil), budget.RedactedPaths...),
 		"profile": map[string]any{
 			"contextWindowTokens":    budget.Profile.ContextWindowTokens,
 			"maxInputTokens":         budget.Profile.MaxInputTokens,
@@ -1884,7 +1886,7 @@ func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels
 		providerReq.ContextBudget.NormalizedSections = uniqueStrings(append(providerReq.ContextBudget.NormalizedSections, providerReq.PromptContext.Normalization.NormalizedSections...))
 		providerReq.ContextBudget.IncludedSections = uniqueStrings(append(providerReq.ContextBudget.IncludedSections, promptContextSectionIDs(providerReq.PromptContext)...))
 	}
-	return providerReq
+	return redactProviderRequestForLLM(providerReq)
 }
 
 func promptContextSectionIDs(context *llmmodels.PromptContext) []string {

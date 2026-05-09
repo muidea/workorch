@@ -6569,7 +6569,7 @@ func TestRuntimeOrchestrator_FailsLLMRunCompletionWithoutDoDAssessment(t *testin
 	}
 }
 
-func TestRuntimeOrchestrator_FailsContinueWithoutActionableContinuation(t *testing.T) {
+func TestRuntimeOrchestrator_FailsContinueWithoutActionableContinuationWithoutDoDGate(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -6594,7 +6594,6 @@ func TestRuntimeOrchestrator_FailsContinueWithoutActionableContinuation(t *testi
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
-		DoDID:           common.DoDID("dod-1"),
 		State:           common.RunStateCreated,
 		InitialStepKind: "llm/workspace_execution",
 	}); err != nil {
@@ -6618,6 +6617,144 @@ func TestRuntimeOrchestrator_FailsContinueWithoutActionableContinuation(t *testi
 	}
 	if step.State != common.StepStateFailed || !strings.Contains(step.Output["error"].(string), "completionState continue has no actionable continuation") {
 		t.Fatalf("step = %+v, want failed completion continuation gate", step)
+	}
+}
+
+func TestRuntimeOrchestrator_DispatchesValidationFollowUpForContinueWithoutActionableContinuation(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	var followUpInput map[string]any
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		if boolValue(request.Input[stepInputKeyNoActionableFollowUp]) {
+			followUpInput = request.Input
+			return map[string]any{
+				"status": "completed",
+				"dodAssessment": map[string]any{
+					"satisfied": true,
+					"summary":   "current evidence satisfies the DoD",
+					"items": []map[string]any{
+						{
+							"item":         "goal completed",
+							"state":        "satisfied",
+							"evidenceRefs": []string{string(request.StepID)},
+						},
+					},
+				},
+			}, nil
+		}
+		return map[string]any{
+			"status": "completed",
+			"llmDecision": map[string]any{
+				"completionState": "continue",
+			},
+		}, nil
+	}}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-continue-follow-up")
+	runID := common.RunID("run-continue-follow-up")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-1"),
+		State:           common.RunStateCreated,
+		InitialStepKind: "llm/workspace_execution",
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run = %+v, want completed after validation follow-up", runItem)
+	}
+	if !boolValue(followUpInput[stepInputKeyNoActionableFollowUp]) {
+		t.Fatalf("followUpInput = %+v, want no-actionable continuation marker", followUpInput)
+	}
+	if followUpInput["previousCompletionState"] != "continue" {
+		t.Fatalf("followUpInput previousCompletionState = %#v, want continue", followUpInput["previousCompletionState"])
+	}
+	if evidence := mapSliceFromValue(followUpInput[stepInputKeyRunEvidenceSummary]); len(evidence) == 0 {
+		t.Fatalf("followUpInput runEvidenceSummary = %#v, want prior evidence", followUpInput[stepInputKeyRunEvidenceSummary])
+	}
+}
+
+func TestRuntimeOrchestrator_RepairsRepeatedContinueWithoutActionableContinuation(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	var repairSeen bool
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		if boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]) {
+			repairSeen = true
+			return map[string]any{
+				"status": "completed",
+				"dodAssessment": map[string]any{
+					"satisfied": true,
+					"summary":   "repair completed validation",
+					"items": []map[string]any{
+						{
+							"item":         "goal completed",
+							"state":        "satisfied",
+							"evidenceRefs": []string{string(request.StepID)},
+						},
+					},
+				},
+			}, nil
+		}
+		return map[string]any{
+			"status": "completed",
+			"llmDecision": map[string]any{
+				"completionState": "continue",
+			},
+		}, nil
+	}}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-repeated-continue-repair")
+	runID := common.RunID("run-repeated-continue-repair")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-1"),
+		State:           common.RunStateCreated,
+		InitialStepKind: "llm/workspace_execution",
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	if !repairSeen {
+		t.Fatalf("runtime repair follow-up was not dispatched after repeated no-actionable continuation")
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run = %+v, want completed after repair", runItem)
 	}
 }
 

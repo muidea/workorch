@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	defaultMagicHubCapacity = 1024
-	wildcardTopic           = "*"
-	magicWildcardTopic      = "/#"
+	defaultMagicHubCapacity           = 1024
+	defaultMagicHubUnsubscribeTimeout = 100 * time.Millisecond
+	wildcardTopic                     = "*"
+	magicWildcardTopic                = "/#"
 )
 
 type MagicHub struct {
@@ -131,7 +132,15 @@ func (h *MagicHub) Subscribe(topic string, handler Handler) func() {
 		}
 		h.mu.Unlock()
 		if ok && observer != nil {
-			h.hub.Unsubscribe(subscription.eventID, observer)
+			done := make(chan struct{})
+			go func() {
+				h.hub.Unsubscribe(subscription.eventID, observer)
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(defaultMagicHubUnsubscribeTimeout):
+			}
 		}
 	}
 }

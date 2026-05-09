@@ -45,6 +45,7 @@ const (
 	stepInputKeyRuntimeRepairAttempt   = "runtimeRepairAttempt"
 	stepInputKeyProviderRetryFollowUp  = "providerRetryFollowUp"
 	stepInputKeyProviderRetryAttempt   = "providerRetryAttempt"
+	stepInputKeyNoActionableFollowUp   = "noActionableContinuationFollowUp"
 	stepOutputKeyBlockDecisionReason   = "blockDecisionReason"
 	stepOutputKeyBlockDecisionTicketID = "blockDecisionTicketId"
 	stepOutputKeyBlockDecisionKind     = "blockDecisionKind"
@@ -1055,6 +1056,9 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if shouldDispatchLLMCompletionFollowUp(run, step, output) {
 		return o.dispatchStepWithWorkspace(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.llmCompletionFollowUpStepInput(ctx, run, step), workspace)
 	}
+	if shouldDispatchNoActionableContinuationFollowUp(run, step, output) {
+		return o.dispatchStepWithWorkspace(ctx, run, noActionableContinuationFollowUpStepID(run.ID, step), initialStepKind(run), o.noActionableContinuationFollowUpStepInput(ctx, run, step), workspace)
+	}
 	if completionState := llmDecisionCompletionStateFromOutput(output); completionState != "" && completionState != "completed" {
 		return o.handleRuntimeStepFailure(
 			ctx,
@@ -1202,6 +1206,13 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 				ID:    llmCompletionFollowUpStepID(run.ID, last),
 				Kind:  initialStepKind(run),
 				Input: o.llmCompletionFollowUpStepInput(ctx, run, last),
+			}}, nil
+		}
+		if shouldDispatchNoActionableContinuationFollowUp(run, last, last.Output) {
+			return []stepDispatchSpec{{
+				ID:    noActionableContinuationFollowUpStepID(run.ID, last),
+				Kind:  initialStepKind(run),
+				Input: o.noActionableContinuationFollowUpStepInput(ctx, run, last),
 			}}, nil
 		}
 	}

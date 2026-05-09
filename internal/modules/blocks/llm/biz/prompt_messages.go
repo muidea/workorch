@@ -83,6 +83,7 @@ func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerProm
 	appendSection("language-and-contract", "user", "normalize_allowed", strings.Join([]string{
 		dialogLanguageInstruction(request),
 		decisionContractPrompt(),
+		capabilityContractPrompt(request),
 	}, "\n\n"))
 	appendSection("workspace-run", "user", "normalize_allowed", marshalPromptSection("Workspace and run context", map[string]any{
 		"workspaceId": request.WorkspaceID,

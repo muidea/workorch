@@ -14,7 +14,7 @@ import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, D
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMContextBudgetTrace, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, ProgressBlocker, ProgressItem, RepairLoop, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
-import { workorchApi } from './api';
+import { createWorkorchEventStream, workorchApi } from './api';
 import './styles.css';
 
 type ViewKey = 'board' | 'workspaceDetail' | 'governance' | 'runtimeControl' | 'configuration' | 'service';
@@ -2616,6 +2616,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [setupStep, setSetupStep] = useState(0);
   const workspaceListRequestSeq = useRef(0);
   const workspaceContextRequestSeq = useRef(0);
+  const currentWorkspaceIdRef = useRef<string | undefined>(undefined);
+  const workspaceEventRefreshTimerRef = useRef<number | undefined>(undefined);
   const [activationForm] = Form.useForm();
   const [soulBindingsForm] = Form.useForm();
   const [setupSoulBindingsForm] = Form.useForm<SoulBindingFormValues>();
@@ -2625,6 +2627,10 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [workspaceDeleteForm] = Form.useForm<WorkspaceDeleteFormValues>();
   const [goalForm] = Form.useForm();
   const [dodForm] = Form.useForm();
+
+  useEffect(() => {
+    currentWorkspaceIdRef.current = workspaceId;
+  }, [workspaceId]);
 
   useEffect(() => {
     setWorkspaceListReady(false);
@@ -2658,16 +2664,62 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   }, [workspaceListReady, workspaceId]);
 
   useEffect(() => {
-    if (!workspaceId || !activationTracking) {
+    if (!workspaceListReady) {
       return undefined;
     }
-    const timer = window.setInterval(() => {
-      void loadWorkspaceContext(workspaceId).catch((error: unknown) => {
-        message.error(errorMessage(error));
-      });
-    }, 3000);
-    return () => window.clearInterval(timer);
-  }, [workspaceId, activationTracking]);
+    const stream = createWorkorchEventStream();
+    const scheduleRefresh = (refreshList: boolean, targetWorkspaceId?: string) => {
+      if (workspaceEventRefreshTimerRef.current !== undefined) {
+        window.clearTimeout(workspaceEventRefreshTimerRef.current);
+      }
+      workspaceEventRefreshTimerRef.current = window.setTimeout(() => {
+        workspaceEventRefreshTimerRef.current = undefined;
+        const selected = currentWorkspaceIdRef.current;
+        const nextWorkspaceId = targetWorkspaceId || selected;
+        if (refreshList) {
+          void loadWorkspaceList(nextWorkspaceId).catch((error: unknown) => {
+            message.error(errorMessage(error));
+          });
+        }
+        if (nextWorkspaceId) {
+          void loadWorkspaceContext(nextWorkspaceId).catch((error: unknown) => {
+            if (isNotFoundError(error)) {
+              void loadWorkspaceList(undefined, nextWorkspaceId).catch((refreshError: unknown) => {
+                message.error(errorMessage(refreshError));
+              });
+              return;
+            }
+            message.error(errorMessage(error));
+          });
+        }
+      }, 150);
+    };
+    const handleEvent = (event: MessageEvent<string>) => {
+      try {
+        const envelope = JSON.parse(event.data) as { topic?: string; workspaceId?: string };
+        const topic = String(envelope.topic ?? '');
+        const eventWorkspaceId = envelope.workspaceId;
+        const refreshList = topic.includes('workspace');
+        if (refreshList || !eventWorkspaceId || eventWorkspaceId === currentWorkspaceIdRef.current) {
+          scheduleRefresh(refreshList, eventWorkspaceId);
+        }
+      } catch {
+        scheduleRefresh(false, currentWorkspaceIdRef.current);
+      }
+    };
+    stream.addEventListener('workorch', handleEvent);
+    stream.onerror = () => {
+      stream.close();
+    };
+    return () => {
+      stream.removeEventListener('workorch', handleEvent);
+      stream.close();
+      if (workspaceEventRefreshTimerRef.current !== undefined) {
+        window.clearTimeout(workspaceEventRefreshTimerRef.current);
+        workspaceEventRefreshTimerRef.current = undefined;
+      }
+    };
+  }, [workspaceListReady]);
 
   const readyDoDs = dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
   const llmProviders = configuration?.llm.providers ?? [];

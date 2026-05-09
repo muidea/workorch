@@ -122,7 +122,7 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		governanceHistory = append(currentGovernance, governanceHistory...)
 	}
 	if len(governanceHistory) > 0 {
-		ret["governanceHistory"] = limitedMapSlice(governanceHistory, 6)
+		ret["governanceHistory"] = redactSensitiveMapSlice(limitedMapSlice(governanceHistory, 6))
 	}
 	return ret
 }
@@ -194,7 +194,21 @@ func (o *RuntimeOrchestrator) currentGovernanceHistoryForLLMInput(ctx context.Co
 	if len(history) == 0 {
 		return nil
 	}
-	return limitedMapSlice(history, 6)
+	return redactSensitiveMapSlice(limitedMapSlice(history, 6))
+}
+
+func redactSensitiveMapSlice(input []map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(input))
+	for _, item := range input {
+		if item == nil {
+			continue
+		}
+		ret = append(ret, common.RedactSensitiveMap(item))
+	}
+	return ret
 }
 
 type stableExecutionContextPackage struct {

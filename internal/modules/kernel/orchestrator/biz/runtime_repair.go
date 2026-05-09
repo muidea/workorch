@@ -65,7 +65,7 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 		}
 		return common.ErrInvalidArgument
 	}
-	if shouldCloseCompletionGateFailureWithoutRepair(summary, step.Output) {
+	if shouldCloseCompletionGateFailureWithoutRepair(summary, step, step.Output) {
 		reason := "runtime step failed"
 		if execErr != nil {
 			reason = execErr.Error()
@@ -80,8 +80,11 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 	return o.dispatchRuntimeRepairFollowUp(ctx, run, step, execErr)
 }
 
-func shouldCloseCompletionGateFailureWithoutRepair(summary string, output map[string]any) bool {
+func shouldCloseCompletionGateFailureWithoutRepair(summary string, step *runModel.Step, output map[string]any) bool {
 	if strings.TrimSpace(summary) != "runtime completion gate failed" {
+		return false
+	}
+	if step != nil && boolValue(step.Input[stepInputKeyNoActionableFollowUp]) {
 		return false
 	}
 	assessment := doDAssessmentFromOutput(output)

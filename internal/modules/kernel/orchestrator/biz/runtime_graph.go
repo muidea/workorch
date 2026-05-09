@@ -164,6 +164,9 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	if shouldDispatchLLMCompletionFollowUp(currentRun, last, last.Output) {
 		return o.dispatchStepWithWorkspace(ctx, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
 	}
+	if shouldDispatchNoActionableContinuationFollowUp(currentRun, last, last.Output) {
+		return o.dispatchStepWithWorkspace(ctx, currentRun, noActionableContinuationFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), noActionableContinuationFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
+	}
 	if completionState := llmDecisionCompletionStateFromOutput(last.Output); completionState != "" && completionState != "completed" {
 		last.State = common.StepStateFailed
 		last.Output = runtimeFailureOutput(last.Output, fmt.Errorf("%w: completionState %s has no actionable continuation", common.ErrInvalidArgument, completionState))
@@ -640,6 +643,20 @@ func shouldDispatchLLMCompletionFollowUp(run *runModel.Run, step *runModel.Step,
 	return hasCompletionFollowUpSideEffect(output)
 }
 
+func shouldDispatchNoActionableContinuationFollowUp(run *runModel.Run, step *runModel.Step, output map[string]any) bool {
+	if !requiresDoDAssessmentCompletionGate(run) || step == nil || output == nil {
+		return false
+	}
+	if boolValue(step.Input[stepInputKeyNoActionableFollowUp]) {
+		return false
+	}
+	if doDAssessmentFromOutput(output) != nil {
+		return false
+	}
+	completionState := llmDecisionCompletionStateFromOutput(output)
+	return completionState != "" && completionState != "completed"
+}
+
 func hasCompletionFollowUpSideEffect(output map[string]any) bool {
 	return outputItemCount(output[stepOutputKeyPatches]) > 0 ||
 		outputItemCount(output[stepOutputKeyMemoryWrites]) > 0 ||
@@ -689,6 +706,43 @@ func llmCompletionFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[
 
 func llmCompletionFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step) map[string]any {
 	input := llmCompletionFollowUpStepInput(run, step)
+	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromSteps(steps))
+}
+
+func noActionableContinuationFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {
+	stepID := runtimeChildID(step.ID, "continuation")
+	if stepID == "" {
+		stepID = "continuation"
+	}
+	return common.StepID(fmt.Sprintf("%s/zz-llm-after-no-actionable-continuation-%s", runID, stepID))
+}
+
+func noActionableContinuationFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]any {
+	input := llmCompletionFollowUpStepInput(run, step)
+	input[stepInputKeyNoActionableFollowUp] = true
+	input["completionFollowUp"] = false
+	input["continuationFollowUp"] = true
+	if completionState := llmDecisionCompletionStateFromOutput(step.Output); completionState != "" {
+		input["previousCompletionState"] = completionState
+		input["continuationFailureReason"] = fmt.Sprintf("completionState %s has no actionable continuation", completionState)
+	}
+	return input
+}
+
+func noActionableContinuationFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step) map[string]any {
+	input := noActionableContinuationFollowUpStepInput(run, step)
+	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromSteps(steps))
+}
+
+func (o *RuntimeOrchestrator) noActionableContinuationFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
+	input := noActionableContinuationFollowUpStepInput(run, step)
+	if o == nil || o.steps == nil || run == nil {
+		return input
+	}
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil {
+		return input
+	}
 	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromSteps(steps))
 }
 

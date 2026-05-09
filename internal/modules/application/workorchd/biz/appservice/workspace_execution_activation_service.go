@@ -627,7 +627,7 @@ func workspaceGovernanceHistory(
 		if err != nil || resolution == nil {
 			continue
 		}
-		ret = append(ret, map[string]any{
+		ret = append(ret, common.RedactSensitiveMap(map[string]any{
 			"ticketId":          string(ticket.ID),
 			"runId":             string(ticket.RunID),
 			"stepId":            string(ticket.StepID),
@@ -637,7 +637,7 @@ func workspaceGovernanceHistory(
 			"resolutionId":      string(resolution.ID),
 			"resolutionType":    resolution.Type,
 			"resolutionPayload": cloneDecisionPayload(resolution.Payload),
-		})
+		}))
 		if len(ret) >= limit {
 			break
 		}

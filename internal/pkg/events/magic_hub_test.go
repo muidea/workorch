@@ -5,6 +5,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
+
+	magicevent "github.com/muidea/magicCommon/event"
 )
 
 func TestMagicHubPublishesThroughMagicCommonHub(t *testing.T) {
@@ -77,6 +80,25 @@ func TestMagicHubUnsubscribeStopsDelivery(t *testing.T) {
 	}
 }
 
+func TestMagicHubUnsubscribeDoesNotBlockOnUnderlyingHub(t *testing.T) {
+	hub := NewMagicHubWithHub(blockingUnsubscribeHub{})
+	unsubscribe := hub.Subscribe(TopicApprovalResolved, func(_ context.Context, _ Envelope) error {
+		return nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		unsubscribe()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(defaultMagicHubUnsubscribeTimeout + 200*time.Millisecond):
+		t.Fatal("unsubscribe blocked on underlying magicCommon hub")
+	}
+}
+
 func TestMagicHubReturnsHandlerError(t *testing.T) {
 	hub := NewMagicHub()
 	defer hub.Terminate()
@@ -95,6 +117,22 @@ func TestMagicHubReturnsHandlerError(t *testing.T) {
 		t.Fatalf("Publish returned unexpected error: %v", err)
 	}
 }
+
+type blockingUnsubscribeHub struct{}
+
+func (blockingUnsubscribeHub) Subscribe(string, magicevent.Observer) {}
+
+func (blockingUnsubscribeHub) Unsubscribe(string, magicevent.Observer) {
+	select {}
+}
+
+func (blockingUnsubscribeHub) Post(magicevent.Event) {}
+
+func (blockingUnsubscribeHub) Send(magicevent.Event) magicevent.Result {
+	return nil
+}
+
+func (blockingUnsubscribeHub) Terminate() {}
 
 func TestMagicHubPublishWithoutSubscribersSucceeds(t *testing.T) {
 	hub := NewMagicHub()

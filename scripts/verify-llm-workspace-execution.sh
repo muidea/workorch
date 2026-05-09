@@ -217,6 +217,16 @@ def stream_usage_payload(model):
         }
     return None
 
+def provider_request_from_payload(payload):
+    messages = payload.get("messages") or []
+    merged_content = "\n".join(str(item.get("content", "")) for item in messages)
+    run_match = re.search(r'"runId"\s*:\s*"([^"]+)"', merged_content)
+    step_match = re.search(r'"stepId"\s*:\s*"([^"]+)"', merged_content)
+    return {
+        "runId": run_match.group(1) if run_match else "",
+        "stepId": step_match.group(1) if step_match else "",
+    }
+
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/v1/embeddings":
@@ -244,13 +254,7 @@ class Handler(BaseHTTPRequestHandler):
         size = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(size)
         payload = json.loads(body)
-        user_content = payload["messages"][-1]["content"]
-        run_match = re.search(r'"runId": "([^"]+)"', user_content)
-        step_match = re.search(r'"stepId": "([^"]+)"', user_content)
-        provider_request = {
-            "runId": run_match.group(1) if run_match else "",
-            "stepId": step_match.group(1) if step_match else "",
-        }
+        provider_request = provider_request_from_payload(payload)
         decision = decision_payload(provider_request)
         content = decision if isinstance(decision, str) else json.dumps(decision, separators=(",", ":"))
         model = payload.get("model", "")
