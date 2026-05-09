@@ -181,6 +181,13 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		_ = o.steps.Update(ctx, last)
 		return o.FailRun(ctx, currentRun.ID, err.Error())
 	}
+	if err := o.validateDoDAssessmentEvidenceQuality(ctx, currentRun, assessment); err != nil {
+		_ = o.recordRejectedCompletionDoDAssessment(ctx, currentRun, last, last.Output)
+		last.State = common.StepStateFailed
+		last.Output = runtimeFailureOutput(last.Output, err)
+		_ = o.steps.Update(ctx, last)
+		return o.FailRun(ctx, currentRun.ID, err.Error())
+	}
 	if err := o.recordCompletionEvidenceFromValidatedDoDAssessment(ctx, currentRun, last, assessment, summary, workspace); err != nil {
 		return err
 	}

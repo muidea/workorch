@@ -86,17 +86,21 @@ type Patch struct {
 }
 
 type ValidationResult struct {
-	ID             string `json:"id"`
-	WorkspaceID    string `json:"workspaceId"`
-	RunID          string `json:"runId"`
-	StepID         string `json:"stepId,omitempty"`
-	ValidationKind string `json:"validationKind"`
-	TargetRef      string `json:"targetRef,omitempty"`
-	State          string `json:"state"`
-	Summary        string `json:"summary,omitempty"`
-	EvidenceRef    string `json:"evidenceRef,omitempty"`
-	StartedAt      string `json:"startedAt,omitempty"`
-	EndedAt        string `json:"endedAt,omitempty"`
+	ID              string   `json:"id"`
+	WorkspaceID     string   `json:"workspaceId"`
+	RunID           string   `json:"runId"`
+	StepID          string   `json:"stepId,omitempty"`
+	ValidationKind  string   `json:"validationKind"`
+	TargetRef       string   `json:"targetRef,omitempty"`
+	State           string   `json:"state"`
+	Summary         string   `json:"summary,omitempty"`
+	EvidenceRef     string   `json:"evidenceRef,omitempty"`
+	EvidenceQuality string   `json:"evidenceQuality,omitempty"`
+	EvidenceReason  string   `json:"evidenceReason,omitempty"`
+	ZeroWork        bool     `json:"zeroWork,omitempty"`
+	EvidenceTags    []string `json:"evidenceTags,omitempty"`
+	StartedAt       string   `json:"startedAt,omitempty"`
+	EndedAt         string   `json:"endedAt,omitempty"`
 }
 
 // Decision & Approval types.
@@ -257,13 +261,14 @@ type MemorySearchQuery struct {
 
 // Workspace template type.
 type WorkspaceTemplate struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	Description   string            `json:"description,omitempty"`
-	GoalText      string            `json:"goalText,omitempty"`
-	DoDItems      []string          `json:"doDItems,omitempty"`
-	DefaultSoulID string            `json:"defaultSoulId,omitempty"`
-	SoulBindings  map[string]string `json:"soulBindings,omitempty"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Description      string            `json:"description,omitempty"`
+	GoalText         string            `json:"goalText,omitempty"`
+	DoDItems         []string          `json:"doDItems,omitempty"`
+	DefaultSoulID    string            `json:"defaultSoulId,omitempty"`
+	SoulBindings     map[string]string `json:"soulBindings,omitempty"`
+	EvidencePolicies []map[string]any  `json:"evidencePolicies,omitempty"`
 }
 
 // Event types.

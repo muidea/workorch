@@ -839,16 +839,18 @@ func TestMapResultQualityFlagsWeakDoDItemEvidence(t *testing.T) {
 			DoDID:       "dod-quality-weak-evidence",
 			ExecutionContext: map[string]any{
 				"dod": map[string]any{
-					"items": []string{"- [ ] go test ./... 包含有效断言"},
+					"items": []string{"- [ ] validation evidence is produced by real executed work"},
 				},
 			},
 		},
 		ValidationResults: []ValidationResult{
 			{
-				ID:      "validation-1",
-				RunID:   "run-quality-weak-evidence",
-				State:   "passed",
-				Summary: "go test ./... [no test files]",
+				ID:              "validation-1",
+				RunID:           "run-quality-weak-evidence",
+				State:           "passed",
+				Summary:         "validation completed without producing matching work",
+				EvidenceQuality: string(common.EvidenceQualityInconclusive),
+				ZeroWork:        true,
 			},
 		},
 		Results: []Result{
@@ -863,12 +865,12 @@ func TestMapResultQualityFlagsWeakDoDItemEvidence(t *testing.T) {
 					Satisfied: true,
 					Summary:   "weak evidence",
 					Items: []DoDAssessmentItem{
-						{Item: "go test ./... 包含有效断言", State: "satisfied", EvidenceRefs: []string{"validation-1"}},
+						{Item: "validation evidence is produced by real executed work", State: "satisfied", EvidenceRefs: []string{"validation-1"}},
 					},
 				},
 				SummaryDetail: &ResultSummary{
-					GoalOutcome:         "tests completed",
-					VerificationSummary: "go test ./... executed",
+					GoalOutcome:         "validation completed",
+					VerificationSummary: "validation produced inconclusive evidence",
 					EvidenceRefs:        []string{"validation-1"},
 					KnownLimitations:    []string{"none"},
 					ResidualRisks:       []string{"assertion strength uncertain"},

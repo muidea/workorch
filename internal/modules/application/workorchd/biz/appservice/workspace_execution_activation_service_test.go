@@ -1466,6 +1466,70 @@ func TestWorkspaceSoulBindingsWithBackendRoutesExecutionSoulByStage(t *testing.T
 	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageValidation, "soul-validation", "run_stage_override")
 }
 
+func TestActivateWorkspaceExecutionWithBackendAddsWorkspaceBoundEvidencePolicy(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
+		ID:     "soul-evidence-validation",
+		Name:   "Evidence Validation",
+		SoulMD: "# Evidence Validation\n\nRequire valid evidence.",
+	}); err != nil {
+		t.Fatalf("CreateSoulWithBackend: %v", err)
+	}
+	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+		ID:   "template-evidence-policy",
+		Name: "Evidence Policy Template",
+		SoulBindings: map[string]string{
+			SoulBindingStageValidation: "soul-evidence-validation",
+		},
+		EvidencePolicies: []map[string]any{
+			{
+				"id":                "template-validation-evidence",
+				"profile":           "template-defined",
+				"rule":              "zero_work_is_inconclusive",
+				"appliesTo":         "shell/command",
+				"commandName":       "tool",
+				"argsContain":       []any{"verify"},
+				"zeroWorkMarkers":   []any{"no work"},
+				"qualityOnZeroWork": "inconclusive",
+				"zeroWork":          true,
+				"evidenceTags":      []any{"validation", "zero_work"},
+				"evidenceReason":    "configured policy marked evidence as zero work",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
+	}
+	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title:            "evidence policy workspace",
+		WorkingDirectory: "workspaces/evidence-policy",
+		TemplateID:       "template-evidence-policy",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "implement feature with tests")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"related tests execute with evidence"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	policies := contextMapSliceFromValue(t, item.Run.ExecutionContext["evidencePolicies"])
+	if len(policies) != 1 || policies[0]["profile"] != "template-defined" || policies[0]["rule"] != "zero_work_is_inconclusive" {
+		t.Fatalf("evidencePolicies = %+v, want template-bound zero-work policy", item.Run.ExecutionContext["evidencePolicies"])
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendUsesSystemDefaultSoul(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	useSystemDefaultSoulConfig(t, "soul-system-default")

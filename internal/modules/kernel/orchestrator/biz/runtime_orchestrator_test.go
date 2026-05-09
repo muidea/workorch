@@ -6758,7 +6758,7 @@ func TestRuntimeOrchestrator_RepairsRepeatedContinueWithoutActionableContinuatio
 	}
 }
 
-func TestRuntimeOrchestrator_RepairsWeakSatisfiedDoDAssessmentBeforeEscalation(t *testing.T) {
+func TestRuntimeOrchestrator_RepairsInconclusiveSatisfiedDoDAssessmentBeforeEscalation(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -6766,21 +6766,26 @@ func TestRuntimeOrchestrator_RepairsWeakSatisfiedDoDAssessmentBeforeEscalation(t
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	resultRepo := memory.NewResultRepository()
+	validationRepo := memory.NewValidationResultRepository()
 	var repairInputs []map[string]any
 	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
 		if boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]) {
 			repairInputs = append(repairInputs, request.Input)
 		}
 		return map[string]any{
-			"status": "completed",
+			"status":          "completed",
+			"evidenceQuality": string(common.EvidenceQualityInconclusive),
+			"evidenceReason":  "runtime adapter reported inconclusive evidence",
+			"zeroWork":        true,
+			"evidenceTags":    []string{"validation", "zero_work"},
 			"dodAssessment": map[string]any{
 				"satisfied":           true,
-				"summary":             "go test ./... passed with [no test files]",
+				"summary":             "verification was inconclusive",
 				"goalOutcome":         "done",
-				"verificationSummary": "go test ./... returned [no test files]",
+				"verificationSummary": "runtime adapter reported inconclusive evidence",
 				"items": []map[string]any{
 					{
-						"item":         "tests pass",
+						"item":         "verification passes",
 						"state":        "satisfied",
 						"evidenceRefs": []string{"run-dod-weak-gate/step-1"},
 					},
@@ -6796,7 +6801,7 @@ func TestRuntimeOrchestrator_RepairsWeakSatisfiedDoDAssessmentBeforeEscalation(t
 		ticketRepo,
 		nil,
 		approvalRepo,
-		RuntimeEvidenceRepositories{Results: resultRepo},
+		RuntimeEvidenceRepositories{Results: resultRepo, ValidationResults: validationRepo},
 		events.NewMemoryHub(),
 	)
 
@@ -7693,33 +7698,6 @@ func TestRuntimeOrchestrator_FailsLLMRunCompletionWithoutDoDSummary(t *testing.T
 	}
 }
 
-func TestValidatedCompletionDoDAssessmentRejectsWeakSatisfiedVerificationEvidence(t *testing.T) {
-	run := &runmodel.Run{
-		ID:              "run-weak-verification",
-		WorkspaceID:     "ws-weak-verification",
-		DoDID:           "dod-weak-verification",
-		InitialStepKind: llmWorkspaceExecutionStepKind,
-	}
-	_, _, err := validatedCompletionDoDAssessment(run, map[string]any{
-		stepOutputKeyDoDAssessment: map[string]any{
-			"satisfied":           true,
-			"summary":             "go test ./... passed with [no test files]",
-			"goalOutcome":         "done",
-			"verificationSummary": "go test ./... returned [no test files]",
-			"items": []map[string]any{
-				{
-					"item":         "tests pass",
-					"state":        "satisfied",
-					"evidenceRefs": []string{"run-weak-verification/step-1"},
-				},
-			},
-		},
-	})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("validatedCompletionDoDAssessment err = %v, want invalid argument for weak evidence", err)
-	}
-}
-
 func TestValidatedCompletionDoDAssessmentRejectsMissingCurrentDoDCoverage(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-dod-coverage-validate",
@@ -7796,6 +7774,56 @@ func TestValidatedCompletionDoDAssessmentCoversCurrentDoDWithMarkdownNormalizati
 	}
 }
 
+func TestRuntimeStepEvidenceQualityUsesRuntimeOutputMetadata(t *testing.T) {
+	run := &runmodel.Run{ID: "run-output-quality", WorkspaceID: "ws-output-quality"}
+	step := &runmodel.Step{ID: "run-output-quality/block/verify", RunID: run.ID, Kind: shellcommon.StepKindCommand}
+	output := map[string]any{
+		"evidenceQuality": string(common.EvidenceQualityInconclusive),
+		"evidenceReason":  "runtime adapter reported inconclusive evidence",
+		"zeroWork":        true,
+		"evidenceTags":    []any{"validation", "zero_work"},
+	}
+	quality := runtimeStepEvidenceQuality(run, step, common.ValidationResultStatePassed, output)
+	if quality.Quality != common.EvidenceQualityInconclusive || !quality.ZeroWork || !strings.Contains(strings.Join(quality.Tags, ","), "zero_work") {
+		t.Fatalf("quality = %+v, want inconclusive zero-work metadata", quality)
+	}
+}
+
+func TestDoDAssessmentEvidenceQualityRejectsInconclusiveStepEvidence(t *testing.T) {
+	ctx := context.Background()
+	validationRepo := memory.NewValidationResultRepository()
+	orch := &RuntimeOrchestrator{evidence: RuntimeEvidenceRepositories{ValidationResults: validationRepo}}
+	runID := common.RunID("run-dod-evidence-quality")
+	stepID := common.StepID("run-dod-evidence-quality/block/verify")
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:              common.ValidationResultID(string(stepID) + "/validation/runtime-step"),
+		WorkspaceID:     "ws-dod-evidence-quality",
+		RunID:           runID,
+		StepID:          stepID,
+		ValidationKind:  "runtime_step",
+		State:           common.ValidationResultStatePassed,
+		Summary:         "runtime step completed",
+		EvidenceQuality: common.EvidenceQualityInconclusive,
+		EvidenceReason:  "runtime adapter reported inconclusive evidence",
+		ZeroWork:        true,
+		EvidenceTags:    []string{"validation", "zero_work"},
+	}); err != nil {
+		t.Fatalf("seed validation result: %v", err)
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, &runmodel.Run{ID: runID}, map[string]any{
+		"items": []map[string]any{
+			{
+				"item":         "429 passthrough is covered",
+				"state":        "satisfied",
+				"evidenceRefs": []string{string(stepID)},
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "inconclusive") || !strings.Contains(err.Error(), string(stepID)) {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want inconclusive evidence rejection", err)
+	}
+}
+
 func TestRuntimeOrchestrator_RecordsRejectedResultForUnsatisfiedDoDAssessment(t *testing.T) {
 	ctx := context.Background()
 	resultRepo := memory.NewResultRepository()
@@ -7855,9 +7883,9 @@ func TestRuntimeOrchestrator_RecordsRejectedResultForWeakSatisfiedDoDAssessment(
 	if err := orch.recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
 		stepOutputKeyDoDAssessment: map[string]any{
 			"satisfied":           true,
-			"summary":             "go test ./... passed with [no test files]",
+			"summary":             "validation completed with inconclusive evidence",
 			"goalOutcome":         "done",
-			"verificationSummary": "go test ./... returned [no test files]",
+			"verificationSummary": "runtime adapter reported inconclusive evidence",
 			"items": []map[string]any{
 				{
 					"item":         "tests pass",

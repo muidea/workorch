@@ -1164,6 +1164,12 @@ func testWorkspaceTemplateRepositoryContract(t *testing.T, factory func() reposi
 			"planning":  "soul-contract",
 			"execution": "soul-contract",
 		},
+		EvidencePolicies: []map[string]any{
+			{
+				"id":              "policy-contract",
+				"zeroWorkMarkers": []any{"no work"},
+			},
+		},
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create workspace template: %v", err)
@@ -1179,12 +1185,14 @@ func testWorkspaceTemplateRepositoryContract(t *testing.T, factory func() reposi
 	got.Name = "mutated"
 	got.DoDItems[0] = "mutated"
 	got.SoulBindings["planning"] = "mutated"
+	got.EvidencePolicies[0]["id"] = "mutated"
+	got.EvidencePolicies[0]["zeroWorkMarkers"].([]any)[0] = "mutated"
 
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get workspace template fresh: %v", err)
 	}
-	if fresh.Name != "contract template" || fresh.DoDItems[0] != "goal is defined" || fresh.SoulBindings["planning"] != "soul-contract" {
+	if fresh.Name != "contract template" || fresh.DoDItems[0] != "goal is defined" || fresh.SoulBindings["planning"] != "soul-contract" || fresh.EvidencePolicies[0]["id"] != "policy-contract" || fresh.EvidencePolicies[0]["zeroWorkMarkers"].([]any)[0] != "no work" {
 		t.Fatalf("clone isolation failed, workspace template = %+v", fresh)
 	}
 
@@ -1231,6 +1239,12 @@ func testWorkspaceRepositoryContract(t *testing.T, factory func() repository.Wor
 		Description:      "workspace contract description",
 		WorkingDirectory: "/tmp/workorch/ws-contract",
 		State:            common.WorkspaceStateActive,
+		EvidencePolicies: []map[string]any{
+			{
+				"id":              "workspace-policy-contract",
+				"zeroWorkMarkers": []any{"no work"},
+			},
+		},
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -1244,6 +1258,8 @@ func testWorkspaceRepositoryContract(t *testing.T, factory func() repository.Wor
 		t.Fatalf("get workspace: %v", err)
 	}
 	got.Title = "mutated"
+	got.EvidencePolicies[0]["id"] = "mutated"
+	got.EvidencePolicies[0]["zeroWorkMarkers"].([]any)[0] = "mutated"
 
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
@@ -1257,6 +1273,9 @@ func testWorkspaceRepositoryContract(t *testing.T, factory func() repository.Wor
 	}
 	if fresh.WorkingDirectory != "/tmp/workorch/ws-contract" {
 		t.Fatalf("workingDirectory = %q, want /tmp/workorch/ws-contract", fresh.WorkingDirectory)
+	}
+	if fresh.EvidencePolicies[0]["id"] != "workspace-policy-contract" || fresh.EvidencePolicies[0]["zeroWorkMarkers"].([]any)[0] != "no work" {
+		t.Fatalf("evidencePolicies clone isolation failed: %+v", fresh.EvidencePolicies)
 	}
 
 	fresh.ActiveRunID = common.RunID("run-1")

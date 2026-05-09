@@ -54,6 +54,12 @@ func TestCreateWorkspaceWithTemplateBindsWorkspaceSouls(t *testing.T) {
 			"execution": "soul-template-execution",
 		},
 		DoDItems: []string{"tests pass"},
+		EvidencePolicies: []map[string]any{
+			{
+				"id":              "template-evidence-policy",
+				"zeroWorkMarkers": []any{"no work"},
+			},
+		},
 	}); err != nil {
 		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
 	}
@@ -82,6 +88,9 @@ func TestCreateWorkspaceWithTemplateBindsWorkspaceSouls(t *testing.T) {
 	}
 	if readBack.DefaultSoulID != item.DefaultSoulID || readBack.SoulBindings["execution"] != item.SoulBindings["execution"] {
 		t.Fatalf("read workspace soul bindings = %+v, want %+v", readBack, item)
+	}
+	if len(readBack.EvidencePolicies) != 1 || readBack.EvidencePolicies[0]["id"] != "template-evidence-policy" {
+		t.Fatalf("read workspace evidence policies = %+v, want template policy", readBack.EvidencePolicies)
 	}
 }
 

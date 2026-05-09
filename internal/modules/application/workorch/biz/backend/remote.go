@@ -567,13 +567,14 @@ func clientTemplateFromInfo(info *TemplateInfo) *client.WorkspaceTemplate {
 		return &client.WorkspaceTemplate{}
 	}
 	return &client.WorkspaceTemplate{
-		ID:            info.ID,
-		Name:          info.Name,
-		Description:   info.Description,
-		GoalText:      info.GoalText,
-		DoDItems:      append([]string(nil), info.DoDItems...),
-		DefaultSoulID: string(info.DefaultSoulID),
-		SoulBindings:  cloneStringMap(info.SoulBindings),
+		ID:               info.ID,
+		Name:             info.Name,
+		Description:      info.Description,
+		GoalText:         info.GoalText,
+		DoDItems:         append([]string(nil), info.DoDItems...),
+		DefaultSoulID:    string(info.DefaultSoulID),
+		SoulBindings:     cloneStringMap(info.SoulBindings),
+		EvidencePolicies: cloneTemplateEvidencePolicies(info.EvidencePolicies),
 	}
 }
 
@@ -582,13 +583,14 @@ func templateInfoFromClient(item *client.WorkspaceTemplate) *TemplateInfo {
 		return nil
 	}
 	return &TemplateInfo{
-		ID:            item.ID,
-		Name:          item.Name,
-		Description:   item.Description,
-		GoalText:      item.GoalText,
-		DoDItems:      append([]string(nil), item.DoDItems...),
-		DefaultSoulID: common.SoulID(item.DefaultSoulID),
-		SoulBindings:  cloneStringMap(item.SoulBindings),
+		ID:               item.ID,
+		Name:             item.Name,
+		Description:      item.Description,
+		GoalText:         item.GoalText,
+		DoDItems:         append([]string(nil), item.DoDItems...),
+		DefaultSoulID:    common.SoulID(item.DefaultSoulID),
+		SoulBindings:     cloneStringMap(item.SoulBindings),
+		EvidencePolicies: cloneTemplateEvidencePolicies(item.EvidencePolicies),
 	}
 }
 

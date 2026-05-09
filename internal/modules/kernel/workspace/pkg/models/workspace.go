@@ -11,4 +11,5 @@ type Workspace struct {
 	ActiveRunID      common.RunID
 	DefaultSoulID    common.SoulID
 	SoulBindings     map[string]common.SoulID
+	EvidencePolicies []map[string]any
 }

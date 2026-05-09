@@ -14,6 +14,7 @@ type ApprovalState string
 type ToolCallState string
 type PatchState string
 type ValidationResultState string
+type EvidenceQuality string
 type CheckpointType string
 type ResultState string
 type ArtifactState string
@@ -88,6 +89,13 @@ const (
 	ValidationResultStatePassed  ValidationResultState = "passed"
 	ValidationResultStateFailed  ValidationResultState = "failed"
 	ValidationResultStateWarning ValidationResultState = "warning"
+)
+
+const (
+	EvidenceQualityValid        EvidenceQuality = "valid"
+	EvidenceQualityInvalid      EvidenceQuality = "invalid"
+	EvidenceQualityInconclusive EvidenceQuality = "inconclusive"
+	EvidenceQualitySkipped      EvidenceQuality = "skipped"
 )
 
 const (

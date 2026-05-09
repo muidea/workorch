@@ -60,7 +60,29 @@
       "approval": "soul-software-dev-approval",
       "validation": "soul-software-dev-validation",
       "artifact": "soul-software-dev-artifact"
-    }
+    },
+    "evidencePolicies": [
+      {
+        "id": "software-dev-validation-evidence",
+        "profile": "software-dev",
+        "rule": "software_dev_test_zero_work_is_inconclusive",
+        "appliesTo": "shell/command",
+        "commandName": "go",
+        "argsContain": ["test"],
+        "zeroWorkMarkers": [
+          "testing: warning: no tests to run",
+          "[no tests to run]",
+          "no tests to run",
+          "[no test files]",
+          "0 tests"
+        ],
+        "qualityOnZeroWork": "inconclusive",
+        "zeroWork": true,
+        "evidenceTags": ["software-dev", "test", "zero_work"],
+        "evidenceReason": "test command completed without executing matching tests",
+        "description": "Validation evidence must represent actual executed work before it can support a satisfied DoD item."
+      }
+    ]
   },
   {
     "id": "code-review",

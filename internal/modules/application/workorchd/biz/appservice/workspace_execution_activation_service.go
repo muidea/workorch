@@ -583,6 +583,9 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	if len(governanceHistory) > 0 {
 		contextData["governanceHistory"] = governanceHistory
 	}
+	if len(workspace.EvidencePolicies) > 0 {
+		contextData["evidencePolicies"] = cloneContextMapSlice(workspace.EvidencePolicies)
+	}
 
 	return contextData, nil
 }

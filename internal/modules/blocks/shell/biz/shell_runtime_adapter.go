@@ -84,6 +84,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		"durationMillis": duration.Milliseconds(),
 		"timeoutMillis":  timeout.Milliseconds(),
 	}
+	applyShellEvidencePolicies(request.Input, command, args, output)
 	if runCtx.Err() == context.DeadlineExceeded {
 		output["status"] = "timeout"
 		return runtimemodel.StepExecutionResult{Output: output}, context.DeadlineExceeded

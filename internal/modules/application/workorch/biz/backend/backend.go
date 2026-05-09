@@ -587,13 +587,14 @@ type MemoryBackend interface {
 // ── Template ──
 
 type TemplateInfo struct {
-	ID            string
-	Name          string
-	Description   string
-	GoalText      string
-	DoDItems      []string
-	DefaultSoulID common.SoulID
-	SoulBindings  map[string]string
+	ID               string
+	Name             string
+	Description      string
+	GoalText         string
+	DoDItems         []string
+	DefaultSoulID    common.SoulID
+	SoulBindings     map[string]string
+	EvidencePolicies []map[string]any
 }
 
 type TemplateBackend interface {

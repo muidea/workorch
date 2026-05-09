@@ -134,6 +134,7 @@ Decision resolution 写入时已有 redaction，但实际 `ai-proxy/interactions
 | FCA-13 | Web 轮询刷新核对与替换方案 | Web | P1 | verified | Web 侧存在 `setInterval` | Web 工作空间详情页已改为订阅 `/api/v1/workorch/events/stream`，事件触发 workspace list/context 刷新 | `make console-build` 和 server/backend/TUI 测试通过；源码不再存在该轮询 |
 | FCA-14 | Read model 展示字段一致性复核 | Web/TUI | P1 | verified | 业务区展示需严格匹配模型 | 本轮改动继续复用 snapshot/contextBudget/read model 投影，未新增 UI 自造业务字段 | appservice、backend、TUI 测试通过 |
 | FCA-15 | `ws-e1e310fd02e4375e` 回归验收 | Runtime/E2E | P0 | verified | 该 workspace 是当前复杂链路样本 | 同类根因已通过 continuation contract、prompt 分层、redaction、e2e 场景收口 | 已用同类复杂软件开发 deployed e2e 全链路回归验证 |
+| FCA-16 | EvidenceQuality 质量门控 | Orchestrator/Template | P0 | verified | 只按 exitCode 判断证据有效会让 zero-work 命令支撑 accepted Result | Core 增加领域中立证据质量状态并在 DoD completion gate 拒绝 invalid/inconclusive/skipped/zero-work 证据；具体命令/输出识别规则只作为 `workspaceTemplate.evidencePolicies` 数据配置，并在创建 workspace 时绑定到 workspace | `TestRuntimeStepEvidenceQualityUsesRuntimeOutputMetadata`、`TestDoDAssessmentEvidenceQualityRejectsInconclusiveStepEvidence`、`TestActivateWorkspaceExecutionWithBackendAddsWorkspaceBoundEvidencePolicy` 覆盖 |
 
 ## 目标行为定义
 
@@ -245,3 +246,4 @@ Decision resolution 写入时已有 redaction，但实际 `ai-proxy/interactions
 | 2026-05-09 | 完成第一轮代码收口：执行图 no-actionable continuation 进入 validation/repair；LLM prompt 拆分 core/capability/template 边界；provider request 出口统一脱敏并投影 redaction summary；Web workspace 刷新由轮询切换为 SSE；SRD 全量脚本取消关键 e2e 默认 skip；software-dev e2e 增加 Scenario-5 覆盖 no-actionable continuation。已通过 `go test ./... -count=1` 与 `make console-build`，deployed e2e 待最新服务重部署后执行。 |
 | 2026-05-09 | 最新服务重部署后执行收口验证：修正 deployed e2e mock 对多轮 prompt 的 `runId/stepId` 解析；隔离 Scenario-5 workspace；修复 MagicHub unsubscribe 阻塞 RuntimeSession teardown 的风险。`scripts/verify-software-requirement-development-orchestration.sh`、`scripts/verify-llm-workspace-execution.sh`、`scripts/verify-software-dev-goal-dod-e2e.sh` 与 `go test ./... -count=1` 均通过。 |
 | 2026-05-09 | 重新部署最新服务后再次复验：`scripts/verify-software-requirement-development-orchestration.sh` 全量通过，覆盖 SRD-16、SRD-17/18、SRD-33 deployed e2e 且无关键 e2e skip；随后执行 `go test ./... -count=1` 全量通过。 |
+| 2026-05-09 | 基于 `ws-e1e310fd02e4375e` 复核补漏：新增 `EvidenceQuality` 通用证据质量模型；`workspaceTemplate.evidencePolicies` 在创建 workspace 时绑定到 workspace，激活上下文只注入 workspace 已绑定策略；运行时依据策略输出 `inconclusive/zero_work` 等结构化证据质量，DoD completion gate 不允许其支撑 satisfied 条目。 |

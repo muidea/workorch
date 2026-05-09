@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestRuntimeAdapter_ExecuteRuntimeStepRunsCommandInWorkspaceDirectory(t *testing.T) {
@@ -86,6 +87,38 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReturnsOutputForNonZeroExit(t *testing
 	stderr, _ := result.Output["stderr"].(string)
 	if !strings.Contains(stdout, "shell-out") || !strings.Contains(stderr, "shell-err") {
 		t.Fatalf("stdout/stderr = %q/%q, want captured command output", stdout, stderr)
+	}
+}
+
+func TestRuntimeAdapterAppliesConfiguredZeroWorkEvidencePolicy(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	workingDirectory := t.TempDir()
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceWorkingDirectory: workingDirectory,
+		Kind:                      "shell/command",
+		Input: map[string]any{
+			"command": "sh",
+			"args":    []any{"-c", "printf 'testing: warning: no tests to run\\nPASS\\n'"},
+			"evidencePolicies": []map[string]any{
+				{
+					"appliesTo":         "shell/command",
+					"commandName":       "sh",
+					"argsContain":       []string{"-c"},
+					"zeroWorkMarkers":   []string{"no tests to run"},
+					"qualityOnZeroWork": string(common.EvidenceQualityInconclusive),
+					"evidenceReason":    "configured zero-work marker matched",
+					"evidenceTags":      []string{"test", "zero_work"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v", err)
+	}
+	if result.Output["evidenceQuality"] != string(common.EvidenceQualityInconclusive) ||
+		result.Output["zeroWork"] != true ||
+		result.Output["evidenceReason"] != "configured zero-work marker matched" {
+		t.Fatalf("output = %+v, want configured inconclusive zero-work evidence", result.Output)
 	}
 }
 

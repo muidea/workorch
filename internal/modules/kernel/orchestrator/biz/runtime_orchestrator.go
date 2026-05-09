@@ -953,13 +953,15 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return err
 	}
 
+	runtimeInput := cloneStepPayload(step.Input)
+	injectRuntimeEvidencePolicies(runtimeInput, run.ExecutionContext)
 	result, err := o.runtime.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
 		WorkspaceID:               run.WorkspaceID,
 		WorkspaceWorkingDirectory: workspace.WorkingDirectory,
 		RunID:                     run.ID,
 		StepID:                    step.ID,
 		Kind:                      step.Kind,
-		Input:                     cloneStepPayload(step.Input),
+		Input:                     runtimeInput,
 	})
 	if err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, result.Output, "runtime step failed", err)
@@ -1072,6 +1074,10 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	}
 	assessment, summary, err := validatedCompletionDoDAssessment(run, output)
 	if err != nil {
+		_ = o.recordRejectedCompletionDoDAssessment(ctx, run, step, output)
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
+	}
+	if err := o.validateDoDAssessmentEvidenceQuality(ctx, run, assessment); err != nil {
 		_ = o.recordRejectedCompletionDoDAssessment(ctx, run, step, output)
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}

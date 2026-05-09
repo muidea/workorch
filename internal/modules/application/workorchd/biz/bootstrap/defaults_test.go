@@ -32,6 +32,9 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	assertContainsAnyDoDItem(t, item.DoDItems, "lint/静态检查")
 	assertContainsAnyDoDItem(t, item.DoDItems, "残余风险")
 	assertContainsAnyDoDItem(t, item.DoDItems, "evidenceRefs")
+	if len(item.EvidencePolicies) == 0 {
+		t.Fatalf("software-dev evidencePolicies missing")
+	}
 }
 
 func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuidance(t *testing.T) {
@@ -137,6 +140,9 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 		t.Fatalf("software-dev template was not refreshed: %+v", template)
 	}
 	assertContainsAnyDoDItem(t, template.DoDItems, "evidenceRefs")
+	if len(template.EvidencePolicies) == 0 {
+		t.Fatalf("software-dev evidence policies were not refreshed: %+v", template)
+	}
 }
 
 func findEmbeddedTemplateByID(items []embeddedTemplate, id string) *embeddedTemplate {

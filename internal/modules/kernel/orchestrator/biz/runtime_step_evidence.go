@@ -156,21 +156,28 @@ func (o *RuntimeOrchestrator) recordValidationResult(
 		return nil
 	}
 	now := runtimeEvidenceTimestamp()
+	quality := runtimeStepEvidenceQuality(run, step, state, step.Output)
 	item := &runModel.ValidationResult{
-		ID:             common.ValidationResultID(fmt.Sprintf("%s/validation/runtime-step", step.ID)),
-		WorkspaceID:    run.WorkspaceID,
-		RunID:          run.ID,
-		StepID:         step.ID,
-		ValidationKind: "runtime_step",
-		TargetRef:      string(step.ID),
-		State:          state,
-		Summary:        summary,
-		EvidenceRef:    evidenceRef,
-		StartedAt:      now,
-		EndedAt:        now,
+		ID:              common.ValidationResultID(fmt.Sprintf("%s/validation/runtime-step", step.ID)),
+		WorkspaceID:     run.WorkspaceID,
+		RunID:           run.ID,
+		StepID:          step.ID,
+		ValidationKind:  "runtime_step",
+		TargetRef:       string(step.ID),
+		State:           state,
+		Summary:         summary,
+		EvidenceRef:     evidenceRef,
+		EvidenceQuality: quality.Quality,
+		EvidenceReason:  quality.Reason,
+		ZeroWork:        quality.ZeroWork,
+		EvidenceTags:    quality.Tags,
+		StartedAt:       now,
+		EndedAt:         now,
 	}
 	if errText != "" {
 		item.Summary = fmt.Sprintf("%s: %s", summary, errText)
+	} else if quality.Quality != "" && quality.Quality != common.EvidenceQualityValid && quality.Reason != "" {
+		item.Summary = fmt.Sprintf("%s; evidence %s: %s", summary, quality.Quality, quality.Reason)
 	}
 	if err := o.evidence.ValidationResults.Create(ctx, item); err != nil {
 		if err != common.ErrConflict {

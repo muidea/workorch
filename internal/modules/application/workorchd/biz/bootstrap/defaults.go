@@ -16,13 +16,14 @@ import (
 var embeddedDefaults embed.FS
 
 type embeddedTemplate struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	Description   string            `json:"description,omitempty"`
-	GoalText      string            `json:"goalText,omitempty"`
-	DoDItems      []string          `json:"doDItems,omitempty"`
-	DefaultSoulID string            `json:"defaultSoulId,omitempty"`
-	SoulBindings  map[string]string `json:"soulBindings,omitempty"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Description      string            `json:"description,omitempty"`
+	GoalText         string            `json:"goalText,omitempty"`
+	DoDItems         []string          `json:"doDItems,omitempty"`
+	DefaultSoulID    string            `json:"defaultSoulId,omitempty"`
+	SoulBindings     map[string]string `json:"soulBindings,omitempty"`
+	EvidencePolicies []map[string]any  `json:"evidencePolicies,omitempty"`
 }
 
 type embeddedSoul struct {
@@ -135,13 +136,52 @@ func upsertBuiltinWorkspaceTemplate(ctx context.Context, repo repository.Workspa
 
 func workspaceTemplateFromEmbedded(t embeddedTemplate) *repository.WorkspaceTemplate {
 	return &repository.WorkspaceTemplate{
-		ID:            t.ID,
-		Name:          t.Name,
-		Description:   t.Description,
-		GoalText:      t.GoalText,
-		DoDItems:      filterEmptyStrings(t.DoDItems),
-		DefaultSoulID: t.DefaultSoulID,
-		SoulBindings:  t.SoulBindings,
+		ID:               t.ID,
+		Name:             t.Name,
+		Description:      t.Description,
+		GoalText:         t.GoalText,
+		DoDItems:         filterEmptyStrings(t.DoDItems),
+		DefaultSoulID:    t.DefaultSoulID,
+		SoulBindings:     t.SoulBindings,
+		EvidencePolicies: cloneEmbeddedEvidencePolicies(t.EvidencePolicies),
+	}
+}
+
+func cloneEmbeddedEvidencePolicies(input []map[string]any) []map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(input))
+	for _, item := range input {
+		cloned := make(map[string]any, len(item))
+		for key, value := range item {
+			cloned[key] = cloneEmbeddedEvidencePolicyValue(value)
+		}
+		ret = append(ret, cloned)
+	}
+	return ret
+}
+
+func cloneEmbeddedEvidencePolicyValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		cloned := make(map[string]any, len(typed))
+		for key, value := range typed {
+			cloned[key] = cloneEmbeddedEvidencePolicyValue(value)
+		}
+		return cloned
+	case []map[string]any:
+		return cloneEmbeddedEvidencePolicies(typed)
+	case []any:
+		ret := make([]any, 0, len(typed))
+		for _, item := range typed {
+			ret = append(ret, cloneEmbeddedEvidencePolicyValue(item))
+		}
+		return ret
+	case []string:
+		return append([]string(nil), typed...)
+	default:
+		return value
 	}
 }
 

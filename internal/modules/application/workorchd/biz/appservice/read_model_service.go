@@ -1925,17 +1925,21 @@ func mapValidationResults(items []*runmodel.ValidationResult) []ValidationResult
 			continue
 		}
 		ret = append(ret, ValidationResult{
-			ID:             string(item.ID),
-			WorkspaceID:    string(item.WorkspaceID),
-			RunID:          string(item.RunID),
-			StepID:         string(item.StepID),
-			ValidationKind: item.ValidationKind,
-			TargetRef:      item.TargetRef,
-			State:          string(item.State),
-			Summary:        item.Summary,
-			EvidenceRef:    item.EvidenceRef,
-			StartedAt:      item.StartedAt,
-			EndedAt:        item.EndedAt,
+			ID:              string(item.ID),
+			WorkspaceID:     string(item.WorkspaceID),
+			RunID:           string(item.RunID),
+			StepID:          string(item.StepID),
+			ValidationKind:  item.ValidationKind,
+			TargetRef:       item.TargetRef,
+			State:           string(item.State),
+			Summary:         item.Summary,
+			EvidenceRef:     item.EvidenceRef,
+			EvidenceQuality: string(item.EvidenceQuality),
+			EvidenceReason:  item.EvidenceReason,
+			ZeroWork:        item.ZeroWork,
+			EvidenceTags:    cloneReadModelStringSlice(item.EvidenceTags),
+			StartedAt:       item.StartedAt,
+			EndedAt:         item.EndedAt,
 		})
 	}
 	if len(ret) == 0 {
@@ -2336,7 +2340,8 @@ func missingRequiredDoDLeafItems(required []string, assessed []DoDAssessmentItem
 func weakValidationEvidenceRefIndex(snapshot RunSnapshot) map[string]bool {
 	ret := map[string]bool{}
 	for _, item := range snapshot.ValidationResults {
-		if !validationSummaryLooksWeak(item.Summary) {
+		quality := strings.TrimSpace(item.EvidenceQuality)
+		if !item.ZeroWork && (quality == "" || quality == string(common.EvidenceQualityValid)) {
 			continue
 		}
 		if ref := strings.TrimSpace(item.ID); ref != "" {
@@ -2368,30 +2373,6 @@ func allEvidenceRefsWeakValidation(refs []string, weakRefIndex map[string]bool) 
 		}
 	}
 	return seen
-}
-
-func validationSummaryLooksWeak(summary string) bool {
-	text := strings.ToLower(strings.TrimSpace(summary))
-	if text == "" {
-		return false
-	}
-	markers := []string{
-		"[no test files]",
-		"no test files",
-		"no tests to run",
-		"0 tests",
-		"without assertions",
-		"no assertions",
-		"无测试文件",
-		"没有测试",
-		"无有效断言",
-	}
-	for _, marker := range markers {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
 }
 
 func readModelDoDItemIsLeaf(value string) bool {

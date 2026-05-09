@@ -2236,6 +2236,7 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 			cloned.SoulBindings[key] = value
 		}
 	}
+	cloned.EvidencePolicies = cloneMapSlice(item.EvidencePolicies)
 	return &cloned
 }
 
@@ -2285,6 +2286,7 @@ func clonePatch(item *run.Patch) *run.Patch {
 
 func cloneValidationResult(item *run.ValidationResult) *run.ValidationResult {
 	cloned := *item
+	cloned.EvidenceTags = cloneStringSlice(item.EvidenceTags)
 	return &cloned
 }
 
@@ -2369,6 +2371,7 @@ func cloneWorkspaceTemplate(item *repository.WorkspaceTemplate) *repository.Work
 			cloned.SoulBindings[key] = value
 		}
 	}
+	cloned.EvidencePolicies = cloneMapSlice(item.EvidencePolicies)
 	return &cloned
 }
 
@@ -2634,7 +2637,37 @@ func cloneMap(input map[string]any) map[string]any {
 	}
 	out := make(map[string]any, len(input))
 	for k, v := range input {
-		out[k] = v
+		out[k] = cloneAny(v)
 	}
 	return out
+}
+
+func cloneMapSlice(input []map[string]any) []map[string]any {
+	if input == nil {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(input))
+	for _, item := range input {
+		out = append(out, cloneMap(item))
+	}
+	return out
+}
+
+func cloneAny(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneMap(typed)
+	case []map[string]any:
+		return cloneMapSlice(typed)
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, cloneAny(item))
+		}
+		return out
+	case []string:
+		return cloneStringSlice(typed)
+	default:
+		return value
+	}
 }

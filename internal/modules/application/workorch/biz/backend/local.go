@@ -846,13 +846,14 @@ func templateInfoFromRepository(t *repository.WorkspaceTemplate) *TemplateInfo {
 		return nil
 	}
 	return &TemplateInfo{
-		ID:            t.ID,
-		Name:          t.Name,
-		Description:   t.Description,
-		GoalText:      t.GoalText,
-		DoDItems:      append([]string(nil), t.DoDItems...),
-		DefaultSoulID: common.SoulID(t.DefaultSoulID),
-		SoulBindings:  cloneStringMap(t.SoulBindings),
+		ID:               t.ID,
+		Name:             t.Name,
+		Description:      t.Description,
+		GoalText:         t.GoalText,
+		DoDItems:         append([]string(nil), t.DoDItems...),
+		DefaultSoulID:    common.SoulID(t.DefaultSoulID),
+		SoulBindings:     cloneStringMap(t.SoulBindings),
+		EvidencePolicies: cloneTemplateEvidencePolicies(t.EvidencePolicies),
 	}
 }
 
@@ -861,25 +862,65 @@ func appTemplateFromInfo(info *TemplateInfo) appservice.WorkspaceTemplate {
 		return appservice.WorkspaceTemplate{}
 	}
 	return appservice.WorkspaceTemplate{
-		ID:            info.ID,
-		Name:          info.Name,
-		Description:   info.Description,
-		GoalText:      info.GoalText,
-		DoDItems:      append([]string(nil), info.DoDItems...),
-		DefaultSoulID: string(info.DefaultSoulID),
-		SoulBindings:  cloneStringMap(info.SoulBindings),
+		ID:               info.ID,
+		Name:             info.Name,
+		Description:      info.Description,
+		GoalText:         info.GoalText,
+		DoDItems:         append([]string(nil), info.DoDItems...),
+		DefaultSoulID:    string(info.DefaultSoulID),
+		SoulBindings:     cloneStringMap(info.SoulBindings),
+		EvidencePolicies: cloneTemplateEvidencePolicies(info.EvidencePolicies),
 	}
 }
 
 func templateInfoFromApp(item appservice.WorkspaceTemplate) *TemplateInfo {
 	return &TemplateInfo{
-		ID:            item.ID,
-		Name:          item.Name,
-		Description:   item.Description,
-		GoalText:      item.GoalText,
-		DoDItems:      append([]string(nil), item.DoDItems...),
-		DefaultSoulID: common.SoulID(item.DefaultSoulID),
-		SoulBindings:  cloneStringMap(item.SoulBindings),
+		ID:               item.ID,
+		Name:             item.Name,
+		Description:      item.Description,
+		GoalText:         item.GoalText,
+		DoDItems:         append([]string(nil), item.DoDItems...),
+		DefaultSoulID:    common.SoulID(item.DefaultSoulID),
+		SoulBindings:     cloneStringMap(item.SoulBindings),
+		EvidencePolicies: cloneTemplateEvidencePolicies(item.EvidencePolicies),
+	}
+}
+
+func cloneTemplateEvidencePolicies(input []map[string]any) []map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(input))
+	for _, item := range input {
+		cloned := make(map[string]any, len(item))
+		for key, value := range item {
+			cloned[key] = cloneTemplateEvidencePolicyValue(value)
+		}
+		ret = append(ret, cloned)
+	}
+	return ret
+}
+
+func cloneTemplateEvidencePolicyValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		cloned := make(map[string]any, len(typed))
+		for key, value := range typed {
+			cloned[key] = cloneTemplateEvidencePolicyValue(value)
+		}
+		return cloned
+	case []map[string]any:
+		return cloneTemplateEvidencePolicies(typed)
+	case []any:
+		ret := make([]any, 0, len(typed))
+		for _, item := range typed {
+			ret = append(ret, cloneTemplateEvidencePolicyValue(item))
+		}
+		return ret
+	case []string:
+		return append([]string(nil), typed...)
+	default:
+		return value
 	}
 }
 

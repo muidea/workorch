@@ -9,13 +9,14 @@ import (
 )
 
 type WorkspaceTemplate struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	Description   string            `json:"description,omitempty"`
-	GoalText      string            `json:"goalText,omitempty"`
-	DoDItems      []string          `json:"doDItems,omitempty"`
-	DefaultSoulID string            `json:"defaultSoulId,omitempty"`
-	SoulBindings  map[string]string `json:"soulBindings,omitempty"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Description      string            `json:"description,omitempty"`
+	GoalText         string            `json:"goalText,omitempty"`
+	DoDItems         []string          `json:"doDItems,omitempty"`
+	DefaultSoulID    string            `json:"defaultSoulId,omitempty"`
+	SoulBindings     map[string]string `json:"soulBindings,omitempty"`
+	EvidencePolicies []map[string]any  `json:"evidencePolicies,omitempty"`
 }
 
 func ListWorkspaceTemplatesWithBackend(ctx context.Context, backend string, dataRoot string) ([]WorkspaceTemplate, error) {
@@ -136,12 +137,13 @@ func workspaceTemplateRepositoryFromSession(session *RuntimeSession) (repository
 
 func normalizeWorkspaceTemplate(template WorkspaceTemplate) (WorkspaceTemplate, error) {
 	item := WorkspaceTemplate{
-		ID:            strings.TrimSpace(template.ID),
-		Name:          strings.TrimSpace(template.Name),
-		Description:   strings.TrimSpace(template.Description),
-		GoalText:      strings.TrimSpace(template.GoalText),
-		DoDItems:      normalizeDoDItems(template.DoDItems),
-		DefaultSoulID: strings.TrimSpace(template.DefaultSoulID),
+		ID:               strings.TrimSpace(template.ID),
+		Name:             strings.TrimSpace(template.Name),
+		Description:      strings.TrimSpace(template.Description),
+		GoalText:         strings.TrimSpace(template.GoalText),
+		DoDItems:         normalizeDoDItems(template.DoDItems),
+		DefaultSoulID:    strings.TrimSpace(template.DefaultSoulID),
+		EvidencePolicies: cloneContextMapSlice(template.EvidencePolicies),
 	}
 	if item.ID == "" || item.Name == "" {
 		return WorkspaceTemplate{}, common.ErrInvalidArgument
@@ -180,13 +182,14 @@ func validateWorkspaceTemplateSouls(ctx context.Context, session *RuntimeSession
 
 func workspaceTemplateToRepository(item WorkspaceTemplate) *repository.WorkspaceTemplate {
 	return &repository.WorkspaceTemplate{
-		ID:            item.ID,
-		Name:          item.Name,
-		Description:   item.Description,
-		GoalText:      item.GoalText,
-		DoDItems:      append([]string(nil), item.DoDItems...),
-		DefaultSoulID: item.DefaultSoulID,
-		SoulBindings:  cloneStringMap(item.SoulBindings),
+		ID:               item.ID,
+		Name:             item.Name,
+		Description:      item.Description,
+		GoalText:         item.GoalText,
+		DoDItems:         append([]string(nil), item.DoDItems...),
+		DefaultSoulID:    item.DefaultSoulID,
+		SoulBindings:     cloneStringMap(item.SoulBindings),
+		EvidencePolicies: cloneContextMapSlice(item.EvidencePolicies),
 	}
 }
 
@@ -195,13 +198,14 @@ func workspaceTemplateFromRepository(item *repository.WorkspaceTemplate) Workspa
 		return WorkspaceTemplate{}
 	}
 	return WorkspaceTemplate{
-		ID:            item.ID,
-		Name:          item.Name,
-		Description:   item.Description,
-		GoalText:      item.GoalText,
-		DoDItems:      append([]string(nil), item.DoDItems...),
-		DefaultSoulID: item.DefaultSoulID,
-		SoulBindings:  cloneStringMap(item.SoulBindings),
+		ID:               item.ID,
+		Name:             item.Name,
+		Description:      item.Description,
+		GoalText:         item.GoalText,
+		DoDItems:         append([]string(nil), item.DoDItems...),
+		DefaultSoulID:    item.DefaultSoulID,
+		SoulBindings:     cloneStringMap(item.SoulBindings),
+		EvidencePolicies: cloneContextMapSlice(item.EvidencePolicies),
 	}
 }
 
@@ -214,4 +218,45 @@ func cloneStringMap(input map[string]string) map[string]string {
 		ret[key] = value
 	}
 	return ret
+}
+
+func cloneContextMapSlice(input []map[string]any) []map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(input))
+	for _, item := range input {
+		ret = append(ret, cloneContextMapDeep(item))
+	}
+	return ret
+}
+
+func cloneContextMapDeep(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for key, value := range input {
+		ret[key] = cloneContextValue(value)
+	}
+	return ret
+}
+
+func cloneContextValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneContextMapDeep(typed)
+	case []map[string]any:
+		return cloneContextMapSlice(typed)
+	case []any:
+		ret := make([]any, 0, len(typed))
+		for _, item := range typed {
+			ret = append(ret, cloneContextValue(item))
+		}
+		return ret
+	case []string:
+		return append([]string(nil), typed...)
+	default:
+		return value
+	}
 }
