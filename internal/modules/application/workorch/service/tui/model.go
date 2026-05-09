@@ -14,6 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/doditems"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
@@ -623,17 +624,7 @@ func renderTranscript(items []transcriptItem, width int, limit int) string {
 }
 
 func parseDoDItems(value string) []string {
-	fields := strings.FieldsFunc(value, func(r rune) bool {
-		return r == ';' || r == '；' || r == '\n'
-	})
-	items := make([]string, 0, len(fields))
-	for _, field := range fields {
-		item := strings.TrimSpace(field)
-		if item != "" {
-			items = append(items, item)
-		}
-	}
-	return items
+	return doditems.Normalize([]string{value})
 }
 
 func renderPendingDoDResult(items []string) string {

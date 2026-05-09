@@ -1439,6 +1439,164 @@ function splitDefinitionList(value?: string) {
   return (value || '').split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
 }
 
+type DoDListContext = {
+  indent: number;
+  text: string;
+};
+
+function splitDoDRawLines(value?: string) {
+  return (value || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .flatMap((line) => {
+      if (!shouldSplitDoDInline(line)) {
+        return [line];
+      }
+      return line.split(/[;；]/);
+    });
+}
+
+function shouldSplitDoDInline(line: string) {
+  if (!/[;；]/.test(line)) {
+    return false;
+  }
+  const trimmed = line.trim();
+  if (!trimmed || /^#{1,6}\s+/.test(trimmed)) {
+    return false;
+  }
+  return !stripDoDListMarker(trimmed).isListItem;
+}
+
+function stripDoDListMarker(line: string): { text: string; isListItem: boolean } {
+  const trimmed = line.trim();
+  if (/^[-*+•]\s+/.test(trimmed)) {
+    return { text: stripDoDCheckbox(trimmed.slice(2).trim()), isListItem: true };
+  }
+  const ordered = trimmed.match(/^\d+[\.)、]\s+/);
+  if (ordered) {
+    return { text: stripDoDCheckbox(trimmed.slice(ordered[0].length).trim()), isListItem: true };
+  }
+  if (/^\[\s\]/.test(trimmed) || /^\[[xX]\]/.test(trimmed)) {
+    return { text: stripDoDCheckbox(trimmed), isListItem: true };
+  }
+  return { text: trimmed, isListItem: false };
+}
+
+function stripDoDCheckbox(line: string) {
+  return line.replace(/^\[\s\]\s*/, '').replace(/^\[[xX]\]\s*/, '').trim();
+}
+
+function cleanDoDInlineMarkdown(value: string) {
+  return value.replace(/\*\*|__|`/g, '').trim().split(/\s+/).filter(Boolean).join(' ');
+}
+
+function stripDoDOrdinal(value: string) {
+  return value.replace(/^\d+(?:\.\d+)*(?:[\.)、])?\s+/, '').trim();
+}
+
+function trimDoDTrailingColon(value: string) {
+  return value.replace(/[\s:：]+$/, '').trim();
+}
+
+function hasDoDInlineLabel(value: string) {
+  const index = value.search(/[:：]/);
+  if (index <= 0 || index >= value.length - 1) {
+    return false;
+  }
+  return value.slice(0, index).trim().length > 0 && Array.from(value.slice(0, index).trim()).length <= 40;
+}
+
+function isDoDSameLevelContinuation(isListItem: boolean, value: string) {
+  return isListItem && !/[:：]$/.test(value) && !hasDoDInlineLabel(value);
+}
+
+function doDLeadingIndent(line: string) {
+  let indent = 0;
+  for (const char of line) {
+    if (char === ' ') {
+      indent += 1;
+    } else if (char === '\t') {
+      indent += 4;
+    } else {
+      break;
+    }
+  }
+  return indent;
+}
+
+function doDWithContext(context: string[], item: string) {
+  const cleanItem = item.trim();
+  if (context.length === 0) {
+    return cleanItem;
+  }
+  const prefix = context.join(' / ');
+  if (cleanItem.startsWith(prefix)) {
+    return cleanItem;
+  }
+  return `${prefix}： ${cleanItem}`;
+}
+
+function setupDoDItems(value?: string) {
+  const headings: string[] = [];
+  const listContexts: DoDListContext[] = [];
+  const seen = new Set<string>();
+  const items: string[] = [];
+
+  for (const line of splitDoDRawLines(value)) {
+    const trimmed = line.trim();
+    if (!trimmed || /^[-_*]{3,}$/.test(trimmed)) {
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      const text = stripDoDOrdinal(cleanDoDInlineMarkdown(heading[2]));
+      if (text) {
+        headings[level - 1] = text;
+        headings.length = level;
+        listContexts.length = 0;
+      }
+      continue;
+    }
+
+    const indent = doDLeadingIndent(line);
+    const stripped = stripDoDListMarker(trimmed);
+    const content = cleanDoDInlineMarkdown(stripped.text);
+    if (!content) {
+      continue;
+    }
+    const keepSameLevel = isDoDSameLevelContinuation(stripped.isListItem, content);
+    while (
+      listContexts.length > 0 &&
+      (listContexts[listContexts.length - 1].indent > indent ||
+        (listContexts[listContexts.length - 1].indent === indent && !keepSameLevel))
+    ) {
+      listContexts.pop();
+    }
+    if (stripped.isListItem && /[:：]$/.test(content)) {
+      const parent = trimDoDTrailingColon(content);
+      if (parent) {
+        listContexts.push({ indent, text: parent });
+      }
+      continue;
+    }
+    const context = [
+      ...headings.filter(Boolean),
+      ...listContexts.map((item) => item.text).filter(Boolean)
+    ];
+    const normalized = doDWithContext(context, content);
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    items.push(normalized);
+  }
+
+  return items;
+}
+
 type SoulBindingFormValues = {
   defaultSoulId?: string;
   bindings?: Record<string, string | undefined>;
@@ -1482,10 +1640,6 @@ function stageBindings(stages: string[], soulId?: string) {
     return {};
   }
   return Object.fromEntries(stages.map((stage) => [stage, value]));
-}
-
-function setupDoDItems(value?: string) {
-  return (value || '').split('\n').map((item) => item.trim()).filter(Boolean);
 }
 
 type SoulDefinitionFormValues = {
@@ -1532,7 +1686,7 @@ function workspaceTemplatePayload(values: WorkspaceTemplateFormValues, templateI
     name: (values.name || '').trim(),
     description: (values.description || '').trim(),
     goalText: (values.goalText || '').trim(),
-    doDItems: splitLines(values.doDItems),
+    doDItems: setupDoDItems(values.doDItems),
     defaultSoulId: bindings.defaultSoulId,
     soulBindings: bindings.bindings
   };

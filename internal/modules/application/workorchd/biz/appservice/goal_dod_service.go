@@ -12,6 +12,7 @@ import (
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/doditems"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -368,15 +369,7 @@ func mapDoDs(items []*workspacemodel.DoD) []DoD {
 }
 
 func normalizeDoDItems(items []string) []string {
-	ret := make([]string, 0, len(items))
-	for _, item := range items {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		ret = append(ret, item)
-	}
-	return ret
+	return doditems.Normalize(items)
 }
 
 func generateBusinessID(prefix string) string {

@@ -1936,6 +1936,28 @@ func TestModelDodSlashCommandSetsPendingDoD(t *testing.T) {
 	}
 }
 
+func TestModelDodSlashCommandNormalizesMarkdownDoD(t *testing.T) {
+	model := NewAppModel(newFake(t), "ws-1", "")
+	model.width = 120
+	model.height = 24
+	model.setInput("/dod ### 1. Scope\n- [ ] **Group**:\n  - first logical item\n  - second logical item")
+
+	updated, _ := model.submitInput()
+	got := updated.(*AppModel)
+	want := []string{
+		"Scope / Group： first logical item",
+		"Scope / Group： second logical item",
+	}
+	if len(got.dodItems) != len(want) {
+		t.Fatalf("dod items = %#v, want %#v", got.dodItems, want)
+	}
+	for idx := range want {
+		if got.dodItems[idx] != want[idx] {
+			t.Fatalf("dod items = %#v, want %#v", got.dodItems, want)
+		}
+	}
+}
+
 func TestModelWorkspaceCreateCommandUsesTemplateAndActivatesWorkspace(t *testing.T) {
 	be := &workspaceCreateFake{fakeBE: newFake(t)}
 	model := NewAppModel(be, "", "")

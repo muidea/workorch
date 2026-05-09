@@ -70,6 +70,38 @@ func TestUpdateDoDWithBackendUpdatesPersistedDoD(t *testing.T) {
 	}
 }
 
+func TestDefineDoDWithBackendNormalizesMarkdownDoD(t *testing.T) {
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-dod-markdown", "dod markdown workspace", "", "workspaces/dod-markdown")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+
+	dod, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{`
+### 3.1 Functional
+- [ ] **Forwarding**: request reaches the configured target
+- [ ] **Traceability**:
+  - produced evidence is linked to the item
+  - final result references the evidence
+`})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	want := []string{
+		"Functional： Forwarding: request reaches the configured target",
+		"Functional / Traceability： produced evidence is linked to the item",
+		"Functional / Traceability： final result references the evidence",
+	}
+	if len(dod.Items) != len(want) {
+		t.Fatalf("dod items = %#v, want %#v", dod.Items, want)
+	}
+	for idx := range want {
+		if dod.Items[idx] != want[idx] {
+			t.Fatalf("dod items = %#v, want %#v", dod.Items, want)
+		}
+	}
+}
+
 func TestUpdateDoDWithBackendValidatesInput(t *testing.T) {
 	if _, err := UpdateDoDWithBackend(context.Background(), "file", t.TempDir(), "", []string{"updated"}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("empty dod id err = %v, want invalid argument", err)
