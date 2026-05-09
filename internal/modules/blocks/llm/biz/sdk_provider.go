@@ -138,11 +138,27 @@ func (p *OpenAIProvider) Embed(ctx context.Context, request llmmodels.ProviderEm
 }
 
 func (p *OpenAIProvider) chatParams(request llmmodels.ProviderRequest) openai.ChatCompletionNewParams {
+	messages := buildProviderPromptMessages(request)
+	chatMessages := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages.Messages))
+	for _, item := range messages.Messages {
+		content := strings.TrimSpace(item.Content)
+		if content == "" {
+			continue
+		}
+		switch normalizedPromptRole(item.Role) {
+		case "system":
+			chatMessages = append(chatMessages, openai.SystemMessage(content))
+		case "assistant":
+			chatMessages = append(chatMessages, openai.AssistantMessage(content))
+		default:
+			chatMessages = append(chatMessages, openai.UserMessage(content))
+		}
+	}
+	if len(chatMessages) == 0 {
+		chatMessages = append(chatMessages, openai.SystemMessage(systemPrompt()), openai.UserMessage(userPrompt(request)))
+	}
 	return openai.ChatCompletionNewParams{
-		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage(systemPrompt()),
-			openai.UserMessage(userPrompt(request)),
-		},
+		Messages:    chatMessages,
 		Model:       shared.ChatModel(p.config.Model),
 		Temperature: openai.Float(0),
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
@@ -250,11 +266,26 @@ func (p *AnthropicProvider) StreamComplete(ctx context.Context, request llmmodel
 }
 
 func (p *AnthropicProvider) messageParams(request llmmodels.ProviderRequest) anthropic.MessageNewParams {
+	messages := buildProviderPromptMessages(request)
+	anthropicMessages := make([]anthropic.MessageParam, 0, len(messages.Messages))
+	for _, item := range messages.Messages {
+		role := normalizedPromptRole(item.Role)
+		content := strings.TrimSpace(item.Content)
+		if content == "" || role == "system" {
+			continue
+		}
+		if role == "assistant" {
+			anthropicMessages = append(anthropicMessages, anthropic.NewAssistantMessage(anthropic.NewTextBlock(content)))
+			continue
+		}
+		anthropicMessages = append(anthropicMessages, anthropic.NewUserMessage(anthropic.NewTextBlock(content)))
+	}
+	if len(anthropicMessages) == 0 {
+		anthropicMessages = append(anthropicMessages, anthropic.NewUserMessage(anthropic.NewTextBlock(userPrompt(request))))
+	}
 	return anthropic.MessageNewParams{
-		MaxTokens: anthropicDefaultMaxTokens,
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(userPrompt(request))),
-		},
+		MaxTokens:   anthropicDefaultMaxTokens,
+		Messages:    anthropicMessages,
 		Model:       anthropic.Model(p.config.Model),
 		Temperature: anthropic.Float(0),
 		System: []anthropic.TextBlockParam{{

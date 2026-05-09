@@ -61,9 +61,12 @@ func TestEnforceProviderRequestBudgetCompactsLargeExecutionContext(t *testing.T)
 		len(got.ContextBudget.SourceRefs) == 0 {
 		t.Fatalf("contextBudget = %+v, want token metadata", got.ContextBudget)
 	}
+	if got.ContextBudget.GoalDoDCompressed {
+		t.Fatalf("contextBudget = %+v, want goal/dod protected from compression", got.ContextBudget)
+	}
 	executionContext := recordFromAny(got.Input["executionContext"])
 	if len(recordFromAny(executionContext["goal"])) == 0 || len(recordFromAny(executionContext["dod"])) == 0 {
-		t.Fatalf("executionContext = %+v, want goal and DoD preserved", executionContext)
+		t.Fatalf("executionContext = %+v input=%+v, want goal and DoD preserved", executionContext, got.Input)
 	}
 	payload := userPrompt(got)
 	if strings.Contains(payload, strings.Repeat("long guidance ", 100)) {
@@ -139,6 +142,9 @@ func TestEnforceProviderRequestBudgetCompactsWhenTokenBudgetExceeded(t *testing.
 	if got.ContextBudget.MaxTokens != 120 || got.ContextBudget.ShrinkLevel != 4 || len(got.ContextBudget.Rules) < 2 {
 		t.Fatalf("contextBudget = %+v, want token-aware aggressive compaction metadata", got.ContextBudget)
 	}
+	if got.ContextBudget.GoalDoDCompressed {
+		t.Fatalf("contextBudget = %+v, want goal/dod not compressed under token pressure", got.ContextBudget)
+	}
 }
 
 func TestMinimalProviderInputUsesStageAwareExecutionContext(t *testing.T) {
@@ -206,6 +212,61 @@ func TestEnforceProviderRequestBudgetAdaptiveShrinkForProviderRetry(t *testing.T
 	}
 	if len(got.ContextBudget.Rules) < 2 || got.ContextBudget.Rules[1] != "adaptive shrink based on provider retry" {
 		t.Fatalf("contextBudget rules = %+v, want adaptive shrink rule", got.ContextBudget.Rules)
+	}
+}
+
+func TestEnforceProviderRequestBudgetMarksP0OverflowWhenGoalDoDContractDominates(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-p0",
+		RunID:       "run-p0",
+		StepID:      "run-p0/step-1",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"executionContext": map[string]any{
+				"goal": strings.Repeat("goal ", 1200),
+				"dod":  strings.Repeat("dod ", 1200),
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    2048,
+				MaxInputTokens:         200,
+				ReservedOutputTokens:   128,
+				SafetyRatio:            0.8,
+				BytesHardLimit:         512 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget metadata missing")
+	}
+	if !got.ContextBudget.P0Overflow {
+		t.Fatalf("contextBudget = %+v, want p0 overflow on protected goal/dod contract", got.ContextBudget)
+	}
+	if got.ContextBudget.GoalDoDCompressed {
+		t.Fatalf("contextBudget = %+v, want goal/dod preserved", got.ContextBudget)
+	}
+}
+
+func TestCaptureAndRestoreProtectedGoalDoD(t *testing.T) {
+	input := map[string]any{
+		"executionContext": map[string]any{
+			"goal": map[string]any{"text": "goal"},
+			"dod":  map[string]any{"items": []any{"d1"}},
+		},
+	}
+	protected := captureProtectedGoalDoD(input)
+	if len(protected.ExecutionContext) == 0 {
+		t.Fatalf("protected = %+v, want executionContext goal/dod captured", protected)
+	}
+	restored := restoreProtectedGoalDoD(map[string]any{"executionContext": map[string]any{}}, protected)
+	exec := recordFromAny(restored["executionContext"])
+	if len(recordFromAny(exec["goal"])) == 0 || len(recordFromAny(exec["dod"])) == 0 {
+		t.Fatalf("restored executionContext = %+v, want goal/dod restored", exec)
 	}
 }
 

@@ -1224,9 +1224,26 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 					"truncated":             true,
 					"rules":                 []string{"compact provider input", "apply priority compaction (P0/P1/P2)"},
 					"sourceRefs":            []string{"input.executionContext.goal", "input.graphEvidence"},
+					"includedSections":      []string{"p0"},
+					"normalizedSections":    []string{"request-intent"},
+					"compressedSections":    []string{"p1", "p2"},
+					"omittedSections":       []string{"older_p1"},
+					"goalDoDCompressed":     false,
+					"p0Overflow":            true,
 					"tracePolicy":           "summary_refs_only",
 					"promptCaptured":        false,
 					"estimator":             "bytes_ratio",
+					"profile": map[string]any{
+						"contextWindowTokens":    200000,
+						"maxInputTokens":         160000,
+						"reservedOutputTokens":   2048,
+						"safetyRatio":            0.8,
+						"bytesHardLimit":         98304,
+						"estimatedTokensPerByte": 0.25,
+						"inputTokenPrice":        0.0,
+						"outputTokenPrice":       0.0,
+						"currency":               "USD",
+					},
 				},
 			},
 		},
@@ -1249,8 +1266,13 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 		!traces[0].Truncated ||
 		traces[0].ShrinkLevel != 3 ||
 		len(traces[0].SourceRefs) != 2 ||
+		len(traces[0].IncludedSections) != 1 ||
+		len(traces[0].CompressedSections) != 2 ||
+		traces[0].GoalDoDCompressed ||
+		!traces[0].P0Overflow ||
 		traces[0].TracePolicy != "summary_refs_only" ||
-		traces[0].PromptCaptured {
+		traces[0].PromptCaptured ||
+		traces[0].Profile["currency"] != "USD" {
 		t.Fatalf("trace = %+v, want projected context budget fields", traces[0])
 	}
 	observability := mapRunObservability(RunSnapshot{

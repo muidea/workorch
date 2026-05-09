@@ -150,22 +150,22 @@ type RecoveryPlan struct {
 }
 
 type RepairLoop struct {
-	State                string   `json:"state"`
-	AttemptCount         int      `json:"attemptCount"`
-	LastAttempt          int      `json:"lastAttempt,omitempty"`
-	LastRepairStepID     string   `json:"lastRepairStepId,omitempty"`
-	LastFailureStepID    string   `json:"lastFailureStepId,omitempty"`
-	LastFailureClass     string   `json:"lastFailureClass,omitempty"`
-	LastFailureSignature string   `json:"lastFailureSignature,omitempty"`
-	LastFailureAt        string   `json:"lastFailureAt,omitempty"`
+	State                string           `json:"state"`
+	AttemptCount         int              `json:"attemptCount"`
+	LastAttempt          int              `json:"lastAttempt,omitempty"`
+	LastRepairStepID     string           `json:"lastRepairStepId,omitempty"`
+	LastFailureStepID    string           `json:"lastFailureStepId,omitempty"`
+	LastFailureClass     string           `json:"lastFailureClass,omitempty"`
+	LastFailureSignature string           `json:"lastFailureSignature,omitempty"`
+	LastFailureAt        string           `json:"lastFailureAt,omitempty"`
 	MissingDoDItems      []map[string]any `json:"missingDoDItems,omitempty"`
 	RecentAttempts       []map[string]any `json:"recentAttempts,omitempty"`
-	RecommendedNextSteps []string `json:"recommendedNextSteps,omitempty"`
-	NextAction           string   `json:"nextAction,omitempty"`
-	Escalated            bool     `json:"escalated"`
-	EscalationReason     string   `json:"escalationReason,omitempty"`
-	EscalationTicketID   string   `json:"escalationTicketId,omitempty"`
-	EvidenceRefs         []string `json:"evidenceRefs,omitempty"`
+	RecommendedNextSteps []string         `json:"recommendedNextSteps,omitempty"`
+	NextAction           string           `json:"nextAction,omitempty"`
+	Escalated            bool             `json:"escalated"`
+	EscalationReason     string           `json:"escalationReason,omitempty"`
+	EscalationTicketID   string           `json:"escalationTicketId,omitempty"`
+	EvidenceRefs         []string         `json:"evidenceRefs,omitempty"`
 }
 
 type ContextBundle struct {
@@ -480,22 +480,29 @@ type WebSourceTrace struct {
 }
 
 type LLMContextBudgetTrace struct {
-	StepID                string   `json:"stepId"`
-	ProviderID            string   `json:"providerId,omitempty"`
-	Model                 string   `json:"model,omitempty"`
-	MaxBytes              int      `json:"maxBytes"`
-	ActualBytes           int      `json:"actualBytes"`
-	MaxTokens             int      `json:"maxTokens,omitempty"`
-	EstimatedInputTokens  int      `json:"estimatedInputTokens,omitempty"`
-	EstimatedOutputTokens int      `json:"estimatedOutputTokens,omitempty"`
-	ActualTokens          int      `json:"actualTokens,omitempty"`
-	ShrinkLevel           int      `json:"shrinkLevel,omitempty"`
-	Truncated             bool     `json:"truncated"`
-	Rules                 []string `json:"rules,omitempty"`
-	SourceRefs            []string `json:"sourceRefs,omitempty"`
-	TracePolicy           string   `json:"tracePolicy,omitempty"`
-	PromptCaptured        bool     `json:"promptCaptured"`
-	Estimator             string   `json:"estimator,omitempty"`
+	StepID                string         `json:"stepId"`
+	ProviderID            string         `json:"providerId,omitempty"`
+	Model                 string         `json:"model,omitempty"`
+	MaxBytes              int            `json:"maxBytes"`
+	ActualBytes           int            `json:"actualBytes"`
+	MaxTokens             int            `json:"maxTokens,omitempty"`
+	EstimatedInputTokens  int            `json:"estimatedInputTokens,omitempty"`
+	EstimatedOutputTokens int            `json:"estimatedOutputTokens,omitempty"`
+	ActualTokens          int            `json:"actualTokens,omitempty"`
+	ShrinkLevel           int            `json:"shrinkLevel,omitempty"`
+	Truncated             bool           `json:"truncated"`
+	Rules                 []string       `json:"rules,omitempty"`
+	SourceRefs            []string       `json:"sourceRefs,omitempty"`
+	IncludedSections      []string       `json:"includedSections,omitempty"`
+	NormalizedSections    []string       `json:"normalizedSections,omitempty"`
+	CompressedSections    []string       `json:"compressedSections,omitempty"`
+	OmittedSections       []string       `json:"omittedSections,omitempty"`
+	GoalDoDCompressed     bool           `json:"goalDoDCompressed"`
+	P0Overflow            bool           `json:"p0Overflow"`
+	TracePolicy           string         `json:"tracePolicy,omitempty"`
+	PromptCaptured        bool           `json:"promptCaptured"`
+	Estimator             string         `json:"estimator,omitempty"`
+	Profile               map[string]any `json:"profile,omitempty"`
 }
 
 type LLMUsageTrace struct {
@@ -719,22 +726,23 @@ type Artifact struct {
 }
 
 type WorkspaceSnapshot struct {
-	Workspace          Workspace           `json:"workspace"`
-	Outcome            WorkspaceOutcome    `json:"outcome"`
-	TaskProgress       TaskProgress        `json:"taskProgress"`
-	TaskDecompositions []TaskDecomposition `json:"taskDecompositions,omitempty"`
-	ExecutionSections  []ExecutionSection  `json:"executionSections,omitempty"`
-	MemoryRecallTraces []MemoryRecallTrace `json:"memoryRecallTraces,omitempty"`
-	Goals              []Goal              `json:"goals,omitempty"`
-	DoDs               []DoD               `json:"dods,omitempty"`
-	Runs               []Run               `json:"runs,omitempty"`
-	Results            []Result            `json:"results,omitempty"`
-	Artifacts          []Artifact          `json:"artifacts,omitempty"`
-	Patches            []Patch             `json:"patches,omitempty"`
-	WebSources         []WebSourceTrace    `json:"webSources,omitempty"`
-	LLMUsageTraces     []LLMUsageTrace     `json:"llmUsageTraces,omitempty"`
-	LLMUsageSummary    LLMUsageSummary     `json:"llmUsageSummary"`
-	EventRecords       []EventRecord       `json:"eventRecords,omitempty"`
-	Decisions          []Decision          `json:"decisions,omitempty"`
-	Approvals          []Approval          `json:"approvals,omitempty"`
+	Workspace          Workspace               `json:"workspace"`
+	Outcome            WorkspaceOutcome        `json:"outcome"`
+	TaskProgress       TaskProgress            `json:"taskProgress"`
+	TaskDecompositions []TaskDecomposition     `json:"taskDecompositions,omitempty"`
+	ExecutionSections  []ExecutionSection      `json:"executionSections,omitempty"`
+	MemoryRecallTraces []MemoryRecallTrace     `json:"memoryRecallTraces,omitempty"`
+	Goals              []Goal                  `json:"goals,omitempty"`
+	DoDs               []DoD                   `json:"dods,omitempty"`
+	Runs               []Run                   `json:"runs,omitempty"`
+	Results            []Result                `json:"results,omitempty"`
+	Artifacts          []Artifact              `json:"artifacts,omitempty"`
+	Patches            []Patch                 `json:"patches,omitempty"`
+	WebSources         []WebSourceTrace        `json:"webSources,omitempty"`
+	LLMContextBudgets  []LLMContextBudgetTrace `json:"llmContextBudgets,omitempty"`
+	LLMUsageTraces     []LLMUsageTrace         `json:"llmUsageTraces,omitempty"`
+	LLMUsageSummary    LLMUsageSummary         `json:"llmUsageSummary"`
+	EventRecords       []EventRecord           `json:"eventRecords,omitempty"`
+	Decisions          []Decision              `json:"decisions,omitempty"`
+	Approvals          []Approval              `json:"approvals,omitempty"`
 }

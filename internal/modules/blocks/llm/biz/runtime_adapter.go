@@ -588,6 +588,9 @@ func providerFailureStage(failureClass string, stream bool) string {
 }
 
 func completeProvider(ctx context.Context, runtime ProviderRuntime, request llmmodels.ProviderRequest) ([]byte, *llmmodels.ProviderUsage, []llmmodels.ProviderStreamEvent, error) {
+	if request.ContextBudget != nil && request.ContextBudget.P0Overflow {
+		return nil, nil, nil, fmt.Errorf("%w: llm provider request too large: p0 overflow with protected goal/dod contract", common.ErrInvalidArgument)
+	}
 	if runtime.Config.Capabilities.Streaming {
 		streaming, ok := runtime.Provider.(StreamingProvider)
 		if !ok {
@@ -676,6 +679,12 @@ func providerContextBudgetOutput(budget *llmmodels.ProviderContextBudget, provid
 		"truncated":             budget.Truncated,
 		"rules":                 append([]string(nil), budget.Rules...),
 		"sourceRefs":            append([]string(nil), budget.SourceRefs...),
+		"includedSections":      append([]string(nil), budget.IncludedSections...),
+		"normalizedSections":    append([]string(nil), budget.NormalizedSections...),
+		"compressedSections":    append([]string(nil), budget.CompressedSections...),
+		"omittedSections":       append([]string(nil), budget.OmittedSections...),
+		"goalDoDCompressed":     budget.GoalDoDCompressed,
+		"p0Overflow":            budget.P0Overflow,
 		"tracePolicy":           budget.TracePolicy,
 		"promptCaptured":        budget.PromptCaptured,
 		"estimator":             budget.Estimator,
@@ -1869,7 +1878,28 @@ func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels
 		},
 		Config: RedactedProviderConfig(config),
 	}
-	return enforceProviderRequestBudget(providerReq)
+	providerReq = enforceProviderRequestBudget(providerReq)
+	providerReq.PromptContext = buildPromptContextFromRequest(providerReq)
+	if providerReq.ContextBudget != nil && providerReq.PromptContext != nil && providerReq.PromptContext.Normalization != nil {
+		providerReq.ContextBudget.NormalizedSections = uniqueStrings(append(providerReq.ContextBudget.NormalizedSections, providerReq.PromptContext.Normalization.NormalizedSections...))
+		providerReq.ContextBudget.IncludedSections = uniqueStrings(append(providerReq.ContextBudget.IncludedSections, promptContextSectionIDs(providerReq.PromptContext)...))
+	}
+	return providerReq
+}
+
+func promptContextSectionIDs(context *llmmodels.PromptContext) []string {
+	if context == nil || len(context.Sections) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(context.Sections))
+	for _, item := range context.Sections {
+		sectionID := strings.TrimSpace(item.ID)
+		if sectionID == "" {
+			continue
+		}
+		out = append(out, sectionID)
+	}
+	return uniqueStrings(out)
 }
 
 func currentSystemLocale() string {

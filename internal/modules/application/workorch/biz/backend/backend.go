@@ -188,6 +188,7 @@ type LLMUsageTraceInfo struct {
 	RequestBytes  int
 	ResponseBytes int
 	Streaming     bool
+	ContextBudget map[string]any
 	Status        string
 	FailureClass  string
 	OccurredAt    string

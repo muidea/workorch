@@ -13,7 +13,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, ProgressBlocker, ProgressItem, RepairLoop, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMContextBudgetTrace, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, ProgressBlocker, ProgressItem, RepairLoop, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import './styles.css';
 
@@ -881,6 +881,57 @@ function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]) {
             )
           }
         ]}
+      />
+    </Space>
+  );
+}
+
+function llmContextBudgetCard(traces?: LLMContextBudgetTrace[]) {
+  const items = traces ?? [];
+  if (items.length === 0) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前运行未记录 LLM Context Budget" />;
+  }
+  const truncatedCount = items.filter((item) => item.truncated).length;
+  const p0OverflowCount = items.filter((item) => item.p0Overflow).length;
+  const goalDoDCompressedCount = items.filter((item) => item.goalDoDCompressed).length;
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      {metricGrid([
+        { key: 'traceCount', label: '预算轨迹', value: numberText(items.length), color: '#1668dc' },
+        { key: 'truncatedCount', label: '触发压缩', value: numberText(truncatedCount), color: truncatedCount ? '#d48806' : undefined },
+        { key: 'p0OverflowCount', label: 'P0 Overflow', value: numberText(p0OverflowCount), color: p0OverflowCount ? '#cf1322' : undefined },
+        { key: 'goalDoDCompressedCount', label: 'Goal/DoD 被压缩', value: numberText(goalDoDCompressedCount), color: goalDoDCompressedCount ? '#cf1322' : '#389e0d' }
+      ])}
+      <ProTable<LLMContextBudgetTrace>
+        rowKey={(item, index) => `${item.stepId}-${index}`}
+        search={false}
+        options={false}
+        pagination={{ pageSize: 8 }}
+        size="small"
+        columns={[
+          { title: '步骤', dataIndex: 'stepId', copyable: true, ellipsis: true },
+          { title: 'Provider/Model', render: (_, item) => `${item.providerId || '-'} / ${item.model || '-'}`, ellipsis: true },
+          { title: '字节预算', width: 150, render: (_, item) => `${numberText(item.actualBytes)} / ${numberText(item.maxBytes)}` },
+          { title: 'Token 预算', width: 150, render: (_, item) => `${numberText(item.estimatedInputTokens)} / ${numberText(item.maxTokens)}` },
+          { title: '压缩级别', dataIndex: 'shrinkLevel', width: 90, render: (_, item) => numberText(item.shrinkLevel) },
+          { title: '状态', width: 180, render: (_, item) => compactTags([item.truncated ? 'truncated' : 'full', item.p0Overflow ? 'p0_overflow' : '', item.goalDoDCompressed ? 'goal_dod_compressed' : 'goal_dod_protected'].filter(Boolean), 4) }
+        ]}
+        expandable={{
+          expandedRowRender: (item) => (
+            <Descriptions
+              size="small"
+              column={1}
+              items={[
+                { key: 'rules', label: '预算规则', children: compactTags(item.rules ?? [], 8) },
+                { key: 'sections', label: '分区处理', children: compactTags([`included:${(item.includedSections ?? []).join('|') || '-'}`, `normalized:${(item.normalizedSections ?? []).join('|') || '-'}`, `compressed:${(item.compressedSections ?? []).join('|') || '-'}`, `omitted:${(item.omittedSections ?? []).join('|') || '-'}`], 8) },
+                { key: 'refs', label: '来源引用', children: compactTags(item.sourceRefs ?? [], 8) },
+                { key: 'policy', label: 'trace 策略', children: `${item.tracePolicy || '-'} / estimator: ${item.estimator || '-'}` },
+                { key: 'profile', label: 'Profile', children: <pre className="json-panel">{compactJSON(item.profile)}</pre> }
+              ]}
+            />
+          )
+        }}
+        dataSource={items}
       />
     </Space>
   );
@@ -3010,6 +3061,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const outcomeDoDItems = dodAssessmentItems(runSnapshot);
   const runWebSources = runObservability?.webSources ?? runSnapshot?.webSources ?? snapshot?.webSources;
   const webSourceCount = webSourceRows(runWebSources).length;
+  const runLLMContextBudgets = runObservability?.llmContextBudgets ?? runSnapshot?.llmContextBudgets ?? snapshot?.llmContextBudgets;
   const runLLMUsageSummary = runObservability?.llmUsageSummary ?? runSnapshot?.llmUsageSummary ?? snapshot?.llmUsageSummary;
   const runLLMUsageTraces = runObservability?.llmUsageTraces ?? runSnapshot?.llmUsageTraces ?? snapshot?.llmUsageTraces;
   const dodDefinitionRows = dods.flatMap((dod) => dod.items.map((text, index) => ({
@@ -3113,6 +3165,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
               { key: 'result', label: modelLabels.result, value: snapshot.results?.length ?? runSnapshot?.results?.length ?? 0, color: '#389e0d' },
               { key: 'artifact', label: modelLabels.artifact, value: snapshot.artifacts?.length ?? runSnapshot?.artifacts?.length ?? 0 },
               { key: 'webSources', label: 'Web 来源', value: webSourceCount, color: webSourceCount ? '#08979c' : undefined },
+              { key: 'llmContext', label: 'LLM Context', value: runLLMContextBudgets?.length ?? 0, color: (runLLMContextBudgets?.length ?? 0) > 0 ? '#1677ff' : undefined },
               { key: 'llmUsage', label: modelLabels.llmUsage, value: runLLMUsageSummary?.entryTotal ?? 0, color: runLLMUsageSummary?.entryTotal ? '#d48806' : undefined },
               { key: 'tool', label: modelLabels.toolCall, value: runSnapshot?.toolCalls?.length ?? 0 },
               { key: 'patch', label: modelLabels.patch, value: runSnapshot?.patches?.length ?? 0 },
@@ -3326,6 +3379,9 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                   <ProCard title="Web 来源" colSpan={{ xs: 24, lg: 12 }}>
                     {webSourceCard(runWebSources)}
                   </ProCard>
+                  <ProCard title="LLM Context Budget" colSpan={{ xs: 24, lg: 12 }}>
+                    {llmContextBudgetCard(runLLMContextBudgets)}
+                  </ProCard>
                   <ProCard title={modelLabels.llmUsage} colSpan={{ xs: 24, lg: 12 }}>
                     {llmUsageCard(runLLMUsageSummary, runLLMUsageTraces)}
                   </ProCard>
@@ -3442,6 +3498,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                   { key: 'results', label: modelLabels.result, value: runObservability?.evidence.resultTotal ?? runSnapshot.results?.length ?? 0, color: '#389e0d' },
                   { key: 'artifacts', label: modelLabels.artifact, value: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 },
                   { key: 'webSources', label: 'Web 来源', value: webSourceCount, color: webSourceCount ? '#08979c' : undefined },
+                  { key: 'llmContextBudgets', label: 'LLM Context', value: runLLMContextBudgets?.length ?? 0, color: (runLLMContextBudgets?.length ?? 0) > 0 ? '#1677ff' : undefined },
                   { key: 'llmUsage', label: modelLabels.llmUsage, value: runLLMUsageSummary?.entryTotal ?? 0, color: runLLMUsageSummary?.entryTotal ? '#d48806' : undefined }
                 ])}
                 <Descriptions
@@ -3459,6 +3516,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     { key: 'results', label: modelLabels.result, children: runObservability?.evidence.resultTotal ?? runSnapshot.results?.length ?? 0 },
                     { key: 'artifacts', label: modelLabels.artifact, children: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 },
                     { key: 'webSources', label: 'Web 来源', children: webSourceCount },
+                    { key: 'llmContextBudgets', label: 'LLM Context', children: runLLMContextBudgets?.length ?? 0 },
                     { key: 'llmUsage', label: modelLabels.llmUsage, children: `${numberText(runLLMUsageSummary?.entryTotal)} 次 / ${numberText(runLLMUsageSummary?.totalTokens)} tokens / ${llmUsageCostSummary(runLLMUsageSummary)}` },
                     { key: 'selectedCapabilities', label: '选择能力', children: runObservability?.selectedCapabilities?.length ?? runSnapshot.selectedCapabilities?.length ?? 0 },
                     { key: 'usedCapabilities', label: '使用能力', children: runObservability?.usedCapabilities?.length ?? runSnapshot.usedCapabilities?.length ?? 0 },
@@ -3527,6 +3585,11 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                       key: 'webSources',
                       label: `Web 来源 ${webSourceCount}`,
                       children: webSourceCard(runWebSources)
+                    },
+                    {
+                      key: 'llmContextBudgets',
+                      label: `LLM Context ${runLLMContextBudgets?.length ?? 0}`,
+                      children: llmContextBudgetCard(runLLMContextBudgets)
                     },
                     {
                       key: 'llmUsage',

@@ -849,6 +849,59 @@ func TestRuntimeAdapterUsesExplicitSoulStageFromStepInput(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterBuildsPromptContextFromGovernanceAndGoalDoDHistory(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{"completionState":"continue"}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+	request := llmStepRequest()
+	request.Input["decisionResolution"] = map[string]any{
+		"resolutionType": "provide_missing_info",
+		"resolutionPayload": map[string]any{
+			"city": "Nanjing",
+		},
+	}
+	request.Input["approvalResolution"] = map[string]any{
+		"action": "approve",
+	}
+	request.Input["executionContext"] = map[string]any{
+		"goals": []any{
+			map[string]any{"text": "goal one"},
+			map[string]any{"text": "goal two"},
+		},
+		"dods": []any{
+			map[string]any{"items": []any{"dod one"}},
+			map[string]any{"items": []any{"dod two"}},
+		},
+		"governanceHistory": []any{
+			map[string]any{"id": "ticket-1", "state": "resolved"},
+		},
+	}
+	if _, err := adapter.ExecuteRuntimeStep(context.Background(), request); err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	if provider.request.PromptContext == nil || len(provider.request.PromptContext.Turns) == 0 {
+		t.Fatalf("promptContext = %+v, want generated turns", provider.request.PromptContext)
+	}
+	joined := ""
+	for _, turn := range provider.request.PromptContext.Turns {
+		joined += turn.Content
+	}
+	for _, expected := range []string{"decisionResolution", "approvalResolution", "goal one", "goal two", "dod one", "dod two"} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("prompt context missing %q, joined=%s", expected, joined)
+		}
+	}
+	if provider.request.ContextBudget == nil {
+		t.Fatalf("contextBudget = nil, want budget manifest")
+	}
+	if provider.request.ContextBudget.GoalDoDCompressed {
+		t.Fatalf("contextBudget = %+v, want goal/dod protected", provider.request.ContextBudget)
+	}
+}
+
 func TestRuntimeAdapterFailsUnknownRequestedProvider(t *testing.T) {
 	adapter := NewRuntimeAdapterWithProviders("local", map[string]ProviderRuntime{
 		"local": {

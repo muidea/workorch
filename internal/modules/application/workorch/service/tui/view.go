@@ -169,6 +169,9 @@ func (m AppModel) renderMain(width, height int) string {
 	if section := renderLLMUsageCompact(m.llmUsage, width-2); section != "" {
 		b.WriteString(section)
 	}
+	if section := renderLLMContextCompact(m.llmContext, width-2); section != "" {
+		b.WriteString(section)
+	}
 	if section := renderGovernanceCompact(m.decisions, m.approvals, width-2, 2); section != "" {
 		b.WriteString(section)
 	}
@@ -363,6 +366,58 @@ func renderLLMUsageCompact(summary backend.LLMUsageSummaryInfo, width int) strin
 	}
 	b.WriteString(truncateDisplay("- "+strings.Join(parts, " | "), width))
 	b.WriteString("\n")
+	return b.String()
+}
+
+func renderLLMContextCompact(budget map[string]any, width int) string {
+	if len(budget) == 0 || width <= 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(Heading.Render("LLM Context"))
+	b.WriteString("\n")
+	provider := firstPayloadString(budget, "providerId", "provider", "ProviderID")
+	model := firstPayloadString(budget, "model", "Model")
+	estimatedInput := payloadIntValue(budget, "estimatedInputTokens", "EstimatedInputTokens")
+	maxTokens := payloadIntValue(budget, "maxTokens", "MaxTokens")
+	shrinkLevel := payloadIntValue(budget, "shrinkLevel", "ShrinkLevel")
+	p0Overflow := payloadBoolValue(budget, "p0Overflow", "P0Overflow")
+	goalDoDCompressed := payloadBoolValue(budget, "goalDoDCompressed", "GoalDoDCompressed")
+	parts := []string{}
+	if provider != "" || model != "" {
+		parts = append(parts, strings.Trim(strings.Join([]string{provider, model}, "/"), "/"))
+	}
+	if maxTokens > 0 || estimatedInput > 0 {
+		parts = append(parts, fmt.Sprintf("tokens %d/%d", estimatedInput, maxTokens))
+	}
+	parts = append(parts, fmt.Sprintf("shrink %d", shrinkLevel))
+	if p0Overflow {
+		parts = append(parts, "p0 overflow")
+	}
+	if goalDoDCompressed {
+		parts = append(parts, "goal/dod compressed")
+	} else {
+		parts = append(parts, "goal/dod protected")
+	}
+	if len(parts) > 0 {
+		b.WriteString(truncateDisplay("- "+strings.Join(parts, " | "), width))
+		b.WriteString("\n")
+	}
+	included := payloadStringSliceValue(budget, "includedSections", "IncludedSections")
+	if len(included) > 0 {
+		b.WriteString(truncateDisplay("- included: "+strings.Join(included, ", "), width))
+		b.WriteString("\n")
+	}
+	normalized := payloadStringSliceValue(budget, "normalizedSections", "NormalizedSections")
+	if len(normalized) > 0 {
+		b.WriteString(truncateDisplay("- normalized: "+strings.Join(normalized, ", "), width))
+		b.WriteString("\n")
+	}
+	compressed := payloadStringSliceValue(budget, "compressedSections", "CompressedSections")
+	if len(compressed) > 0 {
+		b.WriteString(truncateDisplay("- compressed: "+strings.Join(compressed, ", "), width))
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 

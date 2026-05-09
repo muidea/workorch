@@ -50,11 +50,8 @@ func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderR
 		return llmmodels.ProviderCompletionResult{}, err
 	}
 	payload, err := json.Marshal(chatCompletionRequest{
-		Model: p.config.Model,
-		Messages: []chatCompletionMessage{
-			{Role: "system", Content: systemPrompt()},
-			{Role: "user", Content: userPrompt(request)},
-		},
+		Model:          p.config.Model,
+		Messages:       chatMessagesForRequest(&request),
 		Temperature:    0,
 		ResponseFormat: map[string]string{"type": "json_object"},
 	})
@@ -105,11 +102,8 @@ func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.Pro
 		return llmmodels.ProviderCompletionResult{}, err
 	}
 	payload, err := json.Marshal(chatCompletionRequest{
-		Model: p.config.Model,
-		Messages: []chatCompletionMessage{
-			{Role: "system", Content: systemPrompt()},
-			{Role: "user", Content: userPrompt(request)},
-		},
+		Model:          p.config.Model,
+		Messages:       chatMessagesForRequest(&request),
 		Temperature:    0,
 		ResponseFormat: map[string]string{"type": "json_object"},
 		Stream:         true,
@@ -395,6 +389,50 @@ func trimmedJoin(basePath string, child string) string {
 		return "/" + child
 	}
 	return basePath + "/" + child
+}
+
+func chatMessagesForRequest(request *llmmodels.ProviderRequest) []chatCompletionMessage {
+	if request == nil {
+		return []chatCompletionMessage{
+			{Role: "system", Content: systemPrompt()},
+			{Role: "user", Content: "{}"},
+		}
+	}
+	build := buildProviderPromptMessages(*request)
+	messages := make([]chatCompletionMessage, 0, len(build.Messages))
+	for _, item := range build.Messages {
+		content := strings.TrimSpace(item.Content)
+		if content == "" {
+			continue
+		}
+		messages = append(messages, chatCompletionMessage{
+			Role:    normalizedPromptRole(item.Role),
+			Content: content,
+		})
+	}
+	if len(messages) == 0 {
+		messages = []chatCompletionMessage{
+			{Role: "system", Content: systemPrompt()},
+			{Role: "user", Content: userPrompt(*request)},
+		}
+	}
+	if request.ContextBudget != nil {
+		request.ContextBudget.PromptCaptured = true
+		request.ContextBudget.NormalizedSections = uniqueStrings(append(request.ContextBudget.NormalizedSections, build.NormalizedSections...))
+		request.ContextBudget.IncludedSections = uniqueStrings(append(request.ContextBudget.IncludedSections, defaultPromptIncludedSections(messages)...))
+	}
+	return messages
+}
+
+func defaultPromptIncludedSections(messages []chatCompletionMessage) []string {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(messages))
+	for _, item := range messages {
+		out = append(out, item.Role)
+	}
+	return out
 }
 
 func systemPrompt() string {

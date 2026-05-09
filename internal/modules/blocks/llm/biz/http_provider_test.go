@@ -50,23 +50,27 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	if gotAuthorization != "Bearer secret-value" {
 		t.Fatalf("authorization = %q, want bearer secret", gotAuthorization)
 	}
-	if gotPayload.Model != "test-model" || len(gotPayload.Messages) != 2 || gotPayload.ResponseFormat["type"] != "json_object" {
+	if gotPayload.Model != "test-model" || len(gotPayload.Messages) < 3 || gotPayload.ResponseFormat["type"] != "json_object" {
 		t.Fatalf("payload = %+v, want chat completion json request", gotPayload)
+	}
+	joined := ""
+	for _, message := range gotPayload.Messages {
+		joined += "\n" + message.Content
 	}
 	if !strings.Contains(gotPayload.Messages[0].Content, "Do not invent a workorch CLI") ||
 		!strings.Contains(gotPayload.Messages[0].Content, "runtimeCapabilities") ||
 		!strings.Contains(gotPayload.Messages[0].Content, "dialogLanguage") ||
-		!strings.Contains(gotPayload.Messages[1].Content, "Do not use a command named workorch") ||
-		!strings.Contains(gotPayload.Messages[1].Content, "runtimeCapabilities.shellPolicy.unavailableCommands") ||
-		!strings.Contains(gotPayload.Messages[1].Content, "runtimeCapabilities.serviceAPIs") ||
-		!strings.Contains(gotPayload.Messages[1].Content, "Do not assume remote host access credentials") ||
-		!strings.Contains(gotPayload.Messages[1].Content, "ssh/command") ||
-		!strings.Contains(gotPayload.Messages[1].Content, "timeoutMillis") ||
-		!strings.Contains(gotPayload.Messages[1].Content, "An empty workspace file listing is not by itself missing source code") ||
-		!strings.Contains(gotPayload.Messages[1].Content, "new-work initialization case") ||
-		!strings.Contains(gotPayload.Messages[1].Content, "Conversation language: Chinese (Simplified)") ||
-		!strings.Contains(gotPayload.Messages[1].Content, "DoD summaries") ||
-		!strings.Contains(gotPayload.Messages[1].Content, "runtimeCapabilities") {
+		!strings.Contains(joined, "Do not use a command named workorch") ||
+		!strings.Contains(joined, "runtimeCapabilities.shellPolicy.unavailableCommands") ||
+		!strings.Contains(joined, "runtimeCapabilities.serviceAPIs") ||
+		!strings.Contains(joined, "Do not assume remote host access credentials") ||
+		!strings.Contains(joined, "ssh/command") ||
+		!strings.Contains(joined, "timeoutMillis") ||
+		!strings.Contains(joined, "An empty workspace file listing is not by itself missing source code") ||
+		!strings.Contains(joined, "new-work initialization case") ||
+		!strings.Contains(joined, "Conversation language: Chinese (Simplified)") ||
+		!strings.Contains(joined, "DoD summaries") ||
+		!strings.Contains(joined, "runtimeCapabilities") {
 		t.Fatalf("messages = %+v, want runtime capability boundary", gotPayload.Messages)
 	}
 	if !strings.Contains(string(result.Payload), `"completionState":"completed"`) {

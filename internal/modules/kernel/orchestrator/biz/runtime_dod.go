@@ -64,6 +64,18 @@ func doDAssessmentFromOutput(output map[string]any) map[string]any {
 	return mapFromValue(decision[stepOutputKeyDoDAssessment])
 }
 
+func llmDecisionCompletionStateFromOutput(output map[string]any) string {
+	if output == nil {
+		return ""
+	}
+	decision := mapFromValue(output[stepOutputKeyLLMDecision])
+	if decision == nil {
+		return ""
+	}
+	state, _ := decision["completionState"].(string)
+	return strings.TrimSpace(strings.ToLower(state))
+}
+
 func validateDoDAssessmentItems(value any) error {
 	items, ok := doDAssessmentItemMaps(value)
 	if !ok || len(items) == 0 {

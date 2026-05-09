@@ -164,6 +164,12 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	if shouldDispatchLLMCompletionFollowUp(currentRun, last, last.Output) {
 		return o.dispatchStepWithWorkspace(ctx, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
 	}
+	if completionState := llmDecisionCompletionStateFromOutput(last.Output); completionState != "" && completionState != "completed" {
+		last.State = common.StepStateFailed
+		last.Output = runtimeFailureOutput(last.Output, fmt.Errorf("%w: completionState %s has no actionable continuation", common.ErrInvalidArgument, completionState))
+		_ = o.steps.Update(ctx, last)
+		return o.FailRun(ctx, currentRun.ID, fmt.Sprintf("%s: completionState %s has no actionable continuation", common.ErrInvalidArgument, completionState))
+	}
 	assessment, summary, err := validatedCompletionDoDAssessment(currentRun, last.Output)
 	if err != nil {
 		_ = o.recordRejectedCompletionDoDAssessment(ctx, currentRun, last, last.Output)

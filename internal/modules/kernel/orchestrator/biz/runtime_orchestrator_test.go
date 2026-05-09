@@ -6569,6 +6569,58 @@ func TestRuntimeOrchestrator_FailsLLMRunCompletionWithoutDoDAssessment(t *testin
 	}
 }
 
+func TestRuntimeOrchestrator_FailsContinueWithoutActionableContinuation(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{
+		output: map[string]any{
+			"status": "completed",
+			"llmDecision": map[string]any{
+				"completionState": "continue",
+			},
+		},
+	}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-continue-no-action")
+	runID := common.RunID("run-continue-no-action")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-1"),
+		State:           common.RunStateCreated,
+		InitialStepKind: "llm/workspace_execution",
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run should close as failed without returning error: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateFailed || !strings.Contains(runItem.FailureReason, "completionState continue has no actionable continuation") {
+		t.Fatalf("run = %+v, want failed for continue without actionable continuation", runItem)
+	}
+	step, err := stepRepo.Get(ctx, common.StepID("run-continue-no-action/step-1"))
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if step.State != common.StepStateFailed || !strings.Contains(step.Output["error"].(string), "completionState continue has no actionable continuation") {
+		t.Fatalf("step = %+v, want failed completion continuation gate", step)
+	}
+}
+
 func TestRuntimeOrchestrator_RepairsWeakSatisfiedDoDAssessmentBeforeEscalation(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

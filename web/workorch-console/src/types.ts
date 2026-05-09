@@ -553,6 +553,32 @@ export type FetchedWebSource = {
   evidenceRef?: string;
 };
 
+export type LLMContextBudgetTrace = {
+  stepId: string;
+  providerId?: string;
+  model?: string;
+  maxBytes: number;
+  actualBytes: number;
+  maxTokens?: number;
+  estimatedInputTokens?: number;
+  estimatedOutputTokens?: number;
+  actualTokens?: number;
+  shrinkLevel?: number;
+  truncated: boolean;
+  rules?: string[];
+  sourceRefs?: string[];
+  includedSections?: string[];
+  normalizedSections?: string[];
+  compressedSections?: string[];
+  omittedSections?: string[];
+  goalDoDCompressed: boolean;
+  p0Overflow: boolean;
+  tracePolicy?: string;
+  promptCaptured: boolean;
+  estimator?: string;
+  profile?: Record<string, unknown>;
+};
+
 export type LLMUsageTrace = {
   id: string;
   workspaceId: string;
@@ -885,6 +911,7 @@ export type RunObservability = {
   executionSections?: ExecutionSection[];
   memoryRecallTraces?: MemoryRecallTrace[];
   webSources?: WebSourceTrace[];
+  llmContextBudgets?: LLMContextBudgetTrace[];
   llmUsageTraces?: LLMUsageTrace[];
   llmUsageSummary: LLMUsageSummary;
   evidence: RuntimeEvidenceSummary;
@@ -904,6 +931,7 @@ export type RunSnapshot = {
   executionSections?: ExecutionSection[];
   memoryRecallTraces?: MemoryRecallTrace[];
   webSources?: WebSourceTrace[];
+  llmContextBudgets?: LLMContextBudgetTrace[];
   llmUsageTraces?: LLMUsageTrace[];
   llmUsageSummary: LLMUsageSummary;
   steps?: StepView[];
@@ -933,6 +961,7 @@ export type WorkspaceSnapshot = {
   artifacts?: Artifact[];
   patches?: Patch[];
   webSources?: WebSourceTrace[];
+  llmContextBudgets?: LLMContextBudgetTrace[];
   llmUsageTraces?: LLMUsageTrace[];
   llmUsageSummary: LLMUsageSummary;
   eventRecords?: EventRecord[];

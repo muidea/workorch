@@ -1055,6 +1055,17 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if shouldDispatchLLMCompletionFollowUp(run, step, output) {
 		return o.dispatchStepWithWorkspace(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.llmCompletionFollowUpStepInput(ctx, run, step), workspace)
 	}
+	if completionState := llmDecisionCompletionStateFromOutput(output); completionState != "" && completionState != "completed" {
+		return o.handleRuntimeStepFailure(
+			ctx,
+			run,
+			step,
+			toolCall,
+			output,
+			"runtime completion gate failed",
+			fmt.Errorf("%w: completionState %s has no actionable continuation", common.ErrInvalidArgument, completionState),
+		)
+	}
 	assessment, summary, err := validatedCompletionDoDAssessment(run, output)
 	if err != nil {
 		_ = o.recordRejectedCompletionDoDAssessment(ctx, run, step, output)

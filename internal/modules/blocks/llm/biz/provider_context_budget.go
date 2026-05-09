@@ -52,43 +52,69 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	maxTokens := profile.MaxInputTokens
 	rules := []string{"preserve identifiers, schema, config, runtime capabilities, goal, DoD, and governance decisions"}
 	sourceRefs := []string{}
+	includedSections := []string{"p0"}
+	normalizedSections := []string{}
+	compressedSections := []string{}
+	omittedSections := []string{}
 	request.ContextBudget = nil
 	shrinkLevel := 0
+	protected := captureProtectedGoalDoD(request.Input)
 	if adaptiveLevel := adaptiveShrinkLevelFromInput(request.Input); adaptiveLevel > 0 {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = applyAdaptiveShrinkLevel(request.Input, adaptiveLevel)
+		request.Input = restoreProtectedGoalDoD(request.Input, protected)
 		rules = append(rules, "adaptive shrink based on provider retry")
+		compressedSections = append(compressedSections, "adaptive")
 		shrinkLevel = adaptiveLevel
 	}
 	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = budgetProviderInput(request.Input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
+		request.Input = restoreProtectedGoalDoD(request.Input, protected)
 		rules = append(rules, "compact provider input")
+		compressedSections = append(compressedSections, "p2")
 		shrinkLevel = max(shrinkLevel, 1)
 	}
 	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = compactProviderExecutionContext(request.Input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries)
+		request.Input = restoreProtectedGoalDoD(request.Input, protected)
 		rules = append(rules, "summarize execution context transport fields")
+		compressedSections = append(compressedSections, "p1")
 		shrinkLevel = max(shrinkLevel, 2)
 	}
 	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = prioritizedProviderInput(request.Input, true)
+		request.Input = restoreProtectedGoalDoD(request.Input, protected)
 		rules = append(rules, "apply priority compaction (P0/P1/P2)")
+		compressedSections = append(compressedSections, "p1", "p2")
 		shrinkLevel = max(shrinkLevel, 3)
 	}
 	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = minimalProviderInput(request.Input)
+		request.Input = restoreProtectedGoalDoD(request.Input, protected)
 		rules = append(rules, "fallback to stage-aware minimal provider input (P0/P1)")
+		compressedSections = append(compressedSections, "p2", "older_p1")
 		shrinkLevel = max(shrinkLevel, 4)
 	}
+	goalDoDCompressed := !isProtectedGoalDoDEqual(request.Input, protected)
 	actual := providerRequestJSONBytes(request)
 	estimatedInputTokens := estimateInputTokens(actual, profile.EstimatedTokensPerByte)
 	estimatedOutputTokens := min(profile.ReservedOutputTokens, max(0, profile.ContextWindowTokens-estimatedInputTokens))
 	actualTokens := estimatedInputTokens + estimatedOutputTokens
-	truncated := len(rules) > 1 || actual > maxBytes || (maxTokens > 0 && estimatedInputTokens > maxTokens)
+	overBudget := actual > maxBytes || (maxTokens > 0 && estimatedInputTokens > maxTokens)
+	p0Overflow := false
+	if overBudget && hasProtectedGoalDoD(protected) {
+		probe := request
+		probe.Input = withoutProtectedGoalDoD(request.Input)
+		p0Overflow = !exceedsProviderBudget(probe, maxBytes, maxTokens, profile.EstimatedTokensPerByte)
+	}
+	if p0Overflow {
+		rules = append(rules, "p0 overflow: goal/dod contract preserved without compression")
+	}
+	truncated := len(rules) > 1 || overBudget
 	request.ContextBudget = &llmmodels.ProviderContextBudget{
 		MaxBytes:              maxBytes,
 		ActualBytes:           actual,
@@ -100,6 +126,12 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		Truncated:             truncated,
 		Rules:                 rules,
 		SourceRefs:            uniqueStrings(sourceRefs),
+		IncludedSections:      uniqueStrings(includedSections),
+		NormalizedSections:    uniqueStrings(normalizedSections),
+		CompressedSections:    uniqueStrings(compressedSections),
+		OmittedSections:       uniqueStrings(omittedSections),
+		GoalDoDCompressed:     goalDoDCompressed,
+		P0Overflow:            p0Overflow,
 		TracePolicy:           providerContextTracePolicy,
 		PromptCaptured:        false,
 		Estimator:             "bytes_ratio",
@@ -275,8 +307,6 @@ func compactProviderExecutionContext(input map[string]any, stringLimit, itemLimi
 	if len(executionContext) > 0 {
 		compactSoulRouting(executionContext)
 		compactNamedMapSlice(executionContext, "governanceHistory", itemLimit)
-		compactNamedMapSlice(executionContext, "goals", itemLimit)
-		compactNamedMapSlice(executionContext, "dods", itemLimit)
 		out["executionContext"] = executionContext
 	}
 	compactSoulRouting(out)
@@ -372,8 +402,6 @@ func prioritizedProviderInput(input map[string]any, includeP2 bool) map[string]a
 			}
 		}
 		compactNamedMapSlice(compact, "governanceHistory", providerBudgetAggressiveItems)
-		compactNamedMapSlice(compact, "goals", providerBudgetAggressiveItems)
-		compactNamedMapSlice(compact, "dods", providerBudgetAggressiveItems)
 		out["executionContext"] = compact
 	}
 	compactSoulRouting(out)
@@ -381,7 +409,7 @@ func prioritizedProviderInput(input map[string]any, includeP2 bool) map[string]a
 }
 
 func stageAwareExecutionContextKeys(stage string, includeP2 bool) []string {
-	keys := []string{"goal", "dod", "dialogLanguage", "goalDefinitionPolicy", "doDDefinitionPolicy"}
+	keys := []string{"goal", "goals", "dod", "dods", "dialogLanguage", "goalDefinitionPolicy", "doDDefinitionPolicy"}
 	switch stage {
 	case "planning":
 		keys = append(keys, "goals", "dods", "skillSelection", "memoryRetrieval", "workspaceManifest", "workspaceFileManifest")
@@ -465,6 +493,98 @@ func providerInputSourceRefs(input map[string]any) []string {
 		}
 	}
 	return uniqueStrings(refs)
+}
+
+type protectedGoalDoD struct {
+	TopLevel         map[string]any
+	ExecutionContext map[string]any
+}
+
+func captureProtectedGoalDoD(input map[string]any) protectedGoalDoD {
+	ret := protectedGoalDoD{
+		TopLevel:         map[string]any{},
+		ExecutionContext: map[string]any{},
+	}
+	for _, key := range []string{"goal", "goals", "dod", "dods"} {
+		if value, ok := input[key]; ok {
+			if cloned, success := cloneAny(value); success {
+				ret.TopLevel[key] = cloned
+			}
+		}
+	}
+	executionContext := recordFromAny(input["executionContext"])
+	for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy"} {
+		if value, ok := executionContext[key]; ok {
+			if cloned, success := cloneAny(value); success {
+				ret.ExecutionContext[key] = cloned
+			}
+		}
+	}
+	return ret
+}
+
+func restoreProtectedGoalDoD(input map[string]any, protected protectedGoalDoD) map[string]any {
+	if len(input) == 0 {
+		input = map[string]any{}
+	}
+	for key, value := range protected.TopLevel {
+		input[key] = value
+	}
+	executionContext := recordFromAny(input["executionContext"])
+	if executionContext == nil {
+		executionContext = map[string]any{}
+	}
+	for key, value := range protected.ExecutionContext {
+		executionContext[key] = value
+	}
+	if len(executionContext) > 0 {
+		input["executionContext"] = executionContext
+	}
+	return input
+}
+
+func isProtectedGoalDoDEqual(input map[string]any, protected protectedGoalDoD) bool {
+	current := captureProtectedGoalDoD(input)
+	return valuesEqual(current.TopLevel, protected.TopLevel) && valuesEqual(current.ExecutionContext, protected.ExecutionContext)
+}
+
+func hasProtectedGoalDoD(protected protectedGoalDoD) bool {
+	return len(protected.TopLevel) > 0 || len(protected.ExecutionContext) > 0
+}
+
+func withoutProtectedGoalDoD(input map[string]any) map[string]any {
+	clonedInput := map[string]any{}
+	if cloned, ok := cloneAny(input); ok {
+		if typed, ok := cloned.(map[string]any); ok {
+			clonedInput = typed
+		}
+	}
+	if len(clonedInput) == 0 {
+		clonedInput = map[string]any{}
+		for key, value := range input {
+			clonedInput[key] = value
+		}
+	}
+	for _, key := range []string{"goal", "goals", "dod", "dods"} {
+		delete(clonedInput, key)
+	}
+	executionContext := recordFromAny(clonedInput["executionContext"])
+	if len(executionContext) > 0 {
+		for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy"} {
+			delete(executionContext, key)
+		}
+		clonedInput["executionContext"] = executionContext
+	}
+	return clonedInput
+}
+
+func valuesEqual(left, right map[string]any) bool {
+	leftPayload, leftErr := json.Marshal(left)
+	rightPayload, rightErr := json.Marshal(right)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	return string(leftPayload) == string(rightPayload)
 }
 
 func intValue(value any) int {

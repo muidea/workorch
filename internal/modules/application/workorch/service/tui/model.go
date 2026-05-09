@@ -82,6 +82,7 @@ type AppModel struct {
 	taskDecomp    []backend.TaskDecompositionInfo
 	memoryRecalls []backend.MemoryRecallTraceInfo
 	llmUsage      backend.LLMUsageSummaryInfo
+	llmContext    map[string]any
 	progress      progressState
 	progressText  string
 	repairLoop    string
@@ -479,6 +480,7 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 	m.artifacts = nil
 	m.patches = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
+	m.llmContext = nil
 	m.failureReason = ""
 	m.lastError = nil
 	m.clearInput()
@@ -517,6 +519,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.artifacts = nil
 		m.patches = nil
 		m.llmUsage = backend.LLMUsageSummaryInfo{}
+		m.llmContext = nil
 		m.failureReason = ""
 		m.lastError = nil
 		m.resetMainViewport()
@@ -1127,6 +1130,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventLLMUsageRecorded:
 		m.progressText = llmUsageProgressText(evt.Payload)
+		m.llmContext = payloadMapValue(evt.Payload, "contextBudget", "ContextBudget", events.PayloadKeyContextBudget)
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventMemoryCreated, backend.EventMemoryUpdated, backend.EventMemoryDeleted:
 		m.progressText = "Workspace memory changed; refreshing context"
@@ -1417,6 +1421,28 @@ func payloadIntValue(payload map[string]any, keys ...string) int {
 		}
 	}
 	return 0
+}
+
+func payloadBoolValue(payload map[string]any, keys ...string) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	for _, key := range keys {
+		value, ok := payload[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case bool:
+			return typed
+		case string:
+			switch strings.ToLower(strings.TrimSpace(typed)) {
+			case "true", "1", "yes":
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func payloadMap(payload map[string]any, keys ...string) map[string]any {

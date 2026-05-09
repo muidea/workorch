@@ -941,6 +941,7 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		ret.MemoryRecallTraces = runSnapshot.MemoryRecallTraces
 		ret.Patches = mergeWorkspaceSnapshotPatches(ret.Patches, runSnapshot.Patches)
 		ret.WebSources = runSnapshot.WebSources
+		ret.LLMContextBudgets = runSnapshot.LLMContextBudgets
 		ret.LLMUsageTraces = mergeWorkspaceLLMUsageTraces(ret.LLMUsageTraces, runSnapshot.LLMUsageTraces)
 		ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
 	}
@@ -1361,9 +1362,16 @@ func mapLLMContextBudgetTraces(steps []presenter.StepView) []LLMContextBudgetTra
 			Truncated:             readModelBoolValue(budget["truncated"]),
 			Rules:                 readModelStringSliceValue(budget["rules"]),
 			SourceRefs:            readModelStringSliceValue(budget["sourceRefs"]),
+			IncludedSections:      readModelStringSliceValue(budget["includedSections"]),
+			NormalizedSections:    readModelStringSliceValue(budget["normalizedSections"]),
+			CompressedSections:    readModelStringSliceValue(budget["compressedSections"]),
+			OmittedSections:       readModelStringSliceValue(budget["omittedSections"]),
+			GoalDoDCompressed:     readModelBoolValue(budget["goalDoDCompressed"]),
+			P0Overflow:            readModelBoolValue(budget["p0Overflow"]),
 			TracePolicy:           readModelStringValue(budget["tracePolicy"]),
 			PromptCaptured:        readModelBoolValue(budget["promptCaptured"]),
 			Estimator:             readModelStringValue(budget["estimator"]),
+			Profile:               readModelMapValue(budget["profile"]),
 		})
 	}
 	if len(ret) == 0 {

@@ -243,6 +243,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.taskDecomp = snapshotTaskDecompositions(msg.Snapshot, run.ID)
 		m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), msg.Snapshot.MemoryRecallTraces...)
 		m.llmUsage = msg.Snapshot.LLMUsageSummary
+		m.llmContext = latestLLMContextBudget(msg.Snapshot.LLMUsageTraces)
 		m.repairLoop = repairLoopSummary(msg.Snapshot.TaskProgress)
 	}
 
@@ -348,6 +349,7 @@ func (m *AppModel) resetWorkspaceView() {
 	m.taskDecomp = nil
 	m.memoryRecalls = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
+	m.llmContext = nil
 	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""
@@ -361,6 +363,17 @@ func (m *AppModel) resetWorkspaceView() {
 	m.lastError = nil
 	m.resetMainViewport()
 	m.clearInput()
+}
+
+func latestLLMContextBudget(traces []backend.LLMUsageTraceInfo) map[string]any {
+	for idx := len(traces) - 1; idx >= 0; idx-- {
+		budget := traces[idx].ContextBudget
+		if len(budget) == 0 {
+			continue
+		}
+		return clonePayloadMap(budget)
+	}
+	return nil
 }
 
 func (m *AppModel) upsertWorkspace(ws backend.WorkspaceInfo) {
