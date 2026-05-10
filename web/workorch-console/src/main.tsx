@@ -13,7 +13,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMContextBudgetTrace, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, ProgressBlocker, ProgressItem, RepairLoop, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMContextBudgetTrace, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, ProgressBlocker, ProgressItem, RepairLoop, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { createWorkorchEventStream, workorchApi } from './api';
 import './styles.css';
 
@@ -1427,6 +1427,98 @@ function compactTags(items: string[], limit = 3) {
   );
 }
 
+function workspaceSetupDraftStateLabel(state?: string) {
+  switch ((state || '').trim()) {
+    case 'draft_ready':
+      return '草案可用';
+    case 'clarifying':
+      return '需要澄清';
+    case 'confirmed':
+      return '已确认';
+    case 'expired':
+      return '已过期';
+    default:
+      return '未开始';
+  }
+}
+
+function workspaceSetupDraftStateColor(state?: string) {
+  switch ((state || '').trim()) {
+    case 'draft_ready':
+      return 'green';
+    case 'clarifying':
+      return 'orange';
+    case 'confirmed':
+      return 'blue';
+    case 'expired':
+      return 'red';
+    default:
+      return undefined;
+  }
+}
+
+function workspaceSetupDraftConfidenceLabel(value?: string) {
+  switch ((value || '').trim()) {
+    case 'high':
+      return '高';
+    case 'medium':
+      return '中';
+    case 'low':
+      return '低';
+    default:
+      return '-';
+  }
+}
+
+function workspaceSetupDraftTextBlock(value?: string) {
+  const text = (value || '').trim();
+  return (
+    <Typography.Paragraph className="workspace-draft-text-block">
+      {text || '-'}
+    </Typography.Paragraph>
+  );
+}
+
+function workspaceSetupDraftDoDList(items?: string[]) {
+  const normalized = (items ?? []).map((item) => item.trim()).filter(Boolean);
+  if (normalized.length === 0) {
+    return <Typography.Text type="secondary">-</Typography.Text>;
+  }
+  return (
+    <ol className="workspace-draft-dod-list">
+      {normalized.map((item, index) => (
+        <li key={`${index}-${item}`}>
+          <Typography.Text>{item}</Typography.Text>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function workspaceSetupDraftInfoList(items?: string[]) {
+  const normalized = (items ?? []).map((item) => item.trim()).filter(Boolean);
+  if (normalized.length === 0) {
+    return null;
+  }
+  return (
+    <ul className="workspace-draft-info-list">
+      {normalized.map((item, index) => (
+        <li key={`${index}-${item}`}>
+          <Typography.Text>{item}</Typography.Text>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function hasWorkspaceSetupDraftInfoItems(items?: string[]) {
+  return (items ?? []).some((item) => item.trim());
+}
+
+function workspaceSetupDraftReadyForApply(draft?: WorkspaceSetupDraft) {
+  return Boolean(draft?.goalText?.trim() && (draft.doDItems?.some((item) => item.trim()) ?? false));
+}
+
 function splitLines(value?: string) {
   return (value || '').split('\n').map((item) => item.trim()).filter(Boolean);
 }
@@ -1597,12 +1689,48 @@ function setupDoDItems(value?: string) {
   return items;
 }
 
+function workspaceSetupDraftFromForms(goalText?: string, doDText?: string): WorkspaceSetupDraft {
+  return {
+    goalText: (goalText || '').trim(),
+    doDItems: setupDoDItems(doDText)
+  };
+}
+
+function hasWorkspaceSetupDraftContent(draft?: WorkspaceSetupDraft) {
+  return Boolean(
+    draft &&
+    (
+      draft.goalText?.trim() ||
+      (draft.doDItems?.length ?? 0) > 0 ||
+      (draft.assumptions?.length ?? 0) > 0 ||
+      (draft.clarifyingQuestions?.length ?? 0) > 0 ||
+      (draft.warnings?.length ?? 0) > 0
+    )
+  );
+}
+
+function workspaceSetupDraftMessageLabel(role?: string) {
+  switch ((role || '').trim()) {
+    case 'assistant':
+      return '草案助手';
+    case 'system':
+      return '系统';
+    default:
+      return '用户';
+  }
+}
+
+const workspaceSetupSmartDraftStep = 5;
+
 type SoulBindingFormValues = {
   defaultSoulId?: string;
   bindings?: Record<string, string | undefined>;
 };
 
+type WorkspaceSetupMode = 'manual' | 'smart';
+
 type WorkspaceSetupFormValues = {
+  setupMode?: WorkspaceSetupMode;
   templateId?: string;
   title: string;
   description?: string;
@@ -2756,6 +2884,10 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [activationOpen, setActivationOpen] = useState(false);
   const [activationLoading, setActivationLoading] = useState(false);
   const [workspaceSetupOpen, setWorkspaceSetupOpen] = useState(false);
+  const [workspaceSetupDraftSession, setWorkspaceSetupDraftSession] = useState<WorkspaceSetupDraftSession | undefined>(undefined);
+  const [workspaceSetupDraftInput, setWorkspaceSetupDraftInput] = useState('');
+  const [workspaceSetupDraftLoading, setWorkspaceSetupDraftLoading] = useState(false);
+  const [workspaceSetupDraftApplied, setWorkspaceSetupDraftApplied] = useState(false);
   const [goalDefinitionOpen, setGoalDefinitionOpen] = useState(false);
   const [dodDefinitionOpen, setDoDDefinitionOpen] = useState(false);
   const [soulBindingEditorOpen, setSoulBindingEditorOpen] = useState(false);
@@ -2768,6 +2900,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [activationTracking, setActivationTracking] = useState(false);
   const [workspaceListReady, setWorkspaceListReady] = useState(false);
   const [setupStep, setSetupStep] = useState(0);
+  const [workspaceSetupMode, setWorkspaceSetupMode] = useState<WorkspaceSetupMode>('manual');
   const workspaceListRequestSeq = useRef(0);
   const workspaceContextRequestSeq = useRef(0);
   const currentWorkspaceIdRef = useRef<string | undefined>(undefined);
@@ -2781,6 +2914,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [workspaceDeleteForm] = Form.useForm<WorkspaceDeleteFormValues>();
   const [goalForm] = Form.useForm();
   const [dodForm] = Form.useForm();
+  const workspaceSetupTitle = Form.useWatch('title', workspaceForm);
 
   useEffect(() => {
     currentWorkspaceIdRef.current = workspaceId;
@@ -2889,6 +3023,19 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const stageBindingTags = soulBindingStages
     .filter((stage) => soulBindings?.bindings?.[stage])
     .map((stage) => `${soulBindingStageLabel(stage)}: ${soulNameById.get(soulBindings?.bindings?.[stage] || '') || soulBindings?.bindings?.[stage]}`);
+  const workspaceSetupStepLabels: Record<number, string> = {
+    0: '工作空间',
+    1: '目标',
+    2: '验收标准',
+    3: '执行人格',
+    4: '确认提交',
+    [workspaceSetupSmartDraftStep]: '智能向导'
+  };
+  const workspaceSetupFlow = workspaceSetupMode === 'smart' ? [0, workspaceSetupSmartDraftStep, 3, 4] : [0, 1, 2, 3, 4];
+  const workspaceSetupCurrentIndex = Math.max(0, workspaceSetupFlow.indexOf(setupStep));
+  const canGoPreviousWorkspaceSetupStep = workspaceSetupCurrentIndex > 0;
+  const canGoNextWorkspaceSetupStep = workspaceSetupCurrentIndex < workspaceSetupFlow.length - 1;
+  const canUseWorkspaceSetupDraft = Boolean(String(workspaceSetupTitle ?? '').trim());
 
   function clearWorkspaceContext() {
     setSnapshot(undefined);
@@ -3012,13 +3159,123 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     }
   };
 
+  const currentSetupDraftFromForms = () => workspaceSetupDraftFromForms(setupGoalForm.getFieldValue('text'), setupDoDForm.getFieldValue('items'));
+
+  const currentSetupDraftForGeneration = (session?: WorkspaceSetupDraftSession) => {
+    if (workspaceSetupDraftApplied) {
+      return currentSetupDraftFromForms();
+    }
+    return workspaceSetupDraftSession?.draft ?? session?.draft;
+  };
+
+  const clearWorkspaceSetupDraftSession = () => {
+    setWorkspaceSetupDraftSession(undefined);
+    setWorkspaceSetupDraftInput('');
+    setWorkspaceSetupDraftApplied(false);
+  };
+
+  const handleWorkspaceSetupFormValuesChange = (changedValues: Partial<WorkspaceSetupFormValues>) => {
+    if (changedValues.setupMode) {
+      const nextMode = changedValues.setupMode;
+      setWorkspaceSetupMode(nextMode);
+      const nextFlow = nextMode === 'smart' ? [0, workspaceSetupSmartDraftStep, 3, 4] : [0, 1, 2, 3, 4];
+      if (!nextFlow.includes(setupStep)) {
+        setSetupStep(0);
+      }
+      return;
+    }
+    if ('title' in changedValues || 'description' in changedValues || 'workingDirectory' in changedValues) {
+      setWorkspaceSetupDraftSession(undefined);
+      setWorkspaceSetupDraftApplied(false);
+    }
+  };
+
+  const ensureWorkspaceSetupDraftSession = async () => {
+    const values = workspaceForm.getFieldsValue();
+    if (
+      workspaceSetupDraftSession &&
+      workspaceSetupDraftSession.templateId === values.templateId &&
+      workspaceSetupDraftSession.workspace?.title === values.title &&
+      (workspaceSetupDraftSession.workspace?.description || '') === (values.description || '') &&
+      (workspaceSetupDraftSession.workspace?.workingDirectory || '') === (values.workingDirectory || '')
+    ) {
+      return workspaceSetupDraftSession;
+    }
+    if (!values.title?.trim()) {
+      throw new Error('请先填写工作空间标题');
+    }
+    const created = await workorchApi.createWorkspaceSetupDraftSession({
+      templateId: values.templateId,
+      title: values.title,
+      description: values.description,
+      workingDirectory: values.workingDirectory,
+      dialogLanguage: typeof navigator !== 'undefined' ? navigator.language : undefined
+    });
+    setWorkspaceSetupDraftSession(created);
+    return created;
+  };
+
+  const generateOrReviseWorkspaceSetupDraft = async () => {
+    const content = workspaceSetupDraftInput.trim();
+    if (!content && !workspaceSetupDraftSession) {
+      message.warning('请先输入需求描述');
+      return;
+    }
+    if (!content && !hasWorkspaceSetupDraftContent(workspaceSetupDraftSession?.draft)) {
+      message.warning('请先输入需求描述或补充信息');
+      return;
+    }
+    setWorkspaceSetupDraftLoading(true);
+    try {
+      const session = await ensureWorkspaceSetupDraftSession();
+      const values = workspaceForm.getFieldsValue();
+      const requestBody = {
+        templateId: values.templateId,
+        title: values.title,
+        description: values.description,
+        workingDirectory: values.workingDirectory,
+        draft: currentSetupDraftForGeneration(session),
+        dialogLanguage: typeof navigator !== 'undefined' ? navigator.language : undefined
+      };
+      const updated = content
+        ? await workorchApi.appendWorkspaceSetupDraftMessage(session.id, { ...requestBody, content })
+        : await workorchApi.regenerateWorkspaceSetupDraft(session.id, requestBody);
+      setWorkspaceSetupDraftSession(updated);
+      setWorkspaceSetupDraftApplied(false);
+      setWorkspaceSetupDraftInput('');
+      message.success(content ? 'Goal / DoD 草案已根据补充信息更新' : 'Goal / DoD 草案已重新生成');
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setWorkspaceSetupDraftLoading(false);
+    }
+  };
+
+  const applyWorkspaceSetupDraftToForms = () => {
+    const draft = workspaceSetupDraftSession?.draft;
+    if (!draft) {
+      message.warning('暂无可应用的草案');
+      return;
+    }
+    if (draft.goalText) {
+      setupGoalForm.setFieldsValue({ text: draft.goalText });
+    }
+    if (draft.doDItems?.length) {
+      setupDoDForm.setFieldsValue({ items: joinLines(draft.doDItems) });
+    }
+    setWorkspaceSetupDraftApplied(true);
+    message.success('已应用草案到目标和验收标准表单');
+  };
+
   const closeWorkspaceSetup = () => {
     setWorkspaceSetupOpen(false);
     setSetupStep(0);
+    setWorkspaceSetupMode('manual');
     workspaceForm.resetFields();
     setupGoalForm.resetFields();
     setupDoDForm.resetFields();
     setupSoulBindingsForm.resetFields();
+    clearWorkspaceSetupDraftSession();
   };
 
   const openWorkspaceSetup = async () => {
@@ -3034,6 +3291,8 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       setupGoalForm.resetFields();
       setupDoDForm.resetFields();
       setupSoulBindingsForm.resetFields();
+      setWorkspaceSetupMode('manual');
+      clearWorkspaceSetupDraftSession();
       setSetupStep(0);
       setWorkspaceSetupOpen(true);
     } catch (error) {
@@ -3044,6 +3303,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   };
 
   const applyWorkspaceTemplate = (templateID?: string) => {
+    clearWorkspaceSetupDraftSession();
     const template = workspaceTemplates.find((item) => item.id === templateID);
     if (!template) {
       setupGoalForm.resetFields();
@@ -3062,6 +3322,16 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const validateWorkspaceSetupStep = async (step: number) => {
     if (step === 0) {
       await workspaceForm.validateFields();
+      return;
+    }
+    if (step === workspaceSetupSmartDraftStep) {
+      if (workspaceSetupMode === 'smart') {
+        const goalText = String(setupGoalForm.getFieldValue('text') ?? '').trim();
+        const dodItems = setupDoDItems(setupDoDForm.getFieldValue('items'));
+        if (!workspaceSetupDraftApplied || !goalText || dodItems.length === 0) {
+          throw new Error('请先生成并应用 Goal 和 DoD 草案，或返回基础信息切换为手动填写');
+        }
+      }
       return;
     }
     if (step === 1) {
@@ -3083,14 +3353,22 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const goNextWorkspaceSetupStep = async () => {
     try {
       await validateWorkspaceSetupStep(setupStep);
-      setSetupStep((current) => Math.min(current + 1, 4));
+      setSetupStep((current) => {
+        const currentIndex = workspaceSetupFlow.indexOf(current);
+        const nextIndex = currentIndex >= 0 ? Math.min(currentIndex + 1, workspaceSetupFlow.length - 1) : 0;
+        return workspaceSetupFlow[nextIndex] ?? 0;
+      });
     } catch (error) {
       message.error(errorMessage(error));
     }
   };
 
   const goPreviousWorkspaceSetupStep = () => {
-    setSetupStep((current) => Math.max(current - 1, 0));
+    setSetupStep((current) => {
+      const currentIndex = workspaceSetupFlow.indexOf(current);
+      const previousIndex = currentIndex >= 0 ? Math.max(currentIndex - 1, 0) : 0;
+      return workspaceSetupFlow[previousIndex] ?? 0;
+    });
   };
 
   const submitWorkspaceSetup = async () => {
@@ -3105,7 +3383,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
       const goalValues = setupGoalForm.getFieldsValue();
       const dodValues = setupDoDForm.getFieldsValue();
       const soulBindingValues = setupSoulBindingsForm.getFieldsValue();
-      const workspace = await workorchApi.createWorkspace(workspaceValues.title, workspaceValues.description, workspaceValues.workingDirectory);
+      const workspace = await workorchApi.createWorkspace(workspaceValues.title, workspaceValues.description, workspaceValues.workingDirectory, workspaceValues.templateId);
       await workorchApi.defineGoal(workspace.id, goalValues.text);
       await workorchApi.defineDoD(workspace.id, setupDoDItems(dodValues.items));
       await workorchApi.updateWorkspaceSoulBindings(workspace.id, normalizeSoulBindingFormValues(soulBindingValues));
@@ -4037,30 +4315,34 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
         open={workspaceSetupOpen}
         confirmLoading={businessSubmitting}
         onCancel={closeWorkspaceSetup}
-        width={820}
+        width={1080}
         footer={[
           <Button key="cancel" onClick={closeWorkspaceSetup}>取消</Button>,
-          setupStep > 0 ? <Button key="previous" onClick={goPreviousWorkspaceSetupStep}>上一步</Button> : null,
-          setupStep < 4 ? <Button key="next" type="primary" onClick={() => void goNextWorkspaceSetupStep()}>下一步</Button> : null,
+          canGoPreviousWorkspaceSetupStep ? <Button key="previous" onClick={goPreviousWorkspaceSetupStep}>上一步</Button> : null,
+          canGoNextWorkspaceSetupStep ? <Button key="next" type="primary" onClick={() => void goNextWorkspaceSetupStep()}>下一步</Button> : null,
           setupStep === 4 ? <Button key="submit" type="primary" loading={businessSubmitting} onClick={() => void submitWorkspaceSetup()}>确认提交</Button> : null
         ].filter(Boolean)}
       >
         <Steps
-          current={setupStep}
+          current={workspaceSetupCurrentIndex}
           className="workorch-section"
-          items={[
-            { title: '工作空间' },
-            { title: '目标' },
-            { title: '验收标准' },
-            { title: '执行人格' },
-            { title: '确认提交' }
-          ]}
+          items={workspaceSetupFlow.map((step) => ({ title: workspaceSetupStepLabels[step] }))}
         />
         <Form
           form={workspaceForm}
           layout="vertical"
+          initialValues={{ setupMode: 'manual' }}
+          onValuesChange={handleWorkspaceSetupFormValuesChange}
           style={{ display: setupStep === 0 ? 'block' : 'none' }}
         >
+          <Form.Item name="setupMode" label="配置方式">
+            <Select
+              options={[
+                { value: 'manual', label: '手动填写 Goal / DoD' },
+                { value: 'smart', label: '智能生成 Goal / DoD' }
+              ]}
+            />
+          </Form.Item>
           <Form.Item name="templateId" label="工作空间模板（Workspace Template）">
             <Select
               allowClear
@@ -4079,6 +4361,115 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
             <Input placeholder="留空时自动使用 repository.dataDir/workspaces/工作空间 ID/working" />
           </Form.Item>
         </Form>
+        <div style={{ display: setupStep === workspaceSetupSmartDraftStep ? 'block' : 'none' }}>
+          <ProCard
+            title="智能草拟 Goal / DoD"
+            className="workorch-section workspace-draft-card"
+            extra={(
+              <Space size="small">
+                <Tag color={workspaceSetupDraftStateColor(workspaceSetupDraftSession?.state)}>{workspaceSetupDraftStateLabel(workspaceSetupDraftSession?.state)}</Tag>
+                {workspaceSetupDraftApplied ? <Tag color="green">已应用</Tag> : null}
+              </Space>
+            )}
+          >
+            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              <div className="workspace-draft-summary">
+                <div>
+                  <Typography.Text type="secondary">工作空间</Typography.Text>
+                  <Typography.Text strong>{workspaceForm.getFieldValue('title') || '待创建，最终确认提交后生成'}</Typography.Text>
+                </div>
+                <div>
+                  <Typography.Text type="secondary">模板</Typography.Text>
+                  <Typography.Text>{workspaceForm.getFieldValue('templateId') || '未选择'}</Typography.Text>
+                </div>
+                <div>
+                  <Typography.Text type="secondary">置信度</Typography.Text>
+                  <Typography.Text>{workspaceSetupDraftConfidenceLabel(workspaceSetupDraftSession?.draft?.confidence)}</Typography.Text>
+                </div>
+              </div>
+              {workspaceSetupDraftSession?.draft?.generationSummary || workspaceSetupDraftSession?.draft?.warnings?.length || workspaceSetupDraftSession?.draft?.clarifyingQuestions?.length ? (
+                <div className="workspace-draft-generation-status">
+                  {workspaceSetupDraftSession?.draft?.generationSummary ? (
+                    <Typography.Paragraph className="workspace-draft-generation-summary">
+                      {workspaceSetupDraftSession.draft.generationSummary}
+                    </Typography.Paragraph>
+                  ) : null}
+                  {hasWorkspaceSetupDraftInfoItems(workspaceSetupDraftSession?.draft?.clarifyingQuestions) ? (
+                    <div className="workspace-draft-warning-list">
+                      <Typography.Text strong>待澄清问题</Typography.Text>
+                      {workspaceSetupDraftInfoList(workspaceSetupDraftSession?.draft?.clarifyingQuestions)}
+                    </div>
+                  ) : null}
+                  {hasWorkspaceSetupDraftInfoItems(workspaceSetupDraftSession?.draft?.warnings) ? (
+                    <div className="workspace-draft-warning-list">
+                      <Typography.Text strong>注意事项</Typography.Text>
+                      {workspaceSetupDraftInfoList(workspaceSetupDraftSession?.draft?.warnings)}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              <div className="workspace-draft-grid">
+                <div className="workspace-draft-panel workspace-draft-dialog-panel">
+                  <Typography.Text strong>需求对话</Typography.Text>
+                  <Input.TextArea
+                    rows={6}
+                    value={workspaceSetupDraftInput}
+                    onChange={(event) => setWorkspaceSetupDraftInput(event.target.value)}
+                    placeholder="描述你希望这个工作空间完成什么；也可以继续补充约束、范围和验收要求"
+                  />
+                  <Space wrap>
+                    <Button type="primary" loading={workspaceSetupDraftLoading} disabled={!canUseWorkspaceSetupDraft} onClick={() => void generateOrReviseWorkspaceSetupDraft()}>
+                      {workspaceSetupDraftSession ? '生成/修订草案' : '生成草案'}
+                    </Button>
+                    <Button onClick={applyWorkspaceSetupDraftToForms} disabled={!workspaceSetupDraftReadyForApply(workspaceSetupDraftSession?.draft)}>
+                      应用到表单
+                    </Button>
+                  </Space>
+                  <div className="workspace-draft-message-list">
+                    {workspaceSetupDraftSession?.messages?.length ? (
+                      <List
+                        size="small"
+                        dataSource={workspaceSetupDraftSession.messages.slice(-6)}
+                        renderItem={(item) => (
+                          <List.Item>
+                            <List.Item.Meta
+                              title={workspaceSetupDraftMessageLabel(item.role)}
+                              description={<Typography.Paragraph className="workspace-draft-message-content">{item.content || '-'}</Typography.Paragraph>}
+                            />
+                          </List.Item>
+                        )}
+                      />
+                    ) : (
+                      <Typography.Paragraph type="secondary" className="workspace-draft-empty-text">
+                        草案生成只用于创建前澄清，不会自动创建工作空间；最终仍以表单里的 Goal 和 DoD 为准。
+                      </Typography.Paragraph>
+                    )}
+                  </div>
+                </div>
+                <div className="workspace-draft-panel workspace-draft-preview-panel">
+                  <div className="workspace-draft-preview-section">
+                    <Typography.Text strong>Goal 草案</Typography.Text>
+                    {workspaceSetupDraftTextBlock(workspaceSetupDraftSession?.draft?.goalText)}
+                  </div>
+                  <div className="workspace-draft-preview-section workspace-draft-preview-section-grow">
+                    <Typography.Text strong>DoD 草案</Typography.Text>
+                    {workspaceSetupDraftDoDList(workspaceSetupDraftSession?.draft?.doDItems)}
+                  </div>
+                </div>
+              </div>
+              {hasWorkspaceSetupDraftInfoItems(workspaceSetupDraftSession?.draft?.assumptions) ? (
+                <div className="workspace-draft-support-grid">
+                  {hasWorkspaceSetupDraftInfoItems(workspaceSetupDraftSession?.draft?.assumptions) ? (
+                    <div className="workspace-draft-support-section">
+                      <Typography.Text strong>采用假设</Typography.Text>
+                      {workspaceSetupDraftInfoList(workspaceSetupDraftSession?.draft?.assumptions)}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </Space>
+          </ProCard>
+        </div>
         <Form
           form={setupGoalForm}
           layout="vertical"

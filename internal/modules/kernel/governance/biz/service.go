@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -535,6 +537,9 @@ func inferMissingInfoAnswer(
 	if value := singleStringMapValue(ctxMap); value != "" {
 		return value, 0.9, "answer inferred from single ticket context value", evidenceRefs
 	}
+	if value, confidence, ok := structuredCandidateAnswer(ctxMap); ok {
+		return value, confidence, "answer inferred from structured ticket candidates", evidenceRefs
+	}
 
 	query := normalize(strings.Join([]string{question, reason}, " "))
 	if value, ok := findStructuredValueInText(query, goalText); ok {
@@ -562,6 +567,126 @@ func inferMissingInfoAnswer(
 		}
 	}
 	return "", 0.0, "", evidenceRefs
+}
+
+func structuredCandidateAnswer(input map[string]any) (string, float64, bool) {
+	if input == nil {
+		return "", 0, false
+	}
+	if boolFromMap(input, "humanRequired") ||
+		boolFromMap(input, "requiresHuman") ||
+		boolFromMap(input, "manualRequired") ||
+		len(stringSliceFromMap(input, "requiresHumanFields")) > 0 {
+		return "", 0, false
+	}
+	knownValues := stringMapFromMap(input, "knownValues")
+	candidateValues := stringMapFromMap(input, "candidateValues")
+	resolvedValues := stringMapFromMap(input, "resolvedValues")
+	missingFields := stringSliceFromMap(input, "missingFields")
+	confidenceByField := confidenceMapFromMap(input, "confidenceByField")
+	topConfidence, hasTopConfidence := confidenceValue(input["confidence"])
+
+	values := make(map[string]string, len(knownValues)+len(candidateValues)+len(resolvedValues))
+	for key, value := range knownValues {
+		values[key] = value
+	}
+	for key, value := range candidateValues {
+		values[key] = value
+	}
+	for key, value := range resolvedValues {
+		values[key] = value
+	}
+	if len(values) == 0 {
+		return "", 0, false
+	}
+	if len(missingFields) > 0 {
+		for _, field := range missingFields {
+			normalized := normalize(field)
+			if normalized == "" {
+				continue
+			}
+			if _, ok := mapValueCaseInsensitive(candidateValues, normalized); !ok {
+				if _, ok := mapValueCaseInsensitive(resolvedValues, normalized); !ok {
+					return "", 0, false
+				}
+			}
+		}
+	}
+
+	confidence := 1.0
+	confidenceSeen := false
+	for key := range candidateValues {
+		if value, ok := confidenceByField[normalize(key)]; ok {
+			confidence = minFloat(confidence, value)
+			confidenceSeen = true
+		}
+	}
+	for key := range resolvedValues {
+		if value, ok := confidenceByField[normalize(key)]; ok {
+			confidence = minFloat(confidence, value)
+			confidenceSeen = true
+		}
+	}
+	if !confidenceSeen {
+		if !hasTopConfidence {
+			return "", 0, false
+		}
+		confidence = topConfidence
+	}
+
+	answer := joinStructuredAnswer(values, append(missingFields, sortedMapKeys(values)...))
+	if answer == "" {
+		return "", 0, false
+	}
+	return answer, confidence, true
+}
+
+func joinStructuredAnswer(values map[string]string, preferredOrder []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	seen := map[string]bool{}
+	parts := make([]string, 0, len(values))
+	appendField := func(field string) {
+		key := normalize(field)
+		if key == "" || seen[key] {
+			return
+		}
+		value, ok := mapValueCaseInsensitive(values, key)
+		if !ok {
+			return
+		}
+		if value == "" {
+			return
+		}
+		seen[key] = true
+		parts = append(parts, strings.TrimSpace(field)+"="+value)
+	}
+	for _, key := range preferredOrder {
+		appendField(key)
+	}
+	for _, key := range sortedMapKeys(values) {
+		appendField(key)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func mapValueCaseInsensitive(input map[string]string, normalizedKey string) (string, bool) {
+	for key, value := range input {
+		if normalize(key) == normalizedKey {
+			return strings.TrimSpace(value), true
+		}
+	}
+	return "", false
+}
+
+func sortedMapKeys(input map[string]string) []string {
+	keys := make([]string, 0, len(input))
+	for key := range input {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func findStructuredValueInText(query string, text string) (string, bool) {
@@ -615,6 +740,9 @@ func singleStringMapValue(input map[string]any) string {
 	if input == nil {
 		return ""
 	}
+	if len(input) != 1 {
+		return ""
+	}
 	value := ""
 	for _, raw := range input {
 		text, ok := raw.(string)
@@ -631,6 +759,139 @@ func singleStringMapValue(input map[string]any) string {
 		value = text
 	}
 	return value
+}
+
+func stringMapFromMap(input map[string]any, key string) map[string]string {
+	ret := map[string]string{}
+	raw, ok := input[key]
+	if !ok || raw == nil {
+		return ret
+	}
+	switch typed := raw.(type) {
+	case map[string]any:
+		for k, v := range typed {
+			if value := stringifyScalar(v); value != "" {
+				ret[strings.TrimSpace(k)] = value
+			}
+		}
+	case map[string]string:
+		for k, v := range typed {
+			if value := strings.TrimSpace(v); value != "" {
+				ret[strings.TrimSpace(k)] = value
+			}
+		}
+	}
+	return ret
+}
+
+func confidenceMapFromMap(input map[string]any, key string) map[string]float64 {
+	ret := map[string]float64{}
+	raw, ok := input[key]
+	if !ok || raw == nil {
+		return ret
+	}
+	switch typed := raw.(type) {
+	case map[string]any:
+		for k, v := range typed {
+			if value, ok := confidenceValue(v); ok {
+				ret[normalize(k)] = value
+			}
+		}
+	case map[string]float64:
+		for k, v := range typed {
+			ret[normalize(k)] = v
+		}
+	}
+	return ret
+}
+
+func stringSliceFromMap(input map[string]any, key string) []string {
+	raw, ok := input[key]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch typed := raw.(type) {
+	case []string:
+		ret := make([]string, 0, len(typed))
+		for _, value := range typed {
+			if value = strings.TrimSpace(value); value != "" {
+				ret = append(ret, value)
+			}
+		}
+		return ret
+	case []any:
+		ret := make([]string, 0, len(typed))
+		for _, value := range typed {
+			if text := stringifyScalar(value); text != "" {
+				ret = append(ret, text)
+			}
+		}
+		return ret
+	}
+	return nil
+}
+
+func boolFromMap(input map[string]any, key string) bool {
+	raw, ok := input[key]
+	if !ok || raw == nil {
+		return false
+	}
+	switch typed := raw.(type) {
+	case bool:
+		return typed
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(typed))
+		return err == nil && parsed
+	}
+	return false
+}
+
+func confidenceValue(input any) (float64, bool) {
+	switch typed := input.(type) {
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case json.Number:
+		value, err := typed.Float64()
+		return value, err == nil
+	case string:
+		switch normalize(typed) {
+		case "high":
+			return 0.9, true
+		case "medium":
+			return 0.75, true
+		case "low":
+			return 0.5, true
+		default:
+			value, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+			return value, err == nil
+		}
+	}
+	return 0, false
+}
+
+func stringifyScalar(input any) string {
+	switch typed := input.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, bool, json.Number:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
+	return ""
+}
+
+func minFloat(a float64, b float64) float64 {
+	if b < a {
+		return b
+	}
+	return a
 }
 
 func stringFromMap(input map[string]any, key string) string {

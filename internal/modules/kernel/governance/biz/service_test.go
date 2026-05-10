@@ -207,6 +207,188 @@ func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 	}
 }
 
+func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	runRepo := memory.NewRunRepository()
+	goalRepo := memory.NewGoalRepository()
+	dodRepo := memory.NewDoDRepository()
+	memoryRepo := memory.NewMemoryItemRepository()
+	traceRepo := memory.NewAutoGovernanceTraceRepository()
+	approvalRepo := memory.NewApprovalRepository()
+
+	workspaceID := common.WorkspaceID("ws-structured-candidate")
+	runID := common.RunID("run-structured-candidate")
+	goalID := common.GoalID("goal-structured-candidate")
+	dodID := common.DoDID("dod-structured-candidate")
+	ticketID := common.TicketID("ticket-structured-candidate")
+
+	mustNoErr(t, goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "完成受治理查询"}))
+	mustNoErr(t, dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"参数完整后继续执行"}, State: common.DoDStateReady}))
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateRunning}))
+	mustNoErr(t, ticketRepo.Create(ctx, ticket(&ticketFixture{
+		id:          ticketID,
+		workspaceID: workspaceID,
+		runID:       runID,
+		kind:        "provide_missing_info",
+		question:    "请补充 source 和 target",
+		reason:      "缺少执行参数",
+		context: map[string]any{
+			"knownValues": map[string]any{
+				"source": "workspace",
+			},
+			"missingFields": []any{"target"},
+			"candidateValues": map[string]any{
+				"target": "artifact",
+			},
+			"confidenceByField": map[string]any{
+				"target": 0.93,
+			},
+		},
+		state: common.DecisionTicketStateOpen,
+	})))
+
+	var resolvedTicket common.TicketID
+	var resolvedPayload map[string]any
+	var resumedRun common.RunID
+	svc := NewService(Dependencies{
+		Tickets:              ticketRepo,
+		Resolutions:          resolutionRepo,
+		Approvals:            approvalRepo,
+		Runs:                 runRepo,
+		Goals:                goalRepo,
+		DoDs:                 dodRepo,
+		MemoryItems:          memoryRepo,
+		AutoGovernanceTraces: traceRepo,
+		EventHub:             hub,
+		ResolveDecision: func(_ context.Context, id common.TicketID, payload map[string]any) error {
+			resolvedTicket = id
+			resolvedPayload = cloneMap(payload)
+			return resolutionRepo.Create(context.Background(), &decisionmodel.Resolution{
+				ID:       common.ResolutionID("resolution-" + string(id) + "-auto-governance"),
+				TicketID: id,
+				Type:     "provide_missing_info",
+				Payload:  cloneMap(payload),
+			})
+		},
+		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
+		ResumeRun: func(_ context.Context, id common.RunID) error {
+			resumedRun = id
+			return nil
+		},
+		LoadConfig: testGovernanceConfig(true, 0.82, 3),
+	})
+	mustNoErr(t, svc.Start())
+	defer svc.Stop()
+
+	mustNoErr(t, hub.Publish(ctx, events.Envelope{
+		Topic:       events.TopicTicketCreated,
+		SubjectType: "ticket",
+		SubjectID:   string(ticketID),
+		WorkspaceID: string(workspaceID),
+		RunID:       string(runID),
+	}))
+
+	if resolvedTicket != ticketID {
+		t.Fatalf("resolved ticket = %s, want %s", resolvedTicket, ticketID)
+	}
+	answer, _ := resolvedPayload["answer"].(string)
+	if answer != "target=artifact, source=workspace" {
+		t.Fatalf("resolved answer = %q, want structured answer", answer)
+	}
+	if resumedRun != runID {
+		t.Fatalf("resumed run = %s, want %s", resumedRun, runID)
+	}
+	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"))
+	if err != nil {
+		t.Fatalf("get trace: %v", err)
+	}
+	if trace.Status != "resolved" || trace.Confidence != 0.93 {
+		t.Fatalf("trace = %+v, want resolved with candidate confidence", trace)
+	}
+}
+
+func TestServiceEscalatesTicketWhenStructuredCandidateRequiresHuman(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	runRepo := memory.NewRunRepository()
+	goalRepo := memory.NewGoalRepository()
+	dodRepo := memory.NewDoDRepository()
+	memoryRepo := memory.NewMemoryItemRepository()
+	traceRepo := memory.NewAutoGovernanceTraceRepository()
+	approvalRepo := memory.NewApprovalRepository()
+
+	workspaceID := common.WorkspaceID("ws-structured-human")
+	runID := common.RunID("run-structured-human")
+	goalID := common.GoalID("goal-structured-human")
+	dodID := common.DoDID("dod-structured-human")
+	ticketID := common.TicketID("ticket-structured-human")
+
+	mustNoErr(t, goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "处理目标"}))
+	mustNoErr(t, dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"确认后执行"}, State: common.DoDStateReady}))
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateRunning}))
+	mustNoErr(t, ticketRepo.Create(ctx, ticket(&ticketFixture{
+		id:          ticketID,
+		workspaceID: workspaceID,
+		runID:       runID,
+		kind:        "provide_missing_info",
+		question:    "请提供 target",
+		reason:      "目标参数缺少",
+		context: map[string]any{
+			"knownValues": map[string]any{
+				"target": "candidate",
+			},
+			"requiresHumanFields": []any{"target"},
+			"confidence":          "high",
+		},
+		state: common.DecisionTicketStateOpen,
+	})))
+
+	var resolveCount int
+	svc := NewService(Dependencies{
+		Tickets:              ticketRepo,
+		Resolutions:          memory.NewDecisionResolutionRepository(),
+		Approvals:            approvalRepo,
+		Runs:                 runRepo,
+		Goals:                goalRepo,
+		DoDs:                 dodRepo,
+		MemoryItems:          memoryRepo,
+		AutoGovernanceTraces: traceRepo,
+		EventHub:             hub,
+		ResolveDecision: func(context.Context, common.TicketID, map[string]any) error {
+			resolveCount++
+			return nil
+		},
+		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
+		ResumeRun:       func(context.Context, common.RunID) error { return nil },
+		LoadConfig:      testGovernanceConfig(true, 0.82, 3),
+	})
+	mustNoErr(t, svc.Start())
+	defer svc.Stop()
+
+	mustNoErr(t, hub.Publish(ctx, events.Envelope{
+		Topic:       events.TopicTicketCreated,
+		SubjectType: "ticket",
+		SubjectID:   string(ticketID),
+		WorkspaceID: string(workspaceID),
+		RunID:       string(runID),
+	}))
+
+	if resolveCount != 0 {
+		t.Fatalf("resolve count = %d, want 0", resolveCount)
+	}
+	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"))
+	if err != nil {
+		t.Fatalf("get trace: %v", err)
+	}
+	if trace.Status != "escalated" || trace.PolicyBlocked != "low_confidence" {
+		t.Fatalf("trace = %+v, want low confidence escalation", trace)
+	}
+}
+
 func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()

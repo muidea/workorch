@@ -122,6 +122,13 @@ type goalDoDQualityCheckResponse struct {
 	QualityCheck appservice.GoalDoDQualityCheck `json:"qualityCheck"`
 }
 
+type workspaceSetupDraftSessionResponse struct {
+	Service      string                     `json:"service"`
+	Backend      string                     `json:"backend,omitempty"`
+	DataRoot     string                     `json:"dataRoot,omitempty"`
+	DraftSession workspaceSetupDraftSession `json:"draftSession"`
+}
+
 type runInstanceResponse struct {
 	Service  string         `json:"service"`
 	Backend  string         `json:"backend,omitempty"`
@@ -417,6 +424,24 @@ type goalDoDQualityCheckRequest struct {
 	DoDItems []string `json:"doDItems,omitempty"`
 }
 
+type createWorkspaceSetupDraftSessionRequest struct {
+	TemplateID       string `json:"templateId,omitempty"`
+	Title            string `json:"title,omitempty"`
+	Description      string `json:"description,omitempty"`
+	WorkingDirectory string `json:"workingDirectory,omitempty"`
+	DialogLanguage   string `json:"dialogLanguage,omitempty"`
+}
+
+type appendWorkspaceSetupDraftMessageRequest struct {
+	TemplateID       string                         `json:"templateId,omitempty"`
+	Title            string                         `json:"title,omitempty"`
+	Description      string                         `json:"description,omitempty"`
+	WorkingDirectory string                         `json:"workingDirectory,omitempty"`
+	Content          string                         `json:"content"`
+	Draft            appservice.WorkspaceSetupDraft `json:"draft,omitempty"`
+	DialogLanguage   string                         `json:"dialogLanguage,omitempty"`
+}
+
 type errorResponse struct {
 	Error string `json:"error"`
 }
@@ -437,6 +462,7 @@ type updateDoDFunc func(context.Context, string, string, string, []string) (apps
 type readDoDFunc func(context.Context, string, string, string) (appservice.DoD, error)
 type listDoDsFunc func(context.Context, string, string, string) ([]appservice.DoD, error)
 type checkGoalDoDQualityFunc func(context.Context, string, string, appservice.GoalDoDQualityCheckCommand) (appservice.GoalDoDQualityCheck, error)
+type generateWorkspaceSetupDraftFunc func(context.Context, string, string, appservice.WorkspaceSetupDraftGenerationCommand) (appservice.WorkspaceSetupDraft, error)
 type createRunInstanceFunc func(context.Context, string, string, string, string, string, string) (appservice.Run, error)
 type readRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
 type readRunSnapshotFunc func(context.Context, string, string, string) (appservice.RunSnapshot, error)
@@ -520,6 +546,7 @@ type serverState struct {
 	readDoD                         readDoDFunc
 	listDoDs                        listDoDsFunc
 	checkGoalDoDQuality             checkGoalDoDQualityFunc
+	generateWorkspaceSetupDraft     generateWorkspaceSetupDraftFunc
 	createRun                       createRunInstanceFunc
 	readRun                         readRunInstanceFunc
 	readRunSnapshot                 readRunSnapshotFunc
@@ -591,6 +618,8 @@ type serverState struct {
 	runSnapshotCache                map[string]cachedRunSnapshot
 	runSnapshotInflight             map[string]*runSnapshotInflight
 	sharedSession                   *appservice.RuntimeSession
+	workspaceSetupDraftMu           sync.Mutex
+	workspaceSetupDraftSessions     map[string]*workspaceSetupDraftSession
 }
 
 type cachedRunSnapshot struct {
@@ -1844,6 +1873,7 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 }
 
 func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState) {
+	registerWorkspaceSetupDraftRoutes(router, state)
 	router.AddHandler("/api/v1/workorch/workspaces", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		state.metrics.workspaceCreateRequests.Add(1)
@@ -2635,6 +2665,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		readDoD:                         defaultReadDoD,
 		listDoDs:                        defaultListDoDs,
 		checkGoalDoDQuality:             defaultCheckGoalDoDQuality,
+		generateWorkspaceSetupDraft:     defaultGenerateWorkspaceSetupDraft,
 		createRun:                       defaultCreateRun,
 		readRun:                         defaultReadRun,
 		readRunSnapshot:                 defaultReadRunSnapshot,
@@ -2695,6 +2726,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		updateServerConfiguration:       appservice.UpdateServerConfiguration,
 		updateLLMConfiguration:          appservice.UpdateLLMConfiguration,
 		updateWebSearchConfiguration:    appservice.UpdateWebSearchConfiguration,
+		workspaceSetupDraftSessions:     map[string]*workspaceSetupDraftSession{},
 	}
 	state.configureApplicationRuntimeSession()
 	state.configureSharedMemorySession()
@@ -2897,6 +2929,15 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.CheckGoalDoDQualityWithSession(ctx, session, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.generateWorkspaceSetupDraft = func(ctx context.Context, _, _ string, cmd appservice.WorkspaceSetupDraftGenerationCommand) (appservice.WorkspaceSetupDraft, error) {
+		var ret appservice.WorkspaceSetupDraft
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.GenerateWorkspaceSetupDraftWithSession(ctx, session, cmd, nil)
 			return err
 		})
 		return ret, err

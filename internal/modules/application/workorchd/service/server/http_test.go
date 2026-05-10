@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1279,6 +1280,161 @@ func TestWorkspaceCreateEndpointReturnsCreatedWorkspace(t *testing.T) {
 		created.Workspace.WorkingDirectory != "workspaces/ws-http" ||
 		created.Workspace.State != "active" {
 		t.Fatalf("created workspace = %+v, want ws-http/http workspace/workspaces/ws-http/active", created.Workspace)
+	}
+}
+
+func TestWorkspaceSetupDraftSessionSupportsMultiTurnDraft(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state.listWorkspaceTemplates = func(context.Context, string, string) ([]appservice.WorkspaceTemplate, error) {
+		return []appservice.WorkspaceTemplate{{
+			ID:       "generic-template",
+			Name:     "Generic Template",
+			GoalText: "Template goal",
+			DoDItems: []string{"Template DoD"},
+		}}, nil
+	}
+	generateCalls := 0
+	state.generateWorkspaceSetupDraft = func(_ context.Context, _, _ string, cmd appservice.WorkspaceSetupDraftGenerationCommand) (appservice.WorkspaceSetupDraft, error) {
+		generateCalls++
+		if cmd.TemplateID != "generic-template" || len(cmd.Messages) == 0 {
+			t.Fatalf("draft command = %+v, want template and user messages", cmd)
+		}
+		if generateCalls == 1 && cmd.CurrentDraft.GoalText != "Template goal" {
+			t.Fatalf("first draft current draft = %+v, want template draft baseline", cmd.CurrentDraft)
+		}
+		if generateCalls == 2 {
+			if cmd.CurrentDraft.GoalText != "Generated goal from first requirement" {
+				t.Fatalf("second draft current draft = %+v, want previous generated draft", cmd.CurrentDraft)
+			}
+			if len(cmd.Messages) != 3 || cmd.Messages[1].Role != "assistant" {
+				t.Fatalf("second draft messages = %+v, want full multi-turn history with assistant draft", cmd.Messages)
+			}
+		}
+		return appservice.WorkspaceSetupDraft{
+			GoalText:          "Generated goal from " + cmd.Messages[len(cmd.Messages)-1].Content,
+			GenerationSummary: "Draft revised from current context",
+			DoDItems: []string{`
+### Acceptance
+- [ ] **Group**:
+- [ ] first item
+- [ ] second item
+`},
+			Confidence: "high",
+		}, nil
+	}
+	handler := newMuxWithState(state)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspace-setup-draft-sessions", strings.NewReader(`{"templateId":"generic-template","title":"draft workspace"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201, body=%s", createRec.Code, createRec.Body.String())
+	}
+	var created workspaceSetupDraftSessionResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal created draft session: %v", err)
+	}
+	if created.DraftSession.ID == "" || created.DraftSession.Draft.GoalText != "Template goal" {
+		t.Fatalf("created draft session = %+v, want template draft", created.DraftSession)
+	}
+
+	msgReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspace-setup-draft-sessions/"+created.DraftSession.ID+"/messages", strings.NewReader(`{"content":"first requirement"}`))
+	msgReq.Header.Set("Content-Type", "application/json")
+	msgRec := httptest.NewRecorder()
+	handler.ServeHTTP(msgRec, msgReq)
+	if msgRec.Code != http.StatusOK {
+		t.Fatalf("message status = %d, want 200, body=%s", msgRec.Code, msgRec.Body.String())
+	}
+	var updated workspaceSetupDraftSessionResponse
+	if err := json.Unmarshal(msgRec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("unmarshal updated draft session: %v", err)
+	}
+	wantItems := []string{"Acceptance / Group： first item", "Acceptance / Group： second item"}
+	if updated.DraftSession.State != "draft_ready" ||
+		updated.DraftSession.Draft.GoalText != "Generated goal from first requirement" ||
+		len(updated.DraftSession.Messages) != 2 ||
+		!reflect.DeepEqual(updated.DraftSession.Draft.DoDItems, wantItems) {
+		t.Fatalf("updated draft session = %+v, want normalized multi-turn draft", updated.DraftSession)
+	}
+	if !strings.Contains(updated.DraftSession.Messages[1].Content, "DoD:") {
+		t.Fatalf("assistant message = %q, want DoD content for future turns", updated.DraftSession.Messages[1].Content)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspace-setup-draft-sessions/"+created.DraftSession.ID+"/messages", strings.NewReader(`{"content":"second requirement"}`))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("second message status = %d, want 200, body=%s", secondRec.Code, secondRec.Body.String())
+	}
+	var second workspaceSetupDraftSessionResponse
+	if err := json.Unmarshal(secondRec.Body.Bytes(), &second); err != nil {
+		t.Fatalf("unmarshal second draft session: %v", err)
+	}
+	if second.DraftSession.Draft.GoalText != "Generated goal from second requirement" || len(second.DraftSession.Messages) != 4 {
+		t.Fatalf("second draft session = %+v, want revised draft with full history", second.DraftSession)
+	}
+	if second.DraftSession.Draft.GenerationSummary == "" {
+		t.Fatalf("second draft = %+v, want generation summary for display", second.DraftSession.Draft)
+	}
+}
+
+func TestWorkspaceSetupDraftMessageCanRestoreTemplateContext(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state.listWorkspaceTemplates = func(context.Context, string, string) ([]appservice.WorkspaceTemplate, error) {
+		return []appservice.WorkspaceTemplate{{
+			ID:       "generic-template",
+			Name:     "Generic Template",
+			GoalText: "Template goal",
+			DoDItems: []string{"Template DoD"},
+		}}, nil
+	}
+	state.generateWorkspaceSetupDraft = func(_ context.Context, _, _ string, cmd appservice.WorkspaceSetupDraftGenerationCommand) (appservice.WorkspaceSetupDraft, error) {
+		if cmd.TemplateID != "generic-template" {
+			t.Fatalf("draft command template = %q, want restored template", cmd.TemplateID)
+		}
+		if cmd.CurrentDraft.GoalText != "Template goal" || !reflect.DeepEqual(cmd.CurrentDraft.DoDItems, []string{"Template DoD"}) {
+			t.Fatalf("draft command current draft = %+v, want restored template draft", cmd.CurrentDraft)
+		}
+		if len(cmd.CurrentDraft.ClarifyingQuestions) != 0 {
+			t.Fatalf("draft command current draft = %+v, want stale clarifications cleared before revision", cmd.CurrentDraft)
+		}
+		return appservice.WorkspaceSetupDraft{ClarifyingQuestions: []string{"Need more details"}}, nil
+	}
+	handler := newMuxWithState(state)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspace-setup-draft-sessions", strings.NewReader(`{"title":"draft workspace"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201, body=%s", createRec.Code, createRec.Body.String())
+	}
+	var created workspaceSetupDraftSessionResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal created draft session: %v", err)
+	}
+
+	body := `{"templateId":"generic-template","title":"draft workspace","draft":{"clarifyingQuestions":["old question"]},"content":"new requirement"}`
+	msgReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspace-setup-draft-sessions/"+created.DraftSession.ID+"/messages", strings.NewReader(body))
+	msgReq.Header.Set("Content-Type", "application/json")
+	msgRec := httptest.NewRecorder()
+	handler.ServeHTTP(msgRec, msgReq)
+	if msgRec.Code != http.StatusOK {
+		t.Fatalf("message status = %d, want 200, body=%s", msgRec.Code, msgRec.Body.String())
+	}
+	var updated workspaceSetupDraftSessionResponse
+	if err := json.Unmarshal(msgRec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("unmarshal updated draft session: %v", err)
+	}
+	if updated.DraftSession.TemplateID != "generic-template" ||
+		updated.DraftSession.Draft.GoalText != "Template goal" ||
+		!reflect.DeepEqual(updated.DraftSession.Draft.DoDItems, []string{"Template DoD"}) {
+		t.Fatalf("updated draft session = %+v, want restored template goal and DoD", updated.DraftSession)
+	}
+	if len(updated.DraftSession.Draft.ClarifyingQuestions) == 0 {
+		t.Fatalf("updated draft = %+v, want clarification retained", updated.DraftSession.Draft)
 	}
 }
 

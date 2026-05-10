@@ -33,6 +33,37 @@ func TestBuildProviderPromptMessagesUsesMultiTurnStructure(t *testing.T) {
 	}
 }
 
+func TestBuildProviderPromptMessagesUsesStructuredJSONPromptForNonDecisionSchema(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		Kind:           "workspace/setup_draft",
+		Model:          "model",
+		Schema:         "workorch.workspaceSetupDraft.v1",
+		DialogLanguage: "zh-CN",
+		Input: map[string]any{
+			"instructions": []any{"Generate a draft"},
+			"outputSchema": map[string]any{
+				"properties": map[string]any{"goalText": map[string]any{"type": "string"}},
+			},
+		},
+	}
+	build := buildProviderPromptMessages(req)
+	joined := ""
+	for _, item := range build.Messages {
+		joined += "\n" + item.Content
+	}
+	if !strings.Contains(joined, "workorch.workspaceSetupDraft.v1") {
+		t.Fatalf("prompt missing requested schema, joined=%s", joined)
+	}
+	if strings.Contains(joined, "LLMExecutionDecision contract") ||
+		strings.Contains(joined, "Plan the next workspace execution step") ||
+		strings.Contains(joined, "completionState must be one of") {
+		t.Fatalf("non-decision prompt contains execution decision contract, joined=%s", joined)
+	}
+	if !strings.Contains(joined, "Do not return workorch.llmExecutionDecision.v1 fields") {
+		t.Fatalf("non-decision prompt missing schema isolation guidance, joined=%s", joined)
+	}
+}
+
 func TestBuildProviderPromptMessagesProtectsGoalAndNormalizesOtherSections(t *testing.T) {
 	rawGoal := "**Raw Goal**\n\n- item 1"
 	req := llmmodels.ProviderRequest{

@@ -219,6 +219,24 @@ Auto Governance Agent 调用 LLM 时必须使用结构化上下文。
 }
 ```
 
+Ticket 自动补全不从自然语言 Goal/DoD 中猜测业务字段。LLM 或模板侧需要在 `requiredDecision.context` 中提供通用结构化证据，core 只消费这些中立字段：
+
+```json
+{
+  "knownValues": {"source": "workspace"},
+  "missingFields": ["target"],
+  "candidateValues": {"target": "artifact"},
+  "confidenceByField": {"target": 0.92},
+  "requiresHumanFields": []
+}
+```
+
+- `knownValues` 表示已确认信息。
+- `missingFields` 表示当前 ticket 请求补齐的字段。
+- `candidateValues` 表示可由 LLM/模板上下文给出的候选值。
+- `confidenceByField` 或顶层 `confidence` 达到系统阈值时，core 才允许自动回答。
+- `requiresHumanFields`、`humanRequired`、`manualRequired` 出现时，core 必须升级人工处理。
+
 ## DoD 约束
 
 自动处理前必须判断当前 Ticket / Approval 是否仍服务于当前 Goal / DoD。
@@ -412,3 +430,4 @@ TUI 本地模式继续通过 EventHub 获取刷新信号，不能使用 HTTP cli
 | 2026-05-06 | 第四批代码收口：完成 AG-10/AG-11。Decision/Approval API 新增 `autoGovernance` 摘要并在 Web 决策/审批视图展示；TUI 接入 `/governance/auto/*` 事件并输出 compact 状态；补齐 runtime initiator 导出 `AutoGovernanceTraces`，并通过 `go test ./...` 与 console 前端构建验证。 |
 | 2026-05-06 | 第五批代码收口：完成 AG-13/AG-14。新增 Memory source+type 写入白名单与敏感文本拦截；运行期 `memoryWrites` 仅保留长期偏好与确认后的项目约定；补齐预算（重复 prompt）单测与 `scripts/verify-auto-governance-ticket-approval.sh` 验收脚本，并已在本地最新 `workorch --server`（127.0.0.1:18080）完成通过验证。 |
 | 2026-05-06 | 本轮收口复验：执行 `go test ./internal/pkg/workorchconfig ./internal/modules/kernel/governance/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorch/service/tui ./internal/pkg/events ./internal/pkg/repository/... -count=1`，并在本地服务（127.0.0.1:18080）运行 `WORKORCH_LLM_VERIFY_BASE_URL=http://127.0.0.1:18080 ./scripts/verify-auto-governance-ticket-approval.sh` 通过；将 AG-02/05/06/07/08/09/10/11/12 状态升级为 `verified`。 |
+| 2026-05-09 | 针对 `ws-9da22d2b5f3aec24` ticket 无法自动补全问题完成收口：默认 file/container 配置显式启用 autoTicket/autoApproval；LLM decision contract 要求 `requiredDecision.context` 携带中立结构化候选证据；governance core 新增 `knownValues/missingFields/candidateValues/confidenceByField/requiresHumanFields` 通用消费逻辑，并保留自然语言不猜测的人工升级路径。已通过 `go test ./... -count=1` 与 `scripts/verify-boundary-contract.sh`。 |

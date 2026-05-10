@@ -260,6 +260,42 @@ export type WorkspaceTemplate = {
   soulBindings?: Record<string, string>;
 };
 
+export type WorkspaceSetupDraftWorkspace = {
+  title?: string;
+  description?: string;
+  workingDirectory?: string;
+};
+
+export type WorkspaceSetupDraftMessage = {
+  role: string;
+  content: string;
+};
+
+export type WorkspaceSetupDraft = {
+  goalText?: string;
+  doDItems?: string[];
+  assumptions?: string[];
+  clarifyingQuestions?: string[];
+  warnings?: string[];
+  confidence?: string;
+  needsClarification?: boolean;
+  generationSummary?: string;
+  templateContextUsed?: boolean;
+  previousDraftApplied?: boolean;
+};
+
+export type WorkspaceSetupDraftSession = {
+  id: string;
+  templateId?: string;
+  workspace?: WorkspaceSetupDraftWorkspace;
+  messages?: WorkspaceSetupDraftMessage[];
+  draft?: WorkspaceSetupDraft;
+  state: string;
+  dialogLanguage?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Skill = {
   id: string;
   name: string;

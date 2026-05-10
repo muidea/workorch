@@ -26,3 +26,20 @@ apiKey = ""
 model = ""
 timeout = "60s"
 disabled = false
+
+[governance.autoTicket]
+enabled = true
+minConfidence = 0.82
+maxPerRun = 5
+
+[governance.autoApproval]
+enabled = true
+minConfidence = 0.9
+maxPerRun = 3
+allowReadOnly = true
+allowWorkspaceWrite = false
+requireHumanFor = ["secret_access", "external_write", "destructive_operation", "production_operation"]
+
+[governance.budget]
+maxConsecutiveFailures = 2
+maxRepeatedSamePrompt = 1

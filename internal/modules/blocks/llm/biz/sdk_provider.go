@@ -155,7 +155,7 @@ func (p *OpenAIProvider) chatParams(request llmmodels.ProviderRequest) openai.Ch
 		}
 	}
 	if len(chatMessages) == 0 {
-		chatMessages = append(chatMessages, openai.SystemMessage(systemPrompt()), openai.UserMessage(userPrompt(request)))
+		chatMessages = append(chatMessages, openai.SystemMessage(systemPromptForRequest(request)), openai.UserMessage(userPrompt(request)))
 	}
 	return openai.ChatCompletionNewParams{
 		Messages:    chatMessages,
@@ -289,7 +289,7 @@ func (p *AnthropicProvider) messageParams(request llmmodels.ProviderRequest) ant
 		Model:       anthropic.Model(p.config.Model),
 		Temperature: anthropic.Float(0),
 		System: []anthropic.TextBlockParam{{
-			Text: systemPrompt(),
+			Text: systemPromptForRequest(request),
 		}},
 	}
 }

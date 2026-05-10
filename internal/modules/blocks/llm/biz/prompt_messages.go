@@ -41,7 +41,7 @@ func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerProm
 			ret.Messages = append(ret.Messages, providerPromptMessage{Role: role, Content: content})
 		}
 		if len(ret.Messages) == 0 || normalizedPromptRole(ret.Messages[0].Role) != "system" {
-			ret.Messages = append([]providerPromptMessage{{Role: "system", Content: systemPrompt()}}, ret.Messages...)
+			ret.Messages = append([]providerPromptMessage{{Role: "system", Content: systemPromptForRequest(request)}}, ret.Messages...)
 		}
 		if len(ret.Messages) == 1 {
 			ret.Messages = append(ret.Messages, providerPromptMessage{Role: "user", Content: userPrompt(request)})
@@ -51,7 +51,7 @@ func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerProm
 
 	build := providerPromptMessageBuildResult{
 		Messages: []providerPromptMessage{
-			{Role: "system", Content: systemPrompt()},
+			{Role: "system", Content: systemPromptForRequest(request)},
 		},
 	}
 	appendSection := func(id, role, policy, content string) {
@@ -80,11 +80,7 @@ func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerProm
 	}
 
 	appendSection("request-intent", "user", "normalize_allowed", requestIntentPrompt(request))
-	appendSection("language-and-contract", "user", "normalize_allowed", strings.Join([]string{
-		dialogLanguageInstruction(request),
-		decisionContractPrompt(),
-		capabilityContractPrompt(request),
-	}, "\n\n"))
+	appendSection("language-and-contract", "user", "normalize_allowed", languageAndContractPrompt(request))
 	appendSection("workspace-run", "user", "normalize_allowed", marshalPromptSection("Workspace and run context", map[string]any{
 		"workspaceId": request.WorkspaceID,
 		"runId":       request.RunID,
@@ -161,6 +157,15 @@ func protectedPromptSections(request llmmodels.ProviderRequest) []string {
 }
 
 func requestIntentPrompt(request llmmodels.ProviderRequest) string {
+	if !isDecisionSchemaRequest(request) {
+		if request.Repair != nil {
+			return strings.Join([]string{
+				fmt.Sprintf("Repair the invalid JSON output for schema %s.", schemaNameForPrompt(request)),
+				"Return only the corrected JSON object. Do not change the business intent except where required to satisfy the requested schema.",
+			}, "\n")
+		}
+		return fmt.Sprintf("Generate or revise the requested structured JSON for kind %s.", kindNameForPrompt(request))
+	}
 	if request.Repair != nil {
 		return strings.Join([]string{
 			"Repair the invalid workorch.llmExecutionDecision.v1 json output.",
@@ -168,6 +173,60 @@ func requestIntentPrompt(request llmmodels.ProviderRequest) string {
 		}, "\n")
 	}
 	return "Plan the next workspace execution step using the multi-turn context below."
+}
+
+func languageAndContractPrompt(request llmmodels.ProviderRequest) string {
+	if isDecisionSchemaRequest(request) {
+		return strings.Join([]string{
+			dialogLanguageInstruction(request),
+			decisionContractPrompt(),
+			capabilityContractPrompt(request),
+		}, "\n\n")
+	}
+	return strings.Join([]string{
+		structuredJSONLanguageInstruction(request),
+		structuredJSONContractPrompt(request),
+	}, "\n\n")
+}
+
+func isDecisionSchemaRequest(request llmmodels.ProviderRequest) bool {
+	schema := strings.TrimSpace(request.Schema)
+	return schema == "" || schema == decisionSchemaName
+}
+
+func schemaNameForPrompt(request llmmodels.ProviderRequest) string {
+	schema := strings.TrimSpace(request.Schema)
+	if schema == "" {
+		return "the requested output schema"
+	}
+	return schema
+}
+
+func kindNameForPrompt(request llmmodels.ProviderRequest) string {
+	kind := strings.TrimSpace(request.Kind)
+	if kind == "" {
+		return "structured_json"
+	}
+	return kind
+}
+
+func structuredJSONLanguageInstruction(request llmmodels.ProviderRequest) string {
+	language := strings.TrimSpace(request.DialogLanguage)
+	if language == "" {
+		language = "English"
+	}
+	return fmt.Sprintf("Conversation language: %s. Use this language for user-facing text values. Keep JSON keys, enum values, identifiers, file paths, schema names, and evidence refs unchanged.", language)
+}
+
+func structuredJSONContractPrompt(request llmmodels.ProviderRequest) string {
+	return strings.Join([]string{
+		fmt.Sprintf("Required output JSON must match schema %s.", schemaNameForPrompt(request)),
+		"Return exactly one JSON object. Do not wrap it in markdown.",
+		"Follow input.instructions and input.outputSchema when present.",
+		"Use request.input.request, message history, template context, currentDraft, and any other supplied input fields as the source of truth.",
+		"Do not return workorch.llmExecutionDecision.v1 fields such as completionState, requiredDecision, requiredApproval, executionGraph, patchRequests, shellCommands, mcpToolCalls, memoryWrites, or dodAssessment unless the requested output schema explicitly defines them.",
+		"When revising a draft after a new user message, do not repeat stale clarifying questions. Either revise the draft, return no clarifyingQuestions, or ask only still-missing specific questions.",
+	}, "\n")
 }
 
 func goalPromptSection(input map[string]any) string {
@@ -235,6 +294,25 @@ func executionSignalsPromptSection(request llmmodels.ProviderRequest) string {
 }
 
 func currentActionPromptSection(request llmmodels.ProviderRequest) string {
+	if !isDecisionSchemaRequest(request) {
+		if request.Repair != nil {
+			return marshalPromptSection("Current Requested Action", map[string]any{
+				"type": "repair_structured_json",
+				"requirements": []string{
+					"Return one valid JSON object matching " + schemaNameForPrompt(request),
+					"Keep the original structured output intent unless schema correction requires a change",
+				},
+			})
+		}
+		return marshalPromptSection("Current Requested Action", map[string]any{
+			"type": "generate_structured_json",
+			"requirements": []string{
+				"Match " + schemaNameForPrompt(request),
+				"Use the supplied input instructions and output schema",
+				"Do not emit execution-planning fields unless explicitly requested by the output schema",
+			},
+		})
+	}
 	if request.Repair != nil {
 		return marshalPromptSection("Current Requested Action", map[string]any{
 			"type": "repair_invalid_json",

@@ -448,10 +448,44 @@ func systemPrompt() string {
 	}, "\n")
 }
 
+func systemPromptForRequest(request llmmodels.ProviderRequest) string {
+	if isDecisionSchemaRequest(request) {
+		return systemPrompt()
+	}
+	return strings.Join([]string{
+		"You are a WorkOrch structured JSON generation assistant.",
+		fmt.Sprintf("Return only one JSON object matching schema %s.", schemaNameForPrompt(request)),
+		"Do not wrap the JSON in markdown.",
+		"Follow the provider request input instructions and output schema.",
+		"Do not plan runtime execution or return workorch.llmExecutionDecision.v1 fields unless the requested schema explicitly defines them.",
+		"The word json is intentional because some providers require it when response_format is json_object.",
+	}, "\n")
+}
+
 func userPrompt(request llmmodels.ProviderRequest) string {
 	body, err := json.MarshalIndent(request, "", "  ")
 	if err != nil {
 		body = []byte("{}")
+	}
+	if !isDecisionSchemaRequest(request) {
+		if request.Repair != nil {
+			return strings.Join([]string{
+				fmt.Sprintf("Repair the invalid JSON output for schema %s.", schemaNameForPrompt(request)),
+				"Return only the corrected JSON object. Do not change the business intent except where required to satisfy the requested schema.",
+				structuredJSONLanguageInstruction(request),
+				structuredJSONContractPrompt(request),
+				"",
+				"Invalid provider request and repair context:",
+				string(body),
+			}, "\n")
+		}
+		return strings.Join([]string{
+			fmt.Sprintf("Generate or revise structured JSON for kind %s.", kindNameForPrompt(request)),
+			structuredJSONLanguageInstruction(request),
+			structuredJSONContractPrompt(request),
+			"",
+			string(body),
+		}, "\n")
 	}
 	if request.Repair != nil {
 		return strings.Join([]string{
@@ -492,6 +526,8 @@ func decisionContractPrompt() string {
 		"- executionGraph.nodes kind values must be selected from runtimeCapabilities.blockKinds only.",
 		"- Sensitive paths and large patches require Approval before apply. After approval is granted, include the approved approvalId in patch/apply or patchRequests.",
 		"- Use shellCommands, patchRequests, mcpToolCalls, requiredDecision, requiredApproval, memoryWrites, or dodAssessment as appropriate.",
+		"- For blocked_on_decision, include requiredDecision.context whenever known values, missing fields, or safe candidate values exist. Use neutral structured keys: knownValues, missingFields, candidateValues, confidenceByField, requiresHumanFields. Do not put domain-specific policy in field names beyond the fields needed by the current task.",
+		"- Auto governance may resolve only high-confidence structured candidates. Put fields that still require explicit human input in requiresHumanFields instead of guessing.",
 		"- Top-level patchRequests are immediate patch side effects of the current LLM step and may use only patchType, targetRef, content, diff, summary, baseHash, and approvalId. patchType must be file_write or unified_diff. Do not include an operation field.",
 		"- Do not use patch/apply or patchRequests to create report-only deliverables under delivery/, .workorch-data/, or other WorkOrch-managed artifact paths. Do not write governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md into the workspace. For final user-facing results, place the result in dodAssessment and let the runtime record artifacts.",
 		"- The effective Goal and DoD in input.executionContext are authoritative. Treat explicit constraints in them as hard constraints. Do not continue a previous plan, tool choice, validation command, or assumption that conflicts with the current Goal, DoD, or resolved governance decisions.",
@@ -508,7 +544,7 @@ func decisionContractPrompt() string {
 		"- Do not include workspaceId, runId, stepId, schema, traceRefs, config, or any unknown top-level field in the decision JSON.",
 		"Minimal examples:",
 		`{"completionState":"continue","executionGraph":{"nodes":[{"id":"inspect","kind":"shell/command","input":{"command":"ls","args":["-la"]}},{"id":"test","kind":"shell/command","dependsOn":["inspect"],"input":{"command":"go","args":["test","./..."]}}]}}`,
-		`{"completionState":"blocked_on_decision","requiredDecision":{"reason":"missing product choice","decisionKind":"provide_missing_info","question":"Which runtime adapter should be used?"}}`,
+		`{"completionState":"blocked_on_decision","requiredDecision":{"reason":"missing execution target","decisionKind":"provide_missing_info","question":"Please provide target.","context":{"knownValues":{"source":"workspace"},"missingFields":["target"],"candidateValues":{"target":"artifact"},"confidenceByField":{"target":0.92}}}}`,
 		`{"completionState":"completed","dodAssessment":{"satisfied":true,"summary":"Tests passed and the requested artifact is ready.","goalOutcome":"The requested implementation is complete.","implementationSummary":"Implemented the requested behavior.","verificationSummary":"go test ./... passed.","items":[{"item":"tests pass","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}],"knownLimitations":[],"residualRisks":[],"nextActions":["Review the generated artifacts."]}}`,
 	}, "\n")
 }
