@@ -27,7 +27,11 @@ import (
 
 var structuredValuePattern = regexp.MustCompile(`([A-Za-z0-9_\-\p{Han}]{2,32})\s*[:：=]\s*([^\s,，。;；]+)`)
 
-type ResolveDecisionFunc func(context.Context, common.TicketID, map[string]any) error
+const (
+	recoveryPolicyRuntimeRepairExhausted = "runtime_repair_exhausted_requires_strategy"
+)
+
+type ResolveDecisionFunc func(context.Context, common.TicketID, string, map[string]any) error
 type ResolveApprovalFunc func(context.Context, common.ApprovalID) error
 type ResumeRunFunc func(context.Context, common.RunID) error
 
@@ -108,6 +112,7 @@ func (s *Service) Start() error {
 		return nil
 	})
 	s.unsubscribes = []func(){unsubTicket, unsubApproval, unsubRunState}
+	s.reconcileBlockedRuns(context.Background())
 	return nil
 }
 
@@ -129,6 +134,17 @@ func (s *Service) processTicketCreated(ctx context.Context, envelope events.Enve
 	}
 	ticketID := common.TicketID(strings.TrimSpace(envelope.SubjectID))
 	if ticketID == "" {
+		return
+	}
+	s.processPendingTicket(ctx, ticketID)
+}
+
+func (s *Service) processPendingTicket(ctx context.Context, ticketID common.TicketID) {
+	cfg, err := s.loadConfig()
+	if err != nil || !isEnabled(cfg.Governance.AutoTicket.Enabled) {
+		return
+	}
+	if ticketID == "" || s.hasClosedTrace(ctx, "ticket", string(ticketID)) {
 		return
 	}
 	ticket, err := s.tickets.Get(ctx, ticketID)
@@ -182,6 +198,9 @@ func (s *Service) processTicketCreated(ctx context.Context, envelope events.Enve
 		"confidence": eval.confidence,
 		"reason":     eval.reason,
 	}
+	for key, value := range eval.resolutionPayload {
+		payload[key] = value
+	}
 	semantic := governancecommon.NormalizeDecisionResolution("", payload)
 	payload["governanceSemantic"] = map[string]any{
 		"resolutionType": semantic.ResolutionType,
@@ -192,7 +211,7 @@ func (s *Service) processTicketCreated(ctx context.Context, envelope events.Enve
 		"inferred":       semantic.Inferred,
 		"version":        "v1",
 	}
-	if err := s.resolve(ctx, ticket.ID, payload); err != nil {
+	if err := s.resolve(ctx, ticket.ID, semantic.ResolutionType, payload); err != nil {
 		trace.Status = "blocked"
 		trace.Action = "escalate"
 		trace.PolicyBlocked = "resolve_failed"
@@ -222,6 +241,17 @@ func (s *Service) processApprovalCreated(ctx context.Context, envelope events.En
 	}
 	approvalID := common.ApprovalID(strings.TrimSpace(envelope.SubjectID))
 	if approvalID == "" {
+		return
+	}
+	s.processPendingApproval(ctx, approvalID)
+}
+
+func (s *Service) processPendingApproval(ctx context.Context, approvalID common.ApprovalID) {
+	cfg, err := s.loadConfig()
+	if err != nil || !isEnabled(cfg.Governance.AutoApproval.Enabled) {
+		return
+	}
+	if approvalID == "" || s.hasClosedTrace(ctx, "approval", string(approvalID)) {
 		return
 	}
 	approval, err := s.approvals.Get(ctx, approvalID)
@@ -300,7 +330,14 @@ func (s *Service) processRunStateChanged(ctx context.Context, envelope events.En
 	}
 	if data.State == common.RunStateBlockedOnDecision && data.BlockingTicketID != "" {
 		ticket, err := s.tickets.Get(ctx, data.BlockingTicketID)
-		if err != nil || ticket == nil || ticket.State != common.DecisionTicketStateResolved {
+		if err != nil || ticket == nil {
+			return
+		}
+		if ticket.State == common.DecisionTicketStateOpen {
+			s.processPendingTicket(ctx, ticket.ID)
+			return
+		}
+		if ticket.State != common.DecisionTicketStateResolved {
 			return
 		}
 		resolution, err := s.resolutions.GetByTicketID(ctx, ticket.ID)
@@ -316,7 +353,14 @@ func (s *Service) processRunStateChanged(ctx context.Context, envelope events.En
 	}
 	if data.State == common.RunStateBlockedOnApproval && data.BlockingApprovalID != "" {
 		approval, err := s.approvals.Get(ctx, data.BlockingApprovalID)
-		if err != nil || approval == nil || approval.State != common.ApprovalStateApproved {
+		if err != nil || approval == nil {
+			return
+		}
+		if approval.State == common.ApprovalStatePending {
+			s.processPendingApproval(ctx, approval.ID)
+			return
+		}
+		if approval.State != common.ApprovalStateApproved {
 			return
 		}
 		if !s.hasAutoResolvedTrace(ctx, approval.RunID, "approval", string(approval.ID)) {
@@ -326,17 +370,43 @@ func (s *Service) processRunStateChanged(ctx context.Context, envelope events.En
 	}
 }
 
+func (s *Service) reconcileBlockedRuns(ctx context.Context) {
+	if s == nil || s.runs == nil {
+		return
+	}
+	runs, err := s.runs.List(ctx)
+	if err != nil {
+		return
+	}
+	for _, item := range runs {
+		if item == nil {
+			continue
+		}
+		switch item.State {
+		case common.RunStateBlockedOnDecision:
+			if item.BlockingTicketID != "" {
+				s.processPendingTicket(ctx, item.BlockingTicketID)
+			}
+		case common.RunStateBlockedOnApproval:
+			if item.BlockingApprovalID != "" {
+				s.processPendingApproval(ctx, item.BlockingApprovalID)
+			}
+		}
+	}
+}
+
 type ticketEvaluation struct {
-	canAutoResolve bool
-	answer         string
-	confidence     float64
-	reason         string
-	policyBlocked  string
-	policyMatched  string
-	budgetBefore   int
-	budgetAfter    int
-	promptKey      string
-	evidenceRefs   []string
+	canAutoResolve    bool
+	answer            string
+	confidence        float64
+	reason            string
+	policyBlocked     string
+	policyMatched     string
+	budgetBefore      int
+	budgetAfter       int
+	promptKey         string
+	evidenceRefs      []string
+	resolutionPayload map[string]any
 }
 
 type approvalEvaluation struct {
@@ -390,14 +460,23 @@ func (s *Service) evaluateTicket(ctx context.Context, ticket *decisionmodel.Tick
 
 	question := strings.TrimSpace(ticket.Question)
 	reason := strings.TrimSpace(ticket.Reason)
+	if blockedReason, ok := s.blockedBySharedBudgetPolicy(ctx, cfg.Governance, ticket.RunID, "ticket", string(ticket.ID), ret.promptKey); ok {
+		ret.policyBlocked = blockedReason
+		ret.reason = "auto governance budget policy blocked ticket resolution"
+		return ret
+	}
+	if handled, recoveryEval := evaluateRuntimeRepairExhaustionTicket(ticket, ret); handled {
+		if recoveryEval.canAutoResolve {
+			recoveryEval.budgetAfter = budgetUsed + 1
+			if goal != nil && goal.ID != "" {
+				recoveryEval.evidenceRefs = append(recoveryEval.evidenceRefs, string(goal.ID))
+			}
+		}
+		return recoveryEval
+	}
 	if requiresHumanByQuestion(question, reason) {
 		ret.policyBlocked = "human_confirmation_required"
 		ret.reason = "ticket requires explicit human confirmation"
-		return ret
-	}
-	if blockedReason, ok := s.blockedBySharedBudgetPolicy(ctx, cfg.Governance, ticket.RunID, "ticket", ret.promptKey); ok {
-		ret.policyBlocked = blockedReason
-		ret.reason = "auto governance budget policy blocked ticket resolution"
 		return ret
 	}
 
@@ -428,6 +507,40 @@ func (s *Service) evaluateTicket(ctx context.Context, ticket *decisionmodel.Tick
 	}
 	ret.evidenceRefs = append(ret.evidenceRefs, evidenceRefs...)
 	return ret
+}
+
+func evaluateRuntimeRepairExhaustionTicket(ticket *decisionmodel.Ticket, base ticketEvaluation) (bool, ticketEvaluation) {
+	if ticket == nil || strings.TrimSpace(stringFromMap(ticket.Context, "recoveryPolicy")) != recoveryPolicyRuntimeRepairExhausted {
+		return false, base
+	}
+	ret := base
+	ret.policyBlocked = "runtime_repair_exhausted_requires_strategy"
+	ret.reason = "runtime repair exhaustion requires an explicit recovery strategy"
+	if hasManualRequiredMarker(ticket.Context) {
+		ret.policyBlocked = "manual_recovery_required"
+		ret.reason = "runtime recovery context requires manual input"
+		return true, ret
+	}
+	if runtimeRecoveryRequiresExternalOperator(ticket.Context, ticket.Question, ticket.Reason) {
+		ret.policyBlocked = "external_recovery_required"
+		ret.reason = "runtime recovery requires external provider or configuration action"
+		return true, ret
+	}
+	if !stringSliceContainsFold(stringSliceFromMap(ticket.Context, "allowedRecoveryActions"), "replan") {
+		ret.policyBlocked = "replan_not_allowed"
+		ret.reason = "runtime recovery policy does not allow auto replan"
+		return true, ret
+	}
+	ret.canAutoResolve = true
+	ret.answer = "replan"
+	ret.confidence = 0.91
+	ret.reason = "runtime repair exhausted and structured recovery policy allows replan"
+	ret.policyBlocked = ""
+	ret.policyMatched = "runtime_repair_exhausted_auto_replan"
+	ret.resolutionPayload = map[string]any{
+		"recoveryAction": "replan",
+	}
+	return true, ret
 }
 
 func (s *Service) evaluateApproval(ctx context.Context, approval *approvalmodel.Approval, goal *workspace.Goal, dod *workspace.DoD, governanceCfg workorchconfig.GovernanceConfig) approvalEvaluation {
@@ -462,7 +575,7 @@ func (s *Service) evaluateApproval(ctx context.Context, approval *approvalmodel.
 		ret.reason = "auto approval budget exhausted"
 		return ret
 	}
-	if blockedReason, ok := s.blockedBySharedBudgetPolicy(ctx, governanceCfg, approval.RunID, "approval", ret.promptKey); ok {
+	if blockedReason, ok := s.blockedBySharedBudgetPolicy(ctx, governanceCfg, approval.RunID, "approval", string(approval.ID), ret.promptKey); ok {
 		ret.policyBlocked = blockedReason
 		ret.reason = "auto governance budget policy blocked approval resolution"
 		return ret
@@ -722,6 +835,50 @@ func requiresHumanByQuestion(question string, reason string) bool {
 	return false
 }
 
+func hasManualRequiredMarker(input map[string]any) bool {
+	if input == nil {
+		return false
+	}
+	return boolFromMap(input, "humanRequired") ||
+		boolFromMap(input, "requiresHuman") ||
+		boolFromMap(input, "manualRequired") ||
+		len(stringSliceFromMap(input, "requiresHumanFields")) > 0
+}
+
+func runtimeRecoveryRequiresExternalOperator(ctxMap map[string]any, question string, reason string) bool {
+	if ctxMap == nil {
+		return false
+	}
+	scope := normalize(stringFromMap(ctxMap, "scope"))
+	dependency := normalize(stringFromMap(ctxMap, "dependency"))
+	policy := normalize(stringFromMap(ctxMap, "recoveryPolicy"))
+	failureClass := normalize(stringFromMap(ctxMap, "failureClass"))
+	if scope == "workorch_runtime" && dependency == "llm_provider" {
+		return true
+	}
+	if policy == "system_config_required" || policy == "config_only" {
+		return true
+	}
+	if strings.HasPrefix(failureClass, "provider_") ||
+		failureClass == "context_too_large" ||
+		failureClass == "rate_limited" ||
+		failureClass == "auth_or_config_error" {
+		return true
+	}
+	text := normalize(question + "\n" + reason)
+	return strings.Contains(text, "llm provider") || strings.Contains(text, "provider retry")
+}
+
+func stringSliceContainsFold(values []string, want string) bool {
+	want = normalize(want)
+	for _, value := range values {
+		if normalize(value) == want {
+			return true
+		}
+	}
+	return false
+}
+
 func normalize(input string) string {
 	return strings.ToLower(strings.TrimSpace(input))
 }
@@ -949,7 +1106,7 @@ func (s *Service) countResolvedApprovalTraces(ctx context.Context, runID common.
 	return count
 }
 
-func (s *Service) blockedBySharedBudgetPolicy(ctx context.Context, governanceCfg workorchconfig.GovernanceConfig, runID common.RunID, itemType string, promptKey string) (string, bool) {
+func (s *Service) blockedBySharedBudgetPolicy(ctx context.Context, governanceCfg workorchconfig.GovernanceConfig, runID common.RunID, itemType string, currentItemID string, promptKey string) (string, bool) {
 	traces, err := s.loadTracesByRunAndType(ctx, runID, itemType)
 	if err != nil {
 		return "", false
@@ -960,6 +1117,9 @@ func (s *Service) blockedBySharedBudgetPolicy(ctx context.Context, governanceCfg
 		for i := len(traces) - 1; i >= 0; i-- {
 			item := traces[i]
 			if item == nil {
+				continue
+			}
+			if strings.TrimSpace(item.ItemID) == strings.TrimSpace(currentItemID) {
 				continue
 			}
 			if strings.EqualFold(item.Status, "resolved") {
@@ -979,6 +1139,9 @@ func (s *Service) blockedBySharedBudgetPolicy(ctx context.Context, governanceCfg
 		repeated := 0
 		for _, item := range traces {
 			if item == nil {
+				continue
+			}
+			if strings.TrimSpace(item.ItemID) == strings.TrimSpace(currentItemID) {
 				continue
 			}
 			if strings.TrimSpace(item.PromptFingerprint) == promptKey {
@@ -1026,6 +1189,28 @@ func (s *Service) hasAutoResolvedTrace(ctx context.Context, runID common.RunID, 
 	return false
 }
 
+func (s *Service) hasClosedTrace(ctx context.Context, itemType string, itemID string) bool {
+	if s == nil || s.traces == nil || itemType == "" || itemID == "" {
+		return false
+	}
+	list, err := s.traces.List(ctx, repository.AutoGovernanceTraceQuery{
+		ItemType: itemType,
+		ItemID:   itemID,
+	})
+	if err != nil {
+		return false
+	}
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		if strings.EqualFold(item.Status, "resolved") || strings.EqualFold(item.Status, "blocked") {
+			return true
+		}
+	}
+	return false
+}
+
 func classifyApprovalRisk(approval *approvalmodel.Approval) (string, []string) {
 	if approval == nil {
 		return "L4", []string{"invalid_approval"}
@@ -1059,7 +1244,7 @@ func collectApprovalSignals(approval *approvalmodel.Approval) []string {
 		if containsAnyText(actionText, []string{"delete", "remove", "drop", "truncate", "overwrite"}) {
 			signals = append(signals, "destructive_file_change")
 		}
-		if containsAnyText(actionText, []string{"ssh", "remote", "server"}) {
+		if containsRemoteOperationSignal(actionText, approval.Context) {
 			signals = append(signals, "remote_operation")
 		}
 		if containsAnyText(actionText, []string{"deploy", "publish", "release", "prod", "production"}) {
@@ -1093,6 +1278,32 @@ func collectApprovalSignals(approval *approvalmodel.Approval) []string {
 		signals = append(signals, "secret_access")
 	}
 	return compactUniqueStrings(signals)
+}
+
+func containsRemoteOperationSignal(actionText string, contextMap map[string]any) bool {
+	actionText = normalize(actionText)
+	if actionText == "" {
+		return false
+	}
+	if containsAnyText(actionText, []string{"ssh", "remote", "远程", "服务器"}) {
+		return true
+	}
+	if containsAnyText(normalize(stringFromMap(contextMap, "risk")), []string{"remote_operation", "ssh_write"}) ||
+		containsAnyText(normalize(stringFromMap(contextMap, "kind")), []string{"remote_operation", "ssh_write"}) {
+		return true
+	}
+	for _, phrase := range []string{
+		"server host",
+		"server endpoint",
+		"server operation",
+		"server-side operation",
+		"server side operation",
+	} {
+		if strings.Contains(actionText, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func requiresHumanByPolicy(signals []string, requireHumanFor []string) bool {

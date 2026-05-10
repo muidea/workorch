@@ -479,7 +479,7 @@ type listMemoryRecallTracesFunc func(context.Context, string, string, appservice
 type listEventRecordsFunc func(context.Context, string, string, appservice.EventRecordQuery) ([]appservice.EventRecord, error)
 type listRunInstancesFunc func(context.Context, string, string, string) ([]appservice.Run, error)
 type startRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
-type resumeRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
+type resumeRunInstanceFunc func(context.Context, string, string, string, ...map[string]any) (appservice.Run, error)
 type activateWorkspaceExecutionFunc func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error)
 type listDecisionsFunc func(context.Context, string, string, string, string) ([]appservice.Decision, error)
 type readDecisionFunc func(context.Context, string, string, string) (appservice.Decision, error)
@@ -2451,6 +2451,13 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			http.NotFound(w, r)
 			return
 		}
+		var req struct {
+			ExecutionContextPatch map[string]any `json:"executionContextPatch,omitempty"`
+		}
+		if err := decodeOptionalJSON(r, &req); err != nil {
+			writeBusinessError(w, err)
+			return
+		}
 		state.metrics.runResumeRequests.Add(1)
 		release, err := state.acquireRunSlotWithPriority(r.Context(), runPriorityFromRequest(r, 0))
 		if err != nil {
@@ -2459,7 +2466,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		defer release()
-		item, err := state.resumeRun(r.Context(), state.config.Backend, state.config.DataRoot, runID)
+		item, err := state.resumeRun(r.Context(), state.config.Backend, state.config.DataRoot, runID, req.ExecutionContextPatch)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -3050,11 +3057,11 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		})
 		return ret, err
 	}
-	s.resumeRun = func(ctx context.Context, _, _, runID string) (appservice.Run, error) {
+	s.resumeRun = func(ctx context.Context, _, _, runID string, executionContextPatch ...map[string]any) (appservice.Run, error) {
 		var ret appservice.Run
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
-			ret, err = appservice.ResumeRunWithSession(ctx, session, runID)
+			ret, err = appservice.ResumeRunWithSession(ctx, session, runID, executionContextPatch...)
 			return err
 		})
 		return ret, err
@@ -3614,8 +3621,8 @@ func defaultStartRun(ctx context.Context, backend string, dataRoot string, runID
 	return appservice.StartRunWithBackend(ctx, backend, dataRoot, runID)
 }
 
-func defaultResumeRun(ctx context.Context, backend string, dataRoot string, runID string) (appservice.Run, error) {
-	return appservice.ResumeRunWithBackend(ctx, backend, dataRoot, runID)
+func defaultResumeRun(ctx context.Context, backend string, dataRoot string, runID string, executionContextPatch ...map[string]any) (appservice.Run, error) {
+	return appservice.ResumeRunWithBackend(ctx, backend, dataRoot, runID, executionContextPatch...)
 }
 
 func defaultActivateWorkspaceExecution(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {

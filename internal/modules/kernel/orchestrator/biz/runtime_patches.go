@@ -420,8 +420,13 @@ func isReservedWorkspaceReportPatchTarget(cleanTarget string) bool {
 }
 
 func containsUnresolvedRuntimeTemplate(value string) bool {
-	return strings.Contains(value, "{{") && strings.Contains(value, "}}")
+	if strings.Contains(value, "{{") && strings.Contains(value, "}}") {
+		return true
+	}
+	return unresolvedRuntimeSymbolPattern.MatchString(value)
 }
+
+var unresolvedRuntimeSymbolPattern = regexp.MustCompile(`__[A-Z][A-Z0-9_]{8,}__`)
 
 func applyWorkspacePatch(workingDirectory string, request runtimePatchRequest) error {
 	switch request.PatchType {
@@ -653,8 +658,9 @@ type unifiedDiffFilePatch struct {
 }
 
 type unifiedDiffHunk struct {
-	OldStart int
-	Lines    []string
+	OldStart    int
+	HasOldStart bool
+	Lines       []string
 }
 
 func applyWorkspaceUnifiedDiff(workingDirectory string, targetRef string, diff string, baseHash string) error {
@@ -817,6 +823,9 @@ func parseSingleFileUnifiedDiff(diff string) (unifiedDiffFilePatch, error) {
 	if len(lines) < 3 {
 		return unifiedDiffFilePatch{}, common.ErrInvalidArgument
 	}
+	if patch, ok, err := parseSingleFileApplyPatchDiff(lines); ok || err != nil {
+		return patch, err
+	}
 	idx := 0
 	for idx < len(lines) && !strings.HasPrefix(lines[idx], "--- ") {
 		idx++
@@ -837,7 +846,7 @@ func parseSingleFileUnifiedDiff(diff string) (unifiedDiffFilePatch, error) {
 			idx++
 			continue
 		}
-		if !strings.HasPrefix(lines[idx], "@@ ") {
+		if !isUnifiedDiffHunkHeaderLine(lines[idx]) {
 			return unifiedDiffFilePatch{}, common.ErrInvalidArgument
 		}
 		hunk, nextIdx, err := parseUnifiedDiffHunk(lines, idx)
@@ -853,20 +862,94 @@ func parseSingleFileUnifiedDiff(diff string) (unifiedDiffFilePatch, error) {
 	return filePatch, nil
 }
 
+func parseSingleFileApplyPatchDiff(lines []string) (unifiedDiffFilePatch, bool, error) {
+	idx := 0
+	for idx < len(lines) && strings.TrimSpace(lines[idx]) == "" {
+		idx++
+	}
+	if idx >= len(lines) || strings.TrimSpace(lines[idx]) != "*** Begin Patch" {
+		return unifiedDiffFilePatch{}, false, nil
+	}
+	idx++
+	filePatch := unifiedDiffFilePatch{}
+	seenFile := false
+	for idx < len(lines) {
+		line := strings.TrimSpace(lines[idx])
+		if line == "" {
+			idx++
+			continue
+		}
+		if line == "*** End Patch" {
+			if !seenFile || filePatch.NewRef == "" || len(filePatch.Hunks) == 0 {
+				return unifiedDiffFilePatch{}, true, common.ErrInvalidArgument
+			}
+			return filePatch, true, nil
+		}
+		switch {
+		case strings.HasPrefix(line, "*** Update File: "):
+			if seenFile {
+				return unifiedDiffFilePatch{}, true, common.ErrInvalidArgument
+			}
+			ref := normalizeUnifiedDiffPath(strings.TrimSpace(strings.TrimPrefix(line, "*** Update File: ")))
+			if ref == "" || ref == "/dev/null" {
+				return unifiedDiffFilePatch{}, true, common.ErrInvalidArgument
+			}
+			filePatch.OldRef = ref
+			filePatch.NewRef = ref
+			seenFile = true
+			idx++
+		case strings.HasPrefix(line, "*** Add File: "):
+			if seenFile {
+				return unifiedDiffFilePatch{}, true, common.ErrInvalidArgument
+			}
+			ref := normalizeUnifiedDiffPath(strings.TrimSpace(strings.TrimPrefix(line, "*** Add File: ")))
+			if ref == "" || ref == "/dev/null" {
+				return unifiedDiffFilePatch{}, true, common.ErrInvalidArgument
+			}
+			filePatch.OldRef = "/dev/null"
+			filePatch.NewRef = ref
+			seenFile = true
+			idx++
+		case strings.HasPrefix(line, "*** Delete File: "):
+			return unifiedDiffFilePatch{}, true, common.ErrInvalidArgument
+		default:
+			if !seenFile || !isUnifiedDiffHunkHeaderLine(lines[idx]) {
+				return unifiedDiffFilePatch{}, true, common.ErrInvalidArgument
+			}
+			hunk, nextIdx, err := parseUnifiedDiffHunk(lines, idx)
+			if err != nil {
+				return unifiedDiffFilePatch{}, true, err
+			}
+			filePatch.Hunks = append(filePatch.Hunks, hunk)
+			idx = nextIdx
+		}
+	}
+	return unifiedDiffFilePatch{}, true, common.ErrInvalidArgument
+}
+
+func isUnifiedDiffHunkHeaderLine(line string) bool {
+	return strings.HasPrefix(strings.TrimSpace(line), "@@")
+}
+
 func parseUnifiedDiffHunk(lines []string, idx int) (unifiedDiffHunk, int, error) {
 	matches := unifiedDiffHunkHeaderPattern.FindStringSubmatch(lines[idx])
+	hunk := unifiedDiffHunk{}
 	if matches == nil {
-		return unifiedDiffHunk{}, idx, common.ErrInvalidArgument
+		if !isUnifiedDiffHunkHeaderLine(lines[idx]) {
+			return unifiedDiffHunk{}, idx, common.ErrInvalidArgument
+		}
+	} else {
+		oldStart, err := strconv.Atoi(matches[1])
+		if err != nil {
+			return unifiedDiffHunk{}, idx, common.ErrInvalidArgument
+		}
+		hunk.OldStart = oldStart
+		hunk.HasOldStart = true
 	}
-	oldStart, err := strconv.Atoi(matches[1])
-	if err != nil {
-		return unifiedDiffHunk{}, idx, common.ErrInvalidArgument
-	}
-	hunk := unifiedDiffHunk{OldStart: oldStart}
 	idx++
 	for idx < len(lines) {
 		line := lines[idx]
-		if strings.HasPrefix(line, "@@ ") || strings.HasPrefix(line, "--- ") {
+		if isUnifiedDiffHunkHeaderLine(line) || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "*** End Patch") {
 			break
 		}
 		if line == `\ No newline at end of file` {
@@ -895,9 +978,9 @@ func applyUnifiedDiffFilePatch(content string, filePatch unifiedDiffFilePatch) (
 	output := make([]string, 0, len(sourceLines))
 	cursor := 0
 	for _, hunk := range filePatch.Hunks {
-		start := hunk.OldStart - 1
-		if start < 0 {
-			start = 0
+		start, err := unifiedDiffHunkStart(sourceLines, cursor, hunk)
+		if err != nil {
+			return "", err
 		}
 		if start < cursor || start > len(sourceLines) {
 			return "", common.ErrInvalidArgument
@@ -924,6 +1007,59 @@ func applyUnifiedDiffFilePatch(content string, filePatch unifiedDiffFilePatch) (
 	}
 	output = append(output, sourceLines[cursor:]...)
 	return joinTextLines(output, sourceHadFinalNewline || filePatch.OldRef == "/dev/null"), nil
+}
+
+func unifiedDiffHunkStart(sourceLines []string, cursor int, hunk unifiedDiffHunk) (int, error) {
+	if hunk.HasOldStart {
+		start := hunk.OldStart - 1
+		if start < 0 {
+			start = 0
+		}
+		return start, nil
+	}
+	oldLines := make([]string, 0, len(hunk.Lines))
+	for _, line := range hunk.Lines {
+		if line == "" {
+			return 0, common.ErrInvalidArgument
+		}
+		switch line[0] {
+		case ' ', '-':
+			oldLines = append(oldLines, line[1:])
+		}
+	}
+	if len(oldLines) == 0 {
+		if len(sourceLines) == 0 {
+			return 0, nil
+		}
+		return 0, common.ErrInvalidArgument
+	}
+	matches := 0
+	matchedStart := -1
+	for start := cursor; start+len(oldLines) <= len(sourceLines); start++ {
+		if unifiedDiffOldLinesMatch(sourceLines[start:start+len(oldLines)], oldLines) {
+			matches++
+			matchedStart = start
+			if matches > 1 {
+				return 0, common.ErrConflict
+			}
+		}
+	}
+	if matches == 0 {
+		return 0, common.ErrInvalidArgument
+	}
+	return matchedStart, nil
+}
+
+func unifiedDiffOldLinesMatch(sourceLines []string, oldLines []string) bool {
+	if len(sourceLines) != len(oldLines) {
+		return false
+	}
+	for idx := range oldLines {
+		if sourceLines[idx] != oldLines[idx] {
+			return false
+		}
+	}
+	return true
 }
 
 func splitDiffLines(diff string) []string {

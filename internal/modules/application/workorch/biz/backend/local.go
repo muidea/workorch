@@ -280,9 +280,9 @@ func (b *localRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID,
 	}, nil
 }
 
-func (b *localRunBackend) Resume(ctx context.Context, id common.RunID) (*RunInfo, error) {
+func (b *localRunBackend) Resume(ctx context.Context, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error) {
 	s := b.parent.session.Borrow()
-	r, err := appservice.ResumeRunWithSession(ctx, s, string(id))
+	r, err := appservice.ResumeRunWithSession(ctx, s, string(id), executionContextPatch...)
 	if err != nil {
 		return nil, err
 	}

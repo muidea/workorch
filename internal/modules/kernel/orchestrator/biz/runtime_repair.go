@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
+
+const maxPatchRepairSnapshotBytes = 8192
 
 func runtimeFailureOutput(output map[string]any, execErr error) map[string]any {
 	ret := cloneStepPayload(output)
@@ -112,11 +116,11 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 	if o.shouldBlockOnProviderRetryExhaustion(ctx, run, failedStep) {
 		return o.blockOnProviderRetryExhaustion(ctx, run, failedStep, execErr)
 	}
-	if o.shouldBlockOnDuplicateRuntimeFailure(ctx, run, failedStep) {
-		return o.blockOnDuplicateRuntimeFailure(ctx, run, failedStep, execErr)
-	}
 	if o.shouldEscalateRuntimeRepairExhaustion(ctx, run, failedStep) {
 		return o.blockOnRuntimeRepairExhaustion(ctx, run, failedStep, execErr)
+	}
+	if o.shouldBlockOnDuplicateRuntimeFailure(ctx, run, failedStep) {
+		return o.blockOnDuplicateRuntimeFailure(ctx, run, failedStep, execErr)
 	}
 	if !o.shouldAttemptRuntimeRepair(ctx, run, failedStep) {
 		reason := "runtime step failed"
@@ -130,7 +134,7 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 		}
 		return o.FailRun(ctx, run.ID, reason)
 	}
-	attempt := o.runtimeRepairAttemptCount(ctx, run.ID) + 1
+	attempt := o.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep) + 1
 	input := o.runtimeRepairFollowUpStepInput(ctx, run, failedStep, attempt, execErr)
 	return o.dispatchStep(ctx, run, runtimeRepairFollowUpStepID(run.ID, failedStep, attempt), initialStepKind(run), input)
 }
@@ -142,7 +146,7 @@ func (o *RuntimeOrchestrator) shouldEscalateRuntimeRepairExhaustion(ctx context.
 	if !requiresDoDAssessmentCompletionGate(run) || isLLMProviderRuntimeFailure(run, failedStep) {
 		return false
 	}
-	return o.runtimeRepairAttemptCount(ctx, run.ID) >= maxRuntimeRepairAttempts
+	return o.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep) >= maxRuntimeRepairAttempts
 }
 
 func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
@@ -164,15 +168,17 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		Context: map[string]any{
 			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
 			"allowedRecoveryActions":         []string{"retry_same_step", "replan", "provide_information", "terminate"},
-			"attempts":                       maxRuntimeRepairAttempts,
+			"attempts":                       o.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep),
+			"maxAttempts":                    maxRuntimeRepairAttempts,
 			"failureClass":                   stringFromMap(failedStep.Output, failureOutputKeyClass),
 			"failureSignature":               stringFromMap(failedStep.Output, failureOutputKeySignature),
 			"failedStepId":                   string(failedStep.ID),
+			"repairOfRootStepId":             string(runtimeRepairRootStepID(failedStep)),
 			"failedStepKind":                 failedStep.Kind,
 			"failedStepInput":                compactStepInputForLLMContext(failedStep.Input),
 			"failedStepOutput":               compactStepOutputForLLMContext(failedStep.Output),
 			"missingDoDItems":                missingDoDItemsFromFailureOutput(failedStep.Output),
-			"recentRepairAttempts":           o.recentRuntimeRepairAttemptSummaries(ctx, run.ID, maxRuntimeRepairAttempts),
+			"recentRepairAttempts":           o.recentRuntimeRepairAttemptSummaries(ctx, run.ID, failedStep, maxRuntimeRepairAttempts),
 			"recommendedNextActions": []string{
 				"Map each missing DoD item to concrete affected files, patch operations, and verification commands.",
 				"Prioritize minimal implementation and test updates, then rerun targeted verification.",
@@ -193,7 +199,7 @@ func (o *RuntimeOrchestrator) shouldAttemptRuntimeRepair(ctx context.Context, ru
 	if !requiresDoDAssessmentCompletionGate(run) {
 		return false
 	}
-	if o.runtimeRepairAttemptCount(ctx, run.ID) >= maxRuntimeRepairAttempts {
+	if o.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep) >= maxRuntimeRepairAttempts {
 		return false
 	}
 	return !isLLMProviderRuntimeFailure(run, failedStep)
@@ -348,6 +354,97 @@ func (o *RuntimeOrchestrator) runtimeRepairAttemptCount(ctx context.Context, run
 	return count
 }
 
+func (o *RuntimeOrchestrator) runtimeRepairAttemptCountForStep(ctx context.Context, runID common.RunID, failedStep *runModel.Step) int {
+	if o == nil || o.steps == nil || runID == "" || failedStep == nil {
+		return 0
+	}
+	scope := runtimeRepairScopeFromFailedStep(failedStep)
+	return o.runtimeRepairAttemptCountForScope(ctx, runID, scope)
+}
+
+func (o *RuntimeOrchestrator) runtimeRepairAttemptCountForScope(ctx context.Context, runID common.RunID, scope runtimeRepairScope) int {
+	if o == nil || o.steps == nil || runID == "" {
+		return 0
+	}
+	steps, err := o.steps.ListByRun(ctx, runID)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, step := range steps {
+		if isRuntimeRepairBudgetStep(runID, step) && runtimeRepairStepMatchesScope(step, scope) {
+			count++
+		}
+	}
+	return count
+}
+
+func (o *RuntimeOrchestrator) duplicateRuntimeFailureBlockerCanAutoResume(ctx context.Context, run *runModel.Run, ticket *decisionmodel.Ticket) bool {
+	if o == nil || run == nil || ticket == nil || o.steps == nil {
+		return false
+	}
+	if !requiresDoDAssessmentCompletionGate(run) || ticket.State != common.DecisionTicketStateOpen {
+		return false
+	}
+	if !strings.HasSuffix(string(ticket.ID), "duplicate-failure-decision") {
+		return false
+	}
+	failedStep, err := o.steps.Get(ctx, ticket.StepID)
+	if err != nil || failedStep == nil || failedStep.State != common.StepStateFailed {
+		return false
+	}
+	class := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass))
+	signature := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeySignature))
+	if signature == "" || !duplicateRepairDecisionFailureClass(class) {
+		return false
+	}
+	attempts := o.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep)
+	return attempts > 0 && attempts < maxRuntimeRepairAttempts
+}
+
+func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerHasSuccessEvidence(ctx context.Context, ticket *decisionmodel.Ticket) bool {
+	if o == nil || o.steps == nil || ticket == nil || ticket.RunID == "" {
+		return false
+	}
+	if ticket.Context[decisionContextKeyRecoveryPolicy] != decisionContextRecoveryPolicyRepairPlan {
+		return false
+	}
+	scope := runtimeRepairScopeFromDecisionContext(ticket.Context)
+	if scope.failureSignature == "" && scope.rootStepID == "" && scope.failedStepID == "" {
+		return false
+	}
+	steps, err := o.steps.ListByRun(ctx, ticket.RunID)
+	if err != nil {
+		return false
+	}
+	for _, step := range steps {
+		if !isRuntimeRepairSuccessEvidenceStep(step, scope) {
+			continue
+		}
+		if ticket.StepID != "" && step.ID == ticket.StepID {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func isRuntimeRepairSuccessEvidenceStep(step *runModel.Step, scope runtimeRepairScope) bool {
+	if step == nil || step.State != common.StepStateCompleted || step.Input == nil {
+		return false
+	}
+	if !runtimeRepairStepMatchesScope(step, scope) {
+		return false
+	}
+	if boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) {
+		return false
+	}
+	if isProviderFailureClass(stringFromMap(step.Output, failureOutputKeyClass)) || isLLMProviderFailureStage(stringFromMap(step.Output, "stage")) {
+		return false
+	}
+	return true
+}
+
 func isRuntimeRepairBudgetStep(runID common.RunID, step *runModel.Step) bool {
 	if step == nil || step.RunID != runID || !boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) {
 		return false
@@ -360,6 +457,143 @@ func isRuntimeRepairBudgetStep(runID common.RunID, step *runModel.Step) bool {
 		return false
 	}
 	return !isLLMProviderFailureStage(stringFromMap(step.Output, "stage"))
+}
+
+type runtimeRepairScope struct {
+	failedStepID     common.StepID
+	rootStepID       common.StepID
+	failureClass     string
+	failureSignature string
+}
+
+func runtimeRepairScopeFromFailedStep(step *runModel.Step) runtimeRepairScope {
+	if step == nil {
+		return runtimeRepairScope{}
+	}
+	class, signature := runtimeRepairScopeClassAndSignature(step)
+	return runtimeRepairScope{
+		failedStepID:     step.ID,
+		rootStepID:       runtimeRepairRootStepID(step),
+		failureClass:     class,
+		failureSignature: signature,
+	}
+}
+
+func runtimeRepairScopeClassAndSignature(step *runModel.Step) (string, string) {
+	if step == nil {
+		return "", ""
+	}
+	outputClass := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass))
+	outputSignature := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature))
+	inputClass := strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRepairOfFailureClass))
+	inputSignature := strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRepairOfFailureSig))
+	if outputSignature != "" && (inputSignature == "" || failureSignatureHasTargetScope(outputSignature)) {
+		return firstNonEmptyString(outputClass, inputClass), outputSignature
+	}
+	return firstNonEmptyString(inputClass, outputClass), firstNonEmptyString(inputSignature, outputSignature)
+}
+
+func failureSignatureHasTargetScope(signature string) bool {
+	return strings.Contains(signature, "failureTargets=") ||
+		strings.Contains(signature, "targetRef=") ||
+		strings.Contains(signature, "conflictRef=") ||
+		strings.Contains(signature, "serverId=") ||
+		strings.Contains(signature, "tool=") ||
+		strings.Contains(signature, "uri=")
+}
+
+func runtimeRepairScopeFromDecisionContext(context map[string]any) runtimeRepairScope {
+	if len(context) == 0 {
+		return runtimeRepairScope{}
+	}
+	return runtimeRepairScope{
+		failedStepID:     common.StepID(strings.TrimSpace(stringFromMap(context, "failedStepId"))),
+		rootStepID:       common.StepID(strings.TrimSpace(firstNonEmptyString(stringFromMap(context, "repairOfRootStepId"), stringFromMap(context, stepInputKeyRepairOfRootStepID)))),
+		failureClass:     strings.TrimSpace(stringFromMap(context, "failureClass")),
+		failureSignature: strings.TrimSpace(stringFromMap(context, "failureSignature")),
+	}
+}
+
+func runtimeRepairRootStepID(step *runModel.Step) common.StepID {
+	if step == nil {
+		return ""
+	}
+	if root := common.StepID(strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRepairOfRootStepID))); root != "" {
+		return root
+	}
+	if root := graphRootStepID(step); root != "" {
+		return root
+	}
+	return step.ID
+}
+
+func runtimeRepairStepMatchesScope(step *runModel.Step, scope runtimeRepairScope) bool {
+	if step == nil {
+		return false
+	}
+	if scope.failureSignature != "" {
+		stepSignature := strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(step.Input, stepInputKeyRepairOfFailureSig),
+			stringFromMap(step.Input, failureOutputKeySignature),
+			stringFromMap(step.Output, failureOutputKeySignature),
+		))
+		if stepSignature != scope.failureSignature {
+			if stepSignature == "" && !runtimeRepairStepHasExplicitScope(step) {
+				return true
+			}
+			return false
+		}
+		if scope.failureClass != "" {
+			stepClass := strings.TrimSpace(firstNonEmptyString(
+				stringFromMap(step.Input, stepInputKeyRepairOfFailureClass),
+				stringFromMap(step.Input, failureOutputKeyClass),
+				stringFromMap(step.Output, failureOutputKeyClass),
+			))
+			if stepClass != "" && stepClass != scope.failureClass {
+				return false
+			}
+		}
+		return true
+	}
+	if scope.rootStepID != "" {
+		stepRoot := common.StepID(strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(step.Input, stepInputKeyRepairOfRootStepID),
+			string(graphRootStepID(step)),
+		)))
+		if stepRoot == scope.rootStepID {
+			return true
+		}
+	}
+	if scope.failedStepID != "" {
+		if common.StepID(strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRepairOfStepID))) == scope.failedStepID ||
+			common.StepID(strings.TrimSpace(stringFromMap(step.Input, "failedStepId"))) == scope.failedStepID {
+			return true
+		}
+	}
+	if scope.failureSignature == "" && !runtimeRepairStepHasExplicitScope(step) {
+		return true
+	}
+	return false
+}
+
+func runtimeRepairStepHasExplicitScope(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	for _, key := range []string{
+		stepInputKeyRepairOfStepID,
+		stepInputKeyRepairOfRootStepID,
+		stepInputKeyRepairOfFailureClass,
+		stepInputKeyRepairOfFailureSig,
+		failureOutputKeyClass,
+		failureOutputKeySignature,
+		"failedStepId",
+	} {
+		if strings.TrimSpace(stringFromMap(step.Input, key)) != "" || strings.TrimSpace(stringFromMap(step.Output, key)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func isProviderFailureClass(class string) bool {
@@ -434,6 +668,8 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		return input
 	}
 	input["failedStepId"] = string(failedStep.ID)
+	input[stepInputKeyRepairOfStepID] = string(failedStep.ID)
+	input[stepInputKeyRepairOfRootStepID] = string(runtimeRepairRootStepID(failedStep))
 	input["failedStepKind"] = failedStep.Kind
 	input["failedStepState"] = string(failedStep.State)
 	input["failedStepInput"] = compactStepInputForLLMContext(failedStep.Input)
@@ -444,11 +680,14 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if missingDoD := missingDoDItemsFromFailureOutput(failedStep.Output); len(missingDoD) > 0 {
 		input["missingDoDItems"] = missingDoD
 	}
-	if class := stringFromMap(failedStep.Output, failureOutputKeyClass); class != "" {
+	class, signature := runtimeRepairScopeClassAndSignature(failedStep)
+	if class != "" {
 		input[failureOutputKeyClass] = class
+		input[stepInputKeyRepairOfFailureClass] = class
 	}
-	if signature := stringFromMap(failedStep.Output, failureOutputKeySignature); signature != "" {
+	if signature != "" {
 		input[failureOutputKeySignature] = signature
+		input[stepInputKeyRepairOfFailureSig] = signature
 	}
 	input["previousStepKind"] = failedStep.Kind
 	input["previousStepOutput"] = compactStepOutputForLLMContext(failedStep.Output)
@@ -472,6 +711,9 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if evidence := o.completedGraphEvidence(ctx, run, failedStep); len(evidence) > 0 {
 		input[stepInputKeyGraphEvidence] = evidence
 	}
+	if patchContext := o.runtimeRepairPatchContext(ctx, run, failedStep); len(patchContext) > 0 {
+		input["patchRepairContext"] = patchContext
+	}
 	if shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep) {
 		manifest := o.workspaceFileManifest(ctx, run)
 		if len(manifest) > 0 {
@@ -479,6 +721,103 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		}
 	}
 	return input
+}
+
+func (o *RuntimeOrchestrator) runtimeRepairPatchContext(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
+	if o == nil || o.workspaces == nil || run == nil || failedStep == nil {
+		return nil
+	}
+	if strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass)) != failureClassPatchApply {
+		return nil
+	}
+	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
+	if err != nil || workspace == nil || strings.TrimSpace(workspace.WorkingDirectory) == "" {
+		return nil
+	}
+	targetRefs := patchRepairTargetRefs(failedStep)
+	if len(targetRefs) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, min(len(targetRefs), 3))
+	for idx, targetRef := range targetRefs {
+		if idx >= 3 {
+			break
+		}
+		item := patchRepairTargetSnapshot(workspace.WorkingDirectory, targetRef)
+		if len(item) > 0 {
+			ret = append(ret, item)
+		}
+	}
+	return ret
+}
+
+func patchRepairTargetRefs(step *runModel.Step) []string {
+	if step == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	add := func(value string) []string {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			return nil
+		}
+		seen[value] = true
+		return []string{value}
+	}
+	var ret []string
+	ret = append(ret, add(stringFromMap(step.Input, "targetRef"))...)
+	if patches := mapSliceFromValue(step.Output["patches"]); len(patches) > 0 {
+		for _, patch := range patches {
+			ret = append(ret, add(stringFromMap(patch, "targetRef"))...)
+		}
+	}
+	return ret
+}
+
+func patchRepairTargetSnapshot(workingDirectory string, targetRef string) map[string]any {
+	target, err := workspaceTargetPath(workingDirectory, targetRef)
+	if err != nil {
+		return map[string]any{
+			"targetRef": targetRef,
+			"error":     err.Error(),
+		}
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return map[string]any{
+			"targetRef": targetRef,
+			"exists":    false,
+			"error":     err.Error(),
+		}
+	}
+	item := map[string]any{
+		"targetRef":   targetRef,
+		"exists":      true,
+		"size":        len(data),
+		"contentHash": sha256HexBytes(data),
+		"source":      "current_workspace_file",
+		"guidance":    "Use this current target snapshot for repair; failed patch text may be stale or syntactically invalid.",
+	}
+	if patchRepairLooksBinary(data) {
+		item["isBinary"] = true
+		return item
+	}
+	content := string(data)
+	if len(content) > maxPatchRepairSnapshotBytes {
+		content = content[:maxPatchRepairSnapshotBytes]
+		item["truncated"] = true
+	}
+	item["content"] = content
+	return item
+}
+
+func patchRepairLooksBinary(data []byte) bool {
+	for _, b := range data {
+		if b == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep *runModel.Step) bool {
@@ -519,17 +858,18 @@ func missingDoDItemsFromFailureOutput(output map[string]any) []map[string]any {
 	return nil
 }
 
-func (o *RuntimeOrchestrator) recentRuntimeRepairAttemptSummaries(ctx context.Context, runID common.RunID, limit int) []map[string]any {
-	if o == nil || o.steps == nil || runID == "" || limit <= 0 {
+func (o *RuntimeOrchestrator) recentRuntimeRepairAttemptSummaries(ctx context.Context, runID common.RunID, failedStep *runModel.Step, limit int) []map[string]any {
+	if o == nil || o.steps == nil || runID == "" || failedStep == nil || limit <= 0 {
 		return nil
 	}
 	steps, err := o.steps.ListByRun(ctx, runID)
 	if err != nil || len(steps) == 0 {
 		return nil
 	}
+	scope := runtimeRepairScopeFromFailedStep(failedStep)
 	ret := make([]map[string]any, 0, limit)
 	for _, step := range steps {
-		if !isRuntimeRepairBudgetStep(runID, step) {
+		if !isRuntimeRepairBudgetStep(runID, step) || !runtimeRepairStepMatchesScope(step, scope) {
 			continue
 		}
 		item := map[string]any{

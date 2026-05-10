@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -229,6 +230,111 @@ func SubmitGoal(be backend.Backend, workspaceID string, text string, dodItems []
 		}
 		return RunStartedMsg{Run: run}
 	}
+}
+
+const maxOperatorInputQueueItems = 20
+
+func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorInput string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		if strings.TrimSpace(workspaceID) == "" {
+			return RunControlMsg{Message: "No active workspace. Create or select a workspace first."}
+		}
+		wsID := common.WorkspaceID(workspaceID)
+		targetRunID := common.RunID(runID)
+		if targetRunID == "" {
+			workspace, err := be.Workspace().Get(ctx, wsID)
+			if err != nil {
+				return RunControlMsg{WorkspaceID: workspaceID, Error: err}
+			}
+			runs, err := be.Run().List(ctx, wsID)
+			if err != nil {
+				return RunControlMsg{WorkspaceID: workspaceID, Error: err}
+			}
+			run := selectWorkspaceRun(workspace.ActiveRunID, runs)
+			if run == nil {
+				return RunControlMsg{WorkspaceID: workspaceID, Message: "No active run to continue. Use /goal <text> to start a new goal."}
+			}
+			targetRunID = run.ID
+		}
+		run, err := be.Run().Get(ctx, targetRunID)
+		if err != nil {
+			return RunControlMsg{WorkspaceID: workspaceID, Error: err}
+		}
+		if run == nil {
+			return RunControlMsg{WorkspaceID: workspaceID, Message: "No active run to continue. Use /goal <text> to start a new goal."}
+		}
+		switch run.State {
+		case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "The selected run is terminal. Use /goal <text> to start a new goal."}
+		case common.RunStateValidating:
+			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is validating; refreshing workspace state."}
+		default:
+			resumed, err := be.Run().Resume(ctx, run.ID, operatorInputPatch(run, operatorInput))
+			if err != nil {
+				return RunControlMsg{Run: run, WorkspaceID: workspaceID, Error: err}
+			}
+			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Continuing active run"}
+		}
+	}
+}
+
+func operatorInputPatch(run *backend.RunInfo, value string) map[string]any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	queue := operatorInputQueueFromRun(run)
+	queue = append(queue, map[string]any{
+		"source":      "tui",
+		"content":     value,
+		"submittedAt": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if len(queue) > maxOperatorInputQueueItems {
+		queue = append([]map[string]any(nil), queue[len(queue)-maxOperatorInputQueueItems:]...)
+	}
+	return map[string]any{
+		"operatorInputQueue": queue,
+		"latestOperatorInput": map[string]any{
+			"source":  "tui",
+			"content": value,
+		},
+	}
+}
+
+func operatorInputQueueFromRun(run *backend.RunInfo) []map[string]any {
+	if run == nil || len(run.ExecutionContext) == 0 {
+		return nil
+	}
+	rawItems, ok := run.ExecutionContext["operatorInputQueue"].([]any)
+	if ok {
+		ret := make([]map[string]any, 0, len(rawItems))
+		for _, raw := range rawItems {
+			if item, ok := raw.(map[string]any); ok && strings.TrimSpace(stringValueFromMap(item, "content")) != "" {
+				ret = append(ret, item)
+			}
+		}
+		return ret
+	}
+	if items, ok := run.ExecutionContext["operatorInputQueue"].([]map[string]any); ok {
+		ret := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			if strings.TrimSpace(stringValueFromMap(item, "content")) != "" {
+				ret = append(ret, item)
+			}
+		}
+		return ret
+	}
+	return nil
+}
+
+func stringValueFromMap(input map[string]any, key string) string {
+	if input == nil {
+		return ""
+	}
+	value, _ := input[key].(string)
+	return value
 }
 
 func ResolveDecision(be backend.Backend, ticketID string, answer string) tea.Cmd {

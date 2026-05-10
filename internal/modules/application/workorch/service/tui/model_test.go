@@ -144,6 +144,77 @@ func TestModelSubmitGoalStartsRun(t *testing.T) {
 	}
 }
 
+func TestModelRunControlIntentDoesNotSubmitGoal(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateRunning)
+	m := NewAppModel(be, "ws-1", "")
+	m.activeRunID = "run-continue"
+	m.setInput("继续处理")
+
+	next, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("expected continue command")
+	}
+	msg := cmd()
+	next, _ = next.(*AppModel).Update(msg)
+	m = asModel(next)
+
+	if len(be.goals) != 0 {
+		t.Fatalf("goals = %v, want no goal created for run-control input", be.goals)
+	}
+	if len(be.resumes) != 1 || be.resumes[0] != "run-continue" {
+		t.Fatalf("resumes = %v, want run-continue resumed", be.resumes)
+	}
+	if m.progressText != "Continuing active run" {
+		t.Fatalf("progress text = %q, want continuing", m.progressText)
+	}
+}
+
+func TestModelGoalSlashCommandCanSubmitRunControlWordsAsGoal(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateRunning)
+	m := NewAppModel(be, "ws-1", "")
+	m.activeRunID = "run-continue"
+	m.setInput("/goal 继续处理")
+
+	next, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("expected goal submit command")
+	}
+	msg := cmd()
+	_, _ = next.(*AppModel).Update(msg)
+
+	if len(be.goals) != 1 || be.goals[0] != "继续处理" {
+		t.Fatalf("goals = %v, want explicit /goal text", be.goals)
+	}
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want no resume for explicit /goal", be.resumes)
+	}
+}
+
+func TestModelPlainInputDuringActiveRunQueuesOperatorInput(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateRunning)
+	m := NewAppModel(be, "ws-1", "")
+	m.activeRunID = "run-continue"
+	m.setInput("补充约束：优先修复当前失败项")
+
+	next, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("expected continue command")
+	}
+	msg := cmd()
+	_, _ = next.(*AppModel).Update(msg)
+
+	if len(be.goals) != 0 {
+		t.Fatalf("goals = %v, want no goal for active-run operator input", be.goals)
+	}
+	if len(be.resumePatches) != 1 {
+		t.Fatalf("resume patches = %v, want one patch", be.resumePatches)
+	}
+	queue, ok := be.resumePatches[0]["operatorInputQueue"].([]map[string]any)
+	if !ok || len(queue) != 1 || queue[0]["content"] != "补充约束：优先修复当前失败项" {
+		t.Fatalf("operatorInputQueue = %#v, want queued input", be.resumePatches[0]["operatorInputQueue"])
+	}
+}
+
 func TestModelRunStartedDoesNotOverwriteStepProgress(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.applyBackendEvent(backend.Event{
@@ -2060,6 +2131,60 @@ func (f *workspaceCreateWS) Delete(ctx context.Context, id common.WorkspaceID, p
 	return nil
 }
 
+type recordingBE struct {
+	*fakeBE
+	runState      common.RunState
+	goals         []string
+	resumes       []common.RunID
+	resumePatches []map[string]any
+}
+
+func newRecordingBE(t *testing.T, runState common.RunState) *recordingBE {
+	t.Helper()
+	return &recordingBE{fakeBE: newFake(t), runState: runState}
+}
+
+func (b *recordingBE) Goal() backend.GoalBackend { return &recordingGoal{parent: b} }
+func (b *recordingBE) Run() backend.RunBackend   { return &recordingRun{parent: b} }
+
+type recordingGoal struct{ parent *recordingBE }
+
+func (f *recordingGoal) Define(ctx context.Context, wsID common.WorkspaceID, text string) (*backend.GoalInfo, error) {
+	f.parent.goals = append(f.parent.goals, text)
+	return &backend.GoalInfo{ID: "g-recorded", WorkspaceID: wsID, Text: text}, nil
+}
+func (f *recordingGoal) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.GoalInfo, error) {
+	return nil, nil
+}
+func (f *recordingGoal) Get(ctx context.Context, id common.GoalID) (*backend.GoalInfo, error) {
+	return &backend.GoalInfo{ID: id}, nil
+}
+func (f *recordingGoal) Update(ctx context.Context, id common.GoalID, text string) (*backend.GoalInfo, error) {
+	return &backend.GoalInfo{ID: id, Text: text}, nil
+}
+
+type recordingRun struct{ parent *recordingBE }
+
+func (f *recordingRun) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
+	return &backend.RunInfo{ID: "run-new", WorkspaceID: wsID, GoalID: req.GoalID, DoDID: req.DoDID, State: common.RunStateRunning}, nil
+}
+func (f *recordingRun) Resume(ctx context.Context, id common.RunID, executionContextPatch ...map[string]any) (*backend.RunInfo, error) {
+	f.parent.resumes = append(f.parent.resumes, id)
+	if len(executionContextPatch) > 0 {
+		f.parent.resumePatches = append(f.parent.resumePatches, executionContextPatch[0])
+	}
+	return &backend.RunInfo{ID: id, WorkspaceID: "ws-1", State: common.RunStateRunning}, nil
+}
+func (f *recordingRun) Get(ctx context.Context, id common.RunID) (*backend.RunInfo, error) {
+	return &backend.RunInfo{ID: id, WorkspaceID: "ws-1", State: f.parent.runState}, nil
+}
+func (f *recordingRun) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.RunInfo, error) {
+	return []backend.RunInfo{{ID: "run-continue", WorkspaceID: wsID, State: f.parent.runState}}, nil
+}
+func (f *recordingRun) Status(ctx context.Context, id common.RunID) (*backend.RunStatusInfo, error) {
+	return &backend.RunStatusInfo{ID: id, WorkspaceID: "ws-1", State: f.parent.runState}, nil
+}
+
 type conflictApprovalBE struct {
 	*fakeBE
 	runState common.RunState
@@ -2092,7 +2217,7 @@ type conflictRunBackend struct{ parent *conflictApprovalBE }
 func (f *conflictRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	return &backend.RunInfo{ID: "run-1", WorkspaceID: wsID, State: common.RunStateRunning}, nil
 }
-func (f *conflictRunBackend) Resume(ctx context.Context, id common.RunID) (*backend.RunInfo, error) {
+func (f *conflictRunBackend) Resume(ctx context.Context, id common.RunID, _ ...map[string]any) (*backend.RunInfo, error) {
 	f.parent.resumed = true
 	return &backend.RunInfo{ID: id, State: common.RunStateRunning}, nil
 }
@@ -2152,7 +2277,7 @@ type fakeR struct{}
 func (f *fakeR) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	return &backend.RunInfo{ID: "run-1", State: "running"}, nil
 }
-func (f *fakeR) Resume(ctx context.Context, id common.RunID) (*backend.RunInfo, error) {
+func (f *fakeR) Resume(ctx context.Context, id common.RunID, _ ...map[string]any) (*backend.RunInfo, error) {
 	return &backend.RunInfo{ID: id}, nil
 }
 func (f *fakeR) Get(ctx context.Context, id common.RunID) (*backend.RunInfo, error) {

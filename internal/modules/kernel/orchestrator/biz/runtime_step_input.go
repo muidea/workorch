@@ -41,12 +41,29 @@ func nextStepInputFromOutput(run *runModel.Run, previousStep *runModel.Step) map
 	input := nextStepInput(run, previousStep.ID)
 	inheritWorkspaceFileManifest(input, previousStep)
 	inheritStableExecutionContextPackage(input, previousStep)
+	inheritRuntimeRepairLineage(input, previousStep)
 	if nextInput := mapFromValue(previousStep.Output[stepOutputKeyNextInput]); nextInput != nil {
 		for key, value := range nextInput {
 			input[key] = value
 		}
 	}
 	return input
+}
+
+func inheritRuntimeRepairLineage(input map[string]any, previousStep *runModel.Step) {
+	if input == nil || previousStep == nil || previousStep.Input == nil {
+		return
+	}
+	for _, key := range []string{
+		stepInputKeyRepairOfStepID,
+		stepInputKeyRepairOfRootStepID,
+		stepInputKeyRepairOfFailureClass,
+		stepInputKeyRepairOfFailureSig,
+	} {
+		if value, ok := previousStep.Input[key]; ok {
+			input[key] = value
+		}
+	}
 }
 
 func inheritWorkspaceFileManifest(input map[string]any, previousStep *runModel.Step) {

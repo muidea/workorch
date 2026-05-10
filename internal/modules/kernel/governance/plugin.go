@@ -56,11 +56,14 @@ func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 		MemoryItems:          repos.MemoryItems,
 		AutoGovernanceTraces: repos.AutoGovernanceTraces,
 		EventHub:             runtime.EventHub(),
-		ResolveDecision: func(ctx context.Context, ticketID common.TicketID, payload map[string]any) error {
+		ResolveDecision: func(ctx context.Context, ticketID common.TicketID, resolutionType string, payload map[string]any) error {
+			if !decisioncommon.IsSupportedResolutionType(resolutionType) {
+				resolutionType = decisioncommon.ResolutionTypeProvideMissingInfo
+			}
 			return decisionSvc.EnsureResolvedTicket(ctx, decisionmodule.ResolveTicketCommand{
 				ResolutionID: common.ResolutionID("resolution-" + string(ticketID) + "-auto-governance"),
 				TicketID:     ticketID,
-				Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
+				Type:         resolutionType,
 				Payload:      payload,
 			})
 		},

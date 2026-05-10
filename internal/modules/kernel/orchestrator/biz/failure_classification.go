@@ -240,6 +240,9 @@ func runtimeFailureSignature(class string, step *runModel.Step, output map[strin
 			}
 		}
 	}
+	if targets := failureTargetsForSignature(output); len(targets) > 0 {
+		parts = append(parts, "failureTargets="+strings.Join(targets, ","))
+	}
 	if exitCode, ok := normalizedSignatureNumber(output["exitCode"]); ok {
 		parts = append(parts, "exitCode="+exitCode)
 	}
@@ -248,6 +251,48 @@ func runtimeFailureSignature(class string, step *runModel.Step, output map[strin
 		parts = append(parts, "error="+value)
 	}
 	return strings.Join(parts, "|")
+}
+
+func failureTargetsForSignature(output map[string]any) []string {
+	if len(output) == 0 {
+		return nil
+	}
+	text := strings.Join([]string{
+		stringFromMap(output, "stderr"),
+		stringFromMap(output, "stdout"),
+		stringFromMap(output, "error"),
+		stringFromMap(output, "reason"),
+	}, "\n")
+	matches := failureTargetLocatorPattern.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ret []string
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		target := normalizedFailureTarget(match[1])
+		if target == "" || seen[target] {
+			continue
+		}
+		seen[target] = true
+		ret = append(ret, target)
+		if len(ret) >= 5 {
+			break
+		}
+	}
+	return ret
+}
+
+var failureTargetLocatorPattern = regexp.MustCompile(`(?m)(?:^|[\s"'(])([A-Za-z0-9_.\/\\-]+\.[A-Za-z0-9_+-]+):[0-9]+(?::[0-9]+)?`)
+
+func normalizedFailureTarget(value string) string {
+	value = strings.TrimSpace(strings.Trim(value, `"'()[]{}<>`))
+	value = strings.ReplaceAll(value, `\`, `/`)
+	value = strings.TrimPrefix(value, "./")
+	return normalizedSignatureText(value)
 }
 
 func normalizedSignatureNumber(value any) (string, bool) {
@@ -312,7 +357,11 @@ func (o *RuntimeOrchestrator) shouldBlockOnDuplicateRuntimeFailure(ctx context.C
 	}
 	signature := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeySignature))
 	class := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass))
-	if signature == "" || !duplicateRepairDecisionFailureClass(class) || o.runtimeRepairAttemptCount(ctx, run.ID) == 0 {
+	attempts := o.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep)
+	if signature == "" || !duplicateRepairDecisionFailureClass(class) || attempts == 0 {
+		return false
+	}
+	if requiresDoDAssessmentCompletionGate(run) && attempts < maxRuntimeRepairAttempts {
 		return false
 	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)

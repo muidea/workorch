@@ -98,6 +98,24 @@ func TestBuildProviderPromptMessagesProtectsGoalAndNormalizesOtherSections(t *te
 	}
 }
 
+func TestNormalizePromptTextPreservesCodeOperatorsInStructuredEvidence(t *testing.T) {
+	input := `Execution Context and Evidence Signals
+{"input":{"failedStepOutput":{"diff":"func TestAlpha(t *testing.T) {\n\t_ = handler(func(w http.ResponseWriter, r *http.Request) {})\n\tif a < b && c > d { return }\n}"}}}`
+	normalized, _ := normalizePromptText(input)
+	required := []string{
+		"*testing.T",
+		"*http.Request",
+		"&&",
+		"< b",
+		"> d",
+	}
+	for _, item := range required {
+		if !strings.Contains(normalized, item) {
+			t.Fatalf("normalized prompt missing %q\nnormalized=%s", item, normalized)
+		}
+	}
+}
+
 func TestBuildProviderPromptMessagesIncludesDecisionApprovalResolutions(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID:    "ws-3",

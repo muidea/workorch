@@ -210,8 +210,8 @@ func (b *remoteRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID
 		ExecutionContext: act.Run.ExecutionContext, State: common.RunState(act.Run.State),
 	}, nil
 }
-func (b *remoteRunBackend) Resume(ctx context.Context, id common.RunID) (*RunInfo, error) {
-	r, err := b.cl.ResumeRun(ctx, string(id))
+func (b *remoteRunBackend) Resume(ctx context.Context, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error) {
+	r, err := b.cl.ResumeRun(ctx, string(id), executionContextPatch...)
 	if err != nil {
 		return nil, err
 	}

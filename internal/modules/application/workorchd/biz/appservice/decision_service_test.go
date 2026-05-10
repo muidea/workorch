@@ -403,15 +403,15 @@ func TestResolveDecisionWithSessionAllowsTargetWorkspaceExternalDependencyConfig
 	}
 }
 
-func TestResolveDecisionWithSessionRejectsAmbiguousRepairExhaustionContinue(t *testing.T) {
-	session, tickets, resolutions := newCountingDecisionRuntimeSession(t)
+func TestResolveDecisionWithSessionInfersRepairExhaustionRetryFromContinue(t *testing.T) {
+	session, tickets, _ := newCountingDecisionRuntimeSession(t)
 	ctx := context.Background()
-	ticketID := common.TicketID("ticket-repair-exhaustion-ambiguous")
+	ticketID := common.TicketID("ticket-repair-exhaustion-continue")
 	if err := tickets.Create(ctx, &decisionmodel.Ticket{
 		ID:          ticketID,
-		WorkspaceID: common.WorkspaceID("ws-repair-exhaustion-ambiguous"),
-		RunID:       common.RunID("run-repair-exhaustion-ambiguous"),
-		StepID:      common.StepID("run-repair-exhaustion-ambiguous/step-1"),
+		WorkspaceID: common.WorkspaceID("ws-repair-exhaustion-continue"),
+		RunID:       common.RunID("run-repair-exhaustion-continue"),
+		StepID:      common.StepID("run-repair-exhaustion-continue/step-1"),
 		Reason:      "runtime repair attempts exhausted after 3 attempts",
 		Question:    "Provide missing implementation guidance, choose replan, or reject the current path.",
 		Context: map[string]any{
@@ -422,25 +422,21 @@ func TestResolveDecisionWithSessionRejectsAmbiguousRepairExhaustionContinue(t *t
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	_, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
 		ResolutionType: "auto",
 		ResolutionPayload: map[string]any{
 			"answer":   "继续",
 			"operator": "tui",
 		},
 	})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("ResolveDecisionWithSession err = %v, want invalid argument", err)
+	if err != nil {
+		t.Fatalf("ResolveDecisionWithSession: %v", err)
 	}
-	item, getErr := tickets.Get(ctx, ticketID)
-	if getErr != nil {
-		t.Fatalf("get ticket: %v", getErr)
+	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
+		t.Fatalf("decision = %+v, want resolved retry as provide_missing_info", item)
 	}
-	if item.State != common.DecisionTicketStateOpen {
-		t.Fatalf("ticket state = %s, want open", item.State)
-	}
-	if _, getErr = resolutions.GetByTicketID(ctx, ticketID); !errors.Is(getErr, common.ErrNotFound) {
-		t.Fatalf("resolution err = %v, want not found", getErr)
+	if item.ResolutionPayload["recoveryAction"] != "retry_same_step" {
+		t.Fatalf("resolutionPayload = %+v, want inferred retry_same_step", item.ResolutionPayload)
 	}
 }
 
@@ -476,6 +472,52 @@ func TestResolveDecisionWithSessionAllowsExplicitRepairExhaustionRecoveryAction(
 	}
 	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
 		t.Fatalf("decision = %+v, want resolved explicit recovery action", item)
+	}
+}
+
+func TestResolveDecisionWithSessionMapsRepairExhaustionReplanAndTerminate(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		answer             string
+		wantResolutionType string
+		wantAction         string
+	}{
+		{name: "replan", answer: "请重新规划修复路径", wantResolutionType: decisioncommon.ResolutionTypeReplan, wantAction: "replan"},
+		{name: "terminate", answer: "不继续，终止当前路径", wantResolutionType: decisioncommon.ResolutionTypeRejectCurrentPath, wantAction: "terminate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session, tickets, _ := newCountingDecisionRuntimeSession(t)
+			ctx := context.Background()
+			ticketID := common.TicketID("ticket-repair-exhaustion-" + tc.name)
+			if err := tickets.Create(ctx, &decisionmodel.Ticket{
+				ID:          ticketID,
+				WorkspaceID: common.WorkspaceID("ws-repair-exhaustion-" + tc.name),
+				RunID:       common.RunID("run-repair-exhaustion-" + tc.name),
+				StepID:      common.StepID("run-repair-exhaustion-" + tc.name + "/step-1"),
+				Reason:      "runtime repair attempts exhausted after 3 attempts",
+				Question:    "Provide missing implementation guidance, choose replan, or reject the current path.",
+				Context: map[string]any{
+					decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+				},
+				State: common.DecisionTicketStateOpen,
+			}); err != nil {
+				t.Fatalf("create ticket: %v", err)
+			}
+
+			item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+				ResolutionType: "auto",
+				ResolutionPayload: map[string]any{
+					"answer":   tc.answer,
+					"operator": "tui",
+				},
+			})
+			if err != nil {
+				t.Fatalf("ResolveDecisionWithSession: %v", err)
+			}
+			if item.ResolutionType != tc.wantResolutionType || item.ResolutionPayload["recoveryAction"] != tc.wantAction {
+				t.Fatalf("decision = %+v, want type=%s action=%s", item, tc.wantResolutionType, tc.wantAction)
+			}
+		})
 	}
 }
 

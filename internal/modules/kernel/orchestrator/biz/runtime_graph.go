@@ -407,6 +407,7 @@ func nextGraphStepInput(
 	rootStepID common.StepID,
 ) map[string]any {
 	input := nextStepInput(run, last.ID)
+	inheritRuntimeRepairLineage(input, last)
 	renderedNodeInput, _ := renderRuntimeTemplateValue(node.Input, graphRuntimeTemplateContext(steps, rootStepID)).(map[string]any)
 	for key, value := range renderedNodeInput {
 		input[key] = value
@@ -700,6 +701,7 @@ func llmCompletionFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[
 	input := nextStepInput(run, step.ID)
 	input[stepInputKeySoulStage] = soulStageValidation
 	input["completionFollowUp"] = true
+	inheritRuntimeRepairLineage(input, step)
 	inheritWorkspaceFileManifest(input, step)
 	inheritStableExecutionContextPackage(input, step)
 	if step.Kind != "" {
@@ -817,6 +819,7 @@ func graphFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]a
 	input := nextStepInput(run, step.ID)
 	input[stepInputKeySoulStage] = soulStageValidation
 	input["graphFollowUp"] = true
+	inheritRuntimeRepairLineage(input, step)
 	inheritWorkspaceFileManifest(input, step)
 	inheritStableExecutionContextPackage(input, step)
 	if nodeID := graphNodeID(step); nodeID != "" {

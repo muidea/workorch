@@ -37,7 +37,7 @@ enabled = true
 minConfidence = 0.9
 maxPerRun = 3
 allowReadOnly = true
-allowWorkspaceWrite = false
+allowWorkspaceWrite = true
 requireHumanFor = ["secret_access", "external_write", "destructive_operation", "production_operation"]
 
 [governance.budget]

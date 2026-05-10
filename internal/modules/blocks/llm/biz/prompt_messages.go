@@ -24,7 +24,6 @@ type providerPromptMessageBuildResult struct {
 var promptDividerPattern = regexp.MustCompile(`(?m)^[-=]{3,}\s*$`)
 var promptHeadingPattern = regexp.MustCompile(`(?m)^\s{0,3}#{2,}\s*`)
 var promptBoldPattern = regexp.MustCompile(`\*\*([^\*]+)\*\*`)
-var promptItalicPattern = regexp.MustCompile(`\*([^\*\n]+)\*`)
 
 func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerPromptMessageBuildResult {
 	if turns := requestPromptContextTurns(request); len(turns) > 0 {
@@ -362,7 +361,6 @@ func normalizePromptText(content string) (string, int) {
 	content = promptDividerPattern.ReplaceAllString(content, "")
 	content = promptHeadingPattern.ReplaceAllString(content, "")
 	content = promptBoldPattern.ReplaceAllString(content, "$1")
-	content = promptItalicPattern.ReplaceAllString(content, "$1")
 	content = strings.Join(compactPromptLines(strings.Split(content, "\n")), "\n")
 	if content == "" {
 		return strings.TrimSpace(original), 0

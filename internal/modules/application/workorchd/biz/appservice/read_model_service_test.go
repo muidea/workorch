@@ -1575,6 +1575,115 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 	}
 }
 
+func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-stream-blocked-timeline")
+	runID := common.RunID("run-stream-blocked-timeline")
+	stepID := "run-stream-blocked-timeline/zz-llm-repair-step"
+	timeline := runtimeTimeline(RunSnapshot{
+		Run: Run{
+			ID:          string(runID),
+			WorkspaceID: string(workspaceID),
+			State:       string(common.RunStateBlockedOnDecision),
+		},
+		Steps: []presenter.StepView{{
+			ID:    stepID,
+			Kind:  "llm/workspace_execution",
+			State: string(common.StepStateCompleted),
+			Output: map[string]any{
+				"stage": "llm_execution_graph_plan",
+				"streamEvents": []map[string]any{
+					{"type": "delta", "delta": `{"completionState":"continue"`},
+					{"type": "done"},
+				},
+			},
+		}},
+		EventRecords: []EventRecord{{
+			ID:          "evt-stream-progress",
+			Topic:       events.TopicRunLLMStreamProgress,
+			SubjectType: "llm_stream_progress",
+			SubjectID:   stepID,
+			WorkspaceID: string(workspaceID),
+			RunID:       string(runID),
+			StepID:      stepID,
+			Payload: events.LLMStreamProgressPayload(
+				workspaceID,
+				runID,
+				common.StepID(stepID),
+				"provider-a",
+				"model-a",
+				2,
+				28,
+				0,
+				"completed",
+				"llm_execution_graph_plan - completed",
+			),
+		}},
+	})
+
+	var checked int
+	for _, item := range timeline {
+		switch item.Source {
+		case "step", "step_stream", "llm_stream_progress_event":
+			checked++
+			if item.RunState == string(common.RunStateBlockedOnDecision) {
+				t.Fatalf("timeline item = %+v, want step/stream item not to inherit final blocked run state", item)
+			}
+			if item.RunState != string(common.StepStateCompleted) {
+				t.Fatalf("timeline item = %+v, want completed display state", item)
+			}
+		}
+	}
+	if checked != 4 {
+		t.Fatalf("checked timeline items = %d, want step + two stream chunks + progress event", checked)
+	}
+}
+
+func TestRuntimeTimelineCompactsLargeStreamDeltaOutput(t *testing.T) {
+	stepID := "run-large-stream/step-1"
+	streamEvents := make([]map[string]any, 0, 80)
+	for idx := 0; idx < 80; idx++ {
+		streamEvents = append(streamEvents, map[string]any{
+			"type":  "delta",
+			"delta": "chunk-" + strconv.Itoa(idx+1),
+		})
+	}
+	timeline := runtimeTimeline(RunSnapshot{
+		Run: Run{ID: "run-large-stream", WorkspaceID: "ws-large-stream", State: string(common.RunStateRunning)},
+		Steps: []presenter.StepView{{
+			ID:    stepID,
+			Kind:  "llm/workspace_execution",
+			State: string(common.StepStateCompleted),
+			Output: map[string]any{
+				"stage":        "llm_execution_graph_plan",
+				"streamEvents": streamEvents,
+			},
+		}},
+	})
+
+	var streamCount int
+	var omitted *RuntimeTimelineItem
+	for idx := range timeline {
+		item := timeline[idx]
+		if item.Source != "step_stream" {
+			continue
+		}
+		streamCount++
+		if item.Type == "omitted" {
+			omitted = &timeline[idx]
+		}
+		if item.RunState == string(common.RunStateRunning) {
+			t.Fatalf("stream timeline item = %+v, want step display state", item)
+		}
+	}
+	want := streamTimelineHeadItemKeep + streamTimelineTailItemKeep + 1
+	if streamCount != want {
+		t.Fatalf("stream timeline count = %d, want compact count %d", streamCount, want)
+	}
+	if omitted == nil || omitted.Data["omitted"] != 56 || omitted.Data["total"] != 80 {
+		t.Fatalf("omitted item = %+v, want compact omission metadata", omitted)
+	}
+}
+
 func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)

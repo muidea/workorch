@@ -50,9 +50,15 @@ func (c *Client) StartRun(ctx context.Context, runID string) (*Run, error) {
 	return decodeEnvelope[Run](resp, "run")
 }
 
-// ResumeRun resumes a blocked run.
-func (c *Client) ResumeRun(ctx context.Context, runID string) (*Run, error) {
-	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/runs/%s/resume", runID), nil)
+// ResumeRun resumes a blocked run, optionally merging additional execution context.
+func (c *Client) ResumeRun(ctx context.Context, runID string, executionContextPatch ...map[string]any) (*Run, error) {
+	var body any
+	if len(executionContextPatch) > 0 && len(executionContextPatch[0]) > 0 {
+		body = struct {
+			ExecutionContextPatch map[string]any `json:"executionContextPatch,omitempty"`
+		}{ExecutionContextPatch: executionContextPatch[0]}
+	}
+	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/runs/%s/resume", runID), body)
 	if err != nil {
 		return nil, err
 	}

@@ -9,6 +9,12 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
+const (
+	maxRawStreamTimelineItems  = 32
+	streamTimelineHeadItemKeep = 12
+	streamTimelineTailItemKeep = 12
+)
+
 func runtimeEvidenceSummary(snapshot RunSnapshot, eventTotal int) RuntimeEvidenceSummary {
 	ret := RuntimeEvidenceSummary{
 		ToolCallTotal:          len(snapshot.ToolCalls),
@@ -87,18 +93,19 @@ func runtimeTimeline(snapshot RunSnapshot) []RuntimeTimelineItem {
 	}
 	for _, step := range snapshot.Steps {
 		occurredAt := stepOccurrences[step.ID]
+		stepDisplayState := firstNonEmptyReadModel(step.State, snapshot.Run.State)
 		items = append(items, RuntimeTimelineItem{
 			Source:     "step",
 			Type:       step.Kind,
 			ID:         step.ID,
-			RunState:   snapshot.Run.State,
+			RunState:   stepDisplayState,
 			StepID:     step.ID,
 			StepState:  step.State,
 			Summary:    timelineStepSummary(step.Output),
 			OccurredAt: occurredAt,
 			Output:     cloneReadModelMap(step.Output),
 		})
-		items = append(items, streamTimelineItems(step, snapshot.Run.State, occurredAt)...)
+		items = append(items, streamTimelineItems(step, stepDisplayState, occurredAt)...)
 	}
 	for _, checkpoint := range snapshot.RuntimeCheckpoints {
 		items = append(items, RuntimeTimelineItem{
@@ -243,8 +250,29 @@ func streamTimelineItems(step presenter.StepView, runState string, stepOccurredA
 	if len(events) == 0 {
 		return nil
 	}
-	ret := make([]RuntimeTimelineItem, 0, len(events))
+	ret := make([]RuntimeTimelineItem, 0, streamTimelineItemCapacity(len(events)))
+	omittedInserted := false
 	for idx, event := range events {
+		if streamTimelineEventOmitted(idx, len(events)) {
+			if !omittedInserted {
+				omitted := len(events) - streamTimelineHeadItemKeep - streamTimelineTailItemKeep
+				ret = append(ret, RuntimeTimelineItem{
+					Source:    "step_stream",
+					Type:      "omitted",
+					ID:        step.ID + "/stream/omitted",
+					RunState:  runState,
+					StepID:    step.ID,
+					StepState: step.State,
+					Summary:   "omitted " + strconv.Itoa(omitted) + " stream chunks",
+					Data: map[string]any{
+						"omitted": omitted,
+						"total":   len(events),
+					},
+				})
+				omittedInserted = true
+			}
+			continue
+		}
 		eventType, _ := event["type"].(string)
 		if eventType == "" {
 			eventType = "delta"
@@ -266,6 +294,20 @@ func streamTimelineItems(step presenter.StepView, runState string, stepOccurredA
 		})
 	}
 	return ret
+}
+
+func streamTimelineItemCapacity(total int) int {
+	if total <= maxRawStreamTimelineItems {
+		return total
+	}
+	return streamTimelineHeadItemKeep + streamTimelineTailItemKeep + 1
+}
+
+func streamTimelineEventOmitted(idx int, total int) bool {
+	if total <= maxRawStreamTimelineItems {
+		return false
+	}
+	return idx >= streamTimelineHeadItemKeep && idx < total-streamTimelineTailItemKeep
 }
 
 func streamEventOccurredAt(event map[string]any) string {
@@ -293,8 +335,9 @@ func streamProgressTimelineItemFromPersistedEvent(item EventRecord, runState str
 		Type:       itemType,
 		ID:         firstNonEmptyReadModel(item.ID, stepID+"/llm-stream-progress"),
 		Topic:      item.Topic,
-		RunState:   firstNonEmptyReadModel(runState, readModelStringValue(payload[events.PayloadKeyStatus])),
+		RunState:   firstNonEmptyReadModel(readModelStringValue(payload[events.PayloadKeyStatus]), runState),
 		StepID:     stepID,
+		StepState:  itemType,
 		Summary:    summary,
 		OccurredAt: item.OccurredAt,
 		Data:       payload,
@@ -317,8 +360,9 @@ func streamProgressTimelineItemFromObserved(item presenter.ObservedView, runStat
 		Type:       itemType,
 		ID:         firstNonEmptyReadModel(item.SubjectID, stepID+"/llm-stream-progress"),
 		Topic:      item.Topic,
-		RunState:   firstNonEmptyReadModel(runState, readModelStringValue(payload[events.PayloadKeyStatus])),
+		RunState:   firstNonEmptyReadModel(readModelStringValue(payload[events.PayloadKeyStatus]), runState),
 		StepID:     stepID,
+		StepState:  itemType,
 		Summary:    summary,
 		OccurredAt: item.OccurredAt,
 		Data:       payload,

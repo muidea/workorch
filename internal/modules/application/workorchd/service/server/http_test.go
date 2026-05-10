@@ -1130,7 +1130,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}
 		return appservice.Run{ID: runID, WorkspaceID: "ws-native-read", State: "completed"}, nil
 	}
-	state.resumeRun = func(ctx context.Context, _, _, runID string) (appservice.Run, error) {
+	state.resumeRun = func(ctx context.Context, _, _, runID string, _ ...map[string]any) (appservice.Run, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("run resume event hub = %#v, want injected hub", got)
 		}
@@ -3780,7 +3780,7 @@ func TestRunResumeEndpointReturnsRequestTimeoutWhenQueueWaitCanceled(t *testing.
 		MaxConcurrentRuns: 1,
 	}), nil)
 	state.validate = func(context.Context, string, string) error { return nil }
-	state.resumeRun = func(ctx context.Context, backend string, dataRoot string, runID string) (appservice.Run, error) {
+	state.resumeRun = func(ctx context.Context, backend string, dataRoot string, runID string, _ ...map[string]any) (appservice.Run, error) {
 		if runID == "run-held" {
 			started <- struct{}{}
 			<-release

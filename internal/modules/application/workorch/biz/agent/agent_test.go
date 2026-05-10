@@ -166,7 +166,7 @@ type fakeRun struct{}
 func (fakeRun) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	return &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateRunning}, nil
 }
-func (fakeRun) Resume(context.Context, common.RunID) (*backend.RunInfo, error) {
+func (fakeRun) Resume(context.Context, common.RunID, ...map[string]any) (*backend.RunInfo, error) {
 	return &backend.RunInfo{}, nil
 }
 func (fakeRun) Get(context.Context, common.RunID) (*backend.RunInfo, error) {

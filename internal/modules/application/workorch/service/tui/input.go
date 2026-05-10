@@ -2,6 +2,8 @@ package tui
 
 import (
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -188,7 +190,7 @@ func slashCommandMatches(input string) []string {
 		return nil
 	}
 	prefix := strings.ToLower(strings.TrimPrefix(trimmed, "/"))
-	commands := []string{"/help", "/clear", "/workspace", "/workspace create", "/dod", "/memory", "/result", "/exit"}
+	commands := []string{"/help", "/clear", "/workspace", "/workspace create", "/goal", "/dod", "/memory", "/result", "/continue", "/exit"}
 	matches := make([]string, 0, len(commands))
 	for _, command := range commands {
 		if strings.HasPrefix(strings.TrimPrefix(command, "/"), prefix) {
@@ -196,4 +198,71 @@ func slashCommandMatches(input string) []string {
 		}
 	}
 	return matches
+}
+
+func isRunControlIntent(input string) bool {
+	normalized := normalizeRunControlInput(input)
+	if normalized == "" || utf8.RuneCountInString(normalized) > 24 {
+		return false
+	}
+	exact := map[string]struct{}{
+		"继续": {}, "继续处理": {}, "继续执行": {}, "继续推进": {}, "继续收口": {}, "继续修复": {}, "继续运行": {}, "继续工作": {},
+		"恢复": {}, "恢复执行": {}, "恢复运行": {}, "恢复处理": {},
+		"接着处理": {}, "接着执行": {}, "接着推进": {}, "接着修复": {},
+		"continue": {}, "resume": {}, "goon": {}, "proceed": {}, "keeprunning": {}, "continuerun": {}, "resumerun": {}, "resumeexecution": {}, "continueexecution": {},
+	}
+	if _, ok := exact[normalized]; ok {
+		return true
+	}
+	for _, prefix := range []string{"继续", "恢复", "接着"} {
+		if strings.HasPrefix(normalized, prefix) && hasRunControlActionCue(strings.TrimPrefix(normalized, prefix)) {
+			return true
+		}
+	}
+	for _, prefix := range []string{"continue", "resume"} {
+		if strings.HasPrefix(normalized, prefix) && hasASCIIRunControlCue(strings.TrimPrefix(normalized, prefix)) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeRunControlInput(input string) string {
+	input = strings.ToLower(strings.TrimSpace(input))
+	var b strings.Builder
+	for _, r := range input {
+		switch {
+		case unicode.IsLetter(r), unicode.IsNumber(r):
+			b.WriteRune(r)
+		case r >= '\u4e00' && r <= '\u9fff':
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func hasRunControlActionCue(value string) bool {
+	if value == "" {
+		return true
+	}
+	cues := []string{"处理", "执行", "推进", "收口", "修复", "运行", "工作", "做", "跑", "走", "弄", "剩余", "后续", "当前", "任务"}
+	for _, cue := range cues {
+		if strings.Contains(value, cue) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasASCIIRunControlCue(value string) bool {
+	if value == "" {
+		return true
+	}
+	cues := []string{"run", "execution", "process", "work", "task", "fix", "repair", "remaining", "current", "next"}
+	for _, cue := range cues {
+		if strings.Contains(value, cue) {
+			return true
+		}
+	}
+	return false
 }

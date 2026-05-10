@@ -1903,6 +1903,62 @@ func TestApplyWorkspacePatchRejectsBaseHashMismatch(t *testing.T) {
 	}
 }
 
+func TestApplyWorkspacePatchAcceptsRangeLessUnifiedDiff(t *testing.T) {
+	workingDirectory := t.TempDir()
+	target := filepath.Join(workingDirectory, "docs", "sample.txt")
+	original := "alpha\n\nsection one\nold value\nend section\n\nomega\n"
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("create target dir: %v", err)
+	}
+	if err := os.WriteFile(target, []byte(original), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	err := applyWorkspacePatch(workingDirectory, runtimePatchRequest{
+		TargetRef: "docs/sample.txt",
+		PatchType: "unified_diff",
+		Diff:      "--- a/docs/sample.txt\n+++ b/docs/sample.txt\n@@\n section one\n-old value\n+new value\n end section\n",
+	})
+	if err != nil {
+		t.Fatalf("applyWorkspacePatch range-less diff err = %v", err)
+	}
+	content, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("read target: %v", readErr)
+	}
+	if !strings.Contains(string(content), "new value") || strings.Contains(string(content), "old value") {
+		t.Fatalf("content = %q, want range-less diff applied", string(content))
+	}
+}
+
+func TestApplyWorkspacePatchAcceptsSingleFileApplyPatchStyleDiff(t *testing.T) {
+	workingDirectory := t.TempDir()
+	target := filepath.Join(workingDirectory, "docs", "sample.txt")
+	original := "alpha\n\nsection one\nold value\nend section\n\nomega\n"
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("create target dir: %v", err)
+	}
+	if err := os.WriteFile(target, []byte(original), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	err := applyWorkspacePatch(workingDirectory, runtimePatchRequest{
+		TargetRef: "docs/sample.txt",
+		PatchType: "unified_diff",
+		Diff:      "*** Begin Patch\n*** Update File: docs/sample.txt\n@@\n section one\n-old value\n+new value\n end section\n*** End Patch",
+	})
+	if err != nil {
+		t.Fatalf("applyWorkspacePatch apply-patch style diff err = %v", err)
+	}
+	content, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("read target: %v", readErr)
+	}
+	if !strings.Contains(string(content), "new value") || strings.Contains(string(content), "old value") {
+		t.Fatalf("content = %q, want apply-patch style diff applied", string(content))
+	}
+}
+
 func TestPatchPreviewDoesNotWriteFile(t *testing.T) {
 	workingDirectory := t.TempDir()
 	result, err := NewPatchRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
@@ -2292,6 +2348,17 @@ func TestRuntimePatchRequestRejectsUnresolvedTemplateContent(t *testing.T) {
 	}
 }
 
+func TestRuntimePatchRequestRejectsUnresolvedSymbolicPlaceholderContent(t *testing.T) {
+	_, err := runtimePatchRequestFromMap(map[string]any{
+		"patchType": "file_write",
+		"targetRef": "config.go",
+		"content":   "__FROM_READ_REWRITE_CONFIG_GO_WITH_CONFIG_YAML_AND_ENV_OVERRIDE__",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unresolved runtime template") {
+		t.Fatalf("runtimePatchRequestFromMap error = %v, want unresolved symbolic placeholder error", err)
+	}
+}
+
 func TestNextGraphStepInputRendersDependencyOutputTemplates(t *testing.T) {
 	rootStepID := common.StepID("run-render/step-1")
 	completedStep := &runmodel.Step{
@@ -2492,6 +2559,60 @@ func TestRuntimeOrchestrator_RuntimeRepairInputSkipsWorkspaceManifestForDoDFailu
 	}
 	if missing := mapSliceFromValue(input["missingDoDItems"]); len(missing) != 1 || missing[0]["kind"] != "leaf" {
 		t.Fatalf("missingDoDItems = %#v, want one leaf item", input["missingDoDItems"])
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	workingDirectory := t.TempDir()
+	source := "func sample(arg *Type) {\n\t_ = handler(func(v *Value) {})\n}\n"
+	if err := os.WriteFile(filepath.Join(workingDirectory, "source.txt"), []byte(source), 0o644); err != nil {
+		t.Fatalf("seed source file: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-patch-repair-context")
+	runID := common.RunID("run-patch-repair-context")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/block/apply"),
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"targetRef": "source.txt",
+			"diff":      "--- a/source.txt\n+++ b/source.txt\n@@\n-func sample(arg Type)\n+func sample(arg *Type)",
+		},
+		Output: map[string]any{
+			"status":                  "completed",
+			"stage":                   "patch_apply",
+			"error":                   "invalid argument",
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: "class=patch_apply_failed|targetRef=source.txt",
+			"patches": []map[string]any{
+				{"targetRef": "source.txt"},
+			},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 1, common.ErrInvalidArgument)
+
+	patchContext := mapSliceFromValue(input["patchRepairContext"])
+	if len(patchContext) != 1 {
+		t.Fatalf("patchRepairContext = %#v, want one snapshot", input["patchRepairContext"])
+	}
+	item := patchContext[0]
+	if item["targetRef"] != "source.txt" || item["exists"] != true || item["source"] != "current_workspace_file" {
+		t.Fatalf("patchRepairContext item = %#v, want current source.txt snapshot", item)
+	}
+	content, _ := item["content"].(string)
+	if !strings.Contains(content, "*Type") || !strings.Contains(content, "*Value") {
+		t.Fatalf("patchRepairContext content = %q, want exact current source operators", content)
+	}
+	if strings.TrimSpace(stringFromMap(item, "contentHash")) == "" {
+		t.Fatalf("patchRepairContext contentHash missing: %#v", item)
 	}
 }
 
@@ -4905,6 +5026,577 @@ func TestRuntimeOrchestrator_RuntimeRepairAttemptCountIgnoresProviderInfrastruct
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairAttemptCountIsScopedByFailureSignature(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-runtime-repair-budget-scoped-signature")
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	for attempt := 1; attempt <= maxRuntimeRepairAttempts; attempt++ {
+		if err := stepRepo.Create(ctx, &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/repair-a-%d", runID, attempt)),
+			RunID: runID,
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRuntimeRepairAttempt:  attempt,
+				stepInputKeyRepairOfFailureClass:  failureClassRuntime,
+				stepInputKeyRepairOfFailureSig:    "class=runtime|target=a",
+			},
+			Output: map[string]any{"status": "completed"},
+		}); err != nil {
+			t.Fatalf("seed scoped repair %d: %v", attempt, err)
+		}
+	}
+
+	failedA := &runmodel.Step{
+		ID:    common.StepID(runID + "/block/a"),
+		RunID: runID,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime|target=a",
+		},
+	}
+	failedB := &runmodel.Step{
+		ID:    common.StepID(runID + "/block/b"),
+		RunID: runID,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime|target=b",
+		},
+	}
+
+	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedA); got != maxRuntimeRepairAttempts {
+		t.Fatalf("attempt count for A = %d, want exhausted scope", got)
+	}
+	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedB); got != 0 {
+		t.Fatalf("attempt count for B = %d, want independent scope", got)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairScopeUsesCurrentFailureBeforeInheritedLineage(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-runtime-repair-budget-current-signature")
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	for attempt := 1; attempt <= maxRuntimeRepairAttempts; attempt++ {
+		if err := stepRepo.Create(ctx, &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/old-repair-%d", runID, attempt)),
+			RunID: runID,
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRuntimeRepairAttempt:  attempt,
+				stepInputKeyRepairOfFailureClass:  failureClassShellCommand,
+				stepInputKeyRepairOfFailureSig:    "class=shell_command_failed|command=verify|failureTargets=old-target",
+			},
+			Output: map[string]any{"status": "completed"},
+		}); err != nil {
+			t.Fatalf("seed old repair %d: %v", attempt, err)
+		}
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(runID + "/block/verify"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRepairOfFailureClass: failureClassShellCommand,
+			stepInputKeyRepairOfFailureSig:   "class=shell_command_failed|command=verify|failureTargets=old-target",
+		},
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|command=verify|failureTargets=new-target",
+		},
+	}
+
+	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 0 {
+		t.Fatalf("attempt count = %d, want current output failure signature to ignore inherited lineage attempts", got)
+	}
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: common.WorkspaceID("ws-current-signature")}, failedStep, 1, nil)
+	if input[stepInputKeyRepairOfFailureSig] != "class=shell_command_failed|command=verify|failureTargets=new-target" {
+		t.Fatalf("repair input signature = %#v, want current output failure signature", input[stepInputKeyRepairOfFailureSig])
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeClearsStaleRuntimeRepairExhaustionBlocker(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "completed"}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+	workspaceID := common.WorkspaceID("ws-stale-repair-blocker")
+	runID := common.RunID("run-stale-repair-blocker")
+	ticketID := common.TicketID("ticket-stale-repair-blocker")
+	signature := "class=runtime|target=stale"
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID,
+		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      common.StepID(runID + "/block/original"),
+		State:       common.DecisionTicketStateOpen,
+		Context: map[string]any{
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+			"failedStepId":                   string(runID + "/block/original"),
+			"failureClass":                   failureClassRuntime,
+			"failureSignature":               signature,
+		},
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(runID + "/block/repair-success"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"previousStepId":                 string(runID + "/block/original"),
+			stepInputKeyGraphNodeID:          "repair-success",
+			stepInputKeyRepairOfStepID:       string(runID + "/block/original"),
+			stepInputKeyRepairOfFailureClass: failureClassRuntime,
+			stepInputKeyRepairOfFailureSig:   signature,
+		},
+		Output: map[string]any{
+			"status":               "completed",
+			stepOutputKeyNextStep:  string(runID + "/step-after-stale-repair"),
+			stepOutputKeyNextKind:  llmcommon.StepKindWorkspaceExecution,
+			stepOutputKeyNextInput: map[string]any{"fromStaleRepairEvidence": true},
+		},
+	}); err != nil {
+		t.Fatalf("seed repair success evidence: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume stale repair blocker: %v", err)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.BlockingTicketID != "" || runItem.State != common.RunStateCompleted {
+		t.Fatalf("run = %+v, want stale blocker cleared and completed", runItem)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeClearsDuplicateFailureBlockerBelowScopedBudget(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	runtime := &requestCapturingRuntimeAdapter{output: map[string]any{"status": "completed"}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+	workspaceID := common.WorkspaceID("ws-stale-duplicate-blocker")
+	runID := common.RunID("run-stale-duplicate-blocker")
+	failedStepID := common.StepID(runID + "/block/verify")
+	ticketID := common.TicketID(string(failedStepID) + "-duplicate-failure-decision")
+	signature := "class=shell_command_failed|kind=shell/command|node=verify|failureTargets=config/settings.yaml|exitCode=1"
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		DoDID:            common.DoDID("dod-stale-duplicate-blocker"),
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID,
+		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-1"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  1,
+			stepInputKeyRepairOfFailureClass:  failureClassShellCommand,
+			stepInputKeyRepairOfFailureSig:    signature,
+		},
+		Output: map[string]any{"status": "completed"},
+	}); err != nil {
+		t.Fatalf("seed repair step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    failedStepID,
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: signature,
+			"error":                   "exit status 1",
+		},
+	}); err != nil {
+		t.Fatalf("seed failed step: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      failedStepID,
+		State:       common.DecisionTicketStateOpen,
+		Context: map[string]any{
+			"failedStepId":     string(failedStepID),
+			"failureClass":     failureClassShellCommand,
+			"failureSignature": signature,
+		},
+	}); err != nil {
+		t.Fatalf("seed duplicate ticket: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume duplicate blocker below scoped budget: %v", err)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.BlockingTicketID != "" {
+		t.Fatalf("run = %+v, want duplicate blocker cleared", runItem)
+	}
+	if len(runtime.requests) == 0 || !boolValue(runtime.requests[0].Input[stepInputKeyRuntimeRepairFollowUp]) {
+		t.Fatalf("runtime requests = %+v, want runtime repair dispatch", runtime.requests)
+	}
+	if runtime.requests[0].Input[stepInputKeyRepairOfFailureSig] != signature {
+		t.Fatalf("repair signature = %#v, want %q", runtime.requests[0].Input[stepInputKeyRepairOfFailureSig], signature)
+	}
+}
+
+func TestRuntimeOrchestrator_BlockerAutoResumePolicyMatrix(t *testing.T) {
+	type expected struct {
+		err              error
+		state            common.RunState
+		blockingTicket   bool
+		blockingApproval bool
+		runtimeCalls     int
+	}
+	tests := []struct {
+		name string
+		seed func(ctx context.Context, t *testing.T, orch *RuntimeOrchestrator, repos blockerPolicyRepos) common.RunID
+		want expected
+	}{
+		{
+			name: "duplicate failure below scoped repair budget can resume",
+			seed: func(ctx context.Context, t *testing.T, _ *RuntimeOrchestrator, repos blockerPolicyRepos) common.RunID {
+				t.Helper()
+				workspaceID := common.WorkspaceID("ws-policy-duplicate")
+				runID := common.RunID("run-policy-duplicate")
+				failedStepID := common.StepID(runID + "/block/verify")
+				ticketID := common.TicketID(string(failedStepID) + "-duplicate-failure-decision")
+				signature := "class=shell_command_failed|kind=shell/command|node=verify|failureTargets=config/settings.yaml|exitCode=1"
+				seedBlockerPolicyWorkspaceAndRun(ctx, t, repos, workspaceID, runID, common.RunStateBlockedOnDecision, ticketID, "")
+				if err := repos.steps.Create(ctx, &runmodel.Step{
+					ID:    common.StepID(runID + "/repair-1"),
+					RunID: runID,
+					Kind:  llmcommon.StepKindWorkspaceExecution,
+					State: common.StepStateCompleted,
+					Input: map[string]any{
+						stepInputKeyRuntimeRepairFollowUp: true,
+						stepInputKeyRuntimeRepairAttempt:  1,
+						stepInputKeyRepairOfFailureClass:  failureClassShellCommand,
+						stepInputKeyRepairOfFailureSig:    signature,
+					},
+					Output: map[string]any{"status": "completed"},
+				}); err != nil {
+					t.Fatalf("seed repair step: %v", err)
+				}
+				if err := repos.steps.Create(ctx, &runmodel.Step{
+					ID:    failedStepID,
+					RunID: runID,
+					Kind:  shellcommon.StepKindCommand,
+					State: common.StepStateFailed,
+					Output: map[string]any{
+						failureOutputKeyClass:     failureClassShellCommand,
+						failureOutputKeySignature: signature,
+					},
+				}); err != nil {
+					t.Fatalf("seed failed step: %v", err)
+				}
+				if err := repos.tickets.Create(ctx, &decisionmodel.Ticket{
+					ID:          ticketID,
+					WorkspaceID: workspaceID,
+					RunID:       runID,
+					StepID:      failedStepID,
+					State:       common.DecisionTicketStateOpen,
+					Context: map[string]any{
+						"failureClass":     failureClassShellCommand,
+						"failureSignature": signature,
+						"failedStepId":     string(failedStepID),
+					},
+				}); err != nil {
+					t.Fatalf("seed duplicate ticket: %v", err)
+				}
+				return runID
+			},
+			want: expected{state: common.RunStateCompleted, runtimeCalls: 1},
+		},
+		{
+			name: "runtime repair exhaustion without success evidence stays blocked",
+			seed: func(ctx context.Context, t *testing.T, _ *RuntimeOrchestrator, repos blockerPolicyRepos) common.RunID {
+				t.Helper()
+				workspaceID := common.WorkspaceID("ws-policy-repair-exhausted")
+				runID := common.RunID("run-policy-repair-exhausted")
+				failedStepID := common.StepID(runID + "/block/verify")
+				ticketID := common.TicketID(string(failedStepID) + "-repair-exhausted-decision")
+				signature := "class=runtime_failed|target=verification"
+				seedBlockerPolicyWorkspaceAndRun(ctx, t, repos, workspaceID, runID, common.RunStateBlockedOnDecision, ticketID, "")
+				if err := repos.steps.Create(ctx, &runmodel.Step{
+					ID:    failedStepID,
+					RunID: runID,
+					Kind:  shellcommon.StepKindCommand,
+					State: common.StepStateFailed,
+					Output: map[string]any{
+						failureOutputKeyClass:     failureClassRuntime,
+						failureOutputKeySignature: signature,
+					},
+				}); err != nil {
+					t.Fatalf("seed failed step: %v", err)
+				}
+				if err := repos.tickets.Create(ctx, &decisionmodel.Ticket{
+					ID:          ticketID,
+					WorkspaceID: workspaceID,
+					RunID:       runID,
+					StepID:      failedStepID,
+					State:       common.DecisionTicketStateOpen,
+					Context: map[string]any{
+						decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+						"failureClass":                   failureClassRuntime,
+						"failureSignature":               signature,
+						"failedStepId":                   string(failedStepID),
+					},
+				}); err != nil {
+					t.Fatalf("seed repair exhaustion ticket: %v", err)
+				}
+				return runID
+			},
+			want: expected{err: common.ErrBlocked, state: common.RunStateBlockedOnDecision, blockingTicket: true},
+		},
+		{
+			name: "provider retry exhaustion stays blocked for explicit runtime provider recovery",
+			seed: func(ctx context.Context, t *testing.T, _ *RuntimeOrchestrator, repos blockerPolicyRepos) common.RunID {
+				t.Helper()
+				workspaceID := common.WorkspaceID("ws-policy-provider-exhausted")
+				runID := common.RunID("run-policy-provider-exhausted")
+				failedStepID := common.StepID(runID + "/block/provider")
+				ticketID := common.TicketID(string(failedStepID) + "-provider-retry-exhausted-decision")
+				seedBlockerPolicyWorkspaceAndRun(ctx, t, repos, workspaceID, runID, common.RunStateBlockedOnDecision, ticketID, "")
+				if err := repos.steps.Create(ctx, &runmodel.Step{
+					ID:    failedStepID,
+					RunID: runID,
+					Kind:  llmcommon.StepKindWorkspaceExecution,
+					State: common.StepStateFailed,
+					Output: map[string]any{
+						"stage":                   "llm_provider_timeout",
+						failureOutputKeyClass:     failureClassProviderTimeout,
+						failureOutputKeySignature: "class=provider_timeout|stage=llm_provider_timeout",
+					},
+				}); err != nil {
+					t.Fatalf("seed provider failed step: %v", err)
+				}
+				if err := repos.tickets.Create(ctx, &decisionmodel.Ticket{
+					ID:          ticketID,
+					WorkspaceID: workspaceID,
+					RunID:       runID,
+					StepID:      failedStepID,
+					State:       common.DecisionTicketStateOpen,
+					Context: map[string]any{
+						decisionContextKeyScope:          decisionContextScopeWorkorchRuntime,
+						decisionContextKeyDependency:     decisionContextDependencyLLMProvider,
+						decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyConfigOnly,
+					},
+				}); err != nil {
+					t.Fatalf("seed provider exhaustion ticket: %v", err)
+				}
+				return runID
+			},
+			want: expected{err: common.ErrBlocked, state: common.RunStateBlockedOnDecision, blockingTicket: true},
+		},
+		{
+			name: "pending approval stays blocked",
+			seed: func(ctx context.Context, t *testing.T, _ *RuntimeOrchestrator, repos blockerPolicyRepos) common.RunID {
+				t.Helper()
+				workspaceID := common.WorkspaceID("ws-policy-approval")
+				runID := common.RunID("run-policy-approval")
+				approvalID := common.ApprovalID("approval-policy-pending")
+				seedBlockerPolicyWorkspaceAndRun(ctx, t, repos, workspaceID, runID, common.RunStateBlockedOnApproval, "", approvalID)
+				if err := repos.approvals.Create(ctx, &approvalmodel.Approval{
+					ID:          approvalID,
+					WorkspaceID: workspaceID,
+					RunID:       runID,
+					State:       common.ApprovalStatePending,
+				}); err != nil {
+					t.Fatalf("seed approval: %v", err)
+				}
+				return runID
+			},
+			want: expected{err: common.ErrBlocked, state: common.RunStateBlockedOnApproval, blockingApproval: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			repos := newBlockerPolicyRepos()
+			runtime := &requestCapturingRuntimeAdapter{output: map[string]any{
+				"status": "completed",
+				"dodAssessment": map[string]any{
+					"satisfied":   true,
+					"summary":     "blocker policy resumed and completed",
+					"goalOutcome": "blocker policy resumed and completed",
+					"items": []map[string]any{{
+						"item":         "blocker policy verification",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"policy-step"},
+					}},
+				},
+			}}
+			orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+				runtime,
+				repos.runs,
+				repos.steps,
+				repos.workspaces,
+				repos.tickets,
+				repos.resolutions,
+				repos.approvals,
+				RuntimeEvidenceRepositories{
+					ToolCalls:          memory.NewToolCallRepository(),
+					ValidationResults:  memory.NewValidationResultRepository(),
+					RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+				},
+				events.NewMemoryHub(),
+			)
+			runID := tt.seed(ctx, t, orch, repos)
+
+			err := orch.ResumeRun(ctx, runID)
+			if tt.want.err != nil {
+				if !errors.Is(err, tt.want.err) {
+					t.Fatalf("ResumeRun err = %v, want %v", err, tt.want.err)
+				}
+			} else if err != nil {
+				t.Fatalf("ResumeRun err = %v", err)
+			}
+			runItem, err := repos.runs.Get(ctx, runID)
+			if err != nil {
+				t.Fatalf("get run: %v", err)
+			}
+			if runItem.State != tt.want.state {
+				t.Fatalf("run state = %q, want %q", runItem.State, tt.want.state)
+			}
+			if (runItem.BlockingTicketID != "") != tt.want.blockingTicket {
+				t.Fatalf("blocking ticket = %q, want present=%v", runItem.BlockingTicketID, tt.want.blockingTicket)
+			}
+			if (runItem.BlockingApprovalID != "") != tt.want.blockingApproval {
+				t.Fatalf("blocking approval = %q, want present=%v", runItem.BlockingApprovalID, tt.want.blockingApproval)
+			}
+			if len(runtime.requests) != tt.want.runtimeCalls {
+				t.Fatalf("runtime calls = %d, want %d", len(runtime.requests), tt.want.runtimeCalls)
+			}
+		})
+	}
+}
+
+type blockerPolicyRepos struct {
+	workspaces  *memory.WorkspaceRepository
+	runs        *memory.RunRepository
+	steps       *memory.StepRepository
+	tickets     *memory.DecisionTicketRepository
+	resolutions *memory.DecisionResolutionRepository
+	approvals   *memory.ApprovalRepository
+}
+
+func newBlockerPolicyRepos() blockerPolicyRepos {
+	return blockerPolicyRepos{
+		workspaces:  memory.NewWorkspaceRepository(),
+		runs:        memory.NewRunRepository(),
+		steps:       memory.NewStepRepository(),
+		tickets:     memory.NewDecisionTicketRepository(),
+		resolutions: memory.NewDecisionResolutionRepository(),
+		approvals:   memory.NewApprovalRepository(),
+	}
+}
+
+func seedBlockerPolicyWorkspaceAndRun(
+	ctx context.Context,
+	t *testing.T,
+	repos blockerPolicyRepos,
+	workspaceID common.WorkspaceID,
+	runID common.RunID,
+	state common.RunState,
+	ticketID common.TicketID,
+	approvalID common.ApprovalID,
+) {
+	t.Helper()
+	if err := repos.workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "ws",
+		State:       common.WorkspaceStateWaitingDecision,
+		ActiveRunID: runID,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:                 runID,
+		WorkspaceID:        workspaceID,
+		DoDID:              common.DoDID("dod-" + string(runID)),
+		State:              state,
+		InitialStepKind:    llmcommon.StepKindWorkspaceExecution,
+		BlockingTicketID:   ticketID,
+		BlockingApprovalID: approvalID,
+	}
+	if err := repos.runs.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+}
+
 func TestRuntimeOrchestrator_ResumeDispatchForProviderFailureUsesProviderRetry(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-resume-provider-retry")
@@ -5033,7 +5725,7 @@ func TestRuntimeOrchestrator_ProviderRetryInputDoesNotCarryRuntimeRepairMarkers(
 	}
 }
 
-func TestRuntimeOrchestrator_BlocksOnDuplicateRuntimeFailureSignature(t *testing.T) {
+func TestRuntimeOrchestrator_DuplicateRuntimeFailureBelowScopedBudgetDispatchesRepair(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -5092,7 +5784,102 @@ func TestRuntimeOrchestrator_BlocksOnDuplicateRuntimeFailureSignature(t *testing
 		State:           common.RunStateRunning,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}, currentFailed, errors.New("exit status 1")); err != nil {
-		t.Fatalf("duplicate failure should block on decision without returning error: %v", err)
+		t.Fatalf("duplicate failure below scoped repair budget should dispatch repair: %v", err)
+	}
+
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.BlockingTicketID != "" {
+		t.Fatalf("run = %+v, want duplicate failure to continue repair before scoped budget is exhausted", runItem)
+	}
+	steps, err := stepRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	foundRepair := false
+	for _, step := range steps {
+		if step != nil && boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) && step.ID != common.StepID(string(runID)+"/repair-1") {
+			foundRepair = true
+			break
+		}
+	}
+	if !foundRepair {
+		t.Fatalf("steps = %+v, want runtime repair follow-up", steps)
+	}
+}
+
+func TestRuntimeOrchestrator_DuplicateRuntimeFailureExhaustedScopeUsesRepairExhaustion(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-duplicate-failure-exhausted")
+	runID := common.RunID("run-duplicate-failure-exhausted")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-duplicate-failure-exhausted"),
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	previousFailed := duplicateShellFailureStep(runID, "previous-shell-failure")
+	if err := stepRepo.Create(ctx, previousFailed); err != nil {
+		t.Fatalf("seed previous failed step: %v", err)
+	}
+	currentFailed := duplicateShellFailureStep(runID, "current-shell-failure")
+	signature := stringFromMap(currentFailed.Output, failureOutputKeySignature)
+	class := stringFromMap(currentFailed.Output, failureOutputKeyClass)
+	for attempt := 1; attempt <= maxRuntimeRepairAttempts; attempt++ {
+		if err := stepRepo.Create(ctx, &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/scoped-repair-%d", runID, attempt)),
+			RunID: runID,
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRuntimeRepairAttempt:  attempt,
+				stepInputKeyRepairOfFailureClass:  class,
+				stepInputKeyRepairOfFailureSig:    signature,
+			},
+			Output: map[string]any{"status": "completed"},
+		}); err != nil {
+			t.Fatalf("seed scoped repair %d: %v", attempt, err)
+		}
+	}
+
+	if err := orch.dispatchRuntimeRepairFollowUp(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-duplicate-failure-exhausted"),
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}, currentFailed, errors.New("exit status 1")); err != nil {
+		t.Fatalf("duplicate failure with exhausted scoped repair budget should block on repair exhaustion: %v", err)
 	}
 
 	runItem, err := runRepo.Get(ctx, runID)
@@ -5100,14 +5887,14 @@ func TestRuntimeOrchestrator_BlocksOnDuplicateRuntimeFailureSignature(t *testing
 		t.Fatalf("get run: %v", err)
 	}
 	if runItem.State != common.RunStateBlockedOnDecision || runItem.BlockingTicketID == "" {
-		t.Fatalf("run = %+v, want blocked on duplicate failure decision", runItem)
+		t.Fatalf("run = %+v, want blocked on repair exhaustion decision", runItem)
 	}
 	ticket, err := ticketRepo.Get(ctx, runItem.BlockingTicketID)
 	if err != nil {
-		t.Fatalf("get duplicate failure ticket: %v", err)
+		t.Fatalf("get repair exhaustion ticket: %v", err)
 	}
-	if ticket.Context["failureClass"] != failureClassShellCommand || ticket.Context["failureSignature"] == "" {
-		t.Fatalf("ticket context = %+v, want shell failure signature", ticket.Context)
+	if !strings.HasSuffix(string(ticket.ID), "repair-exhausted-decision") || ticket.Context["attempts"] != maxRuntimeRepairAttempts {
+		t.Fatalf("ticket = %+v, want repair exhaustion ticket", ticket)
 	}
 }
 
@@ -11166,6 +11953,70 @@ func TestRuntimeOrchestrator_ResumeRunReplanSupersedesRun(t *testing.T) {
 	}
 }
 
+func TestRuntimeOrchestrator_ResumeRunLegacyRepairResolutionPayloadReplans(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "ok"}}
+	hub := events.NewMemoryHub()
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, hub)
+
+	workspaceID := common.WorkspaceID("ws-legacy-repair-replan")
+	runID := common.RunID("run-legacy-repair-replan")
+	ticketID := common.TicketID("ticket-legacy-repair-replan")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateBlockedOnDecision, BlockingTicketID: ticketID}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		State:       common.DecisionTicketStateResolved,
+		Context: map[string]any{
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+		},
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       common.ResolutionID("resolution-legacy-repair-replan"),
+		TicketID: ticketID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload: map[string]any{
+			"answer":         "replan",
+			"recoveryAction": "replan",
+		},
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume legacy repair replan decision: %v", err)
+	}
+
+	r, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if r.State != common.RunStateSuperseded {
+		t.Fatalf("run state = %q, want superseded", r.State)
+	}
+	ws, err := workspaceRepo.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if ws.ActiveRunID != "" {
+		t.Fatalf("workspace active run = %q, want empty", ws.ActiveRunID)
+	}
+}
+
 func TestRuntimeOrchestrator_ResumeRunRequiresResolvedApproval(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -11426,6 +12277,47 @@ func hasCheckpointFailureClass(items []*runmodel.RuntimeCheckpoint, class string
 		}
 	}
 	return false
+}
+
+func TestRuntimeFailureSignatureSeparatesRepeatedFailuresByTargetObject(t *testing.T) {
+	runID := common.RunID("run-target-object-signature")
+	stepFor := func(id string, stderr string) *runmodel.Step {
+		step := &runmodel.Step{
+			ID:    common.StepID(string(runID) + "/" + id),
+			RunID: runID,
+			Kind:  shellcommon.StepKindCommand,
+			State: common.StepStateFailed,
+			Input: map[string]any{stepInputKeyGraphNodeID: "run_tests"},
+			Output: map[string]any{
+				"status":   "failed",
+				"command":  "go",
+				"args":     []string{"test", "./..."},
+				"exitCode": 1,
+				"stderr":   stderr,
+				"error":    "exit status 1",
+			},
+		}
+		classification := classifyRuntimeFailure(step, step.Output, "runtime step failed", errors.New("exit status 1"))
+		attachRuntimeFailureClassification(step.Output, classification)
+		return step
+	}
+
+	configFailure := stepFor("config", "config/settings.yaml:10:2: missing required value")
+	serverFailure := stepFor("policy", "policies/routing.rules:1:1: invalid rule expression")
+	configAgain := stepFor("config-again", "./config/settings.yaml:99:1: different line, same target object")
+
+	configSig := stringFromMap(configFailure.Output, failureOutputKeySignature)
+	serverSig := stringFromMap(serverFailure.Output, failureOutputKeySignature)
+	configAgainSig := stringFromMap(configAgain.Output, failureOutputKeySignature)
+	if !strings.Contains(configSig, "failureTargets=config/settings.yaml") || !strings.Contains(serverSig, "failureTargets=policies/routing.rules") {
+		t.Fatalf("signatures = config:%q policy:%q, want target-object failure signatures", configSig, serverSig)
+	}
+	if configSig == serverSig {
+		t.Fatalf("signature = %q, want different signatures for different target objects", configSig)
+	}
+	if configSig != configAgainSig {
+		t.Fatalf("same target object signatures differ: %q vs %q", configSig, configAgainSig)
+	}
 }
 
 func duplicateShellFailureStep(runID common.RunID, suffix string) *runmodel.Step {

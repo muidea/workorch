@@ -154,7 +154,7 @@ func (f *fakeRun) Activate(ctx context.Context, wsID common.WorkspaceID, req bac
 	f.b.runs = append(f.b.runs, *r)
 	return r, nil
 }
-func (f *fakeRun) Resume(ctx context.Context, id common.RunID) (*backend.RunInfo, error) {
+func (f *fakeRun) Resume(ctx context.Context, id common.RunID, _ ...map[string]any) (*backend.RunInfo, error) {
 	return &backend.RunInfo{ID: id, State: "running"}, nil
 }
 func (f *fakeRun) Get(ctx context.Context, id common.RunID) (*backend.RunInfo, error) {

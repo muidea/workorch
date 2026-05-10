@@ -173,6 +173,7 @@ func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 	if !decisioncommon.IsSupportedResolutionType(semantic.ResolutionType) {
 		return Decision{}, common.ErrInvalidArgument
 	}
+	resolutionType := semantic.ResolutionType
 	payload := withDecisionSemanticPayload(cmd.ResolutionPayload, semantic)
 	ticket, err := tickets.Get(ctx, common.TicketID(ticketID))
 	if err != nil {
@@ -181,15 +182,16 @@ func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 	if ticket.State != common.DecisionTicketStateOpen {
 		return Decision{}, common.ErrConflict
 	}
+	payload, resolutionType = normalizeDecisionResolutionPayloadForTicket(ticket, payload, resolutionType)
 	if err := validateDecisionResolutionPayloadForTicket(ticket, payload); err != nil {
 		return Decision{}, err
 	}
 	payload = common.RedactSensitiveMap(payload)
 
 	item, resolution, err := service.EnsureResolvedTicketAndReturn(ctx, decisionmodule.ResolveTicketCommand{
-		ResolutionID: common.ResolutionID("resolution-" + ticketID + "-" + semantic.ResolutionType),
+		ResolutionID: common.ResolutionID("resolution-" + ticketID + "-" + resolutionType),
 		TicketID:     common.TicketID(ticketID),
-		Type:         semantic.ResolutionType,
+		Type:         resolutionType,
 		Payload:      payload,
 	})
 	if err != nil {
@@ -248,6 +250,7 @@ func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSessi
 		if r.item.State != common.DecisionTicketStateOpen {
 			return nil, common.ErrConflict
 		}
+		payload, resolutionType = normalizeDecisionResolutionPayloadForTicket(r.item, payload, resolutionType)
 		if err := validateDecisionResolutionPayloadForTicket(r.item, payload); err != nil {
 			return nil, err
 		}
@@ -304,6 +307,29 @@ func validateDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, pa
 	return nil
 }
 
+func normalizeDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, payload map[string]any, resolutionType string) (map[string]any, string) {
+	if !isRuntimeRepairExhaustionTicket(ticket) {
+		return payload, resolutionType
+	}
+	action := inferRuntimeRepairRecoveryAction(payload)
+	if action == "" {
+		return payload, resolutionType
+	}
+	ret := cloneDecisionPayload(payload)
+	if ret == nil {
+		ret = map[string]any{}
+	}
+	ret["recoveryAction"] = action
+	switch action {
+	case "replan":
+		return ret, decisioncommon.ResolutionTypeReplan
+	case "terminate":
+		return ret, decisioncommon.ResolutionTypeRejectCurrentPath
+	default:
+		return ret, decisioncommon.ResolutionTypeProvideMissingInfo
+	}
+}
+
 func isWorkorchRuntimeLLMProviderRecoveryTicket(ticket *decisionmodel.Ticket) bool {
 	if ticket == nil {
 		return false
@@ -352,7 +378,7 @@ func isAmbiguousRuntimeRepairExhaustionResolution(payload map[string]any) bool {
 	if len(payload) == 0 {
 		return true
 	}
-	if action := strings.TrimSpace(stringFromDecisionPayload(payload, "recoveryAction")); action != "" {
+	if action := inferRuntimeRepairRecoveryAction(payload); action != "" {
 		switch action {
 		case "retry_same_step", "replan", "provide_information", "terminate":
 			return false
@@ -360,23 +386,81 @@ func isAmbiguousRuntimeRepairExhaustionResolution(payload map[string]any) bool {
 			return true
 		}
 	}
+	return true
+}
+
+func inferRuntimeRepairRecoveryAction(payload map[string]any) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	if rawAction := strings.TrimSpace(stringFromDecisionPayload(payload, "recoveryAction")); rawAction != "" {
+		return normalizeRuntimeRepairRecoveryAction(rawAction)
+	}
 	semantic := decisionPayloadMap(payload["governanceSemantic"])
 	intent := strings.TrimSpace(stringFromDecisionPayload(semantic, "intent"))
 	switch intent {
-	case governancecommon.GovernanceIntentRequestReplan,
-		governancecommon.GovernanceIntentRejectExecution,
-		governancecommon.GovernanceIntentRequestTerminate,
-		governancecommon.GovernanceIntentProvideMissingInfo:
-		return false
+	case governancecommon.GovernanceIntentRequestReplan:
+		return "replan"
+	case governancecommon.GovernanceIntentRejectExecution, governancecommon.GovernanceIntentRequestTerminate:
+		return "terminate"
 	case governancecommon.GovernanceIntentApproveExecution:
-		return true
+		return "retry_same_step"
 	}
-	switch semanticTextForRepairResolution(payload) {
-	case "", "continue", "proceed", "goahead", "yes", "ok", "okay", "同意", "确认", "继续", "可以", "好的":
-		return true
+	text := semanticTextForRepairResolution(payload)
+	if action := normalizeRuntimeRepairRecoveryAction(text); action != "" {
+		return action
+	}
+	if intent == governancecommon.GovernanceIntentProvideMissingInfo && strings.TrimSpace(text) != "" {
+		return "provide_information"
+	}
+	if strings.TrimSpace(text) != "" {
+		return "provide_information"
+	}
+	return ""
+}
+
+func normalizeRuntimeRepairRecoveryAction(value string) string {
+	text := normalizeRepairResolutionText(value)
+	switch {
+	case text == "":
+		return ""
+	case containsAnyRepairResolutionCue(text, []string{
+		"replan", "replanning", "重新规划", "重新计划", "重做计划", "换方案", "重构计划",
+	}):
+		return "replan"
+	case containsAnyRepairResolutionCue(text, []string{
+		"terminate", "stop", "abort", "cancel", "reject", "decline", "refuse", "deny",
+		"终止", "停止", "取消", "拒绝", "驳回", "否决", "不继续", "不执行",
+	}):
+		return "terminate"
+	case containsAnyRepairResolutionCue(text, []string{
+		"retry_same_step", "retrysamestep", "retry", "rerun", "resume", "continue", "proceed", "goahead", "again",
+		"重试", "重新尝试", "再次尝试", "继续", "继续执行", "重新执行", "恢复执行", "再试", "同意", "确认", "可以", "好的",
+	}):
+		return "retry_same_step"
+	case containsAnyRepairResolutionCue(text, []string{
+		"provide_information", "provideinfo", "information", "guidance", "instruction", "context",
+		"补充信息", "提供信息", "实现指导", "修复指导", "上下文", "说明",
+	}):
+		return "provide_information"
 	default:
-		return false
+		return ""
 	}
+}
+
+func normalizeRepairResolutionText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer(" ", "", "\t", "", "\n", "", "\r", "", "-", "", "_", "", "/", "", "\\", "", ".", "")
+	return replacer.Replace(value)
+}
+
+func containsAnyRepairResolutionCue(value string, cues []string) bool {
+	for _, cue := range cues {
+		if normalized := normalizeRepairResolutionText(cue); normalized != "" && strings.Contains(value, normalized) {
+			return true
+		}
+	}
+	return false
 }
 
 func semanticTextForRepairResolution(payload map[string]any) string {

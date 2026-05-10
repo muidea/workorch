@@ -149,7 +149,11 @@ func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initi
 func (m AppModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{FetchAll(m.be), WaitForBackendEvent(m.eventCh)}
 	if m.initialGoal != "" && m.activeWorkspaceID != "" {
-		cmds = append(cmds, SubmitGoal(m.be, m.activeWorkspaceID, m.initialGoal, m.dodItems))
+		if isRunControlIntent(m.initialGoal) {
+			cmds = append(cmds, ContinueRun(m.be, m.activeWorkspaceID, "", ""))
+		} else {
+			cmds = append(cmds, SubmitGoal(m.be, m.activeWorkspaceID, m.initialGoal, m.dodItems))
+		}
 	}
 	return tea.Batch(cmds...)
 }
@@ -266,6 +270,41 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.fetchActiveBlockerDetails()
 		}
 		return m, nil
+	case RunControlMsg:
+		if msg.Error != nil {
+			if isTransientContextError(msg.Error) {
+				return m, nil
+			}
+			m.setLastError(msg.Error)
+			return m, m.refreshActiveWorkspaceState()
+		}
+		if msg.Run != nil {
+			m.activeRunID = string(msg.Run.ID)
+			switch msg.Run.State {
+			case common.RunStateCompleted:
+				m.running = false
+				m.progress = progressCompleted
+			case common.RunStateFailed:
+				m.running = false
+				m.progress = progressFailed
+			case common.RunStateBlockedOnDecision:
+				m.running = true
+				m.progress = progressWaitingDecision
+			case common.RunStateBlockedOnApproval:
+				m.running = true
+				m.progress = progressWaitingApproval
+			default:
+				m.running = true
+				m.progress = progressRunning
+			}
+		}
+		if msg.Message != "" {
+			m.progressText = msg.Message
+		} else {
+			m.progressText = "Continuing active run"
+		}
+		m.lastError = nil
+		return m, m.refreshActiveWorkspaceState()
 	case DecisionResolvedMsg:
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
@@ -477,6 +516,32 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 		m.lastError = fmt.Errorf("no active workspace")
 		return m, nil
 	}
+	if isRunControlIntent(text) {
+		m.clearInput()
+		m.cancelWorkspaceSelection()
+		m.lastError = nil
+		m.progress = progressSubmitting
+		m.progressText = "Continuing active run"
+		return m, ContinueRun(m.be, m.activeWorkspaceID, m.activeRunID, "")
+	}
+	if m.activeRunID != "" {
+		m.clearInput()
+		m.cancelWorkspaceSelection()
+		m.lastError = nil
+		m.appendTranscript("Input", text)
+		m.progress = progressSubmitting
+		m.progressText = "Queued input; continuing active run"
+		return m, ContinueRun(m.be, m.activeWorkspaceID, m.activeRunID, text)
+	}
+	return m.submitGoalText(text)
+}
+
+func (m *AppModel) submitGoalText(text string) (tea.Model, tea.Cmd) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		m.lastError = fmt.Errorf("goal requires text")
+		return m, nil
+	}
 	m.result = ""
 	m.artifacts = nil
 	m.patches = nil
@@ -544,6 +609,27 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.clearInput()
 		m.toggleWorkspaceSelectMode()
 		return m, nil, true
+	case "goal":
+		m.addInputHistory(text)
+		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
+		if m.activeWorkspaceID == "" {
+			m.lastError = fmt.Errorf("no active workspace")
+			return m, nil, true
+		}
+		if args == "" {
+			m.lastError = fmt.Errorf("goal requires text")
+			return m, nil, true
+		}
+		next, submitCmd := m.submitGoalText(args)
+		return next, submitCmd, true
+	case "continue", "resume":
+		m.addInputHistory(text)
+		m.clearInput()
+		m.cancelWorkspaceSelection()
+		m.lastError = nil
+		m.progress = progressSubmitting
+		m.progressText = "Continuing active run"
+		return m, ContinueRun(m.be, m.activeWorkspaceID, m.activeRunID, ""), true
 	case "result", "refresh":
 		m.addInputHistory(text)
 		m.clearInput()
@@ -1216,7 +1302,7 @@ func (m *AppModel) applyRunStarted(run *backend.RunInfo) {
 
 func (m AppModel) emptyResultText() string {
 	if len(m.workspaces) == 0 && strings.TrimSpace(m.activeWorkspaceID) == "" {
-		return "No workspaces found.\n\nCreate one from this TUI:\n  /workspace create <title> --dir <path>\n  /workspace create <title> --template generic-governed --dir <path>\n  /workspace create <title> --template software-dev --dir <path>\n\nUseful commands:\n  /help     Show commands\n  /dod      Set acceptance criteria\n  /exit     Quit"
+		return "No workspaces found.\n\nCreate one from this TUI:\n  /workspace create <title> --dir <path>\n  /workspace create <title> --template generic-governed --dir <path>\n  /workspace create <title> --template software-dev --dir <path>\n\nUseful commands:\n  /help      Show commands\n  /goal      Submit a new goal\n  /dod       Set acceptance criteria\n  /continue  Resume active run\n  /exit      Quit"
 	}
 	switch m.progress {
 	case progressSubmitting:

@@ -137,7 +137,7 @@ func StartRunFromEnv(ctx context.Context, runID string) (Run, error) {
 	return StartRunWithSession(ctx, session, runID)
 }
 
-func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID string) (ret Run, err error) {
+func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID string, executionContextPatch ...map[string]any) (ret Run, err error) {
 	service, repo, err := runDependenciesFromSession(session)
 	if err != nil {
 		return Run{}, err
@@ -148,6 +148,14 @@ func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID st
 	patch, loadedRun, err := compressedContextPatchForRun(ctx, session, id)
 	if err != nil {
 		return Run{}, err
+	}
+	for _, item := range executionContextPatch {
+		for key, value := range item {
+			if strings.TrimSpace(key) == "" {
+				continue
+			}
+			patch[key] = value
+		}
 	}
 	if err := service.ResumeRun(ctx, runmodule.ResumeRunCommand{RunID: id, LoadedRun: loadedRun, ExecutionContextPatch: patch}); err != nil {
 		return Run{}, err
@@ -160,12 +168,12 @@ func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID st
 	return mapRun(item), nil
 }
 
-func ResumeRunWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (Run, error) {
+func ResumeRunWithBackend(ctx context.Context, backend string, dataRoot string, runID string, executionContextPatch ...map[string]any) (Run, error) {
 	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Run{}, err
 	}
-	return ResumeRunWithSession(ctx, session, runID)
+	return ResumeRunWithSession(ctx, session, runID, executionContextPatch...)
 }
 
 func ResumeRunFromEnv(ctx context.Context, runID string) (Run, error) {

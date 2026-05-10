@@ -2,8 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -174,6 +176,24 @@ func decisionResolutionInput(ticket *decisionmodel.Ticket, resolution *decisionm
 			"resolutionType":    resolution.Type,
 			"resolutionPayload": cloneStepPayload(resolution.Payload),
 		},
+	}
+}
+
+func effectiveDecisionResolutionType(ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) string {
+	if resolution == nil {
+		return ""
+	}
+	resolutionType := strings.TrimSpace(resolution.Type)
+	if ticket == nil || ticket.Context[decisionContextKeyRecoveryPolicy] != decisionContextRecoveryPolicyRepairPlan {
+		return resolutionType
+	}
+	switch strings.TrimSpace(stringFromMap(resolution.Payload, "recoveryAction")) {
+	case "replan":
+		return decisioncommon.ResolutionTypeReplan
+	case "terminate":
+		return decisioncommon.ResolutionTypeRejectCurrentPath
+	default:
+		return resolutionType
 	}
 }
 

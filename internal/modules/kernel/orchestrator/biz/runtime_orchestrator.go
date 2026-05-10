@@ -43,6 +43,10 @@ const (
 	stepInputKeySoulStage              = "soulStage"
 	stepInputKeyRuntimeRepairFollowUp  = "runtimeRepairFollowUp"
 	stepInputKeyRuntimeRepairAttempt   = "runtimeRepairAttempt"
+	stepInputKeyRepairOfStepID         = "repairOfStepId"
+	stepInputKeyRepairOfRootStepID     = "repairOfRootStepId"
+	stepInputKeyRepairOfFailureClass   = "repairOfFailureClass"
+	stepInputKeyRepairOfFailureSig     = "repairOfFailureSignature"
 	stepInputKeyProviderRetryFollowUp  = "providerRetryFollowUp"
 	stepInputKeyProviderRetryAttempt   = "providerRetryAttempt"
 	stepInputKeyNoActionableFollowUp   = "noActionableContinuationFollowUp"
@@ -319,6 +323,15 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 			return err
 		}
 		if ticket.State != common.DecisionTicketStateResolved {
+			if o.runtimeRepairExhaustionBlockerHasSuccessEvidence(ctx, ticket) {
+				r.BlockingTicketID = ""
+				break
+			}
+			if o.duplicateRuntimeFailureBlockerCanAutoResume(ctx, r, ticket) {
+				resumeAfterStepID = ticket.StepID
+				r.BlockingTicketID = ""
+				break
+			}
 			return common.ErrBlocked
 		}
 		resumeAfterStepID = ticket.StepID
@@ -327,7 +340,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 			if err != nil {
 				return err
 			}
-			switch resolution.Type {
+			switch effectiveDecisionResolutionType(ticket, resolution) {
 			case decisioncommon.ResolutionTypeProvideMissingInfo:
 				resumeInput = decisionResolutionInput(ticket, resolution)
 				r.BlockingTicketID = ""
@@ -368,6 +381,17 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 			return err
 		}
 		if recoverStepID == "" {
+			if len(executionContextPatch) > 0 {
+				mergeRunExecutionContextPatch(r, executionContextPatch)
+				workspace, err := o.syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, nil)
+				if err != nil {
+					return err
+				}
+				if err := o.publishRunStateChanged(ctx, r); err != nil {
+					return err
+				}
+				return o.publishWorkspaceStateChanged(ctx, workspace, r.ID)
+			}
 			return nil
 		}
 		resumeAfterStepID = recoverStepID
@@ -439,7 +463,7 @@ func (o *RuntimeOrchestrator) runningDecisionRecoveryContext(
 	if err != nil {
 		return "", nil, err
 	}
-	switch resolution.Type {
+	switch effectiveDecisionResolutionType(ticket, resolution) {
 	case decisioncommon.ResolutionTypeProvideMissingInfo:
 		return last.ID, decisionResolutionInput(ticket, resolution), nil
 	case decisioncommon.ResolutionTypeRejectCurrentPath:
@@ -1243,7 +1267,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 				Input: providerRetryStepInput(last, attempt, nil),
 			}}, nil
 		}
-		attempt := o.runtimeRepairAttemptCount(ctx, run.ID) + 1
+		attempt := o.runtimeRepairAttemptCountForStep(ctx, run.ID, last) + 1
 		stepID, err := o.uniqueDispatchStepID(ctx, run.ID, runtimeRepairFollowUpStepID(run.ID, last, attempt))
 		if err != nil {
 			return nil, err

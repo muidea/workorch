@@ -58,6 +58,13 @@ type RunStartedMsg struct {
 	Error error
 }
 
+type RunControlMsg struct {
+	Run         *backend.RunInfo
+	WorkspaceID string
+	Message     string
+	Error       error
+}
+
 type DecisionResolvedMsg struct {
 	Decision *backend.DecisionInfo
 	Error    error

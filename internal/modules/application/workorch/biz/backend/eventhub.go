@@ -150,7 +150,11 @@ func (b *eventHubBackend) handleCommand(ctx context.Context, cmd events.CLIComma
 		})
 		return resourceMap(item), nil, err
 	case events.CommandRunResume:
-		item, err := b.localBackend.run.Resume(ctx, common.RunID(cmd.SubjectID))
+		var patch map[string]any
+		if rawPatch, ok := cmd.Payload["executionContextPatch"].(map[string]any); ok {
+			patch = rawPatch
+		}
+		item, err := b.localBackend.run.Resume(ctx, common.RunID(cmd.SubjectID), patch)
 		return resourceMap(item), nil, err
 	case events.CommandRunGet:
 		item, err := b.localBackend.run.Get(ctx, common.RunID(cmd.SubjectID))
@@ -511,8 +515,12 @@ func (b *eventHubRunBackend) Activate(ctx context.Context, wsID common.Workspace
 	})
 	return decodeResultResource[RunInfo](result, err)
 }
-func (b *eventHubRunBackend) Resume(ctx context.Context, id common.RunID) (*RunInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandRunResume, "", id, "run", string(id), nil)
+func (b *eventHubRunBackend) Resume(ctx context.Context, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error) {
+	var payload map[string]any
+	if len(executionContextPatch) > 0 && len(executionContextPatch[0]) > 0 {
+		payload = map[string]any{"executionContextPatch": executionContextPatch[0]}
+	}
+	result, err := b.parent.sendCommand(ctx, events.CommandRunResume, "", id, "run", string(id), payload)
 	return decodeResultResource[RunInfo](result, err)
 }
 func (b *eventHubRunBackend) Get(ctx context.Context, id common.RunID) (*RunInfo, error) {

@@ -161,11 +161,14 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 		MemoryItems:          repos.memoryItem,
 		AutoGovernanceTraces: repos.autoGovernanceTrace,
 		EventHub:             eventHub,
-		ResolveDecision: func(ctx context.Context, ticketID common.TicketID, payload map[string]any) error {
+		ResolveDecision: func(ctx context.Context, ticketID common.TicketID, resolutionType string, payload map[string]any) error {
+			if !decisioncommon.IsSupportedResolutionType(resolutionType) {
+				resolutionType = decisioncommon.ResolutionTypeProvideMissingInfo
+			}
 			return decisionModule.Service().EnsureResolvedTicket(ctx, decisionservice.ResolveTicketCommand{
 				ResolutionID: common.ResolutionID("resolution-" + string(ticketID) + "-auto-governance"),
 				TicketID:     ticketID,
-				Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
+				Type:         resolutionType,
 				Payload:      payload,
 			})
 		},
