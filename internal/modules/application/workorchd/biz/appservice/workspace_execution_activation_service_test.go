@@ -604,6 +604,28 @@ func TestActivateWorkspaceExecutionWithBackendCreatesAndStartsRun(t *testing.T) 
 	}
 }
 
+func TestActivationObservableRunState(t *testing.T) {
+	for _, state := range []common.RunState{
+		common.RunStateRunning,
+		common.RunStateValidating,
+		common.RunStateBlockedOnDecision,
+		common.RunStateBlockedOnApproval,
+		common.RunStateCompleted,
+		common.RunStateFailed,
+		common.RunStateCancelled,
+		common.RunStateSuperseded,
+	} {
+		if !isActivationObservableRunState(state) {
+			t.Fatalf("isActivationObservableRunState(%s) = false, want true", state)
+		}
+	}
+	for _, state := range []common.RunState{"", common.RunStateCreated} {
+		if isActivationObservableRunState(state) {
+			t.Fatalf("isActivationObservableRunState(%s) = true, want false", state)
+		}
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendRequiresGoalAndDoD(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()

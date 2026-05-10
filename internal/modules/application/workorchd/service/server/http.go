@@ -2006,6 +2006,9 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		state.metrics.observeRunOutcome(item.Run)
+		if item.Run.State == string(common.RunStateSuperseded) {
+			state.scheduleReplanContinuationIfNeeded(r.Context(), item.Run.WorkspaceID, item.Run.ID, priority)
+		}
 		state.notifyRunStatusChangedForRun(item.Run)
 		writeJSON(w, http.StatusOK, workspaceExecutionActivationResponse{
 			Service:    "workorch",
@@ -2750,6 +2753,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 	}
 	state.configureApplicationRuntimeSession()
 	state.configureSharedMemorySession()
+	state.registerAutoGovernanceResumeWatcher()
 	state.registerReplanContinuationWatcher()
 	return state
 }
@@ -3450,6 +3454,20 @@ func (s *serverState) registerReplanContinuationWatcher() {
 			envelope.RunID,
 			0,
 		)
+		return nil
+	})
+	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
+}
+
+func (s *serverState) registerAutoGovernanceResumeWatcher() {
+	if s == nil || s.eventHub == nil {
+		return
+	}
+	unsubscribe := s.eventHub.Subscribe(events.TopicGovernanceAutoResolved, func(_ context.Context, envelope events.Envelope) error {
+		if strings.TrimSpace(envelope.RunID) == "" {
+			return nil
+		}
+		s.scheduleGovernanceRunResumes([]string{envelope.RunID}, 0)
 		return nil
 	})
 	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)

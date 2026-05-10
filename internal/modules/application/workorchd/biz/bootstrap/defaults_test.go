@@ -53,6 +53,8 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, planning.SoulMD, "DoD 条目")
 	assertSoulContains(t, planning.SoulMD, "DoD-to-test")
 	assertSoulContains(t, planning.SoulMD, "主路径")
+	assertSoulContains(t, planning.SoulMD, "新增 Goal")
+	assertSoulContains(t, planning.SoulMD, "gap analysis")
 	assertSoulContains(t, planning.SoulMD, "workspace 文件清单为空不等于缺少源码")
 	assertSoulContains(t, planning.SoulMD, "新项目初始化场景")
 
@@ -67,6 +69,9 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, execution.SoulMD, "DoD 不满足")
 	assertSoulContains(t, execution.SoulMD, "rootCause")
 	assertSoulContains(t, execution.SoulMD, "错误路径")
+	assertSoulContains(t, execution.SoulMD, "新增 Goal 处理")
+	assertSoulContains(t, execution.SoulMD, "重复运行已有测试")
+	assertSoulContains(t, execution.SoulMD, "不能替代实现")
 	assertSoulContains(t, execution.SoulMD, "补丁质量要求")
 	assertSoulContains(t, execution.SoulMD, "完整、可直接应用")
 	assertSoulContains(t, execution.SoulMD, "占位函数体")

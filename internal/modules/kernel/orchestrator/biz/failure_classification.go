@@ -134,11 +134,11 @@ func isLLMProviderRateLimitedFailure(lowerStage string, execErr error, output ma
 }
 
 func isDoDCoverageMissingFailure(lowerStage string, execErr error, output map[string]any) bool {
-	if lowerStage != "llm_dod_assessment" {
-		return false
-	}
 	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); strings.TrimSpace(stringFromMap(diagnostics, "kind")) == failureClassDoDCoverageMissing {
 		return true
+	}
+	if lowerStage != "llm_dod_assessment" && lowerStage != "llm_execution_graph_plan" {
+		return false
 	}
 	errText := strings.ToLower(firstNonEmptyString(errorString(execErr), stringFromMap(output, "error"), stringFromMap(output, "reason")))
 	return strings.Contains(errText, "dodassessment does not cover all current dod items")

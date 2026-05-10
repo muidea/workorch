@@ -2099,6 +2099,75 @@ func TestMapTaskProgressProjectsRepairLoopEscalation(t *testing.T) {
 	}
 }
 
+func TestMapClosureTracesProjectsGraphLimitAssessmentAndMissingDoD(t *testing.T) {
+	snapshot := RunSnapshot{
+		Workspace: Workspace{ID: "ws-closure"},
+		Run: Run{
+			ID:          "run-closure",
+			WorkspaceID: "ws-closure",
+			State:       string(common.RunStateRunning),
+		},
+		Steps: []presenter.StepView{
+			{
+				ID:    "run-closure/zz-llm-after-graph-node",
+				Kind:  "llm/workspace_execution",
+				State: string(common.StepStateCompleted),
+				Input: map[string]any{
+					"graphFollowUp": true,
+				},
+				Output: map[string]any{
+					"graphFollowUpExpansionLimitExceeded": true,
+					"graphFollowUpExpansionCount":         3,
+					"graphFollowUpExpansionLimit":         2,
+					"ignoredExecutionGraph":               true,
+				},
+			},
+			{
+				ID:    "run-closure/zz-llm-after-graph-limit-node-assessment",
+				Kind:  "llm/workspace_execution",
+				State: string(common.StepStateFailed),
+				Input: map[string]any{
+					"assessmentOnly":              true,
+					"graphExpansionLimitFollowUp": true,
+					"assessmentOnlyReason":        "graph_follow_up_expansion_limit_exceeded",
+					"graphFollowUpExpansionCount": 3,
+					"graphFollowUpExpansionLimit": 2,
+				},
+				Output: map[string]any{
+					"runtimeDiagnostics": map[string]any{
+						"kind": "dod_coverage_missing",
+						"missingDoDItems": []map[string]any{
+							{
+								"kind":   "leaf",
+								"item":   "missing item",
+								"state":  "failed",
+								"source": "dodAssessment",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	snapshot.ClosureTraces = mapClosureTraces(snapshot)
+	observability := mapRunObservability(snapshot)
+	if len(snapshot.ClosureTraces) != 2 {
+		t.Fatalf("closureTraces = %+v, want two traces", snapshot.ClosureTraces)
+	}
+	first := snapshot.ClosureTraces[0]
+	if !first.GraphFollowUp || !first.GraphFollowUpExpansionLimitExceeded || first.GraphFollowUpExpansionCount != 3 || first.GraphFollowUpExpansionLimit != 2 || !first.IgnoredExecutionGraph {
+		t.Fatalf("first closure trace = %+v, want graph expansion limit projection", first)
+	}
+	second := snapshot.ClosureTraces[1]
+	if !second.AssessmentOnly || !second.GraphExpansionLimitFollowUp || second.Reason != "graph_follow_up_expansion_limit_exceeded" || len(second.MissingDoDItems) != 1 {
+		t.Fatalf("second closure trace = %+v, want assessment-only missing DoD projection", second)
+	}
+	if len(observability.ClosureTraces) != len(snapshot.ClosureTraces) {
+		t.Fatalf("observability closureTraces = %+v, want snapshot projection reused", observability.ClosureTraces)
+	}
+}
+
 func TestReadWorkspaceTaskProgressWithBackendReturnsActiveRunProgress(t *testing.T) {
 	dataRoot := t.TempDir()
 	workspaceID := "ws-task-progress-approval"

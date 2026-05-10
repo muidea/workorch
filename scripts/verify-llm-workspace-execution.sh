@@ -76,6 +76,8 @@ import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 initial_runs = []
+run_scenarios = {}
+request_sequence = 0
 
 def full_dod_items(step_id):
     return [
@@ -87,13 +89,33 @@ def full_dod_items(step_id):
         {"item": "memory recall is visible", "state": "satisfied", "evidenceRefs": [step_id]},
     ]
 
+def next_scenario(request):
+    global request_sequence
+    run_id = request.get("runId", "")
+    if run_id and run_id in run_scenarios:
+        request["scenario"] = run_scenarios[run_id]
+        return request["scenario"]
+    scenario = request_sequence
+    request_sequence += 1
+    if run_id:
+        run_scenarios[run_id] = scenario
+    request["scenario"] = scenario
+    return scenario
+
+def mark_continuation_scenario(request, scenario):
+    global request_sequence
+    request["scenario"] = scenario
+    if request_sequence <= scenario:
+        request_sequence = scenario + 1
+
 def decision_payload(request):
     run_id = request.get("runId", "")
     step_id = request.get("stepId", "")
     if run_id == "probe":
         return {"completionState": "failed", "thoughtSummary": "probe"}
-    scenario = initial_runs.index(run_id) if run_id in initial_runs else -1
-    if "llm-after-decision" in step_id and scenario == 3:
+    scenario = run_scenarios.get(run_id, -1) if run_id else -1
+    if "llm-after-decision" in step_id and scenario == 4:
+        mark_continuation_scenario(request, 5)
         return {
             "thoughtSummary": "Decision information was provided; approval is now required before completing.",
             "completionState": "blocked_on_approval",
@@ -104,6 +126,7 @@ def decision_payload(request):
             }
         }
     if "llm-after-decision" in step_id:
+        mark_continuation_scenario(request, 2)
         return {
             "thoughtSummary": "Decision information provided; DoD is now satisfied.",
             "completionState": "completed",
@@ -119,7 +142,8 @@ def decision_payload(request):
                 "items": full_dod_items(step_id)
             }
         }
-    if "llm-after-approval" in step_id and scenario == 3:
+    if "llm-after-approval" in step_id and scenario in {4, 5}:
+        mark_continuation_scenario(request, 6)
         return {
             "thoughtSummary": "Decision and approval gates were both completed; DoD is now satisfied.",
             "completionState": "completed",
@@ -129,9 +153,27 @@ def decision_payload(request):
                 "items": full_dod_items(step_id)
             }
         }
-    if run_id not in initial_runs:
-        initial_runs.append(run_id)
-    scenario = initial_runs.index(run_id)
+    scenario = next_scenario(request)
+    if scenario == 5:
+        return {
+            "thoughtSummary": "Decision information was provided; approval is now required before completing.",
+            "completionState": "blocked_on_approval",
+            "requiredApproval": {
+                "reason": "Approve the second governance gate after decision resolution.",
+                "action": "complete multi-gate LLM path",
+                "context": {"scenario": "decision_then_approval"}
+            }
+        }
+    if scenario == 6:
+        return {
+            "thoughtSummary": "Decision and approval gates were both completed; DoD is now satisfied.",
+            "completionState": "completed",
+            "dodAssessment": {
+                "satisfied": True,
+                "summary": "Multi-gate path completed after Decision and Approval.",
+                "items": full_dod_items(step_id)
+            }
+        }
     if scenario == 0:
         return {
             "thoughtSummary": "Happy path completed with evidence.",
@@ -161,6 +203,22 @@ def decision_payload(request):
         }
     if scenario == 2:
         return {
+            "thoughtSummary": "Decision information provided; DoD is now satisfied.",
+            "completionState": "completed",
+            "memoryWrites": [{
+                "memoryType": "project_context",
+                "summary": "Confirmed implementation convention after decision.",
+                "content": "Adopted implementation convention from resolved decision.",
+                "tags": ["confirmed", "acceptance"]
+            }],
+            "dodAssessment": {
+                "satisfied": True,
+                "summary": "Decision path completed.",
+                "items": full_dod_items(step_id)
+            }
+        }
+    if scenario == 3:
+        return {
             "thoughtSummary": "Risky action requires approval.",
             "completionState": "blocked_on_approval",
             "requiredApproval": {
@@ -169,7 +227,7 @@ def decision_payload(request):
                 "context": {"scenario": "approval"}
             }
         }
-    if scenario == 3:
+    if scenario == 4:
         return {
             "thoughtSummary": "Need operator direction before approval gate can be evaluated.",
             "completionState": "blocked_on_decision",
@@ -180,7 +238,7 @@ def decision_payload(request):
                 "context": {"scenario": "decision_then_approval"}
             }
         }
-    if scenario == 4:
+    if scenario == 7:
         return "not-json"
     return {
         "thoughtSummary": "Memory recall path completed.",
@@ -196,7 +254,7 @@ def usage_payload(request):
     run_id = request.get("runId", "")
     if run_id == "probe":
         return None
-    scenario = initial_runs.index(run_id) if run_id in initial_runs else -1
+    scenario = request.get("scenario", run_scenarios.get(run_id, -1)) if run_id else request.get("scenario", -1)
     # Keep scenario-0 without usage so e2e can assert estimated fallback path.
     if scenario == 0:
         return None
@@ -220,11 +278,15 @@ def stream_usage_payload(model):
 def provider_request_from_payload(payload):
     messages = payload.get("messages") or []
     merged_content = "\n".join(str(item.get("content", "")) for item in messages)
-    run_match = re.search(r'"runId"\s*:\s*"([^"]+)"', merged_content)
-    step_match = re.search(r'"stepId"\s*:\s*"([^"]+)"', merged_content)
+    run_matches = re.findall(r'"runId"\s*:\s*"([^"]+)"', merged_content)
+    if not run_matches:
+        run_matches = re.findall(r'\brunId\b\s*[:=]\s*([A-Za-z0-9._/-]+)', merged_content)
+    step_matches = re.findall(r'"stepId"\s*:\s*"([^"]+)"', merged_content)
+    if not step_matches:
+        step_matches = re.findall(r'\bstepId\b\s*[:=]\s*([A-Za-z0-9._/-]+)', merged_content)
     return {
-        "runId": run_match.group(1) if run_match else "",
-        "stepId": step_match.group(1) if step_match else "",
+        "runId": run_matches[-1] if run_matches else "",
+        "stepId": step_matches[-1] if step_matches else "",
     }
 
 class Handler(BaseHTTPRequestHandler):
@@ -256,6 +318,12 @@ class Handler(BaseHTTPRequestHandler):
         payload = json.loads(body)
         provider_request = provider_request_from_payload(payload)
         decision = decision_payload(provider_request)
+        print("scenario=%s runId=%s stepId=%s state=%s" % (
+            provider_request.get("scenario", ""),
+            provider_request.get("runId", ""),
+            provider_request.get("stepId", ""),
+            decision.get("completionState") if isinstance(decision, dict) else "raw"
+        ), flush=True)
         content = decision if isinstance(decision, str) else json.dumps(decision, separators=(",", ":"))
         model = payload.get("model", "")
         if payload.get("stream"):
@@ -827,16 +895,36 @@ curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DI
 grep 'Default verification preference: use go test ./...' "$TMP_DIR/memory-after-happy.json" >/dev/null
 
 activate_workspace_execution "$TMP_DIR/decision-activation.json"
-grep '"state": "blocked_on_decision"' "$TMP_DIR/decision-activation.json" >/dev/null
 decision_run_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.id")"
-ticket_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.blockingTicketId")"
-ticket_path="$(url_encode "$ticket_id")"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id/status" | grep '"state": "blocked_on_decision"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/decisions?runId=$decision_run_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path" | grep '"decisionKind": "provide_missing_info"' >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve" -H 'Content-Type: application/json' \
-  -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance"}}' | grep '"resolutionType": "provide_missing_info"' >/dev/null
+decision_state="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.state")"
+if [[ "$decision_state" == "blocked_on_decision" ]]; then
+  ticket_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.blockingTicketId")"
+  ticket_path="$(url_encode "$ticket_id")"
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id/status" | grep '"state": "blocked_on_decision"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions?runId=$decision_run_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path" | grep '"decisionKind": "provide_missing_info"' >/dev/null
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve" -H 'Content-Type: application/json' \
+    -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance"}}' | grep '"resolutionType": "provide_missing_info"' >/dev/null
+elif [[ "$decision_state" == "completed" ]]; then
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions?runId=$decision_run_id" >"$TMP_DIR/decision-auto-resolved-list.json"
+  ticket_id="$(python3 - "$TMP_DIR/decision-auto-resolved-list.json" <<'PY'
+import json
+import sys
+items = json.load(open(sys.argv[1], encoding="utf-8")).get("decisions") or []
+if not items:
+    raise SystemExit("completed decision scenario did not expose a Decision record")
+print(items[0].get("id", ""))
+PY
+)"
+  ticket_path="$(url_encode "$ticket_id")"
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path" >"$TMP_DIR/decision-auto-resolved-detail.json"
+  grep '"decisionKind": "provide_missing_info"' "$TMP_DIR/decision-auto-resolved-detail.json" >/dev/null
+  grep '"state": "resolved"' "$TMP_DIR/decision-auto-resolved-detail.json" >/dev/null
+else
+  echo "decision scenario state=$decision_state, want blocked_on_decision or completed" >&2
+  exit 1
+fi
 wait_run_state "$decision_run_id" "completed" "$TMP_DIR/decision-after-resolve-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id/observability" | grep '"terminal": true' >/dev/null
 assert_run_recovery_read_models "$decision_run_id" "decision" "completed" "provider_native"

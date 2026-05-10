@@ -593,6 +593,7 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 	ret.RepairLoop = ret.TaskProgress.RepairLoop
 	ret.TaskDecompositions = mapTaskDecompositions(ret)
 	ret.TaskPlans = mapTaskPlans(ret)
+	ret.ClosureTraces = mapClosureTraces(ret)
 	ret.DoDEvidence = mapDoDEvidence(ret)
 	ret.ResultQuality = mapResultQuality(ret)
 	ret.ExecutionSections = mapExecutionSections(ret)
@@ -2776,6 +2777,7 @@ func mapRunObservability(snapshot RunSnapshot) RunObservability {
 		LLMUsageSummary:      snapshot.LLMUsageSummary,
 		MemoryRecallTraces:   snapshot.MemoryRecallTraces,
 		WebSources:           snapshot.WebSources,
+		ClosureTraces:        snapshot.ClosureTraces,
 		DoDEvidence:          snapshot.DoDEvidence,
 		ResultQuality:        snapshot.ResultQuality,
 		Evidence:             runtimeEvidenceSummary(snapshot, len(timelineEvents(timeline))),
@@ -3224,6 +3226,63 @@ func mapTaskPlans(snapshot RunSnapshot) []TaskPlan {
 		return nil
 	}
 	return ret
+}
+
+func mapClosureTraces(snapshot RunSnapshot) []ClosureTrace {
+	ret := make([]ClosureTrace, 0)
+	for _, step := range snapshot.Steps {
+		trace, ok := closureTraceFromStep(step)
+		if ok {
+			ret = append(ret, trace)
+		}
+	}
+	return ret
+}
+
+func closureTraceFromStep(step presenter.StepView) (ClosureTrace, bool) {
+	input := step.Input
+	output := step.Output
+	trace := ClosureTrace{
+		StepID: step.ID,
+		Kind:   step.Kind,
+		State:  step.State,
+	}
+	trace.GraphFollowUp = readModelBoolValue(input["graphFollowUp"])
+	trace.AssessmentOnly = readModelBoolValue(input["assessmentOnly"]) || readModelBoolValue(input["providerRetryAssessmentOnly"])
+	trace.GraphExpansionLimitFollowUp = readModelBoolValue(input["graphExpansionLimitFollowUp"])
+	trace.GraphFollowUpExpansionLimitExceeded = readModelBoolValue(output["graphFollowUpExpansionLimitExceeded"])
+	trace.GraphFollowUpExpansionCount = firstPositiveInt(
+		readModelIntValue(output["graphFollowUpExpansionCount"]),
+		readModelIntValue(input["graphFollowUpExpansionCount"]),
+	)
+	trace.GraphFollowUpExpansionLimit = firstPositiveInt(
+		readModelIntValue(output["graphFollowUpExpansionLimit"]),
+		readModelIntValue(input["graphFollowUpExpansionLimit"]),
+	)
+	trace.IgnoredExecutionGraph = readModelBoolValue(output["ignoredExecutionGraph"])
+	trace.Reason = strings.TrimSpace(firstNonEmptyReadModel(
+		readModelStringValue(input["assessmentOnlyReason"]),
+		readModelStringValue(output["error"]),
+		readModelStringValue(output["reason"]),
+	))
+	trace.MissingDoDItems = readModelMissingDoDItemsFromStepOutput(output)
+	trace.EvidenceRefs = compactUniqueStrings([]string{step.ID})
+	ok := trace.GraphFollowUp ||
+		trace.AssessmentOnly ||
+		trace.GraphExpansionLimitFollowUp ||
+		trace.GraphFollowUpExpansionLimitExceeded ||
+		trace.IgnoredExecutionGraph ||
+		len(trace.MissingDoDItems) > 0
+	return trace, ok
+}
+
+func firstPositiveInt(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func taskPlanStateFromStep(state string) string {

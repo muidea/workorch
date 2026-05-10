@@ -18,6 +18,7 @@ type RunSnapshot struct {
 	ValidationResults    []ValidationResult       `json:"validationResults,omitempty"`
 	RuntimeCheckpoints   []RuntimeCheckpoint      `json:"runtimeCheckpoints,omitempty"`
 	Results              []Result                 `json:"results,omitempty"`
+	ClosureTraces        []ClosureTrace           `json:"closureTraces,omitempty"`
 	DoDEvidence          []DoDEvidenceTrace       `json:"doDEvidence,omitempty"`
 	ResultQuality        []ResultQualityTrace     `json:"resultQuality,omitempty"`
 	Artifacts            []Artifact               `json:"artifacts,omitempty"`
@@ -63,6 +64,7 @@ type RunObservability struct {
 	LLMUsageSummary      LLMUsageSummary         `json:"llmUsageSummary"`
 	MemoryRecallTraces   []MemoryRecallTrace     `json:"memoryRecallTraces,omitempty"`
 	WebSources           []WebSourceTrace        `json:"webSources,omitempty"`
+	ClosureTraces        []ClosureTrace          `json:"closureTraces,omitempty"`
 	DoDEvidence          []DoDEvidenceTrace      `json:"doDEvidence,omitempty"`
 	ResultQuality        []ResultQualityTrace    `json:"resultQuality,omitempty"`
 	Evidence             RuntimeEvidenceSummary  `json:"evidence"`
@@ -166,6 +168,22 @@ type RepairLoop struct {
 	EscalationReason     string           `json:"escalationReason,omitempty"`
 	EscalationTicketID   string           `json:"escalationTicketId,omitempty"`
 	EvidenceRefs         []string         `json:"evidenceRefs,omitempty"`
+}
+
+type ClosureTrace struct {
+	StepID                              string           `json:"stepId"`
+	Kind                                string           `json:"kind,omitempty"`
+	State                               string           `json:"state,omitempty"`
+	GraphFollowUp                       bool             `json:"graphFollowUp,omitempty"`
+	AssessmentOnly                      bool             `json:"assessmentOnly,omitempty"`
+	GraphExpansionLimitFollowUp         bool             `json:"graphExpansionLimitFollowUp,omitempty"`
+	GraphFollowUpExpansionLimitExceeded bool             `json:"graphFollowUpExpansionLimitExceeded,omitempty"`
+	GraphFollowUpExpansionCount         int              `json:"graphFollowUpExpansionCount,omitempty"`
+	GraphFollowUpExpansionLimit         int              `json:"graphFollowUpExpansionLimit,omitempty"`
+	IgnoredExecutionGraph               bool             `json:"ignoredExecutionGraph,omitempty"`
+	Reason                              string           `json:"reason,omitempty"`
+	MissingDoDItems                     []map[string]any `json:"missingDoDItems,omitempty"`
+	EvidenceRefs                        []string         `json:"evidenceRefs,omitempty"`
 }
 
 type ContextBundle struct {

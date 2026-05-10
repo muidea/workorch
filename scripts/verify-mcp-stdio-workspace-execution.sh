@@ -110,7 +110,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 def decision_payload(user_content):
     if '"runId": "probe"' in user_content:
         return {"completionState": "failed", "thoughtSummary": "probe"}
-    if '"graphFollowUp": true' in user_content or '"previousStepOutput"' in user_content:
+    if '"assessmentOnly": true' in user_content or '"graphFollowUp": true' in user_content or '"previousStepOutput"' in user_content:
         previous = re.search(r'"previousStepId": "([^"]+)"', user_content)
         evidence = previous.group(1) if previous else "mcp-stdio-call"
         return {
@@ -150,7 +150,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         size = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(size))
-        user_content = payload["messages"][-1]["content"]
+        user_content = "\n".join(str(item.get("content", "")) for item in payload.get("messages") or [])
         decision = decision_payload(user_content)
         response = {
             "choices": [{

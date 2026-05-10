@@ -2562,6 +2562,43 @@ func TestRuntimeOrchestrator_RuntimeRepairInputSkipsWorkspaceManifestForDoDFailu
 	}
 }
 
+func TestOutputWithDoDAssessmentDiagnosticsNormalizesMissingItems(t *testing.T) {
+	output := outputWithDoDAssessmentDiagnostics(map[string]any{
+		"status": "completed",
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": false,
+			"summary":   "one item missing",
+			"items": []map[string]any{
+				{
+					"item":         "first item",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run/step-1"},
+				},
+				{
+					"item":         "second item",
+					"state":        "failed",
+					"reason":       "missing implementation evidence",
+					"impact":       "cannot accept the run",
+					"evidenceRefs": []string{"run/step-2"},
+					"nextActions":  []string{"implement the missing behavior", "rerun verification"},
+				},
+			},
+		},
+	})
+
+	diagnostics := mapFromValue(output["runtimeDiagnostics"])
+	if diagnostics["kind"] != failureClassDoDCoverageMissing {
+		t.Fatalf("runtimeDiagnostics = %+v, want DoD coverage missing kind", diagnostics)
+	}
+	missing := mapSliceFromValue(output["missingDoDItems"])
+	if len(missing) != 1 || missing[0]["item"] != "second item" || missing[0]["state"] != "failed" || missing[0]["source"] != "dodAssessment" {
+		t.Fatalf("missingDoDItems = %+v, want normalized failed DoD item", missing)
+	}
+	if refs := stringSliceFromValue(missing[0]["evidenceRefs"]); len(refs) != 1 || refs[0] != "run/step-2" {
+		t.Fatalf("missingDoDItems evidenceRefs = %+v, want run/step-2", missing[0]["evidenceRefs"])
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -8508,7 +8545,7 @@ func TestRuntimeOrchestrator_DispatchesRepeatedGraphNodeIDInNewGraphScope(t *tes
 	}
 }
 
-func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitRoutesToRepair(t *testing.T) {
+func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitRoutesToAssessmentOnly(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -8516,17 +8553,23 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitRoutesToRepair(t *testin
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	var graphExpansions int
-	var repairSeen bool
+	var assessmentOnlySeen bool
 	runtime := &stubRuntimeAdapter{
 		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
-			if boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]) {
-				repairSeen = true
+			if boolValue(request.Input[stepInputKeyAssessmentOnly]) {
+				assessmentOnlySeen = true
+				if boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]) {
+					t.Fatalf("assessment-only input unexpectedly uses runtime repair follow-up: %+v", request.Input)
+				}
+				if _, ok := request.Input[stepOutputKeyExecutionGraph]; ok {
+					t.Fatalf("assessment-only input retained executionGraph: %+v", request.Input[stepOutputKeyExecutionGraph])
+				}
 				return map[string]any{
 					"status": "completed",
 					stepOutputKeyDoDAssessment: map[string]any{
 						"satisfied":   true,
-						"summary":     "graph expansion repaired into final assessment",
-						"goalOutcome": "The run completed after graph expansion repair.",
+						"summary":     "graph expansion bounded into final assessment",
+						"goalOutcome": "The run completed after graph expansion assessment.",
 						"items": []map[string]any{
 							{
 								"item":         "graph expansion bounded",
@@ -8578,8 +8621,8 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitRoutesToRepair(t *testin
 		t.Fatalf("start run: %v", err)
 	}
 
-	if !repairSeen {
-		t.Fatalf("repair was not dispatched after graph expansion limit")
+	if !assessmentOnlySeen {
+		t.Fatalf("assessment-only follow-up was not dispatched after graph expansion limit")
 	}
 	if graphExpansions != maxGraphFollowUpExpansionAttempts+1 {
 		t.Fatalf("graphExpansions = %d, want one bounded overflow beyond limit %d", graphExpansions, maxGraphFollowUpExpansionAttempts)
@@ -8590,7 +8633,79 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitRoutesToRepair(t *testin
 	}
 	if runItem.State != common.RunStateCompleted {
 		steps, _ := stepRepo.ListByRun(ctx, runID)
-		t.Fatalf("run = %+v steps=%+v, want completed after repair", runItem, steps)
+		t.Fatalf("run = %+v steps=%+v, want completed after assessment-only follow-up", runItem, steps)
+	}
+}
+
+func TestRuntimeOrchestrator_AssessmentOnlyRejectsExecutionGraph(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	var assessmentOnlySeen bool
+	runtime := &stubRuntimeAdapter{
+		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			if boolValue(request.Input[stepInputKeyAssessmentOnly]) {
+				assessmentOnlySeen = true
+				return map[string]any{
+					"status": "completed",
+					stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+						{ID: "must_not_execute", Kind: "graph/mock"},
+					}},
+				}, nil
+			}
+			if boolValue(request.Input["graphFollowUp"]) {
+				return map[string]any{
+					"status": "completed",
+					stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+						{ID: runtimeChildID(request.StepID, "verify"), Kind: "graph/mock"},
+					}},
+				}, nil
+			}
+			if request.Kind == "graph/mock" {
+				return map[string]any{"status": "completed", "stdout": "graph node completed"}, nil
+			}
+			return map[string]any{
+				"status": "completed",
+				stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+					{ID: "inspect", Kind: "graph/mock"},
+				}},
+			}, nil
+		},
+	}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-assessment-only-rejects-graph")
+	runID := common.RunID("run-assessment-only-rejects-graph")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-assessment-only-rejects-graph"),
+		State:           common.RunStateCreated,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	if !assessmentOnlySeen {
+		t.Fatalf("assessment-only follow-up was not reached")
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateFailed || !strings.Contains(runItem.FailureReason, "assessment-only step returned executionGraph") {
+		steps, _ := stepRepo.ListByRun(ctx, runID)
+		t.Fatalf("run = %+v steps=%+v, want failed contract violation", runItem, steps)
 	}
 }
 

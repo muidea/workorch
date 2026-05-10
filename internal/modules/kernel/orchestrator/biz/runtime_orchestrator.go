@@ -50,6 +50,8 @@ const (
 	stepInputKeyProviderRetryFollowUp  = "providerRetryFollowUp"
 	stepInputKeyProviderRetryAttempt   = "providerRetryAttempt"
 	stepInputKeyNoActionableFollowUp   = "noActionableContinuationFollowUp"
+	stepInputKeyAssessmentOnly         = "assessmentOnly"
+	stepInputKeyGraphLimitFollowUp     = "graphExpansionLimitFollowUp"
 	stepOutputKeyBlockDecisionReason   = "blockDecisionReason"
 	stepOutputKeyBlockDecisionTicketID = "blockDecisionTicketId"
 	stepOutputKeyBlockDecisionKind     = "blockDecisionKind"
@@ -1083,7 +1085,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if nextStepID != "" {
 		return o.dispatchStepWithWorkspace(ctx, run, nextStepID, nextKind, nextStepInputFromOutput(run, step), workspace)
 	}
-	if handled, err := o.validateGraphExpansionBoundary(ctx, run, step, toolCall, output); handled || err != nil {
+	if handled, err := o.validateGraphExpansionBoundary(ctx, run, step, toolCall, output, workspace); handled || err != nil {
 		return err
 	}
 	graphSpecs, graphSteps := o.readyGraphStepSpecsWithSteps(ctx, run, step)
@@ -1137,13 +1139,17 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 	step *runModel.Step,
 	toolCall *runModel.ToolCall,
 	output map[string]any,
+	workspace *workspaceModel.Workspace,
 ) (bool, error) {
 	if run == nil || step == nil || output == nil || !requiresDoDAssessmentCompletionGate(run) {
 		return false, nil
 	}
-	if boolValue(step.Input["providerRetryAssessmentOnly"]) {
+	if boolValue(step.Input["providerRetryAssessmentOnly"]) || boolValue(step.Input[stepInputKeyAssessmentOnly]) {
 		if _, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
-			err := fmt.Errorf("%w: provider retry assessment-only step returned executionGraph", common.ErrInvalidArgument)
+			err := fmt.Errorf("%w: assessment-only step returned executionGraph", common.ErrInvalidArgument)
+			if boolValue(step.Input["providerRetryAssessmentOnly"]) {
+				err = fmt.Errorf("%w: provider retry assessment-only step returned executionGraph", common.ErrInvalidArgument)
+			}
 			return true, o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 		}
 	}
@@ -1154,8 +1160,18 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 	if count <= maxGraphFollowUpExpansionAttempts {
 		return false, nil
 	}
-	err := fmt.Errorf("%w: graph follow-up expansion limit exceeded after %d attempts", common.ErrInvalidArgument, maxGraphFollowUpExpansionAttempts)
-	return true, o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime graph expansion limit failed", err)
+	output["graphFollowUpExpansionLimitExceeded"] = true
+	output["graphFollowUpExpansionCount"] = count
+	output["graphFollowUpExpansionLimit"] = maxGraphFollowUpExpansionAttempts
+	output["ignoredExecutionGraph"] = true
+	step.Output = output
+	_ = o.steps.Update(ctx, step)
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil {
+		return true, err
+	}
+	input := o.graphExpansionLimitAssessmentFollowUpStepInputFromSteps(run, step, steps, count)
+	return true, o.dispatchUniqueStepWithWorkspace(ctx, run, graphExpansionLimitAssessmentFollowUpStepID(run.ID, step), initialStepKind(run), input, workspace)
 }
 
 func (o *RuntimeOrchestrator) recordRejectedCompletionDoDAssessment(ctx context.Context, run *runModel.Run, step *runModel.Step, output map[string]any) error {

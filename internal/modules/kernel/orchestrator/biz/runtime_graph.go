@@ -746,6 +746,31 @@ func llmCompletionFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.S
 	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromSteps(steps))
 }
 
+func graphExpansionLimitAssessmentFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {
+	stepID := runtimeChildID(step.ID, "assessment")
+	if stepID == "" {
+		stepID = "assessment"
+	}
+	return common.StepID(fmt.Sprintf("%s/zz-llm-after-graph-limit-%s", runID, stepID))
+}
+
+func (o *RuntimeOrchestrator) graphExpansionLimitAssessmentFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step, count int) map[string]any {
+	input := llmCompletionFollowUpStepInputFromSteps(run, step, steps)
+	input[stepInputKeyAssessmentOnly] = true
+	input[stepInputKeyGraphLimitFollowUp] = true
+	input["assessmentOnlyReason"] = "graph_follow_up_expansion_limit_exceeded"
+	input["graphFollowUpExpansionCount"] = count
+	input["graphFollowUpExpansionLimit"] = maxGraphFollowUpExpansionAttempts
+	input["allowedAssessmentOnlyCompletionStates"] = []string{"completed", "failed", "blocked_on_decision", "blocked_on_approval"}
+	delete(input, stepOutputKeyExecutionGraph)
+	if previous := mapFromValue(input["previousStepOutput"]); len(previous) > 0 {
+		delete(previous, stepOutputKeyExecutionGraph)
+		previous["graphFollowUpExpansionLimitExceeded"] = true
+		input["previousStepOutput"] = previous
+	}
+	return input
+}
+
 func noActionableContinuationFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {
 	stepID := runtimeChildID(step.ID, "continuation")
 	if stepID == "" {

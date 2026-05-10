@@ -54,7 +54,7 @@ grep '定义目标' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '定义验收标准' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '启动执行' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '运行摘要' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '最近运行' "$TMP_DIR/workorch-console.js" >/dev/null
+grep '当前运行' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '补充决策信息' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '提交并转入后台' "$TMP_DIR/workorch-console.js" >/dev/null
 grep '审批确认' "$TMP_DIR/workorch-console.js" >/dev/null

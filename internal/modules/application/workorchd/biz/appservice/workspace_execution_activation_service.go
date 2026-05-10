@@ -1248,11 +1248,36 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 			return "", err
 		}
 		if err := exports.Services.RunService.EnsureStarted(ctx, runmodule.StartRunCommand{RunID: runID}); err != nil {
+			if errors.Is(err, common.ErrConflict) {
+				run, getErr := exports.Repositories.Runs.Get(ctx, runID)
+				if getErr != nil {
+					return "", getErr
+				}
+				if isActivationObservableRunState(run.State) {
+					return runID, nil
+				}
+			}
 			return "", err
 		}
 		return runID, nil
 	}
 	return "", common.ErrConflict
+}
+
+func isActivationObservableRunState(state common.RunState) bool {
+	switch state {
+	case common.RunStateRunning,
+		common.RunStateValidating,
+		common.RunStateBlockedOnDecision,
+		common.RunStateBlockedOnApproval,
+		common.RunStateCompleted,
+		common.RunStateFailed,
+		common.RunStateCancelled,
+		common.RunStateSuperseded:
+		return true
+	default:
+		return false
+	}
 }
 
 func recordActivationMemoryRecallTrace(ctx context.Context, exports appbootstrap.Exports, runID common.RunID, workspaceID common.WorkspaceID, executionContext map[string]any) error {

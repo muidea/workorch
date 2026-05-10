@@ -374,20 +374,21 @@ LOOKUP_NAME = os.environ["WORKORCH_WEATHER_LOOKUP_NAME"]
 
 
 def parse_provider_request(payload):
-    content = payload.get("messages", [{}])[-1].get("content", "")
+    messages = payload.get("messages") or []
+    content = "\n".join(str(item.get("content", "")) for item in messages)
     try:
         request = json.loads(content)
     except Exception:
         request = {}
     request["raw"] = content
     if not request.get("runId"):
-        run_match = re.search(r'"runId"\s*:\s*"([^"]+)"', content)
-        if run_match:
-            request["runId"] = run_match.group(1)
+        run_matches = re.findall(r'"runId"\s*:\s*"([^"]+)"', content)
+        if run_matches:
+            request["runId"] = run_matches[-1]
     if not request.get("stepId"):
-        step_match = re.search(r'"stepId"\s*:\s*"([^"]+)"', content)
-        if step_match:
-            request["stepId"] = step_match.group(1)
+        step_matches = re.findall(r'"stepId"\s*:\s*"([^"]+)"', content)
+        if step_matches:
+            request["stepId"] = step_matches[-1]
     return request
 
 
@@ -666,12 +667,23 @@ if not any(item.get("id") == ticket_id and item.get("state") == "resolved" for i
 if not any(item.get("id") == approval_id and item.get("state") == "approved" for item in approvals):
     errors.append(f"approved Approval {approval_id} missing from snapshot approvals={approvals}")
 
+output = {}
 mcp_steps = [item for item in steps if item.get("kind") == "mcp/tool_call"]
 if not mcp_steps:
     errors.append("missing mcp/tool_call weather step")
     structured = {}
 else:
-    output = mcp_steps[0].get("output") or {}
+    selected_step = None
+    for candidate in mcp_steps:
+        candidate_output = candidate.get("output") or {}
+        candidate_result = candidate_output.get("result") or {}
+        candidate_structured = candidate_result.get("structuredContent") or {}
+        if candidate_output.get("tool") == "weather.current" or candidate_structured.get("query"):
+            selected_step = candidate
+            break
+    if selected_step is None:
+        selected_step = mcp_steps[0]
+    output = selected_step.get("output") or {}
     result = output.get("result") or {}
     structured = result.get("structuredContent") or {}
     query = structured.get("query") or {}
@@ -805,13 +817,8 @@ dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
   '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"'"$PROVIDER_ID"'","mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":3}' \
   "$TMP_DIR/decision-activation.json"
-grep '"state": "blocked_on_decision"' "$TMP_DIR/decision-activation.json" >/dev/null
 run_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.id")"
-ticket_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.blockingTicketId")"
-ticket_path="$(url_encode "$ticket_id")"
-curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path" >"$TMP_DIR/decision-ticket.json"
-grep '"decisionKind": "provide_missing_info"' "$TMP_DIR/decision-ticket.json" >/dev/null
-grep "$CITY" "$TMP_DIR/decision-ticket.json" >/dev/null
+activation_state="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.state")"
 
 python3 - "$TMP_DIR/decision-resolution.json" "$COUNTRY" "$PROVINCE" "$CITY" "$LOOKUP_NAME" <<'PY'
 import json
@@ -831,14 +838,32 @@ payload = {
 with open(output, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
 PY
-curl -fsS -H "Content-Type: application/json" -X POST \
-  "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve" \
-  -d @"$TMP_DIR/decision-resolution.json" >"$TMP_DIR/decision-resolved.json"
-grep '"resolutionType": "provide_missing_info"' "$TMP_DIR/decision-resolved.json" >/dev/null
 
-wait_run_state "$run_id" "blocked_on_approval" "$TMP_DIR/approval-status.json"
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces" >"$TMP_DIR/workspaces-blocked.json"
-python3 - "$TMP_DIR/workspaces-blocked.json" "$workspace_id" "$run_id" <<'PY'
+if [[ "$activation_state" == "blocked_on_decision" ]]; then
+  ticket_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.blockingTicketId")"
+  ticket_path="$(url_encode "$ticket_id")"
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path" >"$TMP_DIR/decision-ticket.json"
+  grep '"decisionKind": "provide_missing_info"' "$TMP_DIR/decision-ticket.json" >/dev/null
+  grep "$CITY" "$TMP_DIR/decision-ticket.json" >/dev/null
+  curl -fsS -H "Content-Type: application/json" -X POST \
+    "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve" \
+    -d @"$TMP_DIR/decision-resolution.json" >"$TMP_DIR/decision-resolved.json"
+  grep '"resolutionType": "provide_missing_info"' "$TMP_DIR/decision-resolved.json" >/dev/null
+  wait_run_state "$run_id" "blocked_on_approval" "$TMP_DIR/approval-status.json"
+elif [[ "$activation_state" == "blocked_on_approval" ]]; then
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" >"$TMP_DIR/approval-status.json"
+elif [[ "$activation_state" == "completed" ]]; then
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions?runId=$run_id" >"$TMP_DIR/decision-auto-list.json"
+  grep '"decisionKind": "provide_missing_info"' "$TMP_DIR/decision-auto-list.json" >/dev/null
+  grep '"state": "resolved"' "$TMP_DIR/decision-auto-list.json" >/dev/null
+else
+  echo "weather governance activation state=$activation_state, want blocked_on_decision, blocked_on_approval, or completed" >&2
+  exit 1
+fi
+
+if [[ "$activation_state" != "completed" ]]; then
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces" >"$TMP_DIR/workspaces-blocked.json"
+  python3 - "$TMP_DIR/workspaces-blocked.json" "$workspace_id" "$run_id" <<'PY'
 import json
 import sys
 
@@ -853,15 +878,52 @@ for item in data.get("workspaces") or []:
 else:
     raise SystemExit(f"workspace {workspace_id} missing from workspace list")
 PY
-approval_id="$(json_path "$TMP_DIR/approval-status.json" "status.blockingApprovalId")"
-approval_path="$(url_encode "$approval_id")"
-curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_path" >"$TMP_DIR/approval-pending.json"
-grep '"state": "pending"' "$TMP_DIR/approval-pending.json" >/dev/null
-grep "$CITY" "$TMP_DIR/approval-pending.json" >/dev/null
+  approval_id="$(json_path "$TMP_DIR/approval-status.json" "status.blockingApprovalId")"
+  approval_path="$(url_encode "$approval_id")"
+  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_path" >"$TMP_DIR/approval-pending.json"
+  grep '"state": "pending"' "$TMP_DIR/approval-pending.json" >/dev/null
+  grep "$CITY" "$TMP_DIR/approval-pending.json" >/dev/null
 
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_path/approve" >"$TMP_DIR/approval-approved.json"
-grep '"state": "approved"' "$TMP_DIR/approval-approved.json" >/dev/null
-wait_run_state "$run_id" "completed" "$TMP_DIR/run-completed-status.json"
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_path/approve" >"$TMP_DIR/approval-approved.json"
+  grep '"state": "approved"' "$TMP_DIR/approval-approved.json" >/dev/null
+  wait_run_state "$run_id" "completed" "$TMP_DIR/run-completed-status.json"
+else
+  curl -fsS "$BASE_URL/api/v1/workorch/approvals?runId=$run_id" >"$TMP_DIR/approval-auto-list.json"
+  grep '"state": "approved"' "$TMP_DIR/approval-auto-list.json" >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" >"$TMP_DIR/run-completed-status.json"
+  grep '"state": "completed"' "$TMP_DIR/run-completed-status.json" >/dev/null
+fi
+
+if [[ -z "${ticket_id:-}" ]]; then
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions?runId=$run_id" >"$TMP_DIR/decision-final-list.json"
+  ticket_id="$(python3 - "$TMP_DIR/decision-final-list.json" <<'PY'
+import json
+import sys
+items = json.load(open(sys.argv[1], encoding="utf-8")).get("decisions") or []
+for item in items:
+    if item.get("state") == "resolved":
+        print(item.get("id", ""))
+        break
+else:
+    raise SystemExit("missing resolved decision")
+PY
+)"
+fi
+if [[ -z "${approval_id:-}" ]]; then
+  curl -fsS "$BASE_URL/api/v1/workorch/approvals?runId=$run_id" >"$TMP_DIR/approval-final-list.json"
+  approval_id="$(python3 - "$TMP_DIR/approval-final-list.json" <<'PY'
+import json
+import sys
+items = json.load(open(sys.argv[1], encoding="utf-8")).get("approvals") or []
+for item in items:
+    if item.get("state") == "approved":
+        print(item.get("id", ""))
+        break
+else:
+    raise SystemExit("missing approved approval")
+PY
+)"
+fi
 
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/observability.json"

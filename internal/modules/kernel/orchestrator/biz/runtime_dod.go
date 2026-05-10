@@ -61,6 +61,65 @@ func doDAssessmentFromOutput(output map[string]any) map[string]any {
 	return mapFromValue(decision[stepOutputKeyDoDAssessment])
 }
 
+func outputWithDoDAssessmentDiagnostics(output map[string]any) map[string]any {
+	if len(output) == 0 {
+		return output
+	}
+	missing := missingDoDItemsFromDoDAssessment(doDAssessmentFromOutput(output))
+	if len(missing) == 0 {
+		return output
+	}
+	ret := cloneStepPayload(output)
+	diagnostics := mapFromValue(ret["runtimeDiagnostics"])
+	if diagnostics == nil {
+		diagnostics = map[string]any{}
+	}
+	diagnostics["kind"] = failureClassDoDCoverageMissing
+	diagnostics["missingDoDItems"] = missing
+	ret["runtimeDiagnostics"] = diagnostics
+	ret["missingDoDItems"] = missing
+	return ret
+}
+
+func missingDoDItemsFromDoDAssessment(assessment map[string]any) []map[string]any {
+	if len(assessment) == 0 {
+		return nil
+	}
+	items, ok := doDAssessmentItemMaps(assessment["items"])
+	if !ok || len(items) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0)
+	for _, item := range items {
+		state := strings.ToLower(strings.TrimSpace(stringFromMap(item, "state")))
+		if state == "" || state == "satisfied" {
+			continue
+		}
+		name := strings.TrimSpace(stringFromMap(item, "item"))
+		if name == "" {
+			continue
+		}
+		missing := map[string]any{
+			"kind":         "leaf",
+			"item":         name,
+			"state":        state,
+			"source":       "dodAssessment",
+			"evidenceRefs": evidenceRefsFromValue(item["evidenceRefs"]),
+		}
+		if reason := strings.TrimSpace(firstNonEmptyString(stringFromMap(item, "reason"), stringFromMap(item, "summary"))); reason != "" {
+			missing["reason"] = reason
+		}
+		if impact := strings.TrimSpace(stringFromMap(item, "impact")); impact != "" {
+			missing["impact"] = impact
+		}
+		if actions := stringSliceFromValue(item["nextActions"]); len(actions) > 0 {
+			missing["suggestedNextActions"] = actions
+		}
+		ret = append(ret, missing)
+	}
+	return ret
+}
+
 func llmDecisionCompletionStateFromOutput(output map[string]any) string {
 	if output == nil {
 		return ""

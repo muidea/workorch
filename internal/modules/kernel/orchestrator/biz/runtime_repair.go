@@ -47,7 +47,7 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 		return common.ErrInvalidArgument
 	}
 	step.State = common.StepStateFailed
-	step.Output = runtimeFailureOutput(output, execErr)
+	step.Output = runtimeFailureOutput(outputWithDoDAssessmentDiagnostics(output), execErr)
 	classification := classifyRuntimeFailure(step, step.Output, summary, execErr)
 	attachRuntimeFailureClassification(step.Output, classification)
 	_ = o.recordToolCallFailed(ctx, toolCall, execErr, step.Output)

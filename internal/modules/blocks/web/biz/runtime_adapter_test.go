@@ -206,7 +206,7 @@ func TestRuntimeAdapterFetchBlocksLoopbackUntilApproved(t *testing.T) {
 func TestRuntimeAdapterFetchRechecksFinalURLPolicy(t *testing.T) {
 	approvals := memory.NewApprovalRepository()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"url":"https://example.com/source","finalUrl":"http://127.0.0.1/private","title":"Private","content":"ok","contentType":"text/plain","source":"local"}`))
+		_, _ = w.Write([]byte(`{"url":"https://93.184.216.34/source","finalUrl":"http://127.0.0.1/private","title":"Private","content":"ok","contentType":"text/plain","source":"local"}`))
 	}))
 	defer server.Close()
 	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]ProviderConfig{
@@ -226,7 +226,7 @@ func TestRuntimeAdapterFetchRechecksFinalURLPolicy(t *testing.T) {
 		StepID:      common.StepID("run-final-url/step-1"),
 		Kind:        webcommon.StepKindFetch,
 		Input: map[string]any{
-			"url": "https://example.com/source",
+			"url": "https://93.184.216.34/source",
 		},
 	}
 	blocked, err := adapter.ExecuteRuntimeStep(context.Background(), request)

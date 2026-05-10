@@ -522,6 +522,68 @@ func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
 	}
 }
 
+func TestWorkspaceExecutionActivationSchedulesReplanContinuationForSupersededRun(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := state.close(ctx); err != nil {
+			t.Fatalf("close server state: %v", err)
+		}
+	})
+	handler := newMuxWithState(state)
+	continuation := make(chan appservice.ActivateWorkspaceExecutionCommand, 1)
+	state.listDecisions = func(context.Context, string, string, string, string) ([]appservice.Decision, error) {
+		return []appservice.Decision{
+			{
+				ID:             "ticket-http-replan",
+				WorkspaceID:    "ws-http-replan",
+				RunID:          "run-http-replan",
+				State:          string(common.DecisionTicketStateResolved),
+				ResolutionType: decisioncommon.ResolutionTypeReplan,
+			},
+		}, nil
+	}
+	var calls atomic.Int32
+	state.activateWorkspace = func(_ context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		if workspaceID != "ws-http-replan" {
+			t.Fatalf("workspaceID = %q, want ws-http-replan", workspaceID)
+		}
+		if calls.Add(1) == 1 {
+			return appservice.WorkspaceExecutionActivation{
+				Run: appservice.Run{ID: "run-http-replan", WorkspaceID: workspaceID, State: string(common.RunStateSuperseded), Priority: cmd.Priority},
+			}, nil
+		}
+		continuation <- cmd
+		return appservice.WorkspaceExecutionActivation{
+			Run: appservice.Run{ID: "run-http-replan-continuation", WorkspaceID: workspaceID, State: string(common.RunStateRunning), Priority: cmd.Priority},
+		}, nil
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-http-replan/execution-activations", strings.NewReader(`{"goalId":"goal-http-replan","doDId":"dod-http-replan","priority":6}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("activation status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+	var body workspaceExecutionActivationResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal activation: %v", err)
+	}
+	if body.Activation.Run.ID != "run-http-replan" || body.Activation.Run.State != string(common.RunStateSuperseded) {
+		t.Fatalf("activation run = %+v, want superseded replan run", body.Activation.Run)
+	}
+	select {
+	case cmd := <-continuation:
+		if cmd.Priority != 6 {
+			t.Fatalf("continuation priority = %d, want 6", cmd.Priority)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("activation endpoint did not schedule replan continuation")
+	}
+}
+
 func TestWorkspaceExecutionActivationReportsDisallowedSoulCapability(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	mux := newMux(Config{Backend: "memory"})
@@ -2873,6 +2935,70 @@ func TestServerStateReplanContinuationWatcherUsesSharedSessionEventHub(t *testin
 	case <-activated:
 	case <-time.After(time.Second):
 		t.Fatalf("replan continuation activation was not scheduled from shared session event hub")
+	}
+}
+
+func TestServerStateAutoGovernanceResolvedSchedulesResumeAndReplanContinuation(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := state.close(ctx); err != nil {
+			t.Fatalf("close server state: %v", err)
+		}
+	})
+	if state.eventHub == nil {
+		t.Fatalf("server state eventHub is nil, want shared session event hub")
+	}
+	resumed := make(chan string, 1)
+	activated := make(chan appservice.ActivateWorkspaceExecutionCommand, 1)
+	state.resumeRun = func(_ context.Context, _, _, runID string, _ ...map[string]any) (appservice.Run, error) {
+		if runID != "run-auto-replan" {
+			t.Fatalf("runID = %q, want run-auto-replan", runID)
+		}
+		resumed <- runID
+		return appservice.Run{ID: runID, WorkspaceID: "ws-auto-replan", State: string(common.RunStateSuperseded)}, nil
+	}
+	state.listDecisions = func(context.Context, string, string, string, string) ([]appservice.Decision, error) {
+		return []appservice.Decision{
+			{
+				ID:             "ticket-auto-replan",
+				WorkspaceID:    "ws-auto-replan",
+				RunID:          "run-auto-replan",
+				State:          string(common.DecisionTicketStateResolved),
+				ResolutionType: decisioncommon.ResolutionTypeReplan,
+			},
+		}, nil
+	}
+	state.activateWorkspace = func(_ context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		if workspaceID != "ws-auto-replan" {
+			t.Fatalf("workspaceID = %q, want ws-auto-replan", workspaceID)
+		}
+		activated <- cmd
+		return appservice.WorkspaceExecutionActivation{
+			Run: appservice.Run{ID: "run-auto-replan-continuation", WorkspaceID: workspaceID, State: string(common.RunStateRunning)},
+		}, nil
+	}
+
+	if err := state.eventHub.Publish(context.Background(), events.Envelope{
+		Topic:       events.TopicGovernanceAutoResolved,
+		WorkspaceID: "ws-auto-replan",
+		RunID:       "run-auto-replan",
+		SubjectID:   "ticket-auto-replan/auto-governance",
+		Payload:     map[string]any{"status": "resolved"},
+	}); err != nil {
+		t.Fatalf("publish auto governance resolved event: %v", err)
+	}
+
+	select {
+	case <-resumed:
+	case <-time.After(time.Second):
+		t.Fatalf("auto governance resolved event did not schedule run resume")
+	}
+	select {
+	case <-activated:
+	case <-time.After(time.Second):
+		t.Fatalf("auto governance replan resume did not schedule continuation")
 	}
 }
 

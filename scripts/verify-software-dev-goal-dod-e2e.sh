@@ -7,6 +7,7 @@ BASE_URL="${WORKORCH_SOFTWARE_DEV_E2E_BASE_URL:-${WORKORCH_BASE_URL:-http://127.
 MOCK_ADDR="${WORKORCH_SOFTWARE_DEV_E2E_MOCK_ADDR:-127.0.0.1:18193}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 VERIFY_SUFFIX="${WORKORCH_SOFTWARE_DEV_E2E_SUFFIX:-$$}"
+E2E_MARKER="software-dev-e2e-$VERIFY_SUFFIX"
 TMP_DIR="${WORKORCH_SOFTWARE_DEV_E2E_ARTIFACT_DIR:-$(mktemp -d)}"
 MOCK_PID=""
 MOCK_LOG="$TMP_DIR/software-dev-e2e-llm-mock.log"
@@ -110,6 +111,30 @@ PY
   return 1
 }
 
+wait_run_state_any() {
+  local run_id="$1"
+  local output_file="$2"
+  shift 2
+  local deadline=$((SECONDS + 60))
+  while (( SECONDS <= deadline )); do
+    curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" >"$output_file"
+    if python3 - "$output_file" "$@" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+state = (data.get("status") or {}).get("state")
+raise SystemExit(0 if state in set(sys.argv[2:]) else 1)
+PY
+    then
+      return 0
+    fi
+    sleep 1
+  done
+  cat "$output_file" >&2
+  return 1
+}
+
 write_llm_update_payloads() {
   python3 - "$TMP_DIR/configuration.json" "$TMP_DIR/original-llm-update.json" "$TMP_DIR/verify-llm-update.json" "$MOCK_BASE_URL" <<'PY'
 import json
@@ -187,9 +212,12 @@ import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 
-initial_runs = []
+e2e_marker = os.environ.get("WORKORCH_SOFTWARE_DEV_E2E_MARKER", "")
+run_scenarios = {}
+scenario_counts = {}
 
 BUGGY_SOURCE = "package calculator\n\nfunc Add(a, b int) int { return a - b }\n"
+FIXED_SOURCE = "package calculator\n\nfunc Add(a, b int) int { return a + b }\n"
 FIXED_DIFF = "--- a/calculator.go\n+++ b/calculator.go\n@@ -1,3 +1,3 @@\n package calculator\n \n-func Add(a, b int) int { return a - b }\n+func Add(a, b int) int { return a + b }\n"
 NEW_PROJECT_SOURCE = "package targetproject\n\nfunc Enabled() bool { return true }\n"
 NEW_PROJECT_TEST = "package targetproject\n\nimport \"testing\"\n\nfunc TestEnabled(t *testing.T) {\n\tif !Enabled() {\n\t\tt.Fatal(\"Enabled() = false, want true\")\n\t}\n}\n"
@@ -204,15 +232,46 @@ def parse_request(payload):
     step_id = step_match.group(1) if step_match else ""
     return run_id, step_id, merged_content, messages
 
-def scenario_for_run(run_id):
-    if run_id not in initial_runs:
-        initial_runs.append(run_id)
-    return initial_runs.index(run_id)
+def scenario_for_run(run_id, merged_content):
+    if run_id == "probe":
+        return -2
+    if run_id in run_scenarios:
+        return run_scenarios[run_id]
+    if not e2e_marker or e2e_marker not in merged_content:
+        return -1
+    if "graph follow-up 超出扩展上限" in merged_content:
+        scenario = 5
+    elif "no-actionable continuation" in merged_content or "没有可执行后续动作" in merged_content:
+        scenario = 4
+    elif "从空 workspace 初始化" in merged_content or "项目还必须生成 README.md" in merged_content:
+        count = scenario_counts.get("empty_workspace", 0)
+        scenario_counts["empty_workspace"] = count + 1
+        scenario = 2 if count == 0 else 3 if count == 1 else 7
+    elif "完成软件开发闭环" in merged_content:
+        count = scenario_counts.get("main_repair", 0)
+        scenario_counts["main_repair"] = count + 1
+        scenario = 0 if count == 0 else 1 if count == 1 else 6
+    else:
+        scenario = -1
+    run_scenarios[run_id] = scenario
+    return scenario
 
-def response_for(run_id, step_id):
+def response_for(run_id, step_id, merged_content):
     if run_id == "probe":
         return {"completionState": "failed", "thoughtSummary": "probe"}
-    scenario = scenario_for_run(run_id)
+    scenario = scenario_for_run(run_id, merged_content)
+    if scenario < 0:
+        return {
+            "completionState": "failed",
+            "thoughtSummary": "Ignoring a non-current e2e run during software-dev verification.",
+            "dodAssessment": {
+                "satisfied": False,
+                "summary": "Request did not contain the current e2e marker.",
+                "items": [
+                    {"item": "current e2e marker is present", "state": "failed", "evidenceRefs": [step_id]}
+                ]
+            }
+        }
     if scenario == 0:
         if step_id.endswith("/step-1"):
             return {
@@ -480,6 +539,111 @@ def response_for(run_id, step_id):
                 "thoughtSummary": "Incorrectly requests continuation without a new actionable step."
             }
         return {"completionState": "continue", "thoughtSummary": "Continue execution."}
+    if scenario == 5:
+        if step_id.startswith(run_id + "/step-1"):
+            return {
+                "completionState": "continue",
+                "thoughtSummary": "Plan graph expansion limit closure seed.",
+                "executionGraph": {
+                    "nodes": [
+                        {
+                            "id": "gfa-seed",
+                            "kind": "shell/command",
+                            "input": {"command": "sh", "args": ["-c", "printf gfa-seed"]}
+                        }
+                    ]
+                }
+            }
+        if "zz-llm-after-graph-limit-" in step_id:
+            return {
+                "completionState": "completed",
+                "thoughtSummary": "Graph expansion limit was converted into assessment-only closure.",
+                "dodAssessment": {
+                    "satisfied": True,
+                    "summary": "Graph follow-up expansion limit entered assessment-only closure.",
+                    "goalOutcome": "The run completed through assessment-only closure after bounded expansion.",
+                    "implementationSummary": "No source change was required for this runtime closure contract scenario.",
+                    "verificationSummary": "The graph limit closure path produced DoD evidence instead of another execution graph.",
+                    "items": [
+                        {"item": "graph follow-up 超限后必须进入 assessment-only 并完成 DoD 评估", "state": "satisfied", "evidenceRefs": [step_id]},
+                        {"item": "Run Snapshot 必须暴露 graph expansion limit 与 assessment-only closure trace", "state": "satisfied", "evidenceRefs": [step_id]}
+                    ]
+                }
+            }
+        if "zz-llm-after-graph-" in step_id:
+            suffix = re.sub(r"[^A-Za-z0-9]+", "-", step_id)[-48:].strip("-") or "next"
+            return {
+                "completionState": "continue",
+                "thoughtSummary": "Requests another graph expansion until the runtime boundary converts it to assessment-only.",
+                "executionGraph": {
+                    "nodes": [
+                        {
+                            "id": "gfa-follow-up-" + suffix,
+                            "kind": "shell/command",
+                            "input": {"command": "sh", "args": ["-c", "printf gfa-follow-up"]}
+                        }
+                    ]
+                }
+            }
+        return {"completionState": "continue", "thoughtSummary": "Continue execution."}
+    if scenario == 6:
+        if step_id.endswith("/step-1"):
+            return {
+                "completionState": "continue",
+                "thoughtSummary": "Replan continuation applies a stable source write and reruns tests.",
+                "executionGraph": {
+                    "nodes": [
+                        {
+                            "id": "write-fixed-source-replan",
+                            "kind": "patch/apply",
+                            "input": {
+                                "patchType": "file_write",
+                                "targetRef": "calculator.go",
+                                "content": FIXED_SOURCE
+                            }
+                        },
+                        {
+                            "id": "run-tests-replan",
+                            "kind": "shell/command",
+                            "dependsOn": ["write-fixed-source-replan"],
+                            "input": {"command": "go", "args": ["test", "./..."]}
+                        }
+                    ]
+                }
+            }
+        return {
+            "completionState": "completed",
+            "thoughtSummary": "Replan continuation completed after repair exhaustion.",
+            "dodAssessment": {
+                "satisfied": True,
+                "summary": "Repair exhaustion was automatically replanned and closed by a continuation run.",
+                "goalOutcome": "A continuation run was created after auto governance selected replan.",
+                "implementationSummary": "The continuation run rewrote calculator.go through patch evidence.",
+                "verificationSummary": "go test ./... passed in the continuation run.",
+                "items": [
+                    {"item": "代码修改通过 Patch 证据可追溯", "state": "satisfied", "evidenceRefs": ["write-fixed-source-replan"]},
+                    {"item": "go test ./... 最终通过", "state": "satisfied", "evidenceRefs": ["run-tests-replan"]},
+                    {"item": "结果包含 DoD 评估和交付物索引", "state": "satisfied", "evidenceRefs": [step_id]}
+                ]
+            }
+        }
+    if scenario == 7:
+        return {
+            "completionState": "completed",
+            "thoughtSummary": "Weak-evidence replan continuation closed with complete DoD assessment.",
+            "dodAssessment": {
+                "satisfied": True,
+                "summary": "Continuation after weak-evidence repair exhaustion completed with current DoD coverage.",
+                "goalOutcome": "The cumulative empty-workspace goals remain satisfied.",
+                "implementationSummary": "Existing generated files and README remain in place.",
+                "verificationSummary": "The continuation produced a formal DoD assessment after replan.",
+                "items": [
+                    {"item": "README.md 必须作为交付物证据可追溯", "state": "satisfied", "evidenceRefs": [step_id]},
+                    {"item": "目标项目外部依赖配置必须按 target_workspace/external_dependency 作用域处理", "state": "satisfied", "evidenceRefs": [step_id]},
+                    {"item": "敏感认证信息不得进入 snapshot、observability、event 或 LLM context", "state": "satisfied", "evidenceRefs": [step_id]}
+                ]
+            }
+        }
     return {"completionState": "continue", "thoughtSummary": "Continue execution."}
 
 class Handler(BaseHTTPRequestHandler):
@@ -511,7 +675,7 @@ class Handler(BaseHTTPRequestHandler):
                     "content": merged_content,
                     "messages": messages,
                 }, ensure_ascii=False, separators=(",", ":")) + "\n")
-        decision = response_for(run_id, step_id)
+        decision = response_for(run_id, step_id, merged_content)
         content = json.dumps(decision, separators=(",", ":"))
         response = {"choices": [{"message": {"content": content}}]}
         encoded = json.dumps(response).encode("utf-8")
@@ -528,6 +692,7 @@ host, port_text = os.environ.get("WORKORCH_SOFTWARE_DEV_E2E_MOCK_ADDR", "127.0.0
 ThreadingHTTPServer((host, int(port_text)), Handler).serve_forever()
 PY
   WORKORCH_SOFTWARE_DEV_E2E_MOCK_ADDR="$MOCK_ADDR" \
+    WORKORCH_SOFTWARE_DEV_E2E_MARKER="$E2E_MARKER" \
     WORKORCH_SOFTWARE_DEV_E2E_REQUEST_LOG="$TMP_DIR/software-dev-e2e-llm-requests.jsonl" \
     python3 "$TMP_DIR/software_dev_e2e_mock.py" >>"$MOCK_LOG" 2>&1 &
   MOCK_PID=$!
@@ -576,7 +741,7 @@ workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" -H 'Content-Type: application/json' \
-  -d '{"text":"完成软件开发闭环：通过 executionGraph 修改代码并运行测试，失败时自动修复，最终基于证据输出 DoD 评估。"}' >"$TMP_DIR/goal.json"
+  -d '{"text":"['"$E2E_MARKER"'] 完成软件开发闭环：通过 executionGraph 修改代码并运行测试，失败时自动修复，最终基于证据输出 DoD 评估。"}' >"$TMP_DIR/goal.json"
 goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
 [[ -n "$goal_id" ]]
 
@@ -640,37 +805,63 @@ if errors:
     raise SystemExit(1)
 PY
 
-# Scenario-2: repair loop exhausted then escalated decision.
+# Scenario-2: repair loop exhausted, replan resolution resumes the run,
+# then the server schedules a continuation run. Auto-governance may resolve
+# the ticket directly; otherwise this e2e resolves it explicitly so the
+# continuation contract is still verified under stricter configurations.
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
   -H 'Content-Type: application/json' \
   -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' >"$TMP_DIR/scenario2-activation.json"
 scenario2_run_id="$(json_path "$TMP_DIR/scenario2-activation.json" "activation.run.id")"
-wait_run_state "$scenario2_run_id" "blocked_on_decision" "$TMP_DIR/scenario2-status.json"
-scenario2_ticket_id="$(json_path "$TMP_DIR/scenario2-status.json" "status.blockingTicketId")"
-scenario2_ticket_path="$(url_encode "$scenario2_ticket_id")"
+wait_run_state_any "$scenario2_run_id" "$TMP_DIR/scenario2-status.json" "superseded" "blocked_on_decision"
+scenario2_state="$(json_path "$TMP_DIR/scenario2-status.json" "status.state")"
+scenario2_resolution_mode="auto"
+if [[ "$scenario2_state" == "blocked_on_decision" ]]; then
+  scenario2_resolution_mode="manual"
+  scenario2_ticket_id="$(json_path "$TMP_DIR/scenario2-status.json" "status.blockingTicketId")"
+  scenario2_ticket_path="$(url_encode "$scenario2_ticket_id")"
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$scenario2_ticket_path/resolve" -H 'Content-Type: application/json' \
+    -d '{"resolutionType":"replan","resolutionPayload":{"operator":"software-dev-e2e","reason":"repair exhausted replan continuation verification"}}' >"$TMP_DIR/scenario2-ticket-resolved.json"
+  wait_run_state "$scenario2_run_id" "superseded" "$TMP_DIR/scenario2-status.json"
+fi
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario2_run_id/snapshot" >"$TMP_DIR/scenario2-snapshot.json"
-curl -fsS "$BASE_URL/api/v1/workorch/decisions/$scenario2_ticket_path" >"$TMP_DIR/scenario2-ticket.json"
-
-python3 - "$TMP_DIR/scenario2-snapshot.json" "$TMP_DIR/scenario2-ticket.json" "$scenario2_ticket_id" <<'PY'
+deadline=$((SECONDS + 60))
+while (( SECONDS <= deadline )); do
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/scenario2-workspace-snapshot.json"
+  if python3 - "$TMP_DIR/scenario2-workspace-snapshot.json" "$scenario1_run_id" "$scenario2_run_id" <<'PY'
 import json
 import sys
 
-snapshot = json.load(open(sys.argv[1], encoding="utf-8"))["snapshot"]
-ticket = json.load(open(sys.argv[2], encoding="utf-8"))["decision"]
-ticket_id = sys.argv[3]
+snapshot = json.load(open(sys.argv[1], encoding="utf-8")).get("snapshot") or {}
+excluded = {sys.argv[2], sys.argv[3]}
+runs = snapshot.get("runs") or []
+continuations = [item for item in runs if item.get("id") not in excluded and item.get("state") == "completed"]
+raise SystemExit(0 if continuations else 1)
+PY
+  then
+    break
+  fi
+  sleep 1
+done
+
+python3 - "$TMP_DIR/scenario2-snapshot.json" "$TMP_DIR/scenario2-workspace-snapshot.json" "$scenario1_run_id" "$scenario2_run_id" "$scenario2_resolution_mode" <<'PY'
+import json
+import sys
+
+run_snapshot = json.load(open(sys.argv[1], encoding="utf-8"))["snapshot"]
+workspace_snapshot = json.load(open(sys.argv[2], encoding="utf-8")).get("snapshot") or {}
+scenario1_run_id = sys.argv[3]
+scenario2_run_id = sys.argv[4]
+resolution_mode = sys.argv[5]
 errors = []
-run = snapshot.get("run") or {}
-if run.get("state") != "blocked_on_decision":
-    errors.append(f"run.state={run.get('state')!r}, want blocked_on_decision")
-if run.get("blockingTicketId") != ticket_id:
-    errors.append(f"blockingTicketId={run.get('blockingTicketId')!r}, want {ticket_id!r}")
-repair_loop = (snapshot.get("taskProgress") or {}).get("repairLoop") or {}
-if repair_loop.get("state") != "escalated_decision":
-    errors.append(f"repairLoop.state={repair_loop.get('state')!r}, want escalated_decision")
+run = run_snapshot.get("run") or {}
+if run.get("state") != "superseded":
+    errors.append(f"run.state={run.get('state')!r}, want superseded")
+repair_loop = (run_snapshot.get("taskProgress") or {}).get("repairLoop") or {}
+if repair_loop.get("state") not in {"escalated_decision", "terminated"}:
+    errors.append(f"repairLoop.state={repair_loop.get('state')!r}, want escalated_decision or terminated after auto replan")
 if int(repair_loop.get("attemptCount") or 0) < 3:
     errors.append(f"repairLoop.attemptCount={repair_loop.get('attemptCount')!r}, want >=3")
-if repair_loop.get("escalationTicketId") != ticket_id:
-    errors.append(f"repairLoop.escalationTicketId={repair_loop.get('escalationTicketId')!r}, want {ticket_id!r}")
 routing = ((run.get("executionContext") or {}).get("soulRouting") or {})
 if routing.get("status") != "resolved":
     errors.append(f"soulRouting.status={routing.get('status')!r}, want resolved")
@@ -678,14 +869,29 @@ bindings = routing.get("bindings") or {}
 execution = bindings.get("execution") or {}
 if execution.get("soulId") != "soul-software-dev-execution":
     errors.append(f"soulRouting.execution={execution!r}, want soul-software-dev-execution")
+decisions = run_snapshot.get("decisions") or []
+replan_decisions = [item for item in decisions if item.get("runId") == scenario2_run_id and item.get("resolutionType") == "replan"]
+if not replan_decisions:
+    errors.append(f"decisions={decisions!r}, want resolved replan decision for repair exhaustion")
+ticket = replan_decisions[-1] if replan_decisions else {}
 reason = str(ticket.get("reason") or "")
 if "自动修复尝试已耗尽" not in reason:
     errors.append(f"decision reason missing repair exhaustion: {reason!r}")
 question = str(ticket.get("question") or "")
 if "请补充缺失的实现指导" not in question:
     errors.append(f"decision question missing Chinese repair guidance: {question!r}")
-if ticket.get("state") != "open":
-    errors.append(f"decision state={ticket.get('state')!r}, want open")
+if ticket.get("state") != "resolved":
+    errors.append(f"decision state={ticket.get('state')!r}, want resolved")
+if resolution_mode == "auto" and not ticket.get("autoGovernance"):
+    errors.append(f"decision autoGovernance={ticket.get('autoGovernance')!r}, want auto-governance trace")
+runs = workspace_snapshot.get("runs") or []
+continuations = [item for item in runs if item.get("id") not in {scenario1_run_id, scenario2_run_id} and item.get("state") == "completed"]
+if not continuations:
+    errors.append(f"workspace runs={runs!r}, want completed replan continuation")
+results = workspace_snapshot.get("results") or []
+continuation_id = continuations[-1].get("id") if continuations else ""
+if not any(item.get("runId") == continuation_id and item.get("state") == "accepted" for item in results):
+    errors.append(f"results={results!r}, want accepted result from continuation {continuations[-1].get('id') if continuations else ''}")
 if errors:
     for item in errors:
         print(item, file=sys.stderr)
@@ -703,7 +909,7 @@ scenario3_workspace_id="$(json_path "$TMP_DIR/scenario3-workspace.json" "workspa
 [[ -n "$scenario3_workspace_id" ]]
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/goals" -H 'Content-Type: application/json' \
-  -d '{"text":"从空 workspace 初始化一个最小 Go 项目，并完成可追溯的开发、测试和交付。"}' >"$TMP_DIR/scenario3-goal-initial.json"
+  -d '{"text":"['"$E2E_MARKER"'] 从空 workspace 初始化一个最小 Go 项目，并完成可追溯的开发、测试和交付。"}' >"$TMP_DIR/scenario3-goal-initial.json"
 scenario3_goal_initial_id="$(json_path "$TMP_DIR/scenario3-goal-initial.json" "goal.id")"
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/dods" -H 'Content-Type: application/json' \
@@ -720,7 +926,7 @@ scenario3_ticket_path="$(url_encode "$scenario3_ticket_id")"
 curl -fsS "$BASE_URL/api/v1/workorch/decisions/$scenario3_ticket_path" >"$TMP_DIR/scenario3-ticket-open.json"
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/goals" -H 'Content-Type: application/json' \
-  -d '{"text":"补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。"}' >"$TMP_DIR/scenario3-goal-added.json"
+  -d '{"text":"['"$E2E_MARKER"'] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。"}' >"$TMP_DIR/scenario3-goal-added.json"
 scenario3_goal_added_id="$(json_path "$TMP_DIR/scenario3-goal-added.json" "goal.id")"
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/dods" -H 'Content-Type: application/json' \
@@ -882,7 +1088,25 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/
   -H 'Content-Type: application/json' \
   -d '{"goalId":"'"$scenario3_goal_added_id"'","doDId":"'"$scenario3_dod_added_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' >"$TMP_DIR/scenario4-activation.json"
 scenario4_run_id="$(json_path "$TMP_DIR/scenario4-activation.json" "activation.run.id")"
-wait_run_state "$scenario4_run_id" "blocked_on_decision" "$TMP_DIR/scenario4-blocked-status.json"
+scenario4_activation_state="$(json_path "$TMP_DIR/scenario4-activation.json" "activation.run.state")"
+if [[ "$scenario4_activation_state" == "blocked_on_decision" || "$scenario4_activation_state" == "superseded" ]]; then
+  python3 - "$TMP_DIR/scenario4-activation.json" "$TMP_DIR/scenario4-blocked-status.json" <<'PY'
+import json
+import sys
+
+activation = json.load(open(sys.argv[1], encoding="utf-8")).get("activation") or {}
+run = activation.get("run") or {}
+status = {
+    "id": run.get("id", ""),
+    "workspaceId": run.get("workspaceId", ""),
+    "state": run.get("state", ""),
+    "blockingTicketId": run.get("blockingTicketId", ""),
+}
+json.dump({"status": status}, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
+PY
+else
+  wait_run_state_any "$scenario4_run_id" "$TMP_DIR/scenario4-blocked-status.json" "blocked_on_decision" "superseded"
+fi
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario4_run_id/snapshot" >"$TMP_DIR/scenario4-snapshot.json"
 
 python3 - "$TMP_DIR/scenario4-snapshot.json" "$TMP_DIR/scenario4-blocked-status.json" <<'PY'
@@ -893,13 +1117,13 @@ snapshot = json.load(open(sys.argv[1], encoding="utf-8")).get("snapshot") or {}
 status = json.load(open(sys.argv[2], encoding="utf-8")).get("status") or {}
 errors = []
 run = snapshot.get("run") or {}
-if run.get("state") != "blocked_on_decision":
-    errors.append(f"run.state={run.get('state')!r}, want blocked_on_decision")
-if not status.get("blockingTicketId"):
+if run.get("state") not in {"blocked_on_decision", "superseded"}:
+    errors.append(f"run.state={run.get('state')!r}, want blocked_on_decision or superseded")
+if run.get("state") == "blocked_on_decision" and not status.get("blockingTicketId"):
     errors.append(f"status.blockingTicketId={status.get('blockingTicketId')!r}, want repair escalation ticket")
 repair_loop = (snapshot.get("taskProgress") or {}).get("repairLoop") or {}
-if repair_loop.get("state") != "escalated_decision":
-    errors.append(f"repairLoop.state={repair_loop.get('state')!r}, want escalated_decision")
+if repair_loop.get("state") not in {"escalated_decision", "terminated"}:
+    errors.append(f"repairLoop.state={repair_loop.get('state')!r}, want escalated_decision or terminated")
 if int(repair_loop.get("attemptCount") or 0) < 3:
     errors.append(f"repairLoop.attemptCount={repair_loop.get('attemptCount')!r}, want >=3")
 results = snapshot.get("results") or []
@@ -910,6 +1134,10 @@ elif not any("weak" in str((item.get("doDAssessment") or {}).get("summary") or "
     errors.append(f"rejected results={rejected!r}, want weak verification rejection summary")
 if any(((item.get("doDAssessment") or {}).get("satisfied") is True and item.get("state") == "accepted") for item in results):
     errors.append("weak satisfied DoD produced accepted result")
+if run.get("state") == "superseded":
+    decisions = snapshot.get("decisions") or []
+    if not any(item.get("runId") == run.get("id") and item.get("state") == "resolved" and item.get("resolutionType") == "replan" for item in decisions):
+        errors.append(f"decisions={decisions!r}, want resolved replan decision for superseded weak-evidence run")
 steps = snapshot.get("steps") or []
 if not any("zz-llm-repair-" in str(item.get("id") or "") for item in steps):
     errors.append("missing runtime repair follow-up step for weak verification evidence")
@@ -928,7 +1156,7 @@ scenario5_workspace_id="$(json_path "$TMP_DIR/scenario5-workspace.json" "workspa
 [[ -n "$scenario5_workspace_id" ]]
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario5_workspace_id/goals" -H 'Content-Type: application/json' \
-  -d '{"text":"验证当 LLM 返回 continue 但没有可执行后续动作时，系统会进入 validation follow-up 并完成 DoD 评估。"}' >"$TMP_DIR/scenario5-goal.json"
+  -d '{"text":"['"$E2E_MARKER"'] 验证当 LLM 返回 continue 但没有可执行后续动作时，系统会进入 validation follow-up 并完成 DoD 评估。"}' >"$TMP_DIR/scenario5-goal.json"
 scenario5_goal_id="$(json_path "$TMP_DIR/scenario5-goal.json" "goal.id")"
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario5_workspace_id/dods" -H 'Content-Type: application/json' \
@@ -966,6 +1194,63 @@ if errors:
     raise SystemExit(1)
 PY
 
+# Scenario-6: graph follow-up expansion limit must enter assessment-only closure
+# and expose closureTraces in the read model.
+scenario6_workspace_workdir="$TMP_DIR/graph-follow-up-assessment-workspace"
+mkdir -p "$scenario6_workspace_workdir"
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
+  -d '{"title":"software-dev graph follow-up closure","description":"verify graph follow-up expansion limit assessment-only closure","workingDirectory":"'"$scenario6_workspace_workdir"'","templateId":"software-dev"}' >"$TMP_DIR/scenario6-workspace.json"
+scenario6_workspace_id="$(json_path "$TMP_DIR/scenario6-workspace.json" "workspace.id")"
+[[ -n "$scenario6_workspace_id" ]]
+
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario6_workspace_id/goals" -H 'Content-Type: application/json' \
+  -d '{"text":"['"$E2E_MARKER"'] 验证 graph follow-up 超出扩展上限后，系统必须进入 assessment-only 收口并完成 DoD 评估。"}' >"$TMP_DIR/scenario6-goal.json"
+scenario6_goal_id="$(json_path "$TMP_DIR/scenario6-goal.json" "goal.id")"
+
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario6_workspace_id/dods" -H 'Content-Type: application/json' \
+  -d '{"items":["graph follow-up 超限后必须进入 assessment-only 并完成 DoD 评估","Run Snapshot 必须暴露 graph expansion limit 与 assessment-only closure trace"]}' >"$TMP_DIR/scenario6-dod.json"
+scenario6_dod_id="$(json_path "$TMP_DIR/scenario6-dod.json" "dod.id")"
+
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario6_workspace_id/execution-activations" \
+  -H 'Content-Type: application/json' \
+  -d '{"goalId":"'"$scenario6_goal_id"'","doDId":"'"$scenario6_dod_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' >"$TMP_DIR/scenario6-activation.json"
+scenario6_run_id="$(json_path "$TMP_DIR/scenario6-activation.json" "activation.run.id")"
+wait_run_state "$scenario6_run_id" "completed" "$TMP_DIR/scenario6-completed-status.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario6_run_id/snapshot" >"$TMP_DIR/scenario6-snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario6_run_id/observability" >"$TMP_DIR/scenario6-observability.json"
+
+python3 - "$TMP_DIR/scenario6-snapshot.json" "$TMP_DIR/scenario6-observability.json" <<'PY'
+import json
+import sys
+
+snapshot = json.load(open(sys.argv[1], encoding="utf-8")).get("snapshot") or {}
+observability = json.load(open(sys.argv[2], encoding="utf-8")).get("observability") or {}
+errors = []
+run = snapshot.get("run") or {}
+if run.get("state") != "completed":
+    errors.append(f"run.state={run.get('state')!r}, want completed")
+steps = snapshot.get("steps") or []
+if not any("zz-llm-after-graph-limit-" in str(item.get("id") or "") for item in steps):
+    errors.append("missing graph expansion limit assessment-only follow-up step")
+if any("must_not_execute" in str(item.get("id") or "") for item in steps):
+    errors.append("assessment-only executionGraph was executed unexpectedly")
+results = snapshot.get("results") or []
+if not any(item.get("state") == "accepted" for item in results):
+    errors.append(f"results={results!r}, want accepted result")
+traces = snapshot.get("closureTraces") or []
+if not any(item.get("graphFollowUpExpansionLimitExceeded") and item.get("ignoredExecutionGraph") for item in traces):
+    errors.append(f"closureTraces={traces!r}, want graph expansion limit trace")
+if not any(item.get("assessmentOnly") and item.get("graphExpansionLimitFollowUp") for item in traces):
+    errors.append(f"closureTraces={traces!r}, want assessment-only graph limit trace")
+obs_traces = observability.get("closureTraces") or []
+if len(obs_traces) != len(traces):
+    errors.append(f"observability.closureTraces={obs_traces!r}, want same count as snapshot {len(traces)}")
+if errors:
+    for item in errors:
+        print(item, file=sys.stderr)
+    raise SystemExit(1)
+PY
+
 echo "software-dev goal/dod e2e passed for deployed workorch service $BASE_URL"
 echo "workspaceId=$workspace_id"
 echo "scenario1Run=$scenario1_run_id"
@@ -974,3 +1259,4 @@ echo "scenario3Workspace=$scenario3_workspace_id"
 echo "scenario3Run=$scenario3_run_id"
 echo "scenario4Run=$scenario4_run_id"
 echo "scenario5Run=$scenario5_run_id"
+echo "scenario6Run=$scenario6_run_id"
