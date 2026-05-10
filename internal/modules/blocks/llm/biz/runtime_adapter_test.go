@@ -430,6 +430,12 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 		!runtimeCapabilitiesContainServiceAPI(provider.request.RuntimeCapabilities, "GET", "/api/v1/workorch/runs/{runId}/snapshot") {
 		t.Fatalf("runtime capabilities = %+v, want declared block and service API catalog", provider.request.RuntimeCapabilities)
 	}
+	if description := runtimeCapabilityBlockDescription(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchPreview); !strings.Contains(description, "complete, concrete, and directly applicable") {
+		t.Fatalf("patch/preview description = %q, want concrete patch guidance", description)
+	}
+	if description := runtimeCapabilityBlockDescription(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchApply); !strings.Contains(description, "complete, concrete, and directly applicable") {
+		t.Fatalf("patch/apply description = %q, want concrete patch guidance", description)
+	}
 	for _, kind := range []string{
 		llmcommon.RuntimeBlockKindDecisionRequest,
 		llmcommon.RuntimeBlockKindApprovalRequest,
@@ -1575,6 +1581,15 @@ func runtimeCapabilitiesContainBlock(caps llmmodels.RuntimeCapabilities, kind st
 		}
 	}
 	return false
+}
+
+func runtimeCapabilityBlockDescription(caps llmmodels.RuntimeCapabilities, kind string) string {
+	for _, block := range caps.BlockKinds {
+		if block.Kind == kind {
+			return block.Description
+		}
+	}
+	return ""
 }
 
 func runtimeCapabilitiesContainServiceAPI(caps llmmodels.RuntimeCapabilities, method string, pathTemplate string) bool {

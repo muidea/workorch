@@ -68,6 +68,8 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 		!strings.Contains(joined, "timeoutMillis") ||
 		!strings.Contains(joined, "Conversation language: Chinese (Simplified)") ||
 		!strings.Contains(joined, "DoD summaries") ||
+		!strings.Contains(joined, "complete, concrete, and directly applicable") ||
+		!strings.Contains(joined, "patch/preview or patch/apply failure") ||
 		!strings.Contains(joined, "runtimeCapabilities") {
 		t.Fatalf("messages = %+v, want runtime capability boundary", gotPayload.Messages)
 	}

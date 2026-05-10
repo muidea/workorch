@@ -743,7 +743,7 @@ func (o *RuntimeOrchestrator) runtimeRepairPatchContext(ctx context.Context, run
 	if o == nil || o.workspaces == nil || run == nil || failedStep == nil {
 		return nil
 	}
-	if strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass)) != failureClassPatchApply {
+	if !shouldIncludePatchRepairContext(failedStep) {
 		return nil
 	}
 	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
@@ -767,6 +767,32 @@ func (o *RuntimeOrchestrator) runtimeRepairPatchContext(ctx context.Context, run
 	return ret
 }
 
+func shouldIncludePatchRepairContext(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	switch strings.TrimSpace(step.Kind) {
+	case "patch/preview", "patch/apply":
+		return true
+	}
+	if strings.HasPrefix(strings.TrimSpace(stringFromMap(step.Output, "stage")), "patch_") {
+		return true
+	}
+	if strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)) == failureClassPatchApply {
+		return true
+	}
+	failedOutput := mapFromValue(step.Output["failedStepOutput"])
+	if strings.HasPrefix(strings.TrimSpace(stringFromMap(failedOutput, "stage")), "patch_") {
+		return true
+	}
+	failedInput := mapFromValue(step.Output["failedStepInput"])
+	switch strings.TrimSpace(stringFromMap(failedInput, "kind")) {
+	case "patch/preview", "patch/apply":
+		return true
+	}
+	return false
+}
+
 func patchRepairTargetRefs(step *runModel.Step) []string {
 	if step == nil {
 		return nil
@@ -782,9 +808,21 @@ func patchRepairTargetRefs(step *runModel.Step) []string {
 	}
 	var ret []string
 	ret = append(ret, add(stringFromMap(step.Input, "targetRef"))...)
+	ret = append(ret, add(stringFromMap(step.Output, "targetRef"))...)
 	if patches := mapSliceFromValue(step.Output["patches"]); len(patches) > 0 {
 		for _, patch := range patches {
 			ret = append(ret, add(stringFromMap(patch, "targetRef"))...)
+		}
+	}
+	if failedInput := mapFromValue(step.Output["failedStepInput"]); len(failedInput) > 0 {
+		ret = append(ret, add(stringFromMap(failedInput, "targetRef"))...)
+	}
+	if failedOutput := mapFromValue(step.Output["failedStepOutput"]); len(failedOutput) > 0 {
+		ret = append(ret, add(stringFromMap(failedOutput, "targetRef"))...)
+		if patches := mapSliceFromValue(failedOutput["patches"]); len(patches) > 0 {
+			for _, patch := range patches {
+				ret = append(ret, add(stringFromMap(patch, "targetRef"))...)
+			}
 		}
 	}
 	return ret

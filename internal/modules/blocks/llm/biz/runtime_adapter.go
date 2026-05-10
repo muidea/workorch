@@ -2080,7 +2080,7 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 			},
 			{
 				Kind:        filecommon.StepKindEdit,
-				Description: "Create a non-mutating unified_diff patch preview by replacing a unique oldText with newText in one workspace-relative text file. This does not write files and must be followed by patch/preview or patch/apply to persist changes.",
+				Description: "Create a non-mutating unified_diff patch preview by replacing a unique oldText with newText in one workspace-relative text file. This does not write files and must be followed by patch/preview or patch/apply to persist changes. oldText and newText must be exact, complete text fragments, not omitted placeholders.",
 				Input:       map[string]any{"path": "relative file path", "oldText": "exact text to replace", "newText": "replacement text", "baseHash": "sha256 content hash", "occurrence": "number when oldText is not unique"},
 			},
 			{
@@ -2100,12 +2100,12 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 			},
 			{
 				Kind:        llmcommon.RuntimeBlockKindPatchApply,
-				Description: "Apply one file_write or unified_diff patch inside the workspace working directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory. Include baseHash from file/read when changing an existing file. Governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md are reserved for WorkOrch-managed Artifact records and must not be written through patch/apply.",
+				Description: "Apply one file_write or unified_diff patch inside the workspace working directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory. Include baseHash from file/read when changing an existing file. Patch content and diffs must be complete, concrete, and directly applicable to the current workspace content; do not use omitted sections or placeholder bodies. Governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md are reserved for WorkOrch-managed Artifact records and must not be written through patch/apply.",
 				Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string", "baseHash": "sha256 content hash", "approvalId": "approved approval id when required"},
 			},
 			{
 				Kind:        llmcommon.RuntimeBlockKindPatchPreview,
-				Description: "Validate and summarize one file_write or unified_diff patch without writing files. Use this before high-risk edits when the user or approval flow needs a non-mutating diff preview.",
+				Description: "Validate and summarize one file_write or unified_diff patch without writing files. Use this before high-risk edits when the user or approval flow needs a non-mutating diff preview. Patch content and diffs must be complete, concrete, and directly applicable to the current workspace content; do not use omitted sections or placeholder bodies.",
 				Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string", "baseHash": "sha256 content hash", "approvalId": "approved approval id when required"},
 			},
 			{

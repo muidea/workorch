@@ -2614,6 +2614,33 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *te
 	if strings.TrimSpace(stringFromMap(item, "contentHash")) == "" {
 		t.Fatalf("patchRepairContext contentHash missing: %#v", item)
 	}
+
+	failedPreviewStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/block/preview"),
+		RunID: runID,
+		Kind:  "patch/preview",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"targetRef": "source.txt",
+			"diff":      "--- a/source.txt\n+++ b/source.txt\n@@\n-func sample(arg Type)\n+func sample(arg *Type)",
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"stage":                   "patch_preview",
+			"error":                   "conflict",
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|kind=patch/preview|targetRef=source.txt",
+		},
+	}
+
+	previewInput := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedPreviewStep, 1, common.ErrConflict)
+	previewPatchContext := mapSliceFromValue(previewInput["patchRepairContext"])
+	if len(previewPatchContext) != 1 {
+		t.Fatalf("patchRepairContext for preview = %#v, want one snapshot", previewInput["patchRepairContext"])
+	}
+	if previewPatchContext[0]["targetRef"] != "source.txt" {
+		t.Fatalf("patchRepairContext for preview = %#v, want source.txt target", previewPatchContext[0])
+	}
 }
 
 func TestRuntimeOrchestrator_RuntimeRepairInputCarriesResolvedGovernanceAndFailedGraph(t *testing.T) {

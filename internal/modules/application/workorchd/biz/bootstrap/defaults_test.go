@@ -67,6 +67,10 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, execution.SoulMD, "DoD 不满足")
 	assertSoulContains(t, execution.SoulMD, "rootCause")
 	assertSoulContains(t, execution.SoulMD, "错误路径")
+	assertSoulContains(t, execution.SoulMD, "补丁质量要求")
+	assertSoulContains(t, execution.SoulMD, "完整、可直接应用")
+	assertSoulContains(t, execution.SoulMD, "占位函数体")
+	assertSoulContains(t, execution.SoulMD, "当前文件快照")
 
 	validation := findEmbeddedSoulByID(souls, "soul-software-dev-validation")
 	if validation == nil {

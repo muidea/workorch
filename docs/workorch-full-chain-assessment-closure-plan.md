@@ -139,6 +139,7 @@ Decision resolution 写入时已有 redaction，但实际 `ai-proxy/interactions
 | FCA-18 | Completion gate provider retry 轻量化 | Orchestrator/LLM | P0 | implemented | provider timeout 后重试携带完整 graph/evidence，可能再次触发扩展和上下文放大 | graph/completion/no-actionable follow-up 的 provider retry 进入 assessment-only 模式，只保留紧凑失败上下文并禁止返回 executionGraph | provider retry assessment-only 单测覆盖；待部署后复验 provider timeout 恢复链 |
 | FCA-19 | Runtime Step dispatch 幂等保护 | Orchestrator | P0 | implemented | 已完成或已失败 Step 被同 ID 重新调度时可能覆盖历史结果并重复执行 | dispatch 已存在终态 Step 时返回 conflict；follow-up 调度使用唯一 Step ID，避免覆盖历史 Step | 终态 Step 不覆盖单测覆盖；`go test ./... -count=1` 本地通过 |
 | FCA-20 | 可选文件读取不触发修复环 | Blocks/File | P1 | implemented | LLM 读取 README、配置等可选文件时，文件缺失会被视为运行失败并触发无效 repair | `file/read` 支持 `optional:true`，缺失时返回 `exists:false` 的 completed 输出；LLM capability contract 提示先 list 或 optional read | File adapter 单测覆盖；待部署后复验可选文件探测路径 |
+| FCA-21 | Patch preview repair 中立化收口 | Orchestrator/LLM/Template | P0 | implemented | `patch/preview` 冲突失败缺少当前 target 快照，软件开发场景里会放大占位 diff 重试；直接在 kernel 写源码规则会破坏业务边界 | Core 只提供通用补丁失败当前快照和通用 patch contract；软件开发补丁质量要求放入 `software-dev` Soul | orchestrator、LLM、bootstrap 单测覆盖；待部署后复验 `ws-c4b6c80ed677c443` 类场景 |
 
 ## 目标行为定义
 
@@ -253,3 +254,4 @@ Decision resolution 写入时已有 redaction，但实际 `ai-proxy/interactions
 | 2026-05-09 | 基于 `ws-e1e310fd02e4375e` 复核补漏：新增 `EvidenceQuality` 通用证据质量模型；`workspaceTemplate.evidencePolicies` 在创建 workspace 时绑定到 workspace，激活上下文只注入 workspace 已绑定策略；运行时依据策略输出 `inconclusive/zero_work` 等结构化证据质量，DoD completion gate 不允许其支撑 satisfied 条目。 |
 | 2026-05-10 | 基于 `ws-c4b6c80ed677c443` 类问题继续收口：新增 completion follow-up 扩展边界、completion gate provider retry assessment-only、终态 Step dispatch 幂等保护、`file/read optional:true`。本地全量 `go test ./... -count=1` 通过，待最新服务部署后执行同 workspace 回归。 |
 | 2026-05-10 | 继续核对 `ws-c4b6c80ed677c443`：确认新 Goal 已进入执行上下文，实际卡点是自动治理 `replan` 将旧 Run 置为 `superseded` 后没有触发下一轮 activation；修复 workorchd EventHub 绑定与 Validate 补偿扫描，确保通用 `superseded + resolved replan` 可持续推进。 |
+| 2026-05-10 | 继续收口 patch preview repair：确认不能把源码/语言/测试规则写入 kernel；本次只在通用补丁失败链路提供当前 target 快照和中立 patch contract，并把软件开发补丁质量要求沉淀到 `software-dev` Soul。 |
