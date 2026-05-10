@@ -27,17 +27,18 @@ import (
 )
 
 type ActivateWorkspaceExecutionCommand struct {
-	GoalID         string            `json:"goalId,omitempty"`
-	DoDID          string            `json:"doDId,omitempty"`
-	LLMProviderID  string            `json:"llmProviderId,omitempty"`
-	SoulID         string            `json:"soulId,omitempty"`
-	SoulBindings   map[string]string `json:"soulBindings,omitempty"`
-	SkillIDs       []string          `json:"skillIds,omitempty"`
-	MCPServerIDs   []string          `json:"mcpServerIds,omitempty"`
-	CapabilityIDs  []string          `json:"capabilityIds,omitempty"`
-	MemoryIDs      []string          `json:"memoryIds,omitempty"`
-	DialogLanguage string            `json:"dialogLanguage,omitempty"`
-	Priority       int               `json:"priority,omitempty"`
+	GoalID                string            `json:"goalId,omitempty"`
+	DoDID                 string            `json:"doDId,omitempty"`
+	LLMProviderID         string            `json:"llmProviderId,omitempty"`
+	SoulID                string            `json:"soulId,omitempty"`
+	SoulBindings          map[string]string `json:"soulBindings,omitempty"`
+	SkillIDs              []string          `json:"skillIds,omitempty"`
+	MCPServerIDs          []string          `json:"mcpServerIds,omitempty"`
+	CapabilityIDs         []string          `json:"capabilityIds,omitempty"`
+	MemoryIDs             []string          `json:"memoryIds,omitempty"`
+	DialogLanguage        string            `json:"dialogLanguage,omitempty"`
+	Priority              int               `json:"priority,omitempty"`
+	ExecutionContextPatch map[string]any    `json:"executionContextPatch,omitempty"`
 }
 
 type WorkspaceExecutionActivation struct {
@@ -69,46 +70,50 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 		if err != nil {
 			return WorkspaceExecutionActivation{}, err
 		}
-		goal, dod, replaceErr := selectWorkspaceExecutionDefinitions(ctx, session, common.WorkspaceID(workspaceID), cmd)
-		if replaceErr != nil {
-			if strings.TrimSpace(cmd.GoalID) != "" || strings.TrimSpace(cmd.DoDID) != "" {
-				return WorkspaceExecutionActivation{}, replaceErr
+		if isActivationTerminalRunState(run.State) {
+			workspace.ActiveRunID = ""
+		} else {
+			goal, dod, replaceErr := selectWorkspaceExecutionDefinitions(ctx, session, common.WorkspaceID(workspaceID), cmd)
+			if replaceErr != nil {
+				if strings.TrimSpace(cmd.GoalID) != "" || strings.TrimSpace(cmd.DoDID) != "" {
+					return WorkspaceExecutionActivation{}, replaceErr
+				}
+			} else if goal.ID != run.GoalID || dod.ID != run.DoDID {
+				executionContext, err := buildWorkspaceExecutionContextWithDefinitions(ctx, session, workspace, goal, dod, cmd)
+				if err != nil {
+					return WorkspaceExecutionActivation{}, err
+				}
+				if err := exports.Services.RunService.SupersedeRun(ctx, runmodule.SupersedeRunCommand{RunID: run.ID}); err != nil {
+					return WorkspaceExecutionActivation{}, err
+				}
+				runID, err := createAndStartWorkspaceExecutionRun(ctx, session, common.WorkspaceID(workspaceID), goal.ID, dod.ID, executionContext, cmd.Priority)
+				if err != nil {
+					return WorkspaceExecutionActivation{}, err
+				}
+				runSnapshot, err := readRunSnapshotFromExports(ctx, session, runID)
+				if err != nil {
+					return WorkspaceExecutionActivation{}, err
+				}
+				snapshot, err := readWorkspaceSnapshotFromExportsWithRunSnapshot(ctx, session, common.WorkspaceID(workspaceID), &runSnapshot)
+				if err != nil {
+					return WorkspaceExecutionActivation{}, err
+				}
+				return WorkspaceExecutionActivation{
+					Workspace: snapshot.Workspace,
+					Run:       runSnapshot.Run,
+					Snapshot:  snapshot,
+				}, nil
 			}
-		} else if goal.ID != run.GoalID || dod.ID != run.DoDID {
-			executionContext, err := buildWorkspaceExecutionContextWithDefinitions(ctx, session, workspace, goal, dod, cmd)
-			if err != nil {
-				return WorkspaceExecutionActivation{}, err
-			}
-			if err := exports.Services.RunService.SupersedeRun(ctx, runmodule.SupersedeRunCommand{RunID: run.ID}); err != nil {
-				return WorkspaceExecutionActivation{}, err
-			}
-			runID, err := createAndStartWorkspaceExecutionRun(ctx, session, common.WorkspaceID(workspaceID), goal.ID, dod.ID, executionContext, cmd.Priority)
-			if err != nil {
-				return WorkspaceExecutionActivation{}, err
-			}
-			runSnapshot, err := readRunSnapshotFromExports(ctx, session, runID)
-			if err != nil {
-				return WorkspaceExecutionActivation{}, err
-			}
-			snapshot, err := readWorkspaceSnapshotFromExportsWithRunSnapshot(ctx, session, common.WorkspaceID(workspaceID), &runSnapshot)
+			snapshot, err := readWorkspaceSnapshotFromExports(ctx, session, common.WorkspaceID(workspaceID))
 			if err != nil {
 				return WorkspaceExecutionActivation{}, err
 			}
 			return WorkspaceExecutionActivation{
 				Workspace: snapshot.Workspace,
-				Run:       runSnapshot.Run,
+				Run:       mapRun(run),
 				Snapshot:  snapshot,
 			}, nil
 		}
-		snapshot, err := readWorkspaceSnapshotFromExports(ctx, session, common.WorkspaceID(workspaceID))
-		if err != nil {
-			return WorkspaceExecutionActivation{}, err
-		}
-		return WorkspaceExecutionActivation{
-			Workspace: snapshot.Workspace,
-			Run:       mapRun(run),
-			Snapshot:  snapshot,
-		}, nil
 	}
 
 	goal, dod, err := selectWorkspaceExecutionDefinitions(ctx, session, common.WorkspaceID(workspaceID), cmd)
@@ -137,6 +142,15 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 		Run:       runSnapshot.Run,
 		Snapshot:  snapshot,
 	}, nil
+}
+
+func isActivationTerminalRunState(state common.RunState) bool {
+	switch state {
+	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return true
+	default:
+		return false
+	}
 }
 
 func latestWorkspaceGoal(items []*workspacemodel.Goal) *workspacemodel.Goal {
@@ -586,8 +600,30 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	if len(workspace.EvidencePolicies) > 0 {
 		contextData["evidencePolicies"] = cloneContextMapSlice(workspace.EvidencePolicies)
 	}
+	mergeActivationExecutionContextPatch(contextData, cmd.ExecutionContextPatch)
 
 	return contextData, nil
+}
+
+func mergeActivationExecutionContextPatch(contextData map[string]any, patch map[string]any) {
+	if len(contextData) == 0 || len(patch) == 0 {
+		return
+	}
+	reserved := map[string]struct{}{
+		"activation": {}, "workspaceId": {}, "goalId": {}, "doDId": {},
+		"goal": {}, "goals": {}, "goalDefinitionPolicy": {},
+		"dod": {}, "dods": {}, "doDDefinitionPolicy": {},
+	}
+	for key, value := range patch {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, ok := reserved[key]; ok {
+			continue
+		}
+		contextData[key] = value
+	}
 }
 
 func activationContextReadTasks(tasks ...func() error) error {

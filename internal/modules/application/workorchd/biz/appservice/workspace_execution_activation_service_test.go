@@ -995,6 +995,65 @@ func TestActivationContextUsesSelectedGoalAndDoDWithoutReload(t *testing.T) {
 	}
 }
 
+func TestActivationContextMergesOperatorInputPatchWithoutOverridingDefinitions(t *testing.T) {
+	ctx := context.Background()
+	session, _ := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+	workspace := &workspacemodel.Workspace{
+		ID:    "ws-activation-operator-input",
+		Title: "activation operator input",
+		State: common.WorkspaceStateReady,
+	}
+	goal := &workspacemodel.Goal{
+		ID:          "goal-activation-operator-input",
+		WorkspaceID: workspace.ID,
+		Text:        "existing cumulative goal",
+	}
+	dod := &workspacemodel.DoD{
+		ID:          "dod-activation-operator-input",
+		WorkspaceID: workspace.ID,
+		Items:       []string{"existing dod"},
+		State:       common.DoDStateReady,
+	}
+	if err := exports.Repositories.Workspaces.Create(ctx, workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Goals.Create(ctx, goal); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+	if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
+		t.Fatalf("create dod: %v", err)
+	}
+
+	contextData, err := buildWorkspaceExecutionContextWithDefinitions(ctx, session, workspace, goal, dod, ActivateWorkspaceExecutionCommand{
+		ExecutionContextPatch: map[string]any{
+			"goalId": "malicious-goal-override",
+			"operatorInputQueue": []map[string]any{{
+				"source":  "tui",
+				"content": "继续执行并纳入新的对话信息",
+			}},
+			"latestOperatorInput": map[string]any{
+				"source":  "tui",
+				"content": "继续执行并纳入新的对话信息",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildWorkspaceExecutionContextWithDefinitions: %v", err)
+	}
+	if contextData["goalId"] != string(goal.ID) {
+		t.Fatalf("goalId = %v, want protected selected goal", contextData["goalId"])
+	}
+	queue, ok := contextData["operatorInputQueue"].([]map[string]any)
+	if !ok || len(queue) != 1 || queue[0]["content"] != "继续执行并纳入新的对话信息" {
+		t.Fatalf("operatorInputQueue = %#v, want merged operator input", contextData["operatorInputQueue"])
+	}
+	latest, ok := contextData["latestOperatorInput"].(map[string]any)
+	if !ok || latest["content"] != "继续执行并纳入新的对话信息" {
+		t.Fatalf("latestOperatorInput = %#v, want merged latest input", contextData["latestOperatorInput"])
+	}
+}
+
 func TestActivationDefinitionSelectionReadsGoalAndDoDConcurrently(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -2036,6 +2095,63 @@ func TestActivateWorkspaceExecutionWithBackendReturnsActiveRun(t *testing.T) {
 	}
 	if len(item.Snapshot.Runs) != 1 || item.Snapshot.Workspace.ActiveRunID != activeRunID {
 		t.Fatalf("activation snapshot = %+v, want active run projection", item.Snapshot)
+	}
+}
+
+func TestActivateWorkspaceExecutionWithBackendIgnoresTerminalActiveRun(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-terminal-active", "activation terminal active workspace", "", "workspaces/activation-terminal-active")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "terminal active replacement goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"terminal active replacement dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	oldRunID := common.RunID("run-activation-terminal-active-old")
+	if err := exports.Services.RunService.CreateRun(ctx, runmodule.CreateRunCommand{
+		RunID:       oldRunID,
+		WorkspaceID: common.WorkspaceID(workspace.ID),
+		GoalID:      common.GoalID(goal.ID),
+		DoDID:       common.DoDID(dod.ID),
+	}); err != nil {
+		t.Fatalf("CreateRun old active: %v", err)
+	}
+	oldRun, err := exports.Repositories.Runs.Get(ctx, oldRunID)
+	if err != nil {
+		t.Fatalf("get old run: %v", err)
+	}
+	oldRun.State = common.RunStateSuperseded
+	if err := exports.Repositories.Runs.Update(ctx, oldRun); err != nil {
+		t.Fatalf("mark old run superseded: %v", err)
+	}
+	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.ActiveRunID = oldRunID
+	workspaceItem.State = common.WorkspaceStateFailed
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("update workspace terminal active run: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	if item.Run.ID == string(oldRunID) || item.Run.GoalID != goal.ID || item.Run.DoDID != dod.ID {
+		t.Fatalf("activation run = %+v, want new run using selected definitions", item.Run)
+	}
+	if item.Snapshot.Workspace.ActiveRunID == string(oldRunID) {
+		t.Fatalf("snapshot workspace activeRunId = %q, want replacement run", item.Snapshot.Workspace.ActiveRunID)
 	}
 }
 

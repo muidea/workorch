@@ -145,12 +145,21 @@ func (a *RuntimeAdapter) list(request runtimemodel.StepExecutionRequest) (runtim
 
 func (a *RuntimeAdapter) read(request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
 	relPath := stringInput(request.Input, "path")
-	_, target, rel, err := guardedWorkspacePath(request.WorkspaceWorkingDirectory, relPath, true)
+	optional := boolInput(request.Input, "optional")
+	_, target, rel, err := guardedWorkspacePath(request.WorkspaceWorkingDirectory, relPath, !optional)
 	if err != nil {
 		return fileErrorResult("file_read_invalid_path", err), err
 	}
 	info, err := os.Stat(target)
 	if err != nil {
+		if optional && os.IsNotExist(err) {
+			return runtimemodel.StepExecutionResult{Output: map[string]any{
+				"status": "completed",
+				"stage":  "file_read",
+				"path":   filepath.ToSlash(rel),
+				"exists": false,
+			}}, nil
+		}
 		return fileErrorResult("file_read_stat_failed", err), err
 	}
 	if info.IsDir() {
@@ -193,6 +202,7 @@ func (a *RuntimeAdapter) read(request runtimemodel.StepExecutionRequest) (runtim
 		"status":      "completed",
 		"stage":       "file_read",
 		"path":        filepath.ToSlash(rel),
+		"exists":      true,
 		"content":     content,
 		"contentHash": hex.EncodeToString(hashBytes[:]),
 		"size":        info.Size(),

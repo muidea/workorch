@@ -21,6 +21,7 @@ import (
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server/consoleassets"
+	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -372,17 +373,18 @@ type createRunRequest struct {
 }
 
 type activateWorkspaceExecutionRequest struct {
-	GoalID         string            `json:"goalId,omitempty"`
-	DoDID          string            `json:"doDId,omitempty"`
-	LLMProviderID  string            `json:"llmProviderId,omitempty"`
-	SoulID         string            `json:"soulId,omitempty"`
-	SoulBindings   map[string]string `json:"soulBindings,omitempty"`
-	SkillIDs       []string          `json:"skillIds,omitempty"`
-	MCPServerIDs   []string          `json:"mcpServerIds,omitempty"`
-	CapabilityIDs  []string          `json:"capabilityIds,omitempty"`
-	MemoryIDs      []string          `json:"memoryIds,omitempty"`
-	DialogLanguage string            `json:"dialogLanguage,omitempty"`
-	Priority       int               `json:"priority,omitempty"`
+	GoalID                string            `json:"goalId,omitempty"`
+	DoDID                 string            `json:"doDId,omitempty"`
+	LLMProviderID         string            `json:"llmProviderId,omitempty"`
+	SoulID                string            `json:"soulId,omitempty"`
+	SoulBindings          map[string]string `json:"soulBindings,omitempty"`
+	SkillIDs              []string          `json:"skillIds,omitempty"`
+	MCPServerIDs          []string          `json:"mcpServerIds,omitempty"`
+	CapabilityIDs         []string          `json:"capabilityIds,omitempty"`
+	MemoryIDs             []string          `json:"memoryIds,omitempty"`
+	DialogLanguage        string            `json:"dialogLanguage,omitempty"`
+	Priority              int               `json:"priority,omitempty"`
+	ExecutionContextPatch map[string]any    `json:"executionContextPatch,omitempty"`
 }
 
 type createSoulRequest = appservice.CreateSoulCommand
@@ -614,6 +616,9 @@ type serverState struct {
 	backgroundWG                    sync.WaitGroup
 	runStatusNotifyMu               sync.Mutex
 	runStatusNotify                 chan struct{}
+	eventUnsubscribes               []func()
+	replanContinuationMu            sync.Mutex
+	replanContinuationStarted       map[string]struct{}
 	runSnapshotCacheMu              sync.Mutex
 	runSnapshotCache                map[string]cachedRunSnapshot
 	runSnapshotInflight             map[string]*runSnapshotInflight
@@ -1983,17 +1988,18 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 		}
 		defer release()
 		item, err := state.activateWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, appservice.ActivateWorkspaceExecutionCommand{
-			GoalID:         req.GoalID,
-			DoDID:          req.DoDID,
-			LLMProviderID:  req.LLMProviderID,
-			SoulID:         req.SoulID,
-			SoulBindings:   req.SoulBindings,
-			SkillIDs:       req.SkillIDs,
-			MCPServerIDs:   req.MCPServerIDs,
-			CapabilityIDs:  req.CapabilityIDs,
-			MemoryIDs:      req.MemoryIDs,
-			DialogLanguage: req.DialogLanguage,
-			Priority:       priority,
+			GoalID:                req.GoalID,
+			DoDID:                 req.DoDID,
+			LLMProviderID:         req.LLMProviderID,
+			SoulID:                req.SoulID,
+			SoulBindings:          req.SoulBindings,
+			SkillIDs:              req.SkillIDs,
+			MCPServerIDs:          req.MCPServerIDs,
+			CapabilityIDs:         req.CapabilityIDs,
+			MemoryIDs:             req.MemoryIDs,
+			DialogLanguage:        req.DialogLanguage,
+			Priority:              priority,
+			ExecutionContextPatch: req.ExecutionContextPatch,
 		})
 		if err != nil {
 			writeBusinessError(w, err)
@@ -2436,6 +2442,9 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		state.metrics.observeRunOutcome(item)
+		if item.State == string(common.RunStateSuperseded) {
+			state.scheduleReplanContinuationIfNeeded(r.Context(), item.WorkspaceID, item.ID, runPriorityFromRequest(r, 0))
+		}
 		state.notifyRunStatusChangedForRun(item)
 		writeJSON(w, http.StatusOK, runInstanceResponse{
 			Service:  "workorch",
@@ -2472,6 +2481,9 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		state.metrics.observeRunOutcome(item)
+		if item.State == string(common.RunStateSuperseded) {
+			state.scheduleReplanContinuationIfNeeded(r.Context(), item.WorkspaceID, item.ID, runPriorityFromRequest(r, 0))
+		}
 		state.notifyRunStatusChangedForRun(item)
 		writeJSON(w, http.StatusOK, runInstanceResponse{
 			Service:  "workorch",
@@ -2734,9 +2746,11 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		updateLLMConfiguration:          appservice.UpdateLLMConfiguration,
 		updateWebSearchConfiguration:    appservice.UpdateWebSearchConfiguration,
 		workspaceSetupDraftSessions:     map[string]*workspaceSetupDraftSession{},
+		replanContinuationStarted:       map[string]struct{}{},
 	}
 	state.configureApplicationRuntimeSession()
 	state.configureSharedMemorySession()
+	state.registerReplanContinuationWatcher()
 	return state
 }
 
@@ -2765,6 +2779,11 @@ func (s *serverState) configureSharedMemorySession() {
 func (s *serverState) configureSessionBackedOperations(session *appservice.RuntimeSession) {
 	if s == nil || session == nil {
 		return
+	}
+	if s.eventHub == nil {
+		if exports, err := session.Exports(); err == nil && exports.Infrastructure.EventHub != nil {
+			s.eventHub = exports.Infrastructure.EventHub
+		}
 	}
 	s.sharedSession = session
 	s.validate = func(ctx context.Context, _, _ string) error {
@@ -3416,6 +3435,26 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 	}
 }
 
+func (s *serverState) registerReplanContinuationWatcher() {
+	if s == nil || s.eventHub == nil {
+		return
+	}
+	unsubscribe := s.eventHub.Subscribe(events.TopicRunStateChanged, func(ctx context.Context, envelope events.Envelope) error {
+		data, ok := events.DecodeRunPayload(envelope.Payload)
+		if !ok || data.State != common.RunStateSuperseded || strings.TrimSpace(envelope.RunID) == "" || strings.TrimSpace(envelope.WorkspaceID) == "" {
+			return nil
+		}
+		s.scheduleReplanContinuationIfNeeded(
+			appservice.ContextWithEventHub(ctx, s.eventHub),
+			envelope.WorkspaceID,
+			envelope.RunID,
+			0,
+		)
+		return nil
+	})
+	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
+}
+
 func isMemoryBackend(backend string) bool {
 	return backend == "" || backend == "memory"
 }
@@ -3433,6 +3472,12 @@ func (s *serverState) close(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	for _, unsubscribe := range s.eventUnsubscribes {
+		if unsubscribe != nil {
+			unsubscribe()
+		}
+	}
+	s.eventUnsubscribes = nil
 	if err := s.waitBackground(ctx); err != nil {
 		return err
 	}
@@ -3486,7 +3531,37 @@ func (s *serverState) recoverStuckRunningRuns(ctx context.Context) error {
 		}
 		slog.Warn("workorch recovered stuck running runs", "runIDs", runIDs)
 	}
+	s.recoverReplanContinuations(ctx)
 	return nil
+}
+
+func (s *serverState) recoverReplanContinuations(ctx context.Context) {
+	if s == nil || s.listWorkspaces == nil || s.listRuns == nil {
+		return
+	}
+	workspaces, err := s.listWorkspaces(ctx, s.config.Backend, s.config.DataRoot)
+	if err != nil {
+		slog.Warn("workorch replan continuation workspace scan failed", "err", err)
+		return
+	}
+	for _, workspace := range workspaces {
+		if strings.TrimSpace(workspace.ID) == "" ||
+			strings.TrimSpace(workspace.ActiveRunID) != "" ||
+			workspace.State != string(common.WorkspaceStateFailed) {
+			continue
+		}
+		runs, err := s.listRuns(ctx, s.config.Backend, s.config.DataRoot, workspace.ID)
+		if err != nil {
+			slog.Warn("workorch replan continuation run scan failed", "workspaceID", workspace.ID, "err", err)
+			continue
+		}
+		for _, run := range runs {
+			if run.WorkspaceID != workspace.ID || run.State != string(common.RunStateSuperseded) {
+				continue
+			}
+			s.scheduleReplanContinuationIfNeeded(ctx, workspace.ID, run.ID, run.Priority)
+		}
+	}
 }
 
 func defaultValidate(ctx context.Context, backend string, dataRoot string) error {
@@ -4168,9 +4243,72 @@ func (s *serverState) scheduleGovernanceRunResumes(runIDs []string, priority int
 				return
 			}
 			s.metrics.observeRunOutcome(item)
+			if item.State == string(common.RunStateSuperseded) {
+				s.scheduleReplanContinuationIfNeeded(ctx, item.WorkspaceID, item.ID, priority)
+			}
 			resumedRun = item
 		}()
 	}
+}
+
+func (s *serverState) scheduleReplanContinuationIfNeeded(ctx context.Context, workspaceID string, runID string, priority int) {
+	if s == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(runID) == "" {
+		return
+	}
+	if !s.runHasResolvedReplanDecision(ctx, workspaceID, runID) {
+		return
+	}
+	key := workspaceID + "/" + runID
+	s.replanContinuationMu.Lock()
+	if s.replanContinuationStarted == nil {
+		s.replanContinuationStarted = map[string]struct{}{}
+	}
+	if _, ok := s.replanContinuationStarted[key]; ok {
+		s.replanContinuationMu.Unlock()
+		return
+	}
+	s.replanContinuationStarted[key] = struct{}{}
+	s.replanContinuationMu.Unlock()
+
+	s.backgroundWG.Add(1)
+	go func() {
+		defer s.backgroundWG.Done()
+		runCtx := appservice.ContextWithEventHub(context.Background(), s.eventHub)
+		release, err := s.acquireRunSlotWithPriority(runCtx, priority)
+		if err != nil {
+			s.metrics.runCanceled.Add(1)
+			slog.Warn("workorch replan continuation queue failed", "workspaceID", workspaceID, "runID", runID, "err", err)
+			return
+		}
+		defer release()
+		activation, err := s.activateWorkspace(runCtx, s.config.Backend, s.config.DataRoot, workspaceID, appservice.ActivateWorkspaceExecutionCommand{Priority: priority})
+		if err != nil {
+			slog.Warn("workorch replan continuation activation failed", "workspaceID", workspaceID, "runID", runID, "err", err)
+			s.notifyRunStatusChanged()
+			return
+		}
+		s.metrics.observeRunOutcome(activation.Run)
+		s.notifyRunStatusChangedForRun(activation.Run)
+	}()
+}
+
+func (s *serverState) runHasResolvedReplanDecision(ctx context.Context, workspaceID string, runID string) bool {
+	if s == nil || s.listDecisions == nil {
+		return false
+	}
+	items, err := s.listDecisions(ctx, s.config.Backend, s.config.DataRoot, workspaceID, runID)
+	if err != nil {
+		slog.Warn("workorch replan continuation decision lookup failed", "workspaceID", workspaceID, "runID", runID, "err", err)
+		return false
+	}
+	for _, item := range items {
+		if item.RunID == runID &&
+			item.State == string(common.DecisionTicketStateResolved) &&
+			item.ResolutionType == decisioncommon.ResolutionTypeReplan {
+			return true
+		}
+	}
+	return false
 }
 
 func runIDsFromDecisions(items []appservice.Decision) []string {

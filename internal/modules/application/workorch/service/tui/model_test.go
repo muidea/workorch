@@ -215,6 +215,68 @@ func TestModelPlainInputDuringActiveRunQueuesOperatorInput(t *testing.T) {
 	}
 }
 
+func TestModelPlainInputAfterTerminalRunRestartsWorkspaceWithOperatorInput(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateCompleted)
+	m := NewAppModel(be, "ws-1", "")
+	m.activeRunID = "run-continue"
+	m.currentTask = "已有目标"
+	m.setInput("补充信息：继续基于现有目标修复")
+
+	next, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("expected restart command")
+	}
+	msg := cmd()
+	next, _ = next.(*AppModel).Update(msg)
+	m = asModel(next)
+
+	if len(be.goals) != 0 {
+		t.Fatalf("goals = %v, want no goal created for restart input", be.goals)
+	}
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want terminal run to activate a new run", be.resumes)
+	}
+	if len(be.activations) != 1 {
+		t.Fatalf("activations = %d, want one activation", len(be.activations))
+	}
+	queue, ok := be.activations[0].ExecutionContextPatch["operatorInputQueue"].([]map[string]any)
+	if !ok || len(queue) != 1 || queue[0]["content"] != "补充信息：继续基于现有目标修复" {
+		t.Fatalf("operatorInputQueue = %#v, want queued restart input", be.activations[0].ExecutionContextPatch["operatorInputQueue"])
+	}
+	if m.activeRunID != "run-new" || !m.running {
+		t.Fatalf("run state = %q/%v, want restarted run-new/running", m.activeRunID, m.running)
+	}
+}
+
+func TestModelRestartSlashCommandActivatesWorkspaceWithoutCreatingGoal(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateRunning)
+	m := NewAppModel(be, "ws-1", "")
+	m.activeRunID = "run-continue"
+	m.currentTask = "已有目标"
+	m.setInput("/restart 重新执行并纳入刚补充的信息")
+
+	next, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("expected restart command")
+	}
+	msg := cmd()
+	_, _ = next.(*AppModel).Update(msg)
+
+	if len(be.goals) != 0 {
+		t.Fatalf("goals = %v, want no goal created for /restart", be.goals)
+	}
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want /restart to activate directly", be.resumes)
+	}
+	if len(be.activations) != 1 {
+		t.Fatalf("activations = %d, want one activation", len(be.activations))
+	}
+	latest, ok := be.activations[0].ExecutionContextPatch["latestOperatorInput"].(map[string]any)
+	if !ok || latest["content"] != "重新执行并纳入刚补充的信息" {
+		t.Fatalf("latestOperatorInput = %#v, want restart dialog input", be.activations[0].ExecutionContextPatch["latestOperatorInput"])
+	}
+}
+
 func TestModelRunStartedDoesNotOverwriteStepProgress(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.applyBackendEvent(backend.Event{
@@ -2148,6 +2210,7 @@ type recordingBE struct {
 	*fakeBE
 	runState      common.RunState
 	goals         []string
+	activations   []backend.ActivateRunRequest
 	resumes       []common.RunID
 	resumePatches []map[string]any
 }
@@ -2179,6 +2242,7 @@ func (f *recordingGoal) Update(ctx context.Context, id common.GoalID, text strin
 type recordingRun struct{ parent *recordingBE }
 
 func (f *recordingRun) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
+	f.parent.activations = append(f.parent.activations, req)
 	return &backend.RunInfo{ID: "run-new", WorkspaceID: wsID, GoalID: req.GoalID, DoDID: req.DoDID, State: common.RunStateRunning}, nil
 }
 func (f *recordingRun) Resume(ctx context.Context, id common.RunID, executionContextPatch ...map[string]any) (*backend.RunInfo, error) {

@@ -131,6 +131,9 @@
 - TUI 不提供普通 workspaceTemplate 重新绑定能力。
 - TUI 本地模式继续通过 EventHub 与内置后端交互，不使用本地 HTTP client。
 - 状态刷新和交互应基于 EventHub 异步回调，不采用定时轮询。
+- TUI 普通对话输入不是默认新 Goal：非终态 Run 中作为 operator input
+  resume；终态 Run 后作为 operator input 直接重启 Workspace execution；
+  只有 `/goal <text>` 或无既有任务上下文时才创建新 Goal。
 
 ## 差距分析
 
@@ -253,6 +256,8 @@
 | SRD-37 | DoD 全量覆盖门控 | Orchestrator/通用 | P0 | verified | LLM 返回 `satisfied=true` 时可能遗漏当前 effective DoD 的未完成条目 | completion gate 从 Run executionContext 的 effective DoD 提取非标题条目，对 LLM `dodAssessment.items` 做规范化覆盖对账；遗漏任一条目时记录 rejected Result 并进入 runtime repair | 单测覆盖 markdown/checklist 规范化、遗漏 DoD 子集拒绝和完整覆盖通过 |
 | SRD-38 | Workspace outcome 最新终态选择 | Read model/通用 | P0 | verified | Workspace 级 outcome 可能优先使用 stale taskProgress，导致展示较早 accepted run | terminal workspace 的 outcome 优先按 run 事件选择最新终态 run，无事件时回落到最新 accepted result，再回落到 run 列表；非终态仍保留 active/taskProgress 语义 | 单测覆盖 stale taskProgress 指向旧 run 时 outcome 仍选择最新 accepted terminal run |
 | SRD-39 | EvidenceQuality 证据质量门控 | Orchestrator/Template | P0 | verified | 命令退出码为 0 但没有实际执行测试时仍可能被 LLM 当作 satisfied 证据引用 | 基础框架新增领域中立 `EvidenceQuality`（valid/invalid/inconclusive/skipped）并在 DoD completion gate 拒绝 zero-work / inconclusive / invalid 证据；具体命令/输出识别规则只作为 `workspaceTemplate.evidencePolicies` 数据配置，创建 workspace 时绑定到 workspace，激活 run 时不按 Soul 名称或业务场景推断策略 | 单测覆盖 workspace-bound evidence policy 注入、runtime 输出 metadata 识别、DoD satisfied 引用 inconclusive step 被拒绝 |
+| SRD-40 | Completion gate 持续收口能力 | Orchestrator/通用 | P0 | implemented | `ws-c4b6c80ed677c443` 类场景中，after-graph 评估可能继续扩展 graph；provider timeout retry 又携带完整上下文，导致重复扩展、重复 repair 或无法交付 | 对 graph follow-up 扩展设置通用边界；completion gate provider retry 进入 assessment-only 紧凑模式；终态 Step 禁止同 ID 覆盖；可选文件读取用 `exists:false` 完成输出避免无效 repair | 本地单测覆盖扩展边界、assessment-only retry、终态 Step 幂等和 optional read；待部署后复验同类 workspace |
+| SRD-41 | TUI 对话输入重启 Workspace 执行 | TUI/后端通用 | P0 | implemented | 用户在 TUI 输入“继续处理”或补充信息时，期望推进现有 Workspace，而不是被误当成新 Goal 或只能提示使用 `/goal` | activation 支持 `executionContextPatch`；TUI 在非终态 Run 中 resume 并注入 operator input，在终态 Run 后或 `/restart` 时复用累计 Goal/DoD 激活新 Run | TUI 单测覆盖终态 Run 后普通输入重启、新 `/restart` 命令、普通补充信息不创建 Goal；appservice/server 测试覆盖 activation patch 透传 |
 
 ## 建议实施顺序
 
@@ -381,3 +386,6 @@
 | 2026-05-08 | 回归同步 SRD-33：`verify-software-dev-goal-dod-e2e.sh` 的弱验证证据场景改为验证 rejected Result + runtime repair + repair 耗尽 Decision 升级，避免继续使用“直接失败”旧预期。 |
 | 2026-05-08 | 基于 `ws-e1e310fd02e4375e` 核对收口 SRD-37/SRD-38：DoD completion gate 增加当前 effective DoD 全量覆盖对账；workspace outcome 在终态下优先选择最新终态 run，避免旧 accepted result 覆盖最新结果。 |
 | 2026-05-09 | 收口 SRD-39：基础框架新增 `EvidenceQuality` 通用证据质量字段和 DoD completion gate 质量检查；`workspaceTemplate.evidencePolicies` 在创建 workspace 时绑定到 workspace，激活 run 时只注入 workspace 已绑定策略；runtime 基于策略输出 `inconclusive/zero_work` 等结构化 metadata，不能支撑 satisfied DoD。已通过 orchestrator、appservice、repository 定向单测。 |
+| 2026-05-10 | 收口 SRD-40 本地实现：completion gate 的 graph follow-up 不允许无边界继续扩展；provider timeout retry 对 completion follow-up 使用 assessment-only 紧凑上下文；Step dispatch 不再覆盖终态 Step；`file/read optional:true` 支持可选文件探测。已通过本地 `go test ./... -count=1`，部署后需继续用 `ws-c4b6c80ed677c443` 类场景验证。 |
+| 2026-05-10 | 收口 SRD-41 本地实现：TUI 普通对话输入在非终态 Run 中继续作为 operator input resume；终态 Run 后会复用 Workspace 累计 Goal/DoD 激活新 Run；新增 `/restart [message]` 显式重启命令；activation HTTP/EventHub/local/remote 路径均透传 `executionContextPatch`。已通过本地 `go test ./... -count=1`。 |
+| 2026-05-10 | 收口 SRD-42 本地实现：修复自动治理 `replan` 后只将旧 Run 置为 `superseded`、但没有可靠创建 continuation Run 的问题；workorchd 现在绑定共享 RuntimeSession 实际 EventHub，监听通用 `superseded + resolved replan` 事件触发下一轮 Workspace activation，并在 Validate 阶段补偿扫描历史遗留状态。已补充 server 定向单测。 |

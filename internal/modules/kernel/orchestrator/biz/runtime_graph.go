@@ -159,13 +159,13 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		}
 	}
 	if shouldDispatchGraphFollowUp(currentRun, last, last.Output) {
-		return o.dispatchStepWithWorkspace(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
+		return o.dispatchUniqueStepWithWorkspace(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
 	}
 	if shouldDispatchLLMCompletionFollowUp(currentRun, last, last.Output) {
-		return o.dispatchStepWithWorkspace(ctx, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
+		return o.dispatchUniqueStepWithWorkspace(ctx, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
 	}
 	if shouldDispatchNoActionableContinuationFollowUp(currentRun, last, last.Output) {
-		return o.dispatchStepWithWorkspace(ctx, currentRun, noActionableContinuationFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), noActionableContinuationFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
+		return o.dispatchUniqueStepWithWorkspace(ctx, currentRun, noActionableContinuationFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), noActionableContinuationFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
 	}
 	if completionState := llmDecisionCompletionStateFromOutput(last.Output); completionState != "" && completionState != "completed" {
 		last.State = common.StepStateFailed
@@ -663,6 +663,34 @@ func shouldDispatchNoActionableContinuationFollowUp(run *runModel.Run, step *run
 	}
 	completionState := llmDecisionCompletionStateFromOutput(output)
 	return completionState != "" && completionState != "completed"
+}
+
+func graphFollowUpExpansionStep(step *runModel.Step) bool {
+	if step == nil || step.Input == nil || step.Output == nil {
+		return false
+	}
+	if !boolValue(step.Input["graphFollowUp"]) {
+		return false
+	}
+	_, ok := runtimeGraphSpecFromValue(step.Output[stepOutputKeyExecutionGraph])
+	return ok
+}
+
+func (o *RuntimeOrchestrator) graphFollowUpExpansionCount(ctx context.Context, runID common.RunID) int {
+	if o == nil || o.steps == nil || runID == "" {
+		return 0
+	}
+	steps, err := o.steps.ListByRun(ctx, runID)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, step := range steps {
+		if graphFollowUpExpansionStep(step) {
+			count++
+		}
+	}
+	return count
 }
 
 func hasCompletionFollowUpSideEffect(output map[string]any) bool {

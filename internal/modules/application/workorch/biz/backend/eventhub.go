@@ -139,14 +139,15 @@ func (b *eventHubBackend) handleCommand(ctx context.Context, cmd events.CLIComma
 		return resourceMap(item), nil, err
 	case events.CommandRunActivate:
 		item, err := b.localBackend.run.Activate(ctx, cmd.WorkspaceID, ActivateRunRequest{
-			GoalID:         common.GoalID(stringValue(cmd.Payload, "goalId")),
-			DoDID:          common.DoDID(stringValue(cmd.Payload, "doDId")),
-			LLMProviderID:  stringValue(cmd.Payload, "llmProviderId"),
-			DialogLanguage: stringValue(cmd.Payload, "dialogLanguage"),
-			SoulID:         common.SoulID(stringValue(cmd.Payload, "soulId")),
-			SkillIDs:       skillIDsValue(cmd.Payload, "skillIds"),
-			MCPServerIDs:   mcpServerIDsValue(cmd.Payload, "mcpServerIds"),
-			Priority:       intValue(cmd.Payload, "priority"),
+			GoalID:                common.GoalID(stringValue(cmd.Payload, "goalId")),
+			DoDID:                 common.DoDID(stringValue(cmd.Payload, "doDId")),
+			LLMProviderID:         stringValue(cmd.Payload, "llmProviderId"),
+			DialogLanguage:        stringValue(cmd.Payload, "dialogLanguage"),
+			SoulID:                common.SoulID(stringValue(cmd.Payload, "soulId")),
+			SkillIDs:              skillIDsValue(cmd.Payload, "skillIds"),
+			MCPServerIDs:          mcpServerIDsValue(cmd.Payload, "mcpServerIds"),
+			Priority:              intValue(cmd.Payload, "priority"),
+			ExecutionContextPatch: mapValue(cmd.Payload, "executionContextPatch"),
 		})
 		return resourceMap(item), nil, err
 	case events.CommandRunResume:
@@ -504,14 +505,15 @@ type eventHubRunBackend struct{ parent *eventHubBackend }
 
 func (b *eventHubRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
 	result, err := b.parent.sendCommand(ctx, events.CommandRunActivate, wsID, "", "run", "", map[string]any{
-		"goalId":         string(req.GoalID),
-		"doDId":          string(req.DoDID),
-		"llmProviderId":  req.LLMProviderID,
-		"dialogLanguage": req.DialogLanguage,
-		"soulId":         string(req.SoulID),
-		"skillIds":       skillIDStrings(req.SkillIDs),
-		"mcpServerIds":   mcpServerIDStrings(req.MCPServerIDs),
-		"priority":       req.Priority,
+		"goalId":                string(req.GoalID),
+		"doDId":                 string(req.DoDID),
+		"llmProviderId":         req.LLMProviderID,
+		"dialogLanguage":        req.DialogLanguage,
+		"soulId":                string(req.SoulID),
+		"skillIds":              skillIDStrings(req.SkillIDs),
+		"mcpServerIds":          mcpServerIDStrings(req.MCPServerIDs),
+		"priority":              req.Priority,
+		"executionContextPatch": req.ExecutionContextPatch,
 	})
 	return decodeResultResource[RunInfo](result, err)
 }

@@ -190,7 +190,7 @@ func slashCommandMatches(input string) []string {
 		return nil
 	}
 	prefix := strings.ToLower(strings.TrimPrefix(trimmed, "/"))
-	commands := []string{"/help", "/clear", "/workspace", "/workspace create", "/goal", "/dod", "/memory", "/result", "/continue", "/exit"}
+	commands := []string{"/help", "/clear", "/workspace", "/workspace create", "/goal", "/dod", "/memory", "/result", "/continue", "/restart", "/exit"}
 	matches := make([]string, 0, len(commands))
 	for _, command := range commands {
 		if strings.HasPrefix(strings.TrimPrefix(command, "/"), prefix) {

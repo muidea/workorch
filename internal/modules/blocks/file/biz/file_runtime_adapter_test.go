@@ -40,6 +40,25 @@ func TestRuntimeAdapterReadReturnsContentAndHash(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterOptionalReadMissingFileCompletes(t *testing.T) {
+	workspace := t.TempDir()
+
+	result, err := NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceWorkingDirectory: workspace,
+		Kind:                      "file/read",
+		Input: map[string]any{
+			"path":     "README.md",
+			"optional": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("optional read missing file: %v", err)
+	}
+	if result.Output["status"] != "completed" || result.Output["exists"] != false || result.Output["path"] != "README.md" {
+		t.Fatalf("output = %+v, want completed exists=false", result.Output)
+	}
+}
+
 func TestRuntimeAdapterListSkipsGeneratedDirectories(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.Mkdir(filepath.Join(workspace, "node_modules"), 0o755); err != nil {

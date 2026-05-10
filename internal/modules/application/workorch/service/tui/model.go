@@ -533,6 +533,15 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 		m.progressText = "Queued input; continuing active run"
 		return m, ContinueRun(m.be, m.activeWorkspaceID, m.activeRunID, text)
 	}
+	if strings.TrimSpace(m.currentTask) != "" {
+		m.clearInput()
+		m.cancelWorkspaceSelection()
+		m.lastError = nil
+		m.appendTranscript("Input", text)
+		m.progress = progressSubmitting
+		m.progressText = "Queued input; restarting workspace run"
+		return m, RestartWorkspaceRun(m.be, m.activeWorkspaceID, text)
+	}
 	return m.submitGoalText(text)
 }
 
@@ -630,6 +639,18 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.progress = progressSubmitting
 		m.progressText = "Continuing active run"
 		return m, ContinueRun(m.be, m.activeWorkspaceID, m.activeRunID, ""), true
+	case "restart", "rerun":
+		m.addInputHistory(text)
+		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
+		m.clearInput()
+		m.cancelWorkspaceSelection()
+		m.lastError = nil
+		if args != "" {
+			m.appendTranscript("Input", args)
+		}
+		m.progress = progressSubmitting
+		m.progressText = "Restarting workspace run"
+		return m, RestartWorkspaceRun(m.be, m.activeWorkspaceID, args), true
 	case "result", "refresh":
 		m.addInputHistory(text)
 		m.clearInput()

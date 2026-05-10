@@ -258,14 +258,15 @@ type localRunBackend struct{ parent *localBackend }
 func (b *localRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
 	s := b.parent.session.Borrow()
 	act, err := appservice.ActivateWorkspaceExecutionWithSession(ctx, s, string(wsID), appservice.ActivateWorkspaceExecutionCommand{
-		GoalID:         string(req.GoalID),
-		DoDID:          string(req.DoDID),
-		LLMProviderID:  req.LLMProviderID,
-		DialogLanguage: req.DialogLanguage,
-		SoulID:         string(req.SoulID),
-		SkillIDs:       skillIDStringSlice(req.SkillIDs),
-		MCPServerIDs:   mcpServerIDStringSlice(req.MCPServerIDs),
-		Priority:       req.Priority,
+		GoalID:                string(req.GoalID),
+		DoDID:                 string(req.DoDID),
+		LLMProviderID:         req.LLMProviderID,
+		DialogLanguage:        req.DialogLanguage,
+		SoulID:                string(req.SoulID),
+		SkillIDs:              skillIDStringSlice(req.SkillIDs),
+		MCPServerIDs:          mcpServerIDStringSlice(req.MCPServerIDs),
+		Priority:              req.Priority,
+		ExecutionContextPatch: req.ExecutionContextPatch,
 	})
 	if err != nil {
 		return nil, err

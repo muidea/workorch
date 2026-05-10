@@ -133,15 +133,16 @@ func (c *Client) ActivateWorkspaceExecution(ctx context.Context, workspaceID str
 
 // ActivationRequest is the request body for activating workspace execution.
 type ActivationRequest struct {
-	GoalID         string            `json:"goalId,omitempty"`
-	DoDID          string            `json:"doDId,omitempty"`
-	LLMProviderID  string            `json:"llmProviderId,omitempty"`
-	SoulID         string            `json:"soulId,omitempty"`
-	SoulBindings   map[string]string `json:"soulBindings,omitempty"`
-	SkillIDs       []string          `json:"skillIds,omitempty"`
-	MCPServerIDs   []string          `json:"mcpServerIds,omitempty"`
-	CapabilityIDs  []string          `json:"capabilityIds,omitempty"`
-	MemoryIDs      []string          `json:"memoryIds,omitempty"`
-	DialogLanguage string            `json:"dialogLanguage,omitempty"`
-	Priority       int               `json:"priority,omitempty"`
+	GoalID                string            `json:"goalId,omitempty"`
+	DoDID                 string            `json:"doDId,omitempty"`
+	LLMProviderID         string            `json:"llmProviderId,omitempty"`
+	SoulID                string            `json:"soulId,omitempty"`
+	SoulBindings          map[string]string `json:"soulBindings,omitempty"`
+	SkillIDs              []string          `json:"skillIds,omitempty"`
+	MCPServerIDs          []string          `json:"mcpServerIds,omitempty"`
+	CapabilityIDs         []string          `json:"capabilityIds,omitempty"`
+	MemoryIDs             []string          `json:"memoryIds,omitempty"`
+	DialogLanguage        string            `json:"dialogLanguage,omitempty"`
+	Priority              int               `json:"priority,omitempty"`
+	ExecutionContextPatch map[string]any    `json:"executionContextPatch,omitempty"`
 }

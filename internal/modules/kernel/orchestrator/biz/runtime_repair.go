@@ -301,7 +301,23 @@ func providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr erro
 	input["failureReason"] = errorString(execErr)
 	input[failureOutputKeyClass] = stringFromMap(failedStep.Output, failureOutputKeyClass)
 	input[failureOutputKeySignature] = stringFromMap(failedStep.Output, failureOutputKeySignature)
+	if completionGateFollowUpStep(failedStep) {
+		input["providerRetryMode"] = "completion_assessment_only"
+		input["providerRetryAssessmentOnly"] = true
+		input["completionFollowUp"] = true
+		delete(input, stepOutputKeyExecutionGraph)
+		delete(input, "previousStepOutput")
+	}
 	return input
+}
+
+func completionGateFollowUpStep(step *runModel.Step) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	return boolValue(step.Input["graphFollowUp"]) ||
+		boolValue(step.Input["completionFollowUp"]) ||
+		boolValue(step.Input[stepInputKeyNoActionableFollowUp])
 }
 
 func providerRetryStepID(rootStepID common.StepID, attempt int) common.StepID {

@@ -591,9 +591,9 @@ func (m AppModel) renderInput(width int) string {
 }
 
 func (m AppModel) renderHelp(width int) string {
-	help := "enter: submit | /goal: new goal | /continue: resume | /dod: update DoD | /memory: recall | /exit: quit | ctrl+c: interrupt/quit x2"
+	help := "enter: submit | /goal: new goal | /continue: resume | /restart: rerun | /dod: update DoD | /memory: recall | /exit: quit | ctrl+c: interrupt/quit x2"
 	if width < 120 {
-		help = "enter | /goal | /continue | /dod | /memory | /exit | ctrl+c x2 quit"
+		help = "enter | /goal | /continue | /restart | /dod | /memory | /exit | ctrl+c x2 quit"
 	}
 	if m.workspaceSelectMode {
 		help = "ws select: up/down/j/k move | enter confirm | ctrl+w cancel | esc cancel"
@@ -614,7 +614,7 @@ func (m AppModel) renderHelpOverlay(width, height int) string {
 		"Ctrl+C: interrupt active run; press twice outside a run to quit",
 		"PgUp / PgDn: scroll result",
 		"Esc: clear input or close help",
-		"/help /clear /workspace /workspace create /goal /dod /memory /result /continue /exit",
+		"/help /clear /workspace /workspace create /goal /dod /memory /result /continue /restart /exit",
 	}
 	panelWidth := min(width-4, 72)
 	if panelWidth < 30 {

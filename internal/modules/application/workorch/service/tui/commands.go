@@ -254,7 +254,7 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 			}
 			run := selectWorkspaceRun(workspace.ActiveRunID, runs)
 			if run == nil {
-				return RunControlMsg{WorkspaceID: workspaceID, Message: "No active run to continue. Use /goal <text> to start a new goal."}
+				return activateWorkspaceRun(ctx, be, wsID, nil, operatorInput)
 			}
 			targetRunID = run.ID
 		}
@@ -263,11 +263,11 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 			return RunControlMsg{WorkspaceID: workspaceID, Error: err}
 		}
 		if run == nil {
-			return RunControlMsg{WorkspaceID: workspaceID, Message: "No active run to continue. Use /goal <text> to start a new goal."}
+			return activateWorkspaceRun(ctx, be, wsID, nil, operatorInput)
 		}
 		switch run.State {
 		case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
-			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "The selected run is terminal. Use /goal <text> to start a new goal."}
+			return activateWorkspaceRun(ctx, be, wsID, run, operatorInput)
 		case common.RunStateValidating:
 			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is validating; refreshing workspace state."}
 		default:
@@ -278,6 +278,27 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Continuing active run"}
 		}
 	}
+}
+
+func RestartWorkspaceRun(be backend.Backend, workspaceID string, operatorInput string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		if strings.TrimSpace(workspaceID) == "" {
+			return RunControlMsg{Message: "No active workspace. Create or select a workspace first."}
+		}
+		return activateWorkspaceRun(ctx, be, common.WorkspaceID(workspaceID), nil, operatorInput)
+	}
+}
+
+func activateWorkspaceRun(ctx context.Context, be backend.Backend, workspaceID common.WorkspaceID, run *backend.RunInfo, operatorInput string) tea.Msg {
+	activated, err := be.Run().Activate(ctx, workspaceID, backend.ActivateRunRequest{
+		ExecutionContextPatch: operatorInputPatch(run, operatorInput),
+	})
+	if err != nil {
+		return RunControlMsg{Run: run, WorkspaceID: string(workspaceID), Error: err}
+	}
+	return RunControlMsg{Run: activated, WorkspaceID: string(workspaceID), Message: "Restarting workspace run"}
 }
 
 func operatorInputPatch(run *backend.RunInfo, value string) map[string]any {

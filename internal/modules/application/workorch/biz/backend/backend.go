@@ -391,14 +391,15 @@ type RunInfo struct {
 }
 
 type ActivateRunRequest struct {
-	GoalID         common.GoalID
-	DoDID          common.DoDID
-	LLMProviderID  string
-	DialogLanguage string
-	SoulID         common.SoulID
-	SkillIDs       []common.SkillID
-	MCPServerIDs   []common.MCPServerID
-	Priority       int
+	GoalID                common.GoalID
+	DoDID                 common.DoDID
+	LLMProviderID         string
+	DialogLanguage        string
+	SoulID                common.SoulID
+	SkillIDs              []common.SkillID
+	MCPServerIDs          []common.MCPServerID
+	Priority              int
+	ExecutionContextPatch map[string]any
 }
 
 type RunStatusInfo struct {

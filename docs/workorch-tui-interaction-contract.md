@@ -27,7 +27,14 @@
 
 ## Input Area Behavior
 
-- Accepts free-text goals (same as current REPL).
+- Accepts free-text goals when the active Workspace has no existing task
+  context.
+- During an active non-terminal Run, free text is queued as operator dialog
+  input and the Run is resumed with that context; it is not written as a new
+  Goal.
+- After the selected/latest Run is terminal, free text is queued as operator
+  dialog input and the Workspace execution is restarted using the existing
+  cumulative Goal and DoD definitions.
 - The input area is fixed near the bottom of the terminal, above the help bar.
 - Press Enter to submit.
 - Press Alt+Enter to insert a newline in the input buffer.
@@ -36,7 +43,11 @@
 - Press Ctrl+C to interrupt the active Run.
 - Press ESC to clear current input.
 - `/` commands supported in the default TUI: `/help`, `/clear`,
-  `/workspace`, `/dod`, `/result`, `/exit`.
+  `/workspace`, `/goal`, `/dod`, `/result`, `/memory`, `/continue`,
+  `/restart`, `/exit`.
+- `/restart [message]` starts a new Workspace execution with the existing
+  cumulative Goal and DoD definitions. The optional message is injected as
+  operator dialog input for the new Run.
 - `/dod item1; item2` sets the pending DoD for the next submitted Goal.
   If no custom DoD is set, the next Goal uses the active Workspace template
   DoD when the Workspace was initialized from a matching template; otherwise

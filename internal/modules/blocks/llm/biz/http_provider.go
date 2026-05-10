@@ -553,7 +553,7 @@ func decisionContractPrompt() string {
 func capabilityContractPrompt(request llmmodels.ProviderRequest) string {
 	lines := []string{"Runtime capability contract:"}
 	if requestHasBlockKind(request, "file/list") || requestHasBlockKind(request, "file/read") || requestHasBlockKind(request, "file/edit") {
-		lines = append(lines, "- Prefer file/list and file/read for workspace file discovery and bounded file inspection. Use file/edit only to generate a non-mutating exact-text replacement patch preview; it does not write files.")
+		lines = append(lines, "- Prefer file/list and file/read for workspace file discovery and bounded file inspection. Probe unknown or optional files with file/list first, or set file/read optional:true so a missing file returns exists:false instead of becoming a repair failure. Use file/edit only to generate a non-mutating exact-text replacement patch preview; it does not write files.")
 	}
 	if requestHasBlockKind(request, "patch/preview") || requestHasBlockKind(request, "patch/apply") || requestHasBlockKind(request, "patch/revert") {
 		lines = append(lines, "- Use executionGraph node kind patch/preview to validate and summarize an intended patch without writing files. Use patch/apply for file writes or diffs that must participate in graph dependencies. Use patch/revert only for a WorkOrch patchId when reverting an already applied WorkOrch patch. Do not use patchRequests as an executionGraph node kind.")

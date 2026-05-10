@@ -68,6 +68,7 @@ const (
 	soulStageValidation                = "validation"
 	maxRuntimeRepairAttempts           = 3
 	maxProviderRetryAttempts           = 2
+	maxGraphFollowUpExpansionAttempts  = 2
 )
 
 type RuntimeOrchestrator struct {
@@ -179,7 +180,16 @@ func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) 
 		return err
 	}
 	if ws.ActiveRunID != "" && ws.ActiveRunID != runID {
-		return common.ErrConflict
+		activeRun, err := o.runs.Get(ctx, ws.ActiveRunID)
+		if errors.Is(err, common.ErrNotFound) {
+			return common.ErrConflict
+		}
+		if err != nil {
+			return err
+		}
+		if activeRun != nil && activeRun.WorkspaceID == ws.ID && !isTerminalRunState(activeRun.State) {
+			return common.ErrConflict
+		}
 	}
 
 	r.State = common.RunStateRunning
@@ -947,6 +957,13 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 			return err
 		}
 	} else {
+		if step.RunID != run.ID {
+			return common.ErrConflict
+		}
+		switch step.State {
+		case common.StepStateCompleted, common.StepStateFailed:
+			return fmt.Errorf("%w: runtime step %s is already terminal", common.ErrConflict, step.ID)
+		}
 		step.State = common.StepStateDispatched
 		if kind != "" {
 			step.Kind = kind
@@ -1066,6 +1083,9 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if nextStepID != "" {
 		return o.dispatchStepWithWorkspace(ctx, run, nextStepID, nextKind, nextStepInputFromOutput(run, step), workspace)
 	}
+	if handled, err := o.validateGraphExpansionBoundary(ctx, run, step, toolCall, output); handled || err != nil {
+		return err
+	}
 	graphSpecs, graphSteps := o.readyGraphStepSpecsWithSteps(ctx, run, step)
 	if len(graphSpecs) > 0 {
 		return o.dispatchGraphStepBatchWithWorkspace(ctx, run, graphSpecs, workspace)
@@ -1077,13 +1097,13 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		} else {
 			input = o.graphFollowUpStepInput(ctx, run, step)
 		}
-		return o.dispatchStepWithWorkspace(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), input, workspace)
+		return o.dispatchUniqueStepWithWorkspace(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), input, workspace)
 	}
 	if shouldDispatchLLMCompletionFollowUp(run, step, output) {
-		return o.dispatchStepWithWorkspace(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.llmCompletionFollowUpStepInput(ctx, run, step), workspace)
+		return o.dispatchUniqueStepWithWorkspace(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.llmCompletionFollowUpStepInput(ctx, run, step), workspace)
 	}
 	if shouldDispatchNoActionableContinuationFollowUp(run, step, output) {
-		return o.dispatchStepWithWorkspace(ctx, run, noActionableContinuationFollowUpStepID(run.ID, step), initialStepKind(run), o.noActionableContinuationFollowUpStepInput(ctx, run, step), workspace)
+		return o.dispatchUniqueStepWithWorkspace(ctx, run, noActionableContinuationFollowUpStepID(run.ID, step), initialStepKind(run), o.noActionableContinuationFollowUpStepInput(ctx, run, step), workspace)
 	}
 	if completionState := llmDecisionCompletionStateFromOutput(output); completionState != "" && completionState != "completed" {
 		return o.handleRuntimeStepFailure(
@@ -1109,6 +1129,33 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return err
 	}
 	return o.validateAndCompleteRunWithWorkspace(ctx, run, step.ID, workspace)
+}
+
+func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	toolCall *runModel.ToolCall,
+	output map[string]any,
+) (bool, error) {
+	if run == nil || step == nil || output == nil || !requiresDoDAssessmentCompletionGate(run) {
+		return false, nil
+	}
+	if boolValue(step.Input["providerRetryAssessmentOnly"]) {
+		if _, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
+			err := fmt.Errorf("%w: provider retry assessment-only step returned executionGraph", common.ErrInvalidArgument)
+			return true, o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
+		}
+	}
+	if !graphFollowUpExpansionStep(step) {
+		return false, nil
+	}
+	count := o.graphFollowUpExpansionCount(ctx, run.ID)
+	if count <= maxGraphFollowUpExpansionAttempts {
+		return false, nil
+	}
+	err := fmt.Errorf("%w: graph follow-up expansion limit exceeded after %d attempts", common.ErrInvalidArgument, maxGraphFollowUpExpansionAttempts)
+	return true, o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime graph expansion limit failed", err)
 }
 
 func (o *RuntimeOrchestrator) recordRejectedCompletionDoDAssessment(ctx context.Context, run *runModel.Run, step *runModel.Step, output map[string]any) error {
@@ -1225,22 +1272,34 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			} else {
 				input = o.graphFollowUpStepInput(ctx, run, last)
 			}
+			stepID, err := o.uniqueDispatchStepID(ctx, run.ID, graphFollowUpStepID(run.ID, last))
+			if err != nil {
+				return nil, err
+			}
 			return []stepDispatchSpec{{
-				ID:    graphFollowUpStepID(run.ID, last),
+				ID:    stepID,
 				Kind:  initialStepKind(run),
 				Input: input,
 			}}, nil
 		}
 		if shouldDispatchLLMCompletionFollowUp(run, last, last.Output) {
+			stepID, err := o.uniqueDispatchStepID(ctx, run.ID, llmCompletionFollowUpStepID(run.ID, last))
+			if err != nil {
+				return nil, err
+			}
 			return []stepDispatchSpec{{
-				ID:    llmCompletionFollowUpStepID(run.ID, last),
+				ID:    stepID,
 				Kind:  initialStepKind(run),
 				Input: o.llmCompletionFollowUpStepInput(ctx, run, last),
 			}}, nil
 		}
 		if shouldDispatchNoActionableContinuationFollowUp(run, last, last.Output) {
+			stepID, err := o.uniqueDispatchStepID(ctx, run.ID, noActionableContinuationFollowUpStepID(run.ID, last))
+			if err != nil {
+				return nil, err
+			}
 			return []stepDispatchSpec{{
-				ID:    noActionableContinuationFollowUpStepID(run.ID, last),
+				ID:    stepID,
 				Kind:  initialStepKind(run),
 				Input: o.noActionableContinuationFollowUpStepInput(ctx, run, last),
 			}}, nil
@@ -1364,6 +1423,21 @@ func (o *RuntimeOrchestrator) dispatchStepSpecsWithWorkspace(ctx context.Context
 		return o.dispatchStepWithWorkspace(ctx, run, specs[0].ID, specs[0].Kind, specs[0].Input, workspace)
 	}
 	return o.dispatchGraphStepBatchWithWorkspace(ctx, run, specs, workspace)
+}
+
+func (o *RuntimeOrchestrator) dispatchUniqueStepWithWorkspace(
+	ctx context.Context,
+	run *runModel.Run,
+	baseStepID common.StepID,
+	kind string,
+	input map[string]any,
+	workspace *workspaceModel.Workspace,
+) error {
+	stepID, err := o.uniqueDispatchStepID(ctx, run.ID, baseStepID)
+	if err != nil {
+		return err
+	}
+	return o.dispatchStepWithWorkspace(ctx, run, stepID, kind, input, workspace)
 }
 
 func mergeResumeInput(specs []stepDispatchSpec, resumeInput map[string]any) {
