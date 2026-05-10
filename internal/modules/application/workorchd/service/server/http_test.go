@@ -867,7 +867,7 @@ func TestConsoleRoutesServeEmbeddedAssets(t *testing.T) {
 			t.Fatalf("console js body does not contain %q", want)
 		}
 	}
-	for _, want := range []string{"创建工作空间", "定义目标", "定义验收标准", "启动执行", "运行摘要", "最近运行"} {
+	for _, want := range []string{"创建工作空间", "定义目标", "定义验收标准", "启动执行", "运行摘要", "当前运行"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("console js body does not contain required business action %q", want)
 		}

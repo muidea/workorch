@@ -1799,6 +1799,19 @@ func TestModelWorkspaceCreatedEventRefreshesWorkspaceList(t *testing.T) {
 	}
 }
 
+func TestModelWorkspaceListChangedEventRefreshesWorkspaceList(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: "active"},
+	}})
+	m = asModel(next)
+
+	cmd := m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceListChanged})
+	if cmd == nil || !m.workspaceListRefreshInFlight {
+		t.Fatalf("workspace list changed event should refresh list: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
+	}
+}
+
 func TestModelWorkspaceListRefreshCoalescesWhileInFlight(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{

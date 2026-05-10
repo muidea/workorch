@@ -1061,6 +1061,8 @@ func (m *AppModel) markApprovalResolved(id common.ApprovalID) {
 
 func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 	switch evt.Type {
+	case backend.EventWorkspaceListChanged:
+		return m.requestWorkspaceListRefresh()
 	case backend.EventWorkspaceCreated:
 		m.upsertWorkspaceFromEvent(evt)
 		return m.requestWorkspaceListRefresh()

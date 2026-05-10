@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -617,26 +618,55 @@ func (b *remoteEventsBackend) Subscribe(ctx context.Context, handler EventHandle
 }
 
 func (b *remoteEventsBackend) streamEvents(ctx context.Context, handler EventHandler) {
+	backoff := 200 * time.Millisecond
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		connected := b.streamEventsOnce(ctx, handler)
+		if ctx.Err() != nil {
+			return
+		}
+		if connected {
+			backoff = 200 * time.Millisecond
+		} else if backoff < 2*time.Second {
+			backoff *= 2
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+	}
+}
+
+func (b *remoteEventsBackend) streamEventsOnce(ctx context.Context, handler EventHandler) bool {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.cl.BaseURL()+"/api/v1/workorch/events/stream", nil)
 	if err != nil {
-		return
+		return false
 	}
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := (&http.Client{}).Do(req)
 	if err != nil {
-		return
+		return false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return
+		return false
 	}
+	handler(ctx, Event{
+		Type: EventWorkspaceListChanged,
+		Payload: map[string]any{
+			"reason": "event_stream_connected",
+		},
+	})
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
 	var dataLines []string
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			return
+			return true
 		default:
 		}
 		line := scanner.Text()
@@ -649,6 +679,7 @@ func (b *remoteEventsBackend) streamEvents(ctx context.Context, handler EventHan
 			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
 		}
 	}
+	return true
 }
 
 func (b *remoteEventsBackend) dispatchSSEData(ctx context.Context, lines []string, handler EventHandler) {

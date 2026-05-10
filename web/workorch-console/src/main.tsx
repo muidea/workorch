@@ -232,11 +232,20 @@ function workspaceProjectionRun(snapshot?: WorkspaceSnapshot) {
   if (activeRun) {
     return activeRun;
   }
+  const outcomeRun = snapshot.runs?.find((item) => item.id === snapshot.outcome?.runId);
+  if (outcomeRun) {
+    return outcomeRun;
+  }
   const progressRun = snapshot.runs?.find((item) => item.id === snapshot.taskProgress?.runId);
   if (progressRun) {
     return progressRun;
   }
   return runStateSummary(snapshot.runs).latest;
+}
+
+function workspaceProjectionRunLabel(snapshot?: WorkspaceSnapshot) {
+  const run = workspaceProjectionRun(snapshot);
+  return run ? `${run.id} / ${stateLabel(run.state)}` : '-';
 }
 
 function isBlockedRunState(state?: string) {
@@ -2436,8 +2445,8 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
                 <Space direction="vertical" size="middle" style={{ width: '100%' }}>
                   <div className="workorch-card-summary">
                     <div>
-                      <Typography.Text type="secondary">最近运行（Run）</Typography.Text>
-                      <div>{runSummary.latest ? <Space>{shortId(runSummary.latest.id)}{stateTag(runSummary.latest.state)}</Space> : '-'}</div>
+                      <Typography.Text type="secondary">当前运行（Run）</Typography.Text>
+                      <div>{currentRun ? <Space>{shortId(currentRun.id)}{stateTag(currentRun.state)}</Space> : '-'}</div>
                     </div>
                     <div>
                       <Typography.Text type="secondary">治理阻塞</Typography.Text>
@@ -3675,7 +3684,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                 column={1}
                 size="small"
                 items={[
-                  { key: 'latestRun', label: '最近运行', children: runSummary.latest ? `${runSummary.latest.id} / ${stateLabel(runSummary.latest.state)}` : '-' },
+                  { key: 'latestRun', label: '当前运行', children: workspaceProjectionRunLabel(snapshot) },
                   { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : '-' }
                 ]}
               />
