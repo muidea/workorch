@@ -692,6 +692,16 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	input["failedStepOutput"] = compactStepOutputForLLMContext(failedStep.Output)
 	if diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"]); len(diagnostics) > 0 {
 		input["runtimeDiagnostics"] = cloneStepPayload(diagnostics)
+		if stringFromMap(diagnostics, "kind") == "dod_evidence_quality_gap" {
+			input["repairObjective"] = "produce_concrete_validation_evidence"
+			input["evidenceRepairRequired"] = true
+			input["verificationEvidenceGap"] = cloneStepPayload(diagnostics)
+			input["repairGuidance"] = []string{
+				"Do not repeat assessment-only validation.",
+				"Add or run concrete implementation and tests/assertions for the missing DoD evidence.",
+				"Rerun the targeted verification command and use that new step as evidence.",
+			}
+		}
 	}
 	if missingDoD := missingDoDItemsFromFailureOutput(failedStep.Output); len(missingDoD) > 0 {
 		input["missingDoDItems"] = missingDoD

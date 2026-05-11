@@ -908,23 +908,36 @@ func testMemoryRecallTraceRepositoryContract(t *testing.T, factory func() reposi
 	repo := factory()
 
 	item := &memorymodel.MemoryRecallTrace{
-		ID:                 common.MemoryRecallTraceID("memory-recall-contract"),
-		WorkspaceID:        common.WorkspaceID("ws-contract"),
-		RunID:              common.RunID("run-contract"),
-		StepID:             common.StepID("run-contract/step-1"),
-		GraphNodeID:        "node-planning",
-		Stage:              "planning",
-		Source:             "activation",
-		Policy:             "semantic_vector_search",
-		Status:             "selected",
-		ProviderID:         "embedding-contract",
-		Operation:          "embeddings",
-		QueryTextPreview:   "Goal: use memory",
-		QueryTextSha256:    "sha-contract",
-		MinScore:           0.1,
-		Limit:              8,
-		EmbeddingModel:     "embedding-model",
-		VectorDimension:    3,
+		ID:                     common.MemoryRecallTraceID("memory-recall-contract"),
+		WorkspaceID:            common.WorkspaceID("ws-contract"),
+		RunID:                  common.RunID("run-contract"),
+		StepID:                 common.StepID("run-contract/step-1"),
+		GraphNodeID:            "node-planning",
+		Stage:                  "planning",
+		Source:                 "activation",
+		Policy:                 "semantic_vector_search",
+		Status:                 "selected",
+		ProviderID:             "embedding-contract",
+		Operation:              "embeddings",
+		QueryTextPreview:       "Goal: use memory",
+		QueryTextSha256:        "sha-contract",
+		MinScore:               0.1,
+		Limit:                  8,
+		EmbeddingModel:         "embedding-model",
+		VectorDimension:        3,
+		RefreshSource:          "repair",
+		SelectionPolicyVersion: "workorch.memory.step_input.v1",
+		CandidateMemoryIDs:     []common.MemoryID{common.MemoryID("memory-contract"), common.MemoryID("memory-other")},
+		SelectedMemoryIDs:      []common.MemoryID{common.MemoryID("memory-contract")},
+		ExcludedMemoryIDs:      []common.MemoryID{common.MemoryID("memory-other")},
+		TypeQuota:              map[string]int{"run_summary": 1},
+		SelectionScores: []memorymodel.MemoryRecallSelectionScore{
+			{
+				ID:     common.MemoryID("memory-contract"),
+				Score:  100,
+				Reason: "current_run",
+			},
+		},
 		RetrievedMemoryIDs: []common.MemoryID{common.MemoryID("memory-contract")},
 		RetrievedMemoryHits: []memorymodel.MemoryRecallHit{
 			{
@@ -950,11 +963,22 @@ func testMemoryRecallTraceRepositoryContract(t *testing.T, factory func() reposi
 	}
 	got.RetrievedMemoryIDs[0] = common.MemoryID("mutated")
 	got.RetrievedMemoryHits[0].Summary = "mutated"
+	got.CandidateMemoryIDs[0] = common.MemoryID("mutated")
+	got.SelectedMemoryIDs[0] = common.MemoryID("mutated")
+	got.ExcludedMemoryIDs[0] = common.MemoryID("mutated")
+	got.TypeQuota["run_summary"] = 9
+	got.SelectionScores[0].Score = 9
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get memory recall trace fresh: %v", err)
 	}
-	if fresh.RetrievedMemoryIDs[0] != "memory-contract" || fresh.RetrievedMemoryHits[0].Summary != "contract memory" {
+	if fresh.RetrievedMemoryIDs[0] != "memory-contract" ||
+		fresh.RetrievedMemoryHits[0].Summary != "contract memory" ||
+		fresh.CandidateMemoryIDs[0] != "memory-contract" ||
+		fresh.SelectedMemoryIDs[0] != "memory-contract" ||
+		fresh.ExcludedMemoryIDs[0] != "memory-other" ||
+		fresh.TypeQuota["run_summary"] != 1 ||
+		fresh.SelectionScores[0].Score != 100 {
 		t.Fatalf("memory recall clone isolation failed: %+v", fresh)
 	}
 

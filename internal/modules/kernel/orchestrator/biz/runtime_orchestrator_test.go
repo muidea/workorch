@@ -4280,6 +4280,177 @@ func TestRuntimeOrchestrator_ExecutionContextPackageIncludesRecentFailureSummary
 	}
 }
 
+func TestRuntimeOrchestrator_ExecutionContextPackageRefreshesCurrentRunHighValueMemory(t *testing.T) {
+	ctx := context.Background()
+	memoryRepo := memory.NewMemoryItemRepository()
+	traceRepo := memory.NewMemoryRecallTraceRepository()
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{
+			MemoryItems:        memoryRepo,
+			MemoryRecallTraces: traceRepo,
+		},
+	}
+	workspaceID := common.WorkspaceID("ws-context-package-memory-refresh")
+	runID := common.RunID("run-context-package-memory-refresh")
+	oldRunID := common.RunID("run-context-package-memory-old")
+	for idx := 1; idx <= 4; idx++ {
+		if err := memoryRepo.Create(ctx, &memorymodel.MemoryItem{
+			ID:          common.MemoryID(fmt.Sprintf("%s/memory/old-summary-%d", oldRunID, idx)),
+			WorkspaceID: workspaceID,
+			RunID:       oldRunID,
+			SourceType:  memorycommon.MemorySourceRun,
+			SourceRef:   string(oldRunID),
+			MemoryType:  memorycommon.MemoryTypeRunSummary,
+			Summary:     fmt.Sprintf("old process summary %d", idx),
+			Content:     "old runtime process summary",
+			Importance:  90,
+			Confidence:  90,
+			Visibility:  "workspace",
+		}); err != nil {
+			t.Fatalf("seed old memory %d: %v", idx, err)
+		}
+	}
+	currentMemories := []*memorymodel.MemoryItem{
+		{
+			ID:          common.MemoryID(string(runID) + "/memory/dod-feedback"),
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			SourceType:  memorycommon.MemorySourceRun,
+			SourceRef:   string(runID) + "/assessment",
+			MemoryType:  memorycommon.MemoryTypeDoDFeedback,
+			Summary:     "DoD gaps require tests",
+			Content:     "DoD gaps: missing verification evidence.",
+			Importance:  50,
+			Confidence:  50,
+			Visibility:  "workspace",
+		},
+		{
+			ID:          common.MemoryID(string(runID) + "/memory/execution-lesson"),
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			SourceType:  memorycommon.MemorySourceRun,
+			SourceRef:   string(runID) + "/repair",
+			MemoryType:  memorycommon.MemoryTypeExecutionLesson,
+			Summary:     "Repair must add verification",
+			Content:     "Next repair should produce tests and evidence.",
+			Importance:  50,
+			Confidence:  50,
+			Visibility:  "workspace",
+		},
+	}
+	for _, item := range currentMemories {
+		if err := memoryRepo.Create(ctx, item); err != nil {
+			t.Fatalf("seed current memory %s: %v", item.ID, err)
+		}
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		ExecutionContext: map[string]any{
+			"memories": []map[string]any{
+				{
+					"id":         string(oldRunID) + "/memory/activation-only",
+					"runId":      string(oldRunID),
+					"memoryType": memorycommon.MemoryTypeRunSummary,
+					"summary":    "activation old summary",
+				},
+			},
+			"memoryRetrieval": map[string]any{
+				"policy": "activation_static",
+				"status": "selected",
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeySoulStage:             soulStageExecution,
+			stepInputKeyRuntimeRepairFollowUp: true,
+		},
+	}
+
+	orch.enrichLLMStepInputContext(ctx, run, step, nil)
+
+	pkg := mapFromValue(step.Input[stepInputKeyExecutionContextPackage])
+	selected := mapFromValue(pkg["selectedContext"])
+	memories := mapSliceFromValue(selected["memories"])
+	if !memoryContextContains(memories, string(runID)+"/memory/dod-feedback") ||
+		!memoryContextContains(memories, string(runID)+"/memory/execution-lesson") {
+		t.Fatalf("selected memories = %+v, want current run high-value memories", memories)
+	}
+	oldRunSummaryCount := 0
+	for _, item := range memories {
+		if item["runId"] == string(oldRunID) && item["memoryType"] == memorycommon.MemoryTypeRunSummary {
+			oldRunSummaryCount++
+		}
+	}
+	if oldRunSummaryCount > 1 {
+		t.Fatalf("selected memories = %+v, want at most one old run_summary", memories)
+	}
+	retrieval := mapFromValue(selected["memoryRetrieval"])
+	if retrieval["policy"] != stepInputMemorySelectionPolicy || retrieval["refreshSource"] != "repair" {
+		t.Fatalf("memoryRetrieval = %+v, want dynamic repair refresh", retrieval)
+	}
+	trace, err := traceRepo.Get(ctx, common.MemoryRecallTraceID(string(step.ID)+"/memory-recall/step-input"))
+	if err != nil {
+		t.Fatalf("get recall trace: %v", err)
+	}
+	if !memoryIDsContain(trace.RetrievedMemoryIDs, common.MemoryID(string(runID)+"/memory/dod-feedback")) {
+		t.Fatalf("trace retrieved ids = %+v, want current dod feedback", trace.RetrievedMemoryIDs)
+	}
+	if trace.RefreshSource != "repair" ||
+		trace.SelectionPolicyVersion != stepInputMemorySelectionVersion ||
+		!memoryIDsContain(trace.CandidateMemoryIDs, common.MemoryID(string(runID)+"/memory/dod-feedback")) ||
+		!memoryIDsContain(trace.SelectedMemoryIDs, common.MemoryID(string(runID)+"/memory/dod-feedback")) ||
+		len(trace.ExcludedMemoryIDs) == 0 ||
+		trace.TypeQuota[memorycommon.MemoryTypeRunSummary] != 1 ||
+		len(trace.SelectionScores) == 0 {
+		t.Fatalf("trace selection fields = %+v, want structured selection evidence", trace)
+	}
+}
+
+func TestStepInputMemorySelectionDowngradesSupersededRunMemory(t *testing.T) {
+	currentRunID := common.RunID("run-memory-selection-current")
+	completedRunID := common.RunID("run-memory-selection-completed")
+	supersededRunID := common.RunID("run-memory-selection-superseded")
+	selected, candidates, _ := selectStepInputMemoryItems([]*memorymodel.MemoryItem{
+		{
+			ID:         "memory-superseded-summary",
+			RunID:      supersededRunID,
+			MemoryType: memorycommon.MemoryTypeRunSummary,
+			Summary:    "superseded summary",
+			Importance: 90,
+			Confidence: 90,
+			Visibility: "workspace",
+		},
+		{
+			ID:         "memory-completed-summary",
+			RunID:      completedRunID,
+			MemoryType: memorycommon.MemoryTypeRunSummary,
+			Summary:    "completed summary",
+			Importance: 90,
+			Confidence: 90,
+			Visibility: "workspace",
+		},
+	}, currentRunID, map[common.RunID]common.RunState{
+		completedRunID:  common.RunStateCompleted,
+		supersededRunID: common.RunStateSuperseded,
+	}, stepInputMemoryLimit)
+
+	if len(selected) != 1 || selected[0].RunID != completedRunID {
+		t.Fatalf("selected = %+v, want completed run summary over superseded run summary", selected)
+	}
+	if len(candidates) != 2 || candidates[0].RunID != completedRunID {
+		t.Fatalf("candidates = %+v, want completed run ranked before superseded run", candidates)
+	}
+	reason := stepInputMemoryScoreReason(candidates[1], currentRunID, map[common.RunID]common.RunState{supersededRunID: common.RunStateSuperseded})
+	if !strings.Contains(reason, "run_state=superseded") || !strings.Contains(reason, "run_state_downgraded") {
+		t.Fatalf("reason = %q, want superseded run downgrade explanation", reason)
+	}
+}
+
 func TestRuntimeOrchestrator_ExecutionContextPackageSkipsInitialStepFailureHistoryRead(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -6153,6 +6324,123 @@ func TestRuntimeOrchestrator_RunSummaryMemoryUsesDoDAssessmentSummary(t *testing
 	}
 }
 
+func TestRuntimeOrchestrator_DoDFeedbackMemoryCapturesAssessmentGaps(t *testing.T) {
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_dod_assessment",
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": false,
+			"summary":   "DoD still lacks verification evidence",
+			"items": []map[string]any{
+				{
+					"item":   "streaming usage is verified",
+					"state":  "failed",
+					"reason": "no stream test evidence",
+				},
+				{
+					"item":         "non-streaming usage is verified",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run/verify"},
+				},
+			},
+		},
+	}
+
+	requests := runtimeMemoryWriteRequestsMust(t, output)
+	if !memoryWriteRequestContains(requests, memorycommon.MemoryTypeDoDFeedback, "streaming usage is verified") {
+		t.Fatalf("memory requests = %+v, want dod_feedback gap", requests)
+	}
+}
+
+func TestRuntimeOrchestrator_AcceptedInputMemoryWritesCaptureSkillSoulToolContext(t *testing.T) {
+	runID := common.RunID("run-accepted-input-memory")
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: "ws-accepted-input-memory",
+		ExecutionContext: map[string]any{
+			"soul": map[string]any{
+				"id":               "soul-software-dev-execution",
+				"name":             "software execution",
+				"description":      "execute implementation safely",
+				"allowedToolKinds": []string{"shell/command", "patch/apply"},
+			},
+			"soulRouting": map[string]any{
+				"policy": "workspace_stage_soul_routing",
+			},
+			"mcpSelection": map[string]any{
+				"autoBoundMCPServerIds": []string{"mcp-code"},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/step-1"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeySoulStage: soulStageExecution,
+			stepInputKeyExecutionContextPackage: map[string]any{
+				"selectedContext": map[string]any{
+					"skills": []map[string]any{
+						{
+							"id":                "skill-go",
+							"description":       "Go implementation workflow",
+							"requiredToolKinds": []string{"shell/command"},
+							"constraints":       []string{"run targeted tests"},
+						},
+					},
+					"mcpServers": []map[string]any{
+						{"id": "mcp-code", "transport": "stdio"},
+					},
+					"mcpCapabilities": []map[string]any{
+						{"id": "cap-read", "kind": "resource"},
+					},
+				},
+			},
+		},
+	}
+
+	requests := acceptedInputMemoryWriteRequests(run, step)
+	if !memoryWriteRequestContains(requests, memorycommon.MemoryTypeSkillFeedback, "skill-go") ||
+		!memoryWriteRequestContains(requests, memorycommon.MemoryTypeToolFeedback, "mcp-code") ||
+		!memoryWriteRequestContains(requests, memorycommon.MemoryTypeProjectContext, "soul-software-dev-execution") {
+		t.Fatalf("accepted input memory requests = %+v, want skill/tool/soul context", requests)
+	}
+}
+
+func TestRuntimeOrchestrator_RepairOutputMemoryWritesCaptureExecutionLesson(t *testing.T) {
+	runID := common.RunID("run-repair-lesson-memory")
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/zz-llm-repair-failed-1"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  2,
+			"failedStepId":                    string(runID) + "/block/test",
+			"failureReason":                   "go test failed",
+			failureOutputKeyClass:             failureClassShellCommand,
+			failureOutputKeySignature:         "kind=shell/command|cmd=go test",
+			"missingDoDItems": []map[string]any{
+				{"item": "streaming usage verified"},
+			},
+		},
+	}
+	output := map[string]any{
+		"status":  "completed",
+		"stage":   "llm_execution_graph_repair",
+		"summary": "Repair will add missing stream tests",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{"id": "patch-tests"}},
+		},
+	}
+
+	requests := appendNecessaryOutputMemoryWriteRequests(nil, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-lesson-memory"}, step, output)
+	if !memoryWriteRequestContains(requests, memorycommon.MemoryTypeExecutionLesson, "streaming usage verified") ||
+		!memoryWriteRequestContains(requests, memorycommon.MemoryTypeExecutionLesson, "go test failed") {
+		t.Fatalf("repair memory requests = %+v, want execution lesson with failure and missing DoD context", requests)
+	}
+}
+
 func TestRuntimeOrchestrator_OptionalRunSummaryMemoryDoesNotRequireRepository(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{}
@@ -6333,12 +6621,12 @@ func TestRuntimeOrchestrator_FiltersDisallowedRuntimeMemoryWrites(t *testing.T) 
 	if err != nil {
 		t.Fatalf("list memory items: %v", err)
 	}
-	if len(items) != 1 {
-		t.Fatalf("memory items = %+v, want only one allowed write", items)
+	if len(items) != 2 {
+		t.Fatalf("memory items = %+v, want decision and project context writes", items)
 	}
-	if items[0].MemoryType != memorycommon.MemoryTypeProjectContext ||
-		items[0].Summary != "confirmed workspace convention" {
-		t.Fatalf("memory item = %+v, want persisted project context only", items[0])
+	if !hasMemoryItem(items, runID, memorycommon.MemoryTypeDecision, "approval transcript") ||
+		!hasMemoryItem(items, runID, memorycommon.MemoryTypeProjectContext, "confirmed workspace convention") {
+		t.Fatalf("memory items = %+v, want decision and project context only", items)
 	}
 }
 
@@ -8764,6 +9052,110 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationDispatchesOneCorrect
 	}
 }
 
+func TestRuntimeOrchestrator_AssessmentOnlyIgnoresGraphWhenAssessmentIsPresent(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	var assessmentOnlySeen bool
+	var correctionSeen bool
+	runtime := &stubRuntimeAdapter{
+		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			if boolValue(request.Input[stepInputKeyAssessmentOnly]) {
+				assessmentOnlySeen = true
+				if boolValue(request.Input["assessmentOnlyContractCorrection"]) {
+					correctionSeen = true
+				}
+				return map[string]any{
+					"status": "completed",
+					stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+						{ID: "must_not_execute", Kind: "graph/mock"},
+					}},
+					stepOutputKeyDoDAssessment: map[string]any{
+						"satisfied":   true,
+						"summary":     "assessment-only completed despite ignored graph",
+						"goalOutcome": "assessment-only completed despite ignored graph",
+						"items": []map[string]any{{
+							"item":         "contract corrected",
+							"state":        "satisfied",
+							"evidenceRefs": []string{string(request.StepID)},
+						}},
+					},
+				}, nil
+			}
+			if boolValue(request.Input["graphFollowUp"]) {
+				return map[string]any{
+					"status": "completed",
+					stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+						{ID: runtimeChildID(request.StepID, "verify"), Kind: "graph/mock"},
+					}},
+				}, nil
+			}
+			if request.Kind == "graph/mock" {
+				return map[string]any{"status": "completed", "stdout": "graph node completed"}, nil
+			}
+			return map[string]any{
+				"status": "completed",
+				stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+					{ID: "inspect", Kind: "graph/mock"},
+				}},
+			}, nil
+		},
+	}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-assessment-only-ignores-graph-with-assessment")
+	runID := common.RunID("run-assessment-only-ignores-graph-with-assessment")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-assessment-only-ignores-graph-with-assessment"),
+		State:           common.RunStateCreated,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	if !assessmentOnlySeen {
+		t.Fatalf("assessment-only follow-up was not reached")
+	}
+	if correctionSeen {
+		t.Fatalf("assessment-only correction should not be dispatched when a dodAssessment is present")
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		steps, _ := stepRepo.ListByRun(ctx, runID)
+		t.Fatalf("run = %+v steps=%+v, want completed after ignoring assessment-only graph", runItem, steps)
+	}
+	steps, err := stepRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	var violationMarked bool
+	for _, step := range steps {
+		if strings.Contains(string(step.ID), "must_not_execute") {
+			t.Fatalf("steps = %+v, assessment-only executionGraph must not execute", steps)
+		}
+		if boolValue(step.Output["assessmentOnlyContractViolation"]) && boolValue(step.Output["ignoredExecutionGraph"]) {
+			violationMarked = true
+		}
+	}
+	if !violationMarked {
+		t.Fatalf("steps = %+v, want ignored graph contract marker on assessment step", steps)
+	}
+}
+
 func TestRuntimeOrchestrator_AssessmentOnlyContractViolationConvertsRepeatedGraphToRepair(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -9326,6 +9718,18 @@ func TestDoDAssessmentEvidenceQualityRejectsInconclusiveStepEvidence(t *testing.
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "inconclusive") || !strings.Contains(err.Error(), string(stepID)) {
 		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want inconclusive evidence rejection", err)
+	}
+	var diagnostic runtimeFailureDiagnosticError
+	if !errors.As(err, &diagnostic) {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %T, want runtime diagnostics", err)
+	}
+	diagnostics := diagnostic.RuntimeFailureDiagnostics()
+	if stringFromMap(diagnostics, "kind") != "dod_evidence_quality_gap" {
+		t.Fatalf("diagnostics = %+v, want dod_evidence_quality_gap", diagnostics)
+	}
+	missing := mapSliceFromValue(diagnostics["missingDoDItems"])
+	if len(missing) != 1 || missing[0]["source"] != "evidenceQuality" || missing[0]["state"] != "failed" {
+		t.Fatalf("missingDoDItems = %+v, want failed evidence quality gap", missing)
 	}
 }
 
@@ -13157,6 +13561,42 @@ func hasRunSummaryContent(items []*memorymodel.MemoryItem, runID common.RunID, p
 			}
 		}
 		if !missing {
+			return true
+		}
+	}
+	return false
+}
+
+func memoryContextContains(items []map[string]any, id string) bool {
+	for _, item := range items {
+		if item != nil && item["id"] == id {
+			return true
+		}
+	}
+	return false
+}
+
+func memoryIDsContain(items []common.MemoryID, id common.MemoryID) bool {
+	for _, item := range items {
+		if item == id {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeMemoryWriteRequestsMust(t *testing.T, output map[string]any) []runtimeMemoryWriteRequest {
+	t.Helper()
+	requests, err := runtimeMemoryWriteRequests(output)
+	if err != nil {
+		t.Fatalf("runtimeMemoryWriteRequests: %v", err)
+	}
+	return requests
+}
+
+func memoryWriteRequestContains(items []runtimeMemoryWriteRequest, memoryType string, contentPart string) bool {
+	for _, item := range items {
+		if item.MemoryType == memoryType && strings.Contains(item.Content, contentPart) {
 			return true
 		}
 	}

@@ -16,6 +16,35 @@ type runtimeEvidenceQuality struct {
 	Tags     []string
 }
 
+type doDAssessmentEvidenceQualityError struct {
+	cause error
+	items []map[string]any
+}
+
+func (e *doDAssessmentEvidenceQualityError) Error() string {
+	if e == nil || e.cause == nil {
+		return ""
+	}
+	return e.cause.Error()
+}
+
+func (e *doDAssessmentEvidenceQualityError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+func (e *doDAssessmentEvidenceQualityError) RuntimeFailureDiagnostics() map[string]any {
+	if e == nil || len(e.items) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"kind":            "dod_evidence_quality_gap",
+		"missingDoDItems": e.items,
+	}
+}
+
 func runtimeStepEvidenceQuality(run *runModel.Run, step *runModel.Step, state common.ValidationResultState, output map[string]any) runtimeEvidenceQuality {
 	if state == common.ValidationResultStateFailed {
 		return runtimeEvidenceQuality{Quality: common.EvidenceQualityInvalid, Reason: "runtime step failed"}
@@ -43,7 +72,25 @@ func (o *RuntimeOrchestrator) validateDoDAssessmentEvidenceQuality(ctx context.C
 			if !ok || validationEvidenceCanSatisfyDoD(verdict) {
 				continue
 			}
-			return fmt.Errorf("%w: satisfied dodAssessment item %q references %s evidence %q: %s", common.ErrInvalidArgument, strings.TrimSpace(stringFromMap(item, "item")), verdict.Quality, ref, strings.TrimSpace(verdict.Reason))
+			itemName := strings.TrimSpace(stringFromMap(item, "item"))
+			reason := strings.TrimSpace(verdict.Reason)
+			cause := fmt.Errorf("%w: satisfied dodAssessment item %q references %s evidence %q: %s", common.ErrInvalidArgument, itemName, verdict.Quality, ref, reason)
+			return &doDAssessmentEvidenceQualityError{
+				cause: cause,
+				items: []map[string]any{{
+					"kind":         "leaf",
+					"item":         itemName,
+					"state":        "failed",
+					"source":       "evidenceQuality",
+					"evidenceRefs": []string{ref},
+					"reason":       firstNonEmptyString(reason, fmt.Sprintf("Referenced evidence quality is %s.", verdict.Quality)),
+					"impact":       "This DoD item cannot be marked satisfied until concrete verification evidence is produced.",
+					"suggestedNextActions": []string{
+						"Add or run effective verification that exercises this DoD item.",
+						"Replace weak, zero-work, or inconclusive evidence with a passing command that executes real assertions.",
+					},
+				}},
+			}
 		}
 	}
 	return nil

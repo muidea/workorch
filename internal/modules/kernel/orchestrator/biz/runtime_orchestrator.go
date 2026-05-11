@@ -1177,6 +1177,11 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 			output["ignoredExecutionGraphNodeCount"] = len(ignoredGraph.Nodes)
 			output["ignoredExecutionGraphReason"] = err.Error()
 			delete(output, stepOutputKeyExecutionGraph)
+			if doDAssessmentFromOutput(output) != nil {
+				step.Output = output
+				_ = o.steps.Update(ctx, step)
+				return false, nil
+			}
 			if !boolValue(step.Input["assessmentOnlyContractCorrection"]) {
 				output["contractCorrectionStepDispatched"] = true
 				step.Output = output

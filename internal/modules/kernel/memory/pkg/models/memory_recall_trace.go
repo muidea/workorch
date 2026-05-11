@@ -9,27 +9,40 @@ type MemoryRecallHit struct {
 	VectorDimension int
 }
 
+type MemoryRecallSelectionScore struct {
+	ID     common.MemoryID
+	Score  int
+	Reason string
+}
+
 type MemoryRecallTrace struct {
-	ID                  common.MemoryRecallTraceID
-	WorkspaceID         common.WorkspaceID
-	RunID               common.RunID
-	StepID              common.StepID
-	GraphNodeID         string
-	Stage               string
-	Source              string
-	Policy              string
-	Status              string
-	ProviderID          string
-	Operation           string
-	QueryTextPreview    string
-	QueryTextSha256     string
-	MinScore            float64
-	Limit               int
-	EmbeddingModel      string
-	VectorDimension     int
-	RetrievedMemoryIDs  []common.MemoryID
-	RetrievedMemoryHits []MemoryRecallHit
-	Reason              string
-	OccurredAt          string
-	EvidenceRef         string
+	ID                     common.MemoryRecallTraceID
+	WorkspaceID            common.WorkspaceID
+	RunID                  common.RunID
+	StepID                 common.StepID
+	GraphNodeID            string
+	Stage                  string
+	Source                 string
+	Policy                 string
+	Status                 string
+	ProviderID             string
+	Operation              string
+	QueryTextPreview       string
+	QueryTextSha256        string
+	MinScore               float64
+	Limit                  int
+	EmbeddingModel         string
+	VectorDimension        int
+	RefreshSource          string
+	SelectionPolicyVersion string
+	CandidateMemoryIDs     []common.MemoryID
+	SelectedMemoryIDs      []common.MemoryID
+	ExcludedMemoryIDs      []common.MemoryID
+	TypeQuota              map[string]int
+	SelectionScores        []MemoryRecallSelectionScore
+	RetrievedMemoryIDs     []common.MemoryID
+	RetrievedMemoryHits    []MemoryRecallHit
+	Reason                 string
+	OccurredAt             string
+	EvidenceRef            string
 }

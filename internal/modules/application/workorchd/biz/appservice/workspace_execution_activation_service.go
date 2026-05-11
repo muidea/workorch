@@ -1305,6 +1305,7 @@ func recordActivationMemoryRecallTrace(ctx context.Context, exports appbootstrap
 		Limit:               traceIntValue(retrieval["limit"]),
 		EmbeddingModel:      traceStringValue(retrieval["embeddingModel"]),
 		VectorDimension:     traceIntValue(retrieval["vectorDimension"]),
+		RefreshSource:       "activation",
 		RetrievedMemoryIDs:  traceMemoryIDs(retrieval["retrievedMemoryIds"]),
 		RetrievedMemoryHits: traceMemoryHits(retrieval["retrievedMemoryHits"]),
 		Reason:              traceStringValue(retrieval["reason"]),
@@ -1314,6 +1315,7 @@ func recordActivationMemoryRecallTrace(ctx context.Context, exports appbootstrap
 	if len(trace.RetrievedMemoryIDs) == 0 {
 		trace.RetrievedMemoryIDs = traceMemoryIDs(executionContext["memoryIds"])
 	}
+	trace.SelectedMemoryIDs = append([]common.MemoryID(nil), trace.RetrievedMemoryIDs...)
 	if err := exports.Repositories.MemoryRecallTraces.Upsert(ctx, trace); err != nil {
 		return err
 	}

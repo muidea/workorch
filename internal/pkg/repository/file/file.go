@@ -2384,6 +2384,24 @@ func cloneMemoryItem(item *memorymodel.MemoryItem) *memorymodel.MemoryItem {
 
 func cloneMemoryRecallTrace(item *memorymodel.MemoryRecallTrace) *memorymodel.MemoryRecallTrace {
 	cloned := *item
+	if item.CandidateMemoryIDs != nil {
+		cloned.CandidateMemoryIDs = append([]common.MemoryID(nil), item.CandidateMemoryIDs...)
+	}
+	if item.SelectedMemoryIDs != nil {
+		cloned.SelectedMemoryIDs = append([]common.MemoryID(nil), item.SelectedMemoryIDs...)
+	}
+	if item.ExcludedMemoryIDs != nil {
+		cloned.ExcludedMemoryIDs = append([]common.MemoryID(nil), item.ExcludedMemoryIDs...)
+	}
+	if item.TypeQuota != nil {
+		cloned.TypeQuota = map[string]int{}
+		for key, value := range item.TypeQuota {
+			cloned.TypeQuota[key] = value
+		}
+	}
+	if item.SelectionScores != nil {
+		cloned.SelectionScores = append([]memorymodel.MemoryRecallSelectionScore(nil), item.SelectionScores...)
+	}
 	if item.RetrievedMemoryIDs != nil {
 		cloned.RetrievedMemoryIDs = append([]common.MemoryID(nil), item.RetrievedMemoryIDs...)
 	}

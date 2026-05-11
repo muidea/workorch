@@ -1959,9 +1959,9 @@ func TestActivateWorkspaceExecutionWithBackendUsesSemanticMemoryRecall(t *testin
 	if stepInputTrace == nil ||
 		stepInputTrace.Status != "selected" ||
 		stepInputTrace.StepID == "" ||
-		len(stepInputTrace.RetrievedMemoryIDs) != 1 ||
-		stepInputTrace.RetrievedMemoryIDs[0] != "memory-semantic-match" {
-		t.Fatalf("memory recall traces = %+v, want selected step input trace", runSnapshot.MemoryRecallTraces)
+		stepInputTrace.Policy != "step_input_dynamic_workspace_memory" ||
+		!memoryRecallTraceContainsID(stepInputTrace, "memory-semantic-match") {
+		t.Fatalf("memory recall traces = %+v, want dynamic step input trace with semantic match refreshed", runSnapshot.MemoryRecallTraces)
 	}
 }
 
@@ -2026,11 +2026,24 @@ func TestActivateWorkspaceExecutionWithBackendReportsSemanticMemoryDegradation(t
 		t.Fatalf("memory recall traces = %+v, want degraded activation trace", runSnapshot.MemoryRecallTraces)
 	}
 	if stepInputTrace == nil ||
-		stepInputTrace.Status != "degraded" ||
+		stepInputTrace.Status != "selected" ||
 		stepInputTrace.StepID == "" ||
-		stepInputTrace.Reason == "" {
-		t.Fatalf("memory recall traces = %+v, want degraded step input trace", runSnapshot.MemoryRecallTraces)
+		stepInputTrace.Policy != "step_input_dynamic_workspace_memory" ||
+		!memoryRecallTraceContainsID(stepInputTrace, "memory-degraded-fallback-should-not-select") {
+		t.Fatalf("memory recall traces = %+v, want dynamic step input fallback trace after activation degradation", runSnapshot.MemoryRecallTraces)
 	}
+}
+
+func memoryRecallTraceContainsID(item *MemoryRecallTrace, id string) bool {
+	if item == nil {
+		return false
+	}
+	for _, memoryID := range item.RetrievedMemoryIDs {
+		if memoryID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func memoryRecallTraceBySource(items []MemoryRecallTrace, source string) *MemoryRecallTrace {

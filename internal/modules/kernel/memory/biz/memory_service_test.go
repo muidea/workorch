@@ -109,8 +109,8 @@ func TestServiceRejectsMemoryTypeNotAllowedForSource(t *testing.T) {
 	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryItemCommand{
 		MemoryID:    common.MemoryID("memory-source-type-invalid"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
-		SourceType:  modulecommon.MemorySourceRun,
-		SourceRef:   "run-1",
+		SourceType:  modulecommon.MemorySourceUser,
+		SourceRef:   "user-1",
 		MemoryType:  modulecommon.MemoryTypeDecision,
 		Summary:     "single decision text",
 	})

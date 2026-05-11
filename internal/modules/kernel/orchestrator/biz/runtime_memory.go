@@ -19,16 +19,6 @@ type runtimeMemoryWriteRequest struct {
 	Tags       []string
 }
 
-var runtimeMemoryLongTermPreferenceKeywords = []string{
-	"preference", "prefer", "default", "always", "habit", "convention", "policy",
-	"偏好", "默认", "习惯", "优先", "长期",
-}
-
-var runtimeMemoryConfirmedConventionKeywords = []string{
-	"confirmed", "agreed", "adopted", "convention", "rule", "guideline",
-	"已确认", "确认", "约定", "规范", "规则", "统一",
-}
-
 func (o *RuntimeOrchestrator) recordMemoryWrites(
 	ctx context.Context,
 	run *runModel.Run,
@@ -40,6 +30,8 @@ func (o *RuntimeOrchestrator) recordMemoryWrites(
 	if err != nil {
 		return nil, err
 	}
+	requests = appendNecessaryOutputMemoryWriteRequests(requests, run, step, output)
+	requests = append(requests, acceptedInputMemoryWriteRequests(run, step)...)
 	if len(requests) == 0 {
 		return nil, nil
 	}
@@ -151,31 +143,262 @@ func shouldPersistRuntimeMemoryWrite(request runtimeMemoryWriteRequest) bool {
 	if !memorycommon.IsWritableMemoryTypeForSource(memorycommon.MemorySourceRun, request.MemoryType) {
 		return false
 	}
-	if request.MemoryType != memorycommon.MemoryTypeProjectContext &&
-		request.MemoryType != memorycommon.MemoryTypeUserPreference {
-		return false
-	}
 	joinedTags := strings.ToLower(strings.Join(request.Tags, " "))
 	if memorycommon.ContainsSensitiveMemoryText(request.Summary, request.Content, joinedTags) {
 		return false
 	}
-	if request.MemoryType == memorycommon.MemoryTypeProjectContext {
-		return containsAnyKeyword(request.Summary, request.Content, joinedTags, runtimeMemoryConfirmedConventionKeywords)
-	}
-	return containsAnyKeyword(request.Summary, request.Content, joinedTags, runtimeMemoryLongTermPreferenceKeywords)
-}
-
-func containsAnyKeyword(summary string, content string, tags string, keywords []string) bool {
-	text := strings.ToLower(strings.TrimSpace(strings.Join([]string{summary, content, tags}, "\n")))
-	if text == "" {
+	switch request.MemoryType {
+	case memorycommon.MemoryTypeProjectContext:
+		return true
+	case memorycommon.MemoryTypeUserPreference:
+		return true
+	case memorycommon.MemoryTypeDoDFeedback,
+		memorycommon.MemoryTypeDecision,
+		memorycommon.MemoryTypeExecutionLesson,
+		memorycommon.MemoryTypeSkillFeedback,
+		memorycommon.MemoryTypeToolFeedback:
+		return true
+	default:
 		return false
 	}
-	for _, keyword := range keywords {
-		if strings.Contains(text, strings.ToLower(keyword)) {
-			return true
+}
+
+func appendNecessaryOutputMemoryWriteRequests(requests []runtimeMemoryWriteRequest, run *runModel.Run, step *runModel.Step, output map[string]any) []runtimeMemoryWriteRequest {
+	requests = appendRepairLessonMemoryWrite(requests, run, step, output)
+	requests = appendProviderRetryToolMemoryWrite(requests, run, step, output)
+	return requests
+}
+
+func appendRepairLessonMemoryWrite(requests []runtimeMemoryWriteRequest, _ *runModel.Run, step *runModel.Step, output map[string]any) []runtimeMemoryWriteRequest {
+	if step == nil || step.Input == nil || !boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) || hasMemoryWriteType(requests, memorycommon.MemoryTypeExecutionLesson) {
+		return requests
+	}
+	attempt := int(int64FromValue(step.Input[stepInputKeyRuntimeRepairAttempt]))
+	lines := []string{
+		fmt.Sprintf("Repair attempt: %d", attempt),
+	}
+	for _, key := range []string{
+		"failedStepId",
+		"failedStepKind",
+		"failureReason",
+		failureOutputKeyClass,
+		failureOutputKeySignature,
+		stepInputKeyRepairOfRootStepID,
+	} {
+		if value := strings.TrimSpace(memoryRecallTraceStringValue(step.Input[key])); value != "" {
+			lines = append(lines, fmt.Sprintf("%s: %s", key, value))
 		}
 	}
-	return false
+	for _, key := range []string{"stage", "status", "summary", "nextStep", "nextKind"} {
+		if value := strings.TrimSpace(stringFromMap(output, key)); value != "" {
+			lines = append(lines, fmt.Sprintf("output.%s: %s", key, value))
+		}
+	}
+	if missing := mapSliceFromValue(step.Input["missingDoDItems"]); len(missing) > 0 {
+		lines = append(lines, "missingDoDItems:")
+		for _, item := range limitedMapSlice(missing, 6) {
+			if name := strings.TrimSpace(stringFromMap(item, "item")); name != "" {
+				lines = append(lines, "- "+name)
+			}
+		}
+	}
+	if graph := mapFromValue(output[stepOutputKeyExecutionGraph]); len(graph) > 0 {
+		lines = append(lines, "output.executionGraph: present")
+	}
+	summary := strings.TrimSpace(stringFromMap(output, "summary"))
+	if summary == "" {
+		summary = "Runtime repair lesson captured"
+	}
+	return append(requests, runtimeMemoryWriteRequest{
+		MemoryType: memorycommon.MemoryTypeExecutionLesson,
+		Summary:    summary,
+		Content:    strings.Join(lines, "\n"),
+		Tags:       []string{"repair_loop", "necessary_output"},
+	})
+}
+
+func appendProviderRetryToolMemoryWrite(requests []runtimeMemoryWriteRequest, _ *runModel.Run, step *runModel.Step, output map[string]any) []runtimeMemoryWriteRequest {
+	if step == nil || step.Input == nil || !boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) || hasMemoryWriteType(requests, memorycommon.MemoryTypeToolFeedback) {
+		return requests
+	}
+	attempt := int(int64FromValue(step.Input[stepInputKeyProviderRetryAttempt]))
+	lines := []string{
+		fmt.Sprintf("Provider retry attempt: %d", attempt),
+	}
+	for _, key := range []string{"failedStepId", "failureReason", failureOutputKeyClass, failureOutputKeySignature} {
+		if value := strings.TrimSpace(memoryRecallTraceStringValue(step.Input[key])); value != "" {
+			lines = append(lines, fmt.Sprintf("%s: %s", key, value))
+		}
+	}
+	for _, key := range []string{"stage", "status", "summary"} {
+		if value := strings.TrimSpace(stringFromMap(output, key)); value != "" {
+			lines = append(lines, fmt.Sprintf("output.%s: %s", key, value))
+		}
+	}
+	return append(requests, runtimeMemoryWriteRequest{
+		MemoryType: memorycommon.MemoryTypeToolFeedback,
+		Summary:    "Provider retry outcome captured",
+		Content:    strings.Join(lines, "\n"),
+		Tags:       []string{"provider_retry", "tool_context", "necessary_output"},
+	})
+}
+
+func acceptedInputMemoryWriteRequests(run *runModel.Run, step *runModel.Step) []runtimeMemoryWriteRequest {
+	if run == nil || step == nil || step.Kind != llmWorkspaceExecutionStepKind {
+		return nil
+	}
+	pkg := mapFromValue(step.Input[stepInputKeyExecutionContextPackage])
+	selected := mapFromValue(pkg["selectedContext"])
+	ret := make([]runtimeMemoryWriteRequest, 0, 3)
+	if request, ok := acceptedSkillInputMemoryWriteRequest(run, step, selected); ok {
+		ret = append(ret, request)
+	}
+	if request, ok := acceptedToolInputMemoryWriteRequest(run, step, selected); ok {
+		ret = append(ret, request)
+	}
+	if request, ok := acceptedSoulPromptInputMemoryWriteRequest(run, step); ok {
+		ret = append(ret, request)
+	}
+	return ret
+}
+
+func acceptedSkillInputMemoryWriteRequest(run *runModel.Run, step *runModel.Step, selected map[string]any) (runtimeMemoryWriteRequest, bool) {
+	skills := compactSkillContexts(mapSliceFromValue(selected["skills"]))
+	if len(skills) == 0 {
+		skills = compactSkillContexts(mapSliceFromValue(run.ExecutionContext["skills"]))
+	}
+	if len(skills) == 0 {
+		return runtimeMemoryWriteRequest{}, false
+	}
+	ids := contextIDs(skills)
+	summary := "Accepted skill context"
+	if len(ids) > 0 {
+		summary = "Accepted skill context: " + strings.Join(ids, ", ")
+	}
+	lines := []string{
+		fmt.Sprintf("Stage: %s", firstNonEmptyString(stringFromMap(step.Input, stepInputKeySoulStage), stringFromMap(step.Output, "stage"), "unknown")),
+	}
+	for _, skill := range skills {
+		lines = append(lines, fmt.Sprintf(
+			"- %s: %s",
+			firstNonEmptyString(stringFromMap(skill, "id"), stringFromMap(skill, "name"), "unknown"),
+			firstNonEmptyString(stringFromMap(skill, "description"), stringFromMap(skill, "instruction"), "selected skill"),
+		))
+		if tools := stringSliceFromValue(skill["requiredToolKinds"]); len(tools) > 0 {
+			lines = append(lines, "  requiredToolKinds: "+strings.Join(tools, ", "))
+		}
+		if constraints := stringSliceFromValue(skill["constraints"]); len(constraints) > 0 {
+			lines = append(lines, "  constraints: "+strings.Join(constraints, "; "))
+		}
+	}
+	if selection := mapFromValue(run.ExecutionContext["skillSelection"]); len(selection) > 0 {
+		if reason := strings.TrimSpace(stringFromMap(selection, "reason")); reason != "" {
+			lines = append(lines, "Selection reason: "+reason)
+		}
+	}
+	return runtimeMemoryWriteRequest{
+		MemoryType: memorycommon.MemoryTypeSkillFeedback,
+		Summary:    summary,
+		Content:    strings.Join(lines, "\n"),
+		Tags:       []string{"accepted_input", "skill_context"},
+	}, true
+}
+
+func acceptedToolInputMemoryWriteRequest(run *runModel.Run, step *runModel.Step, selected map[string]any) (runtimeMemoryWriteRequest, bool) {
+	servers := compactMCPServerContexts(mapSliceFromValue(selected["mcpServers"]))
+	if len(servers) == 0 {
+		servers = compactMCPServerContexts(mapSliceFromValue(run.ExecutionContext["mcpServers"]))
+	}
+	capabilities := compactMCPCapabilityContexts(mapSliceFromValue(selected["mcpCapabilities"]))
+	if len(capabilities) == 0 {
+		capabilities = compactMCPCapabilityContexts(mapSliceFromValue(run.ExecutionContext["mcpCapabilities"]))
+	}
+	soul := mapFromValue(run.ExecutionContext["soul"])
+	toolKinds := stringSliceFromValue(soul["allowedToolKinds"])
+	if len(servers) == 0 && len(capabilities) == 0 && len(toolKinds) == 0 {
+		return runtimeMemoryWriteRequest{}, false
+	}
+	lines := []string{
+		fmt.Sprintf("Stage: %s", firstNonEmptyString(stringFromMap(step.Input, stepInputKeySoulStage), stringFromMap(step.Output, "stage"), "unknown")),
+	}
+	if len(toolKinds) > 0 {
+		lines = append(lines, "allowedToolKinds: "+strings.Join(toolKinds, ", "))
+	}
+	if ids := contextIDs(servers); len(ids) > 0 {
+		lines = append(lines, "mcpServers: "+strings.Join(ids, ", "))
+	}
+	if ids := contextIDs(capabilities); len(ids) > 0 {
+		lines = append(lines, "mcpCapabilities: "+strings.Join(ids, ", "))
+	}
+	if selection := mapFromValue(run.ExecutionContext["mcpSelection"]); len(selection) > 0 {
+		if auto := stringSliceFromValue(selection["autoBoundMCPServerIds"]); len(auto) > 0 {
+			lines = append(lines, "autoBoundMCPServerIds: "+strings.Join(auto, ", "))
+		}
+		if auto := stringSliceFromValue(selection["autoBoundCapabilityIds"]); len(auto) > 0 {
+			lines = append(lines, "autoBoundCapabilityIds: "+strings.Join(auto, ", "))
+		}
+	}
+	return runtimeMemoryWriteRequest{
+		MemoryType: memorycommon.MemoryTypeToolFeedback,
+		Summary:    "Accepted tool and MCP context",
+		Content:    strings.Join(lines, "\n"),
+		Tags:       []string{"accepted_input", "tool_context", "mcp_context"},
+	}, true
+}
+
+func acceptedSoulPromptInputMemoryWriteRequest(run *runModel.Run, step *runModel.Step) (runtimeMemoryWriteRequest, bool) {
+	soul := mapFromValue(run.ExecutionContext["soul"])
+	soulRouting := mapFromValue(run.ExecutionContext["soulRouting"])
+	stage := firstNonEmptyString(stringFromMap(step.Input, stepInputKeySoulStage), stringFromMap(step.Output, "stage"))
+	if len(soul) == 0 && len(soulRouting) == 0 {
+		return runtimeMemoryWriteRequest{}, false
+	}
+	lines := []string{}
+	if stage != "" {
+		lines = append(lines, "Stage: "+stage)
+	}
+	if id := strings.TrimSpace(stringFromMap(soul, "id")); id != "" {
+		lines = append(lines, "soulId: "+id)
+	}
+	if name := strings.TrimSpace(stringFromMap(soul, "name")); name != "" {
+		lines = append(lines, "soulName: "+name)
+	}
+	if description := strings.TrimSpace(stringFromMap(soul, "description")); description != "" {
+		lines = append(lines, "soulDescription: "+description)
+	}
+	if tools := stringSliceFromValue(soul["allowedToolKinds"]); len(tools) > 0 {
+		lines = append(lines, "allowedToolKinds: "+strings.Join(tools, ", "))
+	}
+	if len(soulRouting) > 0 {
+		lines = append(lines, "soulRoutingPolicy: accepted runtime stage routing; follow the current stage soul constraints.")
+	}
+	lines = append(lines, "promptPolicy: record only effective constraints and provenance, not the full prompt text.")
+	return runtimeMemoryWriteRequest{
+		MemoryType: memorycommon.MemoryTypeProjectContext,
+		Summary:    "Accepted Soul and prompt constraints",
+		Content:    strings.Join(lines, "\n"),
+		Tags:       []string{"accepted_input", "soul_context", "prompt_policy"},
+	}, true
+}
+
+func contextIDs(items []map[string]any) []string {
+	ret := make([]string, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		id := strings.TrimSpace(stringFromMap(item, "id"))
+		if id == "" {
+			id = strings.TrimSpace(stringFromMap(item, "name"))
+		}
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ret = append(ret, id)
+	}
+	return ret
 }
 
 func runtimeRunSummaryMemoryWrite(output map[string]any) []runtimeMemoryWriteRequest {
@@ -190,6 +413,7 @@ func appendRunSummaryMemoryWrite(requests []runtimeMemoryWriteRequest, output ma
 	if stage != "llm_dod_assessment" || hasRunSummaryMemoryWrite(requests) {
 		return requests
 	}
+	requests = appendDoDFeedbackMemoryWrite(requests, output)
 	summary := runSummaryMemorySummary(output)
 	if summary == "" {
 		return requests
@@ -199,6 +423,51 @@ func appendRunSummaryMemoryWrite(requests []runtimeMemoryWriteRequest, output ma
 		Summary:    summary,
 		Content:    runSummaryMemoryContent(output, summary),
 		Tags:       []string{"run_summary"},
+	})
+}
+
+func appendDoDFeedbackMemoryWrite(requests []runtimeMemoryWriteRequest, output map[string]any) []runtimeMemoryWriteRequest {
+	if hasDoDFeedbackMemoryWrite(requests) {
+		return requests
+	}
+	assessment := doDAssessmentFromOutput(output)
+	if assessment == nil {
+		return requests
+	}
+	items, ok := doDAssessmentItemMaps(assessment["items"])
+	if !ok || len(items) == 0 {
+		return requests
+	}
+	lines := make([]string, 0, len(items)+2)
+	for _, item := range items {
+		state := strings.ToLower(strings.TrimSpace(stringFromMap(item, "state")))
+		if state == "" || state == "satisfied" {
+			continue
+		}
+		name := strings.TrimSpace(stringFromMap(item, "item"))
+		if name == "" {
+			continue
+		}
+		reason := strings.TrimSpace(firstNonEmptyString(stringFromMap(item, "reason"), stringFromMap(item, "summary")))
+		if reason != "" {
+			lines = append(lines, fmt.Sprintf("- [%s] %s: %s", state, name, reason))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- [%s] %s", state, name))
+	}
+	if len(lines) == 0 {
+		return requests
+	}
+	summary := strings.TrimSpace(stringFromMap(assessment, "summary"))
+	if summary == "" {
+		summary = "DoD assessment feedback captured"
+	}
+	content := strings.Join(append([]string{summary, "DoD gaps:"}, lines...), "\n")
+	return append(requests, runtimeMemoryWriteRequest{
+		MemoryType: memorycommon.MemoryTypeDoDFeedback,
+		Summary:    summary,
+		Content:    content,
+		Tags:       []string{"dod_feedback", "repair_loop"},
 	})
 }
 
@@ -231,8 +500,16 @@ func runSummaryMemoryContent(output map[string]any, summary string) string {
 }
 
 func hasRunSummaryMemoryWrite(requests []runtimeMemoryWriteRequest) bool {
+	return hasMemoryWriteType(requests, memorycommon.MemoryTypeRunSummary)
+}
+
+func hasDoDFeedbackMemoryWrite(requests []runtimeMemoryWriteRequest) bool {
+	return hasMemoryWriteType(requests, memorycommon.MemoryTypeDoDFeedback)
+}
+
+func hasMemoryWriteType(requests []runtimeMemoryWriteRequest, memoryType string) bool {
 	for _, request := range requests {
-		if request.MemoryType == memorycommon.MemoryTypeRunSummary {
+		if request.MemoryType == memoryType {
 			return true
 		}
 	}

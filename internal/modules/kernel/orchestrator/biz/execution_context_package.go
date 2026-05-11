@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -20,6 +21,9 @@ const (
 	stepInputKeyExecutionContextPackage = "executionContextPackage"
 	executionContextPackageVersion      = "workorch.execution_context.v1"
 	executionContextPackageHistoryKey   = "workspaceHistoryChecked"
+	stepInputMemorySelectionPolicy      = "step_input_dynamic_workspace_memory"
+	stepInputMemorySelectionVersion     = "workorch.memory.step_input.v1"
+	stepInputMemoryLimit                = 8
 )
 
 func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run *runModel.Run, step *runModel.Step, workspace *workspaceModel.Workspace) {
@@ -57,11 +61,13 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		deliverables       []map[string]any
 		failures           []map[string]any
 		currentGovernance  []map[string]any
+		refreshedMemories  []map[string]any
+		memoryRetrieval    map[string]any
 		acceptedResultRead bool
 		deliverablesRead   bool
 		wg                 sync.WaitGroup
 	)
-	wg.Add(5)
+	wg.Add(6)
 	go func() {
 		defer wg.Done()
 		manifest = o.executionContextWorkspaceFileManifest(ctx, run, step, workspace)
@@ -94,6 +100,10 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		defer wg.Done()
 		currentGovernance = o.currentRunGovernanceHistory(ctx, run)
 	}()
+	go func() {
+		defer wg.Done()
+		refreshedMemories, memoryRetrieval = o.refreshedStepInputMemoryContext(ctx, run, step)
+	}()
 	wg.Wait()
 
 	if len(manifest) > 0 {
@@ -112,9 +122,19 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	if len(failures) > 0 {
 		ret["recentFailureSummary"] = failures
 	}
-	if selected := stableContext.selectedContext; len(selected) > 0 {
-		ret["selectedContext"] = selected
-	} else if selected := selectedContextPackage(executionContext); len(selected) > 0 {
+	selected := map[string]any{}
+	if len(stableContext.selectedContext) > 0 {
+		selected = cloneStepPayload(stableContext.selectedContext)
+	} else if base := selectedContextPackage(executionContext); len(base) > 0 {
+		selected = base
+	}
+	if len(refreshedMemories) > 0 {
+		selected["memories"] = refreshedMemories
+	}
+	if len(memoryRetrieval) > 0 {
+		selected["memoryRetrieval"] = memoryRetrieval
+	}
+	if len(selected) > 0 {
 		ret["selectedContext"] = selected
 	}
 	governanceHistory := mapSliceFromValue(executionContext["governanceHistory"])
@@ -125,6 +145,307 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		ret["governanceHistory"] = redactSensitiveMapSlice(limitedMapSlice(governanceHistory, 6))
 	}
 	return ret
+}
+
+func (o *RuntimeOrchestrator) refreshedStepInputMemoryContext(ctx context.Context, run *runModel.Run, step *runModel.Step) ([]map[string]any, map[string]any) {
+	if o == nil || o.evidence.MemoryItems == nil || run == nil || run.WorkspaceID == "" {
+		return nil, nil
+	}
+	items, err := o.evidence.MemoryItems.ListByWorkspaceID(ctx, run.WorkspaceID)
+	runStates := o.stepInputMemoryRunStates(ctx, run.WorkspaceID)
+	refreshSource := stepInputMemoryRefreshSource(step)
+	if err != nil {
+		return nil, map[string]any{
+			"policy":                 stepInputMemorySelectionPolicy,
+			"selectionPolicyVersion": stepInputMemorySelectionVersion,
+			"status":                 "degraded",
+			"refreshSource":          refreshSource,
+			"reason":                 err.Error(),
+		}
+	}
+	selected, candidates, excluded := selectStepInputMemoryItems(items, run.ID, runStates, stepInputMemoryLimit)
+	if len(selected) == 0 {
+		return nil, nil
+	}
+	contexts := memoryItemContextMaps(selected)
+	return contexts, map[string]any{
+		"policy":                 stepInputMemorySelectionPolicy,
+		"selectionPolicyVersion": stepInputMemorySelectionVersion,
+		"status":                 "selected",
+		"refreshSource":          refreshSource,
+		"limit":                  stepInputMemoryLimit,
+		"retrievedMemoryIds":     memoryModelItemIDs(selected),
+		"retrievedMemoryHits":    memoryModelRetrievalHits(selected),
+		"candidateMemoryIds":     memoryModelItemIDs(candidates),
+		"selectedMemoryIds":      memoryModelItemIDs(selected),
+		"excludedMemoryIds":      memoryModelItemIDs(excluded),
+		"typeQuota":              stepInputMemoryTypeQuota(),
+		"selectionScores":        memoryModelSelectionScores(candidates, run.ID, runStates),
+		"reason": fmt.Sprintf(
+			"refreshSource=%s policy=%s selected=%d candidates=%d excluded=%d",
+			refreshSource,
+			stepInputMemorySelectionVersion,
+			len(selected),
+			len(candidates),
+			len(excluded),
+		),
+	}
+}
+
+func (o *RuntimeOrchestrator) stepInputMemoryRunStates(ctx context.Context, workspaceID common.WorkspaceID) map[common.RunID]common.RunState {
+	if o == nil || o.runs == nil || workspaceID == "" {
+		return nil
+	}
+	runs, err := o.runs.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil || len(runs) == 0 {
+		return nil
+	}
+	ret := make(map[common.RunID]common.RunState, len(runs))
+	for _, run := range runs {
+		if run == nil || run.ID == "" {
+			continue
+		}
+		ret[run.ID] = run.State
+	}
+	return ret
+}
+
+func stepInputMemoryRefreshSource(step *runModel.Step) string {
+	if step == nil || step.Input == nil {
+		return "step_input"
+	}
+	if boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) {
+		return "repair"
+	}
+	if boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) {
+		return "provider_retry"
+	}
+	if boolValue(step.Input[stepInputKeyAssessmentOnly]) || boolValue(step.Input["providerRetryAssessmentOnly"]) {
+		return "assessment"
+	}
+	if stage := strings.TrimSpace(stringFromMap(step.Input, stepInputKeySoulStage)); stage != "" {
+		return stage
+	}
+	return "step_input"
+}
+
+func selectStepInputMemoryItems(items []*memorymodel.MemoryItem, currentRunID common.RunID, runStates map[common.RunID]common.RunState, limit int) ([]*memorymodel.MemoryItem, []*memorymodel.MemoryItem, []*memorymodel.MemoryItem) {
+	if limit <= 0 || len(items) == 0 {
+		return nil, nil, nil
+	}
+	candidates := make([]*memorymodel.MemoryItem, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		if item == nil || item.ID == "" {
+			continue
+		}
+		key := memorySelectionDuplicateKey(item)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		candidates = append(candidates, item)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		left := stepInputMemoryScore(candidates[i], currentRunID, runStates)
+		right := stepInputMemoryScore(candidates[j], currentRunID, runStates)
+		if left != right {
+			return left > right
+		}
+		return string(candidates[i].ID) > string(candidates[j].ID)
+	})
+	quota := stepInputMemoryTypeQuota()
+	selected := make([]*memorymodel.MemoryItem, 0, min(len(candidates), limit))
+	selectedIDs := map[common.MemoryID]struct{}{}
+	typeCounts := map[string]int{}
+	for _, item := range candidates {
+		if len(selected) >= limit {
+			break
+		}
+		memoryType := strings.TrimSpace(item.MemoryType)
+		if maxForType, ok := quota[memoryType]; ok && typeCounts[memoryType] >= maxForType {
+			continue
+		}
+		selected = append(selected, item)
+		selectedIDs[item.ID] = struct{}{}
+		typeCounts[memoryType]++
+	}
+	for _, item := range candidates {
+		if len(selected) >= limit {
+			break
+		}
+		if _, ok := selectedIDs[item.ID]; ok {
+			continue
+		}
+		if _, ok := quota[strings.TrimSpace(item.MemoryType)]; ok {
+			continue
+		}
+		selected = append(selected, item)
+		selectedIDs[item.ID] = struct{}{}
+	}
+	excluded := make([]*memorymodel.MemoryItem, 0, len(candidates)-len(selected))
+	for _, item := range candidates {
+		if _, ok := selectedIDs[item.ID]; ok {
+			continue
+		}
+		excluded = append(excluded, item)
+	}
+	return selected, candidates, excluded
+}
+
+func stepInputMemoryTypeQuota() map[string]int {
+	return map[string]int{
+		memorycommon.MemoryTypeDoDFeedback:     2,
+		memorycommon.MemoryTypeExecutionLesson: 2,
+		memorycommon.MemoryTypeProjectContext:  2,
+		memorycommon.MemoryTypeSkillFeedback:   1,
+		memorycommon.MemoryTypeToolFeedback:    1,
+		memorycommon.MemoryTypeDecision:        1,
+		memorycommon.MemoryTypeRunSummary:      1,
+	}
+}
+
+func stepInputMemoryScore(item *memorymodel.MemoryItem, currentRunID common.RunID, runStates map[common.RunID]common.RunState) int {
+	if item == nil {
+		return 0
+	}
+	score := item.Importance*10 + item.Confidence
+	if item.RunID == currentRunID && currentRunID != "" {
+		score += 10000
+	}
+	switch strings.TrimSpace(item.MemoryType) {
+	case memorycommon.MemoryTypeDoDFeedback:
+		score += 6000
+	case memorycommon.MemoryTypeExecutionLesson:
+		score += 5500
+	case memorycommon.MemoryTypeProjectContext:
+		score += 5000
+	case memorycommon.MemoryTypeSkillFeedback:
+		score += 4500
+	case memorycommon.MemoryTypeToolFeedback:
+		score += 4400
+	case memorycommon.MemoryTypeDecision:
+		score += 4000
+	case memorycommon.MemoryTypeRunSummary:
+		score += 1000
+		if item.RunID != currentRunID || currentRunID == "" {
+			score -= 750
+		}
+	}
+	switch runStates[item.RunID] {
+	case common.RunStateSuperseded:
+		score -= 3000
+	case common.RunStateFailed, common.RunStateCancelled:
+		score -= 2000
+	case common.RunStateCompleted:
+		score += 500
+	}
+	return score
+}
+
+func memorySelectionDuplicateKey(item *memorymodel.MemoryItem) string {
+	if item == nil {
+		return ""
+	}
+	summary := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(item.Summary)), " "))
+	if summary == "" {
+		summary = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(item.Content)), " "))
+	}
+	return strings.TrimSpace(item.MemoryType) + "|" + summary
+}
+
+func memoryItemContextMaps(items []*memorymodel.MemoryItem) []map[string]any {
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		ret = append(ret, map[string]any{
+			"id":                  string(item.ID),
+			"workspaceId":         string(item.WorkspaceID),
+			"runId":               string(item.RunID),
+			"sourceType":          item.SourceType,
+			"sourceRef":           item.SourceRef,
+			"memoryType":          item.MemoryType,
+			"summary":             item.Summary,
+			"content":             item.Content,
+			"tags":                cloneStringsForExecutionContext(item.Tags),
+			"importance":          item.Importance,
+			"confidence":          item.Confidence,
+			"visibility":          item.Visibility,
+			"embeddingProviderId": item.EmbeddingProviderID,
+			"embeddingModel":      item.EmbeddingModel,
+			"vectorReady":         len(item.Vector) > 0,
+			"vectorDimension":     len(item.Vector),
+			"vectorScore":         item.VectorScore,
+		})
+	}
+	return ret
+}
+
+func memoryModelItemIDs(items []*memorymodel.MemoryItem) []string {
+	ret := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == nil || item.ID == "" {
+			continue
+		}
+		ret = append(ret, string(item.ID))
+	}
+	return ret
+}
+
+func memoryModelRetrievalHits(items []*memorymodel.MemoryItem) []map[string]any {
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if item == nil || item.ID == "" {
+			continue
+		}
+		ret = append(ret, map[string]any{
+			"id":              string(item.ID),
+			"summary":         item.Summary,
+			"vectorScore":     item.VectorScore,
+			"vectorDimension": len(item.Vector),
+		})
+	}
+	return ret
+}
+
+func memoryModelSelectionScores(items []*memorymodel.MemoryItem, currentRunID common.RunID, runStates map[common.RunID]common.RunState) []map[string]any {
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if item == nil || item.ID == "" {
+			continue
+		}
+		ret = append(ret, map[string]any{
+			"id":     string(item.ID),
+			"score":  stepInputMemoryScore(item, currentRunID, runStates),
+			"reason": stepInputMemoryScoreReason(item, currentRunID, runStates),
+		})
+	}
+	return ret
+}
+
+func stepInputMemoryScoreReason(item *memorymodel.MemoryItem, currentRunID common.RunID, runStates map[common.RunID]common.RunState) string {
+	if item == nil {
+		return ""
+	}
+	parts := []string{strings.TrimSpace(item.MemoryType)}
+	if item.RunID == currentRunID && currentRunID != "" {
+		parts = append(parts, "current_run")
+	} else if item.RunID != "" {
+		parts = append(parts, "historical_run")
+	}
+	if item.MemoryType == memorycommon.MemoryTypeRunSummary && item.RunID != currentRunID {
+		parts = append(parts, "run_summary_downgraded")
+	}
+	if state := runStates[item.RunID]; state != "" {
+		parts = append(parts, "run_state="+string(state))
+		switch state {
+		case common.RunStateSuperseded, common.RunStateFailed, common.RunStateCancelled:
+			parts = append(parts, "run_state_downgraded")
+		}
+	}
+	return strings.Join(parts, ":")
 }
 
 func (o *RuntimeOrchestrator) currentRunGovernanceHistory(ctx context.Context, run *runModel.Run) []map[string]any {
@@ -452,31 +773,41 @@ func (o *RuntimeOrchestrator) recordLLMStepInputMemoryRecallTrace(ctx context.Co
 		soulStageExecution,
 	)
 	trace := &memorymodel.MemoryRecallTrace{
-		ID:                  traceID,
-		WorkspaceID:         run.WorkspaceID,
-		RunID:               run.ID,
-		StepID:              step.ID,
-		GraphNodeID:         stringFromMap(step.Input, stepInputKeyGraphNodeID),
-		Stage:               stage,
-		Source:              "step_input",
-		Policy:              memoryRecallTraceStringValue(retrieval["policy"]),
-		Status:              memoryRecallTraceStringValue(retrieval["status"]),
-		ProviderID:          memoryRecallTraceStringValue(retrieval["providerId"]),
-		Operation:           memoryRecallTraceStringValue(retrieval["operation"]),
-		QueryTextPreview:    memoryRecallTraceStringValue(retrieval["queryTextPreview"]),
-		QueryTextSha256:     memoryRecallTraceStringValue(retrieval["queryTextSha256"]),
-		MinScore:            floatFromValue(retrieval["minScore"]),
-		Limit:               int(int64FromValue(retrieval["limit"])),
-		EmbeddingModel:      memoryRecallTraceStringValue(retrieval["embeddingModel"]),
-		VectorDimension:     int(int64FromValue(retrieval["vectorDimension"])),
-		RetrievedMemoryIDs:  memoryRecallTraceIDs(retrieval["retrievedMemoryIds"]),
-		RetrievedMemoryHits: memoryRecallTraceHits(retrieval["retrievedMemoryHits"]),
-		Reason:              memoryRecallTraceStringValue(retrieval["reason"]),
-		OccurredAt:          time.Now().UTC().Format(time.RFC3339Nano),
-		EvidenceRef:         string(traceID),
+		ID:                     traceID,
+		WorkspaceID:            run.WorkspaceID,
+		RunID:                  run.ID,
+		StepID:                 step.ID,
+		GraphNodeID:            stringFromMap(step.Input, stepInputKeyGraphNodeID),
+		Stage:                  stage,
+		Source:                 "step_input",
+		Policy:                 memoryRecallTraceStringValue(retrieval["policy"]),
+		Status:                 memoryRecallTraceStringValue(retrieval["status"]),
+		ProviderID:             memoryRecallTraceStringValue(retrieval["providerId"]),
+		Operation:              memoryRecallTraceStringValue(retrieval["operation"]),
+		QueryTextPreview:       memoryRecallTraceStringValue(retrieval["queryTextPreview"]),
+		QueryTextSha256:        memoryRecallTraceStringValue(retrieval["queryTextSha256"]),
+		MinScore:               floatFromValue(retrieval["minScore"]),
+		Limit:                  int(int64FromValue(retrieval["limit"])),
+		EmbeddingModel:         memoryRecallTraceStringValue(retrieval["embeddingModel"]),
+		VectorDimension:        int(int64FromValue(retrieval["vectorDimension"])),
+		RefreshSource:          memoryRecallTraceStringValue(retrieval["refreshSource"]),
+		SelectionPolicyVersion: memoryRecallTraceStringValue(retrieval["selectionPolicyVersion"]),
+		CandidateMemoryIDs:     memoryRecallTraceIDs(retrieval["candidateMemoryIds"]),
+		SelectedMemoryIDs:      memoryRecallTraceIDs(retrieval["selectedMemoryIds"]),
+		ExcludedMemoryIDs:      memoryRecallTraceIDs(retrieval["excludedMemoryIds"]),
+		TypeQuota:              memoryRecallTraceTypeQuota(retrieval["typeQuota"]),
+		SelectionScores:        memoryRecallTraceSelectionScores(retrieval["selectionScores"]),
+		RetrievedMemoryIDs:     memoryRecallTraceIDs(retrieval["retrievedMemoryIds"]),
+		RetrievedMemoryHits:    memoryRecallTraceHits(retrieval["retrievedMemoryHits"]),
+		Reason:                 memoryRecallTraceStringValue(retrieval["reason"]),
+		OccurredAt:             time.Now().UTC().Format(time.RFC3339Nano),
+		EvidenceRef:            string(traceID),
 	}
 	if len(trace.RetrievedMemoryIDs) == 0 {
 		trace.RetrievedMemoryIDs = memoryRecallTraceMemoryIDsFromContexts(memories)
+	}
+	if len(trace.SelectedMemoryIDs) == 0 {
+		trace.SelectedMemoryIDs = append([]common.MemoryID(nil), trace.RetrievedMemoryIDs...)
 	}
 	if len(trace.RetrievedMemoryHits) == 0 {
 		trace.RetrievedMemoryHits = memoryRecallTraceHitsFromContexts(memories)
@@ -550,6 +881,50 @@ func memoryRecallTraceHits(value any) []memorymodel.MemoryRecallHit {
 			Summary:         memoryRecallTraceStringValue(item["summary"]),
 			VectorScore:     floatFromValue(item["vectorScore"]),
 			VectorDimension: int(int64FromValue(item["vectorDimension"])),
+		})
+	}
+	return ret
+}
+
+func memoryRecallTraceTypeQuota(value any) map[string]int {
+	if typed, ok := value.(map[string]int); ok {
+		ret := make(map[string]int, len(typed))
+		for key, quota := range typed {
+			ret[key] = quota
+		}
+		return ret
+	}
+	input := mapFromValue(value)
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make(map[string]int, len(input))
+	for key, item := range input {
+		if quota := int(int64FromValue(item)); quota > 0 {
+			ret[key] = quota
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func memoryRecallTraceSelectionScores(value any) []memorymodel.MemoryRecallSelectionScore {
+	items := mapSliceFromValue(value)
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]memorymodel.MemoryRecallSelectionScore, 0, len(items))
+	for _, item := range items {
+		id := common.MemoryID(memoryRecallTraceStringValue(item["id"]))
+		if id == "" {
+			continue
+		}
+		ret = append(ret, memorymodel.MemoryRecallSelectionScore{
+			ID:     id,
+			Score:  int(int64FromValue(item["score"])),
+			Reason: memoryRecallTraceStringValue(item["reason"]),
 		})
 	}
 	return ret
