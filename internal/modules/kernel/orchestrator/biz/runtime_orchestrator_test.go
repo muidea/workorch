@@ -1021,7 +1021,7 @@ func TestRuntimeOrchestrator_StartRunToComplete_Mainline(t *testing.T) {
 func TestRuntimeOrchestrator_StepDispatchEvidenceWritesConcurrently(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	started := make(chan string, 4)
+	started := make(chan string, 3)
 	release := make(chan struct{})
 	toolCallRepo := &blockingToolCallRepository{
 		inner:              memory.NewToolCallRepository(),
@@ -4451,6 +4451,89 @@ func TestStepInputMemorySelectionDowngradesSupersededRunMemory(t *testing.T) {
 	}
 }
 
+func TestStepInputMemorySelectionLimitsSingleHistoricalRunDominance(t *testing.T) {
+	currentRunID := common.RunID("run-memory-selection-current")
+	firstHistoricalRunID := common.RunID("run-memory-selection-history-a")
+	secondHistoricalRunID := common.RunID("run-memory-selection-history-b")
+	items := []*memorymodel.MemoryItem{
+		{
+			ID:         "history-a-dod",
+			RunID:      firstHistoricalRunID,
+			MemoryType: memorycommon.MemoryTypeDoDFeedback,
+			Summary:    "history a dod gap",
+			Importance: 90,
+			Confidence: 90,
+			Visibility: "workspace",
+		},
+		{
+			ID:         "history-a-lesson",
+			RunID:      firstHistoricalRunID,
+			MemoryType: memorycommon.MemoryTypeExecutionLesson,
+			Summary:    "history a repair lesson",
+			Importance: 90,
+			Confidence: 90,
+			Visibility: "workspace",
+		},
+		{
+			ID:         "history-a-context",
+			RunID:      firstHistoricalRunID,
+			MemoryType: memorycommon.MemoryTypeProjectContext,
+			Summary:    "history a project context",
+			Importance: 90,
+			Confidence: 90,
+			Visibility: "workspace",
+		},
+		{
+			ID:         "history-a-decision",
+			RunID:      firstHistoricalRunID,
+			MemoryType: memorycommon.MemoryTypeDecision,
+			Summary:    "history a decision",
+			Importance: 90,
+			Confidence: 90,
+			Visibility: "workspace",
+		},
+		{
+			ID:         "history-b-skill",
+			RunID:      secondHistoricalRunID,
+			MemoryType: memorycommon.MemoryTypeSkillFeedback,
+			Summary:    "history b skill context",
+			Importance: 80,
+			Confidence: 80,
+			Visibility: "workspace",
+		},
+		{
+			ID:         "history-b-tool",
+			RunID:      secondHistoricalRunID,
+			MemoryType: memorycommon.MemoryTypeToolFeedback,
+			Summary:    "history b tool context",
+			Importance: 80,
+			Confidence: 80,
+			Visibility: "workspace",
+		},
+	}
+
+	selected, _, excluded := selectStepInputMemoryItems(items, currentRunID, map[common.RunID]common.RunState{
+		firstHistoricalRunID:  common.RunStateCompleted,
+		secondHistoricalRunID: common.RunStateCompleted,
+	}, stepInputMemoryLimit)
+
+	firstHistoricalSelected := 0
+	for _, item := range selected {
+		if item.RunID == firstHistoricalRunID {
+			firstHistoricalSelected++
+		}
+	}
+	if firstHistoricalSelected > stepInputHistoricalRunMemoryMax {
+		t.Fatalf("selected = %+v, want at most %d memories from one historical run", selected, stepInputHistoricalRunMemoryMax)
+	}
+	if !memoryItemsContainRun(selected, secondHistoricalRunID) {
+		t.Fatalf("selected = %+v, want other historical run to remain represented", selected)
+	}
+	if !memoryItemsContainRun(excluded, firstHistoricalRunID) {
+		t.Fatalf("excluded = %+v, want excess first historical run memories excluded", excluded)
+	}
+}
+
 func TestRuntimeOrchestrator_ExecutionContextPackageSkipsInitialStepFailureHistoryRead(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -6282,24 +6365,23 @@ func TestRuntimeOrchestrator_StartRunPersistsRuntimeMemoryWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list memory items: %v", err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("memory items = %+v, want user preference and run summary", items)
+	if len(items) != 1 {
+		t.Fatalf("memory items = %+v, want explicit user preference only", items)
 	}
-	if !hasMemoryItem(items, runID, "user_preference", "Default test command preference: go test ./...") ||
-		!hasMemoryItem(items, runID, "run_summary", "Run completed with targeted tests") {
-		t.Fatalf("memory items = %+v, want persisted user preference and run summary", items)
+	if !hasMemoryItem(items, runID, "user_preference", "Default test command preference: go test ./...") {
+		t.Fatalf("memory items = %+v, want persisted user preference", items)
 	}
 	step, err := stepRepo.Get(ctx, common.StepID("run-memory-write/step-1"))
 	if err != nil {
 		t.Fatalf("get step: %v", err)
 	}
 	refs, ok := step.Output["memoryRefs"].([]string)
-	if !ok || len(refs) != 2 {
+	if !ok || len(refs) != 1 {
 		t.Fatalf("memoryRefs = %+v, want created memory ids", step.Output["memoryRefs"])
 	}
 }
 
-func TestRuntimeOrchestrator_RunSummaryMemoryUsesDoDAssessmentSummary(t *testing.T) {
+func TestRuntimeOrchestrator_DoesNotCreateImplicitRunSummaryMemoryFromDoDAssessment(t *testing.T) {
 	output := map[string]any{
 		"status": "completed",
 		"stage":  "llm_dod_assessment",
@@ -6313,14 +6395,8 @@ func TestRuntimeOrchestrator_RunSummaryMemoryUsesDoDAssessmentSummary(t *testing
 	}
 
 	requests := runtimeRunSummaryMemoryWrite(output)
-	if len(requests) != 1 {
-		t.Fatalf("memory requests = %+v, want one run summary", requests)
-	}
-	got := requests[0]
-	if got.MemoryType != memorycommon.MemoryTypeRunSummary ||
-		got.Summary != "目标已完成，成功查询到服务配置信息" ||
-		!strings.Contains(got.Content, "通过 SSH 获取 CPU、内存、磁盘和 Docker 版本。") {
-		t.Fatalf("run summary memory = %+v, want DoD assessment summary/content", got)
+	if len(requests) != 0 {
+		t.Fatalf("memory requests = %+v, want no implicit run_summary duplicate", requests)
 	}
 }
 
@@ -6441,6 +6517,35 @@ func TestRuntimeOrchestrator_RepairOutputMemoryWritesCaptureExecutionLesson(t *t
 	}
 }
 
+func TestRuntimeOrchestrator_RepairOutputMemoryWritesDistillMissingFileLesson(t *testing.T) {
+	runID := common.RunID("run-repair-missing-file-lesson")
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-missing-file"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  1,
+			"failedStepId":                    string(runID) + "/block/read_test_file",
+			"failedStepKind":                  "file/read",
+			"failureReason":                   "open main_test.go: no such file or directory",
+			failureOutputKeySignature:         "kind=file/read|path=main_test.go",
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "file_read_invalid_path",
+	}
+
+	requests := appendNecessaryOutputMemoryWriteRequests(nil, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-missing-file-lesson"}, step, output)
+	if len(requests) != 1 ||
+		requests[0].MemoryType != memorycommon.MemoryTypeExecutionLesson ||
+		requests[0].Summary != "Missing file reads require optional probes or listing before repair" ||
+		!strings.Contains(requests[0].Content, "lesson: Missing file reads require optional probes or listing before repair") {
+		t.Fatalf("repair memory requests = %+v, want distilled missing-file lesson", requests)
+	}
+}
+
 func TestRuntimeOrchestrator_OptionalRunSummaryMemoryDoesNotRequireRepository(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{}
@@ -6515,7 +6620,6 @@ func TestRuntimeOrchestrator_RuntimeMemoryWritesConcurrently(t *testing.T) {
 	wantStarted := map[string]bool{
 		"memory-create:run-memory-write-parallel/step-1/memory/1": false,
 		"memory-create:run-memory-write-parallel/step-1/memory/2": false,
-		"memory-create:run-memory-write-parallel/step-1/memory/3": false,
 	}
 	for !allSeen(wantStarted) {
 		select {
@@ -6538,7 +6642,6 @@ func TestRuntimeOrchestrator_RuntimeMemoryWritesConcurrently(t *testing.T) {
 		wantRefs := []string{
 			"run-memory-write-parallel/step-1/memory/1",
 			"run-memory-write-parallel/step-1/memory/2",
-			"run-memory-write-parallel/step-1/memory/3",
 		}
 		if !reflect.DeepEqual(result.refs, wantRefs) {
 			t.Fatalf("refs = %+v, want %+v", result.refs, wantRefs)
@@ -6550,8 +6653,8 @@ func TestRuntimeOrchestrator_RuntimeMemoryWritesConcurrently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list memory items: %v", err)
 	}
-	if len(items) != 3 {
-		t.Fatalf("memory items = %+v, want 3", items)
+	if len(items) != 2 {
+		t.Fatalf("memory items = %+v, want 2", items)
 	}
 }
 
@@ -10088,6 +10191,7 @@ func TestRuntimeOrchestrator_RecordsValidationCommandMemoriesFromDoDAssessment(t
 		Output: map[string]any{
 			"command":  "go test ./...",
 			"exitCode": 1,
+			"stdout":   "E2E assertions passed\ncoverage ok",
 			"stderr":   "compile error in internal/app.go",
 		},
 	}); err != nil {
@@ -10137,7 +10241,8 @@ func TestRuntimeOrchestrator_RecordsValidationCommandMemoriesFromDoDAssessment(t
 	}
 	if commandMemory == nil ||
 		!strings.Contains(commandMemory.Content, "go test ./...") ||
-		!strings.Contains(commandMemory.Content, string(evidenceStepID)) {
+		!strings.Contains(commandMemory.Content, string(evidenceStepID)) ||
+		!strings.Contains(commandMemory.Content, "signal=E2E assertions passed") {
 		t.Fatalf("command memory = %+v, want command with provenance evidence", commandMemory)
 	}
 	if lessonMemory == nil ||
@@ -13579,6 +13684,15 @@ func memoryContextContains(items []map[string]any, id string) bool {
 func memoryIDsContain(items []common.MemoryID, id common.MemoryID) bool {
 	for _, item := range items {
 		if item == id {
+			return true
+		}
+	}
+	return false
+}
+
+func memoryItemsContainRun(items []*memorymodel.MemoryItem, runID common.RunID) bool {
+	for _, item := range items {
+		if item != nil && item.RunID == runID {
 			return true
 		}
 	}

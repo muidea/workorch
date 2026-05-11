@@ -285,7 +285,9 @@ type validationCommandEntry struct {
 	Command  string
 	ExitCode string
 	Ref      string
+	Stdout   string
 	Stderr   string
+	Summary  string
 }
 
 func validationCommandMemoryEntries(details []resultEvidenceDetail) []validationCommandEntry {
@@ -310,7 +312,9 @@ func validationCommandMemoryEntries(details []resultEvidenceDetail) []validation
 			Command:  command,
 			ExitCode: firstNonEmptyOrchestratorString(exitCode, "unknown"),
 			Ref:      ref,
+			Stdout:   strings.TrimSpace(detail.Stdout),
 			Stderr:   strings.TrimSpace(detail.Stderr),
+			Summary:  strings.TrimSpace(detail.Summary),
 		})
 	}
 	if len(ret) == 0 {
@@ -323,7 +327,11 @@ func validationCommandMemoryContent(run *runModel.Run, items []validationCommand
 	var builder strings.Builder
 	builder.WriteString("Validation commands with provenance evidence:\n")
 	for _, item := range items {
-		builder.WriteString(fmt.Sprintf("- %s | exitCode=%s | evidence=%s\n", item.Command, item.ExitCode, firstNonEmptyOrchestratorString(item.Ref, "n/a")))
+		builder.WriteString(fmt.Sprintf("- %s | exitCode=%s | evidence=%s", item.Command, item.ExitCode, firstNonEmptyOrchestratorString(item.Ref, "n/a")))
+		if signal := validationCommandEvidenceSignal(item); signal != "" {
+			builder.WriteString(fmt.Sprintf(" | signal=%s", signal))
+		}
+		builder.WriteString("\n")
 	}
 	if run != nil {
 		builder.WriteString(fmt.Sprintf("\nRun: %s\n", run.ID))
@@ -335,6 +343,33 @@ func validationCommandMemoryContent(run *runModel.Run, items []validationCommand
 		}
 	}
 	return strings.TrimSpace(builder.String())
+}
+
+func validationCommandEvidenceSignal(item validationCommandEntry) string {
+	return compactValidationEvidenceSignal(firstNonEmptyOrchestratorString(item.Summary, firstUsefulEvidenceLine(item.Stdout), firstUsefulEvidenceLine(item.Stderr)))
+}
+
+func firstUsefulEvidenceLine(text string) string {
+	text = strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+	if text == "" {
+		return ""
+	}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
+func compactValidationEvidenceSignal(text string) string {
+	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	const maxLen = 180
+	if len(text) <= maxLen {
+		return text
+	}
+	return strings.TrimSpace(text[:maxLen]) + "..."
 }
 
 func validationFailureMemoryEntries(items []validationCommandEntry) []validationCommandEntry {

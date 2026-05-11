@@ -263,6 +263,7 @@ Tool / MCP Memory 记录：
 | DMI-09 | e2e 覆盖动态 recall | P1 | e2e / Go tests / scripts | 已落地：Go 单元覆盖动态 recall，新增部署后核对脚本 `scripts/verify-workspace-memory-decision-recall.sh` |
 | DMI-10 | assessment-only 合约收口 | P0 | orchestrator completion gate / LLM prompt | 已落地：assessment-only 响应若夹带 `executionGraph` 但已有 `dodAssessment`，runtime 忽略 graph、记录 contract violation 并继续 DoD gate；仅无 assessment 时才触发 contract correction |
 | DMI-11 | 弱验证证据回流 execution repair | P0 | evidence quality / runtime repair / software-dev Soul | 已落地：`inconclusive` / `zeroWork` 证据会形成 `dod_evidence_quality_gap` 诊断，repair input 明确要求补真实测试/断言并重新验证 |
+| DMI-12 | Memory 噪音与终态 recall 误判收口 | P1 | memory writer / selector / verify script | 已落地：去除隐式重复 `run_summary`，validation command 记录 stdout/summary 信号，repair lesson 提炼缺失文件等可复用教训，selector 限制单个历史 run 占满召回槽位，部署核对脚本区分终态后写入的高价值 Memory |
 
 ## 当前落地状态
 
@@ -288,6 +289,12 @@ Tool / MCP Memory 记录：
   - trace 是否具备结构化 candidate / selected / quota / score 解释。
 - assessment-only / providerRetryAssessmentOnly 合约已进一步收口：如果 LLM 在 assessment-only 响应中夹带 `executionGraph`，但同时提供了合法 `dodAssessment`，runtime 会删除并忽略 graph，保留 `assessmentOnlyContractViolation` / `ignoredExecutionGraph` 标记，然后继续 DoD evidence gate；不会执行该 graph，也不会因为夹带 graph 而丢弃可用 assessment。
 - 弱证据不再只停留在 validation 诊断：当 satisfied DoD 条目引用 `inconclusive`、`zeroWork`、`[no test files]` 等证据时，runtime 会生成 `dod_evidence_quality_gap` 诊断并进入 execution repair。repair input 会携带 `evidenceRepairRequired`、`verificationEvidenceGap`、`missingDoDItems` 和 `repairGuidance`，要求补真实测试/断言后重新运行验证。
+- Memory 噪音已进一步收口：
+  - `llm_dod_assessment` 的普通 step memory 不再隐式重复写入 `run_summary`，最终完成态只保留 completion gate 生成的 canonical run summary。
+  - validation command memory 不再只保存命令和 exitCode，还会记录 stdout / summary / stderr 中的第一条可用信号，例如 `E2E assertions passed`。
+  - runtime repair lesson 会把缺失文件读取等失败提炼成可复用教训，避免只留下泛化的 `Runtime repair lesson captured`。
+  - step-input selector 对同一个历史 run 设置最大选中数，防止旧 failed/superseded run 的多条 Memory 占满上下文。
+  - 部署核对脚本不再把 accepted completed run 在终态后写入、没有后续 LLM step 可召回的高价值 Memory 判定为失败。
 - software-dev 默认 Soul 已补充：
   - planning 阶段读取可选文件前先 `file/list`，不确定时 `file/read optional:true`。
   - execution 阶段遇到无测试、0 tests、无断言或 inconclusive evidence 时必须补有效测试/断言，不得重复运行弱验证命令。

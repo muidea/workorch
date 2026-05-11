@@ -205,9 +205,9 @@ func appendRepairLessonMemoryWrite(requests []runtimeMemoryWriteRequest, _ *runM
 	if graph := mapFromValue(output[stepOutputKeyExecutionGraph]); len(graph) > 0 {
 		lines = append(lines, "output.executionGraph: present")
 	}
-	summary := strings.TrimSpace(stringFromMap(output, "summary"))
-	if summary == "" {
-		summary = "Runtime repair lesson captured"
+	summary := repairLessonSummary(step, output)
+	if lesson := repairLessonContentHint(step, output); lesson != "" {
+		lines = append(lines, "lesson: "+lesson)
 	}
 	return append(requests, runtimeMemoryWriteRequest{
 		MemoryType: memorycommon.MemoryTypeExecutionLesson,
@@ -215,6 +215,35 @@ func appendRepairLessonMemoryWrite(requests []runtimeMemoryWriteRequest, _ *runM
 		Content:    strings.Join(lines, "\n"),
 		Tags:       []string{"repair_loop", "necessary_output"},
 	})
+}
+
+func repairLessonSummary(step *runModel.Step, output map[string]any) string {
+	if summary := repairLessonContentHint(step, output); summary != "" {
+		return summary
+	}
+	if summary := strings.TrimSpace(stringFromMap(output, "summary")); summary != "" {
+		return summary
+	}
+	return "Runtime repair lesson captured"
+}
+
+func repairLessonContentHint(step *runModel.Step, output map[string]any) string {
+	if step == nil {
+		return ""
+	}
+	failedKind := strings.TrimSpace(memoryRecallTraceStringValue(step.Input["failedStepKind"]))
+	stage := strings.TrimSpace(stringFromMap(output, "stage"))
+	failureText := strings.ToLower(strings.Join([]string{
+		memoryRecallTraceStringValue(step.Input["failureReason"]),
+		memoryRecallTraceStringValue(step.Input[failureOutputKeyClass]),
+		memoryRecallTraceStringValue(step.Input[failureOutputKeySignature]),
+		stringFromMap(output, "summary"),
+		stringFromMap(output, "error"),
+	}, "\n"))
+	if failedKind == "file/read" || strings.Contains(stage, "file_read") || strings.Contains(failureText, "no such file") || strings.Contains(failureText, "not found") {
+		return "Missing file reads require optional probes or listing before repair"
+	}
+	return ""
 }
 
 func appendProviderRetryToolMemoryWrite(requests []runtimeMemoryWriteRequest, _ *runModel.Run, step *runModel.Step, output map[string]any) []runtimeMemoryWriteRequest {
@@ -410,20 +439,10 @@ func appendRunSummaryMemoryWrite(requests []runtimeMemoryWriteRequest, output ma
 		return requests
 	}
 	stage, _ := output["stage"].(string)
-	if stage != "llm_dod_assessment" || hasRunSummaryMemoryWrite(requests) {
+	if stage != "llm_dod_assessment" {
 		return requests
 	}
-	requests = appendDoDFeedbackMemoryWrite(requests, output)
-	summary := runSummaryMemorySummary(output)
-	if summary == "" {
-		return requests
-	}
-	return append(requests, runtimeMemoryWriteRequest{
-		MemoryType: memorycommon.MemoryTypeRunSummary,
-		Summary:    summary,
-		Content:    runSummaryMemoryContent(output, summary),
-		Tags:       []string{"run_summary"},
-	})
+	return appendDoDFeedbackMemoryWrite(requests, output)
 }
 
 func appendDoDFeedbackMemoryWrite(requests []runtimeMemoryWriteRequest, output map[string]any) []runtimeMemoryWriteRequest {
@@ -469,38 +488,6 @@ func appendDoDFeedbackMemoryWrite(requests []runtimeMemoryWriteRequest, output m
 		Content:    content,
 		Tags:       []string{"dod_feedback", "repair_loop"},
 	})
-}
-
-func runSummaryMemorySummary(output map[string]any) string {
-	if output == nil {
-		return ""
-	}
-	if summary := strings.TrimSpace(stringFromMap(output, "summary")); summary != "" {
-		return summary
-	}
-	if assessment := doDAssessmentFromOutput(output); assessment != nil {
-		return strings.TrimSpace(stringFromMap(assessment, "summary"))
-	}
-	return ""
-}
-
-func runSummaryMemoryContent(output map[string]any, summary string) string {
-	assessment := doDAssessmentFromOutput(output)
-	if assessment == nil {
-		return summary
-	}
-	parts := []string{summary}
-	for _, key := range []string{"goalOutcome", "implementationSummary", "verificationSummary"} {
-		value := strings.TrimSpace(stringFromMap(assessment, key))
-		if value != "" && value != summary {
-			parts = append(parts, value)
-		}
-	}
-	return strings.Join(parts, "\n\n")
-}
-
-func hasRunSummaryMemoryWrite(requests []runtimeMemoryWriteRequest) bool {
-	return hasMemoryWriteType(requests, memorycommon.MemoryTypeRunSummary)
 }
 
 func hasDoDFeedbackMemoryWrite(requests []runtimeMemoryWriteRequest) bool {

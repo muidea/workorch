@@ -24,6 +24,7 @@ const (
 	stepInputMemorySelectionPolicy      = "step_input_dynamic_workspace_memory"
 	stepInputMemorySelectionVersion     = "workorch.memory.step_input.v1"
 	stepInputMemoryLimit                = 8
+	stepInputHistoricalRunMemoryMax     = 2
 )
 
 func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run *runModel.Run, step *runModel.Step, workspace *workspaceModel.Workspace) {
@@ -258,6 +259,7 @@ func selectStepInputMemoryItems(items []*memorymodel.MemoryItem, currentRunID co
 	selected := make([]*memorymodel.MemoryItem, 0, min(len(candidates), limit))
 	selectedIDs := map[common.MemoryID]struct{}{}
 	typeCounts := map[string]int{}
+	runCounts := map[common.RunID]int{}
 	for _, item := range candidates {
 		if len(selected) >= limit {
 			break
@@ -266,9 +268,13 @@ func selectStepInputMemoryItems(items []*memorymodel.MemoryItem, currentRunID co
 		if maxForType, ok := quota[memoryType]; ok && typeCounts[memoryType] >= maxForType {
 			continue
 		}
+		if !canSelectMemoryFromRun(item, currentRunID, runCounts) {
+			continue
+		}
 		selected = append(selected, item)
 		selectedIDs[item.ID] = struct{}{}
 		typeCounts[memoryType]++
+		incrementSelectedMemoryRunCount(item, currentRunID, runCounts)
 	}
 	for _, item := range candidates {
 		if len(selected) >= limit {
@@ -280,8 +286,12 @@ func selectStepInputMemoryItems(items []*memorymodel.MemoryItem, currentRunID co
 		if _, ok := quota[strings.TrimSpace(item.MemoryType)]; ok {
 			continue
 		}
+		if !canSelectMemoryFromRun(item, currentRunID, runCounts) {
+			continue
+		}
 		selected = append(selected, item)
 		selectedIDs[item.ID] = struct{}{}
+		incrementSelectedMemoryRunCount(item, currentRunID, runCounts)
 	}
 	excluded := make([]*memorymodel.MemoryItem, 0, len(candidates)-len(selected))
 	for _, item := range candidates {
@@ -291,6 +301,20 @@ func selectStepInputMemoryItems(items []*memorymodel.MemoryItem, currentRunID co
 		excluded = append(excluded, item)
 	}
 	return selected, candidates, excluded
+}
+
+func canSelectMemoryFromRun(item *memorymodel.MemoryItem, currentRunID common.RunID, runCounts map[common.RunID]int) bool {
+	if item == nil || item.RunID == "" || currentRunID == "" || item.RunID == currentRunID {
+		return true
+	}
+	return runCounts[item.RunID] < stepInputHistoricalRunMemoryMax
+}
+
+func incrementSelectedMemoryRunCount(item *memorymodel.MemoryItem, currentRunID common.RunID, runCounts map[common.RunID]int) {
+	if item == nil || item.RunID == "" || currentRunID == "" || item.RunID == currentRunID {
+		return
+	}
+	runCounts[item.RunID]++
 }
 
 func stepInputMemoryTypeQuota() map[string]int {
