@@ -1054,6 +1054,28 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 
 	nextStepID, nextKind := nextStepSpec(output)
 	if decisionSpec := decisionBlockSpec(output); decisionSpec.Reason != "" {
+		if assessmentOnlyDecisionShouldRepair(step, decisionSpec) || continuableDecisionShouldRepair(step, decisionSpec) {
+			if assessmentOnlyDecisionShouldRepair(step, decisionSpec) {
+				output["assessmentOnlyDecisionConvertedToRepair"] = true
+			} else {
+				output["continuableDecisionConvertedToRepair"] = true
+			}
+			output[stepOutputKeyDoDAssessment] = assessmentOnlyDecisionRepairAssessment(run, step, decisionSpec)
+			delete(output, stepOutputKeyBlockDecisionReason)
+			delete(output, stepOutputKeyBlockDecisionTicketID)
+			delete(output, stepOutputKeyBlockDecisionKind)
+			delete(output, stepOutputKeyBlockDecisionQuestion)
+			delete(output, stepOutputKeyBlockDecisionContext)
+			return o.handleRuntimeStepFailure(
+				ctx,
+				run,
+				step,
+				toolCall,
+				output,
+				"runtime completion gate failed",
+				fmt.Errorf("%w: decision requests a continuable candidate choice", common.ErrInvalidArgument),
+			)
+		}
 		if nextStepID == "" && !o.hasGraphContinuation(ctx, run, step) {
 			return o.FailRun(ctx, run.ID, fmt.Sprintf("runtime step %s blocked without next step", step.ID))
 		}
@@ -1145,10 +1167,22 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 		return false, nil
 	}
 	if boolValue(step.Input["providerRetryAssessmentOnly"]) || boolValue(step.Input[stepInputKeyAssessmentOnly]) {
-		if _, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
+		if ignoredGraph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
 			err := fmt.Errorf("%w: assessment-only step returned executionGraph", common.ErrInvalidArgument)
 			if boolValue(step.Input["providerRetryAssessmentOnly"]) {
 				err = fmt.Errorf("%w: provider retry assessment-only step returned executionGraph", common.ErrInvalidArgument)
+			}
+			output["assessmentOnlyContractViolation"] = true
+			output["ignoredExecutionGraph"] = true
+			output["ignoredExecutionGraphNodeCount"] = len(ignoredGraph.Nodes)
+			output["ignoredExecutionGraphReason"] = err.Error()
+			delete(output, stepOutputKeyExecutionGraph)
+			if !boolValue(step.Input["assessmentOnlyContractCorrection"]) {
+				output["contractCorrectionStepDispatched"] = true
+				step.Output = output
+				_ = o.steps.Update(ctx, step)
+				input := assessmentOnlyContractCorrectionStepInput(step, output, err)
+				return true, o.dispatchUniqueStepWithWorkspace(ctx, run, assessmentOnlyContractCorrectionStepID(run.ID, step), initialStepKind(run), input, workspace)
 			}
 			return true, o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 		}
@@ -1172,6 +1206,60 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 	}
 	input := o.graphExpansionLimitAssessmentFollowUpStepInputFromSteps(run, step, steps, count)
 	return true, o.dispatchUniqueStepWithWorkspace(ctx, run, graphExpansionLimitAssessmentFollowUpStepID(run.ID, step), initialStepKind(run), input, workspace)
+}
+
+func assessmentOnlyContractCorrectionStepID(runID common.RunID, step *runModel.Step) common.StepID {
+	stepID := runtimeChildID(step.ID, "assessment-contract-correction")
+	if stepID == "" {
+		stepID = "assessment-contract-correction"
+	}
+	return common.StepID(fmt.Sprintf("%s/zz-llm-after-assessment-contract-%s", runID, stepID))
+}
+
+func assessmentOnlyContractCorrectionStepInput(step *runModel.Step, output map[string]any, violation error) map[string]any {
+	input := cloneStepPayload(step.Input)
+	if input == nil {
+		input = map[string]any{}
+	}
+	input[stepInputKeyAssessmentOnly] = true
+	input["assessmentOnlyContractCorrection"] = true
+	input["assessmentOnlyContractViolationStepId"] = string(step.ID)
+	input["assessmentOnlyContractViolationReason"] = errorString(violation)
+	input["allowedAssessmentOnlyCompletionStates"] = []string{"completed", "failed", "blocked_on_decision", "blocked_on_approval"}
+	sanitizeAssessmentOnlyExecutableFields(input)
+	for _, key := range []string{"previousStepOutput", "failedStepOutput"} {
+		if nested := mapFromValue(input[key]); len(nested) > 0 {
+			sanitizeAssessmentOnlyExecutableFields(nested)
+			input[key] = nested
+		}
+	}
+	if sanitized := cloneStepPayload(output); len(sanitized) > 0 {
+		sanitizeAssessmentOnlyExecutableFields(sanitized)
+		sanitized["assessmentOnlyContractViolation"] = true
+		input["previousInvalidAssessmentOutput"] = compactStepOutputForLLMContext(sanitized)
+	}
+	return input
+}
+
+func sanitizeAssessmentOnlyExecutableFields(payload map[string]any) {
+	if payload == nil {
+		return
+	}
+	for _, key := range []string{
+		stepOutputKeyExecutionGraph,
+		"shellCommands",
+		"patchRequests",
+		"mcpToolCalls",
+		"memoryWrites",
+		"nextAction",
+		"nextStep",
+		"nextKind",
+		"nextInput",
+		"patches",
+		stepOutputKeyMemoryRefs,
+	} {
+		delete(payload, key)
+	}
 }
 
 func (o *RuntimeOrchestrator) recordRejectedCompletionDoDAssessment(ctx context.Context, run *runModel.Run, step *runModel.Step, output map[string]any) error {

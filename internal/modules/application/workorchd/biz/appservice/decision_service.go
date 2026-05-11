@@ -308,6 +308,7 @@ func validateDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, pa
 }
 
 func normalizeDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, payload map[string]any, resolutionType string) (map[string]any, string) {
+	payload = normalizeCandidateSelectionResolutionPayloadForTicket(ticket, payload)
 	if !isRuntimeRepairExhaustionTicket(ticket) {
 		return payload, resolutionType
 	}
@@ -328,6 +329,86 @@ func normalizeDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, p
 	default:
 		return ret, decisioncommon.ResolutionTypeProvideMissingInfo
 	}
+}
+
+func normalizeCandidateSelectionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, payload map[string]any) map[string]any {
+	if ticket == nil || len(ticket.Context) == 0 || len(payload) == 0 {
+		return payload
+	}
+	semantic := decisionPayloadMap(payload["governanceSemantic"])
+	if strings.TrimSpace(stringFromDecisionPayload(semantic, "intent")) != governancecommon.GovernanceIntentApproveExecution {
+		return payload
+	}
+	candidates := decisionPayloadMap(ticket.Context["candidateValues"])
+	if len(candidates) == 0 {
+		return payload
+	}
+	ret := cloneDecisionPayload(payload)
+	if ret == nil {
+		ret = map[string]any{}
+	}
+	selected := make([]string, 0, len(candidates))
+	for field, raw := range candidates {
+		field = strings.TrimSpace(field)
+		if field == "" || strings.TrimSpace(stringFromDecisionPayload(ret, field)) != "" {
+			continue
+		}
+		if candidate := preferredContinuationCandidate(raw); candidate != "" {
+			ret[field] = candidate
+			selected = append(selected, field)
+		}
+	}
+	if len(selected) == 0 {
+		return payload
+	}
+	ret["selectedCandidateFields"] = selected
+	ret["candidateSelectionMode"] = "semantic_continue"
+	return ret
+}
+
+func preferredContinuationCandidate(value any) string {
+	switch typed := value.(type) {
+	case []string:
+		for _, item := range typed {
+			if isContinuationCandidate(item) {
+				return strings.TrimSpace(item)
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			if candidate := preferredContinuationCandidate(item); candidate != "" {
+				return candidate
+			}
+		}
+	case map[string]any:
+		for _, key := range []string{"value", "id", "mode", "target", "name"} {
+			if candidate := preferredContinuationCandidate(typed[key]); candidate != "" {
+				return candidate
+			}
+		}
+	case string:
+		if isContinuationCandidate(typed) {
+			return strings.TrimSpace(typed)
+		}
+	}
+	return ""
+}
+
+func isContinuationCandidate(value string) bool {
+	normalized := normalizeRepairResolutionText(value)
+	if normalized == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"init", "initialize", "bootstrap", "fromscratch", "newscratch", "newproject",
+		"currentworkspace", "currentdirectory",
+		"初始化", "从零", "新项目", "当前工作区", "当前目录",
+	} {
+		if strings.Contains(normalized, normalizeRepairResolutionText(marker)) {
+			return true
+		}
+	}
+	return false
 }
 
 func isWorkorchRuntimeLLMProviderRecoveryTicket(ticket *decisionmodel.Ticket) bool {

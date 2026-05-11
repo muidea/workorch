@@ -1386,6 +1386,11 @@ func NormalizeDecisionOutput(request runtimemodel.StepExecutionRequest, decision
 	if len(decision.MemoryWrites) > 0 {
 		output["memoryWrites"] = memoryWriteOutput(decision.MemoryWrites)
 	}
+	if decision.CompletionState == "failed" && decision.DoDAssessment != nil {
+		output["stage"] = "llm_dod_assessment"
+		output["dodAssessment"] = doDAssessmentOutput(decision.DoDAssessment)
+		return output, nil
+	}
 	if decision.CompletionState == "failed" {
 		reason := strings.TrimSpace(decision.ThoughtSummary)
 		if reason == "" {
@@ -1880,6 +1885,9 @@ func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels
 		},
 		Config: RedactedProviderConfig(config),
 	}
+	if isAssessmentOnlyDecisionRequest(providerReq) {
+		providerReq.RuntimeCapabilities = assessmentOnlyRuntimeCapabilities(providerReq.RuntimeCapabilities)
+	}
 	providerReq = enforceProviderRequestBudget(providerReq)
 	providerReq.PromptContext = buildPromptContextFromRequest(providerReq)
 	if providerReq.ContextBudget != nil && providerReq.PromptContext != nil && providerReq.PromptContext.Normalization != nil {
@@ -1887,6 +1895,36 @@ func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels
 		providerReq.ContextBudget.IncludedSections = uniqueStrings(append(providerReq.ContextBudget.IncludedSections, promptContextSectionIDs(providerReq.PromptContext)...))
 	}
 	return redactProviderRequestForLLM(providerReq)
+}
+
+func isAssessmentOnlyDecisionRequest(request llmmodels.ProviderRequest) bool {
+	if !isDecisionSchemaRequest(request) {
+		return false
+	}
+	return boolFromProviderInput(request.Input, "assessmentOnly") ||
+		boolFromProviderInput(request.Input, "graphExpansionLimitFollowUp") ||
+		boolFromProviderInput(request.Input, "providerRetryAssessmentOnly") ||
+		boolFromProviderInput(request.Input, "assessmentOnlyContractCorrection")
+}
+
+func boolFromProviderInput(input map[string]any, key string) bool {
+	if input == nil {
+		return false
+	}
+	switch typed := input[key].(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
+}
+
+func assessmentOnlyRuntimeCapabilities(caps llmmodels.RuntimeCapabilities) llmmodels.RuntimeCapabilities {
+	return llmmodels.RuntimeCapabilities{
+		ShellPolicy: caps.ShellPolicy,
+	}
 }
 
 func promptContextSectionIDs(context *llmmodels.PromptContext) []string {

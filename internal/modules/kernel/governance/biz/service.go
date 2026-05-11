@@ -653,6 +653,12 @@ func inferMissingInfoAnswer(
 	if value, confidence, ok := structuredCandidateAnswer(ctxMap); ok {
 		return value, confidence, "answer inferred from structured ticket candidates", evidenceRefs
 	}
+	if value, confidence, ok := continuationCandidateAnswer(ctxMap); ok {
+		return value, confidence, "answer inferred from continuable ticket candidate", evidenceRefs
+	}
+	if hasCandidateValues(ctxMap) {
+		return "", 0, "", evidenceRefs
+	}
 
 	query := normalize(strings.Join([]string{question, reason}, " "))
 	if value, ok := findStructuredValueInText(query, goalText); ok {
@@ -680,6 +686,121 @@ func inferMissingInfoAnswer(
 		}
 	}
 	return "", 0.0, "", evidenceRefs
+}
+
+func hasCandidateValues(input map[string]any) bool {
+	if input == nil {
+		return false
+	}
+	raw, ok := input["candidateValues"]
+	return ok && raw != nil
+}
+
+func continuationCandidateAnswer(input map[string]any) (string, float64, bool) {
+	if input == nil {
+		return "", 0, false
+	}
+	raw, ok := input["candidateValues"]
+	if !ok || raw == nil {
+		return "", 0, false
+	}
+	candidates := map[string]any{}
+	switch typed := raw.(type) {
+	case map[string]any:
+		candidates = typed
+	case map[string]string:
+		for key, value := range typed {
+			candidates[key] = value
+		}
+	default:
+		return "", 0, false
+	}
+	if len(candidates) == 0 {
+		return "", 0, false
+	}
+	confidences := confidenceMapFromMap(input, "confidenceByField")
+	selected := map[string]string{}
+	confidence := 1.0
+	confidenceSeen := false
+	for field, value := range candidates {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		candidate := preferredAutoContinuationCandidate(value)
+		if candidate == "" {
+			continue
+		}
+		selected[field] = candidate
+		if fieldConfidence, ok := confidences[normalize(field)]; ok {
+			confidence = minFloat(confidence, fieldConfidence)
+			confidenceSeen = true
+		}
+	}
+	if len(selected) == 0 {
+		return "", 0, false
+	}
+	if !confidenceSeen {
+		confidence = 0.9
+	}
+	answer := joinStructuredAnswer(selected, sortedMapKeys(selected))
+	return answer, confidence, answer != ""
+}
+
+func preferredAutoContinuationCandidate(value any) string {
+	switch typed := value.(type) {
+	case string:
+		if isAutoContinuationCandidateText(typed) {
+			return strings.TrimSpace(typed)
+		}
+	case []string:
+		for _, item := range typed {
+			if isAutoContinuationCandidateText(item) {
+				return strings.TrimSpace(item)
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			if candidate := preferredAutoContinuationCandidate(item); candidate != "" {
+				return candidate
+			}
+		}
+	case map[string]any:
+		for _, key := range []string{"value", "id", "mode", "target", "name"} {
+			if candidate := preferredAutoContinuationCandidate(typed[key]); candidate != "" {
+				return candidate
+			}
+		}
+		for _, nested := range typed {
+			if candidate := preferredAutoContinuationCandidate(nested); candidate != "" {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+func isAutoContinuationCandidateText(value string) bool {
+	normalized := normalizeContinuationCandidateText(value)
+	if normalized == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"init", "initialize", "bootstrap", "fromscratch", "newscratch", "newproject",
+		"currentworkspace", "currentdirectory",
+		"初始化", "从零", "新项目", "当前工作区", "当前目录",
+	} {
+		if strings.Contains(normalized, normalizeContinuationCandidateText(marker)) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeContinuationCandidateText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer(" ", "", "\t", "", "\n", "", "\r", "", "-", "", "_", "", "/", "", "\\", "", ".", "")
+	return replacer.Replace(value)
 }
 
 func structuredCandidateAnswer(input map[string]any) (string, float64, bool) {

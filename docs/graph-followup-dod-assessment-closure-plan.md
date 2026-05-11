@@ -94,7 +94,8 @@ Goal/DoD 累计更新
 
 - Core 应将其视为 contract violation。
 - 不继续执行该 graph。
-- 记录结构化诊断，并进入受控 DoD-gap repair 或失败交付。
+- 记录结构化诊断，先自动调度一次更窄的 assessment-only contract correction follow-up。
+- correction follow-up 仍返回 `executionGraph` 时，再进入受控 DoD-gap repair 或失败交付。
 
 ### 2. DoD 缺口驱动 Repair/Replan
 

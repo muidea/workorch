@@ -35,6 +35,7 @@ func (o *RuntimeOrchestrator) recordMemoryWrites(
 	step *runModel.Step,
 	output map[string]any,
 ) ([]string, error) {
+	explicitWrites := output != nil && output[stepOutputKeyMemoryWrites] != nil
 	requests, err := runtimeMemoryWriteRequests(output)
 	if err != nil {
 		return nil, err
@@ -43,6 +44,9 @@ func (o *RuntimeOrchestrator) recordMemoryWrites(
 		return nil, nil
 	}
 	if o.evidence.MemoryItems == nil {
+		if !explicitWrites {
+			return nil, nil
+		}
 		return nil, common.ErrInvalidArgument
 	}
 	refs := make([]string, len(requests))

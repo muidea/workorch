@@ -6153,6 +6153,26 @@ func TestRuntimeOrchestrator_RunSummaryMemoryUsesDoDAssessmentSummary(t *testing
 	}
 }
 
+func TestRuntimeOrchestrator_OptionalRunSummaryMemoryDoesNotRequireRepository(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{}
+	refs, err := orch.recordMemoryWrites(ctx,
+		&runmodel.Run{ID: "run-memory-optional", WorkspaceID: "ws-memory-optional"},
+		&runmodel.Step{ID: "run-memory-optional/step-1", RunID: "run-memory-optional"},
+		map[string]any{
+			"status": "completed",
+			"stage":  "llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": true,
+				"summary":   "DoD satisfied",
+			},
+		},
+	)
+	if err != nil || len(refs) != 0 {
+		t.Fatalf("recordMemoryWrites refs=%+v err=%v, want optional run summary skipped without repository", refs, err)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeMemoryWritesConcurrently(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -8637,7 +8657,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitRoutesToAssessmentOnly(t
 	}
 }
 
-func TestRuntimeOrchestrator_AssessmentOnlyRejectsExecutionGraph(t *testing.T) {
+func TestRuntimeOrchestrator_AssessmentOnlyContractViolationDispatchesOneCorrection(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -8645,10 +8665,33 @@ func TestRuntimeOrchestrator_AssessmentOnlyRejectsExecutionGraph(t *testing.T) {
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	var assessmentOnlySeen bool
+	var correctionSeen bool
 	runtime := &stubRuntimeAdapter{
 		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
 			if boolValue(request.Input[stepInputKeyAssessmentOnly]) {
 				assessmentOnlySeen = true
+				if boolValue(request.Input["assessmentOnlyContractCorrection"]) {
+					correctionSeen = true
+					if _, ok := request.Input[stepOutputKeyExecutionGraph]; ok {
+						t.Fatalf("correction input retained executionGraph: %+v", request.Input)
+					}
+					if previous := mapFromValue(request.Input["previousInvalidAssessmentOutput"]); len(previous) == 0 || previous[stepOutputKeyExecutionGraph] != nil {
+						t.Fatalf("previousInvalidAssessmentOutput = %+v, want sanitized contract violation output", previous)
+					}
+					return map[string]any{
+						"status": "completed",
+						stepOutputKeyDoDAssessment: map[string]any{
+							"satisfied":   true,
+							"summary":     "assessment-only correction completed",
+							"goalOutcome": "assessment-only correction completed",
+							"items": []map[string]any{{
+								"item":         "contract corrected",
+								"state":        "satisfied",
+								"evidenceRefs": []string{string(request.StepID)},
+							}},
+						},
+					}, nil
+				}
 				return map[string]any{
 					"status": "completed",
 					stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
@@ -8699,13 +8742,341 @@ func TestRuntimeOrchestrator_AssessmentOnlyRejectsExecutionGraph(t *testing.T) {
 	if !assessmentOnlySeen {
 		t.Fatalf("assessment-only follow-up was not reached")
 	}
+	if !correctionSeen {
+		t.Fatalf("assessment-only contract correction follow-up was not reached")
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		steps, _ := stepRepo.ListByRun(ctx, runID)
+		t.Fatalf("run = %+v steps=%+v, want completed after contract correction", runItem, steps)
+	}
+	steps, err := stepRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	for _, step := range steps {
+		if strings.Contains(string(step.ID), "must_not_execute") {
+			t.Fatalf("steps = %+v, assessment-only executionGraph must not execute", steps)
+		}
+	}
+}
+
+func TestRuntimeOrchestrator_AssessmentOnlyContractViolationFailsAfterCorrectionRepeatsGraph(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	var correctionSeen bool
+	runtime := &stubRuntimeAdapter{
+		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			if boolValue(request.Input[stepInputKeyAssessmentOnly]) {
+				if boolValue(request.Input["assessmentOnlyContractCorrection"]) {
+					correctionSeen = true
+				}
+				return map[string]any{
+					"status": "completed",
+					stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+						{ID: "must_not_execute", Kind: "graph/mock"},
+					}},
+				}, nil
+			}
+			if boolValue(request.Input["graphFollowUp"]) {
+				return map[string]any{
+					"status": "completed",
+					stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+						{ID: runtimeChildID(request.StepID, "verify"), Kind: "graph/mock"},
+					}},
+				}, nil
+			}
+			if request.Kind == "graph/mock" {
+				return map[string]any{"status": "completed", "stdout": "graph node completed"}, nil
+			}
+			return map[string]any{
+				"status": "completed",
+				stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+					{ID: "inspect", Kind: "graph/mock"},
+				}},
+			}, nil
+		},
+	}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-assessment-only-rejects-repeated-graph")
+	runID := common.RunID("run-assessment-only-rejects-repeated-graph")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-assessment-only-rejects-repeated-graph"),
+		State:           common.RunStateCreated,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	if !correctionSeen {
+		t.Fatalf("assessment-only contract correction follow-up was not reached")
+	}
 	runItem, err := runRepo.Get(ctx, runID)
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
 	if runItem.State != common.RunStateFailed || !strings.Contains(runItem.FailureReason, "assessment-only step returned executionGraph") {
 		steps, _ := stepRepo.ListByRun(ctx, runID)
-		t.Fatalf("run = %+v steps=%+v, want failed contract violation", runItem, steps)
+		t.Fatalf("run = %+v steps=%+v, want failed after repeated contract violation", runItem, steps)
+	}
+}
+
+func TestRuntimeOrchestrator_AssessmentOnlyDecisionForContinuableCandidateRoutesToRepair(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		if boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]) {
+			return map[string]any{
+				"status": "completed",
+				"stage":  "llm_dod_assessment",
+				stepOutputKeyDoDAssessment: map[string]any{
+					"satisfied":   true,
+					"summary":     "repair produced implementation evidence",
+					"goalOutcome": "implementation evidence is now available",
+					"items": []map[string]any{{
+						"item":         "produce implementation",
+						"state":        "satisfied",
+						"evidenceRefs": []string{string(request.StepID)},
+					}},
+				},
+			}, nil
+		}
+		return map[string]any{
+			"status":                           "completed",
+			"stage":                            "llm_decision_required",
+			stepOutputKeyBlockDecisionReason:   "empty workspace requires execution target confirmation",
+			stepOutputKeyBlockDecisionKind:     decisioncommon.ResolutionTypeProvideMissingInfo,
+			stepOutputKeyBlockDecisionQuestion: "Initialize the current workspace or provide existing project content?",
+			stepOutputKeyBlockDecisionContext: map[string]any{
+				"candidateValues": map[string]any{
+					"executionTargetMode": []any{"init_from_scratch", "use_existing_project"},
+				},
+				"missingFields":       []any{"executionTargetMode"},
+				"requiresHumanFields": []any{"executionTargetMode"},
+			},
+		}, nil
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			Results:            memory.NewResultRepository(),
+			Artifacts:          memory.NewArtifactRepository(),
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-assessment-only-decision-repair")
+	runID := common.RunID("run-assessment-only-decision-repair")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		GoalID:          common.GoalID("goal-assessment-only-decision-repair"),
+		DoDID:           common.DoDID("dod-assessment-only-decision-repair"),
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{"items": []any{"produce implementation"}},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.dispatchStep(ctx, run, "run-assessment-only-decision-repair/provider-retry", llmcommon.StepKindWorkspaceExecution, map[string]any{
+		stepInputKeySoulStage:         soulStageValidation,
+		"providerRetryAssessmentOnly": true,
+		"providerRetryMode":           "completion_assessment_only",
+	}); err != nil {
+		t.Fatalf("dispatch assessment-only step: %v", err)
+	}
+
+	tickets, err := ticketRepo.ListByRunID(ctx, runID)
+	if err != nil {
+		t.Fatalf("list tickets: %v", err)
+	}
+	if len(tickets) != 0 {
+		ids := make([]common.TicketID, 0, len(tickets))
+		for _, ticket := range tickets {
+			ids = append(ids, ticket.ID)
+		}
+		steps, _ := stepRepo.ListByRun(ctx, runID)
+		stepSummaries := make([]map[string]any, 0, len(steps))
+		for _, step := range steps {
+			stepSummaries = append(stepSummaries, map[string]any{
+				"id":    step.ID,
+				"state": step.State,
+				"input": step.Input,
+				"stage": stringFromMap(step.Output, "stage"),
+				"error": firstNonEmptyString(stringFromMap(step.Output, "error"), stringFromMap(step.Output, "reason")),
+			})
+		}
+		t.Fatalf("tickets = %+v ids=%v steps=%+v, want no decision ticket for continuable assessment-only candidate", tickets, ids, stepSummaries)
+	}
+	failed, err := stepRepo.Get(ctx, "run-assessment-only-decision-repair/provider-retry")
+	if err != nil {
+		t.Fatalf("get assessment step: %v", err)
+	}
+	if failed.State != common.StepStateFailed || failed.Output["assessmentOnlyDecisionConvertedToRepair"] != true {
+		t.Fatalf("assessment step = %+v, want failed converted to repair", failed)
+	}
+	steps, err := stepRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	var repairSeen bool
+	for _, step := range steps {
+		if boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) {
+			repairSeen = true
+			break
+		}
+	}
+	if !repairSeen {
+		t.Fatalf("steps = %+v, want runtime repair follow-up", steps)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run = %+v, want completed after repair", runItem)
+	}
+}
+
+func TestRuntimeOrchestrator_ContinuableDecisionRoutesToRepair(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		if boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]) {
+			return map[string]any{
+				"status": "completed",
+				"stage":  "llm_dod_assessment",
+				stepOutputKeyDoDAssessment: map[string]any{
+					"satisfied":   true,
+					"summary":     "initialized project from scratch",
+					"goalOutcome": "project bootstrap evidence is available",
+					"items": []map[string]any{{
+						"item":         "produce implementation",
+						"state":        "satisfied",
+						"evidenceRefs": []string{string(request.StepID)},
+					}},
+				},
+			}, nil
+		}
+		return map[string]any{
+			"status":                           "completed",
+			"stage":                            "llm_decision_required",
+			stepOutputKeyBlockDecisionReason:   "empty workspace requires execution target confirmation",
+			stepOutputKeyBlockDecisionKind:     decisioncommon.ResolutionTypeProvideMissingInfo,
+			stepOutputKeyBlockDecisionQuestion: "Sync existing code or initialize a new project?",
+			stepOutputKeyBlockDecisionContext: map[string]any{
+				"candidateValues": map[string]any{
+					"initializationPermission": []any{"允许在空目录从零初始化 Go 网关项目", "不允许初始化，仅等待现有代码同步"},
+					"workspaceSource":          []any{"提供现有项目文件到当前 workspace"},
+				},
+				"missingFields":       []any{"workspaceSource", "initializationPermission"},
+				"requiresHumanFields": []any{"workspaceSource", "initializationPermission"},
+			},
+		}, nil
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			Results:            memory.NewResultRepository(),
+			Artifacts:          memory.NewArtifactRepository(),
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-continuable-decision-repair")
+	runID := common.RunID("run-continuable-decision-repair")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		GoalID:          common.GoalID("goal-continuable-decision-repair"),
+		DoDID:           common.DoDID("dod-continuable-decision-repair"),
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{"items": []any{"produce implementation"}},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.dispatchStep(ctx, run, "run-continuable-decision-repair/step-1", llmcommon.StepKindWorkspaceExecution, map[string]any{
+		stepInputKeySoulStage: soulStageExecution,
+	}); err != nil {
+		t.Fatalf("dispatch step: %v", err)
+	}
+	tickets, err := ticketRepo.ListByRunID(ctx, runID)
+	if err != nil {
+		t.Fatalf("list tickets: %v", err)
+	}
+	if len(tickets) != 0 {
+		t.Fatalf("tickets = %+v, want no decision ticket for continuable candidate", tickets)
+	}
+	failed, err := stepRepo.Get(ctx, "run-continuable-decision-repair/step-1")
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if failed.State != common.StepStateFailed || failed.Output["continuableDecisionConvertedToRepair"] != true {
+		t.Fatalf("step = %+v, want continuable decision converted to repair", failed)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run = %+v, want completed after repair", runItem)
 	}
 }
 

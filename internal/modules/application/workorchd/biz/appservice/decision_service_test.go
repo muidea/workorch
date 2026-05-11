@@ -286,6 +286,60 @@ func TestResolveDecisionWithBackendNormalizesSemanticIntent(t *testing.T) {
 	}
 }
 
+func TestResolveDecisionWithSessionSelectsContinuationCandidateFromApproveIntent(t *testing.T) {
+	session, tickets, _ := newCountingDecisionRuntimeSession(t)
+	ctx := context.Background()
+	ticketID := common.TicketID("ticket-candidate-continue")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:           ticketID,
+		WorkspaceID:  common.WorkspaceID("ws-candidate-continue"),
+		RunID:        common.RunID("run-candidate-continue"),
+		StepID:       common.StepID("run-candidate-continue/step-1"),
+		Reason:       "execution target choice is missing",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Continue in the current workspace or provide another target?",
+		Context: map[string]any{
+			"candidateValues": map[string]any{
+				"executionTargetMode": []any{"init_from_scratch", "use_existing_project"},
+			},
+			"missingFields":        []any{"executionTargetMode"},
+			"requiresHumanFields":  []any{"executionTargetMode"},
+			"confidenceByField":    map[string]any{"executionTargetMode": 0.98},
+			"knownValues":          map[string]any{"workspaceState": "empty"},
+			"decisionContextScope": "target_workspace",
+		},
+		State: common.DecisionTicketStateOpen,
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+		ResolutionPayload: map[string]any{
+			"answer":   "继续处理",
+			"operator": "tui",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveDecisionWithSession: %v", err)
+	}
+	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
+		t.Fatalf("decision = %+v, want resolved provide_missing_info", item)
+	}
+	if item.ResolutionPayload["executionTargetMode"] != "init_from_scratch" ||
+		item.ResolutionPayload["candidateSelectionMode"] != "semantic_continue" {
+		t.Fatalf("resolutionPayload = %+v, want selected continuation candidate", item.ResolutionPayload)
+	}
+	fields, ok := item.ResolutionPayload["selectedCandidateFields"].([]any)
+	if ok {
+		if len(fields) != 1 || fields[0] != "executionTargetMode" {
+			t.Fatalf("selectedCandidateFields = %+v, want executionTargetMode", fields)
+		}
+	} else if fieldsString, ok := item.ResolutionPayload["selectedCandidateFields"].([]string); !ok || len(fieldsString) != 1 || fieldsString[0] != "executionTargetMode" {
+		t.Fatalf("selectedCandidateFields = %+v, want executionTargetMode", item.ResolutionPayload["selectedCandidateFields"])
+	}
+}
+
 func TestResolveDecisionWithSessionRejectsInlineProviderConfigForProviderRecoveryTicket(t *testing.T) {
 	session, tickets, resolutions := newCountingDecisionRuntimeSession(t)
 	ctx := context.Background()

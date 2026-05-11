@@ -91,6 +91,7 @@ func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerProm
 	appendSection("goal-contract-original", "user", "raw_required", goalPromptSection(request.Input))
 	appendSection("dod-contract-original", "user", "raw_required", dodPromptSection(request.Input))
 	appendSection("effective-goal-dod", "user", "normalize_allowed", effectiveGoalDoDPromptSection(request.Input))
+	appendSection("governance-soul-policy", "user", "normalize_allowed", governanceSoulPolicyPromptSection(request.Input))
 	appendSection("previous-decision", "assistant", "normalize_allowed", previousDecisionPromptSection(request.Input))
 	appendSection("execution-signals", "user", "normalize_allowed", executionSignalsPromptSection(request))
 	appendSection("current-action", "user", "normalize_allowed", currentActionPromptSection(request))
@@ -178,7 +179,7 @@ func languageAndContractPrompt(request llmmodels.ProviderRequest) string {
 	if isDecisionSchemaRequest(request) {
 		return strings.Join([]string{
 			dialogLanguageInstruction(request),
-			decisionContractPrompt(),
+			decisionContractPrompt(request),
 			capabilityContractPrompt(request),
 		}, "\n\n")
 	}
@@ -269,6 +270,31 @@ func effectiveGoalDoDPromptSection(input map[string]any) string {
 	return marshalPromptSection("Effective Goal and DoD View", section)
 }
 
+func governanceSoulPolicyPromptSection(input map[string]any) string {
+	executionContext := recordFromAny(input["executionContext"])
+	section := map[string]any{}
+	copyMapValue(section, "currentSoulStage", input["currentSoulStage"])
+	copyMapValue(section, "currentSoul", input["currentSoul"])
+	copyMapValue(section, "currentSoulBinding", input["currentSoulBinding"])
+	routing := recordFromAny(executionContext["soulRouting"])
+	bindings := recordFromAny(routing["bindings"])
+	if len(bindings) > 0 {
+		selectedBindings := map[string]any{}
+		for _, stage := range []string{"planning", "execution", "validation", "decision", "approval"} {
+			if binding := recordFromAny(bindings[stage]); len(binding) > 0 {
+				selectedBindings[stage] = binding
+			}
+		}
+		if len(selectedBindings) > 0 {
+			section["stageBindings"] = selectedBindings
+		}
+	}
+	if len(section) == 0 {
+		return ""
+	}
+	return marshalPromptSection("Governance and Soul Policy View", section)
+}
+
 func previousDecisionPromptSection(input map[string]any) string {
 	value, ok := input["previousStepOutput"]
 	if !ok {
@@ -313,11 +339,27 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 		})
 	}
 	if request.Repair != nil {
+		requirements := []string{
+			"Return one valid JSON object matching workorch.llmExecutionDecision.v1",
+			"Keep decision intent unless schema correction requires a change",
+		}
+		if isAssessmentOnlyDecisionRequest(request) {
+			requirements = append(requirements, "Do not include executionGraph or any executable work fields")
+		}
 		return marshalPromptSection("Current Requested Action", map[string]any{
-			"type": "repair_invalid_json",
+			"type":         "repair_invalid_json",
+			"requirements": requirements,
+		})
+	}
+	if isAssessmentOnlyDecisionRequest(request) {
+		return marshalPromptSection("Current Requested Action", map[string]any{
+			"type": "assess_only",
 			"requirements": []string{
-				"Return one valid JSON object matching workorch.llmExecutionDecision.v1",
-				"Keep decision intent unless schema correction requires a change",
+				"Assess the current evidence against the effective Goal and DoD",
+				"Return completed or failed with dodAssessment, or a real requiredDecision/requiredApproval",
+				"Before returning blocked_on_decision, reconcile the question with the current, decision, planning, and execution Soul policies; do not ask for information that those policies explicitly say is not required",
+				"When evidence is insufficient but the missing work can be handled by later runtime repair or replan, return failed with dodAssessment.nextActions instead of asking the user to choose the execution target",
+				"Do not include executionGraph, shellCommands, patchRequests, mcpToolCalls, memoryWrites, nextAction, or executable work",
 			},
 		})
 	}
@@ -327,6 +369,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			"Use runtimeCapabilities only",
 			"Respect unresolved governance constraints",
 			"Treat effective Goal and DoD as hard constraints",
+			"If the current workspace is empty and the effective Goal/DoD can be satisfied by creating a new project or files, continue by planning bootstrap and implementation work instead of asking whether initialization is allowed",
 		},
 	})
 }

@@ -394,7 +394,7 @@ func trimmedJoin(basePath string, child string) string {
 func chatMessagesForRequest(request *llmmodels.ProviderRequest) []chatCompletionMessage {
 	if request == nil {
 		return []chatCompletionMessage{
-			{Role: "system", Content: systemPrompt()},
+			{Role: "system", Content: systemPrompt(false)},
 			{Role: "user", Content: "{}"},
 		}
 	}
@@ -412,7 +412,7 @@ func chatMessagesForRequest(request *llmmodels.ProviderRequest) []chatCompletion
 	}
 	if len(messages) == 0 {
 		messages = []chatCompletionMessage{
-			{Role: "system", Content: systemPrompt()},
+			{Role: "system", Content: systemPromptForRequest(*request)},
 			{Role: "user", Content: userPrompt(*request)},
 		}
 	}
@@ -435,22 +435,32 @@ func defaultPromptIncludedSections(messages []chatCompletionMessage) []string {
 	return out
 }
 
-func systemPrompt() string {
-	return strings.Join([]string{
+func systemPrompt(assessmentOnly bool) string {
+	lines := []string{
 		"You are the workorch workspace execution planner.",
 		"Return only one JSON object matching schema workorch.llmExecutionDecision.v1.",
 		"Do not wrap the JSON in markdown.",
-		"Do not execute tools directly. Request shell, patch, MCP, Decision, Approval, Memory, DoD assessment, or ExecutionGraph through the JSON fields only.",
 		"Do not invent a workorch CLI. workorch is a service exposed through HTTP APIs and runtime blocks; there is no shell command named workorch unless the provider request explicitly lists it as available.",
-		"Use only runtime block kinds and service APIs declared in runtimeCapabilities. Do not invent local service endpoints.",
 		"Use the provider request dialogLanguage for every user-facing text value, while keeping JSON field names and schema enum values unchanged.",
 		"The word json is intentional because some providers require it when response_format is json_object.",
-	}, "\n")
+	}
+	if assessmentOnly {
+		lines = append(lines,
+			"Assessment-only mode is active: do not return executionGraph, shellCommands, patchRequests, mcpToolCalls, memoryWrites, nextAction, or any executable work.",
+			"Return only dodAssessment with completed or failed, or requiredDecision/requiredApproval for a real governance blocker.",
+		)
+	} else {
+		lines = append(lines,
+			"Do not execute tools directly. Request shell, patch, MCP, Decision, Approval, Memory, DoD assessment, or ExecutionGraph through the JSON fields only.",
+			"Use only runtime block kinds and service APIs declared in runtimeCapabilities. Do not invent local service endpoints.",
+		)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func systemPromptForRequest(request llmmodels.ProviderRequest) string {
 	if isDecisionSchemaRequest(request) {
-		return systemPrompt()
+		return systemPrompt(isAssessmentOnlyDecisionRequest(request))
 	}
 	return strings.Join([]string{
 		"You are a WorkOrch structured JSON generation assistant.",
@@ -492,7 +502,7 @@ func userPrompt(request llmmodels.ProviderRequest) string {
 			"Repair the invalid workorch.llmExecutionDecision.v1 json output.",
 			"Return only the corrected JSON object. Do not change the business intent except where required to satisfy the schema.",
 			dialogLanguageInstruction(request),
-			decisionContractPrompt(),
+			decisionContractPrompt(request),
 			capabilityContractPrompt(request),
 			"",
 			"Invalid provider request and repair context:",
@@ -502,7 +512,7 @@ func userPrompt(request llmmodels.ProviderRequest) string {
 	return strings.Join([]string{
 		"Plan the next workspace execution step from this provider request.",
 		dialogLanguageInstruction(request),
-		decisionContractPrompt(),
+		decisionContractPrompt(request),
 		capabilityContractPrompt(request),
 		"",
 		string(body),
@@ -517,7 +527,29 @@ func dialogLanguageInstruction(request llmmodels.ProviderRequest) string {
 	return fmt.Sprintf("Conversation language: %s. Use this language for all user-facing text, including thoughtSummary, plan entries, decision questions, approval reasons, memory summaries, DoD item labels, DoD summaries, result summaries, and artifact-facing summaries. Keep JSON keys, enum values, block kinds, commands, file paths, identifiers, and evidence refs unchanged.", language)
 }
 
-func decisionContractPrompt() string {
+func decisionContractPrompt(request llmmodels.ProviderRequest) string {
+	if isAssessmentOnlyDecisionRequest(request) {
+		return strings.Join([]string{
+			"Required output JSON fields use the LLMExecutionDecision assessment-only contract:",
+			"- completionState must be one of: completed, failed, blocked_on_decision, blocked_on_approval.",
+			"- Do not return executionGraph, shellCommands, patchRequests, mcpToolCalls, memoryWrites, nextAction, or any other executable work.",
+			"- Return completed with dodAssessment only when current evidence satisfies the effective DoD.",
+			"- Return failed with dodAssessment when evidence is insufficient or DoD items remain unmet and no immediate governance blocker exists.",
+			"- Before returning blocked_on_decision, reconcile the question with input.currentSoul, input.currentSoulBinding, and the decision/planning/execution/validation bindings in input.executionContext.soulRouting. If those policies say the information must not be requested or can be handled automatically, return failed with dodAssessment and concrete nextActions instead.",
+			"- In provider retry, completion follow-up, and graph follow-up assessment-only paths, do not ask the user to choose an execution target when the current evidence only shows missing work that a later runtime repair or replan can perform.",
+			"- For blocked_on_decision, include requiredDecision.context whenever known values, missing fields, or safe candidate values exist. Use requiresHumanFields for unresolved human input.",
+			"- For blocked_on_approval, include requiredApproval only for a real high-risk action that cannot proceed automatically.",
+			"- If input.assessmentOnlyContractCorrection is true, the previous response violated assessment-only mode by returning executable work. Do not repeat executable fields; summarize the violation in dodAssessment.residualRisks or nextActions if useful.",
+			"- dodAssessment.items must cover every current effective DoD item from input.executionContext.dod/items. Do not omit DoD items that are not yet satisfied; mark them failed/skipped with reason, impact, residualRisks, and nextActions.",
+			"- Satisfied dodAssessment items must include evidenceRefs. Failed or skipped items should include evidenceRefs when available.",
+			"- Include dodAssessment.summary and dodAssessment.goalOutcome as non-empty user-facing text. When known include implementationSummary, verificationSummary, knownLimitations, residualRisks, and nextActions.",
+			"- Do not include workspaceId, runId, stepId, schema, traceRefs, config, or any unknown top-level field in the decision JSON.",
+			"Minimal assessment-only examples:",
+			`{"completionState":"completed","dodAssessment":{"satisfied":true,"summary":"The DoD is satisfied by the collected evidence.","goalOutcome":"The requested work is complete.","items":[{"item":"tests pass","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}],"residualRisks":[],"nextActions":["Review the generated artifacts."]}}`,
+			`{"completionState":"failed","dodAssessment":{"satisfied":false,"summary":"The DoD is not satisfied by the current evidence.","goalOutcome":"The requested work is incomplete.","items":[{"item":"streaming support","state":"failed","evidenceRefs":["run-1/step-2"],"reason":"No streaming-path evidence was produced.","impact":"Clients cannot verify streaming behavior."}],"residualRisks":["Streaming path remains unverified."],"nextActions":["Create targeted streaming implementation and tests in a new repair step."]}}`,
+			`{"completionState":"blocked_on_decision","requiredDecision":{"reason":"missing target repository","decisionKind":"provide_missing_info","question":"Please provide the target repository or working directory.","context":{"missingFields":["workingDirectory"],"requiresHumanFields":["workingDirectory"]}}}`,
+		}, "\n")
+	}
 	return strings.Join([]string{
 		"Required output JSON fields use the LLMExecutionDecision contract:",
 		"- completionState must be one of: continue, blocked_on_decision, blocked_on_approval, completed, failed.",
@@ -526,6 +558,7 @@ func decisionContractPrompt() string {
 		"- executionGraph.nodes kind values must be selected from runtimeCapabilities.blockKinds only.",
 		"- Sensitive paths and large patches require Approval before apply. After approval is granted, include the approved approvalId in patch/apply or patchRequests.",
 		"- Use shellCommands, patchRequests, mcpToolCalls, requiredDecision, requiredApproval, memoryWrites, or dodAssessment as appropriate.",
+		"- If the current workspace is empty and the effective Goal/DoD can be satisfied by creating a new project or files, return continue with an executionGraph that bootstraps and implements the project; do not ask whether initialization is allowed.",
 		"- For blocked_on_decision, include requiredDecision.context whenever known values, missing fields, or safe candidate values exist. Use neutral structured keys: knownValues, missingFields, candidateValues, confidenceByField, requiresHumanFields. Do not put domain-specific policy in field names beyond the fields needed by the current task.",
 		"- Auto governance may resolve only high-confidence structured candidates. Put fields that still require explicit human input in requiresHumanFields instead of guessing.",
 		"- Top-level patchRequests are immediate patch side effects of the current LLM step and may use only patchType, targetRef, content, diff, summary, baseHash, and approvalId. patchType must be file_write or unified_diff. Do not include an operation field.",
@@ -555,6 +588,9 @@ func decisionContractPrompt() string {
 }
 
 func capabilityContractPrompt(request llmmodels.ProviderRequest) string {
+	if isAssessmentOnlyDecisionRequest(request) {
+		return "Assessment-only capability contract: executable runtime block kinds and service APIs are intentionally unavailable. Use only current evidence, dodAssessment, requiredDecision, or requiredApproval."
+	}
 	lines := []string{"Runtime capability contract:"}
 	if requestHasBlockKind(request, "file/list") || requestHasBlockKind(request, "file/read") || requestHasBlockKind(request, "file/edit") {
 		lines = append(lines, "- Prefer file/list and file/read for workspace file discovery and bounded file inspection. Probe unknown or optional files with file/list first, or set file/read optional:true so a missing file returns exists:false instead of becoming a repair failure. Use file/edit only to generate a non-mutating exact-text replacement patch preview; it does not write files.")

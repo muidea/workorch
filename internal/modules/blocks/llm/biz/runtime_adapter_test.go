@@ -32,6 +32,18 @@ func (p *staticProvider) Complete(_ context.Context, request llmmodels.ProviderR
 	}, p.err
 }
 
+func promptContextText(context *llmmodels.PromptContext) string {
+	if context == nil {
+		return ""
+	}
+	var joined strings.Builder
+	for _, turn := range context.Turns {
+		joined.WriteString(turn.Content)
+		joined.WriteByte('\n')
+	}
+	return joined.String()
+}
+
 type sequenceProvider struct {
 	payloads [][]byte
 	requests []llmmodels.ProviderRequest
@@ -453,6 +465,39 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterHidesExecutableCapabilitiesForAssessmentOnlyRequest(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{
+		"completionState":"failed",
+		"dodAssessment":{
+			"satisfied":false,
+			"summary":"current evidence is insufficient",
+			"goalOutcome":"incomplete",
+			"items":[{"item":"done","state":"failed","reason":"missing evidence"}]
+		}
+	}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+	request := llmStepRequest()
+	request.Input["assessmentOnly"] = true
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), request)
+	if err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	if len(provider.request.RuntimeCapabilities.BlockKinds) != 0 || len(provider.request.RuntimeCapabilities.ServiceAPIs) != 0 {
+		t.Fatalf("runtime capabilities = %+v, assessment-only request must hide executable capabilities", provider.request.RuntimeCapabilities)
+	}
+	if !provider.request.RuntimeCapabilities.ShellPolicy.Enabled {
+		t.Fatalf("runtime capabilities = %+v, want shell policy evidence retained", provider.request.RuntimeCapabilities)
+	}
+	if result.Output["stage"] != "llm_dod_assessment" {
+		t.Fatalf("output = %+v, want DoD assessment output", result.Output)
+	}
+}
+
 func TestRuntimeAdapterToleratesPatchOperationProviderDrift(t *testing.T) {
 	provider := &staticProvider{payload: []byte(`{
 		"completionState":"continue",
@@ -816,6 +861,80 @@ func TestRuntimeAdapterInjectsCurrentSoulFromRoutingIntoProviderRequest(t *testi
 	soul := provider.request.Input["currentSoul"].(map[string]any)
 	if soul["id"] != "soul-decision" || soul["name"] != "Decision Soul" {
 		t.Fatalf("currentSoul = %+v, want decision soul context", soul)
+	}
+}
+
+func TestRuntimeAdapterAssessmentOnlyPromptProjectsDecisionAndExecutionSoulPolicies(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{
+		"completionState":"failed",
+		"dodAssessment":{
+			"satisfied":false,
+			"summary":"Current evidence is insufficient.",
+			"goalOutcome":"The goal is incomplete.",
+			"items":[{"item":"project exists","state":"failed","reason":"workspace scan is empty"}],
+			"nextActions":["Initialize the minimal project in a repair step."]
+		}
+	}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+	request := llmStepRequest()
+	request.Input["soulStage"] = "validation"
+	request.Input["providerRetryAssessmentOnly"] = true
+	request.Input["providerRetryMode"] = "completion_assessment_only"
+	request.Input["executionContext"] = map[string]any{
+		"soulRouting": map[string]any{
+			"bindings": map[string]any{
+				"validation": map[string]any{
+					"soulId": "soul-validation",
+					"source": "workspace_stage_binding",
+					"soul": map[string]any{
+						"id":     "soul-validation",
+						"name":   "Validation Soul",
+						"soulMd": "# Validation\n\nAssess every DoD item before completion.",
+					},
+				},
+				"decision": map[string]any{
+					"soulId": "soul-decision",
+					"source": "workspace_stage_binding",
+					"soul": map[string]any{
+						"id":     "soul-decision",
+						"name":   "Decision Soul",
+						"soulMd": "# Decision\n\nDo not ask for source code when an empty workspace can be initialized as a new project.",
+					},
+				},
+				"execution": map[string]any{
+					"soulId": "soul-execution",
+					"source": "workspace_stage_binding",
+					"soul": map[string]any{
+						"id":     "soul-execution",
+						"name":   "Execution Soul",
+						"soulMd": "# Execution\n\nWhen the workspace is empty and existing source is not required, initialize a minimal verifiable project.",
+					},
+				},
+			},
+		},
+	}
+
+	if _, err := adapter.ExecuteRuntimeStep(context.Background(), request); err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	if provider.request.Input["currentSoulStage"] != "validation" {
+		t.Fatalf("currentSoulStage = %v, want validation", provider.request.Input["currentSoulStage"])
+	}
+	joined := promptContextText(provider.request.PromptContext)
+	for _, want := range []string{
+		"Governance and Soul Policy View",
+		"Before returning blocked_on_decision",
+		"later runtime repair or replan",
+		"Do not ask for source code when an empty workspace can be initialized as a new project",
+		"When the workspace is empty and existing source is not required",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("prompt context missing %q:\n%s", want, joined)
+		}
 	}
 }
 

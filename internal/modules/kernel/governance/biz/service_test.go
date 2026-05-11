@@ -534,6 +534,53 @@ func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 	}
 }
 
+func TestInferMissingInfoAnswerSelectsContinuableCandidate(t *testing.T) {
+	answer, confidence, reason, _ := inferMissingInfoAnswer(
+		map[string]any{
+			"candidateValues": map[string]any{
+				"initializationPermission": []any{"允许在空目录从零初始化 Go 网关项目", "不允许初始化，仅等待现有代码同步"},
+				"workspaceSource":          []any{"提供现有项目文件到当前 workspace"},
+			},
+			"missingFields":       []any{"workspaceSource", "initializationPermission"},
+			"requiresHumanFields": []any{"workspaceSource", "initializationPermission"},
+			"confidenceByField": map[string]any{
+				"initializationPermission": 0.93,
+				"workspaceSource":          0.95,
+			},
+		},
+		"请提供下一步工作目标",
+		"当前工作区为空",
+		"",
+		&workspacemodel.DoD{Items: []string{"usage.csv 包含：时间, 模型, 输入Token"}},
+		nil,
+	)
+	if answer != "initializationPermission=允许在空目录从零初始化 Go 网关项目" ||
+		confidence != 0.93 ||
+		reason != "answer inferred from continuable ticket candidate" {
+		t.Fatalf("answer=%q confidence=%v reason=%q, want continuable candidate", answer, confidence, reason)
+	}
+}
+
+func TestInferMissingInfoAnswerDoesNotUseGoalOrDoDTextForCandidateTicket(t *testing.T) {
+	answer, confidence, reason, _ := inferMissingInfoAnswer(
+		map[string]any{
+			"candidateValues": map[string]any{
+				"workspaceSource": []any{"提供现有项目文件到当前 workspace", "提供代码仓库内容/打包文件后再继续"},
+			},
+			"missingFields":       []any{"workspaceSource"},
+			"requiresHumanFields": []any{"workspaceSource"},
+		},
+		"请提供 workspaceSource",
+		"当前工作区为空",
+		"workspaceSource: 从目标描述推断",
+		&workspacemodel.DoD{Items: []string{"workspaceSource: 时间"}},
+		nil,
+	)
+	if answer != "" || confidence != 0 || reason != "" {
+		t.Fatalf("answer=%q confidence=%v reason=%q, want no guessed answer for candidate ticket", answer, confidence, reason)
+	}
+}
+
 func TestServiceEscalatesTicketWhenStructuredCandidateRequiresHuman(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()

@@ -88,6 +88,54 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	}
 }
 
+func TestHTTPProviderAssessmentOnlyPromptHidesExecutionGraphContract(t *testing.T) {
+	var gotPayload chatCompletionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"choices":[{"message":{"content":"{\"completionState\":\"failed\",\"dodAssessment\":{\"satisfied\":false,\"summary\":\"needs more evidence\",\"goalOutcome\":\"incomplete\",\"items\":[{\"item\":\"done\",\"state\":\"failed\",\"reason\":\"missing evidence\"}]}}"}}]
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		BaseURL:  server.URL + "/v1",
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Timeout:  5 * time.Second,
+	})
+	request := llmProviderRequest()
+	request.Input["assessmentOnly"] = true
+	request.RuntimeCapabilities = assessmentOnlyRuntimeCapabilities(request.RuntimeCapabilities)
+
+	_, err := provider.Complete(context.Background(), request)
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	joined := ""
+	for _, message := range gotPayload.Messages {
+		joined += "\n" + message.Content
+	}
+	if !strings.Contains(joined, "Assessment-only mode is active") ||
+		!strings.Contains(joined, "Do not return executionGraph") ||
+		!strings.Contains(joined, "Before returning blocked_on_decision") ||
+		!strings.Contains(joined, "decision/planning/execution/validation bindings") ||
+		!strings.Contains(joined, "later runtime repair or replan") ||
+		!strings.Contains(joined, `"type":"assess_only"`) {
+		t.Fatalf("messages = %+v, want assessment-only contract", gotPayload.Messages)
+	}
+	if strings.Contains(joined, "Use executionGraph when") ||
+		strings.Contains(joined, `"executionGraph":{"nodes"`) ||
+		strings.Contains(joined, `"blockKinds":[`) ||
+		strings.Contains(joined, `"serviceAPIs":[`) {
+		t.Fatalf("messages = %+v, assessment-only prompt must not expose executable graph contract", gotPayload.Messages)
+	}
+}
+
 func TestHTTPProviderCompleteReportsProviderErrorWithoutLeakingSecret(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "upstream rejected secret-value", http.StatusUnauthorized)

@@ -72,6 +72,192 @@ func approvalBlockSpec(output map[string]any) runtimeApprovalBlockSpec {
 	}
 }
 
+func assessmentOnlyDecisionShouldRepair(step *runModel.Step, spec runtimeDecisionBlockSpec) bool {
+	if step == nil || spec.Reason == "" {
+		return false
+	}
+	if !boolValue(step.Input["providerRetryAssessmentOnly"]) &&
+		!boolValue(step.Input[stepInputKeyAssessmentOnly]) &&
+		!boolValue(step.Input[stepInputKeyGraphLimitFollowUp]) {
+		return false
+	}
+	if strings.TrimSpace(spec.DecisionKind) != "" &&
+		strings.TrimSpace(spec.DecisionKind) != decisioncommon.ResolutionTypeProvideMissingInfo {
+		return false
+	}
+	if continuableCandidateContext(spec.Context) {
+		return true
+	}
+	for _, field := range stringListFromValue(spec.Context["missingFields"]) {
+		if isExecutionTargetField(field) {
+			return true
+		}
+	}
+	for _, field := range stringListFromValue(spec.Context["requiresHumanFields"]) {
+		if isExecutionTargetField(field) {
+			return true
+		}
+	}
+	return false
+}
+
+func continuableDecisionShouldRepair(step *runModel.Step, spec runtimeDecisionBlockSpec) bool {
+	if step == nil || spec.Reason == "" {
+		return false
+	}
+	if strings.TrimSpace(spec.DecisionKind) != "" &&
+		strings.TrimSpace(spec.DecisionKind) != decisioncommon.ResolutionTypeProvideMissingInfo {
+		return false
+	}
+	return continuableCandidateContext(spec.Context)
+}
+
+func continuableCandidateContext(context map[string]any) bool {
+	candidates := mapFromValue(context["candidateValues"])
+	for _, value := range candidates {
+		if continuableCandidateValue(value) {
+			return true
+		}
+	}
+	return false
+}
+
+func continuableCandidateValue(value any) bool {
+	switch typed := value.(type) {
+	case string:
+		return isContinuableCandidateText(typed)
+	case []string:
+		for _, item := range typed {
+			if isContinuableCandidateText(item) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			if continuableCandidateValue(item) {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, nested := range typed {
+			if continuableCandidateValue(nested) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isContinuableCandidateText(value string) bool {
+	normalized := normalizedDecisionRepairText(value)
+	if normalized == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"init", "initialize", "bootstrap", "fromscratch", "newproject", "currentworkspace", "currentdirectory",
+		"初始化", "从零", "新项目", "当前工作区", "当前目录",
+	} {
+		if strings.Contains(normalized, normalizedDecisionRepairText(marker)) {
+			return true
+		}
+	}
+	return false
+}
+
+func isExecutionTargetField(value string) bool {
+	normalized := normalizedDecisionRepairText(value)
+	if normalized == "" {
+		return false
+	}
+	for _, marker := range []string{"executiontarget", "targetmode", "workspacepath", "projectlocation", "projectcontent", "workingdirectory", "执行目标", "项目路径", "工作目录"} {
+		if strings.Contains(normalized, normalizedDecisionRepairText(marker)) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedDecisionRepairText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer(" ", "", "\t", "", "\n", "", "\r", "", "-", "", "_", "", "/", "", "\\", "", ".", "")
+	return replacer.Replace(value)
+}
+
+func stringListFromValue(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if item = strings.TrimSpace(item); item != "" {
+				ret = append(ret, item)
+			}
+		}
+		return ret
+	case []any:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+				ret = append(ret, strings.TrimSpace(text))
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
+}
+
+func assessmentOnlyDecisionRepairAssessment(run *runModel.Run, step *runModel.Step, spec runtimeDecisionBlockSpec) map[string]any {
+	items := assessmentRepairDoDItems(run, step, spec)
+	return map[string]any{
+		"satisfied":             false,
+		"summary":               "The assessment-only step requested a decision for work that can continue through runtime repair or replan.",
+		"goalOutcome":           "The requested work is incomplete and should continue through automated implementation or verification work.",
+		"implementationSummary": "No implementation evidence was produced before the decision request.",
+		"verificationSummary":   "Current evidence is insufficient for DoD satisfaction.",
+		"items":                 items,
+		"residualRisks": []string{
+			"The requested work has not yet produced implementation or verification evidence.",
+		},
+		"nextActions": []string{
+			"Replan the missing implementation or bootstrap work using the resolved Goal and DoD.",
+			"Run concrete verification after implementation and produce evidence refs for every DoD item.",
+		},
+	}
+}
+
+func assessmentRepairDoDItems(run *runModel.Run, step *runModel.Step, spec runtimeDecisionBlockSpec) []map[string]any {
+	names := effectiveDoDItemTexts(run)
+	if len(names) == 0 {
+		names = []string{"effective DoD"}
+	}
+	ret := make([]map[string]any, 0, len(names))
+	evidenceRef := ""
+	if step != nil {
+		evidenceRef = string(step.ID)
+	}
+	for _, name := range names {
+		item := map[string]any{
+			"item":   name,
+			"state":  "failed",
+			"reason": firstNonEmptyString(spec.Reason, "Assessment-only decision did not produce implementation or verification evidence."),
+			"impact": "The runtime cannot mark this DoD item satisfied without concrete execution evidence.",
+		}
+		if evidenceRef != "" {
+			item["evidenceRefs"] = []string{evidenceRef}
+		}
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func effectiveDoDItemTexts(run *runModel.Run) []string {
+	if run == nil || len(run.ExecutionContext) == 0 {
+		return nil
+	}
+	dod := mapFromValue(run.ExecutionContext["dod"])
+	return stringListFromValue(dod["items"])
+}
+
 func (o *RuntimeOrchestrator) createDecisionTicket(
 	ctx context.Context,
 	run *runModel.Run,
