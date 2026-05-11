@@ -264,6 +264,8 @@ Tool / MCP Memory 记录：
 | DMI-10 | assessment-only 合约收口 | P0 | orchestrator completion gate / LLM prompt | 已落地：assessment-only 响应若夹带 `executionGraph` 但已有 `dodAssessment`，runtime 忽略 graph、记录 contract violation 并继续 DoD gate；仅无 assessment 时才触发 contract correction |
 | DMI-11 | 弱验证证据回流 execution repair | P0 | evidence quality / runtime repair / software-dev Soul | 已落地：`inconclusive` / `zeroWork` 证据会形成 `dod_evidence_quality_gap` 诊断，repair input 明确要求补真实测试/断言并重新验证 |
 | DMI-12 | Memory 噪音与终态 recall 误判收口 | P1 | memory writer / selector / verify script | 已落地：去除隐式重复 `run_summary`，validation command 记录 stdout/summary 信号，repair lesson 提炼缺失文件等可复用教训，selector 限制单个历史 run 占满召回槽位，部署核对脚本区分终态后写入的高价值 Memory |
+| DMI-13 | Rejected result 与 assessment/repair 状态机收口 | P0 | orchestrator completion gate / runtime repair | 已落地：中间 DoD gate 失败不再提前写 rejected result；只有终态失败或阻塞前才记录 rejected result；已有 rejected result 的 running run 会停止继续 dispatch 并关闭；assessment-only 二次返回 executable graph 直接失败，不再转 repair；repair 返回非可执行 unsatisfied assessment 直接闭合失败 |
+| DMI-14 | Goal delta 覆盖与执行契约收口 | P0 | orchestrator completion gate / graph contract / patch adapter / software-dev Soul | 已落地：completion gate 强制校验当前 Goal requirement 覆盖，可通过 `dodAssessment.goalCoverage` 提供证据；execution-stage LLM graph node 不能只返回下一层 `executionGraph`；patch/apply 拦截空内容、空 diff 和 unresolved placeholder；software-dev Soul 默认自主选择常规配置 schema，不为普通配置字段请求 decision |
 
 ## 当前落地状态
 
@@ -295,6 +297,16 @@ Tool / MCP Memory 记录：
   - runtime repair lesson 会把缺失文件读取等失败提炼成可复用教训，避免只留下泛化的 `Runtime repair lesson captured`。
   - step-input selector 对同一个历史 run 设置最大选中数，防止旧 failed/superseded run 的多条 Memory 占满上下文。
   - 部署核对脚本不再把 accepted completed run 在终态后写入、没有后续 LLM step 可召回的高价值 Memory 判定为失败。
+- Rejected result / assessment / repair 状态机已收口：
+  - completion gate 中间态失败只进入 repair 或 blocker，不再立即写正式 rejected result。
+  - 一旦写入 rejected result，run 不允许继续派发新 step；若仍处于 running，会关闭为 failed。
+  - assessment-only 首次返回 executable graph 且无 assessment 时只允许一次 contract correction；correction 再次返回 graph 会直接失败，不再转入 repair。
+  - runtime repair 必须产出可执行 continuation；若只返回 unsatisfied `dodAssessment`，会记录 rejected result 并关闭 run，避免 assessment/repair 循环。
+- Goal delta / execution contract 已收口：
+  - accepted result 的 completion gate 不再只看 DoD items；当前 Goal 文本中未被 DoD 覆盖的 requirement 必须在 `dodAssessment.goalCoverage.items` 或 satisfied assessment item 中提供 evidenceRefs。
+  - execution-stage 的 LLM graph node 如果只返回下一层 `executionGraph`，会被判定为 contract violation，进入失败/修复路径，不再无限嵌套规划。
+  - patch/apply 输入必须是具体可执行内容：`file_write` 需要非空 content，`unified_diff` 需要非空 diff，并拒绝 `<<FROM_...>>`、省略实现、伪代码、占位内容等 unresolved placeholder。
+  - software-dev Soul 明确普通配置 schema、字段命名、默认路由策略属于实现细节；多 provider/多 LLM 网关默认采用 `providers[]` + `enabled` + `model_prefixes`，不再为此触发人工 decision。
 - software-dev 默认 Soul 已补充：
   - planning 阶段读取可选文件前先 `file/list`，不确定时 `file/read optional:true`。
   - execution 阶段遇到无测试、0 tests、无断言或 inconclusive evidence 时必须补有效测试/断言，不得重复运行弱验证命令。

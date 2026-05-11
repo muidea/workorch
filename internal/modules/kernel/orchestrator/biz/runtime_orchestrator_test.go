@@ -2359,6 +2359,28 @@ func TestRuntimePatchRequestRejectsUnresolvedSymbolicPlaceholderContent(t *testi
 	}
 }
 
+func TestRuntimePatchRequestRejectsAnglePlaceholderDiff(t *testing.T) {
+	_, err := runtimePatchRequestFromMap(map[string]any{
+		"patchType": "unified_diff",
+		"targetRef": "main.go",
+		"diff":      "<<FROM_IMPLEMENTATION_STEP_MAIN_DIFF>>",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unresolved runtime template") {
+		t.Fatalf("runtimePatchRequestFromMap error = %v, want unresolved angle placeholder error", err)
+	}
+}
+
+func TestRuntimePatchRequestRejectsEmptyFileWriteContent(t *testing.T) {
+	_, err := runtimePatchRequestFromMap(map[string]any{
+		"patchType": "file_write",
+		"targetRef": "config.json",
+		"content":   "   ",
+	})
+	if err == nil || !strings.Contains(err.Error(), "patch content is required") {
+		t.Fatalf("runtimePatchRequestFromMap error = %v, want empty content error", err)
+	}
+}
+
 func TestNextGraphStepInputRendersDependencyOutputTemplates(t *testing.T) {
 	rootStepID := common.StepID("run-render/step-1")
 	completedStep := &runmodel.Step{
@@ -8136,11 +8158,12 @@ func TestRuntimeOrchestrator_RepairsInconclusiveSatisfiedDoDAssessmentBeforeEsca
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if runItem.State != common.RunStateBlockedOnDecision || runItem.BlockingTicketID == "" {
-		t.Fatalf("run = %+v, want blocked decision after repair exhaustion", runItem)
+	if runItem.State != common.RunStateFailed ||
+		!strings.Contains(runItem.FailureReason, "satisfied dodAssessment item") {
+		t.Fatalf("run = %+v, want failed after repair returned non-actionable weak assessment", runItem)
 	}
-	if len(repairInputs) != maxRuntimeRepairAttempts {
-		t.Fatalf("repair inputs = %d, want %d", len(repairInputs), maxRuntimeRepairAttempts)
+	if len(repairInputs) != 1 {
+		t.Fatalf("repair inputs = %d, want one non-actionable repair assessment", len(repairInputs))
 	}
 	if repairInputs[0]["failedStepId"] == "" || repairInputs[0]["failedStepOutput"] == nil {
 		t.Fatalf("first repair input = %+v, want failed DoD context", repairInputs[0])
@@ -8152,13 +8175,8 @@ func TestRuntimeOrchestrator_RepairsInconclusiveSatisfiedDoDAssessmentBeforeEsca
 	if result.State != common.ResultStateRejected || result.DoDAssessment.Satisfied {
 		t.Fatalf("result = %+v, want rejected unsatisfied DoD result", result)
 	}
-	ticket, err := ticketRepo.Get(ctx, runItem.BlockingTicketID)
-	if err != nil {
-		t.Fatalf("get repair escalation ticket: %v", err)
-	}
-	if ticket.DecisionKind != decisioncommon.ResolutionTypeProvideMissingInfo ||
-		ticket.Context[decisionContextKeyRecoveryPolicy] != decisionContextRecoveryPolicyRepairPlan {
-		t.Fatalf("ticket = %+v, want repair-plan decision", ticket)
+	if tickets, err := ticketRepo.ListByRunID(ctx, runID); err != nil || len(tickets) != 0 {
+		t.Fatalf("tickets = %+v err=%v, want no repair exhaustion ticket for non-actionable repair assessment", tickets, err)
 	}
 }
 
@@ -9259,7 +9277,7 @@ func TestRuntimeOrchestrator_AssessmentOnlyIgnoresGraphWhenAssessmentIsPresent(t
 	}
 }
 
-func TestRuntimeOrchestrator_AssessmentOnlyContractViolationConvertsRepeatedGraphToRepair(t *testing.T) {
+func TestRuntimeOrchestrator_AssessmentOnlyContractViolationFailsRepeatedGraph(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -9267,24 +9285,10 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationConvertsRepeatedGrap
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	var correctionSeen bool
-	var repairSeen bool
 	runtime := &stubRuntimeAdapter{
 		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
 			if boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]) {
-				repairSeen = true
-				return map[string]any{
-					"status": "completed",
-					stepOutputKeyDoDAssessment: map[string]any{
-						"satisfied":   true,
-						"summary":     "assessment-only contract violation repaired",
-						"goalOutcome": "assessment-only contract violation repaired",
-						"items": []map[string]any{{
-							"item":         "contract violation repaired",
-							"state":        "satisfied",
-							"evidenceRefs": []string{string(request.StepID)},
-						}},
-					},
-				}, nil
+				t.Fatalf("runtime repair follow-up should not be dispatched for repeated assessment-only graph violation")
 			}
 			if boolValue(request.Input[stepInputKeyAssessmentOnly]) {
 				if boolValue(request.Input["assessmentOnlyContractCorrection"]) {
@@ -9339,32 +9343,23 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationConvertsRepeatedGrap
 	if !correctionSeen {
 		t.Fatalf("assessment-only contract correction follow-up was not reached")
 	}
-	if !repairSeen {
-		t.Fatalf("runtime repair follow-up was not reached after repeated contract violation")
-	}
 	runItem, err := runRepo.Get(ctx, runID)
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if runItem.State != common.RunStateCompleted {
+	if runItem.State != common.RunStateFailed ||
+		!strings.Contains(runItem.FailureReason, "assessment-only step returned executionGraph") {
 		steps, _ := stepRepo.ListByRun(ctx, runID)
-		t.Fatalf("run = %+v steps=%+v, want completed after repair", runItem, steps)
+		t.Fatalf("run = %+v steps=%+v, want failed after repeated contract violation", runItem, steps)
 	}
 	steps, err := stepRepo.ListByRun(ctx, runID)
 	if err != nil {
 		t.Fatalf("list steps: %v", err)
 	}
-	var converted bool
 	for _, step := range steps {
 		if strings.Contains(string(step.ID), "must_not_execute") {
 			t.Fatalf("steps = %+v, assessment-only executionGraph must not execute", steps)
 		}
-		if boolValue(step.Output["assessmentOnlyContractViolationConvertedToRepair"]) {
-			converted = true
-		}
-	}
-	if !converted {
-		t.Fatalf("steps = %+v, want repeated contract violation converted to repair", steps)
 	}
 }
 
@@ -9732,6 +9727,127 @@ func TestValidatedCompletionDoDAssessmentRejectsMissingCurrentDoDCoverage(t *tes
 	}
 }
 
+func TestValidatedCompletionDoDAssessmentRejectsMissingGoalCoverage(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-goal-coverage-validate",
+		WorkspaceID:     "ws-goal-coverage-validate",
+		DoDID:           "dod-goal-coverage",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": "支持同时代理不同类型的 LLM\n支持通过配置单独停用某个 LLM",
+			},
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+		},
+	}
+	_, _, err := validatedCompletionDoDAssessment(run, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "base DoD passed",
+			"items": []map[string]any{
+				{
+					"item":         "build passes",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-goal-coverage-validate/block/build"},
+				},
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "does not cover all current Goal requirements") ||
+		!strings.Contains(err.Error(), "支持同时代理不同类型的 LLM") {
+		t.Fatalf("validatedCompletionDoDAssessment err = %v, want missing Goal coverage", err)
+	}
+}
+
+func TestValidatedCompletionDoDAssessmentAcceptsExplicitGoalCoverage(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-goal-coverage-complete",
+		WorkspaceID:     "ws-goal-coverage-complete",
+		DoDID:           "dod-goal-coverage",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": "支持同时代理不同类型的 LLM\n支持通过配置单独停用某个 LLM",
+			},
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+		},
+	}
+	_, summary, err := validatedCompletionDoDAssessment(run, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "DoD and Goal coverage passed",
+			"items": []map[string]any{
+				{
+					"item":         "build passes",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-goal-coverage-complete/block/build"},
+				},
+			},
+			"goalCoverage": map[string]any{
+				"satisfied": true,
+				"items": []map[string]any{
+					{
+						"goal":         "支持同时代理不同类型的 LLM",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-goal-coverage-complete/block/patch"},
+					},
+					{
+						"goal":         "支持通过配置单独停用某个 LLM",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-goal-coverage-complete/block/test-disabled"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+	if summary != "DoD and Goal coverage passed" {
+		t.Fatalf("summary = %q, want Goal-aware summary", summary)
+	}
+}
+
+func TestLLMExecutionGraphNodeReturnedOnlyGraphViolatesContract(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-execution-contract",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-execution-contract/block/implement",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID: "implement",
+			stepInputKeySoulStage:   soulStageExecution,
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":    "nested-plan",
+				"kind":  "llm/workspace_execution",
+				"input": map[string]any{"task": "plan again"},
+			}},
+		},
+	}
+	if !llmExecutionGraphNodeReturnedOnlyGraph(run, step, output) {
+		t.Fatalf("llmExecutionGraphNodeReturnedOnlyGraph = false, want contract violation")
+	}
+	output[stepOutputKeyPatches] = []map[string]any{{
+		"patchType": "file_write",
+		"targetRef": "main.go",
+		"content":   "package main\n",
+	}}
+	if llmExecutionGraphNodeReturnedOnlyGraph(run, step, output) {
+		t.Fatalf("llmExecutionGraphNodeReturnedOnlyGraph = true, want concrete patch output allowed")
+	}
+}
+
 func TestValidatedCompletionDoDAssessmentCoversCurrentDoDWithMarkdownNormalization(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-dod-coverage-complete",
@@ -9919,6 +10035,79 @@ func TestRuntimeOrchestrator_RecordsRejectedResultForWeakSatisfiedDoDAssessment(
 	}
 	if !strings.Contains(result.Summary, "DoD assessment rejected") {
 		t.Fatalf("result summary = %q, want rejected weak evidence summary", result.Summary)
+	}
+}
+
+func TestRuntimeOrchestrator_DispatchNextClosesRunningRunWithRejectedResult(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	resultRepo := memory.NewResultRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "completed"}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{Results: resultRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-rejected-result-boundary")
+	runID := common.RunID("run-rejected-result-boundary")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-rejected-result-boundary",
+		State:           common.RunStateRunning,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     common.StepID(string(runID) + "/step-1"),
+		RunID:  runID,
+		Kind:   llmWorkspaceExecutionStepKind,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"status": "completed"},
+	}); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	if err := resultRepo.Create(ctx, &resultmodel.Result{
+		ID:          common.ResultID(string(runID) + "/result/dod-assessment"),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		DoDID:       "dod-rejected-result-boundary",
+		State:       common.ResultStateRejected,
+		Title:       "Rejected Result",
+		Summary:     "DoD not satisfied; stop execution.",
+		SourceType:  resultcommon.SourceTypeDoDAssessment,
+		SourceRef:   string(runID) + "/step-1",
+	}); err != nil {
+		t.Fatalf("seed rejected result: %v", err)
+	}
+
+	err := orch.DispatchNextStep(ctx, runID)
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("DispatchNextStep err = %v, want conflict after closing rejected run", err)
+	}
+	if len(runtime.calls) != 0 {
+		t.Fatalf("runtime calls = %+v, want no dispatch after rejected result", runtime.calls)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateFailed ||
+		runItem.FailureReason != "DoD not satisfied; stop execution." {
+		t.Fatalf("run = %+v, want failed with rejected result summary", runItem)
 	}
 }
 

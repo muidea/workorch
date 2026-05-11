@@ -225,6 +225,22 @@ func (o *RuntimeOrchestrator) recordRunResultFromRejectedDoDAssessment(
 	return o.publishResultAccepted(ctx, item)
 }
 
+func (o *RuntimeOrchestrator) rejectedRunResultSummary(ctx context.Context, runID common.RunID) (string, bool) {
+	if o == nil || o.evidence.Results == nil || runID == "" {
+		return "", false
+	}
+	results, err := o.evidence.Results.ListByRun(ctx, runID)
+	if err != nil {
+		return "", false
+	}
+	for _, result := range results {
+		if result != nil && result.State == common.ResultStateRejected {
+			return strings.TrimSpace(result.Summary), true
+		}
+	}
+	return "", false
+}
+
 func (o *RuntimeOrchestrator) recordCompletionEvidenceFromValidatedDoDAssessment(
 	ctx context.Context,
 	run *runModel.Run,

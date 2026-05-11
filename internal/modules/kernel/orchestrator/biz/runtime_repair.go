@@ -79,6 +79,7 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 				reason = stringFromMap(step.Output, "reason")
 			}
 		}
+		_ = o.recordRejectedCompletionDoDAssessment(ctx, run, step, step.Output)
 		return o.FailRun(ctx, run.ID, reason)
 	}
 	return o.dispatchRuntimeRepairFollowUp(ctx, run, step, execErr)
@@ -95,6 +96,9 @@ func shouldCloseCompletionGateFailureWithoutRepair(summary string, step *runMode
 	if assessment == nil {
 		return true
 	}
+	if step != nil && boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) {
+		return true
+	}
 	if strings.TrimSpace(stringFromMap(assessment, "summary")) == "" {
 		return true
 	}
@@ -107,6 +111,13 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 	failedStep *runModel.Step,
 	execErr error,
 ) error {
+	if summary, ok := o.rejectedRunResultSummary(ctx, run.ID); ok {
+		reason := strings.TrimSpace(summary)
+		if reason == "" {
+			reason = "run has rejected result"
+		}
+		return o.FailRun(ctx, run.ID, reason)
+	}
 	if o.shouldAttemptProviderRetry(ctx, run, failedStep) {
 		rootStepID := providerRetryRootStepID(failedStep)
 		attempt := o.providerRetryAttemptCount(ctx, run.ID, rootStepID) + 1
@@ -189,6 +200,7 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
 		return err
 	}
+	_ = o.recordRejectedCompletionDoDAssessment(ctx, run, failedStep, failedStep.Output)
 	return o.BlockOnDecision(ctx, run.ID, spec.TicketID)
 }
 

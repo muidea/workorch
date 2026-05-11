@@ -331,8 +331,11 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 	if patchType != "file_write" && patchType != "unified_diff" {
 		return runtimePatchRequest{}, common.ErrInvalidArgument
 	}
+	if patchType == "file_write" && strings.TrimSpace(content) == "" {
+		return runtimePatchRequest{}, fmt.Errorf("%w: patch content is required for file_write", common.ErrInvalidArgument)
+	}
 	if patchType == "unified_diff" && strings.TrimSpace(diff) == "" {
-		return runtimePatchRequest{}, common.ErrInvalidArgument
+		return runtimePatchRequest{}, fmt.Errorf("%w: patch diff is required for unified_diff", common.ErrInvalidArgument)
 	}
 	if patchType == "file_write" && containsUnresolvedRuntimeTemplate(content) {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch content contains unresolved runtime template placeholders", common.ErrInvalidArgument)
@@ -423,10 +426,14 @@ func containsUnresolvedRuntimeTemplate(value string) bool {
 	if strings.Contains(value, "{{") && strings.Contains(value, "}}") {
 		return true
 	}
-	return unresolvedRuntimeSymbolPattern.MatchString(value)
+	return unresolvedRuntimeSymbolPattern.MatchString(value) ||
+		unresolvedAnglePlaceholderPattern.MatchString(value) ||
+		unresolvedPseudoImplementationPattern.MatchString(value)
 }
 
 var unresolvedRuntimeSymbolPattern = regexp.MustCompile(`__[A-Z][A-Z0-9_]{8,}__`)
+var unresolvedAnglePlaceholderPattern = regexp.MustCompile(`<<\s*[A-Za-z0-9_-]*(FROM|PATCH|DIFF|CONTENT|IMPLEMENTATION|PLACEHOLDER|TODO)[A-Za-z0-9_\s.-]*\s*>>`)
+var unresolvedPseudoImplementationPattern = regexp.MustCompile(`(?i)(TODO:\s*(implement|fill|replace)|\.\.\.\s*(省略|omitted|placeholder)|省略(实现|代码|内容)|伪代码|占位(实现|代码|内容))`)
 
 func applyWorkspacePatch(workingDirectory string, request runtimePatchRequest) error {
 	switch request.PatchType {

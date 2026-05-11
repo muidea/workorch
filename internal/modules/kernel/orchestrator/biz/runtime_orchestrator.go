@@ -1142,11 +1142,9 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	}
 	assessment, summary, err := validatedCompletionDoDAssessment(run, output)
 	if err != nil {
-		_ = o.recordRejectedCompletionDoDAssessment(ctx, run, step, output)
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
 	if err := o.validateDoDAssessmentEvidenceQuality(ctx, run, assessment); err != nil {
-		_ = o.recordRejectedCompletionDoDAssessment(ctx, run, step, output)
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
 	if err := o.recordCompletionEvidenceFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace); err != nil {
@@ -1165,6 +1163,18 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 ) (bool, error) {
 	if run == nil || step == nil || output == nil || !requiresDoDAssessmentCompletionGate(run) {
 		return false, nil
+	}
+	if llmExecutionGraphNodeReturnedOnlyGraph(run, step, output) {
+		graph, _ := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+		err := fmt.Errorf("%w: execution-stage llm graph node returned executionGraph without concrete output", common.ErrInvalidArgument)
+		output["executionStageContractViolation"] = true
+		output["ignoredExecutionGraph"] = true
+		output["ignoredExecutionGraphNodeCount"] = len(graph.Nodes)
+		output["ignoredExecutionGraphReason"] = err.Error()
+		delete(output, stepOutputKeyExecutionGraph)
+		step.Output = output
+		_ = o.steps.Update(ctx, step)
+		return true, o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime execution contract failed", err)
 	}
 	if boolValue(step.Input["providerRetryAssessmentOnly"]) || boolValue(step.Input[stepInputKeyAssessmentOnly]) {
 		if ignoredGraph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
@@ -1189,8 +1199,6 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 				input := assessmentOnlyContractCorrectionStepInput(step, output, err)
 				return true, o.dispatchUniqueStepWithWorkspace(ctx, run, assessmentOnlyContractCorrectionStepID(run.ID, step), initialStepKind(run), input, workspace)
 			}
-			output["assessmentOnlyContractViolationConvertedToRepair"] = true
-			output[stepOutputKeyDoDAssessment] = assessmentOnlyContractViolationRepairAssessment(run, step, err.Error())
 			return true, o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 		}
 	}
@@ -1213,6 +1221,46 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 	}
 	input := o.graphExpansionLimitAssessmentFollowUpStepInputFromSteps(run, step, steps, count)
 	return true, o.dispatchUniqueStepWithWorkspace(ctx, run, graphExpansionLimitAssessmentFollowUpStepID(run.ID, step), initialStepKind(run), input, workspace)
+}
+
+func llmExecutionGraphNodeReturnedOnlyGraph(run *runModel.Run, step *runModel.Step, output map[string]any) bool {
+	if run == nil || step == nil || output == nil {
+		return false
+	}
+	if step.Kind != initialStepKind(run) || graphNodeID(step) == "" {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(step.Input, stepInputKeySoulStage)) != soulStageExecution {
+		return false
+	}
+	if _, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); !ok {
+		return false
+	}
+	return !hasConcreteLLMExecutionOutput(output)
+}
+
+func hasConcreteLLMExecutionOutput(output map[string]any) bool {
+	if output == nil {
+		return false
+	}
+	if nextStepID, _ := nextStepSpec(output); nextStepID != "" {
+		return true
+	}
+	if doDAssessmentFromOutput(output) != nil {
+		return true
+	}
+	if outputItemCount(output[stepOutputKeyPatches]) > 0 ||
+		outputItemCount(output["patchRequests"]) > 0 ||
+		outputItemCount(mapFromValue(output[stepOutputKeyLLMDecision])["patchRequests"]) > 0 {
+		return true
+	}
+	if spec := decisionBlockSpec(output); spec.Reason != "" {
+		return true
+	}
+	if spec := approvalBlockSpec(output); spec.Reason != "" {
+		return true
+	}
+	return false
 }
 
 func assessmentOnlyContractCorrectionStepID(runID common.RunID, step *runModel.Step) common.StepID {
@@ -1308,6 +1356,18 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 ) ([]stepDispatchSpec, error) {
 	if run == nil {
 		return nil, common.ErrInvalidArgument
+	}
+	if summary, ok := o.rejectedRunResultSummary(ctx, run.ID); ok {
+		reason := strings.TrimSpace(summary)
+		if reason == "" {
+			reason = "run has rejected result"
+		}
+		if !isTerminalRunState(run.State) {
+			if err := o.failLoadedRun(ctx, run, reason); err != nil {
+				return nil, err
+			}
+		}
+		return nil, common.ErrConflict
 	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil {
