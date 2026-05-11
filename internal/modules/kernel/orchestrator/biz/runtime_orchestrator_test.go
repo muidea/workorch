@@ -8764,7 +8764,7 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationDispatchesOneCorrect
 	}
 }
 
-func TestRuntimeOrchestrator_AssessmentOnlyContractViolationFailsAfterCorrectionRepeatsGraph(t *testing.T) {
+func TestRuntimeOrchestrator_AssessmentOnlyContractViolationConvertsRepeatedGraphToRepair(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -8772,8 +8772,25 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationFailsAfterCorrection
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	var correctionSeen bool
+	var repairSeen bool
 	runtime := &stubRuntimeAdapter{
 		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			if boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]) {
+				repairSeen = true
+				return map[string]any{
+					"status": "completed",
+					stepOutputKeyDoDAssessment: map[string]any{
+						"satisfied":   true,
+						"summary":     "assessment-only contract violation repaired",
+						"goalOutcome": "assessment-only contract violation repaired",
+						"items": []map[string]any{{
+							"item":         "contract violation repaired",
+							"state":        "satisfied",
+							"evidenceRefs": []string{string(request.StepID)},
+						}},
+					},
+				}, nil
+			}
 			if boolValue(request.Input[stepInputKeyAssessmentOnly]) {
 				if boolValue(request.Input["assessmentOnlyContractCorrection"]) {
 					correctionSeen = true
@@ -8827,13 +8844,32 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationFailsAfterCorrection
 	if !correctionSeen {
 		t.Fatalf("assessment-only contract correction follow-up was not reached")
 	}
+	if !repairSeen {
+		t.Fatalf("runtime repair follow-up was not reached after repeated contract violation")
+	}
 	runItem, err := runRepo.Get(ctx, runID)
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if runItem.State != common.RunStateFailed || !strings.Contains(runItem.FailureReason, "assessment-only step returned executionGraph") {
+	if runItem.State != common.RunStateCompleted {
 		steps, _ := stepRepo.ListByRun(ctx, runID)
-		t.Fatalf("run = %+v steps=%+v, want failed after repeated contract violation", runItem, steps)
+		t.Fatalf("run = %+v steps=%+v, want completed after repair", runItem, steps)
+	}
+	steps, err := stepRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	var converted bool
+	for _, step := range steps {
+		if strings.Contains(string(step.ID), "must_not_execute") {
+			t.Fatalf("steps = %+v, assessment-only executionGraph must not execute", steps)
+		}
+		if boolValue(step.Output["assessmentOnlyContractViolationConvertedToRepair"]) {
+			converted = true
+		}
+	}
+	if !converted {
+		t.Fatalf("steps = %+v, want repeated contract violation converted to repair", steps)
 	}
 }
 

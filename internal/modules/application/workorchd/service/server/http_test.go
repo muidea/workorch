@@ -2887,6 +2887,74 @@ func TestServerStateSchedulesReplanContinuationForSupersededReplanRun(t *testing
 	}
 }
 
+func TestServerStateReplanContinuationRetriesAfterActivationFailure(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := state.close(ctx); err != nil {
+			t.Fatalf("close server state: %v", err)
+		}
+	})
+	const workspaceID = "ws-replan-retry"
+	const runID = "run-replan-retry"
+	firstAttempt := make(chan struct{}, 1)
+	secondAttempt := make(chan appservice.ActivateWorkspaceExecutionCommand, 1)
+	state.listDecisions = func(context.Context, string, string, string, string) ([]appservice.Decision, error) {
+		return []appservice.Decision{
+			{
+				ID:             "ticket-replan-retry",
+				WorkspaceID:    workspaceID,
+				RunID:          runID,
+				State:          string(common.DecisionTicketStateResolved),
+				ResolutionType: decisioncommon.ResolutionTypeReplan,
+			},
+		}, nil
+	}
+	var calls atomic.Int32
+	state.activateWorkspace = func(_ context.Context, _, _, gotWorkspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		if gotWorkspaceID != workspaceID {
+			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
+		}
+		switch calls.Add(1) {
+		case 1:
+			firstAttempt <- struct{}{}
+			return appservice.WorkspaceExecutionActivation{}, fmt.Errorf("transient activation failure")
+		case 2:
+			secondAttempt <- cmd
+			return appservice.WorkspaceExecutionActivation{
+				Run: appservice.Run{ID: "run-replan-retry-continuation", WorkspaceID: workspaceID, State: string(common.RunStateRunning)},
+			}, nil
+		default:
+			t.Fatalf("unexpected activation retry count")
+			return appservice.WorkspaceExecutionActivation{}, nil
+		}
+	}
+
+	state.scheduleReplanContinuationIfNeeded(context.Background(), workspaceID, runID, 5)
+	select {
+	case <-firstAttempt:
+	case <-time.After(time.Second):
+		t.Fatalf("first replan continuation activation was not attempted")
+	}
+	waitForCondition(t, time.Second, func() bool {
+		state.replanContinuationMu.Lock()
+		defer state.replanContinuationMu.Unlock()
+		_, ok := state.replanContinuationStarted[workspaceID+"/"+runID]
+		return !ok
+	})
+
+	state.scheduleReplanContinuationIfNeeded(context.Background(), workspaceID, runID, 7)
+	select {
+	case cmd := <-secondAttempt:
+		if cmd.Priority != 7 {
+			t.Fatalf("retry activation priority = %d, want 7", cmd.Priority)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("replan continuation activation was not retried after failure")
+	}
+}
+
 func TestServerStateReplanContinuationWatcherUsesSharedSessionEventHub(t *testing.T) {
 	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
@@ -3064,6 +3132,80 @@ func TestServerStateRecoverReplanContinuationsSchedulesSupersededReplanRuns(t *t
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("replan continuation recovery did not schedule activation")
+	}
+}
+
+func TestServerStateRecoverReplanContinuationsRetriesAfterActivationFailure(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := state.close(ctx); err != nil {
+			t.Fatalf("close server state: %v", err)
+		}
+	})
+	const workspaceID = "ws-replan-recover-retry"
+	const runID = "run-replan-recover-retry"
+	firstAttempt := make(chan struct{}, 1)
+	secondAttempt := make(chan appservice.ActivateWorkspaceExecutionCommand, 1)
+	state.listWorkspaces = func(context.Context, string, string) ([]appservice.Workspace, error) {
+		return []appservice.Workspace{{ID: workspaceID, State: string(common.WorkspaceStateFailed)}}, nil
+	}
+	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
+		return []appservice.Run{{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateSuperseded), Priority: 9}}, nil
+	}
+	state.listDecisions = func(context.Context, string, string, string, string) ([]appservice.Decision, error) {
+		return []appservice.Decision{
+			{
+				ID:             "ticket-replan-recover-retry",
+				WorkspaceID:    workspaceID,
+				RunID:          runID,
+				State:          string(common.DecisionTicketStateResolved),
+				ResolutionType: decisioncommon.ResolutionTypeReplan,
+			},
+		}, nil
+	}
+	var calls atomic.Int32
+	state.activateWorkspace = func(_ context.Context, _, _, gotWorkspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		if gotWorkspaceID != workspaceID {
+			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
+		}
+		switch calls.Add(1) {
+		case 1:
+			firstAttempt <- struct{}{}
+			return appservice.WorkspaceExecutionActivation{}, fmt.Errorf("transient activation failure")
+		case 2:
+			secondAttempt <- cmd
+			return appservice.WorkspaceExecutionActivation{
+				Run: appservice.Run{ID: "run-replan-recover-retry-continuation", WorkspaceID: workspaceID, State: string(common.RunStateRunning)},
+			}, nil
+		default:
+			t.Fatalf("unexpected activation retry count")
+			return appservice.WorkspaceExecutionActivation{}, nil
+		}
+	}
+
+	state.recoverReplanContinuations(context.Background())
+	select {
+	case <-firstAttempt:
+	case <-time.After(time.Second):
+		t.Fatalf("first recovered replan continuation activation was not attempted")
+	}
+	waitForCondition(t, time.Second, func() bool {
+		state.replanContinuationMu.Lock()
+		defer state.replanContinuationMu.Unlock()
+		_, ok := state.replanContinuationStarted[workspaceID+"/"+runID]
+		return !ok
+	})
+
+	state.recoverReplanContinuations(context.Background())
+	select {
+	case cmd := <-secondAttempt:
+		if cmd.Priority != 9 {
+			t.Fatalf("retry activation priority = %d, want 9", cmd.Priority)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("recovered replan continuation activation was not retried after failure")
 	}
 }
 

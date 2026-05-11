@@ -225,6 +225,25 @@ func assessmentOnlyDecisionRepairAssessment(run *runModel.Run, step *runModel.St
 	}
 }
 
+func assessmentOnlyContractViolationRepairAssessment(run *runModel.Run, step *runModel.Step, reason string) map[string]any {
+	items := assessmentRepairDoDItems(run, step, runtimeDecisionBlockSpec{Reason: reason})
+	return map[string]any{
+		"satisfied":             false,
+		"summary":               "The assessment-only step returned executable work after a contract correction request.",
+		"goalOutcome":           "The requested work is incomplete and must continue through automated repair or replan.",
+		"implementationSummary": "No executable graph from the assessment-only response was applied.",
+		"verificationSummary":   "Current evidence is insufficient for DoD satisfaction because the validation response did not provide a valid assessment.",
+		"items":                 items,
+		"residualRisks": []string{
+			"The validation model attempted to plan more executable work instead of evaluating the completed evidence.",
+		},
+		"nextActions": []string{
+			"Continue through runtime repair with concrete implementation or verification steps.",
+			"Return a complete item-level DoD assessment once evidence is available.",
+		},
+	}
+}
+
 func assessmentRepairDoDItems(run *runModel.Run, step *runModel.Step, spec runtimeDecisionBlockSpec) []map[string]any {
 	names := effectiveDoDItemTexts(run)
 	if len(names) == 0 {

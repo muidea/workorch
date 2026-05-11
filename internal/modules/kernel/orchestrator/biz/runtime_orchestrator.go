@@ -1184,6 +1184,8 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 				input := assessmentOnlyContractCorrectionStepInput(step, output, err)
 				return true, o.dispatchUniqueStepWithWorkspace(ctx, run, assessmentOnlyContractCorrectionStepID(run.ID, step), initialStepKind(run), input, workspace)
 			}
+			output["assessmentOnlyContractViolationConvertedToRepair"] = true
+			output[stepOutputKeyDoDAssessment] = assessmentOnlyContractViolationRepairAssessment(run, step, err.Error())
 			return true, o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 		}
 	}

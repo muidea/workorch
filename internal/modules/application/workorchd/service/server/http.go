@@ -4294,6 +4294,7 @@ func (s *serverState) scheduleReplanContinuationIfNeeded(ctx context.Context, wo
 		runCtx := appservice.ContextWithEventHub(context.Background(), s.eventHub)
 		release, err := s.acquireRunSlotWithPriority(runCtx, priority)
 		if err != nil {
+			s.clearReplanContinuationStarted(key)
 			s.metrics.runCanceled.Add(1)
 			slog.Warn("workorch replan continuation queue failed", "workspaceID", workspaceID, "runID", runID, "err", err)
 			return
@@ -4301,6 +4302,7 @@ func (s *serverState) scheduleReplanContinuationIfNeeded(ctx context.Context, wo
 		defer release()
 		activation, err := s.activateWorkspace(runCtx, s.config.Backend, s.config.DataRoot, workspaceID, appservice.ActivateWorkspaceExecutionCommand{Priority: priority})
 		if err != nil {
+			s.clearReplanContinuationStarted(key)
 			slog.Warn("workorch replan continuation activation failed", "workspaceID", workspaceID, "runID", runID, "err", err)
 			s.notifyRunStatusChanged()
 			return
@@ -4308,6 +4310,15 @@ func (s *serverState) scheduleReplanContinuationIfNeeded(ctx context.Context, wo
 		s.metrics.observeRunOutcome(activation.Run)
 		s.notifyRunStatusChangedForRun(activation.Run)
 	}()
+}
+
+func (s *serverState) clearReplanContinuationStarted(key string) {
+	if s == nil || strings.TrimSpace(key) == "" {
+		return
+	}
+	s.replanContinuationMu.Lock()
+	defer s.replanContinuationMu.Unlock()
+	delete(s.replanContinuationStarted, key)
 }
 
 func (s *serverState) runHasResolvedReplanDecision(ctx context.Context, workspaceID string, runID string) bool {
