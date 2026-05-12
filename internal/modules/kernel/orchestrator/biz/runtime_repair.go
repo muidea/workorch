@@ -79,8 +79,7 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 				reason = stringFromMap(step.Output, "reason")
 			}
 		}
-		_ = o.recordRejectedCompletionDoDAssessment(ctx, run, step, step.Output)
-		return o.FailRun(ctx, run.ID, reason)
+		return o.failRunWithRejectedCompletionResult(ctx, run, step, reason)
 	}
 	return o.dispatchRuntimeRepairFollowUp(ctx, run, step, execErr)
 }
@@ -143,11 +142,25 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 				reason = stringFromMap(failedStep.Output, "reason")
 			}
 		}
-		return o.FailRun(ctx, run.ID, reason)
+		return o.failRunWithRejectedCompletionResult(ctx, run, failedStep, reason)
 	}
 	attempt := o.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep) + 1
 	input := o.runtimeRepairFollowUpStepInput(ctx, run, failedStep, attempt, execErr)
 	return o.dispatchStep(ctx, run, runtimeRepairFollowUpStepID(run.ID, failedStep, attempt), initialStepKind(run), input)
+}
+
+func (o *RuntimeOrchestrator) failRunWithRejectedCompletionResult(ctx context.Context, run *runModel.Run, step *runModel.Step, reason string) error {
+	if run == nil {
+		return common.ErrInvalidArgument
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "runtime step failed"
+	}
+	if requiresDoDAssessmentCompletionGate(run) && step != nil {
+		_ = o.recordRejectedCompletionDoDAssessment(ctx, run, step, step.Output)
+	}
+	return o.FailRun(ctx, run.ID, reason)
 }
 
 func (o *RuntimeOrchestrator) shouldEscalateRuntimeRepairExhaustion(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
@@ -715,6 +728,16 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			}
 		}
 	}
+	if stateChangingRepairRequired(failedStep, execErr) {
+		input["repairObjective"] = "produce_state_changing_implementation"
+		input["stateChangingOutputRequired"] = true
+		input["repairGuidance"] = []string{
+			"Return concrete patchRequests/patches with complete file_write content or unified_diff diff, or return a failed dodAssessment if implementation cannot be completed.",
+			"Do not return executionGraph for this repair.",
+			"Do not return only shellCommands/read/list/test/build inspection commands.",
+			"Do not use placeholders such as __FROM_PREVIOUS_STEP_OUTPUT__ or <<...>>.",
+		}
+	}
 	if missingDoD := missingDoDItemsFromFailureOutput(failedStep.Output); len(missingDoD) > 0 {
 		input["missingDoDItems"] = missingDoD
 	}
@@ -759,6 +782,44 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		}
 	}
 	return input
+}
+
+func stateChangingRepairRequired(failedStep *runModel.Step, execErr error) bool {
+	if failedStep == nil {
+		return false
+	}
+	if boolValue(failedStep.Input["stateChangingOutputRequired"]) {
+		return true
+	}
+	text := strings.ToLower(strings.Join([]string{
+		errorString(execErr),
+		stringFromMap(failedStep.Output, "error"),
+		stringFromMap(failedStep.Output, "reason"),
+		stringFromMap(failedStep.Output, "stage"),
+		stringFromMap(failedStep.Output, "ignoredExecutionGraphReason"),
+		stringFromMap(mapFromValue(failedStep.Output["runtimeDiagnostics"]), "kind"),
+		stringFromMap(mapFromValue(failedStep.Output["runtimeDiagnostics"]), "reason"),
+	}, "\n"))
+	if boolValue(failedStep.Output["executionStageContractViolation"]) {
+		return true
+	}
+	for _, marker := range []string{
+		"implementation planning llm step returned read-only executiongraph without patch output",
+		"execution-stage llm graph node returned executiongraph",
+		"state-changing llm repair step returned executiongraph",
+		"state-changing llm repair step returned no state-changing output",
+		"implementation execution-stage llm graph node returned no state-changing output",
+		"patch content contains unresolved runtime template",
+		"patch diff contains unresolved runtime template",
+		"patch content is required",
+		"patch diff is required",
+		"patch_dispatch_invalid",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (o *RuntimeOrchestrator) runtimeRepairPatchContext(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {

@@ -266,6 +266,10 @@ Tool / MCP Memory 记录：
 | DMI-12 | Memory 噪音与终态 recall 误判收口 | P1 | memory writer / selector / verify script | 已落地：去除隐式重复 `run_summary`，validation command 记录 stdout/summary 信号，repair lesson 提炼缺失文件等可复用教训，selector 限制单个历史 run 占满召回槽位，部署核对脚本区分终态后写入的高价值 Memory |
 | DMI-13 | Rejected result 与 assessment/repair 状态机收口 | P0 | orchestrator completion gate / runtime repair | 已落地：中间 DoD gate 失败不再提前写 rejected result；只有终态失败或阻塞前才记录 rejected result；已有 rejected result 的 running run 会停止继续 dispatch 并关闭；assessment-only 二次返回 executable graph 直接失败，不再转 repair；repair 返回非可执行 unsatisfied assessment 直接闭合失败 |
 | DMI-14 | Goal delta 覆盖与执行契约收口 | P0 | orchestrator completion gate / graph contract / patch adapter / software-dev Soul | 已落地：completion gate 强制校验当前 Goal requirement 覆盖，可通过 `dodAssessment.goalCoverage` 提供证据；execution-stage LLM graph node 不能只返回下一层 `executionGraph`；patch/apply 拦截空内容、空 diff 和 unresolved placeholder；software-dev Soul 默认自主选择常规配置 schema，不为普通配置字段请求 decision |
+| DMI-15 | Implementation state-changing contract 收口 | P0 | graph dispatch / runtime repair / rejected result | 已落地：implementation/fix/apply/write/refactor 类 execution LLM 节点不能只返回 shellCommands/只读检查；graph 中 patch 节点在派发前校验 diff/content，拒绝 placeholder；终态 contract failure 即使没有 LLM dodAssessment 也写 synthetic rejected result；repair 输入明确只能返回具体 patch 或 rejected assessment，不能 shell-only inspection |
+| DMI-16 | Repair state-changing hard gate 与终态 result 收口 | P0 | runtime output contract / LLM graph validation / terminal failure result | 已落地：`stateChangingOutputRequired` 不再只是 prompt 约束，runtime 会拒绝 repair 返回 `executionGraph`、shell-only 或 file/read-only graph；LLM 输出中的 `executionGraph` 在接受前校验 patch 节点 target/content/diff 和 placeholder；provider retry / schema / contract 终态失败在 `FailRun` 前写 synthetic rejected result |
+| DMI-17 | Follow-up read-only graph 收口 | P0 | runtime output contract / graph follow-up / repair lineage | 已落地：graph follow-up / validation follow-up 不得继续返回只读 `executionGraph`；实现类 Goal 的初始 planning graph 必须包含合法 patch 节点或直接 state-changing output；state-changing repair 的二次 repair 继续继承 `stateChangingOutputRequired` |
+| DMI-18 | Planning contract repair 首轮 state-changing 收口 | P0 | runtime repair classification / implementation planning contract | 已落地：实现类 Goal 的 planning 只读 graph 被拒绝后，首轮 repair 直接携带 `stateChangingOutputRequired=true`，禁止先退回普通探索 graph |
 
 ## 当前落地状态
 
@@ -307,6 +311,63 @@ Tool / MCP Memory 记录：
   - execution-stage 的 LLM graph node 如果只返回下一层 `executionGraph`，会被判定为 contract violation，进入失败/修复路径，不再无限嵌套规划。
   - patch/apply 输入必须是具体可执行内容：`file_write` 需要非空 content，`unified_diff` 需要非空 diff，并拒绝 `<<FROM_...>>`、省略实现、伪代码、占位内容等 unresolved placeholder。
   - software-dev Soul 明确普通配置 schema、字段命名、默认路由策略属于实现细节；多 provider/多 LLM 网关默认采用 `providers[]` + `enabled` + `model_prefixes`，不再为此触发人工 decision。
+- DMI-15 部署核对结论（`ws-f3c58f6f26bf640c` / `run-497fa0fc64990b16`）：
+  - 新 runtime 已阻止基础 DoD 误 accepted，也拦截了 execution-stage 只返回下一层 `executionGraph` 的行为。
+  - 当时暴露的偏差是 implementation 节点仍可通过 `shellCommands` 只做 `find` / `sed` / `go test` / `go build`，没有 patch/write/diff，也没有实际改变 workspace。
+  - repair 生成的新 graph 仍可能包含 `__FROM_PREVIOUS_STEP_OUTPUT__` 这类 patch placeholder；已改为在 graph 派发前直接拒绝，而不是等 patch runtime adapter 执行时失败。
+  - 终态 contract failure 当时只让 run failed，未形成 rejected result；已补 synthetic rejected result 记录 failure reason、Goal 覆盖缺口和不可验收结论。
+  - repair prompt/input 已强化为：实现类 contract failure 后只能返回具体 patch/patchRequests 或 rejected dodAssessment；shell-only inspection 不再是有效 implementation repair。
+- DMI-15 当前收口结果：
+  - execution-stage implementation 节点 shell-only 输出已被拒绝。
+  - patch/apply / patch/preview 在 runtime 前置校验中会拒绝 placeholder 与空 patch。
+  - 终态 contract failure 会生成 synthetic rejected result。
+  - repair 输入会强制收敛到 state-changing implementation 输出。
+- DMI-16 部署核对结论（`ws-f3c58f6f26bf640c` / `run-073735f3862a6096`）：
+  - 新 runtime 没有误 accepted，`implement_multi_provider_and_disable` 只返回下一层 `executionGraph` 已被 `runtime execution contract failed` 拦截。
+  - repair input 已携带 `repairObjective=produce_state_changing_implementation`、`stateChangingOutputRequired=true` 和禁止 graph/shell-only 的 guidance。
+  - 剩余偏差是 repair follow-up 本身没有 `graphNodeId`，因此绕过 implementation graph node 校验，仍可返回只读 `executionGraph`（file/list、file/read）并被接受。
+  - provider retry assessment-only 阶段返回非法 `executionGraph` patch/apply 节点时，当前表现为 `llm_schema_invalid: executionGraph patch/apply targetRef is required`，没有归入 assessment-only graph contract，也没有写 rejected result。
+  - 终态 failed 后缺少 `result.json`，说明 synthetic rejected result 仍未覆盖 provider/schema/contract 直接 `FailRun` 的路径。
+- DMI-16 收口方案：
+  - `stateChangingOutputRequired=true` 作为 runtime 硬合约：只允许具体 `patchRequests` / `patches` / `nextKind=patch/apply`、failed `dodAssessment` 或治理阻塞；拒绝任何 `executionGraph`、shell-only、file/read-only 继续执行。
+  - 对所有 LLM 输出中的 `executionGraph` 做接受前节点校验：`patch/apply` / `patch/preview` 必须有合法 `targetRef`，`file_write` 必须有 content，`unified_diff` 必须有 diff，并拒绝 unresolved placeholder。
+  - provider retry / assessment-only 返回 executable graph 或 graph schema invalid 时，按 contract failure 处理，不再让 run 以无 Result 的 provider/schema failure 结束。
+  - 所有 DoD gate run 的终态 `failed` 路径在 `FailRun` 前尝试写 synthetic rejected result，保证失败也有正式 Result 可追溯。
+- DMI-16 当前收口结果：
+  - `validateLLMExecutionOutputContract()` 已覆盖无 `graphNodeId` 的 state-changing repair follow-up；只读 `executionGraph` 会被拒绝为 contract failure。
+  - LLM 输出中的 graph patch 节点复用 runtime patch request 校验，提前拒绝缺 `targetRef`、空 content/diff 和 unresolved placeholder。
+  - provider/schema 等非可修复终态失败路径通过 `failRunWithRejectedCompletionResult()` 在关闭 run 前写 synthetic rejected result。
+  - 已补回归测试覆盖 state-changing repair graph rejection、invalid patch graph node rejection、provider schema terminal failure 写 rejected result。
+- DMI-17 部署核对结论（`ws-f3c58f6f26bf640c` / `run-b439556bfc45a926` / `run-2a1078b1c9daa5e7`）：
+  - DMI-16 已阻止 state-changing repair 返回只读 graph，并能写 rejected result。
+  - 剩余偏差是 repair-of-repair 可能丢失 `stateChangingOutputRequired`，再次退回普通 execution graph。
+  - validation / graph follow-up 仍可连续返回只读 `executionGraph`，不断 file/list、file/read 和 shell scan，直到 graph expansion limit。
+  - 实现类 Goal 的初始 planning graph 仍可只规划读文件而不包含 patch 节点，导致 run 在“探索-验证-再探索”中消耗 LLM，而不是进入实现。
+  - assessment contract correction 最终非法 JSON 能被 failed + rejected result 收口，但这只是终态兜底，不解决前面反复只读规划的问题。
+- DMI-17 收口方案：
+  - state-changing contract failure 的 repair-of-repair 必须继续携带 `stateChangingOutputRequired=true`。
+  - graph follow-up / completion follow-up / validation follow-up 若返回 `executionGraph`，graph 内必须包含合法 patch 节点；否则直接 contract failure。
+  - 对命中实现类关键词的 Goal，初始 planning LLM 输出的 `executionGraph` 必须包含合法 patch 节点，或输出直接 `patchRequests` / `patches`；只读 graph 不再作为有效计划。
+  - assessment-only contract correction 仍只允许 `dodAssessment` 或治理阻塞，非法 JSON/graph 直接终态失败并保留 rejected result。
+- DMI-17 当前收口结果：
+  - `validateLLMExecutionOutputContract()` 已新增 follow-up graph state-changing 合约：`graphFollowUp`、`completionFollowUp`、`continuationFollowUp`、graph expansion limit follow-up 返回的 graph 必须包含可通过 patch runtime 校验的 `patch/preview` 或 `patch/apply` 节点。
+  - assessment-only / providerRetryAssessmentOnly 保持专门合约：夹带 graph 仍由 assessment-only contract violation 逻辑忽略、纠偏或失败，不被普通 follow-up graph 校验提前转入 repair。
+  - 实现类 Goal 的 planning-stage graph 会基于当前 Goal 文本判断是否需要 state-changing implementation；命中 implement/support/fix/update/create/refactor 及对应中文表达时，只读 planning graph 会被拒绝。
+  - `stateChangingRepairRequired()` 已继承失败 step 的 `stateChangingOutputRequired=true`，并识别 state-changing repair graph / no-output contract failure，避免 repair-of-repair 退回普通只读 execution graph。
+  - 已补回归测试覆盖 follow-up read-only graph rejection、实现类 planning read-only graph rejection、合法 patch graph 放行、repair-of-repair 继承 state-changing 要求。
+- DMI-18 部署核对结论（`ws-f3c58f6f26bf640c` / `run-aadbf8c64340b223` / `run-c2bed3d9b691a1e5`）：
+  - DMI-17 的 planning 硬闸已生效：`step-1` 返回只读 `executionGraph` 被拒绝为 `implementation planning llm step returned read-only executionGraph without patch output`。
+  - 后续 execution-stage LLM 节点继续返回下一层 graph 时，也被 `execution-stage llm graph node returned executionGraph without concrete output` 拦截。
+  - state-changing repair 与 provider retry 已能拒绝返回 graph，并在 repair 耗尽后写 rejected result 或触发 replan。
+  - 剩余偏差是 planning contract failure 触发的首轮 repair 没有携带 `stateChangingOutputRequired=true`，因此仍能先产出普通 execution graph，执行 file/list、file/read、baseline build，再在 implementation 节点被拦截。
+- DMI-18 收口方案：
+  - `stateChangingRepairRequired()` 必须识别 `implementation planning llm step returned read-only executionGraph without patch output`。
+  - planning contract failure 的首轮 repair 输入必须直接设置 `repairObjective=produce_state_changing_implementation` 与 `stateChangingOutputRequired=true`。
+  - 该 repair 只允许直接产出具体 `patchRequests` / `patches`、failed `dodAssessment` 或治理阻塞；不能再用普通 executionGraph 继续探索。
+- DMI-18 当前收口结果：
+  - `stateChangingRepairRequired()` 已纳入 implementation planning read-only graph contract failure。
+  - 首轮 planning repair 会直接复用 state-changing repair guidance：禁止 `executionGraph`、shell-only/read-only inspection 和 unresolved placeholder。
+  - 已补回归测试覆盖 planning contract failure 首轮 repair 必须携带 `stateChangingOutputRequired=true`。
 - software-dev 默认 Soul 已补充：
   - planning 阶段读取可选文件前先 `file/list`，不确定时 `file/read optional:true`。
   - execution 阶段遇到无测试、0 tests、无断言或 inconclusive evidence 时必须补有效测试/断言，不得重复运行弱验证命令。

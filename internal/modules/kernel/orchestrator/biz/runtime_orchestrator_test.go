@@ -2702,6 +2702,99 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *te
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangingOutputForContractFailure(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-state-contract")
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/block/implement"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID: "implement_feature",
+			stepInputKeySoulStage:   soulStageExecution,
+		},
+		Output: map[string]any{
+			"error": "implementation execution-stage llm graph node returned no state-changing output",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-state-contract"}, failedStep, 1, common.ErrInvalidArgument)
+
+	if input["repairObjective"] != "produce_state_changing_implementation" || !boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want state-changing implementation objective", input)
+	}
+	guidance := stringSliceFromValue(input["repairGuidance"])
+	joined := strings.Join(guidance, "\n")
+	if !strings.Contains(joined, "patchRequests/patches") || !strings.Contains(joined, "Do not return only shellCommands") {
+		t.Fatalf("repairGuidance = %#v, want concrete patch and shell-only rejection guidance", guidance)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangingOutputForPlanningContractFailure(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-planning-state-contract")
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/step-1"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeySoulStage: soulStagePlanning,
+		},
+		Output: map[string]any{
+			"error": "invalid argument: implementation planning llm step returned read-only executionGraph without patch output",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-planning-state-contract"}, failedStep, 1, common.ErrInvalidArgument)
+
+	if input["repairObjective"] != "produce_state_changing_implementation" || !boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want planning contract failure to require state-changing implementation", input)
+	}
+	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
+	if !strings.Contains(guidance, "Do not return executionGraph") {
+		t.Fatalf("repairGuidance = %q, want executionGraph rejection guidance", guidance)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairInputInheritsStateChangingRequirement(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-state-contract-inherit")
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/zz-llm-repair-1"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			"stateChangingOutputRequired":     true,
+			stepInputKeySoulStage:             soulStageExecution,
+		},
+		Output: map[string]any{
+			"error": "state-changing llm repair step returned executionGraph instead of concrete patch output",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-state-contract-inherit"}, failedStep, 2, common.ErrInvalidArgument)
+
+	if input["repairObjective"] != "produce_state_changing_implementation" || !boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want inherited state-changing implementation objective", input)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputCarriesResolvedGovernanceAndFailedGraph(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
@@ -8893,7 +8986,15 @@ func TestRuntimeOrchestrator_DispatchesRepeatedGraphNodeIDInNewGraphScope(t *tes
 		{ID: "verify-file", Kind: "graph/mock"},
 	}}
 	secondGraph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
-		{ID: "verify-file", Kind: "graph/mock"},
+		{
+			ID:   "verify-file",
+			Kind: "patch/apply",
+			Input: map[string]any{
+				"patchType": "file_write",
+				"targetRef": "main.go",
+				"content":   "package main\n",
+			},
+		},
 	}}
 	var secondGraphStepID common.StepID
 	runtime := &stubRuntimeAdapter{
@@ -9014,11 +9115,19 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitRoutesToAssessmentOnly(t
 				return map[string]any{
 					"status": "completed",
 					stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
-						{ID: fmt.Sprintf("verify_%d", graphExpansions), Kind: "graph/mock"},
+						{
+							ID:   fmt.Sprintf("verify_%d", graphExpansions),
+							Kind: "patch/apply",
+							Input: map[string]any{
+								"patchType": "file_write",
+								"targetRef": fmt.Sprintf("graph-%d.txt", graphExpansions),
+								"content":   fmt.Sprintf("graph expansion %d\n", graphExpansions),
+							},
+						},
 					}},
 				}, nil
 			}
-			if request.Kind == "graph/mock" {
+			if request.Kind == "graph/mock" || request.Kind == "patch/apply" {
 				return map[string]any{"status": "completed", "stdout": "graph node completed"}, nil
 			}
 			return map[string]any{
@@ -9112,11 +9221,19 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationDispatchesOneCorrect
 				return map[string]any{
 					"status": "completed",
 					stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
-						{ID: runtimeChildID(request.StepID, "verify"), Kind: "graph/mock"},
+						{
+							ID:   runtimeChildID(request.StepID, "verify"),
+							Kind: "patch/apply",
+							Input: map[string]any{
+								"patchType": "file_write",
+								"targetRef": "assessment-follow-up.txt",
+								"content":   "assessment follow-up\n",
+							},
+						},
 					}},
 				}, nil
 			}
-			if request.Kind == "graph/mock" {
+			if request.Kind == "graph/mock" || request.Kind == "patch/apply" {
 				return map[string]any{"status": "completed", "stdout": "graph node completed"}, nil
 			}
 			return map[string]any{
@@ -9210,11 +9327,19 @@ func TestRuntimeOrchestrator_AssessmentOnlyIgnoresGraphWhenAssessmentIsPresent(t
 				return map[string]any{
 					"status": "completed",
 					stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
-						{ID: runtimeChildID(request.StepID, "verify"), Kind: "graph/mock"},
+						{
+							ID:   runtimeChildID(request.StepID, "verify"),
+							Kind: "patch/apply",
+							Input: map[string]any{
+								"patchType": "file_write",
+								"targetRef": "assessment-repeat.txt",
+								"content":   "assessment repeat\n",
+							},
+						},
 					}},
 				}, nil
 			}
-			if request.Kind == "graph/mock" {
+			if request.Kind == "graph/mock" || request.Kind == "patch/apply" {
 				return map[string]any{"status": "completed", "stdout": "graph node completed"}, nil
 			}
 			return map[string]any{
@@ -9305,11 +9430,19 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationFailsRepeatedGraph(t
 				return map[string]any{
 					"status": "completed",
 					stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
-						{ID: runtimeChildID(request.StepID, "verify"), Kind: "graph/mock"},
+						{
+							ID:   runtimeChildID(request.StepID, "verify"),
+							Kind: "patch/apply",
+							Input: map[string]any{
+								"patchType": "file_write",
+								"targetRef": "assessment-repeated-graph.txt",
+								"content":   "assessment repeated graph\n",
+							},
+						},
 					}},
 				}, nil
 			}
-			if request.Kind == "graph/mock" {
+			if request.Kind == "graph/mock" || request.Kind == "patch/apply" {
 				return map[string]any{"status": "completed", "stdout": "graph node completed"}, nil
 			}
 			return map[string]any{
@@ -9848,6 +9981,198 @@ func TestLLMExecutionGraphNodeReturnedOnlyGraphViolatesContract(t *testing.T) {
 	}
 }
 
+func TestValidateLLMExecutionOutputContractRejectsImplementationShellOnly(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-implementation-state-contract",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-implementation-state-contract/block/implement",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID: "implement_with_concrete_outputs",
+			stepInputKeySoulStage:   soulStageExecution,
+		},
+	}
+	output := map[string]any{
+		"completionState": "continue",
+		"shellCommands": []map[string]any{{
+			"command": "go",
+			"args":    []string{"test", "./..."},
+		}},
+		"nextStep": "run-implementation-state-contract/block/test",
+		"nextKind": shellcommon.StepKindCommand,
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "no state-changing output") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want state-changing output rejection", err)
+	}
+
+	output["patchRequests"] = []map[string]any{{
+		"patchType": "file_write",
+		"targetRef": "config.yaml",
+		"content":   "providers: []\n",
+	}}
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract with patch err = %v, want allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsStateChangingRepairGraph(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-contract",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-contract/zz-llm-repair-1",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			stepInputKeySoulStage:         soulStageExecution,
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":    "read_main",
+				"kind":  "file/read",
+				"input": map[string]any{"path": "main.go"},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "state-changing llm repair step returned executionGraph") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want state-changing repair graph rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsInvalidPatchGraphNode(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-invalid-patch-graph",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-invalid-patch-graph/step-1",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeySoulStage: soulStagePlanning,
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":    "write_config",
+				"kind":  "patch/apply",
+				"input": map[string]any{"patchType": "file_write"},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "executionGraph patch/apply input invalid") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want patch graph input rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsFollowUpReadOnlyGraph(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-follow-up-read-only-graph",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-follow-up-read-only-graph/zz-graph-follow-up-1",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"graphFollowUp":         true,
+			stepInputKeySoulStage:   soulStageValidation,
+			stepInputKeyGraphNodeID: "validate_implementation",
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":    "read_main",
+				"kind":  "file/read",
+				"input": map[string]any{"path": "main.go"},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "read-only executionGraph without patch output") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want follow-up read-only graph rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRequiresPatchNodeForImplementationPlanningGraph(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-implementation-planning-graph",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": "完善 provider 配置支持 providers[]、enabled 和 model_prefixes",
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:   "run-implementation-planning-graph/step-1",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeySoulStage: soulStagePlanning,
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":    "read_config",
+				"kind":  "file/read",
+				"input": map[string]any{"path": "config.yaml"},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "implementation planning") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want implementation planning graph rejection", err)
+	}
+
+	output[stepOutputKeyExecutionGraph] = map[string]any{
+		"nodes": []map[string]any{{
+			"id":   "write_config",
+			"kind": "patch/apply",
+			"input": map[string]any{
+				"patchType": "file_write",
+				"targetRef": "config.yaml",
+				"content":   "providers: []\n",
+			},
+		}},
+	}
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract with patch graph err = %v, want allowed", err)
+	}
+}
+
+func TestValidatePatchStepInputBeforeRuntimeRejectsPlaceholder(t *testing.T) {
+	err := validatePatchStepInputBeforeRuntime("patch/apply", map[string]any{
+		"patchType": "file_write",
+		"targetRef": "config.yaml",
+		"content":   "__FROM_PREVIOUS_STEP_OUTPUT__",
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "unresolved runtime template") {
+		t.Fatalf("validatePatchStepInputBeforeRuntime err = %v, want unresolved placeholder rejection", err)
+	}
+}
+
 func TestValidatedCompletionDoDAssessmentCoversCurrentDoDWithMarkdownNormalization(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-dod-coverage-complete",
@@ -10035,6 +10360,103 @@ func TestRuntimeOrchestrator_RecordsRejectedResultForWeakSatisfiedDoDAssessment(
 	}
 	if !strings.Contains(result.Summary, "DoD assessment rejected") {
 		t.Fatalf("result summary = %q, want rejected weak evidence summary", result.Summary)
+	}
+}
+
+func TestRuntimeOrchestrator_RecordsSyntheticRejectedResultWithoutDoDAssessment(t *testing.T) {
+	ctx := context.Background()
+	resultRepo := memory.NewResultRepository()
+	orch := &RuntimeOrchestrator{evidence: RuntimeEvidenceRepositories{Results: resultRepo}}
+	runID := common.RunID("run-rejected-synthetic-dod")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-rejected-synthetic-dod",
+		GoalID:          "goal-rejected-synthetic-dod",
+		DoDID:           "dod-rejected-synthetic-dod",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{ID: common.StepID(string(runID) + "/block/implement"), RunID: runID}
+
+	if err := orch.recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
+		"error": "implementation execution-stage llm graph node returned no state-changing output",
+	}); err != nil {
+		t.Fatalf("record synthetic rejected result: %v", err)
+	}
+
+	result, err := resultRepo.Get(ctx, common.ResultID(string(runID)+"/result/dod-assessment"))
+	if err != nil {
+		t.Fatalf("get synthetic rejected result: %v", err)
+	}
+	if result.State != common.ResultStateRejected || result.DoDAssessment.Satisfied {
+		t.Fatalf("result = %+v, want rejected unsatisfied synthetic DoD result", result)
+	}
+	if !strings.Contains(result.Summary, "no state-changing output") {
+		t.Fatalf("result summary = %q, want contract failure reason", result.Summary)
+	}
+	if len(result.DoDAssessment.Items) == 0 || !strings.Contains(result.DoDAssessment.Items[0].Item, "runtime execution contract") {
+		t.Fatalf("DoDAssessment = %+v, want synthetic runtime contract item", result.DoDAssessment)
+	}
+}
+
+func TestRuntimeOrchestrator_FailRunWritesSyntheticRejectedResultForProviderSchemaTerminalFailure(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	resultRepo := memory.NewResultRepository()
+	runID := common.RunID("run-provider-schema-terminal-result")
+	workspaceID := common.WorkspaceID("ws-provider-schema-terminal-result")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		GoalID:          "goal-provider-schema-terminal-result",
+		DoDID:           "dod-provider-schema-terminal-result",
+		State:           common.RunStateRunning,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		runtime:    &stubRuntimeAdapter{},
+		runs:       runRepo,
+		steps:      stepRepo,
+		workspaces: workspaceRepo,
+		evidence:   RuntimeEvidenceRepositories{Results: resultRepo},
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/provider-retry-1"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{"providerRetryAssessmentOnly": true},
+		Output: map[string]any{
+			"status": "failed",
+			"stage":  "llm_schema_invalid",
+			"error":  "invalid argument: executionGraph patch/apply targetRef is required",
+		},
+	}
+
+	if err := orch.dispatchRuntimeRepairFollowUp(ctx, run, failedStep, errors.New("invalid argument: executionGraph patch/apply targetRef is required")); err != nil {
+		t.Fatalf("dispatchRuntimeRepairFollowUp: %v", err)
+	}
+
+	closed, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if closed.State != common.RunStateFailed {
+		t.Fatalf("run state = %s, want failed", closed.State)
+	}
+	result, err := resultRepo.Get(ctx, common.ResultID(string(runID)+"/result/dod-assessment"))
+	if err != nil {
+		t.Fatalf("get synthetic rejected result: %v", err)
+	}
+	if result.State != common.ResultStateRejected || !strings.Contains(result.Summary, "patch/apply targetRef is required") {
+		t.Fatalf("result = %+v, want rejected result with schema failure reason", result)
 	}
 }
 
