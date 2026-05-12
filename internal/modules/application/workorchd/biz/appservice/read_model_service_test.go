@@ -1368,6 +1368,48 @@ func TestReadRunStatusWithBackendReturnsBlockedApprovalSummary(t *testing.T) {
 	}
 }
 
+func TestReadRunStatusUsesLatestCheckpointStep(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "memory", dataRoot)
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-status-current-step")
+	runID := common.RunID("run-status-current-step")
+	initialStepID := common.StepID("run-status-current-step/step-1")
+	latestStepID := common.StepID("run-status-current-step/provider-retry-002-of-repair-001-of-planning-001")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: latestStepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateFailed}); err != nil {
+		t.Fatalf("create latest step: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: initialStepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateFailed}); err != nil {
+		t.Fatalf("create initial step: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:               "run-status-current-step/checkpoint/1",
+		WorkspaceID:      workspaceID,
+		RunID:            runID,
+		CurrentStepID:    latestStepID,
+		RunStateSnapshot: common.RunStateRunning,
+		OccurredAt:       "2026-05-12T11:20:53Z",
+		Data:             map[string]any{"event": "step_failed"},
+	}); err != nil {
+		t.Fatalf("create checkpoint: %v", err)
+	}
+
+	status, err := ReadRunStatusWithSession(ctx, session, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunStatusWithSession: %v", err)
+	}
+	if status.CurrentStepID != string(latestStepID) || status.CurrentStepState != string(common.StepStateFailed) {
+		t.Fatalf("status = %+v, want current latest checkpoint step %s", status, latestStepID)
+	}
+}
+
 func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "memory", dataRoot)

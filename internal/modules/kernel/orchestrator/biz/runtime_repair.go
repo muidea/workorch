@@ -117,22 +117,31 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 		}
 		return o.FailRun(ctx, run.ID, reason)
 	}
-	if o.shouldAttemptProviderRetry(ctx, run, failedStep) {
+	switch o.recoveryActionForFailedStep(ctx, run, failedStep) {
+	case runtimeRecoveryActionProviderRetry:
 		rootStepID := providerRetryRootStepID(failedStep)
 		attempt := o.providerRetryAttemptCount(ctx, run.ID, rootStepID) + 1
 		input := providerRetryStepInput(failedStep, attempt, execErr)
-		return o.dispatchStep(ctx, run, providerRetryStepID(rootStepID, attempt), failedStep.Kind, input)
-	}
-	if o.shouldBlockOnProviderRetryExhaustion(ctx, run, failedStep) {
+		stepID, err := o.uniqueDispatchStepID(ctx, run.ID, providerRetryStepID(run.ID, rootStepID, attempt))
+		if err != nil {
+			return err
+		}
+		return o.dispatchStep(ctx, run, stepID, failedStep.Kind, input)
+	case runtimeRecoveryActionProviderRetryExhausted:
 		return o.blockOnProviderRetryExhaustion(ctx, run, failedStep, execErr)
-	}
-	if o.shouldEscalateRuntimeRepairExhaustion(ctx, run, failedStep) {
+	case runtimeRecoveryActionRuntimeRepairExhausted:
 		return o.blockOnRuntimeRepairExhaustion(ctx, run, failedStep, execErr)
-	}
-	if o.shouldBlockOnDuplicateRuntimeFailure(ctx, run, failedStep) {
+	case runtimeRecoveryActionDuplicateFailure:
 		return o.blockOnDuplicateRuntimeFailure(ctx, run, failedStep, execErr)
-	}
-	if !o.shouldAttemptRuntimeRepair(ctx, run, failedStep) {
+	case runtimeRecoveryActionRuntimeRepair:
+		attempt := o.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep) + 1
+		input := o.runtimeRepairFollowUpStepInput(ctx, run, failedStep, attempt, execErr)
+		stepID, err := o.uniqueDispatchStepID(ctx, run.ID, runtimeRepairFollowUpStepID(run.ID, failedStep, attempt))
+		if err != nil {
+			return err
+		}
+		return o.dispatchStep(ctx, run, stepID, initialStepKind(run), input)
+	case runtimeRecoveryActionFailRun:
 		reason := "runtime step failed"
 		if execErr != nil {
 			reason = execErr.Error()
@@ -143,10 +152,94 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 			}
 		}
 		return o.failRunWithRejectedCompletionResult(ctx, run, failedStep, reason)
+	default:
+		return common.ErrInvalidArgument
 	}
-	attempt := o.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep) + 1
-	input := o.runtimeRepairFollowUpStepInput(ctx, run, failedStep, attempt, execErr)
-	return o.dispatchStep(ctx, run, runtimeRepairFollowUpStepID(run.ID, failedStep, attempt), initialStepKind(run), input)
+}
+
+type runtimeRecoveryAction string
+
+const (
+	runtimeRecoveryActionProviderRetry          runtimeRecoveryAction = "provider_retry"
+	runtimeRecoveryActionProviderRetryExhausted runtimeRecoveryAction = "provider_retry_exhausted"
+	runtimeRecoveryActionRuntimeRepairExhausted runtimeRecoveryAction = "runtime_repair_exhausted"
+	runtimeRecoveryActionDuplicateFailure       runtimeRecoveryAction = "duplicate_failure"
+	runtimeRecoveryActionRuntimeRepair          runtimeRecoveryAction = "runtime_repair"
+	runtimeRecoveryActionFailRun                runtimeRecoveryAction = "fail_run"
+)
+
+func (o *RuntimeOrchestrator) recoveryActionForFailedStep(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) runtimeRecoveryAction {
+	if o == nil || run == nil || failedStep == nil {
+		return runtimeRecoveryActionFailRun
+	}
+	if o.shouldBlockOnProviderConfigFailure(ctx, run, failedStep) {
+		return runtimeRecoveryActionProviderRetryExhausted
+	}
+	if o.shouldAttemptProviderRetry(ctx, run, failedStep) {
+		return runtimeRecoveryActionProviderRetry
+	}
+	if o.providerRetryBudgetExhausted(ctx, run, failedStep) {
+		return runtimeRecoveryActionProviderRetryExhausted
+	}
+	if isLLMProviderRuntimeFailure(run, failedStep) {
+		return runtimeRecoveryActionFailRun
+	}
+	if o.shouldEscalateRuntimeRepairExhaustion(ctx, run, failedStep) {
+		return runtimeRecoveryActionRuntimeRepairExhausted
+	}
+	if o.shouldBlockOnDuplicateRuntimeFailure(ctx, run, failedStep) {
+		return runtimeRecoveryActionDuplicateFailure
+	}
+	if o.shouldAttemptRuntimeRepair(ctx, run, failedStep) {
+		return runtimeRecoveryActionRuntimeRepair
+	}
+	return runtimeRecoveryActionFailRun
+}
+
+func (o *RuntimeOrchestrator) shouldBlockOnProviderConfigFailure(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
+	if o == nil || run == nil || failedStep == nil || o.tickets == nil {
+		return false
+	}
+	if !isLLMProviderRuntimeFailure(run, failedStep) {
+		return false
+	}
+	switch stringFromMap(failedStep.Output, failureOutputKeyClass) {
+	case failureClassProviderUnavailable, failureClassProviderSchemaDrift, failureClassAuthOrConfigError:
+		return true
+	default:
+		return false
+	}
+}
+
+func (o *RuntimeOrchestrator) blockRecoveryActionFromFailedStep(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	execErr error,
+	action runtimeRecoveryAction,
+) error {
+	if o == nil || o.runs == nil || o.tickets == nil {
+		return common.ErrBlocked
+	}
+	switch action {
+	case runtimeRecoveryActionProviderRetryExhausted:
+		if err := o.blockOnProviderRetryExhaustion(ctx, run, failedStep, execErr); err != nil {
+			return err
+		}
+		return common.ErrBlocked
+	case runtimeRecoveryActionRuntimeRepairExhausted:
+		if err := o.blockOnRuntimeRepairExhaustion(ctx, run, failedStep, execErr); err != nil {
+			return err
+		}
+		return common.ErrBlocked
+	case runtimeRecoveryActionDuplicateFailure:
+		if err := o.blockOnDuplicateRuntimeFailure(ctx, run, failedStep, execErr); err != nil {
+			return err
+		}
+		return common.ErrBlocked
+	default:
+		return common.ErrInvalidArgument
+	}
 }
 
 func (o *RuntimeOrchestrator) failRunWithRejectedCompletionResult(ctx context.Context, run *runModel.Run, step *runModel.Step, reason string) error {
@@ -191,6 +284,7 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		Question:     localizedRuntimeRepairExhaustionQuestion(language),
 		Context: map[string]any{
 			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+			decisionContextKeyResultPolicy:   decisionContextResultPolicyRejected,
 			"allowedRecoveryActions":         []string{"retry_same_step", "replan", "provide_information", "terminate"},
 			"attempts":                       o.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep),
 			"maxAttempts":                    maxRuntimeRepairAttempts,
@@ -213,7 +307,9 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
 		return err
 	}
-	_ = o.recordRejectedCompletionDoDAssessment(ctx, run, failedStep, failedStep.Output)
+	if err := o.recordRejectedResultForDecisionBlock(ctx, run, failedStep, failedStep.Output, spec); err != nil {
+		return err
+	}
 	return o.BlockOnDecision(ctx, run.ID, spec.TicketID)
 }
 
@@ -222,6 +318,9 @@ func (o *RuntimeOrchestrator) shouldAttemptRuntimeRepair(ctx context.Context, ru
 		return false
 	}
 	if !requiresDoDAssessmentCompletionGate(run) {
+		return false
+	}
+	if terminalAssessmentOnlyDecisionContractFailure(failedStep) {
 		return false
 	}
 	if o.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep) >= maxRuntimeRepairAttempts {
@@ -242,6 +341,13 @@ func (o *RuntimeOrchestrator) shouldAttemptProviderRetry(ctx context.Context, ru
 
 func (o *RuntimeOrchestrator) shouldBlockOnProviderRetryExhaustion(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
 	if o == nil || run == nil || failedStep == nil || o.tickets == nil {
+		return false
+	}
+	return o.providerRetryBudgetExhausted(ctx, run, failedStep)
+}
+
+func (o *RuntimeOrchestrator) providerRetryBudgetExhausted(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
+	if o == nil || run == nil || failedStep == nil {
 		return false
 	}
 	if !isRetryableLLMProviderRuntimeFailure(run, failedStep) {
@@ -269,6 +375,7 @@ func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
 			decisionContextKeyScope:          decisionContextScopeWorkorchRuntime,
 			decisionContextKeyDependency:     decisionContextDependencyLLMProvider,
 			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyConfigOnly,
+			decisionContextKeyResultPolicy:   decisionContextResultPolicyNone,
 			"attempts":                       maxProviderRetryAttempts,
 			"failureClass":                   stringFromMap(failedStep.Output, failureOutputKeyClass),
 			"failureSignature":               stringFromMap(failedStep.Output, failureOutputKeySignature),
@@ -318,6 +425,11 @@ func providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr erro
 	rootStepID := providerRetryRootStepID(failedStep)
 	input[stepInputKeyProviderRetryFollowUp] = true
 	input[stepInputKeyProviderRetryAttempt] = attempt
+	input[stepInputKeyProviderRetryRootStep] = string(rootStepID)
+	input[stepInputKeyRecoveryAction] = string(runtimeRecoveryActionProviderRetry)
+	input[stepInputKeyRecoveryRootStepID] = string(rootStepID)
+	input[stepInputKeyRecoveryLineageType] = "provider_retry"
+	input[stepInputKeyRecoveryBudgetScope] = recoveryBudgetScope("provider_retry", rootStepID, stringFromMap(failedStep.Output, failureOutputKeyClass), stringFromMap(failedStep.Output, failureOutputKeySignature))
 	input["maxProviderRetryAttempts"] = maxProviderRetryAttempts
 	input["failedStepId"] = string(rootStepID)
 	input["failedStepKind"] = failedStep.Kind
@@ -345,18 +457,60 @@ func completionGateFollowUpStep(step *runModel.Step) bool {
 		boolValue(step.Input[stepInputKeyNoActionableFollowUp])
 }
 
-func providerRetryStepID(rootStepID common.StepID, attempt int) common.StepID {
-	return common.StepID(runtimeChildID(rootStepID, fmt.Sprintf("provider-retry-%d", attempt)))
+func providerRetryStepID(runID common.RunID, rootStepID common.StepID, attempt int) common.StepID {
+	if attempt < 1 {
+		attempt = 1
+	}
+	rootLabel := runtimeReadableStepLabel(runID, rootStepID)
+	if rootLabel == "" {
+		rootLabel = "root"
+	}
+	return common.StepID(fmt.Sprintf("%s/provider-retry-%03d-of-%s", runID, attempt, rootLabel))
 }
 
 func providerRetryRootStepID(step *runModel.Step) common.StepID {
 	if step == nil {
 		return ""
 	}
-	if root := common.StepID(stringFromMap(step.Input, "failedStepId")); root != "" {
+	if root := common.StepID(strings.TrimSpace(stringFromMap(step.Input, stepInputKeyProviderRetryRootStep))); root != "" {
+		return normalizeRecoveryRootStepIDFromInput(step.Input, root)
+	}
+	if boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) {
+		if root := common.StepID(strings.TrimSpace(stringFromMap(step.Input, "failedStepId"))); root != "" {
+			return normalizeRecoveryRootStepIDFromInput(step.Input, root)
+		}
+	}
+	return normalizeRecoveryRootStepIDFromInput(step.Input, step.ID)
+}
+
+func normalizeRecoveryRootStepIDFromInput(input map[string]any, root common.StepID) common.StepID {
+	if root == "" {
+		return ""
+	}
+	rootText := string(root)
+	if !recoveryRootNeedsNormalization(rootText) {
 		return root
 	}
-	return step.ID
+	if repairRoot := common.StepID(strings.TrimSpace(stringFromMap(input, stepInputKeyRepairOfRootStepID))); repairRoot != "" && !recoveryRootNeedsNormalization(string(repairRoot)) {
+		return repairRoot
+	}
+	if recoveryRoot := common.StepID(strings.TrimSpace(stringFromMap(input, stepInputKeyRecoveryRootStepID))); recoveryRoot != "" && recoveryRoot != root {
+		return normalizeRecoveryRootStepIDFromInput(input, recoveryRoot)
+	}
+	if providerRoot := common.StepID(strings.TrimSpace(stringFromMap(input, stepInputKeyProviderRetryRootStep))); providerRoot != "" && providerRoot != root {
+		return normalizeRecoveryRootStepIDFromInput(input, providerRoot)
+	}
+	if strings.Contains(rootText, "/provider-retry-") || strings.Contains(rootText, "of-provider-retry-") {
+		if repairRoot := common.StepID(strings.TrimSpace(stringFromMap(input, stepInputKeyRepairOfRootStepID))); repairRoot != "" {
+			return repairRoot
+		}
+	}
+	return root
+}
+
+func recoveryRootNeedsNormalization(root string) bool {
+	return strings.Contains(root, "/provider-retry-") ||
+		strings.Contains(root, "of-provider-retry-")
 }
 
 func isRetryableLLMProviderRuntimeFailure(run *runModel.Run, step *runModel.Step) bool {
@@ -560,12 +714,17 @@ func runtimeRepairRootStepID(step *runModel.Step) common.StepID {
 		return ""
 	}
 	if root := common.StepID(strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRepairOfRootStepID))); root != "" {
-		return root
+		return normalizeRecoveryRootStepIDFromInput(step.Input, root)
+	}
+	if boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) {
+		if root := common.StepID(strings.TrimSpace(stringFromMap(step.Input, stepInputKeyProviderRetryRootStep))); root != "" {
+			return normalizeRecoveryRootStepIDFromInput(step.Input, root)
+		}
 	}
 	if root := graphRootStepID(step); root != "" {
-		return root
+		return normalizeRecoveryRootStepIDFromInput(step.Input, root)
 	}
-	return step.ID
+	return normalizeRecoveryRootStepIDFromInput(step.Input, step.ID)
 }
 
 func runtimeRepairStepMatchesScope(step *runModel.Step, scope runtimeRepairScope) bool {
@@ -663,19 +822,28 @@ func isLLMProviderFailureStage(stage string) bool {
 		"llm_provider_error",
 		"llm_provider_stream_error",
 		"llm_provider_request_failed",
-		"llm_schema_invalid",
-		"llm_decision_invalid",
-		"llm_failed":
+		"llm_provider_schema_drift",
+		"llm_provider_response_schema_invalid",
+		"llm_provider_protocol_invalid":
 		return true
 	default:
 		return false
 	}
 }
 
+func terminalAssessmentOnlyDecisionContractFailure(step *runModel.Step) bool {
+	if step == nil || !isLLMDecisionContractFailureStage(stringFromMap(step.Output, "stage")) {
+		return false
+	}
+	return boolValue(step.Input["providerRetryAssessmentOnly"]) ||
+		boolValue(step.Input[stepInputKeyAssessmentOnly]) ||
+		boolValue(step.Input["assessmentOnlyContractCorrection"])
+}
+
 func runtimeRepairFollowUpStepID(runID common.RunID, failedStep *runModel.Step, attempt int) common.StepID {
 	base := ""
 	if failedStep != nil {
-		base = runtimeChildID(failedStep.ID, "repair")
+		base = runtimeReadableStepLabel(runID, runtimeRepairRootStepID(failedStep))
 	}
 	if base == "" {
 		base = "repair"
@@ -683,7 +851,7 @@ func runtimeRepairFollowUpStepID(runID common.RunID, failedStep *runModel.Step, 
 	if attempt < 1 {
 		attempt = 1
 	}
-	return common.StepID(fmt.Sprintf("%s/zz-llm-repair-%s-%d", runID, base, attempt))
+	return common.StepID(fmt.Sprintf("%s/repair-%03d-of-%s", runID, attempt, base))
 }
 
 func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
@@ -710,7 +878,11 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	}
 	input["failedStepId"] = string(failedStep.ID)
 	input[stepInputKeyRepairOfStepID] = string(failedStep.ID)
-	input[stepInputKeyRepairOfRootStepID] = string(runtimeRepairRootStepID(failedStep))
+	rootStepID := runtimeRepairRootStepID(failedStep)
+	input[stepInputKeyRepairOfRootStepID] = string(rootStepID)
+	input[stepInputKeyRecoveryAction] = string(runtimeRecoveryActionRuntimeRepair)
+	input[stepInputKeyRecoveryRootStepID] = string(rootStepID)
+	input[stepInputKeyRecoveryLineageType] = "runtime_repair"
 	input["failedStepKind"] = failedStep.Kind
 	input["failedStepState"] = string(failedStep.State)
 	input["failedStepInput"] = compactStepInputForLLMContext(failedStep.Input)
@@ -728,13 +900,14 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			}
 		}
 	}
-	if stateChangingRepairRequired(failedStep, execErr) {
+	if stateChangingRepairRequired(run, failedStep, execErr) {
 		input["repairObjective"] = "produce_state_changing_implementation"
 		input["stateChangingOutputRequired"] = true
 		input["repairGuidance"] = []string{
 			"Return concrete patchRequests/patches with complete file_write content or unified_diff diff, or return a failed dodAssessment if implementation cannot be completed.",
-			"Do not return executionGraph for this repair.",
-			"Do not return only shellCommands/read/list/test/build inspection commands.",
+			"If multiple dependent operations are needed, executionGraph is allowed only when it contains at least one valid patch/apply node.",
+			"Do not return read-only, inspection-only, or shell-only executionGraph.",
+			"If a target file is missing in an empty or new workspace, create it with patch/apply file_write instead of reading it again.",
 			"Do not use placeholders such as __FROM_PREVIOUS_STEP_OUTPUT__ or <<...>>.",
 		}
 	}
@@ -750,6 +923,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input[failureOutputKeySignature] = signature
 		input[stepInputKeyRepairOfFailureSig] = signature
 	}
+	input[stepInputKeyRecoveryBudgetScope] = recoveryBudgetScope("runtime_repair", rootStepID, class, signature)
 	input["previousStepKind"] = failedStep.Kind
 	input["previousStepOutput"] = compactStepOutputForLLMContext(failedStep.Output)
 	if nodeID := graphNodeID(failedStep); nodeID != "" {
@@ -784,7 +958,21 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	return input
 }
 
-func stateChangingRepairRequired(failedStep *runModel.Step, execErr error) bool {
+func recoveryBudgetScope(lineageType string, rootStepID common.StepID, failureClass string, failureSignature string) map[string]any {
+	ret := map[string]any{
+		"lineageType": lineageType,
+		"rootStepId":  string(rootStepID),
+	}
+	if failureClass = strings.TrimSpace(failureClass); failureClass != "" {
+		ret["failureClass"] = failureClass
+	}
+	if failureSignature = strings.TrimSpace(failureSignature); failureSignature != "" {
+		ret["failureSignature"] = failureSignature
+	}
+	return ret
+}
+
+func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, execErr error) bool {
 	if failedStep == nil {
 		return false
 	}
@@ -803,12 +991,17 @@ func stateChangingRepairRequired(failedStep *runModel.Step, execErr error) bool 
 	if boolValue(failedStep.Output["executionStageContractViolation"]) {
 		return true
 	}
+	if requiresDoDAssessmentCompletionGate(run) && missingWorkspaceFileReadFailure(failedStep, execErr) {
+		return true
+	}
 	for _, marker := range []string{
 		"implementation planning llm step returned read-only executiongraph without patch output",
 		"execution-stage llm graph node returned executiongraph",
 		"state-changing llm repair step returned executiongraph",
 		"state-changing llm repair step returned no state-changing output",
 		"implementation execution-stage llm graph node returned no state-changing output",
+		"targetref is required",
+		"targetref must be set",
 		"patch content contains unresolved runtime template",
 		"patch diff contains unresolved runtime template",
 		"patch content is required",
@@ -820,6 +1013,27 @@ func stateChangingRepairRequired(failedStep *runModel.Step, execErr error) bool 
 		}
 	}
 	return false
+}
+
+func missingWorkspaceFileReadFailure(failedStep *runModel.Step, execErr error) bool {
+	if failedStep == nil {
+		return false
+	}
+	text := strings.ToLower(strings.Join([]string{
+		errorString(execErr),
+		failedStep.Kind,
+		stringFromMap(failedStep.Output, "stage"),
+		stringFromMap(failedStep.Output, "error"),
+		stringFromMap(failedStep.Output, "reason"),
+		stringFromMap(failedStep.Output, failureOutputKeySignature),
+	}, "\n"))
+	if !strings.Contains(text, "file/read") && !strings.Contains(text, "file_read") {
+		return false
+	}
+	return strings.Contains(text, "no such file") ||
+		strings.Contains(text, "cannot find the file") ||
+		strings.Contains(text, "file_read_invalid_path") ||
+		strings.Contains(text, "lstat ")
 }
 
 func (o *RuntimeOrchestrator) runtimeRepairPatchContext(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {

@@ -314,8 +314,9 @@ func TestMemoryBackendPersistsStateAcrossHTTPRequests(t *testing.T) {
 	if statusRec.Code != http.StatusOK {
 		t.Fatalf("run status code = %d, want 200, body = %s", statusRec.Code, statusRec.Body.String())
 	}
-	if !strings.Contains(statusRec.Body.String(), `"state": "failed"`) {
-		t.Fatalf("run status body = %s, want failed without configured LLM provider", statusRec.Body.String())
+	if !strings.Contains(statusRec.Body.String(), `"state": "blocked_on_decision"`) ||
+		!strings.Contains(statusRec.Body.String(), `"blockingTicketId": "run-memory-http-step-1-provider-retry-exhausted-decision"`) {
+		t.Fatalf("run status body = %s, want provider decision blocker without configured LLM provider", statusRec.Body.String())
 	}
 
 	observabilityReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-memory-http/observability", nil)
@@ -324,8 +325,8 @@ func TestMemoryBackendPersistsStateAcrossHTTPRequests(t *testing.T) {
 	if observabilityRec.Code != http.StatusOK {
 		t.Fatalf("run observability code = %d, want 200, body = %s", observabilityRec.Code, observabilityRec.Body.String())
 	}
-	if !strings.Contains(observabilityRec.Body.String(), `"terminal": true`) || !strings.Contains(observabilityRec.Body.String(), `"runtimeCheckpointTotal"`) {
-		t.Fatalf("run observability body = %s, want terminal progress and evidence counters", observabilityRec.Body.String())
+	if !strings.Contains(observabilityRec.Body.String(), `"terminal": false`) || !strings.Contains(observabilityRec.Body.String(), `"runtimeCheckpointTotal"`) {
+		t.Fatalf("run observability body = %s, want non-terminal provider blocker and evidence counters", observabilityRec.Body.String())
 	}
 }
 
@@ -494,11 +495,12 @@ func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
 		body.Activation.Run.GoalID != goalID ||
 		body.Activation.Run.DoDID != dodID ||
 		body.Activation.Run.Priority != 7 ||
-		body.Activation.Run.State != "failed" {
-		t.Fatalf("activation run = %+v, want generated failed llm run with definitions", body.Activation.Run)
+		body.Activation.Run.State != "blocked_on_decision" ||
+		body.Activation.Run.BlockingTicketID == "" {
+		t.Fatalf("activation run = %+v, want generated provider-blocked llm run with definitions", body.Activation.Run)
 	}
-	if !strings.Contains(body.Activation.Run.FailureReason, `llm provider "reasoning" is not configured`) {
-		t.Fatalf("activation failure reason = %q, want selected llm provider configuration failure", body.Activation.Run.FailureReason)
+	if body.Activation.Run.FailureReason != "" {
+		t.Fatalf("activation failure reason = %q, want provider blocker without business failure reason", body.Activation.Run.FailureReason)
 	}
 	if body.Activation.Run.ExecutionContext[llmcommon.ExecutionContextLLMProviderID] != "reasoning" {
 		t.Fatalf("executionContext = %+v, want selected llm provider", body.Activation.Run.ExecutionContext)
@@ -514,7 +516,7 @@ func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
 	}
 	for _, want := range []string{
 		`workorch_run_outcomes_total{status="succeeded"} 0`,
-		`workorch_run_outcomes_total{status="failed"} 1`,
+		`workorch_run_outcomes_total{status="failed"} 0`,
 	} {
 		if !strings.Contains(metricsRec.Body.String(), want) {
 			t.Fatalf("metrics body missing %q\nbody:\n%s", want, metricsRec.Body.String())
@@ -2515,7 +2517,7 @@ func TestRunGetEndpointReturnsNotFoundWhenMissing(t *testing.T) {
 	}
 }
 
-func TestRunStartEndpointReturnsCompletedRun(t *testing.T) {
+func TestRunStartEndpointReturnsBlockedProviderDecisionRun(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspace := createWorkspaceForHTTP(t, handler, "run start http workspace", "workspaces/run-start-http")
@@ -2540,8 +2542,11 @@ func TestRunStartEndpointReturnsCompletedRun(t *testing.T) {
 	if err := json.Unmarshal(startRec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal started run: %v", err)
 	}
-	if body.Run.ID != "run-start-http" || body.Run.State != "failed" || body.Run.FailureReason == "" {
-		t.Fatalf("started run = %+v, want run-start-http/failed with provider failure", body.Run)
+	if body.Run.ID != "run-start-http" ||
+		body.Run.State != string(common.RunStateBlockedOnDecision) ||
+		body.Run.BlockingTicketID == "" ||
+		body.Run.FailureReason != "" {
+		t.Fatalf("started run = %+v, want run-start-http blocked on provider decision", body.Run)
 	}
 }
 
@@ -3474,7 +3479,7 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 		`workorch_run_queue_waiting 0`,
 		`workorch_run_queue_total 0`,
 		`workorch_run_outcomes_total{status="succeeded"} 0`,
-		`workorch_run_outcomes_total{status="failed"} 2`,
+		`workorch_run_outcomes_total{status="failed"} 1`,
 		`workorch_run_outcomes_total{status="canceled"} 0`,
 		`workorch_server_max_concurrent_runs 1`,
 	} {

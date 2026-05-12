@@ -49,6 +49,11 @@ const (
 	stepInputKeyRepairOfFailureSig     = "repairOfFailureSignature"
 	stepInputKeyProviderRetryFollowUp  = "providerRetryFollowUp"
 	stepInputKeyProviderRetryAttempt   = "providerRetryAttempt"
+	stepInputKeyProviderRetryRootStep  = "providerRetryRootStepId"
+	stepInputKeyRecoveryAction         = "recoveryAction"
+	stepInputKeyRecoveryRootStepID     = "recoveryRootStepId"
+	stepInputKeyRecoveryLineageType    = "recoveryLineageType"
+	stepInputKeyRecoveryBudgetScope    = "recoveryBudgetScope"
 	stepInputKeyNoActionableFollowUp   = "noActionableContinuationFollowUp"
 	stepInputKeyAssessmentOnly         = "assessmentOnly"
 	stepInputKeyGraphLimitFollowUp     = "graphExpansionLimitFollowUp"
@@ -1099,6 +1104,9 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		if err := o.createDecisionTicket(ctx, run, step, decisionSpec); err != nil {
 			return err
 		}
+		if err := o.recordRejectedResultForDecisionBlock(ctx, run, step, output, decisionSpec); err != nil {
+			return err
+		}
 		return o.blockOnDecisionAtStep(ctx, run, workspace, ticketID, step.ID)
 	}
 	if approvalSpec := approvalBlockSpec(output); approvalSpec.Reason != "" {
@@ -1246,8 +1254,11 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 		return err
 	}
 	if boolValue(step.Input["stateChangingOutputRequired"]) {
-		if _, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
-			return fmt.Errorf("%w: state-changing llm repair step returned executionGraph instead of concrete patch output", common.ErrInvalidArgument)
+		if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
+			if err := validateStateChangingExecutionGraph(graph); err != nil {
+				return err
+			}
+			return nil
 		}
 		if hasStateChangingLLMExecutionOutput(output) || doDAssessmentFromOutput(output) != nil {
 			return nil
@@ -1378,13 +1389,20 @@ func runGoalRequiresStateChangingImplementation(run *runModel.Run) bool {
 func graphHasStateChangingPatchNode(graph runtimemodel.BlockExecutionGraph) bool {
 	for _, node := range graph.Nodes {
 		switch strings.TrimSpace(node.Kind) {
-		case "patch/preview", "patch/apply":
+		case "patch/apply":
 			if _, err := runtimePatchRequestFromMap(node.Input); err == nil {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func validateStateChangingExecutionGraph(graph runtimemodel.BlockExecutionGraph) error {
+	if !graphHasStateChangingPatchNode(graph) {
+		return fmt.Errorf("%w: state-changing llm repair step returned read-only executionGraph without patch/apply", common.ErrInvalidArgument)
+	}
+	return nil
 }
 
 func llmExecutionGraphNodeReturnedOnlyGraph(run *runModel.Run, step *runModel.Step, output map[string]any) bool {
@@ -1483,11 +1501,11 @@ func validatePatchStepInputBeforeRuntime(kind string, input map[string]any) erro
 }
 
 func assessmentOnlyContractCorrectionStepID(runID common.RunID, step *runModel.Step) common.StepID {
-	stepID := runtimeChildID(step.ID, "assessment-contract-correction")
+	stepID := runtimeChildID(common.StepID(runtimeReadableStepLabel(runID, step.ID)), "assessment-contract-correction")
 	if stepID == "" {
 		stepID = "assessment-contract-correction"
 	}
-	return common.StepID(fmt.Sprintf("%s/zz-llm-after-assessment-contract-%s", runID, stepID))
+	return common.StepID(fmt.Sprintf("%s/assessment-correction-%s", runID, stepID))
 }
 
 func assessmentOnlyContractCorrectionStepInput(step *runModel.Step, output map[string]any, violation error) map[string]any {
@@ -1500,6 +1518,7 @@ func assessmentOnlyContractCorrectionStepInput(step *runModel.Step, output map[s
 	input["assessmentOnlyContractViolationStepId"] = string(step.ID)
 	input["assessmentOnlyContractViolationReason"] = errorString(violation)
 	input["allowedAssessmentOnlyCompletionStates"] = []string{"completed", "failed", "blocked_on_decision", "blocked_on_approval"}
+	stripAssessmentOnlyRecoveryMarkers(input)
 	sanitizeAssessmentOnlyExecutableFields(input)
 	for _, key := range []string{"previousStepOutput", "failedStepOutput"} {
 		if nested := mapFromValue(input[key]); len(nested) > 0 {
@@ -1513,6 +1532,34 @@ func assessmentOnlyContractCorrectionStepInput(step *runModel.Step, output map[s
 		input["previousInvalidAssessmentOutput"] = compactStepOutputForLLMContext(sanitized)
 	}
 	return input
+}
+
+func stripAssessmentOnlyRecoveryMarkers(input map[string]any) {
+	if input == nil {
+		return
+	}
+	for _, key := range []string{
+		stepInputKeyProviderRetryFollowUp,
+		stepInputKeyProviderRetryAttempt,
+		stepInputKeyProviderRetryRootStep,
+		"providerRetryAssessmentOnly",
+		"providerRetryMode",
+		stepInputKeyRuntimeRepairFollowUp,
+		stepInputKeyRuntimeRepairAttempt,
+		stepInputKeyRepairOfStepID,
+		stepInputKeyRepairOfRootStepID,
+		stepInputKeyRepairOfFailureClass,
+		stepInputKeyRepairOfFailureSig,
+		stepInputKeyRecoveryAction,
+		stepInputKeyRecoveryRootStepID,
+		stepInputKeyRecoveryLineageType,
+		stepInputKeyRecoveryBudgetScope,
+		"stateChangingOutputRequired",
+		"repairObjective",
+		"repairGuidance",
+	} {
+		delete(input, key)
+	}
 }
 
 func sanitizeAssessmentOnlyExecutableFields(payload map[string]any) {
@@ -1533,6 +1580,26 @@ func sanitizeAssessmentOnlyExecutableFields(payload map[string]any) {
 		stepOutputKeyMemoryRefs,
 	} {
 		delete(payload, key)
+	}
+	for key, value := range payload {
+		switch typed := value.(type) {
+		case map[string]any:
+			sanitizeAssessmentOnlyExecutableFields(typed)
+			payload[key] = typed
+		case []any:
+			for idx, item := range typed {
+				if nested, ok := item.(map[string]any); ok {
+					sanitizeAssessmentOnlyExecutableFields(nested)
+					typed[idx] = nested
+				}
+			}
+			payload[key] = typed
+		case []map[string]any:
+			for idx := range typed {
+				sanitizeAssessmentOnlyExecutableFields(typed[idx])
+			}
+			payload[key] = typed
+		}
 	}
 }
 
@@ -1757,10 +1824,12 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 		}}, nil
 	}
 	if last.State == common.StepStateFailed && requiresDoDAssessmentCompletionGate(run) {
-		if isRetryableLLMProviderRuntimeFailure(run, last) {
+		action := o.recoveryActionForFailedStep(ctx, run, last)
+		switch action {
+		case runtimeRecoveryActionProviderRetry:
 			rootStepID := providerRetryRootStepID(last)
 			attempt := o.providerRetryAttemptCount(ctx, run.ID, rootStepID) + 1
-			stepID, err := o.uniqueDispatchStepID(ctx, run.ID, providerRetryStepID(rootStepID, attempt))
+			stepID, err := o.uniqueDispatchStepID(ctx, run.ID, providerRetryStepID(run.ID, rootStepID, attempt))
 			if err != nil {
 				return nil, err
 			}
@@ -1769,17 +1838,27 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 				Kind:  last.Kind,
 				Input: providerRetryStepInput(last, attempt, nil),
 			}}, nil
+		case runtimeRecoveryActionRuntimeRepair:
+			attempt := o.runtimeRepairAttemptCountForStep(ctx, run.ID, last) + 1
+			stepID, err := o.uniqueDispatchStepID(ctx, run.ID, runtimeRepairFollowUpStepID(run.ID, last, attempt))
+			if err != nil {
+				return nil, err
+			}
+			return []stepDispatchSpec{{
+				ID:    stepID,
+				Kind:  initialStepKind(run),
+				Input: o.runtimeRepairFollowUpStepInput(ctx, run, last, attempt, nil),
+			}}, nil
+		case runtimeRecoveryActionProviderRetryExhausted,
+			runtimeRecoveryActionRuntimeRepairExhausted,
+			runtimeRecoveryActionDuplicateFailure:
+			if err := o.blockRecoveryActionFromFailedStep(ctx, run, last, nil, action); err != nil {
+				return nil, err
+			}
+			return nil, common.ErrBlocked
+		default:
+			return nil, common.ErrConflict
 		}
-		attempt := o.runtimeRepairAttemptCountForStep(ctx, run.ID, last) + 1
-		stepID, err := o.uniqueDispatchStepID(ctx, run.ID, runtimeRepairFollowUpStepID(run.ID, last, attempt))
-		if err != nil {
-			return nil, err
-		}
-		return []stepDispatchSpec{{
-			ID:    stepID,
-			Kind:  initialStepKind(run),
-			Input: o.runtimeRepairFollowUpStepInput(ctx, run, last, attempt, nil),
-		}}, nil
 	}
 	return nil, common.ErrConflict
 }
@@ -1851,8 +1930,17 @@ func previousExecutionStepID(step *runModel.Step) common.StepID {
 	if step == nil || step.Input == nil {
 		return ""
 	}
-	previousStepID, _ := step.Input["previousStepId"].(string)
-	return common.StepID(strings.TrimSpace(previousStepID))
+	for _, key := range []string{
+		"previousStepId",
+		stepInputKeyRepairOfStepID,
+		"failedStepId",
+	} {
+		previousStepID := strings.TrimSpace(stringFromMap(step.Input, key))
+		if previousStepID != "" && common.StepID(previousStepID) != step.ID {
+			return common.StepID(previousStepID)
+		}
+	}
+	return ""
 }
 
 func (o *RuntimeOrchestrator) dispatchStepSpecs(ctx context.Context, run *runModel.Run, specs []stepDispatchSpec) error {

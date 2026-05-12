@@ -724,12 +724,21 @@ func readRunStatus(ctx context.Context, deps readModelDependencies, runID common
 		return RunStatus{}, err
 	}
 	var steps []*runmodel.Step
+	var checkpoints []*runmodel.RuntimeCheckpoint
 	var decisions []*decisionmodel.Ticket
 	var approvals []*approvalmodel.Approval
 	err = runReadModelTasks(
 		func() error {
 			var err error
 			steps, err = deps.steps.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			if deps.checkpoints == nil {
+				return nil
+			}
+			var err error
+			checkpoints, err = deps.checkpoints.ListByRun(ctx, item.ID)
 			return err
 		},
 		func() error {
@@ -757,7 +766,7 @@ func readRunStatus(ctx context.Context, deps readModelDependencies, runID common
 		BlockingApprovalID: string(item.BlockingApprovalID),
 		FailureReason:      item.FailureReason,
 	}
-	if currentStep := lastStep(steps); currentStep != nil {
+	if currentStep := currentRunStatusStep(steps, checkpoints); currentStep != nil {
 		ret.CurrentStepID = string(currentStep.ID)
 		ret.CurrentStepKind = currentStep.Kind
 		ret.CurrentStepState = string(currentStep.State)
@@ -1276,6 +1285,67 @@ func lastStep(steps []*runmodel.Step) *runmodel.Step {
 		return nil
 	}
 	return steps[len(steps)-1]
+}
+
+func currentRunStatusStep(steps []*runmodel.Step, checkpoints []*runmodel.RuntimeCheckpoint) *runmodel.Step {
+	if len(steps) == 0 {
+		return nil
+	}
+	byID := make(map[common.StepID]*runmodel.Step, len(steps))
+	for _, step := range steps {
+		if step == nil || step.ID == "" {
+			continue
+		}
+		byID[step.ID] = step
+	}
+	if checkpoint := latestRuntimeCheckpointModel(checkpoints); checkpoint != nil && checkpoint.CurrentStepID != "" {
+		if step := byID[checkpoint.CurrentStepID]; step != nil {
+			return step
+		}
+	}
+	if step := terminalRunStatusStep(steps); step != nil {
+		return step
+	}
+	return lastStep(steps)
+}
+
+func terminalRunStatusStep(steps []*runmodel.Step) *runmodel.Step {
+	referenced := map[common.StepID]bool{}
+	for _, step := range steps {
+		if previous := readModelPreviousStepID(step); previous != "" {
+			referenced[previous] = true
+		}
+	}
+	var terminals []*runmodel.Step
+	for _, step := range steps {
+		if step == nil || referenced[step.ID] {
+			continue
+		}
+		terminals = append(terminals, step)
+	}
+	if len(terminals) == 0 {
+		return nil
+	}
+	for _, step := range terminals {
+		if step.State == common.StepStateDispatched {
+			return step
+		}
+	}
+	return terminals[len(terminals)-1]
+}
+
+func readModelPreviousStepID(step *runmodel.Step) common.StepID {
+	if step == nil || step.Input == nil {
+		return ""
+	}
+	for _, key := range []string{"previousStepId", "repairOfStepId", "failedStepId"} {
+		value, _ := step.Input[key].(string)
+		value = strings.TrimSpace(value)
+		if value != "" && common.StepID(value) != step.ID {
+			return common.StepID(value)
+		}
+	}
+	return ""
 }
 
 func mapToolCalls(items []*runmodel.ToolCall) []ToolCall {

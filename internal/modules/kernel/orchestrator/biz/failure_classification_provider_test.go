@@ -56,6 +56,44 @@ func TestClassifyRuntimeFailureProviderAuthOrConfig(t *testing.T) {
 	}
 }
 
+func TestClassifyRuntimeFailureLLMDecisionContractIsNotProviderSchemaDrift(t *testing.T) {
+	step := &runModel.Step{
+		ID:    common.StepID("run-x/step-1"),
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage": "llm_schema_invalid",
+			"error": "invalid argument: executionGraph patch/apply targetRef is required",
+		},
+	}
+	classification := classifyRuntimeFailure(step, step.Output, "runtime step failed", errors.New("invalid argument: executionGraph patch/apply targetRef is required"))
+	if classification.Class != failureClassLLMDecisionInvalid {
+		t.Fatalf("classification = %+v, want %s", classification, failureClassLLMDecisionInvalid)
+	}
+	if isLLMProviderFailureStage("llm_schema_invalid") || isProviderFailureClass(classification.Class) {
+		t.Fatalf("llm_schema_invalid classified as provider failure: classification=%+v", classification)
+	}
+}
+
+func TestClassifyRuntimeFailureProviderSchemaDriftRemainsProviderFailure(t *testing.T) {
+	step := &runModel.Step{
+		ID:    common.StepID("run-x/step-1"),
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage": "llm_provider_schema_drift",
+			"error": "provider response schema changed",
+		},
+	}
+	classification := classifyRuntimeFailure(step, step.Output, "runtime step failed", errors.New("provider response schema changed"))
+	if classification.Class != failureClassProviderSchemaDrift {
+		t.Fatalf("classification = %+v, want %s", classification, failureClassProviderSchemaDrift)
+	}
+	if !isLLMProviderFailureStage("llm_provider_schema_drift") || !isProviderFailureClass(classification.Class) {
+		t.Fatalf("provider schema drift not treated as provider failure: classification=%+v", classification)
+	}
+}
+
 func TestClassifyRuntimeFailureDoDCoverageMissingHasPriorityOverAuthKeywords(t *testing.T) {
 	step := &runModel.Step{
 		ID:    common.StepID("run-x/step-1"),

@@ -837,30 +837,116 @@ func selectedMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, se
 			if r.item.WorkspaceID != workspaceID {
 				return nil, nil, common.ErrConflict
 			}
-			ret = append(ret, r.item)
+			if activationMemoryVisibleToLLM(r.item) {
+				ret = append(ret, r.item)
+			}
+		}
+		status := "selected"
+		if len(ret) == 0 && len(results) > 0 {
+			status = "none_selected"
 		}
 		return ret, map[string]any{
 			"policy":             "explicit_memory_selection",
-			"status":             "selected",
+			"status":             status,
 			"retrievedMemoryIds": memoryItemIDs(ret),
 		}, nil
 	}
 	semanticItems, semanticEvidence, semanticHandled := semanticMemoryItems(ctx, workspaceID, service, goal, dod)
 	if semanticHandled {
-		return semanticItems, semanticEvidence, nil
+		selected := activationVisibleMemoryItems(semanticItems, 8)
+		if semanticEvidence == nil {
+			semanticEvidence = map[string]any{}
+		}
+		semanticEvidence["retrievedMemoryIds"] = memoryItemIDs(selected)
+		if len(selected) == 0 && len(semanticItems) > 0 {
+			semanticEvidence["status"] = "none_selected"
+		}
+		return selected, semanticEvidence, nil
 	}
 	items, err := service.ListMemoryByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(items) > 8 {
-		items = items[:8]
+	selected := activationVisibleMemoryItems(items, 8)
+	status := "selected"
+	if len(selected) == 0 && len(items) > 0 {
+		status = "none_selected"
 	}
-	return items, map[string]any{
+	return selected, map[string]any{
 		"policy":             "deterministic_workspace_list",
-		"status":             "selected",
-		"retrievedMemoryIds": memoryItemIDs(items),
+		"status":             status,
+		"candidateMemoryIds": memoryItemIDs(items),
+		"excludedMemoryIds":  memoryItemIDs(activationExcludedMemoryItems(items, selected)),
+		"retrievedMemoryIds": memoryItemIDs(selected),
 	}, nil
+}
+
+func activationVisibleMemoryItems(items []*memorymodel.MemoryItem, limit int) []*memorymodel.MemoryItem {
+	if limit <= 0 || len(items) == 0 {
+		return nil
+	}
+	ret := make([]*memorymodel.MemoryItem, 0, min(len(items), limit))
+	for _, item := range items {
+		if len(ret) >= limit {
+			break
+		}
+		if activationMemoryVisibleToLLM(item) {
+			ret = append(ret, item)
+		}
+	}
+	return ret
+}
+
+func activationExcludedMemoryItems(candidates []*memorymodel.MemoryItem, selected []*memorymodel.MemoryItem) []*memorymodel.MemoryItem {
+	if len(candidates) == 0 {
+		return nil
+	}
+	selectedIDs := map[common.MemoryID]struct{}{}
+	for _, item := range selected {
+		if item != nil && item.ID != "" {
+			selectedIDs[item.ID] = struct{}{}
+		}
+	}
+	ret := make([]*memorymodel.MemoryItem, 0, len(candidates)-len(selectedIDs))
+	for _, item := range candidates {
+		if item == nil || item.ID == "" {
+			continue
+		}
+		if _, ok := selectedIDs[item.ID]; ok {
+			continue
+		}
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func activationMemoryVisibleToLLM(item *memorymodel.MemoryItem) bool {
+	if item == nil {
+		return false
+	}
+	if strings.TrimSpace(item.MemoryType) != "tool_feedback" {
+		return true
+	}
+	if activationMemoryHasTag(item, "accepted_input") {
+		return true
+	}
+	return !activationMemoryHasTag(item, "provider_retry")
+}
+
+func activationMemoryHasTag(item *memorymodel.MemoryItem, tag string) bool {
+	if item == nil {
+		return false
+	}
+	tag = strings.TrimSpace(strings.ToLower(tag))
+	if tag == "" {
+		return false
+	}
+	for _, candidate := range item.Tags {
+		if strings.TrimSpace(strings.ToLower(candidate)) == tag {
+			return true
+		}
+	}
+	return false
 }
 
 func semanticMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, service interface {
@@ -1200,26 +1286,26 @@ func memoryContexts(items []*memorymodel.MemoryItem) []map[string]any {
 	ret := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, map[string]any{
-			"id":                  string(item.ID),
-			"workspaceId":         string(item.WorkspaceID),
-			"runId":               string(item.RunID),
-			"sourceType":          item.SourceType,
-			"sourceRef":           item.SourceRef,
-			"memoryType":          item.MemoryType,
-			"summary":             item.Summary,
-			"content":             item.Content,
-			"tags":                cloneStrings(item.Tags),
-			"importance":          item.Importance,
-			"confidence":          item.Confidence,
-			"visibility":          item.Visibility,
-			"embeddingProviderId": item.EmbeddingProviderID,
-			"embeddingModel":      item.EmbeddingModel,
-			"vectorReady":         len(item.Vector) > 0,
-			"vectorDimension":     len(item.Vector),
-			"vectorScore":         item.VectorScore,
+			"id":          string(item.ID),
+			"memoryType":  item.MemoryType,
+			"summary":     item.Summary,
+			"content":     item.Content,
+			"tags":        cloneStrings(item.Tags),
+			"importance":  item.Importance,
+			"confidence":  item.Confidence,
+			"visibility":  item.Visibility,
+			"provenance":  activationMemoryProvenance(item),
+			"vectorScore": item.VectorScore,
 		})
 	}
 	return ret
+}
+
+func activationMemoryProvenance(item *memorymodel.MemoryItem) string {
+	if item == nil || item.RunID == "" {
+		return "workspace"
+	}
+	return "historical_run"
 }
 
 func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSession, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any, priority int) (common.RunID, error) {

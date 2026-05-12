@@ -165,14 +165,15 @@ func (o *RuntimeOrchestrator) refreshedStepInputMemoryContext(ctx context.Contex
 		}
 	}
 	selected, candidates, excluded := selectStepInputMemoryItems(items, run.ID, runStates, stepInputMemoryLimit)
+	contexts := memoryItemContextMaps(selected, run.ID)
+	status := "selected"
 	if len(selected) == 0 {
-		return nil, nil
+		status = "none_selected"
 	}
-	contexts := memoryItemContextMaps(selected)
 	return contexts, map[string]any{
 		"policy":                 stepInputMemorySelectionPolicy,
 		"selectionPolicyVersion": stepInputMemorySelectionVersion,
-		"status":                 "selected",
+		"status":                 status,
 		"refreshSource":          refreshSource,
 		"limit":                  stepInputMemoryLimit,
 		"retrievedMemoryIds":     memoryModelItemIDs(selected),
@@ -264,6 +265,9 @@ func selectStepInputMemoryItems(items []*memorymodel.MemoryItem, currentRunID co
 		if len(selected) >= limit {
 			break
 		}
+		if shouldExcludeStepInputMemoryItem(item) {
+			continue
+		}
 		memoryType := strings.TrimSpace(item.MemoryType)
 		if maxForType, ok := quota[memoryType]; ok && typeCounts[memoryType] >= maxForType {
 			continue
@@ -281,6 +285,9 @@ func selectStepInputMemoryItems(items []*memorymodel.MemoryItem, currentRunID co
 			break
 		}
 		if _, ok := selectedIDs[item.ID]; ok {
+			continue
+		}
+		if shouldExcludeStepInputMemoryItem(item) {
 			continue
 		}
 		if _, ok := quota[strings.TrimSpace(item.MemoryType)]; ok {
@@ -329,6 +336,35 @@ func stepInputMemoryTypeQuota() map[string]int {
 	}
 }
 
+func shouldExcludeStepInputMemoryItem(item *memorymodel.MemoryItem) bool {
+	if item == nil {
+		return true
+	}
+	if strings.TrimSpace(item.MemoryType) != memorycommon.MemoryTypeToolFeedback {
+		return false
+	}
+	if memoryItemHasTag(item, "accepted_input") {
+		return false
+	}
+	return memoryItemHasTag(item, "provider_retry")
+}
+
+func memoryItemHasTag(item *memorymodel.MemoryItem, tag string) bool {
+	if item == nil {
+		return false
+	}
+	tag = strings.TrimSpace(strings.ToLower(tag))
+	if tag == "" {
+		return false
+	}
+	for _, candidate := range item.Tags {
+		if strings.TrimSpace(strings.ToLower(candidate)) == tag {
+			return true
+		}
+	}
+	return false
+}
+
 func stepInputMemoryScore(item *memorymodel.MemoryItem, currentRunID common.RunID, runStates map[common.RunID]common.RunState) int {
 	if item == nil {
 		return 0
@@ -356,6 +392,12 @@ func stepInputMemoryScore(item *memorymodel.MemoryItem, currentRunID common.RunI
 			score -= 750
 		}
 	}
+	if memoryItemHasTag(item, "accepted_input") {
+		score += 2000
+	}
+	if shouldExcludeStepInputMemoryItem(item) {
+		score -= 7000
+	}
 	switch runStates[item.RunID] {
 	case common.RunStateSuperseded:
 		score -= 3000
@@ -378,33 +420,36 @@ func memorySelectionDuplicateKey(item *memorymodel.MemoryItem) string {
 	return strings.TrimSpace(item.MemoryType) + "|" + summary
 }
 
-func memoryItemContextMaps(items []*memorymodel.MemoryItem) []map[string]any {
+func memoryItemContextMaps(items []*memorymodel.MemoryItem, currentRunID common.RunID) []map[string]any {
 	ret := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		if item == nil {
 			continue
 		}
 		ret = append(ret, map[string]any{
-			"id":                  string(item.ID),
-			"workspaceId":         string(item.WorkspaceID),
-			"runId":               string(item.RunID),
-			"sourceType":          item.SourceType,
-			"sourceRef":           item.SourceRef,
-			"memoryType":          item.MemoryType,
-			"summary":             item.Summary,
-			"content":             item.Content,
-			"tags":                cloneStringsForExecutionContext(item.Tags),
-			"importance":          item.Importance,
-			"confidence":          item.Confidence,
-			"visibility":          item.Visibility,
-			"embeddingProviderId": item.EmbeddingProviderID,
-			"embeddingModel":      item.EmbeddingModel,
-			"vectorReady":         len(item.Vector) > 0,
-			"vectorDimension":     len(item.Vector),
-			"vectorScore":         item.VectorScore,
+			"id":          string(item.ID),
+			"memoryType":  item.MemoryType,
+			"summary":     item.Summary,
+			"content":     item.Content,
+			"tags":        cloneStringsForExecutionContext(item.Tags),
+			"importance":  item.Importance,
+			"confidence":  item.Confidence,
+			"visibility":  item.Visibility,
+			"provenance":  memoryContextProvenance(item, currentRunID),
+			"vectorScore": item.VectorScore,
 		})
 	}
 	return ret
+}
+
+func memoryContextProvenance(item *memorymodel.MemoryItem, currentRunID common.RunID) string {
+	if item == nil || item.RunID == "" {
+		return "workspace"
+	}
+	if currentRunID != "" && item.RunID == currentRunID {
+		return "current_run"
+	}
+	return "historical_run"
 }
 
 func memoryModelItemIDs(items []*memorymodel.MemoryItem) []string {
@@ -461,6 +506,12 @@ func stepInputMemoryScoreReason(item *memorymodel.MemoryItem, currentRunID commo
 	}
 	if item.MemoryType == memorycommon.MemoryTypeRunSummary && item.RunID != currentRunID {
 		parts = append(parts, "run_summary_downgraded")
+	}
+	if memoryItemHasTag(item, "accepted_input") {
+		parts = append(parts, "accepted_input_boost")
+	}
+	if shouldExcludeStepInputMemoryItem(item) {
+		parts = append(parts, "excluded_low_value_process_memory")
 	}
 	if state := runStates[item.RunID]; state != "" {
 		parts = append(parts, "run_state="+string(state))
@@ -1041,9 +1092,11 @@ func compactMemoryContexts(items []map[string]any) []map[string]any {
 	ret := make([]map[string]any, 0, min(len(items), 8))
 	for _, item := range items {
 		compact := pickExecutionContextFields(item, []string{
-			"id", "runId", "sourceType", "sourceRef", "memoryType", "summary", "content",
-			"tags", "importance", "confidence", "visibility", "vectorScore",
+			"id", "memoryType", "summary", "content", "tags", "importance", "confidence", "visibility", "vectorScore",
 		})
+		if provenance := staticMemoryContextProvenance(item); provenance != "" {
+			compact["provenance"] = provenance
+		}
 		if isLegacyRunSummaryMemory(item) {
 			compact["evidenceTrust"] = "legacy_pre_dod_gate"
 			compact["evidenceTrustReason"] = "Run-summary memory was created before strict DoD gate version tagging; treat as historical reference only."
@@ -1054,6 +1107,17 @@ func compactMemoryContexts(items []map[string]any) []map[string]any {
 		}
 	}
 	return ret
+}
+
+func staticMemoryContextProvenance(item map[string]any) string {
+	runID := strings.TrimSpace(stringFromMap(item, "runId"))
+	if runID != "" {
+		return "historical_or_selected_run"
+	}
+	if strings.TrimSpace(stringFromMap(item, "sourceRef")) != "" {
+		return "workspace"
+	}
+	return ""
 }
 
 func isLegacyRunSummaryMemory(item map[string]any) bool {

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
@@ -182,6 +183,7 @@ func (o *RuntimeOrchestrator) recordRunResultFromRejectedDoDAssessment(
 	}
 	now := runtimeEvidenceTimestamp()
 	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
+	sourceRef, evidenceRefs := rejectedResultSourceAndEvidenceRefs(step, evidenceRefs)
 	dodAssessment := resultDoDAssessmentFromMap(assessment)
 	item := &resultmodel.Result{
 		ID:            common.ResultID(fmt.Sprintf("%s/result/dod-assessment", run.ID)),
@@ -193,7 +195,7 @@ func (o *RuntimeOrchestrator) recordRunResultFromRejectedDoDAssessment(
 		Title:         "Rejected Result",
 		Summary:       summary,
 		SourceType:    resultcommon.SourceTypeDoDAssessment,
-		SourceRef:     string(step.ID),
+		SourceRef:     sourceRef,
 		EvidenceRefs:  evidenceRefs,
 		DoDAssessment: dodAssessment,
 		SummaryDetail: resultSummaryFromDoDAssessment(run, summary, assessment, dodAssessment, evidenceRefs, nil),
@@ -223,6 +225,40 @@ func (o *RuntimeOrchestrator) recordRunResultFromRejectedDoDAssessment(
 		return o.publishResultAccepted(ctx, existing)
 	}
 	return o.publishResultAccepted(ctx, item)
+}
+
+func rejectedResultSourceAndEvidenceRefs(step *runModel.Step, evidenceRefs []string) (string, []string) {
+	if step == nil {
+		return "", evidenceRefs
+	}
+	sourceRef := string(step.ID)
+	rootStepID := common.StepID("")
+	switch {
+	case boolValue(step.Input[stepInputKeyProviderRetryFollowUp]):
+		rootStepID = providerRetryRootStepID(step)
+	case boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]):
+		rootStepID = runtimeRepairRootStepID(step)
+	}
+	if rootStepID == "" || rootStepID == step.ID {
+		return sourceRef, evidenceRefs
+	}
+	sourceRef = string(rootStepID)
+	seen := map[string]bool{}
+	for _, ref := range evidenceRefs {
+		if strings.TrimSpace(ref) != "" {
+			seen[ref] = true
+		}
+	}
+	for _, ref := range []string{string(rootStepID), string(step.ID)} {
+		ref = strings.TrimSpace(ref)
+		if ref == "" || seen[ref] {
+			continue
+		}
+		evidenceRefs = append(evidenceRefs, ref)
+		seen[ref] = true
+	}
+	sort.Strings(evidenceRefs)
+	return sourceRef, evidenceRefs
 }
 
 func (o *RuntimeOrchestrator) rejectedRunResultSummary(ctx context.Context, runID common.RunID) (string, bool) {

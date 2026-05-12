@@ -23,6 +23,9 @@ const (
 	decisionContextKeyRecoveryPolicy        = "recoveryPolicy"
 	decisionContextRecoveryPolicyConfigOnly = "system_config_required"
 	decisionContextRecoveryPolicyRepairPlan = "runtime_repair_exhausted_requires_strategy"
+	decisionContextKeyResultPolicy          = "resultPolicy"
+	decisionContextResultPolicyNone         = "none"
+	decisionContextResultPolicyRejected     = "rejected"
 )
 
 type runtimeDecisionBlockSpec struct {
@@ -38,6 +41,30 @@ type runtimeApprovalBlockSpec struct {
 	ApprovalID common.ApprovalID
 	Action     string
 	Context    map[string]any
+}
+
+func decisionBlockRequiresRejectedResult(spec runtimeDecisionBlockSpec) bool {
+	policy := strings.TrimSpace(stringFromMap(spec.Context, decisionContextKeyResultPolicy))
+	switch policy {
+	case decisionContextResultPolicyRejected:
+		return true
+	case decisionContextResultPolicyNone:
+		return false
+	}
+	return strings.TrimSpace(stringFromMap(spec.Context, decisionContextKeyRecoveryPolicy)) == decisionContextRecoveryPolicyRepairPlan
+}
+
+func (o *RuntimeOrchestrator) recordRejectedResultForDecisionBlock(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	output map[string]any,
+	spec runtimeDecisionBlockSpec,
+) error {
+	if !decisionBlockRequiresRejectedResult(spec) {
+		return nil
+	}
+	return o.recordRejectedCompletionDoDAssessment(ctx, run, step, output)
 }
 
 func decisionBlockSpec(output map[string]any) runtimeDecisionBlockSpec {

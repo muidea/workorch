@@ -13,7 +13,6 @@ import (
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func (o *RuntimeOrchestrator) hasGraphContinuation(ctx context.Context, run *runModel.Run, step *runModel.Step) bool {
@@ -71,8 +70,9 @@ func (o *RuntimeOrchestrator) readyGraphStepSpecsFromSteps(
 	completed := completedGraphNodes(steps, rootStepID)
 	started := startedGraphNodes(steps, rootStepID)
 	branch := selectedGraphBranch(steps)
+	graphSeq := graphScopeSeqFromSteps(steps, rootStepID)
 	ret := make([]stepDispatchSpec, 0, len(graph.Nodes))
-	for _, node := range graph.Nodes {
+	for idx, node := range graph.Nodes {
 		if node.ID == "" || completed[node.ID] || started[node.ID] {
 			continue
 		}
@@ -84,8 +84,10 @@ func (o *RuntimeOrchestrator) readyGraphStepSpecsFromSteps(
 		}
 		input := nextGraphStepInput(run, last, graph, node, completed, branch, steps, rootStepID)
 		input[stepInputKeyGraphRootStepID] = string(rootStepID)
+		input["graphSeq"] = graphSeq
+		input["graphNodeSeq"] = idx + 1
 		ret = append(ret, stepDispatchSpec{
-			ID:    graphStepIDForRootFromSteps(steps, run.ID, rootStepID, node.ID),
+			ID:    graphScopedStepID(run.ID, graphSeq, idx+1, node.ID),
 			Kind:  node.Kind,
 			Input: input,
 		})
@@ -519,45 +521,41 @@ func nestedMapValue(input map[string]any, path []string) (any, bool) {
 	return current, true
 }
 
-func graphStepID(runID common.RunID, nodeID string) common.StepID {
-	return common.StepID(fmt.Sprintf("%s/block/%s", runID, nodeID))
+func graphScopedStepID(runID common.RunID, graphSeq int, nodeSeq int, nodeID string) common.StepID {
+	if graphSeq < 1 {
+		graphSeq = 1
+	}
+	if nodeSeq < 1 {
+		nodeSeq = 1
+	}
+	nodeLabel := runtimeReadableIDPart(nodeID)
+	if nodeLabel == "" {
+		nodeLabel = "node"
+	}
+	return common.StepID(fmt.Sprintf("%s/graph-%03d/%03d-%s", runID, graphSeq, nodeSeq, nodeLabel))
 }
 
-func graphStepIDForRoot(ctx context.Context, steps repository.StepRepository, runID common.RunID, rootStepID common.StepID, nodeID string) common.StepID {
-	base := graphStepID(runID, nodeID)
-	if steps == nil || rootStepID == "" {
-		return base
-	}
-	existing, err := steps.Get(ctx, base)
-	if errors.Is(err, common.ErrNotFound) || err != nil || existing == nil || graphRootStepID(existing) == rootStepID {
-		return base
-	}
-	rootSuffix := runtimeChildID(rootStepID, nodeID)
-	if rootSuffix == "" {
-		return base
-	}
-	return common.StepID(fmt.Sprintf("%s/block/%s", runID, rootSuffix))
-}
-
-func graphStepIDForRootFromSteps(steps []*runModel.Step, runID common.RunID, rootStepID common.StepID, nodeID string) common.StepID {
-	base := graphStepID(runID, nodeID)
+func graphScopeSeqFromSteps(steps []*runModel.Step, rootStepID common.StepID) int {
 	if rootStepID == "" {
-		return base
+		return 1
 	}
+	seen := map[common.StepID]bool{}
+	seq := 0
 	for _, step := range steps {
-		if step == nil || step.ID != base {
+		if step == nil || graphNodeID(step) == "" {
 			continue
 		}
-		if graphRootStepID(step) == rootStepID {
-			return base
+		root := graphRootStepID(step)
+		if root == "" || seen[root] {
+			continue
 		}
-		rootSuffix := runtimeChildID(rootStepID, nodeID)
-		if rootSuffix == "" {
-			return base
+		seen[root] = true
+		seq++
+		if root == rootStepID {
+			return seq
 		}
-		return common.StepID(fmt.Sprintf("%s/block/%s", runID, rootSuffix))
 	}
-	return base
+	return seq + 1
 }
 
 func graphNodeID(step *runModel.Step) string {
@@ -716,11 +714,11 @@ func boolValue(value any) bool {
 }
 
 func llmCompletionFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {
-	stepID := runtimeChildID(step.ID, "completion")
+	stepID := runtimeChildID(common.StepID(runtimeReadableStepLabel(runID, step.ID)), "completion")
 	if stepID == "" {
 		stepID = "completion"
 	}
-	return common.StepID(fmt.Sprintf("%s/zz-llm-after-step-%s", runID, stepID))
+	return common.StepID(fmt.Sprintf("%s/follow-up-%s", runID, stepID))
 }
 
 func llmCompletionFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]any {
@@ -745,11 +743,11 @@ func llmCompletionFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.S
 }
 
 func graphExpansionLimitAssessmentFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {
-	stepID := runtimeChildID(step.ID, "assessment")
+	stepID := runtimeChildID(common.StepID(runtimeReadableStepLabel(runID, step.ID)), "assessment")
 	if stepID == "" {
 		stepID = "assessment"
 	}
-	return common.StepID(fmt.Sprintf("%s/zz-llm-after-graph-limit-%s", runID, stepID))
+	return common.StepID(fmt.Sprintf("%s/follow-up-graph-limit-%s", runID, stepID))
 }
 
 func (o *RuntimeOrchestrator) graphExpansionLimitAssessmentFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step, count int) map[string]any {
@@ -770,11 +768,11 @@ func (o *RuntimeOrchestrator) graphExpansionLimitAssessmentFollowUpStepInputFrom
 }
 
 func noActionableContinuationFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {
-	stepID := runtimeChildID(step.ID, "continuation")
+	stepID := runtimeChildID(common.StepID(runtimeReadableStepLabel(runID, step.ID)), "continuation")
 	if stepID == "" {
 		stepID = "continuation"
 	}
-	return common.StepID(fmt.Sprintf("%s/zz-llm-after-no-actionable-continuation-%s", runID, stepID))
+	return common.StepID(fmt.Sprintf("%s/follow-up-no-actionable-%s", runID, stepID))
 }
 
 func noActionableContinuationFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]any {
@@ -821,12 +819,12 @@ func (o *RuntimeOrchestrator) llmCompletionFollowUpStepInput(ctx context.Context
 func graphFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {
 	nodeID := runtimeChildID(common.StepID(graphNodeID(step)), "")
 	if nodeID == "" {
-		nodeID = runtimeChildID(step.ID, "graph")
+		nodeID = runtimeChildID(common.StepID(runtimeReadableStepLabel(runID, step.ID)), "graph")
 	}
 	if rootStepID := graphRootStepID(step); rootStepID != "" {
-		nodeID = runtimeChildID(rootStepID, nodeID)
+		nodeID = runtimeChildID(common.StepID(runtimeReadableStepLabel(runID, rootStepID)), nodeID)
 	}
-	return common.StepID(fmt.Sprintf("%s/zz-llm-after-graph-%s", runID, nodeID))
+	return common.StepID(fmt.Sprintf("%s/follow-up-graph-%s", runID, nodeID))
 }
 
 func (o *RuntimeOrchestrator) graphFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {

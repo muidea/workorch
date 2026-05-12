@@ -19,6 +19,7 @@ const (
 	failureClassContextTooLarge     = "context_too_large"
 	failureClassRateLimited         = "rate_limited"
 	failureClassAuthOrConfigError   = "auth_or_config_error"
+	failureClassLLMDecisionInvalid  = "llm_decision_invalid"
 	failureClassDoDCoverageMissing  = "dod_coverage_missing"
 	failureClassWorkspacePath       = "workspace_path_conflict"
 	failureClassShellCommand        = "shell_command_failed"
@@ -59,6 +60,8 @@ func classifyRuntimeFailure(step *runModel.Step, output map[string]any, summary 
 		class = failureClassDoDCoverageMissing
 	} else if isLLMProviderAuthOrConfigFailure(lowerStage, execErr, output) {
 		class = failureClassAuthOrConfigError
+	} else if isLLMDecisionContractFailureStage(lowerStage) {
+		class = failureClassLLMDecisionInvalid
 	} else if isLLMProviderSchemaFailure(lowerStage) {
 		class = failureClassProviderSchemaDrift
 	} else if isLLMProviderUnavailableFailure(lowerStage) {
@@ -161,6 +164,17 @@ func isLLMProviderAuthOrConfigFailure(lowerStage string, execErr error, output m
 
 func isLLMProviderSchemaFailure(lowerStage string) bool {
 	switch lowerStage {
+	case "llm_provider_schema_drift",
+		"llm_provider_response_schema_invalid",
+		"llm_provider_protocol_invalid":
+		return true
+	default:
+		return false
+	}
+}
+
+func isLLMDecisionContractFailureStage(stage string) bool {
+	switch strings.ToLower(strings.TrimSpace(stage)) {
 	case "llm_schema_invalid", "llm_decision_invalid":
 		return true
 	default:
@@ -414,15 +428,19 @@ func (o *RuntimeOrchestrator) blockOnDuplicateRuntimeFailure(
 		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
 		Question:     localizedDuplicateRuntimeFailureQuestion(language),
 		Context: map[string]any{
-			"failureClass":     class,
-			"failureSignature": signature,
-			"failedStepId":     string(failedStep.ID),
-			"failedStepKind":   failedStep.Kind,
-			"failedStepInput":  cloneStepPayload(failedStep.Input),
-			"failedStepOutput": cloneStepPayload(failedStep.Output),
+			decisionContextKeyResultPolicy: decisionContextResultPolicyRejected,
+			"failureClass":                 class,
+			"failureSignature":             signature,
+			"failedStepId":                 string(failedStep.ID),
+			"failedStepKind":               failedStep.Kind,
+			"failedStepInput":              cloneStepPayload(failedStep.Input),
+			"failedStepOutput":             cloneStepPayload(failedStep.Output),
 		},
 	}
 	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
+		return err
+	}
+	if err := o.recordRejectedResultForDecisionBlock(ctx, run, failedStep, failedStep.Output, spec); err != nil {
 		return err
 	}
 	return o.BlockOnDecision(ctx, run.ID, spec.TicketID)

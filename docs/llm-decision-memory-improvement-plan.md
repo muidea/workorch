@@ -254,7 +254,7 @@ Tool / MCP Memory 记录：
 | --- | --- | --- | --- | --- |
 | DMI-01 | 定义 decision memory 写入/召回契约 | P0 | docs | 已落地：文档明确 accepted input / necessary output / Skill-Soul-Prompt-Tool-MCP 边界 |
 | DMI-02 | Step input 动态 refresh Memory | P0 | `execution_context_package.go` | 已落地：LLM step input 从 workspace 动态 refresh Memory，不再只复用 activation 静态 Memory |
-| DMI-03 | 当前 run 优先 + 类型配额排序 | P0 | orchestrator memory selector | 已落地：当前 run 的 `dod_feedback`/`execution_lesson` 优先，旧 `run_summary` 严格受配额限制 |
+| DMI-03 | 当前 run 优先 + 类型配额排序 | P0 | orchestrator memory selector | 已落地：当前 run 的 `dod_feedback`/`execution_lesson` 优先，旧 `run_summary` 严格受配额限制；低价值 provider retry 流水仅保留审计 trace，不进入 LLM memory context |
 | DMI-04 | assessment 写入 `dod_feedback` | P0 | `runtime_memory.go` | 已落地：DoD failed/skipped 条目自动形成可召回 Memory |
 | DMI-05 | repair 输出写入 `execution_lesson` | P0 | orchestrator repair path / LLM `memoryWrites` | 已落地：runtime repair follow-up 的 accepted output 会自动沉淀 `execution_lesson`，同时允许 LLM 显式写入 |
 | DMI-06 | Skill/Soul/Prompt/Tool/MCP 约束写入高价值 Memory | P1 | context package / memory writer | 已落地：LLM step accepted input 会自动沉淀 Skill、Tool/MCP、Soul/Prompt 约束 |
@@ -270,6 +270,12 @@ Tool / MCP Memory 记录：
 | DMI-16 | Repair state-changing hard gate 与终态 result 收口 | P0 | runtime output contract / LLM graph validation / terminal failure result | 已落地：`stateChangingOutputRequired` 不再只是 prompt 约束，runtime 会拒绝 repair 返回 `executionGraph`、shell-only 或 file/read-only graph；LLM 输出中的 `executionGraph` 在接受前校验 patch 节点 target/content/diff 和 placeholder；provider retry / schema / contract 终态失败在 `FailRun` 前写 synthetic rejected result |
 | DMI-17 | Follow-up read-only graph 收口 | P0 | runtime output contract / graph follow-up / repair lineage | 已落地：graph follow-up / validation follow-up 不得继续返回只读 `executionGraph`；实现类 Goal 的初始 planning graph 必须包含合法 patch 节点或直接 state-changing output；state-changing repair 的二次 repair 继续继承 `stateChangingOutputRequired` |
 | DMI-18 | Planning contract repair 首轮 state-changing 收口 | P0 | runtime repair classification / implementation planning contract | 已落地：实现类 Goal 的 planning 只读 graph 被拒绝后，首轮 repair 直接携带 `stateChangingOutputRequired=true`，禁止先退回普通探索 graph |
+| DMI-19 | Provider retry root normalization 收口 | P0 | runtime repair / provider retry lineage | 已落地：provider retry 使用显式 `providerRetryRootStepId` 归一 root，禁止 retry step 再派生 `provider-retry-1-provider-retry-1` 这类嵌套 retry |
+| DMI-20 | Recovery action 决策表代码化 | P0 | runtime repair / resume dispatch | 已落地：failure follow-up 与 resume dispatch 复用同一恢复动作表；provider retry 超预算后不再派发 max+1 或 runtime repair；contract failure 在 resume 路径进入 runtime repair |
+| DMI-21 | Schema invalid 语义拆分 | P0 | failure classification / runtime repair | 已落地：`llm_schema_invalid` / `llm_decision_invalid` 归为 LLM decision contract failure，不再作为 provider failure stage；provider schema drift 使用显式 provider stage |
+| DMI-22 | Blocker-result policy 收口 | P1 | decision block / result policy | 已落地：decision context 显式 `resultPolicy`；provider/config blocker 不写业务 result；repair/duplicate/business terminal blocker 写 rejected result |
+| DMI-23 | Repair lineage trace 收口 | P1 | runtime repair / provider retry input | 已落地：provider retry / runtime repair input 显式记录 `recoveryAction`、`recoveryRootStepId`、`recoveryLineageType`、`recoveryBudgetScope` |
+| DMI-24 | 部署核对脚本扩展 | P1 | scripts / deployment verification | 已落地：`scripts/verify-workorch-runtime-core-flow.sh` 自动检测 nested retry、recovery lineage 缺失、state-changing 降级、terminal/blocker result policy，并用 fixture 回归覆盖 handled/unhandled violation 与 graph scope 规则 |
 
 ## 当前落地状态
 
@@ -284,7 +290,7 @@ Tool / MCP Memory 记录：
   - `tool_feedback`：allowed tool kinds、MCP server/capability、自动绑定信息。
   - `project_context`：Soul routing、当前 stage 约束和 prompt 记录策略，且不记录全量 prompt。
 - runtime repair follow-up 被接受后，会自动沉淀 `execution_lesson`，内容包含 repair attempt、failed step、failure class/signature、failure reason、missing DoD item 和 accepted repair output 摘要。
-- provider retry follow-up 被接受后，会自动沉淀 `tool_feedback`，记录 provider retry attempt、失败上下文和 retry output 摘要。
+- provider retry follow-up 被接受后，会自动沉淀 `tool_feedback` 作为审计和诊断资产；step-input recall 会把纯 provider retry 流水保留在 candidate/excluded trace，不再注入 LLM 可见 memory context。
 - `runExecutionContextPackage()` 在每个 LLM step input 构建时从 workspace Memory 动态 refresh，并覆盖 `selectedContext.memories` / `selectedContext.memoryRetrieval`。
 - 动态 selector 按当前 run 优先、高价值类型优先、类型配额和 summary 去重选择 Memory。旧 run 的 `run_summary` 不再能挤占当前 run 的 `dod_feedback` / `execution_lesson`。
 - `MemoryRecallTrace` 已扩展结构化选择解释字段：`RefreshSource`、`SelectionPolicyVersion`、`CandidateMemoryIDs`、`SelectedMemoryIDs`、`ExcludedMemoryIDs`、`TypeQuota`、`SelectionScores`。read model 同步输出这些字段。
@@ -300,6 +306,7 @@ Tool / MCP Memory 记录：
   - validation command memory 不再只保存命令和 exitCode，还会记录 stdout / summary / stderr 中的第一条可用信号，例如 `E2E assertions passed`。
   - runtime repair lesson 会把缺失文件读取等失败提炼成可复用教训，避免只留下泛化的 `Runtime repair lesson captured`。
   - step-input selector 对同一个历史 run 设置最大选中数，防止旧 failed/superseded run 的多条 Memory 占满上下文。
+  - step-input selector 对 `provider_retry` 且非 `accepted_input` 的 `tool_feedback` 做低价值流程流水排除；accepted Skill / Tool / MCP / Soul / Prompt Memory 仍加权选择。
   - 部署核对脚本不再把 accepted completed run 在终态后写入、没有后续 LLM step 可召回的高价值 Memory 判定为失败。
 - Rejected result / assessment / repair 状态机已收口：
   - completion gate 中间态失败只进入 repair 或 blocker，不再立即写正式 rejected result。
@@ -368,12 +375,43 @@ Tool / MCP Memory 记录：
   - `stateChangingRepairRequired()` 已纳入 implementation planning read-only graph contract failure。
   - 首轮 planning repair 会直接复用 state-changing repair guidance：禁止 `executionGraph`、shell-only/read-only inspection 和 unresolved placeholder。
   - 已补回归测试覆盖 planning contract failure 首轮 repair 必须携带 `stateChangingOutputRequired=true`。
+- DMI-19 部署核对结论（`ws-f3c58f6f26bf640c` / `run-1f802f4d3ccdbfe7`）：
+  - DMI-18 已生效，首轮 planning repair 直接携带 `stateChangingOutputRequired=true`。
+  - state-changing repair 返回含 placeholder 的 patch graph 已被 runtime patch contract 拒绝，没有误 accepted。
+  - 新偏差是 provider timeout 后 provider retry 可对 retry step 再派生 retry root，出现 `provider-retry-1-provider-retry-1` / `provider-retry-1-provider-retry-2`。
+- DMI-19 当前收口结果：
+  - provider retry input 增加显式 `providerRetryRootStepId`。
+  - 非 provider retry step 的通用 `failedStepId` 不再作为 provider retry root，避免 runtime repair context 污染 retry root。
+  - provider retry 失败后再次 retry 会继续使用同一个 root 和 attempt 计数，不再生成 nested retry step ID。
+- DMI-20 当前收口结果：
+  - `recoveryActionForFailedStep` 将 provider retry、provider retry exhausted、runtime repair exhausted、duplicate failure、runtime repair、fail run 收敛为唯一恢复动作。
+  - `dispatchRuntimeRepairFollowUp` 与 `nextDispatchSpecsFromStep` 共用该动作表，resume/补派路径不会绕开主流程预算。
+  - `DispatchNextStep` 在恢复动作应进入 decision 时会实际阻塞 run，避免只返回错误但 run 仍停留在 running。
+  - provider timeout retry 达到上限后不再产生 `provider-retry-3` / max+1，也不会退入 runtime repair。
+  - contract failure 的 resume 路径明确派发 runtime repair，不进入 provider retry。
+- DMI-21 当前收口结果：
+  - 新增独立 failure class `llm_decision_invalid`，用于 `llm_schema_invalid` / `llm_decision_invalid` 这类 LLM 输出合约错误。
+  - `llm_schema_invalid` / `llm_decision_invalid` 不再归入 provider failure stage，避免 provider retry / provider exhausted 误处理 contract/schema 问题。
+  - provider schema drift 保留为 provider failure，但必须使用显式 provider stage：`llm_provider_schema_drift`、`llm_provider_response_schema_invalid` 或 `llm_provider_protocol_invalid`。
+  - assessment-only / providerRetryAssessmentOnly 的 LLM decision contract terminal failure 继续写 rejected result 并关闭，不退回普通 repair。
+- DMI-22 当前收口结果：
+  - decision context 增加 `resultPolicy`，当前支持 `none` 和 `rejected`。
+  - provider retry exhausted 使用 `resultPolicy=none`，只阻塞 WorkOrch runtime provider config decision，不写业务 rejected result。
+  - runtime repair exhausted 和 duplicate runtime failure 使用 `resultPolicy=rejected`，阻塞 decision 前写 rejected DoD result。
+  - 普通 LLM decision block 只有显式 `resultPolicy=rejected` 时写 rejected result，避免可继续补信息的 blocker 被误判为终态失败。
+- DMI-23 当前收口结果：
+  - provider retry input 写入 `recoveryAction=provider_retry`、`recoveryRootStepId`、`recoveryLineageType=provider_retry`。
+  - runtime repair input 写入 `recoveryAction=runtime_repair`、`recoveryRootStepId`、`recoveryLineageType=runtime_repair`。
+  - `recoveryBudgetScope` 结构化记录 lineage type、root step、failure class 和 failure signature，后续核对不再依赖 step ID 字符串推断。
+- DMI-24 当前收口结果：
+  - 新增 `scripts/verify-workorch-runtime-core-flow.sh <workspace-id> <run-id>`。
+  - 自动检查 provider retry nested lineage、recovery lineage trace、state-changing 降级、completed/failed/blocked_on_decision result policy。
 - software-dev 默认 Soul 已补充：
   - planning 阶段读取可选文件前先 `file/list`，不确定时 `file/read optional:true`。
   - execution 阶段遇到无测试、0 tests、无断言或 inconclusive evidence 时必须补有效测试/断言，不得重复运行弱验证命令。
   - validation / assessment-only 阶段禁止返回新的执行图；证据不足时输出 failed/skipped DoD assessment，由 runtime repair 回到执行阶段补齐。
 
-本轮尚未完成的部分：
+后续观察与增强项：
 
 - 若后续需要进一步增强，可把 trace 的 `SelectionScores` 拆成更细的规则分项分数，当前实现先输出总分和原因标签。
 - Provider timeout 仍需要部署态持续观察。如果本地模型在 validation/repair 阶段继续 60s 超时，应进一步按 stage 配置 LLM timeout 或压缩 provider retry 输入，但当前代码已减少 assessment-only graph 返工和弱证据 assessment 打转。

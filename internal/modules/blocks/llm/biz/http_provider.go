@@ -550,7 +550,7 @@ func decisionContractPrompt(request llmmodels.ProviderRequest) string {
 			`{"completionState":"blocked_on_decision","requiredDecision":{"reason":"missing target repository","decisionKind":"provide_missing_info","question":"Please provide the target repository or working directory.","context":{"missingFields":["workingDirectory"],"requiresHumanFields":["workingDirectory"]}}}`,
 		}, "\n")
 	}
-	return strings.Join([]string{
+	lines := []string{
 		"Required output JSON fields use the LLMExecutionDecision contract:",
 		"- completionState must be one of: continue, blocked_on_decision, blocked_on_approval, completed, failed.",
 		"- Use executionGraph when the next work contains multiple blocks, dependencies, or future parallel-ready work.",
@@ -584,7 +584,17 @@ func decisionContractPrompt(request llmmodels.ProviderRequest) string {
 		`{"completionState":"continue","executionGraph":{"nodes":[{"id":"inspect","kind":"shell/command","input":{"command":"ls","args":["-la"]}},{"id":"test","kind":"shell/command","dependsOn":["inspect"],"input":{"command":"go","args":["test","./..."]}}]}}`,
 		`{"completionState":"blocked_on_decision","requiredDecision":{"reason":"missing execution target","decisionKind":"provide_missing_info","question":"Please provide target.","context":{"knownValues":{"source":"workspace"},"missingFields":["target"],"candidateValues":{"target":"artifact"},"confidenceByField":{"target":0.92}}}}`,
 		`{"completionState":"completed","dodAssessment":{"satisfied":true,"summary":"Tests passed and the requested artifact is ready.","goalOutcome":"The requested implementation is complete.","implementationSummary":"Implemented the requested behavior.","verificationSummary":"go test ./... passed.","items":[{"item":"tests pass","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}],"knownLimitations":[],"residualRisks":[],"nextActions":["Review the generated artifacts."]}}`,
-	}, "\n")
+	}
+	if boolValue(request.Input["stateChangingOutputRequired"]) {
+		lines = append(lines,
+			"State-changing output is required for this request.",
+			"- Prefer top-level patchRequests/patches with complete concrete file_write content or unified_diff diffs.",
+			"- If multiple dependent operations are needed, executionGraph is allowed only when it contains at least one valid patch/apply node as the implementation path.",
+			"- Do not return read-only, inspection-only, or shell-only executionGraph.",
+			"- If implementation cannot be produced, return failed with dodAssessment or a real requiredDecision/requiredApproval blocker.",
+		)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func capabilityContractPrompt(request llmmodels.ProviderRequest) string {

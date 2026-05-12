@@ -292,6 +292,33 @@ func (s *blockingMemoryService) SearchMemory(context.Context, repository.MemoryS
 	return nil, nil
 }
 
+type activationMemorySelectionService struct {
+	items []*memorymodel.MemoryItem
+}
+
+func (s *activationMemorySelectionService) GetMemoryItem(_ context.Context, id common.MemoryID) (*memorymodel.MemoryItem, error) {
+	for _, item := range s.items {
+		if item != nil && item.ID == id {
+			return item, nil
+		}
+	}
+	return nil, common.ErrNotFound
+}
+
+func (s *activationMemorySelectionService) ListMemoryByWorkspace(_ context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
+	ret := make([]*memorymodel.MemoryItem, 0, len(s.items))
+	for _, item := range s.items {
+		if item != nil && item.WorkspaceID == workspaceID {
+			ret = append(ret, item)
+		}
+	}
+	return ret, nil
+}
+
+func (s *activationMemorySelectionService) SearchMemory(context.Context, repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
+	return nil, nil
+}
+
 type blockingDecisionTicketRepository struct {
 	base    repository.DecisionTicketRepository
 	started chan<- string
@@ -563,8 +590,9 @@ func TestActivateWorkspaceExecutionWithBackendCreatesAndStartsRun(t *testing.T) 
 		item.Run.WorkspaceID != workspace.ID ||
 		item.Run.GoalID != goal.ID ||
 		item.Run.DoDID != dod.ID ||
-		item.Run.State != "failed" {
-		t.Fatalf("activation run = %+v, want generated failed llm run with goal/dod", item.Run)
+		item.Run.State != "blocked_on_decision" ||
+		item.Run.BlockingTicketID == "" {
+		t.Fatalf("activation run = %+v, want generated run blocked on provider decision with goal/dod", item.Run)
 	}
 	if item.Snapshot.Workspace.ID != workspace.ID || len(item.Snapshot.Runs) != 1 {
 		t.Fatalf("activation snapshot = %+v, want workspace with one run", item.Snapshot)
@@ -667,8 +695,8 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestGoalAndDoDDefinitions(t 
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend latest: %v", err)
 	}
-	if item.Run.GoalID != secondGoal.ID || item.Run.DoDID != secondDoD.ID || item.Run.State != "failed" {
-		t.Fatalf("activation run = %+v, want latest goal/dod failed through llm provider validation", item.Run)
+	if item.Run.GoalID != secondGoal.ID || item.Run.DoDID != secondDoD.ID || item.Run.State != "blocked_on_decision" || item.Run.BlockingTicketID == "" {
+		t.Fatalf("activation run = %+v, want latest goal/dod blocked on provider decision", item.Run)
 	}
 	if item.Run.ExecutionContext["goalId"] != secondGoal.ID {
 		t.Fatalf("executionContext goalId = %+v, want latest goal", item.Run.ExecutionContext["goalId"])
@@ -694,8 +722,8 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestGoalAndDoDDefinitions(t 
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend explicit: %v", err)
 	}
-	if item.Run.GoalID != secondGoal.ID || item.Run.DoDID != secondDoD.ID || item.Run.State != "failed" {
-		t.Fatalf("activation run = %+v, want stale explicit goal/dod upgraded to latest definitions", item.Run)
+	if item.Run.GoalID != secondGoal.ID || item.Run.DoDID != secondDoD.ID || item.Run.State != "blocked_on_decision" || item.Run.BlockingTicketID == "" {
+		t.Fatalf("activation run = %+v, want stale explicit goal/dod upgraded to latest definitions and blocked on provider decision", item.Run)
 	}
 }
 
@@ -2031,6 +2059,52 @@ func TestActivateWorkspaceExecutionWithBackendReportsSemanticMemoryDegradation(t
 		stepInputTrace.Policy != "step_input_dynamic_workspace_memory" ||
 		!memoryRecallTraceContainsID(stepInputTrace, "memory-degraded-fallback-should-not-select") {
 		t.Fatalf("memory recall traces = %+v, want dynamic step input fallback trace after activation degradation", runSnapshot.MemoryRecallTraces)
+	}
+}
+
+func TestSelectedMemoryItemsFiltersProviderRetryProcessMemory(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-activation-memory-filter")
+	service := &activationMemorySelectionService{items: []*memorymodel.MemoryItem{
+		{
+			ID:          "memory-provider-retry-process",
+			WorkspaceID: workspaceID,
+			MemoryType:  memorycommon.MemoryTypeToolFeedback,
+			Summary:     "Provider retry outcome captured",
+			Content:     "Provider retry attempt: 1",
+			Tags:        []string{"provider_retry", "tool_context", "necessary_output"},
+		},
+		{
+			ID:          "memory-accepted-tool",
+			WorkspaceID: workspaceID,
+			MemoryType:  memorycommon.MemoryTypeToolFeedback,
+			Summary:     "Accepted tool input",
+			Content:     "Use go test ./...",
+			Tags:        []string{"accepted_input", "tool_context"},
+		},
+	}}
+
+	items, evidence, err := selectedMemoryItems(ctx, workspaceID, service, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("selectedMemoryItems: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "memory-accepted-tool" {
+		t.Fatalf("items = %+v, want only accepted tool memory", items)
+	}
+	if evidence["status"] != "selected" ||
+		!contextStringSliceContains(evidence["candidateMemoryIds"], "memory-provider-retry-process") ||
+		!contextStringSliceContains(evidence["excludedMemoryIds"], "memory-provider-retry-process") ||
+		contextStringSliceContains(evidence["retrievedMemoryIds"], "memory-provider-retry-process") {
+		t.Fatalf("evidence = %+v, want provider retry candidate excluded from retrieval", evidence)
+	}
+	contexts := memoryContexts(items)
+	if len(contexts) != 1 {
+		t.Fatalf("contexts = %+v, want one context", contexts)
+	}
+	for _, noisyKey := range []string{"workspaceId", "runId", "sourceType", "sourceRef", "embeddingProviderId", "embeddingModel", "vectorReady", "vectorDimension"} {
+		if _, ok := contexts[0][noisyKey]; ok {
+			t.Fatalf("memory context = %+v, must not expose process key %s", contexts[0], noisyKey)
+		}
 	}
 }
 

@@ -106,6 +106,60 @@ func runtimeChildID(parent common.StepID, suffix string) string {
 	return base + "-" + suffix
 }
 
+func runtimeReadableIDPart(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-", "_", "-").Replace(value)
+	value = strings.Trim(value, "-")
+	for strings.Contains(value, "--") {
+		value = strings.ReplaceAll(value, "--", "-")
+	}
+	if len(value) > 64 {
+		value = strings.Trim(value[:64], "-")
+	}
+	return value
+}
+
+func runtimeReadableStepLabel(runID common.RunID, stepID common.StepID) string {
+	raw := strings.TrimSpace(string(stepID))
+	if raw == "" {
+		return ""
+	}
+	runPrefix := strings.TrimSpace(string(runID)) + "/"
+	if strings.TrimSpace(string(runID)) != "" && strings.HasPrefix(raw, runPrefix) {
+		raw = strings.TrimPrefix(raw, runPrefix)
+	}
+	raw = strings.Trim(raw, "/")
+	if raw == "" {
+		return "run-root"
+	}
+	if raw == "step-1" {
+		return "planning-001"
+	}
+	parts := strings.Split(raw, "/")
+	first := strings.TrimSpace(parts[0])
+	switch {
+	case strings.HasPrefix(first, "planning-"),
+		strings.HasPrefix(first, "repair-"),
+		strings.HasPrefix(first, "provider-retry-"),
+		strings.HasPrefix(first, "follow-up-"),
+		strings.HasPrefix(first, "assessment-correction-"):
+		return runtimeReadableStageLabel(first)
+	case strings.HasPrefix(first, "graph-") && len(parts) > 1:
+		return runtimeReadableIDPart(first + "-" + parts[len(parts)-1])
+	}
+	return runtimeReadableIDPart(first)
+}
+
+func runtimeReadableStageLabel(value string) string {
+	label := runtimeReadableIDPart(value)
+	if strings.Contains(label, "provider-retry-") {
+		if idx := strings.Index(label, "-of-"); idx > 0 {
+			label = strings.Trim(label[:idx], "-")
+		}
+	}
+	return label
+}
+
 func nextStepInput(run *runModel.Run, previousStepID common.StepID) map[string]any {
 	input := runExecutionInput(run, previousStepID)
 	if input == nil {

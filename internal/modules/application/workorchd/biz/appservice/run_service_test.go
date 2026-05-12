@@ -417,7 +417,7 @@ func TestListRunsWithBackendReturnsFilteredRuns(t *testing.T) {
 	}
 }
 
-func TestStartRunWithBackendFailsWhenDefaultLLMProviderUnavailable(t *testing.T) {
+func TestStartRunWithBackendBlocksWhenDefaultLLMProviderUnavailable(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
 	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-start", "run start workspace", "", "workspaces/run start workspace"); err != nil {
@@ -431,8 +431,8 @@ func TestStartRunWithBackendFailsWhenDefaultLLMProviderUnavailable(t *testing.T)
 	if err != nil {
 		t.Fatalf("StartRunWithBackend: %v", err)
 	}
-	if item.ID != "run-start" || item.State != "failed" || item.FailureReason == "" {
-		t.Fatalf("run = %+v, want run-start/failed with provider failure reason", item)
+	if item.ID != "run-start" || item.State != "blocked_on_decision" || item.BlockingTicketID == "" || item.FailureReason != "" {
+		t.Fatalf("run = %+v, want run-start blocked on provider decision without failure reason", item)
 	}
 	compressed := runCompressedContext(t, item)
 	if compressed["version"] != "workorch.compressedContext.v1" || compressed["mode"] != "deterministic_recovery_summary" {
@@ -443,7 +443,7 @@ func TestStartRunWithBackendFailsWhenDefaultLLMProviderUnavailable(t *testing.T)
 	}
 }
 
-func TestStartRunWithBackendReturnsFailedRunForFailedRunAfterReload(t *testing.T) {
+func TestStartRunWithBackendReturnsConflictForBlockedProviderRunAfterReload(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
 	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-start-restart", "run start restart workspace", "", "workspaces/run start restart workspace"); err != nil {
@@ -457,7 +457,7 @@ func TestStartRunWithBackendReturnsFailedRunForFailedRunAfterReload(t *testing.T
 	}
 
 	if _, err := StartRunWithBackend(context.Background(), "file", dataRoot, "run-start-restart"); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("second StartRunWithBackend err = %v, want conflict for failed run", err)
+		t.Fatalf("second StartRunWithBackend err = %v, want conflict for blocked provider run", err)
 	}
 }
 
