@@ -84,6 +84,55 @@ def graph_has_valid_patch_apply(graph):
             return True
     return False
 
+def graph_has_ungated_valid_patch_apply(graph):
+    if not isinstance(graph, dict):
+        return False
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, list):
+        return False
+    by_id = {}
+    for node in nodes:
+        if isinstance(node, dict):
+            node_id = str(node.get("id") or "").strip()
+            if node_id:
+                by_id[node_id] = node
+
+    def has_llm_ancestor(node, seen):
+        depends_on = node.get("dependsOn")
+        if not isinstance(depends_on, list):
+            return False
+        for dep in depends_on:
+            dep_id = str(dep or "").strip()
+            if not dep_id or dep_id in seen:
+                continue
+            seen.add(dep_id)
+            parent = by_id.get(dep_id)
+            if not isinstance(parent, dict):
+                continue
+            if str(parent.get("kind") or "").strip() == "llm/workspace_execution":
+                return True
+            if has_llm_ancestor(parent, seen):
+                return True
+        return False
+
+    for node in nodes:
+        if not isinstance(node, dict) or str(node.get("kind") or "").strip() != "patch/apply":
+            continue
+        node_input = node.get("input")
+        if not isinstance(node_input, dict):
+            continue
+        patch_type = str(node_input.get("patchType") or "").strip()
+        target_ref = str(node_input.get("targetRef") or "").strip()
+        if not patch_type or not target_ref:
+            continue
+        if patch_type == "file_write" and not str(node_input.get("content") or ""):
+            continue
+        if patch_type == "unified_diff" and not str(node_input.get("diff") or ""):
+            continue
+        if not has_llm_ancestor(node, set()):
+            return True
+    return False
+
 def graph_patch_apply_errors(graph):
     if not isinstance(graph, dict):
         return []
@@ -194,6 +243,23 @@ def is_recovery_step_input(input_payload):
         or str(input_payload.get("recoveryAction") or "").strip() != ""
     )
 
+def text_contains_state_changing_repair_signal(input_payload, output_payload):
+    text = "\n".join([
+        str(input_payload.get("repairObjective") or ""),
+        str(input_payload.get("repairOfFailureClass") or ""),
+        str(input_payload.get("repairOfFailureSignature") or ""),
+        str(input_payload.get("failedStepOutput") or ""),
+        str(output_payload.get("error") or ""),
+        str(output_payload.get("reason") or ""),
+    ]).lower()
+    return (
+        "produce_state_changing_implementation" in text
+        or "state-changing" in text
+        or "patch/apply" in text
+        or "implementation planning llm step returned read-only executiongraph" in text
+        or "planning executiongraph patch/apply depends on llm/workspace_execution" in text
+    )
+
 runs = load_items(run_path)
 steps = load_items(step_path)
 results = load_items(result_path)
@@ -227,11 +293,26 @@ for step in steps:
             errors.append(f"provider retry root points at retry step: {step_id} root={root}")
     output_payload = payload(step, "output")
     violation_messages = []
+    if (
+        input_payload.get("providerRetryFollowUp") is True
+        and has_key(input_payload, "repairOfRootStepId")
+        and text_contains_state_changing_repair_signal(input_payload, output_payload)
+        and input_payload.get("stateChangingOutputRequired") is not True
+    ):
+        violation_messages.append("provider retry of state-changing repair lost stateChangingOutputRequired")
     for reason in graph_patch_apply_errors(output_payload.get("executionGraph")):
         violation_messages.append(f"invalid executionGraph patch/apply: {reason}")
     if input_payload.get("stateChangingOutputRequired") is True and has_key(output_payload, "executionGraph"):
         if not graph_has_valid_patch_apply(output_payload.get("executionGraph")):
             violation_messages.append("state-changing step returned non-patch executionGraph")
+        elif not graph_has_ungated_valid_patch_apply(output_payload.get("executionGraph")):
+            violation_messages.append("state-changing executionGraph patch/apply depends on llm/workspace_execution before patch")
+    if (
+        str(input_payload.get("soulStage") or "").strip() == "planning"
+        and graph_has_valid_patch_apply(output_payload.get("executionGraph"))
+        and not graph_has_ungated_valid_patch_apply(output_payload.get("executionGraph"))
+    ):
+        violation_messages.append("planning executionGraph patch/apply depends on llm/workspace_execution before patch")
     for message in violation_messages:
         handled, by = handled_violation(step_id, steps, results, tickets)
         if handled:
@@ -252,10 +333,18 @@ run_dod = str(field(run, "doDId", "DoDID", "dodId") or "")
 accepted_results = [item for item in results if field(item, "runId", "RunID") == run_id and field(item, "state", "State") == "accepted"]
 rejected_results = [item for item in results if field(item, "runId", "RunID") == run_id and field(item, "state", "State") == "rejected"]
 missing_file_failures = [step for step in steps if missing_file_read_failure(step)]
+rejected_policy_tickets = []
+for ticket_item in tickets:
+    context = payload(ticket_item, "context")
+    if str(context.get("resultPolicy") or "") == "rejected":
+        rejected_policy_tickets.append(ticket_item)
 if run_state == "completed" and not accepted_results:
     errors.append("completed run has no accepted result")
 if run_state == "failed" and run_dod and not rejected_results:
     errors.append("failed DoD run has no rejected result")
+if run_state in ("blocked_on_decision", "superseded", "failed") and rejected_policy_tickets and not rejected_results:
+    ticket_ids = ", ".join(str(field(item, "id", "ID") or "") for item in rejected_policy_tickets[:3])
+    errors.append(f"run has rejected resultPolicy decision without rejected result: {ticket_ids}")
 if (
     run_state == "running"
     and run_dod

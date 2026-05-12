@@ -304,10 +304,10 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 			},
 		},
 	}
-	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
+	if err := o.recordRejectedResultForDecisionBlock(ctx, run, failedStep, failedStep.Output, spec); err != nil {
 		return err
 	}
-	if err := o.recordRejectedResultForDecisionBlock(ctx, run, failedStep, failedStep.Output, spec); err != nil {
+	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
 		return err
 	}
 	return o.BlockOnDecision(ctx, run.ID, spec.TicketID)
@@ -385,10 +385,66 @@ func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
 			"failedStepOutput":               compactStepOutputForLLMContext(failedStep.Output),
 		},
 	}
-	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
+	ticketID, err := o.createOrReuseRuntimeBlockerTicket(ctx, run, failedStep, spec)
+	if err != nil {
 		return err
 	}
-	return o.BlockOnDecision(ctx, run.ID, spec.TicketID)
+	return o.BlockOnDecision(ctx, run.ID, ticketID)
+}
+
+func (o *RuntimeOrchestrator) createOrReuseRuntimeBlockerTicket(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	spec runtimeDecisionBlockSpec,
+) (common.TicketID, error) {
+	if o == nil || o.tickets == nil || run == nil || failedStep == nil || spec.TicketID == "" {
+		return "", common.ErrInvalidArgument
+	}
+	baseID := spec.TicketID
+	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err == nil {
+		return spec.TicketID, nil
+	} else if !errors.Is(err, common.ErrConflict) {
+		return "", err
+	}
+
+	existing, getErr := o.tickets.Get(ctx, baseID)
+	if getErr != nil && !errors.Is(getErr, common.ErrNotFound) {
+		return "", getErr
+	}
+	if existing != nil &&
+		existing.RunID == run.ID &&
+		existing.StepID == failedStep.ID &&
+		existing.State != common.DecisionTicketStateResolved {
+		return existing.ID, nil
+	}
+
+	for seq := 2; seq <= 100; seq++ {
+		nextSpec := spec
+		nextSpec.TicketID = common.TicketID(fmt.Sprintf("%s-%d", baseID, seq))
+		nextSpec.Context = cloneStepPayload(spec.Context)
+		if nextSpec.Context == nil {
+			nextSpec.Context = map[string]any{}
+		}
+		nextSpec.Context["previousTicketId"] = string(baseID)
+		nextSpec.Context["repeatBlocker"] = true
+		if err := o.createDecisionTicket(ctx, run, failedStep, nextSpec); err == nil {
+			return nextSpec.TicketID, nil
+		} else if !errors.Is(err, common.ErrConflict) {
+			return "", err
+		}
+		existing, getErr := o.tickets.Get(ctx, nextSpec.TicketID)
+		if getErr != nil && !errors.Is(getErr, common.ErrNotFound) {
+			return "", getErr
+		}
+		if existing != nil &&
+			existing.RunID == run.ID &&
+			existing.StepID == failedStep.ID &&
+			existing.State != common.DecisionTicketStateResolved {
+			return existing.ID, nil
+		}
+	}
+	return "", common.ErrConflict
 }
 
 func (o *RuntimeOrchestrator) providerRetryAttemptCount(ctx context.Context, runID common.RunID, rootStepID common.StepID) int {
@@ -438,6 +494,13 @@ func providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr erro
 	input["failureReason"] = errorString(execErr)
 	input[failureOutputKeyClass] = stringFromMap(failedStep.Output, failureOutputKeyClass)
 	input[failureOutputKeySignature] = stringFromMap(failedStep.Output, failureOutputKeySignature)
+	if stateChangingRepairRequired(nil, failedStep, execErr) || strings.TrimSpace(stringFromMap(input, "repairObjective")) == "produce_state_changing_implementation" {
+		input["repairObjective"] = "produce_state_changing_implementation"
+		input["stateChangingOutputRequired"] = true
+		if _, ok := input["repairGuidance"]; !ok {
+			input["repairGuidance"] = stateChangingRepairGuidance()
+		}
+	}
 	if completionGateFollowUpStep(failedStep) {
 		input["providerRetryMode"] = "completion_assessment_only"
 		input["providerRetryAssessmentOnly"] = true
@@ -647,11 +710,7 @@ func isRuntimeRepairBudgetStep(runID common.RunID, step *runModel.Step) bool {
 	if boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) {
 		return false
 	}
-	if isProviderFailureClass(stringFromMap(step.Input, failureOutputKeyClass)) ||
-		isProviderFailureClass(stringFromMap(step.Output, failureOutputKeyClass)) {
-		return false
-	}
-	return !isLLMProviderFailureStage(stringFromMap(step.Output, "stage"))
+	return true
 }
 
 type runtimeRepairScope struct {
@@ -903,13 +962,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if stateChangingRepairRequired(run, failedStep, execErr) {
 		input["repairObjective"] = "produce_state_changing_implementation"
 		input["stateChangingOutputRequired"] = true
-		input["repairGuidance"] = []string{
-			"Return concrete patchRequests/patches with complete file_write content or unified_diff diff, or return a failed dodAssessment if implementation cannot be completed.",
-			"If multiple dependent operations are needed, executionGraph is allowed only when it contains at least one valid patch/apply node.",
-			"Do not return read-only, inspection-only, or shell-only executionGraph.",
-			"If a target file is missing in an empty or new workspace, create it with patch/apply file_write instead of reading it again.",
-			"Do not use placeholders such as __FROM_PREVIOUS_STEP_OUTPUT__ or <<...>>.",
-		}
+		input["repairGuidance"] = stateChangingRepairGuidance()
 	}
 	if missingDoD := missingDoDItemsFromFailureOutput(failedStep.Output); len(missingDoD) > 0 {
 		input["missingDoDItems"] = missingDoD
@@ -958,6 +1011,16 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	return input
 }
 
+func stateChangingRepairGuidance() []string {
+	return []string{
+		"Return concrete patchRequests/patches with complete file_write content or unified_diff diff, or return a failed dodAssessment if implementation cannot be completed.",
+		"If multiple dependent operations are needed, executionGraph is allowed only when it contains at least one valid patch/apply node that does not depend on llm/workspace_execution before the patch.",
+		"Do not return read-only, inspection-only, shell-only executionGraph, or LLM-gated executionGraph.",
+		"If a target file is missing in an empty or new workspace, create it with patch/apply file_write instead of reading it again.",
+		"Do not use placeholders such as __FROM_PREVIOUS_STEP_OUTPUT__ or <<...>>.",
+	}
+}
+
 func recoveryBudgetScope(lineageType string, rootStepID common.StepID, failureClass string, failureSignature string) map[string]any {
 	ret := map[string]any{
 		"lineageType": lineageType,
@@ -1000,6 +1063,8 @@ func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, e
 		"state-changing llm repair step returned executiongraph",
 		"state-changing llm repair step returned no state-changing output",
 		"implementation execution-stage llm graph node returned no state-changing output",
+		"state-changing executiongraph patch/apply depends on llm/workspace_execution before patch",
+		"planning executiongraph patch/apply depends on llm/workspace_execution before patch",
 		"targetref is required",
 		"targetref must be set",
 		"patch content contains unresolved runtime template",

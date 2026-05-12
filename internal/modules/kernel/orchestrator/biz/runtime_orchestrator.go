@@ -366,7 +366,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 				return o.failLoadedRun(ctx, r, fmt.Sprintf("decision ticket %s rejected", ticket.ID))
 			case decisioncommon.ResolutionTypeReplan:
 				mergeRunExecutionContextPatch(r, executionContextPatch)
-				return o.supersedeLoadedRun(ctx, r)
+				return o.replanLoadedRun(ctx, r, ticket, resolution)
 			default:
 				return common.ErrInvalidArgument
 			}
@@ -486,7 +486,7 @@ func (o *RuntimeOrchestrator) runningDecisionRecoveryContext(
 	case decisioncommon.ResolutionTypeRejectCurrentPath:
 		return "", nil, o.FailRun(ctx, run.ID, fmt.Sprintf("decision ticket %s rejected", ticket.ID))
 	case decisioncommon.ResolutionTypeReplan:
-		return "", nil, o.SupersedeRun(ctx, run.ID)
+		return "", nil, o.replanLoadedRun(ctx, run, ticket, resolution)
 	default:
 		return "", nil, common.ErrInvalidArgument
 	}
@@ -677,6 +677,74 @@ func (o *RuntimeOrchestrator) failLoadedRun(ctx context.Context, run *runModel.R
 
 func (o *RuntimeOrchestrator) supersedeLoadedRun(ctx context.Context, run *runModel.Run) error {
 	return o.closeLoadedRun(ctx, run, common.RunStateSuperseded, "")
+}
+
+func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel.Run, ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) error {
+	if o == nil || run == nil || run.ID == "" || o.runs == nil {
+		return common.ErrInvalidArgument
+	}
+	successorID, err := o.nextReplanRunID(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	successorContext := cloneStepPayload(run.ExecutionContext)
+	if successorContext == nil {
+		successorContext = map[string]any{}
+	}
+	replanContext := map[string]any{
+		"predecessorRunId": string(run.ID),
+		"reason":           "decision_replan",
+	}
+	if ticket != nil {
+		replanContext["ticketId"] = string(ticket.ID)
+		replanContext["ticketStepId"] = string(ticket.StepID)
+		replanContext["ticketReason"] = ticket.Reason
+	}
+	if resolution != nil {
+		replanContext["resolutionId"] = string(resolution.ID)
+		replanContext["resolutionType"] = resolution.Type
+		replanContext["resolutionPayload"] = cloneStepPayload(resolution.Payload)
+	}
+	successorContext["replanContinuation"] = replanContext
+	successor := &runModel.Run{
+		ID:               successorID,
+		WorkspaceID:      run.WorkspaceID,
+		GoalID:           run.GoalID,
+		DoDID:            run.DoDID,
+		InitialStepKind:  run.InitialStepKind,
+		ExecutionContext: successorContext,
+		State:            common.RunStateCreated,
+		Priority:         run.Priority,
+	}
+	if successor.InitialStepKind == "" {
+		successor.InitialStepKind = initialStepKind(run)
+	}
+	if err := o.closeLoadedRun(ctx, run, common.RunStateSuperseded, ""); err != nil {
+		return err
+	}
+	if err := o.runs.Create(ctx, successor); err != nil {
+		return err
+	}
+	return o.StartRun(ctx, successor.ID)
+}
+
+func (o *RuntimeOrchestrator) nextReplanRunID(ctx context.Context, predecessor common.RunID) (common.RunID, error) {
+	if o == nil || o.runs == nil || predecessor == "" {
+		return "", common.ErrInvalidArgument
+	}
+	base := runtimeReadableIDPart(string(predecessor))
+	if base == "" {
+		base = "run"
+	}
+	for seq := 1; seq <= 100; seq++ {
+		candidate := common.RunID(fmt.Sprintf("%s-replan-%03d", base, seq))
+		if _, err := o.runs.Get(ctx, candidate); errors.Is(err, common.ErrNotFound) {
+			return candidate, nil
+		} else if err != nil {
+			return "", err
+		}
+	}
+	return "", common.ErrConflict
 }
 
 func (o *RuntimeOrchestrator) closeRun(ctx context.Context, runID common.RunID, state common.RunState, reason string) error {
@@ -1319,7 +1387,13 @@ func validateLLMFollowUpGraphStateChangingContract(run *runModel.Run, step *runM
 	if boolValue(step.Input[stepInputKeyAssessmentOnly]) || boolValue(step.Input["providerRetryAssessmentOnly"]) {
 		return nil
 	}
-	if graphHasStateChangingPatchNode(graph) || hasStateChangingLLMExecutionOutput(output) {
+	if graphHasStateChangingPatchNode(graph) {
+		if llmFollowUpGraphRequiresStateChangingPatch(step) || implementationGoalPlanningGraphRequiresStateChangingPatch(run, step) {
+			return validateStateChangingExecutionGraph(graph)
+		}
+		return nil
+	}
+	if hasStateChangingLLMExecutionOutput(output) {
 		return nil
 	}
 	if llmFollowUpGraphRequiresStateChangingPatch(step) {
@@ -1402,7 +1476,53 @@ func validateStateChangingExecutionGraph(graph runtimemodel.BlockExecutionGraph)
 	if !graphHasStateChangingPatchNode(graph) {
 		return fmt.Errorf("%w: state-changing llm repair step returned read-only executionGraph without patch/apply", common.ErrInvalidArgument)
 	}
+	if !graphHasUngatedStateChangingPatchNode(graph) {
+		return fmt.Errorf("%w: state-changing executionGraph patch/apply depends on llm/workspace_execution before patch", common.ErrInvalidArgument)
+	}
 	return nil
+}
+
+func graphHasUngatedStateChangingPatchNode(graph runtimemodel.BlockExecutionGraph) bool {
+	nodes := map[string]runtimemodel.BlockExecutionNode{}
+	for _, node := range graph.Nodes {
+		id := strings.TrimSpace(node.ID)
+		if id != "" {
+			nodes[id] = node
+		}
+	}
+	for _, node := range graph.Nodes {
+		if strings.TrimSpace(node.Kind) != "patch/apply" {
+			continue
+		}
+		if _, err := runtimePatchRequestFromMap(node.Input); err != nil {
+			continue
+		}
+		if !graphNodeHasAncestorKind(node, nodes, llmWorkspaceExecutionStepKind, map[string]bool{}) {
+			return true
+		}
+	}
+	return false
+}
+
+func graphNodeHasAncestorKind(node runtimemodel.BlockExecutionNode, nodes map[string]runtimemodel.BlockExecutionNode, kind string, seen map[string]bool) bool {
+	for _, dep := range node.DependsOn {
+		dep = strings.TrimSpace(dep)
+		if dep == "" || seen[dep] {
+			continue
+		}
+		seen[dep] = true
+		parent, ok := nodes[dep]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(parent.Kind) == kind {
+			return true
+		}
+		if graphNodeHasAncestorKind(parent, nodes, kind, seen) {
+			return true
+		}
+	}
+	return false
 }
 
 func llmExecutionGraphNodeReturnedOnlyGraph(run *runModel.Run, step *runModel.Step, output map[string]any) bool {

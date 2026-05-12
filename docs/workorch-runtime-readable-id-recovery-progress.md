@@ -33,6 +33,10 @@
 | PRR-09 | P1 | activation memory 可见性过滤 | 已本地收口，待部署核对 | activation executionContext 不注入纯 provider_retry 流水 memory |
 | PRR-10 | P0 | 缺失文件读取循环转 state-changing repair | 已本地收口，待部署核对 | DoD run 反复 `file/read` 缺失目标文件时必须创建文件、写 result 或开 decision，不继续只读循环 |
 | PRR-11 | P1 | recovery step 携带 graph 上下文的校验边界 | 已本地收口，待部署核对 | provider retry / runtime repair 可保留失败 graph node context；普通 graph dispatch 仍强制 graph-scoped ID |
+| PRR-12 | P0 | provider blocker resolved 后重复阻塞不落 failed | 已本地收口，待部署核对 | resolved provider retry exhausted ticket 再 resume 时，若 provider 仍不可用，应重新 blocked_on_decision，不写 rejected result、不落 failed |
+| PRR-13 | P0 | resolved replan 自动创建 successor run | 已本地收口，待部署核对 | repair exhausted replan 后旧 run superseded，必须创建并启动 `<run-id>-replan-<seq>` successor run，而不是让 workspace 直接 failed |
+| PRR-14 | P0 | state-changing patch graph 不得被执行期 LLM 分析节点阻断 | 已本地收口，待部署核对 | planning/repair graph 中合法 patch/apply 若全部依赖 llm/workspace_execution，必须立即 contract failure 进入 repair；repair attempt 按已派发计数，避免同一 attempt 反复派生 |
+| PRR-15 | P0 | provider retry of repair 不得丢失 state-changing contract | 已本地收口，待部署核对 | provider retry of state-changing repair 必须继承 `stateChangingOutputRequired` 与 repair scope；repair exhausted 创建 ticket 前必须先写 rejected result |
 
 ## 本轮验收命令
 
@@ -123,3 +127,19 @@ go test ./... -count=1
   - 本轮新增 PRR-10：`file/read` 缺失目标文件失败在 DoD run 中会继承 state-changing 约束，repair guidance 要求通过 `patch/apply file_write` 创建缺失文件。
   - 本轮新增 PRR-11：验证脚本区分普通 graph dispatch step 与 recovery step。provider retry / runtime repair 保留 `graphNodeId` 作为失败上下文时，不再误判为 graph-scoped ID 违规。
   - 验证脚本新增 fixture 覆盖 repeated missing file reads without patch/result/ticket 必须失败，以及 provider retry graph context 作为 recovery step 必须通过。
+- 2026-05-12 部署核对 `ws-16f85e1f5e65e4a8` 最新状态：
+  - run 被置为 `failed` 且 `FailureReason=conflict`，但 provider retry exhausted ticket 已 resolved、`resultPolicy=none`，并且没有 rejected result；这暴露了 provider blocker resolution 后重复创建同 ID ticket 的内部 conflict 被错误转成 run failed。
+  - 本轮新增 PRR-12：provider retry exhausted blocker 重复创建时，未解决 ticket 直接复用；已 resolved ticket 创建带序号的新 blocker，并记录 `previousTicketId` / `repeatBlocker`。
+  - 预期重新部署后，同类场景应保持或重新进入 `blocked_on_decision`，而不是 `failed + no rejected result`。
+- 2026-05-12 再次部署核对 `run-2c0bf38bfebfd5f4`：
+  - 核心 flow 已闭合：三次 state-changing repair 返回只读 graph 后写 rejected result，并通过 repair exhausted decision 进入 replan。
+  - 新偏差：replan 只把旧 run 标记为 `superseded`，未生成 successor run，workspace 最终 `failed` 且 `ActiveRunID` 为空。
+  - 本轮新增 PRR-13：replan resolution 由 orchestrator 核心创建 successor run 并启动，HTTP watcher 仅作为补偿，避免事件/后台调度缺失导致 replan 断链。
+- 2026-05-12 部署核对 `ws-16f85e1f5e65e4a8`：
+  - latest active run 的 planning graph 已包含 `patch/apply`，但 patch 依赖前置 `llm/workspace_execution` 节点 `gap-analysis-and-design`；该节点 provider timeout / 返回只读 graph 后，调度永远到不了 patch。
+  - state-changing repair 在 provider timeout 后会复用同一 attempt 派生 `repair-001-2`，说明 provider timeout repair dispatch 未计入 repair budget。
+  - 本轮新增 PRR-14：state-changing graph 必须至少存在一个不依赖执行期 LLM 节点的合法 patch/apply；runtime repair attempt 按派发计入预算，provider 问题仍走 provider retry/provider blocker。
+- 2026-05-12 再次部署核对 `ws-16f85e1f5e65e4a8`：
+  - PRR-14 生效：初始 gated patch graph 被 contract 拦截，旧 run repair exhausted 后创建 `<run-id>-replan-001` successor。
+  - 新偏差：`provider-retry-001-of-repair-001-of-planning-001` 未继承 `stateChangingOutputRequired`，允许输出“后续 LLM node 负责实现”的 graph；前序 repair exhausted ticket `resultPolicy=rejected` 但缺少 rejected result。
+  - 本轮新增 PRR-15：provider retry of repair 显式保留 state-changing repair contract；repair exhausted 先写 rejected result 再创建 ticket，避免 auto governance replan 抢先导致 result 缺失。

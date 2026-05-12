@@ -15,6 +15,7 @@ func TestVerifyWorkorchRuntimeCoreFlowScriptViolationFixtures(t *testing.T) {
 		steps       []map[string]any
 		results     []map[string]any
 		tickets     []map[string]any
+		runState    string
 		wantErr     string
 		wantWarning string
 	}{
@@ -43,6 +44,47 @@ func TestVerifyWorkorchRuntimeCoreFlowScriptViolationFixtures(t *testing.T) {
 				},
 			},
 			wantWarning: "warning: handled violation by runtime repair",
+		},
+		{
+			name: "planning patch graph gated by llm node fails",
+			steps: []map[string]any{
+				gatedPatchGraphScriptStep("run-script-gated-patch/step-1"),
+			},
+			wantErr: "planning executionGraph patch/apply depends on llm/workspace_execution before patch",
+		},
+		{
+			name: "provider retry of state changing repair loses contract fails",
+			steps: []map[string]any{
+				providerRetryRepairLostStateChangingScriptStep("run-script-provider-retry-repair-contract/provider-retry-001-of-repair-001-of-planning-001"),
+			},
+			wantErr: "provider retry of state-changing repair lost stateChangingOutputRequired",
+		},
+		{
+			name:     "superseded repair exhausted rejected policy without result fails",
+			runState: "superseded",
+			steps: []map[string]any{{
+				"id":    "run-script-repair-exhausted-no-result/repair-003-of-planning-001",
+				"runId": "run-script-repair-exhausted-no-result",
+				"input": map[string]any{
+					"runtimeRepairFollowUp": true,
+					"recoveryAction":        "runtime_repair",
+					"recoveryRootStepId":    "run-script-repair-exhausted-no-result/step-1",
+					"recoveryLineageType":   "runtime_repair",
+					"recoveryBudgetScope":   map[string]any{"rootStepId": "run-script-repair-exhausted-no-result/step-1"},
+				},
+				"state": "failed",
+			}},
+			tickets: []map[string]any{{
+				"id":     "run-script-repair-exhausted-no-result-repair-exhausted-decision",
+				"runId":  "run-script-repair-exhausted-no-result",
+				"stepId": "run-script-repair-exhausted-no-result/repair-003-of-planning-001",
+				"state":  "resolved",
+				"context": map[string]any{
+					"recoveryPolicy": "runtime_repair_exhausted_requires_strategy",
+					"resultPolicy":   "rejected",
+				},
+			}},
+			wantErr: "run has rejected resultPolicy decision without rejected result",
 		},
 		{
 			name: "legacy block graph node id fails",
@@ -124,7 +166,7 @@ func TestVerifyWorkorchRuntimeCoreFlowScriptViolationFixtures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			runID := scriptFixtureRunID(tc.steps)
 			dataRoot := t.TempDir()
-			writeRuntimeVerifyFixture(t, dataRoot, "ws-script-fixture", runID, tc.steps, tc.results, tc.tickets)
+			writeRuntimeVerifyFixture(t, dataRoot, "ws-script-fixture", runID, tc.runState, tc.steps, tc.results, tc.tickets)
 
 			output, err := runRuntimeVerifyScript(t, dataRoot, "ws-script-fixture", runID)
 			if tc.wantErr != "" {
@@ -168,6 +210,69 @@ func invalidPatchGraphScriptStep(stepID string) map[string]any {
 	}
 }
 
+func gatedPatchGraphScriptStep(stepID string) map[string]any {
+	runID := strings.Split(stepID, "/")[0]
+	return map[string]any{
+		"id":    stepID,
+		"runId": runID,
+		"input": map[string]any{
+			"soulStage": "planning",
+		},
+		"output": map[string]any{
+			"executionGraph": map[string]any{
+				"nodes": []map[string]any{
+					{
+						"id":   "analysis",
+						"kind": "llm/workspace_execution",
+					},
+					{
+						"id":        "write-main",
+						"kind":      "patch/apply",
+						"dependsOn": []string{"analysis"},
+						"input": map[string]any{
+							"patchType": "file_write",
+							"targetRef": "main.go",
+							"content":   "package main\n",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func providerRetryRepairLostStateChangingScriptStep(stepID string) map[string]any {
+	runID := strings.Split(stepID, "/")[0]
+	return map[string]any{
+		"id":    stepID,
+		"runId": runID,
+		"state": "completed",
+		"input": map[string]any{
+			"providerRetryFollowUp":   true,
+			"providerRetryAttempt":    1,
+			"providerRetryRootStepId": runID + "/repair-001-of-planning-001",
+			"recoveryAction":          "provider_retry",
+			"recoveryRootStepId":      runID + "/repair-001-of-planning-001",
+			"recoveryLineageType":     "provider_retry",
+			"recoveryBudgetScope":     map[string]any{"rootStepId": runID + "/repair-001-of-planning-001"},
+			"repairOfRootStepId":      runID + "/step-1",
+			"repairOfStepId":          runID + "/step-1",
+			"repairOfFailureClass":    "runtime_failed",
+			"repairOfFailureSignature": "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|" +
+				"error=invalid argument: planning executiongraph patch/apply depends on llm/workspace_execution before patch",
+		},
+		"output": map[string]any{
+			"stage": "llm_execution_graph_plan",
+			"executionGraph": map[string]any{
+				"nodes": []map[string]any{{
+					"id":   "implement",
+					"kind": "llm/workspace_execution",
+				}},
+			},
+		},
+	}
+}
+
 func missingFileReadScriptStep(stepID string, target string) map[string]any {
 	runID := strings.Split(stepID, "/")[0]
 	return map[string]any{
@@ -203,7 +308,7 @@ func scriptFixtureRunID(steps []map[string]any) string {
 	return "run-script-fixture"
 }
 
-func writeRuntimeVerifyFixture(t *testing.T, dataRoot, workspaceID, runID string, steps, results, tickets []map[string]any) {
+func writeRuntimeVerifyFixture(t *testing.T, dataRoot, workspaceID, runID, runState string, steps, results, tickets []map[string]any) {
 	t.Helper()
 	runDir := filepath.Join(dataRoot, "workspaces", workspaceID, "runs", runID)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
@@ -218,10 +323,13 @@ func writeRuntimeVerifyFixture(t *testing.T, dataRoot, workspaceID, runID string
 	if tickets == nil {
 		tickets = []map[string]any{}
 	}
+	if runState == "" {
+		runState = "running"
+	}
 	writeJSONFile(t, filepath.Join(runDir, "run.json"), []map[string]any{{
 		"id":          runID,
 		"workspaceId": workspaceID,
-		"state":       "running",
+		"state":       runState,
 		"doDId":       "dod-script-fixture",
 	}})
 	writeJSONFile(t, filepath.Join(runDir, "step.json"), steps)

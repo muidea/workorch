@@ -91,6 +91,7 @@
 - provider retry 计数按 root 聚合，`provider-retry-1-provider-retry-1` 属于非法 lineage。
 - provider retry input 必须继承原始阶段合约，包括 `stateChangingOutputRequired`、assessment-only、completion follow-up 等约束。
 - provider retry exhausted 只开 WorkOrch runtime provider decision，不写业务 rejected result，除非 recovery policy 明确 terminate。
+- provider retry exhausted 的 decision 被 resolve 后，如果 provider 仍未恢复且同一 root 的 retry budget 仍耗尽，runtime 必须重新进入 provider decision blocker；不得因重复 ticket ID 或内部 conflict 将 DoD run 关闭为 failed。
 
 ## Runtime Repair 约束
 
@@ -98,6 +99,9 @@
 - repair-of-repair 必须继承更强约束，不得降级。
 - implementation planning read-only graph failure 首轮 repair 直接进入 state-changing repair。
 - DoD run 中 `file/read` / `file_read_invalid_path` / `no such file` / `lstat` 这类缺失目标文件失败，若发生在实现闭环内，repair 必须进入 `produce_state_changing_implementation`，并提示创建缺失文件，而不是继续重复读取。
+- state-changing planning / repair graph 中，合法 `patch/apply` 不能依赖前置 `llm/workspace_execution` 分析节点；分析必须在 planning 阶段完成，patch graph 必须能从只读取证节点直接推进到 state-changing patch。
+- runtime repair budget 按已派发 repair attempt 计数；provider timeout 的 repair step 可以触发 provider retry / provider blocker，但不得导致同一 repair attempt 反复生成 `-2/-3/-4`。
+- provider retry of runtime repair 必须继承 state-changing repair contract，包括 `repairObjective=produce_state_changing_implementation`、`stateChangingOutputRequired=true`、repair scope 与 repair guidance；不得把必须产出 patch 的责任降级为后续 LLM execution node。
 - state-changing repair 失败不能退回普通 graph planning。
 - repair 输出 failed DoD assessment 时，如果不可执行 continuation，应写 rejected result 并关闭或进入 decision，不得继续循环。
 
@@ -108,7 +112,7 @@
 | `completed` | 必须有 accepted result，且 DoD/Goal coverage 与 evidence refs 完整 |
 | `failed` | DoD gate run 必须尽力写 rejected result |
 | `blocked_on_decision` | provider/config blocker 可不写 result；业务不可完成 blocker 应写 rejected result 或带 failed assessment |
-| `superseded` | 不强制写 result，但若 supersede 前已判定 rejected，应保留 result |
+| `superseded` | 不强制写 result，但若 supersede 前已判定 rejected，应保留 result；若 superseded 来源是 resolved replan，必须创建 successor run 继续执行 |
 | `cancelled` | 不强制写 result |
 
 ## 当前实现偏差
@@ -187,3 +191,19 @@
   - repair guidance 明确要求空 workspace / 新项目缺文件时使用 `patch/apply file_write` 创建目标文件，不再重复读取。
   - 验证脚本新增 running DoD run 反复缺失文件读取且无 patch/result/ticket 的失败检查。
   - provider retry / runtime repair 这类 recovery step 可携带失败 graph node 上下文，但不按 graph dispatch step 强制要求 `/graph-<seq>/` ID；普通 graph dispatch step 仍必须满足 graph scope 与 `graphSeq` / `graphNodeSeq`。
+- DMI-26 已落地：
+  - provider retry exhausted blocker 重复创建时会复用未解决 ticket；如果旧 ticket 已 resolved，则创建带序号的新 provider blocker ticket。
+  - 新 ticket 保留 `previousTicketId` 与 `repeatBlocker`，用于追踪 resolution 后 provider 仍不可用的重复阻塞。
+  - resume 过程中的重复 provider blocker 不再外溢为 `ErrConflict` 并关闭 run 为 failed，仍保持 `blocked_on_decision` 与 `resultPolicy=none`。
+- DMI-27 已落地：
+  - resolved replan 不再只把当前 run 标记为 `superseded` 后结束；orchestrator 会创建 `<run-id>-replan-<seq>` successor run 并立即启动。
+  - successor run 继承 workspace、Goal、DoD、priority 与 executionContext，并写入 `replanContinuation.predecessorRunId/ticketId/resolutionId` 以保持追溯。
+  - HTTP replan continuation watcher 保留为外层补偿，但 replan 续跑能力已收口到 runtime 核心状态机。
+- DMI-28 已落地：
+  - implementation planning graph 若把所有合法 `patch/apply` 放在 `llm/workspace_execution` 依赖之后，runtime 立即按 contract failure 进入 repair，不再允许“graph 里有 patch 但永远先卡在分析 LLM”。
+  - state-changing repair graph 复用同一约束，避免 repair 再次输出“先分析、后 patch”的阻塞 graph。
+  - runtime repair attempt 计数改为按已派发 repair step 计入预算，provider timeout 不再让同一 attempt 反复派发；provider 不可用仍由 provider retry/provider blocker 单独治理。
+- DMI-29 已落地：
+  - provider retry of state-changing repair 显式继承 `repairObjective`、`stateChangingOutputRequired`、repair scope 与 repair guidance；即使旧输入缺失 marker，也会从 gated graph / read-only planning contract failure 中恢复 state-changing contract。
+  - repair exhausted decision 创建前先写 rejected result，避免 ticket created 事件触发自动治理 replan 时抢先 supersede，导致 `resultPolicy=rejected` 但无 result。
+  - 验证脚本新增 provider retry of repair 丢失 state-changing contract、以及 superseded/failed/blocked run 存在 rejected resultPolicy ticket 但缺 rejected result 的失败检查。
