@@ -9,6 +9,7 @@ import (
 	plugininitiator "github.com/muidea/magicCommon/framework/plugin/initiator"
 	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -95,8 +96,12 @@ func NewRuntimeSessionWithBackend(backend string, dataRoot string) (*RuntimeSess
 }
 
 func NewRuntimeSessionWithBackendAndEventHub(backend string, dataRoot string, eventHub events.Hub) (*RuntimeSession, error) {
+	runtimePolicy := orchestratorbiz.RuntimePolicy{}
+	if cfg, err := workorchconfig.Current(); err == nil {
+		runtimePolicy.MaxProviderRetryAttempts = cfg.Runtime.MaxProviderRetryAttempts
+	}
 	bootstrapRuntime, err := buildBootstrapRuntime(func() *bootstrap.Runtime {
-		return bootstrap.NewWithBackendAndEventHub(backend, dataRoot, eventHub)
+		return bootstrap.NewWithBackendRuntimePolicyAndEventHub(backend, dataRoot, runtimePolicy, eventHub)
 	})
 	if err != nil {
 		return nil, err
@@ -112,7 +117,11 @@ func NewRuntimeSessionFromEnv() (*RuntimeSession, error) {
 		return nil, err
 	}
 	bootstrapRuntime, err := buildBootstrapRuntime(func() *bootstrap.Runtime {
-		return bootstrap.NewWithBackend(cfg.Repository.Backend, cfg.Repository.DataDir)
+		return bootstrap.NewWithBackendAndRuntimePolicy(
+			cfg.Repository.Backend,
+			cfg.Repository.DataDir,
+			orchestratorbiz.RuntimePolicy{MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts},
+		)
 	})
 	if err != nil {
 		return nil, err

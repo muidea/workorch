@@ -35,14 +35,31 @@ func NewFromEnv() *Runtime {
 	if err != nil {
 		panic("load workorch config: " + err.Error())
 	}
-	return NewWithBackend(cfg.Repository.Backend, cfg.Repository.DataDir)
+	return newWithBackendRuntimePolicyAndEventHub(
+		cfg.Repository.Backend,
+		cfg.Repository.DataDir,
+		orchestratorbiz.RuntimePolicy{MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts},
+		nil,
+	)
 }
 
 func NewWithBackend(backend string, dataRoot string) *Runtime {
 	return NewWithBackendAndEventHub(backend, dataRoot, nil)
 }
 
+func NewWithBackendAndRuntimePolicy(backend string, dataRoot string, runtimePolicy orchestratorbiz.RuntimePolicy) *Runtime {
+	return newWithBackendRuntimePolicyAndEventHub(backend, dataRoot, runtimePolicy, nil)
+}
+
 func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.Hub) *Runtime {
+	return newWithBackendRuntimePolicyAndEventHub(backend, dataRoot, orchestratorbiz.RuntimePolicy{}, eventHub)
+}
+
+func NewWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, runtimePolicy orchestratorbiz.RuntimePolicy, eventHub events.Hub) *Runtime {
+	return newWithBackendRuntimePolicyAndEventHub(backend, dataRoot, runtimePolicy, eventHub)
+}
+
+func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, runtimePolicy orchestratorbiz.RuntimePolicy, eventHub events.Hub) *Runtime {
 	repos := buildRepositories(backend, dataRoot)
 
 	if eventHub == nil {
@@ -140,6 +157,7 @@ func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.
 		MemoryItems:          repos.memoryItem,
 		MemoryRecallTraces:   repos.memoryRecallTrace,
 		AutoGovernanceTraces: repos.autoGovernanceTrace,
+		RuntimePolicy:        runtimePolicy,
 		EventHub:             eventHub,
 	}))
 

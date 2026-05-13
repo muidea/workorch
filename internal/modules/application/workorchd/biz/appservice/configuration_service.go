@@ -10,6 +10,7 @@ import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	webbiz "github.com/muidea/workorch/internal/modules/blocks/web/biz"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
+	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/dialoglanguage"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -40,7 +41,8 @@ type RepositoryConfiguration struct {
 }
 
 type RuntimeConfiguration struct {
-	DefaultSoulID string `json:"defaultSoulId,omitempty"`
+	DefaultSoulID            string `json:"defaultSoulId,omitempty"`
+	MaxProviderRetryAttempts int    `json:"maxProviderRetryAttempts"`
 }
 
 type LLMConfiguration struct {
@@ -253,7 +255,8 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 			DataDir: cfg.Repository.DataDir,
 		},
 		Runtime: RuntimeConfiguration{
-			DefaultSoulID: strings.TrimSpace(cfg.Runtime.DefaultSoulID),
+			DefaultSoulID:            strings.TrimSpace(cfg.Runtime.DefaultSoulID),
+			MaxProviderRetryAttempts: orchestratorbiz.NormalizeRuntimePolicy(orchestratorbiz.RuntimePolicy{MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts}).MaxProviderRetryAttempts,
 		},
 		LLM: LLMConfiguration{
 			DefaultProviderID:          defaultProviderID,

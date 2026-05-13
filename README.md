@@ -237,6 +237,10 @@ maxConcurrentRuns = 1
 backend = "memory"
 dataDir = "/var/lib/workorch"
 
+[runtime]
+defaultSoulId = ""
+maxProviderRetryAttempts = 10
+
 [llm]
 defaultProvider = "local"
 

@@ -33,6 +33,7 @@ type Dependencies struct {
 	MemoryItems          repository.MemoryItemRepository
 	MemoryRecallTraces   repository.MemoryRecallTraceRepository
 	AutoGovernanceTraces repository.AutoGovernanceTraceRepository
+	RuntimePolicy        orchestratorbiz.RuntimePolicy
 	EventHub             events.Hub
 }
 
@@ -84,6 +85,7 @@ func (m *Module) Setup(deps Dependencies) error {
 			AutoGovernanceTraces: deps.AutoGovernanceTraces,
 		},
 		deps.EventHub,
+		deps.RuntimePolicy,
 	)
 	m.servicePtr = orchestratorservice.New(orchestratorservice.Dependencies{
 		StartRun:         m.bizPtr.StartRun,

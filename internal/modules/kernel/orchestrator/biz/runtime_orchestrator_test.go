@@ -6837,6 +6837,28 @@ func TestProviderRetryStepInputKeepsStateChangingRepairContract(t *testing.T) {
 	}
 }
 
+func TestRuntimePolicyConfiguresProviderRetryAttempts(t *testing.T) {
+	if got := NormalizeRuntimePolicy(RuntimePolicy{}).MaxProviderRetryAttempts; got != maxProviderRetryAttempts {
+		t.Fatalf("default max provider retry attempts = %d, want %d", got, maxProviderRetryAttempts)
+	}
+	orch := &RuntimeOrchestrator{
+		policy: NormalizeRuntimePolicy(RuntimePolicy{MaxProviderRetryAttempts: 7}),
+	}
+	input := orch.providerRetryStepInput(&runmodel.Step{
+		ID:    "run-policy/step-1",
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage":                   "llm_provider_timeout",
+			failureOutputKeyClass:     failureClassProviderTimeout,
+			failureOutputKeySignature: "provider-timeout",
+		},
+	}, 1, errors.New("context deadline exceeded"))
+	if got := input["maxProviderRetryAttempts"]; got != 7 {
+		t.Fatalf("maxProviderRetryAttempts = %v, want configured 7", got)
+	}
+}
+
 func TestProviderRetryStepInputNarrowsStateChangingProviderTimeout(t *testing.T) {
 	failedStep := &runmodel.Step{
 		ID:    "run-provider-retry-state-changing-timeout/step-1",

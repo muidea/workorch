@@ -649,7 +649,8 @@ type ServiceConfiguration struct {
 		DataDir string `json:"dataDir"`
 	} `json:"repository"`
 	Runtime struct {
-		DefaultSoulID string `json:"defaultSoulId,omitempty"`
+		DefaultSoulID            string `json:"defaultSoulId,omitempty"`
+		MaxProviderRetryAttempts int    `json:"maxProviderRetryAttempts"`
 	} `json:"runtime"`
 	LLM struct {
 		DefaultProviderID          string              `json:"defaultProviderId"`

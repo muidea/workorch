@@ -129,7 +129,7 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 	case runtimeRecoveryActionProviderRetry:
 		rootStepID := providerRetryRootStepID(failedStep)
 		attempt := o.providerRetryAttemptCount(ctx, run.ID, rootStepID) + 1
-		input := providerRetryStepInput(failedStep, attempt, execErr)
+		input := o.providerRetryStepInput(failedStep, attempt, execErr)
 		stepID, err := o.uniqueDispatchStepID(ctx, run.ID, providerRetryStepID(run.ID, rootStepID, attempt))
 		if err != nil {
 			return err
@@ -345,7 +345,7 @@ func (o *RuntimeOrchestrator) shouldAttemptProviderRetry(ctx context.Context, ru
 	if !isRetryableLLMProviderRuntimeFailure(run, failedStep) {
 		return false
 	}
-	return o.providerRetryAttemptCount(ctx, run.ID, providerRetryRootStepID(failedStep)) < maxProviderRetryAttempts
+	return o.providerRetryAttemptCount(ctx, run.ID, providerRetryRootStepID(failedStep)) < o.maxProviderRetryAttempts()
 }
 
 func (o *RuntimeOrchestrator) shouldBlockOnProviderRetryExhaustion(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
@@ -362,7 +362,7 @@ func (o *RuntimeOrchestrator) providerRetryBudgetExhausted(ctx context.Context, 
 	if !isRetryableLLMProviderRuntimeFailure(run, failedStep) {
 		return false
 	}
-	return o.providerRetryAttemptCount(ctx, run.ID, providerRetryRootStepID(failedStep)) >= maxProviderRetryAttempts
+	return o.providerRetryAttemptCount(ctx, run.ID, providerRetryRootStepID(failedStep)) >= o.maxProviderRetryAttempts()
 }
 
 func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
@@ -375,9 +375,10 @@ func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
 		return common.ErrInvalidArgument
 	}
 	language := runDialogLanguage(run)
+	maxAttempts := o.maxProviderRetryAttempts()
 	spec := runtimeDecisionBlockSpec{
 		TicketID:     common.TicketID(runtimeChildID(failedStep.ID, "provider-retry-exhausted-decision")),
-		Reason:       localizedProviderRetryExhaustionReason(language, maxProviderRetryAttempts, execErr),
+		Reason:       localizedProviderRetryExhaustionReason(language, maxAttempts, execErr),
 		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
 		Question:     localizedProviderRetryExhaustionQuestion(language),
 		Context: map[string]any{
@@ -385,7 +386,8 @@ func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
 			decisionContextKeyDependency:     decisionContextDependencyLLMProvider,
 			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyConfigOnly,
 			decisionContextKeyResultPolicy:   decisionContextResultPolicyNone,
-			"attempts":                       maxProviderRetryAttempts,
+			"attempts":                       maxAttempts,
+			"maxAttempts":                    maxAttempts,
 			"failureClass":                   stringFromMap(failedStep.Output, failureOutputKeyClass),
 			"failureSignature":               stringFromMap(failedStep.Output, failureOutputKeySignature),
 			"failedStepId":                   string(failedStep.ID),
@@ -481,6 +483,17 @@ func isFailedProviderRetryAttempt(rootStepID common.StepID, step *runModel.Step)
 }
 
 func providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr error) map[string]any {
+	return providerRetryStepInputWithMaxAttempts(failedStep, attempt, execErr, maxProviderRetryAttempts)
+}
+
+func (o *RuntimeOrchestrator) providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr error) map[string]any {
+	return providerRetryStepInputWithMaxAttempts(failedStep, attempt, execErr, o.maxProviderRetryAttempts())
+}
+
+func providerRetryStepInputWithMaxAttempts(failedStep *runModel.Step, attempt int, execErr error, maxAttempts int) map[string]any {
+	if maxAttempts <= 0 {
+		maxAttempts = maxProviderRetryAttempts
+	}
 	input := cloneStepPayload(failedStep.Input)
 	if input == nil {
 		input = map[string]any{}
@@ -497,7 +510,7 @@ func providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr erro
 	input[stepInputKeyRecoveryRootStepID] = string(rootStepID)
 	input[stepInputKeyRecoveryLineageType] = "provider_retry"
 	input[stepInputKeyRecoveryBudgetScope] = recoveryBudgetScope("provider_retry", rootStepID, stringFromMap(failedStep.Output, failureOutputKeyClass), stringFromMap(failedStep.Output, failureOutputKeySignature))
-	input["maxProviderRetryAttempts"] = maxProviderRetryAttempts
+	input["maxProviderRetryAttempts"] = maxAttempts
 	input["failedStepId"] = string(rootStepID)
 	input["failedStepKind"] = failedStep.Kind
 	input["failedStepState"] = string(failedStep.State)

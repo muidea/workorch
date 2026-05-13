@@ -23,6 +23,10 @@ maxConcurrentRuns = 2
 backend = "file"
 dataDir = ".workorch-data"
 
+[runtime]
+defaultSoulId = "soul-system"
+maxProviderRetryAttempts = 12
+
 [llm]
 defaultProvider = "local"
 defaultEmbeddingProvider = "local"
@@ -96,6 +100,9 @@ maxRepeatedSamePrompt = 1
 	}
 	if cfg.Server.MaxConcurrentRuns != 2 {
 		t.Fatalf("max concurrent runs = %d, want 2", cfg.Server.MaxConcurrentRuns)
+	}
+	if cfg.Runtime.DefaultSoulID != "soul-system" || cfg.Runtime.MaxProviderRetryAttempts != 12 {
+		t.Fatalf("runtime config = %+v, want configured soul and provider retry attempts", cfg.Runtime)
 	}
 	if cfg.LLM.DefaultProvider != "local" {
 		t.Fatalf("default provider = %q, want local", cfg.LLM.DefaultProvider)
@@ -175,6 +182,7 @@ disabled = false
 	if err != nil {
 		t.Fatalf("current config: %v", err)
 	}
+	cfg.Runtime.MaxProviderRetryAttempts = 14
 	disabled := false
 	cfg.LLM.DefaultProvider = "reasoning"
 	cfg.LLM.DefaultEmbeddingProvider = "reasoning"
@@ -245,6 +253,9 @@ disabled = false
 		next.LLM.Providers["reasoning"].MaxInputTokens != 32000 ||
 		next.LLM.Providers["reasoning"].BytesHardLimit != 131072 {
 		t.Fatalf("next llm provider profile = %+v, want saved context profile", next.LLM.Providers["reasoning"])
+	}
+	if next.Runtime.MaxProviderRetryAttempts != 14 {
+		t.Fatalf("next runtime config = %+v, want saved provider retry attempts", next.Runtime)
 	}
 	if next.WebSearch.DefaultProvider != "search" ||
 		next.WebSearch.Providers["search"].FetchEndpoint != "https://search.example.test/fetch" {

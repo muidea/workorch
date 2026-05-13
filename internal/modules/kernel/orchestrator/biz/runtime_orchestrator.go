@@ -74,9 +74,13 @@ const (
 	soulStageApproval                  = "approval"
 	soulStageValidation                = "validation"
 	maxRuntimeRepairAttempts           = 3
-	maxProviderRetryAttempts           = 2
+	maxProviderRetryAttempts           = 10
 	maxGraphFollowUpExpansionAttempts  = 2
 )
+
+type RuntimePolicy struct {
+	MaxProviderRetryAttempts int
+}
 
 type RuntimeOrchestrator struct {
 	runtime     RuntimeAdapter
@@ -88,6 +92,7 @@ type RuntimeOrchestrator struct {
 	approvals   repository.ApprovalRepository
 	evidence    RuntimeEvidenceRepositories
 	eventHub    events.Hub
+	policy      RuntimePolicy
 }
 
 type RuntimeEvidenceRepositories struct {
@@ -153,9 +158,14 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 	approvalRepo repository.ApprovalRepository,
 	evidence RuntimeEvidenceRepositories,
 	eventHub events.Hub,
+	policies ...RuntimePolicy,
 ) *RuntimeOrchestrator {
 	if eventHub == nil {
 		eventHub = events.NewMemoryHub()
+	}
+	policy := NormalizeRuntimePolicy(RuntimePolicy{})
+	if len(policies) > 0 {
+		policy = NormalizeRuntimePolicy(policies[0])
 	}
 	return &RuntimeOrchestrator{
 		runtime:     runtime,
@@ -167,7 +177,22 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		approvals:   approvalRepo,
 		evidence:    evidence,
 		eventHub:    eventHub,
+		policy:      policy,
 	}
+}
+
+func NormalizeRuntimePolicy(policy RuntimePolicy) RuntimePolicy {
+	if policy.MaxProviderRetryAttempts <= 0 {
+		policy.MaxProviderRetryAttempts = maxProviderRetryAttempts
+	}
+	return policy
+}
+
+func (o *RuntimeOrchestrator) maxProviderRetryAttempts() int {
+	if o == nil || o.policy.MaxProviderRetryAttempts <= 0 {
+		return maxProviderRetryAttempts
+	}
+	return o.policy.MaxProviderRetryAttempts
 }
 
 func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) error {
@@ -1889,7 +1914,7 @@ func (o *RuntimeOrchestrator) providerRetrySpecsAfterResolvedDecision(
 	if err != nil {
 		return nil, true, err
 	}
-	input := providerRetryStepInput(step, attempt, nil)
+	input := o.providerRetryStepInput(step, attempt, nil)
 	input["decisionAuthorizedRetry"] = true
 	return []stepDispatchSpec{{
 		ID:    stepID,
@@ -1983,7 +2008,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			return []stepDispatchSpec{{
 				ID:    stepID,
 				Kind:  last.Kind,
-				Input: providerRetryStepInput(last, attempt, nil),
+				Input: o.providerRetryStepInput(last, attempt, nil),
 			}}, nil
 		case runtimeRecoveryActionRuntimeRepair:
 			attempt := o.runtimeRepairAttemptCountForStep(ctx, run.ID, last) + 1

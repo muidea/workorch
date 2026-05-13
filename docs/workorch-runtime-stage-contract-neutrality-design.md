@@ -296,6 +296,7 @@ Repair exhausted 后必须二选一：
 ## Provider Retry 合同
 
 Provider retry 始终只处理 provider transient failure，与 stage 语义无关。
+Provider retry 预算必须来自 runtime 配置，默认 `maxProviderRetryAttempts=10`；不得在 core runtime 分支中写死固定业务场景次数。
 
 允许：
 
