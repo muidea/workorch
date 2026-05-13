@@ -105,6 +105,12 @@ The script auto-detects OS and architecture (linux/darwin, amd64/arm64) and down
 
 This repository is still a single `go.mod` codebase. Here, `go-multi-module-dev` means module-oriented directory organization and dependency boundaries inside one repository, not a split into multiple Go modules yet.
 
+### Core design contract
+
+`docs/workorch-runtime-stage-contract-neutrality-design.md` is the authoritative design contract for future WorkOrch functionality work. Any change that affects WorkOrch runtime behavior, orchestration flow, LLM execution, memory / recall, soul / skill / tool / MCP capability selection, repair / replan, verification / acceptance, or profile mapping must be designed, implemented, and verified against that document.
+
+If older docs, local closure plans, or feature-specific proposals conflict with the stage contract and neutrality design, the stage contract takes precedence. Feature-specific behavior must remain in profile / capability layers and must not be hard-coded into the core runtime.
+
 Common entrypoints:
 
 ```bash

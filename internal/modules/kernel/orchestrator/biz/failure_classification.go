@@ -13,20 +13,21 @@ import (
 )
 
 const (
-	failureClassProviderUnavailable = "provider_unavailable"
-	failureClassProviderSchemaDrift = "provider_schema_drift"
-	failureClassProviderTimeout     = "provider_timeout"
-	failureClassContextTooLarge     = "context_too_large"
-	failureClassRateLimited         = "rate_limited"
-	failureClassAuthOrConfigError   = "auth_or_config_error"
-	failureClassLLMDecisionInvalid  = "llm_decision_invalid"
-	failureClassDoDCoverageMissing  = "dod_coverage_missing"
-	failureClassWorkspacePath       = "workspace_path_conflict"
-	failureClassShellCommand        = "shell_command_failed"
-	failureClassPatchApply          = "patch_apply_failed"
-	failureClassMCPCapabilityDenied = "mcp_capability_denied"
-	failureClassMCPRuntime          = "mcp_runtime_failed"
-	failureClassRuntime             = "runtime_failed"
+	failureClassProviderUnavailable      = "provider_unavailable"
+	failureClassProviderSchemaDrift      = "provider_schema_drift"
+	failureClassProviderTimeout          = "provider_timeout"
+	failureClassContextTooLarge          = "context_too_large"
+	failureClassRateLimited              = "rate_limited"
+	failureClassAuthOrConfigError        = "auth_or_config_error"
+	failureClassProviderStreamIncomplete = "provider_stream_incomplete"
+	failureClassLLMDecisionInvalid       = "llm_decision_invalid"
+	failureClassDoDCoverageMissing       = "dod_coverage_missing"
+	failureClassWorkspacePath            = "workspace_path_conflict"
+	failureClassShellCommand             = "shell_command_failed"
+	failureClassPatchApply               = "patch_apply_failed"
+	failureClassMCPCapabilityDenied      = "mcp_capability_denied"
+	failureClassMCPRuntime               = "mcp_runtime_failed"
+	failureClassRuntime                  = "runtime_failed"
 
 	failureOutputKeyClass     = "failureClass"
 	failureOutputKeySignature = "failureSignature"
@@ -56,6 +57,8 @@ func classifyRuntimeFailure(step *runModel.Step, output map[string]any, summary 
 		class = failureClassContextTooLarge
 	} else if isLLMProviderRateLimitedFailure(lowerStage, execErr, output) {
 		class = failureClassRateLimited
+	} else if isLLMProviderStreamIncompleteFailure(lowerStage, execErr, output) {
+		class = failureClassProviderStreamIncomplete
 	} else if isDoDCoverageMissingFailure(lowerStage, execErr, output) {
 		class = failureClassDoDCoverageMissing
 	} else if isLLMProviderAuthOrConfigFailure(lowerStage, execErr, output) {
@@ -136,6 +139,19 @@ func isLLMProviderRateLimitedFailure(lowerStage string, execErr error, output ma
 		strings.Contains(errText, "http status 429")
 }
 
+func isLLMProviderStreamIncompleteFailure(lowerStage string, execErr error, output map[string]any) bool {
+	if !strings.HasPrefix(lowerStage, "llm_") {
+		return false
+	}
+	if lowerStage == "llm_provider_stream_incomplete" {
+		return true
+	}
+	errText := providerFailureErrorText(execErr, output)
+	return strings.Contains(errText, "stream incomplete") ||
+		strings.Contains(errText, "ended before [done]") ||
+		strings.Contains(errText, "without [done]")
+}
+
 func isDoDCoverageMissingFailure(lowerStage string, execErr error, output map[string]any) bool {
 	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); strings.TrimSpace(stringFromMap(diagnostics, "kind")) == failureClassDoDCoverageMissing {
 		return true
@@ -191,6 +207,7 @@ func isLLMProviderUnavailableFailure(lowerStage string) bool {
 		"llm_provider_request_too_large",
 		"llm_provider_rate_limited",
 		"llm_provider_auth_or_config_error",
+		"llm_provider_stream_incomplete",
 		"llm_provider_error",
 		"llm_provider_stream_error",
 		"llm_provider_request_failed":
@@ -371,7 +388,8 @@ func (o *RuntimeOrchestrator) shouldBlockOnDuplicateRuntimeFailure(ctx context.C
 	}
 	signature := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeySignature))
 	class := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass))
-	attempts := o.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep)
+	targetScope := runtimeFailureTargetScope(signature)
+	attempts := o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep)
 	if signature == "" || !duplicateRepairDecisionFailureClass(class) || attempts == 0 {
 		return false
 	}
@@ -387,6 +405,11 @@ func (o *RuntimeOrchestrator) shouldBlockOnDuplicateRuntimeFailure(ctx context.C
 			continue
 		}
 		if strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature)) == signature {
+			return true
+		}
+		if targetScope != "" &&
+			strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)) == class &&
+			runtimeFailureTargetScopeFromStep(step) == targetScope {
 			return true
 		}
 	}
@@ -431,10 +454,11 @@ func (o *RuntimeOrchestrator) blockOnDuplicateRuntimeFailure(
 			decisionContextKeyResultPolicy: decisionContextResultPolicyRejected,
 			"failureClass":                 class,
 			"failureSignature":             signature,
+			"failureTargetScope":           runtimeFailureTargetScope(signature),
 			"failedStepId":                 string(failedStep.ID),
 			"failedStepKind":               failedStep.Kind,
-			"failedStepInput":              cloneStepPayload(failedStep.Input),
-			"failedStepOutput":             cloneStepPayload(failedStep.Output),
+			"failedStepInput":              compactStepInputForLLMContext(failedStep.Input),
+			"failedStepOutput":             compactStepOutputForLLMContext(failedStep.Output),
 		},
 	}
 	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {

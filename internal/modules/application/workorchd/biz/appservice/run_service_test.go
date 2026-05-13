@@ -623,6 +623,61 @@ func TestRecoverStuckRunningRunsWithBackendFailsRunningRunWithoutContinuationChe
 	}
 }
 
+func TestRecoverStuckRunningRunsWithBackendClearsTerminalActiveWorkspaceRun(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	if _, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-terminal-active", "terminal active workspace", "", "workspaces/terminal-active"); err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	if _, err := CreateRunWithBackend(ctx, "file", dataRoot, "ws-terminal-active", "run-terminal-active", "", ""); err != nil {
+		t.Fatalf("CreateRunWithBackend: %v", err)
+	}
+
+	session, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("Exports: %v", err)
+	}
+	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, "ws-terminal-active")
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.ActiveRunID = "run-terminal-active"
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("update workspace: %v", err)
+	}
+	runItem, err := exports.Repositories.Runs.Get(ctx, "run-terminal-active")
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	runItem.State = common.RunStateSuperseded
+	if err := exports.Repositories.Runs.Update(ctx, runItem); err != nil {
+		t.Fatalf("update run: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close seed session: %v", err)
+	}
+
+	recovered, err := RecoverStuckRunningRunsWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("RecoverStuckRunningRunsWithBackend: %v", err)
+	}
+	if len(recovered) != 0 {
+		t.Fatalf("recovered runs = %+v, want no running run recovery", recovered)
+	}
+	workspace, err := ReadWorkspaceWithBackend(ctx, "file", dataRoot, "ws-terminal-active")
+	if err != nil {
+		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
+	}
+	if workspace.State != string(common.WorkspaceStateFailed) || workspace.ActiveRunID != "" {
+		t.Fatalf("workspace = %+v, want failed with no terminal active run", workspace)
+	}
+}
+
 func TestReadRunWithSessionReturnsFailureReason(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
 	if err := session.Bootstrap.Exports().Services.WorkspaceService.CreateWorkspace(ctx, workspacemodule.CreateWorkspaceCommand{

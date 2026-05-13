@@ -931,7 +931,7 @@ func TestActivateWorkspaceExecutionWithBackendCarriesResolvedDecisionHistory(t *
 	if err != nil {
 		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
 	}
-	stepContext, _ := runSnapshot.Steps[0].Input["executionContext"].(map[string]any)
+	stepContext := contextMapFromValue(t, runSnapshot.Steps[0].Input["executionContextPackage"])
 	if len(contextMapSliceFromValue(t, stepContext["governanceHistory"])) != 1 {
 		t.Fatalf("first step input = %+v, want governance history propagated", runSnapshot.Steps[0].Input)
 	}
@@ -1636,6 +1636,58 @@ func TestActivateWorkspaceExecutionWithBackendAddsWorkspaceBoundEvidencePolicy(t
 	policies := contextMapSliceFromValue(t, item.Run.ExecutionContext["evidencePolicies"])
 	if len(policies) != 1 || policies[0]["profile"] != "template-defined" || policies[0]["rule"] != "zero_work_is_inconclusive" {
 		t.Fatalf("evidencePolicies = %+v, want template-bound zero-work policy", item.Run.ExecutionContext["evidencePolicies"])
+	}
+}
+
+func TestActivateWorkspaceExecutionWithBackendAddsExecutionContractFromWorkspaceContextHints(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
+		ID:     "soul-contract-execution",
+		Name:   "Contract Execution",
+		SoulMD: "# Contract Execution\n\nApply runtime contract.",
+	}); err != nil {
+		t.Fatalf("CreateSoulWithBackend: %v", err)
+	}
+	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+		ID:   "template-state-change-contract",
+		Name: "State Change Contract Template",
+		SoulBindings: map[string]string{
+			SoulBindingStageExecution: "soul-contract-execution",
+		},
+		ContextHints: map[string]any{
+			"stateChangePolicy": "must_produce_state_change",
+		},
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
+	}
+	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title:            "contract workspace",
+		WorkingDirectory: "workspaces/contract-workspace",
+		TemplateID:       "template-state-change-contract",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "deliver the required state change")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"state-changing result is produced"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	contract := contextMapFromValue(t, item.Run.ExecutionContext["executionContract"])
+	if contract["stateChangePolicy"] != "must_produce_state_change" {
+		t.Fatalf("executionContract = %+v, want must_produce_state_change", contract)
 	}
 }
 

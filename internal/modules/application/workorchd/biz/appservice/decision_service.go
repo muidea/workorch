@@ -309,6 +309,17 @@ func validateDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, pa
 
 func normalizeDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, payload map[string]any, resolutionType string) (map[string]any, string) {
 	payload = normalizeCandidateSelectionResolutionPayloadForTicket(ticket, payload)
+	if isWorkorchRuntimeLLMProviderRecoveryTicket(ticket) {
+		action := inferRuntimeRepairRecoveryAction(payload)
+		if action == "retry_same_step" {
+			ret := cloneDecisionPayload(payload)
+			if ret == nil {
+				ret = map[string]any{}
+			}
+			ret["recoveryAction"] = action
+			return ret, decisioncommon.ResolutionTypeProvideMissingInfo
+		}
+	}
 	if !isRuntimeRepairExhaustionTicket(ticket) {
 		return payload, resolutionType
 	}

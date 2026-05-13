@@ -300,6 +300,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		output := failureOutput(request, call.failureStage, call.err.Error(), call.runtime.Config)
 		attachContextBudget(output, call.request.ContextBudget, call.runtime.Config.ID, call.runtime.Config.Model)
 		attachStreamEvents(output, call.streamEvents)
+		attachStreamDiagnostics(output, call.streamEvents)
 		attachFailoverMetadata(output, call.failover)
 		attachLLMUsage(output, buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, classifyProviderInvocationFailure(call.err), "failed"))
 		return runtimemodel.StepExecutionResult{Output: output}, call.err
@@ -324,6 +325,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 			}
 			attachContextBudget(output, providerReq.ContextBudget, runtime.Config.ID, runtime.Config.Model)
 			attachStreamEvents(output, streamEvents)
+			attachStreamDiagnostics(output, streamEvents)
 			attachFailoverMetadata(output, call.failover)
 			attachLLMUsage(output, buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, "llm_schema_invalid", "failed"))
 			return runtimemodel.StepExecutionResult{Output: output}, parseErr
@@ -340,6 +342,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		failure := failureOutput(request, "llm_decision_invalid", err.Error(), runtime.Config)
 		attachContextBudget(failure, providerReq.ContextBudget, runtime.Config.ID, runtime.Config.Model)
 		attachStreamEvents(failure, streamEvents)
+		attachStreamDiagnostics(failure, streamEvents)
 		attachFailoverMetadata(failure, call.failover)
 		attachLLMUsage(failure, buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, "llm_decision_invalid", "failed"))
 		return runtimemodel.StepExecutionResult{Output: failure}, err
@@ -367,11 +370,12 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 }
 
 const (
-	providerFailureClassTimeout      = "provider_timeout"
-	providerFailureClassContextLarge = "context_too_large"
-	providerFailureClassRateLimited  = "rate_limited"
-	providerFailureClassAuthOrConfig = "auth_or_config_error"
-	providerFailureClassUnavailable  = "provider_unavailable"
+	providerFailureClassTimeout          = "provider_timeout"
+	providerFailureClassContextLarge     = "context_too_large"
+	providerFailureClassRateLimited      = "rate_limited"
+	providerFailureClassAuthOrConfig     = "auth_or_config_error"
+	providerFailureClassStreamIncomplete = "provider_stream_incomplete"
+	providerFailureClassUnavailable      = "provider_unavailable"
 )
 
 type providerCallResult struct {
@@ -472,7 +476,7 @@ func shouldAttemptProviderFailover(config llmmodels.ProviderConfig, failureClass
 		return false
 	}
 	switch strings.TrimSpace(failureClass) {
-	case providerFailureClassTimeout, providerFailureClassContextLarge, providerFailureClassRateLimited, providerFailureClassUnavailable:
+	case providerFailureClassTimeout, providerFailureClassContextLarge, providerFailureClassRateLimited, providerFailureClassStreamIncomplete, providerFailureClassUnavailable:
 		return true
 	default:
 		return false
@@ -544,6 +548,10 @@ func classifyProviderInvocationFailure(err error) string {
 		strings.Contains(text, "prompt is too long"),
 		strings.Contains(text, "413"):
 		return providerFailureClassContextLarge
+	case strings.Contains(text, "stream incomplete"),
+		strings.Contains(text, "ended before [done]"),
+		strings.Contains(text, "without [done]"):
+		return providerFailureClassStreamIncomplete
 	case strings.Contains(text, "deadline exceeded"), strings.Contains(text, "timeout"):
 		return providerFailureClassTimeout
 	case strings.Contains(text, "rate limit"),
@@ -574,6 +582,8 @@ func providerFailureStage(failureClass string, stream bool) string {
 		return "llm_provider_rate_limited"
 	case providerFailureClassAuthOrConfig:
 		return "llm_provider_auth_or_config_error"
+	case providerFailureClassStreamIncomplete:
+		return "llm_provider_stream_incomplete"
 	case providerFailureClassUnavailable:
 		if stream {
 			return "llm_provider_stream_error"
@@ -655,6 +665,38 @@ func attachStreamEvents(output map[string]any, events []llmmodels.ProviderStream
 		streamEvents = append(streamEvents, item)
 	}
 	output["streamEvents"] = streamEvents
+}
+
+func attachStreamDiagnostics(output map[string]any, events []llmmodels.ProviderStreamEvent) {
+	if output == nil || len(events) == 0 {
+		return
+	}
+	deltaCount := 0
+	receivedBytes := 0
+	doneReceived := false
+	for _, event := range events {
+		switch strings.TrimSpace(event.Type) {
+		case "done":
+			doneReceived = true
+		case "", "delta":
+			if event.Delta != "" {
+				deltaCount++
+				receivedBytes += len(event.Delta)
+			}
+		default:
+			if event.Delta != "" {
+				receivedBytes += len(event.Delta)
+			}
+		}
+	}
+	output["streamDiagnostics"] = map[string]any{
+		"streaming":          true,
+		"receivedEventCount": len(events),
+		"receivedDeltaCount": deltaCount,
+		"receivedBytes":      receivedBytes,
+		"doneReceived":       doneReceived,
+		"streamIncomplete":   !doneReceived,
+	}
 }
 
 func attachContextBudget(output map[string]any, budget *llmmodels.ProviderContextBudget, providerID, model string) {
@@ -1997,6 +2039,12 @@ func enrichProviderInputWithSoulRouting(input map[string]any) {
 	if len(input) == 0 {
 		return
 	}
+	if stage := strings.TrimSpace(stringValue(input["runtimeStage"])); stage != "" {
+		input["currentRuntimeStage"] = stage
+	}
+	if mode := strings.TrimSpace(stringValue(input["runtimeStageMode"])); mode != "" {
+		input["currentRuntimeStageMode"] = mode
+	}
 	executionContext := recordFromAny(input["executionContext"])
 	if len(executionContext) == 0 {
 		return
@@ -2033,6 +2081,20 @@ func enrichProviderInputWithSoulRouting(input map[string]any) {
 }
 
 func inferProviderSoulStage(input map[string]any) string {
+	if stage := strings.TrimSpace(stringValue(input["runtimeStage"])); stage != "" {
+		switch stage {
+		case "planning":
+			return "planning"
+		case "execution", "repair":
+			return "execution"
+		case "verification", "acceptance":
+			return "validation"
+		case "decision":
+			return "decision"
+		case "approval":
+			return "approval"
+		}
+	}
 	if stage := normalizedProviderSoulStage(input["soulStage"]); stage != "" {
 		return stage
 	}
@@ -2218,6 +2280,7 @@ func llmFailureCategory(stage string) string {
 		"llm_provider_request_too_large",
 		"llm_provider_rate_limited",
 		"llm_provider_auth_or_config_error",
+		"llm_provider_stream_incomplete",
 		"llm_provider_error",
 		"llm_provider_stream_error":
 		return "llm_provider"
@@ -2237,6 +2300,7 @@ func llmFailureResolutionHint(stage string) string {
 		"llm_provider_request_too_large",
 		"llm_provider_rate_limited",
 		"llm_provider_auth_or_config_error",
+		"llm_provider_stream_incomplete",
 		"llm_provider_error",
 		"llm_provider_stream_error":
 		return "check LLM provider baseURL, model, API key, protocol compatibility, and network availability before rerunning the workspace"

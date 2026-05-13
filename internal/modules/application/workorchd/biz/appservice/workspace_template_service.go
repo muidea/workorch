@@ -16,6 +16,7 @@ type WorkspaceTemplate struct {
 	DoDItems         []string          `json:"doDItems,omitempty"`
 	DefaultSoulID    string            `json:"defaultSoulId,omitempty"`
 	SoulBindings     map[string]string `json:"soulBindings,omitempty"`
+	ContextHints     map[string]any    `json:"contextHints,omitempty"`
 	EvidencePolicies []map[string]any  `json:"evidencePolicies,omitempty"`
 }
 
@@ -143,6 +144,7 @@ func normalizeWorkspaceTemplate(template WorkspaceTemplate) (WorkspaceTemplate, 
 		GoalText:         strings.TrimSpace(template.GoalText),
 		DoDItems:         normalizeDoDItems(template.DoDItems),
 		DefaultSoulID:    strings.TrimSpace(template.DefaultSoulID),
+		ContextHints:     cloneContextMap(template.ContextHints),
 		EvidencePolicies: cloneContextMapSlice(template.EvidencePolicies),
 	}
 	if item.ID == "" || item.Name == "" {
@@ -189,6 +191,7 @@ func workspaceTemplateToRepository(item WorkspaceTemplate) *repository.Workspace
 		DoDItems:         append([]string(nil), item.DoDItems...),
 		DefaultSoulID:    item.DefaultSoulID,
 		SoulBindings:     cloneStringMap(item.SoulBindings),
+		ContextHints:     cloneContextMap(item.ContextHints),
 		EvidencePolicies: cloneContextMapSlice(item.EvidencePolicies),
 	}
 }
@@ -205,6 +208,7 @@ func workspaceTemplateFromRepository(item *repository.WorkspaceTemplate) Workspa
 		DoDItems:         append([]string(nil), item.DoDItems...),
 		DefaultSoulID:    item.DefaultSoulID,
 		SoulBindings:     cloneStringMap(item.SoulBindings),
+		ContextHints:     cloneContextMap(item.ContextHints),
 		EvidencePolicies: cloneContextMapSlice(item.EvidencePolicies),
 	}
 }

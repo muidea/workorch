@@ -413,15 +413,98 @@ func nextGraphStepInput(
 		input[key] = value
 	}
 	input[stepInputKeySoulStage] = soulStageExecution
+	setRuntimeStage(input, runtimeStageExecution)
+	if graphLLMNodeRequiresStateChangingOutput(run, node) {
+		input["stateChangingOutputRequired"] = true
+		input["repairObjective"] = repairObjectiveStateChangingOutput
+		if _, ok := input["repairGuidance"]; !ok {
+			input["repairGuidance"] = stateChangingRepairGuidance()
+		}
+	}
 	input[stepOutputKeyExecutionGraph] = graph
 	input[stepInputKeyGraphNodeID] = node.ID
 	input[stepInputKeyGraphRootStepID] = string(graphDispatchRootStepID(last))
 	input[stepInputKeyGraphPreviousNodeID] = graphNodeID(last)
 	input[stepInputKeyGraphCompletedNodes] = completedGraphNodeList(completed)
+	if evidence := completedDependencyGraphEvidence(node, steps, rootStepID); len(evidence) > 0 {
+		input[stepInputKeyGraphEvidence] = evidence
+	}
+	if dependency := singleCompletedDependencyStep(node, steps, rootStepID); dependency != nil && dependency.Output != nil {
+		input["previousStepKind"] = dependency.Kind
+		input["previousStepOutput"] = compactStepOutputForLLMContext(dependency.Output)
+	}
 	if branch != "" {
 		input[stepOutputKeyGraphBranch] = branch
 	}
 	return input
+}
+
+func completedDependencyGraphEvidence(node runtimemodel.BlockExecutionNode, steps []*runModel.Step, rootStepID common.StepID) []map[string]any {
+	if len(node.DependsOn) == 0 || len(steps) == 0 {
+		return nil
+	}
+	dependencySet := map[string]struct{}{}
+	for _, dependency := range node.DependsOn {
+		dependency = strings.TrimSpace(dependency)
+		if dependency != "" {
+			dependencySet[dependency] = struct{}{}
+		}
+	}
+	if len(dependencySet) == 0 {
+		return nil
+	}
+	evidenceByNode := map[string]map[string]any{}
+	for _, step := range steps {
+		if step == nil || step.State != common.StepStateCompleted || !sameGraphRoot(step, rootStepID) {
+			continue
+		}
+		nodeID := graphNodeID(step)
+		if _, ok := dependencySet[nodeID]; !ok {
+			continue
+		}
+		evidenceByNode[nodeID] = map[string]any{
+			"nodeId": nodeID,
+			"stepId": string(step.ID),
+			"kind":   step.Kind,
+			"output": compactStepOutputForLLMContext(step.Output),
+		}
+	}
+	if len(evidenceByNode) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(node.DependsOn))
+	for _, dependency := range node.DependsOn {
+		if item := evidenceByNode[strings.TrimSpace(dependency)]; item != nil {
+			ret = append(ret, item)
+		}
+	}
+	return ret
+}
+
+func singleCompletedDependencyStep(node runtimemodel.BlockExecutionNode, steps []*runModel.Step, rootStepID common.StepID) *runModel.Step {
+	if len(node.DependsOn) != 1 || len(steps) == 0 {
+		return nil
+	}
+	dependency := strings.TrimSpace(node.DependsOn[0])
+	if dependency == "" {
+		return nil
+	}
+	for _, step := range steps {
+		if step == nil || step.State != common.StepStateCompleted || !sameGraphRoot(step, rootStepID) {
+			continue
+		}
+		if graphNodeID(step) == dependency {
+			return step
+		}
+	}
+	return nil
+}
+
+func graphLLMNodeRequiresStateChangingOutput(run *runModel.Run, node runtimemodel.BlockExecutionNode) bool {
+	if run == nil || !runExecutionContractRequiresStateChange(run) {
+		return false
+	}
+	return strings.TrimSpace(node.Kind) == initialStepKind(run)
 }
 
 var runtimeTemplatePattern = regexp.MustCompile(`\{\{\s*([A-Za-z0-9_-]+)\.([A-Za-z0-9_.-]+)\s*\}\}`)
@@ -724,6 +807,7 @@ func llmCompletionFollowUpStepID(runID common.RunID, step *runModel.Step) common
 func llmCompletionFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]any {
 	input := nextStepInput(run, step.ID)
 	input[stepInputKeySoulStage] = soulStageValidation
+	setRuntimeStage(input, runtimeStageVerification)
 	input["completionFollowUp"] = true
 	inheritRuntimeRepairLineage(input, step)
 	inheritWorkspaceFileManifest(input, step)
@@ -754,6 +838,7 @@ func (o *RuntimeOrchestrator) graphExpansionLimitAssessmentFollowUpStepInputFrom
 	input := llmCompletionFollowUpStepInputFromSteps(run, step, steps)
 	input[stepInputKeyAssessmentOnly] = true
 	input[stepInputKeyGraphLimitFollowUp] = true
+	setRuntimeStage(input, runtimeStageVerification)
 	input["assessmentOnlyReason"] = "graph_follow_up_expansion_limit_exceeded"
 	input["graphFollowUpExpansionCount"] = count
 	input["graphFollowUpExpansionLimit"] = maxGraphFollowUpExpansionAttempts
@@ -780,6 +865,7 @@ func noActionableContinuationFollowUpStepInput(run *runModel.Run, step *runModel
 	input[stepInputKeyNoActionableFollowUp] = true
 	input["completionFollowUp"] = false
 	input["continuationFollowUp"] = true
+	setRuntimeStage(input, runtimeStageVerification)
 	if completionState := llmDecisionCompletionStateFromOutput(step.Output); completionState != "" {
 		input["previousCompletionState"] = completionState
 		input["continuationFailureReason"] = fmt.Sprintf("completionState %s has no actionable continuation", completionState)
@@ -867,6 +953,7 @@ func enrichGraphFollowUpInputWithEvidence(input map[string]any, evidence []map[s
 func graphFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]any {
 	input := nextStepInput(run, step.ID)
 	input[stepInputKeySoulStage] = soulStageValidation
+	setRuntimeStage(input, runtimeStageVerification)
 	input["graphFollowUp"] = true
 	inheritRuntimeRepairLineage(input, step)
 	inheritWorkspaceFileManifest(input, step)

@@ -10,6 +10,7 @@ type WorkspaceTemplate struct {
 	DoDItems         []string          `json:"doDItems,omitempty"`
 	DefaultSoulID    string            `json:"defaultSoulId,omitempty"`
 	SoulBindings     map[string]string `json:"soulBindings,omitempty"`
+	ContextHints     map[string]any    `json:"contextHints,omitempty"`
 	EvidencePolicies []map[string]any  `json:"evidencePolicies,omitempty"`
 }
 

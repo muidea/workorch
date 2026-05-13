@@ -1,13 +1,76 @@
 package orchestrator
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
+
+func TestRunExecutionContextPackageIncludesCompactGoalDoDDefinitions(t *testing.T) {
+	orch := &RuntimeOrchestrator{}
+	run := &runmodel.Run{
+		ID:          "run-context-definitions",
+		WorkspaceID: "ws-context-definitions",
+		GoalID:      "goal-context-definitions",
+		DoDID:       "dod-context-definitions",
+		ExecutionContext: map[string]any{
+			"goalId": "goal-context-definitions",
+			"doDId":  "dod-context-definitions",
+			"goal": map[string]any{
+				"id":          "goal-context-definitions",
+				"workspaceId": "ws-context-definitions",
+				"text":        "Build the requested gateway behavior.",
+			},
+			"dod": map[string]any{
+				"id":          "dod-context-definitions",
+				"workspaceId": "ws-context-definitions",
+				"items":       []string{"proxy request", "record usage"},
+				"state":       "ready",
+			},
+			"goals": []map[string]any{
+				{"id": "goal-context-definitions", "text": "Build the requested gateway behavior."},
+			},
+			"dods": []map[string]any{
+				{"id": "dod-context-definitions", "items": []string{"proxy request", "record usage"}},
+			},
+			"goalDefinitionPolicy": "workspace_goals_are_cumulative_latest_refines_previous",
+			"doDDefinitionPolicy":  "workspace_dods_are_cumulative_latest_refines_previous",
+			"soulRouting":          map[string]any{"large": strings.Repeat("x", 9000)},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-context-definitions/step-1",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageExecution,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+		},
+	}
+
+	pkg := orch.runExecutionContextPackage(context.Background(), run, step, nil)
+
+	goal := mapFromValue(pkg["goal"])
+	if goal["id"] != "goal-context-definitions" || goal["text"] != "Build the requested gateway behavior." {
+		t.Fatalf("goal package = %+v, want compact goal definition", pkg["goal"])
+	}
+	dod := mapFromValue(pkg["dod"])
+	items := stringSliceFromValue(dod["items"])
+	if dod["id"] != "dod-context-definitions" || len(items) != 2 || items[0] != "proxy request" || items[1] != "record usage" {
+		t.Fatalf("dod package = %+v, want compact DoD definition", pkg["dod"])
+	}
+	if pkg["goalId"] != "goal-context-definitions" || pkg["doDId"] != "dod-context-definitions" {
+		t.Fatalf("definition IDs = %v/%v, want goal/dod IDs", pkg["goalId"], pkg["doDId"])
+	}
+	if _, ok := pkg["soulRouting"]; ok {
+		t.Fatalf("executionContextPackage retained raw control context: %+v", pkg)
+	}
+}
 
 func TestCompactMemoryContextsMarksLegacyRunSummaryMemory(t *testing.T) {
 	items := []map[string]any{

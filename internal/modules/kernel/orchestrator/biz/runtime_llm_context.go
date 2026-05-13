@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	maxLLMContextStringBytes = 4096
-	maxLLMContextSliceItems  = 20
-	maxLLMContextMapEntries  = 32
+	maxLLMContextStringBytes       = 4096
+	maxLLMContextEvidenceTextBytes = 1200
+	maxLLMContextSliceItems        = 20
+	maxLLMContextMapEntries        = 32
 )
 
 func compactStepInputForLLMContext(input map[string]any) map[string]any {
@@ -18,6 +19,10 @@ func compactStepInputForLLMContext(input map[string]any) map[string]any {
 		return nil
 	}
 	ret := compactLLMContextMap(input, 0)
+	delete(ret, "executionContext")
+	delete(ret, "failedStepInput")
+	delete(ret, "failedStepOutput")
+	delete(ret, "previousStepOutput")
 	delete(ret, stepInputKeyExecutionContextPackage)
 	delete(ret, stepInputKeyWorkspaceFileManifest)
 	delete(ret, stepOutputKeyExecutionGraph)
@@ -83,6 +88,10 @@ func compactLLMContextMap(input map[string]any, depth int) map[string]any {
 			break
 		}
 		if shouldSkipLLMContextKey(key) {
+			continue
+		}
+		if isLargeEvidenceTextKey(key) {
+			ret[key] = compactLLMContextEvidenceText(input[key])
 			continue
 		}
 		ret[key] = compactLLMContextValue(input[key], depth+1)
@@ -165,7 +174,12 @@ func compactLLMContextLeafSummary(input map[string]any) map[string]any {
 
 func shouldSkipLLMContextKey(key string) bool {
 	switch key {
-	case stepInputKeyExecutionContextPackage, stepInputKeyWorkspaceFileManifest:
+	case "executionContext",
+		"failedStepInput",
+		"failedStepOutput",
+		"previousStepOutput",
+		stepInputKeyExecutionContextPackage,
+		stepInputKeyWorkspaceFileManifest:
 		return true
 	default:
 		return false
@@ -178,4 +192,29 @@ func truncateLLMContextString(value string) string {
 		return value
 	}
 	return value[:maxLLMContextStringBytes] + "..."
+}
+
+func isLargeEvidenceTextKey(key string) bool {
+	switch strings.TrimSpace(key) {
+	case "stdout", "stderr":
+		return true
+	default:
+		return false
+	}
+}
+
+func compactLLMContextEvidenceText(value any) any {
+	text, ok := value.(string)
+	if !ok {
+		return compactLLMContextValue(value, 1)
+	}
+	text = strings.TrimSpace(text)
+	if len(text) <= maxLLMContextEvidenceTextBytes {
+		return text
+	}
+	return map[string]any{
+		"textPreview": text[:maxLLMContextEvidenceTextBytes] + "...",
+		"bytes":       len(text),
+		"truncated":   true,
+	}
 }

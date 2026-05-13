@@ -56,6 +56,25 @@ func TestClassifyRuntimeFailureProviderAuthOrConfig(t *testing.T) {
 	}
 }
 
+func TestClassifyRuntimeFailureProviderStreamIncomplete(t *testing.T) {
+	step := &runModel.Step{
+		ID:    common.StepID("run-x/step-1"),
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage": "llm_provider_stream_incomplete",
+			"error": "invalid argument: llm provider stream incomplete: ended before [DONE]",
+		},
+	}
+	classification := classifyRuntimeFailure(step, step.Output, "runtime step failed", errors.New("invalid argument: llm provider stream incomplete: ended before [DONE]"))
+	if classification.Class != failureClassProviderStreamIncomplete {
+		t.Fatalf("classification = %+v, want %s", classification, failureClassProviderStreamIncomplete)
+	}
+	if !isLLMProviderFailureStage("llm_provider_stream_incomplete") || !isProviderFailureClass(classification.Class) {
+		t.Fatalf("stream incomplete not treated as provider failure: classification=%+v", classification)
+	}
+}
+
 func TestClassifyRuntimeFailureLLMDecisionContractIsNotProviderSchemaDrift(t *testing.T) {
 	step := &runModel.Step{
 		ID:    common.StepID("run-x/step-1"),

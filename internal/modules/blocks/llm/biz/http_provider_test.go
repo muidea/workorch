@@ -201,6 +201,33 @@ func TestHTTPProviderStreamCompleteParsesChatCompletionDeltas(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderStreamCompleteRejectsEOFBeforeDone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"completionState\\\":\\\"continue\\\"\"}}]}\n\n"))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		BaseURL:  server.URL + "/v1",
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Timeout:  5 * time.Second,
+	})
+	events := []llmmodels.ProviderStreamEvent{}
+	_, err := provider.StreamComplete(context.Background(), llmProviderRequest(), func(event llmmodels.ProviderStreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "stream incomplete") {
+		t.Fatalf("stream complete err = %v, want stream incomplete invalid argument", err)
+	}
+	if len(events) != 1 || events[0].Type != "delta" {
+		t.Fatalf("events = %+v, want only partial delta without done", events)
+	}
+}
+
 func TestHTTPProviderEmbedUsesEmbeddingsEndpoint(t *testing.T) {
 	var gotPath string
 	var gotAuthorization string

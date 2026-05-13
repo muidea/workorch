@@ -215,7 +215,10 @@ func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) 
 	if err != nil {
 		return err
 	}
-	return o.dispatchStepSpecsWithWorkspace(ctx, r, specs, ws)
+	if err := o.dispatchStepSpecsWithWorkspace(ctx, r, specs, ws); err != nil {
+		return errors.Join(err, o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
+	}
+	return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
 }
 
 func (o *RuntimeOrchestrator) DispatchNextStep(ctx context.Context, runID common.RunID) error {
@@ -430,15 +433,15 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 	if err := o.publishWorkspaceStateChanged(ctx, workspace, r.ID); err != nil {
 		return err
 	}
-	specs, err := o.nextDispatchSpecsAfterStep(ctx, r, resumeAfterStepID)
+	specs, err := o.nextDispatchSpecsAfterResolvedDecision(ctx, r, resumeAfterStepID, resumeInput)
 	if err != nil {
 		return o.failRunningResume(ctx, r.ID, err)
 	}
 	mergeResumeInput(specs, resumeInput)
 	if err := o.dispatchStepSpecsWithWorkspace(ctx, r, specs, workspace); err != nil {
-		return o.failRunningResume(ctx, r.ID, err)
+		return errors.Join(o.failRunningResume(ctx, r.ID, err), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 	}
-	return nil
+	return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
 }
 
 func (o *RuntimeOrchestrator) failRunningResume(ctx context.Context, runID common.RunID, cause error) error {
@@ -820,6 +823,42 @@ func (o *RuntimeOrchestrator) releaseWorkspaceForTerminalRun(ctx context.Context
 	return o.publishWorkspaceStateChanged(ctx, ws, run.ID)
 }
 
+func (o *RuntimeOrchestrator) reconcileWorkspaceActiveRun(ctx context.Context, workspaceID common.WorkspaceID) error {
+	if o == nil || workspaceID == "" {
+		return nil
+	}
+	ws, err := o.workspaces.Get(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	if ws.ActiveRunID == "" {
+		return nil
+	}
+	activeRun, err := o.runs.Get(ctx, ws.ActiveRunID)
+	if err != nil {
+		if !errors.Is(err, common.ErrNotFound) {
+			return err
+		}
+		ws.ActiveRunID = ""
+		if isActiveWorkspaceState(ws.State) {
+			ws.State = common.WorkspaceStateActive
+		}
+		if err := o.workspaces.Update(ctx, ws); err != nil {
+			return err
+		}
+		return o.publishWorkspaceStateChanged(ctx, ws, "")
+	}
+	if activeRun.WorkspaceID != ws.ID || !isTerminalRunState(activeRun.State) {
+		return nil
+	}
+	ws.ActiveRunID = ""
+	ws.State = workspaceStateForTerminalRun(activeRun.State)
+	if err := o.workspaces.Update(ctx, ws); err != nil {
+		return err
+	}
+	return o.publishWorkspaceStateChanged(ctx, ws, activeRun.ID)
+}
+
 func (o *RuntimeOrchestrator) syncWorkspaceForActiveRun(ctx context.Context, run *runModel.Run, state common.WorkspaceState) error {
 	ws, err := o.syncWorkspaceForActiveRunState(ctx, run, state)
 	if err != nil {
@@ -996,6 +1035,15 @@ func canCloseRunAs(current common.RunState, target common.RunState) bool {
 		}
 	}
 	return false
+}
+
+func isActiveWorkspaceState(state common.WorkspaceState) bool {
+	switch state {
+	case common.WorkspaceStateRunning, common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked, common.WorkspaceStateValidating:
+		return true
+	default:
+		return false
+	}
 }
 
 func (o *RuntimeOrchestrator) dispatchStep(
@@ -1315,6 +1363,7 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	if run == nil || step == nil || output == nil || step.Kind != initialStepKind(run) {
 		return nil
 	}
+	stage := runtimeStageFromStepInput(step.Input)
 	if err := validateLLMExecutionGraphOutputContract(output); err != nil {
 		return err
 	}
@@ -1342,13 +1391,13 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	if graphNodeID(step) == "" {
 		return nil
 	}
-	if strings.TrimSpace(stringFromMap(step.Input, stepInputKeySoulStage)) != soulStageExecution {
+	if stage != runtimeStageExecution {
 		return nil
 	}
 	if llmExecutionGraphNodeReturnedOnlyGraph(run, step, output) {
 		return fmt.Errorf("%w: execution-stage llm graph node returned executionGraph without concrete output", common.ErrInvalidArgument)
 	}
-	if !implementationGraphNodeRequiresStateChangingOutput(step) {
+	if !graphNodeRequiresStateChangingOutput(step) {
 		return nil
 	}
 	if hasStateChangingLLMExecutionOutput(output) || doDAssessmentFromOutput(output) != nil {
@@ -1360,7 +1409,7 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	if spec := approvalBlockSpec(output); spec.Reason != "" {
 		return nil
 	}
-	return fmt.Errorf("%w: implementation execution-stage llm graph node returned no state-changing output", common.ErrInvalidArgument)
+	return fmt.Errorf("%w: state-changing execution-stage llm graph node returned no state-changing output", common.ErrInvalidArgument)
 }
 
 func validateLLMExecutionGraphOutputContract(output map[string]any) error {
@@ -1384,23 +1433,18 @@ func validateLLMFollowUpGraphStateChangingContract(run *runModel.Run, step *runM
 	if !ok {
 		return nil
 	}
+	stage := runtimeStageFromStepInput(step.Input)
 	if boolValue(step.Input[stepInputKeyAssessmentOnly]) || boolValue(step.Input["providerRetryAssessmentOnly"]) {
 		return nil
 	}
 	if graphHasStateChangingPatchNode(graph) {
-		if llmFollowUpGraphRequiresStateChangingPatch(step) || implementationGoalPlanningGraphRequiresStateChangingPatch(run, step) {
-			return validateStateChangingExecutionGraph(graph)
-		}
-		return nil
+		return validateStateChangingExecutionGraph(graph)
 	}
 	if hasStateChangingLLMExecutionOutput(output) {
 		return nil
 	}
-	if llmFollowUpGraphRequiresStateChangingPatch(step) {
+	if llmFollowUpGraphRequiresStateChangingPatch(step) || stage == runtimeStageVerification {
 		return fmt.Errorf("%w: validation follow-up llm step returned read-only executionGraph without patch output", common.ErrInvalidArgument)
-	}
-	if implementationGoalPlanningGraphRequiresStateChangingPatch(run, step) {
-		return fmt.Errorf("%w: implementation planning llm step returned read-only executionGraph without patch output", common.ErrInvalidArgument)
 	}
 	return nil
 }
@@ -1415,49 +1459,12 @@ func llmFollowUpGraphRequiresStateChangingPatch(step *runModel.Step) bool {
 		boolValue(step.Input[stepInputKeyGraphLimitFollowUp])
 }
 
-func implementationGoalPlanningGraphRequiresStateChangingPatch(run *runModel.Run, step *runModel.Step) bool {
-	if run == nil || step == nil || step.Input == nil || step.Kind != initialStepKind(run) {
-		return false
-	}
-	if strings.TrimSpace(stringFromMap(step.Input, stepInputKeySoulStage)) != soulStagePlanning {
-		return false
-	}
-	if boolValue(step.Input[stepInputKeyAssessmentOnly]) || boolValue(step.Input["providerRetryAssessmentOnly"]) {
-		return false
-	}
-	return runGoalRequiresStateChangingImplementation(run)
-}
-
-func runGoalRequiresStateChangingImplementation(run *runModel.Run) bool {
+func runExecutionContractRequiresStateChange(run *runModel.Run) bool {
 	if run == nil {
 		return false
 	}
-	text := strings.ToLower(strings.Join(runGoalTexts(run), "\n"))
-	for _, marker := range []string{
-		"implement",
-		"implementation",
-		"support",
-		"modify",
-		"update",
-		"create",
-		"fix",
-		"repair",
-		"refactor",
-		"完善",
-		"实现",
-		"支持",
-		"修改",
-		"更新",
-		"新增",
-		"修复",
-		"重构",
-		"开发",
-	} {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
+	executionContract := mapFromValue(run.ExecutionContext["executionContract"])
+	return strings.TrimSpace(stringFromMap(executionContract, "stateChangePolicy")) == "must_produce_state_change"
 }
 
 func graphHasStateChangingPatchNode(graph runtimemodel.BlockExecutionGraph) bool {
@@ -1532,7 +1539,7 @@ func llmExecutionGraphNodeReturnedOnlyGraph(run *runModel.Run, step *runModel.St
 	if step.Kind != initialStepKind(run) || graphNodeID(step) == "" {
 		return false
 	}
-	if strings.TrimSpace(stringFromMap(step.Input, stepInputKeySoulStage)) != soulStageExecution {
+	if runtimeStageFromStepInput(step.Input) != runtimeStageExecution {
 		return false
 	}
 	if _, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); !ok {
@@ -1563,33 +1570,8 @@ func hasConcreteLLMExecutionOutput(output map[string]any) bool {
 	return false
 }
 
-func implementationGraphNodeRequiresStateChangingOutput(step *runModel.Step) bool {
-	if step == nil {
-		return false
-	}
-	nodeID := strings.ToLower(strings.TrimSpace(graphNodeID(step)))
-	if nodeID == "" {
-		return false
-	}
-	for _, marker := range []string{
-		"implement",
-		"implementation",
-		"apply",
-		"patch",
-		"write",
-		"change",
-		"modify",
-		"update",
-		"create",
-		"fix",
-		"repair",
-		"refactor",
-	} {
-		if strings.Contains(nodeID, marker) {
-			return true
-		}
-	}
-	return false
+func graphNodeRequiresStateChangingOutput(step *runModel.Step) bool {
+	return step != nil && boolValue(step.Input["stateChangingOutputRequired"])
 }
 
 func hasStateChangingLLMExecutionOutput(output map[string]any) bool {
@@ -1635,6 +1617,7 @@ func assessmentOnlyContractCorrectionStepInput(step *runModel.Step, output map[s
 	}
 	input[stepInputKeyAssessmentOnly] = true
 	input["assessmentOnlyContractCorrection"] = true
+	setRuntimeStage(input, runtimeStageVerification)
 	input["assessmentOnlyContractViolationStepId"] = string(step.ID)
 	input["assessmentOnlyContractViolationReason"] = errorString(violation)
 	input["allowedAssessmentOnlyCompletionStates"] = []string{"completed", "failed", "blocked_on_decision", "blocked_on_approval"}
@@ -1869,6 +1852,50 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsAfterStep(
 		}
 	}
 	return nil, common.ErrConflict
+}
+
+func (o *RuntimeOrchestrator) nextDispatchSpecsAfterResolvedDecision(
+	ctx context.Context,
+	run *runModel.Run,
+	stepID common.StepID,
+	resumeInput map[string]any,
+) ([]stepDispatchSpec, error) {
+	if boolValue(resumeInput["providerRetryDecisionRetry"]) {
+		if specs, ok, err := o.providerRetrySpecsAfterResolvedDecision(ctx, run, stepID); ok || err != nil {
+			return specs, err
+		}
+	}
+	return o.nextDispatchSpecsAfterStep(ctx, run, stepID)
+}
+
+func (o *RuntimeOrchestrator) providerRetrySpecsAfterResolvedDecision(
+	ctx context.Context,
+	run *runModel.Run,
+	stepID common.StepID,
+) ([]stepDispatchSpec, bool, error) {
+	if o == nil || run == nil || stepID == "" {
+		return nil, false, nil
+	}
+	step, err := o.steps.Get(ctx, stepID)
+	if err != nil {
+		return nil, false, err
+	}
+	if step == nil || step.State != common.StepStateFailed || !isRetryableLLMProviderRuntimeFailure(run, step) {
+		return nil, false, nil
+	}
+	rootStepID := providerRetryRootStepID(step)
+	attempt := o.providerRetryAttemptCount(ctx, run.ID, rootStepID) + 1
+	stepID, err = o.uniqueDispatchStepID(ctx, run.ID, providerRetryStepID(run.ID, rootStepID, attempt))
+	if err != nil {
+		return nil, true, err
+	}
+	input := providerRetryStepInput(step, attempt, nil)
+	input["decisionAuthorizedRetry"] = true
+	return []stepDispatchSpec{{
+		ID:    stepID,
+		Kind:  step.Kind,
+		Input: input,
+	}}, true, nil
 }
 
 func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(

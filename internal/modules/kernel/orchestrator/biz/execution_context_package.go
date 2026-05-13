@@ -52,8 +52,10 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		"workspaceId": string(run.WorkspaceID),
 		"runId":       string(run.ID),
 		"stepId":      string(step.ID),
-		"stage":       stringFromMap(step.Input, stepInputKeySoulStage),
+		"stage":       firstNonEmptyString(stringFromMap(step.Input, stepInputKeyRuntimeStage), stringFromMap(step.Input, stepInputKeySoulStage)),
+		"stageMode":   stringFromMap(step.Input, stepInputKeyRuntimeStageMode),
 	}
+	mergeExecutionDefinitionsIntoPackage(ret, executionContext)
 	stableContext := stableExecutionContextPackageFromStep(step)
 
 	var (
@@ -148,6 +150,34 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	return ret
 }
 
+func mergeExecutionDefinitionsIntoPackage(pkg map[string]any, executionContext map[string]any) {
+	if len(pkg) == 0 || len(executionContext) == 0 {
+		return
+	}
+	for _, key := range []string{
+		"goalId",
+		"doDId",
+		"goalDefinitionPolicy",
+		"doDDefinitionPolicy",
+		"executionContract",
+		"replanContinuation",
+	} {
+		if value, ok := executionContext[key]; ok && value != nil {
+			pkg[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	for _, key := range []string{
+		"goal",
+		"goals",
+		"dod",
+		"dods",
+	} {
+		if value, ok := executionContext[key]; ok && value != nil {
+			pkg[key] = compactLLMContextValue(value, 1)
+		}
+	}
+}
+
 func (o *RuntimeOrchestrator) refreshedStepInputMemoryContext(ctx context.Context, run *runModel.Run, step *runModel.Step) ([]map[string]any, map[string]any) {
 	if o == nil || o.evidence.MemoryItems == nil || run == nil || run.WorkspaceID == "" {
 		return nil, nil
@@ -224,6 +254,9 @@ func stepInputMemoryRefreshSource(step *runModel.Step) string {
 	}
 	if boolValue(step.Input[stepInputKeyAssessmentOnly]) || boolValue(step.Input["providerRetryAssessmentOnly"]) {
 		return "assessment"
+	}
+	if stage := strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRuntimeStage)); stage != "" {
+		return stage
 	}
 	if stage := strings.TrimSpace(stringFromMap(step.Input, stepInputKeySoulStage)); stage != "" {
 		return stage

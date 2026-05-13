@@ -157,6 +157,32 @@ func TestBuildProviderPromptMessagesIncludesDecisionApprovalResolutions(t *testi
 	}
 }
 
+func TestBuildProviderPromptMessagesIncludesRuntimeStageSignals(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-stage",
+		RunID:          "run-stage",
+		StepID:         "step-stage",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"currentRuntimeStage":     "verification",
+			"currentRuntimeStageMode": "strict_convergence",
+		},
+	}
+	build := buildProviderPromptMessages(req)
+	joined := ""
+	for _, item := range build.Messages {
+		joined += "\n" + item.Content
+	}
+	for _, want := range []string{"runtimeStage", "verification", "runtimeStageMode", "strict_convergence"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("prompt context missing %q, joined=%s", want, joined)
+		}
+	}
+}
+
 func TestBuildProviderPromptMessagesKeepsMultipleGoalAndDoDEntries(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID:    "ws-4",
@@ -189,6 +215,50 @@ func TestBuildProviderPromptMessagesKeepsMultipleGoalAndDoDEntries(t *testing.T)
 	}
 	if !strings.Contains(joined, "dod one") || !strings.Contains(joined, "dod two") {
 		t.Fatalf("prompt missing multiple dod entries, joined=%s", joined)
+	}
+}
+
+func TestBuildProviderPromptMessagesUsesPackagedGoalAndDoDWhenExecutionContextIsSlim(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-packaged-goal-dod",
+		RunID:          "run-packaged-goal-dod",
+		StepID:         "step-packaged-goal-dod",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "Chinese (Simplified)",
+		Input: map[string]any{
+			"executionContext": map[string]any{
+				"dialogLanguage": "zh-CN",
+			},
+			"executionContextPackage": map[string]any{
+				"goal": map[string]any{
+					"text": "packaged goal text",
+				},
+				"dod": map[string]any{
+					"items": []any{"packaged dod item"},
+				},
+				"goalDefinitionPolicy": "workspace_goal",
+				"doDDefinitionPolicy":  "workspace_dod",
+			},
+		},
+	}
+
+	build := buildProviderPromptMessages(req)
+	joined := ""
+	for _, item := range build.Messages {
+		joined += "\n" + item.Content
+	}
+	for _, want := range []string{
+		"packaged goal text",
+		"packaged dod item",
+		"packagedGoalDefinitionPolicy",
+		"packagedDoDDefinitionPolicy",
+		"Effective Goal and DoD View",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("prompt missing %q, joined=%s", want, joined)
+		}
 	}
 }
 

@@ -23,6 +23,7 @@ type embeddedTemplate struct {
 	DoDItems         []string          `json:"doDItems,omitempty"`
 	DefaultSoulID    string            `json:"defaultSoulId,omitempty"`
 	SoulBindings     map[string]string `json:"soulBindings,omitempty"`
+	ContextHints     map[string]any    `json:"contextHints,omitempty"`
 	EvidencePolicies []map[string]any  `json:"evidencePolicies,omitempty"`
 }
 
@@ -143,8 +144,20 @@ func workspaceTemplateFromEmbedded(t embeddedTemplate) *repository.WorkspaceTemp
 		DoDItems:         filterEmptyStrings(t.DoDItems),
 		DefaultSoulID:    t.DefaultSoulID,
 		SoulBindings:     t.SoulBindings,
+		ContextHints:     cloneContextMap(t.ContextHints),
 		EvidencePolicies: cloneEmbeddedEvidencePolicies(t.EvidencePolicies),
 	}
+}
+
+func cloneContextMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for key, value := range input {
+		ret[key] = cloneEmbeddedEvidencePolicyValue(value)
+	}
+	return ret
 }
 
 func cloneEmbeddedEvidencePolicies(input []map[string]any) []map[string]any {

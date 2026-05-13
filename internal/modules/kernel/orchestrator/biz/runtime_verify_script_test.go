@@ -11,13 +11,15 @@ import (
 
 func TestVerifyWorkorchRuntimeCoreFlowScriptViolationFixtures(t *testing.T) {
 	cases := []struct {
-		name        string
-		steps       []map[string]any
-		results     []map[string]any
-		tickets     []map[string]any
-		runState    string
-		wantErr     string
-		wantWarning string
+		name                 string
+		steps                []map[string]any
+		results              []map[string]any
+		tickets              []map[string]any
+		runState             string
+		workspaceState       string
+		workspaceActiveRunID string
+		wantErr              string
+		wantWarning          string
 	}{
 		{
 			name: "unhandled invalid patch graph fails",
@@ -160,13 +162,25 @@ func TestVerifyWorkorchRuntimeCoreFlowScriptViolationFixtures(t *testing.T) {
 			},
 			wantErr: "running DoD run repeats missing file reads without patch/result/ticket",
 		},
+		{
+			name:     "workspace active run points to terminal run fails",
+			runState: "superseded",
+			steps: []map[string]any{{
+				"id":    "run-script-terminal-active/step-1",
+				"runId": "run-script-terminal-active",
+				"input": map[string]any{},
+			}},
+			workspaceState:       "running",
+			workspaceActiveRunID: "run-script-terminal-active",
+			wantErr:              "workspace active run points to terminal run",
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			runID := scriptFixtureRunID(tc.steps)
 			dataRoot := t.TempDir()
-			writeRuntimeVerifyFixture(t, dataRoot, "ws-script-fixture", runID, tc.runState, tc.steps, tc.results, tc.tickets)
+			writeRuntimeVerifyFixture(t, dataRoot, "ws-script-fixture", runID, tc.runState, tc.workspaceState, tc.workspaceActiveRunID, tc.steps, tc.results, tc.tickets)
 
 			output, err := runRuntimeVerifyScript(t, dataRoot, "ws-script-fixture", runID)
 			if tc.wantErr != "" {
@@ -308,7 +322,7 @@ func scriptFixtureRunID(steps []map[string]any) string {
 	return "run-script-fixture"
 }
 
-func writeRuntimeVerifyFixture(t *testing.T, dataRoot, workspaceID, runID, runState string, steps, results, tickets []map[string]any) {
+func writeRuntimeVerifyFixture(t *testing.T, dataRoot, workspaceID, runID, runState, workspaceState, workspaceActiveRunID string, steps, results, tickets []map[string]any) {
 	t.Helper()
 	runDir := filepath.Join(dataRoot, "workspaces", workspaceID, "runs", runID)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
@@ -326,6 +340,26 @@ func writeRuntimeVerifyFixture(t *testing.T, dataRoot, workspaceID, runID, runSt
 	if runState == "" {
 		runState = "running"
 	}
+	activeRunID := runID
+	if workspaceState == "" && workspaceActiveRunID == "" && runState == "completed" {
+		workspaceState = "completed"
+		activeRunID = ""
+	} else if workspaceState == "" && workspaceActiveRunID == "" && (runState == "failed" || runState == "cancelled" || runState == "superseded") {
+		workspaceState = "failed"
+		activeRunID = ""
+	} else {
+		if workspaceState == "" {
+			workspaceState = "running"
+		}
+		if workspaceActiveRunID != "" {
+			activeRunID = workspaceActiveRunID
+		}
+	}
+	writeJSONFile(t, filepath.Join(dataRoot, "workspaces", workspaceID, "workspace.json"), []map[string]any{{
+		"id":          workspaceID,
+		"state":       workspaceState,
+		"activeRunId": activeRunID,
+	}})
 	writeJSONFile(t, filepath.Join(runDir, "run.json"), []map[string]any{{
 		"id":          runID,
 		"workspaceId": workspaceID,

@@ -2,9 +2,11 @@ package appservice
 
 import (
 	"context"
+	"errors"
 
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -18,8 +20,12 @@ func RecoverStuckRunningRunsWithSession(ctx context.Context, session *RuntimeSes
 	defer session.CloseOnReturn(ctx, &err)
 	if exports.Repositories.Runs == nil ||
 		exports.Repositories.RuntimeCheckpoints == nil ||
+		exports.Repositories.Workspaces == nil ||
 		exports.Services.RunService == nil {
 		return nil, common.ErrInvalidArgument
+	}
+	if err := recoverTerminalActiveWorkspacePointers(ctx, exports.Repositories.Workspaces, exports.Repositories.Runs); err != nil {
+		return nil, err
 	}
 
 	runs, err := exports.Repositories.Runs.List(ctx)
@@ -45,6 +51,44 @@ func RecoverStuckRunningRunsWithSession(ctx context.Context, session *RuntimeSes
 	return ret, nil
 }
 
+func recoverTerminalActiveWorkspacePointers(ctx context.Context, workspaces workspaceListerUpdater, runs runGetter) error {
+	if workspaces == nil || runs == nil {
+		return common.ErrInvalidArgument
+	}
+	items, err := workspaces.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, workspace := range items {
+		if workspace == nil || workspace.ActiveRunID == "" {
+			continue
+		}
+		activeRun, err := runs.Get(ctx, workspace.ActiveRunID)
+		if err != nil {
+			if !errors.Is(err, common.ErrNotFound) {
+				return err
+			}
+			workspace.ActiveRunID = ""
+			if isActiveWorkspaceStateForRecovery(workspace.State) {
+				workspace.State = common.WorkspaceStateActive
+			}
+			if err := workspaces.Update(ctx, workspace); err != nil {
+				return err
+			}
+			continue
+		}
+		if activeRun.WorkspaceID != workspace.ID || !isActivationTerminalRunState(activeRun.State) {
+			continue
+		}
+		workspace.ActiveRunID = ""
+		workspace.State = recoveredWorkspaceStateForTerminalRun(activeRun.State)
+		if err := workspaces.Update(ctx, workspace); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func RecoverStuckRunningRunsWithBackend(ctx context.Context, backend string, dataRoot string) ([]Run, error) {
 	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
@@ -65,6 +109,35 @@ func isStuckRunningRunCandidate(ctx context.Context, checkpoints checkpointListe
 
 type checkpointLister interface {
 	ListByRun(context.Context, common.RunID) ([]*runmodel.RuntimeCheckpoint, error)
+}
+
+type workspaceListerUpdater interface {
+	List(context.Context) ([]*workspacemodel.Workspace, error)
+	Update(context.Context, *workspacemodel.Workspace) error
+}
+
+type runGetter interface {
+	Get(context.Context, common.RunID) (*runmodel.Run, error)
+}
+
+func recoveredWorkspaceStateForTerminalRun(state common.RunState) common.WorkspaceState {
+	switch state {
+	case common.RunStateCompleted:
+		return common.WorkspaceStateCompleted
+	case common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return common.WorkspaceStateFailed
+	default:
+		return common.WorkspaceStateActive
+	}
+}
+
+func isActiveWorkspaceStateForRecovery(state common.WorkspaceState) bool {
+	switch state {
+	case common.WorkspaceStateRunning, common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked, common.WorkspaceStateValidating:
+		return true
+	default:
+		return false
+	}
 }
 
 func hasContinuationCheckpoint(ctx context.Context, checkpoints checkpointLister, runID common.RunID) bool {

@@ -232,9 +232,13 @@ func structuredJSONContractPrompt(request llmmodels.ProviderRequest) string {
 func goalPromptSection(input map[string]any) string {
 	section := map[string]any{}
 	executionContext := recordFromAny(input["executionContext"])
+	executionContextPackage := recordFromAny(input["executionContextPackage"])
 	copyMapValue(section, "goal", executionContext["goal"])
 	copyMapValue(section, "goals", executionContext["goals"])
 	copyMapValue(section, "goalDefinitionPolicy", executionContext["goalDefinitionPolicy"])
+	copyMapValue(section, "packagedGoal", executionContextPackage["goal"])
+	copyMapValue(section, "packagedGoals", executionContextPackage["goals"])
+	copyMapValue(section, "packagedGoalDefinitionPolicy", executionContextPackage["goalDefinitionPolicy"])
 	copyMapValue(section, "topLevelGoal", input["goal"])
 	copyMapValue(section, "topLevelGoals", input["goals"])
 	if len(section) == 0 {
@@ -246,9 +250,13 @@ func goalPromptSection(input map[string]any) string {
 func dodPromptSection(input map[string]any) string {
 	section := map[string]any{}
 	executionContext := recordFromAny(input["executionContext"])
+	executionContextPackage := recordFromAny(input["executionContextPackage"])
 	copyMapValue(section, "dod", executionContext["dod"])
 	copyMapValue(section, "dods", executionContext["dods"])
 	copyMapValue(section, "doDDefinitionPolicy", executionContext["doDDefinitionPolicy"])
+	copyMapValue(section, "packagedDoD", executionContextPackage["dod"])
+	copyMapValue(section, "packagedDoDs", executionContextPackage["dods"])
+	copyMapValue(section, "packagedDoDDefinitionPolicy", executionContextPackage["doDDefinitionPolicy"])
 	copyMapValue(section, "topLevelDoD", input["dod"])
 	copyMapValue(section, "topLevelDoDs", input["dods"])
 	if len(section) == 0 {
@@ -259,11 +267,16 @@ func dodPromptSection(input map[string]any) string {
 
 func effectiveGoalDoDPromptSection(input map[string]any) string {
 	executionContext := recordFromAny(input["executionContext"])
+	executionContextPackage := recordFromAny(input["executionContextPackage"])
 	section := map[string]any{}
-	copyMapValue(section, "goal", executionContext["goal"])
-	copyMapValue(section, "dod", executionContext["dod"])
+	copyMapValue(section, "goal", firstNonNilValue(executionContext["goal"], executionContextPackage["goal"]))
+	copyMapValue(section, "dod", firstNonNilValue(executionContext["dod"], executionContextPackage["dod"]))
+	copyMapValue(section, "goals", firstNonNilValue(executionContext["goals"], executionContextPackage["goals"]))
+	copyMapValue(section, "dods", firstNonNilValue(executionContext["dods"], executionContextPackage["dods"]))
 	copyMapValue(section, "goalId", input["goalId"])
 	copyMapValue(section, "doDId", input["doDId"])
+	copyMapValue(section, "packagedGoalId", executionContextPackage["goalId"])
+	copyMapValue(section, "packagedDoDId", executionContextPackage["doDId"])
 	if len(section) == 0 {
 		return ""
 	}
@@ -308,6 +321,12 @@ func executionSignalsPromptSection(request llmmodels.ProviderRequest) string {
 		"input":               request.Input,
 		"runtimeCapabilities": request.RuntimeCapabilities,
 		"traceRefs":           request.TraceRefs,
+	}
+	if stage := strings.TrimSpace(stringValue(request.Input["currentRuntimeStage"])); stage != "" {
+		payload["runtimeStage"] = stage
+	}
+	if mode := strings.TrimSpace(stringValue(request.Input["currentRuntimeStageMode"])); mode != "" {
+		payload["runtimeStageMode"] = mode
 	}
 	if request.ContextBudget != nil {
 		payload["contextBudget"] = request.ContextBudget
@@ -357,6 +376,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			"requirements": []string{
 				"Assess the current evidence against the effective Goal and DoD",
 				"Return completed or failed with dodAssessment, or a real requiredDecision/requiredApproval",
+				"Treat runtimeStage=verification or acceptance as strict convergence stages; do not reopen exploration or implementation planning in these stages",
 				"Before returning blocked_on_decision, reconcile the question with the current, decision, planning, and execution Soul policies; do not ask for information that those policies explicitly say is not required",
 				"When evidence is insufficient but the missing work can be handled by later runtime repair or replan, return failed with dodAssessment.nextActions instead of asking the user to choose the execution target",
 				"Do not include executionGraph, shellCommands, patchRequests, mcpToolCalls, memoryWrites, nextAction, or executable work",
@@ -369,6 +389,8 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			"Use runtimeCapabilities only",
 			"Respect unresolved governance constraints",
 			"Treat effective Goal and DoD as hard constraints",
+			"When runtimeStageMode is open_judgment, prefer context gathering, plan refinement, and constraint clarification over premature state-changing output",
+			"When runtimeStageMode is strict_convergence, produce executable output, failed assessment, or a real blocker; do not continue read-only looping",
 			"If the current workspace is empty and the effective Goal/DoD can be satisfied by creating a new project or files, continue by planning bootstrap and implementation work instead of asking whether initialization is allowed",
 		},
 	})
@@ -447,6 +469,15 @@ func copyMapValue(target map[string]any, key string, value any) {
 	if cloned, ok := cloneAny(value); ok {
 		target[key] = cloned
 	}
+}
+
+func firstNonNilValue(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 func cloneAny(value any) (any, bool) {

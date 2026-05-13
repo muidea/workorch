@@ -30,8 +30,24 @@ func initialStepInput(run *runModel.Run) map[string]any {
 	}
 	if initialStepKind(run) == llmWorkspaceExecutionStepKind {
 		input[stepInputKeySoulStage] = soulStagePlanning
+		setRuntimeStage(input, runtimeStagePlanning)
+		if replanRunRequiresStateChangingOutput(run) {
+			input[stepInputKeySoulStage] = soulStageExecution
+			setRuntimeStage(input, runtimeStageRepair)
+			input["stateChangingOutputRequired"] = true
+			input["repairObjective"] = repairObjectiveStateChangingOutput
+			input["repairGuidance"] = stateChangingRepairGuidance()
+			input["replanStateChangingContinuation"] = true
+		}
 	}
 	return input
+}
+
+func replanRunRequiresStateChangingOutput(run *runModel.Run) bool {
+	if run == nil || !runExecutionContractRequiresStateChange(run) {
+		return false
+	}
+	return len(mapFromValue(run.ExecutionContext["replanContinuation"])) > 0
 }
 
 func nextStepInputFromOutput(run *runModel.Run, previousStep *runModel.Step) map[string]any {
@@ -185,10 +201,42 @@ func runExecutionInput(run *runModel.Run, previousStepID common.StepID) map[stri
 	if run.DoDID != "" {
 		input["doDId"] = string(run.DoDID)
 	}
-	if len(run.ExecutionContext) > 0 {
-		input["executionContext"] = cloneStepPayload(run.ExecutionContext)
+	if executionContext := slimExecutionContextForStepInput(run.ExecutionContext); len(executionContext) > 0 {
+		input["executionContext"] = executionContext
 	}
 	return input
+}
+
+func slimExecutionContextForStepInput(executionContext map[string]any) map[string]any {
+	if len(executionContext) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"dialogLanguage",
+		"language",
+		"locale",
+		"systemLanguage",
+		"systemLocale",
+		"llmProviderId",
+		"llmOperation",
+		"soulId",
+	} {
+		if value, ok := executionContext[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	for _, key := range []string{
+		"compressedContext",
+		"replanContinuation",
+		"soul",
+		"soulRouting",
+	} {
+		if value, ok := executionContext[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	return ret
 }
 
 func cloneStepPayload(input map[string]any) map[string]any {

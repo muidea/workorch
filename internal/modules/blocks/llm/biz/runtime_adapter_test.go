@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -663,6 +664,62 @@ func TestRuntimeAdapterFailsStreamingErrorClearly(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterReportsStreamDiagnosticsOnProviderTimeout(t *testing.T) {
+	provider := &streamingProvider{
+		events: []llmmodels.ProviderStreamEvent{{Type: "delta", Delta: `{"completionState"`}},
+		err:    context.DeadlineExceeded,
+	}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Capabilities: llmmodels.ProviderCapabilities{
+			ChatCompletions: true,
+			Streaming:       true,
+		},
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err == nil {
+		t.Fatal("expected provider timeout")
+	}
+	if result.Output["stage"] != "llm_provider_timeout" {
+		t.Fatalf("stage = %v, want llm_provider_timeout", result.Output["stage"])
+	}
+	diagnostics, ok := result.Output["streamDiagnostics"].(map[string]any)
+	if !ok || diagnostics["doneReceived"] != false || diagnostics["streamIncomplete"] != true || diagnostics["receivedDeltaCount"] != 1 {
+		t.Fatalf("streamDiagnostics = %+v, want incomplete stream diagnostics", result.Output["streamDiagnostics"])
+	}
+}
+
+func TestRuntimeAdapterClassifiesProviderStreamIncomplete(t *testing.T) {
+	provider := &streamingProvider{
+		events: []llmmodels.ProviderStreamEvent{{Type: "delta", Delta: `{"completionState"`}},
+		err:    fmt.Errorf("%w: llm provider stream incomplete: ended before [DONE]", common.ErrInvalidArgument),
+	}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Capabilities: llmmodels.ProviderCapabilities{
+			ChatCompletions: true,
+			Streaming:       true,
+		},
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err == nil {
+		t.Fatal("expected stream incomplete error")
+	}
+	if result.Output["stage"] != "llm_provider_stream_incomplete" {
+		t.Fatalf("stage = %v, want llm_provider_stream_incomplete", result.Output["stage"])
+	}
+	usage, ok := result.Output["llmUsage"].(map[string]any)
+	if !ok || usage["failureClass"] != providerFailureClassStreamIncomplete {
+		t.Fatalf("llmUsage = %+v, want stream incomplete failure class", result.Output["llmUsage"])
+	}
+}
+
 func TestRuntimeAdapterRejectsUndeclaredNonChatOperation(t *testing.T) {
 	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
 		Provider: llmcommon.ProviderCompatible,
@@ -881,6 +938,8 @@ func TestRuntimeAdapterAssessmentOnlyPromptProjectsDecisionAndExecutionSoulPolic
 		Model:    "test-model",
 	}, provider)
 	request := llmStepRequest()
+	request.Input["runtimeStage"] = "verification"
+	request.Input["runtimeStageMode"] = "strict_convergence"
 	request.Input["soulStage"] = "validation"
 	request.Input["providerRetryAssessmentOnly"] = true
 	request.Input["providerRetryMode"] = "completion_assessment_only"
@@ -924,9 +983,17 @@ func TestRuntimeAdapterAssessmentOnlyPromptProjectsDecisionAndExecutionSoulPolic
 	if provider.request.Input["currentSoulStage"] != "validation" {
 		t.Fatalf("currentSoulStage = %v, want validation", provider.request.Input["currentSoulStage"])
 	}
+	if provider.request.Input["currentRuntimeStage"] != "verification" {
+		t.Fatalf("currentRuntimeStage = %v, want verification", provider.request.Input["currentRuntimeStage"])
+	}
+	if provider.request.Input["currentRuntimeStageMode"] != "strict_convergence" {
+		t.Fatalf("currentRuntimeStageMode = %v, want strict_convergence", provider.request.Input["currentRuntimeStageMode"])
+	}
 	joined := promptContextText(provider.request.PromptContext)
 	for _, want := range []string{
 		"Governance and Soul Policy View",
+		"runtimeStage",
+		"runtimeStageMode",
 		"Before returning blocked_on_decision",
 		"later runtime repair or replan",
 		"Do not ask for source code when an empty workspace can be initialized as a new project",

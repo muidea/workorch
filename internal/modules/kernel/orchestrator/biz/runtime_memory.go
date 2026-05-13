@@ -305,7 +305,7 @@ func acceptedSkillInputMemoryWriteRequest(run *runModel.Run, step *runModel.Step
 		summary = "Accepted skill context: " + strings.Join(ids, ", ")
 	}
 	lines := []string{
-		fmt.Sprintf("Stage: %s", firstNonEmptyString(stringFromMap(step.Input, stepInputKeySoulStage), stringFromMap(step.Output, "stage"), "unknown")),
+		fmt.Sprintf("Stage: %s", firstNonEmptyString(stringFromMap(step.Input, stepInputKeyRuntimeStage), stringFromMap(step.Input, stepInputKeySoulStage), stringFromMap(step.Output, "stage"), "unknown")),
 	}
 	for _, skill := range skills {
 		lines = append(lines, fmt.Sprintf(
@@ -348,7 +348,7 @@ func acceptedToolInputMemoryWriteRequest(run *runModel.Run, step *runModel.Step,
 		return runtimeMemoryWriteRequest{}, false
 	}
 	lines := []string{
-		fmt.Sprintf("Stage: %s", firstNonEmptyString(stringFromMap(step.Input, stepInputKeySoulStage), stringFromMap(step.Output, "stage"), "unknown")),
+		fmt.Sprintf("Stage: %s", firstNonEmptyString(stringFromMap(step.Input, stepInputKeyRuntimeStage), stringFromMap(step.Input, stepInputKeySoulStage), stringFromMap(step.Output, "stage"), "unknown")),
 	}
 	if len(toolKinds) > 0 {
 		lines = append(lines, "allowedToolKinds: "+strings.Join(toolKinds, ", "))
@@ -378,7 +378,7 @@ func acceptedToolInputMemoryWriteRequest(run *runModel.Run, step *runModel.Step,
 func acceptedSoulPromptInputMemoryWriteRequest(run *runModel.Run, step *runModel.Step) (runtimeMemoryWriteRequest, bool) {
 	soul := mapFromValue(run.ExecutionContext["soul"])
 	soulRouting := mapFromValue(run.ExecutionContext["soulRouting"])
-	stage := firstNonEmptyString(stringFromMap(step.Input, stepInputKeySoulStage), stringFromMap(step.Output, "stage"))
+	stage := firstNonEmptyString(stringFromMap(step.Input, stepInputKeyRuntimeStage), stringFromMap(step.Input, stepInputKeySoulStage), stringFromMap(step.Output, "stage"))
 	if len(soul) == 0 && len(soulRouting) == 0 {
 		return runtimeMemoryWriteRequest{}, false
 	}

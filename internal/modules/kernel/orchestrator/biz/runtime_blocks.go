@@ -396,8 +396,9 @@ func decisionResolutionInput(ticket *decisionmodel.Ticket, resolution *decisionm
 	if ticket == nil || resolution == nil {
 		return nil
 	}
-	return map[string]any{
-		stepInputKeySoulStage: soulStageDecision,
+	ret := map[string]any{
+		stepInputKeySoulStage:    soulStageDecision,
+		stepInputKeyRuntimeStage: runtimeStageDecision,
 		"decisionResolution": map[string]any{
 			"ticketId":          string(ticket.ID),
 			"stepId":            string(ticket.StepID),
@@ -409,6 +410,13 @@ func decisionResolutionInput(ticket *decisionmodel.Ticket, resolution *decisionm
 			"resolutionPayload": cloneStepPayload(resolution.Payload),
 		},
 	}
+	if action := strings.TrimSpace(stringFromMap(resolution.Payload, "recoveryAction")); action != "" {
+		ret["decisionRecoveryAction"] = action
+		if action == "retry_same_step" && ticket.Context[decisionContextKeyRecoveryPolicy] == decisionContextRecoveryPolicyConfigOnly {
+			ret["providerRetryDecisionRetry"] = true
+		}
+	}
+	return ret
 }
 
 func effectiveDecisionResolutionType(ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) string {
@@ -434,7 +442,8 @@ func approvalResolutionInput(approval *approvalmodel.Approval) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		stepInputKeySoulStage: soulStageApproval,
+		stepInputKeySoulStage:    soulStageApproval,
+		stepInputKeyRuntimeStage: runtimeStageApproval,
 		"approvalResolution": map[string]any{
 			"approvalId": string(approval.ID),
 			"stepId":     string(approval.StepID),

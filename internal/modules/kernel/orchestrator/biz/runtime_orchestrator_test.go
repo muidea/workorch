@@ -2715,27 +2715,28 @@ func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangingOutputForCon
 		Kind:  llmWorkspaceExecutionStepKind,
 		State: common.StepStateFailed,
 		Input: map[string]any{
-			stepInputKeyGraphNodeID: "implement_feature",
-			stepInputKeySoulStage:   soulStageExecution,
+			stepInputKeyGraphNodeID:       "unit-001",
+			stepInputKeyRuntimeStage:      runtimeStageExecution,
+			"stateChangingOutputRequired": true,
 		},
 		Output: map[string]any{
-			"error": "implementation execution-stage llm graph node returned no state-changing output",
+			"error": "state-changing execution-stage llm graph node returned no state-changing output",
 		},
 	}
 
 	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-state-contract"}, failedStep, 1, common.ErrInvalidArgument)
 
-	if input["repairObjective"] != "produce_state_changing_implementation" || !boolValue(input["stateChangingOutputRequired"]) {
-		t.Fatalf("repair input = %+v, want state-changing implementation objective", input)
+	if input["repairObjective"] != "produce_state_changing_output" || !boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want state-changing output objective", input)
 	}
 	guidance := stringSliceFromValue(input["repairGuidance"])
 	joined := strings.Join(guidance, "\n")
-	if !strings.Contains(joined, "patchRequests/patches") || !strings.Contains(joined, "shell-only executionGraph") {
-		t.Fatalf("repairGuidance = %#v, want concrete patch and shell-only rejection guidance", guidance)
+	if !strings.Contains(joined, "state-changing output") || !strings.Contains(joined, "shell-only executionGraph") {
+		t.Fatalf("repairGuidance = %#v, want state-changing output and shell-only rejection guidance", guidance)
 	}
 }
 
-func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangingOutputForPlanningContractFailure(t *testing.T) {
+func TestRuntimeOrchestrator_RuntimeRepairInputDoesNotPromotePlanningReadOnlyFailureToStateChange(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{
 		steps:      memory.NewStepRepository(),
@@ -2751,18 +2752,55 @@ func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangingOutputForPla
 			stepInputKeySoulStage: soulStagePlanning,
 		},
 		Output: map[string]any{
-			"error": "invalid argument: implementation planning llm step returned read-only executionGraph without patch output",
+			"error": "invalid argument: state-changing planning llm step returned read-only executionGraph without patch output",
 		},
 	}
 
 	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-planning-state-contract"}, failedStep, 1, common.ErrInvalidArgument)
 
-	if input["repairObjective"] != "produce_state_changing_implementation" || !boolValue(input["stateChangingOutputRequired"]) {
-		t.Fatalf("repair input = %+v, want planning contract failure to require state-changing implementation", input)
+	if input["repairObjective"] != nil || boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want planning read-only failure to stay open judgment without state-changing repair", input)
 	}
-	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
-	if !strings.Contains(guidance, "valid patch/apply") || !strings.Contains(guidance, "Do not return read-only") {
-		t.Fatalf("repairGuidance = %q, want patch graph guidance", guidance)
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangeForMissingDoDWithStateChangePolicy(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-dod-gap-state-change")
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/assessment"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageVerification,
+		},
+		Output: map[string]any{
+			"stage":               "llm_dod_assessment",
+			failureOutputKeyClass: failureClassDoDCoverageMissing,
+			"missingDoDItems": []map[string]any{
+				{"item": "produce state-changing result", "state": "failed"},
+			},
+		},
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: "ws-repair-dod-gap-state-change",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, common.ErrInvalidArgument)
+
+	if input["repairObjective"] != "produce_state_changing_output" || !boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want missing DoD repair to require state-changing output", input)
+	}
+	if len(mapSliceFromValue(input["missingDoDItems"])) != 1 {
+		t.Fatalf("missingDoDItems = %+v, want missing DoD carried into repair input", input["missingDoDItems"])
 	}
 }
 
@@ -2790,8 +2828,8 @@ func TestRuntimeOrchestrator_RuntimeRepairInputInheritsStateChangingRequirement(
 
 	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-state-contract-inherit"}, failedStep, 2, common.ErrInvalidArgument)
 
-	if input["repairObjective"] != "produce_state_changing_implementation" || !boolValue(input["stateChangingOutputRequired"]) {
-		t.Fatalf("repair input = %+v, want inherited state-changing implementation objective", input)
+	if input["repairObjective"] != "produce_state_changing_output" || !boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want inherited state-changing output objective", input)
 	}
 }
 
@@ -3074,16 +3112,32 @@ func TestWorkspaceFileManifestSkipsRepositoryAndRuntimeNoise(t *testing.T) {
 
 func TestCompactLLMContextDropsHeavyTransportFields(t *testing.T) {
 	input := compactStepInputForLLMContext(map[string]any{
+		"executionContext":                  map[string]any{"skills": []any{map[string]any{"instruction": strings.Repeat("s", 256)}}},
 		stepInputKeyExecutionContextPackage: map[string]any{"workspaceFileManifest": []map[string]any{{"path": ".git/object"}}},
 		stepInputKeyWorkspaceFileManifest:   []map[string]any{{"path": ".git/object"}},
-		"failedStepId":                      "run-1/block/test",
-		"failureReason":                     strings.Repeat("x", maxLLMContextStringBytes+16),
+		"failedStepInput": map[string]any{
+			"executionContext": map[string]any{"memories": []any{map[string]any{"content": strings.Repeat("m", 256)}}},
+		},
+		"failedStepOutput": map[string]any{"stderr": strings.Repeat("e", 256)},
+		"previousStepOutput": map[string]any{
+			stepOutputKeyExecutionGraph: map[string]any{"nodes": []any{map[string]any{"id": "inspect", "kind": "file/list"}}},
+		},
+		"failedStepId":  "run-1/block/test",
+		"failureReason": strings.Repeat("x", maxLLMContextStringBytes+16),
 	})
+	if _, ok := input["executionContext"]; ok {
+		t.Fatalf("executionContext should be dropped from compact input")
+	}
 	if _, ok := input[stepInputKeyExecutionContextPackage]; ok {
 		t.Fatalf("executionContextPackage should be dropped from compact input")
 	}
 	if _, ok := input[stepInputKeyWorkspaceFileManifest]; ok {
 		t.Fatalf("workspaceFileManifest should be dropped from compact input")
+	}
+	for _, key := range []string{"failedStepInput", "failedStepOutput", "previousStepOutput"} {
+		if _, ok := input[key]; ok {
+			t.Fatalf("%s should be dropped from compact input", key)
+		}
 	}
 	if got := fmt.Sprint(input["failureReason"]); len(got) > maxLLMContextStringBytes+3 {
 		t.Fatalf("failureReason length = %d, want truncated", len(got))
@@ -3093,18 +3147,98 @@ func TestCompactLLMContextDropsHeavyTransportFields(t *testing.T) {
 		"stderr":       strings.Repeat("e", maxLLMContextStringBytes+10),
 		"failureClass": failureClassShellCommand,
 		"nested": map[string]any{
+			"executionContext":                  map[string]any{"large": "value"},
 			stepInputKeyExecutionContextPackage: map[string]any{"large": "value"},
+			"failedStepInput":                   map[string]any{"large": "value"},
 		},
 	})
 	if output["failureClass"] != failureClassShellCommand {
 		t.Fatalf("failureClass = %v, want preserved", output["failureClass"])
 	}
-	if got := fmt.Sprint(output["stderr"]); len(got) > maxLLMContextStringBytes+3 {
-		t.Fatalf("stderr length = %d, want truncated", len(got))
+	stderr := mapFromValue(output["stderr"])
+	if len(stderr) == 0 ||
+		stderr["truncated"] != true ||
+		int64FromValue(stderr["bytes"]) <= maxLLMContextEvidenceTextBytes ||
+		!strings.HasSuffix(fmt.Sprint(stderr["textPreview"]), "...") {
+		t.Fatalf("stderr = %#v, want compact evidence text summary", output["stderr"])
 	}
 	nested := mapFromValue(output["nested"])
 	if _, ok := nested[stepInputKeyExecutionContextPackage]; ok {
 		t.Fatalf("nested executionContextPackage should be dropped")
+	}
+	if _, ok := nested["executionContext"]; ok {
+		t.Fatalf("nested executionContext should be dropped")
+	}
+	if _, ok := nested["failedStepInput"]; ok {
+		t.Fatalf("nested failedStepInput should be dropped")
+	}
+}
+
+func TestRunExecutionInputKeepsOnlySlimExecutionContext(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-compact-execution-context",
+		WorkspaceID: "ws-compact-execution-context",
+		GoalID:      "goal-compact",
+		DoDID:       "dod-compact",
+		ExecutionContext: map[string]any{
+			"dialogLanguage": "zh-CN",
+			"llmProviderId":  "reasoning",
+			"skills":         []map[string]any{{"id": "skill-compact", "instruction": strings.Repeat("x", 1024)}},
+			"compressedContext": map[string]any{
+				"version": "workorch.compressedContext.v1",
+				"mode":    "deterministic_recovery_summary",
+			},
+		},
+	}
+
+	input := runExecutionInput(run, "run-compact-execution-context/step-1")
+
+	if input["workspaceId"] != "ws-compact-execution-context" || input["goalId"] != "goal-compact" || input["doDId"] != "dod-compact" {
+		t.Fatalf("input = %+v, want run identity", input)
+	}
+	executionContext := mapFromValue(input["executionContext"])
+	if executionContext["dialogLanguage"] != "zh-CN" || executionContext["llmProviderId"] != "reasoning" {
+		t.Fatalf("executionContext = %+v, want slim control fields", executionContext)
+	}
+	if _, ok := executionContext["skills"]; ok {
+		t.Fatalf("executionContext retained raw skills: %+v", executionContext["skills"])
+	}
+	if compressed := mapFromValue(executionContext["compressedContext"]); compressed["version"] != "workorch.compressedContext.v1" {
+		t.Fatalf("compressedContext = %+v, want compact compressed context", compressed)
+	}
+}
+
+func TestInitialStepInputRequiresStateChangingRepairForReplanContinuation(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-replan-state-changing-repair",
+		WorkspaceID:     "ws-replan-state-changing-repair",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-replan-state-changing",
+				"reason":           "previous repair returned read-only graph",
+			},
+		},
+	}
+
+	input := initialStepInput(run)
+
+	if input[stepInputKeySoulStage] != soulStageExecution ||
+		input[stepInputKeyRuntimeStage] != runtimeStageRepair ||
+		input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true ||
+		input["replanStateChangingContinuation"] != true {
+		t.Fatalf("initial replan input = %+v, want state-changing repair constraints", input)
+	}
+	guidance := stringSliceFromValue(input["repairGuidance"])
+	joined := strings.Join(guidance, "\n")
+	if !strings.Contains(joined, "state-changing output") || !strings.Contains(joined, "shell-only executionGraph") {
+		t.Fatalf("repairGuidance = %#v, want state-changing repair guidance", guidance)
+	}
+	executionContext := mapFromValue(input["executionContext"])
+	if len(mapFromValue(executionContext["replanContinuation"])) == 0 {
+		t.Fatalf("executionContext = %+v, want compact replan continuation", executionContext)
 	}
 }
 
@@ -3278,7 +3412,9 @@ func TestRuntimeOrchestrator_ExecutionContextPackageReusesStableFollowUpPackage(
 		RunID: runID,
 		Kind:  llmcommon.StepKindWorkspaceExecution,
 		Input: map[string]any{
-			stepInputKeySoulStage: soulStageValidation,
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			stepInputKeySoulStage:        soulStageValidation,
 			stepInputKeyExecutionContextPackage: map[string]any{
 				"stepId": "old-step-should-not-leak",
 				"stage":  soulStageExecution,
@@ -3307,8 +3443,11 @@ func TestRuntimeOrchestrator_ExecutionContextPackageReusesStableFollowUpPackage(
 	if got := artifactRepo.listByWorkspaceCount.Load(); got != 0 {
 		t.Fatalf("artifact ListByWorkspace count = %d, want 0 when stable deliverable context is inherited", got)
 	}
-	if pkg["stepId"] != string(step.ID) || pkg["stage"] != soulStageValidation {
+	if pkg["stepId"] != string(step.ID) || pkg["stage"] != runtimeStageVerification {
 		t.Fatalf("executionContextPackage = %+v, want current step identity", pkg)
+	}
+	if pkg["stageMode"] != "strict_convergence" {
+		t.Fatalf("executionContextPackage stageMode = %v, want strict_convergence", pkg["stageMode"])
 	}
 	if accepted := mapFromValue(pkg["latestAcceptedResult"]); accepted["id"] != "result-context-package-stable-reuse" {
 		t.Fatalf("latestAcceptedResult = %+v, want inherited result", accepted)
@@ -4175,8 +4314,8 @@ func TestRuntimeOrchestrator_StartRunDispatchReusesLoadedWorkspace(t *testing.T)
 	if err := orch.StartRun(ctx, runID); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	if got := workspaceRepo.getCount.Load(); got != 1 {
-		t.Fatalf("workspace Get count = %d, want only initial StartRun read", got)
+	if got := workspaceRepo.getCount.Load(); got != 2 {
+		t.Fatalf("workspace Get count = %d, want initial StartRun read plus final active-run reconcile", got)
 	}
 }
 
@@ -4273,8 +4412,8 @@ func TestRuntimeOrchestrator_ResumeRunDispatchReusesSyncedWorkspace(t *testing.T
 	if err := orch.ResumeRun(ctx, runID); err != nil {
 		t.Fatalf("resume run: %v", err)
 	}
-	if got := workspaceRepo.getCount.Load(); got != 1 {
-		t.Fatalf("workspace Get count = %d, want only resume state sync read", got)
+	if got := workspaceRepo.getCount.Load(); got != 2 {
+		t.Fatalf("workspace Get count = %d, want resume state sync read plus final active-run reconcile", got)
 	}
 	runItem, err := runRepo.Get(ctx, runID)
 	if err != nil {
@@ -4331,8 +4470,8 @@ func TestRuntimeOrchestrator_GraphBatchDispatchReusesLoadedWorkspace(t *testing.
 	if err := orch.StartRun(ctx, runID); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	if got := workspaceRepo.getCount.Load(); got != 1 {
-		t.Fatalf("workspace Get count = %d, want graph batch to reuse the initial StartRun workspace", got)
+	if got := workspaceRepo.getCount.Load(); got != 2 {
+		t.Fatalf("workspace Get count = %d, want graph batch reuse plus final active-run reconcile", got)
 	}
 	steps, err := stepRepo.ListByRun(ctx, runID)
 	if err != nil {
@@ -5632,6 +5771,9 @@ func TestRuntimeOrchestrator_RuntimeRepairScopeUsesCurrentFailureBeforeInherited
 	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 0 {
 		t.Fatalf("attempt count = %d, want current output failure signature to ignore inherited lineage attempts", got)
 	}
+	if got := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != 0 {
+		t.Fatalf("effective attempt count = %d, want current output failure target to ignore inherited lineage attempts", got)
+	}
 	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: common.WorkspaceID("ws-current-signature")}, failedStep, 1, nil)
 	if input[stepInputKeyRepairOfFailureSig] != "class=shell_command_failed|command=verify|failureTargets=new-target" {
 		t.Fatalf("repair input signature = %#v, want current output failure signature", input[stepInputKeyRepairOfFailureSig])
@@ -5647,6 +5789,68 @@ func TestRuntimeOrchestrator_RuntimeRepairScopeUsesCurrentFailureBeforeInherited
 		scope["failureClass"] != failureClassShellCommand ||
 		scope["failureSignature"] != "class=shell_command_failed|command=verify|failureTargets=new-target" {
 		t.Fatalf("repair budget scope = %+v, want scoped repair lineage", scope)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairEffectiveScopeCountsFailureTargetAcrossGraphNodes(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-runtime-repair-target-scope")
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps:   stepRepo,
+		tickets: memory.NewDecisionTicketRepository(),
+	}
+	for attempt, node := range []string{"run-stream-test-baseline", "rerun-targeted-test", "list-target-test"} {
+		signature := fmt.Sprintf("class=shell_command_failed|kind=shell/command|node=%s|failureTargets=stream_e2e_test.go|exitCode=1", node)
+		if err := stepRepo.Create(ctx, &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/repair-%d", runID, attempt+1)),
+			RunID: runID,
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRuntimeRepairAttempt:  attempt + 1,
+				stepInputKeyRepairOfFailureClass:  failureClassShellCommand,
+				stepInputKeyRepairOfFailureSig:    signature,
+			},
+			Output: map[string]any{"status": "completed"},
+		}); err != nil {
+			t.Fatalf("seed target repair %d: %v", attempt+1, err)
+		}
+	}
+
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(runID + "/graph-013/002-run-stream-test"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|node=run-stream-test|failureTargets=stream_e2e_test.go|exitCode=1",
+		},
+	}
+	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 0 {
+		t.Fatalf("exact attempt count = %d, want node-specific signature to remain independent", got)
+	}
+	if got := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != maxRuntimeRepairAttempts {
+		t.Fatalf("effective attempt count = %d, want target scope exhausted", got)
+	}
+	if !orch.shouldEscalateRuntimeRepairExhaustion(ctx, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-target-scope")}, failedStep) {
+		t.Fatalf("target-scoped repeated failure should escalate repair exhaustion")
+	}
+
+	otherTarget := &runmodel.Step{
+		ID:    common.StepID(runID + "/graph-014/002-run-other-test"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|node=run-other-test|failureTargets=other_target_test.go|exitCode=1",
+		},
+	}
+	if got := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, otherTarget); got != 0 {
+		t.Fatalf("other target effective attempt count = %d, want independent target scope", got)
 	}
 }
 
@@ -6452,7 +6656,7 @@ func TestRuntimeOrchestrator_ResumeDispatchForContractFailureUsesRuntimeRepair(t
 		Input: map[string]any{},
 		Output: map[string]any{
 			"stage":               "llm_execution_graph_plan",
-			"error":               "implementation planning llm step returned read-only executionGraph without patch output",
+			"error":               "state-changing planning llm step returned read-only executionGraph without patch output",
 			failureOutputKeyClass: failureClassRuntime,
 		},
 	}
@@ -6580,6 +6784,9 @@ func TestRuntimeOrchestrator_ProviderRetryInputDoesNotCarryRuntimeRepairMarkers(
 		input[stepInputKeyRuntimeRepairAttempt] != nil {
 		t.Fatalf("provider retry input = %+v, want provider markers without runtime repair markers", input)
 	}
+	if input[stepInputKeyRuntimeStage] != runtimeStageRepair {
+		t.Fatalf("provider retry runtimeStage = %v, want repair", input[stepInputKeyRuntimeStage])
+	}
 	if input[stepInputKeyRecoveryAction] != string(runtimeRecoveryActionProviderRetry) ||
 		input[stepInputKeyRecoveryRootStepID] != string(rootStepID) ||
 		input[stepInputKeyRecoveryLineageType] != "provider_retry" {
@@ -6602,7 +6809,7 @@ func TestProviderRetryStepInputKeepsStateChangingRepairContract(t *testing.T) {
 			stepInputKeyRuntimeRepairAttempt:  1,
 			stepInputKeyRepairOfRootStepID:    "run-provider-retry-state-changing-repair/step-1",
 			stepInputKeyRepairOfStepID:        "run-provider-retry-state-changing-repair/step-1",
-			"repairObjective":                 "produce_state_changing_implementation",
+			"repairObjective":                 "produce_state_changing_output",
 			"stateChangingOutputRequired":     true,
 		},
 		Output: map[string]any{
@@ -6616,14 +6823,51 @@ func TestProviderRetryStepInputKeepsStateChangingRepairContract(t *testing.T) {
 	if input[stepInputKeyRuntimeRepairFollowUp] != nil || input[stepInputKeyRuntimeRepairAttempt] != nil {
 		t.Fatalf("provider retry input = %+v, want retry markers without runtime repair dispatch markers", input)
 	}
-	if input["repairObjective"] != "produce_state_changing_implementation" ||
+	if input["repairObjective"] != "produce_state_changing_output" ||
 		input["stateChangingOutputRequired"] != true ||
 		len(stringSliceFromValue(input["repairGuidance"])) == 0 {
 		t.Fatalf("provider retry input = %+v, want state-changing repair contract preserved", input)
 	}
+	if input[stepInputKeyRuntimeStage] != runtimeStageRepair {
+		t.Fatalf("provider retry runtimeStage = %v, want repair", input[stepInputKeyRuntimeStage])
+	}
 	if input[stepInputKeyRepairOfRootStepID] != "run-provider-retry-state-changing-repair/step-1" ||
 		input[stepInputKeyRepairOfStepID] != "run-provider-retry-state-changing-repair/step-1" {
 		t.Fatalf("provider retry repair lineage = %+v, want repair scope preserved", input)
+	}
+}
+
+func TestProviderRetryStepInputRestoresStateChangingContractFromMissingDoDRepair(t *testing.T) {
+	failedStep := &runmodel.Step{
+		ID:    "run-provider-retry-dod-gap-repair/repair-001-of-planning-001",
+		RunID: "run-provider-retry-dod-gap-repair",
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  1,
+			stepInputKeyRepairOfRootStepID:    "run-provider-retry-dod-gap-repair/step-1",
+			stepInputKeyRepairOfStepID:        "run-provider-retry-dod-gap-repair/assessment",
+			"missingDoDItems": []map[string]any{
+				{"item": "produce state-changing result", "state": "failed"},
+			},
+		},
+		Output: map[string]any{
+			"stage":               "llm_provider_timeout",
+			failureOutputKeyClass: failureClassProviderTimeout,
+			"error":               "context deadline exceeded",
+		},
+	}
+
+	input := providerRetryStepInput(failedStep, 1, errors.New("context deadline exceeded"))
+	if input["repairObjective"] != "produce_state_changing_output" ||
+		input["stateChangingOutputRequired"] != true ||
+		len(stringSliceFromValue(input["repairGuidance"])) == 0 {
+		t.Fatalf("provider retry input = %+v, want state-changing contract restored from missing DoD repair", input)
+	}
+	if len(mapSliceFromValue(input["missingDoDItems"])) != 1 {
+		t.Fatalf("missingDoDItems = %+v, want missing DoD carried into provider retry", input["missingDoDItems"])
 	}
 }
 
@@ -6647,8 +6891,11 @@ func TestProviderRetryStepInputRestoresStateChangingContractFromGatedGraphFailur
 	}
 
 	input := providerRetryStepInput(failedStep, 1, errors.New("invalid argument: state-changing executionGraph patch/apply depends on llm/workspace_execution before patch"))
-	if input["repairObjective"] != "produce_state_changing_implementation" || input["stateChangingOutputRequired"] != true {
+	if input["repairObjective"] != "produce_state_changing_output" || input["stateChangingOutputRequired"] != true {
 		t.Fatalf("provider retry input = %+v, want state-changing contract restored from gated graph failure", input)
+	}
+	if input[stepInputKeyRuntimeStage] != runtimeStageRepair {
+		t.Fatalf("provider retry runtimeStage = %v, want repair", input[stepInputKeyRuntimeStage])
 	}
 }
 
@@ -6837,6 +7084,64 @@ func TestRuntimeRepairFollowUpStepIDUsesBusinessRootForProviderRetryContractViol
 	}
 }
 
+func TestRuntimeRepairFollowUpStepIDUsesGraphNodeForExecutionFailure(t *testing.T) {
+	runID := common.RunID("run-repair-id-graph-failure")
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(runID + "/graph-003/003-run-go-test"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:         runtimeStageExecution,
+			stepInputKeyGraphNodeID:          "run_go_test",
+			stepInputKeyRepairOfRootStepID:   string(runID) + "/step-1",
+			stepInputKeyRepairOfFailureSig:   "class=dod_coverage_missing|stage=llm_dod_assessment",
+			stepInputKeyRepairOfFailureClass: failureClassDoDCoverageMissing,
+		},
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|node=run_go_test|exitCode=1",
+			"error":                   "exit status 1",
+		},
+	}
+
+	stepID := runtimeRepairFollowUpStepID(runID, failedStep, 1)
+	if !strings.Contains(string(stepID), "graph-003-003-run-go-test") {
+		t.Fatalf("runtime repair step id = %q, want failed graph node label", stepID)
+	}
+	if strings.Contains(string(stepID), "planning-001-2") || strings.HasSuffix(string(stepID), "planning-001") {
+		t.Fatalf("runtime repair step id = %q, want graph failure label instead of planning root label", stepID)
+	}
+}
+
+func TestRuntimeRepairFollowUpStepIDKeepsGraphNodeForSecondOrderRepair(t *testing.T) {
+	runID := common.RunID("run-repair-id-second-order")
+	originalGraphStepID := common.StepID(runID + "/graph-004/001-run-stream-test-baseline")
+	failedRepair := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-001-of-graph-004-001-run-stream-test-baseline"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRepairOfStepID:        string(originalGraphStepID),
+			stepInputKeyRepairOfRootStepID:    string(runID) + "/step-1",
+		},
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|node=run-stream-test|failureTargets=stream_e2e_test.go|exitCode=1",
+		},
+	}
+
+	stepID := runtimeRepairFollowUpStepID(runID, failedRepair, 2)
+	if !strings.Contains(string(stepID), "graph-004-001-run-stream-test-baseline") {
+		t.Fatalf("runtime repair step id = %q, want original graph node label", stepID)
+	}
+	if strings.Contains(string(stepID), "planning-001") {
+		t.Fatalf("runtime repair step id = %q, want graph repair label instead of planning root label", stepID)
+	}
+}
+
 func TestRuntimeOrchestrator_ProviderUnavailableBlocksOnProviderDecisionWithoutRejectedResult(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-provider-unavailable-decision")
@@ -6969,9 +7274,9 @@ func TestRuntimeOrchestrator_ProviderRetryContractInvalidRoutesToRuntimeRepair(t
 	if specs[0].Input[stepInputKeyRepairOfRootStepID] != string(rootStepID) {
 		t.Fatalf("repair root = %v, want provider retry root %s", specs[0].Input[stepInputKeyRepairOfRootStepID], rootStepID)
 	}
-	if specs[0].Input["repairObjective"] != "produce_state_changing_implementation" ||
+	if specs[0].Input["repairObjective"] != "produce_state_changing_output" ||
 		specs[0].Input["stateChangingOutputRequired"] != true {
-		t.Fatalf("repair input = %+v, want targetRef contract failure to require state-changing implementation", specs[0].Input)
+		t.Fatalf("repair input = %+v, want targetRef contract failure to require state-changing output", specs[0].Input)
 	}
 }
 
@@ -7188,6 +7493,60 @@ func TestRuntimeOrchestrator_DuplicateRuntimeFailureExhaustedScopeUsesRepairExha
 	}
 	if result.State != common.ResultStateRejected {
 		t.Fatalf("result = %+v, want rejected result for business repair exhaustion", result)
+	}
+}
+
+func TestRuntimeOrchestrator_DuplicateRuntimeFailureUsesTargetScopeAcrossGraphNodes(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-duplicate-failure-target-scope")
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps:   stepRepo,
+		tickets: memory.NewDecisionTicketRepository(),
+	}
+	for attempt, node := range []string{"baseline", "targeted", "confirm"} {
+		signature := fmt.Sprintf("class=shell_command_failed|kind=shell/command|node=%s|failureTargets=stream_e2e_test.go|exitCode=1", node)
+		if err := stepRepo.Create(ctx, &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/target-repair-%d", runID, attempt+1)),
+			RunID: runID,
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRuntimeRepairAttempt:  attempt + 1,
+				stepInputKeyRepairOfFailureClass:  failureClassShellCommand,
+				stepInputKeyRepairOfFailureSig:    signature,
+			},
+			Output: map[string]any{"status": "completed"},
+		}); err != nil {
+			t.Fatalf("seed target repair %d: %v", attempt+1, err)
+		}
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(runID + "/graph-010/001-baseline"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|node=baseline|failureTargets=stream_e2e_test.go|exitCode=1",
+		},
+	}); err != nil {
+		t.Fatalf("seed previous target failure: %v", err)
+	}
+	currentFailed := &runmodel.Step{
+		ID:    common.StepID(runID + "/graph-011/002-targeted"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|node=targeted|failureTargets=stream_e2e_test.go|exitCode=1",
+		},
+	}
+
+	if !orch.shouldBlockOnDuplicateRuntimeFailure(ctx, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-target-duplicate")}, currentFailed) {
+		t.Fatalf("duplicate failure should block after target-scoped budget is exhausted")
 	}
 }
 
@@ -9289,6 +9648,125 @@ func TestRuntimeOrchestrator_RepairsInconclusiveSatisfiedDoDAssessmentBeforeEsca
 	}
 }
 
+func TestGraphLLMNodeInputRequiresStateChangeWhenRunContractRequiresIt(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-graph-llm-state-change",
+		WorkspaceID:     "ws-graph-llm-state-change",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "plan-implementation", Kind: llmWorkspaceExecutionStepKind, Input: map[string]any{"task": "produce implementation"}},
+	}}
+	last := &runmodel.Step{
+		ID:     common.StepID(string(run.ID) + "/step-1"),
+		RunID:  run.ID,
+		Kind:   llmWorkspaceExecutionStepKind,
+		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
+	}
+
+	input := nextGraphStepInput(run, last, graph, graph.Nodes[0], nil, "", []*runmodel.Step{last}, last.ID)
+
+	if input["stateChangingOutputRequired"] != true ||
+		input["repairObjective"] != "produce_state_changing_output" ||
+		len(stringSliceFromValue(input["repairGuidance"])) == 0 {
+		t.Fatalf("graph llm input = %+v, want state-changing contract injected", input)
+	}
+	if input[stepInputKeyRuntimeStage] != runtimeStageExecution || input[stepInputKeyRuntimeStageMode] != "strict_convergence" {
+		t.Fatalf("graph llm runtime stage = %v/%v, want execution/strict", input[stepInputKeyRuntimeStage], input[stepInputKeyRuntimeStageMode])
+	}
+}
+
+func TestGraphReadNodeInputDoesNotRequireStateChangeWhenRunContractRequiresIt(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-graph-read-state-change",
+		WorkspaceID:     "ws-graph-read-state-change",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "read-main", Kind: "file/read", Input: map[string]any{"path": "main.go", "optional": true}},
+	}}
+	last := &runmodel.Step{
+		ID:     common.StepID(string(run.ID) + "/step-1"),
+		RunID:  run.ID,
+		Kind:   llmWorkspaceExecutionStepKind,
+		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
+	}
+
+	input := nextGraphStepInput(run, last, graph, graph.Nodes[0], nil, "", []*runmodel.Step{last}, last.ID)
+
+	if input["stateChangingOutputRequired"] != nil || input["repairObjective"] != nil {
+		t.Fatalf("graph read input = %+v, want read node to stay observation-only", input)
+	}
+}
+
+func TestGraphLLMNodeInputIncludesDependencyOutput(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-graph-dependency-output",
+		WorkspaceID:     "ws-graph-dependency-output",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "scan_workspace", Kind: "file/list", Input: map[string]any{"path": ".", "recursive": true}},
+		{ID: "refine_plan_from_manifest", Kind: llmWorkspaceExecutionStepKind, DependsOn: []string{"scan_workspace"}},
+	}}
+	root := &runmodel.Step{
+		ID:     common.StepID(string(run.ID) + "/step-1"),
+		RunID:  run.ID,
+		Kind:   llmWorkspaceExecutionStepKind,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
+	}
+	scan := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/graph-001/001-scan-workspace"),
+		RunID: run.ID,
+		Kind:  "file/list",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID:     "scan_workspace",
+			stepInputKeyGraphRootStepID: string(root.ID),
+			stepOutputKeyExecutionGraph: graph,
+		},
+		Output: map[string]any{
+			"status":    "completed",
+			"stage":     "file_list",
+			"path":      ".",
+			"entries":   []map[string]any{},
+			"truncated": false,
+		},
+	}
+	completed := map[string]bool{"scan_workspace": true}
+
+	input := nextGraphStepInput(run, scan, graph, graph.Nodes[1], completed, "", []*runmodel.Step{root, scan}, root.ID)
+
+	if input["previousStepKind"] != "file/list" {
+		t.Fatalf("previousStepKind = %v, want file/list", input["previousStepKind"])
+	}
+	previousOutput := mapFromValue(input["previousStepOutput"])
+	if previousOutput["status"] != "completed" || previousOutput["truncated"] != false {
+		t.Fatalf("previousStepOutput = %+v, want compact scan output", input["previousStepOutput"])
+	}
+	if _, ok := previousOutput["entries"]; !ok {
+		t.Fatalf("previousStepOutput = %+v, want explicit empty entries from scan output", previousOutput)
+	}
+	evidence := mapSliceFromValue(input[stepInputKeyGraphEvidence])
+	if len(evidence) != 1 || evidence[0]["nodeId"] != "scan_workspace" || evidence[0]["kind"] != "file/list" {
+		t.Fatalf("graphEvidence = %+v, want dependency evidence for scan_workspace", input[stepInputKeyGraphEvidence])
+	}
+	evidenceOutput := mapFromValue(evidence[0]["output"])
+	if evidenceOutput["truncated"] != false {
+		t.Fatalf("graphEvidence output = %+v, want scan output", evidenceOutput)
+	}
+}
+
 func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterExecutionGraphCompletes(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -9374,6 +9852,9 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterExecutionGraphCompletes(t
 		followUpInput["previousStepId"] != "run-graph-follow-up/graph-001/001-inspect" ||
 		followUpInput[stepInputKeySoulStage] != soulStageValidation {
 		t.Fatalf("followUpInput = %+v, want graph follow-up context", followUpInput)
+	}
+	if followUpInput[stepInputKeyRuntimeStage] != runtimeStageVerification {
+		t.Fatalf("graph follow-up runtimeStage = %v, want verification", followUpInput[stepInputKeyRuntimeStage])
 	}
 	if _, ok := followUpInput["previousStepOutput"]; ok {
 		t.Fatalf("previousStepOutput = %+v, want graph follow-up to use graphEvidence only", followUpInput["previousStepOutput"])
@@ -9468,6 +9949,9 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterLLMPlannedShellLeaf(t *te
 		followUpInput["previousStepId"] != "run-shell-follow-up/shell-1" ||
 		followUpInput[stepInputKeySoulStage] != soulStageValidation {
 		t.Fatalf("followUpInput = %+v, want completion follow-up context", followUpInput)
+	}
+	if followUpInput[stepInputKeyRuntimeStage] != runtimeStageVerification {
+		t.Fatalf("completion follow-up runtimeStage = %v, want verification", followUpInput[stepInputKeyRuntimeStage])
 	}
 	previousOutput, ok := followUpInput["previousStepOutput"].(map[string]any)
 	if !ok || previousOutput["stdout"] != "result ready" {
@@ -9583,6 +10067,9 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterLLMPatchSideEffect(t *tes
 		followUpInput["previousStepId"] != "run-patch-follow-up/step-1" ||
 		followUpInput[stepInputKeySoulStage] != soulStageValidation {
 		t.Fatalf("followUpInput = %+v, want completion follow-up context", followUpInput)
+	}
+	if followUpInput[stepInputKeyRuntimeStage] != runtimeStageVerification {
+		t.Fatalf("patch follow-up runtimeStage = %v, want verification", followUpInput[stepInputKeyRuntimeStage])
 	}
 }
 
@@ -10331,7 +10818,7 @@ func TestAssessmentOnlyContractCorrectionInputStripsRecoveryMarkersAndNestedExec
 			},
 			stepInputKeyRuntimeRepairFollowUp: true,
 			"stateChangingOutputRequired":     true,
-			"repairObjective":                 "produce_state_changing_implementation",
+			"repairObjective":                 "produce_state_changing_output",
 			"previousStepOutput": map[string]any{
 				"llmDecision": map[string]any{
 					stepOutputKeyExecutionGraph: map[string]any{"nodes": []any{map[string]any{"id": "inspect", "kind": "file/list"}}},
@@ -10846,6 +11333,13 @@ func TestProviderRetryStepInputUsesAssessmentOnlyModeForCompletionGateFollowUp(t
 			"graphFollowUp":             true,
 			stepOutputKeyExecutionGraph: graph,
 			"previousStepOutput":        map[string]any{"large": "payload"},
+			"failedStepInput":           map[string]any{"large": strings.Repeat("x", 1024)},
+			"failedStepOutput":          map[string]any{"large": strings.Repeat("x", 1024)},
+			"executionContext": map[string]any{
+				"dialogLanguage": "zh-CN",
+				"skills":         []map[string]any{{"id": "skill-provider-retry", "instruction": strings.Repeat("x", 1024)}},
+			},
+			stepInputKeyExecutionContextPackage: map[string]any{"selectedContext": map[string]any{"skills": []any{map[string]any{"id": "skill-provider-retry"}}}},
 		},
 		Output: map[string]any{
 			"stage":                     "llm_provider_timeout",
@@ -10865,6 +11359,18 @@ func TestProviderRetryStepInputUsesAssessmentOnlyModeForCompletionGateFollowUp(t
 	}
 	if _, ok := input["previousStepOutput"]; ok {
 		t.Fatalf("input retained previousStepOutput: %+v", input["previousStepOutput"])
+	}
+	for _, key := range []string{"failedStepInput", stepInputKeyExecutionContextPackage} {
+		if _, ok := input[key]; ok {
+			t.Fatalf("input retained %s: %+v", key, input[key])
+		}
+	}
+	executionContext := mapFromValue(input["executionContext"])
+	if executionContext["dialogLanguage"] != "zh-CN" {
+		t.Fatalf("executionContext = %+v, want slim dialog language", executionContext)
+	}
+	if _, ok := executionContext["skills"]; ok {
+		t.Fatalf("executionContext retained raw skills: %+v", executionContext["skills"])
 	}
 	if input["failedStepOutput"] == nil || input[failureOutputKeyClass] != failureClassProviderTimeout {
 		t.Fatalf("input = %+v, want compact failure context", input)
@@ -11085,8 +11591,9 @@ func TestValidateLLMExecutionOutputContractRejectsImplementationShellOnly(t *tes
 		ID:   "run-implementation-state-contract/block/implement",
 		Kind: llmWorkspaceExecutionStepKind,
 		Input: map[string]any{
-			stepInputKeyGraphNodeID: "implement_with_concrete_outputs",
-			stepInputKeySoulStage:   soulStageExecution,
+			stepInputKeyRuntimeStage:      runtimeStageExecution,
+			stepInputKeyGraphNodeID:       "unit-001",
+			"stateChangingOutputRequired": true,
 		},
 	}
 	output := map[string]any{
@@ -11192,14 +11699,16 @@ func TestValidateLLMExecutionOutputContractRejectsImplementationPatchGraphGatedB
 		ID:              "run-gated-patch-graph",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{
-			"goalText": "实现本地代理网关",
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
+			},
 		},
 	}
 	step := &runmodel.Step{
 		ID:   "run-gated-patch-graph/step-1",
 		Kind: llmWorkspaceExecutionStepKind,
 		Input: map[string]any{
-			stepInputKeySoulStage: soulStagePlanning,
+			stepInputKeyRuntimeStage: runtimeStagePlanning,
 		},
 	}
 	output := map[string]any{
@@ -11236,14 +11745,16 @@ func TestValidateLLMExecutionOutputContractAllowsImplementationPatchGraphAfterRe
 		ID:              "run-read-then-patch-graph",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{
-			"goalText": "实现本地代理网关",
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
+			},
 		},
 	}
 	step := &runmodel.Step{
 		ID:   "run-read-then-patch-graph/step-1",
 		Kind: llmWorkspaceExecutionStepKind,
 		Input: map[string]any{
-			stepInputKeySoulStage: soulStagePlanning,
+			stepInputKeyRuntimeStage: runtimeStagePlanning,
 		},
 	}
 	output := map[string]any{
@@ -11437,7 +11948,7 @@ func TestRuntimeOrchestrator_InvalidPatchGraphTargetRefRoutesToRuntimeRepair(t *
 	}
 	if repairInput == nil ||
 		repairInput[stepInputKeyRuntimeRepairFollowUp] != true ||
-		repairInput["repairObjective"] != "produce_state_changing_implementation" ||
+		repairInput["repairObjective"] != "produce_state_changing_output" ||
 		repairInput["stateChangingOutputRequired"] != true {
 		t.Fatalf("repairInput = %+v, want state-changing runtime repair", repairInput)
 	}
@@ -11478,21 +11989,52 @@ func TestValidateLLMExecutionOutputContractRejectsFollowUpReadOnlyGraph(t *testi
 	}
 }
 
-func TestValidateLLMExecutionOutputContractRequiresPatchNodeForImplementationPlanningGraph(t *testing.T) {
+func TestValidateLLMExecutionOutputContractUsesRuntimeStageForVerificationFollowUp(t *testing.T) {
 	run := &runmodel.Run{
-		ID:              "run-implementation-planning-graph",
+		ID:              "run-runtime-stage-follow-up-read-only-graph",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-runtime-stage-follow-up-read-only-graph/follow-up-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageVerification,
+			stepInputKeyGraphNodeID:  "validate_implementation",
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":    "read_main",
+				"kind":  "file/read",
+				"input": map[string]any{"path": "main.go"},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "read-only executionGraph without patch output") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want runtimeStage-based verification rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsReadOnlyPlanningGraphWithStateChangeContract(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-planning-read-only-with-state-change-contract",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{
-			"goal": map[string]any{
-				"text": "完善 provider 配置支持 providers[]、enabled 和 model_prefixes",
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
 			},
 		},
 	}
 	step := &runmodel.Step{
-		ID:   "run-implementation-planning-graph/step-1",
+		ID:   "run-planning-read-only-with-state-change-contract/step-1",
 		Kind: llmWorkspaceExecutionStepKind,
 		Input: map[string]any{
-			stepInputKeySoulStage: soulStagePlanning,
+			stepInputKeyRuntimeStage: runtimeStagePlanning,
 		},
 	}
 	output := map[string]any{
@@ -11507,24 +12049,79 @@ func TestValidateLLMExecutionOutputContractRequiresPatchNodeForImplementationPla
 		},
 	}
 
-	err := validateLLMExecutionOutputContract(run, step, output)
-	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "implementation planning") {
-		t.Fatalf("validateLLMExecutionOutputContract err = %v, want implementation planning graph rejection", err)
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want planning read-only graph allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsReadOnlyPlanningGraphWithoutStateChangeContract(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-planning-read-only-allowed",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"stateChangePolicy": "allowed_but_not_required",
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:   "run-planning-read-only-allowed/step-1",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStagePlanning,
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":    "read_config",
+				"kind":  "file/read",
+				"input": map[string]any{"path": "config.yaml"},
+			}},
+		},
 	}
 
-	output[stepOutputKeyExecutionGraph] = map[string]any{
-		"nodes": []map[string]any{{
-			"id":   "write_config",
-			"kind": "patch/apply",
-			"input": map[string]any{
-				"patchType": "file_write",
-				"targetRef": "config.yaml",
-				"content":   "providers: []\n",
-			},
-		}},
-	}
 	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
-		t.Fatalf("validateLLMExecutionOutputContract with patch graph err = %v, want allowed", err)
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want allowed without state-change contract", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRequiresGraphNodeStateChangeOnlyByExplicitInput(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-graph-node-explicit-state-change",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	output := map[string]any{
+		"status":  "completed",
+		"stage":   "llm_workspace_execution",
+		"summary": "read-only node completed",
+	}
+	readOnlyStep := &runmodel.Step{
+		ID:   "run-graph-node-explicit-state-change/graph-001/001-implement-looking-name",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageExecution,
+			stepInputKeyGraphNodeID:  "implement_feature",
+		},
+	}
+	if err := validateLLMExecutionOutputContract(run, readOnlyStep, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want graph node id text ignored without explicit contract", err)
+	}
+
+	stateChangingStep := &runmodel.Step{
+		ID:   "run-graph-node-explicit-state-change/graph-001/002-unit",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageExecution,
+			stepInputKeyGraphNodeID:       "unit-002",
+			"stateChangingOutputRequired": true,
+		},
+	}
+	err := validateLLMExecutionOutputContract(run, stateChangingStep, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "no state-changing output") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want explicit state-changing graph node rejection", err)
 	}
 }
 
@@ -11744,7 +12341,7 @@ func TestRuntimeOrchestrator_RecordsSyntheticRejectedResultWithoutDoDAssessment(
 	step := &runmodel.Step{ID: common.StepID(string(runID) + "/block/implement"), RunID: runID}
 
 	if err := orch.recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
-		"error": "implementation execution-stage llm graph node returned no state-changing output",
+		"error": "state-changing execution-stage llm graph node returned no state-changing output",
 	}); err != nil {
 		t.Fatalf("record synthetic rejected result: %v", err)
 	}
@@ -12016,7 +12613,7 @@ func TestRuntimeOrchestrator_StateChangingProviderRetryViolationContinuesRecover
 			stepInputKeyRepairOfStepID:        "run-state-changing-retry-closure/provider-retry-001-of-planning-001",
 			stepInputKeyRepairOfRootStepID:    "run-state-changing-retry-closure/step-1",
 			"stateChangingOutputRequired":     true,
-			"repairObjective":                 "produce_state_changing_implementation",
+			"repairObjective":                 "produce_state_changing_output",
 		},
 		Output: map[string]any{
 			"status":                  "completed",
@@ -12120,12 +12717,101 @@ func TestRuntimeRepairInputRequiresStateChangingForMissingWorkspaceFile(t *testi
 
 	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, errors.New("lstat /workspace/main.go: no such file or directory"))
 	if input["stateChangingOutputRequired"] != true ||
-		input["repairObjective"] != "produce_state_changing_implementation" {
+		input["repairObjective"] != "produce_state_changing_output" {
 		t.Fatalf("repair input = %+v, want state-changing repair for missing workspace file", input)
 	}
 	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
 	if !strings.Contains(guidance, "create it with patch/apply file_write") {
 		t.Fatalf("repair guidance = %q, want missing file creation guidance", guidance)
+	}
+}
+
+func TestRuntimeRepairInputRequiresStateChangingForExecutionShellFailure(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-shell-failure-state-changing-repair")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-shell-failure-state-changing-repair",
+		DoDID:           "dod-shell-failure-state-changing-repair",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-003/003-run-go-test"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:       runtimeStageExecution,
+			stepInputKeyGraphNodeID:        "run_go_test",
+			stepInputKeyGraphRootStepID:    string(runID) + "/step-1",
+			stepInputKeyRepairOfRootStepID: string(runID) + "/step-1",
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"error":                   "exit status 1",
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|node=run_go_test|exitCode=1",
+		},
+	}
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, errors.New("exit status 1"))
+	if input["stateChangingOutputRequired"] != true ||
+		input["repairObjective"] != "produce_state_changing_output" {
+		t.Fatalf("repair input = %+v, want execution shell failure to require state-changing repair", input)
+	}
+	if input[stepInputKeyRepairOfStepID] != string(failedStep.ID) ||
+		input["failedGraphNodeId"] != "run_go_test" {
+		t.Fatalf("repair input = %+v, want failed graph node lineage", input)
+	}
+}
+
+func TestRuntimeRepairInputAllowsBoundedRetryForExecutionTimeout(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-shell-timeout-retry")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-shell-timeout-retry",
+		DoDID:           "dod-shell-timeout-retry",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-003/003-verify"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageExecution,
+			stepInputKeyGraphNodeID:     "verify",
+			stepInputKeyGraphRootStepID: string(runID) + "/step-1",
+		},
+		Output: map[string]any{
+			"status":                  "timeout",
+			"error":                   "context deadline exceeded",
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|node=verify|exitCode=-1|error=context deadline exceeded",
+		},
+	}
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, errors.New("context deadline exceeded"))
+	if input["stateChangingOutputRequired"] != nil {
+		t.Fatalf("repair input = %+v, want timeout repair not to require state-changing output", input)
+	}
+	if input["repairObjective"] != repairObjectiveTransientExecutionRetry || input["executionTimeoutRetryAllowed"] != true {
+		t.Fatalf("repair input = %+v, want transient execution retry objective", input)
 	}
 }
 
@@ -14925,6 +15611,41 @@ func TestRuntimeOrchestrator_StartRunAllowsStaleTerminalActiveRun(t *testing.T) 
 	}
 }
 
+func TestRuntimeOrchestrator_ReconcileWorkspaceActiveRunClearsTerminalActiveRun(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, nil)
+
+	workspaceID := common.WorkspaceID("ws-terminal-active-run")
+	runID := common.RunID("run-terminal-active-run")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "ws",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: runID,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateSuperseded}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.reconcileWorkspaceActiveRun(ctx, workspaceID); err != nil {
+		t.Fatalf("reconcile workspace active run: %v", err)
+	}
+	ws, err := workspaceRepo.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if ws.State != common.WorkspaceStateFailed || ws.ActiveRunID != "" {
+		t.Fatalf("workspace = %+v, want failed with no terminal active run", ws)
+	}
+}
+
 func TestRuntimeOrchestrator_StartRunRejectsNonCreatedState(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -15309,6 +16030,118 @@ func TestRuntimeOrchestrator_ResumeRunRequiresResolvedTicket(t *testing.T) {
 	}
 	if r.BlockingTicketID != "" {
 		t.Fatalf("blocking ticket = %q, want empty", r.BlockingTicketID)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeProviderRecoveryContinueDispatchesExplicitRetry(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	resultRepo := memory.NewResultRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{
+		"status":          "completed",
+		"completionState": "completed",
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "provider retry resumed",
+			"items": []map[string]any{{
+				"item":         "provider retry explicit continue",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-provider-retry-continue/provider-retry-003-of-repair-001"},
+			}},
+		},
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		resolutionRepo,
+		approvalRepo,
+		RuntimeEvidenceRepositories{Results: resultRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-provider-retry-continue")
+	runID := common.RunID("run-provider-retry-continue")
+	rootStepID := common.StepID(string(runID) + "/repair-001")
+	failedStepID := common.StepID(string(runID) + "/provider-retry-002-of-repair-001")
+	ticketID := common.TicketID(string(failedStepID) + "-provider-retry-exhausted-decision")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		DoDID:            "dod-provider-retry-continue",
+		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		stepID := common.StepID(fmt.Sprintf("%s/provider-retry-%03d-of-repair-001", runID, attempt))
+		if err := stepRepo.Create(ctx, &runmodel.Step{
+			ID:    stepID,
+			RunID: runID,
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyProviderRetryFollowUp: true,
+				stepInputKeyProviderRetryAttempt:  attempt,
+				stepInputKeyProviderRetryRootStep: string(rootStepID),
+				"stateChangingOutputRequired":     true,
+			},
+			Output: map[string]any{
+				"status":                  "failed",
+				"stage":                   "llm_provider_timeout",
+				"error":                   "context deadline exceeded",
+				failureOutputKeyClass:     failureClassProviderTimeout,
+				failureOutputKeySignature: "class=provider_timeout|stage=llm_provider_timeout|error=context deadline exceeded",
+			},
+		}); err != nil {
+			t.Fatalf("seed provider retry step %d: %v", attempt, err)
+		}
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      failedStepID,
+		State:       common.DecisionTicketStateResolved,
+		Context: map[string]any{
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyConfigOnly,
+		},
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       "resolution-provider-retry-continue",
+		TicketID: ticketID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:  map[string]any{"answer": "继续处理", "recoveryAction": "retry_same_step"},
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume provider recovery continue: %v", err)
+	}
+	if len(runtime.calls) != 1 || !strings.Contains(string(runtime.calls[0]), "provider-retry-003-of-repair-001") {
+		t.Fatalf("runtime calls = %#v, want explicit provider retry attempt 3", runtime.calls)
+	}
+	retry, err := stepRepo.Get(ctx, runtime.calls[0])
+	if err != nil {
+		t.Fatalf("get retry step: %v", err)
+	}
+	if retry.Input["decisionAuthorizedRetry"] != true {
+		t.Fatalf("retry input = %+v, want decisionAuthorizedRetry", retry.Input)
 	}
 }
 

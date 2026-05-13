@@ -418,6 +418,9 @@ func TestResolveDecisionWithSessionAllowsProviderRecoveryConfirmationWithoutSecr
 	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
 		t.Fatalf("decision = %+v, want resolved provider recovery confirmation", item)
 	}
+	if item.ResolutionPayload["recoveryAction"] != "retry_same_step" {
+		t.Fatalf("resolutionPayload = %+v, want retry_same_step recovery action", item.ResolutionPayload)
+	}
 }
 
 func TestResolveDecisionWithSessionAllowsTargetWorkspaceExternalDependencyConfig(t *testing.T) {

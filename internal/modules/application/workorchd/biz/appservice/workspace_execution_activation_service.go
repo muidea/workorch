@@ -465,6 +465,7 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 		"goalId":      string(effectiveGoal.ID),
 		"doDId":       string(effectiveDoD.ID),
 	}
+	contextData["executionContract"] = workspaceExecutionContract(workspace)
 	contextData["goal"] = goalContext(effectiveGoal)
 	if len(workspaceGoals) > 0 {
 		contextData["goals"] = workspaceGoals
@@ -603,6 +604,20 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	mergeActivationExecutionContextPatch(contextData, cmd.ExecutionContextPatch)
 
 	return contextData, nil
+}
+
+func workspaceExecutionContract(workspace *workspacemodel.Workspace) map[string]any {
+	contract := map[string]any{
+		"stateChangePolicy": "allowed_but_not_required",
+	}
+	if workspace == nil || len(workspace.ContextHints) == 0 {
+		return contract
+	}
+	hints := cloneContextMap(workspace.ContextHints)
+	if value, ok := hints["stateChangePolicy"].(string); ok && strings.TrimSpace(value) != "" {
+		contract["stateChangePolicy"] = strings.TrimSpace(value)
+	}
+	return contract
 }
 
 func mergeActivationExecutionContextPatch(contextData map[string]any, patch map[string]any) {

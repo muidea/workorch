@@ -14,11 +14,16 @@ if [[ -z "$WORKSPACE_ID" || -z "$RUN_ID" ]]; then
 fi
 
 RUN_DIR="$DATA_ROOT/workspaces/$WORKSPACE_ID/runs/$RUN_ID"
+WORKSPACE_FILE="$DATA_ROOT/workspaces/$WORKSPACE_ID/workspace.json"
 RUN_FILE="$RUN_DIR/run.json"
 STEP_FILE="$RUN_DIR/step.json"
 RESULT_FILE="$RUN_DIR/result.json"
 TICKET_FILE="$RUN_DIR/ticket.json"
 
+if [[ ! -f "$WORKSPACE_FILE" ]]; then
+  echo "missing workspace file: $WORKSPACE_FILE" >&2
+  exit 1
+fi
 if [[ ! -f "$RUN_FILE" ]]; then
   echo "missing run file: $RUN_FILE" >&2
   exit 1
@@ -28,13 +33,13 @@ if [[ ! -f "$STEP_FILE" ]]; then
   exit 1
 fi
 
-python3 - "$RUN_FILE" "$STEP_FILE" "$RESULT_FILE" "$TICKET_FILE" "$RUN_ID" <<'PY'
+python3 - "$WORKSPACE_FILE" "$RUN_FILE" "$STEP_FILE" "$RESULT_FILE" "$TICKET_FILE" "$WORKSPACE_ID" "$RUN_ID" <<'PY'
 import json
 import os
 import re
 import sys
 
-run_path, step_path, result_path, ticket_path, run_id = sys.argv[1:]
+workspace_path, run_path, step_path, result_path, ticket_path, workspace_id, run_id = sys.argv[1:]
 
 def load_items(path):
     if not os.path.exists(path):
@@ -260,10 +265,14 @@ def text_contains_state_changing_repair_signal(input_payload, output_payload):
         or "planning executiongraph patch/apply depends on llm/workspace_execution" in text
     )
 
+workspaces = load_items(workspace_path)
 runs = load_items(run_path)
 steps = load_items(step_path)
 results = load_items(result_path)
 tickets = load_items(ticket_path)
+workspace = next((item for item in workspaces if field(item, "id", "ID") == workspace_id), workspaces[0] if workspaces else None)
+if not workspace:
+    raise SystemExit(f"workspace {workspace_id} not found in {workspace_path}")
 run = next((item for item in runs if field(item, "id", "ID") == run_id), runs[0] if runs else None)
 if not run:
     raise SystemExit(f"run {run_id} not found in {run_path}")
@@ -330,6 +339,17 @@ for step in steps:
 
 run_state = str(field(run, "state", "State") or "")
 run_dod = str(field(run, "doDId", "DoDID", "dodId") or "")
+workspace_state = str(field(workspace, "state", "State") or "")
+workspace_active_run_id = str(field(workspace, "activeRunId", "ActiveRunID") or "")
+terminal_run_states = {"completed", "failed", "cancelled", "superseded"}
+active_workspace_states = {"running", "validating", "waiting_decision", "blocked"}
+if workspace_active_run_id == run_id and run_state in terminal_run_states:
+    errors.append(
+        "workspace active run points to terminal run: "
+        + f"workspaceState={workspace_state} runState={run_state} activeRunId={workspace_active_run_id}"
+    )
+if workspace_state in active_workspace_states and not workspace_active_run_id:
+    errors.append(f"workspace state {workspace_state} has no activeRunId")
 accepted_results = [item for item in results if field(item, "runId", "RunID") == run_id and field(item, "state", "State") == "accepted"]
 rejected_results = [item for item in results if field(item, "runId", "RunID") == run_id and field(item, "state", "State") == "rejected"]
 missing_file_failures = [step for step in steps if missing_file_read_failure(step)]
@@ -372,6 +392,8 @@ if errors:
     raise SystemExit("\n".join(errors))
 
 print("workorch runtime core flow verification passed")
+print(f"workspaceState={workspace_state}")
+print(f"workspaceActiveRunId={workspace_active_run_id}")
 print(f"runId={run_id}")
 print(f"runState={run_state}")
 print(f"stepCount={len(steps)}")

@@ -61,6 +61,9 @@
       "validation": "soul-software-dev-validation",
       "artifact": "soul-software-dev-artifact"
     },
+    "contextHints": {
+      "stateChangePolicy": "must_produce_state_change"
+    },
     "evidencePolicies": [
       {
         "id": "software-dev-validation-evidence",

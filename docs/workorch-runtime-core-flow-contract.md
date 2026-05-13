@@ -14,6 +14,7 @@
 - `docs/workorch-runtime-lineage-and-assessment-contract.md`：定义 lineage、assessment-only、state-changing graph 准入和 correction 合同。
 - `docs/workorch-runtime-readable-id-and-recovery-contract.md`：定义可读 runtime ID、provider retry 边界、contract violation 统一治理、验证脚本口径和 memory 噪音治理合同。
 - `docs/workorch-runtime-provider-retry-repair-closure-design.md`：定义 provider retry / runtime repair 交织路径的 root 归一、terminal policy 与 memory trace 补充合同。
+- `docs/workorch-runtime-stage-contract-neutrality-design.md`：定义面向长流程任务的中立阶段合约，明确 core runtime 不得内置软件开发或具体业务领域逻辑。
 
 ## 核心状态机
 

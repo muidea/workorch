@@ -32,6 +32,9 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	assertContainsAnyDoDItem(t, item.DoDItems, "lint/静态检查")
 	assertContainsAnyDoDItem(t, item.DoDItems, "残余风险")
 	assertContainsAnyDoDItem(t, item.DoDItems, "evidenceRefs")
+	if item.ContextHints["stateChangePolicy"] != "must_produce_state_change" {
+		t.Fatalf("software-dev contextHints = %+v, want must_produce_state_change", item.ContextHints)
+	}
 	if len(item.EvidencePolicies) == 0 {
 		t.Fatalf("software-dev evidencePolicies missing")
 	}
@@ -147,6 +150,9 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 	}
 	if template.Name == "stale template" || template.SoulBindings["planning"] != "soul-software-dev-planning" {
 		t.Fatalf("software-dev template was not refreshed: %+v", template)
+	}
+	if template.ContextHints["stateChangePolicy"] != "must_produce_state_change" {
+		t.Fatalf("software-dev contextHints = %+v, want must_produce_state_change", template.ContextHints)
 	}
 	assertContainsAnyDoDItem(t, template.DoDItems, "evidenceRefs")
 	if len(template.EvidencePolicies) == 0 {
