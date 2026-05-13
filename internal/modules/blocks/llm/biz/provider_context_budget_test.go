@@ -215,6 +215,64 @@ func TestEnforceProviderRequestBudgetAdaptiveShrinkForProviderRetry(t *testing.T
 	}
 }
 
+func TestEnforceProviderRequestBudgetPreservesDirectStateChangingRecoveryContract(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-direct-recovery",
+		RunID:       "run-direct-recovery",
+		StepID:      "run-direct-recovery/step-1",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"currentSoulStage":                  "execution",
+			"providerRetryFollowUp":             true,
+			"providerRetryAttempt":              1,
+			"failureClass":                      "provider_timeout",
+			"repairObjective":                   "produce_state_changing_output",
+			"stateChangingOutputRequired":       true,
+			"stateChangingRecoveryMode":         "direct_state_change",
+			"providerTimeoutStateChangingRetry": true,
+			"failedStepOutput":                  map[string]any{"partialOutputPreview": strings.Repeat("patch ", 200)},
+			"failedExecutionGraph":              repeatedBudgetItems(80),
+			"graphEvidence":                     repeatedBudgetItems(80),
+			"executionContextPackage": map[string]any{
+				"goal":              map[string]any{"text": "packaged goal"},
+				"dod":               map[string]any{"items": []any{"packaged dod"}},
+				"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    8192,
+				MaxInputTokens:         512,
+				ReservedOutputTokens:   1024,
+				SafetyRatio:            0.8,
+				BytesHardLimit:         256 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+
+	if got.ContextBudget == nil || got.ContextBudget.ShrinkLevel < 4 {
+		t.Fatalf("contextBudget = %+v, want aggressive direct recovery shrink", got.ContextBudget)
+	}
+	if got.Input["stateChangingRecoveryMode"] != "direct_state_change" ||
+		got.Input["stateChangingOutputRequired"] != true {
+		t.Fatalf("input = %+v, want direct state-changing recovery keys preserved", got.Input)
+	}
+	pkg := recordFromAny(got.Input["executionContextPackage"])
+	if recordFromAny(pkg["goal"])["text"] != "packaged goal" ||
+		len(recordFromAny(pkg["dod"])) == 0 ||
+		recordFromAny(pkg["executionContract"])["stateChangePolicy"] != "must_produce_state_change" {
+		t.Fatalf("executionContextPackage = %+v, want protected package Goal/DoD/contract preserved", pkg)
+	}
+	if _, ok := got.Input["failedExecutionGraph"]; ok {
+		t.Fatalf("input retained failedExecutionGraph after direct recovery shrink: %+v", got.Input["failedExecutionGraph"])
+	}
+}
+
 func TestEnforceProviderRequestBudgetMarksP0OverflowWhenGoalDoDContractDominates(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-p0",

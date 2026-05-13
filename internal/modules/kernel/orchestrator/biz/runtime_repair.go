@@ -9,6 +9,7 @@ import (
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -510,6 +511,7 @@ func providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr erro
 		if _, ok := input["repairGuidance"]; !ok {
 			input["repairGuidance"] = stateChangingRepairGuidance()
 		}
+		narrowStateChangingRecoveryInput(input, failedStep, execErr, "provider_retry")
 	}
 	if completionGateFollowUpStep(failedStep) {
 		input["providerRetryMode"] = "completion_assessment_only"
@@ -1193,6 +1195,9 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			input[stepInputKeyWorkspaceFileManifest] = manifest
 		}
 	}
+	if boolValue(input["stateChangingOutputRequired"]) {
+		narrowStateChangingRecoveryInput(input, failedStep, execErr, "runtime_repair")
+	}
 	return input
 }
 
@@ -1201,9 +1206,140 @@ func stateChangingRepairGuidance() []string {
 		"Return concrete state-changing output with complete content, or return a failed dodAssessment if the required state change cannot be completed.",
 		"If multiple dependent operations are needed, executionGraph is allowed only when it contains at least one valid patch/apply node that does not depend on llm/workspace_execution before the patch.",
 		"Do not return read-only, inspection-only, shell-only executionGraph, or LLM-gated executionGraph.",
+		"Do not return self-inspection, run snapshot, observability, or context rehydration graphs when effective Goal and DoD are already present.",
 		"If a target file is missing in an empty or new workspace, create it with patch/apply file_write instead of reading it again.",
 		"Do not use placeholders such as __FROM_PREVIOUS_STEP_OUTPUT__ or <<...>>.",
 	}
+}
+
+func narrowStateChangingRecoveryInput(input map[string]any, failedStep *runModel.Step, execErr error, source string) {
+	if input == nil || failedStep == nil || !boolValue(input["stateChangingOutputRequired"]) {
+		return
+	}
+	class := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(input, failureOutputKeyClass),
+		stringFromMap(failedStep.Output, failureOutputKeyClass),
+	))
+	stage := strings.TrimSpace(stringFromMap(failedStep.Output, "stage"))
+	errorText := firstNonEmptyString(errorString(execErr), stringFromMap(failedStep.Output, "error"), stringFromMap(failedStep.Output, "reason"))
+	if class != failureClassProviderTimeout && !stateChangingReadOnlyGraphFailureText(errorText) {
+		return
+	}
+	input["stateChangingRecoveryMode"] = "direct_state_change"
+	input["stateChangingRecoverySource"] = strings.TrimSpace(source)
+	input["providerTimeoutStateChangingRetry"] = class == failureClassProviderTimeout || stage == "llm_provider_timeout"
+	input["forbiddenRecoveryOutputs"] = []string{
+		"read_only_graph",
+		"self_inspection_graph",
+		"run_snapshot_graph",
+		"observability_graph",
+		"context_rehydration_graph",
+		"llm_gated_replan_graph",
+	}
+	input["requiredRecoveryOutputs"] = []string{
+		"state_changing_artifact",
+		"failed_dod_assessment",
+		"real_decision_or_approval_blocker",
+	}
+	input["failedStepOutput"] = compactStateChangingRecoveryFailureOutput(failedStep.Output)
+	delete(input, "previousStepOutput")
+	delete(input, "failedExecutionGraph")
+	delete(input, stepInputKeyGraphEvidence)
+	delete(input, "runEvidenceSummary")
+	delete(input, stepInputKeyWorkspaceFileManifest)
+	delete(input, stepOutputKeyExecutionGraph)
+}
+
+func stateChangingReadOnlyGraphFailureText(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return strings.Contains(value, "state-changing") &&
+		(strings.Contains(value, "read-only executiongraph") ||
+			strings.Contains(value, "without patch/apply") ||
+			strings.Contains(value, "inspection-only") ||
+			strings.Contains(value, "llm-gated"))
+}
+
+func compactStateChangingRecoveryFailureOutput(output map[string]any) map[string]any {
+	if len(output) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"stage",
+		"status",
+		"error",
+		"reason",
+		failureOutputKeyClass,
+		failureOutputKeySignature,
+		"failureCategory",
+	} {
+		if value, ok := output[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	if diagnostics := mapFromValue(output["streamDiagnostics"]); len(diagnostics) > 0 {
+		ret["streamDiagnostics"] = compactLLMContextMap(diagnostics, 0)
+	}
+	if preview := streamEventsPreview(mapSliceFromValue(output["streamEvents"]), 1200); preview != "" {
+		ret["partialOutputPreview"] = preview
+	}
+	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
+		ret["rejectedExecutionGraph"] = rejectedGraphSummary(graph)
+	} else if graph, ok := runtimeGraphSpecFromValue(mapFromValue(output["llmDecision"])[stepOutputKeyExecutionGraph]); ok {
+		ret["rejectedExecutionGraph"] = rejectedGraphSummary(graph)
+	}
+	return ret
+}
+
+func streamEventsPreview(events []map[string]any, limit int) string {
+	if limit <= 0 || len(events) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	for _, event := range events {
+		delta := stringFromMap(event, "delta")
+		if delta == "" {
+			continue
+		}
+		remaining := limit - builder.Len()
+		if remaining <= 0 {
+			break
+		}
+		if len(delta) > remaining {
+			builder.WriteString(delta[:remaining])
+			break
+		}
+		builder.WriteString(delta)
+	}
+	return strings.TrimSpace(builder.String())
+}
+
+func rejectedGraphSummary(graph runtimemodel.BlockExecutionGraph) map[string]any {
+	if len(graph.Nodes) == 0 {
+		return nil
+	}
+	kinds := make([]string, 0, len(graph.Nodes))
+	nodeIDs := make([]string, 0, len(graph.Nodes))
+	for _, node := range graph.Nodes {
+		if node.Kind != "" {
+			kinds = append(kinds, node.Kind)
+		}
+		if node.ID != "" {
+			nodeIDs = append(nodeIDs, node.ID)
+		}
+	}
+	return map[string]any{
+		"nodeCount": len(graph.Nodes),
+		"nodeIds":   limitedStrings(compactUniqueStrings(nodeIDs), 12),
+		"kinds":     limitedStrings(compactUniqueStrings(kinds), 12),
+	}
+}
+
+func limitedStrings(values []string, limit int) []string {
+	if limit <= 0 || len(values) <= limit {
+		return values
+	}
+	return append([]string(nil), values[:limit]...)
 }
 
 func repairObjectiveRequiresStateChange(value string) bool {

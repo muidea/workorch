@@ -383,6 +383,19 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			},
 		})
 	}
+	if boolValue(request.Input["stateChangingOutputRequired"]) &&
+		(strings.TrimSpace(stringValue(request.Input["stateChangingRecoveryMode"])) == "direct_state_change" ||
+			boolValue(request.Input["providerTimeoutStateChangingRetry"])) {
+		return marshalPromptSection("Current Requested Action", map[string]any{
+			"type": "direct_state_changing_recovery",
+			"requirements": []string{
+				"Use the effective Goal and DoD already supplied in the request",
+				"Return direct state-changing output, failed dodAssessment, or a real requiredDecision/requiredApproval blocker",
+				"Do not return run snapshot, observability, self-inspection, context rehydration, or replan-through-LLM graphs",
+				"If an earlier stream was incomplete, continue by producing a complete fresh JSON object rather than inspecting the run again",
+			},
+		})
+	}
 	return marshalPromptSection("Current Requested Action", map[string]any{
 		"type": "plan_next_step",
 		"requirements": []string{

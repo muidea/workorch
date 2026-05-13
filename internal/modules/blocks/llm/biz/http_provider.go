@@ -593,6 +593,15 @@ func decisionContractPrompt(request llmmodels.ProviderRequest) string {
 			"- Do not return read-only, inspection-only, or shell-only executionGraph.",
 			"- If implementation cannot be produced, return failed with dodAssessment or a real requiredDecision/requiredApproval blocker.",
 		)
+		if strings.TrimSpace(stringValue(request.Input["stateChangingRecoveryMode"])) == "direct_state_change" ||
+			boolValue(request.Input["providerTimeoutStateChangingRetry"]) {
+			lines = append(lines,
+				"State-changing recovery is already scoped by the runtime.",
+				"- Do not return run snapshot, observability, self-inspection, context rehydration, or replan-through-LLM graphs.",
+				"- Continue from the effective Goal and DoD already present in input.executionContextPackage or input.executionContext.",
+				"- The next output must be a direct state-changing artifact path, failed dodAssessment, or a real governance blocker.",
+			)
+		}
 	}
 	return strings.Join(lines, "\n")
 }

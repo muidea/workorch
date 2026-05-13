@@ -262,6 +262,43 @@ func TestBuildProviderPromptMessagesUsesPackagedGoalAndDoDWhenExecutionContextIs
 	}
 }
 
+func TestBuildProviderPromptMessagesUsesDirectStateChangingRecoveryAction(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-direct-recovery",
+		RunID:          "run-direct-recovery",
+		StepID:         "step-direct-recovery",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"stateChangingOutputRequired":       true,
+			"stateChangingRecoveryMode":         "direct_state_change",
+			"providerTimeoutStateChangingRetry": true,
+			"executionContextPackage": map[string]any{
+				"goal": map[string]any{"text": "create the requested artifact"},
+				"dod":  map[string]any{"items": []any{"artifact exists"}},
+			},
+		},
+	}
+
+	build := buildProviderPromptMessages(req)
+	joined := ""
+	for _, item := range build.Messages {
+		joined += "\n" + item.Content
+	}
+	for _, want := range []string{
+		"direct_state_changing_recovery",
+		"Do not return run snapshot",
+		"context rehydration",
+		"complete fresh JSON object",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("prompt missing %q, joined=%s", want, joined)
+		}
+	}
+}
+
 func TestBuildProviderPromptMessagesUsesPromptContextWithoutDuplicatingSystem(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		PromptContext: &llmmodels.PromptContext{

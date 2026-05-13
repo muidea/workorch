@@ -6837,6 +6837,59 @@ func TestProviderRetryStepInputKeepsStateChangingRepairContract(t *testing.T) {
 	}
 }
 
+func TestProviderRetryStepInputNarrowsStateChangingProviderTimeout(t *testing.T) {
+	failedStep := &runmodel.Step{
+		ID:    "run-provider-retry-state-changing-timeout/step-1",
+		RunID: "run-provider-retry-state-changing-timeout",
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failedExecutionGraph":            map[string]any{"nodes": []any{map[string]any{"kind": "shell/command"}}},
+			stepInputKeyGraphEvidence:         []map[string]any{{"nodeId": "inspect", "output": map[string]any{"stdout": strings.Repeat("x", 2048)}}},
+			stepInputKeyWorkspaceFileManifest: []map[string]any{{"path": "README.md"}},
+		},
+		Output: map[string]any{
+			"stage":               "llm_provider_timeout",
+			"status":              "failed",
+			"error":               "context deadline exceeded",
+			failureOutputKeyClass: failureClassProviderTimeout,
+			"contextBudget":       map[string]any{"actualBytes": 9999},
+			"llmUsage":            map[string]any{"inputTokens": 1000},
+			"provider":            map[string]any{"baseUrl": "http://127.0.0.1:8090/v1"},
+			"streamDiagnostics":   map[string]any{"streamIncomplete": true, "doneReceived": false},
+			"streamEvents": []map[string]any{
+				{"type": "delta", "delta": "{\"completionState\":\"continue\",\"executionGraph\":{\"nodes\":[{\"id\":\"write_go_mod\""},
+			},
+		},
+	}
+
+	input := providerRetryStepInput(failedStep, 1, errors.New("context deadline exceeded"))
+
+	if input["stateChangingRecoveryMode"] != "direct_state_change" ||
+		input["providerTimeoutStateChangingRetry"] != true {
+		t.Fatalf("provider retry input = %+v, want direct state-changing recovery mode", input)
+	}
+	for _, key := range []string{"failedExecutionGraph", stepInputKeyGraphEvidence, stepInputKeyWorkspaceFileManifest, "previousStepOutput"} {
+		if _, ok := input[key]; ok {
+			t.Fatalf("provider retry input retained %s: %+v", key, input[key])
+		}
+	}
+	failedOutput := mapFromValue(input["failedStepOutput"])
+	if failedOutput["contextBudget"] != nil || failedOutput["llmUsage"] != nil || failedOutput["provider"] != nil {
+		t.Fatalf("failedStepOutput = %+v, want provider timeout summary without heavy provider payload", failedOutput)
+	}
+	if !strings.Contains(fmt.Sprint(failedOutput["partialOutputPreview"]), "write_go_mod") {
+		t.Fatalf("partialOutputPreview = %q, want partial state-changing output hint", failedOutput["partialOutputPreview"])
+	}
+	forbidden := stringSliceFromValue(input["forbiddenRecoveryOutputs"])
+	if !containsString(forbidden, "run_snapshot_graph") || !containsString(forbidden, "context_rehydration_graph") {
+		t.Fatalf("forbiddenRecoveryOutputs = %+v, want self-inspection outputs forbidden", forbidden)
+	}
+}
+
 func TestProviderRetryStepInputRestoresStateChangingContractFromMissingDoDRepair(t *testing.T) {
 	failedStep := &runmodel.Step{
 		ID:    "run-provider-retry-dod-gap-repair/repair-001-of-planning-001",

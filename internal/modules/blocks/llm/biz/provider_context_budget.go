@@ -25,6 +25,8 @@ var providerP0InputKeys = []string{
 	"workspaceId", "goalId", "doDId", "previousStepId", "currentSoulStage",
 	"runtimeRepairFollowUp", "runtimeRepairAttempt", "providerRetryFollowUp", "providerRetryAttempt",
 	"completionFollowUp", "graphFollowUp", "failureReason", "failureClass", "failureSignature",
+	"repairObjective", "stateChangingOutputRequired", "stateChangingRecoveryMode",
+	"providerTimeoutStateChangingRetry", "forbiddenRecoveryOutputs", "requiredRecoveryOutputs",
 	"decisionResolution", "approvalResolution",
 }
 
@@ -166,6 +168,11 @@ func estimateInputTokens(actualBytes int, tokensPerByte float64) int {
 }
 
 func adaptiveShrinkLevelFromInput(input map[string]any) int {
+	if boolValue(input["providerRetryFollowUp"]) &&
+		boolValue(input["stateChangingOutputRequired"]) &&
+		strings.TrimSpace(stringValue(input["stateChangingRecoveryMode"])) == "direct_state_change" {
+		return 4
+	}
 	if !boolValue(input["providerRetryFollowUp"]) {
 		return 0
 	}
@@ -498,12 +505,14 @@ func providerInputSourceRefs(input map[string]any) []string {
 type protectedGoalDoD struct {
 	TopLevel         map[string]any
 	ExecutionContext map[string]any
+	Package          map[string]any
 }
 
 func captureProtectedGoalDoD(input map[string]any) protectedGoalDoD {
 	ret := protectedGoalDoD{
 		TopLevel:         map[string]any{},
 		ExecutionContext: map[string]any{},
+		Package:          map[string]any{},
 	}
 	for _, key := range []string{"goal", "goals", "dod", "dods"} {
 		if value, ok := input[key]; ok {
@@ -517,6 +526,14 @@ func captureProtectedGoalDoD(input map[string]any) protectedGoalDoD {
 		if value, ok := executionContext[key]; ok {
 			if cloned, success := cloneAny(value); success {
 				ret.ExecutionContext[key] = cloned
+			}
+		}
+	}
+	executionContextPackage := recordFromAny(input["executionContextPackage"])
+	for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "executionContract", "replanContinuation", "stage", "stageMode"} {
+		if value, ok := executionContextPackage[key]; ok {
+			if cloned, success := cloneAny(value); success {
+				ret.Package[key] = cloned
 			}
 		}
 	}
@@ -540,16 +557,28 @@ func restoreProtectedGoalDoD(input map[string]any, protected protectedGoalDoD) m
 	if len(executionContext) > 0 {
 		input["executionContext"] = executionContext
 	}
+	if len(protected.Package) > 0 {
+		executionContextPackage := recordFromAny(input["executionContextPackage"])
+		if executionContextPackage == nil {
+			executionContextPackage = map[string]any{}
+		}
+		for key, value := range protected.Package {
+			executionContextPackage[key] = value
+		}
+		input["executionContextPackage"] = executionContextPackage
+	}
 	return input
 }
 
 func isProtectedGoalDoDEqual(input map[string]any, protected protectedGoalDoD) bool {
 	current := captureProtectedGoalDoD(input)
-	return valuesEqual(current.TopLevel, protected.TopLevel) && valuesEqual(current.ExecutionContext, protected.ExecutionContext)
+	return valuesEqual(current.TopLevel, protected.TopLevel) &&
+		valuesEqual(current.ExecutionContext, protected.ExecutionContext) &&
+		valuesEqual(current.Package, protected.Package)
 }
 
 func hasProtectedGoalDoD(protected protectedGoalDoD) bool {
-	return len(protected.TopLevel) > 0 || len(protected.ExecutionContext) > 0
+	return len(protected.TopLevel) > 0 || len(protected.ExecutionContext) > 0 || len(protected.Package) > 0
 }
 
 func withoutProtectedGoalDoD(input map[string]any) map[string]any {
@@ -574,6 +603,13 @@ func withoutProtectedGoalDoD(input map[string]any) map[string]any {
 			delete(executionContext, key)
 		}
 		clonedInput["executionContext"] = executionContext
+	}
+	executionContextPackage := recordFromAny(clonedInput["executionContextPackage"])
+	if len(executionContextPackage) > 0 {
+		for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "executionContract", "replanContinuation", "stage", "stageMode"} {
+			delete(executionContextPackage, key)
+		}
+		clonedInput["executionContextPackage"] = executionContextPackage
 	}
 	return clonedInput
 }
