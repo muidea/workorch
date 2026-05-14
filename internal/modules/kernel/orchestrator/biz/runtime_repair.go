@@ -934,7 +934,7 @@ func runtimeRepairScopeClassAndSignature(step *runModel.Step) (string, string) {
 	outputSignature := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature))
 	inputClass := strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRepairOfFailureClass))
 	inputSignature := strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRepairOfFailureSig))
-	if outputSignature != "" && (inputSignature == "" || failureSignatureHasTargetScope(outputSignature)) {
+	if outputSignature != "" && (!boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) || inputSignature == "" || failureSignatureHasTargetScope(outputSignature)) {
 		return firstNonEmptyString(outputClass, inputClass), outputSignature
 	}
 	return firstNonEmptyString(inputClass, outputClass), firstNonEmptyString(inputSignature, outputSignature)
@@ -1359,15 +1359,30 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if evidence := o.completedGraphEvidence(ctx, run, failedStep); len(evidence) > 0 {
 		input[stepInputKeyGraphEvidence] = evidence
 	}
-	if patchContext := o.runtimeRepairPatchContext(ctx, run, failedStep); len(patchContext) > 0 {
+	patchContext := o.runtimeRepairPatchContext(ctx, run, failedStep)
+	if len(patchContext) > 0 {
 		input["patchRepairContext"] = patchContext
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Use patchRepairContext as the current target snapshot for patch repair; treat the failed patch text as stale or untrusted.",
+			"If the failed patch reports a hunk/context/base mismatch, prefer a complete patch/apply file_write from the current snapshot, or generate a new diff with exact current context.",
+		)
 	}
-	if shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep) {
+	targetContext := o.runtimeRepairFailureTargetContext(ctx, run, failedStep)
+	if len(targetContext) > 0 {
+		input["failureTargetRepairContext"] = targetContext
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Use failureTargetRepairContext as the current snapshot for targets identified by the failed evidence.",
+			"When failed evidence points at a concrete target resource, generate the smallest auditable patch/apply state change against that current snapshot before rerunning verification.",
+			"Use workspaceFileManifest to reconcile target resources with other known workspace resources; avoid replacing unrelated existing artifacts just to satisfy one failure target.",
+		)
+	}
+	if shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep) || len(targetContext) > 0 || len(patchContext) > 0 {
 		manifest := o.workspaceFileManifest(ctx, run)
 		if len(manifest) > 0 {
 			input[stepInputKeyWorkspaceFileManifest] = manifest
 		}
 	}
+	inheritPriorRepairContext(input, failedStep)
 	if boolValue(input["stateChangingOutputRequired"]) {
 		narrowStateChangingRecoveryInput(input, failedStep, execErr, "runtime_repair")
 	}
@@ -1381,11 +1396,42 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	return input
 }
 
+func inheritPriorRepairContext(input map[string]any, failedStep *runModel.Step) {
+	if input == nil || failedStep == nil || failedStep.Input == nil {
+		return
+	}
+	inherit := func(key string) bool {
+		if len(mapSliceFromValue(input[key])) > 0 {
+			return false
+		}
+		context := mapSliceFromValue(failedStep.Input[key])
+		if len(context) == 0 {
+			return false
+		}
+		input[key] = context
+		return true
+	}
+	inheritedTarget := inherit("failureTargetRepairContext")
+	inheritedPatch := inherit("patchRepairContext")
+	inheritedReadable := inherit("readableResourceRepairContext")
+	inheritedManifest := inherit(stepInputKeyWorkspaceFileManifest)
+	if inheritedTarget || inheritedPatch || inheritedReadable || inheritedManifest {
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Preserve inherited repair context from the previous repair attempt; it contains the current target snapshots needed for direct state-changing recovery.",
+			"Use inherited target snapshots and workspace manifest to produce patch/apply artifacts instead of retrying rejected shell-only or read-only recovery output.",
+		)
+	}
+}
+
 func stateChangingRepairGuidance() []string {
 	return []string{
 		"Return concrete state-changing output with complete content, or return a failed dodAssessment if the required state change cannot be completed.",
 		"If multiple dependent operations are needed, executionGraph is allowed only when it contains at least one valid patch/apply node that does not depend on llm/workspace_execution before the patch.",
 		"Do not return read-only, inspection-only, shell-only executionGraph, or LLM-gated executionGraph.",
+		"patch/apply supports file_write and unified_diff only; file_write content must be non-empty and must not be used as a delete operation.",
+		"Do not use shell/command to modify workspace files when a patch/apply state-change artifact can represent the change; use shell/command for bounded preparation or verification after the patch.",
+		"When failedStepOutput identifies concrete target resources, treat those target snapshots as authoritative and repair the target directly instead of changing unrelated prerequisite metadata.",
+		"When a workspace already contains known resources, reconcile the repair with those existing resources and prefer the smallest coherent state change over broad replacement.",
 		"Do not return self-inspection, run snapshot, observability, or context rehydration graphs when effective Goal and DoD are already present.",
 		"If a target file is missing in an empty or new workspace, create it with patch/apply file_write instead of reading it again.",
 		"Do not use placeholders such as __FROM_PREVIOUS_STEP_OUTPUT__ or <<...>>.",
@@ -1401,7 +1447,11 @@ func narrowStateChangingRecoveryInput(input map[string]any, failedStep *runModel
 		stringFromMap(failedStep.Output, failureOutputKeyClass),
 	))
 	stage := strings.TrimSpace(stringFromMap(failedStep.Output, "stage"))
-	errorText := firstNonEmptyString(errorString(execErr), stringFromMap(failedStep.Output, "error"), stringFromMap(failedStep.Output, "reason"))
+	errorText := strings.Join([]string{
+		errorString(execErr),
+		stringFromMap(failedStep.Output, "error"),
+		stringFromMap(failedStep.Output, "reason"),
+	}, "\n")
 	if class != failureClassProviderTimeout && !stateChangingReadOnlyGraphFailureText(errorText) {
 		return
 	}
@@ -1426,7 +1476,9 @@ func narrowStateChangingRecoveryInput(input map[string]any, failedStep *runModel
 	delete(input, "failedExecutionGraph")
 	delete(input, stepInputKeyGraphEvidence)
 	delete(input, "runEvidenceSummary")
-	delete(input, stepInputKeyWorkspaceFileManifest)
+	if strings.TrimSpace(source) == "provider_retry" {
+		delete(input, stepInputKeyWorkspaceFileManifest)
+	}
 	delete(input, stepOutputKeyExecutionGraph)
 }
 
@@ -1586,6 +1638,7 @@ func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, e
 		"execution-stage llm graph node returned executiongraph",
 		"state-changing llm repair step returned executiongraph",
 		"state-changing llm repair step returned no state-changing output",
+		"state-changing llm repair step returned executiongraph without patch/apply",
 		"state-changing execution-stage llm graph node returned no state-changing output",
 		"implementation execution-stage llm graph node returned no state-changing output",
 		"state-changing executiongraph patch/apply depends on llm/workspace_execution before patch",
@@ -1700,6 +1753,139 @@ func (o *RuntimeOrchestrator) runtimeRepairPatchContext(ctx context.Context, run
 		item := patchRepairTargetSnapshot(workspace.WorkingDirectory, targetRef)
 		if len(item) > 0 {
 			ret = append(ret, item)
+		}
+	}
+	return ret
+}
+
+func (o *RuntimeOrchestrator) runtimeRepairFailureTargetContext(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
+	if o == nil || o.workspaces == nil || run == nil || failedStep == nil {
+		return nil
+	}
+	targetRefs := failureTargetRepairRefs(failedStep)
+	if len(targetRefs) == 0 {
+		return nil
+	}
+	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
+	if err != nil || workspace == nil || strings.TrimSpace(workspace.WorkingDirectory) == "" {
+		return nil
+	}
+	targetRefs = resolveWorkspaceTargetRefs(workspace.WorkingDirectory, targetRefs)
+	ret := make([]map[string]any, 0, min(len(targetRefs), 3))
+	for idx, targetRef := range targetRefs {
+		if idx >= 3 {
+			break
+		}
+		item := patchRepairTargetSnapshot(workspace.WorkingDirectory, targetRef)
+		if len(item) == 0 {
+			continue
+		}
+		item["source"] = "failure_target_current_workspace_file"
+		item["guidance"] = "Use this current failure target snapshot for repair; failed stderr/stdout location is the authoritative target signal."
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func resolveWorkspaceTargetRefs(workingDirectory string, targetRefs []string) []string {
+	if strings.TrimSpace(workingDirectory) == "" || len(targetRefs) == 0 {
+		return targetRefs
+	}
+	files, err := workspaceManifestFiles(workingDirectory)
+	if err != nil || len(files) == 0 {
+		return targetRefs
+	}
+	seen := map[string]bool{}
+	ret := make([]string, 0, len(targetRefs))
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	for _, targetRef := range targetRefs {
+		resolved := resolveWorkspaceTargetRef(files, targetRef)
+		if resolved == "" {
+			resolved = targetRef
+		}
+		add(resolved)
+	}
+	return ret
+}
+
+func resolveWorkspaceTargetRef(files []workspaceDeliverableFile, targetRef string) string {
+	targetRef = normalizedFailureTarget(targetRef)
+	if targetRef == "" {
+		return ""
+	}
+	for _, file := range files {
+		if file.Path == targetRef {
+			return targetRef
+		}
+	}
+	var match string
+	for _, file := range files {
+		if strings.HasSuffix(file.Path, "/"+targetRef) {
+			if match != "" {
+				return targetRef
+			}
+			match = file.Path
+		}
+	}
+	if match != "" {
+		return match
+	}
+	return targetRef
+}
+
+func failureTargetRepairRefs(step *runModel.Step) []string {
+	if step == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ret []string
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	for _, target := range failureTargetsForSignature(step.Output) {
+		add(target)
+	}
+	for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Output, failureOutputKeySignature)) {
+		add(target)
+	}
+	failedOutput := mapFromValue(step.Output["failedStepOutput"])
+	for _, target := range failureTargetsForSignature(failedOutput) {
+		add(target)
+	}
+	for _, target := range failureTargetsFromSignatureText(stringFromMap(failedOutput, failureOutputKeySignature)) {
+		add(target)
+	}
+	return ret
+}
+
+func failureTargetsFromSignatureText(signature string) []string {
+	signature = strings.TrimSpace(signature)
+	if signature == "" {
+		return nil
+	}
+	segments := strings.Split(signature, "|")
+	var ret []string
+	for _, segment := range segments {
+		key, value, ok := strings.Cut(segment, "=")
+		if !ok || strings.TrimSpace(key) != "failureTargets" {
+			continue
+		}
+		for _, target := range strings.Split(value, ",") {
+			if normalized := normalizedFailureTarget(target); normalized != "" {
+				ret = append(ret, normalized)
+			}
 		}
 	}
 	return ret
@@ -1964,6 +2150,9 @@ func shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep *runModel.Step) bo
 	if failedStep == nil || failedStep.Output == nil {
 		return false
 	}
+	if len(failureTargetRepairRefs(failedStep)) > 0 {
+		return true
+	}
 	if stringFromMap(failedStep.Output, failureOutputKeyClass) == failureClassWorkspacePath {
 		return true
 	}
@@ -1977,6 +2166,28 @@ func shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep *runModel.Step) bo
 	}
 	if diagnostics := mapFromValue(failedOutput["runtimeDiagnostics"]); stringFromMap(diagnostics, "kind") == "workspace_path_conflict" {
 		return true
+	}
+	if boolValue(failedStep.Input["stateChangingOutputRequired"]) &&
+		(failedStepInputHasMissingDoDItems(failedStep) ||
+			len(missingDoDItemsFromFailureOutput(failedStep.Output)) > 0 ||
+			runtimeRepairInputHasResourceEvidence(failedStep)) {
+		return true
+	}
+	return false
+}
+
+func runtimeRepairInputHasResourceEvidence(failedStep *runModel.Step) bool {
+	if failedStep == nil {
+		return false
+	}
+	for _, evidence := range mapSliceFromValue(failedStep.Input[stepInputKeyGraphEvidence]) {
+		if strings.TrimSpace(stringFromMap(evidence, "kind")) == "file/list" {
+			return true
+		}
+		output := mapFromValue(evidence["output"])
+		if strings.TrimSpace(stringFromMap(output, "stage")) == "file_list" || len(mapSliceFromValue(output["entries"])) > 0 {
+			return true
+		}
 	}
 	return false
 }

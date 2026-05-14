@@ -393,6 +393,8 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 				"Use the effective Goal and DoD already supplied in the request",
 				"Return direct state-changing output, failed dodAssessment, or a real requiredDecision/requiredApproval blocker",
 				"Do not return run snapshot, observability, self-inspection, context rehydration, or replan-through-LLM graphs",
+				"When failed evidence includes current target snapshots, patch those targets directly with auditable state-change artifacts before rerunning verification",
+				"Do not use shell commands to modify workspace files when a patch artifact can represent the change",
 				"If an earlier stream was incomplete, continue by producing a complete fresh JSON object rather than inspecting the run again",
 			},
 		})

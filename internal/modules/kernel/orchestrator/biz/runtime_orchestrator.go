@@ -746,6 +746,13 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 		replanContext["ticketId"] = string(ticket.ID)
 		replanContext["ticketStepId"] = string(ticket.StepID)
 		replanContext["ticketReason"] = ticket.Reason
+		if len(ticket.Context) > 0 {
+			ticketContext := compactLLMContextMap(ticket.Context, 0)
+			if failedStepOutput := mapFromValue(ticket.Context["failedStepOutput"]); len(failedStepOutput) > 0 {
+				ticketContext["failedStepOutput"] = compactStepOutputForLLMContext(failedStepOutput)
+			}
+			replanContext["ticketContext"] = ticketContext
+		}
 	}
 	if resolution != nil {
 		replanContext["resolutionId"] = string(resolution.ID)
@@ -1527,7 +1534,7 @@ func graphHasStateChangingPatchNode(graph runtimemodel.BlockExecutionGraph) bool
 
 func validateStateChangingExecutionGraph(graph runtimemodel.BlockExecutionGraph) error {
 	if !graphHasStateChangingPatchNode(graph) {
-		return fmt.Errorf("%w: state-changing llm repair step returned read-only executionGraph without patch/apply", common.ErrInvalidArgument)
+		return fmt.Errorf("%w: state-changing llm repair step returned executionGraph without patch/apply; read-only, inspection-only, or shell-only graphs cannot satisfy the state-changing contract", common.ErrInvalidArgument)
 	}
 	if !graphHasUngatedStateChangingPatchNode(graph) {
 		return fmt.Errorf("%w: state-changing executionGraph patch/apply depends on llm/workspace_execution before patch", common.ErrInvalidArgument)

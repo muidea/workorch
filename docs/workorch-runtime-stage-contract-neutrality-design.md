@@ -126,6 +126,21 @@ Runtime repair / duplicate / replan 治理必须同时识别两类中立 scope�
 
 当失败签名不包含目标级 scope 时，runtime 不得臆造业务目标，也不得把无目标失败合并为同一预算；此时继续按完整失败签名、root step 或显式 lineage scope 收敛。
 
+当一个非 repair-follow-up 的当前失败 step 同时携带历史 `repairOfFailureSignature` 和自身 `failureSignature` 时，scope 判定必须优先使用当前失败 step 输出中的 `failureSignature` / `failureClass`。历史 repair lineage 只能作为上下文与来源说明，不得覆盖当前失败证据。只有真正的 repair-follow-up step 才可以继续按其 `repairOfFailureSignature` 归入原始 repair scope。该规则适用于所有中立失败类型，尤其用于避免“上一轮失败签名”串线到新的执行超时、验证失败或能力 contract violation。
+
+若当前失败签名包含短目标引用，runtime 可以用当前 workspace manifest 做唯一后缀解析，以便把失败证据定位到实际资源；若存在多个候选，必须保留原始短引用并标记为未确定目标，不得猜测具体资源。该解析只基于 workspace 中已知资源路径这一中立事实，不得依赖文件类型、语言、测试框架或业务约定。
+
+### Replan Successor Lineage
+
+当 repair exhausted、duplicate failure 或人工/自动治理决策要求 `replan` 时，successor run 必须继承 predecessor 的 Goal / DoD / execution contract，并在 `replanContinuation` 中记录中立 lineage：
+
+- predecessor run ID。
+- 触发 replan 的 ticket / resolution 引用。
+- ticket reason 与 resolution payload。
+- 触发 replan 的 failure context，包括 failure class、failure signature、failure target scope、failed step id/kind、failed step output、最近 repair attempts 或可用摘要。
+
+Successor 的首个 LLM step 不应只知道“需要重规划”。它必须获得足够的失败证据来判断哪些产物可以保留、哪些路径已失败、哪些 contract 仍然必须继承。若 successor 被设为 state-changing repair continuation，则其初始输入必须继续携带 `stateChangingOutputRequired`、`repairObjective` 与对应 guidance；同时不得把历史 provider/model 等运行期动态绑定写入 successor 的恢复上下文。
+
 ### Active Run 一致性
 
 Workspace 的 `ActiveRunID` 只能指向同一 workspace 下的非终态 run。`completed`、`failed`、`cancelled`、`superseded` 均为终态，任何 workspace 都不得继续以这些 run 作为 active run。
@@ -189,6 +204,10 @@ Runtime 必须拒绝：
 当 provider/config 决策解除后需要重试原失败 LLM step 时，decision resolution 只能补充“已授权重试、已提供信息、恢复动作”等恢复上下文，不得覆盖原 step 已存在的 `runtimeStage`、`runtimeStageMode`、`soulStage`、`stateChangingOutputRequired`、`repairObjective` 等阶段合同。换言之，`decision` 是恢复入口，不是被重试任务的执行阶段；provider retry 必须继续继承失败 step 的原阶段语义。
 
 当 execution graph 以并行 batch 方式调度时，batch 完成后的续跑必须以本批次所属 graph root / lineage 为锚点计算 dependency-satisfied 节点，不得用 run 内全局“最新 completed graph step”推断当前 graph。全局最新节点可能属于其他 repair、replan 或历史 graph scope；runtime 必须按当前批次 root 继续推进，直到该 graph scope 内没有可执行节点，再进入 follow-up / verification / acceptance。
+
+当 state-changing 输出依赖具体 runtime capability 时，prompt / tool schema / repair guidance 必须明确该 capability 的中立能力边界。若某个 state-changing capability 只支持有限操作，LLM 不得用未声明语义伪造操作。例如某能力只支持“写入完整内容”和“应用 diff”时，不得把“空内容写入”解释为删除。Runtime 必须拒绝不满足 capability contract 的输出，并把拒绝原因作为下一轮 repair evidence；prompt 层也必须把该约束暴露给 LLM，减少重复输出必然失败的 artifact。
+
+能力边界属于 runtime capability contract，不属于业务领域规则。Core 可以声明“某 capability 不支持 delete、content 不能为空、diff 必须完整”等中立能力事实；但不能据此推断某个业务文件是否应该删除、保留或重命名。
 
 ### 已知可读资源不得升级为人工缺失信息
 
@@ -312,6 +331,18 @@ Repair 不是重新探索。Repair 必须继承来源阶段的约束，并根据
 
 Goal coverage 校验只应把可判定的叶子需求作为覆盖对象。Markdown 标题、分组项、以冒号结尾的父级目标项只用于组织上下文，不得作为必须单独满足的叶子需求。若 Goal 叶子需求与 DoD 项文字不完全一致，LLM 必须通过 `dodAssessment.goalCoverage` 显式建立 Goal requirement -> evidenceRefs 的映射；runtime 不应依赖领域语义硬编码进行推断。
 
+Repair 输入必须尽量包含足以定向修复的当前证据：
+
+- `failedStepOutput`：当前失败的精简输出，包括 failure class / signature、error、reason、status、关键诊断和必要的 stdout/stderr 摘要。
+- `failureTargetRepairContext`：当失败证据指向具体 workspace 资源时，提供当前目标资源快照、存在性、content hash 和来源说明。
+- `workspaceFileManifest`：当失败目标需要与其他已知资源核对、DoD 缺口涉及资源证据、或 repair 需要避免误替换无关资源时，提供当前 workspace 资源清单。
+- `patchRepairContext` 或等价 capability repair context：当失败来自 state-changing artifact 应用失败时，提供当前目标快照，并要求 LLM 基于当前快照重新生成可应用 artifact，而不是重复失败 artifact。
+- 近期 repair attempt 摘要：用于避免重复同一失败输出。
+
+如果 repair-of-repair 是因为 LLM 输出违反 contract，例如缺少必需 artifact 字段、返回只读 graph、返回能力不支持的操作，后续 repair 必须继承上一轮可用的 target context、workspace manifest、state-changing contract 和 rejection evidence。不得因为 contract violation 发生在 LLM repair step 外壳上，就丢失原始 failure target 或降级为泛化探索。
+
+Runtime 可以把失败证据中的目标引用解析为当前 workspace 中的已知资源快照，但只能使用中立路径匹配和 manifest 事实；不能把某个 profile 的文件命名、测试约定或技术栈规则写入 core repair。
+
 Repair exhausted 后必须二选一：
 
 - 写 rejected result 并进入 failed / blocked_on_decision。
@@ -432,7 +463,9 @@ Stage input bundle 必须遵守：
 - Goal / DoD 不可被压缩、改写或用摘要替代。
 - memory recall 只进入高价值决策信息，不堆叠 runtime 流水。
 - skill/tool/mcp/soul/prompt 进入 bundle 时只提供能力摘要和约束，不注入领域硬编码。
-- repair bundle 必须包含 failure scope、来源阶段、失败 evidence、已尝试修复和必须继承的 contract。
+- repair bundle 必须包含 failure scope、来源阶段、失败 evidence、已尝试修复、必要目标快照、workspace manifest 和必须继承的 contract。
+- replan bundle 必须包含 predecessor lineage、replan ticket / resolution、原失败 evidence、已失败 repair path、可保留产物线索和仍然有效的 Goal / DoD / execution contract。
+- capability 摘要必须包含当前能力支持和不支持的中立操作，例如必需字段、禁止字段、是否支持删除、是否要求完整内容或完整 diff。
 - profile-specific bundle 字段必须位于 profile namespace，不能提升为 core 字段。
 
 ### 后续文档收口顺序
@@ -458,6 +491,10 @@ Stage input bundle 必须遵守：
 - `acceptance` terminal 必须有 result。
 - `repair` 必须继承来源 stage contract。
 - `replan` 必须创建 successor run 并保持 lineage。
+- replan successor 的初始输入必须能看到触发 replan 的 failure context，而不是只看到 ticket / resolution id。
+- repair-of-repair 必须保留原始 failure target context、workspace manifest 和 state-changing contract。
+- 当前失败 step 的 output failure signature 必须优先于继承的历史 repair signature，避免新失败被计入旧预算。
+- capability contract violation 必须被拒绝并形成 repair evidence；LLM prompt 必须包含该 capability 的中立限制。
 - profile-specific 检查只能放在 profile verifier 中，不能写入 core verifier。
 
 ## 实施收口计划
@@ -498,6 +535,12 @@ Stage input bundle 必须遵守：
   - 已完成 execution 失败 repair 追加收口。
   - `must_produce_state_change` run 中，`execution/strict_convergence` 阶段的非只读步骤失败会触发 state-changing repair contract，避免测试/构建/执行失败后的 repair 退回只读分析。
   - runtime repair ID 对普通 graph-scoped 失败使用失败 graph node 标签，例如 `repair-001-of-graph-003-003-run-go-test`；provider retry / runtime repair 等 recovery 外壳仍按归一 root 生成，避免再次出现 provider retry 壳嵌套。
+- 2026-05-14：
+  - 已完成 repair failure scope 与上下文继承追加收口。
+  - 非 repair-follow-up 当前失败优先使用自身 output failure signature；历史 `repairOfFailureSignature` 不再覆盖新的无 target scope 失败，避免新执行超时或验证失败串入旧 repair budget。
+  - failure target repair 已补充当前目标快照、唯一后缀路径解析、workspace manifest 与 repair-of-repair 上下文继承；重复 contract violation 不再丢失原始 failure target。
+  - state-changing repair guidance 与 LLM provider prompt 已补充 runtime capability 边界：能力不支持的操作不得用伪语义表达，例如不得用空 `file_write` 表示删除。
+  - replan successor 的 `replanContinuation` 已要求携带 ticket failure context，使 successor 能基于 predecessor failure evidence 继续收敛，而不是只收到 replan 元信息。
 
 ## 非兼容性说明
 
