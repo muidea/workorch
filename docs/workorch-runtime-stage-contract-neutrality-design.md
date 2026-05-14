@@ -306,12 +306,12 @@ Memory 需要按阶段服务 LLM 决策，而不是堆叠 runtime 流水。
 | Stage | recall 优先级 |
 | --- | --- |
 | `exploration` | Goal、DoD、workspace manifest、相关历史结论、可用能力 |
-| `planning` | 探索摘要、约束、DoD、已有方案、不可行路径 |
+| `planning` | 探索摘要、约束、DoD、当前 workspace manifest / known resources、已有方案、不可行路径 |
 | `execution` | 当前 unit、必要上下文、accepted plan、可用 state-changing capability |
 | `verification` | 变更摘要、验证要求、evidence 标准、历史失败原因 |
 | `acceptance` | Goal / DoD、evidence refs、coverage map、remaining gaps |
 | `repair` | failure scope、失败 evidence、最近修复尝试、必须继承的 contract |
-| `replan` | 原计划失败原因、可保留产物、需要重新拆解的目标 |
+| `replan` | 原计划失败原因、当前 workspace manifest / known resources、可保留产物、需要重新拆解的目标 |
 
 ## Repair 合同
 
@@ -325,7 +325,16 @@ Repair 不是重新探索。Repair 必须继承来源阶段的约束，并根据
 | `verification` | 必须补 evidence、解释 weak evidence 或转 rejected |
 | `acceptance` | 必须补 DoD coverage / result，不得新增实现 |
 
-当 run 级 `stateChangePolicy=must_produce_state_change` 且失败输出包含 `missingDoDItems` 时，runtime repair 必须显式携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。后续 provider retry 也必须继承该约束，不能把 DoD 缺口修复降级为只读 exploration graph。
+当 run 级 `stateChangePolicy=must_produce_state_change` 且失败输出包含 `missingDoDItems` 时，runtime repair 必须先区分中立缺口类型：
+
+- `implementation_gap`：已有 evidence 表明实现缺失、实现错误、artifact 无法应用或非只读执行失败，repair 必须显式携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。后续 provider retry 也必须继承该约束，不能把实现缺口修复降级为只读 exploration graph。
+- `evidence_gap`：verification 阶段只证明“缺少 concrete evidence / 未执行验证 / evidence 不足”，但尚未形成实现错误诊断时，repair 应携带 `repairObjective=produce_concrete_validation_evidence`，允许受限 tool / shell / mcp 验证图生成证据；若该验证图后续产生确定性失败，再由新的失败证据触发 state-changing repair。
+
+当 patch / preview / apply 因 context mismatch、base mismatch 或 stale artifact 失败时，默认 repair 仍要求基于当前 target snapshot 重新生成可应用 state-changing artifact。但完整 `file_write` 只允许建立在完整、未脱敏、未截断且标记为 `safeForFileWrite` 的当前快照上；若 repair context 中的内容包含 `[REDACTED]` / `[SECRET]` / `[MASKED]`、省略片段或截断标记，LLM 不得把该内容复制进 patch content / diff，而应先读取目标、使用 exact oldText 的最小替换，或基于可见上下文生成最小 `unified_diff`。
+
+Runtime 可以从失败 diff 与当前 target snapshot 中抽取中立的 `patchRepairSuggestions`，例如“某个 oldText 在当前目标中唯一匹配，可替换为 newText”。该建议只来源于失败 artifact 与当前资源内容的机械对齐，不包含业务语义；它用于帮助 LLM 生成更小、更精确、可审计的 repair artifact，避免重复输出行号漂移、上下文过期或依赖脱敏快照的 patch。
+
+如果 repair 基于当前 `patchRepairContext` 判断目标状态已经满足、失败 patch 已不再需要，runtime 可以接受一个受限 concrete validation evidence graph，用于验证当前状态；该 graph 不得只包含 read-only inspection，也不得包含新的 LLM 嵌套或 patch 节点。若验证失败，新的验证失败 evidence 再驱动后续 state-changing repair。
 
 若 `dodAssessment.satisfied=true` 但 runtime 校验发现 DoD / Goal coverage 字段缺失或不完整，该失败属于 assessment contract correction，而不是新的 state-changing implementation 缺口。runtime 必须以 `assessmentOnly` / `verification` 模式要求 LLM 补齐 `dodAssessment.items`、`dodAssessment.goalCoverage` 与 evidenceRefs；不得在没有新的实现缺口证据时强制重新生成 patch、shell 或其他可执行工作。
 
@@ -337,6 +346,7 @@ Repair 输入必须尽量包含足以定向修复的当前证据：
 - `failureTargetRepairContext`：当失败证据指向具体 workspace 资源时，提供当前目标资源快照、存在性、content hash 和来源说明。
 - `workspaceFileManifest`：当失败目标需要与其他已知资源核对、DoD 缺口涉及资源证据、或 repair 需要避免误替换无关资源时，提供当前 workspace 资源清单。
 - `patchRepairContext` 或等价 capability repair context：当失败来自 state-changing artifact 应用失败时，提供当前目标快照，并要求 LLM 基于当前快照重新生成可应用 artifact，而不是重复失败 artifact。
+- `patchRepairSuggestions` 或等价 capability repair suggestion：当 runtime 能从失败 artifact 与当前目标快照中机械抽取唯一 oldText / newText 替换时，提供可直接复用的最小修复证据；该 suggestion 不代表业务判断，只代表当前资源内容与失败 artifact 的中立匹配事实。
 - 近期 repair attempt 摘要：用于避免重复同一失败输出。
 
 如果 repair-of-repair 是因为 LLM 输出违反 contract，例如缺少必需 artifact 字段、返回只读 graph、返回能力不支持的操作，后续 repair 必须继承上一轮可用的 target context、workspace manifest、state-changing contract 和 rejection evidence。不得因为 contract violation 发生在 LLM repair step 外壳上，就丢失原始 failure target 或降级为泛化探索。
@@ -357,8 +367,8 @@ Provider retry 预算必须来自 runtime 配置，默认 `maxProviderRetryAttem
 
 Provider retry / config blocker 的边界必须基于中立失败形态：
 
-- `timeout`、`rate limit`、`context too large`、`provider stream incomplete`、已完成 stream 但内容为空的 `provider stream error` 等瞬时 provider 执行失败，应先消耗 provider retry 预算。
-- `auth or config`、`schema drift`、明确不支持的 provider operation、明确 client/config unavailable 等配置型失败，可以直接进入 provider/config blocker。
+- `timeout`、`rate limit`、`context too large`、`provider stream incomplete`、已完成 stream 但内容为空的 `provider stream error`、未带明确配置错误标记的 `provider unavailable / request failed / provider error` 等瞬时 provider 执行失败，应先消耗 provider retry 预算。
+- `auth or config`、`schema drift`、明确不支持的 provider operation、明确 client/config unavailable、4xx、缺失 provider / model / credential 等配置型失败，可以直接进入 provider/config blocker。
 - provider/config blocker 的 `attempts` 必须记录真实已失败 provider retry 次数，`maxAttempts` 才记录预算上限；不得在未实际重试时把 `attempts` 写成预算上限。
 - provider retry 不得消费或重置业务 repair/replan 预算；它只表示 runtime LLM provider 调用基础设施暂时未产生可用 LLM 输出。
 
@@ -463,6 +473,7 @@ Stage input bundle 必须遵守：
 - Goal / DoD 不可被压缩、改写或用摘要替代。
 - memory recall 只进入高价值决策信息，不堆叠 runtime 流水。
 - skill/tool/mcp/soul/prompt 进入 bundle 时只提供能力摘要和约束，不注入领域硬编码。
+- exploration / planning / replan continuation 的 LLM input 必须包含当前 workspace 的有界 manifest / known resources。该清单只表达“当前已知资源事实”，不得编码语言、框架、文件类型或业务领域规则；其目的在于避免 LLM 在已有工作区中误生成初始化路径。
 - repair bundle 必须包含 failure scope、来源阶段、失败 evidence、已尝试修复、必要目标快照、workspace manifest 和必须继承的 contract。
 - replan bundle 必须包含 predecessor lineage、replan ticket / resolution、原失败 evidence、已失败 repair path、可保留产物线索和仍然有效的 Goal / DoD / execution contract。
 - capability 摘要必须包含当前能力支持和不支持的中立操作，例如必需字段、禁止字段、是否支持删除、是否要求完整内容或完整 diff。
@@ -541,6 +552,10 @@ Stage input bundle 必须遵守：
   - failure target repair 已补充当前目标快照、唯一后缀路径解析、workspace manifest 与 repair-of-repair 上下文继承；重复 contract violation 不再丢失原始 failure target。
   - state-changing repair guidance 与 LLM provider prompt 已补充 runtime capability 边界：能力不支持的操作不得用伪语义表达，例如不得用空 `file_write` 表示删除。
   - replan successor 的 `replanContinuation` 已要求携带 ticket failure context，使 successor 能基于 predecessor failure evidence 继续收敛，而不是只收到 replan 元信息。
+  - planning / exploration / replan continuation 的 execution context package 已要求携带当前 workspace 的有界 manifest；state-changing repair follow-up 也必须在未显式继承 manifest 时从当前 workspace 补齐，避免已有资源不可见导致重复初始化或错误覆盖。
+  - patch repair context 已补充 `contentComplete` / `safeForFileWrite` 标记与 redaction/truncation 禁用规则；LLM provider prompt 不再无条件鼓励基于当前快照输出完整 `file_write`。
+  - patch repair 已增加中立 `patchRepairSuggestions`：从失败 diff 与当前目标快照机械抽取唯一 oldText/newText 替换，帮助生成最小 diff，避免反复输出 stale diff 或复制脱敏内容。
+  - `unified_diff` 应用能力已支持在行号漂移但 old/context lines 于当前目标中唯一匹配时按唯一匹配位置应用，降低 LLM 生成 diff 行号不准导致的无效 repair 循环。
 
 ## 非兼容性说明
 

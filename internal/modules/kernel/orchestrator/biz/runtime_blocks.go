@@ -26,6 +26,8 @@ const (
 	decisionContextKeyResultPolicy          = "resultPolicy"
 	decisionContextResultPolicyNone         = "none"
 	decisionContextResultPolicyRejected     = "rejected"
+	decisionContextKeyQuestion              = "decisionQuestion"
+	decisionContextKeyReason                = "decisionReason"
 )
 
 type runtimeDecisionBlockSpec struct {
@@ -136,7 +138,7 @@ func continuableDecisionShouldRepair(step *runModel.Step, spec runtimeDecisionBl
 		strings.TrimSpace(spec.DecisionKind) != decisioncommon.ResolutionTypeProvideMissingInfo {
 		return false
 	}
-	return continuableCandidateContext(spec.Context) || knownReadableWorkspaceResourceDecisionContext(spec.Context)
+	return continuableCandidateContext(spec.Context) || knownReadableWorkspaceResourceDecisionSpec(spec)
 }
 
 func continuableCandidateContext(context map[string]any) bool {
@@ -209,12 +211,26 @@ func knownReadableWorkspaceResourceDecisionContext(context map[string]any) bool 
 	if len(resources) == 0 {
 		return false
 	}
-	for _, field := range append(stringListFromValue(context["missingFields"]), stringListFromValue(context["requiresHumanFields"])...) {
-		if decisionFieldReferencesKnownResource(field, resources) {
+	for _, text := range readableResourceReferenceTexts(context) {
+		if decisionTextReferencesKnownResource(text, resources) {
 			return true
 		}
 	}
 	return false
+}
+
+func knownReadableWorkspaceResourceDecisionSpec(spec runtimeDecisionBlockSpec) bool {
+	context := cloneStepPayload(spec.Context)
+	if context == nil {
+		context = map[string]any{}
+	}
+	if strings.TrimSpace(spec.Question) != "" {
+		context[decisionContextKeyQuestion] = spec.Question
+	}
+	if strings.TrimSpace(spec.Reason) != "" {
+		context[decisionContextKeyReason] = spec.Reason
+	}
+	return knownReadableWorkspaceResourceDecisionContext(context)
 }
 
 func knownReadableWorkspaceResourceNames(context map[string]any) []string {
@@ -264,8 +280,12 @@ func isDecisionKnownResourceName(value string) bool {
 }
 
 func decisionFieldReferencesKnownResource(field string, resources []string) bool {
-	normalizedField := normalizedDecisionRepairText(field)
-	if normalizedField == "" {
+	return decisionTextReferencesKnownResource(field, resources)
+}
+
+func decisionTextReferencesKnownResource(text string, resources []string) bool {
+	normalizedText := normalizedDecisionRepairText(text)
+	if normalizedText == "" {
 		return false
 	}
 	for _, resource := range resources {
@@ -273,11 +293,24 @@ func decisionFieldReferencesKnownResource(field string, resources []string) bool
 		if normalizedResource == "" || len(normalizedResource) < 4 {
 			continue
 		}
-		if strings.Contains(normalizedField, normalizedResource) {
+		if strings.Contains(normalizedText, normalizedResource) {
 			return true
 		}
 	}
 	return false
+}
+
+func readableResourceReferenceTexts(context map[string]any) []string {
+	if len(context) == 0 {
+		return nil
+	}
+	ret := append(stringListFromValue(context["missingFields"]), stringListFromValue(context["requiresHumanFields"])...)
+	for _, key := range []string{decisionContextKeyQuestion, decisionContextKeyReason, "question", "reason"} {
+		if text := strings.TrimSpace(stringFromMap(context, key)); text != "" {
+			ret = append(ret, text)
+		}
+	}
+	return ret
 }
 
 func convertedDecisionPayload(spec runtimeDecisionBlockSpec) map[string]any {

@@ -325,6 +325,183 @@ func TestServiceAutoReplansRuntimeRepairExhaustionTicket(t *testing.T) {
 	}
 }
 
+func TestServiceAutoResolvesReplanDecisionTicketWithoutMissingFields(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	runRepo := memory.NewRunRepository()
+	goalRepo := memory.NewGoalRepository()
+	dodRepo := memory.NewDoDRepository()
+	memoryRepo := memory.NewMemoryItemRepository()
+	traceRepo := memory.NewAutoGovernanceTraceRepository()
+	approvalRepo := memory.NewApprovalRepository()
+
+	workspaceID := common.WorkspaceID("ws-replan-generic")
+	runID := common.RunID("run-replan-generic")
+	goalID := common.GoalID("goal-replan-generic")
+	dodID := common.DoDID("dod-replan-generic")
+	ticketID := common.TicketID("ticket-replan-generic")
+
+	mustNoErr(t, goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "完成目标输出"}))
+	mustNoErr(t, dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"完成补丁并通过测试"}, State: common.DoDStateReady}))
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateBlockedOnDecision, BlockingTicketID: ticketID}))
+	mustNoErr(t, ticketRepo.Create(ctx, ticket(&ticketFixture{
+		id:          ticketID,
+		workspaceID: workspaceID,
+		runID:       runID,
+		kind:        "replan",
+		question:    "自动修复未满足 DoD，请允许重新规划。",
+		reason:      "需要先读取关键文件后再生成补丁。",
+		context: map[string]any{
+			"missingFields": []any{},
+		},
+		state: common.DecisionTicketStateOpen,
+	})))
+
+	var resolvedTicket common.TicketID
+	var resolvedResolutionType string
+	var resolvedPayload map[string]any
+	var resumedRun common.RunID
+	svc := NewService(Dependencies{
+		Tickets:              ticketRepo,
+		Resolutions:          resolutionRepo,
+		Approvals:            approvalRepo,
+		Runs:                 runRepo,
+		Goals:                goalRepo,
+		DoDs:                 dodRepo,
+		MemoryItems:          memoryRepo,
+		AutoGovernanceTraces: traceRepo,
+		EventHub:             hub,
+		ResolveDecision: func(_ context.Context, id common.TicketID, resolutionType string, payload map[string]any) error {
+			resolvedTicket = id
+			resolvedResolutionType = resolutionType
+			resolvedPayload = cloneMap(payload)
+			return resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+				ID:       common.ResolutionID("resolution-" + string(id)),
+				TicketID: id,
+				Type:     resolutionType,
+				Payload:  cloneMap(payload),
+			})
+		},
+		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
+		ResumeRun: func(_ context.Context, id common.RunID) error {
+			resumedRun = id
+			return nil
+		},
+		LoadConfig: testGovernanceConfig(true, 0.82, 5),
+	})
+	mustNoErr(t, svc.Start())
+	defer svc.Stop()
+
+	mustNoErr(t, hub.Publish(ctx, events.Envelope{
+		Topic:       events.TopicTicketCreated,
+		SubjectType: "ticket",
+		SubjectID:   string(ticketID),
+		WorkspaceID: string(workspaceID),
+		RunID:       string(runID),
+	}))
+
+	if resolvedTicket != ticketID {
+		t.Fatalf("resolved ticket = %s, want %s", resolvedTicket, ticketID)
+	}
+	if resolvedResolutionType != "replan" {
+		t.Fatalf("resolved type = %s, want replan", resolvedResolutionType)
+	}
+	if resolvedPayload["answer"] != "replan" || resolvedPayload["recoveryAction"] != "replan" {
+		t.Fatalf("resolved payload = %+v, want replan recovery action", resolvedPayload)
+	}
+	if resumedRun != runID {
+		t.Fatalf("resumed run = %s, want %s", resumedRun, runID)
+	}
+	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"))
+	if err != nil {
+		t.Fatalf("get trace: %v", err)
+	}
+	if trace.Status != "resolved" || trace.PolicyMatched != "decision_kind_replan_auto_resolve" {
+		t.Fatalf("trace = %+v, want generic replan auto-resolve", trace)
+	}
+}
+
+func TestServiceEscalatesReplanDecisionTicketWhenMissingFieldsRemain(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	runRepo := memory.NewRunRepository()
+	goalRepo := memory.NewGoalRepository()
+	dodRepo := memory.NewDoDRepository()
+	memoryRepo := memory.NewMemoryItemRepository()
+	traceRepo := memory.NewAutoGovernanceTraceRepository()
+	approvalRepo := memory.NewApprovalRepository()
+
+	workspaceID := common.WorkspaceID("ws-replan-missing")
+	runID := common.RunID("run-replan-missing")
+	goalID := common.GoalID("goal-replan-missing")
+	dodID := common.DoDID("dod-replan-missing")
+	ticketID := common.TicketID("ticket-replan-missing")
+
+	mustNoErr(t, goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "完成目标输出"}))
+	mustNoErr(t, dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"完成补丁并通过测试"}, State: common.DoDStateReady}))
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateBlockedOnDecision, BlockingTicketID: ticketID}))
+	mustNoErr(t, ticketRepo.Create(ctx, ticket(&ticketFixture{
+		id:          ticketID,
+		workspaceID: workspaceID,
+		runID:       runID,
+		kind:        "replan",
+		question:    "自动修复未满足 DoD，请允许重新规划。",
+		reason:      "还缺少必要输入。",
+		context: map[string]any{
+			"missingFields": []any{"workspaceSource"},
+		},
+		state: common.DecisionTicketStateOpen,
+	})))
+
+	var resolveCount int
+	var resumeCount int
+	svc := NewService(Dependencies{
+		Tickets:              ticketRepo,
+		Resolutions:          memory.NewDecisionResolutionRepository(),
+		Approvals:            approvalRepo,
+		Runs:                 runRepo,
+		Goals:                goalRepo,
+		DoDs:                 dodRepo,
+		MemoryItems:          memoryRepo,
+		AutoGovernanceTraces: traceRepo,
+		EventHub:             hub,
+		ResolveDecision: func(context.Context, common.TicketID, string, map[string]any) error {
+			resolveCount++
+			return nil
+		},
+		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
+		ResumeRun: func(context.Context, common.RunID) error {
+			resumeCount++
+			return nil
+		},
+		LoadConfig: testGovernanceConfig(true, 0.82, 5),
+	})
+	mustNoErr(t, svc.Start())
+	defer svc.Stop()
+
+	mustNoErr(t, hub.Publish(ctx, events.Envelope{
+		Topic:       events.TopicTicketCreated,
+		SubjectType: "ticket",
+		SubjectID:   string(ticketID),
+		WorkspaceID: string(workspaceID),
+		RunID:       string(runID),
+	}))
+
+	if resolveCount != 0 || resumeCount != 0 {
+		t.Fatalf("resolve/resume count = %d/%d, want 0/0", resolveCount, resumeCount)
+	}
+	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"))
+	if err != nil {
+		t.Fatalf("get trace: %v", err)
+	}
+	if trace.Status != "escalated" || trace.PolicyBlocked != "missing_replan_fields" {
+		t.Fatalf("trace = %+v, want missing_replan_fields escalation", trace)
+	}
+}
+
 func TestServiceEscalatesRuntimeRepairExhaustionWhenExternalRecoveryRequired(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()

@@ -226,18 +226,63 @@ func providerUnavailableFailureRequiresConfigBlock(failedStep *runModel.Step) bo
 	if failedStep == nil {
 		return false
 	}
-	switch strings.TrimSpace(stringFromMap(failedStep.Output, "stage")) {
+	stage := strings.TrimSpace(stringFromMap(failedStep.Output, "stage"))
+	switch stage {
 	case "llm_provider_stream_error":
 		return false
+	case "llm_provider_client_unavailable",
+		"llm_provider_operation_unsupported",
+		"llm_provider_protocol_invalid":
+		return true
 	case "llm_provider_error",
 		"llm_provider_unavailable",
-		"llm_provider_client_unavailable",
-		"llm_provider_operation_unsupported",
 		"llm_provider_request_failed":
-		return true
+		return providerUnavailableFailureTextRequiresConfigBlock(failedStep)
 	default:
 		return false
 	}
+}
+
+func providerUnavailableFailureTextRequiresConfigBlock(failedStep *runModel.Step) bool {
+	if failedStep == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(strings.Join([]string{
+		stringFromMap(failedStep.Output, "error"),
+		stringFromMap(failedStep.Output, "reason"),
+	}, " ")))
+	if text == "" {
+		return false
+	}
+	configMarkers := []string{
+		"auth_unavailable",
+		"no auth available",
+		"authentication",
+		"unauthorized",
+		"forbidden",
+		"invalid api key",
+		"api key",
+		"missing api",
+		"missing provider",
+		"no provider",
+		"not configured",
+		"provider not configured",
+		"model not found",
+		"unknown model",
+		"unsupported model",
+		"operation unsupported",
+		"unsupported operation",
+		"http status 400",
+		"http status 401",
+		"http status 403",
+		"http status 404",
+	}
+	for _, marker := range configMarkers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (o *RuntimeOrchestrator) blockRecoveryActionFromFailedStep(
@@ -655,7 +700,7 @@ func isRetryableLLMProviderRuntimeFailure(run *runModel.Run, step *runModel.Step
 		return false
 	}
 	if stringFromMap(step.Output, failureOutputKeyClass) == failureClassProviderUnavailable &&
-		strings.TrimSpace(stringFromMap(step.Output, "stage")) == "llm_provider_stream_error" {
+		!providerUnavailableFailureRequiresConfigBlock(step) {
 		return true
 	}
 	switch stringFromMap(step.Output, failureOutputKeyClass) {
@@ -849,7 +894,7 @@ func (o *RuntimeOrchestrator) knownReadableDecisionBlockerCanAutoRepair(ctx cont
 	if err != nil || step == nil || step.State != common.StepStateCompleted {
 		return false
 	}
-	context := o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, nil, ticket.Context)
+	context := o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, nil, ticket.Context, ticket.Question, ticket.Reason)
 	return knownReadableWorkspaceResourceDecisionContext(context)
 }
 
@@ -1279,14 +1324,23 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			input["repairObjective"] = repairObjectiveConcreteValidationEvidence
 			input["evidenceRepairRequired"] = true
 			input["verificationEvidenceGap"] = cloneStepPayload(diagnostics)
-			input["repairGuidance"] = []string{
-				"Do not repeat assessment-only validation.",
-				"Add or run concrete implementation and tests/assertions for the missing DoD evidence.",
-				"Rerun the targeted verification command and use that new step as evidence.",
-			}
+			input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
 		}
 	}
 	assessmentOnlyCoverageRepair := doDCoverageContractCorrectionRequired(failedStep)
+	concreteEvidenceRepair := !assessmentOnlyCoverageRepair && doDVerificationEvidenceRepairRequired(failedStep)
+	if concreteEvidenceRepair {
+		input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+		input["evidenceRepairRequired"] = true
+		input["verificationEvidenceGap"] = map[string]any{
+			"kind":           "dod_verification_evidence_gap",
+			"failedStepId":   string(failedStep.ID),
+			"failedStepKind": string(failedStep.Kind),
+			"missingDoD":     missingDoDItemsFromFailureOutput(failedStep.Output),
+		}
+		input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
+		delete(input, "stateChangingOutputRequired")
+	}
 	if assessmentOnlyCoverageRepair {
 		input[stepInputKeySoulStage] = soulStageValidation
 		setRuntimeStage(input, runtimeStageVerification)
@@ -1310,7 +1364,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input["executionTimeoutRetryAllowed"] = true
 		input["repairGuidance"] = transientExecutionRetryGuidance()
 	}
-	if !assessmentOnlyCoverageRepair && stateChangingRepairRequired(run, failedStep, execErr) {
+	if !assessmentOnlyCoverageRepair && !concreteEvidenceRepair && stateChangingRepairRequired(run, failedStep, execErr) {
 		input["repairObjective"] = repairObjectiveStateChangingOutput
 		input["stateChangingOutputRequired"] = true
 		input["repairGuidance"] = stateChangingRepairGuidance()
@@ -1362,9 +1416,15 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	patchContext := o.runtimeRepairPatchContext(ctx, run, failedStep)
 	if len(patchContext) > 0 {
 		input["patchRepairContext"] = patchContext
+		if suggestions := o.runtimeRepairPatchSuggestions(ctx, run, failedStep); len(suggestions) > 0 {
+			input["patchRepairSuggestions"] = suggestions
+		}
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Use patchRepairContext as the current target snapshot for patch repair; treat the failed patch text as stale or untrusted.",
-			"If the failed patch reports a hunk/context/base mismatch, prefer a complete patch/apply file_write from the current snapshot, or generate a new diff with exact current context.",
+			"Use complete patch/apply file_write only when the current snapshot is marked safeForFileWrite/contentComplete and contains no redaction markers; otherwise use a minimal unified_diff with exact visible context, file/edit with exact oldText, or first read the target.",
+			"Never copy [REDACTED], [SECRET], [MASKED], omitted sections, or truncated snapshot text into patch/apply content or diff.",
+			"If patchRepairSuggestions are present, prefer their exact oldText/newText replacement evidence to construct the smallest current unified_diff or file/edit repair.",
+			"If the current target snapshot proves the failed patch is no longer required, return a bounded verification evidence graph instead of another patch; do not use read-only inspection as the only evidence.",
 		)
 	}
 	targetContext := o.runtimeRepairFailureTargetContext(ctx, run, failedStep)
@@ -1419,6 +1479,7 @@ func inheritPriorRepairContext(input map[string]any, failedStep *runModel.Step) 
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Preserve inherited repair context from the previous repair attempt; it contains the current target snapshots needed for direct state-changing recovery.",
 			"Use inherited target snapshots and workspace manifest to produce patch/apply artifacts instead of retrying rejected shell-only or read-only recovery output.",
+			"Do not generate file_write from inherited snapshots unless the snapshot is complete and not redacted; use exact minimal diffs or file/read when content is incomplete.",
 		)
 	}
 }
@@ -1432,9 +1493,20 @@ func stateChangingRepairGuidance() []string {
 		"Do not use shell/command to modify workspace files when a patch/apply state-change artifact can represent the change; use shell/command for bounded preparation or verification after the patch.",
 		"When failedStepOutput identifies concrete target resources, treat those target snapshots as authoritative and repair the target directly instead of changing unrelated prerequisite metadata.",
 		"When a workspace already contains known resources, reconcile the repair with those existing resources and prefer the smallest coherent state change over broad replacement.",
+		"When repair context contains redacted or truncated content, do not copy it into patch/apply; first read the target or produce a minimal exact diff from visible current evidence.",
 		"Do not return self-inspection, run snapshot, observability, or context rehydration graphs when effective Goal and DoD are already present.",
 		"If a target file is missing in an empty or new workspace, create it with patch/apply file_write instead of reading it again.",
 		"Do not use placeholders such as __FROM_PREVIOUS_STEP_OUTPUT__ or <<...>>.",
+	}
+}
+
+func concreteValidationEvidenceRepairGuidance() []string {
+	return []string{
+		"Do not repeat assessment-only validation.",
+		"Produce concrete verification evidence for the failed Goal/DoD coverage before changing implementation.",
+		"Return a bounded executionGraph that runs available verification capabilities, or return a failed dodAssessment/blocker if concrete evidence cannot be produced.",
+		"Do not use read-only inspection, self-inspection, run snapshot, observability, or context rehydration graphs as evidence repair.",
+		"If a verification command or tool later fails with concrete diagnostics, that failure may drive a separate state-changing repair.",
 	}
 }
 
@@ -1601,6 +1673,9 @@ func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, e
 	if failedStep == nil {
 		return false
 	}
+	if doDVerificationEvidenceRepairRequired(failedStep) {
+		return false
+	}
 	if boolValue(failedStep.Input["stateChangingOutputRequired"]) {
 		return true
 	}
@@ -1651,6 +1726,65 @@ func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, e
 		"patch diff is required",
 		"patch_dispatch_invalid",
 	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func doDVerificationEvidenceRepairRequired(failedStep *runModel.Step) bool {
+	if failedStep == nil || runtimeStageFromStepInput(failedStep.Input) != runtimeStageVerification {
+		return false
+	}
+	class := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(failedStep.Output, failureOutputKeyClass),
+		stringFromMap(mapFromValue(failedStep.Output["runtimeDiagnostics"]), failureOutputKeyClass),
+	))
+	signature := strings.ToLower(strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeySignature)))
+	if class != failureClassDoDCoverageMissing && !strings.Contains(signature, "class="+failureClassDoDCoverageMissing) {
+		return false
+	}
+	if len(missingDoDItemsFromFailureOutput(failedStep.Output)) == 0 && len(missingGoalCoverageFromFailureOutput(failedStep.Output)) == 0 {
+		return false
+	}
+	return doDAssessmentIndicatesEvidenceGap(doDAssessmentFromOutput(failedStep.Output))
+}
+
+func doDAssessmentIndicatesEvidenceGap(assessment map[string]any) bool {
+	if len(assessment) == 0 || boolValue(assessment["satisfied"]) {
+		return false
+	}
+	text := strings.ToLower(strings.Join([]string{
+		stringFromMap(assessment, "summary"),
+		stringFromMap(assessment, "verificationSummary"),
+		stringFromMap(assessment, "goalOutcome"),
+		strings.Join(stringSliceFromValue(assessment["knownLimitations"]), "\n"),
+		strings.Join(stringSliceFromValue(assessment["nextActions"]), "\n"),
+		strings.Join(stringSliceFromValue(assessment["residualRisks"]), "\n"),
+	}, "\n"))
+	if text == "" {
+		return false
+	}
+	evidenceMarkers := []string{
+		"evidence",
+		"verification",
+		"verified",
+		"not verified",
+		"not run",
+		"not executed",
+		"no actual verification",
+		"证据",
+		"验证",
+		"未经验证",
+		"未验证",
+		"未执行",
+		"未经过",
+		"缺少验证",
+		"缺少具体",
+		"无实际验证",
+	}
+	for _, marker := range evidenceMarkers {
 		if strings.Contains(text, marker) {
 			return true
 		}
@@ -1754,6 +1888,45 @@ func (o *RuntimeOrchestrator) runtimeRepairPatchContext(ctx context.Context, run
 		if len(item) > 0 {
 			ret = append(ret, item)
 		}
+	}
+	return ret
+}
+
+func (o *RuntimeOrchestrator) runtimeRepairPatchSuggestions(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
+	if o == nil || o.workspaces == nil || run == nil || failedStep == nil {
+		return nil
+	}
+	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
+	if err != nil || workspace == nil || strings.TrimSpace(workspace.WorkingDirectory) == "" {
+		return nil
+	}
+	targetRefs := patchRepairTargetRefs(failedStep)
+	if len(targetRefs) == 0 {
+		return nil
+	}
+	patches := patchRepairRequestsFromStep(failedStep)
+	if len(patches) == 0 {
+		return nil
+	}
+	allowedTargets := map[string]bool{}
+	for _, targetRef := range targetRefs {
+		allowedTargets[strings.TrimSpace(targetRef)] = true
+	}
+	var ret []map[string]any
+	for _, request := range patches {
+		if len(ret) >= 5 {
+			break
+		}
+		if request.PatchType != "unified_diff" || strings.TrimSpace(request.Diff) == "" {
+			continue
+		}
+		if len(allowedTargets) > 0 && !allowedTargets[request.TargetRef] {
+			continue
+		}
+		ret = append(ret, patchRepairSuggestionsForDiff(workspace.WorkingDirectory, request.TargetRef, request.Diff)...)
+	}
+	if len(ret) > 5 {
+		return ret[:5]
 	}
 	return ret
 }
@@ -1978,15 +2151,125 @@ func patchRepairTargetSnapshot(workingDirectory string, targetRef string) map[st
 	}
 	if patchRepairLooksBinary(data) {
 		item["isBinary"] = true
+		item["contentComplete"] = false
+		item["safeForFileWrite"] = false
 		return item
 	}
 	content := string(data)
+	contentComplete := true
 	if len(content) > maxPatchRepairSnapshotBytes {
 		content = content[:maxPatchRepairSnapshotBytes]
 		item["truncated"] = true
+		contentComplete = false
 	}
 	item["content"] = content
+	item["contentComplete"] = contentComplete
+	item["redacted"] = containsRuntimeRedactionMarker(content)
+	item["safeForFileWrite"] = contentComplete && !containsRuntimeRedactionMarker(content)
 	return item
+}
+
+func patchRepairRequestsFromStep(step *runModel.Step) []runtimePatchRequest {
+	if step == nil {
+		return nil
+	}
+	var ret []runtimePatchRequest
+	add := func(value map[string]any) {
+		if len(value) == 0 {
+			return
+		}
+		if strings.TrimSpace(stringFromMap(value, "patchType")) == "" &&
+			strings.TrimSpace(stringFromMap(value, "operation")) == "" &&
+			strings.TrimSpace(stringFromMap(value, "diff")) != "" {
+			value = cloneStepPayload(value)
+			value["patchType"] = "unified_diff"
+		}
+		request, err := runtimePatchRequestFromMap(value)
+		if err != nil {
+			return
+		}
+		ret = append(ret, request)
+	}
+	add(step.Input)
+	add(step.Output)
+	for _, patch := range mapSliceFromValue(step.Output["patches"]) {
+		add(patch)
+	}
+	if failedInput := mapFromValue(step.Output["failedStepInput"]); len(failedInput) > 0 {
+		add(failedInput)
+	}
+	if failedOutput := mapFromValue(step.Output["failedStepOutput"]); len(failedOutput) > 0 {
+		add(failedOutput)
+		for _, patch := range mapSliceFromValue(failedOutput["patches"]) {
+			add(patch)
+		}
+	}
+	return ret
+}
+
+func patchRepairSuggestionsForDiff(workingDirectory string, targetRef string, diff string) []map[string]any {
+	target, err := workspaceTargetPath(workingDirectory, targetRef)
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(target)
+	if err != nil || patchRepairLooksBinary(data) {
+		return nil
+	}
+	filePatch, err := parseSingleFileUnifiedDiff(diff)
+	if err != nil || !diffTargetMatches(targetRef, filePatch) {
+		return nil
+	}
+	content := string(data)
+	contentHash := sha256HexBytes(data)
+	var ret []map[string]any
+	seen := map[string]bool{}
+	for _, hunk := range filePatch.Hunks {
+		oldText, newText := patchRepairReplacementText(hunk)
+		if oldText == "" || oldText == newText {
+			continue
+		}
+		if containsRuntimeRedactionMarker(oldText) || containsRuntimeRedactionMarker(newText) {
+			continue
+		}
+		if strings.Count(content, oldText) != 1 {
+			continue
+		}
+		key := oldText + "\x00" + newText
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		ret = append(ret, map[string]any{
+			"targetRef":      targetRef,
+			"patchType":      "unified_diff",
+			"oldText":        oldText,
+			"newText":        newText,
+			"contentHash":    contentHash,
+			"matchCount":     1,
+			"source":         "failed_patch_current_snapshot_unique_replacement",
+			"guidance":       "Use this exact current oldText/newText replacement to construct the smallest unified_diff or file/edit repair; do not copy redacted or truncated snapshot content.",
+			"safeForMinimal": true,
+		})
+	}
+	return ret
+}
+
+func patchRepairReplacementText(hunk unifiedDiffHunk) (string, string) {
+	var oldLines []string
+	var newLines []string
+	for _, line := range hunk.Lines {
+		if line == "" {
+			continue
+		}
+		switch line[0] {
+		case '-':
+			oldLines = append(oldLines, line[1:])
+		case '+':
+			newLines = append(newLines, line[1:])
+		}
+	}
+	return strings.Join(oldLines, "\n"), strings.Join(newLines, "\n")
 }
 
 func patchRepairLooksBinary(data []byte) bool {
@@ -2008,7 +2291,7 @@ func (o *RuntimeOrchestrator) convertedDecisionReadableResourceContext(ctx conte
 	if err != nil || workspace == nil || strings.TrimSpace(workspace.WorkingDirectory) == "" {
 		return nil
 	}
-	context = o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, workspace, context)
+	context = o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, workspace, context, stringFromMap(decision, "question"), stringFromMap(decision, "reason"))
 	if !knownReadableWorkspaceResourceDecisionContext(context) {
 		return nil
 	}
@@ -2037,6 +2320,8 @@ func (o *RuntimeOrchestrator) enrichDecisionContextWithReadableWorkspaceResource
 	run *runModel.Run,
 	workspace *workspaceModel.Workspace,
 	context map[string]any,
+	decisionQuestion string,
+	decisionReason string,
 ) map[string]any {
 	if len(context) == 0 || o == nil || run == nil {
 		return context
@@ -2053,7 +2338,13 @@ func (o *RuntimeOrchestrator) enrichDecisionContextWithReadableWorkspaceResource
 	if workingDirectory == "" {
 		return context
 	}
-	fields := append(stringListFromValue(context["missingFields"]), stringListFromValue(context["requiresHumanFields"])...)
+	fields := readableResourceReferenceTexts(context)
+	if decisionQuestion = strings.TrimSpace(decisionQuestion); decisionQuestion != "" {
+		fields = append(fields, decisionQuestion)
+	}
+	if decisionReason = strings.TrimSpace(decisionReason); decisionReason != "" {
+		fields = append(fields, decisionReason)
+	}
 	if len(fields) == 0 {
 		return context
 	}
@@ -2083,6 +2374,12 @@ func (o *RuntimeOrchestrator) enrichDecisionContextWithReadableWorkspaceResource
 		return context
 	}
 	enriched := cloneStepPayload(context)
+	if decisionQuestion != "" {
+		enriched[decisionContextKeyQuestion] = decisionQuestion
+	}
+	if decisionReason != "" {
+		enriched[decisionContextKeyReason] = decisionReason
+	}
 	existing := stringListFromValue(enriched["readableResources"])
 	for _, resource := range resources {
 		if !stringSliceContains(existing, resource) {
@@ -2107,7 +2404,7 @@ func referencedReadableWorkspaceResources(context map[string]any) []string {
 	if len(resources) == 0 {
 		return nil
 	}
-	fields := append(stringListFromValue(context["missingFields"]), stringListFromValue(context["requiresHumanFields"])...)
+	fields := readableResourceReferenceTexts(context)
 	seen := map[string]bool{}
 	var ret []string
 	for _, resource := range resources {

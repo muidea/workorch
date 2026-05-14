@@ -1931,6 +1931,39 @@ func TestApplyWorkspacePatchAcceptsRangeLessUnifiedDiff(t *testing.T) {
 	}
 }
 
+func TestApplyWorkspacePatchAcceptsUnifiedDiffWithDriftedLineNumberWhenContextIsUnique(t *testing.T) {
+	workingDirectory := t.TempDir()
+	target := filepath.Join(workingDirectory, "handler", "handler_test.go")
+	original := "package handler\n\nimport (\n\t\"encoding/json\"\n\t\"net/http\"\n\t\"net/http/httptest\"\n\t\"os\"\n\t\"strings\"\n\t\"testing\"\n\t\"time\"\n\n\t\"ai-gateway/config\"\n)\n"
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("create target dir: %v", err)
+	}
+	if err := os.WriteFile(target, []byte(original), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	err := applyWorkspacePatch(workingDirectory, runtimePatchRequest{
+		TargetRef: "handler/handler_test.go",
+		PatchType: "unified_diff",
+		Diff: "--- handler/handler_test.go\n+++ handler/handler_test.go\n@@ -8,7 +8,7 @@\n" +
+			" \t\"time\"\n" +
+			" \n" +
+			"-\t\"ai-gateway/config\"\n" +
+			"+\t\"openai-gateway/config\"\n" +
+			" )\n",
+	})
+	if err != nil {
+		t.Fatalf("applyWorkspacePatch drifted line diff err = %v", err)
+	}
+	content, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("read target: %v", readErr)
+	}
+	if !strings.Contains(string(content), "\"openai-gateway/config\"") || strings.Contains(string(content), "\"ai-gateway/config\"") {
+		t.Fatalf("content = %q, want drifted line diff applied", string(content))
+	}
+}
+
 func TestApplyWorkspacePatchAcceptsSingleFileApplyPatchStyleDiff(t *testing.T) {
 	workingDirectory := t.TempDir()
 	target := filepath.Join(workingDirectory, "docs", "sample.txt")
@@ -2410,6 +2443,46 @@ func TestRuntimePatchRequestRejectsEmptyFileWriteContent(t *testing.T) {
 	}
 }
 
+func TestRuntimePatchRequestRejectsNonSubstantivePatchPlaceholder(t *testing.T) {
+	_, err := runtimePatchRequestFromMap(map[string]any{
+		"patchType": "file_write",
+		"targetRef": "logger.go",
+		"summary":   "添加注释以确保补丁节点存在",
+		"content": `package main
+
+import "fmt"
+
+// LogMessage prints a message to stdout
+func LogMessage(msg string) {
+	fmt.Println(msg)
+}
+`,
+	})
+	if err == nil || !strings.Contains(err.Error(), "non-substantive state-change placeholder") {
+		t.Fatalf("runtimePatchRequestFromMap error = %v, want non-substantive patch error", err)
+	}
+}
+
+func TestDecisionWithQuestionReferencingReadableWorkspaceFileShouldRepair(t *testing.T) {
+	spec := runtimeDecisionBlockSpec{
+		DecisionKind: "provide_missing_info",
+		Question:     "请提供 handler/handler.go 和 config/config.go 的完整内容。",
+		Reason:       "测试文件引用未定义符号，需要读取实际源文件后修复。",
+		Context: map[string]any{
+			"missingFields":       []any{"actualExportedSymbols"},
+			"requiresHumanFields": []any{"actualExportedSymbols"},
+			"readableResources":   []any{"handler/handler.go", "config/config.go"},
+		},
+	}
+
+	if !knownReadableWorkspaceResourceDecisionSpec(spec) {
+		t.Fatalf("knownReadableWorkspaceResourceDecisionSpec = false, want true for question-referenced workspace files")
+	}
+	if !continuableDecisionShouldRepair(&runmodel.Step{ID: "run-1/step-1"}, spec) {
+		t.Fatalf("continuableDecisionShouldRepair = false, want true for readable workspace resources")
+	}
+}
+
 func TestApplyWorkspaceUnifiedDiffReportsContextMismatch(t *testing.T) {
 	workingDirectory := t.TempDir()
 	targetPath := filepath.Join(workingDirectory, "main_test.go")
@@ -2714,8 +2787,11 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *te
 	if strings.TrimSpace(stringFromMap(item, "contentHash")) == "" {
 		t.Fatalf("patchRepairContext contentHash missing: %#v", item)
 	}
+	if item["contentComplete"] != true || item["safeForFileWrite"] != true {
+		t.Fatalf("patchRepairContext safety = %#v, want complete safe snapshot", item)
+	}
 	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
-	for _, want := range []string{"patchRepairContext", "failed patch text as stale", "hunk/context/base mismatch", "file_write"} {
+	for _, want := range []string{"patchRepairContext", "failed patch text as stale", "safeForFileWrite", "minimal unified_diff", "Never copy [REDACTED]"} {
 		if !strings.Contains(guidance, want) {
 			t.Fatalf("repairGuidance = %q, want %q", guidance, want)
 		}
@@ -2746,6 +2822,74 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *te
 	}
 	if previewPatchContext[0]["targetRef"] != "source.txt" {
 		t.Fatalf("patchRepairContext for preview = %#v, want source.txt target", previewPatchContext[0])
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchRepairSuggestions(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	workingDirectory := t.TempDir()
+	source := "alpha\nold value\nomega\n"
+	if err := os.WriteFile(filepath.Join(workingDirectory, "source.txt"), []byte(source), 0o644); err != nil {
+		t.Fatalf("seed source file: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-patch-repair-suggestion")
+	runID := common.RunID("run-patch-repair-suggestion")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/block/apply"),
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"targetRef": "source.txt",
+			"patchType": "unified_diff",
+			"diff":      "--- a/source.txt\n+++ b/source.txt\n@@ -10,3 +10,3 @@\n-old value\n+new value\n",
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"stage":                   "patch_apply",
+			"error":                   "invalid argument: unified diff hunk context mismatch",
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: "class=patch_apply_failed|targetRef=source.txt",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 1, common.ErrInvalidArgument)
+
+	suggestions := mapSliceFromValue(input["patchRepairSuggestions"])
+	if len(suggestions) != 1 {
+		t.Fatalf("patchRepairSuggestions = %#v, want one suggestion", input["patchRepairSuggestions"])
+	}
+	if suggestions[0]["targetRef"] != "source.txt" || suggestions[0]["oldText"] != "old value" || suggestions[0]["newText"] != "new value" || suggestions[0]["safeForMinimal"] != true {
+		t.Fatalf("patchRepairSuggestions[0] = %#v, want exact old/new replacement", suggestions[0])
+	}
+	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
+	if !strings.Contains(guidance, "patchRepairSuggestions") || !strings.Contains(guidance, "smallest current unified_diff") {
+		t.Fatalf("repairGuidance = %q, want patch repair suggestion guidance", guidance)
+	}
+}
+
+func TestPatchRepairTargetSnapshotMarksRedactedOrTruncatedContentUnsafeForFileWrite(t *testing.T) {
+	workingDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workingDirectory, "secret.txt"), []byte("token [REDACTED]\n"), 0o644); err != nil {
+		t.Fatalf("seed redacted file: %v", err)
+	}
+	large := strings.Repeat("x", maxPatchRepairSnapshotBytes+1)
+	if err := os.WriteFile(filepath.Join(workingDirectory, "large.txt"), []byte(large), 0o644); err != nil {
+		t.Fatalf("seed large file: %v", err)
+	}
+
+	redacted := patchRepairTargetSnapshot(workingDirectory, "secret.txt")
+	if redacted["redacted"] != true || redacted["safeForFileWrite"] != false || redacted["contentComplete"] != true {
+		t.Fatalf("redacted snapshot = %#v, want unsafe redacted complete snapshot", redacted)
+	}
+	truncated := patchRepairTargetSnapshot(workingDirectory, "large.txt")
+	if truncated["truncated"] != true || truncated["contentComplete"] != false || truncated["safeForFileWrite"] != false {
+		t.Fatalf("truncated snapshot = %#v, want unsafe truncated snapshot", truncated)
 	}
 }
 
@@ -3174,6 +3318,62 @@ func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangeForMissingDoDW
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputUsesEvidenceObjectiveForVerificationEvidenceGap(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-dod-evidence-gap")
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/verify"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageVerification,
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied":           false,
+				"summary":             "Current resources exist, but concrete verification evidence is missing.",
+				"verificationSummary": "No actual verification evidence was produced.",
+				"items": []map[string]any{
+					{"item": "deliver verified outcome", "state": "failed"},
+				},
+				"knownLimitations": []string{"not verified"},
+				"nextActions":      []string{"run bounded verification"},
+			},
+			"missingDoDItems": []map[string]any{
+				{"item": "deliver verified outcome", "state": "failed"},
+			},
+		},
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: "ws-repair-dod-evidence-gap",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, common.ErrInvalidArgument)
+
+	if input["repairObjective"] != repairObjectiveConcreteValidationEvidence || boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want concrete evidence objective without state-changing requirement", input)
+	}
+	if input["evidenceRepairRequired"] != true {
+		t.Fatalf("evidenceRepairRequired = %v, want true", input["evidenceRepairRequired"])
+	}
+	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
+	if !strings.Contains(guidance, "concrete verification evidence") || !strings.Contains(guidance, "bounded executionGraph") {
+		t.Fatalf("repairGuidance = %#v, want concrete evidence guidance", input["repairGuidance"])
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputInheritsStateChangingRequirement(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{
@@ -3372,8 +3572,8 @@ func TestRuntimeOrchestrator_LLMInputIncludesExecutionContextPackage(t *testing.
 	if pkg["version"] != executionContextPackageVersion {
 		t.Fatalf("executionContextPackage = %+v, want version %s", pkg, executionContextPackageVersion)
 	}
-	if manifest := mapSliceFromValue(pkg["workspaceFileManifest"]); len(manifest) != 0 {
-		t.Fatalf("workspaceFileManifest = %+v, want no default workspace scan in LLM context package", pkg["workspaceFileManifest"])
+	if manifest := mapSliceFromValue(pkg["workspaceFileManifest"]); len(manifest) != 1 || manifest[0]["path"] != "README.md" {
+		t.Fatalf("workspaceFileManifest = %+v, want bounded current workspace manifest in planning context package", pkg["workspaceFileManifest"])
 	}
 	accepted := mapFromValue(pkg["latestAcceptedResult"])
 	if accepted["id"] != "result-context-package-accepted" {
@@ -3884,6 +4084,60 @@ func TestRuntimeOrchestrator_ExecutionContextPackageDoesNotScanProvidedWorkspace
 	}
 	if manifest := mapSliceFromValue(pkg["workspaceFileManifest"]); len(manifest) != 0 {
 		t.Fatalf("workspaceFileManifest = %+v, want no default workspace scan in LLM context package", pkg["workspaceFileManifest"])
+	}
+}
+
+func TestRuntimeOrchestrator_ExecutionContextPackageIncludesManifestForReplanStateChangingContinuation(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := newCountingWorkspaceRepository()
+	workspaceID := common.WorkspaceID("ws-context-package-replan-manifest")
+	workingDir := t.TempDir()
+	for _, path := range []string{"README.md", "go.mod"} {
+		if err := os.WriteFile(filepath.Join(workingDir, path), []byte("content"), 0o644); err != nil {
+			t.Fatalf("seed workspace file %s: %v", path, err)
+		}
+	}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDir, State: common.WorkspaceStateRunning}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo}
+	runID := common.RunID("run-context-package-replan-manifest")
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		ExecutionContext: map[string]any{
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-context-package-replan-manifest-old",
+				"ticketContext": map[string]any{
+					"failureSignature": "class=runtime_failed|kind=llm/workspace_execution",
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/step-1"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"stateChangingOutputRequired": true,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+		},
+	}
+
+	pkg := orch.runExecutionContextPackage(ctx, run, step, workspace)
+
+	if got := workspaceRepo.getCount.Load(); got != 0 {
+		t.Fatalf("workspace Get count = %d, want 0 when workspace is already provided", got)
+	}
+	manifest := mapSliceFromValue(pkg["workspaceFileManifest"])
+	if len(manifest) != 2 || manifest[0]["path"] != "README.md" || manifest[1]["path"] != "go.mod" {
+		t.Fatalf("workspaceFileManifest = %+v, want current workspace manifest for replan state-changing continuation", pkg["workspaceFileManifest"])
+	}
+	replan := mapFromValue(pkg["replanContinuation"])
+	if mapFromValue(replan["ticketContext"])["failureSignature"] == "" {
+		t.Fatalf("replanContinuation = %+v, want failure context retained", replan)
 	}
 }
 
@@ -5917,6 +6171,55 @@ func TestRuntimeOrchestrator_RetriesLLMProviderStreamErrorBeforeConfigBlock(t *t
 	if specs[0].Input["stateChangingOutputRequired"] != true ||
 		specs[0].Input["repairObjective"] != repairObjectiveStateChangingOutput {
 		t.Fatalf("retry input = %+v, want state-changing repair contract preserved", specs[0].Input)
+	}
+}
+
+func TestRuntimeOrchestrator_RetriesTransientProviderUnavailableBeforeConfigBlock(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-provider-unavailable-retry")
+	failedStepID := common.StepID(runID + "/step-1")
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		runtime: &stubRuntimeAdapter{},
+		steps:   stepRepo,
+		policy:  NormalizeRuntimePolicy(RuntimePolicy{MaxProviderRetryAttempts: 10}),
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     common.WorkspaceID("ws-provider-unavailable-retry"),
+		DoDID:           common.DoDID("dod-provider-unavailable-retry"),
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}
+	failedStep := &runmodel.Step{
+		ID:    failedStepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"status":                  "failed",
+			"stage":                   "llm_provider_unavailable",
+			"error":                   "local error: tls: bad record MAC",
+			failureOutputKeyClass:     failureClassProviderUnavailable,
+			failureOutputKeySignature: "class=provider_unavailable|stage=llm_provider_unavailable|error=local error: tls: bad record mac",
+			"resolutionHint":          "check LLM provider baseURL, model, API key, protocol compatibility, and network availability before rerunning the workspace",
+		},
+	}
+	if err := stepRepo.Create(ctx, failedStep); err != nil {
+		t.Fatalf("seed failed step: %v", err)
+	}
+
+	specs, err := orch.nextDispatchSpecsFromStep(ctx, run, failedStep)
+	if err != nil {
+		t.Fatalf("nextDispatchSpecsFromStep: %v", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("specs = %+v, want provider retry spec", specs)
+	}
+	if specs[0].ID != providerRetryStepID(runID, failedStepID, 1) ||
+		specs[0].Input[stepInputKeyProviderRetryFollowUp] != true ||
+		specs[0].Input[stepInputKeyProviderRetryAttempt] != 1 {
+		t.Fatalf("spec = %+v, want first provider retry for transient provider unavailable", specs[0])
 	}
 }
 
@@ -13223,6 +13526,137 @@ func TestValidateLLMExecutionOutputContractAllowsReadOnlyPlanningGraphWithoutSta
 
 	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want allowed without state-change contract", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsEvidenceRepairShellGraph(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-shell-graph",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-shell-graph/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageRepair,
+			"repairObjective":        repairObjectiveConcreteValidationEvidence,
+			"evidenceRepairRequired": true,
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":    "verify",
+					"kind":  "shell/command",
+					"input": map[string]any{"command": "verify", "args": []string{"--bounded"}},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want evidence repair shell graph allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsPatchRepairNoOpValidationGraph(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-patch-repair-noop-validation",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-patch-repair-noop-validation/repair-001-of-graph-001-003-patch",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"failedStepKind":              "patch/preview",
+			"failedStepOutput": map[string]any{
+				"stage":                   "patch_preview",
+				"error":                   "invalid argument: unified diff hunk context mismatch",
+				failureOutputKeySignature: "class=runtime_failed|kind=patch/preview|stage=patch_preview",
+			},
+			"patchRepairContext": []map[string]any{
+				{"targetRef": "main.go", "exists": true, "contentHash": "hash-main"},
+			},
+		},
+	}
+	output := map[string]any{
+		"status":  "completed",
+		"stage":   "llm_execution_graph_plan",
+		"summary": "Current snapshot already satisfies the intended patch; run bounded verification.",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":    "read-go-mod",
+					"kind":  "file/read",
+					"input": map[string]any{"path": "go.mod"},
+				},
+				{
+					"id":        "build",
+					"kind":      "shell/command",
+					"dependsOn": []string{"read-go-mod"},
+					"input":     map[string]any{"command": "go", "args": []string{"build"}},
+				},
+				{
+					"id":        "test",
+					"kind":      "shell/command",
+					"dependsOn": []string{"build"},
+					"input":     map[string]any{"command": "go", "args": []string{"test", "./..."}},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want patch no-op validation graph allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsPatchRepairReadOnlyNoOpGraph(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-patch-repair-readonly-noop",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-patch-repair-readonly-noop/repair-001-of-graph-001-003-patch",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"failedStepKind":              "patch/apply",
+			"failedStepOutput": map[string]any{
+				"stage":                   "patch_apply",
+				"error":                   "invalid argument: unified diff hunk context mismatch",
+				failureOutputKeySignature: "class=patch_apply_failed|kind=patch/apply|stage=patch_apply",
+			},
+			"patchRepairContext": []map[string]any{
+				{"targetRef": "main.go", "exists": true, "contentHash": "hash-main"},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":    "read-main",
+					"kind":  "file/read",
+					"input": map[string]any{"path": "main.go"},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "executionGraph without patch/apply") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want read-only patch no-op graph rejected", err)
 	}
 }
 

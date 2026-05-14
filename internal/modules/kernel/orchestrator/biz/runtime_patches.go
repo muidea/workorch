@@ -352,6 +352,9 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 	if summary == "" {
 		summary = "workspace patch apply"
 	}
+	if containsNonSubstantivePatchIntent(summary) || containsNonSubstantivePatchIntent(content) || containsNonSubstantivePatchIntent(diff) {
+		return runtimePatchRequest{}, fmt.Errorf("%w: patch describes a non-substantive state-change placeholder", common.ErrInvalidArgument)
+	}
 	return runtimePatchRequest{
 		TargetRef:  targetRef,
 		Content:    content,
@@ -439,10 +442,15 @@ func containsRuntimeRedactionMarker(value string) bool {
 	return runtimeRedactionMarkerPattern.MatchString(value)
 }
 
+func containsNonSubstantivePatchIntent(value string) bool {
+	return nonSubstantivePatchIntentPattern.MatchString(value)
+}
+
 var unresolvedRuntimeSymbolPattern = regexp.MustCompile(`__[A-Z][A-Z0-9_]{8,}__`)
 var unresolvedAnglePlaceholderPattern = regexp.MustCompile(`<<\s*[A-Za-z0-9_-]*(FROM|PATCH|DIFF|CONTENT|IMPLEMENTATION|PLACEHOLDER|TODO)[A-Za-z0-9_\s.-]*\s*>>`)
 var unresolvedPseudoImplementationPattern = regexp.MustCompile(`(?i)(TODO:\s*(implement|fill|replace)|\.\.\.\s*(省略|omitted|placeholder)|省略(实现|代码|内容)|伪代码|占位(实现|代码|内容))`)
 var runtimeRedactionMarkerPattern = regexp.MustCompile(`(?i)\[(?:REDACTED|SECRET|MASKED)\]`)
+var nonSubstantivePatchIntentPattern = regexp.MustCompile(`(?i)(ensure|satisfy|force|only|just).{0,48}(patch|state[-_ ]?change|contract|node)|(?:patch|state[-_ ]?change|contract|node).{0,48}(ensure|satisfy|force|only|just)|确保.{0,24}补丁.{0,24}(节点|存在)|为了.{0,24}(补丁|状态变更|patch)|仅.{0,12}(添加|增加).{0,12}(注释|comment).{0,24}(满足|确保|避免)|占位.{0,12}(补丁|patch|变更)`)
 
 func applyWorkspacePatch(workingDirectory string, request runtimePatchRequest) error {
 	switch request.PatchType {
@@ -1031,18 +1039,34 @@ func unifiedDiffHunkStart(sourceLines []string, cursor int, hunk unifiedDiffHunk
 		if start < 0 {
 			start = 0
 		}
+		oldLines := unifiedDiffHunkOldLines(hunk)
+		if len(oldLines) == 0 || (start >= cursor && start+len(oldLines) <= len(sourceLines) && unifiedDiffOldLinesMatch(sourceLines[start:start+len(oldLines)], oldLines)) {
+			return start, nil
+		}
+		if matchedStart, err := unifiedDiffHunkSearchStart(sourceLines, cursor, oldLines); err == nil {
+			return matchedStart, nil
+		}
 		return start, nil
 	}
+	oldLines := unifiedDiffHunkOldLines(hunk)
+	return unifiedDiffHunkSearchStart(sourceLines, cursor, oldLines)
+}
+
+func unifiedDiffHunkOldLines(hunk unifiedDiffHunk) []string {
 	oldLines := make([]string, 0, len(hunk.Lines))
 	for _, line := range hunk.Lines {
 		if line == "" {
-			return 0, common.ErrInvalidArgument
+			return nil
 		}
 		switch line[0] {
 		case ' ', '-':
 			oldLines = append(oldLines, line[1:])
 		}
 	}
+	return oldLines
+}
+
+func unifiedDiffHunkSearchStart(sourceLines []string, cursor int, oldLines []string) (int, error) {
 	if len(oldLines) == 0 {
 		if len(sourceLines) == 0 {
 			return 0, nil

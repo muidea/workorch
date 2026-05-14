@@ -139,3 +139,34 @@ func TestRemoteEventsBackendReconnectsAndSignalsWorkspaceListRefresh(t *testing.
 		}
 	}
 }
+
+func TestRemoteRunStatusMapsCurrentStepFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/workorch/runs/run-remote/status" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"status":{
+			"id":"run-remote",
+			"workspaceId":"ws-remote",
+			"state":"running",
+			"currentStepId":"run-remote/llm-after-decision",
+			"currentStepKind":"llm/workspace_execution",
+			"currentStepState":"dispatched",
+			"stepCount":6
+		}}`)
+	}))
+	defer server.Close()
+
+	be := NewRemote(server.URL)
+	status, err := be.Run().Status(context.Background(), common.RunID("run-remote"))
+	if err != nil {
+		t.Fatalf("remote run status: %v", err)
+	}
+	if status.CurrentStepID != "run-remote/llm-after-decision" ||
+		status.CurrentStepKind != "llm/workspace_execution" ||
+		status.CurrentStepState != common.StepStateDispatched {
+		t.Fatalf("status current step = %s/%s/%s, want mapped current step fields", status.CurrentStepID, status.CurrentStepKind, status.CurrentStepState)
+	}
+}

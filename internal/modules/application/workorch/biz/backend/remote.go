@@ -257,7 +257,10 @@ func (b *remoteRunBackend) Status(ctx context.Context, id common.RunID) (*RunSta
 	return &RunStatusInfo{
 		ID: common.RunID(s.ID), WorkspaceID: common.WorkspaceID(s.WorkspaceID),
 		State: common.RunState(s.State), StepCount: s.StepCount,
-		DecisionCount: s.DecisionCount, ApprovalCount: s.ApprovalCount,
+		CurrentStepID:    common.StepID(s.CurrentStepID),
+		CurrentStepKind:  s.CurrentStepKind,
+		CurrentStepState: common.StepState(s.CurrentStepState),
+		DecisionCount:    s.DecisionCount, ApprovalCount: s.ApprovalCount,
 		BlockingTicketID:   common.TicketID(s.BlockingTicketID),
 		BlockingApprovalID: common.ApprovalID(s.BlockingApprovalID),
 		FailureReason:      s.FailureReason,

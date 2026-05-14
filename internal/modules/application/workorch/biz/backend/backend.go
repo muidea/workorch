@@ -405,7 +405,9 @@ type RunStatusInfo struct {
 	ID                 common.RunID
 	WorkspaceID        common.WorkspaceID
 	State              common.RunState
+	CurrentStepID      common.StepID
 	CurrentStepKind    string
+	CurrentStepState   common.StepState
 	StepCount          int
 	DecisionCount      int
 	ApprovalCount      int

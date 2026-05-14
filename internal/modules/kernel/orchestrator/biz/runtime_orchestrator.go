@@ -1238,7 +1238,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 
 	nextStepID, nextKind := nextStepSpec(output)
 	if decisionSpec := decisionBlockSpec(output); decisionSpec.Reason != "" {
-		decisionSpec.Context = o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, workspace, decisionSpec.Context)
+		decisionSpec.Context = o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, workspace, decisionSpec.Context, decisionSpec.Question, decisionSpec.Reason)
 		if assessmentOnlyDecisionShouldRepair(step, decisionSpec) || continuableDecisionShouldRepair(step, decisionSpec) {
 			if assessmentOnlyDecisionShouldRepair(step, decisionSpec) {
 				output["assessmentOnlyDecisionConvertedToRepair"] = true
@@ -1425,6 +1425,9 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	}
 	if boolValue(step.Input["stateChangingOutputRequired"]) {
 		if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
+			if allowPatchRepairValidationEvidenceGraph(step, graph) {
+				return nil
+			}
 			if err := validateStateChangingExecutionGraph(graph); err != nil {
 				return err
 			}
@@ -1540,6 +1543,58 @@ func validateStateChangingExecutionGraph(graph runtimemodel.BlockExecutionGraph)
 		return fmt.Errorf("%w: state-changing executionGraph patch/apply depends on llm/workspace_execution before patch", common.ErrInvalidArgument)
 	}
 	return nil
+}
+
+func allowPatchRepairValidationEvidenceGraph(step *runModel.Step, graph runtimemodel.BlockExecutionGraph) bool {
+	if step == nil || step.Input == nil || runtimeStageFromStepInput(step.Input) != runtimeStageRepair {
+		return false
+	}
+	if !boolValue(step.Input["stateChangingOutputRequired"]) || !repairObjectiveRequiresStateChange(stringFromMap(step.Input, "repairObjective")) {
+		return false
+	}
+	if len(mapSliceFromValue(step.Input["patchRepairContext"])) == 0 || !stepRepairsPatchCapabilityFailure(step) {
+		return false
+	}
+	return graphIsConcreteValidationEvidenceGraph(graph)
+}
+
+func stepRepairsPatchCapabilityFailure(step *runModel.Step) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	failedKind := strings.TrimSpace(stringFromMap(step.Input, "failedStepKind"))
+	if failedKind == "patch/preview" || failedKind == "patch/apply" {
+		return true
+	}
+	failedOutput := mapFromValue(step.Input["failedStepOutput"])
+	stage := strings.TrimSpace(stringFromMap(failedOutput, "stage"))
+	if stage == "patch_preview" || strings.HasPrefix(stage, "patch_apply") {
+		return true
+	}
+	signature := strings.ToLower(strings.TrimSpace(stringFromMap(failedOutput, failureOutputKeySignature)))
+	return strings.Contains(signature, "kind=patch/preview") ||
+		strings.Contains(signature, "kind=patch/apply") ||
+		strings.Contains(signature, "class="+failureClassPatchApply)
+}
+
+func graphIsConcreteValidationEvidenceGraph(graph runtimemodel.BlockExecutionGraph) bool {
+	if len(graph.Nodes) == 0 {
+		return false
+	}
+	hasEvidenceProducer := false
+	for _, node := range graph.Nodes {
+		switch strings.TrimSpace(node.Kind) {
+		case "file/read", "file/list", "mcp/resource_read", "mcp/prompt_get":
+			continue
+		case "shell/command", "mcp/tool_call":
+			hasEvidenceProducer = true
+		case "patch/preview", "patch/apply", llmWorkspaceExecutionStepKind:
+			return false
+		default:
+			return false
+		}
+	}
+	return hasEvidenceProducer
 }
 
 func graphHasUngatedStateChangingPatchNode(graph runtimemodel.BlockExecutionGraph) bool {
@@ -1975,7 +2030,7 @@ func (o *RuntimeOrchestrator) knownReadableDecisionRepairSpecs(
 	if decisionSpec.Reason == "" {
 		return nil, false, nil
 	}
-	decisionSpec.Context = o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, nil, decisionSpec.Context)
+	decisionSpec.Context = o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, nil, decisionSpec.Context, decisionSpec.Question, decisionSpec.Reason)
 	if !knownReadableWorkspaceResourceDecisionContext(decisionSpec.Context) {
 		return nil, false, nil
 	}

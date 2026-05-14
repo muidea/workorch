@@ -14,6 +14,7 @@ import (
 	"time"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
@@ -435,7 +436,8 @@ func (s *Service) evaluateTicket(ctx context.Context, ticket *decisionmodel.Tick
 		ret.policyBlocked = "invalid_ticket"
 		return ret
 	}
-	if !strings.EqualFold(strings.TrimSpace(ticket.DecisionKind), "provide_missing_info") {
+	decisionKind := strings.TrimSpace(ticket.DecisionKind)
+	if !decisioncommon.IsSupportedResolutionType(decisionKind) {
 		ret.policyBlocked = "unsupported_decision_kind"
 		return ret
 	}
@@ -474,39 +476,82 @@ func (s *Service) evaluateTicket(ctx context.Context, ticket *decisionmodel.Tick
 		}
 		return recoveryEval
 	}
-	if requiresHumanByQuestion(question, reason) {
-		ret.policyBlocked = "human_confirmation_required"
-		ret.reason = "ticket requires explicit human confirmation"
-		return ret
-	}
-
-	goalText := ""
-	if goal != nil {
-		goalText = strings.TrimSpace(goal.Text)
-	}
-	answer, confidence, answerReason, evidenceRefs := inferMissingInfoAnswer(ticket.Context, question, reason, goalText, dod, memoryItems)
-	minConfidence := cfg.Governance.AutoTicket.MinConfidence
-	if minConfidence <= 0 {
-		minConfidence = 0.82
-	}
-	if strings.TrimSpace(answer) == "" || confidence < minConfidence {
-		ret.policyBlocked = "low_confidence"
+	switch decisionKind {
+	case decisioncommon.ResolutionTypeProvideMissingInfo:
+		if requiresHumanByQuestion(question, reason) {
+			ret.policyBlocked = "human_confirmation_required"
+			ret.reason = "ticket requires explicit human confirmation"
+			return ret
+		}
+		goalText := ""
+		if goal != nil {
+			goalText = strings.TrimSpace(goal.Text)
+		}
+		answer, confidence, answerReason, evidenceRefs := inferMissingInfoAnswer(ticket.Context, question, reason, goalText, dod, memoryItems)
+		minConfidence := cfg.Governance.AutoTicket.MinConfidence
+		if minConfidence <= 0 {
+			minConfidence = 0.82
+		}
+		if strings.TrimSpace(answer) == "" || confidence < minConfidence {
+			ret.policyBlocked = "low_confidence"
+			ret.confidence = confidence
+			ret.reason = "auto answer confidence below threshold"
+			return ret
+		}
+		ret.canAutoResolve = true
+		ret.answer = answer
 		ret.confidence = confidence
-		ret.reason = "auto answer confidence below threshold"
+		ret.reason = answerReason
+		ret.policyBlocked = ""
+		ret.policyMatched = "goal_dod_memory_structured_inference"
+		ret.budgetAfter = budgetUsed + 1
+		if goal != nil && goal.ID != "" {
+			ret.evidenceRefs = append(ret.evidenceRefs, string(goal.ID))
+		}
+		ret.evidenceRefs = append(ret.evidenceRefs, evidenceRefs...)
+		return ret
+	case decisioncommon.ResolutionTypeReplan:
+		if hasManualRequiredMarker(ticket.Context) {
+			ret.policyBlocked = "manual_replan_required"
+			ret.reason = "replan requires explicit human decision fields"
+			return ret
+		}
+		if runtimeRecoveryRequiresExternalOperator(ticket.Context, question, reason) {
+			ret.policyBlocked = "external_recovery_required"
+			ret.reason = "runtime recovery requires external provider or configuration action"
+			return ret
+		}
+		missingFields := stringSliceFromMap(ticket.Context, "missingFields")
+		if len(missingFields) > 0 {
+			ret.policyBlocked = "missing_replan_fields"
+			ret.reason = "replan ticket still has unresolved required fields"
+			return ret
+		}
+		allowedActions := stringSliceFromMap(ticket.Context, "allowedRecoveryActions")
+		if len(allowedActions) > 0 && !stringSliceContainsFold(allowedActions, "replan") {
+			ret.policyBlocked = "replan_not_allowed"
+			ret.reason = "runtime recovery policy does not allow auto replan"
+			return ret
+		}
+		ret.canAutoResolve = true
+		ret.answer = "replan"
+		ret.confidence = 0.9
+		ret.reason = "ticket decision kind is replan and no manual fields remain"
+		ret.policyBlocked = ""
+		ret.policyMatched = "decision_kind_replan_auto_resolve"
+		ret.budgetAfter = budgetUsed + 1
+		ret.resolutionPayload = map[string]any{
+			"recoveryAction": "replan",
+		}
+		if goal != nil && goal.ID != "" {
+			ret.evidenceRefs = append(ret.evidenceRefs, string(goal.ID))
+		}
+		return ret
+	default:
+		ret.policyBlocked = "manual_decision_kind"
+		ret.reason = "decision kind requires manual governance"
 		return ret
 	}
-	ret.canAutoResolve = true
-	ret.answer = answer
-	ret.confidence = confidence
-	ret.reason = answerReason
-	ret.policyBlocked = ""
-	ret.policyMatched = "goal_dod_memory_structured_inference"
-	ret.budgetAfter = budgetUsed + 1
-	if goal != nil && goal.ID != "" {
-		ret.evidenceRefs = append(ret.evidenceRefs, string(goal.ID))
-	}
-	ret.evidenceRefs = append(ret.evidenceRefs, evidenceRefs...)
-	return ret
 }
 
 func evaluateRuntimeRepairExhaustionTicket(ticket *decisionmodel.Ticket, base ticketEvaluation) (bool, ticketEvaluation) {

@@ -702,13 +702,44 @@ func workspaceHistoryCheckedPackage(pkg stableExecutionContextPackage, acceptedR
 	return ret
 }
 
-func (o *RuntimeOrchestrator) executionContextWorkspaceFileManifest(_ context.Context, _ *runModel.Run, step *runModel.Step, _ *workspaceModel.Workspace) []map[string]any {
+func (o *RuntimeOrchestrator) executionContextWorkspaceFileManifest(ctx context.Context, run *runModel.Run, step *runModel.Step, workspace *workspaceModel.Workspace) []map[string]any {
 	if step != nil {
 		if manifest := mapSliceFromValue(step.Input[stepInputKeyWorkspaceFileManifest]); len(manifest) > 0 {
 			return compactWorkspaceFileManifest(manifest)
 		}
 	}
-	return nil
+	if !shouldIncludeWorkspaceManifestInExecutionContextPackage(run, step) {
+		return nil
+	}
+	if workspace == nil && o != nil && o.workspaces != nil && run != nil && run.WorkspaceID != "" {
+		loaded, err := o.workspaces.Get(ctx, run.WorkspaceID)
+		if err == nil {
+			workspace = loaded
+		}
+	}
+	if workspace == nil || strings.TrimSpace(workspace.WorkingDirectory) == "" {
+		return nil
+	}
+	return compactWorkspaceFileManifest(workspaceFileManifestFromDirectory(workspace.WorkingDirectory))
+}
+
+func shouldIncludeWorkspaceManifestInExecutionContextPackage(run *runModel.Run, step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	if boolValue(step.Input["stateChangingOutputRequired"]) ||
+		boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) {
+		return true
+	}
+	if run != nil && len(mapFromValue(run.ExecutionContext["replanContinuation"])) > 0 {
+		return true
+	}
+	switch runtimeStageFromStepInput(step.Input) {
+	case runtimeStageExploration, runtimeStagePlanning:
+		return true
+	default:
+		return false
+	}
 }
 
 func (o *RuntimeOrchestrator) latestAcceptedResultContext(ctx context.Context, run *runModel.Run) map[string]any {
