@@ -393,7 +393,6 @@ type RunInfo struct {
 type ActivateRunRequest struct {
 	GoalID                common.GoalID
 	DoDID                 common.DoDID
-	LLMProviderID         string
 	DialogLanguage        string
 	SoulID                common.SoulID
 	SkillIDs              []common.SkillID

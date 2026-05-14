@@ -136,7 +136,7 @@ func continuableDecisionShouldRepair(step *runModel.Step, spec runtimeDecisionBl
 		strings.TrimSpace(spec.DecisionKind) != decisioncommon.ResolutionTypeProvideMissingInfo {
 		return false
 	}
-	return continuableCandidateContext(spec.Context)
+	return continuableCandidateContext(spec.Context) || knownReadableWorkspaceResourceDecisionContext(spec.Context)
 }
 
 func continuableCandidateContext(context map[string]any) bool {
@@ -202,6 +202,97 @@ func isExecutionTargetField(value string) bool {
 		}
 	}
 	return false
+}
+
+func knownReadableWorkspaceResourceDecisionContext(context map[string]any) bool {
+	resources := knownReadableWorkspaceResourceNames(context)
+	if len(resources) == 0 {
+		return false
+	}
+	for _, field := range append(stringListFromValue(context["missingFields"]), stringListFromValue(context["requiresHumanFields"])...) {
+		if decisionFieldReferencesKnownResource(field, resources) {
+			return true
+		}
+	}
+	return false
+}
+
+func knownReadableWorkspaceResourceNames(context map[string]any) []string {
+	if len(context) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ret []string
+	add := func(value string) {
+		value = strings.TrimSpace(strings.TrimPrefix(value, "./"))
+		if !isDecisionKnownResourceName(value) || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	collect := func(source map[string]any) {
+		for _, item := range stringListFromValue(source["workspaceFiles"]) {
+			add(item)
+		}
+		for _, item := range stringListFromValue(source["existingFiles"]) {
+			add(item)
+		}
+		for _, item := range stringListFromValue(source["readableResources"]) {
+			add(item)
+		}
+		for _, item := range stringListFromValue(source["knownResources"]) {
+			add(item)
+		}
+		for _, item := range mapSliceFromValue(source[stepInputKeyWorkspaceFileManifest]) {
+			add(stringFromMap(item, "path"))
+		}
+	}
+	collect(context)
+	collect(mapFromValue(context["knownValues"]))
+	return ret
+}
+
+func isDecisionKnownResourceName(value string) bool {
+	if value == "" || strings.Contains(value, "..") {
+		return false
+	}
+	if strings.ContainsAny(value, "/\\.") {
+		return true
+	}
+	return len([]rune(value)) >= 6
+}
+
+func decisionFieldReferencesKnownResource(field string, resources []string) bool {
+	normalizedField := normalizedDecisionRepairText(field)
+	if normalizedField == "" {
+		return false
+	}
+	for _, resource := range resources {
+		normalizedResource := normalizedDecisionRepairText(resource)
+		if normalizedResource == "" || len(normalizedResource) < 4 {
+			continue
+		}
+		if strings.Contains(normalizedField, normalizedResource) {
+			return true
+		}
+	}
+	return false
+}
+
+func convertedDecisionPayload(spec runtimeDecisionBlockSpec) map[string]any {
+	payload := map[string]any{
+		"reason":       spec.Reason,
+		"decisionKind": spec.DecisionKind,
+		"question":     spec.Question,
+	}
+	if spec.TicketID != "" {
+		payload["ticketId"] = string(spec.TicketID)
+	}
+	if len(spec.Context) > 0 {
+		payload["context"] = cloneStepPayload(spec.Context)
+	}
+	return payload
 }
 
 func normalizedDecisionRepairText(value string) string {

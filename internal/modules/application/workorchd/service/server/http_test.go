@@ -479,7 +479,7 @@ func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
 	workspace := createWorkspaceForHTTP(t, mux, "activation http", "workspaces/ws-activation-http")
 	goalID, dodID := defineGoalAndDoDForHTTP(t, mux, workspace.ID)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{"llmProviderId":"reasoning","priority":7}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{"priority":7}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -502,8 +502,8 @@ func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
 	if body.Activation.Run.FailureReason != "" {
 		t.Fatalf("activation failure reason = %q, want provider blocker without business failure reason", body.Activation.Run.FailureReason)
 	}
-	if body.Activation.Run.ExecutionContext[llmcommon.ExecutionContextLLMProviderID] != "reasoning" {
-		t.Fatalf("executionContext = %+v, want selected llm provider", body.Activation.Run.ExecutionContext)
+	if body.Activation.Run.ExecutionContext[llmcommon.ExecutionContextLLMProviderID] != nil {
+		t.Fatalf("executionContext = %+v, want no persisted llm provider binding", body.Activation.Run.ExecutionContext)
 	}
 	if len(body.Activation.Snapshot.Runs) != 1 || body.Activation.Snapshot.Runs[0].ID != body.Activation.Run.ID {
 		t.Fatalf("activation snapshot runs = %+v, want created run", body.Activation.Snapshot.Runs)

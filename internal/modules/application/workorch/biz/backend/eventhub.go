@@ -141,7 +141,6 @@ func (b *eventHubBackend) handleCommand(ctx context.Context, cmd events.CLIComma
 		item, err := b.localBackend.run.Activate(ctx, cmd.WorkspaceID, ActivateRunRequest{
 			GoalID:                common.GoalID(stringValue(cmd.Payload, "goalId")),
 			DoDID:                 common.DoDID(stringValue(cmd.Payload, "doDId")),
-			LLMProviderID:         stringValue(cmd.Payload, "llmProviderId"),
 			DialogLanguage:        stringValue(cmd.Payload, "dialogLanguage"),
 			SoulID:                common.SoulID(stringValue(cmd.Payload, "soulId")),
 			SkillIDs:              skillIDsValue(cmd.Payload, "skillIds"),
@@ -507,7 +506,6 @@ func (b *eventHubRunBackend) Activate(ctx context.Context, wsID common.Workspace
 	result, err := b.parent.sendCommand(ctx, events.CommandRunActivate, wsID, "", "run", "", map[string]any{
 		"goalId":                string(req.GoalID),
 		"doDId":                 string(req.DoDID),
-		"llmProviderId":         req.LLMProviderID,
 		"dialogLanguage":        req.DialogLanguage,
 		"soulId":                string(req.SoulID),
 		"skillIds":              skillIDStrings(req.SkillIDs),

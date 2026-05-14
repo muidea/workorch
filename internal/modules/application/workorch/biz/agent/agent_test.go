@@ -35,7 +35,7 @@ func TestAgentRunCompletesFromBackendEvent(t *testing.T) {
 	a := NewWithBackend(be)
 	done := make(chan error, 1)
 	go func() {
-		done <- a.RunWithBackend(context.Background(), "ws-1", "test goal", "")
+		done <- a.RunWithBackend(context.Background(), "ws-1", "test goal")
 	}()
 
 	select {

@@ -151,11 +151,11 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		}
 		return o.FailRun(ctx, currentRun.ID, firstErr.Error())
 	}
-	last := latestCompletedGraphStep(steps)
+	last := latestCompletedGraphBatchStep(steps, specs)
 	if last == nil {
 		return common.ErrConflict
 	}
-	if graph, ok := runtimeGraphSpecFromStep(last); ok {
+	if graph, ok := runtimeGraphSpecForContinuation(steps, last); ok {
 		if nextSpecs := o.readyGraphStepSpecsFromSteps(ctx, currentRun, last, graph, steps); len(nextSpecs) > 0 {
 			return o.dispatchGraphStepBatchWithWorkspace(ctx, currentRun, nextSpecs, workspace)
 		}
@@ -202,6 +202,20 @@ func runtimeGraphSpecFromStep(step *runModel.Step) (runtimemodel.BlockExecutionG
 		return graph, true
 	}
 	return runtimeGraphSpecFromValue(step.Input[stepOutputKeyExecutionGraph])
+}
+
+func runtimeGraphSpecForContinuation(steps []*runModel.Step, last *runModel.Step) (runtimemodel.BlockExecutionGraph, bool) {
+	if rootStepID := graphRootStepID(last); rootStepID != "" {
+		for _, step := range steps {
+			if step != nil && step.ID == rootStepID {
+				if graph, ok := runtimeGraphSpecFromStep(step); ok {
+					return graph, true
+				}
+				break
+			}
+		}
+	}
+	return runtimeGraphSpecFromStep(last)
 }
 
 func runtimeGraphSpecFromValue(value any) (runtimemodel.BlockExecutionGraph, bool) {
@@ -683,6 +697,41 @@ func latestCompletedGraphStep(steps []*runModel.Step) *runModel.Step {
 		}
 	}
 	return nil
+}
+
+func latestCompletedGraphBatchStep(steps []*runModel.Step, specs []stepDispatchSpec) *runModel.Step {
+	if len(specs) == 0 {
+		return latestCompletedGraphStep(steps)
+	}
+	dispatched := map[common.StepID]bool{}
+	var rootStepID common.StepID
+	for _, spec := range specs {
+		if spec.ID != "" {
+			dispatched[spec.ID] = true
+		}
+		if rootStepID == "" && spec.Input != nil {
+			root := strings.TrimSpace(stringFromMap(spec.Input, stepInputKeyGraphRootStepID))
+			if root != "" {
+				rootStepID = common.StepID(root)
+			}
+		}
+	}
+	for idx := len(steps) - 1; idx >= 0; idx-- {
+		step := steps[idx]
+		if step != nil && step.State == common.StepStateCompleted && dispatched[step.ID] && graphNodeID(step) != "" {
+			return step
+		}
+	}
+	if rootStepID == "" {
+		return latestCompletedGraphStep(steps)
+	}
+	for idx := len(steps) - 1; idx >= 0; idx-- {
+		step := steps[idx]
+		if step != nil && step.State == common.StepStateCompleted && graphNodeID(step) != "" && sameGraphRoot(step, rootStepID) {
+			return step
+		}
+	}
+	return latestCompletedGraphStep(steps)
 }
 
 func latestFailedRepairableGraphStep(steps []*runModel.Step) *runModel.Step {

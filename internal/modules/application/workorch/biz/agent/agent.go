@@ -91,7 +91,7 @@ func (a *Agent) Close() {
 	a.closeOnce.Do(func() {})
 }
 
-func (a *Agent) RunWithBackend(ctx context.Context, workspaceID string, goalText string, llmProviderID string) error {
+func (a *Agent) RunWithBackend(ctx context.Context, workspaceID string, goalText string) error {
 	defer close(a.events)
 	if a.be == nil {
 		return fmt.Errorf("agent backend is required")
@@ -136,9 +136,8 @@ func (a *Agent) RunWithBackend(ctx context.Context, workspaceID string, goalText
 		return fmt.Errorf("define dod: %w", err)
 	}
 	run, err := a.be.Run().Activate(ctx, common.WorkspaceID(workspaceID), backend.ActivateRunRequest{
-		GoalID:        goal.ID,
-		DoDID:         dod.ID,
-		LLMProviderID: llmProviderID,
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
 	})
 	if err != nil {
 		return fmt.Errorf("activate execution: %w", err)

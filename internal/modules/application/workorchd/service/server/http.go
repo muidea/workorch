@@ -375,7 +375,6 @@ type createRunRequest struct {
 type activateWorkspaceExecutionRequest struct {
 	GoalID                string            `json:"goalId,omitempty"`
 	DoDID                 string            `json:"doDId,omitempty"`
-	LLMProviderID         string            `json:"llmProviderId,omitempty"`
 	SoulID                string            `json:"soulId,omitempty"`
 	SoulBindings          map[string]string `json:"soulBindings,omitempty"`
 	SkillIDs              []string          `json:"skillIds,omitempty"`
@@ -1990,7 +1989,6 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 		item, err := state.activateWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, appservice.ActivateWorkspaceExecutionCommand{
 			GoalID:                req.GoalID,
 			DoDID:                 req.DoDID,
-			LLMProviderID:         req.LLMProviderID,
 			SoulID:                req.SoulID,
 			SoulBindings:          req.SoulBindings,
 			SkillIDs:              req.SkillIDs,

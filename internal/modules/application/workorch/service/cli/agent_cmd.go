@@ -20,14 +20,12 @@ var agentCmd = &cobra.Command{
 }
 
 func init() {
-	agentCmd.Flags().String("llm-provider", "", "LLM provider ID")
 	rootCmd.AddCommand(agentCmd)
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
 	goalText := strings.Join(args, " ")
 	ctx := context.Background()
-	llmProvider, _ := cmd.Flags().GetString("llm-provider")
 	wsID := defaultWorkspaceID
 	if wsID == "" {
 		created, err := mustBackend().Workspace().Create(ctx, backend.CreateWorkspaceRequest{
@@ -45,7 +43,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	defer a.Close()
 
 	go func() {
-		_ = a.RunWithBackend(ctx, wsID, goalText, llmProvider)
+		_ = a.RunWithBackend(ctx, wsID, goalText)
 	}()
 
 	for evt := range a.Events() {

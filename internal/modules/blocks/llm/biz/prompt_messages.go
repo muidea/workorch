@@ -376,6 +376,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			"requirements": []string{
 				"Assess the current evidence against the effective Goal and DoD",
 				"Return completed or failed with dodAssessment, or a real requiredDecision/requiredApproval",
+				"When Goal requirements are not textually identical to DoD items, include dodAssessment.goalCoverage with item-level evidenceRefs",
 				"Treat runtimeStage=verification or acceptance as strict convergence stages; do not reopen exploration or implementation planning in these stages",
 				"Before returning blocked_on_decision, reconcile the question with the current, decision, planning, and execution Soul policies; do not ask for information that those policies explicitly say is not required",
 				"When evidence is insufficient but the missing work can be handled by later runtime repair or replan, return failed with dodAssessment.nextActions instead of asking the user to choose the execution target",

@@ -374,6 +374,9 @@ func goalCoverageRawItems(text string) []string {
 		if strings.HasPrefix(line, "#") {
 			continue
 		}
+		if classifyDoDItemKind(line) != doDItemKindLeaf {
+			continue
+		}
 		ret = append(ret, line)
 	}
 	if len(ret) == 0 {

@@ -218,7 +218,6 @@ func slimExecutionContextForStepInput(executionContext map[string]any) map[strin
 		"locale",
 		"systemLanguage",
 		"systemLocale",
-		"llmProviderId",
 		"llmOperation",
 		"soulId",
 	} {

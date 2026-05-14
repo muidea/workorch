@@ -787,7 +787,6 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
 		GoalID:         goal.ID,
 		DoDID:          dod.ID,
-		LLMProviderID:  "reasoning",
 		SoulID:         "soul-activation-context",
 		SkillIDs:       []string{"skill-activation-context"},
 		MCPServerIDs:   []string{"mcp-activation-context"},
@@ -806,8 +805,8 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	if executionContext["soulId"] != "soul-activation-context" {
 		t.Fatalf("executionContext = %+v, want selected soul", executionContext)
 	}
-	if executionContext[llmcommon.ExecutionContextLLMProviderID] != "reasoning" {
-		t.Fatalf("executionContext = %+v, want selected llm provider", executionContext)
+	if executionContext[llmcommon.ExecutionContextLLMProviderID] != nil {
+		t.Fatalf("executionContext = %+v, want no persisted llm provider binding", executionContext)
 	}
 	if executionContext["dialogLanguage"] != "zh-CN" {
 		t.Fatalf("executionContext = %+v, want dialog language", executionContext)
@@ -841,8 +840,8 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	if stepContext["soulId"] != "soul-activation-context" {
 		t.Fatalf("first step input = %+v, want execution context propagated", runSnapshot.Steps[0].Input)
 	}
-	if stepContext[llmcommon.ExecutionContextLLMProviderID] != "reasoning" {
-		t.Fatalf("first step input = %+v, want llm provider propagated", runSnapshot.Steps[0].Input)
+	if stepContext[llmcommon.ExecutionContextLLMProviderID] != nil {
+		t.Fatalf("first step input = %+v, want no persisted llm provider binding", runSnapshot.Steps[0].Input)
 	}
 	if stepContext["dialogLanguage"] != "zh-CN" {
 		t.Fatalf("first step input = %+v, want dialog language propagated", runSnapshot.Steps[0].Input)
@@ -1926,9 +1925,8 @@ func TestActivateWorkspaceExecutionWithBackendAutoSelectsSkillAndBindsRequiredMC
 	}
 
 	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
-		GoalID:        goal.ID,
-		DoDID:         dod.ID,
-		LLMProviderID: "reasoning",
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
 	})
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)

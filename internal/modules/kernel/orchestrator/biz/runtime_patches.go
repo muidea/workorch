@@ -343,6 +343,12 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 	if patchType == "unified_diff" && containsUnresolvedRuntimeTemplate(diff) {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch diff contains unresolved runtime template placeholders", common.ErrInvalidArgument)
 	}
+	if patchType == "file_write" && containsRuntimeRedactionMarker(content) {
+		return runtimePatchRequest{}, fmt.Errorf("%w: patch content contains redacted runtime markers", common.ErrInvalidArgument)
+	}
+	if patchType == "unified_diff" && containsRuntimeRedactionMarker(diff) {
+		return runtimePatchRequest{}, fmt.Errorf("%w: patch diff contains redacted runtime markers", common.ErrInvalidArgument)
+	}
 	if summary == "" {
 		summary = "workspace patch apply"
 	}
@@ -423,17 +429,20 @@ func isReservedWorkspaceReportPatchTarget(cleanTarget string) bool {
 }
 
 func containsUnresolvedRuntimeTemplate(value string) bool {
-	if strings.Contains(value, "{{") && strings.Contains(value, "}}") {
-		return true
-	}
-	return unresolvedRuntimeSymbolPattern.MatchString(value) ||
+	return runtimeTemplatePattern.MatchString(value) ||
+		unresolvedRuntimeSymbolPattern.MatchString(value) ||
 		unresolvedAnglePlaceholderPattern.MatchString(value) ||
 		unresolvedPseudoImplementationPattern.MatchString(value)
+}
+
+func containsRuntimeRedactionMarker(value string) bool {
+	return runtimeRedactionMarkerPattern.MatchString(value)
 }
 
 var unresolvedRuntimeSymbolPattern = regexp.MustCompile(`__[A-Z][A-Z0-9_]{8,}__`)
 var unresolvedAnglePlaceholderPattern = regexp.MustCompile(`<<\s*[A-Za-z0-9_-]*(FROM|PATCH|DIFF|CONTENT|IMPLEMENTATION|PLACEHOLDER|TODO)[A-Za-z0-9_\s.-]*\s*>>`)
 var unresolvedPseudoImplementationPattern = regexp.MustCompile(`(?i)(TODO:\s*(implement|fill|replace)|\.\.\.\s*(省略|omitted|placeholder)|省略(实现|代码|内容)|伪代码|占位(实现|代码|内容))`)
+var runtimeRedactionMarkerPattern = regexp.MustCompile(`(?i)\[(?:REDACTED|SECRET|MASKED)\]`)
 
 func applyWorkspacePatch(workingDirectory string, request runtimePatchRequest) error {
 	switch request.PatchType {
@@ -990,7 +999,7 @@ func applyUnifiedDiffFilePatch(content string, filePatch unifiedDiffFilePatch) (
 			return "", err
 		}
 		if start < cursor || start > len(sourceLines) {
-			return "", common.ErrInvalidArgument
+			return "", fmt.Errorf("%w: unified diff hunk start out of range", common.ErrInvalidArgument)
 		}
 		output = append(output, sourceLines[cursor:start]...)
 		cursor = start
@@ -998,13 +1007,13 @@ func applyUnifiedDiffFilePatch(content string, filePatch unifiedDiffFilePatch) (
 			switch diffLine[0] {
 			case ' ':
 				if cursor >= len(sourceLines) || sourceLines[cursor] != diffLine[1:] {
-					return "", common.ErrInvalidArgument
+					return "", fmt.Errorf("%w: unified diff hunk context mismatch", common.ErrInvalidArgument)
 				}
 				output = append(output, sourceLines[cursor])
 				cursor++
 			case '-':
 				if cursor >= len(sourceLines) || sourceLines[cursor] != diffLine[1:] {
-					return "", common.ErrInvalidArgument
+					return "", fmt.Errorf("%w: unified diff hunk removal mismatch", common.ErrInvalidArgument)
 				}
 				cursor++
 			case '+':

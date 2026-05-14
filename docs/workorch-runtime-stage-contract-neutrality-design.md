@@ -122,6 +122,8 @@ Runtime repair / duplicate / replan 治理必须同时识别两类中立 scope�
 
 当失败签名包含目标级 scope 时，node 名称、step ID、loop 编号或 graph 编号变化不得重置 repair budget。若同一 failure class + target scope 已达到 repair budget，runtime 必须进入 repair exhausted / duplicate / replan 治理，而不是继续派发普通 repair。
 
+目标级 scope 不得跨越当前有效 artifact / graph root 窗口无限合并。若新的 state-changing graph、repair graph 或 successor root 已经重新写入同一 target，后续 build/test/verification 失败应优先按当前 graph root / recovery root 计算 repair budget；历史同 target 失败只能作为上下文证据和风险信号，不得直接耗尽新 artifact 版本的修复机会。
+
 当失败签名不包含目标级 scope 时，runtime 不得臆造业务目标，也不得把无目标失败合并为同一预算；此时继续按完整失败签名、root step 或显式 lineage scope 收敛。
 
 ### Active Run 一致性
@@ -183,6 +185,24 @@ Runtime 必须拒绝：
 当 `execution/strict_convergence` 阶段的非只读步骤失败，且 run 级 contract 要求 `must_produce_state_change` 时，后续 runtime repair 必须继续携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。这包括 shell/test/build、patch/apply、file/edit、MCP tool 等执行或验证 state change 的步骤失败；普通 read observation 失败只有在缺失目标文件、DoD 缺口或其他明确 contract failure 时才提升为 state-changing repair。
 
 若非 LLM 执行步骤失败原因是中立的瞬时执行超时（例如 runtime deadline / timeout，且尚未形成确定性失败证据），runtime repair 不应强制要求 state-changing 输出；应允许一次受预算约束的重试、缩小验证范围或返回 failed assessment / blocker。该规则只基于“执行超时”这一中立失败形态，不得写入特定命令、语言、测试框架或业务领域判断。
+
+当 provider/config 决策解除后需要重试原失败 LLM step 时，decision resolution 只能补充“已授权重试、已提供信息、恢复动作”等恢复上下文，不得覆盖原 step 已存在的 `runtimeStage`、`runtimeStageMode`、`soulStage`、`stateChangingOutputRequired`、`repairObjective` 等阶段合同。换言之，`decision` 是恢复入口，不是被重试任务的执行阶段；provider retry 必须继续继承失败 step 的原阶段语义。
+
+当 execution graph 以并行 batch 方式调度时，batch 完成后的续跑必须以本批次所属 graph root / lineage 为锚点计算 dependency-satisfied 节点，不得用 run 内全局“最新 completed graph step”推断当前 graph。全局最新节点可能属于其他 repair、replan 或历史 graph scope；runtime 必须按当前批次 root 继续推进，直到该 graph scope 内没有可执行节点，再进入 follow-up / verification / acceptance。
+
+### 已知可读资源不得升级为人工缺失信息
+
+在任意阶段中，如果 LLM 返回 `blocked_on_decision/provide_missing_info`，但其 `missingFields` / `requiresHumanFields` 指向的内容已经存在于 runtime 可确认的 workspace manifest、known resource list、read-only evidence 或当前工作目录中，则该 decision 不属于真实人工阻塞。
+
+Runtime 必须按中立规则处理：
+
+- 不得要求用户粘贴已知可读资源的内容。
+- 不得把“已知资源内容未进入当前 prompt”误判为人工缺失信息。
+- 应将该 decision 转换为 runtime repair / continuation，并把对应资源的当前快照或可读取引用放入 repair 输入。
+- `workspaceFiles`、`existingFiles`、`readableResources`、`knownResources`、`workspaceFileManifest` 等字段都只能作为“资源是否已知”的中立证据；若这些字段不完整，runtime 仍应以当前 workspace 工作目录中真实可读资源为准做兜底核对。
+- 若资源读取失败，应按普通 read observation failure 或 workspace path failure 收敛，而不是继续追问用户。
+
+该规则只识别“资源是否已知且可读”这一中立事实，不得写入 `main_test.go`、测试文件、代码文件、业务配置文件等领域特判。Profile 可以决定哪些资源更重要，但 core 只负责避免把可自动读取的信息升级为人工决策。
 
 ## Artifact 中立类型
 
@@ -288,15 +308,40 @@ Repair 不是重新探索。Repair 必须继承来源阶段的约束，并根据
 
 当 run 级 `stateChangePolicy=must_produce_state_change` 且失败输出包含 `missingDoDItems` 时，runtime repair 必须显式携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。后续 provider retry 也必须继承该约束，不能把 DoD 缺口修复降级为只读 exploration graph。
 
+若 `dodAssessment.satisfied=true` 但 runtime 校验发现 DoD / Goal coverage 字段缺失或不完整，该失败属于 assessment contract correction，而不是新的 state-changing implementation 缺口。runtime 必须以 `assessmentOnly` / `verification` 模式要求 LLM 补齐 `dodAssessment.items`、`dodAssessment.goalCoverage` 与 evidenceRefs；不得在没有新的实现缺口证据时强制重新生成 patch、shell 或其他可执行工作。
+
+Goal coverage 校验只应把可判定的叶子需求作为覆盖对象。Markdown 标题、分组项、以冒号结尾的父级目标项只用于组织上下文，不得作为必须单独满足的叶子需求。若 Goal 叶子需求与 DoD 项文字不完全一致，LLM 必须通过 `dodAssessment.goalCoverage` 显式建立 Goal requirement -> evidenceRefs 的映射；runtime 不应依赖领域语义硬编码进行推断。
+
 Repair exhausted 后必须二选一：
 
 - 写 rejected result 并进入 failed / blocked_on_decision。
 - 创建 replan successor run，并保留 predecessor lineage。
 
+为支持 blocked_on_decision 后的继续处理，因 repair exhausted、duplicate failure 或其他可恢复治理点写入的 rejected result 只能代表当时失败窗口的临时结论。若后续已经出现针对该 rejected result source step 的 provider retry、runtime repair 或 decision-authorized retry 进展，该 rejected result 必须转为 `superseded`，不得继续阻断当前 run 的恢复、repair 或最终 acceptance。
+
 ## Provider Retry 合同
 
 Provider retry 始终只处理 provider transient failure，与 stage 语义无关。
 Provider retry 预算必须来自 runtime 配置，默认 `maxProviderRetryAttempts=10`；不得在 core runtime 分支中写死固定业务场景次数。
+
+Provider retry / config blocker 的边界必须基于中立失败形态：
+
+- `timeout`、`rate limit`、`context too large`、`provider stream incomplete`、已完成 stream 但内容为空的 `provider stream error` 等瞬时 provider 执行失败，应先消耗 provider retry 预算。
+- `auth or config`、`schema drift`、明确不支持的 provider operation、明确 client/config unavailable 等配置型失败，可以直接进入 provider/config blocker。
+- provider/config blocker 的 `attempts` 必须记录真实已失败 provider retry 次数，`maxAttempts` 才记录预算上限；不得在未实际重试时把 `attempts` 写成预算上限。
+- provider retry 不得消费或重置业务 repair/replan 预算；它只表示 runtime LLM provider 调用基础设施暂时未产生可用 LLM 输出。
+
+### LLM 运行期动态绑定
+
+LLM provider、model、base URL、context profile、failover 目标等信息属于运行期动态绑定，不属于 workspace/run/step/ticket 的可恢复业务状态。runtime 持久化记录可以保留中立观测指标，例如 token 数、请求/响应字节、耗时、failure class、stream diagnostics，但不得把 provider/model/base URL 作为后续恢复、retry、repair、memory 或 decision 的依据。
+
+因此：
+
+- run activation、CLI、HTTP、backend/eventhub 等入口不得把 `llmProviderId` 写入 run execution context。
+- step input、provider retry input、decision ticket context 和 LLM context compaction 必须剥离 provider/model/base URL 等绑定字段。
+- provider/config blocker 被解决并收到“继续处理 / retry same step”后，runtime 必须重新按当前系统配置动态解析 provider；不得因为历史 step 记录中的旧 provider 继续原地 reblock。
+- provider unavailable / auth or config / schema drift 这类配置型失败可以先进入 config blocker；但 blocker 解决后的 retry 是一次新的运行期绑定，不继承旧 provider 选择。
+- 显式 provider 选择如后续重新支持，必须设计为短生命周期调度参数，而不是持久化恢复状态。
 
 允许：
 
@@ -304,6 +349,7 @@ Provider retry 预算必须来自 runtime 配置，默认 `maxProviderRetryAttem
 - rate limit。
 - context too large。
 - provider stream incomplete。
+- provider stream error with empty content。
 
 禁止：
 
@@ -319,6 +365,7 @@ Runtime LLM 的结构化输出必须以完整 provider 响应为准。
 - HTTP SSE / compatible chat completion provider 只有收到 `[DONE]` 才能把 streamed content 视为完整输出。
 - EOF 但未收到 `[DONE]` 必须归类为 `provider_stream_incomplete`，不得把已收到的 partial delta 交给 LLM decision parser。
 - timeout 且已有 partial stream delta 时仍按 `provider_timeout` 治理，但 failure output 必须记录 `streamDiagnostics`，至少包含 `doneReceived`、`streamIncomplete`、`receivedDeltaCount` 和 `receivedBytes`。
+- 收到 done 但 `receivedBytes=0` / `receivedDeltaCount=0` 时，不得当成有效 LLM 输出；应归类为 provider stream error 并进入 provider retry 预算，预算耗尽后再进入 provider/config blocker。
 - 已收到 done 但 JSON schema 无效时，归类为 LLM decision/schema 问题，不得误判为 provider stream incomplete。
 
 ## 相关文档整理与合并策略

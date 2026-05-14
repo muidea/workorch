@@ -33,7 +33,8 @@ func compactStepOutputForLLMContext(output map[string]any) map[string]any {
 	if len(output) == 0 {
 		return nil
 	}
-	return compactLLMContextMap(output, 0)
+	ret := compactLLMContextMap(output, 0)
+	return stripRuntimeLLMBinding(ret)
 }
 
 func compactWorkspaceFileManifest(manifest []map[string]any) []map[string]any {
@@ -177,7 +178,10 @@ func shouldSkipLLMContextKey(key string) bool {
 	case "executionContext",
 		"failedStepInput",
 		"failedStepOutput",
+		"llmProviderId",
 		"previousStepOutput",
+		"provider",
+		"providerId",
 		stepInputKeyExecutionContextPackage,
 		stepInputKeyWorkspaceFileManifest:
 		return true
@@ -217,4 +221,32 @@ func compactLLMContextEvidenceText(value any) any {
 		"bytes":       len(text),
 		"truncated":   true,
 	}
+}
+
+func stripRuntimeLLMBinding(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	delete(input, "provider")
+	delete(input, "providerId")
+	delete(input, "llmProviderId")
+	if budget := mapFromValue(input["contextBudget"]); len(budget) > 0 {
+		delete(budget, "providerId")
+		delete(budget, "model")
+		delete(budget, "profile")
+		input["contextBudget"] = budget
+	}
+	if usage := mapFromValue(input["llmUsage"]); len(usage) > 0 {
+		delete(usage, "provider")
+		delete(usage, "providerId")
+		delete(usage, "model")
+		if budget := mapFromValue(usage["contextBudget"]); len(budget) > 0 {
+			delete(budget, "providerId")
+			delete(budget, "model")
+			delete(budget, "profile")
+			usage["contextBudget"] = budget
+		}
+		input["llmUsage"] = usage
+	}
+	return input
 }

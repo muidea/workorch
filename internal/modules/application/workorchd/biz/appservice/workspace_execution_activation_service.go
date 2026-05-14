@@ -29,7 +29,6 @@ import (
 type ActivateWorkspaceExecutionCommand struct {
 	GoalID                string            `json:"goalId,omitempty"`
 	DoDID                 string            `json:"doDId,omitempty"`
-	LLMProviderID         string            `json:"llmProviderId,omitempty"`
 	SoulID                string            `json:"soulId,omitempty"`
 	SoulBindings          map[string]string `json:"soulBindings,omitempty"`
 	SkillIDs              []string          `json:"skillIds,omitempty"`
@@ -483,10 +482,6 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	if dialogLanguage != "" {
 		contextData["dialogLanguage"] = dialogLanguage
 	}
-	if llmProviderID := strings.TrimSpace(cmd.LLMProviderID); llmProviderID != "" {
-		contextData[llmcommon.ExecutionContextLLMProviderID] = llmProviderID
-	}
-
 	mcpServerIDs := normalizeStringIDs(cmd.MCPServerIDs)
 	capabilityIDs := normalizeStringIDs(cmd.CapabilityIDs)
 	memoryIDs := normalizeStringIDs(cmd.MemoryIDs)

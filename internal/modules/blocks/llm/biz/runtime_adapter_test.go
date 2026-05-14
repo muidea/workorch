@@ -159,8 +159,8 @@ func TestRuntimeAdapterProjectsContextBudgetToStepOutput(t *testing.T) {
 	if !ok {
 		t.Fatalf("contextBudget = %#v, want projected map", result.Output["contextBudget"])
 	}
-	if budget["providerId"] != "reasoning" || budget["model"] != "test-model" {
-		t.Fatalf("contextBudget = %+v, want provider/model projection", budget)
+	if budget["providerId"] != nil || budget["model"] != nil || budget["profile"] != nil {
+		t.Fatalf("contextBudget = %+v, want no persisted provider/model/profile binding", budget)
 	}
 	if budget["maxBytes"] == nil || budget["actualBytes"] == nil || budget["truncated"] == nil {
 		t.Fatalf("contextBudget = %+v, want required budget fields", budget)
@@ -169,8 +169,8 @@ func TestRuntimeAdapterProjectsContextBudgetToStepOutput(t *testing.T) {
 	if !ok {
 		t.Fatalf("llmUsage = %#v, want usage metadata", result.Output["llmUsage"])
 	}
-	if usage["providerId"] != "reasoning" || usage["model"] != "test-model" || usage["estimated"] != true {
-		t.Fatalf("llmUsage = %+v, want provider/model usage projection", usage)
+	if usage["providerId"] != nil || usage["provider"] != nil || usage["model"] != nil || usage["estimated"] != true {
+		t.Fatalf("llmUsage = %+v, want usage without persisted provider/model binding", usage)
 	}
 	if usage["usageSource"] != llmcommon.UsageSourceEstimated {
 		t.Fatalf("llmUsage = %+v, want estimated usage source", usage)
@@ -1158,8 +1158,7 @@ func TestRuntimeAdapterFailsUnknownRequestedProvider(t *testing.T) {
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("execute err = %v, want invalid argument", err)
 	}
-	provider, ok := result.Output["provider"].(llmmodels.RedactedProviderConfig)
-	if result.Output["stage"] != "llm_provider_unavailable" || !ok || provider.ID != "missing" {
+	if result.Output["stage"] != "llm_provider_unavailable" || result.Output["provider"] != nil {
 		t.Fatalf("output = %+v, want missing provider failure", result.Output)
 	}
 }
@@ -1204,16 +1203,17 @@ func TestRuntimeAdapterFailoverOnRetryableProviderFailure(t *testing.T) {
 		t.Fatalf("output stage = %v, want llm_shell_plan from backup provider", result.Output["stage"])
 	}
 	budget, ok := result.Output["contextBudget"].(map[string]any)
-	if !ok || budget["providerId"] != "backup" || budget["model"] != "backup-model" {
-		t.Fatalf("contextBudget = %+v, want backup provider context projection", result.Output["contextBudget"])
+	if !ok || budget["providerId"] != nil || budget["model"] != nil || budget["profile"] != nil {
+		t.Fatalf("contextBudget = %+v, want budget without provider/model/profile binding", result.Output["contextBudget"])
 	}
 	failover, ok := result.Output["llmFailover"].(map[string]any)
 	if !ok ||
 		failover["attempted"] != true ||
 		failover["success"] != true ||
 		failover["failureClass"] != providerFailureClassRateLimited ||
-		failover["fromProviderId"] != "primary" ||
-		failover["toProviderId"] != "backup" {
+		failover["fromProviderId"] != nil ||
+		failover["toProviderId"] != nil ||
+		failover["resolvedBy"] != nil {
 		t.Fatalf("llmFailover = %+v, want successful failover metadata", result.Output["llmFailover"])
 	}
 }
@@ -1533,7 +1533,8 @@ func TestRuntimeAdapterExposesCompletedDoDAssessment(t *testing.T) {
 		"dodAssessment":{
 			"satisfied":true,
 			"summary":"all checks passed",
-			"items":[{"item":"tests pass","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}]
+			"items":[{"item":"tests pass","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}],
+			"goalCoverage":{"satisfied":true,"items":[{"goal":"goal covered","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}]}
 		}
 	}`)}
 	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
@@ -1553,6 +1554,14 @@ func TestRuntimeAdapterExposesCompletedDoDAssessment(t *testing.T) {
 	items, ok := assessment["items"].([]map[string]any)
 	if !ok || len(items) != 1 {
 		t.Fatalf("dodAssessment items = %+v, want one item", assessment["items"])
+	}
+	coverage, ok := assessment["goalCoverage"].(map[string]any)
+	if !ok {
+		t.Fatalf("goalCoverage = %+v, want map", assessment["goalCoverage"])
+	}
+	coverageItems, ok := coverage["items"].([]map[string]any)
+	if !ok || coverage["satisfied"] != true || len(coverageItems) != 1 || coverageItems[0]["goal"] != "goal covered" {
+		t.Fatalf("goalCoverage = %+v, want preserved goal coverage", assessment["goalCoverage"])
 	}
 }
 

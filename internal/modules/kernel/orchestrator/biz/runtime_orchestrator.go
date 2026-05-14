@@ -377,6 +377,25 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 				r.BlockingTicketID = ""
 				break
 			}
+			if o.runtimeRepairExhaustionBlockerCanAutoResume(ctx, r, ticket) {
+				ticket.State = common.DecisionTicketStateDismissed
+				if err := o.tickets.Update(ctx, ticket); err != nil {
+					return err
+				}
+				resumeAfterStepID = ticket.StepID
+				r.BlockingTicketID = ""
+				break
+			}
+			if o.knownReadableDecisionBlockerCanAutoRepair(ctx, r, ticket) {
+				ticket.State = common.DecisionTicketStateDismissed
+				if err := o.tickets.Update(ctx, ticket); err != nil {
+					return err
+				}
+				resumeAfterStepID = ticket.StepID
+				resumeInput = map[string]any{"knownReadableDecisionRepair": true}
+				r.BlockingTicketID = ""
+				break
+			}
 			return common.ErrBlocked
 		}
 		resumeAfterStepID = ticket.StepID
@@ -1212,12 +1231,14 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 
 	nextStepID, nextKind := nextStepSpec(output)
 	if decisionSpec := decisionBlockSpec(output); decisionSpec.Reason != "" {
+		decisionSpec.Context = o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, workspace, decisionSpec.Context)
 		if assessmentOnlyDecisionShouldRepair(step, decisionSpec) || continuableDecisionShouldRepair(step, decisionSpec) {
 			if assessmentOnlyDecisionShouldRepair(step, decisionSpec) {
 				output["assessmentOnlyDecisionConvertedToRepair"] = true
 			} else {
 				output["continuableDecisionConvertedToRepair"] = true
 			}
+			output["convertedDecision"] = convertedDecisionPayload(decisionSpec)
 			output[stepOutputKeyDoDAssessment] = assessmentOnlyDecisionRepairAssessment(run, step, decisionSpec)
 			delete(output, stepOutputKeyBlockDecisionReason)
 			delete(output, stepOutputKeyBlockDecisionTicketID)
@@ -1885,6 +1906,11 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsAfterResolvedDecision(
 	stepID common.StepID,
 	resumeInput map[string]any,
 ) ([]stepDispatchSpec, error) {
+	if boolValue(resumeInput["knownReadableDecisionRepair"]) {
+		if specs, ok, err := o.knownReadableDecisionRepairSpecs(ctx, run, stepID); ok || err != nil {
+			return specs, err
+		}
+	}
 	if boolValue(resumeInput["providerRetryDecisionRetry"]) {
 		if specs, ok, err := o.providerRetrySpecsAfterResolvedDecision(ctx, run, stepID); ok || err != nil {
 			return specs, err
@@ -1905,7 +1931,7 @@ func (o *RuntimeOrchestrator) providerRetrySpecsAfterResolvedDecision(
 	if err != nil {
 		return nil, false, err
 	}
-	if step == nil || step.State != common.StepStateFailed || !isRetryableLLMProviderRuntimeFailure(run, step) {
+	if step == nil || step.State != common.StepStateFailed || !isLLMProviderRuntimeFailure(run, step) {
 		return nil, false, nil
 	}
 	rootStepID := providerRetryRootStepID(step)
@@ -1920,6 +1946,49 @@ func (o *RuntimeOrchestrator) providerRetrySpecsAfterResolvedDecision(
 		ID:    stepID,
 		Kind:  step.Kind,
 		Input: input,
+	}}, true, nil
+}
+
+func (o *RuntimeOrchestrator) knownReadableDecisionRepairSpecs(
+	ctx context.Context,
+	run *runModel.Run,
+	stepID common.StepID,
+) ([]stepDispatchSpec, bool, error) {
+	if o == nil || run == nil || stepID == "" {
+		return nil, false, nil
+	}
+	step, err := o.steps.Get(ctx, stepID)
+	if err != nil {
+		return nil, false, err
+	}
+	if step == nil || step.State != common.StepStateCompleted {
+		return nil, false, nil
+	}
+	decisionSpec := decisionBlockSpec(step.Output)
+	if decisionSpec.Reason == "" {
+		return nil, false, nil
+	}
+	decisionSpec.Context = o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, nil, decisionSpec.Context)
+	if !knownReadableWorkspaceResourceDecisionContext(decisionSpec.Context) {
+		return nil, false, nil
+	}
+	repairOf := *step
+	repairOf.Input = cloneStepPayload(step.Input)
+	repairOf.Output = cloneStepPayload(step.Output)
+	repairOf.State = common.StepStateFailed
+	repairOf.Output["convertedDecision"] = convertedDecisionPayload(decisionSpec)
+	repairOf.Output["continuableDecisionConvertedToRepair"] = true
+	repairOf.Output["status"] = "failed"
+	repairOf.Output["error"] = "decision requested a workspace resource that is already readable"
+	attempt := o.runtimeRepairAttemptCountForStep(ctx, run.ID, &repairOf) + 1
+	stepID, err = o.uniqueDispatchStepID(ctx, run.ID, runtimeRepairFollowUpStepID(run.ID, &repairOf, attempt))
+	if err != nil {
+		return nil, true, err
+	}
+	return []stepDispatchSpec{{
+		ID:    stepID,
+		Kind:  initialStepKind(run),
+		Input: o.runtimeRepairFollowUpStepInput(ctx, run, &repairOf, attempt, common.ErrInvalidArgument),
 	}}, true, nil
 }
 
@@ -2153,7 +2222,19 @@ func mergeResumeInput(specs []stepDispatchSpec, resumeInput map[string]any) {
 			specs[idx].Input = map[string]any{}
 		}
 		for key, value := range resumeInput {
+			if resumeInputShouldPreserveExistingStage(key, specs[idx].Input) {
+				continue
+			}
 			specs[idx].Input[key] = value
 		}
 	}
+}
+
+func resumeInputShouldPreserveExistingStage(key string, input map[string]any) bool {
+	switch strings.TrimSpace(key) {
+	case stepInputKeySoulStage, stepInputKeyRuntimeStage, stepInputKeyRuntimeStageMode:
+	default:
+		return false
+	}
+	return strings.TrimSpace(stringFromMap(input, key)) != ""
 }

@@ -420,15 +420,12 @@ func (a *RuntimeAdapter) executeProviderWithFailover(
 		"attempted":       true,
 		"success":         false,
 		"failureClass":    failureClass,
-		"fromProviderId":  strings.TrimSpace(primaryRuntime.Config.ID),
-		"fromProvider":    strings.TrimSpace(primaryRuntime.Config.Provider),
-		"fromModel":       strings.TrimSpace(primaryRuntime.Config.Model),
 		"primaryError":    callErr.Error(),
 		"primaryStage":    result.failureStage,
 		"primaryBudget":   providerContextBudgetOutput(providerReq.ContextBudget, primaryRuntime.Config.ID, primaryRuntime.Config.Model),
 		"retryWithBackup": true,
 	}
-	backupRuntime, backupProviderID, ok := a.selectFailoverRuntime(primaryProviderID, primaryRuntime.Config, operation)
+	backupRuntime, _, ok := a.selectFailoverRuntime(primaryProviderID, primaryRuntime.Config, operation)
 	if !ok {
 		failover["reason"] = "no failover provider is available"
 		result.failover = failover
@@ -437,9 +434,6 @@ func (a *RuntimeAdapter) executeProviderWithFailover(
 
 	backupReq := providerRequest(request, backupRuntime.Config)
 	backupPayload, backupUsage, backupEvents, backupErr := completeProvider(ctx, backupRuntime, backupReq)
-	failover["toProviderId"] = strings.TrimSpace(backupRuntime.Config.ID)
-	failover["toProvider"] = strings.TrimSpace(backupRuntime.Config.Provider)
-	failover["toModel"] = strings.TrimSpace(backupRuntime.Config.Model)
 	failover["toBudget"] = providerContextBudgetOutput(backupReq.ContextBudget, backupRuntime.Config.ID, backupRuntime.Config.Model)
 	if backupErr != nil {
 		failover["backupError"] = backupErr.Error()
@@ -459,7 +453,6 @@ func (a *RuntimeAdapter) executeProviderWithFailover(
 	}
 
 	failover["success"] = true
-	failover["resolvedBy"] = backupProviderID
 	result.runtime = backupRuntime
 	result.request = backupReq
 	result.payload = backupPayload
@@ -710,6 +703,8 @@ func providerContextBudgetOutput(budget *llmmodels.ProviderContextBudget, provid
 	if budget == nil {
 		return nil
 	}
+	_ = providerID
+	_ = model
 	item := map[string]any{
 		"maxBytes":              budget.MaxBytes,
 		"actualBytes":           budget.ActualBytes,
@@ -732,23 +727,6 @@ func providerContextBudgetOutput(budget *llmmodels.ProviderContextBudget, provid
 		"estimator":             budget.Estimator,
 		"redactionApplied":      budget.RedactionApplied,
 		"redactedPaths":         append([]string(nil), budget.RedactedPaths...),
-		"profile": map[string]any{
-			"contextWindowTokens":    budget.Profile.ContextWindowTokens,
-			"maxInputTokens":         budget.Profile.MaxInputTokens,
-			"reservedOutputTokens":   budget.Profile.ReservedOutputTokens,
-			"safetyRatio":            budget.Profile.SafetyRatio,
-			"bytesHardLimit":         budget.Profile.BytesHardLimit,
-			"estimatedTokensPerByte": budget.Profile.EstimatedTokensPerByte,
-			"inputTokenPrice":        budget.Profile.InputTokenPrice,
-			"outputTokenPrice":       budget.Profile.OutputTokenPrice,
-			"currency":               budget.Profile.Currency,
-		},
-	}
-	if strings.TrimSpace(providerID) != "" {
-		item["providerId"] = strings.TrimSpace(providerID)
-	}
-	if strings.TrimSpace(model) != "" {
-		item["model"] = strings.TrimSpace(model)
 	}
 	return item
 }
@@ -822,9 +800,6 @@ func buildLLMUsageOutput(
 		"workspaceId":   string(request.WorkspaceID),
 		"runId":         string(request.RunID),
 		"stepId":        string(request.StepID),
-		"providerId":    strings.TrimSpace(call.runtime.Config.ID),
-		"provider":      strings.TrimSpace(call.runtime.Config.Provider),
-		"model":         strings.TrimSpace(call.runtime.Config.Model),
 		"operation":     strings.TrimSpace(operation),
 		"inputTokens":   inputTokens,
 		"outputTokens":  outputTokens,
@@ -2259,6 +2234,7 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 }
 
 func failureOutput(request runtimemodel.StepExecutionRequest, stage string, reason string, config llmmodels.ProviderConfig) map[string]any {
+	_ = config
 	return map[string]any{
 		"runId":           string(request.RunID),
 		"stepId":          string(request.StepID),
@@ -2267,7 +2243,6 @@ func failureOutput(request runtimemodel.StepExecutionRequest, stage string, reas
 		"error":           reason,
 		"failureCategory": llmFailureCategory(stage),
 		"resolutionHint":  llmFailureResolutionHint(stage),
-		"provider":        RedactedProviderConfig(config),
 	}
 }
 
@@ -2431,7 +2406,7 @@ func doDAssessmentOutput(assessment *llmmodels.DoDAssessment) map[string]any {
 			"evidenceRefs": append([]string(nil), item.EvidenceRefs...),
 		})
 	}
-	return map[string]any{
+	ret := map[string]any{
 		"satisfied":             assessment.Satisfied,
 		"items":                 items,
 		"summary":               assessment.Summary,
@@ -2441,6 +2416,41 @@ func doDAssessmentOutput(assessment *llmmodels.DoDAssessment) map[string]any {
 		"knownLimitations":      append([]string(nil), assessment.KnownLimitations...),
 		"residualRisks":         append([]string(nil), assessment.ResidualRisks...),
 		"nextActions":           append([]string(nil), assessment.NextActions...),
+	}
+	if assessment.GoalCoverage != nil {
+		ret["goalCoverage"] = doDCoverageOutput(assessment.GoalCoverage)
+	}
+	return ret
+}
+
+func doDCoverageOutput(coverage *llmmodels.DoDCoverage) map[string]any {
+	if coverage == nil {
+		return nil
+	}
+	items := make([]map[string]any, 0, len(coverage.Items))
+	for _, item := range coverage.Items {
+		entry := map[string]any{
+			"state":        item.State,
+			"evidenceRefs": append([]string(nil), item.EvidenceRefs...),
+		}
+		for key, value := range map[string]string{
+			"goal":        item.Goal,
+			"goalItem":    item.GoalItem,
+			"item":        item.Item,
+			"requirement": item.Requirement,
+			"reason":      item.Reason,
+			"summary":     item.Summary,
+		} {
+			if strings.TrimSpace(value) != "" {
+				entry[key] = value
+			}
+		}
+		items = append(items, entry)
+	}
+	return map[string]any{
+		"satisfied": coverage.Satisfied,
+		"items":     items,
+		"summary":   coverage.Summary,
 	}
 }
 

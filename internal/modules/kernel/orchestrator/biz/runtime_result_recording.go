@@ -270,11 +270,76 @@ func (o *RuntimeOrchestrator) rejectedRunResultSummary(ctx context.Context, runI
 		return "", false
 	}
 	for _, result := range results {
-		if result != nil && result.State == common.ResultStateRejected {
+		if result == nil || result.State != common.ResultStateRejected {
+			continue
+		}
+		if o.rejectedResultSupersededByRecovery(ctx, runID, result) {
+			_ = o.supersedeRejectedResult(ctx, result)
+			continue
+		}
+		if result.State == common.ResultStateRejected {
 			return strings.TrimSpace(result.Summary), true
 		}
 	}
 	return "", false
+}
+
+func (o *RuntimeOrchestrator) rejectedResultSupersededByRecovery(ctx context.Context, runID common.RunID, result *resultmodel.Result) bool {
+	if o == nil || o.steps == nil || result == nil || runID == "" {
+		return false
+	}
+	sourceRef := common.StepID(strings.TrimSpace(result.SourceRef))
+	if sourceRef == "" {
+		return false
+	}
+	steps, err := o.steps.ListByRun(ctx, runID)
+	if err != nil {
+		return false
+	}
+	for _, step := range steps {
+		if !recoveryStepSupersedesRejectedSource(step, sourceRef) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func recoveryStepSupersedesRejectedSource(step *runModel.Step, sourceRef common.StepID) bool {
+	if step == nil || sourceRef == "" || step.ID == sourceRef {
+		return false
+	}
+	switch step.State {
+	case common.StepStateDispatched, common.StepStateCompleted:
+	default:
+		return false
+	}
+	if !boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) &&
+		!boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) &&
+		!boolValue(step.Input["decisionAuthorizedRetry"]) {
+		return false
+	}
+	for _, key := range []string{
+		"failedStepId",
+		stepInputKeyRepairOfStepID,
+		stepInputKeyProviderRetryRootStep,
+		"previousStepId",
+	} {
+		if common.StepID(strings.TrimSpace(stringFromMap(step.Input, key))) == sourceRef {
+			return true
+		}
+	}
+	return false
+}
+
+func (o *RuntimeOrchestrator) supersedeRejectedResult(ctx context.Context, result *resultmodel.Result) error {
+	if o == nil || o.evidence.Results == nil || result == nil || result.State != common.ResultStateRejected {
+		return nil
+	}
+	result.State = common.ResultStateSuperseded
+	result.Title = "Superseded Rejected Result"
+	result.UpdatedAt = runtimeEvidenceTimestamp()
+	return o.evidence.Results.Update(ctx, result)
 }
 
 func (o *RuntimeOrchestrator) recordCompletionEvidenceFromValidatedDoDAssessment(

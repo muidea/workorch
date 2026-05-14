@@ -260,7 +260,6 @@ func (b *localRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID,
 	act, err := appservice.ActivateWorkspaceExecutionWithSession(ctx, s, string(wsID), appservice.ActivateWorkspaceExecutionCommand{
 		GoalID:                string(req.GoalID),
 		DoDID:                 string(req.DoDID),
-		LLMProviderID:         req.LLMProviderID,
 		DialogLanguage:        req.DialogLanguage,
 		SoulID:                string(req.SoulID),
 		SkillIDs:              skillIDStringSlice(req.SkillIDs),
