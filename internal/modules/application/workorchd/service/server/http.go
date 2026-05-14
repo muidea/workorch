@@ -613,11 +613,15 @@ type serverState struct {
 	runQueueSequence                uint64
 	activeRunSlots                  int64
 	backgroundWG                    sync.WaitGroup
+	backgroundCtx                   context.Context
+	backgroundCancel                context.CancelFunc
 	runStatusNotifyMu               sync.Mutex
 	runStatusNotify                 chan struct{}
 	eventUnsubscribes               []func()
 	replanContinuationMu            sync.Mutex
 	replanContinuationStarted       map[string]struct{}
+	governanceResumeMu              sync.Mutex
+	governanceResumeStarted         map[string]struct{}
 	runSnapshotCacheMu              sync.Mutex
 	runSnapshotCache                map[string]cachedRunSnapshot
 	runSnapshotInflight             map[string]*runSnapshotInflight
@@ -878,6 +882,7 @@ func (s *HTTPServer) Start() error {
 	if s == nil || s.http == nil {
 		return errors.New("http server is not configured")
 	}
+	s.state.scheduleStartupRecovery()
 	err := s.http.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
@@ -890,10 +895,7 @@ func (s *HTTPServer) Validate(ctx context.Context) error {
 		return errors.New("http server is not configured")
 	}
 	ctx = appservice.ContextWithEventHub(ctx, s.state.eventHub)
-	if err := s.state.validate(ctx, s.config.Backend, s.config.DataRoot); err != nil {
-		return err
-	}
-	return s.state.recoverStuckRunningRuns(ctx)
+	return s.state.validate(ctx, s.config.Backend, s.config.DataRoot)
 }
 
 func (s *HTTPServer) Shutdown(ctx context.Context) error {
@@ -2664,6 +2666,7 @@ func serveConsoleFile(w http.ResponseWriter, r *http.Request, staticFS fs.FS, na
 }
 
 func newServerState(config Config, eventHub events.Hub) *serverState {
+	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
 	state := &serverState{
 		config:                          config,
 		eventHub:                        eventHub,
@@ -2746,8 +2749,11 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		updateServerConfiguration:       appservice.UpdateServerConfiguration,
 		updateLLMConfiguration:          appservice.UpdateLLMConfiguration,
 		updateWebSearchConfiguration:    appservice.UpdateWebSearchConfiguration,
+		backgroundCtx:                   backgroundCtx,
+		backgroundCancel:                backgroundCancel,
 		workspaceSetupDraftSessions:     map[string]*workspaceSetupDraftSession{},
 		replanContinuationStarted:       map[string]struct{}{},
+		governanceResumeStarted:         map[string]struct{}{},
 	}
 	state.configureApplicationRuntimeSession()
 	state.configureSharedMemorySession()
@@ -3488,6 +3494,9 @@ func (s *serverState) close(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	if s.backgroundCancel != nil {
+		s.backgroundCancel()
+	}
 	for _, unsubscribe := range s.eventUnsubscribes {
 		if unsubscribe != nil {
 			unsubscribe()
@@ -3520,6 +3529,30 @@ func (s *serverState) waitBackground(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (s *serverState) scheduleStartupRecovery() {
+	if s == nil {
+		return
+	}
+	ctx := s.backgroundCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.backgroundWG.Add(1)
+	go func() {
+		defer s.backgroundWG.Done()
+		timer := time.NewTimer(500 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return
+		}
+		if err := s.recoverStuckRunningRuns(appservice.ContextWithEventHub(ctx, s.eventHub)); err != nil {
+			slog.Warn("workorch startup run recovery failed", "err", err)
+		}
+	}()
 }
 
 func (s *serverState) recoverStuckRunningRuns(ctx context.Context) error {
@@ -4233,9 +4266,14 @@ func (s *serverState) scheduleGovernanceRunResumes(runIDs []string, priority int
 	runIDs = uniqueNonEmptyStrings(runIDs)
 	for _, runID := range runIDs {
 		runID := runID
+		if !s.markGovernanceResumeStarted(runID) {
+			slog.Debug("workorch governance resume already scheduled", "runID", runID)
+			continue
+		}
 		s.backgroundWG.Add(1)
 		go func() {
 			defer s.backgroundWG.Done()
+			defer s.clearGovernanceResumeStarted(runID)
 			var resumedRun appservice.Run
 			defer func() {
 				if resumedRun.ID != "" {
@@ -4265,6 +4303,39 @@ func (s *serverState) scheduleGovernanceRunResumes(runIDs []string, priority int
 			resumedRun = item
 		}()
 	}
+}
+
+func (s *serverState) markGovernanceResumeStarted(runID string) bool {
+	if s == nil {
+		return false
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return false
+	}
+	s.governanceResumeMu.Lock()
+	defer s.governanceResumeMu.Unlock()
+	if s.governanceResumeStarted == nil {
+		s.governanceResumeStarted = map[string]struct{}{}
+	}
+	if _, ok := s.governanceResumeStarted[runID]; ok {
+		return false
+	}
+	s.governanceResumeStarted[runID] = struct{}{}
+	return true
+}
+
+func (s *serverState) clearGovernanceResumeStarted(runID string) {
+	if s == nil {
+		return
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return
+	}
+	s.governanceResumeMu.Lock()
+	defer s.governanceResumeMu.Unlock()
+	delete(s.governanceResumeStarted, runID)
 }
 
 func (s *serverState) scheduleReplanContinuationIfNeeded(ctx context.Context, workspaceID string, runID string, priority int) {

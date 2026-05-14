@@ -2323,7 +2323,7 @@ func (o *RuntimeOrchestrator) enrichDecisionContextWithReadableWorkspaceResource
 	decisionQuestion string,
 	decisionReason string,
 ) map[string]any {
-	if len(context) == 0 || o == nil || run == nil {
+	if o == nil || run == nil {
 		return context
 	}
 	if workspace == nil && o.workspaces != nil {
@@ -2374,6 +2374,9 @@ func (o *RuntimeOrchestrator) enrichDecisionContextWithReadableWorkspaceResource
 		return context
 	}
 	enriched := cloneStepPayload(context)
+	if enriched == nil {
+		enriched = map[string]any{}
+	}
 	if decisionQuestion != "" {
 		enriched[decisionContextKeyQuestion] = decisionQuestion
 	}

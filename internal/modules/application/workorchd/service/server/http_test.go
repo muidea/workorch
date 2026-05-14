@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -3140,6 +3142,61 @@ func TestServerStateRecoverReplanContinuationsSchedulesSupersededReplanRuns(t *t
 	}
 }
 
+func TestServerStateGovernanceRunResumeCoalescesDuplicateRunID(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{
+		Backend:           "memory",
+		MaxConcurrentRuns: 1,
+	}), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := state.close(ctx); err != nil {
+			t.Fatalf("close server state: %v", err)
+		}
+	})
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var calls atomic.Int32
+	state.resumeRun = func(_ context.Context, _, _, runID string, _ ...map[string]any) (appservice.Run, error) {
+		if runID != "run-duplicate-resume" {
+			t.Fatalf("runID = %q, want run-duplicate-resume", runID)
+		}
+		calls.Add(1)
+		started <- struct{}{}
+		<-release
+		return appservice.Run{ID: runID, State: string(common.RunStateCompleted)}, nil
+	}
+
+	state.scheduleGovernanceRunResumes([]string{"run-duplicate-resume"}, 0)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatalf("initial governance resume did not start")
+	}
+	state.scheduleGovernanceRunResumes([]string{"run-duplicate-resume", "run-duplicate-resume"}, 0)
+	time.Sleep(50 * time.Millisecond)
+	if got := state.metrics.runQueueWaiting.Load(); got != 0 {
+		t.Fatalf("runQueueWaiting = %d, want duplicate governance resume coalesced", got)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("resume calls = %d, want one in-flight call", got)
+	}
+
+	close(release)
+	waitForCondition(t, time.Second, func() bool {
+		state.governanceResumeMu.Lock()
+		_, stillMarked := state.governanceResumeStarted["run-duplicate-resume"]
+		state.governanceResumeMu.Unlock()
+		return calls.Load() == 1 && state.metrics.runQueueWaiting.Load() == 0 && !stillMarked
+	})
+	state.governanceResumeMu.Lock()
+	_, stillMarked := state.governanceResumeStarted["run-duplicate-resume"]
+	state.governanceResumeMu.Unlock()
+	if stillMarked {
+		t.Fatalf("governance resume mark was not cleared after completion")
+	}
+}
+
 func TestServerStateRecoverReplanContinuationsRetriesAfterActivationFailure(t *testing.T) {
 	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
@@ -3489,8 +3546,9 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 	}
 }
 
-func TestHTTPServerValidateRecoversFileBackedStuckRunningRun(t *testing.T) {
+func TestHTTPServerStartupRecoversFileBackedStuckRunningRunInBackground(t *testing.T) {
 	dataRoot := t.TempDir()
+	useWorkorchRuntimeTestConfig(t, "file", dataRoot)
 	ctx := context.Background()
 	first := NewHTTPServer(Config{Backend: "file", DataRoot: dataRoot})
 	firstHandler := first.http.Handler
@@ -3527,6 +3585,58 @@ func TestHTTPServerValidateRecoversFileBackedStuckRunningRun(t *testing.T) {
 	second := NewHTTPServer(Config{Backend: "file", DataRoot: dataRoot})
 	if err := second.Validate(ctx); err != nil {
 		t.Fatalf("validate second server: %v", err)
+	}
+	getRun := func() appservice.Run {
+		t.Helper()
+		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-stuck-validation", nil)
+		getRec := httptest.NewRecorder()
+		second.http.Handler.ServeHTTP(getRec, getReq)
+		if getRec.Code != http.StatusOK {
+			t.Fatalf("run get status = %d, want 200, body=%s", getRec.Code, getRec.Body.String())
+		}
+		var body runInstanceResponse
+		if err := json.Unmarshal(getRec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("unmarshal run: %v", err)
+		}
+		return body.Run
+	}
+	if run := getRun(); run.State != string(common.RunStateRunning) {
+		t.Fatalf("run state after Validate = %s, want running until startup background recovery", run.State)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	second.http.Addr = ln.Addr().String()
+	done := make(chan error, 1)
+	go func() {
+		done <- second.http.Serve(ln)
+	}()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := second.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("shutdown second server: %v", err)
+		}
+		select {
+		case err := <-done:
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				t.Fatalf("second server stopped: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("second server did not stop")
+		}
+	}()
+	second.state.scheduleStartupRecovery()
+
+	var recovered appservice.Run
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		recovered = getRun()
+		if recovered.State == "failed" && recovered.FailureReason != "" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-stuck-validation", nil)
 	getRec := httptest.NewRecorder()

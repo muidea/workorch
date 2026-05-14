@@ -68,6 +68,8 @@ type Service struct {
 	loadConfig      func() (workorchconfig.Config, error)
 	mu              sync.Mutex
 	unsubscribes    []func()
+	reconcileCancel context.CancelFunc
+	reconcileDone   chan struct{}
 }
 
 func NewService(deps Dependencies) *Service {
@@ -113,19 +115,50 @@ func (s *Service) Start() error {
 		return nil
 	})
 	s.unsubscribes = []func(){unsubTicket, unsubApproval, unsubRunState}
-	s.reconcileBlockedRuns(context.Background())
+	s.scheduleBlockedRunReconciliationLocked()
 	return nil
 }
 
 func (s *Service) Stop() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, unsub := range s.unsubscribes {
 		if unsub != nil {
 			unsub()
 		}
 	}
 	s.unsubscribes = nil
+	cancel := s.reconcileCancel
+	done := s.reconcileDone
+	s.reconcileCancel = nil
+	s.reconcileDone = nil
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func (s *Service) scheduleBlockedRunReconciliationLocked() {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	s.reconcileCancel = cancel
+	s.reconcileDone = done
+	go func() {
+		defer close(done)
+		timer := time.NewTimer(500 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			s.reconcileBlockedRuns(ctx)
+		case <-ctx.Done():
+			return
+		}
+	}()
 }
 
 func (s *Service) processTicketCreated(ctx context.Context, envelope events.Envelope) {

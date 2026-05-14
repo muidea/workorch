@@ -2,7 +2,9 @@ package governance
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -970,8 +972,8 @@ func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *
 		State: common.ApprovalStatePending,
 	}))
 
-	var resolveCount int
-	var resumeCount int
+	var resolveCount atomic.Int64
+	var resumeCount atomic.Int64
 	svc := NewService(Dependencies{
 		Tickets:              ticketRepo,
 		Resolutions:          resolutionRepo,
@@ -984,7 +986,7 @@ func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *
 		EventHub:             hub,
 		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
 		ResolveApproval: func(_ context.Context, id common.ApprovalID) error {
-			resolveCount++
+			resolveCount.Add(1)
 			item, err := approvalRepo.Get(ctx, id)
 			if err != nil {
 				return err
@@ -993,7 +995,7 @@ func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *
 			return approvalRepo.Update(ctx, item)
 		},
 		ResumeRun: func(context.Context, common.RunID) error {
-			resumeCount++
+			resumeCount.Add(1)
 			return nil
 		},
 		LoadConfig: testGovernanceConfig(true, 0.82, 5),
@@ -1001,11 +1003,18 @@ func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	if resolveCount != 1 {
-		t.Fatalf("resolve count = %d, want 1", resolveCount)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if resolveCount.Load() == 1 && resumeCount.Load() == 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	if resumeCount != 1 {
-		t.Fatalf("resume count = %d, want 1", resumeCount)
+	if got := resolveCount.Load(); got != 1 {
+		t.Fatalf("resolve count = %d, want 1", got)
+	}
+	if got := resumeCount.Load(); got != 1 {
+		t.Fatalf("resume count = %d, want 1", got)
 	}
 	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(approvalID)+"/auto-governance"))
 	if err != nil {
@@ -1021,6 +1030,97 @@ func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *
 		if ref == "remote_operation" {
 			t.Fatalf("trace evidence refs = %v, server.* file names must not imply remote_operation", trace.EvidenceRefs)
 		}
+	}
+}
+
+func TestServiceStartReturnsWithoutWaitingForBlockedRunResume(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runRepo := memory.NewRunRepository()
+	goalRepo := memory.NewGoalRepository()
+	dodRepo := memory.NewDoDRepository()
+	memoryRepo := memory.NewMemoryItemRepository()
+	traceRepo := memory.NewAutoGovernanceTraceRepository()
+
+	workspaceID := common.WorkspaceID("ws-start-nonblocking")
+	runID := common.RunID("run-start-nonblocking")
+	goalID := common.GoalID("goal-start-nonblocking")
+	dodID := common.DoDID("dod-start-nonblocking")
+	approvalID := common.ApprovalID("approval-start-nonblocking")
+
+	mustNoErr(t, goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "update workspace files"}))
+	mustNoErr(t, dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"workspace changes are applied"}, State: common.DoDStateReady}))
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{
+		ID:                 runID,
+		WorkspaceID:        workspaceID,
+		GoalID:             goalID,
+		DoDID:              dodID,
+		State:              common.RunStateBlockedOnApproval,
+		BlockingApprovalID: approvalID,
+	}))
+	mustNoErr(t, approvalRepo.Create(ctx, &approvalmodel.Approval{
+		ID:          approvalID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      common.StepID("run-start-nonblocking/step-1"),
+		Reason:      "update local workspace file server.conf with a reversible patch",
+		Action:      "edit server.conf and config.yaml inside the workspace",
+		Context: map[string]any{
+			"impactScope": []any{"server.conf", "config.yaml"},
+			"riskLevel":   "medium",
+		},
+		State: common.ApprovalStatePending,
+	}))
+
+	resumeStarted := make(chan struct{}, 1)
+	releaseResume := make(chan struct{})
+	svc := NewService(Dependencies{
+		Tickets:              ticketRepo,
+		Resolutions:          resolutionRepo,
+		Approvals:            approvalRepo,
+		Runs:                 runRepo,
+		Goals:                goalRepo,
+		DoDs:                 dodRepo,
+		MemoryItems:          memoryRepo,
+		AutoGovernanceTraces: traceRepo,
+		EventHub:             hub,
+		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
+		ResolveApproval: func(_ context.Context, id common.ApprovalID) error {
+			item, err := approvalRepo.Get(ctx, id)
+			if err != nil {
+				return err
+			}
+			item.State = common.ApprovalStateApproved
+			return approvalRepo.Update(ctx, item)
+		},
+		ResumeRun: func(context.Context, common.RunID) error {
+			select {
+			case resumeStarted <- struct{}{}:
+			default:
+			}
+			<-releaseResume
+			return nil
+		},
+		LoadConfig: testGovernanceConfig(true, 0.82, 5),
+	})
+
+	startedAt := time.Now()
+	mustNoErr(t, svc.Start())
+	defer func() {
+		close(releaseResume)
+		svc.Stop()
+	}()
+	if elapsed := time.Since(startedAt); elapsed > 200*time.Millisecond {
+		t.Fatalf("Start elapsed = %v, want <= 200ms", elapsed)
+	}
+
+	select {
+	case <-resumeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("background reconcile did not attempt resume")
 	}
 }
 

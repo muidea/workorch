@@ -10478,6 +10478,113 @@ func TestRuntimeOrchestrator_ConvertsKnownReadableResourceDecisionToRepair(t *te
 	}
 }
 
+func TestRuntimeOrchestrator_ConvertsQuestionOnlyReadableResourceDecisionToRepair(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	workingDirectory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workingDirectory, "config"), 0o755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(workingDirectory, "handler"), 0o755); err != nil {
+		t.Fatalf("create handler dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workingDirectory, "config", "config.go"), []byte("package config\n\nconst AppName = \"workorch-test\"\n"), 0o644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workingDirectory, "handler", "handler.go"), []byte("package handler\n\nfunc Route() string { return \"ok\" }\n"), 0o644); err != nil {
+		t.Fatalf("write handler file: %v", err)
+	}
+
+	var repairInput map[string]any
+	call := 0
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		call++
+		if call == 1 {
+			return map[string]any{
+				"status":                "completed",
+				"blockDecisionReason":   "tests need actual file contents before patching",
+				"blockDecisionKind":     "provide_missing_info",
+				"blockDecisionQuestion": "请提供 config/config.go 和 handler/handler.go 的完整内容。",
+				"nextStep":              "run-question-readable-decision/llm-after-decision",
+				"nextKind":              "llm/workspace_execution",
+			}, nil
+		}
+		repairInput = cloneStepPayload(request.Input)
+		return map[string]any{
+			"status": "completed",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": true,
+				"summary":   "completed after question-only readable resource repair",
+				"items": []map[string]any{{
+					"item":         "runtime repair",
+					"state":        "satisfied",
+					"evidenceRefs": []string{string(request.StepID)},
+				}},
+			},
+		}, nil
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-question-readable-decision")
+	runID := common.RunID("run-question-readable-decision")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-question-readable-decision"),
+		State:           common.RunStateCreated,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	if call != 2 {
+		t.Fatalf("runtime calls = %d, want initial decision plus repair", call)
+	}
+	tickets, err := ticketRepo.ListByRunID(ctx, runID)
+	if err != nil {
+		t.Fatalf("list tickets: %v", err)
+	}
+	if len(tickets) != 0 {
+		t.Fatalf("tickets = %+v, want no human decision for workspace-readable files", tickets)
+	}
+	resourceContext := mapSliceFromValue(repairInput["readableResourceRepairContext"])
+	if len(resourceContext) != 2 {
+		t.Fatalf("readableResourceRepairContext = %+v, want two file snapshots", resourceContext)
+	}
+	contentsByTarget := map[string]string{}
+	for _, item := range resourceContext {
+		contentsByTarget[stringFromMap(item, "targetRef")] = stringFromMap(item, "content")
+	}
+	if !strings.Contains(contentsByTarget["config/config.go"], "AppName") ||
+		!strings.Contains(contentsByTarget["handler/handler.go"], "Route") {
+		t.Fatalf("readableResourceRepairContext = %+v, want config and handler snapshots", resourceContext)
+	}
+}
+
 func TestRuntimeOrchestrator_ResumeRunAutoRepairsOpenKnownReadableResourceDecision(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
