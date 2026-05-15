@@ -44,6 +44,7 @@ type RepositoryConfig struct {
 type RuntimeConfig struct {
 	DefaultSoulID            string `json:"defaultSoulId" toml:"defaultSoulId"`
 	MaxProviderRetryAttempts int    `json:"maxProviderRetryAttempts" toml:"maxProviderRetryAttempts"`
+	ShellCommandTimeout      string `json:"shellCommandTimeout" toml:"shellCommandTimeout"`
 }
 
 type LLMConfig struct {

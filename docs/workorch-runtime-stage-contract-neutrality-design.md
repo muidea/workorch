@@ -360,6 +360,14 @@ Repair exhausted 后必须二选一：
 
 为支持 blocked_on_decision 后的继续处理，因 repair exhausted、duplicate failure 或其他可恢复治理点写入的 rejected result 只能代表当时失败窗口的临时结论。若后续已经出现针对该 rejected result source step 的 provider retry、runtime repair 或 decision-authorized retry 进展，该 rejected result 必须转为 `superseded`，不得继续阻断当前 run 的恢复、repair 或最终 acceptance。
 
+## Runtime Capability Time Budget
+
+非 LLM runtime capability 的默认执行预算必须来自中立配置或 capability 自身声明，不得在 core runtime 中按业务领域、语言、框架或命令名称写死。`shell/command` 这类通用执行能力应提供可配置默认超时，并允许单个 step 通过结构化字段声明更长但有上限的预算。
+
+默认预算用于避免普通长流程任务被过短固定值误杀；单步覆盖用于让 LLM 在严格收敛阶段为明确长耗时操作申请有限执行窗口。无论默认值还是单步覆盖，都必须是有界的，并在 step output 中记录实际 `timeoutMillis`，作为后续 repair / verification 的中立证据。
+
+当非 LLM 执行因为 timeout 失败时，runtime repair 只能基于“执行超时”这一中立失败形态选择重试、缩小动作、调整有界预算、返回 failed assessment 或 blocker，不得依赖具体命令名推断业务策略。
+
 ## Provider Retry 合同
 
 Provider retry 始终只处理 provider transient failure，与 stage 语义无关。

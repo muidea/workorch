@@ -16,6 +16,7 @@ dataDir = "/var/lib/workorch"
 [runtime]
 defaultSoulId = ""
 maxProviderRetryAttempts = 10
+shellCommandTimeout = "60s"
 
 [llm]
 defaultProvider = "local"

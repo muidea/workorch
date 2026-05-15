@@ -768,6 +768,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers/:serverId/prompts"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/memory"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/memory"},
+		{method: http.MethodGet, pattern: "/favicon.ico"},
 		{method: http.MethodGet, pattern: "/console"},
 		{method: http.MethodGet, pattern: "/console/"},
 		{method: http.MethodGet, pattern: "/console/**"},
@@ -896,6 +897,13 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 
 func TestConsoleRoutesServeEmbeddedAssets(t *testing.T) {
 	mux := newMux(Config{Backend: "memory"})
+
+	faviconReq := httptest.NewRequest(http.MethodGet, "/favicon.ico", nil)
+	faviconRec := httptest.NewRecorder()
+	mux.ServeHTTP(faviconRec, faviconReq)
+	if faviconRec.Code != http.StatusNoContent {
+		t.Fatalf("favicon status = %d, want 204", faviconRec.Code)
+	}
 
 	for _, uri := range []string{"/console", "/console/", "/console/workspaces"} {
 		req := httptest.NewRequest(http.MethodGet, uri, nil)
@@ -1212,6 +1220,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		if workspaceID != "ws-native-read" ||
 			cmd.GoalID != "goal-native" ||
 			cmd.DoDID != "dod-native" ||
+			cmd.LLMProviderID != "deepseek" ||
 			cmd.SoulID != "soul-native" ||
 			cmd.SoulBindings["validation"] != "soul-native-validation" ||
 			cmd.DialogLanguage != "zh-CN" ||
@@ -1303,7 +1312,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/task-decompositions", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/start", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/resume", status: http.StatusOK},
-		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native","soulId":"soul-native","soulBindings":{"validation":"soul-native-validation"},"skillIds":["skill-native"],"mcpServerIds":["mcp-native"],"memoryIds":["memory-native"],"dialogLanguage":"zh-CN","priority":9,"executionContextPatch":{"latestOperatorInput":{"source":"tui","content":"restart from tui"}}}`, status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native","llmProviderId":"deepseek","soulId":"soul-native","soulBindings":{"validation":"soul-native-validation"},"skillIds":["skill-native"],"mcpServerIds":["mcp-native"],"memoryIds":["memory-native"],"dialogLanguage":"zh-CN","priority":9,"executionContextPatch":{"latestOperatorInput":{"source":"tui","content":"restart from tui"}}}`, status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions?workspaceId=ws-native-read&runId=run-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions/ticket-native-read", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/decisions/ticket-native-read/resolve", status: http.StatusOK},

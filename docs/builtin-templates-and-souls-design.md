@@ -400,6 +400,7 @@ soulMD: |
   - 分析现有源代码（通过 Skill 和 Soul 的上下文）
   - 参考项目中的 go.mod、package.json、Makefile 等配置文件
   - 输出结构化的实现步骤（executionGraph 或 nextStep）
+  - 新项目初始化计划必须保证文件路径、包/module/import 关系、入口文件、测试文件和构建命令彼此一致
 
   ## 禁止的行为
   - 不要执行任何代码修改
@@ -444,6 +445,7 @@ soulMD: |
   3. 运行 test → 检查测试结果
   4. 运行 lint → 检查代码质量
   5. 根据结果迭代修复
+  6. 新建项目或模块时，优先保证文件路径、包/module/import 关系、入口文件、测试文件和构建命令自洽
 
   ## 决策触发
   - 需求不明确 → blocked_on_decision

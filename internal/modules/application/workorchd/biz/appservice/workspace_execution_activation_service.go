@@ -29,6 +29,7 @@ import (
 type ActivateWorkspaceExecutionCommand struct {
 	GoalID                string            `json:"goalId,omitempty"`
 	DoDID                 string            `json:"doDId,omitempty"`
+	LLMProviderID         string            `json:"llmProviderId,omitempty"`
 	SoulID                string            `json:"soulId,omitempty"`
 	SoulBindings          map[string]string `json:"soulBindings,omitempty"`
 	SkillIDs              []string          `json:"skillIds,omitempty"`
@@ -85,7 +86,7 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 				if err := exports.Services.RunService.SupersedeRun(ctx, runmodule.SupersedeRunCommand{RunID: run.ID}); err != nil {
 					return WorkspaceExecutionActivation{}, err
 				}
-				runID, err := createAndStartWorkspaceExecutionRun(ctx, session, common.WorkspaceID(workspaceID), goal.ID, dod.ID, executionContext, cmd.Priority)
+				runID, err := createAndStartWorkspaceExecutionRun(ctx, session, common.WorkspaceID(workspaceID), goal.ID, dod.ID, executionContext, cmd.Priority, cmd.LLMProviderID)
 				if err != nil {
 					return WorkspaceExecutionActivation{}, err
 				}
@@ -124,7 +125,7 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 		return WorkspaceExecutionActivation{}, err
 	}
 
-	runID, err := createAndStartWorkspaceExecutionRun(ctx, session, common.WorkspaceID(workspaceID), goal.ID, dod.ID, executionContext, cmd.Priority)
+	runID, err := createAndStartWorkspaceExecutionRun(ctx, session, common.WorkspaceID(workspaceID), goal.ID, dod.ID, executionContext, cmd.Priority, cmd.LLMProviderID)
 	if err != nil {
 		return WorkspaceExecutionActivation{}, err
 	}
@@ -1318,7 +1319,7 @@ func activationMemoryProvenance(item *memorymodel.MemoryItem) string {
 	return "historical_run"
 }
 
-func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSession, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any, priority int) (common.RunID, error) {
+func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSession, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any, priority int, llmProviderID string) (common.RunID, error) {
 	exports, err := session.Exports()
 	if err != nil {
 		return "", err
@@ -1343,7 +1344,8 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 		if err := recordActivationMemoryRecallTrace(ctx, exports, runID, workspaceID, createExecutionContext); err != nil {
 			return "", err
 		}
-		if err := exports.Services.RunService.EnsureStarted(ctx, runmodule.StartRunCommand{RunID: runID}); err != nil {
+		startCtx := common.ContextWithRuntimeLLMProviderID(ctx, llmProviderID)
+		if err := exports.Services.RunService.EnsureStarted(startCtx, runmodule.StartRunCommand{RunID: runID}); err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				run, getErr := exports.Repositories.Runs.Get(ctx, runID)
 				if getErr != nil {

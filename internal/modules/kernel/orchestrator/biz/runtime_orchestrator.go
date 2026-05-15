@@ -1925,10 +1925,14 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 		return nil, err
 	}
 	if len(steps) == 0 {
+		input := initialStepInput(run)
+		if providerID := common.RuntimeLLMProviderIDFromContext(ctx); providerID != "" {
+			input["llmProviderId"] = providerID
+		}
 		return []stepDispatchSpec{{
 			ID:    common.StepID(fmt.Sprintf("%s/step-1", run.ID)),
 			Kind:  initialStepKind(run),
-			Input: initialStepInput(run),
+			Input: input,
 		}}, nil
 	}
 

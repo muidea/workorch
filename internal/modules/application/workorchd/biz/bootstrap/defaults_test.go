@@ -60,6 +60,7 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, planning.SoulMD, "gap analysis")
 	assertSoulContains(t, planning.SoulMD, "workspace 文件清单为空不等于缺少源码")
 	assertSoulContains(t, planning.SoulMD, "新项目初始化场景")
+	assertSoulContains(t, planning.SoulMD, "包/module/import")
 
 	execution := findEmbeddedSoulByID(souls, "soul-software-dev-execution")
 	if execution == nil {
@@ -79,6 +80,7 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, execution.SoulMD, "完整、可直接应用")
 	assertSoulContains(t, execution.SoulMD, "占位函数体")
 	assertSoulContains(t, execution.SoulMD, "当前文件快照")
+	assertSoulContains(t, execution.SoulMD, "包/module/import")
 
 	validation := findEmbeddedSoulByID(souls, "soul-software-dev-validation")
 	if validation == nil {

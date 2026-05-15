@@ -181,7 +181,14 @@ Main sections:
 
 - `[server]`: `addr`, timeout values, and `maxConcurrentRuns`
 - `[repository]`: `backend` and `dataDir`
+- `[runtime]`: runtime defaults such as `maxProviderRetryAttempts` and
+  `shellCommandTimeout`
 - `[llm]`: default LLM provider selection and named provider definitions
+
+Runtime shell commands default to `runtime.shellCommandTimeout` when an
+individual `shell/command` step does not provide `timeoutMillis`. The default
+configuration uses `60s`; individual commands can still request a bounded
+override with `timeoutMillis` up to 300000 milliseconds.
 
 `CONFIG_PATH` can point to the configuration directory when command-line
 arguments are not convenient. This follows the magicCommon

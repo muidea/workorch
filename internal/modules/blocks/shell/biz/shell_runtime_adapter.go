@@ -14,6 +14,11 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
+const (
+	DefaultCommandTimeout = 60 * time.Second
+	MaxCommandTimeout     = 5 * time.Minute
+)
+
 type RuntimeAdapter struct {
 	timeout      time.Duration
 	envAllowlist map[string]struct{}
@@ -21,7 +26,7 @@ type RuntimeAdapter struct {
 
 func NewRuntimeAdapter() *RuntimeAdapter {
 	return &RuntimeAdapter{
-		timeout: 5 * time.Second,
+		timeout: DefaultCommandTimeout,
 		envAllowlist: map[string]struct{}{
 			"HOME":   {},
 			"PATH":   {},
@@ -34,6 +39,26 @@ func NewRuntimeAdapterWithTimeout(timeout time.Duration) *RuntimeAdapter {
 	adapter := NewRuntimeAdapter()
 	adapter.timeout = timeout
 	return adapter
+}
+
+func NewRuntimeAdapterFromTimeoutString(timeoutValue string) (*RuntimeAdapter, error) {
+	adapter := NewRuntimeAdapter()
+	timeoutValue = strings.TrimSpace(timeoutValue)
+	if timeoutValue == "" {
+		return adapter, nil
+	}
+	timeout, err := time.ParseDuration(timeoutValue)
+	if err != nil {
+		return nil, fmt.Errorf("%w: runtime.shellCommandTimeout must be a valid duration", common.ErrInvalidArgument)
+	}
+	if timeout < time.Second {
+		return nil, fmt.Errorf("%w: runtime.shellCommandTimeout must be at least 1s", common.ErrInvalidArgument)
+	}
+	if timeout > MaxCommandTimeout {
+		return nil, fmt.Errorf("%w: runtime.shellCommandTimeout must not exceed %s", common.ErrInvalidArgument, MaxCommandTimeout)
+	}
+	adapter.timeout = timeout
+	return adapter, nil
 }
 
 func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
@@ -98,7 +123,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 
 func shellCommandTimeout(input map[string]any, defaultTimeout time.Duration) (time.Duration, error) {
 	if defaultTimeout <= 0 {
-		defaultTimeout = 5 * time.Second
+		defaultTimeout = DefaultCommandTimeout
 	}
 	if input == nil || input["timeoutMillis"] == nil {
 		return defaultTimeout, nil
@@ -111,7 +136,7 @@ func shellCommandTimeout(input map[string]any, defaultTimeout time.Duration) (ti
 	if timeout < time.Second {
 		return 0, fmt.Errorf("%w: timeoutMillis must be at least 1000", common.ErrInvalidArgument)
 	}
-	if timeout > 5*time.Minute {
+	if timeout > MaxCommandTimeout {
 		return 0, fmt.Errorf("%w: timeoutMillis must not exceed 300000", common.ErrInvalidArgument)
 	}
 	return timeout, nil

@@ -792,6 +792,7 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 		MCPServerIDs:   []string{"mcp-activation-context"},
 		CapabilityIDs:  []string{"mcp-activation-context:tool:repo.summary"},
 		MemoryIDs:      []string{memory.ID},
+		LLMProviderID:  "selected-runtime-provider",
 		DialogLanguage: "zh-CN",
 		Priority:       7,
 	})
@@ -842,6 +843,9 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	}
 	if stepContext[llmcommon.ExecutionContextLLMProviderID] != nil {
 		t.Fatalf("first step input = %+v, want no persisted llm provider binding", runSnapshot.Steps[0].Input)
+	}
+	if runSnapshot.Steps[0].Input[llmcommon.ExecutionContextLLMProviderID] != "selected-runtime-provider" {
+		t.Fatalf("first step input = %+v, want runtime-only llm provider binding", runSnapshot.Steps[0].Input)
 	}
 	if stepContext["dialogLanguage"] != "zh-CN" {
 		t.Fatalf("first step input = %+v, want dialog language propagated", runSnapshot.Steps[0].Input)

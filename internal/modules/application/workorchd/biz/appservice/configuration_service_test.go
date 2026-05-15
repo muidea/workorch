@@ -32,6 +32,7 @@ dataDir = ".workorch-data"
 [runtime]
 defaultSoulId = "soul-system"
 maxProviderRetryAttempts = 12
+shellCommandTimeout = "90s"
 
 [llm]
 defaultProvider = "local"
@@ -78,8 +79,10 @@ allowDomains = ["example.test"]
 	if cfg.Server.Addr != "127.0.0.1:18080" || cfg.Repository.Backend != "file" {
 		t.Fatalf("configuration = %+v, want server and repository config", cfg)
 	}
-	if cfg.Runtime.DefaultSoulID != "soul-system" || cfg.Runtime.MaxProviderRetryAttempts != 12 {
-		t.Fatalf("runtime configuration = %+v, want system default soul and provider retry attempts", cfg.Runtime)
+	if cfg.Runtime.DefaultSoulID != "soul-system" ||
+		cfg.Runtime.MaxProviderRetryAttempts != 12 ||
+		cfg.Runtime.ShellCommandTimeout != "90s" {
+		t.Fatalf("runtime configuration = %+v, want system runtime settings", cfg.Runtime)
 	}
 	if cfg.LLM.DefaultProviderID != "local" || cfg.LLM.DefaultEmbeddingProviderID != "local" || len(cfg.LLM.Providers) != 1 {
 		t.Fatalf("llm configuration = %+v, want local provider", cfg.LLM)

@@ -43,6 +43,7 @@ type RepositoryConfiguration struct {
 type RuntimeConfiguration struct {
 	DefaultSoulID            string `json:"defaultSoulId,omitempty"`
 	MaxProviderRetryAttempts int    `json:"maxProviderRetryAttempts"`
+	ShellCommandTimeout      string `json:"shellCommandTimeout"`
 }
 
 type LLMConfiguration struct {
@@ -257,6 +258,7 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 		Runtime: RuntimeConfiguration{
 			DefaultSoulID:            strings.TrimSpace(cfg.Runtime.DefaultSoulID),
 			MaxProviderRetryAttempts: orchestratorbiz.NormalizeRuntimePolicy(orchestratorbiz.RuntimePolicy{MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts}).MaxProviderRetryAttempts,
+			ShellCommandTimeout:      runtimeShellCommandTimeout(cfg.Runtime.ShellCommandTimeout),
 		},
 		LLM: LLMConfiguration{
 			DefaultProviderID:          defaultProviderID,
@@ -270,6 +272,14 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 			ProviderTemplates: DefaultWebSearchProviderTemplates(),
 		},
 	}, nil
+}
+
+func runtimeShellCommandTimeout(configured string) string {
+	configured = strings.TrimSpace(configured)
+	if configured != "" {
+		return configured
+	}
+	return "60s"
 }
 
 func DefaultLLMProviderTemplates() []LLMProviderTemplate {

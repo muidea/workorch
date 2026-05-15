@@ -36,6 +36,54 @@ func TestRuntimeAdapter_ExecuteRuntimeStepRunsCommandInWorkspaceDirectory(t *tes
 	}
 }
 
+func TestRuntimeAdapter_ExecuteRuntimeStepUsesDefaultCommandTimeout(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	workingDirectory := t.TempDir()
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceWorkingDirectory: workingDirectory,
+		Kind:                      "shell/command",
+		Input: map[string]any{
+			"command": "pwd",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v", err)
+	}
+	if result.Output["timeoutMillis"] != int64(DefaultCommandTimeout/time.Millisecond) {
+		t.Fatalf("timeoutMillis = %v, want %d", result.Output["timeoutMillis"], DefaultCommandTimeout/time.Millisecond)
+	}
+}
+
+func TestNewRuntimeAdapterFromTimeoutString(t *testing.T) {
+	adapter, err := NewRuntimeAdapterFromTimeoutString("90s")
+	if err != nil {
+		t.Fatalf("NewRuntimeAdapterFromTimeoutString: %v", err)
+	}
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceWorkingDirectory: t.TempDir(),
+		Kind:                      "shell/command",
+		Input: map[string]any{
+			"command": "pwd",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v", err)
+	}
+	if result.Output["timeoutMillis"] != int64(90000) {
+		t.Fatalf("timeoutMillis = %v, want 90000", result.Output["timeoutMillis"])
+	}
+}
+
+func TestNewRuntimeAdapterFromTimeoutStringRejectsOutOfRange(t *testing.T) {
+	if _, err := NewRuntimeAdapterFromTimeoutString("500ms"); err == nil {
+		t.Fatal("NewRuntimeAdapterFromTimeoutString err = nil, want invalid argument")
+	}
+	if _, err := NewRuntimeAdapterFromTimeoutString("6m"); err == nil {
+		t.Fatal("NewRuntimeAdapterFromTimeoutString err = nil, want invalid argument")
+	}
+}
+
 func TestRuntimeAdapter_ExecuteRuntimeStepCreatesMissingWorkspaceDirectory(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	workingDirectory := filepath.Join(t.TempDir(), "missing", "workspace")
