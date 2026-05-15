@@ -23,6 +23,9 @@ func doDAssessmentEvidenceRefs(stepID common.StepID, assessment map[string]any) 
 		ret = append(ret, ref)
 	}
 	add(string(stepID))
+	for _, ref := range evidenceRefsFromValue(assessment["evidenceRefs"]) {
+		add(ref)
+	}
 	items, ok := doDAssessmentItemMaps(assessment["items"])
 	if ok {
 		for _, item := range items {
@@ -31,7 +34,52 @@ func doDAssessmentEvidenceRefs(stepID common.StepID, assessment map[string]any) 
 			}
 		}
 	}
+	goalCoverage := mapFromValue(assessment["goalCoverage"])
+	goalItems, ok := doDAssessmentItemMaps(goalCoverage["items"])
+	if ok {
+		for _, item := range goalItems {
+			for _, ref := range evidenceRefsFromValue(item["evidenceRefs"]) {
+				add(ref)
+			}
+		}
+	}
 	sort.Strings(ret)
+	return ret
+}
+
+func rejectedDoDAssessmentWithFallbackEvidenceRefs(stepID common.StepID, assessment map[string]any) map[string]any {
+	if assessment == nil {
+		return nil
+	}
+	ret := cloneStepPayload(assessment)
+	fallback := doDAssessmentEvidenceRefs(stepID, ret)
+	if len(fallback) == 0 && stepID != "" {
+		fallback = []string{string(stepID)}
+	}
+	if len(fallback) == 0 {
+		return ret
+	}
+	if items, ok := doDAssessmentItemMaps(ret["items"]); ok {
+		for _, item := range items {
+			if strings.TrimSpace(stringFromMap(item, "state")) != "satisfied" &&
+				len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 {
+				item["evidenceRefs"] = append([]string(nil), fallback...)
+			}
+		}
+		ret["items"] = items
+	}
+	if goalCoverage := mapFromValue(ret["goalCoverage"]); len(goalCoverage) > 0 {
+		if items, ok := doDAssessmentItemMaps(goalCoverage["items"]); ok {
+			for _, item := range items {
+				if strings.TrimSpace(stringFromMap(item, "state")) != "satisfied" &&
+					len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 {
+					item["evidenceRefs"] = append([]string(nil), fallback...)
+				}
+			}
+			goalCoverage["items"] = items
+			ret["goalCoverage"] = goalCoverage
+		}
+	}
 	return ret
 }
 

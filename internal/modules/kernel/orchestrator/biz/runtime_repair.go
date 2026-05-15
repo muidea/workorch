@@ -105,6 +105,9 @@ func shouldCloseCompletionGateFailureWithoutRepair(summary string, step *runMode
 		return true
 	}
 	if step != nil && boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) {
+		if doDCoverageContractCorrectionRequired(step) {
+			return false
+		}
 		return true
 	}
 	if strings.TrimSpace(stringFromMap(assessment, "summary")) == "" {
@@ -326,8 +329,28 @@ func (o *RuntimeOrchestrator) failRunWithRejectedCompletionResult(ctx context.Co
 	}
 	if requiresDoDAssessmentCompletionGate(run) && step != nil {
 		_ = o.recordRejectedCompletionDoDAssessment(ctx, run, step, step.Output)
+		reason = rejectedCompletionFailureReason(step, reason)
 	}
 	return o.FailRun(ctx, run.ID, reason)
+}
+
+func rejectedCompletionFailureReason(step *runModel.Step, fallback string) string {
+	fallback = strings.TrimSpace(fallback)
+	if step == nil {
+		return fallback
+	}
+	assessment := doDAssessmentFromOutput(step.Output)
+	if assessment == nil {
+		return fallback
+	}
+	if satisfied, _ := assessment["satisfied"].(bool); satisfied {
+		return fallback
+	}
+	summary := strings.TrimSpace(stringFromMap(assessment, "summary"))
+	if summary == "" {
+		return fallback
+	}
+	return summary
 }
 
 func (o *RuntimeOrchestrator) shouldEscalateRuntimeRepairExhaustion(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
@@ -750,7 +773,7 @@ func (o *RuntimeOrchestrator) runtimeRepairAttemptCountForEffectiveScope(ctx con
 		return exactAttempts
 	}
 	class, _ := runtimeRepairScopeClassAndSignature(failedStep)
-	targetAttempts := o.runtimeRepairAttemptCountForFailureTargetInWindow(ctx, runID, class, targetScope, runtimeRepairTargetBudgetWindowRoot(failedStep))
+	targetAttempts := o.runtimeRepairAttemptCountForFailureTargetInWindow(ctx, runID, class, targetScope, runtimeRepairTargetBudgetWindowRootForFailureTarget(failedStep))
 	if targetAttempts > exactAttempts {
 		return targetAttempts
 	}
@@ -873,8 +896,15 @@ func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerCanAutoResume(ctx co
 	if isLLMProviderRuntimeFailure(run, failedStep) {
 		return false
 	}
-	if runtimeFailureTargetScopeFromStep(failedStep) == "" || runtimeRepairTargetBudgetWindowRoot(failedStep) == "" {
+	targetScope := runtimeFailureTargetScopeFromStep(failedStep)
+	if targetScope == "" {
 		return false
+	}
+	if runtimeRepairTargetBudgetWindowRootForFailureTarget(failedStep) == "" {
+		class, _ := runtimeRepairScopeClassAndSignature(failedStep)
+		if !runtimeFailureTargetUsesRunBudget(class, targetScope) {
+			return false
+		}
 	}
 	return o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) < maxRuntimeRepairAttempts
 }
@@ -1022,22 +1052,55 @@ func runtimeRepairTargetBudgetWindowRoot(step *runModel.Step) common.StepID {
 	return ""
 }
 
+func runtimeRepairTargetBudgetWindowRootForFailureTarget(step *runModel.Step) common.StepID {
+	class, _ := runtimeRepairScopeClassAndSignature(step)
+	if runtimeFailureTargetUsesRunBudget(class, runtimeFailureTargetScopeFromStep(step)) {
+		return ""
+	}
+	return runtimeRepairTargetBudgetWindowRoot(step)
+}
+
+func runtimeFailureTargetUsesRunBudget(class string, targetScope string) bool {
+	if strings.TrimSpace(targetScope) == "" {
+		return false
+	}
+	switch strings.TrimSpace(class) {
+	case failureClassMCPRuntime, failureClassMCPCapabilityDenied:
+		return true
+	default:
+		return false
+	}
+}
+
 func runtimeFailureTargetScope(signature string) string {
 	signature = strings.TrimSpace(signature)
 	if signature == "" {
 		return ""
 	}
 	parts := strings.Split(signature, "|")
-	for _, key := range []string{"failureTargets", "targetRef", "conflictRef", "serverId", "tool", "uri"} {
-		for _, part := range parts {
-			name, value, ok := strings.Cut(part, "=")
-			if !ok || strings.TrimSpace(name) != key {
-				continue
-			}
-			value = normalizeRuntimeFailureTargetValue(value)
-			if value == "" {
-				continue
-			}
+	values := map[string]string{}
+	for _, part := range parts {
+		name, value, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		value = normalizeRuntimeFailureTargetValue(value)
+		if name == "" || value == "" {
+			continue
+		}
+		values[name] = value
+	}
+	for _, key := range []string{"failureTargets", "targetRef", "conflictRef"} {
+		if value := values[key]; value != "" {
+			return key + "=" + value
+		}
+	}
+	if values["serverId"] != "" && values["tool"] != "" {
+		return "serverId=" + values["serverId"] + "|tool=" + values["tool"]
+	}
+	for _, key := range []string{"serverId", "tool", "uri"} {
+		if value := values[key]; value != "" {
 			return key + "=" + value
 		}
 	}
@@ -1351,7 +1414,8 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input["repairGuidance"] = []string{
 			"Return only completed or failed dodAssessment, or a real governance blocker.",
 			"Do not return executionGraph, shellCommands, patchRequests, mcpToolCalls, memoryWrites, or other executable work.",
-			"Preserve the current DoD item assessment when still valid and add missing Goal coverage mapping with concrete evidenceRefs.",
+			"Preserve every still-valid DoD item assessment and add any missing DoD items exactly as listed in missingDoDItems.",
+			"Add dodAssessment.goalCoverage with items for every missingGoalCoverage entry; each satisfied item must cite concrete evidenceRefs.",
 			"If evidence does not support a Goal or DoD item, mark it failed/skipped with reason, residualRisks, and nextActions instead of claiming satisfaction.",
 		}
 		if missingGoalCoverage := missingGoalCoverageFromFailureOutput(failedStep.Output); len(missingGoalCoverage) > 0 {
@@ -1384,7 +1448,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	targetScope := runtimeFailureTargetScope(signature)
 	if targetScope != "" {
 		input["failureTargetScope"] = targetScope
-		input["targetRepairAttempts"] = o.runtimeRepairAttemptCountForFailureTargetInWindow(ctx, run.ID, class, targetScope, runtimeRepairTargetBudgetWindowRoot(failedStep))
+		input["targetRepairAttempts"] = o.runtimeRepairAttemptCountForFailureTargetInWindow(ctx, run.ID, class, targetScope, runtimeRepairTargetBudgetWindowRootForFailureTarget(failedStep))
 	}
 	budgetScope := recoveryBudgetScope("runtime_repair", rootStepID, class, signature)
 	if targetScope != "" {
@@ -2555,7 +2619,7 @@ func (o *RuntimeOrchestrator) recentRuntimeRepairAttemptSummaries(ctx context.Co
 	}
 	scope := runtimeRepairScopeFromFailedStep(failedStep)
 	targetScope := runtimeFailureTargetScopeFromStep(failedStep)
-	windowRoot := runtimeRepairTargetBudgetWindowRoot(failedStep)
+	windowRoot := runtimeRepairTargetBudgetWindowRootForFailureTarget(failedStep)
 	failureClass := strings.TrimSpace(scope.failureClass)
 	ret := make([]map[string]any, 0, limit)
 	for _, step := range steps {

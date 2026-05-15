@@ -120,9 +120,13 @@ Runtime repair / duplicate / replan 治理必须同时识别两类中立 scope�
 - 完整失败签名：用于精确区分同一目标下的不同失败形态。
 - 目标级失败签名：从 `failureTargets`、`targetRef`、`conflictRef`、`serverId`、`tool`、`uri` 等中立键提取，用于识别同一失败目标在不同 step、graph node、loop、attempt 中反复出现。
 
+当失败同时包含 `serverId` 与 `tool` 时，目标级 scope 应组合为同一外部能力目标，例如 `serverId=<id>|tool=<name>`；只有缺少其中一项时才退化为单独的 `serverId` 或 `tool`。这仍然是能力目录层的中立引用，不得解释为某个具体业务服务。
+
 当失败签名包含目标级 scope 时，node 名称、step ID、loop 编号或 graph 编号变化不得重置 repair budget。若同一 failure class + target scope 已达到 repair budget，runtime 必须进入 repair exhausted / duplicate / replan 治理，而不是继续派发普通 repair。
 
 目标级 scope 不得跨越当前有效 artifact / graph root 窗口无限合并。若新的 state-changing graph、repair graph 或 successor root 已经重新写入同一 target，后续 build/test/verification 失败应优先按当前 graph root / recovery root 计算 repair budget；历史同 target 失败只能作为上下文证据和风险信号，不得直接耗尽新 artifact 版本的修复机会。
+
+外部能力依赖失败是例外中的中立子类：当 `mcp/tool_call` 或等价外部 capability 对同一 `failure class + target scope` 反复返回不可用、未找到、权限拒绝、配置缺失等确定性失败时，新的 graph root 或 loop 不应把该外部依赖预算重置为 0。runtime 应收敛到 rejected result、blocked_on_decision 或 replan，而不是继续要求 LLM 生成同一能力调用。是否换用其他能力、补充配置或继续重试，必须通过 capability/profile 或治理决策表达，core 不得内置具体服务名、工具名或业务 fallback。
 
 当失败签名不包含目标级 scope 时，runtime 不得臆造业务目标，也不得把无目标失败合并为同一预算；此时继续按完整失败签名、root step 或显式 lineage scope 收敛。
 
@@ -354,6 +358,8 @@ Runtime 可以从失败 diff 与当前 target snapshot 中抽取中立的 `patch
 如果 repair 基于当前 `patchRepairContext` 判断目标状态已经满足、失败 patch 已不再需要，runtime 可以接受一个受限 concrete validation evidence graph，用于验证当前状态；该 graph 不得只包含 read-only inspection，也不得包含新的 LLM 嵌套或 patch 节点。若验证失败，新的验证失败 evidence 再驱动后续 state-changing repair。
 
 若 `dodAssessment.satisfied=true` 但 runtime 校验发现 DoD / Goal coverage 字段缺失或不完整，该失败属于 assessment contract correction，而不是新的 state-changing implementation 缺口。runtime 必须以 `assessmentOnly` / `verification` 模式要求 LLM 补齐 `dodAssessment.items`、`dodAssessment.goalCoverage` 与 evidenceRefs；不得在没有新的实现缺口证据时强制重新生成 patch、shell 或其他可执行工作。
+
+如果 assessment-only coverage correction 仍返回 `dodAssessment.satisfied=true` 但继续缺失 DoD / Goal coverage，runtime 不得立即把 run 终结为 rejected result；应在 runtime repair budget 内继续派发 assessment-only correction，并把最新 missingDoDItems / missingGoalCoverage 作为强约束输入。只有 coverage correction 预算耗尽、LLM 返回明确 unsatisfied assessment、或出现不可恢复 contract violation 时，才进入 rejected / decision / fail 路径。
 
 Goal coverage 校验只应把可判定的叶子需求作为覆盖对象。Markdown 标题、分组项、以冒号结尾的父级目标项只用于组织上下文，不得作为必须单独满足的叶子需求。若 Goal 叶子需求与 DoD 项文字不完全一致，LLM 必须通过 `dodAssessment.goalCoverage` 显式建立 Goal requirement -> evidenceRefs 的映射；runtime 不应依赖领域语义硬编码进行推断。
 
@@ -588,6 +594,8 @@ Stage input bundle 必须遵守：
   - activation 会基于仍匹配 workspace soul routing 的当前 template `ContextHints` 刷新 run 级 `executionContract`，并保留 workspace 扩展字段；该逻辑只更新中立 contract，不重新绑定 workspace template、soul、skill、mcp。
   - `executionContextPackage` 不再压缩 `executionContract`，确保 LLM 能看到完整 `profileContracts`、required deliverables 与 evidence requirements。
   - verification follow-up 返回只读 execution graph 且缺少有效收敛输出时，后续 repair 会继承 contract violation evidence；需要状态变更时会显式携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。
+  - assessment-only coverage correction 若仍缺 DoD / Goal coverage，不再首轮 repair 后直接终止；runtime 会在 repair budget 内继续派发 assessment-only correction，并携带最新缺失 coverage 项。
+  - 外部 capability 失败的 target scope 已支持 `serverId+tool` 组合并使用 run 级目标预算；同一外部能力反复确定性失败时会进入 duplicate / repair exhausted 治理，rejected result 会携带 terminal failed step 与 repair step 证据，run failure reason 优先使用 unsatisfied DoD assessment summary。
 
 ## 非兼容性说明
 

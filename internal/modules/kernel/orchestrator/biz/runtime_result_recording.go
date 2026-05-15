@@ -181,6 +181,7 @@ func (o *RuntimeOrchestrator) recordRunResultFromRejectedDoDAssessment(
 	if summary == "" {
 		summary = "DoD assessment was not satisfied."
 	}
+	assessment = rejectedDoDAssessmentWithFallbackEvidenceRefs(step.ID, assessment)
 	now := runtimeEvidenceTimestamp()
 	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
 	sourceRef, evidenceRefs := rejectedResultSourceAndEvidenceRefs(step, evidenceRefs)
@@ -249,7 +250,12 @@ func rejectedResultSourceAndEvidenceRefs(step *runModel.Step, evidenceRefs []str
 			seen[ref] = true
 		}
 	}
-	for _, ref := range []string{string(rootStepID), string(step.ID)} {
+	for _, ref := range []string{
+		string(rootStepID),
+		string(step.ID),
+		stringFromMap(step.Input, "failedStepId"),
+		stringFromMap(step.Input, "previousStepId"),
+	} {
 		ref = strings.TrimSpace(ref)
 		if ref == "" || seen[ref] {
 			continue

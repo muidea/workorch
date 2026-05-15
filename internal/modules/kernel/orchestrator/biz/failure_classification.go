@@ -393,7 +393,8 @@ func (o *RuntimeOrchestrator) shouldBlockOnDuplicateRuntimeFailure(ctx context.C
 	if signature == "" || !duplicateRepairDecisionFailureClass(class) || attempts == 0 {
 		return false
 	}
-	if requiresDoDAssessmentCompletionGate(run) && attempts < maxRuntimeRepairAttempts {
+	if requiresDoDAssessmentCompletionGate(run) && attempts < maxRuntimeRepairAttempts &&
+		!runtimeFailureTargetUsesRunBudget(class, targetScope) {
 		return false
 	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)

@@ -7091,6 +7091,70 @@ func TestRuntimeOrchestrator_ResumeClearsRepairExhaustionWhenTargetWindowHasBudg
 	}
 }
 
+func TestRuntimeRepairMCPFailureTargetUsesCompositeRunBudget(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-mcp-target-budget")
+	signature := "class=mcp_runtime_failed|kind=mcp/tool_call|stage=mcp_tool_call_server_unavailable|serverId=external-capability|tool=lookup.current|error=not found"
+	if got := runtimeFailureTargetScope(signature); got != "serverId=external-capability|tool=lookup.current" {
+		t.Fatalf("runtimeFailureTargetScope = %q, want composite server/tool target", got)
+	}
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo, tickets: memory.NewDecisionTicketRepository()}
+	for idx, root := range []string{"graph-001", "graph-002"} {
+		if err := stepRepo.Create(ctx, &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/repair-%03d", runID, idx+1)),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyGraphRootStepID:       string(runID) + "/" + root,
+				stepInputKeyRepairOfFailureClass:  failureClassMCPRuntime,
+				stepInputKeyRepairOfFailureSig:    signature,
+			},
+		}); err != nil {
+			t.Fatalf("seed repair step: %v", err)
+		}
+	}
+	priorFailed := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-002/001-capability-call"),
+		RunID: runID,
+		Kind:  "mcp/tool_call",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassMCPRuntime,
+			failureOutputKeySignature: signature,
+		},
+	}
+	if err := stepRepo.Create(ctx, priorFailed); err != nil {
+		t.Fatalf("seed prior failed step: %v", err)
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-003/001-capability-call"),
+		RunID: runID,
+		Kind:  "mcp/tool_call",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyGraphRootStepID: string(runID) + "/graph-003",
+		},
+		Output: map[string]any{
+			"stage":                   "mcp_tool_call_server_unavailable",
+			"serverId":                "external-capability",
+			"tool":                    "lookup.current",
+			"error":                   "not found",
+			failureOutputKeyClass:     failureClassMCPRuntime,
+			failureOutputKeySignature: signature,
+		},
+	}
+
+	if attempts := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); attempts != 2 {
+		t.Fatalf("effective attempts = %d, want same external capability target counted across graph roots", attempts)
+	}
+	if !orch.shouldBlockOnDuplicateRuntimeFailure(ctx, &runmodel.Run{ID: runID, DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, failedStep) {
+		t.Fatalf("duplicate external capability target should block before repeating the same call again")
+	}
+}
+
 func TestRuntimeOrchestrator_ResumeClearsDuplicateFailureBlockerBelowScopedBudget(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -14885,6 +14949,65 @@ func TestRuntimeOrchestrator_RecordsRejectedResultForUnsatisfiedDoDAssessment(t 
 	if result.DoDAssessment.Satisfied {
 		t.Fatalf("DoDAssessment = %+v, want unsatisfied", result.DoDAssessment)
 	}
+	if len(result.DoDAssessment.Items) != 1 ||
+		!reflect.DeepEqual(result.DoDAssessment.Items[0].EvidenceRefs, []string{string(step.ID)}) {
+		t.Fatalf("DoDAssessment items = %+v, want failed item to cite fallback step evidence", result.DoDAssessment.Items)
+	}
+}
+
+func TestRuntimeOrchestrator_FailRunPrefersUnsatisfiedDoDSummary(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	resultRepo := memory.NewResultRepository()
+	runID := common.RunID("run-unsatisfied-dod-summary-failure")
+	workspaceID := common.WorkspaceID("ws-unsatisfied-dod-summary-failure")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-unsatisfied-dod-summary-failure",
+		State:           common.RunStateRunning,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		runs:       runRepo,
+		workspaces: workspaceRepo,
+		evidence:   RuntimeEvidenceRepositories{Results: resultRepo},
+	}
+	summary := "无法完成目标，因为所需外部能力当前不可用。"
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001"),
+		RunID: runID,
+		Output: map[string]any{
+			"error": "invalid argument: completionState failed has no actionable continuation",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"summary":   summary,
+				"items": []map[string]any{{
+					"item":          "produce requested result",
+					"state":         "failed",
+					"failureReason": "external capability unavailable",
+				}},
+			},
+		},
+	}
+
+	if err := orch.failRunWithRejectedCompletionResult(ctx, run, step, "invalid argument: completionState failed has no actionable continuation"); err != nil {
+		t.Fatalf("failRunWithRejectedCompletionResult: %v", err)
+	}
+	closed, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if closed.State != common.RunStateFailed || closed.FailureReason != summary {
+		t.Fatalf("run = %+v, want failed with DoD summary reason %q", closed, summary)
+	}
 }
 
 func TestRuntimeOrchestrator_RecordsRejectedResultForWeakSatisfiedDoDAssessment(t *testing.T) {
@@ -15268,6 +15391,63 @@ func TestRuntimeRepairInputForSatisfiedDoDCoverageMissingIsAssessmentOnly(t *tes
 	}
 	if missing := mapSliceFromValue(input["missingGoalCoverage"]); len(missing) != 1 {
 		t.Fatalf("missingGoalCoverage = %+v, want one item", input["missingGoalCoverage"])
+	}
+}
+
+func TestCompletionGateCoverageRepairFollowUpCanContinue(t *testing.T) {
+	runID := common.RunID("run-dod-coverage-assessment-repair-continues")
+	step := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-001-of-planning-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyAssessmentOnly:        true,
+			"repairObjective":                 "complete_dod_goal_coverage_assessment",
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|stage=llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": true,
+				"summary":   "DoD passed but goal coverage is still incomplete.",
+				"items": []map[string]any{{
+					"item":         "tests pass",
+					"state":        "satisfied",
+					"evidenceRefs": []string{string(runID) + "/graph-001/003-test"},
+				}},
+				"goalCoverage": map[string]any{
+					"satisfied": true,
+					"items": []map[string]any{{
+						"item":         "covered goal",
+						"state":        "satisfied",
+						"evidenceRefs": []string{string(runID) + "/graph-001/003-test"},
+					}},
+				},
+			},
+			"runtimeDiagnostics": map[string]any{
+				"kind": failureClassDoDCoverageMissing,
+				"missingGoalCoverage": []map[string]any{{
+					"raw":   "streaming token accounting",
+					"kind":  "leaf",
+					"state": "missing",
+				}},
+			},
+		},
+	}
+
+	if shouldCloseCompletionGateFailureWithoutRepair("runtime completion gate failed", step, step.Output) {
+		t.Fatalf("coverage repair follow-up should continue through runtime repair budget")
+	}
+	if input := (&RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}).runtimeRepairFollowUpStepInput(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-dod-coverage-assessment-repair-continues", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, step, 2, errors.New("missing goal coverage")); input[stepInputKeyAssessmentOnly] != true || input["repairObjective"] != "complete_dod_goal_coverage_assessment" {
+		t.Fatalf("repair input = %+v, want continued assessment-only coverage correction", input)
+	} else if missing := mapSliceFromValue(input["missingGoalCoverage"]); len(missing) != 1 || missing[0]["raw"] != "streaming token accounting" {
+		t.Fatalf("missingGoalCoverage = %+v, want carried forward missing goal coverage", input["missingGoalCoverage"])
 	}
 }
 
