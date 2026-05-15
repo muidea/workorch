@@ -1817,9 +1817,11 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		}
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Use patchRepairContext as the current target snapshot for patch repair; treat the failed patch text as stale or untrusted.",
+			"When using baseHash, copy the literal contentHash value from the current target snapshot; never output unresolved references such as ${...}, {{...}}, or symbolic placeholders.",
 			"Use complete patch/apply file_write only when the current snapshot is marked safeForFileWrite/contentComplete and contains no redaction markers; otherwise use a minimal unified_diff with exact visible context, file/edit with exact oldText, or first read the target.",
 			"Never copy [REDACTED], [SECRET], [MASKED], omitted sections, or truncated snapshot text into patch/apply content or diff.",
 			"If patchRepairSuggestions are present, prefer their exact oldText/newText replacement evidence to construct the smallest current unified_diff or file/edit repair.",
+			"Before adding new target content, reconcile the current snapshot and modify an existing equivalent item instead of creating duplicate named artifacts.",
 			"If the current target snapshot proves the failed patch is no longer required, return a bounded verification evidence graph instead of another patch; do not use read-only inspection as the only evidence.",
 		)
 	}
@@ -1841,6 +1843,11 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	inheritPriorRepairContext(input, failedStep)
 	if boolValue(input["stateChangingOutputRequired"]) {
 		narrowStateChangingRecoveryInput(input, failedStep, execErr, "runtime_repair")
+		input["repairActionPackage"] = repairActionPackageFromRepairInput(input, failedStep.Output)
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Use repairActionPackage as the primary actionable repair contract; it contains the required output kind, rejected output summary, and current target snapshots.",
+			"When repairActionPackage.requiredOutput.mustIncludeStateChangingNode is true, the next output must include patch/apply before verification, or return a failed dodAssessment/blocker.",
+		)
 	}
 	if context := o.convertedDecisionReadableResourceContext(ctx, run, failedStep); len(context) > 0 {
 		input["readableResourceRepairContext"] = context
@@ -1875,6 +1882,7 @@ func inheritPriorRepairContext(input map[string]any, failedStep *runModel.Step) 
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Preserve inherited repair context from the previous repair attempt; it contains the current target snapshots needed for direct state-changing recovery.",
 			"Use inherited target snapshots and workspace manifest to produce patch/apply artifacts instead of retrying rejected shell-only or read-only recovery output.",
+			"When a snapshot exposes contentHash, use that literal hash as baseHash or omit baseHash; do not emit template or interpolation syntax in patch fields.",
 			"Do not generate file_write from inherited snapshots unless the snapshot is complete and not redacted; use exact minimal diffs or file/read when content is incomplete.",
 		)
 	}
@@ -1893,7 +1901,7 @@ func stateChangingRepairGuidance() []string {
 		"When repair context contains redacted or truncated content, do not copy it into patch/apply; first read the target or produce a minimal exact diff from visible current evidence.",
 		"Do not return self-inspection, run snapshot, observability, or context rehydration graphs when effective Goal and DoD are already present.",
 		"If a target file is missing in an empty or new workspace, create it with patch/apply file_write instead of reading it again.",
-		"Do not use placeholders such as __FROM_PREVIOUS_STEP_OUTPUT__ or <<...>>.",
+		"Do not use placeholders such as __FROM_PREVIOUS_STEP_OUTPUT__, <<...>>, ${...}, or {{...}} in patch fields; use concrete literal values or omit optional fields.",
 	}
 }
 
@@ -1949,6 +1957,140 @@ func narrowStateChangingRecoveryInput(input map[string]any, failedStep *runModel
 		delete(input, stepInputKeyWorkspaceFileManifest)
 	}
 	delete(input, stepOutputKeyExecutionGraph)
+}
+
+func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ...map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	pkg := map[string]any{
+		"requiredOutput": map[string]any{
+			"mustIncludeStateChangingNode": true,
+			"acceptedKinds":                []string{"patch/apply"},
+			"forbiddenKinds": []string{
+				"read_only_graph",
+				"shell_only_graph",
+				"llm_gated_graph",
+				"self_inspection_graph",
+				"context_rehydration_graph",
+			},
+		},
+	}
+	for _, key := range []string{
+		failureOutputKeyClass,
+		failureOutputKeySignature,
+		"failureTargetScope",
+		"failedStepId",
+		"failedStepKind",
+		"failureReason",
+		"repairObjective",
+		"runtimeRepairAttempt",
+		"maxRuntimeRepairAttempts",
+	} {
+		if value, ok := input[key]; ok && value != nil {
+			pkg[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	if len(rawFailedOutput) > 0 && len(rawFailedOutput[0]) > 0 {
+		pkg["previousRejectedOutputSummary"] = compactStateChangingRecoveryFailureOutput(rawFailedOutput[0])
+	} else if failedOutput := mapFromValue(input["failedStepOutput"]); len(failedOutput) > 0 {
+		pkg["previousRejectedOutputSummary"] = compactStateChangingRecoveryFailureOutput(failedOutput)
+	}
+	if targets := repairActionTargetSnapshots(input); len(targets) > 0 {
+		pkg["targetSnapshots"] = targets
+	}
+	if manifest := repairActionWorkspaceManifest(input); len(manifest) > 0 {
+		pkg["workspaceFileManifest"] = manifest
+	}
+	if len(pkg) <= 1 {
+		return nil
+	}
+	return pkg
+}
+
+func repairActionTargetSnapshots(input map[string]any) []map[string]any {
+	var ret []map[string]any
+	seen := map[string]bool{}
+	add := func(items []map[string]any, source string) {
+		for _, item := range items {
+			targetRef := strings.TrimSpace(stringFromMap(item, "targetRef"))
+			if targetRef == "" || seen[targetRef] {
+				continue
+			}
+			seen[targetRef] = true
+			snapshot := repairActionTargetSnapshot(item)
+			if source != "" {
+				snapshot["contextSource"] = source
+			}
+			ret = append(ret, snapshot)
+			if len(ret) >= maxLLMContextSliceItems {
+				return
+			}
+		}
+	}
+	add(mapSliceFromValue(input["failureTargetRepairContext"]), "failure_target")
+	if len(ret) < maxLLMContextSliceItems {
+		add(mapSliceFromValue(input["patchRepairContext"]), "patch_target")
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func repairActionTargetSnapshot(item map[string]any) map[string]any {
+	ret := map[string]any{}
+	for _, key := range []string{
+		"targetRef",
+		"exists",
+		"contentHash",
+		"contentComplete",
+		"safeForFileWrite",
+		"redacted",
+		"truncated",
+		"isBinary",
+		"size",
+		"source",
+		"error",
+	} {
+		if value, ok := item[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	content := strings.TrimSpace(stringFromMap(item, "content"))
+	if content != "" && !containsRuntimeRedactionMarker(content) {
+		if boolValue(item["contentComplete"]) && boolValue(item["safeForFileWrite"]) {
+			ret["content"] = truncateLLMContextString(content)
+		} else {
+			ret["contentPreview"] = truncateLLMContextString(content)
+		}
+	}
+	return ret
+}
+
+func repairActionWorkspaceManifest(input map[string]any) []map[string]any {
+	manifest := mapSliceFromValue(input[stepInputKeyWorkspaceFileManifest])
+	if len(manifest) == 0 {
+		return nil
+	}
+	limit := min(len(manifest), maxLLMContextSliceItems)
+	ret := make([]map[string]any, 0, limit)
+	for idx := 0; idx < limit; idx++ {
+		item := manifest[idx]
+		entry := map[string]any{}
+		for _, key := range []string{"path", "kind", "size", "contentHash"} {
+			if value, ok := item[key]; ok && value != nil {
+				entry[key] = compactLLMContextValue(value, 1)
+			}
+		}
+		if len(entry) > 0 {
+			ret = append(ret, entry)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func stateChangingReadOnlyGraphFailureText(value string) bool {

@@ -367,7 +367,7 @@ Repair 不是重新探索。Repair 必须继承来源阶段的约束，并根据
 - `implementation_gap`：已有 evidence 表明实现缺失、实现错误、artifact 无法应用或非只读执行失败，repair 必须显式携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。后续 provider retry 也必须继承该约束，不能把实现缺口修复降级为只读 exploration graph。
 - `evidence_gap`：verification 阶段只证明“缺少 concrete evidence / 未执行验证 / evidence 不足”，但尚未形成实现错误诊断时，repair 应携带 `repairObjective=produce_concrete_validation_evidence`，允许受限 tool / shell / mcp 验证图生成证据；若该验证图后续产生确定性失败，再由新的失败证据触发 state-changing repair。
 
-当 patch / preview / apply 因 context mismatch、base mismatch 或 stale artifact 失败时，默认 repair 仍要求基于当前 target snapshot 重新生成可应用 state-changing artifact。但完整 `file_write` 只允许建立在完整、未脱敏、未截断且标记为 `safeForFileWrite` 的当前快照上；若 repair context 中的内容包含 `[REDACTED]` / `[SECRET]` / `[MASKED]`、省略片段或截断标记，LLM 不得把该内容复制进 patch content / diff，而应先读取目标、使用 exact oldText 的最小替换，或基于可见上下文生成最小 `unified_diff`。
+当 patch / preview / apply 因 context mismatch、base mismatch 或 stale artifact 失败时，默认 repair 仍要求基于当前 target snapshot 重新生成可应用 state-changing artifact。但完整 `file_write` 只允许建立在完整、未脱敏、未截断且标记为 `safeForFileWrite` 的当前快照上；若 repair context 中的内容包含 `[REDACTED]` / `[SECRET]` / `[MASKED]`、省略片段或截断标记，LLM 不得把该内容复制进 patch content / diff，而应先读取目标、使用 exact oldText 的最小替换，或基于可见上下文生成最小 `unified_diff`。`baseHash` 只能省略或使用当前 evidence 中的字面 `contentHash` 值；不得输出 `${...}`、`{{...}}`、`<<...>>` 或其他未解析占位符。`unified_diff` 的 hunk header 必须是可解析的真实行号范围，`@@ ... @@` 等伪 hunk 属于无效 artifact。
 
 Runtime 可以从失败 diff 与当前 target snapshot 中抽取中立的 `patchRepairSuggestions`，例如“某个 oldText 在当前目标中唯一匹配，可替换为 newText”。该建议只来源于失败 artifact 与当前资源内容的机械对齐，不包含业务语义；它用于帮助 LLM 生成更小、更精确、可审计的 repair artifact，避免重复输出行号漂移、上下文过期或依赖脱敏快照的 patch。
 
@@ -607,6 +607,7 @@ Stage input bundle 必须遵守：
   - `unified_diff` 应用能力已支持在行号漂移但 old/context lines 于当前目标中唯一匹配时按唯一匹配位置应用，降低 LLM 生成 diff 行号不准导致的无效 repair 循环。
 - 2026-05-15：
   - 已完成 execution contract 下发与 template contract 刷新收口。
+  - patch 输入校验已覆盖 `baseHash` 未解析占位符与 `@@ ... @@` 伪 hunk，LLM provider prompt / repair guidance 已要求使用字面 `contentHash` 或省略 `baseHash`，并在修复前基于当前 target snapshot 避免重复添加等价内容。
   - activation 会基于仍匹配 workspace soul routing 的当前 template `ContextHints` 刷新 run 级 `executionContract`，并保留 workspace 扩展字段；该逻辑只更新中立 contract，不重新绑定 workspace template、soul、skill、mcp。
   - `executionContextPackage` 不再压缩 `executionContract`，确保 LLM 能看到完整 `profileContracts`、required deliverables 与 evidence requirements。
   - verification follow-up 返回只读 execution graph 且缺少有效收敛输出时，后续 repair 会继承 contract violation evidence；需要状态变更时会显式携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。

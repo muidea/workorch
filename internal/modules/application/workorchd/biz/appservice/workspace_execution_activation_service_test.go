@@ -940,6 +940,131 @@ func TestActivateWorkspaceExecutionWithBackendCarriesResolvedDecisionHistory(t *
 	}
 }
 
+func TestActivateWorkspaceExecutionWithBackendPromotesResolvedReplanHistoryToContinuation(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-replan-continuation", "activation replan continuation", "", "workspaces/activation-replan-continuation")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "produce a state-changing deliverable")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"deliverable state changed"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+
+	session, err := newRuntimeSessionWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("session exports: %v", err)
+	}
+	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.ContextHints = map[string]any{"stateChangePolicy": "must_produce_state_change"}
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("update workspace context hints: %v", err)
+	}
+	priorRunID := common.RunID("run-prior-replan-continuation")
+	priorTicketID := common.TicketID("ticket-prior-replan-continuation")
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          priorRunID,
+		WorkspaceID: common.WorkspaceID(workspace.ID),
+		GoalID:      common.GoalID(goal.ID),
+		DoDID:       common.DoDID(dod.ID),
+		State:       common.RunStateFailed,
+	}); err != nil {
+		t.Fatalf("create prior run: %v", err)
+	}
+	if err := exports.Repositories.Tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:           priorTicketID,
+		WorkspaceID:  common.WorkspaceID(workspace.ID),
+		RunID:        priorRunID,
+		StepID:       "run-prior-replan-continuation/repair-003-of-planning-001",
+		Reason:       "runtime repair attempts exhausted",
+		DecisionKind: "provide_missing_info",
+		Question:     "Choose recovery strategy",
+		State:        common.DecisionTicketStateResolved,
+		Context: map[string]any{
+			decisionContextKeyRecoveryPolicy:        decisionContextRecoveryPolicyRepairPlan,
+			"failureClass":                          "runtime_failed",
+			"failureSignature":                      "class=runtime_failed|kind=llm/workspace_execution|failureTargets=target-a",
+			"failureTargetScope":                    "target-a",
+			"failedStepOutput":                      map[string]any{"error": "state-changing output was not produced"},
+			llmcommon.ExecutionContextLLMProviderID: "must-not-persist",
+		},
+	}); err != nil {
+		t.Fatalf("create prior ticket: %v", err)
+	}
+	if err := exports.Repositories.Resolutions.Create(ctx, &decisionmodel.Resolution{
+		ID:       "resolution-prior-replan-continuation",
+		TicketID: priorTicketID,
+		Type:     "replan",
+		Payload: map[string]any{
+			"recoveryAction":                        "replan",
+			llmcommon.ExecutionContextLLMProviderID: "must-not-persist",
+		},
+	}); err != nil {
+		t.Fatalf("create prior resolution: %v", err)
+	}
+	_ = session.Close(ctx)
+
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID:        goal.ID,
+		DoDID:         dod.ID,
+		LLMProviderID: "runtime-only-provider",
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	replan := contextMapFromValue(t, item.Run.ExecutionContext["replanContinuation"])
+	if replan["predecessorRunId"] != string(priorRunID) ||
+		replan["ticketId"] != string(priorTicketID) ||
+		replan["reason"] != "resolved_governance_replan" {
+		t.Fatalf("replanContinuation = %+v, want prior replan lineage", replan)
+	}
+	failure := contextMapFromValue(t, replan["failureContext"])
+	if failure["failureClass"] != "runtime_failed" ||
+		failure["failureTargetScope"] != "target-a" ||
+		failure[llmcommon.ExecutionContextLLMProviderID] != nil {
+		t.Fatalf("failureContext = %+v, want neutral failure context without runtime llm binding", failure)
+	}
+	if replan[llmcommon.ExecutionContextLLMProviderID] != nil {
+		t.Fatalf("replanContinuation = %+v, want no runtime llm binding", replan)
+	}
+
+	runSnapshot, err := ReadRunSnapshotWithBackend(ctx, "file", dataRoot, item.Run.ID)
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
+	}
+	if len(runSnapshot.Steps) != 1 {
+		t.Fatalf("steps = %+v, want first step", runSnapshot.Steps)
+	}
+	step := runSnapshot.Steps[0]
+	if step.Input["runtimeStage"] != "repair" ||
+		step.Input["soulStage"] != "execution" ||
+		step.Input["repairObjective"] != "produce_state_changing_output" ||
+		step.Input["stateChangingOutputRequired"] != true ||
+		step.Input["replanStateChangingContinuation"] != true {
+		t.Fatalf("first step input = %+v, want state-changing replan continuation", step.Input)
+	}
+	stepContext := contextMapFromValue(t, step.Input["executionContext"])
+	if len(contextMapFromValue(t, stepContext["replanContinuation"])) == 0 {
+		t.Fatalf("first step executionContext = %+v, want compact replan continuation", stepContext)
+	}
+	if step.Input[llmcommon.ExecutionContextLLMProviderID] != "runtime-only-provider" {
+		t.Fatalf("first step input = %+v, want runtime-only llm provider binding", step.Input)
+	}
+}
+
 func TestWorkspaceGovernanceHistoryUsesWorkspaceScopedTicketRead(t *testing.T) {
 	ctx := context.Background()
 	workspaceID := common.WorkspaceID("ws-governance-scope")

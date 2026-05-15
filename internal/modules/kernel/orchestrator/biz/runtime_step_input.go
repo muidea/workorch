@@ -38,6 +38,7 @@ func initialStepInput(run *runModel.Run) map[string]any {
 			input["repairObjective"] = repairObjectiveStateChangingOutput
 			input["repairGuidance"] = stateChangingRepairGuidance()
 			input["replanStateChangingContinuation"] = true
+			input["repairActionPackage"] = repairActionPackageFromReplanContinuation(run)
 		}
 	}
 	return input
@@ -48,6 +49,59 @@ func replanRunRequiresStateChangingOutput(run *runModel.Run) bool {
 		return false
 	}
 	return len(mapFromValue(run.ExecutionContext["replanContinuation"])) > 0
+}
+
+func repairActionPackageFromReplanContinuation(run *runModel.Run) map[string]any {
+	if run == nil {
+		return nil
+	}
+	continuation := mapFromValue(run.ExecutionContext["replanContinuation"])
+	if len(continuation) == 0 {
+		return nil
+	}
+	failureContext := mapFromValue(continuation["failureContext"])
+	if len(failureContext) == 0 {
+		failureContext = mapFromValue(continuation["ticketContext"])
+	}
+	pkg := map[string]any{
+		"requiredOutput": map[string]any{
+			"mustIncludeStateChangingNode": true,
+			"acceptedKinds":                []string{"patch/apply"},
+			"forbiddenKinds": []string{
+				"read_only_graph",
+				"shell_only_graph",
+				"llm_gated_graph",
+				"self_inspection_graph",
+				"context_rehydration_graph",
+			},
+		},
+		"predecessorRunId": stringFromMap(continuation, "predecessorRunId"),
+		"reason":           stringFromMap(continuation, "reason"),
+	}
+	for _, key := range []string{
+		failureOutputKeyClass,
+		failureOutputKeySignature,
+		"failureTargetScope",
+		"failedStepId",
+		"failedStepKind",
+		"attempts",
+		"maxAttempts",
+		"repairOfRootStepId",
+	} {
+		if value, ok := failureContext[key]; ok && value != nil {
+			pkg[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	if len(mapFromValue(failureContext["failedStepOutput"])) > 0 {
+		pkg["previousRejectedOutputSummary"] = compactStateChangingRecoveryFailureOutput(mapFromValue(failureContext["failedStepOutput"]))
+	}
+	if targets := repairActionTargetSnapshots(failureContext); len(targets) > 0 {
+		pkg["targetSnapshots"] = targets
+	}
+	if len(pkg) <= 3 {
+		return nil
+	}
+	return pkg
 }
 
 func nextStepInputFromOutput(run *runModel.Run, previousStep *runModel.Step) map[string]any {
@@ -228,6 +282,7 @@ func slimExecutionContextForStepInput(executionContext map[string]any) map[strin
 	for _, key := range []string{
 		"compressedContext",
 		"replanContinuation",
+		"governanceHistory",
 		"soul",
 		"soulRouting",
 	} {

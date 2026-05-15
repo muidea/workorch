@@ -593,6 +593,9 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	}
 	if len(governanceHistory) > 0 {
 		contextData["governanceHistory"] = governanceHistory
+		if replanContinuation := replanContinuationFromGovernanceHistory(governanceHistory); len(replanContinuation) > 0 {
+			contextData["replanContinuation"] = replanContinuation
+		}
 	}
 	if len(workspace.EvidencePolicies) > 0 {
 		contextData["evidencePolicies"] = cloneContextMapSlice(workspace.EvidencePolicies)
@@ -814,6 +817,7 @@ func workspaceGovernanceHistory(
 			"decisionKind":      ticket.DecisionKind,
 			"reason":            ticket.Reason,
 			"question":          ticket.Question,
+			"ticketContext":     cloneDecisionPayload(ticket.Context),
 			"resolutionId":      string(resolution.ID),
 			"resolutionType":    resolution.Type,
 			"resolutionPayload": cloneDecisionPayload(resolution.Payload),
@@ -1421,6 +1425,110 @@ func mcpCapabilityContexts(items []*mcpmodel.Capability) []map[string]any {
 		})
 	}
 	return ret
+}
+
+func replanContinuationFromGovernanceHistory(history []map[string]any) map[string]any {
+	for idx := len(history) - 1; idx >= 0; idx-- {
+		item := history[idx]
+		if len(item) == 0 {
+			continue
+		}
+		resolutionType := strings.TrimSpace(stringFromDecisionPayload(item, "resolutionType"))
+		resolutionPayload := decisionPayloadMap(item["resolutionPayload"])
+		recoveryAction := strings.TrimSpace(stringFromDecisionPayload(resolutionPayload, "recoveryAction"))
+		if resolutionType != "replan" && recoveryAction != "replan" {
+			continue
+		}
+		replan := map[string]any{
+			"predecessorRunId": stringFromDecisionPayload(item, "runId"),
+			"reason":           "resolved_governance_replan",
+			"ticketId":         stringFromDecisionPayload(item, "ticketId"),
+			"ticketStepId":     stringFromDecisionPayload(item, "stepId"),
+			"ticketReason":     stringFromDecisionPayload(item, "reason"),
+			"resolutionId":     stringFromDecisionPayload(item, "resolutionId"),
+			"resolutionType":   resolutionType,
+		}
+		if len(resolutionPayload) > 0 {
+			replan["resolutionPayload"] = stripRuntimeLLMBindingFromActivationContext(common.RedactSensitiveMap(resolutionPayload))
+		}
+		if failure := replanFailureContextFromGovernanceItem(item); len(failure) > 0 {
+			replan["failureContext"] = failure
+			replan["ticketContext"] = failure
+		}
+		return replan
+	}
+	return nil
+}
+
+func replanFailureContextFromGovernanceItem(item map[string]any) map[string]any {
+	if len(item) == 0 {
+		return nil
+	}
+	context := decisionPayloadMap(item["ticketContext"])
+	if len(context) == 0 {
+		context = decisionPayloadMap(item["context"])
+	}
+	if len(context) > 0 {
+		return stripRuntimeLLMBindingFromActivationContext(common.RedactSensitiveMap(context))
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"failureClass",
+		"failureSignature",
+		"failureTargetScope",
+		"failedStepId",
+		"failedStepKind",
+		"repairAttempts",
+		"failedStepOutput",
+		"recoveryPolicy",
+	} {
+		if value, ok := item[key]; ok && value != nil {
+			ret[key] = common.RedactSensitiveValue(value)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func stripRuntimeLLMBindingFromActivationContext(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	for _, key := range []string{
+		"llmProviderId",
+		"providerId",
+		"provider",
+		"model",
+	} {
+		delete(input, key)
+	}
+	for key, value := range input {
+		input[key] = stripRuntimeLLMBindingValueFromActivationContext(value)
+	}
+	return input
+}
+
+func stripRuntimeLLMBindingValueFromActivationContext(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return stripRuntimeLLMBindingFromActivationContext(typed)
+	case []map[string]any:
+		ret := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			ret = append(ret, stripRuntimeLLMBindingFromActivationContext(item))
+		}
+		return ret
+	case []any:
+		ret := make([]any, 0, len(typed))
+		for _, item := range typed {
+			ret = append(ret, stripRuntimeLLMBindingValueFromActivationContext(item))
+		}
+		return ret
+	default:
+		return value
+	}
 }
 
 func memoryContexts(items []*memorymodel.MemoryItem) []map[string]any {

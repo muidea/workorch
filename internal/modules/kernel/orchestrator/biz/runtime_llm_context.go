@@ -26,6 +26,9 @@ func compactStepInputForLLMContext(input map[string]any) map[string]any {
 	delete(ret, stepInputKeyExecutionContextPackage)
 	delete(ret, stepInputKeyWorkspaceFileManifest)
 	delete(ret, stepOutputKeyExecutionGraph)
+	if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
+		ret["repairActionPackage"] = compactLLMContextMap(pkg, 0)
+	}
 	return ret
 }
 

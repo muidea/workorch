@@ -2970,7 +2970,8 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshot(t *
 		Kind:  shellcommon.StepKindCommand,
 		State: common.StepStateFailed,
 		Input: map[string]any{
-			stepInputKeyRuntimeStage: runtimeStageExecution,
+			stepInputKeyRuntimeStage:      runtimeStageExecution,
+			"stateChangingOutputRequired": true,
 		},
 		Output: map[string]any{
 			"status":                  "failed",
@@ -3001,6 +3002,18 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshot(t *
 	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
 	if !strings.Contains(guidance, "failureTargetRepairContext") || !strings.Contains(guidance, "patch/apply") || !strings.Contains(guidance, "workspaceFileManifest") {
 		t.Fatalf("repairGuidance = %q, want target snapshot patch guidance", guidance)
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	if len(actionPackage) == 0 {
+		t.Fatalf("repairActionPackage = %#v, want actionable package", input["repairActionPackage"])
+	}
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true || !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("repairActionPackage.requiredOutput = %#v, want patch/apply state-changing contract", required)
+	}
+	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
+	if len(targets) != 1 || targets[0]["targetRef"] != "main_test.go" || strings.TrimSpace(stringFromMap(targets[0], "contentHash")) == "" {
+		t.Fatalf("repairActionPackage.targetSnapshots = %#v, want current target snapshot", actionPackage["targetSnapshots"])
 	}
 }
 
@@ -3122,6 +3135,62 @@ func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangingOutputForCon
 	}
 }
 
+func TestRuntimeOrchestrator_InitialReplanStateChangingInputIncludesRepairActionPackage(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-replan-action-package",
+		WorkspaceID:     "ws-replan-action-package",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-before-replan-action-package",
+				"reason":           "resolved_governance_replan",
+				"failureContext": map[string]any{
+					failureOutputKeyClass:     failureClassRuntime,
+					failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|failureTargets=main.go",
+					"failureTargetScope":      "failureTargets=main.go",
+					"failedStepId":            "run-before-replan-action-package/repair-003",
+					"failedStepKind":          llmWorkspaceExecutionStepKind,
+					"failureTargetRepairContext": []map[string]any{{
+						"targetRef":        "main.go",
+						"exists":           true,
+						"contentHash":      "hash-main",
+						"contentComplete":  true,
+						"safeForFileWrite": true,
+						"content":          "package main\nfunc main() {}\n",
+					}},
+					"failedStepOutput": map[string]any{
+						"error": "invalid argument: state-changing llm repair step returned executionGraph without patch/apply",
+						stepOutputKeyExecutionGraph: map[string]any{"nodes": []map[string]any{{
+							"id":   "test-only",
+							"kind": "shell/command",
+						}}},
+					},
+				},
+			},
+		},
+	}
+
+	input := initialStepInput(run)
+
+	if input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true ||
+		input["replanStateChangingContinuation"] != true {
+		t.Fatalf("input = %+v, want state-changing replan continuation", input)
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	if len(actionPackage) == 0 {
+		t.Fatalf("repairActionPackage = %#v, want package from replan continuation", input["repairActionPackage"])
+	}
+	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
+	if len(targets) != 1 || targets[0]["targetRef"] != "main.go" || targets[0]["contentHash"] != "hash-main" {
+		t.Fatalf("repairActionPackage.targetSnapshots = %#v, want target snapshot", actionPackage["targetSnapshots"])
+	}
+	if summary := mapFromValue(actionPackage["previousRejectedOutputSummary"]); len(summary) == 0 || mapFromValue(summary["rejectedExecutionGraph"])["nodeCount"] == nil {
+		t.Fatalf("repairActionPackage.previousRejectedOutputSummary = %#v, want rejected graph summary", actionPackage["previousRejectedOutputSummary"])
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputInheritsTargetContextAfterContractFailure(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{
@@ -3158,6 +3227,10 @@ func TestRuntimeOrchestrator_RuntimeRepairInputInheritsTargetContextAfterContrac
 			"stage":                   "llm_execution_graph_plan",
 			failureOutputKeyClass:     failureClassRuntime,
 			failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan",
+			stepOutputKeyExecutionGraph: map[string]any{"nodes": []map[string]any{{
+				"id":   "test-only",
+				"kind": "shell/command",
+			}}},
 		},
 	}
 
@@ -3177,6 +3250,17 @@ func TestRuntimeOrchestrator_RuntimeRepairInputInheritsTargetContextAfterContrac
 	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
 	if !strings.Contains(guidance, "Preserve inherited repair context") || !strings.Contains(guidance, "patch/apply artifacts") || !strings.Contains(guidance, "workspace manifest") {
 		t.Fatalf("repairGuidance = %q, want inherited repair context guidance", guidance)
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	if len(actionPackage) == 0 {
+		t.Fatalf("repairActionPackage = %#v, want inherited actionable package", input["repairActionPackage"])
+	}
+	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
+	if len(targets) != 1 || targets[0]["targetRef"] != "main.go" || targets[0]["contentHash"] != "hash-main" {
+		t.Fatalf("repairActionPackage.targetSnapshots = %#v, want inherited target snapshot", actionPackage["targetSnapshots"])
+	}
+	if summary := mapFromValue(actionPackage["previousRejectedOutputSummary"]); len(summary) == 0 || mapFromValue(summary["rejectedExecutionGraph"])["nodeCount"] == nil {
+		t.Fatalf("repairActionPackage.previousRejectedOutputSummary = %#v, want rejected graph summary", actionPackage["previousRejectedOutputSummary"])
 	}
 }
 
@@ -3825,6 +3909,16 @@ func TestCompactLLMContextDropsHeavyTransportFields(t *testing.T) {
 		"previousStepOutput": map[string]any{
 			stepOutputKeyExecutionGraph: map[string]any{"nodes": []any{map[string]any{"id": "inspect", "kind": "file/list"}}},
 		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{"mustIncludeStateChangingNode": true, "acceptedKinds": []string{"patch/apply"}},
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "main.go",
+				"contentHash":      "hash-main",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"content":          "package main\n",
+			}},
+		},
 		"failedStepId":  "run-1/block/test",
 		"failureReason": strings.Repeat("x", maxLLMContextStringBytes+16),
 	})
@@ -3844,6 +3938,13 @@ func TestCompactLLMContextDropsHeavyTransportFields(t *testing.T) {
 	}
 	if got := fmt.Sprint(input["failureReason"]); len(got) > maxLLMContextStringBytes+3 {
 		t.Fatalf("failureReason length = %d, want truncated", len(got))
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	if len(actionPackage) == 0 {
+		t.Fatalf("repairActionPackage = %#v, want retained actionable package", input["repairActionPackage"])
+	}
+	if targets := mapSliceFromValue(actionPackage["targetSnapshots"]); len(targets) != 1 || targets[0]["targetRef"] != "main.go" {
+		t.Fatalf("repairActionPackage.targetSnapshots = %#v, want compact target snapshot", actionPackage["targetSnapshots"])
 	}
 
 	output := compactStepOutputForLLMContext(map[string]any{
@@ -14579,6 +14680,29 @@ func TestValidatePatchStepInputBeforeRuntimeRejectsPlaceholder(t *testing.T) {
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "unresolved runtime template") {
 		t.Fatalf("validatePatchStepInputBeforeRuntime err = %v, want unresolved placeholder rejection", err)
+	}
+}
+
+func TestValidatePatchStepInputBeforeRuntimeRejectsPlaceholderBaseHash(t *testing.T) {
+	err := validatePatchStepInputBeforeRuntime("patch/apply", map[string]any{
+		"patchType": "unified_diff",
+		"targetRef": "main_test.go",
+		"baseHash":  "${read-main-test.output.contentHash}",
+		"diff":      "--- a/main_test.go\n+++ b/main_test.go\n@@ -1 +1 @@\n-old\n+new\n",
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "baseHash contains unresolved runtime template") {
+		t.Fatalf("validatePatchStepInputBeforeRuntime err = %v, want unresolved baseHash placeholder rejection", err)
+	}
+}
+
+func TestValidatePatchStepInputBeforeRuntimeRejectsEllipsisUnifiedDiffHunk(t *testing.T) {
+	err := validatePatchStepInputBeforeRuntime("patch/apply", map[string]any{
+		"patchType": "unified_diff",
+		"targetRef": "main_test.go",
+		"diff":      "--- a/main_test.go\n+++ b/main_test.go\n@@ ... @@\n-old\n+new\n",
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "diff contains unresolved runtime template") {
+		t.Fatalf("validatePatchStepInputBeforeRuntime err = %v, want ellipsis hunk placeholder rejection", err)
 	}
 }
 

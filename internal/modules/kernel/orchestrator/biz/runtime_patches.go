@@ -337,6 +337,9 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 	if patchType == "unified_diff" && strings.TrimSpace(diff) == "" {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch diff is required for unified_diff", common.ErrInvalidArgument)
 	}
+	if containsUnresolvedPatchBaseHash(baseHash) {
+		return runtimePatchRequest{}, fmt.Errorf("%w: patch baseHash contains unresolved runtime template placeholders", common.ErrInvalidArgument)
+	}
 	if patchType == "file_write" && containsUnresolvedRuntimeTemplate(content) {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch content contains unresolved runtime template placeholders", common.ErrInvalidArgument)
 	}
@@ -433,9 +436,21 @@ func isReservedWorkspaceReportPatchTarget(cleanTarget string) bool {
 
 func containsUnresolvedRuntimeTemplate(value string) bool {
 	return runtimeTemplatePattern.MatchString(value) ||
+		unresolvedUnifiedDiffHunkPattern.MatchString(value) ||
 		unresolvedRuntimeSymbolPattern.MatchString(value) ||
 		unresolvedAnglePlaceholderPattern.MatchString(value) ||
 		unresolvedPseudoImplementationPattern.MatchString(value)
+}
+
+func containsUnresolvedPatchBaseHash(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	return runtimeTemplatePattern.MatchString(value) ||
+		unresolvedDollarPlaceholderPattern.MatchString(value) ||
+		unresolvedRuntimeSymbolPattern.MatchString(value) ||
+		unresolvedAnglePlaceholderPattern.MatchString(value)
 }
 
 func containsRuntimeRedactionMarker(value string) bool {
@@ -447,6 +462,8 @@ func containsNonSubstantivePatchIntent(value string) bool {
 }
 
 var unresolvedRuntimeSymbolPattern = regexp.MustCompile(`__[A-Z][A-Z0-9_]{8,}__`)
+var unresolvedDollarPlaceholderPattern = regexp.MustCompile(`\$\{\s*[A-Za-z0-9_.-]+\s*\}`)
+var unresolvedUnifiedDiffHunkPattern = regexp.MustCompile(`(?m)^@@\s*\.\.\.\s*@@`)
 var unresolvedAnglePlaceholderPattern = regexp.MustCompile(`<<\s*[A-Za-z0-9_-]*(FROM|PATCH|DIFF|CONTENT|IMPLEMENTATION|PLACEHOLDER|TODO)[A-Za-z0-9_\s.-]*\s*>>`)
 var unresolvedPseudoImplementationPattern = regexp.MustCompile(`(?i)(TODO:\s*(implement|fill|replace)|\.\.\.\s*(省略|omitted|placeholder)|省略(实现|代码|内容)|伪代码|占位(实现|代码|内容))`)
 var runtimeRedactionMarkerPattern = regexp.MustCompile(`(?i)\[(?:REDACTED|SECRET|MASKED)\]`)
