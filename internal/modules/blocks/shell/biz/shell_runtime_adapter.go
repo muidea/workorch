@@ -16,7 +16,7 @@ import (
 
 const (
 	DefaultCommandTimeout = 60 * time.Second
-	MaxCommandTimeout     = 5 * time.Minute
+	MaxCommandTimeout     = 10 * time.Minute
 )
 
 type RuntimeAdapter struct {
@@ -137,7 +137,7 @@ func shellCommandTimeout(input map[string]any, defaultTimeout time.Duration) (ti
 		return 0, fmt.Errorf("%w: timeoutMillis must be at least 1000", common.ErrInvalidArgument)
 	}
 	if timeout > MaxCommandTimeout {
-		return 0, fmt.Errorf("%w: timeoutMillis must not exceed 300000", common.ErrInvalidArgument)
+		return 0, fmt.Errorf("%w: timeoutMillis must not exceed %d", common.ErrInvalidArgument, MaxCommandTimeout/time.Millisecond)
 	}
 	return timeout, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -1417,7 +1418,7 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 		return nil
 	}
 	stage := runtimeStageFromStepInput(step.Input)
-	if err := validateLLMExecutionGraphOutputContract(output); err != nil {
+	if err := validateLLMExecutionGraphOutputContract(step, output); err != nil {
 		return err
 	}
 	if err := validateLLMFollowUpGraphStateChangingContract(run, step, output); err != nil {
@@ -1468,7 +1469,7 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	return fmt.Errorf("%w: state-changing execution-stage llm graph node returned no state-changing output", common.ErrInvalidArgument)
 }
 
-func validateLLMExecutionGraphOutputContract(output map[string]any) error {
+func validateLLMExecutionGraphOutputContract(step *runModel.Step, output map[string]any) error {
 	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
 	if !ok {
 		return nil
@@ -1476,12 +1477,52 @@ func validateLLMExecutionGraphOutputContract(output map[string]any) error {
 	for _, node := range graph.Nodes {
 		switch strings.TrimSpace(node.Kind) {
 		case "patch/preview", "patch/apply":
-			if _, err := runtimePatchRequestFromMap(node.Input); err != nil {
+			request, err := runtimePatchRequestFromMap(node.Input)
+			if err != nil {
 				return fmt.Errorf("%w: executionGraph %s input invalid: %v", common.ErrInvalidArgument, strings.TrimSpace(node.Kind), err)
+			}
+			if err := validateRepairPatchRequestGranularity(step, request); err != nil {
+				return err
 			}
 		}
 	}
 	return nil
+}
+
+func validateRepairPatchRequestGranularity(step *runModel.Step, request runtimePatchRequest) error {
+	if step == nil || step.Input == nil || !boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) {
+		return nil
+	}
+	if strings.TrimSpace(request.PatchType) != "file_write" {
+		return nil
+	}
+	if len(mapSliceFromValue(step.Input["patchRepairContext"])) == 0 && len(mapSliceFromValue(step.Input["failureTargetRepairContext"])) == 0 {
+		return nil
+	}
+	target := filepath.Clean(strings.TrimSpace(request.TargetRef))
+	if target == "." || target == "" {
+		return nil
+	}
+	for _, item := range repairPatchContextItems(step) {
+		if item == nil || !boolValue(item["exists"]) {
+			continue
+		}
+		itemTarget := filepath.Clean(strings.TrimSpace(stringFromMap(item, "targetRef")))
+		if itemTarget != target {
+			continue
+		}
+		return fmt.Errorf("%w: runtime repair patch/apply file_write cannot replace existing target %q when current repair context is available; use a minimal unified_diff or exact replacement against the current snapshot", common.ErrInvalidArgument, request.TargetRef)
+	}
+	return nil
+}
+
+func repairPatchContextItems(step *runModel.Step) []map[string]any {
+	if step == nil || step.Input == nil {
+		return nil
+	}
+	ret := mapSliceFromValue(step.Input["patchRepairContext"])
+	ret = append(ret, mapSliceFromValue(step.Input["failureTargetRepairContext"])...)
+	return ret
 }
 
 func validateLLMFollowUpGraphStateChangingContract(run *runModel.Run, step *runModel.Step, output map[string]any) error {
@@ -1543,6 +1584,26 @@ func validateStateChangingExecutionGraph(graph runtimemodel.BlockExecutionGraph)
 		return fmt.Errorf("%w: state-changing executionGraph patch/apply depends on llm/workspace_execution before patch", common.ErrInvalidArgument)
 	}
 	return nil
+}
+
+func graphIsConcreteStateChangingContinuation(graph runtimemodel.BlockExecutionGraph) bool {
+	if graphHasNodeKind(graph, llmWorkspaceExecutionStepKind) {
+		return false
+	}
+	return validateStateChangingExecutionGraph(graph) == nil
+}
+
+func graphHasNodeKind(graph runtimemodel.BlockExecutionGraph, kind string) bool {
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return false
+	}
+	for _, node := range graph.Nodes {
+		if strings.TrimSpace(node.Kind) == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func allowPatchRepairValidationEvidenceGraph(step *runModel.Step, graph runtimemodel.BlockExecutionGraph) bool {
@@ -1650,7 +1711,11 @@ func llmExecutionGraphNodeReturnedOnlyGraph(run *runModel.Run, step *runModel.St
 	if runtimeStageFromStepInput(step.Input) != runtimeStageExecution {
 		return false
 	}
-	if _, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); !ok {
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok {
+		return false
+	}
+	if graphIsConcreteStateChangingContinuation(graph) {
 		return false
 	}
 	return !hasConcreteLLMExecutionOutput(output)

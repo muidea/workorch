@@ -393,10 +393,8 @@ func graphDispatchRootStepID(step *runModel.Step) common.StepID {
 	if step == nil {
 		return ""
 	}
-	if graphNodeID(step) == "" {
-		if _, ok := runtimeGraphSpecFromValue(step.Output[stepOutputKeyExecutionGraph]); ok {
-			return step.ID
-		}
+	if _, ok := runtimeGraphSpecFromValue(step.Output[stepOutputKeyExecutionGraph]); ok {
+		return step.ID
 	}
 	return graphRootStepID(step)
 }

@@ -1490,6 +1490,7 @@ func stateChangingRepairGuidance() []string {
 		"If multiple dependent operations are needed, executionGraph is allowed only when it contains at least one valid patch/apply node that does not depend on llm/workspace_execution before the patch.",
 		"Do not return read-only, inspection-only, shell-only executionGraph, or LLM-gated executionGraph.",
 		"patch/apply supports file_write and unified_diff only; file_write content must be non-empty and must not be used as a delete operation.",
+		"When changing an existing target file, prefer the smallest unified_diff or exact replacement over file_write; use file_write primarily to create missing targets or replace a known full file snapshot intentionally.",
 		"Do not use shell/command to modify workspace files when a patch/apply state-change artifact can represent the change; use shell/command for bounded preparation or verification after the patch.",
 		"When failedStepOutput identifies concrete target resources, treat those target snapshots as authoritative and repair the target directly instead of changing unrelated prerequisite metadata.",
 		"When a workspace already contains known resources, reconcile the repair with those existing resources and prefer the smallest coherent state change over broad replacement.",
@@ -1748,48 +1749,8 @@ func doDVerificationEvidenceRepairRequired(failedStep *runModel.Step) bool {
 	if len(missingDoDItemsFromFailureOutput(failedStep.Output)) == 0 && len(missingGoalCoverageFromFailureOutput(failedStep.Output)) == 0 {
 		return false
 	}
-	return doDAssessmentIndicatesEvidenceGap(doDAssessmentFromOutput(failedStep.Output))
-}
-
-func doDAssessmentIndicatesEvidenceGap(assessment map[string]any) bool {
-	if len(assessment) == 0 || boolValue(assessment["satisfied"]) {
-		return false
-	}
-	text := strings.ToLower(strings.Join([]string{
-		stringFromMap(assessment, "summary"),
-		stringFromMap(assessment, "verificationSummary"),
-		stringFromMap(assessment, "goalOutcome"),
-		strings.Join(stringSliceFromValue(assessment["knownLimitations"]), "\n"),
-		strings.Join(stringSliceFromValue(assessment["nextActions"]), "\n"),
-		strings.Join(stringSliceFromValue(assessment["residualRisks"]), "\n"),
-	}, "\n"))
-	if text == "" {
-		return false
-	}
-	evidenceMarkers := []string{
-		"evidence",
-		"verification",
-		"verified",
-		"not verified",
-		"not run",
-		"not executed",
-		"no actual verification",
-		"证据",
-		"验证",
-		"未经验证",
-		"未验证",
-		"未执行",
-		"未经过",
-		"缺少验证",
-		"缺少具体",
-		"无实际验证",
-	}
-	for _, marker := range evidenceMarkers {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
+	diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"])
+	return strings.TrimSpace(stringFromMap(diagnostics, "kind")) == "dod_evidence_quality_gap"
 }
 
 func runtimeRepairFailureIsTransientExecutionTimeout(step *runModel.Step, execErr error) bool {
@@ -2225,32 +2186,35 @@ func patchRepairSuggestionsForDiff(workingDirectory string, targetRef string, di
 	var ret []map[string]any
 	seen := map[string]bool{}
 	for _, hunk := range filePatch.Hunks {
-		oldText, newText := patchRepairReplacementText(hunk)
-		if oldText == "" || oldText == newText {
-			continue
+		for _, replacement := range patchRepairReplacementCandidates(hunk, content) {
+			oldText := replacement["oldText"]
+			newText := replacement["newText"]
+			if oldText == "" || oldText == newText {
+				continue
+			}
+			if containsRuntimeRedactionMarker(oldText) || containsRuntimeRedactionMarker(newText) {
+				continue
+			}
+			if strings.Count(content, oldText) != 1 {
+				continue
+			}
+			key := oldText + "\x00" + newText
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			ret = append(ret, map[string]any{
+				"targetRef":      targetRef,
+				"patchType":      "unified_diff",
+				"oldText":        oldText,
+				"newText":        newText,
+				"contentHash":    contentHash,
+				"matchCount":     1,
+				"source":         replacement["source"],
+				"guidance":       "Use this exact current oldText/newText replacement to construct the smallest unified_diff or file/edit repair; do not copy redacted or truncated snapshot content.",
+				"safeForMinimal": true,
+			})
 		}
-		if containsRuntimeRedactionMarker(oldText) || containsRuntimeRedactionMarker(newText) {
-			continue
-		}
-		if strings.Count(content, oldText) != 1 {
-			continue
-		}
-		key := oldText + "\x00" + newText
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		ret = append(ret, map[string]any{
-			"targetRef":      targetRef,
-			"patchType":      "unified_diff",
-			"oldText":        oldText,
-			"newText":        newText,
-			"contentHash":    contentHash,
-			"matchCount":     1,
-			"source":         "failed_patch_current_snapshot_unique_replacement",
-			"guidance":       "Use this exact current oldText/newText replacement to construct the smallest unified_diff or file/edit repair; do not copy redacted or truncated snapshot content.",
-			"safeForMinimal": true,
-		})
 	}
 	return ret
 }
@@ -2270,6 +2234,74 @@ func patchRepairReplacementText(hunk unifiedDiffHunk) (string, string) {
 		}
 	}
 	return strings.Join(oldLines, "\n"), strings.Join(newLines, "\n")
+}
+
+func patchRepairReplacementCandidates(hunk unifiedDiffHunk, content string) []map[string]string {
+	var ret []map[string]string
+	hasAddition := false
+	hasDeletion := false
+	for _, line := range hunk.Lines {
+		if len(line) == 0 {
+			continue
+		}
+		switch line[0] {
+		case '+':
+			hasAddition = true
+		case '-':
+			hasDeletion = true
+		}
+	}
+	add := func(oldText string, newText string, source string) {
+		oldText = strings.TrimSuffix(oldText, "\n")
+		newText = strings.TrimSuffix(newText, "\n")
+		if oldText == "" || oldText == newText {
+			return
+		}
+		ret = append(ret, map[string]string{
+			"oldText": oldText,
+			"newText": newText,
+			"source":  source,
+		})
+	}
+	oldText, newText := patchRepairReplacementText(hunk)
+	add(oldText, newText, "failed_patch_current_snapshot_unique_replacement")
+
+	if strings.Count(content, oldText) != 1 {
+		sourceLines, sourceHadFinalNewline := splitTextLines(content)
+		start, err := unifiedDiffHunkStart(sourceLines, 0, hunk)
+		if err == nil {
+			oldLines := unifiedDiffHunkOldLines(hunk)
+			if start >= 0 && start+len(oldLines) <= len(sourceLines) {
+				nextLines := append([]string(nil), sourceLines[:start]...)
+				for _, line := range hunk.Lines {
+					if line == "" {
+						continue
+					}
+					switch line[0] {
+					case ' ', '+':
+						nextLines = append(nextLines, line[1:])
+					}
+				}
+				nextLines = append(nextLines, sourceLines[start+len(oldLines):]...)
+				nextContent := joinTextLines(nextLines, sourceHadFinalNewline)
+				add(content, nextContent, "failed_patch_current_snapshot_full_hunk_replay")
+			}
+		}
+	}
+
+	if hasAddition || !hasDeletion {
+		return ret
+	}
+	for _, line := range hunk.Lines {
+		if len(line) < 2 || line[0] != '-' {
+			continue
+		}
+		oldLine := line[1:]
+		if strings.Count(content, oldLine) == 1 {
+			add(oldLine, "", "failed_patch_current_snapshot_unique_line_removal")
+		}
+	}
+	return ret
 }
 
 func patchRepairLooksBinary(data []byte) bool {

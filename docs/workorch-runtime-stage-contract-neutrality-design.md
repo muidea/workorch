@@ -190,10 +190,12 @@ Runtime 要求 LLM：
 Runtime 必须拒绝：
 
 - shell-only / read-only graph 冒充实现进展。
-- 下层 `executionGraph` 继续套娃。
+- 下层 `executionGraph` 继续依赖 `llm/workspace_execution` 决策节点套娃。
 - placeholder artifact。
 - weak evidence 直接 accepted。
 - assessment-only 阶段输出可执行字段。
+
+若 `execution/strict_convergence` 阶段的 LLM graph 节点返回的 `executionGraph` 已经收敛为具体 runtime capability，且图中至少包含一个有效 state-changing 节点、没有继续包含 `llm/workspace_execution` 决策节点、state-changing 节点不依赖新的 LLM 决策祖先，则 runtime 可以把该图作为新的 graph scope 派发执行。该判断只基于 capability kind、依赖关系和 capability input contract，不得引入业务领域语义。
 
 当 run 级 `stateChangePolicy=must_produce_state_change` 时，`planning` 阶段可以先输出只读 graph 做上下文探索；但一旦 graph 中的 `llm/workspace_execution` 节点被调度到 `execution` 阶段，该 LLM 节点必须继承 `stateChangingOutputRequired=true`、`repairObjective=produce_state_changing_output` 与 state-changing guidance。普通 `file/read`、`file/list`、只读 tool 节点不因此被强制变更。
 

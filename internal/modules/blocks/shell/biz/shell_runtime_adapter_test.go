@@ -79,8 +79,22 @@ func TestNewRuntimeAdapterFromTimeoutStringRejectsOutOfRange(t *testing.T) {
 	if _, err := NewRuntimeAdapterFromTimeoutString("500ms"); err == nil {
 		t.Fatal("NewRuntimeAdapterFromTimeoutString err = nil, want invalid argument")
 	}
-	if _, err := NewRuntimeAdapterFromTimeoutString("6m"); err == nil {
+	if _, err := NewRuntimeAdapterFromTimeoutString("11m"); err == nil {
 		t.Fatal("NewRuntimeAdapterFromTimeoutString err = nil, want invalid argument")
+	}
+}
+
+func TestNewRuntimeAdapterFromTimeoutStringAllowsTenMinutes(t *testing.T) {
+	adapter, err := NewRuntimeAdapterFromTimeoutString("10m")
+	if err != nil {
+		t.Fatalf("NewRuntimeAdapterFromTimeoutString: %v", err)
+	}
+	timeout, err := shellCommandTimeout(nil, adapter.timeout)
+	if err != nil {
+		t.Fatalf("shellCommandTimeout: %v", err)
+	}
+	if timeout != 10*time.Minute {
+		t.Fatalf("timeout = %s, want 10m", timeout)
 	}
 }
 
