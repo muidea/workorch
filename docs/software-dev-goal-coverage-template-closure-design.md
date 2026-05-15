@@ -145,7 +145,8 @@ Core 只执行：
     "software-dev": {
       "acceptanceDimensions": [],
       "evidenceQualityRules": [],
-      "deliverableExpectations": []
+      "deliverableExpectations": [],
+      "evidenceRequirements": []
     }
   }
 }
@@ -155,6 +156,8 @@ Core 只执行：
 
 - 在 core runtime 顶层新增 `softwareDev`、`testFiles`、`goBuild`、`patchRequired` 等领域字段。
 - 在 core runtime 中通过文件名、命令名或业务关键词推断软件开发语义。
+
+`evidenceRequirements` 是 profile 命名空间内的中立证据约束。Core 只读取 `scope`、`id`、`acceptedStepKinds`、`rejectedStepKinds` 并按 step kind 校验，不理解该 `id` 的业务含义。`software-dev` 可以声明：当 `persistence_or_side_effect`、`streaming_or_long_running`、`error_behavior`、`concurrency` 等验收维度被标记 satisfied 时，不能只引用 `file/read` / `file/list` / `mcp/resource_read` / `mcp/prompt_get` 这类只读证据，必须同时具备 `shell/command`、`patch/apply` 或 `mcp/tool_call` 等动作证据。只读证据可以作为辅助上下文引用，但不能单独支撑动作类声明。
 
 ## Software-dev Template 改进设计
 
@@ -253,6 +256,8 @@ Software-dev artifact Soul 应明确：
 | SDC-11 | 增加 acceptance contract fixture，覆盖缺 goalCoverage、无 evidenceRefs、weak evidence satisfied | Done |
 | SDC-12 | 增加 deployed verification 脚本检查 accepted result 的 Goal leaf coverage 与 evidenceRefs | Done |
 | SDC-13 | 使用新的 workspace run 重新验证软件开发任务是否能发现入口/协议/分支覆盖缺口 | Pending |
+| SDC-14 | 增加 profile evidenceRequirements，阻止只读证据单独支撑副作用、流式、错误路径和并发声明 | Done |
+| SDC-15 | 强化 software-dev Soul 的 claim-to-evidence consistency、多目标矩阵、字段级副作用断言要求 | Done |
 
 ## Done Definition
 
@@ -261,6 +266,7 @@ Software-dev artifact Soul 应明确：
 - `software-dev` built-in Soul 不再包含具体应用业务默认实现。
 - 软件开发模板能要求 LLM 从 Goal / DoD 提取关键验收维度，并映射到 plan、execution、validation、artifact。
 - Core acceptance 不允许在 Goal coverage 缺失、evidenceRefs 缺失或 weak evidence 未解释时 accepted。
+- Profile evidenceRequirements 能拦截只读证据支撑动作类声明，且规则位于 profile namespace。
 - Runtime 改动不包含软件开发、Go、测试框架、LLM gateway、provider 协议等硬编码。
 - `go test ./... -count=1` 通过。
 - 至少一个 fixture 或部署核对能复现并拦截“命令通过但 Goal 关键能力未覆盖”的情况。

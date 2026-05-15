@@ -66,6 +66,8 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, planning.SoulMD, "external_contract")
 	assertSoulContains(t, planning.SoulMD, "runtime_entrypoint")
 	assertSoulContains(t, planning.SoulMD, "persistence_or_side_effect")
+	assertSoulContains(t, planning.SoulMD, "provider/protocol matrix")
+	assertSoulContains(t, planning.SoulMD, "file/read")
 
 	execution := findEmbeddedSoulByID(souls, "soul-software-dev-execution")
 	if execution == nil {
@@ -88,6 +90,8 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, execution.SoulMD, "包/module/import")
 	assertSoulContains(t, execution.SoulMD, "Goal / DoD、现有代码和验收证据")
 	assertSoulContains(t, execution.SoulMD, "交付入口")
+	assertSoulContains(t, execution.SoulMD, "多外部系统、多协议")
+	assertSoulContains(t, execution.SoulMD, "file/read")
 	assertSoulNotContains(t, execution.SoulMD, "多 provider/多 LLM 网关")
 	assertSoulNotContains(t, execution.SoulMD, "providers[]")
 	assertSoulNotContains(t, execution.SoulMD, "model_prefixes")
@@ -107,6 +111,11 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, validation.SoulMD, "验收维度")
 	assertSoulContains(t, validation.SoulMD, "目标入口可用")
 	assertSoulContains(t, validation.SoulMD, "入口路径")
+	assertSoulContains(t, validation.SoulMD, "acceptanceDimensions")
+	assertSoulContains(t, validation.SoulMD, "deliverableCoverage")
+	assertSoulContains(t, validation.SoulMD, "claim-to-evidence consistency")
+	assertSoulContains(t, validation.SoulMD, "file/read")
+	assertSoulContains(t, validation.SoulMD, "persistence_or_side_effect")
 
 	artifact := findEmbeddedSoulByID(souls, "soul-software-dev-artifact")
 	if artifact == nil {
@@ -266,4 +275,83 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 	if !ok || len(deliverables) < 4 {
 		t.Fatalf("software-dev deliverableExpectations = %+v, want declared expectations", softwareDev["deliverableExpectations"])
 	}
+	requiredDeliverables := map[string]bool{
+		"source_change":     false,
+		"validation_report": false,
+		"coverage_map":      false,
+		"user_deliverable":  false,
+	}
+	for _, raw := range deliverables {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("deliverable expectation item = %+v, want map", raw)
+		}
+		id, _ := item["id"].(string)
+		if _, ok := requiredDeliverables[id]; !ok {
+			continue
+		}
+		if required, _ := item["required"].(bool); !required {
+			t.Fatalf("software-dev deliverableExpectation %q required = false, want true", id)
+		}
+		requiredDeliverables[id] = true
+	}
+	for id, seen := range requiredDeliverables {
+		if !seen {
+			t.Fatalf("software-dev deliverableExpectations missing required %q in %+v", id, deliverables)
+		}
+	}
+	requirements, ok := softwareDev["evidenceRequirements"].([]any)
+	if !ok || len(requirements) < 4 {
+		t.Fatalf("software-dev evidenceRequirements = %+v, want declared requirements", softwareDev["evidenceRequirements"])
+	}
+	requiredEvidence := map[string]bool{
+		"persistence_or_side_effect": false,
+		"streaming_or_long_running":  false,
+		"error_behavior":             false,
+		"concurrency":                false,
+	}
+	for _, raw := range requirements {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("evidence requirement item = %+v, want map", raw)
+		}
+		id, _ := item["id"].(string)
+		if _, ok := requiredEvidence[id]; !ok {
+			continue
+		}
+		if scope, _ := item["scope"].(string); scope != "acceptanceDimension" {
+			t.Fatalf("evidence requirement %q scope = %q, want acceptanceDimension", id, scope)
+		}
+		accepted, ok := item["acceptedStepKinds"].([]any)
+		if !ok {
+			t.Fatalf("evidence requirement %q acceptedStepKinds = %+v, want list", id, item["acceptedStepKinds"])
+		}
+		rejected, ok := item["rejectedStepKinds"].([]any)
+		if !ok {
+			t.Fatalf("evidence requirement %q rejectedStepKinds = %+v, want list", id, item["rejectedStepKinds"])
+		}
+		assertStringListContains(t, accepted, "shell/command")
+		assertStringListContains(t, accepted, "patch/apply")
+		assertStringListContains(t, accepted, "mcp/tool_call")
+		assertStringListContains(t, rejected, "file/read")
+		assertStringListContains(t, rejected, "file/list")
+		assertStringListContains(t, rejected, "mcp/resource_read")
+		assertStringListContains(t, rejected, "mcp/prompt_get")
+		requiredEvidence[id] = true
+	}
+	for id, seen := range requiredEvidence {
+		if !seen {
+			t.Fatalf("software-dev evidenceRequirements missing %q in %+v", id, requirements)
+		}
+	}
+}
+
+func assertStringListContains(t *testing.T, values []any, want string) {
+	t.Helper()
+	for _, raw := range values {
+		if value, _ := raw.(string); value == want {
+			return
+		}
+	}
+	t.Fatalf("list %+v missing %q", values, want)
 }

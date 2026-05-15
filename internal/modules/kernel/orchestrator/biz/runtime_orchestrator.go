@@ -1888,10 +1888,9 @@ func (o *RuntimeOrchestrator) recordRejectedCompletionDoDAssessment(ctx context.
 		rejected := cloneStepPayload(assessment)
 		rejected["satisfied"] = false
 		if summary := strings.TrimSpace(stringFromMap(rejected, "summary")); summary != "" {
-			rejected["summary"] = "DoD assessment rejected: " + summary
-		} else {
-			rejected["summary"] = "DoD assessment rejected because verification evidence is weak."
+			rejected["sourceSummary"] = summary
 		}
+		rejected["summary"] = "DoD assessment rejected by runtime completion gate."
 		assessment = rejected
 	}
 	summary, _ := assessment["summary"].(string)

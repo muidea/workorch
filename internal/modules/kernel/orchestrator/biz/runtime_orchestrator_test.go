@@ -14566,6 +14566,258 @@ func TestDoDAssessmentEvidenceQualityRejectsInconclusiveStepEvidence(t *testing.
 	}
 }
 
+func TestDoDAssessmentEvidenceKindRequirementRejectsReadOnlySideEffectEvidence(t *testing.T) {
+	ctx := context.Background()
+	validationRepo := memory.NewValidationResultRepository()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			ValidationResults: validationRepo,
+		},
+	}
+	runID := common.RunID("run-dod-evidence-kind")
+	readStepID := common.StepID("run-dod-evidence-kind/block/read-usage")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    readStepID,
+		RunID: runID,
+		Kind:  "file/read",
+		State: common.StepStateCompleted,
+	}); err != nil {
+		t.Fatalf("seed read step: %v", err)
+	}
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:              common.ValidationResultID(string(readStepID) + "/validation/runtime-step"),
+		WorkspaceID:     "ws-dod-evidence-kind",
+		RunID:           runID,
+		StepID:          readStepID,
+		ValidationKind:  "runtime_step",
+		State:           common.ValidationResultStatePassed,
+		EvidenceQuality: common.EvidenceQualityValid,
+	}); err != nil {
+		t.Fatalf("seed validation result: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{
+							{
+								"id":                "persistence_or_side_effect",
+								"scope":             "acceptanceDimension",
+								"acceptedStepKinds": []string{shellcommon.StepKindCommand, "patch/apply", "mcp/tool_call"},
+								"rejectedStepKinds": []string{"file/read", "file/list"},
+								"description":       "Read-only evidence cannot prove side effects.",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"items": []map[string]any{{
+			"item":         "side effect recorded",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(readStepID)},
+		}},
+		"acceptanceDimensions": []map[string]any{{
+			"id":           "persistence_or_side_effect",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(readStepID)},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "persistence_or_side_effect") ||
+		!strings.Contains(err.Error(), "file/read") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want read-only side-effect evidence rejection", err)
+	}
+	var diagnostic runtimeFailureDiagnosticError
+	if !errors.As(err, &diagnostic) {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %T, want runtime diagnostics", err)
+	}
+	missing := mapSliceFromValue(diagnostic.RuntimeFailureDiagnostics()["missingDoDItems"])
+	if len(missing) != 1 || missing[0]["source"] != "evidenceKind" {
+		t.Fatalf("missingDoDItems = %+v, want evidenceKind diagnostic", missing)
+	}
+}
+
+func TestDoDAssessmentEvidenceKindRequirementAcceptsActionEvidence(t *testing.T) {
+	ctx := context.Background()
+	validationRepo := memory.NewValidationResultRepository()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			ValidationResults: validationRepo,
+		},
+	}
+	runID := common.RunID("run-dod-evidence-kind-valid")
+	testStepID := common.StepID("run-dod-evidence-kind-valid/block/test")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    testStepID,
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateCompleted,
+	}); err != nil {
+		t.Fatalf("seed shell step: %v", err)
+	}
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:              common.ValidationResultID(string(testStepID) + "/validation/runtime-step"),
+		WorkspaceID:     "ws-dod-evidence-kind-valid",
+		RunID:           runID,
+		StepID:          testStepID,
+		ValidationKind:  "runtime_step",
+		State:           common.ValidationResultStatePassed,
+		EvidenceQuality: common.EvidenceQualityValid,
+	}); err != nil {
+		t.Fatalf("seed validation result: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{
+							{
+								"id":                "persistence_or_side_effect",
+								"scope":             "acceptanceDimension",
+								"acceptedStepKinds": []string{shellcommon.StepKindCommand, "patch/apply", "mcp/tool_call"},
+								"rejectedStepKinds": []string{"file/read", "file/list"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"items": []map[string]any{{
+			"item":         "side effect recorded",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(testStepID)},
+		}},
+		"acceptanceDimensions": []map[string]any{{
+			"id":           "persistence_or_side_effect",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(testStepID)},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality: %v", err)
+	}
+}
+
+func TestDoDAssessmentEvidenceKindRequirementAllowsReadEvidenceWithActionEvidence(t *testing.T) {
+	ctx := context.Background()
+	validationRepo := memory.NewValidationResultRepository()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			ValidationResults: validationRepo,
+		},
+	}
+	runID := common.RunID("run-dod-evidence-kind-mixed")
+	readStepID := common.StepID("run-dod-evidence-kind-mixed/block/read")
+	actionStepID := common.StepID("run-dod-evidence-kind-mixed/block/action")
+	for _, step := range []*runmodel.Step{
+		{ID: readStepID, RunID: runID, Kind: "file/read", State: common.StepStateCompleted},
+		{ID: actionStepID, RunID: runID, Kind: shellcommon.StepKindCommand, State: common.StepStateCompleted},
+	} {
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+		if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+			ID:              common.ValidationResultID(string(step.ID) + "/validation/runtime-step"),
+			WorkspaceID:     "ws-dod-evidence-kind-mixed",
+			RunID:           runID,
+			StepID:          step.ID,
+			ValidationKind:  "runtime_step",
+			State:           common.ValidationResultStatePassed,
+			EvidenceQuality: common.EvidenceQualityValid,
+		}); err != nil {
+			t.Fatalf("seed validation result for %s: %v", step.ID, err)
+		}
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{
+							{
+								"id":                "persistence_or_side_effect",
+								"scope":             "acceptanceDimension",
+								"acceptedStepKinds": []string{shellcommon.StepKindCommand, "patch/apply", "mcp/tool_call"},
+								"rejectedStepKinds": []string{"file/read", "file/list"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"acceptanceDimensions": []map[string]any{{
+			"id":           "persistence_or_side_effect",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(readStepID), string(actionStepID)},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality: %v", err)
+	}
+}
+
+func TestDoDAssessmentEvidenceKindRequirementRejectsRejectedOnlyRequirement(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-evidence-kind-rejected-only")
+	readStepID := common.StepID("run-dod-evidence-kind-rejected-only/block/read")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    readStepID,
+		RunID: runID,
+		Kind:  "file/read",
+		State: common.StepStateCompleted,
+	}); err != nil {
+		t.Fatalf("seed read step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{
+							{
+								"id":                "runtime_entrypoint",
+								"scope":             "acceptanceDimension",
+								"rejectedStepKinds": []string{"file/read"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"acceptanceDimensions": []map[string]any{{
+			"id":           "runtime_entrypoint",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(readStepID)},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "file/read") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want rejected-only requirement failure", err)
+	}
+}
+
 func TestRuntimeOrchestrator_RecordsRejectedResultForUnsatisfiedDoDAssessment(t *testing.T) {
 	ctx := context.Background()
 	resultRepo := memory.NewResultRepository()

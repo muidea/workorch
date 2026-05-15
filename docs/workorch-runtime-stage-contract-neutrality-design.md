@@ -252,6 +252,7 @@ Profile 可以定义：
 - 允许 artifact type。
 - state-changing artifact 的具体 step kind。
 - evidence 的有效性标准。
+- evidenceRequirements：按 profile 命名空间声明某类 coverage / dimension / deliverable 需要或拒绝的 step kind。
 - memory recall 的筛选优先级。
 
 Profile 不可以改变：
@@ -261,6 +262,16 @@ Profile 不可以改变：
 - provider retry / repair / replan 的治理规则。
 - ID / lineage / budget 规则。
 - core 对 stage contract violation 的判定。
+
+Core 可以按中立结构执行 profile 声明的 evidenceRequirements，但只能做机械校验：
+
+- 读取 `profileContracts.<profile>.evidenceRequirements[]`。
+- 按 `scope` 选择 `acceptanceDimensions`、`deliverableCoverage`、`goalCoverage` 或 `dodAssessment.items`。
+- 当对应 item 为 `satisfied` 时，检查其 `evidenceRefs` 指向的 step kind 是否命中 `acceptedStepKinds` 或 `rejectedStepKinds`。
+- 当 `acceptedStepKinds` 已声明时，`rejectedStepKinds` 表示“不能单独支撑该声明”的证据类型；若同一 item 同时引用 accepted 证据，只读/辅助证据可以保留为上下文。
+- 失败时生成中立 `dod_evidence_quality_gap` diagnostic，驱动后续 repair / rejected assessment。
+
+Core 不得根据 `id` 名称推断业务含义。例如 `persistence_or_side_effect`、`concurrency` 只是 profile 声明的字符串；core 不知道它们对应软件开发、数据写入、测试或任何具体领域。
 
 ### 软件开发 profile 示例
 
