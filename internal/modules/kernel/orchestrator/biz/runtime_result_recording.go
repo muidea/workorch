@@ -243,7 +243,6 @@ func rejectedResultSourceAndEvidenceRefs(step *runModel.Step, evidenceRefs []str
 	if rootStepID == "" || rootStepID == step.ID {
 		return sourceRef, evidenceRefs
 	}
-	sourceRef = string(rootStepID)
 	seen := map[string]bool{}
 	for _, ref := range evidenceRefs {
 		if strings.TrimSpace(ref) != "" {

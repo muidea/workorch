@@ -13209,6 +13209,35 @@ func TestValidatedCompletionDoDAssessmentRejectsMissingGoalCoverage(t *testing.T
 	}
 }
 
+func TestNormalizedRunGoalCoverageItemsIncludeStableRequirementIDs(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-goal-coverage-stable-id",
+		WorkspaceID: "ws-goal-coverage-stable-id",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": "支持流式响应 Token 统计\n支持配置化停用能力",
+			},
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+		},
+	}
+
+	items := normalizedRunGoalCoverageItems(run)
+	if len(items) != 2 {
+		t.Fatalf("goal coverage items = %+v, want two uncovered Goal leaves", items)
+	}
+	for _, item := range items {
+		if !strings.HasPrefix(item.id, "goal-req-") {
+			t.Fatalf("goal item id = %q, want stable goal requirement id", item.id)
+		}
+	}
+	again := normalizedRunGoalCoverageItems(run)
+	if len(again) != len(items) || again[0].id != items[0].id || again[1].id != items[1].id {
+		t.Fatalf("goal item ids = %+v then %+v, want deterministic ids", items, again)
+	}
+}
+
 func TestValidatedCompletionDoDAssessmentRejectsImplicitGoalCoverageWithoutGoalCoverageMap(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-goal-coverage-implicit",
@@ -15151,7 +15180,7 @@ func TestRuntimeOrchestrator_FailRunWritesSyntheticRejectedResultForLLMDecisionC
 	}
 }
 
-func TestRuntimeOrchestrator_RejectedResultAttributesProviderRetryToRoot(t *testing.T) {
+func TestRuntimeOrchestrator_RejectedResultAttributesProviderRetryToTerminalStep(t *testing.T) {
 	ctx := context.Background()
 	resultRepo := memory.NewResultRepository()
 	orch := &RuntimeOrchestrator{evidence: RuntimeEvidenceRepositories{Results: resultRepo}}
@@ -15187,8 +15216,8 @@ func TestRuntimeOrchestrator_RejectedResultAttributesProviderRetryToRoot(t *test
 	if err != nil {
 		t.Fatalf("get rejected result: %v", err)
 	}
-	if result.SourceRef != string(rootStepID) {
-		t.Fatalf("result sourceRef = %q, want root %q", result.SourceRef, rootStepID)
+	if result.SourceRef != string(retryStepID) {
+		t.Fatalf("result sourceRef = %q, want terminal step %q", result.SourceRef, retryStepID)
 	}
 	if !containsString(result.EvidenceRefs, string(rootStepID)) || !containsString(result.EvidenceRefs, string(retryStepID)) {
 		t.Fatalf("result evidenceRefs = %+v, want root and provider retry evidence", result.EvidenceRefs)
@@ -15337,6 +15366,18 @@ func TestRuntimeRepairInputForSatisfiedDoDCoverageMissingIsAssessmentOnly(t *tes
 	ctx := context.Background()
 	runID := common.RunID("run-dod-coverage-assessment-repair")
 	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-dod-coverage-assessment-repair", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}
+	stepRepo := memory.NewStepRepository()
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(runID + "/graph-001/003-test"),
+		RunID: runID,
+		Kind:  "shell/command",
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"stdout": "TestStream passed; token statistics include prompt tokens and completion tokens.",
+		},
+	}); err != nil {
+		t.Fatalf("seed evidence step: %v", err)
+	}
 	step := &runmodel.Step{
 		ID:    common.StepID(runID + "/follow-up-graph-test"),
 		RunID: runID,
@@ -15361,7 +15402,7 @@ func TestRuntimeRepairInputForSatisfiedDoDCoverageMissingIsAssessmentOnly(t *tes
 			"runtimeDiagnostics": map[string]any{
 				"kind": failureClassDoDCoverageMissing,
 				"missingGoalCoverage": []map[string]any{{
-					"raw":   "goal requirement",
+					"raw":   "streaming token accounting",
 					"kind":  "leaf",
 					"state": "missing",
 				}},
@@ -15371,7 +15412,7 @@ func TestRuntimeRepairInputForSatisfiedDoDCoverageMissingIsAssessmentOnly(t *tes
 	orch := NewRuntimeOrchestrator(
 		&stubRuntimeAdapter{},
 		memory.NewRunRepository(),
-		memory.NewStepRepository(),
+		stepRepo,
 		memory.NewWorkspaceRepository(),
 		memory.NewDecisionTicketRepository(),
 		memory.NewApprovalRepository(),
@@ -15391,6 +15432,10 @@ func TestRuntimeRepairInputForSatisfiedDoDCoverageMissingIsAssessmentOnly(t *tes
 	}
 	if missing := mapSliceFromValue(input["missingGoalCoverage"]); len(missing) != 1 {
 		t.Fatalf("missingGoalCoverage = %+v, want one item", input["missingGoalCoverage"])
+	} else if strings.TrimSpace(stringFromMap(missing[0], "goalRequirementId")) == "" {
+		t.Fatalf("missingGoalCoverage = %+v, want stable goalRequirementId", input["missingGoalCoverage"])
+	} else if candidates := mapSliceFromValue(missing[0]["evidenceCandidates"]); len(candidates) == 0 {
+		t.Fatalf("missingGoalCoverage = %+v, want neutral evidence candidates", input["missingGoalCoverage"])
 	}
 }
 
@@ -15448,6 +15493,76 @@ func TestCompletionGateCoverageRepairFollowUpCanContinue(t *testing.T) {
 		t.Fatalf("repair input = %+v, want continued assessment-only coverage correction", input)
 	} else if missing := mapSliceFromValue(input["missingGoalCoverage"]); len(missing) != 1 || missing[0]["raw"] != "streaming token accounting" {
 		t.Fatalf("missingGoalCoverage = %+v, want carried forward missing goal coverage", input["missingGoalCoverage"])
+	}
+}
+
+func TestCompletionGateAssessmentOnlyContradictionWithEvidenceCandidatesContinues(t *testing.T) {
+	runID := common.RunID("run-dod-coverage-assessment-contradiction")
+	step := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-001-of-planning-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyAssessmentOnly:        true,
+			"repairObjective":                 "complete_dod_goal_coverage_assessment",
+			"missingGoalCoverage": []map[string]any{{
+				"goalRequirementId": "goal-req-001-abcdef12",
+				"raw":               "streaming token accounting",
+				"evidenceCandidates": []map[string]any{{
+					"stepId":     string(runID) + "/graph-001/003-test",
+					"kind":       "shell/command",
+					"matchScore": 2,
+				}},
+			}},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|stage=llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"summary":   "Goal coverage marked failed despite candidate evidence.",
+				"items": []map[string]any{{
+					"item":         "tests pass",
+					"state":        "satisfied",
+					"evidenceRefs": []string{string(runID) + "/graph-001/003-test"},
+				}},
+				"goalCoverage": map[string]any{
+					"satisfied": false,
+					"items": []map[string]any{{
+						"goalRequirementId": "goal-req-001-abcdef12",
+						"item":              "streaming token accounting",
+						"state":             "failed",
+						"reason":            "not enough evidence",
+					}},
+				},
+			},
+			"runtimeDiagnostics": map[string]any{
+				"kind": failureClassDoDCoverageMissing,
+				"missingGoalCoverage": []map[string]any{{
+					"goalRequirementId": "goal-req-001-abcdef12",
+					"raw":               "streaming token accounting",
+					"kind":              "leaf",
+					"state":             "missing",
+				}},
+			},
+		},
+	}
+
+	if shouldCloseCompletionGateFailureWithoutRepair("runtime completion gate failed", step, step.Output) {
+		t.Fatalf("assessment-only contradiction with evidence candidates should get another coverage correction attempt")
+	}
+	input := (&RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}).runtimeRepairFollowUpStepInput(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-dod-coverage-assessment-contradiction", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, step, 2, errors.New("missing goal coverage"))
+	if input[stepInputKeyAssessmentOnly] != true || input["repairObjective"] != "complete_dod_goal_coverage_assessment" {
+		t.Fatalf("repair input = %+v, want continued assessment-only coverage correction", input)
+	}
+	if missing := mapSliceFromValue(input["missingGoalCoverage"]); len(missing) != 1 || len(mapSliceFromValue(missing[0]["evidenceCandidates"])) == 0 {
+		t.Fatalf("missingGoalCoverage = %+v, want inherited evidence candidates", input["missingGoalCoverage"])
 	}
 }
 

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
+	"unicode"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -1278,7 +1280,10 @@ func doDCoverageContractCorrectionRequired(step *runModel.Step) bool {
 		return false
 	}
 	satisfied, ok := assessment["satisfied"].(bool)
-	return ok && satisfied
+	if ok && satisfied {
+		return true
+	}
+	return assessmentOnlyGoalCoverageContradictionRepairRequired(step)
 }
 
 func missingGoalCoverageFromFailureOutput(output map[string]any) []map[string]any {
@@ -1292,6 +1297,331 @@ func missingGoalCoverageFromFailureOutput(output map[string]any) []map[string]an
 		ret = append(ret, cloneStepPayload(item))
 	}
 	return ret
+}
+
+func missingGoalCoverageFromStep(step *runModel.Step) []map[string]any {
+	if step == nil {
+		return nil
+	}
+	if missing := missingGoalCoverageFromFailureOutput(step.Output); len(missing) > 0 {
+		return mergeMissingGoalCoverageInputCandidates(missing, step.Input)
+	}
+	return missingGoalCoverageFromInput(step.Input)
+}
+
+func missingGoalCoverageFromInput(input map[string]any) []map[string]any {
+	items := mapSliceFromValue(input["missingGoalCoverage"])
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, cloneStepPayload(item))
+	}
+	return ret
+}
+
+func assessmentOnlyGoalCoverageContradictionRepairRequired(step *runModel.Step) bool {
+	if step == nil || !boolValue(step.Input[stepInputKeyAssessmentOnly]) {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) != "complete_dod_goal_coverage_assessment" {
+		return false
+	}
+	if len(missingGoalCoverageFromStep(step)) == 0 {
+		return false
+	}
+	return missingGoalCoverageInputHasEvidenceCandidates(step.Input)
+}
+
+func missingGoalCoverageInputHasEvidenceCandidates(input map[string]any) bool {
+	for _, item := range mapSliceFromValue(input["missingGoalCoverage"]) {
+		if len(mapSliceFromValue(item["evidenceCandidates"])) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeMissingGoalCoverageInputCandidates(missing []map[string]any, input map[string]any) []map[string]any {
+	if len(missing) == 0 || len(input) == 0 {
+		return missing
+	}
+	prior := missingGoalCoverageFromInput(input)
+	if len(prior) == 0 {
+		return missing
+	}
+	candidatesByKey := map[string][]map[string]any{}
+	for _, item := range prior {
+		candidates := mapSliceFromValue(item["evidenceCandidates"])
+		if len(candidates) == 0 {
+			continue
+		}
+		for _, key := range missingGoalCoverageMatchKeys(item) {
+			candidatesByKey[key] = candidates
+		}
+	}
+	if len(candidatesByKey) == 0 {
+		return missing
+	}
+	for _, item := range missing {
+		if len(mapSliceFromValue(item["evidenceCandidates"])) > 0 {
+			continue
+		}
+		for _, key := range missingGoalCoverageMatchKeys(item) {
+			if candidates := candidatesByKey[key]; len(candidates) > 0 {
+				item["evidenceCandidates"] = candidates
+				break
+			}
+		}
+	}
+	return missing
+}
+
+func missingGoalCoverageMatchKeys(item map[string]any) []string {
+	if len(item) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, 2)
+	if id := strings.TrimSpace(stringFromMap(item, "goalRequirementId")); id != "" {
+		ret = append(ret, "id:"+id)
+	}
+	if normalized := normalizeDoDCoverageText(missingGoalCoverageRequirementText(item)); normalized != "" {
+		ret = append(ret, "text:"+normalized)
+	}
+	return ret
+}
+
+func (o *RuntimeOrchestrator) missingGoalCoverageWithEvidenceCandidates(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	missing []map[string]any,
+) []map[string]any {
+	if len(missing) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(missing))
+	for idx, item := range missing {
+		next := cloneStepPayload(item)
+		requirement := missingGoalCoverageRequirementText(next)
+		normalized := normalizeDoDCoverageText(requirement)
+		if strings.TrimSpace(stringFromMap(next, "goalRequirementId")) == "" && normalized != "" {
+			next["goalRequirementId"] = goalCoverageRequirementID(idx+1, normalized)
+		}
+		if len(mapSliceFromValue(next["evidenceCandidates"])) == 0 {
+			if candidates := o.goalCoverageEvidenceCandidatesForRequirement(ctx, run, failedStep, requirement); len(candidates) > 0 {
+				next["evidenceCandidates"] = candidates
+			}
+		}
+		ret = append(ret, next)
+	}
+	return ret
+}
+
+func missingGoalCoverageRequirementText(item map[string]any) string {
+	return strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(item, "raw"),
+		stringFromMap(item, "item"),
+		stringFromMap(item, "goal"),
+		stringFromMap(item, "goalItem"),
+		stringFromMap(item, "requirement"),
+	))
+}
+
+func (o *RuntimeOrchestrator) goalCoverageEvidenceCandidatesForRequirement(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	requirement string,
+) []map[string]any {
+	if o == nil || o.steps == nil || run == nil {
+		return nil
+	}
+	terms := coverageRequirementTerms(requirement)
+	if len(terms) == 0 {
+		return nil
+	}
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil {
+		return nil
+	}
+	type candidate struct {
+		score int
+		item  map[string]any
+	}
+	candidates := make([]candidate, 0)
+	for _, step := range steps {
+		if step == nil || (failedStep != nil && step.ID == failedStep.ID) {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(step.Kind), "llm/") {
+			continue
+		}
+		if step.State != common.StepStateCompleted && step.State != common.StepStateFailed {
+			continue
+		}
+		text := normalizeDoDCoverageText(strings.Join([]string{
+			string(step.ID),
+			step.Kind,
+			string(step.State),
+			flattenCoverageEvidenceText(step.Output, 0),
+		}, "\n"))
+		if text == "" {
+			continue
+		}
+		matched := matchedCoverageTerms(terms, text)
+		if len(matched) == 0 {
+			continue
+		}
+		item := map[string]any{
+			"stepId":       string(step.ID),
+			"kind":         step.Kind,
+			"state":        string(step.State),
+			"matchedTerms": matched,
+			"matchScore":   len(matched),
+			"source":       "runtime_step_text_match",
+		}
+		if nodeID := graphNodeID(step); nodeID != "" {
+			item["graphNodeId"] = nodeID
+		}
+		if rootStepID := graphRootStepID(step); rootStepID != "" && rootStepID != step.ID {
+			item["graphRootStepId"] = string(rootStepID)
+		}
+		if output := compactStepOutputForLLMContext(step.Output); len(output) > 0 {
+			item["output"] = output
+		}
+		candidates = append(candidates, candidate{score: len(matched), item: item})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score > candidates[j].score
+		}
+		return stringFromMap(candidates[i].item, "stepId") < stringFromMap(candidates[j].item, "stepId")
+	})
+	limit := min(len(candidates), 5)
+	ret := make([]map[string]any, 0, limit)
+	for idx := 0; idx < limit; idx++ {
+		ret = append(ret, candidates[idx].item)
+	}
+	return ret
+}
+
+func coverageRequirementTerms(requirement string) []string {
+	requirement = strings.ToLower(strings.TrimSpace(requirement))
+	if requirement == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := make([]string, 0)
+	add := func(term string) {
+		term = normalizeDoDCoverageText(term)
+		if term == "" || seen[term] {
+			return
+		}
+		seen[term] = true
+		ret = append(ret, term)
+	}
+	for _, term := range strings.FieldsFunc(requirement, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		term = strings.TrimSpace(term)
+		if !coverageRequirementTermIsUseful(term) {
+			continue
+		}
+		add(term)
+		if strings.HasSuffix(term, "ing") && len(term) > 5 {
+			add(strings.TrimSuffix(term, "ing"))
+		}
+		if strings.HasSuffix(term, "ed") && len(term) > 4 {
+			add(strings.TrimSuffix(term, "ed"))
+		}
+	}
+	if len(ret) > 20 {
+		ret = ret[:20]
+	}
+	return ret
+}
+
+func coverageRequirementTermIsUseful(term string) bool {
+	if term == "" {
+		return false
+	}
+	allASCII := true
+	runeCount := 0
+	for _, r := range term {
+		runeCount++
+		if r > 127 {
+			allASCII = false
+		}
+	}
+	if allASCII {
+		return len(term) >= 3
+	}
+	return runeCount >= 2
+}
+
+func matchedCoverageTerms(terms []string, normalizedEvidenceText string) []string {
+	if len(terms) == 0 || normalizedEvidenceText == "" {
+		return nil
+	}
+	ret := make([]string, 0)
+	for _, term := range terms {
+		if term == "" {
+			continue
+		}
+		if strings.Contains(normalizedEvidenceText, term) {
+			ret = append(ret, term)
+		}
+	}
+	return ret
+}
+
+func flattenCoverageEvidenceText(value any, depth int) string {
+	if value == nil || depth > 4 {
+		return ""
+	}
+	switch v := value.(type) {
+	case string:
+		return truncateLLMContextString(v)
+	case []string:
+		return truncateLLMContextString(strings.Join(v, "\n"))
+	case []any:
+		parts := make([]string, 0, min(len(v), maxLLMContextSliceItems))
+		for idx := 0; idx < len(v) && idx < maxLLMContextSliceItems; idx++ {
+			if text := flattenCoverageEvidenceText(v[idx], depth+1); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	case []map[string]any:
+		parts := make([]string, 0, min(len(v), maxLLMContextSliceItems))
+		for idx := 0; idx < len(v) && idx < maxLLMContextSliceItems; idx++ {
+			if text := flattenCoverageEvidenceText(v[idx], depth+1); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	case map[string]any:
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			if shouldSkipLLMContextKey(key) {
+				continue
+			}
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, min(len(keys), maxLLMContextMapEntries))
+		for idx := 0; idx < len(keys) && idx < maxLLMContextMapEntries; idx++ {
+			key := keys[idx]
+			if text := flattenCoverageEvidenceText(v[key], depth+1); text != "" {
+				parts = append(parts, key, text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 func runtimeRepairFollowUpStepID(runID common.RunID, failedStep *runModel.Step, attempt int) common.StepID {
@@ -1415,11 +1745,13 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"Return only completed or failed dodAssessment, or a real governance blocker.",
 			"Do not return executionGraph, shellCommands, patchRequests, mcpToolCalls, memoryWrites, or other executable work.",
 			"Preserve every still-valid DoD item assessment and add any missing DoD items exactly as listed in missingDoDItems.",
-			"Add dodAssessment.goalCoverage with items for every missingGoalCoverage entry; each satisfied item must cite concrete evidenceRefs.",
+			"Add one independent dodAssessment.goalCoverage.items entry for every missingGoalCoverage entry; copy its goalRequirementId when present and cover the exact raw requirement without merging multiple missing entries into a broader item.",
+			"Treat evidenceCandidates as neutral candidates, not automatic proof; use them only when their concrete output supports the exact Goal requirement.",
+			"Each satisfied dodAssessment.goalCoverage item must cite concrete evidenceRefs from the candidate evidence or other available evidence.",
 			"If evidence does not support a Goal or DoD item, mark it failed/skipped with reason, residualRisks, and nextActions instead of claiming satisfaction.",
 		}
-		if missingGoalCoverage := missingGoalCoverageFromFailureOutput(failedStep.Output); len(missingGoalCoverage) > 0 {
-			input["missingGoalCoverage"] = missingGoalCoverage
+		if missingGoalCoverage := missingGoalCoverageFromStep(failedStep); len(missingGoalCoverage) > 0 {
+			input["missingGoalCoverage"] = o.missingGoalCoverageWithEvidenceCandidates(ctx, run, failedStep, missingGoalCoverage)
 		}
 	}
 	transientExecutionTimeout := runtimeRepairFailureIsTransientExecutionTimeout(failedStep, execErr)

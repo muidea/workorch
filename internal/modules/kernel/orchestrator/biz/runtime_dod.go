@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"unicode"
@@ -580,6 +582,7 @@ func normalizedRunGoalCoverageItems(run *runModel.Run) []normalizedDoDItem {
 			}
 			seen[normalized] = true
 			ret = append(ret, normalizedDoDItem{
+				id:                   goalCoverageRequirementID(len(ret)+1, normalized),
 				raw:                  raw,
 				normalized:           normalized,
 				kind:                 doDItemKindLeaf,
@@ -661,6 +664,7 @@ const (
 )
 
 type normalizedDoDItem struct {
+	id                   string
 	raw                  string
 	normalized           string
 	kind                 doDItemKind
@@ -793,6 +797,11 @@ func missingGoalCoverageFromDoDAssessment(assessment map[string]any) []map[strin
 			"source":       "goalCoverage",
 			"evidenceRefs": evidenceRefsFromValue(item["evidenceRefs"]),
 		}
+		if id := strings.TrimSpace(firstNonEmptyString(stringFromMap(item, "goalRequirementId"), stringFromMap(item, "id"))); id != "" {
+			missing["goalRequirementId"] = id
+		} else if normalized := normalizeDoDCoverageText(name); normalized != "" {
+			missing["goalRequirementId"] = goalCoverageRequirementID(0, normalized)
+		}
 		if reason := strings.TrimSpace(firstNonEmptyString(stringFromMap(item, "reason"), stringFromMap(item, "summary"))); reason != "" {
 			missing["reason"] = reason
 		}
@@ -820,6 +829,12 @@ func missingDoDItemDiagnostics(items []normalizedDoDItem) []map[string]any {
 			"normalized": normalized,
 			"kind":       string(item.kind),
 		}
+		if id := strings.TrimSpace(item.id); id != "" {
+			entry["id"] = id
+			if strings.HasPrefix(id, "goal-req-") {
+				entry["goalRequirementId"] = id
+			}
+		}
 		if hint := strings.TrimSpace(item.requiredEvidenceHint); hint != "" {
 			entry["requiredEvidenceHint"] = hint
 		}
@@ -829,6 +844,19 @@ func missingDoDItemDiagnostics(items []normalizedDoDItem) []map[string]any {
 		return nil
 	}
 	return ret
+}
+
+func goalCoverageRequirementID(index int, normalized string) string {
+	normalized = strings.TrimSpace(normalized)
+	if normalized == "" {
+		return ""
+	}
+	sum := sha1.Sum([]byte(normalized))
+	hash := hex.EncodeToString(sum[:])[:8]
+	if index > 0 {
+		return fmt.Sprintf("goal-req-%03d-%s", index, hash)
+	}
+	return fmt.Sprintf("goal-req-%s", hash)
 }
 
 func normalizedRunDoDItems(run *runModel.Run) []normalizedDoDItem {
