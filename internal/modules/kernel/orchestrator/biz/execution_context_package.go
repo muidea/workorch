@@ -159,12 +159,14 @@ func mergeExecutionDefinitionsIntoPackage(pkg map[string]any, executionContext m
 		"doDId",
 		"goalDefinitionPolicy",
 		"doDDefinitionPolicy",
-		"executionContract",
 		"replanContinuation",
 	} {
 		if value, ok := executionContext[key]; ok && value != nil {
 			pkg[key] = compactLLMContextValue(value, 1)
 		}
+	}
+	if value, ok := executionContext["executionContract"]; ok && value != nil {
+		pkg["executionContract"] = cloneLLMContextValue(value)
 	}
 	for _, key := range []string{
 		"goal",
@@ -175,6 +177,36 @@ func mergeExecutionDefinitionsIntoPackage(pkg map[string]any, executionContext m
 		if value, ok := executionContext[key]; ok && value != nil {
 			pkg[key] = compactLLMContextValue(value, 1)
 		}
+	}
+}
+
+func cloneLLMContextValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		ret := make(map[string]any, len(typed))
+		for key, item := range typed {
+			ret[key] = cloneLLMContextValue(item)
+		}
+		return ret
+	case []map[string]any:
+		ret := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			cloned := cloneLLMContextValue(item)
+			if mapped, ok := cloned.(map[string]any); ok {
+				ret = append(ret, mapped)
+			}
+		}
+		return ret
+	case []any:
+		ret := make([]any, 0, len(typed))
+		for _, item := range typed {
+			ret = append(ret, cloneLLMContextValue(item))
+		}
+		return ret
+	case []string:
+		return append([]string(nil), typed...)
+	default:
+		return value
 	}
 }
 

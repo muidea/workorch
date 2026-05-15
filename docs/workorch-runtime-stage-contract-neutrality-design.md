@@ -273,6 +273,10 @@ Core 可以按中立结构执行 profile 声明的 evidenceRequirements，但只
 
 Core 不得根据 `id` 名称推断业务含义。例如 `persistence_or_side_effect`、`concurrency` 只是 profile 声明的字符串；core 不知道它们对应软件开发、数据写入、测试或任何具体领域。
 
+Run activation 必须把当前有效的 profile/template contract 组装进 `executionContract`。若 workspace 是由某个 template 初始化，且其 default soul / stage soul bindings 仍与该 template 匹配，activation 可以使用当前 template 的 `ContextHints` 作为 contract 基线，再保留 workspace 中 template 未声明的扩展字段；template 已声明的同名 contract 字段以当前 template 为准，避免旧 workspace 长期携带过期的 `profileContracts`、`deliverableExpectations` 或 `evidenceRequirements`。该刷新只作用于中立 execution contract，不得在 activation 阶段重新写入或覆盖 workspace 的 soul bindings、skill、mcp 或其他业务绑定。
+
+`executionContextPackage` 交给 LLM 的 `executionContract` 必须保留完整结构，尤其是 profile 下的 `acceptanceDimensions`、`deliverableExpectations`、`evidenceRequirements` 及其 `required`、`acceptedStepKinds`、`rejectedStepKinds` 等字段。Goal / DoD / 历史上下文可以按预算压缩，但 contract 不能被压缩成数组数量或摘要，否则 LLM 无法按 profile 约束做决策，runtime 也会在后续 verification / repair 阶段反复纠偏。
+
 ### 软件开发 profile 示例
 
 该示例只作为 profile 映射，不得写入 core runtime 特判。
@@ -363,6 +367,8 @@ Repair 输入必须尽量包含足以定向修复的当前证据：
 - 近期 repair attempt 摘要：用于避免重复同一失败输出。
 
 如果 repair-of-repair 是因为 LLM 输出违反 contract，例如缺少必需 artifact 字段、返回只读 graph、返回能力不支持的操作，后续 repair 必须继承上一轮可用的 target context、workspace manifest、state-changing contract 和 rejection evidence。不得因为 contract violation 发生在 LLM repair step 外壳上，就丢失原始 failure target 或降级为泛化探索。
+
+当 verification / strict convergence follow-up 已经识别出需要继续收敛，却再次返回只读 execution graph 且没有 state-changing output、concrete validation evidence 或 rejected assessment 时，该失败属于 contract violation。后续 repair 必须携带对应的 rejection evidence；若 failure evidence 表明缺口已经是实现/状态变更缺口，则必须提升为 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`，不能退回普通只读探索。
 
 Runtime 可以把失败证据中的目标引用解析为当前 workspace 中的已知资源快照，但只能使用中立路径匹配和 manifest 事实；不能把某个 profile 的文件命名、测试约定或技术栈规则写入 core repair。
 
@@ -577,6 +583,11 @@ Stage input bundle 必须遵守：
   - patch repair context 已补充 `contentComplete` / `safeForFileWrite` 标记与 redaction/truncation 禁用规则；LLM provider prompt 不再无条件鼓励基于当前快照输出完整 `file_write`。
   - patch repair 已增加中立 `patchRepairSuggestions`：从失败 diff 与当前目标快照机械抽取唯一 oldText/newText 替换，帮助生成最小 diff，避免反复输出 stale diff 或复制脱敏内容。
   - `unified_diff` 应用能力已支持在行号漂移但 old/context lines 于当前目标中唯一匹配时按唯一匹配位置应用，降低 LLM 生成 diff 行号不准导致的无效 repair 循环。
+- 2026-05-15：
+  - 已完成 execution contract 下发与 template contract 刷新收口。
+  - activation 会基于仍匹配 workspace soul routing 的当前 template `ContextHints` 刷新 run 级 `executionContract`，并保留 workspace 扩展字段；该逻辑只更新中立 contract，不重新绑定 workspace template、soul、skill、mcp。
+  - `executionContextPackage` 不再压缩 `executionContract`，确保 LLM 能看到完整 `profileContracts`、required deliverables 与 evidence requirements。
+  - verification follow-up 返回只读 execution graph 且缺少有效收敛输出时，后续 repair 会继承 contract violation evidence；需要状态变更时会显式携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。
 
 ## 非兼容性说明
 

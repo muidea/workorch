@@ -3372,6 +3372,33 @@ func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangeForMissingDoDW
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangeForValidationFollowUpReadOnlyGraph(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-validation-read-only-graph")
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/follow-up-graph-validation-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageVerification,
+		},
+		Output: map[string]any{
+			"error": "invalid argument: validation follow-up llm step returned read-only executionGraph without patch output",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-validation-read-only-graph"}, failedStep, 1, common.ErrInvalidArgument)
+
+	if input["repairObjective"] != "produce_state_changing_output" || !boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want validation follow-up read-only graph repair to require state-changing output", input)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputUsesEvidenceObjectiveForVerificationEvidenceGap(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{

@@ -1711,6 +1711,7 @@ func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, e
 	}
 	for _, marker := range []string{
 		"implementation planning llm step returned read-only executiongraph without patch output",
+		"validation follow-up llm step returned read-only executiongraph without patch output",
 		"execution-stage llm graph node returned executiongraph",
 		"state-changing llm repair step returned executiongraph",
 		"state-changing llm repair step returned no state-changing output",

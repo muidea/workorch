@@ -1707,6 +1707,101 @@ func TestActivateWorkspaceExecutionWithBackendAddsExecutionContractFromWorkspace
 	}
 }
 
+func TestActivateWorkspaceExecutionWithBackendRefreshesExecutionContractFromMatchedTemplate(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
+		ID:     "soul-contract-refresh-execution",
+		Name:   "Contract Refresh Execution",
+		SoulMD: "# Contract Refresh Execution\n\nApply refreshed runtime contract.",
+	}); err != nil {
+		t.Fatalf("CreateSoulWithBackend: %v", err)
+	}
+	templateID := "template-refresh-contract"
+	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+		ID:   templateID,
+		Name: "Refresh Contract Template",
+		SoulBindings: map[string]string{
+			SoulBindingStageExecution: "soul-contract-refresh-execution",
+		},
+		ContextHints: map[string]any{
+			"stateChangePolicy": "must_produce_state_change",
+			"profileContracts": map[string]any{
+				"neutral-profile": map[string]any{
+					"deliverableExpectations": []map[string]any{
+						{"id": "source_change", "required": false},
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
+	}
+	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title:            "refresh contract workspace",
+		WorkingDirectory: "workspaces/refresh-contract-workspace",
+		TemplateID:       templateID,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+	if _, err := UpdateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, templateID, WorkspaceTemplate{
+		ID:   templateID,
+		Name: "Refresh Contract Template",
+		SoulBindings: map[string]string{
+			SoulBindingStageExecution: "soul-contract-refresh-execution",
+		},
+		ContextHints: map[string]any{
+			"stateChangePolicy": "must_produce_state_change",
+			"profileContracts": map[string]any{
+				"neutral-profile": map[string]any{
+					"deliverableExpectations": []map[string]any{
+						{"id": "source_change", "required": true},
+					},
+					"evidenceRequirements": []map[string]any{
+						{
+							"id":                "state_change_evidence",
+							"scope":             "acceptanceDimension",
+							"acceptedStepKinds": []string{"shell/command", "patch/apply"},
+							"rejectedStepKinds": []string{"file/read"},
+						},
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("UpdateWorkspaceTemplateWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "deliver refreshed contract behavior")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"refreshed contract is used"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+
+	contract := contextMapFromValue(t, item.Run.ExecutionContext["executionContract"])
+	profileContracts := contextMapFromValue(t, contract["profileContracts"])
+	profile := contextMapFromValue(t, profileContracts["neutral-profile"])
+	deliverables := contextMapSliceFromValue(t, profile["deliverableExpectations"])
+	if len(deliverables) != 1 || deliverables[0]["id"] != "source_change" || deliverables[0]["required"] != true {
+		t.Fatalf("deliverableExpectations = %+v, want refreshed required=true contract", profile["deliverableExpectations"])
+	}
+	requirements := contextMapSliceFromValue(t, profile["evidenceRequirements"])
+	if len(requirements) != 1 || requirements[0]["id"] != "state_change_evidence" {
+		t.Fatalf("evidenceRequirements = %+v, want refreshed evidence requirements", profile["evidenceRequirements"])
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendUsesSystemDefaultSoul(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	useSystemDefaultSoulConfig(t, "soul-system-default")

@@ -65,6 +65,11 @@ Soul、MCP、Memory、Run、Goal、DoD、Ticket、Approval 等能力，演进为
 - 禁止在 Run activation 阶段根据 template 临时写入或覆盖 SoulBindings。
 - 禁止把 template 设计成运行时持续依赖；template 是初始化来源，不是后续
   执行状态机。
+- 例外：Run activation 可以在不修改 Workspace 持久化绑定的前提下，根据仍与
+  Workspace soul routing 匹配的当前 template 刷新中立 `executionContract`
+  基线，用于获取最新 `profileContracts`、`deliverableExpectations` 与
+  `evidenceRequirements`。该刷新不得重新绑定 template、SoulBindings、Skill、
+  MCP 或任何软件开发专属流程。
 
 ### Web、TUI、CLI 边界
 

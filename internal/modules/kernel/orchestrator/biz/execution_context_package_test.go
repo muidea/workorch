@@ -72,6 +72,59 @@ func TestRunExecutionContextPackageIncludesCompactGoalDoDDefinitions(t *testing.
 	}
 }
 
+func TestRunExecutionContextPackagePreservesExecutionContractDetails(t *testing.T) {
+	orch := &RuntimeOrchestrator{}
+	run := &runmodel.Run{
+		ID:          "run-context-contract-details",
+		WorkspaceID: "ws-context-contract-details",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "source_change", "required": true},
+						},
+						"evidenceRequirements": []map[string]any{
+							{
+								"id":                "side_effect",
+								"scope":             "acceptanceDimension",
+								"acceptedStepKinds": []string{"shell/command", "patch/apply"},
+								"rejectedStepKinds": []string{"file/read"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-context-contract-details/step-1",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageExecution,
+		},
+	}
+
+	pkg := orch.runExecutionContextPackage(context.Background(), run, step, nil)
+
+	contract := mapFromValue(pkg["executionContract"])
+	profiles := mapFromValue(contract["profileContracts"])
+	profile := mapFromValue(profiles["neutral-profile"])
+	deliverables := mapSliceFromValue(profile["deliverableExpectations"])
+	if len(deliverables) != 1 || deliverables[0]["id"] != "source_change" || deliverables[0]["required"] != true {
+		t.Fatalf("deliverableExpectations = %+v, want full required contract", profile["deliverableExpectations"])
+	}
+	requirements := mapSliceFromValue(profile["evidenceRequirements"])
+	if len(requirements) != 1 || requirements[0]["id"] != "side_effect" {
+		t.Fatalf("evidenceRequirements = %+v, want full evidence requirement", profile["evidenceRequirements"])
+	}
+	if accepted := stringSliceFromValue(requirements[0]["acceptedStepKinds"]); len(accepted) != 2 || accepted[0] != "shell/command" || accepted[1] != "patch/apply" {
+		t.Fatalf("acceptedStepKinds = %+v, want preserved accepted kinds", requirements[0]["acceptedStepKinds"])
+	}
+}
+
 func TestCompactMemoryContextsMarksLegacyRunSummaryMemory(t *testing.T) {
 	items := []map[string]any{
 		{

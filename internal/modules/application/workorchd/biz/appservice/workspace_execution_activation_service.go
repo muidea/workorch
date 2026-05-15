@@ -465,7 +465,7 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 		"goalId":      string(effectiveGoal.ID),
 		"doDId":       string(effectiveDoD.ID),
 	}
-	contextData["executionContract"] = workspaceExecutionContract(workspace)
+	contextData["executionContract"] = workspaceExecutionContract(ctx, exports.Repositories.WorkspaceTemplates, workspace)
 	contextData["goal"] = goalContext(effectiveGoal)
 	if len(workspaceGoals) > 0 {
 		contextData["goals"] = workspaceGoals
@@ -602,14 +602,14 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	return contextData, nil
 }
 
-func workspaceExecutionContract(workspace *workspacemodel.Workspace) map[string]any {
+func workspaceExecutionContract(ctx context.Context, templates repository.WorkspaceTemplateRepository, workspace *workspacemodel.Workspace) map[string]any {
 	contract := map[string]any{
 		"stateChangePolicy": "allowed_but_not_required",
 	}
-	if workspace == nil || len(workspace.ContextHints) == 0 {
+	if workspace == nil {
 		return contract
 	}
-	hints := cloneContextMap(workspace.ContextHints)
+	hints := workspaceExecutionContractHints(ctx, templates, workspace)
 	if value, ok := hints["stateChangePolicy"].(string); ok && strings.TrimSpace(value) != "" {
 		contract["stateChangePolicy"] = strings.TrimSpace(value)
 	}
@@ -617,6 +617,133 @@ func workspaceExecutionContract(workspace *workspacemodel.Workspace) map[string]
 		contract["profileContracts"] = cloneContextValue(profileContracts)
 	}
 	return contract
+}
+
+func workspaceExecutionContractHints(ctx context.Context, templates repository.WorkspaceTemplateRepository, workspace *workspacemodel.Workspace) map[string]any {
+	if workspace == nil {
+		return nil
+	}
+	workspaceHints := cloneContextMap(workspace.ContextHints)
+	templateHints := matchingWorkspaceTemplateContextHints(ctx, templates, workspace)
+	if len(templateHints) == 0 {
+		return workspaceHints
+	}
+	return mergeTemplateWorkspaceContextHintsForExecutionContract(templateHints, workspaceHints)
+}
+
+func matchingWorkspaceTemplateContextHints(ctx context.Context, templates repository.WorkspaceTemplateRepository, workspace *workspacemodel.Workspace) map[string]any {
+	if ctx == nil || templates == nil || workspace == nil {
+		return nil
+	}
+	items, err := templates.List(ctx)
+	if err != nil {
+		return nil
+	}
+	var selected map[string]any
+	for _, item := range items {
+		if item == nil || len(item.ContextHints) == 0 {
+			continue
+		}
+		if !workspaceMatchesTemplateRouting(workspace, item) {
+			continue
+		}
+		selected = cloneContextMap(item.ContextHints)
+	}
+	return selected
+}
+
+func workspaceMatchesTemplateRouting(workspace *workspacemodel.Workspace, template *repository.WorkspaceTemplate) bool {
+	if workspace == nil || template == nil {
+		return false
+	}
+	if strings.TrimSpace(template.DefaultSoulID) == "" && len(template.SoulBindings) == 0 {
+		return false
+	}
+	if string(workspace.DefaultSoulID) != strings.TrimSpace(template.DefaultSoulID) {
+		return false
+	}
+	if len(workspace.SoulBindings) != len(template.SoulBindings) {
+		return false
+	}
+	for stage, templateSoulID := range template.SoulBindings {
+		if string(workspace.SoulBindings[stage]) != strings.TrimSpace(templateSoulID) {
+			return false
+		}
+	}
+	return true
+}
+
+func mergeTemplateWorkspaceContextHintsForExecutionContract(templateHints map[string]any, workspaceHints map[string]any) map[string]any {
+	if len(templateHints) == 0 {
+		return cloneContextMap(workspaceHints)
+	}
+	ret := cloneContextMap(templateHints)
+	for key, value := range workspaceHints {
+		if key == "profileContracts" {
+			ret[key] = mergeTemplateWorkspaceProfileContracts(contextMapValue(templateHints[key]), contextMapValue(value))
+			continue
+		}
+		if _, exists := ret[key]; exists {
+			continue
+		}
+		ret[key] = cloneContextValue(value)
+	}
+	return ret
+}
+
+func mergeTemplateWorkspaceProfileContracts(templateProfiles map[string]any, workspaceProfiles map[string]any) map[string]any {
+	if len(templateProfiles) == 0 {
+		if cloned := cloneContextValue(workspaceProfiles); cloned != nil {
+			if mapped, ok := cloned.(map[string]any); ok {
+				return mapped
+			}
+		}
+		return nil
+	}
+	ret := map[string]any{}
+	for profileID, profile := range templateProfiles {
+		ret[profileID] = cloneContextValue(profile)
+	}
+	for profileID, workspaceProfile := range workspaceProfiles {
+		templateProfile, exists := ret[profileID]
+		if !exists {
+			ret[profileID] = cloneContextValue(workspaceProfile)
+			continue
+		}
+		ret[profileID] = mergeTemplateWorkspaceProfileContract(contextMapValue(templateProfile), contextMapValue(workspaceProfile))
+	}
+	return ret
+}
+
+func mergeTemplateWorkspaceProfileContract(templateProfile map[string]any, workspaceProfile map[string]any) map[string]any {
+	if len(templateProfile) == 0 {
+		if cloned := cloneContextValue(workspaceProfile); cloned != nil {
+			if mapped, ok := cloned.(map[string]any); ok {
+				return mapped
+			}
+		}
+		return nil
+	}
+	ret := map[string]any{}
+	for key, value := range templateProfile {
+		ret[key] = cloneContextValue(value)
+	}
+	for key, value := range workspaceProfile {
+		if _, exists := ret[key]; exists {
+			continue
+		}
+		ret[key] = cloneContextValue(value)
+	}
+	return ret
+}
+
+func contextMapValue(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed
+	default:
+		return nil
+	}
 }
 
 func mergeActivationExecutionContextPatch(contextData map[string]any, patch map[string]any) {
