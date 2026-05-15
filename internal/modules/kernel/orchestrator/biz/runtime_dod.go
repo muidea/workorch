@@ -75,6 +75,205 @@ func doDAssessmentFromOutput(output map[string]any) map[string]any {
 	return mapFromValue(decision[stepOutputKeyDoDAssessment])
 }
 
+func normalizeCompletionGateDoDAssessmentOutput(run *runModel.Run, step *runModel.Step, output map[string]any) map[string]any {
+	if run == nil || step == nil || len(output) == 0 || !requiresDoDAssessmentCompletionGate(run) {
+		return output
+	}
+	if !boolValue(step.Input[stepInputKeyAssessmentOnly]) ||
+		strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) != "complete_dod_goal_coverage_assessment" {
+		return output
+	}
+	assessment := doDAssessmentFromOutput(output)
+	if assessment == nil {
+		return output
+	}
+	normalized := normalizeDoDAssessmentGoalCoverageForRepairInput(assessment, step.Input)
+	if len(normalized) == 0 {
+		return output
+	}
+	ret := cloneStepPayload(output)
+	if _, ok := ret[stepOutputKeyDoDAssessment]; ok {
+		ret[stepOutputKeyDoDAssessment] = normalized
+		return ret
+	}
+	decision := mapFromValue(ret[stepOutputKeyLLMDecision])
+	if len(decision) == 0 {
+		return output
+	}
+	decision[stepOutputKeyDoDAssessment] = normalized
+	ret[stepOutputKeyLLMDecision] = decision
+	return ret
+}
+
+func normalizeDoDAssessmentGoalCoverageForRepairInput(assessment map[string]any, input map[string]any) map[string]any {
+	if len(assessment) == 0 || len(input) == 0 {
+		return assessment
+	}
+	missing := missingGoalCoverageFromInput(input)
+	if len(missing) == 0 {
+		return assessment
+	}
+	coverage := mapFromValue(assessment["goalCoverage"])
+	coverageKey := "goalCoverage"
+	if len(coverage) == 0 {
+		coverage = mapFromValue(assessment["goalOutcomeCoverage"])
+		coverageKey = "goalOutcomeCoverage"
+	}
+	if len(coverage) == 0 {
+		return assessment
+	}
+	items, ok := doDAssessmentItemMaps(coverage["items"])
+	if !ok || len(items) == 0 {
+		return assessment
+	}
+	changed := false
+	for idx, item := range items {
+		missingItem := missingGoalCoverageItemForAssessmentItem(item, missing)
+		if len(missingItem) == 0 && idx < len(missing) {
+			missingItem = missing[idx]
+		}
+		if len(missingItem) > 0 {
+			if normalizeGoalCoverageAssessmentItemFromMissing(item, missingItem) {
+				changed = true
+			}
+		}
+		if normalizeAssessmentItemEvidenceRefs(item, missingItem) {
+			changed = true
+		}
+		items[idx] = item
+	}
+	if !changed {
+		return assessment
+	}
+	normalizedAssessment := cloneStepPayload(assessment)
+	coverage["items"] = items
+	normalizedAssessment[coverageKey] = coverage
+	return normalizedAssessment
+}
+
+func normalizeGoalCoverageAssessmentItemFromMissing(item map[string]any, missing map[string]any) bool {
+	if len(item) == 0 || len(missing) == 0 {
+		return false
+	}
+	changed := false
+	req := missingGoalCoverageRequirementText(missing)
+	if strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(item, "goal"),
+		stringFromMap(item, "goalItem"),
+		stringFromMap(item, "item"),
+		stringFromMap(item, "requirement"),
+	)) == "" && req != "" {
+		item["requirement"] = req
+		changed = true
+	}
+	if strings.TrimSpace(stringFromMap(item, "goalRequirementId")) == "" {
+		if id := strings.TrimSpace(firstNonEmptyString(stringFromMap(missing, "goalRequirementId"), stringFromMap(missing, "id"))); id != "" {
+			item["goalRequirementId"] = id
+			changed = true
+		} else if normalized := normalizeDoDCoverageText(req); normalized != "" {
+			item["goalRequirementId"] = goalCoverageRequirementID(0, normalized)
+			changed = true
+		}
+	}
+	return changed
+}
+
+func missingGoalCoverageItemForAssessmentItem(item map[string]any, missing []map[string]any) map[string]any {
+	if len(item) == 0 || len(missing) == 0 {
+		return nil
+	}
+	for _, candidate := range missing {
+		if stringFromMap(item, "goalRequirementId") != "" &&
+			stringFromMap(item, "goalRequirementId") == firstNonEmptyString(stringFromMap(candidate, "goalRequirementId"), stringFromMap(candidate, "id")) {
+			return candidate
+		}
+		itemText := normalizeDoDCoverageText(firstNonEmptyString(
+			stringFromMap(item, "goal"),
+			stringFromMap(item, "goalItem"),
+			stringFromMap(item, "item"),
+			stringFromMap(item, "requirement"),
+		))
+		candidateText := normalizeDoDCoverageText(missingGoalCoverageRequirementText(candidate))
+		if itemText != "" && candidateText != "" && (strings.Contains(itemText, candidateText) || strings.Contains(candidateText, itemText)) {
+			return candidate
+		}
+	}
+	return nil
+}
+
+func normalizeAssessmentItemEvidenceRefs(item map[string]any, missing map[string]any) bool {
+	if len(item) == 0 {
+		return false
+	}
+	refs := evidenceRefsFromValue(item["evidenceRefs"])
+	filtered := filterTraceableEvidenceRefs(refs)
+	if len(filtered) == 0 && strings.ToLower(strings.TrimSpace(stringFromMap(item, "state"))) == "satisfied" {
+		filtered = evidenceCandidateStepRefs(missing)
+	}
+	if stringSlicesEqual(refs, filtered) {
+		return false
+	}
+	item["evidenceRefs"] = filtered
+	return true
+}
+
+func filterTraceableEvidenceRefs(refs []string) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" || seen[ref] {
+			continue
+		}
+		if !traceableEvidenceRef(ref) {
+			continue
+		}
+		seen[ref] = true
+		ret = append(ret, ref)
+	}
+	return ret
+}
+
+func traceableEvidenceRef(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || strings.ContainsAny(ref, " \t\n\r") {
+		return false
+	}
+	return strings.Contains(ref, "/")
+}
+
+func evidenceCandidateStepRefs(missing map[string]any) []string {
+	if len(missing) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := make([]string, 0)
+	for _, candidate := range mapSliceFromValue(missing["evidenceCandidates"]) {
+		ref := strings.TrimSpace(stringFromMap(candidate, "stepId"))
+		if ref == "" || seen[ref] || !traceableEvidenceRef(ref) {
+			continue
+		}
+		seen[ref] = true
+		ret = append(ret, ref)
+	}
+	return ret
+}
+
+func stringSlicesEqual(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if strings.TrimSpace(left[idx]) != strings.TrimSpace(right[idx]) {
+			return false
+		}
+	}
+	return true
+}
+
 func outputWithDoDAssessmentDiagnostics(output map[string]any) map[string]any {
 	if len(output) == 0 {
 		return output
@@ -261,7 +460,7 @@ func validateDoDAssessmentCoversRunGoal(run *runModel.Run, assessment map[string
 	}
 	covered, err := validatedGoalCoverageItems(assessment)
 	if err != nil {
-		return err
+		return newGoalCoverageContractError(err, requiredItems)
 	}
 	if len(covered) == 0 {
 		return newGoalCoverageMissingError(requiredItems)
@@ -683,6 +882,23 @@ type doDCoverageMissingError struct {
 type goalCoverageMissingError struct {
 	cause   error
 	missing []normalizedDoDItem
+}
+
+func newGoalCoverageContractError(cause error, missing []normalizedDoDItem) error {
+	if cause == nil {
+		return newGoalCoverageMissingError(missing)
+	}
+	items := make([]normalizedDoDItem, 0, len(missing))
+	for _, item := range missing {
+		if item.normalized == "" {
+			continue
+		}
+		items = append(items, item)
+	}
+	if len(items) == 0 {
+		return cause
+	}
+	return &goalCoverageMissingError{cause: cause, missing: items}
 }
 
 func newDoDCoverageMissingError(missing []normalizedDoDItem) error {

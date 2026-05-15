@@ -175,6 +175,8 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		_ = o.steps.Update(ctx, last)
 		return o.FailRun(ctx, currentRun.ID, fmt.Sprintf("%s: completionState %s has no actionable continuation", common.ErrInvalidArgument, completionState))
 	}
+	last.Output = normalizeCompletionGateDoDAssessmentOutput(currentRun, last, last.Output)
+	_ = o.steps.Update(ctx, last)
 	assessment, summary, err := validatedCompletionDoDAssessment(currentRun, last.Output)
 	if err != nil {
 		last.State = common.StepStateFailed

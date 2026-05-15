@@ -1330,6 +1330,11 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 			fmt.Errorf("%w: completionState %s has no actionable continuation", common.ErrInvalidArgument, completionState),
 		)
 	}
+	output = normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	step.Output = output
+	if err := o.steps.Update(ctx, step); err != nil {
+		return err
+	}
 	assessment, summary, err := validatedCompletionDoDAssessment(run, output)
 	if err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
@@ -1421,6 +1426,9 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	if err := validateLLMExecutionGraphOutputContract(step, output); err != nil {
 		return err
 	}
+	if err := validateLLMSoulGraphCapabilityContract(run, step, output); err != nil {
+		return err
+	}
 	if err := validateLLMFollowUpGraphStateChangingContract(run, step, output); err != nil {
 		return err
 	}
@@ -1467,6 +1475,102 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 		return nil
 	}
 	return fmt.Errorf("%w: state-changing execution-stage llm graph node returned no state-changing output", common.ErrInvalidArgument)
+}
+
+func validateLLMSoulGraphCapabilityContract(run *runModel.Run, step *runModel.Step, output map[string]any) error {
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok || len(graph.Nodes) == 0 {
+		return nil
+	}
+	soul := runtimeSoulForStep(run, step)
+	if len(soul) == 0 {
+		return nil
+	}
+	if err := validateGraphAllowedToolKinds(graph, stringSliceFromValue(soul["allowedToolKinds"])); err != nil {
+		return err
+	}
+	if err := validateGraphAllowedMCPServers(graph, stringSliceFromValue(soul["allowedMCPServerRefs"])); err != nil {
+		return err
+	}
+	return nil
+}
+
+func runtimeSoulForStep(run *runModel.Run, step *runModel.Step) map[string]any {
+	if run == nil || step == nil || len(run.ExecutionContext) == 0 {
+		return nil
+	}
+	stage := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(step.Input, stepInputKeySoulStage),
+		stringFromMap(step.Input, stepInputKeyRuntimeStage),
+	))
+	routing := mapFromValue(run.ExecutionContext["soulRouting"])
+	bindings := mapFromValue(routing["bindings"])
+	if stage != "" {
+		if binding := mapFromValue(bindings[stage]); len(binding) > 0 {
+			if soul := mapFromValue(binding["soul"]); len(soul) > 0 {
+				return soul
+			}
+		}
+	}
+	return mapFromValue(run.ExecutionContext["soul"])
+}
+
+func validateGraphAllowedToolKinds(graph runtimemodel.BlockExecutionGraph, allowed []string) error {
+	if len(allowed) == 0 || stringListAllows(allowed, "*") {
+		return nil
+	}
+	allowedSet := stringSet(allowed)
+	for _, node := range graph.Nodes {
+		kind := strings.TrimSpace(node.Kind)
+		if kind == "" || allowedSet[kind] {
+			continue
+		}
+		return fmt.Errorf("%w: executionGraph node %q kind %q is not allowed by current soul allowedToolKinds", common.ErrInvalidArgument, strings.TrimSpace(node.ID), kind)
+	}
+	return nil
+}
+
+func validateGraphAllowedMCPServers(graph runtimemodel.BlockExecutionGraph, allowed []string) error {
+	if len(allowed) == 0 || stringListAllows(allowed, "*") {
+		return nil
+	}
+	allowedSet := stringSet(allowed)
+	for _, node := range graph.Nodes {
+		kind := strings.TrimSpace(node.Kind)
+		if kind != "mcp/tool_call" && kind != "mcp/resource_read" {
+			continue
+		}
+		serverID := strings.TrimSpace(stringFromMap(node.Input, "serverId"))
+		if serverID == "" {
+			serverID = strings.TrimSpace(stringFromMap(mapFromValue(node.Input["input"]), "serverId"))
+		}
+		if serverID == "" || allowedSet[serverID] {
+			continue
+		}
+		return fmt.Errorf("%w: executionGraph node %q MCP server %q is not allowed by current soul allowedMCPServerRefs", common.ErrInvalidArgument, strings.TrimSpace(node.ID), serverID)
+	}
+	return nil
+}
+
+func stringSet(values []string) map[string]bool {
+	ret := make(map[string]bool, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			ret[value] = true
+		}
+	}
+	return ret
+}
+
+func stringListAllows(values []string, expected string) bool {
+	expected = strings.TrimSpace(expected)
+	for _, value := range values {
+		if strings.TrimSpace(value) == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func validateLLMExecutionGraphOutputContract(step *runModel.Step, output map[string]any) error {
