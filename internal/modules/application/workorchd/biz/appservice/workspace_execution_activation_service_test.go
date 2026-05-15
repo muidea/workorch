@@ -1661,6 +1661,13 @@ func TestActivateWorkspaceExecutionWithBackendAddsExecutionContractFromWorkspace
 		},
 		ContextHints: map[string]any{
 			"stateChangePolicy": "must_produce_state_change",
+			"profileContracts": map[string]any{
+				"software-dev": map[string]any{
+					"acceptanceDimensions": []any{
+						map[string]any{"id": "runtime_entrypoint", "required": true},
+					},
+				},
+			},
 		},
 	}); err != nil {
 		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
@@ -1691,6 +1698,12 @@ func TestActivateWorkspaceExecutionWithBackendAddsExecutionContractFromWorkspace
 	contract := contextMapFromValue(t, item.Run.ExecutionContext["executionContract"])
 	if contract["stateChangePolicy"] != "must_produce_state_change" {
 		t.Fatalf("executionContract = %+v, want must_produce_state_change", contract)
+	}
+	profileContracts := contextMapFromValue(t, contract["profileContracts"])
+	softwareDev := contextMapFromValue(t, profileContracts["software-dev"])
+	dimensions := contextMapSliceFromValue(t, softwareDev["acceptanceDimensions"])
+	if len(dimensions) != 1 || dimensions[0]["id"] != "runtime_entrypoint" || dimensions[0]["required"] != true {
+		t.Fatalf("profile contract dimensions = %+v, want runtime_entrypoint required", dimensions)
 	}
 }
 

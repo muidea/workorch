@@ -13113,9 +13113,90 @@ func TestValidatedCompletionDoDAssessmentRejectsMissingGoalCoverage(t *testing.T
 		},
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) ||
-		!strings.Contains(err.Error(), "does not cover all current Goal requirements") ||
-		!strings.Contains(err.Error(), "支持同时代理不同类型的 LLM") {
+		!strings.Contains(err.Error(), "dodAssessment.goalCoverage is required") {
 		t.Fatalf("validatedCompletionDoDAssessment err = %v, want missing Goal coverage", err)
+	}
+}
+
+func TestValidatedCompletionDoDAssessmentRejectsImplicitGoalCoverageWithoutGoalCoverageMap(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-goal-coverage-implicit",
+		WorkspaceID:     "ws-goal-coverage-implicit",
+		DoDID:           "dod-goal-coverage",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": "支持通过配置单独停用某个 LLM",
+			},
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+		},
+	}
+	_, _, err := validatedCompletionDoDAssessment(run, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "goal text appears in a DoD item but no goalCoverage map exists",
+			"items": []map[string]any{
+				{
+					"item":         "支持通过配置单独停用某个 LLM",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-goal-coverage-implicit/block/build"},
+				},
+				{
+					"item":         "build passes",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-goal-coverage-implicit/block/build"},
+				},
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "dodAssessment.goalCoverage is required") {
+		t.Fatalf("validatedCompletionDoDAssessment err = %v, want explicit goalCoverage requirement", err)
+	}
+}
+
+func TestValidatedCompletionDoDAssessmentRejectsGoalCoverageWithoutEvidenceRefs(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-goal-coverage-no-evidence",
+		WorkspaceID:     "ws-goal-coverage-no-evidence",
+		DoDID:           "dod-goal-coverage",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": "支持通过配置单独停用某个 LLM",
+			},
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+		},
+	}
+	_, _, err := validatedCompletionDoDAssessment(run, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "goal coverage lacks evidence",
+			"items": []map[string]any{
+				{
+					"item":         "build passes",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-goal-coverage-no-evidence/block/build"},
+				},
+			},
+			"goalCoverage": map[string]any{
+				"satisfied": true,
+				"items": []map[string]any{
+					{
+						"goal":  "支持通过配置单独停用某个 LLM",
+						"state": "satisfied",
+					},
+				},
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "satisfied dodAssessment.goalCoverage item requires evidenceRefs") {
+		t.Fatalf("validatedCompletionDoDAssessment err = %v, want goalCoverage evidenceRefs requirement", err)
 	}
 }
 
@@ -13167,6 +13248,254 @@ func TestValidatedCompletionDoDAssessmentAcceptsExplicitGoalCoverage(t *testing.
 	}
 	if summary != "DoD and Goal coverage passed" {
 		t.Fatalf("summary = %q, want Goal-aware summary", summary)
+	}
+}
+
+func TestValidatedCompletionDoDAssessmentRejectsMissingRequiredAcceptanceDimension(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-required-dimension-missing",
+		WorkspaceID:     "ws-required-dimension-missing",
+		DoDID:           "dod-required-dimension",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"acceptanceDimensions": []map[string]any{
+							{"id": "runtime_entrypoint", "required": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	_, _, err := validatedCompletionDoDAssessment(run, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "base DoD passed",
+			"items": []map[string]any{
+				{
+					"item":         "build passes",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-required-dimension-missing/block/build"},
+				},
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "acceptanceDimensions missing required dimensions: runtime_entrypoint") {
+		t.Fatalf("validatedCompletionDoDAssessment err = %v, want missing acceptance dimension", err)
+	}
+}
+
+func TestValidatedCompletionDoDAssessmentAcceptsRequiredAcceptanceDimension(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-required-dimension-complete",
+		WorkspaceID:     "ws-required-dimension-complete",
+		DoDID:           "dod-required-dimension",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"acceptanceDimensions": []map[string]any{
+							{"id": "runtime_entrypoint", "required": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	_, _, err := validatedCompletionDoDAssessment(run, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "base DoD and required dimension passed",
+			"items": []map[string]any{
+				{
+					"item":         "build passes",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-required-dimension-complete/block/build"},
+				},
+			},
+			"acceptanceDimensions": []map[string]any{
+				{
+					"id":           "runtime_entrypoint",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-required-dimension-complete/block/entrypoint"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+}
+
+func TestValidatedCompletionDoDAssessmentRejectsMissingRequiredDeliverableCoverage(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-required-deliverable-missing",
+		WorkspaceID:     "ws-required-deliverable-missing",
+		DoDID:           "dod-required-deliverable",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "single_binary", "required": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	_, _, err := validatedCompletionDoDAssessment(run, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "base DoD passed",
+			"items": []map[string]any{
+				{
+					"item":         "build passes",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-required-deliverable-missing/block/build"},
+				},
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "deliverableCoverage missing required deliverables: single_binary") {
+		t.Fatalf("validatedCompletionDoDAssessment err = %v, want missing deliverable coverage", err)
+	}
+}
+
+func TestValidatedCompletionDoDAssessmentAcceptsRequiredDeliverableCoverage(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-required-deliverable-complete",
+		WorkspaceID:     "ws-required-deliverable-complete",
+		DoDID:           "dod-required-deliverable",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "single_binary", "required": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	_, _, err := validatedCompletionDoDAssessment(run, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "base DoD and required deliverable passed",
+			"items": []map[string]any{
+				{
+					"item":         "build passes",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-required-deliverable-complete/block/build"},
+				},
+			},
+			"deliverableCoverage": map[string]any{
+				"items": []map[string]any{
+					{
+						"id":           "single_binary",
+						"state":        "satisfied",
+						"artifactRefs": []string{"run-required-deliverable-complete/artifact/result-summary"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+}
+
+func TestValidatedCompletionDoDAssessmentRejectsOpenEvidenceGaps(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-open-evidence-gap",
+		WorkspaceID:     "ws-open-evidence-gap",
+		DoDID:           "dod-open-evidence-gap",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+		},
+	}
+	_, _, err := validatedCompletionDoDAssessment(run, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "base DoD passed but evidence gap remains",
+			"items": []map[string]any{
+				{
+					"item":         "build passes",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-open-evidence-gap/block/build"},
+				},
+			},
+			"evidenceGaps": []map[string]any{
+				{"id": "missing-error-path", "reason": "error branch not verified"},
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "dodAssessment.evidenceGaps must be empty") {
+		t.Fatalf("validatedCompletionDoDAssessment err = %v, want open evidence gap rejection", err)
+	}
+}
+
+func TestValidatedCompletionDoDAssessmentRejectsRequiredBranchCoverageWithoutEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-branch-coverage-no-evidence",
+		WorkspaceID:     "ws-branch-coverage-no-evidence",
+		DoDID:           "dod-branch-coverage-no-evidence",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+		},
+	}
+	_, _, err := validatedCompletionDoDAssessment(run, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "base DoD passed but branch evidence missing",
+			"items": []map[string]any{
+				{
+					"item":         "build passes",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-branch-coverage-no-evidence/block/build"},
+				},
+			},
+			"branchCoverage": map[string]any{
+				"items": []map[string]any{
+					{
+						"id":       "error_path",
+						"required": true,
+						"state":    "satisfied",
+					},
+				},
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "satisfied dodAssessment.branchCoverage item") {
+		t.Fatalf("validatedCompletionDoDAssessment err = %v, want branch coverage evidence rejection", err)
 	}
 }
 

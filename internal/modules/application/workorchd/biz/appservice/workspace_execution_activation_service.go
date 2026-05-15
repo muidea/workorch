@@ -613,6 +613,9 @@ func workspaceExecutionContract(workspace *workspacemodel.Workspace) map[string]
 	if value, ok := hints["stateChangePolicy"].(string); ok && strings.TrimSpace(value) != "" {
 		contract["stateChangePolicy"] = strings.TrimSpace(value)
 	}
+	if profileContracts, ok := hints["profileContracts"].(map[string]any); ok && len(profileContracts) > 0 {
+		contract["profileContracts"] = cloneContextValue(profileContracts)
+	}
 	return contract
 }
 

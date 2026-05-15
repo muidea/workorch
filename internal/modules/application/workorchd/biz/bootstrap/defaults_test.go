@@ -35,6 +35,7 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	if item.ContextHints["stateChangePolicy"] != "must_produce_state_change" {
 		t.Fatalf("software-dev contextHints = %+v, want must_produce_state_change", item.ContextHints)
 	}
+	assertSoftwareDevAcceptanceDimensions(t, item.ContextHints)
 	if len(item.EvidencePolicies) == 0 {
 		t.Fatalf("software-dev evidencePolicies missing")
 	}
@@ -61,6 +62,10 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, planning.SoulMD, "workspace 文件清单为空不等于缺少源码")
 	assertSoulContains(t, planning.SoulMD, "新项目初始化场景")
 	assertSoulContains(t, planning.SoulMD, "包/module/import")
+	assertSoulContains(t, planning.SoulMD, "functional_behavior")
+	assertSoulContains(t, planning.SoulMD, "external_contract")
+	assertSoulContains(t, planning.SoulMD, "runtime_entrypoint")
+	assertSoulContains(t, planning.SoulMD, "persistence_or_side_effect")
 
 	execution := findEmbeddedSoulByID(souls, "soul-software-dev-execution")
 	if execution == nil {
@@ -81,6 +86,11 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, execution.SoulMD, "占位函数体")
 	assertSoulContains(t, execution.SoulMD, "当前文件快照")
 	assertSoulContains(t, execution.SoulMD, "包/module/import")
+	assertSoulContains(t, execution.SoulMD, "Goal / DoD、现有代码和验收证据")
+	assertSoulContains(t, execution.SoulMD, "交付入口")
+	assertSoulNotContains(t, execution.SoulMD, "多 provider/多 LLM 网关")
+	assertSoulNotContains(t, execution.SoulMD, "providers[]")
+	assertSoulNotContains(t, execution.SoulMD, "model_prefixes")
 
 	validation := findEmbeddedSoulByID(souls, "soul-software-dev-validation")
 	if validation == nil {
@@ -93,6 +103,10 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, validation.SoulMD, "evidenceRefs")
 	assertSoulContains(t, validation.SoulMD, "DoD-to-test")
 	assertSoulContains(t, validation.SoulMD, "关键分支")
+	assertSoulContains(t, validation.SoulMD, "Goal 叶子需求")
+	assertSoulContains(t, validation.SoulMD, "验收维度")
+	assertSoulContains(t, validation.SoulMD, "目标入口可用")
+	assertSoulContains(t, validation.SoulMD, "入口路径")
 
 	artifact := findEmbeddedSoulByID(souls, "soul-software-dev-artifact")
 	if artifact == nil {
@@ -101,6 +115,9 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, artifact.SoulMD, "DoD 条目证据引用")
 	assertSoulContains(t, artifact.SoulMD, "变更文件")
 	assertSoulContains(t, artifact.SoulMD, "行为变化")
+	assertSoulContains(t, artifact.SoulMD, "coverage_map")
+	assertSoulContains(t, artifact.SoulMD, "Goal 覆盖项")
+	assertSoulContains(t, artifact.SoulMD, "构建产物")
 	assertSoulContains(t, artifact.SoulMD, "不要只写")
 
 	decision := findEmbeddedSoulByID(souls, "soul-software-dev-decision")
@@ -156,6 +173,7 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 	if template.ContextHints["stateChangePolicy"] != "must_produce_state_change" {
 		t.Fatalf("software-dev contextHints = %+v, want must_produce_state_change", template.ContextHints)
 	}
+	assertSoftwareDevAcceptanceDimensions(t, template.ContextHints)
 	assertContainsAnyDoDItem(t, template.DoDItems, "evidenceRefs")
 	if len(template.EvidencePolicies) == 0 {
 		t.Fatalf("software-dev evidence policies were not refreshed: %+v", template)
@@ -194,5 +212,58 @@ func assertSoulContains(t *testing.T, text string, want string) {
 	t.Helper()
 	if !strings.Contains(text, want) {
 		t.Fatalf("soul markdown missing %q", want)
+	}
+}
+
+func assertSoulNotContains(t *testing.T, text string, forbidden string) {
+	t.Helper()
+	if strings.Contains(text, forbidden) {
+		t.Fatalf("soul markdown contains forbidden business-specific text %q", forbidden)
+	}
+}
+
+func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
+	t.Helper()
+	contracts, ok := hints["profileContracts"].(map[string]any)
+	if !ok {
+		t.Fatalf("contextHints.profileContracts = %+v, want map", hints["profileContracts"])
+	}
+	softwareDev, ok := contracts["software-dev"].(map[string]any)
+	if !ok {
+		t.Fatalf("profileContracts[software-dev] = %+v, want map", contracts["software-dev"])
+	}
+	items, ok := softwareDev["acceptanceDimensions"].([]any)
+	if !ok || len(items) < 9 {
+		t.Fatalf("software-dev acceptanceDimensions = %+v, want declared dimensions", softwareDev["acceptanceDimensions"])
+	}
+	want := map[string]bool{
+		"functional_behavior":        false,
+		"external_contract":          false,
+		"runtime_entrypoint":         false,
+		"configuration":              false,
+		"persistence_or_side_effect": false,
+		"error_behavior":             false,
+		"streaming_or_long_running":  false,
+		"concurrency":                false,
+		"deliverable":                false,
+	}
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("acceptance dimension item = %+v, want map", raw)
+		}
+		id, _ := item["id"].(string)
+		if _, ok := want[id]; ok {
+			want[id] = true
+		}
+	}
+	for id, seen := range want {
+		if !seen {
+			t.Fatalf("software-dev acceptanceDimensions missing %q in %+v", id, items)
+		}
+	}
+	deliverables, ok := softwareDev["deliverableExpectations"].([]any)
+	if !ok || len(deliverables) < 4 {
+		t.Fatalf("software-dev deliverableExpectations = %+v, want declared expectations", softwareDev["deliverableExpectations"])
 	}
 }

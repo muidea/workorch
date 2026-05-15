@@ -62,7 +62,28 @@
       "artifact": "soul-software-dev-artifact"
     },
     "contextHints": {
-      "stateChangePolicy": "must_produce_state_change"
+      "stateChangePolicy": "must_produce_state_change",
+      "profileContracts": {
+        "software-dev": {
+          "acceptanceDimensions": [
+            { "id": "functional_behavior", "required": false, "description": "Goal-level functional behavior and primary path" },
+            { "id": "external_contract", "required": false, "description": "API, CLI, file format, protocol, input/output compatibility, or other external contract" },
+            { "id": "runtime_entrypoint", "required": false, "description": "Command, service, script, package, or callable entrypoint used to run the deliverable" },
+            { "id": "configuration", "required": false, "description": "Configuration sources, defaults, environment overrides, and configuration error behavior" },
+            { "id": "persistence_or_side_effect", "required": false, "description": "File writes, state changes, audit records, or external side effects promised by the Goal or DoD" },
+            { "id": "error_behavior", "required": false, "description": "Error propagation, status, invalid input, dependency failure, or exceptional path behavior" },
+            { "id": "streaming_or_long_running", "required": false, "description": "Streaming, incremental output, long-running operation, cancellation, or completion behavior" },
+            { "id": "concurrency", "required": false, "description": "Concurrent calls, shared state, locks, races, or resource safety" },
+            { "id": "deliverable", "required": false, "description": "Build artifact, binary, package, document, or other user-facing deliverable" }
+          ],
+          "deliverableExpectations": [
+            { "id": "source_change", "required": false, "description": "Source, configuration, documentation, or workspace state change directly related to Goal" },
+            { "id": "validation_report", "required": false, "description": "Validation command, test report, lint/static check, or justified skipped validation" },
+            { "id": "coverage_map", "required": false, "description": "Mapping between Goal leaves, DoD items, acceptance dimensions, evidenceRefs, and residual risks" },
+            { "id": "user_deliverable", "required": false, "description": "Goal-specific user-facing artifact such as binary, package, service endpoint, document, or generated data" }
+          ]
+        }
+      }
     },
     "evidencePolicies": [
       {

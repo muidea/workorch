@@ -184,6 +184,85 @@ def result_covers_step(result, step_id):
                 return True
     return False
 
+def dod_assessment_from_payload(container):
+    assessment = payload(container, "doDAssessment")
+    if assessment:
+        return assessment
+    output_payload = payload(container, "output")
+    if output_payload:
+        assessment = output_payload.get("dodAssessment") or output_payload.get("DoDAssessment")
+        if isinstance(assessment, dict):
+            return assessment
+        decision = output_payload.get("llmDecision") or output_payload.get("LLMDecision")
+        if isinstance(decision, dict):
+            assessment = decision.get("dodAssessment") or decision.get("DoDAssessment")
+            if isinstance(assessment, dict):
+                return assessment
+    return {}
+
+def assessment_items(assessment, key="items"):
+    if not isinstance(assessment, dict):
+        return []
+    items = assessment.get(key) or assessment.get(key[:1].upper() + key[1:])
+    return items if isinstance(items, list) else []
+
+def validate_satisfied_assessment_items_have_evidence(errors, assessment, label):
+    for item in assessment_items(assessment):
+        if not isinstance(item, dict):
+            continue
+        state = str(item.get("state") or item.get("State") or "").strip()
+        if state != "satisfied":
+            continue
+        refs = value_list(item, "evidenceRefs", "EvidenceRefs")
+        if not refs:
+            name = str(item.get("item") or item.get("goal") or item.get("id") or "<unnamed>")
+            errors.append(f"{label} satisfied item missing evidenceRefs: {name}")
+
+def validate_goal_coverage_if_present(errors, assessment, label):
+    coverage = assessment.get("goalCoverage") or assessment.get("goalOutcomeCoverage")
+    if not isinstance(coverage, dict):
+        return
+    if coverage.get("satisfied") is not True:
+        errors.append(f"{label} goalCoverage is present but not satisfied")
+        return
+    items = assessment_items(coverage)
+    if not items:
+        errors.append(f"{label} goalCoverage has no items")
+        return
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        state = str(item.get("state") or "").strip()
+        if state != "satisfied":
+            name = str(item.get("goal") or item.get("item") or item.get("requirement") or "<unnamed>")
+            errors.append(f"{label} goalCoverage item is not satisfied: {name}")
+            continue
+        if not value_list(item, "evidenceRefs", "EvidenceRefs"):
+            name = str(item.get("goal") or item.get("item") or item.get("requirement") or "<unnamed>")
+            errors.append(f"{label} goalCoverage satisfied item missing evidenceRefs: {name}")
+
+def validate_no_open_evidence_gaps(errors, assessment, label):
+    for key in ("evidenceGaps", "verificationEvidenceGaps"):
+        value = assessment.get(key)
+        if isinstance(value, list) and value:
+            errors.append(f"{label} has open {key}")
+    branch_coverage = assessment.get("branchCoverage")
+    branch_items = []
+    if isinstance(branch_coverage, dict):
+        raw = branch_coverage.get("items")
+        if isinstance(raw, list):
+            branch_items = raw
+    elif isinstance(branch_coverage, list):
+        branch_items = branch_coverage
+    for item in branch_items:
+        if not isinstance(item, dict) or item.get("required") is not True:
+            continue
+        name = str(item.get("id") or item.get("branch") or item.get("name") or "<unnamed>")
+        if str(item.get("state") or "").strip() != "satisfied":
+            errors.append(f"{label} required branchCoverage item is not satisfied: {name}")
+        elif not value_list(item, "evidenceRefs", "EvidenceRefs"):
+            errors.append(f"{label} required branchCoverage item missing evidenceRefs: {name}")
+
 def ticket_covers_step(ticket, step_id):
     if not isinstance(ticket, dict):
         return False
@@ -352,6 +431,7 @@ if workspace_state in active_workspace_states and not workspace_active_run_id:
     errors.append(f"workspace state {workspace_state} has no activeRunId")
 accepted_results = [item for item in results if field(item, "runId", "RunID") == run_id and field(item, "state", "State") == "accepted"]
 rejected_results = [item for item in results if field(item, "runId", "RunID") == run_id and field(item, "state", "State") == "rejected"]
+steps_by_id = {str(field(item, "id", "ID") or ""): item for item in steps}
 missing_file_failures = [step for step in steps if missing_file_read_failure(step)]
 rejected_policy_tickets = []
 for ticket_item in tickets:
@@ -360,6 +440,22 @@ for ticket_item in tickets:
         rejected_policy_tickets.append(ticket_item)
 if run_state == "completed" and not accepted_results:
     errors.append("completed run has no accepted result")
+for result in accepted_results:
+    result_id = str(field(result, "id", "ID") or "<unknown>")
+    if not value_list(result, "evidenceRefs", "EvidenceRefs"):
+        errors.append(f"accepted result missing evidenceRefs: {result_id}")
+    result_assessment = dod_assessment_from_payload(result)
+    if not result_assessment:
+        errors.append(f"accepted result missing doDAssessment: {result_id}")
+    else:
+        validate_satisfied_assessment_items_have_evidence(errors, result_assessment, f"accepted result {result_id}")
+    source_ref = str(field(result, "sourceRef", "SourceRef") or "")
+    source_step = steps_by_id.get(source_ref)
+    if source_step:
+        source_assessment = dod_assessment_from_payload(source_step)
+        if source_assessment:
+            validate_goal_coverage_if_present(errors, source_assessment, f"accepted result source step {source_ref}")
+            validate_no_open_evidence_gaps(errors, source_assessment, f"accepted result source step {source_ref}")
 if run_state == "failed" and run_dod and not rejected_results:
     errors.append("failed DoD run has no rejected result")
 if run_state in ("blocked_on_decision", "superseded", "failed") and rejected_policy_tickets and not rejected_results:

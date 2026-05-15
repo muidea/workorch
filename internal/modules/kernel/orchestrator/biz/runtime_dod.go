@@ -37,10 +37,19 @@ func validatedCompletionDoDAssessment(run *runModel.Run, output map[string]any) 
 	if err := validateDoDAssessmentItems(assessment["items"]); err != nil {
 		return nil, "", err
 	}
+	if err := validateDoDAssessmentHasNoOpenEvidenceGaps(assessment); err != nil {
+		return nil, "", err
+	}
 	if err := validateDoDAssessmentCoversRunDoD(run, assessment); err != nil {
 		return nil, "", err
 	}
 	if err := validateDoDAssessmentCoversRunGoal(run, assessment); err != nil {
+		return nil, "", err
+	}
+	if err := validateDoDAssessmentCoversRequiredProfileDimensions(run, assessment); err != nil {
+		return nil, "", err
+	}
+	if err := validateDoDAssessmentCoversRequiredDeliverables(run, assessment); err != nil {
 		return nil, "", err
 	}
 	return assessment, summary, nil
@@ -162,6 +171,43 @@ func validateDoDAssessmentItems(value any) error {
 	return nil
 }
 
+func validateDoDAssessmentHasNoOpenEvidenceGaps(assessment map[string]any) error {
+	if assessment == nil {
+		return nil
+	}
+	for _, key := range []string{"evidenceGaps", "verificationEvidenceGaps"} {
+		if gaps := mapSliceFromValue(assessment[key]); len(gaps) > 0 {
+			return fmt.Errorf("%w: dodAssessment.%s must be empty for accepted result", common.ErrInvalidArgument, key)
+		}
+	}
+	branchCoverage := mapFromValue(assessment["branchCoverage"])
+	items := mapSliceFromValue(assessment["branchCoverage"])
+	if len(branchCoverage) > 0 {
+		items = mapSliceFromValue(branchCoverage["items"])
+	}
+	for _, item := range items {
+		if !boolValue(item["required"]) {
+			continue
+		}
+		name := strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(item, "id"),
+			stringFromMap(item, "branch"),
+			stringFromMap(item, "name"),
+		))
+		if name == "" {
+			name = "unnamed"
+		}
+		state := strings.ToLower(strings.TrimSpace(stringFromMap(item, "state")))
+		if state != "satisfied" {
+			return fmt.Errorf("%w: required dodAssessment.branchCoverage item %q is not satisfied", common.ErrInvalidArgument, name)
+		}
+		if len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 {
+			return fmt.Errorf("%w: satisfied dodAssessment.branchCoverage item %q requires evidenceRefs", common.ErrInvalidArgument, name)
+		}
+	}
+	return nil
+}
+
 func validateDoDAssessmentCoversRunDoD(run *runModel.Run, assessment map[string]any) error {
 	requiredItems := normalizedRunDoDItems(run)
 	if len(requiredItems) == 0 {
@@ -211,9 +257,12 @@ func validateDoDAssessmentCoversRunGoal(run *runModel.Run, assessment map[string
 	if len(requiredItems) == 0 {
 		return nil
 	}
-	covered := normalizedSatisfiedAssessmentCoverageItems(assessment)
-	if coverage := goalCoverageFromAssessment(assessment); len(coverage) > 0 {
-		covered = append(covered, coverage...)
+	covered, err := validatedGoalCoverageItems(assessment)
+	if err != nil {
+		return err
+	}
+	if len(covered) == 0 {
+		return newGoalCoverageMissingError(requiredItems)
 	}
 	missing := make([]normalizedDoDItem, 0)
 	for _, required := range requiredItems {
@@ -238,6 +287,221 @@ func validateDoDAssessmentCoversRunGoal(run *runModel.Run, assessment map[string
 		return nil
 	}
 	return newGoalCoverageMissingError(missing)
+}
+
+func validatedGoalCoverageItems(assessment map[string]any) ([]string, error) {
+	if assessment == nil {
+		return nil, fmt.Errorf("%w: dodAssessment.goalCoverage is required when Goal has uncovered leaf requirements", common.ErrInvalidArgument)
+	}
+	coverage := mapFromValue(assessment["goalCoverage"])
+	if len(coverage) == 0 {
+		coverage = mapFromValue(assessment["goalOutcomeCoverage"])
+	}
+	if len(coverage) == 0 {
+		return nil, fmt.Errorf("%w: dodAssessment.goalCoverage is required when Goal has uncovered leaf requirements", common.ErrInvalidArgument)
+	}
+	satisfied, ok := coverage["satisfied"].(bool)
+	if !ok {
+		return nil, fmt.Errorf("%w: dodAssessment.goalCoverage.satisfied is required", common.ErrInvalidArgument)
+	}
+	if !satisfied {
+		return nil, fmt.Errorf("%w: dodAssessment.goalCoverage is not satisfied", common.ErrInvalidArgument)
+	}
+	items, ok := doDAssessmentItemMaps(coverage["items"])
+	if !ok || len(items) == 0 {
+		return nil, fmt.Errorf("%w: dodAssessment.goalCoverage.items are required", common.ErrInvalidArgument)
+	}
+	ret := make([]string, 0, len(items))
+	for _, item := range items {
+		name := strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(item, "goal"),
+			stringFromMap(item, "goalItem"),
+			stringFromMap(item, "item"),
+			stringFromMap(item, "requirement"),
+		))
+		state := strings.ToLower(strings.TrimSpace(stringFromMap(item, "state")))
+		if name == "" || state == "" {
+			return nil, fmt.Errorf("%w: dodAssessment.goalCoverage item and state are required", common.ErrInvalidArgument)
+		}
+		if state != "satisfied" {
+			return nil, fmt.Errorf("%w: dodAssessment.goalCoverage contains unsatisfied item %q", common.ErrInvalidArgument, name)
+		}
+		if len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 {
+			return nil, fmt.Errorf("%w: satisfied dodAssessment.goalCoverage item requires evidenceRefs", common.ErrInvalidArgument)
+		}
+		if normalized := normalizeDoDCoverageText(name); normalized != "" {
+			ret = append(ret, normalized)
+		}
+	}
+	return ret, nil
+}
+
+func validateDoDAssessmentCoversRequiredProfileDimensions(run *runModel.Run, assessment map[string]any) error {
+	required := requiredProfileAcceptanceDimensions(run)
+	if len(required) == 0 {
+		return nil
+	}
+	items := acceptanceDimensionItemsFromAssessment(assessment)
+	covered := map[string]bool{}
+	for _, item := range items {
+		id := strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(item, "id"),
+			stringFromMap(item, "dimension"),
+			stringFromMap(item, "key"),
+			stringFromMap(item, "name"),
+		))
+		if id == "" {
+			continue
+		}
+		state := strings.ToLower(strings.TrimSpace(stringFromMap(item, "state")))
+		if state != "satisfied" {
+			continue
+		}
+		if len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 {
+			return fmt.Errorf("%w: satisfied dodAssessment.acceptanceDimensions item %q requires evidenceRefs", common.ErrInvalidArgument, id)
+		}
+		covered[id] = true
+	}
+	missing := make([]string, 0)
+	for _, id := range required {
+		if !covered[id] {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: dodAssessment.acceptanceDimensions missing required dimensions: %s", common.ErrInvalidArgument, strings.Join(missing, ", "))
+}
+
+func requiredProfileAcceptanceDimensions(run *runModel.Run) []string {
+	if run == nil || len(run.ExecutionContext) == 0 {
+		return nil
+	}
+	executionContract := mapFromValue(run.ExecutionContext["executionContract"])
+	profileContracts := mapFromValue(executionContract["profileContracts"])
+	if len(profileContracts) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := make([]string, 0)
+	for _, rawProfile := range profileContracts {
+		profile := mapFromValue(rawProfile)
+		if len(profile) == 0 {
+			continue
+		}
+		for _, item := range mapSliceFromValue(profile["acceptanceDimensions"]) {
+			id := strings.TrimSpace(stringFromMap(item, "id"))
+			if id == "" || seen[id] || !boolValue(item["required"]) {
+				continue
+			}
+			seen[id] = true
+			ret = append(ret, id)
+		}
+	}
+	return ret
+}
+
+func acceptanceDimensionItemsFromAssessment(assessment map[string]any) []map[string]any {
+	if assessment == nil {
+		return nil
+	}
+	for _, key := range []string{"acceptanceDimensions", "dimensionCoverage"} {
+		value := assessment[key]
+		if mapped := mapFromValue(value); len(mapped) > 0 {
+			if items := mapSliceFromValue(mapped["items"]); len(items) > 0 {
+				return items
+			}
+		}
+		if items := mapSliceFromValue(value); len(items) > 0 {
+			return items
+		}
+	}
+	return nil
+}
+
+func validateDoDAssessmentCoversRequiredDeliverables(run *runModel.Run, assessment map[string]any) error {
+	required := requiredProfileDeliverableExpectations(run)
+	if len(required) == 0 {
+		return nil
+	}
+	items := deliverableCoverageItemsFromAssessment(assessment)
+	covered := map[string]bool{}
+	for _, item := range items {
+		id := strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(item, "id"),
+			stringFromMap(item, "deliverable"),
+			stringFromMap(item, "name"),
+			stringFromMap(item, "path"),
+		))
+		if id == "" {
+			continue
+		}
+		state := strings.ToLower(strings.TrimSpace(stringFromMap(item, "state")))
+		if state != "satisfied" && state != "available" && state != "produced" {
+			continue
+		}
+		if len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 && len(stringSliceFromValue(item["artifactRefs"])) == 0 {
+			return fmt.Errorf("%w: satisfied dodAssessment.deliverableCoverage item %q requires evidenceRefs or artifactRefs", common.ErrInvalidArgument, id)
+		}
+		covered[id] = true
+	}
+	missing := make([]string, 0)
+	for _, id := range required {
+		if !covered[id] {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: dodAssessment.deliverableCoverage missing required deliverables: %s", common.ErrInvalidArgument, strings.Join(missing, ", "))
+}
+
+func requiredProfileDeliverableExpectations(run *runModel.Run) []string {
+	if run == nil || len(run.ExecutionContext) == 0 {
+		return nil
+	}
+	executionContract := mapFromValue(run.ExecutionContext["executionContract"])
+	profileContracts := mapFromValue(executionContract["profileContracts"])
+	if len(profileContracts) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := make([]string, 0)
+	for _, rawProfile := range profileContracts {
+		profile := mapFromValue(rawProfile)
+		if len(profile) == 0 {
+			continue
+		}
+		for _, item := range mapSliceFromValue(profile["deliverableExpectations"]) {
+			id := strings.TrimSpace(stringFromMap(item, "id"))
+			if id == "" || seen[id] || !boolValue(item["required"]) {
+				continue
+			}
+			seen[id] = true
+			ret = append(ret, id)
+		}
+	}
+	return ret
+}
+
+func deliverableCoverageItemsFromAssessment(assessment map[string]any) []map[string]any {
+	if assessment == nil {
+		return nil
+	}
+	for _, key := range []string{"deliverableCoverage", "deliverables", "producedArtifacts"} {
+		value := assessment[key]
+		if mapped := mapFromValue(value); len(mapped) > 0 {
+			if items := mapSliceFromValue(mapped["items"]); len(items) > 0 {
+				return items
+			}
+		}
+		if items := mapSliceFromValue(value); len(items) > 0 {
+			return items
+		}
+	}
+	return nil
 }
 
 func normalizedSatisfiedAssessmentCoverageItems(assessment map[string]any) []string {
