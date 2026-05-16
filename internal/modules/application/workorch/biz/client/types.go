@@ -650,6 +650,7 @@ type ServiceConfiguration struct {
 	} `json:"repository"`
 	Runtime struct {
 		DefaultSoulID            string `json:"defaultSoulId,omitempty"`
+		MaxRuntimeRepairAttempts int    `json:"maxRuntimeRepairAttempts"`
 		MaxProviderRetryAttempts int    `json:"maxProviderRetryAttempts"`
 	} `json:"runtime"`
 	LLM struct {

@@ -362,12 +362,20 @@ Repair 不是重新探索。Repair 必须继承来源阶段的约束，并根据
 | `verification` | 必须补 evidence、解释 weak evidence 或转 rejected |
 | `acceptance` | 必须补 DoD coverage / result，不得新增实现 |
 
+Runtime repair 预算必须来自 runtime 配置，默认 `maxRuntimeRepairAttempts=10`；不得在 core runtime 分支中写死固定次数。repair 输入、repair exhausted ticket、auto-resume / auto-replan 判断、duplicate failure 判断和 `repairActionPackage.maxRuntimeRepairAttempts` 必须使用同一份归一化预算。Provider retry 预算与 runtime repair 预算互相独立，provider retry 不得消费 runtime repair 次数。
+
+State-changing repair 必须满足目标相关性约束。若 repair 输入已经包含 `failureTargetScope`、`failureTargetRepairContext`、`patchRepairContext`、`repairActionPackage.targetSnapshots` 或等价的显式 `targetRef`，则 `patch/apply` 只有在目标属于这些失败目标、当前目标快照或明确 repair 目标时，才算有效 state-changing artifact。写入无关 marker、空转文件、报告文件或与失败目标无关的 no-op patch，不得满足 state-changing repair 合同；runtime 必须将其作为 contract violation 重新进入 repair / blocker / rejected 治理。
+
+该约束属于 core runtime 的中立合同，只比较结构化目标引用、target snapshot 和 capability input，不解释文件类型、测试框架、编程语言或业务正确性。Core 可以判断“patch target 与失败目标不相关”，但不能判断“某个业务文件应如何修改”。当没有任何显式目标引用时，runtime 不得臆造目标；此时只能依赖 capability contract、LLM 输出和后续 evidence 判断。
+
+Shell / tool 调用不得被用来隐藏实际目标变更，再通过一个无关 `patch/apply` marker 来满足 state-changing 合同。若某个 capability 本身是声明过的 state-changing artifact，必须由该 capability 的输入、输出和 evidence 直接表达目标关系；否则修复应使用目标相关的 `patch/apply`、返回 failed assessment，或进入 blocker。
+
 当 run 级 `stateChangePolicy=must_produce_state_change` 且失败输出包含 `missingDoDItems` 时，runtime repair 必须先区分中立缺口类型：
 
 - `implementation_gap`：已有 evidence 表明实现缺失、实现错误、artifact 无法应用或非只读执行失败，repair 必须显式携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。后续 provider retry 也必须继承该约束，不能把实现缺口修复降级为只读 exploration graph。
 - `evidence_gap`：verification 阶段只证明“缺少 concrete evidence / 未执行验证 / evidence 不足”，但尚未形成实现错误诊断时，repair 应携带 `repairObjective=produce_concrete_validation_evidence`，允许受限 tool / shell / mcp 验证图生成证据；若该验证图后续产生确定性失败，再由新的失败证据触发 state-changing repair。
 
-当 patch / preview / apply 因 context mismatch、base mismatch 或 stale artifact 失败时，默认 repair 仍要求基于当前 target snapshot 重新生成可应用 state-changing artifact。但完整 `file_write` 只允许建立在完整、未脱敏、未截断且标记为 `safeForFileWrite` 的当前快照上；若 repair context 中的内容包含 `[REDACTED]` / `[SECRET]` / `[MASKED]`、省略片段或截断标记，LLM 不得把该内容复制进 patch content / diff，而应先读取目标、使用 exact oldText 的最小替换，或基于可见上下文生成最小 `unified_diff`。`baseHash` 只能省略或使用当前 evidence 中的字面 `contentHash` 值；不得输出 `${...}`、`{{...}}`、`<<...>>` 或其他未解析占位符。`unified_diff` 的 hunk header 必须是可解析的真实行号范围，`@@ ... @@` 等伪 hunk 属于无效 artifact。
+当 patch / preview / apply 因 context mismatch、base mismatch 或 stale artifact 失败，或 `file/edit` 因 `oldText` 不存在、上下文冲突失败时，默认 repair 仍要求基于当前 target snapshot 重新生成可应用 state-changing artifact。runtime 必须把失败目标的当前快照放入 `patchRepairContext` / `repairActionPackage.targetSnapshots`，并明确失败 patch / edit 片段已经陈旧，不能重复使用同一 hunk、oldText 或未解析模板。完整 `file_write` 只允许建立在完整、未脱敏、未截断且标记为 `safeForFileWrite` 的当前快照上；若 repair context 中的内容包含 `[REDACTED]` / `[SECRET]` / `[MASKED]`、省略片段或截断标记，LLM 不得把该内容复制进 patch content / diff，而应先读取目标、使用 exact oldText 的最小替换，或基于可见上下文生成最小 `unified_diff`。`baseHash` 只能省略或使用当前 evidence 中的字面 `contentHash` 值；不得输出 `${...}`、`{{...}}`、`<<...>>` 或其他未解析占位符。`unified_diff` 的 hunk header 必须是可解析的真实行号范围，`@@ ... @@` 等伪 hunk 属于无效 artifact。
 
 Runtime 可以从失败 diff 与当前 target snapshot 中抽取中立的 `patchRepairSuggestions`，例如“某个 oldText 在当前目标中唯一匹配，可替换为 newText”。该建议只来源于失败 artifact 与当前资源内容的机械对齐，不包含业务语义；它用于帮助 LLM 生成更小、更精确、可审计的 repair artifact，避免重复输出行号漂移、上下文过期或依赖脱敏快照的 patch。
 

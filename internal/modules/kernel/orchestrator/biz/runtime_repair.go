@@ -362,7 +362,7 @@ func (o *RuntimeOrchestrator) shouldEscalateRuntimeRepairExhaustion(ctx context.
 	if !requiresDoDAssessmentCompletionGate(run) || isLLMProviderRuntimeFailure(run, failedStep) {
 		return false
 	}
-	return o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= maxRuntimeRepairAttempts
+	return o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= o.maxRuntimeRepairAttempts()
 }
 
 func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
@@ -375,7 +375,8 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		return common.ErrInvalidArgument
 	}
 	language := runDialogLanguage(run)
-	reason := localizedRuntimeRepairExhaustionReason(language, maxRuntimeRepairAttempts, execErr)
+	maxAttempts := o.maxRuntimeRepairAttempts()
+	reason := localizedRuntimeRepairExhaustionReason(language, maxAttempts, execErr)
 	spec := runtimeDecisionBlockSpec{
 		TicketID:     common.TicketID(runtimeChildID(failedStep.ID, "repair-exhausted-decision")),
 		Reason:       reason,
@@ -386,7 +387,7 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 			decisionContextKeyResultPolicy:   decisionContextResultPolicyRejected,
 			"allowedRecoveryActions":         []string{"retry_same_step", "replan", "provide_information", "terminate"},
 			"attempts":                       o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep),
-			"maxAttempts":                    maxRuntimeRepairAttempts,
+			"maxAttempts":                    maxAttempts,
 			"failureClass":                   stringFromMap(failedStep.Output, failureOutputKeyClass),
 			"failureSignature":               stringFromMap(failedStep.Output, failureOutputKeySignature),
 			"failureTargetScope":             runtimeFailureTargetScopeFromStep(failedStep),
@@ -396,7 +397,7 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 			"failedStepInput":                compactStepInputForLLMContext(failedStep.Input),
 			"failedStepOutput":               compactStepOutputForLLMContext(failedStep.Output),
 			"missingDoDItems":                missingDoDItemsFromFailureOutput(failedStep.Output),
-			"recentRepairAttempts":           o.recentRuntimeRepairAttemptSummaries(ctx, run.ID, failedStep, maxRuntimeRepairAttempts),
+			"recentRepairAttempts":           o.recentRuntimeRepairAttemptSummaries(ctx, run.ID, failedStep, maxAttempts),
 			"recommendedNextActions": []string{
 				"Map each missing DoD item to concrete affected files, patch operations, and verification commands.",
 				"Prioritize minimal implementation and test updates, then rerun targeted verification.",
@@ -423,7 +424,7 @@ func (o *RuntimeOrchestrator) shouldAttemptRuntimeRepair(ctx context.Context, ru
 	if terminalAssessmentOnlyDecisionContractFailure(failedStep) {
 		return false
 	}
-	if o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= maxRuntimeRepairAttempts {
+	if o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= o.maxRuntimeRepairAttempts() {
 		return false
 	}
 	return !isLLMProviderRuntimeFailure(run, failedStep)
@@ -872,7 +873,7 @@ func (o *RuntimeOrchestrator) duplicateRuntimeFailureBlockerCanAutoResume(ctx co
 		return false
 	}
 	attempts := o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep)
-	return attempts > 0 && attempts < maxRuntimeRepairAttempts
+	return attempts > 0 && attempts < o.maxRuntimeRepairAttempts()
 }
 
 func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerCanAutoResume(ctx context.Context, run *runModel.Run, ticket *decisionmodel.Ticket) bool {
@@ -888,7 +889,7 @@ func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerCanAutoResume(ctx co
 	if !strings.HasSuffix(string(ticket.ID), "repair-exhausted-decision") {
 		return false
 	}
-	if attempts, ok := ticket.Context["attempts"]; !ok || intFromAny(attempts) < maxRuntimeRepairAttempts {
+	if attempts, ok := ticket.Context["attempts"]; !ok || intFromAny(attempts) < o.maxRuntimeRepairAttempts() {
 		return false
 	}
 	failedStep, err := o.steps.Get(ctx, ticket.StepID)
@@ -908,7 +909,7 @@ func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerCanAutoResume(ctx co
 			return false
 		}
 	}
-	return o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) < maxRuntimeRepairAttempts
+	return o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) < o.maxRuntimeRepairAttempts()
 }
 
 func (o *RuntimeOrchestrator) knownReadableDecisionBlockerCanAutoRepair(ctx context.Context, run *runModel.Run, ticket *decisionmodel.Ticket) bool {
@@ -1693,7 +1694,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	setRuntimeStage(input, runtimeStageRepair)
 	input[stepInputKeyRuntimeRepairFollowUp] = true
 	input[stepInputKeyRuntimeRepairAttempt] = attempt
-	input["maxRuntimeRepairAttempts"] = maxRuntimeRepairAttempts
+	input["maxRuntimeRepairAttempts"] = o.maxRuntimeRepairAttempts()
 	if execErr != nil {
 		input["failureReason"] = execErr.Error()
 	}
@@ -1817,6 +1818,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		}
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Use patchRepairContext as the current target snapshot for patch repair; treat the failed patch text as stale or untrusted.",
+			"When the failure is a diff context mismatch or file/edit oldText conflict, do not retry the same stale hunk or oldText; rebuild the smallest patch from patchRepairContext.content/contentHash.",
 			"When using baseHash, copy the literal contentHash value from the current target snapshot; never output unresolved references such as ${...}, {{...}}, or symbolic placeholders.",
 			"Use complete patch/apply file_write only when the current snapshot is marked safeForFileWrite/contentComplete and contains no redaction markers; otherwise use a minimal unified_diff with exact visible context, file/edit with exact oldText, or first read the target.",
 			"Never copy [REDACTED], [SECRET], [MASKED], omitted sections, or truncated snapshot text into patch/apply content or diff.",
@@ -1897,6 +1899,7 @@ func stateChangingRepairGuidance() []string {
 		"When changing an existing target file, prefer the smallest unified_diff or exact replacement over file_write; use file_write primarily to create missing targets or replace a known full file snapshot intentionally.",
 		"Do not use shell/command to modify workspace files when a patch/apply state-change artifact can represent the change; use shell/command for bounded preparation or verification after the patch.",
 		"When failedStepOutput identifies concrete target resources, treat those target snapshots as authoritative and repair the target directly instead of changing unrelated prerequisite metadata.",
+		"When repair target snapshots or failure target scope are present, patch/apply must target that failure scope or current repair snapshot; unrelated marker/no-op patches are invalid.",
 		"When a workspace already contains known resources, reconcile the repair with those existing resources and prefer the smallest coherent state change over broad replacement.",
 		"When repair context contains redacted or truncated content, do not copy it into patch/apply; first read the target or produce a minimal exact diff from visible current evidence.",
 		"Do not return self-inspection, run snapshot, observability, or context rehydration graphs when effective Goal and DoD are already present.",
@@ -1963,18 +1966,19 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	if len(input) == 0 {
 		return nil
 	}
-	pkg := map[string]any{
-		"requiredOutput": map[string]any{
-			"mustIncludeStateChangingNode": true,
-			"acceptedKinds":                []string{"patch/apply"},
-			"forbiddenKinds": []string{
-				"read_only_graph",
-				"shell_only_graph",
-				"llm_gated_graph",
-				"self_inspection_graph",
-				"context_rehydration_graph",
-			},
+	requiredOutput := map[string]any{
+		"mustIncludeStateChangingNode": true,
+		"acceptedKinds":                []string{"patch/apply"},
+		"forbiddenKinds": []string{
+			"read_only_graph",
+			"shell_only_graph",
+			"llm_gated_graph",
+			"self_inspection_graph",
+			"context_rehydration_graph",
 		},
+	}
+	pkg := map[string]any{
+		"requiredOutput": requiredOutput,
 	}
 	for _, key := range []string{
 		failureOutputKeyClass,
@@ -1998,6 +2002,10 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	}
 	if targets := repairActionTargetSnapshots(input); len(targets) > 0 {
 		pkg["targetSnapshots"] = targets
+		requiredOutput["mustTargetFailureScope"] = true
+		requiredOutput["targetRelation"] = "failure_target_or_repair_snapshot"
+		requiredOutput["mustUseCurrentTargetSnapshot"] = true
+		requiredOutput["forbiddenStalePatchReuse"] = true
 	}
 	if manifest := repairActionWorkspaceManifest(input); len(manifest) > 0 {
 		pkg["workspaceFileManifest"] = manifest
@@ -2265,6 +2273,8 @@ func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, e
 		"patch content is required",
 		"patch diff is required",
 		"patch_dispatch_invalid",
+		"file_edit_conflict",
+		"file/edit oldtext not found",
 	} {
 		if strings.Contains(text, marker) {
 			return true
@@ -2569,10 +2579,13 @@ func shouldIncludePatchRepairContext(step *runModel.Step) bool {
 		return false
 	}
 	switch strings.TrimSpace(step.Kind) {
-	case "patch/preview", "patch/apply":
+	case "patch/preview", "patch/apply", "file/edit":
 		return true
 	}
 	if strings.HasPrefix(strings.TrimSpace(stringFromMap(step.Output, "stage")), "patch_") {
+		return true
+	}
+	if strings.HasPrefix(strings.TrimSpace(stringFromMap(step.Output, "stage")), "file_edit") {
 		return true
 	}
 	if strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)) == failureClassPatchApply {
@@ -2584,7 +2597,7 @@ func shouldIncludePatchRepairContext(step *runModel.Step) bool {
 	}
 	failedInput := mapFromValue(step.Output["failedStepInput"])
 	switch strings.TrimSpace(stringFromMap(failedInput, "kind")) {
-	case "patch/preview", "patch/apply":
+	case "patch/preview", "patch/apply", "file/edit":
 		return true
 	}
 	return false
@@ -2605,7 +2618,9 @@ func patchRepairTargetRefs(step *runModel.Step) []string {
 	}
 	var ret []string
 	ret = append(ret, add(stringFromMap(step.Input, "targetRef"))...)
+	ret = append(ret, add(stringFromMap(step.Input, "path"))...)
 	ret = append(ret, add(stringFromMap(step.Output, "targetRef"))...)
+	ret = append(ret, add(stringFromMap(step.Output, "path"))...)
 	if patches := mapSliceFromValue(step.Output["patches"]); len(patches) > 0 {
 		for _, patch := range patches {
 			ret = append(ret, add(stringFromMap(patch, "targetRef"))...)
@@ -2613,9 +2628,11 @@ func patchRepairTargetRefs(step *runModel.Step) []string {
 	}
 	if failedInput := mapFromValue(step.Output["failedStepInput"]); len(failedInput) > 0 {
 		ret = append(ret, add(stringFromMap(failedInput, "targetRef"))...)
+		ret = append(ret, add(stringFromMap(failedInput, "path"))...)
 	}
 	if failedOutput := mapFromValue(step.Output["failedStepOutput"]); len(failedOutput) > 0 {
 		ret = append(ret, add(stringFromMap(failedOutput, "targetRef"))...)
+		ret = append(ret, add(stringFromMap(failedOutput, "path"))...)
 		if patches := mapSliceFromValue(failedOutput["patches"]); len(patches) > 0 {
 			for _, patch := range patches {
 				ret = append(ret, add(stringFromMap(patch, "targetRef"))...)

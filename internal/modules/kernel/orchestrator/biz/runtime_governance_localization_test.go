@@ -38,7 +38,7 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionUsesDialogLanguage(t *testin
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	for attempt := 1; attempt <= maxRuntimeRepairAttempts; attempt++ {
+	for attempt := 1; attempt <= defaultMaxRuntimeRepairAttempts; attempt++ {
 		stepID := common.StepID(fmt.Sprintf("%s/seed-repair-%d", runID, attempt))
 		if err := stepRepo.Create(ctx, &runmodel.Step{
 			ID:    stepID,

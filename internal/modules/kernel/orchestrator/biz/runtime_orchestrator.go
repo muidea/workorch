@@ -74,12 +74,13 @@ const (
 	soulStageDecision                  = "decision"
 	soulStageApproval                  = "approval"
 	soulStageValidation                = "validation"
-	maxRuntimeRepairAttempts           = 3
+	defaultMaxRuntimeRepairAttempts    = 10
 	maxProviderRetryAttempts           = 10
 	maxGraphFollowUpExpansionAttempts  = 2
 )
 
 type RuntimePolicy struct {
+	MaxRuntimeRepairAttempts int
 	MaxProviderRetryAttempts int
 }
 
@@ -183,10 +184,20 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 }
 
 func NormalizeRuntimePolicy(policy RuntimePolicy) RuntimePolicy {
+	if policy.MaxRuntimeRepairAttempts <= 0 {
+		policy.MaxRuntimeRepairAttempts = defaultMaxRuntimeRepairAttempts
+	}
 	if policy.MaxProviderRetryAttempts <= 0 {
 		policy.MaxProviderRetryAttempts = maxProviderRetryAttempts
 	}
 	return policy
+}
+
+func (o *RuntimeOrchestrator) maxRuntimeRepairAttempts() int {
+	if o == nil || o.policy.MaxRuntimeRepairAttempts <= 0 {
+		return defaultMaxRuntimeRepairAttempts
+	}
+	return o.policy.MaxRuntimeRepairAttempts
 }
 
 func (o *RuntimeOrchestrator) maxProviderRetryAttempts() int {
@@ -1191,6 +1202,9 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, result.Output, "runtime step failed", err)
 	}
 	output := result.Output
+	if err := validateRepairPatchOutputTargetRelevance(step, output); err != nil {
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch output contract failed", err)
+	}
 	if err := o.publishPatchPreviewFromOutput(ctx, run, step, toolCall, output); err != nil {
 		return err
 	}
@@ -1426,6 +1440,9 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	if err := validateLLMExecutionGraphOutputContract(step, output); err != nil {
 		return err
 	}
+	if err := validateLLMNextStepPatchTargetRelevance(step, output); err != nil {
+		return err
+	}
 	if err := validateLLMSoulGraphCapabilityContract(run, step, output); err != nil {
 		return err
 	}
@@ -1579,18 +1596,40 @@ func validateLLMExecutionGraphOutputContract(step *runModel.Step, output map[str
 		return nil
 	}
 	for _, node := range graph.Nodes {
-		switch strings.TrimSpace(node.Kind) {
+		kind := strings.TrimSpace(node.Kind)
+		switch kind {
 		case "patch/preview", "patch/apply":
 			request, err := runtimePatchRequestFromMap(node.Input)
 			if err != nil {
-				return fmt.Errorf("%w: executionGraph %s input invalid: %v", common.ErrInvalidArgument, strings.TrimSpace(node.Kind), err)
+				return fmt.Errorf("%w: executionGraph %s input invalid: %v", common.ErrInvalidArgument, kind, err)
 			}
 			if err := validateRepairPatchRequestGranularity(step, request); err != nil {
 				return err
 			}
+			if kind == "patch/apply" {
+				if err := validateRepairPatchTargetRelevance(step, request); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
+}
+
+func validateLLMNextStepPatchTargetRelevance(step *runModel.Step, output map[string]any) error {
+	if !repairPatchTargetRelevanceRequired(step) {
+		return nil
+	}
+	_, nextKind := nextStepSpec(output)
+	if strings.TrimSpace(nextKind) != "patch/apply" {
+		return nil
+	}
+	nextInput := mapFromValue(output[stepOutputKeyNextInput])
+	request, err := runtimePatchRequestFromMap(nextInput)
+	if err != nil {
+		return fmt.Errorf("%w: nextStep patch/apply input invalid: %v", common.ErrInvalidArgument, err)
+	}
+	return validateRepairPatchTargetRelevance(step, request)
 }
 
 func validateRepairPatchRequestGranularity(step *runModel.Step, request runtimePatchRequest) error {
@@ -1618,6 +1657,159 @@ func validateRepairPatchRequestGranularity(step *runModel.Step, request runtimeP
 		return fmt.Errorf("%w: runtime repair patch/apply file_write cannot replace existing target %q when current repair context is available; use a minimal unified_diff or exact replacement against the current snapshot", common.ErrInvalidArgument, request.TargetRef)
 	}
 	return nil
+}
+
+func validateRepairPatchOutputTargetRelevance(step *runModel.Step, output map[string]any) error {
+	if !repairPatchTargetRelevanceRequired(step) {
+		return nil
+	}
+	requests, err := runtimePatchRequests(output)
+	if err != nil {
+		return err
+	}
+	for _, request := range requests {
+		if err := validateRepairPatchTargetRelevance(step, request); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRepairPatchTargetRelevance(step *runModel.Step, request runtimePatchRequest) error {
+	if !repairPatchTargetRelevanceRequired(step) {
+		return nil
+	}
+	targetRefs := repairPatchRelevantTargetRefs(step)
+	if len(targetRefs) == 0 {
+		return nil
+	}
+	if repairPatchTargetRefMatches(request.TargetRef, targetRefs) {
+		return nil
+	}
+	return fmt.Errorf("%w: runtime repair patch/apply target %q is not related to failure target scope %v; patch a current failure target or return a failed assessment/blocker", common.ErrInvalidArgument, request.TargetRef, limitedStrings(targetRefs, 5))
+}
+
+func repairPatchTargetRelevanceRequired(step *runModel.Step) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	return boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) &&
+		boolValue(step.Input["stateChangingOutputRequired"]) &&
+		repairObjectiveRequiresStateChange(stringFromMap(step.Input, "repairObjective"))
+}
+
+func repairPatchRelevantTargetRefs(step *runModel.Step) []string {
+	if step == nil || step.Input == nil {
+		return nil
+	}
+	return repairPatchRelevantTargetRefsFromInput(step.Input)
+}
+
+func repairPatchRelevantTargetRefsFromInput(input map[string]any) []string {
+	if len(input) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ret []string
+	add := func(value string) {
+		value = normalizeRepairPatchTargetRef(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	addFromItems := func(items []map[string]any) {
+		for _, item := range items {
+			add(stringFromMap(item, "targetRef"))
+		}
+	}
+	addFromScopeText := func(value string) {
+		for _, targetRef := range repairPatchTargetRefsFromScopeText(value) {
+			add(targetRef)
+		}
+	}
+
+	add(stringFromMap(input, "targetRef"))
+	addFromItems(mapSliceFromValue(input["failureTargetRepairContext"]))
+	addFromItems(mapSliceFromValue(input["patchRepairContext"]))
+
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	addFromItems(mapSliceFromValue(actionPackage["targetSnapshots"]))
+	for _, key := range []string{"failureTargetScope", failureOutputKeySignature, stepInputKeyRepairOfFailureSig} {
+		addFromScopeText(stringFromMap(input, key))
+		addFromScopeText(stringFromMap(actionPackage, key))
+	}
+	for _, nestedKey := range []string{"failedStepInput", "failedStepOutput", "previousStepOutput"} {
+		nested := mapFromValue(input[nestedKey])
+		add(stringFromMap(nested, "targetRef"))
+		for _, key := range []string{"failureTargetScope", failureOutputKeySignature, stepInputKeyRepairOfFailureSig} {
+			addFromScopeText(stringFromMap(nested, key))
+		}
+	}
+	return ret
+}
+
+func repairPatchTargetRefsFromScopeText(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ret []string
+	add := func(value string) {
+		value = normalizeRepairPatchTargetRef(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	for _, segment := range strings.Split(value, "|") {
+		key, raw, ok := strings.Cut(segment, "=")
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "failuretargets", "targetref", "conflictref":
+			for _, item := range strings.Split(raw, ",") {
+				add(item)
+			}
+		}
+	}
+	return ret
+}
+
+func repairPatchTargetRefMatches(targetRef string, allowed []string) bool {
+	targetRef = normalizeRepairPatchTargetRef(targetRef)
+	if targetRef == "" {
+		return false
+	}
+	for _, candidate := range allowed {
+		candidate = normalizeRepairPatchTargetRef(candidate)
+		if candidate == "" {
+			continue
+		}
+		if targetRef == candidate || strings.HasSuffix(targetRef, "/"+candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeRepairPatchTargetRef(value string) string {
+	value = strings.TrimSpace(strings.Trim(value, `"'()[]{}<>`))
+	value = strings.ReplaceAll(value, `\`, `/`)
+	value = strings.TrimPrefix(value, "./")
+	if value == "" {
+		return ""
+	}
+	value = filepath.ToSlash(filepath.Clean(value))
+	value = strings.TrimPrefix(value, "./")
+	if value == "." {
+		return ""
+	}
+	return value
 }
 
 func repairPatchContextItems(step *runModel.Step) []map[string]any {

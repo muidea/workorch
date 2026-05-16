@@ -38,7 +38,10 @@ func NewFromEnv() *Runtime {
 	return newWithBackendRuntimePolicyAndEventHub(
 		cfg.Repository.Backend,
 		cfg.Repository.DataDir,
-		orchestratorbiz.RuntimePolicy{MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts},
+		orchestratorbiz.RuntimePolicy{
+			MaxRuntimeRepairAttempts: cfg.Runtime.MaxRuntimeRepairAttempts,
+			MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts,
+		},
 		nil,
 	)
 }

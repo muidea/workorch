@@ -34,7 +34,7 @@
 2. **终态不可逆** — `canCloseRunAs` 只允许从非终态关闭
 3. **superseded 后禁止派发** — `nextDispatchSpecs` 在 `isTerminalRunState` 时返回 conflict
 4. **Recovery 优先级链** — provider retry → exhausted block → repair exhausted block → duplicate block → repair → fail
-5. **Provider retry 约束** — 仅 transient failure（timeout/context_too_large/rate_limited）、root normalization、budget=2
+5. **Provider retry 约束** — 仅 transient failure（timeout/context_too_large/rate_limited）、root normalization、budget 来自 runtime 配置（默认 10）
 6. **Contract failure 不进入 provider retry** — `isLLMDecisionContractFailureStage` 的 stage 不在 provider failure 列表中
 7. **Runtime repair scope 隔离** — 按 root step + failure class + failure signature 归一
 8. **State-changing repair 继承** — repair-of-repair 继承 `stateChangingOutputRequired`
@@ -105,8 +105,8 @@
 
 ### 4.1 设计与实现一致的规则（22 条）
 
-1. Provider retry 预算为有限次数 — `maxProviderRetryAttempts = 2`
-2. Runtime repair 预算为有限次数 — `maxRuntimeRepairAttempts = 3`
+1. Provider retry 预算为有限次数 — `runtime.maxProviderRetryAttempts`，默认 `10`
+2. Runtime repair 预算为有限次数 — `runtime.maxRuntimeRepairAttempts`，默认 `10`
 3. Provider retry 仅对可重试 LLM 故障生效（timeout/context_too_large/rate_limited）
 4. Provider retry 耗尽后创建 Decision block（`recoveryPolicy=system_config_required`、`dependency=llm_provider`）
 5. Runtime repair 耗尽后创建 Decision block（`recoveryPolicy=runtime_repair_exhausted_requires_strategy`）
@@ -132,7 +132,7 @@
 
 | # | 问题 | 建议 |
 |---|------|------|
-| 1 | 文档只说"有限预算"，未写明 `maxProviderRetryAttempts=2` / `maxRuntimeRepairAttempts=3` | 在 Recovery Model 节补充预算数值 |
+| 1 | 文档只说"有限预算"，未写明 `runtime.maxProviderRetryAttempts` / `runtime.maxRuntimeRepairAttempts` 的配置来源与默认值 | 在 Recovery Model 节补充预算配置来源和默认值 |
 | 2 | 文档未提及 duplicate failure signature 机制 | 补充为独立小节 |
 | 3 | 文档未说明 auto-governance run-level budget 的具体实现 | 补充 budget 计算规则 |
 

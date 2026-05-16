@@ -43,6 +43,7 @@ type RepositoryConfig struct {
 
 type RuntimeConfig struct {
 	DefaultSoulID            string `json:"defaultSoulId" toml:"defaultSoulId"`
+	MaxRuntimeRepairAttempts int    `json:"maxRuntimeRepairAttempts" toml:"maxRuntimeRepairAttempts"`
 	MaxProviderRetryAttempts int    `json:"maxProviderRetryAttempts" toml:"maxProviderRetryAttempts"`
 	ShellCommandTimeout      string `json:"shellCommandTimeout" toml:"shellCommandTimeout"`
 }

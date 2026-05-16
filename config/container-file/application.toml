@@ -15,6 +15,7 @@ dataDir = "/var/lib/workorch"
 
 [runtime]
 defaultSoulId = ""
+maxRuntimeRepairAttempts = 10
 maxProviderRetryAttempts = 10
 shellCommandTimeout = "60s"
 

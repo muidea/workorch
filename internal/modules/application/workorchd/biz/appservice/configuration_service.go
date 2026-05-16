@@ -42,6 +42,7 @@ type RepositoryConfiguration struct {
 
 type RuntimeConfiguration struct {
 	DefaultSoulID            string `json:"defaultSoulId,omitempty"`
+	MaxRuntimeRepairAttempts int    `json:"maxRuntimeRepairAttempts"`
 	MaxProviderRetryAttempts int    `json:"maxProviderRetryAttempts"`
 	ShellCommandTimeout      string `json:"shellCommandTimeout"`
 }
@@ -257,6 +258,7 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 		},
 		Runtime: RuntimeConfiguration{
 			DefaultSoulID:            strings.TrimSpace(cfg.Runtime.DefaultSoulID),
+			MaxRuntimeRepairAttempts: orchestratorbiz.NormalizeRuntimePolicy(orchestratorbiz.RuntimePolicy{MaxRuntimeRepairAttempts: cfg.Runtime.MaxRuntimeRepairAttempts}).MaxRuntimeRepairAttempts,
 			MaxProviderRetryAttempts: orchestratorbiz.NormalizeRuntimePolicy(orchestratorbiz.RuntimePolicy{MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts}).MaxProviderRetryAttempts,
 			ShellCommandTimeout:      runtimeShellCommandTimeout(cfg.Runtime.ShellCommandTimeout),
 		},

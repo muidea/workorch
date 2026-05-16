@@ -29,6 +29,9 @@ export type RepositoryConfiguration = {
 
 export type RuntimeConfiguration = {
   defaultSoulId?: string;
+  maxRuntimeRepairAttempts?: number;
+  maxProviderRetryAttempts?: number;
+  shellCommandTimeout?: string;
 };
 
 export type LLMConfiguration = {

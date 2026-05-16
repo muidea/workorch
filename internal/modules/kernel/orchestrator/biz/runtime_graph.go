@@ -1024,7 +1024,7 @@ func graphFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]a
 }
 
 func (o *RuntimeOrchestrator) completedGraphEvidence(ctx context.Context, run *runModel.Run, anchor *runModel.Step) []map[string]any {
-	if o == nil || run == nil || anchor == nil {
+	if o == nil || o.steps == nil || run == nil || anchor == nil {
 		return nil
 	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)

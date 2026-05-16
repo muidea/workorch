@@ -242,7 +242,7 @@ type RuntimeAdapter interface {
 | `mcp_capability_denied` | MCP 能力被拒绝 |
 | `mcp_runtime_failed` | MCP 运行时失败 |
 
-重复相同失败达到阈值（maxRuntimeRepairAttempts = 3）时触发 Decision 阻塞。
+重复相同失败达到 runtime 配置阈值（默认 `maxRuntimeRepairAttempts = 10`）时触发 Decision 阻塞。
 
 **已注册的 Step Kind**：
 - `llm/workspace_execution`（默认初始 kind）

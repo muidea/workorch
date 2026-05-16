@@ -132,7 +132,7 @@
 
 | ID | 优先级 | 内容 | 验收 |
 | --- | --- | --- | --- |
-| DMI-19 | P0 | Provider retry root normalization 与 nested retry 禁止 | 已落地：同一 root 下最多 2 次 provider retry；不会产生 `provider-retry-1-provider-retry-1` |
+| DMI-19 | P0 | Provider retry root normalization 与 nested retry 禁止 | 已落地：同一 root 下最多 runtime 配置的 provider retry 次数（默认 10）；不会产生 `provider-retry-1-provider-retry-1` |
 | DMI-20 | P0 | recovery action 决策表代码化 | 已落地：failure follow-up 与 resume dispatch 复用同一恢复动作表；contract failure 不进入 provider retry；provider retry 超预算不再派发 max+1 或 runtime repair |
 | DMI-21 | P0 | schema invalid 语义拆分 | 已落地：`llm_schema_invalid` / `llm_decision_invalid` 归为 LLM decision contract failure，不再作为 provider failure stage；provider schema drift 使用显式 provider stage |
 | DMI-22 | P1 | blocker-result policy | 已落地：decision context 显式 `resultPolicy`；provider/config blocker 不写业务 result；repair/duplicate/business terminal blocker 写 rejected result |

@@ -25,6 +25,7 @@ dataDir = ".workorch-data"
 
 [runtime]
 defaultSoulId = "soul-system"
+maxRuntimeRepairAttempts = 11
 maxProviderRetryAttempts = 12
 shellCommandTimeout = "90s"
 
@@ -103,6 +104,7 @@ maxRepeatedSamePrompt = 1
 		t.Fatalf("max concurrent runs = %d, want 2", cfg.Server.MaxConcurrentRuns)
 	}
 	if cfg.Runtime.DefaultSoulID != "soul-system" ||
+		cfg.Runtime.MaxRuntimeRepairAttempts != 11 ||
 		cfg.Runtime.MaxProviderRetryAttempts != 12 ||
 		cfg.Runtime.ShellCommandTimeout != "90s" {
 		t.Fatalf("runtime config = %+v, want configured runtime settings", cfg.Runtime)
@@ -185,6 +187,7 @@ disabled = false
 	if err != nil {
 		t.Fatalf("current config: %v", err)
 	}
+	cfg.Runtime.MaxRuntimeRepairAttempts = 15
 	cfg.Runtime.MaxProviderRetryAttempts = 14
 	cfg.Runtime.ShellCommandTimeout = "120s"
 	disabled := false
@@ -258,7 +261,7 @@ disabled = false
 		next.LLM.Providers["reasoning"].BytesHardLimit != 131072 {
 		t.Fatalf("next llm provider profile = %+v, want saved context profile", next.LLM.Providers["reasoning"])
 	}
-	if next.Runtime.MaxProviderRetryAttempts != 14 || next.Runtime.ShellCommandTimeout != "120s" {
+	if next.Runtime.MaxRuntimeRepairAttempts != 15 || next.Runtime.MaxProviderRetryAttempts != 14 || next.Runtime.ShellCommandTimeout != "120s" {
 		t.Fatalf("next runtime config = %+v, want saved runtime settings", next.Runtime)
 	}
 	if next.WebSearch.DefaultProvider != "search" ||

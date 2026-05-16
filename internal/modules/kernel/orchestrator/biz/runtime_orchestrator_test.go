@@ -2823,6 +2823,34 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *te
 	if previewPatchContext[0]["targetRef"] != "source.txt" {
 		t.Fatalf("patchRepairContext for preview = %#v, want source.txt target", previewPatchContext[0])
 	}
+
+	failedEditStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/block/edit"),
+		RunID: runID,
+		Kind:  "file/edit",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"path":    "source.txt",
+			"oldText": "func sample(arg Type)",
+			"newText": "func sample(arg *Type)",
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"stage":                   "file_edit_conflict",
+			"error":                   "conflict: file/edit oldText not found",
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|kind=file/edit|path=source.txt",
+		},
+	}
+	editInput := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedEditStep, 1, common.ErrConflict)
+	editPatchContext := mapSliceFromValue(editInput["patchRepairContext"])
+	if len(editPatchContext) != 1 || editPatchContext[0]["targetRef"] != "source.txt" {
+		t.Fatalf("patchRepairContext for file/edit conflict = %#v, want source.txt snapshot", editInput["patchRepairContext"])
+	}
+	editGuidance := strings.Join(stringSliceFromValue(editInput["repairGuidance"]), "\n")
+	if !strings.Contains(editGuidance, "file/edit oldText conflict") || !strings.Contains(editGuidance, "current target snapshot") {
+		t.Fatalf("repairGuidance for file/edit conflict = %q, want stale oldText guidance", editGuidance)
+	}
 }
 
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchRepairSuggestions(t *testing.T) {
@@ -3010,6 +3038,9 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshot(t *
 	required := mapFromValue(actionPackage["requiredOutput"])
 	if required["mustIncludeStateChangingNode"] != true || !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
 		t.Fatalf("repairActionPackage.requiredOutput = %#v, want patch/apply state-changing contract", required)
+	}
+	if required["mustTargetFailureScope"] != true || required["targetRelation"] != "failure_target_or_repair_snapshot" {
+		t.Fatalf("repairActionPackage.requiredOutput = %#v, want target-relevant repair contract", required)
 	}
 	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
 	if len(targets) != 1 || targets[0]["targetRef"] != "main_test.go" || strings.TrimSpace(stringFromMap(targets[0], "contentHash")) == "" {
@@ -6682,7 +6713,7 @@ func TestRuntimeOrchestrator_RuntimeRepairAttemptCountIsScopedByFailureSignature
 	runID := common.RunID("run-runtime-repair-budget-scoped-signature")
 	stepRepo := memory.NewStepRepository()
 	orch := &RuntimeOrchestrator{steps: stepRepo}
-	for attempt := 1; attempt <= maxRuntimeRepairAttempts; attempt++ {
+	for attempt := 1; attempt <= defaultMaxRuntimeRepairAttempts; attempt++ {
 		if err := stepRepo.Create(ctx, &runmodel.Step{
 			ID:    common.StepID(fmt.Sprintf("%s/repair-a-%d", runID, attempt)),
 			RunID: runID,
@@ -6719,7 +6750,7 @@ func TestRuntimeOrchestrator_RuntimeRepairAttemptCountIsScopedByFailureSignature
 		},
 	}
 
-	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedA); got != maxRuntimeRepairAttempts {
+	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedA); got != defaultMaxRuntimeRepairAttempts {
 		t.Fatalf("attempt count for A = %d, want exhausted scope", got)
 	}
 	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedB); got != 0 {
@@ -6732,7 +6763,7 @@ func TestRuntimeOrchestrator_RuntimeRepairScopeUsesCurrentFailureBeforeInherited
 	runID := common.RunID("run-runtime-repair-budget-current-signature")
 	stepRepo := memory.NewStepRepository()
 	orch := &RuntimeOrchestrator{steps: stepRepo}
-	for attempt := 1; attempt <= maxRuntimeRepairAttempts; attempt++ {
+	for attempt := 1; attempt <= defaultMaxRuntimeRepairAttempts; attempt++ {
 		if err := stepRepo.Create(ctx, &runmodel.Step{
 			ID:    common.StepID(fmt.Sprintf("%s/old-repair-%d", runID, attempt)),
 			RunID: runID,
@@ -6856,22 +6887,23 @@ func TestRuntimeOrchestrator_RuntimeRepairEffectiveScopeCountsFailureTargetAcros
 		steps:   stepRepo,
 		tickets: memory.NewDecisionTicketRepository(),
 	}
-	for attempt, node := range []string{"run-stream-test-baseline", "rerun-targeted-test", "list-target-test"} {
+	for attempt := 1; attempt <= defaultMaxRuntimeRepairAttempts; attempt++ {
+		node := fmt.Sprintf("target-scope-repair-%02d", attempt)
 		signature := fmt.Sprintf("class=shell_command_failed|kind=shell/command|node=%s|failureTargets=stream_e2e_test.go|exitCode=1", node)
 		if err := stepRepo.Create(ctx, &runmodel.Step{
-			ID:    common.StepID(fmt.Sprintf("%s/repair-%d", runID, attempt+1)),
+			ID:    common.StepID(fmt.Sprintf("%s/repair-%d", runID, attempt)),
 			RunID: runID,
 			Kind:  llmcommon.StepKindWorkspaceExecution,
 			State: common.StepStateCompleted,
 			Input: map[string]any{
 				stepInputKeyRuntimeRepairFollowUp: true,
-				stepInputKeyRuntimeRepairAttempt:  attempt + 1,
+				stepInputKeyRuntimeRepairAttempt:  attempt,
 				stepInputKeyRepairOfFailureClass:  failureClassShellCommand,
 				stepInputKeyRepairOfFailureSig:    signature,
 			},
 			Output: map[string]any{"status": "completed"},
 		}); err != nil {
-			t.Fatalf("seed target repair %d: %v", attempt+1, err)
+			t.Fatalf("seed target repair %d: %v", attempt, err)
 		}
 	}
 
@@ -6888,7 +6920,7 @@ func TestRuntimeOrchestrator_RuntimeRepairEffectiveScopeCountsFailureTargetAcros
 	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 0 {
 		t.Fatalf("exact attempt count = %d, want node-specific signature to remain independent", got)
 	}
-	if got := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != maxRuntimeRepairAttempts {
+	if got := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != defaultMaxRuntimeRepairAttempts {
 		t.Fatalf("effective attempt count = %d, want target scope exhausted", got)
 	}
 	if !orch.shouldEscalateRuntimeRepairExhaustion(ctx, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-target-scope")}, failedStep) {
@@ -6919,7 +6951,7 @@ func TestRuntimeOrchestrator_RuntimeRepairTargetScopeUsesCurrentGraphWindow(t *t
 		tickets: memory.NewDecisionTicketRepository(),
 	}
 	signature := "class=shell_command_failed|kind=shell/command|node=build|failureTargets=main.go|exitCode=1|error=exit status 1"
-	for attempt := 1; attempt <= maxRuntimeRepairAttempts; attempt++ {
+	for attempt := 1; attempt <= defaultMaxRuntimeRepairAttempts; attempt++ {
 		if err := stepRepo.Create(ctx, &runmodel.Step{
 			ID:    common.StepID(fmt.Sprintf("%s/repair-old-%d", runID, attempt)),
 			RunID: runID,
@@ -7116,7 +7148,7 @@ func TestRuntimeOrchestrator_ResumeClearsRepairExhaustionWhenTargetWindowHasBudg
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	for attempt := 1; attempt <= maxRuntimeRepairAttempts; attempt++ {
+	for attempt := 1; attempt <= defaultMaxRuntimeRepairAttempts; attempt++ {
 		if err := stepRepo.Create(ctx, &runmodel.Step{
 			ID:    common.StepID(fmt.Sprintf("%s/repair-old-%d", runID, attempt)),
 			RunID: runID,
@@ -7167,7 +7199,7 @@ func TestRuntimeOrchestrator_ResumeClearsRepairExhaustionWhenTargetWindowHasBudg
 			"failureClass":                   failureClassShellCommand,
 			"failureSignature":               signature,
 			"failureTargetScope":             "failureTargets=main.go",
-			"attempts":                       maxRuntimeRepairAttempts,
+			"attempts":                       defaultMaxRuntimeRepairAttempts,
 		},
 		State: common.DecisionTicketStateOpen,
 	}); err != nil {
@@ -8152,11 +8184,31 @@ func TestProviderRetryStepInputKeepsStateChangingRepairContract(t *testing.T) {
 }
 
 func TestRuntimePolicyConfiguresProviderRetryAttempts(t *testing.T) {
+	if got := NormalizeRuntimePolicy(RuntimePolicy{}).MaxRuntimeRepairAttempts; got != defaultMaxRuntimeRepairAttempts {
+		t.Fatalf("default max runtime repair attempts = %d, want %d", got, defaultMaxRuntimeRepairAttempts)
+	}
 	if got := NormalizeRuntimePolicy(RuntimePolicy{}).MaxProviderRetryAttempts; got != maxProviderRetryAttempts {
 		t.Fatalf("default max provider retry attempts = %d, want %d", got, maxProviderRetryAttempts)
 	}
 	orch := &RuntimeOrchestrator{
-		policy: NormalizeRuntimePolicy(RuntimePolicy{MaxProviderRetryAttempts: 7}),
+		policy: NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 9, MaxProviderRetryAttempts: 7}),
+	}
+	repairInput := orch.runtimeRepairFollowUpStepInput(context.Background(), &runmodel.Run{
+		ID:          "run-policy",
+		WorkspaceID: "ws-policy",
+		DoDID:       "dod-policy",
+	}, &runmodel.Step{
+		ID:    "run-policy/failed-step",
+		RunID: "run-policy",
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     "shell_command_failed",
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|command=go|exitCode=1|error=exit status 1",
+		},
+	}, 1, errors.New("exit status 1"))
+	if got := repairInput["maxRuntimeRepairAttempts"]; got != 9 {
+		t.Fatalf("maxRuntimeRepairAttempts = %v, want configured 9", got)
 	}
 	input := orch.providerRetryStepInput(&runmodel.Step{
 		ID:    "run-policy/step-1",
@@ -8834,7 +8886,7 @@ func TestRuntimeOrchestrator_DuplicateRuntimeFailureExhaustedScopeUsesRepairExha
 	currentFailed := duplicateShellFailureStep(runID, "current-shell-failure")
 	signature := stringFromMap(currentFailed.Output, failureOutputKeySignature)
 	class := stringFromMap(currentFailed.Output, failureOutputKeyClass)
-	for attempt := 1; attempt <= maxRuntimeRepairAttempts; attempt++ {
+	for attempt := 1; attempt <= defaultMaxRuntimeRepairAttempts; attempt++ {
 		if err := stepRepo.Create(ctx, &runmodel.Step{
 			ID:    common.StepID(fmt.Sprintf("%s/scoped-repair-%d", runID, attempt)),
 			RunID: runID,
@@ -8873,7 +8925,7 @@ func TestRuntimeOrchestrator_DuplicateRuntimeFailureExhaustedScopeUsesRepairExha
 	if err != nil {
 		t.Fatalf("get repair exhaustion ticket: %v", err)
 	}
-	if !strings.HasSuffix(string(ticket.ID), "repair-exhausted-decision") || ticket.Context["attempts"] != maxRuntimeRepairAttempts {
+	if !strings.HasSuffix(string(ticket.ID), "repair-exhausted-decision") || ticket.Context["attempts"] != defaultMaxRuntimeRepairAttempts {
 		t.Fatalf("ticket = %+v, want repair exhaustion ticket", ticket)
 	}
 	result, err := resultRepo.Get(ctx, common.ResultID(string(runID)+"/result/dod-assessment"))
@@ -8893,22 +8945,23 @@ func TestRuntimeOrchestrator_DuplicateRuntimeFailureUsesTargetScopeAcrossGraphNo
 		steps:   stepRepo,
 		tickets: memory.NewDecisionTicketRepository(),
 	}
-	for attempt, node := range []string{"baseline", "targeted", "confirm"} {
+	for attempt := 1; attempt <= defaultMaxRuntimeRepairAttempts; attempt++ {
+		node := fmt.Sprintf("duplicate-scope-repair-%02d", attempt)
 		signature := fmt.Sprintf("class=shell_command_failed|kind=shell/command|node=%s|failureTargets=stream_e2e_test.go|exitCode=1", node)
 		if err := stepRepo.Create(ctx, &runmodel.Step{
-			ID:    common.StepID(fmt.Sprintf("%s/target-repair-%d", runID, attempt+1)),
+			ID:    common.StepID(fmt.Sprintf("%s/target-repair-%d", runID, attempt)),
 			RunID: runID,
 			Kind:  llmcommon.StepKindWorkspaceExecution,
 			State: common.StepStateCompleted,
 			Input: map[string]any{
 				stepInputKeyRuntimeRepairFollowUp: true,
-				stepInputKeyRuntimeRepairAttempt:  attempt + 1,
+				stepInputKeyRuntimeRepairAttempt:  attempt,
 				stepInputKeyRepairOfFailureClass:  failureClassShellCommand,
 				stepInputKeyRepairOfFailureSig:    signature,
 			},
 			Output: map[string]any{"status": "completed"},
 		}); err != nil {
-			t.Fatalf("seed target repair %d: %v", attempt+1, err)
+			t.Fatalf("seed target repair %d: %v", attempt, err)
 		}
 	}
 	if err := stepRepo.Create(ctx, &runmodel.Step{
@@ -8977,7 +9030,7 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionFailsRun(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	for attempt := 1; attempt <= maxRuntimeRepairAttempts; attempt++ {
+	for attempt := 1; attempt <= defaultMaxRuntimeRepairAttempts; attempt++ {
 		stepID := common.StepID(fmt.Sprintf("%s/seed-repair-%d", runID, attempt))
 		if err := stepRepo.Create(ctx, &runmodel.Step{
 			ID:    stepID,
@@ -9023,7 +9076,7 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionFailsRun(t *testing.T) {
 	}
 	if ticket.State != common.DecisionTicketStateOpen ||
 		!strings.Contains(ticket.Reason, "runtime repair attempts exhausted") ||
-		ticket.Context["attempts"] != maxRuntimeRepairAttempts {
+		ticket.Context["attempts"] != defaultMaxRuntimeRepairAttempts {
 		t.Fatalf("ticket = %+v, want repair exhaustion decision context", ticket)
 	}
 	if ticket.Context[decisionContextKeyRecoveryPolicy] != decisionContextRecoveryPolicyRepairPlan {
@@ -9072,7 +9125,7 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionWritesRejectedResultBeforeTi
 		t.Fatalf("seed run: %v", err)
 	}
 	signature := "class=runtime_failed|target=planning"
-	for attempt := 1; attempt <= maxRuntimeRepairAttempts; attempt++ {
+	for attempt := 1; attempt <= defaultMaxRuntimeRepairAttempts; attempt++ {
 		if err := stepRepo.Create(ctx, &runmodel.Step{
 			ID:    common.StepID(fmt.Sprintf("%s/repair-%03d-of-planning-001", runID, attempt)),
 			RunID: runID,
@@ -9095,7 +9148,7 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionWritesRejectedResultBeforeTi
 			t.Fatalf("seed repair attempt %d: %v", attempt, err)
 		}
 	}
-	failedStep, err := stepRepo.Get(ctx, common.StepID(fmt.Sprintf("%s/repair-%03d-of-planning-001", runID, maxRuntimeRepairAttempts)))
+	failedStep, err := stepRepo.Get(ctx, common.StepID(fmt.Sprintf("%s/repair-%03d-of-planning-001", runID, defaultMaxRuntimeRepairAttempts)))
 	if err != nil {
 		t.Fatalf("get failed repair: %v", err)
 	}
@@ -14068,6 +14121,128 @@ func TestValidateLLMExecutionOutputContractAllowsStateChangingRepairPatchGraph(t
 
 	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want state-changing patch graph allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsStateChangingRepairUnrelatedPatchTarget(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-unrelated-target",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-unrelated-target/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failureTargetScope":              "failureTargets=main_test.go",
+			stepInputKeyRepairOfFailureSig:    "class=shell_command_failed|kind=shell/command|failureTargets=main_test.go|exitCode=1",
+			"failureTargetRepairContext": []map[string]any{
+				{"targetRef": "main_test.go", "exists": true, "contentHash": "hash-main-test"},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "write-marker",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "file_write",
+					"targetRef": "fix-marker.txt",
+					"content":   "fixed\n",
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "not related to failure target") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want unrelated repair target rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsStateChangingRepairRelevantPatchTarget(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-relevant-target",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-relevant-target/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failureTargetScope":              "failureTargets=main_test.go",
+			stepInputKeyRepairOfFailureSig:    "class=shell_command_failed|kind=shell/command|failureTargets=main_test.go|exitCode=1",
+			"failureTargetRepairContext": []map[string]any{
+				{"targetRef": "main_test.go", "exists": true, "contentHash": "hash-main-test"},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "repair-main-test",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "unified_diff",
+					"targetRef": "main_test.go",
+					"diff":      "--- a/main_test.go\n+++ b/main_test.go\n@@ -1 +1 @@\n-old\n+new\n",
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want relevant repair patch allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsStateChangingRepairPatchWithoutExplicitTarget(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-no-explicit-target",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-no-explicit-target/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "write-config",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "file_write",
+					"targetRef": "config.yaml",
+					"content":   "enabled: true\n",
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want repair patch allowed without explicit target scope", err)
 	}
 }
 

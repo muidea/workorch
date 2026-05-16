@@ -31,6 +31,7 @@ dataDir = ".workorch-data"
 
 [runtime]
 defaultSoulId = "soul-system"
+maxRuntimeRepairAttempts = 11
 maxProviderRetryAttempts = 12
 shellCommandTimeout = "90s"
 
@@ -80,6 +81,7 @@ allowDomains = ["example.test"]
 		t.Fatalf("configuration = %+v, want server and repository config", cfg)
 	}
 	if cfg.Runtime.DefaultSoulID != "soul-system" ||
+		cfg.Runtime.MaxRuntimeRepairAttempts != 11 ||
 		cfg.Runtime.MaxProviderRetryAttempts != 12 ||
 		cfg.Runtime.ShellCommandTimeout != "90s" {
 		t.Fatalf("runtime configuration = %+v, want system runtime settings", cfg.Runtime)

@@ -98,6 +98,7 @@ func NewRuntimeSessionWithBackend(backend string, dataRoot string) (*RuntimeSess
 func NewRuntimeSessionWithBackendAndEventHub(backend string, dataRoot string, eventHub events.Hub) (*RuntimeSession, error) {
 	runtimePolicy := orchestratorbiz.RuntimePolicy{}
 	if cfg, err := workorchconfig.Current(); err == nil {
+		runtimePolicy.MaxRuntimeRepairAttempts = cfg.Runtime.MaxRuntimeRepairAttempts
 		runtimePolicy.MaxProviderRetryAttempts = cfg.Runtime.MaxProviderRetryAttempts
 	}
 	bootstrapRuntime, err := buildBootstrapRuntime(func() *bootstrap.Runtime {
@@ -120,7 +121,10 @@ func NewRuntimeSessionFromEnv() (*RuntimeSession, error) {
 		return bootstrap.NewWithBackendAndRuntimePolicy(
 			cfg.Repository.Backend,
 			cfg.Repository.DataDir,
-			orchestratorbiz.RuntimePolicy{MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts},
+			orchestratorbiz.RuntimePolicy{
+				MaxRuntimeRepairAttempts: cfg.Runtime.MaxRuntimeRepairAttempts,
+				MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts,
+			},
 		)
 	})
 	if err != nil {
