@@ -86,7 +86,7 @@ func (f *fakeWS) Create(ctx context.Context, req backend.CreateWorkspaceRequest)
 	}
 	ws := &backend.WorkspaceInfo{
 		ID: id, Title: req.Title, Description: req.Description,
-		WorkingDirectory: req.WorkingDirectory, State: "active",
+		DeliverableDirectory: req.DeliverableDirectory, State: "active",
 	}
 	f.b.workspaces = append(f.b.workspaces, *ws)
 	return ws, nil

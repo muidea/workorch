@@ -31,21 +31,21 @@ type Backend interface {
 // ── Workspace ──
 
 type CreateWorkspaceRequest struct {
-	Title            string
-	Description      string
-	WorkingDirectory string
-	TemplateID       string
+	Title                string
+	Description          string
+	DeliverableDirectory string
+	TemplateID           string
 }
 
 type WorkspaceInfo struct {
-	ID               common.WorkspaceID
-	Title            string
-	Description      string
-	WorkingDirectory string
-	State            common.WorkspaceState
-	ActiveRunID      common.RunID
-	DefaultSoulID    common.SoulID
-	SoulBindings     map[string]common.SoulID
+	ID                   common.WorkspaceID
+	Title                string
+	Description          string
+	DeliverableDirectory string
+	State                common.WorkspaceState
+	ActiveRunID          common.RunID
+	DefaultSoulID        common.SoulID
+	SoulBindings         map[string]common.SoulID
 }
 
 type WorkspaceOutcomeInfo struct {

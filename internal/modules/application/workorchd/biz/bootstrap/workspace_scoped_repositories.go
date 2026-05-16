@@ -39,7 +39,7 @@ const (
 	workspaceScopedRuntimeCheckpointFile = "runtime_checkpoint.json"
 	workspaceScopedResultFile            = "result.json"
 	workspaceScopedArtifactFile          = "artifact.json"
-	workspaceScopedEventRecordFile       = "event_record.json"
+	workspaceScopedEventRecordFile       = "."
 	workspaceScopedTicketFile            = "ticket.json"
 	workspaceScopedResolutionFile        = "resolution.json"
 	workspaceScopedApprovalFile          = "approval.json"
@@ -98,12 +98,13 @@ type workspaceIndex struct {
 }
 
 type workspaceIndexEntry struct {
-	WorkspaceID      common.WorkspaceID    `json:"workspaceId"`
-	WorkspaceRoot    string                `json:"workspaceRoot"`
-	WorkingDirectory string                `json:"workingDirectory"`
-	State            common.WorkspaceState `json:"state"`
-	ActiveRunID      common.RunID          `json:"activeRunId,omitempty"`
-	UpdatedAt        string                `json:"updatedAt"`
+	WorkspaceID          common.WorkspaceID    `json:"workspaceId"`
+	InternalRoot         string                `json:"internalRoot"`
+	DeliverableDirectory string                `json:"deliverableDirectory"`
+	InternalDirectory    string                `json:"internalDirectory"`
+	State                common.WorkspaceState `json:"state"`
+	ActiveRunID          common.RunID          `json:"activeRunId,omitempty"`
+	UpdatedAt            string                `json:"updatedAt"`
 }
 
 type workspaceSoulBindingsFile struct {
@@ -162,7 +163,7 @@ func newWorkspaceScopedFileStore(dataRoot string) *workspaceScopedFileStore {
 }
 
 func (s *workspaceScopedFileStore) workspaceRoot(workspaceID common.WorkspaceID) string {
-	return filepath.Join(s.dataRoot, "workspaces", string(workspaceID))
+	return filepath.Join(s.dataRoot, "internal", "workspaces", string(workspaceID))
 }
 
 func (s *workspaceScopedFileStore) workspaceSoulBindingsPath(workspaceID common.WorkspaceID) string {
@@ -170,7 +171,7 @@ func (s *workspaceScopedFileStore) workspaceSoulBindingsPath(workspaceID common.
 }
 
 func (s *workspaceScopedFileStore) runRoot(workspaceID common.WorkspaceID, runID common.RunID) string {
-	root := filepath.Join(s.dataRoot, "workspaces", string(workspaceID), "runs", string(runID))
+	root := filepath.Join(s.dataRoot, "internal", "workspaces", string(workspaceID), "runs", string(runID))
 	s.rememberRunRoot(runID, root)
 	return root
 }
@@ -184,7 +185,7 @@ func (s *workspaceScopedFileStore) workspaceIndexPath() string {
 }
 
 func (s *workspaceScopedFileStore) workspaceRootRef(workspaceID common.WorkspaceID) string {
-	return filepath.ToSlash(filepath.Join("workspaces", string(workspaceID)))
+	return filepath.ToSlash(filepath.Join("internal", "workspaces", string(workspaceID)))
 }
 
 func (s *workspaceScopedFileStore) runPath(root string, name string) string {
@@ -192,13 +193,13 @@ func (s *workspaceScopedFileStore) runPath(root string, name string) string {
 }
 
 func (s *workspaceScopedFileStore) allWorkspaceRoots() []string {
-	matches, _ := filepath.Glob(filepath.Join(s.dataRoot, "workspaces", "*"))
+	matches, _ := filepath.Glob(filepath.Join(s.dataRoot, "internal", "workspaces", "*"))
 	sort.Strings(matches)
 	return matches
 }
 
 func (s *workspaceScopedFileStore) allRunRoots() []string {
-	matches, _ := filepath.Glob(filepath.Join(s.dataRoot, "workspaces", "*", "runs", "*"))
+	matches, _ := filepath.Glob(filepath.Join(s.dataRoot, "internal", "workspaces", "*", "runs", "*"))
 	sort.Strings(matches)
 	s.rememberRunRoots(matches)
 	return matches
@@ -208,7 +209,7 @@ func (s *workspaceScopedFileStore) workspaceRunRoots(workspaceID common.Workspac
 	if workspaceID == "" {
 		return s.allRunRoots()
 	}
-	matches, _ := filepath.Glob(filepath.Join(s.dataRoot, "workspaces", string(workspaceID), "runs", "*"))
+	matches, _ := filepath.Glob(filepath.Join(s.dataRoot, "internal", "workspaces", string(workspaceID), "runs", "*"))
 	sort.Strings(matches)
 	s.rememberRunRoots(matches)
 	return matches
@@ -242,7 +243,7 @@ func (s *workspaceScopedFileStore) runRootByID(runID common.RunID) (string, bool
 	if ok {
 		return root, true
 	}
-	matches, _ := filepath.Glob(filepath.Join(s.dataRoot, "workspaces", "*", "runs", string(runID)))
+	matches, _ := filepath.Glob(filepath.Join(s.dataRoot, "internal", "workspaces", "*", "runs", string(runID)))
 	sort.Strings(matches)
 	if len(matches) == 0 {
 		return "", false
@@ -506,12 +507,13 @@ func (s *workspaceScopedFileStore) upsertWorkspaceIndex(item *workspacemodel.Wor
 		return err
 	}
 	entry := workspaceIndexEntry{
-		WorkspaceID:      item.ID,
-		WorkspaceRoot:    s.workspaceRootRef(item.ID),
-		WorkingDirectory: item.WorkingDirectory,
-		State:            item.State,
-		ActiveRunID:      item.ActiveRunID,
-		UpdatedAt:        time.Now().UTC().Format(time.RFC3339Nano),
+		WorkspaceID:          item.ID,
+		InternalRoot:         s.workspaceRootRef(item.ID),
+		DeliverableDirectory: item.DeliverableDirectory,
+		InternalDirectory:    item.InternalDirectory,
+		State:                item.State,
+		ActiveRunID:          item.ActiveRunID,
+		UpdatedAt:            time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	replaced := false
 	for pos := range idx.Workspaces {

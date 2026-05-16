@@ -1739,9 +1739,9 @@ func TestActivateWorkspaceExecutionWithBackendAddsWorkspaceBoundEvidencePolicy(t
 		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
 	}
 	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
-		Title:            "evidence policy workspace",
-		WorkingDirectory: "workspaces/evidence-policy",
-		TemplateID:       "template-evidence-policy",
+		Title:                "evidence policy workspace",
+		DeliverableDirectory: "workspaces/evidence-policy",
+		TemplateID:           "template-evidence-policy",
 	})
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
@@ -1798,9 +1798,9 @@ func TestActivateWorkspaceExecutionWithBackendAddsExecutionContractFromWorkspace
 		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
 	}
 	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
-		Title:            "contract workspace",
-		WorkingDirectory: "workspaces/contract-workspace",
-		TemplateID:       "template-state-change-contract",
+		Title:                "contract workspace",
+		DeliverableDirectory: "workspaces/contract-workspace",
+		TemplateID:           "template-state-change-contract",
 	})
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
@@ -1864,9 +1864,9 @@ func TestActivateWorkspaceExecutionWithBackendRefreshesExecutionContractFromMatc
 		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
 	}
 	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
-		Title:            "refresh contract workspace",
-		WorkingDirectory: "workspaces/refresh-contract-workspace",
-		TemplateID:       templateID,
+		Title:                "refresh contract workspace",
+		DeliverableDirectory: "workspaces/refresh-contract-workspace",
+		TemplateID:           templateID,
 	})
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)

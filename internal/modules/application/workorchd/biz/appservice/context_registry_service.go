@@ -471,7 +471,7 @@ func listSkillHubWorkspaceSkillsForWorkspace(ctx context.Context, session *Runti
 	if err != nil {
 		return nil, err
 	}
-	return listSkillHubWorkspaceSkills(ctx, string(workspace.ID), workspace.WorkingDirectory)
+	return listSkillHubWorkspaceSkills(ctx, string(workspace.ID), workspace.DeliverableDirectory)
 }
 
 func readSkillHubSkill(ctx context.Context, session *RuntimeSession, skillID string, query SkillQuery) (Skill, error) {

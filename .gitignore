@@ -6,3 +6,5 @@
 /config/application.toml
 /dist
 /workorch
+/.workorch-data
+/.workorch-workspaces

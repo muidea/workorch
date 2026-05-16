@@ -23,14 +23,22 @@ docker run --rm -p 8080:8080 workorch:local
 Run with the file-backed repository backend:
 
 ```bash
-mkdir -p .workorch-data
-chmod 0777 .workorch-data
+mkdir -p .workorch-runtime
+chmod 0777 .workorch-runtime
 docker run --rm \
   -p 8080:8080 \
   -v "$(pwd)/config/container-file/application.toml:/etc/workorch/application.toml:ro" \
-  -v "$(pwd)/.workorch-data:/var/lib/workorch" \
+  -v "$(pwd)/.workorch-runtime:/var/lib/workorch" \
   workorch:local
 ```
+
+With `config/container-file/application.toml`, internal runtime state is stored
+under `/var/lib/workorch/.workorch-data/internal/workspaces/<workspace-id>/`.
+When a workspace is created without an explicit `deliverableDirectory`, the
+default user project root is created under
+`/var/lib/workorch/.workorch-workspaces/<workspace-id>/`. Mounting the parent
+`/var/lib/workorch` keeps both internal state and default deliverables
+persistent.
 
 The image starts with `/etc/workorch/application.toml` through the magicCommon
 configuration manager. Runtime parameters should be managed through a
@@ -336,7 +344,7 @@ A deployable `workorch --server` instance is acceptable when:
 - `make verify-real-mvp` passes as the grouped verification entrypoint for an
   already running deployed service, covering real LLM execution, MCP `stdio`,
   and vector Memory recall.
-- `POST /api/v1/workorch/workspaces` creates one `workorch` workspace instance, accepts an optional `description`, defaults `workingDirectory` to `repository.dataDir/workspaces/<generated-workspace-id>/working` for the file backend when omitted, and returns the generated `workspace.id`
+- `POST /api/v1/workorch/workspaces` creates one `workorch` workspace instance, accepts an optional `description`, defaults `deliverableDirectory` to `.workorch-workspaces/<generated-workspace-id>` for the file backend when omitted, stores runtime state under `repository.dataDir/internal/workspaces/<workspace-id>`, and returns the generated `workspace.id`
 - with file-backed repository config, `GET /api/v1/workorch/workspaces` returns the current `workorch` workspace list
 - with file-backed repository config, `GET /api/v1/workorch/workspaces/{workspaceId}` returns one persisted `workorch` workspace instance
 - with file-backed repository config, `GET /api/v1/workorch/workspaces/{workspaceId}/snapshot` returns one aggregated `workorch` workspace read model

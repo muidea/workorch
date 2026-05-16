@@ -62,7 +62,8 @@ func latestRuntimeCheckpoint(items []RuntimeCheckpoint) *RuntimeCheckpoint {
 	}
 	latest := items[0]
 	for _, item := range items[1:] {
-		if item.OccurredAt > latest.OccurredAt {
+		if item.OccurredAt > latest.OccurredAt ||
+			(item.OccurredAt == latest.OccurredAt && item.ID > latest.ID) {
 			latest = item
 		}
 	}
@@ -244,11 +245,11 @@ func streamTimelineItems(step presenter.StepView, runState string, stepOccurredA
 	}
 	raw, ok := step.Output["streamEvents"]
 	if !ok {
-		return nil
+		return streamDiagnosticsTimelineItems(step, runState, stepOccurredAt)
 	}
 	events := readModelMapSliceValue(raw)
 	if len(events) == 0 {
-		return nil
+		return streamDiagnosticsTimelineItems(step, runState, stepOccurredAt)
 	}
 	ret := make([]RuntimeTimelineItem, 0, streamTimelineItemCapacity(len(events)))
 	omittedInserted := false
@@ -294,6 +295,28 @@ func streamTimelineItems(step presenter.StepView, runState string, stepOccurredA
 		})
 	}
 	return ret
+}
+
+func streamDiagnosticsTimelineItems(step presenter.StepView, runState string, stepOccurredAt string) []RuntimeTimelineItem {
+	diagnostics := readModelMapValue(step.Output["streamDiagnostics"])
+	if len(diagnostics) == 0 {
+		return nil
+	}
+	summary := "stream diagnostics"
+	if receivedBytes := readModelIntValue(diagnostics["receivedBytes"]); receivedBytes > 0 {
+		summary = "received " + strconv.Itoa(receivedBytes) + " stream bytes"
+	}
+	return []RuntimeTimelineItem{{
+		Source:     "step_stream_summary",
+		Type:       "summary",
+		ID:         step.ID + "/stream/summary",
+		RunState:   runState,
+		StepID:     step.ID,
+		StepState:  step.State,
+		Summary:    summary,
+		OccurredAt: stepOccurredAt,
+		Data:       cloneReadModelMap(diagnostics),
+	}}
 }
 
 func streamTimelineItemCapacity(total int) int {

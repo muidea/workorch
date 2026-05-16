@@ -72,7 +72,7 @@ func (r *artifactStorageRepository) prepareStoredArtifact(item *resultmodel.Arti
 		return nil
 	}
 	fileName := artifactFileName(item)
-	dir := filepath.Join(r.dataRoot, "workspaces", string(item.WorkspaceID), "artifacts", string(item.RunID))
+	dir := filepath.Join(r.dataRoot, "internal", "workspaces", string(item.WorkspaceID), "artifacts", string(item.RunID))
 	if err := r.ensureArtifactDir(dir); err != nil {
 		return err
 	}

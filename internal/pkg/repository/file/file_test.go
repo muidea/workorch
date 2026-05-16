@@ -6,12 +6,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func TestWorkspaceRepositoryGetReturnsErrorWhenPersistedJSONCorrupt(t *testing.T) {
@@ -85,6 +91,300 @@ func TestWorkspaceRepositoryCreateStillSucceedsAfterEmptyPersistedFile(t *testin
 	}
 	if item.ID != "ws-empty" || item.Title != "empty workspace" || item.State != common.WorkspaceStateActive {
 		t.Fatalf("workspace = %+v, want ws-empty/empty workspace/active", item)
+	}
+}
+
+func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "event_record.json")
+	repo := NewEventRecordRepository(root)
+	payload := strings.Repeat("x", eventRecordPayloadInlineThreshold+1)
+
+	if err := repo.Append(ctx, &eventstreammodel.EventRecord{
+		ID:          common.EventRecordID("event-jsonl-1"),
+		Topic:       "/run/state/changed",
+		OccurredAt:  "2026-05-16T00:00:00Z",
+		WorkspaceID: common.WorkspaceID("ws-jsonl"),
+		RunID:       common.RunID("run-jsonl"),
+		Payload:     map[string]any{"large": payload},
+	}); err != nil {
+		t.Fatalf("append event: %v", err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("legacy event_record.json stat err = %v, want not exist", err)
+	}
+	if _, err := os.Stat(filepath.Join(strings.TrimSuffix(root, ".json"), "events", "events-000001.jsonl")); err != nil {
+		t.Fatalf("event JSONL segment stat: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(strings.TrimSuffix(root, ".json"), "payloads", filepath.FromSlash(safeEventRecordFileName("event-jsonl-1"))+".json")); err != nil {
+		t.Fatalf("large event payload ref stat: %v", err)
+	}
+	items, err := repo.List(ctx, repository.EventRecordQuery{RunID: common.RunID("run-jsonl")})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(items) != 1 || items[0].Payload["large"] != payload {
+		t.Fatalf("events = %+v, want rehydrated large payload", items)
+	}
+}
+
+func TestStepRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "step.json")
+	repo := NewStepRepository(root)
+	stepID := common.StepID("run-item/step-1")
+
+	if err := repo.Create(ctx, &runmodel.Step{
+		ID:     stepID,
+		RunID:  common.RunID("run-item"),
+		Kind:   "llm",
+		State:  common.StepStateCompleted,
+		Input:  map[string]any{"prompt": "hello"},
+		Output: map[string]any{"answer": "world"},
+	}); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("legacy step.json stat err = %v, want not exist", err)
+	}
+	itemDir := filepath.Join(filepath.Dir(root), "steps", filepath.FromSlash(safeRepositoryItemFileName(string(stepID))))
+	for _, name := range []string{"metadata.json", "input.json", "output.json"} {
+		if _, err := os.Stat(filepath.Join(itemDir, name)); err != nil {
+			t.Fatalf("step item %s stat: %v", name, err)
+		}
+	}
+	item, err := repo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if item.Input["prompt"] != "hello" || item.Output["answer"] != "world" {
+		t.Fatalf("step payload = %+v/%+v, want split input/output", item.Input, item.Output)
+	}
+}
+
+func TestToolCallRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "tool_call.json")
+	repo := NewToolCallRepository(root)
+	toolCallID := common.ToolCallID("run-item/step-1/tool-1")
+
+	if err := repo.Create(ctx, &runmodel.ToolCall{
+		ID:        toolCallID,
+		RunID:     common.RunID("run-item"),
+		StepID:    common.StepID("run-item/step-1"),
+		ToolName:  "shell",
+		State:     common.ToolCallStateCompleted,
+		Arguments: map[string]any{"command": "true"},
+		Output:    map[string]any{"exitCode": float64(0)},
+	}); err != nil {
+		t.Fatalf("create tool call: %v", err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("legacy tool_call.json stat err = %v, want not exist", err)
+	}
+	itemDir := filepath.Join(filepath.Dir(root), "tool-calls", filepath.FromSlash(safeRepositoryItemFileName(string(toolCallID))))
+	for _, name := range []string{"metadata.json", "arguments.json", "output.json"} {
+		if _, err := os.Stat(filepath.Join(itemDir, name)); err != nil {
+			t.Fatalf("tool call item %s stat: %v", name, err)
+		}
+	}
+	items, err := repo.ListByStep(ctx, common.StepID("run-item/step-1"))
+	if err != nil {
+		t.Fatalf("list tool calls by step: %v", err)
+	}
+	if len(items) != 1 || items[0].Arguments["command"] != "true" || items[0].Output["exitCode"] != float64(0) {
+		t.Fatalf("tool calls = %+v, want rehydrated arguments/output", items)
+	}
+}
+
+func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	runID := common.RunID("run-evidence")
+	stepID := common.StepID("run-evidence/step-1")
+
+	patchPath := filepath.Join(root, "patch.json")
+	patchRepo := NewPatchRepository(patchPath)
+	patchID := common.PatchID("run-evidence/patch-1")
+	if err := patchRepo.Create(ctx, &runmodel.Patch{
+		ID:      patchID,
+		RunID:   runID,
+		StepID:  stepID,
+		Diff:    "diff --git a/file b/file",
+		State:   common.PatchStatePreviewed,
+		Summary: "preview",
+	}); err != nil {
+		t.Fatalf("create patch: %v", err)
+	}
+	assertLegacyMapAbsent(t, patchPath)
+	assertItemFileExists(t, filepath.Join(root, "patches"), string(patchID))
+	patches, err := patchRepo.ListByStep(ctx, stepID)
+	if err != nil {
+		t.Fatalf("list patches by step: %v", err)
+	}
+	if len(patches) != 1 || patches[0].Diff == "" {
+		t.Fatalf("patches = %+v, want rehydrated item", patches)
+	}
+
+	validationPath := filepath.Join(root, "validation_result.json")
+	validationRepo := NewValidationResultRepository(validationPath)
+	validationID := common.ValidationResultID("run-evidence/validation-1")
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:           validationID,
+		RunID:        runID,
+		StepID:       stepID,
+		State:        common.ValidationResultStatePassed,
+		Summary:      "passed",
+		EvidenceTags: []string{"unit"},
+	}); err != nil {
+		t.Fatalf("create validation result: %v", err)
+	}
+	assertLegacyMapAbsent(t, validationPath)
+	assertItemFileExists(t, filepath.Join(root, "validations"), string(validationID))
+
+	checkpointPath := filepath.Join(root, "runtime_checkpoint.json")
+	checkpointRepo := NewRuntimeCheckpointRepository(checkpointPath)
+	checkpointID := common.CheckpointID("run-evidence/checkpoint-1")
+	if err := checkpointRepo.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:             checkpointID,
+		RunID:          runID,
+		CheckpointType: common.CheckpointTypeRunState,
+		Data:           map[string]any{"state": "running"},
+	}); err != nil {
+		t.Fatalf("create runtime checkpoint: %v", err)
+	}
+	assertLegacyMapAbsent(t, checkpointPath)
+	assertItemFileExists(t, filepath.Join(root, "checkpoints"), string(checkpointID))
+	checkpoint, err := checkpointRepo.Get(ctx, checkpointID)
+	if err != nil {
+		t.Fatalf("get runtime checkpoint: %v", err)
+	}
+	if checkpoint.Data["state"] != "running" {
+		t.Fatalf("checkpoint data = %+v, want rehydrated data", checkpoint.Data)
+	}
+
+	resultPath := filepath.Join(root, "result.json")
+	resultRepo := NewResultRepository(resultPath)
+	resultID := common.ResultID("run-evidence/result-1")
+	if err := resultRepo.Create(ctx, &resultmodel.Result{
+		ID:           resultID,
+		RunID:        runID,
+		State:        common.ResultStateAccepted,
+		Summary:      "accepted",
+		EvidenceRefs: []string{"evidence-1"},
+	}); err != nil {
+		t.Fatalf("create result: %v", err)
+	}
+	assertLegacyMapAbsent(t, resultPath)
+	assertItemFileExists(t, filepath.Join(root, "results"), string(resultID))
+
+	artifactPath := filepath.Join(root, "artifact.json")
+	artifactRepo := NewArtifactRepository(artifactPath)
+	artifactID := common.ArtifactID("run-evidence/artifact-1")
+	if err := artifactRepo.Create(ctx, &resultmodel.Artifact{
+		ID:           artifactID,
+		RunID:        runID,
+		ResultID:     resultID,
+		ArtifactType: "text",
+		State:        common.ArtifactStateAvailable,
+		Metadata:     map[string]any{"bytes": float64(12)},
+	}); err != nil {
+		t.Fatalf("create artifact: %v", err)
+	}
+	assertLegacyMapAbsent(t, artifactPath)
+	assertItemFileExists(t, filepath.Join(root, "artifacts"), string(artifactID))
+	artifacts, err := artifactRepo.ListByResult(ctx, resultID)
+	if err != nil {
+		t.Fatalf("list artifacts by result: %v", err)
+	}
+	if len(artifacts) != 1 || artifacts[0].Metadata["bytes"] != float64(12) {
+		t.Fatalf("artifacts = %+v, want rehydrated metadata", artifacts)
+	}
+}
+
+func TestGovernanceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	ticketPath := filepath.Join(root, "ticket.json")
+	ticketRepo := NewDecisionTicketRepository(ticketPath)
+	ticketID := common.TicketID("run-governance/ticket-1")
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: common.WorkspaceID("ws-governance"),
+		RunID:       common.RunID("run-governance"),
+		Reason:      "need human decision",
+		Context:     map[string]any{"field": "value"},
+		State:       common.DecisionTicketStateOpen,
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	assertLegacyMapAbsent(t, ticketPath)
+	assertItemFileExists(t, filepath.Join(root, "decisions", "tickets"), string(ticketID))
+	tickets, err := ticketRepo.ListByRunID(ctx, common.RunID("run-governance"))
+	if err != nil {
+		t.Fatalf("list tickets by run: %v", err)
+	}
+	if len(tickets) != 1 || tickets[0].Context["field"] != "value" {
+		t.Fatalf("tickets = %+v, want rehydrated context", tickets)
+	}
+
+	resolutionPath := filepath.Join(root, "resolution.json")
+	resolutionRepo := NewDecisionResolutionRepository(resolutionPath)
+	resolutionID := common.ResolutionID("run-governance/resolution-1")
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       resolutionID,
+		TicketID: ticketID,
+		Type:     "provide_missing_info",
+		Payload:  map[string]any{"answer": "ok"},
+	}); err != nil {
+		t.Fatalf("create resolution: %v", err)
+	}
+	assertLegacyMapAbsent(t, resolutionPath)
+	assertItemFileExists(t, filepath.Join(root, "decisions", "resolutions"), string(resolutionID))
+	resolution, err := resolutionRepo.GetByTicketID(ctx, ticketID)
+	if err != nil {
+		t.Fatalf("get resolution by ticket: %v", err)
+	}
+	if resolution.Payload["answer"] != "ok" {
+		t.Fatalf("resolution payload = %+v, want rehydrated payload", resolution.Payload)
+	}
+
+	approvalPath := filepath.Join(root, "approval.json")
+	approvalRepo := NewApprovalRepository(approvalPath)
+	approvalID := common.ApprovalID("run-governance/approval-1")
+	if err := approvalRepo.Create(ctx, &approvalmodel.Approval{
+		ID:          approvalID,
+		WorkspaceID: common.WorkspaceID("ws-governance"),
+		RunID:       common.RunID("run-governance"),
+		Reason:      "need approval",
+		Context:     map[string]any{"risk": "high"},
+		State:       common.ApprovalStatePending,
+	}); err != nil {
+		t.Fatalf("create approval: %v", err)
+	}
+	assertLegacyMapAbsent(t, approvalPath)
+	assertItemFileExists(t, filepath.Join(root, "approvals"), string(approvalID))
+	approvals, err := approvalRepo.ListByWorkspaceID(ctx, common.WorkspaceID("ws-governance"))
+	if err != nil {
+		t.Fatalf("list approvals by workspace: %v", err)
+	}
+	if len(approvals) != 1 || approvals[0].Context["risk"] != "high" {
+		t.Fatalf("approvals = %+v, want rehydrated context", approvals)
+	}
+}
+
+func assertLegacyMapAbsent(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("legacy map file %s stat err = %v, want not exist", path, err)
+	}
+}
+
+func assertItemFileExists(t *testing.T, root string, id string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(safeRepositoryItemFileName(id))+".json")); err != nil {
+		t.Fatalf("item file for %s under %s stat: %v", id, root, err)
 	}
 }
 

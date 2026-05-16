@@ -21,8 +21,8 @@ func TestRuntimeAdapterReadReturnsContentAndHash(t *testing.T) {
 	}
 
 	result, err := NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workspace,
-		Kind:                      "file/read",
+		WorkspaceDeliverableDirectory: workspace,
+		Kind:                          "file/read",
 		Input: map[string]any{
 			"path":      "main.go",
 			"startLine": 1,
@@ -44,8 +44,8 @@ func TestRuntimeAdapterOptionalReadMissingFileCompletes(t *testing.T) {
 	workspace := t.TempDir()
 
 	result, err := NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workspace,
-		Kind:                      "file/read",
+		WorkspaceDeliverableDirectory: workspace,
+		Kind:                          "file/read",
 		Input: map[string]any{
 			"path":     "README.md",
 			"optional": true,
@@ -72,8 +72,8 @@ func TestRuntimeAdapterListSkipsGeneratedDirectories(t *testing.T) {
 	}
 
 	result, err := NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workspace,
-		Kind:                      "file/list",
+		WorkspaceDeliverableDirectory: workspace,
+		Kind:                          "file/list",
 		Input: map[string]any{
 			"path":      ".",
 			"recursive": true,
@@ -103,9 +103,9 @@ func TestRuntimeAdapterListSkipsGeneratedDirectories(t *testing.T) {
 func TestRuntimeAdapterRejectsPathEscape(t *testing.T) {
 	workspace := t.TempDir()
 	_, err := NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workspace,
-		Kind:                      "file/read",
-		Input:                     map[string]any{"path": "../outside.txt"},
+		WorkspaceDeliverableDirectory: workspace,
+		Kind:                          "file/read",
+		Input:                         map[string]any{"path": "../outside.txt"},
 	})
 	if err == nil {
 		t.Fatalf("file/read should reject parent traversal")
@@ -123,9 +123,9 @@ func TestRuntimeAdapterRejectsSymlinkEscape(t *testing.T) {
 	}
 
 	_, err := NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workspace,
-		Kind:                      "file/read",
-		Input:                     map[string]any{"path": "outside/secret.txt"},
+		WorkspaceDeliverableDirectory: workspace,
+		Kind:                          "file/read",
+		Input:                         map[string]any{"path": "outside/secret.txt"},
 	})
 	if err == nil {
 		t.Fatalf("file/read should reject symlink escape")
@@ -143,8 +143,8 @@ func TestRuntimeAdapterEditReturnsPatchPreviewWithoutWriting(t *testing.T) {
 	baseHash := hex.EncodeToString(sum[:])
 
 	result, err := NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workspace,
-		Kind:                      "file/edit",
+		WorkspaceDeliverableDirectory: workspace,
+		Kind:                          "file/edit",
 		Input: map[string]any{
 			"path":     "main.go",
 			"oldText":  "println(\"old\")",
@@ -184,8 +184,8 @@ func TestRuntimeAdapterEditRejectsAmbiguousMatch(t *testing.T) {
 		t.Fatalf("seed file: %v", err)
 	}
 	_, err := NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workspace,
-		Kind:                      "file/edit",
+		WorkspaceDeliverableDirectory: workspace,
+		Kind:                          "file/edit",
 		Input: map[string]any{
 			"path":    "main.go",
 			"oldText": "x",
@@ -203,8 +203,8 @@ func TestRuntimeAdapterEditRejectsBaseHashMismatch(t *testing.T) {
 		t.Fatalf("seed file: %v", err)
 	}
 	_, err := NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workspace,
-		Kind:                      "file/edit",
+		WorkspaceDeliverableDirectory: workspace,
+		Kind:                          "file/edit",
 		Input: map[string]any{
 			"path":     "main.go",
 			"oldText":  "old",
@@ -226,8 +226,8 @@ func TestRuntimeAdapterEditUsesExplicitOccurrenceWithoutWriting(t *testing.T) {
 	}
 
 	result, err := NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workspace,
-		Kind:                      "file/edit",
+		WorkspaceDeliverableDirectory: workspace,
+		Kind:                          "file/edit",
 		Input: map[string]any{
 			"path":       "main.go",
 			"oldText":    "x",
@@ -266,8 +266,8 @@ func TestRuntimeAdapterEditRejectsBinaryFile(t *testing.T) {
 	}
 
 	_, err := NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workspace,
-		Kind:                      "file/edit",
+		WorkspaceDeliverableDirectory: workspace,
+		Kind:                          "file/edit",
 		Input: map[string]any{
 			"path":    "asset.bin",
 			"oldText": "\x00",

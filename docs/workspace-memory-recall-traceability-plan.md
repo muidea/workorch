@@ -143,7 +143,7 @@
 
 file backend 建议落地到 workspace scoped 数据目录，例如：
 
-- `.workorch-data/workspaces/{workspaceId}/memory_recall_trace.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/memory_recall_trace.json`
 
 ### EventHub/EventStream
 

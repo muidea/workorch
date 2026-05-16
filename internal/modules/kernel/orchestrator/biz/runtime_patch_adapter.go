@@ -27,7 +27,7 @@ func (a *PatchRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, request runt
 				},
 			}, err
 		}
-		preview, err := previewWorkspacePatch(request.WorkspaceWorkingDirectory, patch)
+		preview, err := previewWorkspacePatch(request.WorkspaceDeliverableDirectory, patch)
 		if err != nil {
 			return runtimemodel.StepExecutionResult{
 				Output: map[string]any{

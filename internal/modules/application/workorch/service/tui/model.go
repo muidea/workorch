@@ -834,13 +834,13 @@ func parseWorkspaceCreateArgs(value string) (backend.CreateWorkspaceRequest, err
 			if idx >= len(fields) {
 				return req, fmt.Errorf("workspace create requires a directory value")
 			}
-			req.WorkingDirectory = fields[idx]
+			req.DeliverableDirectory = fields[idx]
 		case strings.HasPrefix(field, "--dir="):
-			req.WorkingDirectory = strings.TrimPrefix(field, "--dir=")
+			req.DeliverableDirectory = strings.TrimPrefix(field, "--dir=")
 		case strings.HasPrefix(field, "--working-dir="):
-			req.WorkingDirectory = strings.TrimPrefix(field, "--working-dir=")
+			req.DeliverableDirectory = strings.TrimPrefix(field, "--working-dir=")
 		case strings.HasPrefix(field, "dir="):
-			req.WorkingDirectory = strings.TrimPrefix(field, "dir=")
+			req.DeliverableDirectory = strings.TrimPrefix(field, "dir=")
 		case field == "--description" || field == "--desc":
 			idx++
 			if idx >= len(fields) {
@@ -1378,8 +1378,8 @@ func workspaceName(ws backend.WorkspaceInfo) string {
 	if strings.TrimSpace(ws.Title) != "" {
 		return strings.TrimSpace(ws.Title)
 	}
-	if strings.TrimSpace(ws.WorkingDirectory) != "" {
-		parts := strings.Split(strings.TrimRight(ws.WorkingDirectory, "/"), "/")
+	if strings.TrimSpace(ws.DeliverableDirectory) != "" {
+		parts := strings.Split(strings.TrimRight(ws.DeliverableDirectory, "/"), "/")
 		return parts[len(parts)-1]
 	}
 	return shortID(string(ws.ID))

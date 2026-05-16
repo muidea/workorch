@@ -66,14 +66,14 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	if err != nil {
 		return runtimemodel.StepExecutionResult{}, err
 	}
-	workingDirectory, err := filepath.Abs(strings.TrimSpace(request.WorkspaceWorkingDirectory))
-	if err != nil || workingDirectory == "" {
+	deliverableDirectory, err := filepath.Abs(strings.TrimSpace(request.WorkspaceDeliverableDirectory))
+	if err != nil || deliverableDirectory == "" {
 		return runtimemodel.StepExecutionResult{}, common.ErrInvalidArgument
 	}
-	if err := os.MkdirAll(workingDirectory, 0o755); err != nil {
+	if err := os.MkdirAll(deliverableDirectory, 0o755); err != nil {
 		return runtimemodel.StepExecutionResult{}, err
 	}
-	if err := validateShellCommandPolicy(command, args, workingDirectory); err != nil {
+	if err := validateShellCommandPolicy(command, args, deliverableDirectory); err != nil {
 		return runtimemodel.StepExecutionResult{}, err
 	}
 
@@ -86,7 +86,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 
 	startedAt := time.Now().UTC()
 	cmd := exec.CommandContext(runCtx, command, args...)
-	cmd.Dir = workingDirectory
+	cmd.Dir = deliverableDirectory
 	cmd.Env = a.filteredEnv()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -102,7 +102,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		"status":         "completed",
 		"command":        command,
 		"args":           args,
-		"workingDir":     workingDirectory,
+		"workingDir":     deliverableDirectory,
 		"stdout":         stdout.String(),
 		"stderr":         sanitizeSuccessfulCommandStderr(command, args, exitCode, stdout.String(), stderr.String()),
 		"exitCode":       exitCode,
@@ -220,7 +220,7 @@ func shellCommandArgs(input any) ([]string, error) {
 	}
 }
 
-func validateShellCommandPolicy(command string, args []string, workingDirectory string) error {
+func validateShellCommandPolicy(command string, args []string, deliverableDirectory string) error {
 	base := filepath.Base(strings.TrimSpace(command))
 	if base == "" {
 		return common.ErrInvalidArgument
@@ -229,7 +229,7 @@ func validateShellCommandPolicy(command string, args []string, workingDirectory 
 	case "sudo", "su", "shutdown", "reboot", "poweroff", "halt", "mkfs", "mount", "umount":
 		return fmt.Errorf("%w: shell command %q is not allowed", common.ErrInvalidArgument, base)
 	case "rm":
-		if rmCommandIsDangerous(args, workingDirectory) {
+		if rmCommandIsDangerous(args, deliverableDirectory) {
 			return fmt.Errorf("%w: destructive rm command is not allowed", common.ErrInvalidArgument)
 		}
 	case "chmod":
@@ -248,7 +248,7 @@ func validateShellCommandPolicy(command string, args []string, workingDirectory 
 	return nil
 }
 
-func rmCommandIsDangerous(args []string, workingDirectory string) bool {
+func rmCommandIsDangerous(args []string, deliverableDirectory string) bool {
 	recursiveForce := false
 	for _, arg := range args {
 		if strings.HasPrefix(arg, "-") && strings.Contains(arg, "r") && strings.Contains(arg, "f") {
@@ -270,7 +270,7 @@ func rmCommandIsDangerous(args []string, workingDirectory string) bool {
 		}
 		if filepath.IsAbs(target) {
 			cleanTarget := filepath.Clean(target)
-			cleanWorking := filepath.Clean(workingDirectory)
+			cleanWorking := filepath.Clean(deliverableDirectory)
 			if cleanTarget == cleanWorking || !strings.HasPrefix(cleanTarget, cleanWorking+string(os.PathSeparator)) {
 				return true
 			}

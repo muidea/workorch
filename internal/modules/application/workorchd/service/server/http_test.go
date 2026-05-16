@@ -155,8 +155,8 @@ func TestServerStatePrefersApplicationRuntimeSession(t *testing.T) {
 
 	ctx := context.Background()
 	workspace, err := state.createWorkspace(ctx, "", "", appservice.CreateWorkspaceCommand{
-		Title:            "application runtime",
-		WorkingDirectory: "workspaces/application-runtime",
+		Title:                "application runtime",
+		DeliverableDirectory: "workspaces/application-runtime",
 	})
 	if err != nil {
 		t.Fatalf("create workspace through server state: %v", err)
@@ -225,7 +225,9 @@ func TestConfigurationEndpointReturnsRedactedLLMProviders(t *testing.T) {
 func TestUpdateLLMConfigurationEndpointReturnsRedactedConfiguration(t *testing.T) {
 	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
 	state.updateLLMConfiguration = func(cmd appservice.UpdateLLMConfigurationCommand) (appservice.ServiceConfiguration, error) {
-		if cmd.DefaultProviderID != "local" || len(cmd.Providers) != 1 || cmd.Providers[0].APIKey != "secret-value" {
+		if cmd.DefaultProviderID == nil || *cmd.DefaultProviderID != "local" ||
+			cmd.Providers == nil || len(*cmd.Providers) != 1 ||
+			(*cmd.Providers)[0].APIKey == nil || *(*cmd.Providers)[0].APIKey != "secret-value" {
 			t.Fatalf("update command = %+v, want local provider command", cmd)
 		}
 		return appservice.ServiceConfiguration{
@@ -725,6 +727,13 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/snapshot"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/steps"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/tool-calls"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/runtime-checkpoints"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/results"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/patches"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/validation-results"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/artifacts"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/status"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/observability"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/memory-recalls"},
@@ -733,6 +742,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/task-decompositions"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/runs/:runId/start"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/runs/:runId/resume"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/runtime/payloads"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/events/stream"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/decisions"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/decisions/:ticketId"},
@@ -860,14 +870,14 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 	if err := hub.Publish(context.Background(), events.Envelope{
 		Topic:       events.TopicWorkspaceCreated,
 		WorkspaceID: "ws-other",
-		Payload:     events.WorkspacePayload("other", "", "/tmp/other", common.WorkspaceStateActive, ""),
+		Payload:     events.WorkspacePayload("other", "", "/tmp/other", "", common.WorkspaceStateActive, ""),
 	}); err != nil {
 		t.Fatalf("publish nonmatching event: %v", err)
 	}
 	if err := hub.Publish(context.Background(), events.Envelope{
 		Topic:       events.TopicWorkspaceCreated,
 		WorkspaceID: "ws-stream",
-		Payload:     events.WorkspacePayload("stream workspace", "", "/tmp/stream", common.WorkspaceStateActive, ""),
+		Payload:     events.WorkspacePayload("stream workspace", "", "/tmp/stream", "", common.WorkspaceStateActive, ""),
 	}); err != nil {
 		t.Fatalf("publish matching event: %v", err)
 	}
@@ -1087,6 +1097,111 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		t.Fatalf("runID = %q, want run-native-read or run-native-activation", runID)
 		return appservice.RunSnapshot{}, nil
 	}
+	state.listRunSteps = func(ctx context.Context, _, _ string, query appservice.StepQuery) (appservice.StepPage, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run steps event hub = %#v, want injected hub", got)
+		}
+		if query.RunID != "run-native-read" || query.CursorAfterID != "step-native-1" || query.Limit != 2 {
+			t.Fatalf("run steps query = %+v, want run-native-read cursor step-native-1 limit 2", query)
+		}
+		return appservice.StepPage{
+			RunID:             query.RunID,
+			Limit:             query.Limit,
+			CursorAfterID:     query.CursorAfterID,
+			NextCursorAfterID: "step-native-2",
+			HasMore:           true,
+		}, nil
+	}
+	state.listRunToolCalls = func(ctx context.Context, _, _ string, query appservice.ToolCallQuery) (appservice.ToolCallPage, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run tool calls event hub = %#v, want injected hub", got)
+		}
+		if query.RunID != "run-native-read" || query.CursorAfterID != "tool-native-1" || query.Limit != 2 {
+			t.Fatalf("run tool calls query = %+v, want run-native-read cursor tool-native-1 limit 2", query)
+		}
+		return appservice.ToolCallPage{
+			RunID:             query.RunID,
+			Limit:             query.Limit,
+			CursorAfterID:     query.CursorAfterID,
+			NextCursorAfterID: "tool-native-2",
+			HasMore:           true,
+		}, nil
+	}
+	state.listRunRuntimeCheckpoints = func(ctx context.Context, _, _ string, query appservice.RuntimeCheckpointQuery) (appservice.RuntimeCheckpointPage, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run runtime checkpoints event hub = %#v, want injected hub", got)
+		}
+		if query.RunID != "run-native-read" || query.CursorAfterID != "checkpoint-native-1" || query.Limit != 2 {
+			t.Fatalf("run runtime checkpoints query = %+v, want run-native-read cursor checkpoint-native-1 limit 2", query)
+		}
+		return appservice.RuntimeCheckpointPage{
+			RunID:             query.RunID,
+			Limit:             query.Limit,
+			CursorAfterID:     query.CursorAfterID,
+			NextCursorAfterID: "checkpoint-native-2",
+			HasMore:           true,
+		}, nil
+	}
+	state.listRunResults = func(ctx context.Context, _, _ string, query appservice.ResultQuery) (appservice.ResultPage, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run results event hub = %#v, want injected hub", got)
+		}
+		if query.RunID != "run-native-read" || query.CursorAfterID != "result-native-1" || query.Limit != 2 {
+			t.Fatalf("run results query = %+v, want run-native-read cursor result-native-1 limit 2", query)
+		}
+		return appservice.ResultPage{
+			RunID:             query.RunID,
+			Limit:             query.Limit,
+			CursorAfterID:     query.CursorAfterID,
+			NextCursorAfterID: "result-native-2",
+			HasMore:           true,
+		}, nil
+	}
+	state.listRunPatches = func(ctx context.Context, _, _ string, query appservice.PatchQuery) (appservice.PatchPage, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run patches event hub = %#v, want injected hub", got)
+		}
+		if query.RunID != "run-native-read" || query.CursorAfterID != "patch-native-1" || query.Limit != 2 {
+			t.Fatalf("run patches query = %+v, want run-native-read cursor patch-native-1 limit 2", query)
+		}
+		return appservice.PatchPage{
+			RunID:             query.RunID,
+			Limit:             query.Limit,
+			CursorAfterID:     query.CursorAfterID,
+			NextCursorAfterID: "patch-native-2",
+			HasMore:           true,
+		}, nil
+	}
+	state.listRunValidationResults = func(ctx context.Context, _, _ string, query appservice.ValidationResultQuery) (appservice.ValidationResultPage, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run validation results event hub = %#v, want injected hub", got)
+		}
+		if query.RunID != "run-native-read" || query.CursorAfterID != "validation-native-1" || query.Limit != 2 {
+			t.Fatalf("run validation results query = %+v, want run-native-read cursor validation-native-1 limit 2", query)
+		}
+		return appservice.ValidationResultPage{
+			RunID:             query.RunID,
+			Limit:             query.Limit,
+			CursorAfterID:     query.CursorAfterID,
+			NextCursorAfterID: "validation-native-2",
+			HasMore:           true,
+		}, nil
+	}
+	state.listRunArtifacts = func(ctx context.Context, _, _ string, query appservice.ArtifactQuery) (appservice.ArtifactPage, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("run artifacts event hub = %#v, want injected hub", got)
+		}
+		if query.RunID != "run-native-read" || query.CursorAfterID != "artifact-native-1" || query.Limit != 2 {
+			t.Fatalf("run artifacts query = %+v, want run-native-read cursor artifact-native-1 limit 2", query)
+		}
+		return appservice.ArtifactPage{
+			RunID:             query.RunID,
+			Limit:             query.Limit,
+			CursorAfterID:     query.CursorAfterID,
+			NextCursorAfterID: "artifact-native-2",
+			HasMore:           true,
+		}, nil
+	}
 	state.readRunStatus = func(ctx context.Context, _, _, runID string) (appservice.RunStatus, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("run status event hub = %#v, want injected hub", got)
@@ -1141,6 +1256,22 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}
 		return []appservice.Decision{{ID: "ticket-native-read", WorkspaceID: workspaceID, RunID: runID, State: "open"}}, nil
 	}
+	state.listDecisionPage = func(ctx context.Context, _, _ string, query appservice.DecisionQuery) (appservice.DecisionPage, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("decision page event hub = %#v, want injected hub", got)
+		}
+		if query.WorkspaceID != "ws-native-read" || query.RunID != "run-native-read" || query.CursorAfterID != "ticket-native-cursor" || query.Limit != 2 {
+			t.Fatalf("decision page query = %+v, want ws-native-read/run-native-read cursor ticket-native-cursor limit 2", query)
+		}
+		return appservice.DecisionPage{
+			WorkspaceID:       query.WorkspaceID,
+			RunID:             query.RunID,
+			Decisions:         []appservice.Decision{{ID: "ticket-native-read", WorkspaceID: query.WorkspaceID, RunID: query.RunID, State: "open"}},
+			Limit:             query.Limit,
+			CursorAfterID:     query.CursorAfterID,
+			NextCursorAfterID: "ticket-native-read",
+		}, nil
+	}
 	state.readDecision = func(ctx context.Context, _, _, ticketID string) (appservice.Decision, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("decision get event hub = %#v, want injected hub", got)
@@ -1159,6 +1290,22 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}
 		return []appservice.Approval{{ID: "approval-native-read", WorkspaceID: workspaceID, RunID: runID, State: "pending"}}, nil
 	}
+	state.listApprovalPage = func(ctx context.Context, _, _ string, query appservice.ApprovalQuery) (appservice.ApprovalPage, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("approval page event hub = %#v, want injected hub", got)
+		}
+		if query.WorkspaceID != "ws-native-read" || query.RunID != "run-native-read" || query.CursorAfterID != "approval-native-cursor" || query.Limit != 2 {
+			t.Fatalf("approval page query = %+v, want ws-native-read/run-native-read cursor approval-native-cursor limit 2", query)
+		}
+		return appservice.ApprovalPage{
+			WorkspaceID:       query.WorkspaceID,
+			RunID:             query.RunID,
+			Approvals:         []appservice.Approval{{ID: "approval-native-read", WorkspaceID: query.WorkspaceID, RunID: query.RunID, State: "pending"}},
+			Limit:             query.Limit,
+			CursorAfterID:     query.CursorAfterID,
+			NextCursorAfterID: "approval-native-read",
+		}, nil
+	}
 	state.readApproval = func(ctx context.Context, _, _, approvalID string) (appservice.Approval, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("approval get event hub = %#v, want injected hub", got)
@@ -1172,10 +1319,10 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("workspace create event hub = %#v, want injected hub", got)
 		}
-		if cmd.Title != "native write" || cmd.Description != "native description" || cmd.WorkingDirectory != "workspaces/native-write" || cmd.TemplateID != "software-dev" {
-			t.Fatalf("workspace create input = %q/%q/%q/%q, want native write/native description/workspaces/native-write/software-dev", cmd.Title, cmd.Description, cmd.WorkingDirectory, cmd.TemplateID)
+		if cmd.Title != "native write" || cmd.Description != "native description" || cmd.DeliverableDirectory != "workspaces/native-write" || cmd.TemplateID != "software-dev" {
+			t.Fatalf("workspace create input = %q/%q/%q/%q, want native write/native description/workspaces/native-write/software-dev", cmd.Title, cmd.Description, cmd.DeliverableDirectory, cmd.TemplateID)
 		}
-		return appservice.Workspace{ID: "ws-native-write", Title: cmd.Title, Description: cmd.Description, WorkingDirectory: cmd.WorkingDirectory, State: "active"}, nil
+		return appservice.Workspace{ID: "ws-native-write", Title: cmd.Title, Description: cmd.Description, DeliverableDirectory: cmd.DeliverableDirectory, State: "active"}, nil
 	}
 	state.deleteWorkspace = func(ctx context.Context, _, _, workspaceID string, cmd appservice.DeleteWorkspaceCommand) error {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
@@ -1291,7 +1438,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		status int
 	}{
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces", status: http.StatusOK},
-		{method: http.MethodPost, path: "/api/v1/workorch/workspaces", body: `{"title":"native write","description":"native description","workingDirectory":"workspaces/native-write","templateId":"software-dev"}`, status: http.StatusCreated},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces", body: `{"title":"native write","description":"native description","deliverableDirectory":"workspaces/native-write","templateId":"software-dev"}`, status: http.StatusCreated},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read", status: http.StatusOK},
 		{method: http.MethodDelete, path: "/api/v1/workorch/workspaces/ws-native-read?purge=true", status: http.StatusNoContent},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/snapshot", status: http.StatusOK},
@@ -1305,6 +1452,13 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/workorch/runs?workspaceId=ws-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/snapshot", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/steps?cursorAfterId=step-native-1&limit=2", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/tool-calls?cursorAfterId=tool-native-1&limit=2", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/runtime-checkpoints?cursorAfterId=checkpoint-native-1&limit=2", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/results?cursorAfterId=result-native-1&limit=2", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/patches?cursorAfterId=patch-native-1&limit=2", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/validation-results?cursorAfterId=validation-native-1&limit=2", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/artifacts?cursorAfterId=artifact-native-1&limit=2", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/status", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/observability", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/task-progress", status: http.StatusOK},
@@ -1313,11 +1467,11 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/start", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/resume", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native","llmProviderId":"deepseek","soulId":"soul-native","soulBindings":{"validation":"soul-native-validation"},"skillIds":["skill-native"],"mcpServerIds":["mcp-native"],"memoryIds":["memory-native"],"dialogLanguage":"zh-CN","priority":9,"executionContextPatch":{"latestOperatorInput":{"source":"tui","content":"restart from tui"}}}`, status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/decisions?workspaceId=ws-native-read&runId=run-native-read", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/decisions?workspaceId=ws-native-read&runId=run-native-read&cursorAfterId=ticket-native-cursor&limit=2", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions/ticket-native-read", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/decisions/ticket-native-read/resolve", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/decisions/resolve-batch", body: `{"ticketIds":["ticket-native-read"],"resolutionType":"replan"}`, status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/approvals?workspaceId=ws-native-read&runId=run-native-read", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/approvals?workspaceId=ws-native-read&runId=run-native-read&cursorAfterId=approval-native-cursor&limit=2", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/approvals/approval-native-read", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/approvals/approval-native-read/approve", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/approvals/approval-native-read/reject", status: http.StatusOK},
@@ -1338,7 +1492,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 func TestWorkspaceCreateEndpointReturnsCreatedWorkspace(t *testing.T) {
 	handler := newMux(Config{Backend: "memory"})
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"http workspace","description":"http description","workingDirectory":"workspaces/ws-http"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"http workspace","description":"http description","deliverableDirectory":"workspaces/ws-http"}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	handler.ServeHTTP(createRec, createReq)
@@ -1353,7 +1507,7 @@ func TestWorkspaceCreateEndpointReturnsCreatedWorkspace(t *testing.T) {
 	if !strings.HasPrefix(created.Workspace.ID, "ws-") ||
 		created.Workspace.Title != "http workspace" ||
 		created.Workspace.Description != "http description" ||
-		created.Workspace.WorkingDirectory != "workspaces/ws-http" ||
+		created.Workspace.DeliverableDirectory != "workspaces/ws-http" ||
 		created.Workspace.State != "active" {
 		t.Fatalf("created workspace = %+v, want ws-http/http workspace/workspaces/ws-http/active", created.Workspace)
 	}
@@ -1514,7 +1668,7 @@ func TestWorkspaceSetupDraftMessageCanRestoreTemplateContext(t *testing.T) {
 	}
 }
 
-func TestWorkspaceCreateEndpointDefaultsWorkingDirectory(t *testing.T) {
+func TestWorkspaceCreateEndpointDefaultsDeliverableDirectory(t *testing.T) {
 	dataRoot := t.TempDir()
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
 
@@ -1532,14 +1686,15 @@ func TestWorkspaceCreateEndpointDefaultsWorkingDirectory(t *testing.T) {
 	if body.Workspace.ID == "" {
 		t.Fatalf("workspace id is empty")
 	}
-	want := filepath.Join(dataRoot, "workspaces", body.Workspace.ID, "working")
-	if body.Workspace.WorkingDirectory != want {
-		t.Fatalf("workingDirectory = %q, want %q", body.Workspace.WorkingDirectory, want)
+	want := filepath.Join(filepath.Dir(dataRoot), ".workorch-workspaces", body.Workspace.ID)
+	if body.Workspace.DeliverableDirectory != want {
+		t.Fatalf("deliverableDirectory = %q, want %q", body.Workspace.DeliverableDirectory, want)
 	}
 	for _, dir := range []string{
-		filepath.Join(dataRoot, "workspaces", body.Workspace.ID, "working"),
-		filepath.Join(dataRoot, "workspaces", body.Workspace.ID, "artifacts"),
-		filepath.Join(dataRoot, "workspaces", body.Workspace.ID, "runs"),
+		filepath.Join(filepath.Dir(dataRoot), ".workorch-workspaces", body.Workspace.ID),
+		filepath.Join(dataRoot, "internal", "workspaces", body.Workspace.ID),
+		filepath.Join(dataRoot, "internal", "workspaces", body.Workspace.ID, "artifacts"),
+		filepath.Join(dataRoot, "internal", "workspaces", body.Workspace.ID, "runs"),
 	} {
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			t.Fatalf("workspace directory %q = %v/%v, want existing directory", dir, info, err)
@@ -1595,13 +1750,46 @@ func TestArtifactContentEndpointReturnsStoredArtifactFile(t *testing.T) {
 	}
 }
 
+func TestRuntimePayloadEndpointReturnsLLMRawRefContent(t *testing.T) {
+	dataRoot := t.TempDir()
+	workspaceID := "ws-http-raw"
+	runID := "run-http-raw"
+	stepPath := "run-http-raw/llm-1"
+	rawDir := filepath.Join(dataRoot, "internal", "workspaces", workspaceID, "runs", runID, "llm-calls", filepath.FromSlash(stepPath))
+	if err := os.MkdirAll(rawDir, 0o755); err != nil {
+		t.Fatalf("mkdir raw dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rawDir, "request.json"), []byte(`{"model":"test"}`), 0o600); err != nil {
+		t.Fatalf("write request.json: %v", err)
+	}
+
+	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	ref := "workorch://workspaces/ws-http-raw/runs/run-http-raw/llm-calls/" + stepPath + "/request.json"
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runtime/payloads?ref="+url.QueryEscape(ref), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json; charset=utf-8" {
+		t.Fatalf("content-type = %q, want application/json", got)
+	}
+	if got := rec.Header().Get("X-Workorch-Raw-Ref"); got != ref {
+		t.Fatalf("raw ref header = %q, want %q", got, ref)
+	}
+	if rec.Body.String() != `{"model":"test"}` {
+		t.Fatalf("body = %q, want raw request payload", rec.Body.String())
+	}
+}
+
 func TestArtifactContentEndpointReusesCachedRunSnapshotArtifacts(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	workspaceID := "ws-http-artifact-cache"
 	runID := "run-http-artifact-cache"
 	artifactURI := "workorch://workspaces/ws-http-artifact-cache/artifacts/run-http-artifact-cache/result-summary.txt"
-	artifactDir := filepath.Join(dataRoot, "workspaces", workspaceID, "artifacts", runID)
+	artifactDir := filepath.Join(dataRoot, "internal", "workspaces", workspaceID, "artifacts", runID)
 	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
 		t.Fatalf("mkdir artifact dir: %v", err)
 	}
@@ -1677,7 +1865,7 @@ func TestWorkspaceListAndGetEndpointsReturnPersistedWorkspaces(t *testing.T) {
 	if err := json.Unmarshal(getRec.Body.Bytes(), &fetched); err != nil {
 		t.Fatalf("unmarshal fetched workspace: %v", err)
 	}
-	if fetched.Workspace.ID != workspace.ID || fetched.Workspace.Title != "http workspace" || fetched.Workspace.WorkingDirectory != "workspaces/ws-http" {
+	if fetched.Workspace.ID != workspace.ID || fetched.Workspace.Title != "http workspace" || fetched.Workspace.DeliverableDirectory != "workspaces/ws-http" {
 		t.Fatalf("fetched workspace = %+v, want %s/http workspace/workspaces/ws-http", fetched.Workspace, workspace.ID)
 	}
 }
@@ -1711,7 +1899,7 @@ func TestWorkspaceDeleteEndpointDeletesWorkspaceAndSupportsPurge(t *testing.T) {
 	if getRec.Code != http.StatusNotFound {
 		t.Fatalf("get deleted status = %d, want 404, body=%s", getRec.Code, getRec.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(dataRoot, "workspaces", workspace.ID)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dataRoot, "internal", "workspaces", workspace.ID)); !os.IsNotExist(err) {
 		t.Fatalf("workspace data dir err = %v, want not exist", err)
 	}
 }
@@ -1719,7 +1907,7 @@ func TestWorkspaceDeleteEndpointDeletesWorkspaceAndSupportsPurge(t *testing.T) {
 func TestWorkspaceCreateEndpointRejectsClientWorkspaceID(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"ws-client","title":"client workspace","workingDirectory":"workspaces/ws-client"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"ws-client","title":"client workspace","deliverableDirectory":"workspaces/ws-client"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -1946,6 +2134,28 @@ func TestEventStreamEndpointReplaysFileBackedRecordsAfterRestart(t *testing.T) {
 	}
 	if !timelineContainsPersistedEvent(observabilityBody.Observability.Timeline, events.TopicRunCreated) {
 		t.Fatalf("timeline = %+v, want persisted run event after restart", observabilityBody.Observability.Timeline)
+	}
+}
+
+func TestEventRecordQueryFromRequestAppliesBoundedDefaultLimit(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/events", nil)
+	if got := eventRecordQueryFromRequest(req).Limit; got != defaultEventRecordPageLimit {
+		t.Fatalf("default limit = %d, want %d", got, defaultEventRecordPageLimit)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/workorch/events?limit=2", nil)
+	if got := eventRecordQueryFromRequest(req).Limit; got != 2 {
+		t.Fatalf("explicit limit = %d, want 2", got)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/workorch/events?limit=999999", nil)
+	if got := eventRecordQueryFromRequest(req).Limit; got != maxEventRecordPageLimit {
+		t.Fatalf("clamped limit = %d, want %d", got, maxEventRecordPageLimit)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/workorch/events?limit=-1", nil)
+	if got := eventRecordQueryFromRequest(req).Limit; got != defaultEventRecordPageLimit {
+		t.Fatalf("negative limit = %d, want %d", got, defaultEventRecordPageLimit)
 	}
 }
 
@@ -3662,10 +3872,10 @@ func TestHTTPServerStartupRecoversFileBackedStuckRunningRunInBackground(t *testi
 	}
 }
 
-func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, workingDirectory string) appservice.Workspace {
+func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, deliverableDirectory string) appservice.Workspace {
 	t.Helper()
 
-	workspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"`+title+`","workingDirectory":"`+workingDirectory+`"}`))
+	workspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"`+title+`","deliverableDirectory":"`+deliverableDirectory+`"}`))
 	workspaceReq.Header.Set("Content-Type", "application/json")
 	workspaceRec := httptest.NewRecorder()
 	handler.ServeHTTP(workspaceRec, workspaceReq)
@@ -3676,8 +3886,8 @@ func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, wo
 	if err := json.Unmarshal(workspaceRec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal workspace create response: %v", err)
 	}
-	if body.Workspace.ID == "" || body.Workspace.Title != title || body.Workspace.WorkingDirectory != workingDirectory || body.Workspace.State != "active" {
-		t.Fatalf("workspace = %+v, want generated/%s/%s/active", body.Workspace, title, workingDirectory)
+	if body.Workspace.ID == "" || body.Workspace.Title != title || body.Workspace.DeliverableDirectory != deliverableDirectory || body.Workspace.State != "active" {
+		t.Fatalf("workspace = %+v, want generated/%s/%s/active", body.Workspace, title, deliverableDirectory)
 	}
 	return body.Workspace
 }
@@ -3871,10 +4081,10 @@ func seedBlockedRunForHTTP(t *testing.T, dataRoot string, title string, runID st
 	t.Helper()
 	ctx := context.Background()
 	workspace := &workspacemodel.Workspace{
-		ID:               common.WorkspaceID("ws-" + strings.TrimPrefix(runID, "run-")),
-		Title:            title,
-		WorkingDirectory: "workspaces/" + runID,
-		State:            common.WorkspaceStateActive,
+		ID:                   common.WorkspaceID("ws-" + strings.TrimPrefix(runID, "run-")),
+		Title:                title,
+		DeliverableDirectory: "workspaces/" + runID,
+		State:                common.WorkspaceStateActive,
 	}
 	runScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
 	if err := runScopedRepos.Workspaces.Create(ctx, workspace); err != nil {
@@ -3892,7 +4102,7 @@ func seedBlockedRunForHTTP(t *testing.T, dataRoot string, title string, runID st
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	return appservice.Workspace{ID: string(workspace.ID), Title: workspace.Title, WorkingDirectory: workspace.WorkingDirectory, State: string(workspace.State)}, appservice.Run{ID: string(run.ID), WorkspaceID: string(run.WorkspaceID), State: string(run.State)}
+	return appservice.Workspace{ID: string(workspace.ID), Title: workspace.Title, DeliverableDirectory: workspace.DeliverableDirectory, State: string(workspace.State)}, appservice.Run{ID: string(run.ID), WorkspaceID: string(run.WorkspaceID), State: string(run.State)}
 }
 
 func defineGoalAndDoDForHTTP(t *testing.T, handler http.Handler, workspaceID string) (string, string) {

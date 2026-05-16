@@ -329,7 +329,7 @@ func (a *Agent) webSourceLabels(ctx context.Context, workspaceID common.Workspac
 
 func CreateWorkspaceWithBackend(ctx context.Context, be backend.Backend, title string, description string, workingDir string) (string, error) {
 	ws, err := be.Workspace().Create(ctx, backend.CreateWorkspaceRequest{
-		Title: title, Description: description, WorkingDirectory: workingDir,
+		Title: title, Description: description, DeliverableDirectory: workingDir,
 	})
 	if err != nil {
 		return "", err

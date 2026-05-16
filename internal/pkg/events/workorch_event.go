@@ -263,7 +263,7 @@ func DecodeWorkspaceEvent(envelope Envelope) (WorkspaceEvent, bool) {
 	}
 	envelope = cloneEnvelope(envelope)
 	envelope.Version = spec.CurrentVersion
-	envelope.Payload = WorkspacePayload(data.Title, data.Description, data.WorkingDirectory, data.State, data.ActiveRunID)
+	envelope.Payload = WorkspacePayload(data.Title, data.Description, data.DeliverableDirectory, data.InternalDirectory, data.State, data.ActiveRunID)
 	return WorkspaceEvent{envelope: envelope, Data: data}, true
 }
 

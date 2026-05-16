@@ -49,7 +49,7 @@ func readArtifactContentWithSession(ctx context.Context, session *RuntimeSession
 	if artifact == nil {
 		return ArtifactContent{}, common.ErrNotFound
 	}
-	root := filepath.Join(session.RepositoryDataDir(), "workspaces", string(ref.WorkspaceID), "artifacts", string(ref.RunID))
+	root := filepath.Join(session.RepositoryDataDir(), "internal", "workspaces", string(ref.WorkspaceID), "artifacts", string(ref.RunID))
 	cleanPath, err := safeArtifactContentPath(root, ref.RelativePath)
 	if err != nil {
 		return ArtifactContent{}, err

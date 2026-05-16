@@ -64,9 +64,9 @@ module/
 
 ### 3.1 Workspace 模块（权重 20）
 
-**Workspace**：{ID, Title, Description, WorkingDirectory, State, ActiveRunID, DefaultSoulID, SoulBindings}
+**Workspace**：{ID, Title, Description, DeliverableDirectory, InternalDirectory, State, ActiveRunID, DefaultSoulID, SoulBindings}
 
-Workspace 是最高层级的组织单元。包含工作目录、激活的 Run、以及按阶段绑定的 Soul 映射。
+Workspace 是最高层级的组织单元。包含交付物目录、WorkOrch 内部状态目录、激活的 Run、以及按阶段绑定的 Soul 映射。
 
 **Goal**：{ID, WorkspaceID, Text} — 自然语言描述的执行目标
 

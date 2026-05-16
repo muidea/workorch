@@ -1191,12 +1191,13 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	}
 	injectRuntimeEvidencePolicies(runtimeInput, run.ExecutionContext)
 	result, err := o.runtime.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
-		WorkspaceID:               run.WorkspaceID,
-		WorkspaceWorkingDirectory: workspace.WorkingDirectory,
-		RunID:                     run.ID,
-		StepID:                    step.ID,
-		Kind:                      step.Kind,
-		Input:                     runtimeInput,
+		WorkspaceID:                   run.WorkspaceID,
+		WorkspaceDeliverableDirectory: workspace.DeliverableDirectory,
+		WorkspaceInternalDirectory:    workspace.InternalDirectory,
+		RunID:                         run.ID,
+		StepID:                        step.ID,
+		Kind:                          step.Kind,
+		Input:                         runtimeInput,
 	})
 	if err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, result.Output, "runtime step failed", err)
@@ -1215,7 +1216,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	}
 	if patchApproval.Reason != "" {
 		applyPatchApprovalBlockOutput(output, patchApproval)
-	} else if err := o.applyRuntimePatches(ctx, run, step, toolCall, output, workspace.WorkingDirectory); err != nil {
+	} else if err := o.applyRuntimePatches(ctx, run, step, toolCall, output, workspace.DeliverableDirectory); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch application failed", err)
 	}
 	patchRevertApproval, err := o.patchRevertApprovalBlockSpec(ctx, run.ID, language, output)
@@ -1224,7 +1225,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	}
 	if patchRevertApproval.Reason != "" {
 		applyPatchRevertApprovalBlockOutput(output, patchRevertApproval)
-	} else if err := o.applyRuntimePatchRevert(ctx, run, step, toolCall, output, workspace.WorkingDirectory); err != nil {
+	} else if err := o.applyRuntimePatchRevert(ctx, run, step, toolCall, output, workspace.DeliverableDirectory); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch revert failed", err)
 	}
 	memoryRefs, err := o.recordMemoryWrites(ctx, run, step, output)

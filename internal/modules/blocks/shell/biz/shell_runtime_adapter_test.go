@@ -15,11 +15,11 @@ import (
 
 func TestRuntimeAdapter_ExecuteRuntimeStepRunsCommandInWorkspaceDirectory(t *testing.T) {
 	adapter := NewRuntimeAdapter()
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 
 	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workingDirectory,
-		Kind:                      "shell/command",
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
 		Input: map[string]any{
 			"command": "pwd",
 		},
@@ -31,18 +31,18 @@ func TestRuntimeAdapter_ExecuteRuntimeStepRunsCommandInWorkspaceDirectory(t *tes
 		t.Fatalf("exitCode = %v, want 0", result.Output["exitCode"])
 	}
 	stdout, _ := result.Output["stdout"].(string)
-	if strings.TrimSpace(stdout) != workingDirectory {
-		t.Fatalf("stdout = %q, want working directory %q", stdout, workingDirectory)
+	if strings.TrimSpace(stdout) != deliverableDirectory {
+		t.Fatalf("stdout = %q, want deliverable directory %q", stdout, deliverableDirectory)
 	}
 }
 
 func TestRuntimeAdapter_ExecuteRuntimeStepUsesDefaultCommandTimeout(t *testing.T) {
 	adapter := NewRuntimeAdapter()
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 
 	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workingDirectory,
-		Kind:                      "shell/command",
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
 		Input: map[string]any{
 			"command": "pwd",
 		},
@@ -61,8 +61,8 @@ func TestNewRuntimeAdapterFromTimeoutString(t *testing.T) {
 		t.Fatalf("NewRuntimeAdapterFromTimeoutString: %v", err)
 	}
 	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: t.TempDir(),
-		Kind:                      "shell/command",
+		WorkspaceDeliverableDirectory: t.TempDir(),
+		Kind:                          "shell/command",
 		Input: map[string]any{
 			"command": "pwd",
 		},
@@ -100,11 +100,11 @@ func TestNewRuntimeAdapterFromTimeoutStringAllowsTenMinutes(t *testing.T) {
 
 func TestRuntimeAdapter_ExecuteRuntimeStepCreatesMissingWorkspaceDirectory(t *testing.T) {
 	adapter := NewRuntimeAdapter()
-	workingDirectory := filepath.Join(t.TempDir(), "missing", "workspace")
+	deliverableDirectory := filepath.Join(t.TempDir(), "missing", "workspace")
 
 	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workingDirectory,
-		Kind:                      "shell/command",
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
 		Input: map[string]any{
 			"command": "pwd",
 		},
@@ -115,22 +115,22 @@ func TestRuntimeAdapter_ExecuteRuntimeStepCreatesMissingWorkspaceDirectory(t *te
 	if result.Output["exitCode"] != 0 {
 		t.Fatalf("exitCode = %v, want 0", result.Output["exitCode"])
 	}
-	info, err := os.Stat(workingDirectory)
+	info, err := os.Stat(deliverableDirectory)
 	if err != nil {
-		t.Fatalf("stat working directory: %v", err)
+		t.Fatalf("stat deliverable directory: %v", err)
 	}
 	if !info.IsDir() {
-		t.Fatalf("workingDirectory is not a directory")
+		t.Fatalf("deliverableDirectory is not a directory")
 	}
 }
 
 func TestRuntimeAdapter_ExecuteRuntimeStepReturnsOutputForNonZeroExit(t *testing.T) {
 	adapter := NewRuntimeAdapter()
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 
 	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workingDirectory,
-		Kind:                      "shell/command",
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
 		Input: map[string]any{
 			"command": "sh",
 			"args":    []any{"-c", "echo shell-out; echo shell-err >&2; exit 7"},
@@ -154,10 +154,10 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReturnsOutputForNonZeroExit(t *testing
 
 func TestRuntimeAdapterAppliesConfiguredZeroWorkEvidencePolicy(t *testing.T) {
 	adapter := NewRuntimeAdapter()
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workingDirectory,
-		Kind:                      "shell/command",
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
 		Input: map[string]any{
 			"command": "sh",
 			"args":    []any{"-c", "printf 'testing: warning: no tests to run\\nPASS\\n'"},
@@ -214,11 +214,11 @@ func TestSanitizeSuccessfulCommandStderrPreservesFailedCommandStderr(t *testing.
 
 func TestRuntimeAdapter_ExecuteRuntimeStepReturnsTimeoutOutput(t *testing.T) {
 	adapter := NewRuntimeAdapterWithTimeout(10 * time.Millisecond)
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 
 	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workingDirectory,
-		Kind:                      "shell/command",
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
 		Input: map[string]any{
 			"command": "sh",
 			"args":    []any{"-c", "sleep 1"},
@@ -230,18 +230,18 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReturnsTimeoutOutput(t *testing.T) {
 	if result.Output["status"] != "timeout" {
 		t.Fatalf("status = %v, want timeout", result.Output["status"])
 	}
-	if result.Output["workingDir"] != workingDirectory {
-		t.Fatalf("workingDir = %v, want %s", result.Output["workingDir"], workingDirectory)
+	if result.Output["workingDir"] != deliverableDirectory {
+		t.Fatalf("workingDir = %v, want %s", result.Output["workingDir"], deliverableDirectory)
 	}
 }
 
 func TestRuntimeAdapter_ExecuteRuntimeStepUsesInputTimeoutMillis(t *testing.T) {
 	adapter := NewRuntimeAdapterWithTimeout(time.Second)
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 
 	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workingDirectory,
-		Kind:                      "shell/command",
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
 		Input: map[string]any{
 			"command":       "sh",
 			"args":          []any{"-c", "sleep 0.2; echo done"},
@@ -266,8 +266,8 @@ func TestRuntimeAdapter_ExecuteRuntimeStepUsesInputTimeoutMillis(t *testing.T) {
 func TestRuntimeAdapter_ExecuteRuntimeStepRejectsInvalidInputTimeoutMillis(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	_, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: t.TempDir(),
-		Kind:                      "shell/command",
+		WorkspaceDeliverableDirectory: t.TempDir(),
+		Kind:                          "shell/command",
 		Input: map[string]any{
 			"command":       "pwd",
 			"timeoutMillis": 500,
@@ -295,8 +295,8 @@ func TestRuntimeAdapter_ExecuteRuntimeStepRejectsDangerousCommands(t *testing.T)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-				WorkspaceWorkingDirectory: t.TempDir(),
-				Kind:                      "shell/command",
+				WorkspaceDeliverableDirectory: t.TempDir(),
+				Kind:                          "shell/command",
 				Input: map[string]any{
 					"command": tc.command,
 					"args":    tc.args,

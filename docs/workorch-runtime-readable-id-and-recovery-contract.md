@@ -122,6 +122,27 @@ ID 顺序必须由当前 run 已存在 step 推导，不能依赖随机数。推
 - attempt：使用结构化 root + failure class + failure signature 的 budget count 后加一。
 - 并发图节点使用 graph node order 保证稳定，不使用创建时间生成 ID。
 
+### Runtime File Naming
+
+可读 ID 合同同时约束 file backend 的运行态文件名。逻辑 ID 中的 `/` 应优先保留为文件系统层级，而不是把整个 ID 编码成不可读单段名称。
+
+推荐形态：
+
+```text
+steps/run-xxx/graph-002/007-run-go-test/metadata.json
+tool-calls/run-xxx/graph-002/007-run-go-test/runtime-execute/output.json
+llm-calls/run-xxx/provider-retry-001/request.json
+checkpoints/run-xxx/checkpoint/0007.json
+```
+
+禁止把默认运行态文件名写成纯 base64/hash，例如：
+
+```text
+steps/cnVuLXh4eC9ncmFwaC0wMDIvMDA3LXJ1bi1nby10ZXN0/metadata.json
+```
+
+base64/hash 只能作为极端 fallback，用于单个 segment 超长、清洗后冲突且无法通过 graph scope / sequence 解决的情况；fallback 也必须保留可读前缀和短 hash 后缀。运行态 raw payload ref 必须使用同样的可读层级规则。
+
 ## Lineage 字段合同
 
 ID 可读不代表可以移除 lineage。以下字段仍是恢复与预算计算的唯一依据：
@@ -336,4 +357,4 @@ sourceRefs: [run-xxx/follow-up-003/dod-gate]
 9. result root cause 是否指向业务根因。
 10. 验证脚本是否通过或仅输出 handled warning。
 11. memory recall 是否以高价值决策信息为主。
-
+12. file backend 新运行数据是否没有 `cnVu...`、纯 hash 或其他不可读编码作为默认 step/tool-call/checkpoint/result 文件名。

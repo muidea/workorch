@@ -119,6 +119,48 @@
   `step_stream` entries for streamed provider deltas, so streaming evidence is
   visible through `/api/v1/workorch/runs/{runId}/observability`, not only the
   Run snapshot.
+- Event list reads through `/api/v1/workorch/events` are bounded by default:
+  the endpoint applies `limit=100`, supports `cursorAfterId`, and clamps
+  oversized limits before querying repository-backed event records.
+- Run and Workspace snapshot read models now use bounded event projections:
+  snapshots include compact event metadata/summary payload fields only, while
+  LLM usage aggregation reads separately filtered usage events.
+- Run snapshot HTTP responses now embed bounded Step, ToolCall,
+  RuntimeCheckpoint, Result, Patch, ValidationResult, and Artifact projections
+  for initial rendering only; full lists are loaded through dedicated
+  paginated endpoints.
+- Run step detail reads are available as paginated projections through
+  `GET /api/v1/workorch/runs/{runId}/steps?limit=100&cursorAfterId=...`; the
+  response omits raw input and keeps only compact output fields needed for
+  status, summary, and evidence refs.
+- Run tool-call detail reads are available as paginated projections through
+  `GET /api/v1/workorch/runs/{runId}/tool-calls?limit=100&cursorAfterId=...`;
+  the response keeps metadata, state, summary, and error fields while omitting
+  raw arguments/output payloads.
+- Run runtime checkpoint detail reads are available as paginated projections
+  through `GET /api/v1/workorch/runs/{runId}/runtime-checkpoints?limit=100&cursorAfterId=...`;
+  the response keeps checkpoint metadata while omitting raw checkpoint `data`.
+- Run result detail reads are available as paginated projections through
+  `GET /api/v1/workorch/runs/{runId}/results?limit=100&cursorAfterId=...`; the
+  response keeps result metadata, summary, source refs, and evidence refs while
+  omitting raw DoD assessment/detail payloads.
+- Run patch detail reads are available as paginated projections through
+  `GET /api/v1/workorch/runs/{runId}/patches?limit=100&cursorAfterId=...`; the
+  response keeps patch metadata, target refs, approval refs, state, and line
+  stats while omitting raw diff/content payloads.
+- Run validation result detail reads are available as paginated projections
+  through `GET /api/v1/workorch/runs/{runId}/validation-results?limit=100&cursorAfterId=...`;
+  the response keeps validation metadata, state, summary, and evidence refs.
+- Run artifact detail reads are available as paginated projections through
+  `GET /api/v1/workorch/runs/{runId}/artifacts?limit=100&cursorAfterId=...`; the
+  response keeps artifact metadata, URI, summary, and evidence refs while
+  omitting raw metadata maps and artifact content.
+- Decision and Approval audit list reads are now paginated projections through
+  `GET /api/v1/workorch/decisions?workspaceId=...&runId=...&limit=100&cursorAfterId=...`
+  and `GET /api/v1/workorch/approvals?workspaceId=...&runId=...&limit=100&cursorAfterId=...`;
+  list responses keep IDs, state, summary fields, and governance summaries while
+  omitting Decision `context`, Decision `resolutionPayload`, and Approval
+  `context`. Explicit detail reads still return full payloads.
 - LLM provider requests include a formal `runtimeCapabilities` catalog covering
   available runtime block kinds, declared read-only local service APIs, and
   shell policy. LLM decisions are rejected if shell commands or execution graph
@@ -173,6 +215,37 @@
 - Embedded Web Console can start LLM-driven Workspace execution with
   Goal/DoD/Soul/Skill/MCP/Memory context and observe execution context,
   Decision context, Step output, DoD assessment, and Memory refs.
+- Embedded Web Console step and runtime timeline detail views can open LLM raw
+  request, response, stream, usage, and repair-response evidence through logical
+  runtime payload refs without exposing local file paths.
+- Runtime raw payload reads also support non-LLM lazy details through logical
+  refs for Step input/output, ToolCall arguments/output, RuntimeCheckpoint data,
+  and Result DoD/detail payloads; Web Console exposes these as explicit raw
+  actions from expanded detail rows.
+- Embedded Web Console run detail now separates timeline and event evidence:
+  the Event tab loads `/api/v1/workorch/events` pages by `runId`, `limit`, and
+  `cursorAfterId` instead of relying on full snapshot-embedded event payloads.
+- Embedded Web Console run detail Step tab now loads paginated Step projections
+  from `/api/v1/workorch/runs/{runId}/steps` and supports refresh/load-more
+  actions.
+- Embedded Web Console run detail ToolCall tab now loads paginated ToolCall
+  projections from `/api/v1/workorch/runs/{runId}/tool-calls` and supports
+  refresh/load-more actions.
+- Embedded Web Console run detail RuntimeCheckpoint tab now loads paginated
+  checkpoint projections from `/api/v1/workorch/runs/{runId}/runtime-checkpoints`
+  and supports refresh/load-more actions.
+- Embedded Web Console run detail Result tab now loads paginated Result
+  projections from `/api/v1/workorch/runs/{runId}/results` and supports
+  refresh/load-more actions.
+- Embedded Web Console run detail Patch, ValidationResult, and Artifact tabs now
+  load paginated projections from `/api/v1/workorch/runs/{runId}/patches`,
+  `/api/v1/workorch/runs/{runId}/validation-results`, and
+  `/api/v1/workorch/runs/{runId}/artifacts`, with refresh/load-more actions.
+- Embedded Web Console governance queue now loads Decision and Approval pages
+  through the paginated audit endpoints. Resolution/confirmation modals
+  lazy-load the selected full Decision or Approval detail before showing context
+  or resolution payloads, so queue rendering no longer pulls all large audit
+  payloads by default.
 - Embedded Web Console now uses Chinese business-facing labels and converged
   control-plane entries: business overview, workspace console, governance
   queue, runtime control, system configuration, and service status. Workspace
@@ -222,18 +295,16 @@
   logic from leaking into `kernel/orchestrator`, `kernel/run`, `blocks/llm`,
   `blocks/mcp`, or Web outcome rendering. Business-specific weather acceptance
   terms remain allowed only in e2e scripts, tests, and documentation.
-- Workspace data layout has a formal next-step plan in
-  `docs/workspace-data-layout-plan.md`: `.workorch-data` becomes the single
-  persistence root, Workspace directories own `working`, `artifacts`, and
-  Run-scoped evidence, while software source files and blog drafts remain in
-  `working` and accepted delivery snapshots are stored under `artifacts`.
-- Workspace default directory allocation now follows the data layout plan for
-  the file backend: when `workingDirectory` is omitted, workorch creates
-  `repository.dataDir/workspaces/{workspaceId}/working` and prepares sibling
-  `artifacts` and `runs` directories. Explicit `workingDirectory` remains a
-  user-managed workspace path and is created as the working root only.
+- Workspace data layout now follows
+  `docs/workorch-workspace-deliverable-boundary-design.md`: user deliverables
+  live under `.workorch-workspaces/{workspaceId}`, while WorkOrch runtime state
+  lives under `repository.dataDir/internal/workspaces/{workspaceId}`.
+- Workspace default directory allocation now uses `deliverableDirectory` for
+  the user project root. When omitted for the file backend, workorch creates
+  `.workorch-workspaces/{workspaceId}` and separates internal runtime storage
+  under `repository.dataDir/internal/workspaces/{workspaceId}`.
 - File backend Artifact storage now writes available text/report Artifact
-  summaries under `repository.dataDir/workspaces/{workspaceId}/artifacts/{runId}`
+  summaries under `repository.dataDir/internal/workspaces/{workspaceId}/artifacts/{runId}`
   and stores a `workorch://workspaces/{workspaceId}/artifacts/{runId}/...` URI
   in Artifact metadata. The orchestrator still records only formal Artifact
   metadata; directory and URI materialization stay in the application bootstrap
@@ -244,14 +315,14 @@
   and the Web Console exposes download actions in Artifact tables.
 - File backend metadata now follows the Workspace data layout: Workspace,
   Goal, DoD, and MemoryItem are stored under
-  `repository.dataDir/workspaces/{workspaceId}`; Run, Step, ToolCall, Patch,
-  ValidationResult, RuntimeCheckpoint, Result, Artifact, Decision Ticket,
+  `repository.dataDir/internal/workspaces/{workspaceId}`; Run, Step, ToolCall,
+  Patch, ValidationResult, RuntimeCheckpoint, Result, Artifact, Decision Ticket,
   Resolution, Approval, and Run-bound EventRecord are stored under
-  `repository.dataDir/workspaces/{workspaceId}/runs/{runId}`; Soul, global
+  `repository.dataDir/internal/workspaces/{workspaceId}/runs/{runId}`; Soul, global
   Skill, MCP Server, and service-level EventRecord entries remain under
   `repository.dataDir/system`. Workspace list and directory lookup are backed
   by `repository.dataDir/system/workspace_index.json`, while Workspace metadata
-  remains under `workspaces/{workspaceId}/workspace.json` and Workspace Soul
+  remains under `internal/workspaces/{workspaceId}/workspace.json` and Workspace Soul
   bindings are persisted separately under
   `workspaces/{workspaceId}/config/soul_bindings.json`.
 - Workspace task-stage Soul routing has a formal plan in
@@ -505,10 +576,11 @@ curl -f "http://127.0.0.1:8080/api/v1/workorch/runs?workspaceId=${WORKSPACE_ID}"
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}
 ```
 
-- the workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `workingDirectory` to `repository.dataDir/workspaces/<generated-workspace-id>/working` for the file backend when omitted
+- the workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `deliverableDirectory` to `.workorch-workspaces/<generated-workspace-id>` for the file backend when omitted
 - with the file-backed backend, the run create endpoint creates one formal `workorch` run instance for the requested workspace
 - with the file-backed backend, the run list endpoint returns persisted `workorch` run instances and supports `workspaceId` filtering
 - with the file-backed backend, the single-run endpoint returns one persisted `workorch` run instance
+- with the file-backed backend, the runtime payload endpoint returns whitelisted LLM raw evidence files and non-LLM runtime detail payloads from workspace internal storage by logical `workorch://` ref
 - with the file-backed backend, the run start endpoint advances one persisted `workorch` run instance and returns its updated terminal or blocked state
 - with the file-backed backend, the decision list endpoint returns persisted decision tickets and supports `workspaceId` / `runId` filtering
 - with the file-backed backend, the decision get endpoint returns one persisted decision ticket and its resolution fields when present
@@ -553,17 +625,32 @@ Observed persisted files:
 - `.workorch-data/system/mcp_server.json`
 - `.workorch-data/system/mcp_capability.json`
 - `.workorch-data/system/mcp-endpoints/{mcpServerId}/{helper}`
-- `.workorch-data/workspaces/{workspaceId}/workspace.json`
-- `.workorch-data/workspaces/{workspaceId}/config/soul_bindings.json`
-- `.workorch-data/workspaces/{workspaceId}/goals.json`
-- `.workorch-data/workspaces/{workspaceId}/dods.json`
-- `.workorch-data/workspaces/{workspaceId}/memory_item.json`
-- `.workorch-data/workspaces/{workspaceId}/runs/{runId}/run.json`
-- `.workorch-data/workspaces/{workspaceId}/runs/{runId}/step.json`
-- `.workorch-data/workspaces/{workspaceId}/runs/{runId}/ticket.json`
-- `.workorch-data/workspaces/{workspaceId}/runs/{runId}/approval.json`
-- `.workorch-data/workspaces/{workspaceId}/runs/{runId}/resolution.json`
-- `.workorch-data/workspaces/{workspaceId}/runs/{runId}/artifact.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/workspace.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/config/soul_bindings.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/goals.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/dods.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/memory_item.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/run.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/steps/{stepIdSafe}/metadata.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/steps/{stepIdSafe}/input.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/steps/{stepIdSafe}/output.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/tool-calls/{toolCallIdSafe}/metadata.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/tool-calls/{toolCallIdSafe}/arguments.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/tool-calls/{toolCallIdSafe}/output.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/patches/{patchIdSafe}.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/validations/{validationResultIdSafe}.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/checkpoints/{checkpointIdSafe}.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/results/{resultIdSafe}.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/artifacts/{artifactIdSafe}.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/llm-calls/{stepIdSafe}/request.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/llm-calls/{stepIdSafe}/response.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/llm-calls/{stepIdSafe}/response.sse`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/llm-calls/{stepIdSafe}/usage.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/events/events-000001.jsonl`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/payloads/{eventId}.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/decisions/tickets/{ticketIdSafe}.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/decisions/resolutions/{resolutionIdSafe}.json`
+- `.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/approvals/{approvalIdSafe}.json`
 
 Verified terminal states:
 
@@ -797,7 +884,7 @@ Skill 能力来源已从单一 workorch 内置仓储扩展为 workorch 读模型
 - `skill-hub` 继续负责 Skill 生命周期管理，包括 use/apply/status/repo sync/feedback
 - workorch 只读取 `skill-hub status --json` 输出并映射为 Skill 读模型和 Run execution context
 - 全局 Skill 通过 `skill-hub status --global --json --agent codex` 暴露为 `skillhub:global:<skillId>`
-- Workspace 本地 Skill 通过在 `workspace.workingDirectory` 执行 `skill-hub status --json`
+- Workspace 本地 Skill 通过在 `workspace.deliverableDirectory` 执行 `skill-hub status --json`
   暴露为 `skillhub:workspace:<workspaceId>:<skillId>`
 - Web Console 在 Workspace 上下文下加载 Skill 列表，选择器展示来源、作用域、版本和状态
 

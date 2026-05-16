@@ -2382,7 +2382,7 @@ func (o *RuntimeOrchestrator) runtimeRepairPatchContext(ctx context.Context, run
 		return nil
 	}
 	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
-	if err != nil || workspace == nil || strings.TrimSpace(workspace.WorkingDirectory) == "" {
+	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
 		return nil
 	}
 	targetRefs := patchRepairTargetRefs(failedStep)
@@ -2394,7 +2394,7 @@ func (o *RuntimeOrchestrator) runtimeRepairPatchContext(ctx context.Context, run
 		if idx >= 3 {
 			break
 		}
-		item := patchRepairTargetSnapshot(workspace.WorkingDirectory, targetRef)
+		item := patchRepairTargetSnapshot(workspace.DeliverableDirectory, targetRef)
 		if len(item) > 0 {
 			ret = append(ret, item)
 		}
@@ -2407,7 +2407,7 @@ func (o *RuntimeOrchestrator) runtimeRepairPatchSuggestions(ctx context.Context,
 		return nil
 	}
 	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
-	if err != nil || workspace == nil || strings.TrimSpace(workspace.WorkingDirectory) == "" {
+	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
 		return nil
 	}
 	targetRefs := patchRepairTargetRefs(failedStep)
@@ -2433,7 +2433,7 @@ func (o *RuntimeOrchestrator) runtimeRepairPatchSuggestions(ctx context.Context,
 		if len(allowedTargets) > 0 && !allowedTargets[request.TargetRef] {
 			continue
 		}
-		ret = append(ret, patchRepairSuggestionsForDiff(workspace.WorkingDirectory, request.TargetRef, request.Diff)...)
+		ret = append(ret, patchRepairSuggestionsForDiff(workspace.DeliverableDirectory, request.TargetRef, request.Diff)...)
 	}
 	if len(ret) > 5 {
 		return ret[:5]
@@ -2450,16 +2450,16 @@ func (o *RuntimeOrchestrator) runtimeRepairFailureTargetContext(ctx context.Cont
 		return nil
 	}
 	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
-	if err != nil || workspace == nil || strings.TrimSpace(workspace.WorkingDirectory) == "" {
+	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
 		return nil
 	}
-	targetRefs = resolveWorkspaceTargetRefs(workspace.WorkingDirectory, targetRefs)
+	targetRefs = resolveWorkspaceTargetRefs(workspace.DeliverableDirectory, targetRefs)
 	ret := make([]map[string]any, 0, min(len(targetRefs), 3))
 	for idx, targetRef := range targetRefs {
 		if idx >= 3 {
 			break
 		}
-		item := patchRepairTargetSnapshot(workspace.WorkingDirectory, targetRef)
+		item := patchRepairTargetSnapshot(workspace.DeliverableDirectory, targetRef)
 		if len(item) == 0 {
 			continue
 		}
@@ -2470,11 +2470,11 @@ func (o *RuntimeOrchestrator) runtimeRepairFailureTargetContext(ctx context.Cont
 	return ret
 }
 
-func resolveWorkspaceTargetRefs(workingDirectory string, targetRefs []string) []string {
-	if strings.TrimSpace(workingDirectory) == "" || len(targetRefs) == 0 {
+func resolveWorkspaceTargetRefs(deliverableDirectory string, targetRefs []string) []string {
+	if strings.TrimSpace(deliverableDirectory) == "" || len(targetRefs) == 0 {
 		return targetRefs
 	}
-	files, err := workspaceManifestFiles(workingDirectory)
+	files, err := workspaceManifestFiles(deliverableDirectory)
 	if err != nil || len(files) == 0 {
 		return targetRefs
 	}
@@ -2642,8 +2642,8 @@ func patchRepairTargetRefs(step *runModel.Step) []string {
 	return ret
 }
 
-func patchRepairTargetSnapshot(workingDirectory string, targetRef string) map[string]any {
-	target, err := workspaceTargetPath(workingDirectory, targetRef)
+func patchRepairTargetSnapshot(deliverableDirectory string, targetRef string) map[string]any {
+	target, err := workspaceTargetPath(deliverableDirectory, targetRef)
 	if err != nil {
 		return map[string]any{
 			"targetRef": targetRef,
@@ -2724,8 +2724,8 @@ func patchRepairRequestsFromStep(step *runModel.Step) []runtimePatchRequest {
 	return ret
 }
 
-func patchRepairSuggestionsForDiff(workingDirectory string, targetRef string, diff string) []map[string]any {
-	target, err := workspaceTargetPath(workingDirectory, targetRef)
+func patchRepairSuggestionsForDiff(deliverableDirectory string, targetRef string, diff string) []map[string]any {
+	target, err := workspaceTargetPath(deliverableDirectory, targetRef)
 	if err != nil {
 		return nil
 	}
@@ -2876,7 +2876,7 @@ func (o *RuntimeOrchestrator) convertedDecisionReadableResourceContext(ctx conte
 	decision := mapFromValue(failedStep.Output["convertedDecision"])
 	context := mapFromValue(decision["context"])
 	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
-	if err != nil || workspace == nil || strings.TrimSpace(workspace.WorkingDirectory) == "" {
+	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
 		return nil
 	}
 	context = o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, workspace, context, stringFromMap(decision, "question"), stringFromMap(decision, "reason"))
@@ -2892,7 +2892,7 @@ func (o *RuntimeOrchestrator) convertedDecisionReadableResourceContext(ctx conte
 		if idx >= 5 {
 			break
 		}
-		item := patchRepairTargetSnapshot(workspace.WorkingDirectory, targetRef)
+		item := patchRepairTargetSnapshot(workspace.DeliverableDirectory, targetRef)
 		if len(item) == 0 {
 			continue
 		}
@@ -2919,11 +2919,11 @@ func (o *RuntimeOrchestrator) enrichDecisionContextWithReadableWorkspaceResource
 			workspace = loaded
 		}
 	}
-	workingDirectory := ""
+	deliverableDirectory := ""
 	if workspace != nil {
-		workingDirectory = strings.TrimSpace(workspace.WorkingDirectory)
+		deliverableDirectory = strings.TrimSpace(workspace.DeliverableDirectory)
 	}
-	if workingDirectory == "" {
+	if deliverableDirectory == "" {
 		return context
 	}
 	fields := readableResourceReferenceTexts(context)
@@ -2936,7 +2936,7 @@ func (o *RuntimeOrchestrator) enrichDecisionContextWithReadableWorkspaceResource
 	if len(fields) == 0 {
 		return context
 	}
-	manifest := workspaceFileManifestFromDirectory(workingDirectory)
+	manifest := workspaceFileManifestFromDirectory(deliverableDirectory)
 	if len(manifest) == 0 {
 		return context
 	}
@@ -3183,11 +3183,11 @@ func (o *RuntimeOrchestrator) workspaceFileManifest(ctx context.Context, run *ru
 	if err != nil || workspace == nil {
 		return nil
 	}
-	return workspaceFileManifestFromDirectory(workspace.WorkingDirectory)
+	return workspaceFileManifestFromDirectory(workspace.DeliverableDirectory)
 }
 
-func workspaceFileManifestFromDirectory(workingDirectory string) []map[string]any {
-	files, err := workspaceManifestFiles(workingDirectory)
+func workspaceFileManifestFromDirectory(deliverableDirectory string) []map[string]any {
+	files, err := workspaceManifestFiles(deliverableDirectory)
 	if err != nil || len(files) == 0 {
 		return nil
 	}

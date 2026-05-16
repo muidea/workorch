@@ -23,9 +23,9 @@ func (p workspaceServiceActions) EnsureWorkspace(ctx context.Context, workspaceI
 		return common.ErrInvalidArgument
 	}
 	return p.service.EnsureWorkspace(ctx, workspacemodule.EnsureWorkspaceCommand{
-		WorkspaceID:      workspaceID,
-		Title:            title,
-		WorkingDirectory: "workspaces/" + string(workspaceID),
+		WorkspaceID:          workspaceID,
+		Title:                title,
+		DeliverableDirectory: "workspaces/" + string(workspaceID),
 	})
 }
 

@@ -548,7 +548,7 @@ func decisionContractPrompt(request llmmodels.ProviderRequest) string {
 			"Minimal assessment-only examples:",
 			`{"completionState":"completed","dodAssessment":{"satisfied":true,"summary":"The DoD is satisfied by the collected evidence.","goalOutcome":"The requested work is complete.","items":[{"item":"tests pass","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}],"residualRisks":[],"nextActions":["Review the generated artifacts."]}}`,
 			`{"completionState":"failed","dodAssessment":{"satisfied":false,"summary":"The DoD is not satisfied by the current evidence.","goalOutcome":"The requested work is incomplete.","items":[{"item":"streaming support","state":"failed","evidenceRefs":["run-1/step-2"],"reason":"No streaming-path evidence was produced.","impact":"Clients cannot verify streaming behavior."}],"residualRisks":["Streaming path remains unverified."],"nextActions":["Create targeted streaming implementation and tests in a new repair step."]}}`,
-			`{"completionState":"blocked_on_decision","requiredDecision":{"reason":"missing target repository","decisionKind":"provide_missing_info","question":"Please provide the target repository or working directory.","context":{"missingFields":["workingDirectory"],"requiresHumanFields":["workingDirectory"]}}}`,
+			`{"completionState":"blocked_on_decision","requiredDecision":{"reason":"missing target repository","decisionKind":"provide_missing_info","question":"Please provide the target repository or deliverable directory.","context":{"missingFields":["deliverableDirectory"],"requiresHumanFields":["deliverableDirectory"]}}}`,
 		}, "\n")
 	}
 	lines := []string{

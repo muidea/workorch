@@ -107,9 +107,9 @@ func (s *serverState) createWorkspaceSetupDraftSession(ctx context.Context, req 
 		return workspaceSetupDraftSession{}, common.ErrInvalidArgument
 	}
 	workspace := appservice.WorkspaceSetupDraftWorkspace{
-		Title:            strings.TrimSpace(req.Title),
-		Description:      strings.TrimSpace(req.Description),
-		WorkingDirectory: strings.TrimSpace(req.WorkingDirectory),
+		Title:                strings.TrimSpace(req.Title),
+		Description:          strings.TrimSpace(req.Description),
+		DeliverableDirectory: strings.TrimSpace(req.DeliverableDirectory),
 	}
 	if workspace.Title == "" && workspace.Description == "" {
 		return workspaceSetupDraftSession{}, common.ErrInvalidArgument
@@ -216,8 +216,8 @@ func (s *serverState) applyWorkspaceSetupDraftRequestContext(ctx context.Context
 	if description := strings.TrimSpace(req.Description); description != "" {
 		session.Workspace.Description = description
 	}
-	if workingDirectory := strings.TrimSpace(req.WorkingDirectory); workingDirectory != "" {
-		session.Workspace.WorkingDirectory = workingDirectory
+	if deliverableDirectory := strings.TrimSpace(req.DeliverableDirectory); deliverableDirectory != "" {
+		session.Workspace.DeliverableDirectory = deliverableDirectory
 	}
 	return session, nil
 }

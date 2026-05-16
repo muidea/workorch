@@ -66,23 +66,23 @@ type localWorkspaceBackend struct{ parent *localBackend }
 func (b *localWorkspaceBackend) Create(ctx context.Context, req CreateWorkspaceRequest) (*WorkspaceInfo, error) {
 	s := b.parent.session.Borrow()
 	ws, err := appservice.CreateWorkspaceWithTemplateWithSession(ctx, s, appservice.CreateWorkspaceCommand{
-		Title:            req.Title,
-		Description:      req.Description,
-		WorkingDirectory: req.WorkingDirectory,
-		TemplateID:       req.TemplateID,
+		Title:                req.Title,
+		Description:          req.Description,
+		DeliverableDirectory: req.DeliverableDirectory,
+		TemplateID:           req.TemplateID,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &WorkspaceInfo{
-		ID:               common.WorkspaceID(ws.ID),
-		Title:            ws.Title,
-		Description:      ws.Description,
-		WorkingDirectory: ws.WorkingDirectory,
-		State:            common.WorkspaceState(ws.State),
-		ActiveRunID:      common.RunID(ws.ActiveRunID),
-		DefaultSoulID:    common.SoulID(ws.DefaultSoulID),
-		SoulBindings:     commonSoulBindings(ws.SoulBindings),
+		ID:                   common.WorkspaceID(ws.ID),
+		Title:                ws.Title,
+		Description:          ws.Description,
+		DeliverableDirectory: ws.DeliverableDirectory,
+		State:                common.WorkspaceState(ws.State),
+		ActiveRunID:          common.RunID(ws.ActiveRunID),
+		DefaultSoulID:        common.SoulID(ws.DefaultSoulID),
+		SoulBindings:         commonSoulBindings(ws.SoulBindings),
 	}, nil
 }
 
@@ -97,14 +97,14 @@ func (b *localWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) 
 		return nil, err
 	}
 	return &WorkspaceInfo{
-		ID:               ws.ID,
-		Title:            ws.Title,
-		Description:      ws.Description,
-		WorkingDirectory: ws.WorkingDirectory,
-		State:            ws.State,
-		ActiveRunID:      ws.ActiveRunID,
-		DefaultSoulID:    ws.DefaultSoulID,
-		SoulBindings:     ws.SoulBindings,
+		ID:                   ws.ID,
+		Title:                ws.Title,
+		Description:          ws.Description,
+		DeliverableDirectory: ws.DeliverableDirectory,
+		State:                ws.State,
+		ActiveRunID:          ws.ActiveRunID,
+		DefaultSoulID:        ws.DefaultSoulID,
+		SoulBindings:         ws.SoulBindings,
 	}, nil
 }
 
@@ -121,14 +121,14 @@ func (b *localWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, erro
 	result := make([]WorkspaceInfo, 0, len(list))
 	for _, w := range list {
 		result = append(result, WorkspaceInfo{
-			ID:               w.ID,
-			Title:            w.Title,
-			Description:      w.Description,
-			WorkingDirectory: w.WorkingDirectory,
-			State:            w.State,
-			ActiveRunID:      w.ActiveRunID,
-			DefaultSoulID:    w.DefaultSoulID,
-			SoulBindings:     w.SoulBindings,
+			ID:                   w.ID,
+			Title:                w.Title,
+			Description:          w.Description,
+			DeliverableDirectory: w.DeliverableDirectory,
+			State:                w.State,
+			ActiveRunID:          w.ActiveRunID,
+			DefaultSoulID:        w.DefaultSoulID,
+			SoulBindings:         w.SoulBindings,
 		})
 	}
 	return result, nil

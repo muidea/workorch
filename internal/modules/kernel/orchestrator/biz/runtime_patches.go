@@ -86,7 +86,7 @@ func (o *RuntimeOrchestrator) applyRuntimePatches(
 	step *runModel.Step,
 	toolCall *runModel.ToolCall,
 	output map[string]any,
-	workingDirectory string,
+	deliverableDirectory string,
 ) error {
 	requests, err := runtimePatchRequests(output)
 	if err != nil {
@@ -123,7 +123,7 @@ func (o *RuntimeOrchestrator) applyRuntimePatches(
 				return err
 			}
 		}
-		beforeState, err := workspacePatchBeforeStateForRequest(workingDirectory, request)
+		beforeState, err := workspacePatchBeforeStateForRequest(deliverableDirectory, request)
 		if err != nil {
 			patch.State = common.PatchStateFailed
 			_ = o.evidence.Patches.Update(ctx, patch)
@@ -135,7 +135,7 @@ func (o *RuntimeOrchestrator) applyRuntimePatches(
 		patch.BeforeHash = beforeState.Hash
 		patch.OriginalContent = beforeState.Content
 		patch.OriginalExists = beforeState.Exists
-		if err := applyWorkspacePatch(workingDirectory, request); err != nil {
+		if err := applyWorkspacePatch(deliverableDirectory, request); err != nil {
 			patch.State = common.PatchStateFailed
 			_ = o.evidence.Patches.Update(ctx, patch)
 			if publishErr := o.publishPatchChanged(ctx, run, step, toolCall, patch, events.TopicPatchFailed, err); publishErr != nil {
@@ -143,7 +143,7 @@ func (o *RuntimeOrchestrator) applyRuntimePatches(
 			}
 			return err
 		}
-		afterHash, err := workspacePatchAfterHash(workingDirectory, request.TargetRef)
+		afterHash, err := workspacePatchAfterHash(deliverableDirectory, request.TargetRef)
 		if err != nil {
 			patch.State = common.PatchStateFailed
 			_ = o.evidence.Patches.Update(ctx, patch)
@@ -172,7 +172,7 @@ func (o *RuntimeOrchestrator) applyRuntimePatchRevert(
 	step *runModel.Step,
 	toolCall *runModel.ToolCall,
 	output map[string]any,
-	workingDirectory string,
+	deliverableDirectory string,
 ) error {
 	request, ok, err := runtimePatchRevertRequestFromOutput(output)
 	if err != nil || !ok {
@@ -194,7 +194,7 @@ func (o *RuntimeOrchestrator) applyRuntimePatchRevert(
 	if patch.AfterHash == "" {
 		return fmt.Errorf("%w: patch %s has no afterHash and cannot be reverted", common.ErrInvalidArgument, patch.ID)
 	}
-	currentHash, err := workspacePatchAfterHash(workingDirectory, patch.TargetRef)
+	currentHash, err := workspacePatchAfterHash(deliverableDirectory, patch.TargetRef)
 	if err != nil {
 		return err
 	}
@@ -202,18 +202,18 @@ func (o *RuntimeOrchestrator) applyRuntimePatchRevert(
 		return fmt.Errorf("%w: patch revert hash mismatch", common.ErrConflict)
 	}
 	if patch.OriginalExists {
-		target, err := workspaceTargetPath(workingDirectory, patch.TargetRef)
+		target, err := workspaceTargetPath(deliverableDirectory, patch.TargetRef)
 		if err != nil {
 			return err
 		}
-		if err := ensureWorkspacePatchParentDirectory(workingDirectory, patch.TargetRef, target, "patch_revert"); err != nil {
+		if err := ensureWorkspacePatchParentDirectory(deliverableDirectory, patch.TargetRef, target, "patch_revert"); err != nil {
 			return err
 		}
 		if err := os.WriteFile(target, []byte(patch.OriginalContent), 0o644); err != nil {
 			return err
 		}
 	} else {
-		target, err := workspaceTargetPath(workingDirectory, patch.TargetRef)
+		target, err := workspaceTargetPath(deliverableDirectory, patch.TargetRef)
 		if err != nil {
 			return err
 		}
@@ -469,19 +469,19 @@ var unresolvedPseudoImplementationPattern = regexp.MustCompile(`(?i)(TODO:\s*(im
 var runtimeRedactionMarkerPattern = regexp.MustCompile(`(?i)\[(?:REDACTED|SECRET|MASKED)\]`)
 var nonSubstantivePatchIntentPattern = regexp.MustCompile(`(?i)(ensure|satisfy|force|only|just).{0,48}(patch|state[-_ ]?change|contract|node)|(?:patch|state[-_ ]?change|contract|node).{0,48}(ensure|satisfy|force|only|just)|确保.{0,24}补丁.{0,24}(节点|存在)|为了.{0,24}(补丁|状态变更|patch)|仅.{0,12}(添加|增加).{0,12}(注释|comment).{0,24}(满足|确保|避免)|占位.{0,12}(补丁|patch|变更)`)
 
-func applyWorkspacePatch(workingDirectory string, request runtimePatchRequest) error {
+func applyWorkspacePatch(deliverableDirectory string, request runtimePatchRequest) error {
 	switch request.PatchType {
 	case "file_write":
-		return applyWorkspaceFileWrite(workingDirectory, request.TargetRef, request.Content, request.BaseHash)
+		return applyWorkspaceFileWrite(deliverableDirectory, request.TargetRef, request.Content, request.BaseHash)
 	case "unified_diff":
-		return applyWorkspaceUnifiedDiff(workingDirectory, request.TargetRef, request.Diff, request.BaseHash)
+		return applyWorkspaceUnifiedDiff(deliverableDirectory, request.TargetRef, request.Diff, request.BaseHash)
 	default:
 		return common.ErrInvalidArgument
 	}
 }
 
-func workspacePatchBeforeStateForRequest(workingDirectory string, request runtimePatchRequest) (workspacePatchBeforeState, error) {
-	target, err := workspaceTargetPath(workingDirectory, request.TargetRef)
+func workspacePatchBeforeStateForRequest(deliverableDirectory string, request runtimePatchRequest) (workspacePatchBeforeState, error) {
+	target, err := workspaceTargetPath(deliverableDirectory, request.TargetRef)
 	if err != nil {
 		return workspacePatchBeforeState{}, err
 	}
@@ -499,8 +499,8 @@ func workspacePatchBeforeStateForRequest(workingDirectory string, request runtim
 	}, nil
 }
 
-func workspacePatchAfterHash(workingDirectory string, targetRef string) (string, error) {
-	target, err := workspaceTargetPath(workingDirectory, targetRef)
+func workspacePatchAfterHash(deliverableDirectory string, targetRef string) (string, error) {
+	target, err := workspaceTargetPath(deliverableDirectory, targetRef)
 	if err != nil {
 		return "", err
 	}
@@ -542,22 +542,22 @@ func sha256HexBytes(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func applyWorkspaceFileWrite(workingDirectory string, targetRef string, content string, baseHash string) error {
-	target, err := workspaceTargetPath(workingDirectory, targetRef)
+func applyWorkspaceFileWrite(deliverableDirectory string, targetRef string, content string, baseHash string) error {
+	target, err := workspaceTargetPath(deliverableDirectory, targetRef)
 	if err != nil {
 		return err
 	}
 	if err := verifyWorkspacePatchBaseHash(target, baseHash); err != nil {
 		return err
 	}
-	if err := ensureWorkspacePatchParentDirectory(workingDirectory, targetRef, target, "file_write"); err != nil {
+	if err := ensureWorkspacePatchParentDirectory(deliverableDirectory, targetRef, target, "file_write"); err != nil {
 		return err
 	}
 	return os.WriteFile(target, []byte(content), 0o644)
 }
 
-func ensureWorkspacePatchParentDirectory(workingDirectory string, targetRef string, target string, operation string) error {
-	base, err := filepath.Abs(workingDirectory)
+func ensureWorkspacePatchParentDirectory(deliverableDirectory string, targetRef string, target string, operation string) error {
+	base, err := filepath.Abs(deliverableDirectory)
 	if err != nil {
 		return err
 	}
@@ -602,8 +602,8 @@ func ensureWorkspacePatchParentDirectory(workingDirectory string, targetRef stri
 	return os.MkdirAll(parent, 0o755)
 }
 
-func workspaceTargetPath(workingDirectory string, targetRef string) (string, error) {
-	if strings.TrimSpace(workingDirectory) == "" || strings.TrimSpace(targetRef) == "" {
+func workspaceTargetPath(deliverableDirectory string, targetRef string) (string, error) {
+	if strings.TrimSpace(deliverableDirectory) == "" || strings.TrimSpace(targetRef) == "" {
 		return "", common.ErrInvalidArgument
 	}
 	if filepath.IsAbs(targetRef) {
@@ -613,7 +613,7 @@ func workspaceTargetPath(workingDirectory string, targetRef string) (string, err
 	if cleanTarget == "." || cleanTarget == ".." || strings.HasPrefix(cleanTarget, ".."+string(filepath.Separator)) {
 		return "", common.ErrInvalidArgument
 	}
-	base, err := filepath.Abs(workingDirectory)
+	base, err := filepath.Abs(deliverableDirectory)
 	if err != nil {
 		return "", err
 	}
@@ -704,8 +704,8 @@ type unifiedDiffHunk struct {
 	Lines       []string
 }
 
-func applyWorkspaceUnifiedDiff(workingDirectory string, targetRef string, diff string, baseHash string) error {
-	target, err := workspaceTargetPath(workingDirectory, targetRef)
+func applyWorkspaceUnifiedDiff(deliverableDirectory string, targetRef string, diff string, baseHash string) error {
+	target, err := workspaceTargetPath(deliverableDirectory, targetRef)
 	if err != nil {
 		return err
 	}
@@ -731,7 +731,7 @@ func applyWorkspaceUnifiedDiff(workingDirectory string, targetRef string, diff s
 	if err != nil {
 		return err
 	}
-	if err := ensureWorkspacePatchParentDirectory(workingDirectory, targetRef, target, "unified_diff"); err != nil {
+	if err := ensureWorkspacePatchParentDirectory(deliverableDirectory, targetRef, target, "unified_diff"); err != nil {
 		return err
 	}
 	return os.WriteFile(target, []byte(nextContent), 0o644)
@@ -754,8 +754,8 @@ func verifyWorkspacePatchBaseHashBytes(target string, content []byte, baseHash s
 	return nil
 }
 
-func previewWorkspacePatch(workingDirectory string, request runtimePatchRequest) (map[string]any, error) {
-	target, err := workspaceTargetPath(workingDirectory, request.TargetRef)
+func previewWorkspacePatch(deliverableDirectory string, request runtimePatchRequest) (map[string]any, error) {
+	target, err := workspaceTargetPath(deliverableDirectory, request.TargetRef)
 	if err != nil {
 		return nil, err
 	}
@@ -773,7 +773,7 @@ func previewWorkspacePatch(workingDirectory string, request runtimePatchRequest)
 	}
 	switch request.PatchType {
 	case "file_write":
-		if err := ensureWorkspacePatchParentDirectoryPreview(workingDirectory, request.TargetRef, target, "file_write"); err != nil {
+		if err := ensureWorkspacePatchParentDirectoryPreview(deliverableDirectory, request.TargetRef, target, "file_write"); err != nil {
 			return nil, err
 		}
 		sum := sha256.Sum256([]byte(request.Content))
@@ -813,8 +813,8 @@ func previewWorkspacePatch(workingDirectory string, request runtimePatchRequest)
 	return preview, nil
 }
 
-func ensureWorkspacePatchParentDirectoryPreview(workingDirectory string, targetRef string, target string, operation string) error {
-	base, err := filepath.Abs(workingDirectory)
+func ensureWorkspacePatchParentDirectoryPreview(deliverableDirectory string, targetRef string, target string, operation string) error {
+	base, err := filepath.Abs(deliverableDirectory)
 	if err != nil {
 		return err
 	}

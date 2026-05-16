@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -624,16 +626,31 @@ func TestRuntimeAdapterUsesStreamingProviderWhenCapabilityDeclared(t *testing.T)
 		},
 	}, provider)
 
-	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	request := llmStepRequest()
+	request.WorkspaceInternalDirectory = t.TempDir()
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), request)
 	if err != nil {
 		t.Fatalf("execute runtime step: %v", err)
 	}
 	if result.Output["nextKind"] != "shell/command" {
 		t.Fatalf("output = %+v, want shell plan from streamed decision", result.Output)
 	}
-	streamEvents, ok := result.Output["streamEvents"].([]map[string]any)
-	if !ok || len(streamEvents) != 2 || streamEvents[0]["delta"] == "" {
-		t.Fatalf("streamEvents = %+v, want persisted stream deltas", result.Output["streamEvents"])
+	if result.Output["streamEvents"] != nil {
+		t.Fatalf("streamEvents = %+v, want raw stream omitted from primary output", result.Output["streamEvents"])
+	}
+	diagnostics, ok := result.Output["streamDiagnostics"].(map[string]any)
+	if !ok || diagnostics["receivedEventCount"] != 2 || diagnostics["receivedBytes"] == nil {
+		t.Fatalf("streamDiagnostics = %+v, want bounded stream diagnostics", result.Output["streamDiagnostics"])
+	}
+	refs, ok := result.Output["llmCallRefs"].(map[string]any)
+	if !ok || refs["requestRef"] == "" || refs["responseRef"] == "" || refs["streamRef"] == "" || refs["usageRef"] == "" {
+		t.Fatalf("llmCallRefs = %+v, want persisted request/response/stream/usage refs", result.Output["llmCallRefs"])
+	}
+	itemDir := filepath.Join(request.WorkspaceInternalDirectory, "runs", string(request.RunID), "llm-calls", safeLLMCallEvidenceFileName(string(request.StepID)))
+	for _, name := range []string{"request.json", "response.json", "response.sse", "usage.json"} {
+		if _, err := os.Stat(filepath.Join(itemDir, name)); err != nil {
+			t.Fatalf("llm evidence %s stat: %v", name, err)
+		}
 	}
 }
 
@@ -656,8 +673,11 @@ func TestRuntimeAdapterFailsStreamingErrorClearly(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected streaming error")
 	}
-	if result.Output["stage"] != "llm_provider_stream_error" || result.Output["streamEvents"] == nil {
-		t.Fatalf("output = %+v, want stream error with events", result.Output)
+	if result.Output["stage"] != "llm_provider_stream_error" || result.Output["streamEvents"] != nil {
+		t.Fatalf("output = %+v, want stream error without raw events", result.Output)
+	}
+	if diagnostics, ok := result.Output["streamDiagnostics"].(map[string]any); !ok || diagnostics["streamIncomplete"] != true {
+		t.Fatalf("streamDiagnostics = %+v, want stream error diagnostics", result.Output["streamDiagnostics"])
 	}
 	if result.Output["failureCategory"] != "llm_provider" || result.Output["resolutionHint"] == "" {
 		t.Fatalf("output = %+v, want provider diagnostics", result.Output)

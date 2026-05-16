@@ -1202,11 +1202,11 @@ func TestRuntimeOrchestrator_DispatchNextStepRunsShellCommandAdapter(t *testing.
 	}
 	orch := NewRuntimeOrchestrator(registry, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
 
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 	workspaceID := common.WorkspaceID("ws-shell")
 	runID := common.RunID("run-shell")
 	stepID := common.StepID("run-shell/step-1")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
@@ -1234,8 +1234,8 @@ func TestRuntimeOrchestrator_DispatchNextStepRunsShellCommandAdapter(t *testing.
 		t.Fatalf("exitCode = %v, want 0", step.Output["exitCode"])
 	}
 	stdout, _ := step.Output["stdout"].(string)
-	if strings.TrimSpace(stdout) != workingDirectory {
-		t.Fatalf("stdout = %q, want %q", stdout, workingDirectory)
+	if strings.TrimSpace(stdout) != deliverableDirectory {
+		t.Fatalf("stdout = %q, want %q", stdout, deliverableDirectory)
 	}
 	runItem, err := runRepo.Get(ctx, runID)
 	if err != nil {
@@ -1302,7 +1302,7 @@ func TestRuntimeOrchestrator_DispatchNextStepRunsMCPHTTPAdapter(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-mcp")
 	runID := common.RunID("run-mcp")
 	stepID := common.StepID("run-mcp/step-1")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
@@ -1379,7 +1379,7 @@ func TestRuntimeOrchestrator_DispatchNextStepPreservesShellFailureEvidence(t *te
 	workspaceID := common.WorkspaceID("ws-shell-failed")
 	runID := common.RunID("run-shell-failed")
 	stepID := common.StepID("run-shell-failed/step-1")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
@@ -1468,7 +1468,7 @@ func TestRuntimeOrchestrator_DispatchNextStepPreservesShellTimeoutEvidence(t *te
 	workspaceID := common.WorkspaceID("ws-shell-timeout")
 	runID := common.RunID("run-shell-timeout")
 	stepID := common.StepID("run-shell-timeout/step-1")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
@@ -1687,10 +1687,10 @@ func TestRuntimeOrchestrator_StartRunAppliesRuntimePatchEvidence(t *testing.T) {
 		events.NewMemoryHub(),
 	)
 
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 	workspaceID := common.WorkspaceID("ws-patch")
 	runID := common.RunID("run-patch")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
@@ -1701,7 +1701,7 @@ func TestRuntimeOrchestrator_StartRunAppliesRuntimePatchEvidence(t *testing.T) {
 		t.Fatalf("start run: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(workingDirectory, "docs", "result.txt"))
+	content, err := os.ReadFile(filepath.Join(deliverableDirectory, "docs", "result.txt"))
 	if err != nil {
 		t.Fatalf("read applied patch file: %v", err)
 	}
@@ -1728,7 +1728,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesPatchApplyGraphNode(t *testing.T)
 	validationRepo := memory.NewValidationResultRepository()
 	checkpointRepo := memory.NewRuntimeCheckpointRepository()
 	toolCallRepo := memory.NewToolCallRepository()
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 
 	llmRuntime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
 		switch {
@@ -1780,7 +1780,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesPatchApplyGraphNode(t *testing.T)
 		}
 	}}
 	shellRuntime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
-		if _, err := os.Stat(filepath.Join(request.WorkspaceWorkingDirectory, "docs", "result.txt")); err != nil {
+		if _, err := os.Stat(filepath.Join(request.WorkspaceDeliverableDirectory, "docs", "result.txt")); err != nil {
 			return map[string]any{"status": "failed", "error": err.Error()}, err
 		}
 		return map[string]any{"status": "completed", "stage": "shell_command_completed"}, nil
@@ -1815,7 +1815,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesPatchApplyGraphNode(t *testing.T)
 
 	workspaceID := common.WorkspaceID("ws-patch-graph")
 	runID := common.RunID("run-patch-graph")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -1832,7 +1832,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesPatchApplyGraphNode(t *testing.T)
 		t.Fatalf("start run: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(workingDirectory, "docs", "result.txt"))
+	content, err := os.ReadFile(filepath.Join(deliverableDirectory, "docs", "result.txt"))
 	if err != nil {
 		t.Fatalf("read graph patch file: %v", err)
 	}
@@ -1856,12 +1856,12 @@ func TestRuntimeOrchestrator_StartRunDispatchesPatchApplyGraphNode(t *testing.T)
 }
 
 func TestApplyWorkspaceFileWriteReportsPathConflict(t *testing.T) {
-	workingDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workingDirectory, "llm-proxy"), []byte("binary"), 0o755); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "llm-proxy"), []byte("binary"), 0o755); err != nil {
 		t.Fatalf("seed executable file: %v", err)
 	}
 
-	err := applyWorkspaceFileWrite(workingDirectory, "llm-proxy/config.yaml", "config", "")
+	err := applyWorkspaceFileWrite(deliverableDirectory, "llm-proxy/config.yaml", "config", "")
 	if err == nil {
 		t.Fatalf("applyWorkspaceFileWrite should fail for file-as-directory path conflict")
 	}
@@ -1879,13 +1879,13 @@ func TestApplyWorkspaceFileWriteReportsPathConflict(t *testing.T) {
 }
 
 func TestApplyWorkspacePatchRejectsBaseHashMismatch(t *testing.T) {
-	workingDirectory := t.TempDir()
-	target := filepath.Join(workingDirectory, "main.go")
+	deliverableDirectory := t.TempDir()
+	target := filepath.Join(deliverableDirectory, "main.go")
 	if err := os.WriteFile(target, []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("seed file: %v", err)
 	}
 
-	err := applyWorkspacePatch(workingDirectory, runtimePatchRequest{
+	err := applyWorkspacePatch(deliverableDirectory, runtimePatchRequest{
 		TargetRef: "main.go",
 		Content:   "package changed\n",
 		PatchType: "file_write",
@@ -1904,8 +1904,8 @@ func TestApplyWorkspacePatchRejectsBaseHashMismatch(t *testing.T) {
 }
 
 func TestApplyWorkspacePatchAcceptsRangeLessUnifiedDiff(t *testing.T) {
-	workingDirectory := t.TempDir()
-	target := filepath.Join(workingDirectory, "docs", "sample.txt")
+	deliverableDirectory := t.TempDir()
+	target := filepath.Join(deliverableDirectory, "docs", "sample.txt")
 	original := "alpha\n\nsection one\nold value\nend section\n\nomega\n"
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		t.Fatalf("create target dir: %v", err)
@@ -1914,7 +1914,7 @@ func TestApplyWorkspacePatchAcceptsRangeLessUnifiedDiff(t *testing.T) {
 		t.Fatalf("seed file: %v", err)
 	}
 
-	err := applyWorkspacePatch(workingDirectory, runtimePatchRequest{
+	err := applyWorkspacePatch(deliverableDirectory, runtimePatchRequest{
 		TargetRef: "docs/sample.txt",
 		PatchType: "unified_diff",
 		Diff:      "--- a/docs/sample.txt\n+++ b/docs/sample.txt\n@@\n section one\n-old value\n+new value\n end section\n",
@@ -1932,8 +1932,8 @@ func TestApplyWorkspacePatchAcceptsRangeLessUnifiedDiff(t *testing.T) {
 }
 
 func TestApplyWorkspacePatchAcceptsUnifiedDiffWithDriftedLineNumberWhenContextIsUnique(t *testing.T) {
-	workingDirectory := t.TempDir()
-	target := filepath.Join(workingDirectory, "handler", "handler_test.go")
+	deliverableDirectory := t.TempDir()
+	target := filepath.Join(deliverableDirectory, "handler", "handler_test.go")
 	original := "package handler\n\nimport (\n\t\"encoding/json\"\n\t\"net/http\"\n\t\"net/http/httptest\"\n\t\"os\"\n\t\"strings\"\n\t\"testing\"\n\t\"time\"\n\n\t\"ai-gateway/config\"\n)\n"
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		t.Fatalf("create target dir: %v", err)
@@ -1942,7 +1942,7 @@ func TestApplyWorkspacePatchAcceptsUnifiedDiffWithDriftedLineNumberWhenContextIs
 		t.Fatalf("seed file: %v", err)
 	}
 
-	err := applyWorkspacePatch(workingDirectory, runtimePatchRequest{
+	err := applyWorkspacePatch(deliverableDirectory, runtimePatchRequest{
 		TargetRef: "handler/handler_test.go",
 		PatchType: "unified_diff",
 		Diff: "--- handler/handler_test.go\n+++ handler/handler_test.go\n@@ -8,7 +8,7 @@\n" +
@@ -1965,8 +1965,8 @@ func TestApplyWorkspacePatchAcceptsUnifiedDiffWithDriftedLineNumberWhenContextIs
 }
 
 func TestApplyWorkspacePatchAcceptsSingleFileApplyPatchStyleDiff(t *testing.T) {
-	workingDirectory := t.TempDir()
-	target := filepath.Join(workingDirectory, "docs", "sample.txt")
+	deliverableDirectory := t.TempDir()
+	target := filepath.Join(deliverableDirectory, "docs", "sample.txt")
 	original := "alpha\n\nsection one\nold value\nend section\n\nomega\n"
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		t.Fatalf("create target dir: %v", err)
@@ -1975,7 +1975,7 @@ func TestApplyWorkspacePatchAcceptsSingleFileApplyPatchStyleDiff(t *testing.T) {
 		t.Fatalf("seed file: %v", err)
 	}
 
-	err := applyWorkspacePatch(workingDirectory, runtimePatchRequest{
+	err := applyWorkspacePatch(deliverableDirectory, runtimePatchRequest{
 		TargetRef: "docs/sample.txt",
 		PatchType: "unified_diff",
 		Diff:      "*** Begin Patch\n*** Update File: docs/sample.txt\n@@\n section one\n-old value\n+new value\n end section\n*** End Patch",
@@ -1993,10 +1993,10 @@ func TestApplyWorkspacePatchAcceptsSingleFileApplyPatchStyleDiff(t *testing.T) {
 }
 
 func TestPatchPreviewDoesNotWriteFile(t *testing.T) {
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 	result, err := NewPatchRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceWorkingDirectory: workingDirectory,
-		Kind:                      llmcommon.RuntimeBlockKindPatchPreview,
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          llmcommon.RuntimeBlockKindPatchPreview,
 		Input: map[string]any{
 			"patchType": "file_write",
 			"targetRef": "preview.txt",
@@ -2009,7 +2009,7 @@ func TestPatchPreviewDoesNotWriteFile(t *testing.T) {
 	if result.Output["stage"] != "patch_preview" || result.Output["patches"] != nil {
 		t.Fatalf("patch preview output = %+v, want preview without patches side effect", result.Output)
 	}
-	if _, err := os.Stat(filepath.Join(workingDirectory, "preview.txt")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(deliverableDirectory, "preview.txt")); !os.IsNotExist(err) {
 		t.Fatalf("preview wrote target file, stat err = %v", err)
 	}
 }
@@ -2052,8 +2052,8 @@ func TestRuntimeOrchestratorPublishesPatchPreviewEvent(t *testing.T) {
 
 func TestRuntimeOrchestratorApplyRuntimePatchesPublishesAppliedAndFailedEvents(t *testing.T) {
 	ctx := context.Background()
-	workingDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workingDirectory, "main.go"), []byte("before\n"), 0o644); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main.go"), []byte("before\n"), 0o644); err != nil {
 		t.Fatalf("seed main.go: %v", err)
 	}
 	hub := events.NewMemoryHub()
@@ -2080,7 +2080,7 @@ func TestRuntimeOrchestratorApplyRuntimePatchesPublishesAppliedAndFailedEvents(t
 			"content":   "applied\n",
 			"summary":   "write applied file",
 		}},
-	}, workingDirectory); err != nil {
+	}, deliverableDirectory); err != nil {
 		t.Fatalf("apply patch: %v", err)
 	}
 	if !publishedTopicForTarget(hub.Published(), events.TopicPatchApplied, "applied.txt") {
@@ -2095,7 +2095,7 @@ func TestRuntimeOrchestratorApplyRuntimePatchesPublishesAppliedAndFailedEvents(t
 			"diff":      "--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-wrong\n+after\n",
 			"summary":   "fail context",
 		}},
-	}, workingDirectory)
+	}, deliverableDirectory)
 	if err == nil {
 		t.Fatalf("apply invalid diff should fail")
 	}
@@ -2106,8 +2106,8 @@ func TestRuntimeOrchestratorApplyRuntimePatchesPublishesAppliedAndFailedEvents(t
 
 func TestRuntimeOrchestratorRevertsAppliedPatch(t *testing.T) {
 	ctx := context.Background()
-	workingDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workingDirectory, "main.go"), []byte("before\n"), 0o644); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main.go"), []byte("before\n"), 0o644); err != nil {
 		t.Fatalf("seed main.go: %v", err)
 	}
 	hub := events.NewMemoryHub()
@@ -2133,7 +2133,7 @@ func TestRuntimeOrchestratorRevertsAppliedPatch(t *testing.T) {
 			"content":   "after\n",
 			"summary":   "write after",
 		}},
-	}, workingDirectory); err != nil {
+	}, deliverableDirectory); err != nil {
 		t.Fatalf("apply patch: %v", err)
 	}
 	patchID := common.PatchID("run-patch-revert/step-1/patch/1")
@@ -2146,10 +2146,10 @@ func TestRuntimeOrchestratorRevertsAppliedPatch(t *testing.T) {
 	}
 	revertStep := &runmodel.Step{ID: "run-patch-revert/step-2", RunID: run.ID}
 	output := map[string]any{"patchRevert": map[string]any{"patchId": string(patchID)}}
-	if err := orch.applyRuntimePatchRevert(ctx, run, revertStep, toolCall, output, workingDirectory); err != nil {
+	if err := orch.applyRuntimePatchRevert(ctx, run, revertStep, toolCall, output, deliverableDirectory); err != nil {
 		t.Fatalf("revert patch: %v", err)
 	}
-	content, err := os.ReadFile(filepath.Join(workingDirectory, "main.go"))
+	content, err := os.ReadFile(filepath.Join(deliverableDirectory, "main.go"))
 	if err != nil {
 		t.Fatalf("read reverted file: %v", err)
 	}
@@ -2170,8 +2170,8 @@ func TestRuntimeOrchestratorRevertsAppliedPatch(t *testing.T) {
 
 func TestRuntimeOrchestratorRevertRejectsHashDrift(t *testing.T) {
 	ctx := context.Background()
-	workingDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workingDirectory, "main.go"), []byte("before\n"), 0o644); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main.go"), []byte("before\n"), 0o644); err != nil {
 		t.Fatalf("seed main.go: %v", err)
 	}
 	patchRepo := memory.NewPatchRepository()
@@ -2196,20 +2196,20 @@ func TestRuntimeOrchestratorRevertRejectsHashDrift(t *testing.T) {
 			"content":   "after\n",
 			"summary":   "write after",
 		}},
-	}, workingDirectory); err != nil {
+	}, deliverableDirectory); err != nil {
 		t.Fatalf("apply patch: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workingDirectory, "main.go"), []byte("user changed\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main.go"), []byte("user changed\n"), 0o644); err != nil {
 		t.Fatalf("drift file: %v", err)
 	}
 	patchID := common.PatchID("run-patch-revert-conflict/step-1/patch/1")
 	err := orch.applyRuntimePatchRevert(ctx, run, &runmodel.Step{ID: "run-patch-revert-conflict/step-2", RunID: run.ID}, toolCall, map[string]any{
 		"patchRevert": map[string]any{"patchId": string(patchID)},
-	}, workingDirectory)
+	}, deliverableDirectory)
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("revert error = %v, want conflict", err)
 	}
-	content, err := os.ReadFile(filepath.Join(workingDirectory, "main.go"))
+	content, err := os.ReadFile(filepath.Join(deliverableDirectory, "main.go"))
 	if err != nil {
 		t.Fatalf("read file: %v", err)
 	}
@@ -2227,7 +2227,7 @@ func TestRuntimeOrchestratorRevertRejectsHashDrift(t *testing.T) {
 
 func TestRuntimeOrchestratorBlocksSensitivePatchUntilApproval(t *testing.T) {
 	ctx := context.Background()
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 	runRepo := memory.NewRunRepository()
 	stepRepo := memory.NewStepRepository()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -2235,7 +2235,7 @@ func TestRuntimeOrchestratorBlocksSensitivePatchUntilApproval(t *testing.T) {
 	patchRepo := memory.NewPatchRepository()
 	workspaceID := common.WorkspaceID("ws-sensitive-patch-approval")
 	runID := common.RunID("run-sensitive-patch-approval")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "sensitive patch", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "sensitive patch", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
@@ -2272,7 +2272,7 @@ func TestRuntimeOrchestratorBlocksSensitivePatchUntilApproval(t *testing.T) {
 	if runItem.State != common.RunStateBlockedOnApproval || runItem.BlockingApprovalID == "" {
 		t.Fatalf("run = %+v, want blocked on approval", runItem)
 	}
-	if _, err := os.Stat(filepath.Join(workingDirectory, ".env")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(deliverableDirectory, ".env")); !os.IsNotExist(err) {
 		t.Fatalf("sensitive patch wrote .env before approval, stat err = %v", err)
 	}
 	patches, err := patchRepo.ListByRun(ctx, runID)
@@ -2337,13 +2337,13 @@ func publishedTopicForTarget(items []events.Envelope, topic string, targetRef st
 }
 
 func TestWorkspaceTargetPathRejectsSymlinkEscape(t *testing.T) {
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 	outside := t.TempDir()
-	if err := os.Symlink(outside, filepath.Join(workingDirectory, "outside")); err != nil {
+	if err := os.Symlink(outside, filepath.Join(deliverableDirectory, "outside")); err != nil {
 		t.Fatalf("create symlink: %v", err)
 	}
 
-	if _, err := workspaceTargetPath(workingDirectory, "outside/owned.txt"); err == nil {
+	if _, err := workspaceTargetPath(deliverableDirectory, "outside/owned.txt"); err == nil {
 		t.Fatalf("workspaceTargetPath should reject symlink escape")
 	}
 }
@@ -2484,12 +2484,12 @@ func TestDecisionWithQuestionReferencingReadableWorkspaceFileShouldRepair(t *tes
 }
 
 func TestApplyWorkspaceUnifiedDiffReportsContextMismatch(t *testing.T) {
-	workingDirectory := t.TempDir()
-	targetPath := filepath.Join(workingDirectory, "main_test.go")
+	deliverableDirectory := t.TempDir()
+	targetPath := filepath.Join(deliverableDirectory, "main_test.go")
 	if err := os.WriteFile(targetPath, []byte("package main\n\nfunc TestAuth() {\n\tif auth != \"Bearer [REDACTED]\" {\n\t\tpanic(\"bad auth\")\n\t}\n}\n"), 0o644); err != nil {
 		t.Fatalf("seed target: %v", err)
 	}
-	err := applyWorkspaceUnifiedDiff(workingDirectory, "main_test.go", "--- a/main_test.go\n+++ b/main_test.go\n@@ -34,7 +34,7 @@\n \tauth := r.Header.Get(\"Authorization\")\n-\tif auth != \"Bearer [REDACTED]\" {\n+\tif auth != \"Bearer test-key\" {\n \t\thttp.Error(w, \"Unauthorized\", http.StatusUnauthorized)\n", "")
+	err := applyWorkspaceUnifiedDiff(deliverableDirectory, "main_test.go", "--- a/main_test.go\n+++ b/main_test.go\n@@ -34,7 +34,7 @@\n \tauth := r.Header.Get(\"Authorization\")\n-\tif auth != \"Bearer [REDACTED]\" {\n+\tif auth != \"Bearer test-key\" {\n \t\thttp.Error(w, \"Unauthorized\", http.StatusUnauthorized)\n", "")
 	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "unified diff hunk") {
 		t.Fatalf("applyWorkspaceUnifiedDiff err = %v, want contextual unified diff error", err)
 	}
@@ -2598,13 +2598,13 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchConflictDiagnosticsA
 		events.NewMemoryHub(),
 	)
 
-	workingDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workingDirectory, "llm-proxy"), []byte("binary"), 0o755); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "llm-proxy"), []byte("binary"), 0o755); err != nil {
 		t.Fatalf("seed executable file: %v", err)
 	}
 	workspaceID := common.WorkspaceID("ws-patch-conflict-repair")
 	runID := common.RunID("run-patch-conflict-repair")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -2650,13 +2650,13 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchConflictDiagnosticsA
 func TestRuntimeOrchestrator_RuntimeRepairInputSkipsWorkspaceManifestForDoDFailure(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
-	workingDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workingDirectory, "README.md"), []byte("workspace"), 0o644); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "README.md"), []byte("workspace"), 0o644); err != nil {
 		t.Fatalf("seed workspace file: %v", err)
 	}
 	workspaceID := common.WorkspaceID("ws-dod-repair-no-manifest")
 	runID := common.RunID("run-dod-repair-no-manifest")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
@@ -2738,14 +2738,14 @@ func TestOutputWithDoDAssessmentDiagnosticsNormalizesMissingItems(t *testing.T) 
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 	source := "func sample(arg *Type) {\n\t_ = handler(func(v *Value) {})\n}\n"
-	if err := os.WriteFile(filepath.Join(workingDirectory, "source.txt"), []byte(source), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "source.txt"), []byte(source), 0o644); err != nil {
 		t.Fatalf("seed source file: %v", err)
 	}
 	workspaceID := common.WorkspaceID("ws-patch-repair-context")
 	runID := common.RunID("run-patch-repair-context")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
@@ -2856,14 +2856,14 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *te
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchRepairSuggestions(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 	source := "alpha\nold value\nomega\n"
-	if err := os.WriteFile(filepath.Join(workingDirectory, "source.txt"), []byte(source), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "source.txt"), []byte(source), 0o644); err != nil {
 		t.Fatalf("seed source file: %v", err)
 	}
 	workspaceID := common.WorkspaceID("ws-patch-repair-suggestion")
 	runID := common.RunID("run-patch-repair-suggestion")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
@@ -2904,14 +2904,14 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchRepairSuggestions(t 
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesLineRemovalPatchSuggestion(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 	source := "package main\n\nimport (\n\t\"encoding/json\"\n\t\"io\"\n\t\"net/http\"\n)\n"
-	if err := os.WriteFile(filepath.Join(workingDirectory, "gateway_test.go"), []byte(source), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "gateway_test.go"), []byte(source), 0o644); err != nil {
 		t.Fatalf("seed source file: %v", err)
 	}
 	workspaceID := common.WorkspaceID("ws-patch-repair-line-removal")
 	runID := common.RunID("run-patch-repair-line-removal")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
@@ -2956,20 +2956,20 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesLineRemovalPatchSuggestio
 }
 
 func TestPatchRepairTargetSnapshotMarksRedactedOrTruncatedContentUnsafeForFileWrite(t *testing.T) {
-	workingDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workingDirectory, "secret.txt"), []byte("token [REDACTED]\n"), 0o644); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "secret.txt"), []byte("token [REDACTED]\n"), 0o644); err != nil {
 		t.Fatalf("seed redacted file: %v", err)
 	}
 	large := strings.Repeat("x", maxPatchRepairSnapshotBytes+1)
-	if err := os.WriteFile(filepath.Join(workingDirectory, "large.txt"), []byte(large), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "large.txt"), []byte(large), 0o644); err != nil {
 		t.Fatalf("seed large file: %v", err)
 	}
 
-	redacted := patchRepairTargetSnapshot(workingDirectory, "secret.txt")
+	redacted := patchRepairTargetSnapshot(deliverableDirectory, "secret.txt")
 	if redacted["redacted"] != true || redacted["safeForFileWrite"] != false || redacted["contentComplete"] != true {
 		t.Fatalf("redacted snapshot = %#v, want unsafe redacted complete snapshot", redacted)
 	}
-	truncated := patchRepairTargetSnapshot(workingDirectory, "large.txt")
+	truncated := patchRepairTargetSnapshot(deliverableDirectory, "large.txt")
 	if truncated["truncated"] != true || truncated["contentComplete"] != false || truncated["safeForFileWrite"] != false {
 		t.Fatalf("truncated snapshot = %#v, want unsafe truncated snapshot", truncated)
 	}
@@ -2978,17 +2978,17 @@ func TestPatchRepairTargetSnapshotMarksRedactedOrTruncatedContentUnsafeForFileWr
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshot(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 	source := "package main\n\nimport (\n\t\"fmt\"\n\t\"unused/pkg\"\n)\n"
-	if err := os.WriteFile(filepath.Join(workingDirectory, "main_test.go"), []byte(source), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main_test.go"), []byte(source), 0o644); err != nil {
 		t.Fatalf("seed failure target: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workingDirectory, "support.txt"), []byte("related resource"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "support.txt"), []byte("related resource"), 0o644); err != nil {
 		t.Fatalf("seed related resource: %v", err)
 	}
 	workspaceID := common.WorkspaceID("ws-failure-target-repair-context")
 	runID := common.RunID("run-failure-target-repair-context")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
@@ -3051,16 +3051,16 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshot(t *
 func TestRuntimeOrchestrator_RuntimeRepairInputResolvesUniqueSuffixFailureTarget(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
-	workingDirectory := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(workingDirectory, "nested"), 0o755); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(deliverableDirectory, "nested"), 0o755); err != nil {
 		t.Fatalf("seed nested dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workingDirectory, "nested", "target_test.go"), []byte("package nested\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "nested", "target_test.go"), []byte("package nested\n"), 0o644); err != nil {
 		t.Fatalf("seed nested target: %v", err)
 	}
 	workspaceID := common.WorkspaceID("ws-failure-target-suffix-context")
 	runID := common.RunID("run-failure-target-suffix-context")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
@@ -3092,18 +3092,18 @@ func TestRuntimeOrchestrator_RuntimeRepairInputResolvesUniqueSuffixFailureTarget
 func TestRuntimeOrchestrator_RuntimeRepairInputKeepsAmbiguousSuffixFailureTarget(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 	for _, dir := range []string{"first", "second"} {
-		if err := os.MkdirAll(filepath.Join(workingDirectory, dir), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(deliverableDirectory, dir), 0o755); err != nil {
 			t.Fatalf("seed %s dir: %v", dir, err)
 		}
-		if err := os.WriteFile(filepath.Join(workingDirectory, dir, "target_test.go"), []byte("package sample\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(deliverableDirectory, dir, "target_test.go"), []byte("package sample\n"), 0o644); err != nil {
 			t.Fatalf("seed %s target: %v", dir, err)
 		}
 	}
 	workspaceID := common.WorkspaceID("ws-failure-target-ambiguous-suffix")
 	runID := common.RunID("run-failure-target-ambiguous-suffix")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
@@ -3298,18 +3298,18 @@ func TestRuntimeOrchestrator_RuntimeRepairInputInheritsTargetContextAfterContrac
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesManifestForStateChangingResourceEvidence(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 	for name, content := range map[string]string{
 		"resource-a.txt": "primary",
 		"resource-b.txt": "supporting",
 	} {
-		if err := os.WriteFile(filepath.Join(workingDirectory, name), []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(deliverableDirectory, name), []byte(content), 0o644); err != nil {
 			t.Fatalf("seed %s: %v", name, err)
 		}
 	}
 	workspaceID := common.WorkspaceID("ws-state-changing-resource-manifest")
 	runID := common.RunID("run-state-changing-resource-manifest")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
@@ -3363,18 +3363,18 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesManifestForStateChangingR
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesManifestForOutputMissingDoD(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 	for name, content := range map[string]string{
 		"resource-a.txt": "primary",
 		"resource-b.txt": "supporting",
 	} {
-		if err := os.WriteFile(filepath.Join(workingDirectory, name), []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(deliverableDirectory, name), []byte(content), 0o644); err != nil {
 			t.Fatalf("seed %s: %v", name, err)
 		}
 	}
 	workspaceID := common.WorkspaceID("ws-output-dod-manifest")
 	runID := common.RunID("run-output-dod-manifest")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
@@ -3753,13 +3753,13 @@ func TestRuntimeOrchestrator_LLMInputIncludesExecutionContextPackage(t *testing.
 		events.NewMemoryHub(),
 	)
 
-	workingDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workingDirectory, "README.md"), []byte("workspace"), 0o644); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "README.md"), []byte("workspace"), 0o644); err != nil {
 		t.Fatalf("seed workspace file: %v", err)
 	}
 	workspaceID := common.WorkspaceID("ws-context-package")
 	runID := common.RunID("run-context-package")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := resultRepo.Create(ctx, &resultmodel.Result{
@@ -3900,7 +3900,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageReusesInputWorkspaceManifest
 }
 
 func TestWorkspaceFileManifestSkipsRepositoryAndRuntimeNoise(t *testing.T) {
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 	for _, path := range []string{
 		".git/objects/aa/object",
 		".workorch-data/system/event_record.json",
@@ -3909,7 +3909,7 @@ func TestWorkspaceFileManifestSkipsRepositoryAndRuntimeNoise(t *testing.T) {
 		"README.md",
 		"cmd/workorch/main.go",
 	} {
-		target := filepath.Join(workingDirectory, filepath.FromSlash(path))
+		target := filepath.Join(deliverableDirectory, filepath.FromSlash(path))
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", path, err)
 		}
@@ -3918,7 +3918,7 @@ func TestWorkspaceFileManifestSkipsRepositoryAndRuntimeNoise(t *testing.T) {
 		}
 	}
 
-	manifest := workspaceFileManifestFromDirectory(workingDirectory)
+	manifest := workspaceFileManifestFromDirectory(deliverableDirectory)
 	var paths []string
 	for _, item := range manifest {
 		paths = append(paths, fmt.Sprint(item["path"]))
@@ -4209,7 +4209,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageReusesEmptyHistoryChecks(t *
 		Input: map[string]any{stepInputKeySoulStage: soulStageExecution},
 	}
 
-	firstPackage := orch.runExecutionContextPackage(ctx, run, firstStep, &workspacemodel.Workspace{ID: run.WorkspaceID, WorkingDirectory: t.TempDir()})
+	firstPackage := orch.runExecutionContextPackage(ctx, run, firstStep, &workspacemodel.Workspace{ID: run.WorkspaceID, DeliverableDirectory: t.TempDir()})
 	if got := resultRepo.listByWorkspaceCount.Load(); got != 1 {
 		t.Fatalf("first result ListByWorkspace count = %d, want initial history check", got)
 	}
@@ -4230,7 +4230,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageReusesEmptyHistoryChecks(t *
 			stepInputKeyExecutionContextPackage: firstPackage,
 		},
 	}
-	secondPackage := orch.runExecutionContextPackage(ctx, run, followUpStep, &workspacemodel.Workspace{ID: run.WorkspaceID, WorkingDirectory: t.TempDir()})
+	secondPackage := orch.runExecutionContextPackage(ctx, run, followUpStep, &workspacemodel.Workspace{ID: run.WorkspaceID, DeliverableDirectory: t.TempDir()})
 
 	if got := resultRepo.listByWorkspaceCount.Load(); got != 1 {
 		t.Fatalf("result ListByWorkspace count = %d, want follow-up to reuse empty history check", got)
@@ -4292,7 +4292,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageReusesStableFollowUpPackage(
 		},
 	}
 
-	pkg := orch.runExecutionContextPackage(ctx, run, step, &workspacemodel.Workspace{ID: run.WorkspaceID, WorkingDirectory: t.TempDir()})
+	pkg := orch.runExecutionContextPackage(ctx, run, step, &workspacemodel.Workspace{ID: run.WorkspaceID, DeliverableDirectory: t.TempDir()})
 
 	if got := resultRepo.listByWorkspaceCount.Load(); got != 0 {
 		t.Fatalf("result ListByWorkspace count = %d, want 0 when stable result context is inherited", got)
@@ -4328,7 +4328,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageDoesNotScanProvidedWorkspace
 	if err := os.WriteFile(filepath.Join(workingDir, "README.md"), []byte("hello"), 0o644); err != nil {
 		t.Fatalf("seed workspace file: %v", err)
 	}
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDir, State: common.WorkspaceStateRunning}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: workingDir, State: common.WorkspaceStateRunning}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -4362,7 +4362,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageIncludesManifestForReplanSta
 			t.Fatalf("seed workspace file %s: %v", path, err)
 		}
 	}
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDir, State: common.WorkspaceStateRunning}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: workingDir, State: common.WorkspaceStateRunning}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -4414,7 +4414,7 @@ func TestRuntimeOrchestrator_ResultManifestReusesProvidedWorkspace(t *testing.T)
 	if err := os.WriteFile(filepath.Join(workingDir, "README.md"), []byte("accepted"), 0o644); err != nil {
 		t.Fatalf("seed workspace file: %v", err)
 	}
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDir, State: common.WorkspaceStateRunning}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: workingDir, State: common.WorkspaceStateRunning}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -4503,7 +4503,7 @@ func TestRuntimeOrchestrator_ResultManifestDoesNotListWorkspaceFilesWhenNoPatch(
 
 	manifest := orch.workspaceDeliverableManifestContent(ctx, run, step, map[string]any{
 		"summary": "accepted with context manifest",
-	}, []string{string(step.ID)}, &workspacemodel.Workspace{ID: workspaceID, WorkingDirectory: workingDir}, nil)
+	}, []string{string(step.ID)}, &workspacemodel.Workspace{ID: workspaceID, DeliverableDirectory: workingDir}, nil)
 
 	if !strings.Contains(manifest, "No workspace file deliverables were produced in this run.") ||
 		strings.Contains(manifest, "`from-context.md`") ||
@@ -4548,7 +4548,7 @@ func TestRuntimeOrchestrator_ResultManifestListsOnlyPatchTargets(t *testing.T) {
 
 	manifest := orch.workspaceDeliverableManifestContent(ctx, run, step, map[string]any{
 		"summary": "accepted after patch",
-	}, []string{string(step.ID)}, &workspacemodel.Workspace{ID: workspaceID, WorkingDirectory: workingDir}, []resultPatchDetail{
+	}, []string{string(step.ID)}, &workspacemodel.Workspace{ID: workspaceID, DeliverableDirectory: workingDir}, []resultPatchDetail{
 		{TargetRef: "from-disk.md", PatchType: "file_write", Content: "fresh disk content", State: common.PatchStateApplied},
 		{TargetRef: "from-disk.md", PatchType: "file_write", Content: "fresh disk content", State: common.PatchStateApplied},
 	})
@@ -5271,11 +5271,11 @@ func TestRuntimeOrchestrator_ResumeRunDispatchReusesSyncedWorkspace(t *testing.T
 		events.NewMemoryHub(),
 	)
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
-		ID:               workspaceID,
-		Title:            "ws",
-		WorkingDirectory: t.TempDir(),
-		State:            common.WorkspaceStateWaitingDecision,
-		ActiveRunID:      runID,
+		ID:                   workspaceID,
+		Title:                "ws",
+		DeliverableDirectory: t.TempDir(),
+		State:                common.WorkspaceStateWaitingDecision,
+		ActiveRunID:          runID,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -5371,7 +5371,7 @@ func TestRuntimeOrchestrator_GraphBatchDispatchReusesLoadedWorkspace(t *testing.
 	)
 	workspaceID := common.WorkspaceID("ws-graph-batch-workspace-reuse")
 	runID := common.RunID("run-graph-batch-workspace-reuse")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
@@ -5421,7 +5421,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageIncludesRecentFailureSummary
 		State:           common.RunStateRunning,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateRunning}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, run); err != nil {
@@ -5797,7 +5797,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageSkipsInitialStepFailureHisto
 		State:           common.RunStateRunning,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateRunning}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, run); err != nil {
@@ -5846,7 +5846,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageSkipsFailureHistoryForNormal
 		State:           common.RunStateRunning,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateRunning}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, run); err != nil {
@@ -5897,7 +5897,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageBuildsIndependentContextRead
 
 	done := make(chan map[string]any, 1)
 	go func() {
-		done <- orch.runExecutionContextPackage(ctx, run, step, &workspacemodel.Workspace{ID: run.WorkspaceID, WorkingDirectory: t.TempDir()})
+		done <- orch.runExecutionContextPackage(ctx, run, step, &workspacemodel.Workspace{ID: run.WorkspaceID, DeliverableDirectory: t.TempDir()})
 	}()
 
 	seen := map[string]bool{}
@@ -6019,7 +6019,7 @@ func TestRuntimeOrchestrator_DispatchesLLMRepairAfterGraphNodeFailure(t *testing
 
 	workspaceID := common.WorkspaceID("ws-runtime-repair")
 	runID := common.RunID("run-runtime-repair")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -6073,8 +6073,8 @@ func TestRuntimeOrchestrator_SoftwareDevCodeAgentRepairsTestFailureAndDeliversDi
 	artifactRepo := memory.NewArtifactRepository()
 	patchRepo := memory.NewPatchRepository()
 	memoryRepo := memory.NewMemoryItemRepository()
-	workingDirectory := t.TempDir()
-	targetPath := filepath.Join(workingDirectory, "calculator.go")
+	deliverableDirectory := t.TempDir()
+	targetPath := filepath.Join(deliverableDirectory, "calculator.go")
 	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
 		stepID := string(request.StepID)
 		switch {
@@ -6218,7 +6218,7 @@ func TestRuntimeOrchestrator_SoftwareDevCodeAgentRepairsTestFailureAndDeliversDi
 
 	workspaceID := common.WorkspaceID("ws-software-dev-code-agent")
 	runID := common.RunID("run-software-dev-code-agent")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "software-dev", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "software-dev", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -6328,7 +6328,7 @@ func TestRuntimeOrchestrator_DoesNotRepairLLMProviderError(t *testing.T) {
 
 	workspaceID := common.WorkspaceID("ws-llm-provider-error")
 	runID := common.RunID("run-llm-provider-error")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -6542,7 +6542,7 @@ func TestRuntimeOrchestrator_RetriesLLMProviderTimeoutBeforeFailingRun(t *testin
 
 	workspaceID := common.WorkspaceID("ws-llm-provider-timeout-retry")
 	runID := common.RunID("run-llm-provider-timeout-retry")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -6604,7 +6604,7 @@ func TestRuntimeOrchestrator_BlocksOnDecisionAfterProviderTimeoutRetriesExhauste
 
 	workspaceID := common.WorkspaceID("ws-llm-provider-timeout-block")
 	runID := common.RunID("run-llm-provider-timeout-block")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -7040,7 +7040,7 @@ func TestRuntimeOrchestrator_ResumeClearsStaleRuntimeRepairExhaustionBlocker(t *
 	runID := common.RunID("run-stale-repair-blocker")
 	ticketID := common.TicketID("ticket-stale-repair-blocker")
 	signature := "class=runtime|target=stale"
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -7135,7 +7135,7 @@ func TestRuntimeOrchestrator_ResumeClearsRepairExhaustionWhenTargetWindowHasBudg
 	failedStepID := common.StepID(runID + "/graph-009/006-build")
 	ticketID := common.TicketID(string(failedStepID) + "-repair-exhausted-decision")
 	signature := "class=shell_command_failed|kind=shell/command|node=build|failureTargets=main.go|exitCode=1|error=exit status 1"
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -7315,7 +7315,7 @@ func TestRuntimeOrchestrator_ResumeClearsDuplicateFailureBlockerBelowScopedBudge
 	failedStepID := common.StepID(runID + "/block/verify")
 	ticketID := common.TicketID(string(failedStepID) + "-duplicate-failure-decision")
 	signature := "class=shell_command_failed|kind=shell/command|node=verify|failureTargets=config/settings.yaml|exitCode=1"
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -7786,7 +7786,7 @@ func TestRuntimeOrchestrator_DispatchNextBlocksProviderFailureAfterRetryBudget(t
 	workspaceID := common.WorkspaceID("ws-dispatch-provider-retry-exhausted")
 	runID := common.RunID("run-dispatch-provider-retry-exhausted")
 	rootStepID := common.StepID(runID + "/llm-provider-step")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -7881,11 +7881,11 @@ func TestRuntimeOrchestrator_ResumeResolvedProviderRetryExhaustionReblocksWithou
 	failedStepID := providerRetryStepID(runID, rootStepID, maxProviderRetryAttempts)
 	ticketID := common.TicketID(runtimeChildID(failedStepID, "provider-retry-exhausted-decision"))
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
-		ID:               workspaceID,
-		Title:            "ws",
-		WorkingDirectory: t.TempDir(),
-		State:            common.WorkspaceStateWaitingDecision,
-		ActiveRunID:      runID,
+		ID:                   workspaceID,
+		Title:                "ws",
+		DeliverableDirectory: t.TempDir(),
+		State:                common.WorkspaceStateWaitingDecision,
+		ActiveRunID:          runID,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -8780,7 +8780,7 @@ func TestRuntimeOrchestrator_DuplicateRuntimeFailureBelowScopedBudgetDispatchesR
 
 	workspaceID := common.WorkspaceID("ws-duplicate-failure")
 	runID := common.RunID("run-duplicate-failure")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -8867,7 +8867,7 @@ func TestRuntimeOrchestrator_DuplicateRuntimeFailureExhaustedScopeUsesRepairExha
 
 	workspaceID := common.WorkspaceID("ws-duplicate-failure-exhausted")
 	runID := common.RunID("run-duplicate-failure-exhausted")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -9018,7 +9018,7 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionFailsRun(t *testing.T) {
 
 	workspaceID := common.WorkspaceID("ws-runtime-repair-exhausted")
 	runID := common.RunID("run-runtime-repair-exhausted")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -9112,7 +9112,7 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionWritesRejectedResultBeforeTi
 		hub,
 	)
 	workspaceID := common.WorkspaceID("ws-repair-exhaustion-result-before-ticket")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -9610,11 +9610,11 @@ func TestRuntimeOrchestrator_StartRunAppliesUnifiedDiffPatchEvidence(t *testing.
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	patchRepo := memory.NewPatchRepository()
-	workingDirectory := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(workingDirectory, "docs"), 0o755); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(deliverableDirectory, "docs"), 0o755); err != nil {
 		t.Fatalf("mkdir docs: %v", err)
 	}
-	targetPath := filepath.Join(workingDirectory, "docs", "result.txt")
+	targetPath := filepath.Join(deliverableDirectory, "docs", "result.txt")
 	if err := os.WriteFile(targetPath, []byte("before\nkeep\n"), 0o644); err != nil {
 		t.Fatalf("seed target file: %v", err)
 	}
@@ -9648,7 +9648,7 @@ func TestRuntimeOrchestrator_StartRunAppliesUnifiedDiffPatchEvidence(t *testing.
 
 	workspaceID := common.WorkspaceID("ws-unified-diff")
 	runID := common.RunID("run-unified-diff")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
@@ -9689,11 +9689,11 @@ func TestRuntimeOrchestrator_StartRunPersistsUnifiedDiffPatchEvidenceWithFileBac
 	approvalRepo := filerepo.NewApprovalRepository(filepath.Join(dataRoot, "approvals.json"))
 	patchPath := filepath.Join(dataRoot, "patches.json")
 	patchRepo := filerepo.NewPatchRepository(patchPath)
-	workingDirectory := filepath.Join(dataRoot, "workspace")
-	if err := os.MkdirAll(filepath.Join(workingDirectory, "docs"), 0o755); err != nil {
+	deliverableDirectory := filepath.Join(dataRoot, "workspace")
+	if err := os.MkdirAll(filepath.Join(deliverableDirectory, "docs"), 0o755); err != nil {
 		t.Fatalf("mkdir docs: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workingDirectory, "docs", "result.txt"), []byte("before\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "docs", "result.txt"), []byte("before\n"), 0o644); err != nil {
 		t.Fatalf("seed target file: %v", err)
 	}
 	runtime := &stubRuntimeAdapter{output: map[string]any{
@@ -9725,7 +9725,7 @@ func TestRuntimeOrchestrator_StartRunPersistsUnifiedDiffPatchEvidenceWithFileBac
 
 	workspaceID := common.WorkspaceID("ws-unified-diff-file")
 	runID := common.RunID("run-unified-diff-file")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
@@ -9785,16 +9785,16 @@ func TestRuntimeOrchestrator_StartRunFailsInvalidUnifiedDiffPatch(t *testing.T) 
 		events.NewMemoryHub(),
 	)
 
-	workingDirectory := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(workingDirectory, "docs"), 0o755); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(deliverableDirectory, "docs"), 0o755); err != nil {
 		t.Fatalf("mkdir docs: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workingDirectory, "docs", "result.txt"), []byte("before\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "docs", "result.txt"), []byte("before\n"), 0o644); err != nil {
 		t.Fatalf("seed target file: %v", err)
 	}
 	workspaceID := common.WorkspaceID("ws-unified-diff-invalid")
 	runID := common.RunID("run-unified-diff-invalid")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
@@ -9819,7 +9819,7 @@ func TestRuntimeOrchestrator_StartRunFailsInvalidUnifiedDiffPatch(t *testing.T) 
 	if len(patches) != 1 || patches[0].State != common.PatchStateFailed {
 		t.Fatalf("patches = %+v, want failed unified diff patch", patches)
 	}
-	content, err := os.ReadFile(filepath.Join(workingDirectory, "docs", "result.txt"))
+	content, err := os.ReadFile(filepath.Join(deliverableDirectory, "docs", "result.txt"))
 	if err != nil {
 		t.Fatalf("read target file: %v", err)
 	}
@@ -9865,7 +9865,7 @@ func TestRuntimeOrchestrator_StartRunFailsInvalidRuntimePatchTarget(t *testing.T
 
 	workspaceID := common.WorkspaceID("ws-patch-invalid")
 	runID := common.RunID("run-patch-invalid")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
@@ -10725,8 +10725,8 @@ func TestRuntimeOrchestrator_ConvertsKnownReadableResourceDecisionToRepair(t *te
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
-	workingDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workingDirectory, "main_test.go"), []byte("package main\n\nfunc TestKnownResource() {}\n"), 0o644); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main_test.go"), []byte("package main\n\nfunc TestKnownResource() {}\n"), 0o644); err != nil {
 		t.Fatalf("write workspace file: %v", err)
 	}
 
@@ -10785,7 +10785,7 @@ func TestRuntimeOrchestrator_ConvertsKnownReadableResourceDecisionToRepair(t *te
 
 	workspaceID := common.WorkspaceID("ws-known-resource-decision")
 	runID := common.RunID("run-known-resource-decision")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -10836,17 +10836,17 @@ func TestRuntimeOrchestrator_ConvertsQuestionOnlyReadableResourceDecisionToRepai
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
-	workingDirectory := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(workingDirectory, "config"), 0o755); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(deliverableDirectory, "config"), 0o755); err != nil {
 		t.Fatalf("create config dir: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(workingDirectory, "handler"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(deliverableDirectory, "handler"), 0o755); err != nil {
 		t.Fatalf("create handler dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workingDirectory, "config", "config.go"), []byte("package config\n\nconst AppName = \"workorch-test\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "config", "config.go"), []byte("package config\n\nconst AppName = \"workorch-test\"\n"), 0o644); err != nil {
 		t.Fatalf("write config file: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workingDirectory, "handler", "handler.go"), []byte("package handler\n\nfunc Route() string { return \"ok\" }\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "handler", "handler.go"), []byte("package handler\n\nfunc Route() string { return \"ok\" }\n"), 0o644); err != nil {
 		t.Fatalf("write handler file: %v", err)
 	}
 
@@ -10896,7 +10896,7 @@ func TestRuntimeOrchestrator_ConvertsQuestionOnlyReadableResourceDecisionToRepai
 
 	workspaceID := common.WorkspaceID("ws-question-readable-decision")
 	runID := common.RunID("run-question-readable-decision")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -10944,8 +10944,8 @@ func TestRuntimeOrchestrator_ResumeRunAutoRepairsOpenKnownReadableResourceDecisi
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	approvalRepo := memory.NewApprovalRepository()
-	workingDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workingDirectory, "main_test.go"), []byte("package main\n\nfunc TestReadableTicketResource(t *testing.T) {}\n"), 0o644); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main_test.go"), []byte("package main\n\nfunc TestReadableTicketResource(t *testing.T) {}\n"), 0o644); err != nil {
 		t.Fatalf("write workspace file: %v", err)
 	}
 
@@ -10981,7 +10981,7 @@ func TestRuntimeOrchestrator_ResumeRunAutoRepairsOpenKnownReadableResourceDecisi
 	runID := common.RunID("run-open-known-resource-decision")
 	stepID := common.StepID("run-open-known-resource-decision/follow-up-graph-001")
 	ticketID := common.TicketID("ticket-open-known-resource-decision")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -11905,8 +11905,8 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterLLMPatchSideEffect(t *tes
 
 	workspaceID := common.WorkspaceID("ws-patch-follow-up")
 	runID := common.RunID("run-patch-follow-up")
-	workingDirectory := t.TempDir()
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -12291,7 +12291,7 @@ func TestRuntimeOrchestrator_DispatchStepGraphFollowUpReusesLoadedStepsForEviden
 		},
 		eventHub: events.NewMemoryHub(),
 	}
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}
 	run := &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
@@ -13005,7 +13005,7 @@ func TestRuntimeOrchestrator_AssessmentOnlyDecisionForContinuableCandidateRoutes
 
 	workspaceID := common.WorkspaceID("ws-assessment-only-decision-repair")
 	runID := common.RunID("run-assessment-only-decision-repair")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	run := &runmodel.Run{
@@ -13143,7 +13143,7 @@ func TestRuntimeOrchestrator_ContinuableDecisionRoutesToRepair(t *testing.T) {
 
 	workspaceID := common.WorkspaceID("ws-continuable-decision-repair")
 	runID := common.RunID("run-continuable-decision-repair")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	run := &runmodel.Run{
@@ -13898,7 +13898,7 @@ func TestRuntimeOrchestrator_DispatchesConcreteGraphReturnedByExecutionLLMNode(t
 	runID := common.RunID("run-execution-concrete-graph-dispatch")
 	rootStepID := common.StepID(string(runID) + "/step-1")
 	llmStepID := common.StepID(string(runID) + "/graph-001/006-plan-impl")
-	workingDirectory := t.TempDir()
+	deliverableDirectory := t.TempDir()
 	nestedGraph := map[string]any{
 		"nodes": []map[string]any{
 			{
@@ -13953,7 +13953,7 @@ func TestRuntimeOrchestrator_DispatchesConcreteGraphReturnedByExecutionLLMNode(t
 		},
 		events.NewMemoryHub(),
 	)
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateRunning}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateRunning}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -16184,14 +16184,14 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 
 	workspaceID := common.WorkspaceID("ws-dod-gate-complete")
 	runID := common.RunID("run-dod-gate-complete")
-	workingDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workingDirectory, "main.go"), []byte("package main\n"), 0o644); err != nil {
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("write deliverable: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workingDirectory, "README.md"), []byte("# Delivery\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "README.md"), []byte("# Delivery\n"), 0o644); err != nil {
 		t.Fatalf("write deliverable readme: %v", err)
 	}
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: workingDirectory, State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -16836,7 +16836,7 @@ func TestRuntimeOrchestrator_CompletionEvidenceWritesResultAndSkillFeedbackConcu
 
 	workspaceID := common.WorkspaceID("ws-completion-evidence-concurrent")
 	runID := common.RunID("run-completion-evidence-concurrent")
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateRunning}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning}
 	run := &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
@@ -17045,7 +17045,7 @@ func TestRuntimeOrchestrator_ResultArtifactsWriteConcurrentlyBeforeAcceptedResul
 
 	workspaceID := common.WorkspaceID("ws-result-manifest-prefetch")
 	runID := common.RunID("run-result-manifest-prefetch")
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}
 	run := &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,

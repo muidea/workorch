@@ -8,9 +8,17 @@ writeTimeout = "180s"
 idleTimeout = "60s"
 shutdownTimeout = "5s"
 maxConcurrentRuns = 1
+defaultDialogLanguage = ""
 
 [repository]
 backend = "file"
+# repository.dataDir is the WorkOrch internal state root.
+# File backend runtime data is stored under:
+#   <dataDir>/internal/workspaces/<workspace-id>/
+# When a workspace is created without an explicit deliverableDirectory,
+# the user-facing project root defaults to the sibling directory:
+#   .workorch-workspaces/<workspace-id>/
+# beside repository.dataDir, not inside the internal state tree.
 dataDir = ".workorch-data"
 
 [runtime]
@@ -21,6 +29,7 @@ shellCommandTimeout = "60s"
 
 [llm]
 defaultProvider = "local"
+defaultEmbeddingProvider = ""
 
 [llm.providers.local]
 provider = ""

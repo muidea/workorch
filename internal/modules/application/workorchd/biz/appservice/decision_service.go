@@ -43,6 +43,23 @@ type Decision struct {
 	AutoGovernance    *AutoGovernanceSummary `json:"autoGovernance,omitempty"`
 }
 
+type DecisionQuery struct {
+	WorkspaceID   string
+	RunID         string
+	CursorAfterID string
+	Limit         int
+}
+
+type DecisionPage struct {
+	WorkspaceID       string     `json:"workspaceId,omitempty"`
+	RunID             string     `json:"runId,omitempty"`
+	Decisions         []Decision `json:"decisions,omitempty"`
+	Limit             int        `json:"limit"`
+	CursorAfterID     string     `json:"cursorAfterId,omitempty"`
+	NextCursorAfterID string     `json:"nextCursorAfterId,omitempty"`
+	HasMore           bool       `json:"hasMore"`
+}
+
 type ResolveDecisionCommand struct {
 	ResolutionType    string         `json:"resolutionType"`
 	ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
@@ -151,6 +168,63 @@ func ListDecisionsWithBackend(ctx context.Context, backend string, dataRoot stri
 		return nil, err
 	}
 	return ListDecisionsWithSession(ctx, session, workspaceID, runID)
+}
+
+func ListDecisionPageWithSession(ctx context.Context, session *RuntimeSession, query DecisionQuery) (ret DecisionPage, err error) {
+	_, tickets, resolutions, err := decisionDependenciesFromSession(session)
+	if err != nil {
+		return DecisionPage{}, err
+	}
+	traces := autoGovernanceTraceRepositoryFromSession(session)
+	defer session.CloseOnReturn(ctx, &err)
+
+	items, err := tickets.List(ctx)
+	if err != nil {
+		return DecisionPage{}, err
+	}
+	filtered := make([]*decisionmodel.Ticket, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if query.WorkspaceID != "" && string(item.WorkspaceID) != query.WorkspaceID {
+			continue
+		}
+		if query.RunID != "" && string(item.RunID) != query.RunID {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	pageTickets, limit, cursorAfterID, nextCursor, hasMore := pageDecisionTickets(filtered, query)
+	resolutionMap, err := resolutionsForTickets(ctx, resolutions, pageTickets)
+	if err != nil {
+		return DecisionPage{}, err
+	}
+	decisions := make([]Decision, 0, len(pageTickets))
+	for _, item := range pageTickets {
+		summary, err := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "ticket", string(item.ID))
+		if err != nil {
+			return DecisionPage{}, err
+		}
+		decisions = append(decisions, projectDecisionView(mapDecision(item, resolutionMap[item.ID], summary)))
+	}
+	return DecisionPage{
+		WorkspaceID:       strings.TrimSpace(query.WorkspaceID),
+		RunID:             strings.TrimSpace(query.RunID),
+		Decisions:         decisions,
+		Limit:             limit,
+		CursorAfterID:     cursorAfterID,
+		NextCursorAfterID: nextCursor,
+		HasMore:           hasMore,
+	}, nil
+}
+
+func ListDecisionPageWithBackend(ctx context.Context, backend string, dataRoot string, query DecisionQuery) (DecisionPage, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return DecisionPage{}, err
+	}
+	return ListDecisionPageWithSession(ctx, session, query)
 }
 
 func ListDecisionsFromEnv(ctx context.Context, workspaceID string, runID string) ([]Decision, error) {

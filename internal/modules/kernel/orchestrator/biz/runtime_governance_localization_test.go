@@ -24,7 +24,7 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionUsesDialogLanguage(t *testin
 	ticketRepo := memory.NewDecisionTicketRepository()
 	workspaceID := common.WorkspaceID("ws-runtime-repair-localized")
 	runID := common.RunID("run-runtime-repair-localized")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	run := &runmodel.Run{
@@ -97,7 +97,7 @@ func TestRuntimeOrchestrator_DuplicateRuntimeFailureUsesDialogLanguage(t *testin
 	ticketRepo := memory.NewDecisionTicketRepository()
 	workspaceID := common.WorkspaceID("ws-duplicate-failure-localized")
 	runID := common.RunID("run-duplicate-failure-localized")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", WorkingDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	run := &runmodel.Run{

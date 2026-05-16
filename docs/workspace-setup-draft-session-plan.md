@@ -57,7 +57,7 @@
   "workspace": {
     "title": "xxx",
     "description": "xxx",
-    "workingDirectory": "xxx"
+    "deliverableDirectory": "xxx"
   },
   "messages": [
     { "role": "user", "content": "..." },
@@ -88,7 +88,7 @@
   "templateId": "generic-governed",
   "title": "新工作空间",
   "description": "背景描述",
-  "workingDirectory": "/path/to/workspace"
+  "deliverableDirectory": "/path/to/workspace"
 }
 ```
 

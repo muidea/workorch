@@ -206,7 +206,7 @@ func ResolveDefaultWorkspace(ctx context.Context, be backend.Backend, workingDir
 	}
 	list, _ := be.Workspace().List(ctx)
 	for _, ws := range list {
-		if ws.WorkingDirectory == workingDir {
+		if ws.DeliverableDirectory == workingDir {
 			return ws
 		}
 	}
@@ -221,10 +221,10 @@ func ResolveDefaultWorkspace(ctx context.Context, be backend.Backend, workingDir
 		}
 	}
 	ws, err := be.Workspace().Create(ctx, backend.CreateWorkspaceRequest{
-		Title:            filepath.Base(workingDir),
-		Description:      workingDir,
-		WorkingDirectory: workingDir,
-		TemplateID:       defaultWorkspaceTemplateID,
+		Title:                filepath.Base(workingDir),
+		Description:          workingDir,
+		DeliverableDirectory: workingDir,
+		TemplateID:           defaultWorkspaceTemplateID,
 	})
 	if err != nil {
 		return backend.WorkspaceInfo{}

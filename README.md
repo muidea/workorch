@@ -210,12 +210,12 @@ docker run --rm -p 8080:8080 workorch:local
 Optional file-backed container run:
 
 ```bash
-mkdir -p .workorch-data
-chmod 0777 .workorch-data
+mkdir -p .workorch-runtime
+chmod 0777 .workorch-runtime
 docker run --rm \
   -p 8080:8080 \
   -v "$(pwd)/config/container-file/application.toml:/etc/workorch/application.toml:ro" \
-  -v "$(pwd)/.workorch-data:/var/lib/workorch" \
+  -v "$(pwd)/.workorch-runtime:/var/lib/workorch" \
   workorch:local
 ```
 
@@ -232,17 +232,24 @@ writeTimeout = "180s"
 idleTimeout = "60s"
 shutdownTimeout = "5s"
 maxConcurrentRuns = 1
+defaultDialogLanguage = ""
 
 [repository]
 backend = "memory"
-dataDir = "/var/lib/workorch"
+# repository.dataDir is WorkOrch internal state. For file-backed containers,
+# config/container-file/application.toml uses /var/lib/workorch/.workorch-data
+# so default deliverables can live beside it under /var/lib/workorch/.workorch-workspaces.
+dataDir = "/var/lib/workorch/.workorch-data"
 
 [runtime]
 defaultSoulId = ""
+maxRuntimeRepairAttempts = 10
 maxProviderRetryAttempts = 10
+shellCommandTimeout = "60s"
 
 [llm]
 defaultProvider = "local"
+defaultEmbeddingProvider = ""
 
 [llm.providers.local]
 provider = ""
@@ -251,6 +258,23 @@ apiKey = ""
 model = ""
 timeout = "60s"
 disabled = false
+
+[governance.autoTicket]
+enabled = true
+minConfidence = 0.82
+maxPerRun = 5
+
+[governance.autoApproval]
+enabled = true
+minConfidence = 0.9
+maxPerRun = 3
+allowReadOnly = true
+allowWorkspaceWrite = true
+requireHumanFor = ["secret_access", "external_write", "destructive_operation", "production_operation"]
+
+[governance.budget]
+maxConsecutiveFailures = 2
+maxRepeatedSamePrompt = 1
 ```
 
 When the concurrent run limit is reached, execution requests enter an in-process priority-aware wait queue and continue after a slot becomes available. Equal-priority requests keep FIFO order. If the caller cancels the request while waiting, the service returns `408 Request Timeout`.
@@ -427,7 +451,7 @@ curl -f "http://127.0.0.1:8080/api/v1/workorch/runs?workspaceId=${WORKSPACE_ID}"
 curl -f http://127.0.0.1:8080/api/v1/workorch/runs/${RUN_ID}
 ```
 
-The workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `workingDirectory` to `repository.dataDir/workspaces/<generated-workspace-id>/working` for the file backend when the client omits it. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, single-run, snapshot, status, and observability endpoints provide formal `workorch` run instance management. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision and approval endpoints provide formal query and processing paths for blocked runs. All run execution entrypoints share one in-process priority-aware wait queue behind `server.maxConcurrentRuns`. If `[llm].defaultEmbeddingProvider` references a provider declaring `nonChatOperations = ["embeddings"]`, workspace execution activation uses `/embeddings` for vector Memory recall and records `memoryRetrieval` evidence on the Run execution context.
+The workspace create endpoint creates one formal `workorch` workspace instance, accepts an optional `description`, and defaults `deliverableDirectory` to `.workorch-workspaces/<generated-workspace-id>` for the file backend when the client omits it. Runtime state is stored under `repository.dataDir/internal/workspaces/<workspace-id>`. The workspace snapshot endpoint aggregates one workspace together with its related runs and blocking items. The run create, list, single-run, snapshot, status, and observability endpoints provide formal `workorch` run instance management. The run start endpoint synchronously advances a created `run` and returns the updated state, which may already be `completed`, `failed`, `blocked_on_decision`, or `blocked_on_approval`. The run resume endpoint returns `409 conflict` with `blocked` when the required decision or approval has not yet been resolved. The decision and approval endpoints provide formal query and processing paths for blocked runs. All run execution entrypoints share one in-process priority-aware wait queue behind `server.maxConcurrentRuns`. If `[llm].defaultEmbeddingProvider` references a provider declaring `nonChatOperations = ["embeddings"]`, workspace execution activation uses `/embeddings` for vector Memory recall and records `memoryRetrieval` evidence on the Run execution context.
 
 Container-oriented deployment details are in `docs/deployment.md`, and `config/application.toml` provides the baseline runtime configuration template.
 

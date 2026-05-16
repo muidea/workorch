@@ -71,13 +71,13 @@ func (b *remoteBackend) Events() EventsBackend       { return b.evt }
 type remoteWorkspaceBackend struct{ cl *client.Client }
 
 func (b *remoteWorkspaceBackend) Create(ctx context.Context, req CreateWorkspaceRequest) (*WorkspaceInfo, error) {
-	ws, err := b.cl.CreateWorkspace(ctx, req.Title, req.Description, req.WorkingDirectory, req.TemplateID)
+	ws, err := b.cl.CreateWorkspace(ctx, req.Title, req.Description, req.DeliverableDirectory, req.TemplateID)
 	if err != nil {
 		return nil, err
 	}
 	return &WorkspaceInfo{
 		ID: common.WorkspaceID(ws.ID), Title: ws.Title, Description: ws.Description,
-		WorkingDirectory: ws.WorkingDirectory, State: common.WorkspaceState(ws.State),
+		DeliverableDirectory: ws.DeliverableDirectory, State: common.WorkspaceState(ws.State),
 		ActiveRunID: common.RunID(ws.ActiveRunID), DefaultSoulID: common.SoulID(ws.DefaultSoulID),
 		SoulBindings: commonSoulBindings(ws.SoulBindings),
 	}, nil
@@ -90,7 +90,7 @@ func (b *remoteWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID)
 	}
 	return &WorkspaceInfo{
 		ID: common.WorkspaceID(ws.ID), Title: ws.Title, Description: ws.Description,
-		WorkingDirectory: ws.WorkingDirectory, State: common.WorkspaceState(ws.State),
+		DeliverableDirectory: ws.DeliverableDirectory, State: common.WorkspaceState(ws.State),
 		ActiveRunID:   common.RunID(ws.ActiveRunID),
 		DefaultSoulID: common.SoulID(ws.DefaultSoulID),
 		SoulBindings:  commonSoulBindings(ws.SoulBindings),
@@ -106,7 +106,7 @@ func (b *remoteWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, err
 	for _, ws := range list {
 		result = append(result, WorkspaceInfo{
 			ID: common.WorkspaceID(ws.ID), Title: ws.Title, Description: ws.Description,
-			WorkingDirectory: ws.WorkingDirectory, State: common.WorkspaceState(ws.State),
+			DeliverableDirectory: ws.DeliverableDirectory, State: common.WorkspaceState(ws.State),
 			ActiveRunID:   common.RunID(ws.ActiveRunID),
 			DefaultSoulID: common.SoulID(ws.DefaultSoulID),
 			SoulBindings:  commonSoulBindings(ws.SoulBindings),

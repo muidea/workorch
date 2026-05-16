@@ -77,12 +77,12 @@ func listSkillHubGlobalSkills(ctx context.Context) ([]Skill, error) {
 	return listSkillHubSkills(ctx, "", skillScopeGlobal, "", "status", "--global", "--json", "--agent", "codex")
 }
 
-func listSkillHubWorkspaceSkills(ctx context.Context, workspaceID string, workingDirectory string) ([]Skill, error) {
-	workingDirectory = strings.TrimSpace(workingDirectory)
-	if workingDirectory == "" {
+func listSkillHubWorkspaceSkills(ctx context.Context, workspaceID string, deliverableDirectory string) ([]Skill, error) {
+	deliverableDirectory = strings.TrimSpace(deliverableDirectory)
+	if deliverableDirectory == "" {
 		return nil, nil
 	}
-	return listSkillHubSkills(ctx, workingDirectory, skillScopeWorkspace, workspaceID, "status", "--json")
+	return listSkillHubSkills(ctx, deliverableDirectory, skillScopeWorkspace, workspaceID, "status", "--json")
 }
 
 func listSkillHubSkills(ctx context.Context, dir string, scope string, workspaceID string, args ...string) ([]Skill, error) {

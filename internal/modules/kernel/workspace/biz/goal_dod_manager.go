@@ -24,16 +24,17 @@ func NewGoalDoDManager(workspaces repository.WorkspaceRepository, goals reposito
 }
 
 func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspaceservice.CreateWorkspaceCommand) error {
-	if cmd.WorkspaceID == "" || cmd.Title == "" || cmd.WorkingDirectory == "" {
+	if cmd.WorkspaceID == "" || cmd.Title == "" || cmd.DeliverableDirectory == "" {
 		return common.ErrInvalidArgument
 	}
 
 	workspace := &workspaceModel.Workspace{
-		ID:               cmd.WorkspaceID,
-		Title:            cmd.Title,
-		Description:      cmd.Description,
-		WorkingDirectory: cmd.WorkingDirectory,
-		State:            common.WorkspaceStateActive,
+		ID:                   cmd.WorkspaceID,
+		Title:                cmd.Title,
+		Description:          cmd.Description,
+		DeliverableDirectory: cmd.DeliverableDirectory,
+		InternalDirectory:    cmd.InternalDirectory,
+		State:                common.WorkspaceStateActive,
 	}
 	if err := m.workspaces.Create(ctx, workspace); err != nil {
 		return err
@@ -42,7 +43,7 @@ func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspaceservi
 }
 
 func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspaceservice.EnsureWorkspaceCommand) error {
-	if cmd.WorkspaceID == "" || cmd.Title == "" || cmd.WorkingDirectory == "" {
+	if cmd.WorkspaceID == "" || cmd.Title == "" || cmd.DeliverableDirectory == "" {
 		return common.ErrInvalidArgument
 	}
 
@@ -50,10 +51,11 @@ func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspaceservi
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
 			return m.CreateWorkspace(ctx, workspaceservice.CreateWorkspaceCommand{
-				WorkspaceID:      cmd.WorkspaceID,
-				Title:            cmd.Title,
-				Description:      cmd.Description,
-				WorkingDirectory: cmd.WorkingDirectory,
+				WorkspaceID:          cmd.WorkspaceID,
+				Title:                cmd.Title,
+				Description:          cmd.Description,
+				DeliverableDirectory: cmd.DeliverableDirectory,
+				InternalDirectory:    cmd.InternalDirectory,
 			})
 		}
 		return err
@@ -68,8 +70,12 @@ func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspaceservi
 		workspace.Description = cmd.Description
 		changed = true
 	}
-	if workspace.WorkingDirectory != cmd.WorkingDirectory {
-		workspace.WorkingDirectory = cmd.WorkingDirectory
+	if workspace.DeliverableDirectory != cmd.DeliverableDirectory {
+		workspace.DeliverableDirectory = cmd.DeliverableDirectory
+		changed = true
+	}
+	if workspace.InternalDirectory != cmd.InternalDirectory {
+		workspace.InternalDirectory = cmd.InternalDirectory
 		changed = true
 	}
 	if workspace.State != common.WorkspaceStateActive {
@@ -198,7 +204,7 @@ func (m *GoalDoDManager) publishWorkspaceEvent(ctx context.Context, topic string
 		SubjectType:  "workspace",
 		SubjectID:    string(workspace.ID),
 		WorkspaceID:  string(workspace.ID),
-		Payload:      events.WorkspacePayload(workspace.Title, workspace.Description, workspace.WorkingDirectory, workspace.State, workspace.ActiveRunID),
+		Payload:      events.WorkspacePayload(workspace.Title, workspace.Description, workspace.DeliverableDirectory, workspace.InternalDirectory, workspace.State, workspace.ActiveRunID),
 	})
 }
 

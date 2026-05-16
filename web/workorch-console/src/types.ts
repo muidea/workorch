@@ -9,6 +9,7 @@ export type ServiceConfiguration = {
   runtime: RuntimeConfiguration;
   llm: LLMConfiguration;
   webSearch: WebSearchConfiguration;
+  governance: GovernanceConfiguration;
 };
 
 export type ServerConfiguration = {
@@ -55,6 +56,21 @@ export type LLMProviderConfiguration = {
   chatCompletions: boolean;
   streaming: boolean;
   nonChatOperations?: string[];
+  failoverEnabled: boolean;
+  failoverProviders?: string[];
+  contextProfile?: ProviderContextProfile;
+};
+
+export type ProviderContextProfile = {
+  contextWindowTokens?: number;
+  maxInputTokens?: number;
+  reservedOutputTokens?: number;
+  safetyRatio?: number;
+  bytesHardLimit?: number;
+  estimatedTokensPerByte?: number;
+  inputTokenPrice?: number;
+  outputTokenPrice?: number;
+  currency?: string;
 };
 
 export type LLMProviderTemplate = {
@@ -93,6 +109,9 @@ export type UpdateLLMProviderConfiguration = {
   chatCompletions?: boolean;
   streaming?: boolean;
   nonChatOperations?: string[];
+  failoverEnabled?: boolean;
+  failoverProviders?: string[];
+  contextProfile?: ProviderContextProfile;
 };
 
 export type WebSearchConfiguration = {
@@ -106,6 +125,7 @@ export type WebSearchProviderConfiguration = {
   provider: string;
   searchEndpoint?: string;
   fetchEndpoint?: string;
+  headers?: Record<string, string>;
   timeout?: string;
   maxResults?: number;
   maxFetchBytes?: number;
@@ -143,6 +163,7 @@ export type UpdateWebSearchProviderConfiguration = {
   provider?: string;
   searchEndpoint?: string;
   fetchEndpoint?: string;
+  headers?: Record<string, string>;
   apiKey?: string;
   timeout?: string;
   maxResults?: number;
@@ -151,6 +172,32 @@ export type UpdateWebSearchProviderConfiguration = {
   allowDomains?: string[];
   denyDomains?: string[];
   disabled?: boolean;
+};
+
+export type GovernanceConfiguration = {
+  autoTicket: GovernanceAutoTicketConfiguration;
+  autoApproval: GovernanceAutoApprovalConfiguration;
+  budget: GovernanceBudgetConfiguration;
+};
+
+export type GovernanceAutoTicketConfiguration = {
+  enabled: boolean;
+  minConfidence: number;
+  maxPerRun: number;
+};
+
+export type GovernanceAutoApprovalConfiguration = {
+  enabled: boolean;
+  minConfidence: number;
+  maxPerRun: number;
+  allowReadOnly: boolean;
+  allowWorkspaceWrite: boolean;
+  requireHumanFor?: string[];
+};
+
+export type GovernanceBudgetConfiguration = {
+  maxConsecutiveFailures: number;
+  maxRepeatedSamePrompt: number;
 };
 
 export type Workspace = {
@@ -436,6 +483,15 @@ export type StepView = {
   output?: Record<string, unknown>;
 };
 
+export type StepPage = {
+  runId: string;
+  steps?: StepView[];
+  limit: number;
+  cursorAfterId?: string;
+  nextCursorAfterId?: string;
+  hasMore: boolean;
+};
+
 export type ToolCall = {
   id: string;
   workspaceId: string;
@@ -447,6 +503,15 @@ export type ToolCall = {
   exitSummary?: string;
   output?: Record<string, unknown>;
   error?: string;
+};
+
+export type ToolCallPage = {
+  runId: string;
+  toolCalls?: ToolCall[];
+  limit: number;
+  cursorAfterId?: string;
+  nextCursorAfterId?: string;
+  hasMore: boolean;
 };
 
 export type Patch = {
@@ -470,6 +535,15 @@ export type Patch = {
   revertedAt?: string;
 };
 
+export type PatchPage = {
+  runId: string;
+  patches?: Patch[];
+  limit: number;
+  cursorAfterId?: string;
+  nextCursorAfterId?: string;
+  hasMore: boolean;
+};
+
 export type ValidationResult = {
   id: string;
   workspaceId: string;
@@ -481,6 +555,15 @@ export type ValidationResult = {
   summary?: string;
 };
 
+export type ValidationResultPage = {
+  runId: string;
+  validationResults?: ValidationResult[];
+  limit: number;
+  cursorAfterId?: string;
+  nextCursorAfterId?: string;
+  hasMore: boolean;
+};
+
 export type RuntimeCheckpoint = {
   id: string;
   workspaceId: string;
@@ -490,6 +573,15 @@ export type RuntimeCheckpoint = {
   runStateSnapshot: string;
   blockingTicketId?: string;
   blockingApprovalId?: string;
+};
+
+export type RuntimeCheckpointPage = {
+  runId: string;
+  runtimeCheckpoints?: RuntimeCheckpoint[];
+  limit: number;
+  cursorAfterId?: string;
+  nextCursorAfterId?: string;
+  hasMore: boolean;
 };
 
 export type Result = {
@@ -509,6 +601,15 @@ export type Result = {
   summaryDetail?: ResultSummary;
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type ResultPage = {
+  runId: string;
+  results?: Result[];
+  limit: number;
+  cursorAfterId?: string;
+  nextCursorAfterId?: string;
+  hasMore: boolean;
 };
 
 export type ResultSummary = {
@@ -558,6 +659,15 @@ export type Artifact = {
   metadata?: Record<string, unknown>;
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type ArtifactPage = {
+  runId: string;
+  artifacts?: Artifact[];
+  limit: number;
+  cursorAfterId?: string;
+  nextCursorAfterId?: string;
+  hasMore: boolean;
 };
 
 export type WebSourceTrace = {
@@ -1030,6 +1140,16 @@ export type Decision = {
   autoGovernance?: AutoGovernanceSummary;
 };
 
+export type DecisionPage = {
+  workspaceId?: string;
+  runId?: string;
+  decisions?: Decision[];
+  limit: number;
+  cursorAfterId?: string;
+  nextCursorAfterId?: string;
+  hasMore: boolean;
+};
+
 export type Approval = {
   id: string;
   workspaceId: string;
@@ -1038,6 +1158,16 @@ export type Approval = {
   reason: string;
   state: string;
   autoGovernance?: AutoGovernanceSummary;
+};
+
+export type ApprovalPage = {
+  workspaceId?: string;
+  runId?: string;
+  approvals?: Approval[];
+  limit: number;
+  cursorAfterId?: string;
+  nextCursorAfterId?: string;
+  hasMore: boolean;
 };
 
 export type AutoGovernanceSummary = {

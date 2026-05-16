@@ -7,7 +7,7 @@ import (
 )
 
 func TestWorkspacePayloadIncludesExpectedFields(t *testing.T) {
-	payload := WorkspacePayload("ws-title", "workspace description", "/tmp/workorch/ws-title", common.WorkspaceStateActive, common.RunID("run-1"))
+	payload := WorkspacePayload("ws-title", "workspace description", "/tmp/workorch/ws-title", "", common.WorkspaceStateActive, common.RunID("run-1"))
 
 	if payload[PayloadKeyTitle] != "ws-title" {
 		t.Fatalf("title = %v, want ws-title", payload[PayloadKeyTitle])
@@ -15,8 +15,8 @@ func TestWorkspacePayloadIncludesExpectedFields(t *testing.T) {
 	if payload[PayloadKeyDescription] != "workspace description" {
 		t.Fatalf("description = %v, want workspace description", payload[PayloadKeyDescription])
 	}
-	if payload[PayloadKeyWorkingDirectory] != "/tmp/workorch/ws-title" {
-		t.Fatalf("workingDirectory = %v, want /tmp/workorch/ws-title", payload[PayloadKeyWorkingDirectory])
+	if payload[PayloadKeyDeliverableDirectory] != "/tmp/workorch/ws-title" {
+		t.Fatalf("deliverableDirectory = %v, want /tmp/workorch/ws-title", payload[PayloadKeyDeliverableDirectory])
 	}
 	if payload[PayloadKeyState] != string(common.WorkspaceStateActive) {
 		t.Fatalf("state = %v, want %s", payload[PayloadKeyState], common.WorkspaceStateActive)

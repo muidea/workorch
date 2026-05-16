@@ -21,30 +21,31 @@ import (
 )
 
 type Workspace struct {
-	ID               string            `json:"id"`
-	Title            string            `json:"title"`
-	Description      string            `json:"description"`
-	WorkingDirectory string            `json:"workingDirectory"`
-	State            string            `json:"state"`
-	ActiveRunID      string            `json:"activeRunId,omitempty"`
-	DefaultSoulID    string            `json:"defaultSoulId,omitempty"`
-	SoulBindings     map[string]string `json:"soulBindings,omitempty"`
-	ContextHints     map[string]any    `json:"contextHints,omitempty"`
-	EvidencePolicies []map[string]any  `json:"evidencePolicies,omitempty"`
+	ID                   string            `json:"id"`
+	Title                string            `json:"title"`
+	Description          string            `json:"description"`
+	DeliverableDirectory string            `json:"deliverableDirectory"`
+	InternalDirectory    string            `json:"-"`
+	State                string            `json:"state"`
+	ActiveRunID          string            `json:"activeRunId,omitempty"`
+	DefaultSoulID        string            `json:"defaultSoulId,omitempty"`
+	SoulBindings         map[string]string `json:"soulBindings,omitempty"`
+	ContextHints         map[string]any    `json:"contextHints,omitempty"`
+	EvidencePolicies     []map[string]any  `json:"evidencePolicies,omitempty"`
 }
 
 type CreateWorkspaceCommand struct {
-	Title            string `json:"title"`
-	Description      string `json:"description,omitempty"`
-	WorkingDirectory string `json:"workingDirectory,omitempty"`
-	TemplateID       string `json:"templateId,omitempty"`
+	Title                string `json:"title"`
+	Description          string `json:"description,omitempty"`
+	DeliverableDirectory string `json:"deliverableDirectory,omitempty"`
+	TemplateID           string `json:"templateId,omitempty"`
 }
 
-func CreateWorkspaceWithSession(ctx context.Context, session *RuntimeSession, title string, description string, workingDirectory string) (ret Workspace, err error) {
+func CreateWorkspaceWithSession(ctx context.Context, session *RuntimeSession, title string, description string, deliverableDirectory string) (ret Workspace, err error) {
 	return CreateWorkspaceWithTemplateWithSession(ctx, session, CreateWorkspaceCommand{
-		Title:            title,
-		Description:      description,
-		WorkingDirectory: workingDirectory,
+		Title:                title,
+		Description:          description,
+		DeliverableDirectory: deliverableDirectory,
 	})
 }
 
@@ -57,7 +58,7 @@ func CreateWorkspaceWithTemplateWithSession(ctx context.Context, session *Runtim
 
 	for attempt := 0; attempt < 8; attempt++ {
 		id := generateWorkspaceID()
-		layout, err := resolveWorkspaceDirectoryLayout(session, id, cmd.WorkingDirectory)
+		layout, err := resolveWorkspaceDirectoryLayout(session, id, cmd.DeliverableDirectory)
 		if err != nil {
 			return Workspace{}, err
 		}
@@ -65,10 +66,11 @@ func CreateWorkspaceWithTemplateWithSession(ctx context.Context, session *Runtim
 			return Workspace{}, err
 		}
 		if err := service.CreateWorkspace(ctx, workspacemodule.CreateWorkspaceCommand{
-			WorkspaceID:      id,
-			Title:            cmd.Title,
-			Description:      cmd.Description,
-			WorkingDirectory: layout.WorkingDirectory,
+			WorkspaceID:          id,
+			Title:                cmd.Title,
+			Description:          cmd.Description,
+			DeliverableDirectory: layout.DeliverableDirectory,
+			InternalDirectory:    layout.InternalDirectory,
 		}); err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				continue
@@ -89,7 +91,7 @@ func CreateWorkspaceWithTemplateWithSession(ctx context.Context, session *Runtim
 	return Workspace{}, common.ErrConflict
 }
 
-func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, title string, description string, workingDirectory string) (ret Workspace, err error) {
+func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, title string, description string, deliverableDirectory string) (ret Workspace, err error) {
 	service, repo, err := workspaceDependenciesFromSession(session)
 	if err != nil {
 		return Workspace{}, err
@@ -97,7 +99,7 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.WorkspaceID(workspaceID)
-	layout, err := resolveWorkspaceDirectoryLayout(session, id, workingDirectory)
+	layout, err := resolveWorkspaceDirectoryLayout(session, id, deliverableDirectory)
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -105,10 +107,11 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 		return Workspace{}, err
 	}
 	if err := service.CreateWorkspace(ctx, workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID:      id,
-		Title:            title,
-		Description:      description,
-		WorkingDirectory: layout.WorkingDirectory,
+		WorkspaceID:          id,
+		Title:                title,
+		Description:          description,
+		DeliverableDirectory: layout.DeliverableDirectory,
+		InternalDirectory:    layout.InternalDirectory,
 	}); err != nil {
 		return Workspace{}, err
 	}
@@ -120,12 +123,12 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 	return mapWorkspace(item), nil
 }
 
-func CreateWorkspaceWithBackend(ctx context.Context, backend string, dataRoot string, title string, description string, workingDirectory string) (Workspace, error) {
+func CreateWorkspaceWithBackend(ctx context.Context, backend string, dataRoot string, title string, description string, deliverableDirectory string) (Workspace, error) {
 	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Workspace{}, err
 	}
-	return CreateWorkspaceWithSession(ctx, session, title, description, workingDirectory)
+	return CreateWorkspaceWithSession(ctx, session, title, description, deliverableDirectory)
 }
 
 func CreateWorkspaceWithTemplateWithBackend(ctx context.Context, backend string, dataRoot string, cmd CreateWorkspaceCommand) (Workspace, error) {
@@ -170,20 +173,20 @@ func applyWorkspaceTemplateOnCreate(ctx context.Context, session *RuntimeSession
 	return workspaces.Get(ctx, item.ID)
 }
 
-func createWorkspaceWithIDWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, title string, description string, workingDirectory string) (Workspace, error) {
+func createWorkspaceWithIDWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, title string, description string, deliverableDirectory string) (Workspace, error) {
 	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return Workspace{}, err
 	}
-	return createWorkspaceWithIDWithSession(ctx, session, workspaceID, title, description, workingDirectory)
+	return createWorkspaceWithIDWithSession(ctx, session, workspaceID, title, description, deliverableDirectory)
 }
 
-func CreateWorkspaceFromEnv(ctx context.Context, title string, description string, workingDirectory string) (Workspace, error) {
+func CreateWorkspaceFromEnv(ctx context.Context, title string, description string, deliverableDirectory string) (Workspace, error) {
 	session, err := NewRuntimeSessionFromEnv()
 	if err != nil {
 		return Workspace{}, err
 	}
-	return CreateWorkspaceWithSession(ctx, session, title, description, workingDirectory)
+	return CreateWorkspaceWithSession(ctx, session, title, description, deliverableDirectory)
 }
 
 func ReadWorkspaceWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret Workspace, err error) {
@@ -310,7 +313,7 @@ func DeleteWorkspaceWithSession(ctx context.Context, session *RuntimeSession, wo
 	if err := purgeWorkspaceEventRecords(ctx, exports.Repositories, id); err != nil {
 		return err
 	}
-	return purgeWorkspaceDirectories(session, id, workspace.WorkingDirectory)
+	return purgeWorkspaceDirectories(session, id, workspace.DeliverableDirectory, workspace.InternalDirectory)
 }
 
 func DeleteWorkspaceWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd DeleteWorkspaceCommand) error {
@@ -549,12 +552,14 @@ func purgeRunRecords(ctx context.Context, repos bootstrap.RepositoryExports, run
 	return nil
 }
 
-func purgeWorkspaceDirectories(session *RuntimeSession, workspaceID common.WorkspaceID, workingDirectory string) error {
+func purgeWorkspaceDirectories(session *RuntimeSession, workspaceID common.WorkspaceID, deliverableDirectory string, internalDirectory string) error {
 	paths := make([]string, 0, 2)
-	if strings.EqualFold(session.RepositoryBackend(), "file") && strings.TrimSpace(session.RepositoryDataDir()) != "" {
-		paths = append(paths, filepath.Join(session.RepositoryDataDir(), "workspaces", string(workspaceID)))
+	if strings.TrimSpace(internalDirectory) != "" {
+		paths = append(paths, internalDirectory)
+	} else if strings.EqualFold(session.RepositoryBackend(), "file") && strings.TrimSpace(session.RepositoryDataDir()) != "" {
+		paths = append(paths, filepath.Join(session.RepositoryDataDir(), "internal", "workspaces", string(workspaceID)))
 	}
-	paths = append(paths, workingDirectory)
+	paths = append(paths, deliverableDirectory)
 
 	seen := map[string]struct{}{}
 	for _, item := range paths {
@@ -622,16 +627,17 @@ func mapWorkspace(item *workspacemodel.Workspace) Workspace {
 		return Workspace{}
 	}
 	return Workspace{
-		ID:               string(item.ID),
-		Title:            item.Title,
-		Description:      item.Description,
-		WorkingDirectory: item.WorkingDirectory,
-		State:            string(item.State),
-		ActiveRunID:      string(item.ActiveRunID),
-		DefaultSoulID:    string(item.DefaultSoulID),
-		SoulBindings:     mapSoulBindingIDs(item.SoulBindings),
-		ContextHints:     cloneContextMap(item.ContextHints),
-		EvidencePolicies: cloneContextMapSlice(item.EvidencePolicies),
+		ID:                   string(item.ID),
+		Title:                item.Title,
+		Description:          item.Description,
+		DeliverableDirectory: item.DeliverableDirectory,
+		InternalDirectory:    item.InternalDirectory,
+		State:                string(item.State),
+		ActiveRunID:          string(item.ActiveRunID),
+		DefaultSoulID:        string(item.DefaultSoulID),
+		SoulBindings:         mapSoulBindingIDs(item.SoulBindings),
+		ContextHints:         cloneContextMap(item.ContextHints),
+		EvidencePolicies:     cloneContextMapSlice(item.EvidencePolicies),
 	}
 }
 
@@ -644,42 +650,77 @@ func generateWorkspaceID() common.WorkspaceID {
 }
 
 type workspaceDirectoryLayout struct {
-	WorkspaceRoot    string
-	WorkingDirectory string
-	Managed          bool
+	DeliverableRoot      string
+	DeliverableDirectory string
+	InternalDirectory    string
+	Managed              bool
 }
 
-func resolveWorkspaceDirectoryLayout(session *RuntimeSession, id common.WorkspaceID, workingDirectory string) (workspaceDirectoryLayout, error) {
-	workingDirectory = strings.TrimSpace(workingDirectory)
-	if workingDirectory != "" {
-		return workspaceDirectoryLayout{WorkingDirectory: workingDirectory}, nil
+func resolveWorkspaceDirectoryLayout(session *RuntimeSession, id common.WorkspaceID, deliverableDirectory string) (workspaceDirectoryLayout, error) {
+	deliverableDirectory = strings.TrimSpace(deliverableDirectory)
+	internalDirectory, err := resolveWorkspaceInternalDirectory(session, id)
+	if err != nil {
+		return workspaceDirectoryLayout{}, err
 	}
 	if strings.EqualFold(session.RepositoryBackend(), "file") && strings.TrimSpace(session.RepositoryDataDir()) != "" {
-		workspaceRoot := filepath.Join(session.RepositoryDataDir(), "workspaces", string(id))
+		if deliverableDirectory != "" {
+			return workspaceDirectoryLayout{
+				DeliverableDirectory: deliverableDirectory,
+				InternalDirectory:    internalDirectory,
+				Managed:              true,
+			}, nil
+		}
+		deliverableRoot := filepath.Join(filepath.Dir(session.RepositoryDataDir()), ".workorch-workspaces")
 		return workspaceDirectoryLayout{
-			WorkspaceRoot:    workspaceRoot,
-			WorkingDirectory: filepath.Join(workspaceRoot, "working"),
-			Managed:          true,
+			DeliverableRoot:      deliverableRoot,
+			DeliverableDirectory: filepath.Join(deliverableRoot, string(id)),
+			InternalDirectory:    internalDirectory,
+			Managed:              true,
 		}, nil
+	}
+	if deliverableDirectory != "" {
+		return workspaceDirectoryLayout{DeliverableDirectory: deliverableDirectory, InternalDirectory: internalDirectory}, nil
 	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return workspaceDirectoryLayout{}, err
 	}
-	return workspaceDirectoryLayout{WorkingDirectory: filepath.Join(wd, "workspaces", string(id))}, nil
+	return workspaceDirectoryLayout{
+		DeliverableDirectory: filepath.Join(wd, ".workorch-workspaces", string(id)),
+		InternalDirectory:    internalDirectory,
+	}, nil
+}
+
+func resolveWorkspaceInternalDirectory(session *RuntimeSession, id common.WorkspaceID) (string, error) {
+	if session != nil && strings.EqualFold(session.RepositoryBackend(), "file") && strings.TrimSpace(session.RepositoryDataDir()) != "" {
+		return filepath.Join(session.RepositoryDataDir(), "internal", "workspaces", string(id)), nil
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(wd, ".workorch-data", "internal", "workspaces", string(id)), nil
 }
 
 func ensureWorkspaceDirectoryLayout(layout workspaceDirectoryLayout) error {
-	if strings.TrimSpace(layout.WorkingDirectory) == "" {
+	if strings.TrimSpace(layout.DeliverableDirectory) == "" || strings.TrimSpace(layout.InternalDirectory) == "" {
 		return common.ErrInvalidArgument
 	}
 	if !layout.Managed {
-		return os.MkdirAll(layout.WorkingDirectory, 0o755)
+		if err := os.MkdirAll(layout.DeliverableDirectory, 0o755); err != nil {
+			return err
+		}
+		return os.MkdirAll(layout.InternalDirectory, 0o755)
 	}
 	for _, dir := range []string{
-		layout.WorkingDirectory,
-		filepath.Join(layout.WorkspaceRoot, "artifacts"),
-		filepath.Join(layout.WorkspaceRoot, "runs"),
+		layout.DeliverableDirectory,
+		layout.InternalDirectory,
+		filepath.Join(layout.InternalDirectory, "config"),
+		filepath.Join(layout.InternalDirectory, "runs"),
+		filepath.Join(layout.InternalDirectory, "artifacts"),
+		filepath.Join(layout.InternalDirectory, "events"),
+		filepath.Join(layout.InternalDirectory, "llm-calls"),
+		filepath.Join(layout.InternalDirectory, "indexes"),
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err

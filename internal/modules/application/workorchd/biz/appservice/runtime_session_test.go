@@ -238,9 +238,9 @@ func TestRuntimeSessionFromExportsBorrowsLongLivedRuntime(t *testing.T) {
 
 	exports := bootstrapRuntime.Exports()
 	if err := exports.Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID:      "ws-long-lived-export-session",
-		Title:            "long lived export session",
-		WorkingDirectory: "workspaces/ws-long-lived-export-session",
+		WorkspaceID:          "ws-long-lived-export-session",
+		Title:                "long lived export session",
+		DeliverableDirectory: "workspaces/ws-long-lived-export-session",
 	}); err != nil {
 		t.Fatalf("create workspace after borrowed close: %v", err)
 	}
@@ -335,14 +335,15 @@ func TestNewRuntimeSessionWithBackendFileUsesDefaultDataRootWhenUnset(t *testing
 	})
 
 	if err := session.Bootstrap.Exports().Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID:      common.WorkspaceID("ws-runtime-session-default-file"),
-		Title:            "runtime session default file backend",
-		WorkingDirectory: "workspaces/ws-runtime-session-default-file",
+		WorkspaceID:          common.WorkspaceID("ws-runtime-session-default-file"),
+		Title:                "runtime session default file backend",
+		DeliverableDirectory: "workspaces/ws-runtime-session-default-file",
+		InternalDirectory:    filepath.Join(defaultDataDir, "internal", "workspaces", "ws-runtime-session-default-file"),
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(defaultDataDir, "workspaces", "ws-runtime-session-default-file", "workspace.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(defaultDataDir, "internal", "workspaces", "ws-runtime-session-default-file", "workspace.json")); err != nil {
 		t.Fatalf("expected workspace persistence file in default data dir: %v", err)
 	}
 	if session.RepositoryBackend() != "file" || session.RepositoryDataDir() != defaultDataDir {

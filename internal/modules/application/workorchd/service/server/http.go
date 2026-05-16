@@ -20,6 +20,7 @@ import (
 
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server/consoleassets"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -36,14 +37,16 @@ const (
 	configServerShutdownTimeout   = "server.shutdownTimeout"
 	configServerMaxConcurrentRuns = "server.maxConcurrentRuns"
 
-	defaultServerAddr              = ":8080"
-	defaultReadHeaderTimeout       = 5 * time.Second
-	defaultReadTimeout             = 15 * time.Second
-	defaultWriteTimeout            = 180 * time.Second
-	defaultIdleTimeout             = 60 * time.Second
-	defaultShutdownTimeout         = 5 * time.Second
-	defaultMaxConcurrentRuns int64 = 1
-	runSnapshotCacheTTL            = 2 * time.Second
+	defaultServerAddr                 = ":8080"
+	defaultReadHeaderTimeout          = 5 * time.Second
+	defaultReadTimeout                = 15 * time.Second
+	defaultWriteTimeout               = 180 * time.Second
+	defaultIdleTimeout                = 60 * time.Second
+	defaultShutdownTimeout            = 5 * time.Second
+	defaultMaxConcurrentRuns    int64 = 1
+	runSnapshotCacheTTL               = 2 * time.Second
+	defaultEventRecordPageLimit       = 100
+	maxEventRecordPageLimit           = 500
 )
 
 type Config struct {
@@ -144,6 +147,62 @@ type runSnapshotResponse struct {
 	Snapshot appservice.RunSnapshot `json:"snapshot"`
 }
 
+type runStepsResponse struct {
+	Service  string               `json:"service"`
+	Backend  string               `json:"backend,omitempty"`
+	DataRoot string               `json:"dataRoot,omitempty"`
+	Steps    []presenter.StepView `json:"steps,omitempty"`
+	Page     appservice.StepPage  `json:"page"`
+}
+
+type runToolCallsResponse struct {
+	Service   string                  `json:"service"`
+	Backend   string                  `json:"backend,omitempty"`
+	DataRoot  string                  `json:"dataRoot,omitempty"`
+	ToolCalls []appservice.ToolCall   `json:"toolCalls,omitempty"`
+	Page      appservice.ToolCallPage `json:"page"`
+}
+
+type runRuntimeCheckpointsResponse struct {
+	Service            string                           `json:"service"`
+	Backend            string                           `json:"backend,omitempty"`
+	DataRoot           string                           `json:"dataRoot,omitempty"`
+	RuntimeCheckpoints []appservice.RuntimeCheckpoint   `json:"runtimeCheckpoints,omitempty"`
+	Page               appservice.RuntimeCheckpointPage `json:"page"`
+}
+
+type runResultsResponse struct {
+	Service  string                `json:"service"`
+	Backend  string                `json:"backend,omitempty"`
+	DataRoot string                `json:"dataRoot,omitempty"`
+	Results  []appservice.Result   `json:"results,omitempty"`
+	Page     appservice.ResultPage `json:"page"`
+}
+
+type runPatchesResponse struct {
+	Service  string               `json:"service"`
+	Backend  string               `json:"backend,omitempty"`
+	DataRoot string               `json:"dataRoot,omitempty"`
+	Patches  []appservice.Patch   `json:"patches,omitempty"`
+	Page     appservice.PatchPage `json:"page"`
+}
+
+type runValidationResultsResponse struct {
+	Service           string                          `json:"service"`
+	Backend           string                          `json:"backend,omitempty"`
+	DataRoot          string                          `json:"dataRoot,omitempty"`
+	ValidationResults []appservice.ValidationResult   `json:"validationResults,omitempty"`
+	Page              appservice.ValidationResultPage `json:"page"`
+}
+
+type runArtifactsResponse struct {
+	Service   string                  `json:"service"`
+	Backend   string                  `json:"backend,omitempty"`
+	DataRoot  string                  `json:"dataRoot,omitempty"`
+	Artifacts []appservice.Artifact   `json:"artifacts,omitempty"`
+	Page      appservice.ArtifactPage `json:"page"`
+}
+
 type runStatusResponse struct {
 	Service       string               `json:"service"`
 	Backend       string               `json:"backend,omitempty"`
@@ -224,10 +283,11 @@ type decisionResponse struct {
 }
 
 type decisionsResponse struct {
-	Service   string                `json:"service"`
-	Backend   string                `json:"backend,omitempty"`
-	DataRoot  string                `json:"dataRoot,omitempty"`
-	Decisions []appservice.Decision `json:"decisions"`
+	Service   string                  `json:"service"`
+	Backend   string                  `json:"backend,omitempty"`
+	DataRoot  string                  `json:"dataRoot,omitempty"`
+	Decisions []appservice.Decision   `json:"decisions"`
+	Page      appservice.DecisionPage `json:"page"`
 }
 
 type approvalResponse struct {
@@ -238,10 +298,11 @@ type approvalResponse struct {
 }
 
 type approvalsResponse struct {
-	Service   string                `json:"service"`
-	Backend   string                `json:"backend,omitempty"`
-	DataRoot  string                `json:"dataRoot,omitempty"`
-	Approvals []appservice.Approval `json:"approvals"`
+	Service   string                  `json:"service"`
+	Backend   string                  `json:"backend,omitempty"`
+	DataRoot  string                  `json:"dataRoot,omitempty"`
+	Approvals []appservice.Approval   `json:"approvals"`
+	Page      appservice.ApprovalPage `json:"page"`
 }
 
 type soulResponse struct {
@@ -357,11 +418,11 @@ type memoryRecallTracesResponse struct {
 }
 
 type createWorkspaceRequest struct {
-	WorkspaceID      string `json:"workspaceId"`
-	Title            string `json:"title"`
-	Description      string `json:"description"`
-	WorkingDirectory string `json:"workingDirectory"`
-	TemplateID       string `json:"templateId,omitempty"`
+	WorkspaceID          string `json:"workspaceId"`
+	Title                string `json:"title"`
+	Description          string `json:"description"`
+	DeliverableDirectory string `json:"deliverableDirectory"`
+	TemplateID           string `json:"templateId,omitempty"`
 }
 
 type deleteWorkspaceRequest = appservice.DeleteWorkspaceCommand
@@ -427,21 +488,21 @@ type goalDoDQualityCheckRequest struct {
 }
 
 type createWorkspaceSetupDraftSessionRequest struct {
-	TemplateID       string `json:"templateId,omitempty"`
-	Title            string `json:"title,omitempty"`
-	Description      string `json:"description,omitempty"`
-	WorkingDirectory string `json:"workingDirectory,omitempty"`
-	DialogLanguage   string `json:"dialogLanguage,omitempty"`
+	TemplateID           string `json:"templateId,omitempty"`
+	Title                string `json:"title,omitempty"`
+	Description          string `json:"description,omitempty"`
+	DeliverableDirectory string `json:"deliverableDirectory,omitempty"`
+	DialogLanguage       string `json:"dialogLanguage,omitempty"`
 }
 
 type appendWorkspaceSetupDraftMessageRequest struct {
-	TemplateID       string                         `json:"templateId,omitempty"`
-	Title            string                         `json:"title,omitempty"`
-	Description      string                         `json:"description,omitempty"`
-	WorkingDirectory string                         `json:"workingDirectory,omitempty"`
-	Content          string                         `json:"content"`
-	Draft            appservice.WorkspaceSetupDraft `json:"draft,omitempty"`
-	DialogLanguage   string                         `json:"dialogLanguage,omitempty"`
+	TemplateID           string                         `json:"templateId,omitempty"`
+	Title                string                         `json:"title,omitempty"`
+	Description          string                         `json:"description,omitempty"`
+	DeliverableDirectory string                         `json:"deliverableDirectory,omitempty"`
+	Content              string                         `json:"content"`
+	Draft                appservice.WorkspaceSetupDraft `json:"draft,omitempty"`
+	DialogLanguage       string                         `json:"dialogLanguage,omitempty"`
 }
 
 type errorResponse struct {
@@ -468,9 +529,17 @@ type generateWorkspaceSetupDraftFunc func(context.Context, string, string, appse
 type createRunInstanceFunc func(context.Context, string, string, string, string, string, string) (appservice.Run, error)
 type readRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
 type readRunSnapshotFunc func(context.Context, string, string, string) (appservice.RunSnapshot, error)
+type listRunStepsFunc func(context.Context, string, string, appservice.StepQuery) (appservice.StepPage, error)
+type listRunToolCallsFunc func(context.Context, string, string, appservice.ToolCallQuery) (appservice.ToolCallPage, error)
+type listRunRuntimeCheckpointsFunc func(context.Context, string, string, appservice.RuntimeCheckpointQuery) (appservice.RuntimeCheckpointPage, error)
+type listRunResultsFunc func(context.Context, string, string, appservice.ResultQuery) (appservice.ResultPage, error)
+type listRunPatchesFunc func(context.Context, string, string, appservice.PatchQuery) (appservice.PatchPage, error)
+type listRunValidationResultsFunc func(context.Context, string, string, appservice.ValidationResultQuery) (appservice.ValidationResultPage, error)
+type listRunArtifactsFunc func(context.Context, string, string, appservice.ArtifactQuery) (appservice.ArtifactPage, error)
 type readRunStatusFunc func(context.Context, string, string, string) (appservice.RunStatus, error)
 type readRunObservabilityFunc func(context.Context, string, string, string) (appservice.RunObservability, error)
 type readArtifactContentFunc func(context.Context, string, string, string) (appservice.ArtifactContent, error)
+type readRuntimeRawContentFunc func(context.Context, string, string, string) (appservice.RuntimeRawContent, error)
 type readRunTaskProgressFunc func(context.Context, string, string, string) (appservice.TaskProgress, error)
 type readWorkspaceTaskProgressFunc func(context.Context, string, string, string) (appservice.TaskProgress, error)
 type readRunContextBundleFunc func(context.Context, string, string, string) (appservice.ContextBundle, error)
@@ -484,10 +553,12 @@ type startRunInstanceFunc func(context.Context, string, string, string) (appserv
 type resumeRunInstanceFunc func(context.Context, string, string, string, ...map[string]any) (appservice.Run, error)
 type activateWorkspaceExecutionFunc func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error)
 type listDecisionsFunc func(context.Context, string, string, string, string) ([]appservice.Decision, error)
+type listDecisionPageFunc func(context.Context, string, string, appservice.DecisionQuery) (appservice.DecisionPage, error)
 type readDecisionFunc func(context.Context, string, string, string) (appservice.Decision, error)
 type resolveDecisionFunc func(context.Context, string, string, string, appservice.ResolveDecisionCommand) (appservice.Decision, error)
 type batchResolveDecisionsFunc func(context.Context, string, string, appservice.BatchResolveDecisionCommand) ([]appservice.Decision, error)
 type listApprovalsFunc func(context.Context, string, string, string, string) ([]appservice.Approval, error)
+type listApprovalPageFunc func(context.Context, string, string, appservice.ApprovalQuery) (appservice.ApprovalPage, error)
 type readApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
 type approveApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
 type rejectApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
@@ -552,9 +623,17 @@ type serverState struct {
 	createRun                       createRunInstanceFunc
 	readRun                         readRunInstanceFunc
 	readRunSnapshot                 readRunSnapshotFunc
+	listRunSteps                    listRunStepsFunc
+	listRunToolCalls                listRunToolCallsFunc
+	listRunRuntimeCheckpoints       listRunRuntimeCheckpointsFunc
+	listRunResults                  listRunResultsFunc
+	listRunPatches                  listRunPatchesFunc
+	listRunValidationResults        listRunValidationResultsFunc
+	listRunArtifacts                listRunArtifactsFunc
 	readRunStatus                   readRunStatusFunc
 	readRunObservability            readRunObservabilityFunc
 	readArtifactContent             readArtifactContentFunc
+	readRuntimeRawContent           readRuntimeRawContentFunc
 	readRunTaskProgress             readRunTaskProgressFunc
 	readWorkspaceTaskProgress       readWorkspaceTaskProgressFunc
 	readRunContextBundle            readRunContextBundleFunc
@@ -568,10 +647,12 @@ type serverState struct {
 	resumeRun                       resumeRunInstanceFunc
 	activateWorkspace               activateWorkspaceExecutionFunc
 	listDecisions                   listDecisionsFunc
+	listDecisionPage                listDecisionPageFunc
 	readDecision                    readDecisionFunc
 	resolveDecision                 resolveDecisionFunc
 	batchResolveDecisions           batchResolveDecisionsFunc
 	listApprovals                   listApprovalsFunc
+	listApprovalPage                listApprovalPageFunc
 	readApproval                    readApprovalFunc
 	approveApproval                 approveApprovalFunc
 	rejectApproval                  rejectApprovalFunc
@@ -1087,7 +1168,7 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Service:  "workorch",
 			Backend:  state.config.Backend,
 			DataRoot: state.config.DataRoot,
-			Snapshot: item,
+			Snapshot: appservice.ProjectWorkspaceSnapshotDetail(item),
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/task-progress", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -1307,7 +1388,161 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Service:  "workorch",
 			Backend:  state.config.Backend,
 			DataRoot: state.config.DataRoot,
-			Snapshot: item,
+			Snapshot: appservice.ProjectRunSnapshotDetail(item),
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/steps", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "steps" {
+			http.NotFound(w, r)
+			return
+		}
+		query := stepQueryFromRequest(r)
+		query.RunID = runID
+		page, err := state.listRunSteps(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runStepsResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Steps:    page.Steps,
+			Page:     page,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/tool-calls", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "tool-calls" {
+			http.NotFound(w, r)
+			return
+		}
+		query := toolCallQueryFromRequest(r)
+		query.RunID = runID
+		page, err := state.listRunToolCalls(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runToolCallsResponse{
+			Service:   "workorch",
+			Backend:   state.config.Backend,
+			DataRoot:  state.config.DataRoot,
+			ToolCalls: page.ToolCalls,
+			Page:      page,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/runtime-checkpoints", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "runtime-checkpoints" {
+			http.NotFound(w, r)
+			return
+		}
+		query := runtimeCheckpointQueryFromRequest(r)
+		query.RunID = runID
+		page, err := state.listRunRuntimeCheckpoints(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runRuntimeCheckpointsResponse{
+			Service:            "workorch",
+			Backend:            state.config.Backend,
+			DataRoot:           state.config.DataRoot,
+			RuntimeCheckpoints: page.RuntimeCheckpoints,
+			Page:               page,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/results", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "results" {
+			http.NotFound(w, r)
+			return
+		}
+		query := resultQueryFromRequest(r)
+		query.RunID = runID
+		page, err := state.listRunResults(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runResultsResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Results:  page.Results,
+			Page:     page,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/patches", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "patches" {
+			http.NotFound(w, r)
+			return
+		}
+		query := patchQueryFromRequest(r)
+		query.RunID = runID
+		page, err := state.listRunPatches(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runPatchesResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Patches:  page.Patches,
+			Page:     page,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/validation-results", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "validation-results" {
+			http.NotFound(w, r)
+			return
+		}
+		query := validationResultQueryFromRequest(r)
+		query.RunID = runID
+		page, err := state.listRunValidationResults(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runValidationResultsResponse{
+			Service:           "workorch",
+			Backend:           state.config.Backend,
+			DataRoot:          state.config.DataRoot,
+			ValidationResults: page.ValidationResults,
+			Page:              page,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/runs/:runId/artifacts", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		runID, action, ok := runActionFromPath(r.URL.Path)
+		if !ok || action != "artifacts" {
+			http.NotFound(w, r)
+			return
+		}
+		query := artifactQueryFromRequest(r)
+		query.RunID = runID
+		page, err := state.listRunArtifacts(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runArtifactsResponse{
+			Service:   "workorch",
+			Backend:   state.config.Backend,
+			DataRoot:  state.config.DataRoot,
+			Artifacts: page.Artifacts,
+			Page:      page,
 		})
 	})
 	router.AddHandler("/api/v1/workorch/runs/:runId/status", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -1383,6 +1618,15 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			return
 		}
 		writeArtifactContent(w, item)
+	})
+	router.AddHandler("/api/v1/workorch/runtime/payloads", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		item, err := state.readRuntimeRawContent(r.Context(), state.config.Backend, state.config.DataRoot, r.URL.Query().Get("ref"))
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeRuntimeRawContent(w, item)
 	})
 	router.AddHandler("/api/v1/workorch/runs/:runId/task-progress", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
@@ -1510,7 +1754,8 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/decisions", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		state.metrics.decisionListRequests.Add(1)
-		items, err := state.listDecisions(r.Context(), state.config.Backend, state.config.DataRoot, r.URL.Query().Get("workspaceId"), r.URL.Query().Get("runId"))
+		query := decisionQueryFromRequest(r)
+		page, err := state.listDecisionPage(r.Context(), state.config.Backend, state.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1519,7 +1764,8 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Service:   "workorch",
 			Backend:   state.config.Backend,
 			DataRoot:  state.config.DataRoot,
-			Decisions: items,
+			Decisions: page.Decisions,
+			Page:      page,
 		})
 	})
 	router.AddHandler("/api/v1/workorch/decisions/:ticketId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -1545,7 +1791,8 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/approvals", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		state.metrics.approvalListRequests.Add(1)
-		items, err := state.listApprovals(r.Context(), state.config.Backend, state.config.DataRoot, r.URL.Query().Get("workspaceId"), r.URL.Query().Get("runId"))
+		query := approvalQueryFromRequest(r)
+		page, err := state.listApprovalPage(r.Context(), state.config.Backend, state.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1554,7 +1801,8 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Service:   "workorch",
 			Backend:   state.config.Backend,
 			DataRoot:  state.config.DataRoot,
-			Approvals: items,
+			Approvals: page.Approvals,
+			Page:      page,
 		})
 	})
 	router.AddHandler("/api/v1/workorch/approvals/:approvalId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -1894,10 +2142,10 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		item, err := state.createWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, appservice.CreateWorkspaceCommand{
-			Title:            req.Title,
-			Description:      req.Description,
-			WorkingDirectory: req.WorkingDirectory,
-			TemplateID:       req.TemplateID,
+			Title:                req.Title,
+			Description:          req.Description,
+			DeliverableDirectory: req.DeliverableDirectory,
+			TemplateID:           req.TemplateID,
 		})
 		if err != nil {
 			writeBusinessError(w, err)
@@ -2697,9 +2945,17 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		createRun:                       defaultCreateRun,
 		readRun:                         defaultReadRun,
 		readRunSnapshot:                 defaultReadRunSnapshot,
+		listRunSteps:                    defaultListRunSteps,
+		listRunToolCalls:                defaultListRunToolCalls,
+		listRunRuntimeCheckpoints:       defaultListRunRuntimeCheckpoints,
+		listRunResults:                  defaultListRunResults,
+		listRunPatches:                  defaultListRunPatches,
+		listRunValidationResults:        defaultListRunValidationResults,
+		listRunArtifacts:                defaultListRunArtifacts,
 		readRunStatus:                   defaultReadRunStatus,
 		readRunObservability:            defaultReadRunObservability,
 		readArtifactContent:             defaultReadArtifactContent,
+		readRuntimeRawContent:           defaultReadRuntimeRawContent,
 		readRunTaskProgress:             defaultReadRunTaskProgress,
 		readWorkspaceTaskProgress:       defaultReadWorkspaceTaskProgress,
 		readRunContextBundle:            defaultReadRunContextBundle,
@@ -2713,10 +2969,12 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		resumeRun:                       defaultResumeRun,
 		activateWorkspace:               defaultActivateWorkspaceExecution,
 		listDecisions:                   defaultListDecisions,
+		listDecisionPage:                defaultListDecisionPage,
 		readDecision:                    defaultReadDecision,
 		resolveDecision:                 defaultResolveDecision,
 		batchResolveDecisions:           defaultBatchResolveDecisions,
 		listApprovals:                   defaultListApprovals,
+		listApprovalPage:                defaultListApprovalPage,
 		readApproval:                    defaultReadApproval,
 		approveApproval:                 defaultApproveApproval,
 		rejectApproval:                  defaultRejectApproval,
@@ -3008,6 +3266,69 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		})
 		return ret, err
 	}
+	s.listRunSteps = func(ctx context.Context, _, _ string, query appservice.StepQuery) (appservice.StepPage, error) {
+		var ret appservice.StepPage
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListRunStepsWithSession(ctx, session, query)
+			return err
+		})
+		return ret, err
+	}
+	s.listRunToolCalls = func(ctx context.Context, _, _ string, query appservice.ToolCallQuery) (appservice.ToolCallPage, error) {
+		var ret appservice.ToolCallPage
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListRunToolCallsWithSession(ctx, session, query)
+			return err
+		})
+		return ret, err
+	}
+	s.listRunRuntimeCheckpoints = func(ctx context.Context, _, _ string, query appservice.RuntimeCheckpointQuery) (appservice.RuntimeCheckpointPage, error) {
+		var ret appservice.RuntimeCheckpointPage
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListRunRuntimeCheckpointsWithSession(ctx, session, query)
+			return err
+		})
+		return ret, err
+	}
+	s.listRunResults = func(ctx context.Context, _, _ string, query appservice.ResultQuery) (appservice.ResultPage, error) {
+		var ret appservice.ResultPage
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListRunResultsWithSession(ctx, session, query)
+			return err
+		})
+		return ret, err
+	}
+	s.listRunPatches = func(ctx context.Context, _, _ string, query appservice.PatchQuery) (appservice.PatchPage, error) {
+		var ret appservice.PatchPage
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListRunPatchesWithSession(ctx, session, query)
+			return err
+		})
+		return ret, err
+	}
+	s.listRunValidationResults = func(ctx context.Context, _, _ string, query appservice.ValidationResultQuery) (appservice.ValidationResultPage, error) {
+		var ret appservice.ValidationResultPage
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListRunValidationResultsWithSession(ctx, session, query)
+			return err
+		})
+		return ret, err
+	}
+	s.listRunArtifacts = func(ctx context.Context, _, _ string, query appservice.ArtifactQuery) (appservice.ArtifactPage, error) {
+		var ret appservice.ArtifactPage
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListRunArtifactsWithSession(ctx, session, query)
+			return err
+		})
+		return ret, err
+	}
 	s.readRunStatus = func(ctx context.Context, _, _, runID string) (appservice.RunStatus, error) {
 		var ret appservice.RunStatus
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
@@ -3031,6 +3352,15 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ReadArtifactContentWithSession(ctx, session, artifactURI)
+			return err
+		})
+		return ret, err
+	}
+	s.readRuntimeRawContent = func(ctx context.Context, _, _, ref string) (appservice.RuntimeRawContent, error) {
+		var ret appservice.RuntimeRawContent
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadRuntimeRawContentWithSession(ctx, session, ref)
 			return err
 		})
 		return ret, err
@@ -3116,6 +3446,15 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		})
 		return ret, err
 	}
+	s.listDecisionPage = func(ctx context.Context, _, _ string, query appservice.DecisionQuery) (appservice.DecisionPage, error) {
+		var ret appservice.DecisionPage
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListDecisionPageWithSession(ctx, session, query)
+			return err
+		})
+		return ret, err
+	}
 	s.readDecision = func(ctx context.Context, _, _, ticketID string) (appservice.Decision, error) {
 		var ret appservice.Decision
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
@@ -3148,6 +3487,15 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ListApprovalsWithSession(ctx, session, workspaceID, runID)
+			return err
+		})
+		return ret, err
+	}
+	s.listApprovalPage = func(ctx context.Context, _, _ string, query appservice.ApprovalQuery) (appservice.ApprovalPage, error) {
+		var ret appservice.ApprovalPage
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ListApprovalPageWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
@@ -3698,6 +4046,34 @@ func defaultReadRunSnapshot(ctx context.Context, backend string, dataRoot string
 	return appservice.ReadRunSnapshotWithBackend(ctx, backend, dataRoot, runID)
 }
 
+func defaultListRunSteps(ctx context.Context, backend string, dataRoot string, query appservice.StepQuery) (appservice.StepPage, error) {
+	return appservice.ListRunStepsWithBackend(ctx, backend, dataRoot, query)
+}
+
+func defaultListRunToolCalls(ctx context.Context, backend string, dataRoot string, query appservice.ToolCallQuery) (appservice.ToolCallPage, error) {
+	return appservice.ListRunToolCallsWithBackend(ctx, backend, dataRoot, query)
+}
+
+func defaultListRunRuntimeCheckpoints(ctx context.Context, backend string, dataRoot string, query appservice.RuntimeCheckpointQuery) (appservice.RuntimeCheckpointPage, error) {
+	return appservice.ListRunRuntimeCheckpointsWithBackend(ctx, backend, dataRoot, query)
+}
+
+func defaultListRunResults(ctx context.Context, backend string, dataRoot string, query appservice.ResultQuery) (appservice.ResultPage, error) {
+	return appservice.ListRunResultsWithBackend(ctx, backend, dataRoot, query)
+}
+
+func defaultListRunPatches(ctx context.Context, backend string, dataRoot string, query appservice.PatchQuery) (appservice.PatchPage, error) {
+	return appservice.ListRunPatchesWithBackend(ctx, backend, dataRoot, query)
+}
+
+func defaultListRunValidationResults(ctx context.Context, backend string, dataRoot string, query appservice.ValidationResultQuery) (appservice.ValidationResultPage, error) {
+	return appservice.ListRunValidationResultsWithBackend(ctx, backend, dataRoot, query)
+}
+
+func defaultListRunArtifacts(ctx context.Context, backend string, dataRoot string, query appservice.ArtifactQuery) (appservice.ArtifactPage, error) {
+	return appservice.ListRunArtifactsWithBackend(ctx, backend, dataRoot, query)
+}
+
 func defaultReadRunStatus(ctx context.Context, backend string, dataRoot string, runID string) (appservice.RunStatus, error) {
 	return appservice.ReadRunStatusWithBackend(ctx, backend, dataRoot, runID)
 }
@@ -3708,6 +4084,10 @@ func defaultReadRunObservability(ctx context.Context, backend string, dataRoot s
 
 func defaultReadArtifactContent(ctx context.Context, backend string, dataRoot string, artifactURI string) (appservice.ArtifactContent, error) {
 	return appservice.ReadArtifactContentWithBackend(ctx, backend, dataRoot, artifactURI)
+}
+
+func defaultReadRuntimeRawContent(ctx context.Context, backend string, dataRoot string, ref string) (appservice.RuntimeRawContent, error) {
+	return appservice.ReadRuntimeRawContentWithBackend(ctx, backend, dataRoot, ref)
 }
 
 func defaultReadRunTaskProgress(ctx context.Context, backend string, dataRoot string, runID string) (appservice.TaskProgress, error) {
@@ -3762,6 +4142,10 @@ func defaultListDecisions(ctx context.Context, backend string, dataRoot string, 
 	return appservice.ListDecisionsWithBackend(ctx, backend, dataRoot, workspaceID, runID)
 }
 
+func defaultListDecisionPage(ctx context.Context, backend string, dataRoot string, query appservice.DecisionQuery) (appservice.DecisionPage, error) {
+	return appservice.ListDecisionPageWithBackend(ctx, backend, dataRoot, query)
+}
+
 func defaultReadDecision(ctx context.Context, backend string, dataRoot string, ticketID string) (appservice.Decision, error) {
 	return appservice.ReadDecisionWithBackend(ctx, backend, dataRoot, ticketID)
 }
@@ -3776,6 +4160,10 @@ func defaultBatchResolveDecisions(ctx context.Context, backend string, dataRoot 
 
 func defaultListApprovals(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string) ([]appservice.Approval, error) {
 	return appservice.ListApprovalsWithBackend(ctx, backend, dataRoot, workspaceID, runID)
+}
+
+func defaultListApprovalPage(ctx context.Context, backend string, dataRoot string, query appservice.ApprovalQuery) (appservice.ApprovalPage, error) {
+	return appservice.ListApprovalPageWithBackend(ctx, backend, dataRoot, query)
 }
 
 func defaultReadApproval(ctx context.Context, backend string, dataRoot string, approvalID string) (appservice.Approval, error) {
@@ -4563,11 +4951,17 @@ func runPriorityFromRequest(r *http.Request, bodyPriority int) int {
 
 func eventRecordQueryFromRequest(r *http.Request) appservice.EventRecordQuery {
 	values := r.URL.Query()
-	limit := 0
+	limit := defaultEventRecordPageLimit
 	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil {
 			limit = parsed
 		}
+	}
+	if limit <= 0 {
+		limit = defaultEventRecordPageLimit
+	}
+	if limit > maxEventRecordPageLimit {
+		limit = maxEventRecordPageLimit
 	}
 	return appservice.EventRecordQuery{
 		WorkspaceID:    values.Get("workspaceId"),
@@ -4579,6 +4973,136 @@ func eventRecordQueryFromRequest(r *http.Request) appservice.EventRecordQuery {
 		OccurredAfter:  values.Get("occurredAfter"),
 		OccurredBefore: values.Get("occurredBefore"),
 		Limit:          limit,
+	}
+}
+
+func stepQueryFromRequest(r *http.Request) appservice.StepQuery {
+	values := r.URL.Query()
+	limit := 0
+	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	return appservice.StepQuery{
+		CursorAfterID: values.Get("cursorAfterId"),
+		Limit:         limit,
+	}
+}
+
+func toolCallQueryFromRequest(r *http.Request) appservice.ToolCallQuery {
+	values := r.URL.Query()
+	limit := 0
+	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	return appservice.ToolCallQuery{
+		CursorAfterID: values.Get("cursorAfterId"),
+		Limit:         limit,
+	}
+}
+
+func runtimeCheckpointQueryFromRequest(r *http.Request) appservice.RuntimeCheckpointQuery {
+	values := r.URL.Query()
+	limit := 0
+	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	return appservice.RuntimeCheckpointQuery{
+		CursorAfterID: values.Get("cursorAfterId"),
+		Limit:         limit,
+	}
+}
+
+func resultQueryFromRequest(r *http.Request) appservice.ResultQuery {
+	values := r.URL.Query()
+	limit := 0
+	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	return appservice.ResultQuery{
+		CursorAfterID: values.Get("cursorAfterId"),
+		Limit:         limit,
+	}
+}
+
+func patchQueryFromRequest(r *http.Request) appservice.PatchQuery {
+	values := r.URL.Query()
+	limit := 0
+	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	return appservice.PatchQuery{
+		CursorAfterID: values.Get("cursorAfterId"),
+		Limit:         limit,
+	}
+}
+
+func validationResultQueryFromRequest(r *http.Request) appservice.ValidationResultQuery {
+	values := r.URL.Query()
+	limit := 0
+	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	return appservice.ValidationResultQuery{
+		CursorAfterID: values.Get("cursorAfterId"),
+		Limit:         limit,
+	}
+}
+
+func artifactQueryFromRequest(r *http.Request) appservice.ArtifactQuery {
+	values := r.URL.Query()
+	limit := 0
+	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	return appservice.ArtifactQuery{
+		CursorAfterID: values.Get("cursorAfterId"),
+		Limit:         limit,
+	}
+}
+
+func decisionQueryFromRequest(r *http.Request) appservice.DecisionQuery {
+	values := r.URL.Query()
+	limit := 0
+	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	return appservice.DecisionQuery{
+		WorkspaceID:   values.Get("workspaceId"),
+		RunID:         values.Get("runId"),
+		CursorAfterID: values.Get("cursorAfterId"),
+		Limit:         limit,
+	}
+}
+
+func approvalQueryFromRequest(r *http.Request) appservice.ApprovalQuery {
+	values := r.URL.Query()
+	limit := 0
+	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	return appservice.ApprovalQuery{
+		WorkspaceID:   values.Get("workspaceId"),
+		RunID:         values.Get("runId"),
+		CursorAfterID: values.Get("cursorAfterId"),
+		Limit:         limit,
 	}
 }
 
@@ -4954,6 +5478,22 @@ func writeArtifactContent(w http.ResponseWriter, item appservice.ArtifactContent
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": fileName}))
 	w.Header().Set("X-Workorch-Artifact-URI", item.URI)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(item.Content)
+}
+
+func writeRuntimeRawContent(w http.ResponseWriter, item appservice.RuntimeRawContent) {
+	contentType := strings.TrimSpace(item.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	fileName := strings.TrimSpace(item.FileName)
+	if fileName == "" {
+		fileName = "payload"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": fileName}))
+	w.Header().Set("X-Workorch-Raw-Ref", item.Ref)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(item.Content)
 }

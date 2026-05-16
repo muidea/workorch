@@ -28,23 +28,23 @@ import (
 type workorchWorkspaceResponse struct {
 	Service   string `json:"service"`
 	Workspace struct {
-		ID               string `json:"id"`
-		Title            string `json:"title"`
-		Description      string `json:"description"`
-		WorkingDirectory string `json:"workingDirectory"`
-		State            string `json:"state"`
-		ActiveRunID      string `json:"activeRunId"`
+		ID                   string `json:"id"`
+		Title                string `json:"title"`
+		Description          string `json:"description"`
+		DeliverableDirectory string `json:"deliverableDirectory"`
+		State                string `json:"state"`
+		ActiveRunID          string `json:"activeRunId"`
 	} `json:"workspace"`
 }
 
 type workorchWorkspacesResponse struct {
 	Service    string `json:"service"`
 	Workspaces []struct {
-		ID               string `json:"id"`
-		Title            string `json:"title"`
-		Description      string `json:"description"`
-		WorkingDirectory string `json:"workingDirectory"`
-		State            string `json:"state"`
+		ID                   string `json:"id"`
+		Title                string `json:"title"`
+		Description          string `json:"description"`
+		DeliverableDirectory string `json:"deliverableDirectory"`
+		State                string `json:"state"`
 	} `json:"workspaces"`
 }
 
@@ -307,12 +307,12 @@ func TestWorkorchServerModeSupportsFileRepositoryBackend(t *testing.T) {
 	)
 
 	for _, name := range []string{"workspace.json", "goals.json", "dods.json"} {
-		if _, err := os.Stat(filepath.Join(dataDir, "workspaces", workspaceID, name)); err != nil {
+		if _, err := os.Stat(filepath.Join(dataDir, "internal", "workspaces", workspaceID, name)); err != nil {
 			t.Fatalf("expected workspace-scoped persisted file %s: %v", name, err)
 		}
 	}
 	for _, runID := range []string{"run-main-file", decisionResolveRunID, decisionRejectRunID, approvalApproveRunID, approvalRejectRunID} {
-		if _, err := os.Stat(filepath.Join(dataDir, "workspaces", workspaceID, "runs", runID, "run.json")); err != nil {
+		if _, err := os.Stat(filepath.Join(dataDir, "internal", "workspaces", workspaceID, "runs", runID, "run.json")); err != nil {
 			t.Fatalf("expected run-scoped persistence for %s: %v", runID, err)
 		}
 	}
@@ -608,8 +608,8 @@ func createWorkspace(t *testing.T, endpoint string, title string) string {
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode create workspace response: %v", err)
 	}
-	if payload.Workspace.ID == "" || payload.Workspace.Title != title || payload.Workspace.Description != description || payload.Workspace.WorkingDirectory == "" || payload.Workspace.State != "active" {
-		t.Fatalf("created workspace = %+v, want generated/%s/%s/non-empty working directory/active", payload.Workspace, title, description)
+	if payload.Workspace.ID == "" || payload.Workspace.Title != title || payload.Workspace.Description != description || payload.Workspace.DeliverableDirectory == "" || payload.Workspace.State != "active" {
+		t.Fatalf("created workspace = %+v, want generated/%s/%s/non-empty deliverable directory/active", payload.Workspace, title, description)
 	}
 	return payload.Workspace.ID
 }
@@ -617,9 +617,10 @@ func createWorkspace(t *testing.T, endpoint string, title string) string {
 func assertWorkspaceLayoutDirectories(t *testing.T, dataDir string, workspaceID string) {
 	t.Helper()
 	for _, dir := range []string{
-		filepath.Join(dataDir, "workspaces", workspaceID, "working"),
-		filepath.Join(dataDir, "workspaces", workspaceID, "artifacts"),
-		filepath.Join(dataDir, "workspaces", workspaceID, "runs"),
+		filepath.Join(filepath.Dir(dataDir), ".workorch-workspaces", workspaceID),
+		filepath.Join(dataDir, "internal", "workspaces", workspaceID),
+		filepath.Join(dataDir, "internal", "workspaces", workspaceID, "artifacts"),
+		filepath.Join(dataDir, "internal", "workspaces", workspaceID, "runs"),
 	} {
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			t.Fatalf("workspace directory %q = %v/%v, want existing directory", dir, info, err)

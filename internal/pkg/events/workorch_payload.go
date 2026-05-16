@@ -7,107 +7,109 @@ import (
 )
 
 const (
-	PayloadKeyTitle              = "title"
-	PayloadKeyDescription        = "description"
-	PayloadKeyWorkingDirectory   = "workingDirectory"
-	PayloadKeyGoalID             = "goalId"
-	PayloadKeyDoDID              = "doDId"
-	PayloadKeyText               = "text"
-	PayloadKeyItems              = "items"
-	PayloadKeyState              = "state"
-	PayloadKeyActiveRunID        = "activeRunId"
-	PayloadKeyBlockingTicketID   = "blockingTicketId"
-	PayloadKeyBlockingApprovalID = "blockingApprovalId"
-	PayloadKeyFailureReason      = "failureReason"
-	PayloadKeyKind               = "kind"
-	PayloadKeyInput              = "input"
-	PayloadKeyOutput             = "output"
-	PayloadKeyReason             = "reason"
-	PayloadKeyAction             = "action"
-	PayloadKeyContext            = "context"
-	PayloadKeyResolutionID       = "resolutionId"
-	PayloadKeyType               = "type"
-	PayloadKeyPayload            = "payload"
-	PayloadKeySummary            = "summary"
-	PayloadKeySourceType         = "sourceType"
-	PayloadKeySourceRef          = "sourceRef"
-	PayloadKeyEvidenceRefs       = "evidenceRefs"
-	PayloadKeyArtifactRefs       = "artifactRefs"
-	PayloadKeyResultID           = "resultId"
-	PayloadKeyArtifactType       = "artifactType"
-	PayloadKeyName               = "name"
-	PayloadKeyURI                = "uri"
-	PayloadKeyContentType        = "contentType"
-	PayloadKeyMemoryType         = "memoryType"
-	PayloadKeyContent            = "content"
-	PayloadKeyTags               = "tags"
-	PayloadKeyImportance         = "importance"
-	PayloadKeyConfidence         = "confidence"
-	PayloadKeyVisibility         = "visibility"
-	PayloadKeyTraceID            = "traceId"
-	PayloadKeyStage              = "stage"
-	PayloadKeyPolicy             = "policy"
-	PayloadKeyStatus             = "status"
-	PayloadKeyProviderID         = "providerId"
-	PayloadKeyOperation          = "operation"
-	PayloadKeyItemType           = "itemType"
-	PayloadKeyItemID             = "itemId"
-	PayloadKeyConfidenceScore    = "confidence"
-	PayloadKeyPolicyMatched      = "policyMatched"
-	PayloadKeyPolicyBlocked      = "policyBlocked"
-	PayloadKeyBudgetBefore       = "budgetBefore"
-	PayloadKeyBudgetAfter        = "budgetAfter"
-	PayloadKeyLLMProviderID      = "llmProviderId"
-	PayloadKeyLLMModel           = "llmModel"
-	PayloadKeyLLMDecisionPreview = "llmDecisionPreview"
-	PayloadKeyPromptFingerprint  = "promptFingerprint"
-	PayloadKeyResolvedAt         = "resolvedAt"
-	PayloadKeyEscalationReason   = "escalationReason"
-	PayloadKeyRetrievedMemoryIDs = "retrievedMemoryIds"
-	PayloadKeyPatchID            = "patchId"
-	PayloadKeyStepID             = "stepId"
-	PayloadKeyToolCallID         = "toolCallId"
-	PayloadKeyPatchType          = "patchType"
-	PayloadKeyTargetRef          = "targetRef"
-	PayloadKeyAddedLines         = "addedLines"
-	PayloadKeyDeletedLines       = "deletedLines"
-	PayloadKeyContentHash        = "contentHash"
-	PayloadKeyDiffHash           = "diffHash"
-	PayloadKeyApprovalID         = "approvalId"
-	PayloadKeyRisk               = "risk"
-	PayloadKeyError              = "error"
-	PayloadKeyWorkspaceID        = "workspaceId"
-	PayloadKeyRunID              = "runId"
-	PayloadKeyModel              = "model"
-	PayloadKeyChunkCount         = "chunkCount"
-	PayloadKeyReceivedBytes      = "receivedBytes"
-	PayloadKeyElapsedMs          = "elapsedMs"
-	PayloadKeyProvider           = "provider"
-	PayloadKeyInputTokens        = "inputTokens"
-	PayloadKeyOutputTokens       = "outputTokens"
-	PayloadKeyTotalTokens        = "totalTokens"
-	PayloadKeyEstimated          = "estimated"
-	PayloadKeyUsageSource        = "usageSource"
-	PayloadKeyEstimatedCost      = "estimatedCost"
-	PayloadKeyCostEstimated      = "costEstimated"
-	PayloadKeyCostSource         = "costSource"
-	PayloadKeyCurrency           = "currency"
-	PayloadKeyRequestBytes       = "requestBytes"
-	PayloadKeyResponseBytes      = "responseBytes"
-	PayloadKeyStreaming          = "streaming"
-	PayloadKeyContextBudget      = "contextBudget"
-	PayloadKeyStartedAt          = "startedAt"
-	PayloadKeyCompletedAt        = "completedAt"
-	PayloadKeyDurationMs         = "durationMs"
-	PayloadKeyFailureClass       = "failureClass"
+	PayloadKeyTitle                = "title"
+	PayloadKeyDescription          = "description"
+	PayloadKeyDeliverableDirectory = "deliverableDirectory"
+	PayloadKeyInternalDirectory    = "internalDirectory"
+	PayloadKeyGoalID               = "goalId"
+	PayloadKeyDoDID                = "doDId"
+	PayloadKeyText                 = "text"
+	PayloadKeyItems                = "items"
+	PayloadKeyState                = "state"
+	PayloadKeyActiveRunID          = "activeRunId"
+	PayloadKeyBlockingTicketID     = "blockingTicketId"
+	PayloadKeyBlockingApprovalID   = "blockingApprovalId"
+	PayloadKeyFailureReason        = "failureReason"
+	PayloadKeyKind                 = "kind"
+	PayloadKeyInput                = "input"
+	PayloadKeyOutput               = "output"
+	PayloadKeyReason               = "reason"
+	PayloadKeyAction               = "action"
+	PayloadKeyContext              = "context"
+	PayloadKeyResolutionID         = "resolutionId"
+	PayloadKeyType                 = "type"
+	PayloadKeyPayload              = "payload"
+	PayloadKeySummary              = "summary"
+	PayloadKeySourceType           = "sourceType"
+	PayloadKeySourceRef            = "sourceRef"
+	PayloadKeyEvidenceRefs         = "evidenceRefs"
+	PayloadKeyArtifactRefs         = "artifactRefs"
+	PayloadKeyResultID             = "resultId"
+	PayloadKeyArtifactType         = "artifactType"
+	PayloadKeyName                 = "name"
+	PayloadKeyURI                  = "uri"
+	PayloadKeyContentType          = "contentType"
+	PayloadKeyMemoryType           = "memoryType"
+	PayloadKeyContent              = "content"
+	PayloadKeyTags                 = "tags"
+	PayloadKeyImportance           = "importance"
+	PayloadKeyConfidence           = "confidence"
+	PayloadKeyVisibility           = "visibility"
+	PayloadKeyTraceID              = "traceId"
+	PayloadKeyStage                = "stage"
+	PayloadKeyPolicy               = "policy"
+	PayloadKeyStatus               = "status"
+	PayloadKeyProviderID           = "providerId"
+	PayloadKeyOperation            = "operation"
+	PayloadKeyItemType             = "itemType"
+	PayloadKeyItemID               = "itemId"
+	PayloadKeyConfidenceScore      = "confidence"
+	PayloadKeyPolicyMatched        = "policyMatched"
+	PayloadKeyPolicyBlocked        = "policyBlocked"
+	PayloadKeyBudgetBefore         = "budgetBefore"
+	PayloadKeyBudgetAfter          = "budgetAfter"
+	PayloadKeyLLMProviderID        = "llmProviderId"
+	PayloadKeyLLMModel             = "llmModel"
+	PayloadKeyLLMDecisionPreview   = "llmDecisionPreview"
+	PayloadKeyPromptFingerprint    = "promptFingerprint"
+	PayloadKeyResolvedAt           = "resolvedAt"
+	PayloadKeyEscalationReason     = "escalationReason"
+	PayloadKeyRetrievedMemoryIDs   = "retrievedMemoryIds"
+	PayloadKeyPatchID              = "patchId"
+	PayloadKeyStepID               = "stepId"
+	PayloadKeyToolCallID           = "toolCallId"
+	PayloadKeyPatchType            = "patchType"
+	PayloadKeyTargetRef            = "targetRef"
+	PayloadKeyAddedLines           = "addedLines"
+	PayloadKeyDeletedLines         = "deletedLines"
+	PayloadKeyContentHash          = "contentHash"
+	PayloadKeyDiffHash             = "diffHash"
+	PayloadKeyApprovalID           = "approvalId"
+	PayloadKeyRisk                 = "risk"
+	PayloadKeyError                = "error"
+	PayloadKeyWorkspaceID          = "workspaceId"
+	PayloadKeyRunID                = "runId"
+	PayloadKeyModel                = "model"
+	PayloadKeyChunkCount           = "chunkCount"
+	PayloadKeyReceivedBytes        = "receivedBytes"
+	PayloadKeyElapsedMs            = "elapsedMs"
+	PayloadKeyProvider             = "provider"
+	PayloadKeyInputTokens          = "inputTokens"
+	PayloadKeyOutputTokens         = "outputTokens"
+	PayloadKeyTotalTokens          = "totalTokens"
+	PayloadKeyEstimated            = "estimated"
+	PayloadKeyUsageSource          = "usageSource"
+	PayloadKeyEstimatedCost        = "estimatedCost"
+	PayloadKeyCostEstimated        = "costEstimated"
+	PayloadKeyCostSource           = "costSource"
+	PayloadKeyCurrency             = "currency"
+	PayloadKeyRequestBytes         = "requestBytes"
+	PayloadKeyResponseBytes        = "responseBytes"
+	PayloadKeyStreaming            = "streaming"
+	PayloadKeyContextBudget        = "contextBudget"
+	PayloadKeyStartedAt            = "startedAt"
+	PayloadKeyCompletedAt          = "completedAt"
+	PayloadKeyDurationMs           = "durationMs"
+	PayloadKeyFailureClass         = "failureClass"
 )
 
 type WorkspacePayloadData struct {
-	Title            string
-	Description      string
-	WorkingDirectory string
-	State            common.WorkspaceState
-	ActiveRunID      common.RunID
+	Title                string
+	Description          string
+	DeliverableDirectory string
+	InternalDirectory    string
+	State                common.WorkspaceState
+	ActiveRunID          common.RunID
 }
 
 type RunPayloadData struct {
@@ -296,7 +298,7 @@ type LLMUsagePayloadData struct {
 	FailureClass  string
 }
 
-func WorkspacePayload(title string, description string, workingDirectory string, state common.WorkspaceState, activeRunID common.RunID) map[string]any {
+func WorkspacePayload(title string, description string, deliverableDirectory string, internalDirectory string, state common.WorkspaceState, activeRunID common.RunID) map[string]any {
 	payload := map[string]any{
 		PayloadKeyState:       string(state),
 		PayloadKeyActiveRunID: string(activeRunID),
@@ -307,8 +309,11 @@ func WorkspacePayload(title string, description string, workingDirectory string,
 	if description != "" {
 		payload[PayloadKeyDescription] = description
 	}
-	if workingDirectory != "" {
-		payload[PayloadKeyWorkingDirectory] = workingDirectory
+	if deliverableDirectory != "" {
+		payload[PayloadKeyDeliverableDirectory] = deliverableDirectory
+	}
+	if internalDirectory != "" {
+		payload[PayloadKeyInternalDirectory] = internalDirectory
 	}
 	return payload
 }
@@ -658,14 +663,16 @@ func DecodeWorkspacePayload(payload map[string]any) (WorkspacePayloadData, bool)
 	}
 	title, _ := optionalStringField(payload, PayloadKeyTitle)
 	description, _ := optionalStringField(payload, PayloadKeyDescription)
-	workingDirectory, _ := optionalStringField(payload, PayloadKeyWorkingDirectory)
+	deliverableDirectory, _ := optionalStringField(payload, PayloadKeyDeliverableDirectory)
+	internalDirectory, _ := optionalStringField(payload, PayloadKeyInternalDirectory)
 	activeRunID, _ := optionalStringField(payload, PayloadKeyActiveRunID)
 	return WorkspacePayloadData{
-		Title:            title,
-		Description:      description,
-		WorkingDirectory: workingDirectory,
-		State:            common.WorkspaceState(state),
-		ActiveRunID:      common.RunID(activeRunID),
+		Title:                title,
+		Description:          description,
+		DeliverableDirectory: deliverableDirectory,
+		InternalDirectory:    internalDirectory,
+		State:                common.WorkspaceState(state),
+		ActiveRunID:          common.RunID(activeRunID),
 	}, true
 }
 

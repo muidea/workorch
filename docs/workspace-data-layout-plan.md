@@ -1,5 +1,15 @@
 # Workspace Data Layout Plan
 
+Status: superseded for new implementation by
+`docs/workorch-workspace-deliverable-boundary-design.md`.
+
+The current runtime no longer places user deliverables under
+`.workorch-data/workspaces/<workspace-id>/working`. New workspaces use
+`.workorch-workspaces/<workspace-id>` as the deliverable root and
+`.workorch-data/internal/workspaces/<workspace-id>` as WorkOrch internal state.
+This document remains as historical context for the earlier unified-data-root
+proposal.
+
 本文定义 workorch 后续统一数据目录规则。目标是在不改变业务目标的前提下，
 将服务持久化数据、workspace 工作目录、运行产物和正式交付物统一纳入
 `repository.dataDir`，并以 Workspace 为最小管理单位进行归档、迁移、清理和排障。
@@ -54,17 +64,43 @@
       runs/
         run-aaa/
           run.json
-          step.json
-          tool_call.json
-          patch.json
-          validation_result.json
-          runtime_checkpoint.json
-          ticket.json
-          resolution.json
-          approval.json
-          result.json
-          artifact.json
-          event_record.json
+          steps/
+            <step-id-safe>/
+              metadata.json
+              input.json
+              output.json
+          tool-calls/
+            <tool-call-id-safe>/
+              metadata.json
+              arguments.json
+              output.json
+          llm-calls/
+            <step-id-safe>/
+              request.json
+              response.json
+              response.sse
+              usage.json
+          patches/
+            <patch-id-safe>.json
+          validations/
+            <validation-result-id-safe>.json
+          checkpoints/
+            <checkpoint-id-safe>.json
+          decisions/
+            tickets/
+              <ticket-id-safe>.json
+            resolutions/
+              <resolution-id-safe>.json
+          approvals/
+            <approval-id-safe>.json
+          results/
+            <result-id-safe>.json
+          artifacts/
+            <artifact-id-safe>.json
+          events/
+            events-000001.jsonl
+          payloads/
+            <event-id-safe>.json
 ```
 
 ### `system`
@@ -213,7 +249,11 @@ Run 目录中的 `artifact.json` 只保存元数据，不保存大体积文件�
     run-implement-feature/
       result.json
       artifact.json
-      step.json
+      steps/
+        <step-id-safe>/
+          metadata.json
+          input.json
+          output.json
 ```
 
 源码主状态在 `working/repo`。Artifact 只记录某次 Run 被验收接受的补丁、测试报告、
@@ -237,7 +277,11 @@ Run 目录中的 `artifact.json` 只保存元数据，不保存大体积文件�
     run-final-review/
       result.json
       artifact.json
-      step.json
+      steps/
+        <step-id-safe>/
+          metadata.json
+          input.json
+          output.json
 ```
 
 博文源稿在 `working/content/post.md` 持续编辑。`artifacts/run-final-review` 保存

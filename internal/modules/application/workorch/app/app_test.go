@@ -100,13 +100,13 @@ func (s *stubWorkspaceBackend) Events() backend.EventsBackend       { return nil
 func (s *stubWorkspaceBackend) Create(_ context.Context, req backend.CreateWorkspaceRequest) (*backend.WorkspaceInfo, error) {
 	s.createReq = req
 	s.created = backend.WorkspaceInfo{
-		ID:               common.WorkspaceID("ws-created"),
-		Title:            req.Title,
-		Description:      req.Description,
-		WorkingDirectory: req.WorkingDirectory,
-		State:            common.WorkspaceStateActive,
-		DefaultSoulID:    "",
-		SoulBindings:     nil,
+		ID:                   common.WorkspaceID("ws-created"),
+		Title:                req.Title,
+		Description:          req.Description,
+		DeliverableDirectory: req.DeliverableDirectory,
+		State:                common.WorkspaceStateActive,
+		DefaultSoulID:        "",
+		SoulBindings:         nil,
 	}
 	return &s.created, nil
 }
@@ -132,7 +132,7 @@ func TestResolveDefaultWorkspaceCreatesWorkspaceWithGenericGovernedTemplate(t *t
 	if be.createReq.TemplateID != defaultWorkspaceTemplateID {
 		t.Fatalf("template id = %q, want %q for fresh startup", be.createReq.TemplateID, defaultWorkspaceTemplateID)
 	}
-	if be.createReq.WorkingDirectory == "" {
-		t.Fatalf("working directory was not forwarded")
+	if be.createReq.DeliverableDirectory == "" {
+		t.Fatalf("deliverable directory was not forwarded")
 	}
 }

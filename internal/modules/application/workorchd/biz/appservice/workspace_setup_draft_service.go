@@ -17,9 +17,9 @@ import (
 const workspaceSetupDraftSchemaName = "workorch.workspaceSetupDraft.v1"
 
 type WorkspaceSetupDraftWorkspace struct {
-	Title            string `json:"title,omitempty"`
-	Description      string `json:"description,omitempty"`
-	WorkingDirectory string `json:"workingDirectory,omitempty"`
+	Title                string `json:"title,omitempty"`
+	Description          string `json:"description,omitempty"`
+	DeliverableDirectory string `json:"deliverableDirectory,omitempty"`
 }
 
 type WorkspaceSetupDraftMessage struct {
@@ -105,9 +105,9 @@ func BuildWorkspaceSetupDraftGenerationRequest(ctx context.Context, session *Run
 		return WorkspaceSetupDraftGenerationRequest{}, err
 	}
 	workspace := WorkspaceSetupDraftWorkspace{
-		Title:            strings.TrimSpace(cmd.Workspace.Title),
-		Description:      strings.TrimSpace(cmd.Workspace.Description),
-		WorkingDirectory: strings.TrimSpace(cmd.Workspace.WorkingDirectory),
+		Title:                strings.TrimSpace(cmd.Workspace.Title),
+		Description:          strings.TrimSpace(cmd.Workspace.Description),
+		DeliverableDirectory: strings.TrimSpace(cmd.Workspace.DeliverableDirectory),
 	}
 	messages := normalizeWorkspaceSetupDraftMessages(cmd.Messages)
 	if workspace.Title == "" && len(messages) == 0 && strings.TrimSpace(cmd.CurrentDraft.GoalText) == "" {

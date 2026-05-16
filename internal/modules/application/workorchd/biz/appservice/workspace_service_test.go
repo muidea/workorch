@@ -22,7 +22,7 @@ func TestCreateWorkspaceWithBackendReturnsCreatedWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
-	if item.ID == "" || item.Title != "appservice created workspace" || item.Description != "appservice description" || item.WorkingDirectory != "workspaces/appservice created workspace" {
+	if item.ID == "" || item.Title != "appservice created workspace" || item.Description != "appservice description" || item.DeliverableDirectory != "workspaces/appservice created workspace" {
 		t.Fatalf("workspace = %+v, want created workspace", item)
 	}
 	if !strings.HasPrefix(item.ID, "ws-") {
@@ -68,9 +68,9 @@ func TestCreateWorkspaceWithTemplateBindsWorkspaceSouls(t *testing.T) {
 	}
 
 	item, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
-		Title:            "software workspace",
-		WorkingDirectory: "workspaces/software",
-		TemplateID:       "template-code-agent",
+		Title:                "software workspace",
+		DeliverableDirectory: "workspaces/software",
+		TemplateID:           "template-code-agent",
 	})
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
@@ -111,7 +111,7 @@ func TestReadWorkspaceWithBackendReturnsPersistedWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
 	}
-	if item.ID != created.ID || item.Title != "appservice read workspace" || item.Description != "read description" || item.WorkingDirectory != "workspaces/appservice read workspace" {
+	if item.ID != created.ID || item.Title != "appservice read workspace" || item.Description != "read description" || item.DeliverableDirectory != "workspaces/appservice read workspace" {
 		t.Fatalf("workspace = %+v, want persisted workspace", item)
 	}
 }
@@ -173,20 +173,21 @@ func TestReadAndListWorkspacesProjectActiveRunState(t *testing.T) {
 	}
 }
 
-func TestCreateWorkspaceWithBackendDefaultsWorkingDirectory(t *testing.T) {
+func TestCreateWorkspaceWithBackendDefaultsDeliverableDirectory(t *testing.T) {
 	dataRoot := t.TempDir()
 	item, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "appservice default directory workspace", "", "")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
-	want := filepath.Join(dataRoot, "workspaces", item.ID, "working")
-	if item.WorkingDirectory != want {
-		t.Fatalf("workingDirectory = %q, want %q", item.WorkingDirectory, want)
+	want := filepath.Join(filepath.Dir(dataRoot), ".workorch-workspaces", item.ID)
+	if item.DeliverableDirectory != want {
+		t.Fatalf("deliverableDirectory = %q, want %q", item.DeliverableDirectory, want)
 	}
 	for _, dir := range []string{
-		filepath.Join(dataRoot, "workspaces", item.ID, "working"),
-		filepath.Join(dataRoot, "workspaces", item.ID, "artifacts"),
-		filepath.Join(dataRoot, "workspaces", item.ID, "runs"),
+		filepath.Join(filepath.Dir(dataRoot), ".workorch-workspaces", item.ID),
+		filepath.Join(dataRoot, "internal", "workspaces", item.ID),
+		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "artifacts"),
+		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "runs"),
 	} {
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			t.Fatalf("workspace directory %q = %v/%v, want existing directory", dir, info, err)
@@ -194,17 +195,78 @@ func TestCreateWorkspaceWithBackendDefaultsWorkingDirectory(t *testing.T) {
 	}
 }
 
-func TestCreateWorkspaceWithBackendCreatesExplicitWorkingDirectory(t *testing.T) {
-	workingDirectory := filepath.Join(t.TempDir(), "custom-working")
-	item, err := CreateWorkspaceWithBackend(context.Background(), "file", t.TempDir(), "appservice explicit directory workspace", "", workingDirectory)
+func TestCreateWorkspaceWithBackendCreatesExplicitDeliverableDirectory(t *testing.T) {
+	dataRoot := t.TempDir()
+	deliverableDirectory := filepath.Join(t.TempDir(), "custom-project")
+	item, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "appservice explicit directory workspace", "", deliverableDirectory)
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
-	if item.WorkingDirectory != workingDirectory {
-		t.Fatalf("workingDirectory = %q, want %q", item.WorkingDirectory, workingDirectory)
+	if item.DeliverableDirectory != deliverableDirectory {
+		t.Fatalf("deliverableDirectory = %q, want %q", item.DeliverableDirectory, deliverableDirectory)
 	}
-	if info, err := os.Stat(workingDirectory); err != nil || !info.IsDir() {
-		t.Fatalf("explicit working directory = %v/%v, want existing directory", info, err)
+	if info, err := os.Stat(deliverableDirectory); err != nil || !info.IsDir() {
+		t.Fatalf("explicit deliverable directory = %v/%v, want existing directory", info, err)
+	}
+	for _, dir := range []string{
+		filepath.Join(dataRoot, "internal", "workspaces", item.ID),
+		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "config"),
+		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "runs"),
+		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "artifacts"),
+		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "events"),
+		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "llm-calls"),
+		filepath.Join(dataRoot, "internal", "workspaces", item.ID, "indexes"),
+	} {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Fatalf("workspace internal directory %q = %v/%v, want existing directory", dir, info, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(deliverableDirectory, "working")); !os.IsNotExist(err) {
+		t.Fatalf("legacy working directory stat err = %v, want not exist", err)
+	}
+	if _, err := os.Stat(filepath.Join(dataRoot, "internal", "workspaces", item.ID, "working")); !os.IsNotExist(err) {
+		t.Fatalf("legacy internal working directory stat err = %v, want not exist", err)
+	}
+}
+
+func TestResolveWorkspaceDirectoryLayoutUsesFileBackendRoots(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	session, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	defer func() {
+		if err := session.Close(ctx); err != nil {
+			t.Fatalf("close session: %v", err)
+		}
+	}()
+
+	workspaceID := common.WorkspaceID("ws-layout-contract")
+	layout, err := resolveWorkspaceDirectoryLayout(session, workspaceID, "")
+	if err != nil {
+		t.Fatalf("resolveWorkspaceDirectoryLayout default: %v", err)
+	}
+	if !layout.Managed {
+		t.Fatalf("layout.Managed = false, want true for file backend")
+	}
+	wantDeliverableRoot := filepath.Join(filepath.Dir(dataRoot), ".workorch-workspaces")
+	wantDeliverable := filepath.Join(wantDeliverableRoot, string(workspaceID))
+	wantInternal := filepath.Join(dataRoot, "internal", "workspaces", string(workspaceID))
+	if layout.DeliverableRoot != wantDeliverableRoot || layout.DeliverableDirectory != wantDeliverable || layout.InternalDirectory != wantInternal {
+		t.Fatalf("layout = %+v, want deliverableRoot=%q deliverable=%q internal=%q", layout, wantDeliverableRoot, wantDeliverable, wantInternal)
+	}
+	if strings.Contains(filepath.ToSlash(layout.DeliverableDirectory), "/working") {
+		t.Fatalf("deliverableDirectory = %q, must not include legacy working level", layout.DeliverableDirectory)
+	}
+
+	explicitDeliverable := filepath.Join(t.TempDir(), "explicit-project-root")
+	explicit, err := resolveWorkspaceDirectoryLayout(session, workspaceID, explicitDeliverable)
+	if err != nil {
+		t.Fatalf("resolveWorkspaceDirectoryLayout explicit: %v", err)
+	}
+	if !explicit.Managed || explicit.DeliverableDirectory != explicitDeliverable || explicit.InternalDirectory != wantInternal {
+		t.Fatalf("explicit layout = %+v, want managed explicit deliverable and stable internal root", explicit)
 	}
 }
 
@@ -231,8 +293,8 @@ func TestDeleteWorkspaceWithBackendDeletesOnlyWorkspaceByDefault(t *testing.T) {
 	if _, err := ReadWorkspaceWithBackend(ctx, "file", dataRoot, created.ID); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("ReadWorkspaceWithBackend err = %v, want not found", err)
 	}
-	if info, err := os.Stat(created.WorkingDirectory); err != nil || !info.IsDir() {
-		t.Fatalf("working directory = %v/%v, want preserved directory", info, err)
+	if info, err := os.Stat(created.DeliverableDirectory); err != nil || !info.IsDir() {
+		t.Fatalf("deliverable directory = %v/%v, want preserved directory", info, err)
 	}
 }
 
@@ -261,8 +323,11 @@ func TestDeleteWorkspaceWithBackendPurgesWorkspaceData(t *testing.T) {
 	if _, err := ReadWorkspaceWithBackend(ctx, "file", dataRoot, created.ID); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("ReadWorkspaceWithBackend err = %v, want not found", err)
 	}
-	if _, err := os.Stat(filepath.Join(dataRoot, "workspaces", created.ID)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dataRoot, "internal", "workspaces", created.ID)); !os.IsNotExist(err) {
 		t.Fatalf("workspace data root stat err = %v, want not exist", err)
+	}
+	if _, err := os.Stat(created.DeliverableDirectory); !os.IsNotExist(err) {
+		t.Fatalf("workspace deliverable root stat err = %v, want not exist", err)
 	}
 }
 

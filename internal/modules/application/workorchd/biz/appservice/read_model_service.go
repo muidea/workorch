@@ -28,6 +28,31 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
+const (
+	readModelEventRecordLimit       = 100
+	readModelLLMUsageRecordLimit    = 5000
+	readModelStepPageLimit          = 100
+	readModelMaxStepPageLimit       = 500
+	readModelToolCallPageLimit      = 100
+	readModelMaxToolCallPageLimit   = 500
+	readModelCheckpointPageLimit    = 100
+	readModelMaxCheckpointPageLimit = 500
+	readModelResultPageLimit        = 100
+	readModelMaxResultPageLimit     = 500
+	readModelPatchPageLimit         = 100
+	readModelMaxPatchPageLimit      = 500
+	readModelValidationPageLimit    = 100
+	readModelMaxValidationPageLimit = 500
+	readModelArtifactPageLimit      = 100
+	readModelMaxArtifactPageLimit   = 500
+	readModelDecisionPageLimit      = 100
+	readModelMaxDecisionPageLimit   = 500
+	readModelApprovalPageLimit      = 100
+	readModelMaxApprovalPageLimit   = 500
+	eventPayloadStringLimit         = 512
+	eventPayloadListLimit           = 16
+)
+
 type readModelDependencies struct {
 	workspaces           repository.WorkspaceRepository
 	goals                repository.GoalRepository
@@ -283,6 +308,209 @@ func ListEventRecordsWithSession(ctx context.Context, session *RuntimeSession, q
 	return mapEventRecords(items), nil
 }
 
+func ListRunStepsWithSession(ctx context.Context, session *RuntimeSession, query StepQuery) (ret StepPage, err error) {
+	if session == nil || strings.TrimSpace(query.RunID) == "" {
+		return StepPage{}, common.ErrInvalidArgument
+	}
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		return StepPage{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	runID := common.RunID(strings.TrimSpace(query.RunID))
+	if _, err := deps.runs.Get(ctx, runID); err != nil {
+		return StepPage{}, err
+	}
+	items, err := deps.steps.ListByRun(ctx, runID)
+	if err != nil {
+		return StepPage{}, err
+	}
+	return pageRunSteps(items, query), nil
+}
+
+func ListRunStepsWithBackend(ctx context.Context, backend string, dataRoot string, query StepQuery) (StepPage, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return StepPage{}, err
+	}
+	return ListRunStepsWithSession(ctx, session, query)
+}
+
+func ListRunToolCallsWithSession(ctx context.Context, session *RuntimeSession, query ToolCallQuery) (ret ToolCallPage, err error) {
+	if session == nil || strings.TrimSpace(query.RunID) == "" {
+		return ToolCallPage{}, common.ErrInvalidArgument
+	}
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		return ToolCallPage{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	runID := common.RunID(strings.TrimSpace(query.RunID))
+	if _, err := deps.runs.Get(ctx, runID); err != nil {
+		return ToolCallPage{}, err
+	}
+	items, err := deps.toolCalls.ListByRun(ctx, runID)
+	if err != nil {
+		return ToolCallPage{}, err
+	}
+	return pageRunToolCalls(items, query), nil
+}
+
+func ListRunToolCallsWithBackend(ctx context.Context, backend string, dataRoot string, query ToolCallQuery) (ToolCallPage, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return ToolCallPage{}, err
+	}
+	return ListRunToolCallsWithSession(ctx, session, query)
+}
+
+func ListRunRuntimeCheckpointsWithSession(ctx context.Context, session *RuntimeSession, query RuntimeCheckpointQuery) (ret RuntimeCheckpointPage, err error) {
+	if session == nil || strings.TrimSpace(query.RunID) == "" {
+		return RuntimeCheckpointPage{}, common.ErrInvalidArgument
+	}
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		return RuntimeCheckpointPage{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	runID := common.RunID(strings.TrimSpace(query.RunID))
+	if _, err := deps.runs.Get(ctx, runID); err != nil {
+		return RuntimeCheckpointPage{}, err
+	}
+	items, err := deps.checkpoints.ListByRun(ctx, runID)
+	if err != nil {
+		return RuntimeCheckpointPage{}, err
+	}
+	return pageRunRuntimeCheckpoints(items, query), nil
+}
+
+func ListRunRuntimeCheckpointsWithBackend(ctx context.Context, backend string, dataRoot string, query RuntimeCheckpointQuery) (RuntimeCheckpointPage, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return RuntimeCheckpointPage{}, err
+	}
+	return ListRunRuntimeCheckpointsWithSession(ctx, session, query)
+}
+
+func ListRunResultsWithSession(ctx context.Context, session *RuntimeSession, query ResultQuery) (ret ResultPage, err error) {
+	if session == nil || strings.TrimSpace(query.RunID) == "" {
+		return ResultPage{}, common.ErrInvalidArgument
+	}
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		return ResultPage{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	runID := common.RunID(strings.TrimSpace(query.RunID))
+	if _, err := deps.runs.Get(ctx, runID); err != nil {
+		return ResultPage{}, err
+	}
+	items, err := deps.results.ListByRun(ctx, runID)
+	if err != nil {
+		return ResultPage{}, err
+	}
+	return pageRunResults(items, query), nil
+}
+
+func ListRunResultsWithBackend(ctx context.Context, backend string, dataRoot string, query ResultQuery) (ResultPage, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return ResultPage{}, err
+	}
+	return ListRunResultsWithSession(ctx, session, query)
+}
+
+func ListRunPatchesWithSession(ctx context.Context, session *RuntimeSession, query PatchQuery) (ret PatchPage, err error) {
+	if session == nil || strings.TrimSpace(query.RunID) == "" {
+		return PatchPage{}, common.ErrInvalidArgument
+	}
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		return PatchPage{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	runID := common.RunID(strings.TrimSpace(query.RunID))
+	if _, err := deps.runs.Get(ctx, runID); err != nil {
+		return PatchPage{}, err
+	}
+	items, err := deps.patches.ListByRun(ctx, runID)
+	if err != nil {
+		return PatchPage{}, err
+	}
+	return pageRunPatches(items, query), nil
+}
+
+func ListRunPatchesWithBackend(ctx context.Context, backend string, dataRoot string, query PatchQuery) (PatchPage, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return PatchPage{}, err
+	}
+	return ListRunPatchesWithSession(ctx, session, query)
+}
+
+func ListRunValidationResultsWithSession(ctx context.Context, session *RuntimeSession, query ValidationResultQuery) (ret ValidationResultPage, err error) {
+	if session == nil || strings.TrimSpace(query.RunID) == "" {
+		return ValidationResultPage{}, common.ErrInvalidArgument
+	}
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		return ValidationResultPage{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	runID := common.RunID(strings.TrimSpace(query.RunID))
+	if _, err := deps.runs.Get(ctx, runID); err != nil {
+		return ValidationResultPage{}, err
+	}
+	items, err := deps.validations.ListByRun(ctx, runID)
+	if err != nil {
+		return ValidationResultPage{}, err
+	}
+	return pageRunValidationResults(items, query), nil
+}
+
+func ListRunValidationResultsWithBackend(ctx context.Context, backend string, dataRoot string, query ValidationResultQuery) (ValidationResultPage, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return ValidationResultPage{}, err
+	}
+	return ListRunValidationResultsWithSession(ctx, session, query)
+}
+
+func ListRunArtifactsWithSession(ctx context.Context, session *RuntimeSession, query ArtifactQuery) (ret ArtifactPage, err error) {
+	if session == nil || strings.TrimSpace(query.RunID) == "" {
+		return ArtifactPage{}, common.ErrInvalidArgument
+	}
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		return ArtifactPage{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+
+	runID := common.RunID(strings.TrimSpace(query.RunID))
+	if _, err := deps.runs.Get(ctx, runID); err != nil {
+		return ArtifactPage{}, err
+	}
+	items, err := deps.artifacts.ListByRun(ctx, runID)
+	if err != nil {
+		return ArtifactPage{}, err
+	}
+	return pageRunArtifacts(items, query), nil
+}
+
+func ListRunArtifactsWithBackend(ctx context.Context, backend string, dataRoot string, query ArtifactQuery) (ArtifactPage, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return ArtifactPage{}, err
+	}
+	return ListRunArtifactsWithSession(ctx, session, query)
+}
+
 func ListEventRecordsWithBackend(ctx context.Context, backend string, dataRoot string, query EventRecordQuery) ([]EventRecord, error) {
 	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
@@ -478,6 +706,7 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 	var results []*resultmodel.Result
 	var artifacts []*resultmodel.Artifact
 	var eventRecords []*eventstreammodel.EventRecord
+	var llmUsageEventRecords []*eventstreammodel.EventRecord
 	var memoryRecallTraces []*memorymodel.MemoryRecallTrace
 	var decisions []Decision
 	var selectedTicket *decisionmodel.Ticket
@@ -528,7 +757,12 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		},
 		func() error {
 			var err error
-			eventRecords, err = deps.eventRecords.List(ctx, repository.EventRecordQuery{RunID: item.ID})
+			eventRecords, err = deps.eventRecords.List(ctx, repository.EventRecordQuery{RunID: item.ID, Limit: readModelEventRecordLimit})
+			return err
+		},
+		func() error {
+			var err error
+			llmUsageEventRecords, err = deps.eventRecords.List(ctx, repository.EventRecordQuery{RunID: item.ID, Topic: events.TopicRunLLMUsageRecorded, Limit: readModelLLMUsageRecordLimit})
 			return err
 		},
 		func() error {
@@ -560,26 +794,31 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		return RunSnapshot{}, err
 	}
 
-	currentStep := lastStep(steps)
 	observedItems := observed.BuildWorkorchSnapshot(workspace, item, steps, selectedTicket, selectedResolution, selectedApproval, deps.published)
 	stepViews := presenter.MapSteps(steps)
+	currentStep := currentRunSnapshotStep(
+		stepViews,
+		decisionStepID(selectedTicket),
+		approvalStepID(selectedApproval),
+		mapRuntimeCheckpoints(checkpoints),
+	)
 
 	ret := RunSnapshot{
 		Workspace:          mapWorkspaceWithRunProjection(workspace, item),
 		Run:                mapRun(item),
-		Step:               presenter.MapStep(currentStep),
+		Step:               currentStep,
 		Steps:              stepViews,
 		ToolCalls:          mapToolCalls(toolCalls),
 		Patches:            mapPatches(patches),
 		WebSources:         mapWebSourceTraces(stepViews),
 		LLMContextBudgets:  mapLLMContextBudgetTraces(stepViews),
-		LLMUsageTraces:     mapLLMUsageTracesFromEventRecords(mapEventRecords(eventRecords), string(item.ID)),
+		LLMUsageTraces:     mapLLMUsageTracesFromEventRecords(mapEventRecords(llmUsageEventRecords), string(item.ID)),
 		ValidationResults:  mapValidationResults(validations),
 		RuntimeCheckpoints: mapRuntimeCheckpoints(checkpoints),
 		Results:            mapResults(results),
 		Artifacts:          mapArtifacts(artifacts),
 		MemoryRecallTraces: mapMemoryRecallTraces(memoryRecallTraces),
-		EventRecords:       mapEventRecords(eventRecords),
+		EventRecords:       mapProjectedEventRecords(eventRecords),
 		Decisions:          decisions,
 		Approvals:          approvals,
 		Observed:           presenter.MapObserved(observedItems),
@@ -614,6 +853,7 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 	var results []*resultmodel.Result
 	var artifacts []*resultmodel.Artifact
 	var eventRecords []*eventstreammodel.EventRecord
+	var llmUsageEventRecords []*eventstreammodel.EventRecord
 	var memoryRecallTraces []*memorymodel.MemoryRecallTrace
 	var decisions []Decision
 	var approvals []Approval
@@ -660,7 +900,12 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 		},
 		func() error {
 			var err error
-			eventRecords, err = deps.eventRecords.List(ctx, repository.EventRecordQuery{RunID: item.ID})
+			eventRecords, err = deps.eventRecords.List(ctx, repository.EventRecordQuery{RunID: item.ID, Limit: readModelEventRecordLimit})
+			return err
+		},
+		func() error {
+			var err error
+			llmUsageEventRecords, err = deps.eventRecords.List(ctx, repository.EventRecordQuery{RunID: item.ID, Topic: events.TopicRunLLMUsageRecorded, Limit: readModelLLMUsageRecordLimit})
 			return err
 		},
 		func() error {
@@ -690,21 +935,22 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 		return RunSnapshot{}, err
 	}
 	stepViews := presenter.MapSteps(steps)
+	currentStep := currentRunSnapshotStep(stepViews, "", "", mapRuntimeCheckpoints(checkpoints))
 	ret := RunSnapshot{
 		Workspace:          mapWorkspaceWithRunProjection(workspace, item),
 		Run:                mapRun(item),
-		Step:               presenter.MapStep(lastStep(steps)),
+		Step:               currentStep,
 		Steps:              stepViews,
 		ToolCalls:          mapToolCalls(toolCalls),
 		Patches:            mapPatches(patches),
 		LLMContextBudgets:  mapLLMContextBudgetTraces(stepViews),
-		LLMUsageTraces:     mapLLMUsageTracesFromEventRecords(mapEventRecords(eventRecords), string(item.ID)),
+		LLMUsageTraces:     mapLLMUsageTracesFromEventRecords(mapEventRecords(llmUsageEventRecords), string(item.ID)),
 		ValidationResults:  mapValidationResults(validations),
 		RuntimeCheckpoints: mapRuntimeCheckpoints(checkpoints),
 		Results:            mapResults(results),
 		Artifacts:          mapArtifacts(artifacts),
 		MemoryRecallTraces: mapMemoryRecallTraces(memoryRecallTraces),
-		EventRecords:       mapEventRecords(eventRecords),
+		EventRecords:       mapProjectedEventRecords(eventRecords),
 		Decisions:          decisions,
 		Approvals:          approvals,
 	}
@@ -766,7 +1012,7 @@ func readRunStatus(ctx context.Context, deps readModelDependencies, runID common
 		BlockingApprovalID: string(item.BlockingApprovalID),
 		FailureReason:      item.FailureReason,
 	}
-	if currentStep := currentRunStatusStep(steps, checkpoints); currentStep != nil {
+	if currentStep := currentRunStatusStep(item, steps, checkpoints, decisions, approvals); currentStep != nil {
 		ret.CurrentStepID = string(currentStep.ID)
 		ret.CurrentStepKind = currentStep.Kind
 		ret.CurrentStepState = string(currentStep.State)
@@ -813,6 +1059,7 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 	var dodItems []*workspacemodel.DoD
 	var resultItems []*resultmodel.Result
 	var eventRecordItems []*eventstreammodel.EventRecord
+	var llmUsageEventRecordItems []*eventstreammodel.EventRecord
 	var artifactItems []*resultmodel.Artifact
 	var ticketItems []*decisionmodel.Ticket
 	var approvalItems []*approvalmodel.Approval
@@ -830,7 +1077,12 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		},
 		func() error {
 			var err error
-			eventRecordItems, err = deps.eventRecords.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID})
+			eventRecordItems, err = deps.eventRecords.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID, Limit: readModelEventRecordLimit})
+			return err
+		},
+		func() error {
+			var err error
+			llmUsageEventRecordItems, err = deps.eventRecords.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID, Topic: events.TopicRunLLMUsageRecorded, Limit: readModelLLMUsageRecordLimit})
 			return err
 		},
 		func() error {
@@ -925,11 +1177,11 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		Results:      mapResults(resultItems),
 		Artifacts:    mapArtifacts(artifactItems),
 		Patches:      mapPatches(patchItems),
-		EventRecords: mapEventRecords(eventRecordItems),
+		EventRecords: mapProjectedEventRecords(eventRecordItems),
 		Decisions:    decisions,
 		Approvals:    approvals,
 	}
-	ret.LLMUsageTraces = mapLLMUsageTracesFromEventRecords(ret.EventRecords, "")
+	ret.LLMUsageTraces = mapLLMUsageTracesFromEventRecords(mapEventRecords(llmUsageEventRecordItems), "")
 	ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
 	ret.TaskProgress = mapWorkspaceTaskProgress(ret)
 	if projectionRun != nil {
@@ -961,14 +1213,15 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 
 func workspaceModelFromView(item Workspace) *workspacemodel.Workspace {
 	return &workspacemodel.Workspace{
-		ID:               common.WorkspaceID(item.ID),
-		Title:            item.Title,
-		Description:      item.Description,
-		WorkingDirectory: item.WorkingDirectory,
-		State:            common.WorkspaceState(item.State),
-		ActiveRunID:      common.RunID(item.ActiveRunID),
-		DefaultSoulID:    common.SoulID(item.DefaultSoulID),
-		SoulBindings:     workspaceSoulBindingsFromView(item.SoulBindings),
+		ID:                   common.WorkspaceID(item.ID),
+		Title:                item.Title,
+		Description:          item.Description,
+		DeliverableDirectory: item.DeliverableDirectory,
+		InternalDirectory:    item.InternalDirectory,
+		State:                common.WorkspaceState(item.State),
+		ActiveRunID:          common.RunID(item.ActiveRunID),
+		DefaultSoulID:        common.SoulID(item.DefaultSoulID),
+		SoulBindings:         workspaceSoulBindingsFromView(item.SoulBindings),
 	}
 }
 
@@ -1287,7 +1540,7 @@ func lastStep(steps []*runmodel.Step) *runmodel.Step {
 	return steps[len(steps)-1]
 }
 
-func currentRunStatusStep(steps []*runmodel.Step, checkpoints []*runmodel.RuntimeCheckpoint) *runmodel.Step {
+func currentRunStatusStep(run *runmodel.Run, steps []*runmodel.Step, checkpoints []*runmodel.RuntimeCheckpoint, decisions []*decisionmodel.Ticket, approvals []*approvalmodel.Approval) *runmodel.Step {
 	if len(steps) == 0 {
 		return nil
 	}
@@ -1298,6 +1551,24 @@ func currentRunStatusStep(steps []*runmodel.Step, checkpoints []*runmodel.Runtim
 		}
 		byID[step.ID] = step
 	}
+	if run != nil && run.BlockingTicketID != "" {
+		for _, item := range decisions {
+			if item != nil && item.ID == run.BlockingTicketID && item.StepID != "" {
+				if step := byID[item.StepID]; step != nil {
+					return step
+				}
+			}
+		}
+	}
+	if run != nil && run.BlockingApprovalID != "" {
+		for _, item := range approvals {
+			if item != nil && item.ID == run.BlockingApprovalID && item.StepID != "" {
+				if step := byID[item.StepID]; step != nil {
+					return step
+				}
+			}
+		}
+	}
 	if checkpoint := latestRuntimeCheckpointModel(checkpoints); checkpoint != nil && checkpoint.CurrentStepID != "" {
 		if step := byID[checkpoint.CurrentStepID]; step != nil {
 			return step
@@ -1307,6 +1578,45 @@ func currentRunStatusStep(steps []*runmodel.Step, checkpoints []*runmodel.Runtim
 		return step
 	}
 	return lastStep(steps)
+}
+
+func currentRunSnapshotStep(steps []presenter.StepView, decisionStep string, approvalStep string, checkpoints []RuntimeCheckpoint) *presenter.StepView {
+	if decisionStep != "" {
+		if step := stepByID(steps, decisionStep); step != nil {
+			return step
+		}
+	}
+	if approvalStep != "" {
+		if step := stepByID(steps, approvalStep); step != nil {
+			return step
+		}
+	}
+	if checkpoint := latestRuntimeCheckpoint(checkpoints); checkpoint != nil {
+		if step := stepByID(steps, checkpoint.CurrentStepID); step != nil {
+			return step
+		}
+	}
+	if len(steps) == 0 {
+		return nil
+	}
+	if step := terminalSnapshotStep(steps); step != nil {
+		return step
+	}
+	return &steps[len(steps)-1]
+}
+
+func decisionStepID(item *decisionmodel.Ticket) string {
+	if item == nil {
+		return ""
+	}
+	return string(item.StepID)
+}
+
+func approvalStepID(item *approvalmodel.Approval) string {
+	if item == nil {
+		return ""
+	}
+	return string(item.StepID)
 }
 
 func terminalRunStatusStep(steps []*runmodel.Step) *runmodel.Step {
@@ -1334,6 +1644,31 @@ func terminalRunStatusStep(steps []*runmodel.Step) *runmodel.Step {
 	return terminals[len(terminals)-1]
 }
 
+func terminalSnapshotStep(steps []presenter.StepView) *presenter.StepView {
+	referenced := map[string]bool{}
+	for _, step := range steps {
+		if previous := readModelPreviousStepIDSnapshot(step); previous != "" {
+			referenced[previous] = true
+		}
+	}
+	var terminals []*presenter.StepView
+	for idx := range steps {
+		if steps[idx].ID == "" || referenced[steps[idx].ID] {
+			continue
+		}
+		terminals = append(terminals, &steps[idx])
+	}
+	if len(terminals) == 0 {
+		return nil
+	}
+	for _, step := range terminals {
+		if step.State == string(common.StepStateDispatched) {
+			return step
+		}
+	}
+	return terminals[len(terminals)-1]
+}
+
 func readModelPreviousStepID(step *runmodel.Step) common.StepID {
 	if step == nil || step.Input == nil {
 		return ""
@@ -1346,6 +1681,14 @@ func readModelPreviousStepID(step *runmodel.Step) common.StepID {
 		}
 	}
 	return ""
+}
+
+func readModelPreviousStepIDSnapshot(step presenter.StepView) string {
+	if step.Input == nil {
+		return ""
+	}
+	value, _ := step.Input["previousStepId"].(string)
+	return strings.TrimSpace(value)
 }
 
 func mapToolCalls(items []*runmodel.ToolCall) []ToolCall {
@@ -1879,27 +2222,7 @@ func mapPatches(items []*runmodel.Patch) []Patch {
 		if item == nil {
 			continue
 		}
-		addedLines, deletedLines := readModelPatchLineStats(item)
-		ret = append(ret, Patch{
-			ID:               string(item.ID),
-			WorkspaceID:      string(item.WorkspaceID),
-			RunID:            string(item.RunID),
-			StepID:           string(item.StepID),
-			ToolCallID:       string(item.ToolCallID),
-			ApprovalID:       string(item.ApprovalID),
-			RevertApprovalID: string(item.RevertApprovalID),
-			PatchType:        item.PatchType,
-			TargetRef:        item.TargetRef,
-			Summary:          item.Summary,
-			State:            string(item.State),
-			AddedLines:       addedLines,
-			DeletedLines:     deletedLines,
-			BeforeHash:       item.BeforeHash,
-			AfterHash:        item.AfterHash,
-			CreatedAt:        item.CreatedAt,
-			AppliedAt:        item.AppliedAt,
-			RevertedAt:       item.RevertedAt,
-		})
+		ret = append(ret, projectPatch(item))
 	}
 	if len(ret) == 0 {
 		return nil
@@ -1995,23 +2318,7 @@ func mapValidationResults(items []*runmodel.ValidationResult) []ValidationResult
 		if item == nil {
 			continue
 		}
-		ret = append(ret, ValidationResult{
-			ID:              string(item.ID),
-			WorkspaceID:     string(item.WorkspaceID),
-			RunID:           string(item.RunID),
-			StepID:          string(item.StepID),
-			ValidationKind:  item.ValidationKind,
-			TargetRef:       item.TargetRef,
-			State:           string(item.State),
-			Summary:         item.Summary,
-			EvidenceRef:     item.EvidenceRef,
-			EvidenceQuality: string(item.EvidenceQuality),
-			EvidenceReason:  item.EvidenceReason,
-			ZeroWork:        item.ZeroWork,
-			EvidenceTags:    cloneReadModelStringSlice(item.EvidenceTags),
-			StartedAt:       item.StartedAt,
-			EndedAt:         item.EndedAt,
-		})
+		ret = append(ret, projectValidationResult(item))
 	}
 	if len(ret) == 0 {
 		return nil
@@ -2622,6 +2929,985 @@ func mapEventRecords(items []*eventstreammodel.EventRecord) []EventRecord {
 	return ret
 }
 
+func pageRunSteps(items []*runmodel.Step, query StepQuery) StepPage {
+	limit := query.Limit
+	if limit <= 0 {
+		limit = readModelStepPageLimit
+	}
+	if limit > readModelMaxStepPageLimit {
+		limit = readModelMaxStepPageLimit
+	}
+	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
+	started := cursorAfterID == ""
+	selected := make([]presenter.StepView, 0, min(limit, len(items)))
+	hasMore := false
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if !started {
+			if string(item.ID) == cursorAfterID {
+				started = true
+			}
+			continue
+		}
+		if len(selected) >= limit {
+			hasMore = true
+			break
+		}
+		mapped := presenter.MapStep(item)
+		if mapped == nil {
+			continue
+		}
+		selected = append(selected, projectStepView(*mapped))
+	}
+	nextCursor := ""
+	if len(selected) > 0 {
+		nextCursor = selected[len(selected)-1].ID
+	}
+	return StepPage{
+		RunID:             strings.TrimSpace(query.RunID),
+		Steps:             selected,
+		Limit:             limit,
+		CursorAfterID:     cursorAfterID,
+		NextCursorAfterID: nextCursor,
+		HasMore:           hasMore,
+	}
+}
+
+func projectStepView(item presenter.StepView) presenter.StepView {
+	return presenter.StepView{
+		ID:     item.ID,
+		Kind:   item.Kind,
+		State:  item.State,
+		Output: projectStepOutput(item.Output),
+	}
+}
+
+func projectStepOutput(output map[string]any) map[string]any {
+	if len(output) == 0 {
+		return nil
+	}
+	allowed := map[string]struct{}{
+		"approvalId":                   {},
+		"assessmentOnly":               {},
+		"assessmentOnlyReason":         {},
+		"blockingApprovalId":           {},
+		"blockingTicketId":             {},
+		"capabilityId":                 {},
+		"category":                     {},
+		"completionState":              {},
+		"contextBudget":                {},
+		"decisionId":                   {},
+		"dodAssessment":                {},
+		"error":                        {},
+		"failureClass":                 {},
+		"failureReason":                {},
+		"llmCallRefs":                  {},
+		"llmUsage":                     {},
+		"memoryRefs":                   {},
+		"nextKind":                     {},
+		"operation":                    {},
+		"patchId":                      {},
+		"prompt":                       {},
+		"reason":                       {},
+		"repairAttempt":                {},
+		"resultId":                     {},
+		"serverId":                     {},
+		"stage":                        {},
+		"state":                        {},
+		"status":                       {},
+		"streamDiagnostics":            {},
+		"summary":                      {},
+		"target":                       {},
+		"targetRef":                    {},
+		"tool":                         {},
+		"toolCallId":                   {},
+		"uri":                          {},
+		"validationId":                 {},
+		"workspaceExecutionSummary":    {},
+		"workspaceExecutionSummaryRef": {},
+	}
+	ret := map[string]any{}
+	for key, value := range output {
+		if _, ok := allowed[key]; !ok {
+			continue
+		}
+		ret[key] = value
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func pageRunToolCalls(items []*runmodel.ToolCall, query ToolCallQuery) ToolCallPage {
+	limit := query.Limit
+	if limit <= 0 {
+		limit = readModelToolCallPageLimit
+	}
+	if limit > readModelMaxToolCallPageLimit {
+		limit = readModelMaxToolCallPageLimit
+	}
+	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
+	started := cursorAfterID == ""
+	selected := make([]ToolCall, 0, min(limit, len(items)))
+	hasMore := false
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if !started {
+			if string(item.ID) == cursorAfterID {
+				started = true
+			}
+			continue
+		}
+		if len(selected) >= limit {
+			hasMore = true
+			break
+		}
+		selected = append(selected, projectToolCall(item))
+	}
+	nextCursor := ""
+	if len(selected) > 0 {
+		nextCursor = selected[len(selected)-1].ID
+	}
+	return ToolCallPage{
+		RunID:             strings.TrimSpace(query.RunID),
+		ToolCalls:         selected,
+		Limit:             limit,
+		CursorAfterID:     cursorAfterID,
+		NextCursorAfterID: nextCursor,
+		HasMore:           hasMore,
+	}
+}
+
+func projectToolCall(item *runmodel.ToolCall) ToolCall {
+	if item == nil {
+		return ToolCall{}
+	}
+	return ToolCall{
+		ID:          string(item.ID),
+		WorkspaceID: string(item.WorkspaceID),
+		RunID:       string(item.RunID),
+		StepID:      string(item.StepID),
+		ToolName:    item.ToolName,
+		State:       string(item.State),
+		StartedAt:   item.StartedAt,
+		EndedAt:     item.EndedAt,
+		ExitSummary: item.ExitSummary,
+		Error:       item.Error,
+	}
+}
+
+func ProjectRunSnapshotDetail(snapshot RunSnapshot) RunSnapshot {
+	ret := snapshot
+	if ret.Step != nil {
+		projected := projectStepView(*ret.Step)
+		ret.Step = &projected
+	}
+	if len(ret.Steps) > 0 {
+		limit := min(len(ret.Steps), readModelStepPageLimit)
+		projected := make([]presenter.StepView, 0, limit)
+		for _, item := range ret.Steps[:limit] {
+			projected = append(projected, projectStepView(item))
+		}
+		ret.Steps = projected
+	}
+	if len(ret.ToolCalls) > 0 {
+		limit := min(len(ret.ToolCalls), readModelToolCallPageLimit)
+		projected := make([]ToolCall, 0, limit)
+		for _, item := range ret.ToolCalls[:limit] {
+			projected = append(projected, projectToolCallView(item))
+		}
+		ret.ToolCalls = projected
+	}
+	if len(ret.RuntimeCheckpoints) > 0 {
+		limit := min(len(ret.RuntimeCheckpoints), readModelCheckpointPageLimit)
+		projected := make([]RuntimeCheckpoint, 0, limit)
+		for _, item := range ret.RuntimeCheckpoints[:limit] {
+			projected = append(projected, projectRuntimeCheckpointView(item))
+		}
+		ret.RuntimeCheckpoints = projected
+	}
+	if len(ret.Results) > 0 {
+		limit := min(len(ret.Results), readModelResultPageLimit)
+		projected := make([]Result, 0, limit)
+		for _, item := range ret.Results[:limit] {
+			projected = append(projected, projectResultView(item))
+		}
+		ret.Results = projected
+	}
+	if len(ret.Patches) > 0 {
+		limit := min(len(ret.Patches), readModelPatchPageLimit)
+		projected := make([]Patch, 0, limit)
+		for _, item := range ret.Patches[:limit] {
+			projected = append(projected, projectPatchView(item))
+		}
+		ret.Patches = projected
+	}
+	if len(ret.ValidationResults) > 0 {
+		limit := min(len(ret.ValidationResults), readModelValidationPageLimit)
+		projected := make([]ValidationResult, 0, limit)
+		for _, item := range ret.ValidationResults[:limit] {
+			projected = append(projected, projectValidationResultView(item))
+		}
+		ret.ValidationResults = projected
+	}
+	if len(ret.Artifacts) > 0 {
+		limit := min(len(ret.Artifacts), readModelArtifactPageLimit)
+		projected := make([]Artifact, 0, limit)
+		for _, item := range ret.Artifacts[:limit] {
+			projected = append(projected, projectArtifactView(item))
+		}
+		ret.Artifacts = projected
+	}
+	if len(ret.Decisions) > 0 {
+		limit := min(len(ret.Decisions), readModelDecisionPageLimit)
+		projected := make([]Decision, 0, limit)
+		for _, item := range ret.Decisions[:limit] {
+			projected = append(projected, projectDecisionView(item))
+		}
+		ret.Decisions = projected
+	}
+	if len(ret.Approvals) > 0 {
+		limit := min(len(ret.Approvals), readModelApprovalPageLimit)
+		projected := make([]Approval, 0, limit)
+		for _, item := range ret.Approvals[:limit] {
+			projected = append(projected, projectApprovalView(item))
+		}
+		ret.Approvals = projected
+	}
+	return ret
+}
+
+func ProjectWorkspaceSnapshotDetail(snapshot WorkspaceSnapshot) WorkspaceSnapshot {
+	ret := snapshot
+	if len(ret.Decisions) > 0 {
+		limit := min(len(ret.Decisions), readModelDecisionPageLimit)
+		projected := make([]Decision, 0, limit)
+		for _, item := range ret.Decisions[:limit] {
+			projected = append(projected, projectDecisionView(item))
+		}
+		ret.Decisions = projected
+	}
+	if len(ret.Approvals) > 0 {
+		limit := min(len(ret.Approvals), readModelApprovalPageLimit)
+		projected := make([]Approval, 0, limit)
+		for _, item := range ret.Approvals[:limit] {
+			projected = append(projected, projectApprovalView(item))
+		}
+		ret.Approvals = projected
+	}
+	return ret
+}
+
+func projectToolCallView(item ToolCall) ToolCall {
+	return ToolCall{
+		ID:          item.ID,
+		WorkspaceID: item.WorkspaceID,
+		RunID:       item.RunID,
+		StepID:      item.StepID,
+		ToolName:    item.ToolName,
+		State:       item.State,
+		StartedAt:   item.StartedAt,
+		EndedAt:     item.EndedAt,
+		ExitSummary: item.ExitSummary,
+		Error:       item.Error,
+	}
+}
+
+func pageRunRuntimeCheckpoints(items []*runmodel.RuntimeCheckpoint, query RuntimeCheckpointQuery) RuntimeCheckpointPage {
+	limit := query.Limit
+	if limit <= 0 {
+		limit = readModelCheckpointPageLimit
+	}
+	if limit > readModelMaxCheckpointPageLimit {
+		limit = readModelMaxCheckpointPageLimit
+	}
+	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
+	started := cursorAfterID == ""
+	selected := make([]RuntimeCheckpoint, 0, min(limit, len(items)))
+	hasMore := false
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if !started {
+			if string(item.ID) == cursorAfterID {
+				started = true
+			}
+			continue
+		}
+		if len(selected) >= limit {
+			hasMore = true
+			break
+		}
+		selected = append(selected, projectRuntimeCheckpoint(item))
+	}
+	nextCursor := ""
+	if len(selected) > 0 {
+		nextCursor = selected[len(selected)-1].ID
+	}
+	return RuntimeCheckpointPage{
+		RunID:              strings.TrimSpace(query.RunID),
+		RuntimeCheckpoints: selected,
+		Limit:              limit,
+		CursorAfterID:      cursorAfterID,
+		NextCursorAfterID:  nextCursor,
+		HasMore:            hasMore,
+	}
+}
+
+func projectRuntimeCheckpoint(item *runmodel.RuntimeCheckpoint) RuntimeCheckpoint {
+	if item == nil {
+		return RuntimeCheckpoint{}
+	}
+	return RuntimeCheckpoint{
+		ID:                 string(item.ID),
+		WorkspaceID:        string(item.WorkspaceID),
+		RunID:              string(item.RunID),
+		CheckpointType:     string(item.CheckpointType),
+		CurrentStepID:      string(item.CurrentStepID),
+		RunStateSnapshot:   string(item.RunStateSnapshot),
+		BlockingTicketID:   string(item.BlockingTicketID),
+		BlockingApprovalID: string(item.BlockingApprovalID),
+		ThreadRef:          item.ThreadRef,
+		OccurredAt:         item.OccurredAt,
+		RestorableUntil:    item.RestorableUntil,
+	}
+}
+
+func pageRunResults(items []*resultmodel.Result, query ResultQuery) ResultPage {
+	limit := query.Limit
+	if limit <= 0 {
+		limit = readModelResultPageLimit
+	}
+	if limit > readModelMaxResultPageLimit {
+		limit = readModelMaxResultPageLimit
+	}
+	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
+	started := cursorAfterID == ""
+	selected := make([]Result, 0, min(limit, len(items)))
+	hasMore := false
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if !started {
+			if string(item.ID) == cursorAfterID {
+				started = true
+			}
+			continue
+		}
+		if len(selected) >= limit {
+			hasMore = true
+			break
+		}
+		selected = append(selected, projectResult(item))
+	}
+	nextCursor := ""
+	if len(selected) > 0 {
+		nextCursor = selected[len(selected)-1].ID
+	}
+	return ResultPage{
+		RunID:             strings.TrimSpace(query.RunID),
+		Results:           selected,
+		Limit:             limit,
+		CursorAfterID:     cursorAfterID,
+		NextCursorAfterID: nextCursor,
+		HasMore:           hasMore,
+	}
+}
+
+func projectResult(item *resultmodel.Result) Result {
+	if item == nil {
+		return Result{}
+	}
+	artifactRefs := make([]string, 0, len(item.ArtifactRefs))
+	for _, ref := range item.ArtifactRefs {
+		if ref != "" {
+			artifactRefs = append(artifactRefs, string(ref))
+		}
+	}
+	return Result{
+		ID:           string(item.ID),
+		WorkspaceID:  string(item.WorkspaceID),
+		RunID:        string(item.RunID),
+		GoalID:       string(item.GoalID),
+		DoDID:        string(item.DoDID),
+		State:        string(item.State),
+		Title:        item.Title,
+		Summary:      item.Summary,
+		SourceType:   item.SourceType,
+		SourceRef:    item.SourceRef,
+		EvidenceRefs: cloneReadModelStringSlice(item.EvidenceRefs),
+		ArtifactRefs: artifactRefs,
+		CreatedAt:    item.CreatedAt,
+		UpdatedAt:    item.UpdatedAt,
+	}
+}
+
+func projectRuntimeCheckpointView(item RuntimeCheckpoint) RuntimeCheckpoint {
+	return RuntimeCheckpoint{
+		ID:                 item.ID,
+		WorkspaceID:        item.WorkspaceID,
+		RunID:              item.RunID,
+		CheckpointType:     item.CheckpointType,
+		CurrentStepID:      item.CurrentStepID,
+		RunStateSnapshot:   item.RunStateSnapshot,
+		BlockingTicketID:   item.BlockingTicketID,
+		BlockingApprovalID: item.BlockingApprovalID,
+		ThreadRef:          item.ThreadRef,
+		OccurredAt:         item.OccurredAt,
+		RestorableUntil:    item.RestorableUntil,
+	}
+}
+
+func projectResultView(item Result) Result {
+	return Result{
+		ID:           item.ID,
+		WorkspaceID:  item.WorkspaceID,
+		RunID:        item.RunID,
+		GoalID:       item.GoalID,
+		DoDID:        item.DoDID,
+		State:        item.State,
+		Title:        item.Title,
+		Summary:      item.Summary,
+		SourceType:   item.SourceType,
+		SourceRef:    item.SourceRef,
+		EvidenceRefs: cloneReadModelStringSlice(item.EvidenceRefs),
+		ArtifactRefs: cloneReadModelStringSlice(item.ArtifactRefs),
+		CreatedAt:    item.CreatedAt,
+		UpdatedAt:    item.UpdatedAt,
+	}
+}
+
+func pageRunPatches(items []*runmodel.Patch, query PatchQuery) PatchPage {
+	limit := query.Limit
+	if limit <= 0 {
+		limit = readModelPatchPageLimit
+	}
+	if limit > readModelMaxPatchPageLimit {
+		limit = readModelMaxPatchPageLimit
+	}
+	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
+	started := cursorAfterID == ""
+	selected := make([]Patch, 0, min(limit, len(items)))
+	hasMore := false
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if !started {
+			if string(item.ID) == cursorAfterID {
+				started = true
+			}
+			continue
+		}
+		if len(selected) >= limit {
+			hasMore = true
+			break
+		}
+		selected = append(selected, projectPatch(item))
+	}
+	nextCursor := ""
+	if len(selected) > 0 {
+		nextCursor = selected[len(selected)-1].ID
+	}
+	return PatchPage{
+		RunID:             strings.TrimSpace(query.RunID),
+		Patches:           selected,
+		Limit:             limit,
+		CursorAfterID:     cursorAfterID,
+		NextCursorAfterID: nextCursor,
+		HasMore:           hasMore,
+	}
+}
+
+func projectPatch(item *runmodel.Patch) Patch {
+	if item == nil {
+		return Patch{}
+	}
+	addedLines, deletedLines := readModelPatchLineStats(item)
+	return Patch{
+		ID:               string(item.ID),
+		WorkspaceID:      string(item.WorkspaceID),
+		RunID:            string(item.RunID),
+		StepID:           string(item.StepID),
+		ToolCallID:       string(item.ToolCallID),
+		ApprovalID:       string(item.ApprovalID),
+		RevertApprovalID: string(item.RevertApprovalID),
+		PatchType:        item.PatchType,
+		TargetRef:        item.TargetRef,
+		Summary:          item.Summary,
+		State:            string(item.State),
+		AddedLines:       addedLines,
+		DeletedLines:     deletedLines,
+		BeforeHash:       item.BeforeHash,
+		AfterHash:        item.AfterHash,
+		CreatedAt:        item.CreatedAt,
+		AppliedAt:        item.AppliedAt,
+		RevertedAt:       item.RevertedAt,
+	}
+}
+
+func projectPatchView(item Patch) Patch {
+	return Patch{
+		ID:               item.ID,
+		WorkspaceID:      item.WorkspaceID,
+		RunID:            item.RunID,
+		StepID:           item.StepID,
+		ToolCallID:       item.ToolCallID,
+		ApprovalID:       item.ApprovalID,
+		RevertApprovalID: item.RevertApprovalID,
+		PatchType:        item.PatchType,
+		TargetRef:        item.TargetRef,
+		Summary:          item.Summary,
+		State:            item.State,
+		AddedLines:       item.AddedLines,
+		DeletedLines:     item.DeletedLines,
+		BeforeHash:       item.BeforeHash,
+		AfterHash:        item.AfterHash,
+		CreatedAt:        item.CreatedAt,
+		AppliedAt:        item.AppliedAt,
+		RevertedAt:       item.RevertedAt,
+	}
+}
+
+func pageRunValidationResults(items []*runmodel.ValidationResult, query ValidationResultQuery) ValidationResultPage {
+	limit := query.Limit
+	if limit <= 0 {
+		limit = readModelValidationPageLimit
+	}
+	if limit > readModelMaxValidationPageLimit {
+		limit = readModelMaxValidationPageLimit
+	}
+	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
+	started := cursorAfterID == ""
+	selected := make([]ValidationResult, 0, min(limit, len(items)))
+	hasMore := false
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if !started {
+			if string(item.ID) == cursorAfterID {
+				started = true
+			}
+			continue
+		}
+		if len(selected) >= limit {
+			hasMore = true
+			break
+		}
+		selected = append(selected, projectValidationResult(item))
+	}
+	nextCursor := ""
+	if len(selected) > 0 {
+		nextCursor = selected[len(selected)-1].ID
+	}
+	return ValidationResultPage{
+		RunID:             strings.TrimSpace(query.RunID),
+		ValidationResults: selected,
+		Limit:             limit,
+		CursorAfterID:     cursorAfterID,
+		NextCursorAfterID: nextCursor,
+		HasMore:           hasMore,
+	}
+}
+
+func projectValidationResult(item *runmodel.ValidationResult) ValidationResult {
+	if item == nil {
+		return ValidationResult{}
+	}
+	return ValidationResult{
+		ID:              string(item.ID),
+		WorkspaceID:     string(item.WorkspaceID),
+		RunID:           string(item.RunID),
+		StepID:          string(item.StepID),
+		ValidationKind:  item.ValidationKind,
+		TargetRef:       item.TargetRef,
+		State:           string(item.State),
+		Summary:         item.Summary,
+		EvidenceRef:     item.EvidenceRef,
+		EvidenceQuality: string(item.EvidenceQuality),
+		EvidenceReason:  item.EvidenceReason,
+		ZeroWork:        item.ZeroWork,
+		EvidenceTags:    cloneReadModelStringSlice(item.EvidenceTags),
+		StartedAt:       item.StartedAt,
+		EndedAt:         item.EndedAt,
+	}
+}
+
+func projectValidationResultView(item ValidationResult) ValidationResult {
+	return ValidationResult{
+		ID:              item.ID,
+		WorkspaceID:     item.WorkspaceID,
+		RunID:           item.RunID,
+		StepID:          item.StepID,
+		ValidationKind:  item.ValidationKind,
+		TargetRef:       item.TargetRef,
+		State:           item.State,
+		Summary:         item.Summary,
+		EvidenceRef:     item.EvidenceRef,
+		EvidenceQuality: item.EvidenceQuality,
+		EvidenceReason:  item.EvidenceReason,
+		ZeroWork:        item.ZeroWork,
+		EvidenceTags:    cloneReadModelStringSlice(item.EvidenceTags),
+		StartedAt:       item.StartedAt,
+		EndedAt:         item.EndedAt,
+	}
+}
+
+func pageRunArtifacts(items []*resultmodel.Artifact, query ArtifactQuery) ArtifactPage {
+	limit := query.Limit
+	if limit <= 0 {
+		limit = readModelArtifactPageLimit
+	}
+	if limit > readModelMaxArtifactPageLimit {
+		limit = readModelMaxArtifactPageLimit
+	}
+	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
+	started := cursorAfterID == ""
+	selected := make([]Artifact, 0, min(limit, len(items)))
+	hasMore := false
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if !started {
+			if string(item.ID) == cursorAfterID {
+				started = true
+			}
+			continue
+		}
+		if len(selected) >= limit {
+			hasMore = true
+			break
+		}
+		selected = append(selected, projectArtifact(item))
+	}
+	nextCursor := ""
+	if len(selected) > 0 {
+		nextCursor = selected[len(selected)-1].ID
+	}
+	return ArtifactPage{
+		RunID:             strings.TrimSpace(query.RunID),
+		Artifacts:         selected,
+		Limit:             limit,
+		CursorAfterID:     cursorAfterID,
+		NextCursorAfterID: nextCursor,
+		HasMore:           hasMore,
+	}
+}
+
+func projectArtifact(item *resultmodel.Artifact) Artifact {
+	if item == nil {
+		return Artifact{}
+	}
+	return Artifact{
+		ID:                 string(item.ID),
+		WorkspaceID:        string(item.WorkspaceID),
+		RunID:              string(item.RunID),
+		ResultID:           string(item.ResultID),
+		StepID:             string(item.StepID),
+		ToolCallID:         string(item.ToolCallID),
+		PatchID:            string(item.PatchID),
+		ValidationResultID: string(item.ValidationResultID),
+		ArtifactType:       item.ArtifactType,
+		Category:           item.Category,
+		Name:               item.Name,
+		Summary:            item.Summary,
+		URI:                item.URI,
+		ContentType:        item.ContentType,
+		State:              string(item.State),
+		EvidenceRefs:       cloneReadModelStringSlice(item.EvidenceRefs),
+		CreatedAt:          item.CreatedAt,
+		UpdatedAt:          item.UpdatedAt,
+	}
+}
+
+func projectArtifactView(item Artifact) Artifact {
+	return Artifact{
+		ID:                 item.ID,
+		WorkspaceID:        item.WorkspaceID,
+		RunID:              item.RunID,
+		ResultID:           item.ResultID,
+		StepID:             item.StepID,
+		ToolCallID:         item.ToolCallID,
+		PatchID:            item.PatchID,
+		ValidationResultID: item.ValidationResultID,
+		ArtifactType:       item.ArtifactType,
+		Category:           item.Category,
+		Name:               item.Name,
+		Summary:            item.Summary,
+		URI:                item.URI,
+		ContentType:        item.ContentType,
+		State:              item.State,
+		EvidenceRefs:       cloneReadModelStringSlice(item.EvidenceRefs),
+		CreatedAt:          item.CreatedAt,
+		UpdatedAt:          item.UpdatedAt,
+	}
+}
+
+func pageDecisionTickets(items []*decisionmodel.Ticket, query DecisionQuery) ([]*decisionmodel.Ticket, int, string, string, bool) {
+	limit := query.Limit
+	if limit <= 0 {
+		limit = readModelDecisionPageLimit
+	}
+	if limit > readModelMaxDecisionPageLimit {
+		limit = readModelMaxDecisionPageLimit
+	}
+	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
+	started := cursorAfterID == ""
+	selected := make([]*decisionmodel.Ticket, 0, min(limit, len(items)))
+	hasMore := false
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if !started {
+			if string(item.ID) == cursorAfterID {
+				started = true
+			}
+			continue
+		}
+		if len(selected) >= limit {
+			hasMore = true
+			break
+		}
+		selected = append(selected, item)
+	}
+	nextCursor := ""
+	if len(selected) > 0 {
+		nextCursor = string(selected[len(selected)-1].ID)
+	}
+	return selected, limit, cursorAfterID, nextCursor, hasMore
+}
+
+func projectDecisionView(item Decision) Decision {
+	return Decision{
+		ID:             item.ID,
+		WorkspaceID:    item.WorkspaceID,
+		RunID:          item.RunID,
+		StepID:         item.StepID,
+		Reason:         item.Reason,
+		DecisionKind:   item.DecisionKind,
+		Question:       item.Question,
+		State:          item.State,
+		ResolutionID:   item.ResolutionID,
+		ResolutionType: item.ResolutionType,
+		AutoGovernance: item.AutoGovernance,
+	}
+}
+
+func pageApprovals(items []*approvalmodel.Approval, query ApprovalQuery) ([]*approvalmodel.Approval, int, string, string, bool) {
+	limit := query.Limit
+	if limit <= 0 {
+		limit = readModelApprovalPageLimit
+	}
+	if limit > readModelMaxApprovalPageLimit {
+		limit = readModelMaxApprovalPageLimit
+	}
+	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
+	started := cursorAfterID == ""
+	selected := make([]*approvalmodel.Approval, 0, min(limit, len(items)))
+	hasMore := false
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if !started {
+			if string(item.ID) == cursorAfterID {
+				started = true
+			}
+			continue
+		}
+		if len(selected) >= limit {
+			hasMore = true
+			break
+		}
+		selected = append(selected, item)
+	}
+	nextCursor := ""
+	if len(selected) > 0 {
+		nextCursor = string(selected[len(selected)-1].ID)
+	}
+	return selected, limit, cursorAfterID, nextCursor, hasMore
+}
+
+func projectApprovalView(item Approval) Approval {
+	return Approval{
+		ID:             item.ID,
+		WorkspaceID:    item.WorkspaceID,
+		RunID:          item.RunID,
+		StepID:         item.StepID,
+		Reason:         item.Reason,
+		Action:         item.Action,
+		State:          item.State,
+		AutoGovernance: item.AutoGovernance,
+	}
+}
+
+func mapProjectedEventRecords(items []*eventstreammodel.EventRecord) []EventRecord {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]EventRecord, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		ret = append(ret, EventRecord{
+			ID:           string(item.ID),
+			Version:      item.Version,
+			Topic:        item.Topic,
+			OccurredAt:   item.OccurredAt,
+			SourceModule: item.SourceModule,
+			SubjectType:  item.SubjectType,
+			SubjectID:    item.SubjectID,
+			WorkspaceID:  string(item.WorkspaceID),
+			RunID:        string(item.RunID),
+			StepID:       string(item.StepID),
+			Payload:      projectEventPayload(item.Payload),
+		})
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func projectEventPayload(payload map[string]any) map[string]any {
+	if len(payload) == 0 {
+		return nil
+	}
+	allowed := map[string]struct{}{
+		events.PayloadKeyAction:             {},
+		events.PayloadKeyActiveRunID:        {},
+		events.PayloadKeyAddedLines:         {},
+		events.PayloadKeyApprovalID:         {},
+		events.PayloadKeyArtifactRefs:       {},
+		events.PayloadKeyArtifactType:       {},
+		events.PayloadKeyBlockingApprovalID: {},
+		events.PayloadKeyBlockingTicketID:   {},
+		events.PayloadKeyChunkCount:         {},
+		events.PayloadKeyCompletedAt:        {},
+		events.PayloadKeyConfidenceScore:    {},
+		events.PayloadKeyContentHash:        {},
+		events.PayloadKeyContentType:        {},
+		events.PayloadKeyCostEstimated:      {},
+		events.PayloadKeyCostSource:         {},
+		events.PayloadKeyCurrency:           {},
+		events.PayloadKeyDeletedLines:       {},
+		events.PayloadKeyDiffHash:           {},
+		events.PayloadKeyDoDID:              {},
+		events.PayloadKeyDurationMs:         {},
+		events.PayloadKeyElapsedMs:          {},
+		events.PayloadKeyError:              {},
+		events.PayloadKeyEstimated:          {},
+		events.PayloadKeyEstimatedCost:      {},
+		events.PayloadKeyEvidenceRefs:       {},
+		events.PayloadKeyFailureClass:       {},
+		events.PayloadKeyFailureReason:      {},
+		events.PayloadKeyGoalID:             {},
+		events.PayloadKeyItemID:             {},
+		events.PayloadKeyItemType:           {},
+		events.PayloadKeyKind:               {},
+		events.PayloadKeyLLMDecisionPreview: {},
+		events.PayloadKeyLLMModel:           {},
+		events.PayloadKeyLLMProviderID:      {},
+		events.PayloadKeyModel:              {},
+		events.PayloadKeyName:               {},
+		events.PayloadKeyOperation:          {},
+		events.PayloadKeyOutputTokens:       {},
+		events.PayloadKeyPatchID:            {},
+		events.PayloadKeyPatchType:          {},
+		events.PayloadKeyPolicy:             {},
+		events.PayloadKeyPolicyBlocked:      {},
+		events.PayloadKeyPolicyMatched:      {},
+		events.PayloadKeyPromptFingerprint:  {},
+		events.PayloadKeyProvider:           {},
+		events.PayloadKeyProviderID:         {},
+		events.PayloadKeyReason:             {},
+		events.PayloadKeyReceivedBytes:      {},
+		events.PayloadKeyRequestBytes:       {},
+		events.PayloadKeyResponseBytes:      {},
+		events.PayloadKeyResultID:           {},
+		events.PayloadKeyRisk:               {},
+		events.PayloadKeyRunID:              {},
+		events.PayloadKeySourceRef:          {},
+		events.PayloadKeyStage:              {},
+		events.PayloadKeyStartedAt:          {},
+		events.PayloadKeyState:              {},
+		events.PayloadKeyStatus:             {},
+		events.PayloadKeyStepID:             {},
+		events.PayloadKeyStreaming:          {},
+		events.PayloadKeySummary:            {},
+		events.PayloadKeyTargetRef:          {},
+		events.PayloadKeyToolCallID:         {},
+		events.PayloadKeyTotalTokens:        {},
+		events.PayloadKeyTraceID:            {},
+		events.PayloadKeyType:               {},
+		events.PayloadKeyURI:                {},
+		events.PayloadKeyUsageSource:        {},
+		events.PayloadKeyWorkspaceID:        {},
+	}
+	ret := map[string]any{}
+	for key, value := range payload {
+		if _, ok := allowed[key]; !ok {
+			continue
+		}
+		if projected, ok := projectEventPayloadValue(value); ok {
+			ret[key] = projected
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func projectEventPayloadValue(value any) (any, bool) {
+	switch typed := value.(type) {
+	case nil:
+		return nil, false
+	case string:
+		if len(typed) <= eventPayloadStringLimit {
+			return typed, true
+		}
+		return typed[:eventPayloadStringLimit] + "...", true
+	case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return typed, true
+	case []string:
+		limit := min(len(typed), eventPayloadListLimit)
+		ret := make([]string, 0, limit)
+		for _, item := range typed[:limit] {
+			if len(item) > eventPayloadStringLimit {
+				item = item[:eventPayloadStringLimit] + "..."
+			}
+			ret = append(ret, item)
+		}
+		return ret, true
+	case []any:
+		limit := min(len(typed), eventPayloadListLimit)
+		ret := make([]any, 0, limit)
+		for _, item := range typed[:limit] {
+			if projected, ok := projectEventPayloadValue(item); ok {
+				ret = append(ret, projected)
+			}
+		}
+		if len(ret) == 0 {
+			return nil, false
+		}
+		return ret, true
+	default:
+		return nil, false
+	}
+}
+
 func mapMemoryRecallTraces(items []*memorymodel.MemoryRecallTrace) []MemoryRecallTrace {
 	if len(items) == 0 {
 		return nil
@@ -2999,6 +4285,8 @@ func mapTaskProgress(snapshot RunSnapshot) TaskProgress {
 	ret.CurrentMilestone = currentProgressMilestone(ret.Milestones)
 	ret.EvidenceRefs = taskProgressEvidenceRefs(snapshot)
 	ret.Recovery = taskProgressRecovery(snapshot, latestCheckpoint, ret.Blockers, ret.Recovery)
+	ret.BlockingTicketID = ret.Recovery.BlockingTicketID
+	ret.BlockingApprovalID = ret.Recovery.BlockingApprovalID
 	ret.RepairLoop = mapTaskProgressRepairLoop(snapshot, ret.Recovery)
 	ret.Summary = taskProgressSummary(ret, &snapshot)
 	return ret
@@ -3022,10 +4310,10 @@ func mapWorkspaceContextBundle(snapshot WorkspaceSnapshot) ContextBundle {
 				State:    snapshot.Workspace.State,
 				Summary:  snapshot.Workspace.Title,
 				Data: map[string]any{
-					"id":               snapshot.Workspace.ID,
-					"title":            snapshot.Workspace.Title,
-					"description":      snapshot.Workspace.Description,
-					"workingDirectory": snapshot.Workspace.WorkingDirectory,
+					"id":                   snapshot.Workspace.ID,
+					"title":                snapshot.Workspace.Title,
+					"description":          snapshot.Workspace.Description,
+					"deliverableDirectory": snapshot.Workspace.DeliverableDirectory,
 				},
 			},
 			{
@@ -3723,10 +5011,10 @@ func contextWorkspaceSection(snapshot RunSnapshot) ContextSection {
 		State:    snapshot.Workspace.State,
 		Summary:  snapshot.Workspace.Title,
 		Data: map[string]any{
-			"id":               snapshot.Workspace.ID,
-			"title":            snapshot.Workspace.Title,
-			"description":      snapshot.Workspace.Description,
-			"workingDirectory": snapshot.Workspace.WorkingDirectory,
+			"id":                   snapshot.Workspace.ID,
+			"title":                snapshot.Workspace.Title,
+			"description":          snapshot.Workspace.Description,
+			"deliverableDirectory": snapshot.Workspace.DeliverableDirectory,
 		},
 	}
 }
@@ -4204,7 +5492,9 @@ func taskProgressRecovery(snapshot RunSnapshot, latestCheckpoint *RuntimeCheckpo
 	ret.BlockingApprovalID = snapshot.Run.BlockingApprovalID
 	if latestCheckpoint != nil {
 		ret.CheckpointID = latestCheckpoint.ID
-		if ret.StepID == "" {
+		if ret.BlockingTicketID == "" && ret.BlockingApprovalID == "" && latestCheckpoint.CurrentStepID != "" {
+			ret.StepID = latestCheckpoint.CurrentStepID
+		} else if ret.StepID == "" {
 			ret.StepID = latestCheckpoint.CurrentStepID
 		}
 		if ret.BlockingTicketID == "" {
@@ -4259,15 +5549,43 @@ func taskProgressRecovery(snapshot RunSnapshot, latestCheckpoint *RuntimeCheckpo
 
 func taskProgressSummary(progress TaskProgress, snapshot *RunSnapshot) string {
 	if snapshot != nil {
-		if result := primaryTaskProgressResult(snapshot.Results); result != nil && result.Summary != "" {
+		results := runScopedResults(*snapshot)
+		artifacts := runScopedArtifacts(*snapshot)
+		if result := primaryTaskProgressResult(results); result != nil && result.Summary != "" {
 			return result.Summary
 		}
 		if snapshot.Run.FailureReason != "" {
 			return snapshot.Run.FailureReason
 		}
-		return "run " + snapshot.Run.State + " with " + strconv.Itoa(len(snapshot.Steps)) + " steps, " + strconv.Itoa(len(snapshot.Results)) + " results, " + strconv.Itoa(len(snapshot.Artifacts)) + " artifacts"
+		changedFiles := appliedPatchTargetCount(snapshot.Patches)
+		summary := "run " + snapshot.Run.State + " with " + strconv.Itoa(len(snapshot.Steps)) + " steps, " + strconv.Itoa(len(results)) + " results, " + strconv.Itoa(len(artifacts)) + " artifacts"
+		if changedFiles > 0 {
+			summary += ", " + strconv.Itoa(changedFiles) + " changed files"
+		}
+		return summary
 	}
 	return "workspace " + progress.State + " with " + strconv.Itoa(len(progress.Blockers)) + " open blockers"
+}
+
+func appliedPatchTargetCount(items []Patch) int {
+	if len(items) == 0 {
+		return 0
+	}
+	targets := map[string]struct{}{}
+	for _, item := range items {
+		if item.State != string(common.PatchStateApplied) {
+			continue
+		}
+		target := strings.TrimSpace(item.TargetRef)
+		if target == "" {
+			target = strings.TrimSpace(item.ID)
+		}
+		if target == "" {
+			continue
+		}
+		targets[target] = struct{}{}
+	}
+	return len(targets)
 }
 
 func mapTaskProgressRepairLoop(snapshot RunSnapshot, recovery RecoveryPlan) RepairLoop {

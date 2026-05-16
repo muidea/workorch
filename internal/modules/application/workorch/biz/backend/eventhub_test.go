@@ -23,9 +23,9 @@ func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 
 	be := NewEventHub(session, exports.Infrastructure.EventHub)
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{
-		Title:            "eventhub workspace",
-		Description:      "created through cli command event",
-		WorkingDirectory: "/tmp/eventhub-workspace",
+		Title:                "eventhub workspace",
+		Description:          "created through cli command event",
+		DeliverableDirectory: "/tmp/eventhub-workspace",
 	})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -194,8 +194,8 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 
 	be := NewEventHub(session, exports.Infrastructure.EventHub)
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{
-		Title:            "memory workspace",
-		WorkingDirectory: "/tmp/memory-workspace",
+		Title:                "memory workspace",
+		DeliverableDirectory: "/tmp/memory-workspace",
 	})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -280,7 +280,7 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 	created := convertEnvelope(events.Envelope{
 		Topic:       events.TopicWorkspaceCreated,
 		WorkspaceID: "ws-created",
-		Payload:     events.WorkspacePayload("created", "", "/tmp/created", "active", ""),
+		Payload:     events.WorkspacePayload("created", "", "/tmp/created", "", "active", ""),
 	})
 	if created.Type != EventWorkspaceCreated || created.WorkspaceID != "ws-created" {
 		t.Fatalf("created event = %+v, want workspace created", created)
@@ -289,7 +289,7 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 	deleted := convertEnvelope(events.Envelope{
 		Topic:       events.TopicWorkspaceDeleted,
 		WorkspaceID: "ws-deleted",
-		Payload:     events.WorkspacePayload("deleted", "", "/tmp/deleted", "active", ""),
+		Payload:     events.WorkspacePayload("deleted", "", "/tmp/deleted", "", "active", ""),
 	})
 	if deleted.Type != EventWorkspaceDeleted || deleted.WorkspaceID != "ws-deleted" {
 		t.Fatalf("deleted event = %+v, want workspace deleted", deleted)

@@ -2,14 +2,14 @@ package client
 
 // Workspace resource types (matches workorchd HTTP JSON format with lowercase camelCase tags).
 type Workspace struct {
-	ID               string            `json:"id"`
-	Title            string            `json:"title"`
-	Description      string            `json:"description,omitempty"`
-	WorkingDirectory string            `json:"workingDirectory,omitempty"`
-	State            string            `json:"state"`
-	ActiveRunID      string            `json:"activeRunId,omitempty"`
-	DefaultSoulID    string            `json:"defaultSoulId,omitempty"`
-	SoulBindings     map[string]string `json:"soulBindings,omitempty"`
+	ID                   string            `json:"id"`
+	Title                string            `json:"title"`
+	Description          string            `json:"description,omitempty"`
+	DeliverableDirectory string            `json:"deliverableDirectory,omitempty"`
+	State                string            `json:"state"`
+	ActiveRunID          string            `json:"activeRunId,omitempty"`
+	DefaultSoulID        string            `json:"defaultSoulId,omitempty"`
+	SoulBindings         map[string]string `json:"soulBindings,omitempty"`
 }
 
 type Goal struct {
@@ -332,12 +332,14 @@ type RepairLoop struct {
 }
 
 type TaskProgress struct {
-	WorkspaceID string       `json:"workspaceId"`
-	RunID       string       `json:"runId,omitempty"`
-	State       string       `json:"state"`
-	Summary     string       `json:"summary,omitempty"`
-	Recovery    RecoveryPlan `json:"recovery"`
-	RepairLoop  RepairLoop   `json:"repairLoop"`
+	WorkspaceID        string       `json:"workspaceId"`
+	RunID              string       `json:"runId,omitempty"`
+	State              string       `json:"state"`
+	Summary            string       `json:"summary,omitempty"`
+	BlockingTicketID   string       `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID string       `json:"blockingApprovalId,omitempty"`
+	Recovery           RecoveryPlan `json:"recovery"`
+	RepairLoop         RepairLoop   `json:"repairLoop"`
 }
 
 type RunOutcome struct {
@@ -617,20 +619,35 @@ type WorkspaceSoulBindings struct {
 
 // Configuration types.
 type LLMProviderConfig struct {
-	ID                string   `json:"id"`
-	Provider          string   `json:"provider"`
-	BaseURL           string   `json:"baseUrl,omitempty"`
-	APIKey            string   `json:"apiKey,omitempty"`
-	Model             string   `json:"model,omitempty"`
-	Timeout           string   `json:"timeout,omitempty"`
-	Disabled          bool     `json:"disabled"`
-	Ready             bool     `json:"ready"`
-	Reason            string   `json:"reason,omitempty"`
-	Default           bool     `json:"default"`
-	APIKeyConfigured  bool     `json:"apiKeyConfigured"`
-	ChatCompletions   bool     `json:"chatCompletions"`
-	Streaming         bool     `json:"streaming"`
-	NonChatOperations []string `json:"nonChatOperations,omitempty"`
+	ID                string                 `json:"id"`
+	Provider          string                 `json:"provider"`
+	BaseURL           string                 `json:"baseUrl,omitempty"`
+	APIKey            string                 `json:"apiKey,omitempty"`
+	Model             string                 `json:"model,omitempty"`
+	Timeout           string                 `json:"timeout,omitempty"`
+	Disabled          bool                   `json:"disabled"`
+	Ready             bool                   `json:"ready"`
+	Reason            string                 `json:"reason,omitempty"`
+	Default           bool                   `json:"default"`
+	APIKeyConfigured  bool                   `json:"apiKeyConfigured"`
+	ChatCompletions   bool                   `json:"chatCompletions"`
+	Streaming         bool                   `json:"streaming"`
+	NonChatOperations []string               `json:"nonChatOperations,omitempty"`
+	FailoverEnabled   bool                   `json:"failoverEnabled"`
+	FailoverProviders []string               `json:"failoverProviders,omitempty"`
+	ContextProfile    ProviderContextProfile `json:"contextProfile,omitempty"`
+}
+
+type ProviderContextProfile struct {
+	ContextWindowTokens    int     `json:"contextWindowTokens,omitempty"`
+	MaxInputTokens         int     `json:"maxInputTokens,omitempty"`
+	ReservedOutputTokens   int     `json:"reservedOutputTokens,omitempty"`
+	SafetyRatio            float64 `json:"safetyRatio,omitempty"`
+	BytesHardLimit         int     `json:"bytesHardLimit,omitempty"`
+	EstimatedTokensPerByte float64 `json:"estimatedTokensPerByte,omitempty"`
+	InputTokenPrice        float64 `json:"inputTokenPrice,omitempty"`
+	OutputTokenPrice       float64 `json:"outputTokenPrice,omitempty"`
+	Currency               string  `json:"currency,omitempty"`
 }
 
 type ServiceConfiguration struct {
@@ -652,10 +669,51 @@ type ServiceConfiguration struct {
 		DefaultSoulID            string `json:"defaultSoulId,omitempty"`
 		MaxRuntimeRepairAttempts int    `json:"maxRuntimeRepairAttempts"`
 		MaxProviderRetryAttempts int    `json:"maxProviderRetryAttempts"`
+		ShellCommandTimeout      string `json:"shellCommandTimeout"`
 	} `json:"runtime"`
 	LLM struct {
 		DefaultProviderID          string              `json:"defaultProviderId"`
 		DefaultEmbeddingProviderID string              `json:"defaultEmbeddingProviderId,omitempty"`
 		Providers                  []LLMProviderConfig `json:"providers"`
 	} `json:"llm"`
+	WebSearch struct {
+		DefaultProviderID string `json:"defaultProviderId,omitempty"`
+		Providers         []struct {
+			ID               string            `json:"id"`
+			Provider         string            `json:"provider"`
+			SearchEndpoint   string            `json:"searchEndpoint,omitempty"`
+			FetchEndpoint    string            `json:"fetchEndpoint,omitempty"`
+			Headers          map[string]string `json:"headers,omitempty"`
+			Timeout          string            `json:"timeout,omitempty"`
+			MaxResults       int               `json:"maxResults,omitempty"`
+			MaxFetchBytes    int64             `json:"maxFetchBytes,omitempty"`
+			MaxRedirects     int               `json:"maxRedirects,omitempty"`
+			AllowDomains     []string          `json:"allowDomains,omitempty"`
+			DenyDomains      []string          `json:"denyDomains,omitempty"`
+			Disabled         bool              `json:"disabled"`
+			Ready            bool              `json:"ready"`
+			Reason           string            `json:"reason,omitempty"`
+			Default          bool              `json:"default"`
+			APIKeyConfigured bool              `json:"apiKeyConfigured"`
+		} `json:"providers"`
+	} `json:"webSearch"`
+	Governance struct {
+		AutoTicket struct {
+			Enabled       bool    `json:"enabled"`
+			MinConfidence float64 `json:"minConfidence"`
+			MaxPerRun     int     `json:"maxPerRun"`
+		} `json:"autoTicket"`
+		AutoApproval struct {
+			Enabled             bool     `json:"enabled"`
+			MinConfidence       float64  `json:"minConfidence"`
+			MaxPerRun           int      `json:"maxPerRun"`
+			AllowReadOnly       bool     `json:"allowReadOnly"`
+			AllowWorkspaceWrite bool     `json:"allowWorkspaceWrite"`
+			RequireHumanFor     []string `json:"requireHumanFor,omitempty"`
+		} `json:"autoApproval"`
+		Budget struct {
+			MaxConsecutiveFailures int `json:"maxConsecutiveFailures"`
+			MaxRepeatedSamePrompt  int `json:"maxRepeatedSamePrompt"`
+		} `json:"budget"`
+	} `json:"governance"`
 }

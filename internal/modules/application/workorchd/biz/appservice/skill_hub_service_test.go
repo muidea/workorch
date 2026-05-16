@@ -143,8 +143,8 @@ Use this skill for auto delivery verification.
 func TestListSkillsWithBackendIncludesWorkspaceSkillHubSkills(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
-	workingDirectory := t.TempDir()
-	skillFile := filepath.Join(workingDirectory, ".agents", "skills", "workspace-delivery", "SKILL.md")
+	deliverableDirectory := t.TempDir()
+	skillFile := filepath.Join(deliverableDirectory, ".agents", "skills", "workspace-delivery", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(skillFile), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestListSkillsWithBackendIncludesWorkspaceSkillHubSkills(t *testing.T) {
 	withFakeSkillHubRunner(t, fakeSkillHubCommandRunner{
 		responses: map[string][]byte{
 			skillHubCommandKey("", "status", "--global", "--json", "--agent", "codex"): []byte(`{"scope":"global","items":[]}`),
-			skillHubCommandKey(workingDirectory, "status", "--json"): []byte(fmt.Sprintf(`{
+			skillHubCommandKey(deliverableDirectory, "status", "--json"): []byte(fmt.Sprintf(`{
 				"project_path":%q,
 				"items":[{
 					"skill_id":"workspace-delivery",
@@ -165,11 +165,11 @@ func TestListSkillsWithBackendIncludesWorkspaceSkillHubSkills(t *testing.T) {
 					"local_path":%q,
 					"repo_path":"/home/test/.skill-hub/repositories/skills-repo/skills/workspace-delivery/SKILL.md"
 				}]
-			}`, workingDirectory, skillFile)),
+			}`, deliverableDirectory, skillFile)),
 		},
 	})
 
-	workspace, err := CreateWorkspaceWithBackend(ctx, "file", dataRoot, "Workspace SkillHub", "workspace skillhub test", workingDirectory)
+	workspace, err := CreateWorkspaceWithBackend(ctx, "file", dataRoot, "Workspace SkillHub", "workspace skillhub test", deliverableDirectory)
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestListSkillsWithBackendIncludesWorkspaceSkillHubSkills(t *testing.T) {
 	if workspaceSkill.Scope != skillScopeWorkspace ||
 		workspaceSkill.WorkspaceID != workspace.ID ||
 		workspaceSkill.Version != "2.0.0" ||
-		workspaceSkill.ProjectPath != workingDirectory ||
+		workspaceSkill.ProjectPath != deliverableDirectory ||
 		!strings.Contains(workspaceSkill.Instruction, "Workspace Skill Instruction") {
 		t.Fatalf("workspace skill metadata = %+v", workspaceSkill)
 	}
@@ -192,11 +192,11 @@ func TestListSkillsWithBackendIncludesWorkspaceSkillHubSkills(t *testing.T) {
 func TestSelectedSkillsCanResolveSkillHubReferences(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
-	workingDirectory := t.TempDir()
-	writeSkillHubInstruction(t, workingDirectory, "Workspace Runtime Skill")
+	deliverableDirectory := t.TempDir()
+	writeSkillHubInstruction(t, deliverableDirectory, "Workspace Runtime Skill")
 	withFakeSkillHubRunner(t, fakeSkillHubCommandRunner{
 		responses: map[string][]byte{
-			skillHubCommandKey(workingDirectory, "status", "--json"): []byte(fmt.Sprintf(`{
+			skillHubCommandKey(deliverableDirectory, "status", "--json"): []byte(fmt.Sprintf(`{
 				"project_path":%q,
 				"items":[{
 					"skill_id":"runtime-workspace-skill",
@@ -204,10 +204,10 @@ func TestSelectedSkillsCanResolveSkillHubReferences(t *testing.T) {
 					"local_version":"3.0.0",
 					"local_path":%q
 				}]
-			}`, workingDirectory, filepath.Join(workingDirectory, "SKILL.md"))),
+			}`, deliverableDirectory, filepath.Join(deliverableDirectory, "SKILL.md"))),
 		},
 	})
-	workspace, err := CreateWorkspaceWithBackend(ctx, "file", dataRoot, "Runtime Workspace", "runtime workspace skill", workingDirectory)
+	workspace, err := CreateWorkspaceWithBackend(ctx, "file", dataRoot, "Runtime Workspace", "runtime workspace skill", deliverableDirectory)
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}

@@ -50,6 +50,111 @@ type RunStatus struct {
 	FailureReason      string `json:"failureReason,omitempty"`
 }
 
+type StepQuery struct {
+	RunID         string
+	CursorAfterID string
+	Limit         int
+}
+
+type StepPage struct {
+	RunID             string               `json:"runId"`
+	Steps             []presenter.StepView `json:"steps,omitempty"`
+	Limit             int                  `json:"limit"`
+	CursorAfterID     string               `json:"cursorAfterId,omitempty"`
+	NextCursorAfterID string               `json:"nextCursorAfterId,omitempty"`
+	HasMore           bool                 `json:"hasMore"`
+}
+
+type ToolCallQuery struct {
+	RunID         string
+	CursorAfterID string
+	Limit         int
+}
+
+type ToolCallPage struct {
+	RunID             string     `json:"runId"`
+	ToolCalls         []ToolCall `json:"toolCalls,omitempty"`
+	Limit             int        `json:"limit"`
+	CursorAfterID     string     `json:"cursorAfterId,omitempty"`
+	NextCursorAfterID string     `json:"nextCursorAfterId,omitempty"`
+	HasMore           bool       `json:"hasMore"`
+}
+
+type RuntimeCheckpointQuery struct {
+	RunID         string
+	CursorAfterID string
+	Limit         int
+}
+
+type RuntimeCheckpointPage struct {
+	RunID              string              `json:"runId"`
+	RuntimeCheckpoints []RuntimeCheckpoint `json:"runtimeCheckpoints,omitempty"`
+	Limit              int                 `json:"limit"`
+	CursorAfterID      string              `json:"cursorAfterId,omitempty"`
+	NextCursorAfterID  string              `json:"nextCursorAfterId,omitempty"`
+	HasMore            bool                `json:"hasMore"`
+}
+
+type ResultQuery struct {
+	RunID         string
+	CursorAfterID string
+	Limit         int
+}
+
+type ResultPage struct {
+	RunID             string   `json:"runId"`
+	Results           []Result `json:"results,omitempty"`
+	Limit             int      `json:"limit"`
+	CursorAfterID     string   `json:"cursorAfterId,omitempty"`
+	NextCursorAfterID string   `json:"nextCursorAfterId,omitempty"`
+	HasMore           bool     `json:"hasMore"`
+}
+
+type PatchQuery struct {
+	RunID         string
+	CursorAfterID string
+	Limit         int
+}
+
+type PatchPage struct {
+	RunID             string  `json:"runId"`
+	Patches           []Patch `json:"patches,omitempty"`
+	Limit             int     `json:"limit"`
+	CursorAfterID     string  `json:"cursorAfterId,omitempty"`
+	NextCursorAfterID string  `json:"nextCursorAfterId,omitempty"`
+	HasMore           bool    `json:"hasMore"`
+}
+
+type ValidationResultQuery struct {
+	RunID         string
+	CursorAfterID string
+	Limit         int
+}
+
+type ValidationResultPage struct {
+	RunID             string             `json:"runId"`
+	ValidationResults []ValidationResult `json:"validationResults,omitempty"`
+	Limit             int                `json:"limit"`
+	CursorAfterID     string             `json:"cursorAfterId,omitempty"`
+	NextCursorAfterID string             `json:"nextCursorAfterId,omitempty"`
+	HasMore           bool               `json:"hasMore"`
+}
+
+type ArtifactQuery struct {
+	RunID         string
+	CursorAfterID string
+	Limit         int
+}
+
+type ArtifactPage struct {
+	RunID             string     `json:"runId"`
+	Artifacts         []Artifact `json:"artifacts,omitempty"`
+	Limit             int        `json:"limit"`
+	CursorAfterID     string     `json:"cursorAfterId,omitempty"`
+	NextCursorAfterID string     `json:"nextCursorAfterId,omitempty"`
+	HasMore           bool       `json:"hasMore"`
+}
+
 type RunObservability struct {
 	Run                  Run                     `json:"run"`
 	Outcome              RunOutcome              `json:"outcome"`
@@ -75,17 +180,19 @@ type RunObservability struct {
 }
 
 type TaskProgress struct {
-	WorkspaceID      string              `json:"workspaceId"`
-	RunID            string              `json:"runId,omitempty"`
-	State            string              `json:"state"`
-	Summary          string              `json:"summary,omitempty"`
-	CurrentMilestone string              `json:"currentMilestone,omitempty"`
-	Milestones       []ProgressMilestone `json:"milestones,omitempty"`
-	Items            []ProgressItem      `json:"items,omitempty"`
-	Blockers         []ProgressBlocker   `json:"blockers,omitempty"`
-	Recovery         RecoveryPlan        `json:"recovery"`
-	RepairLoop       RepairLoop          `json:"repairLoop"`
-	EvidenceRefs     []string            `json:"evidenceRefs,omitempty"`
+	WorkspaceID        string              `json:"workspaceId"`
+	RunID              string              `json:"runId,omitempty"`
+	State              string              `json:"state"`
+	Summary            string              `json:"summary,omitempty"`
+	CurrentMilestone   string              `json:"currentMilestone,omitempty"`
+	BlockingTicketID   string              `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID string              `json:"blockingApprovalId,omitempty"`
+	Milestones         []ProgressMilestone `json:"milestones,omitempty"`
+	Items              []ProgressItem      `json:"items,omitempty"`
+	Blockers           []ProgressBlocker   `json:"blockers,omitempty"`
+	Recovery           RecoveryPlan        `json:"recovery"`
+	RepairLoop         RepairLoop          `json:"repairLoop"`
+	EvidenceRefs       []string            `json:"evidenceRefs,omitempty"`
 }
 
 type RunOutcome struct {

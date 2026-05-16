@@ -21,11 +21,11 @@ type SnapshotItem struct {
 }
 
 type WorkspacePayload struct {
-	Title            string
-	Description      string
-	WorkingDirectory string
-	State            string
-	ActiveRunID      string
+	Title                string
+	Description          string
+	DeliverableDirectory string
+	State                string
+	ActiveRunID          string
 }
 
 type RunPayload struct {
@@ -114,8 +114,8 @@ func (p WorkspacePayload) EnvelopePayload() map[string]any {
 	if p.Description != "" {
 		payload[events.PayloadKeyDescription] = p.Description
 	}
-	if p.WorkingDirectory != "" {
-		payload[events.PayloadKeyWorkingDirectory] = p.WorkingDirectory
+	if p.DeliverableDirectory != "" {
+		payload[events.PayloadKeyDeliverableDirectory] = p.DeliverableDirectory
 	}
 	return payload
 }
@@ -191,11 +191,11 @@ func decodeSnapshotPayload(topic string, payload map[string]any) (SnapshotPayloa
 			return nil, false
 		}
 		return WorkspacePayload{
-			Title:            item.Title,
-			Description:      item.Description,
-			WorkingDirectory: item.WorkingDirectory,
-			State:            string(item.State),
-			ActiveRunID:      string(item.ActiveRunID),
+			Title:                item.Title,
+			Description:          item.Description,
+			DeliverableDirectory: item.DeliverableDirectory,
+			State:                string(item.State),
+			ActiveRunID:          string(item.ActiveRunID),
 		}, true
 	case topicRunSnapshot:
 		item, ok := events.DecodeRunPayload(payload)

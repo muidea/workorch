@@ -29,7 +29,7 @@ patch 应用和变更验收能力的需求、设计边界、任务状态和验�
 
 ### 系统目标
 
-- 文件能力必须限制在 Workspace `WorkingDirectory` 内。
+- 文件能力必须限制在 Workspace `deliverableDirectory` 内。
 - 读操作默认安全可执行；写、删除、大范围修改、敏感路径修改按策略进入
   Approval。
 - 变更默认通过 `patch/apply` 落盘，避免不可审计的自由覆盖写。

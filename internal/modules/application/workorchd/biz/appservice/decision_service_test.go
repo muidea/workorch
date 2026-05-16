@@ -171,6 +171,53 @@ func TestListDecisionsWithBackendReturnsFilteredTickets(t *testing.T) {
 	}
 }
 
+func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
+	dataRoot := t.TempDir()
+	first := prepareDecisionRun(t, dataRoot, "ws-decision-page-a", "run-decision-page-a")
+	second := prepareDecisionRun(t, dataRoot, "ws-decision-page-b", "run-decision-page-b")
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, first.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
+		ResolutionPayload: map[string]any{"answer": "first decision payload"},
+	}); err != nil {
+		t.Fatalf("ResolveDecisionWithBackend: %v", err)
+	}
+
+	page, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, DecisionQuery{
+		Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("ListDecisionPageWithBackend: %v", err)
+	}
+	if len(page.Decisions) != 1 || page.Decisions[0].ID != first.BlockingTicketID {
+		t.Fatalf("page decisions = %+v, want first ticket", page.Decisions)
+	}
+	if !page.HasMore || page.NextCursorAfterID != first.BlockingTicketID {
+		t.Fatalf("page cursor = %+v, want hasMore with first cursor", page)
+	}
+	if page.Decisions[0].Context != nil || page.Decisions[0].ResolutionPayload != nil {
+		t.Fatalf("projected decision carries large payloads: %+v", page.Decisions[0])
+	}
+
+	next, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, DecisionQuery{
+		CursorAfterID: page.NextCursorAfterID,
+		Limit:         1,
+	})
+	if err != nil {
+		t.Fatalf("ListDecisionPageWithBackend next: %v", err)
+	}
+	if len(next.Decisions) != 1 || next.Decisions[0].ID != second.BlockingTicketID || next.HasMore {
+		t.Fatalf("next page = %+v, want second ticket without more", next)
+	}
+
+	detail, err := ReadDecisionWithBackend(context.Background(), "file", dataRoot, first.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("ReadDecisionWithBackend: %v", err)
+	}
+	if detail.Context == nil || detail.ResolutionPayload == nil {
+		t.Fatalf("detail decision lost full payloads: %+v", detail)
+	}
+}
+
 func TestReadDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-read", "run-decision-read")

@@ -299,7 +299,7 @@ func (o *RuntimeOrchestrator) publishWorkspaceStateChanged(ctx context.Context, 
 		SubjectID:    string(workspace.ID),
 		WorkspaceID:  string(workspace.ID),
 		RunID:        string(runID),
-		Payload:      events.WorkspacePayload(workspace.Title, workspace.Description, workspace.WorkingDirectory, workspace.State, workspace.ActiveRunID),
+		Payload:      events.WorkspacePayload(workspace.Title, workspace.Description, workspace.DeliverableDirectory, workspace.InternalDirectory, workspace.State, workspace.ActiveRunID),
 	})
 }
 
@@ -339,23 +339,31 @@ func (o *RuntimeOrchestrator) publishLLMStreamProgressFromStep(ctx context.Conte
 		return nil
 	}
 	streamEvents := streamEventMapSlice(step.Output["streamEvents"])
-	if len(streamEvents) == 0 {
-		return nil
-	}
 	providerID, model := llmStreamProviderAndModel(step.Output)
 	chunkCount := len(streamEvents)
 	receivedBytes := 0
 	elapsedMs := 0
-	for _, item := range streamEvents {
-		receivedBytes += len(stringFromAny(item["delta"]))
-		if value := intFromAny(item["elapsedMs"]); value > elapsedMs {
-			elapsedMs = value
-		}
-		if payload, ok := item["payload"].(map[string]any); ok {
-			if value := intFromAny(payload["elapsedMs"]); value > elapsedMs {
+	if chunkCount > 0 {
+		for _, item := range streamEvents {
+			receivedBytes += len(stringFromAny(item["delta"]))
+			if value := intFromAny(item["elapsedMs"]); value > elapsedMs {
 				elapsedMs = value
 			}
+			if payload, ok := item["payload"].(map[string]any); ok {
+				if value := intFromAny(payload["elapsedMs"]); value > elapsedMs {
+					elapsedMs = value
+				}
+			}
 		}
+	} else if diagnostics := streamDiagnosticsMap(step.Output["streamDiagnostics"]); len(diagnostics) > 0 {
+		chunkCount = intFromAny(diagnostics["receivedEventCount"])
+		if chunkCount == 0 {
+			chunkCount = intFromAny(diagnostics["receivedDeltaCount"])
+		}
+		receivedBytes = intFromAny(diagnostics["receivedBytes"])
+		elapsedMs = intFromAny(diagnostics["elapsedMs"])
+	} else {
+		return nil
 	}
 	status := string(step.State)
 	if status == "" {
@@ -403,6 +411,15 @@ func streamEventMapSlice(raw any) []map[string]any {
 			ret = append(ret, mapped)
 		}
 		return ret
+	default:
+		return nil
+	}
+}
+
+func streamDiagnosticsMap(raw any) map[string]any {
+	switch typed := raw.(type) {
+	case map[string]any:
+		return typed
 	default:
 		return nil
 	}

@@ -296,13 +296,16 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 
 	call := a.executeProviderWithFailover(ctx, request, runtime, providerID, operation)
 	invokeCompletedAt := time.Now().UTC()
+	llmRefs, llmRefErr := persistLLMCallEvidence(request, call)
 	if call.err != nil {
 		output := failureOutput(request, call.failureStage, call.err.Error(), call.runtime.Config)
 		attachContextBudget(output, call.request.ContextBudget, call.runtime.Config.ID, call.runtime.Config.Model)
-		attachStreamEvents(output, call.streamEvents)
 		attachStreamDiagnostics(output, call.streamEvents)
 		attachFailoverMetadata(output, call.failover)
-		attachLLMUsage(output, buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, classifyProviderInvocationFailure(call.err), "failed"))
+		usage := buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, classifyProviderInvocationFailure(call.err), "failed")
+		llmRefErr = persistLLMCallUsageEvidence(request, &llmRefs, usage, llmRefErr)
+		attachLLMUsage(output, usage)
+		attachLLMCallRefs(output, llmRefs, llmRefErr)
 		return runtimemodel.StepExecutionResult{Output: output}, call.err
 	}
 	payload := call.payload
@@ -322,12 +325,15 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 			output["rawContentPreview"] = previewLLMOutput(payload)
 			if len(repairPayload) > 0 {
 				output["repairRawContentPreview"] = previewLLMOutput(repairPayload)
+				llmRefErr = persistLLMCallRepairResponseEvidence(request, &llmRefs, repairPayload, llmRefErr)
 			}
 			attachContextBudget(output, providerReq.ContextBudget, runtime.Config.ID, runtime.Config.Model)
-			attachStreamEvents(output, streamEvents)
 			attachStreamDiagnostics(output, streamEvents)
 			attachFailoverMetadata(output, call.failover)
-			attachLLMUsage(output, buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, "llm_schema_invalid", "failed"))
+			usage := buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, "llm_schema_invalid", "failed")
+			llmRefErr = persistLLMCallUsageEvidence(request, &llmRefs, usage, llmRefErr)
+			attachLLMUsage(output, usage)
+			attachLLMCallRefs(output, llmRefs, llmRefErr)
 			return runtimemodel.StepExecutionResult{Output: output}, parseErr
 		}
 		decision = repairedDecision
@@ -341,14 +347,16 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	if err != nil {
 		failure := failureOutput(request, "llm_decision_invalid", err.Error(), runtime.Config)
 		attachContextBudget(failure, providerReq.ContextBudget, runtime.Config.ID, runtime.Config.Model)
-		attachStreamEvents(failure, streamEvents)
 		attachStreamDiagnostics(failure, streamEvents)
 		attachFailoverMetadata(failure, call.failover)
-		attachLLMUsage(failure, buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, "llm_decision_invalid", "failed"))
+		usage := buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, "llm_decision_invalid", "failed")
+		llmRefErr = persistLLMCallUsageEvidence(request, &llmRefs, usage, llmRefErr)
+		attachLLMUsage(failure, usage)
+		attachLLMCallRefs(failure, llmRefs, llmRefErr)
 		return runtimemodel.StepExecutionResult{Output: failure}, err
 	}
 	attachContextBudget(output, providerReq.ContextBudget, runtime.Config.ID, runtime.Config.Model)
-	attachStreamEvents(output, streamEvents)
+	attachStreamDiagnostics(output, streamEvents)
 	attachFailoverMetadata(output, call.failover)
 	llmUsageStatus := "completed"
 	if repairMetadata != nil {
@@ -362,10 +370,16 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		if strings.TrimSpace(reason) == "" {
 			reason = "llm decision reported failure"
 		}
-		attachLLMUsage(output, buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, "llm_decision_failed", "failed"))
+		usage := buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, "llm_decision_failed", "failed")
+		llmRefErr = persistLLMCallUsageEvidence(request, &llmRefs, usage, llmRefErr)
+		attachLLMUsage(output, usage)
+		attachLLMCallRefs(output, llmRefs, llmRefErr)
 		return runtimemodel.StepExecutionResult{Output: output}, fmt.Errorf("%w: %s", common.ErrInvalidArgument, reason)
 	}
-	attachLLMUsage(output, buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, "", llmUsageStatus))
+	usage := buildLLMUsageOutput(request, call, operation, invokeStartedAt, invokeCompletedAt, "", llmUsageStatus)
+	llmRefErr = persistLLMCallUsageEvidence(request, &llmRefs, usage, llmRefErr)
+	attachLLMUsage(output, usage)
+	attachLLMCallRefs(output, llmRefs, llmRefErr)
 	return runtimemodel.StepExecutionResult{Output: output}, nil
 }
 
@@ -640,6 +654,240 @@ func (a *RuntimeAdapter) GenerateEmbedding(ctx context.Context, providerID strin
 		result.Model = runtime.Config.Model
 	}
 	return result, nil
+}
+
+type llmCallEvidenceRefs struct {
+	BaseRef           string
+	RequestRef        string
+	ResponseRef       string
+	StreamRef         string
+	UsageRef          string
+	RepairResponseRef string
+}
+
+func persistLLMCallEvidence(request runtimemodel.StepExecutionRequest, call providerCallResult) (llmCallEvidenceRefs, error) {
+	root, refs, ok := llmCallEvidenceRootAndRefs(request)
+	if !ok {
+		return llmCallEvidenceRefs{}, nil
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return refs, err
+	}
+	if err := writeLLMJSONFileAtomic(filepath.Join(root, "request.json"), call.request); err != nil {
+		return refs, err
+	}
+	refs.RequestRef = refs.BaseRef + "/request.json"
+	if len(call.payload) > 0 {
+		if err := writeLLMBytesFileAtomic(filepath.Join(root, "response.json"), call.payload); err != nil {
+			return refs, err
+		}
+		refs.ResponseRef = refs.BaseRef + "/response.json"
+	}
+	if len(call.streamEvents) > 0 {
+		if err := writeLLMBytesFileAtomic(filepath.Join(root, "response.sse"), llmStreamEventsSSE(call.streamEvents)); err != nil {
+			return refs, err
+		}
+		refs.StreamRef = refs.BaseRef + "/response.sse"
+	}
+	return refs, nil
+}
+
+func persistLLMCallRepairResponseEvidence(request runtimemodel.StepExecutionRequest, refs *llmCallEvidenceRefs, payload []byte, previous error) error {
+	if previous != nil || len(payload) == 0 {
+		return previous
+	}
+	root, resolvedRefs, ok := llmCallEvidenceRootAndRefs(request)
+	if !ok {
+		return nil
+	}
+	if refs != nil && refs.BaseRef == "" {
+		*refs = resolvedRefs
+	}
+	if err := writeLLMBytesFileAtomic(filepath.Join(root, "repair-response.json"), payload); err != nil {
+		return err
+	}
+	if refs != nil {
+		refs.RepairResponseRef = resolvedRefs.BaseRef + "/repair-response.json"
+	}
+	return nil
+}
+
+func persistLLMCallUsageEvidence(request runtimemodel.StepExecutionRequest, refs *llmCallEvidenceRefs, usage map[string]any, previous error) error {
+	if previous != nil || len(usage) == 0 {
+		return previous
+	}
+	root, resolvedRefs, ok := llmCallEvidenceRootAndRefs(request)
+	if !ok {
+		return nil
+	}
+	if refs != nil && refs.BaseRef == "" {
+		*refs = resolvedRefs
+	}
+	if err := writeLLMJSONFileAtomic(filepath.Join(root, "usage.json"), usage); err != nil {
+		return err
+	}
+	if refs != nil {
+		refs.UsageRef = resolvedRefs.BaseRef + "/usage.json"
+	}
+	return nil
+}
+
+func llmCallEvidenceRootAndRefs(request runtimemodel.StepExecutionRequest) (string, llmCallEvidenceRefs, bool) {
+	internalRoot := strings.TrimSpace(request.WorkspaceInternalDirectory)
+	if internalRoot == "" || request.WorkspaceID == "" || request.RunID == "" || request.StepID == "" {
+		return "", llmCallEvidenceRefs{}, false
+	}
+	stepSafe := safeLLMCallEvidenceFileName(string(request.StepID))
+	root := filepath.Join(internalRoot, "runs", string(request.RunID), "llm-calls", stepSafe)
+	baseRef := "workorch://workspaces/" + string(request.WorkspaceID) + "/runs/" + string(request.RunID) + "/llm-calls/" + stepSafe
+	return root, llmCallEvidenceRefs{BaseRef: baseRef}, true
+}
+
+func safeLLMCallEvidenceFileName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "empty"
+	}
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if name := safeLLMCallEvidencePathSegment(part); name != "" {
+			cleaned = append(cleaned, name)
+		}
+	}
+	if len(cleaned) == 0 {
+		return "empty"
+	}
+	return filepath.Join(cleaned...)
+}
+
+func safeLLMCallEvidencePathSegment(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "." || value == ".." {
+		return ""
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		keep := r >= 'a' && r <= 'z' ||
+			r >= 'A' && r <= 'Z' ||
+			r >= '0' && r <= '9' ||
+			r == '-' || r == '_' || r == '.'
+		if keep {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	ret := strings.Trim(b.String(), ".-")
+	if ret == "" || ret == "." || ret == ".." {
+		return "item"
+	}
+	return ret
+}
+
+func llmStreamEventsSSE(events []llmmodels.ProviderStreamEvent) []byte {
+	var builder strings.Builder
+	for _, event := range events {
+		payload := map[string]any{"type": strings.TrimSpace(event.Type)}
+		if payload["type"] == "" {
+			payload["type"] = "delta"
+		}
+		if event.Delta != "" {
+			payload["delta"] = event.Delta
+		}
+		if len(event.Payload) > 0 {
+			payload["payload"] = cloneMap(event.Payload)
+		}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			continue
+		}
+		builder.WriteString("data: ")
+		builder.Write(raw)
+		builder.WriteString("\n\n")
+	}
+	return []byte(builder.String())
+}
+
+func writeLLMJSONFileAtomic(path string, value any) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return writeLLMBytesFileAtomic(path, data)
+}
+
+func writeLLMBytesFileAtomic(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
+}
+
+func attachLLMCallRefs(output map[string]any, refs llmCallEvidenceRefs, persistErr error) {
+	if output == nil || (refs.BaseRef == "" && persistErr == nil) {
+		return
+	}
+	item := map[string]any{}
+	if refs.BaseRef != "" {
+		item["baseRef"] = refs.BaseRef
+		if refs.RequestRef != "" {
+			item["requestRef"] = refs.RequestRef
+		}
+		if refs.ResponseRef != "" {
+			item["responseRef"] = refs.ResponseRef
+		}
+		if refs.StreamRef != "" {
+			item["streamRef"] = refs.StreamRef
+		}
+		if refs.UsageRef != "" {
+			item["usageRef"] = refs.UsageRef
+		}
+		if refs.RepairResponseRef != "" {
+			item["repairResponseRef"] = refs.RepairResponseRef
+		}
+	}
+	if persistErr != nil {
+		item["persistenceError"] = persistErr.Error()
+	}
+	output["llmCallRefs"] = item
 }
 
 func attachStreamEvents(output map[string]any, events []llmmodels.ProviderStreamEvent) {
@@ -2140,12 +2388,12 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 			},
 			{
 				Kind:        shellcommon.StepKindCommand,
-				Description: "Execute one bounded local shell command in the workspace working directory.",
+				Description: "Execute one bounded local shell command in the workspace deliverable directory.",
 				Input:       map[string]any{"command": "string", "args": "[]string"},
 			},
 			{
 				Kind:        filecommon.StepKindList,
-				Description: "List files and directories under the workspace working directory without modifying workspace state. Paths must be workspace-relative; large generated directories are skipped.",
+				Description: "List files and directories under the workspace deliverable directory without modifying workspace state. Paths must be workspace-relative; large generated directories are skipped.",
 				Input:       map[string]any{"path": "relative directory path", "recursive": "boolean", "maxEntries": "number"},
 			},
 			{
@@ -2175,7 +2423,7 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 			},
 			{
 				Kind:        llmcommon.RuntimeBlockKindPatchApply,
-				Description: "Apply one file_write or unified_diff patch inside the workspace working directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory. Include baseHash from file/read when changing an existing file. Patch content and diffs must be complete, concrete, and directly applicable to the current workspace content; do not use omitted sections or placeholder bodies. Governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md are reserved for WorkOrch-managed Artifact records and must not be written through patch/apply.",
+				Description: "Apply one file_write or unified_diff patch inside the workspace deliverable directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory. Include baseHash from file/read when changing an existing file. Patch content and diffs must be complete, concrete, and directly applicable to the current workspace content; do not use omitted sections or placeholder bodies. Governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md are reserved for WorkOrch-managed Artifact records and must not be written through patch/apply.",
 				Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string", "baseHash": "sha256 content hash", "approvalId": "approved approval id when required"},
 			},
 			{

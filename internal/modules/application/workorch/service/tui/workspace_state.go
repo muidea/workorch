@@ -33,7 +33,7 @@ func (m *AppModel) upsertWorkspaceFromEvent(evt backend.Event) {
 	activeRunID := common.RunID(firstPayloadString(evt.Payload, "activeRunId", "ActiveRunID", events.PayloadKeyActiveRunID))
 	title := firstPayloadString(evt.Payload, "title", "Title", events.PayloadKeyTitle)
 	description := firstPayloadString(evt.Payload, "description", "Description", events.PayloadKeyDescription)
-	workingDirectory := firstPayloadString(evt.Payload, "workingDirectory", "WorkingDirectory", events.PayloadKeyWorkingDirectory)
+	deliverableDirectory := firstPayloadString(evt.Payload, "deliverableDirectory", "DeliverableDirectory", events.PayloadKeyDeliverableDirectory)
 	for i := range m.workspaces {
 		if m.workspaces[i].ID == evt.WorkspaceID {
 			if title != "" {
@@ -42,8 +42,8 @@ func (m *AppModel) upsertWorkspaceFromEvent(evt backend.Event) {
 			if description != "" {
 				m.workspaces[i].Description = description
 			}
-			if workingDirectory != "" {
-				m.workspaces[i].WorkingDirectory = workingDirectory
+			if deliverableDirectory != "" {
+				m.workspaces[i].DeliverableDirectory = deliverableDirectory
 			}
 			if state != "" {
 				m.workspaces[i].State = state
@@ -55,12 +55,12 @@ func (m *AppModel) upsertWorkspaceFromEvent(evt backend.Event) {
 		}
 	}
 	m.workspaces = append(m.workspaces, backend.WorkspaceInfo{
-		ID:               evt.WorkspaceID,
-		Title:            title,
-		Description:      description,
-		WorkingDirectory: workingDirectory,
-		State:            state,
-		ActiveRunID:      activeRunID,
+		ID:                   evt.WorkspaceID,
+		Title:                title,
+		Description:          description,
+		DeliverableDirectory: deliverableDirectory,
+		State:                state,
+		ActiveRunID:          activeRunID,
 	})
 }
 

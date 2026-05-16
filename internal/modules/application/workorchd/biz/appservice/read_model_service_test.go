@@ -3,6 +3,7 @@ package appservice
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -241,6 +242,576 @@ func TestReadRunSnapshotWithSessionReturnsInvalidArgumentWhenSessionMissing(t *t
 	}
 }
 
+func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
+	session, ctx := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+	workspaceID := common.WorkspaceID("ws-bounded-events")
+	runID := common.RunID("run-bounded-events")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:    workspaceID,
+		Title: "bounded events",
+		State: common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for i := 0; i < readModelEventRecordLimit+25; i++ {
+		payload := map[string]any{
+			events.PayloadKeyState:  "running",
+			events.PayloadKeyOutput: map[string]any{"raw": strings.Repeat("x", eventPayloadStringLimit*8)},
+		}
+		topic := events.TopicRunStateChanged
+		if i == readModelEventRecordLimit+20 {
+			topic = events.TopicRunLLMUsageRecorded
+			payload = events.LLMUsagePayload(events.LLMUsagePayloadData{
+				WorkspaceID:  workspaceID,
+				RunID:        runID,
+				StepID:       common.StepID("run-bounded-events/step-usage"),
+				ProviderID:   "provider-a",
+				Model:        "model-a",
+				Operation:    "chat_completions",
+				InputTokens:  30,
+				OutputTokens: 14,
+				TotalTokens:  44,
+				Status:       "completed",
+			})
+		}
+		if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
+			ID:          common.EventRecordID("event-bounded-" + strconv.Itoa(i)),
+			Version:     "v1",
+			Topic:       topic,
+			OccurredAt:  fmt.Sprintf("2026-05-16T10:%02d:00Z", i%60),
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			Payload:     payload,
+		}); err != nil {
+			t.Fatalf("append event %d: %v", i, err)
+		}
+	}
+
+	snapshot, err := ReadRunSnapshotWithSession(ctx, session, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithSession: %v", err)
+	}
+	if len(snapshot.EventRecords) != readModelEventRecordLimit {
+		t.Fatalf("event record count = %d, want %d", len(snapshot.EventRecords), readModelEventRecordLimit)
+	}
+	for _, item := range snapshot.EventRecords {
+		if _, ok := item.Payload[events.PayloadKeyOutput]; ok {
+			t.Fatalf("snapshot event contains raw output payload: %+v", item.Payload)
+		}
+	}
+	if snapshot.LLMUsageSummary.EntryTotal != 1 || snapshot.LLMUsageSummary.TotalTokens != 44 {
+		t.Fatalf("llm usage summary = %+v, want one late usage event with 44 tokens", snapshot.LLMUsageSummary)
+	}
+}
+
+func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *testing.T) {
+	rawPayload := map[string]any{"content": strings.Repeat("x", 4096)}
+	rawOutput := map[string]any{"rawOutput": strings.Repeat("o", 4096), "summary": "kept"}
+	count := readModelStepPageLimit + 7
+	snapshot := RunSnapshot{
+		Step: &presenter.StepView{
+			ID:     "run-large/step-current",
+			Kind:   "llm/workspace_execution",
+			State:  "completed",
+			Input:  rawPayload,
+			Output: rawOutput,
+		},
+	}
+	for idx := 0; idx < count; idx++ {
+		suffix := fmt.Sprintf("%03d", idx)
+		snapshot.Steps = append(snapshot.Steps, presenter.StepView{
+			ID:     "run-large/step-" + suffix,
+			Kind:   "llm/workspace_execution",
+			State:  "completed",
+			Input:  rawPayload,
+			Output: rawOutput,
+		})
+		snapshot.ToolCalls = append(snapshot.ToolCalls, ToolCall{
+			ID:        "tool-call-" + suffix,
+			RunID:     "run-large",
+			ToolName:  "neutral-tool",
+			Arguments: rawPayload,
+			State:     "completed",
+			Output:    rawPayload,
+		})
+		snapshot.RuntimeCheckpoints = append(snapshot.RuntimeCheckpoints, RuntimeCheckpoint{
+			ID:               "checkpoint-" + suffix,
+			RunID:            "run-large",
+			CheckpointType:   "runtime",
+			RunStateSnapshot: "running",
+			Data:             rawPayload,
+		})
+		snapshot.Results = append(snapshot.Results, Result{
+			ID:      "result-" + suffix,
+			RunID:   "run-large",
+			State:   "completed",
+			Summary: "summary",
+			DoDAssessment: &DoDAssessment{
+				Satisfied: true,
+				Summary:   strings.Repeat("d", 4096),
+			},
+			SummaryDetail: &ResultSummary{
+				ImplementationSummary: strings.Repeat("s", 4096),
+			},
+		})
+		snapshot.Patches = append(snapshot.Patches, Patch{
+			ID:         "patch-" + suffix,
+			RunID:      "run-large",
+			PatchType:  "unified_diff",
+			TargetRef:  "workorch://target/" + suffix,
+			State:      "applied",
+			AddedLines: 3,
+		})
+		snapshot.ValidationResults = append(snapshot.ValidationResults, ValidationResult{
+			ID:             "validation-" + suffix,
+			RunID:          "run-large",
+			ValidationKind: "generic",
+			State:          "passed",
+			Summary:        "validation summary",
+			EvidenceRef:    "workorch://evidence/" + suffix,
+		})
+		snapshot.Artifacts = append(snapshot.Artifacts, Artifact{
+			ID:           "artifact-" + suffix,
+			RunID:        "run-large",
+			ArtifactType: "file",
+			State:        "created",
+			Summary:      "artifact summary",
+			Metadata:     rawPayload,
+		})
+		snapshot.Decisions = append(snapshot.Decisions, Decision{
+			ID:                "decision-" + suffix,
+			RunID:             "run-large",
+			Reason:            "needs input",
+			State:             "resolved",
+			Context:           rawPayload,
+			ResolutionID:      "resolution-" + suffix,
+			ResolutionType:    "continue",
+			ResolutionPayload: rawPayload,
+		})
+		snapshot.Approvals = append(snapshot.Approvals, Approval{
+			ID:      "approval-" + suffix,
+			RunID:   "run-large",
+			Reason:  "needs approval",
+			Action:  "continue",
+			State:   "approved",
+			Context: rawPayload,
+		})
+	}
+
+	projected := ProjectRunSnapshotDetail(snapshot)
+
+	if projected.Step == nil || projected.Step.Input != nil || projected.Step.Output["rawOutput"] != nil || projected.Step.Output["summary"] != "kept" {
+		t.Fatalf("current step projection = %+v, want raw input/output omitted and summary kept", projected.Step)
+	}
+	assertProjectedCollectionLength(t, "steps", len(projected.Steps), readModelStepPageLimit)
+	assertProjectedCollectionLength(t, "tool calls", len(projected.ToolCalls), readModelToolCallPageLimit)
+	assertProjectedCollectionLength(t, "checkpoints", len(projected.RuntimeCheckpoints), readModelCheckpointPageLimit)
+	assertProjectedCollectionLength(t, "results", len(projected.Results), readModelResultPageLimit)
+	assertProjectedCollectionLength(t, "patches", len(projected.Patches), readModelPatchPageLimit)
+	assertProjectedCollectionLength(t, "validations", len(projected.ValidationResults), readModelValidationPageLimit)
+	assertProjectedCollectionLength(t, "artifacts", len(projected.Artifacts), readModelArtifactPageLimit)
+	assertProjectedCollectionLength(t, "decisions", len(projected.Decisions), readModelDecisionPageLimit)
+	assertProjectedCollectionLength(t, "approvals", len(projected.Approvals), readModelApprovalPageLimit)
+
+	if projected.Steps[0].Input != nil || projected.Steps[0].Output["rawOutput"] != nil || projected.Steps[0].Output["summary"] != "kept" {
+		t.Fatalf("step projection = %+v, want raw input/output omitted and summary kept", projected.Steps[0])
+	}
+	if projected.ToolCalls[0].Arguments != nil || projected.ToolCalls[0].Output != nil {
+		t.Fatalf("tool call projection = %+v, want raw arguments/output omitted", projected.ToolCalls[0])
+	}
+	if projected.RuntimeCheckpoints[0].Data != nil {
+		t.Fatalf("checkpoint projection = %+v, want raw data omitted", projected.RuntimeCheckpoints[0])
+	}
+	if projected.Results[0].DoDAssessment != nil || projected.Results[0].SummaryDetail != nil {
+		t.Fatalf("result projection = %+v, want raw assessment/detail omitted", projected.Results[0])
+	}
+	if projected.Artifacts[0].Metadata != nil {
+		t.Fatalf("artifact projection = %+v, want metadata omitted", projected.Artifacts[0])
+	}
+	if projected.Decisions[0].Context != nil || projected.Decisions[0].ResolutionPayload != nil {
+		t.Fatalf("decision projection = %+v, want context/resolution payload omitted", projected.Decisions[0])
+	}
+	if projected.Approvals[0].Context != nil {
+		t.Fatalf("approval projection = %+v, want context omitted", projected.Approvals[0])
+	}
+}
+
+func assertProjectedCollectionLength(t *testing.T, name string, got, want int) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("%s count = %d, want %d", name, got, want)
+	}
+}
+
+func TestListRunStepsWithSessionPaginatesProjectedSteps(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	workspaceID := common.WorkspaceID("ws-step-page")
+	runID := common.RunID("run-step-page")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "step page", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for idx := 1; idx <= 3; idx++ {
+		stepID := common.StepID(fmt.Sprintf("%s/step-%d", runID, idx))
+		if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+			ID:    stepID,
+			RunID: runID,
+			Kind:  "llm/workspace_execution",
+			State: common.StepStateCompleted,
+			Input: map[string]any{"rawInput": strings.Repeat("i", 1024)},
+			Output: map[string]any{
+				"stage":       "stage-" + strconv.Itoa(idx),
+				"summary":     "summary-" + strconv.Itoa(idx),
+				"llmCallRefs": map[string]any{"requestRef": "workorch://request"},
+				"rawOutput":   strings.Repeat("o", 1024),
+			},
+		}); err != nil {
+			t.Fatalf("create step %d: %v", idx, err)
+		}
+	}
+
+	first, err := ListRunStepsWithBackend(ctx, "file", dataRoot, StepQuery{RunID: string(runID), Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRunStepsWithSession first page: %v", err)
+	}
+	if len(first.Steps) != 2 || !first.HasMore || first.NextCursorAfterID != "run-step-page/step-2" {
+		t.Fatalf("first page = %+v, want two steps and cursor step-2", first)
+	}
+	if first.Steps[0].Input != nil {
+		t.Fatalf("first step input = %+v, want omitted projection", first.Steps[0].Input)
+	}
+	if first.Steps[0].Output["rawOutput"] != nil || first.Steps[0].Output["stage"] != "stage-1" {
+		t.Fatalf("first step output = %+v, want projected output", first.Steps[0].Output)
+	}
+
+	second, err := ListRunStepsWithBackend(ctx, "file", dataRoot, StepQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRunStepsWithSession second page: %v", err)
+	}
+	if len(second.Steps) != 1 || second.HasMore || second.Steps[0].ID != "run-step-page/step-3" {
+		t.Fatalf("second page = %+v, want final step only", second)
+	}
+}
+
+func TestListRunToolCallsWithSessionPaginatesProjectedToolCalls(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	workspaceID := common.WorkspaceID("ws-tool-page")
+	runID := common.RunID("run-tool-page")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "tool page", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for idx := 1; idx <= 3; idx++ {
+		toolCallID := common.ToolCallID(fmt.Sprintf("%s/tool-%d", runID, idx))
+		if err := exports.Repositories.ToolCalls.Create(ctx, &runmodel.ToolCall{
+			ID:          toolCallID,
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			StepID:      common.StepID(fmt.Sprintf("%s/step-%d", runID, idx)),
+			ToolName:    "tool-" + strconv.Itoa(idx),
+			Arguments:   map[string]any{"rawArguments": strings.Repeat("a", 1024)},
+			State:       common.ToolCallStateCompleted,
+			ExitSummary: "summary-" + strconv.Itoa(idx),
+			Output:      map[string]any{"rawOutput": strings.Repeat("o", 1024)},
+		}); err != nil {
+			t.Fatalf("create tool call %d: %v", idx, err)
+		}
+	}
+
+	first, err := ListRunToolCallsWithBackend(ctx, "file", dataRoot, ToolCallQuery{RunID: string(runID), Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRunToolCallsWithSession first page: %v", err)
+	}
+	if len(first.ToolCalls) != 2 || !first.HasMore || first.NextCursorAfterID != "run-tool-page/tool-2" {
+		t.Fatalf("first page = %+v, want two tool calls and cursor tool-2", first)
+	}
+	if first.ToolCalls[0].Arguments != nil || first.ToolCalls[0].Output != nil || first.ToolCalls[0].ExitSummary != "summary-1" {
+		t.Fatalf("first tool call = %+v, want projected metadata without raw payloads", first.ToolCalls[0])
+	}
+
+	second, err := ListRunToolCallsWithBackend(ctx, "file", dataRoot, ToolCallQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRunToolCallsWithSession second page: %v", err)
+	}
+	if len(second.ToolCalls) != 1 || second.HasMore || second.ToolCalls[0].ID != "run-tool-page/tool-3" {
+		t.Fatalf("second page = %+v, want final tool call only", second)
+	}
+}
+
+func TestListRunRuntimeCheckpointsWithSessionPaginatesProjectedCheckpoints(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	workspaceID := common.WorkspaceID("ws-checkpoint-page")
+	runID := common.RunID("run-checkpoint-page")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "checkpoint page", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for idx := 1; idx <= 3; idx++ {
+		checkpointID := common.CheckpointID(fmt.Sprintf("%s/checkpoint-%d", runID, idx))
+		if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+			ID:               checkpointID,
+			WorkspaceID:      workspaceID,
+			RunID:            runID,
+			CheckpointType:   common.CheckpointTypeRunState,
+			CurrentStepID:    common.StepID(fmt.Sprintf("%s/step-%d", runID, idx)),
+			RunStateSnapshot: common.RunStateRunning,
+			OccurredAt:       fmt.Sprintf("2026-05-16T10:0%d:00Z", idx),
+			Data:             map[string]any{"rawData": strings.Repeat("d", 1024)},
+		}); err != nil {
+			t.Fatalf("create checkpoint %d: %v", idx, err)
+		}
+	}
+
+	first, err := ListRunRuntimeCheckpointsWithBackend(ctx, "file", dataRoot, RuntimeCheckpointQuery{RunID: string(runID), Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRunRuntimeCheckpointsWithSession first page: %v", err)
+	}
+	if len(first.RuntimeCheckpoints) != 2 || !first.HasMore || first.NextCursorAfterID != "run-checkpoint-page/checkpoint-2" {
+		t.Fatalf("first page = %+v, want two checkpoints and cursor checkpoint-2", first)
+	}
+	if first.RuntimeCheckpoints[0].Data != nil || first.RuntimeCheckpoints[0].CurrentStepID != "run-checkpoint-page/step-1" {
+		t.Fatalf("first checkpoint = %+v, want projected metadata without raw data", first.RuntimeCheckpoints[0])
+	}
+
+	second, err := ListRunRuntimeCheckpointsWithBackend(ctx, "file", dataRoot, RuntimeCheckpointQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRunRuntimeCheckpointsWithSession second page: %v", err)
+	}
+	if len(second.RuntimeCheckpoints) != 1 || second.HasMore || second.RuntimeCheckpoints[0].ID != "run-checkpoint-page/checkpoint-3" {
+		t.Fatalf("second page = %+v, want final checkpoint only", second)
+	}
+}
+
+func TestListRunResultsWithSessionPaginatesProjectedResults(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	workspaceID := common.WorkspaceID("ws-result-page")
+	runID := common.RunID("run-result-page")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "result page", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for idx := 1; idx <= 3; idx++ {
+		resultID := common.ResultID(fmt.Sprintf("%s/result-%d", runID, idx))
+		if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
+			ID:           resultID,
+			WorkspaceID:  workspaceID,
+			RunID:        runID,
+			State:        common.ResultStateAccepted,
+			Title:        "result-" + strconv.Itoa(idx),
+			Summary:      "summary-" + strconv.Itoa(idx),
+			SourceType:   "runtime",
+			SourceRef:    fmt.Sprintf("%s/step-%d", runID, idx),
+			EvidenceRefs: []string{fmt.Sprintf("evidence-%d", idx)},
+			DoDAssessment: resultmodel.DoDAssessment{
+				Satisfied: true,
+				Items:     []resultmodel.DoDAssessmentItem{{Item: strings.Repeat("dod", 512), State: "satisfied"}},
+			},
+			SummaryDetail: resultmodel.ResultSummary{
+				GoalOutcome: strings.Repeat("goal", 512),
+			},
+		}); err != nil {
+			t.Fatalf("create result %d: %v", idx, err)
+		}
+	}
+
+	first, err := ListRunResultsWithBackend(ctx, "file", dataRoot, ResultQuery{RunID: string(runID), Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRunResultsWithSession first page: %v", err)
+	}
+	if len(first.Results) != 2 || !first.HasMore || first.NextCursorAfterID != "run-result-page/result-2" {
+		t.Fatalf("first page = %+v, want two results and cursor result-2", first)
+	}
+	if first.Results[0].DoDAssessment != nil || first.Results[0].SummaryDetail != nil || first.Results[0].Summary != "summary-1" {
+		t.Fatalf("first result = %+v, want projected metadata without raw assessment detail", first.Results[0])
+	}
+
+	second, err := ListRunResultsWithBackend(ctx, "file", dataRoot, ResultQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRunResultsWithSession second page: %v", err)
+	}
+	if len(second.Results) != 1 || second.HasMore || second.Results[0].ID != "run-result-page/result-3" {
+		t.Fatalf("second page = %+v, want final result only", second)
+	}
+}
+
+func TestListRunPatchesWithSessionPaginatesProjectedPatches(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	workspaceID := common.WorkspaceID("ws-patch-page")
+	runID := common.RunID("run-patch-page")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "patch page", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for idx := 1; idx <= 3; idx++ {
+		patchID := common.PatchID(fmt.Sprintf("%s/patch-%d", runID, idx))
+		if err := exports.Repositories.Patches.Create(ctx, &runmodel.Patch{
+			ID:          patchID,
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			StepID:      common.StepID(fmt.Sprintf("%s/step-%d", runID, idx)),
+			PatchType:   "unified_diff",
+			TargetRef:   fmt.Sprintf("target-%d", idx),
+			Diff:        "+added\n-deleted\n" + strings.Repeat("x", 1024),
+			Summary:     "summary-" + strconv.Itoa(idx),
+			State:       common.PatchStateApplied,
+		}); err != nil {
+			t.Fatalf("create patch %d: %v", idx, err)
+		}
+	}
+
+	first, err := ListRunPatchesWithBackend(ctx, "file", dataRoot, PatchQuery{RunID: string(runID), Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRunPatchesWithSession first page: %v", err)
+	}
+	if len(first.Patches) != 2 || !first.HasMore || first.NextCursorAfterID != "run-patch-page/patch-2" {
+		t.Fatalf("first page = %+v, want two patches and cursor patch-2", first)
+	}
+	if first.Patches[0].AddedLines != 1 || first.Patches[0].DeletedLines != 1 || first.Patches[0].Summary != "summary-1" {
+		t.Fatalf("first patch = %+v, want projected metadata and line stats", first.Patches[0])
+	}
+
+	second, err := ListRunPatchesWithBackend(ctx, "file", dataRoot, PatchQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRunPatchesWithSession second page: %v", err)
+	}
+	if len(second.Patches) != 1 || second.HasMore || second.Patches[0].ID != "run-patch-page/patch-3" {
+		t.Fatalf("second page = %+v, want final patch only", second)
+	}
+}
+
+func TestListRunValidationResultsWithSessionPaginatesProjectedValidationResults(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	workspaceID := common.WorkspaceID("ws-validation-page")
+	runID := common.RunID("run-validation-page")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "validation page", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for idx := 1; idx <= 3; idx++ {
+		validationID := common.ValidationResultID(fmt.Sprintf("%s/validation-%d", runID, idx))
+		if err := exports.Repositories.ValidationResults.Create(ctx, &runmodel.ValidationResult{
+			ID:              validationID,
+			WorkspaceID:     workspaceID,
+			RunID:           runID,
+			StepID:          common.StepID(fmt.Sprintf("%s/step-%d", runID, idx)),
+			ValidationKind:  "dod",
+			TargetRef:       fmt.Sprintf("target-%d", idx),
+			State:           common.ValidationResultStatePassed,
+			Summary:         "summary-" + strconv.Itoa(idx),
+			EvidenceRef:     fmt.Sprintf("evidence-%d", idx),
+			EvidenceQuality: common.EvidenceQualityValid,
+			EvidenceReason:  strings.Repeat("reason", 256),
+			EvidenceTags:    []string{"tag"},
+		}); err != nil {
+			t.Fatalf("create validation %d: %v", idx, err)
+		}
+	}
+
+	first, err := ListRunValidationResultsWithBackend(ctx, "file", dataRoot, ValidationResultQuery{RunID: string(runID), Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRunValidationResultsWithSession first page: %v", err)
+	}
+	if len(first.ValidationResults) != 2 || !first.HasMore || first.NextCursorAfterID != "run-validation-page/validation-2" {
+		t.Fatalf("first page = %+v, want two validation results and cursor validation-2", first)
+	}
+	if first.ValidationResults[0].EvidenceRef != "evidence-1" || first.ValidationResults[0].Summary != "summary-1" {
+		t.Fatalf("first validation = %+v, want projected validation metadata", first.ValidationResults[0])
+	}
+
+	second, err := ListRunValidationResultsWithBackend(ctx, "file", dataRoot, ValidationResultQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRunValidationResultsWithSession second page: %v", err)
+	}
+	if len(second.ValidationResults) != 1 || second.HasMore || second.ValidationResults[0].ID != "run-validation-page/validation-3" {
+		t.Fatalf("second page = %+v, want final validation only", second)
+	}
+}
+
+func TestListRunArtifactsWithSessionPaginatesProjectedArtifacts(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	workspaceID := common.WorkspaceID("ws-artifact-page")
+	runID := common.RunID("run-artifact-page")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "artifact page", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for idx := 1; idx <= 3; idx++ {
+		artifactID := common.ArtifactID(fmt.Sprintf("%s/artifact-%d", runID, idx))
+		if err := exports.Repositories.Artifacts.Create(ctx, &resultmodel.Artifact{
+			ID:           artifactID,
+			WorkspaceID:  workspaceID,
+			RunID:        runID,
+			ResultID:     common.ResultID(fmt.Sprintf("%s/result-%d", runID, idx)),
+			ArtifactType: "file",
+			Category:     "deliverable",
+			Name:         "artifact-" + strconv.Itoa(idx),
+			Summary:      "summary-" + strconv.Itoa(idx),
+			URI:          fmt.Sprintf("workorch://workspaces/%s/artifacts/%s/artifact-%d.txt", workspaceID, runID, idx),
+			ContentType:  "text/plain",
+			State:        common.ArtifactStateAvailable,
+			EvidenceRefs: []string{fmt.Sprintf("evidence-%d", idx)},
+			Metadata:     map[string]any{"raw": strings.Repeat("m", 1024)},
+		}); err != nil {
+			t.Fatalf("create artifact %d: %v", idx, err)
+		}
+	}
+
+	first, err := ListRunArtifactsWithBackend(ctx, "file", dataRoot, ArtifactQuery{RunID: string(runID), Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRunArtifactsWithSession first page: %v", err)
+	}
+	if len(first.Artifacts) != 2 || !first.HasMore || first.NextCursorAfterID != "run-artifact-page/artifact-2" {
+		t.Fatalf("first page = %+v, want two artifacts and cursor artifact-2", first)
+	}
+	if first.Artifacts[0].Metadata != nil || first.Artifacts[0].URI == "" || first.Artifacts[0].Summary != "summary-1" {
+		t.Fatalf("first artifact = %+v, want projected metadata without raw metadata map", first.Artifacts[0])
+	}
+
+	second, err := ListRunArtifactsWithBackend(ctx, "file", dataRoot, ArtifactQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRunArtifactsWithSession second page: %v", err)
+	}
+	if len(second.Artifacts) != 1 || second.HasMore || second.Artifacts[0].ID != "run-artifact-page/artifact-3" {
+		t.Fatalf("second page = %+v, want final artifact only", second)
+	}
+}
+
 func TestReadRunSnapshotWithBackendReturnsBlockedDecisionReadModel(t *testing.T) {
 	dataRoot := t.TempDir()
 	runID := "run-decision-snapshot"
@@ -362,10 +933,10 @@ func TestReadRunSnapshotReadsWorkspaceAndRunScopedEvidenceConcurrently(t *testin
 	baseWorkspaces := memory.NewWorkspaceRepository()
 	baseSteps := memory.NewStepRepository()
 	if err := baseWorkspaces.Create(context.Background(), &workspacemodel.Workspace{
-		ID:               workspaceID,
-		Title:            "run snapshot concurrent",
-		State:            common.WorkspaceStateActive,
-		WorkingDirectory: "workspaces/run-snapshot-concurrent",
+		ID:                   workspaceID,
+		Title:                "run snapshot concurrent",
+		State:                common.WorkspaceStateActive,
+		DeliverableDirectory: "workspaces/run-snapshot-concurrent",
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -1410,6 +1981,75 @@ func TestReadRunStatusUsesLatestCheckpointStep(t *testing.T) {
 	}
 }
 
+func TestReadRunStatusPrefersBlockingDecisionStepOverStaleCheckpoint(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-status-blocking-step")
+	runID := common.RunID("run-status-blocking-step")
+	staleStepID := common.StepID("run-status-blocking-step/graph-001/001-stale")
+	blockingStepID := common.StepID("run-status-blocking-step/provider-retry-010-of-repair-001")
+	ticketID := common.TicketID("ticket-run-status-blocking-step")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: staleStepID, RunID: runID, Kind: "patch/apply", State: common.StepStateCompleted}); err != nil {
+		t.Fatalf("create stale step: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: blockingStepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateFailed}); err != nil {
+		t.Fatalf("create blocking step: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:               "run-status-blocking-step/checkpoint/stale",
+		WorkspaceID:      workspaceID,
+		RunID:            runID,
+		CurrentStepID:    staleStepID,
+		RunStateSnapshot: common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID,
+		OccurredAt:       "2026-05-12T11:20:53Z",
+	}); err != nil {
+		t.Fatalf("create checkpoint: %v", err)
+	}
+	if err := exports.Repositories.Tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      blockingStepID,
+		Reason:      "provider retry exhausted",
+		State:       common.DecisionTicketStateOpen,
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	status, err := ReadRunStatusWithSession(ctx, session, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunStatusWithSession: %v", err)
+	}
+	if status.CurrentStepID != string(blockingStepID) || status.CurrentStepKind != "llm/workspace_execution" || status.CurrentStepState != string(common.StepStateFailed) {
+		t.Fatalf("status = %+v, want blocking decision step %s", status, blockingStepID)
+	}
+
+	snapshot, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
+	}
+	if snapshot.Step == nil || snapshot.Step.ID != string(blockingStepID) {
+		t.Fatalf("snapshot step = %+v, want blocking decision step %s", snapshot.Step, blockingStepID)
+	}
+	if snapshot.TaskProgress.Recovery.StepID != string(blockingStepID) {
+		t.Fatalf("recovery = %+v, want blocking decision step %s", snapshot.TaskProgress.Recovery, blockingStepID)
+	}
+}
+
 func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "memory", dataRoot)
@@ -1680,6 +2320,42 @@ func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *t
 	}
 }
 
+func TestRuntimeTimelineUsesStreamDiagnosticsWhenRawEventsAreRefOnly(t *testing.T) {
+	stepID := "run-stream-diagnostics/llm-1"
+	timeline := runtimeTimeline(RunSnapshot{
+		Run: Run{ID: "run-stream-diagnostics", WorkspaceID: "ws-stream-diagnostics", State: string(common.RunStateRunning)},
+		Steps: []presenter.StepView{{
+			ID:    stepID,
+			Kind:  "llm/workspace_execution",
+			State: string(common.StepStateCompleted),
+			Output: map[string]any{
+				"stage": "llm_execution_graph_plan",
+				"llmCallRefs": map[string]any{
+					"streamRef": "workorch://workspaces/ws-stream-diagnostics/runs/run-stream-diagnostics/llm-calls/step/response.sse",
+				},
+				"streamDiagnostics": map[string]any{
+					"streaming":          true,
+					"receivedEventCount": 3,
+					"receivedDeltaCount": 2,
+					"receivedBytes":      28,
+					"doneReceived":       true,
+				},
+			},
+		}},
+	})
+
+	var found *RuntimeTimelineItem
+	for idx := range timeline {
+		if timeline[idx].Source == "step_stream_summary" {
+			found = &timeline[idx]
+			break
+		}
+	}
+	if found == nil || found.Summary != "received 28 stream bytes" || found.Data["receivedEventCount"] != 3 {
+		t.Fatalf("stream diagnostics timeline item = %+v, want bounded diagnostics summary", found)
+	}
+}
+
 func TestRuntimeTimelineCompactsLargeStreamDeltaOutput(t *testing.T) {
 	stepID := "run-large-stream/step-1"
 	streamEvents := make([]map[string]any, 0, 80)
@@ -1906,6 +2582,48 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 	}
 }
 
+func TestMapProjectedEventRecordsKeepsBoundedMetadataPayload(t *testing.T) {
+	items := []*eventstreammodel.EventRecord{{
+		ID:          common.EventRecordID("event-projection"),
+		Topic:       events.TopicRunStateChanged,
+		OccurredAt:  "2026-05-16T10:00:00Z",
+		WorkspaceID: common.WorkspaceID("ws-projection"),
+		RunID:       common.RunID("run-projection"),
+		StepID:      common.StepID("run-projection/step-1"),
+		Payload: map[string]any{
+			events.PayloadKeyState:        "running",
+			events.PayloadKeySummary:      strings.Repeat("s", eventPayloadStringLimit+20),
+			events.PayloadKeyEvidenceRefs: []any{"ref-1", "ref-2"},
+			events.PayloadKeyOutput:       map[string]any{"raw": strings.Repeat("x", eventPayloadStringLimit*4)},
+			events.PayloadKeyContext:      map[string]any{"raw": "hidden"},
+		},
+	}}
+
+	projected := mapProjectedEventRecords(items)
+
+	if len(projected) != 1 {
+		t.Fatalf("projected = %+v, want one event", projected)
+	}
+	payload := projected[0].Payload
+	if payload[events.PayloadKeyState] != "running" {
+		t.Fatalf("payload state = %v, want running", payload[events.PayloadKeyState])
+	}
+	summary, ok := payload[events.PayloadKeySummary].(string)
+	if !ok || len(summary) > eventPayloadStringLimit+3 || !strings.HasSuffix(summary, "...") {
+		t.Fatalf("summary projection = %q, want bounded string with suffix", summary)
+	}
+	if _, ok := payload[events.PayloadKeyOutput]; ok {
+		t.Fatalf("projected payload includes raw output: %+v", payload)
+	}
+	if _, ok := payload[events.PayloadKeyContext]; ok {
+		t.Fatalf("projected payload includes raw context: %+v", payload)
+	}
+	refs, ok := payload[events.PayloadKeyEvidenceRefs].([]any)
+	if !ok || len(refs) != 2 {
+		t.Fatalf("evidence refs = %#v, want projected refs", payload[events.PayloadKeyEvidenceRefs])
+	}
+}
+
 func TestSummarizeLLMUsageKeepsCostCurrencyAware(t *testing.T) {
 	summary := summarizeLLMUsage([]LLMUsageTrace{
 		{
@@ -2018,6 +2736,46 @@ func TestReadRunTaskProgressWithBackendReturnsDecisionRecovery(t *testing.T) {
 	}
 	if !progressContainsMilestone(progress, "governance", "blocked") {
 		t.Fatalf("milestones = %+v, want blocked governance", progress.Milestones)
+	}
+}
+
+func TestReadRunTaskProgressSummaryCountsAppliedPatchesAsChangedFiles(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	workspaceID := common.WorkspaceID("ws-task-progress-patches")
+	runID := common.RunID("run-task-progress-patches")
+	stepID := common.StepID("run-task-progress-patches/graph-001/001-apply-main")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "patch/apply", State: common.StepStateCompleted}); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	if err := exports.Repositories.Patches.Create(ctx, &runmodel.Patch{
+		ID:          common.PatchID("run-task-progress-patches/patch/1"),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		PatchType:   "unified_diff",
+		TargetRef:   "main.go",
+		State:       common.PatchStateApplied,
+	}); err != nil {
+		t.Fatalf("create patch: %v", err)
+	}
+
+	progress, err := ReadRunTaskProgressWithSession(ctx, session, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunTaskProgressWithSession: %v", err)
+	}
+	if !strings.Contains(progress.Summary, "1 changed files") {
+		t.Fatalf("summary = %q, want changed file count from applied patches", progress.Summary)
+	}
+	if !progressContainsItem(progress, "run-task-progress-patches/patch/1", "patch", string(common.PatchStateApplied)) {
+		t.Fatalf("items = %+v, want patch progress item", progress.Items)
 	}
 }
 
@@ -2236,10 +2994,10 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 	workspaceID := common.WorkspaceID("ws-context-bundle")
 	runID := common.RunID("run-context-bundle")
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
-		ID:               workspaceID,
-		Title:            "context bundle workspace",
-		State:            common.WorkspaceStateActive,
-		WorkingDirectory: "workspaces/context-bundle",
+		ID:                   workspaceID,
+		Title:                "context bundle workspace",
+		State:                common.WorkspaceStateActive,
+		DeliverableDirectory: "workspaces/context-bundle",
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -2985,10 +3743,10 @@ func TestReadWorkspaceSnapshotReadsWorkspaceAndWorkspaceScopedItemsConcurrently(
 	baseWorkspaces := memory.NewWorkspaceRepository()
 	baseRuns := memory.NewRunRepository()
 	if err := baseWorkspaces.Create(context.Background(), &workspacemodel.Workspace{
-		ID:               workspaceID,
-		Title:            "workspace snapshot concurrent",
-		State:            common.WorkspaceStateActive,
-		WorkingDirectory: "workspaces/workspace-snapshot-concurrent",
+		ID:                   workspaceID,
+		Title:                "workspace snapshot concurrent",
+		State:                common.WorkspaceStateActive,
+		DeliverableDirectory: "workspaces/workspace-snapshot-concurrent",
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}

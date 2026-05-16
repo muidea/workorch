@@ -18,7 +18,7 @@ func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
 	envelope := events.Envelope{
 		Topic:       events.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-remote",
-		Payload:     events.WorkspacePayload("remote workspace", "", "/tmp/remote", common.WorkspaceStateRunning, "run-remote"),
+		Payload:     events.WorkspacePayload("remote workspace", "", "/tmp/remote", "", common.WorkspaceStateRunning, "run-remote"),
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/workorch/events/stream" {
@@ -76,7 +76,7 @@ func TestRemoteEventsBackendReconnectsAndSignalsWorkspaceListRefresh(t *testing.
 		Version:     events.WorkorchEventVersion,
 		Topic:       events.TopicWorkspaceCreated,
 		WorkspaceID: "ws-created-after-reconnect",
-		Payload:     events.WorkspacePayload("created after reconnect", "", "/tmp/reconnect", common.WorkspaceStateActive, ""),
+		Payload:     events.WorkspacePayload("created after reconnect", "", "/tmp/reconnect", "", common.WorkspaceStateActive, ""),
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/workorch/events/stream" {

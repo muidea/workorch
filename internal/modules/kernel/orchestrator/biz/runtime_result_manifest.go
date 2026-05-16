@@ -194,12 +194,12 @@ type workspaceDeliverableFile struct {
 	Category   string
 }
 
-func workspaceManifestFiles(workingDirectory string) ([]workspaceDeliverableFile, error) {
-	workingDirectory = strings.TrimSpace(workingDirectory)
-	if workingDirectory == "" {
+func workspaceManifestFiles(deliverableDirectory string) ([]workspaceDeliverableFile, error) {
+	deliverableDirectory = strings.TrimSpace(deliverableDirectory)
+	if deliverableDirectory == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	root, err := filepath.Abs(workingDirectory)
+	root, err := filepath.Abs(deliverableDirectory)
 	if err != nil {
 		return nil, err
 	}

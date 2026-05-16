@@ -238,7 +238,7 @@ Then:
 E2E assertion:
 
 - Backend receives a Workspace ensure/create command with
-  `workingDirectory=/tmp/workorch-tui-e2e/project-a`.
+  `deliverableDirectory=/tmp/workorch-tui-e2e/project-a`.
 - The TUI renders the active Workspace as current.
 
 ### TUI-E2E-03. Submit Goal Starts Run

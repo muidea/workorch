@@ -53,6 +53,60 @@ func TestListApprovalsWithBackendReturnsFilteredApprovals(t *testing.T) {
 	}
 }
 
+func TestListApprovalPageWithBackendProjectsAuditPayloads(t *testing.T) {
+	dataRoot := t.TempDir()
+	first := prepareApprovalRun(t, dataRoot, "ws-approval-page-a", "run-approval-page-a")
+	second := prepareApprovalRun(t, dataRoot, "ws-approval-page-b", "run-approval-page-b")
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("runtime exports: %v", err)
+	}
+	approval, err := exports.Repositories.Approvals.Get(ctx, common.ApprovalID(first.BlockingApprovalID))
+	if err != nil {
+		t.Fatalf("get approval: %v", err)
+	}
+	approval.Context = map[string]any{"large": "approval context"}
+	if err := exports.Repositories.Approvals.Update(ctx, approval); err != nil {
+		t.Fatalf("update approval context: %v", err)
+	}
+
+	page, err := ListApprovalPageWithBackend(context.Background(), "file", dataRoot, ApprovalQuery{
+		Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("ListApprovalPageWithBackend: %v", err)
+	}
+	if len(page.Approvals) != 1 || page.Approvals[0].ID != first.BlockingApprovalID {
+		t.Fatalf("page approvals = %+v, want first approval", page.Approvals)
+	}
+	if !page.HasMore || page.NextCursorAfterID != first.BlockingApprovalID {
+		t.Fatalf("page cursor = %+v, want hasMore with first cursor", page)
+	}
+	if page.Approvals[0].Context != nil {
+		t.Fatalf("projected approval carries large context: %+v", page.Approvals[0])
+	}
+
+	next, err := ListApprovalPageWithBackend(context.Background(), "file", dataRoot, ApprovalQuery{
+		CursorAfterID: page.NextCursorAfterID,
+		Limit:         1,
+	})
+	if err != nil {
+		t.Fatalf("ListApprovalPageWithBackend next: %v", err)
+	}
+	if len(next.Approvals) != 1 || next.Approvals[0].ID != second.BlockingApprovalID || next.HasMore {
+		t.Fatalf("next page = %+v, want second approval without more", next)
+	}
+
+	detail, err := ReadApprovalWithBackend(context.Background(), "file", dataRoot, first.BlockingApprovalID)
+	if err != nil {
+		t.Fatalf("ReadApprovalWithBackend: %v", err)
+	}
+	if detail.Context == nil {
+		t.Fatalf("detail approval lost full context: %+v", detail)
+	}
+}
+
 func TestReadApprovalWithBackendReturnsRejectedApproval(t *testing.T) {
 	dataRoot := t.TempDir()
 	started := prepareApprovalRun(t, dataRoot, "ws-approval-read", "run-approval-read")

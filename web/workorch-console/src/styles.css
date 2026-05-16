@@ -357,6 +357,14 @@ body {
   max-height: 360px;
 }
 
+.runtime-expanded-detail {
+  width: 100%;
+}
+
+.runtime-raw-actions {
+  max-width: 100%;
+}
+
 .workorch-bounded-text {
   max-width: 100%;
   margin-bottom: 0 !important;

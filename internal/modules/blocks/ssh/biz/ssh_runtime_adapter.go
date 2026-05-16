@@ -32,7 +32,7 @@ func NewRuntimeAdapterWithTimeout(timeout time.Duration) *RuntimeAdapter {
 }
 
 func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
-	spec, err := sshCommandSpecFromInput(request.Input, request.WorkspaceWorkingDirectory, a.defaultTimeout())
+	spec, err := sshCommandSpecFromInput(request.Input, request.WorkspaceDeliverableDirectory, a.defaultTimeout())
 	if err != nil {
 		return runtimemodel.StepExecutionResult{}, err
 	}
@@ -95,7 +95,7 @@ func (s sshCommandSpec) authMethod() string {
 	return ""
 }
 
-func sshCommandSpecFromInput(input map[string]any, workspaceWorkingDirectory string, defaultTimeout time.Duration) (sshCommandSpec, error) {
+func sshCommandSpecFromInput(input map[string]any, workspaceDeliverableDirectory string, defaultTimeout time.Duration) (sshCommandSpec, error) {
 	if input == nil {
 		return sshCommandSpec{}, common.ErrInvalidArgument
 	}
@@ -115,7 +115,7 @@ func sshCommandSpecFromInput(input map[string]any, workspaceWorkingDirectory str
 	if spec.Host == "" || spec.Username == "" || spec.Command == "" || spec.Port <= 0 || spec.Port > 65535 {
 		return sshCommandSpec{}, common.ErrInvalidArgument
 	}
-	privateKey, privateKeyPath, err := sshPrivateKeyInput(input, workspaceWorkingDirectory)
+	privateKey, privateKeyPath, err := sshPrivateKeyInput(input, workspaceDeliverableDirectory)
 	if err != nil {
 		return sshCommandSpec{}, err
 	}
@@ -137,7 +137,7 @@ func stringInput(input map[string]any, key string) string {
 	return strings.TrimSpace(value)
 }
 
-func sshPrivateKeyInput(input map[string]any, workspaceWorkingDirectory string) (string, string, error) {
+func sshPrivateKeyInput(input map[string]any, workspaceDeliverableDirectory string) (string, string, error) {
 	if value := stringInput(input, "privateKey"); value != "" {
 		return value, "", nil
 	}
@@ -146,7 +146,7 @@ func sshPrivateKeyInput(input map[string]any, workspaceWorkingDirectory string) 
 		return "", "", nil
 	}
 	if !filepath.IsAbs(path) {
-		base := strings.TrimSpace(workspaceWorkingDirectory)
+		base := strings.TrimSpace(workspaceDeliverableDirectory)
 		if base == "" {
 			return "", "", common.ErrInvalidArgument
 		}

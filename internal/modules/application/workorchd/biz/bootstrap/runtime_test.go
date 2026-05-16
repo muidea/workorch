@@ -76,9 +76,9 @@ func TestNewWithBackendMemoryBuildsRuntime(t *testing.T) {
 	exports := rt.Exports()
 
 	if err := exports.Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID:      common.WorkspaceID("ws-bootstrap-memory"),
-		Title:            "bootstrap memory backend",
-		WorkingDirectory: "workspaces/ws-bootstrap-memory",
+		WorkspaceID:          common.WorkspaceID("ws-bootstrap-memory"),
+		Title:                "bootstrap memory backend",
+		DeliverableDirectory: "workspaces/ws-bootstrap-memory",
 	}); err != nil {
 		t.Fatalf("create workspace with memory backend: %v", err)
 	}
@@ -142,8 +142,8 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 		t.Fatalf("patch/apply output = %+v, want patch_apply stage", result.Output)
 	}
 	result, err = registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		Kind:                      llmcommon.RuntimeBlockKindPatchPreview,
-		WorkspaceWorkingDirectory: t.TempDir(),
+		Kind:                          llmcommon.RuntimeBlockKindPatchPreview,
+		WorkspaceDeliverableDirectory: t.TempDir(),
 		Input: map[string]any{
 			"patchType": "file_write",
 			"targetRef": "result.txt",
@@ -176,15 +176,16 @@ func TestNewWithBackendFilePersistsWorkspaceData(t *testing.T) {
 	exports := rt.Exports()
 
 	err := exports.Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID:      common.WorkspaceID("ws-bootstrap-file"),
-		Title:            "bootstrap file backend",
-		WorkingDirectory: "workspaces/ws-bootstrap-file",
+		WorkspaceID:          common.WorkspaceID("ws-bootstrap-file"),
+		Title:                "bootstrap file backend",
+		DeliverableDirectory: "workspaces/ws-bootstrap-file",
+		InternalDirectory:    filepath.Join(dataDir, "internal", "workspaces", "ws-bootstrap-file"),
 	})
 	if err != nil {
 		t.Fatalf("create workspace with file backend: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(dataDir, "workspaces", "ws-bootstrap-file", "workspace.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(dataDir, "internal", "workspaces", "ws-bootstrap-file", "workspace.json")); err != nil {
 		t.Fatalf("expected workspace persistence file: %v", err)
 	}
 }
@@ -217,7 +218,7 @@ func TestNewWithBackendFileStoresAvailableArtifactContent(t *testing.T) {
 	if stored.URI != wantURI {
 		t.Fatalf("artifact uri = %q, want %q", stored.URI, wantURI)
 	}
-	payload, err := os.ReadFile(filepath.Join(dataDir, "workspaces", "ws-bootstrap-artifact", "artifacts", "run-bootstrap-artifact", "result-summary.txt"))
+	payload, err := os.ReadFile(filepath.Join(dataDir, "internal", "workspaces", "ws-bootstrap-artifact", "artifacts", "run-bootstrap-artifact", "result-summary.txt"))
 	if err != nil {
 		t.Fatalf("read stored artifact: %v", err)
 	}
@@ -279,11 +280,12 @@ func TestNewWithBackendFilePartitionsWorkspaceScopedRepositories(t *testing.T) {
 	dodID := common.DoDID("dod-bootstrap-workspace-partition")
 	memoryID := common.MemoryID("memory-bootstrap-workspace-partition")
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
-		ID:               workspaceID,
-		Title:            "workspace partition",
-		WorkingDirectory: filepath.Join(dataDir, "workspaces", string(workspaceID), "working"),
-		State:            common.WorkspaceStateActive,
-		DefaultSoulID:    common.SoulID("soul-default"),
+		ID:                   workspaceID,
+		Title:                "workspace partition",
+		DeliverableDirectory: filepath.Join(filepath.Dir(dataDir), ".workorch-workspaces", string(workspaceID)),
+		InternalDirectory:    filepath.Join(dataDir, "internal", "workspaces", string(workspaceID)),
+		State:                common.WorkspaceStateActive,
+		DefaultSoulID:        common.SoulID("soul-default"),
 		SoulBindings: map[string]common.SoulID{
 			"execution": common.SoulID("soul-execution"),
 		},
@@ -315,7 +317,7 @@ func TestNewWithBackendFilePartitionsWorkspaceScopedRepositories(t *testing.T) {
 		t.Fatalf("create memory item: %v", err)
 	}
 
-	workspaceRoot := filepath.Join(dataDir, "workspaces", string(workspaceID))
+	workspaceRoot := filepath.Join(dataDir, "internal", "workspaces", string(workspaceID))
 	for _, fileName := range []string{"workspace.json", "goals.json", "dods.json", "memory_item.json"} {
 		if _, err := os.Stat(filepath.Join(workspaceRoot, fileName)); err != nil {
 			t.Fatalf("expected workspace-scoped %s: %v", fileName, err)
@@ -422,7 +424,7 @@ func assertWorkspaceSoulBindingsStoredOutsideWorkspaceJSON(t *testing.T, workspa
 
 func workspaceIndexContains(index workspaceIndex, workspaceID common.WorkspaceID, state common.WorkspaceState, activeRunID common.RunID) bool {
 	for _, item := range index.Workspaces {
-		if item.WorkspaceID == workspaceID && item.State == state && item.ActiveRunID == activeRunID && item.WorkspaceRoot == filepath.ToSlash(filepath.Join("workspaces", string(workspaceID))) {
+		if item.WorkspaceID == workspaceID && item.State == state && item.ActiveRunID == activeRunID && item.InternalRoot == filepath.ToSlash(filepath.Join("internal", "workspaces", string(workspaceID))) {
 			return true
 		}
 	}
@@ -473,6 +475,7 @@ func TestNewWithBackendFilePartitionsRunScopedRepositories(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-bootstrap-partition")
 	runID := common.RunID("run-bootstrap-partition")
 	stepID := common.StepID("step-bootstrap-partition")
+	toolCallID := common.ToolCallID("tool-bootstrap-partition")
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -480,7 +483,7 @@ func TestNewWithBackendFilePartitionsRunScopedRepositories(t *testing.T) {
 		t.Fatalf("create step: %v", err)
 	}
 	if err := exports.Repositories.ToolCalls.Create(ctx, &runmodel.ToolCall{
-		ID:          common.ToolCallID("tool-bootstrap-partition"),
+		ID:          toolCallID,
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		StepID:      stepID,
@@ -564,20 +567,9 @@ func TestNewWithBackendFilePartitionsRunScopedRepositories(t *testing.T) {
 		t.Fatalf("append event record: %v", err)
 	}
 
-	runRoot := filepath.Join(dataDir, "workspaces", string(workspaceID), "runs", string(runID))
+	runRoot := filepath.Join(dataDir, "internal", "workspaces", string(workspaceID), "runs", string(runID))
 	for _, fileName := range []string{
 		"run.json",
-		"step.json",
-		"tool_call.json",
-		"patch.json",
-		"validation_result.json",
-		"runtime_checkpoint.json",
-		"result.json",
-		"artifact.json",
-		"ticket.json",
-		"resolution.json",
-		"approval.json",
-		"event_record.json",
 	} {
 		if _, err := os.Stat(filepath.Join(runRoot, fileName)); err != nil {
 			t.Fatalf("expected run-scoped %s: %v", fileName, err)
@@ -585,6 +577,37 @@ func TestNewWithBackendFilePartitionsRunScopedRepositories(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dataDir, fileName)); !os.IsNotExist(err) {
 			t.Fatalf("unexpected root-scoped %s err=%v", fileName, err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(runRoot, "steps", filepath.FromSlash(string(stepID)), "metadata.json")); err != nil {
+		t.Fatalf("expected item-scoped step metadata: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(runRoot, "tool-calls", filepath.FromSlash(string(toolCallID)), "metadata.json")); err != nil {
+		t.Fatalf("expected item-scoped tool call metadata: %v", err)
+	}
+	for _, item := range []struct {
+		dir string
+		id  string
+	}{
+		{dir: "patches", id: "patch-bootstrap-partition"},
+		{dir: "validations", id: "validation-bootstrap-partition"},
+		{dir: "checkpoints", id: "checkpoint-bootstrap-partition"},
+		{dir: "results", id: "result-bootstrap-partition"},
+		{dir: "artifacts", id: "artifact-bootstrap-partition"},
+		{dir: filepath.Join("decisions", "tickets"), id: "ticket-bootstrap-partition"},
+		{dir: filepath.Join("decisions", "resolutions"), id: "resolution-bootstrap-partition"},
+		{dir: "approvals", id: "approval-bootstrap-partition"},
+	} {
+		if _, err := os.Stat(filepath.Join(runRoot, item.dir, filepath.FromSlash(item.id)+".json")); err != nil {
+			t.Fatalf("expected item-scoped %s %s: %v", item.dir, item.id, err)
+		}
+	}
+	for _, legacyFileName := range []string{"step.json", "tool_call.json", "patch.json", "validation_result.json", "runtime_checkpoint.json", "result.json", "artifact.json", "ticket.json", "resolution.json", "approval.json"} {
+		if _, err := os.Stat(filepath.Join(runRoot, legacyFileName)); !os.IsNotExist(err) {
+			t.Fatalf("unexpected legacy run-scoped %s err=%v", legacyFileName, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(runRoot, "events", "events-000001.jsonl")); err != nil {
+		t.Fatalf("expected run-scoped event JSONL segment: %v", err)
 	}
 	if steps, err := exports.Repositories.Steps.ListByRun(ctx, runID); err != nil || len(steps) != 1 {
 		t.Fatalf("list run steps = %v, %v; want one", steps, err)
@@ -603,15 +626,16 @@ func TestNewWithBackendFileUsesDefaultDataRootWhenUnset(t *testing.T) {
 	exports := rt.Exports()
 
 	err := exports.Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID:      common.WorkspaceID("ws-bootstrap-file-default"),
-		Title:            "bootstrap file backend default data root",
-		WorkingDirectory: "workspaces/ws-bootstrap-file-default",
+		WorkspaceID:          common.WorkspaceID("ws-bootstrap-file-default"),
+		Title:                "bootstrap file backend default data root",
+		DeliverableDirectory: "workspaces/ws-bootstrap-file-default",
+		InternalDirectory:    filepath.Join(defaultDataDir, "internal", "workspaces", "ws-bootstrap-file-default"),
 	})
 	if err != nil {
 		t.Fatalf("create workspace with default file backend: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(defaultDataDir, "workspaces", "ws-bootstrap-file-default", "workspace.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(defaultDataDir, "internal", "workspaces", "ws-bootstrap-file-default", "workspace.json")); err != nil {
 		t.Fatalf("expected workspace persistence file in default data dir: %v", err)
 	}
 }

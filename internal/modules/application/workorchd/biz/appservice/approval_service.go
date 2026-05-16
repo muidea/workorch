@@ -24,6 +24,23 @@ type Approval struct {
 	AutoGovernance *AutoGovernanceSummary `json:"autoGovernance,omitempty"`
 }
 
+type ApprovalQuery struct {
+	WorkspaceID   string
+	RunID         string
+	CursorAfterID string
+	Limit         int
+}
+
+type ApprovalPage struct {
+	WorkspaceID       string     `json:"workspaceId,omitempty"`
+	RunID             string     `json:"runId,omitempty"`
+	Approvals         []Approval `json:"approvals,omitempty"`
+	Limit             int        `json:"limit"`
+	CursorAfterID     string     `json:"cursorAfterId,omitempty"`
+	NextCursorAfterID string     `json:"nextCursorAfterId,omitempty"`
+	HasMore           bool       `json:"hasMore"`
+}
+
 type BatchResolveApprovalCommand struct {
 	ApprovalIDs []string `json:"approvalIds"`
 	Action      string   `json:"action"`
@@ -99,6 +116,59 @@ func ListApprovalsWithBackend(ctx context.Context, backend string, dataRoot stri
 		return nil, err
 	}
 	return ListApprovalsWithSession(ctx, session, workspaceID, runID)
+}
+
+func ListApprovalPageWithSession(ctx context.Context, session *RuntimeSession, query ApprovalQuery) (ret ApprovalPage, err error) {
+	_, repo, err := approvalDependenciesFromSession(session)
+	if err != nil {
+		return ApprovalPage{}, err
+	}
+	traces := autoGovernanceTraceRepositoryFromSession(session)
+	defer session.CloseOnReturn(ctx, &err)
+
+	items, err := repo.List(ctx)
+	if err != nil {
+		return ApprovalPage{}, err
+	}
+	filtered := make([]*approvalmodel.Approval, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if query.WorkspaceID != "" && string(item.WorkspaceID) != query.WorkspaceID {
+			continue
+		}
+		if query.RunID != "" && string(item.RunID) != query.RunID {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	pageApprovals, limit, cursorAfterID, nextCursor, hasMore := pageApprovals(filtered, query)
+	approvals := make([]Approval, 0, len(pageApprovals))
+	for _, item := range pageApprovals {
+		summary, err := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "approval", string(item.ID))
+		if err != nil {
+			return ApprovalPage{}, err
+		}
+		approvals = append(approvals, projectApprovalView(mapApproval(item, summary)))
+	}
+	return ApprovalPage{
+		WorkspaceID:       strings.TrimSpace(query.WorkspaceID),
+		RunID:             strings.TrimSpace(query.RunID),
+		Approvals:         approvals,
+		Limit:             limit,
+		CursorAfterID:     cursorAfterID,
+		NextCursorAfterID: nextCursor,
+		HasMore:           hasMore,
+	}, nil
+}
+
+func ListApprovalPageWithBackend(ctx context.Context, backend string, dataRoot string, query ApprovalQuery) (ApprovalPage, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return ApprovalPage{}, err
+	}
+	return ListApprovalPageWithSession(ctx, session, query)
 }
 
 func ListApprovalsFromEnv(ctx context.Context, workspaceID string, runID string) ([]Approval, error) {

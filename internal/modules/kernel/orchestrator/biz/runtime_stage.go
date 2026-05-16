@@ -3,30 +3,30 @@ package orchestrator
 import "strings"
 
 const (
-	stepInputKeyRuntimeStage = "runtimeStage"
+	stepInputKeyRuntimeStage     = "runtimeStage"
 	stepInputKeyRuntimeStageMode = "runtimeStageMode"
 
-	runtimeStageExploration = "exploration"
-	runtimeStagePlanning    = "planning"
-	runtimeStageExecution   = "execution"
+	runtimeStageExploration  = "exploration"
+	runtimeStagePlanning     = "planning"
+	runtimeStageExecution    = "execution"
 	runtimeStageVerification = "verification"
-	runtimeStageAcceptance  = "acceptance"
-	runtimeStageRepair      = "repair"
-	runtimeStageReplan      = "replan"
-	runtimeStageDecision    = "decision"
-	runtimeStageApproval    = "approval"
+	runtimeStageAcceptance   = "acceptance"
+	runtimeStageRepair       = "repair"
+	runtimeStageReplan       = "replan"
+	runtimeStageDecision     = "decision"
+	runtimeStageApproval     = "approval"
 )
 
 var validRuntimeStages = map[string]struct{}{
-	runtimeStageExploration: {},
-	runtimeStagePlanning:    {},
-	runtimeStageExecution:   {},
+	runtimeStageExploration:  {},
+	runtimeStagePlanning:     {},
+	runtimeStageExecution:    {},
 	runtimeStageVerification: {},
-	runtimeStageAcceptance:  {},
-	runtimeStageRepair:      {},
-	runtimeStageReplan:      {},
-	runtimeStageDecision:    {},
-	runtimeStageApproval:    {},
+	runtimeStageAcceptance:   {},
+	runtimeStageRepair:       {},
+	runtimeStageReplan:       {},
+	runtimeStageDecision:     {},
+	runtimeStageApproval:     {},
 }
 
 func normalizedRuntimeStage(value any) string {

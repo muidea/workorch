@@ -14,8 +14,8 @@ import (
 func TestResolveDefaultWorkspacePrefersCurrentDirectoryBinding(t *testing.T) {
 	cfgPath := writeCLIConfig(t, "ws-last")
 	be := &startupFakeBackend{workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-current", Title: "current", WorkingDirectory: "/project"},
-		{ID: "ws-last", Title: "last", WorkingDirectory: "/other"},
+		{ID: "ws-current", Title: "current", DeliverableDirectory: "/project"},
+		{ID: "ws-last", Title: "last", DeliverableDirectory: "/other"},
 	}}
 
 	got := resolveDefaultWorkspace(context.Background(), be, "/project", cfgPath)
@@ -31,7 +31,7 @@ func TestResolveDefaultWorkspacePrefersCurrentDirectoryBinding(t *testing.T) {
 func TestResolveDefaultWorkspaceUsesLastActiveWhenCurrentDirectoryUnbound(t *testing.T) {
 	cfgPath := writeCLIConfig(t, "ws-last")
 	be := &startupFakeBackend{workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-last", Title: "last", WorkingDirectory: "/other"},
+		{ID: "ws-last", Title: "last", DeliverableDirectory: "/other"},
 	}}
 
 	got := resolveDefaultWorkspace(context.Background(), be, "/project", cfgPath)
@@ -118,7 +118,7 @@ type startupFakeWorkspace struct{ parent *startupFakeBackend }
 func (b *startupFakeWorkspace) Create(ctx context.Context, req backend.CreateWorkspaceRequest) (*backend.WorkspaceInfo, error) {
 	b.parent.created++
 	b.parent.lastCreate = req
-	ws := backend.WorkspaceInfo{ID: "ws-created", Title: req.Title, WorkingDirectory: req.WorkingDirectory}
+	ws := backend.WorkspaceInfo{ID: "ws-created", Title: req.Title, DeliverableDirectory: req.DeliverableDirectory}
 	b.parent.workspaces = append(b.parent.workspaces, ws)
 	return &ws, nil
 }

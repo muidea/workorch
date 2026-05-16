@@ -1258,11 +1258,11 @@ func testWorkspaceRepositoryContract(t *testing.T, factory func() repository.Wor
 	repo := factory()
 
 	item := &workspacemodel.Workspace{
-		ID:               common.WorkspaceID("ws-contract"),
-		Title:            "workspace-contract",
-		Description:      "workspace contract description",
-		WorkingDirectory: "/tmp/workorch/ws-contract",
-		State:            common.WorkspaceStateActive,
+		ID:                   common.WorkspaceID("ws-contract"),
+		Title:                "workspace-contract",
+		Description:          "workspace contract description",
+		DeliverableDirectory: "/tmp/workorch/ws-contract",
+		State:                common.WorkspaceStateActive,
 		EvidencePolicies: []map[string]any{
 			{
 				"id":              "workspace-policy-contract",
@@ -1295,8 +1295,8 @@ func testWorkspaceRepositoryContract(t *testing.T, factory func() repository.Wor
 	if fresh.Description != "workspace contract description" {
 		t.Fatalf("description = %q, want workspace contract description", fresh.Description)
 	}
-	if fresh.WorkingDirectory != "/tmp/workorch/ws-contract" {
-		t.Fatalf("workingDirectory = %q, want /tmp/workorch/ws-contract", fresh.WorkingDirectory)
+	if fresh.DeliverableDirectory != "/tmp/workorch/ws-contract" {
+		t.Fatalf("deliverableDirectory = %q, want /tmp/workorch/ws-contract", fresh.DeliverableDirectory)
 	}
 	if fresh.EvidencePolicies[0]["id"] != "workspace-policy-contract" || fresh.EvidencePolicies[0]["zeroWorkMarkers"].([]any)[0] != "no work" {
 		t.Fatalf("evidencePolicies clone isolation failed: %+v", fresh.EvidencePolicies)
@@ -1304,7 +1304,7 @@ func testWorkspaceRepositoryContract(t *testing.T, factory func() repository.Wor
 
 	fresh.ActiveRunID = common.RunID("run-1")
 	fresh.Description = "workspace contract updated description"
-	fresh.WorkingDirectory = "/tmp/workorch/ws-contract-updated"
+	fresh.DeliverableDirectory = "/tmp/workorch/ws-contract-updated"
 	if err := repo.Update(ctx, fresh); err != nil {
 		t.Fatalf("update workspace: %v", err)
 	}
@@ -1319,15 +1319,15 @@ func testWorkspaceRepositoryContract(t *testing.T, factory func() repository.Wor
 	if updated.Description != "workspace contract updated description" {
 		t.Fatalf("updated description = %q, want workspace contract updated description", updated.Description)
 	}
-	if updated.WorkingDirectory != "/tmp/workorch/ws-contract-updated" {
-		t.Fatalf("updated workingDirectory = %q, want /tmp/workorch/ws-contract-updated", updated.WorkingDirectory)
+	if updated.DeliverableDirectory != "/tmp/workorch/ws-contract-updated" {
+		t.Fatalf("updated deliverableDirectory = %q, want /tmp/workorch/ws-contract-updated", updated.DeliverableDirectory)
 	}
 
 	second := &workspacemodel.Workspace{
-		ID:               common.WorkspaceID("ws-contract-2"),
-		Title:            "workspace-contract-2",
-		WorkingDirectory: "/tmp/workorch/ws-contract-2",
-		State:            common.WorkspaceStateActive,
+		ID:                   common.WorkspaceID("ws-contract-2"),
+		Title:                "workspace-contract-2",
+		DeliverableDirectory: "/tmp/workorch/ws-contract-2",
+		State:                common.WorkspaceStateActive,
 	}
 	if err := repo.Create(ctx, second); err != nil {
 		t.Fatalf("create second workspace: %v", err)

@@ -681,9 +681,9 @@ func TestRecoverStuckRunningRunsWithBackendClearsTerminalActiveWorkspaceRun(t *t
 func TestReadRunWithSessionReturnsFailureReason(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
 	if err := session.Bootstrap.Exports().Services.WorkspaceService.CreateWorkspace(ctx, workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID:      "ws-run-failure",
-		Title:            "run failure workspace",
-		WorkingDirectory: "workspaces/ws-run-failure",
+		WorkspaceID:          "ws-run-failure",
+		Title:                "run failure workspace",
+		DeliverableDirectory: "workspaces/ws-run-failure",
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}

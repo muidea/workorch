@@ -18,10 +18,10 @@ func TestGoalDoDManager_CreateWorkspace(t *testing.T) {
 	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), nil)
 
 	cmd := workspaceservice.CreateWorkspaceCommand{
-		WorkspaceID:      common.WorkspaceID("ws-1"),
-		Title:            "workorch workspace",
-		Description:      "workspace description",
-		WorkingDirectory: "/tmp/workorch/ws-1",
+		WorkspaceID:          common.WorkspaceID("ws-1"),
+		Title:                "workorch workspace",
+		Description:          "workspace description",
+		DeliverableDirectory: "/tmp/workorch/ws-1",
 	}
 	if err := manager.CreateWorkspace(ctx, cmd); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -37,8 +37,8 @@ func TestGoalDoDManager_CreateWorkspace(t *testing.T) {
 	if ws.Description != cmd.Description {
 		t.Fatalf("description = %q, want %q", ws.Description, cmd.Description)
 	}
-	if ws.WorkingDirectory != cmd.WorkingDirectory {
-		t.Fatalf("workingDirectory = %q, want %q", ws.WorkingDirectory, cmd.WorkingDirectory)
+	if ws.DeliverableDirectory != cmd.DeliverableDirectory {
+		t.Fatalf("deliverableDirectory = %q, want %q", ws.DeliverableDirectory, cmd.DeliverableDirectory)
 	}
 	if ws.State != common.WorkspaceStateActive {
 		t.Fatalf("state = %q, want active", ws.State)
@@ -50,9 +50,9 @@ func TestGoalDoDManager_CreateWorkspace_ValidateArguments(t *testing.T) {
 	manager := NewGoalDoDManager(memory.NewWorkspaceRepository(), memory.NewGoalRepository(), memory.NewDoDRepository(), nil)
 
 	tests := []workspaceservice.CreateWorkspaceCommand{
-		{WorkspaceID: "", Title: "ok", WorkingDirectory: "/tmp/workorch/ws-1"},
-		{WorkspaceID: common.WorkspaceID("ws-1"), Title: "", WorkingDirectory: "/tmp/workorch/ws-1"},
-		{WorkspaceID: common.WorkspaceID("ws-1"), Title: "ok", WorkingDirectory: ""},
+		{WorkspaceID: "", Title: "ok", DeliverableDirectory: "/tmp/workorch/ws-1"},
+		{WorkspaceID: common.WorkspaceID("ws-1"), Title: "", DeliverableDirectory: "/tmp/workorch/ws-1"},
+		{WorkspaceID: common.WorkspaceID("ws-1"), Title: "ok", DeliverableDirectory: ""},
 	}
 	for _, tt := range tests {
 		if err := manager.CreateWorkspace(ctx, tt); !errors.Is(err, common.ErrInvalidArgument) {
@@ -67,18 +67,18 @@ func TestGoalDoDManager_CreateWorkspace_RejectsDuplicateWorkspaceID(t *testing.T
 	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), nil)
 
 	cmd := workspaceservice.CreateWorkspaceCommand{
-		WorkspaceID:      common.WorkspaceID("ws-duplicate"),
-		Title:            "workorch workspace",
-		WorkingDirectory: "/tmp/workorch/ws-duplicate",
+		WorkspaceID:          common.WorkspaceID("ws-duplicate"),
+		Title:                "workorch workspace",
+		DeliverableDirectory: "/tmp/workorch/ws-duplicate",
 	}
 	if err := manager.CreateWorkspace(ctx, cmd); err != nil {
 		t.Fatalf("first create workspace: %v", err)
 	}
 
 	second := workspaceservice.CreateWorkspaceCommand{
-		WorkspaceID:      cmd.WorkspaceID,
-		Title:            "workorch workspace updated",
-		WorkingDirectory: "/tmp/workorch/ws-duplicate-updated",
+		WorkspaceID:          cmd.WorkspaceID,
+		Title:                "workorch workspace updated",
+		DeliverableDirectory: "/tmp/workorch/ws-duplicate-updated",
 	}
 	if err := manager.CreateWorkspace(ctx, second); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("second create err = %v, want conflict", err)
@@ -100,10 +100,10 @@ func TestGoalDoDManager_CreateWorkspace_PublishesWorkspaceCreatedEvent(t *testin
 	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), hub)
 
 	cmd := workspaceservice.CreateWorkspaceCommand{
-		WorkspaceID:      common.WorkspaceID("ws-event"),
-		Title:            "workorch workspace",
-		Description:      "workspace event description",
-		WorkingDirectory: "/tmp/workorch/ws-event",
+		WorkspaceID:          common.WorkspaceID("ws-event"),
+		Title:                "workorch workspace",
+		Description:          "workspace event description",
+		DeliverableDirectory: "/tmp/workorch/ws-event",
 	}
 	if err := manager.CreateWorkspace(ctx, cmd); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -125,8 +125,8 @@ func TestGoalDoDManager_CreateWorkspace_PublishesWorkspaceCreatedEvent(t *testin
 	if published[0].Payload[events.PayloadKeyDescription] != cmd.Description {
 		t.Fatalf("description payload = %v, want %s", published[0].Payload[events.PayloadKeyDescription], cmd.Description)
 	}
-	if published[0].Payload[events.PayloadKeyWorkingDirectory] != cmd.WorkingDirectory {
-		t.Fatalf("workingDirectory payload = %v, want %s", published[0].Payload[events.PayloadKeyWorkingDirectory], cmd.WorkingDirectory)
+	if published[0].Payload[events.PayloadKeyDeliverableDirectory] != cmd.DeliverableDirectory {
+		t.Fatalf("deliverableDirectory payload = %v, want %s", published[0].Payload[events.PayloadKeyDeliverableDirectory], cmd.DeliverableDirectory)
 	}
 	if published[0].Payload[events.PayloadKeyState] != string(common.WorkspaceStateActive) {
 		t.Fatalf("state payload = %v, want %s", published[0].Payload[events.PayloadKeyState], common.WorkspaceStateActive)
@@ -139,10 +139,10 @@ func TestGoalDoDManager_EnsureWorkspaceCreatesMissingWorkspace(t *testing.T) {
 	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), nil)
 
 	cmd := workspaceservice.EnsureWorkspaceCommand{
-		WorkspaceID:      common.WorkspaceID("ws-ensure-create"),
-		Title:            "workorch ensure workspace",
-		Description:      "ensure description",
-		WorkingDirectory: "/tmp/workorch/ws-ensure-create",
+		WorkspaceID:          common.WorkspaceID("ws-ensure-create"),
+		Title:                "workorch ensure workspace",
+		Description:          "ensure description",
+		DeliverableDirectory: "/tmp/workorch/ws-ensure-create",
 	}
 	if err := manager.EnsureWorkspace(ctx, cmd); err != nil {
 		t.Fatalf("ensure workspace: %v", err)
@@ -158,8 +158,8 @@ func TestGoalDoDManager_EnsureWorkspaceCreatesMissingWorkspace(t *testing.T) {
 	if ws.Description != cmd.Description {
 		t.Fatalf("description = %q, want %q", ws.Description, cmd.Description)
 	}
-	if ws.WorkingDirectory != cmd.WorkingDirectory {
-		t.Fatalf("workingDirectory = %q, want %q", ws.WorkingDirectory, cmd.WorkingDirectory)
+	if ws.DeliverableDirectory != cmd.DeliverableDirectory {
+		t.Fatalf("deliverableDirectory = %q, want %q", ws.DeliverableDirectory, cmd.DeliverableDirectory)
 	}
 	if ws.State != common.WorkspaceStateActive {
 		t.Fatalf("state = %q, want active", ws.State)
@@ -177,21 +177,21 @@ func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t
 
 	workspaceID := common.WorkspaceID("ws-ensure-reset")
 	if err := repo.Create(ctx, &workspacemodel.Workspace{
-		ID:               workspaceID,
-		Title:            "stale title",
-		Description:      "stale description",
-		WorkingDirectory: "/tmp/workorch/stale",
-		State:            common.WorkspaceStateArchived,
-		ActiveRunID:      common.RunID("run-stale"),
+		ID:                   workspaceID,
+		Title:                "stale title",
+		Description:          "stale description",
+		DeliverableDirectory: "/tmp/workorch/stale",
+		State:                common.WorkspaceStateArchived,
+		ActiveRunID:          common.RunID("run-stale"),
 	}); err != nil {
 		t.Fatalf("create stale workspace: %v", err)
 	}
 
 	if err := manager.EnsureWorkspace(ctx, workspaceservice.EnsureWorkspaceCommand{
-		WorkspaceID:      workspaceID,
-		Title:            "workorch reset workspace",
-		Description:      "reset description",
-		WorkingDirectory: "/tmp/workorch/ws-ensure-reset",
+		WorkspaceID:          workspaceID,
+		Title:                "workorch reset workspace",
+		Description:          "reset description",
+		DeliverableDirectory: "/tmp/workorch/ws-ensure-reset",
 	}); err != nil {
 		t.Fatalf("ensure workspace reset: %v", err)
 	}
@@ -206,8 +206,8 @@ func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t
 	if ws.Description != "reset description" {
 		t.Fatalf("description = %q, want reset description", ws.Description)
 	}
-	if ws.WorkingDirectory != "/tmp/workorch/ws-ensure-reset" {
-		t.Fatalf("workingDirectory = %q, want /tmp/workorch/ws-ensure-reset", ws.WorkingDirectory)
+	if ws.DeliverableDirectory != "/tmp/workorch/ws-ensure-reset" {
+		t.Fatalf("deliverableDirectory = %q, want /tmp/workorch/ws-ensure-reset", ws.DeliverableDirectory)
 	}
 	if ws.State != common.WorkspaceStateActive {
 		t.Fatalf("state = %q, want active", ws.State)
@@ -229,8 +229,8 @@ func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t
 	if published[0].Payload[events.PayloadKeyDescription] != "reset description" {
 		t.Fatalf("description payload = %v, want reset description", published[0].Payload[events.PayloadKeyDescription])
 	}
-	if published[0].Payload[events.PayloadKeyWorkingDirectory] != "/tmp/workorch/ws-ensure-reset" {
-		t.Fatalf("workingDirectory payload = %v, want /tmp/workorch/ws-ensure-reset", published[0].Payload[events.PayloadKeyWorkingDirectory])
+	if published[0].Payload[events.PayloadKeyDeliverableDirectory] != "/tmp/workorch/ws-ensure-reset" {
+		t.Fatalf("deliverableDirectory payload = %v, want /tmp/workorch/ws-ensure-reset", published[0].Payload[events.PayloadKeyDeliverableDirectory])
 	}
 	if published[0].Payload[events.PayloadKeyState] != string(common.WorkspaceStateActive) {
 		t.Fatalf("state payload = %v, want %s", published[0].Payload[events.PayloadKeyState], common.WorkspaceStateActive)

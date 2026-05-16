@@ -749,10 +749,10 @@ func (o *RuntimeOrchestrator) executionContextWorkspaceFileManifest(ctx context.
 			workspace = loaded
 		}
 	}
-	if workspace == nil || strings.TrimSpace(workspace.WorkingDirectory) == "" {
+	if workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
 		return nil
 	}
-	return compactWorkspaceFileManifest(workspaceFileManifestFromDirectory(workspace.WorkingDirectory))
+	return compactWorkspaceFileManifest(workspaceFileManifestFromDirectory(workspace.DeliverableDirectory))
 }
 
 func shouldIncludeWorkspaceManifestInExecutionContextPackage(run *runModel.Run, step *runModel.Step) bool {

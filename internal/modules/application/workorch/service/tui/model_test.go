@@ -379,7 +379,7 @@ func TestModelRunFailurePrefersActionableHintOverTimeout(t *testing.T) {
 func TestModelViewIsResultFirstAndSuppressesEventNoise(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-1", Title: "Project", WorkingDirectory: "/tmp/project", State: "active"},
+		{ID: "ws-1", Title: "Project", DeliverableDirectory: "/tmp/project", State: "active"},
 	}})
 	m = asModel(next)
 	m.width = 100
@@ -1844,9 +1844,9 @@ func TestModelWorkspaceCreatedEventRefreshesWorkspaceList(t *testing.T) {
 		Type:        backend.EventWorkspaceCreated,
 		WorkspaceID: "ws-b",
 		Payload: map[string]any{
-			"title":            "B",
-			"workingDirectory": "/tmp/b",
-			"state":            "active",
+			"title":                "B",
+			"deliverableDirectory": "/tmp/b",
+			"state":                "active",
 		},
 	}})
 	m = asModel(next)
@@ -1985,9 +1985,9 @@ func TestTUIE2EWorkspaceListLiveRefreshFromBackendEvents(t *testing.T) {
 		Type:        backend.EventWorkspaceCreated,
 		WorkspaceID: "ws-b",
 		Payload: map[string]any{
-			"title":            "B",
-			"workingDirectory": "/tmp/b",
-			"state":            string(common.WorkspaceStateActive),
+			"title":                "B",
+			"deliverableDirectory": "/tmp/b",
+			"state":                string(common.WorkspaceStateActive),
 		},
 	})
 	if createCmd == nil || !m.workspaceListRefreshInFlight {
@@ -2119,7 +2119,7 @@ func TestModelWorkspaceCreateCommandUsesTemplateAndActivatesWorkspace(t *testing
 	if !ok || msg.Error != nil || msg.Workspace == nil {
 		t.Fatalf("workspace create msg = %#v, want created workspace", msg)
 	}
-	if be.createReq.Title != "code agent" || be.createReq.TemplateID != "software-dev" || be.createReq.WorkingDirectory != "/tmp/code-agent" {
+	if be.createReq.Title != "code agent" || be.createReq.TemplateID != "software-dev" || be.createReq.DeliverableDirectory != "/tmp/code-agent" {
 		t.Fatalf("create request = %+v, want title/template/dir", be.createReq)
 	}
 
@@ -2177,11 +2177,11 @@ type workspaceCreateWS struct{ parent *workspaceCreateFake }
 func (f *workspaceCreateWS) Create(ctx context.Context, req backend.CreateWorkspaceRequest) (*backend.WorkspaceInfo, error) {
 	f.parent.createReq = req
 	ws := &backend.WorkspaceInfo{
-		ID:               "ws-created",
-		Title:            req.Title,
-		Description:      req.Description,
-		WorkingDirectory: req.WorkingDirectory,
-		State:            common.WorkspaceStateActive,
+		ID:                   "ws-created",
+		Title:                req.Title,
+		Description:          req.Description,
+		DeliverableDirectory: req.DeliverableDirectory,
+		State:                common.WorkspaceStateActive,
 		SoulBindings: map[string]common.SoulID{
 			"planning":  "soul-planning",
 			"execution": "soul-execution",

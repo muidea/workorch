@@ -486,8 +486,8 @@ func (m AppModel) renderActiveWorkspace(width int) string {
 		return Dim.Render("Workspace: " + shortID(m.activeWorkspaceID))
 	}
 	label := workspaceLabel(*ws)
-	if ws.WorkingDirectory != "" {
-		label += "  " + ws.WorkingDirectory
+	if ws.DeliverableDirectory != "" {
+		label += "  " + ws.DeliverableDirectory
 	}
 	return truncateDisplay("Workspace: "+label, width-2)
 }

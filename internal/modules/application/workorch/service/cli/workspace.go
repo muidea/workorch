@@ -57,10 +57,10 @@ var workspaceCreateCmd = &cobra.Command{
 		dir, _ := cmd.Flags().GetString("working-dir")
 		templateID, _ := cmd.Flags().GetString("template")
 		ws, err := mustBackend().Workspace().Create(ctx(), backend.CreateWorkspaceRequest{
-			Title:            title,
-			Description:      desc,
-			WorkingDirectory: dir,
-			TemplateID:       templateID,
+			Title:                title,
+			Description:          desc,
+			DeliverableDirectory: dir,
+			TemplateID:           templateID,
 		})
 		if err != nil {
 			return fmt.Errorf("create workspace: %w", err)
@@ -140,8 +140,8 @@ func printWorkspaceDetail(ws *backend.WorkspaceInfo) {
 	if ws.ActiveRunID != "" {
 		fmt.Printf("  Active Run: %s\n", ws.ActiveRunID)
 	}
-	if ws.WorkingDirectory != "" {
-		fmt.Printf("  Working Dir: %s\n", ws.WorkingDirectory)
+	if ws.DeliverableDirectory != "" {
+		fmt.Printf("  Working Dir: %s\n", ws.DeliverableDirectory)
 	}
 	if ws.DefaultSoulID != "" {
 		fmt.Printf("  Default Soul: %s\n", ws.DefaultSoulID)
@@ -164,7 +164,7 @@ func init() {
 
 	workspaceCreateCmd.Flags().String("title", "", "Workspace title (required)")
 	workspaceCreateCmd.Flags().String("description", "", "Workspace description")
-	workspaceCreateCmd.Flags().String("working-dir", "", "Working directory path")
+	workspaceCreateCmd.Flags().String("working-dir", "", "Deliverable directory path")
 	workspaceCreateCmd.Flags().String("template", "", "Workspace template ID")
 	workspaceCreateCmd.MarkFlagRequired("title")
 

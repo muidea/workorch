@@ -12,12 +12,39 @@ import {
 import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-components';
 import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import type { Approval, Artifact, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, ExecutionSection, Goal, LLMContextBudgetTrace, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, ProgressBlocker, ProgressItem, RepairLoop, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { ProColumns } from '@ant-design/pro-components';
+import type { Approval, ApprovalPage, Artifact, ArtifactPage, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DecisionPage, DoD, EventRecord, ExecutionSection, Goal, LLMContextBudgetTrace, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, PatchPage, ProgressBlocker, ProgressItem, RepairLoop, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, ToolCallPage, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, ValidationResultPage, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { createWorkorchEventStream, workorchApi } from './api';
 import './styles.css';
 
 type ViewKey = 'board' | 'workspaceDetail' | 'governance' | 'runtimeControl' | 'configuration' | 'service';
+
+const runtimeEventPageLimit = 100;
+const runtimeStepPageLimit = 100;
+const runtimeToolCallPageLimit = 100;
+const runtimeCheckpointPageLimit = 100;
+const runtimeResultPageLimit = 100;
+const runtimePatchPageLimit = 100;
+const runtimeValidationPageLimit = 100;
+const runtimeArtifactPageLimit = 100;
+const governancePageLimit = 100;
+
+function mergeById<T extends { id: string }>(current: T[], items: T[], append: boolean) {
+  if (!append) {
+    return items;
+  }
+  const seen = new Set(current.map((item) => item.id));
+  return [
+    ...current,
+    ...items.filter((item) => {
+      if (seen.has(item.id)) {
+        return false;
+      }
+      seen.add(item.id);
+      return true;
+    })
+  ];
+}
 
 const routes = [
   { path: '/board', name: '业务总览', icon: <DashboardOutlined /> },
@@ -196,14 +223,6 @@ function errorMessage(error: unknown) {
 
 function isNotFoundError(error: unknown) {
   return /(^|\s)404(\s|$)|not found|不存在/i.test(errorMessage(error));
-}
-
-function tableResult<T>(data: T[]) {
-  return {
-    data,
-    success: true,
-    total: data.length
-  };
 }
 
 function pendingCount(items?: Array<{ state: string }>) {
@@ -1310,8 +1329,107 @@ function outputText(output: Record<string, unknown> | undefined, key: string) {
   return typeof value === 'string' ? value : compactJSON(value);
 }
 
+function eventRecordSummary(item: EventRecord) {
+  const payload = item.payload;
+  for (const key of ['summary', 'reason', 'error', 'action', 'status', 'state']) {
+    const value = outputText(payload, key);
+    if (value !== '-') {
+      return value;
+    }
+  }
+  return item.subjectId || item.subjectType || '-';
+}
+
+function eventRecordState(item: EventRecord) {
+  const state = outputText(item.payload, 'state');
+  if (state !== '-') {
+    return stateLabel(state);
+  }
+  const status = outputText(item.payload, 'status');
+  return status !== '-' ? status : '-';
+}
+
+function eventRecordSubject(item: EventRecord) {
+  return [item.subjectType, item.subjectId].filter(Boolean).join(' / ') || '-';
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+const runtimeRawRefFields = [
+  { key: 'requestRef', label: 'Request' },
+  { key: 'responseRef', label: 'Response' },
+  { key: 'streamRef', label: 'Stream' },
+  { key: 'usageRef', label: 'Usage' },
+  { key: 'repairResponseRef', label: 'Repair' }
+];
+
+function runtimeRawRefActions(value: unknown) {
+  const root = asRecord(value);
+  const refs = asRecord(root?.llmCallRefs) ?? (runtimeRawRefFields.some((field) => typeof root?.[field.key] === 'string') ? root : undefined);
+  if (!refs) {
+    return null;
+  }
+  const actions = runtimeRawRefFields.flatMap((field) => {
+    const ref = refs[field.key];
+    if (typeof ref !== 'string' || !ref) {
+      return [];
+    }
+    return [{ ...field, ref }];
+  });
+  if (actions.length === 0) {
+    return null;
+  }
+  return (
+    <Space size={4} wrap className="runtime-raw-actions">
+      <Typography.Text type="secondary">LLM Raw</Typography.Text>
+      {actions.map((action) => (
+        <Button
+          key={`${action.key}:${action.ref}`}
+          size="small"
+          type="link"
+          href={workorchApi.runtimePayloadURL(action.ref)}
+          target="_blank"
+        >
+          {action.label}
+        </Button>
+      ))}
+    </Space>
+  );
+}
+
+function runtimeRawItemSafe(value: string) {
+  return btoa(value).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function runtimePayloadRef(workspaceId: string, runId: string, collection: string, itemId: string, fileName: string) {
+  return `workorch://workspaces/${workspaceId}/runs/${runId}/${collection}/${runtimeRawItemSafe(itemId)}/${fileName}`;
+}
+
+function runtimeDetailActions(workspaceId: string, runId: string, collection: string, itemId: string, actions: Array<{ fileName: string; label: string }>) {
+  if (!workspaceId || !runId || !collection || !itemId || actions.length === 0) {
+    return null;
+  }
+  return (
+    <Space size={4} wrap className="runtime-raw-actions">
+      <Typography.Text type="secondary">Raw</Typography.Text>
+      {actions.map((action) => {
+        const ref = runtimePayloadRef(workspaceId, runId, collection, itemId, action.fileName);
+        return (
+          <Button
+            key={`${collection}:${itemId}:${action.fileName}`}
+            size="small"
+            type="link"
+            href={workorchApi.runtimePayloadURL(ref)}
+            target="_blank"
+          >
+            {action.label}
+          </Button>
+        );
+      })}
+    </Space>
+  );
 }
 
 function asStringArray(value: unknown): string[] {
@@ -2492,17 +2610,41 @@ function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
 
 function DecisionQueuePage() {
   const { message } = AntApp.useApp();
-  const actionRef = useRef<ActionType | undefined>(undefined);
   const [selectedDecisionKeys, setSelectedDecisionKeys] = useState<React.Key[]>([]);
   const [decisionTarget, setDecisionTarget] = useState<{ item: Decision; resolutionType: string } | undefined>(undefined);
   const [decisionSubmitting, setDecisionSubmitting] = useState(false);
+  const [decisionRecords, setDecisionRecords] = useState<Decision[]>([]);
+  const [decisionCursorAfterId, setDecisionCursorAfterId] = useState<string | undefined>(undefined);
+  const [decisionHasMore, setDecisionHasMore] = useState(false);
+  const [decisionLoading, setDecisionLoading] = useState(false);
   const [decisionForm] = Form.useForm();
+
+  function applyDecisionPage(page: DecisionPage, append: boolean) {
+    const items = (page.decisions ?? []).sort((left, right) => Number(left.state !== 'open') - Number(right.state !== 'open'));
+    setDecisionRecords((current) => mergeById(current, items, append));
+    setDecisionCursorAfterId(page.nextCursorAfterId || items.at(-1)?.id);
+    setDecisionHasMore(Boolean(page.hasMore));
+  }
+
+  async function loadDecisionPage(cursorAfterId?: string) {
+    setDecisionLoading(true);
+    try {
+      const page = await workorchApi.listDecisionPage({ cursorAfterId, limit: governancePageLimit });
+      applyDecisionPage(page, Boolean(cursorAfterId));
+    } finally {
+      setDecisionLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));
+  }, []);
 
   const resolve = async (item: Decision, resolutionType: string, payload?: Record<string, unknown>) => {
     try {
       await workorchApi.resolveDecision(item.id, resolutionType, payload);
       message.success(`决策已按 ${resolutionType} 处理，${modelLabels.run} 已由服务端转入后台继续`);
-      actionRef.current?.reload();
+      void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));
     } catch (error) {
       message.error(errorMessage(error));
     }
@@ -2510,12 +2652,16 @@ function DecisionQueuePage() {
 
   const openDecisionResolution = (item: Decision, resolutionType: string) => {
     decisionForm.resetFields();
-    if (resolutionType === 'provide_missing_info') {
-      decisionForm.setFieldsValue(decisionInitialPayload(item));
-    } else {
-      decisionForm.setFieldsValue({ operator: 'console' });
-    }
-    setDecisionTarget({ item, resolutionType });
+    void workorchApi.readDecision(item.id)
+      .then((detail) => {
+        if (resolutionType === 'provide_missing_info') {
+          decisionForm.setFieldsValue(decisionInitialPayload(detail));
+        } else {
+          decisionForm.setFieldsValue({ operator: 'console' });
+        }
+        setDecisionTarget({ item: detail, resolutionType });
+      })
+      .catch((error: unknown) => message.error(errorMessage(error)));
   };
 
   const submitDecisionResolution = async () => {
@@ -2531,7 +2677,7 @@ function DecisionQueuePage() {
       setDecisionTarget(undefined);
       decisionForm.resetFields();
       message.success(`决策已按 ${target.resolutionType} 处理，${modelLabels.run} 已由服务端转入后台继续`);
-      actionRef.current?.reload();
+      void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
@@ -2549,7 +2695,7 @@ function DecisionQueuePage() {
       await workorchApi.batchResolveDecisions(ticketIds, resolutionType, { operator: 'console', mode: 'batch' });
       message.success(`${ticketIds.length} 个决策工单已按 ${resolutionType} 处理，相关${modelLabels.run}已由服务端转入后台继续`);
       setSelectedDecisionKeys([]);
-      actionRef.current?.reload();
+      void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));
     } catch (error) {
       message.error(errorMessage(error));
     }
@@ -2590,7 +2736,6 @@ function DecisionQueuePage() {
       )}
     >
       <ProTable<Decision>
-        actionRef={actionRef}
         rowKey="id"
         search={false}
         options={false}
@@ -2600,15 +2745,13 @@ function DecisionQueuePage() {
           getCheckboxProps: (record) => ({ disabled: record.state !== 'open' })
         }}
         columns={columns}
-        request={async () => {
-          const items = await workorchApi.listDecisions();
-          return tableResult(items.sort((left, right) => Number(left.state !== 'open') - Number(right.state !== 'open')));
-        }}
+        loading={decisionLoading}
+        dataSource={decisionRecords}
         expandable={{
           expandedRowRender: (item) => (
             <ProCard gutter={16} wrap ghost>
               <ProCard title="决策上下文" colSpan={{ xs: 24, lg: 12 }}>
-                <pre className="json-panel json-panel-large">{compactJSON(item.context)}</pre>
+                <pre className="json-panel json-panel-large">{item.context ? compactJSON(item.context) : '列表投影未加载上下文，请进入处理弹窗查看完整详情'}</pre>
               </ProCard>
               <ProCard title="解决内容" colSpan={{ xs: 24, lg: 12 }}>
                 <pre className="json-panel json-panel-large">{compactJSON(item.resolutionPayload)}</pre>
@@ -2620,6 +2763,23 @@ function DecisionQueuePage() {
           )
         }}
       />
+      <Space className="workorch-section">
+        <Button
+          size="small"
+          onClick={() => void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)))}
+          loading={decisionLoading}
+        >
+          刷新决策
+        </Button>
+        <Button
+          size="small"
+          disabled={!decisionHasMore || !decisionCursorAfterId}
+          onClick={() => void loadDecisionPage(decisionCursorAfterId).catch((error: unknown) => message.error(errorMessage(error)))}
+          loading={decisionLoading}
+        >
+          加载更多
+        </Button>
+      </Space>
       <Modal
         title="补充决策信息"
         open={Boolean(decisionTarget)}
@@ -2698,22 +2858,50 @@ function DecisionQueuePage() {
 
 function ApprovalQueuePage() {
   const { message } = AntApp.useApp();
-  const actionRef = useRef<ActionType | undefined>(undefined);
   const [selectedApprovalKeys, setSelectedApprovalKeys] = useState<React.Key[]>([]);
   const [approvalTarget, setApprovalTarget] = useState<{ item: Approval; action: 'approve' | 'reject'; relatedDecision?: Decision } | undefined>(undefined);
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+  const [approvalRecords, setApprovalRecords] = useState<Approval[]>([]);
+  const [approvalCursorAfterId, setApprovalCursorAfterId] = useState<string | undefined>(undefined);
+  const [approvalHasMore, setApprovalHasMore] = useState(false);
+  const [approvalLoading, setApprovalLoading] = useState(false);
   const [approvalForm] = Form.useForm<{ operator?: string; comment?: string }>();
   const actionLabel = (action: 'approve' | 'reject') => action === 'approve' ? '已批准' : '已拒绝';
+
+  function applyApprovalPage(page: ApprovalPage, append: boolean) {
+    const items = (page.approvals ?? []).sort((left, right) => Number(left.state !== 'pending') - Number(right.state !== 'pending'));
+    setApprovalRecords((current) => mergeById(current, items, append));
+    setApprovalCursorAfterId(page.nextCursorAfterId || items.at(-1)?.id);
+    setApprovalHasMore(Boolean(page.hasMore));
+  }
+
+  async function loadApprovalPage(cursorAfterId?: string) {
+    setApprovalLoading(true);
+    try {
+      const page = await workorchApi.listApprovalPage({ cursorAfterId, limit: governancePageLimit });
+      applyApprovalPage(page, Boolean(cursorAfterId));
+    } finally {
+      setApprovalLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)));
+  }, []);
 
   const openApprovalResolution = async (item: Approval, action: 'approve' | 'reject') => {
     approvalForm.resetFields();
     approvalForm.setFieldsValue({ operator: 'console' });
     try {
-      const decisions = await workorchApi.listDecisions();
+      const [approvalDetail, decisions] = await Promise.all([
+        workorchApi.readApproval(item.id),
+        workorchApi.listDecisionPage({ runId: item.runId, limit: governancePageLimit })
+      ]);
       const relatedDecision = decisions
-        .filter((decision) => decision.runId === item.runId && decision.state === 'resolved')
+        .decisions
+        ?.filter((decision) => decision.runId === item.runId && decision.state === 'resolved')
         .at(-1);
-      setApprovalTarget({ item, action, relatedDecision });
+      setApprovalTarget({ item: approvalDetail, action, relatedDecision });
     } catch (error) {
       message.error(errorMessage(error));
     }
@@ -2735,7 +2923,7 @@ function ApprovalQueuePage() {
       setApprovalTarget(undefined);
       approvalForm.resetFields();
       message.success(`审批${actionLabel(target.action)}，${modelLabels.run} 已由服务端转入后台继续`);
-      actionRef.current?.reload();
+      void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)));
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
@@ -2753,7 +2941,7 @@ function ApprovalQueuePage() {
       await workorchApi.batchResolveApprovals(approvalIds, action);
       message.success(`${approvalIds.length} 个审批项${actionLabel(action)}，相关${modelLabels.run}已由服务端转入后台继续`);
       setSelectedApprovalKeys([]);
-      actionRef.current?.reload();
+      void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)));
     } catch (error) {
       message.error(errorMessage(error));
     }
@@ -2791,7 +2979,6 @@ function ApprovalQueuePage() {
       )}
     >
       <ProTable<Approval>
-        actionRef={actionRef}
         rowKey="id"
         search={false}
         options={false}
@@ -2801,11 +2988,26 @@ function ApprovalQueuePage() {
           getCheckboxProps: (record) => ({ disabled: record.state !== 'pending' })
         }}
         columns={columns}
-        request={async () => {
-          const items = await workorchApi.listApprovals();
-          return tableResult(items.sort((left, right) => Number(left.state !== 'pending') - Number(right.state !== 'pending')));
-        }}
+        loading={approvalLoading}
+        dataSource={approvalRecords}
       />
+      <Space className="workorch-section">
+        <Button
+          size="small"
+          onClick={() => void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)))}
+          loading={approvalLoading}
+        >
+          刷新审批
+        </Button>
+        <Button
+          size="small"
+          disabled={!approvalHasMore || !approvalCursorAfterId}
+          onClick={() => void loadApprovalPage(approvalCursorAfterId).catch((error: unknown) => message.error(errorMessage(error)))}
+          loading={approvalLoading}
+        >
+          加载更多
+        </Button>
+      </Space>
       <Modal
         title={approvalTarget?.action === 'reject' ? '拒绝审批确认' : '审批确认'}
         open={Boolean(approvalTarget)}
@@ -2889,6 +3091,38 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const [runSnapshot, setRunSnapshot] = useState<RunSnapshot | undefined>(undefined);
   const [runObservability, setRunObservability] = useState<RunObservability | undefined>(undefined);
   const [contextBundle, setContextBundle] = useState<ContextBundle | undefined>(undefined);
+  const [runEventRecords, setRunEventRecords] = useState<EventRecord[]>([]);
+  const [runEventCursorAfterId, setRunEventCursorAfterId] = useState<string | undefined>(undefined);
+  const [runEventHasMore, setRunEventHasMore] = useState(false);
+  const [runEventLoading, setRunEventLoading] = useState(false);
+  const [runStepRecords, setRunStepRecords] = useState<StepView[]>([]);
+  const [runStepCursorAfterId, setRunStepCursorAfterId] = useState<string | undefined>(undefined);
+  const [runStepHasMore, setRunStepHasMore] = useState(false);
+  const [runStepLoading, setRunStepLoading] = useState(false);
+  const [runToolCallRecords, setRunToolCallRecords] = useState<ToolCall[]>([]);
+  const [runToolCallCursorAfterId, setRunToolCallCursorAfterId] = useState<string | undefined>(undefined);
+  const [runToolCallHasMore, setRunToolCallHasMore] = useState(false);
+  const [runToolCallLoading, setRunToolCallLoading] = useState(false);
+  const [runCheckpointRecords, setRunCheckpointRecords] = useState<RuntimeCheckpoint[]>([]);
+  const [runCheckpointCursorAfterId, setRunCheckpointCursorAfterId] = useState<string | undefined>(undefined);
+  const [runCheckpointHasMore, setRunCheckpointHasMore] = useState(false);
+  const [runCheckpointLoading, setRunCheckpointLoading] = useState(false);
+  const [runResultRecords, setRunResultRecords] = useState<Result[]>([]);
+  const [runResultCursorAfterId, setRunResultCursorAfterId] = useState<string | undefined>(undefined);
+  const [runResultHasMore, setRunResultHasMore] = useState(false);
+  const [runResultLoading, setRunResultLoading] = useState(false);
+  const [runPatchRecords, setRunPatchRecords] = useState<Patch[]>([]);
+  const [runPatchCursorAfterId, setRunPatchCursorAfterId] = useState<string | undefined>(undefined);
+  const [runPatchHasMore, setRunPatchHasMore] = useState(false);
+  const [runPatchLoading, setRunPatchLoading] = useState(false);
+  const [runValidationRecords, setRunValidationRecords] = useState<ValidationResult[]>([]);
+  const [runValidationCursorAfterId, setRunValidationCursorAfterId] = useState<string | undefined>(undefined);
+  const [runValidationHasMore, setRunValidationHasMore] = useState(false);
+  const [runValidationLoading, setRunValidationLoading] = useState(false);
+  const [runArtifactRecords, setRunArtifactRecords] = useState<Artifact[]>([]);
+  const [runArtifactCursorAfterId, setRunArtifactCursorAfterId] = useState<string | undefined>(undefined);
+  const [runArtifactHasMore, setRunArtifactHasMore] = useState(false);
+  const [runArtifactLoading, setRunArtifactLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activationOpen, setActivationOpen] = useState(false);
   const [activationLoading, setActivationLoading] = useState(false);
@@ -3058,6 +3292,315 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     setRunSnapshot(undefined);
     setRunObservability(undefined);
     setContextBundle(undefined);
+    setRunEventRecords([]);
+    setRunEventCursorAfterId(undefined);
+    setRunEventHasMore(false);
+    setRunEventLoading(false);
+    setRunStepRecords([]);
+    setRunStepCursorAfterId(undefined);
+    setRunStepHasMore(false);
+    setRunStepLoading(false);
+    setRunToolCallRecords([]);
+    setRunToolCallCursorAfterId(undefined);
+    setRunToolCallHasMore(false);
+    setRunToolCallLoading(false);
+    setRunCheckpointRecords([]);
+    setRunCheckpointCursorAfterId(undefined);
+    setRunCheckpointHasMore(false);
+    setRunCheckpointLoading(false);
+    setRunResultRecords([]);
+    setRunResultCursorAfterId(undefined);
+    setRunResultHasMore(false);
+    setRunResultLoading(false);
+    setRunPatchRecords([]);
+    setRunPatchCursorAfterId(undefined);
+    setRunPatchHasMore(false);
+    setRunPatchLoading(false);
+    setRunValidationRecords([]);
+    setRunValidationCursorAfterId(undefined);
+    setRunValidationHasMore(false);
+    setRunValidationLoading(false);
+    setRunArtifactRecords([]);
+    setRunArtifactCursorAfterId(undefined);
+    setRunArtifactHasMore(false);
+    setRunArtifactLoading(false);
+  }
+
+  function applyRunStepPage(page: StepPage, append: boolean) {
+    const items = page.steps ?? [];
+    setRunStepRecords((current) => {
+      if (!append) {
+        return items;
+      }
+      const seen = new Set(current.map((item) => item.id));
+      return [
+        ...current,
+        ...items.filter((item) => {
+          if (seen.has(item.id)) {
+            return false;
+          }
+          seen.add(item.id);
+          return true;
+        })
+      ];
+    });
+    setRunStepCursorAfterId(page.nextCursorAfterId || items.at(-1)?.id);
+    setRunStepHasMore(Boolean(page.hasMore));
+  }
+
+  async function loadRunStepPage(runId: string, cursorAfterId?: string) {
+    setRunStepLoading(true);
+    try {
+      const page = await workorchApi.listRunSteps(runId, {
+        cursorAfterId,
+        limit: runtimeStepPageLimit
+      });
+      applyRunStepPage(page, Boolean(cursorAfterId));
+    } finally {
+      setRunStepLoading(false);
+    }
+  }
+
+  function applyRunToolCallPage(page: ToolCallPage, append: boolean) {
+    const items = page.toolCalls ?? [];
+    setRunToolCallRecords((current) => {
+      if (!append) {
+        return items;
+      }
+      const seen = new Set(current.map((item) => item.id));
+      return [
+        ...current,
+        ...items.filter((item) => {
+          if (seen.has(item.id)) {
+            return false;
+          }
+          seen.add(item.id);
+          return true;
+        })
+      ];
+    });
+    setRunToolCallCursorAfterId(page.nextCursorAfterId || items.at(-1)?.id);
+    setRunToolCallHasMore(Boolean(page.hasMore));
+  }
+
+  async function loadRunToolCallPage(runId: string, cursorAfterId?: string) {
+    setRunToolCallLoading(true);
+    try {
+      const page = await workorchApi.listRunToolCalls(runId, {
+        cursorAfterId,
+        limit: runtimeToolCallPageLimit
+      });
+      applyRunToolCallPage(page, Boolean(cursorAfterId));
+    } finally {
+      setRunToolCallLoading(false);
+    }
+  }
+
+  function applyRunCheckpointPage(page: RuntimeCheckpointPage, append: boolean) {
+    const items = page.runtimeCheckpoints ?? [];
+    setRunCheckpointRecords((current) => {
+      if (!append) {
+        return items;
+      }
+      const seen = new Set(current.map((item) => item.id));
+      return [...current, ...items.filter((item) => {
+        if (seen.has(item.id)) {
+          return false;
+        }
+        seen.add(item.id);
+        return true;
+      })];
+    });
+    setRunCheckpointCursorAfterId(page.nextCursorAfterId || items.at(-1)?.id);
+    setRunCheckpointHasMore(Boolean(page.hasMore));
+  }
+
+  async function loadRunCheckpointPage(runId: string, cursorAfterId?: string) {
+    setRunCheckpointLoading(true);
+    try {
+      const page = await workorchApi.listRunRuntimeCheckpoints(runId, {
+        cursorAfterId,
+        limit: runtimeCheckpointPageLimit
+      });
+      applyRunCheckpointPage(page, Boolean(cursorAfterId));
+    } finally {
+      setRunCheckpointLoading(false);
+    }
+  }
+
+  function applyRunResultPage(page: ResultPage, append: boolean) {
+    const items = page.results ?? [];
+    setRunResultRecords((current) => {
+      if (!append) {
+        return items;
+      }
+      const seen = new Set(current.map((item) => item.id));
+      return [...current, ...items.filter((item) => {
+        if (seen.has(item.id)) {
+          return false;
+        }
+        seen.add(item.id);
+        return true;
+      })];
+    });
+    setRunResultCursorAfterId(page.nextCursorAfterId || items.at(-1)?.id);
+    setRunResultHasMore(Boolean(page.hasMore));
+  }
+
+  async function loadRunResultPage(runId: string, cursorAfterId?: string) {
+    setRunResultLoading(true);
+    try {
+      const page = await workorchApi.listRunResults(runId, {
+        cursorAfterId,
+        limit: runtimeResultPageLimit
+      });
+      applyRunResultPage(page, Boolean(cursorAfterId));
+    } finally {
+      setRunResultLoading(false);
+    }
+  }
+
+  function applyRunPatchPage(page: PatchPage, append: boolean) {
+    const items = page.patches ?? [];
+    setRunPatchRecords((current) => mergeById(current, items, append));
+    setRunPatchCursorAfterId(page.nextCursorAfterId || items.at(-1)?.id);
+    setRunPatchHasMore(Boolean(page.hasMore));
+  }
+
+  async function loadRunPatchPage(runId: string, cursorAfterId?: string) {
+    setRunPatchLoading(true);
+    try {
+      const page = await workorchApi.listRunPatches(runId, {
+        cursorAfterId,
+        limit: runtimePatchPageLimit
+      });
+      applyRunPatchPage(page, Boolean(cursorAfterId));
+    } finally {
+      setRunPatchLoading(false);
+    }
+  }
+
+  function applyRunValidationPage(page: ValidationResultPage, append: boolean) {
+    const items = page.validationResults ?? [];
+    setRunValidationRecords((current) => mergeById(current, items, append));
+    setRunValidationCursorAfterId(page.nextCursorAfterId || items.at(-1)?.id);
+    setRunValidationHasMore(Boolean(page.hasMore));
+  }
+
+  async function loadRunValidationPage(runId: string, cursorAfterId?: string) {
+    setRunValidationLoading(true);
+    try {
+      const page = await workorchApi.listRunValidationResults(runId, {
+        cursorAfterId,
+        limit: runtimeValidationPageLimit
+      });
+      applyRunValidationPage(page, Boolean(cursorAfterId));
+    } finally {
+      setRunValidationLoading(false);
+    }
+  }
+
+  function applyRunArtifactPage(page: ArtifactPage, append: boolean) {
+    const items = page.artifacts ?? [];
+    setRunArtifactRecords((current) => mergeById(current, items, append));
+    setRunArtifactCursorAfterId(page.nextCursorAfterId || items.at(-1)?.id);
+    setRunArtifactHasMore(Boolean(page.hasMore));
+  }
+
+  async function loadRunArtifactPage(runId: string, cursorAfterId?: string) {
+    setRunArtifactLoading(true);
+    try {
+      const page = await workorchApi.listRunArtifacts(runId, {
+        cursorAfterId,
+        limit: runtimeArtifactPageLimit
+      });
+      applyRunArtifactPage(page, Boolean(cursorAfterId));
+    } finally {
+      setRunArtifactLoading(false);
+    }
+  }
+
+  function applyRunEventPage(items: EventRecord[], append: boolean) {
+    setRunEventRecords((current) => {
+      if (!append) {
+        return items;
+      }
+      const seen = new Set(current.map((item) => item.id));
+      return [
+        ...current,
+        ...items.filter((item) => {
+          if (seen.has(item.id)) {
+            return false;
+          }
+          seen.add(item.id);
+          return true;
+        })
+      ];
+    });
+    setRunEventCursorAfterId(items.at(-1)?.id);
+    setRunEventHasMore(items.length >= runtimeEventPageLimit);
+  }
+
+  async function loadRunEventPage(runId: string, cursorAfterId?: string) {
+    setRunEventLoading(true);
+    try {
+      const items = await workorchApi.listEventRecords({
+        runId,
+        cursorAfterId,
+        limit: runtimeEventPageLimit
+      });
+      applyRunEventPage(items, Boolean(cursorAfterId));
+    } finally {
+      setRunEventLoading(false);
+    }
+  }
+
+  async function loadRunProcess(runId: string, includeContext = false) {
+    setRunEventLoading(true);
+    setRunStepLoading(true);
+    setRunToolCallLoading(true);
+    setRunCheckpointLoading(true);
+    setRunResultLoading(true);
+    setRunPatchLoading(true);
+    setRunValidationLoading(true);
+    setRunArtifactLoading(true);
+    try {
+      const [nextRunSnapshot, nextRunObservability, nextRunContextBundle, stepPage, toolCallPage, checkpointPage, resultPage, patchPage, validationPage, artifactPage, eventRecords] = await Promise.all([
+        workorchApi.readRunSnapshot(runId),
+        workorchApi.readRunObservability(runId),
+        includeContext ? workorchApi.readRunContextBundle(runId) : Promise.resolve(undefined),
+        workorchApi.listRunSteps(runId, { limit: runtimeStepPageLimit }),
+        workorchApi.listRunToolCalls(runId, { limit: runtimeToolCallPageLimit }),
+        workorchApi.listRunRuntimeCheckpoints(runId, { limit: runtimeCheckpointPageLimit }),
+        workorchApi.listRunResults(runId, { limit: runtimeResultPageLimit }),
+        workorchApi.listRunPatches(runId, { limit: runtimePatchPageLimit }),
+        workorchApi.listRunValidationResults(runId, { limit: runtimeValidationPageLimit }),
+        workorchApi.listRunArtifacts(runId, { limit: runtimeArtifactPageLimit }),
+        workorchApi.listEventRecords({ runId, limit: runtimeEventPageLimit })
+      ]);
+      setRunSnapshot(nextRunSnapshot);
+      setRunObservability(nextRunObservability);
+      if (nextRunContextBundle) {
+        setContextBundle(nextRunContextBundle);
+      }
+      applyRunStepPage(stepPage, false);
+      applyRunToolCallPage(toolCallPage, false);
+      applyRunCheckpointPage(checkpointPage, false);
+      applyRunResultPage(resultPage, false);
+      applyRunPatchPage(patchPage, false);
+      applyRunValidationPage(validationPage, false);
+      applyRunArtifactPage(artifactPage, false);
+      applyRunEventPage(eventRecords, false);
+    } finally {
+      setRunEventLoading(false);
+      setRunStepLoading(false);
+      setRunToolCallLoading(false);
+      setRunCheckpointLoading(false);
+      setRunResultLoading(false);
+      setRunPatchLoading(false);
+      setRunValidationLoading(false);
+      setRunArtifactLoading(false);
+    }
   }
 
   async function loadWorkspaceList(preferredWorkspaceId?: string, ignoredWorkspaceId?: string) {
@@ -3117,21 +3660,78 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
     setConfiguration(nextConfiguration);
     const projectedRun = workspaceProjectionRun(nextSnapshot);
     if (projectedRun) {
-      const [nextRunSnapshot, nextRunObservability, nextRunContextBundle] = await Promise.all([
+      setRunEventLoading(true);
+      setRunStepLoading(true);
+      setRunToolCallLoading(true);
+      setRunCheckpointLoading(true);
+      setRunResultLoading(true);
+      setRunPatchLoading(true);
+      setRunValidationLoading(true);
+      setRunArtifactLoading(true);
+      const [nextRunSnapshot, nextRunObservability, nextRunContextBundle, nextRunSteps, nextRunToolCalls, nextRunCheckpoints, nextRunResults, nextRunPatches, nextRunValidations, nextRunArtifacts, nextRunEvents] = await Promise.all([
         workorchApi.readRunSnapshot(projectedRun.id),
         workorchApi.readRunObservability(projectedRun.id),
-        workorchApi.readRunContextBundle(projectedRun.id)
-      ]);
+        workorchApi.readRunContextBundle(projectedRun.id),
+        workorchApi.listRunSteps(projectedRun.id, { limit: runtimeStepPageLimit }),
+        workorchApi.listRunToolCalls(projectedRun.id, { limit: runtimeToolCallPageLimit }),
+        workorchApi.listRunRuntimeCheckpoints(projectedRun.id, { limit: runtimeCheckpointPageLimit }),
+        workorchApi.listRunResults(projectedRun.id, { limit: runtimeResultPageLimit }),
+        workorchApi.listRunPatches(projectedRun.id, { limit: runtimePatchPageLimit }),
+        workorchApi.listRunValidationResults(projectedRun.id, { limit: runtimeValidationPageLimit }),
+        workorchApi.listRunArtifacts(projectedRun.id, { limit: runtimeArtifactPageLimit }),
+        workorchApi.listEventRecords({ runId: projectedRun.id, limit: runtimeEventPageLimit })
+      ]).finally(() => {
+        setRunEventLoading(false);
+        setRunStepLoading(false);
+        setRunToolCallLoading(false);
+        setRunCheckpointLoading(false);
+        setRunResultLoading(false);
+        setRunPatchLoading(false);
+        setRunValidationLoading(false);
+        setRunArtifactLoading(false);
+      });
       if (requestSeq !== workspaceContextRequestSeq.current) {
         return;
       }
       setRunSnapshot(nextRunSnapshot);
       setRunObservability(nextRunObservability);
       setContextBundle(nextRunContextBundle);
+      applyRunStepPage(nextRunSteps, false);
+      applyRunToolCallPage(nextRunToolCalls, false);
+      applyRunCheckpointPage(nextRunCheckpoints, false);
+      applyRunResultPage(nextRunResults, false);
+      applyRunPatchPage(nextRunPatches, false);
+      applyRunValidationPage(nextRunValidations, false);
+      applyRunArtifactPage(nextRunArtifacts, false);
+      applyRunEventPage(nextRunEvents, false);
     } else {
       setRunSnapshot(undefined);
       setRunObservability(undefined);
       setContextBundle(nextContextBundle);
+      setRunStepRecords([]);
+      setRunStepCursorAfterId(undefined);
+      setRunStepHasMore(false);
+      setRunToolCallRecords([]);
+      setRunToolCallCursorAfterId(undefined);
+      setRunToolCallHasMore(false);
+      setRunCheckpointRecords([]);
+      setRunCheckpointCursorAfterId(undefined);
+      setRunCheckpointHasMore(false);
+      setRunResultRecords([]);
+      setRunResultCursorAfterId(undefined);
+      setRunResultHasMore(false);
+      setRunPatchRecords([]);
+      setRunPatchCursorAfterId(undefined);
+      setRunPatchHasMore(false);
+      setRunValidationRecords([]);
+      setRunValidationCursorAfterId(undefined);
+      setRunValidationHasMore(false);
+      setRunArtifactRecords([]);
+      setRunArtifactCursorAfterId(undefined);
+      setRunArtifactHasMore(false);
+      setRunEventRecords([]);
+      setRunEventCursorAfterId(undefined);
+      setRunEventHasMore(false);
     }
   }
 
@@ -3463,6 +4063,30 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
         setSnapshot(activation.snapshot);
         setRunSnapshot(undefined);
         setRunObservability(undefined);
+        setRunEventRecords([]);
+        setRunEventCursorAfterId(undefined);
+        setRunEventHasMore(false);
+        setRunStepRecords([]);
+        setRunStepCursorAfterId(undefined);
+        setRunStepHasMore(false);
+        setRunToolCallRecords([]);
+        setRunToolCallCursorAfterId(undefined);
+        setRunToolCallHasMore(false);
+        setRunCheckpointRecords([]);
+        setRunCheckpointCursorAfterId(undefined);
+        setRunCheckpointHasMore(false);
+        setRunResultRecords([]);
+        setRunResultCursorAfterId(undefined);
+        setRunResultHasMore(false);
+        setRunPatchRecords([]);
+        setRunPatchCursorAfterId(undefined);
+        setRunPatchHasMore(false);
+        setRunValidationRecords([]);
+        setRunValidationCursorAfterId(undefined);
+        setRunValidationHasMore(false);
+        setRunArtifactRecords([]);
+        setRunArtifactCursorAfterId(undefined);
+        setRunArtifactHasMore(false);
         setContextBundle(undefined);
         await loadWorkspaceContext(targetWorkspaceId);
         message.success('工作空间执行已完成一次状态刷新');
@@ -3518,13 +4142,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
         <Space>
           <Button
             size="small"
-            onClick={() => void Promise.all([
-              workorchApi.readRunSnapshot(item.id),
-              workorchApi.readRunObservability(item.id)
-            ]).then(([nextSnapshot, nextObservability]) => {
-              setRunSnapshot(nextSnapshot);
-              setRunObservability(nextObservability);
-            }).catch((error: unknown) => message.error(errorMessage(error)))}
+            onClick={() => void loadRunProcess(item.id, true).catch((error: unknown) => message.error(errorMessage(error)))}
           >
             查看成果与过程
           </Button>
@@ -3546,9 +4164,10 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
   const outcomeDoD = dods.find((item) => item.id === outcomeRun?.doDId);
   const outcomeResult = primaryAcceptedResult(runSnapshot) ?? primaryResult(runSnapshot);
   const outcomeSummary = outcomeResult?.summaryDetail;
+  const currentArtifactRecords = runArtifactRecords.length ? runArtifactRecords : (runSnapshot?.artifacts ?? []);
   const outcomeArtifacts = outcomeResult
-    ? (runSnapshot?.artifacts ?? []).filter((item) => item.resultId === outcomeResult.id || !item.resultId)
-    : (runSnapshot?.artifacts ?? []);
+    ? currentArtifactRecords.filter((item) => item.resultId === outcomeResult.id || !item.resultId)
+    : currentArtifactRecords;
   const outcomeMemoryRefs = memoryRefIDs(runSnapshot);
   const outcomeMemories = memoryItems.filter((item) => item.runId === outcomeRun?.id || outcomeMemoryRefs.has(item.id));
   const outcomeDoDItems = dodAssessmentItems(runSnapshot);
@@ -3655,15 +4274,15 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
               { key: 'mcp', label: modelLabels.mcpServer, value: mcpServers.length },
               { key: 'memory', label: modelLabels.memory, value: memoryItems.length },
               { key: 'step', label: modelLabels.step, value: runSnapshot?.steps?.length ?? 0 },
-              { key: 'result', label: modelLabels.result, value: snapshot.results?.length ?? runSnapshot?.results?.length ?? 0, color: '#389e0d' },
-              { key: 'artifact', label: modelLabels.artifact, value: snapshot.artifacts?.length ?? runSnapshot?.artifacts?.length ?? 0 },
+              { key: 'result', label: modelLabels.result, value: snapshot.results?.length ?? (runResultRecords.length || runSnapshot?.results?.length || 0), color: '#389e0d' },
+              { key: 'artifact', label: modelLabels.artifact, value: snapshot.artifacts?.length ?? (runArtifactRecords.length || runSnapshot?.artifacts?.length || 0) },
               { key: 'webSources', label: 'Web 来源', value: webSourceCount, color: webSourceCount ? '#08979c' : undefined },
               { key: 'llmContext', label: 'LLM Context', value: runLLMContextBudgets?.length ?? 0, color: (runLLMContextBudgets?.length ?? 0) > 0 ? '#1677ff' : undefined },
               { key: 'llmUsage', label: modelLabels.llmUsage, value: runLLMUsageSummary?.entryTotal ?? 0, color: runLLMUsageSummary?.entryTotal ? '#d48806' : undefined },
               { key: 'tool', label: modelLabels.toolCall, value: runSnapshot?.toolCalls?.length ?? 0 },
-              { key: 'patch', label: modelLabels.patch, value: runSnapshot?.patches?.length ?? 0 },
-              { key: 'validation', label: modelLabels.validationResult, value: runSnapshot?.validationResults?.length ?? 0 },
-              { key: 'checkpoint', label: modelLabels.runtimeCheckpoint, value: runSnapshot?.runtimeCheckpoints?.length ?? 0 }
+              { key: 'patch', label: modelLabels.patch, value: runPatchRecords.length || runSnapshot?.patches?.length || 0 },
+              { key: 'validation', label: modelLabels.validationResult, value: runValidationRecords.length || runSnapshot?.validationResults?.length || 0 },
+              { key: 'checkpoint', label: modelLabels.runtimeCheckpoint, value: runCheckpointRecords.length || runSnapshot?.runtimeCheckpoints?.length || 0 }
             ])}
           </ProCard>
           <ProCard title="运行摘要" className="workorch-section">
@@ -3827,12 +4446,13 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                 </ProCard>
                 <ProCard gutter={16} wrap>
                   <ProCard title={modelLabels.toolCall} colSpan={{ xs: 24, lg: 12 }}>
-                    {(runSnapshot.toolCalls?.length ?? 0) > 0 ? (
+                    {runToolCallRecords.length > 0 ? (
                       <ProTable<ToolCall>
                         rowKey="id"
                         search={false}
                         options={false}
                         pagination={{ pageSize: 5 }}
+                        loading={runToolCallLoading}
                         size="small"
                         columns={[
                           { title: '工具', dataIndex: 'toolName', ellipsis: true },
@@ -3840,7 +4460,7 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                           { title: '结果摘要', dataIndex: 'exitSummary', ellipsis: true },
                           { title: '错误', dataIndex: 'error', ellipsis: true }
                         ]}
-                        dataSource={runSnapshot.toolCalls ?? []}
+                        dataSource={runToolCallRecords}
                       />
                     ) : (
                       <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`当前${modelLabels.run}未产生${modelLabels.toolCall}`} />
@@ -3978,18 +4598,18 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                   items={[
                     { title: '调度', description: stateLabel(runOutcomeState(runSnapshot, runObservability)), status: 'finish' },
                     { title: '步骤', description: `${runObservability?.progress.stepCompleted ?? 0}/${runObservability?.progress.stepTotal ?? runSnapshot.steps?.length ?? 0}`, status: runObservability?.progress.stepFailed ? 'error' : 'finish' },
-                    { title: '工具调用', description: `${runObservability?.evidence.toolCallCompleted ?? 0}/${runObservability?.evidence.toolCallTotal ?? runSnapshot.toolCalls?.length ?? 0}`, status: 'finish' },
-                    { title: '校验', description: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? runSnapshot.validationResults?.length ?? 0}`, status: runOutcomeState(runSnapshot, runObservability) === 'failed' ? 'error' : 'finish' },
+                    { title: '工具调用', description: `${runObservability?.evidence.toolCallCompleted ?? 0}/${runObservability?.evidence.toolCallTotal ?? runToolCallRecords.length}`, status: 'finish' },
+                    { title: '校验', description: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? (runValidationRecords.length || runSnapshot.validationResults?.length || 0)}`, status: runOutcomeState(runSnapshot, runObservability) === 'failed' ? 'error' : 'finish' },
                     { title: '终态', description: runObservability?.progress.terminal ? '已进入终态' : '尚未终态', status: runObservability?.progress.terminal ? 'finish' : 'process' }
                   ]}
                 />
                 {metricGrid([
                   { key: 'steps', label: '步骤完成', value: `${runObservability?.progress.stepCompleted ?? 0}/${runObservability?.progress.stepTotal ?? runSnapshot.steps?.length ?? 0}`, color: runObservability?.progress.stepFailed ? '#cf1322' : '#0958d9' },
-                  { key: 'tools', label: '工具完成', value: `${runObservability?.evidence.toolCallCompleted ?? 0}/${runObservability?.evidence.toolCallTotal ?? runSnapshot.toolCalls?.length ?? 0}` },
-                  { key: 'validations', label: '校验通过', value: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? runSnapshot.validationResults?.length ?? 0}`, color: runObservability?.evidence.validationFailed ? '#cf1322' : '#389e0d' },
-                  { key: 'patches', label: '补丁（Patch）应用', value: `${runObservability?.evidence.patchApplied ?? 0}/${runObservability?.evidence.patchTotal ?? runSnapshot.patches?.length ?? 0}` },
-                  { key: 'results', label: modelLabels.result, value: runObservability?.evidence.resultTotal ?? runSnapshot.results?.length ?? 0, color: '#389e0d' },
-                  { key: 'artifacts', label: modelLabels.artifact, value: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 },
+                  { key: 'tools', label: '工具完成', value: `${runObservability?.evidence.toolCallCompleted ?? 0}/${runObservability?.evidence.toolCallTotal ?? runToolCallRecords.length}` },
+                  { key: 'validations', label: '校验通过', value: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? (runValidationRecords.length || runSnapshot.validationResults?.length || 0)}`, color: runObservability?.evidence.validationFailed ? '#cf1322' : '#389e0d' },
+                  { key: 'patches', label: '补丁（Patch）应用', value: `${runObservability?.evidence.patchApplied ?? 0}/${runObservability?.evidence.patchTotal ?? (runPatchRecords.length || runSnapshot.patches?.length || 0)}` },
+                  { key: 'results', label: modelLabels.result, value: runObservability?.evidence.resultTotal ?? runResultRecords.length, color: '#389e0d' },
+                  { key: 'artifacts', label: modelLabels.artifact, value: runObservability?.evidence.artifactTotal ?? (runArtifactRecords.length || runSnapshot.artifacts?.length || 0) },
                   { key: 'webSources', label: 'Web 来源', value: webSourceCount, color: webSourceCount ? '#08979c' : undefined },
                   { key: 'llmContextBudgets', label: 'LLM Context', value: runLLMContextBudgets?.length ?? 0, color: (runLLMContextBudgets?.length ?? 0) > 0 ? '#1677ff' : undefined },
                   { key: 'llmUsage', label: modelLabels.llmUsage, value: runLLMUsageSummary?.entryTotal ?? 0, color: runLLMUsageSummary?.entryTotal ? '#d48806' : undefined }
@@ -4002,12 +4622,12 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     { key: 'currentStep', label: '当前步骤', children: runObservability?.progress.currentStepId || runSnapshot.steps?.at(-1)?.id || '-' },
                     { key: 'terminal', label: '是否终态', children: runObservability ? (runObservability.progress.terminal ? '是' : '否') : '-' },
                     { key: 'steps', label: '步骤', children: `${runObservability?.progress.stepCompleted ?? 0}/${runObservability?.progress.stepTotal ?? runSnapshot.steps?.length ?? 0} 已完成` },
-                    { key: 'toolCalls', label: '工具调用', children: `${runObservability?.evidence.toolCallCompleted ?? 0}/${runObservability?.evidence.toolCallTotal ?? runSnapshot.toolCalls?.length ?? 0} 已完成` },
-                    { key: 'patches', label: modelLabels.patch, children: `${runObservability?.evidence.patchApplied ?? 0}/${runObservability?.evidence.patchTotal ?? runSnapshot.patches?.length ?? 0} 已应用` },
-                    { key: 'validations', label: modelLabels.validationResult, children: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? runSnapshot.validationResults?.length ?? 0} 通过` },
-                    { key: 'checkpoints', label: modelLabels.runtimeCheckpoint, children: runObservability?.evidence.runtimeCheckpointTotal ?? runSnapshot.runtimeCheckpoints?.length ?? 0 },
-                    { key: 'results', label: modelLabels.result, children: runObservability?.evidence.resultTotal ?? runSnapshot.results?.length ?? 0 },
-                    { key: 'artifacts', label: modelLabels.artifact, children: runObservability?.evidence.artifactTotal ?? runSnapshot.artifacts?.length ?? 0 },
+                    { key: 'toolCalls', label: '工具调用', children: `${runObservability?.evidence.toolCallCompleted ?? 0}/${runObservability?.evidence.toolCallTotal ?? runToolCallRecords.length} 已完成` },
+                    { key: 'patches', label: modelLabels.patch, children: `${runObservability?.evidence.patchApplied ?? 0}/${runObservability?.evidence.patchTotal ?? (runPatchRecords.length || runSnapshot.patches?.length || 0)} 已应用` },
+                    { key: 'validations', label: modelLabels.validationResult, children: `${runObservability?.evidence.validationPassed ?? 0}/${runObservability?.evidence.validationTotal ?? (runValidationRecords.length || runSnapshot.validationResults?.length || 0)} 通过` },
+                    { key: 'checkpoints', label: modelLabels.runtimeCheckpoint, children: runObservability?.evidence.runtimeCheckpointTotal ?? runCheckpointRecords.length },
+                    { key: 'results', label: modelLabels.result, children: runObservability?.evidence.resultTotal ?? runResultRecords.length },
+                    { key: 'artifacts', label: modelLabels.artifact, children: runObservability?.evidence.artifactTotal ?? (runArtifactRecords.length || runSnapshot.artifacts?.length || 0) },
                     { key: 'webSources', label: 'Web 来源', children: webSourceCount },
                     { key: 'llmContextBudgets', label: 'LLM Context', children: runLLMContextBudgets?.length ?? 0 },
                     { key: 'llmUsage', label: modelLabels.llmUsage, children: `${numberText(runLLMUsageSummary?.entryTotal)} 次 / ${numberText(runLLMUsageSummary?.totalTokens)} tokens / ${llmUsageCostSummary(runLLMUsageSummary)}` },
@@ -4068,10 +4688,62 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                             { title: '发生时间', dataIndex: 'occurredAt', width: 210, render: (_, item) => timelineOccurredAtContent(item) }
                           ]}
                           expandable={{
-                            expandedRowRender: (item) => <pre className="json-panel json-panel-large">{compactJSON(item.output ?? item.data)}</pre>
+                            expandedRowRender: (item) => (
+                              <Space direction="vertical" size={8} className="runtime-expanded-detail">
+                                {runtimeRawRefActions(item.output ?? item.data)}
+                                <pre className="json-panel json-panel-large">{compactJSON(item.output ?? item.data)}</pre>
+                              </Space>
+                            )
                           }}
                           dataSource={runObservability?.timeline ?? []}
                         />
+                      )
+                    },
+                    {
+                      key: 'events',
+                      label: `事件 ${runObservability?.evidence.eventTotal ?? runEventRecords.length}`,
+                      children: (
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          <ProTable<EventRecord>
+                            rowKey="id"
+                            search={false}
+                            options={false}
+                            pagination={{ pageSize: 8 }}
+                            loading={runEventLoading}
+                            size="small"
+                            columns={[
+                              { title: '事件', dataIndex: 'topic', ellipsis: true },
+                              { title: '状态', width: 120, render: (_, item) => eventRecordState(item) },
+                              { title: '主体', render: (_, item) => eventRecordSubject(item), ellipsis: true },
+                              { title: '步骤', dataIndex: 'stepId', ellipsis: true },
+                              { title: '摘要', render: (_, item) => eventRecordSummary(item), ellipsis: true },
+                              { title: '发生时间', dataIndex: 'occurredAt', width: 210, render: (_, item) => item.occurredAt || '-' }
+                            ]}
+                            expandable={{
+                              expandedRowRender: (item) => (
+                                <pre className="json-panel json-panel-large">{compactJSON(item.payload)}</pre>
+                              )
+                            }}
+                            dataSource={runEventRecords}
+                          />
+                          <Space>
+                            <Button
+                              size="small"
+                              onClick={() => void loadRunEventPage(runSnapshot.run.id).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runEventLoading}
+                            >
+                              刷新事件
+                            </Button>
+                            <Button
+                              size="small"
+                              disabled={!runEventHasMore || !runEventCursorAfterId}
+                              onClick={() => void loadRunEventPage(runSnapshot.run.id, runEventCursorAfterId).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runEventLoading}
+                            >
+                              加载更多
+                            </Button>
+                          </Space>
+                        </Space>
                       )
                     },
                     {
@@ -4091,168 +4763,350 @@ function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 's
                     },
                     {
                       key: 'steps',
-                      label: `步骤 ${runSnapshot.steps?.length ?? 0}`,
+                      label: `步骤 ${runObservability?.progress.stepTotal ?? runStepRecords.length}`,
                       children: (
-                        <ProTable<StepView>
-                          rowKey="id"
-                          search={false}
-                          options={false}
-                          pagination={{ pageSize: 8 }}
-                          size="small"
-                          columns={[
-                            { title: '步骤', dataIndex: 'id', copyable: true, ellipsis: true },
-                            { title: '类型', dataIndex: 'kind', width: 180 },
-                            { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
-                            { title: '操作', render: (_, item) => outputText(item.output, 'operation'), ellipsis: true },
-                            { title: '服务', render: (_, item) => outputText(item.output, 'serverId'), ellipsis: true },
-                            { title: '目标', render: (_, item) => runtimeTarget(item.output), ellipsis: true },
-                            { title: '阶段', render: (_, item) => outputText(item.output, 'stage'), ellipsis: true },
-                            { title: '下一类型', render: (_, item) => outputText(item.output, 'nextKind'), ellipsis: true }
-                          ]}
-                          expandable={{
-                            expandedRowRender: (item) => <pre className="json-panel json-panel-large">{compactJSON(item.output)}</pre>
-                          }}
-                          dataSource={runSnapshot.steps ?? []}
-                        />
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          <ProTable<StepView>
+                            rowKey="id"
+                            search={false}
+                            options={false}
+                            pagination={{ pageSize: 8 }}
+                            loading={runStepLoading}
+                            size="small"
+                            columns={[
+                              { title: '步骤', dataIndex: 'id', copyable: true, ellipsis: true },
+                              { title: '类型', dataIndex: 'kind', width: 180 },
+                              { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+                              { title: '操作', render: (_, item) => outputText(item.output, 'operation'), ellipsis: true },
+                              { title: '服务', render: (_, item) => outputText(item.output, 'serverId'), ellipsis: true },
+                              { title: '目标', render: (_, item) => runtimeTarget(item.output), ellipsis: true },
+                              { title: '阶段', render: (_, item) => outputText(item.output, 'stage'), ellipsis: true },
+                              { title: '下一类型', render: (_, item) => outputText(item.output, 'nextKind'), ellipsis: true }
+                            ]}
+                            expandable={{
+                              expandedRowRender: (item) => (
+                                <Space direction="vertical" size={8} className="runtime-expanded-detail">
+                                  {runtimeDetailActions(runSnapshot.workspace.id, runSnapshot.run.id, 'steps', item.id, [
+                                    { fileName: 'input.json', label: 'Input' },
+                                    { fileName: 'output.json', label: 'Output' }
+                                  ])}
+                                  {runtimeRawRefActions(item.output)}
+                                  <pre className="json-panel json-panel-large">{compactJSON(item.output)}</pre>
+                                </Space>
+                              )
+                            }}
+                            dataSource={runStepRecords}
+                          />
+                          <Space>
+                            <Button
+                              size="small"
+                              onClick={() => void loadRunStepPage(runSnapshot.run.id).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runStepLoading}
+                            >
+                              刷新步骤
+                            </Button>
+                            <Button
+                              size="small"
+                              disabled={!runStepHasMore || !runStepCursorAfterId}
+                              onClick={() => void loadRunStepPage(runSnapshot.run.id, runStepCursorAfterId).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runStepLoading}
+                            >
+                              加载更多
+                            </Button>
+                          </Space>
+                        </Space>
                       )
                     },
                     {
                       key: 'toolCalls',
-                      label: `工具调用 ${runSnapshot.toolCalls?.length ?? 0}`,
+                      label: `工具调用 ${runObservability?.evidence.toolCallTotal ?? runToolCallRecords.length}`,
                       children: (
-                        <ProTable<ToolCall>
-                          rowKey="id"
-                          search={false}
-                          options={false}
-                          pagination={{ pageSize: 8 }}
-                          size="small"
-                          columns={[
-                            { title: modelLabels.toolCall, dataIndex: 'id', copyable: true, ellipsis: true },
-                            { title: '工具', dataIndex: 'toolName', ellipsis: true },
-                            { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
-                            { title: '摘要', dataIndex: 'exitSummary', ellipsis: true },
-                            { title: '错误', dataIndex: 'error', ellipsis: true }
-                          ]}
-                          dataSource={runSnapshot.toolCalls ?? []}
-                        />
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          <ProTable<ToolCall>
+                            rowKey="id"
+                            search={false}
+                            options={false}
+                            pagination={{ pageSize: 8 }}
+                            loading={runToolCallLoading}
+                            size="small"
+                            columns={[
+                              { title: modelLabels.toolCall, dataIndex: 'id', copyable: true, ellipsis: true },
+                              { title: '工具', dataIndex: 'toolName', ellipsis: true },
+                              { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+                              { title: '步骤', dataIndex: 'stepId', copyable: true, ellipsis: true },
+                              { title: '摘要', dataIndex: 'exitSummary', ellipsis: true },
+                              { title: '错误', dataIndex: 'error', ellipsis: true }
+                            ]}
+                            expandable={{
+                              expandedRowRender: (item) => (
+                                <Space direction="vertical" size={8} className="runtime-expanded-detail">
+                                  {runtimeDetailActions(runSnapshot.workspace.id, runSnapshot.run.id, 'tool-calls', item.id, [
+                                    { fileName: 'arguments.json', label: 'Arguments' },
+                                    { fileName: 'output.json', label: 'Output' }
+                                  ])}
+                                  <pre className="json-panel json-panel-large">{compactJSON(item)}</pre>
+                                </Space>
+                              )
+                            }}
+                            dataSource={runToolCallRecords}
+                          />
+                          <Space>
+                            <Button
+                              size="small"
+                              onClick={() => void loadRunToolCallPage(runSnapshot.run.id).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runToolCallLoading}
+                            >
+                              刷新工具调用
+                            </Button>
+                            <Button
+                              size="small"
+                              disabled={!runToolCallHasMore || !runToolCallCursorAfterId}
+                              onClick={() => void loadRunToolCallPage(runSnapshot.run.id, runToolCallCursorAfterId).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runToolCallLoading}
+                            >
+                              加载更多
+                            </Button>
+                          </Space>
+                        </Space>
                       )
                     },
                     {
                       key: 'validations',
-                      label: `校验结果 ${runSnapshot.validationResults?.length ?? 0}`,
+                      label: `校验结果 ${runObservability?.evidence.validationTotal ?? runValidationRecords.length}`,
                       children: (
-                        <ProTable<ValidationResult>
-                          rowKey="id"
-                          search={false}
-                          options={false}
-                          pagination={{ pageSize: 8 }}
-                          size="small"
-                          columns={[
-                            { title: modelLabels.validationResult, dataIndex: 'id', copyable: true, ellipsis: true },
-                            { title: '类型', dataIndex: 'validationKind', width: 160 },
-                            { title: '目标', dataIndex: 'targetRef', ellipsis: true },
-                            { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
-                            { title: '摘要', dataIndex: 'summary', ellipsis: true }
-                          ]}
-                          dataSource={runSnapshot.validationResults ?? []}
-                        />
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          <ProTable<ValidationResult>
+                            rowKey="id"
+                            search={false}
+                            options={false}
+                            pagination={{ pageSize: 8 }}
+                            loading={runValidationLoading}
+                            size="small"
+                            columns={[
+                              { title: modelLabels.validationResult, dataIndex: 'id', copyable: true, ellipsis: true },
+                              { title: '类型', dataIndex: 'validationKind', width: 160 },
+                              { title: '目标', dataIndex: 'targetRef', ellipsis: true },
+                              { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+                              { title: '摘要', dataIndex: 'summary', ellipsis: true }
+                            ]}
+                            dataSource={runValidationRecords}
+                          />
+                          <Space>
+                            <Button
+                              size="small"
+                              onClick={() => void loadRunValidationPage(runSnapshot.run.id).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runValidationLoading}
+                            >
+                              刷新校验
+                            </Button>
+                            <Button
+                              size="small"
+                              disabled={!runValidationHasMore || !runValidationCursorAfterId}
+                              onClick={() => void loadRunValidationPage(runSnapshot.run.id, runValidationCursorAfterId).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runValidationLoading}
+                            >
+                              加载更多
+                            </Button>
+                          </Space>
+                        </Space>
                       )
                     },
                     {
                       key: 'patches',
-                      label: `${modelLabels.patch} ${runSnapshot.patches?.length ?? 0}`,
+                      label: `${modelLabels.patch} ${runObservability?.evidence.patchTotal ?? runPatchRecords.length}`,
                       children: (
-                        <ProTable<Patch>
-                          rowKey="id"
-                          search={false}
-                          options={false}
-                          pagination={{ pageSize: 8 }}
-                          size="small"
-                          columns={[
-                            { title: modelLabels.patch, dataIndex: 'id', copyable: true, ellipsis: true },
-                            { title: '类型', dataIndex: 'patchType', width: 140 },
-                            { title: '目标', dataIndex: 'targetRef', ellipsis: true },
-                            { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
-                            { title: '增删行', width: 100, render: (_, item) => `+${item.addedLines ?? 0}/-${item.deletedLines ?? 0}` },
-                            { title: '审批', dataIndex: 'approvalId', copyable: true, ellipsis: true, render: (_, item) => item.approvalId || item.revertApprovalId || '-' },
-                            { title: '摘要', dataIndex: 'summary', ellipsis: true }
-                          ]}
-                          dataSource={runSnapshot.patches ?? []}
-                        />
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          <ProTable<Patch>
+                            rowKey="id"
+                            search={false}
+                            options={false}
+                            pagination={{ pageSize: 8 }}
+                            loading={runPatchLoading}
+                            size="small"
+                            columns={[
+                              { title: modelLabels.patch, dataIndex: 'id', copyable: true, ellipsis: true },
+                              { title: '类型', dataIndex: 'patchType', width: 140 },
+                              { title: '目标', dataIndex: 'targetRef', ellipsis: true },
+                              { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+                              { title: '增删行', width: 100, render: (_, item) => `+${item.addedLines ?? 0}/-${item.deletedLines ?? 0}` },
+                              { title: '审批', dataIndex: 'approvalId', copyable: true, ellipsis: true, render: (_, item) => item.approvalId || item.revertApprovalId || '-' },
+                              { title: '摘要', dataIndex: 'summary', ellipsis: true }
+                            ]}
+                            dataSource={runPatchRecords}
+                          />
+                          <Space>
+                            <Button
+                              size="small"
+                              onClick={() => void loadRunPatchPage(runSnapshot.run.id).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runPatchLoading}
+                            >
+                              刷新补丁
+                            </Button>
+                            <Button
+                              size="small"
+                              disabled={!runPatchHasMore || !runPatchCursorAfterId}
+                              onClick={() => void loadRunPatchPage(runSnapshot.run.id, runPatchCursorAfterId).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runPatchLoading}
+                            >
+                              加载更多
+                            </Button>
+                          </Space>
+                        </Space>
                       )
                     },
                     {
                       key: 'checkpoints',
-                      label: `${modelLabels.runtimeCheckpoint} ${runSnapshot.runtimeCheckpoints?.length ?? 0}`,
+                      label: `${modelLabels.runtimeCheckpoint} ${runObservability?.evidence.runtimeCheckpointTotal ?? runCheckpointRecords.length}`,
                       children: (
-                        <ProTable<RuntimeCheckpoint>
-                          rowKey="id"
-                          search={false}
-                          options={false}
-                          pagination={{ pageSize: 8 }}
-                          size="small"
-                          columns={[
-                            { title: modelLabels.runtimeCheckpoint, dataIndex: 'id', copyable: true, ellipsis: true },
-                            { title: '类型', dataIndex: 'checkpointType', width: 180 },
-                            { title: '运行状态', dataIndex: 'runStateSnapshot', width: 140, render: (_, item) => stateTag(item.runStateSnapshot) },
-                            { title: '当前步骤', dataIndex: 'currentStepId', ellipsis: true },
-                            { title: '决策', dataIndex: 'blockingTicketId', ellipsis: true },
-                            { title: '审批', dataIndex: 'blockingApprovalId', ellipsis: true }
-                          ]}
-                          dataSource={runSnapshot.runtimeCheckpoints ?? []}
-                        />
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          <ProTable<RuntimeCheckpoint>
+                            rowKey="id"
+                            search={false}
+                            options={false}
+                            pagination={{ pageSize: 8 }}
+                            loading={runCheckpointLoading}
+                            size="small"
+                            columns={[
+                              { title: modelLabels.runtimeCheckpoint, dataIndex: 'id', copyable: true, ellipsis: true },
+                              { title: '类型', dataIndex: 'checkpointType', width: 180 },
+                              { title: '运行状态', dataIndex: 'runStateSnapshot', width: 140, render: (_, item) => stateTag(item.runStateSnapshot) },
+                              { title: '当前步骤', dataIndex: 'currentStepId', ellipsis: true },
+                              { title: '决策', dataIndex: 'blockingTicketId', ellipsis: true },
+                              { title: '审批', dataIndex: 'blockingApprovalId', ellipsis: true }
+                            ]}
+                            expandable={{
+                              expandedRowRender: (item) => (
+                                <Space direction="vertical" size={8} className="runtime-expanded-detail">
+                                  {runtimeDetailActions(runSnapshot.workspace.id, runSnapshot.run.id, 'runtime-checkpoints', item.id, [
+                                    { fileName: 'data.json', label: 'Data' }
+                                  ])}
+                                  <pre className="json-panel json-panel-large">{compactJSON(item)}</pre>
+                                </Space>
+                              )
+                            }}
+                            dataSource={runCheckpointRecords}
+                          />
+                          <Space>
+                            <Button
+                              size="small"
+                              onClick={() => void loadRunCheckpointPage(runSnapshot.run.id).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runCheckpointLoading}
+                            >
+                              刷新检查点
+                            </Button>
+                            <Button
+                              size="small"
+                              disabled={!runCheckpointHasMore || !runCheckpointCursorAfterId}
+                              onClick={() => void loadRunCheckpointPage(runSnapshot.run.id, runCheckpointCursorAfterId).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runCheckpointLoading}
+                            >
+                              加载更多
+                            </Button>
+                          </Space>
+                        </Space>
                       )
                     },
                     {
                       key: 'results',
-                      label: `结果 ${runSnapshot.results?.length ?? 0}`,
+                      label: `结果 ${runObservability?.evidence.resultTotal ?? runResultRecords.length}`,
                       children: (
-                        <ProTable<Result>
-                          rowKey="id"
-                          search={false}
-                          options={false}
-                          pagination={{ pageSize: 8 }}
-                          size="small"
-                          columns={[
-                            { title: modelLabels.result, dataIndex: 'id', copyable: true, ellipsis: true },
-                            { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
-                            { title: '标题', dataIndex: 'title', ellipsis: true },
-                            { title: '摘要', dataIndex: 'summary', ellipsis: true },
-                            { title: '来源', render: (_, item) => `${item.sourceType || '-'} / ${item.sourceRef || '-'}`, ellipsis: true }
-                          ]}
-                          dataSource={runSnapshot.results ?? []}
-                        />
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          <ProTable<Result>
+                            rowKey="id"
+                            search={false}
+                            options={false}
+                            pagination={{ pageSize: 8 }}
+                            loading={runResultLoading}
+                            size="small"
+                            columns={[
+                              { title: modelLabels.result, dataIndex: 'id', copyable: true, ellipsis: true },
+                              { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+                              { title: '标题', dataIndex: 'title', ellipsis: true },
+                              { title: '摘要', dataIndex: 'summary', ellipsis: true },
+                              { title: '来源', render: (_, item) => `${item.sourceType || '-'} / ${item.sourceRef || '-'}`, ellipsis: true }
+                            ]}
+                            expandable={{
+                              expandedRowRender: (item) => (
+                                <Space direction="vertical" size={8} className="runtime-expanded-detail">
+                                  {runtimeDetailActions(runSnapshot.workspace.id, runSnapshot.run.id, 'results', item.id, [
+                                    { fileName: 'dod-assessment.json', label: 'DoD' },
+                                    { fileName: 'summary-detail.json', label: 'Detail' }
+                                  ])}
+                                  <pre className="json-panel json-panel-large">{compactJSON(item)}</pre>
+                                </Space>
+                              )
+                            }}
+                            dataSource={runResultRecords}
+                          />
+                          <Space>
+                            <Button
+                              size="small"
+                              onClick={() => void loadRunResultPage(runSnapshot.run.id).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runResultLoading}
+                            >
+                              刷新结果
+                            </Button>
+                            <Button
+                              size="small"
+                              disabled={!runResultHasMore || !runResultCursorAfterId}
+                              onClick={() => void loadRunResultPage(runSnapshot.run.id, runResultCursorAfterId).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runResultLoading}
+                            >
+                              加载更多
+                            </Button>
+                          </Space>
+                        </Space>
                       )
                     },
                     {
                       key: 'artifacts',
-                      label: `交付物 ${runSnapshot.artifacts?.length ?? 0}`,
+                      label: `交付物 ${runObservability?.evidence.artifactTotal ?? runArtifactRecords.length}`,
                       children: (
-                        <ProTable<Artifact>
-                          rowKey="id"
-                          search={false}
-                          options={false}
-                          pagination={{ pageSize: 8 }}
-                          size="small"
-                          columns={[
-                            { title: modelLabels.artifact, dataIndex: 'id', copyable: true, ellipsis: true },
-                            { title: '类型', dataIndex: 'artifactType', width: 140 },
-                            { title: '分类', dataIndex: 'category', width: 140, render: (_, item) => item.category || '-' },
-                            { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
-                            { title: '名称/URI', render: (_, item) => item.name || item.uri || '-', ellipsis: true },
-                            { title: '摘要', dataIndex: 'summary', ellipsis: true },
-                            {
-                              title: '操作',
-                              valueType: 'option',
-                              render: (_, item) => item.uri ? (
-                                <Button size="small" type="link" href={workorchApi.artifactContentURL(item.uri)} target="_blank">
-                                  下载
-                                </Button>
-                              ) : null
-                            }
-                          ]}
-                          dataSource={runSnapshot.artifacts ?? []}
-                        />
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          <ProTable<Artifact>
+                            rowKey="id"
+                            search={false}
+                            options={false}
+                            pagination={{ pageSize: 8 }}
+                            loading={runArtifactLoading}
+                            size="small"
+                            columns={[
+                              { title: modelLabels.artifact, dataIndex: 'id', copyable: true, ellipsis: true },
+                              { title: '类型', dataIndex: 'artifactType', width: 140 },
+                              { title: '分类', dataIndex: 'category', width: 140, render: (_, item) => item.category || '-' },
+                              { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+                              { title: '名称/URI', render: (_, item) => item.name || item.uri || '-', ellipsis: true },
+                              { title: '摘要', dataIndex: 'summary', ellipsis: true },
+                              {
+                                title: '操作',
+                                valueType: 'option',
+                                render: (_, item) => item.uri ? (
+                                  <Button size="small" type="link" href={workorchApi.artifactContentURL(item.uri)} target="_blank">
+                                    下载
+                                  </Button>
+                                ) : null
+                              }
+                            ]}
+                            dataSource={runArtifactRecords}
+                          />
+                          <Space>
+                            <Button
+                              size="small"
+                              onClick={() => void loadRunArtifactPage(runSnapshot.run.id).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runArtifactLoading}
+                            >
+                              刷新交付物
+                            </Button>
+                            <Button
+                              size="small"
+                              disabled={!runArtifactHasMore || !runArtifactCursorAfterId}
+                              onClick={() => void loadRunArtifactPage(runSnapshot.run.id, runArtifactCursorAfterId).catch((error: unknown) => message.error(errorMessage(error)))}
+                              loading={runArtifactLoading}
+                            >
+                              加载更多
+                            </Button>
+                          </Space>
+                        </Space>
                       )
                     }
                   ]}

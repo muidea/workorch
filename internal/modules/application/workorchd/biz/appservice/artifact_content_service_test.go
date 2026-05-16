@@ -58,7 +58,7 @@ func TestReadArtifactContentWithRunSnapshotReusesCachedArtifactMetadata(t *testi
 	workspaceID := "ws-artifact-cache"
 	runID := "run-artifact-cache"
 	artifactURI := "workorch://workspaces/ws-artifact-cache/artifacts/run-artifact-cache/result-summary.txt"
-	artifactDir := filepath.Join(dataRoot, "workspaces", workspaceID, "artifacts", runID)
+	artifactDir := filepath.Join(dataRoot, "internal", "workspaces", workspaceID, "artifacts", runID)
 	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
 		t.Fatalf("mkdir artifact dir: %v", err)
 	}
@@ -99,10 +99,10 @@ func TestReadArtifactContentWithRunSnapshotReusesCachedArtifactMetadata(t *testi
 func TestReadArtifactContentWithBackendRejectsUnknownOrUnsafeURI(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dataRoot, "workspaces", "ws-a", "artifacts", "run-a"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dataRoot, "internal", "workspaces", "ws-a", "artifacts", "run-a"), 0o755); err != nil {
 		t.Fatalf("mkdir artifact dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dataRoot, "workspaces", "ws-a", "artifacts", "run-a", "secret.txt"), []byte("secret"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dataRoot, "internal", "workspaces", "ws-a", "artifacts", "run-a", "secret.txt"), []byte("secret"), 0o600); err != nil {
 		t.Fatalf("write secret: %v", err)
 	}
 

@@ -2609,7 +2609,7 @@ Acceptance criteria:
   duplicate write/read is visible.
 - 2026-05-02: Added QC90 Artifact storage run directory cache. File backend
   Artifact storage now caches the prepared
-  `.workorch-data/workspaces/{workspace}/artifacts/{run}` directory inside
+  `.workorch-data/internal/workspaces/{workspace}/artifacts/{run}` directory inside
   the `artifactStorageRepository`, so the accepted Result Summary artifact and
   Deliverable Manifest artifact for the same Run do not each pay a repeated
   `os.MkdirAll` call during terminal materialization. This is limited to the

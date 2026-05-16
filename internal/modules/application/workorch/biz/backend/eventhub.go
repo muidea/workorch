@@ -95,10 +95,10 @@ func (b *eventHubBackend) handleCommand(ctx context.Context, cmd events.CLIComma
 	switch cmd.Command {
 	case events.CommandWorkspaceCreate:
 		ws, err := b.localBackend.ws.Create(ctx, CreateWorkspaceRequest{
-			Title:            stringValue(cmd.Payload, "title"),
-			Description:      stringValue(cmd.Payload, "description"),
-			WorkingDirectory: stringValue(cmd.Payload, "workingDirectory"),
-			TemplateID:       stringValue(cmd.Payload, "templateId"),
+			Title:                stringValue(cmd.Payload, "title"),
+			Description:          stringValue(cmd.Payload, "description"),
+			DeliverableDirectory: stringValue(cmd.Payload, "deliverableDirectory"),
+			TemplateID:           stringValue(cmd.Payload, "templateId"),
 		})
 		return resourceMap(ws), nil, err
 	case events.CommandWorkspaceGet:
@@ -438,10 +438,10 @@ type eventHubWorkspaceBackend struct{ parent *eventHubBackend }
 
 func (b *eventHubWorkspaceBackend) Create(ctx context.Context, req CreateWorkspaceRequest) (*WorkspaceInfo, error) {
 	result, err := b.parent.sendCommand(ctx, events.CommandWorkspaceCreate, "", "", "workspace", "", map[string]any{
-		"title":            req.Title,
-		"description":      req.Description,
-		"workingDirectory": req.WorkingDirectory,
-		"templateId":       req.TemplateID,
+		"title":                req.Title,
+		"description":          req.Description,
+		"deliverableDirectory": req.DeliverableDirectory,
+		"templateId":           req.TemplateID,
 	})
 	return decodeResultResource[WorkspaceInfo](result, err)
 }

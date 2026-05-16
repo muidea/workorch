@@ -45,7 +45,7 @@ func (a *RuntimeAdapter) list(request runtimemodel.StepExecutionRequest) (runtim
 	if relPath == "" {
 		relPath = "."
 	}
-	root, target, rel, err := guardedWorkspacePath(request.WorkspaceWorkingDirectory, relPath, false)
+	root, target, rel, err := guardedWorkspacePath(request.WorkspaceDeliverableDirectory, relPath, false)
 	if err != nil {
 		return fileErrorResult("file_list_invalid_path", err), err
 	}
@@ -146,7 +146,7 @@ func (a *RuntimeAdapter) list(request runtimemodel.StepExecutionRequest) (runtim
 func (a *RuntimeAdapter) read(request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
 	relPath := stringInput(request.Input, "path")
 	optional := boolInput(request.Input, "optional")
-	_, target, rel, err := guardedWorkspacePath(request.WorkspaceWorkingDirectory, relPath, !optional)
+	_, target, rel, err := guardedWorkspacePath(request.WorkspaceDeliverableDirectory, relPath, !optional)
 	if err != nil {
 		return fileErrorResult("file_read_invalid_path", err), err
 	}
@@ -222,7 +222,7 @@ func (a *RuntimeAdapter) edit(request runtimemodel.StepExecutionRequest) (runtim
 	if strings.TrimSpace(relPath) == "" || oldText == "" {
 		return fileErrorResult("file_edit_invalid_input", common.ErrInvalidArgument), common.ErrInvalidArgument
 	}
-	_, target, rel, err := guardedWorkspacePath(request.WorkspaceWorkingDirectory, relPath, true)
+	_, target, rel, err := guardedWorkspacePath(request.WorkspaceDeliverableDirectory, relPath, true)
 	if err != nil {
 		return fileErrorResult("file_edit_invalid_path", err), err
 	}
@@ -294,14 +294,14 @@ func (a *RuntimeAdapter) edit(request runtimemodel.StepExecutionRequest) (runtim
 	}}, nil
 }
 
-func guardedWorkspacePath(workingDirectory string, inputPath string, requireExisting bool) (string, string, string, error) {
-	if strings.TrimSpace(workingDirectory) == "" || strings.TrimSpace(inputPath) == "" {
+func guardedWorkspacePath(deliverableDirectory string, inputPath string, requireExisting bool) (string, string, string, error) {
+	if strings.TrimSpace(deliverableDirectory) == "" || strings.TrimSpace(inputPath) == "" {
 		return "", "", "", common.ErrInvalidArgument
 	}
 	if filepath.IsAbs(inputPath) {
 		return "", "", "", common.ErrInvalidArgument
 	}
-	root, err := filepath.Abs(workingDirectory)
+	root, err := filepath.Abs(deliverableDirectory)
 	if err != nil {
 		return "", "", "", err
 	}

@@ -631,8 +631,61 @@ Stage input bundle 必须遵守：
 - 重构 output contract validator。
 - 将软件开发相关 prompt / tool 选择迁移到 profile 层。
 - 清理旧 memory recall 中的低价值 runtime 流水。
+- 替换旧的 runtime file-backend 文件命名与 raw payload ref 形态。
 
 但即使不考虑兼容，也不得破坏核心中立原则。
+
+## Runtime Storage Naming Contract
+
+运行态存储命名属于 core runtime 可观测性合同。WorkOrch 的长流程执行需要人、LLM、read-model 和恢复逻辑都能从目录结构中快速定位 workspace / run / stage / loop / step / artifact，因此 file backend 不得把逻辑 ID 的完整字符串默认编码成不可读文件名。
+
+### 主命名规则
+
+- runtime 逻辑 ID 必须优先保持结构化、可读、稳定，例如 `run-xxx/graph-002/007-run-go-test`。
+- file backend 必须把逻辑 ID 按 `/` 展开为可读层级路径，而不是把整个 ID 做 base64、hash 或随机 token。
+- 每个路径 segment 只允许保留文件系统安全字符，例如 `[A-Za-z0-9._-]`；其他字符应做中立清洗，例如替换为 `-`。
+- 空 segment、`.`、`..`、路径穿越和绝对路径必须被拒绝或清洗为安全 segment。
+- 结构化 lineage 仍然是因果关系和恢复预算的权威来源；文件路径只用于定位、审计和排查，不得反向推断业务语义。
+
+推荐落盘形态：
+
+```text
+runs/<run-id>/
+  steps/<run-id>/graph-002/007-run-go-test/metadata.json
+  tool-calls/<run-id>/graph-002/007-run-go-test/runtime-execute/output.json
+  llm-calls/<run-id>/repair-001/request.json
+  checkpoints/<run-id>/checkpoint/0007.json
+  results/<run-id>/result/dod-assessment.json
+```
+
+### 禁止项
+
+以下形态不得作为默认 runtime 文件名或 raw payload ref：
+
+```text
+steps/cnVuLTMyNDk1MjE0OTUyNGQ2NDgvZ3JhcGgtMDAy/metadata.json
+checkpoints/cnVuLTMyNDk1MjE0OTUyNGQ2NDgvY2hlY2twb2ludC8x.json
+llm-calls/3f8a9c1b/request.json
+```
+
+base64/hash 只允许作为极端 fallback，例如单个 segment 超过文件系统限制、清洗后发生冲突且无法通过结构化顺序消解。即便 fallback，也必须带可读前缀和短 hash 后缀，例如：
+
+```text
+graph-002-007-run-go-test--h-abc123
+```
+
+不得使用纯 base64 或纯 hash 作为主路径。
+
+### Raw Payload Ref
+
+`workorch://` raw payload ref 必须使用同一可读层级规则：
+
+```text
+workorch://workspaces/<workspace-id>/runs/<run-id>/llm-calls/<run-id>/repair-001/response.json
+workorch://workspaces/<workspace-id>/runs/<run-id>/steps/<run-id>/graph-002/007-run-go-test/output.json
+```
+
+raw ref 是稳定的逻辑定位，不是本地绝对路径。API 实现必须继续校验 workspace、run、collection、item path 和文件名白名单，防止路径穿越。
 
 ## 核对清单
 
@@ -648,3 +701,4 @@ Stage input bundle 必须遵守：
 8. terminal run 是否有符合状态的 result。
 9. profile-specific 检查是否位于 profile 层。
 10. 验证脚本是否能区分 core contract 与 profile contract。
+11. runtime 文件名和 raw payload ref 是否保持可读层级路径，且没有默认 base64/hash 主命名。

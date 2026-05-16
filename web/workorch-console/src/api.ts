@@ -1,4 +1,4 @@
-import type { Approval, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Run, RunObservability, RunSnapshot, ServiceConfiguration, ServiceStatus, Skill, Soul, TaskDecomposition, TaskProgress, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, Decision, DecisionPage, DoD, EventRecord, Goal, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -199,6 +199,104 @@ export const workorchApi = {
     const body = await request<{ snapshot: RunSnapshot }>(`${apiBase}/runs/${encodeURIComponent(runId)}/snapshot`);
     return body.snapshot;
   },
+  listRunSteps: async (runId: string, query?: { cursorAfterId?: string; limit?: number }) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value));
+      }
+    }
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    const body = await request<{ steps?: StepPage['steps']; page: StepPage }>(`${apiBase}/runs/${encodeURIComponent(runId)}/steps${suffix}`);
+    return {
+      ...body.page,
+      steps: body.steps ?? body.page.steps ?? []
+    };
+  },
+  listRunToolCalls: async (runId: string, query?: { cursorAfterId?: string; limit?: number }) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value));
+      }
+    }
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    const body = await request<{ toolCalls?: ToolCallPage['toolCalls']; page: ToolCallPage }>(`${apiBase}/runs/${encodeURIComponent(runId)}/tool-calls${suffix}`);
+    return {
+      ...body.page,
+      toolCalls: body.toolCalls ?? body.page.toolCalls ?? []
+    };
+  },
+  listRunRuntimeCheckpoints: async (runId: string, query?: { cursorAfterId?: string; limit?: number }) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value));
+      }
+    }
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    const body = await request<{ runtimeCheckpoints?: RuntimeCheckpointPage['runtimeCheckpoints']; page: RuntimeCheckpointPage }>(`${apiBase}/runs/${encodeURIComponent(runId)}/runtime-checkpoints${suffix}`);
+    return {
+      ...body.page,
+      runtimeCheckpoints: body.runtimeCheckpoints ?? body.page.runtimeCheckpoints ?? []
+    };
+  },
+  listRunResults: async (runId: string, query?: { cursorAfterId?: string; limit?: number }) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value));
+      }
+    }
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    const body = await request<{ results?: ResultPage['results']; page: ResultPage }>(`${apiBase}/runs/${encodeURIComponent(runId)}/results${suffix}`);
+    return {
+      ...body.page,
+      results: body.results ?? body.page.results ?? []
+    };
+  },
+  listRunPatches: async (runId: string, query?: { cursorAfterId?: string; limit?: number }) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value));
+      }
+    }
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    const body = await request<{ patches?: PatchPage['patches']; page: PatchPage }>(`${apiBase}/runs/${encodeURIComponent(runId)}/patches${suffix}`);
+    return {
+      ...body.page,
+      patches: body.patches ?? body.page.patches ?? []
+    };
+  },
+  listRunValidationResults: async (runId: string, query?: { cursorAfterId?: string; limit?: number }) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value));
+      }
+    }
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    const body = await request<{ validationResults?: ValidationResultPage['validationResults']; page: ValidationResultPage }>(`${apiBase}/runs/${encodeURIComponent(runId)}/validation-results${suffix}`);
+    return {
+      ...body.page,
+      validationResults: body.validationResults ?? body.page.validationResults ?? []
+    };
+  },
+  listRunArtifacts: async (runId: string, query?: { cursorAfterId?: string; limit?: number }) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value));
+      }
+    }
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    const body = await request<{ artifacts?: ArtifactPage['artifacts']; page: ArtifactPage }>(`${apiBase}/runs/${encodeURIComponent(runId)}/artifacts${suffix}`);
+    return {
+      ...body.page,
+      artifacts: body.artifacts ?? body.page.artifacts ?? []
+    };
+  },
   readRunObservability: async (runId: string) => {
     const body = await request<{ observability: RunObservability }>(`${apiBase}/runs/${encodeURIComponent(runId)}/observability`);
     return body.observability;
@@ -212,6 +310,7 @@ export const workorchApi = {
     return body.memoryRecallTraces ?? [];
   },
   artifactContentURL: (uri: string) => `${apiBase}/artifacts/content?${new URLSearchParams({ uri }).toString()}`,
+  runtimePayloadURL: (ref: string) => `${apiBase}/runtime/payloads?${new URLSearchParams({ ref }).toString()}`,
   readRunTaskProgress: async (runId: string) => {
     const body = await request<{ taskProgress: TaskProgress }>(`${apiBase}/runs/${encodeURIComponent(runId)}/task-progress`);
     return body.taskProgress;
@@ -381,9 +480,49 @@ export const workorchApi = {
     const body = await request<{ memory: MemoryItem[] }>(`${apiBase}/memory?${search.toString()}`);
     return body.memory ?? [];
   },
+  listDecisionPage: async (query?: { workspaceId?: string; runId?: string; cursorAfterId?: string; limit?: number }) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value));
+      }
+    }
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    const body = await request<{ decisions?: DecisionPage['decisions']; page: DecisionPage }>(`${apiBase}/decisions${suffix}`);
+    return {
+      ...body.page,
+      decisions: body.decisions ?? body.page.decisions ?? []
+    };
+  },
   listDecisions: async () => {
-    const body = await request<{ decisions: Decision[] }>(`${apiBase}/decisions`);
+    const body = await workorchApi.listDecisionPage();
     return body.decisions ?? [];
+  },
+  readDecision: async (ticketId: string) => {
+    const body = await request<{ decision: Decision }>(`${apiBase}/decisions/${encodeURIComponent(ticketId)}`);
+    return body.decision;
+  },
+  listApprovals: async () => {
+    const body = await workorchApi.listApprovalPage();
+    return body.approvals ?? [];
+  },
+  listApprovalPage: async (query?: { workspaceId?: string; runId?: string; cursorAfterId?: string; limit?: number }) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value));
+      }
+    }
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    const body = await request<{ approvals?: ApprovalPage['approvals']; page: ApprovalPage }>(`${apiBase}/approvals${suffix}`);
+    return {
+      ...body.page,
+      approvals: body.approvals ?? body.page.approvals ?? []
+    };
+  },
+  readApproval: async (approvalId: string) => {
+    const body = await request<{ approval: Approval }>(`${apiBase}/approvals/${encodeURIComponent(approvalId)}`);
+    return body.approval;
   },
   resolveDecision: async (ticketId: string, resolutionType = 'provide_missing_info', resolutionPayload?: Record<string, unknown>) => {
     const body = await request<{ decision: Decision }>(`${apiBase}/decisions/${encodeURIComponent(ticketId)}/resolve`, {
@@ -401,10 +540,6 @@ export const workorchApi = {
   },
   rejectDecision: async (ticketId: string) => {
     return workorchApi.resolveDecision(ticketId, 'reject_current_path', { operator: 'console' });
-  },
-  listApprovals: async () => {
-    const body = await request<{ approvals: Approval[] }>(`${apiBase}/approvals`);
-    return body.approvals ?? [];
   },
   approveApproval: async (approvalId: string) => {
     const body = await request<{ approval: Approval }>(`${apiBase}/approvals/${encodeURIComponent(approvalId)}/approve`, { method: 'POST' });

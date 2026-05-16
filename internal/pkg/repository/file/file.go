@@ -1,6 +1,7 @@
 package file
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -83,6 +84,18 @@ type ArtifactRepository struct {
 type EventRecordRepository struct {
 	mu   sync.RWMutex
 	path string
+}
+
+const (
+	eventRecordPayloadInlineThreshold = 8 * 1024
+	eventRecordSegmentMaxBytes        = 8 * 1024 * 1024
+	eventRecordSegmentPrefix          = "events-"
+	eventRecordSegmentSuffix          = ".jsonl"
+)
+
+type eventRecordLogLine struct {
+	Record     eventstream.EventRecord `json:"record"`
+	PayloadRef string                  `json:"payloadRef,omitempty"`
 }
 
 type mapFileCacheEntry struct {
@@ -668,28 +681,25 @@ func (r *ResultRepository) Create(_ context.Context, item *resultmodel.Result) e
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.ResultID, resultmodel.Result](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	path := r.resultPath(item.ID)
+	if _, err := os.Stat(path); err == nil {
+		return common.ErrConflict
+	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if _, ok := items[item.ID]; ok {
-		return common.ErrConflict
-	}
-	items[item.ID] = *cloneResult(item)
-	return saveMap(r.path, items)
+	return writeJSONFileAtomic(path, cloneResult(item))
 }
 
 func (r *ResultRepository) Get(_ context.Context, id common.ResultID) (*resultmodel.Result, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ResultID, resultmodel.Result](r.path)
+	item, err := readJSONItemFile[resultmodel.Result](r.resultPath(id))
 	if err != nil {
 		return nil, err
-	}
-	item, ok := items[id]
-	if !ok {
-		return nil, common.ErrNotFound
 	}
 	return cloneResult(&item), nil
 }
@@ -698,47 +708,78 @@ func (r *ResultRepository) ListByWorkspace(_ context.Context, workspaceID common
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ResultID, resultmodel.Result](r.path)
-	if err != nil {
-		return nil, err
-	}
-	return listResults(items, func(item resultmodel.Result) bool {
+	return r.list(func(item resultmodel.Result) bool {
 		return item.WorkspaceID == workspaceID
-	}), nil
+	})
 }
 
 func (r *ResultRepository) ListByRun(_ context.Context, runID common.RunID) ([]*resultmodel.Result, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ResultID, resultmodel.Result](r.path)
-	if err != nil {
-		return nil, err
-	}
-	return listResults(items, func(item resultmodel.Result) bool {
+	return r.list(func(item resultmodel.Result) bool {
 		return item.RunID == runID
-	}), nil
+	})
 }
 
 func (r *ResultRepository) Update(_ context.Context, item *resultmodel.Result) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.ResultID, resultmodel.Result](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	path := r.resultPath(item.ID)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
 		return err
 	}
-	if _, ok := items[item.ID]; !ok {
-		return common.ErrNotFound
-	}
-	items[item.ID] = *cloneResult(item)
-	return saveMap(r.path, items)
+	return writeJSONFileAtomic(path, cloneResult(item))
 }
 
 func (r *ResultRepository) Delete(_ context.Context, id common.ResultID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return deleteMapItem[common.ResultID, resultmodel.Result](r.path, id)
+	path := r.resultPath(id)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return os.Remove(path)
+}
+
+func (r *ResultRepository) resultRoot() string {
+	return repositoryItemRoot(r.path, "result.json", "results")
+}
+
+func (r *ResultRepository) resultPath(id common.ResultID) string {
+	return repositoryItemPath(r.resultRoot(), string(id))
+}
+
+func (r *ResultRepository) list(matches func(resultmodel.Result) bool) ([]*resultmodel.Result, error) {
+	paths, err := repositoryItemPaths(r.resultRoot())
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*resultmodel.Result, 0, len(paths))
+	for _, path := range paths {
+		item, err := readJSONItemFile[resultmodel.Result](path)
+		if err != nil {
+			return nil, err
+		}
+		if matches == nil || matches(item) {
+			ret = append(ret, cloneResult(&item))
+		}
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		return string(ret[i].ID) < string(ret[j].ID)
+	})
+	if len(ret) == 0 {
+		return nil, nil
+	}
+	return ret, nil
 }
 
 func NewArtifactRepository(path string) *ArtifactRepository {
@@ -749,28 +790,25 @@ func (r *ArtifactRepository) Create(_ context.Context, item *resultmodel.Artifac
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.ArtifactID, resultmodel.Artifact](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	path := r.artifactPath(item.ID)
+	if _, err := os.Stat(path); err == nil {
+		return common.ErrConflict
+	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if _, ok := items[item.ID]; ok {
-		return common.ErrConflict
-	}
-	items[item.ID] = *cloneArtifact(item)
-	return saveMap(r.path, items)
+	return writeJSONFileAtomic(path, cloneArtifact(item))
 }
 
 func (r *ArtifactRepository) Get(_ context.Context, id common.ArtifactID) (*resultmodel.Artifact, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ArtifactID, resultmodel.Artifact](r.path)
+	item, err := readJSONItemFile[resultmodel.Artifact](r.artifactPath(id))
 	if err != nil {
 		return nil, err
-	}
-	item, ok := items[id]
-	if !ok {
-		return nil, common.ErrNotFound
 	}
 	return cloneArtifact(&item), nil
 }
@@ -779,60 +817,87 @@ func (r *ArtifactRepository) ListByWorkspace(_ context.Context, workspaceID comm
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ArtifactID, resultmodel.Artifact](r.path)
-	if err != nil {
-		return nil, err
-	}
-	return listArtifacts(items, func(item resultmodel.Artifact) bool {
+	return r.list(func(item resultmodel.Artifact) bool {
 		return item.WorkspaceID == workspaceID
-	}), nil
+	})
 }
 
 func (r *ArtifactRepository) ListByRun(_ context.Context, runID common.RunID) ([]*resultmodel.Artifact, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ArtifactID, resultmodel.Artifact](r.path)
-	if err != nil {
-		return nil, err
-	}
-	return listArtifacts(items, func(item resultmodel.Artifact) bool {
+	return r.list(func(item resultmodel.Artifact) bool {
 		return item.RunID == runID
-	}), nil
+	})
 }
 
 func (r *ArtifactRepository) ListByResult(_ context.Context, resultID common.ResultID) ([]*resultmodel.Artifact, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ArtifactID, resultmodel.Artifact](r.path)
-	if err != nil {
-		return nil, err
-	}
-	return listArtifacts(items, func(item resultmodel.Artifact) bool {
+	return r.list(func(item resultmodel.Artifact) bool {
 		return item.ResultID == resultID
-	}), nil
+	})
 }
 
 func (r *ArtifactRepository) Update(_ context.Context, item *resultmodel.Artifact) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.ArtifactID, resultmodel.Artifact](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	path := r.artifactPath(item.ID)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
 		return err
 	}
-	if _, ok := items[item.ID]; !ok {
-		return common.ErrNotFound
-	}
-	items[item.ID] = *cloneArtifact(item)
-	return saveMap(r.path, items)
+	return writeJSONFileAtomic(path, cloneArtifact(item))
 }
 
 func (r *ArtifactRepository) Delete(_ context.Context, id common.ArtifactID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return deleteMapItem[common.ArtifactID, resultmodel.Artifact](r.path, id)
+	path := r.artifactPath(id)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return os.Remove(path)
+}
+
+func (r *ArtifactRepository) artifactRoot() string {
+	return repositoryItemRoot(r.path, "artifact.json", "artifacts")
+}
+
+func (r *ArtifactRepository) artifactPath(id common.ArtifactID) string {
+	return repositoryItemPath(r.artifactRoot(), string(id))
+}
+
+func (r *ArtifactRepository) list(matches func(resultmodel.Artifact) bool) ([]*resultmodel.Artifact, error) {
+	paths, err := repositoryItemPaths(r.artifactRoot())
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*resultmodel.Artifact, 0, len(paths))
+	for _, path := range paths {
+		item, err := readJSONItemFile[resultmodel.Artifact](path)
+		if err != nil {
+			return nil, err
+		}
+		if matches == nil || matches(item) {
+			ret = append(ret, cloneArtifact(&item))
+		}
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		return string(ret[i].ID) < string(ret[j].ID)
+	})
+	if len(ret) == 0 {
+		return nil, nil
+	}
+	return ret, nil
 }
 
 func NewEventRecordRepository(path string) *EventRecordRepository {
@@ -843,38 +908,76 @@ func (r *EventRecordRepository) Append(_ context.Context, item *eventstream.Even
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.EventRecordID, eventstream.EventRecord](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	root := r.eventLogRoot()
+	idPath := filepath.Join(root, "ids", safeEventRecordFileName(string(item.ID))+".marker")
+	if err := os.MkdirAll(filepath.Dir(idPath), 0o755); err != nil {
 		return err
 	}
-	if _, ok := items[item.ID]; ok {
-		return common.ErrConflict
+	marker, err := os.OpenFile(idPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return common.ErrConflict
+		}
+		return err
 	}
-	items[item.ID] = *cloneEventRecord(item)
-	return saveMap(r.path, items)
+	if closeErr := marker.Close(); closeErr != nil {
+		return closeErr
+	}
+	if err := r.removeDeletedMarker(item.ID); err != nil {
+		_ = os.Remove(idPath)
+		return err
+	}
+	if err := r.appendLogLine(root, item); err != nil {
+		_ = os.Remove(idPath)
+		return err
+	}
+	return nil
 }
 
 func (r *EventRecordRepository) Get(_ context.Context, id common.EventRecordID) (*eventstream.EventRecord, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.EventRecordID, eventstream.EventRecord](r.path)
-	if err != nil {
-		return nil, err
+	if id == "" {
+		return nil, common.ErrInvalidArgument
 	}
-	item, ok := items[id]
-	if !ok {
+	if r.isEventDeleted(id) {
 		return nil, common.ErrNotFound
 	}
-	return cloneEventRecord(&item), nil
+	var found *eventstream.EventRecord
+	if err := r.scanEventRecords(func(item *eventstream.EventRecord) error {
+		if item.ID == id {
+			found = cloneEventRecord(item)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if found == nil {
+		return nil, common.ErrNotFound
+	}
+	return found, nil
 }
 
 func (r *EventRecordRepository) List(_ context.Context, query repository.EventRecordQuery) ([]*eventstream.EventRecord, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.EventRecordID, eventstream.EventRecord](r.path)
+	deleted, err := r.deletedEventIDs()
 	if err != nil {
+		return nil, err
+	}
+	items := map[common.EventRecordID]eventstream.EventRecord{}
+	if err := r.scanEventRecords(func(item *eventstream.EventRecord) error {
+		if _, ok := deleted[item.ID]; ok {
+			return nil
+		}
+		items[item.ID] = *cloneEventRecord(item)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	return listEventRecords(items, query), nil
@@ -883,7 +986,387 @@ func (r *EventRecordRepository) List(_ context.Context, query repository.EventRe
 func (r *EventRecordRepository) Delete(_ context.Context, id common.EventRecordID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return deleteMapItem[common.EventRecordID, eventstream.EventRecord](r.path, id)
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	exists, err := r.eventExists(id)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return common.ErrNotFound
+	}
+	path := r.deletedMarkerPath(id)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if err := writeFileAtomic(path, []byte(string(id)+"\n"), 0o644); err != nil {
+		return err
+	}
+	_ = os.Remove(filepath.Join(r.eventLogRoot(), "ids", safeEventRecordFileName(string(id))+".marker"))
+	return nil
+}
+
+func (r *EventRecordRepository) eventLogRoot() string {
+	path := filepath.Clean(strings.TrimSpace(r.path))
+	if path == "" || path == "." {
+		return "event_record"
+	}
+	if strings.EqualFold(filepath.Ext(path), ".json") {
+		return strings.TrimSuffix(path, filepath.Ext(path))
+	}
+	return path
+}
+
+func (r *EventRecordRepository) eventSegmentDir() string {
+	return filepath.Join(r.eventLogRoot(), "events")
+}
+
+func (r *EventRecordRepository) eventPayloadDir() string {
+	return filepath.Join(r.eventLogRoot(), "payloads")
+}
+
+func (r *EventRecordRepository) deletedMarkerPath(id common.EventRecordID) string {
+	return filepath.Join(r.eventLogRoot(), "deleted", safeEventRecordFileName(string(id))+".marker")
+}
+
+func (r *EventRecordRepository) removeDeletedMarker(id common.EventRecordID) error {
+	if err := os.Remove(r.deletedMarkerPath(id)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func (r *EventRecordRepository) isEventDeleted(id common.EventRecordID) bool {
+	_, err := os.Stat(r.deletedMarkerPath(id))
+	return err == nil
+}
+
+func (r *EventRecordRepository) deletedEventIDs() (map[common.EventRecordID]struct{}, error) {
+	ret := map[common.EventRecordID]struct{}{}
+	dir := filepath.Join(r.eventLogRoot(), "deleted")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ret, nil
+		}
+		return nil, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return nil, err
+		}
+		id := common.EventRecordID(strings.TrimSpace(string(data)))
+		if id != "" {
+			ret[id] = struct{}{}
+		}
+	}
+	return ret, nil
+}
+
+func (r *EventRecordRepository) eventExists(id common.EventRecordID) (bool, error) {
+	if r.isEventDeleted(id) {
+		return false, nil
+	}
+	found := false
+	if err := r.scanEventRecords(func(item *eventstream.EventRecord) error {
+		if item.ID == id {
+			found = true
+		}
+		return nil
+	}); err != nil {
+		return false, err
+	}
+	return found, nil
+}
+
+func (r *EventRecordRepository) appendLogLine(root string, item *eventstream.EventRecord) error {
+	line, err := r.eventRecordLogLine(item)
+	if err != nil {
+		return err
+	}
+	data, err := json.Marshal(line)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	segment, err := r.activeEventSegment(len(data))
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(segment, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+func (r *EventRecordRepository) eventRecordLogLine(item *eventstream.EventRecord) (eventRecordLogLine, error) {
+	record := cloneEventRecord(item)
+	line := eventRecordLogLine{Record: *record}
+	if len(record.Payload) == 0 {
+		return line, nil
+	}
+	payload, err := json.Marshal(record.Payload)
+	if err != nil {
+		return eventRecordLogLine{}, err
+	}
+	if len(payload) <= eventRecordPayloadInlineThreshold {
+		return line, nil
+	}
+	payloadRef := filepath.ToSlash(filepath.Join("payloads", safeEventRecordFileName(string(record.ID))+".json"))
+	payloadPath := filepath.Join(r.eventLogRoot(), filepath.FromSlash(payloadRef))
+	if err := writeFileAtomic(payloadPath, payload, 0o644); err != nil {
+		return eventRecordLogLine{}, err
+	}
+	line.Record.Payload = nil
+	line.PayloadRef = payloadRef
+	return line, nil
+}
+
+func (r *EventRecordRepository) activeEventSegment(nextBytes int) (string, error) {
+	dir := r.eventSegmentDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, eventRecordSegmentPrefix+"*"+eventRecordSegmentSuffix))
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(matches)
+	if len(matches) == 0 {
+		return filepath.Join(dir, eventRecordSegmentName(1)), nil
+	}
+	current := matches[len(matches)-1]
+	info, err := os.Stat(current)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	if err == nil && info.Size()+int64(nextBytes) <= eventRecordSegmentMaxBytes {
+		return current, nil
+	}
+	return filepath.Join(dir, eventRecordSegmentName(len(matches)+1)), nil
+}
+
+func eventRecordSegmentName(index int) string {
+	return fmt.Sprintf("%s%06d%s", eventRecordSegmentPrefix, index, eventRecordSegmentSuffix)
+}
+
+func (r *EventRecordRepository) scanEventRecords(fn func(*eventstream.EventRecord) error) error {
+	if fn == nil {
+		return common.ErrInvalidArgument
+	}
+	matches, err := filepath.Glob(filepath.Join(r.eventSegmentDir(), eventRecordSegmentPrefix+"*"+eventRecordSegmentSuffix))
+	if err != nil {
+		return err
+	}
+	sort.Strings(matches)
+	for _, path := range matches {
+		if err := r.scanEventRecordSegment(path, fn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *EventRecordRepository) scanEventRecordSegment(path string, fn func(*eventstream.EventRecord) error) error {
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var recordLine eventRecordLogLine
+		if err := json.Unmarshal([]byte(line), &recordLine); err != nil {
+			return err
+		}
+		item := cloneEventRecord(&recordLine.Record)
+		if recordLine.PayloadRef != "" {
+			payload, err := r.readEventPayload(recordLine.PayloadRef)
+			if err != nil {
+				return err
+			}
+			item.Payload = payload
+		}
+		if err := fn(item); err != nil {
+			return err
+		}
+	}
+	return scanner.Err()
+}
+
+func (r *EventRecordRepository) readEventPayload(ref string) (map[string]any, error) {
+	clean := filepath.Clean(filepath.FromSlash(strings.TrimSpace(ref)))
+	if clean == "." || clean == "" || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
+		return nil, common.ErrInvalidArgument
+	}
+	data, err := os.ReadFile(filepath.Join(r.eventLogRoot(), clean))
+	if err != nil {
+		return nil, err
+	}
+	payload := map[string]any{}
+	if len(data) == 0 {
+		return payload, nil
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+func safeEventRecordFileName(value string) string {
+	return readableRepositoryItemName(value)
+}
+
+func safeRepositoryItemFileName(value string) string {
+	return readableRepositoryItemName(value)
+}
+
+func readableRepositoryItemName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "empty"
+	}
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if name := safeRepositoryPathSegment(part); name != "" {
+			cleaned = append(cleaned, name)
+		}
+	}
+	if len(cleaned) == 0 {
+		return "empty"
+	}
+	return filepath.Join(cleaned...)
+}
+
+func safeRepositoryPathSegment(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "." || value == ".." {
+		return ""
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		keep := r >= 'a' && r <= 'z' ||
+			r >= 'A' && r <= 'Z' ||
+			r >= '0' && r <= '9' ||
+			r == '-' || r == '_' || r == '.'
+		if keep {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	ret := strings.Trim(b.String(), ".-")
+	if ret == "" || ret == "." || ret == ".." {
+		return "item"
+	}
+	return ret
+}
+
+func repositoryItemRoot(path string, legacyFileName string, directoryName string) string {
+	cleaned := filepath.Clean(strings.TrimSpace(path))
+	if strings.EqualFold(filepath.Base(cleaned), legacyFileName) {
+		return filepath.Join(filepath.Dir(cleaned), directoryName)
+	}
+	if strings.EqualFold(filepath.Ext(cleaned), ".json") {
+		return strings.TrimSuffix(cleaned, filepath.Ext(cleaned))
+	}
+	return cleaned
+}
+
+func repositoryItemPath(root string, id string) string {
+	return filepath.Join(root, safeRepositoryItemFileName(id)+".json")
+}
+
+func repositoryItemPaths(root string) ([]string, error) {
+	return repositoryFiles(root, "json")
+}
+
+func repositoryMetadataDirs(root string) ([]string, error) {
+	paths, err := repositoryFiles(root, "metadata.json")
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]string, 0, len(paths))
+	for _, path := range paths {
+		ret = append(ret, filepath.Dir(path))
+	}
+	return ret, nil
+}
+
+func repositoryFiles(root string, match string) ([]string, error) {
+	root = filepath.Clean(strings.TrimSpace(root))
+	if root == "" || root == "." {
+		return nil, nil
+	}
+	var ret []string
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		switch match {
+		case "json":
+			if strings.EqualFold(filepath.Ext(entry.Name()), ".json") {
+				ret = append(ret, path)
+			}
+		default:
+			if strings.EqualFold(entry.Name(), match) {
+				ret = append(ret, path)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	sort.Strings(ret)
+	return ret, nil
+}
+
+func readJSONItemFile[T any](path string) (T, error) {
+	var item T
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return item, common.ErrNotFound
+		}
+		return item, err
+	}
+	if err := json.Unmarshal(data, &item); err != nil {
+		return item, err
+	}
+	return item, nil
 }
 
 func NewWorkspaceRepository(path string) *WorkspaceRepository {
@@ -1349,46 +1832,42 @@ func (r *StepRepository) Create(_ context.Context, item *run.Step) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.StepID, run.Step](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	dir := r.stepDir(item.ID)
+	if _, err := os.Stat(filepath.Join(dir, "metadata.json")); err == nil {
+		return common.ErrConflict
+	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if _, ok := items[item.ID]; ok {
-		return common.ErrConflict
-	}
-	items[item.ID] = *cloneStep(item)
-	return saveMap(r.path, items)
+	return r.saveStep(item)
 }
 
 func (r *StepRepository) Get(_ context.Context, id common.StepID) (*run.Step, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.StepID, run.Step](r.path)
-	if err != nil {
-		return nil, err
-	}
-	item, ok := items[id]
-	if !ok {
-		return nil, common.ErrNotFound
-	}
-	return cloneStep(&item), nil
+	return r.loadStep(id)
 }
 
 func (r *StepRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.Step, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.StepID, run.Step](r.path)
+	dirs, err := repositoryMetadataDirs(r.stepRoot())
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]*run.Step, 0, len(items))
-	for _, item := range items {
-		if item.RunID != runID {
-			continue
+	ret := make([]*run.Step, 0, len(dirs))
+	for _, dir := range dirs {
+		item, err := r.loadStepFromDir(dir)
+		if err != nil {
+			return nil, err
 		}
-		ret = append(ret, cloneStep(&item))
+		if item.RunID == runID {
+			ret = append(ret, item)
+		}
 	}
 	sort.Slice(ret, func(i, j int) bool {
 		return string(ret[i].ID) < string(ret[j].ID)
@@ -1403,21 +1882,91 @@ func (r *StepRepository) Update(_ context.Context, item *run.Step) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.StepID, run.Step](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if _, err := os.Stat(filepath.Join(r.stepDir(item.ID), "metadata.json")); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
 		return err
 	}
-	if _, ok := items[item.ID]; !ok {
-		return common.ErrNotFound
-	}
-	items[item.ID] = *cloneStep(item)
-	return saveMap(r.path, items)
+	return r.saveStep(item)
 }
 
 func (r *StepRepository) Delete(_ context.Context, id common.StepID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return deleteMapItem[common.StepID, run.Step](r.path, id)
+	dir := r.stepDir(id)
+	if _, err := os.Stat(filepath.Join(dir, "metadata.json")); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return os.RemoveAll(dir)
+}
+
+func (r *StepRepository) stepRoot() string {
+	path := filepath.Clean(strings.TrimSpace(r.path))
+	if strings.EqualFold(filepath.Base(path), "step.json") {
+		return filepath.Join(filepath.Dir(path), "steps")
+	}
+	if strings.EqualFold(filepath.Ext(path), ".json") {
+		return strings.TrimSuffix(path, filepath.Ext(path))
+	}
+	return path
+}
+
+func (r *StepRepository) stepDir(id common.StepID) string {
+	return filepath.Join(r.stepRoot(), safeRepositoryItemFileName(string(id)))
+}
+
+func (r *StepRepository) saveStep(item *run.Step) error {
+	dir := r.stepDir(item.ID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	metadata := *cloneStep(item)
+	metadata.Input = nil
+	metadata.Output = nil
+	if err := writeJSONFileAtomic(filepath.Join(dir, "metadata.json"), metadata); err != nil {
+		return err
+	}
+	if err := writeOptionalMapFile(filepath.Join(dir, "input.json"), item.Input); err != nil {
+		return err
+	}
+	return writeOptionalMapFile(filepath.Join(dir, "output.json"), item.Output)
+}
+
+func (r *StepRepository) loadStep(id common.StepID) (*run.Step, error) {
+	if id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	return r.loadStepFromDir(r.stepDir(id))
+}
+
+func (r *StepRepository) loadStepFromDir(dir string) (*run.Step, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, common.ErrNotFound
+		}
+		return nil, err
+	}
+	var item run.Step
+	if err := json.Unmarshal(data, &item); err != nil {
+		return nil, err
+	}
+	input, err := readOptionalMapFile(filepath.Join(dir, "input.json"))
+	if err != nil {
+		return nil, err
+	}
+	output, err := readOptionalMapFile(filepath.Join(dir, "output.json"))
+	if err != nil {
+		return nil, err
+	}
+	item.Input = input
+	item.Output = output
+	return cloneStep(&item), nil
 }
 
 type ToolCallRepository struct {
@@ -1433,46 +1982,42 @@ func (r *ToolCallRepository) Create(_ context.Context, item *run.ToolCall) error
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.ToolCallID, run.ToolCall](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	dir := r.toolCallDir(item.ID)
+	if _, err := os.Stat(filepath.Join(dir, "metadata.json")); err == nil {
+		return common.ErrConflict
+	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if _, ok := items[item.ID]; ok {
-		return common.ErrConflict
-	}
-	items[item.ID] = *cloneToolCall(item)
-	return saveMap(r.path, items)
+	return r.saveToolCall(item)
 }
 
 func (r *ToolCallRepository) Get(_ context.Context, id common.ToolCallID) (*run.ToolCall, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ToolCallID, run.ToolCall](r.path)
-	if err != nil {
-		return nil, err
-	}
-	item, ok := items[id]
-	if !ok {
-		return nil, common.ErrNotFound
-	}
-	return cloneToolCall(&item), nil
+	return r.loadToolCall(id)
 }
 
 func (r *ToolCallRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.ToolCall, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ToolCallID, run.ToolCall](r.path)
+	dirs, err := repositoryMetadataDirs(r.toolCallRoot())
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]*run.ToolCall, 0, len(items))
-	for _, item := range items {
-		if item.RunID != runID {
-			continue
+	ret := make([]*run.ToolCall, 0, len(dirs))
+	for _, dir := range dirs {
+		item, err := r.loadToolCallFromDir(dir)
+		if err != nil {
+			return nil, err
 		}
-		ret = append(ret, cloneToolCall(&item))
+		if item.RunID == runID {
+			ret = append(ret, item)
+		}
 	}
 	sort.Slice(ret, func(i, j int) bool {
 		return string(ret[i].ID) < string(ret[j].ID)
@@ -1487,16 +2032,19 @@ func (r *ToolCallRepository) ListByStep(_ context.Context, stepID common.StepID)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ToolCallID, run.ToolCall](r.path)
+	dirs, err := repositoryMetadataDirs(r.toolCallRoot())
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]*run.ToolCall, 0, len(items))
-	for _, item := range items {
-		if item.StepID != stepID {
-			continue
+	ret := make([]*run.ToolCall, 0, len(dirs))
+	for _, dir := range dirs {
+		item, err := r.loadToolCallFromDir(dir)
+		if err != nil {
+			return nil, err
 		}
-		ret = append(ret, cloneToolCall(&item))
+		if item.StepID == stepID {
+			ret = append(ret, item)
+		}
 	}
 	sort.Slice(ret, func(i, j int) bool {
 		return string(ret[i].ID) < string(ret[j].ID)
@@ -1511,21 +2059,91 @@ func (r *ToolCallRepository) Update(_ context.Context, item *run.ToolCall) error
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.ToolCallID, run.ToolCall](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if _, err := os.Stat(filepath.Join(r.toolCallDir(item.ID), "metadata.json")); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
 		return err
 	}
-	if _, ok := items[item.ID]; !ok {
-		return common.ErrNotFound
-	}
-	items[item.ID] = *cloneToolCall(item)
-	return saveMap(r.path, items)
+	return r.saveToolCall(item)
 }
 
 func (r *ToolCallRepository) Delete(_ context.Context, id common.ToolCallID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return deleteMapItem[common.ToolCallID, run.ToolCall](r.path, id)
+	dir := r.toolCallDir(id)
+	if _, err := os.Stat(filepath.Join(dir, "metadata.json")); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return os.RemoveAll(dir)
+}
+
+func (r *ToolCallRepository) toolCallRoot() string {
+	path := filepath.Clean(strings.TrimSpace(r.path))
+	if strings.EqualFold(filepath.Base(path), "tool_call.json") {
+		return filepath.Join(filepath.Dir(path), "tool-calls")
+	}
+	if strings.EqualFold(filepath.Ext(path), ".json") {
+		return strings.TrimSuffix(path, filepath.Ext(path))
+	}
+	return path
+}
+
+func (r *ToolCallRepository) toolCallDir(id common.ToolCallID) string {
+	return filepath.Join(r.toolCallRoot(), safeRepositoryItemFileName(string(id)))
+}
+
+func (r *ToolCallRepository) saveToolCall(item *run.ToolCall) error {
+	dir := r.toolCallDir(item.ID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	metadata := *cloneToolCall(item)
+	metadata.Arguments = nil
+	metadata.Output = nil
+	if err := writeJSONFileAtomic(filepath.Join(dir, "metadata.json"), metadata); err != nil {
+		return err
+	}
+	if err := writeOptionalMapFile(filepath.Join(dir, "arguments.json"), item.Arguments); err != nil {
+		return err
+	}
+	return writeOptionalMapFile(filepath.Join(dir, "output.json"), item.Output)
+}
+
+func (r *ToolCallRepository) loadToolCall(id common.ToolCallID) (*run.ToolCall, error) {
+	if id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	return r.loadToolCallFromDir(r.toolCallDir(id))
+}
+
+func (r *ToolCallRepository) loadToolCallFromDir(dir string) (*run.ToolCall, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, common.ErrNotFound
+		}
+		return nil, err
+	}
+	var item run.ToolCall
+	if err := json.Unmarshal(data, &item); err != nil {
+		return nil, err
+	}
+	arguments, err := readOptionalMapFile(filepath.Join(dir, "arguments.json"))
+	if err != nil {
+		return nil, err
+	}
+	output, err := readOptionalMapFile(filepath.Join(dir, "output.json"))
+	if err != nil {
+		return nil, err
+	}
+	item.Arguments = arguments
+	item.Output = output
+	return cloneToolCall(&item), nil
 }
 
 type PatchRepository struct {
@@ -1541,28 +2159,25 @@ func (r *PatchRepository) Create(_ context.Context, item *run.Patch) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.PatchID, run.Patch](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	path := r.patchPath(item.ID)
+	if _, err := os.Stat(path); err == nil {
+		return common.ErrConflict
+	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if _, ok := items[item.ID]; ok {
-		return common.ErrConflict
-	}
-	items[item.ID] = *clonePatch(item)
-	return saveMap(r.path, items)
+	return writeJSONFileAtomic(path, clonePatch(item))
 }
 
 func (r *PatchRepository) Get(_ context.Context, id common.PatchID) (*run.Patch, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.PatchID, run.Patch](r.path)
+	item, err := readJSONItemFile[run.Patch](r.patchPath(id))
 	if err != nil {
 		return nil, err
-	}
-	item, ok := items[id]
-	if !ok {
-		return nil, common.ErrNotFound
 	}
 	return clonePatch(&item), nil
 }
@@ -1571,40 +2186,66 @@ func (r *PatchRepository) ListByRun(_ context.Context, runID common.RunID) ([]*r
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.PatchID, run.Patch](r.path)
-	if err != nil {
-		return nil, err
-	}
-	ret := make([]*run.Patch, 0, len(items))
-	for _, item := range items {
-		if item.RunID != runID {
-			continue
-		}
-		ret = append(ret, clonePatch(&item))
-	}
-	sort.Slice(ret, func(i, j int) bool {
-		return string(ret[i].ID) < string(ret[j].ID)
-	})
-	if len(ret) == 0 {
-		return nil, nil
-	}
-	return ret, nil
+	return r.list(func(item run.Patch) bool { return item.RunID == runID })
 }
 
 func (r *PatchRepository) ListByStep(_ context.Context, stepID common.StepID) ([]*run.Patch, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.PatchID, run.Patch](r.path)
+	return r.list(func(item run.Patch) bool { return item.StepID == stepID })
+}
+
+func (r *PatchRepository) Update(_ context.Context, item *run.Patch) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	path := r.patchPath(item.ID)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return writeJSONFileAtomic(path, clonePatch(item))
+}
+
+func (r *PatchRepository) Delete(_ context.Context, id common.PatchID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	path := r.patchPath(id)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return os.Remove(path)
+}
+
+func (r *PatchRepository) patchRoot() string {
+	return repositoryItemRoot(r.path, "patch.json", "patches")
+}
+
+func (r *PatchRepository) patchPath(id common.PatchID) string {
+	return repositoryItemPath(r.patchRoot(), string(id))
+}
+
+func (r *PatchRepository) list(matches func(run.Patch) bool) ([]*run.Patch, error) {
+	paths, err := repositoryItemPaths(r.patchRoot())
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]*run.Patch, 0, len(items))
-	for _, item := range items {
-		if item.StepID != stepID {
-			continue
+	ret := make([]*run.Patch, 0, len(paths))
+	for _, path := range paths {
+		item, err := readJSONItemFile[run.Patch](path)
+		if err != nil {
+			return nil, err
 		}
-		ret = append(ret, clonePatch(&item))
+		if matches == nil || matches(item) {
+			ret = append(ret, clonePatch(&item))
+		}
 	}
 	sort.Slice(ret, func(i, j int) bool {
 		return string(ret[i].ID) < string(ret[j].ID)
@@ -1613,27 +2254,6 @@ func (r *PatchRepository) ListByStep(_ context.Context, stepID common.StepID) ([
 		return nil, nil
 	}
 	return ret, nil
-}
-
-func (r *PatchRepository) Update(_ context.Context, item *run.Patch) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	items, err := loadMap[common.PatchID, run.Patch](r.path)
-	if err != nil {
-		return err
-	}
-	if _, ok := items[item.ID]; !ok {
-		return common.ErrNotFound
-	}
-	items[item.ID] = *clonePatch(item)
-	return saveMap(r.path, items)
-}
-
-func (r *PatchRepository) Delete(_ context.Context, id common.PatchID) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return deleteMapItem[common.PatchID, run.Patch](r.path, id)
 }
 
 type ValidationResultRepository struct {
@@ -1649,28 +2269,25 @@ func (r *ValidationResultRepository) Create(_ context.Context, item *run.Validat
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.ValidationResultID, run.ValidationResult](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	path := r.validationResultPath(item.ID)
+	if _, err := os.Stat(path); err == nil {
+		return common.ErrConflict
+	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if _, ok := items[item.ID]; ok {
-		return common.ErrConflict
-	}
-	items[item.ID] = *cloneValidationResult(item)
-	return saveMap(r.path, items)
+	return writeJSONFileAtomic(path, cloneValidationResult(item))
 }
 
 func (r *ValidationResultRepository) Get(_ context.Context, id common.ValidationResultID) (*run.ValidationResult, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ValidationResultID, run.ValidationResult](r.path)
+	item, err := readJSONItemFile[run.ValidationResult](r.validationResultPath(id))
 	if err != nil {
 		return nil, err
-	}
-	item, ok := items[id]
-	if !ok {
-		return nil, common.ErrNotFound
 	}
 	return cloneValidationResult(&item), nil
 }
@@ -1679,40 +2296,66 @@ func (r *ValidationResultRepository) ListByRun(_ context.Context, runID common.R
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ValidationResultID, run.ValidationResult](r.path)
-	if err != nil {
-		return nil, err
-	}
-	ret := make([]*run.ValidationResult, 0, len(items))
-	for _, item := range items {
-		if item.RunID != runID {
-			continue
-		}
-		ret = append(ret, cloneValidationResult(&item))
-	}
-	sort.Slice(ret, func(i, j int) bool {
-		return string(ret[i].ID) < string(ret[j].ID)
-	})
-	if len(ret) == 0 {
-		return nil, nil
-	}
-	return ret, nil
+	return r.list(func(item run.ValidationResult) bool { return item.RunID == runID })
 }
 
 func (r *ValidationResultRepository) ListByStep(_ context.Context, stepID common.StepID) ([]*run.ValidationResult, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ValidationResultID, run.ValidationResult](r.path)
+	return r.list(func(item run.ValidationResult) bool { return item.StepID == stepID })
+}
+
+func (r *ValidationResultRepository) Update(_ context.Context, item *run.ValidationResult) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	path := r.validationResultPath(item.ID)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return writeJSONFileAtomic(path, cloneValidationResult(item))
+}
+
+func (r *ValidationResultRepository) Delete(_ context.Context, id common.ValidationResultID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	path := r.validationResultPath(id)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return os.Remove(path)
+}
+
+func (r *ValidationResultRepository) validationResultRoot() string {
+	return repositoryItemRoot(r.path, "validation_result.json", "validations")
+}
+
+func (r *ValidationResultRepository) validationResultPath(id common.ValidationResultID) string {
+	return repositoryItemPath(r.validationResultRoot(), string(id))
+}
+
+func (r *ValidationResultRepository) list(matches func(run.ValidationResult) bool) ([]*run.ValidationResult, error) {
+	paths, err := repositoryItemPaths(r.validationResultRoot())
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]*run.ValidationResult, 0, len(items))
-	for _, item := range items {
-		if item.StepID != stepID {
-			continue
+	ret := make([]*run.ValidationResult, 0, len(paths))
+	for _, path := range paths {
+		item, err := readJSONItemFile[run.ValidationResult](path)
+		if err != nil {
+			return nil, err
 		}
-		ret = append(ret, cloneValidationResult(&item))
+		if matches == nil || matches(item) {
+			ret = append(ret, cloneValidationResult(&item))
+		}
 	}
 	sort.Slice(ret, func(i, j int) bool {
 		return string(ret[i].ID) < string(ret[j].ID)
@@ -1721,27 +2364,6 @@ func (r *ValidationResultRepository) ListByStep(_ context.Context, stepID common
 		return nil, nil
 	}
 	return ret, nil
-}
-
-func (r *ValidationResultRepository) Update(_ context.Context, item *run.ValidationResult) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	items, err := loadMap[common.ValidationResultID, run.ValidationResult](r.path)
-	if err != nil {
-		return err
-	}
-	if _, ok := items[item.ID]; !ok {
-		return common.ErrNotFound
-	}
-	items[item.ID] = *cloneValidationResult(item)
-	return saveMap(r.path, items)
-}
-
-func (r *ValidationResultRepository) Delete(_ context.Context, id common.ValidationResultID) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return deleteMapItem[common.ValidationResultID, run.ValidationResult](r.path, id)
 }
 
 type RuntimeCheckpointRepository struct {
@@ -1757,28 +2379,25 @@ func (r *RuntimeCheckpointRepository) Create(_ context.Context, item *run.Runtim
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.CheckpointID, run.RuntimeCheckpoint](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	path := r.runtimeCheckpointPath(item.ID)
+	if _, err := os.Stat(path); err == nil {
+		return common.ErrConflict
+	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if _, ok := items[item.ID]; ok {
-		return common.ErrConflict
-	}
-	items[item.ID] = *cloneRuntimeCheckpoint(item)
-	return saveMap(r.path, items)
+	return writeJSONFileAtomic(path, cloneRuntimeCheckpoint(item))
 }
 
 func (r *RuntimeCheckpointRepository) Get(_ context.Context, id common.CheckpointID) (*run.RuntimeCheckpoint, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.CheckpointID, run.RuntimeCheckpoint](r.path)
+	item, err := readJSONItemFile[run.RuntimeCheckpoint](r.runtimeCheckpointPath(id))
 	if err != nil {
 		return nil, err
-	}
-	item, ok := items[id]
-	if !ok {
-		return nil, common.ErrNotFound
 	}
 	return cloneRuntimeCheckpoint(&item), nil
 }
@@ -1787,16 +2406,59 @@ func (r *RuntimeCheckpointRepository) ListByRun(_ context.Context, runID common.
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.CheckpointID, run.RuntimeCheckpoint](r.path)
+	return r.list(func(item run.RuntimeCheckpoint) bool { return item.RunID == runID })
+}
+
+func (r *RuntimeCheckpointRepository) Update(_ context.Context, item *run.RuntimeCheckpoint) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	path := r.runtimeCheckpointPath(item.ID)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return writeJSONFileAtomic(path, cloneRuntimeCheckpoint(item))
+}
+
+func (r *RuntimeCheckpointRepository) Delete(_ context.Context, id common.CheckpointID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	path := r.runtimeCheckpointPath(id)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return os.Remove(path)
+}
+
+func (r *RuntimeCheckpointRepository) runtimeCheckpointRoot() string {
+	return repositoryItemRoot(r.path, "runtime_checkpoint.json", "checkpoints")
+}
+
+func (r *RuntimeCheckpointRepository) runtimeCheckpointPath(id common.CheckpointID) string {
+	return repositoryItemPath(r.runtimeCheckpointRoot(), string(id))
+}
+
+func (r *RuntimeCheckpointRepository) list(matches func(run.RuntimeCheckpoint) bool) ([]*run.RuntimeCheckpoint, error) {
+	paths, err := repositoryItemPaths(r.runtimeCheckpointRoot())
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]*run.RuntimeCheckpoint, 0, len(items))
-	for _, item := range items {
-		if item.RunID != runID {
-			continue
+	ret := make([]*run.RuntimeCheckpoint, 0, len(paths))
+	for _, path := range paths {
+		item, err := readJSONItemFile[run.RuntimeCheckpoint](path)
+		if err != nil {
+			return nil, err
 		}
-		ret = append(ret, cloneRuntimeCheckpoint(&item))
+		if matches == nil || matches(item) {
+			ret = append(ret, cloneRuntimeCheckpoint(&item))
+		}
 	}
 	sort.Slice(ret, func(i, j int) bool {
 		return string(ret[i].ID) < string(ret[j].ID)
@@ -1805,27 +2467,6 @@ func (r *RuntimeCheckpointRepository) ListByRun(_ context.Context, runID common.
 		return nil, nil
 	}
 	return ret, nil
-}
-
-func (r *RuntimeCheckpointRepository) Update(_ context.Context, item *run.RuntimeCheckpoint) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	items, err := loadMap[common.CheckpointID, run.RuntimeCheckpoint](r.path)
-	if err != nil {
-		return err
-	}
-	if _, ok := items[item.ID]; !ok {
-		return common.ErrNotFound
-	}
-	items[item.ID] = *cloneRuntimeCheckpoint(item)
-	return saveMap(r.path, items)
-}
-
-func (r *RuntimeCheckpointRepository) Delete(_ context.Context, id common.CheckpointID) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return deleteMapItem[common.CheckpointID, run.RuntimeCheckpoint](r.path, id)
 }
 
 type DecisionTicketRepository struct {
@@ -1841,28 +2482,25 @@ func (r *DecisionTicketRepository) Create(_ context.Context, item *decision.Tick
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.TicketID, decision.Ticket](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	path := r.ticketPath(item.ID)
+	if _, err := os.Stat(path); err == nil {
+		return common.ErrConflict
+	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if _, ok := items[item.ID]; ok {
-		return common.ErrConflict
-	}
-	items[item.ID] = *cloneDecisionTicket(item)
-	return saveMap(r.path, items)
+	return writeJSONFileAtomic(path, cloneDecisionTicket(item))
 }
 
 func (r *DecisionTicketRepository) Get(_ context.Context, id common.TicketID) (*decision.Ticket, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.TicketID, decision.Ticket](r.path)
+	item, err := readJSONItemFile[decision.Ticket](r.ticketPath(id))
 	if err != nil {
 		return nil, err
-	}
-	item, ok := items[id]
-	if !ok {
-		return nil, common.ErrNotFound
 	}
 	return cloneDecisionTicket(&item), nil
 }
@@ -1871,94 +2509,78 @@ func (r *DecisionTicketRepository) List(_ context.Context) ([]*decision.Ticket, 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.TicketID, decision.Ticket](r.path)
-	if err != nil {
-		return nil, err
-	}
-
-	ids := make([]string, 0, len(items))
-	for id := range items {
-		ids = append(ids, string(id))
-	}
-	sort.Strings(ids)
-
-	ret := make([]*decision.Ticket, 0, len(ids))
-	for _, id := range ids {
-		item := items[common.TicketID(id)]
-		ret = append(ret, cloneDecisionTicket(&item))
-	}
-	return ret, nil
+	return r.list(nil)
 }
 
 func (r *DecisionTicketRepository) ListByRunID(_ context.Context, runID common.RunID) ([]*decision.Ticket, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.TicketID, decision.Ticket](r.path)
-	if err != nil {
-		return nil, err
-	}
-
-	ids := make([]string, 0, len(items))
-	for id, item := range items {
-		if item.RunID == runID {
-			ids = append(ids, string(id))
-		}
-	}
-	sort.Strings(ids)
-
-	ret := make([]*decision.Ticket, 0, len(ids))
-	for _, id := range ids {
-		item := items[common.TicketID(id)]
-		ret = append(ret, cloneDecisionTicket(&item))
-	}
-	return ret, nil
+	return r.list(func(item decision.Ticket) bool { return item.RunID == runID })
 }
 
 func (r *DecisionTicketRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*decision.Ticket, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.TicketID, decision.Ticket](r.path)
-	if err != nil {
-		return nil, err
-	}
-
-	ids := make([]string, 0, len(items))
-	for id, item := range items {
-		if item.WorkspaceID == workspaceID {
-			ids = append(ids, string(id))
-		}
-	}
-	sort.Strings(ids)
-
-	ret := make([]*decision.Ticket, 0, len(ids))
-	for _, id := range ids {
-		item := items[common.TicketID(id)]
-		ret = append(ret, cloneDecisionTicket(&item))
-	}
-	return ret, nil
+	return r.list(func(item decision.Ticket) bool { return item.WorkspaceID == workspaceID })
 }
 
 func (r *DecisionTicketRepository) Update(_ context.Context, item *decision.Ticket) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.TicketID, decision.Ticket](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	path := r.ticketPath(item.ID)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
 		return err
 	}
-	if _, ok := items[item.ID]; !ok {
-		return common.ErrNotFound
-	}
-	items[item.ID] = *cloneDecisionTicket(item)
-	return saveMap(r.path, items)
+	return writeJSONFileAtomic(path, cloneDecisionTicket(item))
 }
 
 func (r *DecisionTicketRepository) Delete(_ context.Context, id common.TicketID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return deleteMapItem[common.TicketID, decision.Ticket](r.path, id)
+	path := r.ticketPath(id)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return os.Remove(path)
+}
+
+func (r *DecisionTicketRepository) ticketRoot() string {
+	return repositoryItemRoot(r.path, "ticket.json", filepath.Join("decisions", "tickets"))
+}
+
+func (r *DecisionTicketRepository) ticketPath(id common.TicketID) string {
+	return repositoryItemPath(r.ticketRoot(), string(id))
+}
+
+func (r *DecisionTicketRepository) list(matches func(decision.Ticket) bool) ([]*decision.Ticket, error) {
+	paths, err := repositoryItemPaths(r.ticketRoot())
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*decision.Ticket, 0, len(paths))
+	for _, path := range paths {
+		item, err := readJSONItemFile[decision.Ticket](path)
+		if err != nil {
+			return nil, err
+		}
+		if matches == nil || matches(item) {
+			ret = append(ret, cloneDecisionTicket(&item))
+		}
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		return string(ret[i].ID) < string(ret[j].ID)
+	})
+	return ret, nil
 }
 
 type DecisionResolutionRepository struct {
@@ -1974,28 +2596,30 @@ func (r *DecisionResolutionRepository) Create(_ context.Context, item *decision.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.TicketID, decision.Resolution](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" || item.TicketID == "" {
+		return common.ErrInvalidArgument
+	}
+	if _, err := r.findByTicketID(item.TicketID); err == nil {
+		return common.ErrConflict
+	} else if err != common.ErrNotFound {
 		return err
 	}
-	if _, ok := items[item.TicketID]; ok {
+	path := r.resolutionPath(item.ID)
+	if _, err := os.Stat(path); err == nil {
 		return common.ErrConflict
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
 	}
-	items[item.TicketID] = *cloneDecisionResolution(item)
-	return saveMap(r.path, items)
+	return writeJSONFileAtomic(path, cloneDecisionResolution(item))
 }
 
 func (r *DecisionResolutionRepository) GetByTicketID(_ context.Context, ticketID common.TicketID) (*decision.Resolution, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.TicketID, decision.Resolution](r.path)
+	item, err := r.findByTicketID(ticketID)
 	if err != nil {
 		return nil, err
-	}
-	item, ok := items[ticketID]
-	if !ok {
-		return nil, common.ErrNotFound
 	}
 	return cloneDecisionResolution(&item), nil
 }
@@ -2003,7 +2627,45 @@ func (r *DecisionResolutionRepository) GetByTicketID(_ context.Context, ticketID
 func (r *DecisionResolutionRepository) DeleteByTicketID(_ context.Context, ticketID common.TicketID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return deleteMapItem[common.TicketID, decision.Resolution](r.path, ticketID)
+	_, path, err := r.findPathByTicketID(ticketID)
+	if err != nil {
+		return err
+	}
+	return os.Remove(path)
+}
+
+func (r *DecisionResolutionRepository) resolutionRoot() string {
+	return repositoryItemRoot(r.path, "resolution.json", filepath.Join("decisions", "resolutions"))
+}
+
+func (r *DecisionResolutionRepository) resolutionPath(id common.ResolutionID) string {
+	return repositoryItemPath(r.resolutionRoot(), string(id))
+}
+
+func (r *DecisionResolutionRepository) findByTicketID(ticketID common.TicketID) (decision.Resolution, error) {
+	item, _, err := r.findPathByTicketID(ticketID)
+	return item, err
+}
+
+func (r *DecisionResolutionRepository) findPathByTicketID(ticketID common.TicketID) (decision.Resolution, string, error) {
+	var zero decision.Resolution
+	if ticketID == "" {
+		return zero, "", common.ErrInvalidArgument
+	}
+	paths, err := repositoryItemPaths(r.resolutionRoot())
+	if err != nil {
+		return zero, "", err
+	}
+	for _, path := range paths {
+		item, err := readJSONItemFile[decision.Resolution](path)
+		if err != nil {
+			return zero, "", err
+		}
+		if item.TicketID == ticketID {
+			return item, path, nil
+		}
+	}
+	return zero, "", common.ErrNotFound
 }
 
 type ApprovalRepository struct {
@@ -2019,28 +2681,25 @@ func (r *ApprovalRepository) Create(_ context.Context, item *approval.Approval) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.ApprovalID, approval.Approval](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	path := r.approvalPath(item.ID)
+	if _, err := os.Stat(path); err == nil {
+		return common.ErrConflict
+	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if _, ok := items[item.ID]; ok {
-		return common.ErrConflict
-	}
-	items[item.ID] = *cloneApproval(item)
-	return saveMap(r.path, items)
+	return writeJSONFileAtomic(path, cloneApproval(item))
 }
 
 func (r *ApprovalRepository) Get(_ context.Context, id common.ApprovalID) (*approval.Approval, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ApprovalID, approval.Approval](r.path)
+	item, err := readJSONItemFile[approval.Approval](r.approvalPath(id))
 	if err != nil {
 		return nil, err
-	}
-	item, ok := items[id]
-	if !ok {
-		return nil, common.ErrNotFound
 	}
 	return cloneApproval(&item), nil
 }
@@ -2049,94 +2708,78 @@ func (r *ApprovalRepository) List(_ context.Context) ([]*approval.Approval, erro
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ApprovalID, approval.Approval](r.path)
-	if err != nil {
-		return nil, err
-	}
-
-	ids := make([]string, 0, len(items))
-	for id := range items {
-		ids = append(ids, string(id))
-	}
-	sort.Strings(ids)
-
-	ret := make([]*approval.Approval, 0, len(ids))
-	for _, id := range ids {
-		item := items[common.ApprovalID(id)]
-		ret = append(ret, cloneApproval(&item))
-	}
-	return ret, nil
+	return r.list(nil)
 }
 
 func (r *ApprovalRepository) ListByRunID(_ context.Context, runID common.RunID) ([]*approval.Approval, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ApprovalID, approval.Approval](r.path)
-	if err != nil {
-		return nil, err
-	}
-
-	ids := make([]string, 0, len(items))
-	for id, item := range items {
-		if item.RunID == runID {
-			ids = append(ids, string(id))
-		}
-	}
-	sort.Strings(ids)
-
-	ret := make([]*approval.Approval, 0, len(ids))
-	for _, id := range ids {
-		item := items[common.ApprovalID(id)]
-		ret = append(ret, cloneApproval(&item))
-	}
-	return ret, nil
+	return r.list(func(item approval.Approval) bool { return item.RunID == runID })
 }
 
 func (r *ApprovalRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*approval.Approval, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.ApprovalID, approval.Approval](r.path)
-	if err != nil {
-		return nil, err
-	}
-
-	ids := make([]string, 0, len(items))
-	for id, item := range items {
-		if item.WorkspaceID == workspaceID {
-			ids = append(ids, string(id))
-		}
-	}
-	sort.Strings(ids)
-
-	ret := make([]*approval.Approval, 0, len(ids))
-	for _, id := range ids {
-		item := items[common.ApprovalID(id)]
-		ret = append(ret, cloneApproval(&item))
-	}
-	return ret, nil
+	return r.list(func(item approval.Approval) bool { return item.WorkspaceID == workspaceID })
 }
 
 func (r *ApprovalRepository) Update(_ context.Context, item *approval.Approval) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.ApprovalID, approval.Approval](r.path)
-	if err != nil {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	path := r.approvalPath(item.ID)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
 		return err
 	}
-	if _, ok := items[item.ID]; !ok {
-		return common.ErrNotFound
-	}
-	items[item.ID] = *cloneApproval(item)
-	return saveMap(r.path, items)
+	return writeJSONFileAtomic(path, cloneApproval(item))
 }
 
 func (r *ApprovalRepository) Delete(_ context.Context, id common.ApprovalID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return deleteMapItem[common.ApprovalID, approval.Approval](r.path, id)
+	path := r.approvalPath(id)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return common.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return os.Remove(path)
+}
+
+func (r *ApprovalRepository) approvalRoot() string {
+	return repositoryItemRoot(r.path, "approval.json", "approvals")
+}
+
+func (r *ApprovalRepository) approvalPath(id common.ApprovalID) string {
+	return repositoryItemPath(r.approvalRoot(), string(id))
+}
+
+func (r *ApprovalRepository) list(matches func(approval.Approval) bool) ([]*approval.Approval, error) {
+	paths, err := repositoryItemPaths(r.approvalRoot())
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*approval.Approval, 0, len(paths))
+	for _, path := range paths {
+		item, err := readJSONItemFile[approval.Approval](path)
+		if err != nil {
+			return nil, err
+		}
+		if matches == nil || matches(item) {
+			ret = append(ret, cloneApproval(&item))
+		}
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		return string(ret[i].ID) < string(ret[j].ID)
+	})
+	return ret, nil
 }
 
 func loadMap[K comparable, V any](path string) (map[K]V, error) {
@@ -2212,6 +2855,82 @@ func saveMap[K comparable, V any](path string, items map[K]V) error {
 	defer cache.mu.Unlock()
 	cache.items = cloneStoredMap(items)
 	cache.loaded = true
+	return nil
+}
+
+func writeJSONFileAtomic(path string, value any) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(path, data, 0o644)
+}
+
+func writeOptionalMapFile(path string, value map[string]any) error {
+	if value == nil {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	return writeJSONFileAtomic(path, value)
+}
+
+func readOptionalMapFile(path string) (map[string]any, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(data) == 0 {
+		return map[string]any{}, nil
+	}
+	var item map[string]any
+	if err := json.Unmarshal(data, &item); err != nil {
+		return nil, err
+	}
+	if item == nil {
+		return nil, nil
+	}
+	return item, nil
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	cleanup = false
 	return nil
 }
 
