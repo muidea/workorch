@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -1805,6 +1807,13 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input[failureOutputKeySignature] = signature
 		input[stepInputKeyRepairOfFailureSig] = signature
 	}
+	if signals := structuredFailureSignalsFromFailureOutput(failedStep.Output, execErr, class, signature); len(signals) > 0 {
+		input["structuredFailureSignals"] = signals
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Use structuredFailureSignals as mechanical failure evidence only; paths, line refs, and identifiers must be reconciled with current target snapshots or fresh reads before patching.",
+			"Do not treat identifier-like tokens in failure text as proof that a symbol or field should be invented; ground every referenced name in current resources or introduce it explicitly in the same patch.",
+		)
+	}
 	targetScope := runtimeFailureTargetScope(signature)
 	if targetScope != "" {
 		input["failureTargetScope"] = targetScope
@@ -1876,7 +1885,10 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	inheritPriorRepairContext(input, failedStep)
 	if boolValue(input["stateChangingOutputRequired"]) {
 		narrowStateChangingRecoveryInput(input, failedStep, execErr, "runtime_repair")
-		input["repairActionPackage"] = repairActionPackageFromRepairInput(input, failedStep.Output)
+		if pkg := repairActionPackageFromRepairInput(input, failedStep.Output); len(pkg) > 0 {
+			input["repairActionPackage"] = pkg
+			compactStateChangingRepairInputAroundActionPackage(input)
+		}
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Use repairActionPackage as the primary actionable repair contract; it contains the required output kind, rejected output summary, and current target snapshots.",
 			"When repairActionPackage.requiredOutput.mustIncludeStateChangingNode is true, the next output must include patch/apply before verification, or return a failed dodAssessment/blocker.",
@@ -2022,6 +2034,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		"repairObjective",
 		"runtimeRepairAttempt",
 		"maxRuntimeRepairAttempts",
+		"targetRepairAttempts",
 	} {
 		if value, ok := input[key]; ok && value != nil {
 			pkg[key] = compactLLMContextValue(value, 1)
@@ -2031,6 +2044,17 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		pkg["previousRejectedOutputSummary"] = compactStateChangingRecoveryFailureOutput(rawFailedOutput[0])
 	} else if failedOutput := mapFromValue(input["failedStepOutput"]); len(failedOutput) > 0 {
 		pkg["previousRejectedOutputSummary"] = compactStateChangingRecoveryFailureOutput(failedOutput)
+	}
+	if signals := mapFromValue(input["structuredFailureSignals"]); len(signals) > 0 {
+		pkg["structuredFailureSignals"] = compactLLMContextMap(signals, 0)
+	} else if len(rawFailedOutput) > 0 && len(rawFailedOutput[0]) > 0 {
+		if signals := structuredFailureSignalsFromFailureOutput(rawFailedOutput[0], nil, "", ""); len(signals) > 0 {
+			pkg["structuredFailureSignals"] = compactLLMContextMap(signals, 0)
+		}
+	}
+	if forbidden := forbiddenRepairContentReuseFromFailure(input, rawFailedOutput...); len(forbidden) > 0 {
+		pkg["forbiddenContentReuse"] = forbidden
+		requiredOutput["mustRebuildFromCurrentEvidence"] = true
 	}
 	if targets := repairActionTargetSnapshots(input); len(targets) > 0 {
 		pkg["targetSnapshots"] = targets
@@ -2042,10 +2066,442 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	if manifest := repairActionWorkspaceManifest(input); len(manifest) > 0 {
 		pkg["workspaceFileManifest"] = manifest
 	}
+	if diagnostics := repairActionTargetRelevanceDiagnostics(input, pkg); len(diagnostics) > 0 {
+		pkg["targetRelevanceDiagnostics"] = diagnostics
+	}
+	if int64FromValue(input["targetRepairAttempts"]) >= 2 {
+		pkg["repeatedTargetRepairMode"] = map[string]any{
+			"enabled":                           true,
+			"reason":                            "same_target_scope_repeated_failure",
+			"maxTargetScopedRepairInputBytes":   120 * 1024,
+			"mustPreferExactTargetSnapshot":     true,
+			"mustOmitRejectedRawFailureProduct": true,
+		}
+		requiredOutput["mustUseCurrentTargetSnapshot"] = true
+		requiredOutput["mustRebuildFromCurrentEvidence"] = true
+	}
 	if len(pkg) <= 1 {
 		return nil
 	}
 	return pkg
+}
+
+func compactStateChangingRepairInputAroundActionPackage(input map[string]any) {
+	if len(input) == 0 || len(mapFromValue(input["repairActionPackage"])) == 0 {
+		return
+	}
+	omitted := []string{}
+	omit := func(key string) {
+		if _, ok := input[key]; !ok {
+			return
+		}
+		delete(input, key)
+		omitted = append(omitted, key)
+	}
+	for _, key := range []string{
+		"failedStepInput",
+		"failedStepOutput",
+		"previousStepOutput",
+		"failedExecutionGraph",
+		stepInputKeyGraphEvidence,
+		"runEvidenceSummary",
+		stepOutputKeyExecutionGraph,
+	} {
+		omit(key)
+	}
+	if len(omitted) > 0 {
+		input["repairInputCompaction"] = map[string]any{
+			"mode":                  "repair_action_package_primary",
+			"omittedFields":         omitted,
+			"primaryField":          "repairActionPackage",
+			"reason":                "state-changing repair uses bounded current failure package instead of duplicated historical payloads",
+			"targetScopedByteLimit": 120 * 1024,
+		}
+	}
+}
+
+func repairActionTargetRelevanceDiagnostics(input map[string]any, pkg map[string]any) map[string]any {
+	if len(input) == 0 && len(pkg) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	if scope := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(input, "failureTargetScope"),
+		stringFromMap(pkg, "failureTargetScope"),
+	)); scope != "" {
+		ret["failureTargetScope"] = scope
+	}
+	if targets := mapSliceFromValue(pkg["targetSnapshots"]); len(targets) > 0 {
+		ret["targetSnapshotCount"] = len(targets)
+		ret["targetRefs"] = repairActionTargetRefs(targets)
+	}
+	if manifest := mapSliceFromValue(pkg["workspaceFileManifest"]); len(manifest) > 0 {
+		ret["workspaceManifestEntryCount"] = len(manifest)
+	}
+	if signals := mapFromValue(pkg["structuredFailureSignals"]); len(signals) > 0 {
+		if refs := stringSliceFromValue(signals["targetRefs"]); len(refs) > 0 {
+			ret["failureSignalTargetRefs"] = limitedStrings(refs, maxLLMContextSliceItems)
+		}
+		if ids := stringSliceFromValue(signals["identifiers"]); len(ids) > 0 {
+			ret["failureSignalIdentifierCount"] = len(ids)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func repairActionTargetRefs(targets []map[string]any) []string {
+	if len(targets) == 0 {
+		return nil
+	}
+	refs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if ref := stringFromMap(target, "targetRef"); ref != "" {
+			refs = append(refs, ref)
+		}
+	}
+	return limitedStrings(compactUniqueStrings(refs), maxLLMContextSliceItems)
+}
+
+func structuredFailureSignalsFromFailureOutput(output map[string]any, execErr error, failureClass string, failureSignature string) map[string]any {
+	texts := repairFailureSignalTexts(output, execErr, failureClass, failureSignature)
+	if len(texts) == 0 {
+		return nil
+	}
+	sources := make([]string, 0, len(texts))
+	targets := []string{}
+	identifiers := []string{}
+	messages := []string{}
+	lineRefs := []map[string]any{}
+	seenLineRefs := map[string]bool{}
+	for source, text := range texts {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+		sources = append(sources, source)
+		for _, ref := range extractStructuredFailureLineRefs(text) {
+			key := fmt.Sprintf("%s:%v:%v", ref["targetRef"], ref["line"], ref["column"])
+			if seenLineRefs[key] {
+				continue
+			}
+			seenLineRefs[key] = true
+			lineRefs = append(lineRefs, ref)
+			if targetRef := stringFromMap(ref, "targetRef"); targetRef != "" {
+				targets = append(targets, targetRef)
+			}
+			if len(lineRefs) >= maxLLMContextSliceItems {
+				break
+			}
+		}
+		targets = append(targets, extractStructuredFailureTargetRefs(text)...)
+		identifiers = append(identifiers, extractStructuredFailureIdentifiers(text)...)
+		messages = append(messages, extractStructuredFailureMessages(text)...)
+	}
+	ret := map[string]any{}
+	if sources = limitedStrings(compactUniqueStrings(sources), 8); len(sources) > 0 {
+		ret["sources"] = sources
+	}
+	if targets = limitedStrings(compactUniqueStrings(targets), maxLLMContextSliceItems); len(targets) > 0 {
+		ret["targetRefs"] = targets
+	}
+	if len(lineRefs) > 0 {
+		ret["lineRefs"] = lineRefs
+	}
+	if identifiers = limitedStrings(compactUniqueStrings(identifiers), maxLLMContextSliceItems); len(identifiers) > 0 {
+		ret["identifiers"] = identifiers
+	}
+	if messages = limitedStrings(compactUniqueStrings(messages), 10); len(messages) > 0 {
+		ret["messages"] = messages
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func repairFailureSignalTexts(output map[string]any, execErr error, failureClass string, failureSignature string) map[string]string {
+	ret := map[string]string{}
+	add := func(source string, value string) {
+		value = strings.TrimSpace(value)
+		if source == "" || value == "" || containsRuntimeRedactionMarker(value) {
+			return
+		}
+		ret[source] = value
+	}
+	for _, key := range []string{"stderr", "stdout", "error", "reason", failureOutputKeySignature, "failureCategory"} {
+		add(key, stringFromMap(output, key))
+	}
+	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		for _, key := range []string{"kind", "reason", "error", "targetRef"} {
+			add("runtimeDiagnostics."+key, stringFromMap(diagnostics, key))
+		}
+	}
+	if diagnostics := mapFromValue(output["streamDiagnostics"]); len(diagnostics) > 0 {
+		for _, key := range []string{"kind", "reason", "error"} {
+			add("streamDiagnostics."+key, stringFromMap(diagnostics, key))
+		}
+	}
+	add("execErr", errorString(execErr))
+	add("failureClass", failureClass)
+	add(failureOutputKeySignature, failureSignature)
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func extractStructuredFailureLineRefs(text string) []map[string]any {
+	matches := structuredFailureLineRefPattern.FindAllStringSubmatch(text, maxLLMContextSliceItems)
+	if len(matches) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(matches))
+	for _, match := range matches {
+		if len(match) < 3 {
+			continue
+		}
+		targetRef := normalizeStructuredFailureTargetRef(match[1])
+		if targetRef == "" {
+			continue
+		}
+		line, _ := strconv.Atoi(match[2])
+		if line <= 0 {
+			continue
+		}
+		item := map[string]any{
+			"targetRef": targetRef,
+			"line":      line,
+		}
+		if len(match) > 3 && strings.TrimSpace(match[3]) != "" {
+			if column, _ := strconv.Atoi(match[3]); column > 0 {
+				item["column"] = column
+			}
+		}
+		ret = append(ret, item)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func extractStructuredFailureTargetRefs(text string) []string {
+	matches := structuredFailureTargetRefPattern.FindAllStringSubmatch(text, maxLLMContextSliceItems*2)
+	if len(matches) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		if targetRef := normalizeStructuredFailureTargetRef(match[1]); targetRef != "" {
+			ret = append(ret, targetRef)
+		}
+	}
+	return ret
+}
+
+func normalizeStructuredFailureTargetRef(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, "`'\"()[]{}<>;,")
+	value = strings.ReplaceAll(value, "\\", "/")
+	for strings.HasPrefix(value, "./") {
+		value = strings.TrimPrefix(value, "./")
+	}
+	value = strings.TrimPrefix(value, "a/")
+	value = strings.TrimPrefix(value, "b/")
+	value = strings.Trim(value, "/")
+	if value == "" || strings.Contains(value, "://") || strings.Contains(value, " ") {
+		return ""
+	}
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "http:") || strings.HasPrefix(lower, "https:") {
+		return ""
+	}
+	if !strings.Contains(value, ".") {
+		return ""
+	}
+	return value
+}
+
+func extractStructuredFailureIdentifiers(text string) []string {
+	matches := structuredFailureIdentifierPattern.FindAllString(text, maxLLMContextSliceItems*4)
+	if len(matches) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, len(matches))
+	for _, value := range matches {
+		value = strings.TrimSpace(value)
+		if !structuredFailureIdentifierUseful(value) {
+			continue
+		}
+		ret = append(ret, value)
+	}
+	return ret
+}
+
+func structuredFailureIdentifierUseful(value string) bool {
+	if value == "" || len(value) < 3 || len(value) > 96 {
+		return false
+	}
+	lower := strings.ToLower(value)
+	if structuredFailureIdentifierStopWords[lower] {
+		return false
+	}
+	if strings.Contains(lower, "_test") || strings.Contains(lower, "_failed") {
+		return false
+	}
+	hasShape := false
+	for _, r := range value {
+		if unicode.IsUpper(r) || unicode.IsDigit(r) || r == '_' {
+			hasShape = true
+			break
+		}
+	}
+	return hasShape
+}
+
+func extractStructuredFailureMessages(text string) []string {
+	lines := strings.Split(text, "\n")
+	ret := make([]string, 0, min(len(lines), 10))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || containsRuntimeRedactionMarker(line) {
+			continue
+		}
+		ret = append(ret, truncateLLMContextString(line))
+		if len(ret) >= 10 {
+			break
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func forbiddenRepairContentReuseFromFailure(input map[string]any, rawFailedOutput ...map[string]any) []string {
+	output := map[string]any(nil)
+	if len(rawFailedOutput) > 0 && len(rawFailedOutput[0]) > 0 {
+		output = rawFailedOutput[0]
+	} else if failedOutput := mapFromValue(input["failedStepOutput"]); len(failedOutput) > 0 {
+		output = failedOutput
+	}
+	text := strings.ToLower(strings.Join(repairForbiddenReuseTextValues(input, output), "\n"))
+	ret := []string{}
+	if llmDecisionInvalidOutput(output) ||
+		strings.Contains(text, "invalid json") ||
+		strings.Contains(text, "invalid character") ||
+		strings.Contains(text, "schema invalid") ||
+		strings.Contains(text, "llm decision invalid") {
+		ret = append(ret, "raw_invalid_llm_decision_content")
+	}
+	if runtimeValueContainsRedactionMarker(output, 0) ||
+		runtimeValueContainsRedactionMarker(input["failedStepOutput"], 0) ||
+		strings.Contains(text, "redacted runtime marker") ||
+		strings.Contains(text, "runtime redaction marker") {
+		ret = append(ret, "redacted_runtime_marker_text")
+	}
+	if strings.Contains(text, "malformed unified") ||
+		strings.Contains(text, "invalid unified") ||
+		strings.Contains(text, "hunk header") ||
+		strings.Contains(text, "bare @@") {
+		ret = append(ret, "malformed_diff_text")
+	}
+	if strings.Contains(text, "oldtext not found") ||
+		strings.Contains(text, "old text not found") ||
+		strings.Contains(text, "file/edit oldtext") {
+		ret = append(ret, "missing_old_text")
+	}
+	if strings.Contains(text, "context mismatch") ||
+		strings.Contains(text, "patch does not apply") ||
+		strings.Contains(text, "stale") ||
+		strings.Contains(text, "conflict") {
+		ret = append(ret, "stale_patch_text")
+	}
+	return limitedStrings(compactUniqueStrings(ret), 8)
+}
+
+func repairForbiddenReuseTextValues(input map[string]any, output map[string]any) []string {
+	values := []string{}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	for _, source := range []map[string]any{input, output} {
+		for _, key := range []string{
+			"stage",
+			"status",
+			"error",
+			"reason",
+			"failureReason",
+			failureOutputKeyClass,
+			failureOutputKeySignature,
+			"failureCategory",
+		} {
+			add(stringFromMap(source, key))
+		}
+	}
+	for _, key := range []string{"runtimeDiagnostics", "streamDiagnostics"} {
+		diagnostics := mapFromValue(output[key])
+		for _, diagnosticKey := range []string{"kind", "reason", "error"} {
+			add(stringFromMap(diagnostics, diagnosticKey))
+		}
+	}
+	return values
+}
+
+func runtimeValueContainsRedactionMarker(value any, depth int) bool {
+	if depth > 4 || value == nil {
+		return false
+	}
+	switch typed := value.(type) {
+	case string:
+		return containsRuntimeRedactionMarker(typed)
+	case map[string]any:
+		for _, nested := range typed {
+			if runtimeValueContainsRedactionMarker(nested, depth+1) {
+				return true
+			}
+		}
+	case []map[string]any:
+		for _, nested := range typed {
+			if runtimeValueContainsRedactionMarker(nested, depth+1) {
+				return true
+			}
+		}
+	case []any:
+		for _, nested := range typed {
+			if runtimeValueContainsRedactionMarker(nested, depth+1) {
+				return true
+			}
+		}
+	case []string:
+		for _, nested := range typed {
+			if containsRuntimeRedactionMarker(nested) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+var structuredFailureLineRefPattern = regexp.MustCompile(`(?:^|[\s"'(\[])([A-Za-z0-9_./\\-]+\.[A-Za-z0-9_./\\-]+):([0-9]+)(?::([0-9]+))?`)
+var structuredFailureTargetRefPattern = regexp.MustCompile(`(?:^|[\s"'(\[])([A-Za-z0-9_./\\-]+\.[A-Za-z0-9_./\\-]+)(?::[0-9]+(?::[0-9]+)?)?`)
+var structuredFailureIdentifierPattern = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]{2,}`)
+
+var structuredFailureIdentifierStopWords = map[string]bool{
+	"error": true, "failed": true, "failure": true, "status": true, "stage": true,
+	"stderr": true, "stdout": true, "reason": true, "class": true, "targetref": true,
+	"undefined": true, "unknown": true, "field": true, "literal": true, "type": true,
+	"struct": true, "exit": true, "runtime": true, "patch": true, "diff": true,
+	"content": true, "context": true, "mismatch": true, "invalid": true,
 }
 
 func repairActionTargetSnapshots(input map[string]any) []map[string]any {

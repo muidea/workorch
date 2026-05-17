@@ -2099,6 +2099,12 @@ func repairLoopSummary(progress backend.TaskProgressInfo) string {
 	if loop.LastFailureClass != "" {
 		parts = append(parts, loop.LastFailureClass)
 	}
+	if loop.LastFailureTargetScope != "" {
+		parts = append(parts, loop.LastFailureTargetScope)
+	}
+	if loop.RepeatedFailureReason != "" {
+		parts = append(parts, loop.RepeatedFailureReason)
+	}
 	if loop.NextAction != "" {
 		parts = append(parts, loop.NextAction)
 	}

@@ -2813,6 +2813,24 @@ func TestMapTaskProgressProjectsRepairLoopState(t *testing.T) {
 				Input: map[string]any{
 					"runtimeRepairFollowUp": true,
 					"runtimeRepairAttempt":  2,
+					"failureTargetScope":    "target.txt",
+					"structuredFailureSignals": map[string]any{
+						"targetRefs":  []string{"target.txt"},
+						"identifiers": []string{"MissingThing"},
+					},
+					"repairInputCompaction": map[string]any{
+						"mode":          "repair_action_package_primary",
+						"omittedFields": []string{"failedStepOutput", "previousStepOutput"},
+					},
+					"repairActionPackage": map[string]any{
+						"targetRelevanceDiagnostics": map[string]any{
+							"failureTargetScope": "target.txt",
+						},
+						"repeatedTargetRepairMode": map[string]any{
+							"enabled": true,
+							"reason":  "same_target_scope_repeated_failure",
+						},
+					},
 				},
 			},
 		},
@@ -2839,8 +2857,14 @@ func TestMapTaskProgressProjectsRepairLoopState(t *testing.T) {
 		progress.RepairLoop.LastFailureClass != "shell_command_failed" ||
 		progress.RepairLoop.LastFailureSignature != "kind=shell/command" ||
 		progress.RepairLoop.LastFailureStepID != "run-repair-loop/block/run-tests" ||
-		progress.RepairLoop.NextAction != "continue_run" {
+		progress.RepairLoop.NextAction != "continue_run" ||
+		progress.RepairLoop.LastFailureTargetScope != "target.txt" ||
+		progress.RepairLoop.RepeatedFailureReason != "same_target_scope_repeated_failure" ||
+		progress.RepairLoop.LastRepairInputBytes == 0 {
 		t.Fatalf("repairLoop = %+v, want repairing projection with attempts/failure/next action", progress.RepairLoop)
+	}
+	if len(progress.RepairLoop.StructuredFailureSignals) == 0 || len(progress.RepairLoop.RepairInputCompaction) == 0 {
+		t.Fatalf("repairLoop = %+v, want repair grounding observability", progress.RepairLoop)
 	}
 }
 

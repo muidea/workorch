@@ -353,6 +353,10 @@ function taskProgressCard(progress?: TaskProgress, repairLoopOverride?: RepairLo
   const repairEscalation = repairLoop?.escalated
     ? [repairLoop.escalationTicketId, repairLoop.escalationReason].filter(Boolean).join(' / ')
     : '-';
+  const repairSignals = repairLoop?.structuredFailureSignals;
+  const repairSignalTargets = asStringArray(repairSignals?.targetRefs);
+  const repairSignalIdentifiers = asStringArray(repairSignals?.identifiers);
+  const repairCompactionFields = asStringArray(repairLoop?.repairInputCompaction?.omittedFields);
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Steps
@@ -378,11 +382,35 @@ function taskProgressCard(progress?: TaskProgress, repairLoopOverride?: RepairLo
           { key: 'repairState', label: '修复状态', children: repairLoop ? repairLoopStateLabel(repairLoop.state) : '-' },
           { key: 'repairAttempt', label: '修复轮次', children: repairAttempt || '-' },
           { key: 'repairFailure', label: '最近失败', children: repairFailure || '-' },
+          { key: 'repairTargetScope', label: '失败目标', children: repairLoop?.lastFailureTargetScope || '-' },
+          { key: 'repairInputBytes', label: '修复输入字节', children: repairLoop?.lastRepairInputBytes ? numberText(repairLoop.lastRepairInputBytes) : '-' },
+          { key: 'repairRepeatedReason', label: '重复失败原因', children: repairLoop?.repeatedFailureReason || '-' },
           { key: 'repairNextAction', label: '修复下一步', children: repairLoop?.nextAction || '-' },
           { key: 'repairEscalation', label: '升级信息', children: repairEscalation },
+          { key: 'repairSignalTargets', label: '失败信号目标', children: compactTags(repairSignalTargets, 4) },
+          { key: 'repairSignalIdentifiers', label: '失败信号标识符', children: compactTags(repairSignalIdentifiers, 4) },
+          { key: 'repairCompaction', label: '修复输入裁剪', children: repairCompactionFields.length ? compactTags(repairCompactionFields, 4) : '-' },
           { key: 'repairEvidence', label: '修复证据', children: compactTags(repairLoop?.evidenceRefs ?? [], 4) }
         ]}
       />
+      {repairSignals || repairLoop?.repairInputCompaction ? (
+        <Descriptions
+          column={{ xs: 1, md: 2 }}
+          size="small"
+          items={[
+            {
+              key: 'signals',
+              label: 'Structured Failure Signals',
+              children: repairSignals ? <pre className="json-panel">{compactJSON(repairSignals)}</pre> : '-'
+            },
+            {
+              key: 'compaction',
+              label: 'Repair Input Compaction',
+              children: repairLoop?.repairInputCompaction ? <pre className="json-panel">{compactJSON(repairLoop.repairInputCompaction)}</pre> : '-'
+            }
+          ]}
+        />
+      ) : null}
       {blockers.length ? (
         <ProTable<ProgressBlocker>
           rowKey="id"

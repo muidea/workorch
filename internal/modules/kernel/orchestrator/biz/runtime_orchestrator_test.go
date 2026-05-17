@@ -4254,16 +4254,14 @@ func TestRuntimeRepairInputOmitsInvalidLLMRawContentFromRepairContext(t *testing
 	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-invalid-llm-redacted"}, failedStep, 1, common.ErrInvalidArgument)
 
 	for _, key := range []string{"failedStepOutput", "previousStepOutput"} {
-		encoded, err := json.Marshal(input[key])
-		if err != nil {
-			t.Fatalf("marshal %s: %v", key, err)
+		if _, ok := input[key]; ok {
+			t.Fatalf("%s should be omitted when repairActionPackage is primary", key)
 		}
-		if strings.Contains(string(encoded), "[REDACTED]") {
-			t.Fatalf("%s still exposes redacted marker: %s", key, encoded)
-		}
-		summary := mapFromValue(input[key])
-		if summary["rawContentPreviewOmitted"] != true || summary["streamEventsOmitted"] != true {
-			t.Fatalf("%s = %#v, want raw content and stream events omitted", key, input[key])
+	}
+	compaction := mapFromValue(input["repairInputCompaction"])
+	for _, key := range []string{"failedStepOutput", "previousStepOutput"} {
+		if !stringSliceContains(stringSliceFromValue(compaction["omittedFields"]), key) {
+			t.Fatalf("repairInputCompaction = %#v, want %s omitted", compaction, key)
 		}
 	}
 	actionPackage := mapFromValue(input["repairActionPackage"])

@@ -2,6 +2,7 @@ package appservice
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -5609,6 +5610,7 @@ func mapTaskProgressRepairLoop(snapshot RunSnapshot, recovery RecoveryPlan) Repa
 			ret.MissingDoDItems = readModelMissingDoDItemsFromStepOutput(failedStep.Output)
 		}
 	}
+	projectRepairGroundingObservability(&ret, snapshot)
 
 	if ticketID, reason, escalationContext, ok := repairEscalationProjection(snapshot, recovery); ok {
 		ret.Escalated = true
@@ -5646,6 +5648,55 @@ func mapTaskProgressRepairLoop(snapshot RunSnapshot, recovery RecoveryPlan) Repa
 
 	ret.EvidenceRefs = compactUniqueStrings(append(ret.EvidenceRefs, ret.LastRepairStepID, ret.LastFailureStepID))
 	return ret
+}
+
+func projectRepairGroundingObservability(ret *RepairLoop, snapshot RunSnapshot) {
+	if ret == nil || strings.TrimSpace(ret.LastRepairStepID) == "" {
+		return
+	}
+	repairStep := stepByID(snapshot.Steps, ret.LastRepairStepID)
+	if repairStep == nil {
+		return
+	}
+	actionPackage := readModelMapValue(repairStep.Input["repairActionPackage"])
+	targetDiagnostics := readModelMapValue(actionPackage["targetRelevanceDiagnostics"])
+	ret.LastFailureTargetScope = strings.TrimSpace(readModelFirstNonEmptyString(
+		readModelStringValue(repairStep.Input["failureTargetScope"]),
+		readModelStringValue(actionPackage["failureTargetScope"]),
+		readModelStringValue(targetDiagnostics["failureTargetScope"]),
+	))
+	if signals := readModelMapValue(repairStep.Input["structuredFailureSignals"]); len(signals) > 0 {
+		ret.StructuredFailureSignals = signals
+	} else if signals := readModelMapValue(actionPackage["structuredFailureSignals"]); len(signals) > 0 {
+		ret.StructuredFailureSignals = signals
+	}
+	if compaction := readModelMapValue(repairStep.Input["repairInputCompaction"]); len(compaction) > 0 {
+		ret.RepairInputCompaction = compaction
+	}
+	if repeated := readModelMapValue(actionPackage["repeatedTargetRepairMode"]); len(repeated) > 0 {
+		ret.RepeatedFailureReason = strings.TrimSpace(readModelStringValue(repeated["reason"]))
+	}
+	ret.LastRepairInputBytes = readModelJSONSize(repairStep.Input)
+}
+
+func readModelJSONSize(value any) int {
+	if value == nil {
+		return 0
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return 0
+	}
+	return len(encoded)
+}
+
+func readModelFirstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 type repairFailureProjection struct {

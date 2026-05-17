@@ -968,7 +968,12 @@ export type RepairLoop = {
   lastFailureStepId?: string;
   lastFailureClass?: string;
   lastFailureSignature?: string;
+  lastFailureTargetScope?: string;
   lastFailureAt?: string;
+  structuredFailureSignals?: Record<string, unknown>;
+  repairInputCompaction?: Record<string, unknown>;
+  lastRepairInputBytes?: number;
+  repeatedFailureReason?: string;
   nextAction?: string;
   escalated: boolean;
   escalationReason?: string;

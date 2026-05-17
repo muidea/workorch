@@ -284,19 +284,24 @@ type RecoveryPlanInfo struct {
 }
 
 type RepairLoopInfo struct {
-	State                string
-	AttemptCount         int
-	LastAttempt          int
-	LastRepairStepID     common.StepID
-	LastFailureStepID    common.StepID
-	LastFailureClass     string
-	LastFailureSignature string
-	LastFailureAt        string
-	NextAction           string
-	Escalated            bool
-	EscalationReason     string
-	EscalationTicketID   common.TicketID
-	EvidenceRefs         []string
+	State                    string
+	AttemptCount             int
+	LastAttempt              int
+	LastRepairStepID         common.StepID
+	LastFailureStepID        common.StepID
+	LastFailureClass         string
+	LastFailureSignature     string
+	LastFailureTargetScope   string
+	LastFailureAt            string
+	StructuredFailureSignals map[string]any
+	RepairInputCompaction    map[string]any
+	LastRepairInputBytes     int
+	RepeatedFailureReason    string
+	NextAction               string
+	Escalated                bool
+	EscalationReason         string
+	EscalationTicketID       common.TicketID
+	EvidenceRefs             []string
 }
 
 type TaskProgressInfo struct {

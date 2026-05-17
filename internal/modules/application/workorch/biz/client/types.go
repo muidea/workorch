@@ -316,19 +316,24 @@ type RecoveryPlan struct {
 }
 
 type RepairLoop struct {
-	State                string   `json:"state"`
-	AttemptCount         int      `json:"attemptCount"`
-	LastAttempt          int      `json:"lastAttempt,omitempty"`
-	LastRepairStepID     string   `json:"lastRepairStepId,omitempty"`
-	LastFailureStepID    string   `json:"lastFailureStepId,omitempty"`
-	LastFailureClass     string   `json:"lastFailureClass,omitempty"`
-	LastFailureSignature string   `json:"lastFailureSignature,omitempty"`
-	LastFailureAt        string   `json:"lastFailureAt,omitempty"`
-	NextAction           string   `json:"nextAction,omitempty"`
-	Escalated            bool     `json:"escalated"`
-	EscalationReason     string   `json:"escalationReason,omitempty"`
-	EscalationTicketID   string   `json:"escalationTicketId,omitempty"`
-	EvidenceRefs         []string `json:"evidenceRefs,omitempty"`
+	State                    string         `json:"state"`
+	AttemptCount             int            `json:"attemptCount"`
+	LastAttempt              int            `json:"lastAttempt,omitempty"`
+	LastRepairStepID         string         `json:"lastRepairStepId,omitempty"`
+	LastFailureStepID        string         `json:"lastFailureStepId,omitempty"`
+	LastFailureClass         string         `json:"lastFailureClass,omitempty"`
+	LastFailureSignature     string         `json:"lastFailureSignature,omitempty"`
+	LastFailureTargetScope   string         `json:"lastFailureTargetScope,omitempty"`
+	LastFailureAt            string         `json:"lastFailureAt,omitempty"`
+	StructuredFailureSignals map[string]any `json:"structuredFailureSignals,omitempty"`
+	RepairInputCompaction    map[string]any `json:"repairInputCompaction,omitempty"`
+	LastRepairInputBytes     int            `json:"lastRepairInputBytes,omitempty"`
+	RepeatedFailureReason    string         `json:"repeatedFailureReason,omitempty"`
+	NextAction               string         `json:"nextAction,omitempty"`
+	Escalated                bool           `json:"escalated"`
+	EscalationReason         string         `json:"escalationReason,omitempty"`
+	EscalationTicketID       string         `json:"escalationTicketId,omitempty"`
+	EvidenceRefs             []string       `json:"evidenceRefs,omitempty"`
 }
 
 type TaskProgress struct {
