@@ -1348,6 +1348,11 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		)
 	}
 	output = normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	var evidenceNormalizeErr error
+	output, evidenceNormalizeErr = o.normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, run, output)
+	if evidenceNormalizeErr != nil {
+		return evidenceNormalizeErr
+	}
 	step.Output = output
 	if err := o.steps.Update(ctx, step); err != nil {
 		return err
@@ -2368,15 +2373,16 @@ func assessmentOnlyContractCorrectionStepInput(step *runModel.Step, output map[s
 	input["assessmentOnlyContractViolationReason"] = errorString(violation)
 	input["allowedAssessmentOnlyCompletionStates"] = []string{"completed", "failed", "blocked_on_decision", "blocked_on_approval"}
 	stripAssessmentOnlyRecoveryMarkers(input)
-	sanitizeAssessmentOnlyExecutableFields(input)
+	stripAssessmentOnlyCorrectionHistory(input)
+	sanitizeAssessmentOnlyCorrectionFields(input)
 	for _, key := range []string{"previousStepOutput", "failedStepOutput"} {
 		if nested := mapFromValue(input[key]); len(nested) > 0 {
-			sanitizeAssessmentOnlyExecutableFields(nested)
+			sanitizeAssessmentOnlyCorrectionFields(nested)
 			input[key] = nested
 		}
 	}
 	if sanitized := cloneStepPayload(output); len(sanitized) > 0 {
-		sanitizeAssessmentOnlyExecutableFields(sanitized)
+		sanitizeAssessmentOnlyCorrectionFields(sanitized)
 		sanitized["assessmentOnlyContractViolation"] = true
 		input["previousInvalidAssessmentOutput"] = compactStepOutputForLLMContext(sanitized)
 	}
@@ -2406,8 +2412,95 @@ func stripAssessmentOnlyRecoveryMarkers(input map[string]any) {
 		"stateChangingOutputRequired",
 		"repairObjective",
 		"repairGuidance",
+		"repairActionPackage",
+		"patchRepairContext",
+		"patchRepairSuggestions",
+		"failureTargetRepairContext",
+		"readableResourceRepairContext",
+		"structuredFailureSignals",
+		"targetRepairAttempts",
+		"failureTargetScope",
 	} {
 		delete(input, key)
+	}
+}
+
+func stripAssessmentOnlyCorrectionHistory(input map[string]any) {
+	if input == nil {
+		return
+	}
+	for _, key := range []string{
+		"governanceHistory",
+		"replanContinuation",
+		"runtimeRepairContinuation",
+		"providerRetryContinuation",
+		"recoveryContinuation",
+		"failedStepInput",
+		"failedStepOutput",
+		"previousStepOutput",
+		"failedExecutionGraph",
+		stepInputKeyGraphEvidence,
+	} {
+		delete(input, key)
+	}
+}
+
+func sanitizeAssessmentOnlyCorrectionFields(payload map[string]any) {
+	sanitizeAssessmentOnlyExecutableFields(payload)
+	stripAssessmentOnlyCorrectionDecisionAndRecoveryFields(payload)
+}
+
+func stripAssessmentOnlyCorrectionDecisionAndRecoveryFields(payload map[string]any) {
+	if payload == nil {
+		return
+	}
+	for _, key := range []string{
+		stepOutputKeyLLMDecision,
+		"convertedDecision",
+		"requiredDecision",
+		"requiredApproval",
+		stepOutputKeyBlockDecisionReason,
+		stepOutputKeyBlockDecisionTicketID,
+		stepOutputKeyBlockDecisionKind,
+		stepOutputKeyBlockDecisionQuestion,
+		stepOutputKeyBlockDecisionContext,
+		"governanceHistory",
+		"replanContinuation",
+		"runtimeRepairContinuation",
+		"providerRetryContinuation",
+		"recoveryContinuation",
+		"resolutionPayload",
+		"ticketContext",
+		"recoveryPolicy",
+		"recoveryAction",
+		"repairActionPackage",
+		"patchRepairContext",
+		"patchRepairSuggestions",
+		"failureTargetRepairContext",
+		"readableResourceRepairContext",
+		"structuredFailureSignals",
+	} {
+		delete(payload, key)
+	}
+	for key, value := range payload {
+		switch typed := value.(type) {
+		case map[string]any:
+			stripAssessmentOnlyCorrectionDecisionAndRecoveryFields(typed)
+			payload[key] = typed
+		case []any:
+			for idx, item := range typed {
+				if nested, ok := item.(map[string]any); ok {
+					stripAssessmentOnlyCorrectionDecisionAndRecoveryFields(nested)
+					typed[idx] = nested
+				}
+			}
+			payload[key] = typed
+		case []map[string]any:
+			for idx := range typed {
+				stripAssessmentOnlyCorrectionDecisionAndRecoveryFields(typed[idx])
+			}
+			payload[key] = typed
+		}
 	}
 }
 

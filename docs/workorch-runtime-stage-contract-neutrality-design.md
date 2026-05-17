@@ -160,7 +160,11 @@ Runtime 在以下边界必须执行 active-run 一致性核对：
 
 若发现 workspace 指向终态 run，runtime 必须清空 `ActiveRunID`，并按终态 run 状态收敛 workspace 状态：`completed` 映射为 workspace `completed`，`failed` / `cancelled` / `superseded` 映射为 workspace `failed`。若该 run 存在已解决 replan 决策，服务层恢复扫描可以在 workspace 回到无 active run 的终态后继续调度 successor，但 core runtime 不得通过业务领域逻辑推断 successor 内容。
 
-Workspace outcome 投影必须优先反映最新终态证据：当最新终态 result 的时间不早于最新 run 事件时，outcome 应指向该 result 对应 run；当存在更新的终态 run 事件但该 run 尚无 result 时，outcome 应指向该最新 run 及其失败/终态原因。历史 accepted / rejected result 必须继续保留在 results 列表中，但不得覆盖更新 run 的终态状态。
+Workspace outcome 与 taskProgress 投影必须优先反映最新终态证据：当最新终态 result 的时间不早于最新 run 事件时，outcome / taskProgress 应共同指向该 result 对应 run；当存在更新的终态 run 事件但该 run 尚无 result 时，outcome / taskProgress 应指向该最新 run 及其失败/终态原因。历史 accepted / rejected result 必须继续保留在 results 列表中，但不得覆盖更新 run 的终态状态。若 snapshot / read model 中的 event records 因分页、保留窗口或恢复重放而滞后，更新的 terminal result 必须可以覆盖旧 run event，避免 workspace 已由最新 run 失败/完成但 outcome 或 taskProgress 仍投影到历史 run。
+
+Result 事件与持久化 marker 必须表达 result 的真实状态。`accepted` result 才能生成 `event/accepted` 标识；`rejected` result 必须生成 `event/rejected` 标识，即使当前事件 topic 仍用于通知 result materialized / refresh，也不得让 rejected result 在文件系统或 read model 中留下 accepted marker。
+
+Result summary / artifact summary 必须以 runtime 已记录事实为准进行最终校正。若同一 run 已存在已应用 patch、tool call、validation、artifact 等 state-changing 或 evidence 记录，accepted result、summaryDetail、result-summary artifact、deliverable-manifest 不得保留与这些事实矛盾的 LLM 自述，例如“仅 assessment-only”“无新增可执行操作”“不包含新的执行性修复”。Core 只允许基于中立 runtime evidence 类型做事实校正，不得推断该变更属于代码、测试、配置或任何具体业务领域；领域解释继续由 profile / template / soul 提供。
 
 Run observability / snapshot 的 outcome 也必须遵守同一语义：`superseded` run 的 outcome 首先表达该 run 已被后续 lineage 取代，而不是继续被其历史 `rejected` result 投影为 `failed`。换言之，`rejected -> superseded` 只保留为历史证据，不再是当前 run observability 的有效终态结论。
 
@@ -217,9 +221,11 @@ Runtime 必须拒绝：
 - `missingDeliverableCoverage` 中的每个条目都必须在 assessment-only correction 中成为独立的 `dodAssessment.deliverableCoverage.items[]` 条目；满足项必须复制 required deliverable id，并引用具体 `evidenceRefs` 或 `artifactRefs`。
 - runtime 可以为 `missingGoalCoverage` 附加中立 `evidenceCandidates`，候选来源只能是当前 run 已完成或失败 step 的 step id、kind、state、output 文本与 requirement 文本的通用匹配。候选证据不是自动通过依据，LLM 必须判断其 output 是否真实支持该 Goal leaf，并在满足时引用具体 `evidenceRefs`。
 - assessment-only correction 输出缺少可由 `missingGoalCoverage` 唯一确定的 requirement 文本或 `goalRequirementId` 时，runtime 可以在 completion gate 前进行中立 schema normalization：按条目顺序或稳定 ID / 文本匹配补齐 requirement 元数据，并剔除非可追踪 `evidenceRefs`；若满足项仅给出不可追踪引用，可回填该缺口的中立候选 step id。该 normalization 只修复合同结构和证据引用形态，不代表 runtime 自动接受候选证据的业务含义。
+- completion gate 在校验 `dodAssessment` 前必须基于 runtime evidence catalog 规范化 `evidenceRefs`：已完成 step、通过的 validation result、已应用 patch、tool call 等 runtime 已知证据可以作为 canonical evidence；LLM 输出的 graph node 别名、`runId/nodeId`、旧 `block/nodeId/patch/N`、`runId/<assessment-follow-up-step>-<node-id>` 等结构别名必须映射到 canonical step / validation / patch ref；别名匹配应支持 node id 的 `_` / `-` 等价与 graph step 顺序前缀剥离，但只能映射到同 run 内可追踪且可用的 runtime evidence。已知失败、无效、不可追踪或无法映射的引用必须从满足项中剔除。若剔除后某个 satisfied item 不再有有效 evidence，completion gate 必须拒绝该 assessment，而不能让历史失败 evidence 或 LLM 自造 ref 支撑 accepted result。
 - 若 LLM 将 `dodAssessment.goalCoverage`、`dodAssessment.acceptanceDimensions` 或 `dodAssessment.deliverableCoverage` 误输出为 bare array，runtime 可以在解析前中立规范化为 `{ "satisfied": <由 items 状态推断>, "items": [...] }`。该容错只修复 schema 形态，不得改变 item 文本、证据引用、artifact 引用或业务判断。
 - completion gate 因 `goalCoverage`、`acceptanceDimensions` 或 `deliverableCoverage` 缺失、未满足或结构不完整失败时，runtime 必须保留对应 coverage 诊断，并在后续 repair 中进入 assessment-only coverage correction；不得把纯 assessment 合同缺口误升级为普通 execution repair。
 - assessment-only correction 不得返回 executable work；只能返回 completed / failed `dodAssessment` 或真实治理 blocker。
+- assessment-only contract correction 的输入必须是 narrow assessment package：不得携带 `executionGraph`、patch/shell/tool/memory 可执行字段，也不得携带 `governanceHistory`、`replanContinuation`、历史 `convertedDecision/llmDecision`、state-changing repair action package、patch repair context 或 provider retry lineage。correction 只用于修正 assessment schema / coverage / evidence refs，不得被旧 replan 或 decision 语义诱导成新的执行规划。
 - 若 assessment-only correction 给出 failed assessment，但同一缺口仍存在候选证据或满足项矛盾，runtime 应在 repair budget 内再次派发 assessment-only correction，而不是立即写 rejected result。预算耗尽后才进入 rejected / blocked / replan 治理。
 - rejected result 的 `SourceRef` 应指向最终产生 rejection 的终态 assessment / repair step；root step、failed step、候选证据 step 应保留在 `EvidenceRefs` 中，确保终态来源与 lineage 都可追踪。
 
@@ -655,6 +661,10 @@ Stage input bundle 必须遵守：
   - patch repair 中已有目标 `file_write` 已改为安全条件放行：必须命中当前 repair target snapshot，且 snapshot 完整、未脱敏、可 file write，并且请求 `baseHash` 与 `contentHash` 完全一致；否则继续拒绝并要求使用最小 diff/edit 或重新读取目标。
   - rejected / partial LLM 输出中的 redacted marker 不再通过 `partialOutputPreview` 回流到 repair input，只保留 omitted 标记和不可复用原因。
   - `governanceHistory` 与 `replanContinuation` 的失败 lineage 改为 summary/ref-only，禁止把旧的 raw failure input/output、target content、LLM raw preview、stream events 或 provider/model 动态绑定复制进 successor run、step input 或 execution context package。
+  - assessment-only contract correction 输入已进一步隔离旧治理/重规划/决策/执行修复上下文，只保留评估补正必要字段和已清洗的 invalid assessment 摘要。
+  - workspace 终态 read model 已要求 `taskProgress` 与 `outcome` 使用同一最新终态 result / run 选择规则，避免 outcome 指向当前 rejected run 但 taskProgress 回退到历史 run。
+  - completion gate evidence ref 归一已补充 graph follow-up / assessment follow-up 派生别名映射：`run/<follow-up-step>-<node-id>`、`verify_full_test` / `verify-full-test`、`003-verify-full-test` 等中立结构别名可映射到同 run 内真实 graph step；不可追踪或失败证据继续剔除。
+  - accepted result / result-summary / deliverable-manifest 已增加 runtime 事实校正：同一 run 存在已应用 workspace 变更时，不再保留“仅 assessment-only / 无新增可执行操作”等与事实矛盾的 LLM 自述。
   - Step state event payload 改为 raw ref + compact summary，不再复制完整 step input/output；ToolCall runtime evidence 改为记录 step input/output refs 与摘要，不再把完整 step input 重复写入 `tool-calls/*/arguments.json`。
   - 该变更用于避免长流程 workspace 在 repair/replan 中反复 JSON clone/marshal/read/write，导致 CPU、内存和 payload 文件成倍膨胀。
 - 2026-05-17：

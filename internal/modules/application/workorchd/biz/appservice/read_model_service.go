@@ -1320,8 +1320,15 @@ func selectWorkspaceProjectionRun(workspace *workspacemodel.Workspace, runs []*r
 	if active != nil && !isTerminalProjectionRunState(active.State) {
 		return active
 	}
-	if latestByEvent := selectLatestRunByEvent(workspace.ID, runsByID, eventRecords); latestByEvent != nil {
-		return latestByEvent
+	latestEvent := selectLatestRunEvent(workspace.ID, runsByID, eventRecords)
+	if isTerminalProjectionState(string(workspace.State)) {
+		if result, resultRun := selectTerminalResultRun(workspace.ID, runsByID, results); resultRun != nil &&
+			(latestEvent == nil || resultModelNotBeforeEvent(result, latestEvent)) {
+			return resultRun
+		}
+	}
+	if latestEvent != nil {
+		return runsByID[latestEvent.RunID]
 	}
 	if resultRun := selectAcceptedResultRun(workspace.ID, runsByID, results); resultRun != nil {
 		return resultRun
@@ -1332,7 +1339,40 @@ func selectWorkspaceProjectionRun(workspace *workspacemodel.Workspace, runs []*r
 	return latest
 }
 
+func selectTerminalResultRun(workspaceID common.WorkspaceID, runs map[common.RunID]*runmodel.Run, results []*resultmodel.Result) (*resultmodel.Result, *runmodel.Run) {
+	var selected *resultmodel.Result
+	for _, item := range results {
+		if item == nil || item.WorkspaceID != workspaceID || item.RunID == "" {
+			continue
+		}
+		switch item.State {
+		case common.ResultStateAccepted, common.ResultStateRejected:
+		default:
+			continue
+		}
+		run := runs[item.RunID]
+		if run == nil || !isTerminalProjectionRunState(run.State) {
+			continue
+		}
+		if selected == nil || resultProjectionTime(item) >= resultProjectionTime(selected) {
+			selected = item
+		}
+	}
+	if selected == nil {
+		return nil, nil
+	}
+	return selected, runs[selected.RunID]
+}
+
 func selectLatestRunByEvent(workspaceID common.WorkspaceID, runs map[common.RunID]*runmodel.Run, eventRecords []*eventstreammodel.EventRecord) *runmodel.Run {
+	selected := selectLatestRunEvent(workspaceID, runs, eventRecords)
+	if selected == nil {
+		return nil
+	}
+	return runs[selected.RunID]
+}
+
+func selectLatestRunEvent(workspaceID common.WorkspaceID, runs map[common.RunID]*runmodel.Run, eventRecords []*eventstreammodel.EventRecord) *eventstreammodel.EventRecord {
 	var selected *eventstreammodel.EventRecord
 	for _, item := range eventRecords {
 		if item == nil || item.WorkspaceID != workspaceID || item.RunID == "" {
@@ -1353,7 +1393,7 @@ func selectLatestRunByEvent(workspaceID common.WorkspaceID, runs map[common.RunI
 	if selected == nil {
 		return nil
 	}
-	return runs[selected.RunID]
+	return selected
 }
 
 func mapWorkspaceWithRunProjection(workspace *workspacemodel.Workspace, run *runmodel.Run) Workspace {
@@ -1398,6 +1438,23 @@ func resultProjectionTime(item *resultmodel.Result) string {
 		return item.UpdatedAt
 	}
 	return item.CreatedAt
+}
+
+func resultModelNotBeforeEvent(result *resultmodel.Result, event *eventstreammodel.EventRecord) bool {
+	if result == nil || event == nil {
+		return result != nil
+	}
+	resultAt := resultProjectionTime(result)
+	eventAt := strings.TrimSpace(event.OccurredAt)
+	if resultAt == "" || eventAt == "" {
+		return resultAt >= eventAt
+	}
+	resultTime, resultErr := time.Parse(time.RFC3339Nano, resultAt)
+	eventTime, eventErr := time.Parse(time.RFC3339Nano, eventAt)
+	if resultErr == nil && eventErr == nil {
+		return !resultTime.Before(eventTime)
+	}
+	return resultAt >= eventAt
 }
 
 func workspaceProjectionState(runState common.RunState) common.WorkspaceState {
@@ -6041,6 +6098,11 @@ func latestWorkspaceRunForOutcome(snapshot WorkspaceSnapshot) *Run {
 		}
 	}
 	if selectedEvent != nil {
+		if result := latestTerminalWorkspaceResult(snapshot.Results); result != nil && resultNotBeforeEvent(*result, *selectedEvent) {
+			if run := runsByID[result.RunID]; run != nil {
+				return run
+			}
+		}
 		return runsByID[selectedEvent.RunID]
 	}
 	if result := latestTerminalWorkspaceResult(snapshot.Results); result != nil {

@@ -73,10 +73,14 @@ func (s *stubRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, request runti
 type requestCapturingRuntimeAdapter struct {
 	requests []runtimemodel.StepExecutionRequest
 	output   map[string]any
+	fn       func(runtimemodel.StepExecutionRequest) map[string]any
 }
 
 func (a *requestCapturingRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
 	a.requests = append(a.requests, request)
+	if a.fn != nil {
+		return runtimemodel.StepExecutionResult{Output: a.fn(request)}, nil
+	}
 	return runtimemodel.StepExecutionResult{Output: a.output}, nil
 }
 
@@ -7923,18 +7927,20 @@ func TestRuntimeOrchestrator_BlockerAutoResumePolicyMatrix(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			repos := newBlockerPolicyRepos()
-			runtime := &requestCapturingRuntimeAdapter{output: map[string]any{
-				"status": "completed",
-				"dodAssessment": map[string]any{
-					"satisfied":   true,
-					"summary":     "blocker policy resumed and completed",
-					"goalOutcome": "blocker policy resumed and completed",
-					"items": []map[string]any{{
-						"item":         "blocker policy verification",
-						"state":        "satisfied",
-						"evidenceRefs": []string{"policy-step"},
-					}},
-				},
+			runtime := &requestCapturingRuntimeAdapter{fn: func(request runtimemodel.StepExecutionRequest) map[string]any {
+				return map[string]any{
+					"status": "completed",
+					"dodAssessment": map[string]any{
+						"satisfied":   true,
+						"summary":     "blocker policy resumed and completed",
+						"goalOutcome": "blocker policy resumed and completed",
+						"items": []map[string]any{{
+							"item":         "blocker policy verification",
+							"state":        "satisfied",
+							"evidenceRefs": []string{string(request.StepID) + "/validation/runtime-step"},
+						}},
+					},
+				}
 			}}
 			orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
 				runtime,
@@ -13046,6 +13052,17 @@ func TestAssessmentOnlyContractCorrectionInputStripsRecoveryMarkersAndNestedExec
 			stepInputKeyRuntimeRepairFollowUp: true,
 			"stateChangingOutputRequired":     true,
 			"repairObjective":                 "produce_state_changing_output",
+			"governanceHistory": []map[string]any{{
+				"resolutionPayload": map[string]any{"recoveryAction": "replan"},
+			}},
+			"executionContextPackage": map[string]any{
+				"replanContinuation": map[string]any{
+					"resolutionPayload": map[string]any{"recoveryAction": "replan"},
+				},
+			},
+			"failedStepOutput": map[string]any{
+				"convertedDecision": map[string]any{"question": "choose a continuation"},
+			},
 			"previousStepOutput": map[string]any{
 				"llmDecision": map[string]any{
 					stepOutputKeyExecutionGraph: map[string]any{"nodes": []any{map[string]any{"id": "inspect", "kind": "file/list"}}},
@@ -13077,6 +13094,9 @@ func TestAssessmentOnlyContractCorrectionInputStripsRecoveryMarkersAndNestedExec
 		stepInputKeyRuntimeRepairFollowUp,
 		"stateChangingOutputRequired",
 		"repairObjective",
+		"governanceHistory",
+		"failedStepOutput",
+		"previousStepOutput",
 	} {
 		if _, ok := input[key]; ok {
 			t.Fatalf("correction input retained %s: %+v", key, input)
@@ -13085,17 +13105,16 @@ func TestAssessmentOnlyContractCorrectionInputStripsRecoveryMarkersAndNestedExec
 	if input[stepInputKeyAssessmentOnly] != true || input["assessmentOnlyContractCorrection"] != true {
 		t.Fatalf("correction input = %+v, want assessment-only correction markers", input)
 	}
-	previous := mapFromValue(input["previousStepOutput"])
-	if nested := mapFromValue(previous["llmDecision"]); nested[stepOutputKeyExecutionGraph] != nil || nested["patchRequests"] != nil {
-		t.Fatalf("previousStepOutput retained executable nested fields: %+v", previous)
-	}
-	items := previous["items"].([]any)
-	if item := mapFromValue(items[0]); item["shellCommands"] != nil {
-		t.Fatalf("previousStepOutput list retained shellCommands: %+v", previous)
+	executionContextPackage := mapFromValue(input["executionContextPackage"])
+	if executionContextPackage["replanContinuation"] != nil {
+		t.Fatalf("correction input retained nested replanContinuation: %+v", executionContextPackage)
 	}
 	invalid := mapFromValue(input["previousInvalidAssessmentOutput"])
 	if nested := mapFromValue(invalid["llmDecision"]); nested[stepOutputKeyExecutionGraph] != nil {
 		t.Fatalf("previousInvalidAssessmentOutput retained nested graph: %+v", invalid)
+	}
+	if invalid["llmDecision"] != nil {
+		t.Fatalf("previousInvalidAssessmentOutput retained llmDecision: %+v", invalid)
 	}
 }
 
@@ -15962,6 +15981,97 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsRejectedOnlyRequirement(t *t
 	}
 }
 
+func TestCompletionGateNormalizesEvidenceRefsToCanonicalUsableRuntimeEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			ValidationResults: validationRepo,
+		},
+	}
+	runID := common.RunID("run-dod-evidence-normalize")
+	validStepID := common.StepID(runID + "/graph-001/003-verify-full-regression")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    validStepID,
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateCompleted,
+		Input: map[string]any{"graphNodeId": "verify_full_regression"},
+	}); err != nil {
+		t.Fatalf("seed valid step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(runID + "/follow-up-graph-planning-001-verify_full_regression"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage": "llm_dod_assessment",
+			"error": "coverage correction needed",
+		},
+	}); err != nil {
+		t.Fatalf("seed follow-up assessment step: %v", err)
+	}
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:              common.ValidationResultID(string(validStepID) + "/validation/runtime-step"),
+		WorkspaceID:     "ws-dod-evidence-normalize",
+		RunID:           runID,
+		StepID:          validStepID,
+		ValidationKind:  "runtime_step",
+		State:           common.ValidationResultStatePassed,
+		EvidenceQuality: common.EvidenceQualityValid,
+	}); err != nil {
+		t.Fatalf("seed valid validation: %v", err)
+	}
+	oldFailedStepID := common.StepID("run-old/graph-025/002-verify-targeted-streaming-fallback-tests")
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:              common.ValidationResultID(string(oldFailedStepID) + "/validation/runtime-step"),
+		WorkspaceID:     "ws-dod-evidence-normalize",
+		RunID:           "run-old",
+		StepID:          oldFailedStepID,
+		ValidationKind:  "runtime_step",
+		State:           common.ValidationResultStateFailed,
+		EvidenceQuality: common.EvidenceQualityInvalid,
+		EvidenceReason:  "runtime step failed",
+	}); err != nil {
+		t.Fatalf("seed failed validation: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		DoDID:           "dod-dod-evidence-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "done",
+			"items": []map[string]any{{
+				"item":         "full regression",
+				"state":        "satisfied",
+				"evidenceRefs": []string{string(runID) + "/follow-up-graph-planning-001-verify_full_regression", string(runID) + "/verify_full_regression", string(oldFailedStepID)},
+			}},
+		},
+	}
+
+	normalized, err := orch.normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, run, output)
+	if err != nil {
+		t.Fatalf("normalizeCompletionGateDoDAssessmentEvidenceRefs: %v", err)
+	}
+	assessment := doDAssessmentFromOutput(normalized)
+	items, _ := doDAssessmentItemMaps(assessment["items"])
+	if len(items) != 1 {
+		t.Fatalf("items = %+v, want one normalized item", items)
+	}
+	if got := evidenceRefsFromValue(items[0]["evidenceRefs"]); !reflect.DeepEqual(got, []string{string(validStepID)}) {
+		t.Fatalf("evidenceRefs = %+v, want canonical valid step only", got)
+	}
+	if err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, assessment); err != nil {
+		t.Fatalf("validate normalized evidence: %v", err)
+	}
+}
+
 func TestRuntimeOrchestrator_RecordsRejectedResultForUnsatisfiedDoDAssessment(t *testing.T) {
 	ctx := context.Background()
 	resultRepo := memory.NewResultRepository()
@@ -16104,6 +16214,51 @@ func TestRuntimeOrchestrator_RecordsRejectedResultForWeakSatisfiedDoDAssessment(
 	}
 	if !strings.Contains(result.Summary, "DoD assessment rejected") {
 		t.Fatalf("result summary = %q, want rejected weak evidence summary", result.Summary)
+	}
+}
+
+func TestRuntimeOrchestrator_RejectedResultPublishesRejectedEventID(t *testing.T) {
+	ctx := context.Background()
+	resultRepo := memory.NewResultRepository()
+	eventHub := events.NewMemoryHub()
+	orch := &RuntimeOrchestrator{
+		eventHub: eventHub,
+		evidence: RuntimeEvidenceRepositories{
+			Results: resultRepo,
+		},
+	}
+	runID := common.RunID("run-rejected-event-id")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-rejected-event-id",
+		GoalID:          "goal-rejected-event-id",
+		DoDID:           "dod-rejected-event-id",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{ID: common.StepID(string(runID) + "/assessment"), RunID: runID}
+
+	if err := orch.recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": false,
+			"summary":   "not satisfied",
+			"items": []map[string]any{{
+				"item":  "required outcome",
+				"state": "failed",
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("record rejected result: %v", err)
+	}
+
+	published := eventHub.Published()
+	if len(published) != 1 {
+		t.Fatalf("published events = %+v, want one result event", published)
+	}
+	if !strings.HasSuffix(published[0].ID, "/event/rejected") {
+		t.Fatalf("event ID = %q, want rejected suffix", published[0].ID)
+	}
+	if strings.HasSuffix(published[0].ID, "/event/accepted") {
+		t.Fatalf("event ID = %q, rejected result must not use accepted marker", published[0].ID)
 	}
 }
 
@@ -17374,6 +17529,9 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludePatchDiff(t *testing.T) {
 		WorkspaceID:     workspaceID,
 		DoDID:           "dod-result-patch-diff",
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: map[string]any{
+			"dialogLanguage": "zh-CN",
+		},
 	}
 	step := &runmodel.Step{
 		ID:    stepID,
@@ -17405,8 +17563,8 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludePatchDiff(t *testing.T) {
 				"evidenceRefs": []string{string(stepID)},
 			},
 		},
-		"summary":               "DoD satisfied with patch diff",
-		"implementationSummary": "Updated internal/example.go.",
+		"summary":               "本次仅执行 assessment-only 评估，无新增可执行操作。",
+		"implementationSummary": "本步为评估收敛，不包含新的执行性修复。",
 		"verificationSummary":   "Patch was applied and captured as evidence.",
 	}
 	artifactRepo := memory.NewArtifactRepository()
@@ -17419,7 +17577,7 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludePatchDiff(t *testing.T) {
 		},
 	}
 
-	if err := orch.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied with patch diff", nil); err != nil {
+	if err := orch.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, "本次仅执行 assessment-only 评估，无新增可执行操作。", nil); err != nil {
 		t.Fatalf("record result from validated assessment: %v", err)
 	}
 	results, err := resultRepo.ListByRun(ctx, runID)
@@ -17428,6 +17586,13 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludePatchDiff(t *testing.T) {
 	}
 	if len(results) != 1 {
 		t.Fatalf("results = %+v, want one accepted result", results)
+	}
+	if strings.Contains(results[0].Summary, "无新增可执行") ||
+		strings.Contains(results[0].DoDAssessment.Summary, "无新增可执行") ||
+		strings.Contains(results[0].SummaryDetail.ImplementationSummary, "不包含新的执行性修复") ||
+		!strings.Contains(results[0].Summary, "runtime 记录到 1 个已应用的 workspace 变更") ||
+		!strings.Contains(results[0].SummaryDetail.ImplementationSummary, "internal/example.go") {
+		t.Fatalf("result summary/detail = %+v, want runtime fact-corrected applied workspace change summary", results[0])
 	}
 	if !reflect.DeepEqual(results[0].ArtifactRefs, []common.ArtifactID{
 		common.ArtifactID(string(runID) + "/artifact/result-summary"),
@@ -17463,6 +17628,11 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludePatchDiff(t *testing.T) {
 	}
 	if summaryArtifact == nil || !strings.Contains(summaryArtifact.Summary, string(diffArtifact.ID)) {
 		t.Fatalf("summary artifact = %+v, want patch diff artifact ref", summaryArtifact)
+	}
+	if strings.Contains(summaryArtifact.Summary, "无新增可执行") ||
+		strings.Contains(summaryArtifact.Summary, "不包含新的执行性修复") ||
+		!strings.Contains(summaryArtifact.Summary, "runtime 记录到 1 个已应用的 workspace 变更") {
+		t.Fatalf("summary artifact = %s, want runtime fact-corrected content", summaryArtifact.Summary)
 	}
 	if manifestArtifact == nil || !strings.Contains(manifestArtifact.Summary, "## Workspace Change Evidence") || !strings.Contains(manifestArtifact.Summary, string(patchID)) {
 		t.Fatalf("manifest artifact = %+v, want patch evidence section", manifestArtifact)

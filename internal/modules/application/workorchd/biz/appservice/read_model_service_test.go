@@ -3971,6 +3971,85 @@ func TestReadWorkspaceSnapshotProjectsLatestRunFailureOverHistoricalAcceptedResu
 	}
 }
 
+func TestReadWorkspaceSnapshotTaskProgressUsesLatestTerminalRejectedResult(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-terminal-rejected-progress")
+	oldRunID := common.RunID("run-old-failed")
+	currentRunID := common.RunID("run-current-rejected")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:    workspaceID,
+		Title: "terminal rejected progress",
+		State: common.WorkspaceStateFailed,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	for _, item := range []struct {
+		id     common.RunID
+		reason string
+	}{
+		{oldRunID, "old failed run"},
+		{currentRunID, "current rejected run"},
+	} {
+		if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+			ID:            item.id,
+			WorkspaceID:   workspaceID,
+			State:         common.RunStateFailed,
+			FailureReason: item.reason,
+		}); err != nil {
+			t.Fatalf("create run %s: %v", item.id, err)
+		}
+	}
+	if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
+		ID:          common.ResultID(string(oldRunID) + "/result/dod-assessment"),
+		WorkspaceID: workspaceID,
+		RunID:       oldRunID,
+		State:       common.ResultStateRejected,
+		Summary:     "old rejected result",
+		CreatedAt:   "2026-05-17T07:03:52Z",
+		UpdatedAt:   "2026-05-17T07:03:52Z",
+	}); err != nil {
+		t.Fatalf("create old result: %v", err)
+	}
+	if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
+		ID:          common.ResultID(string(currentRunID) + "/result/dod-assessment"),
+		WorkspaceID: workspaceID,
+		RunID:       currentRunID,
+		State:       common.ResultStateRejected,
+		Summary:     "current rejected result",
+		CreatedAt:   "2026-05-17T12:31:45Z",
+		UpdatedAt:   "2026-05-17T12:31:45Z",
+	}); err != nil {
+		t.Fatalf("create current result: %v", err)
+	}
+	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
+		ID:          common.EventRecordID("evt-old-failed-before-current-result"),
+		Version:     events.WorkorchEventVersion,
+		Topic:       events.TopicRunStateChanged,
+		OccurredAt:  "2026-05-17T12:30:00Z",
+		SubjectType: "run",
+		SubjectID:   string(oldRunID),
+		WorkspaceID: workspaceID,
+		RunID:       oldRunID,
+		Payload:     map[string]any{events.PayloadKeyState: string(common.RunStateFailed)},
+	}); err != nil {
+		t.Fatalf("append stale event: %v", err)
+	}
+
+	snapshot, err := ReadWorkspaceSnapshotWithBackend(context.Background(), "file", dataRoot, string(workspaceID))
+	if err != nil {
+		t.Fatalf("ReadWorkspaceSnapshotWithBackend: %v", err)
+	}
+	if snapshot.Outcome.RunID != string(currentRunID) || snapshot.Outcome.ResultID != string(currentRunID)+"/result/dod-assessment" {
+		t.Fatalf("outcome = %+v, want current rejected result", snapshot.Outcome)
+	}
+	if snapshot.TaskProgress.RunID != string(currentRunID) || snapshot.TaskProgress.State != string(common.RunStateFailed) {
+		t.Fatalf("task progress = %+v, want same current rejected run as outcome", snapshot.TaskProgress)
+	}
+}
+
 func TestMapWorkspaceOutcomePrefersLatestTerminalRunOverStaleTaskProgress(t *testing.T) {
 	olderRunID := "run-older-accepted"
 	latestRunID := "run-latest-accepted"
@@ -4241,5 +4320,65 @@ func TestMapWorkspaceOutcomeUsesLatestRunEventOverHistoricalAcceptedResult(t *te
 	}
 	if outcome.ResultID != "" || outcome.Reason != "latest verification failed" {
 		t.Fatalf("outcome = %+v, want failed run reason without historical accepted result", outcome)
+	}
+}
+
+func TestMapWorkspaceOutcomeUsesNewerTerminalResultOverStaleRunEvents(t *testing.T) {
+	snapshot := WorkspaceSnapshot{
+		Workspace: Workspace{
+			ID:    "ws-newer-terminal-result",
+			State: string(common.WorkspaceStateFailed),
+		},
+		Runs: []Run{
+			{
+				ID:            "run-old-failed",
+				WorkspaceID:   "ws-newer-terminal-result",
+				State:         string(common.RunStateFailed),
+				FailureReason: "old failed run",
+			},
+			{
+				ID:            "run-current-failed",
+				WorkspaceID:   "ws-newer-terminal-result",
+				State:         string(common.RunStateFailed),
+				FailureReason: "current failed run",
+			},
+		},
+		Results: []Result{
+			{
+				ID:          "run-old-failed/result/dod-assessment",
+				WorkspaceID: "ws-newer-terminal-result",
+				RunID:       "run-old-failed",
+				State:       string(common.ResultStateRejected),
+				Summary:     "old rejected result",
+				CreatedAt:   "2026-05-17T07:03:52Z",
+				UpdatedAt:   "2026-05-17T07:03:52Z",
+			},
+			{
+				ID:          "run-current-failed/result/dod-assessment",
+				WorkspaceID: "ws-newer-terminal-result",
+				RunID:       "run-current-failed",
+				State:       string(common.ResultStateRejected),
+				Summary:     "current rejected result",
+				CreatedAt:   "2026-05-17T11:48:05Z",
+				UpdatedAt:   "2026-05-17T11:48:05Z",
+			},
+		},
+		EventRecords: []EventRecord{
+			{
+				ID:          "evt-old-run-state",
+				Topic:       events.TopicRunStateChanged,
+				OccurredAt:  "2026-05-17T07:01:03Z",
+				WorkspaceID: "ws-newer-terminal-result",
+				RunID:       "run-old-failed",
+			},
+		},
+	}
+
+	outcome := mapWorkspaceOutcome(snapshot)
+	if outcome.RunID != "run-current-failed" || outcome.ResultID != "run-current-failed/result/dod-assessment" {
+		t.Fatalf("outcome = %+v, want newer terminal result over stale run event", outcome)
+	}
+	if outcome.Summary != "current rejected result" || outcome.State != "failed" || outcome.Accepted {
+		t.Fatalf("outcome = %+v, want current failed rejected result", outcome)
 	}
 }

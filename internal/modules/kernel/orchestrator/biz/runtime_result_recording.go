@@ -53,6 +53,8 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 	now := runtimeEvidenceTimestamp()
 	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
 	patchDetails := o.resultPatchDetails(ctx, run.ID)
+	assessment, summary = resultAssessmentWithRuntimeFacts(run, assessment, summary, patchDetails)
+	evidenceRefs = doDAssessmentEvidenceRefs(step.ID, assessment)
 	webSourceDetails := o.resultWebSourceDetails(ctx, run.ID)
 	expectedArtifactRefs := expectedCompletionArtifactRefs(run, patchDetails, webSourceDetails)
 	manifestCh := make(chan string, 1)
