@@ -4104,3 +4104,59 @@ func containsResultQualityIssueCode(items []ResultQualityIssue, code string) boo
 	}
 	return false
 }
+
+func TestMapWorkspaceOutcomeUsesLatestTerminalResult(t *testing.T) {
+	snapshot := WorkspaceSnapshot{
+		Workspace: Workspace{
+			ID:    "ws-outcome-latest-result",
+			State: string(common.WorkspaceStateFailed),
+		},
+		Runs: []Run{
+			{
+				ID:            "run-old",
+				WorkspaceID:   "ws-outcome-latest-result",
+				State:         string(common.RunStateFailed),
+				FailureReason: "old failure",
+			},
+			{
+				ID:            "run-new",
+				WorkspaceID:   "ws-outcome-latest-result",
+				State:         string(common.RunStateFailed),
+				FailureReason: "new failure",
+			},
+		},
+		Results: []Result{
+			{
+				ID:           "run-old/result/dod-assessment",
+				WorkspaceID:  "ws-outcome-latest-result",
+				RunID:        "run-old",
+				State:        string(common.ResultStateRejected),
+				Summary:      "old rejected result",
+				EvidenceRefs: []string{"run-old/step-1"},
+				CreatedAt:    "2026-05-17T07:03:52Z",
+				UpdatedAt:    "2026-05-17T07:03:52Z",
+			},
+			{
+				ID:           "run-new/result/dod-assessment",
+				WorkspaceID:  "ws-outcome-latest-result",
+				RunID:        "run-new",
+				State:        string(common.ResultStateRejected),
+				Summary:      "new schema rejected result",
+				EvidenceRefs: []string{"run-new/assessment"},
+				CreatedAt:    "2026-05-17T07:12:30Z",
+				UpdatedAt:    "2026-05-17T07:12:30Z",
+			},
+		},
+	}
+
+	outcome := mapWorkspaceOutcome(snapshot)
+	if outcome.RunID != "run-new" {
+		t.Fatalf("outcome runId = %q, want latest terminal result run", outcome.RunID)
+	}
+	if outcome.ResultID != "run-new/result/dod-assessment" || outcome.Summary != "new schema rejected result" {
+		t.Fatalf("outcome = %+v, want latest rejected result summary", outcome)
+	}
+	if outcome.State != "failed" || outcome.Accepted {
+		t.Fatalf("outcome state/accepted = %q/%v, want failed false", outcome.State, outcome.Accepted)
+	}
+}

@@ -1692,7 +1692,110 @@ func validateRepairPatchTargetRelevance(step *runModel.Step, request runtimePatc
 	if repairPatchTargetRefMatches(request.TargetRef, targetRefs) {
 		return nil
 	}
+	if repairPatchTargetRefIsRelatedPrerequisite(step.Input, request.TargetRef, targetRefs) {
+		return nil
+	}
 	return fmt.Errorf("%w: runtime repair patch/apply target %q is not related to failure target scope %v; patch a current failure target or return a failed assessment/blocker", common.ErrInvalidArgument, request.TargetRef, limitedStrings(targetRefs, 5))
+}
+
+func repairPatchTargetRefIsRelatedPrerequisite(input map[string]any, targetRef string, allowed []string) bool {
+	targetRef = normalizeRepairPatchTargetRef(targetRef)
+	if len(input) == 0 || targetRef == "" || len(allowed) == 0 {
+		return false
+	}
+	if !repairFailureIndicatesDependencyMetadataPrerequisite(input) || !dependencyMetadataTargetRef(targetRef) {
+		return false
+	}
+	for _, candidate := range allowed {
+		if repairPatchTargetsShareDirectory(targetRef, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func repairFailureIndicatesDependencyMetadataPrerequisite(input map[string]any) bool {
+	texts := []string{
+		stringFromMap(input, "failureReason"),
+		stringFromMap(input, "failureTargetScope"),
+		stringFromMap(input, failureOutputKeySignature),
+		stringFromMap(input, stepInputKeyRepairOfFailureSig),
+	}
+	for _, key := range []string{"failedStepOutput", "previousStepOutput", "structuredFailureSignals", "repairActionPackage"} {
+		if text := flattenCoverageEvidenceText(input[key], 0); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	text := strings.ToLower(strings.Join(texts, "\n"))
+	if text == "" {
+		return false
+	}
+	hasFailure := strings.Contains(text, "missing") ||
+		strings.Contains(text, "not found") ||
+		strings.Contains(text, "no such") ||
+		strings.Contains(text, "required") ||
+		strings.Contains(text, "checksum") ||
+		strings.Contains(text, "lock")
+	hasPrerequisite := strings.Contains(text, "depend") ||
+		strings.Contains(text, "module") ||
+		strings.Contains(text, "package") ||
+		strings.Contains(text, "manifest") ||
+		strings.Contains(text, "metadata") ||
+		strings.Contains(text, "checksum") ||
+		strings.Contains(text, "lock")
+	return hasFailure && hasPrerequisite
+}
+
+func dependencyMetadataTargetRef(targetRef string) bool {
+	targetRef = normalizeRepairPatchTargetRef(targetRef)
+	if targetRef == "" {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(targetRef))
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(base)), ".")
+	stem := strings.TrimSuffix(base, "."+ext)
+	for _, token := range []string{
+		"dependency",
+		"dependencies",
+		"deps",
+		"lock",
+		"checksum",
+		"checksums",
+		"sum",
+		"sums",
+		"manifest",
+		"module",
+		"modules",
+		"package",
+		"packages",
+		"requirements",
+	} {
+		if base == token || stem == token || ext == token ||
+			strings.Contains(base, token+".") ||
+			strings.Contains(base, "."+token) ||
+			strings.Contains(base, "-"+token) ||
+			strings.Contains(base, "_"+token) {
+			return true
+		}
+	}
+	return false
+}
+
+func repairPatchTargetsShareDirectory(targetRef string, candidate string) bool {
+	targetRef = normalizeRepairPatchTargetRef(targetRef)
+	candidate = normalizeRepairPatchTargetRef(candidate)
+	if targetRef == "" || candidate == "" {
+		return false
+	}
+	targetDir := filepath.ToSlash(filepath.Dir(targetRef))
+	candidateDir := filepath.ToSlash(filepath.Dir(candidate))
+	if targetDir == "." {
+		targetDir = ""
+	}
+	if candidateDir == "." {
+		candidateDir = ""
+	}
+	return targetDir == candidateDir
 }
 
 func validateLLMCoverageGapRepairIntent(step *runModel.Step, output map[string]any) error {
@@ -1974,6 +2077,9 @@ func validateLLMFollowUpGraphStateChangingContract(run *runModel.Run, step *runM
 		return validateStateChangingExecutionGraph(graph)
 	}
 	if hasStateChangingLLMExecutionOutput(output) {
+		return nil
+	}
+	if stage == runtimeStageVerification && graphIsConcreteValidationEvidenceGraph(graph) {
 		return nil
 	}
 	if llmFollowUpGraphRequiresStateChangingPatch(step) || stage == runtimeStageVerification {

@@ -1338,6 +1338,10 @@ func ParseLLMExecutionDecision(payload []byte) (llmmodels.LLMExecutionDecision, 
 	if err := validateLLMDecisionTopLevelFields(raw); err != nil {
 		return llmmodels.LLMExecutionDecision{}, err
 	}
+	normalized, err = normalizeLLMDecisionSchemaPayload(normalized)
+	if err != nil {
+		return llmmodels.LLMExecutionDecision{}, err
+	}
 	var decision llmmodels.LLMExecutionDecision
 	if err := json.Unmarshal(normalized, &decision); err != nil {
 		return llmmodels.LLMExecutionDecision{}, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
@@ -1370,6 +1374,52 @@ func validateLLMDecisionTopLevelFields(raw map[string]json.RawMessage) error {
 		}
 	}
 	return nil
+}
+
+func normalizeLLMDecisionSchemaPayload(payload []byte) ([]byte, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		return payload, nil
+	}
+	assessment, ok := doc["dodAssessment"].(map[string]any)
+	if !ok || len(assessment) == 0 {
+		return payload, nil
+	}
+	changed := false
+	for _, key := range []string{"goalCoverage", "acceptanceDimensions", "deliverableCoverage"} {
+		if items, ok := assessment[key].([]any); ok {
+			assessment[key] = map[string]any{
+				"satisfied": coverageItemsSatisfied(items),
+				"items":     items,
+			}
+			changed = true
+		}
+	}
+	if !changed {
+		return payload, nil
+	}
+	doc["dodAssessment"] = assessment
+	normalized, err := json.Marshal(doc)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
+	}
+	return normalized, nil
+}
+
+func coverageItemsSatisfied(items []any) bool {
+	if len(items) == 0 {
+		return false
+	}
+	for _, item := range items {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			return false
+		}
+		if !strings.EqualFold(strings.TrimSpace(stringValue(entry["state"])), "satisfied") {
+			return false
+		}
+	}
+	return true
 }
 
 func NormalizeLLMDecisionPayload(payload []byte) ([]byte, error) {

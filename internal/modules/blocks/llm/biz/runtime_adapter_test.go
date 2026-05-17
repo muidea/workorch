@@ -1627,6 +1627,35 @@ func TestParseLLMExecutionDecisionRejectsCompletedDoDWithoutSummary(t *testing.T
 	}
 }
 
+func TestParseLLMExecutionDecisionNormalizesBareCoverageArrays(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"completed",
+		"dodAssessment":{
+			"satisfied":true,
+			"summary":"done",
+			"items":[{"item":"done","state":"satisfied","evidenceRefs":["run-1/step-1"]}],
+			"goalCoverage":[{"requirement":"goal leaf","state":"satisfied","evidenceRefs":["run-1/step-1"]}],
+			"acceptanceDimensions":[{"id":"runtime_entrypoint","state":"failed","reason":"missing evidence"}],
+			"deliverableCoverage":[{"id":"user_deliverable","state":"satisfied","artifactRefs":["artifact-1"]}]
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	if decision.DoDAssessment == nil || decision.DoDAssessment.GoalCoverage == nil || decision.DoDAssessment.AcceptanceDimensions == nil || decision.DoDAssessment.DeliverableCoverage == nil {
+		t.Fatalf("coverage = %+v, want normalized coverage objects", decision.DoDAssessment)
+	}
+	if !decision.DoDAssessment.GoalCoverage.Satisfied {
+		t.Fatalf("goalCoverage.satisfied = false, want inferred true")
+	}
+	if decision.DoDAssessment.AcceptanceDimensions.Satisfied {
+		t.Fatalf("acceptanceDimensions.satisfied = true, want inferred false")
+	}
+	if got := decision.DoDAssessment.DeliverableCoverage.Items[0].ArtifactRefs; !reflect.DeepEqual(got, []string{"artifact-1"}) {
+		t.Fatalf("deliverable artifactRefs = %+v, want preserved refs", got)
+	}
+}
+
 func TestParseLLMExecutionDecisionAcceptsMarkdownFencedJSONObject(t *testing.T) {
 	decision, err := ParseLLMExecutionDecision([]byte("```json\n{\"completionState\":\"continue\"}\n```"))
 	if err != nil {

@@ -378,6 +378,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 				"Return completed or failed with dodAssessment, or a real requiredDecision/requiredApproval",
 				"When Goal requirements are not textually identical to DoD items, include dodAssessment.goalCoverage with item-level evidenceRefs",
 				"When executionContract.profileContracts declares required acceptanceDimensions or deliverableExpectations, include dodAssessment.acceptanceDimensions and dodAssessment.deliverableCoverage with item-level evidenceRefs or artifactRefs for every required id",
+				"dodAssessment.goalCoverage, dodAssessment.acceptanceDimensions, and dodAssessment.deliverableCoverage must be objects shaped as {\"satisfied\":boolean,\"items\":[...]}; never return these coverage fields as bare arrays",
 				"Treat runtimeStage=verification or acceptance as strict convergence stages; do not reopen exploration or broad planning in these stages",
 				"Before returning blocked_on_decision, reconcile the question with the current, decision, planning, and execution Soul policies; do not ask for information that those policies explicitly say is not required",
 				"When evidence is insufficient but the missing work can be handled by later runtime repair or replan, return failed with dodAssessment.nextActions instead of asking the user to choose the execution target",

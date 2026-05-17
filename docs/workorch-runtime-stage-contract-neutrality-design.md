@@ -130,7 +130,7 @@ Runtime repair / duplicate / replan 治理必须同时识别两类中立 scope�
 
 当失败签名不包含目标级 scope 时，runtime 不得臆造业务目标，也不得把无目标失败合并为同一预算；此时继续按完整失败签名、root step 或显式 lineage scope 收敛。
 
-当一个非 repair-follow-up 的当前失败 step 同时携带历史 `repairOfFailureSignature` 和自身 `failureSignature` 时，scope 判定必须优先使用当前失败 step 输出中的 `failureSignature` / `failureClass`。历史 repair lineage 只能作为上下文与来源说明，不得覆盖当前失败证据。只有真正的 repair-follow-up step 才可以继续按其 `repairOfFailureSignature` 归入原始 repair scope。该规则适用于所有中立失败类型，尤其用于避免“上一轮失败签名”串线到新的执行超时、验证失败或能力 contract violation。
+当当前失败 step 同时携带历史 `repairOfFailureSignature` 和自身 `failureSignature` 时，scope 判定必须优先使用当前失败 step 输出中的 `failureSignature` / `failureClass`。历史 repair lineage 只能作为上下文与来源说明，不得覆盖当前失败证据。真正的 provider/runtime 调度外壳若只记录了 provider retry 状态且没有新的有效失败签名，可以继续按原始 repair scope 计数；除此以外，repair-follow-up 自身产生的 runtime contract violation、patch contract violation、验证失败或能力失败都必须作为当前失败证据进入下一轮治理。该规则适用于所有中立失败类型，尤其用于避免“上一轮失败签名”串线到新的执行超时、验证失败或能力 contract violation。
 
 若当前失败签名包含短目标引用，runtime 可以用当前 workspace manifest 做唯一后缀解析，以便把失败证据定位到实际资源；若存在多个候选，必须保留原始短引用并标记为未确定目标，不得猜测具体资源。该解析只基于 workspace 中已知资源路径这一中立事实，不得依赖文件类型、语言、测试框架或业务约定。
 
@@ -159,6 +159,8 @@ Runtime 在以下边界必须执行 active-run 一致性核对：
 - runtime 验证脚本核对 workspace/run 执行过程时。
 
 若发现 workspace 指向终态 run，runtime 必须清空 `ActiveRunID`，并按终态 run 状态收敛 workspace 状态：`completed` 映射为 workspace `completed`，`failed` / `cancelled` / `superseded` 映射为 workspace `failed`。若该 run 存在已解决 replan 决策，服务层恢复扫描可以在 workspace 回到无 active run 的终态后继续调度 successor，但 core runtime 不得通过业务领域逻辑推断 successor 内容。
+
+Workspace outcome 投影必须优先反映最新终态证据：当最新终态 result 的时间不早于最新 run 事件时，outcome 应指向该 result 对应 run；当存在更新的终态 run 事件但该 run 尚无 result 时，outcome 应指向该最新 run 及其失败/终态原因。历史 accepted / rejected result 必须继续保留在 results 列表中，但不得覆盖更新 run 的终态状态。
 
 ## 阶段内约束模式
 
@@ -212,6 +214,7 @@ Runtime 必须拒绝：
 - `missingDeliverableCoverage` 中的每个条目都必须在 assessment-only correction 中成为独立的 `dodAssessment.deliverableCoverage.items[]` 条目；满足项必须复制 required deliverable id，并引用具体 `evidenceRefs` 或 `artifactRefs`。
 - runtime 可以为 `missingGoalCoverage` 附加中立 `evidenceCandidates`，候选来源只能是当前 run 已完成或失败 step 的 step id、kind、state、output 文本与 requirement 文本的通用匹配。候选证据不是自动通过依据，LLM 必须判断其 output 是否真实支持该 Goal leaf，并在满足时引用具体 `evidenceRefs`。
 - assessment-only correction 输出缺少可由 `missingGoalCoverage` 唯一确定的 requirement 文本或 `goalRequirementId` 时，runtime 可以在 completion gate 前进行中立 schema normalization：按条目顺序或稳定 ID / 文本匹配补齐 requirement 元数据，并剔除非可追踪 `evidenceRefs`；若满足项仅给出不可追踪引用，可回填该缺口的中立候选 step id。该 normalization 只修复合同结构和证据引用形态，不代表 runtime 自动接受候选证据的业务含义。
+- 若 LLM 将 `dodAssessment.goalCoverage`、`dodAssessment.acceptanceDimensions` 或 `dodAssessment.deliverableCoverage` 误输出为 bare array，runtime 可以在解析前中立规范化为 `{ "satisfied": <由 items 状态推断>, "items": [...] }`。该容错只修复 schema 形态，不得改变 item 文本、证据引用、artifact 引用或业务判断。
 - completion gate 因 `goalCoverage`、`acceptanceDimensions` 或 `deliverableCoverage` 缺失、未满足或结构不完整失败时，runtime 必须保留对应 coverage 诊断，并在后续 repair 中进入 assessment-only coverage correction；不得把纯 assessment 合同缺口误升级为普通 execution repair。
 - assessment-only correction 不得返回 executable work；只能返回 completed / failed `dodAssessment` 或真实治理 blocker。
 - 若 assessment-only correction 给出 failed assessment，但同一缺口仍存在候选证据或满足项矛盾，runtime 应在 repair budget 内再次派发 assessment-only correction，而不是立即写 rejected result。预算耗尽后才进入 rejected / blocked / replan 治理。
@@ -372,6 +375,8 @@ State-changing repair 必须满足目标相关性约束。若 repair 输入已�
 
 该约束属于 core runtime 的中立合同，只比较结构化目标引用、target snapshot 和 capability input，不解释文件类型、测试框架、编程语言或业务正确性。Core 可以判断“patch target 与失败目标不相关”，但不能判断“某个业务文件应如何修改”。当没有任何显式目标引用时，runtime 不得臆造目标；此时只能依赖 capability contract、LLM 输出和后续 evidence 判断。
 
+若失败证据本身明确指向依赖、manifest、metadata、checksum、lock 等配套资源缺失，state-changing repair 可以写入与失败目标同目录的中立配套元数据目标。该放宽只基于失败文本中的通用前置资源信号、目标路径关系和目标文件名的通用 metadata/manifest/lock/checksum 形态，不得硬编码语言、框架、包管理器或具体业务文件。若配套目标不在同一目录、失败证据没有前置资源信号，或目标只是无关 marker/report/no-op 文件，仍必须按无关 patch 拒绝。
+
 Shell / tool 调用不得被用来隐藏实际目标变更，再通过一个无关 `patch/apply` marker 来满足 state-changing 合同。若某个 capability 本身是声明过的 state-changing artifact，必须由该 capability 的输入、输出和 evidence 直接表达目标关系；否则修复应使用目标相关的 `patch/apply`、返回 failed assessment，或进入 blocker。
 
 当 run 级 `stateChangePolicy=must_produce_state_change` 且失败输出包含 `missingDoDItems` 时，runtime repair 必须先区分中立缺口类型：
@@ -408,7 +413,7 @@ Repair 输入必须尽量包含足以定向修复的当前证据：
 
 如果 repair-of-repair 是因为 LLM 输出违反 contract，例如缺少必需 artifact 字段、返回只读 graph、返回能力不支持的操作，后续 repair 必须继承上一轮可用的 target context、workspace manifest、state-changing contract 和 rejection evidence。不得因为 contract violation 发生在 LLM repair step 外壳上，就丢失原始 failure target 或降级为泛化探索。
 
-当 verification / strict convergence follow-up 已经识别出需要继续收敛，却再次返回只读 execution graph 且没有 state-changing output、concrete validation evidence 或 rejected assessment 时，该失败属于 contract violation。后续 repair 必须携带对应的 rejection evidence；若 failure evidence 表明缺口已经是实现/状态变更缺口，则必须提升为 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`，不能退回普通只读探索。
+当 verification / strict convergence follow-up 已经识别出需要继续收敛时，可以返回受限 concrete validation evidence graph，例如明确的 shell/tool/mcp 验证节点；该 graph 不需要包含 patch，但不得只包含 read-only inspection、自检、run snapshot、context rehydration 或新的 LLM 嵌套。若再次返回只读 inspection graph 且没有 state-changing output、concrete validation evidence 或 rejected assessment，该失败属于 contract violation。后续 repair 必须携带对应的 rejection evidence；只有 failure evidence 已表明缺口是实现/状态变更缺口时，才提升为 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`，不能把纯验证证据缺口误升级为写文件 repair。
 
 Runtime 可以把失败证据中的目标引用解析为当前 workspace 中的已知资源快照，但只能使用中立路径匹配和 manifest 事实；不能把某个 profile 的文件命名、测试约定或技术栈规则写入 core repair。
 
@@ -633,6 +638,9 @@ Stage input bundle 必须遵守：
   - 外部 capability 失败的 target scope 已支持 `serverId+tool` 组合并使用 run 级目标预算；同一外部能力反复确定性失败时会进入 duplicate / repair exhausted 治理，rejected result 会携带 terminal failed step 与 repair step 证据，run failure reason 优先使用 unsatisfied DoD assessment summary。
 - 2026-05-17：
   - 已完成运行态上下文放大收口。
+  - verification follow-up 已允许受限 concrete validation evidence graph；只有纯 read-only inspection / 自检 / context rehydration 且无 evidence、无 rejected assessment 时才视为 contract violation，避免把验证阶段测试/检查图误升级为必须 patch 的 repair。
+  - state-changing repair target relevance 已补充中立配套元数据目标规则：当失败证据明确指向 dependency / manifest / metadata / checksum / lock 前置资源缺失时，可修复同目录配套目标，但不得引入语言、框架或业务文件硬编码。
+  - repair scope 已要求当前 repair-follow-up 自身产生的 runtime contract violation 优先使用当前 `failureClass/failureSignature`，provider retry 等无新签名的运行外壳才继续继承原始 scope。
   - `governanceHistory` 与 `replanContinuation` 的失败 lineage 改为 summary/ref-only，禁止把旧的 raw failure input/output、target content、LLM raw preview、stream events 或 provider/model 动态绑定复制进 successor run、step input 或 execution context package。
   - Step state event payload 改为 raw ref + compact summary，不再复制完整 step input/output；ToolCall runtime evidence 改为记录 step input/output refs 与摘要，不再把完整 step input 重复写入 `tool-calls/*/arguments.json`。
   - 该变更用于避免长流程 workspace 在 repair/replan 中反复 JSON clone/marshal/read/write，导致 CPU、内存和 payload 文件成倍膨胀。

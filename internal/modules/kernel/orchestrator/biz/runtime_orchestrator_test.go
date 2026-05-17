@@ -3541,7 +3541,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangeForMissingDoDW
 	}
 }
 
-func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangeForValidationFollowUpReadOnlyGraph(t *testing.T) {
+func TestRuntimeOrchestrator_RuntimeRepairInputDoesNotForceStateChangeForValidationFollowUpReadOnlyGraph(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{
 		steps:      memory.NewStepRepository(),
@@ -3563,8 +3563,8 @@ func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangeForValidationF
 
 	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-validation-read-only-graph"}, failedStep, 1, common.ErrInvalidArgument)
 
-	if input["repairObjective"] != "produce_state_changing_output" || !boolValue(input["stateChangingOutputRequired"]) {
-		t.Fatalf("repair input = %+v, want validation follow-up read-only graph repair to require state-changing output", input)
+	if input["repairObjective"] == "produce_state_changing_output" || boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want validation follow-up read-only graph repair not to force state-changing output", input)
 	}
 }
 
@@ -7126,6 +7126,54 @@ func TestRuntimeOrchestrator_RuntimeRepairScopeUsesCurrentFailureWithoutTargetSc
 	}
 	if input["repairObjective"] != repairObjectiveTransientExecutionRetry || input["stateChangingOutputRequired"] != nil {
 		t.Fatalf("repair input = %+v, want transient retry without state-changing requirement", input)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairScopeUsesCurrentRepairContractFailure(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-runtime-repair-budget-current-repair-contract")
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	oldSignature := "class=shell_command_failed|kind=shell/command|node=verify|failureTargets=main.go|exitCode=1"
+	currentSignature := "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_contract|error=state-changing repair returned unrelated patch target"
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-002-of-graph-004-verify"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRepairOfFailureClass:  failureClassShellCommand,
+			stepInputKeyRepairOfFailureSig:    oldSignature,
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"stage":                   "llm_execution_contract",
+			"error":                   "state-changing repair returned unrelated patch target",
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: currentSignature,
+		},
+	}
+
+	class, signature := runtimeRepairScopeClassAndSignature(failedStep)
+	if class != failureClassRuntime || signature != currentSignature {
+		t.Fatalf("runtimeRepairScopeClassAndSignature = class:%q signature:%q, want current repair contract failure", class, signature)
+	}
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: common.WorkspaceID("ws-current-repair-contract"),
+		DoDID:       common.DoDID("dod-current-repair-contract"),
+	}, failedStep, 1, errors.New("state-changing repair returned unrelated patch target"))
+	if input[failureOutputKeyClass] != failureClassRuntime ||
+		input[stepInputKeyRepairOfFailureClass] != failureClassRuntime ||
+		input[failureOutputKeySignature] != currentSignature ||
+		input[stepInputKeyRepairOfFailureSig] != currentSignature {
+		t.Fatalf("repair input failure scope = class:%#v repairClass:%#v signature:%#v repairSignature:%#v, want current failure",
+			input[failureOutputKeyClass],
+			input[stepInputKeyRepairOfFailureClass],
+			input[failureOutputKeySignature],
+			input[stepInputKeyRepairOfFailureSig],
+		)
 	}
 }
 
@@ -14479,6 +14527,91 @@ func TestValidateLLMExecutionOutputContractAllowsStateChangingRepairRelevantPatc
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsStateChangingRepairDependencyMetadataTarget(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-dependency-metadata-target",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-dependency-metadata-target/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failureTargetScope":              "failureTargets=main.go",
+			stepInputKeyRepairOfFailureSig:    "class=shell_command_failed|kind=shell/command|failureTargets=main.go|exitCode=1",
+			"failedStepOutput": map[string]any{
+				"stderr": "missing checksum entry for module providing package example.org/feature",
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "repair-dependency-metadata",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "file_write",
+					"targetRef": "deps.sum",
+					"content":   "example.org/feature v1.2.3 h1:abc\n",
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want related dependency metadata target allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsStateChangingRepairUnrelatedDependencyMetadataTarget(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-unrelated-dependency-metadata-target",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-unrelated-dependency-metadata-target/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failureTargetScope":              "failureTargets=src/main.go",
+			stepInputKeyRepairOfFailureSig:    "class=shell_command_failed|kind=shell/command|failureTargets=src/main.go|exitCode=1",
+			"failedStepOutput": map[string]any{
+				"stderr": "missing checksum entry for module providing package example.org/feature",
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "repair-unrelated-dependency-metadata",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "file_write",
+					"targetRef": "deps.sum",
+					"content":   "example.org/feature v1.2.3 h1:abc\n",
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "not related to failure target") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want unrelated dependency metadata target rejection", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsCoverageGapPatchWithoutCoverageTargets(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-repair-coverage-targets",
@@ -14923,6 +15056,39 @@ func TestValidateLLMExecutionOutputContractUsesRuntimeStageForVerificationFollow
 	err := validateLLMExecutionOutputContract(run, step, output)
 	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "read-only executionGraph without patch output") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want runtimeStage-based verification rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsVerificationEvidenceGraph(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-runtime-stage-follow-up-evidence-graph",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-runtime-stage-follow-up-evidence-graph/follow-up-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"graphFollowUp":            true,
+			stepInputKeyRuntimeStage:   runtimeStageVerification,
+			stepInputKeyGraphNodeID:    "validate_implementation",
+			stepInputKeySoulStage:      soulStageValidation,
+			"validationFollowUpReason": "rerun concrete verification",
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":    "run_tests",
+				"kind":  shellcommon.StepKindCommand,
+				"input": map[string]any{"command": "test-runner", "args": []string{"./..."}},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want verification evidence graph allowed", err)
 	}
 }
 

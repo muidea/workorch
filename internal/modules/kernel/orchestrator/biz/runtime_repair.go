@@ -1013,6 +1013,9 @@ func runtimeRepairScopeClassAndSignature(step *runModel.Step) (string, string) {
 	outputSignature := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature))
 	inputClass := strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRepairOfFailureClass))
 	inputSignature := strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRepairOfFailureSig))
+	if outputSignature != "" && outputClass != "" && !isProviderFailureClass(outputClass) {
+		return outputClass, outputSignature
+	}
 	if outputSignature != "" && (!boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) || inputSignature == "" || failureSignatureHasTargetScope(outputSignature)) {
 		return firstNonEmptyString(outputClass, inputClass), outputSignature
 	}
@@ -2758,7 +2761,6 @@ func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, e
 		return true
 	}
 	for _, marker := range []string{
-		"validation follow-up llm step returned read-only executiongraph without patch output",
 		"execution-stage llm graph node returned executiongraph",
 		"state-changing llm repair step returned executiongraph",
 		"state-changing llm repair step returned no state-changing output",

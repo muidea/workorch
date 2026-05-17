@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
@@ -5907,9 +5908,14 @@ func mapRunOutcome(snapshot RunSnapshot) RunOutcome {
 		RawState: snapshot.Run.State,
 		Terminal: isTerminalRunState(snapshot.Run.State),
 	}
-	if result := primaryAcceptedResult(runScopedResults(snapshot)); result != nil {
-		ret.State = "accepted"
-		ret.Accepted = true
+	if result := latestTerminalWorkspaceResult(runScopedResults(snapshot)); result != nil {
+		if result.State == string(common.ResultStateAccepted) {
+			ret.State = "accepted"
+			ret.Accepted = true
+		} else {
+			ret.State = "failed"
+			ret.Reason = result.Summary
+		}
 		ret.Terminal = true
 		ret.ResultID = result.ID
 		ret.Summary = result.Summary
@@ -6028,7 +6034,17 @@ func latestWorkspaceRunForOutcome(snapshot WorkspaceSnapshot) *Run {
 		}
 	}
 	if selectedEvent != nil {
+		if result := latestTerminalWorkspaceResult(snapshot.Results); result != nil && resultNotBeforeEvent(*result, *selectedEvent) {
+			if run := runsByID[result.RunID]; run != nil {
+				return run
+			}
+		}
 		return runsByID[selectedEvent.RunID]
+	}
+	if result := latestTerminalWorkspaceResult(snapshot.Results); result != nil {
+		if run := runsByID[result.RunID]; run != nil {
+			return run
+		}
 	}
 	if result := primaryAcceptedResult(snapshot.Results); result != nil {
 		if run := runsByID[result.RunID]; run != nil {
@@ -6036,6 +6052,35 @@ func latestWorkspaceRunForOutcome(snapshot WorkspaceSnapshot) *Run {
 		}
 	}
 	return &snapshot.Runs[len(snapshot.Runs)-1]
+}
+
+func latestTerminalWorkspaceResult(items []Result) *Result {
+	var selected *Result
+	for idx := range items {
+		switch common.ResultState(items[idx].State) {
+		case common.ResultStateAccepted, common.ResultStateRejected:
+		default:
+			continue
+		}
+		if selected == nil || resultTimeValue(items[idx]) >= resultTimeValue(*selected) {
+			selected = &items[idx]
+		}
+	}
+	return selected
+}
+
+func resultNotBeforeEvent(result Result, event EventRecord) bool {
+	resultAt := resultTimeValue(result)
+	eventAt := strings.TrimSpace(event.OccurredAt)
+	if resultAt == "" || eventAt == "" {
+		return resultAt >= eventAt
+	}
+	resultTime, resultErr := time.Parse(time.RFC3339Nano, resultAt)
+	eventTime, eventErr := time.Parse(time.RFC3339Nano, eventAt)
+	if resultErr == nil && eventErr == nil {
+		return !resultTime.Before(eventTime)
+	}
+	return resultAt >= eventAt
 }
 
 func primaryAcceptedResult(items []Result) *Result {
