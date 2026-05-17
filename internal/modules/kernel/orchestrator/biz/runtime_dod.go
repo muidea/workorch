@@ -785,7 +785,7 @@ func normalizedRunGoalCoverageItems(run *runModel.Run) []normalizedDoDItem {
 				raw:                  raw,
 				normalized:           normalized,
 				kind:                 doDItemKindLeaf,
-				requiredEvidenceHint: "Provide concrete implementation and verification evidence refs for this Goal requirement.",
+				requiredEvidenceHint: neutralCoverageEvidenceHint("Goal requirement"),
 			})
 		}
 	}
@@ -1184,17 +1184,15 @@ func classifyDoDItemKind(value string) doDItemKind {
 }
 
 func doDRequiredEvidenceHint(raw string) string {
-	text := strings.ToLower(raw)
-	switch {
-	case strings.Contains(text, "test"), strings.Contains(text, "测试"), strings.Contains(text, "验证"), strings.Contains(text, "verification"):
-		return "Provide validation command evidence with explicit assertions for this DoD item."
-	case strings.Contains(text, "config"), strings.Contains(text, "配置"), strings.Contains(text, "yaml"), strings.Contains(text, "env"), strings.Contains(text, "环境变量"):
-		return "Provide implementation evidence and configuration-loading verification evidence for this DoD item."
-	case strings.Contains(text, "并发"), strings.Contains(text, "concurrency"), strings.Contains(text, "race"):
-		return "Provide concurrency/race-path verification evidence for this DoD item."
-	default:
-		return "Provide concrete implementation and verification evidence refs for this DoD item."
+	return neutralCoverageEvidenceHint("DoD item")
+}
+
+func neutralCoverageEvidenceHint(subject string) string {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		subject = "coverage item"
 	}
+	return "Provide concrete evidence refs for this " + subject + " according to the active runtime stage and profile contract."
 }
 
 func normalizeDoDCoverageText(value string) string {

@@ -24,7 +24,6 @@ const maxPatchRepairSnapshotBytes = 8192
 
 const (
 	repairObjectiveStateChangingOutput        = "produce_state_changing_output"
-	legacyRepairObjectiveStateChangingImpl    = "produce_state_changing_implementation"
 	repairObjectiveConcreteValidationEvidence = "produce_concrete_validation_evidence"
 	repairObjectiveTransientExecutionRetry    = "retry_or_adjust_transient_execution"
 )
@@ -401,8 +400,8 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 			"missingDoDItems":                missingDoDItemsFromFailureOutput(failedStep.Output),
 			"recentRepairAttempts":           o.recentRuntimeRepairAttemptSummaries(ctx, run.ID, failedStep, maxAttempts),
 			"recommendedNextActions": []string{
-				"Map each missing DoD item to concrete affected files, patch operations, and verification commands.",
-				"Prioritize minimal implementation and test updates, then rerun targeted verification.",
+				"Map each missing DoD item to concrete affected resources, state-changing operations, and verification actions.",
+				"Prioritize minimal target changes, then rerun targeted verification.",
 				"If key constraints remain unclear, provide a focused decision payload with only missing information.",
 			},
 		},
@@ -1955,7 +1954,7 @@ func stateChangingRepairGuidance() []string {
 func concreteValidationEvidenceRepairGuidance() []string {
 	return []string{
 		"Do not repeat assessment-only validation.",
-		"Produce concrete verification evidence for the failed Goal/DoD coverage before changing implementation.",
+		"Produce concrete verification evidence for the failed Goal/DoD coverage before attempting state-changing repair.",
 		"Return a bounded executionGraph that runs available verification capabilities, or return a failed dodAssessment/blocker if concrete evidence cannot be produced.",
 		"Do not use read-only inspection, self-inspection, run snapshot, observability, or context rehydration graphs as evidence repair.",
 		"If a verification command or tool later fails with concrete diagnostics, that failure may drive a separate state-changing repair.",
@@ -2352,9 +2351,6 @@ func structuredFailureIdentifierUseful(value string) bool {
 	if structuredFailureIdentifierStopWords[lower] {
 		return false
 	}
-	if strings.Contains(lower, "_test") || strings.Contains(lower, "_failed") {
-		return false
-	}
 	hasShape := false
 	for _, r := range value {
 		if unicode.IsUpper(r) || unicode.IsDigit(r) || r == '_' {
@@ -2701,7 +2697,7 @@ func limitedStrings(values []string, limit int) []string {
 
 func repairObjectiveRequiresStateChange(value string) bool {
 	switch strings.TrimSpace(value) {
-	case repairObjectiveStateChangingOutput, legacyRepairObjectiveStateChangingImpl:
+	case repairObjectiveStateChangingOutput:
 		return true
 	default:
 		return false
@@ -2762,14 +2758,12 @@ func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, e
 		return true
 	}
 	for _, marker := range []string{
-		"implementation planning llm step returned read-only executiongraph without patch output",
 		"validation follow-up llm step returned read-only executiongraph without patch output",
 		"execution-stage llm graph node returned executiongraph",
 		"state-changing llm repair step returned executiongraph",
 		"state-changing llm repair step returned no state-changing output",
 		"state-changing llm repair step returned executiongraph without patch/apply",
 		"state-changing execution-stage llm graph node returned no state-changing output",
-		"implementation execution-stage llm graph node returned no state-changing output",
 		"state-changing executiongraph patch/apply depends on llm/workspace_execution before patch",
 		"planning executiongraph patch/apply depends on llm/workspace_execution before patch",
 		"targetref is required",

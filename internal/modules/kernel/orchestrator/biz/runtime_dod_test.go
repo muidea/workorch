@@ -54,3 +54,17 @@ func TestValidateDoDAssessmentCoversRunDoD_LeafOnlyCoverageAndDiagnostics(t *tes
 		t.Fatalf("missingDoDItems[0] = %#v, want leaf raw item", missing[0])
 	}
 }
+
+func TestDoDRequiredEvidenceHintStaysProfileNeutral(t *testing.T) {
+	cases := []string{
+		"配置文件必须被代码真实加载并有测试断言",
+		"并发请求必须安全",
+		"stream verification must pass",
+	}
+	want := "Provide concrete evidence refs for this DoD item according to the active runtime stage and profile contract."
+	for _, tc := range cases {
+		if got := doDRequiredEvidenceHint(tc); got != want {
+			t.Fatalf("doDRequiredEvidenceHint(%q) = %q, want %q", tc, got, want)
+		}
+	}
+}

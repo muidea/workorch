@@ -291,7 +291,7 @@ func TestBuildProviderPromptMessagesUsesDirectStateChangingRecoveryAction(t *tes
 		"direct_state_changing_recovery",
 		"Do not return run snapshot",
 		"context rehydration",
-		"patch those targets directly",
+		"update those targets directly",
 		"hunk/context/base mismatch",
 		"Do not use shell commands to modify workspace files",
 		"complete fresh JSON object",

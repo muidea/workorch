@@ -117,16 +117,6 @@ func assessmentOnlyDecisionShouldRepair(step *runModel.Step, spec runtimeDecisio
 	if continuableCandidateContext(spec.Context) {
 		return true
 	}
-	for _, field := range stringListFromValue(spec.Context["missingFields"]) {
-		if isExecutionTargetField(field) {
-			return true
-		}
-	}
-	for _, field := range stringListFromValue(spec.Context["requiresHumanFields"]) {
-		if isExecutionTargetField(field) {
-			return true
-		}
-	}
 	return false
 }
 
@@ -142,64 +132,8 @@ func continuableDecisionShouldRepair(step *runModel.Step, spec runtimeDecisionBl
 }
 
 func continuableCandidateContext(context map[string]any) bool {
-	candidates := mapFromValue(context["candidateValues"])
-	for _, value := range candidates {
-		if continuableCandidateValue(value) {
-			return true
-		}
-	}
-	return false
-}
-
-func continuableCandidateValue(value any) bool {
-	switch typed := value.(type) {
-	case string:
-		return isContinuableCandidateText(typed)
-	case []string:
-		for _, item := range typed {
-			if isContinuableCandidateText(item) {
-				return true
-			}
-		}
-	case []any:
-		for _, item := range typed {
-			if continuableCandidateValue(item) {
-				return true
-			}
-		}
-	case map[string]any:
-		for _, nested := range typed {
-			if continuableCandidateValue(nested) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func isContinuableCandidateText(value string) bool {
-	normalized := normalizedDecisionRepairText(value)
-	if normalized == "" {
-		return false
-	}
-	for _, marker := range []string{
-		"init", "initialize", "bootstrap", "fromscratch", "newproject", "currentworkspace", "currentdirectory",
-		"初始化", "从零", "新项目", "当前工作区", "当前目录",
-	} {
-		if strings.Contains(normalized, normalizedDecisionRepairText(marker)) {
-			return true
-		}
-	}
-	return false
-}
-
-func isExecutionTargetField(value string) bool {
-	normalized := normalizedDecisionRepairText(value)
-	if normalized == "" {
-		return false
-	}
-	for _, marker := range []string{"executiontarget", "targetmode", "workspacepath", "projectlocation", "projectcontent", "workingdirectory", "执行目标", "项目路径", "工作目录"} {
-		if strings.Contains(normalized, normalizedDecisionRepairText(marker)) {
+	for _, key := range []string{"runtimeCanContinue", "continuableByRuntime", "workspaceActionable"} {
+		if boolValue(context[key]) {
 			return true
 		}
 	}
@@ -362,16 +296,16 @@ func assessmentOnlyDecisionRepairAssessment(run *runModel.Run, step *runModel.St
 	return map[string]any{
 		"satisfied":             false,
 		"summary":               "The assessment-only step requested a decision for work that can continue through runtime repair or replan.",
-		"goalOutcome":           "The requested work is incomplete and should continue through automated implementation or verification work.",
-		"implementationSummary": "No implementation evidence was produced before the decision request.",
+		"goalOutcome":           "The requested work is incomplete and should continue through automated state-changing or verification work.",
+		"implementationSummary": "No state-changing or deliverable evidence was produced before the decision request.",
 		"verificationSummary":   "Current evidence is insufficient for DoD satisfaction.",
 		"items":                 items,
 		"residualRisks": []string{
-			"The requested work has not yet produced implementation or verification evidence.",
+			"The requested work has not yet produced state-changing, deliverable, or verification evidence.",
 		},
 		"nextActions": []string{
-			"Replan the missing implementation or bootstrap work using the resolved Goal and DoD.",
-			"Run concrete verification after implementation and produce evidence refs for every DoD item.",
+			"Replan the missing state-changing or deliverable work using the resolved Goal and DoD.",
+			"Run concrete verification after the required state change and produce evidence refs for every DoD item.",
 		},
 	}
 }
@@ -389,7 +323,7 @@ func assessmentOnlyContractViolationRepairAssessment(run *runModel.Run, step *ru
 			"The validation model attempted to plan more executable work instead of evaluating the completed evidence.",
 		},
 		"nextActions": []string{
-			"Continue through runtime repair with concrete implementation or verification steps.",
+			"Continue through runtime repair with concrete state-changing or verification steps.",
 			"Return a complete item-level DoD assessment once evidence is available.",
 		},
 	}
@@ -409,7 +343,7 @@ func assessmentRepairDoDItems(run *runModel.Run, step *runModel.Step, spec runti
 		item := map[string]any{
 			"item":   name,
 			"state":  "failed",
-			"reason": firstNonEmptyString(spec.Reason, "Assessment-only decision did not produce implementation or verification evidence."),
+			"reason": firstNonEmptyString(spec.Reason, "Assessment-only decision did not produce state-changing or verification evidence."),
 			"impact": "The runtime cannot mark this DoD item satisfied without concrete execution evidence.",
 		}
 		if evidenceRef != "" {

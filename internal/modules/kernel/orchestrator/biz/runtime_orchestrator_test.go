@@ -2678,7 +2678,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputSkipsWorkspaceManifestForDoDFailu
 						"raw":                  "配置文件必须被代码真实加载并有测试断言",
 						"normalized":           "配置文件必须被代码真实加载并有测试断言",
 						"kind":                 "leaf",
-						"requiredEvidenceHint": "Provide implementation evidence and configuration-loading verification evidence for this DoD item.",
+						"requiredEvidenceHint": "Provide concrete evidence refs for this DoD item according to the active runtime stage and profile contract.",
 					},
 				},
 			},
@@ -4806,7 +4806,7 @@ func TestRuntimeOrchestrator_ResultManifestListsOnlyPatchTargets(t *testing.T) {
 	if !strings.Contains(manifest, "`from-disk.md`") || strings.Contains(manifest, "`from-context.md`") {
 		t.Fatalf("manifest = %q, want only explicit patch target deliverables", manifest)
 	}
-	deliverableSection := strings.Split(manifest, "## Code Change Evidence")[0]
+	deliverableSection := strings.Split(manifest, "## Workspace Change Evidence")[0]
 	if got := strings.Count(deliverableSection, "`from-disk.md`"); got != 1 {
 		t.Fatalf("manifest = %q, deliverable file row count = %d, want deduplicated row", manifest, got)
 	}
@@ -6526,7 +6526,7 @@ func TestRuntimeOrchestrator_SoftwareDevCodeAgentRepairsTestFailureAndDeliversDi
 	}
 	var diffArtifact *resultmodel.Artifact
 	for _, artifact := range artifacts {
-		if artifact.ID == common.ArtifactID("run-software-dev-code-agent/artifact/code-change-diff") {
+		if artifact.ID == common.ArtifactID("run-software-dev-code-agent/artifact/workspace-change-diff") {
 			diffArtifact = artifact
 			break
 		}
@@ -6538,7 +6538,7 @@ func TestRuntimeOrchestrator_SoftwareDevCodeAgentRepairsTestFailureAndDeliversDi
 	if err != nil {
 		t.Fatalf("list memories: %v", err)
 	}
-	if !hasRunSummaryContent(memories, runID, "Patch targets:", "go test ./...") {
+	if !hasRunSummaryContent(memories, runID, "State-change targets:", "go test ./...") {
 		t.Fatalf("memories = %+v, want run summary memory with patch and verification context", memories)
 	}
 }
@@ -13227,6 +13227,7 @@ func TestRuntimeOrchestrator_AssessmentOnlyDecisionForContinuableCandidateRoutes
 			stepOutputKeyBlockDecisionKind:     decisioncommon.ResolutionTypeProvideMissingInfo,
 			stepOutputKeyBlockDecisionQuestion: "Initialize the current workspace or provide existing project content?",
 			stepOutputKeyBlockDecisionContext: map[string]any{
+				"runtimeCanContinue": true,
 				"candidateValues": map[string]any{
 					"executionTargetMode": []any{"init_from_scratch", "use_existing_project"},
 				},
@@ -13364,6 +13365,7 @@ func TestRuntimeOrchestrator_ContinuableDecisionRoutesToRepair(t *testing.T) {
 			stepOutputKeyBlockDecisionKind:     decisioncommon.ResolutionTypeProvideMissingInfo,
 			stepOutputKeyBlockDecisionQuestion: "Sync existing code or initialize a new project?",
 			stepOutputKeyBlockDecisionContext: map[string]any{
+				"runtimeCanContinue": true,
 				"candidateValues": map[string]any{
 					"initializationPermission": []any{"允许在空目录从零初始化 Go 网关项目", "不允许初始化，仅等待现有代码同步"},
 					"workspaceSource":          []any{"提供现有项目文件到当前 workspace"},
@@ -14075,8 +14077,10 @@ func TestLLMExecutionGraphNodeReturnedOnlyGraphViolatesContract(t *testing.T) {
 		ID:   "run-execution-contract/block/implement",
 		Kind: llmWorkspaceExecutionStepKind,
 		Input: map[string]any{
-			stepInputKeyGraphNodeID: "implement",
-			stepInputKeySoulStage:   soulStageExecution,
+			stepInputKeyGraphNodeID:      "implement",
+			stepInputKeyRuntimeStage:     runtimeStageExecution,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			stepInputKeySoulStage:        soulStageExecution,
 		},
 	}
 	output := map[string]any{
@@ -17086,7 +17090,7 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludePatchDiff(t *testing.T) {
 	if !reflect.DeepEqual(results[0].ArtifactRefs, []common.ArtifactID{
 		common.ArtifactID(string(runID) + "/artifact/result-summary"),
 		common.ArtifactID(string(runID) + "/artifact/deliverable-manifest"),
-		common.ArtifactID(string(runID) + "/artifact/code-change-diff"),
+		common.ArtifactID(string(runID) + "/artifact/workspace-change-diff"),
 	}) {
 		t.Fatalf("result artifact refs = %+v, want summary, manifest and patch diff", results[0].ArtifactRefs)
 	}
@@ -17103,7 +17107,7 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludePatchDiff(t *testing.T) {
 			summaryArtifact = artifact
 		case common.ArtifactID(string(runID) + "/artifact/deliverable-manifest"):
 			manifestArtifact = artifact
-		case common.ArtifactID(string(runID) + "/artifact/code-change-diff"):
+		case common.ArtifactID(string(runID) + "/artifact/workspace-change-diff"):
 			diffArtifact = artifact
 		}
 	}
@@ -17118,7 +17122,7 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludePatchDiff(t *testing.T) {
 	if summaryArtifact == nil || !strings.Contains(summaryArtifact.Summary, string(diffArtifact.ID)) {
 		t.Fatalf("summary artifact = %+v, want patch diff artifact ref", summaryArtifact)
 	}
-	if manifestArtifact == nil || !strings.Contains(manifestArtifact.Summary, "## Code Change Evidence") || !strings.Contains(manifestArtifact.Summary, string(patchID)) {
+	if manifestArtifact == nil || !strings.Contains(manifestArtifact.Summary, "## Workspace Change Evidence") || !strings.Contains(manifestArtifact.Summary, string(patchID)) {
 		t.Fatalf("manifest artifact = %+v, want patch evidence section", manifestArtifact)
 	}
 }

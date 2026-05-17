@@ -2318,9 +2318,6 @@ func inferProviderSoulStage(input map[string]any) string {
 			return "approval"
 		}
 	}
-	if stage := normalizedProviderSoulStage(input["soulStage"]); stage != "" {
-		return stage
-	}
 	if stage := normalizedProviderSoulStage(input["currentSoulStage"]); stage != "" {
 		return stage
 	}

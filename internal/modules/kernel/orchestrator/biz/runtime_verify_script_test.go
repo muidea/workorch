@@ -52,7 +52,7 @@ func TestVerifyWorkorchRuntimeCoreFlowScriptViolationFixtures(t *testing.T) {
 			steps: []map[string]any{
 				gatedPatchGraphScriptStep("run-script-gated-patch/step-1"),
 			},
-			wantErr: "planning executionGraph patch/apply depends on llm/workspace_execution before patch",
+			wantErr: "planning executionGraph state-changing node depends on llm/workspace_execution before state change",
 		},
 		{
 			name: "provider retry of state changing repair loses contract fails",
@@ -199,6 +199,59 @@ func TestVerifyWorkorchRuntimeCoreFlowScriptViolationFixtures(t *testing.T) {
 	}
 }
 
+func TestVerifyWorkorchRuntimeSoftwareDevProfileScriptFixtures(t *testing.T) {
+	cases := []struct {
+		name     string
+		run      map[string]any
+		results  []map[string]any
+		wantErr  string
+		wantSkip bool
+		wantPass bool
+	}{
+		{
+			name:     "generic profile skips",
+			run:      profileScriptRun("run-profile-generic", "completed", nil),
+			wantSkip: true,
+		},
+		{
+			name:     "software dev accepted coverage passes",
+			run:      profileScriptRun("run-profile-software-dev-pass", "completed", softwareDevProfileContractFixture()),
+			results:  []map[string]any{softwareDevAcceptedResultFixture("run-profile-software-dev-pass", true)},
+			wantPass: true,
+		},
+		{
+			name:    "software dev missing deliverable coverage fails",
+			run:     profileScriptRun("run-profile-software-dev-fail", "completed", softwareDevProfileContractFixture()),
+			results: []map[string]any{softwareDevAcceptedResultFixture("run-profile-software-dev-fail", false)},
+			wantErr: "accepted software-dev result missing deliverableCoverage ids: user_deliverable",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dataRoot := t.TempDir()
+			runID := stringFromMap(tc.run, "id")
+			writeProfileVerifyFixture(t, dataRoot, "ws-profile-fixture", runID, tc.run, tc.results)
+
+			output, err := runRuntimeProfileSoftwareDevVerifyScript(t, dataRoot, "ws-profile-fixture", runID)
+			switch {
+			case tc.wantErr != "":
+				if err == nil || !strings.Contains(output, tc.wantErr) {
+					t.Fatalf("verify output = %s err=%v, want error containing %q", output, err, tc.wantErr)
+				}
+			case tc.wantSkip:
+				if err != nil || !strings.Contains(output, "skipped for non-software-dev run") {
+					t.Fatalf("verify output = %s err=%v, want skip", output, err)
+				}
+			case tc.wantPass:
+				if err != nil || !strings.Contains(output, "software-dev profile verification passed") {
+					t.Fatalf("verify output = %s err=%v, want pass", output, err)
+				}
+			}
+		})
+	}
+}
+
 func invalidPatchGraphScriptStep(stepID string) map[string]any {
 	runID := strings.Split(stepID, "/")[0]
 	return map[string]any{
@@ -224,13 +277,93 @@ func invalidPatchGraphScriptStep(stepID string) map[string]any {
 	}
 }
 
+func profileScriptRun(runID string, state string, profile map[string]any) map[string]any {
+	run := map[string]any{
+		"id":          runID,
+		"workspaceId": "ws-profile-fixture",
+		"state":       state,
+	}
+	if profile != nil {
+		run["executionContext"] = map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": profile,
+				},
+			},
+		}
+	}
+	return run
+}
+
+func softwareDevProfileContractFixture() map[string]any {
+	return map[string]any{
+		"acceptanceDimensions": []map[string]any{{
+			"id":       "functional_behavior",
+			"required": true,
+		}},
+		"deliverableExpectations": []map[string]any{{
+			"id":       "user_deliverable",
+			"required": true,
+		}},
+		"evidenceRequirements": []map[string]any{{
+			"id":       "runtime_execution",
+			"required": true,
+		}},
+	}
+}
+
+func softwareDevAcceptedResultFixture(runID string, includeDeliverable bool) map[string]any {
+	assessment := map[string]any{
+		"satisfied": true,
+		"summary":   "accepted",
+		"items": []map[string]any{{
+			"item":         "required outcome",
+			"state":        "satisfied",
+			"evidenceRefs": []string{runID + "/validation/runtime-step"},
+		}},
+		"goalCoverage": map[string]any{
+			"satisfied": true,
+			"items": []map[string]any{{
+				"goal":         "goal covered",
+				"state":        "satisfied",
+				"evidenceRefs": []string{runID + "/validation/runtime-step"},
+			}},
+		},
+		"acceptanceDimensions": map[string]any{
+			"satisfied": true,
+			"items": []map[string]any{{
+				"id":           "functional_behavior",
+				"state":        "satisfied",
+				"evidenceRefs": []string{runID + "/validation/runtime-step"},
+			}},
+		},
+	}
+	if includeDeliverable {
+		assessment["deliverableCoverage"] = map[string]any{
+			"satisfied": true,
+			"items": []map[string]any{{
+				"id":           "user_deliverable",
+				"state":        "satisfied",
+				"artifactRefs": []string{runID + "/artifact/workspace-change-diff"},
+			}},
+		}
+	}
+	return map[string]any{
+		"id":            runID + "/result/dod-assessment",
+		"runId":         runID,
+		"workspaceId":   "ws-profile-fixture",
+		"state":         "accepted",
+		"doDAssessment": assessment,
+	}
+}
+
 func gatedPatchGraphScriptStep(stepID string) map[string]any {
 	runID := strings.Split(stepID, "/")[0]
 	return map[string]any{
 		"id":    stepID,
 		"runId": runID,
 		"input": map[string]any{
-			"soulStage": "planning",
+			"runtimeStage": "planning",
 		},
 		"output": map[string]any{
 			"executionGraph": map[string]any{
@@ -273,7 +406,7 @@ func providerRetryRepairLostStateChangingScriptStep(stepID string) map[string]an
 			"repairOfStepId":          runID + "/step-1",
 			"repairOfFailureClass":    "runtime_failed",
 			"repairOfFailureSignature": "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|" +
-				"error=invalid argument: planning executiongraph patch/apply depends on llm/workspace_execution before patch",
+				"error=invalid argument: planning executiongraph state-changing node depends on llm/workspace_execution before state change",
 		},
 		"output": map[string]any{
 			"stage": "llm_execution_graph_plan",
@@ -371,6 +504,24 @@ func writeRuntimeVerifyFixture(t *testing.T, dataRoot, workspaceID, runID, runSt
 	writeJSONFile(t, filepath.Join(runDir, "ticket.json"), tickets)
 }
 
+func writeProfileVerifyFixture(t *testing.T, dataRoot, workspaceID, runID string, run map[string]any, results []map[string]any) {
+	t.Helper()
+	runDir := filepath.Join(dataRoot, "workspaces", workspaceID, "runs", runID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("mkdir profile fixture: %v", err)
+	}
+	if results == nil {
+		results = []map[string]any{}
+	}
+	writeJSONFile(t, filepath.Join(dataRoot, "workspaces", workspaceID, "workspace.json"), []map[string]any{{
+		"id":          workspaceID,
+		"state":       "completed",
+		"activeRunId": "",
+	}})
+	writeJSONFile(t, filepath.Join(runDir, "run.json"), []map[string]any{run})
+	writeJSONFile(t, filepath.Join(runDir, "result.json"), results)
+}
+
 func writeJSONFile(t *testing.T, path string, value any) {
 	t.Helper()
 	payload, err := json.MarshalIndent(value, "", "  ")
@@ -389,6 +540,19 @@ func runRuntimeVerifyScript(t *testing.T, dataRoot, workspaceID, runID string) (
 		t.Fatalf("resolve repo root: %v", err)
 	}
 	cmd := exec.Command("bash", filepath.Join(root, "scripts", "verify-workorch-runtime-core-flow.sh"), workspaceID, runID)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "WORKORCH_RUNTIME_VERIFY_DATA_ROOT="+dataRoot)
+	output, err := cmd.CombinedOutput()
+	return string(output), err
+}
+
+func runRuntimeProfileSoftwareDevVerifyScript(t *testing.T, dataRoot, workspaceID, runID string) (string, error) {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "..", "..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+	cmd := exec.Command("bash", filepath.Join(root, "scripts", "verify-workorch-runtime-profile-software-dev.sh"), workspaceID, runID)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "WORKORCH_RUNTIME_VERIFY_DATA_ROOT="+dataRoot)
 	output, err := cmd.CombinedOutput()

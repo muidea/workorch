@@ -337,11 +337,11 @@ def text_contains_state_changing_repair_signal(input_payload, output_payload):
         str(output_payload.get("reason") or ""),
     ]).lower()
     return (
-        "produce_state_changing_implementation" in text
+        "produce_state_changing_output" in text
         or "state-changing" in text
         or "patch/apply" in text
-        or "implementation planning llm step returned read-only executiongraph" in text
-        or "planning executiongraph patch/apply depends on llm/workspace_execution" in text
+        or "state-changing planning llm step returned read-only executiongraph" in text
+        or "planning executiongraph state-changing node depends on llm/workspace_execution" in text
     )
 
 workspaces = load_items(workspace_path)
@@ -396,11 +396,11 @@ for step in steps:
         elif not graph_has_ungated_valid_patch_apply(output_payload.get("executionGraph")):
             violation_messages.append("state-changing executionGraph patch/apply depends on llm/workspace_execution before patch")
     if (
-        str(input_payload.get("soulStage") or "").strip() == "planning"
+        str(input_payload.get("runtimeStage") or "").strip() == "planning"
         and graph_has_valid_patch_apply(output_payload.get("executionGraph"))
         and not graph_has_ungated_valid_patch_apply(output_payload.get("executionGraph"))
     ):
-        violation_messages.append("planning executionGraph patch/apply depends on llm/workspace_execution before patch")
+        violation_messages.append("planning executionGraph state-changing node depends on llm/workspace_execution before state change")
     for message in violation_messages:
         handled, by = handled_violation(step_id, steps, results, tickets)
         if handled:

@@ -78,7 +78,11 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	}
 	if strings.Contains(joined, "An empty workspace file listing is not by itself missing source code") ||
 		strings.Contains(joined, "new-work initialization case") ||
-		strings.Contains(joined, "A test command that reports no tests") {
+		strings.Contains(joined, "A test command that reports no tests") ||
+		strings.Contains(joined, "implements the project") ||
+		strings.Contains(joined, "go test ./...") ||
+		strings.Contains(joined, "affected files") ||
+		strings.Contains(joined, "implementation path") {
 		t.Fatalf("messages = %+v, should not include software-dev template guidance in the core prompt", gotPayload.Messages)
 	}
 	if !strings.Contains(string(result.Payload), `"completionState":"completed"`) {

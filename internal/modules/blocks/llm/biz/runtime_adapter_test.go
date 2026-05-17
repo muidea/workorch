@@ -1026,7 +1026,7 @@ func TestRuntimeAdapterAssessmentOnlyPromptProjectsDecisionAndExecutionSoulPolic
 	}
 }
 
-func TestRuntimeAdapterUsesExplicitSoulStageFromStepInput(t *testing.T) {
+func TestRuntimeAdapterUsesExplicitCurrentSoulStageFromStepInput(t *testing.T) {
 	provider := &staticProvider{payload: []byte(`{"completionState":"continue"}`)}
 	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
 		Provider: llmcommon.ProviderCompatible,
@@ -1034,7 +1034,7 @@ func TestRuntimeAdapterUsesExplicitSoulStageFromStepInput(t *testing.T) {
 		Model:    "test-model",
 	}, provider)
 	request := llmStepRequest()
-	request.Input["soulStage"] = "artifact"
+	request.Input["currentSoulStage"] = "artifact"
 	request.Input["executionContext"] = map[string]any{
 		"soulRouting": map[string]any{
 			"bindings": map[string]any{

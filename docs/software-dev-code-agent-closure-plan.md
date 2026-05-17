@@ -205,7 +205,7 @@ Soul、MCP、Memory、Run、Goal、DoD、Ticket、Approval 等能力，演进为
 | 2026-05-03 | shell runtime 增加危险命令阻断策略：拒绝 sudo/su/shutdown/reboot/mkfs/mount 等系统级命令，拒绝 `rm -rf` 针对根目录、`.git`、当前目录或 workspace 外绝对路径，拒绝 `chmod 777` 和 `git push --force`；新增测试覆盖阻断路径。 |
 | 2026-05-04 | TUI 新增 `/workspace create <title> --template <templateId> [--dir <path>]` 创建路径，并在主视图中展示当前 Workspace 的 default soul 与 SoulBindings 摘要；创建后会切换到新 Workspace 并刷新清单。 |
 | 2026-05-04 | 强化内置 `software-dev` 六个阶段 Soul：明确自治开发闭环、自动修复、DoD 证据、Ticket/Approval 使用边界和最终交付物要求。 |
-| 2026-05-04 | 交付证据与结果收口：最终 Result 现在包含交付物索引与默认风险/后续动作，Patch 持久化 diff/content，新增 Code Change Diff artifact，completion memory 自动写入 run summary。 |
+| 2026-05-04 | 交付证据与结果收口：最终 Result 现在包含交付物索引与默认风险/后续动作，Patch 持久化 diff/content，新增 workspace-change-diff artifact，completion memory 自动写入 run summary。 |
 | 2026-05-04 | 增加软件开发闭环集成测试：覆盖缺陷实现自动修复、unified diff 应用、测试恢复、Result/Artifact 输出与 run summary memory 生成。 |
 | 2026-05-04 | 风险操作治理收口：Approval 模型、仓储、事件、appservice、backend、TUI/agent 均贯通 `action/context`；LLM `requiredApproval` 输出会映射为 `blockApprovalAction/blockApprovalContext`，orchestrator 创建 Approval 时持久化风险元数据，批准后将同一元数据写入 `approvalResolution` 传递给后续 Step；批准和拒绝路径均增加测试覆盖。 |
 | 2026-05-04 | `scripts/verify-llm-workspace-execution.sh` 补充 Approval `action/context` 断言，覆盖直接 Approval reject 和 Decision 后 Approval approve 两条 e2e 路径。 |

@@ -35,7 +35,7 @@
 | SDR-02 | 结构化传递 missing DoD items | 通用后端 | P0 | completed | DoD 覆盖缺口通过 typed diagnostics 写入 `runtimeDiagnostics.missingDoDItems`（raw/normalized/kind/requiredEvidenceHint），并透传到 repair input 与修复升级上下文 | repair follow-up 能直接使用结构化缺口列表，无需依赖错误字符串反解析 |
 | SDR-03 | repair prompt 强制 DoD-to-implementation/test plan | 通用后端 / Soul | P0 | completed | LLM 决策契约增加 `dod_coverage_missing` 约束：必须将缺口映射到 affected files、patch/apply、verification commands，禁止泛化 inspection loop | DoD 缺口 repair 的 prompt contract 已具备强约束，不再允许仅 `file/list` 循环 |
 | SDR-04 | 增加无效 repair 收敛保护 | 通用后端 | P0 | completed | 结合已有 repair attempt 上限与升级机制，补充升级决策上下文（missingDoDItems、recentRepairAttempts、recommendedNextActions） | run 不会无限 `running`；repair exhausted ticket 可直接给出下一步修复方向 |
-| SDR-05 | 历史 accepted Memory 可信度标记 | Memory / 上下文 | P0 | completed | 新写入 run-summary memory 增加 `dod_gate_version:v2`；上下文压缩对旧 run-summary 标注 `legacy_pre_dod_gate` | recall 到旧 summary 时有显式降权标记，避免被误当作当前 DoD 强证据 |
+| SDR-05 | run-summary Memory 版本化与中立化 | Memory / 上下文 | P0 | completed | 新写入 run-summary memory 增加 `dod_gate_version:v2` 与中立 `runtime_result` tag；当前阶段不保留旧 summary 兼容降权分支 | recall 上下文不再注入历史兼容 trust marker；新 summary 只能作为带版本标签的运行结果证据参与上下文 |
 | SDR-06 | DoD 条目类型识别 | 通用后端 | P0 | completed | completion gate 解析 DoD 为 `heading/parent/leaf`，仅 `leaf` 进入强制覆盖门禁 | 标题与父级分组不再误判为必须 satisfied 条目；叶子验收项必须覆盖 |
 | SDR-07 | 强化 evidence-to-DoD 校验 | 通用后端 / resultQuality | P0 | completed | `resultQuality` 增加 DoD 叶子覆盖检查、satisfied 条目 evidence 链接性检查、弱验证证据检查 | build/test 泛化证据无法覆盖全部 DoD；弱证据与缺失证据会被标记 failed |
 | SDR-08 | 强化 `software-dev` Soul 的缺口修复策略 | Template / Soul | P0 | completed | 软件开发 planning/execution/validation Soul 已固化 DoD-to-test、弱证据拒绝、补实现补测试优先策略；并由 LLM 契约补强 repair 约束 | `config.yaml` 等条目不再因文件存在被误判 satisfied，需实现与测试证据闭环 |
@@ -100,7 +100,7 @@
 - 系统自动初始化项目、补实现、补测试。
 - 所有 DoD leaf items 均有对应 evidenceRefs。
 - `go test`、`go test -race`、`go vet`、`go build` 或等价命令通过。
-- 产出 accepted Result、result-summary、deliverable-manifest、code-change-diff。
+- 产出 accepted Result、result-summary、deliverable-manifest、workspace-change-diff。
 - 若无法满足，必须输出 rejected / failed Result，并列出缺失项和下一步。
 
 ## 与现有计划的关系

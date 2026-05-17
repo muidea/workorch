@@ -378,7 +378,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 				"Return completed or failed with dodAssessment, or a real requiredDecision/requiredApproval",
 				"When Goal requirements are not textually identical to DoD items, include dodAssessment.goalCoverage with item-level evidenceRefs",
 				"When executionContract.profileContracts declares required acceptanceDimensions or deliverableExpectations, include dodAssessment.acceptanceDimensions and dodAssessment.deliverableCoverage with item-level evidenceRefs or artifactRefs for every required id",
-				"Treat runtimeStage=verification or acceptance as strict convergence stages; do not reopen exploration or implementation planning in these stages",
+				"Treat runtimeStage=verification or acceptance as strict convergence stages; do not reopen exploration or broad planning in these stages",
 				"Before returning blocked_on_decision, reconcile the question with the current, decision, planning, and execution Soul policies; do not ask for information that those policies explicitly say is not required",
 				"When evidence is insufficient but the missing work can be handled by later runtime repair or replan, return failed with dodAssessment.nextActions instead of asking the user to choose the execution target",
 				"Do not include executionGraph, shellCommands, patchRequests, mcpToolCalls, memoryWrites, nextAction, or executable work",
@@ -394,7 +394,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 				"Use the effective Goal and DoD already supplied in the request",
 				"Return direct state-changing output, failed dodAssessment, or a real requiredDecision/requiredApproval blocker",
 				"Do not return run snapshot, observability, self-inspection, context rehydration, or replan-through-LLM graphs",
-				"When failed evidence includes current target snapshots, patch those targets directly with auditable state-change artifacts before rerunning verification",
+				"When failed evidence includes current target snapshots, update those targets directly with auditable state-change artifacts before rerunning verification",
 				"Do not use shell commands to modify workspace files when a patch artifact can represent the change",
 				"If an earlier stream was incomplete, continue by producing a complete fresh JSON object rather than inspecting the run again",
 			},
@@ -408,7 +408,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			"Treat effective Goal and DoD as hard constraints",
 			"When runtimeStageMode is open_judgment, prefer context gathering, plan refinement, and constraint clarification over premature state-changing output",
 			"When runtimeStageMode is strict_convergence, produce executable output, failed assessment, or a real blocker; do not continue read-only looping",
-			"If the current workspace is empty and the effective Goal/DoD can be satisfied by creating a new project or files, continue by planning bootstrap and implementation work instead of asking whether initialization is allowed",
+			"If the current workspace is empty and the effective Goal/DoD can be satisfied by creating workspace deliverables with available runtime capabilities, continue with bounded state-changing work instead of asking whether initialization is allowed",
 		},
 	})
 }

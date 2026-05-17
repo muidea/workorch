@@ -106,8 +106,8 @@ func writePatchEvidenceSection(builder *strings.Builder, patchDetails []resultPa
 	if builder == nil || len(patchDetails) == 0 {
 		return
 	}
-	builder.WriteString("\n## Code Change Evidence\n\n")
-	builder.WriteString("| Patch | Type | Target | State | Summary |\n")
+	builder.WriteString("\n## Workspace Change Evidence\n\n")
+	builder.WriteString("| Change | Type | Target | State | Summary |\n")
 	builder.WriteString("| --- | --- | --- | --- | --- |\n")
 	for _, patch := range patchDetails {
 		builder.WriteString(fmt.Sprintf(
@@ -120,7 +120,7 @@ func writePatchEvidenceSection(builder *strings.Builder, patchDetails []resultPa
 		))
 	}
 	if hasPatchDeliverableContent(patchDetails) {
-		builder.WriteString("\n- Full change content is stored in the Code Change Diff artifact.\n")
+		builder.WriteString("\n- Full change content is stored in the workspace change diff artifact.\n")
 	}
 }
 
@@ -145,7 +145,7 @@ func patchDiffArtifactID(run *runModel.Run) common.ArtifactID {
 	if run == nil {
 		return ""
 	}
-	return common.ArtifactID(fmt.Sprintf("%s/artifact/code-change-diff", run.ID))
+	return common.ArtifactID(fmt.Sprintf("%s/artifact/workspace-change-diff", run.ID))
 }
 
 func hasPatchDeliverableContent(patchDetails []resultPatchDetail) bool {
@@ -159,7 +159,7 @@ func hasPatchDeliverableContent(patchDetails []resultPatchDetail) bool {
 
 func patchDiffArtifactContent(patchDetails []resultPatchDetail) string {
 	var builder strings.Builder
-	builder.WriteString("# Code Change Diff\n")
+	builder.WriteString("# Workspace Change Diff\n")
 	for _, patch := range patchDetails {
 		if strings.TrimSpace(patch.Diff) == "" && strings.TrimSpace(patch.Content) == "" {
 			continue
@@ -273,39 +273,15 @@ func shouldSkipWorkspaceManifestPath(rel string, entry os.DirEntry) bool {
 }
 
 func artifactCategoryForWorkspaceFile(path string) string {
-	normalized := strings.ToLower(filepath.ToSlash(path))
-	base := pathBaseLower(normalized)
-	switch {
-	case strings.Contains(normalized, "/testdata/"),
-		strings.HasSuffix(base, "_test.go"),
-		strings.HasSuffix(base, ".test.js"),
-		strings.HasSuffix(base, ".spec.js"),
-		strings.Contains(base, "test-report"),
-		strings.Contains(base, "coverage"):
-		return resultcommon.ArtifactCategoryTestReport
-	case strings.HasSuffix(base, ".md"),
-		strings.HasSuffix(base, ".adoc"),
-		strings.HasSuffix(base, ".rst"),
-		strings.HasPrefix(base, "readme"),
-		strings.HasPrefix(base, "docs"):
-		return resultcommon.ArtifactCategoryDocumentation
-	case strings.HasSuffix(base, ".toml"),
-		strings.HasSuffix(base, ".yaml"),
-		strings.HasSuffix(base, ".yml"),
-		strings.HasSuffix(base, ".json"),
-		strings.HasSuffix(base, ".env"),
-		strings.Contains(base, "config"),
-		strings.Contains(base, "lock"):
-		return resultcommon.ArtifactCategoryConfiguration
-	default:
-		return resultcommon.ArtifactCategorySource
-	}
+	return resultcommon.ArtifactCategoryDeliverable
 }
 
 func artifactPurposeForCategory(category string) string {
 	switch category {
+	case resultcommon.ArtifactCategoryDeliverable:
+		return "Workspace deliverable produced for the accepted outcome."
 	case resultcommon.ArtifactCategoryConfiguration:
-		return "Configuration required to run or integrate the deliverable."
+		return "Structured configuration artifact associated with the deliverable."
 	case resultcommon.ArtifactCategoryDocumentation:
 		return "Documentation or usage guidance for acceptance review."
 	case resultcommon.ArtifactCategoryTestReport:
@@ -315,7 +291,7 @@ func artifactPurposeForCategory(category string) string {
 	case resultcommon.ArtifactCategoryFinalSummary:
 		return "Final user-facing acceptance summary."
 	default:
-		return "Source or implementation artifact for the accepted outcome."
+		return "Workspace artifact for the accepted outcome."
 	}
 }
 

@@ -21,6 +21,7 @@ const (
 	ArtifactCategoryConfiguration   = "configuration"
 	ArtifactCategoryDocumentation   = "documentation"
 	ArtifactCategoryTestReport      = "test_report"
+	ArtifactCategoryDeliverable     = "deliverable"
 	ArtifactCategoryRuntimeEvidence = "runtime_evidence"
 	ArtifactCategoryFinalSummary    = "final_summary"
 )

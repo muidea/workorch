@@ -125,12 +125,12 @@ func TestRunExecutionContextPackagePreservesExecutionContractDetails(t *testing.
 	}
 }
 
-func TestCompactMemoryContextsMarksLegacyRunSummaryMemory(t *testing.T) {
+func TestCompactMemoryContextsDoesNotInjectHistoricalCompatibilityTrust(t *testing.T) {
 	items := []map[string]any{
 		{
-			"id":         "memory-legacy",
+			"id":         "memory-without-gate-tag",
 			"memoryType": "run_summary",
-			"summary":    "legacy summary",
+			"summary":    "summary without gate tag",
 			"tags":       []string{"run_summary", "dod_assessment"},
 		},
 		{
@@ -145,11 +145,10 @@ func TestCompactMemoryContextsMarksLegacyRunSummaryMemory(t *testing.T) {
 	if len(compact) != 2 {
 		t.Fatalf("compactMemoryContexts len = %d, want 2", len(compact))
 	}
-	if compact[0]["evidenceTrust"] != "legacy_pre_dod_gate" {
-		t.Fatalf("legacy evidenceTrust = %#v, want legacy_pre_dod_gate", compact[0]["evidenceTrust"])
-	}
-	if _, ok := compact[1]["evidenceTrust"]; ok {
-		t.Fatalf("v2 memory evidenceTrust = %#v, want unset", compact[1]["evidenceTrust"])
+	for _, item := range compact {
+		if _, ok := item["evidenceTrust"]; ok {
+			t.Fatalf("memory context injected compatibility trust marker: %+v", item)
+		}
 	}
 }
 

@@ -18,9 +18,9 @@ func localizedRuntimeRepairExhaustionReason(language string, attempts int, err e
 
 func localizedRuntimeRepairExhaustionQuestion(language string) string {
 	if prefersChinese(language) {
-		return "自动运行时修复尝试已耗尽。请补充缺失的实现指导，选择重新规划，或拒绝当前路径。"
+		return "自动运行时修复尝试已耗尽。请补充缺失的处理指导，选择重新规划，或拒绝当前路径。"
 	}
-	return "Automatic runtime repair attempts were exhausted. Provide missing implementation guidance, choose replan, or reject the current path."
+	return "Automatic runtime repair attempts were exhausted. Provide missing recovery guidance, choose replan, or reject the current path."
 }
 
 func localizedDuplicateRuntimeFailureReason(language string, signature string, err error) string {

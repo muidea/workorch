@@ -137,7 +137,7 @@ func (e *workspacePathConflictError) RuntimeFailureDiagnostics() map[string]any 
 		"targetRef":    e.TargetRef,
 		"conflictRef":  e.ConflictRef,
 		"conflictKind": e.ConflictKind,
-		"guidance":     "Choose a targetRef whose parent path is a directory, or write the file at the existing project root. Do not treat an existing file as a directory.",
+		"guidance":     "Choose a targetRef whose parent path is a directory, or write the resource at the existing workspace root. Do not treat an existing file as a directory.",
 	}
 }
 

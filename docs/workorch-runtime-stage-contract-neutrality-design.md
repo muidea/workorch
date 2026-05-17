@@ -221,13 +221,13 @@ Runtime 必须拒绝：
 
 当 run 级 `stateChangePolicy=must_produce_state_change` 时，`planning` 阶段可以先输出只读 graph 做上下文探索；但一旦 graph 中的 `llm/workspace_execution` 节点被调度到 `execution` 阶段，该 LLM 节点必须继承 `stateChangingOutputRequired=true`、`repairObjective=produce_state_changing_output` 与 state-changing guidance。普通 `file/read`、`file/list`、只读 tool 节点不因此被强制变更。
 
-LLM 输出 `executionGraph` 时，runtime 必须按当前 `soulStage` 解析有效 Soul 绑定，并用中立 capability contract 校验 graph 节点：若 `allowedToolKinds` 非空且不含 `*`，所有节点 kind 必须在允许列表内；若 `allowedMCPServerRefs` 非空且不含 `*`，MCP 节点引用的 server 必须在允许列表内。该校验只依据 Soul 的能力白名单，不得写入具体业务领域或特定工具 fallback 规则。
+LLM 输出 `executionGraph` 时，runtime 必须按当前 Soul 绑定阶段解析有效 Soul 绑定，并用中立 capability contract 校验 graph 节点：若 `allowedToolKinds` 非空且不含 `*`，所有节点 kind 必须在允许列表内；若 `allowedMCPServerRefs` 非空且不含 `*`，MCP 节点引用的 server 必须在允许列表内。该校验只依据 Soul 的能力白名单，不得写入具体业务领域或特定工具 fallback 规则。
 
 当 `execution/strict_convergence` 阶段的非只读步骤失败，且 run 级 contract 要求 `must_produce_state_change` 时，后续 runtime repair 必须继续携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。这包括 shell/test/build、patch/apply、file/edit、MCP tool 等执行或验证 state change 的步骤失败；普通 read observation 失败只有在缺失目标文件、DoD 缺口或其他明确 contract failure 时才提升为 state-changing repair。
 
 若非 LLM 执行步骤失败原因是中立的瞬时执行超时（例如 runtime deadline / timeout，且尚未形成确定性失败证据），runtime repair 不应强制要求 state-changing 输出；应允许一次受预算约束的重试、缩小验证范围或返回 failed assessment / blocker。该规则只基于“执行超时”这一中立失败形态，不得写入特定命令、语言、测试框架或业务领域判断。
 
-当 provider/config 决策解除后需要重试原失败 LLM step 时，decision resolution 只能补充“已授权重试、已提供信息、恢复动作”等恢复上下文，不得覆盖原 step 已存在的 `runtimeStage`、`runtimeStageMode`、`soulStage`、`stateChangingOutputRequired`、`repairObjective` 等阶段合同。换言之，`decision` 是恢复入口，不是被重试任务的执行阶段；provider retry 必须继续继承失败 step 的原阶段语义。
+当 provider/config 决策解除后需要重试原失败 LLM step 时，decision resolution 只能补充“已授权重试、已提供信息、恢复动作”等恢复上下文，不得覆盖原 step 已存在的 `runtimeStage`、`runtimeStageMode`、Soul 绑定阶段、`stateChangingOutputRequired`、`repairObjective` 等阶段合同。换言之，`decision` 是恢复入口，不是被重试任务的执行阶段；provider retry 必须继续继承失败 step 的原阶段语义。
 
 当 execution graph 以并行 batch 方式调度时，batch 完成后的续跑必须以本批次所属 graph root / lineage 为锚点计算 dependency-satisfied 节点，不得用 run 内全局“最新 completed graph step”推断当前 graph。全局最新节点可能属于其他 repair、replan 或历史 graph scope；runtime 必须按当前批次 root 继续推进，直到该 graph scope 内没有可执行节点，再进入 follow-up / verification / acceptance。
 
@@ -594,20 +594,20 @@ Stage input bundle 必须遵守：
   - 已完成 STG-01 第一批收口。
   - orchestrator 新增显式 `runtimeStage` 输入字段与统一 helper，作为 core runtime 的中立阶段标识。
   - 初始 LLM step、graph node、graph follow-up、completion follow-up、assessment-only follow-up、runtime repair、provider retry、decision resolution、approval resolution 已开始显式写入 `runtimeStage`。
-  - `validateLLMExecutionOutputContract` 和 follow-up graph state-changing contract 已开始优先基于 `runtimeStage` 判断，不再只依赖 `soulStage`。
-  - 当前仍保留 `soulStage` 作为兼容过渡信号；后续 STG-02 / STG-03 继续把 open/strict 模式、assessment-only、repair 继承和 profile 映射归一到 stage contract。
+  - `validateLLMExecutionOutputContract` 和 follow-up graph state-changing contract 已开始优先基于 `runtimeStage` 判断，不再依赖 Soul 绑定阶段。
+  - 2026-05-17 已完成破坏性收口：runtime contract 不再从 `soulStage` 反推 `runtimeStage`；Soul 绑定阶段只用于选择 Soul / capability allowlist，不再作为 runtime stage fallback。
 - 2026-05-13：
   - 已完成 STG-03 第一批收口。
   - core runtime 新增 `runtimeStageMode`，当前支持 `open_judgment`、`strict_convergence`、`structured_governance`。
   - `runtimeStageMode` 已随 `runtimeStage` 一起进入 step input、execution context package、memory trace 和 LLM provider input。
   - blocks/llm prompt 已显式接入 `runtimeStage` / `runtimeStageMode`，让 LLM 在 prompt 层知道当前是开放判断还是严格收敛。
-  - 当前仍未完成 profile 层的独立阶段映射与专用 verifier；后续需要继续推进 STG-02 / STG-04 / STG-07，把 profile-specific 规则完全从 core runtime 中抽离。
+  - 当时仍未完成 profile 层的独立阶段映射与专用 verifier；后续 STG-04 / STG-07 落地记录见 2026-05-17 条目。
 - 2026-05-13：
   - 已完成 STG-02 / STG-06 / STG-08 追加收口。
   - core runtime 已移除通过 `graphNodeId` 文本关键词推断 state-changing graph node 的逻辑；graph node 是否必须产生 state-changing output 只读取显式 `stateChangingOutputRequired` contract。
   - execution graph node 的阶段判断已从 `soulStage=execution` 切换到中立 `runtimeStage=execution`。
   - planning / exploration 保持 `open_judgment` 语义，即使 run 级 `executionContract.stateChangePolicy=must_produce_state_change`，也不在 planning 阶段强制 patch；state-changing 要求在 execution / repair 等严格收敛阶段执行。
-  - repair 新写入的 `repairObjective` 已改为 `produce_state_changing_output`；旧 `produce_state_changing_implementation` 仅作为历史输入兼容识别，不再作为新输出。
+  - repair 新写入的 `repairObjective` 已改为 `produce_state_changing_output`；`produce_state_changing_implementation` 已从 runtime state-change 判定中移除。
   - state-changing repair guidance 已改为中立的 state-changing output 要求，profile 层仍可把该 artifact 映射为 patch/file write 等具体能力。
 - 2026-05-13：
   - 已完成 execution 失败 repair 追加收口。
@@ -636,6 +636,19 @@ Stage input bundle 必须遵守：
   - `governanceHistory` 与 `replanContinuation` 的失败 lineage 改为 summary/ref-only，禁止把旧的 raw failure input/output、target content、LLM raw preview、stream events 或 provider/model 动态绑定复制进 successor run、step input 或 execution context package。
   - Step state event payload 改为 raw ref + compact summary，不再复制完整 step input/output；ToolCall runtime evidence 改为记录 step input/output refs 与摘要，不再把完整 step input 重复写入 `tool-calls/*/arguments.json`。
   - 该变更用于避免长流程 workspace 在 repair/replan 中反复 JSON clone/marshal/read/write，导致 CPU、内存和 payload 文件成倍膨胀。
+- 2026-05-17：
+  - 已完成 DoD / Goal coverage 缺口提示中立化收口。
+  - core runtime 不再根据 DoD 文本中的测试、配置、并发、语言栈或其他业务关键词生成领域化 evidence hint。
+  - `missingDoDItems` / Goal coverage diagnostics 只提示按当前 `runtimeStage` 与 profile contract 提供具体 evidence refs；软件开发所需的 build/test/diff/config/concurrency 等证据要求继续由 `software-dev` workspaceTemplate / Soul / profile contract 承载。
+  - Result manifest 与 patch evidence artifact 命名同步从 `Code Change` / `code-change-diff` 收敛为中立 `Workspace Change` / `workspace-change-diff`，避免 core 把通用 workspace 状态变更解释为代码变更。
+  - workspace 交付文件在 core manifest 中统一标记为 `deliverable`，不再按文件名或扩展名推断 source / configuration / test_report；若某个 profile 需要更细的产物分类，必须由 profile verifier 或模板输出结构化声明。
+  - blocks/llm 全局 provider prompt 已移除软件开发默认路径、测试命令示例、项目初始化和领域化 DoD repair 话术；全局 prompt 只表达 stage / capability / workspace target / evidence 的中立约束，软件开发流程继续由 `software-dev` Soul 和 profile contract 下发。
+  - 已新增 `scripts/verify-workorch-runtime-profile-software-dev.sh` 与 `make verify-runtime-profile-software-dev`，把 software-dev 的 `goalCoverage`、`acceptanceDimensions`、`deliverableCoverage` 等 profile-specific 验证从 core verifier 拆出；`verify-workorch-runtime-core-flow.sh` 继续只检查中立 runtime flow。
+  - `scripts/verify-boundary-contract.sh` 已补充软件开发偏置守卫，禁止 reusable runtime / 全局 LLM prompt 重新出现 `Code Change`、固定测试命令、`implementation path`、`affected files`、profile deliverable id 等专属表达。
+  - 已完成不兼容收口：`runtimeStageFromStepInput` 不再从 `soulStage` 反推 runtime stage；blocks/llm provider Soul 推断也不再把旧 `soulStage` 当作 fallback。后续所有 runtime 合同判断必须依赖显式 `runtimeStage` 或结构化 follow-up flags。
+  - run-summary memory 上下文压缩已移除旧 `run_summary` 兼容 trust marker；core 只保留中立 provenance 与当前版本标签，不再为历史数据生成特殊降权字段。
+  - run-summary memory 的 core 文本已把 `Verification commands` / `Patch targets` / `code_agent` 收敛为中立 `Evidence executions` / `State-change targets` / `runtime_result`，软件开发具体命令和 patch 语义只作为 profile evidence 内容出现，不作为 core 标签或固定标题。
+  - continuable decision -> runtime repair 的判断已移除 `new project`、`project path`、`工作目录` 等文本关键词启发式；core 只接受中立结构化标记 `runtimeCanContinue` / `continuableByRuntime` / `workspaceActionable` 或已知可读 workspace resource 证据。
 
 ## 非兼容性说明
 
@@ -646,6 +659,8 @@ Stage input bundle 必须遵守：
 - 重构 output contract validator。
 - 将软件开发相关 prompt / tool 选择迁移到 profile 层。
 - 清理旧 memory recall 中的低价值 runtime 流水。
+- 移除旧 memory trust marker、旧 run-summary 降权分支和历史数据特殊解释。
+- 移除基于自然语言关键词的历史 decision 兼容推断；需要继续执行时必须通过结构化 runtime context 表达。
 - 替换旧的 runtime file-backend 文件命名与 raw payload ref 形态。
 
 但即使不考虑兼容，也不得破坏核心中立原则。

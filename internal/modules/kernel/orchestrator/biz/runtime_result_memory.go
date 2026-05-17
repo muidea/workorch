@@ -50,7 +50,7 @@ func completionRunSummaryMemoryContent(
 		parts = append(parts, "Evidence refs: "+strings.Join(evidenceRefs, ", "))
 	}
 	if len(evidenceDetails) > 0 {
-		lines := []string{"Verification commands:"}
+		lines := []string{"Evidence executions:"}
 		for _, detail := range evidenceDetails {
 			if detail.Command == "" && detail.ExitCode == "" {
 				continue
@@ -62,7 +62,7 @@ func completionRunSummaryMemoryContent(
 		}
 	}
 	if len(patchDetails) > 0 {
-		lines := []string{"Patch targets:"}
+		lines := []string{"State-change targets:"}
 		for _, patch := range patchDetails {
 			lines = append(lines, fmt.Sprintf("- %s %s %s", patch.PatchType, patch.TargetRef, patch.State))
 		}
@@ -198,7 +198,7 @@ func (o *RuntimeOrchestrator) recordRunSummaryMemoryFromValidatedDoDAssessment(
 		MemoryType:  memorycommon.MemoryTypeRunSummary,
 		Content:     completionRunSummaryMemoryContent(run, summary, assessment, evidenceRefs, o.resultPatchDetails(ctx, run.ID), o.resultEvidenceDetails(ctx, evidenceRefs), o.resultWebSourceDetails(ctx, run.ID)),
 		Summary:     summary,
-		Tags:        []string{"run_summary", "dod_assessment", "code_agent", runSummaryDoDGateVersionTag},
+		Tags:        []string{"run_summary", "dod_assessment", "runtime_result", runSummaryDoDGateVersionTag},
 		Importance:  70,
 		Confidence:  70,
 		Visibility:  "workspace",

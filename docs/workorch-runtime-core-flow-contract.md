@@ -32,8 +32,8 @@
 
 | 阶段 | 输入标识 | 允许输出 | 禁止输出 |
 | --- | --- | --- | --- |
-| planning | `soulStage=planning` | 对非实现类 goal 可输出探索 graph；实现类 goal 必须输出含合法 patch 节点的 graph，或直接 state-changing output / blocker | 实现类 goal 只读 graph |
-| execution graph node | `soulStage=execution` + `graphNodeId` | 具体 runtime output、合法 patch output、DoD assessment、decision/approval blocker | 只返回下一层 `executionGraph`；implementation 节点 shell-only / read-only |
+| planning | `runtimeStage=planning` | 可输出探索 graph；若当前 execution contract 要求 state change，则必须输出含合法 state-changing 节点的 graph、直接 state-changing output 或 blocker | state-changing contract 下只读 graph |
+| execution graph node | `runtimeStage=execution` + `graphNodeId` | 具体 runtime output、合法 state-changing output、DoD assessment、decision/approval blocker | 只返回下一层 `executionGraph`；state-changing 节点 shell-only / read-only |
 | graph follow-up | `graphFollowUp` / `completionFollowUp` / `continuationFollowUp` | 合法 patch graph、DoD assessment、blocker | 只读 graph |
 | assessment-only | `assessmentOnly` / `providerRetryAssessmentOnly` | `dodAssessment` 或真实治理 blocker | `executionGraph`、patch、shell、memoryWrites |
 | runtime repair | `runtimeRepairFollowUp` | 按 repair objective 输出具体修复、failed DoD assessment、blocker | 与 objective 冲突的 graph / shell-only |
@@ -42,10 +42,10 @@
 
 ## 有效进展定义
 
-在实现类 Goal 下，以下输出才算有效进展：
+在要求 workspace state change 的 Goal 下，以下输出才算有效进展：
 
-- 成功应用 patch 或返回可派发的 patch step。
-- 新增或更新源码、配置、测试、文档，并能被后续验证引用。
+- 成功应用 state-changing artifact 或返回可派发的 state-changing step。
+- 新增或更新 workspace 交付内容，并能被后续验证引用。
 - 输出 failed/skipped DoD assessment，明确列出缺口、影响和下一步。
 - 输出真实 blocker，例如 provider 配置不可用、缺少必要需求、需要审批。
 
@@ -55,7 +55,7 @@
 - 只运行 build/test 但没有覆盖新增 Goal 或没有任何变更。
 - LLM 反复返回下一层 `executionGraph`。
 - patch 内容含 `__FROM_PREVIOUS_STEP_OUTPUT__`、`<<...>>`、省略号、TODO 代替实现。
-- 在空 workspace 或新项目场景下，反复读取不存在的目标文件而不创建文件、不输出 result、不开 decision。
+- 在空 workspace 或缺失目标内容场景下，反复读取不存在的目标文件而不创建内容、不输出 result、不开 decision。
 
 ## Failure 分类
 
@@ -64,7 +64,7 @@
 | `provider_timeout` / `rate_limited` / `context_too_large` | LLM provider runtime failure | provider retry，重试耗尽后 block_on_decision，要求修复 WorkOrch runtime provider |
 | `provider_schema_drift` | provider response/protocol schema 与 runtime provider 适配不一致 | provider/config decision 或 provider adapter 修复，不进入业务 runtime repair |
 | `llm_decision_invalid` | LLM 输出 JSON / WorkOrch decision schema / 阶段输出合约无效 | 普通执行阶段进入 runtime repair / contract correction；assessment-only 终态写 rejected result |
-| `runtime_failed` + contract message | LLM 输出违反 WorkOrch 合约 | runtime repair；若是 implementation/state-changing contract，repair 必须继承 state-changing |
+| `runtime_failed` + contract message | LLM 输出违反 WorkOrch 合约 | runtime repair；若是 state-changing contract，repair 必须继承 state-changing |
 | `patch_apply_failed` / `patch_dispatch_invalid` | patch 校验或应用失败 | state-changing repair，必须基于当前文件快照生成具体 patch |
 | `dod_coverage_missing` | DoD/Goal coverage 不足 | repair 或 rejected result；不得继续 assessment-only graph |
 | `workspace_path_conflict` | 文件缺失、路径冲突 | repair 可先读取/列目录，但若原目标是 state-changing，必须回到具体 patch |
@@ -98,11 +98,11 @@
 
 - repair scope 必须按 root step、failure class、failure signature 归一。
 - repair-of-repair 必须继承更强约束，不得降级。
-- implementation planning read-only graph failure 首轮 repair 直接进入 state-changing repair。
-- DoD run 中 `file/read` / `file_read_invalid_path` / `no such file` / `lstat` 这类缺失目标文件失败，若发生在实现闭环内，repair 必须进入 `produce_state_changing_implementation`，并提示创建缺失文件，而不是继续重复读取。
-- state-changing planning / repair graph 中，合法 `patch/apply` 不能依赖前置 `llm/workspace_execution` 分析节点；分析必须在 planning 阶段完成，patch graph 必须能从只读取证节点直接推进到 state-changing patch。
+- state-changing planning read-only graph failure 首轮 repair 直接进入 state-changing repair。
+- DoD run 中 `file/read` / `file_read_invalid_path` / `no such file` / `lstat` 这类缺失目标文件失败，若发生在 state-changing 闭环内，repair 必须进入 `produce_state_changing_output`，并提示创建缺失内容，而不是继续重复读取。
+- state-changing planning / repair graph 中，合法 state-changing 节点不能依赖前置 `llm/workspace_execution` 分析节点；分析必须在 planning 阶段完成，state-changing graph 必须能从只读取证节点直接推进到状态变更。
 - runtime repair budget 按已派发 repair attempt 计数；provider timeout 的 repair step 可以触发 provider retry / provider blocker，但不得导致同一 repair attempt 反复生成 `-2/-3/-4`。
-- provider retry of runtime repair 必须继承 state-changing repair contract，包括 `repairObjective=produce_state_changing_implementation`、`stateChangingOutputRequired=true`、repair scope 与 repair guidance；不得把必须产出 patch 的责任降级为后续 LLM execution node。
+- provider retry of runtime repair 必须继承 state-changing repair contract，包括 `repairObjective=produce_state_changing_output`、`stateChangingOutputRequired=true`、repair scope 与 repair guidance；不得把必须产出 state-changing output 的责任降级为后续 LLM execution node。
 - state-changing repair 失败不能退回普通 graph planning。
 - repair 输出 failed DoD assessment 时，如果不可执行 continuation，应写 rejected result 并关闭或进入 decision，不得继续循环。
 
@@ -188,8 +188,8 @@
   - 自动区分 unhandled violation 与已由 runtime repair / assessment correction / rejected result / decision ticket 覆盖的 handled violation。
   - Go fixture 回归已覆盖未治理 invalid patch graph、已治理 invalid patch graph、旧 `/block/` graph node ID、缺失 `graphSeq`。
 - DMI-25 已落地：
-  - DoD run 中缺失 workspace 文件读取失败会触发 state-changing runtime repair，repair input 写入 `repairObjective=produce_state_changing_implementation` 与 `stateChangingOutputRequired=true`。
-  - repair guidance 明确要求空 workspace / 新项目缺文件时使用 `patch/apply file_write` 创建目标文件，不再重复读取。
+  - DoD run 中缺失 workspace 文件读取失败会触发 state-changing runtime repair，repair input 写入 `repairObjective=produce_state_changing_output` 与 `stateChangingOutputRequired=true`。
+  - repair guidance 明确要求空 workspace / 目标内容缺失时使用可审计的 state-changing 操作创建目标内容，不再重复读取。
   - 验证脚本新增 running DoD run 反复缺失文件读取且无 patch/result/ticket 的失败检查。
   - provider retry / runtime repair 这类 recovery step 可携带失败 graph node 上下文，但不按 graph dispatch step 强制要求 `/graph-<seq>/` ID；普通 graph dispatch step 仍必须满足 graph scope 与 `graphSeq` / `graphNodeSeq`。
 - DMI-26 已落地：
@@ -201,7 +201,7 @@
   - successor run 继承 workspace、Goal、DoD、priority 与 executionContext，并写入 `replanContinuation.predecessorRunId/ticketId/resolutionId` 以保持追溯。
   - HTTP replan continuation watcher 保留为外层补偿，但 replan 续跑能力已收口到 runtime 核心状态机。
 - DMI-28 已落地：
-  - implementation planning graph 若把所有合法 `patch/apply` 放在 `llm/workspace_execution` 依赖之后，runtime 立即按 contract failure 进入 repair，不再允许“graph 里有 patch 但永远先卡在分析 LLM”。
+  - state-changing planning graph 若把所有合法 state-changing 节点放在 `llm/workspace_execution` 依赖之后，runtime 立即按 contract failure 进入 repair，不再允许“graph 里有 state-changing 节点但永远先卡在分析 LLM”。
   - state-changing repair graph 复用同一约束，避免 repair 再次输出“先分析、后 patch”的阻塞 graph。
   - runtime repair attempt 计数改为按已派发 repair step 计入预算，provider timeout 不再让同一 attempt 反复派发；provider 不可用仍由 provider retry/provider blocker 单独治理。
 - DMI-29 已落地：

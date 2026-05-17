@@ -1195,10 +1195,6 @@ func compactMemoryContexts(items []map[string]any) []map[string]any {
 		if provenance := staticMemoryContextProvenance(item); provenance != "" {
 			compact["provenance"] = provenance
 		}
-		if isLegacyRunSummaryMemory(item) {
-			compact["evidenceTrust"] = "legacy_pre_dod_gate"
-			compact["evidenceTrustReason"] = "Run-summary memory was created before strict DoD gate version tagging; treat as historical reference only."
-		}
 		ret = append(ret, compact)
 		if len(ret) >= 8 {
 			break
@@ -1216,18 +1212,6 @@ func staticMemoryContextProvenance(item map[string]any) string {
 		return "workspace"
 	}
 	return ""
-}
-
-func isLegacyRunSummaryMemory(item map[string]any) bool {
-	if strings.TrimSpace(stringFromMap(item, "memoryType")) != "run_summary" {
-		return false
-	}
-	for _, tag := range stringSliceFromValue(item["tags"]) {
-		if strings.TrimSpace(tag) == runSummaryDoDGateVersionTag {
-			return false
-		}
-	}
-	return true
 }
 
 func pickExecutionContextFields(input map[string]any, fields []string) map[string]any {

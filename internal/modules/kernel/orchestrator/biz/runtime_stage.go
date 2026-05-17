@@ -64,18 +64,6 @@ func runtimeStageFromStepInput(input map[string]any) string {
 	case input["approvalResolution"] != nil:
 		return runtimeStageApproval
 	}
-	switch normalizedOrchestratorSoulStage(input[stepInputKeySoulStage]) {
-	case soulStagePlanning:
-		return runtimeStagePlanning
-	case soulStageExecution:
-		return runtimeStageExecution
-	case soulStageValidation:
-		return runtimeStageVerification
-	case soulStageDecision:
-		return runtimeStageDecision
-	case soulStageApproval:
-		return runtimeStageApproval
-	}
 	return ""
 }
 
