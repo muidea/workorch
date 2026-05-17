@@ -1660,9 +1660,32 @@ func validateRepairPatchRequestGranularity(step *runModel.Step, request runtimeP
 		if itemTarget != target {
 			continue
 		}
+		if repairPatchContextAllowsSafeFileWrite(item, request) {
+			return nil
+		}
 		return fmt.Errorf("%w: runtime repair patch/apply file_write cannot replace existing target %q when current repair context is available; use a minimal unified_diff or exact replacement against the current snapshot", common.ErrInvalidArgument, request.TargetRef)
 	}
 	return nil
+}
+
+func repairPatchContextAllowsSafeFileWrite(item map[string]any, request runtimePatchRequest) bool {
+	if len(item) == 0 || strings.TrimSpace(request.PatchType) != "file_write" {
+		return false
+	}
+	if !boolValue(item["contentComplete"]) || !boolValue(item["safeForFileWrite"]) {
+		return false
+	}
+	if boolValue(item["redacted"]) || boolValue(item["truncated"]) || boolValue(item["isBinary"]) {
+		return false
+	}
+	contentHash := strings.TrimSpace(stringFromMap(item, "contentHash"))
+	if contentHash == "" || strings.TrimSpace(request.BaseHash) == "" || strings.TrimSpace(request.BaseHash) != contentHash {
+		return false
+	}
+	if containsRuntimeRedactionMarker(request.Content) || containsUnresolvedRuntimeTemplate(request.Content) {
+		return false
+	}
+	return true
 }
 
 func validateRepairPatchOutputTargetRelevance(step *runModel.Step, output map[string]any) error {

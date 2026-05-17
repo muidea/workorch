@@ -2637,7 +2637,12 @@ func compactStateChangingRecoveryFailureOutput(output map[string]any) map[string
 			ret["omittedContentReason"] = "invalid or rejected LLM decision content is not reusable repair input; rebuild from current context, target snapshots, or fresh reads"
 		}
 	} else if preview := streamEventsPreview(mapSliceFromValue(output["streamEvents"]), 1200); preview != "" {
-		ret["partialOutputPreview"] = compactLLMContextString(preview)
+		if containsRuntimeRedactionMarker(preview) {
+			ret["partialOutputPreviewOmitted"] = true
+			ret["omittedContentReason"] = "rejected or redacted runtime output is not reusable repair input; rebuild from current target snapshots or fresh reads"
+		} else {
+			ret["partialOutputPreview"] = compactLLMContextString(preview)
+		}
 	}
 	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
 		ret["rejectedExecutionGraph"] = rejectedGraphSummary(graph)

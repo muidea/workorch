@@ -142,6 +142,44 @@ func TestRuntimeRepairActionPackageOmitsRawRedactedFailureProducts(t *testing.T)
 	}
 }
 
+func TestRuntimeRepairActionPackageOmitsRedactedPartialOutputPreview(t *testing.T) {
+	runID := common.RunID("run-repair-grounding-redacted-partial")
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+		},
+		Output: map[string]any{
+			"stage":                   "llm_execution_graph_plan",
+			"status":                  "completed",
+			"error":                   "invalid argument: patch diff contains redacted runtime markers",
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan",
+			"streamEvents": []map[string]any{{
+				"delta": `{"diff":"@@ -1 +1 @@\n-[REDACTED]\n+safe\n"}`,
+			}},
+		},
+	}
+	orch := &RuntimeOrchestrator{steps: memory.NewStepRepository()}
+
+	input := orch.runtimeRepairFollowUpStepInput(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-grounding-redacted-partial"}, failedStep, 1, common.ErrInvalidArgument)
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	encoded, err := json.Marshal(actionPackage)
+	if err != nil {
+		t.Fatalf("marshal repairActionPackage: %v", err)
+	}
+	if strings.Contains(string(encoded), "[REDACTED]") || strings.Contains(string(encoded), "partialOutputPreview\"") {
+		t.Fatalf("repairActionPackage exposed redacted partial output: %s", encoded)
+	}
+	summary := mapFromValue(actionPackage["previousRejectedOutputSummary"])
+	if summary["partialOutputPreviewOmitted"] != true {
+		t.Fatalf("previousRejectedOutputSummary = %#v, want partial preview omitted", summary)
+	}
+}
+
 func TestRuntimeRepairInputCompactsDuplicatedHistoricalFieldsAroundActionPackage(t *testing.T) {
 	runID := common.RunID("run-repair-grounding-compact")
 	failedStep := &runmodel.Step{

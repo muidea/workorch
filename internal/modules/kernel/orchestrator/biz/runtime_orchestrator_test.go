@@ -15248,7 +15248,56 @@ func TestValidateLLMExecutionOutputContractAllowsPatchRepairNoOpValidationGraph(
 	}
 }
 
-func TestValidateLLMExecutionOutputContractRejectsRepairFileWriteForExistingContextTarget(t *testing.T) {
+func TestValidateLLMExecutionOutputContractAllowsSafeRepairFileWriteForExistingContextTarget(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-repair-file-write-safe-existing-target",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-repair-file-write-safe-existing-target/repair-001-of-graph-001-003-patch",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failedStepKind":                  "patch/apply",
+			"patchRepairContext": []map[string]any{{
+				"targetRef":        "main.go",
+				"exists":           true,
+				"contentHash":      "hash-main",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"redacted":         false,
+				"truncated":        false,
+			}},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "rewrite-main",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef": "main.go",
+						"patchType": "file_write",
+						"baseHash":  "hash-main",
+						"content":   "package main\n\nfunc main() {}\n",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want safe existing target file_write allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsRepairFileWriteForExistingContextTargetWithoutBaseHash(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-repair-file-write-existing-target",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
@@ -15263,7 +15312,7 @@ func TestValidateLLMExecutionOutputContractRejectsRepairFileWriteForExistingCont
 			"stateChangingOutputRequired":     true,
 			"failedStepKind":                  "patch/apply",
 			"patchRepairContext": []map[string]any{
-				{"targetRef": "main.go", "exists": true, "contentHash": "hash-main"},
+				{"targetRef": "main.go", "exists": true, "contentHash": "hash-main", "contentComplete": true, "safeForFileWrite": true},
 			},
 		},
 	}
