@@ -631,6 +631,7 @@ func validateDoDAssessmentCoversRequiredDeliverables(run *runModel.Run, assessme
 	for _, item := range items {
 		id := strings.TrimSpace(firstNonEmptyString(
 			stringFromMap(item, "id"),
+			stringFromMap(item, "item"),
 			stringFromMap(item, "deliverable"),
 			stringFromMap(item, "name"),
 			stringFromMap(item, "path"),

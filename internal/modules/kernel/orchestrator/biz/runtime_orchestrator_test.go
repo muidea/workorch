@@ -14072,6 +14072,72 @@ func TestValidatedCompletionDoDAssessmentAcceptsRequiredDeliverableCoverage(t *t
 	}
 }
 
+func TestValidatedCompletionDoDAssessmentAcceptsRequiredDeliverableCoverageItemField(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-required-deliverable-item-field",
+		WorkspaceID:     "ws-required-deliverable-item-field",
+		DoDID:           "dod-required-deliverable-item-field",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "source_change", "required": true},
+							{"id": "validation_report", "required": true},
+							{"id": "coverage_map", "required": true},
+							{"id": "user_deliverable", "required": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	_, _, err := validatedCompletionDoDAssessment(run, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "base DoD and required deliverables passed",
+			"items": []map[string]any{
+				{
+					"item":         "build passes",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-required-deliverable-item-field/block/build"},
+				},
+			},
+			"deliverableCoverage": map[string]any{
+				"items": []map[string]any{
+					{
+						"item":         "source_change",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-required-deliverable-item-field/block/patch"},
+					},
+					{
+						"item":         "validation_report",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-required-deliverable-item-field/block/test"},
+					},
+					{
+						"item":         "coverage_map",
+						"state":        "satisfied",
+						"artifactRefs": []string{"run-required-deliverable-item-field/artifact/result-summary"},
+					},
+					{
+						"item":         "user_deliverable",
+						"state":        "satisfied",
+						"artifactRefs": []string{"run-required-deliverable-item-field/artifact/manifest"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+}
+
 func TestValidatedCompletionDoDAssessmentRejectsOpenEvidenceGaps(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-open-evidence-gap",

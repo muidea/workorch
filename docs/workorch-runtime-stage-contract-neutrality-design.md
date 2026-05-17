@@ -212,6 +212,7 @@ Runtime 必须拒绝：
 - Goal 中被拆出的 leaf requirement 必须获得确定性、可复现的 `goalRequirementId`，ID 来源只能是 requirement 顺序与规范化文本，不得使用随机值或领域语义。
 - DoD 与 Goal coverage 必须分别表达；DoD item 通过不代表 Goal leaf 自动覆盖，除非 `dodAssessment.goalCoverage.items[]` 明确给出对应 Goal requirement、状态和 evidence refs。
 - profile 声明的 required `acceptanceDimensions` 与 required `deliverableExpectations` 必须分别通过 `dodAssessment.acceptanceDimensions.items[]` 与 `dodAssessment.deliverableCoverage.items[]` 表达；core 只校验声明的 `id`、状态和 evidenceRefs / artifactRefs，不得根据 id 名称推断业务含义。
+- coverage item 的中立标识允许来自稳定字段别名集合，而不能强绑定单一字段名：Goal coverage 可使用 `goal` / `goalItem` / `item` / `requirement`；acceptance dimension 可使用 `id` / `dimension` / `key` / `name`；deliverable coverage 可使用 `id` / `item` / `deliverable` / `name` / `path`。runtime 只能把这些字段视为“coverage 条目标识”的结构别名，不得据此推断业务语义。
 - `missingGoalCoverage` 中的每个条目都必须在 assessment-only correction 中成为独立的 `dodAssessment.goalCoverage.items[]` 条目；不得把多个缺口合并成一个宽泛描述后宣称满足。
 - `missingDeliverableCoverage` 中的每个条目都必须在 assessment-only correction 中成为独立的 `dodAssessment.deliverableCoverage.items[]` 条目；满足项必须复制 required deliverable id，并引用具体 `evidenceRefs` 或 `artifactRefs`。
 - runtime 可以为 `missingGoalCoverage` 附加中立 `evidenceCandidates`，候选来源只能是当前 run 已完成或失败 step 的 step id、kind、state、output 文本与 requirement 文本的通用匹配。候选证据不是自动通过依据，LLM 必须判断其 output 是否真实支持该 Goal leaf，并在满足时引用具体 `evidenceRefs`。
