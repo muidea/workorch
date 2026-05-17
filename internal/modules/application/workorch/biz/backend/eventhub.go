@@ -59,7 +59,7 @@ func (b *eventHubBackend) registerCommandDispatcher() {
 			return common.ErrInvalidArgument
 		}
 		result := b.dispatchCommand(ctx, cmd)
-		return b.eventHub.Publish(ctx, events.Envelope{
+		resultEnvelope := events.Envelope{
 			Topic:        events.TopicCLIResult,
 			SourceModule: "workorch-cli-dispatcher",
 			SubjectType:  cmd.SubjectType,
@@ -67,7 +67,15 @@ func (b *eventHubBackend) registerCommandDispatcher() {
 			WorkspaceID:  string(cmd.WorkspaceID),
 			RunID:        string(cmd.RunID),
 			Payload:      events.CLIResultPayloadMap(result),
-		})
+		}
+		if asyncHub, ok := b.eventHub.(events.AsyncHub); ok {
+			_ = asyncHub.PublishAsync(context.Background(), resultEnvelope)
+		} else {
+			go func() {
+				_ = b.eventHub.Publish(context.Background(), resultEnvelope)
+			}()
+		}
+		return events.Response(resultEnvelope)
 	})
 }
 
@@ -319,6 +327,16 @@ func (b *eventHubBackend) sendCommand(ctx context.Context, command string, wsID 
 		RunID:        string(runID),
 		Payload:      events.CLICommandPayloadMap(cmd),
 	}); err != nil {
+		if responseEnvelope, ok := events.ResponseEnvelope(err); ok {
+			result, ok := events.DecodeCLIResultPayload(responseEnvelope.Payload)
+			if !ok || result.CorrelationID != correlationID {
+				return events.CLIResultPayload{}, common.ErrInvalidArgument
+			}
+			if !result.OK {
+				return result, fmt.Errorf("%s", result.Error)
+			}
+			return result, nil
+		}
 		return events.CLIResultPayload{}, err
 	}
 

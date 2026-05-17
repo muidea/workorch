@@ -118,6 +118,26 @@ func TestMagicHubReturnsHandlerError(t *testing.T) {
 	}
 }
 
+func TestMagicHubPublishCanReturnHandlerResponse(t *testing.T) {
+	hub := NewMagicHub()
+	defer hub.Terminate()
+
+	want := Envelope{Topic: TopicCLIResult, Payload: map[string]any{"ok": true}}
+	unsubscribe := hub.Subscribe(TopicCLICommand, func(_ context.Context, _ Envelope) error {
+		return Response(want)
+	})
+	defer unsubscribe()
+
+	err := hub.Publish(context.Background(), Envelope{Topic: TopicCLICommand})
+	response, ok := ResponseEnvelope(err)
+	if !ok {
+		t.Fatalf("Publish err = %v, want response envelope", err)
+	}
+	if response.Topic != TopicCLIResult || response.Payload["ok"] != true {
+		t.Fatalf("response = %+v, want CLI result payload", response)
+	}
+}
+
 type blockingUnsubscribeHub struct{}
 
 func (blockingUnsubscribeHub) Subscribe(string, magicevent.Observer) {}

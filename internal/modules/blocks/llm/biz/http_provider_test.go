@@ -141,6 +141,62 @@ func TestHTTPProviderAssessmentOnlyPromptHidesExecutionGraphContract(t *testing.
 	}
 }
 
+func TestHTTPProviderCompleteIncludesRepairAPIMismatchPriorityContract(t *testing.T) {
+	var gotPayload chatCompletionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"choices":[{"message":{"content":"{\"completionState\":\"failed\",\"dodAssessment\":{\"satisfied\":false,\"summary\":\"failed\",\"goalOutcome\":\"incomplete\",\"items\":[]}}"}}]
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		BaseURL:  server.URL + "/v1",
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Timeout:  5 * time.Second,
+	})
+	request := llmProviderRequest()
+	request.Input["runtimeRepairFollowUp"] = true
+	request.Input["failureTargetRepairContext"] = []map[string]any{{
+		"targetRef":        "target_test.go",
+		"content":          "package main\n",
+		"contentHash":      "hash",
+		"contentComplete":  true,
+		"safeForFileWrite": true,
+		"redacted":         false,
+		"truncated":        false,
+	}}
+	request.Input["failedStepOutput"] = map[string]any{
+		"stderr": "./target_test.go:10:3: unknown field Port in struct literal of type Config\n./target_test.go:11:7: undefined: newGatewayHandler\n",
+	}
+
+	_, err := provider.Complete(context.Background(), request)
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	joined := ""
+	for _, message := range gotPayload.Messages {
+		joined += "\n" + message.Content
+	}
+	for _, want := range []string{
+		"undefined identifiers",
+		"unknown fields",
+		"cannot-use type mismatches",
+		"resolve those reported blockers",
+		"reconcile the target against current visible API/resource definitions first",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("messages = %+v, want repair API mismatch contract %q", gotPayload.Messages, want)
+		}
+	}
+}
+
 func TestHTTPProviderCompleteReportsProviderErrorWithoutLeakingSecret(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "upstream rejected secret-value", http.StatusUnauthorized)

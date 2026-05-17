@@ -1815,6 +1815,12 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"Use structuredFailureSignals as mechanical failure evidence only; paths, line refs, and identifiers must be reconciled with current target snapshots or fresh reads before patching.",
 			"Do not treat identifier-like tokens in failure text as proof that a symbol or field should be invented; ground every referenced name in current resources or introduce it explicitly in the same patch.",
 		)
+		if structuredFailureSignalsContainAPIMismatch(signals) {
+			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+				"Prioritize the primary diagnostics from structuredFailureSignals before secondary cleanup: fix reported unresolved identifiers, unknown fields, type mismatches, constructor/schema/interface mismatches, and line-referenced target errors first.",
+				"When diagnostics identify a concrete target snapshot, reconcile that target with current visible API/resource shapes before changing assertions, evidence wording, or unrelated quality improvements.",
+			)
+		}
 	}
 	targetScope := runtimeFailureTargetScope(signature)
 	if targetScope != "" {
@@ -1876,6 +1882,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"When failed evidence points at a concrete target resource, generate the smallest auditable patch/apply state change against that current snapshot before rerunning verification.",
 			"Use workspaceFileManifest to reconcile target resources with other known workspace resources; avoid replacing unrelated existing artifacts just to satisfy one failure target.",
 			"When a failure mentions missing symbols, unknown fields, constructor names, schema keys, or interface members, do not invent new names in the target patch; first reconcile the target with currently visible definitions from the relevant existing resource, or read the defining resource before patching.",
+			"When the failure text contains line-referenced unresolved identifiers, unknown fields, type/literal mismatches, constructor/schema/interface mismatches, or equivalent API-shape diagnostics in the failure target, repair those reported blockers before optimizing tests, assertions, formatting, or other secondary concerns.",
 		)
 	}
 	if shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep) || len(targetContext) > 0 || len(patchContext) > 0 {
@@ -1935,6 +1942,46 @@ func inheritPriorRepairContext(input map[string]any, failedStep *runModel.Step) 
 	}
 }
 
+func structuredFailureSignalsContainAPIMismatch(signals map[string]any) bool {
+	for _, key := range []string{"messages", "identifiers"} {
+		for _, value := range stringSliceFromValue(signals[key]) {
+			if textContainsAPIMismatchDiagnostic(value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func textContainsAPIMismatchDiagnostic(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	if normalized == "" {
+		return false
+	}
+	for _, token := range []string{
+		"undefined:",
+		"undefined ",
+		"unknown field",
+		"type mismatch",
+		"cannot use",
+		"missing field",
+		"missing method",
+		"does not implement",
+		"unresolved",
+		"unresolved reference",
+		"no such field",
+		"no such method",
+		"constructor",
+		"schema key",
+		"interface member",
+	} {
+		if strings.Contains(normalized, token) {
+			return true
+		}
+	}
+	return false
+}
+
 func stateChangingRepairGuidance() []string {
 	return []string{
 		"Return concrete state-changing output with complete content, or return a failed dodAssessment if the required state change cannot be completed.",
@@ -1948,6 +1995,7 @@ func stateChangingRepairGuidance() []string {
 		"When a workspace already contains known resources, reconcile the repair with those existing resources and prefer the smallest coherent state change over broad replacement.",
 		"When repair context contains redacted or truncated content, do not copy it into patch/apply; first read the target or produce a minimal exact diff from visible current evidence.",
 		"When fixing failures caused by missing symbols, unknown fields, constructor names, schema keys, or interface members, patch against names that already exist in current workspace resources unless the Goal explicitly requires creating the missing definition.",
+		"When failure diagnostics include concrete line refs or API-shape mismatches, fix the reported compile/validation blockers in the failure target before secondary assertion, formatting, or evidence refinements.",
 		"Do not return self-inspection, run snapshot, observability, or context rehydration graphs when effective Goal and DoD are already present.",
 		"If a target file is missing in an empty or new workspace, create it with patch/apply file_write instead of reading it again.",
 		"Do not use placeholders such as __FROM_PREVIOUS_STEP_OUTPUT__, <<...>>, ${...}, or {{...}} in patch fields; use concrete literal values or omit optional fields.",

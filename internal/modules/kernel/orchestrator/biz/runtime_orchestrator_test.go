@@ -3102,6 +3102,67 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshot(t *
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputPrioritizesAPIMismatchDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "gateway.go"), []byte("package main\n\ntype Config struct { Address string }\nfunc newHandler(cfg Config) any { return cfg }\n"), 0o644); err != nil {
+		t.Fatalf("seed gateway.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "streaming_fallback_estimator_test.go"), []byte("package main\n\nfunc TestFallback(t *testing.T) {\n\t_ = Config{Port: 8080}\n\t_ = newGatewayHandler()\n}\n"), 0o644); err != nil {
+		t.Fatalf("seed test target: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-api-mismatch-repair")
+	runID := common.RunID("run-api-mismatch-repair")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-014/002-rerun-targeted-streaming-fallback-tests"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageExecution,
+			"stateChangingOutputRequired": true,
+		},
+		Output: map[string]any{
+			"status": "failed",
+			"error":  "exit status 1",
+			"stderr": strings.Join([]string{
+				"./streaming_fallback_estimator_test.go:4:13: unknown field Port in struct literal of type Config",
+				"./streaming_fallback_estimator_test.go:5:6: undefined: newGatewayHandler",
+			}, "\n"),
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=streaming_fallback_estimator_test.go|exitCode=1",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 1, errors.New("exit status 1"))
+
+	targetContext := mapSliceFromValue(input["failureTargetRepairContext"])
+	if len(targetContext) != 1 || targetContext[0]["targetRef"] != "streaming_fallback_estimator_test.go" {
+		t.Fatalf("failureTargetRepairContext = %#v, want targeted test snapshot", input["failureTargetRepairContext"])
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	signals := mapFromValue(actionPackage["structuredFailureSignals"])
+	if len(signals) == 0 {
+		t.Fatalf("repairActionPackage.structuredFailureSignals missing for compile diagnostics: %#v", actionPackage)
+	}
+	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
+	for _, want := range []string{
+		"Prioritize the primary diagnostics from structuredFailureSignals",
+		"unknown fields, type/literal mismatches",
+		"repair those reported blockers before optimizing tests",
+		"before secondary assertion",
+	} {
+		if !strings.Contains(guidance, want) {
+			t.Fatalf("repairGuidance = %q, want %q", guidance, want)
+		}
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputResolvesUniqueSuffixFailureTarget(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

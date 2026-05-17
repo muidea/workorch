@@ -446,6 +446,7 @@ soulMD: |
   4. 运行 lint → 检查代码质量
   5. 根据结果迭代修复
   6. 新建项目或模块时，优先保证文件路径、包/module/import 关系、入口文件、测试文件和构建命令自洽
+  7. 如果 build/test 失败报告 undefined、unknown field、cannot use、missing method、constructor/schema/interface mismatch 或入口函数缺失，先把失败目标文件对齐当前项目已有 API/类型/配置/入口形状，再处理断言增强或次要整理
 
   ## 决策触发
   - 需求不明确 → blocked_on_decision

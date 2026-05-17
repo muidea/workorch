@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"testing"
+	"time"
 
 	appservice "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -55,6 +56,38 @@ func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 	}
 	if !sawCommand || !sawResult {
 		t.Fatalf("published command=%v result=%v, want both", sawCommand, sawResult)
+	}
+}
+
+func TestEventHubBackendCLICommandUsesSynchronousResponseWithoutSendTimeout(t *testing.T) {
+	ctx := context.Background()
+	session, err := appservice.NewRuntimeSessionWithBackend("memory", "")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close(ctx)
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+
+	be := NewEventHub(session, exports.Infrastructure.EventHub)
+	done := make(chan error, 1)
+	go func() {
+		_, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{
+			Title:                "eventhub sync response workspace",
+			DeliverableDirectory: "/tmp/eventhub-sync-response-workspace",
+		})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("create workspace: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("workspace create blocked waiting for nested CLI result event")
 	}
 }
 

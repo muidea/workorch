@@ -162,6 +162,8 @@ Runtime 在以下边界必须执行 active-run 一致性核对：
 
 Workspace outcome 投影必须优先反映最新终态证据：当最新终态 result 的时间不早于最新 run 事件时，outcome 应指向该 result 对应 run；当存在更新的终态 run 事件但该 run 尚无 result 时，outcome 应指向该最新 run 及其失败/终态原因。历史 accepted / rejected result 必须继续保留在 results 列表中，但不得覆盖更新 run 的终态状态。
 
+Run observability / snapshot 的 outcome 也必须遵守同一语义：`superseded` run 的 outcome 首先表达该 run 已被后续 lineage 取代，而不是继续被其历史 `rejected` result 投影为 `failed`。换言之，`rejected -> superseded` 只保留为历史证据，不再是当前 run observability 的有效终态结论。
+
 ## 阶段内约束模式
 
 ### 开放判断模式
@@ -389,6 +391,12 @@ Shell / tool 调用不得被用来隐藏实际目标变更，再通过一个无�
 当 patch / preview / apply 因 context mismatch、base mismatch 或 stale artifact 失败，或 `file/edit` 因 `oldText` 不存在、上下文冲突失败时，默认 repair 仍要求基于当前 target snapshot 重新生成可应用 state-changing artifact。runtime 必须把失败目标的当前快照放入 `patchRepairContext` / `repairActionPackage.targetSnapshots`，并明确失败 patch / edit 片段已经陈旧，不能重复使用同一 hunk、oldText 或未解析模板。完整 `file_write` 只允许建立在完整、未脱敏、未截断且标记为 `safeForFileWrite` 的当前快照上，且 patch 请求必须携带与当前快照 `contentHash` 完全一致的字面 `baseHash`；否则必须使用 `unified_diff`、`file/edit` 或先重新读取目标。若 repair context 中的内容包含 runtime redaction marker、被省略片段或截断标记，LLM 不得把该内容复制进 patch content / diff，而应先读取目标、使用 exact oldText 的最小替换，或基于可见上下文生成最小 `unified_diff`。`baseHash` 只能省略或使用当前 evidence 中的字面 `contentHash` 值；不得输出 `${...}`、`{{...}}`、`<<...>>` 或其他未解析占位符。`unified_diff` 的 hunk header 必须是可解析的真实行号范围，`@@ ... @@` 等伪 hunk 属于无效 artifact。
 
 当前 repair target snapshot 是定向修复的高优先级输入。Provider context budget、prompt normalization 和 outbound redaction 不得把满足以下条件的 `failureTargetRepairContext[].content`、`patchRepairContext[].content` 或 `repairActionPackage.targetSnapshots[].content` 压缩、摘要化或替换为 `[REDACTED]`：`contentComplete=true`、`safeForFileWrite=true`、`redacted=false`、`truncated=false`、`isBinary=false` 或未声明、且存在字面 `contentHash`。该豁免只适用于当前 repair target snapshot 的 `content` 字段，且只表达“当前资源快照可作为修复基线”的中立事实；其他敏感字段、历史输出、失败正文、stream partial、provider 配置和不满足安全标记的 snapshot 仍必须按通用 redaction / budget 规则处理。若在极端预算下连安全当前快照也无法完整提供，runtime 必须显式标记快照不可用于完整 `file_write`，要求 LLM 重新读取目标、使用最小 diff / exact edit，或返回 blocker / failed assessment；不得向 LLM 发送已被 `[REDACTED]` 替换的“伪完整快照”。
+
+当失败 evidence 已经包含中立的编译/类型/API 形状诊断时，repair 需要遵守“首要阻塞优先”合同。这里的中立诊断包括但不限于：line-ref compile/build/test 错误、`undefined` / unresolved identifier、`unknown field`、`cannot use` / type mismatch、missing method、constructor/schema/interface mismatch，以及其他明确指向当前目标资源无法通过编译或基本验证的结构性错误。runtime core 只能表达以下中立约束，不得写入具体语言框架、业务模型或供应商细节：
+- repairGuidance / provider prompt 必须要求 LLM 先修复这些已报告的首要阻塞，再处理断言增强、格式整理、文案修饰或其他次要改进。
+- 若 `failureTargetRepairContext`、`patchRepairContext` 或 `repairActionPackage.targetSnapshots` 已提供当前目标快照，LLM 必须优先把目标与当前可见资源/API 形状对齐，而不是凭空发明新的名字、字段、入口或脚手架。
+- 若具体任务属于软件开发等领域，workspaceTemplate / soul 可以在领域层进一步细化“对齐现有类型、构造函数、配置结构、入口函数和测试入口”的要求；这些领域规则不得下沉到 core runtime 里。
+- 该规则只定义 repair 的排序与 grounding，不判断某个业务符号该叫什么、某个框架入口该怎么写，也不允许 core runtime 根据命令名、语言名或业务关键字生成特定修复方案。
 
 失败产物上下文必须遵守“不可复用失败正文”约束。对于被拒绝的 LLM decision、schema-invalid 输出、失败 patch / edit 正文、stream partial output 或任何包含 runtime redaction marker 的片段，runtime 不应把原文再次放入 repair input；只能暴露中立诊断摘要，例如失败 stage、failureClass、error/reason、streamDiagnostics、llmUsage、rejectedExecutionGraph 摘要，以及当前 target snapshot / workspace manifest / patchRepairSuggestions。若 stream partial output 或 rejected graph 摘要中包含 redaction marker，runtime 必须记录 omitted 标记与不可复用原因，而不是保留可复制片段。该约束用于防止 LLM 复制 malformed JSON、过期 diff、脱敏片段或重复 rejected artifact；它不判断具体业务内容，只限制 runtime repair 的输入形态。
 

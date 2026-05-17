@@ -87,10 +87,47 @@ func (h *MagicHub) Publish(ctx context.Context, envelope Envelope) error {
 	)
 	ev.BindLaneKey(envelope.Topic)
 	result := h.hub.Send(ev)
-	if result == nil || result.Error() == nil {
+	if result == nil {
+		return nil
+	}
+	if data, resultErr := result.Get(); resultErr == nil {
+		if envelope, ok := data.(Envelope); ok {
+			return Response(envelope)
+		}
 		return nil
 	}
 	return fmt.Errorf("handle event %s: %s", envelope.Topic, result.Error().Error())
+}
+
+func (h *MagicHub) PublishAsync(ctx context.Context, envelope Envelope) error {
+	if h == nil || h.hub == nil {
+		return common.ErrInvalidArgument
+	}
+	envelope = prepareEnvelope(envelope)
+	if envelope.Topic == "" {
+		return common.ErrInvalidArgument
+	}
+
+	h.mu.Lock()
+	h.published = append(h.published, cloneEnvelope(envelope))
+	hasSubscribers := h.hasSubscribersLocked(envelope.Topic)
+	h.mu.Unlock()
+
+	if !hasSubscribers {
+		return nil
+	}
+
+	ev := magicevent.NewEventWithContext(
+		envelope.Topic,
+		envelope.SourceModule,
+		envelope.Topic,
+		magicevent.NewHeader(),
+		ctx,
+		cloneEnvelope(envelope),
+	)
+	ev.BindLaneKey(envelope.Topic)
+	h.hub.Post(ev)
+	return nil
 }
 
 func (h *MagicHub) Subscribe(topic string, handler Handler) func() {
@@ -203,13 +240,17 @@ func (o *magicDispatchObserver) Notify(ev magicevent.Event, result magicevent.Re
 		}
 		if err := handler(ev.Context(), cloneEnvelope(envelope)); err != nil {
 			if result != nil {
+				if responseEnvelope, ok := ResponseEnvelope(err); ok {
+					result.Set(responseEnvelope, nil)
+					return
+				}
 				result.Set(nil, cd.NewError(cd.Unexpected, err.Error()))
 			}
 			return
 		}
 	}
 	if result != nil {
-		result.Set(cloneEnvelope(envelope), nil)
+		result.Set(nil, nil)
 	}
 }
 

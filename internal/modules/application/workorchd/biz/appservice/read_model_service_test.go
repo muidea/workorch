@@ -4160,3 +4160,86 @@ func TestMapWorkspaceOutcomeUsesLatestTerminalResult(t *testing.T) {
 		t.Fatalf("outcome state/accepted = %q/%v, want failed false", outcome.State, outcome.Accepted)
 	}
 }
+
+func TestMapRunOutcomeKeepsSupersededRunFromStaleRejectedResult(t *testing.T) {
+	snapshot := RunSnapshot{
+		Run: Run{
+			ID:          "run-superseded",
+			WorkspaceID: "ws-superseded-outcome",
+			State:       string(common.RunStateSuperseded),
+		},
+		Results: []Result{
+			{
+				ID:          "run-superseded/result/dod-assessment",
+				WorkspaceID: "ws-superseded-outcome",
+				RunID:       "run-superseded",
+				State:       string(common.ResultStateRejected),
+				Summary:     "stale rejected result",
+				CreatedAt:   "2026-05-17T07:03:52Z",
+				UpdatedAt:   "2026-05-17T07:03:52Z",
+			},
+		},
+	}
+
+	outcome := mapRunOutcome(snapshot)
+	if outcome.State != string(common.RunStateSuperseded) || outcome.Accepted || outcome.ResultID != "" {
+		t.Fatalf("outcome = %+v, want superseded without stale rejected result", outcome)
+	}
+}
+
+func TestMapWorkspaceOutcomeUsesLatestRunEventOverHistoricalAcceptedResult(t *testing.T) {
+	snapshot := WorkspaceSnapshot{
+		Workspace: Workspace{
+			ID:    "ws-latest-run-event",
+			State: string(common.WorkspaceStateFailed),
+		},
+		Runs: []Run{
+			{
+				ID:          "run-accepted",
+				WorkspaceID: "ws-latest-run-event",
+				State:       string(common.RunStateCompleted),
+			},
+			{
+				ID:            "run-latest-failed",
+				WorkspaceID:   "ws-latest-run-event",
+				State:         string(common.RunStateFailed),
+				FailureReason: "latest verification failed",
+			},
+		},
+		Results: []Result{
+			{
+				ID:          "run-accepted/result/dod-assessment",
+				WorkspaceID: "ws-latest-run-event",
+				RunID:       "run-accepted",
+				State:       string(common.ResultStateAccepted),
+				Summary:     "historical accepted result",
+				CreatedAt:   "2026-05-17T07:00:00Z",
+				UpdatedAt:   "2026-05-17T07:00:00Z",
+			},
+		},
+		EventRecords: []EventRecord{
+			{
+				ID:          "evt-accepted",
+				Topic:       events.TopicRunStateChanged,
+				OccurredAt:  "2026-05-17T07:00:00Z",
+				WorkspaceID: "ws-latest-run-event",
+				RunID:       "run-accepted",
+			},
+			{
+				ID:          "evt-latest-failed",
+				Topic:       events.TopicRunStateChanged,
+				OccurredAt:  "2026-05-17T08:00:00Z",
+				WorkspaceID: "ws-latest-run-event",
+				RunID:       "run-latest-failed",
+			},
+		},
+	}
+
+	outcome := mapWorkspaceOutcome(snapshot)
+	if outcome.RunID != "run-latest-failed" || outcome.State != "failed" || outcome.Accepted {
+		t.Fatalf("outcome = %+v, want latest failed run event over historical accepted result", outcome)
+	}
+	if outcome.ResultID != "" || outcome.Reason != "latest verification failed" {
+		t.Fatalf("outcome = %+v, want failed run reason without historical accepted result", outcome)
+	}
+}

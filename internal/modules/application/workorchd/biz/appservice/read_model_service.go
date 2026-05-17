@@ -5908,6 +5908,13 @@ func mapRunOutcome(snapshot RunSnapshot) RunOutcome {
 		RawState: snapshot.Run.State,
 		Terminal: isTerminalRunState(snapshot.Run.State),
 	}
+	if common.RunState(snapshot.Run.State) == common.RunStateSuperseded {
+		ret.State = string(common.RunStateSuperseded)
+		ret.Terminal = true
+		ret.Reason = "run superseded"
+		ret.Summary = ret.Reason
+		return ret
+	}
 	if result := latestTerminalWorkspaceResult(runScopedResults(snapshot)); result != nil {
 		if result.State == string(common.ResultStateAccepted) {
 			ret.State = "accepted"
@@ -6034,11 +6041,6 @@ func latestWorkspaceRunForOutcome(snapshot WorkspaceSnapshot) *Run {
 		}
 	}
 	if selectedEvent != nil {
-		if result := latestTerminalWorkspaceResult(snapshot.Results); result != nil && resultNotBeforeEvent(*result, *selectedEvent) {
-			if run := runsByID[result.RunID]; run != nil {
-				return run
-			}
-		}
 		return runsByID[selectedEvent.RunID]
 	}
 	if result := latestTerminalWorkspaceResult(snapshot.Results); result != nil {

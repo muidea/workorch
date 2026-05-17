@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -10,9 +11,33 @@ import (
 
 type Handler func(context.Context, Envelope) error
 
+type responseError struct {
+	envelope Envelope
+}
+
+func (e responseError) Error() string {
+	return "event response"
+}
+
+func Response(envelope Envelope) error {
+	return responseError{envelope: prepareEnvelope(envelope)}
+}
+
+func ResponseEnvelope(err error) (Envelope, bool) {
+	var response responseError
+	if !errors.As(err, &response) {
+		return Envelope{}, false
+	}
+	return cloneEnvelope(response.envelope), true
+}
+
 type Hub interface {
 	Publish(context.Context, Envelope) error
 	Subscribe(string, Handler) func()
+}
+
+type AsyncHub interface {
+	PublishAsync(context.Context, Envelope) error
 }
 
 type MemoryHub struct {
@@ -42,10 +67,17 @@ func (h *MemoryHub) Publish(ctx context.Context, envelope Envelope) error {
 			continue
 		}
 		if err := handler(ctx, cloneEnvelope(envelope)); err != nil {
+			if _, ok := ResponseEnvelope(err); ok {
+				return err
+			}
 			return fmt.Errorf("handle event %s: %w", envelope.Topic, err)
 		}
 	}
 	return nil
+}
+
+func (h *MemoryHub) PublishAsync(ctx context.Context, envelope Envelope) error {
+	return h.Publish(ctx, envelope)
 }
 
 func (h *MemoryHub) Subscribe(topic string, handler Handler) func() {
