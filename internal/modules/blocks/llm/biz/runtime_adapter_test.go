@@ -1160,6 +1160,49 @@ func TestRuntimeAdapterRedactsOutboundProviderRequest(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterPreservesSafeRepairSnapshotContentInPrompt(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{"completionState":"failed","thoughtSummary":"assessed","dodAssessment":{"summary":"not enough evidence"}}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{ID: "test", Model: "model"}, provider)
+	safeContent := "package main\n\nconst APIKey = \"test-key\"\n"
+	request := llmStepRequest()
+	request.Input = map[string]any{
+		"currentSoulStage": "execution",
+		"failureTargetRepairContext": []map[string]any{{
+			"targetRef":        "main_test.go",
+			"content":          safeContent,
+			"contentHash":      "sha256-safe",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+			"redacted":         false,
+			"truncated":        false,
+			"isBinary":         false,
+		}},
+		"repairActionPackage": map[string]any{
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "main_test.go",
+				"content":          safeContent,
+				"contentHash":      "sha256-safe",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"redacted":         false,
+				"truncated":        false,
+				"isBinary":         false,
+			}},
+		},
+	}
+
+	if _, err := adapter.ExecuteRuntimeStep(context.Background(), request); err != nil {
+		t.Fatalf("ExecuteRuntimeStep error = %v", err)
+	}
+	joined := promptContextText(provider.request.PromptContext)
+	if !strings.Contains(joined, "\"content\":\"package main\\n\\nconst APIKey = \\\"test-key\\\"\\n\"") {
+		t.Fatalf("promptContext = %s, want exact safe repair snapshot content", joined)
+	}
+	if strings.Contains(joined, "const APIKey = [REDACTED]") {
+		t.Fatalf("promptContext = %s, should not redact safe current repair snapshot content", joined)
+	}
+}
+
 func TestRuntimeAdapterFailsUnknownRequestedProvider(t *testing.T) {
 	adapter := NewRuntimeAdapterWithProviders("local", map[string]ProviderRuntime{
 		"local": {

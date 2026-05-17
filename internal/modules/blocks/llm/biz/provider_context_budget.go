@@ -61,10 +61,12 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	request.ContextBudget = nil
 	shrinkLevel := 0
 	protected := captureProtectedGoalDoD(request.Input)
+	protectedRepairTargets := captureProtectedProviderRepairTargets(request.Input)
 	if adaptiveLevel := adaptiveShrinkLevelFromInput(request.Input); adaptiveLevel > 0 {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = applyAdaptiveShrinkLevel(request.Input, adaptiveLevel)
 		request.Input = restoreProtectedGoalDoD(request.Input, protected)
+		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
 		rules = append(rules, "adaptive shrink based on provider retry")
 		compressedSections = append(compressedSections, "adaptive")
 		shrinkLevel = adaptiveLevel
@@ -73,6 +75,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = budgetProviderInput(request.Input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
 		request.Input = restoreProtectedGoalDoD(request.Input, protected)
+		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
 		rules = append(rules, "compact provider input")
 		compressedSections = append(compressedSections, "p2")
 		shrinkLevel = max(shrinkLevel, 1)
@@ -81,6 +84,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = compactProviderExecutionContext(request.Input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries)
 		request.Input = restoreProtectedGoalDoD(request.Input, protected)
+		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
 		rules = append(rules, "summarize execution context transport fields")
 		compressedSections = append(compressedSections, "p1")
 		shrinkLevel = max(shrinkLevel, 2)
@@ -89,6 +93,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = prioritizedProviderInput(request.Input, true)
 		request.Input = restoreProtectedGoalDoD(request.Input, protected)
+		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
 		rules = append(rules, "apply priority compaction (P0/P1/P2)")
 		compressedSections = append(compressedSections, "p1", "p2")
 		shrinkLevel = max(shrinkLevel, 3)
@@ -97,6 +102,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = minimalProviderInput(request.Input)
 		request.Input = restoreProtectedGoalDoD(request.Input, protected)
+		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
 		rules = append(rules, "fallback to stage-aware minimal provider input (P0/P1)")
 		compressedSections = append(compressedSections, "p2", "older_p1")
 		shrinkLevel = max(shrinkLevel, 4)
@@ -400,6 +406,11 @@ func prioritizedProviderInput(input map[string]any, includeP2 bool) map[string]a
 			}
 		}
 	}
+	for _, key := range []string{"failureTargetRepairContext", "patchRepairContext", "repairActionPackage"} {
+		if value, ok := input[key]; ok {
+			out[key] = budgetProviderValue(value, 0, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
+		}
+	}
 	stage := strings.TrimSpace(strings.ToLower(stringValue(input["currentSoulStage"])))
 	if executionContext := recordFromAny(input["executionContext"]); len(executionContext) > 0 {
 		compact := map[string]any{}
@@ -508,6 +519,12 @@ type protectedGoalDoD struct {
 	Package          map[string]any
 }
 
+type protectedProviderRepairTargets struct {
+	FailureTargetRepairContext any
+	PatchRepairContext         any
+	RepairActionPackage        any
+}
+
 func captureProtectedGoalDoD(input map[string]any) protectedGoalDoD {
 	ret := protectedGoalDoD{
 		TopLevel:         map[string]any{},
@@ -538,6 +555,99 @@ func captureProtectedGoalDoD(input map[string]any) protectedGoalDoD {
 		}
 	}
 	return ret
+}
+
+func captureProtectedProviderRepairTargets(input map[string]any) protectedProviderRepairTargets {
+	ret := protectedProviderRepairTargets{}
+	if len(input) == 0 {
+		return ret
+	}
+	if items := providerSafeRepairSnapshotsFromValue(input["failureTargetRepairContext"]); len(items) > 0 {
+		ret.FailureTargetRepairContext = items
+	}
+	if items := providerSafeRepairSnapshotsFromValue(input["patchRepairContext"]); len(items) > 0 {
+		ret.PatchRepairContext = items
+	}
+	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
+		targets := providerSafeRepairSnapshotsFromValue(pkg["targetSnapshots"])
+		if len(targets) > 0 {
+			pkgOut := map[string]any{}
+			for _, key := range []string{"requiredOutput", "structuredFailureSignals", "patchRepairSuggestions", "previousRejectedOutputSummary"} {
+				if value, ok := pkg[key]; ok {
+					pkgOut[key] = budgetProviderValue(value, 0, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
+				}
+			}
+			pkgOut["targetSnapshots"] = targets
+			ret.RepairActionPackage = pkgOut
+		}
+	}
+	return ret
+}
+
+func restoreProtectedProviderRepairTargets(input map[string]any, protected protectedProviderRepairTargets) map[string]any {
+	if len(input) == 0 {
+		input = map[string]any{}
+	}
+	if protected.FailureTargetRepairContext != nil {
+		input["failureTargetRepairContext"] = protected.FailureTargetRepairContext
+	}
+	if protected.PatchRepairContext != nil {
+		input["patchRepairContext"] = protected.PatchRepairContext
+	}
+	if protected.RepairActionPackage != nil {
+		input["repairActionPackage"] = protected.RepairActionPackage
+	}
+	return input
+}
+
+func providerSafeRepairSnapshotsFromValue(value any) []any {
+	items := providerRepairSnapshotItemsFromValue(value)
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]any, 0, len(items))
+	for _, item := range items {
+		if !providerSafeRepairSnapshotContent(item) {
+			continue
+		}
+		if cloned, ok := cloneAny(item); ok {
+			if mapped, ok := cloned.(map[string]any); ok {
+				ret = append(ret, mapped)
+			}
+		}
+	}
+	return ret
+}
+
+func providerRepairSnapshotItemsFromValue(value any) []map[string]any {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		ret := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if mapped := recordFromAny(item); len(mapped) > 0 {
+				ret = append(ret, mapped)
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
+}
+
+func providerSafeRepairSnapshotContent(item map[string]any) bool {
+	if len(item) == 0 {
+		return false
+	}
+	if strings.TrimSpace(rawStringValue(item["content"])) == "" || strings.TrimSpace(stringValue(item["contentHash"])) == "" {
+		return false
+	}
+	return boolValue(item["contentComplete"]) &&
+		boolValue(item["safeForFileWrite"]) &&
+		!boolValue(item["redacted"]) &&
+		!boolValue(item["truncated"]) &&
+		!boolValue(item["isBinary"])
 }
 
 func restoreProtectedGoalDoD(input map[string]any, protected protectedGoalDoD) map[string]any {

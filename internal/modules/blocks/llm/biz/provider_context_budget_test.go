@@ -273,6 +273,146 @@ func TestEnforceProviderRequestBudgetPreservesDirectStateChangingRecoveryContrac
 	}
 }
 
+func TestEnforceProviderRequestBudgetPreservesSafeRepairTargetSnapshots(t *testing.T) {
+	safeContent := "package main\n\nconst APIKey = \"test-key\"\n"
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-repair-budget",
+		RunID:       "run-repair-budget",
+		StepID:      "run-repair-budget/repair-1",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"currentSoulStage":      "execution",
+			"providerRetryFollowUp": true,
+			"providerRetryAttempt":  2,
+			"failureClass":          "provider_timeout",
+			"failedExecutionGraph":  repeatedBudgetItems(200),
+			"graphEvidence":         repeatedBudgetItems(200),
+			"failureTargetRepairContext": []map[string]any{{
+				"targetRef":        "main_test.go",
+				"content":          safeContent,
+				"contentHash":      "sha256-safe",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"redacted":         false,
+				"truncated":        false,
+				"isBinary":         false,
+			}},
+			"repairActionPackage": map[string]any{
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "main_test.go",
+					"content":          safeContent,
+					"contentHash":      "sha256-safe",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+					"redacted":         false,
+					"truncated":        false,
+					"isBinary":         false,
+				}},
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    8192,
+				MaxInputTokens:         512,
+				ReservedOutputTokens:   1024,
+				SafetyRatio:            0.8,
+				BytesHardLimit:         16 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil || got.ContextBudget.ShrinkLevel < 4 {
+		t.Fatalf("contextBudget = %+v, want aggressive shrink under retry budget pressure", got.ContextBudget)
+	}
+	failureTargets := providerRepairSnapshotItemsFromValue(got.Input["failureTargetRepairContext"])
+	if len(failureTargets) != 1 || failureTargets[0]["content"] != safeContent {
+		t.Fatalf("failureTargetRepairContext = %#v, want safe content preserved", got.Input["failureTargetRepairContext"])
+	}
+	pkg := recordFromAny(got.Input["repairActionPackage"])
+	targets := providerRepairSnapshotItemsFromValue(pkg["targetSnapshots"])
+	if len(targets) != 1 || targets[0]["content"] != safeContent {
+		t.Fatalf("repairActionPackage.targetSnapshots = %#v, want safe content preserved", pkg["targetSnapshots"])
+	}
+}
+
+func TestRedactProviderRequestPreservesOnlySafeRepairSnapshotContent(t *testing.T) {
+	safeContent := "package main\n\nconst APIKey = \"test-key\"\n"
+	unsafeContent := "package main\n\nconst APIKey = \"unsafe-key\"\n"
+	req := llmmodels.ProviderRequest{
+		Input: map[string]any{
+			"apiKey": "top-secret",
+			"failureTargetRepairContext": []map[string]any{{
+				"targetRef":        "safe.go",
+				"content":          safeContent,
+				"contentHash":      "sha256-safe",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"redacted":         false,
+				"truncated":        false,
+				"isBinary":         false,
+			}},
+			"patchRepairContext": []map[string]any{{
+				"targetRef":        "unsafe.go",
+				"content":          unsafeContent,
+				"contentHash":      "sha256-unsafe",
+				"contentComplete":  false,
+				"safeForFileWrite": false,
+				"redacted":         false,
+				"truncated":        true,
+				"isBinary":         false,
+			}},
+			"repairActionPackage": map[string]any{
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "safe.go",
+					"content":          safeContent,
+					"contentHash":      "sha256-safe",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+					"redacted":         false,
+					"truncated":        false,
+					"isBinary":         false,
+				}},
+			},
+		},
+	}
+
+	got := redactProviderRequestForLLM(req)
+	if got.Input["apiKey"] != "[REDACTED]" {
+		t.Fatalf("input.apiKey = %#v, want redacted", got.Input["apiKey"])
+	}
+	failureTargets := providerRepairSnapshotItemsFromValue(got.Input["failureTargetRepairContext"])
+	if len(failureTargets) != 1 {
+		t.Fatalf("failureTargetRepairContext = %#v, want one safe target", got.Input["failureTargetRepairContext"])
+	}
+	if failureTargets[0]["content"] != safeContent {
+		t.Fatalf("safe target content = %#v, want preserved", failureTargets[0]["content"])
+	}
+	patchTargets := providerRepairSnapshotItemsFromValue(got.Input["patchRepairContext"])
+	if len(patchTargets) != 1 {
+		t.Fatalf("patchRepairContext = %#v, want one unsafe target", got.Input["patchRepairContext"])
+	}
+	if patchTargets[0]["content"] == unsafeContent || !strings.Contains(stringValue(patchTargets[0]["content"]), "[REDACTED]") {
+		t.Fatalf("unsafe patch target content = %#v, want redacted", patchTargets[0]["content"])
+	}
+	pkg := recordFromAny(got.Input["repairActionPackage"])
+	targets := providerRepairSnapshotItemsFromValue(pkg["targetSnapshots"])
+	if len(targets) != 1 || targets[0]["content"] != safeContent {
+		t.Fatalf("repairActionPackage.targetSnapshots = %#v, want safe content preserved", pkg["targetSnapshots"])
+	}
+	if got.ContextBudget == nil || !got.ContextBudget.RedactionApplied {
+		t.Fatalf("contextBudget = %+v, want redaction manifest", got.ContextBudget)
+	}
+	for _, path := range got.ContextBudget.RedactedPaths {
+		if path == "input.failureTargetRepairContext[].content" || path == "input.repairActionPackage.targetSnapshots[].content" {
+			t.Fatalf("redactedPaths = %+v, safe repair content should not be reported as redacted", got.ContextBudget.RedactedPaths)
+		}
+	}
+}
+
 func TestEnforceProviderRequestBudgetMarksP0OverflowWhenGoalDoDContractDominates(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-p0",

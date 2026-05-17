@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"reflect"
 	"sort"
 	"strings"
@@ -8,6 +9,12 @@ import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
+
+var providerRepairSnapshotContentPaths = []string{
+	"input.failureTargetRepairContext[]",
+	"input.patchRepairContext[]",
+	"input.repairActionPackage.targetSnapshots[]",
+}
 
 func redactProviderRequestForLLM(request llmmodels.ProviderRequest) llmmodels.ProviderRequest {
 	paths := make([]string, 0)
@@ -70,8 +77,125 @@ func redactProviderMap(path string, input map[string]any, paths *[]string) map[s
 		return nil
 	}
 	redacted := common.RedactSensitiveMap(input)
+	restoreSafeProviderRepairSnapshotContents(path, input, redacted)
 	collectRedactionPaths(path, input, redacted, paths)
 	return redacted
+}
+
+func restoreSafeProviderRepairSnapshotContents(path string, original map[string]any, redacted map[string]any) {
+	if len(original) == 0 || len(redacted) == 0 {
+		return
+	}
+	restore := func(field string) {
+		originalItems := mapSliceFromAny(original[field])
+		redactedItems := mapSliceFromAny(redacted[field])
+		if len(originalItems) == 0 || len(redactedItems) == 0 {
+			return
+		}
+		restoreProviderRepairSnapshotArray(joinRedactionPath(path, field)+"[]", originalItems, redactedItems)
+		redacted[field] = redactedItems
+	}
+	restore("failureTargetRepairContext")
+	restore("patchRepairContext")
+	originalPackage := mapFromAny(original["repairActionPackage"])
+	redactedPackage := mapFromAny(redacted["repairActionPackage"])
+	if len(originalPackage) == 0 || len(redactedPackage) == 0 {
+		return
+	}
+	originalTargets := mapSliceFromAny(originalPackage["targetSnapshots"])
+	redactedTargets := mapSliceFromAny(redactedPackage["targetSnapshots"])
+	if len(originalTargets) == 0 || len(redactedTargets) == 0 {
+		return
+	}
+	restoreProviderRepairSnapshotArray(joinRedactionPath(joinRedactionPath(path, "repairActionPackage"), "targetSnapshots")+"[]", originalTargets, redactedTargets)
+	redactedPackage["targetSnapshots"] = redactedTargets
+	redacted["repairActionPackage"] = redactedPackage
+}
+
+func restoreProviderRepairSnapshotArray(path string, original []map[string]any, redacted []map[string]any) {
+	for idx := range original {
+		if idx >= len(redacted) {
+			break
+		}
+		if !providerRepairSnapshotContentPreserved(path, original[idx]) {
+			continue
+		}
+		content := rawStringValue(original[idx]["content"])
+		if content == "" {
+			continue
+		}
+		redacted[idx]["content"] = content
+	}
+}
+
+func providerRepairSnapshotContentPreserved(path string, item map[string]any) bool {
+	if len(item) == 0 || !providerRepairSnapshotPathAllowed(path) {
+		return false
+	}
+	if strings.TrimSpace(rawStringValue(item["content"])) == "" || strings.TrimSpace(stringValue(item["contentHash"])) == "" {
+		return false
+	}
+	return boolValue(item["contentComplete"]) &&
+		boolValue(item["safeForFileWrite"]) &&
+		!boolValue(item["redacted"]) &&
+		!boolValue(item["truncated"]) &&
+		!boolValue(item["isBinary"])
+}
+
+func rawStringValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return ""
+	}
+}
+
+func providerRepairSnapshotPathAllowed(path string) bool {
+	path = strings.TrimSpace(path)
+	for _, candidate := range providerRepairSnapshotContentPaths {
+		if path == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func mapFromAny(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed
+	default:
+		if value == nil {
+			return nil
+		}
+		payload, err := json.Marshal(value)
+		if err != nil {
+			return nil
+		}
+		var ret map[string]any
+		if err := json.Unmarshal(payload, &ret); err != nil {
+			return nil
+		}
+		return ret
+	}
+}
+
+func mapSliceFromAny(value any) []map[string]any {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		ret := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if mapped := mapFromAny(item); len(mapped) > 0 {
+				ret = append(ret, mapped)
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
 }
 
 func collectRedactionPaths(path string, before any, after any, paths *[]string) {

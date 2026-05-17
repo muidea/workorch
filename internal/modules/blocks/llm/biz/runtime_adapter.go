@@ -2204,12 +2204,13 @@ func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels
 		providerReq.RuntimeCapabilities = assessmentOnlyRuntimeCapabilities(providerReq.RuntimeCapabilities)
 	}
 	providerReq = enforceProviderRequestBudget(providerReq)
+	providerReq = redactProviderRequestForLLM(providerReq)
 	providerReq.PromptContext = buildPromptContextFromRequest(providerReq)
 	if providerReq.ContextBudget != nil && providerReq.PromptContext != nil && providerReq.PromptContext.Normalization != nil {
 		providerReq.ContextBudget.NormalizedSections = uniqueStrings(append(providerReq.ContextBudget.NormalizedSections, providerReq.PromptContext.Normalization.NormalizedSections...))
 		providerReq.ContextBudget.IncludedSections = uniqueStrings(append(providerReq.ContextBudget.IncludedSections, promptContextSectionIDs(providerReq.PromptContext)...))
 	}
-	return redactProviderRequestForLLM(providerReq)
+	return providerReq
 }
 
 func isAssessmentOnlyDecisionRequest(request llmmodels.ProviderRequest) bool {
