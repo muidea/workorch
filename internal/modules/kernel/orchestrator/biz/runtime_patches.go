@@ -26,6 +26,7 @@ type runtimePatchRequest struct {
 	PatchType  string
 	BaseHash   string
 	ApprovalID common.ApprovalID
+	Extra      map[string]any
 }
 
 type runtimePatchRevertRequest struct {
@@ -427,6 +428,7 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 		PatchType:  patchType,
 		BaseHash:   strings.TrimSpace(baseHash),
 		ApprovalID: common.ApprovalID(strings.TrimSpace(approvalID)),
+		Extra:      cloneStepPayload(item),
 	}, nil
 }
 

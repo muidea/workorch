@@ -3097,7 +3097,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshot(t *
 	if required["mustIncludeStateChangingNode"] != true || !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
 		t.Fatalf("repairActionPackage.requiredOutput = %#v, want patch/apply state-changing contract", required)
 	}
-	if required["mustTargetFailureScope"] != true || required["targetRelation"] != "failure_target_or_repair_snapshot" {
+	if required["mustTargetFailureScope"] != true || required["targetRelation"] != "failure_target_repair_snapshot_or_declared_related_failure_target" {
 		t.Fatalf("repairActionPackage.requiredOutput = %#v, want target-relevant repair contract", required)
 	}
 	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
@@ -14673,6 +14673,93 @@ func TestValidateLLMExecutionOutputContractAllowsStateChangingRepairRelevantPatc
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsDeclaredRelatedFailureTargetPatch(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-related-target",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-related-target/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failureTargetScope":              "failureTargets=config_contract_test.go",
+			stepInputKeyRepairOfFailureSig:    "class=shell_command_failed|kind=shell/command|failureTargets=config_contract_test.go|exitCode=1",
+			"failureTargetRepairContext": []map[string]any{
+				{"targetRef": "config_contract_test.go", "exists": true, "contentHash": "hash-config-contract-test"},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "repair-config",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType":             "file_write",
+					"targetRef":             "config.yaml",
+					"content":               "providers: []\n",
+					"relatedFailureTargets": []string{"config_contract_test.go"},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want declared related failure target patch allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsMismatchedDeclaredRelatedFailureTargetPatch(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-mismatched-related-target",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-mismatched-related-target/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failureTargetScope":              "failureTargets=config_contract_test.go",
+			stepInputKeyRepairOfFailureSig:    "class=shell_command_failed|kind=shell/command|failureTargets=config_contract_test.go|exitCode=1",
+			"failureTargetRepairContext": []map[string]any{
+				{"targetRef": "config_contract_test.go", "exists": true, "contentHash": "hash-config-contract-test"},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "repair-config",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType":             "file_write",
+					"targetRef":             "config.yaml",
+					"content":               "providers: []\n",
+					"relatedFailureTargets": []string{"unrelated_test.go"},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "not related to failure target") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want mismatched related failure target rejection", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsStateChangingRepairDependencyMetadataTarget(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-repair-dependency-metadata-target",
@@ -16072,6 +16159,59 @@ func TestCompletionGateNormalizesEvidenceRefsToCanonicalUsableRuntimeEvidence(t 
 	}
 }
 
+func TestCompletionGateNormalizesSupersededFailureEvidenceToLatestSuccess(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-evidence-superseded")
+	oldFailedStepID := common.StepID(runID + "/graph-006/002-rerun-targeted-goal-test")
+	latestSuccessStepID := common.StepID(runID + "/graph-007/002-rerun-targeted-goal-test")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     oldFailedStepID,
+		RunID:  runID,
+		Kind:   shellcommon.StepKindCommand,
+		State:  common.StepStateFailed,
+		Output: map[string]any{"stderr": "old failure"},
+	}); err != nil {
+		t.Fatalf("seed old failed step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     latestSuccessStepID,
+		RunID:  runID,
+		Kind:   shellcommon.StepKindCommand,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"stdout": "latest targeted validation passed"},
+	}); err != nil {
+		t.Fatalf("seed latest success step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		DoDID:           "dod-dod-evidence-superseded",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "done",
+			"items": []map[string]any{{
+				"item":         "targeted goal validation",
+				"state":        "satisfied",
+				"evidenceRefs": []string{string(oldFailedStepID)},
+			}},
+		},
+	}
+
+	normalized, err := orch.normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, run, output)
+	if err != nil {
+		t.Fatalf("normalizeCompletionGateDoDAssessmentEvidenceRefs: %v", err)
+	}
+	assessment := doDAssessmentFromOutput(normalized)
+	items, _ := doDAssessmentItemMaps(assessment["items"])
+	if got := evidenceRefsFromValue(items[0]["evidenceRefs"]); !reflect.DeepEqual(got, []string{string(latestSuccessStepID)}) {
+		t.Fatalf("evidenceRefs = %+v, want latest successful evidence", got)
+	}
+}
+
 func TestRuntimeOrchestrator_RecordsRejectedResultForUnsatisfiedDoDAssessment(t *testing.T) {
 	ctx := context.Background()
 	resultRepo := memory.NewResultRepository()
@@ -16615,6 +16755,135 @@ func TestRuntimeRepairInputForSatisfiedDoDCoverageMissingIsAssessmentOnly(t *tes
 		t.Fatalf("missingGoalCoverage = %+v, want stable goalRequirementId", input["missingGoalCoverage"])
 	} else if candidates := mapSliceFromValue(missing[0]["evidenceCandidates"]); len(candidates) == 0 {
 		t.Fatalf("missingGoalCoverage = %+v, want neutral evidence candidates", input["missingGoalCoverage"])
+	}
+}
+
+func TestRuntimeRepairInputIncludesLatestClosureEvidenceForCoverageCorrection(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-dod-coverage-latest-closure")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-dod-coverage-latest-closure", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}
+	stepRepo := memory.NewStepRepository()
+	patchRepo := memory.NewPatchRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	oldFailedStepID := common.StepID(runID + "/graph-006/002-rerun-targeted-goal-test")
+	latestSuccessStepID := common.StepID(runID + "/graph-007/002-rerun-targeted-goal-test")
+	for _, step := range []*runmodel.Step{
+		{ID: oldFailedStepID, RunID: runID, Kind: shellcommon.StepKindCommand, State: common.StepStateFailed, Output: map[string]any{"stderr": "old failure"}},
+		{ID: latestSuccessStepID, RunID: runID, Kind: shellcommon.StepKindCommand, State: common.StepStateCompleted, Output: map[string]any{"stdout": "latest targeted validation passed"}},
+	} {
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+	}
+	if err := patchRepo.Create(ctx, &runmodel.Patch{
+		ID:          common.PatchID(runID + "/graph-007/001-apply-patch/patch/main-go"),
+		WorkspaceID: run.WorkspaceID,
+		RunID:       runID,
+		StepID:      latestSuccessStepID,
+		PatchType:   "unified_diff",
+		TargetRef:   "main.go",
+		Summary:     "applied target change",
+		State:       common.PatchStateApplied,
+	}); err != nil {
+		t.Fatalf("seed patch: %v", err)
+	}
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:              common.ValidationResultID(string(latestSuccessStepID) + "/validation/runtime-step"),
+		WorkspaceID:     run.WorkspaceID,
+		RunID:           runID,
+		StepID:          latestSuccessStepID,
+		ValidationKind:  "runtime_step",
+		TargetRef:       "main.go",
+		State:           common.ValidationResultStatePassed,
+		Summary:         "targeted validation passed",
+		EvidenceQuality: common.EvidenceQualityValid,
+	}); err != nil {
+		t.Fatalf("seed validation: %v", err)
+	}
+	failedAssessment := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-002-of-graph-006-002-rerun-targeted-goal-test"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyAssessmentOnly:        true,
+			"repairObjective":                 "complete_dod_goal_coverage_assessment",
+			"missingGoalCoverage": []map[string]any{{
+				"goalRequirementId": "goal-req-latest-closure",
+				"raw":               "targeted goal validation",
+				"evidenceCandidates": []map[string]any{{
+					"stepId": string(latestSuccessStepID),
+					"kind":   shellcommon.StepKindCommand,
+				}},
+			}},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|stage=llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"summary":   "old failure still cited",
+				"items": []map[string]any{{
+					"item":         "targeted goal validation",
+					"state":        "satisfied",
+					"evidenceRefs": []string{string(oldFailedStepID)},
+				}},
+				"goalCoverage": map[string]any{
+					"satisfied": false,
+					"items": []map[string]any{{
+						"goalRequirementId": "goal-req-latest-closure",
+						"item":              "targeted goal validation",
+						"state":             "failed",
+						"reason":            "old failure was cited",
+					}},
+				},
+			},
+			"runtimeDiagnostics": map[string]any{
+				"kind": failureClassDoDCoverageMissing,
+				"missingGoalCoverage": []map[string]any{{
+					"goalRequirementId": "goal-req-latest-closure",
+					"raw":               "targeted goal validation",
+					"state":             "missing",
+				}},
+			},
+		},
+	}
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{},
+		memory.NewRunRepository(),
+		stepRepo,
+		memory.NewWorkspaceRepository(),
+		memory.NewDecisionTicketRepository(),
+		memory.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+	orch.evidence.Patches = patchRepo
+	orch.evidence.ValidationResults = validationRepo
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedAssessment, 2, errors.New("missing goal coverage"))
+
+	closure := mapFromValue(input["latestClosureEvidence"])
+	if len(closure) == 0 {
+		t.Fatalf("latestClosureEvidence missing from repair input: %+v", input)
+	}
+	latest := mapSliceFromValue(closure["latestEvidence"])
+	if len(latest) == 0 || stringFromMap(latest[0], "evidenceRef") != string(latestSuccessStepID) {
+		t.Fatalf("latestClosureEvidence = %+v, want latest successful step", closure)
+	}
+	if patches := mapSliceFromValue(closure["latestPatchEvidence"]); len(patches) == 0 || patches[0]["targetRef"] != "main.go" {
+		t.Fatalf("latestPatchEvidence = %+v, want applied patch evidence", closure["latestPatchEvidence"])
+	}
+	if validations := mapSliceFromValue(closure["latestValidationEvidence"]); len(validations) == 0 || validations[0]["targetRef"] != "main.go" {
+		t.Fatalf("latestValidationEvidence = %+v, want passed validation evidence", closure["latestValidationEvidence"])
+	}
+	superseded := mapSliceFromValue(input["supersededFailureEvidence"])
+	if len(superseded) == 0 || stringFromMap(superseded[0], "supersededBy") != string(latestSuccessStepID) {
+		t.Fatalf("supersededFailureEvidence = %+v, want old failure mapped to latest success", input["supersededFailureEvidence"])
+	}
+	if !strings.Contains(strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n"), "latestClosureEvidence") {
+		t.Fatalf("repairGuidance = %+v, want latestClosureEvidence guidance", input["repairGuidance"])
 	}
 }
 

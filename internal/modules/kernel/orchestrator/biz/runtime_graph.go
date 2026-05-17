@@ -176,6 +176,11 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		return o.FailRun(ctx, currentRun.ID, fmt.Sprintf("%s: completionState %s has no actionable continuation", common.ErrInvalidArgument, completionState))
 	}
 	last.Output = normalizeCompletionGateDoDAssessmentOutput(currentRun, last, last.Output)
+	normalizedOutput, evidenceNormalizeErr := o.normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, currentRun, last.Output)
+	if evidenceNormalizeErr != nil {
+		return evidenceNormalizeErr
+	}
+	last.Output = normalizedOutput
 	_ = o.steps.Update(ctx, last)
 	assessment, summary, err := validatedCompletionDoDAssessment(currentRun, last.Output)
 	if err != nil {

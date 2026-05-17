@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -9,10 +10,15 @@ import (
 )
 
 type completionEvidenceRefCatalog struct {
-	runID   common.RunID
-	aliases map[string]string
-	steps   map[string]*runModel.Step
-	patches map[string]bool
+	runID                     common.RunID
+	aliases                   map[string]string
+	steps                     map[string]*runModel.Step
+	patches                   map[string]bool
+	stepOrder                 map[string]int
+	stepScope                 map[string]string
+	latestUsableStepByScope   map[string]string
+	latestUsableOrderByScope  map[string]int
+	supersededFailureStepRefs map[string]string
 }
 
 func (o *RuntimeOrchestrator) normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx context.Context, run *runModel.Run, output map[string]any) (map[string]any, error) {
@@ -47,10 +53,15 @@ func (o *RuntimeOrchestrator) normalizeCompletionGateDoDAssessmentEvidenceRefs(c
 
 func (o *RuntimeOrchestrator) completionEvidenceRefCatalog(ctx context.Context, run *runModel.Run) (completionEvidenceRefCatalog, error) {
 	catalog := completionEvidenceRefCatalog{
-		runID:   run.ID,
-		aliases: map[string]string{},
-		steps:   map[string]*runModel.Step{},
-		patches: map[string]bool{},
+		runID:                     run.ID,
+		aliases:                   map[string]string{},
+		steps:                     map[string]*runModel.Step{},
+		patches:                   map[string]bool{},
+		stepOrder:                 map[string]int{},
+		stepScope:                 map[string]string{},
+		latestUsableStepByScope:   map[string]string{},
+		latestUsableOrderByScope:  map[string]int{},
+		supersededFailureStepRefs: map[string]string{},
 	}
 	if o == nil || o.steps == nil || run == nil || run.ID == "" {
 		return catalog, nil
@@ -59,16 +70,41 @@ func (o *RuntimeOrchestrator) completionEvidenceRefCatalog(ctx context.Context, 
 	if err != nil {
 		return catalog, err
 	}
-	for _, step := range steps {
+	for idx, step := range steps {
 		if step == nil || step.ID == "" {
 			continue
 		}
 		canonical := string(step.ID)
 		catalog.steps[canonical] = step
+		catalog.stepOrder[canonical] = idx
+		if scope := completionEvidenceStepScope(step); scope != "" {
+			catalog.stepScope[canonical] = scope
+			if completionEvidenceStepUsable(step) {
+				catalog.latestUsableStepByScope[scope] = canonical
+				catalog.latestUsableOrderByScope[scope] = idx
+			}
+		}
 		catalog.addAlias(canonical, canonical)
 		catalog.addAlias(canonical+"/tool-call/runtime-execute", canonical)
 		for _, rawAlias := range completionEvidenceStepAliases(run.ID, step) {
 			catalog.addAlias(rawAlias, canonical)
+		}
+	}
+	for _, step := range steps {
+		if step == nil || step.ID == "" || step.State != common.StepStateFailed {
+			continue
+		}
+		canonical := string(step.ID)
+		scope := catalog.stepScope[canonical]
+		if scope == "" {
+			continue
+		}
+		latest := catalog.latestUsableStepByScope[scope]
+		if latest == "" {
+			continue
+		}
+		if catalog.latestUsableOrderByScope[scope] > catalog.stepOrder[canonical] {
+			catalog.supersededFailureStepRefs[canonical] = latest
 		}
 	}
 	for _, step := range steps {
@@ -257,6 +293,29 @@ func completionEvidenceLastPathPart(ref string) string {
 	return ref
 }
 
+func completionEvidenceStepScope(step *runModel.Step) string {
+	if step == nil {
+		return ""
+	}
+	if target := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(step.Input, "targetRef"),
+		stringFromMap(step.Output, "targetRef"),
+	)); target != "" {
+		return "targetRef=" + normalizeRuntimeFailureTargetValue(target)
+	}
+	if scope := runtimeFailureTargetScopeFromStep(step); scope != "" {
+		return scope
+	}
+	if nodeID := graphNodeID(step); nodeID != "" {
+		return "graphNodeId=" + completionEvidenceStripSequencePrefix(strings.TrimSpace(nodeID))
+	}
+	last := completionEvidenceLastPathPart(string(step.ID))
+	if last == "" {
+		return ""
+	}
+	return "stepLabel=" + completionEvidenceStripSequencePrefix(last)
+}
+
 func completionEvidencePatchAliases(runID common.RunID, stepID common.StepID, patchID string, step *runModel.Step) []string {
 	if runID == "" || patchID == "" {
 		return nil
@@ -418,7 +477,13 @@ func (o *RuntimeOrchestrator) canonicalCompletionEvidenceRef(ctx context.Context
 		if catalog.patches[canonical] {
 			return canonical, true
 		}
-		return canonical, completionEvidenceStepUsable(catalog.steps[canonical])
+		if completionEvidenceStepUsable(catalog.steps[canonical]) {
+			return canonical, true
+		}
+		if replacement := catalog.supersededFailureStepRefs[canonical]; replacement != "" {
+			return replacement, true
+		}
+		return canonical, false
 	}
 	if verdict, ok, err := o.evidenceRefQualityVerdict(ctx, ref); err == nil && ok {
 		return ref, validationEvidenceCanSatisfyDoD(verdict)
@@ -427,7 +492,22 @@ func (o *RuntimeOrchestrator) canonicalCompletionEvidenceRef(ctx context.Context
 		return ref, true
 	}
 	if step, ok, err := o.stepByEvidenceRef(ctx, ref); err == nil && ok {
-		return string(step.ID), completionEvidenceStepUsable(step)
+		canonical := string(step.ID)
+		if completionEvidenceStepUsable(step) {
+			return canonical, true
+		}
+		if replacement := catalog.supersededFailureStepRefs[canonical]; replacement != "" {
+			return replacement, true
+		}
+		if step.RunID == catalog.runID {
+			if scope := completionEvidenceStepScope(step); scope != "" {
+				if replacement := catalog.latestUsableStepByScope[scope]; replacement != "" &&
+					catalog.latestUsableOrderByScope[scope] > catalog.stepOrder[canonical] {
+					return replacement, true
+				}
+			}
+		}
+		return canonical, false
 	}
 	return "", false
 }
@@ -481,4 +561,201 @@ func completionEvidenceStepUsable(step *runModel.Step) bool {
 	default:
 		return false
 	}
+}
+
+func (o *RuntimeOrchestrator) latestCompletionClosureEvidence(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) map[string]any {
+	if o == nil || run == nil || o.steps == nil {
+		return nil
+	}
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil || len(steps) == 0 {
+		return nil
+	}
+	type closureItem struct {
+		order int
+		item  map[string]any
+	}
+	latestByScope := map[string]closureItem{}
+	for idx, step := range steps {
+		if step == nil || step.ID == "" || step.State != common.StepStateCompleted {
+			continue
+		}
+		scope := completionEvidenceStepScope(step)
+		if scope == "" {
+			continue
+		}
+		latestByScope[scope] = closureItem{order: idx, item: completionClosureStepEvidenceItem(step, idx, scope)}
+	}
+	failures := make([]map[string]any, 0)
+	for idx, step := range steps {
+		if step == nil || step.ID == "" || step.State != common.StepStateFailed {
+			continue
+		}
+		scope := completionEvidenceStepScope(step)
+		if scope == "" {
+			continue
+		}
+		latest, ok := latestByScope[scope]
+		if !ok || latest.order <= idx {
+			continue
+		}
+		item := completionClosureStepEvidenceItem(step, idx, scope)
+		item["supersededBy"] = stringFromMap(latest.item, "evidenceRef")
+		failures = append(failures, item)
+	}
+	latest := make([]closureItem, 0, len(latestByScope))
+	focusScope := ""
+	if failedStep != nil {
+		focusScope = completionEvidenceStepScope(failedStep)
+	}
+	for scope, item := range latestByScope {
+		if focusScope != "" && scope == focusScope {
+			item.item["focus"] = true
+		}
+		latest = append(latest, item)
+	}
+	sort.SliceStable(latest, func(i, j int) bool {
+		return latest[i].order > latest[j].order
+	})
+	latestLimit := min(len(latest), 8)
+	latestItems := make([]map[string]any, 0, latestLimit)
+	for idx := 0; idx < latestLimit; idx++ {
+		latestItems = append(latestItems, latest[idx].item)
+	}
+	patchItems := o.latestCompletionPatchEvidence(ctx, run, failedStep)
+	validationItems := o.latestCompletionValidationEvidence(ctx, run, failedStep)
+	failureLimit := min(len(failures), 8)
+	ret := map[string]any{}
+	if len(latestItems) > 0 {
+		ret["latestEvidence"] = latestItems
+	}
+	if len(patchItems) > 0 {
+		ret["latestPatchEvidence"] = patchItems
+	}
+	if len(validationItems) > 0 {
+		ret["latestValidationEvidence"] = validationItems
+	}
+	if failureLimit > 0 {
+		ret["supersededFailures"] = failures[len(failures)-failureLimit:]
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	ret["selectionRule"] = "Prefer later successful evidence in the same neutral scope over earlier failed evidence; older failures remain lineage only."
+	return ret
+}
+
+func completionClosureStepEvidenceItem(step *runModel.Step, order int, scope string) map[string]any {
+	item := map[string]any{
+		"evidenceRef": string(step.ID),
+		"kind":        step.Kind,
+		"state":       string(step.State),
+		"order":       order,
+		"scope":       scope,
+	}
+	if nodeID := graphNodeID(step); nodeID != "" {
+		item["graphNodeId"] = nodeID
+	}
+	if target := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(step.Input, "targetRef"),
+		stringFromMap(step.Output, "targetRef"),
+	)); target != "" {
+		item["targetRef"] = target
+	}
+	if output := compactStepOutputForLLMContext(step.Output); len(output) > 0 {
+		item["output"] = output
+	}
+	return item
+}
+
+func (o *RuntimeOrchestrator) latestCompletionPatchEvidence(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
+	if o == nil || run == nil || o.evidence.Patches == nil {
+		return nil
+	}
+	patches, err := o.evidence.Patches.ListByRun(ctx, run.ID)
+	if err != nil || len(patches) == 0 {
+		return nil
+	}
+	focusScope := ""
+	if failedStep != nil {
+		focusScope = completionEvidenceStepScope(failedStep)
+	}
+	ret := make([]map[string]any, 0, min(len(patches), 8))
+	for _, patch := range patches {
+		if patch == nil || patch.ID == "" || patch.State != common.PatchStateApplied {
+			continue
+		}
+		scope := ""
+		if target := strings.TrimSpace(patch.TargetRef); target != "" {
+			scope = "targetRef=" + normalizeRuntimeFailureTargetValue(target)
+		}
+		item := map[string]any{
+			"evidenceRef": string(patch.ID),
+			"kind":        "patch/" + strings.TrimSpace(patch.PatchType),
+			"state":       string(patch.State),
+			"stepId":      string(patch.StepID),
+			"targetRef":   strings.TrimSpace(patch.TargetRef),
+			"scope":       scope,
+			"summary":     strings.TrimSpace(patch.Summary),
+		}
+		if focusScope != "" && scope != "" && scope == focusScope {
+			item["focus"] = true
+		}
+		ret = append(ret, item)
+		if len(ret) >= 8 {
+			break
+		}
+	}
+	return ret
+}
+
+func (o *RuntimeOrchestrator) latestCompletionValidationEvidence(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
+	if o == nil || run == nil || o.evidence.ValidationResults == nil {
+		return nil
+	}
+	items, err := o.evidence.ValidationResults.ListByRun(ctx, run.ID)
+	if err != nil || len(items) == 0 {
+		return nil
+	}
+	focusScope := ""
+	if failedStep != nil {
+		focusScope = completionEvidenceStepScope(failedStep)
+	}
+	ret := make([]map[string]any, 0, min(len(items), 8))
+	for _, result := range items {
+		if result == nil || result.ID == "" || result.State != common.ValidationResultStatePassed {
+			continue
+		}
+		if !validationEvidenceCanSatisfyDoD(qualityFromValidationResult(result)) {
+			continue
+		}
+		scope := ""
+		if target := strings.TrimSpace(result.TargetRef); target != "" {
+			scope = "targetRef=" + normalizeRuntimeFailureTargetValue(target)
+		} else if result.StepID != "" {
+			if step, ok, err := o.stepByEvidenceRef(ctx, string(result.StepID)); err == nil && ok {
+				scope = completionEvidenceStepScope(step)
+			}
+		}
+		item := map[string]any{
+			"evidenceRef": string(result.ID),
+			"kind":        "validation/" + strings.TrimSpace(result.ValidationKind),
+			"state":       string(result.State),
+			"stepId":      string(result.StepID),
+			"targetRef":   strings.TrimSpace(result.TargetRef),
+			"scope":       scope,
+			"summary":     strings.TrimSpace(result.Summary),
+		}
+		if evidenceRef := strings.TrimSpace(result.EvidenceRef); evidenceRef != "" {
+			item["sourceEvidenceRef"] = evidenceRef
+		}
+		if focusScope != "" && scope != "" && scope == focusScope {
+			item["focus"] = true
+		}
+		ret = append(ret, item)
+		if len(ret) >= 8 {
+			break
+		}
+	}
+	return ret
 }

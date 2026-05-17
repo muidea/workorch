@@ -184,6 +184,9 @@ type TaskProgress struct {
 	RunID              string              `json:"runId,omitempty"`
 	State              string              `json:"state"`
 	Summary            string              `json:"summary,omitempty"`
+	CurrentStepID      string              `json:"currentStepId,omitempty"`
+	CurrentStepKind    string              `json:"currentStepKind,omitempty"`
+	CurrentStepState   string              `json:"currentStepState,omitempty"`
 	CurrentMilestone   string              `json:"currentMilestone,omitempty"`
 	BlockingTicketID   string              `json:"blockingTicketId,omitempty"`
 	BlockingApprovalID string              `json:"blockingApprovalId,omitempty"`
@@ -874,6 +877,8 @@ type Artifact struct {
 
 type WorkspaceSnapshot struct {
 	Workspace          Workspace               `json:"workspace"`
+	Run                *Run                    `json:"run,omitempty"`
+	Step               *presenter.StepView     `json:"step,omitempty"`
 	Outcome            WorkspaceOutcome        `json:"outcome"`
 	TaskProgress       TaskProgress            `json:"taskProgress"`
 	TaskDecompositions []TaskDecomposition     `json:"taskDecompositions,omitempty"`

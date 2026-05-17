@@ -1766,8 +1766,16 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"Add one independent dodAssessment.goalCoverage.items entry for every missingGoalCoverage entry; copy its goalRequirementId when present and cover the exact raw requirement without merging multiple missing entries into a broader item.",
 			"Add one independent dodAssessment.deliverableCoverage.items entry for every missingDeliverableCoverage entry or required deliverableExpectation id; each satisfied entry must copy the exact id and cite evidenceRefs or artifactRefs.",
 			"Treat evidenceCandidates as neutral candidates, not automatic proof; use them only when their concrete output supports the exact Goal requirement.",
+			"When latestClosureEvidence is present, compare the latest successful evidence against older failed evidence in the same neutral scope; do not reject solely because an earlier superseded failure exists.",
+			"If latestClosureEvidence is still insufficient, explain the exact missing dimension and cite the latest evidence that was considered.",
 			"Each satisfied dodAssessment.goalCoverage item must cite concrete evidenceRefs from the candidate evidence or other available evidence.",
 			"If evidence does not support a Goal or DoD item, mark it failed/skipped with reason, residualRisks, and nextActions instead of claiming satisfaction.",
+		}
+		if closure := o.latestCompletionClosureEvidence(ctx, run, failedStep); len(closure) > 0 {
+			input["latestClosureEvidence"] = closure
+			if superseded := mapSliceFromValue(closure["supersededFailures"]); len(superseded) > 0 {
+				input["supersededFailureEvidence"] = superseded
+			}
 		}
 		if missingGoalCoverage := missingGoalCoverageFromStep(failedStep); len(missingGoalCoverage) > 0 {
 			input["missingGoalCoverage"] = o.missingGoalCoverageWithEvidenceCandidates(ctx, run, failedStep, missingGoalCoverage)
@@ -1991,7 +1999,7 @@ func stateChangingRepairGuidance() []string {
 		"When changing an existing target file, prefer the smallest unified_diff or exact replacement over file_write; use file_write primarily to create missing targets or replace a known full file snapshot intentionally.",
 		"Do not use shell/command to modify workspace files when a patch/apply state-change artifact can represent the change; use shell/command for bounded preparation or verification after the patch.",
 		"When failedStepOutput identifies concrete target resources, treat those target snapshots as authoritative and repair the target directly instead of changing unrelated prerequisite metadata.",
-		"When repair target snapshots or failure target scope are present, patch/apply must target that failure scope or current repair snapshot; unrelated marker/no-op patches are invalid.",
+		"When repair target snapshots or failure target scope are present, patch/apply must target that failure scope/current repair snapshot, or explicitly declare relatedFailureTargets that cite the current failure target being validated or unblocked; unrelated marker/no-op patches are invalid.",
 		"When a workspace already contains known resources, reconcile the repair with those existing resources and prefer the smallest coherent state change over broad replacement.",
 		"When repair context contains redacted or truncated content, do not copy it into patch/apply; first read the target or produce a minimal exact diff from visible current evidence.",
 		"When fixing failures caused by missing symbols, unknown fields, constructor names, schema keys, or interface members, patch against names that already exist in current workspace resources unless the Goal explicitly requires creating the missing definition.",
@@ -2109,7 +2117,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	if targets := repairActionTargetSnapshots(input); len(targets) > 0 {
 		pkg["targetSnapshots"] = targets
 		requiredOutput["mustTargetFailureScope"] = true
-		requiredOutput["targetRelation"] = "failure_target_or_repair_snapshot"
+		requiredOutput["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
 		requiredOutput["mustUseCurrentTargetSnapshot"] = true
 		requiredOutput["forbiddenStalePatchReuse"] = true
 	}

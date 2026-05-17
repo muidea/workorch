@@ -1199,6 +1199,10 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 				return WorkspaceSnapshot{}, err
 			}
 		}
+		run := runSnapshot.Run
+		step := runSnapshot.Step
+		ret.Run = &run
+		ret.Step = step
 		ret.TaskProgress = runSnapshot.TaskProgress
 		ret.TaskDecompositions = runSnapshot.TaskDecompositions
 		ret.ExecutionSections = runSnapshot.ExecutionSections
@@ -1633,6 +1637,9 @@ func currentRunStatusStep(run *runmodel.Run, steps []*runmodel.Step, checkpoints
 			return step
 		}
 	}
+	if step := latestNonTerminalRunStatusStep(steps); step != nil {
+		return step
+	}
 	if step := terminalRunStatusStep(steps); step != nil {
 		return step
 	}
@@ -1658,10 +1665,35 @@ func currentRunSnapshotStep(steps []presenter.StepView, decisionStep string, app
 	if len(steps) == 0 {
 		return nil
 	}
+	if step := latestNonTerminalSnapshotStep(steps); step != nil {
+		return step
+	}
 	if step := terminalSnapshotStep(steps); step != nil {
 		return step
 	}
 	return &steps[len(steps)-1]
+}
+
+func latestNonTerminalRunStatusStep(steps []*runmodel.Step) *runmodel.Step {
+	for idx := len(steps) - 1; idx >= 0; idx-- {
+		step := steps[idx]
+		if step == nil {
+			continue
+		}
+		if step.State == common.StepStateDispatched || step.State == common.StepStatePending {
+			return step
+		}
+	}
+	return nil
+}
+
+func latestNonTerminalSnapshotStep(steps []presenter.StepView) *presenter.StepView {
+	for idx := len(steps) - 1; idx >= 0; idx-- {
+		if steps[idx].State == string(common.StepStateDispatched) || steps[idx].State == string(common.StepStatePending) {
+			return &steps[idx]
+		}
+	}
+	return nil
 }
 
 func decisionStepID(item *decisionmodel.Ticket) string {
@@ -4257,6 +4289,14 @@ func mapWorkspaceTaskProgress(snapshot WorkspaceSnapshot) TaskProgress {
 		ret.Recovery.NextAction = "inspect_active_run"
 		ret.Recovery.Reason = localizedWorkspaceProgressText(language, "active_run")
 	}
+	if snapshot.Step != nil {
+		ret.CurrentStepID = snapshot.Step.ID
+		ret.CurrentStepKind = snapshot.Step.Kind
+		ret.CurrentStepState = snapshot.Step.State
+		if ret.Recovery.StepID == "" {
+			ret.Recovery.StepID = snapshot.Step.ID
+		}
+	}
 	for _, item := range snapshot.Decisions {
 		if isResolvedDecisionState(item.State) {
 			continue
@@ -4326,6 +4366,9 @@ func mapTaskProgress(snapshot RunSnapshot) TaskProgress {
 		},
 	}
 	if snapshot.Step != nil {
+		ret.CurrentStepID = snapshot.Step.ID
+		ret.CurrentStepKind = snapshot.Step.Kind
+		ret.CurrentStepState = snapshot.Step.State
 		ret.Recovery.StepID = snapshot.Step.ID
 	}
 	if latestCheckpoint != nil {

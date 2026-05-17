@@ -1720,10 +1720,25 @@ func validateRepairPatchTargetRelevance(step *runModel.Step, request runtimePatc
 	if repairPatchTargetRefMatches(request.TargetRef, targetRefs) {
 		return nil
 	}
+	if repairPatchRequestDeclaresRelatedFailureTargets(request, targetRefs) {
+		return nil
+	}
 	if repairPatchTargetRefIsRelatedPrerequisite(step.Input, request.TargetRef, targetRefs) {
 		return nil
 	}
 	return fmt.Errorf("%w: runtime repair patch/apply target %q is not related to failure target scope %v; patch a current failure target or return a failed assessment/blocker", common.ErrInvalidArgument, request.TargetRef, limitedStrings(targetRefs, 5))
+}
+
+func repairPatchRequestDeclaresRelatedFailureTargets(request runtimePatchRequest, allowed []string) bool {
+	if len(allowed) == 0 {
+		return false
+	}
+	for _, declared := range stringSliceFromValue(request.Extra["relatedFailureTargets"]) {
+		if repairPatchTargetRefMatches(declared, allowed) {
+			return true
+		}
+	}
+	return false
 }
 
 func repairPatchTargetRefIsRelatedPrerequisite(input map[string]any, targetRef string, allowed []string) bool {

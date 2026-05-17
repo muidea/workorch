@@ -3711,6 +3711,62 @@ func TestReadWorkspaceSnapshotWithRunSnapshotAvoidsProjectionRunStepRead(t *test
 	}
 }
 
+func TestReadWorkspaceSnapshotProjectsActiveRunAndCurrentStep(t *testing.T) {
+	session, ctx := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-active-run-current-step")
+	runID := common.RunID("run-active-run-current-step")
+	stepID := common.StepID(string(runID) + "/graph-001/002-repair")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "active run current step",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: runID,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/001-read"),
+		RunID: runID,
+		Kind:  "file/read",
+		State: common.StepStateCompleted,
+	}); err != nil {
+		t.Fatalf("create completed step: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateDispatched,
+	}); err != nil {
+		t.Fatalf("create current step: %v", err)
+	}
+
+	snapshot, err := ReadWorkspaceSnapshotWithSession(ctx, session.Borrow(), string(workspaceID))
+	if err != nil {
+		t.Fatalf("ReadWorkspaceSnapshotWithSession: %v", err)
+	}
+	if snapshot.Run == nil || snapshot.Run.ID != string(runID) {
+		t.Fatalf("snapshot.Run = %+v, want active run", snapshot.Run)
+	}
+	if snapshot.Step == nil || snapshot.Step.ID != string(stepID) || snapshot.Step.State != string(common.StepStateDispatched) {
+		t.Fatalf("snapshot.Step = %+v, want dispatched current step", snapshot.Step)
+	}
+	if snapshot.TaskProgress.CurrentStepID != string(stepID) ||
+		snapshot.TaskProgress.CurrentStepKind != "llm/workspace_execution" ||
+		snapshot.TaskProgress.CurrentStepState != string(common.StepStateDispatched) {
+		t.Fatalf("taskProgress current step = %+v, want active run current step", snapshot.TaskProgress)
+	}
+}
+
 func TestReadWorkspaceSnapshotIncludesWorkspaceGoalsAndDoDs(t *testing.T) {
 	ctx := context.Background()
 	workspaceID := common.WorkspaceID("ws-snapshot-goal-dod")
