@@ -146,6 +146,22 @@ steps/<step-id-path>/output.json
 
 Large input/output payloads are stored separately. Updating output should not rewrite all steps in a run.
 
+Step state events and runtime ToolCall evidence must not duplicate full step
+input/output. They store logical refs plus bounded summaries only:
+
+```json
+{
+  "inputRef": "workorch://workspaces/<workspace-id>/runs/<run-id>/steps/<step-id-path>/input.json",
+  "outputRef": "workorch://workspaces/<workspace-id>/runs/<run-id>/steps/<step-id-path>/output.json",
+  "summary": {}
+}
+```
+
+`governanceHistory` and `replanContinuation` are lineage summaries, not raw
+payload containers. They may reference failed steps and target metadata, but
+must not embed raw failed step input, full execution context, target file
+content, raw LLM stream, or provider/model runtime binding.
+
 ### Append-Only Events
 
 Events must be append-only JSONL:
@@ -162,6 +178,11 @@ Each line contains event metadata plus optional `payloadRef`:
 ```
 
 Small payloads may be embedded only under a strict size threshold. Large payloads must be written to `payloads/`.
+
+Repository list operations must filter, sort, page, and cursor on event
+metadata before reading `payloadRef`. Large payload files are hydrated only for
+the records returned by the query, and read-model projections should avoid
+requesting raw payloads unless the caller explicitly opens the raw ref.
 
 ### LLM Calls
 

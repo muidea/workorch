@@ -160,7 +160,10 @@ func isDoDCoverageMissingFailure(lowerStage string, execErr error, output map[st
 		return false
 	}
 	errText := strings.ToLower(firstNonEmptyString(errorString(execErr), stringFromMap(output, "error"), stringFromMap(output, "reason")))
-	return strings.Contains(errText, "dodassessment does not cover all current dod items")
+	return strings.Contains(errText, "dodassessment does not cover all current dod items") ||
+		strings.Contains(errText, "dodassessment does not cover all current goal requirements") ||
+		strings.Contains(errText, "dodassessment.deliverablecoverage missing required deliverables") ||
+		strings.Contains(errText, "acceptancedimensions missing required dimensions")
 }
 
 func isLLMProviderAuthOrConfigFailure(lowerStage string, execErr error, output map[string]any) bool {

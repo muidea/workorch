@@ -817,10 +817,10 @@ func workspaceGovernanceHistory(
 			"decisionKind":      ticket.DecisionKind,
 			"reason":            ticket.Reason,
 			"question":          ticket.Question,
-			"ticketContext":     cloneDecisionPayload(ticket.Context),
+			"ticketContext":     compactActivationFailureContext(ticket.Context),
 			"resolutionId":      string(resolution.ID),
 			"resolutionType":    resolution.Type,
-			"resolutionPayload": cloneDecisionPayload(resolution.Payload),
+			"resolutionPayload": compactActivationDecisionPayload(resolution.Payload),
 		}))
 		if len(ret) >= limit {
 			break
@@ -1449,7 +1449,7 @@ func replanContinuationFromGovernanceHistory(history []map[string]any) map[strin
 			"resolutionType":   resolutionType,
 		}
 		if len(resolutionPayload) > 0 {
-			replan["resolutionPayload"] = stripRuntimeLLMBindingFromActivationContext(common.RedactSensitiveMap(resolutionPayload))
+			replan["resolutionPayload"] = compactActivationDecisionPayload(resolutionPayload)
 		}
 		if failure := replanFailureContextFromGovernanceItem(item); len(failure) > 0 {
 			replan["failureContext"] = failure
@@ -1469,7 +1469,7 @@ func replanFailureContextFromGovernanceItem(item map[string]any) map[string]any 
 		context = decisionPayloadMap(item["context"])
 	}
 	if len(context) > 0 {
-		return stripRuntimeLLMBindingFromActivationContext(common.RedactSensitiveMap(context))
+		return compactActivationFailureContext(context)
 	}
 	ret := map[string]any{}
 	for _, key := range []string{
@@ -1483,13 +1483,279 @@ func replanFailureContextFromGovernanceItem(item map[string]any) map[string]any 
 		"recoveryPolicy",
 	} {
 		if value, ok := item[key]; ok && value != nil {
-			ret[key] = common.RedactSensitiveValue(value)
+			ret[key] = compactActivationContextValue(value, 1)
 		}
 	}
 	if len(ret) == 0 {
 		return nil
 	}
 	return ret
+}
+
+func compactActivationDecisionPayload(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"answer",
+		"note",
+		"operator",
+		"recoveryAction",
+		"resumeInstruction",
+		"resolution",
+		"summary",
+		"reason",
+		"failureClass",
+		"failureSignature",
+		"failureTargetScope",
+		"failedStepId",
+		"failedStepKind",
+		"attempts",
+		"maxAttempts",
+		"repairOfRootStepId",
+		"recoveryPolicy",
+	} {
+		if value, ok := input[key]; ok && value != nil {
+			ret[key] = compactActivationContextValue(value, 1)
+		}
+	}
+	for _, key := range []string{"failureContext", "ticketContext", "context"} {
+		if context := decisionPayloadMap(input[key]); len(context) > 0 {
+			ret[key] = compactActivationFailureContext(context)
+		}
+	}
+	return stripRuntimeLLMBindingFromActivationContext(common.RedactSensitiveMap(ret))
+}
+
+func compactActivationFailureContext(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"failureClass",
+		"failureSignature",
+		"failureTargetScope",
+		"failedStepId",
+		"failedStepKind",
+		"failureReason",
+		"repairObjective",
+		"attempts",
+		"maxAttempts",
+		"repairAttempts",
+		"repairOfRootStepId",
+		"runtimeRepairAttempt",
+		"maxRuntimeRepairAttempts",
+		"recoveryPolicy",
+	} {
+		if value, ok := input[key]; ok && value != nil {
+			ret[key] = compactActivationContextValue(value, 1)
+		}
+	}
+	if failedOutput := decisionPayloadMap(input["failedStepOutput"]); len(failedOutput) > 0 {
+		ret["failedStepOutput"] = compactActivationFailedOutput(failedOutput)
+	}
+	if targets := compactActivationTargetSnapshots(input); len(targets) > 0 {
+		ret["targetSnapshots"] = targets
+	}
+	return stripRuntimeLLMBindingFromActivationContext(common.RedactSensitiveMap(ret))
+}
+
+func compactActivationFailedOutput(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"stage",
+		"status",
+		"error",
+		"reason",
+		"failureClass",
+		"failureSignature",
+		"failureCategory",
+	} {
+		if value, ok := input[key]; ok && value != nil {
+			ret[key] = compactActivationContextValue(value, 1)
+		}
+	}
+	if graph := decisionPayloadMap(input["executionGraph"]); len(graph) > 0 {
+		if nodes, ok := graph["nodes"].([]any); ok {
+			ret["rejectedExecutionGraph"] = map[string]any{"nodeCount": len(nodes)}
+		} else if nodes, ok := graph["nodes"].([]map[string]any); ok {
+			ret["rejectedExecutionGraph"] = map[string]any{"nodeCount": len(nodes)}
+		}
+	}
+	if _, ok := input["rawContentPreview"]; ok {
+		ret["rawContentPreviewOmitted"] = true
+	}
+	if _, ok := input["repairRawContentPreview"]; ok {
+		ret["repairRawContentPreviewOmitted"] = true
+	}
+	if _, ok := input["streamEvents"]; ok {
+		ret["streamEventsOmitted"] = true
+	}
+	if ret["rawContentPreviewOmitted"] == true ||
+		ret["repairRawContentPreviewOmitted"] == true ||
+		ret["streamEventsOmitted"] == true {
+		ret["omittedContentReason"] = "invalid or rejected LLM decision content is not reusable repair input; rebuild from current context, target snapshots, or fresh reads"
+	}
+	return ret
+}
+
+func compactActivationTargetSnapshots(input map[string]any) []map[string]any {
+	var ret []map[string]any
+	seen := map[string]bool{}
+	add := func(raw any, source string) {
+		for _, item := range activationMapSlice(raw) {
+			targetRef := strings.TrimSpace(stringFromDecisionPayload(item, "targetRef"))
+			if targetRef == "" || seen[targetRef] {
+				continue
+			}
+			seen[targetRef] = true
+			snapshot := map[string]any{}
+			for _, key := range []string{
+				"targetRef",
+				"exists",
+				"contentHash",
+				"contentComplete",
+				"safeForFileWrite",
+				"redacted",
+				"truncated",
+				"isBinary",
+				"size",
+				"source",
+				"error",
+			} {
+				if value, ok := item[key]; ok && value != nil {
+					snapshot[key] = compactActivationContextValue(value, 1)
+				}
+			}
+			if source != "" {
+				snapshot["contextSource"] = source
+			}
+			ret = append(ret, snapshot)
+			if len(ret) >= 20 {
+				return
+			}
+		}
+	}
+	add(input["targetSnapshots"], "lineage_target")
+	if len(ret) < 20 {
+		add(input["failureTargetRepairContext"], "failure_target")
+	}
+	if len(ret) < 20 {
+		add(input["patchRepairContext"], "patch_target")
+	}
+	return ret
+}
+
+func activationMapSlice(value any) []map[string]any {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		ret := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if mapped, ok := item.(map[string]any); ok {
+				ret = append(ret, mapped)
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
+}
+
+func compactActivationContextValue(value any, depth int) any {
+	value = common.RedactSensitiveValue(value)
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case string:
+		typed = strings.TrimSpace(typed)
+		if strings.Contains(typed, "[REDACTED]") {
+			return map[string]any{
+				"omitted":                         true,
+				"containedRuntimeRedactionMarker": true,
+				"bytes":                           len(typed),
+				"reason":                          "redacted runtime marker content is not reusable repair input; rebuild from current target snapshots or fresh reads",
+			}
+		}
+		if len(typed) > 4096 {
+			return typed[:4096] + "..."
+		}
+		return typed
+	case map[string]any:
+		if depth >= 3 {
+			return map[string]any{"entries": len(typed)}
+		}
+		ret := map[string]any{}
+		for key, item := range typed {
+			if activationContextKeySkipped(key) {
+				continue
+			}
+			ret[key] = compactActivationContextValue(item, depth+1)
+			if len(ret) >= 32 {
+				break
+			}
+		}
+		return ret
+	case []map[string]any:
+		if depth >= 3 {
+			return map[string]any{"items": len(typed)}
+		}
+		limit := min(len(typed), 20)
+		ret := make([]any, 0, limit)
+		for idx := 0; idx < limit; idx++ {
+			ret = append(ret, compactActivationContextValue(typed[idx], depth+1))
+		}
+		return ret
+	case []any:
+		if depth >= 3 {
+			return map[string]any{"items": len(typed)}
+		}
+		limit := min(len(typed), 20)
+		ret := make([]any, 0, limit)
+		for idx := 0; idx < limit; idx++ {
+			ret = append(ret, compactActivationContextValue(typed[idx], depth+1))
+		}
+		return ret
+	case []string:
+		limit := min(len(typed), 20)
+		ret := make([]any, 0, limit)
+		for idx := 0; idx < limit; idx++ {
+			ret = append(ret, compactActivationContextValue(typed[idx], depth+1))
+		}
+		return ret
+	default:
+		return typed
+	}
+}
+
+func activationContextKeySkipped(key string) bool {
+	switch strings.TrimSpace(key) {
+	case "executionContext",
+		"executionContextPackage",
+		"failedStepInput",
+		"previousStepOutput",
+		"workspaceFileManifest",
+		"failureTargetRepairContext",
+		"patchRepairContext",
+		"content",
+		"diff",
+		"rawContentPreview",
+		"repairRawContentPreview",
+		"streamEvents",
+		"llmProviderId",
+		"providerId",
+		"provider",
+		"model":
+		return true
+	default:
+		return false
+	}
 }
 
 func stripRuntimeLLMBindingFromActivationContext(input map[string]any) map[string]any {

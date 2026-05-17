@@ -8,7 +8,6 @@ var writableMemoryTypesBySource = map[string]map[string]struct{}{
 		MemoryTypeUserPreference: {},
 	},
 	MemorySourceRun: {
-		MemoryTypeDecision:        {},
 		MemoryTypeDoDFeedback:     {},
 		MemoryTypeProjectContext:  {},
 		MemoryTypeUserPreference:  {},
@@ -16,6 +15,9 @@ var writableMemoryTypesBySource = map[string]map[string]struct{}{
 		MemoryTypeSkillFeedback:   {},
 		MemoryTypeToolFeedback:    {},
 		MemoryTypeRunSummary:      {},
+	},
+	MemorySourceDecision: {
+		MemoryTypeDecision: {},
 	},
 }
 

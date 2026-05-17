@@ -145,7 +145,7 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		governanceHistory = append(currentGovernance, governanceHistory...)
 	}
 	if len(governanceHistory) > 0 {
-		ret["governanceHistory"] = redactSensitiveMapSlice(limitedMapSlice(governanceHistory, 6))
+		ret["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(governanceHistory, 6)
 	}
 	return ret
 }
@@ -159,11 +159,13 @@ func mergeExecutionDefinitionsIntoPackage(pkg map[string]any, executionContext m
 		"doDId",
 		"goalDefinitionPolicy",
 		"doDDefinitionPolicy",
-		"replanContinuation",
 	} {
 		if value, ok := executionContext[key]; ok && value != nil {
 			pkg[key] = compactLLMContextValue(value, 1)
 		}
+	}
+	if value := mapFromValue(executionContext["replanContinuation"]); len(value) > 0 {
+		pkg["replanContinuation"] = compactReplanContinuationForRuntimeContext(value)
 	}
 	if value, ok := executionContext["executionContract"]; ok && value != nil {
 		pkg["executionContract"] = cloneLLMContextValue(value)
@@ -655,7 +657,7 @@ func (o *RuntimeOrchestrator) currentGovernanceHistoryForLLMInput(ctx context.Co
 	if len(history) == 0 {
 		return nil
 	}
-	return redactSensitiveMapSlice(limitedMapSlice(history, 6))
+	return compactGovernanceHistoryForRuntimeContext(history, 6)
 }
 
 func redactSensitiveMapSlice(input []map[string]any) []map[string]any {

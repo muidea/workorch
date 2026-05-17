@@ -1300,6 +1300,19 @@ func missingGoalCoverageFromFailureOutput(output map[string]any) []map[string]an
 	return ret
 }
 
+func missingDeliverableCoverageFromFailureOutput(output map[string]any) []map[string]any {
+	diagnostics := mapFromValue(output["runtimeDiagnostics"])
+	items := mapSliceFromValue(diagnostics["missingDeliverableCoverage"])
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, cloneStepPayload(item))
+	}
+	return ret
+}
+
 func missingGoalCoverageFromStep(step *runModel.Step) []map[string]any {
 	if step == nil {
 		return nil
@@ -1747,12 +1760,19 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"Do not return executionGraph, shellCommands, patchRequests, mcpToolCalls, memoryWrites, or other executable work.",
 			"Preserve every still-valid DoD item assessment and add any missing DoD items exactly as listed in missingDoDItems.",
 			"Add one independent dodAssessment.goalCoverage.items entry for every missingGoalCoverage entry; copy its goalRequirementId when present and cover the exact raw requirement without merging multiple missing entries into a broader item.",
+			"Add one independent dodAssessment.deliverableCoverage.items entry for every missingDeliverableCoverage entry or required deliverableExpectation id; each satisfied entry must copy the exact id and cite evidenceRefs or artifactRefs.",
 			"Treat evidenceCandidates as neutral candidates, not automatic proof; use them only when their concrete output supports the exact Goal requirement.",
 			"Each satisfied dodAssessment.goalCoverage item must cite concrete evidenceRefs from the candidate evidence or other available evidence.",
 			"If evidence does not support a Goal or DoD item, mark it failed/skipped with reason, residualRisks, and nextActions instead of claiming satisfaction.",
 		}
 		if missingGoalCoverage := missingGoalCoverageFromStep(failedStep); len(missingGoalCoverage) > 0 {
 			input["missingGoalCoverage"] = o.missingGoalCoverageWithEvidenceCandidates(ctx, run, failedStep, missingGoalCoverage)
+		}
+		if missingDeliverableCoverage := missingDeliverableCoverageFromFailureOutput(failedStep.Output); len(missingDeliverableCoverage) > 0 {
+			input["missingDeliverableCoverage"] = missingDeliverableCoverage
+		}
+		if requiredDeliverables := requiredProfileDeliverableExpectations(run); len(requiredDeliverables) > 0 {
+			input["requiredDeliverableCoverage"] = requiredDeliverables
 		}
 	}
 	transientExecutionTimeout := runtimeRepairFailureIsTransientExecutionTimeout(failedStep, execErr)
@@ -1768,6 +1788,13 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	}
 	if missingDoD := missingDoDItemsFromFailureOutput(failedStep.Output); len(missingDoD) > 0 {
 		input["missingDoDItems"] = missingDoD
+	}
+	if boolValue(input["stateChangingOutputRequired"]) &&
+		(len(mapSliceFromValue(input["missingDoDItems"])) > 0 || len(missingGoalCoverageFromInput(input)) > 0) {
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"When missingDoDItems or missingGoalCoverage are present, at least one patch/apply node must declare coverageTargets and each entry must match the exact missing DoD item text or goalRequirementId/item it is intended to close.",
+			"Do not return a generic skeleton patch. If a patch cannot be tied to a concrete missing coverage target, return a failed dodAssessment or blocker instead.",
+		)
 	}
 	class, signature := runtimeRepairScopeClassAndSignature(failedStep)
 	if class != "" {
@@ -1821,9 +1848,12 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"When the failure is a diff context mismatch or file/edit oldText conflict, do not retry the same stale hunk or oldText; rebuild the smallest patch from patchRepairContext.content/contentHash.",
 			"When using baseHash, copy the literal contentHash value from the current target snapshot; never output unresolved references such as ${...}, {{...}}, or symbolic placeholders.",
 			"Use complete patch/apply file_write only when the current snapshot is marked safeForFileWrite/contentComplete and contains no redaction markers; otherwise use a minimal unified_diff with exact visible context, file/edit with exact oldText, or first read the target.",
-			"Never copy [REDACTED], [SECRET], [MASKED], omitted sections, or truncated snapshot text into patch/apply content or diff.",
+			"Never copy runtime redaction marker tokens, omitted sections, or truncated snapshot text into patch/apply content or diff.",
+			"If a previous patch was rejected for redacted runtime markers, discard that diff entirely and rebuild from current unredacted file/read or patchRepairContext content; do not transform redacted marker text into source content.",
 			"If patchRepairSuggestions are present, prefer their exact oldText/newText replacement evidence to construct the smallest current unified_diff or file/edit repair.",
+			"If patch application failed because of malformed unified_diff syntax, return either a complete standard unified diff with explicit line ranges such as @@ -12,3 +12,4 @@, or use file/edit with exact oldText/newText from the current snapshot.",
 			"Before adding new target content, reconcile the current snapshot and modify an existing equivalent item instead of creating duplicate named artifacts.",
+			"When patching files that reference existing code symbols, patch against names that already exist in current workspace resources unless the Goal explicitly requires introducing a new definition.",
 			"If the current target snapshot proves the failed patch is no longer required, return a bounded verification evidence graph instead of another patch; do not use read-only inspection as the only evidence.",
 		)
 	}
@@ -1834,6 +1864,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"Use failureTargetRepairContext as the current snapshot for targets identified by the failed evidence.",
 			"When failed evidence points at a concrete target resource, generate the smallest auditable patch/apply state change against that current snapshot before rerunning verification.",
 			"Use workspaceFileManifest to reconcile target resources with other known workspace resources; avoid replacing unrelated existing artifacts just to satisfy one failure target.",
+			"When a failure mentions missing symbols, unknown fields, constructor names, schema keys, or interface members, do not invent new names in the target patch; first reconcile the target with currently visible definitions from the relevant existing resource, or read the defining resource before patching.",
 		)
 	}
 	if shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep) || len(targetContext) > 0 || len(patchContext) > 0 {
@@ -1902,6 +1933,7 @@ func stateChangingRepairGuidance() []string {
 		"When repair target snapshots or failure target scope are present, patch/apply must target that failure scope or current repair snapshot; unrelated marker/no-op patches are invalid.",
 		"When a workspace already contains known resources, reconcile the repair with those existing resources and prefer the smallest coherent state change over broad replacement.",
 		"When repair context contains redacted or truncated content, do not copy it into patch/apply; first read the target or produce a minimal exact diff from visible current evidence.",
+		"When fixing failures caused by missing symbols, unknown fields, constructor names, schema keys, or interface members, patch against names that already exist in current workspace resources unless the Goal explicitly requires creating the missing definition.",
 		"Do not return self-inspection, run snapshot, observability, or context rehydration graphs when effective Goal and DoD are already present.",
 		"If a target file is missing in an empty or new workspace, create it with patch/apply file_write instead of reading it again.",
 		"Do not use placeholders such as __FROM_PREVIOUS_STEP_OUTPUT__, <<...>>, ${...}, or {{...}} in patch fields; use concrete literal values or omit optional fields.",
@@ -2040,6 +2072,9 @@ func repairActionTargetSnapshots(input map[string]any) []map[string]any {
 	if len(ret) < maxLLMContextSliceItems {
 		add(mapSliceFromValue(input["patchRepairContext"]), "patch_target")
 	}
+	if len(ret) < maxLLMContextSliceItems {
+		add(mapSliceFromValue(input["targetSnapshots"]), "lineage_target")
+	}
 	if len(ret) == 0 {
 		return nil
 	}
@@ -2131,8 +2166,23 @@ func compactStateChangingRecoveryFailureOutput(output map[string]any) map[string
 	if diagnostics := mapFromValue(output["streamDiagnostics"]); len(diagnostics) > 0 {
 		ret["streamDiagnostics"] = compactLLMContextMap(diagnostics, 0)
 	}
-	if preview := streamEventsPreview(mapSliceFromValue(output["streamEvents"]), 1200); preview != "" {
-		ret["partialOutputPreview"] = preview
+	if llmDecisionInvalidOutput(output) {
+		if _, ok := output["rawContentPreview"]; ok {
+			ret["rawContentPreviewOmitted"] = true
+		}
+		if _, ok := output["repairRawContentPreview"]; ok {
+			ret["repairRawContentPreviewOmitted"] = true
+		}
+		if len(mapSliceFromValue(output["streamEvents"])) > 0 {
+			ret["streamEventsOmitted"] = true
+		}
+		if ret["rawContentPreviewOmitted"] == true ||
+			ret["repairRawContentPreviewOmitted"] == true ||
+			ret["streamEventsOmitted"] == true {
+			ret["omittedContentReason"] = "invalid or rejected LLM decision content is not reusable repair input; rebuild from current context, target snapshots, or fresh reads"
+		}
+	} else if preview := streamEventsPreview(mapSliceFromValue(output["streamEvents"]), 1200); preview != "" {
+		ret["partialOutputPreview"] = compactLLMContextString(preview)
 	}
 	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
 		ret["rejectedExecutionGraph"] = rejectedGraphSummary(graph)

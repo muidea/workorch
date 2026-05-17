@@ -91,6 +91,7 @@ const (
 	eventRecordSegmentMaxBytes        = 8 * 1024 * 1024
 	eventRecordSegmentPrefix          = "events-"
 	eventRecordSegmentSuffix          = ".jsonl"
+	eventRecordPayloadRefKey          = "payloadRef"
 )
 
 type eventRecordLogLine struct {
@@ -959,6 +960,9 @@ func (r *EventRecordRepository) Get(_ context.Context, id common.EventRecordID) 
 	if found == nil {
 		return nil, common.ErrNotFound
 	}
+	if err := r.hydrateEventRecordPayload(found); err != nil {
+		return nil, err
+	}
 	return found, nil
 }
 
@@ -980,7 +984,13 @@ func (r *EventRecordRepository) List(_ context.Context, query repository.EventRe
 	}); err != nil {
 		return nil, err
 	}
-	return listEventRecords(items, query), nil
+	ret := listEventRecords(items, query)
+	for _, item := range ret {
+		if err := r.hydrateEventRecordPayload(item); err != nil {
+			return nil, err
+		}
+	}
+	return ret, nil
 }
 
 func (r *EventRecordRepository) Delete(_ context.Context, id common.EventRecordID) error {
@@ -1199,17 +1209,29 @@ func (r *EventRecordRepository) scanEventRecordSegment(path string, fn func(*eve
 		}
 		item := cloneEventRecord(&recordLine.Record)
 		if recordLine.PayloadRef != "" {
-			payload, err := r.readEventPayload(recordLine.PayloadRef)
-			if err != nil {
-				return err
-			}
-			item.Payload = payload
+			item.Payload = map[string]any{eventRecordPayloadRefKey: recordLine.PayloadRef}
 		}
 		if err := fn(item); err != nil {
 			return err
 		}
 	}
 	return scanner.Err()
+}
+
+func (r *EventRecordRepository) hydrateEventRecordPayload(item *eventstream.EventRecord) error {
+	if item == nil || len(item.Payload) == 0 {
+		return nil
+	}
+	ref, _ := item.Payload[eventRecordPayloadRefKey].(string)
+	if strings.TrimSpace(ref) == "" {
+		return nil
+	}
+	payload, err := r.readEventPayload(ref)
+	if err != nil {
+		return err
+	}
+	item.Payload = payload
+	return nil
 }
 
 func (r *EventRecordRepository) readEventPayload(ref string) (map[string]any, error) {

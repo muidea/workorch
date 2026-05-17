@@ -153,7 +153,6 @@ func shouldPersistRuntimeMemoryWrite(request runtimeMemoryWriteRequest) bool {
 	case memorycommon.MemoryTypeUserPreference:
 		return true
 	case memorycommon.MemoryTypeDoDFeedback,
-		memorycommon.MemoryTypeDecision,
 		memorycommon.MemoryTypeExecutionLesson,
 		memorycommon.MemoryTypeSkillFeedback,
 		memorycommon.MemoryTypeToolFeedback:

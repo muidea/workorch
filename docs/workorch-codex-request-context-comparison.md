@@ -257,6 +257,13 @@ Codex stores streaming responses separately. WorkOrch should do the same:
 
 Read models should default to summary views and load raw content only on demand.
 
+Governance and replan continuity should follow the same pattern. Historical
+tickets/resolutions are useful only as accepted decisions and failure lineage;
+they should carry compact failure summaries and refs, not old step inputs,
+target content, raw LLM previews, stream events, or provider/model bindings.
+Runtime ToolCall records should also point at step input/output refs instead of
+copying the complete step payload into `arguments.json` and `output.json`.
+
 ### 9. Storage Layout Alignment
 
 To support the context model above, runtime persistence should stop rewriting large JSON maps.

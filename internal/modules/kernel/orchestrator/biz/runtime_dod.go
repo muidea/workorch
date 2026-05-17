@@ -656,7 +656,7 @@ func validateDoDAssessmentCoversRequiredDeliverables(run *runModel.Run, assessme
 	if len(missing) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%w: dodAssessment.deliverableCoverage missing required deliverables: %s", common.ErrInvalidArgument, strings.Join(missing, ", "))
+	return newDeliverableCoverageMissingError(missing)
 }
 
 func requiredProfileDeliverableExpectations(run *runModel.Run) []string {
@@ -884,6 +884,11 @@ type goalCoverageMissingError struct {
 	missing []normalizedDoDItem
 }
 
+type deliverableCoverageMissingError struct {
+	cause   error
+	missing []string
+}
+
 func newGoalCoverageContractError(cause error, missing []normalizedDoDItem) error {
 	if cause == nil {
 		return newGoalCoverageMissingError(missing)
@@ -980,6 +985,56 @@ func (e *goalCoverageMissingError) RuntimeFailureDiagnostics() map[string]any {
 	return map[string]any{
 		"kind":                failureClassDoDCoverageMissing,
 		"missingGoalCoverage": missingDoDItemDiagnostics(e.missing),
+	}
+}
+
+func newDeliverableCoverageMissingError(missing []string) error {
+	items := make([]string, 0, len(missing))
+	for _, item := range missing {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			items = append(items, item)
+		}
+	}
+	return &deliverableCoverageMissingError{
+		cause:   fmt.Errorf("%w: dodAssessment.deliverableCoverage missing required deliverables: %s", common.ErrInvalidArgument, strings.Join(items, ", ")),
+		missing: items,
+	}
+}
+
+func (e *deliverableCoverageMissingError) Error() string {
+	if e == nil || e.cause == nil {
+		return ""
+	}
+	return e.cause.Error()
+}
+
+func (e *deliverableCoverageMissingError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+func (e *deliverableCoverageMissingError) RuntimeFailureDiagnostics() map[string]any {
+	if e == nil {
+		return nil
+	}
+	items := make([]map[string]any, 0, len(e.missing))
+	for _, id := range e.missing {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		items = append(items, map[string]any{
+			"id":    id,
+			"kind":  "deliverableExpectation",
+			"state": "missing",
+		})
+	}
+	return map[string]any{
+		"kind":                       failureClassDoDCoverageMissing,
+		"missingDeliverableCoverage": items,
 	}
 }
 

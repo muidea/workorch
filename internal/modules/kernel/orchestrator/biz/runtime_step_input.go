@@ -281,14 +281,18 @@ func slimExecutionContextForStepInput(executionContext map[string]any) map[strin
 	}
 	for _, key := range []string{
 		"compressedContext",
-		"replanContinuation",
-		"governanceHistory",
 		"soul",
 		"soulRouting",
 	} {
 		if value, ok := executionContext[key]; ok && value != nil {
 			ret[key] = compactLLMContextValue(value, 1)
 		}
+	}
+	if value := mapFromValue(executionContext["replanContinuation"]); len(value) > 0 {
+		ret["replanContinuation"] = compactReplanContinuationForRuntimeContext(value)
+	}
+	if value := mapSliceFromValue(executionContext["governanceHistory"]); len(value) > 0 {
+		ret["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(value, 6)
 	}
 	return ret
 }

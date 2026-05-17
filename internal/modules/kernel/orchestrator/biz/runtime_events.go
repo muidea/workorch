@@ -316,7 +316,7 @@ func (o *RuntimeOrchestrator) publishStepState(ctx context.Context, run *runMode
 		WorkspaceID:  string(run.WorkspaceID),
 		RunID:        string(run.ID),
 		StepID:       string(step.ID),
-		Payload:      events.StepPayload(step.Kind, step.State, step.Input, step.Output),
+		Payload:      events.StepPayload(step.Kind, step.State, runtimeStepEventInput(run, step), runtimeStepEventOutput(run, step)),
 	}); err != nil {
 		return err
 	}
@@ -329,6 +329,32 @@ func (o *RuntimeOrchestrator) publishStepState(ctx context.Context, run *runMode
 		}
 	}
 	return nil
+}
+
+func runtimeStepEventInput(run *runModel.Run, step *runModel.Step) map[string]any {
+	if run == nil || step == nil {
+		return nil
+	}
+	ret := map[string]any{
+		"inputRef": runtimeRawPayloadRef(run.WorkspaceID, run.ID, "steps", string(step.ID), "input.json"),
+	}
+	if summary := compactStepInputForLLMContext(step.Input); len(summary) > 0 {
+		ret["summary"] = summary
+	}
+	return ret
+}
+
+func runtimeStepEventOutput(run *runModel.Run, step *runModel.Step) map[string]any {
+	if run == nil || step == nil || len(step.Output) == 0 {
+		return nil
+	}
+	ret := map[string]any{
+		"outputRef": runtimeRawPayloadRef(run.WorkspaceID, run.ID, "steps", string(step.ID), "output.json"),
+	}
+	if summary := compactStepOutputForLLMContext(step.Output); len(summary) > 0 {
+		ret["summary"] = summary
+	}
+	return ret
 }
 
 func (o *RuntimeOrchestrator) publishLLMStreamProgressFromStep(ctx context.Context, run *runModel.Run, step *runModel.Step) error {

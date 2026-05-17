@@ -119,6 +119,52 @@ func TestServiceRejectsMemoryTypeNotAllowedForSource(t *testing.T) {
 	}
 }
 
+func TestServiceRejectsRunSourceDecisionMemory(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(backend.NewMemoryItemRepository())
+
+	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryItemCommand{
+		MemoryID:    common.MemoryID("memory-run-decision-invalid"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		RunID:       common.RunID("run-1"),
+		SourceType:  modulecommon.MemorySourceRun,
+		SourceRef:   "run-1",
+		MemoryType:  modulecommon.MemoryTypeDecision,
+		Summary:     "single approval raw text",
+		Content:     "approval transcript",
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("create run decision memory err = %v, want invalid argument", err)
+	}
+}
+
+func TestServiceAllowsDecisionSourceDecisionMemory(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(backend.NewMemoryItemRepository())
+
+	cmd := memoryservice.CreateMemoryItemCommand{
+		MemoryID:    common.MemoryID("memory-decision"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		RunID:       common.RunID("run-1"),
+		SourceType:  modulecommon.MemorySourceDecision,
+		SourceRef:   "ticket-1",
+		MemoryType:  modulecommon.MemoryTypeDecision,
+		Summary:     "operator selected the safe retry path",
+		Content:     "Decision ticket ticket-1 was resolved with safe retry.",
+	}
+	if err := service.CreateMemoryItem(ctx, cmd); err != nil {
+		t.Fatalf("create decision source memory: %v", err)
+	}
+
+	items, err := service.ListMemoryByWorkspace(ctx, cmd.WorkspaceID)
+	if err != nil {
+		t.Fatalf("list memory: %v", err)
+	}
+	if len(items) != 1 || items[0].SourceType != modulecommon.MemorySourceDecision || items[0].MemoryType != modulecommon.MemoryTypeDecision {
+		t.Fatalf("memory items = %+v, want decision source decision memory", items)
+	}
+}
+
 func TestServiceRejectsSensitiveMemoryText(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(backend.NewMemoryItemRepository())

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -20,7 +21,7 @@ func (o *RuntimeOrchestrator) recordToolCallStarted(ctx context.Context, run *ru
 		RunID:       run.ID,
 		StepID:      step.ID,
 		ToolName:    step.Kind,
-		Arguments:   cloneStepPayload(step.Input),
+		Arguments:   runtimeToolCallArguments(run, step),
 		State:       common.ToolCallStateRunning,
 		StartedAt:   now,
 	}
@@ -85,7 +86,7 @@ func (o *RuntimeOrchestrator) recordToolCallCompleted(ctx context.Context, toolC
 	toolCall.State = common.ToolCallStateCompleted
 	toolCall.EndedAt = runtimeEvidenceTimestamp()
 	toolCall.ExitSummary = localizedStepCompletionSummary(dialogLanguage)
-	toolCall.Output = cloneStepPayload(output)
+	toolCall.Output = runtimeToolCallOutput(toolCall, output)
 	toolCall.Error = ""
 	if err := o.evidence.ToolCalls.Update(ctx, toolCall); err != nil {
 		if err == common.ErrNotFound {
@@ -130,7 +131,7 @@ func (o *RuntimeOrchestrator) recordToolCallFailed(ctx context.Context, toolCall
 	toolCall.State = common.ToolCallStateFailed
 	toolCall.EndedAt = runtimeEvidenceTimestamp()
 	toolCall.ExitSummary = "runtime step failed"
-	toolCall.Output = cloneStepPayload(output)
+	toolCall.Output = runtimeToolCallOutput(toolCall, output)
 	if execErr != nil {
 		toolCall.Error = execErr.Error()
 	}
@@ -141,6 +142,53 @@ func (o *RuntimeOrchestrator) recordToolCallFailed(ctx context.Context, toolCall
 		return err
 	}
 	return nil
+}
+
+func runtimeToolCallArguments(run *runModel.Run, step *runModel.Step) map[string]any {
+	if run == nil || step == nil {
+		return nil
+	}
+	ret := map[string]any{
+		"workspaceId": string(run.WorkspaceID),
+		"runId":       string(run.ID),
+		"stepId":      string(step.ID),
+		"stepKind":    step.Kind,
+		"inputRef":    runtimeRawPayloadRef(run.WorkspaceID, run.ID, "steps", string(step.ID), "input.json"),
+	}
+	if summary := compactStepInputForLLMContext(step.Input); len(summary) > 0 {
+		ret["inputSummary"] = summary
+	}
+	return ret
+}
+
+func runtimeToolCallOutput(toolCall *runModel.ToolCall, output map[string]any) map[string]any {
+	if toolCall == nil {
+		return compactStepOutputForLLMContext(output)
+	}
+	ret := map[string]any{
+		"workspaceId": string(toolCall.WorkspaceID),
+		"runId":       string(toolCall.RunID),
+		"stepId":      string(toolCall.StepID),
+		"toolCallId":  string(toolCall.ID),
+		"outputRef":   runtimeRawPayloadRef(toolCall.WorkspaceID, toolCall.RunID, "steps", string(toolCall.StepID), "output.json"),
+	}
+	if summary := compactStepOutputForLLMContext(output); len(summary) > 0 {
+		for key, value := range summary {
+			ret[key] = value
+		}
+	}
+	return ret
+}
+
+func runtimeRawPayloadRef(workspaceID common.WorkspaceID, runID common.RunID, collection string, itemPath string, fileName string) string {
+	return fmt.Sprintf(
+		"workorch://workspaces/%s/runs/%s/%s/%s/%s",
+		workspaceID,
+		runID,
+		collection,
+		strings.Trim(strings.TrimSpace(itemPath), "/"),
+		strings.TrimSpace(fileName),
+	)
 }
 
 func (o *RuntimeOrchestrator) recordValidationResult(

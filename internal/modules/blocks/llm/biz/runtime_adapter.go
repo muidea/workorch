@@ -2668,6 +2668,12 @@ func doDAssessmentOutput(assessment *llmmodels.DoDAssessment) map[string]any {
 	if assessment.GoalCoverage != nil {
 		ret["goalCoverage"] = doDCoverageOutput(assessment.GoalCoverage)
 	}
+	if assessment.AcceptanceDimensions != nil {
+		ret["acceptanceDimensions"] = doDCoverageOutput(assessment.AcceptanceDimensions)
+	}
+	if assessment.DeliverableCoverage != nil {
+		ret["deliverableCoverage"] = doDCoverageOutput(assessment.DeliverableCoverage)
+	}
 	return ret
 }
 
@@ -2682,6 +2688,10 @@ func doDCoverageOutput(coverage *llmmodels.DoDCoverage) map[string]any {
 			"evidenceRefs": append([]string(nil), item.EvidenceRefs...),
 		}
 		for key, value := range map[string]string{
+			"id":          item.ID,
+			"deliverable": item.Deliverable,
+			"name":        item.Name,
+			"path":        item.Path,
 			"goal":        item.Goal,
 			"goalItem":    item.GoalItem,
 			"item":        item.Item,
@@ -2692,6 +2702,9 @@ func doDCoverageOutput(coverage *llmmodels.DoDCoverage) map[string]any {
 			if strings.TrimSpace(value) != "" {
 				entry[key] = value
 			}
+		}
+		if len(item.ArtifactRefs) > 0 {
+			entry["artifactRefs"] = append([]string(nil), item.ArtifactRefs...)
 		}
 		items = append(items, entry)
 	}

@@ -1903,7 +1903,7 @@ func TestApplyWorkspacePatchRejectsBaseHashMismatch(t *testing.T) {
 	}
 }
 
-func TestApplyWorkspacePatchAcceptsRangeLessUnifiedDiff(t *testing.T) {
+func TestApplyWorkspacePatchRejectsRangeLessStandardUnifiedDiff(t *testing.T) {
 	deliverableDirectory := t.TempDir()
 	target := filepath.Join(deliverableDirectory, "docs", "sample.txt")
 	original := "alpha\n\nsection one\nold value\nend section\n\nomega\n"
@@ -1919,15 +1919,15 @@ func TestApplyWorkspacePatchAcceptsRangeLessUnifiedDiff(t *testing.T) {
 		PatchType: "unified_diff",
 		Diff:      "--- a/docs/sample.txt\n+++ b/docs/sample.txt\n@@\n section one\n-old value\n+new value\n end section\n",
 	})
-	if err != nil {
-		t.Fatalf("applyWorkspacePatch range-less diff err = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "explicit line ranges") {
+		t.Fatalf("applyWorkspacePatch range-less standard diff err = %v, want explicit line range rejection", err)
 	}
 	content, readErr := os.ReadFile(target)
 	if readErr != nil {
 		t.Fatalf("read target: %v", readErr)
 	}
-	if !strings.Contains(string(content), "new value") || strings.Contains(string(content), "old value") {
-		t.Fatalf("content = %q, want range-less diff applied", string(content))
+	if string(content) != original {
+		t.Fatalf("content = %q, want unchanged", string(content))
 	}
 }
 
@@ -2791,7 +2791,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *te
 		t.Fatalf("patchRepairContext safety = %#v, want complete safe snapshot", item)
 	}
 	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
-	for _, want := range []string{"patchRepairContext", "failed patch text as stale", "safeForFileWrite", "minimal unified_diff", "Never copy [REDACTED]"} {
+	for _, want := range []string{"patchRepairContext", "failed patch text as stale", "safeForFileWrite", "minimal unified_diff", "runtime redaction marker tokens"} {
 		if !strings.Contains(guidance, want) {
 			t.Fatalf("repairGuidance = %q, want %q", guidance, want)
 		}
@@ -2952,6 +2952,60 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesLineRemovalPatchSuggestio
 	}
 	if !found {
 		t.Fatalf("patchRepairSuggestions = %#v, want exact import line removal suggestion", input["patchRepairSuggestions"])
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairInputIncludesMalformedDiffAndMissingSymbolGuidance(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main.go"), []byte("package main\n\ntype Gateway struct{}\n"), 0o644); err != nil {
+		t.Fatalf("seed main.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main_test.go"), []byte("package main\n\nfunc makeApp() *App { return nil }\n"), 0o644); err != nil {
+		t.Fatalf("seed main_test.go: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-repair-guidance-symbols")
+	runID := common.RunID("run-repair-guidance-symbols")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-006/002-run-go-test-after-patch"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"status":                  "failed",
+			"stage":                   "patch_apply",
+			"stderr":                  "./main_test.go:16:7: undefined: NewGateway\n./main_test.go:18:4: unknown field ListenPort in struct literal of type Config\n",
+			"error":                   "invalid argument: patch diff contains redacted runtime markers",
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|failureTargets=main_test.go|error=invalid argument: patch diff contains redacted runtime markers",
+			"failedStepOutput": map[string]any{
+				"stage": "patch_apply",
+				"error": "invalid argument: patch diff contains redacted runtime markers",
+				"patches": []map[string]any{{
+					"patchType": "unified_diff",
+					"targetRef": "main_test.go",
+					"diff":      "--- a/main_test.go\n+++ b/main_test.go\n@@\n-func makeApp() *App { return nil }\n+func makeApp() *Gateway { return [REDACTED] }\n",
+				}},
+			},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 1, common.ErrInvalidArgument)
+	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
+	for _, want := range []string{
+		"discard that diff entirely",
+		"explicit line ranges such as @@ -12,3 +12,4 @@",
+		"do not invent new names",
+		"patch against names that already exist",
+	} {
+		if !strings.Contains(guidance, want) {
+			t.Fatalf("repairGuidance = %q, want %q", guidance, want)
+		}
 	}
 }
 
@@ -4028,6 +4082,204 @@ func TestCompactLLMContextDropsHeavyTransportFields(t *testing.T) {
 	}
 	if _, ok := nested["failedStepInput"]; ok {
 		t.Fatalf("nested failedStepInput should be dropped")
+	}
+}
+
+func TestRuntimeContextLineageCompactionDropsRawFailureArtifacts(t *testing.T) {
+	rawContent := "package main\nconst apiKey = \"[REDACTED]\"\n"
+	continuation := compactReplanContinuationForRuntimeContext(map[string]any{
+		"predecessorRunId": "run-before",
+		"reason":           "decision_replan",
+		"ticketContext": map[string]any{
+			"failureClass":     failureClassRuntime,
+			"failureSignature": "class=runtime_failed|kind=llm/workspace_execution|failureTargets=main.go",
+			"failedStepInput": map[string]any{
+				"executionContext": map[string]any{"large": strings.Repeat("x", 4096)},
+			},
+			"failureTargetRepairContext": []map[string]any{{
+				"targetRef":        "main.go",
+				"contentHash":      "hash-main",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"content":          rawContent,
+			}},
+			"failedStepOutput": map[string]any{
+				"stage":             "llm_schema_invalid",
+				"rawContentPreview": `{"diff":"[REDACTED]"}`,
+				"streamEvents": []map[string]any{{
+					"delta": `{"content":"[REDACTED]"}`,
+				}},
+			},
+		},
+	})
+	encoded, err := json.Marshal(continuation)
+	if err != nil {
+		t.Fatalf("marshal compact continuation: %v", err)
+	}
+	text := string(encoded)
+	if strings.Contains(text, rawContent) || strings.Contains(text, "failedStepInput") || strings.Contains(text, "[REDACTED]") {
+		t.Fatalf("compact continuation retained raw failure artifacts: %s", text)
+	}
+	ticketContext := mapFromValue(continuation["ticketContext"])
+	targets := mapSliceFromValue(ticketContext["targetSnapshots"])
+	if len(targets) != 1 || targets[0]["targetRef"] != "main.go" || targets[0]["content"] != nil {
+		t.Fatalf("targetSnapshots = %#v, want metadata-only lineage target", ticketContext["targetSnapshots"])
+	}
+	failedOutput := mapFromValue(ticketContext["failedStepOutput"])
+	if failedOutput["rawContentPreviewOmitted"] != true || failedOutput["streamEventsOmitted"] != true {
+		t.Fatalf("failedStepOutput = %#v, want invalid LLM raw content omitted", failedOutput)
+	}
+}
+
+func TestRuntimeEvidenceAndStepEventsUseRawRefsInsteadOfDuplicatingFullPayloads(t *testing.T) {
+	run := &runmodel.Run{ID: "run-ref-evidence", WorkspaceID: "ws-ref-evidence"}
+	step := &runmodel.Step{
+		ID:    "run-ref-evidence/repair-001-of-planning-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"executionContext": map[string]any{
+				"governanceHistory": []map[string]any{{
+					"ticketContext": map[string]any{"failedStepInput": map[string]any{"large": strings.Repeat("x", 64*1024)}},
+				}},
+			},
+			"repairActionPackage": map[string]any{
+				"targetSnapshots": []map[string]any{{"targetRef": "main.go", "content": "package main\n"}},
+			},
+		},
+		Output: map[string]any{
+			"status": "failed",
+			"stderr": strings.Repeat("compile error\n", 4096),
+		},
+	}
+
+	args := runtimeToolCallArguments(run, step)
+	eventInput := runtimeStepEventInput(run, step)
+	eventOutput := runtimeStepEventOutput(run, step)
+
+	encoded, err := json.Marshal(map[string]any{
+		"args":        args,
+		"eventInput":  eventInput,
+		"eventOutput": eventOutput,
+	})
+	if err != nil {
+		t.Fatalf("marshal compact evidence payloads: %v", err)
+	}
+	text := string(encoded)
+	if strings.Contains(text, strings.Repeat("x", 1024)) || strings.Contains(text, "compile error\ncompile error\ncompile error\ncompile error\n") {
+		t.Fatalf("compact evidence payloads retained raw heavy data: %s", text)
+	}
+	if args["inputRef"] == "" || eventInput["inputRef"] == "" || eventOutput["outputRef"] == "" {
+		t.Fatalf("refs missing: args=%+v eventInput=%+v eventOutput=%+v", args, eventInput, eventOutput)
+	}
+}
+
+func TestCompactStepOutputForLLMContextOmitsRedactedRejectedPatchFragments(t *testing.T) {
+	output := compactStepOutputForLLMContext(map[string]any{
+		"status":            "failed",
+		"error":             "invalid argument: patch diff contains redacted runtime markers",
+		"rawContentPreview": `{"patches":[{"targetRef":"main.go","diff":"@@ -1 +1 @@\n+token [REDACTED]"}]}`,
+		"patchRequests": []map[string]any{{
+			"targetRef": "main.go",
+			"patchType": "file_write",
+			"content":   "package main\nconst token = \"[REDACTED]\"\n",
+		}},
+		"llmDecision": map[string]any{
+			stepOutputKeyExecutionGraph: map[string]any{
+				"nodes": []map[string]any{{
+					"id":   "patch",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef": "main.go",
+						"patchType": "unified_diff",
+						"diff":      "--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n+token [REDACTED]\n",
+					},
+				}},
+			},
+		},
+	})
+
+	encoded, err := json.Marshal(output)
+	if err != nil {
+		t.Fatalf("marshal compact output: %v", err)
+	}
+	if strings.Contains(string(encoded), "[REDACTED]") {
+		t.Fatalf("compact output still exposes redacted marker: %s", encoded)
+	}
+	if omitted := mapFromValue(output["rawContentPreview"]); omitted["omitted"] != true || omitted["containedRuntimeRedactionMarker"] != true {
+		t.Fatalf("rawContentPreview = %#v, want omitted redacted content summary", output["rawContentPreview"])
+	}
+	requests, _ := output["patchRequests"].([]any)
+	if len(requests) != 1 {
+		t.Fatalf("patchRequests = %#v, want one compact request", output["patchRequests"])
+	}
+	request := mapFromValue(requests[0])
+	if request["targetRef"] != "main.go" || mapFromValue(request["content"])["omitted"] != true {
+		t.Fatalf("patchRequests[0] = %#v, want target preserved and content omitted", request)
+	}
+}
+
+func TestRuntimeRepairInputOmitsInvalidLLMRawContentFromRepairContext(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-invalid-llm-redacted")
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/planning-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"stateChangingOutputRequired": true,
+		},
+		Output: map[string]any{
+			"stage":               "llm_schema_invalid",
+			"status":              "failed",
+			"error":               "invalid character '}' after array element",
+			failureOutputKeyClass: failureClassLLMDecisionInvalid,
+			"rawContentPreview":   `{"executionGraph":{"nodes":[{"kind":"patch/apply","input":{"diff":"@@ -1 +1 @@\n+[REDACTED]"}}]}}`,
+			"streamEvents": []map[string]any{{
+				"delta": `{"patches":[{"content":"[REDACTED]"}]}`,
+			}},
+			"streamDiagnostics": map[string]any{
+				"doneReceived":     true,
+				"streamIncomplete": false,
+			},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-invalid-llm-redacted"}, failedStep, 1, common.ErrInvalidArgument)
+
+	for _, key := range []string{"failedStepOutput", "previousStepOutput"} {
+		encoded, err := json.Marshal(input[key])
+		if err != nil {
+			t.Fatalf("marshal %s: %v", key, err)
+		}
+		if strings.Contains(string(encoded), "[REDACTED]") {
+			t.Fatalf("%s still exposes redacted marker: %s", key, encoded)
+		}
+		summary := mapFromValue(input[key])
+		if summary["rawContentPreviewOmitted"] != true || summary["streamEventsOmitted"] != true {
+			t.Fatalf("%s = %#v, want raw content and stream events omitted", key, input[key])
+		}
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	summary := mapFromValue(actionPackage["previousRejectedOutputSummary"])
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatalf("marshal previousRejectedOutputSummary: %v", err)
+	}
+	if strings.Contains(string(encoded), "[REDACTED]") {
+		t.Fatalf("previousRejectedOutputSummary still exposes redacted marker: %s", encoded)
+	}
+	if summary["rawContentPreviewOmitted"] != true || summary["streamEventsOmitted"] != true {
+		t.Fatalf("previousRejectedOutputSummary = %#v, want invalid content omitted", summary)
+	}
+	if _, ok := summary["partialOutputPreview"]; ok {
+		t.Fatalf("previousRejectedOutputSummary.partialOutputPreview should be omitted for invalid LLM decisions")
 	}
 }
 
@@ -9583,12 +9835,12 @@ func TestRuntimeOrchestrator_FiltersDisallowedRuntimeMemoryWrites(t *testing.T) 
 	if err != nil {
 		t.Fatalf("list memory items: %v", err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("memory items = %+v, want decision and project context writes", items)
+	if len(items) != 1 {
+		t.Fatalf("memory items = %+v, want project context write only", items)
 	}
-	if !hasMemoryItem(items, runID, memorycommon.MemoryTypeDecision, "approval transcript") ||
+	if hasMemoryItem(items, runID, memorycommon.MemoryTypeDecision, "approval transcript") ||
 		!hasMemoryItem(items, runID, memorycommon.MemoryTypeProjectContext, "confirmed workspace convention") {
-		t.Fatalf("memory items = %+v, want decision and project context only", items)
+		t.Fatalf("memory items = %+v, want decision filtered with project context only", items)
 	}
 }
 
@@ -13649,6 +13901,18 @@ func TestValidatedCompletionDoDAssessmentRejectsMissingRequiredDeliverableCovera
 		!strings.Contains(err.Error(), "deliverableCoverage missing required deliverables: single_binary") {
 		t.Fatalf("validatedCompletionDoDAssessment err = %v, want missing deliverable coverage", err)
 	}
+	var diagnostic runtimeFailureDiagnosticError
+	if !errors.As(err, &diagnostic) {
+		t.Fatalf("validatedCompletionDoDAssessment err = %T, want runtime diagnostics", err)
+	}
+	diagnostics := diagnostic.RuntimeFailureDiagnostics()
+	if diagnostics["kind"] != failureClassDoDCoverageMissing {
+		t.Fatalf("runtimeDiagnostics = %+v, want DoD coverage correction kind", diagnostics)
+	}
+	missing := mapSliceFromValue(diagnostics["missingDeliverableCoverage"])
+	if len(missing) != 1 || missing[0]["id"] != "single_binary" {
+		t.Fatalf("missingDeliverableCoverage = %+v, want single_binary", diagnostics["missingDeliverableCoverage"])
+	}
 }
 
 func TestValidatedCompletionDoDAssessmentAcceptsRequiredDeliverableCoverage(t *testing.T) {
@@ -14143,6 +14407,9 @@ func TestValidateLLMExecutionOutputContractRejectsStateChangingRepairUnrelatedPa
 			"failureTargetRepairContext": []map[string]any{
 				{"targetRef": "main_test.go", "exists": true, "contentHash": "hash-main-test"},
 			},
+			"missingDoDItems": []map[string]any{
+				{"item": "gateway request path is covered", "state": "failed"},
+			},
 		},
 	}
 	output := map[string]any{
@@ -14196,9 +14463,10 @@ func TestValidateLLMExecutionOutputContractAllowsStateChangingRepairRelevantPatc
 				"id":   "repair-main-test",
 				"kind": "patch/apply",
 				"input": map[string]any{
-					"patchType": "unified_diff",
-					"targetRef": "main_test.go",
-					"diff":      "--- a/main_test.go\n+++ b/main_test.go\n@@ -1 +1 @@\n-old\n+new\n",
+					"patchType":       "unified_diff",
+					"targetRef":       "main_test.go",
+					"coverageTargets": []string{"gateway request path is covered"},
+					"diff":            "--- a/main_test.go\n+++ b/main_test.go\n@@ -1 +1 @@\n-old\n+new\n",
 				},
 			}},
 		},
@@ -14206,6 +14474,90 @@ func TestValidateLLMExecutionOutputContractAllowsStateChangingRepairRelevantPatc
 
 	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want relevant repair patch allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsCoverageGapPatchWithoutCoverageTargets(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-coverage-targets",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-coverage-targets/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failureTargetScope":              "failureTargets=main_test.go",
+			"missingDoDItems": []map[string]any{
+				{"item": "gateway request path is covered", "state": "failed"},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "repair-main-test",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "file_write",
+					"targetRef": "main_test.go",
+					"content":   "package main\n",
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "coverageTargets") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want coverage target rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsCoverageGapPatchWithUnmatchedCoverageTargets(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-coverage-target-mismatch",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-coverage-target-mismatch/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"missingGoalCoverage": []map[string]any{
+				{"goalRequirementId": "goal-req-001-neutral", "item": "support transparent gateway forwarding", "state": "failed"},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "repair-main",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType":       "file_write",
+					"targetRef":       "main.go",
+					"content":         "package main\n",
+					"coverageTargets": []string{"unrelated target"},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "coverageTargets") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want coverage target mismatch rejection", err)
 	}
 }
 
@@ -14878,6 +15230,35 @@ func TestValidatePatchStepInputBeforeRuntimeRejectsEllipsisUnifiedDiffHunk(t *te
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "diff contains unresolved runtime template") {
 		t.Fatalf("validatePatchStepInputBeforeRuntime err = %v, want ellipsis hunk placeholder rejection", err)
+	}
+}
+
+func TestValidatePatchStepInputBeforeRuntimeRejectsBareUnifiedDiffHunk(t *testing.T) {
+	err := validatePatchStepInputBeforeRuntime("patch/apply", map[string]any{
+		"patchType": "unified_diff",
+		"targetRef": "main_test.go",
+		"diff":      "--- a/main_test.go\n+++ b/main_test.go\n@@\n-func makeApp(baseURL string) *App {\n+func makeApp(baseURL string) *Gateway {\n",
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "explicit line ranges") {
+		t.Fatalf("validatePatchStepInputBeforeRuntime err = %v, want explicit hunk range rejection", err)
+	}
+	var diagnostic runtimeFailureDiagnosticError
+	if !errors.As(err, &diagnostic) {
+		t.Fatalf("validatePatchStepInputBeforeRuntime err = %T, want diagnostics", err)
+	}
+	diagnostics := diagnostic.RuntimeFailureDiagnostics()
+	if diagnostics["errorDetail"] != "unified_diff_missing_line_ranges" || diagnostics["targetRef"] != "main_test.go" {
+		t.Fatalf("diagnostics = %+v, want missing line range target diagnostic", diagnostics)
+	}
+}
+
+func TestParseSingleFileApplyPatchDiffAllowsBareHunkHeader(t *testing.T) {
+	patch, err := parseSingleFileUnifiedDiff("*** Begin Patch\n*** Update File: main_test.go\n@@\n-func makeApp(baseURL string) *App {\n+func makeApp(baseURL string) *Gateway {\n*** End Patch\n")
+	if err != nil {
+		t.Fatalf("parseSingleFileUnifiedDiff apply patch style err = %v, want allowed", err)
+	}
+	if patch.NewRef != "main_test.go" || len(patch.Hunks) != 1 || patch.Hunks[0].HasOldStart {
+		t.Fatalf("patch = %+v, want apply-patch style bare hunk", patch)
 	}
 }
 
@@ -15735,6 +16116,83 @@ func TestRuntimeRepairInputForSatisfiedDoDCoverageMissingIsAssessmentOnly(t *tes
 		t.Fatalf("missingGoalCoverage = %+v, want stable goalRequirementId", input["missingGoalCoverage"])
 	} else if candidates := mapSliceFromValue(missing[0]["evidenceCandidates"]); len(candidates) == 0 {
 		t.Fatalf("missingGoalCoverage = %+v, want neutral evidence candidates", input["missingGoalCoverage"])
+	}
+}
+
+func TestRuntimeRepairInputForMissingDeliverableCoverageIsAssessmentOnly(t *testing.T) {
+	runID := common.RunID("run-deliverable-coverage-assessment-repair")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-deliverable-coverage-assessment-repair",
+		DoDID:           "dod",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "source_change", "required": true},
+							{"id": "validation_report", "required": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    common.StepID(runID + "/follow-up-graph-test"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"graphFollowUp": true,
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|stage=llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": true,
+				"summary":   "DoD passed but deliverable coverage is missing.",
+				"items": []map[string]any{{
+					"item":         "tests pass",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-deliverable-coverage-assessment-repair/graph-001/003-test"},
+				}},
+			},
+			"runtimeDiagnostics": map[string]any{
+				"kind": failureClassDoDCoverageMissing,
+				"missingDeliverableCoverage": []map[string]any{{
+					"id":    "source_change",
+					"kind":  "deliverableExpectation",
+					"state": "missing",
+				}},
+			},
+		},
+	}
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{},
+		memory.NewRunRepository(),
+		memory.NewStepRepository(),
+		memory.NewWorkspaceRepository(),
+		memory.NewDecisionTicketRepository(),
+		memory.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+
+	input := orch.runtimeRepairFollowUpStepInput(context.Background(), run, step, 1, errors.New("missing deliverable coverage"))
+
+	if input[stepInputKeyAssessmentOnly] != true || input[stepInputKeyRuntimeStage] != runtimeStageVerification || input[stepInputKeySoulStage] != soulStageValidation {
+		t.Fatalf("input = %+v, want assessment-only verification repair", input)
+	}
+	if boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("input = %+v, want no state-changing requirement for deliverable coverage correction", input)
+	}
+	if missing := mapSliceFromValue(input["missingDeliverableCoverage"]); len(missing) != 1 || missing[0]["id"] != "source_change" {
+		t.Fatalf("missingDeliverableCoverage = %+v, want source_change", input["missingDeliverableCoverage"])
+	}
+	if required := stringSliceFromValue(input["requiredDeliverableCoverage"]); !reflect.DeepEqual(required, []string{"source_change", "validation_report"}) {
+		t.Fatalf("requiredDeliverableCoverage = %+v, want profile required deliverables", input["requiredDeliverableCoverage"])
 	}
 }
 

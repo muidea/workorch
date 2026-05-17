@@ -44,6 +44,67 @@ type runtimeFailureDiagnosticError interface {
 	RuntimeFailureDiagnostics() map[string]any
 }
 
+type patchApplyDiagnosticError struct {
+	targetRef   string
+	patchType   string
+	stage       string
+	reason      string
+	inner       error
+	guidance    string
+	errorDetail string
+}
+
+func (e *patchApplyDiagnosticError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if strings.TrimSpace(e.reason) != "" {
+		return e.reason
+	}
+	if e.inner != nil {
+		return e.inner.Error()
+	}
+	return common.ErrInvalidArgument.Error()
+}
+
+func (e *patchApplyDiagnosticError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.inner
+}
+
+func (e *patchApplyDiagnosticError) RuntimeFailureDiagnostics() map[string]any {
+	if e == nil {
+		return nil
+	}
+	ret := map[string]any{
+		"kind":      failureClassPatchApply,
+		"targetRef": strings.TrimSpace(e.targetRef),
+		"patchType": strings.TrimSpace(e.patchType),
+		"stage":     firstNonEmptyString(strings.TrimSpace(e.stage), "patch_apply"),
+	}
+	if detail := strings.TrimSpace(e.errorDetail); detail != "" {
+		ret["errorDetail"] = detail
+	}
+	if guidance := strings.TrimSpace(e.guidance); guidance != "" {
+		ret["guidance"] = guidance
+	}
+	return ret
+}
+
+func newPatchApplyDiagnosticError(targetRef string, patchType string, stage string, inner error, reason string, guidance string, detail string) error {
+	return &patchApplyDiagnosticError{
+		targetRef:   strings.TrimSpace(targetRef),
+		patchType:   strings.TrimSpace(patchType),
+		stage:       strings.TrimSpace(stage),
+		reason:      strings.TrimSpace(reason),
+		inner:       inner,
+		guidance:    strings.TrimSpace(guidance),
+		errorDetail: strings.TrimSpace(detail),
+	}
+}
+
 type workspacePathConflictError struct {
 	Operation    string
 	TargetRef    string
@@ -711,10 +772,18 @@ func applyWorkspaceUnifiedDiff(deliverableDirectory string, targetRef string, di
 	}
 	filePatch, err := parseSingleFileUnifiedDiff(diff)
 	if err != nil {
-		return err
+		return wrapPatchApplyParseError(targetRef, "unified_diff", err)
 	}
 	if !diffTargetMatches(targetRef, filePatch) {
-		return common.ErrInvalidArgument
+		return newPatchApplyDiagnosticError(
+			targetRef,
+			"unified_diff",
+			"patch_apply",
+			common.ErrInvalidArgument,
+			fmt.Sprintf("%s: unified diff target does not match targetRef", common.ErrInvalidArgument),
+			"Regenerate the patch for the current targetRef and keep the diff scoped to exactly one file.",
+			"unified_diff_target_mismatch",
+		)
 	}
 
 	currentContent, err := os.ReadFile(target)
@@ -729,7 +798,7 @@ func applyWorkspaceUnifiedDiff(deliverableDirectory string, targetRef string, di
 	}
 	nextContent, err := applyUnifiedDiffFilePatch(string(currentContent), filePatch)
 	if err != nil {
-		return err
+		return wrapPatchApplyExecutionError(targetRef, "unified_diff", err)
 	}
 	if err := ensureWorkspacePatchParentDirectory(deliverableDirectory, targetRef, target, "unified_diff"); err != nil {
 		return err
@@ -862,7 +931,7 @@ func ensureWorkspacePatchParentDirectoryPreview(deliverableDirectory string, tar
 func parseSingleFileUnifiedDiff(diff string) (unifiedDiffFilePatch, error) {
 	lines := splitDiffLines(diff)
 	if len(lines) < 3 {
-		return unifiedDiffFilePatch{}, common.ErrInvalidArgument
+		return unifiedDiffFilePatch{}, fmt.Errorf("%w: unified diff must include file header and at least one hunk", common.ErrInvalidArgument)
 	}
 	if patch, ok, err := parseSingleFileApplyPatchDiff(lines); ok || err != nil {
 		return patch, err
@@ -872,7 +941,7 @@ func parseSingleFileUnifiedDiff(diff string) (unifiedDiffFilePatch, error) {
 		idx++
 	}
 	if idx+2 > len(lines) || !strings.HasPrefix(lines[idx], "--- ") || !strings.HasPrefix(lines[idx+1], "+++ ") {
-		return unifiedDiffFilePatch{}, common.ErrInvalidArgument
+		return unifiedDiffFilePatch{}, fmt.Errorf("%w: unified diff must begin with ---/+++ file headers", common.ErrInvalidArgument)
 	}
 	filePatch := unifiedDiffFilePatch{
 		OldRef: normalizeUnifiedDiffPath(strings.TrimSpace(strings.TrimPrefix(lines[idx], "--- "))),
@@ -881,16 +950,16 @@ func parseSingleFileUnifiedDiff(diff string) (unifiedDiffFilePatch, error) {
 	idx += 2
 	for idx < len(lines) {
 		if strings.HasPrefix(lines[idx], "--- ") {
-			return unifiedDiffFilePatch{}, common.ErrInvalidArgument
+			return unifiedDiffFilePatch{}, fmt.Errorf("%w: unified diff must contain exactly one file", common.ErrInvalidArgument)
 		}
 		if strings.TrimSpace(lines[idx]) == "" {
 			idx++
 			continue
 		}
 		if !isUnifiedDiffHunkHeaderLine(lines[idx]) {
-			return unifiedDiffFilePatch{}, common.ErrInvalidArgument
+			return unifiedDiffFilePatch{}, fmt.Errorf("%w: unified diff hunk header is required before changed lines", common.ErrInvalidArgument)
 		}
-		hunk, nextIdx, err := parseUnifiedDiffHunk(lines, idx)
+		hunk, nextIdx, err := parseUnifiedDiffHunk(lines, idx, false)
 		if err != nil {
 			return unifiedDiffFilePatch{}, err
 		}
@@ -898,7 +967,7 @@ func parseSingleFileUnifiedDiff(diff string) (unifiedDiffFilePatch, error) {
 		idx = nextIdx
 	}
 	if filePatch.NewRef == "" || len(filePatch.Hunks) == 0 {
-		return unifiedDiffFilePatch{}, common.ErrInvalidArgument
+		return unifiedDiffFilePatch{}, fmt.Errorf("%w: unified diff must include at least one non-empty hunk", common.ErrInvalidArgument)
 	}
 	return filePatch, nil
 }
@@ -957,7 +1026,7 @@ func parseSingleFileApplyPatchDiff(lines []string) (unifiedDiffFilePatch, bool, 
 			if !seenFile || !isUnifiedDiffHunkHeaderLine(lines[idx]) {
 				return unifiedDiffFilePatch{}, true, common.ErrInvalidArgument
 			}
-			hunk, nextIdx, err := parseUnifiedDiffHunk(lines, idx)
+			hunk, nextIdx, err := parseUnifiedDiffHunk(lines, idx, true)
 			if err != nil {
 				return unifiedDiffFilePatch{}, true, err
 			}
@@ -972,22 +1041,28 @@ func isUnifiedDiffHunkHeaderLine(line string) bool {
 	return strings.HasPrefix(strings.TrimSpace(line), "@@")
 }
 
-func parseUnifiedDiffHunk(lines []string, idx int) (unifiedDiffHunk, int, error) {
+func parseUnifiedDiffHunk(lines []string, idx int, allowBareHeader bool) (unifiedDiffHunk, int, error) {
 	matches := unifiedDiffHunkHeaderPattern.FindStringSubmatch(lines[idx])
 	hunk := unifiedDiffHunk{}
 	if matches == nil {
 		if !isUnifiedDiffHunkHeaderLine(lines[idx]) {
-			return unifiedDiffHunk{}, idx, common.ErrInvalidArgument
+			return unifiedDiffHunk{}, idx, fmt.Errorf("%w: unified diff hunk header is required", common.ErrInvalidArgument)
 		}
+		if allowBareHeader {
+			idx++
+			goto parseLines
+		}
+		return unifiedDiffHunk{}, idx, fmt.Errorf("%w: unified diff hunk header must include explicit line ranges like @@ -12,3 +12,4 @@", common.ErrInvalidArgument)
 	} else {
 		oldStart, err := strconv.Atoi(matches[1])
 		if err != nil {
-			return unifiedDiffHunk{}, idx, common.ErrInvalidArgument
+			return unifiedDiffHunk{}, idx, fmt.Errorf("%w: unified diff hunk header line range is invalid", common.ErrInvalidArgument)
 		}
 		hunk.OldStart = oldStart
 		hunk.HasOldStart = true
 	}
 	idx++
+parseLines:
 	for idx < len(lines) {
 		line := lines[idx]
 		if isUnifiedDiffHunkHeaderLine(line) || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "*** End Patch") {
@@ -998,20 +1073,82 @@ func parseUnifiedDiffHunk(lines []string, idx int) (unifiedDiffHunk, int, error)
 			continue
 		}
 		if line == "" {
-			return unifiedDiffHunk{}, idx, common.ErrInvalidArgument
+			return unifiedDiffHunk{}, idx, fmt.Errorf("%w: unified diff hunk contains an empty raw line; every line must start with space, +, or -", common.ErrInvalidArgument)
 		}
 		switch line[0] {
 		case ' ', '-', '+':
 			hunk.Lines = append(hunk.Lines, line)
 		default:
-			return unifiedDiffHunk{}, idx, common.ErrInvalidArgument
+			return unifiedDiffHunk{}, idx, fmt.Errorf("%w: unified diff hunk line must start with space, +, or -", common.ErrInvalidArgument)
 		}
 		idx++
 	}
 	if len(hunk.Lines) == 0 {
-		return unifiedDiffHunk{}, idx, common.ErrInvalidArgument
+		return unifiedDiffHunk{}, idx, fmt.Errorf("%w: unified diff hunk cannot be empty", common.ErrInvalidArgument)
 	}
 	return hunk, idx, nil
+}
+
+func wrapPatchApplyParseError(targetRef string, patchType string, err error) error {
+	if err == nil {
+		return nil
+	}
+	errText := strings.ToLower(strings.TrimSpace(err.Error()))
+	detail := "patch_parse_invalid"
+	guidance := "Return a complete single-file patch with ---/+++ headers and explicit @@ -old,+new @@ hunk ranges, or use file/edit with exact oldText."
+	switch {
+	case strings.Contains(errText, "explicit line ranges"):
+		detail = "unified_diff_missing_line_ranges"
+		guidance = "Do not emit bare @@ hunks. Include explicit line ranges like @@ -12,3 +12,4 @@, or switch to file/edit with exact oldText/newText from the current snapshot."
+	case strings.Contains(errText, "must begin with ---/+++"):
+		detail = "unified_diff_missing_file_headers"
+	case strings.Contains(errText, "exactly one file"):
+		detail = "unified_diff_multiple_files"
+	case strings.Contains(errText, "hunk contains an empty raw line"):
+		detail = "unified_diff_invalid_blank_line"
+	}
+	return newPatchApplyDiagnosticError(
+		targetRef,
+		patchType,
+		"patch_apply",
+		err,
+		fmt.Sprintf("%s: %v", common.ErrInvalidArgument, err),
+		guidance,
+		detail,
+	)
+}
+
+func wrapPatchApplyExecutionError(targetRef string, patchType string, err error) error {
+	if err == nil {
+		return nil
+	}
+	errText := strings.ToLower(strings.TrimSpace(err.Error()))
+	detail := "patch_apply_invalid"
+	guidance := "Read the current target snapshot and regenerate the smallest exact patch; do not retry a stale diff."
+	switch {
+	case strings.Contains(errText, "hunk context mismatch"):
+		detail = "unified_diff_hunk_context_mismatch"
+		guidance = "The diff context is stale. Read the current target and rebuild the smallest exact unified_diff or use file/edit with exact oldText."
+	case strings.Contains(errText, "hunk removal mismatch"):
+		detail = "unified_diff_hunk_removal_mismatch"
+		guidance = "The removed lines no longer match the current file. Re-read the target and patch only the exact visible lines."
+	case strings.Contains(errText, "basehash mismatch"):
+		detail = "patch_basehash_mismatch"
+		guidance = "The target changed since the previous snapshot. Use the current contentHash from patchRepairContext as baseHash or omit baseHash."
+	case strings.Contains(errText, "start out of range"):
+		detail = "unified_diff_hunk_start_out_of_range"
+	case errors.Is(err, common.ErrConflict):
+		detail = "patch_apply_conflict"
+	}
+	return newPatchApplyDiagnosticError(
+		targetRef,
+		patchType,
+		"patch_apply",
+		err,
+		fmt.Sprintf("%s: %v", common.ErrInvalidArgument, err),
+		guidance,
+		detail,
+	)
 }
 
 func applyUnifiedDiffFilePatch(content string, filePatch unifiedDiffFilePatch) (string, error) {

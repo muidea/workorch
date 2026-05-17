@@ -750,6 +750,10 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 	if successorContext == nil {
 		successorContext = map[string]any{}
 	}
+	if history := mapSliceFromValue(successorContext["governanceHistory"]); len(history) > 0 {
+		successorContext["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(history, 6)
+	}
+	delete(successorContext, "replanContinuation")
 	replanContext := map[string]any{
 		"predecessorRunId": string(run.ID),
 		"reason":           "decision_replan",
@@ -759,19 +763,17 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 		replanContext["ticketStepId"] = string(ticket.StepID)
 		replanContext["ticketReason"] = ticket.Reason
 		if len(ticket.Context) > 0 {
-			ticketContext := compactLLMContextMap(ticket.Context, 0)
-			if failedStepOutput := mapFromValue(ticket.Context["failedStepOutput"]); len(failedStepOutput) > 0 {
-				ticketContext["failedStepOutput"] = compactStepOutputForLLMContext(failedStepOutput)
-			}
+			ticketContext := compactFailureContextForRuntimeContext(ticket.Context)
 			replanContext["ticketContext"] = ticketContext
+			replanContext["failureContext"] = ticketContext
 		}
 	}
 	if resolution != nil {
 		replanContext["resolutionId"] = string(resolution.ID)
 		replanContext["resolutionType"] = resolution.Type
-		replanContext["resolutionPayload"] = cloneStepPayload(resolution.Payload)
+		replanContext["resolutionPayload"] = compactDecisionPayloadForRuntimeContext(resolution.Payload)
 	}
-	successorContext["replanContinuation"] = replanContext
+	successorContext["replanContinuation"] = compactReplanContinuationForRuntimeContext(replanContext)
 	successor := &runModel.Run{
 		ID:               successorID,
 		WorkspaceID:      run.WorkspaceID,
@@ -1450,6 +1452,9 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	if err := validateLLMFollowUpGraphStateChangingContract(run, step, output); err != nil {
 		return err
 	}
+	if err := validateLLMCoverageGapRepairIntent(step, output); err != nil {
+		return err
+	}
 	if boolValue(step.Input["stateChangingOutputRequired"]) {
 		if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
 			if allowPatchRepairValidationEvidenceGraph(step, graph) {
@@ -1688,6 +1693,140 @@ func validateRepairPatchTargetRelevance(step *runModel.Step, request runtimePatc
 		return nil
 	}
 	return fmt.Errorf("%w: runtime repair patch/apply target %q is not related to failure target scope %v; patch a current failure target or return a failed assessment/blocker", common.ErrInvalidArgument, request.TargetRef, limitedStrings(targetRefs, 5))
+}
+
+func validateLLMCoverageGapRepairIntent(step *runModel.Step, output map[string]any) error {
+	if !coverageGapStateChangingRepairRequired(step) {
+		return nil
+	}
+	if coverageGapRepairOutputHasPatch(output) && coverageGapRepairOutputDeclaresTargets(step, output) {
+		return nil
+	}
+	if !coverageGapRepairOutputHasPatch(output) {
+		return nil
+	}
+	return fmt.Errorf("%w: coverage-gap state-changing repair patch/apply must declare coverageTargets matching missing DoD or Goal coverage items", common.ErrInvalidArgument)
+}
+
+func coverageGapRepairOutputHasPatch(output map[string]any) bool {
+	if output == nil {
+		return false
+	}
+	if outputItemCount(output[stepOutputKeyPatches]) > 0 ||
+		outputItemCount(output["patchRequests"]) > 0 ||
+		outputItemCount(mapFromValue(output[stepOutputKeyLLMDecision])["patchRequests"]) > 0 {
+		return true
+	}
+	_, nextKind := nextStepSpec(output)
+	if strings.TrimSpace(nextKind) == "patch/apply" {
+		return true
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok {
+		return false
+	}
+	for _, node := range graph.Nodes {
+		if strings.TrimSpace(node.Kind) == "patch/apply" {
+			return true
+		}
+	}
+	return false
+}
+
+func coverageGapRepairOutputDeclaresTargets(step *runModel.Step, output map[string]any) bool {
+	allowedTargets := coverageGapRepairTargetTokens(step)
+	if len(allowedTargets) == 0 {
+		return true
+	}
+	if patchPayloadsDeclareCoverageTargets(output[stepOutputKeyPatches], allowedTargets) ||
+		patchPayloadsDeclareCoverageTargets(output["patchRequests"], allowedTargets) ||
+		patchPayloadsDeclareCoverageTargets(mapFromValue(output[stepOutputKeyLLMDecision])["patchRequests"], allowedTargets) {
+		return true
+	}
+	_, nextKind := nextStepSpec(output)
+	if strings.TrimSpace(nextKind) == "patch/apply" && patchNodeDeclaresCoverageTargets(mapFromValue(output[stepOutputKeyNextInput]), allowedTargets) {
+		return true
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if ok {
+		for _, node := range graph.Nodes {
+			if strings.TrimSpace(node.Kind) != "patch/apply" {
+				continue
+			}
+			if patchNodeDeclaresCoverageTargets(node.Input, allowedTargets) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func patchPayloadsDeclareCoverageTargets(value any, allowed []string) bool {
+	for _, item := range mapSliceFromValue(value) {
+		if patchNodeDeclaresCoverageTargets(item, allowed) {
+			return true
+		}
+	}
+	return false
+}
+
+func coverageGapStateChangingRepairRequired(step *runModel.Step) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	if !boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) ||
+		!boolValue(step.Input["stateChangingOutputRequired"]) ||
+		!repairObjectiveRequiresStateChange(stringFromMap(step.Input, "repairObjective")) {
+		return false
+	}
+	return len(mapSliceFromValue(step.Input["missingDoDItems"])) > 0 || len(missingGoalCoverageFromInput(step.Input)) > 0
+}
+
+func coverageGapRepairTargetTokens(step *runModel.Step) []string {
+	if step == nil || step.Input == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := make([]string, 0)
+	add := func(value string) {
+		value = normalizeCoverageGapRepairToken(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	for _, item := range mapSliceFromValue(step.Input["missingDoDItems"]) {
+		add(stringFromMap(item, "item"))
+	}
+	for _, item := range missingGoalCoverageFromInput(step.Input) {
+		add(firstNonEmptyString(stringFromMap(item, "goalRequirementId"), stringFromMap(item, "item")))
+	}
+	return ret
+}
+
+func patchNodeDeclaresCoverageTargets(input map[string]any, allowed []string) bool {
+	if len(input) == 0 || len(allowed) == 0 {
+		return false
+	}
+	for _, value := range stringSliceFromValue(input["coverageTargets"]) {
+		value = normalizeCoverageGapRepairToken(value)
+		if value == "" {
+			continue
+		}
+		for _, candidate := range allowed {
+			if value == candidate {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizeCoverageGapRepairToken(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.Join(strings.Fields(value), " ")
+	return value
 }
 
 func repairPatchTargetRelevanceRequired(step *runModel.Step) bool {
@@ -2065,8 +2204,16 @@ func hasStateChangingLLMExecutionOutput(output map[string]any) bool {
 func validatePatchStepInputBeforeRuntime(kind string, input map[string]any) error {
 	switch strings.TrimSpace(kind) {
 	case "patch/preview", "patch/apply":
-		_, err := runtimePatchRequestFromMap(input)
-		return err
+		request, err := runtimePatchRequestFromMap(input)
+		if err != nil {
+			return err
+		}
+		if request.PatchType == "unified_diff" {
+			if _, err := parseSingleFileUnifiedDiff(request.Diff); err != nil {
+				return wrapPatchApplyParseError(request.TargetRef, request.PatchType, err)
+			}
+		}
+		return nil
 	default:
 		return nil
 	}

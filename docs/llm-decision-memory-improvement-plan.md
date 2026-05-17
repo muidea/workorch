@@ -282,8 +282,9 @@ Tool / MCP Memory 记录：
 本轮完成了 P0 的内核闭环：
 
 - `run` source 允许写入 `dod_feedback`。
-- `run` source 允许写入 `decision`、`dod_feedback`、`execution_lesson`、`skill_feedback`、`tool_feedback`。当前阶段不保留旧兼容限制，`project_context` 和 `user_preference` 也不再依赖关键词白名单，只保留敏感内容过滤。
-- LLM 显式 `memoryWrites` 可以直接沉淀高价值 decision memory，包括 DoD gap、repair lesson、skill/tool feedback、项目上下文和偏好。
+- `run` source 允许写入 `dod_feedback`、`execution_lesson`、`skill_feedback`、`tool_feedback`、`run_summary`，以及被敏感内容过滤后的 `project_context` / `user_preference`。
+- `decision` memory 必须来自具体 `decision` source 或等价决策 artifact；公开 API 和 runtime `run` source 不得用泛化 run 记录直接写入 `decision` memory，避免把运行过程流水误沉淀为决策事实。
+- LLM 显式 `memoryWrites` 可以沉淀 DoD gap、repair lesson、skill/tool feedback、项目上下文和偏好；其中 `decision` 类型仍必须遵守 source/type policy，不能通过 `run` source 直写。
 - `llm_dod_assessment` 输出中 failed/skipped DoD item 会自动生成 `dod_feedback`，内容聚焦缺口和 reason。
 - LLM step 被 runtime 接受后，会从 step input 的 `executionContextPackage.selectedContext` 和 run `ExecutionContext` 中自动沉淀：
   - `skill_feedback`：被接受的 Skill、触发/选择依据、required tools 和约束。
@@ -406,6 +407,11 @@ Tool / MCP Memory 记录：
 - DMI-24 当前收口结果：
   - 新增 `scripts/verify-workorch-runtime-core-flow.sh <workspace-id> <run-id>`。
   - 自动检查 provider retry nested lineage、recovery lineage trace、state-changing 降级、completed/failed/blocked_on_decision result policy。
+- DMI-25 当前收口结果：
+  - LLM repair context 不再回灌 schema-invalid / decision-invalid 的原始正文、raw preview 或 stream partial output，只保留中立诊断摘要。
+  - 含 runtime redaction marker 的失败 patch / content / diff 片段在 LLM context 中被替换为 omitted summary，避免 repair 再次复制脱敏片段。
+  - `repairActionPackage.previousRejectedOutputSummary` 对 invalid decision 同样只保留 stage、failure class、stream diagnostics 与 rejected graph 摘要，不携带可复用失败正文。
+  - repair guidance 改为描述 redaction marker tokens，不把具体 marker token 写入提示文本，降低 LLM 机械复制风险。
 - software-dev 默认 Soul 已补充：
   - planning 阶段读取可选文件前先 `file/list`，不确定时 `file/read optional:true`。
   - execution 阶段遇到无测试、0 tests、无断言或 inconclusive evidence 时必须补有效测试/断言，不得重复运行弱验证命令。

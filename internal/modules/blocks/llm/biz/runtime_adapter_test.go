@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1554,7 +1555,9 @@ func TestRuntimeAdapterExposesCompletedDoDAssessment(t *testing.T) {
 			"satisfied":true,
 			"summary":"all checks passed",
 			"items":[{"item":"tests pass","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}],
-			"goalCoverage":{"satisfied":true,"items":[{"goal":"goal covered","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}]}
+			"goalCoverage":{"satisfied":true,"items":[{"goal":"goal covered","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}]},
+			"acceptanceDimensions":{"satisfied":true,"items":[{"id":"runtime_entrypoint","state":"satisfied","evidenceRefs":["run-1/build/runtime-step"]}]},
+			"deliverableCoverage":{"satisfied":true,"items":[{"id":"user_deliverable","state":"satisfied","artifactRefs":["run-1/artifacts/manifest"]}]}
 		}
 	}`)}
 	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
@@ -1582,6 +1585,25 @@ func TestRuntimeAdapterExposesCompletedDoDAssessment(t *testing.T) {
 	coverageItems, ok := coverage["items"].([]map[string]any)
 	if !ok || coverage["satisfied"] != true || len(coverageItems) != 1 || coverageItems[0]["goal"] != "goal covered" {
 		t.Fatalf("goalCoverage = %+v, want preserved goal coverage", assessment["goalCoverage"])
+	}
+	dimensions, ok := assessment["acceptanceDimensions"].(map[string]any)
+	if !ok {
+		t.Fatalf("acceptanceDimensions = %+v, want map", assessment["acceptanceDimensions"])
+	}
+	dimensionItems, ok := dimensions["items"].([]map[string]any)
+	if !ok || len(dimensionItems) != 1 || dimensionItems[0]["id"] != "runtime_entrypoint" {
+		t.Fatalf("acceptanceDimensions = %+v, want preserved dimension coverage", assessment["acceptanceDimensions"])
+	}
+	deliverables, ok := assessment["deliverableCoverage"].(map[string]any)
+	if !ok {
+		t.Fatalf("deliverableCoverage = %+v, want map", assessment["deliverableCoverage"])
+	}
+	deliverableItems, ok := deliverables["items"].([]map[string]any)
+	if !ok || len(deliverableItems) != 1 || deliverableItems[0]["id"] != "user_deliverable" {
+		t.Fatalf("deliverableCoverage = %+v, want preserved deliverable coverage", assessment["deliverableCoverage"])
+	}
+	if refs := deliverableItems[0]["artifactRefs"]; !reflect.DeepEqual(refs, []string{"run-1/artifacts/manifest"}) {
+		t.Fatalf("artifactRefs = %+v, want preserved artifact refs", refs)
 	}
 }
 
