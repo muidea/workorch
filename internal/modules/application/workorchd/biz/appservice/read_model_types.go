@@ -879,6 +879,7 @@ type WorkspaceSnapshot struct {
 	Workspace          Workspace               `json:"workspace"`
 	Run                *Run                    `json:"run,omitempty"`
 	Step               *presenter.StepView     `json:"step,omitempty"`
+	Result             *Result                 `json:"result,omitempty"`
 	Outcome            WorkspaceOutcome        `json:"outcome"`
 	TaskProgress       TaskProgress            `json:"taskProgress"`
 	TaskDecompositions []TaskDecomposition     `json:"taskDecompositions,omitempty"`

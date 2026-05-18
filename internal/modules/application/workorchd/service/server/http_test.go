@@ -2053,6 +2053,20 @@ func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
 		t.Fatalf("filtered runs = %+v, want run-b", filtered.Runs)
 	}
 
+	workspaceScopedReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspaceA.ID+"/runs", nil)
+	workspaceScopedRec := httptest.NewRecorder()
+	handler.ServeHTTP(workspaceScopedRec, workspaceScopedReq)
+	if workspaceScopedRec.Code != http.StatusOK {
+		t.Fatalf("workspace scoped run list status = %d, want 200, body=%s", workspaceScopedRec.Code, workspaceScopedRec.Body.String())
+	}
+	var workspaceScoped runsResponse
+	if err := json.Unmarshal(workspaceScopedRec.Body.Bytes(), &workspaceScoped); err != nil {
+		t.Fatalf("unmarshal workspace scoped runs: %v", err)
+	}
+	if len(workspaceScoped.Runs) != 1 || workspaceScoped.Runs[0].ID != "run-a" || workspaceScoped.Runs[0].WorkspaceID != workspaceA.ID {
+		t.Fatalf("workspace scoped runs = %+v, want run-a for %s", workspaceScoped.Runs, workspaceA.ID)
+	}
+
 	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-a", nil)
 	getRec := httptest.NewRecorder()
 	handler.ServeHTTP(getRec, getReq)

@@ -20,6 +20,7 @@ import (
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -4075,6 +4076,8 @@ func TestReadWorkspaceSnapshotTaskProgressUsesLatestTerminalRejectedResult(t *te
 		RunID:       currentRunID,
 		State:       common.ResultStateRejected,
 		Summary:     "current rejected result",
+		SourceType:  resultcommon.SourceTypeDoDAssessment,
+		SourceRef:   string(currentRunID) + "/graph-002/assessment",
 		CreatedAt:   "2026-05-17T12:31:45Z",
 		UpdatedAt:   "2026-05-17T12:31:45Z",
 	}); err != nil {
@@ -4103,6 +4106,14 @@ func TestReadWorkspaceSnapshotTaskProgressUsesLatestTerminalRejectedResult(t *te
 	}
 	if snapshot.TaskProgress.RunID != string(currentRunID) || snapshot.TaskProgress.State != string(common.RunStateFailed) {
 		t.Fatalf("task progress = %+v, want same current rejected run as outcome", snapshot.TaskProgress)
+	}
+	if snapshot.Result == nil || snapshot.Result.ID != string(currentRunID)+"/result/dod-assessment" || snapshot.Result.Summary != "current rejected result" {
+		t.Fatalf("snapshot result = %+v, want current rejected result", snapshot.Result)
+	}
+	if snapshot.TaskProgress.CurrentStepID != string(currentRunID)+"/graph-002/assessment" ||
+		snapshot.TaskProgress.CurrentStepKind != "result/"+resultcommon.SourceTypeDoDAssessment ||
+		snapshot.TaskProgress.CurrentStepState != string(common.ResultStateRejected) {
+		t.Fatalf("task progress current = %s/%s/%s, want terminal rejected result source", snapshot.TaskProgress.CurrentStepID, snapshot.TaskProgress.CurrentStepKind, snapshot.TaskProgress.CurrentStepState)
 	}
 }
 

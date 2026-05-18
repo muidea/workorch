@@ -2671,8 +2671,25 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			Capability: item,
 		})
 	})
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs", http.MethodGet, func(_ context.Context, w http.ResponseWriter, _ *http.Request) {
-		writeMethodNotAllowed(w)
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "runs" {
+			http.NotFound(w, r)
+			return
+		}
+		state.metrics.runListRequests.Add(1)
+		items, err := state.listRuns(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runsResponse{
+			Service:  "workorch",
+			Backend:  state.config.Backend,
+			DataRoot: state.config.DataRoot,
+			Runs:     items,
+		})
 	})
 	router.AddHandler("/api/v1/workorch/runs/:runId/start", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))

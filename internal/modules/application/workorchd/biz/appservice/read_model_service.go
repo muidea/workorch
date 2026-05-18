@@ -1203,6 +1203,10 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		step := runSnapshot.Step
 		ret.Run = &run
 		ret.Step = step
+		if result := primaryTaskProgressResult(runScopedResults(runSnapshot)); result != nil {
+			selected := *result
+			ret.Result = &selected
+		}
 		ret.TaskProgress = runSnapshot.TaskProgress
 		ret.TaskDecompositions = runSnapshot.TaskDecompositions
 		ret.ExecutionSections = runSnapshot.ExecutionSections
@@ -4371,6 +4375,12 @@ func mapTaskProgress(snapshot RunSnapshot) TaskProgress {
 		ret.CurrentStepState = snapshot.Step.State
 		ret.Recovery.StepID = snapshot.Step.ID
 	}
+	if result := terminalTaskProgressResult(snapshot); result != nil {
+		ret.CurrentStepID = firstNonEmptyReadModel(result.SourceRef, result.ID)
+		ret.CurrentStepKind = "result/" + strings.TrimSpace(firstNonEmptyReadModel(result.SourceType, "terminal"))
+		ret.CurrentStepState = result.State
+		ret.Recovery.StepID = ret.CurrentStepID
+	}
 	if latestCheckpoint != nil {
 		ret.Recovery.CheckpointID = latestCheckpoint.ID
 	}
@@ -5497,10 +5507,20 @@ func compactContextSections(items []ContextSection) []ContextSection {
 }
 
 func currentStepID(snapshot RunSnapshot) string {
+	if result := terminalTaskProgressResult(snapshot); result != nil {
+		return firstNonEmptyReadModel(result.SourceRef, result.ID)
+	}
 	if snapshot.Step == nil {
 		return ""
 	}
 	return snapshot.Step.ID
+}
+
+func terminalTaskProgressResult(snapshot RunSnapshot) *Result {
+	if !isTerminalRunState(snapshot.Run.State) {
+		return nil
+	}
+	return primaryTaskProgressResult(runScopedResults(snapshot))
 }
 
 func contextDoDSummary(dod map[string]any) string {
