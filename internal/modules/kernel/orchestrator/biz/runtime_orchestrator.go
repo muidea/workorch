@@ -454,7 +454,33 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 	case common.RunStateRunning:
 		recoverStepID, recoverInput, err := o.runningDecisionRecoveryContext(ctx, r)
 		if err != nil {
-			return err
+			if !errors.Is(err, common.ErrConflict) {
+				return err
+			}
+			specs, specErr := o.runningFailedTerminalStepRecoverySpecs(ctx, r)
+			if specErr != nil {
+				return specErr
+			}
+			if len(specs) == 0 {
+				return err
+			}
+			r.State = common.RunStateRunning
+			r.FailureReason = ""
+			mergeRunExecutionContextPatch(r, executionContextPatch)
+			workspace, syncErr := o.syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, nil)
+			if syncErr != nil {
+				return syncErr
+			}
+			if publishErr := o.publishRunStateChanged(ctx, r); publishErr != nil {
+				return publishErr
+			}
+			if publishErr := o.publishWorkspaceStateChanged(ctx, workspace, r.ID); publishErr != nil {
+				return publishErr
+			}
+			if dispatchErr := o.dispatchStepSpecsWithWorkspace(ctx, r, specs, workspace); dispatchErr != nil {
+				return errors.Join(o.failRunningResume(ctx, r.ID, dispatchErr), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
+			}
+			return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
 		}
 		if recoverStepID == "" {
 			if len(executionContextPatch) > 0 {
@@ -498,6 +524,21 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 		return errors.Join(o.failRunningResume(ctx, r.ID, err), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 	}
 	return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
+}
+
+func (o *RuntimeOrchestrator) runningFailedTerminalStepRecoverySpecs(ctx context.Context, run *runModel.Run) ([]stepDispatchSpec, error) {
+	if o == nil || run == nil || o.steps == nil {
+		return nil, common.ErrConflict
+	}
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	last := terminalExecutionStep(steps)
+	if last == nil || last.State != common.StepStateFailed {
+		return nil, nil
+	}
+	return o.nextDispatchSpecsFromStep(ctx, run, last)
 }
 
 func (o *RuntimeOrchestrator) failRunningResume(ctx context.Context, runID common.RunID, cause error) error {

@@ -138,6 +138,18 @@ def full_dod_items(step_id):
         {"item": "memory recall is visible", "state": "satisfied", "evidenceRefs": [step_id]},
     ]
 
+def full_goal_coverage(step_id):
+    return {
+        "satisfied": True,
+        "items": [
+            {
+                "requirement": "verify LLM driven workspace execution",
+                "state": "satisfied",
+                "evidenceRefs": [step_id],
+            },
+        ],
+    }
+
 def next_scenario(request):
     global request_sequence
     run_id = request.get("runId", "")
@@ -188,7 +200,8 @@ def decision_payload(request):
             "dodAssessment": {
                 "satisfied": True,
                 "summary": "Decision path completed.",
-                "items": full_dod_items(step_id)
+                "items": full_dod_items(step_id),
+                "goalCoverage": full_goal_coverage(step_id)
             }
         }
     if "llm-after-approval" in step_id and scenario in {4, 5}:
@@ -199,7 +212,8 @@ def decision_payload(request):
             "dodAssessment": {
                 "satisfied": True,
                 "summary": "Multi-gate path completed after Decision and Approval.",
-                "items": full_dod_items(step_id)
+                "items": full_dod_items(step_id),
+                "goalCoverage": full_goal_coverage(step_id)
             }
         }
     scenario = next_scenario(request)
@@ -220,7 +234,8 @@ def decision_payload(request):
             "dodAssessment": {
                 "satisfied": True,
                 "summary": "Multi-gate path completed after Decision and Approval.",
-                "items": full_dod_items(step_id)
+                "items": full_dod_items(step_id),
+                "goalCoverage": full_goal_coverage(step_id)
             }
         }
     if scenario == 0:
@@ -236,7 +251,8 @@ def decision_payload(request):
             "dodAssessment": {
                 "satisfied": True,
                 "summary": "Happy path DoD satisfied.",
-                "items": full_dod_items(step_id)
+                "items": full_dod_items(step_id),
+                "goalCoverage": full_goal_coverage(step_id)
             }
         }
     if scenario == 1:
@@ -263,7 +279,8 @@ def decision_payload(request):
             "dodAssessment": {
                 "satisfied": True,
                 "summary": "Decision path completed.",
-                "items": full_dod_items(step_id)
+                "items": full_dod_items(step_id),
+                "goalCoverage": full_goal_coverage(step_id)
             }
         }
     if scenario == 3:
@@ -295,7 +312,8 @@ def decision_payload(request):
         "dodAssessment": {
             "satisfied": True,
             "summary": "Memory recall DoD satisfied.",
-            "items": full_dod_items(step_id)
+            "items": full_dod_items(step_id),
+            "goalCoverage": full_goal_coverage(step_id)
         }
     }
 

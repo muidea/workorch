@@ -9500,6 +9500,110 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionFailsRun(t *testing.T) {
 	}
 }
 
+func TestRuntimeOrchestrator_ResumeRunningFailedDoDCoverageRepairExhaustionBlocksRun(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resultRepo := memory.NewResultRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{Results: resultRepo},
+		events.NewMemoryHub(),
+	)
+	workspaceID := common.WorkspaceID("ws-running-dod-coverage-exhausted")
+	runID := common.RunID("run-running-dod-coverage-exhausted")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-running-dod-coverage-exhausted",
+		State:           common.RunStateRunning,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	signature := "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment|error=invalid argument: dodassessment.goalcoverage is required when goal has uncovered leaf requirements"
+	for attempt := 1; attempt <= defaultMaxRuntimeRepairAttempts; attempt++ {
+		stepID := common.StepID(fmt.Sprintf("%s/repair-%03d-of-llm-after-decision", runID, attempt))
+		if err := stepRepo.Create(ctx, &runmodel.Step{
+			ID:    stepID,
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRuntimeRepairAttempt:  attempt,
+				stepInputKeyRepairOfStepID:        string(runID) + "/llm-after-decision",
+				stepInputKeyRepairOfRootStepID:    string(runID) + "/llm-after-decision",
+				stepInputKeyRepairOfFailureClass:  failureClassDoDCoverageMissing,
+				stepInputKeyRepairOfFailureSig:    signature,
+				stepInputKeyAssessmentOnly:        true,
+			},
+			Output: map[string]any{
+				"stage":                   "llm_dod_assessment",
+				"error":                   "invalid argument: dodAssessment.goalCoverage is required when Goal has uncovered leaf requirements",
+				failureOutputKeyClass:     failureClassDoDCoverageMissing,
+				failureOutputKeySignature: signature,
+				stepOutputKeyDoDAssessment: map[string]any{
+					"satisfied": true,
+					"summary":   "DoD passed but goal coverage is missing.",
+					"items": []map[string]any{{
+						"item":         "verify runtime flow",
+						"state":        "satisfied",
+						"evidenceRefs": []string{string(stepID)},
+					}},
+				},
+				"runtimeDiagnostics": map[string]any{
+					"kind": failureClassDoDCoverageMissing,
+					"missingGoalCoverage": []map[string]any{{
+						"raw":   "verify LLM driven workspace execution",
+						"kind":  "leaf",
+						"state": "missing",
+					}},
+				},
+			},
+		}); err != nil {
+			t.Fatalf("seed repair attempt %d: %v", attempt, err)
+		}
+	}
+
+	err := orch.ResumeRun(ctx, runID)
+	if !errors.Is(err, common.ErrBlocked) {
+		t.Fatalf("ResumeRun err = %v, want blocked after repair exhaustion", err)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateBlockedOnDecision || runItem.BlockingTicketID == "" {
+		t.Fatalf("run = %+v, want blocked on decision after running failed terminal repair exhaustion", runItem)
+	}
+	ticket, err := ticketRepo.Get(ctx, runItem.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("get ticket: %v", err)
+	}
+	if ticket.Context["failureClass"] != failureClassDoDCoverageMissing || ticket.Context["attempts"] != defaultMaxRuntimeRepairAttempts {
+		t.Fatalf("ticket context = %+v, want exhausted dod coverage repair context", ticket.Context)
+	}
+	results, err := resultRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list results: %v", err)
+	}
+	if len(results) == 0 || results[0].State != common.ResultStateRejected {
+		t.Fatalf("results = %+v, want rejected result when repair exhaustion blocks", results)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairExhaustionWritesRejectedResultBeforeTicketEvent(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
