@@ -4259,6 +4259,40 @@ func TestMapWorkspaceOutcomePrefersLatestTerminalRunOverStaleTaskProgress(t *tes
 	}
 }
 
+func TestMapWorkspaceOutcomeDoesNotReuseAcceptedResultAfterDefinitionsReopenWorkspace(t *testing.T) {
+	snapshot := WorkspaceSnapshot{
+		Workspace: Workspace{
+			ID:    "ws-definition-reopened",
+			State: string(common.WorkspaceStateActive),
+		},
+		Runs: []Run{
+			{
+				ID:          "run-old-accepted",
+				WorkspaceID: "ws-definition-reopened",
+				State:       string(common.RunStateCompleted),
+			},
+		},
+		Results: []Result{
+			{
+				ID:          "run-old-accepted/result/dod-assessment",
+				WorkspaceID: "ws-definition-reopened",
+				RunID:       "run-old-accepted",
+				State:       string(common.ResultStateAccepted),
+				Summary:     "old accepted result",
+				CreatedAt:   "2026-05-18T10:00:00Z",
+			},
+		},
+	}
+
+	outcome := mapWorkspaceOutcome(snapshot)
+	if outcome.Accepted || outcome.Terminal || outcome.ResultID != "" || outcome.RunID != "" {
+		t.Fatalf("outcome = %+v, want no accepted terminal outcome after definition change", outcome)
+	}
+	if outcome.State != string(common.WorkspaceStateActive) || !strings.Contains(outcome.Reason, "definitions changed") {
+		t.Fatalf("outcome = %+v, want active definition-change rerun reason", outcome)
+	}
+}
+
 func TestReadTerminalRunModelsWithBackendRemainStableAcrossReloads(t *testing.T) {
 	dataRoot := t.TempDir()
 	workspaceID := "ws-run-terminal-reload"

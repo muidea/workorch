@@ -1310,6 +1310,9 @@ func selectWorkspaceProjectionRun(workspace *workspacemodel.Workspace, runs []*r
 	if workspace == nil || len(runs) == 0 {
 		return nil
 	}
+	if workspace.State == common.WorkspaceStateActive && strings.TrimSpace(string(workspace.ActiveRunID)) == "" {
+		return nil
+	}
 	var latest *runmodel.Run
 	var active *runmodel.Run
 	runsByID := make(map[common.RunID]*runmodel.Run, len(runs))
@@ -6265,6 +6268,15 @@ func mapWorkspaceOutcome(snapshot WorkspaceSnapshot) WorkspaceOutcome {
 		WorkspaceID:       snapshot.Workspace.ID,
 		State:             snapshot.Workspace.State,
 		RawWorkspaceState: snapshot.Workspace.State,
+	}
+	if common.WorkspaceState(snapshot.Workspace.State) == common.WorkspaceStateActive &&
+		strings.TrimSpace(snapshot.Workspace.ActiveRunID) == "" {
+		ret.State = string(common.WorkspaceStateActive)
+		ret.Terminal = false
+		ret.Accepted = false
+		ret.Reason = "workspace definitions changed; execution must be rerun"
+		ret.Summary = ret.Reason
+		return ret
 	}
 	var selectedRun *Run
 	if isTerminalProjectionState(snapshot.Workspace.State) {

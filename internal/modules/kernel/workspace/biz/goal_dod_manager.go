@@ -113,7 +113,8 @@ func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspaceservice.De
 	if cmd.GoalID == "" || cmd.WorkspaceID == "" || cmd.Text == "" {
 		return common.ErrInvalidArgument
 	}
-	if _, err := m.workspaces.Get(ctx, cmd.WorkspaceID); err != nil {
+	workspace, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
+	if err != nil {
 		return err
 	}
 	goal := &workspaceModel.Goal{
@@ -122,6 +123,9 @@ func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspaceservice.De
 		Text:        cmd.Text,
 	}
 	if err := m.goals.Create(ctx, goal); err != nil {
+		return err
+	}
+	if err := m.markWorkspaceDefinitionsChanged(ctx, workspace); err != nil {
 		return err
 	}
 	return m.publishGoalEvent(ctx, goal)
@@ -135,11 +139,15 @@ func (m *GoalDoDManager) UpdateGoal(ctx context.Context, cmd workspaceservice.Up
 	if err != nil {
 		return err
 	}
-	if _, err := m.workspaces.Get(ctx, goal.WorkspaceID); err != nil {
+	workspace, err := m.workspaces.Get(ctx, goal.WorkspaceID)
+	if err != nil {
 		return err
 	}
 	goal.Text = cmd.Text
 	if err := m.goals.Update(ctx, goal); err != nil {
+		return err
+	}
+	if err := m.markWorkspaceDefinitionsChanged(ctx, workspace); err != nil {
 		return err
 	}
 	return m.publishGoalEvent(ctx, goal)
@@ -154,7 +162,8 @@ func (m *GoalDoDManager) DefineDoD(ctx context.Context, cmd workspaceservice.Def
 			return common.ErrInvalidArgument
 		}
 	}
-	if _, err := m.workspaces.Get(ctx, cmd.WorkspaceID); err != nil {
+	workspace, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
+	if err != nil {
 		return err
 	}
 	dod := &workspaceModel.DoD{
@@ -164,6 +173,9 @@ func (m *GoalDoDManager) DefineDoD(ctx context.Context, cmd workspaceservice.Def
 		State:       common.DoDStateReady,
 	}
 	if err := m.dods.Create(ctx, dod); err != nil {
+		return err
+	}
+	if err := m.markWorkspaceDefinitionsChanged(ctx, workspace); err != nil {
 		return err
 	}
 	return m.publishDoDEvent(ctx, dod)
@@ -182,7 +194,8 @@ func (m *GoalDoDManager) UpdateDoD(ctx context.Context, cmd workspaceservice.Upd
 	if err != nil {
 		return err
 	}
-	if _, err := m.workspaces.Get(ctx, dod.WorkspaceID); err != nil {
+	workspace, err := m.workspaces.Get(ctx, dod.WorkspaceID)
+	if err != nil {
 		return err
 	}
 	dod.Items = append([]string(nil), cmd.Items...)
@@ -190,7 +203,30 @@ func (m *GoalDoDManager) UpdateDoD(ctx context.Context, cmd workspaceservice.Upd
 	if err := m.dods.Update(ctx, dod); err != nil {
 		return err
 	}
+	if err := m.markWorkspaceDefinitionsChanged(ctx, workspace); err != nil {
+		return err
+	}
 	return m.publishDoDEvent(ctx, dod)
+}
+
+func (m *GoalDoDManager) markWorkspaceDefinitionsChanged(ctx context.Context, workspace *workspaceModel.Workspace) error {
+	if workspace == nil {
+		return common.ErrInvalidArgument
+	}
+	changed := false
+	switch workspace.State {
+	case common.WorkspaceStateCompleted, common.WorkspaceStateFailed, common.WorkspaceStateArchived:
+		workspace.State = common.WorkspaceStateActive
+		workspace.ActiveRunID = ""
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	if err := m.workspaces.Update(ctx, workspace); err != nil {
+		return err
+	}
+	return m.publishWorkspaceEvent(ctx, events.TopicWorkspaceStateChanged, workspace)
 }
 
 func (m *GoalDoDManager) publishWorkspaceEvent(ctx context.Context, topic string, workspace *workspaceModel.Workspace) error {

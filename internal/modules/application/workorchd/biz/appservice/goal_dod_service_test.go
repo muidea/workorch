@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -61,6 +63,68 @@ func TestDefineGoalWithBackendMergesWorkspaceGoalAndRemovesOlderDefinitions(t *t
 	}
 	if len(list) != 1 || list[0].ID != first.ID {
 		t.Fatalf("goal list = %+v, want one canonical Goal", list)
+	}
+}
+
+func TestDefineGoalWithBackendReopensCompletedWorkspaceAndInvalidatesOldOutcome(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-goal-reopen", "goal reopen workspace", "", "workspaces/goal-reopen")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "initial goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend initial: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"initial dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend initial: %v", err)
+	}
+	runID := common.RunID("run-old-accepted")
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: common.WorkspaceID(workspace.ID),
+		GoalID:      common.GoalID(goal.ID),
+		DoDID:       common.DoDID(dod.ID),
+		State:       common.RunStateCompleted,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
+		ID:          common.ResultID(string(runID) + "/result/dod-assessment"),
+		WorkspaceID: common.WorkspaceID(workspace.ID),
+		RunID:       runID,
+		GoalID:      common.GoalID(goal.ID),
+		DoDID:       common.DoDID(dod.ID),
+		State:       common.ResultStateAccepted,
+		Summary:     "old accepted result",
+		CreatedAt:   "2026-05-18T10:00:00Z",
+	}); err != nil {
+		t.Fatalf("create result: %v", err)
+	}
+	ws, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	ws.State = common.WorkspaceStateCompleted
+	if err := exports.Repositories.Workspaces.Update(ctx, ws); err != nil {
+		t.Fatalf("mark workspace completed: %v", err)
+	}
+
+	if _, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "new goal requirement"); err != nil {
+		t.Fatalf("DefineGoalWithBackend new: %v", err)
+	}
+	snapshot, err := ReadWorkspaceSnapshotWithBackend(ctx, "file", dataRoot, workspace.ID)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceSnapshotWithBackend: %v", err)
+	}
+	if snapshot.Workspace.State != string(common.WorkspaceStateActive) || snapshot.Workspace.ActiveRunID != "" {
+		t.Fatalf("workspace = %+v, want active without active run after new goal", snapshot.Workspace)
+	}
+	if snapshot.Outcome.Accepted || snapshot.Outcome.Terminal || snapshot.Outcome.ResultID != "" {
+		t.Fatalf("outcome = %+v, want old accepted result invalidated by definition change", snapshot.Outcome)
 	}
 }
 

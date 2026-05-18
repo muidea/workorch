@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -237,5 +238,71 @@ func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t
 	}
 	if published[0].Payload[events.PayloadKeyActiveRunID] != "" {
 		t.Fatalf("activeRunId payload = %v, want empty", published[0].Payload[events.PayloadKeyActiveRunID])
+	}
+}
+
+func TestGoalDoDManager_DefinitionChangeReopensTerminalWorkspace(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		act  func(*GoalDoDManager, common.WorkspaceID) error
+	}{
+		{
+			name: "define goal",
+			act: func(manager *GoalDoDManager, workspaceID common.WorkspaceID) error {
+				return manager.DefineGoal(ctx, workspaceservice.DefineGoalCommand{
+					GoalID:      "goal-reopen",
+					WorkspaceID: workspaceID,
+					Text:        "new goal requirement",
+				})
+			},
+		},
+		{
+			name: "define dod",
+			act: func(manager *GoalDoDManager, workspaceID common.WorkspaceID) error {
+				return manager.DefineDoD(ctx, workspaceservice.DefineDoDCommand{
+					DoDID:       "dod-reopen",
+					WorkspaceID: workspaceID,
+					Items:       []string{"new acceptance requirement"},
+				})
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := memory.NewWorkspaceRepository()
+			hub := events.NewMemoryHub()
+			manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), hub)
+			workspaceID := common.WorkspaceID("ws-" + strings.ReplaceAll(tc.name, " ", "-"))
+			if err := repo.Create(ctx, &workspacemodel.Workspace{
+				ID:          workspaceID,
+				Title:       "terminal workspace",
+				State:       common.WorkspaceStateCompleted,
+				ActiveRunID: "run-terminal",
+			}); err != nil {
+				t.Fatalf("create workspace: %v", err)
+			}
+
+			if err := tc.act(manager, workspaceID); err != nil {
+				t.Fatalf("definition change: %v", err)
+			}
+			ws, err := repo.Get(ctx, workspaceID)
+			if err != nil {
+				t.Fatalf("get workspace: %v", err)
+			}
+			if ws.State != common.WorkspaceStateActive || ws.ActiveRunID != "" {
+				t.Fatalf("workspace = %+v, want active without active run after definition change", ws)
+			}
+			published := hub.Published()
+			if len(published) < 2 {
+				t.Fatalf("published = %+v, want state change and definition event", published)
+			}
+			if published[0].Topic != events.TopicWorkspaceStateChanged {
+				t.Fatalf("first topic = %s, want workspace state changed", published[0].Topic)
+			}
+			if published[0].Payload[events.PayloadKeyState] != string(common.WorkspaceStateActive) ||
+				published[0].Payload[events.PayloadKeyActiveRunID] != "" {
+				t.Fatalf("state payload = %+v, want active without activeRunId", published[0].Payload)
+			}
+		})
 	}
 }
