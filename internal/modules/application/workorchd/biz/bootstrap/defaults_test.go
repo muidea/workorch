@@ -68,6 +68,8 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, planning.SoulMD, "persistence_or_side_effect")
 	assertSoulContains(t, planning.SoulMD, "provider/protocol matrix")
 	assertSoulContains(t, planning.SoulMD, "file/read")
+	assertSoulContains(t, planning.SoulMD, "rejectedResultContinuation")
+	assertSoulContains(t, planning.SoulMD, "missingGoalCoverage")
 
 	execution := findEmbeddedSoulByID(souls, "soul-software-dev-execution")
 	if execution == nil {
@@ -121,6 +123,8 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, validation.SoulMD, "claim-to-evidence consistency")
 	assertSoulContains(t, validation.SoulMD, "file/read")
 	assertSoulContains(t, validation.SoulMD, "persistence_or_side_effect")
+	assertSoulContains(t, validation.SoulMD, "rejectedResultContinuation")
+	assertSoulContains(t, validation.SoulMD, "missingDeliverableCoverage")
 
 	artifact := findEmbeddedSoulByID(souls, "soul-software-dev-artifact")
 	if artifact == nil {

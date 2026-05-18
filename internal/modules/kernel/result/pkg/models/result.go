@@ -34,9 +34,12 @@ type ResultSummary struct {
 }
 
 type DoDAssessment struct {
-	Satisfied bool
-	Items     []DoDAssessmentItem
-	Summary   string
+	Satisfied            bool
+	Items                []DoDAssessmentItem
+	GoalCoverage         *DoDCoverage
+	AcceptanceDimensions *DoDCoverage
+	DeliverableCoverage  *DoDCoverage
+	Summary              string
 }
 
 type DoDAssessmentItem struct {
@@ -46,4 +49,24 @@ type DoDAssessmentItem struct {
 	FailureReason string
 	Confidence    float64
 	SourceNote    string
+}
+
+type DoDCoverage struct {
+	Satisfied bool
+	Items     []DoDCoverageItem
+	Summary   string
+}
+
+type DoDCoverageItem struct {
+	ID           string
+	Deliverable  string
+	Name         string
+	Path         string
+	Goal         string
+	GoalItem     string
+	Item         string
+	Requirement  string
+	State        string
+	EvidenceRefs []string
+	ArtifactRefs []common.ArtifactID
 }

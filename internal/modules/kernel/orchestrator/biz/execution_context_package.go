@@ -167,6 +167,9 @@ func mergeExecutionDefinitionsIntoPackage(pkg map[string]any, executionContext m
 	if value := mapFromValue(executionContext["replanContinuation"]); len(value) > 0 {
 		pkg["replanContinuation"] = compactReplanContinuationForRuntimeContext(value)
 	}
+	if value := mapFromValue(executionContext["rejectedResultContinuation"]); len(value) > 0 {
+		pkg["rejectedResultContinuation"] = compactRejectedResultContinuationForRuntimeContext(value)
+	}
 	if value, ok := executionContext["executionContract"]; ok && value != nil {
 		pkg["executionContract"] = cloneLLMContextValue(value)
 	}

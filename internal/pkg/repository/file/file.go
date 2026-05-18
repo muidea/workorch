@@ -3056,7 +3056,28 @@ func cloneResultDoDAssessment(item resultmodel.DoDAssessment) resultmodel.DoDAss
 			cloned.Items = append(cloned.Items, assessmentItem)
 		}
 	}
+	cloned.GoalCoverage = cloneResultDoDCoverage(item.GoalCoverage)
+	cloned.AcceptanceDimensions = cloneResultDoDCoverage(item.AcceptanceDimensions)
+	cloned.DeliverableCoverage = cloneResultDoDCoverage(item.DeliverableCoverage)
 	return cloned
+}
+
+func cloneResultDoDCoverage(item *resultmodel.DoDCoverage) *resultmodel.DoDCoverage {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	if item.Items != nil {
+		cloned.Items = make([]resultmodel.DoDCoverageItem, 0, len(item.Items))
+		for _, coverageItem := range item.Items {
+			coverageItem.EvidenceRefs = cloneStringSlice(coverageItem.EvidenceRefs)
+			if coverageItem.ArtifactRefs != nil {
+				coverageItem.ArtifactRefs = append([]common.ArtifactID(nil), coverageItem.ArtifactRefs...)
+			}
+			cloned.Items = append(cloned.Items, coverageItem)
+		}
+	}
+	return &cloned
 }
 
 func cloneArtifact(item *resultmodel.Artifact) *resultmodel.Artifact {

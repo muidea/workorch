@@ -16,6 +16,7 @@ import (
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
@@ -597,6 +598,13 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 			contextData["replanContinuation"] = replanContinuation
 		}
 	}
+	rejectedContinuation, err := rejectedResultContinuationForActivation(ctx, exports.Repositories.Results, workspace.ID, effectiveGoal.ID, effectiveDoD.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(rejectedContinuation) > 0 {
+		contextData["rejectedResultContinuation"] = rejectedContinuation
+	}
 	if len(workspace.EvidencePolicies) > 0 {
 		contextData["evidencePolicies"] = cloneContextMapSlice(workspace.EvidencePolicies)
 	}
@@ -757,6 +765,7 @@ func mergeActivationExecutionContextPatch(contextData map[string]any, patch map[
 		"activation": {}, "workspaceId": {}, "goalId": {}, "doDId": {},
 		"goal": {}, "goals": {}, "goalDefinitionPolicy": {},
 		"dod": {}, "dods": {}, "doDDefinitionPolicy": {},
+		"rejectedResultContinuation": {},
 	}
 	for key, value := range patch {
 		key = strings.TrimSpace(key)
@@ -1423,6 +1432,236 @@ func mcpCapabilityContexts(items []*mcpmodel.Capability) []map[string]any {
 			"approvalPolicy": item.ApprovalPolicy,
 			"status":         item.Status,
 		})
+	}
+	return ret
+}
+
+func rejectedResultContinuationForActivation(ctx context.Context, results repository.ResultRepository, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID) (map[string]any, error) {
+	if results == nil || workspaceID == "" || goalID == "" || dodID == "" {
+		return nil, nil
+	}
+	items, err := results.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	latest := latestTerminalResultForDefinitions(items, goalID, dodID)
+	if latest == nil || latest.State != common.ResultStateRejected {
+		return nil, nil
+	}
+	return rejectedResultContinuationContext(latest), nil
+}
+
+func latestTerminalResultForDefinitions(items []*resultmodel.Result, goalID common.GoalID, dodID common.DoDID) *resultmodel.Result {
+	var latest *resultmodel.Result
+	latestKey := ""
+	for idx, item := range items {
+		if item == nil || item.GoalID != goalID || item.DoDID != dodID || !isTerminalResultState(item.State) {
+			continue
+		}
+		key := resultOrderingKey(item, idx)
+		if latest == nil || key > latestKey {
+			latest = item
+			latestKey = key
+		}
+	}
+	return latest
+}
+
+func isTerminalResultState(state common.ResultState) bool {
+	switch state {
+	case common.ResultStateAccepted, common.ResultStateRejected:
+		return true
+	default:
+		return false
+	}
+}
+
+func resultOrderingKey(item *resultmodel.Result, index int) string {
+	if item == nil {
+		return fmt.Sprintf("%020d", index)
+	}
+	timestamp := strings.TrimSpace(item.UpdatedAt)
+	if timestamp == "" {
+		timestamp = strings.TrimSpace(item.CreatedAt)
+	}
+	return fmt.Sprintf("%s|%020d", timestamp, index)
+}
+
+func rejectedResultContinuationContext(item *resultmodel.Result) map[string]any {
+	if item == nil {
+		return nil
+	}
+	ret := map[string]any{
+		"mode":                "rejected_result_continuation",
+		"predecessorRunId":    string(item.RunID),
+		"resultId":            string(item.ID),
+		"resultState":         string(item.State),
+		"sourceType":          strings.TrimSpace(item.SourceType),
+		"sourceRef":           strings.TrimSpace(item.SourceRef),
+		"summary":             compactActivationContextValue(item.Summary, 1),
+		"goalOutcome":         compactActivationContextValue(item.SummaryDetail.GoalOutcome, 1),
+		"satisfiedDoDItems":   rejectedContinuationDoDItems(item.DoDAssessment.Items, true),
+		"unsatisfiedDoDItems": rejectedContinuationDoDItems(item.DoDAssessment.Items, false),
+		"coverageGaps": map[string]any{
+			"missingGoalCoverage":         rejectedContinuationCoverageGaps(item.DoDAssessment.GoalCoverage, "goal"),
+			"missingAcceptanceDimensions": rejectedContinuationCoverageGaps(item.DoDAssessment.AcceptanceDimensions, "acceptance"),
+			"missingDeliverableCoverage":  rejectedContinuationCoverageGaps(item.DoDAssessment.DeliverableCoverage, "deliverable"),
+		},
+		"requiredEvidence":   rejectedContinuationRequiredEvidence(item.SummaryDetail),
+		"resultEvidenceRefs": compactStringRefs(item.EvidenceRefs, 20),
+		"artifactRefs":       compactArtifactRefs(item.ArtifactRefs, 20),
+	}
+	if refs := compactStringRefs(item.SummaryDetail.EvidenceRefs, 20); len(refs) > 0 {
+		ret["summaryEvidenceRefs"] = refs
+	}
+	if refs := compactArtifactRefs(item.SummaryDetail.ArtifactRefs, 20); len(refs) > 0 {
+		ret["summaryArtifactRefs"] = refs
+	}
+	return stripRuntimeLLMBindingFromActivationContext(common.RedactSensitiveMap(ret))
+}
+
+func rejectedContinuationDoDItems(items []resultmodel.DoDAssessmentItem, satisfied bool) []map[string]any {
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		state := strings.TrimSpace(item.State)
+		isSatisfied := strings.EqualFold(state, "satisfied")
+		if satisfied != isSatisfied {
+			continue
+		}
+		mapped := map[string]any{
+			"item":         compactActivationContextValue(item.Item, 1),
+			"evidenceRefs": compactStringRefs(item.EvidenceRefs, 10),
+		}
+		if !satisfied {
+			mapped["state"] = state
+			mapped["reason"] = compactActivationContextValue(item.FailureReason, 1)
+		}
+		ret = append(ret, mapped)
+		if len(ret) >= 20 {
+			break
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func rejectedContinuationCoverageGaps(coverage *resultmodel.DoDCoverage, scope string) []map[string]any {
+	if coverage == nil || len(coverage.Items) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(coverage.Items))
+	for _, item := range coverage.Items {
+		if rejectedContinuationCoverageItemSatisfied(item, scope) {
+			continue
+		}
+		mapped := map[string]any{}
+		for key, value := range rejectedContinuationCoverageIdentity(item) {
+			mapped[key] = compactActivationContextValue(value, 1)
+		}
+		mapped["state"] = strings.TrimSpace(item.State)
+		if refs := compactStringRefs(item.EvidenceRefs, 10); len(refs) > 0 {
+			mapped["evidenceRefs"] = refs
+		}
+		if refs := compactArtifactRefs(item.ArtifactRefs, 10); len(refs) > 0 {
+			mapped["artifactRefs"] = refs
+		}
+		ret = append(ret, mapped)
+		if len(ret) >= 20 {
+			break
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func rejectedContinuationCoverageItemSatisfied(item resultmodel.DoDCoverageItem, scope string) bool {
+	if !strings.EqualFold(strings.TrimSpace(item.State), "satisfied") {
+		return false
+	}
+	if scope == "deliverable" {
+		return len(compactStringRefs(item.EvidenceRefs, 1)) > 0 || len(compactArtifactRefs(item.ArtifactRefs, 1)) > 0
+	}
+	return len(compactStringRefs(item.EvidenceRefs, 1)) > 0
+}
+
+func rejectedContinuationCoverageIdentity(item resultmodel.DoDCoverageItem) map[string]string {
+	ret := map[string]string{}
+	for key, value := range map[string]string{
+		"id":          item.ID,
+		"deliverable": item.Deliverable,
+		"name":        item.Name,
+		"path":        item.Path,
+		"goal":        item.Goal,
+		"goalItem":    item.GoalItem,
+		"item":        item.Item,
+		"requirement": item.Requirement,
+	} {
+		if strings.TrimSpace(value) != "" {
+			ret[key] = strings.TrimSpace(value)
+		}
+	}
+	return ret
+}
+
+func rejectedContinuationRequiredEvidence(summary resultmodel.ResultSummary) []any {
+	values := make([]string, 0, len(summary.NextActions)+len(summary.ResidualRisks)+len(summary.KnownLimitations))
+	values = append(values, summary.NextActions...)
+	values = append(values, summary.ResidualRisks...)
+	values = append(values, summary.KnownLimitations...)
+	return compactStringRefs(values, 20)
+}
+
+func compactStringRefs(input []string, limit int) []any {
+	if len(input) == 0 || limit <= 0 {
+		return nil
+	}
+	ret := make([]any, 0, min(len(input), limit))
+	seen := map[string]struct{}{}
+	for _, item := range input {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		ret = append(ret, compactActivationContextValue(item, 1))
+		if len(ret) >= limit {
+			break
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func compactArtifactRefs(input []common.ArtifactID, limit int) []any {
+	if len(input) == 0 || limit <= 0 {
+		return nil
+	}
+	ret := make([]any, 0, min(len(input), limit))
+	seen := map[common.ArtifactID]struct{}{}
+	for _, item := range input {
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		ret = append(ret, compactActivationContextValue(string(item), 1))
+		if len(ret) >= limit {
+			break
+		}
+	}
+	if len(ret) == 0 {
+		return nil
 	}
 	return ret
 }

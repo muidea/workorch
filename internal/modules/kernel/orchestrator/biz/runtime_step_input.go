@@ -291,6 +291,9 @@ func slimExecutionContextForStepInput(executionContext map[string]any) map[strin
 	if value := mapFromValue(executionContext["replanContinuation"]); len(value) > 0 {
 		ret["replanContinuation"] = compactReplanContinuationForRuntimeContext(value)
 	}
+	if value := mapFromValue(executionContext["rejectedResultContinuation"]); len(value) > 0 {
+		ret["rejectedResultContinuation"] = compactRejectedResultContinuationForRuntimeContext(value)
+	}
 	if value := mapSliceFromValue(executionContext["governanceHistory"]); len(value) > 0 {
 		ret["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(value, 6)
 	}

@@ -20,6 +20,7 @@ import (
 	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory/service"
+	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
@@ -1062,6 +1063,148 @@ func TestActivateWorkspaceExecutionWithBackendPromotesResolvedReplanHistoryToCon
 	}
 	if step.Input[llmcommon.ExecutionContextLLMProviderID] != "runtime-only-provider" {
 		t.Fatalf("first step input = %+v, want runtime-only llm provider binding", step.Input)
+	}
+}
+
+func TestBuildWorkspaceExecutionContextInjectsLatestRejectedResultContinuation(t *testing.T) {
+	ctx := context.Background()
+	session, _ := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+	workspace := &workspacemodel.Workspace{
+		ID:    "ws-rejected-continuation",
+		Title: "rejected continuation workspace",
+		State: common.WorkspaceStateFailed,
+	}
+	goal := &workspacemodel.Goal{
+		ID:          "goal-rejected-continuation",
+		WorkspaceID: workspace.ID,
+		Text:        "deliver neutral coverage closure",
+	}
+	dod := &workspacemodel.DoD{
+		ID:          "dod-rejected-continuation",
+		WorkspaceID: workspace.ID,
+		Items:       []string{"coverage closure is evidenced"},
+		State:       common.DoDStateReady,
+	}
+	if err := exports.Repositories.Workspaces.Create(ctx, workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Goals.Create(ctx, goal); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+	if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
+		t.Fatalf("create dod: %v", err)
+	}
+	if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
+		ID:          "run-old/result/dod-assessment",
+		WorkspaceID: workspace.ID,
+		RunID:       "run-old",
+		GoalID:      goal.ID,
+		DoDID:       dod.ID,
+		State:       common.ResultStateRejected,
+		Summary:     "old rejected result",
+		UpdatedAt:   "2026-05-15T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("create old result: %v", err)
+	}
+	if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
+		ID:           "run-latest/result/dod-assessment",
+		WorkspaceID:  workspace.ID,
+		RunID:        "run-latest",
+		GoalID:       goal.ID,
+		DoDID:        dod.ID,
+		State:        common.ResultStateRejected,
+		Summary:      "latest rejected result",
+		SourceType:   "dod_assessment",
+		SourceRef:    "run-latest/assessment",
+		EvidenceRefs: []string{"run-latest/assessment", "run-latest/assessment"},
+		ArtifactRefs: []common.ArtifactID{"artifact-latest"},
+		DoDAssessment: resultmodel.DoDAssessment{
+			Satisfied: false,
+			Items: []resultmodel.DoDAssessmentItem{
+				{Item: "completed DoD", State: "satisfied", EvidenceRefs: []string{"run-latest/validation"}},
+				{Item: "missing DoD", State: "failed", FailureReason: "missing neutral evidence", EvidenceRefs: []string{"run-latest/assessment"}},
+			},
+			GoalCoverage: &resultmodel.DoDCoverage{Items: []resultmodel.DoDCoverageItem{
+				{ID: "goal-1", Requirement: "goal leaf needs evidence", State: "failed"},
+				{ID: "goal-2", Requirement: "covered goal leaf", State: "satisfied", EvidenceRefs: []string{"run-latest/validation"}},
+			}},
+			AcceptanceDimensions: &resultmodel.DoDCoverage{Items: []resultmodel.DoDCoverageItem{
+				{ID: "neutral_dimension", State: "satisfied"},
+			}},
+			DeliverableCoverage: &resultmodel.DoDCoverage{Items: []resultmodel.DoDCoverageItem{
+				{ID: "required_deliverable", Deliverable: "required deliverable", State: "satisfied"},
+			}},
+			Summary: "assessment summary",
+		},
+		SummaryDetail: resultmodel.ResultSummary{
+			GoalOutcome:      "goal still missing coverage evidence",
+			NextActions:      []string{"provide missing coverage evidence"},
+			ResidualRisks:    []string{"coverage gap remains"},
+			KnownLimitations: []string{"no raw stream should be copied"},
+			EvidenceRefs:     []string{"run-latest/summary-evidence"},
+		},
+		UpdatedAt: "2026-05-16T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("create latest result: %v", err)
+	}
+	if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
+		ID:          "run-other/result/dod-assessment",
+		WorkspaceID: workspace.ID,
+		RunID:       "run-other",
+		GoalID:      "goal-other",
+		DoDID:       dod.ID,
+		State:       common.ResultStateAccepted,
+		Summary:     "other goal result",
+		UpdatedAt:   "2026-05-17T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("create other result: %v", err)
+	}
+
+	contextData, err := buildWorkspaceExecutionContextWithDefinitions(ctx, session, workspace, goal, dod, ActivateWorkspaceExecutionCommand{
+		LLMProviderID: "runtime-only-provider",
+		ExecutionContextPatch: map[string]any{
+			"rejectedResultContinuation": map[string]any{"resultId": "operator-override"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildWorkspaceExecutionContextWithDefinitions: %v", err)
+	}
+	continuation := contextMapFromValue(t, contextData["rejectedResultContinuation"])
+	if continuation["resultId"] != "run-latest/result/dod-assessment" ||
+		continuation["predecessorRunId"] != "run-latest" ||
+		continuation["resultState"] != "rejected" ||
+		continuation[llmcommon.ExecutionContextLLMProviderID] != nil {
+		t.Fatalf("rejectedResultContinuation = %+v, want latest neutral rejected result without runtime llm binding", continuation)
+	}
+	satisfied := contextMapSliceFromValue(t, continuation["satisfiedDoDItems"])
+	if len(satisfied) != 1 || satisfied[0]["item"] != "completed DoD" {
+		t.Fatalf("satisfiedDoDItems = %+v, want completed DoD", satisfied)
+	}
+	unsatisfied := contextMapSliceFromValue(t, continuation["unsatisfiedDoDItems"])
+	if len(unsatisfied) != 1 || unsatisfied[0]["item"] != "missing DoD" || unsatisfied[0]["reason"] != "missing neutral evidence" {
+		t.Fatalf("unsatisfiedDoDItems = %+v, want missing DoD reason", unsatisfied)
+	}
+	gaps := contextMapFromValue(t, continuation["coverageGaps"])
+	missingGoal := contextMapSliceFromValue(t, gaps["missingGoalCoverage"])
+	if len(missingGoal) != 1 || missingGoal[0]["id"] != "goal-1" {
+		t.Fatalf("missingGoalCoverage = %+v, want only failed goal item", missingGoal)
+	}
+	missingAcceptance := contextMapSliceFromValue(t, gaps["missingAcceptanceDimensions"])
+	if len(missingAcceptance) != 1 || missingAcceptance[0]["id"] != "neutral_dimension" {
+		t.Fatalf("missingAcceptanceDimensions = %+v, want satisfied-without-evidence gap", missingAcceptance)
+	}
+	missingDeliverable := contextMapSliceFromValue(t, gaps["missingDeliverableCoverage"])
+	if len(missingDeliverable) != 1 || missingDeliverable[0]["id"] != "required_deliverable" {
+		t.Fatalf("missingDeliverableCoverage = %+v, want satisfied-without-ref gap", missingDeliverable)
+	}
+	requiredEvidence, ok := continuation["requiredEvidence"].([]any)
+	if !ok || len(requiredEvidence) != 3 {
+		t.Fatalf("requiredEvidence = %#v, want next actions, residual risks, known limitations", continuation["requiredEvidence"])
+	}
+	refs, ok := continuation["resultEvidenceRefs"].([]any)
+	if !ok || len(refs) != 1 || refs[0] != "run-latest/assessment" {
+		t.Fatalf("resultEvidenceRefs = %#v, want compact unique refs", continuation["resultEvidenceRefs"])
 	}
 }
 

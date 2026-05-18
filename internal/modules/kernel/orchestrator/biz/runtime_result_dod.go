@@ -90,8 +90,11 @@ func resultDoDAssessmentFromMap(assessment map[string]any) resultmodel.DoDAssess
 	summary, _ := assessment["summary"].(string)
 	satisfied, _ := assessment["satisfied"].(bool)
 	ret := resultmodel.DoDAssessment{
-		Satisfied: satisfied,
-		Summary:   strings.TrimSpace(summary),
+		Satisfied:            satisfied,
+		Summary:              strings.TrimSpace(summary),
+		GoalCoverage:         resultDoDCoverageFromMap(mapFromValue(assessment["goalCoverage"])),
+		AcceptanceDimensions: resultDoDCoverageFromMap(mapFromValue(assessment["acceptanceDimensions"])),
+		DeliverableCoverage:  resultDoDCoverageFromMap(mapFromValue(assessment["deliverableCoverage"])),
 	}
 	items, ok := doDAssessmentItemMaps(assessment["items"])
 	if !ok {
@@ -111,6 +114,61 @@ func resultDoDAssessmentFromMap(assessment map[string]any) resultmodel.DoDAssess
 			Confidence:    floatFromValue(item["confidence"]),
 			SourceNote:    strings.TrimSpace(sourceNote),
 		})
+	}
+	return ret
+}
+
+func resultDoDCoverageFromMap(coverage map[string]any) *resultmodel.DoDCoverage {
+	if len(coverage) == 0 {
+		return nil
+	}
+	summary, _ := coverage["summary"].(string)
+	satisfied, _ := coverage["satisfied"].(bool)
+	ret := &resultmodel.DoDCoverage{
+		Satisfied: satisfied,
+		Summary:   strings.TrimSpace(summary),
+	}
+	items, ok := doDAssessmentItemMaps(coverage["items"])
+	if !ok {
+		return ret
+	}
+	ret.Items = make([]resultmodel.DoDCoverageItem, 0, len(items))
+	for _, item := range items {
+		ret.Items = append(ret.Items, resultmodel.DoDCoverageItem{
+			ID:           strings.TrimSpace(stringFromMap(item, "id")),
+			Deliverable:  strings.TrimSpace(stringFromMap(item, "deliverable")),
+			Name:         strings.TrimSpace(stringFromMap(item, "name")),
+			Path:         strings.TrimSpace(stringFromMap(item, "path")),
+			Goal:         strings.TrimSpace(stringFromMap(item, "goal")),
+			GoalItem:     strings.TrimSpace(stringFromMap(item, "goalItem")),
+			Item:         strings.TrimSpace(stringFromMap(item, "item")),
+			Requirement:  strings.TrimSpace(stringFromMap(item, "requirement")),
+			State:        strings.TrimSpace(stringFromMap(item, "state")),
+			EvidenceRefs: evidenceRefsFromValue(item["evidenceRefs"]),
+			ArtifactRefs: resultArtifactRefsFromValue(item["artifactRefs"]),
+		})
+	}
+	return ret
+}
+
+func resultArtifactRefsFromValue(value any) []common.ArtifactID {
+	refs := stringSliceFromValue(value)
+	if len(refs) == 0 {
+		return nil
+	}
+	ret := make([]common.ArtifactID, 0, len(refs))
+	seen := map[common.ArtifactID]struct{}{}
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		id := common.ArtifactID(ref)
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ret = append(ret, id)
 	}
 	return ret
 }

@@ -1244,7 +1244,7 @@ func assertConflictAction(t *testing.T, endpoint string, expectedError string) {
 	}
 }
 
-func TestWorkorchServerModeRejectsUnsupportedMethodOnWorkspaceRunCreateEndpoint(t *testing.T) {
+func TestWorkorchServerModeListsWorkspaceRunsEndpoint(t *testing.T) {
 	addr := reserveLoopbackAddr(t)
 	bin := buildWorkorchBinary(t)
 	cmd := startWorkorchServerProcess(t, bin, addr, nil)
@@ -1254,11 +1254,18 @@ func TestWorkorchServerModeRejectsUnsupportedMethodOnWorkspaceRunCreateEndpoint(
 
 	resp, err := http.Get("http://" + addr + "/api/v1/workorch/workspaces/ws-main-memory/runs")
 	if err != nil {
-		t.Fatalf("get workspace run create endpoint: %v", err)
+		t.Fatalf("get workspace runs endpoint: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Fatalf("status = %d, want 405", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body workorchRunsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode workspace runs response: %v", err)
+	}
+	if body.Service != "workorch" {
+		t.Fatalf("service = %q, want workorch", body.Service)
 	}
 }
 

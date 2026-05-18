@@ -64,6 +64,36 @@ func compactReplanContinuationForRuntimeContext(input map[string]any) map[string
 	return stripRuntimeLLMBinding(ret)
 }
 
+func compactRejectedResultContinuationForRuntimeContext(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"mode",
+		"predecessorRunId",
+		"resultId",
+		"resultState",
+		"sourceType",
+		"sourceRef",
+		"summary",
+		"goalOutcome",
+		"satisfiedDoDItems",
+		"unsatisfiedDoDItems",
+		"coverageGaps",
+		"requiredEvidence",
+		"resultEvidenceRefs",
+		"artifactRefs",
+		"summaryEvidenceRefs",
+		"summaryArtifactRefs",
+	} {
+		if value, ok := input[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	return stripRuntimeLLMBinding(common.RedactSensitiveMap(ret))
+}
+
 func compactGovernanceHistoryForRuntimeContext(input []map[string]any, limit int) []map[string]any {
 	if limit <= 0 || len(input) == 0 {
 		return nil

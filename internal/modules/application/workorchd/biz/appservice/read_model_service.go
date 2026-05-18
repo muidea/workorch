@@ -2536,12 +2536,20 @@ func mapResultSummary(item resultmodel.ResultSummary) *ResultSummary {
 }
 
 func mapDoDAssessment(item resultmodel.DoDAssessment) *DoDAssessment {
-	if item.Summary == "" && len(item.Items) == 0 && !item.Satisfied {
+	if item.Summary == "" &&
+		len(item.Items) == 0 &&
+		item.GoalCoverage == nil &&
+		item.AcceptanceDimensions == nil &&
+		item.DeliverableCoverage == nil &&
+		!item.Satisfied {
 		return nil
 	}
 	ret := &DoDAssessment{
-		Satisfied: item.Satisfied,
-		Summary:   item.Summary,
+		Satisfied:            item.Satisfied,
+		Summary:              item.Summary,
+		GoalCoverage:         mapDoDCoverage(item.GoalCoverage),
+		AcceptanceDimensions: mapDoDCoverage(item.AcceptanceDimensions),
+		DeliverableCoverage:  mapDoDCoverage(item.DeliverableCoverage),
 	}
 	if len(item.Items) > 0 {
 		ret.Items = make([]DoDAssessmentItem, 0, len(item.Items))
@@ -2553,6 +2561,41 @@ func mapDoDAssessment(item resultmodel.DoDAssessment) *DoDAssessment {
 				FailureReason: assessmentItem.FailureReason,
 				Confidence:    assessmentItem.Confidence,
 				SourceNote:    assessmentItem.SourceNote,
+			})
+		}
+	}
+	return ret
+}
+
+func mapDoDCoverage(item *resultmodel.DoDCoverage) *DoDCoverage {
+	if item == nil {
+		return nil
+	}
+	ret := &DoDCoverage{
+		Satisfied: item.Satisfied,
+		Summary:   item.Summary,
+	}
+	if len(item.Items) > 0 {
+		ret.Items = make([]DoDCoverageItem, 0, len(item.Items))
+		for _, coverageItem := range item.Items {
+			artifactRefs := make([]string, 0, len(coverageItem.ArtifactRefs))
+			for _, ref := range coverageItem.ArtifactRefs {
+				if ref != "" {
+					artifactRefs = append(artifactRefs, string(ref))
+				}
+			}
+			ret.Items = append(ret.Items, DoDCoverageItem{
+				ID:           coverageItem.ID,
+				Deliverable:  coverageItem.Deliverable,
+				Name:         coverageItem.Name,
+				Path:         coverageItem.Path,
+				Goal:         coverageItem.Goal,
+				GoalItem:     coverageItem.GoalItem,
+				Item:         coverageItem.Item,
+				Requirement:  coverageItem.Requirement,
+				State:        coverageItem.State,
+				EvidenceRefs: cloneReadModelStringSlice(coverageItem.EvidenceRefs),
+				ArtifactRefs: artifactRefs,
 			})
 		}
 	}

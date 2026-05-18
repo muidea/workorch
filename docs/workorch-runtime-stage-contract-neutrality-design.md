@@ -147,6 +147,14 @@ Successor 的首个 LLM step 不应只知道“需要重规划”。它必须获
 
 `governanceHistory`、`replanContinuation.failureContext`、`replanContinuation.ticketContext` 必须是 summary/ref-only lineage。允许保留 failure class、signature、target scope、failed step id/kind、attempts、recovery policy、failed step output summary、target snapshot metadata、ticket/resolution refs 与人工决议摘要；禁止携带 `failedStepInput`、完整 `executionContext`、完整 `executionGraph.nodes[].input.diff/content`、raw LLM stream、raw preview、provider/model 动态绑定、target snapshot `content`。若需要完整证据，必须通过 step/tool/LLM raw ref 按需读取。该规则是核心中立约束：它只约束运行态数据形态，不得引入具体应用领域判断。
 
+### Rejected Result Continuation
+
+当 workspace 已无 active run，且同一 workspace / effective Goal / effective DoD 的最新终态 result 为 `rejected` 时，新的 activation 必须把该 result 转换为中立 `executionContext.rejectedResultContinuation`。该 continuation 只表达 predecessor run/result、DoD satisfied/unsatisfied items、coverage gaps、required evidence、evidenceRefs/artifactRefs 等结构化事实，用于下一轮继续补齐缺口。
+
+`rejectedResultContinuation` 必须遵守 summary/ref-only 规则：允许携带 `predecessorRunId`、`resultId`、`sourceType`、`sourceRef`、result summary、`goalOutcome`、`satisfiedDoDItems`、`unsatisfiedDoDItems`、`coverageGaps.missingGoalCoverage`、`coverageGaps.missingAcceptanceDimensions`、`coverageGaps.missingDeliverableCoverage`、`requiredEvidence`、`resultEvidenceRefs`、`artifactRefs`；禁止携带 provider/model 动态绑定、raw LLM stream、完整 execution graph、完整 failed step input、完整 workspace 文件内容或领域特化修复指令。
+
+Coverage gap 只能从 `dodAssessment` 的结构化 `goalCoverage`、`acceptanceDimensions`、`deliverableCoverage` 与 result 的 `nextActions` / `residualRisks` / `knownLimitations` 抽取。Core 不得根据自然语言 summary 或某个业务 profile 的文字关键词推断缺口类型；软件开发等领域如何解释这些缺口，只能由 workspaceTemplate、profile、soul、skill 或用户 Goal / DoD 决定。
+
 ### Active Run 一致性
 
 Workspace 的 `ActiveRunID` 只能指向同一 workspace 下的非终态 run。`completed`、`failed`、`cancelled`、`superseded` 均为终态，任何 workspace 都不得继续以这些 run 作为 active run。
