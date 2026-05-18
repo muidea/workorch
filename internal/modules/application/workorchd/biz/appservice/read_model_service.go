@@ -5825,11 +5825,17 @@ func projectRepairGroundingObservability(ret *RepairLoop, snapshot RunSnapshot) 
 	actionPackage := readModelMapValue(repairStep.Input["repairActionPackage"])
 	targetDiagnostics := readModelMapValue(actionPackage["targetRelevanceDiagnostics"])
 	ret.LastFailureTargetScope = strings.TrimSpace(readModelFirstNonEmptyString(
+		readModelFailureTargetScopeFromStep(stepByID(snapshot.Steps, ret.LastFailureStepID)),
 		readModelStringValue(repairStep.Input["failureTargetScope"]),
 		readModelStringValue(actionPackage["failureTargetScope"]),
 		readModelStringValue(targetDiagnostics["failureTargetScope"]),
 	))
-	if signals := readModelMapValue(repairStep.Input["structuredFailureSignals"]); len(signals) > 0 {
+	if failedStep := stepByID(snapshot.Steps, ret.LastFailureStepID); failedStep != nil {
+		ret.StructuredFailureSignals = readModelStructuredFailureSignalsFromStep(failedStep, ret.LastFailureClass, ret.LastFailureSignature)
+	}
+	if len(ret.StructuredFailureSignals) > 0 {
+		// Current failed step wins. Repair-step inputs may still contain inherited stale signals.
+	} else if signals := readModelMapValue(repairStep.Input["structuredFailureSignals"]); len(signals) > 0 {
 		ret.StructuredFailureSignals = signals
 	} else if signals := readModelMapValue(actionPackage["structuredFailureSignals"]); len(signals) > 0 {
 		ret.StructuredFailureSignals = signals
@@ -5841,6 +5847,128 @@ func projectRepairGroundingObservability(ret *RepairLoop, snapshot RunSnapshot) 
 		ret.RepeatedFailureReason = strings.TrimSpace(readModelStringValue(repeated["reason"]))
 	}
 	ret.LastRepairInputBytes = readModelJSONSize(repairStep.Input)
+}
+
+func readModelStructuredFailureSignalsFromStep(step *presenter.StepView, failureClass string, failureSignature string) map[string]any {
+	if step == nil {
+		return nil
+	}
+	if signals := readModelMapValue(step.Output["structuredFailureSignals"]); len(signals) > 0 {
+		return signals
+	}
+	output := step.Output
+	sources := []string{}
+	targetRefs := []string{}
+	messages := []string{}
+	addSourceMessage := func(source string, value string) {
+		value = strings.TrimSpace(value)
+		if source == "" || value == "" {
+			return
+		}
+		sources = append(sources, source)
+		messages = append(messages, readModelTruncateString(value, 512))
+	}
+	addTarget := func(value string) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			targetRefs = append(targetRefs, value)
+		}
+	}
+	addSourceMessage("failureClass", readModelFirstNonEmptyString(failureClass, readModelStringValue(output["failureClass"])))
+	addSourceMessage("failureSignature", readModelFirstNonEmptyString(failureSignature, readModelStringValue(output["failureSignature"])))
+	for _, key := range []string{"error", "reason", "stderr", "stdout", "stage"} {
+		addSourceMessage(key, readModelStringValue(output[key]))
+	}
+	addTarget(readModelStringValue(output["targetRef"]))
+	addTarget(readModelStringValue(output["path"]))
+	diagnostics := readModelMapValue(output["runtimeDiagnostics"])
+	for _, key := range []string{"targetRef", "conflictRef"} {
+		addTarget(readModelStringValue(diagnostics[key]))
+	}
+	for _, signature := range []string{failureSignature, readModelStringValue(output["failureSignature"])} {
+		for _, target := range readModelTargetsFromFailureSignature(signature) {
+			addTarget(target)
+		}
+	}
+	ret := map[string]any{}
+	if sources = compactUniqueStrings(sources); len(sources) > 0 {
+		ret["sources"] = readModelLimitStrings(sources, 8)
+	}
+	if targetRefs = compactUniqueStrings(targetRefs); len(targetRefs) > 0 {
+		ret["targetRefs"] = readModelLimitStrings(targetRefs, 16)
+	}
+	if messages = compactUniqueStrings(messages); len(messages) > 0 {
+		ret["messages"] = readModelLimitStrings(messages, 10)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func readModelFailureTargetScopeFromStep(step *presenter.StepView) string {
+	if step == nil {
+		return ""
+	}
+	signature := readModelStringValue(step.Output["failureSignature"])
+	if scope := readModelFailureTargetScope(signature); scope != "" {
+		return scope
+	}
+	return strings.TrimSpace(readModelFirstNonEmptyString(
+		readModelStringValue(step.Output["targetRef"]),
+		readModelStringValue(step.Output["path"]),
+	))
+}
+
+func readModelFailureTargetScope(signature string) string {
+	for _, target := range readModelTargetsFromFailureSignature(signature) {
+		return target
+	}
+	return ""
+}
+
+func readModelTargetsFromFailureSignature(signature string) []string {
+	signature = strings.TrimSpace(signature)
+	if signature == "" {
+		return nil
+	}
+	var ret []string
+	for _, segment := range strings.Split(signature, "|") {
+		key, value, ok := strings.Cut(segment, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		switch key {
+		case "failureTargets":
+			for _, target := range strings.Split(value, ",") {
+				if target = strings.TrimSpace(target); target != "" {
+					ret = append(ret, target)
+				}
+			}
+		case "targetRef", "conflictRef":
+			if value != "" {
+				ret = append(ret, value)
+			}
+		}
+	}
+	return compactUniqueStrings(ret)
+}
+
+func readModelLimitStrings(values []string, limit int) []string {
+	if limit <= 0 || len(values) <= limit {
+		return values
+	}
+	return values[:limit]
+}
+
+func readModelTruncateString(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	return value[:limit]
 }
 
 func readModelJSONSize(value any) int {

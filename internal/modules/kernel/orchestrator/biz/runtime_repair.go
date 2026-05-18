@@ -1072,7 +1072,7 @@ func runtimeFailureTargetUsesRunBudget(class string, targetScope string) bool {
 		return false
 	}
 	switch strings.TrimSpace(class) {
-	case failureClassMCPRuntime, failureClassMCPCapabilityDenied:
+	case failureClassMCPRuntime, failureClassMCPCapabilityDenied, failureClassPatchApply:
 		return true
 	default:
 		return false
@@ -2082,6 +2082,9 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	pkg := map[string]any{
 		"requiredOutput": requiredOutput,
 	}
+	if currentFailure := repairActionCurrentFailure(input, rawFailedOutput...); len(currentFailure) > 0 {
+		pkg["currentFailure"] = currentFailure
+	}
 	for _, key := range []string{
 		failureOutputKeyClass,
 		failureOutputKeySignature,
@@ -2116,10 +2119,32 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	}
 	if targets := repairActionTargetSnapshots(input); len(targets) > 0 {
 		pkg["targetSnapshots"] = targets
+		pkg["currentTargetSnapshots"] = repairActionTargetSnapshotMetadata(targets)
 		requiredOutput["mustTargetFailureScope"] = true
 		requiredOutput["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
 		requiredOutput["mustUseCurrentTargetSnapshot"] = true
 		requiredOutput["forbiddenStalePatchReuse"] = true
+	}
+	if targetSet := repairActionTargetSet(input, pkg, rawFailedOutput...); len(targetSet) > 0 {
+		pkg["repairTargetSet"] = targetSet
+		requiredOutput["mustTargetRepairTargetSet"] = true
+	}
+	if digest := failedPatchDigestFromRepairFailure(input, rawFailedOutput...); len(digest) > 0 {
+		pkg["failedPatchDigest"] = digest
+	}
+	forbiddenActions := repairActionForbiddenActions(input, pkg)
+	if len(forbiddenActions) > 0 {
+		pkg["forbiddenActions"] = forbiddenActions
+	}
+	if mode := repairActionRequiredRepairMode(input, pkg, rawFailedOutput...); mode != "" {
+		pkg["requiredRepairMode"] = mode
+	}
+	if budget := repairActionBudgetState(input, pkg); len(budget) > 0 {
+		pkg["repairBudget"] = budget
+	}
+	pkg["exitCriteria"] = []string{
+		"state_changing_artifact_applied_then_verify",
+		"failed_assessment_or_blocker_when_not_repairable",
 	}
 	if manifest := repairActionWorkspaceManifest(input); len(manifest) > 0 {
 		pkg["workspaceFileManifest"] = manifest
@@ -2142,6 +2167,233 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		return nil
 	}
 	return pkg
+}
+
+func repairActionCurrentFailure(input map[string]any, rawFailedOutput ...map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	output := firstRawFailureOutput(input, rawFailedOutput...)
+	ret := map[string]any{}
+	add := func(key string, value string) {
+		if value = strings.TrimSpace(value); value != "" {
+			ret[key] = value
+		}
+	}
+	add("failureClass", firstNonEmptyString(stringFromMap(input, failureOutputKeyClass), stringFromMap(output, failureOutputKeyClass)))
+	add("failureSignature", firstNonEmptyString(stringFromMap(input, failureOutputKeySignature), stringFromMap(output, failureOutputKeySignature)))
+	add("failedStepId", stringFromMap(input, "failedStepId"))
+	add("failedStepKind", stringFromMap(input, "failedStepKind"))
+	add("stage", stringFromMap(output, "stage"))
+	add("targetRef", firstNonEmptyString(
+		stringFromMap(output, "targetRef"),
+		stringFromMap(output, "path"),
+		repairActionTargetRefFromScope(stringFromMap(input, "failureTargetScope")),
+	))
+	add("targetScope", stringFromMap(input, "failureTargetScope"))
+	add("error", firstNonEmptyString(stringFromMap(output, "error"), stringFromMap(input, "failureReason")))
+	add("reason", firstNonEmptyString(stringFromMap(output, "reason"), stringFromMap(input, "failureReason")))
+	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		add("diagnosticKind", stringFromMap(diagnostics, "kind"))
+		add("diagnosticStage", stringFromMap(diagnostics, "stage"))
+		add("diagnosticErrorDetail", stringFromMap(diagnostics, "errorDetail"))
+		if _, ok := ret["targetRef"]; !ok {
+			add("targetRef", stringFromMap(diagnostics, "targetRef"))
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return compactLLMContextMap(ret, 1)
+}
+
+func firstRawFailureOutput(input map[string]any, rawFailedOutput ...map[string]any) map[string]any {
+	if len(rawFailedOutput) > 0 && len(rawFailedOutput[0]) > 0 {
+		return rawFailedOutput[0]
+	}
+	if failedOutput := mapFromValue(input["failedStepOutput"]); len(failedOutput) > 0 {
+		return failedOutput
+	}
+	return nil
+}
+
+func repairActionTargetSet(input map[string]any, pkg map[string]any, rawFailedOutput ...map[string]any) []string {
+	seen := map[string]bool{}
+	var ret []string
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		value = strings.TrimPrefix(value, "targetRef=")
+		value = strings.TrimPrefix(value, "failureTargets=")
+		value = strings.TrimPrefix(value, "conflictRef=")
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	add(repairActionTargetRefFromScope(stringFromMap(input, "failureTargetScope")))
+	if currentFailure := mapFromValue(pkg["currentFailure"]); len(currentFailure) > 0 {
+		add(stringFromMap(currentFailure, "targetRef"))
+		add(repairActionTargetRefFromScope(stringFromMap(currentFailure, "targetScope")))
+	}
+	output := firstRawFailureOutput(input, rawFailedOutput...)
+	add(stringFromMap(output, "targetRef"))
+	add(stringFromMap(output, "path"))
+	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		add(stringFromMap(diagnostics, "targetRef"))
+		add(stringFromMap(diagnostics, "conflictRef"))
+	}
+	for _, key := range []string{"failureTargetRepairContext", "patchRepairContext", "targetSnapshots", "patchRepairSuggestions"} {
+		for _, item := range mapSliceFromValue(input[key]) {
+			add(stringFromMap(item, "targetRef"))
+		}
+	}
+	for _, item := range mapSliceFromValue(pkg["targetSnapshots"]) {
+		add(stringFromMap(item, "targetRef"))
+	}
+	for _, item := range mapSliceFromValue(pkg["currentTargetSnapshots"]) {
+		add(stringFromMap(item, "targetRef"))
+	}
+	if signals := mapFromValue(input["structuredFailureSignals"]); len(signals) > 0 {
+		for _, ref := range stringSliceFromValue(signals["targetRefs"]) {
+			add(ref)
+		}
+	}
+	if signals := mapFromValue(pkg["structuredFailureSignals"]); len(signals) > 0 {
+		for _, ref := range stringSliceFromValue(signals["targetRefs"]) {
+			add(ref)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return limitedStrings(ret, maxLLMContextSliceItems)
+}
+
+func repairActionTargetRefFromScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return ""
+	}
+	_, value, ok := strings.Cut(scope, "=")
+	if !ok {
+		return scope
+	}
+	return strings.TrimSpace(value)
+}
+
+func failedPatchDigestFromRepairFailure(input map[string]any, rawFailedOutput ...map[string]any) map[string]any {
+	output := firstRawFailureOutput(input, rawFailedOutput...)
+	text := strings.ToLower(strings.Join(repairForbiddenReuseTextValues(input, output), "\n"))
+	class := strings.TrimSpace(firstNonEmptyString(stringFromMap(input, failureOutputKeyClass), stringFromMap(output, failureOutputKeyClass)))
+	if class != failureClassPatchApply &&
+		!strings.Contains(text, "patch") &&
+		!strings.Contains(text, "hunk") &&
+		!strings.Contains(text, "oldtext") &&
+		!strings.Contains(text, "context mismatch") {
+		return nil
+	}
+	ret := map[string]any{}
+	add := func(key string, value string) {
+		if value = strings.TrimSpace(value); value != "" {
+			ret[key] = value
+		}
+	}
+	add("patchId", firstNonEmptyString(stringFromMap(output, "patchId"), stringFromMap(input, "patchId")))
+	add("targetRef", firstNonEmptyString(
+		stringFromMap(output, "targetRef"),
+		stringFromMap(input, "targetRef"),
+		repairActionTargetRefFromScope(stringFromMap(input, "failureTargetScope")),
+	))
+	add("patchType", firstNonEmptyString(stringFromMap(output, "patchType"), stringFromMap(input, "patchType")))
+	add("failureReason", firstNonEmptyString(stringFromMap(output, "reason"), stringFromMap(output, "error"), stringFromMap(input, "failureReason")))
+	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		add("failureDetail", firstNonEmptyString(stringFromMap(diagnostics, "errorDetail"), stringFromMap(diagnostics, "guidance")))
+		if stringFromMap(ret, "targetRef") == "" {
+			add("targetRef", stringFromMap(diagnostics, "targetRef"))
+		}
+		if stringFromMap(ret, "patchType") == "" {
+			add("patchType", stringFromMap(diagnostics, "patchType"))
+		}
+	}
+	if repairActionFailureIndicatesStalePatch(input, output) {
+		ret["stalePatchRejected"] = true
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return compactLLMContextMap(ret, 1)
+}
+
+func repairActionForbiddenActions(input map[string]any, pkg map[string]any) []string {
+	ret := []string{"read_only_graph_for_state_changing_repair"}
+	if len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
+		ret = append(ret, "modify_target_outside_repair_target_set")
+	}
+	forbiddenReuse := stringSliceFromValue(pkg["forbiddenContentReuse"])
+	if repairActionFailureIndicatesStalePatch(input, firstRawFailureOutput(input)) ||
+		stringSliceContains(forbiddenReuse, "stale_patch_text") ||
+		stringSliceContains(forbiddenReuse, "missing_old_text") ||
+		stringSliceContains(forbiddenReuse, "malformed_diff_text") {
+		ret = append(ret, "reuse_stale_patch_hunk")
+	}
+	return limitedStrings(compactUniqueStrings(ret), 8)
+}
+
+func repairActionRequiredRepairMode(input map[string]any, pkg map[string]any, rawFailedOutput ...map[string]any) string {
+	output := firstRawFailureOutput(input, rawFailedOutput...)
+	if !repairActionFailureIndicatesStalePatch(input, output) &&
+		!stringSliceContains(stringSliceFromValue(pkg["forbiddenContentReuse"]), "stale_patch_text") &&
+		!stringSliceContains(stringSliceFromValue(pkg["forbiddenContentReuse"]), "missing_old_text") &&
+		!stringSliceContains(stringSliceFromValue(pkg["forbiddenContentReuse"]), "malformed_diff_text") {
+		return ""
+	}
+	if int64FromValue(input["targetRepairAttempts"]) >= 2 {
+		return "exact_replacement_against_current_snapshot"
+	}
+	return "patch_current_snapshot_only"
+}
+
+func repairActionFailureIndicatesStalePatch(input map[string]any, output map[string]any) bool {
+	text := strings.ToLower(strings.Join(repairForbiddenReuseTextValues(input, output), "\n"))
+	return strings.Contains(text, "context mismatch") ||
+		strings.Contains(text, "patch does not apply") ||
+		strings.Contains(text, "stale") ||
+		strings.Contains(text, "oldtext not found") ||
+		strings.Contains(text, "old text not found") ||
+		strings.Contains(text, "hunk header") ||
+		strings.Contains(text, "malformed unified") ||
+		strings.Contains(text, "invalid unified")
+}
+
+func repairActionBudgetState(input map[string]any, pkg map[string]any) map[string]any {
+	ret := map[string]any{}
+	if attempt := int64FromValue(input[stepInputKeyRuntimeRepairAttempt]); attempt > 0 {
+		ret["attempt"] = attempt
+	}
+	if maxAttempts := int64FromValue(input["maxRuntimeRepairAttempts"]); maxAttempts > 0 {
+		ret["maxAttempts"] = maxAttempts
+	}
+	if targetAttempts := int64FromValue(input["targetRepairAttempts"]); targetAttempts > 0 {
+		ret["targetRepairAttempts"] = targetAttempts
+	}
+	class := strings.TrimSpace(firstNonEmptyString(stringFromMap(input, failureOutputKeyClass), stringFromMap(pkg, failureOutputKeyClass)))
+	switch class {
+	case failureClassProviderTimeout, failureClassProviderUnavailable, failureClassContextTooLarge, failureClassRateLimited, failureClassProviderStreamIncomplete:
+		ret["budgetKind"] = "provider_retry"
+	case failureClassLLMDecisionInvalid:
+		ret["budgetKind"] = "llm_schema_repair"
+	case failureClassPatchApply:
+		ret["budgetKind"] = "patch_apply_repair"
+	case failureClassShellCommand:
+		ret["budgetKind"] = "verification_repair"
+	case failureClassRuntime:
+		ret["budgetKind"] = "state_changing_contract_repair"
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func compactStateChangingRepairInputAroundActionPackage(input map[string]any) {
@@ -2618,6 +2870,41 @@ func repairActionTargetSnapshot(item map[string]any) map[string]any {
 		} else {
 			ret["contentPreview"] = truncateLLMContextString(content)
 		}
+	}
+	return ret
+}
+
+func repairActionTargetSnapshotMetadata(items []map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		next := map[string]any{}
+		for _, key := range []string{
+			"targetRef",
+			"exists",
+			"contentHash",
+			"contentComplete",
+			"safeForFileWrite",
+			"redacted",
+			"truncated",
+			"isBinary",
+			"size",
+			"source",
+			"contextSource",
+			"error",
+		} {
+			if value, ok := item[key]; ok && value != nil {
+				next[key] = compactLLMContextValue(value, 1)
+			}
+		}
+		if len(next) > 0 {
+			ret = append(ret, next)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
 	}
 	return ret
 }

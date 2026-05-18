@@ -261,3 +261,71 @@ func TestRuntimeRepairActionPackageMarksRepeatedTargetRepairMode(t *testing.T) {
 		t.Fatalf("targetRelevanceDiagnostics = %#v, want target and signal diagnostics", diagnostics)
 	}
 }
+
+func TestRuntimeRepairActionPackageGroundsCurrentPatchFailure(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"runtimeRepairAttempt":        3,
+		"maxRuntimeRepairAttempts":    10,
+		"targetRepairAttempts":        1,
+		"failedStepId":                "run/graph-002/patch",
+		"failedStepKind":              "patch/apply",
+		"failureClass":                failureClassPatchApply,
+		"failureSignature":            "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|targetRef=target.txt|error=context mismatch",
+		"failureTargetScope":          "targetRef=target.txt",
+		"patchRepairContext": []map[string]any{{
+			"targetRef":        "target.txt",
+			"exists":           true,
+			"contentHash":      "sha256-current",
+			"content":          "current content\n",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+		}},
+		"structuredFailureSignals": map[string]any{
+			"targetRefs": []string{"target.txt"},
+			"messages":   []string{"unified diff hunk context mismatch"},
+		},
+	}
+	actionPackage := repairActionPackageFromRepairInput(input, map[string]any{
+		"stage":                   "patch_apply",
+		"targetRef":               "target.txt",
+		"patchType":               "unified_diff",
+		"error":                   "invalid argument: unified diff hunk context mismatch",
+		failureOutputKeyClass:     failureClassPatchApply,
+		failureOutputKeySignature: "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|targetRef=target.txt|error=context mismatch",
+		"runtimeDiagnostics": map[string]any{
+			"kind":        failureClassPatchApply,
+			"targetRef":   "target.txt",
+			"patchType":   "unified_diff",
+			"errorDetail": "unified_diff_hunk_context_mismatch",
+		},
+	})
+
+	currentFailure := mapFromValue(actionPackage["currentFailure"])
+	if currentFailure["failureClass"] != failureClassPatchApply ||
+		currentFailure["failedStepId"] != "run/graph-002/patch" ||
+		currentFailure["targetRef"] != "target.txt" {
+		t.Fatalf("currentFailure = %#v, want current patch failure", currentFailure)
+	}
+	digest := mapFromValue(actionPackage["failedPatchDigest"])
+	if digest["targetRef"] != "target.txt" || digest["stalePatchRejected"] != true {
+		t.Fatalf("failedPatchDigest = %#v, want stale target digest", digest)
+	}
+	if actionPackage["requiredRepairMode"] != "patch_current_snapshot_only" {
+		t.Fatalf("requiredRepairMode = %#v, want patch_current_snapshot_only", actionPackage["requiredRepairMode"])
+	}
+	forbidden := stringSliceFromValue(actionPackage["forbiddenActions"])
+	for _, want := range []string{"read_only_graph_for_state_changing_repair", "modify_target_outside_repair_target_set", "reuse_stale_patch_hunk"} {
+		if !stringSliceContains(forbidden, want) {
+			t.Fatalf("forbiddenActions = %#v, want %q", forbidden, want)
+		}
+	}
+	targetSet := stringSliceFromValue(actionPackage["repairTargetSet"])
+	if len(targetSet) != 1 || targetSet[0] != "target.txt" {
+		t.Fatalf("repairTargetSet = %#v, want target.txt", actionPackage["repairTargetSet"])
+	}
+	budget := mapFromValue(actionPackage["repairBudget"])
+	if budget["budgetKind"] != "patch_apply_repair" || budget["attempt"] != int64(3) {
+		t.Fatalf("repairBudget = %#v, want patch apply budget state", budget)
+	}
+}

@@ -13,6 +13,7 @@
 - 新增或调整 runtime 流程时，必须能映射到本文定义的中立 stage、artifact、evidence、result、repair、replan 合同。
 - 若旧文档、历史计划、局部收口方案与本文冲突，以本文为准；需要保留的合理内容应先抽象为中立规则，再并入本文或作为 profile 文档引用。
 - 后续所有针对 WorkOrch 功能的开发完善，都必须在设计、实现和验证三个环节显式参照本文。
+- runtime repair 的当前失败优先、patch grounding、repair target set、预算拆分与终态收敛必须同时遵守 `workorch-repair-convergence-patch-grounding-closure-design.md`；该文档是本文在 repair 收敛维度的补充合约，仍不得引入任何业务领域硬编码。
 
 ## 背景
 

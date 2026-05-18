@@ -7376,6 +7376,57 @@ func TestRuntimeOrchestrator_RuntimeRepairTargetScopeUsesCurrentGraphWindow(t *t
 	}
 }
 
+func TestRuntimeOrchestrator_PatchApplyTargetBudgetCrossesGraphWindows(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-runtime-repair-patch-target-budget")
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps:   stepRepo,
+		tickets: memory.NewDecisionTicketRepository(),
+	}
+	signature := "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|targetRef=target.txt|error=context mismatch"
+	for attempt := 1; attempt <= defaultMaxRuntimeRepairAttempts; attempt++ {
+		if err := stepRepo.Create(ctx, &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/repair-old-%d", runID, attempt)),
+			RunID: runID,
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRuntimeRepairAttempt:  attempt,
+				stepInputKeyGraphRootStepID:       fmt.Sprintf("%s/graph-%03d", runID, attempt),
+				stepInputKeyRepairOfFailureClass:  failureClassPatchApply,
+				stepInputKeyRepairOfFailureSig:    signature,
+			},
+			Output: map[string]any{"status": "completed"},
+		}); err != nil {
+			t.Fatalf("seed patch target repair %d: %v", attempt, err)
+		}
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(runID + "/graph-latest/patch"),
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyGraphRootStepID: string(runID) + "/graph-latest",
+		},
+		Output: map[string]any{
+			"stage":                   "patch_apply",
+			"error":                   "invalid argument: unified diff hunk context mismatch",
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: signature,
+		},
+	}
+
+	if got := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != defaultMaxRuntimeRepairAttempts {
+		t.Fatalf("effective attempt count = %d, want patch target attempts counted across graph roots", got)
+	}
+	if !orch.shouldEscalateRuntimeRepairExhaustion(ctx, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-patch-target-budget")}, failedStep) {
+		t.Fatalf("repeated patch target failure should escalate repair exhaustion")
+	}
+}
+
 func TestRuntimeOrchestrator_ResumeClearsStaleRuntimeRepairExhaustionBlocker(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

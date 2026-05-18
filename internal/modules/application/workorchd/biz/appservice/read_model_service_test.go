@@ -2869,6 +2869,83 @@ func TestMapTaskProgressProjectsRepairLoopState(t *testing.T) {
 	}
 }
 
+func TestMapTaskProgressRepairLoopSignalsPreferCurrentFailureStep(t *testing.T) {
+	snapshot := RunSnapshot{
+		Workspace: Workspace{ID: "ws-current-failure-signals"},
+		Run: Run{
+			ID:          "run-current-failure-signals",
+			WorkspaceID: "ws-current-failure-signals",
+			State:       string(common.RunStateRunning),
+		},
+		Steps: []presenter.StepView{
+			{
+				ID:    "run-current-failure-signals/graph-002/patch",
+				Kind:  "patch/apply",
+				State: string(common.StepStateFailed),
+				Output: map[string]any{
+					"stage":            "patch_apply",
+					"error":            "invalid argument: unified diff hunk context mismatch",
+					"targetRef":        "target.txt",
+					"failureClass":     "patch_apply_failed",
+					"failureSignature": "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|targetRef=target.txt|error=context mismatch",
+				},
+			},
+			{
+				ID:    "run-current-failure-signals/repair-003",
+				Kind:  "llm/workspace_execution",
+				State: string(common.StepStateDispatched),
+				Input: map[string]any{
+					"runtimeRepairFollowUp": true,
+					"runtimeRepairAttempt":  3,
+					"structuredFailureSignals": map[string]any{
+						"messages":    []string{"state-changing llm repair step returned executionGraph without patch/apply"},
+						"identifiers": []string{"llm_execution_graph_plan"},
+					},
+					"repairActionPackage": map[string]any{
+						"structuredFailureSignals": map[string]any{
+							"messages": []string{"historical graph contract violation"},
+						},
+					},
+				},
+			},
+		},
+		RuntimeCheckpoints: []RuntimeCheckpoint{
+			{
+				ID:            "checkpoint-current-patch-failure",
+				RunID:         "run-current-failure-signals",
+				CurrentStepID: "run-current-failure-signals/graph-002/patch",
+				OccurredAt:    "2026-05-06T10:00:03Z",
+				Data: map[string]any{
+					"event":            "step_failed",
+					"failureClass":     "patch_apply_failed",
+					"failureSignature": "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|targetRef=target.txt|error=context mismatch",
+				},
+			},
+		},
+	}
+
+	progress := mapTaskProgress(snapshot)
+	signals := progress.RepairLoop.StructuredFailureSignals
+	messages := readModelStringSliceValue(signals["messages"])
+	foundCurrentPatchMessage := false
+	for _, message := range messages {
+		if strings.Contains(message, "invalid argument: unified diff hunk context mismatch") {
+			foundCurrentPatchMessage = true
+			break
+		}
+	}
+	if progress.RepairLoop.LastFailureClass != "patch_apply_failed" ||
+		progress.RepairLoop.LastFailureTargetScope != "target.txt" ||
+		!foundCurrentPatchMessage {
+		t.Fatalf("repairLoop = %+v signals=%+v, want current patch failure signals", progress.RepairLoop, signals)
+	}
+	for _, message := range messages {
+		if strings.Contains(message, "executionGraph without patch/apply") || strings.Contains(message, "historical graph") {
+			t.Fatalf("signals = %+v, should not expose stale repair-step graph violation", signals)
+		}
+	}
+}
+
 func TestMapTaskProgressProjectsRepairLoopEscalation(t *testing.T) {
 	snapshot := RunSnapshot{
 		Workspace: Workspace{ID: "ws-repair-escalation"},
