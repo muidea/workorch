@@ -173,6 +173,9 @@ func mergeExecutionDefinitionsIntoPackage(pkg map[string]any, executionContext m
 	if value, ok := executionContext["executionContract"]; ok && value != nil {
 		pkg["executionContract"] = cloneLLMContextValue(value)
 	}
+	if value, ok := executionContext["definitionChangeImpact"]; ok && value != nil {
+		pkg["definitionChangeImpact"] = compactLLMContextValue(value, 1)
+	}
 	for _, key := range []string{
 		"goal",
 		"goals",

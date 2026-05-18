@@ -239,6 +239,7 @@ func goalPromptSection(input map[string]any) string {
 	copyMapValue(section, "packagedGoal", executionContextPackage["goal"])
 	copyMapValue(section, "packagedGoals", executionContextPackage["goals"])
 	copyMapValue(section, "packagedGoalDefinitionPolicy", executionContextPackage["goalDefinitionPolicy"])
+	copyMapValue(section, "definitionChangeImpact", firstNonNilValue(executionContext["definitionChangeImpact"], executionContextPackage["definitionChangeImpact"]))
 	copyMapValue(section, "topLevelGoal", input["goal"])
 	copyMapValue(section, "topLevelGoals", input["goals"])
 	if len(section) == 0 {
@@ -257,6 +258,7 @@ func dodPromptSection(input map[string]any) string {
 	copyMapValue(section, "packagedDoD", executionContextPackage["dod"])
 	copyMapValue(section, "packagedDoDs", executionContextPackage["dods"])
 	copyMapValue(section, "packagedDoDDefinitionPolicy", executionContextPackage["doDDefinitionPolicy"])
+	copyMapValue(section, "definitionChangeImpact", firstNonNilValue(executionContext["definitionChangeImpact"], executionContextPackage["definitionChangeImpact"]))
 	copyMapValue(section, "topLevelDoD", input["dod"])
 	copyMapValue(section, "topLevelDoDs", input["dods"])
 	if len(section) == 0 {
@@ -277,6 +279,7 @@ func effectiveGoalDoDPromptSection(input map[string]any) string {
 	copyMapValue(section, "doDId", input["doDId"])
 	copyMapValue(section, "packagedGoalId", executionContextPackage["goalId"])
 	copyMapValue(section, "packagedDoDId", executionContextPackage["doDId"])
+	copyMapValue(section, "definitionChangeImpact", firstNonNilValue(executionContext["definitionChangeImpact"], executionContextPackage["definitionChangeImpact"]))
 	if len(section) == 0 {
 		return ""
 	}
@@ -401,17 +404,39 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			},
 		})
 	}
+	requirements := []string{
+		"Use runtimeCapabilities only",
+		"Respect unresolved governance constraints",
+		"Treat effective Goal and DoD as hard constraints",
+		"When runtimeStageMode is open_judgment, prefer context gathering, plan refinement, and constraint clarification over premature state-changing output",
+		"When runtimeStageMode is strict_convergence, produce executable output, failed assessment, or a real blocker; do not continue read-only looping",
+		"If the current workspace is empty and the effective Goal/DoD can be satisfied by creating workspace deliverables with available runtime capabilities, continue with bounded state-changing work instead of asking whether initialization is allowed",
+	}
+	if definitionChangeImpactChanged(request.Input) {
+		requirements = append(requirements,
+			"definitionChangeImpact.changed is true: before state-changing work, identify additive constraints, still-valid prior constraints, conflicts, and the neutral strategy for artifact/evidence/verification targets",
+			"Do not weaken prior Goal or DoD constraints, remove valid acceptance evidence, or relax the requested outcome to make the current run pass",
+		)
+	}
 	return marshalPromptSection("Current Requested Action", map[string]any{
-		"type": "plan_next_step",
-		"requirements": []string{
-			"Use runtimeCapabilities only",
-			"Respect unresolved governance constraints",
-			"Treat effective Goal and DoD as hard constraints",
-			"When runtimeStageMode is open_judgment, prefer context gathering, plan refinement, and constraint clarification over premature state-changing output",
-			"When runtimeStageMode is strict_convergence, produce executable output, failed assessment, or a real blocker; do not continue read-only looping",
-			"If the current workspace is empty and the effective Goal/DoD can be satisfied by creating workspace deliverables with available runtime capabilities, continue with bounded state-changing work instead of asking whether initialization is allowed",
-		},
+		"type":         "plan_next_step",
+		"requirements": requirements,
 	})
+}
+
+func definitionChangeImpactChanged(input map[string]any) bool {
+	if impact := recordFromAny(input["definitionChangeImpact"]); boolValue(impact["changed"]) {
+		return true
+	}
+	executionContext := recordFromAny(input["executionContext"])
+	if impact := recordFromAny(executionContext["definitionChangeImpact"]); boolValue(impact["changed"]) {
+		return true
+	}
+	executionContextPackage := recordFromAny(input["executionContextPackage"])
+	if impact := recordFromAny(executionContextPackage["definitionChangeImpact"]); boolValue(impact["changed"]) {
+		return true
+	}
+	return false
 }
 
 func marshalPromptSection(title string, value any) string {

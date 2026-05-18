@@ -240,6 +240,10 @@ func TestBuildProviderPromptMessagesUsesPackagedGoalAndDoDWhenExecutionContextIs
 				},
 				"goalDefinitionPolicy": "workspace_goal",
 				"doDDefinitionPolicy":  "workspace_dod",
+				"definitionChangeImpact": map[string]any{
+					"changed": true,
+					"policy":  "workspace_goal_dod_cumulative_latest_refines_previous",
+				},
 			},
 		},
 	}
@@ -255,6 +259,9 @@ func TestBuildProviderPromptMessagesUsesPackagedGoalAndDoDWhenExecutionContextIs
 		"packagedGoalDefinitionPolicy",
 		"packagedDoDDefinitionPolicy",
 		"Effective Goal and DoD View",
+		"definitionChangeImpact.changed is true",
+		"additive constraints",
+		"workspace_goal_dod_cumulative_latest_refines_previous",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("prompt missing %q, joined=%s", want, joined)

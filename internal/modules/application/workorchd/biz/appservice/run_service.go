@@ -357,6 +357,9 @@ func workspaceDefinitionContextPatchForRun(ctx context.Context, session *Runtime
 		patch["dods"] = workspaceDoDs
 		patch["doDDefinitionPolicy"] = "workspace_dods_are_cumulative_latest_refines_previous"
 	}
+	if impact := definitionChangeImpactFromDefinitions(effectiveGoal, workspaceGoals, effectiveDoD, workspaceDoDs); len(impact) > 0 {
+		patch["definitionChangeImpact"] = impact
+	}
 	return patch, nil
 }
 

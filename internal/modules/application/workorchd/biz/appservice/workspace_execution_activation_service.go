@@ -477,6 +477,9 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 		contextData["dods"] = workspaceDoDs
 		contextData["doDDefinitionPolicy"] = "workspace_dods_are_cumulative_latest_refines_previous"
 	}
+	if impact := definitionChangeImpactFromDefinitions(effectiveGoal, workspaceGoals, effectiveDoD, workspaceDoDs); len(impact) > 0 {
+		contextData["definitionChangeImpact"] = impact
+	}
 	dialogLanguage := languageNameFromLocale(cmd.DialogLanguage)
 	if dialogLanguage == "" {
 		dialogLanguage = defaultDialogLanguage()
@@ -765,6 +768,7 @@ func mergeActivationExecutionContextPatch(contextData map[string]any, patch map[
 		"activation": {}, "workspaceId": {}, "goalId": {}, "doDId": {},
 		"goal": {}, "goals": {}, "goalDefinitionPolicy": {},
 		"dod": {}, "dods": {}, "doDDefinitionPolicy": {},
+		"definitionChangeImpact":     {},
 		"rejectedResultContinuation": {},
 	}
 	for key, value := range patch {
@@ -777,6 +781,72 @@ func mergeActivationExecutionContextPatch(contextData map[string]any, patch map[
 		}
 		contextData[key] = value
 	}
+}
+
+func definitionChangeImpactFromDefinitions(effectiveGoal *workspacemodel.Goal, goals []map[string]any, effectiveDoD *workspacemodel.DoD, dods []map[string]any) map[string]any {
+	goalIDs := goalIDsFromContexts(goals)
+	doDIDs := doDIDsFromContexts(dods)
+	effectiveGoalID := ""
+	if effectiveGoal != nil {
+		effectiveGoalID = string(effectiveGoal.ID)
+	}
+	effectiveDoDID := ""
+	if effectiveDoD != nil {
+		effectiveDoDID = string(effectiveDoD.ID)
+	}
+	changed := len(goalIDs) > 1 || len(doDIDs) > 1
+	if !changed {
+		return nil
+	}
+	return map[string]any{
+		"version":                        "workorch.definition_change_impact.v1",
+		"changed":                        true,
+		"policy":                         "workspace_goal_dod_cumulative_latest_refines_previous",
+		"requiredPreExecutionAssessment": true,
+		"goalChange": map[string]any{
+			"effectiveGoalId":        effectiveGoalID,
+			"latestGoalId":           latestDefinitionID(goalIDs, effectiveGoalID),
+			"previousGoalIds":        previousDefinitionIDs(goalIDs, effectiveGoalID),
+			"allGoalIds":             goalIDs,
+			"allGoalsAreConstraints": true,
+		},
+		"doDChange": map[string]any{
+			"effectiveDoDId":                effectiveDoDID,
+			"latestDoDId":                   latestDefinitionID(doDIDs, effectiveDoDID),
+			"previousDoDIds":                previousDefinitionIDs(doDIDs, effectiveDoDID),
+			"allDoDIds":                     doDIDs,
+			"allDoDItemsAreAcceptanceGates": true,
+		},
+		"strategyRequirements": []string{
+			"preserve still-valid prior Goal and DoD constraints",
+			"identify additive requirements and conflicts before state-changing work",
+			"choose state-change, evidence, and verification targets before state-changing work",
+			"do not weaken prior acceptance evidence or constraints",
+		},
+	}
+}
+
+func latestDefinitionID(ids []string, effectiveID string) string {
+	if strings.TrimSpace(effectiveID) != "" {
+		return strings.TrimSpace(effectiveID)
+	}
+	if len(ids) == 0 {
+		return ""
+	}
+	return ids[len(ids)-1]
+}
+
+func previousDefinitionIDs(ids []string, effectiveID string) []string {
+	ret := make([]string, 0, len(ids))
+	effectiveID = strings.TrimSpace(effectiveID)
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || id == effectiveID {
+			continue
+		}
+		ret = append(ret, id)
+	}
+	return ret
 }
 
 func activationContextReadTasks(tasks ...func() error) error {

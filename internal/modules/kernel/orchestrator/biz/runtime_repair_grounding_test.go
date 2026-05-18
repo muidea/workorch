@@ -252,6 +252,14 @@ func TestRuntimeRepairActionPackageMarksRepeatedTargetRepairMode(t *testing.T) {
 	if repeated["enabled"] != true || repeated["mustPreferExactTargetSnapshot"] != true {
 		t.Fatalf("repeatedTargetRepairMode = %#v, want strict repeated target mode", repeated)
 	}
+	reassessment := mapFromValue(actionPackage["strategyReassessment"])
+	if reassessment["required"] != true || reassessment["reason"] != "same_target_scope_repeated_failure" {
+		t.Fatalf("strategyReassessment = %#v, want repeated target reassessment", reassessment)
+	}
+	requiredFields := stringSliceFromValue(reassessment["requiredDecisionFields"])
+	if !stringSliceContains(requiredFields, "rootCauseTarget") || !stringSliceContains(requiredFields, "repairTargetDecision") {
+		t.Fatalf("requiredDecisionFields = %#v, want root cause and target decision fields", reassessment["requiredDecisionFields"])
+	}
 	required := mapFromValue(actionPackage["requiredOutput"])
 	if required["mustUseCurrentTargetSnapshot"] != true || required["mustRebuildFromCurrentEvidence"] != true {
 		t.Fatalf("requiredOutput = %#v, want repeated repair target constraints", required)

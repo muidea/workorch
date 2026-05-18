@@ -1330,10 +1330,21 @@ func TestActivationContextMergesOperatorInputPatchWithoutOverridingDefinitions(t
 		WorkspaceID: workspace.ID,
 		Text:        "existing cumulative goal",
 	}
+	nextGoal := &workspacemodel.Goal{
+		ID:          "goal-activation-operator-input-next",
+		WorkspaceID: workspace.ID,
+		Text:        "new cumulative goal",
+	}
 	dod := &workspacemodel.DoD{
 		ID:          "dod-activation-operator-input",
 		WorkspaceID: workspace.ID,
 		Items:       []string{"existing dod"},
+		State:       common.DoDStateReady,
+	}
+	nextDoD := &workspacemodel.DoD{
+		ID:          "dod-activation-operator-input-next",
+		WorkspaceID: workspace.ID,
+		Items:       []string{"new dod"},
 		State:       common.DoDStateReady,
 	}
 	if err := exports.Repositories.Workspaces.Create(ctx, workspace); err != nil {
@@ -1342,13 +1353,23 @@ func TestActivationContextMergesOperatorInputPatchWithoutOverridingDefinitions(t
 	if err := exports.Repositories.Goals.Create(ctx, goal); err != nil {
 		t.Fatalf("create goal: %v", err)
 	}
+	if err := exports.Repositories.Goals.Create(ctx, nextGoal); err != nil {
+		t.Fatalf("create next goal: %v", err)
+	}
 	if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
 		t.Fatalf("create dod: %v", err)
+	}
+	if err := exports.Repositories.DoDs.Create(ctx, nextDoD); err != nil {
+		t.Fatalf("create next dod: %v", err)
 	}
 
 	contextData, err := buildWorkspaceExecutionContextWithDefinitions(ctx, session, workspace, goal, dod, ActivateWorkspaceExecutionCommand{
 		ExecutionContextPatch: map[string]any{
 			"goalId": "malicious-goal-override",
+			"definitionChangeImpact": map[string]any{
+				"changed": false,
+				"policy":  "operator_override",
+			},
 			"operatorInputQueue": []map[string]any{{
 				"source":  "tui",
 				"content": "继续执行并纳入新的对话信息",
@@ -1362,8 +1383,22 @@ func TestActivationContextMergesOperatorInputPatchWithoutOverridingDefinitions(t
 	if err != nil {
 		t.Fatalf("buildWorkspaceExecutionContextWithDefinitions: %v", err)
 	}
-	if contextData["goalId"] != string(goal.ID) {
-		t.Fatalf("goalId = %v, want protected selected goal", contextData["goalId"])
+	if contextData["goalId"] != string(nextGoal.ID) {
+		t.Fatalf("goalId = %v, want protected latest goal", contextData["goalId"])
+	}
+	impact := contextMapFromValue(t, contextData["definitionChangeImpact"])
+	if impact["changed"] != true || impact["policy"] != "workspace_goal_dod_cumulative_latest_refines_previous" {
+		t.Fatalf("definitionChangeImpact = %+v, want runtime-generated cumulative impact", impact)
+	}
+	goalChange := contextMapFromValue(t, impact["goalChange"])
+	previousGoalIDs := stringSliceFromAny(goalChange["previousGoalIds"])
+	if goalChange["effectiveGoalId"] != string(nextGoal.ID) || !stringSliceContains(previousGoalIDs, string(goal.ID)) {
+		t.Fatalf("goalChange = %+v, want latest goal with previous goal ids", goalChange)
+	}
+	doDChange := contextMapFromValue(t, impact["doDChange"])
+	previousDoDIDs := stringSliceFromAny(doDChange["previousDoDIds"])
+	if doDChange["effectiveDoDId"] != string(nextDoD.ID) || !stringSliceContains(previousDoDIDs, string(dod.ID)) {
+		t.Fatalf("doDChange = %+v, want latest DoD with previous DoD ids", doDChange)
 	}
 	queue, ok := contextData["operatorInputQueue"].([]map[string]any)
 	if !ok || len(queue) != 1 || queue[0]["content"] != "继续执行并纳入新的对话信息" {

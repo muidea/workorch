@@ -1835,6 +1835,14 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input["failureTargetScope"] = targetScope
 		input["targetRepairAttempts"] = o.runtimeRepairAttemptCountForFailureTargetInWindow(ctx, run.ID, class, targetScope, runtimeRepairTargetBudgetWindowRootForFailureTarget(failedStep))
 	}
+	if reassessment := repairStrategyReassessmentFromInput(input); len(reassessment) > 0 {
+		input["strategyReassessment"] = reassessment
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"strategyReassessment.required is true: distinguish the failed surface from the root cause target before changing the same target again.",
+			"Explain the next repair target decision in neutral terms: failedSurface, rootCauseTarget, repairTargetDecision, forbiddenRepair, and verificationPlan.",
+			"Do not weaken still-valid Goal or DoD constraints, remove valid evidence, or reduce the requested outcome to make verification pass.",
+		)
+	}
 	budgetScope := recoveryBudgetScope("runtime_repair", rootStepID, class, signature)
 	if targetScope != "" {
 		budgetScope["failureTargetScope"] = targetScope
@@ -2010,6 +2018,51 @@ func stateChangingRepairGuidance() []string {
 	}
 }
 
+func repairStrategyReassessmentFromInput(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	targetAttempts := int64FromValue(input["targetRepairAttempts"])
+	repairAttempt := int64FromValue(input[stepInputKeyRuntimeRepairAttempt])
+	targetScope := strings.TrimSpace(stringFromMap(input, "failureTargetScope"))
+	failureClass := strings.TrimSpace(stringFromMap(input, failureOutputKeyClass))
+	failureSignature := strings.TrimSpace(stringFromMap(input, failureOutputKeySignature))
+	if targetAttempts < 2 && !(repairAttempt >= 3 && (targetScope != "" || failureClass != "" || failureSignature != "")) {
+		return nil
+	}
+	reason := "repeated_repair_failure"
+	if targetAttempts >= 2 {
+		reason = "same_target_scope_repeated_failure"
+	}
+	failedSurface := firstNonEmptyString(targetScope, failureSignature, failureClass, strings.TrimSpace(stringFromMap(input, "failedStepKind")))
+	ret := map[string]any{
+		"required":             true,
+		"reason":               reason,
+		"failedSurface":        failedSurface,
+		"repairAttempt":        repairAttempt,
+		"targetRepairAttempts": targetAttempts,
+		"requiredDecisionFields": []string{
+			"failedSurface",
+			"rootCauseTarget",
+			"repairTargetDecision",
+			"forbiddenRepair",
+			"verificationPlan",
+		},
+		"requirements": []string{
+			"distinguish failed surface from root cause target before patching again",
+			"explain whether the next change targets state-change artifact, evidence, verification, or blocker handling",
+			"do not weaken still-valid Goal or DoD constraints to make verification pass",
+		},
+	}
+	if failureClass != "" {
+		ret["failureClass"] = failureClass
+	}
+	if targetScope != "" {
+		ret["failureTargetScope"] = targetScope
+	}
+	return ret
+}
+
 func concreteValidationEvidenceRepairGuidance() []string {
 	return []string{
 		"Do not repeat assessment-only validation.",
@@ -2096,6 +2149,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		"runtimeRepairAttempt",
 		"maxRuntimeRepairAttempts",
 		"targetRepairAttempts",
+		"strategyReassessment",
 	} {
 		if value, ok := input[key]; ok && value != nil {
 			pkg[key] = compactLLMContextValue(value, 1)
@@ -2162,6 +2216,11 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		}
 		requiredOutput["mustUseCurrentTargetSnapshot"] = true
 		requiredOutput["mustRebuildFromCurrentEvidence"] = true
+		if len(mapFromValue(pkg["strategyReassessment"])) == 0 {
+			if reassessment := repairStrategyReassessmentFromInput(input); len(reassessment) > 0 {
+				pkg["strategyReassessment"] = reassessment
+			}
+		}
 	}
 	if len(pkg) <= 1 {
 		return nil

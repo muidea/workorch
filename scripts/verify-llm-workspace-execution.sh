@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
@@ -8,12 +8,57 @@ BASE_URL="${WORKORCH_LLM_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:
 MOCK_ADDR="${WORKORCH_LLM_VERIFY_MOCK_ADDR:-127.0.0.1:18181}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 VERIFY_SUFFIX="${WORKORCH_LLM_VERIFY_SUFFIX:-$$}"
+CURL_CONNECT_TIMEOUT="${WORKORCH_VERIFY_CURL_CONNECT_TIMEOUT_SECONDS:-5}"
+CURL_MAX_TIME="${WORKORCH_VERIFY_CURL_MAX_TIME_SECONDS:-30}"
+SCRIPT_TIMEOUT_SECONDS="${WORKORCH_LLM_VERIFY_TIMEOUT_SECONDS:-900}"
+RUN_WAIT_SECONDS="${WORKORCH_LLM_VERIFY_RUN_WAIT_SECONDS:-45}"
 MCP_SERVER_ID="mcp-context-verify-$VERIFY_SUFFIX"
 SKILL_ID="skill-llm-acceptance-$VERIFY_SUFFIX"
 SOUL_ID="soul-llm-acceptance-$VERIFY_SUFFIX"
 MEMORY_ID="memory-context-seed-$VERIFY_SUFFIX"
 MOCK_PID=""
+WATCHDOG_PID=""
 MOCK_LOG="$TMP_DIR/llm-mock.log"
+
+curl() {
+  local status url arg
+  url=""
+  for arg in "$@"; do
+    if [[ "$arg" == http://* || "$arg" == https://* ]]; then
+      url="$arg"
+    fi
+  done
+  set +e
+  command curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" "$@"
+  status=$?
+  set -e
+  if [[ $status -ne 0 ]]; then
+    echo "curl failed status=$status url=${url:-unknown} connect-timeout=${CURL_CONNECT_TIMEOUT}s max-time=${CURL_MAX_TIME}s" >&2
+  fi
+  return $status
+}
+
+timeout_failure() {
+  echo "workorch LLM workspace execution verification timed out after ${SCRIPT_TIMEOUT_SECONDS}s for deployed workorch service $BASE_URL" >&2
+  if [[ -f "$MOCK_LOG" ]]; then
+    echo "--- llm-mock.log ---" >&2
+    tail -n 200 "$MOCK_LOG" >&2 || true
+  fi
+  exit 124
+}
+
+start_watchdog() {
+  if ! [[ "$SCRIPT_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] || [[ "$SCRIPT_TIMEOUT_SECONDS" -le 0 ]]; then
+    return
+  fi
+  local parent_pid="$$"
+  (
+    sleep "$SCRIPT_TIMEOUT_SECONDS"
+    echo "workorch LLM workspace execution verification exceeded ${SCRIPT_TIMEOUT_SECONDS}s; terminating" >&2
+    kill -TERM "$parent_pid" >/dev/null 2>&1 || true
+  ) &
+  WATCHDOG_PID=$!
+}
 
 report_failure() {
   local status=$?
@@ -33,6 +78,10 @@ report_failure() {
 }
 
 cleanup() {
+  if [[ -n "$WATCHDOG_PID" ]]; then
+    kill "$WATCHDOG_PID" >/dev/null 2>&1 || true
+    wait "$WATCHDOG_PID" >/dev/null 2>&1 || true
+  fi
   if [[ -f "$TMP_DIR/original-llm-update.json" ]]; then
     curl -fsS -H "Content-Type: application/json" -X PUT \
       "$BASE_URL/api/v1/workorch/configuration/llm" \
@@ -545,7 +594,7 @@ wait_run_state() {
   local run_id="$1"
   local expected_state="$2"
   local output_file="$3"
-  local deadline=$((SECONDS + 30))
+  local deadline=$((SECONDS + RUN_WAIT_SECONDS))
 
   while (( SECONDS <= deadline )); do
     curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" >"$output_file"
@@ -801,9 +850,11 @@ PY
 }
 
 trap report_failure ERR
+trap timeout_failure TERM
 trap cleanup EXIT
 
 cd "$ROOT_DIR"
+start_watchdog
 start_mock_provider
 wait_mock
 wait_ready

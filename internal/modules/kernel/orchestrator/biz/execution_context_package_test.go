@@ -40,7 +40,17 @@ func TestRunExecutionContextPackageIncludesCompactGoalDoDDefinitions(t *testing.
 			},
 			"goalDefinitionPolicy": "workspace_goals_are_cumulative_latest_refines_previous",
 			"doDDefinitionPolicy":  "workspace_dods_are_cumulative_latest_refines_previous",
-			"soulRouting":          map[string]any{"large": strings.Repeat("x", 9000)},
+			"definitionChangeImpact": map[string]any{
+				"version": "workorch.definition_change_impact.v1",
+				"changed": true,
+				"policy":  "workspace_goal_dod_cumulative_latest_refines_previous",
+				"goalChange": map[string]any{
+					"effectiveGoalId": "goal-context-definitions",
+					"previousGoalIds": []string{"goal-context-prior"},
+				},
+				"strategyRequirements": []string{"preserve still-valid prior Goal and DoD constraints"},
+			},
+			"soulRouting": map[string]any{"large": strings.Repeat("x", 9000)},
 		},
 	}
 	step := &runmodel.Step{
@@ -69,6 +79,14 @@ func TestRunExecutionContextPackageIncludesCompactGoalDoDDefinitions(t *testing.
 	}
 	if _, ok := pkg["soulRouting"]; ok {
 		t.Fatalf("executionContextPackage retained raw control context: %+v", pkg)
+	}
+	impact := mapFromValue(pkg["definitionChangeImpact"])
+	if impact["changed"] != true || impact["policy"] != "workspace_goal_dod_cumulative_latest_refines_previous" {
+		t.Fatalf("definitionChangeImpact = %+v, want compact change impact", impact)
+	}
+	goalChange := mapFromValue(impact["goalChange"])
+	if goalChange["effectiveGoalId"] != "goal-context-definitions" {
+		t.Fatalf("goalChange = %+v, want effective goal id", goalChange)
 	}
 }
 

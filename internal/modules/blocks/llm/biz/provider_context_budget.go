@@ -539,7 +539,7 @@ func captureProtectedGoalDoD(input map[string]any) protectedGoalDoD {
 		}
 	}
 	executionContext := recordFromAny(input["executionContext"])
-	for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy"} {
+	for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "definitionChangeImpact"} {
 		if value, ok := executionContext[key]; ok {
 			if cloned, success := cloneAny(value); success {
 				ret.ExecutionContext[key] = cloned
@@ -547,7 +547,7 @@ func captureProtectedGoalDoD(input map[string]any) protectedGoalDoD {
 		}
 	}
 	executionContextPackage := recordFromAny(input["executionContextPackage"])
-	for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "executionContract", "replanContinuation", "stage", "stageMode"} {
+	for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "definitionChangeImpact", "executionContract", "replanContinuation", "stage", "stageMode"} {
 		if value, ok := executionContextPackage[key]; ok {
 			if cloned, success := cloneAny(value); success {
 				ret.Package[key] = cloned
@@ -572,7 +572,7 @@ func captureProtectedProviderRepairTargets(input map[string]any) protectedProvid
 		targets := providerSafeRepairSnapshotsFromValue(pkg["targetSnapshots"])
 		if len(targets) > 0 {
 			pkgOut := map[string]any{}
-			for _, key := range []string{"requiredOutput", "structuredFailureSignals", "patchRepairSuggestions", "previousRejectedOutputSummary"} {
+			for _, key := range []string{"requiredOutput", "structuredFailureSignals", "patchRepairSuggestions", "previousRejectedOutputSummary", "strategyReassessment"} {
 				if value, ok := pkg[key]; ok {
 					pkgOut[key] = budgetProviderValue(value, 0, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
 				}
@@ -709,14 +709,14 @@ func withoutProtectedGoalDoD(input map[string]any) map[string]any {
 	}
 	executionContext := recordFromAny(clonedInput["executionContext"])
 	if len(executionContext) > 0 {
-		for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy"} {
+		for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "definitionChangeImpact"} {
 			delete(executionContext, key)
 		}
 		clonedInput["executionContext"] = executionContext
 	}
 	executionContextPackage := recordFromAny(clonedInput["executionContextPackage"])
 	if len(executionContextPackage) > 0 {
-		for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "executionContract", "replanContinuation", "stage", "stageMode"} {
+		for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "definitionChangeImpact", "executionContract", "replanContinuation", "stage", "stageMode"} {
 			delete(executionContextPackage, key)
 		}
 		clonedInput["executionContextPackage"] = executionContextPackage
