@@ -75,6 +75,10 @@ Runtime 统一使用中立阶段，不使用业务阶段名称作为核心状态
 | `repair` | 针对失败证据做定向修复 | 继承原约束并收紧 | targeted correction、state-changing repair、failed assessment、blocker | 广泛重规划、降级为探索、重复同一失败 |
 | `replan` | 原计划不成立时重新拆解 | 受控开放 | successor run proposal、new units、discard/keep rationale | 在旧失败路径继续循环、丢失 lineage |
 
+### Acceptance Assessment 归一化
+
+Acceptance 阶段允许 runtime 做领域中立的结构归一化：当 LLM 已声明 `dodAssessment` satisfied，但遗漏子项 `state` 或 `evidenceRefs` 时，runtime 可以从当前 run 已完成、非弱证据、可追溯的 shell/tool/patch/validation evidence 中补齐引用。该能力只修正结构缺口，不判断具体业务是否正确；若没有可用证据，或证据属于 read-only、zero-work、inconclusive、invalid，则必须保持失败并进入 repair / rejected result / decision 收口。
+
 ## 阶段转换合同
 
 ### 标准路径

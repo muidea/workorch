@@ -116,6 +116,13 @@
 | `superseded` | 不强制写 result，但若 supersede 前已判定 rejected，应保留 result；若 superseded 来源是 resolved replan，必须创建 successor run 继续执行 |
 | `cancelled` | 不强制写 result |
 
+## DoD Assessment 归一化边界
+
+- Completion gate 在校验前可以对 `dodAssessment` 做确定性结构归一化，包括规范化 evidence ref、补齐父级 `satisfied=true` 但子项 `state` 为空的 coverage state、以及为声明 satisfied/available/produced 但遗漏 `evidenceRefs` 的项补入当前 run 的可用证据。
+- 归一化只能使用当前 run 中已完成、可追溯、非弱证据的中立 evidence，例如成功的 shell/tool/patch/validation 步骤；`file/read`、`file/list`、`mcp/resource_read`、LLM 自身输出、zero-work/inconclusive/invalid evidence 不能作为自动 fallback。
+- 若没有可用 evidence，runtime 不得凭空接受 assessment，必须继续按 completion gate 失败、repair、rejected result 或 decision blocker 收口。
+- 该规则只治理结构化证据引用完整性，不引入任何业务领域判断；业务语义是否充分仍由 Goal/DoD、profile contract、LLM assessment 与 evidence quality gate 共同约束。
+
 ## 当前实现偏差
 
 | ID | 偏差 | 风险 | 收口方案 |

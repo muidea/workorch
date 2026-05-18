@@ -372,17 +372,18 @@ func (o *RuntimeOrchestrator) normalizeDoDAssessmentEvidenceRefs(ctx context.Con
 	}
 	ret := cloneStepPayload(assessment)
 	changed := false
+	fallbackRefs := completionEvidenceFallbackRefs(catalog)
 	if refs, ok := normalizeEvidenceRefList(ctx, o, catalog, ret["evidenceRefs"]); ok {
 		ret["evidenceRefs"] = refs
 		changed = true
 	}
-	if items, ok := normalizeAssessmentItemsEvidenceRefs(ctx, o, catalog, ret["items"]); ok {
+	if items, ok := normalizeAssessmentItemsEvidenceRefs(ctx, o, catalog, ret["items"], fallbackRefs, false); ok {
 		ret["items"] = items
 		changed = true
 	}
 	for _, key := range []string{"goalCoverage", "goalOutcomeCoverage", "acceptanceDimensions", "dimensionCoverage", "deliverableCoverage", "deliverables", "producedArtifacts"} {
 		value := ret[key]
-		normalized, ok := normalizeCoverageEvidenceRefs(ctx, o, catalog, value)
+		normalized, ok := normalizeCoverageEvidenceRefs(ctx, o, catalog, value, fallbackRefs)
 		if !ok {
 			continue
 		}
@@ -395,9 +396,9 @@ func (o *RuntimeOrchestrator) normalizeDoDAssessmentEvidenceRefs(ctx context.Con
 	return ret, true
 }
 
-func normalizeCoverageEvidenceRefs(ctx context.Context, o *RuntimeOrchestrator, catalog completionEvidenceRefCatalog, value any) (any, bool) {
+func normalizeCoverageEvidenceRefs(ctx context.Context, o *RuntimeOrchestrator, catalog completionEvidenceRefCatalog, value any, fallbackRefs []string) (any, bool) {
 	if mapped := mapFromValue(value); len(mapped) > 0 {
-		items, changed := normalizeAssessmentItemsEvidenceRefs(ctx, o, catalog, mapped["items"])
+		items, changed := normalizeAssessmentItemsEvidenceRefs(ctx, o, catalog, mapped["items"], fallbackRefs, boolValue(mapped["satisfied"]))
 		if !changed {
 			return value, false
 		}
@@ -405,14 +406,14 @@ func normalizeCoverageEvidenceRefs(ctx context.Context, o *RuntimeOrchestrator, 
 		ret["items"] = items
 		return ret, true
 	}
-	items, changed := normalizeAssessmentItemsEvidenceRefs(ctx, o, catalog, value)
+	items, changed := normalizeAssessmentItemsEvidenceRefs(ctx, o, catalog, value, fallbackRefs, false)
 	if !changed {
 		return value, false
 	}
 	return items, true
 }
 
-func normalizeAssessmentItemsEvidenceRefs(ctx context.Context, o *RuntimeOrchestrator, catalog completionEvidenceRefCatalog, value any) ([]map[string]any, bool) {
+func normalizeAssessmentItemsEvidenceRefs(ctx context.Context, o *RuntimeOrchestrator, catalog completionEvidenceRefCatalog, value any, fallbackRefs []string, inferSatisfiedFromParent bool) ([]map[string]any, bool) {
 	items, ok := doDAssessmentItemMaps(value)
 	if !ok || len(items) == 0 {
 		return nil, false
@@ -425,12 +426,162 @@ func normalizeAssessmentItemsEvidenceRefs(ctx context.Context, o *RuntimeOrchest
 			normalized["evidenceRefs"] = refs
 			changed = true
 		}
+		state := strings.ToLower(strings.TrimSpace(stringFromMap(normalized, "state")))
+		itemFallbackRefs := fallbackRefs
+		if refs := completionEvidenceCandidateRefs(ctx, o, catalog, normalized); len(refs) > 0 {
+			itemFallbackRefs = refs
+		}
+		if state == "" && inferSatisfiedFromParent && len(itemFallbackRefs) > 0 {
+			normalized["state"] = "satisfied"
+			state = "satisfied"
+			changed = true
+		}
+		if completionAssessmentStateAllowsEvidenceFallback(state) &&
+			len(evidenceRefsFromValue(normalized["evidenceRefs"])) == 0 &&
+			len(stringSliceFromValue(normalized["artifactRefs"])) == 0 &&
+			len(itemFallbackRefs) > 0 {
+			normalized["evidenceRefs"] = append([]string(nil), itemFallbackRefs...)
+			changed = true
+		}
 		ret = append(ret, normalized)
 	}
 	if !changed {
 		return items, false
 	}
 	return ret, true
+}
+
+func completionAssessmentStateAllowsEvidenceFallback(state string) bool {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "satisfied", "available", "produced":
+		return true
+	default:
+		return false
+	}
+}
+
+func completionEvidenceCandidateRefs(ctx context.Context, o *RuntimeOrchestrator, catalog completionEvidenceRefCatalog, item map[string]any) []string {
+	if o == nil {
+		return nil
+	}
+	candidates := mapSliceFromValue(item["evidenceCandidates"])
+	if len(candidates) == 0 {
+		return nil
+	}
+	refs := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if !completionEvidenceCandidateCanFallback(candidate) {
+			continue
+		}
+		ref := strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(candidate, "evidenceRef"),
+			stringFromMap(candidate, "stepId"),
+		))
+		if ref == "" {
+			continue
+		}
+		canonical, ok := o.canonicalCompletionEvidenceRef(ctx, catalog, ref)
+		if !ok {
+			continue
+		}
+		refs = append(refs, canonical)
+	}
+	return dedupeEvidenceRefs(refs)
+}
+
+func completionEvidenceCandidateCanFallback(candidate map[string]any) bool {
+	if len(candidate) == 0 {
+		return false
+	}
+	kind := strings.TrimSpace(stringFromMap(candidate, "kind"))
+	if completionEvidenceKindIsWeakFallback(kind) {
+		return false
+	}
+	if boolValue(candidate["zeroWork"]) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(stringFromMap(candidate, "evidenceQuality"))) {
+	case "inconclusive", "invalid":
+		return false
+	default:
+		return true
+	}
+}
+
+func completionEvidenceFallbackRefs(catalog completionEvidenceRefCatalog) []string {
+	type orderedRef struct {
+		order int
+		ref   string
+	}
+	refs := make([]orderedRef, 0, len(catalog.steps)+len(catalog.patches))
+	for ref := range catalog.patches {
+		refs = append(refs, orderedRef{order: len(catalog.stepOrder) + len(refs) + 1, ref: ref})
+	}
+	for ref, step := range catalog.steps {
+		if !completionEvidenceStepFallbackUsable(step) {
+			continue
+		}
+		refs = append(refs, orderedRef{order: catalog.stepOrder[ref], ref: ref})
+	}
+	sort.SliceStable(refs, func(i, j int) bool {
+		if refs[i].order != refs[j].order {
+			return refs[i].order > refs[j].order
+		}
+		return refs[i].ref < refs[j].ref
+	})
+	limit := min(len(refs), 3)
+	ret := make([]string, 0, limit)
+	for idx := 0; idx < limit; idx++ {
+		ret = append(ret, refs[idx].ref)
+	}
+	return dedupeEvidenceRefs(ret)
+}
+
+func completionEvidenceStepFallbackUsable(step *runModel.Step) bool {
+	if !completionEvidenceStepUsable(step) {
+		return false
+	}
+	if strings.HasPrefix(strings.TrimSpace(step.Kind), "llm/") {
+		return false
+	}
+	if completionEvidenceKindIsWeakFallback(step.Kind) {
+		return false
+	}
+	if boolValue(step.Output["zeroWork"]) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(stringFromMap(step.Output, "evidenceQuality"))) {
+	case "inconclusive", "invalid":
+		return false
+	default:
+		return true
+	}
+}
+
+func completionEvidenceKindIsWeakFallback(kind string) bool {
+	switch strings.TrimSpace(kind) {
+	case "", "file/read", "file/list", "mcp/resource_read", "mcp/prompt_get":
+		return true
+	default:
+		return false
+	}
+}
+
+func dedupeEvidenceRefs(refs []string) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" || seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		ret = append(ret, ref)
+	}
+	return ret
 }
 
 func normalizeEvidenceRefList(ctx context.Context, o *RuntimeOrchestrator, catalog completionEvidenceRefCatalog, value any) ([]string, bool) {
