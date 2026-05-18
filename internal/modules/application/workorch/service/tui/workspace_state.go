@@ -216,6 +216,9 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 
 	run := msg.ActiveRun
 	if run == nil {
+		if msg.DoD != nil && len(msg.DoD.Items) > 0 {
+			m.dodItems = append([]string(nil), msg.DoD.Items...)
+		}
 		m.applyWorkspaceProgress(msg.Workspace.State)
 		m.syncBlockingDecisionFromList()
 		m.syncBlockingApprovalFromList()

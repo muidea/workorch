@@ -58,6 +58,11 @@ type RunStartedMsg struct {
 	Error error
 }
 
+type DoDUpdatedMsg struct {
+	DoD   *backend.DoDInfo
+	Error error
+}
+
 type RunControlMsg struct {
 	Run         *backend.RunInfo
 	WorkspaceID string

@@ -270,6 +270,23 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.fetchActiveBlockerDetails()
 		}
 		return m, nil
+	case DoDUpdatedMsg:
+		if msg.Error != nil {
+			m.setLastError(msg.Error)
+			m.progress = progressFailed
+			m.progressText = "DoD save failed"
+			return m, nil
+		}
+		if msg.DoD != nil {
+			m.dodItems = append([]string(nil), msg.DoD.Items...)
+			m.result = renderPendingDoDResult(m.dodItems)
+			m.progress = progressIdle
+			m.progressText = "DoD saved"
+			m.lastError = nil
+			m.resetMainViewport()
+			return m, FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+		}
+		return m, nil
 	case RunControlMsg:
 		if msg.Error != nil {
 			if isTransientContextError(msg.Error) {
@@ -667,6 +684,10 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 	case "dod":
 		m.addInputHistory(text)
 		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
+		if m.activeWorkspaceID == "" {
+			m.lastError = fmt.Errorf("no active workspace")
+			return m, nil, true
+		}
 		if args == "" {
 			m.clearInput()
 			m.result = renderPendingDoDResult(m.dodItems)
@@ -684,9 +705,10 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.lastError = nil
 		m.appendTranscript("DoD", strings.Join(items, "; "))
 		m.result = renderPendingDoDResult(items)
-		m.progressText = "DoD updated for next goal"
+		m.progress = progressSubmitting
+		m.progressText = "Saving DoD"
 		m.resetMainViewport()
-		return m, nil, true
+		return m, PersistDoD(m.be, m.activeWorkspaceID, items), true
 	default:
 		m.lastError = fmt.Errorf("unknown slash command: /%s", name)
 		return m, nil, true

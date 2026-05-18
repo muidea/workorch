@@ -60,6 +60,9 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 						dod, _ = be.DoD().Get(ctx, activeRun.DoDID)
 					}
 				}
+				if dod == nil {
+					dod = latestDoDFromBackend(ctx, be, wsID)
+				}
 				return WorkspaceContextMsg{
 					Workspace: &snapshot.Workspace,
 					Snapshot:  snapshot,
@@ -101,6 +104,9 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 				dod, _ = be.DoD().Get(ctx, run.DoDID)
 			}
 		}
+		if dod == nil {
+			dod = latestDoDFromBackend(ctx, be, wsID)
+		}
 		decisions, err := be.Decision().List(ctx, wsID)
 		if err != nil {
 			return WorkspaceContextMsg{Error: err}
@@ -138,6 +144,17 @@ func FetchDecisions(be backend.Backend, workspaceID string) tea.Cmd {
 		items, err := be.Decision().List(ctx, common.WorkspaceID(workspaceID))
 		return DecisionListMsg{Decisions: items, Error: err}
 	}
+}
+
+func latestDoDFromBackend(ctx context.Context, be backend.Backend, wsID common.WorkspaceID) *backend.DoDInfo {
+	if be == nil || wsID == "" {
+		return nil
+	}
+	items, err := be.DoD().List(ctx, wsID)
+	if err != nil || len(items) == 0 {
+		return nil
+	}
+	return &items[len(items)-1]
 }
 
 func selectWorkspaceRun(activeRunID common.RunID, runs []backend.RunInfo) *backend.RunInfo {
@@ -229,6 +246,21 @@ func SubmitGoal(be backend.Backend, workspaceID string, text string, dodItems []
 			return RunStartedMsg{Error: err}
 		}
 		return RunStartedMsg{Run: run}
+	}
+}
+
+func PersistDoD(be backend.Backend, workspaceID string, items []string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if strings.TrimSpace(workspaceID) == "" {
+			return DoDUpdatedMsg{Error: common.ErrInvalidArgument}
+		}
+		dod, err := be.DoD().Define(ctx, common.WorkspaceID(workspaceID), items)
+		if err != nil {
+			return DoDUpdatedMsg{Error: err}
+		}
+		return DoDUpdatedMsg{DoD: dod}
 	}
 }
 

@@ -683,6 +683,9 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestGoalAndDoDDefinitions(t 
 	if err != nil {
 		t.Fatalf("DefineGoalWithBackend second: %v", err)
 	}
+	if secondGoal.ID != firstGoal.ID {
+		t.Fatalf("second Goal id = %q, want workspace canonical Goal %q", secondGoal.ID, firstGoal.ID)
+	}
 	firstDoD, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"first activation dod"})
 	if err != nil {
 		t.Fatalf("DefineDoDWithBackend first: %v", err)
@@ -743,6 +746,9 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestDefinitionRevisionWithou
 	if err != nil {
 		t.Fatalf("DefineGoalWithBackend second: %v", err)
 	}
+	if secondGoal.ID != firstGoal.ID {
+		t.Fatalf("second Goal id = %q, want workspace canonical Goal %q", secondGoal.ID, firstGoal.ID)
+	}
 	firstDoD, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"first activation dod"})
 	if err != nil {
 		t.Fatalf("DefineDoDWithBackend first: %v", err)
@@ -750,6 +756,9 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestDefinitionRevisionWithou
 	secondDoD, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"second activation dod"})
 	if err != nil {
 		t.Fatalf("DefineDoDWithBackend second: %v", err)
+	}
+	if secondDoD.ID != firstDoD.ID {
+		t.Fatalf("second DoD id = %q, want workspace canonical DoD %q", secondDoD.ID, firstDoD.ID)
 	}
 	updatedGoal, err := UpdateGoalWithBackend(context.Background(), "file", dataRoot, firstGoal.ID, "first activation goal revised")
 	if err != nil {
@@ -768,13 +777,13 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestDefinitionRevisionWithou
 		t.Fatalf("activation run = %+v, want latest updated definition revision blocked on provider decision", item.Run)
 	}
 	goalContext, _ := item.Run.ExecutionContext["goal"].(map[string]any)
-	if text, _ := goalContext["text"].(string); !strings.Contains(text, "first activation goal revised") || !strings.Contains(text, secondGoal.Text) {
-		t.Fatalf("effective goal text = %q, want revised first goal plus second goal", text)
+	if text, _ := goalContext["text"].(string); text != "first activation goal revised" {
+		t.Fatalf("effective goal text = %q, want revised canonical goal only", text)
 	}
 	dodContext, _ := item.Run.ExecutionContext["dod"].(map[string]any)
 	dodItems, _ := dodContext["items"].([]string)
-	if !stringSliceContains(dodItems, "first activation dod revised") || !stringSliceContains(dodItems, secondDoD.Items[0]) {
-		t.Fatalf("effective dod items = %+v, want revised first dod plus second dod", dodItems)
+	if len(dodItems) != 1 || !stringSliceContains(dodItems, "first activation dod revised") {
+		t.Fatalf("effective dod items = %+v, want revised canonical dod only", dodItems)
 	}
 	impact, _ := item.Run.ExecutionContext["definitionChangeImpact"].(map[string]any)
 	if len(impact) == 0 {
@@ -785,11 +794,11 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestDefinitionRevisionWithou
 	if goalChange["effectiveGoalId"] != updatedGoal.ID || doDChange["effectiveDoDId"] != updatedDoD.ID {
 		t.Fatalf("definitionChangeImpact = %+v, want revised effective goal/dod", impact)
 	}
-	if got := stringSliceFromAny(goalChange["allGoalIds"]); len(got) != 2 || got[0] != secondGoal.ID || got[1] != updatedGoal.ID {
-		t.Fatalf("allGoalIds = %+v, want deduped order [second, revised first]", got)
+	if got := stringSliceFromAny(goalChange["allGoalIds"]); len(got) != 1 || got[0] != updatedGoal.ID {
+		t.Fatalf("allGoalIds = %+v, want canonical revised Goal only", got)
 	}
-	if got := stringSliceFromAny(doDChange["allDoDIds"]); len(got) != 2 || got[0] != secondDoD.ID || got[1] != updatedDoD.ID {
-		t.Fatalf("allDoDIds = %+v, want deduped order [second, revised first]", got)
+	if got := stringSliceFromAny(doDChange["allDoDIds"]); len(got) != 1 || got[0] != updatedDoD.ID {
+		t.Fatalf("allDoDIds = %+v, want canonical revised DoD only", got)
 	}
 	if goalChange["changedInPlace"] != true || doDChange["changedInPlace"] != true {
 		t.Fatalf("definitionChangeImpact = %+v, want changedInPlace for updated definitions", impact)
@@ -2811,17 +2820,9 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefin
 	if err != nil {
 		t.Fatalf("DefineGoalWithBackend old: %v", err)
 	}
-	newGoal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "new activation goal")
-	if err != nil {
-		t.Fatalf("DefineGoalWithBackend new: %v", err)
-	}
 	oldDoD, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"old activation dod"})
 	if err != nil {
 		t.Fatalf("DefineDoDWithBackend old: %v", err)
-	}
-	newDoD, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"new activation dod"})
-	if err != nil {
-		t.Fatalf("DefineDoDWithBackend new: %v", err)
 	}
 
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
@@ -2832,6 +2833,21 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefin
 		WorkspaceID: common.WorkspaceID(workspace.ID),
 		GoalID:      common.GoalID(oldGoal.ID),
 		DoDID:       common.DoDID(oldDoD.ID),
+		ExecutionContext: map[string]any{
+			"goalId": oldGoal.ID,
+			"goal": map[string]any{
+				"id":          oldGoal.ID,
+				"workspaceId": workspace.ID,
+				"text":        oldGoal.Text,
+			},
+			"doDId": oldDoD.ID,
+			"dod": map[string]any{
+				"id":          oldDoD.ID,
+				"workspaceId": workspace.ID,
+				"items":       []string{"old activation dod"},
+				"state":       oldDoD.State,
+			},
+		},
 	}); err != nil {
 		t.Fatalf("CreateRun old active: %v", err)
 	}
@@ -2852,13 +2868,29 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefin
 	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace active run: %v", err)
 	}
+	newGoal, err := UpdateGoalWithBackend(context.Background(), "file", dataRoot, oldGoal.ID, "new activation goal")
+	if err != nil {
+		t.Fatalf("UpdateGoalWithBackend new: %v", err)
+	}
+	newDoD, err := UpdateDoDWithBackend(context.Background(), "file", dataRoot, oldDoD.ID, []string{"new activation dod"})
+	if err != nil {
+		t.Fatalf("UpdateDoDWithBackend new: %v", err)
+	}
 
 	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{})
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
 	if item.Run.ID == string(oldRunID) || item.Run.GoalID != newGoal.ID || item.Run.DoDID != newDoD.ID {
-		t.Fatalf("activation run = %+v, want replacement run with new goal/dod", item.Run)
+		t.Fatalf("activation run = %+v, want replacement run with updated canonical goal/dod", item.Run)
+	}
+	goalContext, _ := item.Run.ExecutionContext["goal"].(map[string]any)
+	if text, _ := goalContext["text"].(string); text != "new activation goal" {
+		t.Fatalf("replacement goal text = %q, want updated canonical goal", text)
+	}
+	dodContext, _ := item.Run.ExecutionContext["dod"].(map[string]any)
+	if items, _ := dodContext["items"].([]string); len(items) != 1 || items[0] != "new activation dod" {
+		t.Fatalf("replacement dod items = %+v, want updated canonical dod", dodContext["items"])
 	}
 	replaced, err := exports.Repositories.Runs.Get(ctx, oldRunID)
 	if err != nil {

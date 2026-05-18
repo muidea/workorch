@@ -2104,6 +2104,44 @@ func TestModelDodSlashCommandNormalizesMarkdownDoD(t *testing.T) {
 	}
 }
 
+func TestModelDodSlashCommandPersistsDoDToActiveWorkspace(t *testing.T) {
+	be := &recordingDoDBE{fakeBE: newFake(t)}
+	model := NewAppModel(be, "ws-1", "")
+	model.width = 120
+	model.height = 24
+	model.setInput("/dod tests pass; diff is delivered")
+
+	updated, cmd := model.submitInput()
+	if cmd == nil {
+		t.Fatal("dod command returned nil cmd")
+	}
+	msg, ok := cmd().(DoDUpdatedMsg)
+	if !ok || msg.Error != nil || msg.DoD == nil {
+		t.Fatalf("dod command msg = %#v, want DoDUpdatedMsg", msg)
+	}
+	if be.workspaceID != "ws-1" {
+		t.Fatalf("persisted workspace = %q, want ws-1", be.workspaceID)
+	}
+	want := []string{"tests pass", "diff is delivered"}
+	if len(be.items) != len(want) {
+		t.Fatalf("persisted items = %#v, want %#v", be.items, want)
+	}
+	for idx := range want {
+		if be.items[idx] != want[idx] {
+			t.Fatalf("persisted items = %#v, want %#v", be.items, want)
+		}
+	}
+
+	next, refresh := updated.(*AppModel).Update(msg)
+	if refresh == nil {
+		t.Fatal("dod update should refresh workspace context")
+	}
+	got := next.(AppModel)
+	if got.progressText != "DoD saved" {
+		t.Fatalf("progress text = %q, want DoD saved", got.progressText)
+	}
+}
+
 func TestModelWorkspaceCreateCommandUsesTemplateAndActivatesWorkspace(t *testing.T) {
 	be := &workspaceCreateFake{fakeBE: newFake(t)}
 	model := NewAppModel(be, "", "")
@@ -2347,6 +2385,37 @@ func (f *fakeD) Get(ctx context.Context, id common.DoDID) (*backend.DoDInfo, err
 }
 func (f *fakeD) Update(ctx context.Context, id common.DoDID, items []string) (*backend.DoDInfo, error) {
 	return f.Get(ctx, id)
+}
+
+type recordingDoDBE struct {
+	*fakeBE
+	workspaceID common.WorkspaceID
+	items       []string
+}
+
+func (b *recordingDoDBE) DoD() backend.DoDBackend {
+	return &recordingDoD{parent: b}
+}
+
+type recordingDoD struct{ parent *recordingDoDBE }
+
+func (f *recordingDoD) Define(ctx context.Context, wsID common.WorkspaceID, items []string) (*backend.DoDInfo, error) {
+	f.parent.workspaceID = wsID
+	f.parent.items = append([]string(nil), items...)
+	return &backend.DoDInfo{ID: "dod-recorded", WorkspaceID: wsID, Items: items, State: "ready"}, nil
+}
+func (f *recordingDoD) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.DoDInfo, error) {
+	if f.parent.workspaceID == wsID && len(f.parent.items) > 0 {
+		return []backend.DoDInfo{{ID: "dod-recorded", WorkspaceID: wsID, Items: append([]string(nil), f.parent.items...), State: "ready"}}, nil
+	}
+	return nil, nil
+}
+func (f *recordingDoD) Get(ctx context.Context, id common.DoDID) (*backend.DoDInfo, error) {
+	return &backend.DoDInfo{ID: id, WorkspaceID: f.parent.workspaceID, Items: append([]string(nil), f.parent.items...), State: "ready"}, nil
+}
+func (f *recordingDoD) Update(ctx context.Context, id common.DoDID, items []string) (*backend.DoDInfo, error) {
+	f.parent.items = append([]string(nil), items...)
+	return &backend.DoDInfo{ID: id, WorkspaceID: f.parent.workspaceID, Items: items, State: "ready"}, nil
 }
 
 type fakeR struct{}

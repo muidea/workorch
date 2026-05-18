@@ -157,7 +157,11 @@ func (b *remoteGoalBackend) Get(ctx context.Context, id common.GoalID) (*GoalInf
 	return &GoalInfo{ID: common.GoalID(g.ID), WorkspaceID: common.WorkspaceID(g.WorkspaceID), Text: g.Text}, nil
 }
 func (b *remoteGoalBackend) Update(ctx context.Context, id common.GoalID, text string) (*GoalInfo, error) {
-	return b.Get(ctx, id)
+	g, err := b.cl.UpdateGoal(ctx, string(id), text)
+	if err != nil {
+		return nil, err
+	}
+	return &GoalInfo{ID: common.GoalID(g.ID), WorkspaceID: common.WorkspaceID(g.WorkspaceID), Text: g.Text}, nil
 }
 
 // ── Remote DoD ──
@@ -190,7 +194,11 @@ func (b *remoteDoDBackend) Get(ctx context.Context, id common.DoDID) (*DoDInfo, 
 	return &DoDInfo{ID: common.DoDID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), Items: d.Items, State: d.State}, nil
 }
 func (b *remoteDoDBackend) Update(ctx context.Context, id common.DoDID, items []string) (*DoDInfo, error) {
-	return b.Get(ctx, id)
+	d, err := b.cl.UpdateDoD(ctx, string(id), items)
+	if err != nil {
+		return nil, err
+	}
+	return &DoDInfo{ID: common.DoDID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), Items: d.Items, State: d.State}, nil
 }
 
 // ── Remote Run ──

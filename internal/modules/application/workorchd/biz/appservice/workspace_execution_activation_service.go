@@ -3,6 +3,7 @@ package appservice
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -80,7 +81,7 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 				if strings.TrimSpace(cmd.GoalID) != "" || strings.TrimSpace(cmd.DoDID) != "" {
 					return WorkspaceExecutionActivation{}, replaceErr
 				}
-			} else if goal.ID != run.GoalID || dod.ID != run.DoDID {
+			} else if activeRunDefinitionStale(ctx, session, workspace.ID, run, goal, dod) {
 				executionContext, err := buildWorkspaceExecutionContextWithDefinitions(ctx, session, workspace, goal, dod, cmd)
 				if err != nil {
 					return WorkspaceExecutionActivation{}, err
@@ -372,6 +373,51 @@ func effectiveWorkspaceDoD(ctx context.Context, dods repository.DoDRepository, e
 		effective.State = common.DoDStateReady
 	}
 	return &effective, contexts, nil
+}
+
+func activeRunDefinitionStale(ctx context.Context, session *RuntimeSession, workspaceID common.WorkspaceID, run *runmodel.Run, selectedGoal *workspacemodel.Goal, selectedDoD *workspacemodel.DoD) bool {
+	if run == nil || selectedGoal == nil || selectedDoD == nil {
+		return true
+	}
+	if run.GoalID != selectedGoal.ID || run.DoDID != selectedDoD.ID {
+		return true
+	}
+	if len(run.ExecutionContext) == 0 {
+		return true
+	}
+	exports, err := session.Exports()
+	if err != nil || exports.Repositories.Goals == nil || exports.Repositories.DoDs == nil {
+		return true
+	}
+	effectiveGoal, _, err := effectiveWorkspaceGoal(ctx, exports.Repositories.Goals, exports.Repositories.EventRecords, workspaceID, selectedGoal)
+	if err != nil || effectiveGoal == nil {
+		return true
+	}
+	effectiveDoD, _, err := effectiveWorkspaceDoD(ctx, exports.Repositories.DoDs, exports.Repositories.EventRecords, workspaceID, selectedDoD)
+	if err != nil || effectiveDoD == nil {
+		return true
+	}
+	current := map[string]any{
+		"goalId": string(effectiveGoal.ID),
+		"goal":   goalContext(effectiveGoal),
+		"doDId":  string(effectiveDoD.ID),
+		"dod":    dodContext(effectiveDoD),
+	}
+	existing := map[string]any{
+		"goalId": run.ExecutionContext["goalId"],
+		"goal":   run.ExecutionContext["goal"],
+		"doDId":  run.ExecutionContext["doDId"],
+		"dod":    run.ExecutionContext["dod"],
+	}
+	return stableContextJSON(existing) != stableContextJSON(current)
+}
+
+func stableContextJSON(value any) string {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return string(payload)
 }
 
 func ActivateWorkspaceExecutionWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd ActivateWorkspaceExecutionCommand) (WorkspaceExecutionActivation, error) {
