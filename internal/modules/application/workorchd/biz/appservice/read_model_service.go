@@ -5620,17 +5620,18 @@ func taskProgressItems(snapshot RunSnapshot) []ProgressItem {
 	results := runScopedResults(snapshot)
 	artifacts := runScopedArtifacts(snapshot)
 	ret := make([]ProgressItem, 0, len(snapshot.Steps)+len(snapshot.ToolCalls)+len(snapshot.ValidationResults)+len(results)+len(artifacts)+len(snapshot.Decisions)+len(snapshot.Approvals))
+	recoveredHistoricalFailures := acceptedTerminalRun(snapshot)
 	for _, item := range snapshot.Steps {
-		ret = append(ret, ProgressItem{ID: item.ID, Kind: "step", Title: firstNonEmptyReadModel(item.Kind, item.ID), State: item.State, EvidenceRefs: []string{item.ID}})
+		ret = append(ret, ProgressItem{ID: item.ID, Kind: "step", Title: firstNonEmptyReadModel(item.Kind, item.ID), State: recoveredProgressItemState(item.State, recoveredHistoricalFailures), EvidenceRefs: []string{item.ID}})
 	}
 	for _, item := range snapshot.ToolCalls {
-		ret = append(ret, ProgressItem{ID: item.ID, Kind: "tool_call", Title: firstNonEmptyReadModel(item.ToolName, item.ID), State: item.State, EvidenceRefs: []string{item.ID, item.StepID}})
+		ret = append(ret, ProgressItem{ID: item.ID, Kind: "tool_call", Title: firstNonEmptyReadModel(item.ToolName, item.ID), State: recoveredProgressItemState(item.State, recoveredHistoricalFailures), EvidenceRefs: []string{item.ID, item.StepID}})
 	}
 	for _, item := range snapshot.Patches {
 		ret = append(ret, ProgressItem{ID: item.ID, Kind: "patch", Title: firstNonEmptyReadModel(item.TargetRef, item.PatchType, item.ID), State: item.State, EvidenceRefs: []string{item.ID, item.ToolCallID, item.StepID}})
 	}
 	for _, item := range snapshot.ValidationResults {
-		ret = append(ret, ProgressItem{ID: item.ID, Kind: "validation_result", Title: firstNonEmptyReadModel(item.ValidationKind, item.TargetRef, item.ID), State: item.State, EvidenceRefs: []string{item.ID, item.EvidenceRef, item.StepID}})
+		ret = append(ret, ProgressItem{ID: item.ID, Kind: "validation_result", Title: firstNonEmptyReadModel(item.ValidationKind, item.TargetRef, item.ID), State: recoveredProgressItemState(item.State, recoveredHistoricalFailures), EvidenceRefs: []string{item.ID, item.EvidenceRef, item.StepID}})
 	}
 	for _, item := range results {
 		ret = append(ret, ProgressItem{ID: item.ID, Kind: "result", Title: firstNonEmptyReadModel(item.Title, item.SourceType, item.ID), State: item.State, EvidenceRefs: compactUniqueStrings(append([]string{item.ID, item.SourceRef}, item.EvidenceRefs...))})
@@ -5648,6 +5649,13 @@ func taskProgressItems(snapshot RunSnapshot) []ProgressItem {
 		ret[idx].EvidenceRefs = compactUniqueStrings(ret[idx].EvidenceRefs)
 	}
 	return ret
+}
+
+func recoveredProgressItemState(state string, recoveredHistoricalFailures bool) string {
+	if recoveredHistoricalFailures && strings.TrimSpace(state) == "failed" {
+		return "recovered"
+	}
+	return state
 }
 
 func taskProgressRecovery(snapshot RunSnapshot, latestCheckpoint *RuntimeCheckpoint, blockers []ProgressBlocker, fallback RecoveryPlan) RecoveryPlan {
@@ -6138,6 +6146,9 @@ func stepProgressState(snapshot RunSnapshot) string {
 }
 
 func governanceProgressState(snapshot RunSnapshot) string {
+	if acceptedTerminalRun(snapshot) {
+		return "completed"
+	}
 	if len(snapshot.Decisions) == 0 && len(snapshot.Approvals) == 0 {
 		return "pending"
 	}
@@ -6173,6 +6184,10 @@ func validationProgressState(snapshot RunSnapshot) string {
 		}
 	}
 	return "completed"
+}
+
+func acceptedTerminalRun(snapshot RunSnapshot) bool {
+	return snapshot.Run.State == string(common.RunStateCompleted) && hasAcceptedRunResult(snapshot)
 }
 
 func resultProgressState(snapshot RunSnapshot) string {

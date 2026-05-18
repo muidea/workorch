@@ -2496,6 +2496,13 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 	if !progressContainsMilestone(progress, "execution_steps", "completed") || !progressContainsMilestone(progress, "validation", "completed") {
 		t.Fatalf("milestones = %+v, want accepted result to complete execution and validation milestones", progress.Milestones)
 	}
+	if !progressContainsMilestone(progress, "governance", "completed") {
+		t.Fatalf("milestones = %+v, want accepted result to complete governance milestone", progress.Milestones)
+	}
+	if !progressContainsItem(progress, string(failedStepID), "step", "recovered") ||
+		!progressContainsItem(progress, "validation-task-progress-failed-before-repair", "validation_result", "recovered") {
+		t.Fatalf("items = %+v, want historical failed step and validation marked recovered", progress.Items)
+	}
 	if !progressContainsItem(progress, string(resultID), "result", "accepted") || !progressContainsItem(progress, string(artifactID), "artifact", "available") {
 		t.Fatalf("items = %+v, want result and artifact items", progress.Items)
 	}
