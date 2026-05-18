@@ -728,6 +728,77 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestGoalAndDoDDefinitions(t 
 	}
 }
 
+func TestActivateWorkspaceExecutionWithBackendUsesLatestDefinitionRevisionWithoutDuplicateLineage(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-definition-revision", "activation definition revision workspace", "", "workspaces/activation-definition-revision")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	firstGoal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "first activation goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend first: %v", err)
+	}
+	secondGoal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "second activation goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend second: %v", err)
+	}
+	firstDoD, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"first activation dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend first: %v", err)
+	}
+	secondDoD, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"second activation dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend second: %v", err)
+	}
+	updatedGoal, err := UpdateGoalWithBackend(context.Background(), "file", dataRoot, firstGoal.ID, "first activation goal revised")
+	if err != nil {
+		t.Fatalf("UpdateGoalWithBackend first: %v", err)
+	}
+	updatedDoD, err := UpdateDoDWithBackend(context.Background(), "file", dataRoot, firstDoD.ID, []string{"first activation dod revised"})
+	if err != nil {
+		t.Fatalf("UpdateDoDWithBackend first: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	if item.Run.GoalID != updatedGoal.ID || item.Run.DoDID != updatedDoD.ID || item.Run.State != "blocked_on_decision" || item.Run.BlockingTicketID == "" {
+		t.Fatalf("activation run = %+v, want latest updated definition revision blocked on provider decision", item.Run)
+	}
+	goalContext, _ := item.Run.ExecutionContext["goal"].(map[string]any)
+	if text, _ := goalContext["text"].(string); !strings.Contains(text, "first activation goal revised") || !strings.Contains(text, secondGoal.Text) {
+		t.Fatalf("effective goal text = %q, want revised first goal plus second goal", text)
+	}
+	dodContext, _ := item.Run.ExecutionContext["dod"].(map[string]any)
+	dodItems, _ := dodContext["items"].([]string)
+	if !stringSliceContains(dodItems, "first activation dod revised") || !stringSliceContains(dodItems, secondDoD.Items[0]) {
+		t.Fatalf("effective dod items = %+v, want revised first dod plus second dod", dodItems)
+	}
+	impact, _ := item.Run.ExecutionContext["definitionChangeImpact"].(map[string]any)
+	if len(impact) == 0 {
+		t.Fatalf("definitionChangeImpact missing")
+	}
+	goalChange, _ := impact["goalChange"].(map[string]any)
+	doDChange, _ := impact["doDChange"].(map[string]any)
+	if goalChange["effectiveGoalId"] != updatedGoal.ID || doDChange["effectiveDoDId"] != updatedDoD.ID {
+		t.Fatalf("definitionChangeImpact = %+v, want revised effective goal/dod", impact)
+	}
+	if got := stringSliceFromAny(goalChange["allGoalIds"]); len(got) != 2 || got[0] != secondGoal.ID || got[1] != updatedGoal.ID {
+		t.Fatalf("allGoalIds = %+v, want deduped order [second, revised first]", got)
+	}
+	if got := stringSliceFromAny(doDChange["allDoDIds"]); len(got) != 2 || got[0] != secondDoD.ID || got[1] != updatedDoD.ID {
+		t.Fatalf("allDoDIds = %+v, want deduped order [second, revised first]", got)
+	}
+	if goalChange["changedInPlace"] != true || doDChange["changedInPlace"] != true {
+		t.Fatalf("definitionChangeImpact = %+v, want changedInPlace for updated definitions", impact)
+	}
+	if len(contextMapSliceFromValue(t, goalChange["definitionRevisions"])) != 1 || len(contextMapSliceFromValue(t, doDChange["definitionRevisions"])) != 1 {
+		t.Fatalf("definitionChangeImpact = %+v, want one goal and one DoD revision record", impact)
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()

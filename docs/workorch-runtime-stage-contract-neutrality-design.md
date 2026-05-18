@@ -227,6 +227,9 @@ Runtime 必须拒绝：
 
 当 acceptance / verification 需要对 Goal 与 DoD 做完成度判断时，runtime 必须把覆盖判断建模为中立 coverage 合同：
 
+- Goal / DoD definition 的“最新”必须按同一 workspace 内 definition event 的最后一次出现确定。同一 definition ID 被多次定义或更新时，累计 definition lineage 中只能保留该 ID 的最后一次事件位置，不能把重复事件展开成 `[old,new,old]` 这类误导性顺序。若同一 ID 发生更新，`definitionChangeImpact` 必须通过 `changedInPlace=true` 与 `definitionRevisions[]` 标记该修订；不能只按 ID 数量判断是否发生定义变化。
+- 当 `definitionChangeImpact.changed=true` 时，后续 planning / verification / acceptance 必须把最新 effective Goal / DoD 作为当前验收基准，并重新评估新增、删除、改写或同 ID 更新后的 requirement。已有历史 evidence 只能作为候选或 lineage；accepted result 必须明确映射最新 effective Goal / DoD，不能仅复用变更前 assessment。
+- Runtime core 不得从 Goal / DoD 文本中识别或内置任何具体业务对象、供应商、协议名称、接口名称、测试框架或字段语义。Core 只能要求 coverage item、acceptance dimension、deliverable expectation 和 evidence refs 的结构完整性；具体对象如何被解释、实现或验证，必须由当前 workspace 的 Goal / DoD、profile / template / soul / skill 和 LLM assessment 动态派生。
 - Goal 中被拆出的 leaf requirement 必须获得确定性、可复现的 `goalRequirementId`，ID 来源只能是 requirement 顺序与规范化文本，不得使用随机值或领域语义。
 - DoD 与 Goal coverage 必须分别表达；DoD item 通过不代表 Goal leaf 自动覆盖，除非 `dodAssessment.goalCoverage.items[]` 明确给出对应 Goal requirement、状态和 evidence refs。
 - profile 声明的 required `acceptanceDimensions` 与 required `deliverableExpectations` 必须分别通过 `dodAssessment.acceptanceDimensions.items[]` 与 `dodAssessment.deliverableCoverage.items[]` 表达；core 只校验声明的 `id`、状态和 evidenceRefs / artifactRefs，不得根据 id 名称推断业务含义。
@@ -242,6 +245,25 @@ Runtime 必须拒绝：
 - assessment-only contract correction 的输入必须是 narrow assessment package：不得携带 `executionGraph`、patch/shell/tool/memory 可执行字段，也不得携带 `governanceHistory`、`replanContinuation`、历史 `convertedDecision/llmDecision`、state-changing repair action package、patch repair context 或 provider retry lineage。correction 只用于修正 assessment schema / coverage / evidence refs，不得被旧 replan 或 decision 语义诱导成新的执行规划。
 - 若 assessment-only correction 给出 failed assessment，但同一缺口仍存在候选证据或满足项矛盾，runtime 应在 repair budget 内再次派发 assessment-only correction，而不是立即写 rejected result。预算耗尽后才进入 rejected / blocked / replan 治理。
 - rejected result 的 `SourceRef` 应指向最终产生 rejection 的终态 assessment / repair step；root step、failed step、候选证据 step 应保留在 `EvidenceRefs` 中，确保终态来源与 lineage 都可追踪。
+
+### 抽象覆盖矩阵合同
+
+当 Goal / DoD 或 profile contract 显式要求多个目标对象、多个接口契约、多个格式/协议、配置化行为、流式/长流程行为、错误行为、副作用或并发行为时，runtime 必须要求 LLM 在 planning / verification / acceptance 输出中形成中立覆盖矩阵。矩阵只是结构化验收表达，不是 core 领域知识。
+
+允许的中立矩阵包括：
+
+| Matrix | 触发条件 | 必须表达的中立内容 |
+| --- | --- | --- |
+| `targetCompatibilityMatrix` | Goal / DoD 声明多个目标对象、目标类别、运行目标、外部系统或适配对象 | 每个目标的名称/标识、来源、预期行为、实现状态、验证证据 |
+| `interfaceContractMatrix` | Goal / DoD 声明接口、协议、格式、输入输出兼容或转换 | 输入契约、输出契约、转换/适配规则、响应/结果映射、验证证据 |
+| `configurationBehaviorMatrix` | Goal / DoD 声明配置文件、环境覆盖、启用/禁用、默认值或错误配置 | 配置来源、默认值、覆盖顺序、启用/禁用行为、缺失/非法配置行为、验证证据 |
+| `streamingBehaviorMatrix` | Goal / DoD 声明流式、增量、长流程、取消或完成行为 | 触发输入、增量输出、完成条件、超时/取消、结果汇总或等价度量、验证证据 |
+| `errorBehaviorMatrix` | Goal / DoD 声明错误透传、异常处理、依赖失败或状态映射 | 错误输入、错误来源、输出状态/消息、是否透传或转换、验证证据 |
+| `sideEffectEvidenceMatrix` | Goal / DoD 声明写入、追加、审计、记录、状态变化或外部副作用 | 写入时机、字段/内容、追加/覆盖语义、并发/幂等约束、验证证据 |
+
+矩阵行的具体名称只能来自当前 Goal / DoD、workspace 文件、配置、工具返回、用户输入或 LLM 对当前上下文的解释；core 和通用 template 不得预置具体业务对象名称。若某行缺少实现或验证证据，assessment 必须标记 failed / skipped / inconclusive，并给出需要补齐的中立 evidence 类型；不得用一个兼容路径、一个 mock、一个总体通过命令或一段 summary 概括所有矩阵行。
+
+Claim-to-evidence 一致性也必须保持中立：summary、goalOutcome、implementationSummary、verificationSummary、knownLimitations 中的每个能力声明，只要可被拆成矩阵行或 coverage item，就必须能追溯到对应 `evidenceRefs` / `artifactRefs`。Core 只能检查“声明是否有结构化覆盖项和证据引用”，不得判断某个具体协议、工具、模型、文件或业务规则是否正确。
 
 若 `execution/strict_convergence` 阶段的 LLM graph 节点返回的 `executionGraph` 已经收敛为具体 runtime capability，且图中至少包含一个有效 state-changing 节点、没有继续包含 `llm/workspace_execution` 决策节点、state-changing 节点不依赖新的 LLM 决策祖先，则 runtime 可以把该图作为新的 graph scope 派发执行。该判断只基于 capability kind、依赖关系和 capability input contract，不得引入业务领域语义。
 
@@ -356,6 +378,18 @@ Memory 需要按阶段服务 LLM 决策，而不是堆叠 runtime 流水。
 - 已确认不可行的方案及原因。
 - 当前可用 skill / tool / mcp / soul / prompt 的能力摘要。
 - 人工 decision / approval 的结论。
+
+## 抽象矩阵收口跟踪
+
+本节记录针对“核心保持业务中立，template 避免绑定具体 Goal / DoD 内容”的收口项。后续同类修复必须先落到本文的中立合同，再决定是否需要在 profile / template / soul 中表达通用工程约束。
+
+| ID | 内容 | 落点 | 状态 | 验收口径 |
+| --- | --- | --- | --- | --- |
+| SNC-01 | Core 明确不得内置具体业务对象、供应商、协议、接口、字段或测试框架语义 | 本文 Goal / DoD Coverage Assessment 合同、`workorch-runtime-core-flow-contract.md` | completed | 文档只要求 coverage / matrix / evidence 结构完整，不包含具体业务行 |
+| SNC-02 | 定义中立覆盖矩阵，替代具体目标/接口类型规则 | 本文“抽象覆盖矩阵合同” | completed | 使用 `targetCompatibilityMatrix`、`interfaceContractMatrix`、`configurationBehaviorMatrix`、`streamingBehaviorMatrix`、`errorBehaviorMatrix`、`sideEffectEvidenceMatrix` |
+| SNC-03 | software-dev planning Soul 从具体目标类型矩阵改为目标/接口契约矩阵 | 内置 `soul-software-dev-planning` | completed | 默认值测试断言包含 `target/interface contract matrix`，并禁止旧特化表达 |
+| SNC-04 | software-dev execution / validation Soul 去除具体目标类别、计量对象和外部适配对象表达 | 内置 `soul-software-dev-execution`、`soul-software-dev-validation` | completed | 默认值测试断言不再出现旧特化表达，保留多目标、多接口契约、计量/副作用等通用工程约束 |
+| SNC-05 | 保留 workspace 动态派生业务矩阵能力 | profile / soul 约束 | completed | 具体矩阵行只能来自当前 Goal / DoD、workspace 上下文、工具结果或 LLM assessment，不由 core/template 预置 |
 
 ### 低价值或噪音 memory
 

@@ -118,10 +118,23 @@
 
 ## DoD Assessment 归一化边界
 
+- Activation / resume 构造 execution context 时必须以 definition event 的最后一次出现确定 Goal / DoD 顺序。同一 Goal / DoD ID 的重复事件只能形成一个 lineage 条目，并通过 `definitionChangeImpact.*.definitionRevisions[]` 表示修订次数；不得让重复事件把旧 ID 重新插入到 `allGoalIds` / `allDoDIds`，导致 runtime 误判 effective definition 或 LLM 误用旧验收基准。
+- Core 对 Goal / DoD 覆盖只能做中立结构校验：coverage item、acceptance dimension、deliverable expectation、matrix row 与 evidenceRefs / artifactRefs 必须完整且可追踪。Core 不得内置任何具体业务对象、供应商、协议、接口、字段或测试框架名称，也不得根据自然语言中的领域词自动判定某项能力已满足。
 - Completion gate 在校验前可以对 `dodAssessment` 做确定性结构归一化，包括规范化 evidence ref、补齐父级 `satisfied=true` 但子项 `state` 为空的 coverage state、以及为声明 satisfied/available/produced 但遗漏 `evidenceRefs` 的项补入当前 run 的可用证据。
 - 归一化只能使用当前 run 中已完成、可追溯、非弱证据的中立 evidence，例如成功的 shell/tool/patch/validation 步骤；`file/read`、`file/list`、`mcp/resource_read`、LLM 自身输出、zero-work/inconclusive/invalid evidence 不能作为自动 fallback。
 - 若没有可用 evidence，runtime 不得凭空接受 assessment，必须继续按 completion gate 失败、repair、rejected result 或 decision blocker 收口。
 - 该规则只治理结构化证据引用完整性，不引入任何业务领域判断；业务语义是否充分仍由 Goal/DoD、profile contract、LLM assessment 与 evidence quality gate 共同约束。
+
+## 抽象矩阵与证据门禁
+
+当当前 Goal / DoD 或 profile contract 涉及多目标、接口/格式转换、配置、流式/长流程、错误行为、副作用或并发时，LLM assessment 应输出中立覆盖矩阵或等价的结构化 coverage items。Runtime completion gate 的职责是确认：
+
+- 每个矩阵行或 coverage item 都有稳定标识、状态和证据引用。
+- satisfied 项不能只引用 read-only、zero-work、inconclusive 或不可追踪证据。
+- 一个通过命令、一个兼容 mock、一个 summary 或一个笼统 DoD item 不能自动覆盖所有矩阵行。
+- result summary 中的能力声明必须能映射到对应 coverage item / matrix row / evidence refs。
+
+矩阵的具体行内容只能由 Goal / DoD、workspace 当前上下文、profile / template / soul / skill 或 LLM assessment 动态产生；core flow 不允许预置任何业务领域行、字段或验证语义。若证据不足，runtime 应进入 assessment correction、repair、rejected result 或 decision blocker，而不是把领域语义写入 core。
 
 ## 当前实现偏差
 

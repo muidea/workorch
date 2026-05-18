@@ -66,10 +66,16 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, planning.SoulMD, "external_contract")
 	assertSoulContains(t, planning.SoulMD, "runtime_entrypoint")
 	assertSoulContains(t, planning.SoulMD, "persistence_or_side_effect")
-	assertSoulContains(t, planning.SoulMD, "provider/protocol matrix")
+	assertSoulContains(t, planning.SoulMD, "target/interface contract matrix")
+	assertSoulContains(t, planning.SoulMD, "输入契约")
+	assertSoulContains(t, planning.SoulMD, "输出契约")
 	assertSoulContains(t, planning.SoulMD, "file/read")
 	assertSoulContains(t, planning.SoulMD, "rejectedResultContinuation")
 	assertSoulContains(t, planning.SoulMD, "missingGoalCoverage")
+	assertSoulNotContains(t, planning.SoulMD, "provider/protocol matrix")
+	assertSoulNotContains(t, planning.SoulMD, "多供应商")
+	assertSoulNotContains(t, planning.SoulMD, "多模型")
+	assertSoulNotContains(t, planning.SoulMD, "Token")
 
 	execution := findEmbeddedSoulByID(souls, "soul-software-dev-execution")
 	if execution == nil {
@@ -92,7 +98,7 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, execution.SoulMD, "包/module/import")
 	assertSoulContains(t, execution.SoulMD, "Goal / DoD、现有代码和验收证据")
 	assertSoulContains(t, execution.SoulMD, "交付入口")
-	assertSoulContains(t, execution.SoulMD, "多外部系统、多协议")
+	assertSoulContains(t, execution.SoulMD, "多外部系统、多接口契约")
 	assertSoulContains(t, execution.SoulMD, "file/read")
 	assertSoulContains(t, execution.SoulMD, "编译与接口形状修复")
 	assertSoulContains(t, execution.SoulMD, "undefined")
@@ -106,6 +112,8 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulNotContains(t, execution.SoulMD, "多 provider/多 LLM 网关")
 	assertSoulNotContains(t, execution.SoulMD, "providers[]")
 	assertSoulNotContains(t, execution.SoulMD, "model_prefixes")
+	assertSoulNotContains(t, execution.SoulMD, "真实外部 provider")
+	assertSoulNotContains(t, execution.SoulMD, "provider 行为")
 
 	validation := findEmbeddedSoulByID(souls, "soul-software-dev-validation")
 	if validation == nil {
@@ -129,6 +137,9 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, validation.SoulMD, "persistence_or_side_effect")
 	assertSoulContains(t, validation.SoulMD, "rejectedResultContinuation")
 	assertSoulContains(t, validation.SoulMD, "missingDeliverableCoverage")
+	assertSoulNotContains(t, validation.SoulMD, "多供应商")
+	assertSoulNotContains(t, validation.SoulMD, "多模型")
+	assertSoulNotContains(t, validation.SoulMD, "Token")
 
 	artifact := findEmbeddedSoulByID(souls, "soul-software-dev-artifact")
 	if artifact == nil {

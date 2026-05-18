@@ -336,6 +336,8 @@ func workspaceDefinitionContextPatchForRun(ctx context.Context, session *Runtime
 	if err != nil {
 		return nil, err
 	}
+	goalRevisions := workspaceDefinitionRevisionContexts(ctx, exports.Repositories.EventRecords, workspace.ID, events.TopicGoalDefined)
+	doDRevisions := workspaceDefinitionRevisionContexts(ctx, exports.Repositories.EventRecords, workspace.ID, events.TopicDoDDefined)
 	patch := map[string]any{
 		"goalId": string(effectiveGoal.ID),
 		"goal":   goalContext(effectiveGoal),
@@ -357,7 +359,7 @@ func workspaceDefinitionContextPatchForRun(ctx context.Context, session *Runtime
 		patch["dods"] = workspaceDoDs
 		patch["doDDefinitionPolicy"] = "workspace_dods_are_cumulative_latest_refines_previous"
 	}
-	if impact := definitionChangeImpactFromDefinitions(effectiveGoal, workspaceGoals, effectiveDoD, workspaceDoDs); len(impact) > 0 {
+	if impact := definitionChangeImpactFromDefinitions(effectiveGoal, workspaceGoals, goalRevisions, effectiveDoD, workspaceDoDs, doDRevisions); len(impact) > 0 {
 		patch["definitionChangeImpact"] = impact
 	}
 	return patch, nil

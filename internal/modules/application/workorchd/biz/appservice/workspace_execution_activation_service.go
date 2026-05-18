@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -206,18 +207,33 @@ func orderedWorkspaceDefinitions[T any, ID ~string](ctx context.Context, eventRe
 			byID[id] = item
 		}
 	}
-	ret := make([]T, 0, len(ordered))
-	seen := map[string]struct{}{}
-	for _, record := range records {
+	type orderedRecord struct {
+		id  string
+		pos int
+	}
+	lastRecordByID := map[string]orderedRecord{}
+	for idx, record := range records {
 		if record == nil || record.SubjectID == "" {
 			continue
 		}
-		item, ok := byID[record.SubjectID]
-		if !ok {
+		if _, ok := byID[record.SubjectID]; !ok {
 			continue
 		}
+		lastRecordByID[record.SubjectID] = orderedRecord{id: record.SubjectID, pos: idx}
+	}
+	eventOrder := make([]orderedRecord, 0, len(lastRecordByID))
+	for _, record := range lastRecordByID {
+		eventOrder = append(eventOrder, record)
+	}
+	sort.SliceStable(eventOrder, func(i, j int) bool {
+		return eventOrder[i].pos < eventOrder[j].pos
+	})
+	ret := make([]T, 0, len(ordered))
+	seen := map[string]struct{}{}
+	for _, record := range eventOrder {
+		item := byID[record.id]
 		ret = append(ret, item)
-		seen[record.SubjectID] = struct{}{}
+		seen[record.id] = struct{}{}
 	}
 	for _, item := range ordered {
 		id := string(idOf(item))
@@ -225,6 +241,58 @@ func orderedWorkspaceDefinitions[T any, ID ~string](ctx context.Context, eventRe
 			continue
 		}
 		ret = append(ret, item)
+	}
+	return ret
+}
+
+func workspaceDefinitionRevisionContexts(ctx context.Context, eventRecords repository.EventRecordRepository, workspaceID common.WorkspaceID, topic string) []map[string]any {
+	if eventRecords == nil {
+		return nil
+	}
+	records, err := eventRecords.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID, Topic: topic})
+	if err != nil || len(records) == 0 {
+		return nil
+	}
+	type revision struct {
+		id             string
+		count          int
+		lastEventID    string
+		lastOccurredAt string
+		lastPos        int
+	}
+	byID := map[string]*revision{}
+	for idx, record := range records {
+		if record == nil || record.SubjectID == "" {
+			continue
+		}
+		item := byID[record.SubjectID]
+		if item == nil {
+			item = &revision{id: record.SubjectID}
+			byID[record.SubjectID] = item
+		}
+		item.count++
+		item.lastEventID = string(record.ID)
+		item.lastOccurredAt = strings.TrimSpace(record.OccurredAt)
+		item.lastPos = idx
+	}
+	items := make([]*revision, 0, len(byID))
+	for _, item := range byID {
+		items = append(items, item)
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].lastPos < items[j].lastPos
+	})
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if item.count <= 1 {
+			continue
+		}
+		ret = append(ret, map[string]any{
+			"id":             item.id,
+			"revisionCount":  item.count,
+			"lastEventId":    item.lastEventID,
+			"lastOccurredAt": item.lastOccurredAt,
+		})
 	}
 	return ret
 }
@@ -460,6 +528,8 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	if err != nil {
 		return nil, err
 	}
+	goalRevisions := workspaceDefinitionRevisionContexts(ctx, exports.Repositories.EventRecords, workspace.ID, events.TopicGoalDefined)
+	doDRevisions := workspaceDefinitionRevisionContexts(ctx, exports.Repositories.EventRecords, workspace.ID, events.TopicDoDDefined)
 	contextData := map[string]any{
 		"activation":  "workspace_execution",
 		"workspaceId": string(workspace.ID),
@@ -477,7 +547,7 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 		contextData["dods"] = workspaceDoDs
 		contextData["doDDefinitionPolicy"] = "workspace_dods_are_cumulative_latest_refines_previous"
 	}
-	if impact := definitionChangeImpactFromDefinitions(effectiveGoal, workspaceGoals, effectiveDoD, workspaceDoDs); len(impact) > 0 {
+	if impact := definitionChangeImpactFromDefinitions(effectiveGoal, workspaceGoals, goalRevisions, effectiveDoD, workspaceDoDs, doDRevisions); len(impact) > 0 {
 		contextData["definitionChangeImpact"] = impact
 	}
 	dialogLanguage := languageNameFromLocale(cmd.DialogLanguage)
@@ -783,7 +853,7 @@ func mergeActivationExecutionContextPatch(contextData map[string]any, patch map[
 	}
 }
 
-func definitionChangeImpactFromDefinitions(effectiveGoal *workspacemodel.Goal, goals []map[string]any, effectiveDoD *workspacemodel.DoD, dods []map[string]any) map[string]any {
+func definitionChangeImpactFromDefinitions(effectiveGoal *workspacemodel.Goal, goals []map[string]any, goalRevisions []map[string]any, effectiveDoD *workspacemodel.DoD, dods []map[string]any, doDRevisions []map[string]any) map[string]any {
 	goalIDs := goalIDsFromContexts(goals)
 	doDIDs := doDIDsFromContexts(dods)
 	effectiveGoalID := ""
@@ -794,7 +864,7 @@ func definitionChangeImpactFromDefinitions(effectiveGoal *workspacemodel.Goal, g
 	if effectiveDoD != nil {
 		effectiveDoDID = string(effectiveDoD.ID)
 	}
-	changed := len(goalIDs) > 1 || len(doDIDs) > 1
+	changed := len(goalIDs) > 1 || len(doDIDs) > 1 || len(goalRevisions) > 0 || len(doDRevisions) > 0
 	if !changed {
 		return nil
 	}
@@ -808,6 +878,8 @@ func definitionChangeImpactFromDefinitions(effectiveGoal *workspacemodel.Goal, g
 			"latestGoalId":           latestDefinitionID(goalIDs, effectiveGoalID),
 			"previousGoalIds":        previousDefinitionIDs(goalIDs, effectiveGoalID),
 			"allGoalIds":             goalIDs,
+			"definitionRevisions":    cloneContextMapSlice(goalRevisions),
+			"changedInPlace":         len(goalRevisions) > 0,
 			"allGoalsAreConstraints": true,
 		},
 		"doDChange": map[string]any{
@@ -815,6 +887,8 @@ func definitionChangeImpactFromDefinitions(effectiveGoal *workspacemodel.Goal, g
 			"latestDoDId":                   latestDefinitionID(doDIDs, effectiveDoDID),
 			"previousDoDIds":                previousDefinitionIDs(doDIDs, effectiveDoDID),
 			"allDoDIds":                     doDIDs,
+			"definitionRevisions":           cloneContextMapSlice(doDRevisions),
+			"changedInPlace":                len(doDRevisions) > 0,
 			"allDoDItemsAreAcceptanceGates": true,
 		},
 		"strategyRequirements": []string{
