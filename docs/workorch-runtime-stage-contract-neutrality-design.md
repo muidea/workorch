@@ -16,6 +16,7 @@
 - runtime repair 的当前失败优先、patch grounding、repair target set、预算拆分与终态收敛必须同时遵守 `workorch-repair-convergence-patch-grounding-closure-design.md`；该文档是本文在 repair 收敛维度的补充合约，仍不得引入任何业务领域硬编码。
 - Goal / DoD 发生累计变化时的影响评估、策略选择与重复修复重评估必须同时遵守 `workorch-goal-dod-change-impact-strategy-closure-design.md`；该文档是本文在定义变化与 repair strategy 维度的补充合约，仍不得引入任何业务领域硬编码。
 - Result / DoD assessment 的证据严格性、直接证据、入口证据与 template/profile 显式绑定必须同时遵守 `workorch-result-evidence-strictness-closure-design.md`；该文档是本文在结果可信度维度的补充合约，core 仍只能校验证据结构和 profile 声明的机械约束。
+- 重复失败面、root-cause target、同失败面 patch 准入和 repair-of-repair 上下文继承必须同时遵守 `workorch-runtime-failed-surface-root-cause-target-design.md`；该文档是本文在 repair target 选择与失败面纠偏维度的补充合约，core 仍不得理解具体业务产物含义。
 
 ## 背景
 
