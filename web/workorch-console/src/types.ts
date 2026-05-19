@@ -1210,3 +1210,14 @@ export type AutoGovernanceSummary = {
   promptFingerprint?: string;
   occurredAt?: string;
 };
+
+export type ControlPlaneProps = {
+  selectedWorkspaceId?: string;
+  onOpenWorkspace: (workspaceId: string) => void;
+};
+
+export type WorkspaceBoardItem = {
+  snapshot: WorkspaceSnapshot;
+  goals: Goal[];
+  dods: DoD[];
+};

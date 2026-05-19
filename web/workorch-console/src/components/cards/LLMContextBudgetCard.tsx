@@ -1,0 +1,66 @@
+import React from 'react';
+import { Space, Empty, Descriptions } from 'antd';
+import { ProTable } from '@ant-design/pro-components';
+import type { LLMContextBudgetTrace } from '../../types';
+import { numberText, compactJSON } from '../../utils';
+import { MetricGrid, CompactTags } from '../common';
+
+interface LLMContextBudgetCardProps {
+  traces?: LLMContextBudgetTrace[];
+}
+
+export const LLMContextBudgetCard = React.memo(function LLMContextBudgetCard({ traces }: LLMContextBudgetCardProps) {
+  const items = traces ?? [];
+
+  if (items.length === 0) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前运行未记录 LLM Context Budget" />;
+  }
+
+  const truncatedCount = items.filter((item) => item.truncated).length;
+  const p0OverflowCount = items.filter((item) => item.p0Overflow).length;
+  const goalDoDCompressedCount = items.filter((item) => item.goalDoDCompressed).length;
+
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <MetricGrid
+        items={[
+          { key: 'traceCount', label: '预算轨迹', value: numberText(items.length), color: '#1668dc' },
+          { key: 'truncatedCount', label: '触发压缩', value: numberText(truncatedCount), color: truncatedCount ? '#d48806' : undefined },
+          { key: 'p0OverflowCount', label: 'P0 Overflow', value: numberText(p0OverflowCount), color: p0OverflowCount ? '#cf1322' : undefined },
+          { key: 'goalDoDCompressedCount', label: 'Goal/DoD 被压缩', value: numberText(goalDoDCompressedCount), color: goalDoDCompressedCount ? '#cf1322' : '#389e0d' }
+        ]}
+      />
+      <ProTable<LLMContextBudgetTrace>
+        rowKey={(item, index) => `${item.stepId}-${index}`}
+        search={false}
+        options={false}
+        pagination={{ pageSize: 8 }}
+        size="small"
+        columns={[
+          { title: '步骤', dataIndex: 'stepId', copyable: true, ellipsis: true },
+          { title: 'Provider/Model', render: (_, item) => `${item.providerId || '-'} / ${item.model || '-'}`, ellipsis: true },
+          { title: '字节预算', width: 150, render: (_, item) => `${numberText(item.actualBytes)} / ${numberText(item.maxBytes)}` },
+          { title: 'Token 预算', width: 150, render: (_, item) => `${numberText(item.estimatedInputTokens)} / ${numberText(item.maxTokens)}` },
+          { title: '压缩级别', dataIndex: 'shrinkLevel', width: 90, render: (_, item) => numberText(item.shrinkLevel) },
+          { title: '状态', width: 180, render: (_, item) => <CompactTags tags={[item.truncated ? 'truncated' : 'full', item.p0Overflow ? 'p0_overflow' : '', item.goalDoDCompressed ? 'goal_dod_compressed' : 'goal_dod_protected'].filter(Boolean)} maxVisible={4} /> }
+        ]}
+        expandable={{
+          expandedRowRender: (item) => (
+            <Descriptions
+              size="small"
+              column={1}
+              items={[
+                { key: 'rules', label: '预算规则', children: <CompactTags tags={item.rules ?? []} maxVisible={8} /> },
+                { key: 'sections', label: '分区处理', children: <CompactTags tags={[`included:${(item.includedSections ?? []).join('|') || '-'}`, `normalized:${(item.normalizedSections ?? []).join('|') || '-'}`, `compressed:${(item.compressedSections ?? []).join('|') || '-'}`, `omitted:${(item.omittedSections ?? []).join('|') || '-'}`]} maxVisible={8} /> },
+                { key: 'refs', label: '来源引用', children: <CompactTags tags={item.sourceRefs ?? []} maxVisible={8} /> },
+                { key: 'policy', label: 'trace 策略', children: `${item.tracePolicy || '-'} / estimator: ${item.estimator || '-'}` },
+                { key: 'profile', label: 'Profile', children: <pre className="json-panel">{compactJSON(item.profile)}</pre> }
+              ]}
+            />
+          )
+        }}
+        dataSource={items}
+      />
+    </Space>
+  );
+});
