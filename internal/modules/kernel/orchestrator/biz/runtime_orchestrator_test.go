@@ -16223,6 +16223,40 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsRejectedOnlyRequirement(t *t
 	}
 }
 
+func TestDoDAssessmentEvidenceKindRequirementRejectsUntraceableDirectEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-direct-evidence")
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                    "runtime_entrypoint",
+							"scope":                 "acceptanceDimension",
+							"requireDirectEvidence": true,
+							"acceptedStepKinds":     []string{shellcommon.StepKindCommand},
+						}},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"acceptanceDimensions": []map[string]any{{
+			"id":           "runtime_entrypoint",
+			"state":        "satisfied",
+			"evidenceRefs": []string{"run-dod-direct-evidence/graph-001/999-unknown"},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "traceable direct evidenceRef") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want untraceable direct evidence rejection", err)
+	}
+}
+
 func TestCompletionGateNormalizesEvidenceRefsToCanonicalUsableRuntimeEvidence(t *testing.T) {
 	ctx := context.Background()
 	stepRepo := memory.NewStepRepository()
@@ -17119,6 +17153,66 @@ func TestRuntimeRepairInputForMissingDeliverableCoverageIsAssessmentOnly(t *test
 	}
 }
 
+func TestRuntimeRepairInputForMissingGoalCoverageWithoutEvidenceCandidatesProducesEvidenceRepair(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-dod-coverage-evidence-repair")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-dod-coverage-evidence-repair", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-001-of-planning-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyAssessmentOnly:        true,
+			"repairObjective":                 "complete_dod_goal_coverage_assessment",
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|stage=llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": true,
+				"summary":   "DoD passed but goal coverage is still incomplete.",
+				"items": []map[string]any{{
+					"item":         "tests pass",
+					"state":        "satisfied",
+					"evidenceRefs": []string{string(runID) + "/graph-001/003-test"},
+				}},
+			},
+			"runtimeDiagnostics": map[string]any{
+				"kind": failureClassDoDCoverageMissing,
+				"missingGoalCoverage": []map[string]any{{
+					"goalRequirementId": "goal-req-001-no-candidate",
+					"raw":               "new goal requirement with no current evidence",
+					"kind":              "leaf",
+					"state":             "missing",
+				}},
+			},
+		},
+	}
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, step, 2, errors.New("missing goal coverage"))
+
+	if input[stepInputKeyAssessmentOnly] != nil || input["repairObjective"] != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("repair input = %+v, want concrete evidence repair without assessment-only", input)
+	}
+	if input["evidenceRepairRequired"] != true {
+		t.Fatalf("evidenceRepairRequired = %v, want true", input["evidenceRepairRequired"])
+	}
+	gap := mapFromValue(input["verificationEvidenceGap"])
+	if missing := mapSliceFromValue(gap["missingGoal"]); len(missing) != 1 || missing[0]["goalRequirementId"] != "goal-req-001-no-candidate" {
+		t.Fatalf("verificationEvidenceGap = %+v, want missing Goal coverage carried forward", gap)
+	}
+	if got := input["evidenceRepairSource"]; got != "coverage_gap_without_candidate_evidence" {
+		t.Fatalf("evidenceRepairSource = %v, want coverage_gap_without_candidate_evidence", got)
+	}
+}
+
 func TestCompletionGateCoverageRepairFollowUpCanContinue(t *testing.T) {
 	runID := common.RunID("run-dod-coverage-assessment-repair-continues")
 	step := &runmodel.Step{
@@ -17130,6 +17224,13 @@ func TestCompletionGateCoverageRepairFollowUpCanContinue(t *testing.T) {
 			stepInputKeyRuntimeRepairFollowUp: true,
 			stepInputKeyAssessmentOnly:        true,
 			"repairObjective":                 "complete_dod_goal_coverage_assessment",
+			"missingGoalCoverage": []map[string]any{{
+				"raw": "streaming token accounting",
+				"evidenceCandidates": []map[string]any{{
+					"stepId": string(runID) + "/graph-001/003-test",
+					"kind":   "shell/command",
+				}},
+			}},
 		},
 		Output: map[string]any{
 			"stage":                   "llm_dod_assessment",

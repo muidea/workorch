@@ -27,6 +27,7 @@ type profileEvidenceKindRequirement struct {
 	AcceptedStepKinds []string
 	RejectedStepKinds []string
 	Description       string
+	RequireDirect     bool
 }
 
 func (e *doDAssessmentEvidenceQualityError) Error() string {
@@ -164,8 +165,9 @@ func profileEvidenceKindRequirements(run *runModel.Run) []profileEvidenceKindReq
 				AcceptedStepKinds: stringSliceFromValue(raw["acceptedStepKinds"]),
 				RejectedStepKinds: stringSliceFromValue(raw["rejectedStepKinds"]),
 				Description:       strings.TrimSpace(stringFromMap(raw, "description")),
+				RequireDirect:     boolValue(raw["requireDirectEvidence"]),
 			}
-			if len(req.AcceptedStepKinds) == 0 && len(req.RejectedStepKinds) == 0 {
+			if len(req.AcceptedStepKinds) == 0 && len(req.RejectedStepKinds) == 0 && !req.RequireDirect {
 				continue
 			}
 			ret = append(ret, req)
@@ -231,6 +233,10 @@ func evidenceKindRequirementMatchesItem(requirement profileEvidenceKindRequireme
 func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context, requirement profileEvidenceKindRequirement, item map[string]any) error {
 	refs := evidenceRefsFromValue(item["evidenceRefs"])
 	if len(refs) == 0 {
+		if requirement.RequireDirect {
+			itemName := evidenceKindRequirementItemName(requirement, item)
+			return evidenceKindRequirementError(requirement, itemName, "", "", "requires at least one traceable direct evidenceRef")
+		}
 		return nil
 	}
 	accepted := mapStringSet(requirement.AcceptedStepKinds)
@@ -259,6 +265,9 @@ func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context,
 		if accepted[kind] {
 			hasAcceptedEvidence = true
 		}
+	}
+	if requirement.RequireDirect && knownEvidenceRefs == 0 {
+		return evidenceKindRequirementError(requirement, itemName, strings.Join(refs, ", "), "", "requires at least one traceable direct evidenceRef")
 	}
 	if hasAcceptedRequirement && hasAcceptedEvidence {
 		return nil

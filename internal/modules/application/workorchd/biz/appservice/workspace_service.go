@@ -28,6 +28,8 @@ type Workspace struct {
 	InternalDirectory    string            `json:"-"`
 	State                string            `json:"state"`
 	ActiveRunID          string            `json:"activeRunId,omitempty"`
+	TemplateID           string            `json:"templateId,omitempty"`
+	ProfileID            string            `json:"profileId,omitempty"`
 	DefaultSoulID        string            `json:"defaultSoulId,omitempty"`
 	SoulBindings         map[string]string `json:"soulBindings,omitempty"`
 	ContextHints         map[string]any    `json:"contextHints,omitempty"`
@@ -164,6 +166,8 @@ func applyWorkspaceTemplateOnCreate(ctx context.Context, session *RuntimeSession
 		return nil, err
 	}
 	item.DefaultSoulID = common.SoulID(strings.TrimSpace(template.DefaultSoulID))
+	item.TemplateID = strings.TrimSpace(template.ID)
+	item.ProfileID = strings.TrimSpace(template.ID)
 	item.SoulBindings = bindings
 	item.ContextHints = cloneContextMap(template.ContextHints)
 	item.EvidencePolicies = cloneContextMapSlice(template.EvidencePolicies)
@@ -634,6 +638,8 @@ func mapWorkspace(item *workspacemodel.Workspace) Workspace {
 		InternalDirectory:    item.InternalDirectory,
 		State:                string(item.State),
 		ActiveRunID:          string(item.ActiveRunID),
+		TemplateID:           item.TemplateID,
+		ProfileID:            item.ProfileID,
 		DefaultSoulID:        string(item.DefaultSoulID),
 		SoulBindings:         mapSoulBindingIDs(item.SoulBindings),
 		ContextHints:         cloneContextMap(item.ContextHints),

@@ -81,6 +81,8 @@ func (b *localWorkspaceBackend) Create(ctx context.Context, req CreateWorkspaceR
 		DeliverableDirectory: ws.DeliverableDirectory,
 		State:                common.WorkspaceState(ws.State),
 		ActiveRunID:          common.RunID(ws.ActiveRunID),
+		TemplateID:           ws.TemplateID,
+		ProfileID:            ws.ProfileID,
 		DefaultSoulID:        common.SoulID(ws.DefaultSoulID),
 		SoulBindings:         commonSoulBindings(ws.SoulBindings),
 	}, nil
@@ -103,6 +105,8 @@ func (b *localWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) 
 		DeliverableDirectory: ws.DeliverableDirectory,
 		State:                ws.State,
 		ActiveRunID:          ws.ActiveRunID,
+		TemplateID:           ws.TemplateID,
+		ProfileID:            ws.ProfileID,
 		DefaultSoulID:        ws.DefaultSoulID,
 		SoulBindings:         ws.SoulBindings,
 	}, nil
@@ -127,6 +131,8 @@ func (b *localWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, erro
 			DeliverableDirectory: w.DeliverableDirectory,
 			State:                w.State,
 			ActiveRunID:          w.ActiveRunID,
+			TemplateID:           w.TemplateID,
+			ProfileID:            w.ProfileID,
 			DefaultSoulID:        w.DefaultSoulID,
 			SoulBindings:         w.SoulBindings,
 		})

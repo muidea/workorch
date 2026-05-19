@@ -127,13 +127,14 @@ func normalizeDoDAssessmentGoalCoverageForRepairInput(assessment map[string]any,
 		return assessment
 	}
 	changed := false
+	parentSatisfied := boolValue(coverage["satisfied"])
 	for idx, item := range items {
 		missingItem := missingGoalCoverageItemForAssessmentItem(item, missing)
 		if len(missingItem) == 0 && idx < len(missing) {
 			missingItem = missing[idx]
 		}
 		if len(missingItem) > 0 {
-			if normalizeGoalCoverageAssessmentItemFromMissing(item, missingItem) {
+			if normalizeGoalCoverageAssessmentItemFromMissing(item, missingItem, parentSatisfied) {
 				changed = true
 			}
 		}
@@ -151,7 +152,7 @@ func normalizeDoDAssessmentGoalCoverageForRepairInput(assessment map[string]any,
 	return normalizedAssessment
 }
 
-func normalizeGoalCoverageAssessmentItemFromMissing(item map[string]any, missing map[string]any) bool {
+func normalizeGoalCoverageAssessmentItemFromMissing(item map[string]any, missing map[string]any, parentSatisfied bool) bool {
 	if len(item) == 0 || len(missing) == 0 {
 		return false
 	}
@@ -174,6 +175,11 @@ func normalizeGoalCoverageAssessmentItemFromMissing(item map[string]any, missing
 			item["goalRequirementId"] = goalCoverageRequirementID(0, normalized)
 			changed = true
 		}
+	}
+	if parentSatisfied && strings.TrimSpace(stringFromMap(item, "state")) == "" &&
+		(len(evidenceRefsFromValue(item["evidenceRefs"])) > 0 || len(evidenceCandidateStepRefs(missing)) > 0) {
+		item["state"] = "satisfied"
+		changed = true
 	}
 	return changed
 }
@@ -458,7 +464,7 @@ func validateDoDAssessmentCoversRunGoal(run *runModel.Run, assessment map[string
 	if len(requiredItems) == 0 {
 		return nil
 	}
-	covered, err := validatedGoalCoverageItems(assessment)
+	covered, err := validatedGoalCoverageItemCoverage(assessment)
 	if err != nil {
 		return newGoalCoverageContractError(err, requiredItems)
 	}
@@ -472,10 +478,14 @@ func validateDoDAssessmentCoversRunGoal(run *runModel.Run, assessment map[string
 		}
 		matched := false
 		for _, actual := range covered {
-			if actual == "" {
+			if actual.normalized == "" && actual.id == "" {
 				continue
 			}
-			if strings.Contains(actual, required.normalized) || strings.Contains(required.normalized, actual) {
+			if required.id != "" && actual.id != "" && required.id == actual.id {
+				matched = true
+				break
+			}
+			if actual.normalized != "" && (strings.Contains(actual.normalized, required.normalized) || strings.Contains(required.normalized, actual.normalized)) {
 				matched = true
 				break
 			}
@@ -491,6 +501,20 @@ func validateDoDAssessmentCoversRunGoal(run *runModel.Run, assessment map[string
 }
 
 func validatedGoalCoverageItems(assessment map[string]any) ([]string, error) {
+	items, err := validatedGoalCoverageItemCoverage(assessment)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.normalized != "" {
+			ret = append(ret, item.normalized)
+		}
+	}
+	return ret, nil
+}
+
+func validatedGoalCoverageItemCoverage(assessment map[string]any) ([]normalizedDoDItem, error) {
 	if assessment == nil {
 		return nil, fmt.Errorf("%w: dodAssessment.goalCoverage is required when Goal has uncovered leaf requirements", common.ErrInvalidArgument)
 	}
@@ -512,7 +536,7 @@ func validatedGoalCoverageItems(assessment map[string]any) ([]string, error) {
 	if !ok || len(items) == 0 {
 		return nil, fmt.Errorf("%w: dodAssessment.goalCoverage.items are required", common.ErrInvalidArgument)
 	}
-	ret := make([]string, 0, len(items))
+	ret := make([]normalizedDoDItem, 0, len(items))
 	for _, item := range items {
 		name := strings.TrimSpace(firstNonEmptyString(
 			stringFromMap(item, "goal"),
@@ -530,9 +554,12 @@ func validatedGoalCoverageItems(assessment map[string]any) ([]string, error) {
 		if len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 {
 			return nil, fmt.Errorf("%w: satisfied dodAssessment.goalCoverage item requires evidenceRefs", common.ErrInvalidArgument)
 		}
-		if normalized := normalizeDoDCoverageText(name); normalized != "" {
-			ret = append(ret, normalized)
-		}
+		ret = append(ret, normalizedDoDItem{
+			id:         strings.TrimSpace(firstNonEmptyString(stringFromMap(item, "goalRequirementId"), stringFromMap(item, "id"))),
+			raw:        name,
+			normalized: normalizeDoDCoverageText(name),
+			kind:       doDItemKindLeaf,
+		})
 	}
 	return ret, nil
 }

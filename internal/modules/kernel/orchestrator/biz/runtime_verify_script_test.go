@@ -203,6 +203,7 @@ func TestVerifyWorkorchRuntimeSoftwareDevProfileScriptFixtures(t *testing.T) {
 	cases := []struct {
 		name     string
 		run      map[string]any
+		steps    []map[string]any
 		results  []map[string]any
 		wantErr  string
 		wantSkip bool
@@ -220,6 +221,18 @@ func TestVerifyWorkorchRuntimeSoftwareDevProfileScriptFixtures(t *testing.T) {
 			wantPass: true,
 		},
 		{
+			name: "software dev read only direct evidence fails",
+			run:  profileScriptRun("run-profile-software-dev-read-only", "completed", softwareDevProfileContractFixture()),
+			steps: []map[string]any{{
+				"id":    "run-profile-software-dev-read-only/validation/runtime-step",
+				"runId": "run-profile-software-dev-read-only",
+				"kind":  "file/read",
+				"state": "completed",
+			}},
+			results: []map[string]any{softwareDevAcceptedResultFixture("run-profile-software-dev-read-only", true)},
+			wantErr: "direct evidenceRefs use read-only or rejected step kinds",
+		},
+		{
 			name:    "software dev missing deliverable coverage fails",
 			run:     profileScriptRun("run-profile-software-dev-fail", "completed", softwareDevProfileContractFixture()),
 			results: []map[string]any{softwareDevAcceptedResultFixture("run-profile-software-dev-fail", false)},
@@ -231,7 +244,7 @@ func TestVerifyWorkorchRuntimeSoftwareDevProfileScriptFixtures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dataRoot := t.TempDir()
 			runID := stringFromMap(tc.run, "id")
-			writeProfileVerifyFixture(t, dataRoot, "ws-profile-fixture", runID, tc.run, tc.results)
+			writeProfileVerifyFixture(t, dataRoot, "ws-profile-fixture", runID, tc.run, tc.steps, tc.results)
 
 			output, err := runRuntimeProfileSoftwareDevVerifyScript(t, dataRoot, "ws-profile-fixture", runID)
 			switch {
@@ -249,6 +262,60 @@ func TestVerifyWorkorchRuntimeSoftwareDevProfileScriptFixtures(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestVerifyWorkorchRuntimeSoftwareDevProfileScriptSnapshotFixture(t *testing.T) {
+	dataRoot := t.TempDir()
+	runID := "run-profile-snapshot-pass"
+	snapshotPath := filepath.Join(dataRoot, "snapshot.json")
+	resultsPath := filepath.Join(dataRoot, "results.json")
+	writeJSONFile(t, snapshotPath, map[string]any{
+		"snapshot": map[string]any{
+			"workspace": map[string]any{
+				"id":         "ws-profile-fixture",
+				"state":      "completed",
+				"templateId": "software-dev",
+			},
+			"run":   profileScriptRun(runID, "completed", softwareDevProfileContractFixture()),
+			"steps": softwareDevProfileScriptSteps(runID, "shell/command"),
+		},
+	})
+	writeJSONFile(t, resultsPath, map[string]any{
+		"results": []map[string]any{softwareDevAcceptedResultFixture(runID, true)},
+	})
+
+	output, err := runRuntimeProfileSoftwareDevVerifyScriptSnapshot(t, snapshotPath, resultsPath)
+	if err != nil || !strings.Contains(output, "software-dev profile verification passed") {
+		t.Fatalf("verify output = %s err=%v, want pass", output, err)
+	}
+}
+
+func TestVerifyWorkorchRuntimeSoftwareDevProfileScriptSnapshotFixtureAcceptsRawResultCasing(t *testing.T) {
+	dataRoot := t.TempDir()
+	runID := "run-profile-snapshot-raw-casing"
+	snapshotPath := filepath.Join(dataRoot, "snapshot.json")
+	resultsPath := filepath.Join(dataRoot, "results.json")
+	writeJSONFile(t, snapshotPath, map[string]any{
+		"snapshot": map[string]any{
+			"workspace": map[string]any{
+				"id":         "ws-profile-fixture",
+				"state":      "completed",
+				"templateId": "software-dev",
+			},
+			"run":   profileScriptRun(runID, "completed", softwareDevProfileContractFixture()),
+			"steps": softwareDevProfileScriptSteps(runID, "shell/command"),
+		},
+	})
+	result := softwareDevAcceptedResultFixture(runID, true)
+	result["doDAssessment"] = softwareDevAcceptedRawCasedAssessmentFixture(runID)
+	writeJSONFile(t, resultsPath, map[string]any{
+		"results": []map[string]any{result},
+	})
+
+	output, err := runRuntimeProfileSoftwareDevVerifyScriptSnapshot(t, snapshotPath, resultsPath)
+	if err != nil || !strings.Contains(output, "software-dev profile verification passed") {
+		t.Fatalf("verify output = %s err=%v, want pass", output, err)
 	}
 }
 
@@ -300,14 +367,20 @@ func softwareDevProfileContractFixture() map[string]any {
 		"acceptanceDimensions": []map[string]any{{
 			"id":       "functional_behavior",
 			"required": true,
+		}, {
+			"id":       "runtime_entrypoint",
+			"required": false,
 		}},
 		"deliverableExpectations": []map[string]any{{
 			"id":       "user_deliverable",
 			"required": true,
 		}},
 		"evidenceRequirements": []map[string]any{{
-			"id":       "runtime_execution",
-			"required": true,
+			"id":                    "runtime_entrypoint",
+			"scope":                 "acceptanceDimension",
+			"requireDirectEvidence": true,
+			"acceptedStepKinds":     []string{"shell/command", "patch/apply", "mcp/tool_call"},
+			"rejectedStepKinds":     []string{"file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"},
 		}},
 	}
 }
@@ -335,6 +408,10 @@ func softwareDevAcceptedResultFixture(runID string, includeDeliverable bool) map
 				"id":           "functional_behavior",
 				"state":        "satisfied",
 				"evidenceRefs": []string{runID + "/validation/runtime-step"},
+			}, {
+				"id":           "runtime_entrypoint",
+				"state":        "satisfied",
+				"evidenceRefs": []string{runID + "/validation/runtime-step"},
 			}},
 		},
 	}
@@ -355,6 +432,55 @@ func softwareDevAcceptedResultFixture(runID string, includeDeliverable bool) map
 		"state":         "accepted",
 		"doDAssessment": assessment,
 	}
+}
+
+func softwareDevAcceptedRawCasedAssessmentFixture(runID string) map[string]any {
+	return map[string]any{
+		"Satisfied": true,
+		"Summary":   "accepted",
+		"Items": []map[string]any{{
+			"Item":         "required outcome",
+			"State":        "satisfied",
+			"EvidenceRefs": []string{runID + "/validation/runtime-step"},
+		}},
+		"GoalCoverage": map[string]any{
+			"Satisfied": true,
+			"Items": []map[string]any{{
+				"Goal":         "goal covered",
+				"State":        "satisfied",
+				"EvidenceRefs": []string{runID + "/validation/runtime-step"},
+			}},
+		},
+		"AcceptanceDimensions": map[string]any{
+			"Satisfied": true,
+			"Items": []map[string]any{{
+				"ID":           "functional_behavior",
+				"State":        "satisfied",
+				"EvidenceRefs": []string{runID + "/validation/runtime-step"},
+			}, {
+				"ID":           "runtime_entrypoint",
+				"State":        "satisfied",
+				"EvidenceRefs": []string{runID + "/validation/runtime-step"},
+			}},
+		},
+		"DeliverableCoverage": map[string]any{
+			"Satisfied": true,
+			"Items": []map[string]any{{
+				"ID":           "user_deliverable",
+				"State":        "satisfied",
+				"ArtifactRefs": []string{runID + "/artifact/workspace-change-diff"},
+			}},
+		},
+	}
+}
+
+func softwareDevProfileScriptSteps(runID string, kind string) []map[string]any {
+	return []map[string]any{{
+		"id":    runID + "/validation/runtime-step",
+		"runId": runID,
+		"kind":  kind,
+		"state": "completed",
+	}}
 }
 
 func gatedPatchGraphScriptStep(stepID string) map[string]any {
@@ -504,11 +630,14 @@ func writeRuntimeVerifyFixture(t *testing.T, dataRoot, workspaceID, runID, runSt
 	writeJSONFile(t, filepath.Join(runDir, "ticket.json"), tickets)
 }
 
-func writeProfileVerifyFixture(t *testing.T, dataRoot, workspaceID, runID string, run map[string]any, results []map[string]any) {
+func writeProfileVerifyFixture(t *testing.T, dataRoot, workspaceID, runID string, run map[string]any, steps, results []map[string]any) {
 	t.Helper()
 	runDir := filepath.Join(dataRoot, "workspaces", workspaceID, "runs", runID)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		t.Fatalf("mkdir profile fixture: %v", err)
+	}
+	if steps == nil {
+		steps = softwareDevProfileScriptSteps(runID, "shell/command")
 	}
 	if results == nil {
 		results = []map[string]any{}
@@ -519,6 +648,7 @@ func writeProfileVerifyFixture(t *testing.T, dataRoot, workspaceID, runID string
 		"activeRunId": "",
 	}})
 	writeJSONFile(t, filepath.Join(runDir, "run.json"), []map[string]any{run})
+	writeJSONFile(t, filepath.Join(runDir, "step.json"), steps)
 	writeJSONFile(t, filepath.Join(runDir, "result.json"), results)
 }
 
@@ -542,6 +672,19 @@ func runRuntimeVerifyScript(t *testing.T, dataRoot, workspaceID, runID string) (
 	cmd := exec.Command("bash", filepath.Join(root, "scripts", "verify-workorch-runtime-core-flow.sh"), workspaceID, runID)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "WORKORCH_RUNTIME_VERIFY_DATA_ROOT="+dataRoot)
+	output, err := cmd.CombinedOutput()
+	return string(output), err
+}
+
+func runRuntimeProfileSoftwareDevVerifyScriptSnapshot(t *testing.T, snapshotPath, resultsPath string) (string, error) {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "..", "..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+	cmd := exec.Command("bash", filepath.Join(root, "scripts", "verify-workorch-runtime-profile-software-dev.sh"), "--snapshot", snapshotPath, resultsPath)
+	cmd.Dir = root
+	cmd.Env = os.Environ()
 	output, err := cmd.CombinedOutput()
 	return string(output), err
 }

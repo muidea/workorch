@@ -78,7 +78,7 @@ func (b *remoteWorkspaceBackend) Create(ctx context.Context, req CreateWorkspace
 	return &WorkspaceInfo{
 		ID: common.WorkspaceID(ws.ID), Title: ws.Title, Description: ws.Description,
 		DeliverableDirectory: ws.DeliverableDirectory, State: common.WorkspaceState(ws.State),
-		ActiveRunID: common.RunID(ws.ActiveRunID), DefaultSoulID: common.SoulID(ws.DefaultSoulID),
+		ActiveRunID: common.RunID(ws.ActiveRunID), TemplateID: ws.TemplateID, ProfileID: ws.ProfileID, DefaultSoulID: common.SoulID(ws.DefaultSoulID),
 		SoulBindings: commonSoulBindings(ws.SoulBindings),
 	}, nil
 }
@@ -92,6 +92,8 @@ func (b *remoteWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID)
 		ID: common.WorkspaceID(ws.ID), Title: ws.Title, Description: ws.Description,
 		DeliverableDirectory: ws.DeliverableDirectory, State: common.WorkspaceState(ws.State),
 		ActiveRunID:   common.RunID(ws.ActiveRunID),
+		TemplateID:    ws.TemplateID,
+		ProfileID:     ws.ProfileID,
 		DefaultSoulID: common.SoulID(ws.DefaultSoulID),
 		SoulBindings:  commonSoulBindings(ws.SoulBindings),
 	}, nil
@@ -108,6 +110,8 @@ func (b *remoteWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, err
 			ID: common.WorkspaceID(ws.ID), Title: ws.Title, Description: ws.Description,
 			DeliverableDirectory: ws.DeliverableDirectory, State: common.WorkspaceState(ws.State),
 			ActiveRunID:   common.RunID(ws.ActiveRunID),
+			TemplateID:    ws.TemplateID,
+			ProfileID:     ws.ProfileID,
 			DefaultSoulID: common.SoulID(ws.DefaultSoulID),
 			SoulBindings:  commonSoulBindings(ws.SoulBindings),
 		})

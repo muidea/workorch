@@ -1230,6 +1230,8 @@ func workspaceModelFromView(item Workspace) *workspacemodel.Workspace {
 		InternalDirectory:    item.InternalDirectory,
 		State:                common.WorkspaceState(item.State),
 		ActiveRunID:          common.RunID(item.ActiveRunID),
+		TemplateID:           item.TemplateID,
+		ProfileID:            item.ProfileID,
 		DefaultSoulID:        common.SoulID(item.DefaultSoulID),
 		SoulBindings:         workspaceSoulBindingsFromView(item.SoulBindings),
 	}

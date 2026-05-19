@@ -2977,6 +2977,7 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 			cloned.SoulBindings[key] = value
 		}
 	}
+	cloned.ContextHints = cloneMap(item.ContextHints)
 	cloned.EvidencePolicies = cloneMapSlice(item.EvidencePolicies)
 	return &cloned
 }

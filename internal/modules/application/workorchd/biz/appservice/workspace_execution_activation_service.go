@@ -765,6 +765,13 @@ func matchingWorkspaceTemplateContextHints(ctx context.Context, templates reposi
 	if ctx == nil || templates == nil || workspace == nil {
 		return nil
 	}
+	if templateID := strings.TrimSpace(workspace.TemplateID); templateID != "" {
+		item, err := templates.Get(ctx, templateID)
+		if err == nil && item != nil {
+			return cloneContextMap(item.ContextHints)
+		}
+		return nil
+	}
 	items, err := templates.List(ctx)
 	if err != nil {
 		return nil

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -1291,6 +1292,137 @@ func doDCoverageContractCorrectionRequired(step *runModel.Step) bool {
 	return assessmentOnlyGoalCoverageContradictionRepairRequired(step)
 }
 
+func coverageCorrectionNeedsConcreteEvidence(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	missingGoal := missingGoalCoverageFromInput(step.Input)
+	if len(missingGoal) > 0 {
+		for _, item := range missingGoal {
+			if goalCoverageGapCanReuseSatisfiedAssessmentEvidence(step, item) {
+				continue
+			}
+			if len(mapSliceFromValue(item["evidenceCandidates"])) == 0 {
+				return true
+			}
+		}
+	}
+	missingDoD := missingDoDItemsFromFailureOutput(step.Output)
+	if len(missingDoD) > 0 {
+		for _, item := range missingDoD {
+			if len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func goalCoverageGapCanReuseSatisfiedAssessmentEvidence(step *runModel.Step, missing map[string]any) bool {
+	if step == nil || len(missing) == 0 {
+		return false
+	}
+	assessment := doDAssessmentFromOutput(step.Output)
+	if len(assessment) == 0 {
+		return false
+	}
+	target := normalizeDoDCoverageText(missingGoalCoverageRequirementText(missing))
+	if target == "" {
+		return false
+	}
+	items, ok := doDAssessmentItemMaps(assessment["items"])
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		if strings.ToLower(strings.TrimSpace(stringFromMap(item, "state"))) != "satisfied" {
+			continue
+		}
+		if len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 && len(stringSliceFromValue(item["artifactRefs"])) == 0 {
+			continue
+		}
+		itemText := normalizeDoDCoverageText(firstNonEmptyString(
+			stringFromMap(item, "item"),
+			stringFromMap(item, "goal"),
+			stringFromMap(item, "goalItem"),
+			stringFromMap(item, "requirement"),
+		))
+		if itemText == "" {
+			continue
+		}
+		if strings.Contains(itemText, target) || strings.Contains(target, itemText) || coverageTextsLikelyEquivalent(itemText, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func coverageTextsLikelyEquivalent(left string, right string) bool {
+	left = normalizeDoDCoverageText(left)
+	right = normalizeDoDCoverageText(right)
+	if left == "" || right == "" {
+		return false
+	}
+	if left == right {
+		return true
+	}
+	leftTerms := coverageRequirementTerms(left)
+	rightTerms := coverageRequirementTerms(right)
+	if len(leftTerms) == 0 || len(rightTerms) == 0 {
+		return false
+	}
+	leftSet := map[string]bool{}
+	for _, term := range leftTerms {
+		leftSet[term] = true
+	}
+	matches := 0
+	for _, term := range rightTerms {
+		if leftSet[term] {
+			matches++
+		}
+	}
+	minTerms := min(len(leftTerms), len(rightTerms))
+	if matches > 0 && matches*2 >= minTerms {
+		return true
+	}
+	return coverageTextsShareStrongCJKNGrams(left, right)
+}
+
+func coverageTextsShareStrongCJKNGrams(left string, right string) bool {
+	if utf8.RuneCountInString(left) < 2 || utf8.RuneCountInString(right) < 2 {
+		return false
+	}
+	leftGrams := coverageTextNGrams(left, 2)
+	rightGrams := coverageTextNGrams(right, 2)
+	if len(leftGrams) == 0 || len(rightGrams) == 0 {
+		return false
+	}
+	shared := 0
+	for gram := range leftGrams {
+		if rightGrams[gram] {
+			shared++
+		}
+	}
+	minGrams := min(len(leftGrams), len(rightGrams))
+	return shared >= 2 && shared*2 >= minGrams
+}
+
+func coverageTextNGrams(value string, size int) map[string]bool {
+	runes := []rune(value)
+	if len(runes) < size {
+		return nil
+	}
+	ret := map[string]bool{}
+	for idx := 0; idx+size <= len(runes); idx++ {
+		gram := string(runes[idx : idx+size])
+		if strings.TrimSpace(gram) == "" {
+			continue
+		}
+		ret[gram] = true
+	}
+	return ret
+}
+
 func missingGoalCoverageFromFailureOutput(output map[string]any) []map[string]any {
 	diagnostics := mapFromValue(output["runtimeDiagnostics"])
 	items := mapSliceFromValue(diagnostics["missingGoalCoverage"])
@@ -1739,7 +1871,16 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		}
 	}
 	assessmentOnlyCoverageRepair := doDCoverageContractCorrectionRequired(failedStep)
-	concreteEvidenceRepair := !assessmentOnlyCoverageRepair && doDVerificationEvidenceRepairRequired(failedStep)
+	if assessmentOnlyCoverageRepair {
+		if missingGoalCoverage := missingGoalCoverageFromStep(failedStep); len(missingGoalCoverage) > 0 {
+			input["missingGoalCoverage"] = o.missingGoalCoverageWithEvidenceCandidates(ctx, run, failedStep, missingGoalCoverage)
+		}
+	}
+	coverageNeedsConcreteEvidence := assessmentOnlyCoverageRepair && coverageCorrectionNeedsConcreteEvidence(&runModel.Step{
+		Input:  input,
+		Output: failedStep.Output,
+	})
+	concreteEvidenceRepair := coverageNeedsConcreteEvidence || (!assessmentOnlyCoverageRepair && doDVerificationEvidenceRepairRequired(failedStep))
 	if concreteEvidenceRepair {
 		input["repairObjective"] = repairObjectiveConcreteValidationEvidence
 		input["evidenceRepairRequired"] = true
@@ -1748,11 +1889,12 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"failedStepId":   string(failedStep.ID),
 			"failedStepKind": string(failedStep.Kind),
 			"missingDoD":     missingDoDItemsFromFailureOutput(failedStep.Output),
+			"missingGoal":    missingGoalCoverageFromStep(failedStep),
 		}
 		input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
 		delete(input, "stateChangingOutputRequired")
 	}
-	if assessmentOnlyCoverageRepair {
+	if assessmentOnlyCoverageRepair && !coverageNeedsConcreteEvidence {
 		input[stepInputKeySoulStage] = soulStageValidation
 		setRuntimeStage(input, runtimeStageVerification)
 		input[stepInputKeyAssessmentOnly] = true
@@ -1777,15 +1919,22 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 				input["supersededFailureEvidence"] = superseded
 			}
 		}
-		if missingGoalCoverage := missingGoalCoverageFromStep(failedStep); len(missingGoalCoverage) > 0 {
-			input["missingGoalCoverage"] = o.missingGoalCoverageWithEvidenceCandidates(ctx, run, failedStep, missingGoalCoverage)
-		}
 		if missingDeliverableCoverage := missingDeliverableCoverageFromFailureOutput(failedStep.Output); len(missingDeliverableCoverage) > 0 {
 			input["missingDeliverableCoverage"] = missingDeliverableCoverage
 		}
 		if requiredDeliverables := requiredProfileDeliverableExpectations(run); len(requiredDeliverables) > 0 {
 			input["requiredDeliverableCoverage"] = requiredDeliverables
 		}
+	}
+	if coverageNeedsConcreteEvidence {
+		delete(input, stepInputKeyAssessmentOnly)
+		delete(input, "assessmentOnlyReason")
+		input["completionFollowUp"] = false
+		input["evidenceRepairSource"] = "coverage_gap_without_candidate_evidence"
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"At least one Goal/DoD coverage gap lacks concrete candidate evidence; produce bounded verification evidence before another dodAssessment correction.",
+			"If new verification evidence closes a specific Goal requirement, ensure the next dodAssessment cites that exact evidenceRef and goalRequirementId.",
+		)
 	}
 	transientExecutionTimeout := runtimeRepairFailureIsTransientExecutionTimeout(failedStep, execErr)
 	if transientExecutionTimeout {

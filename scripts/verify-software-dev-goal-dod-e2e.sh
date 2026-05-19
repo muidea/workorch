@@ -135,6 +135,42 @@ PY
   return 1
 }
 
+verify_software_dev_profile_snapshot() {
+  local workspace_id_for_run="$1"
+  local run_id="$2"
+  local snapshot_file="$3"
+  local results_metadata_file="$TMP_DIR/${run_id}-profile-results-metadata.json"
+  local results_file="$TMP_DIR/${run_id}-profile-results.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/results?limit=500" >"$results_metadata_file"
+  python3 - "$results_metadata_file" "$results_file" "$BASE_URL" "$workspace_id_for_run" "$run_id" <<'PY'
+import json
+import subprocess
+import sys
+from urllib.parse import quote
+
+metadata_path, output_path, base_url, workspace_id, run_id = sys.argv[1:]
+data = json.load(open(metadata_path, encoding="utf-8"))
+results = data.get("results") or []
+for item in results:
+    result_id = str(item.get("id") or "")
+    if not result_id:
+        continue
+    if item.get("doDAssessment"):
+        continue
+    ref = f"workorch://workspaces/{workspace_id}/runs/{run_id}/results/{result_id}/dod-assessment.json"
+    url = base_url.rstrip("/") + "/api/v1/workorch/runtime/payloads?ref=" + quote(ref, safe="")
+    try:
+        raw = subprocess.check_output(["curl", "-fsS", url], text=True)
+        assessment = json.loads(raw)
+    except Exception:
+        continue
+    if isinstance(assessment, dict) and assessment:
+        item["doDAssessment"] = assessment
+json.dump({"results": results}, open(output_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+PY
+  "$ROOT_DIR/scripts/verify-workorch-runtime-profile-software-dev.sh" --snapshot "$snapshot_file" "$results_file"
+}
+
 write_llm_update_payloads() {
   python3 - "$TMP_DIR/configuration.json" "$TMP_DIR/original-llm-update.json" "$TMP_DIR/verify-llm-update.json" "$MOCK_BASE_URL" <<'PY'
 import json
@@ -311,7 +347,29 @@ def response_for(run_id, step_id, merged_content):
                         {"item": "代码修改通过 Patch 证据可追溯", "state": "satisfied", "evidenceRefs": ["fix-source"]},
                         {"item": "go test ./... 最终通过", "state": "satisfied", "evidenceRefs": ["run-tests-fixed"]},
                         {"item": "结果包含 DoD 评估和交付物索引", "state": "satisfied", "evidenceRefs": [step_id]}
-                    ]
+                    ],
+                    "goalCoverage": {
+                        "satisfied": True,
+                        "items": [
+                            {"goal": "完成软件开发闭环", "state": "satisfied", "evidenceRefs": ["fix-source", "run-tests-fixed"]}
+                        ]
+                    },
+                    "acceptanceDimensions": {
+                        "satisfied": True,
+                        "items": [
+                            {"id": "functional_behavior", "state": "satisfied", "evidenceRefs": ["run-tests-fixed"]},
+                            {"id": "runtime_entrypoint", "state": "satisfied", "evidenceRefs": ["run-tests-fixed"]}
+                        ]
+                    },
+                    "deliverableCoverage": {
+                        "satisfied": True,
+                        "items": [
+                            {"id": "source_change", "state": "satisfied", "evidenceRefs": ["fix-source"]},
+                            {"id": "validation_report", "state": "satisfied", "artifactRefs": ["run-tests-fixed"]},
+                            {"id": "coverage_map", "state": "satisfied", "artifactRefs": [step_id]},
+                            {"id": "user_deliverable", "state": "satisfied", "artifactRefs": ["fix-source"]}
+                        ]
+                    }
                 }
             }
         if "zz-llm-repair-" in step_id:
@@ -413,7 +471,31 @@ def response_for(run_id, step_id, merged_content):
                         {"item": "README.md 必须作为交付物证据可追溯", "state": "satisfied", "evidenceRefs": ["write-readme"]},
                         {"item": "目标项目外部依赖配置必须按 target_workspace/external_dependency 作用域处理", "state": "satisfied", "evidenceRefs": [step_id]},
                         {"item": "敏感认证信息不得进入 snapshot、observability、event 或 LLM context", "state": "satisfied", "evidenceRefs": [step_id]}
-                    ]
+                    ],
+                    "goalCoverage": {
+                        "satisfied": True,
+                        "items": [
+                            {"goal": "从空 workspace 初始化最小 Go 项目", "state": "satisfied", "evidenceRefs": ["write-go-mod", "write-source", "write-tests", "run-empty-project-tests"]},
+                            {"goal": "生成 README.md 并说明初始化来源", "state": "satisfied", "evidenceRefs": ["write-readme"]}
+                        ]
+                    },
+                    "acceptanceDimensions": {
+                        "satisfied": True,
+                        "items": [
+                            {"id": "functional_behavior", "state": "satisfied", "evidenceRefs": ["run-empty-project-tests"]},
+                            {"id": "runtime_entrypoint", "state": "satisfied", "evidenceRefs": ["run-empty-project-tests"]},
+                            {"id": "external_contract", "state": "satisfied", "evidenceRefs": ["run-empty-project-tests"]}
+                        ]
+                    },
+                    "deliverableCoverage": {
+                        "satisfied": True,
+                        "items": [
+                            {"id": "source_change", "state": "satisfied", "evidenceRefs": ["write-go-mod", "write-source", "write-tests", "write-readme"]},
+                            {"id": "validation_report", "state": "satisfied", "artifactRefs": ["run-empty-project-tests"]},
+                            {"id": "coverage_map", "state": "satisfied", "artifactRefs": [step_id]},
+                            {"id": "user_deliverable", "state": "satisfied", "artifactRefs": ["write-source", "write-readme"]}
+                        ]
+                    }
                 }
             }
         if "llm-after-decision" in step_id:
@@ -758,6 +840,7 @@ scenario1_run_id="$(json_path "$TMP_DIR/scenario1-activation.json" "activation.r
 wait_run_state "$scenario1_run_id" "completed" "$TMP_DIR/scenario1-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario1_run_id/snapshot" >"$TMP_DIR/scenario1-snapshot.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario1_run_id/observability" >"$TMP_DIR/scenario1-observability.json"
+verify_software_dev_profile_snapshot "$workspace_id" "$scenario1_run_id" "$TMP_DIR/scenario1-snapshot.json"
 
 python3 - "$TMP_DIR/scenario1-snapshot.json" "$workspace_workdir/calculator.go" <<'PY'
 import json
@@ -941,6 +1024,7 @@ curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario3_run_id/observability" >"$TM
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario3_run_id/context-bundle" >"$TMP_DIR/scenario3-context-bundle.json"
 curl -fsS "$BASE_URL/api/v1/workorch/events?runId=$scenario3_run_id&limit=200" >"$TMP_DIR/scenario3-events.json"
 curl -fsS "$BASE_URL/api/v1/workorch/decisions/$scenario3_ticket_path" >"$TMP_DIR/scenario3-ticket-final.json"
+verify_software_dev_profile_snapshot "$scenario3_workspace_id" "$scenario3_run_id" "$TMP_DIR/scenario3-snapshot.json"
 
 python3 - \
   "$TMP_DIR/scenario3-ticket-open.json" \

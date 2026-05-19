@@ -249,6 +249,67 @@ func TestNormalizeCompletionGateDoDAssessmentOutputUsesEvidenceCandidatesWhenRef
 	}
 }
 
+func TestNormalizeCompletionGateDoDAssessmentOutputInfersSatisfiedStateFromParentAndCandidates(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-goal-coverage-normalize-parent-satisfied",
+		WorkspaceID:     "ws-goal-coverage-normalize-parent-satisfied",
+		DoDID:           "dod-goal-coverage-normalize-parent-satisfied",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:    "run-goal-coverage-normalize-parent-satisfied/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyAssessmentOnly: true,
+			"repairObjective":          "complete_dod_goal_coverage_assessment",
+			"missingGoalCoverage": []map[string]any{{
+				"goalRequirementId": "goal-req-001-parent-satisfied",
+				"raw":               "publish completion evidence",
+				"evidenceCandidates": []map[string]any{{
+					"stepId": "run-goal-coverage-normalize-parent-satisfied/graph-001/002-verify",
+				}},
+			}},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "Goal and DoD requirements are covered.",
+			"items": []map[string]any{{
+				"item":         "verification passes",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-goal-coverage-normalize-parent-satisfied/graph-001/002-verify"},
+			}},
+			"goalCoverage": map[string]any{
+				"satisfied": true,
+				"items": []map[string]any{{
+					"item":         "publish completion evidence",
+					"evidenceRefs": []string{"summary.md"},
+				}},
+			},
+		},
+	}
+
+	normalized := normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	assessment := doDAssessmentFromOutput(normalized)
+	coverage := mapFromValue(assessment["goalCoverage"])
+	items, ok := doDAssessmentItemMaps(coverage["items"])
+	if !ok || len(items) != 1 {
+		t.Fatalf("goalCoverage.items = %+v, want one normalized item", coverage["items"])
+	}
+	if got := stringFromMap(items[0], "state"); got != "satisfied" {
+		t.Fatalf("goalCoverage item state = %q, want inferred satisfied", got)
+	}
+	if got := stringFromMap(items[0], "goalRequirementId"); got != "goal-req-001-parent-satisfied" {
+		t.Fatalf("goalRequirementId = %q, want copied requirement id", got)
+	}
+	refs := evidenceRefsFromValue(items[0]["evidenceRefs"])
+	if len(refs) != 1 || refs[0] != "run-goal-coverage-normalize-parent-satisfied/graph-001/002-verify" {
+		t.Fatalf("evidenceRefs = %+v, want fallback candidate step ref", refs)
+	}
+}
+
 func TestNormalizeCompletionGateDoDAssessmentOutputDoesNotMaskNonAssessmentOnlyOutput(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-goal-coverage-normalize-scope",

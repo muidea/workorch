@@ -2090,6 +2090,86 @@ func TestActivateWorkspaceExecutionWithBackendAddsExecutionContractFromWorkspace
 	}
 }
 
+func TestActivationExecutionContractUsesWorkspaceTemplateIDBeforeSoulRouting(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	templateID := "template-explicit-contract"
+	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+		ID:   templateID,
+		Name: "explicit contract",
+		ContextHints: map[string]any{
+			"stateChangePolicy": "must_produce_state_change",
+			"profileContracts": map[string]any{
+				"explicit-profile": map[string]any{
+					"deliverableExpectations": []map[string]any{{
+						"id":       "explicit-deliverable",
+						"required": true,
+					}},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
+	}
+	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title:                "explicit template workspace",
+		DeliverableDirectory: "workspaces/explicit-template-workspace",
+		TemplateID:           templateID,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+	if workspace.TemplateID != templateID || workspace.ProfileID != templateID {
+		t.Fatalf("workspace template/profile = %q/%q, want %q", workspace.TemplateID, workspace.ProfileID, templateID)
+	}
+
+	// Mutate routing after creation. The execution contract must still come from
+	// TemplateID rather than being lost because Soul routing does not match.
+	session, err := newRuntimeSessionWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+	item, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	item.DefaultSoulID = "soul-mutated"
+	if err := exports.Repositories.Workspaces.Update(ctx, item); err != nil {
+		t.Fatalf("update workspace: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
+
+	session, err = newRuntimeSessionWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("newRuntimeSessionWithBackend #2: %v", err)
+	}
+	exports, err = session.Exports()
+	if err != nil {
+		t.Fatalf("exports #2: %v", err)
+	}
+	workspaceModel, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("get workspace #2: %v", err)
+	}
+	contract := workspaceExecutionContract(ctx, exports.Repositories.WorkspaceTemplates, workspaceModel)
+	if contract["stateChangePolicy"] != "must_produce_state_change" {
+		t.Fatalf("executionContract = %+v, want template policy", contract)
+	}
+	profiles := contextMapFromValue(t, contract["profileContracts"])
+	if _, ok := profiles["explicit-profile"]; !ok {
+		t.Fatalf("profileContracts = %+v, want explicit-profile from TemplateID", profiles)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close session #2: %v", err)
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendRefreshesExecutionContractFromMatchedTemplate(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()

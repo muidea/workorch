@@ -28,6 +28,8 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	assertContainsAnyDoDItem(t, item.DoDItems, "PRD")
 	assertContainsAnyDoDItem(t, item.DoDItems, "unified_diff")
 	assertContainsAnyDoDItem(t, item.DoDItems, "build/test")
+	assertContainsAnyDoDItem(t, item.DoDItems, "最终交付入口")
+	assertContainsAnyDoDItem(t, item.DoDItems, "用户可观察行为")
 	assertContainsAnyDoDItem(t, item.DoDItems, "主路径")
 	assertContainsAnyDoDItem(t, item.DoDItems, "lint/静态检查")
 	assertContainsAnyDoDItem(t, item.DoDItems, "残余风险")
@@ -135,6 +137,12 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, validation.SoulMD, "claim-to-evidence consistency")
 	assertSoulContains(t, validation.SoulMD, "file/read")
 	assertSoulContains(t, validation.SoulMD, "persistence_or_side_effect")
+	assertSoulContains(t, validation.SoulMD, "直接 evidenceRefs")
+	assertSoulContains(t, validation.SoulMD, "runtime_entrypoint")
+	assertSoulContains(t, validation.SoulMD, "external_contract")
+	assertSoulContains(t, validation.SoulMD, "不能只引用 build/race/coverage_map")
+	assertSoulContains(t, validation.SoulMD, "用户可观察行为")
+	assertSoulContains(t, validation.SoulMD, "最终交付入口")
 	assertSoulContains(t, validation.SoulMD, "rejectedResultContinuation")
 	assertSoulContains(t, validation.SoulMD, "missingDeliverableCoverage")
 	assertSoulNotContains(t, validation.SoulMD, "多供应商")
@@ -329,6 +337,8 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		t.Fatalf("software-dev evidenceRequirements = %+v, want declared requirements", softwareDev["evidenceRequirements"])
 	}
 	requiredEvidence := map[string]bool{
+		"runtime_entrypoint":         false,
+		"external_contract":         false,
 		"persistence_or_side_effect": false,
 		"streaming_or_long_running":  false,
 		"error_behavior":             false,
@@ -345,6 +355,9 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		}
 		if scope, _ := item["scope"].(string); scope != "acceptanceDimension" {
 			t.Fatalf("evidence requirement %q scope = %q, want acceptanceDimension", id, scope)
+		}
+		if direct, _ := item["requireDirectEvidence"].(bool); !direct {
+			t.Fatalf("evidence requirement %q requireDirectEvidence = false, want true", id)
 		}
 		accepted, ok := item["acceptedStepKinds"].([]any)
 		if !ok {

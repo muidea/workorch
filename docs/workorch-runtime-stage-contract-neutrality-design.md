@@ -15,6 +15,7 @@
 - 后续所有针对 WorkOrch 功能的开发完善，都必须在设计、实现和验证三个环节显式参照本文。
 - runtime repair 的当前失败优先、patch grounding、repair target set、预算拆分与终态收敛必须同时遵守 `workorch-repair-convergence-patch-grounding-closure-design.md`；该文档是本文在 repair 收敛维度的补充合约，仍不得引入任何业务领域硬编码。
 - Goal / DoD 发生累计变化时的影响评估、策略选择与重复修复重评估必须同时遵守 `workorch-goal-dod-change-impact-strategy-closure-design.md`；该文档是本文在定义变化与 repair strategy 维度的补充合约，仍不得引入任何业务领域硬编码。
+- Result / DoD assessment 的证据严格性、直接证据、入口证据与 template/profile 显式绑定必须同时遵守 `workorch-result-evidence-strictness-closure-design.md`；该文档是本文在结果可信度维度的补充合约，core 仍只能校验证据结构和 profile 声明的机械约束。
 
 ## 背景
 
@@ -238,6 +239,9 @@ Runtime 必须拒绝：
 - `missingDeliverableCoverage` 中的每个条目都必须在 assessment-only correction 中成为独立的 `dodAssessment.deliverableCoverage.items[]` 条目；满足项必须复制 required deliverable id，并引用具体 `evidenceRefs` 或 `artifactRefs`。
 - runtime 可以为 `missingGoalCoverage` 附加中立 `evidenceCandidates`，候选来源只能是当前 run 已完成或失败 step 的 step id、kind、state、output 文本与 requirement 文本的通用匹配。候选证据不是自动通过依据，LLM 必须判断其 output 是否真实支持该 Goal leaf，并在满足时引用具体 `evidenceRefs`。
 - assessment-only correction 输出缺少可由 `missingGoalCoverage` 唯一确定的 requirement 文本或 `goalRequirementId` 时，runtime 可以在 completion gate 前进行中立 schema normalization：按条目顺序或稳定 ID / 文本匹配补齐 requirement 元数据，并剔除非可追踪 `evidenceRefs`；若满足项仅给出不可追踪引用，可回填该缺口的中立候选 step id。该 normalization 只修复合同结构和证据引用形态，不代表 runtime 自动接受候选证据的业务含义。
+- 当 `dodAssessment.goalCoverage.satisfied=true` 且子项已提供可追踪 evidence refs，但遗漏子项 `state` 时，runtime 可以在 completion gate 前将该子项归一化为 `state=satisfied`。该容错只适用于 assessment-only coverage correction，且必须同时具备父级 satisfied 与可追踪 evidence refs / evidenceCandidates；不得为缺少证据的子项推断 satisfied。
+- Coverage correction 的 repair 分流必须先基于当前 run evidence 补齐中立候选证据，再判断是否仍缺少可用于判断的证据。若缺口可以通过稳定 `goalRequirementId`、精确规范化文本、通用 token overlap 或 CJK n-gram overlap 与已有 satisfied DoD/Goal evidence 机械匹配，仍属于 assessment-only correction；若缺口没有候选证据，也不能从已有 satisfied evidence 中机械映射，runtime 才能转入 concrete validation evidence repair，并允许 LLM 返回受限 verification `executionGraph`。
+- 该机械匹配只用于决定“是否已有可评估证据可供 LLM 做 coverage assessment”，不得直接判定业务满足。最终是否 accepted 仍必须由 `dodAssessment.goalCoverage.items[]` 明确列出 requirement / goalRequirementId、`state=satisfied` 与可追踪 evidence refs，并通过 completion gate 校验。
 - completion gate 在校验 `dodAssessment` 前必须基于 runtime evidence catalog 规范化 `evidenceRefs`：已完成 step、通过的 validation result、已应用 patch、tool call 等 runtime 已知证据可以作为 canonical evidence；LLM 输出的 graph node 别名、`runId/nodeId`、旧 `block/nodeId/patch/N`、`runId/<assessment-follow-up-step>-<node-id>` 等结构别名必须映射到 canonical step / validation / patch ref；别名匹配应支持 node id 的 `_` / `-` 等价与 graph step 顺序前缀剥离，但只能映射到同 run 内可追踪且可用的 runtime evidence。已知失败、无效、不可追踪或无法映射的引用必须从满足项中剔除。若剔除后某个 satisfied item 不再有有效 evidence，completion gate 必须拒绝该 assessment，而不能让历史失败 evidence 或 LLM 自造 ref 支撑 accepted result。
 - 若 LLM 将 `dodAssessment.goalCoverage`、`dodAssessment.acceptanceDimensions` 或 `dodAssessment.deliverableCoverage` 误输出为 bare array，runtime 可以在解析前中立规范化为 `{ "satisfied": <由 items 状态推断>, "items": [...] }`。该容错只修复 schema 形态，不得改变 item 文本、证据引用、artifact 引用或业务判断。
 - completion gate 因 `goalCoverage`、`acceptanceDimensions` 或 `deliverableCoverage` 缺失、未满足或结构不完整失败时，runtime 必须保留对应 coverage 诊断，并在后续 repair 中进入 assessment-only coverage correction；不得把纯 assessment 合同缺口误升级为普通 execution repair。
@@ -341,11 +345,12 @@ Core 可以按中立结构执行 profile 声明的 evidenceRequirements，但只
 - 按 `scope` 选择 `acceptanceDimensions`、`deliverableCoverage`、`goalCoverage` 或 `dodAssessment.items`。
 - 当对应 item 为 `satisfied` 时，检查其 `evidenceRefs` 指向的 step kind 是否命中 `acceptedStepKinds` 或 `rejectedStepKinds`。
 - 当 `acceptedStepKinds` 已声明时，`rejectedStepKinds` 表示“不能单独支撑该声明”的证据类型；若同一 item 同时引用 accepted 证据，只读/辅助证据可以保留为上下文。
+- 当 profile 声明 `requireDirectEvidence=true` 时，对应 satisfied item 必须至少有一条可追踪 evidenceRef；若声明了 `acceptedStepKinds`，该直接证据还必须命中 accepted step kind。不可追踪 ref、只读 ref 或被 profile 拒绝的 ref 不能单独支撑 satisfied。
 - 失败时生成中立 `dod_evidence_quality_gap` diagnostic，驱动后续 repair / rejected assessment。
 
 Core 不得根据 `id` 名称推断业务含义。例如 `persistence_or_side_effect`、`concurrency` 只是 profile 声明的字符串；core 不知道它们对应软件开发、数据写入、测试或任何具体领域。
 
-Run activation 必须把当前有效的 profile/template contract 组装进 `executionContract`。若 workspace 是由某个 template 初始化，且其 default soul / stage soul bindings 仍与该 template 匹配，activation 可以使用当前 template 的 `ContextHints` 作为 contract 基线，再保留 workspace 中 template 未声明的扩展字段；template 已声明的同名 contract 字段以当前 template 为准，避免旧 workspace 长期携带过期的 `profileContracts`、`deliverableExpectations` 或 `evidenceRequirements`。该刷新只作用于中立 execution contract，不得在 activation 阶段重新写入或覆盖 workspace 的 soul bindings、skill、mcp 或其他业务绑定。
+Run activation 必须把当前有效的 profile/template contract 组装进 `executionContract`。若 workspace 持久化了 `TemplateID`，activation 必须优先按该 ID 读取当前 template 的 `ContextHints` 作为 contract 基线，再保留 workspace 中 template 未声明的扩展字段；template 已声明的同名 contract 字段以当前 template 为准，避免旧 workspace 长期携带过期的 `profileContracts`、`deliverableExpectations` 或 `evidenceRequirements`。仅当旧 workspace 缺少 `TemplateID` 时，activation 才允许根据 default soul / stage soul bindings 兜底匹配 template。该刷新只作用于中立 execution contract，不得在 activation 阶段重新写入或覆盖 workspace 的 soul bindings、skill、mcp 或其他业务绑定。
 
 `executionContextPackage` 交给 LLM 的 `executionContract` 必须保留完整结构，尤其是 profile 下的 `acceptanceDimensions`、`deliverableExpectations`、`evidenceRequirements` 及其 `required`、`acceptedStepKinds`、`rejectedStepKinds` 等字段。Goal / DoD / 历史上下文可以按预算压缩，但 contract 不能被压缩成数组数量或摘要，否则 LLM 无法按 profile 约束做决策，runtime 也会在后续 verification / repair 阶段反复纠偏。
 
@@ -461,7 +466,7 @@ Runtime 可以从失败 diff 与当前 target snapshot 中抽取中立的 `patch
 
 如果 repair 基于当前 `patchRepairContext` 判断目标状态已经满足、失败 patch 已不再需要，runtime 可以接受一个受限 concrete validation evidence graph，用于验证当前状态；该 graph 不得只包含 read-only inspection，也不得包含新的 LLM 嵌套或 patch 节点。若验证失败，新的验证失败 evidence 再驱动后续 state-changing repair。
 
-若 `dodAssessment.satisfied=true` 但 runtime 校验发现 DoD / Goal / acceptance dimension / deliverable coverage 字段缺失或不完整，该失败属于 assessment contract correction，而不是新的 state-changing implementation 缺口。runtime 必须以 `assessmentOnly` / `verification` 模式要求 LLM 补齐 `dodAssessment.items`、`dodAssessment.goalCoverage`、`dodAssessment.acceptanceDimensions`、`dodAssessment.deliverableCoverage` 与 evidenceRefs / artifactRefs；不得在没有新的实现缺口证据时强制重新生成 patch、shell 或其他可执行工作。
+若 `dodAssessment.satisfied=true` 但 runtime 校验发现 DoD / Goal / acceptance dimension / deliverable coverage 字段缺失或不完整，该失败首先属于 assessment contract correction，而不是新的 state-changing implementation 缺口。runtime 必须先尝试以 `assessmentOnly` / `verification` 模式要求 LLM 补齐 `dodAssessment.items`、`dodAssessment.goalCoverage`、`dodAssessment.acceptanceDimensions`、`dodAssessment.deliverableCoverage` 与 evidenceRefs / artifactRefs；不得在没有新的实现缺口证据时强制重新生成 patch、shell 或其他 state-changing 工作。若补齐后的 coverage 缺口仍没有任何中立候选证据，也不能从已有 satisfied evidence 机械映射，runtime 应切换为 concrete validation evidence repair，要求 LLM 产生受限 verification evidence 或明确 failed assessment / blocker。
 
 如果 assessment-only coverage correction 仍返回 `dodAssessment.satisfied=true` 但继续缺失 DoD / Goal / acceptance dimension / deliverable coverage，runtime 不得立即把 run 终结为 rejected result；应在 runtime repair budget 内继续派发 assessment-only correction，并把最新 missingDoDItems / missingGoalCoverage / missingDeliverableCoverage 作为强约束输入。只有 coverage correction 预算耗尽、LLM 返回明确 unsatisfied assessment、或出现不可恢复 contract violation 时，才进入 rejected / decision / fail 路径。
 

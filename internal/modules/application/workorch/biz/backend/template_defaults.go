@@ -44,6 +44,9 @@ func TemplateDoDItemsForWorkspace(ctx context.Context, be Backend, wsID common.W
 }
 
 func workspaceMatchesTemplate(ws WorkspaceInfo, template TemplateInfo) bool {
+	if ws.TemplateID != "" {
+		return ws.TemplateID == template.ID
+	}
 	if template.DefaultSoulID != "" && ws.DefaultSoulID != template.DefaultSoulID {
 		return false
 	}

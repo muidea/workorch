@@ -44,6 +44,8 @@ type WorkspaceInfo struct {
 	DeliverableDirectory string
 	State                common.WorkspaceState
 	ActiveRunID          common.RunID
+	TemplateID           string
+	ProfileID            string
 	DefaultSoulID        common.SoulID
 	SoulBindings         map[string]common.SoulID
 }
