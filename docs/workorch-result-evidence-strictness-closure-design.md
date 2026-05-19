@@ -57,7 +57,7 @@ Run activation 组装 `executionContract` 时优先按 `TemplateID` 读取当前
 - 默认 DoD 要求用户可观察行为必须有直接验证或明确跳过说明。
 - 默认 DoD 要求高风险维度的测试绑定真实交付入口或生产实现；测试内临时 fake/mock/helper 只能作为依赖替身或辅助，不能作为唯一 satisfied 证据。
 - `runtime_entrypoint`、`streaming_or_long_running`、`error_behavior`、`persistence_or_side_effect`、`concurrency` 等 evidence requirements 设置 `requireDirectEvidence=true`。
-- Soul 要求 validation 输出逐项 `DoD item -> acceptance dimension -> exact evidenceRefs`，不能用总体 build/race/coverage_map 替代所有条目。
+- Soul 要求 validation 输出逐项 `DoD item -> acceptance dimension -> exact evidenceRefs`，不能用总体 build/race/coverage_map 替代所有条目；validation Soul 同样必须拒绝把测试文件内 fake/mock/helper 当作高风险维度的唯一被测对象或唯一直接证据。
 
 ## 收口跟踪
 
@@ -67,5 +67,5 @@ Run activation 组装 `executionContract` 时优先按 `TemplateID` 读取当前
 | RES-02 | Workspace 持久化 `TemplateID/ProfileID` | workspace model / appservice / backend | completed | 创建 template workspace 后 workspace 记录与 backend DTO 可看到 template/profile |
 | RES-03 | Activation 优先按 `TemplateID` 刷新 template contract | appservice activation | completed | `workspaceExecutionContract` 优先按 `TemplateID` 读取 template，Soul routing 仅作旧 workspace 兜底 |
 | RES-04 | `evidenceRequirements.requireDirectEvidence` 机械校验 | orchestrator evidence quality gate | completed | 单测覆盖不可追踪 direct evidence 不能支撑 satisfied |
-| RES-05 | software-dev template 补强最终入口、用户可观察行为和生产实现绑定约束 | builtin templates / souls | completed | 默认 DoD、profile requirement 与 Soul 已明确最终入口、用户可观察行为、高风险维度直接证据，以及 fake/mock/helper 不能作为唯一被测对象 |
+| RES-05 | software-dev template 补强最终入口、用户可观察行为和生产实现绑定约束 | builtin templates / souls | completed | 默认 DoD、profile requirement、execution Soul 与 validation Soul 已明确最终入口、用户可观察行为、高风险维度直接证据，以及 fake/mock/helper 不能作为唯一被测对象 |
 | RES-06 | deployed e2e 复验复杂 Goal/DoD accepted result | scripts / deployed verification | completed | `verify-software-dev-goal-dod-e2e.sh` 已在交付型 scenario 后自动调用 `verify-workorch-runtime-profile-software-dev.sh --snapshot`，并通过 raw result payload 补齐 DoD assessment 后校验 direct evidenceRefs 可追踪且命中 profile 允许 step kind；重新部署后执行 e2e 即可复验真实服务 |

@@ -158,6 +158,8 @@ Successor 的首个 LLM step 不应只知道“需要重规划”。它必须获
 
 当 workspace 已无 active run，且同一 workspace / effective Goal / effective DoD 的最新终态 result 为 `rejected` 时，新的 activation 必须把该 result 转换为中立 `executionContext.rejectedResultContinuation`。该 continuation 只表达 predecessor run/result、DoD satisfied/unsatisfied items、coverage gaps、required evidence、evidenceRefs/artifactRefs 等结构化事实，用于下一轮继续补齐缺口。
 
+若 workspace 已处于终态 failed 且没有 active run，新的 activation 不得尝试恢复旧终态 run，也不得只返回旧 terminal run；必须创建新的 successor run，并把最新 rejected result 作为 `rejectedResultContinuation` 注入 successor 的 execution context。旧 run 保持终态不可变，successor 通过 `predecessorRunId/resultId` 建立 lineage。
+
 `rejectedResultContinuation` 必须遵守 summary/ref-only 规则：允许携带 `predecessorRunId`、`resultId`、`sourceType`、`sourceRef`、result summary、`goalOutcome`、`satisfiedDoDItems`、`unsatisfiedDoDItems`、`coverageGaps.missingGoalCoverage`、`coverageGaps.missingAcceptanceDimensions`、`coverageGaps.missingDeliverableCoverage`、`requiredEvidence`、`resultEvidenceRefs`、`artifactRefs`；禁止携带 provider/model 动态绑定、raw LLM stream、完整 execution graph、完整 failed step input、完整 workspace 文件内容或领域特化修复指令。
 
 Coverage gap 只能从 `dodAssessment` 的结构化 `goalCoverage`、`acceptanceDimensions`、`deliverableCoverage` 与 result 的 `nextActions` / `residualRisks` / `knownLimitations` 抽取。Core 不得根据自然语言 summary 或某个业务 profile 的文字关键词推断缺口类型；软件开发等领域如何解释这些缺口，只能由 workspaceTemplate、profile、soul、skill 或用户 Goal / DoD 决定。

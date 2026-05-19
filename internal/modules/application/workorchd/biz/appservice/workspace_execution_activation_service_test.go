@@ -2889,6 +2889,95 @@ func TestActivateWorkspaceExecutionWithBackendIgnoresTerminalActiveRun(t *testin
 	}
 }
 
+func TestActivateWorkspaceExecutionWithBackendContinuesRejectedTerminalResult(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-rejected-terminal", "activation rejected terminal workspace", "", "workspaces/activation-rejected-terminal")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "continue from rejected result")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"missing evidence is closed"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	oldRunID := common.RunID("run-activation-rejected-terminal-old")
+	if err := exports.Services.RunService.CreateRun(ctx, runmodule.CreateRunCommand{
+		RunID:       oldRunID,
+		WorkspaceID: common.WorkspaceID(workspace.ID),
+		GoalID:      common.GoalID(goal.ID),
+		DoDID:       common.DoDID(dod.ID),
+	}); err != nil {
+		t.Fatalf("CreateRun old terminal: %v", err)
+	}
+	oldRun, err := exports.Repositories.Runs.Get(ctx, oldRunID)
+	if err != nil {
+		t.Fatalf("get old run: %v", err)
+	}
+	oldRun.State = common.RunStateFailed
+	oldRun.FailureReason = "terminal rejected result"
+	if err := exports.Repositories.Runs.Update(ctx, oldRun); err != nil {
+		t.Fatalf("mark old run failed: %v", err)
+	}
+	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.ActiveRunID = ""
+	workspaceItem.State = common.WorkspaceStateFailed
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("update workspace terminal state: %v", err)
+	}
+	if err := exports.Repositories.Results.Create(ctx, &resultmodel.Result{
+		ID:           common.ResultID(string(oldRunID) + "/result/dod-assessment"),
+		WorkspaceID:  common.WorkspaceID(workspace.ID),
+		RunID:        oldRunID,
+		GoalID:       common.GoalID(goal.ID),
+		DoDID:        common.DoDID(dod.ID),
+		State:        common.ResultStateRejected,
+		Summary:      "missing required evidence",
+		SourceType:   "dod_assessment",
+		SourceRef:    string(oldRunID) + "/graph-001/validation",
+		EvidenceRefs: []string{string(oldRunID) + "/graph-001/validation"},
+		DoDAssessment: resultmodel.DoDAssessment{
+			Satisfied: false,
+			Items: []resultmodel.DoDAssessmentItem{
+				{Item: "missing evidence is closed", State: "failed", FailureReason: "missing validation evidence"},
+			},
+		},
+		UpdatedAt: "2026-05-16T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("create rejected result: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	if item.Run.ID == string(oldRunID) || item.Run.GoalID != goal.ID || item.Run.DoDID != dod.ID {
+		t.Fatalf("activation run = %+v, want successor run using current definitions", item.Run)
+	}
+	continuation := contextMapFromValue(t, item.Run.ExecutionContext["rejectedResultContinuation"])
+	if continuation["predecessorRunId"] != string(oldRunID) ||
+		continuation["resultId"] != string(oldRunID)+"/result/dod-assessment" ||
+		continuation["resultState"] != "rejected" {
+		t.Fatalf("rejectedResultContinuation = %+v, want predecessor rejected result context", continuation)
+	}
+	unsatisfied := contextMapSliceFromValue(t, continuation["unsatisfiedDoDItems"])
+	if len(unsatisfied) != 1 || unsatisfied[0]["item"] != "missing evidence is closed" {
+		t.Fatalf("unsatisfiedDoDItems = %+v, want rejected DoD gap", unsatisfied)
+	}
+	if item.Snapshot.Workspace.ActiveRunID != item.Run.ID {
+		t.Fatalf("snapshot activeRunId = %q, want successor run %q", item.Snapshot.Workspace.ActiveRunID, item.Run.ID)
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefinitionsChange(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
