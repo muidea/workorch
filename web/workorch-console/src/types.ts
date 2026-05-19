@@ -38,8 +38,16 @@ export type RuntimeConfiguration = {
 export type LLMConfiguration = {
   defaultProviderId?: string;
   defaultEmbeddingProviderId?: string;
+  modelCapabilities?: LLMModelCapabilityConfiguration[];
   providers?: LLMProviderConfiguration[];
   providerTemplates?: LLMProviderTemplate[];
+};
+
+export type LLMModelCapabilityConfiguration = {
+  id: string;
+  provider?: string;
+  modelPattern: string;
+  contextWindowTokens: number;
 };
 
 export type LLMProviderConfiguration = {
@@ -58,15 +66,27 @@ export type LLMProviderConfiguration = {
   nonChatOperations?: string[];
   failoverEnabled: boolean;
   failoverProviders?: string[];
+  inferenceProfile?: ProviderInferenceProfile;
   contextProfile?: ProviderContextProfile;
 };
 
+export type ProviderInferenceProfile = {
+  temperature?: number;
+  maxOutputTokens?: number;
+  reasoningEffort?: string;
+  thinkingBudgetTokens?: number;
+};
+
 export type ProviderContextProfile = {
+  profileMode?: string;
+  capabilitySource?: string;
   contextWindowTokens?: number;
   maxInputTokens?: number;
   reservedOutputTokens?: number;
   safetyRatio?: number;
+  contextUtilizationRatio?: number;
   bytesHardLimit?: number;
+  maxRequestBytes?: number;
   estimatedTokensPerByte?: number;
   inputTokenPrice?: number;
   outputTokenPrice?: number;
@@ -91,6 +111,7 @@ export type LLMProviderTemplate = {
 export type UpdateLLMConfigurationRequest = {
   defaultProviderId?: string;
   defaultEmbeddingProviderId?: string;
+  modelCapabilities?: LLMModelCapabilityConfiguration[];
   providers: UpdateLLMProviderConfiguration[];
 };
 
@@ -111,6 +132,7 @@ export type UpdateLLMProviderConfiguration = {
   nonChatOperations?: string[];
   failoverEnabled?: boolean;
   failoverProviders?: string[];
+  inferenceProfile?: ProviderInferenceProfile;
   contextProfile?: ProviderContextProfile;
 };
 

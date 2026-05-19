@@ -13,7 +13,7 @@ import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-com
 import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ProColumns } from '@ant-design/pro-components';
-import type { Approval, ApprovalPage, Artifact, ArtifactPage, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DecisionPage, DoD, EventRecord, ExecutionSection, Goal, LLMContextBudgetTrace, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, PatchPage, ProgressBlocker, ProgressItem, RepairLoop, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, ToolCallPage, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, ValidationResultPage, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ApprovalPage, Artifact, ArtifactPage, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DecisionPage, DoD, EventRecord, ExecutionSection, Goal, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, PatchPage, ProgressBlocker, ProgressItem, RepairLoop, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, ToolCallPage, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, ValidationResultPage, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { createWorkorchEventStream, workorchApi } from './api';
 import './styles.css';
 
@@ -2021,6 +2021,7 @@ function llmConfigurationFormValues(configuration: ServiceConfiguration): Update
   return {
     defaultProviderId: configuration.llm.defaultProviderId,
     defaultEmbeddingProviderId: configuration.llm.defaultEmbeddingProviderId,
+    modelCapabilities: configuration.llm.modelCapabilities ?? [],
     providers: (configuration.llm.providers ?? []).map((item) => ({
       id: item.id,
       provider: item.provider,
@@ -2031,7 +2032,11 @@ function llmConfigurationFormValues(configuration: ServiceConfiguration): Update
       disabled: item.disabled,
       chatCompletions: item.chatCompletions,
       streaming: item.streaming,
-      nonChatOperations: item.nonChatOperations ?? []
+      nonChatOperations: item.nonChatOperations ?? [],
+      failoverEnabled: item.failoverEnabled,
+      failoverProviders: item.failoverProviders ?? [],
+      inferenceProfile: item.inferenceProfile,
+      contextProfile: item.contextProfile
     }))
   };
 }
@@ -2082,6 +2087,55 @@ function nextProviderDraft(existing: UpdateLLMProviderConfiguration[], template?
     chatCompletions: true,
     streaming: false,
     nonChatOperations: []
+  };
+}
+
+function nextModelCapabilityDraft(existing: LLMModelCapabilityConfiguration[]): LLMModelCapabilityConfiguration {
+  let index = existing.length + 1;
+  let id = `model-capability-${index}`;
+  const existingIDs = new Set(existing.map((item) => item.id));
+  while (existingIDs.has(id)) {
+    index += 1;
+    id = `model-capability-${index}`;
+  }
+  return {
+    id,
+    modelPattern: '',
+    contextWindowTokens: 128000
+  };
+}
+
+function cleanedInferenceProfile(item: UpdateLLMProviderConfiguration) {
+  const profile = item.inferenceProfile;
+  if (!profile) {
+    return undefined;
+  }
+  return {
+    temperature: profile.temperature,
+    maxOutputTokens: profile.maxOutputTokens,
+    reasoningEffort: profile.reasoningEffort?.trim(),
+    thinkingBudgetTokens: profile.thinkingBudgetTokens
+  };
+}
+
+function cleanedContextProfile(item: UpdateLLMProviderConfiguration) {
+  const profile = item.contextProfile;
+  if (!profile) {
+    return undefined;
+  }
+  return {
+    profileMode: profile.profileMode?.trim(),
+    contextWindowTokens: profile.contextWindowTokens,
+    maxInputTokens: profile.maxInputTokens,
+    reservedOutputTokens: profile.reservedOutputTokens,
+    safetyRatio: profile.safetyRatio,
+    contextUtilizationRatio: profile.contextUtilizationRatio,
+    bytesHardLimit: profile.bytesHardLimit,
+    maxRequestBytes: profile.maxRequestBytes,
+    estimatedTokensPerByte: profile.estimatedTokensPerByte,
+    inputTokenPrice: profile.inputTokenPrice,
+    outputTokenPrice: profile.outputTokenPrice,
+    currency: profile.currency?.trim()
   };
 }
 
@@ -6306,6 +6360,7 @@ function ConfigurationPage() {
   const [workspaceTemplates, setWorkspaceTemplates] = useState<WorkspaceTemplate[]>([]);
   const [defaultProviderId, setDefaultProviderId] = useState<string | undefined>(undefined);
   const [defaultEmbeddingProviderId, setDefaultEmbeddingProviderId] = useState<string | undefined>(undefined);
+  const [modelCapabilityDrafts, setModelCapabilityDrafts] = useState<LLMModelCapabilityConfiguration[]>([]);
   const [providerDrafts, setProviderDrafts] = useState<UpdateLLMProviderConfiguration[]>([]);
   const [selectedProviderIndex, setSelectedProviderIndex] = useState(0);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>(undefined);
@@ -6333,6 +6388,7 @@ function ConfigurationPage() {
       setWorkspaceTemplates(nextWorkspaceTemplates);
       setDefaultProviderId(nextFormValues.defaultProviderId);
       setDefaultEmbeddingProviderId(nextFormValues.defaultEmbeddingProviderId);
+      setModelCapabilityDrafts(nextFormValues.modelCapabilities ?? []);
       setProviderDrafts(nextFormValues.providers);
       setSelectedProviderIndex(0);
       setSelectedTemplateId(nextConfiguration.llm.providerTemplates?.[0]?.templateId);
@@ -6360,6 +6416,12 @@ function ConfigurationPage() {
       const nextConfiguration = await workorchApi.updateLLMConfiguration({
         defaultProviderId,
         defaultEmbeddingProviderId,
+        modelCapabilities: modelCapabilityDrafts.map((item) => ({
+          id: item.id.trim(),
+          provider: item.provider?.trim() || undefined,
+          modelPattern: item.modelPattern.trim(),
+          contextWindowTokens: item.contextWindowTokens
+        })),
         providers: providerDrafts.map((item) => ({
           id: item.id?.trim(),
           provider: item.provider?.trim(),
@@ -6370,13 +6432,18 @@ function ConfigurationPage() {
           disabled: item.disabled === true,
           chatCompletions: item.chatCompletions !== false,
           streaming: item.streaming === true,
-          nonChatOperations: item.nonChatOperations ?? []
+          nonChatOperations: item.nonChatOperations ?? [],
+          failoverEnabled: item.failoverEnabled === true,
+          failoverProviders: item.failoverProviders ?? [],
+          inferenceProfile: cleanedInferenceProfile(item),
+          contextProfile: cleanedContextProfile(item)
         }))
       });
       const nextFormValues = llmConfigurationFormValues(nextConfiguration);
       setConfiguration(nextConfiguration);
       setDefaultProviderId(nextFormValues.defaultProviderId);
       setDefaultEmbeddingProviderId(nextFormValues.defaultEmbeddingProviderId);
+      setModelCapabilityDrafts(nextFormValues.modelCapabilities ?? []);
       setProviderDrafts(nextFormValues.providers);
       setSelectedProviderIndex(0);
       providerEditorForm.setFieldsValue(nextFormValues.providers[0] ?? nextProviderDraft([]));
@@ -6507,6 +6574,25 @@ function ConfigurationPage() {
       }
       return nextItems;
     });
+  };
+
+  const updateModelCapabilityDraft = (index: number, patch: Partial<LLMModelCapabilityConfiguration>) => {
+    setModelCapabilityDrafts((items) => {
+      const nextItems = [...items];
+      nextItems[index] = {
+        ...nextItems[index],
+        ...patch
+      };
+      return nextItems;
+    });
+  };
+
+  const addModelCapability = () => {
+    setModelCapabilityDrafts((items) => [...items, nextModelCapabilityDraft(items)]);
+  };
+
+  const removeModelCapability = (index: number) => {
+    setModelCapabilityDrafts((items) => items.filter((_, itemIndex) => itemIndex !== index));
   };
 
   const statusByProviderID = new Map((configuration?.llm.providers ?? []).map((item) => [item.id, item]));
@@ -6778,6 +6864,47 @@ function ConfigurationPage() {
         </Typography.Paragraph>
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <ProCard
+            title="模型能力表"
+            extra={<Button onClick={addModelCapability}>新增能力</Button>}
+          >
+            <Space direction="vertical" size="small" style={{ width: '100%' }}>
+              {modelCapabilityDrafts.length ? modelCapabilityDrafts.map((item, index) => (
+                <Space key={`${item.id || 'model-capability'}-${index}`} wrap align="start" style={{ width: '100%' }}>
+                  <Input
+                    style={{ width: 220 }}
+                    value={item.id}
+                    onChange={(event) => updateModelCapabilityDraft(index, { id: event.target.value })}
+                    placeholder="能力标识"
+                  />
+                  <Select
+                    allowClear
+                    style={{ width: 180 }}
+                    value={item.provider || undefined}
+                    onChange={(value) => updateModelCapabilityDraft(index, { provider: value })}
+                    placeholder="Provider 类型"
+                    options={Array.from(new Set(providerTemplates.map((template) => template.provider).filter(Boolean))).map((provider) => ({ value: provider, label: provider }))}
+                  />
+                  <Input
+                    style={{ width: 260 }}
+                    value={item.modelPattern}
+                    onChange={(event) => updateModelCapabilityDraft(index, { modelPattern: event.target.value })}
+                    placeholder="模型匹配表达式"
+                  />
+                  <InputNumber
+                    style={{ width: 180 }}
+                    min={1}
+                    value={item.contextWindowTokens}
+                    onChange={(value) => updateModelCapabilityDraft(index, { contextWindowTokens: Number(value ?? 0) })}
+                    placeholder="上下文 Tokens"
+                  />
+                  <Button danger onClick={() => removeModelCapability(index)}>移除</Button>
+                </Space>
+              )) : (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无模型能力配置" />
+              )}
+            </Space>
+          </ProCard>
+          <ProCard
             title="服务商列表"
             extra={(
               <Space>
@@ -6899,6 +7026,79 @@ function ConfigurationPage() {
                 <Form.Item name="nonChatOperations" label="非对话能力">
                   <Select mode="tags" placeholder="embeddings, responses" options={[]} />
                 </Form.Item>
+                <Form.Item name="failoverEnabled" label="故障转移">
+                  <Select
+                    options={[
+                      { value: false, label: '禁用' },
+                      { value: true, label: '启用' }
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item name="failoverProviders" label="故障转移服务商">
+                  <Select mode="tags" placeholder="按顺序填写备用 provider id" options={providerDrafts.map((item) => ({ value: item.id, label: item.id }))} />
+                </Form.Item>
+                <Form.Item name={['inferenceProfile', 'temperature']} label="Temperature">
+                  <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name={['inferenceProfile', 'maxOutputTokens']} label="最大输出 Tokens">
+                  <InputNumber min={0} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name={['inferenceProfile', 'reasoningEffort']} label="推理强度">
+                  <Select
+                    allowClear
+                    options={[
+                      { value: 'low', label: 'low' },
+                      { value: 'medium', label: 'medium' },
+                      { value: 'high', label: 'high' },
+                      { value: 'xhigh', label: 'xhigh' }
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item name={['inferenceProfile', 'thinkingBudgetTokens']} label="Thinking Budget Tokens">
+                  <InputNumber min={0} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name={['contextProfile', 'profileMode']} label="上下文配置模式">
+                  <Select
+                    allowClear
+                    options={[
+                      { value: 'auto', label: 'auto' },
+                      { value: 'manual', label: 'manual' }
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item name={['contextProfile', 'contextWindowTokens']} label="上下文窗口 Tokens">
+                  <InputNumber min={0} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name={['contextProfile', 'maxInputTokens']} label="最大输入 Tokens">
+                  <InputNumber min={0} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name={['contextProfile', 'reservedOutputTokens']} label="保留输出 Tokens">
+                  <InputNumber min={0} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name={['contextProfile', 'safetyRatio']} label="安全比例">
+                  <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name={['contextProfile', 'contextUtilizationRatio']} label="上下文利用比例">
+                  <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name={['contextProfile', 'bytesHardLimit']} label="请求字节硬限制">
+                  <InputNumber min={0} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name={['contextProfile', 'maxRequestBytes']} label="最大请求字节数">
+                  <InputNumber min={0} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name={['contextProfile', 'estimatedTokensPerByte']} label="Token/Byte 估算">
+                  <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name={['contextProfile', 'inputTokenPrice']} label="输入 Token 单价">
+                  <InputNumber min={0} step={0.000001} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name={['contextProfile', 'outputTokenPrice']} label="输出 Token 单价">
+                  <InputNumber min={0} step={0.000001} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name={['contextProfile', 'currency']} label="计费币种">
+                  <Input placeholder="USD" />
+                </Form.Item>
                 <Form.Item name="apiKey" label="API 密钥">
                   <Input.Password placeholder="留空表示保留已有 API 密钥" autoComplete="new-password" />
                 </Form.Item>
@@ -6907,7 +7107,10 @@ function ConfigurationPage() {
                   items={[
                     { key: 'apiKey', label: '已保存 API 密钥', children: selectedProviderStatus?.apiKeyConfigured ? <Tag color="green">已配置</Tag> : <Tag color="red">缺失</Tag> },
                     { key: 'status', label: '已保存状态', children: selectedProviderStatus?.ready ? <Tag color="green">就绪</Tag> : <Tag color="red">{selectedProviderStatus?.reason || '未保存'}</Tag> },
-                    { key: 'capabilities', label: '已保存能力', children: <Space wrap>{selectedProviderStatus?.chatCompletions ? <Tag color="blue">chat</Tag> : null}{selectedProviderStatus?.streaming ? <Tag color="cyan">streaming</Tag> : null}{(selectedProviderStatus?.nonChatOperations ?? []).map((item) => <Tag key={item}>{item}</Tag>)}</Space> }
+                    { key: 'capabilities', label: '已保存能力', children: <Space wrap>{selectedProviderStatus?.chatCompletions ? <Tag color="blue">chat</Tag> : null}{selectedProviderStatus?.streaming ? <Tag color="cyan">streaming</Tag> : null}{(selectedProviderStatus?.nonChatOperations ?? []).map((item) => <Tag key={item}>{item}</Tag>)}</Space> },
+                    { key: 'contextProfileMode', label: '已保存上下文模式', children: selectedProviderStatus?.contextProfile?.profileMode || '-' },
+                    { key: 'contextWindowTokens', label: '已保存上下文窗口', children: selectedProviderStatus?.contextProfile?.contextWindowTokens || '-' },
+                    { key: 'contextCapabilitySource', label: '已保存能力来源', children: selectedProviderStatus?.contextProfile?.capabilitySource || '-' }
                   ]}
                 />
               </Form>
