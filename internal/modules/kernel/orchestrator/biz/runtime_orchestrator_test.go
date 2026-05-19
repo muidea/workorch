@@ -2905,6 +2905,75 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchRepairSuggestions(t 
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputDetectsAlreadySatisfiedFailedPatch(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	deliverableDirectory := t.TempDir()
+	source := "package main\n\nimport (\n\t\"fmt\"\n\t\"strconv\"\n)\n"
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main.go"), []byte(source), 0o644); err != nil {
+		t.Fatalf("seed source file: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-patch-repair-already-satisfied")
+	runID := common.RunID("run-patch-repair-already-satisfied")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-027/002-apply-import-fix"),
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageExecution,
+			"targetRef":              "main.go",
+			"patchType":              "unified_diff",
+			"diff":                   "--- a/main.go\n+++ b/main.go\n@@ -2,5 +2,6 @@\n \n import (\n \t\"fmt\"\n+\t\"strconv\"\n )\n",
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"stage":                   "patch_apply",
+			"error":                   "invalid argument: unified diff hunk context mismatch",
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|targetRef=main.go|error=context mismatch",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}, failedStep, 1, common.ErrInvalidArgument)
+
+	signals := mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])
+	if len(signals) != 1 {
+		t.Fatalf("currentTargetAlreadySatisfiesFailedPatch = %#v, want one signal", input["currentTargetAlreadySatisfiesFailedPatch"])
+	}
+	if signals[0]["targetRef"] != "main.go" || signals[0]["safeForValidation"] != true || signals[0]["businessJudgment"] != false {
+		t.Fatalf("already satisfied signal = %#v, want neutral validation signal", signals[0])
+	}
+	if input["stateChangeAlreadySatisfiedByCurrentTarget"] != true {
+		t.Fatalf("stateChangeAlreadySatisfiedByCurrentTarget = %#v, want true", input["stateChangeAlreadySatisfiedByCurrentTarget"])
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != false || required["mustProduceConcreteValidationEvidence"] != true {
+		t.Fatalf("repairActionPackage.requiredOutput = %#v, want validation evidence package", required)
+	}
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "shell/command") {
+		t.Fatalf("repairActionPackage.requiredOutput.acceptedKinds = %#v, want shell/command", required["acceptedKinds"])
+	}
+	if !stringSliceContains(stringSliceFromValue(actionPackage["forbiddenActions"]), "repeat_same_failed_patch") {
+		t.Fatalf("repairActionPackage.forbiddenActions = %#v, want repeat_same_failed_patch", actionPackage["forbiddenActions"])
+	}
+	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
+	if !strings.Contains(guidance, "currentTargetAlreadySatisfiesFailedPatch") || !strings.Contains(guidance, "bounded concrete validation evidence graph") {
+		t.Fatalf("repairGuidance = %q, want already-satisfied validation guidance", guidance)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesLineRemovalPatchSuggestion(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -12683,6 +12752,130 @@ func TestRuntimeOrchestrator_GraphFollowUpRunEvidenceIncludesPriorCompletedSteps
 	}
 }
 
+func TestGraphExpansionLimitAssessmentInputIncludesLatestClosureEvidence(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-graph-limit-assessment-closure")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-graph-limit-assessment-closure", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}
+	stepRepo := memory.NewStepRepository()
+	patchRepo := memory.NewPatchRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	failedStepID := common.StepID(runID + "/graph-006/002-targeted-test")
+	latestStepID := common.StepID(runID + "/graph-007/002-targeted-test")
+	anchor := &runmodel.Step{
+		ID:     common.StepID(runID + "/follow-up-graph-previous"),
+		RunID:  runID,
+		Kind:   llmWorkspaceExecutionStepKind,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"status": "completed"},
+	}
+	for _, step := range []*runmodel.Step{
+		{ID: failedStepID, RunID: runID, Kind: shellcommon.StepKindCommand, State: common.StepStateFailed, Output: map[string]any{"stderr": "old targeted failure"}},
+		{ID: latestStepID, RunID: runID, Kind: shellcommon.StepKindCommand, State: common.StepStateCompleted, Output: map[string]any{"stdout": "latest targeted validation passed"}},
+		anchor,
+	} {
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+	}
+	if err := patchRepo.Create(ctx, &runmodel.Patch{
+		ID:          common.PatchID(runID + "/graph-007/001-apply-patch/patch/main-go"),
+		WorkspaceID: run.WorkspaceID,
+		RunID:       runID,
+		StepID:      latestStepID,
+		PatchType:   "unified_diff",
+		TargetRef:   "main.go",
+		Summary:     "applied target change",
+		State:       common.PatchStateApplied,
+	}); err != nil {
+		t.Fatalf("seed patch: %v", err)
+	}
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:              common.ValidationResultID(string(latestStepID) + "/validation/runtime-step"),
+		WorkspaceID:     run.WorkspaceID,
+		RunID:           runID,
+		StepID:          latestStepID,
+		ValidationKind:  "runtime_step",
+		TargetRef:       "main.go",
+		State:           common.ValidationResultStatePassed,
+		Summary:         "targeted validation passed",
+		EvidenceQuality: common.EvidenceQualityValid,
+	}); err != nil {
+		t.Fatalf("seed validation: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			Patches:           patchRepo,
+			ValidationResults: validationRepo,
+		},
+	}
+	steps, err := stepRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+
+	input := orch.graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx, run, anchor, steps, maxGraphFollowUpExpansionAttempts+1)
+
+	if input[stepInputKeyAssessmentOnly] != true || input[stepInputKeyGraphLimitFollowUp] != true {
+		t.Fatalf("input = %+v, want graph limit assessment-only markers", input)
+	}
+	closure := mapFromValue(input["latestClosureEvidence"])
+	if len(closure) == 0 {
+		t.Fatalf("latestClosureEvidence missing from graph limit assessment input: %+v", input)
+	}
+	latest := mapSliceFromValue(closure["latestEvidence"])
+	if len(latest) == 0 || stringFromMap(latest[0], "evidenceRef") != string(latestStepID) {
+		t.Fatalf("latestClosureEvidence = %+v, want latest successful step", closure)
+	}
+	if patches := mapSliceFromValue(closure["latestPatchEvidence"]); len(patches) == 0 || patches[0]["targetRef"] != "main.go" {
+		t.Fatalf("latestPatchEvidence = %+v, want patch evidence", closure["latestPatchEvidence"])
+	}
+	if validations := mapSliceFromValue(closure["latestValidationEvidence"]); len(validations) == 0 || validations[0]["targetRef"] != "main.go" {
+		t.Fatalf("latestValidationEvidence = %+v, want validation evidence", closure["latestValidationEvidence"])
+	}
+	if !strings.Contains(strings.Join(stringSliceFromValue(input["assessmentEvidenceGuidance"]), "\n"), "do not cite only the run ID") {
+		t.Fatalf("assessmentEvidenceGuidance = %+v, want concrete evidence ref guidance", input["assessmentEvidenceGuidance"])
+	}
+}
+
+func TestRunEvidenceSummaryPrioritizesActionEvidenceWhenLarge(t *testing.T) {
+	runID := common.RunID("run-evidence-priority")
+	steps := make([]*runmodel.Step, 0, maxLLMContextSliceItems+3)
+	for idx := 0; idx < maxLLMContextSliceItems+2; idx++ {
+		steps = append(steps, &runmodel.Step{
+			ID:     common.StepID(fmt.Sprintf("%s/llm-%03d", runID, idx)),
+			RunID:  runID,
+			Kind:   llmWorkspaceExecutionStepKind,
+			State:  common.StepStateCompleted,
+			Output: map[string]any{"status": "completed"},
+		})
+	}
+	critical := &runmodel.Step{
+		ID:     common.StepID(runID + "/graph-001/002-verify"),
+		RunID:  runID,
+		Kind:   shellcommon.StepKindCommand,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"stdout": "critical validation passed"},
+	}
+	steps = append([]*runmodel.Step{critical}, steps...)
+
+	evidence := runEvidenceSummaryFromSteps(steps)
+
+	if len(evidence) != maxLLMContextSliceItems {
+		t.Fatalf("runEvidenceSummary length = %d, want %d", len(evidence), maxLLMContextSliceItems)
+	}
+	foundCritical := false
+	for _, item := range evidence {
+		if item["stepId"] == string(critical.ID) {
+			foundCritical = true
+			break
+		}
+	}
+	if !foundCritical {
+		t.Fatalf("runEvidenceSummary = %+v, want critical shell evidence retained", evidence)
+	}
+}
+
 func TestMergeRunExecutionContextPatchRefreshesEffectiveDefinitionIDs(t *testing.T) {
 	run := &runmodel.Run{
 		ID:               "run-definition-patch",
@@ -17073,6 +17266,91 @@ func TestRuntimeRepairInputIncludesLatestClosureEvidenceForCoverageCorrection(t 
 	}
 	if !strings.Contains(strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n"), "latestClosureEvidence") {
 		t.Fatalf("repairGuidance = %+v, want latestClosureEvidence guidance", input["repairGuidance"])
+	}
+}
+
+func TestRuntimeRepairInputTreatsGraphLimitAssessmentAsCoverageCorrection(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-graph-limit-coverage-correction")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-graph-limit-coverage-correction", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}
+	stepRepo := memory.NewStepRepository()
+	evidenceStepID := common.StepID(runID + "/graph-003/002-run-validation")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     evidenceStepID,
+		RunID:  runID,
+		Kind:   shellcommon.StepKindCommand,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"stdout": "validation passed"},
+	}); err != nil {
+		t.Fatalf("seed evidence step: %v", err)
+	}
+	failedAssessment := &runmodel.Step{
+		ID:    common.StepID(runID + "/follow-up-graph-limit-assessment"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyAssessmentOnly:     true,
+			stepInputKeyGraphLimitFollowUp: true,
+			"assessmentOnlyReason":         "graph_follow_up_expansion_limit_exceeded",
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|stage=llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"summary":   "coverage missing",
+				"items": []map[string]any{{
+					"item":         "validation requirement",
+					"state":        "failed",
+					"evidenceRefs": []string{string(runID)},
+				}},
+				"goalCoverage": map[string]any{
+					"satisfied": false,
+					"items": []map[string]any{{
+						"goalRequirementId": "goal-req-validation",
+						"item":              "validation requirement",
+						"state":             "failed",
+						"reason":            "missing concrete evidence refs",
+					}},
+				},
+			},
+			"runtimeDiagnostics": map[string]any{
+				"kind": failureClassDoDCoverageMissing,
+				"missingGoalCoverage": []map[string]any{{
+					"goalRequirementId": "goal-req-validation",
+					"raw":               "validation requirement",
+					"state":             "failed",
+				}},
+			},
+		},
+	}
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{},
+		memory.NewRunRepository(),
+		stepRepo,
+		memory.NewWorkspaceRepository(),
+		memory.NewDecisionTicketRepository(),
+		memory.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedAssessment, 1, errors.New("coverage missing"))
+
+	if input[stepInputKeyAssessmentOnly] != true || input["repairObjective"] != "complete_dod_goal_coverage_assessment" {
+		t.Fatalf("input = %+v, want graph-limit assessment coverage correction", input)
+	}
+	missingGoal := mapSliceFromValue(input["missingGoalCoverage"])
+	if len(missingGoal) == 0 || len(mapSliceFromValue(missingGoal[0]["evidenceCandidates"])) == 0 {
+		t.Fatalf("missingGoalCoverage = %+v, want evidence candidates", input["missingGoalCoverage"])
+	}
+	missingDoD := mapSliceFromValue(input["missingDoDItems"])
+	if len(missingDoD) == 0 || len(mapSliceFromValue(missingDoD[0]["evidenceCandidates"])) == 0 {
+		t.Fatalf("missingDoDItems = %+v, want evidence candidates", input["missingDoDItems"])
+	}
+	if closure := mapFromValue(input["latestClosureEvidence"]); len(closure) == 0 {
+		t.Fatalf("latestClosureEvidence missing from coverage correction input: %+v", input)
 	}
 }
 

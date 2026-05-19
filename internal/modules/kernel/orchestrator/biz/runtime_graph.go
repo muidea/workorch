@@ -888,7 +888,7 @@ func graphExpansionLimitAssessmentFollowUpStepID(runID common.RunID, step *runMo
 	return common.StepID(fmt.Sprintf("%s/follow-up-graph-limit-%s", runID, stepID))
 }
 
-func (o *RuntimeOrchestrator) graphExpansionLimitAssessmentFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step, count int) map[string]any {
+func (o *RuntimeOrchestrator) graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx context.Context, run *runModel.Run, step *runModel.Step, steps []*runModel.Step, count int) map[string]any {
 	input := llmCompletionFollowUpStepInputFromSteps(run, step, steps)
 	input[stepInputKeyAssessmentOnly] = true
 	input[stepInputKeyGraphLimitFollowUp] = true
@@ -902,6 +902,18 @@ func (o *RuntimeOrchestrator) graphExpansionLimitAssessmentFollowUpStepInputFrom
 		delete(previous, stepOutputKeyExecutionGraph)
 		previous["graphFollowUpExpansionLimitExceeded"] = true
 		input["previousStepOutput"] = previous
+	}
+	if closure := o.latestCompletionClosureEvidence(ctx, run, step); len(closure) > 0 {
+		input["latestClosureEvidence"] = closure
+		if superseded := mapSliceFromValue(closure["supersededFailures"]); len(superseded) > 0 {
+			input["supersededFailureEvidence"] = superseded
+		}
+	}
+	input["assessmentEvidenceGuidance"] = []string{
+		"Return only a completed or failed dodAssessment, or a real governance blocker.",
+		"Use concrete step IDs from runEvidenceSummary or latestClosureEvidence as evidenceRefs; do not cite only the run ID or memory refs for satisfied items.",
+		"Prefer later successful evidence in the same neutral scope over earlier failed evidence.",
+		"If the available evidence is insufficient, mark only the unsupported item failed/skipped and state the exact missing evidence.",
 	}
 	return input
 }
@@ -1083,12 +1095,12 @@ func runEvidenceSummaryFromSteps(steps []*runModel.Step) []map[string]any {
 	if len(steps) == 0 {
 		return nil
 	}
-	items := make([]map[string]any, 0, min(len(steps), maxLLMContextSliceItems))
-	start := 0
+	selected := steps
 	if len(steps) > maxLLMContextSliceItems {
-		start = len(steps) - maxLLMContextSliceItems
+		selected = prioritizedRunEvidenceSummarySteps(steps, maxLLMContextSliceItems)
 	}
-	for _, step := range steps[start:] {
+	items := make([]map[string]any, 0, min(len(selected), maxLLMContextSliceItems))
+	for _, step := range selected {
 		if step == nil {
 			continue
 		}
@@ -1118,6 +1130,70 @@ func runEvidenceSummaryFromSteps(steps []*runModel.Step) []map[string]any {
 		return nil
 	}
 	return items
+}
+
+func prioritizedRunEvidenceSummarySteps(steps []*runModel.Step, limit int) []*runModel.Step {
+	if limit <= 0 || len(steps) == 0 {
+		return nil
+	}
+	type candidate struct {
+		step     *runModel.Step
+		index    int
+		priority int
+	}
+	candidates := make([]candidate, 0, len(steps))
+	for idx, step := range steps {
+		if step == nil {
+			continue
+		}
+		if step.State != common.StepStateCompleted && step.State != common.StepStateFailed {
+			continue
+		}
+		candidates = append(candidates, candidate{
+			step:     step,
+			index:    idx,
+			priority: runEvidenceSummaryStepPriority(step),
+		})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].priority != candidates[j].priority {
+			return candidates[i].priority > candidates[j].priority
+		}
+		return candidates[i].index > candidates[j].index
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return candidates[i].index < candidates[j].index
+	})
+	ret := make([]*runModel.Step, 0, len(candidates))
+	for _, candidate := range candidates {
+		ret = append(ret, candidate.step)
+	}
+	return ret
+}
+
+func runEvidenceSummaryStepPriority(step *runModel.Step) int {
+	if step == nil {
+		return 0
+	}
+	priority := 1
+	if step.State == common.StepStateFailed {
+		priority += 10
+	}
+	kind := strings.TrimSpace(step.Kind)
+	if !strings.HasPrefix(kind, "llm/") {
+		priority += 20
+	}
+	if completionEvidenceStepFallbackUsable(step) {
+		priority += 30
+	}
+	switch kind {
+	case "patch/apply", "shell/command", "mcp/tool_call":
+		priority += 20
+	}
+	return priority
 }
 
 func compactStepOutputForRunEvidenceSummary(output map[string]any) map[string]any {

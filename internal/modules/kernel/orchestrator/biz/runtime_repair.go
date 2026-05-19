@@ -1307,10 +1307,14 @@ func coverageCorrectionNeedsConcreteEvidence(step *runModel.Step) bool {
 			}
 		}
 	}
-	missingDoD := missingDoDItemsFromFailureOutput(step.Output)
+	missingDoD := mapSliceFromValue(step.Input["missingDoDItems"])
+	if len(missingDoD) == 0 {
+		missingDoD = missingDoDItemsFromStep(step)
+	}
 	if len(missingDoD) > 0 {
 		for _, item := range missingDoD {
-			if len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 {
+			if len(filterTraceableEvidenceRefs(evidenceRefsFromValue(item["evidenceRefs"]))) == 0 &&
+				len(mapSliceFromValue(item["evidenceCandidates"])) == 0 {
 				return true
 			}
 		}
@@ -1436,6 +1440,16 @@ func missingGoalCoverageFromFailureOutput(output map[string]any) []map[string]an
 	return ret
 }
 
+func missingDoDItemsFromStep(step *runModel.Step) []map[string]any {
+	if step == nil {
+		return nil
+	}
+	if missing := missingDoDItemsFromFailureOutput(step.Output); len(missing) > 0 {
+		return missing
+	}
+	return missingDoDItemsFromDoDAssessment(doDAssessmentFromOutput(step.Output))
+}
+
 func missingDeliverableCoverageFromFailureOutput(output map[string]any) []map[string]any {
 	diagnostics := mapFromValue(output["runtimeDiagnostics"])
 	items := mapSliceFromValue(diagnostics["missingDeliverableCoverage"])
@@ -1475,11 +1489,17 @@ func assessmentOnlyGoalCoverageContradictionRepairRequired(step *runModel.Step) 
 	if step == nil || !boolValue(step.Input[stepInputKeyAssessmentOnly]) {
 		return false
 	}
-	if strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) != "complete_dod_goal_coverage_assessment" {
+	if strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) != "complete_dod_goal_coverage_assessment" &&
+		!boolValue(step.Input[stepInputKeyGraphLimitFollowUp]) &&
+		strings.TrimSpace(stringFromMap(step.Input, "assessmentOnlyReason")) != "graph_follow_up_expansion_limit_exceeded" {
 		return false
 	}
 	if len(missingGoalCoverageFromStep(step)) == 0 {
 		return false
+	}
+	if boolValue(step.Input[stepInputKeyGraphLimitFollowUp]) ||
+		strings.TrimSpace(stringFromMap(step.Input, "assessmentOnlyReason")) == "graph_follow_up_expansion_limit_exceeded" {
+		return true
 	}
 	return missingGoalCoverageInputHasEvidenceCandidates(step.Input)
 }
@@ -1563,6 +1583,35 @@ func (o *RuntimeOrchestrator) missingGoalCoverageWithEvidenceCandidates(
 			if candidates := o.goalCoverageEvidenceCandidatesForRequirement(ctx, run, failedStep, requirement); len(candidates) > 0 {
 				next["evidenceCandidates"] = candidates
 			}
+		}
+		if len(mapSliceFromValue(next["evidenceCandidates"])) == 0 {
+			next["evidenceCandidates"] = o.latestActionEvidenceCandidates(ctx, run, failedStep, 5)
+		}
+		ret = append(ret, next)
+	}
+	return ret
+}
+
+func (o *RuntimeOrchestrator) missingDoDItemsWithEvidenceCandidates(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	missing []map[string]any,
+) []map[string]any {
+	if len(missing) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(missing))
+	for _, item := range missing {
+		next := cloneStepPayload(item)
+		if len(mapSliceFromValue(next["evidenceCandidates"])) == 0 {
+			requirement := strings.TrimSpace(stringFromMap(next, "item"))
+			if candidates := o.goalCoverageEvidenceCandidatesForRequirement(ctx, run, failedStep, requirement); len(candidates) > 0 {
+				next["evidenceCandidates"] = candidates
+			}
+		}
+		if len(mapSliceFromValue(next["evidenceCandidates"])) == 0 {
+			next["evidenceCandidates"] = o.latestActionEvidenceCandidates(ctx, run, failedStep, 5)
 		}
 		ret = append(ret, next)
 	}
@@ -1653,6 +1702,49 @@ func (o *RuntimeOrchestrator) goalCoverageEvidenceCandidatesForRequirement(
 	ret := make([]map[string]any, 0, limit)
 	for idx := 0; idx < limit; idx++ {
 		ret = append(ret, candidates[idx].item)
+	}
+	return ret
+}
+
+func (o *RuntimeOrchestrator) latestActionEvidenceCandidates(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	limit int,
+) []map[string]any {
+	if o == nil || o.steps == nil || run == nil || limit <= 0 {
+		return nil
+	}
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil || len(steps) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, limit)
+	for idx := len(steps) - 1; idx >= 0 && len(ret) < limit; idx-- {
+		step := steps[idx]
+		if step == nil || (failedStep != nil && step.ID == failedStep.ID) {
+			continue
+		}
+		if !completionEvidenceStepFallbackUsable(step) {
+			continue
+		}
+		item := map[string]any{
+			"stepId":     string(step.ID),
+			"kind":       step.Kind,
+			"state":      string(step.State),
+			"source":     "latest_successful_action_evidence",
+			"matchScore": 0,
+		}
+		if nodeID := graphNodeID(step); nodeID != "" {
+			item["graphNodeId"] = nodeID
+		}
+		if rootStepID := graphRootStepID(step); rootStepID != "" && rootStepID != step.ID {
+			item["graphRootStepId"] = string(rootStepID)
+		}
+		if output := compactStepOutputForLLMContext(step.Output); len(output) > 0 {
+			item["output"] = output
+		}
+		ret = append(ret, item)
 	}
 	return ret
 }
@@ -1876,6 +1968,9 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			input["missingGoalCoverage"] = o.missingGoalCoverageWithEvidenceCandidates(ctx, run, failedStep, missingGoalCoverage)
 		}
 	}
+	if missingDoD := missingDoDItemsFromStep(failedStep); len(missingDoD) > 0 {
+		input["missingDoDItems"] = o.missingDoDItemsWithEvidenceCandidates(ctx, run, failedStep, missingDoD)
+	}
 	coverageNeedsConcreteEvidence := assessmentOnlyCoverageRepair && coverageCorrectionNeedsConcreteEvidence(&runModel.Step{
 		Input:  input,
 		Output: failedStep.Output,
@@ -1931,6 +2026,9 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		delete(input, "assessmentOnlyReason")
 		input["completionFollowUp"] = false
 		input["evidenceRepairSource"] = "coverage_gap_without_candidate_evidence"
+		if closure := o.latestCompletionClosureEvidence(ctx, run, failedStep); len(closure) > 0 {
+			input["latestClosureEvidence"] = closure
+		}
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"At least one Goal/DoD coverage gap lacks concrete candidate evidence; produce bounded verification evidence before another dodAssessment correction.",
 			"If new verification evidence closes a specific Goal requirement, ensure the next dodAssessment cites that exact evidenceRef and goalRequirementId.",
@@ -1946,9 +2044,6 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input["repairObjective"] = repairObjectiveStateChangingOutput
 		input["stateChangingOutputRequired"] = true
 		input["repairGuidance"] = stateChangingRepairGuidance()
-	}
-	if missingDoD := missingDoDItemsFromFailureOutput(failedStep.Output); len(missingDoD) > 0 {
-		input["missingDoDItems"] = missingDoD
 	}
 	if boolValue(input["stateChangingOutputRequired"]) &&
 		(len(mapSliceFromValue(input["missingDoDItems"])) > 0 || len(missingGoalCoverageFromInput(input)) > 0) {
@@ -2025,6 +2120,10 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		if suggestions := o.runtimeRepairPatchSuggestions(ctx, run, failedStep); len(suggestions) > 0 {
 			input["patchRepairSuggestions"] = suggestions
 		}
+		if satisfied := o.runtimeRepairPatchAlreadySatisfiedSignals(ctx, run, failedStep); len(satisfied) > 0 {
+			input["currentTargetAlreadySatisfiesFailedPatch"] = satisfied
+			input["stateChangeAlreadySatisfiedByCurrentTarget"] = true
+		}
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Use patchRepairContext as the current target snapshot for patch repair; treat the failed patch text as stale or untrusted.",
 			"When the failure is a diff context mismatch or file/edit oldText conflict, do not retry the same stale hunk or oldText; rebuild the smallest patch from patchRepairContext.content/contentHash.",
@@ -2038,6 +2137,12 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"When patching files that reference existing code symbols, patch against names that already exist in current workspace resources unless the Goal explicitly requires introducing a new definition.",
 			"If the current target snapshot proves the failed patch is no longer required, return a bounded verification evidence graph instead of another patch; do not use read-only inspection as the only evidence.",
 		)
+		if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) > 0 {
+			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+				"currentTargetAlreadySatisfiesFailedPatch is a mechanical signal that the failed artifact's intended line changes are already reflected in the current target snapshot.",
+				"Do not repeat the same failed patch when this signal is present; return a bounded concrete validation evidence graph, or a failed dodAssessment/blocker if validation cannot be produced.",
+			)
+		}
 	}
 	targetContext := o.runtimeRepairFailureTargetContext(ctx, run, failedStep)
 	if len(targetContext) > 0 {
@@ -2335,6 +2440,14 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	if digest := failedPatchDigestFromRepairFailure(input, rawFailedOutput...); len(digest) > 0 {
 		pkg["failedPatchDigest"] = digest
 	}
+	if satisfied := mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"]); len(satisfied) > 0 {
+		pkg["currentTargetAlreadySatisfiesFailedPatch"] = satisfied
+		pkg["stateChangeAlreadySatisfiedByCurrentTarget"] = true
+		requiredOutput["mustIncludeStateChangingNode"] = false
+		requiredOutput["mustProduceConcreteValidationEvidence"] = true
+		requiredOutput["acceptedKinds"] = []string{"shell/command", "mcp/tool_call"}
+		requiredOutput["forbiddenKinds"] = append(stringSliceFromValue(requiredOutput["forbiddenKinds"]), "repeat_same_failed_patch")
+	}
 	forbiddenActions := repairActionForbiddenActions(input, pkg)
 	if len(forbiddenActions) > 0 {
 		pkg["forbiddenActions"] = forbiddenActions
@@ -2544,6 +2657,9 @@ func repairActionForbiddenActions(input map[string]any, pkg map[string]any) []st
 		stringSliceContains(forbiddenReuse, "missing_old_text") ||
 		stringSliceContains(forbiddenReuse, "malformed_diff_text") {
 		ret = append(ret, "reuse_stale_patch_hunk")
+	}
+	if len(mapSliceFromValue(pkg["currentTargetAlreadySatisfiesFailedPatch"])) > 0 {
+		ret = append(ret, "repeat_same_failed_patch")
 	}
 	return limitedStrings(compactUniqueStrings(ret), 8)
 }
@@ -3499,6 +3615,44 @@ func (o *RuntimeOrchestrator) runtimeRepairPatchSuggestions(ctx context.Context,
 	return ret
 }
 
+func (o *RuntimeOrchestrator) runtimeRepairPatchAlreadySatisfiedSignals(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
+	if o == nil || o.workspaces == nil || run == nil || failedStep == nil {
+		return nil
+	}
+	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
+	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
+		return nil
+	}
+	targetRefs := patchRepairTargetRefs(failedStep)
+	if len(targetRefs) == 0 {
+		return nil
+	}
+	patches := patchRepairRequestsFromStep(failedStep)
+	if len(patches) == 0 {
+		return nil
+	}
+	allowedTargets := map[string]bool{}
+	for _, targetRef := range targetRefs {
+		allowedTargets[strings.TrimSpace(targetRef)] = true
+	}
+	var ret []map[string]any
+	for _, request := range patches {
+		if len(ret) >= 3 {
+			break
+		}
+		if request.PatchType != "unified_diff" || strings.TrimSpace(request.Diff) == "" {
+			continue
+		}
+		if len(allowedTargets) > 0 && !allowedTargets[request.TargetRef] {
+			continue
+		}
+		if signal := patchRepairAlreadySatisfiedSignalForDiff(workspace.DeliverableDirectory, request.TargetRef, request.Diff); len(signal) > 0 {
+			ret = append(ret, signal)
+		}
+	}
+	return ret
+}
+
 func (o *RuntimeOrchestrator) runtimeRepairFailureTargetContext(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
 	if o == nil || o.workspaces == nil || run == nil || failedStep == nil {
 		return nil
@@ -3831,6 +3985,95 @@ func patchRepairSuggestionsForDiff(deliverableDirectory string, targetRef string
 		}
 	}
 	return ret
+}
+
+func patchRepairAlreadySatisfiedSignalForDiff(deliverableDirectory string, targetRef string, diff string) map[string]any {
+	target, err := workspaceTargetPath(deliverableDirectory, targetRef)
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(target)
+	if err != nil || patchRepairLooksBinary(data) {
+		return nil
+	}
+	filePatch, err := parseSingleFileUnifiedDiff(diff)
+	if err != nil || !diffTargetMatches(targetRef, filePatch) {
+		return nil
+	}
+	content := string(data)
+	addedLines, deletedLines := patchRepairChangedLines(filePatch)
+	if len(addedLines) == 0 && len(deletedLines) == 0 {
+		return nil
+	}
+	if patchRepairLinesAlreadySatisfied(content, addedLines, deletedLines) {
+		return map[string]any{
+			"targetRef":          targetRef,
+			"patchType":          "unified_diff",
+			"contentHash":        sha256HexBytes(data),
+			"addedLineCount":     len(addedLines),
+			"deletedLineCount":   len(deletedLines),
+			"safeForValidation":  true,
+			"reason":             "current_target_already_matches_failed_patch_intent",
+			"guidance":           "The current target snapshot already reflects the failed patch's intended line-level state. Do not repeat the stale patch; run bounded concrete validation or return a failed assessment/blocker.",
+			"mechanicalSignal":   true,
+			"businessJudgment":   false,
+			"matchedCurrentFile": true,
+		}
+	}
+	return nil
+}
+
+func patchRepairChangedLines(filePatch unifiedDiffFilePatch) (added []string, deleted []string) {
+	seenAdded := map[string]bool{}
+	seenDeleted := map[string]bool{}
+	add := func(dst *[]string, seen map[string]bool, value string) {
+		if strings.TrimSpace(value) == "" || containsRuntimeRedactionMarker(value) {
+			return
+		}
+		if seen[value] {
+			return
+		}
+		seen[value] = true
+		*dst = append(*dst, value)
+	}
+	for _, hunk := range filePatch.Hunks {
+		for _, line := range hunk.Lines {
+			if len(line) == 0 {
+				continue
+			}
+			switch line[0] {
+			case '+':
+				add(&added, seenAdded, line[1:])
+			case '-':
+				add(&deleted, seenDeleted, line[1:])
+			}
+		}
+	}
+	return added, deleted
+}
+
+func patchRepairLinesAlreadySatisfied(content string, added []string, deleted []string) bool {
+	for _, line := range added {
+		if !patchRepairContentContainsLine(content, line) {
+			return false
+		}
+	}
+	for _, line := range deleted {
+		if patchRepairContentContainsLine(content, line) {
+			return false
+		}
+	}
+	return len(added) > 0 || len(deleted) > 0
+}
+
+func patchRepairContentContainsLine(content string, expected string) bool {
+	expected = strings.TrimRight(expected, "\r")
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimRight(line, "\r") == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func patchRepairReplacementText(hunk unifiedDiffHunk) (string, string) {

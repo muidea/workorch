@@ -254,7 +254,7 @@ func TestWorkorchServerModeSupportsFileRepositoryBackend(t *testing.T) {
 	assertWorkspaceLayoutDirectories(t, dataDir, workspaceID)
 	createRunInstance(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", "run-main-file", "goal-main-file", "dod-main-file")
 	assertWorkspaceListAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces", workspaceID)
-	assertWorkspaceAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID, workspaceID, "main file workspace", "ready")
+	assertWorkspaceAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID, workspaceID, "main file workspace", "active")
 	assertRunListAvailable(t, "http://"+addr+"/api/v1/workorch/runs", "run-main-file")
 	assertRunAvailable(t, "http://"+addr+"/api/v1/workorch/runs/run-main-file", "run-main-file", workspaceID)
 	assertRunListAvailable(t, "http://"+addr+"/api/v1/workorch/runs?workspaceId="+workspaceID, "run-main-file")

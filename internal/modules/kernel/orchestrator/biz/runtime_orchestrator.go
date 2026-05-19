@@ -1477,7 +1477,7 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 	if err != nil {
 		return true, err
 	}
-	input := o.graphExpansionLimitAssessmentFollowUpStepInputFromSteps(run, step, steps, count)
+	input := o.graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx, run, step, steps, count)
 	return true, o.dispatchUniqueStepWithWorkspace(ctx, run, graphExpansionLimitAssessmentFollowUpStepID(run.ID, step), initialStepKind(run), input, workspace)
 }
 

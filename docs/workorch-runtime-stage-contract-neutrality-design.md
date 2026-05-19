@@ -464,6 +464,8 @@ Runtime repair grounding 的详细合同见 `workorch-runtime-neutral-repair-gro
 
 Runtime 可以从失败 diff 与当前 target snapshot 中抽取中立的 `patchRepairSuggestions`，例如“某个 oldText 在当前目标中唯一匹配，可替换为 newText”。该建议只来源于失败 artifact 与当前资源内容的机械对齐，不包含业务语义；它用于帮助 LLM 生成更小、更精确、可审计的 repair artifact，避免重复输出行号漂移、上下文过期或依赖脱敏快照的 patch。
 
+Runtime 也可以从失败 diff 与当前 target snapshot 中抽取中立的 `currentTargetAlreadySatisfiesFailedPatch` 信号：当失败 artifact 的新增行已存在、删除行已不存在，且该判断只来自当前文件内容与 diff 行级状态的机械比对时，runtime 可以标记 `stateChangeAlreadySatisfiedByCurrentTarget=true`。该信号不代表业务已正确完成，只表示“重复同一失败 patch 不再合理”。后续 repairActionPackage 应禁止 `repeat_same_failed_patch`，并要求 LLM 返回受限 concrete validation evidence graph，或在无法验证时返回 failed assessment / blocker。
+
 如果 repair 基于当前 `patchRepairContext` 判断目标状态已经满足、失败 patch 已不再需要，runtime 可以接受一个受限 concrete validation evidence graph，用于验证当前状态；该 graph 不得只包含 read-only inspection，也不得包含新的 LLM 嵌套或 patch 节点。若验证失败，新的验证失败 evidence 再驱动后续 state-changing repair。
 
 若 `dodAssessment.satisfied=true` 但 runtime 校验发现 DoD / Goal / acceptance dimension / deliverable coverage 字段缺失或不完整，该失败首先属于 assessment contract correction，而不是新的 state-changing implementation 缺口。runtime 必须先尝试以 `assessmentOnly` / `verification` 模式要求 LLM 补齐 `dodAssessment.items`、`dodAssessment.goalCoverage`、`dodAssessment.acceptanceDimensions`、`dodAssessment.deliverableCoverage` 与 evidenceRefs / artifactRefs；不得在没有新的实现缺口证据时强制重新生成 patch、shell 或其他 state-changing 工作。若补齐后的 coverage 缺口仍没有任何中立候选证据，也不能从已有 satisfied evidence 机械映射，runtime 应切换为 concrete validation evidence repair，要求 LLM 产生受限 verification evidence 或明确 failed assessment / blocker。
@@ -471,6 +473,12 @@ Runtime 可以从失败 diff 与当前 target snapshot 中抽取中立的 `patch
 如果 assessment-only coverage correction 仍返回 `dodAssessment.satisfied=true` 但继续缺失 DoD / Goal / acceptance dimension / deliverable coverage，runtime 不得立即把 run 终结为 rejected result；应在 runtime repair budget 内继续派发 assessment-only correction，并把最新 missingDoDItems / missingGoalCoverage / missingDeliverableCoverage 作为强约束输入。只有 coverage correction 预算耗尽、LLM 返回明确 unsatisfied assessment、或出现不可恢复 contract violation 时，才进入 rejected / decision / fail 路径。
 
 Completion / assessment 必须遵守“最新非 superseded 证据优先”规则。对于同一中立 scope（例如同一 graph node label、同一 targetRef、同一 failure target scope 或同一可追踪步骤标签），如果较早失败 evidence 之后出现了成功完成的验证、patch 或执行证据，较早失败只能作为 lineage / 历史诊断保留，不能继续主导 accepted / rejected 判断。runtime 在 completion gate 中应把可机械匹配的旧失败 evidenceRef 归一化为后续成功 evidenceRef；在 assessment-only coverage correction 输入中应携带 `latestClosureEvidence` 与 `supersededFailureEvidence`，其中 `latestClosureEvidence` 至少应覆盖最新成功 step evidence、已应用 patch evidence 与已通过 validation evidence。LLM 必须对比最新成功证据后再判断；若最新成功证据仍不足，必须说明具体缺失的中立验收维度，而不是笼统复述旧失败。
+
+Graph expansion limit assessment 是 assessment-only coverage correction 的一种来源，而不是特殊业务流程。当前 follow-up 图扩展达到 runtime 上限时，runtime 必须把 assessment 转为严格证据收口：输入应包含 `runEvidenceSummary`、`latestClosureEvidence`、`supersededFailureEvidence` 和具体 evidence guidance；LLM 只能用可追踪 step / patch / validation evidence 证明 satisfied coverage，不得用 run ID、memory-only ref 或旧失败证据替代。
+
+为了防止长流程中 LLM 过程步骤淹没关键证据，runtime 在构造 `runEvidenceSummary` 时必须按中立证据价值裁剪：优先保留已完成/失败的 action evidence、state-changing artifact evidence、validation evidence 和可用于 closure 的步骤；普通 LLM 过程输出只能作为辅助上下文。该排序只基于 step kind、state、evidence quality 与可追踪性，不解析命令内容、语言、测试框架或业务语义。
+
+当 graph expansion limit assessment 的 failed `dodAssessment` / `goalCoverage` 暴露 coverage 缺口时，后续 repair 输入必须将缺口与可候选的最新 action evidence 绑定，例如 `missingDoDItems[].evidenceCandidates` 或 `missingGoalCoverage[].evidenceCandidates`。若候选证据存在，优先进行 assessment-only correction；若候选证据不存在或不足，才进入 concrete validation evidence repair 或治理终态。core 不能因为处于 graph expansion limit 路径就跳过 coverage correction，也不能因缺少领域判断而直接要求 state-changing patch。
 
 Goal coverage 校验只应把可判定的叶子需求作为覆盖对象。Markdown 标题、分组项、以冒号结尾的父级目标项只用于组织上下文，不得作为必须单独满足的叶子需求。若 Goal 叶子需求与 DoD 项文字不完全一致，LLM 必须通过 `dodAssessment.goalCoverage` 显式建立 Goal requirement -> evidenceRefs 的映射；runtime 不应依赖领域语义硬编码进行推断。
 
@@ -735,6 +743,10 @@ Stage input bundle 必须遵守：
   - run-summary memory 上下文压缩已移除旧 `run_summary` 兼容 trust marker；core 只保留中立 provenance 与当前版本标签，不再为历史数据生成特殊降权字段。
   - run-summary memory 的 core 文本已把 `Verification commands` / `Patch targets` / `code_agent` 收敛为中立 `Evidence executions` / `State-change targets` / `runtime_result`，软件开发具体命令和 patch 语义只作为 profile evidence 内容出现，不作为 core 标签或固定标题。
   - continuable decision -> runtime repair 的判断已移除 `new project`、`project path`、`工作目录` 等文本关键词启发式；core 只接受中立结构化标记 `runtimeCanContinue` / `continuableByRuntime` / `workspaceActionable` 或已知可读 workspace resource 证据。
+- 2026-05-19：
+  - graph expansion limit assessment 输入已补齐 `latestClosureEvidence` / `supersededFailureEvidence` 与 assessment evidence guidance，要求 satisfied coverage 只能引用具体可追踪证据。
+  - `runEvidenceSummary` 在超出上下文预算时优先保留 action / patch / validation / closure evidence，避免关键证据被普通 LLM 过程步骤挤出。
+  - graph expansion limit assessment 触发 coverage correction 时会为 `missingDoDItems` / `missingGoalCoverage` 补充中立 `evidenceCandidates`；候选证据存在时继续 assessment-only correction，候选不足时再进入 concrete validation evidence repair。
 
 ## 非兼容性说明
 

@@ -29,7 +29,9 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	assertContainsAnyDoDItem(t, item.DoDItems, "unified_diff")
 	assertContainsAnyDoDItem(t, item.DoDItems, "build/test")
 	assertContainsAnyDoDItem(t, item.DoDItems, "最终交付入口")
+	assertContainsAnyDoDItem(t, item.DoDItems, "真实交付入口")
 	assertContainsAnyDoDItem(t, item.DoDItems, "用户可观察行为")
+	assertContainsAnyDoDItem(t, item.DoDItems, "fake/mock/helper")
 	assertContainsAnyDoDItem(t, item.DoDItems, "主路径")
 	assertContainsAnyDoDItem(t, item.DoDItems, "lint/静态检查")
 	assertContainsAnyDoDItem(t, item.DoDItems, "残余风险")
@@ -111,6 +113,9 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, execution.SoulMD, "failedPatchDigest")
 	assertSoulContains(t, execution.SoulMD, "patch_current_snapshot_only")
 	assertSoulContains(t, execution.SoulMD, "exact_replacement_against_current_snapshot")
+	assertSoulContains(t, execution.SoulMD, "currentTargetAlreadySatisfiesFailedPatch")
+	assertSoulContains(t, execution.SoulMD, "真实交付入口")
+	assertSoulContains(t, execution.SoulMD, "测试文件内临时实现")
 	assertSoulNotContains(t, execution.SoulMD, "多 provider/多 LLM 网关")
 	assertSoulNotContains(t, execution.SoulMD, "providers[]")
 	assertSoulNotContains(t, execution.SoulMD, "model_prefixes")
@@ -338,7 +343,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 	}
 	requiredEvidence := map[string]bool{
 		"runtime_entrypoint":         false,
-		"external_contract":         false,
+		"external_contract":          false,
 		"persistence_or_side_effect": false,
 		"streaming_or_long_running":  false,
 		"error_behavior":             false,

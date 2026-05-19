@@ -65,7 +65,7 @@
 | `provider_schema_drift` | provider response/protocol schema 与 runtime provider 适配不一致 | provider/config decision 或 provider adapter 修复，不进入业务 runtime repair |
 | `llm_decision_invalid` | LLM 输出 JSON / WorkOrch decision schema / 阶段输出合约无效 | 普通执行阶段进入 runtime repair / contract correction；assessment-only 终态写 rejected result |
 | `runtime_failed` + contract message | LLM 输出违反 WorkOrch 合约 | runtime repair；若是 state-changing contract，repair 必须继承 state-changing |
-| `patch_apply_failed` / `patch_dispatch_invalid` | patch 校验或应用失败 | state-changing repair，必须基于当前文件快照生成具体 patch |
+| `patch_apply_failed` / `patch_dispatch_invalid` | patch 校验或应用失败 | state-changing repair，必须基于当前文件快照生成具体 patch；若当前目标已机械满足失败 patch 意图，则禁止重复同一 patch，改为 concrete validation evidence graph 或 failed assessment/blocker |
 | `dod_coverage_missing` | DoD/Goal coverage 不足 | repair 或 rejected result；不得继续 assessment-only graph |
 | `workspace_path_conflict` | 文件缺失、路径冲突 | repair 可先读取/列目录，但若原目标是 state-changing，必须回到具体 patch |
 | `shell_command_failed` | build/test/lint 失败 | repair 失败根因，重新 patch 或补测试 |
@@ -124,6 +124,9 @@
 - 归一化只能使用当前 run 中已完成、可追溯、非弱证据的中立 evidence，例如成功的 shell/tool/patch/validation 步骤；`file/read`、`file/list`、`mcp/resource_read`、LLM 自身输出、zero-work/inconclusive/invalid evidence 不能作为自动 fallback。
 - 若没有可用 evidence，runtime 不得凭空接受 assessment，必须继续按 completion gate 失败、repair、rejected result 或 decision blocker 收口。
 - 该规则只治理结构化证据引用完整性，不引入任何业务领域判断；业务语义是否充分仍由 Goal/DoD、profile contract、LLM assessment 与 evidence quality gate 共同约束。
+- graph follow-up 因扩展次数达到上限而转入 assessment-only 时，assessment 输入必须携带当前 run 的 `runEvidenceSummary`、`latestClosureEvidence` 和必要的 `supersededFailureEvidence`。LLM 对 satisfied item 的 `evidenceRefs` 必须引用具体可追踪 step / patch / validation evidence，不能只引用 run ID、memory ref 或旧失败 step。
+- 当 `runEvidenceSummary` 因上下文预算需要裁剪时，runtime 必须优先保留中立 action evidence，例如已完成/失败的 shell、tool、patch、validation 或其他可证明状态变化/验证结果的步骤；不得让后续 LLM 过程步骤把关键验证/变更证据全部挤出 assessment 输入。
+- assessment-only coverage correction 对 graph expansion limit assessment 同样适用。若 failed `dodAssessment.items` 或 `goalCoverage.items` 缺少可追踪 evidence，repair input 必须带入具体 `evidenceCandidates` 或最新 action evidence 候选；只有候选证据仍不足时，才切换为 concrete validation evidence repair、rejected result 或 decision blocker。
 
 ## 抽象矩阵与证据门禁
 
@@ -145,6 +148,7 @@
 | RFC-03 | `llm_schema_invalid` 同时被视为 provider failure stage 和 contract/schema failure | schema invalid 可能走 provider retry，也可能应直接 contract correction / rejected result | 将 schema invalid 分为 provider transport schema 与 LLM contract schema |
 | RFC-04 | blocked_on_decision 是否写 rejected result 规则不够统一 | provider blocker 合理无 result，业务 blocker 可能缺 rejected result | 增加 blocker scope 到 result policy 映射 |
 | RFC-05 | state-changing repair 仍可能返回非 state-changing graph 或 placeholder patch | 过早禁止所有 `executionGraph` 会阻断合法多步骤 patch graph；允许所有 graph 又会回到只读循环 | 仅允许包含合法 `patch/apply` 的 state-changing graph；继续拦截 read-only / shell-only graph |
+| RFC-05A | 失败 patch 的目标状态已满足但仍重复提交同一 patch | context mismatch 后当前文件可能已经包含目标变更，继续强制 patch 会形成重复失败循环 | 增加 `currentTargetAlreadySatisfiesFailedPatch` 中立信号，repairActionPackage 禁止 `repeat_same_failed_patch`，允许受限 concrete validation evidence graph |
 | RFC-06 | provider retry / runtime repair 交织后 root 可指向 repair-of-provider-retry 外壳 | `provider-retry-001-of-repair-001` 的 root 指向 `repair-001-of-provider-retry-001`，budget 与 result attribution 被外壳污染 | 新增 recovery root normalizer，provider retry / runtime repair / result attribution 均使用结构化业务 root |
 | RFC-07 | provider/config terminal failure 可写业务 rejected result 并 failed | `auth_unavailable` 被当作业务 DoD rejected result，缺少 WorkOrch provider config decision | provider/config blocker 统一进入 `blocked_on_decision`，`resultPolicy=none` |
 
