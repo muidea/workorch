@@ -70,6 +70,7 @@ func (o *RuntimeOrchestrator) completionEvidenceRefCatalog(ctx context.Context, 
 	if err != nil {
 		return catalog, err
 	}
+	steps = orderedRuntimeContextSteps(steps)
 	for idx, step := range steps {
 		if step == nil || step.ID == "" {
 			continue
@@ -722,6 +723,7 @@ func (o *RuntimeOrchestrator) latestCompletionClosureEvidence(ctx context.Contex
 	if err != nil || len(steps) == 0 {
 		return nil
 	}
+	steps = orderedRuntimeContextSteps(steps)
 	type closureItem struct {
 		order int
 		item  map[string]any
@@ -766,6 +768,11 @@ func (o *RuntimeOrchestrator) latestCompletionClosureEvidence(ctx context.Contex
 		latest = append(latest, item)
 	}
 	sort.SliceStable(latest, func(i, j int) bool {
+		leftFocus, _ := latest[i].item["focus"].(bool)
+		rightFocus, _ := latest[j].item["focus"].(bool)
+		if leftFocus != rightFocus {
+			return !leftFocus
+		}
 		return latest[i].order > latest[j].order
 	})
 	latestLimit := min(len(latest), 8)

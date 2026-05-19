@@ -531,10 +531,17 @@ func compactLLMContextEvidenceText(value any) any {
 	if len(text) <= maxLLMContextEvidenceTextBytes {
 		return text
 	}
+	tailStart := len(text) - maxLLMContextEvidenceTextBytes
+	if tailStart < 0 {
+		tailStart = 0
+	}
 	return map[string]any{
 		"textPreview": text[:maxLLMContextEvidenceTextBytes] + "...",
+		"headPreview": text[:maxLLMContextEvidenceTextBytes],
+		"tailPreview": text[tailStart:],
 		"bytes":       len(text),
 		"truncated":   true,
+		"refOnly":     false,
 	}
 }
 

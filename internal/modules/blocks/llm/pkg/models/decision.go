@@ -62,12 +62,15 @@ type ProviderContextBudget struct {
 	CompressedSections    []string               `json:"compressedSections,omitempty"`
 	OmittedSections       []string               `json:"omittedSections,omitempty"`
 	GoalDoDCompressed     bool                   `json:"goalDoDCompressed,omitempty"`
+	OverBudget            bool                   `json:"overBudget,omitempty"`
 	P0Overflow            bool                   `json:"p0Overflow,omitempty"`
 	TracePolicy           string                 `json:"tracePolicy,omitempty"`
 	PromptCaptured        bool                   `json:"promptCaptured"`
 	Estimator             string                 `json:"estimator,omitempty"`
 	RedactionApplied      bool                   `json:"redactionApplied,omitempty"`
 	RedactedPaths         []string               `json:"redactedPaths,omitempty"`
+	ProtectedFields       []string               `json:"protectedFields,omitempty"`
+	IntegrityWarnings     []string               `json:"integrityWarnings,omitempty"`
 	Profile               ProviderContextProfile `json:"profile,omitempty"`
 }
 

@@ -1987,7 +1987,11 @@ func coverageGapRepairTargetTokens(step *runModel.Step) []string {
 		add(stringFromMap(item, "item"))
 	}
 	for _, item := range missingGoalCoverageFromInput(step.Input) {
-		add(firstNonEmptyString(stringFromMap(item, "goalRequirementId"), stringFromMap(item, "item")))
+		add(firstNonEmptyString(
+			stringFromMap(item, "goalRequirementId"),
+			stringFromMap(item, "item"),
+			missingGoalCoverageRequirementText(item),
+		))
 	}
 	return ret
 }

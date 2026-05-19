@@ -644,6 +644,7 @@ type LLMContextBudgetTrace struct {
 	CompressedSections    []string       `json:"compressedSections,omitempty"`
 	OmittedSections       []string       `json:"omittedSections,omitempty"`
 	GoalDoDCompressed     bool           `json:"goalDoDCompressed"`
+	OverBudget            bool           `json:"overBudget"`
 	P0Overflow            bool           `json:"p0Overflow"`
 	TracePolicy           string         `json:"tracePolicy,omitempty"`
 	PromptCaptured        bool           `json:"promptCaptured"`

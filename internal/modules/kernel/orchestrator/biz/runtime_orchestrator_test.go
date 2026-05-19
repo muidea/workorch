@@ -9068,6 +9068,250 @@ func TestRuntimeRepairFollowUpStepIDKeepsGraphNodeForSecondOrderRepair(t *testin
 	}
 }
 
+func TestRuntimeRepairFollowUpStepIDKeepsEmbeddedGraphNodeForRepairOfRepair(t *testing.T) {
+	runID := common.RunID("run-repair-id-embedded-graph-lineage")
+	failedRepair := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-001-of-graph-001-002-run-go-test-2"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRepairOfStepID:        string(runID) + "/repair-001-of-graph-001-002-run-go-test",
+			stepInputKeyRepairOfRootStepID:    string(runID) + "/step-1",
+		},
+		Output: map[string]any{
+			"stage":                   "llm_schema_invalid",
+			failureOutputKeyClass:     failureClassLLMDecisionInvalid,
+			failureOutputKeySignature: "class=llm_decision_invalid|kind=llm/workspace_execution|stage=llm_schema_invalid",
+			"error":                   "invalid argument: invalid llm decision json",
+		},
+	}
+
+	stepID := runtimeRepairFollowUpStepID(runID, failedRepair, 2)
+	if !strings.Contains(string(stepID), "graph-001-002-run-go-test") {
+		t.Fatalf("runtime repair step id = %q, want embedded original graph label", stepID)
+	}
+	if strings.Contains(string(stepID), "planning-001") {
+		t.Fatalf("runtime repair step id = %q, want graph repair label instead of planning root label", stepID)
+	}
+}
+
+func TestRuntimeRepairInputForSchemaInvalidRepairAddsJSONRecoveryContract(t *testing.T) {
+	runID := common.RunID("run-schema-invalid-repair-contract")
+	failedRepair := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-001-of-graph-001-002-run-go-test"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRepairOfStepID:        string(runID) + "/graph-001/002-run-go-test",
+			stepInputKeyRepairOfRootStepID:    string(runID) + "/step-1",
+			"stateChangingOutputRequired":     true,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"failureTargetRepairContext": []map[string]any{{
+				"targetRef":        "main_test.go",
+				"exists":           true,
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"contentHash":      "hash",
+				"content":          "package main\n",
+			}},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_schema_invalid",
+			failureOutputKeyClass:     failureClassLLMDecisionInvalid,
+			failureOutputKeySignature: "class=llm_decision_invalid|kind=llm/workspace_execution|stage=llm_schema_invalid",
+			"error":                   "invalid argument: invalid llm decision json: invalid character '}' after array element",
+			"reason":                  "invalid argument: invalid llm decision json: invalid character '}' after array element",
+		},
+	}
+
+	input := (&RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}).runtimeRepairFollowUpStepInput(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-schema-invalid-repair-contract", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, failedRepair, 2, errors.New("invalid argument: invalid llm decision json"))
+
+	if input["schemaInvalidRepairMode"] != "single_valid_json_decision" {
+		t.Fatalf("schemaInvalidRepairMode = %v, want single_valid_json_decision", input["schemaInvalidRepairMode"])
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		t.Fatalf("repairActionPackage missing from input: %+v", input)
+	}
+	if recovery := mapFromValue(pkg["schemaInvalidRecovery"]); recovery["required"] != true {
+		t.Fatalf("schemaInvalidRecovery = %+v, want required", recovery)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if required["mustReturnValidJSON"] != true || required["mustNotReuseRejectedJSON"] != true {
+		t.Fatalf("requiredOutput = %+v, want schema invalid JSON constraints", required)
+	}
+	if guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n"); !strings.Contains(guidance, "single valid JSON") {
+		t.Fatalf("repairGuidance = %+v, want schema invalid JSON guidance", input["repairGuidance"])
+	}
+}
+
+func TestRuntimeRepairInputCarriesCoverageTargetsAndProgressAfterRepairContractFailure(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-coverage-target-context-inherit")
+	steps := memory.NewStepRepository()
+	if err := steps.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(runID + "/graph-002/001-patch-target"),
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID:     "patch-target",
+			stepInputKeyGraphRootStepID: string(runID) + "/repair-001-of-planning-001-3",
+		},
+		Output: map[string]any{
+			"status": "completed",
+			"patches": []map[string]any{{
+				"targetRef": "main.go",
+				"patchType": "unified_diff",
+				"content":   "large patch body should not be repeated in progress",
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("seed patch step: %v", err)
+	}
+	if err := steps.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(runID + "/graph-002/002-run-tests"),
+		RunID: runID,
+		Kind:  "shell/command",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID:     "run-tests",
+			stepInputKeyGraphRootStepID: string(runID) + "/repair-001-of-planning-001-3",
+		},
+		Output: map[string]any{
+			"status":   "completed",
+			"command":  "test",
+			"args":     []string{"all"},
+			"exitCode": 0,
+			"stdout":   "ok target suite",
+		},
+	}); err != nil {
+		t.Fatalf("seed test step: %v", err)
+	}
+	failedRepair := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-001-of-planning-001-4"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  1,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeyRepairOfStepID:        string(runID) + "/follow-up-graph-repair-001-of-planning-001-3-run-build",
+			stepInputKeyRepairOfRootStepID:    string(runID) + "/step-1",
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"missingDoDItems": []map[string]any{{
+				"item":  "streaming responses must be directly verified",
+				"state": "failed",
+				"evidenceCandidates": []map[string]any{{
+					"stepId": string(runID) + "/graph-002/002-run-tests",
+					"kind":   "shell/command",
+					"state":  "completed",
+				}},
+			}},
+			"missingGoalCoverage": []map[string]any{{
+				"goalRequirementId": "goal-001",
+				"raw":               "token accounting must be covered",
+				"state":             "failed",
+			}},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_execution_graph_plan",
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|error=coverage-targets",
+			"error":                   "invalid argument: coverage-gap state-changing repair patch/apply must declare coverageTargets matching missing DoD or Goal coverage items",
+			"executionGraph": map[string]any{"nodes": []map[string]any{{
+				"id":   "patch-without-coverage-targets",
+				"kind": "patch/apply",
+			}}},
+		},
+	}
+
+	input := (&RuntimeOrchestrator{
+		steps:      steps,
+		workspaces: memory.NewWorkspaceRepository(),
+	}).runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-coverage-target-context-inherit", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, failedRepair, 2, common.ErrInvalidArgument)
+
+	if missing := mapSliceFromValue(input["missingDoDItems"]); len(missing) != 1 || missing[0]["item"] != "streaming responses must be directly verified" {
+		t.Fatalf("missingDoDItems = %+v, want inherited unresolved DoD target", input["missingDoDItems"])
+	}
+	if missing := mapSliceFromValue(input["missingGoalCoverage"]); len(missing) != 1 || missing[0]["goalRequirementId"] != "goal-001" {
+		t.Fatalf("missingGoalCoverage = %+v, want inherited unresolved goal target", input["missingGoalCoverage"])
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if pkg["coverageRepairRequired"] != true {
+		t.Fatalf("repairActionPackage = %+v, want coverageRepairRequired", pkg)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if required["mustDeclareCoverageTargets"] != true {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v, want mustDeclareCoverageTargets", required)
+	}
+	targets := mapSliceFromValue(pkg["coverageTargetSet"])
+	if len(targets) != 2 {
+		t.Fatalf("coverageTargetSet = %+v, want DoD and Goal targets", targets)
+	}
+	progress := mapFromValue(pkg["currentExecutionProgress"])
+	if int64FromValue(progress["coverageGapCount"]) != 2 {
+		t.Fatalf("currentExecutionProgress = %+v, want coverage gap count", progress)
+	}
+	if latest := mapSliceFromValue(progress["latestActionEvidence"]); len(latest) == 0 {
+		t.Fatalf("currentExecutionProgress = %+v, want latest action evidence", progress)
+	}
+	if strings.Contains(fmt.Sprint(progress), "large patch body should not be repeated") {
+		t.Fatalf("currentExecutionProgress leaked patch body: %+v", progress)
+	}
+}
+
+func TestRuntimeRepairLatestActionEvidenceUsesExplicitSequenceOrder(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-context-order")
+	steps := memory.NewStepRepository()
+	for _, seed := range []struct {
+		id       string
+		seq      int
+		nodeID   string
+		expected bool
+	}{
+		{id: "graph-002/001-older-by-sequence", seq: 2, nodeID: "older"},
+		{id: "graph-001/001-newer-by-sequence", seq: 3, nodeID: "newer", expected: true},
+	} {
+		if err := steps.Create(ctx, &runmodel.Step{
+			ID:    common.StepID(string(runID) + "/" + seed.id),
+			RunID: runID,
+			Kind:  "shell/command",
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				"stepSequence":              seed.seq,
+				stepInputKeyGraphNodeID:     seed.nodeID,
+				stepInputKeyGraphRootStepID: string(runID) + "/step-1",
+			},
+			Output: map[string]any{
+				"status":   "completed",
+				"command":  "test",
+				"exitCode": 0,
+			},
+		}); err != nil {
+			t.Fatalf("seed step: %v", err)
+		}
+	}
+	orch := &RuntimeOrchestrator{steps: steps}
+	evidence := orch.latestActionEvidenceCandidates(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-context-order"}, nil, 2)
+	if len(evidence) != 2 {
+		t.Fatalf("latestActionEvidenceCandidates = %+v, want two items", evidence)
+	}
+	if evidence[0]["graphNodeId"] != "newer" {
+		t.Fatalf("latestActionEvidenceCandidates = %+v, want explicit sequence order", evidence)
+	}
+}
+
 func TestRuntimeOrchestrator_ProviderUnavailableBlocksOnProviderDecisionWithoutRejectedResult(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-provider-unavailable-decision")
@@ -12876,6 +13120,38 @@ func TestRunEvidenceSummaryPrioritizesActionEvidenceWhenLarge(t *testing.T) {
 	}
 }
 
+func TestRunEvidenceSummaryIncludesOutputRefAndTargetedLargeTextExcerpt(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-evidence-ref",
+		WorkspaceID: "ws-evidence-ref",
+	}
+	step := &runmodel.Step{
+		ID:    "run-evidence-ref/graph-001/001-verify",
+		RunID: run.ID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stderr": strings.Repeat("head-line\n", 200) + "final actionable failure",
+		},
+	}
+
+	evidence := runEvidenceSummaryFromRunSteps(run, []*runmodel.Step{step})
+
+	if len(evidence) != 1 {
+		t.Fatalf("runEvidenceSummary length = %d, want 1", len(evidence))
+	}
+	if evidence[0]["outputRef"] != "workorch://workspaces/ws-evidence-ref/runs/run-evidence-ref/steps/run-evidence-ref/graph-001/001-verify/output.json" {
+		t.Fatalf("outputRef = %#v", evidence[0]["outputRef"])
+	}
+	output := mapFromValue(evidence[0]["output"])
+	stderr := mapFromValue(output["stderr"])
+	if stderr["truncated"] != true ||
+		!strings.Contains(fmt.Sprint(stderr["headPreview"]), "head-line") ||
+		!strings.Contains(fmt.Sprint(stderr["tailPreview"]), "final actionable failure") {
+		t.Fatalf("stderr = %+v, want targeted head/tail excerpt", stderr)
+	}
+}
+
 func TestMergeRunExecutionContextPatchRefreshesEffectiveDefinitionIDs(t *testing.T) {
 	run := &runmodel.Run{
 		ID:               "run-definition-patch",
@@ -15274,6 +15550,47 @@ func TestValidateLLMExecutionOutputContractRejectsCoverageGapPatchWithUnmatchedC
 	err := validateLLMExecutionOutputContract(run, step, output)
 	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "coverageTargets") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want coverage target mismatch rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsGoalCoverageRawTarget(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-coverage-raw-target",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-coverage-raw-target/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"missingGoalCoverage": []map[string]any{
+				{"raw": "streaming token accounting is directly covered", "state": "failed"},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "repair-main",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType":       "file_write",
+					"targetRef":       "main.go",
+					"content":         "package main\n",
+					"coverageTargets": []string{"streaming token accounting is directly covered"},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want raw goal coverage target allowed", err)
 	}
 }
 

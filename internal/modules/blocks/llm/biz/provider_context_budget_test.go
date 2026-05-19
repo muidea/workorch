@@ -7,6 +7,15 @@ import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 )
 
+func stringSliceContains(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestEnforceProviderRequestBudgetCompactsLargeExecutionContext(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-budget",
@@ -410,6 +419,155 @@ func TestRedactProviderRequestPreservesOnlySafeRepairSnapshotContent(t *testing.
 		if path == "input.failureTargetRepairContext[].content" || path == "input.repairActionPackage.targetSnapshots[].content" {
 			t.Fatalf("redactedPaths = %+v, safe repair content should not be reported as redacted", got.ContextBudget.RedactedPaths)
 		}
+	}
+}
+
+func TestEnforceProviderRequestBudgetRecordsContextIntegrityAudit(t *testing.T) {
+	safeContent := "package main\n\nfunc main() {}\n"
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-integrity",
+		RunID:       "run-integrity",
+		StepID:      "run-integrity/repair-001",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"goal": "preserve goal",
+			"dod":  "preserve dod",
+			"repairActionPackage": map[string]any{
+				"coverageRepairRequired": true,
+				"coverageTargetSet": []map[string]any{{
+					"kind":                "dod",
+					"coverageTargetToken": "target-1",
+					"targetText":          "target one",
+				}},
+				"currentExecutionProgress": map[string]any{
+					"coverageGapCount": 1,
+				},
+				"requiredOutput": map[string]any{
+					"mustDeclareCoverageTargets": true,
+				},
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "main.go",
+					"content":          safeContent,
+					"contentHash":      "hash-main",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{BytesHardLimit: 4096, EstimatedTokensPerByte: 0.25},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget = nil, want integrity audit")
+	}
+	for _, expected := range []string{
+		"input.goal",
+		"input.dod",
+		"input.repairActionPackage.coverageTargetSet",
+		"input.repairActionPackage.currentExecutionProgress",
+		"input.repairActionPackage.requiredOutput",
+		"input.repairActionPackage.targetSnapshots",
+	} {
+		if !stringSliceContains(got.ContextBudget.ProtectedFields, expected) {
+			t.Fatalf("protectedFields = %+v, missing %s", got.ContextBudget.ProtectedFields, expected)
+		}
+	}
+	if len(got.ContextBudget.IntegrityWarnings) != 0 {
+		t.Fatalf("integrityWarnings = %+v, want none", got.ContextBudget.IntegrityWarnings)
+	}
+}
+
+func TestEnforceProviderRequestBudgetWarnsCoverageRepairWithoutTargets(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-integrity-warning",
+		RunID:       "run-integrity-warning",
+		StepID:      "run-integrity-warning/repair-001",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"repairActionPackage": map[string]any{
+				"coverageRepairRequired": true,
+				"requiredOutput": map[string]any{
+					"mustDeclareCoverageTargets": true,
+				},
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget = nil, want integrity audit")
+	}
+	for _, expected := range []string{
+		"coverage_repair_required_without_coverage_target_set",
+		"must_declare_coverage_targets_without_target_set",
+	} {
+		if !stringSliceContains(got.ContextBudget.IntegrityWarnings, expected) {
+			t.Fatalf("integrityWarnings = %+v, missing %s", got.ContextBudget.IntegrityWarnings, expected)
+		}
+	}
+}
+
+func TestEnforceProviderRequestBudgetPreservesRepairContractWithoutSnapshots(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-repair-contract",
+		RunID:       "run-repair-contract",
+		StepID:      "run-repair-contract/repair-001",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"currentSoulStage":     "execution",
+			"failedExecutionGraph": repeatedBudgetItems(200),
+			"graphEvidence":        repeatedBudgetItems(200),
+			"repairActionPackage": map[string]any{
+				"coverageRepairRequired": true,
+				"coverageTargetSet": []map[string]any{{
+					"kind":                "dod",
+					"coverageTargetToken": "target-1",
+					"targetText":          "target one",
+				}},
+				"currentExecutionProgress": map[string]any{
+					"coverageGapCount": 1,
+				},
+				"requiredOutput": map[string]any{
+					"mustDeclareCoverageTargets": true,
+					"mustReturnValidJSON":        true,
+				},
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    4096,
+				MaxInputTokens:         256,
+				ReservedOutputTokens:   128,
+				BytesHardLimit:         8 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil || got.ContextBudget.ShrinkLevel == 0 {
+		t.Fatalf("contextBudget = %+v, want compacted budget", got.ContextBudget)
+	}
+	pkg := recordFromAny(got.Input["repairActionPackage"])
+	if len(mapSliceFromAny(pkg["coverageTargetSet"])) != 1 {
+		t.Fatalf("repairActionPackage = %+v, want coverageTargetSet preserved without targetSnapshots", pkg)
+	}
+	required := recordFromAny(pkg["requiredOutput"])
+	if !boolValue(required["mustDeclareCoverageTargets"]) || !boolValue(required["mustReturnValidJSON"]) {
+		t.Fatalf("requiredOutput = %+v, want protected repair output contract", required)
+	}
+	progress := recordFromAny(pkg["currentExecutionProgress"])
+	if intValue(progress["coverageGapCount"]) != 1 {
+		t.Fatalf("currentExecutionProgress = %+v, want preserved progress", progress)
 	}
 }
 

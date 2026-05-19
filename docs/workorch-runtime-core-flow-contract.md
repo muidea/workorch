@@ -98,6 +98,9 @@
 
 - repair scope 必须按 root step、failure class、failure signature 归一。
 - repair-of-repair 必须继承更强约束，不得降级。
+- repair-of-repair 若源自 graph-scoped 失败，即使当前失败发生在 repair 外壳或 LLM schema invalid 外壳上，后续 repair ID、lineage label 与 input scope 也必须保持原始 graph failure label；不得退回 `planning-001` 或其他早期 root label。
+- coverage repair 的 repair-of-repair 必须继承上一轮 `missingDoDItems`、`missingGoalCoverage`、`missingDeliverableCoverage`、候选 evidence、已完成 action evidence、当前失败信息与最近 repair 尝试摘要；`repairActionPackage` 必须携带 `coverageRepairRequired`、`coverageTargetSet`、`currentExecutionProgress` 和 `requiredOutput.mustDeclareCoverageTargets`，避免 LLM 只看到输出合同错误却看不到实际进展与未关闭目标。
+- LLM 输入上下文完整性、顺序、脱敏、摘要和 request audit 必须遵守 `workorch-runtime-llm-context-integrity-design.md`；P0/P1 必要上下文不得被外壳失败、历史 superseded evidence、context compaction 或 redaction 静默覆盖。
 - state-changing planning read-only graph failure 首轮 repair 直接进入 state-changing repair。
 - DoD run 中 `file/read` / `file_read_invalid_path` / `no such file` / `lstat` 这类缺失目标文件失败，若发生在 state-changing 闭环内，repair 必须进入 `produce_state_changing_output`，并提示创建缺失内容，而不是继续重复读取。
 - state-changing planning / repair graph 中，合法 state-changing 节点不能依赖前置 `llm/workspace_execution` 分析节点；分析必须在 planning 阶段完成，state-changing graph 必须能从只读取证节点直接推进到状态变更。
@@ -193,6 +196,7 @@
 - DMI-21 已落地：
   - 新增独立 failure class `llm_decision_invalid`，用于 `llm_schema_invalid` / `llm_decision_invalid` 这类 LLM 输出合约错误。
   - `llm_schema_invalid` / `llm_decision_invalid` 不再属于 `isLLMProviderFailureStage`，因此不会触发 provider retry / provider exhausted 规则。
+  - state-changing repair 的 `llm_schema_invalid` 后续 repair input 必须包含 schema invalid recovery contract：只允许基于 `repairActionPackage` 和当前 target snapshot 重建单个合法 JSON decision；不得复用 rejected raw JSON、markdown 包裹、注释、重复 JSON object、尾随多余括号或局部数组。
   - provider schema drift 保留为 provider failure，但必须使用显式 `llm_provider_schema_drift` / `llm_provider_response_schema_invalid` / `llm_provider_protocol_invalid` stage。
   - assessment-only / providerRetryAssessmentOnly 的 LLM decision contract terminal failure 继续写 rejected result 并关闭，不退回普通 repair。
 - DMI-22 已落地：

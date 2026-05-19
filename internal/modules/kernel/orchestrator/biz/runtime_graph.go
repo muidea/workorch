@@ -877,7 +877,7 @@ func llmCompletionFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[
 
 func llmCompletionFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step) map[string]any {
 	input := llmCompletionFollowUpStepInput(run, step)
-	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromSteps(steps))
+	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
 }
 
 func graphExpansionLimitAssessmentFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {
@@ -941,7 +941,7 @@ func noActionableContinuationFollowUpStepInput(run *runModel.Run, step *runModel
 
 func noActionableContinuationFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step) map[string]any {
 	input := noActionableContinuationFollowUpStepInput(run, step)
-	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromSteps(steps))
+	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
 }
 
 func (o *RuntimeOrchestrator) noActionableContinuationFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
@@ -953,7 +953,7 @@ func (o *RuntimeOrchestrator) noActionableContinuationFollowUpStepInput(ctx cont
 	if err != nil {
 		return input
 	}
-	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromSteps(steps))
+	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
 }
 
 func (o *RuntimeOrchestrator) llmCompletionFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
@@ -965,7 +965,7 @@ func (o *RuntimeOrchestrator) llmCompletionFollowUpStepInput(ctx context.Context
 	if err != nil {
 		return input
 	}
-	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromSteps(steps))
+	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
 }
 
 func graphFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {
@@ -992,9 +992,9 @@ func (o *RuntimeOrchestrator) graphFollowUpStepInput(ctx context.Context, run *r
 
 func (o *RuntimeOrchestrator) graphFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step) map[string]any {
 	input := graphFollowUpStepInput(run, step)
-	evidence := o.completedGraphEvidenceFromSteps(step, steps)
+	evidence := o.completedGraphEvidenceFromSteps(run, step, steps)
 	input = enrichGraphFollowUpInputWithEvidence(input, evidence)
-	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromSteps(steps))
+	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
 }
 
 func enrichGraphFollowUpInputWithEvidence(input map[string]any, evidence []map[string]any) map[string]any {
@@ -1048,10 +1048,10 @@ func (o *RuntimeOrchestrator) completedGraphEvidence(ctx context.Context, run *r
 	if err != nil {
 		return nil
 	}
-	return o.completedGraphEvidenceFromSteps(anchor, steps)
+	return o.completedGraphEvidenceFromSteps(run, anchor, steps)
 }
 
-func (o *RuntimeOrchestrator) completedGraphEvidenceFromSteps(anchor *runModel.Step, steps []*runModel.Step) []map[string]any {
+func (o *RuntimeOrchestrator) completedGraphEvidenceFromSteps(run *runModel.Run, anchor *runModel.Step, steps []*runModel.Step) []map[string]any {
 	graph, ok := runtimeGraphSpecFromStep(anchor)
 	if !ok || len(graph.Nodes) == 0 {
 		return nil
@@ -1074,10 +1074,11 @@ func (o *RuntimeOrchestrator) completedGraphEvidenceFromSteps(anchor *runModel.S
 			continue
 		}
 		evidence = append(evidence, map[string]any{
-			"nodeId": node.ID,
-			"stepId": string(step.ID),
-			"kind":   step.Kind,
-			"output": compactStepOutputForLLMContext(step.Output),
+			"nodeId":    node.ID,
+			"stepId":    string(step.ID),
+			"kind":      step.Kind,
+			"output":    compactStepOutputForLLMContext(step.Output),
+			"outputRef": stepOutputRefForLLMContext(run, step),
 		})
 	}
 	return evidence
@@ -1092,6 +1093,10 @@ func enrichRunEvidenceSummaryInput(input map[string]any, evidence []map[string]a
 }
 
 func runEvidenceSummaryFromSteps(steps []*runModel.Step) []map[string]any {
+	return runEvidenceSummaryFromRunSteps(nil, steps)
+}
+
+func runEvidenceSummaryFromRunSteps(run *runModel.Run, steps []*runModel.Step) []map[string]any {
 	if len(steps) == 0 {
 		return nil
 	}
@@ -1118,6 +1123,9 @@ func runEvidenceSummaryFromSteps(steps []*runModel.Step) []map[string]any {
 		if rootStepID := graphRootStepID(step); rootStepID != "" && rootStepID != step.ID {
 			item["graphRootStepId"] = string(rootStepID)
 		}
+		if outputRef := stepOutputRefForLLMContext(run, step); outputRef != "" {
+			item["outputRef"] = outputRef
+		}
 		if branch := graphBranch(step); branch != "" {
 			item["graphBranch"] = branch
 		}
@@ -1130,6 +1138,13 @@ func runEvidenceSummaryFromSteps(steps []*runModel.Step) []map[string]any {
 		return nil
 	}
 	return items
+}
+
+func stepOutputRefForLLMContext(run *runModel.Run, step *runModel.Step) string {
+	if run == nil || step == nil || run.WorkspaceID == "" || run.ID == "" || step.ID == "" {
+		return ""
+	}
+	return runtimeRawPayloadRef(run.WorkspaceID, run.ID, "steps", string(step.ID), "output.json")
 }
 
 func prioritizedRunEvidenceSummarySteps(steps []*runModel.Step, limit int) []*runModel.Step {

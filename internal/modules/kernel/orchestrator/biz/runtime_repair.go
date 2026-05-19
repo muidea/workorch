@@ -1745,6 +1745,7 @@ func (o *RuntimeOrchestrator) latestActionEvidenceCandidates(
 	if err != nil || len(steps) == 0 {
 		return nil
 	}
+	steps = orderedRuntimeContextSteps(steps)
 	ret := make([]map[string]any, 0, limit)
 	for idx := len(steps) - 1; idx >= 0 && len(ret) < limit; idx-- {
 		step := steps[idx]
@@ -1771,6 +1772,154 @@ func (o *RuntimeOrchestrator) latestActionEvidenceCandidates(
 			item["output"] = output
 		}
 		ret = append(ret, item)
+	}
+	return ret
+}
+
+func (o *RuntimeOrchestrator) runtimeRepairCurrentExecutionProgress(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	input map[string]any,
+) map[string]any {
+	if run == nil || failedStep == nil {
+		return nil
+	}
+	ret := map[string]any{
+		"runId":            string(run.ID),
+		"failedStepId":     string(failedStep.ID),
+		"failedStepKind":   failedStep.Kind,
+		"failedStepState":  string(failedStep.State),
+		"coverageGapCount": runtimeRepairCoverageGapCount(input),
+	}
+	if class := strings.TrimSpace(firstNonEmptyString(stringFromMap(input, failureOutputKeyClass), stringFromMap(failedStep.Output, failureOutputKeyClass))); class != "" {
+		ret["failureClass"] = class
+	}
+	if stage := strings.TrimSpace(stringFromMap(failedStep.Output, "stage")); stage != "" {
+		ret["failureStage"] = stage
+	}
+	if reason := strings.TrimSpace(firstNonEmptyString(stringFromMap(input, "failureReason"), stringFromMap(failedStep.Output, "error"), stringFromMap(failedStep.Output, "reason"))); reason != "" {
+		ret["failureReason"] = truncateLLMContextString(reason)
+	}
+	if evidence := runtimeRepairProgressEvidenceSummaries(mapSliceFromValue(input[stepInputKeyGraphEvidence])); len(evidence) > 0 {
+		ret["completedGraphEvidence"] = evidence
+	}
+	if latest := runtimeRepairProgressEvidenceSummaries(o.latestActionEvidenceCandidates(ctx, run, failedStep, 6)); len(latest) > 0 {
+		ret["latestActionEvidence"] = latest
+	}
+	if attempts := runtimeRepairAttemptProgressSummaries(o.recentRuntimeRepairAttemptSummaries(ctx, run.ID, failedStep, 5)); len(attempts) > 0 {
+		ret["recentRepairAttempts"] = attempts
+	}
+	if targets := coverageTargetSetFromRepairInput(input); len(targets) > 0 {
+		ret["unresolvedCoverageTargets"] = targets
+	}
+	if len(ret) <= 5 {
+		return nil
+	}
+	return compactLLMContextMap(ret, 0)
+}
+
+func runtimeRepairCoverageGapCount(input map[string]any) int {
+	if len(input) == 0 {
+		return 0
+	}
+	return len(mapSliceFromValue(input["missingDoDItems"])) +
+		len(mapSliceFromValue(input["missingGoalCoverage"])) +
+		len(mapSliceFromValue(input["missingDeliverableCoverage"]))
+}
+
+func runtimeRepairProgressEvidenceSummaries(items []map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	limit := min(len(items), 8)
+	ret := make([]map[string]any, 0, limit)
+	for idx := 0; idx < limit; idx++ {
+		item := items[idx]
+		next := map[string]any{}
+		for _, key := range []string{"stepId", "nodeId", "graphNodeId", "graphRootStepId", "kind", "state", "source", "matchScore"} {
+			if value, ok := item[key]; ok && value != nil {
+				next[key] = compactLLMContextValue(value, 1)
+			}
+		}
+		output := mapFromValue(item["output"])
+		if len(output) > 0 {
+			summary := map[string]any{}
+			for _, key := range []string{"status", "stage", "command", "args", "exitCode", "durationMillis", "targetRef", "patchId", "patchType", "summary", "error", "reason"} {
+				if value, ok := output[key]; ok && value != nil {
+					summary[key] = compactLLMContextValue(value, 1)
+				}
+			}
+			if stdout := strings.TrimSpace(stringFromMap(output, "stdout")); stdout != "" {
+				summary["stdoutPreview"] = truncateLLMContextString(stdout)
+			}
+			if stderr := strings.TrimSpace(stringFromMap(output, "stderr")); stderr != "" {
+				summary["stderrPreview"] = truncateLLMContextString(stderr)
+			}
+			if patches := mapSliceFromValue(output["patches"]); len(patches) > 0 {
+				summary["patches"] = runtimeRepairPatchEvidenceSummaries(patches)
+			}
+			if len(summary) > 0 {
+				next["outputSummary"] = summary
+			}
+		}
+		if len(next) > 0 {
+			ret = append(ret, next)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func runtimeRepairPatchEvidenceSummaries(patches []map[string]any) []map[string]any {
+	if len(patches) == 0 {
+		return nil
+	}
+	limit := min(len(patches), 5)
+	ret := make([]map[string]any, 0, limit)
+	for idx := 0; idx < limit; idx++ {
+		patch := patches[idx]
+		next := map[string]any{}
+		for _, key := range []string{"targetRef", "patchType", "summary", "baseHash", "contentHash"} {
+			if value, ok := patch[key]; ok && value != nil {
+				next[key] = compactLLMContextValue(value, 1)
+			}
+		}
+		if _, ok := patch["content"]; ok {
+			next["contentOmitted"] = true
+		}
+		if _, ok := patch["diff"]; ok {
+			next["diffOmitted"] = true
+		}
+		if len(next) > 0 {
+			ret = append(ret, next)
+		}
+	}
+	return ret
+}
+
+func runtimeRepairAttemptProgressSummaries(items []map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	limit := min(len(items), 5)
+	ret := make([]map[string]any, 0, limit)
+	for idx := 0; idx < limit; idx++ {
+		item := items[idx]
+		next := map[string]any{}
+		for _, key := range []string{"stepId", "state", "attempt", "failureClass", "failureStage", "failureSummary"} {
+			if value, ok := item[key]; ok && value != nil {
+				next[key] = compactLLMContextValue(value, 1)
+			}
+		}
+		if missing := mapSliceFromValue(item["missingDoDItems"]); len(missing) > 0 {
+			next["missingDoDCount"] = len(missing)
+		}
+		if len(next) > 0 {
+			ret = append(ret, next)
+		}
 	}
 	return ret
 }
@@ -1916,6 +2065,9 @@ func runtimeRepairIDLabelStepID(failedStep *runModel.Step) common.StepID {
 	if repairOf := common.StepID(strings.TrimSpace(stringFromMap(failedStep.Input, stepInputKeyRepairOfStepID))); runtimeRepairIDShouldUseRepairOfStepID(failedStep, repairOf) {
 		return repairOf
 	}
+	if graphLineage := runtimeRepairGraphLineageLabelStepID(failedStep); graphLineage != "" {
+		return graphLineage
+	}
 	return runtimeRepairRootStepID(failedStep)
 }
 
@@ -1943,6 +2095,42 @@ func runtimeRepairIDShouldUseRepairOfStepID(failedStep *runModel.Step, repairOf 
 		return false
 	}
 	return strings.Contains(strings.TrimSpace(string(repairOf)), "/graph-")
+}
+
+func runtimeRepairGraphLineageLabelStepID(failedStep *runModel.Step) common.StepID {
+	if failedStep == nil ||
+		boolValue(failedStep.Input[stepInputKeyProviderRetryFollowUp]) ||
+		boolValue(failedStep.Input["assessmentOnlyContractCorrection"]) {
+		return ""
+	}
+	for _, candidate := range []common.StepID{
+		common.StepID(strings.TrimSpace(stringFromMap(failedStep.Input, stepInputKeyRepairOfStepID))),
+		common.StepID(strings.TrimSpace(stringFromMap(failedStep.Input, "failedStepId"))),
+		failedStep.ID,
+	} {
+		if label := runtimeEmbeddedGraphLineageLabel(failedStep.RunID, candidate); label != "" {
+			return label
+		}
+	}
+	return ""
+}
+
+func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
+	raw := strings.TrimSpace(string(stepID))
+	if raw == "" {
+		return ""
+	}
+	if runID != "" {
+		raw = strings.TrimPrefix(raw, strings.TrimSpace(string(runID))+"/")
+	}
+	raw = strings.Trim(raw, "/")
+	if strings.HasPrefix(raw, "graph-") {
+		return common.StepID(raw)
+	}
+	if idx := strings.Index(raw, "-of-graph-"); idx >= 0 {
+		return common.StepID(strings.TrimSpace(raw[idx+len("-of-"):]))
+	}
+	return ""
 }
 
 func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
@@ -1996,6 +2184,12 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	}
 	if missingDoD := missingDoDItemsFromStep(failedStep); len(missingDoD) > 0 {
 		input["missingDoDItems"] = o.missingDoDItemsWithEvidenceCandidates(ctx, run, failedStep, missingDoD)
+	}
+	if inheritCoverageRepairContext(input, failedStep) {
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Preserve inherited coverage gaps from the previous repair attempt; a contract failure on the repair wrapper does not clear the original Goal/DoD/deliverable gaps.",
+			"Use missingDoDItems, missingGoalCoverage, and missingDeliverableCoverage as the current unresolved scope unless current evidence explicitly closes an item.",
+		)
 	}
 	assessmentOnlyFailedCoverageRepair := assessmentOnlyCoverageCorrectionFailedWithActionableGaps(failedStep)
 	coverageNeedsConcreteEvidence := assessmentOnlyCoverageRepair && (coverageCorrectionNeedsConcreteEvidence(&runModel.Step{
@@ -2149,6 +2343,9 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if evidence := o.completedGraphEvidence(ctx, run, failedStep); len(evidence) > 0 {
 		input[stepInputKeyGraphEvidence] = evidence
 	}
+	if progress := o.runtimeRepairCurrentExecutionProgress(ctx, run, failedStep, input); len(progress) > 0 {
+		input["currentExecutionProgress"] = progress
+	}
 	patchContext := o.runtimeRepairPatchContext(ctx, run, failedStep)
 	if len(patchContext) > 0 {
 		input["patchRepairContext"] = patchContext
@@ -2207,6 +2404,14 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"Use repairActionPackage as the primary actionable repair contract; it contains the required output kind, rejected output summary, and current target snapshots.",
 			"When repairActionPackage.requiredOutput.mustIncludeStateChangingNode is true, the next output must include patch/apply before verification, or return a failed dodAssessment/blocker.",
 		)
+		if stateChangingSchemaInvalidRepair(failedStep) {
+			input["schemaInvalidRepairMode"] = "single_valid_json_decision"
+			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+				"Previous repair output was rejected before execution because the LLM decision JSON was invalid; rebuild a single valid JSON object from repairActionPackage and current target snapshots.",
+				"Do not copy any rawContentPreview or repairRawContentPreview from the rejected output; do not include markdown, comments, duplicate JSON objects, trailing braces, or partial arrays.",
+				"If returning executionGraph, every node must be a complete JSON object and the graph must include the required patch/apply state-changing node before verification.",
+			)
+		}
 	}
 	if context := o.convertedDecisionReadableResourceContext(ctx, run, failedStep); len(context) > 0 {
 		input["readableResourceRepairContext"] = context
@@ -2245,6 +2450,43 @@ func inheritPriorRepairContext(input map[string]any, failedStep *runModel.Step) 
 			"Do not generate file_write from inherited snapshots unless the snapshot is complete and not redacted; use exact minimal diffs or file/read when content is incomplete.",
 		)
 	}
+}
+
+func inheritCoverageRepairContext(input map[string]any, failedStep *runModel.Step) bool {
+	if input == nil || failedStep == nil {
+		return false
+	}
+	inherited := false
+	inheritSlice := func(key string) {
+		if len(mapSliceFromValue(input[key])) > 0 {
+			return
+		}
+		if values := mapSliceFromValue(failedStep.Input[key]); len(values) > 0 {
+			input[key] = cloneMapSlice(values)
+			inherited = true
+			return
+		}
+		if values := mapSliceFromValue(failedStep.Output[key]); len(values) > 0 {
+			input[key] = cloneMapSlice(values)
+			inherited = true
+			return
+		}
+		if failedOutput := mapFromValue(failedStep.Output["failedStepOutput"]); len(failedOutput) > 0 {
+			if values := mapSliceFromValue(failedOutput[key]); len(values) > 0 {
+				input[key] = cloneMapSlice(values)
+				inherited = true
+			}
+		}
+	}
+	inheritSlice("missingDoDItems")
+	inheritSlice("missingGoalCoverage")
+	inheritSlice("missingDeliverableCoverage")
+	if !inherited {
+		return false
+	}
+	input["coverageRepairContextInherited"] = true
+	input["coverageRepairRequired"] = true
+	return true
 }
 
 func structuredFailureSignalsContainAPIMismatch(signals map[string]any) bool {
@@ -2472,6 +2714,15 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		pkg["repairTargetSet"] = targetSet
 		requiredOutput["mustTargetRepairTargetSet"] = true
 	}
+	if coverageTargets := coverageTargetSetFromRepairInput(input); len(coverageTargets) > 0 {
+		pkg["coverageRepairRequired"] = true
+		pkg["coverageTargetSet"] = coverageTargets
+		requiredOutput["mustDeclareCoverageTargets"] = true
+		requiredOutput["coverageTargetMatchRule"] = "patch/apply coverageTargets must match one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+	}
+	if progress := mapFromValue(input["currentExecutionProgress"]); len(progress) > 0 {
+		pkg["currentExecutionProgress"] = compactLLMContextMap(progress, 0)
+	}
 	if digest := failedPatchDigestFromRepairFailure(input, rawFailedOutput...); len(digest) > 0 {
 		pkg["failedPatchDigest"] = digest
 	}
@@ -2492,6 +2743,26 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	}
 	if budget := repairActionBudgetState(input, pkg); len(budget) > 0 {
 		pkg["repairBudget"] = budget
+	}
+	if repairActionIsSchemaInvalidRepair(input, rawFailedOutput...) {
+		pkg["schemaInvalidRecovery"] = map[string]any{
+			"required": true,
+			"reason":   "previous_llm_decision_json_invalid",
+			"requirements": []string{
+				"return exactly one valid JSON object",
+				"do not reuse rejected raw output previews",
+				"do not include markdown, comments, duplicate objects, trailing braces, or partial arrays",
+				"make every executionGraph node a complete JSON object",
+			},
+		}
+		requiredOutput["mustReturnValidJSON"] = true
+		requiredOutput["mustNotReuseRejectedJSON"] = true
+		requiredOutput["forbiddenKinds"] = append(stringSliceFromValue(requiredOutput["forbiddenKinds"]),
+			"malformed_json",
+			"markdown_wrapped_json",
+			"raw_rejected_json_reuse",
+			"partial_json_array",
+		)
 	}
 	pkg["exitCriteria"] = []string{
 		"state_changing_artifact_applied_then_verify",
@@ -2563,6 +2834,34 @@ func repairActionCurrentFailure(input map[string]any, rawFailedOutput ...map[str
 	return compactLLMContextMap(ret, 1)
 }
 
+func stateChangingSchemaInvalidRepair(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	return repairActionIsSchemaInvalidRepair(map[string]any{
+		failureOutputKeyClass: stringFromMap(step.Output, failureOutputKeyClass),
+	}, step.Output)
+}
+
+func repairActionIsSchemaInvalidRepair(input map[string]any, rawFailedOutput ...map[string]any) bool {
+	output := firstRawFailureOutput(input, rawFailedOutput...)
+	class := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(input, failureOutputKeyClass),
+		stringFromMap(output, failureOutputKeyClass),
+	))
+	stage := strings.TrimSpace(stringFromMap(output, "stage"))
+	if class == failureClassLLMDecisionInvalid || stage == "llm_schema_invalid" {
+		return true
+	}
+	text := strings.ToLower(strings.Join([]string{
+		stringFromMap(input, "failureReason"),
+		stringFromMap(output, "error"),
+		stringFromMap(output, "reason"),
+	}, "\n"))
+	return strings.Contains(text, "invalid llm decision json") ||
+		strings.Contains(text, "invalid character") && strings.Contains(text, "json")
+}
+
 func firstRawFailureOutput(input map[string]any, rawFailedOutput ...map[string]any) map[string]any {
 	if len(rawFailedOutput) > 0 && len(rawFailedOutput[0]) > 0 {
 		return rawFailedOutput[0]
@@ -2624,6 +2923,72 @@ func repairActionTargetSet(input map[string]any, pkg map[string]any, rawFailedOu
 		return nil
 	}
 	return limitedStrings(ret, maxLLMContextSliceItems)
+}
+
+func coverageTargetSetFromRepairInput(input map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := make([]map[string]any, 0)
+	add := func(kind string, item map[string]any, targetText string) {
+		targetText = strings.TrimSpace(targetText)
+		if targetText == "" {
+			return
+		}
+		token := normalizeCoverageGapRepairToken(firstNonEmptyString(stringFromMap(item, "goalRequirementId"), targetText))
+		if token == "" || seen[kind+":"+token] {
+			return
+		}
+		seen[kind+":"+token] = true
+		next := map[string]any{
+			"kind":       kind,
+			"targetText": targetText,
+			"state":      firstNonEmptyString(stringFromMap(item, "state"), "failed"),
+		}
+		if id := strings.TrimSpace(stringFromMap(item, "goalRequirementId")); id != "" {
+			next["goalRequirementId"] = id
+			next["coverageTargetToken"] = id
+		} else {
+			next["coverageTargetToken"] = targetText
+		}
+		for _, key := range []string{"item", "raw", "requirement", "source"} {
+			if value, ok := item[key]; ok && value != nil {
+				next[key] = compactLLMContextValue(value, 1)
+			}
+		}
+		if refs := evidenceRefsFromValue(item["evidenceRefs"]); len(refs) > 0 {
+			next["evidenceRefs"] = refs
+		}
+		if candidates := runtimeRepairProgressEvidenceSummaries(mapSliceFromValue(item["evidenceCandidates"])); len(candidates) > 0 {
+			next["evidenceCandidates"] = candidates
+		}
+		ret = append(ret, next)
+	}
+	for _, item := range mapSliceFromValue(input["missingDoDItems"]) {
+		add("dod", item, stringFromMap(item, "item"))
+	}
+	for _, item := range missingGoalCoverageFromInput(input) {
+		add("goal", item, firstNonEmptyString(
+			stringFromMap(item, "goalRequirementId"),
+			missingGoalCoverageRequirementText(item),
+		))
+	}
+	for _, item := range mapSliceFromValue(input["missingDeliverableCoverage"]) {
+		add("deliverable", item, firstNonEmptyString(
+			stringFromMap(item, "item"),
+			stringFromMap(item, "id"),
+			stringFromMap(item, "expectationId"),
+			stringFromMap(item, "requirement"),
+		))
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	if len(ret) > maxLLMContextSliceItems {
+		ret = ret[:maxLLMContextSliceItems]
+	}
+	return ret
 }
 
 func repairActionTargetRefFromScope(scope string) string {
@@ -4446,6 +4811,7 @@ func (o *RuntimeOrchestrator) recentRuntimeRepairAttemptSummaries(ctx context.Co
 	if err != nil || len(steps) == 0 {
 		return nil
 	}
+	steps = orderedRuntimeContextSteps(steps)
 	scope := runtimeRepairScopeFromFailedStep(failedStep)
 	targetScope := runtimeFailureTargetScopeFromStep(failedStep)
 	windowRoot := runtimeRepairTargetBudgetWindowRootForFailureTarget(failedStep)

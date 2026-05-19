@@ -605,8 +605,13 @@ func providerFailureStage(failureClass string, stream bool) string {
 }
 
 func completeProvider(ctx context.Context, runtime ProviderRuntime, request llmmodels.ProviderRequest) ([]byte, *llmmodels.ProviderUsage, []llmmodels.ProviderStreamEvent, error) {
-	if request.ContextBudget != nil && request.ContextBudget.P0Overflow {
-		return nil, nil, nil, fmt.Errorf("%w: llm provider request too large: p0 overflow with protected goal/dod contract", common.ErrInvalidArgument)
+	if request.ContextBudget != nil {
+		if request.ContextBudget.P0Overflow {
+			return nil, nil, nil, fmt.Errorf("%w: llm provider request too large: p0 overflow with protected goal/dod contract", common.ErrInvalidArgument)
+		}
+		if request.ContextBudget.OverBudget {
+			return nil, nil, nil, fmt.Errorf("%w: llm provider request too large after context budget compaction", common.ErrInvalidArgument)
+		}
 	}
 	if runtime.Config.Capabilities.Streaming {
 		streaming, ok := runtime.Provider.(StreamingProvider)
@@ -969,12 +974,15 @@ func providerContextBudgetOutput(budget *llmmodels.ProviderContextBudget, provid
 		"compressedSections":    append([]string(nil), budget.CompressedSections...),
 		"omittedSections":       append([]string(nil), budget.OmittedSections...),
 		"goalDoDCompressed":     budget.GoalDoDCompressed,
+		"overBudget":            budget.OverBudget,
 		"p0Overflow":            budget.P0Overflow,
 		"tracePolicy":           budget.TracePolicy,
 		"promptCaptured":        budget.PromptCaptured,
 		"estimator":             budget.Estimator,
 		"redactionApplied":      budget.RedactionApplied,
 		"redactedPaths":         append([]string(nil), budget.RedactedPaths...),
+		"protectedFields":       append([]string(nil), budget.ProtectedFields...),
+		"integrityWarnings":     append([]string(nil), budget.IntegrityWarnings...),
 	}
 	return item
 }

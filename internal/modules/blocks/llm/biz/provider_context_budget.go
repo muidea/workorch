@@ -58,6 +58,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	normalizedSections := []string{}
 	compressedSections := []string{}
 	omittedSections := []string{}
+	protectedFields := providerProtectedContextFields(request.Input)
 	request.ContextBudget = nil
 	shrinkLevel := 0
 	protected := captureProtectedGoalDoD(request.Input)
@@ -122,6 +123,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	if p0Overflow {
 		rules = append(rules, "p0 overflow: goal/dod contract preserved without compression")
 	}
+	integrityWarnings := providerContextIntegrityWarnings(request.Input, protected, protectedRepairTargets, overBudget)
 	truncated := len(rules) > 1 || overBudget
 	request.ContextBudget = &llmmodels.ProviderContextBudget{
 		MaxBytes:              maxBytes,
@@ -139,10 +141,13 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		CompressedSections:    uniqueStrings(compressedSections),
 		OmittedSections:       uniqueStrings(omittedSections),
 		GoalDoDCompressed:     goalDoDCompressed,
+		OverBudget:            overBudget,
 		P0Overflow:            p0Overflow,
 		TracePolicy:           providerContextTracePolicy,
 		PromptCaptured:        false,
 		Estimator:             "bytes_ratio",
+		ProtectedFields:       uniqueStrings(protectedFields),
+		IntegrityWarnings:     uniqueStrings(integrityWarnings),
 		Profile:               profile,
 	}
 	return request
@@ -513,6 +518,94 @@ func providerInputSourceRefs(input map[string]any) []string {
 	return uniqueStrings(refs)
 }
 
+func providerProtectedContextFields(input map[string]any) []string {
+	fields := []string{}
+	for _, key := range []string{"goal", "goals", "dod", "dods"} {
+		if _, ok := input[key]; ok {
+			fields = append(fields, "input."+key)
+		}
+	}
+	executionContext := recordFromAny(input["executionContext"])
+	for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "definitionChangeImpact"} {
+		if _, ok := executionContext[key]; ok {
+			fields = append(fields, "input.executionContext."+key)
+		}
+	}
+	executionContextPackage := recordFromAny(input["executionContextPackage"])
+	for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "definitionChangeImpact", "executionContract", "replanContinuation", "stage", "stageMode"} {
+		if _, ok := executionContextPackage[key]; ok {
+			fields = append(fields, "input.executionContextPackage."+key)
+		}
+	}
+	for _, key := range []string{"failureTargetRepairContext", "patchRepairContext"} {
+		if len(providerSafeRepairSnapshotsFromValue(input[key])) > 0 {
+			fields = append(fields, "input."+key)
+		}
+	}
+	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
+		for _, key := range []string{"coverageTargetSet", "currentExecutionProgress", "requiredOutput", "targetSnapshots"} {
+			if _, ok := pkg[key]; ok {
+				fields = append(fields, "input.repairActionPackage."+key)
+			}
+		}
+	}
+	return uniqueStrings(fields)
+}
+
+func providerContextIntegrityWarnings(input map[string]any, protected protectedGoalDoD, repairTargets protectedProviderRepairTargets, overBudget bool) []string {
+	warnings := []string{}
+	if !isProtectedGoalDoDEqual(input, protected) {
+		warnings = append(warnings, "protected_goal_dod_changed_after_context_budget")
+	}
+	if overBudget && hasProtectedGoalDoD(protected) {
+		warnings = append(warnings, "request_still_over_budget_with_protected_goal_dod")
+	}
+	pkg := recordFromAny(input["repairActionPackage"])
+	if (boolValue(input["coverageRepairRequired"]) || boolValue(pkg["coverageRepairRequired"])) && len(coverageTargetsFromProviderInput(input)) == 0 {
+		warnings = append(warnings, "coverage_repair_required_without_coverage_target_set")
+	}
+	if len(pkg) > 0 {
+		required := recordFromAny(pkg["requiredOutput"])
+		if boolValue(required["mustDeclareCoverageTargets"]) && len(coverageTargetsFromProviderInput(input)) == 0 {
+			warnings = append(warnings, "must_declare_coverage_targets_without_target_set")
+		}
+	}
+	warnings = append(warnings, missingProtectedRepairSnapshotWarnings(input, repairTargets)...)
+	return uniqueStrings(warnings)
+}
+
+func coverageTargetsFromProviderInput(input map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	if targets := mapSliceFromAny(input["coverageTargetSet"]); len(targets) > 0 {
+		return targets
+	}
+	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
+		if targets := mapSliceFromAny(pkg["coverageTargetSet"]); len(targets) > 0 {
+			return targets
+		}
+	}
+	return nil
+}
+
+func missingProtectedRepairSnapshotWarnings(input map[string]any, protected protectedProviderRepairTargets) []string {
+	warnings := []string{}
+	if protected.FailureTargetRepairContext != nil && len(providerSafeRepairSnapshotsFromValue(input["failureTargetRepairContext"])) == 0 {
+		warnings = append(warnings, "protected_failure_target_snapshot_missing_after_context_budget")
+	}
+	if protected.PatchRepairContext != nil && len(providerSafeRepairSnapshotsFromValue(input["patchRepairContext"])) == 0 {
+		warnings = append(warnings, "protected_patch_repair_snapshot_missing_after_context_budget")
+	}
+	if protected.RepairActionPackage != nil {
+		pkg := recordFromAny(input["repairActionPackage"])
+		if len(providerSafeRepairSnapshotsFromValue(pkg["targetSnapshots"])) == 0 {
+			warnings = append(warnings, "protected_repair_action_target_snapshot_missing_after_context_budget")
+		}
+	}
+	return warnings
+}
+
 type protectedGoalDoD struct {
 	TopLevel         map[string]any
 	ExecutionContext map[string]any
@@ -569,15 +662,16 @@ func captureProtectedProviderRepairTargets(input map[string]any) protectedProvid
 		ret.PatchRepairContext = items
 	}
 	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
-		targets := providerSafeRepairSnapshotsFromValue(pkg["targetSnapshots"])
-		if len(targets) > 0 {
-			pkgOut := map[string]any{}
-			for _, key := range []string{"requiredOutput", "structuredFailureSignals", "patchRepairSuggestions", "previousRejectedOutputSummary", "strategyReassessment"} {
-				if value, ok := pkg[key]; ok {
-					pkgOut[key] = budgetProviderValue(value, 0, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
-				}
+		pkgOut := map[string]any{}
+		for _, key := range []string{"requiredOutput", "coverageRepairRequired", "coverageTargetSet", "currentExecutionProgress", "structuredFailureSignals", "patchRepairSuggestions", "previousRejectedOutputSummary", "strategyReassessment"} {
+			if value, ok := pkg[key]; ok {
+				pkgOut[key] = budgetProviderValue(value, 0, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
 			}
+		}
+		if targets := providerSafeRepairSnapshotsFromValue(pkg["targetSnapshots"]); len(targets) > 0 {
 			pkgOut["targetSnapshots"] = targets
+		}
+		if len(pkgOut) > 0 {
 			ret.RepairActionPackage = pkgOut
 		}
 	}

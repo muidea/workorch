@@ -1881,6 +1881,7 @@ func mapLLMContextBudgetTraces(steps []presenter.StepView) []LLMContextBudgetTra
 			CompressedSections:    readModelStringSliceValue(budget["compressedSections"]),
 			OmittedSections:       readModelStringSliceValue(budget["omittedSections"]),
 			GoalDoDCompressed:     readModelBoolValue(budget["goalDoDCompressed"]),
+			OverBudget:            readModelBoolValue(budget["overBudget"]),
 			P0Overflow:            readModelBoolValue(budget["p0Overflow"]),
 			TracePolicy:           readModelStringValue(budget["tracePolicy"]),
 			PromptCaptured:        readModelBoolValue(budget["promptCaptured"]),

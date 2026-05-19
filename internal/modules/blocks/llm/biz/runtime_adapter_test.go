@@ -143,7 +143,7 @@ func TestRuntimeAdapterProjectsContextBudgetToStepOutput(t *testing.T) {
 		Model:    "test-model",
 		ContextProfile: llmmodels.ProviderContextProfile{
 			ContextWindowTokens:    4096,
-			MaxInputTokens:         512,
+			MaxInputTokens:         4096,
 			ReservedOutputTokens:   512,
 			SafetyRatio:            0.8,
 			BytesHardLimit:         64 * 1024,
@@ -196,6 +196,54 @@ func TestRuntimeAdapterProjectsContextBudgetToStepOutput(t *testing.T) {
 	}
 	if usage["estimatedCost"] == nil || usage["currency"] != "USD" || usage["costEstimated"] != true || usage["costSource"] != llmcommon.CostSourceProfilePricing {
 		t.Fatalf("llmUsage = %+v, want estimated cost with currency", usage)
+	}
+}
+
+func TestRuntimeAdapterBlocksProviderCallWhenCompactedRequestStillOverBudget(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{"completionState":"continue"}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		ID:       "tiny-context",
+		Provider: llmcommon.ProviderCompatible,
+		Model:    "test-model",
+		ContextProfile: llmmodels.ProviderContextProfile{
+			ContextWindowTokens:    256,
+			MaxInputTokens:         16,
+			ReservedOutputTokens:   32,
+			BytesHardLimit:         512,
+			EstimatedTokensPerByte: 0.25,
+		},
+	}, provider)
+	request := llmStepRequest()
+	request.Input["repairActionPackage"] = map[string]any{
+		"coverageRepairRequired": true,
+		"coverageTargetSet": []map[string]any{{
+			"kind":                "dod",
+			"coverageTargetToken": "target-1",
+			"targetText":          strings.Repeat("target ", 200),
+		}},
+		"requiredOutput": map[string]any{
+			"mustDeclareCoverageTargets": true,
+			"mustReturnValidJSON":        true,
+		},
+	}
+	request.Input["failedExecutionGraph"] = repeatedBudgetItems(80)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), request)
+	if err == nil {
+		t.Fatal("ExecuteRuntimeStep error = nil, want context budget failure")
+	}
+	if provider.request.StepID != "" {
+		t.Fatalf("provider was called with request = %+v, want fail-fast before provider invocation", provider.request)
+	}
+	if result.Output["stage"] != "llm_provider_request_too_large" {
+		t.Fatalf("output = %+v, want request too large stage", result.Output)
+	}
+	budget := recordFromAny(result.Output["contextBudget"])
+	if !boolValue(budget["overBudget"]) {
+		t.Fatalf("contextBudget = %+v, want overBudget=true", budget)
+	}
+	if boolValue(budget["p0Overflow"]) {
+		t.Fatalf("contextBudget = %+v, want generic overBudget without p0 overflow", budget)
 	}
 }
 
