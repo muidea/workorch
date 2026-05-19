@@ -507,7 +507,7 @@ func TestResolveDecisionWithSessionAllowsTargetWorkspaceExternalDependencyConfig
 	}
 }
 
-func TestResolveDecisionWithSessionInfersRepairExhaustionRetryFromContinue(t *testing.T) {
+func TestResolveDecisionWithSessionInfersRepairExhaustionReplanFromContinueUnderPolicy(t *testing.T) {
 	session, tickets, _ := newCountingDecisionRuntimeSession(t)
 	ctx := context.Background()
 	ticketID := common.TicketID("ticket-repair-exhaustion-continue")
@@ -520,6 +520,7 @@ func TestResolveDecisionWithSessionInfersRepairExhaustionRetryFromContinue(t *te
 		Question:    "Provide missing implementation guidance, choose replan, or reject the current path.",
 		Context: map[string]any{
 			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+			"allowedRecoveryActions":         []any{"replan"},
 		},
 		State: common.DecisionTicketStateOpen,
 	}); err != nil {
@@ -536,11 +537,11 @@ func TestResolveDecisionWithSessionInfersRepairExhaustionRetryFromContinue(t *te
 	if err != nil {
 		t.Fatalf("ResolveDecisionWithSession: %v", err)
 	}
-	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
-		t.Fatalf("decision = %+v, want resolved retry as provide_missing_info", item)
+	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan {
+		t.Fatalf("decision = %+v, want resolved replan", item)
 	}
-	if item.ResolutionPayload["recoveryAction"] != "retry_same_step" {
-		t.Fatalf("resolutionPayload = %+v, want inferred retry_same_step", item.ResolutionPayload)
+	if item.ResolutionPayload["recoveryAction"] != "replan" {
+		t.Fatalf("resolutionPayload = %+v, want inferred replan", item.ResolutionPayload)
 	}
 }
 

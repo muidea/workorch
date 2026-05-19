@@ -3363,7 +3363,7 @@ func TestRuntimeOrchestrator_InitialReplanStateChangingInputIncludesRepairAction
 			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
 			"replanContinuation": map[string]any{
 				"predecessorRunId": "run-before-replan-action-package",
-				"reason":           "resolved_governance_replan",
+				"reason":           "runtime_repair_exhausted_requires_strategy",
 				"failureContext": map[string]any{
 					failureOutputKeyClass:     failureClassRuntime,
 					failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|failureTargets=main.go",
@@ -3407,6 +3407,79 @@ func TestRuntimeOrchestrator_InitialReplanStateChangingInputIncludesRepairAction
 	}
 	if summary := mapFromValue(actionPackage["previousRejectedOutputSummary"]); len(summary) == 0 || mapFromValue(summary["rejectedExecutionGraph"])["nodeCount"] == nil {
 		t.Fatalf("repairActionPackage.previousRejectedOutputSummary = %#v, want rejected graph summary", actionPackage["previousRejectedOutputSummary"])
+	}
+	reassessment := mapFromValue(input["strategyReassessment"])
+	if !boolValue(reassessment["required"]) || stringFromMap(reassessment, "failedSurface") != "failureTargets=main.go" {
+		t.Fatalf("strategyReassessment = %#v, want repeated failed-surface reassessment", input["strategyReassessment"])
+	}
+	if int64FromValue(input["targetRepairAttempts"]) < 2 {
+		t.Fatalf("targetRepairAttempts = %#v, want inherited repeated-target budget", input["targetRepairAttempts"])
+	}
+	pkgReassessment := mapFromValue(actionPackage["strategyReassessment"])
+	if !boolValue(pkgReassessment["required"]) || stringFromMap(pkgReassessment, "failedSurface") != "failureTargets=main.go" {
+		t.Fatalf("repairActionPackage.strategyReassessment = %#v, want inherited reassessment", actionPackage["strategyReassessment"])
+	}
+	repeatedMode := mapFromValue(actionPackage["repeatedTargetRepairMode"])
+	if !boolValue(repeatedMode["enabled"]) || !boolValue(repeatedMode["mustDistinguishRootCauseTarget"]) {
+		t.Fatalf("repairActionPackage.repeatedTargetRepairMode = %#v, want repeated-target successor mode", actionPackage["repeatedTargetRepairMode"])
+	}
+	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
+	if !strings.Contains(guidance, "distinguish failedSurface from rootCauseTarget") {
+		t.Fatalf("repairGuidance = %q, want root-cause target shift guidance", guidance)
+	}
+}
+
+func TestRuntimeOrchestrator_InitialReplanStateChangingInputPromotesPatchFailureIntoStrategyReassessment(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-replan-patch-failure-reassessment",
+		WorkspaceID:     "ws-replan-patch-failure-reassessment",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-before-replan-patch-failure",
+				"reason":           "runtime_repair_exhausted_requires_strategy",
+				"failureContext": map[string]any{
+					failureOutputKeyClass:     "patch_apply_failed",
+					failureOutputKeySignature: "class=patch_apply_failed|kind=patch/apply|targetRef=e2e_gateway_contract_test.go|error=context mismatch",
+					"failureTargetScope":      "targetRef=e2e_gateway_contract_test.go",
+					"failedStepId":            "run-before-replan-patch-failure/graph-005/001-patch-target",
+					"failedStepKind":          "patch/apply",
+					"attempts":                3,
+					"failedStepOutput": map[string]any{
+						"error":  "invalid argument: unified diff hunk context mismatch",
+						"reason": "invalid argument: unified diff hunk context mismatch",
+						"stage":  "patch_apply",
+						"status": "completed",
+					},
+				},
+			},
+		},
+	}
+
+	input := initialStepInput(run)
+
+	reassessment := mapFromValue(input["strategyReassessment"])
+	if !boolValue(reassessment["required"]) {
+		t.Fatalf("strategyReassessment = %#v, want required reassessment", input["strategyReassessment"])
+	}
+	if stringFromMap(reassessment, "failedSurface") != "targetRef=e2e_gateway_contract_test.go" {
+		t.Fatalf("strategyReassessment.failedSurface = %#v, want failed patch target scope", reassessment["failedSurface"])
+	}
+	if int64FromValue(reassessment["targetRepairAttempts"]) < 2 || int64FromValue(input["targetRepairAttempts"]) < 2 {
+		t.Fatalf("targetRepairAttempts = input:%#v reassessment:%#v, want repeated target attempts", input["targetRepairAttempts"], reassessment["targetRepairAttempts"])
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	if len(actionPackage) == 0 {
+		t.Fatalf("repairActionPackage = %#v, want package", input["repairActionPackage"])
+	}
+	pkgReassessment := mapFromValue(actionPackage["strategyReassessment"])
+	if stringFromMap(pkgReassessment, "failedSurface") != "targetRef=e2e_gateway_contract_test.go" {
+		t.Fatalf("repairActionPackage.strategyReassessment = %#v, want same failed surface contract", actionPackage["strategyReassessment"])
+	}
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if !boolValue(required["mustUseCurrentTargetSnapshot"]) || !boolValue(required["mustRebuildFromCurrentEvidence"]) {
+		t.Fatalf("repairActionPackage.requiredOutput = %#v, want current-evidence rebuild constraints", actionPackage["requiredOutput"])
 	}
 }
 
@@ -3480,6 +3553,71 @@ func TestRuntimeOrchestrator_RuntimeRepairInputInheritsTargetContextAfterContrac
 	}
 	if summary := mapFromValue(actionPackage["previousRejectedOutputSummary"]); len(summary) == 0 || mapFromValue(summary["rejectedExecutionGraph"])["nodeCount"] == nil {
 		t.Fatalf("repairActionPackage.previousRejectedOutputSummary = %#v, want rejected graph summary", actionPackage["previousRejectedOutputSummary"])
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairInputInheritsStrategyReassessmentAfterContractFailure(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-strategy-reassessment-inherit")
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001-of-step-1"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"failureTargetScope":          "targetRef=surface.txt",
+			"targetRepairAttempts":        int64(3),
+			"strategyReassessment": map[string]any{
+				"required":             true,
+				"reason":               "same_target_scope_repeated_failure",
+				"failedSurface":        "targetRef=surface.txt",
+				"targetRepairAttempts": int64(3),
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+			"rootCauseCandidateContext": []map[string]any{
+				{"targetRef": "candidate.txt", "source": "workspace_manifest"},
+			},
+		},
+		Output: map[string]any{
+			"error":                   "invalid argument: strategyReassessment.required=true requires state-changing patch output to declare failedSurface/rootCauseTarget/repairTargetDecision/forbiddenRepair/verificationPlan",
+			"stage":                   "llm_execution_graph_plan",
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-strategy-reassessment-inherit"}, failedStep, 2, common.ErrInvalidArgument)
+
+	reassessment := mapFromValue(input["strategyReassessment"])
+	if !boolValue(reassessment["required"]) || stringFromMap(reassessment, "failedSurface") != "targetRef=surface.txt" {
+		t.Fatalf("strategyReassessment = %#v, want inherited repeated-surface contract", input["strategyReassessment"])
+	}
+	candidates := mapSliceFromValue(input["rootCauseCandidateContext"])
+	if len(candidates) != 1 || candidates[0]["targetRef"] != "candidate.txt" {
+		t.Fatalf("rootCauseCandidateContext = %#v, want inherited candidates", input["rootCauseCandidateContext"])
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	pkgReassessment := mapFromValue(actionPackage["strategyReassessment"])
+	if !boolValue(pkgReassessment["required"]) || stringFromMap(pkgReassessment, "failedSurface") != "targetRef=surface.txt" {
+		t.Fatalf("repairActionPackage.strategyReassessment = %#v, want inherited contract", actionPackage["strategyReassessment"])
+	}
+	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
+	if !strings.Contains(guidance, "runtime contract failure on the repair wrapper does not clear") ||
+		!strings.Contains(guidance, "surfaceContractCorrection") {
+		t.Fatalf("repairGuidance = %q, want inherited reassessment guidance", guidance)
 	}
 }
 
@@ -15821,7 +15959,7 @@ func TestRuntimeOrchestrator_InvalidPatchGraphTargetRefRoutesToRuntimeRepair(t *
 					}},
 				},
 			}, nil
-		case boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]):
+		case boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]) || boolValue(request.Input[stepInputKeyProviderRetryFollowUp]):
 			repairInput = request.Input
 			return map[string]any{
 				"status": "completed",
@@ -15884,10 +16022,10 @@ func TestRuntimeOrchestrator_InvalidPatchGraphTargetRefRoutesToRuntimeRepair(t *
 		t.Fatalf("run state = %s failureReason=%q, want completed", runItem.State, runItem.FailureReason)
 	}
 	if repairInput == nil ||
-		repairInput[stepInputKeyRuntimeRepairFollowUp] != true ||
+		repairInput[stepInputKeyProviderRetryFollowUp] != true ||
 		repairInput["repairObjective"] != "produce_state_changing_output" ||
 		repairInput["stateChangingOutputRequired"] != true {
-		t.Fatalf("repairInput = %+v, want state-changing runtime repair", repairInput)
+		t.Fatalf("repairInput = %+v, want provider retry carrying state-changing repair contract", repairInput)
 	}
 	if !strings.Contains(fmt.Sprint(repairInput["failureReason"]), "patch targetRef is required") {
 		t.Fatalf("repair failureReason = %v, want targetRef-specific reason", repairInput["failureReason"])
@@ -16231,6 +16369,800 @@ func TestValidateLLMExecutionOutputContractRejectsRepairFileWriteForExistingCont
 	err := validateLLMExecutionOutputContract(run, step, output)
 	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "file_write cannot replace existing target") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want existing target file_write rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsMissingStrategyReassessmentDecisionFields(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-missing",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-missing/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"strategyReassessment": map[string]any{
+				"required":      true,
+				"failedSurface": "failureTargets=main_test.go",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-main-test",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef": "main_test.go",
+						"patchType": "unified_diff",
+						"diff":      "--- a/main_test.go\n+++ b/main_test.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "strategyReassessment.required=true") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want strategy reassessment field rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsStrategyReassessmentDecisionFieldsInPatchInput(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-valid",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-valid/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"strategyReassessment": map[string]any{
+				"required":      true,
+				"failedSurface": "failureTargets=main_test.go",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-main-test",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "main_test.go",
+						"patchType":            "unified_diff",
+						"diff":                 "--- a/main_test.go\n+++ b/main_test.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+						"failedSurface":        "failureTargets=main_test.go",
+						"rootCauseTarget":      "main_test.go imports",
+						"repairTargetDecision": "patch main_test.go to align imports and symbols",
+						"forbiddenRepair":      "do not edit unrelated files",
+						"verificationPlan":     "run targeted verification for main_test.go and related import/symbol checks after patch",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want strategy reassessment-compliant patch accepted", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsUndistinguishedStrategyReassessmentRootCause(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-undistinguished-root-cause",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-undistinguished-root-cause/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"strategyReassessment": map[string]any{
+				"required":      true,
+				"failedSurface": "failureTargets=main_test.go",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-main-test",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "main_test.go",
+						"patchType":            "unified_diff",
+						"diff":                 "--- a/main_test.go\n+++ b/main_test.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+						"failedSurface":        "failureTargets=main_test.go",
+						"rootCauseTarget":      "failureTargets=main_test.go",
+						"repairTargetDecision": "patch main_test.go directly",
+						"forbiddenRepair":      "do not edit unrelated files",
+						"verificationPlan":     "run full regression across the workspace",
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "strategyReassessment.required=true") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want undistinguished root cause rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsUnboundedVerificationForScopedFailedSurface(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-unbounded-verification",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-unbounded-verification/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"strategyReassessment": map[string]any{
+				"required":      true,
+				"failedSurface": "failureTargets=gateway_dod_additional_paths_test.go",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-target-test",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "gateway_dod_additional_paths_test.go",
+						"patchType":            "unified_diff",
+						"diff":                 "--- a/gateway_dod_additional_paths_test.go\n+++ b/gateway_dod_additional_paths_test.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+						"failedSurface":        "failureTargets=gateway_dod_additional_paths_test.go",
+						"rootCauseTarget":      "proxy helper recursion in gateway_dod_additional_paths_test.go",
+						"repairTargetDecision": "patch recursive proxy helper into concrete handler call",
+						"forbiddenRepair":      "do not change unrelated feature files",
+						"verificationPlan":     "run full regression across the workspace",
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "bounded verification") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want bounded-verification rejection for scoped failed surface", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsRepeatedFailedSurfacePatchWithoutTargetShift(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-repeat-same-surface",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-repeat-same-surface/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"strategyReassessment": map[string]any{
+				"required":             true,
+				"reason":               "same_target_scope_repeated_failure",
+				"targetRepairAttempts": 2,
+				"failedSurface":        "failureTargets=gateway_dod_additional_paths_test.go",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-target-test-again",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "gateway_dod_additional_paths_test.go",
+						"patchType":            "unified_diff",
+						"diff":                 "--- a/gateway_dod_additional_paths_test.go\n+++ b/gateway_dod_additional_paths_test.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+						"failedSurface":        "failureTargets=gateway_dod_additional_paths_test.go",
+						"rootCauseTarget":      "gateway routing contract in production handler",
+						"repairTargetDecision": "patch gateway_dod_additional_paths_test.go again",
+						"forbiddenRepair":      "do not change unrelated files",
+						"verificationPlan":     "run targeted verification for gateway_dod_additional_paths_test.go",
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "distinct root-cause target") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want repeated failed-surface patch rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsIncompleteSurfaceContractCorrection(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-incomplete-surface-correction",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-incomplete-surface-correction/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"strategyReassessment": map[string]any{
+				"required":             true,
+				"reason":               "same_target_scope_repeated_failure",
+				"targetRepairAttempts": 2,
+				"failedSurface":        "targetRef=surface.txt",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+			"failureTargetScope": "targetRef=surface.txt",
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-surface-again",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "surface.txt",
+						"patchType":            "unified_diff",
+						"diff":                 "--- a/surface.txt\n+++ b/surface.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+						"failedSurface":        "targetRef=surface.txt",
+						"rootCauseTarget":      "targetRef=surface.txt",
+						"repairTargetDecision": "patch the failed surface itself",
+						"forbiddenRepair":      "do not change unrelated resources",
+						"verificationPlan":     "run targeted verification for surface.txt",
+						"surfaceContractCorrection": map[string]any{
+							"whySurfaceIsWrong": "current resource evidence shows the surface contract is stale",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "strategyReassessment.required=true") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want incomplete surface correction rejected", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsCompleteSurfaceContractCorrection(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-complete-surface-correction",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-complete-surface-correction/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"strategyReassessment": map[string]any{
+				"required":             true,
+				"reason":               "same_target_scope_repeated_failure",
+				"targetRepairAttempts": 2,
+				"failedSurface":        "targetRef=surface.txt",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+			"failureTargetScope": "targetRef=surface.txt",
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-surface-contract",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "surface.txt",
+						"patchType":            "unified_diff",
+						"diff":                 "--- a/surface.txt\n+++ b/surface.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+						"failedSurface":        "targetRef=surface.txt",
+						"rootCauseTarget":      "targetRef=surface.txt",
+						"repairTargetDecision": "patch the failed surface because the surface contract itself is stale",
+						"forbiddenRepair":      "do not change unrelated resources",
+						"verificationPlan":     "run targeted verification for surface.txt",
+						"surfaceContractCorrection": map[string]any{
+							"failedSurface":           "targetRef=surface.txt",
+							"whySurfaceIsWrong":       "current resource evidence shows the failed surface no longer matches the active contract",
+							"contractConflict":        "the surface contract conflicts with the latest Goal and DoD evidence",
+							"currentResourceEvidence": []string{"surface.txt current snapshot", "latest accepted contract evidence"},
+							"boundedVerificationPlan": "run targeted verification for surface.txt only",
+						},
+					},
+				},
+				{
+					"id":        "verify-surface",
+					"kind":      "shell/command",
+					"dependsOn": []string{"patch-surface-contract"},
+					"input": map[string]any{
+						"command": "verify",
+						"args":    []string{"--target=surface.txt"},
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want complete surface correction accepted", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsRepeatedFailedSurfaceWhenPatchTargetsDistinctRootCause(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-shift-target",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-shift-target/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"strategyReassessment": map[string]any{
+				"required":             true,
+				"reason":               "same_target_scope_repeated_failure",
+				"targetRepairAttempts": 2,
+				"failedSurface":        "failureTargets=gateway_dod_additional_paths_test.go",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+			"failureTargetScope": "failureTargets=gateway_dod_additional_paths_test.go",
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-production-handler",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "main.go",
+						"patchType":            "unified_diff",
+						"diff":                 "--- a/main.go\n+++ b/main.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+						"failedSurface":        "failureTargets=gateway_dod_additional_paths_test.go",
+						"rootCauseTarget":      "main.go route registration",
+						"repairTargetDecision": "patch main.go to align runtime route behavior with the acceptance contract",
+						"forbiddenRepair":      "do not patch the failed verification artifact again in this iteration",
+						"verificationPlan":     "run targeted verification for gateway_dod_additional_paths_test.go after the production route change",
+						"relatedFailureTargets": []string{
+							"gateway_dod_additional_paths_test.go",
+						},
+					},
+				},
+				{
+					"id":        "verify-targeted",
+					"kind":      "shell/command",
+					"dependsOn": []string{"patch-production-handler"},
+					"input": map[string]any{
+						"command": "go",
+						"args":    []string{"test", "./...", "-run", "TestGateway_"},
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want distinct root-cause target accepted", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsRepeatedFailedSurfacePatchWhenRootCauseTargetDoesNotMatchPatchTarget(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-root-cause-mismatch",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-root-cause-mismatch/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"strategyReassessment": map[string]any{
+				"required":             true,
+				"reason":               "same_target_scope_repeated_failure",
+				"targetRepairAttempts": 3,
+				"failedSurface":        "failureTargets=gateway_dod_additional_paths_test.go",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+			"failureTargetScope": "failureTargets=gateway_dod_additional_paths_test.go",
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-target-test-again",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "gateway_dod_additional_paths_test.go",
+						"patchType":            "unified_diff",
+						"diff":                 "--- a/gateway_dod_additional_paths_test.go\n+++ b/gateway_dod_additional_paths_test.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+						"failedSurface":        "failureTargets=gateway_dod_additional_paths_test.go",
+						"rootCauseTarget":      "main.go",
+						"repairTargetDecision": "patch the verification artifact again",
+						"forbiddenRepair":      "do not patch unrelated files",
+						"verificationPlan":     "run targeted verification for gateway_dod_additional_paths_test.go",
+						"relatedFailureTargets": []string{
+							"gateway_dod_additional_paths_test.go",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "match declared rootCauseTarget") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want root-cause target consistency rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsReplanContinuationRepeatedFailedSurfacePatchWithoutDecisionFields(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-replan-continuation-strategy-reassessment",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-replan-continuation-strategy-reassessment/step-1",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"replanStateChangingContinuation": true,
+			"strategyReassessment": map[string]any{
+				"required":             true,
+				"reason":               "same_target_scope_repeated_failure",
+				"targetRepairAttempts": 2,
+				"failedSurface":        "targetRef=e2e_gateway_contract_test.go",
+				"failureTargetScope":   "targetRef=e2e_gateway_contract_test.go",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"failureTargetScope": "targetRef=e2e_gateway_contract_test.go",
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-e2e-contract-test-full-rewrite",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef": "e2e_gateway_contract_test.go",
+						"patchType": "file_write",
+						"content":   "package main\n",
+						"summary":   "rewrite failed surface again without root-cause target shift",
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "strategyReassessment.required=true") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want replan continuation reassessment rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsUnboundedVerificationForScopedStateChangingRepairWithoutStrategyReassessment(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-scoped-repair-unbounded-verification-without-reassessment",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-scoped-repair-unbounded-verification-without-reassessment/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failureTargetScope":              "failureTargets=gateway_dod_additional_paths_test.go",
+			"lastFailureDiagnostics": map[string]any{
+				"failureClass":     "shell_command_failed",
+				"failureSignature": "class=shell_command_failed|kind=shell/command|failureTargets=gateway_dod_additional_paths_test.go",
+				"error":            "exit status 1",
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-target-test",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef": "gateway_dod_additional_paths_test.go",
+						"patchType": "unified_diff",
+						"diff":      "--- a/gateway_dod_additional_paths_test.go\n+++ b/gateway_dod_additional_paths_test.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+					},
+				},
+				{
+					"id":        "verify-all",
+					"kind":      "shell/command",
+					"dependsOn": []string{"patch-target-test"},
+					"input": map[string]any{
+						"command": "go",
+						"args":    []string{"test", "./..."},
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "scoped state-changing runtime repair requires bounded verification") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want scoped state-changing bounded-verification rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsBoundedVerificationForScopedFailedSurface(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-bounded-verification",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-bounded-verification/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"strategyReassessment": map[string]any{
+				"required":      true,
+				"failedSurface": "failureTargets=gateway_dod_additional_paths_test.go",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-target-test",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "gateway_dod_additional_paths_test.go",
+						"patchType":            "unified_diff",
+						"diff":                 "--- a/gateway_dod_additional_paths_test.go\n+++ b/gateway_dod_additional_paths_test.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+						"failedSurface":        "failureTargets=gateway_dod_additional_paths_test.go",
+						"rootCauseTarget":      "proxy helper recursion in gateway_dod_additional_paths_test.go",
+						"repairTargetDecision": "patch recursive proxy helper into concrete handler call",
+						"forbiddenRepair":      "do not change unrelated feature files",
+						"verificationPlan":     "run targeted verification for gateway_dod_additional_paths_test.go and related contract checks",
+					},
+				},
+				{
+					"id":        "verify-targeted",
+					"kind":      "shell/command",
+					"dependsOn": []string{"patch-target-test"},
+					"input": map[string]any{
+						"command": "go",
+						"args":    []string{"test", "./...", "-run", "TestGateway_UsageCSVAppendWithUsage|TestGateway_ConcurrentCSVAppend_NoLoss"},
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want bounded verification accepted", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsMissingLastFailureDiagnosticsForStateChangingRepair(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-missing-last-failure-diagnostics",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-missing-last-failure-diagnostics/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failedStepId":                    "run-state-changing-repair-missing-last-failure-diagnostics/graph-001/002-verify",
+			stepInputKeyRepairOfStepID:        "run-state-changing-repair-missing-last-failure-diagnostics/graph-001/002-verify",
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-main",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef": "main.go",
+						"patchType": "file_write",
+						"content":   "package main\n",
+					},
+				},
+			},
+		},
+	}
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "requires lastFailureDiagnostics") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want missing state-changing repair diagnostics rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsStateChangingRepairWithLastFailureDiagnostics(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-with-last-failure-diagnostics",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-with-last-failure-diagnostics/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"lastFailureDiagnostics": map[string]any{
+				"failureClass":     "shell_command_failed",
+				"failureSignature": "class=shell_command_failed|kind=shell/command|exitCode=1",
+				"error":            "exit status 1",
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-main",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef": "main.go",
+						"patchType": "file_write",
+						"content":   "package main\n",
+					},
+				},
+			},
+		},
+	}
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want allowed when lastFailureDiagnostics exists", err)
 	}
 }
 

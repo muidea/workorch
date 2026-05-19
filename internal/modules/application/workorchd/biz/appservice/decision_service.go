@@ -398,6 +398,9 @@ func normalizeDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, p
 		return payload, resolutionType
 	}
 	action := inferRuntimeRepairRecoveryAction(payload)
+	if action != "" {
+		action = normalizeRuntimeRepairRecoveryActionByTicketPolicy(ticket, action)
+	}
 	if action == "" {
 		return payload, resolutionType
 	}
@@ -414,6 +417,22 @@ func normalizeDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, p
 	default:
 		return ret, decisioncommon.ResolutionTypeProvideMissingInfo
 	}
+}
+
+func normalizeRuntimeRepairRecoveryActionByTicketPolicy(ticket *decisionmodel.Ticket, action string) string {
+	if ticket == nil || ticket.Context == nil {
+		return action
+	}
+	allowed := runtimeRepairAllowedRecoveryActions(ticket.Context)
+	if len(allowed) == 0 || containsRuntimeRepairRecoveryAction(allowed, action) {
+		return action
+	}
+	for _, candidate := range []string{"replan", "provide_information", "retry_same_step", "terminate"} {
+		if containsRuntimeRepairRecoveryAction(allowed, candidate) {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func normalizeCandidateSelectionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, payload map[string]any) map[string]any {
@@ -640,6 +659,52 @@ func semanticTextForRepairResolution(payload map[string]any) string {
 		}
 	}
 	return ""
+}
+
+func runtimeRepairAllowedRecoveryActions(input map[string]any) []string {
+	if input == nil {
+		return nil
+	}
+	value, ok := input["allowedRecoveryActions"]
+	if !ok {
+		return nil
+	}
+	switch typed := value.(type) {
+	case []string:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			action := normalizeRuntimeRepairRecoveryAction(item)
+			if action != "" {
+				ret = append(ret, action)
+			}
+		}
+		return ret
+	case []any:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			raw, _ := item.(string)
+			action := normalizeRuntimeRepairRecoveryAction(raw)
+			if action != "" {
+				ret = append(ret, action)
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
+}
+
+func containsRuntimeRepairRecoveryAction(values []string, want string) bool {
+	want = normalizeRuntimeRepairRecoveryAction(want)
+	if want == "" {
+		return false
+	}
+	for _, value := range values {
+		if normalizeRuntimeRepairRecoveryAction(value) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func containsInlineLLMProviderConfig(payload map[string]any) bool {

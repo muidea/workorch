@@ -51,6 +51,72 @@ func TestStructuredFailureSignalsExtractsNeutralPathLineIdentifier(t *testing.T)
 	}
 }
 
+func TestStructuredFailureSignalsDoNotPromoteRuntimeContractFieldsAsTargetRefs(t *testing.T) {
+	output := map[string]any{
+		"status":              "completed",
+		"stage":               "llm_execution_graph_plan",
+		"error":               "invalid argument: strategyReassessment.required=true requires state-changing patch output to declare failedSurface/rootCauseTarget/repairTargetDecision/forbiddenRepair/verificationPlan aligned with current failed surface",
+		"reason":              "invalid argument: strategyReassessment.required=true requires state-changing patch output to declare failedSurface/rootCauseTarget/repairTargetDecision/forbiddenRepair/verificationPlan aligned with current failed surface",
+		failureOutputKeyClass: failureClassRuntime,
+	}
+
+	signals := structuredFailureSignalsFromFailureOutput(output, nil, failureClassRuntime, "")
+
+	targets := stringSliceFromValue(signals["targetRefs"])
+	for _, forbidden := range []string{"strategyReassessment.required", "strategyreassessment.required"} {
+		if stringSliceContains(targets, forbidden) {
+			t.Fatalf("targetRefs = %#v, want runtime contract field %q filtered", targets, forbidden)
+		}
+	}
+	identifiers := stringSliceFromValue(signals["identifiers"])
+	if !stringSliceContains(identifiers, "strategyReassessment") || !stringSliceContains(identifiers, "rootCauseTarget") {
+		t.Fatalf("identifiers = %#v, want contract field names retained only as identifiers", identifiers)
+	}
+}
+
+func TestRuntimeRepairActionPackageDoesNotUseRuntimeContractFieldsAsRepairTargetSet(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"runtimeRepairAttempt":        1,
+		"maxRuntimeRepairAttempts":    10,
+		"failedStepId":                "run/step-1",
+		"failedStepKind":              llmWorkspaceExecutionStepKind,
+		"failureClass":                failureClassRuntime,
+		"failureReason":               "invalid argument: strategyReassessment.required=true requires failedSurface/rootCauseTarget/repairTargetDecision/forbiddenRepair/verificationPlan",
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"structuredFailureSignals": map[string]any{
+			"targetRefs": []string{"strategyReassessment.required", "strategyreassessment.required"},
+			"identifiers": []string{
+				"strategyReassessment",
+				"failedSurface",
+				"rootCauseTarget",
+				"repairTargetDecision",
+				"forbiddenRepair",
+				"verificationPlan",
+			},
+		},
+	}
+
+	actionPackage := repairActionPackageFromRepairInput(input, map[string]any{
+		"stage":               "llm_execution_graph_plan",
+		"error":               "invalid argument: strategyReassessment.required=true requires failedSurface/rootCauseTarget/repairTargetDecision/forbiddenRepair/verificationPlan",
+		failureOutputKeyClass: failureClassRuntime,
+	})
+
+	if targetSet := stringSliceFromValue(actionPackage["repairTargetSet"]); len(targetSet) != 0 {
+		t.Fatalf("repairTargetSet = %#v, want runtime contract fields omitted", targetSet)
+	}
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustTargetRepairTargetSet"] == true {
+		t.Fatalf("requiredOutput = %#v, want no repair target set requirement for runtime contract fields", required)
+	}
+	signals := mapFromValue(actionPackage["structuredFailureSignals"])
+	targetRefs := stringSliceFromValue(signals["targetRefs"])
+	if len(targetRefs) != 0 {
+		t.Fatalf("structuredFailureSignals.targetRefs = %#v, want contract field refs filtered from package", targetRefs)
+	}
+}
+
 func TestRuntimeRepairActionPackageIncludesStructuredFailureSignalsAndForbiddenReuse(t *testing.T) {
 	runID := common.RunID("run-repair-grounding")
 	failedStep := &runmodel.Step{

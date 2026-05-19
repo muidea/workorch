@@ -145,6 +145,16 @@ func TestRuntimeOrchestrator_DuplicateRuntimeFailureUsesDialogLanguage(t *testin
 	if !strings.Contains(ticket.Reason, "检测到重复的运行时失败签名") || strings.Contains(ticket.Question, "The same runtime failure") {
 		t.Fatalf("ticket = %+v, want Chinese duplicate failure prompt", ticket)
 	}
+	if ticket.Context[decisionContextKeyRecoveryPolicy] != decisionContextRecoveryPolicyRepairPlan {
+		t.Fatalf("ticket context recoveryPolicy = %#v, want %q", ticket.Context[decisionContextKeyRecoveryPolicy], decisionContextRecoveryPolicyRepairPlan)
+	}
+	if ticket.Context["runtimeRepairLoopState"] != "duplicate_failure_escalated" {
+		t.Fatalf("ticket context runtimeRepairLoopState = %#v, want duplicate_failure_escalated", ticket.Context["runtimeRepairLoopState"])
+	}
+	allowed, ok := ticket.Context["allowedRecoveryActions"].([]string)
+	if !ok || len(allowed) != 1 || allowed[0] != "replan" {
+		t.Fatalf("ticket context allowedRecoveryActions = %#v, want [replan]", ticket.Context["allowedRecoveryActions"])
+	}
 }
 
 func TestRuntimeOrchestrator_PatchApprovalUsesDialogLanguage(t *testing.T) {

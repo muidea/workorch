@@ -38,7 +38,31 @@ func initialStepInput(run *runModel.Run) map[string]any {
 			input["repairObjective"] = repairObjectiveStateChangingOutput
 			input["repairGuidance"] = stateChangingRepairGuidance()
 			input["replanStateChangingContinuation"] = true
-			input["repairActionPackage"] = repairActionPackageFromReplanContinuation(run)
+			actionPackage := repairActionPackageFromReplanContinuation(run)
+			if reassessment := strategyReassessmentFromReplanContinuation(run); len(reassessment) > 0 {
+				input["strategyReassessment"] = reassessment
+				input["targetRepairAttempts"] = int64FromValue(reassessment["targetRepairAttempts"])
+				input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+					"Replan continuation carries a repeated failed surface: distinguish failedSurface from rootCauseTarget before patching the same target again.",
+					"If the next state change patches a target different from failedSurface, declare relatedFailureTargets for the failed surface being unblocked.",
+					"If no distinct root-cause target is supported by current evidence, return a failed assessment or blocker instead of repeating the same failed-surface patch.",
+				)
+				if len(actionPackage) > 0 {
+					actionPackage["strategyReassessment"] = reassessment
+					actionPackage["repeatedTargetRepairMode"] = map[string]any{
+						"enabled":                           true,
+						"reason":                            stringFromMap(reassessment, "reason"),
+						"mustDistinguishRootCauseTarget":    true,
+						"mustDeclareRequiredDecisionFields": true,
+					}
+					if required := mapFromValue(actionPackage["requiredOutput"]); len(required) > 0 {
+						required["mustRebuildFromCurrentEvidence"] = true
+						required["mustUseCurrentTargetSnapshot"] = true
+						actionPackage["requiredOutput"] = required
+					}
+				}
+			}
+			input["repairActionPackage"] = actionPackage
 		}
 	}
 	return input
@@ -55,13 +79,9 @@ func repairActionPackageFromReplanContinuation(run *runModel.Run) map[string]any
 	if run == nil {
 		return nil
 	}
-	continuation := mapFromValue(run.ExecutionContext["replanContinuation"])
+	continuation, failureContext := replanContinuationFailureContext(run)
 	if len(continuation) == 0 {
 		return nil
-	}
-	failureContext := mapFromValue(continuation["failureContext"])
-	if len(failureContext) == 0 {
-		failureContext = mapFromValue(continuation["ticketContext"])
 	}
 	pkg := map[string]any{
 		"requiredOutput": map[string]any{
@@ -102,6 +122,102 @@ func repairActionPackageFromReplanContinuation(run *runModel.Run) map[string]any
 		return nil
 	}
 	return pkg
+}
+
+func replanContinuationFailureContext(run *runModel.Run) (map[string]any, map[string]any) {
+	if run == nil {
+		return nil, nil
+	}
+	continuation := mapFromValue(run.ExecutionContext["replanContinuation"])
+	if len(continuation) == 0 {
+		return nil, nil
+	}
+	failureContext := mapFromValue(continuation["failureContext"])
+	if len(failureContext) == 0 {
+		failureContext = mapFromValue(continuation["ticketContext"])
+	}
+	return continuation, failureContext
+}
+
+func strategyReassessmentFromReplanContinuation(run *runModel.Run) map[string]any {
+	continuation, failureContext := replanContinuationFailureContext(run)
+	if len(failureContext) == 0 {
+		return nil
+	}
+	targetScope := strings.TrimSpace(stringFromMap(failureContext, "failureTargetScope"))
+	failureClass := strings.TrimSpace(stringFromMap(failureContext, failureOutputKeyClass))
+	failureSignature := strings.TrimSpace(stringFromMap(failureContext, failureOutputKeySignature))
+	if targetScope == "" && len(repairPatchTargetRefsFromScopeText(failureSignature)) == 0 {
+		return nil
+	}
+	targetAttempts := replanContinuationTargetRepairAttempts(failureContext)
+	if targetAttempts < 2 && !replanContinuationRequiresStrategyReassessment(continuation, failureContext) {
+		return nil
+	}
+	if targetAttempts < 2 {
+		targetAttempts = 2
+	}
+	input := map[string]any{
+		"targetRepairAttempts":    targetAttempts,
+		"failureTargetScope":      targetScope,
+		failureOutputKeyClass:     failureClass,
+		failureOutputKeySignature: failureSignature,
+		"failedStepKind":          strings.TrimSpace(stringFromMap(failureContext, "failedStepKind")),
+	}
+	return repairStrategyReassessmentFromInput(input)
+}
+
+func replanContinuationRequiresStrategyReassessment(continuation map[string]any, failureContext map[string]any) bool {
+	if len(continuation) == 0 && len(failureContext) == 0 {
+		return false
+	}
+	var signals []string
+	for _, key := range []string{
+		"reason",
+		"ticketReason",
+		"resolutionType",
+		"recoveryAction",
+	} {
+		signals = append(signals, strings.ToLower(strings.TrimSpace(stringFromMap(continuation, key))))
+	}
+	for _, key := range []string{
+		"failureReason",
+		"repairObjective",
+		"recoveryPolicy",
+	} {
+		signals = append(signals, strings.ToLower(strings.TrimSpace(stringFromMap(failureContext, key))))
+	}
+	joined := strings.Join(signals, " ")
+	for _, marker := range []string{
+		"repeated",
+		"duplicate",
+		"exhausted",
+		"same_target",
+		"same-target",
+		"same target",
+		"loop",
+	} {
+		if strings.Contains(joined, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func replanContinuationTargetRepairAttempts(failureContext map[string]any) int64 {
+	var ret int64
+	for _, key := range []string{
+		"targetRepairAttempts",
+		"repairAttempts",
+		"attempts",
+		"runtimeRepairAttempt",
+		"maxAttempts",
+	} {
+		if attempts := int64FromValue(failureContext[key]); attempts > ret {
+			ret = attempts
+		}
+	}
+	return ret
 }
 
 func nextStepInputFromOutput(run *runModel.Run, previousStep *runModel.Step) map[string]any {

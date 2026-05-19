@@ -393,31 +393,43 @@ func (o *RuntimeOrchestrator) shouldBlockOnDuplicateRuntimeFailure(ctx context.C
 	class := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass))
 	targetScope := runtimeFailureTargetScope(signature)
 	attempts := o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep)
-	if signature == "" || !duplicateRepairDecisionFailureClass(class) || attempts == 0 {
+	if signature == "" || !runtimeFailureEligibleForDuplicateEscalation(failedStep, class) || attempts == 0 {
 		return false
 	}
 	if requiresDoDAssessmentCompletionGate(run) && attempts < o.maxRuntimeRepairAttempts() &&
-		!runtimeFailureTargetUsesRunBudget(class, targetScope) {
+		!runtimeFailureTargetUsesRunBudget(class, targetScope) &&
+		class != failureClassLLMDecisionInvalid &&
+		!runtimeFailureIsLLMContractLoop(failedStep) {
 		return false
 	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil {
 		return false
 	}
+	duplicateFound := false
 	for _, step := range steps {
 		if step == nil || step.ID == failedStep.ID || step.State != common.StepStateFailed {
 			continue
 		}
 		if strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature)) == signature {
-			return true
+			duplicateFound = true
+			break
 		}
 		if targetScope != "" &&
 			strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)) == class &&
 			runtimeFailureTargetScopeFromStep(step) == targetScope {
-			return true
+			duplicateFound = true
+			break
 		}
 	}
-	return false
+	if !duplicateFound {
+		return false
+	}
+	if runtimeFailureNeedsNoNewEvidenceCheck(class, failedStep) &&
+		runtimeFailureRunHasCompletedActionEvidence(steps, failedStep.ID) {
+		return false
+	}
+	return true
 }
 
 func duplicateRepairDecisionFailureClass(class string) bool {
@@ -425,12 +437,76 @@ func duplicateRepairDecisionFailureClass(class string) bool {
 	case failureClassWorkspacePath,
 		failureClassShellCommand,
 		failureClassPatchApply,
+		failureClassLLMDecisionInvalid,
 		failureClassMCPCapabilityDenied,
 		failureClassMCPRuntime:
 		return true
 	default:
 		return false
 	}
+}
+
+func runtimeFailureEligibleForDuplicateEscalation(step *runModel.Step, class string) bool {
+	if duplicateRepairDecisionFailureClass(class) {
+		return true
+	}
+	if strings.TrimSpace(class) != failureClassRuntime {
+		return false
+	}
+	return runtimeFailureIsLLMContractLoop(step)
+}
+
+func runtimeFailureNeedsNoNewEvidenceCheck(class string, step *runModel.Step) bool {
+	return strings.TrimSpace(class) == failureClassRuntime && runtimeFailureIsLLMContractLoop(step)
+}
+
+func runtimeFailureIsLLMContractLoop(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	if strings.TrimSpace(step.Kind) != llmWorkspaceExecutionStepKind {
+		return false
+	}
+	stage := strings.ToLower(strings.TrimSpace(stringFromMap(step.Output, "stage")))
+	if stage != "llm_execution_graph_plan" && stage != "llm_schema_invalid" && stage != "llm_decision_invalid" {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(strings.Join([]string{
+		stringFromMap(step.Output, "error"),
+		stringFromMap(step.Output, "reason"),
+	}, " ")))
+	for _, marker := range []string{
+		"executiongraph patch/apply input invalid",
+		"patch diff contains redacted runtime markers",
+		"patch content contains redacted runtime markers",
+		"invalid llm decision json",
+		"state-changing llm repair step returned",
+		"execution-stage llm graph node returned executiongraph without concrete output",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeFailureRunHasCompletedActionEvidence(steps []*runModel.Step, failedStepID common.StepID) bool {
+	for _, step := range steps {
+		if step == nil || step.State != common.StepStateCompleted {
+			continue
+		}
+		if step.ID == failedStepID {
+			continue
+		}
+		switch strings.TrimSpace(step.Kind) {
+		case "patch/apply", "shell/command", "mcp/tool_call":
+			return true
+		}
+		if len(mapSliceFromValue(step.Output[stepOutputKeyPatches])) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (o *RuntimeOrchestrator) blockOnDuplicateRuntimeFailure(
@@ -455,14 +531,17 @@ func (o *RuntimeOrchestrator) blockOnDuplicateRuntimeFailure(
 		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
 		Question:     localizedDuplicateRuntimeFailureQuestion(language),
 		Context: map[string]any{
-			decisionContextKeyResultPolicy: decisionContextResultPolicyRejected,
-			"failureClass":                 class,
-			"failureSignature":             signature,
-			"failureTargetScope":           runtimeFailureTargetScope(signature),
-			"failedStepId":                 string(failedStep.ID),
-			"failedStepKind":               failedStep.Kind,
-			"failedStepInput":              compactStepInputForLLMContext(failedStep.Input),
-			"failedStepOutput":             compactStepOutputForLLMContext(failedStep.Output),
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+			decisionContextKeyResultPolicy:   decisionContextResultPolicyRejected,
+			"allowedRecoveryActions":         []string{"replan"},
+			"runtimeRepairLoopState":         "duplicate_failure_escalated",
+			"failureClass":                   class,
+			"failureSignature":               signature,
+			"failureTargetScope":             runtimeFailureTargetScope(signature),
+			"failedStepId":                   string(failedStep.ID),
+			"failedStepKind":                 failedStep.Kind,
+			"failedStepInput":                compactStepInputForLLMContext(failedStep.Input),
+			"failedStepOutput":               compactStepOutputForLLMContext(failedStep.Output),
 		},
 	}
 	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {

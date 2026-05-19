@@ -1501,6 +1501,15 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	if err := validateLLMCoverageGapRepairIntent(step, output); err != nil {
 		return err
 	}
+	if err := validateLLMRepairStrategyReassessmentContract(step, output); err != nil {
+		return err
+	}
+	if err := validateScopedStateChangingRepairVerificationContract(step, output); err != nil {
+		return err
+	}
+	if err := validateRuntimeRepairFailureDiagnosticsContract(step); err != nil {
+		return err
+	}
 	if boolValue(step.Input["stateChangingOutputRequired"]) {
 		if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
 			if allowPatchRepairValidationEvidenceGraph(step, graph) {
@@ -1544,6 +1553,69 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 		return nil
 	}
 	return fmt.Errorf("%w: state-changing execution-stage llm graph node returned no state-changing output", common.ErrInvalidArgument)
+}
+
+func validateScopedStateChangingRepairVerificationContract(step *runModel.Step, output map[string]any) error {
+	if step == nil || step.Input == nil || output == nil {
+		return nil
+	}
+	if !stateChangingRepairContractActive(step) {
+		return nil
+	}
+	if runtimeStageFromStepInput(step.Input) != runtimeStageRepair {
+		return nil
+	}
+	if !strategyFailedSurfaceRequiresBoundedVerification(
+		strings.TrimSpace(stringFromMap(step.Input, "failureTargetScope")),
+		mapFromValue(step.Input["strategyReassessment"]),
+	) {
+		return nil
+	}
+	if !strategyOutputGraphUsesUnboundedVerification(output) {
+		return nil
+	}
+	return fmt.Errorf("%w: scoped state-changing runtime repair requires bounded verification; unbounded verification without explicit target scope is not allowed", common.ErrInvalidArgument)
+}
+
+func validateRuntimeRepairFailureDiagnosticsContract(step *runModel.Step) error {
+	if step == nil || step.Input == nil {
+		return nil
+	}
+	if !stateChangingRepairContractActive(step) {
+		return nil
+	}
+	if strings.TrimSpace(stringFromMap(step.Input, "failedStepId")) == "" &&
+		strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRepairOfStepID)) == "" {
+		return nil
+	}
+	diagnostics := mapFromValue(step.Input["lastFailureDiagnostics"])
+	if len(diagnostics) == 0 {
+		failedOutput := mapFromValue(step.Input["failedStepOutput"])
+		if len(failedOutput) > 0 {
+			diagnostics = map[string]any{
+				"failureSignature": firstNonEmptyString(
+					stringFromMap(step.Input, failureOutputKeySignature),
+					stringFromMap(failedOutput, failureOutputKeySignature),
+				),
+				"failureClass": firstNonEmptyString(
+					stringFromMap(step.Input, failureOutputKeyClass),
+					stringFromMap(failedOutput, failureOutputKeyClass),
+				),
+				"error": firstNonEmptyString(
+					stringFromMap(failedOutput, "error"),
+					stringFromMap(failedOutput, "reason"),
+				),
+			}
+		}
+	}
+	if strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(diagnostics, "failureSignature"),
+		stringFromMap(diagnostics, "failureClass"),
+		stringFromMap(diagnostics, "error"),
+	)) == "" {
+		return fmt.Errorf("%w: state-changing runtime repair requires lastFailureDiagnostics or equivalent failedStepOutput diagnostics", common.ErrInvalidArgument)
+	}
+	return nil
 }
 
 func validateLLMSoulGraphCapabilityContract(run *runModel.Run, step *runModel.Step, output map[string]any) error {
@@ -1685,7 +1757,7 @@ func validateLLMNextStepPatchTargetRelevance(step *runModel.Step, output map[str
 }
 
 func validateRepairPatchRequestGranularity(step *runModel.Step, request runtimePatchRequest) error {
-	if step == nil || step.Input == nil || !boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) {
+	if !stateChangingRepairContractActive(step) {
 		return nil
 	}
 	if strings.TrimSpace(request.PatchType) != "file_write" {
@@ -1759,15 +1831,354 @@ func validateRepairPatchTargetRelevance(step *runModel.Step, request runtimePatc
 		return nil
 	}
 	if repairPatchTargetRefMatches(request.TargetRef, targetRefs) {
-		return nil
+		return validateRepeatedRepairRootCauseTargetConsistency(step, request)
 	}
 	if repairPatchRequestDeclaresRelatedFailureTargets(request, targetRefs) {
-		return nil
+		return validateRepeatedRepairRootCauseTargetConsistency(step, request)
 	}
 	if repairPatchTargetRefIsRelatedPrerequisite(step.Input, request.TargetRef, targetRefs) {
-		return nil
+		return validateRepeatedRepairRootCauseTargetConsistency(step, request)
 	}
 	return fmt.Errorf("%w: runtime repair patch/apply target %q is not related to failure target scope %v; patch a current failure target or return a failed assessment/blocker", common.ErrInvalidArgument, request.TargetRef, limitedStrings(targetRefs, 5))
+}
+
+func validateRepeatedRepairRootCauseTargetConsistency(step *runModel.Step, request runtimePatchRequest) error {
+	if step == nil || step.Input == nil {
+		return nil
+	}
+	reassessment := mapFromValue(step.Input["strategyReassessment"])
+	if !boolValue(reassessment["required"]) {
+		return nil
+	}
+	if !strategyReassessmentRequiresRootCauseTargetShift(reassessment) {
+		return nil
+	}
+	declaredRootCauseTargets := rootCauseTargetRefsFromStrategyValue(request.Extra["rootCauseTarget"])
+	if len(declaredRootCauseTargets) == 0 {
+		return nil
+	}
+	targetRef := normalizeRepairPatchTargetRef(request.TargetRef)
+	if targetRef == "" {
+		return nil
+	}
+	if repairPatchTargetRefMatches(targetRef, declaredRootCauseTargets) {
+		return nil
+	}
+	return fmt.Errorf("%w: strategyReassessment.required=true requires patch target %q to match declared rootCauseTarget %q when repeated failed-surface repair must shift targets", common.ErrInvalidArgument, request.TargetRef, strings.TrimSpace(stringFromAny(request.Extra["rootCauseTarget"])))
+}
+
+func rootCauseTargetRefsFromStrategyValue(value any) []string {
+	text := strings.TrimSpace(stringFromAny(value))
+	if text == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ret []string
+	add := func(value string) {
+		value = normalizeRepairPatchTargetRef(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	for _, target := range repairPatchTargetRefsFromScopeText(text) {
+		add(target)
+	}
+	for _, target := range extractStructuredFailureTargetRefs(text) {
+		add(target)
+	}
+	for _, ref := range strings.Fields(text) {
+		ref = strings.Trim(ref, "`'\"()[]{}<>;,")
+		if strings.Contains(ref, ".") {
+			add(ref)
+		}
+	}
+	return ret
+}
+
+func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output map[string]any) error {
+	if step == nil || step.Input == nil || output == nil {
+		return nil
+	}
+	if !stateChangingRepairContractActive(step) {
+		return nil
+	}
+	reassessment := mapFromValue(step.Input["strategyReassessment"])
+	if !boolValue(reassessment["required"]) {
+		return nil
+	}
+	candidates, hasPatch := strategyReassessmentDecisionCandidates(output)
+	if !hasPatch {
+		return nil
+	}
+	requiredFields := stringSliceFromValue(reassessment["requiredDecisionFields"])
+	if len(requiredFields) == 0 {
+		requiredFields = []string{"failedSurface", "rootCauseTarget", "repairTargetDecision", "forbiddenRepair", "verificationPlan"}
+	}
+	expectedSurface := strings.TrimSpace(stringFromMap(reassessment, "failedSurface"))
+	for _, candidate := range candidates {
+		if len(candidate) == 0 {
+			continue
+		}
+		if !strategyCandidateHasRequiredFields(candidate, requiredFields) {
+			continue
+		}
+		if expectedSurface != "" && !strategyFailedSurfaceMatches(candidate, expectedSurface) {
+			continue
+		}
+		surfaceCorrection := strategyCandidateHasSurfaceContractCorrection(candidate, expectedSurface)
+		if !strategyRootCauseDistinguishableFromFailedSurface(candidate, expectedSurface) && !surfaceCorrection {
+			continue
+		}
+		if strategyReassessmentRequiresRootCauseTargetShift(reassessment) &&
+			strategyCandidatePatchesFailedSurface(candidate, expectedSurface) && !surfaceCorrection {
+			return fmt.Errorf("%w: strategyReassessment.required=true requires repeated failed-surface repairs to patch a distinct root-cause target or return a failed assessment/blocker", common.ErrInvalidArgument)
+		}
+		if strategyFailedSurfaceRequiresBoundedVerification(expectedSurface, candidate) &&
+			(strategyVerificationPlanAppearsUnbounded(strings.TrimSpace(stringFromAny(candidate["verificationPlan"]))) ||
+				strategyOutputGraphUsesUnboundedVerification(output)) {
+			return fmt.Errorf("%w: strategyReassessment.required=true requires bounded verification for scoped failed surface; unbounded verification without explicit target scope is not allowed in this repair decision", common.ErrInvalidArgument)
+		}
+		return nil
+	}
+	return fmt.Errorf("%w: strategyReassessment.required=true requires state-changing patch output to declare failedSurface/rootCauseTarget/repairTargetDecision/forbiddenRepair/verificationPlan aligned with current failed surface", common.ErrInvalidArgument)
+}
+
+func strategyCandidateHasSurfaceContractCorrection(candidate map[string]any, expectedSurface string) bool {
+	if len(candidate) == 0 {
+		return false
+	}
+	correction := mapFromValue(candidate["surfaceContractCorrection"])
+	if len(correction) == 0 {
+		return false
+	}
+	if declaredSurface := strings.TrimSpace(stringFromAny(correction["failedSurface"])); declaredSurface != "" {
+		if expectedSurface != "" && !strategyFailedSurfaceTextMatches(declaredSurface, expectedSurface) {
+			return false
+		}
+		if parentSurface := strings.TrimSpace(stringFromAny(candidate["failedSurface"])); parentSurface != "" && !strategyFailedSurfaceTextMatches(declaredSurface, parentSurface) {
+			return false
+		}
+	}
+	for _, field := range []string{"whySurfaceIsWrong", "contractConflict", "currentResourceEvidence", "boundedVerificationPlan"} {
+		if !surfaceContractCorrectionFieldPresent(correction[field]) {
+			return false
+		}
+	}
+	if strategyVerificationPlanAppearsUnbounded(strings.TrimSpace(stringFromAny(correction["boundedVerificationPlan"]))) {
+		return false
+	}
+	return true
+}
+
+func surfaceContractCorrectionFieldPresent(value any) bool {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed) != ""
+	case []string:
+		for _, item := range typed {
+			if strings.TrimSpace(item) != "" {
+				return true
+			}
+		}
+		return false
+	case []any:
+		for _, item := range typed {
+			if surfaceContractCorrectionFieldPresent(item) {
+				return true
+			}
+		}
+		return false
+	case map[string]any:
+		return len(typed) > 0
+	case []map[string]any:
+		return len(typed) > 0
+	default:
+		return false
+	}
+}
+
+func strategyReassessmentDecisionCandidates(output map[string]any) ([]map[string]any, bool) {
+	var candidates []map[string]any
+	hasPatch := false
+	appendCandidate := func(value map[string]any) {
+		if len(value) > 0 {
+			candidates = append(candidates, value)
+		}
+	}
+	if requests, err := runtimePatchRequests(output); err == nil {
+		for _, request := range requests {
+			hasPatch = true
+			appendCandidate(mapFromValue(request.Extra))
+		}
+	}
+	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
+		for _, node := range graph.Nodes {
+			if strings.TrimSpace(node.Kind) != "patch/apply" {
+				continue
+			}
+			if _, err := runtimePatchRequestFromMap(node.Input); err != nil {
+				continue
+			}
+			hasPatch = true
+			appendCandidate(mapFromValue(node.Input))
+		}
+	}
+	_, nextKind := nextStepSpec(output)
+	if strings.TrimSpace(nextKind) == "patch/apply" {
+		nextInput := mapFromValue(output[stepOutputKeyNextInput])
+		if _, err := runtimePatchRequestFromMap(nextInput); err == nil {
+			hasPatch = true
+			appendCandidate(nextInput)
+		}
+	}
+	return candidates, hasPatch
+}
+
+func strategyCandidateHasRequiredFields(candidate map[string]any, required []string) bool {
+	for _, field := range required {
+		if strings.TrimSpace(stringFromAny(candidate[field])) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func strategyFailedSurfaceMatches(candidate map[string]any, expected string) bool {
+	got := strings.TrimSpace(stringFromAny(candidate["failedSurface"]))
+	return strategyFailedSurfaceTextMatches(got, expected)
+}
+
+func strategyFailedSurfaceTextMatches(got string, expected string) bool {
+	got = normalizeStrategyContractText(got)
+	expected = normalizeStrategyContractText(expected)
+	if got == "" || expected == "" {
+		return false
+	}
+	return got == expected || strings.Contains(got, expected) || strings.Contains(expected, got)
+}
+
+func strategyRootCauseDistinguishableFromFailedSurface(candidate map[string]any, expectedSurface string) bool {
+	rootCause := normalizeStrategyContractText(strings.TrimSpace(stringFromAny(candidate["rootCauseTarget"])))
+	if rootCause == "" {
+		return false
+	}
+	failedSurface := strings.TrimSpace(stringFromAny(candidate["failedSurface"]))
+	if failedSurface == "" {
+		failedSurface = expectedSurface
+	}
+	failedSurface = normalizeStrategyContractText(failedSurface)
+	if failedSurface == "" {
+		return true
+	}
+	return rootCause != failedSurface
+}
+
+func strategyReassessmentRequiresRootCauseTargetShift(reassessment map[string]any) bool {
+	if len(reassessment) == 0 {
+		return false
+	}
+	if int64FromValue(reassessment["targetRepairAttempts"]) >= 2 {
+		return true
+	}
+	reason := strings.ToLower(strings.TrimSpace(stringFromAny(reassessment["reason"])))
+	return strings.Contains(reason, "same_target") || strings.Contains(reason, "repeated")
+}
+
+func strategyCandidatePatchesFailedSurface(candidate map[string]any, expectedSurface string) bool {
+	if len(candidate) == 0 {
+		return false
+	}
+	targetRef := normalizeRepairPatchTargetRef(strings.TrimSpace(stringFromAny(candidate["targetRef"])))
+	if targetRef == "" {
+		return false
+	}
+	surface := strings.TrimSpace(stringFromAny(candidate["failedSurface"]))
+	if surface == "" {
+		surface = expectedSurface
+	}
+	for _, surfaceTarget := range repairPatchTargetRefsFromScopeText(surface) {
+		if repairPatchTargetRefMatches(targetRef, []string{surfaceTarget}) {
+			return true
+		}
+	}
+	return false
+}
+
+func strategyFailedSurfaceRequiresBoundedVerification(expectedSurface string, candidate map[string]any) bool {
+	surface := strings.TrimSpace(stringFromAny(candidate["failedSurface"]))
+	if surface == "" {
+		surface = expectedSurface
+	}
+	surface = strings.ToLower(surface)
+	if surface == "" {
+		return false
+	}
+	return strings.Contains(surface, "failuretargets=") || strings.Contains(surface, "targetref=")
+}
+
+func strategyVerificationPlanAppearsUnbounded(plan string) bool {
+	lower := strings.ToLower(strings.TrimSpace(plan))
+	if lower == "" {
+		return false
+	}
+	normalized := normalizeStrategyContractText(lower)
+	return strings.Contains(lower, "full regression") ||
+		strings.Contains(lower, "run all checks") ||
+		strings.Contains(lower, "workspace wide") ||
+		strings.Contains(lower, "entire workspace") ||
+		strings.Contains(lower, "global scan") ||
+		strings.Contains(normalized, "fullregression") ||
+		strings.Contains(normalized, "runallchecks") ||
+		strings.Contains(normalized, "workspacewide") ||
+		strings.Contains(normalized, "entireworkspace") ||
+		strings.Contains(normalized, "globalscan")
+}
+
+func strategyOutputGraphUsesUnboundedVerification(output map[string]any) bool {
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok || len(graph.Nodes) == 0 {
+		return false
+	}
+	for _, node := range graph.Nodes {
+		if strings.TrimSpace(node.Kind) != "shell/command" {
+			continue
+		}
+		args := stringSliceFromValue(node.Input["args"])
+		hasBroadScope := false
+		hasExplicitScope := false
+		for _, arg := range args {
+			a := strings.ToLower(strings.TrimSpace(arg))
+			if a == "" {
+				continue
+			}
+			if a == "./..." || a == "..." || a == "*" || strings.Contains(a, "all") {
+				hasBroadScope = true
+			}
+			if strings.HasPrefix(a, "--scope=") ||
+				strings.HasPrefix(a, "--target=") ||
+				strings.HasPrefix(a, "--path=") ||
+				strings.HasPrefix(a, "--filter=") ||
+				strings.HasPrefix(a, "--match=") ||
+				strings.HasPrefix(a, "-run") {
+				hasExplicitScope = true
+			}
+		}
+		if hasBroadScope && !hasExplicitScope {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeStrategyContractText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(" ", "", "\t", "", "\n", "", "\r", "", "-", "", "_", "", "/", "", "\\", "", ".", "")
+	return replacer.Replace(value)
 }
 
 func repairPatchRequestDeclaresRelatedFailureTargets(request runtimePatchRequest, allowed []string) bool {
@@ -2024,9 +2435,20 @@ func repairPatchTargetRelevanceRequired(step *runModel.Step) bool {
 	if step == nil || step.Input == nil {
 		return false
 	}
-	return boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) &&
-		boolValue(step.Input["stateChangingOutputRequired"]) &&
-		repairObjectiveRequiresStateChange(stringFromMap(step.Input, "repairObjective"))
+	return stateChangingRepairContractActive(step)
+}
+
+func stateChangingRepairContractActive(step *runModel.Step) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	if runtimeStageFromStepInput(step.Input) != runtimeStageRepair {
+		return false
+	}
+	if !boolValue(step.Input["stateChangingOutputRequired"]) {
+		return false
+	}
+	return repairObjectiveRequiresStateChange(stringFromMap(step.Input, "repairObjective"))
 }
 
 func repairPatchRelevantTargetRefs(step *runModel.Step) []string {
