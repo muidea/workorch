@@ -126,7 +126,8 @@
 - 该规则只治理结构化证据引用完整性，不引入任何业务领域判断；业务语义是否充分仍由 Goal/DoD、profile contract、LLM assessment 与 evidence quality gate 共同约束。
 - graph follow-up 因扩展次数达到上限而转入 assessment-only 时，assessment 输入必须携带当前 run 的 `runEvidenceSummary`、`latestClosureEvidence` 和必要的 `supersededFailureEvidence`。LLM 对 satisfied item 的 `evidenceRefs` 必须引用具体可追踪 step / patch / validation evidence，不能只引用 run ID、memory ref 或旧失败 step。
 - 当 `runEvidenceSummary` 因上下文预算需要裁剪时，runtime 必须优先保留中立 action evidence，例如已完成/失败的 shell、tool、patch、validation 或其他可证明状态变化/验证结果的步骤；不得让后续 LLM 过程步骤把关键验证/变更证据全部挤出 assessment 输入。
-- assessment-only coverage correction 对 graph expansion limit assessment 同样适用。若 failed `dodAssessment.items` 或 `goalCoverage.items` 缺少可追踪 evidence，repair input 必须带入具体 `evidenceCandidates` 或最新 action evidence 候选；只有候选证据仍不足时，才切换为 concrete validation evidence repair、rejected result 或 decision blocker。
+- assessment-only coverage correction 对 graph expansion limit assessment 同样适用。若 failed `dodAssessment.items`、`goalCoverage.items` 或 `deliverableCoverage.items` 缺少可追踪 evidence，repair input 必须带入具体 `evidenceCandidates` 或最新 action evidence 候选；只有候选证据仍不足时，才切换为 concrete validation evidence repair、rejected result 或 decision blocker。
+- 若 assessment-only coverage correction 自身返回 `satisfied=false` 的 failed `dodAssessment`，并明确列出仍缺失的 DoD / Goal / deliverable coverage，下一步 repair 必须清除 `assessmentOnly`，转入 concrete validation evidence repair 或治理终态；不得继续携带 assessment-only 约束，也不得漂移到无关 planning / scan scope。
 
 ## 抽象矩阵与证据门禁
 

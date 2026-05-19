@@ -480,7 +480,9 @@ Graph expansion limit assessment 是 assessment-only coverage correction 的一�
 
 为了防止长流程中 LLM 过程步骤淹没关键证据，runtime 在构造 `runEvidenceSummary` 时必须按中立证据价值裁剪：优先保留已完成/失败的 action evidence、state-changing artifact evidence、validation evidence 和可用于 closure 的步骤；普通 LLM 过程输出只能作为辅助上下文。该排序只基于 step kind、state、evidence quality 与可追踪性，不解析命令内容、语言、测试框架或业务语义。
 
-当 graph expansion limit assessment 的 failed `dodAssessment` / `goalCoverage` 暴露 coverage 缺口时，后续 repair 输入必须将缺口与可候选的最新 action evidence 绑定，例如 `missingDoDItems[].evidenceCandidates` 或 `missingGoalCoverage[].evidenceCandidates`。若候选证据存在，优先进行 assessment-only correction；若候选证据不存在或不足，才进入 concrete validation evidence repair 或治理终态。core 不能因为处于 graph expansion limit 路径就跳过 coverage correction，也不能因缺少领域判断而直接要求 state-changing patch。
+当 graph expansion limit assessment 的 failed `dodAssessment` / `goalCoverage` / `deliverableCoverage` 暴露 coverage 缺口时，后续 repair 输入必须将缺口与可候选的最新 action evidence 绑定，例如 `missingDoDItems[].evidenceCandidates` 或 `missingGoalCoverage[].evidenceCandidates`。若候选证据存在，优先进行 assessment-only correction；若候选证据不存在或不足，才进入 concrete validation evidence repair 或治理终态。core 不能因为处于 graph expansion limit 路径就跳过 coverage correction，也不能因缺少领域判断而直接要求 state-changing patch。
+
+如果 assessment-only coverage correction 自身返回 `satisfied=false` 的 failed assessment，并列出仍缺失的 DoD / Goal / deliverable coverage，这已经不是“结构补齐”问题，而是缺少可接受验证证据或真实未满足。后续 runtime repair 必须退出 assessment-only，保留缺口清单到 `verificationEvidenceGap`，并进入 concrete validation evidence repair、rejected result 或 decision blocker；不得继续要求 LLM 只做 assessment，也不得把失败 scope 漂移回早期 planning / scan 节点。
 
 Goal coverage 校验只应把可判定的叶子需求作为覆盖对象。Markdown 标题、分组项、以冒号结尾的父级目标项只用于组织上下文，不得作为必须单独满足的叶子需求。若 Goal 叶子需求与 DoD 项文字不完全一致，LLM 必须通过 `dodAssessment.goalCoverage` 显式建立 Goal requirement -> evidenceRefs 的映射；runtime 不应依赖领域语义硬编码进行推断。
 

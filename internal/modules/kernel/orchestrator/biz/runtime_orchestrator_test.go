@@ -17431,6 +17431,65 @@ func TestRuntimeRepairInputForMissingDeliverableCoverageIsAssessmentOnly(t *test
 	}
 }
 
+func TestRuntimeRepairInputForFailedAssessmentOnlyDeliverableCoverageSwitchesToEvidenceRepair(t *testing.T) {
+	runID := common.RunID("run-deliverable-coverage-evidence-repair")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-deliverable-coverage-evidence-repair",
+		DoDID:           "dod",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-001-of-assessment"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyAssessmentOnly:        true,
+			"repairObjective":                 "complete_dod_goal_coverage_assessment",
+			"assessmentOnlyReason":            "dod_coverage_contract_correction",
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|stage=llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"summary":   "deliverable coverage still missing",
+				"deliverableCoverage": map[string]any{
+					"satisfied": false,
+					"items": []map[string]any{{
+						"id":     "user_deliverable",
+						"state":  "failed",
+						"reason": "missing final deliverable evidence",
+					}},
+				},
+			},
+			"runtimeDiagnostics": map[string]any{
+				"kind": failureClassDoDCoverageMissing,
+				"missingDeliverableCoverage": []map[string]any{{
+					"id":    "user_deliverable",
+					"state": "failed",
+				}},
+			},
+		},
+	}
+
+	input := (&RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}).runtimeRepairFollowUpStepInput(context.Background(), run, step, 2, errors.New("missing deliverable coverage"))
+
+	if input[stepInputKeyAssessmentOnly] != nil || input["repairObjective"] != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("repair input = %+v, want concrete evidence repair after failed deliverable assessment correction", input)
+	}
+	gap := mapFromValue(input["verificationEvidenceGap"])
+	if missing := mapSliceFromValue(gap["missingDeliverable"]); len(missing) != 1 || missing[0]["id"] != "user_deliverable" {
+		t.Fatalf("verificationEvidenceGap = %+v, want missing deliverable coverage carried forward", gap)
+	}
+}
+
 func TestRuntimeRepairInputForMissingGoalCoverageWithoutEvidenceCandidatesProducesEvidenceRepair(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-dod-coverage-evidence-repair")
@@ -17555,7 +17614,7 @@ func TestCompletionGateCoverageRepairFollowUpCanContinue(t *testing.T) {
 	}
 }
 
-func TestCompletionGateAssessmentOnlyContradictionWithEvidenceCandidatesContinues(t *testing.T) {
+func TestCompletionGateAssessmentOnlyFailedCoverageCorrectionSwitchesToConcreteEvidenceRepair(t *testing.T) {
 	runID := common.RunID("run-dod-coverage-assessment-contradiction")
 	step := &runmodel.Step{
 		ID:    common.StepID(runID + "/repair-001-of-planning-001"),
@@ -17617,11 +17676,17 @@ func TestCompletionGateAssessmentOnlyContradictionWithEvidenceCandidatesContinue
 		steps:      memory.NewStepRepository(),
 		workspaces: memory.NewWorkspaceRepository(),
 	}).runtimeRepairFollowUpStepInput(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-dod-coverage-assessment-contradiction", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, step, 2, errors.New("missing goal coverage"))
-	if input[stepInputKeyAssessmentOnly] != true || input["repairObjective"] != "complete_dod_goal_coverage_assessment" {
-		t.Fatalf("repair input = %+v, want continued assessment-only coverage correction", input)
+	if input[stepInputKeyAssessmentOnly] != nil || input["repairObjective"] != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("repair input = %+v, want concrete evidence repair after failed assessment-only coverage correction", input)
+	}
+	if input["evidenceRepairRequired"] != true || input["evidenceRepairSource"] != "failed_assessment_only_coverage_gap" {
+		t.Fatalf("repair input = %+v, want failed assessment-only evidence repair signal", input)
 	}
 	if missing := mapSliceFromValue(input["missingGoalCoverage"]); len(missing) != 1 || len(mapSliceFromValue(missing[0]["evidenceCandidates"])) == 0 {
 		t.Fatalf("missingGoalCoverage = %+v, want inherited evidence candidates", input["missingGoalCoverage"])
+	}
+	if guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n"); !strings.Contains(guidance, "verification evidence") {
+		t.Fatalf("repairGuidance = %+v, want concrete verification evidence guidance", input["repairGuidance"])
 	}
 }
 

@@ -1289,6 +1289,9 @@ func doDCoverageContractCorrectionRequired(step *runModel.Step) bool {
 	if ok && satisfied {
 		return true
 	}
+	if assessmentOnlyCoverageCorrectionFailedWithActionableGaps(step) {
+		return true
+	}
 	return assessmentOnlyGoalCoverageContradictionRepairRequired(step)
 }
 
@@ -1320,6 +1323,29 @@ func coverageCorrectionNeedsConcreteEvidence(step *runModel.Step) bool {
 		}
 	}
 	return false
+}
+
+func assessmentOnlyCoverageCorrectionFailedWithActionableGaps(step *runModel.Step) bool {
+	if step == nil || !boolValue(step.Input[stepInputKeyAssessmentOnly]) {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) != "complete_dod_goal_coverage_assessment" &&
+		strings.TrimSpace(stringFromMap(step.Input, "assessmentOnlyReason")) != "dod_coverage_contract_correction" {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)) != failureClassDoDCoverageMissing {
+		return false
+	}
+	assessment := doDAssessmentFromOutput(step.Output)
+	if len(assessment) == 0 {
+		return false
+	}
+	if satisfied, ok := assessment["satisfied"].(bool); ok && satisfied {
+		return false
+	}
+	return len(missingDoDItemsFromFailureOutput(step.Output)) > 0 ||
+		len(missingGoalCoverageFromFailureOutput(step.Output)) > 0 ||
+		len(missingDeliverableCoverageFromFailureOutput(step.Output)) > 0
 }
 
 func goalCoverageGapCanReuseSatisfiedAssessmentEvidence(step *runModel.Step, missing map[string]any) bool {
@@ -1971,20 +1997,22 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if missingDoD := missingDoDItemsFromStep(failedStep); len(missingDoD) > 0 {
 		input["missingDoDItems"] = o.missingDoDItemsWithEvidenceCandidates(ctx, run, failedStep, missingDoD)
 	}
-	coverageNeedsConcreteEvidence := assessmentOnlyCoverageRepair && coverageCorrectionNeedsConcreteEvidence(&runModel.Step{
+	assessmentOnlyFailedCoverageRepair := assessmentOnlyCoverageCorrectionFailedWithActionableGaps(failedStep)
+	coverageNeedsConcreteEvidence := assessmentOnlyCoverageRepair && (coverageCorrectionNeedsConcreteEvidence(&runModel.Step{
 		Input:  input,
 		Output: failedStep.Output,
-	})
+	}) || assessmentOnlyFailedCoverageRepair)
 	concreteEvidenceRepair := coverageNeedsConcreteEvidence || (!assessmentOnlyCoverageRepair && doDVerificationEvidenceRepairRequired(failedStep))
 	if concreteEvidenceRepair {
 		input["repairObjective"] = repairObjectiveConcreteValidationEvidence
 		input["evidenceRepairRequired"] = true
 		input["verificationEvidenceGap"] = map[string]any{
-			"kind":           "dod_verification_evidence_gap",
-			"failedStepId":   string(failedStep.ID),
-			"failedStepKind": string(failedStep.Kind),
-			"missingDoD":     missingDoDItemsFromFailureOutput(failedStep.Output),
-			"missingGoal":    missingGoalCoverageFromStep(failedStep),
+			"kind":               "dod_verification_evidence_gap",
+			"failedStepId":       string(failedStep.ID),
+			"failedStepKind":     string(failedStep.Kind),
+			"missingDoD":         missingDoDItemsFromFailureOutput(failedStep.Output),
+			"missingGoal":        missingGoalCoverageFromStep(failedStep),
+			"missingDeliverable": missingDeliverableCoverageFromFailureOutput(failedStep.Output),
 		}
 		input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
 		delete(input, "stateChangingOutputRequired")
@@ -2026,11 +2054,18 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		delete(input, "assessmentOnlyReason")
 		input["completionFollowUp"] = false
 		input["evidenceRepairSource"] = "coverage_gap_without_candidate_evidence"
+		if assessmentOnlyFailedCoverageRepair {
+			input["evidenceRepairSource"] = "failed_assessment_only_coverage_gap"
+		}
 		if closure := o.latestCompletionClosureEvidence(ctx, run, failedStep); len(closure) > 0 {
 			input["latestClosureEvidence"] = closure
+			if superseded := mapSliceFromValue(closure["supersededFailures"]); len(superseded) > 0 {
+				input["supersededFailureEvidence"] = superseded
+			}
 		}
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"At least one Goal/DoD coverage gap lacks concrete candidate evidence; produce bounded verification evidence before another dodAssessment correction.",
+			"At least one Goal/DoD/deliverable coverage gap still lacks acceptable concrete evidence; produce bounded verification evidence before another dodAssessment correction.",
+			"When latestClosureEvidence is present, prefer the latest successful evidence over older superseded failures in the same neutral scope.",
 			"If new verification evidence closes a specific Goal requirement, ensure the next dodAssessment cites that exact evidenceRef and goalRequirementId.",
 		)
 	}
@@ -3469,7 +3504,9 @@ func doDVerificationEvidenceRepairRequired(failedStep *runModel.Step) bool {
 	if class != failureClassDoDCoverageMissing && !strings.Contains(signature, "class="+failureClassDoDCoverageMissing) {
 		return false
 	}
-	if len(missingDoDItemsFromFailureOutput(failedStep.Output)) == 0 && len(missingGoalCoverageFromFailureOutput(failedStep.Output)) == 0 {
+	if len(missingDoDItemsFromFailureOutput(failedStep.Output)) == 0 &&
+		len(missingGoalCoverageFromFailureOutput(failedStep.Output)) == 0 &&
+		len(missingDeliverableCoverageFromFailureOutput(failedStep.Output)) == 0 {
 		return false
 	}
 	diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"])
