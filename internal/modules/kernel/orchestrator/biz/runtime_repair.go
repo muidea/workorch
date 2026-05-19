@@ -2951,6 +2951,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 			"maxTargetScopedRepairInputBytes":   120 * 1024,
 			"mustPreferExactTargetSnapshot":     true,
 			"mustOmitRejectedRawFailureProduct": true,
+			"mustDistinguishRootCauseTarget":    true,
 		}
 		requiredOutput["mustUseCurrentTargetSnapshot"] = true
 		requiredOutput["mustRebuildFromCurrentEvidence"] = true
@@ -2960,10 +2961,38 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 			}
 		}
 	}
+	addStrategyReassessmentRequiredOutputContract(pkg, requiredOutput)
 	if len(pkg) <= 1 {
 		return nil
 	}
 	return pkg
+}
+
+func addStrategyReassessmentRequiredOutputContract(pkg map[string]any, requiredOutput map[string]any) {
+	if len(pkg) == 0 || len(requiredOutput) == 0 {
+		return
+	}
+	reassessment := mapFromValue(pkg["strategyReassessment"])
+	if !boolValue(reassessment["required"]) {
+		return
+	}
+	requiredFields := stringSliceFromValue(reassessment["requiredDecisionFields"])
+	if len(requiredFields) == 0 {
+		requiredFields = []string{
+			"failedSurface",
+			"rootCauseTarget",
+			"repairTargetDecision",
+			"forbiddenRepair",
+			"verificationPlan",
+		}
+	}
+	requiredOutput["mustDeclareStrategyReassessmentFields"] = true
+	requiredOutput["strategyReassessmentRequiredFields"] = requiredFields
+	requiredOutput["strategyReassessmentMatchRule"] = "each state-changing patch/apply node must declare these fields in its input and align failedSurface with strategyReassessment.failedSurface; rootCauseTarget must identify the resource or scope being changed"
+	if strategyReassessmentRequiresRootCauseTargetShift(reassessment) {
+		requiredOutput["mustDistinguishRootCauseTarget"] = true
+		requiredOutput["rootCauseTargetShiftRule"] = "when repeatedly repairing the same failed surface, patch a distinct root-cause target or return a failed assessment/blocker"
+	}
 }
 
 func compactStructuredFailureSignalsForRepairActionPackage(signals map[string]any) map[string]any {

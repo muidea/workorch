@@ -65,6 +65,15 @@ When `runtimeStage=repair`, `stateChangingOutputRequired=true`, and repeated fai
 
 If a repair output is rejected for violating the strategy reassessment contract, the next repair step must inherit the same `strategyReassessment` and candidate context. A runtime contract failure on the wrapper must not erase the original repeated-surface repair contract.
 
+The same requirement must be visible in the primary actionable package, not only in free-form guidance. When `strategyReassessment.required=true`, `repairActionPackage.requiredOutput` must include:
+
+- `mustDeclareStrategyReassessmentFields=true`
+- `strategyReassessmentRequiredFields`
+- `strategyReassessmentMatchRule`
+- `mustDistinguishRootCauseTarget=true` when repeated failed-surface repair requires a target shift
+
+These fields are runtime contract metadata. They are not workspace targets and must not be promoted into `repairTargetSet`.
+
 ## 5. Patch Admission Rules
 
 For state-changing repair under `strategyReassessment.required=true`:
@@ -83,6 +92,8 @@ For state-changing repair under `strategyReassessment.required=true`:
    - `currentResourceEvidence`
    - `boundedVerificationPlan`
 5. Runtime contract diagnostic field names such as `strategyReassessment.required`, `failedSurface`, `rootCauseTarget`, and `surfaceContractCorrection` must never be promoted into `repairTargetSet`.
+
+Runtime must classify strategy reassessment admission failures as runtime/decision contract failures, not provider auth/config failures. Text such as `forbiddenRepair` is a required contract field name and must not trigger `auth_or_config_error`; provider auth/config classification is reserved for provider stages such as `llm_provider_auth_or_config_error` or `llm_provider_error` with auth/config evidence.
 
 `surfaceContractCorrection` is intentionally not named after any domain artifact. It means: the LLM claims the failed surface's own contract is invalid or stale, and provides bounded evidence for changing that same surface.
 

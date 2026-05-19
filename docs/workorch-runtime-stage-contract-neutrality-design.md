@@ -504,6 +504,10 @@ Repair 输入必须尽量包含足以定向修复的当前证据：
 
 当 repair-of-repair 的当前失败是 `llm_schema_invalid` / `llm_decision_invalid`，runtime 必须把该失败作为 LLM decision contract failure 处理，而不是 provider failure。repair input 应包含中立的 schema invalid recovery contract：只能基于 `repairActionPackage`、当前 target snapshot 和 schema 约束重建一个合法 JSON decision；禁止复用 rejected raw content / preview，禁止 markdown 包裹、注释、重复 JSON object、尾随多余括号和局部数组。该规则只治理输出形态和 lineage，不引入任何业务领域判断。
 
+当 repair-of-repair 的失败来自 runtime 输出合同或准入合同，例如 `strategyReassessment.required=true`、`executionGraph patch/apply input invalid`、`scoped state-changing runtime repair requires bounded verification` 或等价中立合同错误，failure class 必须保持 `runtime_failed` 或 `llm_decision_invalid`，不得因为错误文本中包含 `forbiddenRepair`、`API Key`、`auth` 等业务/合同词而误归类为 `auth_or_config_error`。Provider auth/config 只适用于 `llm_provider_*` 阶段或明确 provider auth/config stage；runtime 合同失败后续 repair 必须继续继承原始 failure surface、repairActionPackage、target context 和 strategy reassessment。
+
+当 `strategyReassessment.required=true` 且 repair 输出需要 state-changing patch 时，`repairActionPackage.requiredOutput` 必须显式包含 `mustDeclareStrategyReassessmentFields=true` 与 `strategyReassessmentRequiredFields`，默认字段为 `failedSurface`、`rootCauseTarget`、`repairTargetDecision`、`forbiddenRepair`、`verificationPlan`。若重复 failed surface 需要 root-cause target shift，还必须包含 `mustDistinguishRootCauseTarget=true`。这些字段是中立 runtime 合同，不表达任何具体业务含义；LLM patch/apply 节点必须在自身 input 中声明这些字段并与当前 failed surface 对齐。
+
 当 verification / strict convergence follow-up 已经识别出需要继续收敛时，可以返回受限 concrete validation evidence graph，例如明确的 shell/tool/mcp 验证节点；该 graph 不需要包含 patch，但不得只包含 read-only inspection、自检、run snapshot、context rehydration 或新的 LLM 嵌套。若再次返回只读 inspection graph 且没有 state-changing output、concrete validation evidence 或 rejected assessment，该失败属于 contract violation。后续 repair 必须携带对应的 rejection evidence；只有 failure evidence 已表明缺口是实现/状态变更缺口时，才提升为 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`，不能把纯验证证据缺口误升级为写文件 repair。
 
 Runtime 可以把失败证据中的目标引用解析为当前 workspace 中的已知资源快照，但只能使用中立路径匹配和 manifest 事实；不能把某个 profile 的文件命名、测试约定或技术栈规则写入 core repair。

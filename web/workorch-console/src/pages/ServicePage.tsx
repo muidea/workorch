@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { PageContainer, ProCard } from '@ant-design/pro-components';
 import { Descriptions } from 'antd';
+import { PageContainer, ProCard } from '@ant-design/pro-components';
 import { workorchApi } from '../api';
 import { modelLabels } from '../labels';
 

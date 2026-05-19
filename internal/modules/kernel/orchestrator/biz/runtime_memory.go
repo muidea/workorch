@@ -189,6 +189,9 @@ func appendRepairLessonMemoryWrite(requests []runtimeMemoryWriteRequest, _ *runM
 		}
 	}
 	for _, key := range []string{"stage", "status", "summary", "nextStep", "nextKind"} {
+		if key == "summary" && shouldOmitRejectedRepairOutputSummary(output) {
+			continue
+		}
 		if value := strings.TrimSpace(stringFromMap(output, key)); value != "" {
 			lines = append(lines, fmt.Sprintf("output.%s: %s", key, value))
 		}
@@ -220,10 +223,25 @@ func repairLessonSummary(step *runModel.Step, output map[string]any) string {
 	if summary := repairLessonContentHint(step, output); summary != "" {
 		return summary
 	}
-	if summary := strings.TrimSpace(stringFromMap(output, "summary")); summary != "" {
+	if summary := strings.TrimSpace(stringFromMap(output, "summary")); summary != "" && !shouldOmitRejectedRepairOutputSummary(output) {
 		return summary
 	}
+	if shouldOmitRejectedRepairOutputSummary(output) {
+		return "Runtime repair rejection captured"
+	}
 	return "Runtime repair lesson captured"
+}
+
+func shouldOmitRejectedRepairOutputSummary(output map[string]any) bool {
+	if len(output) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(output, "error")) != "" || strings.TrimSpace(stringFromMap(output, "reason")) != "" {
+		return true
+	}
+	stage := strings.ToLower(strings.TrimSpace(stringFromMap(output, "stage")))
+	status := strings.ToLower(strings.TrimSpace(stringFromMap(output, "status")))
+	return status == "failed" && (strings.HasPrefix(stage, "llm_") || strings.Contains(stage, "patch"))
 }
 
 func repairLessonContentHint(step *runModel.Step, output map[string]any) string {

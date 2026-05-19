@@ -56,6 +56,26 @@ func TestClassifyRuntimeFailureProviderAuthOrConfig(t *testing.T) {
 	}
 }
 
+func TestClassifyRuntimeFailureStrategyReassessmentContractIsNotAuthOrConfig(t *testing.T) {
+	err := errors.New("invalid argument: strategyReassessment.required=true requires state-changing patch output to declare failedSurface/rootCauseTarget/repairTargetDecision/forbiddenRepair/verificationPlan aligned with current failed surface")
+	step := &runModel.Step{
+		ID:    common.StepID("run-x/step-1"),
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage": "llm_execution_graph_plan",
+			"error": err.Error(),
+		},
+	}
+	classification := classifyRuntimeFailure(step, step.Output, "runtime step failed", err)
+	if classification.Class != failureClassRuntime {
+		t.Fatalf("classification = %+v, want %s", classification, failureClassRuntime)
+	}
+	if isProviderFailureClass(classification.Class) {
+		t.Fatalf("runtime contract failure classified as provider failure: classification=%+v", classification)
+	}
+}
+
 func TestClassifyRuntimeFailureProviderStreamIncomplete(t *testing.T) {
 	step := &runModel.Step{
 		ID:    common.StepID("run-x/step-1"),

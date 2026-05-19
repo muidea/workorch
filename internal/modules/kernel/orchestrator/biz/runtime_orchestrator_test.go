@@ -10376,6 +10376,39 @@ func TestRuntimeOrchestrator_RepairOutputMemoryWritesDistillMissingFileLesson(t 
 	}
 }
 
+func TestRuntimeOrchestrator_RepairOutputMemoryOmitsRejectedPlanSummary(t *testing.T) {
+	runID := common.RunID("run-repair-rejected-summary-memory")
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-rejected-summary"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  4,
+			"failedStepId":                    string(runID) + "/block/test",
+			"failureReason":                   "contract validation failed",
+			failureOutputKeyClass:             failureClassRuntime,
+		},
+	}
+	output := map[string]any{
+		"status":  "completed",
+		"stage":   "llm_execution_graph_plan",
+		"error":   "invalid argument: strategyReassessment.required=true requires state-changing patch output",
+		"summary": "rootCauseTarget=config.yaml; repairTargetDecision=add a marker comment",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{"id": "patch-unrelated-marker"}},
+		},
+	}
+
+	requests := appendNecessaryOutputMemoryWriteRequests(nil, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-rejected-summary-memory"}, step, output)
+	if len(requests) != 1 || requests[0].Summary != "Runtime repair rejection captured" {
+		t.Fatalf("repair memory requests = %+v, want rejected repair summary", requests)
+	}
+	if strings.Contains(requests[0].Content, "rootCauseTarget=config.yaml") || strings.Contains(requests[0].Content, "marker comment") {
+		t.Fatalf("repair memory content reused rejected plan summary: %s", requests[0].Content)
+	}
+}
+
 func TestRuntimeOrchestrator_OptionalRunSummaryMemoryDoesNotRequireRepository(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{}

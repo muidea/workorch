@@ -330,9 +330,60 @@ func TestRuntimeRepairActionPackageMarksRepeatedTargetRepairMode(t *testing.T) {
 	if required["mustUseCurrentTargetSnapshot"] != true || required["mustRebuildFromCurrentEvidence"] != true {
 		t.Fatalf("requiredOutput = %#v, want repeated repair target constraints", required)
 	}
+	if required["mustDeclareStrategyReassessmentFields"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["strategyReassessmentRequiredFields"]), "rootCauseTarget") ||
+		required["mustDistinguishRootCauseTarget"] != true {
+		t.Fatalf("requiredOutput = %#v, want explicit strategy reassessment output contract", required)
+	}
 	diagnostics := mapFromValue(actionPackage["targetRelevanceDiagnostics"])
 	if diagnostics["targetSnapshotCount"] != 1 || diagnostics["failureSignalIdentifierCount"] != 1 {
 		t.Fatalf("targetRelevanceDiagnostics = %#v, want target and signal diagnostics", diagnostics)
+	}
+}
+
+func TestRuntimeRepairActionPackageRequiresStrategyFieldsForDeclaredRelatedTargetSet(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"targetRepairAttempts":        2,
+		"failureTargetScope":          "failureTargets=main.go",
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		failureOutputKeyClass:         failureClassShellCommand,
+		"failureTargetRepairContext": []map[string]any{{
+			"targetRef":        "main.go",
+			"exists":           true,
+			"contentHash":      "hash-main",
+			"content":          "current content",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+		}},
+		"structuredFailureSignals": map[string]any{
+			"targetRefs": []string{"main.go", "related.lock"},
+			"messages": []string{
+				"main.go:10:2: missing related.lock entry",
+			},
+		},
+	}
+
+	actionPackage := repairActionPackageFromRepairInput(input, map[string]any{
+		"status": "failed",
+		"stderr": "main.go:10:2: missing related.lock entry",
+	})
+
+	targetSet := stringSliceFromValue(actionPackage["repairTargetSet"])
+	if !stringSliceContains(targetSet, "main.go") || !stringSliceContains(targetSet, "related.lock") {
+		t.Fatalf("repairTargetSet = %#v, want failed surface and declared related target", actionPackage["repairTargetSet"])
+	}
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustDeclareStrategyReassessmentFields"] != true ||
+		required["mustTargetRepairTargetSet"] != true ||
+		required["mustDistinguishRootCauseTarget"] != true {
+		t.Fatalf("requiredOutput = %#v, want target set plus explicit strategy reassessment contract", required)
+	}
+	fields := stringSliceFromValue(required["strategyReassessmentRequiredFields"])
+	for _, want := range []string{"failedSurface", "rootCauseTarget", "repairTargetDecision", "forbiddenRepair", "verificationPlan"} {
+		if !stringSliceContains(fields, want) {
+			t.Fatalf("strategyReassessmentRequiredFields = %#v, want %q", fields, want)
+		}
 	}
 }
 

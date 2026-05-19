@@ -61,6 +61,8 @@ func classifyRuntimeFailure(step *runModel.Step, output map[string]any, summary 
 		class = failureClassProviderStreamIncomplete
 	} else if isDoDCoverageMissingFailure(lowerStage, execErr, output) {
 		class = failureClassDoDCoverageMissing
+	} else if isRuntimeContractFailure(lowerStage, execErr, output) {
+		class = failureClassRuntime
 	} else if isLLMProviderAuthOrConfigFailure(lowerStage, execErr, output) {
 		class = failureClassAuthOrConfigError
 	} else if isLLMDecisionContractFailureStage(lowerStage) {
@@ -167,7 +169,7 @@ func isDoDCoverageMissingFailure(lowerStage string, execErr error, output map[st
 }
 
 func isLLMProviderAuthOrConfigFailure(lowerStage string, execErr error, output map[string]any) bool {
-	if !strings.HasPrefix(lowerStage, "llm_") {
+	if !strings.HasPrefix(lowerStage, "llm_provider_") {
 		return false
 	}
 	if lowerStage == "llm_provider_auth_or_config_error" {
@@ -179,6 +181,34 @@ func isLLMProviderAuthOrConfigFailure(lowerStage string, execErr error, output m
 		strings.Contains(errText, "invalid api key") ||
 		strings.Contains(errText, "authentication") ||
 		strings.Contains(errText, "api key")
+}
+
+func isRuntimeContractFailure(lowerStage string, execErr error, output map[string]any) bool {
+	if lowerStage != "llm_execution_graph_plan" &&
+		lowerStage != "llm_dod_assessment" &&
+		lowerStage != "patch_apply" {
+		return false
+	}
+	errText := providerFailureErrorText(execErr, output)
+	if errText == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"strategyreassessment.required",
+		"state-changing llm repair",
+		"state-changing execution-stage",
+		"runtime repair",
+		"scoped state-changing runtime repair",
+		"executiongraph patch/apply",
+		"patch/apply input invalid",
+		"patch describes a non-substantive",
+		"llm decision json invalid",
+	} {
+		if strings.Contains(errText, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func isLLMProviderSchemaFailure(lowerStage string) bool {

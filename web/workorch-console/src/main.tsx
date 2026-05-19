@@ -10,11 +10,14 @@ import {
   SettingOutlined
 } from '@ant-design/icons';
 import { PageContainer, ProCard, ProLayout, ProTable } from '@ant-design/pro-components';
-import { App as AntApp, Badge, Button, Checkbox, ConfigProvider, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
+import { App as AntApp, Button, Checkbox, ConfigProvider, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import type { ProColumns } from '@ant-design/pro-components';
-import type { Approval, ApprovalPage, Artifact, ArtifactPage, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DecisionPage, DoD, EventRecord, ExecutionSection, Goal, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, PatchPage, ProgressBlocker, ProgressItem, RepairLoop, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, ToolCallPage, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, ValidationResultPage, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, Artifact, ArtifactPage, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, EventRecord, ExecutionSection, Goal, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, Patch, PatchPage, ProgressBlocker, ProgressItem, RepairLoop, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, TaskDecomposition, TaskDecompositionNode, TaskProgress, ToolCall, ToolCallPage, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, ValidationResult, ValidationResultPage, WebSearchProviderTemplate, WebSourceTrace, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { createWorkorchEventStream, workorchApi } from './api';
+import { ServicePage } from './pages/ServicePage';
+import { GovernanceQueuePage } from './pages/GovernanceQueuePage';
+import { WorkspaceBoardPage } from './pages/WorkspaceBoardPage';
 import './styles.css';
 
 type ViewKey = 'board' | 'workspaceDetail' | 'governance' | 'runtimeControl' | 'configuration' | 'service';
@@ -27,7 +30,6 @@ const runtimeResultPageLimit = 100;
 const runtimePatchPageLimit = 100;
 const runtimeValidationPageLimit = 100;
 const runtimeArtifactPageLimit = 100;
-const governancePageLimit = 100;
 
 function mergeById<T extends { id: string }>(current: T[], items: T[], append: boolean) {
   if (!append) {
@@ -210,7 +212,7 @@ function stateTag(state?: string) {
   return <Tag color={color}>{stateLabel(value)}</Tag>;
 }
 
-function shortId(value?: string, keep = 10) {
+export function shortId(value?: string, keep = 10) {
   if (!value) {
     return '-';
   }
@@ -225,11 +227,11 @@ function isNotFoundError(error: unknown) {
   return /(^|\s)404(\s|$)|not found|不存在/i.test(errorMessage(error));
 }
 
-function pendingCount(items?: Array<{ state: string }>) {
+export function pendingCount(items?: Array<{ state: string }>) {
   return (items ?? []).filter((item) => item.state === 'open' || item.state === 'pending').length;
 }
 
-function runStateSummary(runs?: Run[]) {
+export function runStateSummary(runs?: Run[]) {
   const items = runs ?? [];
   return {
     total: items.length,
@@ -243,7 +245,7 @@ function runStateSummary(runs?: Run[]) {
   };
 }
 
-function workspaceProjectionRun(snapshot?: WorkspaceSnapshot) {
+export function workspaceProjectionRun(snapshot?: WorkspaceSnapshot) {
   if (!snapshot) {
     return undefined;
   }
@@ -279,7 +281,7 @@ function isFailedRunState(state?: string) {
   return state === 'failed' || state === 'cancelled' || state === 'superseded';
 }
 
-function isTerminalRunState(state?: string) {
+export function isTerminalRunState(state?: string) {
   return isCompletedRunState(state) || isFailedRunState(state);
 }
 
@@ -287,7 +289,7 @@ function activeOrLatestRun(snapshot?: WorkspaceSnapshot) {
   return workspaceProjectionRun(snapshot);
 }
 
-function workspaceProcessItems(snapshot?: WorkspaceSnapshot, goals?: Goal[], dods?: DoD[]) {
+export function workspaceProcessItems(snapshot?: WorkspaceSnapshot, goals?: Goal[], dods?: DoD[]) {
   const currentRun = activeOrLatestRun(snapshot);
   const hasDefinition = Boolean((goals?.length ?? 0) > 0 && (dods?.length ?? 0) > 0);
   const missingDefinition = !goals?.length ? `需要定义${modelLabels.goal}` : !dods?.length ? `需要定义${modelLabels.dod}` : `需要补齐${modelLabels.goal} / ${modelLabels.dod}`;
@@ -314,7 +316,7 @@ function workspaceProcessItems(snapshot?: WorkspaceSnapshot, goals?: Goal[], dod
   ];
 }
 
-function runtimeSummaryTags(runs?: Run[]) {
+export function runtimeSummaryTags(runs?: Run[]) {
   const summary = runStateSummary(runs);
   return (
     <Space wrap>
@@ -1279,7 +1281,7 @@ function decisionRequiredFields(item: Decision) {
   return Array.from(new Set([...requiredFields, ...suggestedFields]));
 }
 
-function decisionPayloadFields(item: Decision): DecisionPayloadField[] {
+export function decisionPayloadFields(item: Decision): DecisionPayloadField[] {
   const context = recordValue(item.context);
   const suggested = primitiveSuggestedPayload(context);
   const required = new Set([
@@ -1294,7 +1296,7 @@ function decisionPayloadFields(item: Decision): DecisionPayloadField[] {
   }));
 }
 
-function decisionInitialPayload(item: Decision) {
+export function decisionInitialPayload(item: Decision) {
   const structuredPayload: Record<string, unknown> = {};
   for (const field of decisionPayloadFields(item)) {
     structuredPayload[field.name] = field.initialValue ?? '';
@@ -1312,7 +1314,7 @@ function decisionFieldLabel(field: string) {
   return field;
 }
 
-function parseDecisionExtraPayload(text: unknown) {
+export function parseDecisionExtraPayload(text: unknown) {
   const content = typeof text === 'string' ? text.trim() : '';
   if (!content) {
     return {};
@@ -1325,7 +1327,7 @@ function parseDecisionExtraPayload(text: unknown) {
   return record;
 }
 
-function normalizeDecisionResolutionPayload(values: Record<string, unknown>) {
+export function normalizeDecisionResolutionPayload(values: Record<string, unknown>) {
   const structuredPayload = recordValue(values.structuredPayload) ?? {};
   const payload: Record<string, unknown> = {
     operator: typeof values.operator === 'string' && values.operator.trim() ? values.operator.trim() : 'console'
@@ -2536,7 +2538,7 @@ function readyDoDs(dods: DoD[]) {
   return dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
 }
 
-function workspaceBoardActivationRequest(item: WorkspaceBoardItem): WorkspaceExecutionActivationRequest | undefined {
+export function workspaceBoardActivationRequest(item: WorkspaceBoardItem): WorkspaceExecutionActivationRequest | undefined {
   const projectedRun = workspaceProjectionRun(item.snapshot);
   if (projectedRun && isTerminalRunState(projectedRun.state) && projectedRun.goalId && projectedRun.doDId) {
     return { goalId: projectedRun.goalId, doDId: projectedRun.doDId };
@@ -2550,7 +2552,7 @@ function workspaceBoardActivationRequest(item: WorkspaceBoardItem): WorkspaceExe
   return undefined;
 }
 
-function workspaceBoardActivationHint(item: WorkspaceBoardItem) {
+export function workspaceBoardActivationHint(item: WorkspaceBoardItem) {
   if (item.goals.length === 0) {
     return `当前工作空间尚未定义目标，请进入工作空间补齐${modelLabels.goal}后再启动执行`;
   }
@@ -2564,596 +2566,9 @@ function workspaceBoardActivationHint(item: WorkspaceBoardItem) {
   return '当前工作空间无法确定启动上下文，请进入工作空间核对后再启动执行';
 }
 
-function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
-  const { message } = AntApp.useApp();
-  const [boardItems, setBoardItems] = useState<WorkspaceBoardItem[]>([]);
-  const [loading, setLoading] = useState(false);
 
-  const loadBoard = async () => {
-    setLoading(true);
-    try {
-      const workspaces = await workorchApi.listWorkspaces();
-      const nextBoardItems = await Promise.all(workspaces.map(async (item) => {
-        const [snapshot, goals, dods] = await Promise.all([
-          workorchApi.readWorkspaceSnapshot(item.id),
-          workorchApi.listGoals(item.id),
-          workorchApi.listDoDs(item.id)
-        ]);
-        return { snapshot, goals, dods };
-      }));
-      setBoardItems(nextBoardItems);
-    } catch (error) {
-      message.error(errorMessage(error));
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  useEffect(() => {
-    void loadBoard();
-  }, []);
 
-  const trackWorkspaceActivationInBackground = (workspaceId: string, request: WorkspaceExecutionActivationRequest) => {
-    void workorchApi.activateWorkspaceExecution(workspaceId, request)
-      .then(() => {
-        message.success('工作空间执行已在后台启动');
-        void loadBoard();
-      })
-      .catch((error: unknown) => {
-        message.error(`工作空间执行后台启动失败：${errorMessage(error)}`);
-        void loadBoard();
-      });
-  };
-
-  const activateWorkspaceExecution = async (item: WorkspaceBoardItem) => {
-    const request = workspaceBoardActivationRequest(item);
-    if (!request) {
-      message.warning(workspaceBoardActivationHint(item));
-      return;
-    }
-    message.info('工作空间执行已提交，正在后台启动');
-    trackWorkspaceActivationInBackground(item.snapshot.workspace.id, request);
-  };
-
-  return (
-    <PageContainer
-      title="业务总览"
-      subTitle="从工作空间视角查看目标、运行、治理阻塞和交付状态"
-      extra={<Button onClick={() => void loadBoard()} loading={loading}>刷新</Button>}
-    >
-      {boardItems.length === 0 && !loading ? (
-        <Empty description="暂无工作空间" />
-      ) : (
-        <ProCard gutter={16} wrap loading={loading}>
-          {boardItems.map((item) => {
-            const { snapshot, goals, dods } = item;
-            const activeRun = snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId);
-            const currentRun = workspaceProjectionRun(snapshot);
-            const runSummary = runStateSummary(snapshot.runs);
-            const pendingDecisions = pendingCount(snapshot.decisions);
-            const pendingApprovals = pendingCount(snapshot.approvals);
-            const canStartRun = !currentRun || isTerminalRunState(currentRun.state);
-            return (
-              <ProCard
-                key={snapshot.workspace.id}
-                title={snapshot.workspace.title || snapshot.workspace.id}
-                subTitle={snapshot.workspace.id}
-                colSpan={{ xs: 24, md: 12, xl: 8 }}
-                bordered
-                extra={stateTag(snapshot.outcome?.state ?? snapshot.workspace.state)}
-              >
-                <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                  <div className="workorch-card-summary">
-                    <div>
-                      <Typography.Text type="secondary">当前运行（Run）</Typography.Text>
-                      <div>{currentRun ? <Space>{shortId(currentRun.id)}{stateTag(currentRun.state)}</Space> : '-'}</div>
-                    </div>
-                    <div>
-                      <Typography.Text type="secondary">治理阻塞</Typography.Text>
-                      <div><Badge count={pendingDecisions + pendingApprovals} showZero color={pendingDecisions + pendingApprovals > 0 ? '#faad14' : '#52c41a'} /></div>
-                    </div>
-                  </div>
-                  {metricGrid([
-                    { key: 'goal', label: modelLabels.goal, value: goals.length },
-                    { key: 'dod', label: modelLabels.dod, value: dods.length },
-                    { key: 'run', label: modelLabels.run, value: runSummary.total },
-                    { key: 'completed', label: '完成', value: runSummary.completed, color: '#389e0d' },
-                    { key: 'failed', label: '失败', value: runSummary.failed, color: '#cf1322' }
-                  ])}
-                  <Descriptions
-                    column={1}
-                    size="small"
-                    items={[
-                      { key: 'workingDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.workingDirectory, { rows: 1, copyText: snapshot.workspace.workingDirectory }) },
-                      { key: 'activeRun', label: '活跃运行', children: activeRun ? `${activeRun.id} / ${stateLabel(activeRun.state)}` : '-' },
-                      { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : stateLabel(snapshot.outcome?.state ?? snapshot.workspace.state) },
-                      { key: 'runtimeSummary', label: '运行摘要', children: runtimeSummaryTags(snapshot.runs) }
-                    ]}
-                  />
-                </Space>
-                <Steps
-                  size="small"
-                  className="workorch-section"
-                  items={workspaceProcessItems(snapshot, goals, dods)}
-                />
-                <Space className="workorch-section" wrap>
-                  <Button type="primary" onClick={() => onOpenWorkspace(snapshot.workspace.id)}>进入工作空间</Button>
-                  {canStartRun ? <Button onClick={() => void activateWorkspaceExecution(item)}>{currentRun ? '重新启动执行' : '启动执行'}</Button> : null}
-                  {currentRun && !isTerminalRunState(currentRun.state) ? <Button onClick={() => void workorchApi.resumeRun(currentRun.id).then(loadBoard).catch((error: unknown) => message.error(errorMessage(error)))}>继续运行</Button> : null}
-                </Space>
-              </ProCard>
-            );
-          })}
-        </ProCard>
-      )}
-    </PageContainer>
-  );
-}
-
-function DecisionQueuePage() {
-  const { message } = AntApp.useApp();
-  const [selectedDecisionKeys, setSelectedDecisionKeys] = useState<React.Key[]>([]);
-  const [decisionTarget, setDecisionTarget] = useState<{ item: Decision; resolutionType: string } | undefined>(undefined);
-  const [decisionSubmitting, setDecisionSubmitting] = useState(false);
-  const [decisionRecords, setDecisionRecords] = useState<Decision[]>([]);
-  const [decisionCursorAfterId, setDecisionCursorAfterId] = useState<string | undefined>(undefined);
-  const [decisionHasMore, setDecisionHasMore] = useState(false);
-  const [decisionLoading, setDecisionLoading] = useState(false);
-  const [decisionForm] = Form.useForm();
-
-  function applyDecisionPage(page: DecisionPage, append: boolean) {
-    const items = (page.decisions ?? []).sort((left, right) => Number(left.state !== 'open') - Number(right.state !== 'open'));
-    setDecisionRecords((current) => mergeById(current, items, append));
-    setDecisionCursorAfterId(page.nextCursorAfterId || items.at(-1)?.id);
-    setDecisionHasMore(Boolean(page.hasMore));
-  }
-
-  async function loadDecisionPage(cursorAfterId?: string) {
-    setDecisionLoading(true);
-    try {
-      const page = await workorchApi.listDecisionPage({ cursorAfterId, limit: governancePageLimit });
-      applyDecisionPage(page, Boolean(cursorAfterId));
-    } finally {
-      setDecisionLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));
-  }, []);
-
-  const resolve = async (item: Decision, resolutionType: string, payload?: Record<string, unknown>) => {
-    try {
-      await workorchApi.resolveDecision(item.id, resolutionType, payload);
-      message.success(`决策已按 ${resolutionType} 处理，${modelLabels.run} 已由服务端转入后台继续`);
-      void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));
-    } catch (error) {
-      message.error(errorMessage(error));
-    }
-  };
-
-  const openDecisionResolution = (item: Decision, resolutionType: string) => {
-    decisionForm.resetFields();
-    void workorchApi.readDecision(item.id)
-      .then((detail) => {
-        if (resolutionType === 'provide_missing_info') {
-          decisionForm.setFieldsValue(decisionInitialPayload(detail));
-        } else {
-          decisionForm.setFieldsValue({ operator: 'console' });
-        }
-        setDecisionTarget({ item: detail, resolutionType });
-      })
-      .catch((error: unknown) => message.error(errorMessage(error)));
-  };
-
-  const submitDecisionResolution = async () => {
-    if (!decisionTarget) {
-      return;
-    }
-    setDecisionSubmitting(true);
-    try {
-      const values = await decisionForm.validateFields();
-      const payload = normalizeDecisionResolutionPayload(values);
-      const target = decisionTarget;
-      await workorchApi.resolveDecision(target.item.id, target.resolutionType, payload);
-      setDecisionTarget(undefined);
-      decisionForm.resetFields();
-      message.success(`决策已按 ${target.resolutionType} 处理，${modelLabels.run} 已由服务端转入后台继续`);
-      void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));
-    } catch (error) {
-      message.error(errorMessage(error));
-    } finally {
-      setDecisionSubmitting(false);
-    }
-  };
-
-  const batchResolve = async (resolutionType: string) => {
-    const ticketIds = selectedDecisionKeys.map(String);
-    if (ticketIds.length === 0) {
-      message.warning('请先选择待处理决策工单');
-      return;
-    }
-    try {
-      await workorchApi.batchResolveDecisions(ticketIds, resolutionType, { operator: 'console', mode: 'batch' });
-      message.success(`${ticketIds.length} 个决策工单已按 ${resolutionType} 处理，相关${modelLabels.run}已由服务端转入后台继续`);
-      setSelectedDecisionKeys([]);
-      void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));
-    } catch (error) {
-      message.error(errorMessage(error));
-    }
-  };
-
-  const columns: ProColumns<Decision>[] = [
-    { title: '工单 ID', dataIndex: 'id', copyable: true },
-    { title: '工作空间', dataIndex: 'workspaceId', copyable: true },
-    { title: '运行', dataIndex: 'runId', copyable: true },
-    { title: '类型', dataIndex: 'decisionKind' },
-    { title: '问题', dataIndex: 'question', ellipsis: true, render: (_, item) => boundedParagraph(item.question, { rows: 2 }) },
-    { title: '原因', dataIndex: 'reason', ellipsis: true },
-    { title: '自动治理', dataIndex: 'autoGovernance', render: (_, item) => item.autoGovernance ? stateTag(`${item.autoGovernance.status}:${item.autoGovernance.action}`) : '-' },
-    { title: '解决方式', dataIndex: 'resolutionType', width: 140, render: (_, item) => item.resolutionType ? stateTag(item.resolutionType) : '-' },
-    { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
-    {
-      title: '操作',
-      valueType: 'option',
-      render: (_, item) => item.state === 'open' ? (
-        <Space wrap>
-          <Button size="small" type="primary" onClick={() => openDecisionResolution(item, 'provide_missing_info')}>补充信息</Button>
-          <Button size="small" onClick={() => void resolve(item, 'replan', { operator: 'console' })}>重新规划并继续</Button>
-          <Button size="small" danger onClick={() => void resolve(item, 'reject_current_path', { operator: 'console' })}>拒绝路径并继续</Button>
-        </Space>
-      ) : stateTag(item.resolutionType)
-    }
-  ];
-
-  return (
-    <PageContainer
-      title="决策工单"
-      subTitle={`处理阻塞${modelLabels.run}的${modelLabels.decision}，支持补充信息、重新规划和拒绝当前路径`}
-      extra={(
-        <Space wrap>
-          <Button disabled={selectedDecisionKeys.length === 0} onClick={() => void batchResolve('replan')}>批量重新规划</Button>
-          <Button danger disabled={selectedDecisionKeys.length === 0} onClick={() => void batchResolve('reject_current_path')}>批量拒绝路径</Button>
-        </Space>
-      )}
-    >
-      <ProTable<Decision>
-        rowKey="id"
-        search={false}
-        options={false}
-        rowSelection={{
-          selectedRowKeys: selectedDecisionKeys,
-          onChange: setSelectedDecisionKeys,
-          getCheckboxProps: (record) => ({ disabled: record.state !== 'open' })
-        }}
-        columns={columns}
-        loading={decisionLoading}
-        dataSource={decisionRecords}
-        expandable={{
-          expandedRowRender: (item) => (
-            <ProCard gutter={16} wrap ghost>
-              <ProCard title="决策上下文" colSpan={{ xs: 24, lg: 12 }}>
-                <pre className="json-panel json-panel-large">{item.context ? compactJSON(item.context) : '列表投影未加载上下文，请进入处理弹窗查看完整详情'}</pre>
-              </ProCard>
-              <ProCard title="解决内容" colSpan={{ xs: 24, lg: 12 }}>
-                <pre className="json-panel json-panel-large">{compactJSON(item.resolutionPayload)}</pre>
-              </ProCard>
-              <ProCard title="自动治理摘要" colSpan={{ xs: 24, lg: 12 }}>
-                <pre className="json-panel json-panel-large">{compactJSON(item.autoGovernance)}</pre>
-              </ProCard>
-            </ProCard>
-          )
-        }}
-      />
-      <Space className="workorch-section">
-        <Button
-          size="small"
-          onClick={() => void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)))}
-          loading={decisionLoading}
-        >
-          刷新决策
-        </Button>
-        <Button
-          size="small"
-          disabled={!decisionHasMore || !decisionCursorAfterId}
-          onClick={() => void loadDecisionPage(decisionCursorAfterId).catch((error: unknown) => message.error(errorMessage(error)))}
-          loading={decisionLoading}
-        >
-          加载更多
-        </Button>
-      </Space>
-      <Modal
-        title="补充决策信息"
-        open={Boolean(decisionTarget)}
-        confirmLoading={decisionSubmitting}
-        onCancel={() => setDecisionTarget(undefined)}
-        onOk={() => void submitDecisionResolution()}
-        okText="提交并转入后台"
-        destroyOnHidden
-      >
-        {decisionTarget ? (
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Descriptions
-              column={1}
-              size="small"
-              items={[
-                { key: 'ticket', label: '决策工单', children: decisionTarget.item.id },
-                { key: 'run', label: `关联${modelLabels.run}`, children: decisionTarget.item.runId },
-                { key: 'question', label: '问题', children: decisionTarget.item.question || '-' },
-                { key: 'reason', label: '原因', children: decisionTarget.item.reason || '-' }
-              ]}
-            />
-            <Form form={decisionForm} layout="vertical">
-              {decisionPayloadFields(decisionTarget.item).map((field) => (
-                <Form.Item
-                  key={field.name}
-                  name={['structuredPayload', field.name]}
-                  label={field.label}
-                  rules={field.required ? [{ required: true, message: `请补充${field.label}` }] : undefined}
-                >
-                  <Input />
-                </Form.Item>
-              ))}
-              {decisionPayloadFields(decisionTarget.item).length === 0 ? (
-                <Form.Item name="answer" label="补充信息" rules={[{ required: true, message: '请填写补充信息' }]}>
-                  <Input.TextArea rows={4} placeholder="按决策问题补充业务信息，例如目标对象、执行范围、路径选择或缺失参数。" />
-                </Form.Item>
-              ) : (
-                <Form.Item name="answer" label="补充说明">
-                  <Input.TextArea rows={3} placeholder="可选。用于补充字段之外的业务判断、执行约束或上下文说明。" />
-                </Form.Item>
-              )}
-              <Form.Item name="note" label="处理备注">
-                <Input.TextArea rows={2} placeholder="可选。记录本次处理依据，供后续审计和审批查看。" />
-              </Form.Item>
-              <Form.Item
-                name="extraPayloadText"
-                label="高级 JSON 载荷"
-                tooltip="可选。填写 JSON 对象，会合并到 resolutionPayload，用于复杂结构化信息。"
-                rules={[
-                  {
-                    validator: (_, value) => {
-                      try {
-                        parseDecisionExtraPayload(value);
-                        return Promise.resolve();
-                      } catch (error) {
-                        return Promise.reject(error instanceof Error ? error : new Error('JSON 格式不正确'));
-                      }
-                    }
-                  }
-                ]}
-              >
-                <Input.TextArea rows={4} placeholder='例如：{"target":"业务对象","method":"执行方式","constraints":["约束条件"]}' />
-              </Form.Item>
-              <Form.Item name="operator" label="处理人" rules={[{ required: true, message: '请填写处理人' }]}>
-                <Input />
-              </Form.Item>
-            </Form>
-            <Typography.Text type="secondary">上下文</Typography.Text>
-            <pre className="json-panel">{compactJSON(decisionTarget.item.context)}</pre>
-          </Space>
-        ) : null}
-      </Modal>
-    </PageContainer>
-  );
-}
-
-function ApprovalQueuePage() {
-  const { message } = AntApp.useApp();
-  const [selectedApprovalKeys, setSelectedApprovalKeys] = useState<React.Key[]>([]);
-  const [approvalTarget, setApprovalTarget] = useState<{ item: Approval; action: 'approve' | 'reject'; relatedDecision?: Decision } | undefined>(undefined);
-  const [approvalSubmitting, setApprovalSubmitting] = useState(false);
-  const [approvalRecords, setApprovalRecords] = useState<Approval[]>([]);
-  const [approvalCursorAfterId, setApprovalCursorAfterId] = useState<string | undefined>(undefined);
-  const [approvalHasMore, setApprovalHasMore] = useState(false);
-  const [approvalLoading, setApprovalLoading] = useState(false);
-  const [approvalForm] = Form.useForm<{ operator?: string; comment?: string }>();
-  const actionLabel = (action: 'approve' | 'reject') => action === 'approve' ? '已批准' : '已拒绝';
-
-  function applyApprovalPage(page: ApprovalPage, append: boolean) {
-    const items = (page.approvals ?? []).sort((left, right) => Number(left.state !== 'pending') - Number(right.state !== 'pending'));
-    setApprovalRecords((current) => mergeById(current, items, append));
-    setApprovalCursorAfterId(page.nextCursorAfterId || items.at(-1)?.id);
-    setApprovalHasMore(Boolean(page.hasMore));
-  }
-
-  async function loadApprovalPage(cursorAfterId?: string) {
-    setApprovalLoading(true);
-    try {
-      const page = await workorchApi.listApprovalPage({ cursorAfterId, limit: governancePageLimit });
-      applyApprovalPage(page, Boolean(cursorAfterId));
-    } finally {
-      setApprovalLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)));
-  }, []);
-
-  const openApprovalResolution = async (item: Approval, action: 'approve' | 'reject') => {
-    approvalForm.resetFields();
-    approvalForm.setFieldsValue({ operator: 'console' });
-    try {
-      const [approvalDetail, decisions] = await Promise.all([
-        workorchApi.readApproval(item.id),
-        workorchApi.listDecisionPage({ runId: item.runId, limit: governancePageLimit })
-      ]);
-      const relatedDecision = decisions
-        .decisions
-        ?.filter((decision) => decision.runId === item.runId && decision.state === 'resolved')
-        .at(-1);
-      setApprovalTarget({ item: approvalDetail, action, relatedDecision });
-    } catch (error) {
-      message.error(errorMessage(error));
-    }
-  };
-
-  const submitApprovalResolution = async () => {
-    if (!approvalTarget) {
-      return;
-    }
-    setApprovalSubmitting(true);
-    try {
-      await approvalForm.validateFields();
-      if (approvalTarget.action === 'approve') {
-        await workorchApi.approveApproval(approvalTarget.item.id);
-      } else {
-        await workorchApi.rejectApproval(approvalTarget.item.id);
-      }
-      const target = approvalTarget;
-      setApprovalTarget(undefined);
-      approvalForm.resetFields();
-      message.success(`审批${actionLabel(target.action)}，${modelLabels.run} 已由服务端转入后台继续`);
-      void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)));
-    } catch (error) {
-      message.error(errorMessage(error));
-    } finally {
-      setApprovalSubmitting(false);
-    }
-  };
-
-  const batchResolve = async (action: 'approve' | 'reject') => {
-    const approvalIds = selectedApprovalKeys.map(String);
-    if (approvalIds.length === 0) {
-      message.warning('请先选择待审批项');
-      return;
-    }
-    try {
-      await workorchApi.batchResolveApprovals(approvalIds, action);
-      message.success(`${approvalIds.length} 个审批项${actionLabel(action)}，相关${modelLabels.run}已由服务端转入后台继续`);
-      setSelectedApprovalKeys([]);
-      void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)));
-    } catch (error) {
-      message.error(errorMessage(error));
-    }
-  };
-
-  const columns: ProColumns<Approval>[] = [
-    { title: '审批 ID', dataIndex: 'id', copyable: true },
-    { title: '工作空间', dataIndex: 'workspaceId', copyable: true },
-    { title: '运行', dataIndex: 'runId', copyable: true },
-    { title: '步骤', dataIndex: 'stepId', copyable: true, ellipsis: true },
-    { title: '原因', dataIndex: 'reason', ellipsis: true },
-    { title: '自动治理', dataIndex: 'autoGovernance', render: (_, item) => item.autoGovernance ? stateTag(`${item.autoGovernance.status}:${item.autoGovernance.action}`) : '-' },
-    { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
-    {
-      title: '操作',
-      valueType: 'option',
-      render: (_, item) => item.state === 'pending' ? (
-        <Space wrap>
-          <Button size="small" type="primary" onClick={() => void openApprovalResolution(item, 'approve')}>审批确认</Button>
-          <Button size="small" danger onClick={() => void openApprovalResolution(item, 'reject')}>拒绝确认</Button>
-        </Space>
-      ) : stateTag(item.state)
-    }
-  ];
-
-  return (
-    <PageContainer
-      title="审批队列"
-      subTitle={`处理阻塞${modelLabels.run}的${modelLabels.approval}，批准后运行可继续推进，拒绝后运行失败收口`}
-      extra={(
-        <Space wrap>
-          <Button disabled={selectedApprovalKeys.length === 0} onClick={() => void batchResolve('approve')}>批量批准</Button>
-          <Button danger disabled={selectedApprovalKeys.length === 0} onClick={() => void batchResolve('reject')}>批量拒绝</Button>
-        </Space>
-      )}
-    >
-      <ProTable<Approval>
-        rowKey="id"
-        search={false}
-        options={false}
-        rowSelection={{
-          selectedRowKeys: selectedApprovalKeys,
-          onChange: setSelectedApprovalKeys,
-          getCheckboxProps: (record) => ({ disabled: record.state !== 'pending' })
-        }}
-        columns={columns}
-        loading={approvalLoading}
-        dataSource={approvalRecords}
-      />
-      <Space className="workorch-section">
-        <Button
-          size="small"
-          onClick={() => void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)))}
-          loading={approvalLoading}
-        >
-          刷新审批
-        </Button>
-        <Button
-          size="small"
-          disabled={!approvalHasMore || !approvalCursorAfterId}
-          onClick={() => void loadApprovalPage(approvalCursorAfterId).catch((error: unknown) => message.error(errorMessage(error)))}
-          loading={approvalLoading}
-        >
-          加载更多
-        </Button>
-      </Space>
-      <Modal
-        title={approvalTarget?.action === 'reject' ? '拒绝审批确认' : '审批确认'}
-        open={Boolean(approvalTarget)}
-        confirmLoading={approvalSubmitting}
-        onCancel={() => setApprovalTarget(undefined)}
-        onOk={() => void submitApprovalResolution()}
-        okText={approvalTarget?.action === 'reject' ? '拒绝并转入后台' : '批准并转入后台'}
-        okButtonProps={{ danger: approvalTarget?.action === 'reject' }}
-        destroyOnHidden
-      >
-        {approvalTarget ? (
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Descriptions
-              column={1}
-              size="small"
-              items={[
-                { key: 'approval', label: '审批 ID', children: approvalTarget.item.id },
-                { key: 'run', label: `关联${modelLabels.run}`, children: approvalTarget.item.runId },
-                { key: 'step', label: '步骤', children: approvalTarget.item.stepId || '-' },
-                { key: 'reason', label: '审批原因', children: approvalTarget.item.reason || '-' }
-              ]}
-            />
-            <Typography.Text type="secondary">已补充的决策信息</Typography.Text>
-            <pre className="json-panel">{compactJSON(approvalTarget.relatedDecision?.resolutionPayload)}</pre>
-            <Typography.Text type="secondary">自动治理摘要</Typography.Text>
-            <pre className="json-panel">{compactJSON(approvalTarget.item.autoGovernance)}</pre>
-            <Form form={approvalForm} layout="vertical">
-              <Form.Item name="operator" label="审批人" rules={[{ required: true, message: '请填写审批人' }]}>
-                <Input />
-              </Form.Item>
-              <Form.Item name="comment" label="审批意见">
-                <Input.TextArea rows={3} placeholder="记录本次审批判断依据，当前版本用于界面确认，不写入审批模型" />
-              </Form.Item>
-            </Form>
-          </Space>
-        ) : null}
-      </Modal>
-    </PageContainer>
-  );
-}
-
-function GovernanceQueuePage() {
-  return (
-    <PageContainer
-      title="治理队列"
-      subTitle={`统一处理人工决策与审批，确保阻塞${modelLabels.run}能按正式业务语义继续、失败或重新规划`}
-    >
-      <Tabs
-        items={[
-          {
-            key: 'decisions',
-            label: '决策工单',
-            children: <DecisionQueuePage />
-          },
-          {
-            key: 'approvals',
-            label: '审批处理',
-            children: <ApprovalQueuePage />
-          }
-        ]}
-      />
-    </PageContainer>
-  );
-}
 
 function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 'selectedWorkspaceId'>) {
   const { message } = AntApp.useApp();
@@ -7119,34 +6534,6 @@ function ConfigurationPage() {
             )}
           </ProCard>
         </Space>
-      </ProCard>
-    </PageContainer>
-  );
-}
-
-function ServicePage() {
-  const [health, setHealth] = useState<Record<string, string>>({});
-  const [ready, setReady] = useState<Record<string, string>>({});
-  const [metrics, setMetrics] = useState('');
-
-  useEffect(() => {
-    void workorchApi.healthz().then(setHealth);
-    void workorchApi.readyz().then(setReady);
-    void fetch('/metrics').then((response) => response.text()).then(setMetrics);
-  }, []);
-
-  return (
-    <PageContainer title="服务状态" subTitle="查看 workorch 健康状态、就绪状态和运行指标">
-      <ProCard gutter={16} wrap>
-        <ProCard title="健康检查" colSpan="50%">
-          <Descriptions items={Object.entries(health).map(([key, value]) => ({ key, label: key, children: value }))} column={1} />
-        </ProCard>
-        <ProCard title="就绪检查" colSpan="50%">
-          <Descriptions items={Object.entries(ready).map(([key, value]) => ({ key, label: key, children: value }))} column={1} />
-        </ProCard>
-      </ProCard>
-      <ProCard title={modelLabels.metrics} className="workorch-section">
-        <pre className="metrics-panel">{metrics}</pre>
       </ProCard>
     </PageContainer>
   );
