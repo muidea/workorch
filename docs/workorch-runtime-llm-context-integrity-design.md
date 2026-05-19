@@ -13,6 +13,7 @@
 - `docs/codex-like-llm-prompt-context-design.md`
 - `docs/workorch-codex-request-context-comparison.md`
 - `docs/model-aware-llm-context-budget-design.md`
+- `docs/workorch-llm-auto-context-profile-design.md`
 - `docs/workorch-runtime-neutral-repair-grounding-design.md`
 
 ## 设计目标

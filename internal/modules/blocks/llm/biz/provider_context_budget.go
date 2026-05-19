@@ -39,13 +39,15 @@ var providerP2InputKeys = []string{
 }
 
 func enforceProviderRequestBudget(request llmmodels.ProviderRequest) llmmodels.ProviderRequest {
-	profile := normalizedProviderContextProfile(request.Config.ContextProfile)
-	return enforceProviderRequestBudgetLimit(request, profile.BytesHardLimit)
+	return enforceProviderRequestBudgetLimit(request, 0)
 }
 
 func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxBytes int) llmmodels.ProviderRequest {
-	profile := normalizedProviderContextProfile(request.Config.ContextProfile)
+	baseProfile := normalizedProviderContextProfile(request.Config.ContextProfile)
+	profile, stageBudgetRatio, stageBudgetSource := stageAwareProviderContextProfile(baseProfile, request.Input)
 	if maxBytes <= 0 {
+		maxBytes = profile.BytesHardLimit
+	} else if profile.BytesHardLimit > 0 && profile.BytesHardLimit < maxBytes {
 		maxBytes = profile.BytesHardLimit
 	}
 	if maxBytes <= 0 {
@@ -123,7 +125,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	if p0Overflow {
 		rules = append(rules, "p0 overflow: goal/dod contract preserved without compression")
 	}
-	integrityWarnings := providerContextIntegrityWarnings(request.Input, protected, protectedRepairTargets, overBudget)
+	integrityWarnings := providerContextIntegrityWarnings(request.Input, protected, protectedRepairTargets, profile, overBudget)
 	truncated := len(rules) > 1 || overBudget
 	request.ContextBudget = &llmmodels.ProviderContextBudget{
 		MaxBytes:              maxBytes,
@@ -143,6 +145,12 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		GoalDoDCompressed:     goalDoDCompressed,
 		OverBudget:            overBudget,
 		P0Overflow:            p0Overflow,
+		ProfileMode:           profile.ProfileMode,
+		CapabilitySource:      profile.CapabilitySource,
+		ContextUtilization:    profile.ContextUtilizationRatio,
+		MaxRequestBytes:       profile.MaxRequestBytes,
+		StageBudgetRatio:      stageBudgetRatio,
+		StageBudgetSource:     stageBudgetSource,
 		TracePolicy:           providerContextTracePolicy,
 		PromptCaptured:        false,
 		Estimator:             "bytes_ratio",
@@ -151,6 +159,53 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		Profile:               profile,
 	}
 	return request
+}
+
+func stageAwareProviderContextProfile(profile llmmodels.ProviderContextProfile, input map[string]any) (llmmodels.ProviderContextProfile, float64, string) {
+	profile = normalizedProviderContextProfile(profile)
+	ratio, source := providerContextStageBudgetRatio(input)
+	if ratio <= 0 || ratio >= 1 {
+		return profile, 1, source
+	}
+	profile.MaxInputTokens = max(1, int(float64(profile.MaxInputTokens)*ratio))
+	profile.BytesHardLimit = max(1, int(float64(profile.BytesHardLimit)*ratio))
+	return profile, ratio, source
+}
+
+func providerContextStageBudgetRatio(input map[string]any) (float64, string) {
+	if boolValue(input["runtimeRepairFollowUp"]) {
+		return 1, "runtime_repair"
+	}
+	if boolValue(input["providerRetryFollowUp"]) {
+		return 0.5, "provider_retry"
+	}
+	stage := strings.TrimSpace(strings.ToLower(firstNonEmptyProviderContextString(
+		stringValue(input["runtimeStage"]),
+		stringValue(input["currentSoulStage"]),
+	)))
+	switch stage {
+	case "planning":
+		return 1, "stage_planning"
+	case "execution":
+		return 0.8, "stage_execution"
+	case "validation", "verification":
+		return 0.55, "stage_validation"
+	case "artifact", "result", "final":
+		return 0.5, "stage_artifact"
+	case "decision", "approval":
+		return 0.6, "stage_governance"
+	default:
+		return 1, "default"
+	}
+}
+
+func firstNonEmptyProviderContextString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func exceedsProviderBudget(request llmmodels.ProviderRequest, maxBytes, maxTokens int, tokensPerByte float64) bool {
@@ -552,7 +607,7 @@ func providerProtectedContextFields(input map[string]any) []string {
 	return uniqueStrings(fields)
 }
 
-func providerContextIntegrityWarnings(input map[string]any, protected protectedGoalDoD, repairTargets protectedProviderRepairTargets, overBudget bool) []string {
+func providerContextIntegrityWarnings(input map[string]any, protected protectedGoalDoD, repairTargets protectedProviderRepairTargets, profile llmmodels.ProviderContextProfile, overBudget bool) []string {
 	warnings := []string{}
 	if !isProtectedGoalDoDEqual(input, protected) {
 		warnings = append(warnings, "protected_goal_dod_changed_after_context_budget")

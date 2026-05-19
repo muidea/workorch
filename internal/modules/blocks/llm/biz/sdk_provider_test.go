@@ -41,6 +41,10 @@ func TestOpenAIProviderCompleteUsesOfficialSDKChatCompletions(t *testing.T) {
 		APIKey:   "secret-value",
 		Model:    "test-model",
 		Timeout:  5 * time.Second,
+		InferenceProfile: llmmodels.ProviderInferenceProfile{
+			MaxOutputTokens: 65536,
+			ReasoningEffort: "high",
+		},
 	})
 	result, err := provider.Complete(context.Background(), llmProviderRequest())
 	if err != nil {
@@ -54,6 +58,9 @@ func TestOpenAIProviderCompleteUsesOfficialSDKChatCompletions(t *testing.T) {
 	}
 	if gotPayload["model"] != "test-model" {
 		t.Fatalf("payload model = %v, want test-model", gotPayload["model"])
+	}
+	if gotPayload["max_completion_tokens"] != float64(65536) || gotPayload["reasoning_effort"] != "high" {
+		t.Fatalf("payload = %+v, want configured OpenAI inference profile", gotPayload)
 	}
 	if !strings.Contains(string(result.Payload), `"summary":"openai sdk done"`) {
 		t.Fatalf("payload = %s, want SDK decision content", result.Payload)
@@ -134,6 +141,10 @@ func TestAnthropicProviderCompleteUsesOfficialSDKMessages(t *testing.T) {
 		APIKey:   "secret-value",
 		Model:    "claude-test",
 		Timeout:  5 * time.Second,
+		InferenceProfile: llmmodels.ProviderInferenceProfile{
+			MaxOutputTokens:      65536,
+			ThinkingBudgetTokens: 32768,
+		},
 	})
 	result, err := provider.Complete(context.Background(), llmProviderRequest())
 	if err != nil {
@@ -147,6 +158,12 @@ func TestAnthropicProviderCompleteUsesOfficialSDKMessages(t *testing.T) {
 	}
 	if gotPayload["model"] != "claude-test" || gotPayload["max_tokens"] == nil || gotPayload["system"] == nil {
 		t.Fatalf("payload = %+v, want messages request with system prompt", gotPayload)
+	}
+	thinking, _ := gotPayload["thinking"].(map[string]any)
+	if gotPayload["max_tokens"] != float64(65536) ||
+		thinking["type"] != "enabled" ||
+		thinking["budget_tokens"] != float64(32768) {
+		t.Fatalf("payload = %+v, want configured Anthropic thinking profile", gotPayload)
 	}
 	if !strings.Contains(string(result.Payload), `"summary":"anthropic sdk done"`) {
 		t.Fatalf("payload = %s, want SDK decision content", result.Payload)

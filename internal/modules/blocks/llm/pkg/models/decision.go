@@ -64,6 +64,12 @@ type ProviderContextBudget struct {
 	GoalDoDCompressed     bool                   `json:"goalDoDCompressed,omitempty"`
 	OverBudget            bool                   `json:"overBudget,omitempty"`
 	P0Overflow            bool                   `json:"p0Overflow,omitempty"`
+	ProfileMode           string                 `json:"profileMode,omitempty"`
+	CapabilitySource      string                 `json:"capabilitySource,omitempty"`
+	ContextUtilization    float64                `json:"contextUtilizationRatio,omitempty"`
+	MaxRequestBytes       int                    `json:"maxRequestBytes,omitempty"`
+	StageBudgetRatio      float64                `json:"stageBudgetRatio,omitempty"`
+	StageBudgetSource     string                 `json:"stageBudgetSource,omitempty"`
 	TracePolicy           string                 `json:"tracePolicy,omitempty"`
 	PromptCaptured        bool                   `json:"promptCaptured"`
 	Estimator             string                 `json:"estimator,omitempty"`
@@ -75,15 +81,19 @@ type ProviderContextBudget struct {
 }
 
 type ProviderContextProfile struct {
-	ContextWindowTokens    int     `json:"contextWindowTokens,omitempty"`
-	MaxInputTokens         int     `json:"maxInputTokens,omitempty"`
-	ReservedOutputTokens   int     `json:"reservedOutputTokens,omitempty"`
-	SafetyRatio            float64 `json:"safetyRatio,omitempty"`
-	BytesHardLimit         int     `json:"bytesHardLimit,omitempty"`
-	EstimatedTokensPerByte float64 `json:"estimatedTokensPerByte,omitempty"`
-	InputTokenPrice        float64 `json:"inputTokenPrice,omitempty"`
-	OutputTokenPrice       float64 `json:"outputTokenPrice,omitempty"`
-	Currency               string  `json:"currency,omitempty"`
+	ProfileMode             string  `json:"profileMode,omitempty"`
+	CapabilitySource        string  `json:"capabilitySource,omitempty"`
+	ContextWindowTokens     int     `json:"contextWindowTokens,omitempty"`
+	MaxInputTokens          int     `json:"maxInputTokens,omitempty"`
+	ReservedOutputTokens    int     `json:"reservedOutputTokens,omitempty"`
+	SafetyRatio             float64 `json:"safetyRatio,omitempty"`
+	ContextUtilizationRatio float64 `json:"contextUtilizationRatio,omitempty"`
+	BytesHardLimit          int     `json:"bytesHardLimit,omitempty"`
+	MaxRequestBytes         int     `json:"maxRequestBytes,omitempty"`
+	EstimatedTokensPerByte  float64 `json:"estimatedTokensPerByte,omitempty"`
+	InputTokenPrice         float64 `json:"inputTokenPrice,omitempty"`
+	OutputTokenPrice        float64 `json:"outputTokenPrice,omitempty"`
+	Currency                string  `json:"currency,omitempty"`
 }
 
 type ProviderUsage struct {

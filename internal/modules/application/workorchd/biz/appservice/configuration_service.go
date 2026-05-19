@@ -49,29 +49,38 @@ type RuntimeConfiguration struct {
 }
 
 type LLMConfiguration struct {
-	DefaultProviderID          string                     `json:"defaultProviderId"`
-	DefaultEmbeddingProviderID string                     `json:"defaultEmbeddingProviderId,omitempty"`
-	Providers                  []LLMProviderConfiguration `json:"providers"`
-	ProviderTemplates          []LLMProviderTemplate      `json:"providerTemplates"`
+	DefaultProviderID          string                            `json:"defaultProviderId"`
+	DefaultEmbeddingProviderID string                            `json:"defaultEmbeddingProviderId,omitempty"`
+	ModelCapabilities          []LLMModelCapabilityConfiguration `json:"modelCapabilities,omitempty"`
+	Providers                  []LLMProviderConfiguration        `json:"providers"`
+	ProviderTemplates          []LLMProviderTemplate             `json:"providerTemplates"`
+}
+
+type LLMModelCapabilityConfiguration struct {
+	ID                  string `json:"id"`
+	Provider            string `json:"provider,omitempty"`
+	ModelPattern        string `json:"modelPattern"`
+	ContextWindowTokens int    `json:"contextWindowTokens"`
 }
 
 type LLMProviderConfiguration struct {
-	ID                string                           `json:"id"`
-	Provider          string                           `json:"provider,omitempty"`
-	BaseURL           string                           `json:"baseUrl,omitempty"`
-	Model             string                           `json:"model,omitempty"`
-	Timeout           string                           `json:"timeout,omitempty"`
-	Disabled          bool                             `json:"disabled"`
-	Ready             bool                             `json:"ready"`
-	Reason            string                           `json:"reason,omitempty"`
-	Default           bool                             `json:"default"`
-	APIKeyConfigured  bool                             `json:"apiKeyConfigured"`
-	ChatCompletions   bool                             `json:"chatCompletions"`
-	Streaming         bool                             `json:"streaming"`
-	NonChatOperations []string                         `json:"nonChatOperations,omitempty"`
-	FailoverEnabled   bool                             `json:"failoverEnabled"`
-	FailoverProviders []string                         `json:"failoverProviders,omitempty"`
-	ContextProfile    llmmodels.ProviderContextProfile `json:"contextProfile,omitempty"`
+	ID                string                             `json:"id"`
+	Provider          string                             `json:"provider,omitempty"`
+	BaseURL           string                             `json:"baseUrl,omitempty"`
+	Model             string                             `json:"model,omitempty"`
+	Timeout           string                             `json:"timeout,omitempty"`
+	Disabled          bool                               `json:"disabled"`
+	Ready             bool                               `json:"ready"`
+	Reason            string                             `json:"reason,omitempty"`
+	Default           bool                               `json:"default"`
+	APIKeyConfigured  bool                               `json:"apiKeyConfigured"`
+	ChatCompletions   bool                               `json:"chatCompletions"`
+	Streaming         bool                               `json:"streaming"`
+	NonChatOperations []string                           `json:"nonChatOperations,omitempty"`
+	FailoverEnabled   bool                               `json:"failoverEnabled"`
+	FailoverProviders []string                           `json:"failoverProviders,omitempty"`
+	InferenceProfile  llmmodels.ProviderInferenceProfile `json:"inferenceProfile,omitempty"`
+	ContextProfile    llmmodels.ProviderContextProfile   `json:"contextProfile,omitempty"`
 }
 
 type LLMProviderTemplate struct {
@@ -155,9 +164,10 @@ type GovernanceBudgetConfiguration struct {
 }
 
 type UpdateLLMConfigurationCommand struct {
-	DefaultProviderID          *string                           `json:"defaultProviderId,omitempty"`
-	DefaultEmbeddingProviderID *string                           `json:"defaultEmbeddingProviderId,omitempty"`
-	Providers                  *[]UpdateLLMProviderConfiguration `json:"providers,omitempty"`
+	DefaultProviderID          *string                            `json:"defaultProviderId,omitempty"`
+	DefaultEmbeddingProviderID *string                            `json:"defaultEmbeddingProviderId,omitempty"`
+	ModelCapabilities          *[]LLMModelCapabilityConfiguration `json:"modelCapabilities,omitempty"`
+	Providers                  *[]UpdateLLMProviderConfiguration  `json:"providers,omitempty"`
 }
 
 type UpdateServerConfigurationCommand struct {
@@ -165,19 +175,20 @@ type UpdateServerConfigurationCommand struct {
 }
 
 type UpdateLLMProviderConfiguration struct {
-	ID                string                            `json:"id"`
-	Provider          *string                           `json:"provider,omitempty"`
-	BaseURL           *string                           `json:"baseUrl,omitempty"`
-	APIKey            *string                           `json:"apiKey,omitempty"`
-	Model             *string                           `json:"model,omitempty"`
-	Timeout           *string                           `json:"timeout,omitempty"`
-	Disabled          *bool                             `json:"disabled,omitempty"`
-	ChatCompletions   *bool                             `json:"chatCompletions,omitempty"`
-	Streaming         *bool                             `json:"streaming,omitempty"`
-	NonChatOperations []string                          `json:"nonChatOperations,omitempty"`
-	FailoverEnabled   *bool                             `json:"failoverEnabled,omitempty"`
-	FailoverProviders []string                          `json:"failoverProviders,omitempty"`
-	ContextProfile    *llmmodels.ProviderContextProfile `json:"contextProfile,omitempty"`
+	ID                string                              `json:"id"`
+	Provider          *string                             `json:"provider,omitempty"`
+	BaseURL           *string                             `json:"baseUrl,omitempty"`
+	APIKey            *string                             `json:"apiKey,omitempty"`
+	Model             *string                             `json:"model,omitempty"`
+	Timeout           *string                             `json:"timeout,omitempty"`
+	Disabled          *bool                               `json:"disabled,omitempty"`
+	ChatCompletions   *bool                               `json:"chatCompletions,omitempty"`
+	Streaming         *bool                               `json:"streaming,omitempty"`
+	NonChatOperations []string                            `json:"nonChatOperations,omitempty"`
+	FailoverEnabled   *bool                               `json:"failoverEnabled,omitempty"`
+	FailoverProviders []string                            `json:"failoverProviders,omitempty"`
+	InferenceProfile  *llmmodels.ProviderInferenceProfile `json:"inferenceProfile,omitempty"`
+	ContextProfile    *llmmodels.ProviderContextProfile   `json:"contextProfile,omitempty"`
 }
 
 type UpdateWebSearchConfigurationCommand struct {
@@ -230,6 +241,7 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 			NonChatOperations: append([]string(nil), redacted.Capabilities.NonChatOperations...),
 			FailoverEnabled:   redacted.Failover.Enabled,
 			FailoverProviders: append([]string(nil), redacted.Failover.Providers...),
+			InferenceProfile:  redacted.InferenceProfile,
 			ContextProfile:    redacted.ContextProfile,
 		})
 	}
@@ -295,6 +307,7 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 		LLM: LLMConfiguration{
 			DefaultProviderID:          defaultProviderID,
 			DefaultEmbeddingProviderID: strings.TrimSpace(cfg.LLM.DefaultEmbeddingProvider),
+			ModelCapabilities:          modelCapabilityConfigurations(cfg.LLM.ModelCapabilities),
 			Providers:                  providers,
 			ProviderTemplates:          DefaultLLMProviderTemplates(),
 		},
@@ -424,6 +437,13 @@ func UpdateLLMConfiguration(cmd UpdateLLMConfigurationCommand) (ServiceConfigura
 			return ServiceConfiguration{}, err
 		}
 	}
+	modelCapabilities := cloneLLMModelCapabilityConfigs(cfg.LLM.ModelCapabilities)
+	if cmd.ModelCapabilities != nil {
+		modelCapabilities, err = updatedLLMModelCapabilities(*cmd.ModelCapabilities)
+		if err != nil {
+			return ServiceConfiguration{}, err
+		}
+	}
 	defaultProviderID := strings.TrimSpace(cfg.LLM.DefaultProvider)
 	if cmd.DefaultProviderID != nil {
 		defaultProviderID = strings.TrimSpace(*cmd.DefaultProviderID)
@@ -456,6 +476,7 @@ func UpdateLLMConfiguration(cmd UpdateLLMConfigurationCommand) (ServiceConfigura
 	}
 	cfg.LLM.DefaultProvider = defaultProviderID
 	cfg.LLM.DefaultEmbeddingProvider = defaultEmbeddingProviderID
+	cfg.LLM.ModelCapabilities = modelCapabilities
 	cfg.LLM.Providers = providers
 	if err := workorchconfig.Save(cfg); err != nil {
 		return ServiceConfiguration{}, err
@@ -597,12 +618,21 @@ func updatedLLMProviders(existing map[string]workorchconfig.LLMProviderConfig, u
 		if update.FailoverProviders != nil {
 			next.FailoverProviders = normalizedProviderOperations(update.FailoverProviders)
 		}
+		if update.InferenceProfile != nil {
+			next.Temperature = cloneFloat64Ptr(update.InferenceProfile.Temperature)
+			next.MaxOutputTokens = update.InferenceProfile.MaxOutputTokens
+			next.ReasoningEffort = update.InferenceProfile.ReasoningEffort
+			next.ThinkingBudgetTokens = update.InferenceProfile.ThinkingBudgetTokens
+		}
 		if update.ContextProfile != nil {
+			next.ContextProfileMode = update.ContextProfile.ProfileMode
 			next.ContextWindowTokens = update.ContextProfile.ContextWindowTokens
 			next.MaxInputTokens = update.ContextProfile.MaxInputTokens
 			next.ReservedOutputTokens = update.ContextProfile.ReservedOutputTokens
 			next.SafetyRatio = update.ContextProfile.SafetyRatio
+			next.ContextUtilizationRatio = update.ContextProfile.ContextUtilizationRatio
 			next.BytesHardLimit = update.ContextProfile.BytesHardLimit
+			next.MaxRequestBytes = update.ContextProfile.MaxRequestBytes
 			next.EstimatedTokensPerByte = update.ContextProfile.EstimatedTokensPerByte
 			next.InputTokenPrice = update.ContextProfile.InputTokenPrice
 			next.OutputTokenPrice = update.ContextProfile.OutputTokenPrice
@@ -625,6 +655,50 @@ func normalizedProviderOperations(values []string) []string {
 		ret = append(ret, value)
 	}
 	return ret
+}
+
+func modelCapabilityConfigurations(source map[string]workorchconfig.LLMModelCapabilityConfig) []LLMModelCapabilityConfiguration {
+	ret := make([]LLMModelCapabilityConfiguration, 0, len(source))
+	for id, capability := range source {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		ret = append(ret, LLMModelCapabilityConfiguration{
+			ID:                  id,
+			Provider:            strings.TrimSpace(capability.Provider),
+			ModelPattern:        strings.TrimSpace(capability.ModelPattern),
+			ContextWindowTokens: capability.ContextWindowTokens,
+		})
+	}
+	sort.Slice(ret, func(i, j int) bool { return ret[i].ID < ret[j].ID })
+	return ret
+}
+
+func updatedLLMModelCapabilities(updates []LLMModelCapabilityConfiguration) (map[string]workorchconfig.LLMModelCapabilityConfig, error) {
+	ret := make(map[string]workorchconfig.LLMModelCapabilityConfig, len(updates))
+	for _, update := range updates {
+		id := strings.TrimSpace(update.ID)
+		if id == "" {
+			return nil, fmt.Errorf("%w: LLM model capability id is required", common.ErrInvalidArgument)
+		}
+		if _, exists := ret[id]; exists {
+			return nil, fmt.Errorf("%w: duplicate LLM model capability id %q", common.ErrInvalidArgument, id)
+		}
+		modelPattern := strings.TrimSpace(update.ModelPattern)
+		if modelPattern == "" {
+			return nil, fmt.Errorf("%w: LLM model capability modelPattern is required", common.ErrInvalidArgument)
+		}
+		if update.ContextWindowTokens <= 0 {
+			return nil, fmt.Errorf("%w: LLM model capability contextWindowTokens must be positive", common.ErrInvalidArgument)
+		}
+		ret[id] = workorchconfig.LLMModelCapabilityConfig{
+			Provider:            strings.TrimSpace(update.Provider),
+			ModelPattern:        modelPattern,
+			ContextWindowTokens: update.ContextWindowTokens,
+		}
+	}
+	return ret, nil
 }
 
 func updatedWebSearchProviders(existing map[string]workorchconfig.WebSearchProviderConfig, updates []UpdateWebSearchProviderConfiguration) (map[string]workorchconfig.WebSearchProviderConfig, error) {
@@ -702,29 +776,59 @@ func cloneLLMProviderConfigs(source map[string]workorchconfig.LLMProviderConfig)
 	return ret
 }
 
+func cloneLLMModelCapabilityConfigs(source map[string]workorchconfig.LLMModelCapabilityConfig) map[string]workorchconfig.LLMModelCapabilityConfig {
+	if len(source) == 0 {
+		return map[string]workorchconfig.LLMModelCapabilityConfig{}
+	}
+	ret := make(map[string]workorchconfig.LLMModelCapabilityConfig, len(source))
+	for id, capability := range source {
+		ret[id] = workorchconfig.LLMModelCapabilityConfig{
+			Provider:            capability.Provider,
+			ModelPattern:        capability.ModelPattern,
+			ContextWindowTokens: capability.ContextWindowTokens,
+		}
+	}
+	return ret
+}
+
 func cloneLLMProviderConfig(source workorchconfig.LLMProviderConfig) workorchconfig.LLMProviderConfig {
 	return workorchconfig.LLMProviderConfig{
-		Provider:               source.Provider,
-		BaseURL:                source.BaseURL,
-		APIKey:                 source.APIKey,
-		Model:                  source.Model,
-		Timeout:                source.Timeout,
-		Disabled:               cloneBoolPtr(source.Disabled),
-		ChatCompletions:        cloneBoolPtr(source.ChatCompletions),
-		Streaming:              cloneBoolPtr(source.Streaming),
-		NonChatOperations:      append([]string(nil), source.NonChatOperations...),
-		FailoverEnabled:        cloneBoolPtr(source.FailoverEnabled),
-		FailoverProviders:      append([]string(nil), source.FailoverProviders...),
-		ContextWindowTokens:    source.ContextWindowTokens,
-		MaxInputTokens:         source.MaxInputTokens,
-		ReservedOutputTokens:   source.ReservedOutputTokens,
-		SafetyRatio:            source.SafetyRatio,
-		BytesHardLimit:         source.BytesHardLimit,
-		EstimatedTokensPerByte: source.EstimatedTokensPerByte,
-		InputTokenPrice:        source.InputTokenPrice,
-		OutputTokenPrice:       source.OutputTokenPrice,
-		Currency:               source.Currency,
+		Provider:                source.Provider,
+		BaseURL:                 source.BaseURL,
+		APIKey:                  source.APIKey,
+		Model:                   source.Model,
+		Timeout:                 source.Timeout,
+		Disabled:                cloneBoolPtr(source.Disabled),
+		ChatCompletions:         cloneBoolPtr(source.ChatCompletions),
+		Streaming:               cloneBoolPtr(source.Streaming),
+		NonChatOperations:       append([]string(nil), source.NonChatOperations...),
+		FailoverEnabled:         cloneBoolPtr(source.FailoverEnabled),
+		FailoverProviders:       append([]string(nil), source.FailoverProviders...),
+		Temperature:             cloneFloat64Ptr(source.Temperature),
+		MaxOutputTokens:         source.MaxOutputTokens,
+		ReasoningEffort:         source.ReasoningEffort,
+		ThinkingBudgetTokens:    source.ThinkingBudgetTokens,
+		ContextProfileMode:      source.ContextProfileMode,
+		ContextWindowTokens:     source.ContextWindowTokens,
+		MaxInputTokens:          source.MaxInputTokens,
+		ReservedOutputTokens:    source.ReservedOutputTokens,
+		SafetyRatio:             source.SafetyRatio,
+		ContextUtilizationRatio: source.ContextUtilizationRatio,
+		BytesHardLimit:          source.BytesHardLimit,
+		MaxRequestBytes:         source.MaxRequestBytes,
+		EstimatedTokensPerByte:  source.EstimatedTokensPerByte,
+		InputTokenPrice:         source.InputTokenPrice,
+		OutputTokenPrice:        source.OutputTokenPrice,
+		Currency:                source.Currency,
 	}
+}
+
+func cloneFloat64Ptr(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func cloneWebSearchProviderConfigs(source map[string]workorchconfig.WebSearchProviderConfig) map[string]workorchconfig.WebSearchProviderConfig {

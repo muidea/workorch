@@ -13,6 +13,15 @@ WorkOrch 已有基础的 LLM provider request 上下文保护和 provider timeou
 - workspace 维度的 LLM usage / cost ledger。
 - 统一的 read model 投影与可观测性。
 
+自动模型能力解析与阶段感知预算的细化设计见：
+
+- `docs/workorch-llm-auto-context-profile-design.md`
+
+该补充文档同时约束两类配置必须保持 provider 层中立：
+
+- `llm.modelCapabilities`: 具体模型上下文窗口能力表，禁止在代码中硬编码模型名。
+- provider inference profile: `temperature`、`maxOutputTokens`、`reasoningEffort`、`thinkingBudgetTokens`，由 LLM adapter 映射到不同厂商请求字段。
+
 ## 设计目标
 
 - 不使用单一全局 context 上限。
@@ -306,4 +315,3 @@ streaming 的价值是：
 - streaming 事件投影
 - usage ledger
 - read model 展示边界
-

@@ -116,6 +116,48 @@ func TestEnforceProviderRequestBudgetDoesNotMarkSmallRequestTruncated(t *testing
 	}
 }
 
+func TestEnforceProviderRequestBudgetAppliesStageAwareBudget(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-stage-budget",
+		RunID:       "run-stage-budget",
+		StepID:      "run-stage-budget/validation-1",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"currentSoulStage": "validation",
+			"executionContext": map[string]any{
+				"goal": map[string]any{"text": "small"},
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ProfileMode:             contextProfileModeAuto,
+				CapabilitySource:        contextCapabilitySourceModelRegistry,
+				ContextWindowTokens:     1_000_000,
+				MaxInputTokens:          800_000,
+				ReservedOutputTokens:    65_536,
+				SafetyRatio:             0.8,
+				ContextUtilizationRatio: 0.75,
+				BytesHardLimit:          4_000_000,
+				MaxRequestBytes:         4_194_304,
+				EstimatedTokensPerByte:  0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget metadata missing")
+	}
+	if got.ContextBudget.MaxTokens != 440_000 ||
+		got.ContextBudget.MaxBytes != 2_200_000 ||
+		got.ContextBudget.StageBudgetRatio != 0.55 ||
+		got.ContextBudget.StageBudgetSource != "stage_validation" {
+		t.Fatalf("contextBudget = %+v, want validation stage budget ratio applied", got.ContextBudget)
+	}
+}
+
 func TestEnforceProviderRequestBudgetCompactsWhenTokenBudgetExceeded(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-token",

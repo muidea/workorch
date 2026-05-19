@@ -2,6 +2,7 @@ package workorchconfig
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -49,32 +50,46 @@ type RuntimeConfig struct {
 }
 
 type LLMConfig struct {
-	DefaultProvider          string                       `json:"defaultProvider" toml:"defaultProvider"`
-	DefaultEmbeddingProvider string                       `json:"defaultEmbeddingProvider" toml:"defaultEmbeddingProvider"`
-	Providers                map[string]LLMProviderConfig `json:"providers" toml:"providers"`
+	DefaultProvider          string                              `json:"defaultProvider" toml:"defaultProvider"`
+	DefaultEmbeddingProvider string                              `json:"defaultEmbeddingProvider" toml:"defaultEmbeddingProvider"`
+	ModelCapabilities        map[string]LLMModelCapabilityConfig `json:"modelCapabilities" toml:"modelCapabilities"`
+	Providers                map[string]LLMProviderConfig        `json:"providers" toml:"providers"`
+}
+
+type LLMModelCapabilityConfig struct {
+	Provider            string `json:"provider" toml:"provider"`
+	ModelPattern        string `json:"modelPattern" toml:"modelPattern"`
+	ContextWindowTokens int    `json:"contextWindowTokens" toml:"contextWindowTokens"`
 }
 
 type LLMProviderConfig struct {
-	Provider               string   `json:"provider" toml:"provider"`
-	BaseURL                string   `json:"baseURL" toml:"baseURL"`
-	APIKey                 string   `json:"apiKey" toml:"apiKey"`
-	Model                  string   `json:"model" toml:"model"`
-	Timeout                string   `json:"timeout" toml:"timeout"`
-	Disabled               *bool    `json:"disabled" toml:"disabled"`
-	ChatCompletions        *bool    `json:"chatCompletions" toml:"chatCompletions"`
-	Streaming              *bool    `json:"streaming" toml:"streaming"`
-	NonChatOperations      []string `json:"nonChatOperations" toml:"nonChatOperations"`
-	FailoverEnabled        *bool    `json:"failoverEnabled" toml:"failoverEnabled"`
-	FailoverProviders      []string `json:"failoverProviders" toml:"failoverProviders"`
-	ContextWindowTokens    int      `json:"contextWindowTokens" toml:"contextWindowTokens"`
-	MaxInputTokens         int      `json:"maxInputTokens" toml:"maxInputTokens"`
-	ReservedOutputTokens   int      `json:"reservedOutputTokens" toml:"reservedOutputTokens"`
-	SafetyRatio            float64  `json:"safetyRatio" toml:"safetyRatio"`
-	BytesHardLimit         int      `json:"bytesHardLimit" toml:"bytesHardLimit"`
-	EstimatedTokensPerByte float64  `json:"estimatedTokensPerByte" toml:"estimatedTokensPerByte"`
-	InputTokenPrice        float64  `json:"inputTokenPrice" toml:"inputTokenPrice"`
-	OutputTokenPrice       float64  `json:"outputTokenPrice" toml:"outputTokenPrice"`
-	Currency               string   `json:"currency" toml:"currency"`
+	Provider                string   `json:"provider" toml:"provider"`
+	BaseURL                 string   `json:"baseURL" toml:"baseURL"`
+	APIKey                  string   `json:"apiKey" toml:"apiKey"`
+	Model                   string   `json:"model" toml:"model"`
+	Timeout                 string   `json:"timeout" toml:"timeout"`
+	Disabled                *bool    `json:"disabled" toml:"disabled"`
+	ChatCompletions         *bool    `json:"chatCompletions" toml:"chatCompletions"`
+	Streaming               *bool    `json:"streaming" toml:"streaming"`
+	NonChatOperations       []string `json:"nonChatOperations" toml:"nonChatOperations"`
+	Temperature             *float64 `json:"temperature" toml:"temperature"`
+	MaxOutputTokens         int      `json:"maxOutputTokens" toml:"maxOutputTokens"`
+	ReasoningEffort         string   `json:"reasoningEffort" toml:"reasoningEffort"`
+	ThinkingBudgetTokens    int      `json:"thinkingBudgetTokens" toml:"thinkingBudgetTokens"`
+	FailoverEnabled         *bool    `json:"failoverEnabled" toml:"failoverEnabled"`
+	FailoverProviders       []string `json:"failoverProviders" toml:"failoverProviders"`
+	ContextProfileMode      string   `json:"contextProfileMode" toml:"contextProfileMode"`
+	ContextWindowTokens     int      `json:"contextWindowTokens" toml:"contextWindowTokens"`
+	MaxInputTokens          int      `json:"maxInputTokens" toml:"maxInputTokens"`
+	ReservedOutputTokens    int      `json:"reservedOutputTokens" toml:"reservedOutputTokens"`
+	SafetyRatio             float64  `json:"safetyRatio" toml:"safetyRatio"`
+	ContextUtilizationRatio float64  `json:"contextUtilizationRatio" toml:"contextUtilizationRatio"`
+	BytesHardLimit          int      `json:"bytesHardLimit" toml:"bytesHardLimit"`
+	MaxRequestBytes         int      `json:"maxRequestBytes" toml:"maxRequestBytes"`
+	EstimatedTokensPerByte  float64  `json:"estimatedTokensPerByte" toml:"estimatedTokensPerByte"`
+	InputTokenPrice         float64  `json:"inputTokenPrice" toml:"inputTokenPrice"`
+	OutputTokenPrice        float64  `json:"outputTokenPrice" toml:"outputTokenPrice"`
+	Currency                string   `json:"currency" toml:"currency"`
 }
 
 type WebSearchConfig struct {
@@ -184,6 +199,9 @@ func Save(next Config) error {
 	if next.LLM.Providers == nil {
 		next.LLM.Providers = map[string]LLMProviderConfig{}
 	}
+	if next.LLM.ModelCapabilities == nil {
+		next.LLM.ModelCapabilities = map[string]LLMModelCapabilityConfig{}
+	}
 	if next.WebSearch.Providers == nil {
 		next.WebSearch.Providers = map[string]WebSearchProviderConfig{}
 	}
@@ -235,9 +253,59 @@ func (c Config) LLMProviderValueSets() map[string]map[string]string {
 		if id == "" {
 			continue
 		}
-		ret[id] = llmProviderValues(provider)
+		values := llmProviderValues(provider)
+		if provider.ContextWindowTokens <= 0 {
+			if capability, ok := c.LLM.ResolveModelCapability(provider.Provider, provider.Model); ok && capability.ContextWindowTokens > 0 {
+				values["contextWindowTokens"] = intString(capability.ContextWindowTokens)
+				values["contextCapabilitySource"] = "model_registry"
+			}
+		}
+		ret[id] = values
 	}
 	return ret
+}
+
+func (c LLMConfig) ResolveModelCapability(provider string, model string) (LLMModelCapabilityConfig, bool) {
+	provider = normalizeCapabilityMatchValue(provider)
+	model = normalizeCapabilityMatchValue(model)
+	if model == "" {
+		return LLMModelCapabilityConfig{}, false
+	}
+	for _, capability := range c.ModelCapabilities {
+		if capability.ContextWindowTokens <= 0 {
+			continue
+		}
+		if capability.Provider != "" && normalizeCapabilityMatchValue(capability.Provider) != provider {
+			continue
+		}
+		if modelPatternMatches(capability.ModelPattern, model) {
+			return capability, true
+		}
+	}
+	return LLMModelCapabilityConfig{}, false
+}
+
+func modelPatternMatches(patternValue string, model string) bool {
+	patternValue = normalizeCapabilityMatchValue(patternValue)
+	if patternValue == "" {
+		return false
+	}
+	if patternValue == "*" {
+		return true
+	}
+	if strings.ContainsAny(patternValue, "*?[") {
+		if matched, err := path.Match(patternValue, model); err == nil && matched {
+			return true
+		}
+	}
+	return patternValue == model || strings.Contains(model, patternValue)
+}
+
+func normalizeCapabilityMatchValue(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "_", "-")
+	value = strings.ReplaceAll(value, " ", "-")
+	return value
 }
 
 func (c Config) WebSearchProviderValues() map[string]string {
@@ -264,6 +332,9 @@ func llmProviderValues(provider LLMProviderConfig) map[string]string {
 	set(values, "apiKey", provider.APIKey)
 	set(values, "model", provider.Model)
 	set(values, "timeout", provider.Timeout)
+	if strings.TrimSpace(provider.ContextProfileMode) != "" {
+		values["contextProfileMode"] = strings.TrimSpace(provider.ContextProfileMode)
+	}
 	if provider.ContextWindowTokens > 0 {
 		values["contextWindowTokens"] = intString(provider.ContextWindowTokens)
 	}
@@ -276,8 +347,14 @@ func llmProviderValues(provider LLMProviderConfig) map[string]string {
 	if provider.SafetyRatio > 0 {
 		values["safetyRatio"] = formatFloat(provider.SafetyRatio)
 	}
+	if provider.ContextUtilizationRatio > 0 {
+		values["contextUtilizationRatio"] = formatFloat(provider.ContextUtilizationRatio)
+	}
 	if provider.BytesHardLimit > 0 {
 		values["bytesHardLimit"] = intString(provider.BytesHardLimit)
+	}
+	if provider.MaxRequestBytes > 0 {
+		values["maxRequestBytes"] = intString(provider.MaxRequestBytes)
 	}
 	if provider.EstimatedTokensPerByte > 0 {
 		values["estimatedTokensPerByte"] = formatFloat(provider.EstimatedTokensPerByte)
@@ -304,6 +381,16 @@ func llmProviderValues(provider LLMProviderConfig) map[string]string {
 	}
 	if len(provider.NonChatOperations) > 0 {
 		values["nonChatOperations"] = strings.Join(provider.NonChatOperations, ",")
+	}
+	if provider.Temperature != nil {
+		values["temperature"] = formatFloat(*provider.Temperature)
+	}
+	if provider.MaxOutputTokens > 0 {
+		values["maxOutputTokens"] = intString(provider.MaxOutputTokens)
+	}
+	set(values, "reasoningEffort", provider.ReasoningEffort)
+	if provider.ThinkingBudgetTokens > 0 {
+		values["thinkingBudgetTokens"] = intString(provider.ThinkingBudgetTokens)
 	}
 	if provider.FailoverEnabled != nil {
 		values["failoverEnabled"] = boolString(*provider.FailoverEnabled)

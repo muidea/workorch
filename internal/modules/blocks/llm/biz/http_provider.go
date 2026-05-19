@@ -50,10 +50,13 @@ func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderR
 		return llmmodels.ProviderCompletionResult{}, err
 	}
 	payload, err := json.Marshal(chatCompletionRequest{
-		Model:          p.config.Model,
-		Messages:       chatMessagesForRequest(&request),
-		Temperature:    0,
-		ResponseFormat: map[string]string{"type": "json_object"},
+		Model:               p.config.Model,
+		Messages:            chatMessagesForRequest(&request),
+		Temperature:         providerTemperature(p.config),
+		MaxCompletionTokens: maxOutputTokens(p.config),
+		ReasoningEffort:     p.config.InferenceProfile.ReasoningEffort,
+		Thinking:            compatibleThinkingConfig(p.config),
+		ResponseFormat:      map[string]string{"type": "json_object"},
 	})
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
@@ -102,12 +105,15 @@ func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.Pro
 		return llmmodels.ProviderCompletionResult{}, err
 	}
 	payload, err := json.Marshal(chatCompletionRequest{
-		Model:          p.config.Model,
-		Messages:       chatMessagesForRequest(&request),
-		Temperature:    0,
-		ResponseFormat: map[string]string{"type": "json_object"},
-		Stream:         true,
-		StreamOptions:  &chatCompletionStreamOptions{IncludeUsage: true},
+		Model:               p.config.Model,
+		Messages:            chatMessagesForRequest(&request),
+		Temperature:         providerTemperature(p.config),
+		MaxCompletionTokens: maxOutputTokens(p.config),
+		ReasoningEffort:     p.config.InferenceProfile.ReasoningEffort,
+		Thinking:            compatibleThinkingConfig(p.config),
+		ResponseFormat:      map[string]string{"type": "json_object"},
+		Stream:              true,
+		StreamOptions:       &chatCompletionStreamOptions{IncludeUsage: true},
 	})
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
@@ -204,12 +210,20 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 }
 
 type chatCompletionRequest struct {
-	Model          string                       `json:"model"`
-	Messages       []chatCompletionMessage      `json:"messages"`
-	Temperature    float64                      `json:"temperature"`
-	ResponseFormat map[string]string            `json:"response_format,omitempty"`
-	Stream         bool                         `json:"stream,omitempty"`
-	StreamOptions  *chatCompletionStreamOptions `json:"stream_options,omitempty"`
+	Model               string                         `json:"model"`
+	Messages            []chatCompletionMessage        `json:"messages"`
+	Temperature         float64                        `json:"temperature"`
+	MaxCompletionTokens int64                          `json:"max_completion_tokens,omitempty"`
+	ReasoningEffort     string                         `json:"reasoning_effort,omitempty"`
+	Thinking            *compatibleThinkingConfigParam `json:"thinking,omitempty"`
+	ResponseFormat      map[string]string              `json:"response_format,omitempty"`
+	Stream              bool                           `json:"stream,omitempty"`
+	StreamOptions       *chatCompletionStreamOptions   `json:"stream_options,omitempty"`
+}
+
+type compatibleThinkingConfigParam struct {
+	Type         string `json:"type"`
+	BudgetTokens int64  `json:"budget_tokens"`
 }
 
 type chatCompletionMessage struct {

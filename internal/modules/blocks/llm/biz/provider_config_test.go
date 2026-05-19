@@ -43,7 +43,9 @@ func TestLoadProviderConfigAcceptsCompatibleProvider(t *testing.T) {
 		cfg.ContextProfile.MaxInputTokens != defaultContextWindowTokens-defaultReservedOutputTokens ||
 		cfg.ContextProfile.ReservedOutputTokens != defaultReservedOutputTokens ||
 		cfg.ContextProfile.SafetyRatio != defaultContextSafetyRatio ||
+		cfg.ContextProfile.ContextUtilizationRatio != defaultContextUtilizationRatio ||
 		cfg.ContextProfile.BytesHardLimit != defaultContextBytesHardLimit ||
+		cfg.ContextProfile.MaxRequestBytes != defaultContextMaxRequestBytes ||
 		cfg.ContextProfile.EstimatedTokensPerByte != defaultEstimatedTokensPerByte {
 		t.Fatalf("context profile = %+v, want normalized defaults", cfg.ContextProfile)
 	}
@@ -141,32 +143,110 @@ func TestLoadProviderConfigRejectsInvalidTimeout(t *testing.T) {
 
 func TestLoadProviderConfigParsesContextProfile(t *testing.T) {
 	cfg, err := LoadProviderConfig("reasoning", map[string]string{
-		llmcommon.EnvProvider:         llmcommon.ProviderOpenAI,
-		llmcommon.EnvAPIKey:           "reasoning-secret",
-		llmcommon.EnvModel:            "reasoning-model",
-		llmcommon.EnvContextWindow:    "128000",
-		llmcommon.EnvMaxInputTokens:   "64000",
-		llmcommon.EnvReservedOutput:   "8000",
-		llmcommon.EnvSafetyRatio:      "0.85",
-		llmcommon.EnvBytesHardLimit:   "262144",
-		llmcommon.EnvTokensPerByte:    "0.22",
-		llmcommon.EnvInputTokenPrice:  "0.000002",
-		llmcommon.EnvOutputTokenPrice: "0.000008",
-		llmcommon.EnvCurrency:         "usd",
+		llmcommon.EnvProvider:           llmcommon.ProviderOpenAI,
+		llmcommon.EnvAPIKey:             "reasoning-secret",
+		llmcommon.EnvModel:              "reasoning-model",
+		llmcommon.EnvContextProfileMode: contextProfileModeManual,
+		llmcommon.EnvContextWindow:      "128000",
+		llmcommon.EnvMaxInputTokens:     "64000",
+		llmcommon.EnvReservedOutput:     "8000",
+		llmcommon.EnvSafetyRatio:        "0.85",
+		llmcommon.EnvContextUtilization: "0.65",
+		llmcommon.EnvBytesHardLimit:     "262144",
+		llmcommon.EnvMaxRequestBytes:    "524288",
+		llmcommon.EnvTokensPerByte:      "0.22",
+		llmcommon.EnvInputTokenPrice:    "0.000002",
+		llmcommon.EnvOutputTokenPrice:   "0.000008",
+		llmcommon.EnvCurrency:           "usd",
 	})
 	if err != nil {
 		t.Fatalf("load provider config: %v", err)
 	}
-	if cfg.ContextProfile.ContextWindowTokens != 128000 ||
+	if cfg.ContextProfile.ProfileMode != contextProfileModeManual ||
+		cfg.ContextProfile.ContextWindowTokens != 128000 ||
 		cfg.ContextProfile.MaxInputTokens != 64000 ||
 		cfg.ContextProfile.ReservedOutputTokens != 8000 ||
 		cfg.ContextProfile.SafetyRatio != 0.85 ||
+		cfg.ContextProfile.ContextUtilizationRatio != 0.65 ||
 		cfg.ContextProfile.BytesHardLimit != 262144 ||
+		cfg.ContextProfile.MaxRequestBytes != 524288 ||
 		cfg.ContextProfile.EstimatedTokensPerByte != 0.22 ||
 		cfg.ContextProfile.InputTokenPrice != 0.000002 ||
 		cfg.ContextProfile.OutputTokenPrice != 0.000008 ||
 		cfg.ContextProfile.Currency != "USD" {
 		t.Fatalf("context profile = %+v, want parsed values", cfg.ContextProfile)
+	}
+}
+
+func TestLoadProviderConfigParsesInferenceProfile(t *testing.T) {
+	cfg, err := LoadProviderConfig("reasoning", map[string]string{
+		llmcommon.EnvProvider:        llmcommon.ProviderOpenAI,
+		llmcommon.EnvAPIKey:          "reasoning-secret",
+		llmcommon.EnvModel:           "reasoning-model",
+		llmcommon.EnvTemperature:     "0",
+		llmcommon.EnvMaxOutputTokens: "65536",
+		llmcommon.EnvReasoningEffort: "HIGH",
+		llmcommon.EnvThinkingBudget:  "32768",
+	})
+	if err != nil {
+		t.Fatalf("load provider config: %v", err)
+	}
+	if cfg.InferenceProfile.Temperature == nil ||
+		*cfg.InferenceProfile.Temperature != 0 ||
+		cfg.InferenceProfile.MaxOutputTokens != 65536 ||
+		cfg.InferenceProfile.ReasoningEffort != "high" ||
+		cfg.InferenceProfile.ThinkingBudgetTokens != 32768 {
+		t.Fatalf("inference profile = %+v, want parsed reasoning profile", cfg.InferenceProfile)
+	}
+	redacted := RedactedProviderConfig(cfg)
+	if redacted.InferenceProfile.ReasoningEffort != "high" ||
+		redacted.InferenceProfile.ThinkingBudgetTokens != 32768 {
+		t.Fatalf("redacted inference profile = %+v, want exported profile", redacted.InferenceProfile)
+	}
+}
+
+func TestLoadProviderConfigAutoUsesConfiguredModelRegistryCapability(t *testing.T) {
+	cfg, err := LoadProviderConfig("large-context", map[string]string{
+		llmcommon.EnvProvider:                llmcommon.ProviderCompatible,
+		llmcommon.EnvBaseURL:                 "http://127.0.0.1:8090/v1",
+		llmcommon.EnvAPIKey:                  "large-context-secret",
+		llmcommon.EnvModel:                   "configured-large-context-model",
+		llmcommon.EnvContextProfileMode:      contextProfileModeAuto,
+		llmcommon.EnvContextCapabilitySource: contextCapabilitySourceModelRegistry,
+		llmcommon.EnvContextWindow:           "1000000",
+	})
+	if err != nil {
+		t.Fatalf("load provider config: %v", err)
+	}
+	if cfg.ContextProfile.ProfileMode != contextProfileModeAuto ||
+		cfg.ContextProfile.CapabilitySource != contextCapabilitySourceModelRegistry ||
+		cfg.ContextProfile.ContextWindowTokens != 1_000_000 ||
+		cfg.ContextProfile.ReservedOutputTokens != 62_500 ||
+		cfg.ContextProfile.MaxInputTokens != 703_125 ||
+		cfg.ContextProfile.BytesHardLimit != 2_812_500 {
+		t.Fatalf("context profile = %+v, want auto 1M configured model budget", cfg.ContextProfile)
+	}
+}
+
+func TestLoadProviderConfigAutoKeepsExplicitBudgetOverrides(t *testing.T) {
+	cfg, err := LoadProviderConfig("deepseek", map[string]string{
+		llmcommon.EnvProvider:                llmcommon.ProviderCompatible,
+		llmcommon.EnvBaseURL:                 "https://api.deepseek.com",
+		llmcommon.EnvAPIKey:                  "deepseek-secret",
+		llmcommon.EnvModel:                   "configured-large-context-model",
+		llmcommon.EnvContextProfileMode:      contextProfileModeAuto,
+		llmcommon.EnvContextCapabilitySource: contextCapabilitySourceModelRegistry,
+		llmcommon.EnvContextWindow:           "1000000",
+		llmcommon.EnvMaxInputTokens:          "12345",
+		llmcommon.EnvBytesHardLimit:          "222222",
+	})
+	if err != nil {
+		t.Fatalf("load provider config: %v", err)
+	}
+	if cfg.ContextProfile.ContextWindowTokens != 1_000_000 ||
+		cfg.ContextProfile.MaxInputTokens != 12345 ||
+		cfg.ContextProfile.BytesHardLimit != 222222 {
+		t.Fatalf("context profile = %+v, want explicit max input/bytes preserved", cfg.ContextProfile)
 	}
 }
 

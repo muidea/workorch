@@ -200,6 +200,10 @@ disabled = false
 			Model:                  "reasoning-model",
 			Timeout:                "45s",
 			Disabled:               &disabled,
+			Temperature:            float64Ptr(0),
+			MaxOutputTokens:        65536,
+			ReasoningEffort:        "high",
+			ThinkingBudgetTokens:   32768,
 			ContextWindowTokens:    64000,
 			MaxInputTokens:         32000,
 			ReservedOutputTokens:   4096,
@@ -260,6 +264,13 @@ disabled = false
 		next.LLM.Providers["reasoning"].MaxInputTokens != 32000 ||
 		next.LLM.Providers["reasoning"].BytesHardLimit != 131072 {
 		t.Fatalf("next llm provider profile = %+v, want saved context profile", next.LLM.Providers["reasoning"])
+	}
+	if next.LLM.Providers["reasoning"].Temperature == nil ||
+		*next.LLM.Providers["reasoning"].Temperature != 0 ||
+		next.LLM.Providers["reasoning"].MaxOutputTokens != 65536 ||
+		next.LLM.Providers["reasoning"].ReasoningEffort != "high" ||
+		next.LLM.Providers["reasoning"].ThinkingBudgetTokens != 32768 {
+		t.Fatalf("next llm inference profile = %+v, want saved inference profile", next.LLM.Providers["reasoning"])
 	}
 	if next.Runtime.MaxRuntimeRepairAttempts != 15 || next.Runtime.MaxProviderRetryAttempts != 14 || next.Runtime.ShellCommandTimeout != "120s" {
 		t.Fatalf("next runtime config = %+v, want saved runtime settings", next.Runtime)
@@ -328,6 +339,10 @@ func TestLLMProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 					Disabled:               &disabled,
 					Streaming:              &disabled,
 					NonChatOperations:      []string{"embeddings"},
+					Temperature:            float64Ptr(0),
+					MaxOutputTokens:        65536,
+					ReasoningEffort:        "high",
+					ThinkingBudgetTokens:   32768,
 					ContextWindowTokens:    32768,
 					MaxInputTokens:         8192,
 					ReservedOutputTokens:   2048,
@@ -347,6 +362,10 @@ func TestLLMProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 		values["disabled"] != "true" ||
 		values["streaming"] != "true" ||
 		values["nonChatOperations"] != "embeddings" ||
+		values["temperature"] != "0" ||
+		values["maxOutputTokens"] != "65536" ||
+		values["reasoningEffort"] != "high" ||
+		values["thinkingBudgetTokens"] != "32768" ||
 		values["contextWindowTokens"] != "32768" ||
 		values["maxInputTokens"] != "8192" ||
 		values["reservedOutputTokens"] != "2048" ||
@@ -362,6 +381,38 @@ func TestLLMProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 	if valueSets["reasoning"]["model"] != "model" {
 		t.Fatalf("provider value sets = %+v, want reasoning model", valueSets)
 	}
+}
+
+func TestLLMProviderValueSetsResolveConfiguredModelCapabilities(t *testing.T) {
+	cfg := Config{
+		LLM: LLMConfig{
+			DefaultProvider: "reasoning",
+			ModelCapabilities: map[string]LLMModelCapabilityConfig{
+				"codex-large": {
+					Provider:            "compatible",
+					ModelPattern:        "*codex*",
+					ContextWindowTokens: 1_000_000,
+				},
+			},
+			Providers: map[string]LLMProviderConfig{
+				"reasoning": {
+					Provider:           "compatible",
+					Model:              "gpt-5.3-codex",
+					ContextProfileMode: "auto",
+				},
+			},
+		},
+	}
+
+	values := cfg.LLMProviderValues()
+	if values["contextWindowTokens"] != "1000000" ||
+		values["contextCapabilitySource"] != "model_registry" {
+		t.Fatalf("provider values = %+v, want model registry capability projected", values)
+	}
+}
+
+func float64Ptr(value float64) *float64 {
+	return &value
 }
 
 func TestWebSearchProviderValuesUsesFrameworkConfigFields(t *testing.T) {

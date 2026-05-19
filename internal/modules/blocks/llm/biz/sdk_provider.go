@@ -157,14 +157,21 @@ func (p *OpenAIProvider) chatParams(request llmmodels.ProviderRequest) openai.Ch
 	if len(chatMessages) == 0 {
 		chatMessages = append(chatMessages, openai.SystemMessage(systemPromptForRequest(request)), openai.UserMessage(userPrompt(request)))
 	}
-	return openai.ChatCompletionNewParams{
+	params := openai.ChatCompletionNewParams{
 		Messages:    chatMessages,
 		Model:       shared.ChatModel(p.config.Model),
-		Temperature: openai.Float(0),
+		Temperature: openai.Float(providerTemperature(p.config)),
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONObject: &shared.ResponseFormatJSONObjectParam{Type: "json_object"},
 		},
 	}
+	if maxTokens := maxOutputTokens(p.config); maxTokens > 0 {
+		params.MaxCompletionTokens = openai.Int(maxTokens)
+	}
+	if p.config.InferenceProfile.ReasoningEffort != "" {
+		params.ReasoningEffort = shared.ReasoningEffort(p.config.InferenceProfile.ReasoningEffort)
+	}
+	return params
 }
 
 func (p *OpenAIProvider) chatStreamParams(request llmmodels.ProviderRequest) openai.ChatCompletionNewParams {
@@ -283,14 +290,53 @@ func (p *AnthropicProvider) messageParams(request llmmodels.ProviderRequest) ant
 	if len(anthropicMessages) == 0 {
 		anthropicMessages = append(anthropicMessages, anthropic.NewUserMessage(anthropic.NewTextBlock(userPrompt(request))))
 	}
-	return anthropic.MessageNewParams{
-		MaxTokens:   anthropicDefaultMaxTokens,
+	params := anthropic.MessageNewParams{
+		MaxTokens:   anthropicMaxTokens(p.config),
 		Messages:    anthropicMessages,
 		Model:       anthropic.Model(p.config.Model),
-		Temperature: anthropic.Float(0),
+		Temperature: anthropic.Float(providerTemperature(p.config)),
 		System: []anthropic.TextBlockParam{{
 			Text: systemPromptForRequest(request),
 		}},
+	}
+	if p.config.InferenceProfile.ThinkingBudgetTokens > 0 {
+		params.Thinking = anthropic.ThinkingConfigParamOfEnabled(int64(p.config.InferenceProfile.ThinkingBudgetTokens))
+	}
+	return params
+}
+
+func providerTemperature(config llmmodels.ProviderConfig) float64 {
+	if config.InferenceProfile.Temperature == nil {
+		return 0
+	}
+	return *config.InferenceProfile.Temperature
+}
+
+func maxOutputTokens(config llmmodels.ProviderConfig) int64 {
+	if config.InferenceProfile.MaxOutputTokens <= 0 {
+		return 0
+	}
+	return int64(config.InferenceProfile.MaxOutputTokens)
+}
+
+func anthropicMaxTokens(config llmmodels.ProviderConfig) int64 {
+	maxTokens := maxOutputTokens(config)
+	if maxTokens <= 0 {
+		maxTokens = anthropicDefaultMaxTokens
+	}
+	if budget := int64(config.InferenceProfile.ThinkingBudgetTokens); budget > 0 && maxTokens <= budget {
+		maxTokens = budget + anthropicDefaultMaxTokens
+	}
+	return maxTokens
+}
+
+func compatibleThinkingConfig(config llmmodels.ProviderConfig) *compatibleThinkingConfigParam {
+	if config.InferenceProfile.ThinkingBudgetTokens <= 0 {
+		return nil
+	}
+	return &compatibleThinkingConfigParam{
+		Type:         "enabled",
+		BudgetTokens: int64(config.InferenceProfile.ThinkingBudgetTokens),
 	}
 }
 

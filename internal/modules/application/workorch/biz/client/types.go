@@ -649,35 +649,54 @@ type WorkspaceSoulBindings struct {
 
 // Configuration types.
 type LLMProviderConfig struct {
-	ID                string                 `json:"id"`
-	Provider          string                 `json:"provider"`
-	BaseURL           string                 `json:"baseUrl,omitempty"`
-	APIKey            string                 `json:"apiKey,omitempty"`
-	Model             string                 `json:"model,omitempty"`
-	Timeout           string                 `json:"timeout,omitempty"`
-	Disabled          bool                   `json:"disabled"`
-	Ready             bool                   `json:"ready"`
-	Reason            string                 `json:"reason,omitempty"`
-	Default           bool                   `json:"default"`
-	APIKeyConfigured  bool                   `json:"apiKeyConfigured"`
-	ChatCompletions   bool                   `json:"chatCompletions"`
-	Streaming         bool                   `json:"streaming"`
-	NonChatOperations []string               `json:"nonChatOperations,omitempty"`
-	FailoverEnabled   bool                   `json:"failoverEnabled"`
-	FailoverProviders []string               `json:"failoverProviders,omitempty"`
-	ContextProfile    ProviderContextProfile `json:"contextProfile,omitempty"`
+	ID                string                   `json:"id"`
+	Provider          string                   `json:"provider"`
+	BaseURL           string                   `json:"baseUrl,omitempty"`
+	APIKey            string                   `json:"apiKey,omitempty"`
+	Model             string                   `json:"model,omitempty"`
+	Timeout           string                   `json:"timeout,omitempty"`
+	Disabled          bool                     `json:"disabled"`
+	Ready             bool                     `json:"ready"`
+	Reason            string                   `json:"reason,omitempty"`
+	Default           bool                     `json:"default"`
+	APIKeyConfigured  bool                     `json:"apiKeyConfigured"`
+	ChatCompletions   bool                     `json:"chatCompletions"`
+	Streaming         bool                     `json:"streaming"`
+	NonChatOperations []string                 `json:"nonChatOperations,omitempty"`
+	FailoverEnabled   bool                     `json:"failoverEnabled"`
+	FailoverProviders []string                 `json:"failoverProviders,omitempty"`
+	InferenceProfile  ProviderInferenceProfile `json:"inferenceProfile,omitempty"`
+	ContextProfile    ProviderContextProfile   `json:"contextProfile,omitempty"`
+}
+
+type ProviderInferenceProfile struct {
+	Temperature          *float64 `json:"temperature,omitempty"`
+	MaxOutputTokens      int      `json:"maxOutputTokens,omitempty"`
+	ReasoningEffort      string   `json:"reasoningEffort,omitempty"`
+	ThinkingBudgetTokens int      `json:"thinkingBudgetTokens,omitempty"`
+}
+
+type LLMModelCapabilityConfig struct {
+	ID                  string `json:"id"`
+	Provider            string `json:"provider,omitempty"`
+	ModelPattern        string `json:"modelPattern"`
+	ContextWindowTokens int    `json:"contextWindowTokens"`
 }
 
 type ProviderContextProfile struct {
-	ContextWindowTokens    int     `json:"contextWindowTokens,omitempty"`
-	MaxInputTokens         int     `json:"maxInputTokens,omitempty"`
-	ReservedOutputTokens   int     `json:"reservedOutputTokens,omitempty"`
-	SafetyRatio            float64 `json:"safetyRatio,omitempty"`
-	BytesHardLimit         int     `json:"bytesHardLimit,omitempty"`
-	EstimatedTokensPerByte float64 `json:"estimatedTokensPerByte,omitempty"`
-	InputTokenPrice        float64 `json:"inputTokenPrice,omitempty"`
-	OutputTokenPrice       float64 `json:"outputTokenPrice,omitempty"`
-	Currency               string  `json:"currency,omitempty"`
+	ProfileMode             string  `json:"profileMode,omitempty"`
+	CapabilitySource        string  `json:"capabilitySource,omitempty"`
+	ContextWindowTokens     int     `json:"contextWindowTokens,omitempty"`
+	MaxInputTokens          int     `json:"maxInputTokens,omitempty"`
+	ReservedOutputTokens    int     `json:"reservedOutputTokens,omitempty"`
+	SafetyRatio             float64 `json:"safetyRatio,omitempty"`
+	ContextUtilizationRatio float64 `json:"contextUtilizationRatio,omitempty"`
+	BytesHardLimit          int     `json:"bytesHardLimit,omitempty"`
+	MaxRequestBytes         int     `json:"maxRequestBytes,omitempty"`
+	EstimatedTokensPerByte  float64 `json:"estimatedTokensPerByte,omitempty"`
+	InputTokenPrice         float64 `json:"inputTokenPrice,omitempty"`
+	OutputTokenPrice        float64 `json:"outputTokenPrice,omitempty"`
+	Currency                string  `json:"currency,omitempty"`
 }
 
 type ServiceConfiguration struct {
@@ -702,9 +721,10 @@ type ServiceConfiguration struct {
 		ShellCommandTimeout      string `json:"shellCommandTimeout"`
 	} `json:"runtime"`
 	LLM struct {
-		DefaultProviderID          string              `json:"defaultProviderId"`
-		DefaultEmbeddingProviderID string              `json:"defaultEmbeddingProviderId,omitempty"`
-		Providers                  []LLMProviderConfig `json:"providers"`
+		DefaultProviderID          string                     `json:"defaultProviderId"`
+		DefaultEmbeddingProviderID string                     `json:"defaultEmbeddingProviderId,omitempty"`
+		ModelCapabilities          []LLMModelCapabilityConfig `json:"modelCapabilities,omitempty"`
+		Providers                  []LLMProviderConfig        `json:"providers"`
 	} `json:"llm"`
 	WebSearch struct {
 		DefaultProviderID string `json:"defaultProviderId,omitempty"`

@@ -38,6 +38,11 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 		APIKey:   "secret-value",
 		Model:    "test-model",
 		Timeout:  5 * time.Second,
+		InferenceProfile: llmmodels.ProviderInferenceProfile{
+			MaxOutputTokens:      65536,
+			ReasoningEffort:      "high",
+			ThinkingBudgetTokens: 32768,
+		},
 	})
 	result, err := provider.Complete(context.Background(), llmProviderRequest())
 	if err != nil {
@@ -52,6 +57,12 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	}
 	if gotPayload.Model != "test-model" || len(gotPayload.Messages) < 3 || gotPayload.ResponseFormat["type"] != "json_object" {
 		t.Fatalf("payload = %+v, want chat completion json request", gotPayload)
+	}
+	if gotPayload.MaxCompletionTokens != 65536 ||
+		gotPayload.ReasoningEffort != "high" ||
+		gotPayload.Thinking == nil ||
+		gotPayload.Thinking.BudgetTokens != 32768 {
+		t.Fatalf("payload = %+v, want configured inference profile", gotPayload)
 	}
 	joined := ""
 	for _, message := range gotPayload.Messages {

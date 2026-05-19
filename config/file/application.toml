@@ -31,6 +31,35 @@ shellCommandTimeout = "60s"
 defaultProvider = "local"
 defaultEmbeddingProvider = ""
 
+[llm.modelCapabilities.gpt-codex-1m]
+provider = "compatible"
+modelPattern = "*codex*"
+contextWindowTokens = 1000000
+
+[llm.modelCapabilities.gpt-thinking-256k]
+modelPattern = "*gpt-5.5*thinking*"
+contextWindowTokens = 262144
+
+[llm.modelCapabilities.gpt-instant-128k]
+modelPattern = "*gpt-5.5*instant*"
+contextWindowTokens = 131072
+
+[llm.modelCapabilities.deepseek-v4-1m]
+modelPattern = "*deepseek*v4*"
+contextWindowTokens = 1000000
+
+[llm.modelCapabilities.claude-4-6-1m]
+modelPattern = "*claude*4?6*"
+contextWindowTokens = 1000000
+
+[llm.modelCapabilities.claude-4-7-1m]
+modelPattern = "*claude*4?7*"
+contextWindowTokens = 1000000
+
+[llm.modelCapabilities.claude-4-5-200k]
+modelPattern = "*claude*4?5*"
+contextWindowTokens = 200000
+
 [llm.providers.local]
 provider = ""
 baseURL = ""
@@ -38,6 +67,10 @@ apiKey = ""
 model = ""
 timeout = "60s"
 disabled = false
+temperature = 0.0
+maxOutputTokens = 0
+reasoningEffort = ""
+thinkingBudgetTokens = 0
 
 [governance.autoTicket]
 enabled = true
