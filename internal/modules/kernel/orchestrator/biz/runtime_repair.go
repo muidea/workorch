@@ -3650,6 +3650,16 @@ func repairFailureSignalTexts(output map[string]any, execErr error, failureClass
 			add("streamDiagnostics."+key, stringFromMap(diagnostics, key))
 		}
 	}
+	if diagnostics := mapFromValue(output["lastFailureDiagnostics"]); len(diagnostics) > 0 {
+		for _, key := range []string{"targetRef", "stdoutPreview", "stderrPreview", "error", "reason", failureOutputKeySignature} {
+			add("lastFailureDiagnostics."+key, stringFromMap(diagnostics, key))
+		}
+	}
+	if failedOutput := mapFromValue(output["failedStepOutput"]); len(failedOutput) > 0 {
+		for _, key := range []string{"stderr", "stdout", "error", "reason", failureOutputKeySignature} {
+			add("failedStepOutput."+key, stringFromMap(failedOutput, key))
+		}
+	}
 	add("execErr", errorString(execErr))
 	add("failureClass", failureClass)
 	add(failureOutputKeySignature, failureSignature)
@@ -4865,6 +4875,13 @@ func failureTargetRepairRefs(step *runModel.Step) []string {
 	}
 	for _, target := range failureTargetsFromSignatureText(stringFromMap(failedOutput, failureOutputKeySignature)) {
 		add(target)
+	}
+	class := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass))
+	signature := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature))
+	if signals := structuredFailureSignalsFromFailureOutput(step.Output, nil, class, signature); len(signals) > 0 {
+		for _, target := range stringSliceFromValue(signals["targetRefs"]) {
+			add(target)
+		}
 	}
 	return ret
 }

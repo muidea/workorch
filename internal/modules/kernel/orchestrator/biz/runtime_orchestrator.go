@@ -1847,10 +1847,18 @@ func validateRepairPatchRequestGranularity(step *runModel.Step, request runtimeP
 	if !stateChangingRepairContractActive(step) {
 		return nil
 	}
+	if strings.TrimSpace(request.PatchType) == "unified_diff" && len(repairPatchContextItems(step)) > 0 {
+		if ok, reason := unifiedDiffHasSubstantiveNonBlankChange(request.Diff); !ok {
+			if reason == "" {
+				reason = "non_substantive_unified_diff"
+			}
+			return fmt.Errorf("%w: runtime repair patch/apply unified_diff for target %q is non-substantive (%s); rebuild an exact patch from current target snapshot or return a failed assessment/blocker", common.ErrInvalidArgument, request.TargetRef, reason)
+		}
+	}
 	if strings.TrimSpace(request.PatchType) != "file_write" {
 		return nil
 	}
-	if len(mapSliceFromValue(step.Input["patchRepairContext"])) == 0 && len(mapSliceFromValue(step.Input["failureTargetRepairContext"])) == 0 {
+	if len(repairPatchContextItems(step)) == 0 {
 		return nil
 	}
 	target := filepath.Clean(strings.TrimSpace(request.TargetRef))
@@ -3267,6 +3275,8 @@ func repairPatchContextItems(step *runModel.Step) []map[string]any {
 	}
 	ret := mapSliceFromValue(step.Input["patchRepairContext"])
 	ret = append(ret, mapSliceFromValue(step.Input["failureTargetRepairContext"])...)
+	actionPackage := mapFromValue(step.Input["repairActionPackage"])
+	ret = append(ret, mapSliceFromValue(actionPackage["targetSnapshots"])...)
 	return ret
 }
 

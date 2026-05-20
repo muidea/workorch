@@ -3213,6 +3213,130 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshot(t *
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshotFromStructuredStdout(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "target-alpha.data"), []byte("alpha current content\n"), 0o644); err != nil {
+		t.Fatalf("seed target alpha: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "target-beta.data"), []byte("beta current content\n"), 0o644); err != nil {
+		t.Fatalf("seed target beta: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-failure-target-stdout")
+	runID := common.RunID("run-failure-target-stdout")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/003-validate"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageExecution,
+			"stateChangingOutputRequired": true,
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"error":                   "exit status 1",
+			"stdout":                  "validation failed for target resources:\ntarget-alpha.data\ntarget-beta.data\n",
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|command=sh|exitCode=1",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 1, errors.New("exit status 1"))
+
+	targetContext := mapSliceFromValue(input["failureTargetRepairContext"])
+	if len(targetContext) != 2 {
+		t.Fatalf("failureTargetRepairContext = %#v, want two stdout target snapshots", input["failureTargetRepairContext"])
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
+	if len(targets) != 2 {
+		t.Fatalf("repairActionPackage.targetSnapshots = %#v, want two target snapshots", actionPackage["targetSnapshots"])
+	}
+	targetSet := stringSliceFromValue(actionPackage["repairTargetSet"])
+	if !stringSliceContains(targetSet, "target-alpha.data") || !stringSliceContains(targetSet, "target-beta.data") {
+		t.Fatalf("repairTargetSet = %#v, want stdout target refs", actionPackage["repairTargetSet"])
+	}
+}
+
+func TestValidateRepairPatchRequestGranularityRejectsNonSubstantiveUnifiedDiffWithContext(t *testing.T) {
+	targetSnapshot := map[string]any{
+		"targetRef":        "main_test.go",
+		"exists":           true,
+		"content":          "package main\n\nfunc TestX(t *testing.T) {}\n",
+		"contentComplete":  true,
+		"safeForFileWrite": true,
+	}
+	for _, tc := range []struct {
+		name string
+		diff string
+		want string
+	}{
+		{
+			name: "identical replacement",
+			diff: "--- a/main_test.go\n+++ b/main_test.go\n@@ -1,1 +1,1 @@\n" +
+				"-package main\n+package main\n",
+			want: "identical_removed_and_added_lines",
+		},
+		{
+			name: "blank only",
+			diff: "--- a/main_test.go\n+++ b/main_test.go\n@@ -1,1 +1,2 @@\n" +
+				" package main\n+\n",
+			want: "blank_line_only_change",
+		},
+	} {
+		for _, contextCase := range []struct {
+			name  string
+			input map[string]any
+		}{
+			{
+				name: "failure target context",
+				input: map[string]any{
+					"failureTargetRepairContext": []map[string]any{targetSnapshot},
+				},
+			},
+			{
+				name: "repair action target snapshot",
+				input: map[string]any{
+					"repairActionPackage": map[string]any{
+						"targetSnapshots": []map[string]any{targetSnapshot},
+					},
+				},
+			},
+		} {
+			t.Run(tc.name+"/"+contextCase.name, func(t *testing.T) {
+				input := map[string]any{
+					stepInputKeyRuntimeStage:      runtimeStageRepair,
+					"stateChangingOutputRequired": true,
+					"repairObjective":             repairObjectiveStateChangingOutput,
+				}
+				for key, value := range contextCase.input {
+					input[key] = value
+				}
+				step := &runmodel.Step{
+					ID:    "run/repair-1",
+					RunID: "run",
+					Kind:  llmcommon.StepKindWorkspaceExecution,
+					Input: input,
+				}
+				err := validateRepairPatchRequestGranularity(step, runtimePatchRequest{
+					TargetRef: "main_test.go",
+					PatchType: "unified_diff",
+					Diff:      tc.diff,
+				})
+				if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("validateRepairPatchRequestGranularity err = %v, want %s", err, tc.want)
+				}
+			})
+		}
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputPrioritizesResourceShapeDiagnostics(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

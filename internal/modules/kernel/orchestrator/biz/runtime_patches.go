@@ -1091,6 +1091,56 @@ parseLines:
 	return hunk, idx, nil
 }
 
+func unifiedDiffHasSubstantiveNonBlankChange(diff string) (bool, string) {
+	filePatch, err := parseSingleFileUnifiedDiff(diff)
+	if err != nil {
+		return false, "invalid_unified_diff"
+	}
+	var removed []string
+	var added []string
+	hasNonBlankChange := false
+	for _, hunk := range filePatch.Hunks {
+		for _, line := range hunk.Lines {
+			if line == "" {
+				continue
+			}
+			switch line[0] {
+			case '-':
+				value := line[1:]
+				removed = append(removed, value)
+				if strings.TrimSpace(value) != "" {
+					hasNonBlankChange = true
+				}
+			case '+':
+				value := line[1:]
+				added = append(added, value)
+				if strings.TrimSpace(value) != "" {
+					hasNonBlankChange = true
+				}
+			}
+		}
+	}
+	if len(removed) == 0 && len(added) == 0 {
+		return false, "no_changed_lines"
+	}
+	if !hasNonBlankChange {
+		return false, "blank_line_only_change"
+	}
+	if len(removed) == len(added) {
+		allSame := true
+		for idx := range removed {
+			if removed[idx] != added[idx] {
+				allSame = false
+				break
+			}
+		}
+		if allSame {
+			return false, "identical_removed_and_added_lines"
+		}
+	}
+	return true, ""
+}
+
 func wrapPatchApplyParseError(targetRef string, patchType string, err error) error {
 	if err == nil {
 		return nil

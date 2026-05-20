@@ -296,6 +296,8 @@ LLM 输出 `executionGraph` 时，runtime 必须按当前 Soul 绑定阶段解�
 
 `unified_diff` 是通用 patch capability，不属于软件开发专用能力。其 hunk 必须包含显式行号范围，例如 `@@ -12,3 +12,4 @@`；裸 `@@` hunk 属于 capability contract violation。若 LLM 无法确定行号，必须选择安全的替代状态变更表达：基于完整安全快照的 `file_write + baseHash`、精确 `oldText/newText` 编辑、先读取目标，或返回 failed assessment / blocker。Runtime prompt、repair guidance 和 dispatch 校验必须共同表达该规则。
 
+当 state-changing repair 输入已经携带当前 target snapshot，例如 `failureTargetRepairContext`、`patchRepairContext` 或 `repairActionPackage.targetSnapshots` 时，`unified_diff` 还必须包含实质性非空变更。只替换为完全相同内容、只新增/删除空白行、没有 changed lines、或其他无实质状态变化的 diff 必须被 runtime 拒绝，并作为 repair contract evidence 回流。该规则只校验通用 diff 形态与 state-changing contract，不判断具体业务内容是否正确。
+
 能力边界属于 runtime capability contract，不属于业务领域规则。Core 可以声明“某 capability 不支持 delete、content 不能为空、diff 必须完整”等中立能力事实；但不能据此推断某个业务文件是否应该删除、保留或重命名。
 
 ### 已知可读资源不得升级为人工缺失信息
@@ -534,6 +536,8 @@ State-changing patch 不能只是为了满足 runtime contract 或 repair conver
 当 verification / strict convergence follow-up 已经识别出需要继续收敛时，可以返回受限 concrete validation evidence graph，例如明确的 shell/tool/mcp 验证节点；该 graph 不需要包含 patch，但不得只包含 read-only inspection、自检、run snapshot、context rehydration 或新的 LLM 嵌套。若再次返回只读 inspection graph 且没有 state-changing output、concrete validation evidence 或 rejected assessment，该失败属于 contract violation。后续 repair 必须携带对应的 rejection evidence；只有 failure evidence 已表明缺口是实现/状态变更缺口时，才提升为 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`，不能把纯验证证据缺口误升级为写文件 repair。
 
 Runtime 可以把失败证据中的目标引用解析为当前 workspace 中的已知资源快照，但只能使用中立路径匹配和 manifest 事实；不能把某个 profile 的文件命名、测试约定或技术栈规则写入 core repair。
+
+失败目标引用不仅来自结构化 `failureTargets` / `targetRef` / `failureSignature`。当非 LLM 执行步骤的 `stdout`、`stderr`、`error`、`reason`、`lastFailureDiagnostics` 或 `failedStepOutput` 中以中立路径/line-ref 形态出现 workspace 资源引用时，runtime 必须把这些引用纳入 `structuredFailureSignals.targetRefs`，再通过当前 workspace manifest 唯一解析为 `failureTargetRepairContext` 与 `repairActionPackage.targetSnapshots`。该抽取只能依赖路径形态、line-ref、manifest 和当前资源快照，不得依赖命令名、语言、测试框架或文件命名约定。若目标无法唯一解析，必须保留诊断摘要并要求读取/阻塞，而不能让 LLM 在缺少当前快照的情况下生成固定 state-changing artifact。
 
 Repair exhausted 后必须二选一：
 
@@ -994,6 +998,8 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
   - Provider context gate 已将 repair / state-changing continuation / replan continuation 的过程证据缺失升级为 `runtime_repair_process_evidence_missing` fail-fast，避免继续向 LLM 提交缺少最近过程证据的 state-changing repair 请求。
   - Scoped repair verification 已支持中立 bounded 关系：宽泛验证命令若依赖直接命中当前 failure target 的 patch，或显式声明 target/scope/reason，即可作为当前 repair 的有界验证；无 scope 关系的宽泛验证仍会被拒绝。
   - LLM provider prompt 与 state-changing repair guidance 已明确 `unified_diff` 必须使用显式 hunk line range，禁止裸 `@@` hunk；行号不确定时应使用安全 `file_write + baseHash`、精确 edit、先读取目标或 failed/blocker。
+  - Runtime repair 已从失败输出的 stdout/stderr/error/reason/diagnostics 中抽取中立 target refs，并通过当前 workspace manifest 注入 `failureTargetRepairContext` 与 `repairActionPackage.targetSnapshots`，避免 LLM 在缺少当前目标快照时反复输出无效 state-changing artifact。
+  - 带当前 target snapshot 的 state-changing repair 已拒绝无实质 `unified_diff`，包括完全相同替换、只有空白行变化和无 changed lines，确保 repair 必须产生真实状态变化、failed assessment 或 blocker。
   - 软件开发行为约束继续由 software-dev workspaceTemplate / Soul / skill 承载；core 仅处理 step、stage、state、capability kind、evidence ref、failure class / signature 等中立运行事实。
   - software-dev 默认 Soul 已同步吸纳 Codex 启发的工程行为约束：规划阶段要求参考 `processEvidenceTimeline` / `currentProgressDigest` 做已有输出、最近失败、当前缺口和下一步要求分析；执行阶段要求先基于当前代码/当前快照/当前失败证据再改、沿用本地项目模式、保护 workspace 已有有效内容、避免无关重构和长期只调整测试；验证阶段要求先对齐最新过程证据和 closure evidence，避免旧失败覆盖后续成功证据。
 
