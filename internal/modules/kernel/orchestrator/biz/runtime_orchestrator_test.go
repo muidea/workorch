@@ -2467,6 +2467,30 @@ func LogMessage(msg string) {
 	}
 }
 
+func TestRuntimePatchRequestRejectsContractConvergenceMarkerPatch(t *testing.T) {
+	_, err := runtimePatchRequestFromMap(map[string]any{
+		"patchType": "unified_diff",
+		"targetRef": "config.yaml",
+		"summary":   "为满足修复收敛契约执行最小状态变更，新增注释且不改变运行语义",
+		"diff":      "--- a/config.yaml\n+++ b/config.yaml\n@@ -1,2 +1,3 @@\n+# runtime-repair: bounded state change for strategy reassessment convergence\n listen_addr: \":8080\"\n",
+	})
+	if err == nil || !strings.Contains(err.Error(), "non-substantive state-change placeholder") {
+		t.Fatalf("runtimePatchRequestFromMap error = %v, want contract marker patch rejection", err)
+	}
+}
+
+func TestRuntimePatchRequestRejectsVerificationAnchorPatch(t *testing.T) {
+	_, err := runtimePatchRequestFromMap(map[string]any{
+		"patchType": "unified_diff",
+		"targetRef": "main.go",
+		"summary":   "在失败目标 main.go 上做最小状态变更，并为严格收敛修复提供有界验证锚点",
+		"diff":      "--- a/main.go\n+++ b/main.go\n@@ -1,2 +1,3 @@\n package main\n+\n+// state-change anchor for verification\n",
+	})
+	if err == nil || !strings.Contains(err.Error(), "non-substantive state-change placeholder") {
+		t.Fatalf("runtimePatchRequestFromMap error = %v, want verification anchor patch rejection", err)
+	}
+}
+
 func TestDecisionWithQuestionReferencingReadableWorkspaceFileShouldRepair(t *testing.T) {
 	spec := runtimeDecisionBlockSpec{
 		DecisionKind: "provide_missing_info",
@@ -3028,7 +3052,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesLineRemovalPatchSuggestio
 	}
 }
 
-func TestRuntimeOrchestrator_RuntimeRepairInputIncludesMalformedDiffAndMissingSymbolGuidance(t *testing.T) {
+func TestRuntimeOrchestrator_RuntimeRepairInputIncludesMalformedDiffAndMissingNameGuidance(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	deliverableDirectory := t.TempDir()
@@ -3175,7 +3199,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshot(t *
 	}
 }
 
-func TestRuntimeOrchestrator_RuntimeRepairInputPrioritizesAPIMismatchDiagnostics(t *testing.T) {
+func TestRuntimeOrchestrator_RuntimeRepairInputPrioritizesResourceShapeDiagnostics(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	deliverableDirectory := t.TempDir()
@@ -3218,17 +3242,32 @@ func TestRuntimeOrchestrator_RuntimeRepairInputPrioritizesAPIMismatchDiagnostics
 	if len(targetContext) != 1 || targetContext[0]["targetRef"] != "streaming_fallback_estimator_test.go" {
 		t.Fatalf("failureTargetRepairContext = %#v, want targeted test snapshot", input["failureTargetRepairContext"])
 	}
+	shapeContext := mapSliceFromValue(input["resourceShapeAlignmentContext"])
+	if len(shapeContext) == 0 {
+		t.Fatalf("resourceShapeAlignmentContext missing for resource shape diagnostics: %#v", input)
+	}
+	foundGateway := false
+	for _, item := range shapeContext {
+		if item["targetRef"] == "gateway.go" && strings.Contains(stringFromMap(item, "content"), "type Config struct { Address string }") {
+			foundGateway = true
+			break
+		}
+	}
+	if !foundGateway {
+		t.Fatalf("resourceShapeAlignmentContext = %#v, want current gateway.go resource snapshot", shapeContext)
+	}
 	actionPackage := mapFromValue(input["repairActionPackage"])
 	signals := mapFromValue(actionPackage["structuredFailureSignals"])
 	if len(signals) == 0 {
-		t.Fatalf("repairActionPackage.structuredFailureSignals missing for compile diagnostics: %#v", actionPackage)
+		t.Fatalf("repairActionPackage.structuredFailureSignals missing for resource shape diagnostics: %#v", actionPackage)
 	}
 	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
 	for _, want := range []string{
 		"Prioritize the primary diagnostics from structuredFailureSignals",
-		"unknown fields, type/literal mismatches",
-		"repair those reported blockers before optimizing tests",
-		"before secondary assertion",
+		"invalid attributes, shape mismatches",
+		"repair those reported blockers before secondary validation",
+		"resourceShapeAlignmentContext",
+		"current workspace resources",
 	} {
 		if !strings.Contains(guidance, want) {
 			t.Fatalf("repairGuidance = %q, want %q", guidance, want)

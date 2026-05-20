@@ -95,6 +95,8 @@ For state-changing repair under `strategyReassessment.required=true`:
 
 Runtime must classify strategy reassessment admission failures as runtime/decision contract failures, not provider auth/config failures. Text such as `forbiddenRepair` is a required contract field name and must not trigger `auth_or_config_error`; provider auth/config classification is reserved for provider stages such as `llm_provider_auth_or_config_error` or `llm_provider_error` with auth/config evidence.
 
+When a repair output is rejected by these admission rules, runtime memory must not preserve the rejected plan summary as a lesson. The next repair may use the rejected fact and contract diagnostics, but must not inherit the rejected root-cause claim or unrelated target choice as decision evidence.
+
 `surfaceContractCorrection` is intentionally not named after any domain artifact. It means: the LLM claims the failed surface's own contract is invalid or stale, and provides bounded evidence for changing that same surface.
 
 ## 6. Expected Behavior

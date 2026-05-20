@@ -495,6 +495,7 @@ Repair 输入必须尽量包含足以定向修复的当前证据：
 
 - `failedStepOutput`：当前失败的精简输出，包括 failure class / signature、error、reason、status、关键诊断和必要的 stdout/stderr 摘要。
 - `failureTargetRepairContext`：当失败证据指向具体 workspace 资源时，提供当前目标资源快照、存在性、content hash 和来源说明。
+- `resourceShapeAlignmentContext`：当失败诊断包含 unresolved identifier、unknown field、type mismatch、constructor/schema/interface mismatch 等中立 API / 资源形状冲突时，提供同目录、非失败目标的当前资源快照，帮助 LLM 在修改前对齐现有定义。该上下文只能基于路径、manifest、当前快照和失败诊断机械生成，不得按语言、框架、测试约定或业务名称做 core 特判。
 - `workspaceFileManifest`：当失败目标需要与其他已知资源核对、DoD 缺口涉及资源证据、或 repair 需要避免误替换无关资源时，提供当前 workspace 资源清单。
 - `patchRepairContext` 或等价 capability repair context：当失败来自 state-changing artifact 应用失败时，提供当前目标快照，并要求 LLM 基于当前快照重新生成可应用 artifact，而不是重复失败 artifact。
 - `patchRepairSuggestions` 或等价 capability repair suggestion：当 runtime 能从失败 artifact 与当前目标快照中机械抽取唯一 oldText / newText 替换时，提供可直接复用的最小修复证据；该 suggestion 不代表业务判断，只代表当前资源内容与失败 artifact 的中立匹配事实。
@@ -507,6 +508,10 @@ Repair 输入必须尽量包含足以定向修复的当前证据：
 当 repair-of-repair 的失败来自 runtime 输出合同或准入合同，例如 `strategyReassessment.required=true`、`executionGraph patch/apply input invalid`、`scoped state-changing runtime repair requires bounded verification` 或等价中立合同错误，failure class 必须保持 `runtime_failed` 或 `llm_decision_invalid`，不得因为错误文本中包含 `forbiddenRepair`、`API Key`、`auth` 等业务/合同词而误归类为 `auth_or_config_error`。Provider auth/config 只适用于 `llm_provider_*` 阶段或明确 provider auth/config stage；runtime 合同失败后续 repair 必须继续继承原始 failure surface、repairActionPackage、target context 和 strategy reassessment。
 
 当 `strategyReassessment.required=true` 且 repair 输出需要 state-changing patch 时，`repairActionPackage.requiredOutput` 必须显式包含 `mustDeclareStrategyReassessmentFields=true` 与 `strategyReassessmentRequiredFields`，默认字段为 `failedSurface`、`rootCauseTarget`、`repairTargetDecision`、`forbiddenRepair`、`verificationPlan`。若重复 failed surface 需要 root-cause target shift，还必须包含 `mustDistinguishRootCauseTarget=true`。这些字段是中立 runtime 合同，不表达任何具体业务含义；LLM patch/apply 节点必须在自身 input 中声明这些字段并与当前 failed surface 对齐。
+
+被 runtime 拒绝的 repair plan 不得把自身 `summary` / `thoughtSummary` 当成可复用 execution lesson 写入 memory。memory 只能记录 rejected fact、failure class、failure signature、当前失败和仍需遵守的 contract，不能把已拒绝的 rootCauseTarget、无关目标选择、占位变更理由或验证计划沉淀为下一轮决策依据。
+
+State-changing patch 不能只是为了满足 runtime contract 或 repair convergence 而添加 marker/comment/no-op。若 patch 摘要或内容表明其目的只是“满足补丁节点/状态变更/契约/收敛/严格收敛/验证锚点”，或类似 `runtime-repair` marker / `state-change anchor` / `verification anchor`，runtime 必须作为 non-substantive state-change placeholder 拒绝。该规则只检查补丁意图与形态，不判断具体业务语义。
 
 当 verification / strict convergence follow-up 已经识别出需要继续收敛时，可以返回受限 concrete validation evidence graph，例如明确的 shell/tool/mcp 验证节点；该 graph 不需要包含 patch，但不得只包含 read-only inspection、自检、run snapshot、context rehydration 或新的 LLM 嵌套。若再次返回只读 inspection graph 且没有 state-changing output、concrete validation evidence 或 rejected assessment，该失败属于 contract violation。后续 repair 必须携带对应的 rejection evidence；只有 failure evidence 已表明缺口是实现/状态变更缺口时，才提升为 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`，不能把纯验证证据缺口误升级为写文件 repair。
 
@@ -762,6 +767,8 @@ Stage input bundle 必须遵守：
   - graph expansion limit assessment 输入已补齐 `latestClosureEvidence` / `supersededFailureEvidence` 与 assessment evidence guidance，要求 satisfied coverage 只能引用具体可追踪证据。
   - `runEvidenceSummary` 在超出上下文预算时优先保留 action / patch / validation / closure evidence，避免关键证据被普通 LLM 过程步骤挤出。
   - graph expansion limit assessment 触发 coverage correction 时会为 `missingDoDItems` / `missingGoalCoverage` 补充中立 `evidenceCandidates`；候选证据存在时继续 assessment-only correction，候选不足时再进入 concrete validation evidence repair。
+  - runtime repair 已补充 `resourceShapeAlignmentContext`：当结构化失败信号表明当前目标与现有 API / 资源形状不一致时，repair 输入会携带同目录当前资源快照，要求 LLM 先对齐现有定义再生成 state-changing artifact。
+  - patch/apply 准入已扩展 non-substantive placeholder 识别，拒绝“严格收敛”“验证锚点”“state-change anchor”“verification anchor”等只为满足流程存在性的 marker/comment/no-op 变更。
 
 ## 非兼容性说明
 

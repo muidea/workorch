@@ -2372,19 +2372,19 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input[failureOutputKeySignature] = signature
 		input[stepInputKeyRepairOfFailureSig] = signature
 	}
-	if signals := structuredFailureSignalsFromFailureOutput(failedStep.Output, execErr, class, signature); len(signals) > 0 {
-		input["structuredFailureSignals"] = signals
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"Use structuredFailureSignals as mechanical failure evidence only; paths, line refs, and identifiers must be reconciled with current target snapshots or fresh reads before patching.",
-			"Do not treat identifier-like tokens in failure text as proof that a symbol or field should be invented; ground every referenced name in current resources or introduce it explicitly in the same patch.",
-		)
-		if structuredFailureSignalsContainAPIMismatch(signals) {
+		if signals := structuredFailureSignalsFromFailureOutput(failedStep.Output, execErr, class, signature); len(signals) > 0 {
+			input["structuredFailureSignals"] = signals
 			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-				"Prioritize the primary diagnostics from structuredFailureSignals before secondary cleanup: fix reported unresolved identifiers, unknown fields, type mismatches, constructor/schema/interface mismatches, and line-referenced target errors first.",
-				"When diagnostics identify a concrete target snapshot, reconcile that target with current visible API/resource shapes before changing assertions, evidence wording, or unrelated quality improvements.",
+				"Use structuredFailureSignals as mechanical failure evidence only; paths, line refs, and identifiers must be reconciled with current target snapshots or fresh reads before patching.",
+				"Do not treat identifier-like tokens in failure text as proof that a named element should be invented; ground every referenced name in current resources or introduce it explicitly in the same patch.",
 			)
+			if structuredFailureSignalsContainShapeConflict(signals) {
+				input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+					"Prioritize the primary diagnostics from structuredFailureSignals before secondary cleanup: fix reported unresolved names, invalid attributes, shape mismatches, contract-entry mismatches, and line-referenced target errors first.",
+					"When diagnostics identify a concrete target snapshot, reconcile that target with current visible resource or contract shape before changing secondary validation details, evidence wording, or unrelated quality improvements.",
+				)
+			}
 		}
-	}
 	targetScope := runtimeFailureTargetScope(signature)
 	if targetScope != "" {
 		input["failureTargetScope"] = targetScope
@@ -2451,13 +2451,13 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"When using baseHash, copy the literal contentHash value from the current target snapshot; never output unresolved references such as ${...}, {{...}}, or symbolic placeholders.",
 			"Use complete patch/apply file_write only when the current snapshot is marked safeForFileWrite/contentComplete and contains no redaction markers; otherwise use a minimal unified_diff with exact visible context, file/edit with exact oldText, or first read the target.",
 			"Never copy runtime redaction marker tokens, omitted sections, or truncated snapshot text into patch/apply content or diff.",
-			"If a previous patch was rejected for redacted runtime markers, discard that diff entirely and rebuild from current unredacted file/read or patchRepairContext content; do not transform redacted marker text into source content.",
-			"If patchRepairSuggestions are present, prefer their exact oldText/newText replacement evidence to construct the smallest current unified_diff or file/edit repair.",
-			"If patch application failed because of malformed unified_diff syntax, return either a complete standard unified diff with explicit line ranges such as @@ -12,3 +12,4 @@, or use file/edit with exact oldText/newText from the current snapshot.",
-			"Before adding new target content, reconcile the current snapshot and modify an existing equivalent item instead of creating duplicate named artifacts.",
-			"When patching files that reference existing code symbols, patch against names that already exist in current workspace resources unless the Goal explicitly requires introducing a new definition.",
-			"If the current target snapshot proves the failed patch is no longer required, return a bounded verification evidence graph instead of another patch; do not use read-only inspection as the only evidence.",
-		)
+				"If a previous patch was rejected for redacted runtime markers, discard that diff entirely and rebuild from current unredacted file/read or patchRepairContext content; do not transform redacted marker text into source content.",
+				"If patchRepairSuggestions are present, prefer their exact oldText/newText replacement evidence to construct the smallest current unified_diff or file/edit repair.",
+				"If patch application failed because of malformed unified_diff syntax, return either a complete standard unified diff with explicit line ranges such as @@ -12,3 +12,4 @@, or use file/edit with exact oldText/newText from the current snapshot.",
+				"Before adding new target content, reconcile the current snapshot and modify an existing equivalent item instead of creating duplicate named artifacts.",
+				"When patching resources that reference existing named elements, patch against names that already exist in current workspace resources unless the Goal explicitly requires introducing a new named element.",
+				"If the current target snapshot proves the failed patch is no longer required, return a bounded verification evidence graph instead of another patch; do not use read-only inspection as the only evidence.",
+			)
 		if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) > 0 {
 			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 				"currentTargetAlreadySatisfiesFailedPatch is a mechanical signal that the failed artifact's intended line changes are already reflected in the current target snapshot.",
@@ -2469,13 +2469,21 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if len(targetContext) > 0 {
 		input["failureTargetRepairContext"] = targetContext
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"Use failureTargetRepairContext as the current snapshot for targets identified by the failed evidence.",
-			"When failed evidence points at a concrete target resource, generate the smallest auditable patch/apply state change against that current snapshot before rerunning verification.",
-			"Use workspaceFileManifest to reconcile target resources with other known workspace resources; avoid replacing unrelated existing artifacts just to satisfy one failure target.",
-			"When a failure mentions missing symbols, unknown fields, constructor names, schema keys, or interface members, do not invent new names in the target patch; first reconcile the target with currently visible definitions from the relevant existing resource, or read the defining resource before patching.",
-			"When the failure text contains line-referenced unresolved identifiers, unknown fields, type/literal mismatches, constructor/schema/interface mismatches, or equivalent API-shape diagnostics in the failure target, repair those reported blockers before optimizing tests, assertions, formatting, or other secondary concerns.",
-		)
-	}
+				"Use failureTargetRepairContext as the current snapshot for targets identified by the failed evidence.",
+				"When failed evidence points at a concrete target resource, generate the smallest auditable patch/apply state change against that current snapshot before rerunning verification.",
+				"Use workspaceFileManifest to reconcile target resources with other known workspace resources; avoid replacing unrelated existing artifacts just to satisfy one failure target.",
+				"When a failure mentions missing names, invalid attributes, or contract-entry mismatches, do not invent new names in the target patch; first reconcile the target with currently visible resource shape from relevant existing resources, or read the relevant resource before patching.",
+				"When the failure text contains line-referenced unresolved names, invalid attributes, shape mismatches, or equivalent resource-shape diagnostics in the failure target, repair those reported blockers before secondary validation, formatting, or evidence refinements.",
+			)
+		}
+		if shapeContext := o.runtimeRepairResourceShapeAlignmentContext(ctx, run, failedStep); len(shapeContext) > 0 {
+			input["resourceShapeAlignmentContext"] = shapeContext
+			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+				"Use resourceShapeAlignmentContext as current same-directory resource evidence when diagnostics report unresolved names, invalid attributes, shape mismatches, contract-entry mismatches, or equivalent resource-shape conflicts.",
+				"Before introducing new named elements or attributes, reconcile the failed target with existing current workspace resources in resourceShapeAlignmentContext.",
+				"If the failed target disagrees with current resource shape, prefer the smallest coherent state change that aligns the target and existing resources; do not invent replacement contracts from failure text alone.",
+			)
+		}
 	if rootCauseCandidates := o.runtimeRepairRootCauseCandidateContext(ctx, run, failedStep); len(rootCauseCandidates) > 0 {
 		input["rootCauseCandidateContext"] = rootCauseCandidates
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
@@ -2659,10 +2667,10 @@ func inheritCoverageRepairContext(input map[string]any, failedStep *runModel.Ste
 	return true
 }
 
-func structuredFailureSignalsContainAPIMismatch(signals map[string]any) bool {
+func structuredFailureSignalsContainShapeConflict(signals map[string]any) bool {
 	for _, key := range []string{"messages", "identifiers"} {
 		for _, value := range stringSliceFromValue(signals[key]) {
-			if textContainsAPIMismatchDiagnostic(value) {
+			if textContainsShapeConflictDiagnostic(value) {
 				return true
 			}
 		}
@@ -2670,7 +2678,7 @@ func structuredFailureSignalsContainAPIMismatch(signals map[string]any) bool {
 	return false
 }
 
-func textContainsAPIMismatchDiagnostic(text string) bool {
+func textContainsShapeConflictDiagnostic(text string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(text))
 	if normalized == "" {
 		return false
@@ -2688,9 +2696,7 @@ func textContainsAPIMismatchDiagnostic(text string) bool {
 		"unresolved reference",
 		"no such field",
 		"no such method",
-		"constructor",
 		"schema key",
-		"interface member",
 	} {
 		if strings.Contains(normalized, token) {
 			return true
@@ -2711,8 +2717,8 @@ func stateChangingRepairGuidance() []string {
 		"When repair target snapshots or failure target scope are present, patch/apply must target that failure scope/current repair snapshot, or explicitly declare relatedFailureTargets that cite the current failure target being validated or unblocked; unrelated marker/no-op patches are invalid.",
 		"When a workspace already contains known resources, reconcile the repair with those existing resources and prefer the smallest coherent state change over broad replacement.",
 		"When repair context contains redacted or truncated content, do not copy it into patch/apply; first read the target or produce a minimal exact diff from visible current evidence.",
-		"When fixing failures caused by missing symbols, unknown fields, constructor names, schema keys, or interface members, patch against names that already exist in current workspace resources unless the Goal explicitly requires creating the missing definition.",
-		"When failure diagnostics include concrete line refs or API-shape mismatches, fix the reported compile/validation blockers in the failure target before secondary assertion, formatting, or evidence refinements.",
+		"When fixing failures caused by missing names, invalid attributes, or contract-entry mismatches, patch against names that already exist in current workspace resources unless the Goal explicitly requires creating a new named element.",
+		"When failure diagnostics include concrete line refs or resource-shape mismatches, fix the reported execution/validation blockers in the failure target before secondary validation, formatting, or evidence refinements.",
 		"Do not return self-inspection, run snapshot, observability, or context rehydration graphs when effective Goal and DoD are already present.",
 		"If a target file is missing in an empty or new workspace, create it with patch/apply file_write instead of reading it again.",
 		"Do not use placeholders such as __FROM_PREVIOUS_STEP_OUTPUT__, <<...>>, ${...}, or {{...}} in patch fields; use concrete literal values or omit optional fields.",
@@ -4341,6 +4347,144 @@ func (o *RuntimeOrchestrator) runtimeRepairFailureTargetContext(ctx context.Cont
 		ret = append(ret, item)
 	}
 	return ret
+}
+
+func (o *RuntimeOrchestrator) runtimeRepairResourceShapeAlignmentContext(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
+	if o == nil || o.workspaces == nil || run == nil || failedStep == nil || !runtimeRepairNeedsResourceShapeAlignment(failedStep) {
+		return nil
+	}
+	targetRefs := failureTargetRepairRefs(failedStep)
+	if len(targetRefs) == 0 {
+		return nil
+	}
+	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
+	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
+		return nil
+	}
+	files, err := workspaceManifestFiles(workspace.DeliverableDirectory)
+	if err != nil || len(files) == 0 {
+		return nil
+	}
+	targetRefs = resolveWorkspaceTargetRefs(workspace.DeliverableDirectory, targetRefs)
+	failedSet := map[string]bool{}
+	failedDirs := map[string]bool{}
+	failedStems := map[string]bool{}
+	for _, target := range targetRefs {
+		target = normalizeRepairPatchTargetRef(target)
+		if target == "" {
+			continue
+		}
+		failedSet[target] = true
+		failedDirs[filepath.Dir(target)] = true
+		failedStems[normalizedPathStem(target)] = true
+	}
+	if len(failedDirs) == 0 {
+		return nil
+	}
+	candidates := make([]workspaceDeliverableFile, 0, len(files))
+	for _, file := range files {
+		path := normalizeRepairPatchTargetRef(file.Path)
+		if path == "" || failedSet[path] || !sameDirectoryResourceCandidate(path, failedDirs) {
+			continue
+		}
+		candidates = append(candidates, file)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		leftScore := resourceShapeAlignmentCandidateScore(candidates[i].Path, failedStems)
+		rightScore := resourceShapeAlignmentCandidateScore(candidates[j].Path, failedStems)
+		if leftScore != rightScore {
+			return leftScore > rightScore
+		}
+		if candidates[i].Size != candidates[j].Size {
+			return candidates[i].Size < candidates[j].Size
+		}
+		return candidates[i].Path < candidates[j].Path
+	})
+	ret := make([]map[string]any, 0, min(len(candidates), 3))
+	for _, candidate := range candidates {
+		if len(ret) >= 3 {
+			break
+		}
+		item := patchRepairTargetSnapshot(workspace.DeliverableDirectory, candidate.Path)
+		if len(item) == 0 || !boolValue(item["exists"]) {
+			continue
+		}
+		item["source"] = "same_directory_resource_for_shape_conflict"
+		item["guidance"] = "Use this current same-directory resource to reconcile resource or contract shape before inventing names, attributes, or contract entries."
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func runtimeRepairNeedsResourceShapeAlignment(failedStep *runModel.Step) bool {
+	if failedStep == nil {
+		return false
+	}
+	class := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass))
+	signature := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeySignature))
+	if signals := structuredFailureSignalsFromFailureOutput(failedStep.Output, nil, class, signature); structuredFailureSignalsContainShapeConflict(signals) {
+		return true
+	}
+	for _, key := range []string{"stderr", "stdout", "error", "reason", "summary", "message"} {
+		if textContainsShapeConflictDiagnostic(stringFromMap(failedStep.Output, key)) {
+			return true
+		}
+	}
+	if failedOutput := mapFromValue(failedStep.Output["failedStepOutput"]); len(failedOutput) > 0 {
+		for _, key := range []string{"stderr", "stdout", "error", "reason", "summary", "message"} {
+			if textContainsShapeConflictDiagnostic(stringFromMap(failedOutput, key)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func sameDirectoryResourceCandidate(path string, failedDirs map[string]bool) bool {
+	path = normalizeRepairPatchTargetRef(path)
+	if path == "" || len(failedDirs) == 0 {
+		return false
+	}
+	return failedDirs[filepath.Dir(path)]
+}
+
+func resourceShapeAlignmentCandidateScore(path string, failedStems map[string]bool) int {
+	path = normalizeRepairPatchTargetRef(path)
+	if path == "" {
+		return 0
+	}
+	base := strings.ToLower(filepath.Base(path))
+	ext := strings.ToLower(filepath.Ext(base))
+	stem := strings.TrimSuffix(base, ext)
+	score := 50
+	if ext != "" {
+		score += 5
+	}
+	for failedStem := range failedStems {
+		if failedStem == "" {
+			continue
+		}
+		switch {
+		case stem == failedStem:
+			score += 30
+		case strings.HasPrefix(failedStem, stem+"_") || strings.HasPrefix(failedStem, stem+"-") || strings.HasPrefix(stem, failedStem+"_") || strings.HasPrefix(stem, failedStem+"-"):
+			score += 25
+		case strings.Contains(failedStem, stem) || strings.Contains(stem, failedStem):
+			score += 10
+		}
+	}
+	if !strings.Contains(stem, "_") && !strings.Contains(stem, "-") && !strings.Contains(stem, ".") {
+		score += 5
+	}
+	return score
+}
+
+func normalizedPathStem(path string) string {
+	base := strings.ToLower(filepath.Base(normalizeRepairPatchTargetRef(path)))
+	if base == "." || base == "" {
+		return ""
+	}
+	return strings.TrimSuffix(base, strings.ToLower(filepath.Ext(base)))
 }
 
 func (o *RuntimeOrchestrator) runtimeRepairRootCauseCandidateContext(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
