@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { App as AntApp, Button, Descriptions, Empty, Form, Input, InputNumber, Select, Space, Tag, Typography } from 'antd';
+import { App as AntApp, Button, Descriptions, Empty, Form, Input, InputNumber, Select, Space, Tabs, Tag, Typography } from 'antd';
 import { PageContainer, ProCard } from '@ant-design/pro-components';
 import type {
   LLMModelCapabilityConfiguration,
@@ -358,7 +358,15 @@ export function ConfigurationPage() {
       subTitle="管理服务配置、执行人格（Soul）、工作空间模板（Workspace Template）、LLM 服务商和 Web Search Provider"
       extra={<Button onClick={() => void loadConfiguration()} loading={loading}>刷新</Button>}
     >
-      <ProCard gutter={16} wrap loading={loading}>
+      <Tabs
+        className="configuration-tabs"
+        destroyOnHidden={false}
+        items={[
+          {
+            key: 'service',
+            label: '基础服务',
+            children: (
+              <ProCard gutter={16} wrap loading={loading}>
         <ProCard title="服务参数" colSpan="50%">
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
             <Descriptions
@@ -400,8 +408,14 @@ export function ConfigurationPage() {
             ]}
           />
         </ProCard>
-      </ProCard>
-      <ProCard
+              </ProCard>
+            )
+          },
+          {
+            key: 'web-search',
+            label: 'Web Search',
+            children: (
+              <ProCard
         title="Web Search Provider"
         className="workorch-section"
         extra={<Button type="primary" onClick={() => void webSearchProviderEditorForm.validateFields().then(() => saveWebSearchConfiguration())} loading={webSearchSaving}>保存 Web Search Provider</Button>}
@@ -528,10 +542,24 @@ export function ConfigurationPage() {
             )}
           </ProCard>
         </Space>
-      </ProCard>
-      <SoulDefinitionManager souls={souls} onSoulsChange={setSouls} />
-      <WorkspaceTemplateManager souls={souls} templates={workspaceTemplates} onTemplatesChange={setWorkspaceTemplates} />
-      <ProCard
+              </ProCard>
+            )
+          },
+          {
+            key: 'soul',
+            label: '执行人格',
+            children: <SoulDefinitionManager souls={souls} onSoulsChange={setSouls} />
+          },
+          {
+            key: 'workspace-template',
+            label: '工作空间模板',
+            children: <WorkspaceTemplateManager souls={souls} templates={workspaceTemplates} onTemplatesChange={setWorkspaceTemplates} />
+          },
+          {
+            key: 'llm',
+            label: 'LLM 服务商',
+            children: (
+              <ProCard
         title="LLM 服务商"
         className="workorch-section"
         extra={<Button type="primary" onClick={() => void providerEditorForm.validateFields().then(() => saveLLMConfiguration())} loading={saving}>保存 LLM 服务商</Button>}
@@ -796,7 +824,11 @@ export function ConfigurationPage() {
             )}
           </ProCard>
         </Space>
-      </ProCard>
+              </ProCard>
+            )
+          }
+        ]}
+      />
     </PageContainer>
   );
 }

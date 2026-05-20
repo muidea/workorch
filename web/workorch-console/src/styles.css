@@ -37,6 +37,14 @@ body {
   margin-top: 16px;
 }
 
+.configuration-tabs .workorch-section {
+  margin-top: 0;
+}
+
+.configuration-tabs .ant-tabs-nav {
+  margin-bottom: 12px;
+}
+
 .workspace-page-header-actions {
   display: flex;
   flex-wrap: wrap;
