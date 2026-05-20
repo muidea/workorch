@@ -3,7 +3,7 @@ import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, 
 import { ProCard, ProTable } from '@ant-design/pro-components';
 import type { ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, EventRecord, ExecutionSection, Goal, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, RepairLoop, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
-import { modelLabels } from './labels';
+import { modelLabels } from './utils/constants';
 
 export type ViewKey = 'board' | 'workspaceDetail' | 'governance' | 'runtimeControl' | 'configuration' | 'service';
 
@@ -2509,7 +2509,6 @@ export function workspaceBoardActivationHint(item: WorkspaceBoardItem) {
   }
   return '当前工作空间无法确定启动上下文，请进入工作空间核对后再启动执行';
 }
-
 
 
 

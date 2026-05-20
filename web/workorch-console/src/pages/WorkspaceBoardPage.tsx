@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { App as AntApp, Badge, Button, Descriptions, Empty, Space, Steps, Typography } from 'antd';
 import { PageContainer, ProCard } from '@ant-design/pro-components';
 import { workorchApi } from '../api';
-import { modelLabels } from '../labels';
+import { modelLabels } from '../utils/constants';
+import { useSSE } from '../hooks';
 import { errorMessage, shortId, stateTag, stateLabel, boundedParagraph, metricGrid } from '../utils';
-import { workspaceBoardActivationRequest, workspaceBoardActivationHint, workspaceProjectionRun, runStateSummary, pendingCount, isTerminalRunState, workspaceProcessItems, runtimeSummaryTags } from '../main';
+import { workspaceBoardActivationRequest, workspaceBoardActivationHint, workspaceProjectionRun, runStateSummary, pendingCount, isTerminalRunState, workspaceProcessItems, runtimeSummaryTags } from '../helpers';
 import type { ControlPlaneProps, WorkspaceBoardItem, WorkspaceExecutionActivationRequest } from '../types';
 
 export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
@@ -12,8 +13,10 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
   const [boardItems, setBoardItems] = useState<WorkspaceBoardItem[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const loadBoard = async () => {
-    setLoading(true);
+  const loadBoard = useCallback(async (showLoading = true) => {
+    if (showLoading) {
+      setLoading(true);
+    }
     try {
       const workspaces = await workorchApi.listWorkspaces();
       const nextBoardItems = await Promise.all(workspaces.map(async (item) => {
@@ -28,13 +31,22 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
-  };
+  }, [message]);
 
   useEffect(() => {
     void loadBoard();
-  }, []);
+  }, [loadBoard]);
+
+  useSSE(() => {
+    void loadBoard(false);
+  }, {
+    debounceMs: 250,
+    onReconnect: () => void loadBoard(false)
+  });
 
   const trackWorkspaceActivationInBackground = (workspaceId: string, request: WorkspaceExecutionActivationRequest) => {
     void workorchApi.activateWorkspaceExecution(workspaceId, request)
@@ -67,7 +79,7 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
       {boardItems.length === 0 && !loading ? (
         <Empty description="暂无工作空间" />
       ) : (
-        <ProCard gutter={16} wrap loading={loading}>
+        <ProCard className="workspace-board-grid" gutter={16} wrap loading={loading}>
           {boardItems.map((item) => {
             const { snapshot, goals, dods } = item;
             const activeRun = snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId);
@@ -122,7 +134,7 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
                 <Space className="workorch-section" wrap>
                   <Button type="primary" onClick={() => onOpenWorkspace(snapshot.workspace.id)}>进入工作空间</Button>
                   {canStartRun ? <Button onClick={() => void activateWorkspaceExecution(item)}>{currentRun ? '重新启动执行' : '启动执行'}</Button> : null}
-                  {currentRun && !isTerminalRunState(currentRun.state) ? <Button onClick={() => void workorchApi.resumeRun(currentRun.id).then(loadBoard).catch((error: unknown) => message.error(errorMessage(error)))}>继续运行</Button> : null}
+                  {currentRun && !isTerminalRunState(currentRun.state) ? <Button onClick={() => void workorchApi.resumeRun(currentRun.id).then(() => loadBoard()).catch((error: unknown) => message.error(errorMessage(error)))}>继续运行</Button> : null}
                 </Space>
               </ProCard>
             );

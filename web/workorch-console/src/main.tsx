@@ -19,9 +19,6 @@ const RuntimeControlPage = lazy(() => import('./pages/RuntimeControlPage').then(
 const ConfigurationPage = lazy(() => import('./pages/ConfigurationPage').then(m => ({ default: m.ConfigurationPage })));
 const WorkspaceDetailPage = lazy(() => import('./pages/WorkspaceDetailPage').then(m => ({ default: m.WorkspaceDetailPage })));
 
-export { modelLabels } from './labels';
-export * from './helpers';
-
 type ViewKey = 'board' | 'workspaceDetail' | 'governance' | 'runtimeControl' | 'configuration' | 'service';
 
 const routes = [

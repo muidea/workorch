@@ -4,14 +4,14 @@ import { PageContainer, ProCard, ProTable } from '@ant-design/pro-components';
 import type { ProColumns } from '@ant-design/pro-components';
 import type { MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool } from '../types';
 import { workorchApi } from '../api';
-import { modelLabels } from '../labels';
+import { modelLabels } from '../utils/constants';
 import {
   joinLines,
   metricValue,
   capabilityKindTag,
   errorMessage,
   splitLines
-} from '../main';
+} from '../helpers';
 
 function displayMCPEndpoint(endpoint?: string) {
   const value = endpoint?.trim() ?? '';

@@ -5,8 +5,8 @@ import type { ProColumns } from '@ant-design/pro-components';
 import { DownOutlined } from '@ant-design/icons';
 import type { Approval, Artifact, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPServer, MemoryItem, Patch, PatchPage, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from '../types';
 import { createWorkorchEventStream, workorchApi } from '../api';
-import { modelLabels } from '../labels';
-import * as helpers from '../main';
+import { modelLabels } from '../utils/constants';
+import * as helpers from '../helpers';
 
 type ControlPlaneProps = helpers.ControlPlaneProps;
 type SoulBindingFormValues = helpers.SoulBindingFormValues;
@@ -164,7 +164,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       return undefined;
     }
     const stream = createWorkorchEventStream();
-    const scheduleRefresh = (refreshList: boolean, targetWorkspaceId?: string, topic?: string) => {
+    const scheduleRefresh = (refreshList: boolean, targetWorkspaceId?: string) => {
       if (workspaceEventRefreshTimerRef.current !== undefined) {
         window.clearTimeout(workspaceEventRefreshTimerRef.current);
       }
@@ -178,19 +178,15 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           });
         }
         if (nextWorkspaceId && nextWorkspaceId === selected) {
-          if (topic && (topic.startsWith('run.') || topic.startsWith('step.') || topic.startsWith('tool_call.'))) {
-            void refreshRunData(nextWorkspaceId).catch(() => {});
-          } else {
-            void loadWorkspaceContext(nextWorkspaceId).catch((error: unknown) => {
-              if (isNotFoundError(error)) {
-                void loadWorkspaceList(undefined, nextWorkspaceId).catch((refreshError: unknown) => {
-                  message.error(errorMessage(refreshError));
-                });
-                return;
-              }
-              message.error(errorMessage(error));
-            });
-          }
+          void loadWorkspaceContext(nextWorkspaceId).catch((error: unknown) => {
+            if (isNotFoundError(error)) {
+              void loadWorkspaceList(undefined, nextWorkspaceId).catch((refreshError: unknown) => {
+                message.error(errorMessage(refreshError));
+              });
+              return;
+            }
+            message.error(errorMessage(error));
+          });
         }
       }, 150);
     };
@@ -201,7 +197,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         const eventWorkspaceId = envelope.workspaceId;
         const refreshList = topic.includes('workspace');
         if (refreshList || !eventWorkspaceId || eventWorkspaceId === currentWorkspaceIdRef.current) {
-          scheduleRefresh(refreshList, eventWorkspaceId, topic);
+          scheduleRefresh(refreshList, eventWorkspaceId);
         }
       } catch {
         scheduleRefresh(false, currentWorkspaceIdRef.current);
@@ -592,20 +588,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       clearWorkspaceContext();
     }
     return nextWorkspaceId;
-  }
-
-  async function refreshRunData(targetWorkspaceId: string) {
-    const nextSnapshot = await workorchApi.readWorkspaceSnapshot(targetWorkspaceId);
-    setSnapshot(nextSnapshot);
-    const projectedRun = workspaceProjectionRun(nextSnapshot);
-    if (projectedRun) {
-      const [nextRunSnapshot, nextRunObservability] = await Promise.all([
-        workorchApi.readRunSnapshot(projectedRun.id),
-        workorchApi.readRunObservability(projectedRun.id)
-      ]);
-      setRunSnapshot(nextRunSnapshot);
-      setRunObservability(nextRunObservability);
-    }
   }
 
   async function loadWorkspaceContext(targetWorkspaceId: string) {
@@ -2654,8 +2636,5 @@ export function displayMCPEndpoint(endpoint?: string) {
   const index = value.indexOf(marker);
   return index >= 0 ? value.slice(index) : value;
 }
-
-
-
 
 

@@ -1,6 +1,6 @@
 import { PageContainer } from '@ant-design/pro-components';
 import { Tabs } from 'antd';
-import { modelLabels } from '../labels';
+import { modelLabels } from '../utils/constants';
 import { DecisionQueuePage } from './DecisionQueuePage';
 import { ApprovalQueuePage } from './ApprovalQueuePage';
 

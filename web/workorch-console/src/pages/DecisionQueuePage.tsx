@@ -3,9 +3,10 @@ import { App as AntApp, Button, Descriptions, Form, Input, Modal, Space, Typogra
 import { PageContainer, ProCard, ProTable } from '@ant-design/pro-components';
 import type { ProColumns } from '@ant-design/pro-components';
 import { workorchApi } from '../api';
-import { modelLabels } from '../labels';
+import { modelLabels } from '../utils/constants';
+import { useSSE } from '../hooks';
 import { errorMessage, mergeById, compactJSON, boundedParagraph, stateTag } from '../utils';
-import { decisionInitialPayload, normalizeDecisionResolutionPayload, decisionPayloadFields, parseDecisionExtraPayload } from '../main';
+import { decisionInitialPayload, normalizeDecisionResolutionPayload, decisionPayloadFields, parseDecisionExtraPayload } from '../helpers';
 import type { Decision, DecisionPage } from '../types';
 
 const governancePageLimit = 20;
@@ -41,6 +42,12 @@ export function DecisionQueuePage() {
   useEffect(() => {
     void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));
   }, []);
+
+  useSSE((event) => {
+    if (event.topic.includes('decision') || event.topic.includes('governance') || event.topic.includes('run.')) {
+      void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));
+    }
+  }, { debounceMs: 300 });
 
   const resolve = async (item: Decision, resolutionType: string, payload?: Record<string, unknown>) => {
     try {

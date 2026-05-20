@@ -27,7 +27,7 @@ import {
   webSearchProviderFormValues,
   WorkspaceTemplateManager,
   type WebSearchProviderFormValues
-} from '../main';
+} from '../helpers';
 
 export function ConfigurationPage() {
   const { message } = AntApp.useApp();
