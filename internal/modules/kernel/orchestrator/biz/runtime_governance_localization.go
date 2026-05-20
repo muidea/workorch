@@ -65,6 +65,29 @@ func localizedProviderRetryExhaustionQuestion(language string) string {
 	return "WorkOrch runtime LLM provider retries were exhausted. Fix or switch the runtime LLM provider in WorkOrch system configuration first, or retry later; do not paste API keys into the ticket answer. After configuration is fixed, continue, choose replan, or reject the current path."
 }
 
+func localizedContextIntegrityGateReason(language string, action string, reason string, err error) string {
+	if action == "" {
+		action = "unknown"
+	}
+	if reason == "" && err != nil {
+		reason = err.Error()
+	}
+	if reason == "" {
+		reason = "context integrity gate failed"
+	}
+	if prefersChinese(language) {
+		return fmt.Sprintf("runtime 上下文准入失败（%s）：%s", action, reason)
+	}
+	return fmt.Sprintf("runtime context gate failed (%s): %s", action, reason)
+}
+
+func localizedContextIntegrityGateQuestion(language string) string {
+	if prefersChinese(language) {
+		return "WorkOrch runtime 无法构造满足准入要求的 LLM 上下文。请补充缺失信息、选择重新规划，或终止当前路径；不要通过普通状态变更输出修复该 runtime 上下文问题。"
+	}
+	return "WorkOrch runtime cannot build an LLM context that satisfies the gate. Provide the missing information, choose replan, or terminate the path; do not fix this runtime context issue through a normal state-changing output."
+}
+
 func localizedPatchApprovalReason(language string) string {
 	if prefersChinese(language) {
 		return "修改工作区文件前需要审批补丁。"

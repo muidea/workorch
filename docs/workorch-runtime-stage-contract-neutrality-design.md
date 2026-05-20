@@ -706,6 +706,25 @@ Runtime 在 provider request 前必须执行 context gate，并得到唯一处�
 
 `contextBudget.integrityWarnings` 不能只是观测日志。若 warning 涉及 P0-P4 必要字段，例如 `protected_repair_action_target_snapshot_missing_after_context_budget`、Goal / DoD 压缩、requiredOutput 缺失、current failure 缺失、coverageTargetSet 缺失，context gate 必须选择 `read_required`、`fail_fast`、`blocker_required` 或 `replan_required` 之一。
 
+`protected_repair_action_target_snapshot_missing_after_context_budget` 只能在原始 provider input 已包含可安全写入的 `repairActionPackage.targetSnapshots`，但预算处理后丢失时触发。`repairActionPackage.requiredOutput`、`coverageTargetSet`、`currentExecutionProgress` 等受保护合同字段不能被误判为 target snapshot 要求；否则会把“无目标快照需求”的普通 repair 合同错误转成 `read_required`。
+
+`llm_context_integrity_failed` 是 provider 前的 runtime context gate failure，不能交给 LLM 生成 state-changing repair 来修复。若 gate 为 `read_required`，runtime 只能先补充 read/resource fetch 或阻塞；若 gate 为 `fail_fast`，应终止本轮 provider 提交并给出结构化原因。该类失败不得继承 `stateChangingOutputRequired=true` 后继续要求 `patch/apply`，避免形成 context gate -> state-changing repair -> context gate 的循环。
+
+Context gate 的恢复必须由 runtime 结构化分流，而不是由普通 repair prompt 间接推断：
+
+- `pass`：提交 provider。
+- `read_required`：若 runtime 能从结构化 target refs 解析出可读资源，先派发 read/resource fetch；若无法解析或能力不可用，创建 `runtime_context_required` 决策阻塞。
+- `fail_fast`：不提交 provider，不进入 state-changing repair；创建 runtime context blocker 或直接终止当前 successor，错误中必须包含 `contextGateAction`、`contextGateReason` 和受影响 protected field。
+- `blocker_required`：创建 `blocked_on_decision`，上下文必须说明 missing field、source refs、为什么 runtime 无法自动获取。
+- `replan_required`：创建 successor lineage，携带 predecessor failure context 和仍有效的 Goal/DoD 合同。
+
+跨模块不变量：
+
+- LLM budget 模块只负责计算 `contextGateAction/contextGateReason`，不得假设 orchestrator 会用 patch 修复上下文。
+- Orchestrator 看到 `llm_context_integrity_failed` 后必须按 context gate 语义处理，禁止进入 provider retry、普通 runtime repair 或 state-changing repair。
+- `stateChangingOutputRequired` 只约束业务目标产物或验证收口，不得覆盖 provider 前上下文准入失败。
+- `repairActionPackage` 的字段必须按字段级 presence bit 保护：合同字段、进展字段、coverage 字段和 target snapshot 字段互不隐式代表。
+
 ### Stage-Specific Required Context
 
 | Stage | 必须完整提供 | 缺失时处置 |
@@ -883,6 +902,7 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
   - provider request 的 `contextBudget` 已补充 `contextGateAction` / `contextGateReason`，并在提交 LLM provider 前执行硬准入；P0-P4 必要上下文缺失、coverage repair 缺少 target set、repair 缺少当前失败、受保护 target snapshot 在预算处理后丢失等情况不再作为普通观测 warning 静默提交 provider。
   - `llm_context_integrity_failed` 作为 runtime contract failure 进入失败分类，避免被误归为 provider transient / config 类问题。
   - execution graph 校验已拒绝 `patch/apply` 依赖同图 `file/read` 的固定 state-changing artifact；需要先读取当前资源时必须拆成前置读取轮次，再由后续 LLM 基于已进入上下文的快照生成状态变更。
+  - provider budget 的 repair target 保护已区分 `repairActionPackage` 合同字段与真实 `targetSnapshots`：只有原始输入存在安全 target snapshot 时才触发 protected snapshot missing；provider 前 context gate failure 不再被升级为要求 `patch/apply` 的 state-changing repair，并会进入显式 `runtime_context_required` 阻塞处置。
 
 ## 非兼容性说明
 

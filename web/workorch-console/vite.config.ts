@@ -10,7 +10,12 @@ export default defineConfig({
       output: {
         entryFileNames: 'assets/workorch-console.js',
         chunkFileNames: 'assets/[name]-[hash].js',
-        assetFileNames: 'assets/workorch-console[extname]'
+        assetFileNames: 'assets/workorch-console[extname]',
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-antd': ['antd', '@ant-design/pro-components', '@ant-design/icons'],
+          'vendor-state': ['zustand']
+        }
       }
     }
   },

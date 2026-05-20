@@ -2,6 +2,8 @@ import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, Decision, Dec
 
 const apiBase = '/api/v1/workorch';
 
+const inflightGets = new Map<string, Promise<unknown>>();
+
 export function createWorkorchEventStream(query?: { workspaceId?: string; runId?: string }) {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(query ?? {})) {
@@ -14,6 +16,24 @@ export function createWorkorchEventStream(query?: { workspaceId?: string; runId?
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const method = init?.method?.toUpperCase() || 'GET';
+  const dedupeKey = method === 'GET' ? url : '';
+
+  if (dedupeKey && inflightGets.has(dedupeKey)) {
+    return inflightGets.get(dedupeKey) as Promise<T>;
+  }
+
+  const promise = doRequest<T>(url, init);
+
+  if (dedupeKey) {
+    inflightGets.set(dedupeKey, promise);
+    promise.finally(() => inflightGets.delete(dedupeKey));
+  }
+
+  return promise;
+}
+
+async function doRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
     headers: {

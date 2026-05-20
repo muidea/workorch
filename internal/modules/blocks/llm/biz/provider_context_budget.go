@@ -718,7 +718,7 @@ func missingProtectedRepairSnapshotWarnings(input map[string]any, protected prot
 	if protected.PatchRepairContext != nil && len(providerSafeRepairSnapshotsFromValue(input["patchRepairContext"])) == 0 {
 		warnings = append(warnings, "protected_patch_repair_snapshot_missing_after_context_budget")
 	}
-	if protected.RepairActionPackage != nil {
+	if protected.RepairActionPackage != nil && protected.RepairActionTargetSnapshots != nil {
 		pkg := recordFromAny(input["repairActionPackage"])
 		if len(providerSafeRepairSnapshotsFromValue(pkg["targetSnapshots"])) == 0 {
 			warnings = append(warnings, "protected_repair_action_target_snapshot_missing_after_context_budget")
@@ -734,9 +734,10 @@ type protectedGoalDoD struct {
 }
 
 type protectedProviderRepairTargets struct {
-	FailureTargetRepairContext any
-	PatchRepairContext         any
-	RepairActionPackage        any
+	FailureTargetRepairContext  any
+	PatchRepairContext          any
+	RepairActionPackage         any
+	RepairActionTargetSnapshots any
 }
 
 func captureProtectedGoalDoD(input map[string]any) protectedGoalDoD {
@@ -791,6 +792,7 @@ func captureProtectedProviderRepairTargets(input map[string]any) protectedProvid
 		}
 		if targets := providerSafeRepairSnapshotsFromValue(pkg["targetSnapshots"]); len(targets) > 0 {
 			pkgOut["targetSnapshots"] = targets
+			ret.RepairActionTargetSnapshots = targets
 		}
 		if len(pkgOut) > 0 {
 			ret.RepairActionPackage = pkgOut

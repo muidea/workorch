@@ -191,6 +191,8 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 		return o.blockOnRuntimeRepairExhaustion(ctx, run, failedStep, execErr)
 	case runtimeRecoveryActionDuplicateFailure:
 		return o.blockOnDuplicateRuntimeFailure(ctx, run, failedStep, execErr)
+	case runtimeRecoveryActionContextIntegrityBlocked:
+		return o.blockOnContextIntegrityGate(ctx, run, failedStep, execErr)
 	case runtimeRecoveryActionRuntimeRepair:
 		attempt := o.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep) + 1
 		input := o.runtimeRepairFollowUpStepInput(ctx, run, failedStep, attempt, execErr)
@@ -218,12 +220,13 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 type runtimeRecoveryAction string
 
 const (
-	runtimeRecoveryActionProviderRetry          runtimeRecoveryAction = "provider_retry"
-	runtimeRecoveryActionProviderRetryExhausted runtimeRecoveryAction = "provider_retry_exhausted"
-	runtimeRecoveryActionRuntimeRepairExhausted runtimeRecoveryAction = "runtime_repair_exhausted"
-	runtimeRecoveryActionDuplicateFailure       runtimeRecoveryAction = "duplicate_failure"
-	runtimeRecoveryActionRuntimeRepair          runtimeRecoveryAction = "runtime_repair"
-	runtimeRecoveryActionFailRun                runtimeRecoveryAction = "fail_run"
+	runtimeRecoveryActionProviderRetry           runtimeRecoveryAction = "provider_retry"
+	runtimeRecoveryActionProviderRetryExhausted  runtimeRecoveryAction = "provider_retry_exhausted"
+	runtimeRecoveryActionRuntimeRepairExhausted  runtimeRecoveryAction = "runtime_repair_exhausted"
+	runtimeRecoveryActionDuplicateFailure        runtimeRecoveryAction = "duplicate_failure"
+	runtimeRecoveryActionContextIntegrityBlocked runtimeRecoveryAction = "context_integrity_blocked"
+	runtimeRecoveryActionRuntimeRepair           runtimeRecoveryAction = "runtime_repair"
+	runtimeRecoveryActionFailRun                 runtimeRecoveryAction = "fail_run"
 )
 
 func (o *RuntimeOrchestrator) recoveryActionForFailedStep(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) runtimeRecoveryAction {
@@ -241,6 +244,9 @@ func (o *RuntimeOrchestrator) recoveryActionForFailedStep(ctx context.Context, r
 	}
 	if isLLMProviderRuntimeFailure(run, failedStep) {
 		return runtimeRecoveryActionFailRun
+	}
+	if runtimeContextIntegrityGateFailure(failedStep) {
+		return runtimeRecoveryActionContextIntegrityBlocked
 	}
 	if o.shouldEscalateRuntimeRepairExhaustion(ctx, run, failedStep) {
 		return runtimeRecoveryActionRuntimeRepairExhausted
@@ -360,6 +366,11 @@ func (o *RuntimeOrchestrator) blockRecoveryActionFromFailedStep(
 			return err
 		}
 		return common.ErrBlocked
+	case runtimeRecoveryActionContextIntegrityBlocked:
+		if err := o.blockOnContextIntegrityGate(ctx, run, failedStep, execErr); err != nil {
+			return err
+		}
+		return common.ErrBlocked
 	default:
 		return common.ErrInvalidArgument
 	}
@@ -468,6 +479,9 @@ func (o *RuntimeOrchestrator) shouldAttemptRuntimeRepair(ctx context.Context, ru
 	if terminalAssessmentOnlyDecisionContractFailure(failedStep) {
 		return false
 	}
+	if runtimeContextIntegrityGateFailure(failedStep) {
+		return false
+	}
 	if o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= o.maxRuntimeRepairAttempts() {
 		return false
 	}
@@ -537,6 +551,55 @@ func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
 			"failureSignature":               stringFromMap(failedStep.Output, failureOutputKeySignature),
 			"failedStepId":                   string(failedStep.ID),
 			"failedStepKind":                 failedStep.Kind,
+			"failedStepInput":                compactStepInputForLLMContext(failedStep.Input),
+			"failedStepOutput":               compactStepOutputForLLMContext(failedStep.Output),
+		},
+	}
+	ticketID, err := o.createOrReuseRuntimeBlockerTicket(ctx, run, failedStep, spec)
+	if err != nil {
+		return err
+	}
+	return o.BlockOnDecision(ctx, run.ID, ticketID)
+}
+
+func (o *RuntimeOrchestrator) blockOnContextIntegrityGate(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	execErr error,
+) error {
+	if run == nil || failedStep == nil {
+		return common.ErrInvalidArgument
+	}
+	language := runDialogLanguage(run)
+	budget := mapFromValue(failedStep.Output["contextBudget"])
+	gateAction := strings.TrimSpace(stringFromMap(budget, "contextGateAction"))
+	gateReason := strings.TrimSpace(stringFromMap(budget, "contextGateReason"))
+	if gateReason == "" {
+		gateReason = firstNonEmptyString(
+			stringFromMap(failedStep.Output, "reason"),
+			stringFromMap(failedStep.Output, "error"),
+			errorString(execErr),
+		)
+	}
+	spec := runtimeDecisionBlockSpec{
+		TicketID:     common.TicketID(runtimeChildID(failedStep.ID, "context-integrity-decision")),
+		Reason:       localizedContextIntegrityGateReason(language, gateAction, gateReason, execErr),
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     localizedContextIntegrityGateQuestion(language),
+		Context: map[string]any{
+			decisionContextKeyScope:          decisionContextScopeWorkorchRuntime,
+			decisionContextKeyDependency:     decisionContextDependencyContextGate,
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyContext,
+			decisionContextKeyResultPolicy:   decisionContextResultPolicyNone,
+			"allowedRecoveryActions":         []string{"provide_information", "replan", "terminate"},
+			"contextGateAction":              gateAction,
+			"contextGateReason":              gateReason,
+			"failureClass":                   stringFromMap(failedStep.Output, failureOutputKeyClass),
+			"failureSignature":               stringFromMap(failedStep.Output, failureOutputKeySignature),
+			"failedStepId":                   string(failedStep.ID),
+			"failedStepKind":                 failedStep.Kind,
+			"contextBudget":                  compactLLMContextValue(budget, 1),
 			"failedStepInput":                compactStepInputForLLMContext(failedStep.Input),
 			"failedStepOutput":               compactStepOutputForLLMContext(failedStep.Output),
 		},
@@ -4062,6 +4125,9 @@ func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, e
 	if failedStep == nil {
 		return false
 	}
+	if runtimeContextIntegrityGateFailure(failedStep) {
+		return false
+	}
 	if doDVerificationEvidenceRepairRequired(failedStep) {
 		return false
 	}
@@ -4120,6 +4186,28 @@ func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, e
 		}
 	}
 	return false
+}
+
+func runtimeContextIntegrityGateFailure(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	if strings.TrimSpace(step.Kind) != llmWorkspaceExecutionStepKind {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(step.Output, "stage")) != "llm_context_integrity_failed" {
+		return false
+	}
+	budget := mapFromValue(step.Output["contextBudget"])
+	action := strings.TrimSpace(stringFromMap(budget, "contextGateAction"))
+	if action == "read_required" || action == "fail_fast" {
+		return true
+	}
+	text := strings.ToLower(strings.Join([]string{
+		stringFromMap(step.Output, "error"),
+		stringFromMap(step.Output, "reason"),
+	}, " "))
+	return strings.Contains(text, "llm context gate")
 }
 
 func doDVerificationEvidenceRepairRequired(failedStep *runModel.Step) bool {

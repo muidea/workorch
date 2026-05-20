@@ -3395,7 +3395,8 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			}}, nil
 		case runtimeRecoveryActionProviderRetryExhausted,
 			runtimeRecoveryActionRuntimeRepairExhausted,
-			runtimeRecoveryActionDuplicateFailure:
+			runtimeRecoveryActionDuplicateFailure,
+			runtimeRecoveryActionContextIntegrityBlocked:
 			if err := o.blockRecoveryActionFromFailedStep(ctx, run, last, nil, action); err != nil {
 				return nil, err
 			}

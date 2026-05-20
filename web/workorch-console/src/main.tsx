@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import {
   CheckCircleOutlined,
@@ -16,9 +16,9 @@ import { workorchApi } from './api';
 import { ServicePage } from './pages/ServicePage';
 import { GovernanceQueuePage } from './pages/GovernanceQueuePage';
 import { WorkspaceBoardPage } from './pages/WorkspaceBoardPage';
-import { RuntimeControlPage } from './pages/RuntimeControlPage';
-import { ConfigurationPage } from './pages/ConfigurationPage';
-import { WorkspaceDetailPage } from './pages/WorkspaceDetailPage';
+const RuntimeControlPage = lazy(() => import('./pages/RuntimeControlPage').then(m => ({ default: m.RuntimeControlPage })));
+const ConfigurationPage = lazy(() => import('./pages/ConfigurationPage').then(m => ({ default: m.ConfigurationPage })));
+const WorkspaceDetailPage = lazy(() => import('./pages/WorkspaceDetailPage').then(m => ({ default: m.WorkspaceDetailPage })));
 import './styles.css';
 
 export type ViewKey = 'board' | 'workspaceDetail' | 'governance' | 'runtimeControl' | 'configuration' | 'service';
@@ -2629,7 +2629,9 @@ export function ConsoleApp() {
           layout="mix"
           contentWidth="Fluid"
         >
-          {renderContent()}
+          <Suspense fallback={<div style={{ padding: 24, textAlign: 'center' }}>加载中...</div>}>
+            {renderContent()}
+          </Suspense>
         </ProLayout>
       </AntApp>
     </ConfigProvider>

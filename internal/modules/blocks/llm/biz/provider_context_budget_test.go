@@ -645,6 +645,33 @@ func TestEnforceProviderRequestBudgetPreservesRepairContractWithoutSnapshots(t *
 	if intValue(progress["coverageGapCount"]) != 1 {
 		t.Fatalf("currentExecutionProgress = %+v, want preserved progress", progress)
 	}
+	if stringSliceContains(got.ContextBudget.IntegrityWarnings, "protected_repair_action_target_snapshot_missing_after_context_budget") {
+		t.Fatalf("integrityWarnings = %+v, want no target snapshot warning when original repair package had no targetSnapshots", got.ContextBudget.IntegrityWarnings)
+	}
+	if got.ContextBudget.ContextGateReason == "protected_repair_action_target_snapshot_missing_after_context_budget" {
+		t.Fatalf("contextGateReason = %q warnings=%+v, want no target snapshot gate when original repair package had no targetSnapshots", got.ContextBudget.ContextGateReason, got.ContextBudget.IntegrityWarnings)
+	}
+}
+
+func TestMissingProtectedRepairSnapshotWarningsRequireOriginalRepairSnapshots(t *testing.T) {
+	withoutSnapshots := missingProtectedRepairSnapshotWarnings(
+		map[string]any{"repairActionPackage": map[string]any{"requiredOutput": map[string]any{"mustReturnValidJSON": true}}},
+		protectedProviderRepairTargets{RepairActionPackage: map[string]any{"requiredOutput": map[string]any{"mustReturnValidJSON": true}}},
+	)
+	if stringSliceContains(withoutSnapshots, "protected_repair_action_target_snapshot_missing_after_context_budget") {
+		t.Fatalf("warnings = %+v, want no target snapshot warning for package-only protected fields", withoutSnapshots)
+	}
+
+	withSnapshots := missingProtectedRepairSnapshotWarnings(
+		map[string]any{"repairActionPackage": map[string]any{"requiredOutput": map[string]any{"mustReturnValidJSON": true}}},
+		protectedProviderRepairTargets{
+			RepairActionPackage:         map[string]any{"targetSnapshots": []any{map[string]any{"targetRef": "resource-1.txt", "content": "current resource\n"}}},
+			RepairActionTargetSnapshots: []any{map[string]any{"targetRef": "resource-1.txt", "content": "current resource\n"}},
+		},
+	)
+	if !stringSliceContains(withSnapshots, "protected_repair_action_target_snapshot_missing_after_context_budget") {
+		t.Fatalf("warnings = %+v, want missing target snapshot warning when original snapshots were protected", withSnapshots)
+	}
 }
 
 func TestEnforceProviderRequestBudgetMarksP0OverflowWhenGoalDoDContractDominates(t *testing.T) {
