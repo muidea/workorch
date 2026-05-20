@@ -658,6 +658,7 @@ LLM 输入中的 step / event / evidence 顺序必须稳定：
 | --- | --- | --- |
 | `contract` | Goal、DoD、runtimeStage、allowed artifact、forbidden output、result policy | run / goal / dod / stage contract |
 | `continuity` | 当前 unit、上一步有效输出、必要 lineage、active blockers | orchestrator / result / ticket |
+| `progress` | 当前执行进展、最近动作、最近验证、当前缺口、下一步要求 | step output / tool output / validation / runtime governance |
 | `memory` | 被筛选后的 accepted input、necessary output、evidence、decision memory | memory recall |
 | `capabilities` | 当前 stage 可用的 skill/tool/mcp/soul/prompt 引用与能力摘要 | profile / capability registry |
 | `evidence` | 当前可用于 verification / acceptance 的证据引用 | step output / artifact / result |
@@ -674,6 +675,59 @@ Stage input bundle 必须遵守：
 - capability 摘要必须包含当前能力支持和不支持的中立操作，例如必需字段、禁止字段、是否支持删除、是否要求完整内容或完整 diff。
 - profile-specific bundle 字段必须位于 profile namespace，不能提升为 core 字段。
 
+### Codex 启发的中立过程证据合同
+
+通过核对 `/home/rangh/aispace/ai-proxy/logs/codex` 中 Codex 长流程代码开发请求，可以借鉴的是上下文组织机制，而不是 Codex 的私有 request schema、隐藏 reasoning、具体工具名或软件开发专用提示词。WorkOrch core 只能吸纳其中的中立原则：
+
+- LLM request 必须是分层上下文包，而不是单个无差别 runtime 快照。
+- 稳定 runtime 合同、当前 Goal / DoD、当前 stage bundle、当前 failure / required output 必须排在历史信息之前。
+- 最近过程证据必须按发生顺序保留，包含“已存在什么、刚尝试了什么、实际输出是什么、失败在哪里、下一步必须完成什么”。
+- 工具输出、验证失败、provider 诊断、large artifact 与 raw stream 必须以摘要 + source ref 形式进入上下文，完整原文通过 ref 追溯。
+- 当失败 stderr / stdout / validation output 是 LLM 判断下一步的必要依据时，必须提供足够的 head / tail /关键片段和完整 ref；不得只给抽象失败标签。
+- 历史 superseded run、旧 rejected decision、provider/model 动态绑定、raw stream delta 不得覆盖当前 failure surface。
+- 不依赖隐藏 reasoning 作为可恢复状态；可恢复状态必须来自显式 step output、artifact、evidence、memory、ticket、approval 或 request audit。
+
+WorkOrch 因此必须在 stage input bundle 中形成中立 `processEvidenceTimeline`。该 timeline 不表达任何具体业务领域语义，只表达可追溯的运行事实：
+
+```json
+{
+  "processEvidenceTimeline": [
+    {
+      "order": 1,
+      "sourceRef": "step://...",
+      "stage": "execution",
+      "actionKind": "tool_call|llm_decision|artifact_write|validation|runtime_gate",
+      "state": "completed|failed|skipped|blocked",
+      "summary": "...",
+      "inputSummary": "...",
+      "outputSummary": "...",
+      "failureClass": "...",
+      "failureReason": "...",
+      "evidenceRefs": ["..."],
+      "payloadRef": "artifact://..."
+    }
+  ],
+  "currentProgressDigest": {
+    "existingOutputs": ["..."],
+    "lastAttempt": "...",
+    "lastObservedFailure": "...",
+    "currentGap": "...",
+    "nextRequiredAction": "..."
+  }
+}
+```
+
+`processEvidenceTimeline` 的收敛规则：
+
+- `order` 必须稳定、可复现，并与 step / event 发生顺序一致。
+- 每条记录必须有 `sourceRef`，没有 sourceRef 的自然语言进度不得作为高置信证据。
+- 最近 state-changing action、最近 validation、最近 failure、最近 accepted / rejected assessment 必须优先保留。
+- 超预算时可以摘要较早 timeline，但必须保留 source refs、state、failureClass、evidenceRefs 和 omitted reason。
+- P0/P1 必要过程证据缺失时不得静默提交 provider；必须由 context gate 选择 `read_required`、`blocker_required`、`fail_fast` 或 `replan_required`。
+- timeline 不得包含完整旧 execution graph、完整旧 provider request、raw stream 或 provider/model/baseURL 动态绑定。
+
+Codex 中的软件开发行为只能作为 profile / workspaceTemplate / soul / skill 的输入约束吸收，例如“先读已有资源再改”“优先沿用当前工作区风格”“验证失败后根据失败证据修正产物”“避免无关变更”。这些规则不得进入 core runtime；core 只校验它们是否被 profile 声明、是否进入当前能力边界、是否产生可追踪 evidence。
+
 ## Runtime Context Enforcement Contract
 
 上下文完整性不能只依赖 prompt 文案。Runtime 在向 LLM provider 提交 request 前，必须先对 stage input bundle 执行中立准入校验，并把校验结果写入 request audit / step output。该合同只校验结构、引用、完整性和阶段约束，不判断任何具体业务语义。
@@ -687,7 +741,7 @@ Stage input bundle 必须遵守：
 | `contract` | `workspaceId`、`runId`、`stepId`、`runtimeStage`、`runtimeStageMode`、`goal` / `goals`、`dod` / `dods`、`allowedOutputs` 或 `requiredOutput` | `profileContract`、`stateChangePolicy`、`resultPolicy`、`assessmentOnly`、`stateChangingOutputRequired`、`repairObjective` | provider/model/baseURL、raw stream、raw rejected output |
 | `continuity` | 当前 unit 或当前恢复 root、predecessor lineage、active run / active blocker 状态 | `replanContinuation`、`rejectedResultContinuation`、`governanceSummary`、`definitionChangeImpact` | 完整历史 executionContext、完整旧 graph payload、provider 动态绑定 |
 | `failure` | 当前失败 step id/kind/state、failureClass、failureSignature、stage、reason/error | `failureTargetScope`、`structuredFailureSignals`、`runtimeDiagnostics`、`streamDiagnostics` | raw malformed JSON、raw failed patch、redaction marker content |
-| `progress` | `currentExecutionProgress`、latest action / validation / artifact evidence refs | `latestClosureEvidence`、`supersededFailureEvidence`、recent repair attempts | 无 sourceRef 的自然语言进度、不可追踪 evidence |
+| `progress` | `currentExecutionProgress`、`processEvidenceTimeline`、`currentProgressDigest`、latest action / validation / artifact evidence refs | `latestClosureEvidence`、`supersededFailureEvidence`、recent repair attempts | 无 sourceRef 的自然语言进度、不可追踪 evidence、完整旧 provider request / raw stream |
 | `coverage` | 当前 Goal / DoD coverage 基准；repair 时必须含 unresolved coverage 或说明无 coverage gap | `missingDoDItems`、`missingGoalCoverage`、`missingDeliverableCoverage`、`coverageTargetSet`、`evidenceCandidates` | 由 core 根据业务关键词推断的缺口 |
 | `snapshots` | 当修复需要目标资源时必须含 target ref、exists、contentHash、content completeness flags | `targetSnapshots`、`failureTargetRepairContext`、`patchRepairContext`、`workspaceFileManifest`、`resourceShapeAlignmentContext` | 伪完整快照、无 hash 的完整 file_write 基线、被误标安全的 redacted/truncated 内容 |
 | `capabilities` | 当前 stage 可用 capability kind 与能力边界 | skill/tool/mcp/soul/prompt refs、allowlist、input contract、unsupported operations | 领域硬编码 fallback、未声明能力语义 |
@@ -750,6 +804,7 @@ Context gate 的恢复必须由 runtime 结构化分流，而不是由普通 rep
 | --- | --- | --- |
 | Context bundle assembly | `execution_context_package.go`、`runtime_step_input.go`、activation / resume context 构造 | LLM input 可投影出完整 bundle section |
 | Context gate | `runtime_llm_context.go`、LLM provider request assembly、context budget normalization | P0-P4 缺失时不提交不可靠 provider request |
+| Process evidence timeline | step / event / tool / validation evidence projection、request audit | LLM input 可按顺序看到已有输出、最近动作、失败原因、当前缺口和下一步要求 |
 | Repair action package | `runtime_repair.go`、failure classification、repair input compaction | repair-of-repair 不丢原始 failure surface、coverage、target snapshots |
 | Graph output contract | `runtime_graph.go`、LLM output validator、patch adapter | 禁止 read-only 严格收敛、同图 read 后固定 patch、placeholder patch |
 | Evidence / acceptance | completion gate、result recorder、runtime evidence catalog | accepted result 必须有可追踪 evidence / coverage |
@@ -812,6 +867,7 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
 - 当前失败 step 的 output failure signature 必须优先于继承的历史 repair signature，避免新失败被计入旧预算。
 - capability contract violation 必须被拒绝并形成 repair evidence；LLM prompt 必须包含该 capability 的中立限制。
 - `contextBudget` 必须包含 protectedFields、integrityWarnings、included / omitted / redacted sections 和 source refs。
+- `processEvidenceTimeline` 必须按 step / event 顺序表达最近有效动作、验证结果、失败输出和当前缺口；缺 sourceRef 的进度文本不得作为 completion / repair / replan 的高置信依据。
 - profile-specific 检查只能放在 profile verifier 中，不能写入 core verifier。
 
 ## 实施收口计划
@@ -826,6 +882,7 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
 | STG-06 | P1 | Repair 继承来源 stage contract | provider retry / repair / repair-of-repair 不丢失约束 |
 | STG-07 | P1 | 更新验证脚本为 core + profile 两层 | core verifier 保持中立，profile verifier 检查软件开发映射 |
 | STG-08 | P2 | 清理旧的字符串匹配与领域化提示 | contract violation 使用结构化字段表达 |
+| STG-09 | P1 | 引入 Codex 启发的中立过程证据 timeline | LLM request 能看到按序排列的已有输出、最近动作、失败证据、当前缺口和下一步要求，且全部带 source refs |
 
 ## 当前落地记录
 
@@ -908,6 +965,13 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
   - `llm_context_integrity_failed` 作为 runtime contract failure 进入失败分类，避免被误归为 provider transient / config 类问题。
   - execution graph 校验已拒绝 `patch/apply` 依赖同图 `file/read` 的固定 state-changing artifact；需要先读取当前资源时必须拆成前置读取轮次，再由后续 LLM 基于已进入上下文的快照生成状态变更。
   - provider budget 的 repair target 保护已区分 `repairActionPackage` 合同字段与真实 `targetSnapshots`：只有原始输入存在安全 target snapshot 时才触发 protected snapshot missing；provider 前 context gate failure 不再被升级为要求 `patch/apply` 的 state-changing repair，并会进入显式 `runtime_context_required` 阻塞处置。
+
+- 2026-05-20：
+  - 已将 Codex 长流程上下文管理中可中立借鉴的内容并入本文：核心只吸收分层上下文、过程证据 timeline、失败输出保留、raw payload ref、request audit 与 profile 边界，不吸收 Codex 私有 schema、隐藏 reasoning、工具名或软件开发专用流程。
+  - 新增并完成 STG-09 首批代码收口：LLM step input / `executionContextPackage` 会在严格收敛、repair、verification、acceptance、replan 等需要过程证据的阶段注入中立 `processEvidenceTimeline` 与 `currentProgressDigest`；timeline 按 runtime step 顺序表达已有输出、最近动作、验证失败、当前缺口和下一步要求，并且每条记录具备 `sourceRef` / `payloadRef`。
+  - Provider context budget 已将 `processEvidenceTimeline` 与 `currentProgressDigest` 纳入 P2 保留与 source refs 审计。初始 planning 与普通 decision / approval follow-up 不额外读取 step history，避免为上下文增强引入无意义启动开销。
+  - 软件开发行为约束继续由 software-dev workspaceTemplate / Soul / skill 承载；core 仅处理 step、stage、state、capability kind、evidence ref、failure class / signature 等中立运行事实。
+  - software-dev 默认 Soul 已同步吸纳 Codex 启发的工程行为约束：规划阶段要求参考 `processEvidenceTimeline` / `currentProgressDigest` 做已有输出、最近失败、当前缺口和下一步要求分析；执行阶段要求先基于当前代码/当前快照/当前失败证据再改、沿用本地项目模式、保护 workspace 已有有效内容、避免无关重构和长期只调整测试；验证阶段要求先对齐最新过程证据和 closure evidence，避免旧失败覆盖后续成功证据。
 
 ## 非兼容性说明
 

@@ -1140,6 +1140,282 @@ func runEvidenceSummaryFromRunSteps(run *runModel.Run, steps []*runModel.Step) [
 	return items
 }
 
+func (o *RuntimeOrchestrator) currentRunProcessEvidenceContext(ctx context.Context, run *runModel.Run, currentStepID common.StepID) ([]map[string]any, map[string]any) {
+	if o == nil || o.steps == nil || run == nil || run.ID == "" {
+		return nil, nil
+	}
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil || len(steps) == 0 {
+		return nil, nil
+	}
+	timeline := processEvidenceTimelineFromRunSteps(run, steps, currentStepID)
+	if len(timeline) == 0 {
+		return nil, nil
+	}
+	return timeline, currentProgressDigestFromProcessEvidenceTimeline(timeline)
+}
+
+func processEvidenceTimelineFromRunSteps(run *runModel.Run, steps []*runModel.Step, currentStepID common.StepID) []map[string]any {
+	if len(steps) == 0 {
+		return nil
+	}
+	ordered := orderedRuntimeContextSteps(steps)
+	candidates := make([]*runModel.Step, 0, len(ordered))
+	for _, step := range ordered {
+		if step == nil || step.ID == "" || step.ID == currentStepID {
+			continue
+		}
+		if step.State != common.StepStateCompleted && step.State != common.StepStateFailed {
+			continue
+		}
+		candidates = append(candidates, step)
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	selected := candidates
+	if len(candidates) > maxLLMContextSliceItems {
+		selected = prioritizedRunEvidenceSummarySteps(candidates, maxLLMContextSliceItems)
+	}
+	items := make([]map[string]any, 0, min(len(selected), maxLLMContextSliceItems))
+	for idx, step := range selected {
+		item := processEvidenceTimelineItem(run, step, idx+1)
+		if len(item) > 0 {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func processEvidenceTimelineItem(run *runModel.Run, step *runModel.Step, order int) map[string]any {
+	if step == nil || step.ID == "" {
+		return nil
+	}
+	item := map[string]any{
+		"order":      order,
+		"sourceRef":  "step://" + string(step.ID),
+		"stepId":     string(step.ID),
+		"kind":       step.Kind,
+		"actionKind": processEvidenceActionKind(step.Kind),
+		"state":      string(step.State),
+	}
+	if stage := processEvidenceStage(step); stage != "" {
+		item["stage"] = stage
+	}
+	if nodeID := graphNodeID(step); nodeID != "" {
+		item["graphNodeId"] = nodeID
+	}
+	if rootStepID := graphRootStepID(step); rootStepID != "" && rootStepID != step.ID {
+		item["graphRootStepId"] = string(rootStepID)
+	}
+	if branch := graphBranch(step); branch != "" {
+		item["graphBranch"] = branch
+	}
+	if outputRef := stepOutputRefForLLMContext(run, step); outputRef != "" {
+		item["payloadRef"] = outputRef
+		item["outputRef"] = outputRef
+	}
+	if summary := processEvidenceOutputSummary(step.Output); summary != "" {
+		item["summary"] = summary
+		item["outputSummary"] = summary
+	}
+	if inputSummary := processEvidenceInputSummary(step.Input); inputSummary != "" {
+		item["inputSummary"] = inputSummary
+	}
+	if step.State == common.StepStateFailed {
+		if class := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)); class != "" {
+			item["failureClass"] = class
+		}
+		if signature := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature)); signature != "" {
+			item["failureSignature"] = compactLLMContextString(signature)
+		}
+		if reason := processEvidenceFailureReason(step.Output); reason != "" {
+			item["failureReason"] = reason
+		}
+	}
+	if refs := processEvidenceRefs(step); len(refs) > 0 {
+		item["evidenceRefs"] = refs
+	}
+	if output := compactStepOutputForRunEvidenceSummary(step.Output); len(output) > 0 {
+		item["output"] = output
+	}
+	return item
+}
+
+func processEvidenceActionKind(kind string) string {
+	kind = strings.TrimSpace(kind)
+	switch {
+	case kind == llmWorkspaceExecutionStepKind:
+		return "llm_decision"
+	case kind == "patch/apply":
+		return "artifact_write"
+	case strings.Contains(kind, "validation") || strings.Contains(kind, "verify"):
+		return "validation"
+	case strings.Contains(kind, "tool") || strings.Contains(kind, "command") || strings.Contains(kind, "shell") || strings.Contains(kind, "mcp"):
+		return "tool_call"
+	case strings.Contains(kind, "read") || strings.Contains(kind, "list"):
+		return "resource_read"
+	default:
+		return "runtime_step"
+	}
+}
+
+func processEvidenceStage(step *runModel.Step) string {
+	if step == nil {
+		return ""
+	}
+	return firstNonEmptyString(
+		stringFromMap(step.Input, stepInputKeyRuntimeStage),
+		stringFromMap(step.Input, stepInputKeySoulStage),
+		stringFromMap(step.Output, "runtimeStage"),
+		stringFromMap(step.Output, "stage"),
+	)
+}
+
+func processEvidenceInputSummary(input map[string]any) string {
+	if len(input) == 0 {
+		return ""
+	}
+	parts := []string{}
+	for _, key := range []string{
+		stepInputKeyRuntimeStage,
+		stepInputKeyRuntimeStageMode,
+		stepInputKeyGraphNodeID,
+		stepInputKeyGraphRootStepID,
+		stepOutputKeyGraphBranch,
+		stepInputKeyRuntimeRepairFollowUp,
+		stepInputKeyProviderRetryFollowUp,
+		stepInputKeyAssessmentOnly,
+	} {
+		if value, ok := input[key]; ok && value != nil {
+			parts = append(parts, key+"="+fmt.Sprint(value))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return truncateLLMContextString(strings.Join(parts, "; "))
+}
+
+func processEvidenceOutputSummary(output map[string]any) string {
+	if len(output) == 0 {
+		return ""
+	}
+	return truncateLLMContextString(firstNonEmptyString(
+		stringFromMap(output, "summary"),
+		stringFromMap(output, "status"),
+		stringFromMap(output, "reason"),
+		stringFromMap(output, "error"),
+		stringFromMap(output, "stderr"),
+		stringFromMap(output, "stdout"),
+		stringFromMap(output, failureOutputKeySignature),
+	))
+}
+
+func processEvidenceFailureReason(output map[string]any) string {
+	if len(output) == 0 {
+		return ""
+	}
+	return truncateLLMContextString(firstNonEmptyString(
+		stringFromMap(output, "error"),
+		stringFromMap(output, "reason"),
+		stringFromMap(output, "stderr"),
+		stringFromMap(output, failureOutputKeySignature),
+	))
+}
+
+func processEvidenceRefs(step *runModel.Step) []string {
+	if step == nil {
+		return nil
+	}
+	refs := []string{string(step.ID)}
+	if ref := strings.TrimSpace(stringFromMap(step.Output, "evidenceRef")); ref != "" {
+		refs = append(refs, ref)
+	}
+	refs = append(refs, stringSliceFromValue(step.Output["evidenceRefs"])...)
+	return uniqueProcessEvidenceStrings(refs)
+}
+
+func uniqueProcessEvidenceStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		ret = append(ret, value)
+	}
+	return ret
+}
+
+func currentProgressDigestFromProcessEvidenceTimeline(timeline []map[string]any) map[string]any {
+	if len(timeline) == 0 {
+		return nil
+	}
+	digest := map[string]any{}
+	existingOutputs := []string{}
+	var lastAttempt, lastFailure map[string]any
+	for _, item := range timeline {
+		if len(item) == 0 {
+			continue
+		}
+		lastAttempt = item
+		if strings.TrimSpace(stringFromMap(item, "state")) == string(common.StepStateCompleted) {
+			if summary := strings.TrimSpace(stringFromMap(item, "summary")); summary != "" {
+				existingOutputs = append(existingOutputs, summary)
+			} else if stepID := strings.TrimSpace(stringFromMap(item, "stepId")); stepID != "" {
+				existingOutputs = append(existingOutputs, stepID)
+			}
+		}
+		if strings.TrimSpace(stringFromMap(item, "state")) == string(common.StepStateFailed) {
+			lastFailure = item
+		}
+	}
+	if len(existingOutputs) > maxLLMContextSliceItems {
+		existingOutputs = existingOutputs[len(existingOutputs)-maxLLMContextSliceItems:]
+	}
+	if len(existingOutputs) > 0 {
+		digest["existingOutputs"] = existingOutputs
+	}
+	if len(lastAttempt) > 0 {
+		digest["lastAttempt"] = processEvidenceDigestStep(lastAttempt)
+	}
+	if len(lastFailure) > 0 {
+		digest["lastObservedFailure"] = processEvidenceDigestStep(lastFailure)
+		digest["currentGap"] = firstNonEmptyString(
+			stringFromMap(lastFailure, "failureReason"),
+			stringFromMap(lastFailure, "summary"),
+			stringFromMap(lastFailure, "failureClass"),
+		)
+		digest["nextRequiredAction"] = "address_last_failure_under_current_stage_contract"
+	} else {
+		digest["currentGap"] = "none_observed_in_recent_process_evidence"
+		digest["nextRequiredAction"] = "continue_current_stage_contract"
+	}
+	return digest
+}
+
+func processEvidenceDigestStep(item map[string]any) map[string]any {
+	if len(item) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{"order", "sourceRef", "stepId", "kind", "actionKind", "state", "stage", "summary", "failureClass", "failureReason"} {
+		if value, ok := item[key]; ok && value != nil {
+			ret[key] = value
+		}
+	}
+	return ret
+}
+
 func stepOutputRefForLLMContext(run *runModel.Run, step *runModel.Step) string {
 	if run == nil || step == nil || run.WorkspaceID == "" || run.ID == "" || step.ID == "" {
 		return ""

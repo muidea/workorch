@@ -36,6 +36,12 @@ func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run
 	}
 	pkg := o.runExecutionContextPackage(ctx, run, step, workspace)
 	step.Input[stepInputKeyExecutionContextPackage] = pkg
+	if timeline := mapSliceFromValue(pkg[stepInputKeyProcessEvidenceTimeline]); len(timeline) > 0 {
+		step.Input[stepInputKeyProcessEvidenceTimeline] = timeline
+	}
+	if digest := mapFromValue(pkg[stepInputKeyCurrentProgressDigest]); len(digest) > 0 {
+		step.Input[stepInputKeyCurrentProgressDigest] = digest
+	}
 	_ = o.recordLLMStepInputMemoryRecallTrace(ctx, run, step, pkg)
 }
 
@@ -63,6 +69,8 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		result             map[string]any
 		deliverables       []map[string]any
 		failures           []map[string]any
+		processTimeline    []map[string]any
+		progressDigest     map[string]any
 		currentGovernance  []map[string]any
 		refreshedMemories  []map[string]any
 		memoryRetrieval    map[string]any
@@ -70,7 +78,7 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		deliverablesRead   bool
 		wg                 sync.WaitGroup
 	)
-	wg.Add(6)
+	wg.Add(7)
 	go func() {
 		defer wg.Done()
 		manifest = o.executionContextWorkspaceFileManifest(ctx, run, step, workspace)
@@ -101,6 +109,12 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	}()
 	go func() {
 		defer wg.Done()
+		if shouldReadProcessEvidenceTimeline(step) {
+			processTimeline, progressDigest = o.currentRunProcessEvidenceContext(ctx, run, step.ID)
+		}
+	}()
+	go func() {
+		defer wg.Done()
 		currentGovernance = o.currentRunGovernanceHistory(ctx, run)
 	}()
 	go func() {
@@ -124,6 +138,12 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	}
 	if len(failures) > 0 {
 		ret["recentFailureSummary"] = failures
+	}
+	if len(processTimeline) > 0 {
+		ret[stepInputKeyProcessEvidenceTimeline] = processTimeline
+	}
+	if len(progressDigest) > 0 {
+		ret[stepInputKeyCurrentProgressDigest] = progressDigest
 	}
 	selected := map[string]any{}
 	if len(stableContext.selectedContext) > 0 {
@@ -894,6 +914,33 @@ func shouldReadRecentFailureHistory(step *runModel.Step) bool {
 		}
 	}
 	return false
+}
+
+func shouldReadProcessEvidenceTimeline(step *runModel.Step) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	if boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) ||
+		boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) ||
+		boolValue(step.Input[stepInputKeyAssessmentOnly]) ||
+		boolValue(step.Input[stepInputKeyGraphLimitFollowUp]) ||
+		boolValue(step.Input[stepInputKeyNoActionableFollowUp]) ||
+		boolValue(step.Input["completionFollowUp"]) ||
+		boolValue(step.Input["graphFollowUp"]) {
+		return true
+	}
+	stage := strings.TrimSpace(strings.ToLower(stringFromMap(step.Input, stepInputKeyRuntimeStage)))
+	switch stage {
+	case runtimeStageExecution, runtimeStageVerification, runtimeStageAcceptance, runtimeStageRepair, runtimeStageReplan:
+		return true
+	}
+	soulStage := strings.TrimSpace(strings.ToLower(stringFromMap(step.Input, stepInputKeySoulStage)))
+	switch soulStage {
+	case soulStageExecution, "validation", "verification", "artifact", "result", "final":
+		return true
+	default:
+		return false
+	}
 }
 
 func initialStepID(runID common.RunID) common.StepID {

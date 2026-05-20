@@ -9,6 +9,7 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	memrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
 func TestRunExecutionContextPackageIncludesCompactGoalDoDDefinitions(t *testing.T) {
@@ -140,6 +141,88 @@ func TestRunExecutionContextPackagePreservesExecutionContractDetails(t *testing.
 	}
 	if accepted := stringSliceFromValue(requirements[0]["acceptedStepKinds"]); len(accepted) != 2 || accepted[0] != "shell/command" || accepted[1] != "patch/apply" {
 		t.Fatalf("acceptedStepKinds = %+v, want preserved accepted kinds", requirements[0]["acceptedStepKinds"])
+	}
+}
+
+func TestRunExecutionContextPackageIncludesProcessEvidenceTimeline(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memrepo.NewStepRepository()
+	run := &runmodel.Run{
+		ID:          "run-process-context",
+		WorkspaceID: "ws-process-context",
+	}
+	completed := &runmodel.Step{
+		ID:    "run-process-context/graph-001/001-write",
+		RunID: run.ID,
+		Kind:  "patch/apply",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: "execution",
+			stepInputKeyGraphNodeID:  "write_target",
+		},
+		Output: map[string]any{
+			"summary":      "state-changing artifact completed",
+			"evidenceRefs": []string{"patch://run-process-context/001"},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-process-context/graph-001/002-verify",
+		RunID: run.ID,
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: "verification",
+			stepInputKeyGraphNodeID:  "verify_target",
+		},
+		Output: map[string]any{
+			"stderr":                  strings.Repeat("verification failed\n", 20) + "final failure detail",
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|node=verify_target|exitCode=1",
+		},
+	}
+	if err := stepRepo.Create(ctx, completed); err != nil {
+		t.Fatalf("create completed step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, failed); err != nil {
+		t.Fatalf("create failed step: %v", err)
+	}
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	current := &runmodel.Step{
+		ID:    "run-process-context/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: "repair",
+		},
+	}
+
+	orch.enrichLLMStepInputContext(ctx, run, current, nil)
+
+	pkg := mapFromValue(current.Input[stepInputKeyExecutionContextPackage])
+	timeline := mapSliceFromValue(pkg[stepInputKeyProcessEvidenceTimeline])
+	if len(timeline) != 2 {
+		t.Fatalf("processEvidenceTimeline = %+v, want two prior evidence items", timeline)
+	}
+	if timeline[0]["sourceRef"] != "step://run-process-context/graph-001/001-write" ||
+		timeline[1]["sourceRef"] != "step://run-process-context/graph-001/002-verify" {
+		t.Fatalf("processEvidenceTimeline order/sourceRef = %+v", timeline)
+	}
+	if timeline[1]["failureClass"] != failureClassShellCommand {
+		t.Fatalf("failed timeline item = %+v, want failure class", timeline[1])
+	}
+	if timeline[1]["payloadRef"] != "workorch://workspaces/ws-process-context/runs/run-process-context/steps/run-process-context/graph-001/002-verify/output.json" {
+		t.Fatalf("failed payloadRef = %#v", timeline[1]["payloadRef"])
+	}
+	digest := mapFromValue(pkg[stepInputKeyCurrentProgressDigest])
+	if mapFromValue(digest["lastObservedFailure"])["stepId"] != string(failed.ID) ||
+		digest["nextRequiredAction"] != "address_last_failure_under_current_stage_contract" {
+		t.Fatalf("currentProgressDigest = %+v, want latest failure and next action", digest)
+	}
+	if len(mapSliceFromValue(current.Input[stepInputKeyProcessEvidenceTimeline])) != 2 {
+		t.Fatalf("top-level processEvidenceTimeline missing from LLM step input: %+v", current.Input)
+	}
+	if len(mapFromValue(current.Input[stepInputKeyCurrentProgressDigest])) == 0 {
+		t.Fatalf("top-level currentProgressDigest missing from LLM step input: %+v", current.Input)
 	}
 }
 

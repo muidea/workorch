@@ -41,7 +41,7 @@ var providerP1InputKeys = []string{
 }
 
 var providerP2InputKeys = []string{
-	"failedExecutionGraph", "graphEvidence", "runEvidenceSummary", "workspaceFileManifest", "workspaceManifest", "previousResults",
+	"failedExecutionGraph", "graphEvidence", "runEvidenceSummary", "processEvidenceTimeline", "currentProgressDigest", "workspaceFileManifest", "workspaceManifest", "previousResults",
 }
 
 func enforceProviderRequestBudget(request llmmodels.ProviderRequest) llmmodels.ProviderRequest {
@@ -565,8 +565,8 @@ func providerInputSourceRefs(input map[string]any) []string {
 	refs := make([]string, 0, 12)
 	for key := range input {
 		switch strings.TrimSpace(key) {
-		case "executionContext", "workspaceFileManifest", "workspaceManifest",
-			"graphEvidence", "runEvidenceSummary", "failedExecutionGraph", "failedStepInput", "failedStepOutput",
+		case "executionContext", "executionContextPackage", "workspaceFileManifest", "workspaceManifest",
+			"graphEvidence", "runEvidenceSummary", "processEvidenceTimeline", "currentProgressDigest", "failedExecutionGraph", "failedStepInput", "failedStepOutput",
 			"decisionResolution", "approvalResolution", "memoryRetrieval", "skillSelection":
 			refs = append(refs, "input."+key)
 		}
@@ -576,6 +576,14 @@ func providerInputSourceRefs(input map[string]any) []string {
 			switch strings.TrimSpace(key) {
 			case "goal", "goals", "dod", "dods", "governanceHistory", "memoryRetrieval", "skillSelection":
 				refs = append(refs, "input.executionContext."+key)
+			}
+		}
+	}
+	if executionContextPackage := recordFromAny(input["executionContextPackage"]); len(executionContextPackage) > 0 {
+		for key := range executionContextPackage {
+			switch strings.TrimSpace(key) {
+			case "processEvidenceTimeline", "currentProgressDigest", "recentFailureSummary", "selectedContext":
+				refs = append(refs, "input.executionContextPackage."+key)
 			}
 		}
 	}

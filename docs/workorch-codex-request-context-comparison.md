@@ -104,6 +104,25 @@ stable contracts
 
 The key is to preserve continuity without turning every LLM call into a full run dump.
 
+## Absorbed Neutral Lessons
+
+The reusable lessons from the Codex logs have been absorbed into the canonical runtime contract in:
+
+```text
+docs/workorch-runtime-stage-contract-neutrality-design.md
+```
+
+The absorbed rules are intentionally neutral:
+
+- build each LLM request as layered context, not one raw runtime snapshot;
+- put stable runtime contract, current Goal / DoD, stage bundle, current failure and required output before historical context;
+- include an ordered `processEvidenceTimeline` so the LLM can see existing outputs, recent attempts, validation results, current failures, current gaps and the next required action;
+- preserve command/tool/validation failure utility with bounded summaries, key excerpts and full payload refs;
+- keep raw streams, full provider payloads and large artifacts outside the prompt by default, addressable through refs;
+- keep profile-specific behavior such as software-development workflow discipline in workspaceTemplate / Soul / skill, not in core runtime.
+
+The comparison document remains an implementation note and evidence source. It must not be treated as a second runtime contract. If a future Codex lesson should change WorkOrch behavior, it must first be translated into neutral stage / artifact / evidence / result / context-gate terms and then merged into the canonical design contract.
+
 ## Required Improvements
 
 ### 1. Context Projection By Stage

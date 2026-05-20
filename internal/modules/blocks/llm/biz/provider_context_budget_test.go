@@ -86,6 +86,45 @@ func TestEnforceProviderRequestBudgetCompactsLargeExecutionContext(t *testing.T)
 	}
 }
 
+func TestPrioritizedProviderInputKeepsProcessEvidenceTimelineAsP2(t *testing.T) {
+	input := map[string]any{
+		"workspaceId": "ws-process-budget",
+		"goalId":      "goal-process-budget",
+		"processEvidenceTimeline": []map[string]any{
+			{
+				"order":         1,
+				"sourceRef":     "step://run-process/graph-001/001-action",
+				"stepId":        "run-process/graph-001/001-action",
+				"actionKind":    "tool_call",
+				"state":         "failed",
+				"summary":       strings.Repeat("actionable failure ", 100),
+				"failureClass":  "runtime_failed",
+				"failureReason": strings.Repeat("failure detail ", 100),
+				"payloadRef":    "workorch://workspaces/ws-process-budget/runs/run-process/steps/run-process/graph-001/001-action/output.json",
+			},
+		},
+		"currentProgressDigest": map[string]any{
+			"currentGap":         "latest failure still open",
+			"nextRequiredAction": "address_last_failure_under_current_stage_contract",
+		},
+	}
+
+	got := prioritizedProviderInput(input, true)
+
+	if items, ok := got["processEvidenceTimeline"].([]any); !ok || len(items) == 0 {
+		t.Fatalf("prioritized input = %+v, want processEvidenceTimeline retained as P2", got)
+	}
+	digest := recordFromAny(got["currentProgressDigest"])
+	if digest["nextRequiredAction"] != "address_last_failure_under_current_stage_contract" {
+		t.Fatalf("currentProgressDigest = %+v, want retained next action", digest)
+	}
+	refs := providerInputSourceRefs(input)
+	if !stringSliceContains(refs, "input.processEvidenceTimeline") ||
+		!stringSliceContains(refs, "input.currentProgressDigest") {
+		t.Fatalf("sourceRefs = %+v, want process evidence refs", refs)
+	}
+}
+
 func TestEnforceProviderRequestBudgetDoesNotMarkSmallRequestTruncated(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-small",
