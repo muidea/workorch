@@ -184,6 +184,9 @@ func isLLMProviderAuthOrConfigFailure(lowerStage string, execErr error, output m
 }
 
 func isRuntimeContractFailure(lowerStage string, execErr error, output map[string]any) bool {
+	if lowerStage == "llm_context_integrity_failed" {
+		return true
+	}
 	if lowerStage != "llm_execution_graph_plan" &&
 		lowerStage != "llm_dod_assessment" &&
 		lowerStage != "patch_apply" {

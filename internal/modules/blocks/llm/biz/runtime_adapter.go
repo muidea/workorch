@@ -390,6 +390,7 @@ const (
 	providerFailureClassAuthOrConfig     = "auth_or_config_error"
 	providerFailureClassStreamIncomplete = "provider_stream_incomplete"
 	providerFailureClassUnavailable      = "provider_unavailable"
+	providerFailureClassContextIntegrity = "context_integrity_failed"
 )
 
 type providerCallResult struct {
@@ -559,6 +560,9 @@ func classifyProviderInvocationFailure(err error) string {
 		strings.Contains(text, "ended before [done]"),
 		strings.Contains(text, "without [done]"):
 		return providerFailureClassStreamIncomplete
+	case strings.Contains(text, "context gate"),
+		strings.Contains(text, "context integrity"):
+		return providerFailureClassContextIntegrity
 	case strings.Contains(text, "deadline exceeded"), strings.Contains(text, "timeout"):
 		return providerFailureClassTimeout
 	case strings.Contains(text, "rate limit"),
@@ -591,6 +595,8 @@ func providerFailureStage(failureClass string, stream bool) string {
 		return "llm_provider_auth_or_config_error"
 	case providerFailureClassStreamIncomplete:
 		return "llm_provider_stream_incomplete"
+	case providerFailureClassContextIntegrity:
+		return "llm_context_integrity_failed"
 	case providerFailureClassUnavailable:
 		if stream {
 			return "llm_provider_stream_error"
@@ -612,6 +618,9 @@ func completeProvider(ctx context.Context, runtime ProviderRuntime, request llmm
 		if request.ContextBudget.OverBudget {
 			return nil, nil, nil, fmt.Errorf("%w: llm provider request too large after context budget compaction", common.ErrInvalidArgument)
 		}
+		if err := validateProviderContextGate(request.ContextBudget); err != nil {
+			return nil, nil, nil, err
+		}
 	}
 	if runtime.Config.Capabilities.Streaming {
 		streaming, ok := runtime.Provider.(StreamingProvider)
@@ -630,6 +639,24 @@ func completeProvider(ctx context.Context, runtime ProviderRuntime, request llmm
 	}
 	completion, err := runtime.Provider.Complete(ctx, request)
 	return completion.Payload, completion.Usage, nil, err
+}
+
+func validateProviderContextGate(budget *llmmodels.ProviderContextBudget) error {
+	if budget == nil {
+		return nil
+	}
+	action := strings.TrimSpace(budget.ContextGateAction)
+	if action == "" || action == providerContextGatePass {
+		return nil
+	}
+	reason := strings.TrimSpace(budget.ContextGateReason)
+	if reason == "" && len(budget.IntegrityWarnings) > 0 {
+		reason = strings.Join(budget.IntegrityWarnings, ",")
+	}
+	if reason == "" {
+		reason = "required LLM context is incomplete"
+	}
+	return fmt.Errorf("%w: llm context gate %s: %s", common.ErrInvalidArgument, action, reason)
 }
 
 func (a *RuntimeAdapter) GenerateEmbedding(ctx context.Context, providerID string, input string) (llmmodels.ProviderEmbeddingResult, error) {
@@ -989,6 +1016,8 @@ func providerContextBudgetOutput(budget *llmmodels.ProviderContextBudget, provid
 		"redactedPaths":           append([]string(nil), budget.RedactedPaths...),
 		"protectedFields":         append([]string(nil), budget.ProtectedFields...),
 		"integrityWarnings":       append([]string(nil), budget.IntegrityWarnings...),
+		"contextGateAction":       budget.ContextGateAction,
+		"contextGateReason":       budget.ContextGateReason,
 	}
 	return item
 }
@@ -1919,7 +1948,50 @@ func validateExecutionGraph(graph llmmodels.BlockExecutionGraph) error {
 	if hasExecutionGraphCycle(graph) {
 		return fmt.Errorf("%w: executionGraph must be acyclic", common.ErrInvalidArgument)
 	}
+	if graphHasPatchApplyDependingOnFileRead(graph) {
+		return fmt.Errorf("%w: executionGraph patch/apply must not depend on same-graph file/read; read current content in an earlier turn and submit a separate state-changing graph", common.ErrInvalidArgument)
+	}
 	return nil
+}
+
+func graphHasPatchApplyDependingOnFileRead(graph llmmodels.BlockExecutionGraph) bool {
+	nodes := make(map[string]llmmodels.BlockExecutionNode, len(graph.Nodes))
+	for _, node := range graph.Nodes {
+		nodeID := strings.TrimSpace(node.ID)
+		if nodeID != "" {
+			nodes[nodeID] = node
+		}
+	}
+	for _, node := range graph.Nodes {
+		if strings.TrimSpace(node.Kind) != llmcommon.RuntimeBlockKindPatchApply {
+			continue
+		}
+		if graphNodeHasAncestorBlockKind(node, nodes, filecommon.StepKindRead, map[string]bool{}) {
+			return true
+		}
+	}
+	return false
+}
+
+func graphNodeHasAncestorBlockKind(node llmmodels.BlockExecutionNode, nodes map[string]llmmodels.BlockExecutionNode, kind string, seen map[string]bool) bool {
+	for _, dependency := range node.DependsOn {
+		dependency = strings.TrimSpace(dependency)
+		if dependency == "" || seen[dependency] {
+			continue
+		}
+		seen[dependency] = true
+		parent, ok := nodes[dependency]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(parent.Kind) == kind {
+			return true
+		}
+		if graphNodeHasAncestorBlockKind(parent, nodes, kind, seen) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeDecisionExecutionGraph(decision *llmmodels.LLMExecutionDecision) {

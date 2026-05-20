@@ -77,6 +77,8 @@ type ProviderContextBudget struct {
 	RedactedPaths         []string               `json:"redactedPaths,omitempty"`
 	ProtectedFields       []string               `json:"protectedFields,omitempty"`
 	IntegrityWarnings     []string               `json:"integrityWarnings,omitempty"`
+	ContextGateAction     string                 `json:"contextGateAction,omitempty"`
+	ContextGateReason     string                 `json:"contextGateReason,omitempty"`
 	Profile               ProviderContextProfile `json:"profile,omitempty"`
 }
 

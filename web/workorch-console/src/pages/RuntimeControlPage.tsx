@@ -6,13 +6,35 @@ import type { MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool } from '
 import { workorchApi } from '../api';
 import { modelLabels } from '../labels';
 import {
-  displayMCPEndpoint,
   joinLines,
-  mcpServerPayload,
   metricValue,
   capabilityKindTag,
-  errorMessage
+  errorMessage,
+  splitLines
 } from '../main';
+
+function displayMCPEndpoint(endpoint?: string) {
+  const value = endpoint?.trim() ?? '';
+  const marker = '.workorch-data/system/mcp-endpoints/';
+  const index = value.indexOf(marker);
+  return index >= 0 ? value.slice(index) : value;
+}
+
+function mcpServerPayload(values: MCPServerFormValues): MCPServer {
+  return {
+    id: values.id.trim(),
+    name: values.name.trim(),
+    transport: values.transport,
+    endpoint: values.endpoint?.trim(),
+    enabled: values.enabled !== false,
+    allowedTools: splitLines(values.allowedTools),
+    allowedResources: splitLines(values.allowedResources),
+    allowedPrompts: splitLines(values.allowedPrompts),
+    defaultApprovalPolicy: values.defaultApprovalPolicy?.trim(),
+    sessionPolicy: values.sessionPolicy?.trim(),
+    timeoutMillis: values.timeoutMillis
+  };
+}
 
 interface MCPServerFormValues {
   id: string;

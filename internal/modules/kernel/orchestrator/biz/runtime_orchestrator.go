@@ -2635,6 +2635,9 @@ func validateStateChangingExecutionGraph(graph runtimemodel.BlockExecutionGraph)
 	if !graphHasUngatedStateChangingPatchNode(graph) {
 		return fmt.Errorf("%w: state-changing executionGraph patch/apply depends on llm/workspace_execution before patch", common.ErrInvalidArgument)
 	}
+	if graphHasPatchApplyDependingOnSameGraphRead(graph) {
+		return fmt.Errorf("%w: state-changing executionGraph patch/apply must not depend on same-graph file/read", common.ErrInvalidArgument)
+	}
 	return nil
 }
 
@@ -2747,6 +2750,28 @@ func graphNodeHasAncestorKind(node runtimemodel.BlockExecutionNode, nodes map[st
 			return true
 		}
 		if graphNodeHasAncestorKind(parent, nodes, kind, seen) {
+			return true
+		}
+	}
+	return false
+}
+
+func graphHasPatchApplyDependingOnSameGraphRead(graph runtimemodel.BlockExecutionGraph) bool {
+	nodes := map[string]runtimemodel.BlockExecutionNode{}
+	for _, node := range graph.Nodes {
+		id := strings.TrimSpace(node.ID)
+		if id != "" {
+			nodes[id] = node
+		}
+	}
+	for _, node := range graph.Nodes {
+		if strings.TrimSpace(node.Kind) != "patch/apply" {
+			continue
+		}
+		if _, err := runtimePatchRequestFromMap(node.Input); err != nil {
+			continue
+		}
+		if graphNodeHasAncestorKind(node, nodes, "file/read", map[string]bool{}) {
 			return true
 		}
 	}

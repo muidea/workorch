@@ -21,6 +21,12 @@ const (
 	providerContextTracePolicy        = "summary_refs_only"
 )
 
+const (
+	providerContextGatePass         = "pass"
+	providerContextGateReadRequired = "read_required"
+	providerContextGateFailFast     = "fail_fast"
+)
+
 var providerP0InputKeys = []string{
 	"workspaceId", "goalId", "doDId", "previousStepId", "currentSoulStage",
 	"runtimeRepairFollowUp", "runtimeRepairAttempt", "providerRetryFollowUp", "providerRetryAttempt",
@@ -126,6 +132,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		rules = append(rules, "p0 overflow: goal/dod contract preserved without compression")
 	}
 	integrityWarnings := providerContextIntegrityWarnings(request.Input, protected, protectedRepairTargets, profile, overBudget)
+	contextGateAction, contextGateReason := providerContextGateDecision(goalDoDCompressed, overBudget, p0Overflow, integrityWarnings)
 	truncated := len(rules) > 1 || overBudget
 	request.ContextBudget = &llmmodels.ProviderContextBudget{
 		MaxBytes:              maxBytes,
@@ -156,6 +163,8 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		Estimator:             "bytes_ratio",
 		ProtectedFields:       uniqueStrings(protectedFields),
 		IntegrityWarnings:     uniqueStrings(integrityWarnings),
+		ContextGateAction:     contextGateAction,
+		ContextGateReason:     contextGateReason,
 		Profile:               profile,
 	}
 	return request
@@ -624,9 +633,66 @@ func providerContextIntegrityWarnings(input map[string]any, protected protectedG
 		if boolValue(required["mustDeclareCoverageTargets"]) && len(coverageTargetsFromProviderInput(input)) == 0 {
 			warnings = append(warnings, "must_declare_coverage_targets_without_target_set")
 		}
+		if (boolValue(input["runtimeRepairFollowUp"]) || boolValue(input["stateChangingOutputRequired"])) && len(required) == 0 {
+			warnings = append(warnings, "repair_action_package_required_output_missing")
+		}
+	}
+	if boolValue(input["runtimeRepairFollowUp"]) && !providerInputHasCurrentFailure(input) {
+		warnings = append(warnings, "runtime_repair_current_failure_missing")
 	}
 	warnings = append(warnings, missingProtectedRepairSnapshotWarnings(input, repairTargets)...)
 	return uniqueStrings(warnings)
+}
+
+func providerContextGateDecision(goalDoDCompressed, overBudget, p0Overflow bool, integrityWarnings []string) (string, string) {
+	switch {
+	case goalDoDCompressed:
+		return providerContextGateFailFast, "protected Goal/DoD contract changed during context budgeting"
+	case p0Overflow:
+		return providerContextGateFailFast, "P0 contract exceeds provider context budget"
+	case overBudget:
+		return providerContextGateFailFast, "provider request remains over context budget after compaction"
+	}
+	for _, warning := range integrityWarnings {
+		switch strings.TrimSpace(warning) {
+		case "protected_goal_dod_changed_after_context_budget",
+			"request_still_over_budget_with_protected_goal_dod",
+			"coverage_repair_required_without_coverage_target_set",
+			"must_declare_coverage_targets_without_target_set",
+			"repair_action_package_required_output_missing",
+			"runtime_repair_current_failure_missing":
+			return providerContextGateFailFast, warning
+		case "protected_failure_target_snapshot_missing_after_context_budget",
+			"protected_patch_repair_snapshot_missing_after_context_budget",
+			"protected_repair_action_target_snapshot_missing_after_context_budget":
+			return providerContextGateReadRequired, warning
+		}
+	}
+	return providerContextGatePass, ""
+}
+
+func providerInputHasCurrentFailure(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	for _, key := range []string{"failedStepId", "failureClass", "failureSignature", "failureReason"} {
+		if strings.TrimSpace(stringValue(input[key])) != "" {
+			return true
+		}
+	}
+	failedOutput := recordFromAny(input["failedStepOutput"])
+	for _, key := range []string{"error", "reason", "failureClass", "failureSignature", "stage"} {
+		if strings.TrimSpace(stringValue(failedOutput[key])) != "" {
+			return true
+		}
+	}
+	diagnostics := recordFromAny(input["lastFailureDiagnostics"])
+	for _, key := range []string{"error", "failureClass", "failureSignature", "stage"} {
+		if strings.TrimSpace(stringValue(diagnostics[key])) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func coverageTargetsFromProviderInput(input map[string]any) []map[string]any {

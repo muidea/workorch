@@ -15,7 +15,7 @@ bytesHardLimit = 98304
 
 这会让支持 128K、256K、1M 上下文的模型实际只能使用约 24K-28K 输入上下文。对于长流程 workspace、复杂 repair、代码库或文档审计类 agent 任务，这会导致必要中间信息被过早压缩，增加 LLM 决策偏差和反复修复风险。
 
-本设计定义 **自动模型能力解析 + 阶段感知预算**，作为 `docs/model-aware-llm-context-budget-design.md` 与 `docs/workorch-runtime-llm-context-integrity-design.md` 的补充。
+本文件是模型上下文预算的实现说明，不再作为 WorkOrch core runtime 的并列设计合约。核心上下文完整性、阶段预算、redaction、repair 输入和 request audit 约束统一以 `docs/workorch-runtime-stage-contract-neutrality-design.md` 为准。
 
 ## 目标
 

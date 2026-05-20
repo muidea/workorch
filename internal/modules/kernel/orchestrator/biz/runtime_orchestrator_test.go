@@ -15887,7 +15887,7 @@ func TestValidateLLMExecutionOutputContractRejectsImplementationPatchGraphGatedB
 	}
 }
 
-func TestValidateLLMExecutionOutputContractAllowsImplementationPatchGraphAfterReadOnlyNodes(t *testing.T) {
+func TestValidateLLMExecutionOutputContractRejectsImplementationPatchGraphAfterSameGraphRead(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-read-then-patch-graph",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
@@ -15928,8 +15928,9 @@ func TestValidateLLMExecutionOutputContractAllowsImplementationPatchGraphAfterRe
 		},
 	}
 
-	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
-		t.Fatalf("validateLLMExecutionOutputContract err = %v, want read-only prerequisites before patch allowed", err)
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "same-graph file/read") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want same-graph read/patch rejection", err)
 	}
 }
 

@@ -247,6 +247,39 @@ func TestRuntimeAdapterBlocksProviderCallWhenCompactedRequestStillOverBudget(t *
 	}
 }
 
+func TestRuntimeAdapterBlocksProviderCallWhenContextGateFails(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{"completionState":"continue"}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		ID:       "context-gate",
+		Provider: llmcommon.ProviderCompatible,
+		Model:    "test-model",
+		ContextProfile: llmmodels.ProviderContextProfile{
+			BytesHardLimit:         64 * 1024,
+			EstimatedTokensPerByte: 0.25,
+		},
+	}, provider)
+	request := llmStepRequest()
+	request.Input["runtimeRepairFollowUp"] = true
+	request.Input["repairActionPackage"] = map[string]any{
+		"requiredOutput": map[string]any{"mustReturnValidJSON": true},
+	}
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), request)
+	if err == nil {
+		t.Fatal("ExecuteRuntimeStep error = nil, want context gate failure")
+	}
+	if provider.request.StepID != "" {
+		t.Fatalf("provider was called with request = %+v, want context gate before provider invocation", provider.request)
+	}
+	if result.Output["stage"] != "llm_context_integrity_failed" {
+		t.Fatalf("output = %+v, want context integrity stage", result.Output)
+	}
+	budget := recordFromAny(result.Output["contextBudget"])
+	if budget["contextGateAction"] != providerContextGateFailFast {
+		t.Fatalf("contextBudget = %+v, want fail_fast context gate", budget)
+	}
+}
+
 func TestRuntimeAdapterUsesNativeProviderUsageWhenAvailable(t *testing.T) {
 	provider := &staticProvider{
 		payload: []byte(`{
@@ -1820,6 +1853,19 @@ func TestParseLLMExecutionDecisionRejectsInvalidExecutionGraph(t *testing.T) {
 	}`))
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("parse err = %v, want invalid argument", err)
+	}
+}
+
+func TestParseLLMExecutionDecisionRejectsSameGraphReadBeforePatchApply(t *testing.T) {
+	_, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"continue",
+		"executionGraph":{"nodes":[
+			{"id":"read_target","kind":"file/read","input":{"path":"target.txt"}},
+			{"id":"write_target","kind":"patch/apply","dependsOn":["read_target"],"input":{"patchType":"file_write","targetRef":"target.txt","content":"updated\n"}}
+		]}
+	}`))
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "same-graph file/read") {
+		t.Fatalf("parse err = %v, want same-graph read/patch rejection", err)
 	}
 }
 

@@ -522,6 +522,9 @@ func TestEnforceProviderRequestBudgetRecordsContextIntegrityAudit(t *testing.T) 
 	if len(got.ContextBudget.IntegrityWarnings) != 0 {
 		t.Fatalf("integrityWarnings = %+v, want none", got.ContextBudget.IntegrityWarnings)
 	}
+	if got.ContextBudget.ContextGateAction != providerContextGatePass {
+		t.Fatalf("contextGateAction = %q, want pass", got.ContextBudget.ContextGateAction)
+	}
 }
 
 func TestEnforceProviderRequestBudgetWarnsCoverageRepairWithoutTargets(t *testing.T) {
@@ -553,6 +556,37 @@ func TestEnforceProviderRequestBudgetWarnsCoverageRepairWithoutTargets(t *testin
 		if !stringSliceContains(got.ContextBudget.IntegrityWarnings, expected) {
 			t.Fatalf("integrityWarnings = %+v, missing %s", got.ContextBudget.IntegrityWarnings, expected)
 		}
+	}
+	if got.ContextBudget.ContextGateAction != providerContextGateFailFast {
+		t.Fatalf("contextGateAction = %q, want fail_fast", got.ContextBudget.ContextGateAction)
+	}
+}
+
+func TestEnforceProviderRequestBudgetFailsGateWhenRepairCurrentFailureMissing(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-missing-failure",
+		RunID:       "run-missing-failure",
+		StepID:      "run-missing-failure/repair-001",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"runtimeRepairFollowUp": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{"mustReturnValidJSON": true},
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget = nil, want integrity audit")
+	}
+	if !stringSliceContains(got.ContextBudget.IntegrityWarnings, "runtime_repair_current_failure_missing") {
+		t.Fatalf("integrityWarnings = %+v, want missing current failure warning", got.ContextBudget.IntegrityWarnings)
+	}
+	if got.ContextBudget.ContextGateAction != providerContextGateFailFast {
+		t.Fatalf("contextGateAction = %q, want fail_fast", got.ContextBudget.ContextGateAction)
 	}
 }
 

@@ -26,7 +26,7 @@
 
 ---
 
-## 二、Runtime 核心流程契约（workorch-runtime-core-flow-contract.md）
+## 二、Runtime 核心流程契约（已合并至 workorch-runtime-stage-contract-neutrality-design.md）
 
 ### 2.1 已正确实现的核心契约（13 条）
 
@@ -185,10 +185,9 @@
 
 #### P1 — 中优先级
 
-3. **更新 `workorch-runtime-core-flow-contract.md`**
-   - 补充 10 条未文档化的实现行为
-   - 补充 `validating` 中间状态到状态机表
-   - 补充 `cancelled` 终态到状态机表
+3. **更新 `workorch-runtime-stage-contract-neutrality-design.md`**
+   - 补充未文档化的中立实现行为
+   - 补充运行状态、终态、恢复和上下文合约到唯一核心设计文档
 
 4. **修复代码偏差**
    - `stateChangingRepairRequired` 改用结构化标记替代字符串匹配

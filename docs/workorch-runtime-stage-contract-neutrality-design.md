@@ -1,22 +1,21 @@
-# WorkOrch Runtime Stage Contract and Neutrality Design
+# WorkOrch Unified Runtime Design Contract
 
-本文定义 WorkOrch 面向长流程任务的阶段化运行合约。目标是解决反复单点修复后仍无法稳定推进的问题，同时明确核心框架必须保持功能中立：runtime 只能治理阶段、约束、证据、结果和恢复策略，不得内置软件开发、代码 patch、具体技术栈或具体业务领域规则。
+本文定义 WorkOrch 面向长流程任务的唯一核心运行设计合约。目标是解决反复单点修复后仍无法稳定推进的问题，同时明确核心框架必须保持功能中立：runtime 只能治理阶段、约束、证据、结果、上下文和恢复策略，不得内置软件开发、代码 patch、具体技术栈或具体业务领域规则。
 
 ## 权威合约声明
 
-本文是后续 WorkOrch 功能开发、runtime 完善、能力扩展和缺陷收口的核心设计合约。任何涉及 WorkOrch runtime、orchestrator、LLM 执行、memory / recall、soul / skill / tool / mcp 能力选择、repair / replan、verification / acceptance、profile 映射的变更，都必须先核对本文。
+本文是后续 WorkOrch 功能开发、runtime 完善、能力扩展和缺陷收口的唯一核心设计合约。任何涉及 WorkOrch runtime、orchestrator、LLM 执行、上下文组织、memory / recall、soul / skill / tool / mcp 能力选择、repair / replan、verification / acceptance、profile 映射的变更，都必须先核对本文。
+
+从本文生效后，`docs/` 中不再保留第二份 runtime core / LLM context / repair / replan 补充合约。历史专项文档中的合理内容必须先抽象为本文中的中立规则，才能作为后续实现依据。若任何旧计划、历史收口文档、专题文档或代码注释与本文冲突，以本文为准。
 
 后续实现必须满足：
 
 - 不得突破本文定义的核心中立原则。
 - 不得在 core runtime 中引入软件开发、代码 patch、测试框架、具体业务领域等特化逻辑。
 - 新增或调整 runtime 流程时，必须能映射到本文定义的中立 stage、artifact、evidence、result、repair、replan 合同。
-- 若旧文档、历史计划、局部收口方案与本文冲突，以本文为准；需要保留的合理内容应先抽象为中立规则，再并入本文或作为 profile 文档引用。
+- 旧文档、历史计划、局部收口方案不得作为本文之外的并列约束；需要保留的合理内容应先抽象为中立规则并入本文，或作为 profile / capability 文档的非核心实现说明。
 - 后续所有针对 WorkOrch 功能的开发完善，都必须在设计、实现和验证三个环节显式参照本文。
-- runtime repair 的当前失败优先、patch grounding、repair target set、预算拆分与终态收敛必须同时遵守 `workorch-repair-convergence-patch-grounding-closure-design.md`；该文档是本文在 repair 收敛维度的补充合约，仍不得引入任何业务领域硬编码。
-- Goal / DoD 发生累计变化时的影响评估、策略选择与重复修复重评估必须同时遵守 `workorch-goal-dod-change-impact-strategy-closure-design.md`；该文档是本文在定义变化与 repair strategy 维度的补充合约，仍不得引入任何业务领域硬编码。
-- Result / DoD assessment 的证据严格性、直接证据、入口证据与 template/profile 显式绑定必须同时遵守 `workorch-result-evidence-strictness-closure-design.md`；该文档是本文在结果可信度维度的补充合约，core 仍只能校验证据结构和 profile 声明的机械约束。
-- 重复失败面、root-cause target、同失败面 patch 准入和 repair-of-repair 上下文继承必须同时遵守 `workorch-runtime-failed-surface-root-cause-target-design.md`；该文档是本文在 repair target 选择与失败面纠偏维度的补充合约，core 仍不得理解具体业务产物含义。
+- Runtime core flow、LLM context integrity、neutral repair grounding、provider retry、readable ID / lineage、Goal / DoD change impact、result evidence strictness、rejected result continuation 等规则均已并入本文。后续不得再新增分散的 runtime 补充合约；如确需新增专题文档，只能作为 profile / capability / implementation note，并且不得改变本文的核心约束。
 
 ## 背景
 
@@ -393,7 +392,7 @@ Memory 需要按阶段服务 LLM 决策，而不是堆叠 runtime 流水。
 
 | ID | 内容 | 落点 | 状态 | 验收口径 |
 | --- | --- | --- | --- | --- |
-| SNC-01 | Core 明确不得内置具体业务对象、供应商、协议、接口、字段或测试框架语义 | 本文 Goal / DoD Coverage Assessment 合同、`workorch-runtime-core-flow-contract.md` | completed | 文档只要求 coverage / matrix / evidence 结构完整，不包含具体业务行 |
+| SNC-01 | Core 明确不得内置具体业务对象、供应商、协议、接口、字段或测试框架语义 | 本文 Goal / DoD Coverage Assessment 合同与阶段输出合同 | completed | 文档只要求 coverage / matrix / evidence 结构完整，不包含具体业务行 |
 | SNC-02 | 定义中立覆盖矩阵，替代具体目标/接口类型规则 | 本文“抽象覆盖矩阵合同” | completed | 使用 `targetCompatibilityMatrix`、`interfaceContractMatrix`、`configurationBehaviorMatrix`、`streamingBehaviorMatrix`、`errorBehaviorMatrix`、`sideEffectEvidenceMatrix` |
 | SNC-03 | software-dev planning Soul 从具体目标类型矩阵改为目标/接口契约矩阵 | 内置 `soul-software-dev-planning` | completed | 默认值测试断言包含 `target/interface contract matrix`，并禁止旧特化表达 |
 | SNC-04 | software-dev execution / validation Soul 去除具体目标类别、计量对象和外部适配对象表达 | 内置 `soul-software-dev-execution`、`soul-software-dev-validation` | completed | 默认值测试断言不再出现旧特化表达，保留多目标、多接口契约、计量/副作用等通用工程约束 |
@@ -457,6 +456,12 @@ Shell / tool 调用不得被用来隐藏实际目标变更，再通过一个无�
 
 当前 repair target snapshot 是定向修复的高优先级输入。Provider context budget、prompt normalization 和 outbound redaction 不得把满足以下条件的 `failureTargetRepairContext[].content`、`patchRepairContext[].content` 或 `repairActionPackage.targetSnapshots[].content` 压缩、摘要化或替换为 `[REDACTED]`：`contentComplete=true`、`safeForFileWrite=true`、`redacted=false`、`truncated=false`、`isBinary=false` 或未声明、且存在字面 `contentHash`。该豁免只适用于当前 repair target snapshot 的 `content` 字段，且只表达“当前资源快照可作为修复基线”的中立事实；其他敏感字段、历史输出、失败正文、stream partial、provider 配置和不满足安全标记的 snapshot 仍必须按通用 redaction / budget 规则处理。若在极端预算下连安全当前快照也无法完整提供，runtime 必须显式标记快照不可用于完整 `file_write`，要求 LLM 重新读取目标、使用最小 diff / exact edit，或返回 blocker / failed assessment；不得向 LLM 发送已被 `[REDACTED]` 替换的“伪完整快照”。
 
+若 state-changing artifact 依赖刚读取的目标内容，runtime 不得接受同一张 `executionGraph` 中“先 `file/read` 再生成已固定 `patch/apply`”的伪依赖。原因是 patch 内容在 LLM 本次响应中已经确定，无法真正消费运行时后续 `file/read` 的输出。此类场景必须拆成两个闭环：第一轮只允许读取目标并记录完整快照 / contentHash；第二轮 LLM 基于新的 `executionContextPackage` / `repairActionPackage` 生成具体 state-changing artifact。只有当 patch 仅依赖本轮输入中已存在的完整、安全、未脱敏当前快照时，才允许在同一 graph 中派发 patch。
+
+`repairActionPackage` 是 state-changing repair 的主输入，而不是历史失败材料的附属摘要。它必须优先包含：`currentFailure`、`requiredOutput`、`structuredFailureSignals`、`targetSnapshots`、`workspaceFileManifest`、`currentExecutionProgress`、`coverageTargetSet`、`recentRepairAttempts`、`forbiddenActions`、`repairBudget` 与 `exitCriteria`。旧字段可以作为 runtime 内部兼容数据存在，但 LLM-facing context 必须以 `repairActionPackage` 为准；当其存在时，不得再把完整 `failedStepInput`、rejected raw output、raw patch body、raw stream 或历史 graph payload 复制给 LLM。
+
+`structuredFailureSignals` 只能通过中立机械方式抽取：target refs、line refs、identifier-shaped tokens、field-shaped tokens、bounded diagnostic lines、failure class / signature。这些信号只表达“失败文本中出现了可追踪形态”，不表达业务语义。LLM 在 repair 中引用这些 token 时，必须先与当前 target snapshot、workspace manifest 或同一 patch 中新增的资源对齐；不得仅因为失败文本出现某个 token 就凭空发明资源、字段、入口或目标结构。
+
 当失败 evidence 已经包含中立的资源形状冲突诊断时，repair 需要遵守“首要阻塞优先”合同。这里的中立诊断包括但不限于：line-ref 执行/验证错误、unresolved identifier、invalid attribute、shape mismatch、missing method、schema mismatch，以及其他明确指向当前目标资源无法通过基本执行或验证的结构性错误。runtime core 只能表达以下中立约束，不得写入具体语言框架、业务模型或供应商细节：
 - repairGuidance / provider prompt 必须要求 LLM 先修复这些已报告的首要阻塞，再处理格式整理、文案修饰或其他次要改进。
 - 若 `failureTargetRepairContext`、`patchRepairContext` 或 `repairActionPackage.targetSnapshots` 已提供当前目标快照，LLM 必须优先把目标与当前可见资源形状或契约形状对齐，而不是凭空发明新的名字、属性、入口或资源结构。
@@ -464,10 +469,6 @@ Shell / tool 调用不得被用来隐藏实际目标变更，再通过一个无�
 - 该规则只定义 repair 的排序与 grounding，不判断某个业务符号该叫什么、某个框架入口该怎么写，也不允许 core runtime 根据命令名、语言名或业务关键字生成特定修复方案。
 
 失败产物上下文必须遵守“不可复用失败正文”约束。对于被拒绝的 LLM decision、schema-invalid 输出、失败 patch / edit 正文、stream partial output 或任何包含 runtime redaction marker 的片段，runtime 不应把原文再次放入 repair input；只能暴露中立诊断摘要，例如失败 stage、failureClass、error/reason、streamDiagnostics、llmUsage、rejectedExecutionGraph 摘要，以及当前 target snapshot / workspace manifest / patchRepairSuggestions。若 stream partial output 或 rejected graph 摘要中包含 redaction marker，runtime 必须记录 omitted 标记与不可复用原因，而不是保留可复制片段。该约束用于防止 LLM 复制 malformed JSON、过期 diff、脱敏片段或重复 rejected artifact；它不判断具体业务内容，只限制 runtime repair 的输入形态。
-
-Runtime repair grounding 的详细合同见 `workorch-runtime-neutral-repair-grounding-design.md`。其中 `structuredFailureSignals`、`repairActionPackage`、失败产物隔离、identifier grounding 与重复失败收敛都属于核心中立运行态约束；任何语言、测试框架、协议、供应商或业务语义解释必须留在 workspaceTemplate / profile / soul / skill 中。
-
-Runtime LLM 输入上下文完整性、排序、脱敏、coverage target 继承、current execution progress 和 request audit 的详细合同见 `workorch-runtime-llm-context-integrity-design.md`。后续所有涉及 LLM 输入构造、context budget、repair input、redaction、memory recall、run evidence summary 的修改，都必须同时按该文档核对，避免单点修复后再次丢失当前进展或未关闭目标。
 
 Runtime 可以从失败 diff 与当前 target snapshot 中抽取中立的 `patchRepairSuggestions`，例如“某个 oldText 在当前目标中唯一匹配，可替换为 newText”。该建议只来源于失败 artifact 与当前资源内容的机械对齐，不包含业务语义；它用于帮助 LLM 生成更小、更精确、可审计的 repair artifact，避免重复输出行号漂移、上下文过期或依赖脱敏快照的 patch。
 
@@ -581,43 +582,11 @@ Runtime LLM 的结构化输出必须以完整 provider 响应为准。
 - 收到 done 但 `receivedBytes=0` / `receivedDeltaCount=0` 时，不得当成有效 LLM 输出；应归类为 provider stream error 并进入 provider retry 预算，预算耗尽后再进入 provider/config blocker。
 - 已收到 done 但 JSON schema 无效时，归类为 LLM decision/schema 问题，不得误判为 provider stream incomplete。
 
-## 相关文档整理与合并策略
+## 文档合并状态
 
-有必要整理 `docs/` 中与 runtime 执行、memory、LLM context、repair/replan、soul/skill/mcp 能力选择相关的文档，但不应把所有文档机械合并到本文。本文应成为“阶段化 runtime 合约”的权威入口；历史收口记录、领域 profile、API/UI 设计和已完成任务流水应保留为引用或归档材料。
+本文已经吸收 runtime core flow、LLM context integrity、neutral repair grounding、provider retry、lineage / assessment、readable ID / recovery、Goal / DoD change impact、result evidence strictness、rejected result continuation、repair convergence 等核心约束。相关旧文档不得继续作为并列设计依据；后续实现、核对和评审只以本文为 WorkOrch core runtime 的长期核心约束。
 
-### 整理目标
-
-- 让阶段合约、输出合约、恢复治理、memory recall、profile 边界在一个权威文档中闭合。
-- 减少同一规则散落在多份文档中，导致实现时按旧计划或局部计划修补。
-- 保持 core runtime 中立，不把软件开发 profile 的细节并入 core contract。
-- 为后续逐项收口提供单一 checklist。
-
-### 文档角色分层
-
-| 层级 | 文档角色 | 处理方式 |
-| --- | --- | --- |
-| 权威合同 | 本文、`workorch-runtime-core-flow-contract.md` | 保留并同步引用；本文负责 stage/profile 中立合约，core flow 负责现有状态机和恢复优先级 |
-| 专项合同 | lineage、readable ID、provider retry、memory recall、prompt context | 抽取通用规则并入本文；专项文档保留细节和历史落地记录 |
-| Profile 文档 | software-dev、code-agent、DoD repair | 只抽取可泛化规则；领域行为留在 profile 层 |
-| 能力文档 | soul、skill、mcp、tool、web、patch | 抽取“能力如何被 stage 使用”的通用边界；具体 API、UI、数据模型留在原文 |
-| 历史计划/审计 | closure plan、audit、progress、status | 不合并正文；只作为追溯引用，完成后可归档 |
-
-### 建议并入本文的内容
-
-| 来源文档 | 应并入本文的内容 | 并入位置 |
-| --- | --- | --- |
-| `workorch-runtime-core-flow-contract.md` | 状态机、阶段输出合约、failure 分类、recovery 优先级、result 终态规则 | 阶段转换合同、阶段内约束模式、Repair 合同 |
-| `workorch-runtime-lineage-and-assessment-contract.md` | lineage 必须结构化、assessment-only 边界、DoD assessment 与 evidence 归因 | Artifact 中立类型、验证脚本要求 |
-| `workorch-runtime-readable-id-and-recovery-contract.md` | run-scoped ID、graph scope、provider retry root、memory 噪音治理 | 阶段转换合同、Memory / Recall 合同、验证脚本要求 |
-| `runtime-recovery-governance-closure-design.md` | provider retry / runtime repair 预算、duplicate failure、manual escalation、auto-governance replan | Repair 合同、Provider Retry 合同、实施收口计划 |
-| `graph-followup-dod-assessment-closure-plan.md` | graph follow-up 超限后进入 assessment-only、DoD 缺口驱动 repair/replan | 阶段内约束模式、Repair 合同、验证脚本要求 |
-| `llm-decision-memory-improvement-plan.md` | accepted input memory、necessary output memory、skill/soul/prompt/tool/mcp memory 边界 | Memory / Recall 合同、Stage Input Bundle 合同 |
-| `workspace-memory-recall-traceability-plan.md` | activation / step / recovery recall trace、可观测性字段 | Memory / Recall 合同、验证脚本要求 |
-| `codex-like-llm-prompt-context-design.md` | Goal / DoD 不可压缩、上下文分层、budget manifest、prompt normalization | Stage Input Bundle 合同 |
-| `workspace-soul-routing-plan.md` | stage-specific soul binding、选择优先级、run execution context | Profile 映射规则、Stage Input Bundle 合同 |
-| `mcp-capability-management-design.md` | MCP capability 作为可选择能力目录，不进入 core 业务规则 | Profile 映射规则、Stage Input Bundle 合同 |
-
-### 不应并入本文的内容
+### 已移出核心合约范围的内容
 
 | 内容 | 原因 | 保留位置 |
 | --- | --- | --- |
@@ -626,6 +595,55 @@ Runtime LLM 的结构化输出必须以完整 provider 响应为准。
 | 数据库存储路径、file backend layout 细节 | 属于持久化实现，不是阶段合约 | `workspace-data-layout-plan.md` |
 | 已完成任务流水和日期记录 | 只用于追溯，不应污染权威设计 | progress/status/audit 文档 |
 | 某个具体 workspace 的排障样本 | 可作为验证 case，不应成为 core 规则 | 部署核对记录或 e2e fixture |
+
+## LLM 上下文完整性合同
+
+每次 LLM 调用必须优先回答四个问题：
+
+1. 当前目标是什么：workspace、run、stage、step、Goal、DoD、deliverable expectation、profile contract、allowed output、forbidden output。
+2. 已经完成什么：最新 completed action evidence、state-changing artifact、validation evidence、artifact refs、coverage refs、当前 deliverable 状态摘要。
+3. 当前失败是什么：failedStepId、failureClass、failureSignature、failureTargetScope、stage、error、reason、diagnostics，以及当前失败是否只是外壳 contract failure。
+4. 下一步必须做什么：repairObjective、requiredOutput、forbiddenActions、coverageTargetSet、exitCriteria、是否允许只读、是否必须 state-changing。
+
+若上述任一问题无法由当前上下文回答，runtime 不得让 LLM 假装继续严格收敛；必须补充上下文、读取目标、缩小任务、进入 blocker / failed assessment，或按恢复策略 replan。
+
+### 上下文优先级
+
+| 层级 | 内容 | 约束 |
+| --- | --- | --- |
+| P0 Contract | runtime contract、输出 schema、workspace/run/stage/step identity、当前 Goal / DoD、当前动作要求 | 不得静默删除；超预算必须 fail-fast、换更大上下文配置或进入治理 |
+| P1 Current Failure | failedStepId、failureClass、failureSignature、stage、error、runtimeDiagnostics、repairObjective、requiredOutput | 不得被 provider retry / repair-of-repair 外壳失败覆盖 |
+| P2 Coverage Scope | missingDoDItems、missingGoalCoverage、missingDeliverableCoverage、coverageTargetSet、evidenceCandidates | 不得因 contract violation 被清空 |
+| P3 Current Evidence | latest action evidence、patch/tool/validation evidence、artifact refs、currentExecutionProgress | 保留 step/ref/摘要；大 stdout/stderr 使用 head/tail/preview + ref |
+| P4 Current Snapshots | failureTargetRepairContext、patchRepairContext、targetSnapshots、workspaceFileManifest | 小目标完整；大目标窗口化或 ref；安全完整快照不得误脱敏 |
+| P5 Recent Attempts | 最近 repair attempts、invalid strategy、duplicate failure、forbiddenActions | top-k 摘要；保留失败原因和避免重复策略 |
+| P6 Historical Context | superseded runs、早期 memory、旧 governance、旧 graph evidence | 默认摘要或引用；不得覆盖 P0-P5 |
+| P7 Raw Archives | response.sse、full tool output、完整 payload、历史 raw artifacts | 默认 ref only |
+
+P0-P4 是当前决策必要上下文。若 context budget、redaction 或 compaction 导致 P0-P4 的关键字段缺失，runtime 必须在 `contextBudget.integrityWarnings` 中记录并阻断不可靠 state-changing 输出；不得把缺失上下文伪装为完整上下文继续提交 provider。
+
+### 顺序与追溯
+
+LLM 输入中的 step / event / evidence 顺序必须稳定：
+
+- 同一 run 内优先按 monotonic sequence / event sequence 排序。
+- 无 sequence 时按 occurredAt / createdAt 排序。
+- 时间缺失时按 step id 中的 graph / node / attempt 编号排序。
+- 同一中立 scope 内，较新的成功 action / validation evidence 优先于历史失败；历史失败只能作为 lineage 或避免重复策略的背景。
+
+任何被摘要、裁剪、脱敏或引用化的内容都必须保留 source refs：workspaceId、runId、stepId、graphNodeId / graphRootStepId、artifactRef / payloadRef、targetRef、contentHash、omitted reason、redaction reason 和 compaction rule。
+
+### Request Audit
+
+每次 LLM request 必须输出可观测的 `contextBudget` / request audit 摘要，至少包含：
+
+- capability source、provider/model context profile、max tokens / max bytes、actual bytes / estimated tokens。
+- included / omitted / redacted sections。
+- protectedFields 与 integrityWarnings。
+- trace policy 与 source refs。
+- 是否 goal / DoD 被压缩、是否 P0-P4 被截断、是否应用 redaction。
+
+`contextBudget` 是上下文可靠性证据，不是业务状态。provider/model/base URL 等动态绑定不得作为后续 repair / memory / recovery 的持久依据。
 
 ### Stage Input Bundle 合同
 
@@ -651,15 +669,101 @@ Stage input bundle 必须遵守：
 - capability 摘要必须包含当前能力支持和不支持的中立操作，例如必需字段、禁止字段、是否支持删除、是否要求完整内容或完整 diff。
 - profile-specific bundle 字段必须位于 profile namespace，不能提升为 core 字段。
 
-### 后续文档收口顺序
+## Runtime Context Enforcement Contract
 
-| 顺序 | 动作 | 输出 |
+上下文完整性不能只依赖 prompt 文案。Runtime 在向 LLM provider 提交 request 前，必须先对 stage input bundle 执行中立准入校验，并把校验结果写入 request audit / step output。该合同只校验结构、引用、完整性和阶段约束，不判断任何具体业务语义。
+
+### Context Bundle Schema
+
+每个 LLM step 的输入必须能归一化为以下 bundle。字段可以在物理 JSON 中分散存在，但 request assembly 前必须形成等价结构：
+
+| Section | 必填字段 | 可选字段 | 禁止字段 |
+| --- | --- | --- | --- |
+| `contract` | `workspaceId`、`runId`、`stepId`、`runtimeStage`、`runtimeStageMode`、`goal` / `goals`、`dod` / `dods`、`allowedOutputs` 或 `requiredOutput` | `profileContract`、`stateChangePolicy`、`resultPolicy`、`assessmentOnly`、`stateChangingOutputRequired`、`repairObjective` | provider/model/baseURL、raw stream、raw rejected output |
+| `continuity` | 当前 unit 或当前恢复 root、predecessor lineage、active run / active blocker 状态 | `replanContinuation`、`rejectedResultContinuation`、`governanceSummary`、`definitionChangeImpact` | 完整历史 executionContext、完整旧 graph payload、provider 动态绑定 |
+| `failure` | 当前失败 step id/kind/state、failureClass、failureSignature、stage、reason/error | `failureTargetScope`、`structuredFailureSignals`、`runtimeDiagnostics`、`streamDiagnostics` | raw malformed JSON、raw failed patch、redaction marker content |
+| `progress` | `currentExecutionProgress`、latest action / validation / artifact evidence refs | `latestClosureEvidence`、`supersededFailureEvidence`、recent repair attempts | 无 sourceRef 的自然语言进度、不可追踪 evidence |
+| `coverage` | 当前 Goal / DoD coverage 基准；repair 时必须含 unresolved coverage 或说明无 coverage gap | `missingDoDItems`、`missingGoalCoverage`、`missingDeliverableCoverage`、`coverageTargetSet`、`evidenceCandidates` | 由 core 根据业务关键词推断的缺口 |
+| `snapshots` | 当修复需要目标资源时必须含 target ref、exists、contentHash、content completeness flags | `targetSnapshots`、`failureTargetRepairContext`、`patchRepairContext`、`workspaceFileManifest`、`resourceShapeAlignmentContext` | 伪完整快照、无 hash 的完整 file_write 基线、被误标安全的 redacted/truncated 内容 |
+| `capabilities` | 当前 stage 可用 capability kind 与能力边界 | skill/tool/mcp/soul/prompt refs、allowlist、input contract、unsupported operations | 领域硬编码 fallback、未声明能力语义 |
+| `memory` | accepted input / necessary output / decision memory 的 refs 和摘要 | profile memory、tool capability memory、recent lessons | 被拒 repair plan 的自述、provider retry 流水、低价值日志 |
+| `budget` | context budget、repair budget、provider retry budget、stage budget | timeout budget、request audit refs | 代码分支写死的固定预算 |
+
+所有 section 的摘要字段必须带 source refs 或 omitted reason。若某个 section 对当前 stage 不适用，应显式标记 `notApplicable` 或等价省略原因，而不是留空后让 LLM 猜测。
+
+### Context Gate
+
+Runtime 在 provider request 前必须执行 context gate，并得到唯一处置：
+
+| Gate | 触发条件 | 处置 |
 | --- | --- | --- |
-| 1 | 从 runtime core / lineage / readable ID / recovery 文档抽取通用 runtime 合同 | 更新本文对应章节，保留原文作为细节引用 |
-| 2 | 从 memory / prompt context 文档抽取 stage input bundle 与 recall 规则 | 完善 Memory / Recall 合同和 Stage Input Bundle 合同 |
-| 3 | 从 soul / skill / mcp 文档抽取 capability/profile 边界 | 完善 Profile 映射规则 |
-| 4 | 从 software-dev 文档抽取可泛化规则，领域内容留给 profile | 新增或整理 software-dev profile 文档 |
-| 5 | 标记历史 closure/progress/audit 文档的权威性状态 | 避免后续实现继续引用过期计划 |
+| `pass` | P0-P4 必要字段完整，输出合同可执行 | 允许提交 provider |
+| `read_required` | state-changing repair 需要当前目标内容，但快照缺失、不完整、被截断或被脱敏 | 只允许派发 read / resource fetch；读完后进入下一轮 LLM，不允许同图固定 patch |
+| `degrade_to_assessment` | 缺口是 assessment / evidence 结构缺口，已有候选证据但无需状态变更 | 进入 assessment-only correction 或 concrete validation evidence |
+| `blocker_required` | 必要信息不在 workspace / refs / capability 中，且 runtime 无法自行读取 | 进入 blocked_on_decision，明确 missing field 与无法自动获取原因 |
+| `fail_fast` | P0/P1 缺失、Goal/DoD 被压缩、stage contract 缺失、context over budget 且无法保留必要字段 | 不提交 provider，写 runtime_failed / context_integrity failure |
+| `replan_required` | 原计划 / repair path 已被证据证明不可继续，且需要 successor lineage | 创建 replan successor，携带 predecessor failure context |
+
+`contextBudget.integrityWarnings` 不能只是观测日志。若 warning 涉及 P0-P4 必要字段，例如 `protected_repair_action_target_snapshot_missing_after_context_budget`、Goal / DoD 压缩、requiredOutput 缺失、current failure 缺失、coverageTargetSet 缺失，context gate 必须选择 `read_required`、`fail_fast`、`blocker_required` 或 `replan_required` 之一。
+
+### Stage-Specific Required Context
+
+| Stage | 必须完整提供 | 缺失时处置 |
+| --- | --- | --- |
+| `exploration` | Goal / DoD、workspace manifest / known resources、可用能力摘要、探索预算 | 缺 Goal / DoD fail-fast；缺 manifest 可先 list/read |
+| `planning` | Goal / DoD、profile contract、known resources、已有 evidence / rejected continuation、stage transition rules | 缺 Goal / DoD fail-fast；缺 known resources 先读取；计划不能假设空 workspace |
+| `execution` | 当前 unit、state-change policy、allowed capability、必要 target refs / snapshots、contract | 缺 target snapshot 时 read_required；缺 capability contract fail-fast |
+| `verification` | 已变更 artifact refs、验证目标、evidence requirements、latest action evidence | 缺 evidence refs 时 concrete validation evidence；不得直接 accepted |
+| `acceptance` | effective Goal / DoD、coverage matrix、evidence catalog、artifact refs、result policy | 缺 coverage 进入 assessment correction；缺 result policy fail-fast |
+| `repair` | current failure、original failure surface、repairActionPackage、target snapshots / manifest、recent attempts、forbidden actions | 缺目标快照 read_required；缺原始语义 fail-fast；重复失败按 budget 收敛 |
+| `replan` | predecessor run/result、failure context、failed paths、可保留产物线索、仍有效 contract | 缺 predecessor failure context fail-fast；不得只携带 ticket id |
+
+### Implementation Mapping
+
+后续代码收口必须把本文约束映射到明确实现点。至少包含：
+
+| Contract Area | 主要实现点 | 验收 |
+| --- | --- | --- |
+| Context bundle assembly | `execution_context_package.go`、`runtime_step_input.go`、activation / resume context 构造 | LLM input 可投影出完整 bundle section |
+| Context gate | `runtime_llm_context.go`、LLM provider request assembly、context budget normalization | P0-P4 缺失时不提交不可靠 provider request |
+| Repair action package | `runtime_repair.go`、failure classification、repair input compaction | repair-of-repair 不丢原始 failure surface、coverage、target snapshots |
+| Graph output contract | `runtime_graph.go`、LLM output validator、patch adapter | 禁止 read-only 严格收敛、同图 read 后固定 patch、placeholder patch |
+| Evidence / acceptance | completion gate、result recorder、runtime evidence catalog | accepted result 必须有可追踪 evidence / coverage |
+| Provider retry | provider runtime、failure recovery decision、decision blocker | provider retry 只处理 transient provider failure，不覆盖 stage contract |
+| Memory recall/write | `runtime_memory.go`、memory selection、run summary memory | 只写入 accepted input / necessary output / rejected fact，不写 rejected plan 自述 |
+| Profile boundary | template/profile loading、Soul routing、capability registry | core 只消费 profile 声明，不把 profile 语义硬编码进 runtime |
+| Storage / refs | file backend、raw payload refs、event payload summaries | 大内容 ref-only、路径可读、source refs 可追溯 |
+
+任何实现点如果无法提供所需字段，必须在 step output / contextBudget 中记录缺失原因，并让 context gate 选择明确处置。
+
+### Core / Profile Boundary
+
+Core 可以做：
+
+- 校验 stage、contract、capability kind、target ref、evidence ref、coverage item、budget 和 lineage。
+- 从失败文本中机械抽取 path-like、line-like、identifier-like、field-like token。
+- 基于 workspace manifest 做唯一后缀解析、target snapshot 选择、sourceRef 归一化。
+- 根据 profile 声明的 evidenceRequirements 做机械证据类型校验。
+- 拒绝 placeholder、redaction marker、raw rejected content、同图 read 后固定 patch、无关 state-changing artifact。
+
+Core 不可以做：
+
+- 根据语言、框架、测试命令、文件名、供应商、协议或业务词推断应该如何修复。
+- 根据 Goal / DoD 自然语言中的领域关键词生成具体实现方案或证据要求。
+- 把某个 workspaceTemplate 的默认流程写成全局 runtime 规则。
+- 把 profile-specific matrix 行、测试命令、入口约定、代码结构约定提升为 core 字段。
+
+WorkspaceTemplate / profile / soul / skill 可以做：
+
+- 声明某类任务的 stage prompt、capability allowlist、evidenceRequirements、deliverableExpectations。
+- 提供领域术语解释、建议验证方式、典型产物结构、profile-specific coverage matrix。
+- 将中立 state-changing artifact 映射到具体能力组合。
+
+WorkspaceTemplate / profile / soul / skill 不可以做：
+
+- 写死某个具体 Goal / DoD 的答案、文件内容或验收结论。
+- 降低本文定义的 core evidence、result、repair、context gate 要求。
+- 要求 core runtime 理解 profile 内部业务语义。
 
 ## 验证脚本要求
 
@@ -668,16 +772,22 @@ Stage input bundle 必须遵守：
 必须覆盖：
 
 - 每个 step 都有 runtime stage 或可从结构化 input 推导 stage。
+- LLM request 可投影出 Context Bundle Schema 中适用于当前 stage 的必填 section。
+- P0 Contract / P1 Current Failure / P2 Coverage Scope / P3 Current Evidence / P4 Current Snapshots 的缺失会触发 context gate，而不是静默提交 provider。
 - `exploration` / `planning` 允许 read-only output，但受预算限制。
 - `execution` 的 state-changing requirement 不允许 read-only graph。
 - `verification` accepted 必须有 evidence refs。
 - `acceptance` terminal 必须有 result。
 - `repair` 必须继承来源 stage contract。
+- state-changing repair 必须携带 `repairActionPackage`，并保留 current failure、target snapshots / manifest、coverage target 和 recent attempts。
+- target snapshot 不完整、redacted 或 truncated 时，不允许生成完整 file_write 或同图固定 patch。
+- 同一 execution graph 中 `patch/apply` 不得声称依赖同图前置 `file/read` 的运行时输出。
 - `replan` 必须创建 successor run 并保持 lineage。
 - replan successor 的初始输入必须能看到触发 replan 的 failure context，而不是只看到 ticket / resolution id。
 - repair-of-repair 必须保留原始 failure target context、workspace manifest 和 state-changing contract。
 - 当前失败 step 的 output failure signature 必须优先于继承的历史 repair signature，避免新失败被计入旧预算。
 - capability contract violation 必须被拒绝并形成 repair evidence；LLM prompt 必须包含该 capability 的中立限制。
+- `contextBudget` 必须包含 protectedFields、integrityWarnings、included / omitted / redacted sections 和 source refs。
 - profile-specific 检查只能放在 profile verifier 中，不能写入 core verifier。
 
 ## 实施收口计划
@@ -769,6 +879,10 @@ Stage input bundle 必须遵守：
   - graph expansion limit assessment 触发 coverage correction 时会为 `missingDoDItems` / `missingGoalCoverage` 补充中立 `evidenceCandidates`；候选证据存在时继续 assessment-only correction，候选不足时再进入 concrete validation evidence repair。
   - runtime repair 已补充 `resourceShapeAlignmentContext`：当结构化失败信号表明当前目标与现有资源形状不一致时，repair 输入会携带同目录当前资源快照，要求 LLM 先对齐现有资源形状再生成 state-changing artifact。
   - patch/apply 准入已扩展 non-substantive placeholder 识别，拒绝“严格收敛”“验证锚点”“state-change anchor”“verification anchor”等只为满足流程存在性的 marker/comment/no-op 变更。
+- 2026-05-20：
+  - provider request 的 `contextBudget` 已补充 `contextGateAction` / `contextGateReason`，并在提交 LLM provider 前执行硬准入；P0-P4 必要上下文缺失、coverage repair 缺少 target set、repair 缺少当前失败、受保护 target snapshot 在预算处理后丢失等情况不再作为普通观测 warning 静默提交 provider。
+  - `llm_context_integrity_failed` 作为 runtime contract failure 进入失败分类，避免被误归为 provider transient / config 类问题。
+  - execution graph 校验已拒绝 `patch/apply` 依赖同图 `file/read` 的固定 state-changing artifact；需要先读取当前资源时必须拆成前置读取轮次，再由后续 LLM 基于已进入上下文的快照生成状态变更。
 
 ## 非兼容性说明
 
