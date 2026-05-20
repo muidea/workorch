@@ -2372,19 +2372,19 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input[failureOutputKeySignature] = signature
 		input[stepInputKeyRepairOfFailureSig] = signature
 	}
-		if signals := structuredFailureSignalsFromFailureOutput(failedStep.Output, execErr, class, signature); len(signals) > 0 {
-			input["structuredFailureSignals"] = signals
+	if signals := structuredFailureSignalsFromFailureOutput(failedStep.Output, execErr, class, signature); len(signals) > 0 {
+		input["structuredFailureSignals"] = signals
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Use structuredFailureSignals as mechanical failure evidence only; paths, line refs, and identifiers must be reconciled with current target snapshots or fresh reads before patching.",
+			"Do not treat identifier-like tokens in failure text as proof that a named element should be invented; ground every referenced name in current resources or introduce it explicitly in the same patch.",
+		)
+		if structuredFailureSignalsContainShapeConflict(signals) {
 			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-				"Use structuredFailureSignals as mechanical failure evidence only; paths, line refs, and identifiers must be reconciled with current target snapshots or fresh reads before patching.",
-				"Do not treat identifier-like tokens in failure text as proof that a named element should be invented; ground every referenced name in current resources or introduce it explicitly in the same patch.",
+				"Prioritize the primary diagnostics from structuredFailureSignals before secondary cleanup: fix reported unresolved names, invalid attributes, shape mismatches, contract-entry mismatches, and line-referenced target errors first.",
+				"When diagnostics identify a concrete target snapshot, reconcile that target with current visible resource or contract shape before changing secondary validation details, evidence wording, or unrelated quality improvements.",
 			)
-			if structuredFailureSignalsContainShapeConflict(signals) {
-				input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-					"Prioritize the primary diagnostics from structuredFailureSignals before secondary cleanup: fix reported unresolved names, invalid attributes, shape mismatches, contract-entry mismatches, and line-referenced target errors first.",
-					"When diagnostics identify a concrete target snapshot, reconcile that target with current visible resource or contract shape before changing secondary validation details, evidence wording, or unrelated quality improvements.",
-				)
-			}
 		}
+	}
 	targetScope := runtimeFailureTargetScope(signature)
 	if targetScope != "" {
 		input["failureTargetScope"] = targetScope
@@ -2451,13 +2451,13 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"When using baseHash, copy the literal contentHash value from the current target snapshot; never output unresolved references such as ${...}, {{...}}, or symbolic placeholders.",
 			"Use complete patch/apply file_write only when the current snapshot is marked safeForFileWrite/contentComplete and contains no redaction markers; otherwise use a minimal unified_diff with exact visible context, file/edit with exact oldText, or first read the target.",
 			"Never copy runtime redaction marker tokens, omitted sections, or truncated snapshot text into patch/apply content or diff.",
-				"If a previous patch was rejected for redacted runtime markers, discard that diff entirely and rebuild from current unredacted file/read or patchRepairContext content; do not transform redacted marker text into source content.",
-				"If patchRepairSuggestions are present, prefer their exact oldText/newText replacement evidence to construct the smallest current unified_diff or file/edit repair.",
-				"If patch application failed because of malformed unified_diff syntax, return either a complete standard unified diff with explicit line ranges such as @@ -12,3 +12,4 @@, or use file/edit with exact oldText/newText from the current snapshot.",
-				"Before adding new target content, reconcile the current snapshot and modify an existing equivalent item instead of creating duplicate named artifacts.",
-				"When patching resources that reference existing named elements, patch against names that already exist in current workspace resources unless the Goal explicitly requires introducing a new named element.",
-				"If the current target snapshot proves the failed patch is no longer required, return a bounded verification evidence graph instead of another patch; do not use read-only inspection as the only evidence.",
-			)
+			"If a previous patch was rejected for redacted runtime markers, discard that diff entirely and rebuild from current unredacted file/read or patchRepairContext content; do not transform redacted marker text into source content.",
+			"If patchRepairSuggestions are present, prefer their exact oldText/newText replacement evidence to construct the smallest current unified_diff or file/edit repair.",
+			"If patch application failed because of malformed unified_diff syntax, return either a complete standard unified diff with explicit line ranges such as @@ -12,3 +12,4 @@, or use file/edit with exact oldText/newText from the current snapshot.",
+			"Before adding new target content, reconcile the current snapshot and modify an existing equivalent item instead of creating duplicate named artifacts.",
+			"When patching resources that reference existing named elements, patch against names that already exist in current workspace resources unless the Goal explicitly requires introducing a new named element.",
+			"If the current target snapshot proves the failed patch is no longer required, return a bounded verification evidence graph instead of another patch; do not use read-only inspection as the only evidence.",
+		)
 		if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) > 0 {
 			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 				"currentTargetAlreadySatisfiesFailedPatch is a mechanical signal that the failed artifact's intended line changes are already reflected in the current target snapshot.",
@@ -2469,21 +2469,21 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if len(targetContext) > 0 {
 		input["failureTargetRepairContext"] = targetContext
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-				"Use failureTargetRepairContext as the current snapshot for targets identified by the failed evidence.",
-				"When failed evidence points at a concrete target resource, generate the smallest auditable patch/apply state change against that current snapshot before rerunning verification.",
-				"Use workspaceFileManifest to reconcile target resources with other known workspace resources; avoid replacing unrelated existing artifacts just to satisfy one failure target.",
-				"When a failure mentions missing names, invalid attributes, or contract-entry mismatches, do not invent new names in the target patch; first reconcile the target with currently visible resource shape from relevant existing resources, or read the relevant resource before patching.",
-				"When the failure text contains line-referenced unresolved names, invalid attributes, shape mismatches, or equivalent resource-shape diagnostics in the failure target, repair those reported blockers before secondary validation, formatting, or evidence refinements.",
-			)
-		}
-		if shapeContext := o.runtimeRepairResourceShapeAlignmentContext(ctx, run, failedStep); len(shapeContext) > 0 {
-			input["resourceShapeAlignmentContext"] = shapeContext
-			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-				"Use resourceShapeAlignmentContext as current same-directory resource evidence when diagnostics report unresolved names, invalid attributes, shape mismatches, contract-entry mismatches, or equivalent resource-shape conflicts.",
-				"Before introducing new named elements or attributes, reconcile the failed target with existing current workspace resources in resourceShapeAlignmentContext.",
-				"If the failed target disagrees with current resource shape, prefer the smallest coherent state change that aligns the target and existing resources; do not invent replacement contracts from failure text alone.",
-			)
-		}
+			"Use failureTargetRepairContext as the current snapshot for targets identified by the failed evidence.",
+			"When failed evidence points at a concrete target resource, generate the smallest auditable patch/apply state change against that current snapshot before rerunning verification.",
+			"Use workspaceFileManifest to reconcile target resources with other known workspace resources; avoid replacing unrelated existing artifacts just to satisfy one failure target.",
+			"When a failure mentions missing names, invalid attributes, or contract-entry mismatches, do not invent new names in the target patch; first reconcile the target with currently visible resource shape from relevant existing resources, or read the relevant resource before patching.",
+			"When the failure text contains line-referenced unresolved names, invalid attributes, shape mismatches, or equivalent resource-shape diagnostics in the failure target, repair those reported blockers before secondary validation, formatting, or evidence refinements.",
+		)
+	}
+	if shapeContext := o.runtimeRepairResourceShapeAlignmentContext(ctx, run, failedStep); len(shapeContext) > 0 {
+		input["resourceShapeAlignmentContext"] = shapeContext
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Use resourceShapeAlignmentContext as current same-directory resource evidence when diagnostics report unresolved names, invalid attributes, shape mismatches, contract-entry mismatches, or equivalent resource-shape conflicts.",
+			"Before introducing new named elements or attributes, reconcile the failed target with existing current workspace resources in resourceShapeAlignmentContext.",
+			"If the failed target disagrees with current resource shape, prefer the smallest coherent state change that aligns the target and existing resources; do not invent replacement contracts from failure text alone.",
+		)
+	}
 	if rootCauseCandidates := o.runtimeRepairRootCauseCandidateContext(ctx, run, failedStep); len(rootCauseCandidates) > 0 {
 		input["rootCauseCandidateContext"] = rootCauseCandidates
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],

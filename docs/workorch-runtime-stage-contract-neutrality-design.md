@@ -457,9 +457,9 @@ Shell / tool 调用不得被用来隐藏实际目标变更，再通过一个无�
 
 当前 repair target snapshot 是定向修复的高优先级输入。Provider context budget、prompt normalization 和 outbound redaction 不得把满足以下条件的 `failureTargetRepairContext[].content`、`patchRepairContext[].content` 或 `repairActionPackage.targetSnapshots[].content` 压缩、摘要化或替换为 `[REDACTED]`：`contentComplete=true`、`safeForFileWrite=true`、`redacted=false`、`truncated=false`、`isBinary=false` 或未声明、且存在字面 `contentHash`。该豁免只适用于当前 repair target snapshot 的 `content` 字段，且只表达“当前资源快照可作为修复基线”的中立事实；其他敏感字段、历史输出、失败正文、stream partial、provider 配置和不满足安全标记的 snapshot 仍必须按通用 redaction / budget 规则处理。若在极端预算下连安全当前快照也无法完整提供，runtime 必须显式标记快照不可用于完整 `file_write`，要求 LLM 重新读取目标、使用最小 diff / exact edit，或返回 blocker / failed assessment；不得向 LLM 发送已被 `[REDACTED]` 替换的“伪完整快照”。
 
-当失败 evidence 已经包含中立的编译/类型/API 形状诊断时，repair 需要遵守“首要阻塞优先”合同。这里的中立诊断包括但不限于：line-ref compile/build/test 错误、`undefined` / unresolved identifier、`unknown field`、`cannot use` / type mismatch、missing method、constructor/schema/interface mismatch，以及其他明确指向当前目标资源无法通过编译或基本验证的结构性错误。runtime core 只能表达以下中立约束，不得写入具体语言框架、业务模型或供应商细节：
-- repairGuidance / provider prompt 必须要求 LLM 先修复这些已报告的首要阻塞，再处理断言增强、格式整理、文案修饰或其他次要改进。
-- 若 `failureTargetRepairContext`、`patchRepairContext` 或 `repairActionPackage.targetSnapshots` 已提供当前目标快照，LLM 必须优先把目标与当前可见资源/API 形状对齐，而不是凭空发明新的名字、字段、入口或脚手架。
+当失败 evidence 已经包含中立的资源形状冲突诊断时，repair 需要遵守“首要阻塞优先”合同。这里的中立诊断包括但不限于：line-ref 执行/验证错误、unresolved identifier、invalid attribute、shape mismatch、missing method、schema mismatch，以及其他明确指向当前目标资源无法通过基本执行或验证的结构性错误。runtime core 只能表达以下中立约束，不得写入具体语言框架、业务模型或供应商细节：
+- repairGuidance / provider prompt 必须要求 LLM 先修复这些已报告的首要阻塞，再处理格式整理、文案修饰或其他次要改进。
+- 若 `failureTargetRepairContext`、`patchRepairContext` 或 `repairActionPackage.targetSnapshots` 已提供当前目标快照，LLM 必须优先把目标与当前可见资源形状或契约形状对齐，而不是凭空发明新的名字、属性、入口或资源结构。
 - 若具体任务属于软件开发等领域，workspaceTemplate / soul 可以在领域层进一步细化“对齐现有类型、构造函数、配置结构、入口函数和测试入口”的要求；这些领域规则不得下沉到 core runtime 里。
 - 该规则只定义 repair 的排序与 grounding，不判断某个业务符号该叫什么、某个框架入口该怎么写，也不允许 core runtime 根据命令名、语言名或业务关键字生成特定修复方案。
 
@@ -495,7 +495,7 @@ Repair 输入必须尽量包含足以定向修复的当前证据：
 
 - `failedStepOutput`：当前失败的精简输出，包括 failure class / signature、error、reason、status、关键诊断和必要的 stdout/stderr 摘要。
 - `failureTargetRepairContext`：当失败证据指向具体 workspace 资源时，提供当前目标资源快照、存在性、content hash 和来源说明。
-- `resourceShapeAlignmentContext`：当失败诊断包含 unresolved identifier、unknown field、type mismatch、constructor/schema/interface mismatch 等中立 API / 资源形状冲突时，提供同目录、非失败目标的当前资源快照，帮助 LLM 在修改前对齐现有定义。该上下文只能基于路径、manifest、当前快照和失败诊断机械生成，不得按语言、框架、测试约定或业务名称做 core 特判。
+- `resourceShapeAlignmentContext`：当失败诊断包含 unresolved identifier、invalid attribute、shape mismatch、schema mismatch 等中立资源形状冲突时，提供同目录、非失败目标的当前资源快照，帮助 LLM 在修改前对齐现有资源形状。该上下文只能基于路径、manifest、当前快照和失败诊断机械生成，不得按语言、框架、测试约定或业务名称做 core 特判。
 - `workspaceFileManifest`：当失败目标需要与其他已知资源核对、DoD 缺口涉及资源证据、或 repair 需要避免误替换无关资源时，提供当前 workspace 资源清单。
 - `patchRepairContext` 或等价 capability repair context：当失败来自 state-changing artifact 应用失败时，提供当前目标快照，并要求 LLM 基于当前快照重新生成可应用 artifact，而不是重复失败 artifact。
 - `patchRepairSuggestions` 或等价 capability repair suggestion：当 runtime 能从失败 artifact 与当前目标快照中机械抽取唯一 oldText / newText 替换时，提供可直接复用的最小修复证据；该 suggestion 不代表业务判断，只代表当前资源内容与失败 artifact 的中立匹配事实。
@@ -767,7 +767,7 @@ Stage input bundle 必须遵守：
   - graph expansion limit assessment 输入已补齐 `latestClosureEvidence` / `supersededFailureEvidence` 与 assessment evidence guidance，要求 satisfied coverage 只能引用具体可追踪证据。
   - `runEvidenceSummary` 在超出上下文预算时优先保留 action / patch / validation / closure evidence，避免关键证据被普通 LLM 过程步骤挤出。
   - graph expansion limit assessment 触发 coverage correction 时会为 `missingDoDItems` / `missingGoalCoverage` 补充中立 `evidenceCandidates`；候选证据存在时继续 assessment-only correction，候选不足时再进入 concrete validation evidence repair。
-  - runtime repair 已补充 `resourceShapeAlignmentContext`：当结构化失败信号表明当前目标与现有 API / 资源形状不一致时，repair 输入会携带同目录当前资源快照，要求 LLM 先对齐现有定义再生成 state-changing artifact。
+  - runtime repair 已补充 `resourceShapeAlignmentContext`：当结构化失败信号表明当前目标与现有资源形状不一致时，repair 输入会携带同目录当前资源快照，要求 LLM 先对齐现有资源形状再生成 state-changing artifact。
   - patch/apply 准入已扩展 non-substantive placeholder 识别，拒绝“严格收敛”“验证锚点”“state-change anchor”“verification anchor”等只为满足流程存在性的 marker/comment/no-op 变更。
 
 ## 非兼容性说明
