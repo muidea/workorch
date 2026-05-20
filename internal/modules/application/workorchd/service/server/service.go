@@ -29,7 +29,7 @@ func (s *Service) Startup(serviceName string, eventHub event.Hub, backgroundRout
 	}
 	s.eventHub = eventHub
 	s.backgroundRoutine = backgroundRoutine
-	s.http = NewHTTPServerWithEventHub(s.config, workorchevents.NewMagicHubWithHub(eventHub))
+	s.http = NewHTTPServerWithEventHub(s.config, workorchevents.NewMagicHubWithHubOwner(eventHub, "workorchd/http"))
 	s.done = make(chan error, 1)
 	if err := s.http.Validate(context.Background()); err != nil {
 		return cd.NewError(cd.Unexpected, err.Error())

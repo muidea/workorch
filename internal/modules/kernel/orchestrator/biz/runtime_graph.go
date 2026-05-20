@@ -742,11 +742,32 @@ func latestCompletedGraphBatchStep(steps []*runModel.Step, specs []stepDispatchS
 func latestFailedRepairableGraphStep(steps []*runModel.Step) *runModel.Step {
 	for idx := len(steps) - 1; idx >= 0; idx-- {
 		step := steps[idx]
-		if step != nil && step.State == common.StepStateFailed && graphNodeID(step) != "" {
+		if step != nil && step.State == common.StepStateFailed && graphNodeID(step) != "" &&
+			!graphFailureSupersededByLaterSuccess(steps, idx, step) {
 			return step
 		}
 	}
 	return nil
+}
+
+func graphFailureSupersededByLaterSuccess(steps []*runModel.Step, failedIdx int, failedStep *runModel.Step) bool {
+	if failedStep == nil || failedIdx < 0 || failedIdx >= len(steps)-1 {
+		return false
+	}
+	scope := completionEvidenceStepScope(failedStep)
+	if scope == "" {
+		return false
+	}
+	for idx := failedIdx + 1; idx < len(steps); idx++ {
+		step := steps[idx]
+		if step == nil || step.State != common.StepStateCompleted {
+			continue
+		}
+		if completionEvidenceStepScope(step) == scope {
+			return true
+		}
+	}
+	return false
 }
 
 func completedGraphNodeList(completed map[string]bool) []string {

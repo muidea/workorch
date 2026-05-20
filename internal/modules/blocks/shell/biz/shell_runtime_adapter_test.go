@@ -263,6 +263,36 @@ func TestRuntimeAdapter_ExecuteRuntimeStepUsesInputTimeoutMillis(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapter_ExecuteRuntimeStepNormalizesShPipefailScriptToBash(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	deliverableDirectory := t.TempDir()
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command": "sh",
+			"args":    []any{"-c", "set -euo pipefail\nprintf ok"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v", err)
+	}
+	if result.Output["status"] != "completed" {
+		t.Fatalf("status = %v, want completed", result.Output["status"])
+	}
+	if result.Output["command"] != "sh" || result.Output["actualCommand"] != "bash" {
+		t.Fatalf("command fields = %+v, want requested sh executed by bash", result.Output)
+	}
+	if result.Output["commandNormalization"] != "sh_script_requires_bash_pipefail" {
+		t.Fatalf("commandNormalization = %v, want pipefail normalization", result.Output["commandNormalization"])
+	}
+	stdout, _ := result.Output["stdout"].(string)
+	if strings.TrimSpace(stdout) != "ok" {
+		t.Fatalf("stdout = %q, want ok", stdout)
+	}
+}
+
 func TestRuntimeAdapter_ExecuteRuntimeStepRejectsInvalidInputTimeoutMillis(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	_, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{

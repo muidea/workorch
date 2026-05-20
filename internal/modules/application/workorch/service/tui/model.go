@@ -120,10 +120,7 @@ func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initi
 	unsubscribe := func() {}
 	if be != nil {
 		if unsub, err := be.Events().Subscribe(context.Background(), func(_ context.Context, evt backend.Event) {
-			select {
-			case eventCh <- evt:
-			default:
-			}
+			enqueueBackendEvent(eventCh, evt)
 		}); err == nil {
 			unsubscribe = unsub
 		}
@@ -143,6 +140,39 @@ func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initi
 		progress:            progressIdle,
 		historyCursor:       -1,
 		mainViewport:        newMainViewport(),
+	}
+}
+
+func enqueueBackendEvent(ch chan backend.Event, evt backend.Event) {
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- evt:
+		return
+	default:
+	}
+	if !isWorkspaceListCriticalEvent(evt.Type) {
+		return
+	}
+	select {
+	case <-ch:
+	default:
+	}
+	select {
+	case ch <- evt:
+	default:
+	}
+}
+
+func isWorkspaceListCriticalEvent(eventType backend.EventType) bool {
+	switch eventType {
+	case backend.EventWorkspaceCreated,
+		backend.EventWorkspaceDeleted,
+		backend.EventWorkspaceListChanged:
+		return true
+	default:
+		return false
 	}
 }
 

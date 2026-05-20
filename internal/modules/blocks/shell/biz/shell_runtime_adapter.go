@@ -84,8 +84,9 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	execCommand, execArgs, commandNormalization := normalizeShellExecutionCommand(command, args)
 	startedAt := time.Now().UTC()
-	cmd := exec.CommandContext(runCtx, command, args...)
+	cmd := exec.CommandContext(runCtx, execCommand, execArgs...)
 	cmd.Dir = deliverableDirectory
 	cmd.Env = a.filteredEnv()
 	var stdout bytes.Buffer
@@ -109,6 +110,10 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		"durationMillis": duration.Milliseconds(),
 		"timeoutMillis":  timeout.Milliseconds(),
 	}
+	if commandNormalization != "" {
+		output["actualCommand"] = filepath.Base(execCommand)
+		output["commandNormalization"] = commandNormalization
+	}
 	applyShellEvidencePolicies(request.Input, command, args, output)
 	if runCtx.Err() == context.DeadlineExceeded {
 		output["status"] = "timeout"
@@ -119,6 +124,37 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 	return runtimemodel.StepExecutionResult{Output: output}, nil
+}
+
+func normalizeShellExecutionCommand(command string, args []string) (string, []string, string) {
+	if !shellCommandRequiresBash(command, args) {
+		return command, args, ""
+	}
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		return command, args, ""
+	}
+	return bashPath, args, "sh_script_requires_bash_pipefail"
+}
+
+func shellCommandRequiresBash(command string, args []string) bool {
+	if filepath.Base(strings.TrimSpace(command)) != "sh" {
+		return false
+	}
+	script, ok := inlineShellScript(args)
+	if !ok {
+		return false
+	}
+	return strings.Contains(strings.ToLower(script), "pipefail")
+}
+
+func inlineShellScript(args []string) (string, bool) {
+	for idx, arg := range args {
+		if arg == "-c" && idx+1 < len(args) {
+			return args[idx+1], true
+		}
+	}
+	return "", false
 }
 
 func shellCommandTimeout(input map[string]any, defaultTimeout time.Duration) (time.Duration, error) {

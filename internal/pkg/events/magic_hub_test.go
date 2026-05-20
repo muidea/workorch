@@ -224,3 +224,102 @@ func TestMagicHubDeliversSameTopicToMultipleSubscribers(t *testing.T) {
 		t.Fatalf("calls = %d/%d, want 1/1", firstCalls, secondCalls)
 	}
 }
+
+func TestMagicHubPublishesAcrossWrappersSharingSameUnderlyingHub(t *testing.T) {
+	rawHub := magicevent.NewHub(defaultMagicHubCapacity)
+	defer rawHub.Terminate()
+
+	publisher := NewMagicHubWithHubOwner(rawHub, "test/publisher")
+	subscriber := NewMagicHubWithHubOwner(rawHub, "test/subscriber")
+
+	var received Envelope
+	unsubscribe := subscriber.Subscribe(TopicWorkspaceCreated, func(_ context.Context, envelope Envelope) error {
+		received = envelope
+		return nil
+	})
+	defer unsubscribe()
+
+	if err := publisher.Publish(context.Background(), Envelope{Topic: TopicWorkspaceCreated}); err != nil {
+		t.Fatalf("publish across wrappers returned error: %v", err)
+	}
+	if received.Topic != TopicWorkspaceCreated {
+		t.Fatalf("received topic = %s, want %s", received.Topic, TopicWorkspaceCreated)
+	}
+}
+
+func TestMagicHubDeliversSameTopicAcrossMultipleWrappers(t *testing.T) {
+	rawHub := magicevent.NewHub(defaultMagicHubCapacity)
+	defer rawHub.Terminate()
+
+	first := NewMagicHubWithHubOwner(rawHub, "test/first")
+	second := NewMagicHubWithHubOwner(rawHub, "test/second")
+	publisher := NewMagicHubWithHubOwner(rawHub, "test/publisher")
+
+	var firstCalls int
+	var secondCalls int
+	unsubscribeFirst := first.Subscribe(TopicWorkspaceCreated, func(_ context.Context, _ Envelope) error {
+		firstCalls++
+		return nil
+	})
+	defer unsubscribeFirst()
+	unsubscribeSecond := second.Subscribe(TopicWorkspaceCreated, func(_ context.Context, _ Envelope) error {
+		secondCalls++
+		return nil
+	})
+	defer unsubscribeSecond()
+
+	if err := publisher.Publish(context.Background(), Envelope{Topic: TopicWorkspaceCreated}); err != nil {
+		t.Fatalf("publish across wrappers returned error: %v", err)
+	}
+	if firstCalls != 1 || secondCalls != 1 {
+		t.Fatalf("calls = %d/%d, want 1/1", firstCalls, secondCalls)
+	}
+}
+
+func TestMagicHubDeliversWildcardEventsToMultipleWrappers(t *testing.T) {
+	rawHub := magicevent.NewHub(defaultMagicHubCapacity)
+	defer rawHub.Terminate()
+
+	first := NewMagicHubWithHubOwner(rawHub, "test/first")
+	second := NewMagicHubWithHubOwner(rawHub, "test/second")
+	publisher := NewMagicHubWithHubOwner(rawHub, "test/publisher")
+
+	var firstCalls int
+	var secondCalls int
+	unsubscribeFirst := first.Subscribe("*", func(_ context.Context, _ Envelope) error {
+		firstCalls++
+		return nil
+	})
+	defer unsubscribeFirst()
+	unsubscribeSecond := second.Subscribe("*", func(_ context.Context, _ Envelope) error {
+		secondCalls++
+		return nil
+	})
+	defer unsubscribeSecond()
+
+	if err := publisher.Publish(context.Background(), Envelope{Topic: TopicWorkspaceCreated}); err != nil {
+		t.Fatalf("publish across wrappers returned error: %v", err)
+	}
+	if firstCalls != 1 || secondCalls != 1 {
+		t.Fatalf("wildcard calls = %d/%d, want 1/1", firstCalls, secondCalls)
+	}
+}
+
+func TestMagicHubObserverIDUsesStableOwnerName(t *testing.T) {
+	hub := NewMagicHubWithOwner("workorchd/http")
+	defer hub.Terminate()
+
+	unsubscribe := hub.Subscribe(TopicWorkspaceCreated, func(_ context.Context, _ Envelope) error {
+		return nil
+	})
+	defer unsubscribe()
+
+	observer := hub.observers[TopicWorkspaceCreated]
+	if observer == nil {
+		t.Fatal("workspace observer was not registered")
+	}
+	want := "/_workorch_observer/workorchd/http/workspace/created"
+	if observer.ID() != want {
+		t.Fatalf("observer ID = %q, want %q", observer.ID(), want)
+	}
+}

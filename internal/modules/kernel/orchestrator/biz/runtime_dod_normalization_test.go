@@ -249,6 +249,45 @@ func TestNormalizeCompletionGateDoDAssessmentOutputUsesEvidenceCandidatesWhenRef
 	}
 }
 
+func TestValidatedCompletionDoDAssessmentAcceptsNearEquivalentGoalCoverageText(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-goal-coverage-near-equivalent",
+		WorkspaceID:     "ws-goal-coverage-near-equivalent",
+		DoDID:           "dod-goal-coverage-near-equivalent",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": "* **统一协议转换**：作为本地网关，接收客户端请求，并透明转发至目标供应商（OpenAI, DeepSeek, Anthropic 等）。",
+			},
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "Goal coverage passed.",
+			"items": []map[string]any{{
+				"item":         "build passes",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-goal-coverage-near-equivalent/graph-001/verify"},
+			}},
+			"goalCoverage": map[string]any{
+				"satisfied": true,
+				"items": []map[string]any{{
+					"item":         "统一协议转换：作为本地网关接收客户端请求并透明转发到目标供应商（OpenAI/DeepSeek/Anthropic）。",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-goal-coverage-near-equivalent/graph-001/verify"},
+				}},
+			},
+		},
+	}
+	if _, _, err := validatedCompletionDoDAssessment(run, output); err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+}
+
 func TestNormalizeCompletionGateDoDAssessmentOutputInfersSatisfiedStateFromParentAndCandidates(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-goal-coverage-normalize-parent-satisfied",

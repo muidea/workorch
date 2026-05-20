@@ -1727,10 +1727,7 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			if runID != "" && envelope.RunID != runID {
 				return nil
 			}
-			select {
-			case eventCh <- envelope:
-			default:
-			}
+			enqueueEventStreamEnvelope(eventCh, envelope)
 			return nil
 		})
 		defer unsubscribe()
@@ -3849,6 +3846,39 @@ func (s *serverState) registerAutoGovernanceResumeWatcher() {
 
 func isMemoryBackend(backend string) bool {
 	return backend == "" || backend == "memory"
+}
+
+func enqueueEventStreamEnvelope(ch chan events.Envelope, envelope events.Envelope) {
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- envelope:
+		return
+	default:
+	}
+	if !isEventStreamCriticalTopic(envelope.Topic) {
+		return
+	}
+	select {
+	case <-ch:
+	default:
+	}
+	select {
+	case ch <- envelope:
+	default:
+	}
+}
+
+func isEventStreamCriticalTopic(topic string) bool {
+	switch topic {
+	case events.TopicWorkspaceCreated,
+		events.TopicWorkspaceDeleted,
+		events.TopicWorkspaceStateChanged:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *serverState) withSharedSession(ctx context.Context, fn func(*appservice.RuntimeSession) error) error {

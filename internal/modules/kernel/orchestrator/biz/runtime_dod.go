@@ -200,7 +200,7 @@ func missingGoalCoverageItemForAssessmentItem(item map[string]any, missing []map
 			stringFromMap(item, "requirement"),
 		))
 		candidateText := normalizeDoDCoverageText(missingGoalCoverageRequirementText(candidate))
-		if itemText != "" && candidateText != "" && (strings.Contains(itemText, candidateText) || strings.Contains(candidateText, itemText)) {
+		if normalizedCoverageTextMatches(itemText, candidateText) {
 			return candidate
 		}
 	}
@@ -444,7 +444,7 @@ func validateDoDAssessmentCoversRunDoD(run *runModel.Run, assessment map[string]
 			if actual == "" {
 				continue
 			}
-			if strings.Contains(actual, required.normalized) || strings.Contains(required.normalized, actual) {
+			if normalizedCoverageTextMatches(actual, required.normalized) {
 				matched = true
 				break
 			}
@@ -485,7 +485,7 @@ func validateDoDAssessmentCoversRunGoal(run *runModel.Run, assessment map[string
 				matched = true
 				break
 			}
-			if actual.normalized != "" && (strings.Contains(actual.normalized, required.normalized) || strings.Contains(required.normalized, actual.normalized)) {
+			if normalizedCoverageTextMatches(actual.normalized, required.normalized) {
 				matched = true
 				break
 			}
@@ -825,7 +825,7 @@ func goalItemCoveredByDoD(goalItem string, doDItems []string) bool {
 		if item == "" {
 			continue
 		}
-		if strings.Contains(item, goalItem) || strings.Contains(goalItem, item) {
+		if normalizedCoverageTextMatches(item, goalItem) {
 			return true
 		}
 	}
@@ -1234,6 +1234,59 @@ func normalizeDoDCoverageText(value string) string {
 		builder.WriteRune(r)
 	}
 	return builder.String()
+}
+
+func normalizedCoverageTextMatches(actual string, required string) bool {
+	actual = strings.TrimSpace(actual)
+	required = strings.TrimSpace(required)
+	if actual == "" || required == "" {
+		return false
+	}
+	if actual == required || strings.Contains(actual, required) || strings.Contains(required, actual) {
+		return true
+	}
+	shorter, longer := actual, required
+	if len([]rune(shorter)) > len([]rune(longer)) {
+		shorter, longer = longer, shorter
+	}
+	shorterLen := len([]rune(shorter))
+	longerLen := len([]rune(longer))
+	if shorterLen < 24 || longerLen == 0 {
+		return false
+	}
+	if float64(shorterLen)/float64(longerLen) < 0.75 {
+		return false
+	}
+	lcs := longestCommonRuneSubsequenceLength(shorter, longer)
+	return float64(lcs)/float64(shorterLen) >= 0.9
+}
+
+func longestCommonRuneSubsequenceLength(left string, right string) int {
+	a := []rune(left)
+	b := []rune(right)
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	prev := make([]int, len(b)+1)
+	curr := make([]int, len(b)+1)
+	for i := 1; i <= len(a); i++ {
+		for j := 1; j <= len(b); j++ {
+			if a[i-1] == b[j-1] {
+				curr[j] = prev[j-1] + 1
+				continue
+			}
+			if prev[j] > curr[j-1] {
+				curr[j] = prev[j]
+			} else {
+				curr[j] = curr[j-1]
+			}
+		}
+		prev, curr = curr, prev
+		for j := range curr {
+			curr[j] = 0
+		}
+	}
+	return prev[len(b)]
 }
 
 func trimDoDItemText(value string) string {

@@ -907,6 +907,199 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 	}
 }
 
+func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEvent(t *testing.T) {
+	hub := events.NewMagicHub()
+	defer hub.Terminate()
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	server := httptest.NewServer(newMuxWithState(state))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream", nil)
+	if err != nil {
+		t.Fatalf("new stream request: %v", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream status = %d, want 200", resp.StatusCode)
+	}
+
+	lines := make(chan string, 16)
+	readErr := make(chan error, 1)
+	go func() {
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		readErr <- scanner.Err()
+	}()
+
+	select {
+	case line := <-lines:
+		if !strings.HasPrefix(line, ": connected") {
+			t.Fatalf("first stream line = %q, want connected comment", line)
+		}
+	case err := <-readErr:
+		t.Fatalf("stream closed before connected comment: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for stream connection")
+	}
+
+	createResp, err := http.Post(server.URL+"/api/v1/workorch/workspaces", "application/json", strings.NewReader(`{"title":"streamed workspace","deliverableDirectory":"workspaces/streamed"}`))
+	if err != nil {
+		t.Fatalf("post workspace: %v", err)
+	}
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201", createResp.StatusCode)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case line := <-lines:
+			if !strings.HasPrefix(line, "data:") {
+				continue
+			}
+			var envelope events.Envelope
+			if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &envelope); err != nil {
+				t.Fatalf("decode stream data %q: %v", line, err)
+			}
+			if envelope.Topic != events.TopicWorkspaceCreated || envelope.WorkspaceID == "" || envelope.Payload[events.PayloadKeyTitle] != "streamed workspace" {
+				t.Fatalf("stream envelope = %+v, want workspace-created event for created workspace", envelope)
+			}
+			return
+		case err := <-readErr:
+			t.Fatalf("stream closed before created event: %v", err)
+		case <-deadline:
+			t.Fatal("timed out waiting for streamed workspace-created event")
+		}
+	}
+}
+
+func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEventToMultipleClients(t *testing.T) {
+	hub := events.NewMagicHub()
+	defer hub.Terminate()
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	server := httptest.NewServer(newMuxWithState(state))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	openStream := func(name string) (<-chan string, <-chan error, func()) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream", nil)
+		if err != nil {
+			t.Fatalf("%s new stream request: %v", name, err)
+		}
+		req.Header.Set("Accept", "text/event-stream")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s stream request: %v", name, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			t.Fatalf("%s stream status = %d, want 200", name, resp.StatusCode)
+		}
+		lines := make(chan string, 16)
+		readErr := make(chan error, 1)
+		go func() {
+			defer resp.Body.Close()
+			scanner := bufio.NewScanner(resp.Body)
+			for scanner.Scan() {
+				lines <- scanner.Text()
+			}
+			readErr <- scanner.Err()
+		}()
+		return lines, readErr, func() { _ = resp.Body.Close() }
+	}
+
+	firstLines, firstErr, closeFirst := openStream("first")
+	defer closeFirst()
+	secondLines, secondErr, closeSecond := openStream("second")
+	defer closeSecond()
+
+	waitConnected := func(name string, lines <-chan string, readErr <-chan error) {
+		t.Helper()
+		select {
+		case line := <-lines:
+			if !strings.HasPrefix(line, ": connected") {
+				t.Fatalf("%s first stream line = %q, want connected comment", name, line)
+			}
+		case err := <-readErr:
+			t.Fatalf("%s stream closed before connected comment: %v", name, err)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s timed out waiting for stream connection", name)
+		}
+	}
+	waitConnected("first", firstLines, firstErr)
+	waitConnected("second", secondLines, secondErr)
+
+	createResp, err := http.Post(server.URL+"/api/v1/workorch/workspaces", "application/json", strings.NewReader(`{"title":"streamed multi-client workspace","deliverableDirectory":"workspaces/streamed-multi"}`))
+	if err != nil {
+		t.Fatalf("post workspace: %v", err)
+	}
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201", createResp.StatusCode)
+	}
+
+	waitWorkspaceCreated := func(name string, lines <-chan string, readErr <-chan error) {
+		t.Helper()
+		deadline := time.After(2 * time.Second)
+		for {
+			select {
+			case line := <-lines:
+				if !strings.HasPrefix(line, "data:") {
+					continue
+				}
+				var envelope events.Envelope
+				if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &envelope); err != nil {
+					t.Fatalf("%s decode stream data %q: %v", name, line, err)
+				}
+				if envelope.Topic == events.TopicWorkspaceCreated && envelope.Payload[events.PayloadKeyTitle] == "streamed multi-client workspace" {
+					return
+				}
+			case err := <-readErr:
+				t.Fatalf("%s stream closed before created event: %v", name, err)
+			case <-deadline:
+				t.Fatalf("%s timed out waiting for streamed workspace-created event", name)
+			}
+		}
+	}
+	waitWorkspaceCreated("first", firstLines, firstErr)
+	waitWorkspaceCreated("second", secondLines, secondErr)
+}
+
+func TestEnqueueEventStreamEnvelopeKeepsWorkspaceCreatedWhenChannelFull(t *testing.T) {
+	ch := make(chan events.Envelope, 1)
+	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: events.TopicStepStateChanged, WorkspaceID: "ws-a"})
+	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: events.TopicWorkspaceCreated, WorkspaceID: "ws-b"})
+
+	got := <-ch
+	if got.Topic != events.TopicWorkspaceCreated || got.WorkspaceID != "ws-b" {
+		t.Fatalf("envelope = %+v, want workspace-created to replace older non-critical event", got)
+	}
+}
+
+func TestEnqueueEventStreamEnvelopeDropsNonCriticalWhenChannelFull(t *testing.T) {
+	ch := make(chan events.Envelope, 1)
+	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: events.TopicWorkspaceCreated, WorkspaceID: "ws-a"})
+	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: events.TopicStepStateChanged, WorkspaceID: "ws-b"})
+
+	got := <-ch
+	if got.Topic != events.TopicWorkspaceCreated || got.WorkspaceID != "ws-a" {
+		t.Fatalf("envelope = %+v, want existing critical event preserved", got)
+	}
+}
+
 func TestConsoleRoutesServeEmbeddedAssets(t *testing.T) {
 	mux := newMux(Config{Backend: "memory"})
 

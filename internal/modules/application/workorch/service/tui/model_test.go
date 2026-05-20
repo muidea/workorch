@@ -1861,6 +1861,28 @@ func TestModelWorkspaceCreatedEventRefreshesWorkspaceList(t *testing.T) {
 	}
 }
 
+func TestEnqueueBackendEventKeepsWorkspaceCreatedWhenChannelFull(t *testing.T) {
+	ch := make(chan backend.Event, 1)
+	enqueueBackendEvent(ch, backend.Event{Type: backend.EventStepCompleted, WorkspaceID: "ws-a"})
+	enqueueBackendEvent(ch, backend.Event{Type: backend.EventWorkspaceCreated, WorkspaceID: "ws-b"})
+
+	got := <-ch
+	if got.Type != backend.EventWorkspaceCreated || got.WorkspaceID != "ws-b" {
+		t.Fatalf("event = %+v, want workspace created to replace older non-critical event", got)
+	}
+}
+
+func TestEnqueueBackendEventDropsNonCriticalWhenChannelFull(t *testing.T) {
+	ch := make(chan backend.Event, 1)
+	enqueueBackendEvent(ch, backend.Event{Type: backend.EventWorkspaceCreated, WorkspaceID: "ws-a"})
+	enqueueBackendEvent(ch, backend.Event{Type: backend.EventStepCompleted, WorkspaceID: "ws-b"})
+
+	got := <-ch
+	if got.Type != backend.EventWorkspaceCreated || got.WorkspaceID != "ws-a" {
+		t.Fatalf("event = %+v, want existing critical event preserved", got)
+	}
+}
+
 func TestModelWorkspaceListChangedEventRefreshesWorkspaceList(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{

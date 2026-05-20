@@ -8068,6 +8068,118 @@ func TestRuntimeOrchestrator_ResumeClearsDuplicateFailureBlockerBelowScopedBudge
 	}
 }
 
+func TestRuntimeOrchestrator_RunningResumeReplansFromResolvedDecisionOnFailedNonTerminalStep(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	runtime := &requestCapturingRuntimeAdapter{output: map[string]any{"status": "completed"}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		resolutionRepo,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+	workspaceID := common.WorkspaceID("ws-running-resolved-replan")
+	runID := common.RunID("run-running-resolved-replan")
+	ticketStepID := common.StepID(runID + "/provider-retry-001")
+	terminalStepID := common.StepID(runID + "/repair-branch-001")
+	ticketID := common.TicketID(string(ticketStepID) + "-duplicate-failure-decision")
+	resolutionID := common.ResolutionID("resolution-" + string(ticketID))
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    ticketStepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage":               "llm_schema_invalid",
+			failureOutputKeyClass: failureClassLLMDecisionInvalid,
+		},
+	}); err != nil {
+		t.Fatalf("seed ticket step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    terminalStepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"previousStepId": string(ticketStepID),
+		},
+		Output: map[string]any{
+			"stage":               "llm_schema_invalid",
+			failureOutputKeyClass: failureClassLLMDecisionInvalid,
+		},
+	}); err != nil {
+		t.Fatalf("seed terminal step: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      ticketStepID,
+		State:       common.DecisionTicketStateResolved,
+		CreatedAt:   "2026-05-20T11:31:32Z",
+		UpdatedAt:   "2026-05-20T11:31:33Z",
+		Context: map[string]any{
+			"allowedRecoveryActions": []any{"replan"},
+			"recoveryPolicy":         "runtime_repair_exhausted_requires_strategy",
+		},
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       resolutionID,
+		TicketID: ticketID,
+		Type:     decisioncommon.ResolutionTypeReplan,
+		Payload:  map[string]any{"source": "auto_governance", "recoveryAction": "replan"},
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume running resolved replan: %v", err)
+	}
+
+	predecessor, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get predecessor: %v", err)
+	}
+	if predecessor.State != common.RunStateSuperseded {
+		t.Fatalf("predecessor state = %s, want superseded", predecessor.State)
+	}
+	successorID := common.RunID("run-running-resolved-replan-replan-001")
+	successor, err := runRepo.Get(ctx, successorID)
+	if err != nil {
+		t.Fatalf("get successor: %v", err)
+	}
+	if successor.ExecutionContext == nil || successor.ExecutionContext["replanContinuation"] == nil {
+		t.Fatalf("successor execution context = %#v, want replan continuation", successor.ExecutionContext)
+	}
+}
+
 func TestRuntimeOrchestrator_BlockerAutoResumePolicyMatrix(t *testing.T) {
 	type expected struct {
 		err              error
@@ -9449,6 +9561,9 @@ func TestRuntimeRepairInputCarriesCoverageTargetsAndProgressAfterRepairContractF
 	required := mapFromValue(pkg["requiredOutput"])
 	if required["mustDeclareCoverageTargets"] != true {
 		t.Fatalf("repairActionPackage.requiredOutput = %+v, want mustDeclareCoverageTargets", required)
+	}
+	if targets := mapSliceFromValue(input["coverageTargetSet"]); len(targets) != 2 {
+		t.Fatalf("coverageTargetSet = %+v, want top-level DoD and Goal targets", input["coverageTargetSet"])
 	}
 	targets := mapSliceFromValue(pkg["coverageTargetSet"])
 	if len(targets) != 2 {

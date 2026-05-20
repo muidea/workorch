@@ -66,7 +66,7 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 	repos := buildRepositories(backend, dataRoot)
 
 	if eventHub == nil {
-		eventHub = events.NewMagicHub()
+		eventHub = events.NewMagicHubWithOwner("workorch/bootstrap")
 	}
 	fileModule := filemodule.New()
 	mustSetup("file", fileModule.Setup())

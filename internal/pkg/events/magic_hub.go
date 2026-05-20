@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,12 +17,14 @@ const (
 	defaultMagicHubUnsubscribeTimeout = 100 * time.Millisecond
 	wildcardTopic                     = "*"
 	magicWildcardTopic                = "/#"
+	defaultMagicHubOwner              = "workorch/events"
 )
 
 type MagicHub struct {
 	mu            sync.RWMutex
 	hub           magicevent.Hub
 	ownsHub       bool
+	owner         string
 	nextID        int
 	subscriptions map[int]magicSubscription
 	observers     map[string]*magicDispatchObserver
@@ -40,20 +43,29 @@ type magicDispatchObserver struct {
 }
 
 func NewMagicHub() *MagicHub {
-	return newMagicHub(magicevent.NewHub(defaultMagicHubCapacity), true)
+	return NewMagicHubWithOwner(defaultMagicHubOwner)
+}
+
+func NewMagicHubWithOwner(owner string) *MagicHub {
+	return newMagicHub(magicevent.NewHub(defaultMagicHubCapacity), true, owner)
 }
 
 func NewMagicHubWithHub(hub magicevent.Hub) *MagicHub {
-	if hub == nil {
-		return NewMagicHub()
-	}
-	return newMagicHub(hub, false)
+	return NewMagicHubWithHubOwner(hub, defaultMagicHubOwner)
 }
 
-func newMagicHub(hub magicevent.Hub, ownsHub bool) *MagicHub {
+func NewMagicHubWithHubOwner(hub magicevent.Hub, owner string) *MagicHub {
+	if hub == nil {
+		return NewMagicHubWithOwner(owner)
+	}
+	return newMagicHub(hub, false, owner)
+}
+
+func newMagicHub(hub magicevent.Hub, ownsHub bool, owner string) *MagicHub {
 	return &MagicHub{
 		hub:           hub,
 		ownsHub:       ownsHub,
+		owner:         normalizeMagicHubOwner(owner),
 		subscriptions: map[int]magicSubscription{},
 		observers:     map[string]*magicDispatchObserver{},
 	}
@@ -70,17 +82,12 @@ func (h *MagicHub) Publish(ctx context.Context, envelope Envelope) error {
 
 	h.mu.Lock()
 	h.published = append(h.published, cloneEnvelope(envelope))
-	hasSubscribers := h.hasSubscribersLocked(envelope.Topic)
 	h.mu.Unlock()
-
-	if !hasSubscribers {
-		return nil
-	}
 
 	ev := magicevent.NewEventWithContext(
 		envelope.Topic,
 		envelope.SourceModule,
-		envelope.Topic,
+		magicWildcardTopic,
 		magicevent.NewHeader(),
 		ctx,
 		cloneEnvelope(envelope),
@@ -88,6 +95,9 @@ func (h *MagicHub) Publish(ctx context.Context, envelope Envelope) error {
 	ev.BindLaneKey(envelope.Topic)
 	result := h.hub.Send(ev)
 	if result == nil {
+		return nil
+	}
+	if result.Error() != nil && strings.Contains(result.Error().Message, "missing observer") {
 		return nil
 	}
 	if data, resultErr := result.Get(); resultErr == nil {
@@ -110,17 +120,12 @@ func (h *MagicHub) PublishAsync(ctx context.Context, envelope Envelope) error {
 
 	h.mu.Lock()
 	h.published = append(h.published, cloneEnvelope(envelope))
-	hasSubscribers := h.hasSubscribersLocked(envelope.Topic)
 	h.mu.Unlock()
-
-	if !hasSubscribers {
-		return nil
-	}
 
 	ev := magicevent.NewEventWithContext(
 		envelope.Topic,
 		envelope.SourceModule,
-		envelope.Topic,
+		magicWildcardTopic,
 		magicevent.NewHeader(),
 		ctx,
 		cloneEnvelope(envelope),
@@ -141,7 +146,7 @@ func (h *MagicHub) Subscribe(topic string, handler Handler) func() {
 	h.nextID++
 	observer := h.observers[eventID]
 	if observer == nil {
-		observer = &magicDispatchObserver{id: eventID, handlers: map[int]Handler{}}
+		observer = &magicDispatchObserver{id: magicObserverID(h.owner, eventID), handlers: map[int]Handler{}}
 		h.observers[eventID] = observer
 		h.hub.Subscribe(eventID, observer)
 	}
@@ -200,15 +205,6 @@ func (h *MagicHub) Terminate() {
 		return
 	}
 	h.hub.Terminate()
-}
-
-func (h *MagicHub) hasSubscribersLocked(topic string) bool {
-	for _, subscription := range h.subscriptions {
-		if subscription.topic == topic || subscription.topic == wildcardTopic {
-			return true
-		}
-	}
-	return false
 }
 
 func (o *magicDispatchObserver) ID() string {
@@ -287,6 +283,44 @@ func magicEventID(topic string) string {
 		return magicWildcardTopic
 	}
 	return topic
+}
+
+func magicObserverID(owner string, eventID string) string {
+	owner = normalizeMagicHubOwner(owner)
+	if eventID == magicWildcardTopic {
+		return "/_workorch_observer/" + owner + "/all"
+	}
+	if !strings.HasPrefix(eventID, "/") {
+		eventID = "/" + eventID
+	}
+	return "/_workorch_observer/" + owner + "/" + strings.Trim(strings.TrimSpace(eventID), "/")
+}
+
+func normalizeMagicHubOwner(owner string) string {
+	owner = strings.Trim(strings.TrimSpace(owner), "/")
+	if owner == "" {
+		return defaultMagicHubOwner
+	}
+	parts := strings.FieldsFunc(owner, func(r rune) bool {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return false
+		case r >= 'A' && r <= 'Z':
+			return false
+		case r >= '0' && r <= '9':
+			return false
+		case r == '/', r == '-', r == '_', r == '.':
+			return false
+		default:
+			return true
+		}
+	})
+	owner = strings.Join(parts, "-")
+	owner = strings.Trim(owner, "/-_.")
+	if owner == "" {
+		return defaultMagicHubOwner
+	}
+	return owner
 }
 
 func prepareEnvelope(envelope Envelope) Envelope {

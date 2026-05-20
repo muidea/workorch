@@ -76,7 +76,7 @@ func (r *Runtime) Setup(eventHub event.Hub, _ task.BackgroundRoutine) *cd.Error 
 		return cd.NewError(cd.IllegalParam, "invalid argument: "+err.Error())
 	}
 	r.repositories = repositories
-	r.eventHub = workorchevents.NewMagicHubWithHub(eventHub)
+	r.eventHub = workorchevents.NewMagicHubWithHubOwner(eventHub, common.InitiatorID)
 	return nil
 }
 

@@ -133,6 +133,8 @@ Runtime repair / duplicate / replan 治理必须同时识别两类中立 scope�
 
 目标级 scope 不得跨越当前有效 artifact / graph root 窗口无限合并。若新的 state-changing graph、repair graph 或 successor root 已经重新写入同一 target，后续 build/test/verification 失败应优先按当前 graph root / recovery root 计算 repair budget；历史同 target 失败只能作为上下文证据和风险信号，不得直接耗尽新 artifact 版本的修复机会。
 
+若较晚的 completed step 在同一中立 scope 内已经给出最新成功证据，较早的 failed graph step 必须视为 superseded，不得继续作为 repair target 或重复触发 ticket；runtime 应优先使用最新成功证据校正 completion/repair 视图。
+
 外部能力依赖失败是例外中的中立子类：当 `mcp/tool_call` 或等价外部 capability 对同一 `failure class + target scope` 反复返回不可用、未找到、权限拒绝、配置缺失等确定性失败时，新的 graph root 或 loop 不应把该外部依赖预算重置为 0。runtime 应收敛到 rejected result、blocked_on_decision 或 replan，而不是继续要求 LLM 生成同一能力调用。是否换用其他能力、补充配置或继续重试，必须通过 capability/profile 或治理决策表达，core 不得内置具体服务名、工具名或业务 fallback。
 
 当失败签名不包含目标级 scope 时，runtime 不得臆造业务目标，也不得把无目标失败合并为同一预算；此时继续按完整失败签名、root step 或显式 lineage scope 收敛。
@@ -150,6 +152,8 @@ Runtime repair / duplicate / replan 治理必须同时识别两类中立 scope�
 - ticket reason 与 resolution payload。
 - 触发 replan 的 failure context，包括 failure class、failure signature、failure target scope、failed step id/kind、failed step output、最近 repair attempts 或可用摘要。
 - predecessor run 的中立过程证据摘要，包括 `processEvidenceTimeline` 与 `currentProgressDigest`。该摘要必须保留最近有效动作、最近失败、当前缺口和下一步要求，且每条 evidence 必须带 `sourceRef` / step ref。
+
+已 resolved 的 `replan` 决策是 run 级恢复信号。若 run 仍处于 `running` 且没有 active blocker，runtime resume 不得只检查当前 terminal step 是否直接绑定该 ticket；当 resolved replan ticket 绑定的 step 仍是当前 run 内的 failed step 时，即使后续存在同 lineage 的并行失败分支、provider retry 分支或辅助失败步骤，也必须创建 successor run 或显式终态化，不得保持 `running` 空转。
 
 Successor 的首个 LLM step 不应只知道“需要重规划”。它必须获得足够的失败证据来判断哪些产物可以保留、哪些路径已失败、哪些 contract 仍然必须继承。若 successor 被设为 state-changing repair continuation，则其初始输入必须继续携带 `stateChangingOutputRequired`、`repairObjective` 与对应 guidance；同时不得把历史 provider/model 等运行期动态绑定写入 successor 的恢复上下文。
 
@@ -503,6 +507,8 @@ Graph expansion limit assessment 是 assessment-only coverage correction 的一�
 
 Goal coverage 校验只应把可判定的叶子需求作为覆盖对象。Markdown 标题、分组项、以冒号结尾的父级目标项只用于组织上下文，不得作为必须单独满足的叶子需求。若 Goal 叶子需求与 DoD 项文字不完全一致，LLM 必须通过 `dodAssessment.goalCoverage` 显式建立 Goal requirement -> evidenceRefs 的映射；runtime 不应依赖领域语义硬编码进行推断。
 
+为避免格式差异造成误判，runtime 可以对 Goal / DoD 覆盖文本做中立归一化后再比较，例如去除 Markdown 装饰、标点、空白，并对长文本做保守近似匹配；但不得把完全不同的需求机械合并为同一项，也不得用这种近似匹配替代真实 evidenceRefs。
+
 Repair 输入必须尽量包含足以定向修复的当前证据：
 
 - `failedStepOutput`：当前失败的精简输出，包括 failure class / signature、error、reason、status、关键诊断和必要的 stdout/stderr 摘要。
@@ -539,6 +545,8 @@ Repair exhausted 后必须二选一：
 ## Runtime Capability Time Budget
 
 非 LLM runtime capability 的默认执行预算必须来自中立配置或 capability 自身声明，不得在 core runtime 中按业务领域、语言、框架或命令名称写死。`shell/command` 这类通用执行能力应提供可配置默认超时，并允许单个 step 通过结构化字段声明更长但有上限的预算。
+
+当 `shell/command` 通过 `sh -c` 执行的脚本显式依赖 `pipefail` 等 bash-only 语义时，runtime 可以在不改变步骤语义的前提下切换到兼容的 shell 执行器；该兼容必须是通用执行策略，不得以业务命令名或业务目录名做条件分支，并且应在 step output 中记录实际执行器以便追踪。
 
 默认预算用于避免普通长流程任务被过短固定值误杀；单步覆盖用于让 LLM 在严格收敛阶段为明确长耗时操作申请有限执行窗口。无论默认值还是单步覆盖，都必须是有界的，并在 step output 中记录实际 `timeoutMillis`，作为后续 repair / verification 的中立证据。
 
@@ -772,6 +780,8 @@ Runtime 在 provider request 前必须执行 context gate，并得到唯一处�
 | `replan_required` | 原计划 / repair path 已被证据证明不可继续，且需要 successor lineage | 创建 replan successor，携带 predecessor failure context |
 
 `contextBudget.integrityWarnings` 不能只是观测日志。若 warning 涉及 P0-P4 必要字段，例如 `protected_repair_action_target_snapshot_missing_after_context_budget`、Goal / DoD 压缩、requiredOutput 缺失、current failure 缺失、coverageTargetSet 缺失，context gate 必须选择 `read_required`、`fail_fast`、`blocker_required` 或 `replan_required` 之一。
+
+若 `coverageRepairRequired` 已由 missingDoDItems / missingGoalCoverage / missingDeliverableCoverage 触发，但 `coverageTargetSet` 因预算整形或输入整理暂时缺失，runtime 应先自动从现有缺口事实补齐中立 `coverageTargetSet` 再重试；只有当前输入里确实没有任何可辨认的 coverage 缺口事实时，才允许 `coverage_repair_required_without_coverage_target_set` 进入 fail-fast 或 blocker 流程。
 
 Repair / replan continuation 的过程证据缺失也属于 P0-P4 必要字段缺失。若 provider input 显示当前是 `runtimeRepairFollowUp`、`stateChangingOutputRequired`、`runtimeStage=repair` 或带有 `replanContinuation`，但 `processEvidenceTimeline` / `currentProgressDigest` 不存在，context gate 必须输出 `runtime_repair_process_evidence_missing` 并 fail-fast；该失败不能交给普通 state-changing repair 处理。
 

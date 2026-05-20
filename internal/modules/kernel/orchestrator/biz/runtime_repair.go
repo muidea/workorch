@@ -245,7 +245,7 @@ func (o *RuntimeOrchestrator) recoveryActionForFailedStep(ctx context.Context, r
 	if isLLMProviderRuntimeFailure(run, failedStep) {
 		return runtimeRecoveryActionFailRun
 	}
-	if runtimeContextIntegrityGateFailure(failedStep) {
+	if runtimeContextIntegrityGateFailure(failedStep) && !runtimeContextIntegrityGateCanRecoverWithCoverageTargets(failedStep) {
 		return runtimeRecoveryActionContextIntegrityBlocked
 	}
 	if o.shouldEscalateRuntimeRepairExhaustion(ctx, run, failedStep) {
@@ -479,7 +479,7 @@ func (o *RuntimeOrchestrator) shouldAttemptRuntimeRepair(ctx context.Context, ru
 	if terminalAssessmentOnlyDecisionContractFailure(failedStep) {
 		return false
 	}
-	if runtimeContextIntegrityGateFailure(failedStep) {
+	if runtimeContextIntegrityGateFailure(failedStep) && !runtimeContextIntegrityGateCanRecoverWithCoverageTargets(failedStep) {
 		return false
 	}
 	if o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= o.maxRuntimeRepairAttempts() {
@@ -2297,6 +2297,10 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if missingDoD := missingDoDItemsFromStep(failedStep); len(missingDoD) > 0 {
 		input["missingDoDItems"] = o.missingDoDItemsWithEvidenceCandidates(ctx, run, failedStep, missingDoD)
 	}
+	if missingDeliverableCoverage := missingDeliverableCoverageFromFailureOutput(failedStep.Output); len(missingDeliverableCoverage) > 0 &&
+		len(mapSliceFromValue(input["missingDeliverableCoverage"])) == 0 {
+		input["missingDeliverableCoverage"] = missingDeliverableCoverage
+	}
 	if inheritCoverageRepairContext(input, failedStep) {
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Preserve inherited coverage gaps from the previous repair attempt; a contract failure on the repair wrapper does not clear the original Goal/DoD/deliverable gaps.",
@@ -2375,6 +2379,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"If new verification evidence closes a specific Goal requirement, ensure the next dodAssessment cites that exact evidenceRef and goalRequirementId.",
 		)
 	}
+	ensureCoverageRepairTargetSet(input)
 	transientExecutionTimeout := runtimeRepairFailureIsTransientExecutionTimeout(failedStep, execErr)
 	if transientExecutionTimeout {
 		input["repairObjective"] = repairObjectiveTransientExecutionRetry
@@ -2684,6 +2689,12 @@ func inheritCoverageRepairContext(input map[string]any, failedStep *runModel.Ste
 		}
 		if failedOutput := mapFromValue(failedStep.Output["failedStepOutput"]); len(failedOutput) > 0 {
 			if values := mapSliceFromValue(failedOutput[key]); len(values) > 0 {
+				input[key] = cloneMapSlice(values)
+				inherited = true
+			}
+		}
+		if diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+			if values := mapSliceFromValue(diagnostics[key]); len(values) > 0 {
 				input[key] = cloneMapSlice(values)
 				inherited = true
 			}
@@ -3326,6 +3337,30 @@ func coverageTargetSetFromRepairInput(input map[string]any) []map[string]any {
 		ret = ret[:maxLLMContextSliceItems]
 	}
 	return ret
+}
+
+func ensureCoverageRepairTargetSet(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	targets := coverageTargetSetFromRepairInput(input)
+	if len(targets) == 0 {
+		return
+	}
+	input["coverageRepairRequired"] = true
+	input["coverageTargetSet"] = targets
+	if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
+		pkg["coverageRepairRequired"] = true
+		pkg["coverageTargetSet"] = targets
+		required := mapFromValue(pkg["requiredOutput"])
+		if len(required) == 0 {
+			required = map[string]any{}
+		}
+		required["mustDeclareCoverageTargets"] = true
+		required["coverageTargetMatchRule"] = "patch/apply coverageTargets must match one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+		pkg["requiredOutput"] = required
+		input["repairActionPackage"] = pkg
+	}
 }
 
 func repairActionTargetRefFromScope(scope string) string {
@@ -4247,6 +4282,30 @@ func runtimeContextIntegrityGateFailure(step *runModel.Step) bool {
 		stringFromMap(step.Output, "reason"),
 	}, " "))
 	return strings.Contains(text, "llm context gate")
+}
+
+func runtimeContextIntegrityGateCanRecoverWithCoverageTargets(step *runModel.Step) bool {
+	if step == nil || !runtimeContextIntegrityGateFailure(step) {
+		return false
+	}
+	reason := strings.TrimSpace(stringFromMap(mapFromValue(step.Output["contextBudget"]), "contextGateReason"))
+	if reason == "" {
+		reason = strings.ToLower(strings.Join([]string{
+			stringFromMap(step.Output, "error"),
+			stringFromMap(step.Output, "reason"),
+		}, " "))
+	}
+	if !strings.Contains(reason, "coverage_repair_required_without_coverage_target_set") &&
+		!strings.Contains(reason, "must_declare_coverage_targets_without_target_set") {
+		return false
+	}
+	probe := cloneStepPayload(step.Input)
+	if probe == nil {
+		probe = map[string]any{}
+	}
+	inheritCoverageRepairContext(probe, step)
+	ensureCoverageRepairTargetSet(probe)
+	return len(coverageTargetSetFromRepairInput(probe)) > 0
 }
 
 func doDVerificationEvidenceRepairRequired(failedStep *runModel.Step) bool {
