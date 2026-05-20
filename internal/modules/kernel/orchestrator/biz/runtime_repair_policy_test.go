@@ -182,9 +182,9 @@ func TestRuntimeRepairFollowUpStepInputIncludesFailureContext(t *testing.T) {
 	}
 }
 
-func TestShouldAttemptProviderRetryForLLMRepairGenerationFailure(t *testing.T) {
+func TestRuntimeContractViolationUsesRuntimeRepairInsteadOfProviderRetry(t *testing.T) {
 	ctx := context.Background()
-	runID := common.RunID("run-provider-retry-llm-repair-generation")
+	runID := common.RunID("run-runtime-repair-llm-contract-violation")
 	repo := memory.NewStepRepository()
 	orch := &RuntimeOrchestrator{
 		runtime: &stubRuntimeAdapter{},
@@ -207,8 +207,11 @@ func TestShouldAttemptProviderRetryForLLMRepairGenerationFailure(t *testing.T) {
 			"reason":              "invalid argument: executionGraph patch/apply input invalid: invalid argument: patch diff contains redacted runtime markers",
 		},
 	}
-	if !orch.shouldAttemptProviderRetry(ctx, run, failed) {
-		t.Fatalf("expected provider retry for retryable LLM repair-generation contract failure")
+	if orch.shouldAttemptProviderRetry(ctx, run, failed) {
+		t.Fatalf("expected runtime contract violation to avoid provider retry")
+	}
+	if action := orch.recoveryActionForFailedStep(ctx, run, failed); action != runtimeRecoveryActionRuntimeRepair {
+		t.Fatalf("recoveryActionForFailedStep = %s, want runtime_repair", action)
 	}
 }
 

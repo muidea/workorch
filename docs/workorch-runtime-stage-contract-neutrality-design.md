@@ -464,9 +464,11 @@ Shell / tool 调用不得被用来隐藏实际目标变更，再通过一个无�
 
 当失败 evidence 已经包含中立的资源形状冲突诊断时，repair 需要遵守“首要阻塞优先”合同。这里的中立诊断包括但不限于：line-ref 执行/验证错误、unresolved identifier、invalid attribute、shape mismatch、missing method、schema mismatch，以及其他明确指向当前目标资源无法通过基本执行或验证的结构性错误。runtime core 只能表达以下中立约束，不得写入具体语言框架、业务模型或供应商细节：
 - repairGuidance / provider prompt 必须要求 LLM 先修复这些已报告的首要阻塞，再处理格式整理、文案修饰或其他次要改进。
+- 当 `structuredFailureSignals` 中存在可追踪 `lineRefs`、`targetRefs` 或 identifier-shaped tokens 且触发资源形状冲突时，runtime 必须生成中立 `primaryDiagnosticRepair.required=true` 合同，并同步写入 `repairActionPackage.requiredOutput.mustAddressPrimaryDiagnostics=true`。该合同只包含 targetRef、lineRef、identifier、bounded diagnostic message 与通用 match rule，不得包含语言、框架、测试库或业务领域专名之外的推断。
+- LLM 返回 state-changing `patch/apply` 时，runtime 准入必须验证 patch 是否优先覆盖 `primaryDiagnosticRepair`：直接 patch 诊断 target 时，`unified_diff` 的 hunk 行区间必须覆盖诊断 lineRef 附近，或完整 `file_write` 必须基于当前 target snapshot 改变/移除诊断行；patch 相关目标时，必须声明 `relatedFailureTargets`，并通过 `primaryDiagnosticResolution` / `addressesFailureSignals` 或 patch 内容中的诊断 identifier 表明正在解除哪个主诊断。只修改同一文件的其他行、调整文案/断言/格式、补报告或执行无关 marker，不得满足该合同。
 - 若 `failureTargetRepairContext`、`patchRepairContext` 或 `repairActionPackage.targetSnapshots` 已提供当前目标快照，LLM 必须优先把目标与当前可见资源形状或契约形状对齐，而不是凭空发明新的名字、属性、入口或资源结构。
 - 若具体任务属于软件开发等领域，workspaceTemplate / soul 可以在领域层进一步细化“对齐现有类型、构造函数、配置结构、入口函数和测试入口”的要求；这些领域规则不得下沉到 core runtime 里。
-- 该规则只定义 repair 的排序与 grounding，不判断某个业务符号该叫什么、某个框架入口该怎么写，也不允许 core runtime 根据命令名、语言名或业务关键字生成特定修复方案。
+- 该规则只定义 repair 的排序、grounding 与准入，不判断某个业务符号该叫什么、某个框架入口该怎么写，也不允许 core runtime 根据命令名、语言名或业务关键字生成特定修复方案。
 
 失败产物上下文必须遵守“不可复用失败正文”约束。对于被拒绝的 LLM decision、schema-invalid 输出、失败 patch / edit 正文、stream partial output 或任何包含 runtime redaction marker 的片段，runtime 不应把原文再次放入 repair input；只能暴露中立诊断摘要，例如失败 stage、failureClass、error/reason、streamDiagnostics、llmUsage、rejectedExecutionGraph 摘要，以及当前 target snapshot / workspace manifest / patchRepairSuggestions。若 stream partial output 或 rejected graph 摘要中包含 redaction marker，runtime 必须记录 omitted 标记与不可复用原因，而不是保留可复制片段。该约束用于防止 LLM 复制 malformed JSON、过期 diff、脱敏片段或重复 rejected artifact；它不判断具体业务内容，只限制 runtime repair 的输入形态。
 
@@ -544,6 +546,7 @@ Provider retry / config blocker 的边界必须基于中立失败形态：
 - `auth or config`、`schema drift`、明确不支持的 provider operation、明确 client/config unavailable、4xx、缺失 provider / model / credential 等配置型失败，可以直接进入 provider/config blocker。
 - provider/config blocker 的 `attempts` 必须记录真实已失败 provider retry 次数，`maxAttempts` 才记录预算上限；不得在未实际重试时把 `attempts` 写成预算上限。
 - provider retry 不得消费或重置业务 repair/replan 预算；它只表示 runtime LLM provider 调用基础设施暂时未产生可用 LLM 输出。
+- LLM 已经返回可解析 decision，但 decision 因 runtime 输出合同或准入合同被拒绝时，不属于 provider transient failure。包括 `executionGraph patch/apply input invalid`、`patch describes a non-substantive state-change placeholder`、`scoped state-changing runtime repair requires bounded verification`、`strategyReassessment.required`、invalid decision/schema contract 等等价中立合同错误，必须继续进入 runtime repair / repair-of-repair / blocker 治理，并继承 `repairActionPackage`、target snapshot、current failure 与 stage contract。
 
 ### LLM 运行期动态绑定
 

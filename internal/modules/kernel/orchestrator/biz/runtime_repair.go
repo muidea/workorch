@@ -499,7 +499,7 @@ func (o *RuntimeOrchestrator) shouldAttemptProviderRetry(ctx context.Context, ru
 	if isRetryableLLMProviderRuntimeFailure(run, failedStep) {
 		return true
 	}
-	return isRetryableLLMRepairGenerationFailure(run, failedStep)
+	return false
 }
 
 func (o *RuntimeOrchestrator) shouldBlockOnProviderRetryExhaustion(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
@@ -853,39 +853,6 @@ func isLLMProviderRuntimeFailure(run *runModel.Run, step *runModel.Step) bool {
 		return false
 	}
 	return isLLMProviderFailureStage(stringFromMap(step.Output, "stage"))
-}
-
-func isRetryableLLMRepairGenerationFailure(run *runModel.Run, step *runModel.Step) bool {
-	if run == nil || step == nil || step.Kind != initialStepKind(run) {
-		return false
-	}
-	class := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass))
-	if class != failureClassRuntime && class != failureClassLLMDecisionInvalid && class != failureClassPatchApply {
-		return false
-	}
-	stage := strings.ToLower(strings.TrimSpace(stringFromMap(step.Output, "stage")))
-	if stage != "llm_execution_graph_plan" && stage != "llm_schema_invalid" && stage != "llm_decision_invalid" && stage != "patch_dispatch_invalid" {
-		return false
-	}
-	reason := strings.ToLower(strings.TrimSpace(strings.Join([]string{
-		stringFromMap(step.Output, "error"),
-		stringFromMap(step.Output, "reason"),
-	}, " ")))
-	if reason == "" {
-		return false
-	}
-	for _, marker := range []string{
-		"executiongraph patch/apply input invalid",
-		"patch diff contains redacted runtime markers",
-		"patch content contains redacted runtime markers",
-		"invalid llm decision json",
-		"unified diff hunk header must include explicit line ranges",
-	} {
-		if strings.Contains(reason, marker) {
-			return true
-		}
-	}
-	return false
 }
 
 func (o *RuntimeOrchestrator) runtimeRepairAttemptCount(ctx context.Context, runID common.RunID) int {
@@ -2442,6 +2409,9 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"Do not treat identifier-like tokens in failure text as proof that a named element should be invented; ground every referenced name in current resources or introduce it explicitly in the same patch.",
 		)
 		if structuredFailureSignalsContainShapeConflict(signals) {
+			if primary := primaryDiagnosticRepairContractFromSignals(signals); len(primary) > 0 {
+				input["primaryDiagnosticRepair"] = primary
+			}
 			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 				"Prioritize the primary diagnostics from structuredFailureSignals before secondary cleanup: fix reported unresolved names, invalid attributes, shape mismatches, contract-entry mismatches, and line-referenced target errors first.",
 				"When diagnostics identify a concrete target snapshot, reconcile that target with current visible resource or contract shape before changing secondary validation details, evidence wording, or unrelated quality improvements.",
@@ -2741,6 +2711,61 @@ func structuredFailureSignalsContainShapeConflict(signals map[string]any) bool {
 	return false
 }
 
+func primaryDiagnosticRepairContractFromSignals(signals map[string]any) map[string]any {
+	if len(signals) == 0 || !structuredFailureSignalsContainShapeConflict(signals) {
+		return nil
+	}
+	lineRefs := mapSliceFromValue(signals["lineRefs"])
+	targetRefs := primaryDiagnosticTargetRefs(signals, lineRefs)
+	identifiers := stringSliceFromValue(signals["identifiers"])
+	messages := stringSliceFromValue(signals["messages"])
+	if len(lineRefs) == 0 && len(targetRefs) == 0 && len(identifiers) == 0 {
+		return nil
+	}
+	ret := map[string]any{
+		"required": true,
+		"reason":   "line_or_shape_diagnostic_blocks_current_validation",
+		"requirements": []string{
+			"address line-referenced resource shape blockers before secondary changes",
+			"patch the diagnostic target lines or declare a matching primaryDiagnosticResolution/addressesFailureSignals contract",
+			"when patching a related target, declare relatedFailureTargets and reference the diagnostic identifiers or line refs being unblocked",
+		},
+	}
+	if len(targetRefs) > 0 {
+		ret["targetRefs"] = targetRefs
+	}
+	if len(lineRefs) > 0 {
+		ret["lineRefs"] = lineRefs
+	}
+	if len(identifiers) > 0 {
+		ret["identifiers"] = limitedStrings(compactUniqueStrings(identifiers), maxLLMContextSliceItems)
+	}
+	if len(messages) > 0 {
+		ret["messages"] = limitedStrings(compactUniqueStrings(messages), 5)
+	}
+	return ret
+}
+
+func primaryDiagnosticTargetRefs(signals map[string]any, lineRefs []map[string]any) []string {
+	seen := map[string]bool{}
+	var ret []string
+	add := func(value string) {
+		value = normalizeStructuredFailureTargetRef(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	for _, ref := range lineRefs {
+		add(stringFromMap(ref, "targetRef"))
+	}
+	for _, value := range stringSliceFromValue(signals["targetRefs"]) {
+		add(value)
+	}
+	return limitedStrings(ret, maxLLMContextSliceItems)
+}
+
 func textContainsShapeConflictDiagnostic(text string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(text))
 	if normalized == "" {
@@ -2935,6 +2960,17 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	} else if len(rawFailedOutput) > 0 && len(rawFailedOutput[0]) > 0 {
 		if signals := structuredFailureSignalsFromFailureOutput(rawFailedOutput[0], nil, "", ""); len(signals) > 0 {
 			pkg["structuredFailureSignals"] = compactStructuredFailureSignalsForRepairActionPackage(signals)
+		}
+	}
+	if primary := mapFromValue(input["primaryDiagnosticRepair"]); len(primary) > 0 {
+		pkg["primaryDiagnosticRepair"] = compactLLMContextMap(primary, 1)
+		requiredOutput["mustAddressPrimaryDiagnostics"] = true
+		requiredOutput["primaryDiagnosticMatchRule"] = "state-changing patch/apply must address line-referenced target diagnostics, or declare matching primaryDiagnosticResolution/addressesFailureSignals with relatedFailureTargets for a related target"
+	} else if signals := mapFromValue(pkg["structuredFailureSignals"]); len(signals) > 0 {
+		if primary := primaryDiagnosticRepairContractFromSignals(signals); len(primary) > 0 {
+			pkg["primaryDiagnosticRepair"] = compactLLMContextMap(primary, 1)
+			requiredOutput["mustAddressPrimaryDiagnostics"] = true
+			requiredOutput["primaryDiagnosticMatchRule"] = "state-changing patch/apply must address line-referenced target diagnostics, or declare matching primaryDiagnosticResolution/addressesFailureSignals with relatedFailureTargets for a related target"
 		}
 	}
 	if forbidden := forbiddenRepairContentReuseFromFailure(input, rawFailedOutput...); len(forbidden) > 0 {

@@ -16095,10 +16095,11 @@ func TestRuntimeOrchestrator_InvalidPatchGraphTargetRefRoutesToRuntimeRepair(t *
 		t.Fatalf("run state = %s failureReason=%q, want completed", runItem.State, runItem.FailureReason)
 	}
 	if repairInput == nil ||
-		repairInput[stepInputKeyProviderRetryFollowUp] != true ||
+		repairInput[stepInputKeyRuntimeRepairFollowUp] != true ||
+		repairInput[stepInputKeyProviderRetryFollowUp] == true ||
 		repairInput["repairObjective"] != "produce_state_changing_output" ||
 		repairInput["stateChangingOutputRequired"] != true {
-		t.Fatalf("repairInput = %+v, want provider retry carrying state-changing repair contract", repairInput)
+		t.Fatalf("repairInput = %+v, want runtime repair carrying state-changing repair contract", repairInput)
 	}
 	if !strings.Contains(fmt.Sprint(repairInput["failureReason"]), "patch targetRef is required") {
 		t.Fatalf("repair failureReason = %v, want targetRef-specific reason", repairInput["failureReason"])
