@@ -3139,7 +3139,9 @@ func coverageGapStateChangingRepairRequired(step *runModel.Step) bool {
 		!repairObjectiveRequiresStateChange(stringFromMap(step.Input, "repairObjective")) {
 		return false
 	}
-	return len(mapSliceFromValue(step.Input["missingDoDItems"])) > 0 || len(missingGoalCoverageFromInput(step.Input)) > 0
+	return len(mapSliceFromValue(step.Input["missingDoDItems"])) > 0 ||
+		len(missingGoalCoverageFromInput(step.Input)) > 0 ||
+		len(mapSliceFromValue(step.Input["missingDeliverableCoverage"])) > 0
 }
 
 func coverageGapRepairTargetTokens(step *runModel.Step) []string {
@@ -3165,6 +3167,15 @@ func coverageGapRepairTargetTokens(step *runModel.Step) []string {
 			stringFromMap(item, "item"),
 			missingGoalCoverageRequirementText(item),
 		))
+		add(missingGoalCoverageRequirementText(item))
+	}
+	for _, item := range mapSliceFromValue(step.Input["missingDeliverableCoverage"]) {
+		add(firstNonEmptyString(
+			stringFromMap(item, "item"),
+			stringFromMap(item, "id"),
+			stringFromMap(item, "expectationId"),
+			stringFromMap(item, "requirement"),
+		))
 	}
 	return ret
 }
@@ -3173,7 +3184,7 @@ func patchNodeDeclaresCoverageTargets(input map[string]any, allowed []string) bo
 	if len(input) == 0 || len(allowed) == 0 {
 		return false
 	}
-	for _, value := range stringSliceFromValue(input["coverageTargets"]) {
+	for _, value := range patchNodeCoverageTargetTokens(input) {
 		value = normalizeCoverageGapRepairToken(value)
 		if value == "" {
 			continue
@@ -3185,6 +3196,50 @@ func patchNodeDeclaresCoverageTargets(input map[string]any, allowed []string) bo
 		}
 	}
 	return false
+}
+
+func patchNodeCoverageTargetTokens(input map[string]any) []string {
+	if len(input) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := make([]string, 0)
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		key := normalizeCoverageGapRepairToken(value)
+		if key == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		ret = append(ret, value)
+	}
+	addValue := func(value any) {
+		for _, text := range stringSliceFromValue(value) {
+			add(text)
+		}
+		for _, item := range mapSliceFromValue(value) {
+			for _, key := range []string{
+				"coverageTargetToken",
+				"goalRequirementId",
+				"targetText",
+				"item",
+				"raw",
+				"requirement",
+				"goal",
+				"goalItem",
+				"id",
+				"expectationId",
+			} {
+				add(stringFromMap(item, key))
+			}
+		}
+	}
+	addValue(input["coverageTargets"])
+	addValue(input["coverageTargetSet"])
+	return ret
 }
 
 func normalizeCoverageGapRepairToken(value string) string {

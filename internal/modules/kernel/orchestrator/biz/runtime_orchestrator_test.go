@@ -16021,6 +16021,94 @@ func TestValidateLLMExecutionOutputContractRejectsCoverageGapPatchWithUnmatchedC
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsCoverageGapPatchWithStructuredCoverageTargets(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-structured-coverage-target",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-structured-coverage-target/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"missingDoDItems": []map[string]any{
+				{"item": "streaming responses must be delivered incrementally", "state": "failed"},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "repair-main",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "file_write",
+					"targetRef": "main.go",
+					"content":   "package main\n",
+					"coverageTargets": []map[string]any{{
+						"kind": "dod",
+						"item": "streaming responses must be delivered incrementally",
+					}},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want structured coverage target allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsGoalCoverageObjectByTextWhenIdExists(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-goal-coverage-object-target",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-goal-coverage-object-target/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"missingGoalCoverage": []map[string]any{
+				{"goalRequirementId": "goal-req-001-neutral", "item": "support transparent gateway forwarding", "state": "failed"},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "repair-main",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "file_write",
+					"targetRef": "main.go",
+					"content":   "package main\n",
+					"coverageTargets": []map[string]any{{
+						"kind":       "goal",
+						"targetText": "support transparent gateway forwarding",
+					}},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want goal coverage text target allowed", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsGoalCoverageRawTarget(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-repair-coverage-raw-target",
