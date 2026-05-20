@@ -181,6 +181,25 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("runtime exports: %v", err)
+	}
+	for id, createdAt := range map[string]string{
+		first.BlockingTicketID:  "2026-05-20T00:00:00Z",
+		second.BlockingTicketID: "2026-05-20T00:01:00Z",
+	} {
+		ticket, err := exports.Repositories.Tickets.Get(ctx, common.TicketID(id))
+		if err != nil {
+			t.Fatalf("get ticket %s: %v", id, err)
+		}
+		ticket.CreatedAt = createdAt
+		ticket.UpdatedAt = createdAt
+		if err := exports.Repositories.Tickets.Update(ctx, ticket); err != nil {
+			t.Fatalf("update ticket %s: %v", id, err)
+		}
+	}
 
 	page, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, DecisionQuery{
 		Limit: 1,
@@ -188,11 +207,11 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDecisionPageWithBackend: %v", err)
 	}
-	if len(page.Decisions) != 1 || page.Decisions[0].ID != first.BlockingTicketID {
-		t.Fatalf("page decisions = %+v, want first ticket", page.Decisions)
+	if len(page.Decisions) != 1 || page.Decisions[0].ID != second.BlockingTicketID || page.Decisions[0].State != string(common.DecisionTicketStateOpen) {
+		t.Fatalf("page decisions = %+v, want open second ticket first", page.Decisions)
 	}
-	if !page.HasMore || page.NextCursorAfterID != first.BlockingTicketID {
-		t.Fatalf("page cursor = %+v, want hasMore with first cursor", page)
+	if !page.HasMore || page.NextCursorAfterID != second.BlockingTicketID {
+		t.Fatalf("page cursor = %+v, want hasMore with second cursor", page)
 	}
 	if page.Decisions[0].Context != nil || page.Decisions[0].ResolutionPayload != nil {
 		t.Fatalf("projected decision carries large payloads: %+v", page.Decisions[0])
@@ -205,8 +224,8 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDecisionPageWithBackend next: %v", err)
 	}
-	if len(next.Decisions) != 1 || next.Decisions[0].ID != second.BlockingTicketID || next.HasMore {
-		t.Fatalf("next page = %+v, want second ticket without more", next)
+	if len(next.Decisions) != 1 || next.Decisions[0].ID != first.BlockingTicketID || next.HasMore {
+		t.Fatalf("next page = %+v, want resolved first ticket without more", next)
 	}
 
 	detail, err := ReadDecisionWithBackend(context.Background(), "file", dataRoot, first.BlockingTicketID)

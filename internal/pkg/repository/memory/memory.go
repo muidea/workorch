@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	approval "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decision "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -1438,6 +1439,13 @@ func (r *DecisionTicketRepository) Create(_ context.Context, item *decision.Tick
 	if _, ok := r.items[item.ID]; ok {
 		return common.ErrConflict
 	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if strings.TrimSpace(item.CreatedAt) == "" {
+		item.CreatedAt = now
+	}
+	if strings.TrimSpace(item.UpdatedAt) == "" {
+		item.UpdatedAt = item.CreatedAt
+	}
 	r.items[item.ID] = cloneDecisionTicket(item)
 	return nil
 }
@@ -1513,6 +1521,10 @@ func (r *DecisionTicketRepository) Update(_ context.Context, item *decision.Tick
 	if _, ok := r.items[item.ID]; !ok {
 		return common.ErrNotFound
 	}
+	if strings.TrimSpace(item.CreatedAt) == "" {
+		item.CreatedAt = r.items[item.ID].CreatedAt
+	}
+	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	r.items[item.ID] = cloneDecisionTicket(item)
 	return nil
 }
@@ -1582,6 +1594,13 @@ func (r *ApprovalRepository) Create(_ context.Context, item *approval.Approval) 
 	defer r.mu.Unlock()
 	if _, ok := r.items[item.ID]; ok {
 		return common.ErrConflict
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if strings.TrimSpace(item.CreatedAt) == "" {
+		item.CreatedAt = now
+	}
+	if strings.TrimSpace(item.UpdatedAt) == "" {
+		item.UpdatedAt = item.CreatedAt
 	}
 	cloned := cloneApproval(item)
 	r.items[item.ID] = &cloned
@@ -1663,6 +1682,10 @@ func (r *ApprovalRepository) Update(_ context.Context, item *approval.Approval) 
 	if _, ok := r.items[item.ID]; !ok {
 		return common.ErrNotFound
 	}
+	if strings.TrimSpace(item.CreatedAt) == "" {
+		item.CreatedAt = r.items[item.ID].CreatedAt
+	}
+	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	cloned := cloneApproval(item)
 	r.items[item.ID] = &cloned
 	return nil

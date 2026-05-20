@@ -17060,7 +17060,7 @@ func TestValidateLLMExecutionOutputContractRejectsReplanContinuationRepeatedFail
 	}
 }
 
-func TestValidateLLMExecutionOutputContractRejectsUnboundedVerificationForScopedStateChangingRepairWithoutStrategyReassessment(t *testing.T) {
+func TestValidateLLMExecutionOutputContractAllowsPatchScopedVerificationForScopedStateChangingRepair(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-scoped-repair-unbounded-verification-without-reassessment",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
@@ -17099,6 +17099,53 @@ func TestValidateLLMExecutionOutputContractRejectsUnboundedVerificationForScoped
 					"id":        "verify-all",
 					"kind":      "shell/command",
 					"dependsOn": []string{"patch-target-test"},
+					"input": map[string]any{
+						"command": "go",
+						"args":    []string{"test", "./..."},
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want patch-scoped verification accepted", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsUnboundedVerificationForScopedStateChangingRepairWithoutScopeLink(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-unbounded-verification-without-scope-link",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-unbounded-verification-without-scope-link/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failureTargetScope":              "failureTargets=gateway_dod_additional_paths_test.go",
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-target-test",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef": "gateway_dod_additional_paths_test.go",
+						"patchType": "unified_diff",
+						"diff":      "--- a/gateway_dod_additional_paths_test.go\n+++ b/gateway_dod_additional_paths_test.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+					},
+				},
+				{
+					"id":   "verify-all",
+					"kind": "shell/command",
 					"input": map[string]any{
 						"command": "go",
 						"args":    []string{"test", "./..."},

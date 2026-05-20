@@ -3810,6 +3810,7 @@ func pageDecisionTickets(items []*decisionmodel.Ticket, query DecisionQuery) ([]
 	if limit > readModelMaxDecisionPageLimit {
 		limit = readModelMaxDecisionPageLimit
 	}
+	items = orderedDecisionTicketsForGovernancePage(items)
 	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
 	started := cursorAfterID == ""
 	selected := make([]*decisionmodel.Ticket, 0, min(limit, len(items)))
@@ -3837,6 +3838,25 @@ func pageDecisionTickets(items []*decisionmodel.Ticket, query DecisionQuery) ([]
 	return selected, limit, cursorAfterID, nextCursor, hasMore
 }
 
+func orderedDecisionTicketsForGovernancePage(items []*decisionmodel.Ticket) []*decisionmodel.Ticket {
+	ordered := append([]*decisionmodel.Ticket(nil), items...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left, right := ordered[i], ordered[j]
+		if left == nil || right == nil {
+			return right != nil
+		}
+		leftCreated := strings.TrimSpace(left.CreatedAt)
+		rightCreated := strings.TrimSpace(right.CreatedAt)
+		if leftCreated != "" || rightCreated != "" {
+			if leftCreated != rightCreated {
+				return leftCreated > rightCreated
+			}
+		}
+		return string(left.ID) > string(right.ID)
+	})
+	return ordered
+}
+
 func projectDecisionView(item Decision) Decision {
 	return Decision{
 		ID:             item.ID,
@@ -3850,6 +3870,8 @@ func projectDecisionView(item Decision) Decision {
 		ResolutionID:   item.ResolutionID,
 		ResolutionType: item.ResolutionType,
 		AutoGovernance: item.AutoGovernance,
+		CreatedAt:      item.CreatedAt,
+		UpdatedAt:      item.UpdatedAt,
 	}
 }
 
@@ -3861,6 +3883,7 @@ func pageApprovals(items []*approvalmodel.Approval, query ApprovalQuery) ([]*app
 	if limit > readModelMaxApprovalPageLimit {
 		limit = readModelMaxApprovalPageLimit
 	}
+	items = orderedApprovalsForGovernancePage(items)
 	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
 	started := cursorAfterID == ""
 	selected := make([]*approvalmodel.Approval, 0, min(limit, len(items)))
@@ -3888,6 +3911,25 @@ func pageApprovals(items []*approvalmodel.Approval, query ApprovalQuery) ([]*app
 	return selected, limit, cursorAfterID, nextCursor, hasMore
 }
 
+func orderedApprovalsForGovernancePage(items []*approvalmodel.Approval) []*approvalmodel.Approval {
+	ordered := append([]*approvalmodel.Approval(nil), items...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left, right := ordered[i], ordered[j]
+		if left == nil || right == nil {
+			return right != nil
+		}
+		leftCreated := strings.TrimSpace(left.CreatedAt)
+		rightCreated := strings.TrimSpace(right.CreatedAt)
+		if leftCreated != "" || rightCreated != "" {
+			if leftCreated != rightCreated {
+				return leftCreated > rightCreated
+			}
+		}
+		return string(left.ID) > string(right.ID)
+	})
+	return ordered
+}
+
 func projectApprovalView(item Approval) Approval {
 	return Approval{
 		ID:             item.ID,
@@ -3898,6 +3940,8 @@ func projectApprovalView(item Approval) Approval {
 		Action:         item.Action,
 		State:          item.State,
 		AutoGovernance: item.AutoGovernance,
+		CreatedAt:      item.CreatedAt,
+		UpdatedAt:      item.UpdatedAt,
 	}
 }
 

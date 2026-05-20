@@ -149,10 +149,13 @@ Runtime repair / duplicate / replan 治理必须同时识别两类中立 scope�
 - 触发 replan 的 ticket / resolution 引用。
 - ticket reason 与 resolution payload。
 - 触发 replan 的 failure context，包括 failure class、failure signature、failure target scope、failed step id/kind、failed step output、最近 repair attempts 或可用摘要。
+- predecessor run 的中立过程证据摘要，包括 `processEvidenceTimeline` 与 `currentProgressDigest`。该摘要必须保留最近有效动作、最近失败、当前缺口和下一步要求，且每条 evidence 必须带 `sourceRef` / step ref。
 
 Successor 的首个 LLM step 不应只知道“需要重规划”。它必须获得足够的失败证据来判断哪些产物可以保留、哪些路径已失败、哪些 contract 仍然必须继承。若 successor 被设为 state-changing repair continuation，则其初始输入必须继续携带 `stateChangingOutputRequired`、`repairObjective` 与对应 guidance；同时不得把历史 provider/model 等运行期动态绑定写入 successor 的恢复上下文。
 
-`governanceHistory`、`replanContinuation.failureContext`、`replanContinuation.ticketContext` 必须是 summary/ref-only lineage。允许保留 failure class、signature、target scope、failed step id/kind、attempts、recovery policy、failed step output summary、target snapshot metadata、ticket/resolution refs 与人工决议摘要；禁止携带 `failedStepInput`、完整 `executionContext`、完整 `executionGraph.nodes[].input.diff/content`、raw LLM stream、raw preview、provider/model 动态绑定、target snapshot `content`。若需要完整证据，必须通过 step/tool/LLM raw ref 按需读取。该规则是核心中立约束：它只约束运行态数据形态，不得引入具体应用领域判断。
+若 successor run 刚创建、当前 run 尚无 completed / failed step，`executionContextPackage` 必须从 `replanContinuation` 继承 predecessor 的 `processEvidenceTimeline` / `currentProgressDigest`。不得因为 successor run 本地历史为空，就把首个 repair LLM step 降级为无过程证据的普通重新规划。
+
+`governanceHistory`、`replanContinuation.failureContext`、`replanContinuation.ticketContext`、`replanContinuation.processEvidenceTimeline` 必须是 summary/ref-only lineage。允许保留 failure class、signature、target scope、failed step id/kind、attempts、recovery policy、failed step output summary、target snapshot metadata、ticket/resolution refs、人工决议摘要与过程证据摘要；禁止携带 `failedStepInput`、完整 `executionContext`、完整 `executionGraph.nodes[].input.diff/content`、raw LLM stream、raw preview、provider/model 动态绑定、target snapshot `content`。若需要完整证据，必须通过 step/tool/LLM raw ref 按需读取。该规则是核心中立约束：它只约束运行态数据形态，不得引入具体应用领域判断。
 
 ### Rejected Result Continuation
 
@@ -286,6 +289,8 @@ LLM 输出 `executionGraph` 时，runtime 必须按当前 Soul 绑定阶段解�
 当 execution graph 以并行 batch 方式调度时，batch 完成后的续跑必须以本批次所属 graph root / lineage 为锚点计算 dependency-satisfied 节点，不得用 run 内全局“最新 completed graph step”推断当前 graph。全局最新节点可能属于其他 repair、replan 或历史 graph scope；runtime 必须按当前批次 root 继续推进，直到该 graph scope 内没有可执行节点，再进入 follow-up / verification / acceptance。
 
 当 state-changing 输出依赖具体 runtime capability 时，prompt / tool schema / repair guidance 必须明确该 capability 的中立能力边界。若某个 state-changing capability 只支持有限操作，LLM 不得用未声明语义伪造操作。例如某能力只支持“写入完整内容”和“应用 diff”时，不得把“空内容写入”解释为删除。Runtime 必须拒绝不满足 capability contract 的输出，并把拒绝原因作为下一轮 repair evidence；prompt 层也必须把该约束暴露给 LLM，减少重复输出必然失败的 artifact。
+
+`unified_diff` 是通用 patch capability，不属于软件开发专用能力。其 hunk 必须包含显式行号范围，例如 `@@ -12,3 +12,4 @@`；裸 `@@` hunk 属于 capability contract violation。若 LLM 无法确定行号，必须选择安全的替代状态变更表达：基于完整安全快照的 `file_write + baseHash`、精确 `oldText/newText` 编辑、先读取目标，或返回 failed assessment / blocker。Runtime prompt、repair guidance 和 dispatch 校验必须共同表达该规则。
 
 能力边界属于 runtime capability contract，不属于业务领域规则。Core 可以声明“某 capability 不支持 delete、content 不能为空、diff 必须完整”等中立能力事实；但不能据此推断某个业务文件是否应该删除、保留或重命名。
 
@@ -436,6 +441,8 @@ Repair 不是重新探索。Repair 必须继承来源阶段的约束，并根据
 Runtime repair 预算必须来自 runtime 配置，默认 `maxRuntimeRepairAttempts=10`；不得在 core runtime 分支中写死固定次数。repair 输入、repair exhausted ticket、auto-resume / auto-replan 判断、duplicate failure 判断和 `repairActionPackage.maxRuntimeRepairAttempts` 必须使用同一份归一化预算。Provider retry 预算与 runtime repair 预算互相独立，provider retry 不得消费 runtime repair 次数。
 
 State-changing repair 必须满足目标相关性约束。若 repair 输入已经包含 `failureTargetScope`、`failureTargetRepairContext`、`patchRepairContext`、`repairActionPackage.targetSnapshots` 或等价的显式 `targetRef`，则 `patch/apply` 只有在目标属于这些失败目标、当前目标快照或明确 repair 目标时，才算有效 state-changing artifact。写入无关 marker、空转文件、报告文件或与失败目标无关的 no-op patch，不得满足 state-changing repair 合同；runtime 必须将其作为 contract violation 重新进入 repair / blocker / rejected 治理。
+
+Scoped repair 允许在 state-changing artifact 后追加验证，但验证必须能被 runtime 识别为 bounded。满足任一条件即可视为 bounded verification：`shell/command` 输入显式声明 `targetRef`、`relatedFailureTargets`、`verificationScope` 或 `boundedReason`；或该验证节点依赖一个直接命中当前 failure target / repair target 的 `patch/apply` 节点。若验证命令宽泛且既无显式 scope，也不依赖命中失败目标的 patch，runtime 必须拒绝并要求补 scope 或返回 failed assessment / blocker。该规则只约束“验证与当前失败目标的可追踪关系”，不得硬编码命令、语言、测试框架或业务类型。
 
 该约束属于 core runtime 的中立合同，只比较结构化目标引用、target snapshot 和 capability input，不解释文件类型、测试框架、编程语言或业务正确性。Core 可以判断“patch target 与失败目标不相关”，但不能判断“某个业务文件应如何修改”。当没有任何显式目标引用时，runtime 不得臆造目标；此时只能依赖 capability contract、LLM 输出和后续 evidence 判断。
 
@@ -724,6 +731,7 @@ WorkOrch 因此必须在 stage input bundle 中形成中立 `processEvidenceTime
 - 最近 state-changing action、最近 validation、最近 failure、最近 accepted / rejected assessment 必须优先保留。
 - 超预算时可以摘要较早 timeline，但必须保留 source refs、state、failureClass、evidenceRefs 和 omitted reason。
 - P0/P1 必要过程证据缺失时不得静默提交 provider；必须由 context gate 选择 `read_required`、`blocker_required`、`fail_fast` 或 `replan_required`。
+- `repair`、state-changing continuation、带 `replanContinuation` 的 successor step 若缺少 `processEvidenceTimeline` 或 `currentProgressDigest`，属于上下文完整性失败。Runtime 必须在 provider 前 fail-fast 或先补齐读取/继承，不得让 LLM 在缺失最近过程证据时继续生成 state-changing 输出。
 - timeline 不得包含完整旧 execution graph、完整旧 provider request、raw stream 或 provider/model/baseURL 动态绑定。
 
 Codex 中的软件开发行为只能作为 profile / workspaceTemplate / soul / skill 的输入约束吸收，例如“先读已有资源再改”“优先沿用当前工作区风格”“验证失败后根据失败证据修正产物”“避免无关变更”。这些规则不得进入 core runtime；core 只校验它们是否被 profile 声明、是否进入当前能力边界、是否产生可追踪 evidence。
@@ -764,6 +772,8 @@ Runtime 在 provider request 前必须执行 context gate，并得到唯一处�
 | `replan_required` | 原计划 / repair path 已被证据证明不可继续，且需要 successor lineage | 创建 replan successor，携带 predecessor failure context |
 
 `contextBudget.integrityWarnings` 不能只是观测日志。若 warning 涉及 P0-P4 必要字段，例如 `protected_repair_action_target_snapshot_missing_after_context_budget`、Goal / DoD 压缩、requiredOutput 缺失、current failure 缺失、coverageTargetSet 缺失，context gate 必须选择 `read_required`、`fail_fast`、`blocker_required` 或 `replan_required` 之一。
+
+Repair / replan continuation 的过程证据缺失也属于 P0-P4 必要字段缺失。若 provider input 显示当前是 `runtimeRepairFollowUp`、`stateChangingOutputRequired`、`runtimeStage=repair` 或带有 `replanContinuation`，但 `processEvidenceTimeline` / `currentProgressDigest` 不存在，context gate 必须输出 `runtime_repair_process_evidence_missing` 并 fail-fast；该失败不能交给普通 state-changing repair 处理。
 
 `protected_repair_action_target_snapshot_missing_after_context_budget` 只能在原始 provider input 已包含可安全写入的 `repairActionPackage.targetSnapshots`，但预算处理后丢失时触发。`repairActionPackage.requiredOutput`、`coverageTargetSet`、`currentExecutionProgress` 等受保护合同字段不能被误判为 target snapshot 要求；否则会把“无目标快照需求”的普通 repair 合同错误转成 `read_required`。
 
@@ -970,6 +980,10 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
   - 已将 Codex 长流程上下文管理中可中立借鉴的内容并入本文：核心只吸收分层上下文、过程证据 timeline、失败输出保留、raw payload ref、request audit 与 profile 边界，不吸收 Codex 私有 schema、隐藏 reasoning、工具名或软件开发专用流程。
   - 新增并完成 STG-09 首批代码收口：LLM step input / `executionContextPackage` 会在严格收敛、repair、verification、acceptance、replan 等需要过程证据的阶段注入中立 `processEvidenceTimeline` 与 `currentProgressDigest`；timeline 按 runtime step 顺序表达已有输出、最近动作、验证失败、当前缺口和下一步要求，并且每条记录具备 `sourceRef` / `payloadRef`。
   - Provider context budget 已将 `processEvidenceTimeline` 与 `currentProgressDigest` 纳入 P2 保留与 source refs 审计。初始 planning 与普通 decision / approval follow-up 不额外读取 step history，避免为上下文增强引入无意义启动开销。
+  - Replan successor 已开始继承 predecessor 的 `processEvidenceTimeline` / `currentProgressDigest`，并在 successor 当前 run 尚无历史步骤时从 `replanContinuation` 回填到 `executionContextPackage` 和顶层 LLM input。
+  - Provider context gate 已将 repair / state-changing continuation / replan continuation 的过程证据缺失升级为 `runtime_repair_process_evidence_missing` fail-fast，避免继续向 LLM 提交缺少最近过程证据的 state-changing repair 请求。
+  - Scoped repair verification 已支持中立 bounded 关系：宽泛验证命令若依赖直接命中当前 failure target 的 patch，或显式声明 target/scope/reason，即可作为当前 repair 的有界验证；无 scope 关系的宽泛验证仍会被拒绝。
+  - LLM provider prompt 与 state-changing repair guidance 已明确 `unified_diff` 必须使用显式 hunk line range，禁止裸 `@@` hunk；行号不确定时应使用安全 `file_write + baseHash`、精确 edit、先读取目标或 failed/blocker。
   - 软件开发行为约束继续由 software-dev workspaceTemplate / Soul / skill 承载；core 仅处理 step、stage、state、capability kind、evidence ref、failure class / signature 等中立运行事实。
   - software-dev 默认 Soul 已同步吸纳 Codex 启发的工程行为约束：规划阶段要求参考 `processEvidenceTimeline` / `currentProgressDigest` 做已有输出、最近失败、当前缺口和下一步要求分析；执行阶段要求先基于当前代码/当前快照/当前失败证据再改、沿用本地项目模式、保护 workspace 已有有效内容、避免无关重构和长期只调整测试；验证阶段要求先对齐最新过程证据和 closure evidence，避免旧失败覆盖后续成功证据。
 
@@ -1039,6 +1053,17 @@ workorch://workspaces/<workspace-id>/runs/<run-id>/steps/<run-id>/graph-002/007-
 ```
 
 raw ref 是稳定的逻辑定位，不是本地绝对路径。API 实现必须继续校验 workspace、run、collection、item path 和文件名白名单，防止路径穿越。
+
+## Governance Queue And Resume Contract
+
+决策工单和审批项是 runtime 治理入口，属于中立控制面能力，不承载具体业务领域语义。
+
+- Ticket / Approval 必须保存 `createdAt` 与 `updatedAt`。新建时两个字段相同，状态变更时只刷新 `updatedAt`，不得改变 `createdAt`。
+- 治理列表默认按 `createdAt` 倒序分页展示；`cursorAfterId` 必须基于排序后的列表继续翻页，避免新生成的阻塞项被历史 resolved 项挤出第一页。
+- File backend 对历史无时间字段的 Ticket / Approval 可用文件 mtime 作为 `createdAt/updatedAt` 兜底；该兜底只表达生成顺序，不引入业务推断。
+- blocked run 在 ticket 提交后若短暂恢复又再次阻塞，必须通过 checkpoint / step output / latest ticket 定位新的失败原因，不得只依据“已提交”推断恢复成功。
+- replan continuation 若没有显式 `processEvidenceTimeline/currentProgressDigest`，runtime 必须从 `failureContext/ticketContext` 合成最小过程证据，确保 repair / strict convergence 阶段能够通过上下文门禁并看到当前失败面、失败步骤和下一步缺口。
+- Provider context gate 仍保持中立：repair / state-changing / replan continuation 必须带过程证据；证据可以来自真实 step timeline，也可以来自结构化 replan failure context 的中立投影。
 
 ## 核对清单
 

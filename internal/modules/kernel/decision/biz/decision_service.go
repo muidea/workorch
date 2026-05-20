@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"time"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionModel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -28,6 +29,7 @@ func (s *Service) CreateTicket(ctx context.Context, cmd decisionservice.CreateTi
 		return common.ErrInvalidArgument
 	}
 
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	item := &decisionModel.Ticket{
 		ID:           cmd.TicketID,
 		WorkspaceID:  cmd.WorkspaceID,
@@ -38,6 +40,8 @@ func (s *Service) CreateTicket(ctx context.Context, cmd decisionservice.CreateTi
 		Question:     cmd.Question,
 		Context:      clonePayload(cmd.Context),
 		State:        common.DecisionTicketStateOpen,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	if err := s.tickets.Create(ctx, item); err != nil {
 		return err
@@ -110,6 +114,7 @@ func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.T
 		return nil, common.ErrConflict
 	}
 
+	ticket.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	resolution := &decisionModel.Resolution{
 		ID:       cmd.ResolutionID,
 		TicketID: cmd.TicketID,

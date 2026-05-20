@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"time"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
 	approvalModel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -27,6 +28,7 @@ func (s *Service) CreateApproval(ctx context.Context, cmd approvalservice.Create
 		return common.ErrInvalidArgument
 	}
 
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	item := &approvalModel.Approval{
 		ID:          cmd.ApprovalID,
 		WorkspaceID: cmd.WorkspaceID,
@@ -36,6 +38,8 @@ func (s *Service) CreateApproval(ctx context.Context, cmd approvalservice.Create
 		Action:      cmd.Action,
 		Context:     cloneApprovalContext(cmd.Context),
 		State:       common.ApprovalStatePending,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 	if err := s.approvals.Create(ctx, item); err != nil {
 		return err
@@ -162,6 +166,7 @@ func (s *Service) resolveItem(ctx context.Context, item *approvalModel.Approval,
 	if item.State != common.ApprovalStatePending {
 		return common.ErrConflict
 	}
+	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	item.State = target
 	if err := s.approvals.Update(ctx, item); err != nil {
 		return err

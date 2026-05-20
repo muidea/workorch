@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	approval "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decision "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -2513,6 +2514,13 @@ func (r *DecisionTicketRepository) Create(_ context.Context, item *decision.Tick
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if strings.TrimSpace(item.CreatedAt) == "" {
+		item.CreatedAt = now
+	}
+	if strings.TrimSpace(item.UpdatedAt) == "" {
+		item.UpdatedAt = item.CreatedAt
+	}
 	return writeJSONFileAtomic(path, cloneDecisionTicket(item))
 }
 
@@ -2524,6 +2532,7 @@ func (r *DecisionTicketRepository) Get(_ context.Context, id common.TicketID) (*
 	if err != nil {
 		return nil, err
 	}
+	applyDecisionTicketFileTimestampFallback(&item, r.ticketPath(id))
 	return cloneDecisionTicket(&item), nil
 }
 
@@ -2561,6 +2570,14 @@ func (r *DecisionTicketRepository) Update(_ context.Context, item *decision.Tick
 	} else if err != nil {
 		return err
 	}
+	existing, err := readJSONItemFile[decision.Ticket](path)
+	if err == nil && strings.TrimSpace(item.CreatedAt) == "" {
+		item.CreatedAt = existing.CreatedAt
+	}
+	if strings.TrimSpace(item.CreatedAt) == "" {
+		applyDecisionTicketFileTimestampFallback(item, path)
+	}
+	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	return writeJSONFileAtomic(path, cloneDecisionTicket(item))
 }
 
@@ -2595,6 +2612,7 @@ func (r *DecisionTicketRepository) list(matches func(decision.Ticket) bool) ([]*
 		if err != nil {
 			return nil, err
 		}
+		applyDecisionTicketFileTimestampFallback(&item, path)
 		if matches == nil || matches(item) {
 			ret = append(ret, cloneDecisionTicket(&item))
 		}
@@ -2712,6 +2730,13 @@ func (r *ApprovalRepository) Create(_ context.Context, item *approval.Approval) 
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if strings.TrimSpace(item.CreatedAt) == "" {
+		item.CreatedAt = now
+	}
+	if strings.TrimSpace(item.UpdatedAt) == "" {
+		item.UpdatedAt = item.CreatedAt
+	}
 	return writeJSONFileAtomic(path, cloneApproval(item))
 }
 
@@ -2723,6 +2748,7 @@ func (r *ApprovalRepository) Get(_ context.Context, id common.ApprovalID) (*appr
 	if err != nil {
 		return nil, err
 	}
+	applyApprovalFileTimestampFallback(&item, r.approvalPath(id))
 	return cloneApproval(&item), nil
 }
 
@@ -2760,6 +2786,14 @@ func (r *ApprovalRepository) Update(_ context.Context, item *approval.Approval) 
 	} else if err != nil {
 		return err
 	}
+	existing, err := readJSONItemFile[approval.Approval](path)
+	if err == nil && strings.TrimSpace(item.CreatedAt) == "" {
+		item.CreatedAt = existing.CreatedAt
+	}
+	if strings.TrimSpace(item.CreatedAt) == "" {
+		applyApprovalFileTimestampFallback(item, path)
+	}
+	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	return writeJSONFileAtomic(path, cloneApproval(item))
 }
 
@@ -2794,6 +2828,7 @@ func (r *ApprovalRepository) list(matches func(approval.Approval) bool) ([]*appr
 		if err != nil {
 			return nil, err
 		}
+		applyApprovalFileTimestampFallback(&item, path)
 		if matches == nil || matches(item) {
 			ret = append(ret, cloneApproval(&item))
 		}
@@ -3100,6 +3135,22 @@ func cloneDecisionTicket(item *decision.Ticket) *decision.Ticket {
 	return &cloned
 }
 
+func applyDecisionTicketFileTimestampFallback(item *decision.Ticket, path string) {
+	if item == nil || (strings.TrimSpace(item.CreatedAt) != "" && strings.TrimSpace(item.UpdatedAt) != "") {
+		return
+	}
+	timestamp := fileModTimeTimestamp(path)
+	if timestamp == "" {
+		return
+	}
+	if strings.TrimSpace(item.CreatedAt) == "" {
+		item.CreatedAt = timestamp
+	}
+	if strings.TrimSpace(item.UpdatedAt) == "" {
+		item.UpdatedAt = timestamp
+	}
+}
+
 func cloneDecisionResolution(item *decision.Resolution) *decision.Resolution {
 	cloned := *item
 	if item.Payload != nil {
@@ -3112,6 +3163,30 @@ func cloneApproval(item *approval.Approval) *approval.Approval {
 	cloned := *item
 	cloned.Context = cloneMap(item.Context)
 	return &cloned
+}
+
+func applyApprovalFileTimestampFallback(item *approval.Approval, path string) {
+	if item == nil || (strings.TrimSpace(item.CreatedAt) != "" && strings.TrimSpace(item.UpdatedAt) != "") {
+		return
+	}
+	timestamp := fileModTimeTimestamp(path)
+	if timestamp == "" {
+		return
+	}
+	if strings.TrimSpace(item.CreatedAt) == "" {
+		item.CreatedAt = timestamp
+	}
+	if strings.TrimSpace(item.UpdatedAt) == "" {
+		item.UpdatedAt = timestamp
+	}
+}
+
+func fileModTimeTimestamp(path string) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	return info.ModTime().UTC().Format(time.RFC3339Nano)
 }
 
 func cloneSoul(item *soul.Soul) *soul.Soul {

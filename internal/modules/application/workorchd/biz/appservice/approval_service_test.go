@@ -62,7 +62,21 @@ func TestListApprovalPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
-	approval, err := exports.Repositories.Approvals.Get(ctx, common.ApprovalID(first.BlockingApprovalID))
+	for id, createdAt := range map[string]string{
+		first.BlockingApprovalID:  "2026-05-20T00:00:00Z",
+		second.BlockingApprovalID: "2026-05-20T00:01:00Z",
+	} {
+		item, err := exports.Repositories.Approvals.Get(ctx, common.ApprovalID(id))
+		if err != nil {
+			t.Fatalf("get approval %s: %v", id, err)
+		}
+		item.CreatedAt = createdAt
+		item.UpdatedAt = createdAt
+		if err := exports.Repositories.Approvals.Update(ctx, item); err != nil {
+			t.Fatalf("update approval %s: %v", id, err)
+		}
+	}
+	approval, err := exports.Repositories.Approvals.Get(ctx, common.ApprovalID(second.BlockingApprovalID))
 	if err != nil {
 		t.Fatalf("get approval: %v", err)
 	}
@@ -77,11 +91,11 @@ func TestListApprovalPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListApprovalPageWithBackend: %v", err)
 	}
-	if len(page.Approvals) != 1 || page.Approvals[0].ID != first.BlockingApprovalID {
-		t.Fatalf("page approvals = %+v, want first approval", page.Approvals)
+	if len(page.Approvals) != 1 || page.Approvals[0].ID != second.BlockingApprovalID {
+		t.Fatalf("page approvals = %+v, want newest second approval", page.Approvals)
 	}
-	if !page.HasMore || page.NextCursorAfterID != first.BlockingApprovalID {
-		t.Fatalf("page cursor = %+v, want hasMore with first cursor", page)
+	if !page.HasMore || page.NextCursorAfterID != second.BlockingApprovalID {
+		t.Fatalf("page cursor = %+v, want hasMore with second cursor", page)
 	}
 	if page.Approvals[0].Context != nil {
 		t.Fatalf("projected approval carries large context: %+v", page.Approvals[0])
@@ -94,11 +108,11 @@ func TestListApprovalPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListApprovalPageWithBackend next: %v", err)
 	}
-	if len(next.Approvals) != 1 || next.Approvals[0].ID != second.BlockingApprovalID || next.HasMore {
-		t.Fatalf("next page = %+v, want second approval without more", next)
+	if len(next.Approvals) != 1 || next.Approvals[0].ID != first.BlockingApprovalID || next.HasMore {
+		t.Fatalf("next page = %+v, want older first approval without more", next)
 	}
 
-	detail, err := ReadApprovalWithBackend(context.Background(), "file", dataRoot, first.BlockingApprovalID)
+	detail, err := ReadApprovalWithBackend(context.Background(), "file", dataRoot, second.BlockingApprovalID)
 	if err != nil {
 		t.Fatalf("ReadApprovalWithBackend: %v", err)
 	}

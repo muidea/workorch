@@ -22,6 +22,8 @@ type Approval struct {
 	Context        map[string]any         `json:"context,omitempty"`
 	State          string                 `json:"state"`
 	AutoGovernance *AutoGovernanceSummary `json:"autoGovernance,omitempty"`
+	CreatedAt      string                 `json:"createdAt,omitempty"`
+	UpdatedAt      string                 `json:"updatedAt,omitempty"`
 }
 
 type ApprovalQuery struct {
@@ -368,6 +370,8 @@ func mapApproval(item *approvalmodel.Approval, autoGovernance *AutoGovernanceSum
 		Context:        cloneApprovalMap(item.Context),
 		State:          string(item.State),
 		AutoGovernance: autoGovernance,
+		CreatedAt:      item.CreatedAt,
+		UpdatedAt:      item.UpdatedAt,
 	}
 }
 

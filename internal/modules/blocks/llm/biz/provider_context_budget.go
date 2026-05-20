@@ -648,6 +648,9 @@ func providerContextIntegrityWarnings(input map[string]any, protected protectedG
 	if boolValue(input["runtimeRepairFollowUp"]) && !providerInputHasCurrentFailure(input) {
 		warnings = append(warnings, "runtime_repair_current_failure_missing")
 	}
+	if providerInputRequiresProcessEvidence(input) && !providerInputHasProcessEvidence(input) {
+		warnings = append(warnings, "runtime_repair_process_evidence_missing")
+	}
 	warnings = append(warnings, missingProtectedRepairSnapshotWarnings(input, repairTargets)...)
 	return uniqueStrings(warnings)
 }
@@ -668,7 +671,8 @@ func providerContextGateDecision(goalDoDCompressed, overBudget, p0Overflow bool,
 			"coverage_repair_required_without_coverage_target_set",
 			"must_declare_coverage_targets_without_target_set",
 			"repair_action_package_required_output_missing",
-			"runtime_repair_current_failure_missing":
+			"runtime_repair_current_failure_missing",
+			"runtime_repair_process_evidence_missing":
 			return providerContextGateFailFast, warning
 		case "protected_failure_target_snapshot_missing_after_context_budget",
 			"protected_patch_repair_snapshot_missing_after_context_budget",
@@ -677,6 +681,36 @@ func providerContextGateDecision(goalDoDCompressed, overBudget, p0Overflow bool,
 		}
 	}
 	return providerContextGatePass, ""
+}
+
+func providerInputRequiresProcessEvidence(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if boolValue(input["runtimeRepairFollowUp"]) ||
+		boolValue(input["stateChangingOutputRequired"]) ||
+		strings.TrimSpace(strings.ToLower(stringValue(input["runtimeStage"]))) == "repair" {
+		return true
+	}
+	if len(recordFromAny(recordFromAny(input["executionContext"])["replanContinuation"])) > 0 ||
+		len(recordFromAny(recordFromAny(input["executionContextPackage"])["replanContinuation"])) > 0 {
+		return true
+	}
+	return false
+}
+
+func providerInputHasProcessEvidence(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if len(mapSliceFromAny(input["processEvidenceTimeline"])) > 0 && len(recordFromAny(input["currentProgressDigest"])) > 0 {
+		return true
+	}
+	pkg := recordFromAny(input["executionContextPackage"])
+	if len(mapSliceFromAny(pkg["processEvidenceTimeline"])) > 0 && len(recordFromAny(pkg["currentProgressDigest"])) > 0 {
+		return true
+	}
+	return false
 }
 
 func providerInputHasCurrentFailure(input map[string]any) bool {

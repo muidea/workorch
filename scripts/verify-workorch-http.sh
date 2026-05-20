@@ -42,26 +42,33 @@ grep 'workorch_http_requests_total' "$TMP_DIR/metrics.txt" >/dev/null
 curl -fsS "$BASE_URL/console" | grep 'workorch Console' >/dev/null
 curl -fsS "$BASE_URL/console/assets/workorch-console.css" | grep 'workorch-section' >/dev/null
 curl -fsS "$BASE_URL/console/assets/workorch-console.js" >"$TMP_DIR/workorch-console.js"
-grep 'workorch 控制台' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '业务总览' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '治理队列' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '工作空间详情' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '运行控制' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '系统配置' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '服务状态' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '创建工作空间' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '定义目标' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '定义验收标准' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '启动执行' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '运行摘要' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '当前运行' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '失败目标' "$TMP_DIR/workorch-console.js" >/dev/null
-grep 'Structured Failure Signals' "$TMP_DIR/workorch-console.js" >/dev/null
-grep 'Repair Input Compaction' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '补充决策信息' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '提交并转入后台' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '审批确认' "$TMP_DIR/workorch-console.js" >/dev/null
-if grep -E 'workorch management overview|Create run|Run slice|Available slice catalog' "$TMP_DIR/workorch-console.js" >/dev/null; then
+cp "$TMP_DIR/workorch-console.js" "$TMP_DIR/workorch-console-all.js"
+grep -oE '[A-Za-z0-9_.-]+-[A-Za-z0-9_-]+\.js' "$TMP_DIR/workorch-console.js" | sort -u >"$TMP_DIR/workorch-console-chunks.txt" || true
+while IFS= read -r chunk; do
+  [[ -n "$chunk" ]] || continue
+  curl -fsS "$BASE_URL/console/assets/$chunk" >>"$TMP_DIR/workorch-console-all.js"
+  printf '\n' >>"$TMP_DIR/workorch-console-all.js"
+done <"$TMP_DIR/workorch-console-chunks.txt"
+grep 'workorch 控制台' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '业务总览' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '治理队列' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '工作空间详情' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '运行控制' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '系统配置' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '服务状态' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '创建工作空间' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '定义目标' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '定义验收标准' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '启动执行' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '运行摘要' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '当前运行' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '失败目标' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep 'Structured Failure Signals' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep 'Repair Input Compaction' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '补充决策信息' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '提交并转入后台' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '审批确认' "$TMP_DIR/workorch-console-all.js" >/dev/null
+if grep -E 'workorch management overview|Create run|Run slice|Available slice catalog' "$TMP_DIR/workorch-console-all.js" >/dev/null; then
   echo "console exposes retired web entries" >&2
   exit 1
 fi

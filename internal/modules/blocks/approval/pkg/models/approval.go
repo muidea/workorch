@@ -11,4 +11,6 @@ type Approval struct {
 	Action      string
 	Context     map[string]any
 	State       common.ApprovalState
+	CreatedAt   string
+	UpdatedAt   string
 }

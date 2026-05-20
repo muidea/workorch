@@ -12,4 +12,6 @@ type Ticket struct {
 	Question     string
 	Context      map[string]any
 	State        common.DecisionTicketState
+	CreatedAt    string
+	UpdatedAt    string
 }

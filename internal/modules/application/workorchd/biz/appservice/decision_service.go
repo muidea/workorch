@@ -41,6 +41,8 @@ type Decision struct {
 	ResolutionType    string                 `json:"resolutionType,omitempty"`
 	ResolutionPayload map[string]any         `json:"resolutionPayload,omitempty"`
 	AutoGovernance    *AutoGovernanceSummary `json:"autoGovernance,omitempty"`
+	CreatedAt         string                 `json:"createdAt,omitempty"`
+	UpdatedAt         string                 `json:"updatedAt,omitempty"`
 }
 
 type DecisionQuery struct {
@@ -862,6 +864,8 @@ func mapDecision(item *decisionmodel.Ticket, resolution *decisionmodel.Resolutio
 		Context:        cloneDecisionPayload(item.Context),
 		State:          string(item.State),
 		AutoGovernance: autoGovernance,
+		CreatedAt:      item.CreatedAt,
+		UpdatedAt:      item.UpdatedAt,
 	}
 	if resolution != nil {
 		ret.ResolutionID = string(resolution.ID)

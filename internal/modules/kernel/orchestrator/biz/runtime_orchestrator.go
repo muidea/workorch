@@ -802,6 +802,12 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 		"predecessorRunId": string(run.ID),
 		"reason":           "decision_replan",
 	}
+	if timeline, digest := o.currentRunProcessEvidenceContext(ctx, run, ""); len(timeline) > 0 {
+		replanContext[stepInputKeyProcessEvidenceTimeline] = timeline
+		if len(digest) > 0 {
+			replanContext[stepInputKeyCurrentProgressDigest] = digest
+		}
+	}
 	if ticket != nil {
 		replanContext["ticketId"] = string(ticket.ID)
 		replanContext["ticketStepId"] = string(ticket.StepID)
@@ -1577,7 +1583,7 @@ func validateScopedStateChangingRepairVerificationContract(step *runModel.Step, 
 	) {
 		return nil
 	}
-	if !strategyOutputGraphUsesUnboundedVerification(output) {
+	if !strategyOutputGraphUsesUnboundedVerificationForStep(step, output) {
 		return nil
 	}
 	return fmt.Errorf("%w: scoped state-changing runtime repair requires bounded verification; unbounded verification without explicit target scope is not allowed", common.ErrInvalidArgument)
@@ -2452,7 +2458,7 @@ func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output m
 		}
 		if strategyFailedSurfaceRequiresBoundedVerification(expectedSurface, candidate) &&
 			(strategyVerificationPlanAppearsUnbounded(strings.TrimSpace(stringFromAny(candidate["verificationPlan"]))) ||
-				strategyOutputGraphUsesUnboundedVerification(output)) {
+				strategyOutputGraphUsesUnboundedVerificationForStep(step, output)) {
 			return fmt.Errorf("%w: strategyReassessment.required=true requires bounded verification for scoped failed surface; unbounded verification without explicit target scope is not allowed in this repair decision", common.ErrInvalidArgument)
 		}
 		return nil
@@ -2652,9 +2658,21 @@ func strategyVerificationPlanAppearsUnbounded(plan string) bool {
 }
 
 func strategyOutputGraphUsesUnboundedVerification(output map[string]any) bool {
+	return strategyOutputGraphUsesUnboundedVerificationForTargets(output, nil)
+}
+
+func strategyOutputGraphUsesUnboundedVerificationForStep(step *runModel.Step, output map[string]any) bool {
+	return strategyOutputGraphUsesUnboundedVerificationForTargets(output, scopedRepairVerificationTargetRefs(step))
+}
+
+func strategyOutputGraphUsesUnboundedVerificationForTargets(output map[string]any, scopedTargets []string) bool {
 	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
 	if !ok || len(graph.Nodes) == 0 {
 		return false
+	}
+	nodeByID := map[string]runtimemodel.BlockExecutionNode{}
+	for _, node := range graph.Nodes {
+		nodeByID[strings.TrimSpace(node.ID)] = node
 	}
 	for _, node := range graph.Nodes {
 		if strings.TrimSpace(node.Kind) != "shell/command" {
@@ -2680,11 +2698,102 @@ func strategyOutputGraphUsesUnboundedVerification(output map[string]any) bool {
 				hasExplicitScope = true
 			}
 		}
+		if shellCommandInputHasExplicitVerificationScope(node.Input) {
+			hasExplicitScope = true
+		}
+		if hasBroadScope && !hasExplicitScope && graphNodeDependsOnScopedTargetPatch(node, nodeByID, scopedTargets, map[string]bool{}) {
+			hasExplicitScope = true
+		}
 		if hasBroadScope && !hasExplicitScope {
 			return true
 		}
 	}
 	return false
+}
+
+func shellCommandInputHasExplicitVerificationScope(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	for _, key := range []string{"targetRef", "verificationScope", "boundedReason", "failedSurface", "rootCauseTarget"} {
+		if strings.TrimSpace(stringFromAny(input[key])) != "" {
+			return true
+		}
+	}
+	for _, key := range []string{"relatedFailureTargets", "targetRefs", "affectedTargets"} {
+		if len(stringSliceFromValue(input[key])) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func graphNodeDependsOnScopedTargetPatch(node runtimemodel.BlockExecutionNode, nodeByID map[string]runtimemodel.BlockExecutionNode, scopedTargets []string, seen map[string]bool) bool {
+	if len(scopedTargets) == 0 || len(node.DependsOn) == 0 {
+		return false
+	}
+	for _, depID := range node.DependsOn {
+		depID = strings.TrimSpace(depID)
+		if depID == "" || seen[depID] {
+			continue
+		}
+		seen[depID] = true
+		dep, ok := nodeByID[depID]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(dep.Kind) == "patch/apply" {
+			targetRef := normalizeRepairPatchTargetRef(strings.TrimSpace(stringFromAny(dep.Input["targetRef"])))
+			if repairPatchTargetRefMatches(targetRef, scopedTargets) {
+				return true
+			}
+			for _, related := range stringSliceFromValue(dep.Input["relatedFailureTargets"]) {
+				if repairPatchTargetRefMatches(normalizeRepairPatchTargetRef(related), scopedTargets) {
+					return true
+				}
+			}
+		}
+		if graphNodeDependsOnScopedTargetPatch(dep, nodeByID, scopedTargets, seen) {
+			return true
+		}
+	}
+	return false
+}
+
+func scopedRepairVerificationTargetRefs(step *runModel.Step) []string {
+	if step == nil || step.Input == nil {
+		return nil
+	}
+	var ret []string
+	add := func(value string) {
+		for _, ref := range repairPatchTargetRefsFromScopeText(value) {
+			ret = append(ret, ref)
+		}
+		if normalized := normalizeRepairPatchTargetRef(value); normalized != "" && !strings.Contains(value, "=") {
+			ret = append(ret, normalized)
+		}
+	}
+	add(stringFromMap(step.Input, "failureTargetScope"))
+	add(stringFromMap(step.Input, failureOutputKeySignature))
+	pkg := mapFromValue(step.Input["repairActionPackage"])
+	for _, key := range []string{"failureTargetScope", failureOutputKeySignature} {
+		add(stringFromMap(pkg, key))
+	}
+	if currentFailure := mapFromValue(pkg["currentFailure"]); len(currentFailure) > 0 {
+		for _, key := range []string{"targetRef", "targetScope", "failureSignature"} {
+			add(stringFromMap(currentFailure, key))
+		}
+	}
+	for _, target := range mapSliceFromValue(pkg["repairTargetSet"]) {
+		add(stringFromMap(target, "targetRef"))
+	}
+	for _, value := range stringSliceFromValue(pkg["repairTargetSet"]) {
+		add(value)
+	}
+	for _, target := range mapSliceFromValue(pkg["targetSnapshots"]) {
+		add(stringFromMap(target, "targetRef"))
+	}
+	return uniqueProcessEvidenceStrings(ret)
 }
 
 func normalizeStrategyContractText(value string) string {

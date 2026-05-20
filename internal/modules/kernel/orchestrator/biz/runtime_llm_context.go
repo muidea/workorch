@@ -117,7 +117,142 @@ func compactReplanContinuationForRuntimeContext(input map[string]any) map[string
 	if ticketContext := mapFromValue(input["ticketContext"]); len(ticketContext) > 0 {
 		ret["ticketContext"] = compactFailureContextForRuntimeContext(ticketContext)
 	}
+	if timeline := mapSliceFromValue(input[stepInputKeyProcessEvidenceTimeline]); len(timeline) > 0 {
+		ret[stepInputKeyProcessEvidenceTimeline] = compactProcessEvidenceTimelineForRuntimeContext(timeline)
+	}
+	if digest := mapFromValue(input[stepInputKeyCurrentProgressDigest]); len(digest) > 0 {
+		ret[stepInputKeyCurrentProgressDigest] = compactLLMContextValue(digest, 2)
+	}
 	return stripRuntimeLLMBinding(ret)
+}
+
+func inheritedReplanProcessEvidence(executionContext map[string]any) ([]map[string]any, map[string]any) {
+	replan := mapFromValue(executionContext["replanContinuation"])
+	if len(replan) == 0 {
+		return nil, nil
+	}
+	timeline := mapSliceFromValue(replan[stepInputKeyProcessEvidenceTimeline])
+	if len(timeline) == 0 {
+		timeline = processEvidenceTimelineFromReplanContinuation(replan)
+	}
+	if len(timeline) == 0 {
+		return nil, nil
+	}
+	digest := mapFromValue(replan[stepInputKeyCurrentProgressDigest])
+	if len(digest) == 0 {
+		digest = currentProgressDigestFromProcessEvidenceTimeline(timeline)
+	}
+	return compactProcessEvidenceTimelineForRuntimeContext(timeline), digest
+}
+
+func processEvidenceTimelineFromReplanContinuation(replan map[string]any) []map[string]any {
+	if len(replan) == 0 {
+		return nil
+	}
+	failureContext := mapFromValue(replan["failureContext"])
+	if len(failureContext) == 0 {
+		failureContext = mapFromValue(replan["ticketContext"])
+	}
+	if len(failureContext) == 0 {
+		return nil
+	}
+	failedStepID := firstNonEmptyString(
+		stringFromMap(failureContext, "failedStepId"),
+		stringFromMap(replan, "ticketStepId"),
+	)
+	item := map[string]any{
+		"order":      1,
+		"sourceRef":  "replanContinuation",
+		"kind":       firstNonEmptyString(stringFromMap(failureContext, "failedStepKind"), "runtime/replan_continuation"),
+		"actionKind": "runtime",
+		"state":      string(common.StepStateFailed),
+	}
+	if failedStepID != "" {
+		item["stepId"] = failedStepID
+		item["sourceRef"] = "step://" + failedStepID
+	}
+	for _, key := range []string{
+		"stage",
+		"failureClass",
+		"failureSignature",
+		"failureReason",
+		"failureTargetScope",
+	} {
+		if value, ok := failureContext[key]; ok && value != nil {
+			item[key] = value
+		}
+	}
+	if _, ok := item["failureReason"]; !ok {
+		if reason := firstNonEmptyString(
+			stringFromMap(failureContext, "reason"),
+			stringFromMap(failureContext, "error"),
+			stringFromMap(replan, "ticketReason"),
+		); reason != "" {
+			item["failureReason"] = reason
+		}
+	}
+	if output := mapFromValue(failureContext["failedStepOutput"]); len(output) > 0 {
+		item["output"] = compactStepOutputForLLMContext(output)
+		if summary := processEvidenceOutputSummary(output); summary != "" {
+			item["summary"] = summary
+			item["outputSummary"] = summary
+		}
+	}
+	if input := mapFromValue(failureContext["failedStepInput"]); len(input) > 0 {
+		if summary := processEvidenceInputSummary(input); summary != "" {
+			item["inputSummary"] = summary
+		}
+	}
+	return []map[string]any{item}
+}
+
+func compactProcessEvidenceTimelineForRuntimeContext(input []map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	selected := input
+	if len(selected) > maxLLMContextSliceItems {
+		selected = selected[len(selected)-maxLLMContextSliceItems:]
+	}
+	ret := make([]map[string]any, 0, len(selected))
+	for _, item := range selected {
+		if len(item) == 0 {
+			continue
+		}
+		next := map[string]any{}
+		for _, key := range []string{
+			"order",
+			"sourceRef",
+			"stepId",
+			"kind",
+			"actionKind",
+			"state",
+			"stage",
+			"graphNodeId",
+			"graphRootStepId",
+			"summary",
+			"inputSummary",
+			"failureClass",
+			"failureSignature",
+			"failureReason",
+			"outputRef",
+			"payloadRef",
+		} {
+			if value, ok := item[key]; ok && value != nil {
+				next[key] = compactLLMContextValue(value, 1)
+			}
+		}
+		if refs := stringSliceFromValue(item["evidenceRefs"]); len(refs) > 0 {
+			next["evidenceRefs"] = refs
+		}
+		if output := mapFromValue(item["output"]); len(output) > 0 {
+			next["output"] = compactStepOutputForLLMContext(output)
+		}
+		if len(next) > 0 {
+			ret = append(ret, next)
+		}
+	}
+	return ret
 }
 
 func compactRejectedResultContinuationForRuntimeContext(input map[string]any) map[string]any {

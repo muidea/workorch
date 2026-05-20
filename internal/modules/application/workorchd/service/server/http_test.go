@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,7 @@ import (
 	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	appbootstrap "github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server/consoleassets"
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
@@ -945,7 +947,7 @@ func TestConsoleRoutesServeEmbeddedAssets(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("console js status = %d, want 200", rec.Code)
 	}
-	body := rec.Body.String()
+	body := rec.Body.String() + "\n" + readEmbeddedConsoleJSAssets(t, mux)
 	for _, want := range []string{"业务总览", "治理队列", "工作空间", "服务状态"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("console js body does not contain %q", want)
@@ -961,6 +963,34 @@ func TestConsoleRoutesServeEmbeddedAssets(t *testing.T) {
 			t.Fatalf("console js body exposes retired entry %q", forbidden)
 		}
 	}
+}
+
+func readEmbeddedConsoleJSAssets(t *testing.T, mux http.Handler) string {
+	t.Helper()
+
+	var body strings.Builder
+	err := fs.WalkDir(consoleassets.Assets, "dist/assets", func(name string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(name, ".js") {
+			return nil
+		}
+		uri := "/console/" + strings.TrimPrefix(name, "dist/")
+		req := httptest.NewRequest(http.MethodGet, uri, nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			return fmt.Errorf("%s status = %d, want 200", uri, rec.Code)
+		}
+		body.WriteString(rec.Body.String())
+		body.WriteByte('\n')
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("read embedded console js assets: %v", err)
+	}
+	return body.String()
 }
 
 func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
@@ -2942,8 +2972,8 @@ func TestDecisionListAndGetEndpointsReturnPersistedTickets(t *testing.T) {
 	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil {
 		t.Fatalf("unmarshal decision list: %v", err)
 	}
-	if len(listed.Decisions) != 2 || listed.Decisions[0].ID != startedA.BlockingTicketID || listed.Decisions[1].ID != startedB.BlockingTicketID {
-		t.Fatalf("listed decisions = %+v, want sorted tickets", listed.Decisions)
+	if len(listed.Decisions) != 2 || listed.Decisions[0].ID != startedB.BlockingTicketID || listed.Decisions[1].ID != startedA.BlockingTicketID {
+		t.Fatalf("listed decisions = %+v, want newest tickets first", listed.Decisions)
 	}
 
 	filteredReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/decisions?workspaceId="+workspaceB.ID, nil)

@@ -226,6 +226,100 @@ func TestRunExecutionContextPackageIncludesProcessEvidenceTimeline(t *testing.T)
 	}
 }
 
+func TestRunExecutionContextPackageInheritsReplanProcessEvidence(t *testing.T) {
+	ctx := context.Background()
+	run := &runmodel.Run{
+		ID:          "run-process-context-replan",
+		WorkspaceID: "ws-process-context-replan",
+		ExecutionContext: map[string]any{
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-before-replan",
+				stepInputKeyProcessEvidenceTimeline: []map[string]any{
+					{
+						"order":         1,
+						"sourceRef":     "step://run-before-replan/graph-001/001-patch",
+						"stepId":        "run-before-replan/graph-001/001-patch",
+						"kind":          "patch/apply",
+						"actionKind":    "artifact_write",
+						"state":         string(common.StepStateFailed),
+						"stage":         runtimeStageExecution,
+						"failureClass":  failureClassRuntime,
+						"failureReason": "patch failed",
+					},
+				},
+				stepInputKeyCurrentProgressDigest: map[string]any{
+					"currentGap":         "patch failed",
+					"nextRequiredAction": "address_last_failure_under_current_stage_contract",
+				},
+			},
+		},
+	}
+	current := &runmodel.Step{
+		ID:    "run-process-context-replan/step-1",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: "repair",
+		},
+	}
+
+	orch := &RuntimeOrchestrator{steps: memrepo.NewStepRepository()}
+	orch.enrichLLMStepInputContext(ctx, run, current, nil)
+
+	pkg := mapFromValue(current.Input[stepInputKeyExecutionContextPackage])
+	timeline := mapSliceFromValue(pkg[stepInputKeyProcessEvidenceTimeline])
+	if len(timeline) != 1 || timeline[0]["stepId"] != "run-before-replan/graph-001/001-patch" {
+		t.Fatalf("processEvidenceTimeline = %+v, want inherited predecessor evidence", timeline)
+	}
+	if digest := mapFromValue(current.Input[stepInputKeyCurrentProgressDigest]); digest["currentGap"] != "patch failed" {
+		t.Fatalf("currentProgressDigest = %+v, want inherited predecessor digest", digest)
+	}
+}
+
+func TestRunExecutionContextPackageSynthesizesReplanFailureProcessEvidence(t *testing.T) {
+	ctx := context.Background()
+	run := &runmodel.Run{
+		ID:          "run-process-context-replan-synth",
+		WorkspaceID: "ws-process-context-replan-synth",
+		ExecutionContext: map[string]any{
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-before-replan",
+				"failureContext": map[string]any{
+					"failedStepId":     "run-before-replan/graph-001/001-patch",
+					"failedStepKind":   "patch/apply",
+					"failureClass":     failureClassPatchApply,
+					"failureSignature": "class=patch_apply_failed|targetRef=main_test.go",
+					"failedStepOutput": map[string]any{
+						"stage":  "patch_apply",
+						"reason": "unified diff hunk context mismatch",
+					},
+				},
+			},
+		},
+	}
+	current := &runmodel.Step{
+		ID:    "run-process-context-replan-synth/step-1",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: "repair",
+		},
+	}
+
+	orch := &RuntimeOrchestrator{steps: memrepo.NewStepRepository()}
+	orch.enrichLLMStepInputContext(ctx, run, current, nil)
+
+	pkg := mapFromValue(current.Input[stepInputKeyExecutionContextPackage])
+	timeline := mapSliceFromValue(pkg[stepInputKeyProcessEvidenceTimeline])
+	if len(timeline) != 1 || timeline[0]["stepId"] != "run-before-replan/graph-001/001-patch" {
+		t.Fatalf("processEvidenceTimeline = %+v, want synthesized predecessor failure evidence", timeline)
+	}
+	digest := mapFromValue(current.Input[stepInputKeyCurrentProgressDigest])
+	if strings.TrimSpace(stringFromMap(digest, "currentGap")) == "" {
+		t.Fatalf("currentProgressDigest = %+v, want synthesized current gap", digest)
+	}
+}
+
 func TestCompactMemoryContextsDoesNotInjectHistoricalCompatibilityTrust(t *testing.T) {
 	items := []map[string]any{
 		{

@@ -145,6 +145,14 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	if len(progressDigest) > 0 {
 		ret[stepInputKeyCurrentProgressDigest] = progressDigest
 	}
+	if len(processTimeline) == 0 {
+		if inheritedTimeline, inheritedDigest := inheritedReplanProcessEvidence(executionContext); len(inheritedTimeline) > 0 {
+			ret[stepInputKeyProcessEvidenceTimeline] = inheritedTimeline
+			if len(inheritedDigest) > 0 {
+				ret[stepInputKeyCurrentProgressDigest] = inheritedDigest
+			}
+		}
+	}
 	selected := map[string]any{}
 	if len(stableContext.selectedContext) > 0 {
 		selected = cloneStepPayload(stableContext.selectedContext)
