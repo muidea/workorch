@@ -1720,7 +1720,7 @@ func (o *RuntimeOrchestrator) missingGoalCoverageWithEvidenceCandidates(
 			}
 		}
 		if len(mapSliceFromValue(next["evidenceCandidates"])) == 0 {
-			next["evidenceCandidates"] = o.latestActionEvidenceCandidates(ctx, run, failedStep, 5)
+			next["evidenceCandidates"] = o.latestCoverageBoundActionEvidenceCandidates(ctx, run, failedStep, requirement, 5)
 		}
 		ret = append(ret, next)
 	}
@@ -1746,7 +1746,7 @@ func (o *RuntimeOrchestrator) missingDoDItemsWithEvidenceCandidates(
 			}
 		}
 		if len(mapSliceFromValue(next["evidenceCandidates"])) == 0 {
-			next["evidenceCandidates"] = o.latestActionEvidenceCandidates(ctx, run, failedStep, 5)
+			next["evidenceCandidates"] = o.latestCoverageBoundActionEvidenceCandidates(ctx, run, failedStep, strings.TrimSpace(stringFromMap(next, "item")), 5)
 		}
 		ret = append(ret, next)
 	}
@@ -1795,6 +1795,9 @@ func (o *RuntimeOrchestrator) goalCoverageEvidenceCandidatesForRequirement(
 		if step.State != common.StepStateCompleted && step.State != common.StepStateFailed {
 			continue
 		}
+		if !coverageEvidenceQualityCandidateAllowed(stringFromMap(step.Output, "evidenceQuality")) {
+			continue
+		}
 		text := normalizeDoDCoverageText(strings.Join([]string{
 			string(step.ID),
 			step.Kind,
@@ -1808,13 +1811,20 @@ func (o *RuntimeOrchestrator) goalCoverageEvidenceCandidatesForRequirement(
 		if len(matched) == 0 {
 			continue
 		}
+		source := "runtime_step_text_match"
+		evidenceQuality := "indirect"
+		if stepDeclaresCoverageTarget(step, requirement) {
+			source = "coverage_bound_step_text_match"
+			evidenceQuality = "direct"
+		}
 		item := map[string]any{
-			"stepId":       string(step.ID),
-			"kind":         step.Kind,
-			"state":        string(step.State),
-			"matchedTerms": matched,
-			"matchScore":   len(matched),
-			"source":       "runtime_step_text_match",
+			"stepId":          string(step.ID),
+			"kind":            step.Kind,
+			"state":           string(step.State),
+			"matchedTerms":    matched,
+			"matchScore":      len(matched),
+			"source":          source,
+			"evidenceQuality": evidenceQuality,
 		}
 		if nodeID := graphNodeID(step); nodeID != "" {
 			item["graphNodeId"] = nodeID
@@ -1839,6 +1849,15 @@ func (o *RuntimeOrchestrator) goalCoverageEvidenceCandidatesForRequirement(
 		ret = append(ret, candidates[idx].item)
 	}
 	return ret
+}
+
+func coverageEvidenceQualityCandidateAllowed(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "inconclusive", "invalid", "smoke", "unrelated":
+		return false
+	default:
+		return true
+	}
 }
 
 func (o *RuntimeOrchestrator) latestActionEvidenceCandidates(
@@ -1881,6 +1900,121 @@ func (o *RuntimeOrchestrator) latestActionEvidenceCandidates(
 			item["output"] = output
 		}
 		ret = append(ret, item)
+	}
+	return ret
+}
+
+func (o *RuntimeOrchestrator) latestCoverageBoundActionEvidenceCandidates(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	coverageTarget string,
+	limit int,
+) []map[string]any {
+	if o == nil || o.steps == nil || run == nil || limit <= 0 {
+		return nil
+	}
+	coverageTarget = normalizeCoverageGapRepairToken(coverageTarget)
+	if coverageTarget == "" {
+		return nil
+	}
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil || len(steps) == 0 {
+		return nil
+	}
+	steps = orderedRuntimeContextSteps(steps)
+	ret := make([]map[string]any, 0, limit)
+	for idx := len(steps) - 1; idx >= 0 && len(ret) < limit; idx-- {
+		step := steps[idx]
+		if step == nil || (failedStep != nil && step.ID == failedStep.ID) {
+			continue
+		}
+		if !completionEvidenceStepFallbackUsable(step) {
+			continue
+		}
+		if !stepDeclaresCoverageTarget(step, coverageTarget) {
+			continue
+		}
+		ret = append(ret, latestActionEvidenceCandidateFromStep(step))
+	}
+	return ret
+}
+
+func latestActionEvidenceCandidateFromStep(step *runModel.Step) map[string]any {
+	if step == nil {
+		return nil
+	}
+	item := map[string]any{
+		"stepId":          string(step.ID),
+		"kind":            step.Kind,
+		"state":           string(step.State),
+		"source":          "latest_coverage_bound_action_evidence",
+		"matchScore":      1,
+		"evidenceQuality": "direct",
+	}
+	if nodeID := graphNodeID(step); nodeID != "" {
+		item["graphNodeId"] = nodeID
+	}
+	if rootStepID := graphRootStepID(step); rootStepID != "" && rootStepID != step.ID {
+		item["graphRootStepId"] = string(rootStepID)
+	}
+	if output := compactStepOutputForLLMContext(step.Output); len(output) > 0 {
+		item["output"] = output
+	}
+	return item
+}
+
+func stepDeclaresCoverageTarget(step *runModel.Step, coverageTarget string) bool {
+	if step == nil || coverageTarget == "" {
+		return false
+	}
+	for _, value := range coverageTargetTokensFromStep(step) {
+		value = normalizeCoverageGapRepairToken(value)
+		if value == "" {
+			continue
+		}
+		if value == coverageTarget || coverageTextsLikelyEquivalent(value, coverageTarget) {
+			return true
+		}
+	}
+	return false
+}
+
+func coverageTargetTokensFromStep(step *runModel.Step) []string {
+	if step == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := make([]string, 0)
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		key := normalizeCoverageGapRepairToken(value)
+		if key == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		ret = append(ret, value)
+	}
+	for _, value := range patchNodeCoverageTargetTokens(step.Input) {
+		add(value)
+	}
+	for _, value := range patchNodeCoverageTargetTokens(step.Output) {
+		add(value)
+	}
+	for _, patch := range mapSliceFromValue(step.Output["patches"]) {
+		for _, value := range patchNodeCoverageTargetTokens(patch) {
+			add(value)
+		}
+	}
+	if decision := mapFromValue(step.Output[stepOutputKeyLLMDecision]); len(decision) > 0 {
+		for _, request := range mapSliceFromValue(decision["patchRequests"]) {
+			for _, value := range patchNodeCoverageTargetTokens(request) {
+				add(value)
+			}
+		}
 	}
 	return ret
 }

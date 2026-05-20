@@ -15979,6 +15979,133 @@ func TestValidateLLMExecutionOutputContractRejectsCoverageGapPatchWithoutCoverag
 	}
 }
 
+func TestValidateLLMExecutionOutputContractRejectsCoverageGapPatchWithoutStateChangingFlag(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-coverage-gap-targets-without-state-changing-flag",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-coverage-gap-targets-without-state-changing-flag/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageVerification,
+			stepInputKeySoulStage:             soulStageValidation,
+			"missingDoDItems": []map[string]any{
+				{"item": "target alpha requirement", "state": "failed"},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "apply-unbound-change",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "file_write",
+					"targetRef": "artifact.txt",
+					"content":   "updated\n",
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "coverageTargets") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want coverage target rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsInitialStateChangingPatchWithoutCoverageTargets(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-initial-state-changing-coverage-targets",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-initial-state-changing-coverage-targets/step-1",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			stepInputKeySoulStage:         soulStageExecution,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			stepInputKeyExecutionContextPackage: map[string]any{
+				"dod": map[string]any{
+					"items": []string{"streaming responses must be delivered incrementally"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "create-simple-test",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "file_write",
+					"targetRef": "dod_simple_test.go",
+					"content":   "package main\n",
+					"summary":   "create a smoke test",
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "coverageTargets") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want initial coverage target rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsInitialStateChangingPatchWithCoverageTargets(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-initial-state-changing-coverage-targets-valid",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-initial-state-changing-coverage-targets-valid/step-1",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			stepInputKeySoulStage:         soulStageExecution,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			stepInputKeyExecutionContextPackage: map[string]any{
+				"dod": map[string]any{
+					"items": []string{"streaming responses must be delivered incrementally"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "repair-streaming",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "file_write",
+					"targetRef": "main.go",
+					"content":   "package main\n",
+					"coverageTargets": []map[string]any{{
+						"kind": "dod",
+						"item": "streaming responses must be delivered incrementally",
+					}},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want initial coverage target allowed", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsCoverageGapPatchWithUnmatchedCoverageTargets(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-repair-coverage-target-mismatch",
@@ -19397,6 +19524,62 @@ func TestRuntimeRepairInputForMissingGoalCoverageWithoutEvidenceCandidatesProduc
 	}
 	if got := input["evidenceRepairSource"]; got != "coverage_gap_without_candidate_evidence" {
 		t.Fatalf("evidenceRepairSource = %v, want coverage_gap_without_candidate_evidence", got)
+	}
+}
+
+func TestRuntimeRepairEvidenceCandidatesRequireCoverageBoundAction(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-coverage-bound-evidence-candidates")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-coverage-bound-evidence-candidates", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}
+	stepRepo := memory.NewStepRepository()
+	unboundStepID := common.StepID(runID + "/graph-001/001-unbound-action")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     unboundStepID,
+		RunID:  runID,
+		Kind:   shellcommon.StepKindCommand,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"stdout": "latest action completed"},
+	}); err != nil {
+		t.Fatalf("seed unbound step: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		steps:      stepRepo,
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	missing := orch.missingDoDItemsWithEvidenceCandidates(ctx, run, nil, []map[string]any{{
+		"item":  "target alpha requirement",
+		"state": "failed",
+	}})
+	if len(missing) != 1 {
+		t.Fatalf("missing = %+v, want one item", missing)
+	}
+	if candidates := mapSliceFromValue(missing[0]["evidenceCandidates"]); len(candidates) != 0 {
+		t.Fatalf("evidenceCandidates = %+v, want unbound latest action filtered", candidates)
+	}
+
+	boundStepID := common.StepID(runID + "/graph-002/001-bound-action")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    boundStepID,
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"stdout":          "targeted action completed",
+			"coverageTargets": []string{"target alpha requirement"},
+		},
+	}); err != nil {
+		t.Fatalf("seed bound step: %v", err)
+	}
+	missing = orch.missingDoDItemsWithEvidenceCandidates(ctx, run, nil, []map[string]any{{
+		"item":  "target alpha requirement",
+		"state": "failed",
+	}})
+	candidates := mapSliceFromValue(missing[0]["evidenceCandidates"])
+	if len(candidates) != 1 || stringFromMap(candidates[0], "stepId") != string(boundStepID) {
+		t.Fatalf("evidenceCandidates = %+v, want coverage-bound latest action", candidates)
+	}
+	if got := stringFromMap(candidates[0], "evidenceQuality"); got != "direct" {
+		t.Fatalf("evidenceQuality = %q, want direct", got)
 	}
 }
 

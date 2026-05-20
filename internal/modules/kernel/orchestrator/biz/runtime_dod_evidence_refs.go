@@ -502,7 +502,7 @@ func completionEvidenceCandidateCanFallback(candidate map[string]any) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(stringFromMap(candidate, "evidenceQuality"))) {
-	case "inconclusive", "invalid":
+	case "inconclusive", "invalid", "smoke", "unrelated":
 		return false
 	default:
 		return true
@@ -552,7 +552,7 @@ func completionEvidenceStepFallbackUsable(step *runModel.Step) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(stringFromMap(step.Output, "evidenceQuality"))) {
-	case "inconclusive", "invalid":
+	case "inconclusive", "invalid", "smoke", "unrelated":
 		return false
 	default:
 		return true

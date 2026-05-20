@@ -1582,7 +1582,7 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	if err := validateLLMFollowUpGraphStateChangingContract(run, step, output); err != nil {
 		return err
 	}
-	if err := validateLLMCoverageGapRepairIntent(step, output); err != nil {
+	if err := validateLLMCoverageBoundStateChangingIntent(run, step, output); err != nil {
 		return err
 	}
 	if err := validateLLMRepairStrategyReassessmentContract(step, output); err != nil {
@@ -3055,17 +3055,17 @@ func repairPatchTargetsShareDirectory(targetRef string, candidate string) bool {
 	return targetDir == candidateDir
 }
 
-func validateLLMCoverageGapRepairIntent(step *runModel.Step, output map[string]any) error {
-	if !coverageGapStateChangingRepairRequired(step) {
+func validateLLMCoverageBoundStateChangingIntent(run *runModel.Run, step *runModel.Step, output map[string]any) error {
+	if !coverageBoundStateChangingOutputRequired(run, step) {
 		return nil
 	}
-	if coverageGapRepairOutputHasPatch(output) && coverageGapRepairOutputDeclaresTargets(step, output) {
+	if coverageGapRepairOutputHasPatch(output) && coverageBoundOutputDeclaresTargets(step, output) {
 		return nil
 	}
 	if !coverageGapRepairOutputHasPatch(output) {
 		return nil
 	}
-	return fmt.Errorf("%w: coverage-gap state-changing repair patch/apply must declare coverageTargets matching missing DoD or Goal coverage items", common.ErrInvalidArgument)
+	return fmt.Errorf("%w: coverage-bound state-changing patch/apply must declare coverageTargets matching current Goal, DoD, or deliverable coverage targets", common.ErrInvalidArgument)
 }
 
 func coverageGapRepairOutputHasPatch(output map[string]any) bool {
@@ -3093,8 +3093,8 @@ func coverageGapRepairOutputHasPatch(output map[string]any) bool {
 	return false
 }
 
-func coverageGapRepairOutputDeclaresTargets(step *runModel.Step, output map[string]any) bool {
-	allowedTargets := coverageGapRepairTargetTokens(step)
+func coverageBoundOutputDeclaresTargets(step *runModel.Step, output map[string]any) bool {
+	allowedTargets := coverageBoundTargetTokens(step)
 	if len(allowedTargets) == 0 {
 		return true
 	}
@@ -3130,21 +3130,40 @@ func patchPayloadsDeclareCoverageTargets(value any, allowed []string) bool {
 	return false
 }
 
-func coverageGapStateChangingRepairRequired(step *runModel.Step) bool {
+func coverageBoundStateChangingOutputRequired(run *runModel.Run, step *runModel.Step) bool {
 	if step == nil || step.Input == nil {
 		return false
 	}
-	if !boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) ||
-		!boolValue(step.Input["stateChangingOutputRequired"]) ||
-		!repairObjectiveRequiresStateChange(stringFromMap(step.Input, "repairObjective")) {
+	if len(coverageBoundTargetTokens(step)) == 0 {
 		return false
 	}
-	return len(mapSliceFromValue(step.Input["missingDoDItems"])) > 0 ||
-		len(missingGoalCoverageFromInput(step.Input)) > 0 ||
-		len(mapSliceFromValue(step.Input["missingDeliverableCoverage"])) > 0
+	if coverageBoundInputCarriesCoverageGap(step.Input) {
+		return true
+	}
+	stateChanging := boolValue(step.Input["stateChangingOutputRequired"]) ||
+		repairObjectiveRequiresStateChange(stringFromMap(step.Input, "repairObjective")) ||
+		runExecutionContractRequiresStateChange(run) ||
+		inputExecutionContractRequiresStateChange(step.Input)
+	return stateChanging
 }
 
-func coverageGapRepairTargetTokens(step *runModel.Step) []string {
+func coverageBoundInputCarriesCoverageGap(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if len(mapSliceFromValue(input["missingDoDItems"])) > 0 ||
+		len(missingGoalCoverageFromInput(input)) > 0 ||
+		len(mapSliceFromValue(input["missingDeliverableCoverage"])) > 0 ||
+		len(mapSliceFromValue(input["coverageTargetSet"])) > 0 {
+		return true
+	}
+	if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
+		return len(mapSliceFromValue(pkg["coverageTargetSet"])) > 0
+	}
+	return false
+}
+
+func coverageBoundTargetTokens(step *runModel.Step) []string {
 	if step == nil || step.Input == nil {
 		return nil
 	}
@@ -3157,6 +3176,22 @@ func coverageGapRepairTargetTokens(step *runModel.Step) []string {
 		}
 		seen[value] = true
 		ret = append(ret, value)
+	}
+	addCoverageTargetMap := func(item map[string]any) {
+		add(firstNonEmptyString(
+			stringFromMap(item, "coverageTargetToken"),
+			stringFromMap(item, "goalRequirementId"),
+			stringFromMap(item, "targetText"),
+			stringFromMap(item, "item"),
+			stringFromMap(item, "raw"),
+			stringFromMap(item, "requirement"),
+			stringFromMap(item, "goal"),
+			stringFromMap(item, "goalItem"),
+			stringFromMap(item, "id"),
+			stringFromMap(item, "expectationId"),
+			stringFromMap(item, "description"),
+			stringFromMap(item, "title"),
+		))
 	}
 	for _, item := range mapSliceFromValue(step.Input["missingDoDItems"]) {
 		add(stringFromMap(item, "item"))
@@ -3176,6 +3211,97 @@ func coverageGapRepairTargetTokens(step *runModel.Step) []string {
 			stringFromMap(item, "expectationId"),
 			stringFromMap(item, "requirement"),
 		))
+	}
+	for _, item := range mapSliceFromValue(step.Input["coverageTargetSet"]) {
+		addCoverageTargetMap(item)
+	}
+	if pkg := mapFromValue(step.Input["repairActionPackage"]); len(pkg) > 0 {
+		for _, item := range mapSliceFromValue(pkg["coverageTargetSet"]) {
+			addCoverageTargetMap(item)
+		}
+	}
+	for _, item := range coverageTargetsFromExecutionContextPackage(mapFromValue(step.Input[stepInputKeyExecutionContextPackage])) {
+		addCoverageTargetMap(item)
+	}
+	return ret
+}
+
+func inputExecutionContractRequiresStateChange(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	for _, source := range []map[string]any{
+		mapFromValue(input["executionContract"]),
+		mapFromValue(mapFromValue(input["executionContext"])["executionContract"]),
+		mapFromValue(mapFromValue(input[stepInputKeyExecutionContextPackage])["executionContract"]),
+	} {
+		if strings.TrimSpace(stringFromMap(source, "stateChangePolicy")) == "must_produce_state_change" {
+			return true
+		}
+	}
+	return false
+}
+
+func coverageTargetsFromExecutionContextPackage(pkg map[string]any) []map[string]any {
+	if len(pkg) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0)
+	add := func(kind string, fields map[string]any) {
+		if len(fields) == 0 {
+			return
+		}
+		target := firstNonEmptyString(
+			stringFromMap(fields, "coverageTargetToken"),
+			stringFromMap(fields, "goalRequirementId"),
+			stringFromMap(fields, "targetText"),
+			stringFromMap(fields, "item"),
+			stringFromMap(fields, "raw"),
+			stringFromMap(fields, "requirement"),
+			stringFromMap(fields, "goal"),
+			stringFromMap(fields, "goalItem"),
+			stringFromMap(fields, "id"),
+			stringFromMap(fields, "expectationId"),
+			stringFromMap(fields, "description"),
+			stringFromMap(fields, "title"),
+		)
+		if strings.TrimSpace(target) == "" {
+			return
+		}
+		next := cloneStepPayload(fields)
+		next["kind"] = kind
+		next["targetText"] = target
+		if strings.TrimSpace(stringFromMap(next, "coverageTargetToken")) == "" {
+			next["coverageTargetToken"] = target
+		}
+		ret = append(ret, next)
+	}
+	addItems := func(kind string, value any) {
+		for _, text := range stringSliceFromValue(value) {
+			add(kind, map[string]any{"item": text})
+		}
+		for _, item := range mapSliceFromValue(value) {
+			add(kind, item)
+		}
+	}
+	if dod := mapFromValue(pkg["dod"]); len(dod) > 0 {
+		addItems("dod", dod["items"])
+	}
+	for _, dod := range mapSliceFromValue(pkg["dods"]) {
+		addItems("dod", dod["items"])
+	}
+	if goal := mapFromValue(pkg["goal"]); len(goal) > 0 {
+		add("goal", goal)
+	}
+	addItems("goal", pkg["goals"])
+	if profileContract := mapFromValue(pkg["profileContract"]); len(profileContract) > 0 {
+		addItems("deliverable", profileContract["deliverableExpectations"])
+	}
+	if contract := mapFromValue(pkg["executionContract"]); len(contract) > 0 {
+		addItems("deliverable", contract["deliverableExpectations"])
+	}
+	if len(ret) == 0 {
+		return nil
 	}
 	return ret
 }
