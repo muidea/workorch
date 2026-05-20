@@ -114,6 +114,7 @@ If older docs, local closure plans, or feature-specific proposals conflict with 
 Common entrypoints:
 
 ```bash
+make deps
 make fmt
 make fmt-check
 make vet
@@ -130,6 +131,9 @@ make ci
 
 Notes:
 
+- `make deps` downloads Go modules and installs Web console dependencies before local builds
+- Go module preparation uses `go mod download`; set `GO=/path/to/go` or `GO_MOD_DOWNLOAD_FLAGS=...` when a machine needs custom toolchain/proxy settings
+- Web console dependency preparation uses `npm ci` when `web/workorch-console/package-lock.json` exists, so fresh checkouts and stale `node_modules` are rebuilt from the lockfile; set `NPM=/path/to/npm` or `NPM_CI_FLAGS=...` for local registry/proxy flags
 - `make build` writes the binary to `./bin/workorch`
 - `make console-build` rebuilds the embedded management console assets from `web/workorch-console`
 - `make verify-service` and `make verify-service-file` verify the currently deployed `workorch --server` HTTP service at `WORKORCH_BASE_URL` without starting or stopping it
@@ -488,6 +492,7 @@ Governed workspace concurrency load tests also target the currently deployed ins
 ## Development targets
 
 ```bash
+make deps
 make fmt
 make vet
 make test

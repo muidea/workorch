@@ -6,17 +6,27 @@ APP := ./application/workorch
 PKGS := ./...
 GOFMT ?= gofmt
 GOTEST_FLAGS ?=
+GO_MOD_DOWNLOAD_FLAGS ?=
 BUILD_OUT ?= ./bin/workorch
 CLI_BUILD_OUT ?= $(BUILD_OUT)
 CLI_APP := $(APP)
 CONSOLE_WEB := ./web/workorch-console
+CONSOLE_PACKAGE_JSON := $(CONSOLE_WEB)/package.json
+CONSOLE_PACKAGE_LOCK := $(CONSOLE_WEB)/package-lock.json
+CONSOLE_NODE_MODULES := $(CONSOLE_WEB)/node_modules
+CONSOLE_DEPS_STAMP := $(CONSOLE_NODE_MODULES)/.workorch-deps-stamp
+NPM_CI_FLAGS ?=
+NPM_INSTALL_FLAGS ?=
 
-.PHONY: help fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-long-output release release-check install-latest ci
+.PHONY: help deps go-deps console-deps fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-long-output release release-check install-latest ci
 
 help:
 	@echo "Targets:"
 	@echo "  fmt        - gofmt -w + go fmt for project sources"
 	@echo "  fmt-check  - fail if any Go file needs gofmt"
+	@echo "  deps       - download Go modules and install Web console dependencies"
+	@echo "  go-deps    - download Go modules declared by go.mod/go.sum"
+	@echo "  console-deps - install Web console dependencies from package-lock.json"
 	@echo "  test       - go test $(PKGS)"
 	@echo "  test-race  - go test -race $(PKGS)"
 	@echo "  vet        - go vet $(PKGS)"
@@ -75,7 +85,25 @@ help:
 	@echo "  install-latest - install latest release binary from GitHub via install script"
 	@echo "  ci         - fmt-check + vet + test + build + file-backed service verification"
 
-fmt:
+deps: go-deps console-deps
+
+go-deps:
+	@command -v $(GO) >/dev/null 2>&1 || { echo "missing Go compiler: $(GO)"; exit 1; }
+	$(GO) mod download $(GO_MOD_DOWNLOAD_FLAGS)
+
+console-deps: $(CONSOLE_DEPS_STAMP)
+
+$(CONSOLE_DEPS_STAMP): $(CONSOLE_PACKAGE_JSON) $(CONSOLE_PACKAGE_LOCK)
+	@command -v $(NPM) >/dev/null 2>&1 || { echo "missing npm executable: $(NPM)"; exit 1; }
+	@cd $(CONSOLE_WEB) && \
+	if [[ -f package-lock.json ]]; then \
+		$(NPM) ci $(NPM_CI_FLAGS); \
+	else \
+		$(NPM) install $(NPM_INSTALL_FLAGS); \
+	fi
+	@touch $(CONSOLE_DEPS_STAMP)
+
+fmt: go-deps
 	@files="$$(find . -type f -name '*.go' -not -path './.git/*' -not -path './.workorch-data/*' -not -path './.claude/*' -not -path './vendor/*' -not -path './web/workorch-console/node_modules/*')"; \
 	if [[ -n "$$files" ]]; then \
 		$(GOFMT) -w $$files; \
@@ -94,31 +122,29 @@ fmt-check:
 		exit 1; \
 	fi
 
-test:
+test: go-deps
 	$(GO) test $(GOTEST_FLAGS) $(PKGS)
 
-test-race:
+test-race: go-deps
 	$(GO) test -race $(GOTEST_FLAGS) $(PKGS)
 
-vet:
+vet: go-deps
 	$(GO) vet $(PKGS)
 
-console-build:
-	@cd $(CONSOLE_WEB) && \
-	if [[ ! -d node_modules ]]; then $(NPM) install; fi && \
-	$(NPM) run build
+console-build: console-deps
+	@cd $(CONSOLE_WEB) && $(NPM) run build
 
-build: console-build
+build: go-deps console-build
 	@mkdir -p $(dir $(BUILD_OUT))
 	$(GO) build -o $(BUILD_OUT) $(APP)
 
 clean:
 	rm -rf ./bin ./.workorch-data ./workorch
 
-run:
+run: go-deps
 	$(GO) run $(APP) --server -config-dir config
 
-run-file:
+run-file: go-deps
 	rm -rf ./.workorch-data
 	$(GO) run $(APP) --server -config-dir config/file
 
@@ -244,7 +270,7 @@ RELEASE_OUT ?= ./dist
 RELEASE_TAG ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.0.0-dev")
 RELEASE_PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-release: console-build
+release: go-deps console-build
 	@rm -rf $(RELEASE_OUT)
 	@mkdir -p $(RELEASE_OUT)
 	@for platform in $(RELEASE_PLATFORMS); do \
@@ -268,7 +294,7 @@ install-latest:
 pre-commit: fmt fmt-check vet
 	@echo "pre-commit checks passed"
 
-cli-build:
+cli-build: go-deps
 	@mkdir -p $(dir $(CLI_BUILD_OUT))
 	$(GO) build -o $(CLI_BUILD_OUT) $(CLI_APP)
 
