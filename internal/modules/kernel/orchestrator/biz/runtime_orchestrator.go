@@ -1843,6 +1843,9 @@ func validateRepairPatchTargetRelevance(step *runModel.Step, request runtimePatc
 	if repairPatchRequestDeclaresRelatedFailureTargets(request, targetRefs) {
 		return validateRepeatedRepairRootCauseTargetConsistency(step, request)
 	}
+	if primaryDiagnosticRequestHasInferredRelatedShapeRepair(step, request, primaryDiagnosticRepairContractForStep(step)) {
+		return validateRepeatedRepairRootCauseTargetConsistency(step, request)
+	}
 	if repairPatchTargetRefIsRelatedPrerequisite(step.Input, request.TargetRef, targetRefs) {
 		return validateRepeatedRepairRootCauseTargetConsistency(step, request)
 	}
@@ -1926,16 +1929,9 @@ func primaryDiagnosticPatchRequestAddressesContract(step *runModel.Step, request
 		return true
 	}
 	lineRefs := mapSliceFromValue(contract["lineRefs"])
-	targetRefs := stringSliceFromValue(contract["targetRefs"])
-	if len(targetRefs) == 0 {
-		for _, ref := range lineRefs {
-			if targetRef := stringFromMap(ref, "targetRef"); targetRef != "" {
-				targetRefs = append(targetRefs, targetRef)
-			}
-		}
-	}
+	targetRefs := primaryDiagnosticTargetRefsFromContract(contract)
 	if !primaryDiagnosticRequestTargetsDiagnosticScope(request, targetRefs) {
-		return false
+		return primaryDiagnosticRequestHasInferredRelatedShapeRepair(step, request, contract)
 	}
 	if primaryDiagnosticRequestHasMatchingDeclaration(request, contract) {
 		return true
@@ -1951,6 +1947,159 @@ func primaryDiagnosticPatchRequestAddressesContract(step *runModel.Step, request
 		return true
 	}
 	return false
+}
+
+func primaryDiagnosticTargetRefsFromContract(contract map[string]any) []string {
+	if len(contract) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ret []string
+	add := func(value string) {
+		value = normalizeRepairPatchTargetRef(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	for _, value := range stringSliceFromValue(contract["targetRefs"]) {
+		add(value)
+	}
+	for _, ref := range mapSliceFromValue(contract["lineRefs"]) {
+		add(stringFromMap(ref, "targetRef"))
+	}
+	return ret
+}
+
+func primaryDiagnosticRequestHasInferredRelatedShapeRepair(step *runModel.Step, request runtimePatchRequest, contract map[string]any) bool {
+	if len(contract) == 0 || !boolValue(contract["required"]) {
+		return false
+	}
+	targetRefs := primaryDiagnosticTargetRefsFromContract(contract)
+	if len(targetRefs) == 0 || repairPatchTargetRefMatches(request.TargetRef, targetRefs) {
+		return false
+	}
+	if !primaryDiagnosticRequestTargetsRelatedResourceNeighborhood(step, request, targetRefs) {
+		return false
+	}
+	identifiers := primaryDiagnosticMeaningfulIdentifiers(contract)
+	if len(identifiers) == 0 {
+		return false
+	}
+	changedText := primaryDiagnosticPatchChangedText(request)
+	if changedText == "" {
+		return false
+	}
+	return primaryDiagnosticTextMentionsAny(changedText, identifiers)
+}
+
+func primaryDiagnosticRequestTargetsRelatedResourceNeighborhood(step *runModel.Step, request runtimePatchRequest, targetRefs []string) bool {
+	if len(targetRefs) == 0 {
+		return false
+	}
+	for _, targetRef := range targetRefs {
+		if repairPatchTargetsShareDirectory(request.TargetRef, targetRef) {
+			return true
+		}
+	}
+	if step == nil || step.Input == nil {
+		return false
+	}
+	actionPackage := mapFromValue(step.Input["repairActionPackage"])
+	for _, item := range mapSliceFromValue(actionPackage["workspaceFileManifest"]) {
+		if !repairPatchTargetRefMatches(stringFromMap(item, "path"), []string{request.TargetRef}) {
+			continue
+		}
+		for _, targetRef := range targetRefs {
+			if repairPatchTargetsShareDirectory(request.TargetRef, targetRef) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func primaryDiagnosticMeaningfulIdentifiers(contract map[string]any) []string {
+	seen := map[string]bool{}
+	var ret []string
+	for _, value := range stringSliceFromValue(contract["identifiers"]) {
+		trimmed := strings.TrimSpace(value)
+		normalized := strings.ToLower(trimmed)
+		if trimmed == "" || len([]rune(trimmed)) < 3 || seen[normalized] {
+			continue
+		}
+		if primaryDiagnosticMetadataIdentifier(normalized) {
+			continue
+		}
+		seen[normalized] = true
+		ret = append(ret, trimmed)
+	}
+	return ret
+}
+
+func primaryDiagnosticMetadataIdentifier(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return true
+	}
+	switch value {
+	case "fail", "failed", "failure", "failureclass", "failuresignature", "failuretargets", "exitcode", "status", "error", "reason", "stdout", "stderr":
+		return true
+	}
+	return strings.Contains(value, "failure") ||
+		strings.Contains(value, "failed") ||
+		strings.HasPrefix(value, "exit") ||
+		strings.HasSuffix(value, ".test")
+}
+
+func primaryDiagnosticPatchChangedText(request runtimePatchRequest) string {
+	switch strings.TrimSpace(request.PatchType) {
+	case "file_write":
+		return primaryDiagnosticNonCommentText(request.Content)
+	case "unified_diff":
+		filePatch, err := parseSingleFileUnifiedDiff(request.Diff)
+		if err != nil {
+			return primaryDiagnosticNonCommentText(request.Diff)
+		}
+		var lines []string
+		for _, hunk := range filePatch.Hunks {
+			for _, line := range hunk.Lines {
+				if line == "" {
+					continue
+				}
+				switch line[0] {
+				case '+', '-':
+					lines = append(lines, strings.TrimSpace(line[1:]))
+				}
+			}
+		}
+		return primaryDiagnosticNonCommentText(strings.Join(lines, "\n"))
+	default:
+		return ""
+	}
+}
+
+func primaryDiagnosticNonCommentText(value string) string {
+	var lines []string
+	for _, line := range strings.Split(value, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || primaryDiagnosticLooksCommentOnly(line) {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return strings.ToLower(strings.Join(lines, "\n"))
+}
+
+func primaryDiagnosticLooksCommentOnly(line string) bool {
+	line = strings.TrimSpace(line)
+	return strings.HasPrefix(line, "//") ||
+		strings.HasPrefix(line, "#") ||
+		strings.HasPrefix(line, "--") ||
+		strings.HasPrefix(line, "/*") ||
+		strings.HasPrefix(line, "*") ||
+		strings.HasPrefix(line, "<!--")
 }
 
 func primaryDiagnosticRequestTargetsDiagnosticScope(request runtimePatchRequest, targetRefs []string) bool {

@@ -28,7 +28,63 @@ func compactStepInputForLLMContext(input map[string]any) map[string]any {
 	delete(ret, stepInputKeyWorkspaceFileManifest)
 	delete(ret, stepOutputKeyExecutionGraph)
 	if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
-		ret["repairActionPackage"] = compactLLMContextMap(pkg, 0)
+		ret["repairActionPackage"] = compactRepairActionPackageForLLMContext(pkg)
+	}
+	return ret
+}
+
+func compactRepairActionPackageForLLMContext(pkg map[string]any) map[string]any {
+	if len(pkg) == 0 {
+		return nil
+	}
+	ret := compactLLMContextMap(pkg, 0)
+	if targets := compactRepairActionTargetSnapshotsForLLMContext(mapSliceFromValue(pkg["targetSnapshots"])); len(targets) > 0 {
+		ret["targetSnapshots"] = targets
+	}
+	return ret
+}
+
+func compactRepairActionTargetSnapshotsForLLMContext(items []map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	limit := min(len(items), maxLLMContextSliceItems)
+	ret := make([]map[string]any, 0, limit)
+	for idx := 0; idx < limit; idx++ {
+		item := items[idx]
+		next := map[string]any{}
+		for _, key := range []string{
+			"targetRef",
+			"exists",
+			"contentHash",
+			"contentComplete",
+			"safeForFileWrite",
+			"redacted",
+			"truncated",
+			"isBinary",
+			"size",
+			"source",
+			"contextSource",
+			"error",
+		} {
+			if value, ok := item[key]; ok && value != nil {
+				next[key] = compactLLMContextValue(value, 1)
+			}
+		}
+		content := strings.TrimSpace(stringFromMap(item, "content"))
+		if content != "" && !containsRuntimeRedactionMarker(content) &&
+			boolValue(item["contentComplete"]) && boolValue(item["safeForFileWrite"]) &&
+			!boolValue(item["redacted"]) && !boolValue(item["truncated"]) && !boolValue(item["isBinary"]) &&
+			len(content) <= maxPatchRepairSnapshotBytes {
+			next["content"] = content
+		} else if preview := strings.TrimSpace(stringFromMap(item, "contentPreview")); preview != "" && !containsRuntimeRedactionMarker(preview) {
+			next["contentPreview"] = truncateLLMContextString(preview)
+		} else if content != "" && !containsRuntimeRedactionMarker(content) {
+			next["contentPreview"] = truncateLLMContextString(content)
+		}
+		if len(next) > 0 {
+			ret = append(ret, next)
+		}
 	}
 	return ret
 }

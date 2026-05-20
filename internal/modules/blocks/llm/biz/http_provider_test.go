@@ -273,6 +273,41 @@ func TestHTTPProviderStreamCompleteParsesChatCompletionDeltas(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderStreamCompleteAcceptsLargeSSELine(t *testing.T) {
+	largeDecision := `{"completionState":"continue","executionGraph":{"nodes":[{"id":"write-large","kind":"patch/apply","input":{"patchType":"file_write","targetRef":"large.txt","content":"` + strings.Repeat("x", 2*1024*1024) + `"}}]}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		payload, err := json.Marshal(map[string]any{
+			"choices": []map[string]any{{
+				"delta": map[string]any{"content": largeDecision},
+			}},
+		})
+		if err != nil {
+			t.Fatalf("marshal stream chunk: %v", err)
+		}
+		_, _ = w.Write([]byte("data: "))
+		_, _ = w.Write(payload)
+		_, _ = w.Write([]byte("\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		BaseURL:  server.URL + "/v1",
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Timeout:  5 * time.Second,
+	})
+	result, err := provider.StreamComplete(context.Background(), llmProviderRequest(), nil)
+	if err != nil {
+		t.Fatalf("stream complete: %v", err)
+	}
+	if !strings.Contains(string(result.Payload), strings.Repeat("x", 1024)) {
+		t.Fatalf("payload missing large streamed content")
+	}
+}
+
 func TestHTTPProviderStreamCompleteRejectsEOFBeforeDone(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

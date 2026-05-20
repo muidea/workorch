@@ -16,7 +16,7 @@ import (
 )
 
 const maxProviderErrorBodyBytes = 4096
-const maxProviderStreamLineBytes = 1024 * 1024
+const maxProviderStreamLineBytes = 16 * 1024 * 1024
 
 type HTTPProvider struct {
 	config llmmodels.ProviderConfig

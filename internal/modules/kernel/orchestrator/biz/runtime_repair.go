@@ -22,7 +22,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-const maxPatchRepairSnapshotBytes = 8192
+const maxPatchRepairSnapshotBytes = 120 * 1024
 
 const (
 	repairObjectiveStateChangingOutput        = "produce_state_changing_output"
@@ -2984,6 +2984,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		requiredOutput["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
 		requiredOutput["mustUseCurrentTargetSnapshot"] = true
 		requiredOutput["forbiddenStalePatchReuse"] = true
+		requiredOutput["fileWriteExistingTargetRule"] = "only allowed when the target snapshot is complete/safe and patch/apply file_write includes baseHash equal to that snapshot contentHash; otherwise use bounded unified_diff or file/edit"
 	}
 	if targetSet := repairActionTargetSet(input, pkg, rawFailedOutput...); len(targetSet) > 0 {
 		pkg["repairTargetSet"] = targetSet
@@ -3954,7 +3955,7 @@ func repairActionTargetSnapshot(item map[string]any) map[string]any {
 	content := strings.TrimSpace(stringFromMap(item, "content"))
 	if content != "" && !containsRuntimeRedactionMarker(content) {
 		if boolValue(item["contentComplete"]) && boolValue(item["safeForFileWrite"]) {
-			ret["content"] = truncateLLMContextString(content)
+			ret["content"] = content
 		} else {
 			ret["contentPreview"] = truncateLLMContextString(content)
 		}

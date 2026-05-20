@@ -436,6 +436,11 @@ func TestRuntimeRepairActionPackageGroundsCurrentPatchFailure(t *testing.T) {
 	if digest["targetRef"] != "target.txt" || digest["stalePatchRejected"] != true {
 		t.Fatalf("failedPatchDigest = %#v, want stale target digest", digest)
 	}
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if !strings.Contains(stringFromMap(required, "fileWriteExistingTargetRule"), "baseHash") ||
+		!strings.Contains(stringFromMap(required, "fileWriteExistingTargetRule"), "contentHash") {
+		t.Fatalf("requiredOutput.fileWriteExistingTargetRule = %#v, want explicit baseHash/contentHash rule", required["fileWriteExistingTargetRule"])
+	}
 	if actionPackage["requiredRepairMode"] != "patch_current_snapshot_only" {
 		t.Fatalf("requiredRepairMode = %#v, want patch_current_snapshot_only", actionPackage["requiredRepairMode"])
 	}

@@ -123,6 +123,80 @@ func TestValidateLLMExecutionOutputContractAllowsRelatedPatchWithPrimaryDiagnost
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsInferredRelatedShapePatch(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-primary-diagnostic-inferred-related-repair",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := primaryDiagnosticRepairStep("run-primary-diagnostic-inferred-related-repair/repair-001")
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "repair-related-resource-shape",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "unified_diff",
+					"targetRef": "main.go",
+					"diff": strings.Join([]string{
+						"--- a/main.go",
+						"+++ b/main.go",
+						"@@ -10,3 +10,6 @@",
+						" type Vendor struct {",
+						" \tBaseURL string",
+						"+\tModelRouting map[string]string",
+						"+\tHeaders map[string]string",
+						" }",
+						"",
+					}, "\n"),
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want inferred related primary diagnostic repair allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsInferredRelatedCommentOnlyPatch(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-primary-diagnostic-inferred-related-comment",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := primaryDiagnosticRepairStep("run-primary-diagnostic-inferred-related-comment/repair-001")
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "comment-related-resource",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "unified_diff",
+					"targetRef": "main.go",
+					"diff": strings.Join([]string{
+						"--- a/main.go",
+						"+++ b/main.go",
+						"@@ -1,2 +1,3 @@",
+						" package main",
+						"+// ModelRouting and Headers are mentioned here without changing resource shape.",
+						" type Vendor struct {}",
+						"",
+					}, "\n"),
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		(!strings.Contains(err.Error(), "primary diagnostic repair requires") && !strings.Contains(err.Error(), "not related to failure target")) {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want comment-only inferred repair rejection", err)
+	}
+}
+
 func primaryDiagnosticRepairStep(id common.StepID) *runmodel.Step {
 	return &runmodel.Step{
 		ID:   id,

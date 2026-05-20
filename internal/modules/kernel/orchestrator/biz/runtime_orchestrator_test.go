@@ -3111,6 +3111,13 @@ func TestPatchRepairTargetSnapshotMarksRedactedOrTruncatedContentUnsafeForFileWr
 	if err := os.WriteFile(filepath.Join(deliverableDirectory, "secret.txt"), []byte("token [REDACTED]\n"), 0o644); err != nil {
 		t.Fatalf("seed redacted file: %v", err)
 	}
+	largeSafe := strings.Repeat("safe-current-line\n", 900)
+	if len(largeSafe) <= maxLLMContextStringBytes {
+		t.Fatalf("test fixture too small")
+	}
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "large-safe.txt"), []byte(largeSafe), 0o644); err != nil {
+		t.Fatalf("seed large safe file: %v", err)
+	}
 	large := strings.Repeat("x", maxPatchRepairSnapshotBytes+1)
 	if err := os.WriteFile(filepath.Join(deliverableDirectory, "large.txt"), []byte(large), 0o644); err != nil {
 		t.Fatalf("seed large file: %v", err)
@@ -3119,6 +3126,13 @@ func TestPatchRepairTargetSnapshotMarksRedactedOrTruncatedContentUnsafeForFileWr
 	redacted := patchRepairTargetSnapshot(deliverableDirectory, "secret.txt")
 	if redacted["redacted"] != true || redacted["safeForFileWrite"] != false || redacted["contentComplete"] != true {
 		t.Fatalf("redacted snapshot = %#v, want unsafe redacted complete snapshot", redacted)
+	}
+	safe := patchRepairTargetSnapshot(deliverableDirectory, "large-safe.txt")
+	if safe["truncated"] == true || safe["contentComplete"] != true || safe["safeForFileWrite"] != true {
+		t.Fatalf("large safe snapshot = %#v, want complete safe snapshot", safe)
+	}
+	if got, want := stringFromMap(safe, "content"), strings.TrimSpace(largeSafe); got != want {
+		t.Fatalf("large safe content length = %d, want full trimmed length %d", len(got), len(want))
 	}
 	truncated := patchRepairTargetSnapshot(deliverableDirectory, "large.txt")
 	if truncated["truncated"] != true || truncated["contentComplete"] != false || truncated["safeForFileWrite"] != false {
@@ -4294,6 +4308,7 @@ func TestWorkspaceFileManifestSkipsRepositoryAndRuntimeNoise(t *testing.T) {
 }
 
 func TestCompactLLMContextDropsHeavyTransportFields(t *testing.T) {
+	largeRepairContent := "package main\n" + strings.Repeat("func currentShape() {}\n", 300)
 	input := compactStepInputForLLMContext(map[string]any{
 		"executionContext":                  map[string]any{"skills": []any{map[string]any{"instruction": strings.Repeat("s", 256)}}},
 		stepInputKeyExecutionContextPackage: map[string]any{"workspaceFileManifest": []map[string]any{{"path": ".git/object"}}},
@@ -4312,7 +4327,9 @@ func TestCompactLLMContextDropsHeavyTransportFields(t *testing.T) {
 				"contentHash":      "hash-main",
 				"contentComplete":  true,
 				"safeForFileWrite": true,
-				"content":          "package main\n",
+				"redacted":         false,
+				"truncated":        false,
+				"content":          largeRepairContent,
 			}},
 		},
 		"failedStepId":  "run-1/block/test",
@@ -4341,6 +4358,8 @@ func TestCompactLLMContextDropsHeavyTransportFields(t *testing.T) {
 	}
 	if targets := mapSliceFromValue(actionPackage["targetSnapshots"]); len(targets) != 1 || targets[0]["targetRef"] != "main.go" {
 		t.Fatalf("repairActionPackage.targetSnapshots = %#v, want compact target snapshot", actionPackage["targetSnapshots"])
+	} else if got, want := stringFromMap(targets[0], "content"), strings.TrimSpace(largeRepairContent); got != want {
+		t.Fatalf("repairActionPackage.targetSnapshots[0].content length = %d, want untruncated safe target length %d", len(got), len(want))
 	}
 
 	output := compactStepOutputForLLMContext(map[string]any{
