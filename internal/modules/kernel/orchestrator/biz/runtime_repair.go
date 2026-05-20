@@ -2999,6 +2999,10 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		requiredOutput["forbiddenStalePatchReuse"] = true
 		requiredOutput["fileWriteExistingTargetRule"] = "only allowed when the target snapshot is complete/safe and patch/apply file_write includes baseHash equal to that snapshot contentHash; otherwise use bounded unified_diff or file/edit"
 	}
+	if candidates := mapSliceFromValue(input["rootCauseCandidateContext"]); len(candidates) > 0 {
+		pkg["rootCauseCandidateContext"] = compactLLMContextValue(candidates, 1)
+		requiredOutput["rootCauseCandidateRule"] = "repeated failed-surface repair may patch a rootCauseCandidateContext target when strategyReassessment declares that target as rootCauseTarget"
+	}
 	if targetSet := repairActionTargetSet(input, pkg, rawFailedOutput...); len(targetSet) > 0 {
 		pkg["repairTargetSet"] = targetSet
 		requiredOutput["mustTargetRepairTargetSet"] = true
@@ -3602,7 +3606,11 @@ func structuredFailureSignalsFromFailureOutput(output map[string]any, execErr er
 				break
 			}
 		}
-		targets = append(targets, extractStructuredFailureTargetRefs(text)...)
+		for _, targetRef := range extractStructuredFailureTargetRefs(text) {
+			if structuredFailureTargetRefGroundedBySourceOrText(source, text, targetRef) {
+				targets = append(targets, targetRef)
+			}
+		}
 		identifiers = append(identifiers, extractStructuredFailureIdentifiers(text)...)
 		messages = append(messages, extractStructuredFailureMessages(text)...)
 	}
@@ -3721,6 +3729,24 @@ func extractStructuredFailureTargetRefs(text string) []string {
 	return ret
 }
 
+func structuredFailureTargetRefGroundedBySourceOrText(source string, text string, targetRef string) bool {
+	targetRef = normalizeStructuredFailureTargetRef(targetRef)
+	if targetRef == "" {
+		return false
+	}
+	if strings.Contains(targetRef, "/") {
+		return true
+	}
+	source = strings.ToLower(strings.TrimSpace(source))
+	if strings.Contains(source, "signature") || strings.HasSuffix(source, "targetref") {
+		return true
+	}
+	text = strings.ToLower(strings.TrimSpace(text))
+	return strings.Contains(text, "targetref=") ||
+		strings.Contains(text, "failuretargets=") ||
+		strings.Contains(text, "conflictref=")
+}
+
 func normalizeStructuredFailureTargetRef(value string) string {
 	value = strings.TrimSpace(value)
 	value = strings.TrimPrefix(value, "targetRef=")
@@ -3771,7 +3797,42 @@ func structuredFailureTextTargetRefAllowed(value string) bool {
 	if base == "" || strings.HasSuffix(base, ".") {
 		return false
 	}
+	if structuredFailureBareTargetLooksLikeNumericMeasurement(base, ext) {
+		return false
+	}
 	return true
+}
+
+func structuredFailureBareTargetLooksLikeNumericMeasurement(base string, ext string) bool {
+	base = strings.TrimSpace(base)
+	ext = strings.TrimPrefix(strings.TrimSpace(ext), ".")
+	if base == "" || ext == "" {
+		return false
+	}
+	baseNumeric := true
+	for _, r := range base {
+		if r != '.' && (r < '0' || r > '9') {
+			baseNumeric = false
+			break
+		}
+	}
+	if !baseNumeric {
+		return false
+	}
+	hasDigit := false
+	hasLetter := false
+	for _, r := range ext {
+		if r >= '0' && r <= '9' {
+			hasDigit = true
+			continue
+		}
+		if r >= 'a' && r <= 'z' {
+			hasLetter = true
+			continue
+		}
+		return false
+	}
+	return hasDigit || !hasLetter
 }
 
 func extractStructuredFailureIdentifiers(text string) []string {
@@ -3936,7 +3997,7 @@ func runtimeValueContainsRedactionMarker(value any, depth int) bool {
 }
 
 var structuredFailureLineRefPattern = regexp.MustCompile(`(?:^|[\s"'(\[])([A-Za-z0-9_./\\-]+\.[A-Za-z0-9_./\\-]+):([0-9]+)(?::([0-9]+))?`)
-var structuredFailureTargetRefPattern = regexp.MustCompile(`(?:^|[\s"'(\[])([A-Za-z0-9_./\\-]+\.[A-Za-z0-9_./\\-]+)(?::[0-9]+(?::[0-9]+)?)?`)
+var structuredFailureTargetRefPattern = regexp.MustCompile(`(?:^|[\s"'(\[=])([A-Za-z0-9_./\\-]+\.[A-Za-z0-9_./\\-]+)(?::[0-9]+(?::[0-9]+)?)?`)
 var structuredFailureIdentifierPattern = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]{2,}`)
 
 var structuredFailureIdentifierStopWords = map[string]bool{
@@ -4520,12 +4581,18 @@ func (o *RuntimeOrchestrator) runtimeRepairFailureTargetContext(ctx context.Cont
 	if o == nil || o.workspaces == nil || run == nil || failedStep == nil {
 		return nil
 	}
-	targetRefs := failureTargetRepairRefs(failedStep)
-	if len(targetRefs) == 0 {
-		return nil
-	}
 	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
 	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
+		return nil
+	}
+	files, err := workspaceManifestFiles(workspace.DeliverableDirectory)
+	if err != nil {
+		files = nil
+	}
+	targetRefs := append([]string{}, failureTargetRepairRefs(failedStep)...)
+	targetRefs = append(targetRefs, manifestGroundedFailureSignalTargetRefs(failedStep, files)...)
+	targetRefs = compactUniqueStrings(targetRefs)
+	if len(targetRefs) == 0 {
 		return nil
 	}
 	targetRefs = resolveWorkspaceTargetRefs(workspace.DeliverableDirectory, targetRefs)
@@ -4794,6 +4861,35 @@ func resolveWorkspaceTargetRefFromManifest(files []workspaceDeliverableFile, tar
 		}
 	}
 	return match
+}
+
+func manifestGroundedFailureSignalTargetRefs(step *runModel.Step, files []workspaceDeliverableFile) []string {
+	if step == nil || len(files) == 0 {
+		return nil
+	}
+	class := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass))
+	signature := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature))
+	texts := repairFailureSignalTexts(step.Output, nil, class, signature)
+	if len(texts) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ret []string
+	add := func(value string) {
+		resolved := resolveWorkspaceTargetRefFromManifest(files, value)
+		resolved = normalizeRepairPatchTargetRef(resolved)
+		if resolved == "" || seen[resolved] {
+			return
+		}
+		seen[resolved] = true
+		ret = append(ret, resolved)
+	}
+	for _, text := range texts {
+		for _, target := range extractStructuredFailureTargetRefs(text) {
+			add(target)
+		}
+	}
+	return ret
 }
 
 func resolveWorkspaceTargetRefs(deliverableDirectory string, targetRefs []string) []string {

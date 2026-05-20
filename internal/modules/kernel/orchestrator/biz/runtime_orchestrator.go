@@ -1934,6 +1934,9 @@ func validateRepairPatchTargetRelevance(step *runModel.Step, request runtimePatc
 	if primaryDiagnosticRequestHasInferredRelatedShapeRepair(step, request, primaryDiagnosticRepairContractForStep(step)) {
 		return validateRepeatedRepairRootCauseTargetConsistency(step, request)
 	}
+	if repairPatchTargetRefIsGroundedRootCauseCandidate(step.Input, request.TargetRef, targetRefs) {
+		return validateRepeatedRepairRootCauseTargetConsistency(step, request)
+	}
 	if repairPatchTargetRefIsRelatedPrerequisite(step.Input, request.TargetRef, targetRefs) {
 		return validateRepeatedRepairRootCauseTargetConsistency(step, request)
 	}
@@ -2913,6 +2916,61 @@ func repairPatchTargetRefIsRelatedPrerequisite(input map[string]any, targetRef s
 	return false
 }
 
+func repairPatchTargetRefIsGroundedRootCauseCandidate(input map[string]any, targetRef string, allowed []string) bool {
+	targetRef = normalizeRepairPatchTargetRef(targetRef)
+	if len(input) == 0 || targetRef == "" || len(allowed) == 0 {
+		return false
+	}
+	reassessment := mapFromValue(input["strategyReassessment"])
+	if !strategyReassessmentRequiresRootCauseTargetShift(reassessment) {
+		return false
+	}
+	for _, item := range mapSliceFromValue(input["rootCauseCandidateContext"]) {
+		if len(item) == 0 || !boolValue(item["exists"]) {
+			continue
+		}
+		candidate := normalizeRepairPatchTargetRef(stringFromMap(item, "targetRef"))
+		if candidate == "" || !repairPatchTargetRefMatches(targetRef, []string{candidate}) {
+			continue
+		}
+		if rootCauseCandidateHasNeutralRelationEvidence(item, targetRef, allowed) {
+			return true
+		}
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	for _, item := range mapSliceFromValue(actionPackage["rootCauseCandidateContext"]) {
+		if len(item) == 0 || !boolValue(item["exists"]) {
+			continue
+		}
+		candidate := normalizeRepairPatchTargetRef(stringFromMap(item, "targetRef"))
+		if candidate == "" || !repairPatchTargetRefMatches(targetRef, []string{candidate}) {
+			continue
+		}
+		if rootCauseCandidateHasNeutralRelationEvidence(item, targetRef, allowed) {
+			return true
+		}
+	}
+	return false
+}
+
+func rootCauseCandidateHasNeutralRelationEvidence(item map[string]any, targetRef string, allowed []string) bool {
+	source := strings.ToLower(strings.TrimSpace(stringFromMap(item, "source")))
+	if source == "" {
+		return false
+	}
+	for _, token := range []string{"same_directory", "structured_failure", "patch_repair", "manifest", "resource_shape", "root_cause"} {
+		if strings.Contains(source, token) {
+			return true
+		}
+	}
+	for _, candidate := range allowed {
+		if repairPatchTargetsShareDirectory(targetRef, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
 func repairFailureIndicatesDependencyMetadataPrerequisite(input map[string]any) bool {
 	texts := []string{
 		stringFromMap(input, "failureReason"),
@@ -3275,8 +3333,10 @@ func repairPatchContextItems(step *runModel.Step) []map[string]any {
 	}
 	ret := mapSliceFromValue(step.Input["patchRepairContext"])
 	ret = append(ret, mapSliceFromValue(step.Input["failureTargetRepairContext"])...)
+	ret = append(ret, mapSliceFromValue(step.Input["rootCauseCandidateContext"])...)
 	actionPackage := mapFromValue(step.Input["repairActionPackage"])
 	ret = append(ret, mapSliceFromValue(actionPackage["targetSnapshots"])...)
+	ret = append(ret, mapSliceFromValue(actionPackage["rootCauseCandidateContext"])...)
 	return ret
 }
 

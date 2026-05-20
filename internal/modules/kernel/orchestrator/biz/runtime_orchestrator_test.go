@@ -16975,6 +16975,140 @@ func TestValidateLLMExecutionOutputContractRejectsRepeatedFailedSurfacePatchWith
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsGroundedRootCauseCandidateShift(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-root-cause-candidate",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-root-cause-candidate/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failureTargetScope":              "failureTargets=surface.txt",
+			"failureTargetRepairContext": []map[string]any{{
+				"targetRef": "surface.txt",
+				"exists":    true,
+				"content":   "observed failed surface\n",
+			}},
+			"rootCauseCandidateContext": []map[string]any{{
+				"targetRef":        "root.txt",
+				"exists":           true,
+				"source":           "same_directory_resource",
+				"content":          "root cause old\n",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"contentHash":      "hash-root",
+			}},
+			"strategyReassessment": map[string]any{
+				"required":             true,
+				"reason":               "same_target_scope_repeated_failure",
+				"targetRepairAttempts": 2,
+				"failedSurface":        "failureTargets=surface.txt",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-root-cause",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "root.txt",
+						"patchType":            "unified_diff",
+						"diff":                 "--- a/root.txt\n+++ b/root.txt\n@@ -1,1 +1,1 @@\n-root cause old\n+root cause new\n",
+						"failedSurface":        "failureTargets=surface.txt",
+						"rootCauseTarget":      "root.txt",
+						"repairTargetDecision": "patch grounded root-cause candidate",
+						"forbiddenRepair":      "do not repeatedly patch the failed surface without evidence",
+						"verificationPlan":     "run bounded verification for surface.txt after root.txt changes",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want grounded root-cause candidate shift allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsUngroundedRootCauseCandidateShift(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-ungrounded-root",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-ungrounded-root/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failureTargetScope":              "failureTargets=surface.txt",
+			"failureTargetRepairContext": []map[string]any{{
+				"targetRef": "surface.txt",
+				"exists":    true,
+				"content":   "observed failed surface\n",
+			}},
+			"strategyReassessment": map[string]any{
+				"required":             true,
+				"reason":               "same_target_scope_repeated_failure",
+				"targetRepairAttempts": 2,
+				"failedSurface":        "failureTargets=surface.txt",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-ungrounded-root",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "root.txt",
+						"patchType":            "unified_diff",
+						"diff":                 "--- a/root.txt\n+++ b/root.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+						"failedSurface":        "failureTargets=surface.txt",
+						"rootCauseTarget":      "root.txt",
+						"repairTargetDecision": "patch ungrounded root target",
+						"forbiddenRepair":      "do not repeatedly patch the failed surface without evidence",
+						"verificationPlan":     "run bounded verification for surface.txt",
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "not related to failure target") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want ungrounded root-cause target rejection", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsIncompleteSurfaceContractCorrection(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-strategy-reassessment-incomplete-surface-correction",

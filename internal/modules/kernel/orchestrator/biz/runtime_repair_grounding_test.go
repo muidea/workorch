@@ -74,6 +74,29 @@ func TestStructuredFailureSignalsDoNotPromoteRuntimeContractFieldsAsTargetRefs(t
 	}
 }
 
+func TestStructuredFailureSignalsFilterExecutionLabelsAndDurations(t *testing.T) {
+	output := map[string]any{
+		"stderr": strings.Join([]string{
+			"# module-name [module-name.test]",
+			"./actual_target.go:17:9: undefined: currentShape",
+			"FAIL\tmodule-name\t0.03s",
+		}, "\n"),
+		failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=actual_target.go|exitCode=1",
+	}
+
+	signals := structuredFailureSignalsFromFailureOutput(output, errors.New("exit status 1"), failureClassShellCommand, "")
+
+	targets := stringSliceFromValue(signals["targetRefs"])
+	if !stringSliceContains(targets, "actual_target.go") {
+		t.Fatalf("targetRefs = %#v, want actual_target.go", targets)
+	}
+	for _, forbidden := range []string{"module-name.test", "0.03s"} {
+		if stringSliceContains(targets, forbidden) {
+			t.Fatalf("targetRefs = %#v, want execution label/duration %q filtered", targets, forbidden)
+		}
+	}
+}
+
 func TestRuntimeRepairActionPackageDoesNotUseRuntimeContractFieldsAsRepairTargetSet(t *testing.T) {
 	input := map[string]any{
 		"stateChangingOutputRequired": true,

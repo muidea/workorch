@@ -529,6 +529,10 @@ Repair 输入必须尽量包含足以定向修复的当前证据：
 
 当 `strategyReassessment.required=true` 且 repair 输出需要 state-changing patch 时，`repairActionPackage.requiredOutput` 必须显式包含 `mustDeclareStrategyReassessmentFields=true` 与 `strategyReassessmentRequiredFields`，默认字段为 `failedSurface`、`rootCauseTarget`、`repairTargetDecision`、`forbiddenRepair`、`verificationPlan`。若重复 failed surface 需要 root-cause target shift，还必须包含 `mustDistinguishRootCauseTarget=true`。这些字段是中立 runtime 合同，不表达任何具体业务含义；LLM patch/apply 节点必须在自身 input 中声明这些字段并与当前 failed surface 对齐。
 
+当重复 failed surface 已触发 root-cause target shift 时，runtime 可以向 repair 输入提供中立 `rootCauseCandidateContext`。候选只能来自当前 workspace manifest、同目录/同 scope 资源、结构化 failure refs、当前 target snapshot 或 resource-shape alignment 等机械证据；不得根据文件名、语言、测试框架、业务语义或具体 goal 内容硬编码推断。LLM 可以 patch 不同于 failed surface 的 root-cause candidate，但必须在 patch/apply input 中把该候选声明为 `rootCauseTarget`，并保持 `failedSurface`、`repairTargetDecision`、`forbiddenRepair`、`verificationPlan` 与当前 strategy reassessment 对齐。runtime 准入只允许命中这些已给出当前快照且存在中立关系证据的候选；未出现在候选上下文或未能对齐 failed surface 的目标仍必须被拒绝或要求返回 blocker / failed assessment。
+
+`rootCauseCandidateContext` 也是当前 repair context 的一部分。若候选快照完整、安全、未脱敏、未截断并带有 `contentHash`，它可以作为 `unified_diff` 和受限 `file_write + baseHash` 的当前基线；若候选快照不完整或不存在，runtime 不得让 LLM 直接生成固定 state-changing artifact，而应要求先读取、返回 blocker 或转入人工决策。该规则只治理“失败面与根因候选之间的中立可追踪关系”，不判断候选内容是否业务正确。
+
 被 runtime 拒绝的 repair plan 不得把自身 `summary` / `thoughtSummary` 当成可复用 execution lesson 写入 memory。memory 只能记录 rejected fact、failure class、failure signature、当前失败和仍需遵守的 contract，不能把已拒绝的 rootCauseTarget、无关目标选择、占位变更理由或验证计划沉淀为下一轮决策依据。
 
 State-changing patch 不能只是为了满足 runtime contract 或 repair convergence 而添加 marker/comment/no-op。若 patch 摘要或内容表明其目的只是“满足补丁节点/状态变更/契约/收敛/严格收敛/验证锚点”，或类似 `runtime-repair` marker / `state-change anchor` / `verification anchor`，runtime 必须作为 non-substantive state-change placeholder 拒绝。该规则只检查补丁意图与形态，不判断具体业务语义。
@@ -538,6 +542,8 @@ State-changing patch 不能只是为了满足 runtime contract 或 repair conver
 Runtime 可以把失败证据中的目标引用解析为当前 workspace 中的已知资源快照，但只能使用中立路径匹配和 manifest 事实；不能把某个 profile 的文件命名、测试约定或技术栈规则写入 core repair。
 
 失败目标引用不仅来自结构化 `failureTargets` / `targetRef` / `failureSignature`。当非 LLM 执行步骤的 `stdout`、`stderr`、`error`、`reason`、`lastFailureDiagnostics` 或 `failedStepOutput` 中以中立路径/line-ref 形态出现 workspace 资源引用时，runtime 必须把这些引用纳入 `structuredFailureSignals.targetRefs`，再通过当前 workspace manifest 唯一解析为 `failureTargetRepairContext` 与 `repairActionPackage.targetSnapshots`。该抽取只能依赖路径形态、line-ref、manifest 和当前资源快照，不得依赖命令名、语言、测试框架或文件命名约定。若目标无法唯一解析，必须保留诊断摘要并要求读取/阻塞，而不能让 LLM 在缺少当前快照的情况下生成固定 state-changing artifact。
+
+结构化 failure target 抽取必须过滤明显不是 workspace 资源的中立噪声，例如单独的运行产物标签、duration / numeric measurement、runtime contract 字段名、URL、空路径和无法通过 manifest 唯一解析的裸 token。过滤规则只能基于通用路径形态、扩展名形态、数值形态和 workspace manifest，不得基于具体命令、语言或测试框架。过滤后的 token 仍可作为 diagnostic message / identifier 保留，但不得进入 `targetRefs`、`failureTargetRepairContext` 或 `repairTargetSet`。
 
 Repair exhausted 后必须二选一：
 
@@ -1000,6 +1006,7 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
   - LLM provider prompt 与 state-changing repair guidance 已明确 `unified_diff` 必须使用显式 hunk line range，禁止裸 `@@` hunk；行号不确定时应使用安全 `file_write + baseHash`、精确 edit、先读取目标或 failed/blocker。
   - Runtime repair 已从失败输出的 stdout/stderr/error/reason/diagnostics 中抽取中立 target refs，并通过当前 workspace manifest 注入 `failureTargetRepairContext` 与 `repairActionPackage.targetSnapshots`，避免 LLM 在缺少当前目标快照时反复输出无效 state-changing artifact。
   - 带当前 target snapshot 的 state-changing repair 已拒绝无实质 `unified_diff`，包括完全相同替换、只有空白行变化和无 changed lines，确保 repair 必须产生真实状态变化、failed assessment 或 blocker。
+  - 重复 failed surface 的 root-cause target shift 已支持中立 `rootCauseCandidateContext`：只有来自 manifest / same-scope resource / structured failure / current snapshot 等机械证据且存在当前快照的候选可作为不同 root cause target；同时 failure target 抽取已过滤裸运行产物标签和 duration / numeric measurement，避免非资源 token 污染 repair scope。
   - 软件开发行为约束继续由 software-dev workspaceTemplate / Soul / skill 承载；core 仅处理 step、stage、state、capability kind、evidence ref、failure class / signature 等中立运行事实。
   - software-dev 默认 Soul 已同步吸纳 Codex 启发的工程行为约束：规划阶段要求参考 `processEvidenceTimeline` / `currentProgressDigest` 做已有输出、最近失败、当前缺口和下一步要求分析；执行阶段要求先基于当前代码/当前快照/当前失败证据再改、沿用本地项目模式、保护 workspace 已有有效内容、避免无关重构和长期只调整测试；验证阶段要求先对齐最新过程证据和 closure evidence，避免旧失败覆盖后续成功证据。
 
