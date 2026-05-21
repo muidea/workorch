@@ -383,7 +383,21 @@ Run activation 必须把当前有效的 profile/template contract 组装进 `exe
 
 ## Memory / Recall 合同
 
-Memory 需要按阶段服务 LLM 决策，而不是堆叠 runtime 流水。
+Memory 需要按阶段服务 LLM 决策，而不是堆叠 runtime 流水。Memory 是带适用边界的参考知识；过程证据、失败流水、provider retry、schema invalid、单次 patch 失败和普通 step 日志必须优先进入 `processEvidenceTimeline`、`currentProgressDigest`、`repairActionPackage.recentRejectedAttempts`、run evidence 或 result artifact，而不是默认写入 memory。
+
+### Memory 写入准入
+
+Memory 写入准入必须前置于 recall 降噪。若一条信息无法作为后续 LLM 的参考信息使用，runtime 不应先写入 memory 再依赖 recall 阶段过滤。
+
+允许写入 memory 的信息必须满足以下条件：
+
+- `referenceValue=true` 或等价可推导条件成立：该信息是稳定事实、已接纳输入、必要输出、可迁移经验、人工决策结论或 Goal / DoD 覆盖反馈。
+- 具备适用边界：至少包含 `scope`、`precondition`、`appliesTo`、`validUntil`、`evidenceRef`、`sourceStage` 或等价上下文字段之一。
+- 非瞬态过程：不得只是 provider retry 次数、schema parse error、单次 runtime failure、重复 step id、旧 graph payload、raw stdout/stderr 或已被拒绝的 LLM 计划。
+- 非重复记录：可从当前 workspace/template/config/soul/skill/tool 绑定直接重建且未发生变化的信息，不应每轮重复写入 memory。
+- 不含敏感信息、provider 动态绑定、运行期 API key、临时 endpoint 或不可持久化凭据。
+
+Core 准入只判断 memory 的稳定性、边界、来源和可复用性，不判断具体业务领域含义。
 
 ### 高价值 memory
 
@@ -396,6 +410,8 @@ Memory 需要按阶段服务 LLM 决策，而不是堆叠 runtime 流水。
 - 已确认不可行的方案及原因。
 - 当前可用 skill / tool / mcp / soul / prompt 的能力摘要。
 - 人工 decision / approval 的结论。
+
+被 LLM 实际接纳的 skill / tool / mcp / soul / prompt 信息只有在初始化、绑定变化、用户确认、或已经产生有效输出证据时才应写入 memory。普通 LLM step 不能因为再次携带同一份能力上下文就重复生成 accepted input memory。
 
 ## 抽象矩阵收口跟踪
 
@@ -414,11 +430,15 @@ Memory 需要按阶段服务 LLM 决策，而不是堆叠 runtime 流水。
 默认不应进入 recall 主上下文：
 
 - provider retry 流水。
+- schema invalid / JSON parse error / stream partial 的单次失败。
+- state-changing repair 被 runtime 拒绝的无效 graph、无效 patch、无效 rootCauseTarget 或无效验证计划。
 - 重复 step ID 列表。
 - 已被 supersede 的旧 repair 过程。
 - 只读扫描的原始日志。
 - 没有被 LLM 接纳或没有影响后续决策的中间文本。
 - 已过期的 blocker。
+
+这些信息若对当前 run 仍有价值，应作为当前失败证据或 rejected attempt 摘要进入 `repairActionPackage` / process evidence，而不是进入长期 memory。
 
 ### 阶段化 recall
 
@@ -431,6 +451,45 @@ Memory 需要按阶段服务 LLM 决策，而不是堆叠 runtime 流水。
 | `acceptance` | Goal / DoD、evidence refs、coverage map、remaining gaps |
 | `repair` | failure scope、失败 evidence、最近修复尝试、必须继承的 contract |
 | `replan` | 原计划失败原因、当前 workspace manifest / known resources、可保留产物、需要重新拆解的目标 |
+
+Strict repair / strict convergence 阶段的 recall 必须进一步收窄：只有与当前 `failureSignature`、`failureTargetScope`、`repairTargetSet`、Goal / DoD gap、coverage target 或当前 stage contract 存在结构化匹配的 memory 才能进入 LLM-facing context。来自 failed / superseded run 的 memory 默认不召回，除非其内容满足写入准入中的可复用经验和适用边界要求。缺少适用边界的 memory 不得作为参考注入 strict repair prompt。
+
+### LLM Prompt Section 优先级
+
+Provider prompt 必须按阶段把上下文拆分为可审计 section，而不是把所有信息混入一个大 JSON。默认优先级如下：
+
+1. System / schema / output format contract。
+2. 原始 Goal 与原始 DoD，保持 raw required。
+3. Effective Goal / DoD view。
+4. Stage Contract：当前 `runtimeStage`、`runtimeStageMode`、`stateChangingOutputRequired`、`repairObjective`、`requiredOutput`、当前阶段可接受输出与禁止输出。
+5. Current Failure Package：`repairActionPackage`、当前失败、目标快照、当前执行进展、最近被拒绝尝试和退出条件。
+6. Background Context：workspace manifest、已接纳 result、deliverables、governance history、memory references。
+7. Current Requested Action：必须与 Stage Contract / `repairActionPackage.requiredOutput` 完全一致。
+
+当存在 `repairActionPackage` 时，它必须独立成为 LLM-facing prompt section，且优先级高于历史 memory、governance history、manifest 和 generic runtime capabilities。`repairActionPackage.requiredOutput` 不得只出现在大段 `Execution Context and Evidence Signals` 内。
+
+Strict repair 的 `Current Requested Action` 不得继续使用泛化 `plan_next_step`。当 `stateChangingOutputRequired=true` 或 `repairObjective=produce_state_changing_output`，且 `requiredOutput.acceptedKinds` 包含 state-changing capability kind 时，Current Action 必须表达为 `produce_state_changing_repair_or_failed_assessment` 或等价中立动作，并显式带上 accepted / forbidden output kinds。若只能先读取资源，runtime 应把该轮建模为读取闭环而不是 state-changing repair 闭环；同一轮不得一边要求 `patch/apply`，一边把 `plan_next_step` 作为当前动作。
+
+### Context Conflict Gate
+
+提交 LLM provider 前必须执行中立上下文冲突门禁：
+
+- `stateChangingOutputRequired=true` 或 `repairObjective=produce_state_changing_output`，但 Current Action 仍是 `plan_next_step`，必须 fail-fast 为 `context_contract_conflict`。
+- `repairActionPackage.requiredOutput.acceptedKinds` 存在，但 Current Action 未声明同一 accepted kinds，必须 fail-fast。
+- Strict repair 同时鼓励 read-only exploration / context rehydration / self inspection，且没有显式读取闭环合同，必须 fail-fast。
+- Goal / DoD、Stage Contract、`repairActionPackage.requiredOutput`、当前 failure package、必要 target snapshots 或 current progress 被预算裁剪到不可用时，不得提交 provider。
+
+该 gate 只检查阶段合同、输出 kind、上下文存在性和提示词一致性，不引入任何具体业务领域语义。
+
+### STG-10 Prompt / Memory 收口跟踪
+
+| ID | 内容 | 落点 | 状态 | 验收口径 |
+| --- | --- | --- | --- | --- |
+| STG-10-01 | Strict state-changing repair 的 Current Action 不再使用 `plan_next_step` | LLM prompt builder | completed | request prompt 中 action type 与 `requiredOutput` 一致 |
+| STG-10-02 | `repairActionPackage` 独立成高优先级 prompt section | LLM prompt builder / request evidence | completed | request prompt 有独立 repair package section，且保留 requiredOutput |
+| STG-10-03 | Provider 前上下文冲突 gate | LLM provider request budget / gate | completed | 冲突 action / requiredOutput 在 provider 调用前 fail-fast |
+| STG-10-04 | Memory 写入准入前置，禁止 transient failure / provider retry 默认写入 | runtime memory | completed | transient repair/provider failure 不产生长期 memory |
+| STG-10-05 | Strict repair recall 只接纳有适用边界且相关的 memory | execution context memory selection | completed | 无边界历史 memory 不进入 strict repair context |
 
 ## Repair 合同
 

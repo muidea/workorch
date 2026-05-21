@@ -280,6 +280,32 @@ func TestRuntimeAdapterBlocksProviderCallWhenContextGateFails(t *testing.T) {
 	}
 }
 
+func TestApplyProviderPromptContractGateRejectsStateChangingPlanAction(t *testing.T) {
+	request := llmmodels.ProviderRequest{
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             "produce_state_changing_output",
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds": []string{"patch/apply"},
+				},
+			},
+		},
+		ContextBudget: &llmmodels.ProviderContextBudget{ContextGateAction: providerContextGatePass},
+		PromptContext: &llmmodels.PromptContext{Turns: []llmmodels.PromptTurn{{
+			Role:    "user",
+			Content: `Current Requested Action {"type":"plan_next_step","requirements":["Use runtimeCapabilities only"]}`,
+		}}},
+	}
+
+	got := applyProviderPromptContractGate(request)
+
+	if got.ContextBudget.ContextGateAction != providerContextGateFailFast ||
+		got.ContextBudget.ContextGateReason != "state_changing_current_action_conflicts_with_plan_next_step" {
+		t.Fatalf("contextBudget = %+v, want state-changing prompt conflict gate", got.ContextBudget)
+	}
+}
+
 func TestRuntimeAdapterUsesNativeProviderUsageWhenAvailable(t *testing.T) {
 	provider := &staticProvider{
 		payload: []byte(`{

@@ -10555,6 +10555,25 @@ func TestRuntimeOrchestrator_DoDFeedbackMemoryCapturesAssessmentGaps(t *testing.
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeMemoryWriteRejectsTransientProviderRetry(t *testing.T) {
+	requests, err := runtimeMemoryWriteRequests(map[string]any{
+		"memoryWrites": []map[string]any{
+			{
+				"memoryType": memorycommon.MemoryTypeToolFeedback,
+				"summary":    "Provider retry outcome captured",
+				"content":    "Provider retry attempt: 1\nfailureClass: provider_timeout",
+				"tags":       []string{"provider_retry", "tool_context", "necessary_output"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("runtimeMemoryWriteRequests: %v", err)
+	}
+	if len(requests) != 0 {
+		t.Fatalf("memory requests = %+v, want transient provider retry rejected", requests)
+	}
+}
+
 func TestRuntimeOrchestrator_AcceptedInputMemoryWritesCaptureSkillSoulToolContext(t *testing.T) {
 	runID := common.RunID("run-accepted-input-memory")
 	run := &runmodel.Run{
@@ -10610,7 +10629,7 @@ func TestRuntimeOrchestrator_AcceptedInputMemoryWritesCaptureSkillSoulToolContex
 	}
 }
 
-func TestRuntimeOrchestrator_RepairOutputMemoryWritesCaptureExecutionLesson(t *testing.T) {
+func TestRuntimeOrchestrator_RepairOutputMemorySkipsUnboundedFailureLesson(t *testing.T) {
 	runID := common.RunID("run-repair-lesson-memory")
 	step := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/zz-llm-repair-failed-1"),
@@ -10638,9 +10657,8 @@ func TestRuntimeOrchestrator_RepairOutputMemoryWritesCaptureExecutionLesson(t *t
 	}
 
 	requests := appendNecessaryOutputMemoryWriteRequests(nil, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-lesson-memory"}, step, output)
-	if !memoryWriteRequestContains(requests, memorycommon.MemoryTypeExecutionLesson, "streaming usage verified") ||
-		!memoryWriteRequestContains(requests, memorycommon.MemoryTypeExecutionLesson, "go test failed") {
-		t.Fatalf("repair memory requests = %+v, want execution lesson with failure and missing DoD context", requests)
+	if len(requests) != 0 {
+		t.Fatalf("repair memory requests = %+v, want no unbounded process memory", requests)
 	}
 }
 
@@ -10698,11 +10716,8 @@ func TestRuntimeOrchestrator_RepairOutputMemoryOmitsRejectedPlanSummary(t *testi
 	}
 
 	requests := appendNecessaryOutputMemoryWriteRequests(nil, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-rejected-summary-memory"}, step, output)
-	if len(requests) != 1 || requests[0].Summary != "Runtime repair rejection captured" {
-		t.Fatalf("repair memory requests = %+v, want rejected repair summary", requests)
-	}
-	if strings.Contains(requests[0].Content, "rootCauseTarget=config.yaml") || strings.Contains(requests[0].Content, "marker comment") {
-		t.Fatalf("repair memory content reused rejected plan summary: %s", requests[0].Content)
+	if len(requests) != 0 {
+		t.Fatalf("repair memory requests = %+v, want rejected repair process kept out of long-term memory", requests)
 	}
 }
 

@@ -147,19 +147,63 @@ func shouldPersistRuntimeMemoryWrite(request runtimeMemoryWriteRequest) bool {
 	if memorycommon.ContainsSensitiveMemoryText(request.Summary, request.Content, joinedTags) {
 		return false
 	}
+	if runtimeMemoryWriteHasTransientTag(request.Tags) {
+		return false
+	}
 	switch request.MemoryType {
 	case memorycommon.MemoryTypeProjectContext:
 		return true
 	case memorycommon.MemoryTypeUserPreference:
 		return true
 	case memorycommon.MemoryTypeDoDFeedback,
-		memorycommon.MemoryTypeExecutionLesson,
-		memorycommon.MemoryTypeSkillFeedback,
+		memorycommon.MemoryTypeExecutionLesson:
+		return runtimeMemoryWriteHasReferenceBoundary(request)
+	case memorycommon.MemoryTypeSkillFeedback,
 		memorycommon.MemoryTypeToolFeedback:
-		return true
+		return runtimeMemoryWriteHasAcceptedInputTag(request.Tags)
 	default:
 		return false
 	}
+}
+
+func runtimeMemoryWriteHasTransientTag(tags []string) bool {
+	for _, tag := range tags {
+		switch strings.TrimSpace(strings.ToLower(tag)) {
+		case "provider_retry", "transient", "runtime_plumbing", "schema_invalid", "parse_error", "rejected_output":
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeMemoryWriteHasAcceptedInputTag(tags []string) bool {
+	for _, tag := range tags {
+		if strings.TrimSpace(strings.ToLower(tag)) == "accepted_input" {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeMemoryWriteHasReferenceBoundary(request runtimeMemoryWriteRequest) bool {
+	if runtimeMemoryWriteHasAcceptedInputTag(request.Tags) {
+		return true
+	}
+	text := strings.ToLower(request.Summary + "\n" + request.Content + "\n" + strings.Join(request.Tags, "\n"))
+	for _, token := range []string{
+		"scope:",
+		"precondition:",
+		"appliesto:",
+		"validuntil:",
+		"evidenceref:",
+		"reference_value",
+		"referencevalue",
+	} {
+		if strings.Contains(text, token) {
+			return true
+		}
+	}
+	return false
 }
 
 func appendNecessaryOutputMemoryWriteRequests(requests []runtimeMemoryWriteRequest, run *runModel.Run, step *runModel.Step, output map[string]any) []runtimeMemoryWriteRequest {
@@ -172,9 +216,15 @@ func appendRepairLessonMemoryWrite(requests []runtimeMemoryWriteRequest, _ *runM
 	if step == nil || step.Input == nil || !boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) || hasMemoryWriteType(requests, memorycommon.MemoryTypeExecutionLesson) {
 		return requests
 	}
+	lesson := repairLessonContentHint(step, output)
+	if lesson == "" {
+		return requests
+	}
 	attempt := int(int64FromValue(step.Input[stepInputKeyRuntimeRepairAttempt]))
 	lines := []string{
 		fmt.Sprintf("Repair attempt: %d", attempt),
+		"scope: runtime repair reusable lesson",
+		"appliesTo: " + lesson,
 	}
 	for _, key := range []string{
 		"failedStepId",
@@ -208,14 +258,12 @@ func appendRepairLessonMemoryWrite(requests []runtimeMemoryWriteRequest, _ *runM
 		lines = append(lines, "output.executionGraph: present")
 	}
 	summary := repairLessonSummary(step, output)
-	if lesson := repairLessonContentHint(step, output); lesson != "" {
-		lines = append(lines, "lesson: "+lesson)
-	}
+	lines = append(lines, "lesson: "+lesson)
 	return append(requests, runtimeMemoryWriteRequest{
 		MemoryType: memorycommon.MemoryTypeExecutionLesson,
 		Summary:    summary,
 		Content:    strings.Join(lines, "\n"),
-		Tags:       []string{"repair_loop", "necessary_output"},
+		Tags:       []string{"repair_loop", "necessary_output", "reference_value"},
 	})
 }
 
@@ -264,33 +312,14 @@ func repairLessonContentHint(step *runModel.Step, output map[string]any) string 
 }
 
 func appendProviderRetryToolMemoryWrite(requests []runtimeMemoryWriteRequest, _ *runModel.Run, step *runModel.Step, output map[string]any) []runtimeMemoryWriteRequest {
-	if step == nil || step.Input == nil || !boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) || hasMemoryWriteType(requests, memorycommon.MemoryTypeToolFeedback) {
-		return requests
-	}
-	attempt := int(int64FromValue(step.Input[stepInputKeyProviderRetryAttempt]))
-	lines := []string{
-		fmt.Sprintf("Provider retry attempt: %d", attempt),
-	}
-	for _, key := range []string{"failedStepId", "failureReason", failureOutputKeyClass, failureOutputKeySignature} {
-		if value := strings.TrimSpace(memoryRecallTraceStringValue(step.Input[key])); value != "" {
-			lines = append(lines, fmt.Sprintf("%s: %s", key, value))
-		}
-	}
-	for _, key := range []string{"stage", "status", "summary"} {
-		if value := strings.TrimSpace(stringFromMap(output, key)); value != "" {
-			lines = append(lines, fmt.Sprintf("output.%s: %s", key, value))
-		}
-	}
-	return append(requests, runtimeMemoryWriteRequest{
-		MemoryType: memorycommon.MemoryTypeToolFeedback,
-		Summary:    "Provider retry outcome captured",
-		Content:    strings.Join(lines, "\n"),
-		Tags:       []string{"provider_retry", "tool_context", "necessary_output"},
-	})
+	return requests
 }
 
 func acceptedInputMemoryWriteRequests(run *runModel.Run, step *runModel.Step) []runtimeMemoryWriteRequest {
 	if run == nil || step == nil || step.Kind != llmWorkspaceExecutionStepKind {
+		return nil
+	}
+	if !shouldCaptureAcceptedInputMemory(step) {
 		return nil
 	}
 	pkg := mapFromValue(step.Input[stepInputKeyExecutionContextPackage])
@@ -306,6 +335,16 @@ func acceptedInputMemoryWriteRequests(run *runModel.Run, step *runModel.Step) []
 		ret = append(ret, request)
 	}
 	return ret
+}
+
+func shouldCaptureAcceptedInputMemory(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	if boolValue(step.Input["acceptedInputMemoryCapture"]) {
+		return true
+	}
+	return strings.HasSuffix(string(step.ID), "/step-1")
 }
 
 func acceptedSkillInputMemoryWriteRequest(run *runModel.Run, step *runModel.Step, selected map[string]any) (runtimeMemoryWriteRequest, bool) {

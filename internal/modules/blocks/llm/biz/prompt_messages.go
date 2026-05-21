@@ -91,6 +91,8 @@ func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerProm
 	appendSection("goal-contract-original", "user", "raw_required", goalPromptSection(request.Input))
 	appendSection("dod-contract-original", "user", "raw_required", dodPromptSection(request.Input))
 	appendSection("effective-goal-dod", "user", "normalize_allowed", effectiveGoalDoDPromptSection(request.Input))
+	appendSection("stage-contract", "user", "normalize_allowed", stageContractPromptSection(request.Input))
+	appendSection("repair-action-package", "user", "normalize_allowed", repairActionPackagePromptSection(request.Input))
 	appendSection("governance-soul-policy", "user", "normalize_allowed", governanceSoulPolicyPromptSection(request.Input))
 	appendSection("previous-decision", "assistant", "normalize_allowed", previousDecisionPromptSection(request.Input))
 	appendSection("execution-signals", "user", "normalize_allowed", executionSignalsPromptSection(request))
@@ -286,6 +288,66 @@ func effectiveGoalDoDPromptSection(input map[string]any) string {
 	return marshalPromptSection("Effective Goal and DoD View", section)
 }
 
+func stageContractPromptSection(input map[string]any) string {
+	section := map[string]any{}
+	for _, key := range []string{
+		"currentRuntimeStage",
+		"currentRuntimeStageMode",
+		"runtimeStage",
+		"runtimeStageMode",
+		"currentSoulStage",
+		"stateChangingOutputRequired",
+		"repairObjective",
+		"stateChangingRecoveryMode",
+		"providerTimeoutStateChangingRetry",
+	} {
+		copyMapValue(section, key, input[key])
+	}
+	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
+		copyMapValue(section, "requiredOutput", pkg["requiredOutput"])
+		copyMapValue(section, "forbiddenActions", pkg["forbiddenActions"])
+		copyMapValue(section, "exitCriteria", pkg["exitCriteria"])
+	}
+	if len(section) == 0 {
+		return ""
+	}
+	return marshalPromptSection("Stage Contract", section)
+}
+
+func repairActionPackagePromptSection(input map[string]any) string {
+	pkg := recordFromAny(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		return ""
+	}
+	section := map[string]any{}
+	for _, key := range []string{
+		"currentFailure",
+		"requiredOutput",
+		"structuredFailureSignals",
+		"targetSnapshots",
+		"workspaceFileManifest",
+		"currentExecutionProgress",
+		"coverageTargetSet",
+		"recentRepairAttempts",
+		"previousRejectedOutputSummary",
+		"forbiddenActions",
+		"repairBudget",
+		"exitCriteria",
+		"failureClass",
+		"failureSignature",
+		"failureTargetScope",
+		"failedStepId",
+		"failedStepKind",
+		"reason",
+	} {
+		copyMapValue(section, key, pkg[key])
+	}
+	if len(section) == 0 {
+		section = pkg
+	}
+	return marshalPromptSection("Current Repair Action Package", section)
+}
+
 func governanceSoulPolicyPromptSection(input map[string]any) string {
 	executionContext := recordFromAny(input["executionContext"])
 	section := map[string]any{}
@@ -389,11 +451,11 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			},
 		})
 	}
-	if boolValue(request.Input["stateChangingOutputRequired"]) &&
-		(strings.TrimSpace(stringValue(request.Input["stateChangingRecoveryMode"])) == "direct_state_change" ||
-			boolValue(request.Input["providerTimeoutStateChangingRetry"])) {
+	if stateChangingDecisionRequest(request.Input) {
+		required := stateChangingDecisionRequiredOutput(request.Input)
 		return marshalPromptSection("Current Requested Action", map[string]any{
-			"type": "direct_state_changing_recovery",
+			"type":           "produce_state_changing_repair_or_failed_assessment",
+			"requiredOutput": required,
 			"requirements": []string{
 				"Use the effective Goal and DoD already supplied in the request",
 				"Return direct state-changing output, failed dodAssessment, or a real requiredDecision/requiredApproval blocker",
@@ -422,6 +484,39 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 		"type":         "plan_next_step",
 		"requirements": requirements,
 	})
+}
+
+func stateChangingDecisionRequest(input map[string]any) bool {
+	if !boolValue(input["stateChangingOutputRequired"]) {
+		return false
+	}
+	objective := strings.TrimSpace(stringValue(input["repairObjective"]))
+	if objective == "" ||
+		objective == "produce_state_changing_output" ||
+		strings.TrimSpace(stringValue(input["stateChangingRecoveryMode"])) == "direct_state_change" ||
+		boolValue(input["providerTimeoutStateChangingRetry"]) {
+		return true
+	}
+	return false
+}
+
+func stateChangingDecisionRequiredOutput(input map[string]any) map[string]any {
+	pkg := recordFromAny(input["repairActionPackage"])
+	required := recordFromAny(pkg["requiredOutput"])
+	if len(required) > 0 {
+		return required
+	}
+	return map[string]any{
+		"acceptedKinds": []string{"patch/apply"},
+		"forbiddenKinds": []string{
+			"read_only_graph",
+			"shell_only_graph",
+			"llm_gated_graph",
+			"self_inspection_graph",
+			"context_rehydration_graph",
+		},
+		"mustIncludeStateChangingNode": true,
+	}
 }
 
 func definitionChangeImpactChanged(input map[string]any) bool {

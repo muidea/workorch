@@ -269,7 +269,7 @@ func TestBuildProviderPromptMessagesUsesPackagedGoalAndDoDWhenExecutionContextIs
 	}
 }
 
-func TestBuildProviderPromptMessagesUsesDirectStateChangingRecoveryAction(t *testing.T) {
+func TestBuildProviderPromptMessagesUsesStateChangingRepairAction(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID:    "ws-direct-recovery",
 		RunID:          "run-direct-recovery",
@@ -282,6 +282,16 @@ func TestBuildProviderPromptMessagesUsesDirectStateChangingRecoveryAction(t *tes
 			"stateChangingOutputRequired":       true,
 			"stateChangingRecoveryMode":         "direct_state_change",
 			"providerTimeoutStateChangingRetry": true,
+			"repairObjective":                   "produce_state_changing_output",
+			"repairActionPackage": map[string]any{
+				"failureClass":     "runtime_failed",
+				"failureSignature": "class=runtime_failed|kind=llm/workspace_execution",
+				"requiredOutput": map[string]any{
+					"acceptedKinds":                []string{"patch/apply"},
+					"forbiddenKinds":               []string{"read_only_graph", "shell_only_graph"},
+					"mustIncludeStateChangingNode": true,
+				},
+			},
 			"executionContextPackage": map[string]any{
 				"goal": map[string]any{"text": "create the requested artifact"},
 				"dod":  map[string]any{"items": []any{"artifact exists"}},
@@ -295,7 +305,11 @@ func TestBuildProviderPromptMessagesUsesDirectStateChangingRecoveryAction(t *tes
 		joined += "\n" + item.Content
 	}
 	for _, want := range []string{
-		"direct_state_changing_recovery",
+		"Stage Contract",
+		"Current Repair Action Package",
+		"produce_state_changing_repair_or_failed_assessment",
+		"patch/apply",
+		"read_only_graph",
 		"Do not return run snapshot",
 		"context rehydration",
 		"update those targets directly",
@@ -306,6 +320,9 @@ func TestBuildProviderPromptMessagesUsesDirectStateChangingRecoveryAction(t *tes
 		if !strings.Contains(joined, want) {
 			t.Fatalf("prompt missing %q, joined=%s", want, joined)
 		}
+	}
+	if strings.Contains(joined, "\"type\":\"plan_next_step\"") {
+		t.Fatalf("state-changing repair prompt still requests plan_next_step, joined=%s", joined)
 	}
 }
 

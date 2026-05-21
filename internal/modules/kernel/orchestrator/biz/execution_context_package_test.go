@@ -433,6 +433,51 @@ func TestStepInputMemorySelectionExcludesProviderRetryPlumbing(t *testing.T) {
 	}
 }
 
+func TestStepInputMemorySelectionForStrictRepairRequiresHistoricalBoundary(t *testing.T) {
+	currentRunID := common.RunID("run-memory-strict-current")
+	oldFailedRunID := common.RunID("run-memory-strict-failed")
+	step := &runmodel.Step{
+		ID:    "run-memory-strict-current/repair-001",
+		RunID: currentRunID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageRepair,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+		},
+	}
+	selected, _, excluded := selectStepInputMemoryItemsForStep([]*memorymodel.MemoryItem{
+		{
+			ID:         "memory-failed-run-process",
+			RunID:      oldFailedRunID,
+			MemoryType: memorycommon.MemoryTypeExecutionLesson,
+			Summary:    "Runtime repair lesson captured",
+			Content:    "Repair attempt: 2\nfailureClass: runtime_failed",
+			Importance: 100,
+			Confidence: 100,
+		},
+		{
+			ID:         "memory-failed-run-reference",
+			RunID:      oldFailedRunID,
+			MemoryType: memorycommon.MemoryTypeExecutionLesson,
+			Summary:    "Missing file reads require optional probes or listing before repair",
+			Content:    "scope: runtime repair reusable lesson\nprecondition: file/read target missing\nappliesTo: missing resource recovery",
+			Tags:       []string{"reference_value"},
+			Importance: 90,
+			Confidence: 90,
+		},
+	}, currentRunID, map[common.RunID]common.RunState{oldFailedRunID: common.RunStateFailed}, step, stepInputMemoryLimit)
+
+	if memoryItemsContainID(selected, "memory-failed-run-process") {
+		t.Fatalf("selected = %+v, want unbounded failed-run process memory excluded", selected)
+	}
+	if !memoryItemsContainID(selected, "memory-failed-run-reference") {
+		t.Fatalf("selected = %+v, want bounded reference memory retained", selected)
+	}
+	if !memoryItemsContainID(excluded, "memory-failed-run-process") {
+		t.Fatalf("excluded = %+v, want unbounded failed-run memory in exclusion trace", excluded)
+	}
+}
+
 func memoryItemsContainID(items []*memorymodel.MemoryItem, id common.MemoryID) bool {
 	for _, item := range items {
 		if item != nil && item.ID == id {

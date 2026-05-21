@@ -262,7 +262,7 @@ func (o *RuntimeOrchestrator) refreshedStepInputMemoryContext(ctx context.Contex
 			"reason":                 err.Error(),
 		}
 	}
-	selected, candidates, excluded := selectStepInputMemoryItems(items, run.ID, runStates, stepInputMemoryLimit)
+	selected, candidates, excluded := selectStepInputMemoryItemsForStep(items, run.ID, runStates, step, stepInputMemoryLimit)
 	contexts := memoryItemContextMaps(selected, run.ID)
 	status := "selected"
 	if len(selected) == 0 {
@@ -411,6 +411,49 @@ func selectStepInputMemoryItems(items []*memorymodel.MemoryItem, currentRunID co
 	return selected, candidates, excluded
 }
 
+func selectStepInputMemoryItemsForStep(items []*memorymodel.MemoryItem, currentRunID common.RunID, runStates map[common.RunID]common.RunState, step *runModel.Step, limit int) ([]*memorymodel.MemoryItem, []*memorymodel.MemoryItem, []*memorymodel.MemoryItem) {
+	selected, candidates, excluded := selectStepInputMemoryItems(items, currentRunID, runStates, limit)
+	if !strictRepairMemoryRecall(step) || len(selected) == 0 {
+		return selected, candidates, excluded
+	}
+	filtered := make([]*memorymodel.MemoryItem, 0, len(selected))
+	for _, item := range selected {
+		if shouldExcludeStrictRepairMemoryItem(item, currentRunID, runStates) {
+			excluded = append(excluded, item)
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered, candidates, excluded
+}
+
+func strictRepairMemoryRecall(step *runModel.Step) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	stage := strings.TrimSpace(strings.ToLower(firstNonEmptyString(
+		stringFromMap(step.Input, stepInputKeyRuntimeStage),
+		stringFromMap(step.Input, stepInputKeySoulStage),
+	)))
+	mode := strings.TrimSpace(strings.ToLower(stringFromMap(step.Input, stepInputKeyRuntimeStageMode)))
+	return stage == runtimeStageRepair && (mode == "strict_convergence" || boolValue(step.Input["stateChangingOutputRequired"]))
+}
+
+func shouldExcludeStrictRepairMemoryItem(item *memorymodel.MemoryItem, currentRunID common.RunID, runStates map[common.RunID]common.RunState) bool {
+	if item == nil {
+		return true
+	}
+	if item.RunID == "" || item.RunID == currentRunID {
+		return false
+	}
+	switch runStates[item.RunID] {
+	case common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return !memoryItemHasReferenceBoundary(item)
+	default:
+		return false
+	}
+}
+
 func canSelectMemoryFromRun(item *memorymodel.MemoryItem, currentRunID common.RunID, runCounts map[common.RunID]int) bool {
 	if item == nil || item.RunID == "" || currentRunID == "" || item.RunID == currentRunID {
 		return true
@@ -448,6 +491,33 @@ func shouldExcludeStepInputMemoryItem(item *memorymodel.MemoryItem) bool {
 		return false
 	}
 	return memoryItemHasTag(item, "provider_retry")
+}
+
+func memoryItemHasReferenceBoundary(item *memorymodel.MemoryItem) bool {
+	if item == nil {
+		return false
+	}
+	for _, tag := range item.Tags {
+		switch strings.TrimSpace(strings.ToLower(tag)) {
+		case "accepted_input", "reference_value", "decision", "user_confirmed":
+			return true
+		}
+	}
+	text := strings.ToLower(item.Summary + "\n" + item.Content)
+	for _, token := range []string{
+		"scope:",
+		"precondition:",
+		"appliesto:",
+		"validuntil:",
+		"evidenceref:",
+		"reference_value",
+		"referencevalue",
+	} {
+		if strings.Contains(text, token) {
+			return true
+		}
+	}
+	return false
 }
 
 func memoryItemHasTag(item *memorymodel.MemoryItem, tag string) bool {

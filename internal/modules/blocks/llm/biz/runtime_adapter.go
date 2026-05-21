@@ -2296,7 +2296,63 @@ func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels
 		providerReq.ContextBudget.NormalizedSections = uniqueStrings(append(providerReq.ContextBudget.NormalizedSections, providerReq.PromptContext.Normalization.NormalizedSections...))
 		providerReq.ContextBudget.IncludedSections = uniqueStrings(append(providerReq.ContextBudget.IncludedSections, promptContextSectionIDs(providerReq.PromptContext)...))
 	}
+	providerReq = applyProviderPromptContractGate(providerReq)
 	return providerReq
+}
+
+func applyProviderPromptContractGate(request llmmodels.ProviderRequest) llmmodels.ProviderRequest {
+	if request.ContextBudget == nil {
+		return request
+	}
+	warnings := providerPromptContractWarnings(request)
+	if len(warnings) == 0 {
+		return request
+	}
+	request.ContextBudget.IntegrityWarnings = uniqueStrings(append(request.ContextBudget.IntegrityWarnings, warnings...))
+	if strings.TrimSpace(request.ContextBudget.ContextGateAction) == "" || request.ContextBudget.ContextGateAction == providerContextGatePass {
+		request.ContextBudget.ContextGateAction = providerContextGateFailFast
+		request.ContextBudget.ContextGateReason = warnings[0]
+	}
+	return request
+}
+
+func providerPromptContractWarnings(request llmmodels.ProviderRequest) []string {
+	if !stateChangingDecisionRequest(request.Input) {
+		return nil
+	}
+	currentAction := currentActionPromptContent(request.PromptContext)
+	if currentAction == "" {
+		return []string{"state_changing_current_action_missing"}
+	}
+	warnings := []string{}
+	lowerAction := strings.ToLower(currentAction)
+	if strings.Contains(lowerAction, `"type":"plan_next_step"`) ||
+		strings.Contains(lowerAction, `"type": "plan_next_step"`) {
+		warnings = append(warnings, "state_changing_current_action_conflicts_with_plan_next_step")
+	}
+	required := stateChangingDecisionRequiredOutput(request.Input)
+	for _, accepted := range stringSliceFromValue(required["acceptedKinds"]) {
+		if accepted == "" {
+			continue
+		}
+		if !strings.Contains(currentAction, accepted) {
+			warnings = append(warnings, "state_changing_current_action_missing_accepted_kind")
+			break
+		}
+	}
+	return uniqueStrings(warnings)
+}
+
+func currentActionPromptContent(context *llmmodels.PromptContext) string {
+	if context == nil {
+		return ""
+	}
+	for _, turn := range context.Turns {
+		if strings.Contains(turn.Content, "Current Requested Action") {
+			return turn.Content
+		}
+	}
+	return ""
 }
 
 func isAssessmentOnlyDecisionRequest(request llmmodels.ProviderRequest) bool {
@@ -2510,6 +2566,23 @@ func boolValue(value any) bool {
 		return typed
 	default:
 		return false
+	}
+}
+
+func stringSliceFromValue(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(stringValue(item)); text != "" {
+				ret = append(ret, text)
+			}
+		}
+		return ret
+	default:
+		return nil
 	}
 }
 
