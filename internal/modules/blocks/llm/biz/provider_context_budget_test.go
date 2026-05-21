@@ -503,6 +503,44 @@ func TestRedactProviderRequestPreservesOnlySafeRepairSnapshotContent(t *testing.
 	}
 }
 
+func TestRedactProviderRequestDoesNotReportSafeSnapshotRedactedForJSONDecodedSlices(t *testing.T) {
+	safeContent := "package main\n\nconst APIKey = \"test-key\"\n"
+	req := llmmodels.ProviderRequest{
+		Input: map[string]any{
+			"apiKey": "top-secret",
+			"failureTargetRepairContext": []any{map[string]any{
+				"targetRef":        "gateway/main_test.go",
+				"content":          safeContent,
+				"contentHash":      "sha256-safe",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"redacted":         false,
+			}},
+			"repairActionPackage": map[string]any{
+				"targetSnapshots": []any{map[string]any{
+					"targetRef":        "gateway/main_test.go",
+					"content":          safeContent,
+					"contentHash":      "sha256-safe",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+					"redacted":         false,
+				}},
+			},
+		},
+	}
+
+	got := redactProviderRequestForLLM(req)
+	if got.ContextBudget == nil || !got.ContextBudget.RedactionApplied {
+		t.Fatalf("contextBudget = %+v, want redaction manifest for sensitive top-level content", got.ContextBudget)
+	}
+	for _, path := range got.ContextBudget.RedactedPaths {
+		if strings.HasPrefix(path, "input.failureTargetRepairContext[].") ||
+			strings.HasPrefix(path, "input.repairActionPackage.targetSnapshots[].") {
+			t.Fatalf("redactedPaths = %+v, safe JSON-decoded repair snapshot should not be reported as redacted", got.ContextBudget.RedactedPaths)
+		}
+	}
+}
+
 func TestEnforceProviderRequestBudgetRecordsContextIntegrityAudit(t *testing.T) {
 	safeContent := "package main\n\nfunc main() {}\n"
 	req := llmmodels.ProviderRequest{

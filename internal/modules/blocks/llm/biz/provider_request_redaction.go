@@ -213,35 +213,40 @@ func collectRedactionPaths(path string, before any, after any, paths *[]string) 
 			}
 			collectRedactionPaths(nextPath, beforeValue, afterValue, paths)
 		}
-	case []any:
-		afterTyped, _ := after.([]any)
-		for idx, beforeValue := range beforeTyped {
-			afterValue := any(nil)
-			if idx < len(afterTyped) {
-				afterValue = afterTyped[idx]
-			}
-			collectRedactionPaths(path+"[]", beforeValue, afterValue, paths)
-		}
-	case []map[string]any:
-		afterTyped, _ := after.([]map[string]any)
-		for idx, beforeValue := range beforeTyped {
-			afterValue := map[string]any(nil)
-			if idx < len(afterTyped) {
-				afterValue = afterTyped[idx]
-			}
-			collectRedactionPaths(path+"[]", beforeValue, afterValue, paths)
-		}
-	case []string:
-		afterTyped, _ := after.([]string)
-		for idx, beforeValue := range beforeTyped {
-			afterValue := ""
-			if idx < len(afterTyped) {
-				afterValue = afterTyped[idx]
-			}
-			collectRedactionPaths(path+"[]", beforeValue, afterValue, paths)
-		}
 	default:
+		if beforeItems, ok := redactionPathSliceFromAny(beforeTyped); ok {
+			afterItems, _ := redactionPathSliceFromAny(after)
+			for idx, beforeValue := range beforeItems {
+				afterValue := any(nil)
+				if idx < len(afterItems) {
+					afterValue = afterItems[idx]
+				}
+				collectRedactionPaths(path+"[]", beforeValue, afterValue, paths)
+			}
+			return
+		}
 		*paths = append(*paths, path)
+	}
+}
+
+func redactionPathSliceFromAny(value any) ([]any, bool) {
+	switch typed := value.(type) {
+	case []any:
+		return typed, true
+	case []map[string]any:
+		ret := make([]any, 0, len(typed))
+		for _, item := range typed {
+			ret = append(ret, item)
+		}
+		return ret, true
+	case []string:
+		ret := make([]any, 0, len(typed))
+		for _, item := range typed {
+			ret = append(ret, item)
+		}
+		return ret, true
+	default:
+		return nil, false
 	}
 }
 

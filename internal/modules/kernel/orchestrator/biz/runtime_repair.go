@@ -2864,7 +2864,7 @@ func primaryDiagnosticRepairContractFromSignals(signals map[string]any) map[stri
 	targetRefs := primaryDiagnosticTargetRefs(signals, lineRefs)
 	identifiers := stringSliceFromValue(signals["identifiers"])
 	messages := stringSliceFromValue(signals["messages"])
-	if len(lineRefs) == 0 && len(targetRefs) == 0 && len(identifiers) == 0 {
+	if len(lineRefs) == 0 && len(targetRefs) == 0 {
 		return nil
 	}
 	ret := map[string]any{
@@ -3245,7 +3245,7 @@ func addStrategyReassessmentRequiredOutputContract(pkg map[string]any, requiredO
 	}
 	requiredOutput["mustDeclareStrategyReassessmentFields"] = true
 	requiredOutput["strategyReassessmentRequiredFields"] = requiredFields
-	requiredOutput["strategyReassessmentMatchRule"] = "each state-changing patch/apply node must declare these fields in its input and align failedSurface with strategyReassessment.failedSurface; rootCauseTarget must identify the resource or scope being changed"
+	requiredOutput["strategyReassessmentMatchRule"] = "each state-changing patch/apply node must declare these fields inside the patch/apply input object, not as top-level decision fields or node sibling fields; failedSurface must align with strategyReassessment.failedSurface and rootCauseTarget must identify the resource or scope being changed"
 	if strategyReassessmentRequiresRootCauseTargetShift(reassessment) {
 		requiredOutput["mustDistinguishRootCauseTarget"] = true
 		requiredOutput["rootCauseTargetShiftRule"] = "when repeatedly repairing the same failed surface, patch a distinct root-cause target or return a failed assessment/blocker"
@@ -3716,6 +3716,7 @@ func structuredFailureSignalsFromFailureOutput(output map[string]any, execErr er
 	}
 	sources := make([]string, 0, len(texts))
 	targets := []string{}
+	externalRefs := []string{}
 	identifiers := []string{}
 	messages := []string{}
 	lineRefs := []map[string]any{}
@@ -3741,6 +3742,10 @@ func structuredFailureSignalsFromFailureOutput(output map[string]any, execErr er
 			}
 		}
 		for _, targetRef := range extractStructuredFailureTargetRefs(text) {
+			if structuredFailureRefLooksExternalReference(targetRef) {
+				externalRefs = append(externalRefs, targetRef)
+				continue
+			}
 			if structuredFailureTargetRefGroundedBySourceOrText(source, text, targetRef) {
 				targets = append(targets, targetRef)
 			}
@@ -3754,6 +3759,9 @@ func structuredFailureSignalsFromFailureOutput(output map[string]any, execErr er
 	}
 	if targets = limitedStrings(compactUniqueStrings(targets), maxLLMContextSliceItems); len(targets) > 0 {
 		ret["targetRefs"] = targets
+	}
+	if externalRefs = limitedStrings(compactUniqueStrings(externalRefs), maxLLMContextSliceItems); len(externalRefs) > 0 {
+		ret["externalReferences"] = externalRefs
 	}
 	if len(lineRefs) > 0 {
 		ret["lineRefs"] = lineRefs
@@ -3822,7 +3830,7 @@ func extractStructuredFailureLineRefs(text string) []map[string]any {
 			continue
 		}
 		targetRef := normalizeStructuredFailureTargetRef(match[1])
-		if targetRef == "" {
+		if targetRef == "" || structuredFailureRefLooksExternalReference(targetRef) {
 			continue
 		}
 		line, _ := strconv.Atoi(match[2])
@@ -3932,6 +3940,18 @@ func structuredFailureTextTargetRefAllowed(value string) bool {
 		return false
 	}
 	if structuredFailureBareTargetLooksLikeNumericMeasurement(base, ext) {
+		return false
+	}
+	return true
+}
+
+func structuredFailureRefLooksExternalReference(value string) bool {
+	value = normalizeStructuredFailureTargetRef(value)
+	if value == "" || !strings.Contains(value, "/") {
+		return false
+	}
+	parts := strings.Split(value, "/")
+	if len(parts) < 2 || !strings.Contains(parts[0], ".") {
 		return false
 	}
 	return true
@@ -4730,6 +4750,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFailureTargetContext(ctx context.Cont
 		return nil
 	}
 	targetRefs = resolveWorkspaceTargetRefs(workspace.DeliverableDirectory, targetRefs)
+	targetRefs = compactUniqueStrings(targetRefs)
 	ret := make([]map[string]any, 0, min(len(targetRefs), 3))
 	for idx, targetRef := range targetRefs {
 		if idx >= 3 {

@@ -73,7 +73,8 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	if err := os.MkdirAll(deliverableDirectory, 0o755); err != nil {
 		return runtimemodel.StepExecutionResult{}, err
 	}
-	if err := validateShellCommandPolicy(command, args, deliverableDirectory); err != nil {
+	execCommand, execArgs, commandNormalization := normalizeShellExecutionCommand(command, args)
+	if err := validateShellCommandPolicy(execCommand, execArgs, deliverableDirectory); err != nil {
 		return runtimemodel.StepExecutionResult{}, err
 	}
 
@@ -84,7 +85,6 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	execCommand, execArgs, commandNormalization := normalizeShellExecutionCommand(command, args)
 	startedAt := time.Now().UTC()
 	cmd := exec.CommandContext(runCtx, execCommand, execArgs...)
 	cmd.Dir = deliverableDirectory
@@ -127,6 +127,9 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 }
 
 func normalizeShellExecutionCommand(command string, args []string) (string, []string, string) {
+	if shellCommandRequiresInlineShell(command, args) {
+		return "sh", []string{"-c", shellCommandInlineScript(command, args)}, "compound_command_wrapped_with_sh_c"
+	}
 	if !shellCommandRequiresBash(command, args) {
 		return command, args, ""
 	}
@@ -135,6 +138,66 @@ func normalizeShellExecutionCommand(command string, args []string) (string, []st
 		return command, args, ""
 	}
 	return bashPath, args, "sh_script_requires_bash_pipefail"
+}
+
+func shellCommandRequiresInlineShell(command string, args []string) bool {
+	base := filepath.Base(strings.TrimSpace(command))
+	if base == "" || base == "sh" || base == "bash" || base == "zsh" {
+		return false
+	}
+	if shellCommandIsShellBuiltin(base) && len(args) > 0 {
+		return true
+	}
+	for _, arg := range args {
+		if shellCommandArgIsShellOperator(arg) {
+			return true
+		}
+	}
+	return false
+}
+
+func shellCommandIsShellBuiltin(command string) bool {
+	switch strings.TrimSpace(command) {
+	case "cd", "export", "alias", "source", ".":
+		return true
+	default:
+		return false
+	}
+}
+
+func shellCommandArgIsShellOperator(arg string) bool {
+	switch strings.TrimSpace(arg) {
+	case "&&", "||", ";", "|", ">", ">>", "<", "2>", "2>>":
+		return true
+	default:
+		return false
+	}
+}
+
+func shellCommandInlineScript(command string, args []string) string {
+	parts := []string{shellQuoteCommandToken(command)}
+	for _, arg := range args {
+		if shellCommandArgIsShellOperator(arg) {
+			parts = append(parts, strings.TrimSpace(arg))
+			continue
+		}
+		parts = append(parts, shellQuoteCommandToken(arg))
+	}
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
+func shellQuoteCommandToken(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "''"
+	}
+	if strings.IndexFunc(value, func(r rune) bool {
+		return !(r == '/' || r == '.' || r == '_' || r == '-' || r == ':' || r == '=' ||
+			(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'))
+	}) == -1 {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func shellCommandRequiresBash(command string, args []string) bool {

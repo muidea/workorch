@@ -140,6 +140,10 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		ret["recentFailureSummary"] = failures
 	}
 	if len(processTimeline) > 0 {
+		if shouldCompactProcessEvidenceForStateChangingRepair(step) {
+			processTimeline = compactProcessEvidenceTimelineForStateChangingRepair(processTimeline)
+			progressDigest = currentProgressDigestFromProcessEvidenceTimeline(processTimeline)
+		}
 		ret[stepInputKeyProcessEvidenceTimeline] = processTimeline
 	}
 	if len(progressDigest) > 0 {
@@ -174,6 +178,61 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	}
 	if len(governanceHistory) > 0 {
 		ret["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(governanceHistory, 6)
+	}
+	return ret
+}
+
+func shouldCompactProcessEvidenceForStateChangingRepair(step *runModel.Step) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	return boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) &&
+		boolValue(step.Input["stateChangingOutputRequired"]) &&
+		len(mapFromValue(step.Input["repairActionPackage"])) > 0
+}
+
+func compactProcessEvidenceTimelineForStateChangingRepair(input []map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	selected := input
+	if len(selected) > 8 {
+		selected = selected[len(selected)-8:]
+	}
+	ret := make([]map[string]any, 0, len(selected))
+	for _, item := range selected {
+		if len(item) == 0 {
+			continue
+		}
+		next := map[string]any{}
+		for _, key := range []string{
+			"order",
+			"sourceRef",
+			"stepId",
+			"kind",
+			"actionKind",
+			"state",
+			"stage",
+			"graphNodeId",
+			"graphRootStepId",
+			"summary",
+			"inputSummary",
+			"failureClass",
+			"failureSignature",
+			"failureReason",
+			"outputRef",
+			"payloadRef",
+		} {
+			if value, ok := item[key]; ok && value != nil {
+				next[key] = compactLLMContextValue(value, 1)
+			}
+		}
+		if refs := stringSliceFromValue(item["evidenceRefs"]); len(refs) > 0 {
+			next["evidenceRefs"] = refs
+		}
+		if len(next) > 0 {
+			ret = append(ret, next)
+		}
 	}
 	return ret
 }

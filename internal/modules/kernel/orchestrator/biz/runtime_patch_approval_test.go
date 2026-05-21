@@ -9,11 +9,11 @@ import (
 func TestPatchApprovalReasonsRequireApprovalForLargeLockfileChange(t *testing.T) {
 	content := ""
 	for i := 0; i < 60; i++ {
-		content += "github.com/example/mod v1.0.0 h1:hash\n"
+		content += "unit-001 checksum-hash\n"
 	}
 	reasons := patchApprovalReasons(runtimePatchRequest{
 		PatchType: "file_write",
-		TargetRef: "go.sum",
+		TargetRef: "dependencies.lock",
 		Content:   content,
 	})
 	if !containsString(reasons, "lockfile_large_change") {
@@ -24,8 +24,8 @@ func TestPatchApprovalReasonsRequireApprovalForLargeLockfileChange(t *testing.T)
 func TestPatchApprovalReasonsAllowSmallLockfileChange(t *testing.T) {
 	reasons := patchApprovalReasons(runtimePatchRequest{
 		PatchType: "file_write",
-		TargetRef: "go.sum",
-		Content:   "github.com/example/mod v1.0.0 h1:hash\n",
+		TargetRef: "dependencies.lock",
+		Content:   "unit-001 checksum-hash\n",
 	})
 	if containsString(reasons, "lockfile_large_change") || containsString(reasons, "large_change") {
 		t.Fatalf("reasons = %+v, want no lockfile or large-change approval reason", reasons)

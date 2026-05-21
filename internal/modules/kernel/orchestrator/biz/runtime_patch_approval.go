@@ -252,12 +252,15 @@ func isSensitivePatchTarget(targetRef string) bool {
 
 func isLockfilePatchTarget(targetRef string) bool {
 	base := strings.ToLower(filepath.Base(filepath.ToSlash(filepath.Clean(strings.TrimSpace(targetRef)))))
-	switch base {
-	case "go.sum", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "composer.lock", "poetry.lock", "cargo.lock", "gemfile.lock":
+	ext := strings.TrimPrefix(filepath.Ext(base), ".")
+	stem := strings.TrimSuffix(base, "."+ext)
+	if base == "lock" || base == "lockfile" || ext == "lock" {
 		return true
-	default:
-		return false
 	}
+	return strings.Contains(base, "lockfile") ||
+		strings.Contains(base, ".lock.") ||
+		strings.HasSuffix(stem, "-lock") ||
+		strings.HasSuffix(stem, "_lock")
 }
 
 func cloneMapSlice(items []map[string]any) []map[string]any {

@@ -293,6 +293,45 @@ func TestRuntimeAdapter_ExecuteRuntimeStepNormalizesShPipefailScriptToBash(t *te
 	}
 }
 
+func TestRuntimeAdapter_ExecuteRuntimeStepWrapsCompoundCommandWithShell(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	deliverableDirectory := t.TempDir()
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command": "cd",
+			"args":    []any{".", "&&", "pwd"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v", err)
+	}
+	if result.Output["commandNormalization"] != "compound_command_wrapped_with_sh_c" {
+		t.Fatalf("commandNormalization = %v, want compound command normalization", result.Output["commandNormalization"])
+	}
+	stdout, _ := result.Output["stdout"].(string)
+	if strings.TrimSpace(stdout) != deliverableDirectory {
+		t.Fatalf("stdout = %q, want deliverable directory %q", stdout, deliverableDirectory)
+	}
+}
+
+func TestRuntimeAdapter_ExecuteRuntimeStepRejectsDangerousCompoundCommandAfterWrapping(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	_, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: t.TempDir(),
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command": "echo",
+			"args":    []any{"ok", "&&", "sudo", "true"},
+		},
+	})
+	if err == nil {
+		t.Fatal("ExecuteRuntimeStep err = nil, want invalid argument")
+	}
+}
+
 func TestRuntimeAdapter_ExecuteRuntimeStepRejectsInvalidInputTimeoutMillis(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	_, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{

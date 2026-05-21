@@ -74,6 +74,24 @@ func TestStructuredFailureSignalsDoNotPromoteRuntimeContractFieldsAsTargetRefs(t
 	}
 }
 
+func TestPrimaryDiagnosticRepairRequiresConcreteTargetEvidence(t *testing.T) {
+	signals := map[string]any{
+		"identifiers": []string{
+			"llm_decision_invalid",
+			"workspace_execution",
+			"llm_schema_invalid",
+			"strategyReassessment",
+		},
+		"messages": []string{
+			`invalid argument: invalid llm decision json: json: unknown field "strategyReassessment"`,
+		},
+	}
+
+	if contract := primaryDiagnosticRepairContractFromSignals(signals); len(contract) != 0 {
+		t.Fatalf("primaryDiagnosticRepair = %#v, want omitted without targetRefs or lineRefs", contract)
+	}
+}
+
 func TestStructuredFailureSignalsFilterExecutionLabelsAndDurations(t *testing.T) {
 	output := map[string]any{
 		"stderr": strings.Join([]string{
@@ -94,6 +112,30 @@ func TestStructuredFailureSignalsFilterExecutionLabelsAndDurations(t *testing.T)
 		if stringSliceContains(targets, forbidden) {
 			t.Fatalf("targetRefs = %#v, want execution label/duration %q filtered", targets, forbidden)
 		}
+	}
+}
+
+func TestStructuredFailureSignalsKeepExternalReferencesOutOfTargetRefs(t *testing.T) {
+	output := map[string]any{
+		"stderr": strings.Join([]string{
+			"missing metadata entry for external.example/unit/name",
+			"./actual_target.txt:9:1: unresolved external reference",
+		}, "\n"),
+		failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=actual_target.txt|exitCode=1",
+	}
+
+	signals := structuredFailureSignalsFromFailureOutput(output, errors.New("exit status 1"), failureClassShellCommand, "")
+
+	targets := stringSliceFromValue(signals["targetRefs"])
+	if stringSliceContains(targets, "external.example/unit/name") {
+		t.Fatalf("targetRefs = %#v, want external reference kept out of workspace targets", targets)
+	}
+	if !stringSliceContains(targets, "actual_target.txt") {
+		t.Fatalf("targetRefs = %#v, want actual workspace-shaped target retained", targets)
+	}
+	externalRefs := stringSliceFromValue(signals["externalReferences"])
+	if !stringSliceContains(externalRefs, "external.example/unit/name") {
+		t.Fatalf("externalReferences = %#v, want external reference retained diagnostically", externalRefs)
 	}
 }
 
@@ -357,6 +399,9 @@ func TestRuntimeRepairActionPackageMarksRepeatedTargetRepairMode(t *testing.T) {
 		!stringSliceContains(stringSliceFromValue(required["strategyReassessmentRequiredFields"]), "rootCauseTarget") ||
 		required["mustDistinguishRootCauseTarget"] != true {
 		t.Fatalf("requiredOutput = %#v, want explicit strategy reassessment output contract", required)
+	}
+	if rule := stringFromAny(required["strategyReassessmentMatchRule"]); !strings.Contains(rule, "inside the patch/apply input object") || strings.Contains(rule, "top-level decision fields") == false {
+		t.Fatalf("strategyReassessmentMatchRule = %q, want explicit placement rule", rule)
 	}
 	diagnostics := mapFromValue(actionPackage["targetRelevanceDiagnostics"])
 	if diagnostics["targetSnapshotCount"] != 1 || diagnostics["failureSignalIdentifierCount"] != 1 {
