@@ -138,8 +138,8 @@ Notes:
 - `make console-build` rebuilds the embedded management console assets from `web/workorch-console`
 - `make verify-service` and `make verify-service-file` verify the currently deployed `workorch --server` HTTP service at `WORKORCH_BASE_URL` without starting or stopping it
 - `make verify-service-file` is kept as an alias for the same deployed-instance check
-- `make run-file` runs the service with the file-backed repository backend
-- default memory-backed service state is shared within the running `workorch --server` process; use `make run-file` for restart persistence
+- `make run-file` runs the service with the default file-backed repository backend
+- default service state is file-backed and persists under `repository.dataDir`
 - file-backed service execution is repeatable against the same data directory for the shipped workorch IDs
 - `make ci` is the local equivalent of the GitHub Actions baseline
 
@@ -239,7 +239,7 @@ maxConcurrentRuns = 1
 defaultDialogLanguage = ""
 
 [repository]
-backend = "memory"
+backend = "file"
 # repository.dataDir is WorkOrch internal state. For file-backed containers,
 # config/container-file/application.toml uses /var/lib/workorch/.workorch-data
 # so default deliverables can live beside it under /var/lib/workorch/.workorch-workspaces.

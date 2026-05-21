@@ -3845,7 +3845,7 @@ func (s *serverState) registerAutoGovernanceResumeWatcher() {
 }
 
 func isMemoryBackend(backend string) bool {
-	return backend == "" || backend == "memory"
+	return backend == "memory"
 }
 
 func enqueueEventStreamEnvelope(ch chan events.Envelope, envelope events.Envelope) {

@@ -484,8 +484,8 @@ func writeWorkorchTestConfig(t *testing.T, addr string, extraEnv []string) strin
 	t.Helper()
 
 	values := map[string]string{
-		"repository.backend": "memory",
-		"repository.dataDir": "",
+		"repository.backend": "file",
+		"repository.dataDir": filepath.Join(t.TempDir(), ".workorch-data"),
 		"server.readTimeout": "15s",
 	}
 	for _, item := range extraEnv {

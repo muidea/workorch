@@ -330,8 +330,9 @@ func (r *Runtime) SetRunService(service runservice.Service) {
 }
 
 func buildRepositories(backend string, dataRoot string) (common.RepositorySet, error) {
+	backend = appbootstrap.NormalizeRepositoryBackend(backend)
 	switch backend {
-	case "", "memory":
+	case "memory":
 		return common.RepositorySet{
 			Souls:                memory.NewSoulRepository(),
 			WorkspaceTemplates:   memory.NewWorkspaceTemplateRepository(),

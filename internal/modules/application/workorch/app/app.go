@@ -254,7 +254,7 @@ func EnsureConfigFile(dir string) error {
 			"shutdownTimeout":   "5s",
 		},
 		"repository": map[string]any{
-			"backend": "memory",
+			"backend": "file",
 			"dataDir": ".workorch-data",
 		},
 	}

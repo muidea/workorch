@@ -36,8 +36,9 @@ type repositorySet struct {
 }
 
 func buildRepositories(backend string, dataRoot string) repositorySet {
+	backend = NormalizeRepositoryBackend(backend)
 	switch backend {
-	case "", "memory":
+	case "memory":
 		return repositorySet{
 			soul:                memory.NewSoulRepository(),
 			workspaceTemplate:   memory.NewWorkspaceTemplateRepository(),
@@ -97,6 +98,7 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 }
 
 func ResolveRepositoryDataRoot(backend string, dataRoot string) string {
+	backend = NormalizeRepositoryBackend(backend)
 	if backend != "file" {
 		return ""
 	}
@@ -104,4 +106,11 @@ func ResolveRepositoryDataRoot(backend string, dataRoot string) string {
 		return filepath.Join(os.TempDir(), "workorch-data")
 	}
 	return dataRoot
+}
+
+func NormalizeRepositoryBackend(backend string) string {
+	if backend == "" {
+		return "file"
+	}
+	return backend
 }

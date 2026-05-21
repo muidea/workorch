@@ -157,7 +157,8 @@ endpointName = "workorch"
 addr = "127.0.0.1:18080"
 
 [repository]
-backend = "memory"
+backend = "file"
+dataDir = ".workorch-data"
 
 [llm]
 defaultProvider = "local"
@@ -296,7 +297,8 @@ endpointName = "workorch"
 addr = "127.0.0.1:18080"
 
 [repository]
-backend = "memory"
+backend = "file"
+dataDir = ".workorch-data"
 	`)
 	_ = Close()
 	t.Setenv(EnvConfigDir, configDir)
