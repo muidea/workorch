@@ -182,6 +182,107 @@ func TestRuntimeRepairActionPackageDoesNotUseRuntimeContractFieldsAsRepairTarget
 	}
 }
 
+func TestRuntimeRepairActionPackageUsesEvidenceAcquisitionWithoutConcreteTarget(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"failedStepId":                "run/repair-001",
+		"failedStepKind":              llmWorkspaceExecutionStepKind,
+		"failureClass":                failureClassLLMDecisionInvalid,
+		"failureReason":               "invalid argument: invalid llm decision json: no json object found",
+	}
+
+	actionPackage := repairActionPackageFromRepairInput(input, map[string]any{
+		"stage":               "llm_schema_invalid",
+		"error":               "invalid argument: invalid llm decision json: no json object found",
+		failureOutputKeyClass: failureClassLLMDecisionInvalid,
+	})
+
+	if actionPackage["evidenceAcquisitionRequired"] != true {
+		t.Fatalf("repairActionPackage = %#v, want evidence acquisition required", actionPackage)
+	}
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != false || required["mustProduceConcreteFailureEvidence"] != true {
+		t.Fatalf("requiredOutput = %#v, want evidence acquisition output contract", required)
+	}
+	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("acceptedKinds = %#v, want no patch/apply without concrete target evidence", required["acceptedKinds"])
+	}
+	if required["mustReturnValidJSON"] != true {
+		t.Fatalf("requiredOutput = %#v, want schema recovery JSON contract preserved", required)
+	}
+}
+
+func TestRuntimeRepairActionPackageRequiresPatchWithConcreteTargetSnapshot(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"failureTargetRepairContext": []map[string]any{{
+			"targetRef":        "main_test.go",
+			"exists":           true,
+			"contentHash":      "hash-main-test",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+			"content":          "package main\n",
+		}},
+		"structuredFailureSignals": map[string]any{
+			"targetRefs": []string{"main_test.go"},
+			"lineRefs":   []map[string]any{{"targetRef": "main_test.go", "line": 91}},
+		},
+	}
+
+	actionPackage := repairActionPackageFromRepairInput(input, map[string]any{
+		"status": "failed",
+		"stderr": "./main_test.go:91:2: cannot assign to struct field in map",
+	})
+
+	if actionPackage["evidenceAcquisitionRequired"] == true {
+		t.Fatalf("repairActionPackage = %#v, did not expect evidence acquisition with target snapshot", actionPackage)
+	}
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true || !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %#v, want patch/apply state-changing contract", required)
+	}
+	if targets := mapSliceFromValue(actionPackage["targetSnapshots"]); len(targets) != 1 || targets[0]["targetRef"] != "main_test.go" {
+		t.Fatalf("targetSnapshots = %#v, want main_test.go snapshot", actionPackage["targetSnapshots"])
+	}
+}
+
+func TestInitialStepInputReplanUsesEvidenceAcquisitionWithoutConcreteTarget(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-replan-no-target",
+		WorkspaceID:     "ws-replan-no-target",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-predecessor",
+				"reason":           "continue predecessor",
+				"failureContext": map[string]any{
+					failureOutputKeyClass: failureClassLLMDecisionInvalid,
+					"failedStepKind":      llmWorkspaceExecutionStepKind,
+					"failedStepOutput": map[string]any{
+						"stage": "llm_schema_invalid",
+						"error": "invalid argument: invalid llm decision json: no json object found",
+					},
+				},
+			},
+		},
+	}
+
+	input := initialStepInput(run)
+	if input["stateChangingOutputRequired"] != nil {
+		t.Fatalf("initial input = %#v, want no stateChangingOutputRequired without concrete target", input)
+	}
+	if input["repairObjective"] != repairObjectiveAcquireFailureEvidence || input["concreteFailureEvidenceRequired"] != true {
+		t.Fatalf("initial input = %#v, want evidence acquisition objective", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != false || required["mustProduceConcreteFailureEvidence"] != true {
+		t.Fatalf("requiredOutput = %#v, want evidence acquisition contract", required)
+	}
+}
+
 func TestRuntimeRepairActionPackageIncludesStructuredFailureSignalsAndForbiddenReuse(t *testing.T) {
 	runID := common.RunID("run-repair-grounding")
 	failedStep := &runmodel.Step{

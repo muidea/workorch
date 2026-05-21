@@ -3608,7 +3608,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputKeepsAmbiguousSuffixFailureTarget
 	}
 }
 
-func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangingOutputForContractFailure(t *testing.T) {
+func TestRuntimeOrchestrator_RuntimeRepairInputAcquiresEvidenceForContractFailureWithoutTarget(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{
 		steps:      memory.NewStepRepository(),
@@ -3632,13 +3632,15 @@ func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangingOutputForCon
 
 	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-state-contract"}, failedStep, 1, common.ErrInvalidArgument)
 
-	if input["repairObjective"] != "produce_state_changing_output" || !boolValue(input["stateChangingOutputRequired"]) {
-		t.Fatalf("repair input = %+v, want state-changing output objective", input)
+	if input["repairObjective"] != repairObjectiveAcquireFailureEvidence ||
+		input["stateChangingOutputRequired"] != nil ||
+		input["concreteFailureEvidenceRequired"] != true {
+		t.Fatalf("repair input = %+v, want concrete evidence acquisition objective", input)
 	}
 	guidance := stringSliceFromValue(input["repairGuidance"])
 	joined := strings.Join(guidance, "\n")
-	if !strings.Contains(joined, "state-changing output") || !strings.Contains(joined, "shell-only executionGraph") || !strings.Contains(joined, "patch/apply state-change artifact") {
-		t.Fatalf("repairGuidance = %#v, want state-changing output and shell-only rejection guidance", guidance)
+	if !strings.Contains(joined, "Acquire bounded concrete failure evidence") || strings.Contains(joined, "next output must include patch/apply") {
+		t.Fatalf("repairGuidance = %#v, want evidence acquisition guidance", guidance)
 	}
 }
 
@@ -4236,7 +4238,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangeForUnclassifie
 	}
 }
 
-func TestRuntimeOrchestrator_RuntimeRepairInputInheritsStateChangingRequirement(t *testing.T) {
+func TestRuntimeOrchestrator_RuntimeRepairInputSwitchesInheritedStateChangingRequirementToEvidenceAcquisitionWithoutTarget(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{
 		steps:      memory.NewStepRepository(),
@@ -4260,8 +4262,10 @@ func TestRuntimeOrchestrator_RuntimeRepairInputInheritsStateChangingRequirement(
 
 	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-state-contract-inherit"}, failedStep, 2, common.ErrInvalidArgument)
 
-	if input["repairObjective"] != "produce_state_changing_output" || !boolValue(input["stateChangingOutputRequired"]) {
-		t.Fatalf("repair input = %+v, want inherited state-changing output objective", input)
+	if input["repairObjective"] != repairObjectiveAcquireFailureEvidence ||
+		input["stateChangingOutputRequired"] != nil ||
+		input["concreteFailureEvidenceRequired"] != true {
+		t.Fatalf("repair input = %+v, want inherited wrapper failure to acquire concrete target evidence", input)
 	}
 }
 
@@ -4880,7 +4884,7 @@ func TestRunExecutionInputKeepsOnlySlimExecutionContext(t *testing.T) {
 	}
 }
 
-func TestInitialStepInputRequiresStateChangingRepairForReplanContinuation(t *testing.T) {
+func TestInitialStepInputUsesEvidenceAcquisitionForReplanContinuationWithoutTarget(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-replan-state-changing-repair",
 		WorkspaceID:     "ws-replan-state-changing-repair",
@@ -4898,15 +4902,16 @@ func TestInitialStepInputRequiresStateChangingRepairForReplanContinuation(t *tes
 
 	if input[stepInputKeySoulStage] != soulStageExecution ||
 		input[stepInputKeyRuntimeStage] != runtimeStageRepair ||
-		input["repairObjective"] != repairObjectiveStateChangingOutput ||
-		input["stateChangingOutputRequired"] != true ||
+		input["repairObjective"] != repairObjectiveAcquireFailureEvidence ||
+		input["stateChangingOutputRequired"] != nil ||
+		input["concreteFailureEvidenceRequired"] != true ||
 		input["replanStateChangingContinuation"] != true {
-		t.Fatalf("initial replan input = %+v, want state-changing repair constraints", input)
+		t.Fatalf("initial replan input = %+v, want evidence acquisition repair constraints", input)
 	}
 	guidance := stringSliceFromValue(input["repairGuidance"])
 	joined := strings.Join(guidance, "\n")
-	if !strings.Contains(joined, "state-changing output") || !strings.Contains(joined, "shell-only executionGraph") {
-		t.Fatalf("repairGuidance = %#v, want state-changing repair guidance", guidance)
+	if !strings.Contains(joined, "Acquire bounded concrete failure evidence") || strings.Contains(joined, "patch/apply until current failure evidence") == false {
+		t.Fatalf("repairGuidance = %#v, want evidence acquisition guidance", guidance)
 	}
 	executionContext := mapFromValue(input["executionContext"])
 	if len(mapFromValue(executionContext["replanContinuation"])) == 0 {
@@ -10052,9 +10057,10 @@ func TestRuntimeOrchestrator_ProviderRetryContractInvalidRoutesToRuntimeRepair(t
 	if specs[0].Input[stepInputKeyRepairOfRootStepID] != string(rootStepID) {
 		t.Fatalf("repair root = %v, want provider retry root %s", specs[0].Input[stepInputKeyRepairOfRootStepID], rootStepID)
 	}
-	if specs[0].Input["repairObjective"] != "produce_state_changing_output" ||
-		specs[0].Input["stateChangingOutputRequired"] != true {
-		t.Fatalf("repair input = %+v, want targetRef contract failure to require state-changing output", specs[0].Input)
+	if specs[0].Input["repairObjective"] != repairObjectiveAcquireFailureEvidence ||
+		specs[0].Input["stateChangingOutputRequired"] != nil ||
+		specs[0].Input["concreteFailureEvidenceRequired"] != true {
+		t.Fatalf("repair input = %+v, want targetRef contract wrapper failure to acquire concrete target evidence", specs[0].Input)
 	}
 }
 
@@ -16798,9 +16804,10 @@ func TestRuntimeOrchestrator_InvalidPatchGraphTargetRefRoutesToRuntimeRepair(t *
 	if repairInput == nil ||
 		repairInput[stepInputKeyRuntimeRepairFollowUp] != true ||
 		repairInput[stepInputKeyProviderRetryFollowUp] == true ||
-		repairInput["repairObjective"] != "produce_state_changing_output" ||
-		repairInput["stateChangingOutputRequired"] != true {
-		t.Fatalf("repairInput = %+v, want runtime repair carrying state-changing repair contract", repairInput)
+		repairInput["repairObjective"] != repairObjectiveAcquireFailureEvidence ||
+		repairInput["stateChangingOutputRequired"] != nil ||
+		repairInput["concreteFailureEvidenceRequired"] != true {
+		t.Fatalf("repairInput = %+v, want runtime repair acquiring concrete target evidence", repairInput)
 	}
 	if !strings.Contains(fmt.Sprint(repairInput["failureReason"]), "patch targetRef is required") {
 		t.Fatalf("repair failureReason = %v, want targetRef-specific reason", repairInput["failureReason"])
@@ -20137,13 +20144,13 @@ func TestRuntimeRepairInputRequiresStateChangingForMissingWorkspaceFile(t *testi
 	}
 }
 
-func TestRuntimeRepairInputRequiresStateChangingForExecutionShellFailure(t *testing.T) {
+func TestRuntimeRepairInputUsesEvidenceAcquisitionForExecutionShellFailureWithoutConcreteTarget(t *testing.T) {
 	ctx := context.Background()
-	runID := common.RunID("run-shell-failure-state-changing-repair")
+	runID := common.RunID("run-shell-failure-evidence-acquisition")
 	run := &runmodel.Run{
 		ID:              runID,
-		WorkspaceID:     "ws-shell-failure-state-changing-repair",
-		DoDID:           "dod-shell-failure-state-changing-repair",
+		WorkspaceID:     "ws-shell-failure-evidence-acquisition",
+		DoDID:           "dod-shell-failure-evidence-acquisition",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{
 			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
@@ -20173,13 +20180,66 @@ func TestRuntimeRepairInputRequiresStateChangingForExecutionShellFailure(t *test
 	}
 
 	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, errors.New("exit status 1"))
-	if input["stateChangingOutputRequired"] != true ||
-		input["repairObjective"] != "produce_state_changing_output" {
-		t.Fatalf("repair input = %+v, want execution shell failure to require state-changing repair", input)
+	if input["stateChangingOutputRequired"] != nil ||
+		input["repairObjective"] != repairObjectiveAcquireFailureEvidence ||
+		input["concreteFailureEvidenceRequired"] != true {
+		t.Fatalf("repair input = %+v, want evidence acquisition without concrete failure target", input)
 	}
 	if input[stepInputKeyRepairOfStepID] != string(failedStep.ID) ||
 		input["failedGraphNodeId"] != "run_go_test" {
 		t.Fatalf("repair input = %+v, want failed graph node lineage", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != false || required["mustProduceConcreteFailureEvidence"] != true {
+		t.Fatalf("requiredOutput = %+v, want concrete evidence acquisition contract", required)
+	}
+}
+
+func TestRuntimeRepairInputRequiresStateChangingForExecutionShellFailureWithConcreteTarget(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-shell-failure-state-changing-repair")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-shell-failure-state-changing-repair",
+		DoDID:           "dod-shell-failure-state-changing-repair",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-003/003-run-go-test"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:       runtimeStageExecution,
+			stepInputKeyGraphNodeID:        "run_go_test",
+			stepInputKeyGraphRootStepID:    string(runID) + "/step-1",
+			stepInputKeyRepairOfRootStepID: string(runID) + "/step-1",
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"stderr":                  "./main_test.go:91:2: cannot assign to struct field config.Providers[\"openai\"].BaseURL in map",
+			"error":                   "exit status 1",
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=main_test.go|node=run_go_test|exitCode=1",
+		},
+	}
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, errors.New("exit status 1"))
+	if input["stateChangingOutputRequired"] != true ||
+		input["repairObjective"] != repairObjectiveStateChangingOutput {
+		t.Fatalf("repair input = %+v, want concrete target shell failure to require state-changing repair", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want patch/apply state-changing contract", required)
 	}
 }
 

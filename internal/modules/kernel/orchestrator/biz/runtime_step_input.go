@@ -34,12 +34,18 @@ func initialStepInput(run *runModel.Run) map[string]any {
 		if replanRunRequiresStateChangingOutput(run) {
 			input[stepInputKeySoulStage] = soulStageExecution
 			setRuntimeStage(input, runtimeStageRepair)
-			input["stateChangingOutputRequired"] = true
-			input["repairObjective"] = repairObjectiveStateChangingOutput
-			input["repairGuidance"] = stateChangingRepairGuidance()
 			input["replanStateChangingContinuation"] = true
 			actionPackage := repairActionPackageFromReplanContinuation(run)
-			if reassessment := strategyReassessmentFromReplanContinuation(run); len(reassessment) > 0 {
+			if repairActionPackageRequiresStateChangingOutput(actionPackage) {
+				input["stateChangingOutputRequired"] = true
+				input["repairObjective"] = repairObjectiveStateChangingOutput
+				input["repairGuidance"] = stateChangingRepairGuidance()
+			} else {
+				input["repairObjective"] = repairObjectiveAcquireFailureEvidence
+				input["concreteFailureEvidenceRequired"] = true
+				input["repairGuidance"] = concreteFailureEvidenceAcquisitionGuidance()
+			}
+			if reassessment := strategyReassessmentFromReplanContinuation(run); repairActionPackageRequiresStateChangingOutput(actionPackage) && len(reassessment) > 0 {
 				input["strategyReassessment"] = reassessment
 				input["targetRepairAttempts"] = int64FromValue(reassessment["targetRepairAttempts"])
 				input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
@@ -118,6 +124,16 @@ func repairActionPackageFromReplanContinuation(run *runModel.Run) map[string]any
 	if targets := repairActionTargetSnapshots(failureContext); len(targets) > 0 {
 		pkg["targetSnapshots"] = targets
 	}
+	if targetSet := repairActionTargetSet(failureContext, pkg); len(targetSet) > 0 {
+		pkg["repairTargetSet"] = targetSet
+		if required := mapFromValue(pkg["requiredOutput"]); len(required) > 0 {
+			required["mustTargetRepairTargetSet"] = true
+			pkg["requiredOutput"] = required
+		}
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	applyConcreteRepairEvidenceOutputContract(failureContext, pkg, required)
+	pkg["requiredOutput"] = required
 	if len(pkg) <= 3 {
 		return nil
 	}

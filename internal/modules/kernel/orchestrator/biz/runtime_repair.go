@@ -28,6 +28,7 @@ const (
 	repairObjectiveStateChangingOutput        = "produce_state_changing_output"
 	repairObjectiveConcreteValidationEvidence = "produce_concrete_validation_evidence"
 	repairObjectiveTransientExecutionRetry    = "retry_or_adjust_transient_execution"
+	repairObjectiveAcquireFailureEvidence     = "acquire_concrete_failure_evidence"
 )
 
 func runtimeFailureOutput(output map[string]any, execErr error) map[string]any {
@@ -2679,19 +2680,30 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		}
 		narrowStateChangingRecoveryInput(input, failedStep, execErr, "runtime_repair")
 		if pkg := repairActionPackageFromRepairInput(input, failedStep.Output); len(pkg) > 0 {
+			if repairActionPackageRequiresEvidenceAcquisition(pkg) {
+				delete(input, "stateChangingOutputRequired")
+				input["repairObjective"] = repairObjectiveAcquireFailureEvidence
+				input["concreteFailureEvidenceRequired"] = true
+				input["evidenceAcquisitionReason"] = stringFromMap(pkg, "evidenceAcquisitionReason")
+				input["repairGuidance"] = concreteFailureEvidenceAcquisitionGuidance()
+			}
 			input["repairActionPackage"] = pkg
 			compactStateChangingRepairInputAroundActionPackage(input)
 		}
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Use repairActionPackage as the primary actionable repair contract; it contains the required output kind, rejected output summary, and current target snapshots.",
-			"When repairActionPackage.requiredOutput.mustIncludeStateChangingNode is true, the next output must include patch/apply before verification, or return a failed dodAssessment/blocker.",
 		)
+		if !boolValue(input["concreteFailureEvidenceRequired"]) {
+			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+				"When repairActionPackage.requiredOutput.mustIncludeStateChangingNode is true, the next output must include patch/apply before verification, or return a failed dodAssessment/blocker.",
+			)
+		}
 		if stateChangingSchemaInvalidRepair(failedStep) {
 			input["schemaInvalidRepairMode"] = "single_valid_json_decision"
 			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 				"Previous repair output was rejected before execution because the LLM decision JSON was invalid; rebuild a single valid JSON object from repairActionPackage and current target snapshots.",
 				"Do not copy any rawContentPreview or repairRawContentPreview from the rejected output; do not include markdown, comments, duplicate JSON objects, trailing braces, or partial arrays.",
-				"If returning executionGraph, every node must be a complete JSON object and the graph must include the required patch/apply state-changing node before verification.",
+				"If returning executionGraph, every node must be a complete JSON object and must follow repairActionPackage.requiredOutput acceptedKinds.",
 			)
 		}
 	}
@@ -2960,6 +2972,16 @@ func stateChangingRepairGuidance() []string {
 	}
 }
 
+func concreteFailureEvidenceAcquisitionGuidance() []string {
+	return []string{
+		"Acquire bounded concrete failure evidence before producing a patch.",
+		"Use only targeted file/list, file/read, shell/command, mcp/tool_call, or equivalent concrete verification capabilities.",
+		"Do not return patch/apply until current failure evidence identifies a concrete target, line ref, repair target set, coverage target, or current target snapshot.",
+		"Do not use self-inspection, run snapshot, observability-only, context rehydration, or nested LLM graphs as evidence acquisition.",
+		"If bounded verification produces target refs, line refs, stdout/stderr, exit code, or current snapshots, let the next repair use that evidence for target-scoped state-changing repair.",
+	}
+}
+
 func repairStrategyReassessmentFromInput(input map[string]any) map[string]any {
 	if len(input) == 0 {
 		return nil
@@ -3063,17 +3085,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	if len(input) == 0 {
 		return nil
 	}
-	requiredOutput := map[string]any{
-		"mustIncludeStateChangingNode": true,
-		"acceptedKinds":                []string{"patch/apply"},
-		"forbiddenKinds": []string{
-			"read_only_graph",
-			"shell_only_graph",
-			"llm_gated_graph",
-			"self_inspection_graph",
-			"context_rehydration_graph",
-		},
-	}
+	requiredOutput := stateChangingRepairRequiredOutput()
 	pkg := map[string]any{
 		"requiredOutput": requiredOutput,
 	}
@@ -3218,6 +3230,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 			}
 		}
 	}
+	applyConcreteRepairEvidenceOutputContract(input, pkg, requiredOutput)
 	addStrategyReassessmentRequiredOutputContract(pkg, requiredOutput)
 	if len(pkg) <= 1 {
 		return nil
@@ -3225,8 +3238,133 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	return pkg
 }
 
+func stateChangingRepairRequiredOutput() map[string]any {
+	return map[string]any{
+		"mustIncludeStateChangingNode": true,
+		"acceptedKinds":                []string{"patch/apply"},
+		"forbiddenKinds": []string{
+			"read_only_graph",
+			"shell_only_graph",
+			"llm_gated_graph",
+			"self_inspection_graph",
+			"context_rehydration_graph",
+		},
+	}
+}
+
+func evidenceAcquisitionRequiredOutput(existing map[string]any) map[string]any {
+	out := map[string]any{}
+	for key, value := range existing {
+		switch key {
+		case "mustReturnValidJSON", "mustNotReuseRejectedJSON", "forbiddenStalePatchReuse":
+			out[key] = value
+		}
+	}
+	out["mustIncludeStateChangingNode"] = false
+	out["mustProduceConcreteFailureEvidence"] = true
+	out["acceptedKinds"] = []string{"file/list", "file/read", "shell/command", "mcp/tool_call"}
+	out["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(existing["forbiddenKinds"]),
+		"patch/apply",
+		"llm_gated_graph",
+		"self_inspection_graph",
+		"context_rehydration_graph",
+		"run_snapshot_graph",
+		"observability_only_graph",
+	))
+	out["evidenceAcquisitionRule"] = "bounded evidence acquisition is required because no concrete state-changing repair target evidence is available"
+	return out
+}
+
+func applyConcreteRepairEvidenceOutputContract(input map[string]any, pkg map[string]any, requiredOutput map[string]any) {
+	if len(pkg) == 0 || len(requiredOutput) == 0 {
+		return
+	}
+	if !boolValue(requiredOutput["mustIncludeStateChangingNode"]) {
+		return
+	}
+	if stateChangingRepairHasConcreteTargetEvidence(input, pkg) {
+		requiredOutput["mustIncludeStateChangingNode"] = true
+		requiredOutput["acceptedKinds"] = []string{"patch/apply"}
+		return
+	}
+	next := evidenceAcquisitionRequiredOutput(requiredOutput)
+	for key := range requiredOutput {
+		delete(requiredOutput, key)
+	}
+	for key, value := range next {
+		requiredOutput[key] = value
+	}
+	pkg["evidenceAcquisitionRequired"] = true
+	pkg["evidenceAcquisitionReason"] = "state_changing_repair_target_evidence_missing"
+	pkg["exitCriteria"] = []string{
+		"concrete_failure_evidence_acquired_then_target_scoped_repair",
+		"failed_assessment_or_blocker_when_evidence_cannot_be_acquired",
+	}
+}
+
+func stateChangingRepairHasConcreteTargetEvidence(input map[string]any, pkg map[string]any) bool {
+	if len(input) > 0 {
+		for _, key := range []string{"failureTargetRepairContext", "patchRepairContext", "rootCauseCandidateContext"} {
+			if len(mapSliceFromValue(input[key])) > 0 {
+				return true
+			}
+		}
+		if len(repairActionTargetSnapshots(input)) > 0 || len(coverageTargetSetFromRepairInput(input)) > 0 {
+			return true
+		}
+		if signals := mapFromValue(input["structuredFailureSignals"]); len(signals) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
+			return true
+		}
+	}
+	if len(pkg) > 0 {
+		if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 ||
+			len(mapSliceFromValue(pkg["coverageTargetSet"])) > 0 ||
+			len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
+			return true
+		}
+		if primary := mapFromValue(pkg["primaryDiagnosticRepair"]); len(primary) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(primary) {
+			return true
+		}
+		if signals := mapFromValue(pkg["structuredFailureSignals"]); len(signals) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
+			return true
+		}
+	}
+	return false
+}
+
+func structuredFailureSignalsHaveConcreteTargetEvidence(signals map[string]any) bool {
+	if len(signals) == 0 {
+		return false
+	}
+	for _, ref := range stringSliceFromValue(signals["targetRefs"]) {
+		if structuredFailureTextTargetRefAllowed(ref) {
+			return true
+		}
+	}
+	for _, ref := range mapSliceFromValue(signals["lineRefs"]) {
+		if structuredFailureTextTargetRefAllowed(stringFromMap(ref, "targetRef")) {
+			return true
+		}
+	}
+	return false
+}
+
+func repairActionPackageRequiresEvidenceAcquisition(pkg map[string]any) bool {
+	return len(pkg) > 0 && boolValue(pkg["evidenceAcquisitionRequired"])
+}
+
+func repairActionPackageRequiresStateChangingOutput(pkg map[string]any) bool {
+	if len(pkg) == 0 {
+		return false
+	}
+	return boolValue(mapFromValue(pkg["requiredOutput"])["mustIncludeStateChangingNode"])
+}
+
 func addStrategyReassessmentRequiredOutputContract(pkg map[string]any, requiredOutput map[string]any) {
 	if len(pkg) == 0 || len(requiredOutput) == 0 {
+		return
+	}
+	if !boolValue(requiredOutput["mustIncludeStateChangingNode"]) {
 		return
 	}
 	reassessment := mapFromValue(pkg["strategyReassessment"])
@@ -3658,7 +3796,7 @@ func compactStateChangingRepairInputAroundActionPackage(input map[string]any) {
 			"mode":                  "repair_action_package_primary",
 			"omittedFields":         omitted,
 			"primaryField":          "repairActionPackage",
-			"reason":                "state-changing repair uses bounded current failure package instead of duplicated historical payloads",
+			"reason":                "repair uses bounded current failure package instead of duplicated historical payloads",
 			"targetScopedByteLimit": 120 * 1024,
 		}
 	}

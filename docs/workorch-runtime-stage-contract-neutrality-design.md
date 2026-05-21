@@ -592,6 +592,21 @@ Repair 输入必须尽量包含足以定向修复的当前证据：
 - `patchRepairSuggestions` 或等价 capability repair suggestion：当 runtime 能从失败 artifact 与当前目标快照中机械抽取唯一 oldText / newText 替换时，提供可直接复用的最小修复证据；该 suggestion 不代表业务判断，只代表当前资源内容与失败 artifact 的中立匹配事实。
 - 近期 repair attempt 摘要：用于避免重复同一失败输出。
 
+State-changing repair 必须有 concrete repair target evidence 才能要求 LLM 输出 `patch/apply`。Runtime 在设置 `stateChangingOutputRequired=true`、`repairObjective=produce_state_changing_output`、`repairActionPackage.requiredOutput.mustIncludeStateChangingNode=true` 或 `acceptedKinds=["patch/apply"]` 之前，必须确认至少存在一个可追踪目标证据：`failureTargetRepairContext`、`patchRepairContext`、`repairActionPackage.targetSnapshots`、可解析到 workspace manifest 的 `repairTargetSet` / `structuredFailureSignals.targetRefs` / `lineRefs`、明确 `coverageTargetSet`，或带当前快照的 `rootCauseCandidateContext`。如果这些证据都不存在，runtime 不得把“必须修复状态”合同发送给 LLM；否则会诱导无关 marker、报告、README 或其他形式性 patch。
+
+当 replan、repair-of-repair、schema invalid recovery 或 runtime contract recovery 缺少 concrete repair target evidence 时，runtime 必须进入中立 `acquire_concrete_failure_evidence` 模式。该模式允许有界 `file/list`、`file/read`、`shell/command`、`mcp/tool_call` 或等价能力来获取当前 workspace 的真实失败面、target refs、line refs、stdout/stderr、exit code 和当前快照；不得要求 `patch/apply`，不得接受无边界探索、自检、run snapshot、context rehydration 或新的 LLM 嵌套。若 evidence acquisition 产出确定性失败，再由该失败证据触发 target-scoped state-changing repair。
+
+Replan continuation 不得只因为 predecessor run 的 execution contract 要求 state change 就直接派发 state-changing repair。它必须先从 predecessor lineage 恢复最近未解决的 concrete failure target、target snapshot、contentHash、coverage target 或 patch repair context；若只能恢复到 LLM schema/runtime contract wrapper failure，例如 `llm_schema_invalid`、`no json object found`、`executionGraph without patch/apply` 或 `coverageTargets missing`，则这些 wrapper failure 只能作为 rejected output / schema recovery evidence，不能替代原始未解决的 workspace 失败面。找不到原始目标证据时，replan successor 必须进入 `acquire_concrete_failure_evidence`。
+
+本约束的实现收口必须覆盖以下检查点：
+
+- Repair action package 统一由 required output contract 决定是否允许 state-changing output；当 `mustIncludeStateChangingNode=false`，任何后续证据门禁不得再把它提升回 patch，例如 `currentTargetAlreadySatisfiesFailedPatch` 必须保持 concrete validation evidence contract。
+- 缺少 concrete repair target evidence 时，runtime 必须移除顶层 `stateChangingOutputRequired`，设置 `repairObjective=acquire_concrete_failure_evidence` 与 `concreteFailureEvidenceRequired=true`，并把 `repairActionPackage.requiredOutput.acceptedKinds` 限定为 evidence acquisition 能力。
+- Replan continuation 必须把 predecessor failure context 中可机械解析的 `failureTargetScope`、`targetRef`、target snapshot 或 coverage target 写入 `repairActionPackage`；只有该 package 确认可追踪目标证据存在时，才能保持 state-changing repair。
+- Runtime contract wrapper failure、schema invalid、`patch/apply targetRef is required`、`executionGraph without patch/apply` 等只描述输出合同的失败，不能单独作为 workspace repair target；若无法恢复原始 target context，必须先获取证据。
+- 无论进入 state-changing repair 还是 evidence acquisition，`repairActionPackage` 都是 primary actionable contract；runtime 应压缩重复的 `failedStepOutput`、`previousStepOutput`、`failedExecutionGraph` 等历史 payload，只保留被 package 摘要化后的中立事实，避免 LLM 上下文再次膨胀和冲突。
+- 测试必须同时覆盖“无目标证据进入 evidence acquisition”和“有 target refs / target snapshots / coverage target 时保持 patch contract”两类路径，避免后续修改重新回到按失败类别一刀切。
+
 如果 repair-of-repair 是因为 LLM 输出违反 contract，例如缺少必需 artifact 字段、返回只读 graph、返回能力不支持的操作，后续 repair 必须继承上一轮可用的 target context、workspace manifest、state-changing contract、coverage gap context、current execution progress 和 rejection evidence。不得因为 contract violation 发生在 LLM repair step 外壳上，就丢失原始 failure target、Goal/DoD coverage target、已完成证据或当前失败信息，也不得降级为泛化探索。若原始失败来自 graph node，后续 repair 的 ID、lineage label 与 scope 必须继续指向该 graph failure label；即使当前外壳是 `repair-...` 或 schema-invalid repair，也不得退回 planning root。
 
 当 repair-of-repair 的当前失败是 `llm_schema_invalid` / `llm_decision_invalid`，runtime 必须把该失败作为 LLM decision contract failure 处理，而不是 provider failure。repair input 应包含中立的 schema invalid recovery contract：只能基于 `repairActionPackage`、当前 target snapshot 和 schema 约束重建一个合法 JSON decision；禁止复用 rejected raw content / preview，禁止 markdown 包裹、注释、重复 JSON object、尾随多余括号和局部数组。该规则只治理输出形态和 lineage，不引入任何业务领域判断。
