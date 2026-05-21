@@ -163,11 +163,14 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	} else if base := selectedContextPackage(executionContext); len(base) > 0 {
 		selected = base
 	}
-	if len(refreshedMemories) > 0 {
-		selected["memories"] = refreshedMemories
-	}
 	if len(memoryRetrieval) > 0 {
+		if len(refreshedMemories) > 0 {
+			selected["memories"] = refreshedMemories
+		} else {
+			delete(selected, "memories")
+		}
 		selected["memoryRetrieval"] = memoryRetrieval
+		selected = removeExcludedSelectedContextMemories(selected, memoryRetrieval)
 	}
 	if len(selected) > 0 {
 		ret["selectedContext"] = selected
@@ -180,6 +183,49 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		ret["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(governanceHistory, 6)
 	}
 	return ret
+}
+
+func removeExcludedSelectedContextMemories(selected map[string]any, retrieval map[string]any) map[string]any {
+	if len(selected) == 0 || len(retrieval) == 0 {
+		return selected
+	}
+	selectedIDs := map[string]bool{}
+	for _, id := range stringSliceFromValue(retrieval["selectedMemoryIds"]) {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			selectedIDs[id] = true
+		}
+	}
+	excludedIDs := map[string]bool{}
+	for _, id := range stringSliceFromValue(retrieval["excludedMemoryIds"]) {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			excludedIDs[id] = true
+		}
+	}
+	if len(selectedIDs) == 0 {
+		delete(selected, "memories")
+		return selected
+	}
+	memories := mapSliceFromValue(selected["memories"])
+	if len(memories) == 0 {
+		delete(selected, "memories")
+		return selected
+	}
+	filtered := make([]map[string]any, 0, len(memories))
+	for _, memory := range memories {
+		id := strings.TrimSpace(firstNonEmptyString(stringFromMap(memory, "id"), stringFromMap(memory, "ID")))
+		if id == "" || !selectedIDs[id] || excludedIDs[id] {
+			continue
+		}
+		filtered = append(filtered, memory)
+	}
+	if len(filtered) == 0 {
+		delete(selected, "memories")
+		return selected
+	}
+	selected["memories"] = filtered
+	return selected
 }
 
 func shouldCompactProcessEvidenceForStateChangingRepair(step *runModel.Step) bool {
@@ -220,6 +266,7 @@ func compactProcessEvidenceTimelineForStateChangingRepair(input []map[string]any
 			"failureClass",
 			"failureSignature",
 			"failureReason",
+			"evidenceValidity",
 			"outputRef",
 			"payloadRef",
 		} {

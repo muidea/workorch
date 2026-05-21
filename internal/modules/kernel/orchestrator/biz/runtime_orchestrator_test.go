@@ -4450,8 +4450,11 @@ func TestRuntimeOrchestrator_LLMInputIncludesExecutionContextPackage(t *testing.
 		t.Fatalf("currentDeliverables = %+v, want historical artifact", pkg["currentDeliverables"])
 	}
 	selected := mapFromValue(pkg["selectedContext"])
-	if len(mapSliceFromValue(selected["skills"])) != 1 || len(mapSliceFromValue(selected["mcpCapabilities"])) != 1 || len(mapSliceFromValue(selected["memories"])) != 1 {
-		t.Fatalf("selectedContext = %+v, want selected skill, mcp capability, and memory", selected)
+	if len(mapSliceFromValue(selected["skills"])) != 1 || len(mapSliceFromValue(selected["mcpCapabilities"])) != 1 {
+		t.Fatalf("selectedContext = %+v, want selected skill and mcp capability", selected)
+	}
+	if len(mapSliceFromValue(selected["memories"])) != 0 {
+		t.Fatalf("selectedContext.memories = %+v, want stale stable memories omitted when dynamic memory recall selected none", selected["memories"])
 	}
 }
 
@@ -24531,5 +24534,32 @@ func TestCoverageRepairTokenMatchesNeutralPrefixesAndPartialTargets(t *testing.T
 	}
 	if coverageRepairTokenMatches("test", "technical test target") {
 		t.Fatalf("short generic token should not match by substring")
+	}
+}
+
+func TestRuntimeRepairTargetAdmissionRejectsRuntimeAndAbsoluteTargets(t *testing.T) {
+	rejected := []string{
+		"/home/user/workspace/main.go",
+		"home/user/workorch/.workorch-workspaces/ws-1/main.go",
+		".workorch-data/internal/run.json",
+		"llmexecutiondecision.plan",
+		"runs/run-1/request.json",
+		"../escape.go",
+	}
+	for _, target := range rejected {
+		if runtimeRepairTargetRefAdmissible(target) {
+			t.Fatalf("runtimeRepairTargetRefAdmissible(%q) = true, want false", target)
+		}
+	}
+	for _, target := range []string{"src/main.go", "gateway/config.yaml"} {
+		if !runtimeRepairTargetRefAdmissible(target) {
+			t.Fatalf("runtimeRepairTargetRefAdmissible(%q) = false, want true", target)
+		}
+	}
+	signals := structuredFailureSignalsFromFailureOutput(map[string]any{
+		"stderr": "no files in /home/user/workorch/.workorch-workspaces/ws-1",
+	}, nil, failureClassShellCommand, "class=shell_command_failed|kind=shell/command|exitCode=1")
+	if structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
+		t.Fatalf("signals = %+v, want local absolute workspace path treated as diagnostic-only", signals)
 	}
 }

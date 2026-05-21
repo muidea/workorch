@@ -2909,7 +2909,7 @@ func primaryDiagnosticTargetRefs(signals map[string]any, lineRefs []map[string]a
 	var ret []string
 	add := func(value string) {
 		value = normalizeStructuredFailureTargetRef(value)
-		if value == "" || seen[value] {
+		if value == "" || !runtimeRepairTargetRefAdmissible(value) || seen[value] {
 			return
 		}
 		seen[value] = true
@@ -4047,7 +4047,7 @@ func normalizeStructuredFailureTargetRef(value string) string {
 	value = strings.TrimPrefix(value, "a/")
 	value = strings.TrimPrefix(value, "b/")
 	value = strings.Trim(value, "/")
-	if value == "" || strings.Contains(value, "://") || strings.Contains(value, " ") {
+	if value == "" || strings.Contains(value, "://") || strings.Contains(value, " ") || !runtimeRepairTargetRefAdmissible(value) {
 		return ""
 	}
 	lower := strings.ToLower(value)
@@ -4062,7 +4062,7 @@ func normalizeStructuredFailureTargetRef(value string) string {
 
 func structuredFailureTextTargetRefAllowed(value string) bool {
 	value = normalizeStructuredFailureTargetRef(value)
-	if value == "" {
+	if value == "" || !runtimeRepairTargetRefAdmissible(value) {
 		return false
 	}
 	if strings.Contains(value, "/") {
@@ -4088,6 +4088,91 @@ func structuredFailureTextTargetRefAllowed(value string) bool {
 		return false
 	}
 	return true
+}
+
+func runtimeRepairTargetRefAdmissible(value string) bool {
+	original := strings.TrimSpace(strings.Trim(value, `"'()[]{}<>;,`))
+	if original == "" {
+		return false
+	}
+	original = strings.ReplaceAll(original, "\\", "/")
+	if filepath.IsAbs(original) || strings.HasPrefix(original, "/") || strings.HasPrefix(original, "~") {
+		return false
+	}
+	clean := normalizeRepairPatchTargetRef(original)
+	if clean == "" || clean == "." || clean == ".." || filepath.IsAbs(clean) || strings.HasPrefix(clean, "../") {
+		return false
+	}
+	lower := strings.ToLower(filepath.ToSlash(clean))
+	if strings.Contains(lower, "://") || strings.Contains(lower, " ") || strings.Contains(lower, ":") {
+		return false
+	}
+	for _, marker := range []string{
+		".workorch-data/",
+		".workorch-workspaces/",
+		"/.workorch-data/",
+		"/.workorch-workspaces/",
+	} {
+		if strings.Contains(lower, marker) || strings.HasPrefix(lower, strings.TrimSuffix(marker, "/")) {
+			return false
+		}
+	}
+	if runtimeRepairTargetLooksLikeLocalAbsolutePath(lower) {
+		return false
+	}
+	if isReservedWorkspacePatchTarget(clean) || isRuntimeDecisionArtifactTarget(clean) {
+		return false
+	}
+	return true
+}
+
+func runtimeRepairTargetLooksLikeLocalAbsolutePath(cleanLower string) bool {
+	cleanLower = strings.Trim(cleanLower, "/")
+	if cleanLower == "" {
+		return false
+	}
+	parts := strings.Split(cleanLower, "/")
+	if len(parts) < 3 {
+		return false
+	}
+	switch parts[0] {
+	case "home", "users", "var", "tmp", "private", "opt", "usr":
+		return true
+	default:
+		return false
+	}
+}
+
+func isRuntimeDecisionArtifactTarget(targetRef string) bool {
+	clean := strings.ToLower(filepath.ToSlash(filepath.Clean(strings.TrimSpace(targetRef))))
+	clean = strings.TrimPrefix(clean, "./")
+	base := filepath.Base(clean)
+	if base == "llmexecutiondecision.plan" || strings.HasPrefix(base, "llmexecutiondecision.") {
+		return true
+	}
+	switch base {
+	case "request.json", "response.json", "repair-response.json", "usage.json", "metadata.json", "output.json", "input.json", "run.json":
+		return true
+	default:
+		return false
+	}
+}
+
+func filterAdmissibleRuntimeRepairTargetRefs(targetRefs []string) []string {
+	if len(targetRefs) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := make([]string, 0, len(targetRefs))
+	for _, targetRef := range targetRefs {
+		targetRef = normalizeRepairPatchTargetRef(targetRef)
+		if targetRef == "" || !runtimeRepairTargetRefAdmissible(targetRef) || seen[targetRef] {
+			continue
+		}
+		seen[targetRef] = true
+		ret = append(ret, targetRef)
+	}
+	return ret
 }
 
 func structuredFailureRefLooksExternalReference(value string) bool {
@@ -4313,11 +4398,14 @@ func repairActionTargetSnapshots(input map[string]any) []map[string]any {
 	add := func(items []map[string]any, source string) {
 		for _, item := range items {
 			targetRef := strings.TrimSpace(stringFromMap(item, "targetRef"))
-			if targetRef == "" || seen[targetRef] {
+			if targetRef == "" || !runtimeRepairTargetRefAdmissible(targetRef) || boolValue(item["isBinary"]) || seen[targetRef] {
 				continue
 			}
 			seen[targetRef] = true
 			snapshot := repairActionTargetSnapshot(item)
+			if len(snapshot) == 0 || boolValue(snapshot["isBinary"]) {
+				continue
+			}
 			if source != "" {
 				snapshot["contextSource"] = source
 			}
@@ -4896,13 +4984,14 @@ func (o *RuntimeOrchestrator) runtimeRepairFailureTargetContext(ctx context.Cont
 	}
 	targetRefs = resolveWorkspaceTargetRefs(workspace.DeliverableDirectory, targetRefs)
 	targetRefs = compactUniqueStrings(targetRefs)
+	targetRefs = filterAdmissibleRuntimeRepairTargetRefs(targetRefs)
 	ret := make([]map[string]any, 0, min(len(targetRefs), 3))
 	for idx, targetRef := range targetRefs {
 		if idx >= 3 {
 			break
 		}
 		item := patchRepairTargetSnapshot(workspace.DeliverableDirectory, targetRef)
-		if len(item) == 0 {
+		if len(item) == 0 || !runtimeRepairTargetRefAdmissible(targetRef) || boolValue(item["isBinary"]) {
 			continue
 		}
 		item["source"] = "failure_target_current_workspace_file"
@@ -5252,8 +5341,8 @@ func failureTargetRepairRefs(step *runModel.Step) []string {
 	seen := map[string]bool{}
 	var ret []string
 	add := func(value string) {
-		value = strings.TrimSpace(value)
-		if value == "" || seen[value] {
+		value = normalizeStructuredFailureTargetRef(value)
+		if value == "" || !runtimeRepairTargetRefAdmissible(value) || seen[value] {
 			return
 		}
 		seen[value] = true

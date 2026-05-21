@@ -1184,6 +1184,55 @@ raw ref 是稳定的逻辑定位，不是本地绝对路径。API 实现必须�
 - replan continuation 若没有显式 `processEvidenceTimeline/currentProgressDigest`，runtime 必须从 `failureContext/ticketContext` 合成最小过程证据，确保 repair / strict convergence 阶段能够通过上下文门禁并看到当前失败面、失败步骤和下一步缺口。
 - Provider context gate 仍保持中立：repair / state-changing / replan continuation 必须带过程证据；证据可以来自真实 step timeline，也可以来自结构化 replan failure context 的中立投影。
 
+## LLM Context Admission Contract
+
+LLM 输入必须是当前阶段可行动、可验证、无冲突的任务合同。runtime 可以传递 Goal / DoD、当前进展、失败证据、修复目标、历史摘要和 memory，但必须在发送前完成中立准入，不得把运行态噪点、历史失败产物或本地绝对路径包装成业务修复目标。
+
+### Repair Target Admission
+
+`repairTargetSet`、`failureTargetRepairContext`、`repairActionPackage.targetSnapshots` 只允许包含 workspace deliverable 下的 workspace-relative 资源引用。准入规则如下：
+
+- 禁止绝对路径、路径穿越、用户机器路径、`.workorch-data`、`.workorch-workspaces`、runtime raw payload ref、本地 runtime 存储路径进入 patch target 或 repair target。
+- 禁止目录、二进制产物、运行态决策/计划文件、provider/request/response 日志、checkpoint、run/step 元数据作为默认 state-changing repair target。
+- shell stderr/stdout 中出现的路径默认只是诊断信号。只有该路径能解析为 workspace deliverable 中的真实可行动资源，或由上游 step 显式声明为 `targetRef/failureTargets/conflictRef`，才可升级为 repair target。
+- shell 失败如果只表明执行目录、命令上下文、working directory 或验证入口错误，应归类为 `verification_command_context_issue` 或继续进行 bounded evidence acquisition；不得直接要求 LLM patch 目录或创建无关根文件。
+- 若没有通过准入的 concrete target snapshot，state-changing repair 必须降级为证据采集合同，而不是强制要求 `patch/apply`。
+
+该规则只约束资源引用的形态和可行动性，不判断资源所属业务类型。
+
+### Context Semantic Layers
+
+LLM-facing context 必须区分以下层级：
+
+- `Goal/DoD`：最终验收合同，始终是收敛判断的权威来源。
+- `currentProgressDigest`：当前 run 的最新真实进展和下一步缺口。
+- `processEvidenceTimeline`：最近有效证据链，必须带 `sourceRef`，历史 wrapper/schema/provider 失败只能作为摘要而不能覆盖当前事实。
+- `failureEvidence` / `structuredFailureSignals`：机械诊断证据，必须标注是否可行动；未准入 target 只能作为 diagnostic-only。
+- `repairActionPackage`：本轮唯一可行动 repair 合同，必须包含 required output、target admission 结果和必要的 target snapshots。
+- `historicalSignals` / `governanceHistory` / `memory`：参考信息，不得覆盖当前 Goal/DoD、当前 target snapshot 或当前失败证据。
+
+### Memory Recall Admission
+
+Memory 是参考知识，不是运行流水。LLM 输入中的 memory 必须满足 selected/excluded 一致性：
+
+- `selectedMemoryIds` 为空时，LLM-facing `selectedContext.memories` 必须为空或不存在。
+- 被 `excludedMemoryIds` 标记的 memory 不得通过 stable selectedContext、历史 executionContext 或兼容字段再次注入。
+- strict repair / strict convergence 阶段不得注入 failed/superseded run 的过程失败 memory，除非该 memory 具备清晰适用边界、可复用经验和当前 failure/Goal/DoD 结构化匹配。
+- provider retry、schema invalid、stream incomplete、patch syntax failure、non-substantive patch、重复 repair loop 等瞬态过程只能作为 process evidence 或 repair diagnostics，不得作为可复用 memory 影响当前决策。
+
+### Semantic Context Gate
+
+发送 LLM 前必须执行语义门禁。以下情况应 fail-fast、read-required 或转入 evidence acquisition，而不是继续调用 LLM：
+
+- Goal / DoD 缺失或与当前 activation 不匹配。
+- state-changing repair 要求 `patch/apply`，但没有通过准入的 concrete target snapshot、coverage target 或明确 root-cause target。
+- `repairTargetSet` 包含绝对路径、目录、二进制、runtime 内部文件、运行态计划文件或未解析 workspace-relative 的目标。
+- `selectedMemoryIds` 与实际 `selectedContext.memories` 不一致。
+- `processEvidenceTimeline` 只有 rejected/invalid LLM wrapper 失败，没有当前可行动失败证据或下一步缺口。
+- 上下文同时要求“必须 patch 当前 target”和“当前 target 不存在/不可读/未通过准入”，但没有证据采集出口。
+
+门禁失败的输出必须保持中立，说明缺失的上下文层级和建议的下一步 runtime 动作，不得引入具体业务领域修复建议。
+
 ## 核对清单
 
 后续每次收口前先核对：
@@ -1199,3 +1248,4 @@ raw ref 是稳定的逻辑定位，不是本地绝对路径。API 实现必须�
 9. profile-specific 检查是否位于 profile 层。
 10. 验证脚本是否能区分 core contract 与 profile contract。
 11. runtime 文件名和 raw payload ref 是否保持可读层级路径，且没有默认 base64/hash 主命名。
+12. LLM context 是否通过语义准入，且没有把 runtime 内部文件、绝对路径、目录或二进制产物作为默认 repair target。

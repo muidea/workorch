@@ -861,6 +861,37 @@ func TestEnforceProviderRequestBudgetMarksP0OverflowWhenGoalDoDContractDominates
 	}
 }
 
+func TestProviderSemanticContextWarningsRejectMemoryMismatchAndRuntimeTargets(t *testing.T) {
+	warnings := providerSemanticContextWarnings(map[string]any{
+		"executionContextPackage": map[string]any{
+			"selectedContext": map[string]any{
+				"memories": []map[string]any{{"id": "memory-old"}},
+				"memoryRetrieval": map[string]any{
+					"selectedMemoryIds": []string{},
+					"excludedMemoryIds": []string{"memory-old"},
+				},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"repairTargetSet": []string{"home/user/project/.workorch-workspaces/ws-1"},
+			"targetSnapshots": []map[string]any{{
+				"targetRef": "llmexecutiondecision.plan",
+				"exists":    true,
+			}},
+		},
+	})
+	for _, want := range []string{
+		"selected_context_memories_without_selected_memory_ids",
+		"selected_context_memories_include_unselected_or_excluded_memory",
+		"inadmissible_repair_target_set",
+		"inadmissible_repair_target_snapshot",
+	} {
+		if !stringSliceContains(warnings, want) {
+			t.Fatalf("warnings = %+v, want %s", warnings, want)
+		}
+	}
+}
+
 func TestCaptureAndRestoreProtectedGoalDoD(t *testing.T) {
 	input := map[string]any{
 		"executionContext": map[string]any{

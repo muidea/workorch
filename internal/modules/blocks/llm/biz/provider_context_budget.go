@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -659,8 +660,52 @@ func providerContextIntegrityWarnings(input map[string]any, protected protectedG
 	if providerInputRequiresProcessEvidence(input) && !providerInputHasProcessEvidence(input) {
 		warnings = append(warnings, "runtime_repair_process_evidence_missing")
 	}
+	warnings = append(warnings, providerSemanticContextWarnings(input)...)
 	warnings = append(warnings, missingProtectedRepairSnapshotWarnings(input, repairTargets)...)
 	return uniqueStrings(warnings)
+}
+
+func providerSemanticContextWarnings(input map[string]any) []string {
+	warnings := []string{}
+	if len(input) == 0 {
+		return nil
+	}
+	selected := recordFromAny(recordFromAny(input["executionContextPackage"])["selectedContext"])
+	if len(selected) == 0 {
+		selected = recordFromAny(input["selectedContext"])
+	}
+	retrieval := recordFromAny(selected["memoryRetrieval"])
+	memories := mapSliceFromAny(selected["memories"])
+	selectedIDs := stringSetFromProviderValue(retrieval["selectedMemoryIds"])
+	excludedIDs := stringSetFromProviderValue(retrieval["excludedMemoryIds"])
+	if len(memories) > 0 && len(retrieval) > 0 && len(selectedIDs) == 0 {
+		warnings = append(warnings, "selected_context_memories_without_selected_memory_ids")
+	}
+	for _, memory := range memories {
+		id := strings.TrimSpace(firstProviderString(memory["id"], memory["ID"]))
+		if id == "" {
+			continue
+		}
+		if excludedIDs[id] || (len(selectedIDs) > 0 && !selectedIDs[id]) {
+			warnings = append(warnings, "selected_context_memories_include_unselected_or_excluded_memory")
+			break
+		}
+	}
+	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
+		for _, target := range stringSliceFromAny(pkg["repairTargetSet"]) {
+			if !providerRepairTargetRefAdmissible(target) {
+				warnings = append(warnings, "inadmissible_repair_target_set")
+				break
+			}
+		}
+		for _, item := range mapSliceFromAny(pkg["targetSnapshots"]) {
+			if !providerRepairTargetRefAdmissible(firstProviderString(item["targetRef"])) || boolValue(item["isBinary"]) {
+				warnings = append(warnings, "inadmissible_repair_target_snapshot")
+				break
+			}
+		}
+	}
+	return warnings
 }
 
 func providerContextGateDecision(goalDoDCompressed, overBudget, p0Overflow bool, integrityWarnings []string) (string, string) {
@@ -680,7 +725,11 @@ func providerContextGateDecision(goalDoDCompressed, overBudget, p0Overflow bool,
 			"must_declare_coverage_targets_without_target_set",
 			"repair_action_package_required_output_missing",
 			"runtime_repair_current_failure_missing",
-			"runtime_repair_process_evidence_missing":
+			"runtime_repair_process_evidence_missing",
+			"selected_context_memories_without_selected_memory_ids",
+			"selected_context_memories_include_unselected_or_excluded_memory",
+			"inadmissible_repair_target_set",
+			"inadmissible_repair_target_snapshot":
 			return providerContextGateFailFast, warning
 		case "protected_failure_target_snapshot_missing_after_context_budget",
 			"protected_patch_repair_snapshot_missing_after_context_budget",
@@ -1005,6 +1054,90 @@ func valuesEqual(left, right map[string]any) bool {
 		return false
 	}
 	return string(leftPayload) == string(rightPayload)
+}
+
+func stringSetFromProviderValue(value any) map[string]bool {
+	ret := map[string]bool{}
+	for _, item := range stringSliceFromAny(value) {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			ret[item] = true
+		}
+	}
+	return ret
+}
+
+func stringSliceFromAny(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(firstProviderString(item)); text != "" {
+				ret = append(ret, text)
+			}
+		}
+		return ret
+	default:
+		if text := strings.TrimSpace(firstProviderString(value)); text != "" {
+			return []string{text}
+		}
+		return nil
+	}
+}
+
+func firstProviderString(values ...any) string {
+	for _, value := range values {
+		switch typed := value.(type) {
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				return strings.TrimSpace(typed)
+			}
+		case fmt.Stringer:
+			if text := strings.TrimSpace(typed.String()); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
+}
+
+func providerRepairTargetRefAdmissible(value string) bool {
+	value = strings.TrimSpace(strings.Trim(value, `"'()[]{}<>;,`))
+	value = strings.ReplaceAll(value, "\\", "/")
+	if value == "" || strings.HasPrefix(value, "/") || strings.HasPrefix(value, "~") || strings.Contains(value, "://") || strings.Contains(value, " ") || strings.Contains(value, ":") {
+		return false
+	}
+	for strings.HasPrefix(value, "./") {
+		value = strings.TrimPrefix(value, "./")
+	}
+	clean := strings.Trim(value, "/")
+	if clean == "" || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return false
+	}
+	lower := strings.ToLower(clean)
+	if strings.Contains(lower, ".workorch-data/") || strings.Contains(lower, ".workorch-workspaces/") ||
+		strings.HasPrefix(lower, ".workorch-data") || strings.HasPrefix(lower, ".workorch-workspaces") {
+		return false
+	}
+	parts := strings.Split(lower, "/")
+	if len(parts) >= 3 {
+		switch parts[0] {
+		case "home", "users", "var", "tmp", "private", "opt", "usr":
+			return false
+		}
+	}
+	base := parts[len(parts)-1]
+	if base == "llmexecutiondecision.plan" || strings.HasPrefix(base, "llmexecutiondecision.") {
+		return false
+	}
+	switch base {
+	case "request.json", "response.json", "repair-response.json", "usage.json", "metadata.json", "output.json", "input.json", "run.json":
+		return false
+	default:
+		return true
+	}
 }
 
 func intValue(value any) int {

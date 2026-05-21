@@ -1253,6 +1253,9 @@ func processEvidenceTimelineItem(run *runModel.Run, step *runModel.Step, order i
 		if reason := processEvidenceFailureReason(step.Output); reason != "" {
 			item["failureReason"] = reason
 		}
+		if validity := processEvidenceValidity(step); validity != "" {
+			item["evidenceValidity"] = validity
+		}
 	}
 	if refs := processEvidenceRefs(step); len(refs) > 0 {
 		item["evidenceRefs"] = refs
@@ -1261,6 +1264,27 @@ func processEvidenceTimelineItem(run *runModel.Run, step *runModel.Step, order i
 		item["output"] = output
 	}
 	return item
+}
+
+func processEvidenceValidity(step *runModel.Step) string {
+	if step == nil {
+		return ""
+	}
+	class := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass))
+	stage := strings.TrimSpace(stringFromMap(step.Output, "stage"))
+	switch class {
+	case failureClassProviderTimeout, failureClassProviderUnavailable, failureClassRateLimited, failureClassProviderStreamIncomplete:
+		return "diagnostic_only"
+	case failureClassLLMDecisionInvalid:
+		return "stale_or_rejected"
+	}
+	if stage == "llm_schema_invalid" || strings.Contains(strings.ToLower(stage), "schema") {
+		return "stale_or_rejected"
+	}
+	if class == failureClassShellCommand || class == failureClassPatchApply || class == failureClassRuntime {
+		return "actionable_failure"
+	}
+	return "diagnostic_only"
 }
 
 func processEvidenceActionKind(kind string) string {

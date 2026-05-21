@@ -478,6 +478,39 @@ func TestStepInputMemorySelectionForStrictRepairRequiresHistoricalBoundary(t *te
 	}
 }
 
+func TestRemoveExcludedSelectedContextMemoriesDropsStaleStableMemories(t *testing.T) {
+	selected := map[string]any{
+		"memories": []map[string]any{
+			{"id": "memory-excluded", "summary": "old runtime loop"},
+			{"id": "memory-unselected", "summary": "not selected"},
+		},
+	}
+	retrieval := map[string]any{
+		"selectedMemoryIds": []string{},
+		"excludedMemoryIds": []string{"memory-excluded"},
+	}
+	got := removeExcludedSelectedContextMemories(selected, retrieval)
+	if _, ok := got["memories"]; ok {
+		t.Fatalf("selectedContext.memories = %+v, want dropped when selectedMemoryIds is empty", got["memories"])
+	}
+
+	selected = map[string]any{
+		"memories": []map[string]any{
+			{"id": "memory-selected", "summary": "current reference"},
+			{"id": "memory-excluded", "summary": "old runtime loop"},
+		},
+	}
+	retrieval = map[string]any{
+		"selectedMemoryIds": []string{"memory-selected"},
+		"excludedMemoryIds": []string{"memory-excluded"},
+	}
+	got = removeExcludedSelectedContextMemories(selected, retrieval)
+	memories := mapSliceFromValue(got["memories"])
+	if len(memories) != 1 || memories[0]["id"] != "memory-selected" {
+		t.Fatalf("selectedContext.memories = %+v, want only selected non-excluded memory", memories)
+	}
+}
+
 func memoryItemsContainID(items []*memorymodel.MemoryItem, id common.MemoryID) bool {
 	for _, item := range items {
 		if item != nil && item.ID == id {
