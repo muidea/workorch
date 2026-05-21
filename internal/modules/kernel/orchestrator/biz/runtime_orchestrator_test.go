@@ -6473,6 +6473,68 @@ func TestRuntimeOrchestrator_StepInputMemoryTraceRecordsExcludedProviderRetryMem
 	}
 }
 
+func TestRuntimeOrchestrator_StepInputMemoryTraceExcludesTransientDoDFeedback(t *testing.T) {
+	ctx := context.Background()
+	memoryRepo := memory.NewMemoryItemRepository()
+	traceRepo := memory.NewMemoryRecallTraceRepository()
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{
+			MemoryItems:        memoryRepo,
+			MemoryRecallTraces: traceRepo,
+		},
+	}
+	workspaceID := common.WorkspaceID("ws-transient-dod-memory-trace")
+	runID := common.RunID("run-transient-dod-memory-trace")
+	memoryID := common.MemoryID(string(runID) + "/provider-retry-001/memory/1")
+	if err := memoryRepo.Create(ctx, &memorymodel.MemoryItem{
+		ID:          memoryID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		SourceType:  memorycommon.MemorySourceRun,
+		SourceRef:   string(runID),
+		MemoryType:  memorycommon.MemoryTypeDoDFeedback,
+		Summary:     "因 LLM 提供者超时（context deadline exceeded），无法完成本次工作区执行规划。",
+		Content:     "Provider retry attempt 1 failed.\nDoD gaps:\n- [skipped] 功能准则",
+		Tags:        []string{"dod_feedback", "repair_loop"},
+		Importance:  90,
+		Confidence:  90,
+		Visibility:  "workspace",
+	}); err != nil {
+		t.Fatalf("seed transient dod memory: %v", err)
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID}
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeySoulStage:             soulStageExecution,
+			stepInputKeyRuntimeRepairFollowUp: true,
+		},
+	}
+
+	orch.enrichLLMStepInputContext(ctx, run, step, nil)
+
+	pkg := mapFromValue(step.Input[stepInputKeyExecutionContextPackage])
+	selected := mapFromValue(pkg["selectedContext"])
+	if memories := mapSliceFromValue(selected["memories"]); len(memories) != 0 {
+		t.Fatalf("selected memories = %+v, want transient dod feedback excluded", memories)
+	}
+	trace, err := traceRepo.Get(ctx, common.MemoryRecallTraceID(string(step.ID)+"/memory-recall/step-input"))
+	if err != nil {
+		t.Fatalf("get recall trace: %v", err)
+	}
+	if !memoryIDsContain(trace.CandidateMemoryIDs, memoryID) ||
+		memoryIDsContain(trace.SelectedMemoryIDs, memoryID) ||
+		!memoryIDsContain(trace.ExcludedMemoryIDs, memoryID) ||
+		len(trace.SelectionScores) == 0 {
+		t.Fatalf("trace = %+v, want transient dod feedback candidate excluded with scores", trace)
+	}
+	if !strings.Contains(trace.SelectionScores[0].Reason, "excluded_low_value_process_memory") {
+		t.Fatalf("selection score reason = %q, want low-value process exclusion", trace.SelectionScores[0].Reason)
+	}
+}
+
 func TestRuntimeOrchestrator_ExecutionContextPackageSkipsInitialStepFailureHistoryRead(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -10571,6 +10633,46 @@ func TestRuntimeOrchestrator_RuntimeMemoryWriteRejectsTransientProviderRetry(t *
 	}
 	if len(requests) != 0 {
 		t.Fatalf("memory requests = %+v, want transient provider retry rejected", requests)
+	}
+}
+
+func TestRuntimeOrchestrator_DoDFeedbackMemoryRejectsTransientProviderAssessment(t *testing.T) {
+	requests := runtimeMemoryWriteRequestsMust(t, map[string]any{
+		"status": "failed",
+		"stage":  "llm_dod_assessment",
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": false,
+			"summary":   "因 LLM 提供者超时（context deadline exceeded），无法完成本次工作区执行规划。",
+			"items": []map[string]any{
+				{
+					"item":   "功能准则",
+					"state":  "skipped",
+					"reason": "Provider retry attempt 1 failed",
+				},
+			},
+		},
+	})
+	if len(requests) != 0 {
+		t.Fatalf("memory requests = %+v, want transient provider assessment excluded", requests)
+	}
+}
+
+func TestRuntimeOrchestrator_ExplicitDoDFeedbackMemoryRejectsTransientText(t *testing.T) {
+	requests, err := runtimeMemoryWriteRequests(map[string]any{
+		"memoryWrites": []map[string]any{
+			{
+				"memoryType": memorycommon.MemoryTypeDoDFeedback,
+				"summary":    "Provider retry failed with context deadline exceeded",
+				"content":    "DoD gaps were skipped because provider_timeout prevented assessment.\nreference_value",
+				"tags":       []string{"dod_feedback", "reference_value"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("runtimeMemoryWriteRequests: %v", err)
+	}
+	if len(requests) != 0 {
+		t.Fatalf("memory requests = %+v, want explicit transient dod feedback rejected", requests)
 	}
 }
 
@@ -24076,4 +24178,16 @@ func memoryWriteRequestContains(items []runtimeMemoryWriteRequest, memoryType st
 		}
 	}
 	return false
+}
+
+func TestCoverageRepairTokenMatchesNeutralPrefixesAndPartialTargets(t *testing.T) {
+	if !coverageRepairTokenMatches("goal:goal-123", "goal-123") {
+		t.Fatalf("expected goal: prefix to match bare goal id")
+	}
+	if !coverageRepairTokenMatches("功能准则 (Functional)： 基础转发", "功能准则 (Functional)： 基础转发：能够正确代理请求并获得预期回复。") {
+		t.Fatalf("expected bounded partial coverage target to match full target text")
+	}
+	if coverageRepairTokenMatches("test", "technical test target") {
+		t.Fatalf("short generic token should not match by substring")
+	}
 }

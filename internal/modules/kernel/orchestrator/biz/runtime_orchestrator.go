@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -3316,7 +3317,7 @@ func patchNodeDeclaresCoverageTargets(input map[string]any, allowed []string) bo
 			continue
 		}
 		for _, candidate := range allowed {
-			if value == candidate {
+			if coverageRepairTokenMatches(value, candidate) {
 				return true
 			}
 		}
@@ -3370,8 +3371,29 @@ func patchNodeCoverageTargetTokens(input map[string]any) []string {
 
 func normalizeCoverageGapRepairToken(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
+	for _, prefix := range []string{"goal:", "dod:", "deliverable:", "acceptance:", "expectation:"} {
+		if strings.HasPrefix(value, prefix) {
+			value = strings.TrimSpace(strings.TrimPrefix(value, prefix))
+			break
+		}
+	}
 	value = strings.Join(strings.Fields(value), " ")
 	return value
+}
+
+func coverageRepairTokenMatches(value string, candidate string) bool {
+	value = normalizeCoverageGapRepairToken(value)
+	candidate = normalizeCoverageGapRepairToken(candidate)
+	if value == "" || candidate == "" {
+		return false
+	}
+	if value == candidate {
+		return true
+	}
+	if utf8.RuneCountInString(value) < 8 || utf8.RuneCountInString(candidate) < 8 {
+		return false
+	}
+	return strings.Contains(candidate, value) || strings.Contains(value, candidate)
 }
 
 func repairPatchTargetRelevanceRequired(step *runModel.Step) bool {

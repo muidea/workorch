@@ -31,6 +31,14 @@ func TestBuildProviderPromptMessagesUsesMultiTurnStructure(t *testing.T) {
 	if build.Messages[0].Role != "system" {
 		t.Fatalf("first role = %q, want system", build.Messages[0].Role)
 	}
+	joined := ""
+	for _, item := range build.Messages {
+		joined += "\n" + item.Content
+	}
+	if !strings.Contains(joined, "Allowed top-level JSON fields") ||
+		!strings.Contains(joined, "validationPlan") {
+		t.Fatalf("prompt missing explicit decision schema field guidance, joined=%s", joined)
+	}
 }
 
 func TestBuildProviderPromptMessagesUsesStructuredJSONPromptForNonDecisionSchema(t *testing.T) {

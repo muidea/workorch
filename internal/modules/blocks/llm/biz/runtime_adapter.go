@@ -1378,11 +1378,16 @@ func ParseLLMExecutionDecision(payload []byte) (llmmodels.LLMExecutionDecision, 
 	} else if err != io.EOF {
 		return llmmodels.LLMExecutionDecision{}, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
 	}
-	if err := validateLLMDecisionTopLevelFields(raw); err != nil {
-		return llmmodels.LLMExecutionDecision{}, err
-	}
 	normalized, err = normalizeLLMDecisionSchemaPayload(normalized)
 	if err != nil {
+		return llmmodels.LLMExecutionDecision{}, err
+	}
+	raw = nil
+	decoder = json.NewDecoder(bytes.NewReader(normalized))
+	if err := decoder.Decode(&raw); err != nil {
+		return llmmodels.LLMExecutionDecision{}, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
+	}
+	if err := validateLLMDecisionTopLevelFields(raw); err != nil {
 		return llmmodels.LLMExecutionDecision{}, err
 	}
 	var decision llmmodels.LLMExecutionDecision
@@ -1424,11 +1429,27 @@ func normalizeLLMDecisionSchemaPayload(payload []byte) ([]byte, error) {
 	if err := json.Unmarshal(payload, &doc); err != nil {
 		return payload, nil
 	}
+	changed := false
+	if value, ok := doc["validationPlan"]; ok {
+		if _, hasPlan := doc["plan"]; !hasPlan {
+			if plan := advisoryDecisionPlanValue(value); len(plan) > 0 {
+				doc["plan"] = plan
+			}
+		}
+		delete(doc, "validationPlan")
+		changed = true
+	}
 	assessment, ok := doc["dodAssessment"].(map[string]any)
 	if !ok || len(assessment) == 0 {
-		return payload, nil
+		if !changed {
+			return payload, nil
+		}
+		normalized, err := json.Marshal(doc)
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
+		}
+		return normalized, nil
 	}
-	changed := false
 	for _, key := range []string{"goalCoverage", "acceptanceDimensions", "deliverableCoverage"} {
 		if items, ok := assessment[key].([]any); ok {
 			assessment[key] = map[string]any{
@@ -1447,6 +1468,43 @@ func normalizeLLMDecisionSchemaPayload(payload []byte) ([]byte, error) {
 		return nil, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
 	}
 	return normalized, nil
+}
+
+func advisoryDecisionPlanValue(value any) []string {
+	switch typed := value.(type) {
+	case string:
+		if text := strings.TrimSpace(typed); text != "" {
+			return []string{text}
+		}
+	case []any:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			switch v := item.(type) {
+			case string:
+				if text := strings.TrimSpace(v); text != "" {
+					ret = append(ret, text)
+				}
+			default:
+				if encoded, err := json.Marshal(v); err == nil && len(encoded) > 0 {
+					ret = append(ret, string(encoded))
+				}
+			}
+		}
+		return ret
+	case []string:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(item); text != "" {
+				ret = append(ret, text)
+			}
+		}
+		return ret
+	default:
+		if encoded, err := json.Marshal(typed); err == nil && len(encoded) > 0 && string(encoded) != "null" {
+			return []string{string(encoded)}
+		}
+	}
+	return nil
 }
 
 func coverageItemsSatisfied(items []any) bool {

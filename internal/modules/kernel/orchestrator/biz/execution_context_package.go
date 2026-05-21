@@ -484,13 +484,20 @@ func shouldExcludeStepInputMemoryItem(item *memorymodel.MemoryItem) bool {
 	if item == nil {
 		return true
 	}
-	if strings.TrimSpace(item.MemoryType) != memorycommon.MemoryTypeToolFeedback {
-		return false
+	if memoryItemHasTransientProcessTag(item) {
+		return true
 	}
-	if memoryItemHasTag(item, "accepted_input") {
-		return false
+	memoryType := strings.TrimSpace(item.MemoryType)
+	if memoryType == memorycommon.MemoryTypeDoDFeedback {
+		return runtimeMemoryTextHasTransientSignal(item.Summary + "\n" + item.Content)
 	}
-	return memoryItemHasTag(item, "provider_retry")
+	if memoryType == memorycommon.MemoryTypeToolFeedback {
+		if memoryItemHasTag(item, "accepted_input") {
+			return false
+		}
+		return memoryItemHasTag(item, "provider_retry") || runtimeMemoryTextHasTransientSignal(item.Summary+"\n"+item.Content)
+	}
+	return false
 }
 
 func memoryItemHasReferenceBoundary(item *memorymodel.MemoryItem) bool {
@@ -514,6 +521,19 @@ func memoryItemHasReferenceBoundary(item *memorymodel.MemoryItem) bool {
 		"referencevalue",
 	} {
 		if strings.Contains(text, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func memoryItemHasTransientProcessTag(item *memorymodel.MemoryItem) bool {
+	if item == nil {
+		return true
+	}
+	for _, tag := range item.Tags {
+		switch strings.TrimSpace(strings.ToLower(tag)) {
+		case "provider_retry", "transient", "runtime_plumbing", "schema_invalid", "parse_error", "rejected_output":
 			return true
 		}
 	}

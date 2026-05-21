@@ -2042,3 +2042,23 @@ func llmStepRequest() runtimemodel.StepExecutionRequest {
 		},
 	}
 }
+
+func TestParseLLMExecutionDecisionNormalizesValidationPlanAdvisoryField(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"continue",
+		"validationPlan":["run focused tests"],
+		"executionGraph":{"nodes":[{"id":"verify","kind":"shell/command","input":{"command":"go","args":["test","./..."]}}]}
+	}`))
+	if err != nil {
+		t.Fatalf("ParseLLMExecutionDecision: %v", err)
+	}
+	if decision.CompletionState != "continue" {
+		t.Fatalf("completionState = %q, want continue", decision.CompletionState)
+	}
+	if len(decision.Plan) != 1 || decision.Plan[0] != "run focused tests" {
+		t.Fatalf("plan = %+v, want validationPlan normalized into plan", decision.Plan)
+	}
+	if decision.ExecutionGraph == nil || len(decision.ExecutionGraph.Nodes) != 1 {
+		t.Fatalf("executionGraph = %+v, want graph preserved", decision.ExecutionGraph)
+	}
+}

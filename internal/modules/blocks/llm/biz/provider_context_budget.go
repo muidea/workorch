@@ -587,6 +587,14 @@ func providerInputSourceRefs(input map[string]any) []string {
 			}
 		}
 	}
+	if repairActionPackage := recordFromAny(input["repairActionPackage"]); len(repairActionPackage) > 0 {
+		for key := range repairActionPackage {
+			switch strings.TrimSpace(key) {
+			case "currentExecutionProgress", "currentFailure", "previousRejectedOutputSummary", "coverageTargetSet":
+				refs = append(refs, "input.repairActionPackage."+key)
+			}
+		}
+	}
 	return uniqueStrings(refs)
 }
 
@@ -708,6 +716,13 @@ func providerInputHasProcessEvidence(input map[string]any) bool {
 	}
 	pkg := recordFromAny(input["executionContextPackage"])
 	if len(mapSliceFromAny(pkg["processEvidenceTimeline"])) > 0 && len(recordFromAny(pkg["currentProgressDigest"])) > 0 {
+		return true
+	}
+	repairPkg := recordFromAny(input["repairActionPackage"])
+	if len(recordFromAny(repairPkg["currentExecutionProgress"])) > 0 &&
+		(len(recordFromAny(repairPkg["currentFailure"])) > 0 ||
+			len(recordFromAny(repairPkg["previousRejectedOutputSummary"])) > 0 ||
+			len(mapSliceFromAny(repairPkg["coverageTargetSet"])) > 0) {
 		return true
 	}
 	return false

@@ -659,6 +659,49 @@ func TestEnforceProviderRequestBudgetFailsGateWhenRepairProcessEvidenceMissing(t
 	}
 }
 
+func TestEnforceProviderRequestBudgetAcceptsRepairActionProgressAsProcessEvidence(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-repair-progress",
+		RunID:       "run-repair-progress",
+		StepID:      "run-repair-progress/provider-retry-001",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"runtimeRepairFollowUp":       true,
+			"stateChangingOutputRequired": true,
+			"failedStepId":                "run-repair-progress/repair-001",
+			"failureClass":                "dod_coverage_missing",
+			"repairActionPackage": map[string]any{
+				"coverageTargetSet": []map[string]any{{
+					"kind":       "dod",
+					"targetText": "required outcome",
+				}},
+				"currentExecutionProgress": map[string]any{
+					"failedStepId":     "run-repair-progress/repair-001",
+					"failureClass":     "dod_coverage_missing",
+					"failureReason":    "completionState failed has no actionable continuation",
+					"coverageGapCount": 1,
+				},
+				"requiredOutput": map[string]any{
+					"mustDeclareCoverageTargets": true,
+				},
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget = nil, want integrity audit")
+	}
+	if stringSliceContains(got.ContextBudget.IntegrityWarnings, "runtime_repair_process_evidence_missing") {
+		t.Fatalf("integrityWarnings = %+v, did not expect missing process evidence", got.ContextBudget.IntegrityWarnings)
+	}
+	if got.ContextBudget.ContextGateAction == providerContextGateFailFast {
+		t.Fatalf("contextGateAction = %q, did not expect fail_fast", got.ContextBudget.ContextGateAction)
+	}
+}
+
 func TestEnforceProviderRequestBudgetPreservesRepairContractWithoutSnapshots(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-repair-contract",

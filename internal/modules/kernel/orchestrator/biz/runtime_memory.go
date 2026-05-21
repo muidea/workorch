@@ -155,8 +155,12 @@ func shouldPersistRuntimeMemoryWrite(request runtimeMemoryWriteRequest) bool {
 		return true
 	case memorycommon.MemoryTypeUserPreference:
 		return true
-	case memorycommon.MemoryTypeDoDFeedback,
-		memorycommon.MemoryTypeExecutionLesson:
+	case memorycommon.MemoryTypeDoDFeedback:
+		if runtimeMemoryWriteHasTransientText(request) {
+			return false
+		}
+		return runtimeMemoryWriteHasReferenceBoundary(request)
+	case memorycommon.MemoryTypeExecutionLesson:
 		return runtimeMemoryWriteHasReferenceBoundary(request)
 	case memorycommon.MemoryTypeSkillFeedback,
 		memorycommon.MemoryTypeToolFeedback:
@@ -170,6 +174,33 @@ func runtimeMemoryWriteHasTransientTag(tags []string) bool {
 	for _, tag := range tags {
 		switch strings.TrimSpace(strings.ToLower(tag)) {
 		case "provider_retry", "transient", "runtime_plumbing", "schema_invalid", "parse_error", "rejected_output":
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeMemoryWriteHasTransientText(request runtimeMemoryWriteRequest) bool {
+	return runtimeMemoryTextHasTransientSignal(request.Summary + "\n" + request.Content)
+}
+
+func runtimeMemoryTextHasTransientSignal(text string) bool {
+	text = strings.ToLower(text)
+	for _, token := range []string{
+		"provider_retry",
+		"provider retry",
+		"provider_timeout",
+		"llm_provider_timeout",
+		"context deadline exceeded",
+		"stream incomplete",
+		"llm_schema_invalid",
+		"llm_decision_invalid",
+		"invalid llm decision json",
+		"schema invalid",
+		"parse error",
+		"no actionable continuation",
+	} {
+		if strings.Contains(text, token) {
 			return true
 		}
 	}
@@ -505,6 +536,9 @@ func appendDoDFeedbackMemoryWrite(requests []runtimeMemoryWriteRequest, output m
 	if hasDoDFeedbackMemoryWrite(requests) {
 		return requests
 	}
+	if doDFeedbackOutputIsTransient(output) {
+		return requests
+	}
 	assessment := doDAssessmentFromOutput(output)
 	if assessment == nil {
 		return requests
@@ -517,6 +551,9 @@ func appendDoDFeedbackMemoryWrite(requests []runtimeMemoryWriteRequest, output m
 	for _, item := range items {
 		state := strings.ToLower(strings.TrimSpace(stringFromMap(item, "state")))
 		if state == "" || state == "satisfied" {
+			continue
+		}
+		if state == "skipped" && len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 {
 			continue
 		}
 		name := strings.TrimSpace(stringFromMap(item, "item"))
@@ -538,12 +575,52 @@ func appendDoDFeedbackMemoryWrite(requests []runtimeMemoryWriteRequest, output m
 		summary = "DoD assessment feedback captured"
 	}
 	content := strings.Join(append([]string{summary, "DoD gaps:"}, lines...), "\n")
-	return append(requests, runtimeMemoryWriteRequest{
+	request := runtimeMemoryWriteRequest{
 		MemoryType: memorycommon.MemoryTypeDoDFeedback,
 		Summary:    summary,
 		Content:    content,
-		Tags:       []string{"dod_feedback", "repair_loop"},
-	})
+		Tags:       []string{"dod_feedback", "repair_loop", "reference_value"},
+	}
+	if !shouldPersistRuntimeMemoryWrite(request) {
+		return requests
+	}
+	return append(requests, request)
+}
+
+func doDFeedbackOutputIsTransient(output map[string]any) bool {
+	if len(output) == 0 {
+		return true
+	}
+	text := strings.Join([]string{
+		stringFromMap(output, "failureCategory"),
+		stringFromMap(output, "failureClass"),
+		stringFromMap(output, "stage"),
+		stringFromMap(output, "error"),
+		stringFromMap(output, "reason"),
+		stringFromMap(output, "summary"),
+		stringFromMap(doDAssessmentFromOutput(output), "summary"),
+		doDAssessmentItemsText(doDAssessmentFromOutput(output)),
+	}, "\n")
+	return runtimeMemoryTextHasTransientSignal(text)
+}
+
+func doDAssessmentItemsText(assessment map[string]any) string {
+	if assessment == nil {
+		return ""
+	}
+	items, ok := doDAssessmentItemMaps(assessment["items"])
+	if !ok || len(items) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(items)*3)
+	for _, item := range items {
+		parts = append(parts,
+			stringFromMap(item, "item"),
+			stringFromMap(item, "reason"),
+			stringFromMap(item, "summary"),
+		)
+	}
+	return strings.Join(parts, "\n")
 }
 
 func hasDoDFeedbackMemoryWrite(requests []runtimeMemoryWriteRequest) bool {

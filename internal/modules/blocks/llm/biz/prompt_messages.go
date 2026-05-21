@@ -470,6 +470,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 		"Use runtimeCapabilities only",
 		"Respect unresolved governance constraints",
 		"Treat effective Goal and DoD as hard constraints",
+		"Return only allowed workorch.llmExecutionDecision.v1 top-level fields; do not return validationPlan or other unknown advisory fields",
 		"When runtimeStageMode is open_judgment, prefer context gathering, plan refinement, and constraint clarification over premature state-changing output",
 		"When runtimeStageMode is strict_convergence, produce executable output, failed assessment, or a real blocker; do not continue read-only looping",
 		"If the current workspace is empty and the effective Goal/DoD can be satisfied by creating workspace deliverables with available runtime capabilities, continue with bounded state-changing work instead of asking whether initialization is allowed",

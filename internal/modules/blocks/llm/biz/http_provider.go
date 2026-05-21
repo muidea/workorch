@@ -569,6 +569,8 @@ func decisionContractPrompt(request llmmodels.ProviderRequest) string {
 	lines := []string{
 		"Required output JSON fields use the LLMExecutionDecision contract:",
 		"- completionState must be one of: continue, blocked_on_decision, blocked_on_approval, completed, failed.",
+		"- Allowed top-level JSON fields are only: completionState, thoughtSummary, plan, executionGraph, nextAction, requiredDecision, requiredApproval, patchRequests, mcpToolCalls, shellCommands, memoryWrites, dodAssessment.",
+		"- Do not return unknown top-level fields such as validationPlan, testPlan, implementationPlan, verificationPlan, workspaceId, runId, stepId, schema, traceRefs, or config. Put advisory planning text into plan or thoughtSummary; put verification commands into executionGraph or shellCommands when executable work is allowed.",
 		"- Use executionGraph when the next work contains multiple blocks, dependencies, or future parallel-ready work.",
 		"- executionGraph.nodes items require id and kind; dependsOn is a list of node ids; input carries block input.",
 		"- executionGraph.nodes kind values must be selected from runtimeCapabilities.blockKinds only.",

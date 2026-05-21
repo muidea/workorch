@@ -399,6 +399,8 @@ Memory 写入准入必须前置于 recall 降噪。若一条信息无法作为�
 
 Core 准入只判断 memory 的稳定性、边界、来源和可复用性，不判断具体业务领域含义。
 
+`llm_dod_assessment` 只能在产生真实 DoD 覆盖反馈时隐式写入 `dod_feedback` memory。若 assessment 表达的是 provider timeout、provider retry exhausted、schema invalid、stream incomplete、context gate failure 等瞬态运行问题，或 DoD item 全部为无 evidence 的 `skipped`，runtime 必须把它作为当前 run 的过程证据、失败证据或 repair package 信息保存，禁止写入长期 memory。显式 `memoryWrites` 同样必须通过该准入，不允许用 `dod_feedback` 包装 provider/runtime 流水。
+
 ### 高价值 memory
 
 高价值 memory 包括：
@@ -488,7 +490,7 @@ Strict repair 的 `Current Requested Action` 不得继续使用泛化 `plan_next
 | STG-10-01 | Strict state-changing repair 的 Current Action 不再使用 `plan_next_step` | LLM prompt builder | completed | request prompt 中 action type 与 `requiredOutput` 一致 |
 | STG-10-02 | `repairActionPackage` 独立成高优先级 prompt section | LLM prompt builder / request evidence | completed | request prompt 有独立 repair package section，且保留 requiredOutput |
 | STG-10-03 | Provider 前上下文冲突 gate | LLM provider request budget / gate | completed | 冲突 action / requiredOutput 在 provider 调用前 fail-fast |
-| STG-10-04 | Memory 写入准入前置，禁止 transient failure / provider retry 默认写入 | runtime memory | completed | transient repair/provider failure 不产生长期 memory |
+| STG-10-04 | Memory 写入准入前置，禁止 transient failure / provider retry 默认写入 | runtime memory / recall selection | completed | transient repair/provider failure 不产生长期 memory；历史低价值 transient memory 不进入 recall 主上下文 |
 | STG-10-05 | Strict repair recall 只接纳有适用边界且相关的 memory | execution context memory selection | completed | 无边界历史 memory 不进入 strict repair context |
 
 ## Repair 合同
