@@ -12,7 +12,7 @@ import (
 
 func TestMagicHubPublishesThroughMagicCommonHub(t *testing.T) {
 	hub := NewMagicHub()
-	defer hub.Terminate()
+	defer hub.Terminate(context.Background())
 
 	var received Envelope
 	unsubscribe := hub.Subscribe(TopicRunStateChanged, func(_ context.Context, envelope Envelope) error {
@@ -41,7 +41,7 @@ func TestMagicHubPublishesThroughMagicCommonHub(t *testing.T) {
 
 func TestMagicHubSupportsWildcardSubscription(t *testing.T) {
 	hub := NewMagicHub()
-	defer hub.Terminate()
+	defer hub.Terminate(context.Background())
 
 	var topics []string
 	unsubscribe := hub.Subscribe("*", func(_ context.Context, envelope Envelope) error {
@@ -63,7 +63,7 @@ func TestMagicHubSupportsWildcardSubscription(t *testing.T) {
 
 func TestMagicHubUnsubscribeStopsDelivery(t *testing.T) {
 	hub := NewMagicHub()
-	defer hub.Terminate()
+	defer hub.Terminate(context.Background())
 
 	var calls int
 	unsubscribe := hub.Subscribe(TopicApprovalResolved, func(_ context.Context, _ Envelope) error {
@@ -101,7 +101,7 @@ func TestMagicHubUnsubscribeDoesNotBlockOnUnderlyingHub(t *testing.T) {
 
 func TestMagicHubReturnsHandlerError(t *testing.T) {
 	hub := NewMagicHub()
-	defer hub.Terminate()
+	defer hub.Terminate(context.Background())
 
 	wantErr := errors.New("handler failed")
 	unsubscribe := hub.Subscribe(TopicTicketResolved, func(_ context.Context, _ Envelope) error {
@@ -120,7 +120,7 @@ func TestMagicHubReturnsHandlerError(t *testing.T) {
 
 func TestMagicHubPublishCanReturnHandlerResponse(t *testing.T) {
 	hub := NewMagicHub()
-	defer hub.Terminate()
+	defer hub.Terminate(context.Background())
 
 	want := Envelope{Topic: TopicCLIResult, Payload: map[string]any{"ok": true}}
 	unsubscribe := hub.Subscribe(TopicCLICommand, func(_ context.Context, _ Envelope) error {
@@ -152,11 +152,11 @@ func (blockingUnsubscribeHub) Send(magicevent.Event) magicevent.Result {
 	return nil
 }
 
-func (blockingUnsubscribeHub) Terminate() {}
+func (blockingUnsubscribeHub) Terminate(_ context.Context) {}
 
 func TestMagicHubPublishWithoutSubscribersSucceeds(t *testing.T) {
 	hub := NewMagicHub()
-	defer hub.Terminate()
+	defer hub.Terminate(context.Background())
 
 	if err := hub.Publish(context.Background(), Envelope{Topic: TopicStepDispatched}); err != nil {
 		t.Fatalf("Publish without subscribers returned error: %v", err)
@@ -169,7 +169,7 @@ func TestMagicHubPublishWithoutSubscribersSucceeds(t *testing.T) {
 
 func TestMagicHubSupportsSubscribeWorkorch(t *testing.T) {
 	hub := NewMagicHub()
-	defer hub.Terminate()
+	defer hub.Terminate(context.Background())
 
 	var calls int
 	unsubscribers := SubscribeWorkorch(hub, func(_ context.Context, event WorkorchEvent) error {
@@ -202,7 +202,7 @@ func TestMagicHubSupportsSubscribeWorkorch(t *testing.T) {
 
 func TestMagicHubDeliversSameTopicToMultipleSubscribers(t *testing.T) {
 	hub := NewMagicHub()
-	defer hub.Terminate()
+	defer hub.Terminate(context.Background())
 
 	var firstCalls int
 	var secondCalls int
@@ -227,7 +227,7 @@ func TestMagicHubDeliversSameTopicToMultipleSubscribers(t *testing.T) {
 
 func TestMagicHubPublishesAcrossWrappersSharingSameUnderlyingHub(t *testing.T) {
 	rawHub := magicevent.NewHub(defaultMagicHubCapacity)
-	defer rawHub.Terminate()
+	defer rawHub.Terminate(context.Background())
 
 	publisher := NewMagicHubWithHubOwner(rawHub, "test/publisher")
 	subscriber := NewMagicHubWithHubOwner(rawHub, "test/subscriber")
@@ -249,7 +249,7 @@ func TestMagicHubPublishesAcrossWrappersSharingSameUnderlyingHub(t *testing.T) {
 
 func TestMagicHubDeliversSameTopicAcrossMultipleWrappers(t *testing.T) {
 	rawHub := magicevent.NewHub(defaultMagicHubCapacity)
-	defer rawHub.Terminate()
+	defer rawHub.Terminate(context.Background())
 
 	first := NewMagicHubWithHubOwner(rawHub, "test/first")
 	second := NewMagicHubWithHubOwner(rawHub, "test/second")
@@ -278,7 +278,7 @@ func TestMagicHubDeliversSameTopicAcrossMultipleWrappers(t *testing.T) {
 
 func TestMagicHubDeliversWildcardEventsToMultipleWrappers(t *testing.T) {
 	rawHub := magicevent.NewHub(defaultMagicHubCapacity)
-	defer rawHub.Terminate()
+	defer rawHub.Terminate(context.Background())
 
 	first := NewMagicHubWithHubOwner(rawHub, "test/first")
 	second := NewMagicHubWithHubOwner(rawHub, "test/second")
@@ -307,7 +307,7 @@ func TestMagicHubDeliversWildcardEventsToMultipleWrappers(t *testing.T) {
 
 func TestMagicHubObserverIDUsesStableOwnerName(t *testing.T) {
 	hub := NewMagicHubWithOwner("workorchd/http")
-	defer hub.Terminate()
+	defer hub.Terminate(context.Background())
 
 	unsubscribe := hub.Subscribe(TopicWorkspaceCreated, func(_ context.Context, _ Envelope) error {
 		return nil

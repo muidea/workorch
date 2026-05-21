@@ -27,7 +27,7 @@ func (p *plugin) ID() string { return ModuleID }
 
 func (p *plugin) Weight() int { return 20 }
 
-func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
+func (p *plugin) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 	runtime, err := workorchRuntime()
 	if err != nil {
 		return err
@@ -46,7 +46,7 @@ func (p *plugin) Setup(_ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 	return nil
 }
 
-func (p *plugin) Run() *cd.Error {
+func (p *plugin) Run(_ context.Context) *cd.Error {
 	if p == nil || p.module == nil {
 		return cd.NewError(cd.IllegalParam, "workspace module is not configured")
 	}
@@ -56,11 +56,11 @@ func (p *plugin) Run() *cd.Error {
 	return nil
 }
 
-func (p *plugin) Teardown() {
+func (p *plugin) Teardown(ctx context.Context) {
 	if p == nil || p.module == nil {
 		return
 	}
-	_ = p.module.Teardown(context.Background())
+	_ = p.module.Teardown(ctx)
 	p.module = nil
 }
 

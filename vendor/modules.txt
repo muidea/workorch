@@ -165,7 +165,7 @@ github.com/muesli/reflow/wordwrap
 # github.com/muesli/termenv v0.16.0
 ## explicit; go 1.17
 github.com/muesli/termenv
-# github.com/muidea/magicCommon v1.5.7
+# github.com/muidea/magicCommon v1.5.8 => /home/rangh/codespace/magicCommon
 ## explicit; go 1.24.0
 github.com/muidea/magicCommon/def
 github.com/muidea/magicCommon/event
@@ -296,3 +296,4 @@ gopkg.in/gomail.v2
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
+# github.com/muidea/magicCommon => /home/rangh/codespace/magicCommon

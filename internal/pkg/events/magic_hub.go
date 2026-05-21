@@ -200,11 +200,11 @@ func (h *MagicHub) Published() []Envelope {
 	return out
 }
 
-func (h *MagicHub) Terminate() {
+func (h *MagicHub) Terminate(ctx context.Context) {
 	if h == nil || h.hub == nil || !h.ownsHub {
 		return
 	}
-	h.hub.Terminate()
+	h.hub.Terminate(ctx)
 }
 
 func (o *magicDispatchObserver) ID() string {

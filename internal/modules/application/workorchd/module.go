@@ -1,6 +1,8 @@
 package workorchd
 
 import (
+	"context"
+
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
@@ -33,27 +35,27 @@ func (m *Module) Weight() int {
 	return 100
 }
 
-func (m *Module) Setup(eventHub event.Hub, backgroundRoutine task.BackgroundRoutine) *cd.Error {
+func (m *Module) Setup(ctx context.Context, eventHub event.Hub, backgroundRoutine task.BackgroundRoutine) *cd.Error {
 	config, err := server.ConfigFromEnv()
 	if err != nil {
 		return cd.NewError(cd.IllegalParam, err.Error())
 	}
 	m.service = server.NewService(config)
-	return m.service.Startup(modulecommon.ServiceName, eventHub, backgroundRoutine)
+	return m.service.Startup(ctx, modulecommon.ServiceName, eventHub, backgroundRoutine)
 }
 
-func (m *Module) Run() *cd.Error {
+func (m *Module) Run(ctx context.Context) *cd.Error {
 	if m == nil || m.service == nil {
 		return cd.NewError(cd.IllegalParam, "workorch module is not configured")
 	}
-	return m.service.Run()
+	return m.service.Run(ctx)
 }
 
-func (m *Module) Teardown() {
+func (m *Module) Teardown(ctx context.Context) {
 	if m == nil || m.service == nil {
 		return
 	}
-	m.service.Shutdown()
+	m.service.Shutdown(ctx)
 	m.service = nil
 }
 

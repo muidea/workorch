@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/muidea/magicCommon/framework/application"
 	"github.com/muidea/magicCommon/framework/service"
@@ -54,6 +57,7 @@ type Options struct {
 }
 
 const defaultWorkspaceTemplateID = "generic-governed"
+const defaultApplicationShutdownTimeout = 30 * time.Second
 
 type StartupArgs struct {
 	ConfigDir string
@@ -129,12 +133,12 @@ func runLocal(ctx context.Context, programName string, args StartupArgs) (err er
 	if args.Mode == ModeInteractive {
 		defer installInteractiveLogging(configDir)()
 	}
-	if err := application.Startup(service.DefaultService()); err != nil {
+	if err := application.Startup(ctx, service.DefaultService()); err != nil {
 		return err
 	}
-	defer application.Shutdown()
+	defer shutdownApplication()
 
-	if err := application.Run(); err != nil {
+	if err := application.Run(ctx); err != nil {
 		return err
 	}
 	if args.Mode == ModeServer {
@@ -159,6 +163,38 @@ func runLocal(ctx context.Context, programName string, args StartupArgs) (err er
 	return withArgs(programName, args.CobraArgs, func() error {
 		return cli.ExecuteWithBackend(be, defaultWS)
 	})
+}
+
+func shutdownApplication() {
+	timeout := applicationShutdownTimeout()
+	ctx := context.Background()
+	if timeout <= 0 {
+		application.Shutdown(ctx)
+		return
+	}
+	shutdownCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	application.Shutdown(shutdownCtx)
+	if err := shutdownCtx.Err(); err != nil {
+		slog.Error("workorch application shutdown context finished", "timeout", timeout, "err", err)
+	}
+}
+
+func applicationShutdownTimeout() time.Duration {
+	timeout := defaultApplicationShutdownTimeout
+	cfg, err := workorchconfig.Current()
+	if err != nil {
+		return timeout
+	}
+	raw := strings.TrimSpace(cfg.Server.ShutdownTimeout)
+	if raw == "" {
+		return timeout
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil || parsed <= 0 {
+		return timeout
+	}
+	return parsed + 10*time.Second
 }
 
 func waitServer(ctx context.Context) error {

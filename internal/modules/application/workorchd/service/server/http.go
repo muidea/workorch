@@ -984,7 +984,11 @@ func (s *HTTPServer) Shutdown(ctx context.Context) error {
 	if s == nil || s.http == nil {
 		return nil
 	}
-	return errors.Join(s.http.Shutdown(ctx), s.state.close(ctx))
+	err := s.http.Shutdown(ctx)
+	if err != nil && ctx != nil && errors.Is(err, context.DeadlineExceeded) {
+		_ = s.http.Close()
+	}
+	return errors.Join(err, s.state.close(ctx))
 }
 
 func newMux(config Config) http.Handler {
@@ -3931,14 +3935,18 @@ func (s *serverState) waitBackground(ctx context.Context) error {
 	}
 }
 
+func (s *serverState) backgroundContext() context.Context {
+	if s != nil && s.backgroundCtx != nil {
+		return s.backgroundCtx
+	}
+	return context.Background()
+}
+
 func (s *serverState) scheduleStartupRecovery() {
 	if s == nil {
 		return
 	}
-	ctx := s.backgroundCtx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := s.backgroundContext()
 	s.backgroundWG.Add(1)
 	go func() {
 		defer s.backgroundWG.Done()
@@ -4430,7 +4438,7 @@ func (s *serverState) warmRunSnapshotCache(ctx context.Context, runID string, st
 	go func() {
 		defer s.backgroundWG.Done()
 		defer s.finishRunSnapshotInflight(runID)
-		warmCtx, cancel := context.WithTimeout(context.Background(), runSnapshotCacheTTL)
+		warmCtx, cancel := context.WithTimeout(s.backgroundContext(), runSnapshotCacheTTL)
 		defer cancel()
 		item, err := s.readRunSnapshot(warmCtx, s.config.Backend, s.config.DataRoot, runID)
 		s.completeRunSnapshotInflight(runID, item, err)
@@ -4722,7 +4730,7 @@ func (s *serverState) scheduleGovernanceRunResumes(runIDs []string, priority int
 				}
 				s.notifyRunStatusChanged()
 			}()
-			ctx := appservice.ContextWithEventHub(context.Background(), s.eventHub)
+			ctx := appservice.ContextWithEventHub(s.backgroundContext(), s.eventHub)
 			s.metrics.runResumeRequests.Add(1)
 			release, err := s.acquireRunSlotWithPriority(ctx, priority)
 			if err != nil {
@@ -4800,7 +4808,7 @@ func (s *serverState) scheduleReplanContinuationIfNeeded(ctx context.Context, wo
 	s.backgroundWG.Add(1)
 	go func() {
 		defer s.backgroundWG.Done()
-		runCtx := appservice.ContextWithEventHub(context.Background(), s.eventHub)
+		runCtx := appservice.ContextWithEventHub(s.backgroundContext(), s.eventHub)
 		release, err := s.acquireRunSlotWithPriority(runCtx, priority)
 		if err != nil {
 			s.clearReplanContinuationStarted(key)

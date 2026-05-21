@@ -34,7 +34,7 @@ func (m *modulePluginLifecycle) Run() error {
 	if m == nil || m.manager == nil {
 		return nil
 	}
-	if err := m.manager.Run(); err != nil {
+	if err := m.manager.Run(context.Background()); err != nil {
 		return err
 	}
 	return nil
@@ -60,7 +60,7 @@ func (m *modulePluginAdapter) ID() string {
 	return m.module.ID()
 }
 
-func (m *modulePluginAdapter) Run() *cd.Error {
+func (m *modulePluginAdapter) Run(_ context.Context) *cd.Error {
 	if m == nil || m.module == nil {
 		return nil
 	}
@@ -70,8 +70,8 @@ func (m *modulePluginAdapter) Run() *cd.Error {
 	return nil
 }
 
-func (m *modulePluginAdapter) Teardown() *cd.Error {
-	if err := m.shutdown(m.ctx); err != nil {
+func (m *modulePluginAdapter) Teardown(ctx context.Context) *cd.Error {
+	if err := m.shutdown(ctx); err != nil {
 		return cd.NewError(cd.Unexpected, err.Error())
 	}
 	return nil

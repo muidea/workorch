@@ -32,7 +32,7 @@ workorch/
 
 | 依赖 | 用途 |
 |------|------|
-| magicCommon v1.5.7 | 应用框架（启动、关闭、插件生命周期） |
+| magicCommon v1.5.8 | 应用框架（启动、关闭、插件生命周期） |
 | magicEngine v1.4.9 | HTTP 路由与中间件 |
 | anthropic-sdk-go v1.38.0 | Anthropic LLM 适配器 |
 | openai-go v1.12.0 | OpenAI LLM 适配器 |

@@ -1132,10 +1132,17 @@ func TestActivateWorkspaceExecutionWithBackendPromotesResolvedReplanHistoryToCon
 	step := runSnapshot.Steps[0]
 	if step.Input["runtimeStage"] != "repair" ||
 		step.Input["soulStage"] != "execution" ||
-		step.Input["repairObjective"] != "produce_state_changing_output" ||
-		step.Input["stateChangingOutputRequired"] != true ||
+		step.Input["repairObjective"] != "acquire_concrete_failure_evidence" ||
+		step.Input["concreteFailureEvidenceRequired"] != true ||
 		step.Input["replanStateChangingContinuation"] != true {
-		t.Fatalf("first step input = %+v, want state-changing replan continuation", step.Input)
+		t.Fatalf("first step input = %+v, want evidence-grounded replan continuation", step.Input)
+	}
+	actionPackage := contextMapFromValue(t, step.Input["repairActionPackage"])
+	requiredOutput := contextMapFromValue(t, actionPackage["requiredOutput"])
+	if actionPackage["evidenceAcquisitionRequired"] != true ||
+		requiredOutput["mustProduceConcreteFailureEvidence"] != true ||
+		requiredOutput["mustIncludeStateChangingNode"] != false {
+		t.Fatalf("repairActionPackage = %+v, want concrete failure evidence acquisition before state-changing repair", actionPackage)
 	}
 	stepContext := contextMapFromValue(t, step.Input["executionContext"])
 	if len(contextMapFromValue(t, stepContext["replanContinuation"])) == 0 {

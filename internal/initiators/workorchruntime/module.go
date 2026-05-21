@@ -66,7 +66,7 @@ func (r *Runtime) Weight() int {
 	return 10
 }
 
-func (r *Runtime) Setup(eventHub event.Hub, _ task.BackgroundRoutine) *cd.Error {
+func (r *Runtime) Setup(_ context.Context, eventHub event.Hub, _ task.BackgroundRoutine) *cd.Error {
 	cfg, err := workorchconfig.Current()
 	if err != nil {
 		return cd.NewError(cd.IllegalParam, "invalid argument: "+err.Error())
@@ -80,14 +80,14 @@ func (r *Runtime) Setup(eventHub event.Hub, _ task.BackgroundRoutine) *cd.Error 
 	return nil
 }
 
-func (r *Runtime) Run() *cd.Error {
-	if err := appbootstrap.EnsureBuiltinDefaults(context.Background(), r.repositories.Souls, r.repositories.WorkspaceTemplates); err != nil {
+func (r *Runtime) Run(ctx context.Context) *cd.Error {
+	if err := appbootstrap.EnsureBuiltinDefaults(ctx, r.repositories.Souls, r.repositories.WorkspaceTemplates); err != nil {
 		return cd.NewError(cd.IllegalParam, "ensure builtin defaults: "+err.Error())
 	}
 	return nil
 }
 
-func (r *Runtime) Teardown() {
+func (r *Runtime) Teardown(_ context.Context) {
 	r.repositories = common.RepositorySet{}
 	r.eventHub = nil
 	r.fileRuntimeAdapter = nil

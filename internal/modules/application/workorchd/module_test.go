@@ -17,7 +17,7 @@ func TestModuleSetupReturnsConfigError(t *testing.T) {
 	useWorkorchModuleTestConfig(t, "127.0.0.1:0", "memory", "", "not-a-duration")
 	mod := New()
 
-	if err := mod.Setup(event.NewHub(8), task.NewBackgroundRoutine(8)); err == nil {
+	if err := mod.Setup(context.Background(), event.NewHub(8), task.NewBackgroundRoutine(8)); err == nil {
 		t.Fatal("expected setup error")
 	}
 }
@@ -25,15 +25,15 @@ func TestModuleSetupReturnsConfigError(t *testing.T) {
 func TestModuleRunRequiresSetup(t *testing.T) {
 	mod := New()
 
-	if err := mod.Run(); err == nil {
+	if err := mod.Run(context.Background()); err == nil {
 		t.Fatal("expected run error")
 	}
 }
 
 func TestModuleTeardownIsIdempotent(t *testing.T) {
 	mod := New()
-	mod.Teardown()
-	mod.Teardown()
+	mod.Teardown(context.Background())
+	mod.Teardown(context.Background())
 }
 
 func TestDoneReturnsClosedChannelBeforeSetup(t *testing.T) {
@@ -53,23 +53,23 @@ func TestModuleSetupAndTeardownWithEphemeralAddress(t *testing.T) {
 	useWorkorchModuleTestConfig(t, "127.0.0.1:0", "memory", "", "15s")
 	mod := New()
 
-	if err := mod.Setup(event.NewHub(8), task.NewBackgroundRoutine(8)); err != nil {
+	if err := mod.Setup(context.Background(), event.NewHub(8), task.NewBackgroundRoutine(8)); err != nil {
 		t.Fatalf("setup module: %v", err)
 	}
-	mod.Teardown()
+	mod.Teardown(context.Background())
 }
 
 func TestModuleDoneReportsServerCloseAsCleanShutdown(t *testing.T) {
 	useWorkorchModuleTestConfig(t, "127.0.0.1:0", "memory", "", "15s")
 	mod := New()
 
-	if err := mod.Setup(event.NewHub(8), task.NewBackgroundRoutine(8)); err != nil {
+	if err := mod.Setup(context.Background(), event.NewHub(8), task.NewBackgroundRoutine(8)); err != nil {
 		t.Fatalf("setup module: %v", err)
 	}
-	if err := mod.Run(); err != nil {
+	if err := mod.Run(context.Background()); err != nil {
 		t.Fatalf("run module: %v", err)
 	}
-	mod.Teardown()
+	mod.Teardown(context.Background())
 
 	select {
 	case err, ok := <-mod.Done():

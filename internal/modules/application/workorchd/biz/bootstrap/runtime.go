@@ -90,8 +90,8 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 		}
 	}
 	r.modules = nil
-	if terminator, ok := r.exports.Infrastructure.EventHub.(interface{ Terminate() }); ok {
-		terminator.Terminate()
+	if terminator, ok := r.exports.Infrastructure.EventHub.(interface{ Terminate(context.Context) }); ok {
+		terminator.Terminate(ctx)
 	}
 	return nil
 }

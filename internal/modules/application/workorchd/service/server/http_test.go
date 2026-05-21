@@ -98,6 +98,67 @@ func TestHealthzReturnsOK(t *testing.T) {
 	}
 }
 
+func TestHTTPServerShutdownForceClosesAfterDeadline(t *testing.T) {
+	handlerStarted := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	srv := &HTTPServer{
+		state: &serverState{},
+		http: &http.Server{
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				close(handlerStarted)
+				<-releaseHandler
+				_, _ = w.Write([]byte("ok"))
+			}),
+		},
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	serveDone := make(chan error, 1)
+	go func() {
+		serveDone <- srv.http.Serve(listener)
+	}()
+	clientDone := make(chan error, 1)
+	go func() {
+		resp, err := http.Get("http://" + listener.Addr().String())
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		clientDone <- err
+	}()
+	select {
+	case <-handlerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("handler did not start")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err = srv.Shutdown(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("shutdown error = %v, want context deadline exceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("shutdown elapsed = %v, want bounded return", elapsed)
+	}
+	select {
+	case err := <-serveDone:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Fatalf("serve error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("http server did not stop after forced close")
+	}
+	close(releaseHandler)
+	select {
+	case <-clientDone:
+	case <-time.After(time.Second):
+		t.Fatal("client request did not finish after releasing handler")
+	}
+}
+
 func TestReadyzReturnsServiceUnavailableWhenBackendInvalid(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
@@ -132,15 +193,15 @@ func TestServerStatePrefersApplicationRuntimeSession(t *testing.T) {
 	useWorkorchRuntimeTestConfig(t, "memory", "")
 	hub := magicevent.NewHub(16)
 	routine := magictask.NewBackgroundRoutine(16)
-	defer routine.Shutdown(time.Second)
-	defer hub.Terminate()
-	defer plugininitiator.Teardown()
-	defer pluginmodule.Teardown()
+	defer routine.Shutdown(context.Background())
+	defer hub.Terminate(context.Background())
+	defer plugininitiator.Teardown(context.Background())
+	defer pluginmodule.Teardown(context.Background())
 
-	if err := plugininitiator.Setup(hub, routine); err != nil {
+	if err := plugininitiator.Setup(context.Background(), hub, routine); err != nil {
 		t.Fatalf("setup runtime initiator: %v", err)
 	}
-	if err := pluginmodule.Setup(hub, routine); err != nil {
+	if err := pluginmodule.Setup(context.Background(), hub, routine); err != nil {
 		t.Fatalf("setup runtime modules: %v", err)
 	}
 
@@ -909,7 +970,7 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 
 func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEvent(t *testing.T) {
 	hub := events.NewMagicHub()
-	defer hub.Terminate()
+	defer hub.Terminate(context.Background())
 	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
@@ -985,7 +1046,7 @@ func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEvent(t *testing.T) {
 
 func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEventToMultipleClients(t *testing.T) {
 	hub := events.NewMagicHub()
-	defer hub.Terminate()
+	defer hub.Terminate(context.Background())
 	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
