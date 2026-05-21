@@ -48,6 +48,11 @@ contextWindowTokens = 131072
 modelPattern = "*deepseek*v4*"
 contextWindowTokens = 1000000
 
+[llm.modelCapabilities.minimax-m2-7-highspeed-205k]
+provider = "openai"
+modelPattern = "*MiniMax-M2.7-highspeed*"
+contextWindowTokens = 204800
+
 [llm.modelCapabilities.claude-4-6-1m]
 modelPattern = "*claude*4?6*"
 contextWindowTokens = 1000000
