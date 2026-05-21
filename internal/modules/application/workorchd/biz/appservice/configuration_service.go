@@ -175,20 +175,42 @@ type UpdateServerConfigurationCommand struct {
 }
 
 type UpdateLLMProviderConfiguration struct {
-	ID                string                              `json:"id"`
-	Provider          *string                             `json:"provider,omitempty"`
-	BaseURL           *string                             `json:"baseUrl,omitempty"`
-	APIKey            *string                             `json:"apiKey,omitempty"`
-	Model             *string                             `json:"model,omitempty"`
-	Timeout           *string                             `json:"timeout,omitempty"`
-	Disabled          *bool                               `json:"disabled,omitempty"`
-	ChatCompletions   *bool                               `json:"chatCompletions,omitempty"`
-	Streaming         *bool                               `json:"streaming,omitempty"`
-	NonChatOperations []string                            `json:"nonChatOperations,omitempty"`
-	FailoverEnabled   *bool                               `json:"failoverEnabled,omitempty"`
-	FailoverProviders []string                            `json:"failoverProviders,omitempty"`
-	InferenceProfile  *llmmodels.ProviderInferenceProfile `json:"inferenceProfile,omitempty"`
-	ContextProfile    *llmmodels.ProviderContextProfile   `json:"contextProfile,omitempty"`
+	ID                string                             `json:"id"`
+	Provider          *string                            `json:"provider,omitempty"`
+	BaseURL           *string                            `json:"baseUrl,omitempty"`
+	APIKey            *string                            `json:"apiKey,omitempty"`
+	Model             *string                            `json:"model,omitempty"`
+	Timeout           *string                            `json:"timeout,omitempty"`
+	Disabled          *bool                              `json:"disabled,omitempty"`
+	ChatCompletions   *bool                              `json:"chatCompletions,omitempty"`
+	Streaming         *bool                              `json:"streaming,omitempty"`
+	NonChatOperations []string                           `json:"nonChatOperations,omitempty"`
+	FailoverEnabled   *bool                              `json:"failoverEnabled,omitempty"`
+	FailoverProviders []string                           `json:"failoverProviders,omitempty"`
+	InferenceProfile  *UpdateLLMProviderInferenceProfile `json:"inferenceProfile,omitempty"`
+	ContextProfile    *UpdateLLMProviderContextProfile   `json:"contextProfile,omitempty"`
+}
+
+type UpdateLLMProviderInferenceProfile struct {
+	Temperature          *float64 `json:"temperature,omitempty"`
+	MaxOutputTokens      *int     `json:"maxOutputTokens,omitempty"`
+	ReasoningEffort      *string  `json:"reasoningEffort,omitempty"`
+	ThinkingBudgetTokens *int     `json:"thinkingBudgetTokens,omitempty"`
+}
+
+type UpdateLLMProviderContextProfile struct {
+	ProfileMode             *string  `json:"profileMode,omitempty"`
+	ContextWindowTokens     *int     `json:"contextWindowTokens,omitempty"`
+	MaxInputTokens          *int     `json:"maxInputTokens,omitempty"`
+	ReservedOutputTokens    *int     `json:"reservedOutputTokens,omitempty"`
+	SafetyRatio             *float64 `json:"safetyRatio,omitempty"`
+	ContextUtilizationRatio *float64 `json:"contextUtilizationRatio,omitempty"`
+	BytesHardLimit          *int     `json:"bytesHardLimit,omitempty"`
+	MaxRequestBytes         *int     `json:"maxRequestBytes,omitempty"`
+	EstimatedTokensPerByte  *float64 `json:"estimatedTokensPerByte,omitempty"`
+	InputTokenPrice         *float64 `json:"inputTokenPrice,omitempty"`
+	OutputTokenPrice        *float64 `json:"outputTokenPrice,omitempty"`
+	Currency                *string  `json:"currency,omitempty"`
 }
 
 type UpdateWebSearchConfigurationCommand struct {
@@ -619,28 +641,74 @@ func updatedLLMProviders(existing map[string]workorchconfig.LLMProviderConfig, u
 			next.FailoverProviders = normalizedProviderOperations(update.FailoverProviders)
 		}
 		if update.InferenceProfile != nil {
-			next.Temperature = cloneFloat64Ptr(update.InferenceProfile.Temperature)
-			next.MaxOutputTokens = update.InferenceProfile.MaxOutputTokens
-			next.ReasoningEffort = update.InferenceProfile.ReasoningEffort
-			next.ThinkingBudgetTokens = update.InferenceProfile.ThinkingBudgetTokens
+			applyLLMProviderInferenceProfileUpdate(&next, update.InferenceProfile)
 		}
 		if update.ContextProfile != nil {
-			next.ContextProfileMode = update.ContextProfile.ProfileMode
-			next.ContextWindowTokens = update.ContextProfile.ContextWindowTokens
-			next.MaxInputTokens = update.ContextProfile.MaxInputTokens
-			next.ReservedOutputTokens = update.ContextProfile.ReservedOutputTokens
-			next.SafetyRatio = update.ContextProfile.SafetyRatio
-			next.ContextUtilizationRatio = update.ContextProfile.ContextUtilizationRatio
-			next.BytesHardLimit = update.ContextProfile.BytesHardLimit
-			next.MaxRequestBytes = update.ContextProfile.MaxRequestBytes
-			next.EstimatedTokensPerByte = update.ContextProfile.EstimatedTokensPerByte
-			next.InputTokenPrice = update.ContextProfile.InputTokenPrice
-			next.OutputTokenPrice = update.ContextProfile.OutputTokenPrice
-			next.Currency = update.ContextProfile.Currency
+			applyLLMProviderContextProfileUpdate(&next, update.ContextProfile)
 		}
 		ret[id] = next
 	}
 	return ret, nil
+}
+
+func applyLLMProviderInferenceProfileUpdate(next *workorchconfig.LLMProviderConfig, update *UpdateLLMProviderInferenceProfile) {
+	if next == nil || update == nil {
+		return
+	}
+	if update.Temperature != nil {
+		next.Temperature = cloneFloat64Ptr(update.Temperature)
+	}
+	if update.MaxOutputTokens != nil {
+		next.MaxOutputTokens = *update.MaxOutputTokens
+	}
+	if update.ReasoningEffort != nil {
+		next.ReasoningEffort = strings.TrimSpace(*update.ReasoningEffort)
+	}
+	if update.ThinkingBudgetTokens != nil {
+		next.ThinkingBudgetTokens = *update.ThinkingBudgetTokens
+	}
+}
+
+func applyLLMProviderContextProfileUpdate(next *workorchconfig.LLMProviderConfig, update *UpdateLLMProviderContextProfile) {
+	if next == nil || update == nil {
+		return
+	}
+	if update.ProfileMode != nil {
+		next.ContextProfileMode = strings.TrimSpace(*update.ProfileMode)
+	}
+	if update.ContextWindowTokens != nil {
+		next.ContextWindowTokens = *update.ContextWindowTokens
+	}
+	if update.MaxInputTokens != nil {
+		next.MaxInputTokens = *update.MaxInputTokens
+	}
+	if update.ReservedOutputTokens != nil {
+		next.ReservedOutputTokens = *update.ReservedOutputTokens
+	}
+	if update.SafetyRatio != nil {
+		next.SafetyRatio = *update.SafetyRatio
+	}
+	if update.ContextUtilizationRatio != nil {
+		next.ContextUtilizationRatio = *update.ContextUtilizationRatio
+	}
+	if update.BytesHardLimit != nil {
+		next.BytesHardLimit = *update.BytesHardLimit
+	}
+	if update.MaxRequestBytes != nil {
+		next.MaxRequestBytes = *update.MaxRequestBytes
+	}
+	if update.EstimatedTokensPerByte != nil {
+		next.EstimatedTokensPerByte = *update.EstimatedTokensPerByte
+	}
+	if update.InputTokenPrice != nil {
+		next.InputTokenPrice = *update.InputTokenPrice
+	}
+	if update.OutputTokenPrice != nil {
+		next.OutputTokenPrice = *update.OutputTokenPrice
+	}
+	if update.Currency != nil {
+		next.Currency = strings.TrimSpace(*update.Currency)
+	}
 }
 
 func normalizedProviderOperations(values []string) []string {

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -186,11 +185,11 @@ disabled = false
 			Model:             stringPtr("next-model"),
 			Timeout:           stringPtr("45s"),
 			NonChatOperations: []string{"embeddings", "embeddings"},
-			ContextProfile: &llmmodels.ProviderContextProfile{
-				InputTokenPrice:        0.000001,
-				OutputTokenPrice:       0.000002,
-				Currency:               "USD",
-				EstimatedTokensPerByte: 0.25,
+			ContextProfile: &UpdateLLMProviderContextProfile{
+				InputTokenPrice:        float64Ptr(0.000001),
+				OutputTokenPrice:       float64Ptr(0.000002),
+				Currency:               stringPtr("USD"),
+				EstimatedTokensPerByte: float64Ptr(0.25),
 			},
 		}),
 	})
@@ -365,6 +364,104 @@ failoverProviders = ["backup"]
 	provider := cfg.LLM.Providers[0]
 	if len(provider.NonChatOperations) != 0 || len(provider.FailoverProviders) != 0 {
 		t.Fatalf("provider = %+v, want explicit empty slices persisted", provider)
+	}
+}
+
+func TestUpdateLLMConfigurationPartialInferenceProfilePreservesExistingValues(t *testing.T) {
+	configDir := t.TempDir()
+	content := `
+endpointName = "workorch"
+
+[llm]
+defaultProvider = "local"
+
+[llm.providers.local]
+provider = "compatible"
+baseURL = "http://127.0.0.1:11434/v1"
+model = "local-model"
+temperature = 0.4
+maxOutputTokens = 8192
+reasoningEffort = "high"
+thinkingBudgetTokens = 4096
+`
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+
+	cfg, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
+		Providers: llmProviderUpdates(UpdateLLMProviderConfiguration{
+			ID: "local",
+			InferenceProfile: &UpdateLLMProviderInferenceProfile{
+				ReasoningEffort: stringPtr("medium"),
+			},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("update llm configuration: %v", err)
+	}
+	provider := cfg.LLM.Providers[0]
+	if provider.InferenceProfile.ReasoningEffort != "medium" ||
+		provider.InferenceProfile.MaxOutputTokens != 8192 ||
+		provider.InferenceProfile.ThinkingBudgetTokens != 4096 ||
+		provider.InferenceProfile.Temperature == nil ||
+		*provider.InferenceProfile.Temperature != 0.4 {
+		t.Fatalf("provider inference profile = %+v, want partial update with preserved values", provider.InferenceProfile)
+	}
+}
+
+func TestUpdateLLMConfigurationPartialContextProfilePreservesExistingValues(t *testing.T) {
+	configDir := t.TempDir()
+	content := `
+endpointName = "workorch"
+
+[llm]
+defaultProvider = "local"
+
+[llm.providers.local]
+provider = "compatible"
+baseURL = "http://127.0.0.1:11434/v1"
+model = "local-model"
+contextProfileMode = "manual"
+contextWindowTokens = 32768
+maxInputTokens = 28672
+reservedOutputTokens = 4096
+safetyRatio = 0.8
+bytesHardLimit = 98304
+estimatedTokensPerByte = 0.25
+inputTokenPrice = 0.000001
+outputTokenPrice = 0.000002
+currency = "USD"
+`
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+
+	cfg, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
+		Providers: llmProviderUpdates(UpdateLLMProviderConfiguration{
+			ID: "local",
+			ContextProfile: &UpdateLLMProviderContextProfile{
+				ProfileMode:         stringPtr("auto"),
+				ContextWindowTokens: intPtr(65536),
+			},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("update llm configuration: %v", err)
+	}
+	provider := cfg.LLM.Providers[0]
+	if provider.ContextProfile.ProfileMode != "auto" ||
+		provider.ContextProfile.ContextWindowTokens != 65536 ||
+		provider.ContextProfile.MaxInputTokens != 28672 ||
+		provider.ContextProfile.ReservedOutputTokens != 4096 ||
+		provider.ContextProfile.BytesHardLimit != 98304 ||
+		provider.ContextProfile.Currency != "USD" {
+		t.Fatalf("provider context profile = %+v, want partial update with preserved values", provider.ContextProfile)
 	}
 }
 
@@ -618,6 +715,10 @@ searchEndpoint = "https://search.example.test/search"
 }
 
 func stringPtr(value string) *string {
+	return &value
+}
+
+func float64Ptr(value float64) *float64 {
 	return &value
 }
 

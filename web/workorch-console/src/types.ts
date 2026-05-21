@@ -132,8 +132,30 @@ export type UpdateLLMProviderConfiguration = {
   nonChatOperations?: string[];
   failoverEnabled?: boolean;
   failoverProviders?: string[];
-  inferenceProfile?: ProviderInferenceProfile;
-  contextProfile?: ProviderContextProfile;
+  inferenceProfile?: UpdateLLMProviderInferenceProfile;
+  contextProfile?: UpdateLLMProviderContextProfile;
+};
+
+export type UpdateLLMProviderInferenceProfile = {
+  temperature?: number;
+  maxOutputTokens?: number;
+  reasoningEffort?: string;
+  thinkingBudgetTokens?: number;
+};
+
+export type UpdateLLMProviderContextProfile = {
+  profileMode?: string;
+  contextWindowTokens?: number;
+  maxInputTokens?: number;
+  reservedOutputTokens?: number;
+  safetyRatio?: number;
+  contextUtilizationRatio?: number;
+  bytesHardLimit?: number;
+  maxRequestBytes?: number;
+  estimatedTokensPerByte?: number;
+  inputTokenPrice?: number;
+  outputTokenPrice?: number;
+  currency?: string;
 };
 
 export type WebSearchConfiguration = {

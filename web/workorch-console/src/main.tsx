@@ -5,7 +5,8 @@ import {
   ClusterOutlined,
   DashboardOutlined,
   ExceptionOutlined,
-  ProfileOutlined
+  ProfileOutlined,
+  SettingOutlined
 } from '@ant-design/icons';
 import { ProLayout } from '@ant-design/pro-components';
 import { App as AntApp, ConfigProvider, theme } from 'antd';
@@ -26,7 +27,7 @@ const routes = [
   { path: '/workspaceDetail', name: '工作空间', icon: <ProfileOutlined /> },
   { path: '/governance', name: '治理队列', icon: <ExceptionOutlined /> },
   { path: '/runtimeControl', name: '运行控制', icon: <ClusterOutlined /> },
-  { path: '/configuration', name: '系统配置', icon: <CheckCircleOutlined /> },
+  { path: '/configuration', name: '系统配置', icon: <SettingOutlined /> },
   { path: '/service', name: '服务状态', icon: <CheckCircleOutlined /> }
 ];
 

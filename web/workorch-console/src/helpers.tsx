@@ -2056,12 +2056,13 @@ export function cleanedInferenceProfile(item: UpdateLLMProviderConfiguration) {
   if (!profile) {
     return undefined;
   }
-  return {
+  const cleaned = {
     temperature: profile.temperature,
     maxOutputTokens: profile.maxOutputTokens,
     reasoningEffort: profile.reasoningEffort?.trim(),
     thinkingBudgetTokens: profile.thinkingBudgetTokens
   };
+  return hasDefinedValue(cleaned) ? cleaned : undefined;
 }
 
 export function cleanedContextProfile(item: UpdateLLMProviderConfiguration) {
@@ -2069,7 +2070,7 @@ export function cleanedContextProfile(item: UpdateLLMProviderConfiguration) {
   if (!profile) {
     return undefined;
   }
-  return {
+  const cleaned = {
     profileMode: profile.profileMode?.trim(),
     contextWindowTokens: profile.contextWindowTokens,
     maxInputTokens: profile.maxInputTokens,
@@ -2083,6 +2084,11 @@ export function cleanedContextProfile(item: UpdateLLMProviderConfiguration) {
     outputTokenPrice: profile.outputTokenPrice,
     currency: profile.currency?.trim()
   };
+  return hasDefinedValue(cleaned) ? cleaned : undefined;
+}
+
+function hasDefinedValue(input: Record<string, unknown>) {
+  return Object.values(input).some((value) => value !== undefined && value !== '');
 }
 
 export type WebSearchProviderFormValues = Omit<Partial<UpdateWebSearchProviderConfiguration>, 'allowDomains' | 'denyDomains'> & {
@@ -2509,7 +2515,6 @@ export function workspaceBoardActivationHint(item: WorkspaceBoardItem) {
   }
   return '当前工作空间无法确定启动上下文，请进入工作空间核对后再启动执行';
 }
-
 
 
 
