@@ -2474,6 +2474,9 @@ func validateRepeatedRepairRootCauseTargetConsistency(step *runModel.Step, reque
 	if !strategyReassessmentRequiresRootCauseTargetShift(reassessment) {
 		return nil
 	}
+	if strategyRepairModeFromCandidate(request.Extra) != strategyRepairModeShiftRootCauseTarget {
+		return nil
+	}
 	declaredRootCauseTargets := rootCauseTargetRefsFromStrategyValue(request.Extra["rootCauseTarget"])
 	if len(declaredRootCauseTargets) == 0 {
 		return nil
@@ -2535,7 +2538,7 @@ func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output m
 	}
 	requiredFields := stringSliceFromValue(reassessment["requiredDecisionFields"])
 	if len(requiredFields) == 0 {
-		requiredFields = []string{"failedSurface", "rootCauseTarget", "repairTargetDecision", "forbiddenRepair", "verificationPlan"}
+		requiredFields = []string{"failedSurface", "rootCauseTarget", "repairTargetDecision", "repairMode", "forbiddenRepair", "verificationPlan"}
 	}
 	expectedSurface := strings.TrimSpace(stringFromMap(reassessment, "failedSurface"))
 	for _, candidate := range candidates {
@@ -2548,13 +2551,27 @@ func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output m
 		if expectedSurface != "" && !strategyFailedSurfaceMatches(candidate, expectedSurface) {
 			continue
 		}
-		surfaceCorrection := strategyCandidateHasSurfaceContractCorrection(candidate, expectedSurface)
-		if !strategyRootCauseDistinguishableFromFailedSurface(candidate, expectedSurface) && !surfaceCorrection {
+		repairMode := strategyRepairModeFromCandidate(candidate)
+		if repairMode == "" {
 			continue
 		}
-		if strategyReassessmentRequiresRootCauseTargetShift(reassessment) &&
-			strategyCandidatePatchesFailedSurface(candidate, expectedSurface) && !surfaceCorrection {
-			return fmt.Errorf("%w: strategyReassessment.required=true requires repeated failed-surface repairs to patch a distinct root-cause target or return a failed assessment/blocker", common.ErrInvalidArgument)
+		surfaceCorrection := strategyCandidateHasSurfaceContractCorrection(candidate, expectedSurface)
+		switch repairMode {
+		case strategyRepairModeContinueSameTarget:
+			if strategyReassessmentRequiresRootCauseTargetShift(reassessment) &&
+				!strategySameTargetContinuationAddressesCurrentFailure(step, candidate, expectedSurface) && !surfaceCorrection {
+				return fmt.Errorf("%w: strategyReassessment.required=true repairMode=continue_same_target_repair requires patch/apply to address current primary diagnostics or return a failed assessment/blocker", common.ErrInvalidArgument)
+			}
+		case strategyRepairModeShiftRootCauseTarget:
+			if !strategyRootCauseDistinguishableFromFailedSurface(candidate, expectedSurface) && !surfaceCorrection {
+				continue
+			}
+			if strategyReassessmentRequiresRootCauseTargetShift(reassessment) &&
+				strategyCandidatePatchesFailedSurface(candidate, expectedSurface) && !surfaceCorrection {
+				return fmt.Errorf("%w: strategyReassessment.required=true repairMode=shift_root_cause_target requires repeated failed-surface repairs to patch a distinct root-cause target or return a failed assessment/blocker", common.ErrInvalidArgument)
+			}
+		default:
+			continue
 		}
 		if strategyFailedSurfaceRequiresBoundedVerification(expectedSurface, candidate) &&
 			(strategyVerificationPlanAppearsUnbounded(strings.TrimSpace(stringFromAny(candidate["verificationPlan"]))) ||
@@ -2563,7 +2580,47 @@ func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output m
 		}
 		return nil
 	}
-	return fmt.Errorf("%w: strategyReassessment.required=true requires state-changing patch output to declare failedSurface/rootCauseTarget/repairTargetDecision/forbiddenRepair/verificationPlan aligned with current failed surface", common.ErrInvalidArgument)
+	return fmt.Errorf("%w: strategyReassessment.required=true requires state-changing patch output to declare failedSurface/rootCauseTarget/repairTargetDecision/repairMode/forbiddenRepair/verificationPlan aligned with current failed surface", common.ErrInvalidArgument)
+}
+
+const (
+	strategyRepairModeContinueSameTarget   = "continue_same_target_repair"
+	strategyRepairModeShiftRootCauseTarget = "shift_root_cause_target"
+)
+
+func strategyRepairModeFromCandidate(candidate map[string]any) string {
+	mode := strings.ToLower(strings.TrimSpace(stringFromAny(candidate["repairMode"])))
+	switch mode {
+	case strategyRepairModeContinueSameTarget, strategyRepairModeShiftRootCauseTarget:
+		return mode
+	default:
+		return ""
+	}
+}
+
+func strategySameTargetContinuationAddressesCurrentFailure(step *runModel.Step, candidate map[string]any, expectedSurface string) bool {
+	if len(candidate) == 0 || !strategyCandidatePatchesFailedSurface(candidate, expectedSurface) {
+		return false
+	}
+	request, err := runtimePatchRequestFromMap(candidate)
+	if err != nil {
+		return false
+	}
+	if contract := primaryDiagnosticRepairContractForStep(step); len(contract) > 0 && boolValue(contract["required"]) {
+		return primaryDiagnosticPatchRequestAddressesContract(step, request, contract)
+	}
+	signals := mapFromValue(step.Input["structuredFailureSignals"])
+	if len(signals) == 0 {
+		actionPackage := mapFromValue(step.Input["repairActionPackage"])
+		signals = mapFromValue(actionPackage["structuredFailureSignals"])
+	}
+	if primary := primaryDiagnosticRepairContractFromSignals(signals); len(primary) > 0 {
+		return primaryDiagnosticPatchRequestAddressesContract(step, request, primary)
+	}
+	return strings.TrimSpace(stringFromAny(candidate["addressesFailureSignals"])) != "" ||
+		len(stringSliceFromValue(candidate["addressesFailureSignals"])) > 0 ||
+		strings.TrimSpace(stringFromAny(candidate["primaryDiagnosticResolution"])) != "" ||
+		len(mapSliceFromValue(candidate["primaryDiagnosticResolutions"])) > 0
 }
 
 func strategyCandidateHasSurfaceContractCorrection(candidate map[string]any, expectedSurface string) bool {
@@ -3160,21 +3217,14 @@ func patchPayloadsDeclareCoverageTargets(value any, allowed []string) bool {
 	return false
 }
 
-func coverageBoundStateChangingOutputRequired(run *runModel.Run, step *runModel.Step) bool {
+func coverageBoundStateChangingOutputRequired(_ *runModel.Run, step *runModel.Step) bool {
 	if step == nil || step.Input == nil {
 		return false
 	}
-	if len(coverageBoundTargetTokens(step)) == 0 {
+	if !coverageBoundInputCarriesCoverageGap(step.Input) {
 		return false
 	}
-	if coverageBoundInputCarriesCoverageGap(step.Input) {
-		return true
-	}
-	stateChanging := boolValue(step.Input["stateChangingOutputRequired"]) ||
-		repairObjectiveRequiresStateChange(stringFromMap(step.Input, "repairObjective")) ||
-		runExecutionContractRequiresStateChange(run) ||
-		inputExecutionContractRequiresStateChange(step.Input)
-	return stateChanging
+	return len(coverageBoundTargetTokens(step)) > 0
 }
 
 func coverageBoundInputCarriesCoverageGap(input map[string]any) bool {

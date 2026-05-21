@@ -49,16 +49,16 @@ func initialStepInput(run *runModel.Run) map[string]any {
 				input["strategyReassessment"] = reassessment
 				input["targetRepairAttempts"] = int64FromValue(reassessment["targetRepairAttempts"])
 				input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-					"Replan continuation carries a repeated failed surface: distinguish failedSurface from rootCauseTarget before patching the same target again.",
-					"If the next state change patches a target different from failedSurface, declare relatedFailureTargets for the failed surface being unblocked.",
-					"If no distinct root-cause target is supported by current evidence, return a failed assessment or blocker instead of repeating the same failed-surface patch.",
+					"Replan continuation carries a repeated failed surface: choose repairMode as continue_same_target_repair or shift_root_cause_target, or return a failed assessment/blocker.",
+					"If continuing the same target, patch only when current target evidence addresses the current primary diagnostics and keep verification bounded to the failed surface.",
+					"If shifting root-cause target, use a neutral grounded target and declare relatedFailureTargets for the failed surface being unblocked.",
 				)
 				if len(actionPackage) > 0 {
 					actionPackage["strategyReassessment"] = reassessment
 					actionPackage["repeatedTargetRepairMode"] = map[string]any{
 						"enabled":                           true,
 						"reason":                            stringFromMap(reassessment, "reason"),
-						"mustDistinguishRootCauseTarget":    true,
+						"mustReassessRepeatedFailedSurface": true,
 						"mustDeclareRequiredDecisionFields": true,
 					}
 					if required := mapFromValue(actionPackage["requiredOutput"]); len(required) > 0 {

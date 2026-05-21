@@ -2572,9 +2572,10 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if reassessment := repairStrategyReassessmentFromInput(input); len(reassessment) > 0 {
 		input["strategyReassessment"] = reassessment
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"strategyReassessment.required is true: distinguish the failed surface from the root cause target before changing the same target again.",
-			"Explain the next repair target decision in neutral terms: failedSurface, rootCauseTarget, repairTargetDecision, forbiddenRepair, and verificationPlan.",
-			"When the same failed surface has repeated repair failures, the next patch/apply must target a distinct root-cause resource and declare relatedFailureTargets for the failed surface, or return a failed dodAssessment/blocker.",
+			"strategyReassessment.required is true: explicitly choose repairMode as continue_same_target_repair or shift_root_cause_target, or return a failed assessment/blocker.",
+			"Explain the next repair target decision in neutral terms: failedSurface, rootCauseTarget, repairTargetDecision, repairMode, forbiddenRepair, and verificationPlan.",
+			"When continuing the same failed target, patch only if the current target snapshot and primary diagnostics show a concrete same-target correction; otherwise choose a grounded root-cause target or return a blocker.",
+			"When shifting root-cause target, patch a neutral grounded root-cause resource and declare relatedFailureTargets for the failed surface.",
 			"Do not weaken still-valid Goal or DoD constraints, remove valid evidence, or reduce the requested outcome to make verification pass.",
 		)
 	}
@@ -3009,12 +3010,15 @@ func repairStrategyReassessmentFromInput(input map[string]any) map[string]any {
 			"failedSurface",
 			"rootCauseTarget",
 			"repairTargetDecision",
+			"repairMode",
 			"forbiddenRepair",
 			"verificationPlan",
 		},
 		"requirements": []string{
-			"distinguish failed surface from root cause target before patching again",
+			"choose repairMode as continue_same_target_repair, shift_root_cause_target, or return blocker/failed assessment",
 			"explain whether the next change targets state-change artifact, evidence, verification, or blocker handling",
+			"when continuing the same target, address the current primary diagnostics using current target evidence and bounded verification",
+			"when shifting root-cause target, use a neutral grounded candidate and relate it to the failed surface",
 			"do not weaken still-valid Goal or DoD constraints to make verification pass",
 		},
 	}
@@ -3220,7 +3224,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 			"maxTargetScopedRepairInputBytes":   120 * 1024,
 			"mustPreferExactTargetSnapshot":     true,
 			"mustOmitRejectedRawFailureProduct": true,
-			"mustDistinguishRootCauseTarget":    true,
+			"mustReassessRepeatedFailedSurface": true,
 		}
 		requiredOutput["mustUseCurrentTargetSnapshot"] = true
 		requiredOutput["mustRebuildFromCurrentEvidence"] = true
@@ -3377,16 +3381,19 @@ func addStrategyReassessmentRequiredOutputContract(pkg map[string]any, requiredO
 			"failedSurface",
 			"rootCauseTarget",
 			"repairTargetDecision",
+			"repairMode",
 			"forbiddenRepair",
 			"verificationPlan",
 		}
 	}
 	requiredOutput["mustDeclareStrategyReassessmentFields"] = true
 	requiredOutput["strategyReassessmentRequiredFields"] = requiredFields
-	requiredOutput["strategyReassessmentMatchRule"] = "each state-changing patch/apply node must declare these fields inside the patch/apply input object, not as top-level decision fields or node sibling fields; failedSurface must align with strategyReassessment.failedSurface and rootCauseTarget must identify the resource or scope being changed"
+	requiredOutput["strategyReassessmentRepairModes"] = []string{"continue_same_target_repair", "shift_root_cause_target"}
+	requiredOutput["strategyReassessmentMatchRule"] = "each state-changing patch/apply node must declare these fields inside the patch/apply input object, not as top-level decision fields or node sibling fields; failedSurface must align with strategyReassessment.failedSurface, repairMode must be explicit, and rootCauseTarget must identify the resource or scope being changed"
 	if strategyReassessmentRequiresRootCauseTargetShift(reassessment) {
-		requiredOutput["mustDistinguishRootCauseTarget"] = true
-		requiredOutput["rootCauseTargetShiftRule"] = "when repeatedly repairing the same failed surface, patch a distinct root-cause target or return a failed assessment/blocker"
+		requiredOutput["mustReassessRepeatedFailedSurface"] = true
+		requiredOutput["sameTargetContinuationRule"] = "repairMode=continue_same_target_repair may patch the failed target only when it addresses current primary diagnostics with current target evidence and bounded verification"
+		requiredOutput["rootCauseTargetShiftRule"] = "repairMode=shift_root_cause_target must patch a distinct neutral grounded root-cause target or return a failed assessment/blocker"
 	}
 }
 

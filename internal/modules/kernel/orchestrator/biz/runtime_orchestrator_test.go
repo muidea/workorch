@@ -3710,12 +3710,12 @@ func TestRuntimeOrchestrator_InitialReplanStateChangingInputIncludesRepairAction
 		t.Fatalf("repairActionPackage.strategyReassessment = %#v, want inherited reassessment", actionPackage["strategyReassessment"])
 	}
 	repeatedMode := mapFromValue(actionPackage["repeatedTargetRepairMode"])
-	if !boolValue(repeatedMode["enabled"]) || !boolValue(repeatedMode["mustDistinguishRootCauseTarget"]) {
+	if !boolValue(repeatedMode["enabled"]) || !boolValue(repeatedMode["mustReassessRepeatedFailedSurface"]) {
 		t.Fatalf("repairActionPackage.repeatedTargetRepairMode = %#v, want repeated-target successor mode", actionPackage["repeatedTargetRepairMode"])
 	}
 	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
-	if !strings.Contains(guidance, "distinguish failedSurface from rootCauseTarget") {
-		t.Fatalf("repairGuidance = %q, want root-cause target shift guidance", guidance)
+	if !strings.Contains(guidance, "choose repairMode") {
+		t.Fatalf("repairGuidance = %q, want strategy reassessment repair mode guidance", guidance)
 	}
 }
 
@@ -3873,6 +3873,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputInheritsStrategyReassessmentAfter
 					"failedSurface",
 					"rootCauseTarget",
 					"repairTargetDecision",
+					"repairMode",
 					"forbiddenRepair",
 					"verificationPlan",
 				},
@@ -6645,6 +6646,70 @@ func TestRuntimeOrchestrator_StepInputMemoryTraceExcludesTransientDoDFeedback(t 
 		!memoryIDsContain(trace.ExcludedMemoryIDs, memoryID) ||
 		len(trace.SelectionScores) == 0 {
 		t.Fatalf("trace = %+v, want transient dod feedback candidate excluded with scores", trace)
+	}
+	if !strings.Contains(trace.SelectionScores[0].Reason, "excluded_low_value_process_memory") {
+		t.Fatalf("selection score reason = %q, want low-value process exclusion", trace.SelectionScores[0].Reason)
+	}
+}
+
+func TestRuntimeOrchestrator_StepInputMemoryTraceExcludesRepairContractDoDFeedback(t *testing.T) {
+	ctx := context.Background()
+	memoryRepo := memory.NewMemoryItemRepository()
+	traceRepo := memory.NewMemoryRecallTraceRepository()
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{
+			MemoryItems:        memoryRepo,
+			MemoryRecallTraces: traceRepo,
+		},
+	}
+	workspaceID := common.WorkspaceID("ws-repair-contract-dod-memory-trace")
+	runID := common.RunID("run-repair-contract-dod-memory-trace")
+	historicalRunID := common.RunID("run-repair-contract-dod-memory-old")
+	memoryID := common.MemoryID(string(historicalRunID) + "/repair/memory/1")
+	if err := memoryRepo.Create(ctx, &memorymodel.MemoryItem{
+		ID:          memoryID,
+		WorkspaceID: workspaceID,
+		RunID:       historicalRunID,
+		SourceType:  memorycommon.MemorySourceRun,
+		SourceRef:   string(historicalRunID),
+		MemoryType:  memorycommon.MemoryTypeDoDFeedback,
+		Summary:     "构建修复失败：连续多次补丁尝试因 coverageTargets 缺失或 schema 错误被拒绝",
+		Content:     "DoD gaps:\n- [failed] target alpha\ninvalid_unified_diff\n非实质性变更",
+		Tags:        []string{"dod_feedback", "repair_loop", "reference_value"},
+		Importance:  90,
+		Confidence:  90,
+		Visibility:  "workspace",
+	}); err != nil {
+		t.Fatalf("seed repair contract memory: %v", err)
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID}
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeyRuntimeRepairFollowUp: true,
+			"stateChangingOutputRequired":     true,
+		},
+	}
+
+	orch.enrichLLMStepInputContext(ctx, run, step, nil)
+
+	pkg := mapFromValue(step.Input[stepInputKeyExecutionContextPackage])
+	selected := mapFromValue(pkg["selectedContext"])
+	if memories := mapSliceFromValue(selected["memories"]); len(memories) != 0 {
+		t.Fatalf("selected memories = %+v, want repair contract DoD feedback excluded", memories)
+	}
+	trace, err := traceRepo.Get(ctx, common.MemoryRecallTraceID(string(step.ID)+"/memory-recall/step-input"))
+	if err != nil {
+		t.Fatalf("get recall trace: %v", err)
+	}
+	if !memoryIDsContain(trace.CandidateMemoryIDs, memoryID) ||
+		memoryIDsContain(trace.SelectedMemoryIDs, memoryID) ||
+		!memoryIDsContain(trace.ExcludedMemoryIDs, memoryID) ||
+		len(trace.SelectionScores) == 0 {
+		t.Fatalf("trace = %+v, want repair contract memory candidate excluded with scores", trace)
 	}
 	if !strings.Contains(trace.SelectionScores[0].Reason, "excluded_low_value_process_memory") {
 		t.Fatalf("selection score reason = %q, want low-value process exclusion", trace.SelectionScores[0].Reason)
@@ -16252,13 +16317,13 @@ func TestValidateLLMExecutionOutputContractRejectsCoverageGapPatchWithoutStateCh
 	}
 }
 
-func TestValidateLLMExecutionOutputContractRejectsInitialStateChangingPatchWithoutCoverageTargets(t *testing.T) {
+func TestValidateLLMExecutionOutputContractAllowsStateChangingPatchWithoutCoverageGapTargets(t *testing.T) {
 	run := &runmodel.Run{
-		ID:              "run-initial-state-changing-coverage-targets",
+		ID:              "run-state-changing-without-coverage-gap-targets",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}
 	step := &runmodel.Step{
-		ID:   "run-initial-state-changing-coverage-targets/step-1",
+		ID:   "run-state-changing-without-coverage-gap-targets/step-1",
 		Kind: llmWorkspaceExecutionStepKind,
 		Input: map[string]any{
 			stepInputKeyRuntimeStage:      runtimeStageRepair,
@@ -16289,9 +16354,8 @@ func TestValidateLLMExecutionOutputContractRejectsInitialStateChangingPatchWitho
 		},
 	}
 
-	err := validateLLMExecutionOutputContract(run, step, output)
-	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "coverageTargets") {
-		t.Fatalf("validateLLMExecutionOutputContract err = %v, want initial coverage target rejection", err)
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want ordinary state-changing patch allowed without coverageTargets", err)
 	}
 }
 
@@ -16308,6 +16372,10 @@ func TestValidateLLMExecutionOutputContractAllowsInitialStateChangingPatchWithCo
 			stepInputKeySoulStage:         soulStageExecution,
 			"repairObjective":             repairObjectiveStateChangingOutput,
 			"stateChangingOutputRequired": true,
+			"coverageTargetSet": []map[string]any{{
+				"kind":       "dod",
+				"targetText": "streaming responses must be delivered incrementally",
+			}},
 			stepInputKeyExecutionContextPackage: map[string]any{
 				"dod": map[string]any{
 					"items": []string{"streaming responses must be delivered incrementally"},
@@ -17174,6 +17242,7 @@ func TestValidateLLMExecutionOutputContractRejectsMissingStrategyReassessmentDec
 					"failedSurface",
 					"rootCauseTarget",
 					"repairTargetDecision",
+					"repairMode",
 					"forbiddenRepair",
 					"verificationPlan",
 				},
@@ -17224,6 +17293,7 @@ func TestValidateLLMExecutionOutputContractAllowsStrategyReassessmentDecisionFie
 					"failedSurface",
 					"rootCauseTarget",
 					"repairTargetDecision",
+					"repairMode",
 					"forbiddenRepair",
 					"verificationPlan",
 				},
@@ -17245,6 +17315,7 @@ func TestValidateLLMExecutionOutputContractAllowsStrategyReassessmentDecisionFie
 						"failedSurface":        "failureTargets=main_test.go",
 						"rootCauseTarget":      "main_test.go imports",
 						"repairTargetDecision": "patch main_test.go to align imports and symbols",
+						"repairMode":           "shift_root_cause_target",
 						"forbiddenRepair":      "do not edit unrelated files",
 						"verificationPlan":     "run targeted verification for main_test.go and related import/symbol checks after patch",
 					},
@@ -17278,6 +17349,7 @@ func TestValidateLLMExecutionOutputContractRejectsUndistinguishedStrategyReasses
 					"failedSurface",
 					"rootCauseTarget",
 					"repairTargetDecision",
+					"repairMode",
 					"forbiddenRepair",
 					"verificationPlan",
 				},
@@ -17299,6 +17371,7 @@ func TestValidateLLMExecutionOutputContractRejectsUndistinguishedStrategyReasses
 						"failedSurface":        "failureTargets=main_test.go",
 						"rootCauseTarget":      "failureTargets=main_test.go",
 						"repairTargetDecision": "patch main_test.go directly",
+						"repairMode":           "shift_root_cause_target",
 						"forbiddenRepair":      "do not edit unrelated files",
 						"verificationPlan":     "run full regression across the workspace",
 					},
@@ -17333,6 +17406,7 @@ func TestValidateLLMExecutionOutputContractRejectsUnboundedVerificationForScoped
 					"failedSurface",
 					"rootCauseTarget",
 					"repairTargetDecision",
+					"repairMode",
 					"forbiddenRepair",
 					"verificationPlan",
 				},
@@ -17354,6 +17428,7 @@ func TestValidateLLMExecutionOutputContractRejectsUnboundedVerificationForScoped
 						"failedSurface":        "failureTargets=gateway_dod_additional_paths_test.go",
 						"rootCauseTarget":      "proxy helper recursion in gateway_dod_additional_paths_test.go",
 						"repairTargetDecision": "patch recursive proxy helper into concrete handler call",
+						"repairMode":           "continue_same_target_repair",
 						"forbiddenRepair":      "do not change unrelated feature files",
 						"verificationPlan":     "run full regression across the workspace",
 					},
@@ -17390,6 +17465,7 @@ func TestValidateLLMExecutionOutputContractRejectsRepeatedFailedSurfacePatchWith
 					"failedSurface",
 					"rootCauseTarget",
 					"repairTargetDecision",
+					"repairMode",
 					"forbiddenRepair",
 					"verificationPlan",
 				},
@@ -17411,6 +17487,7 @@ func TestValidateLLMExecutionOutputContractRejectsRepeatedFailedSurfacePatchWith
 						"failedSurface":        "failureTargets=gateway_dod_additional_paths_test.go",
 						"rootCauseTarget":      "gateway routing contract in production handler",
 						"repairTargetDecision": "patch gateway_dod_additional_paths_test.go again",
+						"repairMode":           "continue_same_target_repair",
 						"forbiddenRepair":      "do not change unrelated files",
 						"verificationPlan":     "run targeted verification for gateway_dod_additional_paths_test.go",
 					},
@@ -17420,8 +17497,87 @@ func TestValidateLLMExecutionOutputContractRejectsRepeatedFailedSurfacePatchWith
 	}
 
 	err := validateLLMExecutionOutputContract(run, step, output)
-	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "distinct root-cause target") {
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "continue_same_target_repair") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want repeated failed-surface patch rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsRepeatedFailedSurfaceSameTargetWhenPrimaryDiagnosticAddressed(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-same-target-primary-diagnostic",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-same-target-primary-diagnostic/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failureTargetScope":              "failureTargets=target.txt",
+			"primaryDiagnosticRepair": map[string]any{
+				"required":    true,
+				"targetRefs":  []string{"target.txt"},
+				"identifiers": []string{"missingName"},
+				"lineRefs": []map[string]any{{
+					"targetRef": "target.txt",
+					"line":      12,
+				}},
+			},
+			"strategyReassessment": map[string]any{
+				"required":             true,
+				"reason":               "same_target_scope_repeated_failure",
+				"targetRepairAttempts": 2,
+				"failedSurface":        "failureTargets=target.txt",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"repairMode",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-current-diagnostic",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "target.txt",
+						"patchType":            "unified_diff",
+						"diff":                 "--- a/target.txt\n+++ b/target.txt\n@@ -12,1 +12,1 @@\n-missingName old\n+missingName new\n",
+						"failedSurface":        "failureTargets=target.txt",
+						"rootCauseTarget":      "target.txt",
+						"repairTargetDecision": "patch target.txt current primary diagnostic",
+						"repairMode":           "continue_same_target_repair",
+						"forbiddenRepair":      "do not change unrelated resources",
+						"verificationPlan":     "run targeted verification for target.txt",
+					},
+				},
+				{
+					"id":        "verify-current-diagnostic",
+					"kind":      "shell/command",
+					"dependsOn": []string{"patch-current-diagnostic"},
+					"input": map[string]any{
+						"command":           "verify",
+						"args":              []string{"--target=target.txt"},
+						"targetRef":         "target.txt",
+						"verificationScope": "bounded_to_failure_target",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want same-target diagnostic repair accepted", err)
 	}
 }
 
@@ -17462,6 +17618,7 @@ func TestValidateLLMExecutionOutputContractAllowsGroundedRootCauseCandidateShift
 					"failedSurface",
 					"rootCauseTarget",
 					"repairTargetDecision",
+					"repairMode",
 					"forbiddenRepair",
 					"verificationPlan",
 				},
@@ -17483,6 +17640,7 @@ func TestValidateLLMExecutionOutputContractAllowsGroundedRootCauseCandidateShift
 						"failedSurface":        "failureTargets=surface.txt",
 						"rootCauseTarget":      "root.txt",
 						"repairTargetDecision": "patch grounded root-cause candidate",
+						"repairMode":           "shift_root_cause_target",
 						"forbiddenRepair":      "do not repeatedly patch the failed surface without evidence",
 						"verificationPlan":     "run bounded verification for surface.txt after root.txt changes",
 					},
@@ -17524,6 +17682,7 @@ func TestValidateLLMExecutionOutputContractRejectsUngroundedRootCauseCandidateSh
 					"failedSurface",
 					"rootCauseTarget",
 					"repairTargetDecision",
+					"repairMode",
 					"forbiddenRepair",
 					"verificationPlan",
 				},
@@ -17545,6 +17704,7 @@ func TestValidateLLMExecutionOutputContractRejectsUngroundedRootCauseCandidateSh
 						"failedSurface":        "failureTargets=surface.txt",
 						"rootCauseTarget":      "root.txt",
 						"repairTargetDecision": "patch ungrounded root target",
+						"repairMode":           "shift_root_cause_target",
 						"forbiddenRepair":      "do not repeatedly patch the failed surface without evidence",
 						"verificationPlan":     "run bounded verification for surface.txt",
 					},
@@ -17581,6 +17741,7 @@ func TestValidateLLMExecutionOutputContractRejectsIncompleteSurfaceContractCorre
 					"failedSurface",
 					"rootCauseTarget",
 					"repairTargetDecision",
+					"repairMode",
 					"forbiddenRepair",
 					"verificationPlan",
 				},
@@ -17603,6 +17764,7 @@ func TestValidateLLMExecutionOutputContractRejectsIncompleteSurfaceContractCorre
 						"failedSurface":        "targetRef=surface.txt",
 						"rootCauseTarget":      "targetRef=surface.txt",
 						"repairTargetDecision": "patch the failed surface itself",
+						"repairMode":           "shift_root_cause_target",
 						"forbiddenRepair":      "do not change unrelated resources",
 						"verificationPlan":     "run targeted verification for surface.txt",
 						"surfaceContractCorrection": map[string]any{
@@ -17642,6 +17804,7 @@ func TestValidateLLMExecutionOutputContractAllowsCompleteSurfaceContractCorrecti
 					"failedSurface",
 					"rootCauseTarget",
 					"repairTargetDecision",
+					"repairMode",
 					"forbiddenRepair",
 					"verificationPlan",
 				},
@@ -17664,6 +17827,7 @@ func TestValidateLLMExecutionOutputContractAllowsCompleteSurfaceContractCorrecti
 						"failedSurface":        "targetRef=surface.txt",
 						"rootCauseTarget":      "targetRef=surface.txt",
 						"repairTargetDecision": "patch the failed surface because the surface contract itself is stale",
+						"repairMode":           "shift_root_cause_target",
 						"forbiddenRepair":      "do not change unrelated resources",
 						"verificationPlan":     "run targeted verification for surface.txt",
 						"surfaceContractCorrection": map[string]any{
@@ -17715,6 +17879,7 @@ func TestValidateLLMExecutionOutputContractAllowsRepeatedFailedSurfaceWhenPatchT
 					"failedSurface",
 					"rootCauseTarget",
 					"repairTargetDecision",
+					"repairMode",
 					"forbiddenRepair",
 					"verificationPlan",
 				},
@@ -17737,6 +17902,7 @@ func TestValidateLLMExecutionOutputContractAllowsRepeatedFailedSurfaceWhenPatchT
 						"failedSurface":        "failureTargets=gateway_dod_additional_paths_test.go",
 						"rootCauseTarget":      "main.go route registration",
 						"repairTargetDecision": "patch main.go to align runtime route behavior with the acceptance contract",
+						"repairMode":           "shift_root_cause_target",
 						"forbiddenRepair":      "do not patch the failed verification artifact again in this iteration",
 						"verificationPlan":     "run targeted verification for gateway_dod_additional_paths_test.go after the production route change",
 						"relatedFailureTargets": []string{
@@ -17784,6 +17950,7 @@ func TestValidateLLMExecutionOutputContractRejectsRepeatedFailedSurfacePatchWhen
 					"failedSurface",
 					"rootCauseTarget",
 					"repairTargetDecision",
+					"repairMode",
 					"forbiddenRepair",
 					"verificationPlan",
 				},
@@ -17806,6 +17973,7 @@ func TestValidateLLMExecutionOutputContractRejectsRepeatedFailedSurfacePatchWhen
 						"failedSurface":        "failureTargets=gateway_dod_additional_paths_test.go",
 						"rootCauseTarget":      "main.go",
 						"repairTargetDecision": "patch the verification artifact again",
+						"repairMode":           "shift_root_cause_target",
 						"forbiddenRepair":      "do not patch unrelated files",
 						"verificationPlan":     "run targeted verification for gateway_dod_additional_paths_test.go",
 						"relatedFailureTargets": []string{
@@ -17846,6 +18014,7 @@ func TestValidateLLMExecutionOutputContractRejectsReplanContinuationRepeatedFail
 					"failedSurface",
 					"rootCauseTarget",
 					"repairTargetDecision",
+					"repairMode",
 					"forbiddenRepair",
 					"verificationPlan",
 				},
@@ -18004,6 +18173,7 @@ func TestValidateLLMExecutionOutputContractAllowsBoundedVerificationForScopedFai
 					"failedSurface",
 					"rootCauseTarget",
 					"repairTargetDecision",
+					"repairMode",
 					"forbiddenRepair",
 					"verificationPlan",
 				},
@@ -18025,6 +18195,7 @@ func TestValidateLLMExecutionOutputContractAllowsBoundedVerificationForScopedFai
 						"failedSurface":        "failureTargets=gateway_dod_additional_paths_test.go",
 						"rootCauseTarget":      "proxy helper recursion in gateway_dod_additional_paths_test.go",
 						"repairTargetDecision": "patch recursive proxy helper into concrete handler call",
+						"repairMode":           "continue_same_target_repair",
 						"forbiddenRepair":      "do not change unrelated feature files",
 						"verificationPlan":     "run targeted verification for gateway_dod_additional_paths_test.go and related contract checks",
 					},

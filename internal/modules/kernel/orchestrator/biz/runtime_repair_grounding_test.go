@@ -156,6 +156,7 @@ func TestRuntimeRepairActionPackageDoesNotUseRuntimeContractFieldsAsRepairTarget
 				"failedSurface",
 				"rootCauseTarget",
 				"repairTargetDecision",
+				"repairMode",
 				"forbiddenRepair",
 				"verificationPlan",
 			},
@@ -498,7 +499,7 @@ func TestRuntimeRepairActionPackageMarksRepeatedTargetRepairMode(t *testing.T) {
 	}
 	if required["mustDeclareStrategyReassessmentFields"] != true ||
 		!stringSliceContains(stringSliceFromValue(required["strategyReassessmentRequiredFields"]), "rootCauseTarget") ||
-		required["mustDistinguishRootCauseTarget"] != true {
+		required["mustReassessRepeatedFailedSurface"] != true {
 		t.Fatalf("requiredOutput = %#v, want explicit strategy reassessment output contract", required)
 	}
 	if rule := stringFromAny(required["strategyReassessmentMatchRule"]); !strings.Contains(rule, "inside the patch/apply input object") || strings.Contains(rule, "top-level decision fields") == false {
@@ -545,11 +546,11 @@ func TestRuntimeRepairActionPackageRequiresStrategyFieldsForDeclaredRelatedTarge
 	required := mapFromValue(actionPackage["requiredOutput"])
 	if required["mustDeclareStrategyReassessmentFields"] != true ||
 		required["mustTargetRepairTargetSet"] != true ||
-		required["mustDistinguishRootCauseTarget"] != true {
+		required["mustReassessRepeatedFailedSurface"] != true {
 		t.Fatalf("requiredOutput = %#v, want target set plus explicit strategy reassessment contract", required)
 	}
 	fields := stringSliceFromValue(required["strategyReassessmentRequiredFields"])
-	for _, want := range []string{"failedSurface", "rootCauseTarget", "repairTargetDecision", "forbiddenRepair", "verificationPlan"} {
+	for _, want := range []string{"failedSurface", "rootCauseTarget", "repairTargetDecision", "repairMode", "forbiddenRepair", "verificationPlan"} {
 		if !stringSliceContains(fields, want) {
 			t.Fatalf("strategyReassessmentRequiredFields = %#v, want %q", fields, want)
 		}

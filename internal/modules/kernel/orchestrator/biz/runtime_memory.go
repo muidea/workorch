@@ -199,6 +199,15 @@ func runtimeMemoryTextHasTransientSignal(text string) bool {
 		"schema invalid",
 		"parse error",
 		"no actionable continuation",
+		"coveragetargets",
+		"coverage-bound",
+		"invalid_unified_diff",
+		"non-substantive",
+		"schema 错误",
+		"补丁尝试",
+		"修复失败",
+		"无法通过进一步补丁",
+		"非实质性变更",
 	} {
 		if strings.Contains(text, token) {
 			return true
