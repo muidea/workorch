@@ -19,14 +19,15 @@ import (
 )
 
 type runtimePatchRequest struct {
-	TargetRef  string
-	Content    string
-	Diff       string
-	Summary    string
-	PatchType  string
-	BaseHash   string
-	ApprovalID common.ApprovalID
-	Extra      map[string]any
+	TargetRef       string
+	Content         string
+	Diff            string
+	Summary         string
+	PatchType       string
+	BaseHash        string
+	ApprovalID      common.ApprovalID
+	CoverageTargets any
+	Extra           map[string]any
 }
 
 type runtimePatchRevertRequest struct {
@@ -163,19 +164,20 @@ func (o *RuntimeOrchestrator) applyRuntimePatches(
 	for idx, request := range requests {
 		patchID := common.PatchID(fmt.Sprintf("%s/patch/%d", step.ID, idx+1))
 		patch := &runModel.Patch{
-			ID:          patchID,
-			WorkspaceID: run.WorkspaceID,
-			RunID:       run.ID,
-			StepID:      step.ID,
-			ToolCallID:  toolCall.ID,
-			ApprovalID:  request.ApprovalID,
-			PatchType:   request.PatchType,
-			TargetRef:   request.TargetRef,
-			Content:     request.Content,
-			Diff:        request.Diff,
-			Summary:     request.Summary,
-			State:       common.PatchStateCreated,
-			CreatedAt:   runtimeEvidenceTimestamp(),
+			ID:              patchID,
+			WorkspaceID:     run.WorkspaceID,
+			RunID:           run.ID,
+			StepID:          step.ID,
+			ToolCallID:      toolCall.ID,
+			ApprovalID:      request.ApprovalID,
+			PatchType:       request.PatchType,
+			TargetRef:       request.TargetRef,
+			Content:         request.Content,
+			Diff:            request.Diff,
+			Summary:         request.Summary,
+			CoverageTargets: request.CoverageTargets,
+			State:           common.PatchStateCreated,
+			CreatedAt:       runtimeEvidenceTimestamp(),
 		}
 		if err := o.evidence.Patches.Create(ctx, patch); err != nil {
 			if err != common.ErrConflict {
@@ -421,15 +423,57 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch describes a non-substantive state-change placeholder", common.ErrInvalidArgument)
 	}
 	return runtimePatchRequest{
-		TargetRef:  targetRef,
-		Content:    content,
-		Diff:       diff,
-		Summary:    summary,
-		PatchType:  patchType,
-		BaseHash:   strings.TrimSpace(baseHash),
-		ApprovalID: common.ApprovalID(strings.TrimSpace(approvalID)),
-		Extra:      cloneStepPayload(item),
+		TargetRef:       targetRef,
+		Content:         content,
+		Diff:            diff,
+		Summary:         summary,
+		PatchType:       patchType,
+		BaseHash:        strings.TrimSpace(baseHash),
+		ApprovalID:      common.ApprovalID(strings.TrimSpace(approvalID)),
+		CoverageTargets: patchCoverageTargetsValue(item["coverageTargets"]),
+		Extra:           cloneStepPayload(item),
 	}, nil
+}
+
+func patchCoverageTargetsValue(value any) any {
+	if value == nil {
+		return nil
+	}
+	switch typed := value.(type) {
+	case []string:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(item); text != "" {
+				ret = append(ret, text)
+			}
+		}
+		if len(ret) == 0 {
+			return nil
+		}
+		return ret
+	case []any:
+		ret := make([]any, 0, len(typed))
+		for _, item := range typed {
+			if item != nil {
+				ret = append(ret, item)
+			}
+		}
+		if len(ret) == 0 {
+			return nil
+		}
+		return ret
+	case map[string]any:
+		if len(typed) == 0 {
+			return nil
+		}
+		return cloneStepPayload(typed)
+	default:
+		text := strings.TrimSpace(fmt.Sprint(typed))
+		if text == "" || text == "<nil>" {
+			return nil
+		}
+		return text
+	}
 }
 
 func isReservedWorkspacePatchTarget(targetRef string) bool {

@@ -1869,6 +1869,40 @@ func TestNormalizeDecisionOutputPreservesRequiredApprovalActionContext(t *testin
 	}
 }
 
+func TestNormalizeDecisionOutputPreservesPatchCoverageTargets(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"continue",
+		"patchRequests":[{
+			"patchType":"file_write",
+			"targetRef":"main.go",
+			"content":"package main\n",
+			"coverageTargets":[{"goalRequirementId":"goal-1","targetText":"main entry covers request path"}]
+		}]
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	output, err := NormalizeDecisionOutput(runtimemodel.StepExecutionRequest{
+		RunID:  common.RunID("run-coverage-targets"),
+		StepID: common.StepID("run-coverage-targets/llm-1"),
+	}, decision)
+	if err != nil {
+		t.Fatalf("normalize decision output: %v", err)
+	}
+	patches, ok := output["patches"].([]map[string]any)
+	if !ok || len(patches) != 1 {
+		t.Fatalf("patches = %#v, want one patch", output["patches"])
+	}
+	targets, ok := patches[0]["coverageTargets"].([]any)
+	if !ok || len(targets) != 1 {
+		t.Fatalf("coverageTargets = %#v, want preserved target", patches[0]["coverageTargets"])
+	}
+	target := targets[0].(map[string]any)
+	if target["goalRequirementId"] != "goal-1" || target["targetText"] != "main entry covers request path" {
+		t.Fatalf("coverage target = %+v, want original metadata", target)
+	}
+}
+
 func TestParseLLMExecutionDecisionRejectsInvalidExecutionGraph(t *testing.T) {
 	_, err := ParseLLMExecutionDecision([]byte(`{
 		"completionState":"continue",

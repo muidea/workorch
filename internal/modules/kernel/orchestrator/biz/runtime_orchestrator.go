@@ -1331,6 +1331,9 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if err := validateRepairPatchOutputTargetRelevance(step, output); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch output contract failed", err)
 	}
+	if err := validateRuntimeStateChangingOutputBeforeSideEffects(run, step, output); err != nil {
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime state-changing contract gate failed", err)
+	}
 	if err := o.publishPatchPreviewFromOutput(ctx, run, step, toolCall, output); err != nil {
 		return err
 	}
@@ -1638,6 +1641,19 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 		return nil
 	}
 	return fmt.Errorf("%w: state-changing execution-stage llm graph node returned no state-changing output", common.ErrInvalidArgument)
+}
+
+func validateRuntimeStateChangingOutputBeforeSideEffects(run *runModel.Run, step *runModel.Step, output map[string]any) error {
+	if run == nil || step == nil || output == nil {
+		return nil
+	}
+	if step.Kind == initialStepKind(run) {
+		return validateLLMExecutionOutputContract(run, step, output)
+	}
+	if strings.TrimSpace(step.Kind) != "patch/apply" {
+		return nil
+	}
+	return validatePatchStepCoverageTargetsBeforeRuntime(run, step, output)
 }
 
 func validateScopedStateChangingRepairVerificationContract(step *runModel.Step, output map[string]any) error {
@@ -3064,6 +3080,19 @@ func validateLLMCoverageBoundStateChangingIntent(run *runModel.Run, step *runMod
 		return nil
 	}
 	if !coverageGapRepairOutputHasPatch(output) {
+		return nil
+	}
+	return fmt.Errorf("%w: coverage-bound state-changing patch/apply must declare coverageTargets matching current Goal, DoD, or deliverable coverage targets", common.ErrInvalidArgument)
+}
+
+func validatePatchStepCoverageTargetsBeforeRuntime(run *runModel.Run, step *runModel.Step, output map[string]any) error {
+	if !coverageBoundStateChangingOutputRequired(run, step) {
+		return nil
+	}
+	if !coverageGapRepairOutputHasPatch(output) {
+		return nil
+	}
+	if coverageBoundOutputDeclaresTargets(step, output) {
 		return nil
 	}
 	return fmt.Errorf("%w: coverage-bound state-changing patch/apply must declare coverageTargets matching current Goal, DoD, or deliverable coverage targets", common.ErrInvalidArgument)

@@ -1721,6 +1721,117 @@ func TestRuntimeOrchestrator_StartRunAppliesRuntimePatchEvidence(t *testing.T) {
 	}
 }
 
+func TestRuntimeOrchestrator_DispatchRejectsCoverageBoundPatchBeforeApply(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	toolCallRepo := memory.NewToolCallRepository()
+	patchRepo := memory.NewPatchRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	checkpointRepo := memory.NewRuntimeCheckpointRepository()
+	deliverableDirectory := t.TempDir()
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		if request.Kind == llmWorkspaceExecutionStepKind {
+			return map[string]any{
+				"status": "completed",
+				"stage":  "llm_execution_graph_plan",
+				stepOutputKeyExecutionGraph: map[string]any{
+					"nodes": []map[string]any{{
+						"id":   "repair-main-go",
+						"kind": "patch/apply",
+						"input": map[string]any{
+							"patchType": "file_write",
+							"targetRef": "main.go",
+							"content":   "package main\n",
+							"summary":   "repair main entry",
+						},
+					}},
+				},
+			}, nil
+		}
+		return map[string]any{"status": "completed"}, nil
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		resolutionRepo,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          toolCallRepo,
+			Patches:            patchRepo,
+			ValidationResults:  validationRepo,
+			RuntimeCheckpoints: checkpointRepo,
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-coverage-preapply")
+	runID := common.RunID("run-coverage-preapply")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "ws",
+		DeliverableDirectory: deliverableDirectory,
+		State:                common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod",
+		State:           common.RunStateRunning,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	err := orch.dispatchStepWithWorkspace(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod",
+		State:           common.RunStateRunning,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}, common.StepID(string(runID)+"/llm-coverage-root"), llmWorkspaceExecutionStepKind, map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"missingDoDItems": []map[string]any{
+			{"item": "main entry covers request path", "state": "failed"},
+		},
+	}, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		DeliverableDirectory: deliverableDirectory,
+		State:                common.WorkspaceStateRunning,
+	})
+	if err != nil && !strings.Contains(err.Error(), "coverageTargets") {
+		t.Fatalf("dispatch err = %v, want nil or coverageTargets recovery error", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(deliverableDirectory, "main.go")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("main.go stat err = %v, want file not written", statErr)
+	}
+	patches, listErr := patchRepo.ListByRun(ctx, runID)
+	if listErr != nil {
+		t.Fatalf("list patches: %v", listErr)
+	}
+	if len(patches) != 0 {
+		t.Fatalf("patches = %+v, want no patch evidence before contract passes", patches)
+	}
+	step, getErr := stepRepo.Get(ctx, common.StepID(string(runID)+"/llm-coverage-root"))
+	if getErr != nil {
+		t.Fatalf("get step: %v", getErr)
+	}
+	if step.State != common.StepStateFailed || !strings.Contains(stringFromMap(step.Output, "error"), "coverageTargets") {
+		t.Fatalf("step = %+v, want failed before patch apply with coverageTargets error", step)
+	}
+}
+
 func TestRuntimeOrchestrator_StartRunDispatchesPatchApplyGraphNode(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

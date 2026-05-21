@@ -2688,8 +2688,8 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 			},
 			{
 				Kind:        llmcommon.RuntimeBlockKindPatchApply,
-				Description: "Apply one file_write or unified_diff patch inside the workspace deliverable directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory. Include baseHash from file/read when changing an existing file. Patch content and diffs must be complete, concrete, and directly applicable to the current workspace content; do not use omitted sections or placeholder bodies. Governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md are reserved for WorkOrch-managed Artifact records and must not be written through patch/apply.",
-				Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string", "baseHash": "sha256 content hash", "approvalId": "approved approval id when required"},
+				Description: "Apply one file_write or unified_diff patch inside the workspace deliverable directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory. Include baseHash from file/read when changing an existing file. When the runtime input carries missing coverage targets, include coverageTargets that cite the exact Goal, DoD, or deliverable coverage item this state change intends to close. Patch content and diffs must be complete, concrete, and directly applicable to the current workspace content; do not use omitted sections or placeholder bodies. Governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md are reserved for WorkOrch-managed Artifact records and must not be written through patch/apply.",
+				Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string", "baseHash": "sha256 content hash", "coverageTargets": "array of Goal/DoD/deliverable coverage target strings or objects", "approvalId": "approved approval id when required"},
 			},
 			{
 				Kind:        llmcommon.RuntimeBlockKindPatchPreview,
@@ -2802,7 +2802,7 @@ func llmFailureResolutionHint(stage string) string {
 func patchOutput(requests []llmmodels.PatchRequest) []map[string]any {
 	ret := make([]map[string]any, 0, len(requests))
 	for _, request := range normalizedPatchRequests(requests) {
-		ret = append(ret, map[string]any{
+		patch := map[string]any{
 			"patchType":  request.PatchType,
 			"targetRef":  request.TargetRef,
 			"content":    request.Content,
@@ -2810,7 +2810,11 @@ func patchOutput(requests []llmmodels.PatchRequest) []map[string]any {
 			"summary":    request.Summary,
 			"baseHash":   request.BaseHash,
 			"approvalId": request.ApprovalID,
-		})
+		}
+		if request.CoverageTargets != nil {
+			patch["coverageTargets"] = request.CoverageTargets
+		}
+		ret = append(ret, patch)
 	}
 	return ret
 }

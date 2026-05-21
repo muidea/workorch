@@ -14,6 +14,7 @@ type Patch struct {
 	Content          string
 	Diff             string
 	Summary          string
+	CoverageTargets  any
 	State            common.PatchState
 	BeforeHash       string
 	AfterHash        string

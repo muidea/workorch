@@ -1782,8 +1782,12 @@ func testPatchRepositoryContract(t *testing.T, factory func() repository.PatchRe
 		TargetRef:   "internal/example.go",
 		Diff:        "--- a/internal/example.go\n+++ b/internal/example.go\n@@ -1 +1 @@\n-before\n+after\n",
 		Summary:     "initial patch",
-		State:       common.PatchStateCreated,
-		CreatedAt:   "2026-04-25T00:00:00Z",
+		CoverageTargets: []any{map[string]any{
+			"goalRequirementId": "goal-contract",
+			"targetText":        "contract target",
+		}},
+		State:     common.PatchStateCreated,
+		CreatedAt: "2026-04-25T00:00:00Z",
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create patch: %v", err)
@@ -1810,6 +1814,14 @@ func testPatchRepositoryContract(t *testing.T, factory func() repository.PatchRe
 	}
 	if updated.Diff != item.Diff {
 		t.Fatalf("patch diff = %q, want persisted diff", updated.Diff)
+	}
+	targets, ok := updated.CoverageTargets.([]any)
+	if !ok || len(targets) != 1 {
+		t.Fatalf("coverage targets = %#v, want persisted target metadata", updated.CoverageTargets)
+	}
+	target, ok := targets[0].(map[string]any)
+	if !ok || target["goalRequirementId"] != "goal-contract" || target["targetText"] != "contract target" {
+		t.Fatalf("coverage target = %#v, want preserved structured target", updated.CoverageTargets)
 	}
 
 	second := &runmodel.Patch{

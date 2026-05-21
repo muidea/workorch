@@ -2107,7 +2107,9 @@ func cloneStringSlice(input []string) []string {
 }
 
 func clonePatch(item *run.Patch) run.Patch {
-	return *item
+	cloned := *item
+	cloned.CoverageTargets = cloneAny(item.CoverageTargets)
+	return cloned
 }
 
 func cloneApproval(item *approval.Approval) approval.Approval {
