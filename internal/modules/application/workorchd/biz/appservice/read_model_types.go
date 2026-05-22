@@ -14,6 +14,7 @@ type RunSnapshot struct {
 	Steps                []presenter.StepView     `json:"steps,omitempty"`
 	ToolCalls            []ToolCall               `json:"toolCalls,omitempty"`
 	Patches              []Patch                  `json:"patches,omitempty"`
+	GitOperations        []GitOperationTrace      `json:"gitOperations,omitempty"`
 	WebSources           []WebSourceTrace         `json:"webSources,omitempty"`
 	ValidationResults    []ValidationResult       `json:"validationResults,omitempty"`
 	RuntimeCheckpoints   []RuntimeCheckpoint      `json:"runtimeCheckpoints,omitempty"`
@@ -168,6 +169,7 @@ type RunObservability struct {
 	LLMUsageTraces       []LLMUsageTrace         `json:"llmUsageTraces,omitempty"`
 	LLMUsageSummary      LLMUsageSummary         `json:"llmUsageSummary"`
 	MemoryRecallTraces   []MemoryRecallTrace     `json:"memoryRecallTraces,omitempty"`
+	GitOperations        []GitOperationTrace     `json:"gitOperations,omitempty"`
 	WebSources           []WebSourceTrace        `json:"webSources,omitempty"`
 	ClosureTraces        []ClosureTrace          `json:"closureTraces,omitempty"`
 	DoDEvidence          []DoDEvidenceTrace      `json:"doDEvidence,omitempty"`
@@ -623,6 +625,37 @@ type WebSourceTrace struct {
 	EvidenceRefs   []string           `json:"evidenceRefs,omitempty"`
 	ApprovalID     string             `json:"approvalId,omitempty"`
 	PolicyDecision string             `json:"policyDecision,omitempty"`
+}
+
+type GitOperationTrace struct {
+	StepID           string           `json:"stepId"`
+	Kind             string           `json:"kind"`
+	Operation        string           `json:"operation,omitempty"`
+	Status           string           `json:"status,omitempty"`
+	RepoRoot         string           `json:"repoRoot,omitempty"`
+	WorkingDir       string           `json:"workingDir,omitempty"`
+	Branch           string           `json:"branch,omitempty"`
+	HeadCommit       string           `json:"headCommit,omitempty"`
+	HeadCommitBefore string           `json:"headCommitBefore,omitempty"`
+	HeadCommitAfter  string           `json:"headCommitAfter,omitempty"`
+	CommitHash       string           `json:"commitHash,omitempty"`
+	CommitSubject    string           `json:"commitSubject,omitempty"`
+	ChangedFiles     []GitChangedFile `json:"changedFiles,omitempty"`
+	StagedFiles      []GitChangedFile `json:"stagedFiles,omitempty"`
+	Truncated        bool             `json:"truncated,omitempty"`
+	ZeroWork         bool             `json:"zeroWork,omitempty"`
+	ErrorCode        string           `json:"errorCode,omitempty"`
+	Summary          string           `json:"summary,omitempty"`
+	EvidenceRefs     []string         `json:"evidenceRefs,omitempty"`
+}
+
+type GitChangedFile struct {
+	Path      string `json:"path"`
+	OldPath   string `json:"oldPath,omitempty"`
+	Status    string `json:"status,omitempty"`
+	Staged    bool   `json:"staged,omitempty"`
+	Unstaged  bool   `json:"unstaged,omitempty"`
+	Untracked bool   `json:"untracked,omitempty"`
 }
 
 type LLMContextBudgetTrace struct {

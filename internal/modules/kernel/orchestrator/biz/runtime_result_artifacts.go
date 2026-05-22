@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
@@ -284,6 +285,70 @@ func (o *RuntimeOrchestrator) recordWebSourceIndexArtifact(
 	return item.ID, o.publishArtifactCreated(ctx, item)
 }
 
+func (o *RuntimeOrchestrator) recordGitOperationIndexArtifact(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	gitDetails []resultGitOperationDetail,
+	now string,
+) (common.ArtifactID, error) {
+	if run == nil || step == nil || o.evidence.Artifacts == nil || len(gitDetails) == 0 {
+		return "", nil
+	}
+	evidenceRefs := resultGitOperationEvidenceRefs(gitDetails)
+	item := &resultmodel.Artifact{
+		ID:           gitOperationIndexArtifactID(run),
+		WorkspaceID:  run.WorkspaceID,
+		RunID:        run.ID,
+		ResultID:     common.ResultID(fmt.Sprintf("%s/result/dod-assessment", run.ID)),
+		StepID:       step.ID,
+		ArtifactType: resultcommon.ArtifactTypeReport,
+		Category:     resultcommon.ArtifactCategoryRuntimeEvidence,
+		Name:         "Git Operation Index",
+		Summary:      gitOperationIndexArtifactContent(gitDetails),
+		URI:          fmt.Sprintf("workorch://runs/%s/results/dod-assessment/git-operation-index", run.ID),
+		ContentType:  "text/markdown; charset=utf-8",
+		State:        common.ArtifactStateAvailable,
+		EvidenceRefs: evidenceRefs,
+		Metadata: map[string]any{
+			"sourceType":   resultcommon.SourceTypeDoDAssessment,
+			"sourceRef":    string(step.ID),
+			"category":     resultcommon.ArtifactCategoryRuntimeEvidence,
+			"artifactKind": "git_operation_index",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := o.evidence.Artifacts.Create(ctx, item); err != nil {
+		if err != common.ErrConflict {
+			return "", err
+		}
+		existing, getErr := o.evidence.Artifacts.Get(ctx, item.ID)
+		if getErr != nil {
+			return "", getErr
+		}
+		existing.WorkspaceID = item.WorkspaceID
+		existing.RunID = item.RunID
+		existing.ResultID = item.ResultID
+		existing.StepID = item.StepID
+		existing.ArtifactType = item.ArtifactType
+		existing.Category = item.Category
+		existing.Name = item.Name
+		existing.Summary = item.Summary
+		existing.URI = item.URI
+		existing.ContentType = item.ContentType
+		existing.State = item.State
+		existing.EvidenceRefs = item.EvidenceRefs
+		existing.Metadata = item.Metadata
+		existing.UpdatedAt = now
+		if err := o.evidence.Artifacts.Update(ctx, existing); err != nil {
+			return "", err
+		}
+		return existing.ID, o.publishArtifactCreated(ctx, existing)
+	}
+	return item.ID, o.publishArtifactCreated(ctx, item)
+}
+
 func resultSummaryFromDoDAssessment(
 	run *runModel.Run,
 	summary string,
@@ -373,6 +438,59 @@ func (o *RuntimeOrchestrator) resultWebSourceDetails(ctx context.Context, runID 
 	return ret
 }
 
+func (o *RuntimeOrchestrator) resultGitOperationDetails(ctx context.Context, runID common.RunID) []resultGitOperationDetail {
+	if o == nil || o.steps == nil || runID == "" {
+		return nil
+	}
+	steps, err := o.steps.ListByRun(ctx, runID)
+	if err != nil || len(steps) == 0 {
+		return nil
+	}
+	ret := make([]resultGitOperationDetail, 0)
+	for _, step := range steps {
+		if step == nil || len(step.Output) == 0 {
+			continue
+		}
+		if step.Kind != gitcommon.StepKindRead && step.Kind != gitcommon.StepKindWrite {
+			continue
+		}
+		commit := mapFromValue(step.Output["commit"])
+		ret = append(ret, resultGitOperationDetail{
+			StepID:           step.ID,
+			Kind:             step.Kind,
+			Operation:        stringFromMap(step.Output, "operation"),
+			Status:           stringFromMap(step.Output, "status"),
+			Branch:           stringFromMap(step.Output, "branch"),
+			HeadCommit:       stringFromMap(step.Output, "headCommit"),
+			HeadCommitBefore: stringFromMap(step.Output, "headCommitBefore"),
+			HeadCommitAfter:  stringFromMap(step.Output, "headCommitAfter"),
+			CommitHash:       stringFromMap(commit, "hash"),
+			CommitSubject:    stringFromMap(commit, "subject"),
+			Summary:          stringFromMap(step.Output, "summary"),
+			ChangedFiles:     resultGitChangedFilePaths(step.Output["changedFiles"]),
+			StagedFiles:      resultGitChangedFilePaths(step.Output["stagedFiles"]),
+			Truncated:        boolFromValue(step.Output["truncated"]),
+			ZeroWork:         boolFromValue(step.Output["zeroWork"]),
+			ErrorCode:        stringFromMap(step.Output, "errorCode"),
+		})
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func resultGitChangedFilePaths(value any) []string {
+	items := mapSliceFromValue(value)
+	ret := make([]string, 0, len(items))
+	for _, item := range items {
+		if path := stringFromMap(item, "path"); path != "" {
+			ret = append(ret, path)
+		}
+	}
+	return compactUniqueStrings(ret)
+}
+
 func resultWebSearchDetails(step *runModel.Step) []resultWebSourceDetail {
 	results := mapSliceFromValue(step.Output["results"])
 	if len(results) == 0 {
@@ -446,6 +564,13 @@ func webSourceIndexArtifactID(run *runModel.Run) common.ArtifactID {
 	return common.ArtifactID(fmt.Sprintf("%s/artifact/web-source-index", run.ID))
 }
 
+func gitOperationIndexArtifactID(run *runModel.Run) common.ArtifactID {
+	if run == nil {
+		return ""
+	}
+	return common.ArtifactID(fmt.Sprintf("%s/artifact/git-operation-index", run.ID))
+}
+
 func webSourceIndexArtifactContent(sourceDetails []resultWebSourceDetail) string {
 	var builder strings.Builder
 	builder.WriteString("# Web Source Index\n\n")
@@ -468,6 +593,50 @@ func webSourceIndexArtifactContent(sourceDetails []resultWebSourceDetail) string
 	return strings.TrimSpace(builder.String())
 }
 
+func gitOperationIndexArtifactContent(gitDetails []resultGitOperationDetail) string {
+	var builder strings.Builder
+	builder.WriteString("# Git Operation Index\n\n")
+	builder.WriteString("| Evidence | Kind | Operation | Status | Branch | Commit | Files | Summary |\n")
+	builder.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- |\n")
+	for _, item := range gitDetails {
+		commit := firstNonEmptyOrchestratorString(item.CommitHash, item.HeadCommitAfter, item.HeadCommit)
+		files := item.ChangedFiles
+		if len(files) == 0 {
+			files = item.StagedFiles
+		}
+		builder.WriteString(fmt.Sprintf(
+			"| `%s` | `%s` | `%s` | %s | %s | %s | %s | %s |\n",
+			markdownInlineCode(string(item.StepID)),
+			markdownInlineCode(item.Kind),
+			markdownInlineCode(item.Operation),
+			markdownTableCell(item.Status),
+			markdownTableCell(item.Branch),
+			markdownTableCell(shortCommit(commit)),
+			markdownTableCell(strings.Join(files, ", ")),
+			markdownTableCell(item.Summary),
+		))
+	}
+	return strings.TrimSpace(builder.String())
+}
+
+func resultGitOperationEvidenceRefs(gitDetails []resultGitOperationDetail) []string {
+	ret := make([]string, 0, len(gitDetails))
+	for _, item := range gitDetails {
+		if item.StepID != "" {
+			ret = append(ret, string(item.StepID))
+		}
+	}
+	return compactUniqueStrings(ret)
+}
+
+func shortCommit(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 12 {
+		return value
+	}
+	return value[:12]
+}
+
 type resultWebSourceDetail struct {
 	StepID         common.StepID
 	Kind           string
@@ -484,6 +653,25 @@ type resultWebSourceDetail struct {
 	Rank           int
 	Truncated      bool
 	PolicyDecision string
+}
+
+type resultGitOperationDetail struct {
+	StepID           common.StepID
+	Kind             string
+	Operation        string
+	Status           string
+	Branch           string
+	HeadCommit       string
+	HeadCommitBefore string
+	HeadCommitAfter  string
+	CommitHash       string
+	CommitSubject    string
+	Summary          string
+	ChangedFiles     []string
+	StagedFiles      []string
+	Truncated        bool
+	ZeroWork         bool
+	ErrorCode        string
 }
 
 func (o *RuntimeOrchestrator) resultEvidenceDetails(ctx context.Context, evidenceRefs []string) []resultEvidenceDetail {

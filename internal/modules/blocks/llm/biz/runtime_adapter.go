@@ -20,6 +20,7 @@ import (
 	"unicode"
 
 	filecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
+	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	mcpcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
@@ -29,6 +30,7 @@ import (
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/dialoglanguage"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 const decisionSchemaName = "workorch.llmExecutionDecision.v1"
@@ -2699,78 +2701,80 @@ func stringSliceFromValue(value any) []string {
 }
 
 func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
-	return llmmodels.RuntimeCapabilities{
-		BlockKinds: []llmmodels.RuntimeBlockCapability{
-			{
-				Kind:        llmcommon.StepKindWorkspaceExecution,
-				Description: "Plan the next workspace execution step from workspace goal, DoD, memory, skills, and MCP context.",
-			},
-			{
-				Kind:        shellcommon.StepKindCommand,
-				Description: "Execute one bounded local shell command in the workspace deliverable directory.",
-				Input:       map[string]any{"command": "string", "args": "[]string"},
-			},
-			{
-				Kind:        filecommon.StepKindList,
-				Description: "List files and directories under the workspace deliverable directory without modifying workspace state. Paths must be workspace-relative; large generated directories are skipped.",
-				Input:       map[string]any{"path": "relative directory path", "recursive": "boolean", "maxEntries": "number"},
-			},
-			{
-				Kind:        filecommon.StepKindRead,
-				Description: "Read bounded UTF-8 text content or binary metadata for one workspace-relative file. Use contentHash as the baseHash for later patch/apply or patch/preview when guarding against stale writes.",
-				Input:       map[string]any{"path": "relative file path", "startLine": "number", "endLine": "number", "maxBytes": "number"},
-			},
-			{
-				Kind:        filecommon.StepKindEdit,
-				Description: "Create a non-mutating unified_diff patch preview by replacing a unique oldText with newText in one workspace-relative text file. This does not write files and must be followed by patch/preview or patch/apply to persist changes. oldText and newText must be exact, complete text fragments, not omitted placeholders.",
-				Input:       map[string]any{"path": "relative file path", "oldText": "exact text to replace", "newText": "replacement text", "baseHash": "sha256 content hash", "occurrence": "number when oldText is not unique"},
-			},
-			{
-				Kind:        sshcommon.StepKindCommand,
-				Description: "Execute one bounded non-interactive SSH command on a remote host using supplied password or private key credentials.",
-				Input:       map[string]any{"host": "string", "port": "number", "username": "string", "password": "string", "privateKey": "string", "privateKeyPath": "string", "command": "string", "timeoutMillis": "number"},
-			},
-			{
-				Kind:        webcommon.StepKindSearch,
-				Description: "Search external web sources through a governed Web Search provider. Search results are candidate sources only; important facts should be verified by web/fetch before final use.",
-				Input:       map[string]any{"query": "string", "locale": "string", "recency": "day|week|month|year", "domains": "[]string", "excludeDomains": "[]string", "maxResults": "number", "safeSearch": "boolean", "reason": "string", "approvalId": "approved approval id when required"},
-			},
-			{
-				Kind:        webcommon.StepKindFetch,
-				Description: "Fetch one HTTP(S) URL through a governed Web Search provider and return bounded content or metadata. Include approvalId when the source requires approval.",
-				Input:       map[string]any{"url": "string", "maxBytes": "number", "extractMode": "text|metadata|summary", "reason": "string", "approvalId": "approved approval id when required"},
-			},
-			{
-				Kind:        llmcommon.RuntimeBlockKindPatchApply,
-				Description: "Apply one file_write or unified_diff patch inside the workspace deliverable directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory. Include baseHash from file/read when changing an existing file. When the runtime input carries missing coverage targets, include coverageTargets that cite the exact Goal, DoD, or deliverable coverage item this state change intends to close. Patch content and diffs must be complete, concrete, and directly applicable to the current workspace content; do not use omitted sections or placeholder bodies. Governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md are reserved for WorkOrch-managed Artifact records and must not be written through patch/apply.",
-				Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string", "baseHash": "sha256 content hash", "coverageTargets": "array of Goal/DoD/deliverable coverage target strings or objects", "approvalId": "approved approval id when required"},
-			},
-			{
-				Kind:        llmcommon.RuntimeBlockKindPatchPreview,
-				Description: "Validate and summarize one file_write or unified_diff patch without writing files. Use this before high-risk edits when the user or approval flow needs a non-mutating diff preview. Patch content and diffs must be complete, concrete, and directly applicable to the current workspace content; do not use omitted sections or placeholder bodies.",
-				Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string", "baseHash": "sha256 content hash", "approvalId": "approved approval id when required"},
-			},
-			{
-				Kind:        llmcommon.RuntimeBlockKindPatchRevert,
-				Description: "Revert a WorkOrch-applied patch by patchId only when the current file hash still matches the original patch afterHash. Sensitive or destructive reverts may require approvalId.",
-				Input:       map[string]any{"patchId": "WorkOrch patch id", "approvalId": "approved approval id when required", "strict": "boolean"},
-			},
-			{
-				Kind:        mcpcommon.StepKindToolCall,
-				Description: "Call an explicitly configured MCP server tool.",
-				Input:       map[string]any{"serverId": "string", "tool": "string", "input": "object"},
-			},
-			{
-				Kind:        mcpcommon.StepKindResourceRead,
-				Description: "Read an explicitly allowed MCP resource from a configured server.",
-				Input:       map[string]any{"serverId": "string", "uri": "string"},
-			},
-			{
-				Kind:        mcpcommon.StepKindPromptGet,
-				Description: "Get an explicitly allowed MCP prompt from a configured server.",
-				Input:       map[string]any{"serverId": "string", "prompt": "string", "arguments": "object"},
-			},
+	blockKinds := []llmmodels.RuntimeBlockCapability{
+		{
+			Kind:        llmcommon.StepKindWorkspaceExecution,
+			Description: "Plan the next workspace execution step from workspace goal, DoD, memory, skills, and MCP context.",
 		},
+		{
+			Kind:        shellcommon.StepKindCommand,
+			Description: "Execute one bounded local shell command in the workspace deliverable directory.",
+			Input:       map[string]any{"command": "string", "args": "[]string"},
+		},
+		{
+			Kind:        filecommon.StepKindList,
+			Description: "List files and directories under the workspace deliverable directory without modifying workspace state. Paths must be workspace-relative; large generated directories are skipped.",
+			Input:       map[string]any{"path": "relative directory path", "recursive": "boolean", "maxEntries": "number"},
+		},
+		{
+			Kind:        filecommon.StepKindRead,
+			Description: "Read bounded UTF-8 text content or binary metadata for one workspace-relative file. Use contentHash as the baseHash for later patch/apply or patch/preview when guarding against stale writes.",
+			Input:       map[string]any{"path": "relative file path", "startLine": "number", "endLine": "number", "maxBytes": "number"},
+		},
+		{
+			Kind:        filecommon.StepKindEdit,
+			Description: "Create a non-mutating unified_diff patch preview by replacing a unique oldText with newText in one workspace-relative text file. This does not write files and must be followed by patch/preview or patch/apply to persist changes. oldText and newText must be exact, complete text fragments, not omitted placeholders.",
+			Input:       map[string]any{"path": "relative file path", "oldText": "exact text to replace", "newText": "replacement text", "baseHash": "sha256 content hash", "occurrence": "number when oldText is not unique"},
+		},
+		{
+			Kind:        sshcommon.StepKindCommand,
+			Description: "Execute one bounded non-interactive SSH command on a remote host using supplied password or private key credentials.",
+			Input:       map[string]any{"host": "string", "port": "number", "username": "string", "password": "string", "privateKey": "string", "privateKeyPath": "string", "command": "string", "timeoutMillis": "number"},
+		},
+		{
+			Kind:        webcommon.StepKindSearch,
+			Description: "Search external web sources through a governed Web Search provider. Search results are candidate sources only; important facts should be verified by web/fetch before final use.",
+			Input:       map[string]any{"query": "string", "locale": "string", "recency": "day|week|month|year", "domains": "[]string", "excludeDomains": "[]string", "maxResults": "number", "safeSearch": "boolean", "reason": "string", "approvalId": "approved approval id when required"},
+		},
+		{
+			Kind:        webcommon.StepKindFetch,
+			Description: "Fetch one HTTP(S) URL through a governed Web Search provider and return bounded content or metadata. Include approvalId when the source requires approval.",
+			Input:       map[string]any{"url": "string", "maxBytes": "number", "extractMode": "text|metadata|summary", "reason": "string", "approvalId": "approved approval id when required"},
+		},
+		{
+			Kind:        llmcommon.RuntimeBlockKindPatchApply,
+			Description: "Apply one file_write or unified_diff patch inside the workspace deliverable directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory. Include baseHash from file/read when changing an existing file. When the runtime input carries missing coverage targets, include coverageTargets that cite the exact Goal, DoD, or deliverable coverage item this state change intends to close. Patch content and diffs must be complete, concrete, and directly applicable to the current workspace content; do not use omitted sections or placeholder bodies. Governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md are reserved for WorkOrch-managed Artifact records and must not be written through patch/apply.",
+			Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string", "baseHash": "sha256 content hash", "coverageTargets": "array of Goal/DoD/deliverable coverage target strings or objects", "approvalId": "approved approval id when required"},
+		},
+		{
+			Kind:        llmcommon.RuntimeBlockKindPatchPreview,
+			Description: "Validate and summarize one file_write or unified_diff patch without writing files. Use this before high-risk edits when the user or approval flow needs a non-mutating diff preview. Patch content and diffs must be complete, concrete, and directly applicable to the current workspace content; do not use omitted sections or placeholder bodies.",
+			Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string", "baseHash": "sha256 content hash", "approvalId": "approved approval id when required"},
+		},
+		{
+			Kind:        llmcommon.RuntimeBlockKindPatchRevert,
+			Description: "Revert a WorkOrch-applied patch by patchId only when the current file hash still matches the original patch afterHash. Sensitive or destructive reverts may require approvalId.",
+			Input:       map[string]any{"patchId": "WorkOrch patch id", "approvalId": "approved approval id when required", "strict": "boolean"},
+		},
+		{
+			Kind:        mcpcommon.StepKindToolCall,
+			Description: "Call an explicitly configured MCP server tool.",
+			Input:       map[string]any{"serverId": "string", "tool": "string", "input": "object"},
+		},
+		{
+			Kind:        mcpcommon.StepKindResourceRead,
+			Description: "Read an explicitly allowed MCP resource from a configured server.",
+			Input:       map[string]any{"serverId": "string", "uri": "string"},
+		},
+		{
+			Kind:        mcpcommon.StepKindPromptGet,
+			Description: "Get an explicitly allowed MCP prompt from a configured server.",
+			Input:       map[string]any{"serverId": "string", "prompt": "string", "arguments": "object"},
+		},
+	}
+	blockKinds = appendGitRuntimeCapabilities(blockKinds)
+	return llmmodels.RuntimeCapabilities{
+		BlockKinds: blockKinds,
 		ServiceAPIs: []llmmodels.ServiceAPICapability{
 			{
 				Method:       "GET",
@@ -2798,6 +2802,27 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 			AllowedLocalServiceHost: []string{"localhost:8080", "127.0.0.1:8080"},
 		},
 	}
+}
+
+func appendGitRuntimeCapabilities(blockKinds []llmmodels.RuntimeBlockCapability) []llmmodels.RuntimeBlockCapability {
+	cfg, err := workorchconfig.Current()
+	enabled := err != nil || workorchconfig.GitRuntimeEnabled(cfg.Runtime.Git)
+	writeEnabled := err != nil || workorchconfig.GitRuntimeWriteEnabled(cfg.Runtime.Git)
+	if enabled {
+		blockKinds = append(blockKinds, llmmodels.RuntimeBlockCapability{
+			Kind:        gitcommon.StepKindRead,
+			Description: "Read local Git repository state for the workspace deliverable repository. Supported operations: status, diff, log, show, branch. This block is read-only and path-scoped; it is not a general Git CLI.",
+			Input:       map[string]any{"operation": "status|diff|log|show|branch", "pathspecs": "[]relative path", "ref": "string", "baseRef": "string", "limit": "number", "reason": "string"},
+		})
+	}
+	if enabled && writeEnabled {
+		blockKinds = append(blockKinds, llmmodels.RuntimeBlockCapability{
+			Kind:        gitcommon.StepKindWrite,
+			Description: "Perform minimal local Git state changes in the workspace deliverable repository. Supported operations: add, commit. add requires explicit pathspecs; commit only commits already staged changes, rejects detached HEAD, does not run hooks, and does not support remote operations or history rewrite.",
+			Input:       map[string]any{"operation": "add|commit", "pathspecs": "[]relative path for add only", "message": "commit message for commit", "expectedHead": "optional full HEAD hash guard", "reason": "string"},
+		})
+	}
+	return blockKinds
 }
 
 func failureOutput(request runtimemodel.StepExecutionRequest, stage string, reason string, config llmmodels.ProviderConfig) map[string]any {

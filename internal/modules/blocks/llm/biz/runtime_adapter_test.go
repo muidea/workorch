@@ -14,11 +14,13 @@ import (
 	"testing"
 	"time"
 
+	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 type staticProvider struct {
@@ -543,6 +545,8 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "file/list") ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "file/read") ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "file/edit") ||
+		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, gitcommon.StepKindRead) ||
+		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, gitcommon.StepKindWrite) ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "shell/command") ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "ssh/command") ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, webcommon.StepKindSearch) ||
@@ -573,6 +577,28 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 		result.Output["stage"] != "llm_shell_plan" ||
 		result.Output["nextKind"] != "shell/command" {
 		t.Fatalf("output = %+v, want shell plan", result.Output)
+	}
+}
+
+func TestDeclaredRuntimeCapabilitiesHideGitWriteWhenDisabled(t *testing.T) {
+	configDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`
+[runtime.git]
+enabled = true
+writeEnabled = false
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+
+	caps := declaredRuntimeCapabilities()
+	if !runtimeCapabilitiesContainBlock(caps, gitcommon.StepKindRead) {
+		t.Fatalf("runtime capabilities = %+v, want git/read", caps)
+	}
+	if runtimeCapabilitiesContainBlock(caps, gitcommon.StepKindWrite) {
+		t.Fatalf("runtime capabilities = %+v, git/write must be hidden when disabled", caps)
 	}
 }
 

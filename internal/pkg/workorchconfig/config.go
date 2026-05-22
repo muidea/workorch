@@ -43,10 +43,17 @@ type RepositoryConfig struct {
 }
 
 type RuntimeConfig struct {
-	DefaultSoulID            string `json:"defaultSoulId" toml:"defaultSoulId"`
-	MaxRuntimeRepairAttempts int    `json:"maxRuntimeRepairAttempts" toml:"maxRuntimeRepairAttempts"`
-	MaxProviderRetryAttempts int    `json:"maxProviderRetryAttempts" toml:"maxProviderRetryAttempts"`
-	ShellCommandTimeout      string `json:"shellCommandTimeout" toml:"shellCommandTimeout"`
+	DefaultSoulID            string           `json:"defaultSoulId" toml:"defaultSoulId"`
+	MaxRuntimeRepairAttempts int              `json:"maxRuntimeRepairAttempts" toml:"maxRuntimeRepairAttempts"`
+	MaxProviderRetryAttempts int              `json:"maxProviderRetryAttempts" toml:"maxProviderRetryAttempts"`
+	ShellCommandTimeout      string           `json:"shellCommandTimeout" toml:"shellCommandTimeout"`
+	Git                      GitRuntimeConfig `json:"git" toml:"git"`
+}
+
+type GitRuntimeConfig struct {
+	Enabled        *bool  `json:"enabled" toml:"enabled"`
+	WriteEnabled   *bool  `json:"writeEnabled" toml:"writeEnabled"`
+	DefaultTimeout string `json:"defaultTimeout" toml:"defaultTimeout"`
 }
 
 type LLMConfig struct {
@@ -472,6 +479,14 @@ func boolString(value bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func GitRuntimeEnabled(cfg GitRuntimeConfig) bool {
+	return cfg.Enabled == nil || *cfg.Enabled
+}
+
+func GitRuntimeWriteEnabled(cfg GitRuntimeConfig) bool {
+	return cfg.WriteEnabled == nil || *cfg.WriteEnabled
 }
 
 func intString(value int) string {

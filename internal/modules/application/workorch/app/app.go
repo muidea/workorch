@@ -25,6 +25,7 @@ import (
 	_ "github.com/muidea/workorch/internal/modules/application/workorch"
 	_ "github.com/muidea/workorch/internal/modules/blocks/approval"
 	_ "github.com/muidea/workorch/internal/modules/blocks/file"
+	_ "github.com/muidea/workorch/internal/modules/blocks/git"
 	_ "github.com/muidea/workorch/internal/modules/blocks/llm"
 	_ "github.com/muidea/workorch/internal/modules/blocks/mcp"
 	_ "github.com/muidea/workorch/internal/modules/blocks/shell"

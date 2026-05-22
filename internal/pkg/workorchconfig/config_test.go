@@ -29,6 +29,11 @@ maxRuntimeRepairAttempts = 11
 maxProviderRetryAttempts = 12
 shellCommandTimeout = "90s"
 
+[runtime.git]
+enabled = true
+writeEnabled = true
+defaultTimeout = "45s"
+
 [llm]
 defaultProvider = "local"
 defaultEmbeddingProvider = "local"
@@ -109,6 +114,11 @@ maxRepeatedSamePrompt = 1
 		cfg.Runtime.ShellCommandTimeout != "90s" {
 		t.Fatalf("runtime config = %+v, want configured runtime settings", cfg.Runtime)
 	}
+	if !GitRuntimeEnabled(cfg.Runtime.Git) ||
+		!GitRuntimeWriteEnabled(cfg.Runtime.Git) ||
+		cfg.Runtime.Git.DefaultTimeout != "45s" {
+		t.Fatalf("runtime git config = %+v, want configured git runtime settings", cfg.Runtime.Git)
+	}
 	if cfg.LLM.DefaultProvider != "local" {
 		t.Fatalf("default provider = %q, want local", cfg.LLM.DefaultProvider)
 	}
@@ -146,6 +156,16 @@ maxRepeatedSamePrompt = 1
 		len(cfg.Governance.AutoApproval.RequireHumanFor) != 2 ||
 		cfg.Governance.Budget.MaxConsecutiveFailures != 2 {
 		t.Fatalf("governance config = %+v, want auto governance settings", cfg.Governance)
+	}
+}
+
+func TestGitRuntimeWriteEnabledDefaultsToTrue(t *testing.T) {
+	if !GitRuntimeWriteEnabled(GitRuntimeConfig{}) {
+		t.Fatal("git runtime write should default to enabled")
+	}
+	disabled := false
+	if GitRuntimeWriteEnabled(GitRuntimeConfig{WriteEnabled: &disabled}) {
+		t.Fatal("git runtime write should respect explicit false")
 	}
 }
 

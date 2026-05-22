@@ -56,7 +56,8 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 	assessment, summary = resultAssessmentWithRuntimeFacts(run, assessment, summary, patchDetails)
 	evidenceRefs = doDAssessmentEvidenceRefs(step.ID, assessment)
 	webSourceDetails := o.resultWebSourceDetails(ctx, run.ID)
-	expectedArtifactRefs := expectedCompletionArtifactRefs(run, patchDetails, webSourceDetails)
+	gitOperationDetails := o.resultGitOperationDetails(ctx, run.ID)
+	expectedArtifactRefs := expectedCompletionArtifactRefs(run, patchDetails, webSourceDetails, gitOperationDetails)
 	manifestCh := make(chan string, 1)
 	go func() {
 		manifestCh <- o.workspaceDeliverableManifestContent(ctx, run, step, assessment, evidenceRefs, workspace, patchDetails)
@@ -94,32 +95,50 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 		}
 		webSourceArtifactCh <- artifactWriteResult{refs: refs, err: err}
 	}()
+	gitOperationArtifactCh := make(chan artifactWriteResult, 1)
+	go func() {
+		ref, err := o.recordGitOperationIndexArtifact(ctx, run, step, gitOperationDetails, now)
+		var refs []common.ArtifactID
+		if ref != "" {
+			refs = []common.ArtifactID{ref}
+		}
+		gitOperationArtifactCh <- artifactWriteResult{refs: refs, err: err}
+	}()
 	summaryArtifact := <-summaryArtifactCh
 	if summaryArtifact.err != nil {
 		<-manifestArtifactCh
 		<-patchArtifactCh
 		<-webSourceArtifactCh
+		<-gitOperationArtifactCh
 		return summaryArtifact.err
 	}
 	manifestArtifact := <-manifestArtifactCh
 	if manifestArtifact.err != nil {
 		<-patchArtifactCh
 		<-webSourceArtifactCh
+		<-gitOperationArtifactCh
 		return manifestArtifact.err
 	}
 	patchArtifact := <-patchArtifactCh
 	if patchArtifact.err != nil {
 		<-webSourceArtifactCh
+		<-gitOperationArtifactCh
 		return patchArtifact.err
 	}
 	webSourceArtifact := <-webSourceArtifactCh
 	if webSourceArtifact.err != nil {
+		<-gitOperationArtifactCh
 		return webSourceArtifact.err
+	}
+	gitOperationArtifact := <-gitOperationArtifactCh
+	if gitOperationArtifact.err != nil {
+		return gitOperationArtifact.err
 	}
 	artifactRefs := append([]common.ArtifactID(nil), summaryArtifact.refs...)
 	artifactRefs = append(artifactRefs, manifestArtifact.refs...)
 	artifactRefs = append(artifactRefs, patchArtifact.refs...)
 	artifactRefs = append(artifactRefs, webSourceArtifact.refs...)
+	artifactRefs = append(artifactRefs, gitOperationArtifact.refs...)
 	dodAssessment := resultDoDAssessmentFromMap(assessment)
 	item := &resultmodel.Result{
 		ID:            common.ResultID(fmt.Sprintf("%s/result/dod-assessment", run.ID)),

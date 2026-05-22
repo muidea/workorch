@@ -654,6 +654,13 @@ func capabilityContractPrompt(request llmmodels.ProviderRequest) string {
 	if requestHasBlockKind(request, "patch/preview") || requestHasBlockKind(request, "patch/apply") || requestHasBlockKind(request, "patch/revert") {
 		lines = append(lines, "- Use executionGraph node kind patch/preview to validate and summarize an intended patch without writing files. Use patch/apply for file writes or diffs that must participate in graph dependencies. Use patch/revert only for a WorkOrch patchId when reverting an already applied WorkOrch patch. Do not use patchRequests as an executionGraph node kind.")
 	}
+	if requestHasBlockKind(request, "git/read") || requestHasBlockKind(request, "git/write") {
+		lines = append(lines,
+			"- Prefer git/read for repository status, diff, log, show, and branch evidence instead of shell git commands.",
+			"- Use git/write only for the supported local operations add and commit. Use patch/apply for file content changes before staging them.",
+			"- git/write commit does not accept pathspecs; stage files first with git/write add using explicit relative pathspecs, then commit the staged index with a non-empty message.",
+		)
+	}
 	if requestHasBlockKind(request, "shell/command") {
 		lines = append(lines,
 			"- Shell command names must be real commands available in the local process environment. Do not use a command named workorch.",

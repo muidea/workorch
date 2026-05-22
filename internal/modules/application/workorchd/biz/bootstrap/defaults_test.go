@@ -108,6 +108,8 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, execution.SoulMD, "交付入口")
 	assertSoulContains(t, execution.SoulMD, "多外部系统、多接口契约")
 	assertSoulContains(t, execution.SoulMD, "file/read")
+	assertSoulContains(t, execution.SoulMD, "git/read")
+	assertSoulContains(t, execution.SoulMD, "git/write")
 	assertSoulContains(t, execution.SoulMD, "编译与接口形状修复")
 	assertSoulContains(t, execution.SoulMD, "undefined")
 	assertSoulContains(t, execution.SoulMD, "unknown field")

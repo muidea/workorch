@@ -10,6 +10,7 @@ import (
 	"github.com/muidea/magicCommon/task"
 	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	filecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
+	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
 	sshcommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
@@ -50,6 +51,13 @@ func (p *plugin) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine)
 	if runtime.ShellRuntimeAdapter() != nil {
 		if err := runtimeRegistry.Register("shell/command", runtime.ShellRuntimeAdapter()); err != nil {
 			return cd.NewError(cd.Unexpected, err.Error())
+		}
+	}
+	if runtime.GitRuntimeAdapter() != nil {
+		for _, stepKind := range []string{gitcommon.StepKindRead, gitcommon.StepKindWrite} {
+			if err := runtimeRegistry.Register(stepKind, runtime.GitRuntimeAdapter()); err != nil {
+				return cd.NewError(cd.Unexpected, err.Error())
+			}
 		}
 	}
 	if runtime.SSHRuntimeAdapter() != nil {
