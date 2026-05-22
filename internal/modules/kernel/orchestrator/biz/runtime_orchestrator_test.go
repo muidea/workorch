@@ -13847,6 +13847,135 @@ func TestRuntimeOrchestrator_GraphFollowUpRestoresRepairContractAfterConcreteEvi
 	}
 }
 
+func TestRuntimeOrchestrator_GraphFollowUpRestoresRepairContractFromRootAfterListAndShellEvidence(t *testing.T) {
+	runID := common.RunID("run-evidence-acquisition-root-list-shell")
+	orch := &RuntimeOrchestrator{}
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-evidence-acquisition-root-list-shell", InitialStepKind: llmWorkspaceExecutionStepKind}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "list-targets", Kind: "file/list"},
+		{ID: "check-target", Kind: "shell/command", DependsOn: []string{"list-targets"}},
+	}}
+	root := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"concreteFailureEvidenceRequired": true,
+			failureOutputKeyClass:             failureClassRuntime,
+			failureOutputKeySignature:         "class=runtime_failed|kind=verification|failureTargets=resources/contract.txt",
+			"repairActionPackage": map[string]any{
+				"requiredOutput":          evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput()),
+				failureOutputKeySignature: "class=runtime_failed|kind=verification|failureTargets=resources/contract.txt",
+			},
+		},
+		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
+	}
+	listStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-002/001-list-targets"),
+		RunID: runID,
+		Kind:  "file/list",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID:     "list-targets",
+			stepInputKeyGraphRootStepID: string(root.ID),
+			stepOutputKeyExecutionGraph: graph,
+		},
+		Output: map[string]any{
+			"stage": "file_list",
+			"entries": []map[string]any{
+				{"path": "resources/contract.txt", "kind": "file", "contentHash": "hash-contract", "isBinary": false},
+				{"path": "resources/archive", "kind": "directory"},
+			},
+		},
+	}
+	shellStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-002/002-check-target"),
+		RunID: runID,
+		Kind:  "shell/command",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID:     "check-target",
+			stepInputKeyGraphRootStepID: string(root.ID),
+			stepOutputKeyExecutionGraph: graph,
+		},
+		Output: map[string]any{
+			"stdout": "resources/contract.txt:12: missing required field",
+		},
+	}
+
+	input := orch.graphFollowUpStepInputFromSteps(run, shellStep, []*runmodel.Step{root, listStep, shellStep})
+
+	if input[stepInputKeyRuntimeStage] != runtimeStageRepair ||
+		input[stepInputKeyRuntimeStageMode] != "strict_convergence" ||
+		input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true ||
+		input["concreteFailureEvidenceRequired"] != nil {
+		t.Fatalf("follow-up input = %+v, want restored state-changing repair contract from graph root", input)
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v, want patch/apply contract", required)
+	}
+	if !stringSliceContains(stringSliceFromValue(actionPackage["repairTargetSet"]), "resources/contract.txt") {
+		t.Fatalf("repairTargetSet = %+v, want evidence-acquired target", actionPackage["repairTargetSet"])
+	}
+	signals := mapFromValue(input["structuredFailureSignals"])
+	if !stringSliceContains(stringSliceFromValue(signals["targetRefs"]), "resources/contract.txt") || len(mapSliceFromValue(signals["lineRefs"])) == 0 {
+		t.Fatalf("structuredFailureSignals = %+v, want acquired target and line refs", signals)
+	}
+}
+
+func TestRuntimeOrchestrator_GraphFollowUpDoesNotRestoreRepairContractWithoutConcreteEvidence(t *testing.T) {
+	runID := common.RunID("run-evidence-acquisition-no-target")
+	orch := &RuntimeOrchestrator{}
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-evidence-acquisition-no-target", InitialStepKind: llmWorkspaceExecutionStepKind}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "probe", Kind: "shell/command"},
+	}}
+	root := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"concreteFailureEvidenceRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput()),
+			},
+		},
+		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
+	}
+	probeStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/001-probe"),
+		RunID: runID,
+		Kind:  "shell/command",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID:     "probe",
+			stepInputKeyGraphRootStepID: string(root.ID),
+			stepOutputKeyExecutionGraph: graph,
+		},
+		Output: map[string]any{"stdout": "probe completed without target reference"},
+	}
+
+	input := orch.graphFollowUpStepInputFromSteps(run, probeStep, []*runmodel.Step{root, probeStep})
+
+	if input[stepInputKeyRuntimeStage] != runtimeStageVerification ||
+		input["repairObjective"] == repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] == true ||
+		input["repairActionPackage"] != nil {
+		t.Fatalf("follow-up input = %+v, want no forced state-changing repair without concrete evidence", input)
+	}
+}
+
 func TestRuntimeOrchestrator_GraphFollowUpRunEvidenceIncludesPriorCompletedSteps(t *testing.T) {
 	runID := common.RunID("run-graph-follow-up-run-evidence")
 	orch := &RuntimeOrchestrator{}

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -1015,7 +1016,7 @@ func (o *RuntimeOrchestrator) graphFollowUpStepInputFromSteps(run *runModel.Run,
 	input := graphFollowUpStepInput(run, step)
 	evidence := o.completedGraphEvidenceFromSteps(run, step, steps)
 	input = enrichGraphFollowUpInputWithEvidence(input, evidence)
-	input = restoreRepairContractAfterConcreteEvidenceAcquisition(input, step, evidence)
+	input = restoreRepairContractAfterConcreteEvidenceAcquisition(input, evidenceAcquisitionSourceStep(step, steps), evidence)
 	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
 }
 
@@ -1038,18 +1039,46 @@ func enrichGraphFollowUpInputWithEvidence(input map[string]any, evidence []map[s
 	return input
 }
 
+func evidenceAcquisitionSourceStep(anchor *runModel.Step, steps []*runModel.Step) *runModel.Step {
+	if stepRequiresConcreteFailureEvidenceAcquisition(anchor) {
+		return anchor
+	}
+	rootStepID := graphRootStepID(anchor)
+	if rootStepID == "" {
+		return anchor
+	}
+	for _, step := range steps {
+		if step == nil || step.ID != rootStepID {
+			continue
+		}
+		if stepRequiresConcreteFailureEvidenceAcquisition(step) {
+			return step
+		}
+		break
+	}
+	return anchor
+}
+
 func restoreRepairContractAfterConcreteEvidenceAcquisition(input map[string]any, source *runModel.Step, evidence []map[string]any) map[string]any {
 	if len(input) == 0 || source == nil || source.Input == nil || !stepRequiresConcreteFailureEvidenceAcquisition(source) {
 		return input
 	}
 	snapshots := targetSnapshotsFromConcreteFailureEvidence(evidence)
 	sourcePackage := mapFromValue(source.Input["repairActionPackage"])
+	if sourcePackage == nil {
+		sourcePackage = map[string]any{}
+	}
 	probe := cloneStepPayload(source.Input)
 	if probe == nil {
 		probe = map[string]any{}
 	}
 	if len(snapshots) > 0 {
 		probe["failureTargetRepairContext"] = snapshots
+	}
+	evidenceSignals := structuredFailureSignalsFromConcreteFailureEvidence(evidence)
+	if len(evidenceSignals) > 0 {
+		probe["structuredFailureSignals"] = mergeStructuredFailureSignals(mapFromValue(probe["structuredFailureSignals"]), evidenceSignals)
+		sourcePackage["structuredFailureSignals"] = mergeStructuredFailureSignals(mapFromValue(sourcePackage["structuredFailureSignals"]), evidenceSignals)
 	}
 	actionPackage := repairActionPackageForEvidenceAcquisitionFollowUp(probe, sourcePackage, snapshots)
 	if !stateChangingRepairHasConcreteTargetEvidence(probe, actionPackage) {
@@ -1139,6 +1168,136 @@ func targetSnapshotsFromConcreteFailureEvidence(evidence []map[string]any) []map
 		return nil
 	}
 	return ret
+}
+
+func structuredFailureSignalsFromConcreteFailureEvidence(evidence []map[string]any) map[string]any {
+	if len(evidence) == 0 {
+		return nil
+	}
+	merged := map[string]any{}
+	for _, item := range evidence {
+		output := mapFromValue(item["output"])
+		if len(output) == 0 {
+			continue
+		}
+		signals := structuredFailureSignalsFromFailureOutput(output, nil, "", "")
+		if fileListEvidenceHasEntries(item, output) {
+			for _, entry := range mapSliceFromValue(output["entries"]) {
+				if strings.EqualFold(strings.TrimSpace(stringFromMap(entry, "kind")), "directory") || boolValue(entry["isBinary"]) {
+					continue
+				}
+				targetRef := strings.TrimSpace(stringFromMap(entry, "path"))
+				if structuredFailureTextTargetRefAllowed(targetRef) {
+					signals = appendStructuredFailureSignalTarget(signals, targetRef)
+				}
+			}
+		}
+		if path := strings.TrimSpace(stringFromMap(output, "path")); path != "" && structuredFailureTextTargetRefAllowed(path) {
+			signals = appendStructuredFailureSignalTarget(signals, path)
+		}
+		if len(signals) > 0 {
+			merged = mergeStructuredFailureSignals(merged, signals)
+		}
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
+}
+
+func fileListEvidenceHasEntries(item map[string]any, output map[string]any) bool {
+	if len(output) == 0 || len(mapSliceFromValue(output["entries"])) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(output, "stage")) == "file_list" {
+		return true
+	}
+	return strings.TrimSpace(stringFromMap(item, "kind")) == "file/list"
+}
+
+func appendStructuredFailureSignalTarget(signals map[string]any, targetRef string) map[string]any {
+	targetRef = normalizeStructuredFailureTargetRef(targetRef)
+	if targetRef == "" {
+		return signals
+	}
+	if signals == nil {
+		signals = map[string]any{}
+	}
+	targets := stringSliceFromValue(signals["targetRefs"])
+	targets = append(targets, targetRef)
+	signals["targetRefs"] = limitedStrings(compactUniqueStrings(targets), maxLLMContextSliceItems)
+	return signals
+}
+
+func mergeStructuredFailureSignals(first map[string]any, second map[string]any) map[string]any {
+	if len(first) == 0 && len(second) == 0 {
+		return nil
+	}
+	ret := cloneStepPayload(first)
+	if ret == nil {
+		ret = map[string]any{}
+	}
+	for _, key := range []string{"sources", "targetRefs", "externalReferences", "identifiers", "messages"} {
+		values := append(stringSliceFromValue(ret[key]), stringSliceFromValue(second[key])...)
+		if values = limitedStrings(compactUniqueStrings(values), maxLLMContextSliceItems); len(values) > 0 {
+			ret[key] = values
+		}
+	}
+	if lineRefs := mergeStructuredFailureLineRefs(mapSliceFromValue(ret["lineRefs"]), mapSliceFromValue(second["lineRefs"])); len(lineRefs) > 0 {
+		ret["lineRefs"] = lineRefs
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func mergeStructuredFailureLineRefs(first []map[string]any, second []map[string]any) []map[string]any {
+	seen := map[string]bool{}
+	ret := make([]map[string]any, 0, len(first)+len(second))
+	add := func(items []map[string]any) {
+		for _, item := range items {
+			targetRef := normalizeStructuredFailureTargetRef(stringFromMap(item, "targetRef"))
+			if targetRef == "" {
+				continue
+			}
+			line := intFromValue(item["line"])
+			column := intFromValue(item["column"])
+			key := fmt.Sprintf("%s:%d:%d", targetRef, line, column)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			next := cloneStepPayload(item)
+			next["targetRef"] = targetRef
+			ret = append(ret, next)
+			if len(ret) >= maxLLMContextSliceItems {
+				return
+			}
+		}
+	}
+	add(first)
+	add(second)
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func intFromValue(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		value, _ := typed.Int64()
+		return int(value)
+	default:
+		return 0
+	}
 }
 
 func repairActionPackageForEvidenceAcquisitionFollowUp(input map[string]any, sourcePackage map[string]any, snapshots []map[string]any) map[string]any {
