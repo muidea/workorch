@@ -320,6 +320,7 @@ func selectProcessEvidenceForStateChangingRepair(input []map[string]any, targetS
 		return nil
 	}
 	target := strings.TrimSpace(string(targetStepID))
+	target = processEvidenceActionableRepairTarget(input, target)
 	selected := make([]map[string]any, 0, min(len(input), 8))
 	seen := map[string]bool{}
 	add := func(item map[string]any) {
@@ -375,6 +376,31 @@ func selectProcessEvidenceForStateChangingRepair(input []map[string]any, targetS
 		return compareProcessEvidenceOrder(selected[i], selected[j]) < 0
 	})
 	return selected
+}
+
+func processEvidenceActionableRepairTarget(input []map[string]any, target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return target
+	}
+	for _, item := range input {
+		if !processEvidenceMatchesRepairTarget(item, target) {
+			continue
+		}
+		if processEvidenceItemIsActionableFailure(item) {
+			return target
+		}
+	}
+	for idx := len(input) - 1; idx >= 0; idx-- {
+		item := input[idx]
+		if !processEvidenceItemIsActionableFailure(item) {
+			continue
+		}
+		if stepID := strings.TrimSpace(stringFromMap(item, "stepId")); stepID != "" {
+			return stepID
+		}
+	}
+	return target
 }
 
 func processEvidenceMatchesRepairTarget(item map[string]any, target string) bool {

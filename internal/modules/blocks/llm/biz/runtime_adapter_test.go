@@ -2110,3 +2110,33 @@ func TestParseLLMExecutionDecisionNormalizesStringPlanField(t *testing.T) {
 		t.Fatalf("plan = %+v, want string plan normalized into []string", decision.Plan)
 	}
 }
+
+func TestParseLLMExecutionDecisionMovesTopLevelStrategyReassessmentIntoPatchNodeInput(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"continue",
+		"strategyReassessment":{
+			"failedSurface":"target.txt:12",
+			"rootCauseTarget":"target.txt",
+			"repairTargetDecision":"continue current target",
+			"repairMode":"continue_same_target_repair",
+			"forbiddenRepair":"do not retry stale output",
+			"verificationPlan":"run bounded verification"
+		},
+		"executionGraph":{"nodes":[
+			{"id":"patch","kind":"patch/apply","input":{"patchType":"file_write","targetRef":"target.txt","content":"updated\n"}},
+			{"id":"verify","kind":"shell/command","dependsOn":["patch"],"input":{"command":"go","args":["test","./..."]}}
+		]}
+	}`))
+	if err != nil {
+		t.Fatalf("ParseLLMExecutionDecision: %v", err)
+	}
+	if decision.ExecutionGraph == nil || len(decision.ExecutionGraph.Nodes) != 2 {
+		t.Fatalf("executionGraph = %+v, want two nodes", decision.ExecutionGraph)
+	}
+	input := decision.ExecutionGraph.Nodes[0].Input
+	for _, key := range []string{"failedSurface", "rootCauseTarget", "repairTargetDecision", "repairMode", "forbiddenRepair", "verificationPlan"} {
+		if strings.TrimSpace(stringValue(input[key])) == "" {
+			t.Fatalf("patch node input missing %s: %+v", key, input)
+		}
+	}
+}

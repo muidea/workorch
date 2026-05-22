@@ -1407,7 +1407,7 @@ func currentProgressDigestFromProcessEvidenceTimeline(timeline []map[string]any)
 	}
 	digest := map[string]any{}
 	existingOutputs := []string{}
-	var lastAttempt, lastFailure map[string]any
+	var lastAttempt, lastFailure, lastActionableFailure map[string]any
 	for _, item := range timeline {
 		if len(item) == 0 {
 			continue
@@ -1422,6 +1422,9 @@ func currentProgressDigestFromProcessEvidenceTimeline(timeline []map[string]any)
 		}
 		if strings.TrimSpace(stringFromMap(item, "state")) == string(common.StepStateFailed) {
 			lastFailure = item
+			if processEvidenceItemIsActionableFailure(item) {
+				lastActionableFailure = item
+			}
 		}
 	}
 	if len(existingOutputs) > maxLLMContextSliceItems {
@@ -1432,6 +1435,9 @@ func currentProgressDigestFromProcessEvidenceTimeline(timeline []map[string]any)
 	}
 	if len(lastAttempt) > 0 {
 		digest["lastAttempt"] = processEvidenceDigestStep(lastAttempt)
+	}
+	if len(lastActionableFailure) > 0 {
+		lastFailure = lastActionableFailure
 	}
 	if len(lastFailure) > 0 {
 		digest["lastObservedFailure"] = processEvidenceDigestStep(lastFailure)
@@ -1446,6 +1452,25 @@ func currentProgressDigestFromProcessEvidenceTimeline(timeline []map[string]any)
 		digest["nextRequiredAction"] = "continue_current_stage_contract"
 	}
 	return digest
+}
+
+func processEvidenceItemIsActionableFailure(item map[string]any) bool {
+	if len(item) == 0 {
+		return false
+	}
+	validity := strings.TrimSpace(stringFromMap(item, "evidenceValidity"))
+	if validity == "actionable_failure" {
+		return true
+	}
+	if validity == "stale_or_rejected" || validity == "diagnostic_only" {
+		return false
+	}
+	switch strings.TrimSpace(stringFromMap(item, "failureClass")) {
+	case failureClassShellCommand, failureClassPatchApply, failureClassRuntime:
+		return true
+	default:
+		return false
+	}
 }
 
 func processEvidenceDigestStep(item map[string]any) map[string]any {

@@ -1445,6 +1445,12 @@ func normalizeLLMDecisionSchemaPayload(payload []byte) ([]byte, error) {
 		delete(doc, "validationPlan")
 		changed = true
 	}
+	if value, ok := doc["strategyReassessment"]; ok {
+		if attachTopLevelStrategyReassessmentToPatchNodes(doc, value) {
+			delete(doc, "strategyReassessment")
+			changed = true
+		}
+	}
 	assessment, ok := doc["dodAssessment"].(map[string]any)
 	if !ok || len(assessment) == 0 {
 		if !changed {
@@ -1474,6 +1480,48 @@ func normalizeLLMDecisionSchemaPayload(payload []byte) ([]byte, error) {
 		return nil, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
 	}
 	return normalized, nil
+}
+
+func attachTopLevelStrategyReassessmentToPatchNodes(doc map[string]any, value any) bool {
+	reassessment, ok := value.(map[string]any)
+	if !ok || len(reassessment) == 0 {
+		return false
+	}
+	graph, ok := doc["executionGraph"].(map[string]any)
+	if !ok || len(graph) == 0 {
+		return false
+	}
+	nodes, ok := graph["nodes"].([]any)
+	if !ok || len(nodes) == 0 {
+		return false
+	}
+	attached := false
+	for _, item := range nodes {
+		node, ok := item.(map[string]any)
+		if !ok || strings.TrimSpace(stringValue(node["kind"])) != "patch/apply" {
+			continue
+		}
+		input, ok := node["input"].(map[string]any)
+		if !ok {
+			input = map[string]any{}
+			node["input"] = input
+		}
+		for key, reassessmentValue := range reassessment {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			if _, exists := input[key]; exists {
+				continue
+			}
+			input[key] = reassessmentValue
+		}
+		attached = true
+	}
+	if attached {
+		doc["executionGraph"] = graph
+	}
+	return attached
 }
 
 func advisoryDecisionPlanValue(value any) []string {

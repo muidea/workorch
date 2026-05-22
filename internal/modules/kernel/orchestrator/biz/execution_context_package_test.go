@@ -284,6 +284,53 @@ func TestCompactProcessEvidenceTimelineForStateChangingRepairPrioritizesCurrentF
 	}
 }
 
+func TestCompactProcessEvidenceTimelineForStateChangingRepairKeepsActionableFailureOverSchemaInvalid(t *testing.T) {
+	step := &runmodel.Step{
+		ID:    "run-process-context/repair-002",
+		RunID: "run-process-context",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			"stateChangingOutputRequired":     true,
+			"failedStepId":                    "run-process-context/repair-001",
+			"repairActionPackage": map[string]any{
+				"failedStepId": "run-process-context/repair-001",
+			},
+		},
+	}
+	timeline := []map[string]any{
+		{
+			"order":            1,
+			"stepId":           "run-process-context/graph-001/002-verify",
+			"kind":             "shell/command",
+			"state":            string(common.StepStateFailed),
+			"failureClass":     failureClassShellCommand,
+			"failureReason":    "current verification failure",
+			"evidenceValidity": "actionable_failure",
+		},
+		{
+			"order":            2,
+			"stepId":           "run-process-context/repair-001",
+			"kind":             llmWorkspaceExecutionStepKind,
+			"state":            string(common.StepStateFailed),
+			"failureClass":     failureClassLLMDecisionInvalid,
+			"failureReason":    "invalid llm decision json",
+			"evidenceValidity": "stale_or_rejected",
+		},
+	}
+
+	compact := compactProcessEvidenceTimelineForStateChangingRepair(timeline, step)
+	digest := currentProgressDigestFromProcessEvidenceTimeline(compact)
+
+	failure := mapFromValue(digest["lastObservedFailure"])
+	if failure["stepId"] != "run-process-context/graph-001/002-verify" {
+		t.Fatalf("lastObservedFailure = %+v, want original actionable failure", failure)
+	}
+	if digest["currentGap"] != "current verification failure" {
+		t.Fatalf("currentGap = %v, want actionable failure reason", digest["currentGap"])
+	}
+}
+
 func TestRunExecutionContextPackageInheritsReplanProcessEvidence(t *testing.T) {
 	ctx := context.Background()
 	run := &runmodel.Run{
