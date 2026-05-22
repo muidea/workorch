@@ -56,11 +56,17 @@ func promoteRepairActionPackageContext(input map[string]any) {
 	}
 	if digest := mapFromValue(input[stepInputKeyCurrentProgressDigest]); currentProgressDigestIsActionableFailure(digest) {
 		progress := compactLLMContextMap(digest, 0)
-		input["currentExecutionProgress"] = progress
-		pkg["currentExecutionProgress"] = progress
+		if currentProgressDigestShouldOverrideRepairPackage(digest) ||
+			(len(mapFromValue(input["currentExecutionProgress"])) == 0 && len(mapFromValue(pkg["currentExecutionProgress"])) == 0) {
+			input["currentExecutionProgress"] = progress
+			pkg["currentExecutionProgress"] = progress
+		}
 		if currentFailure := currentFailureFromProgressDigest(digest); len(currentFailure) > 0 {
-			input["currentFailure"] = currentFailure
-			pkg["currentFailure"] = currentFailure
+			if currentProgressDigestShouldOverrideRepairPackage(digest) ||
+				(len(mapFromValue(input["currentFailure"])) == 0 && len(mapFromValue(pkg["currentFailure"])) == 0) {
+				input["currentFailure"] = currentFailure
+				pkg["currentFailure"] = currentFailure
+			}
 		}
 		input["repairActionPackage"] = pkg
 		return
@@ -85,11 +91,30 @@ func currentProgressDigestIsActionableFailure(digest map[string]any) bool {
 	if len(failure) == 0 {
 		return false
 	}
-	if strings.TrimSpace(stringFromMap(failure, "evidenceValidity")) == "actionable_failure" &&
-		(strings.TrimSpace(stringFromMap(failure, "kind")) == "shell/command" ||
-			strings.TrimSpace(stringFromMap(failure, "kind")) == "patch/apply") {
+	switch strings.TrimSpace(stringFromMap(failure, "evidenceValidity")) {
+	case "actionable_failure", "actionable_gap":
+		return true
+	case "stale_or_rejected", "diagnostic_only":
+		return false
+	}
+	switch strings.TrimSpace(stringFromMap(failure, "failureClass")) {
+	case failureClassShellCommand, failureClassPatchApply:
+		return true
+	default:
+		return false
+	}
+}
+
+func currentProgressDigestIsActionableGap(digest map[string]any) bool {
+	failure := mapFromValue(digest["lastObservedFailure"])
+	return strings.TrimSpace(stringFromMap(failure, "evidenceValidity")) == "actionable_gap"
+}
+
+func currentProgressDigestShouldOverrideRepairPackage(digest map[string]any) bool {
+	if currentProgressDigestIsActionableGap(digest) {
 		return true
 	}
+	failure := mapFromValue(digest["lastObservedFailure"])
 	switch strings.TrimSpace(stringFromMap(failure, "failureClass")) {
 	case failureClassShellCommand, failureClassPatchApply:
 		return true
@@ -114,6 +139,8 @@ func currentFailureFromProgressDigest(digest map[string]any) map[string]any {
 	add("failureClass", stringFromMap(failure, "failureClass"))
 	add("failureSignature", stringFromMap(failure, "failureSignature"))
 	add("reason", firstNonEmptyString(stringFromMap(failure, "failureReason"), stringFromMap(digest, "currentGap")))
+	add("source", stringFromMap(failure, "source"))
+	add("evidenceValidity", stringFromMap(failure, "evidenceValidity"))
 	add("targetRef", stringFromMap(failure, "targetRef"))
 	add("targetScope", stringFromMap(failure, "targetScope"))
 	if len(ret) == 0 {
@@ -230,7 +257,7 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		ret[stepInputKeyCurrentProgressDigest] = progressDigest
 	}
 	if len(processTimeline) == 0 {
-		if inheritedTimeline, inheritedDigest := inheritedReplanProcessEvidence(executionContext); len(inheritedTimeline) > 0 {
+		if inheritedTimeline, inheritedDigest := inheritedContinuationProcessEvidence(executionContext); len(inheritedTimeline) > 0 {
 			ret[stepInputKeyProcessEvidenceTimeline] = inheritedTimeline
 			if len(inheritedDigest) > 0 {
 				ret[stepInputKeyCurrentProgressDigest] = inheritedDigest
@@ -589,11 +616,15 @@ func mergeExecutionDefinitionsIntoPackage(pkg map[string]any, executionContext m
 			pkg[key] = compactLLMContextValue(value, 1)
 		}
 	}
-	if value := mapFromValue(executionContext["replanContinuation"]); len(value) > 0 {
-		pkg["replanContinuation"] = compactReplanContinuationForRuntimeContext(value)
-	}
 	if value := mapFromValue(executionContext["rejectedResultContinuation"]); len(value) > 0 {
 		pkg["rejectedResultContinuation"] = compactRejectedResultContinuationForRuntimeContext(value)
+	}
+	if value := mapFromValue(executionContext["replanContinuation"]); len(value) > 0 {
+		if len(mapFromValue(executionContext["rejectedResultContinuation"])) > 0 {
+			pkg["replanContinuation"] = compactHistoricalReplanContinuationForRuntimeContext(value)
+		} else {
+			pkg["replanContinuation"] = compactReplanContinuationForRuntimeContext(value)
+		}
 	}
 	if value, ok := executionContext["executionContract"]; ok && value != nil {
 		pkg["executionContract"] = cloneLLMContextValue(value)

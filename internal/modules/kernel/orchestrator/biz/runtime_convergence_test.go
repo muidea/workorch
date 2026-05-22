@@ -538,3 +538,40 @@ func TestBuildConvergenceContractReadsRejectedResultContinuationFromExecutionCon
 		t.Fatalf("convergenceContract = %+v, want need_evidence from rejected result continuation", contract)
 	}
 }
+
+func TestBuildConvergenceContractRejectedResultSkipsHistoricalReplanPackage(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-rejected-skips-replan-package",
+		WorkspaceID:     "ws-rejected-skips-replan-package",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"rejectedResultContinuation": map[string]any{
+				"predecessorRunId": "run-latest",
+				"requiredEvidence": []string{"collect current evidence"},
+			},
+			"replanContinuation": map[string]any{
+				"historicalOnly": true,
+				"repairActionPackage": map[string]any{
+					"repairTargetSet": []string{"old_test.go"},
+					"requiredOutput": map[string]any{
+						"mustIncludeStateChangingNode": true,
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		"executionContext": map[string]any{
+			"rejectedResultContinuation": run.ExecutionContext["rejectedResultContinuation"],
+			"replanContinuation":         run.ExecutionContext["replanContinuation"],
+		},
+	}
+
+	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
+	if contract.State != convergenceStateNeedEvidence || contract.StateChangingOutputRequired {
+		t.Fatalf("convergenceContract = %+v, want rejected-result evidence acquisition", contract)
+	}
+	if targets := stringSliceFromValue(contract.RepairActionPackage["repairTargetSet"]); len(targets) > 0 {
+		t.Fatalf("repairActionPackage = %+v, want historical replan target suppressed", contract.RepairActionPackage)
+	}
+}

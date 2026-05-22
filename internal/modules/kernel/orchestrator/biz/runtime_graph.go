@@ -1348,17 +1348,28 @@ func repairActionPackageForEvidenceAcquisitionFollowUp(input map[string]any, sou
 }
 
 func currentFailureForEvidenceAcquisitionFollowUp(input map[string]any, pkg map[string]any) map[string]any {
+	for _, digest := range []map[string]any{
+		mapFromValue(input["currentProgressDigest"]),
+		mapFromValue(pkg["currentExecutionProgress"]),
+		mapFromValue(input["currentExecutionProgress"]),
+	} {
+		if currentProgressDigestIsActionableGap(digest) {
+			if currentFailure := currentFailureFromProgressDigest(digest); len(currentFailure) > 0 {
+				return currentFailure
+			}
+		}
+	}
 	if currentFailure := repairActionCurrentFailure(input); len(currentFailure) > 0 {
 		return currentFailure
 	}
 	for _, source := range []map[string]any{
 		pkg,
-		mapFromValue(mapFromValue(mapFromValue(input["executionContextPackage"])["replanContinuation"])["failureContext"]),
-		mapFromValue(mapFromValue(mapFromValue(input["executionContextPackage"])["replanContinuation"])["ticketContext"]),
-		mapFromValue(mapFromValue(input["executionContextPackage"])["replanContinuation"]),
-		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["replanContinuation"])["failureContext"]),
-		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["replanContinuation"])["ticketContext"]),
-		mapFromValue(mapFromValue(input["executionContext"])["replanContinuation"]),
+		replanContinuationFailureContextForCurrentProgress(mapFromValue(input["executionContextPackage"])),
+		replanContinuationTicketContextForCurrentProgress(mapFromValue(input["executionContextPackage"])),
+		replanContinuationForCurrentProgress(mapFromValue(input["executionContextPackage"])),
+		replanContinuationFailureContextForCurrentProgress(mapFromValue(input["executionContext"])),
+		replanContinuationTicketContextForCurrentProgress(mapFromValue(input["executionContext"])),
+		replanContinuationForCurrentProgress(mapFromValue(input["executionContext"])),
 	} {
 		if len(source) == 0 {
 			continue
@@ -1395,15 +1406,58 @@ func currentExecutionProgressForEvidenceAcquisitionFollowUp(input map[string]any
 	for _, source := range []map[string]any{
 		mapFromValue(input["currentExecutionProgress"]),
 		mapFromValue(pkg["currentExecutionProgress"]),
-		mapFromValue(mapFromValue(mapFromValue(input["executionContextPackage"])["replanContinuation"])["currentProgressDigest"]),
-		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["replanContinuation"])["currentProgressDigest"]),
 		mapFromValue(input["currentProgressDigest"]),
+		replanContinuationCurrentProgressDigest(mapFromValue(input["executionContextPackage"])),
+		replanContinuationCurrentProgressDigest(mapFromValue(input["executionContext"])),
 	} {
 		if repairProgressDigestIsInformative(source) {
 			return compactLLMContextMap(source, 0)
 		}
 	}
 	return nil
+}
+
+func replanContinuationForCurrentProgress(container map[string]any) map[string]any {
+	replan := mapFromValue(container["replanContinuation"])
+	if len(replan) == 0 || !replanContinuationCanDriveCurrentProgress(container, replan) {
+		return nil
+	}
+	return replan
+}
+
+func replanContinuationFailureContextForCurrentProgress(container map[string]any) map[string]any {
+	return mapFromValue(replanContinuationForCurrentProgress(container)["failureContext"])
+}
+
+func replanContinuationTicketContextForCurrentProgress(container map[string]any) map[string]any {
+	return mapFromValue(replanContinuationForCurrentProgress(container)["ticketContext"])
+}
+
+func replanContinuationCurrentProgressDigest(container map[string]any) map[string]any {
+	return mapFromValue(replanContinuationForCurrentProgress(container)["currentProgressDigest"])
+}
+
+func replanContinuationCanDriveCurrentProgress(container map[string]any, replan map[string]any) bool {
+	if len(replan) == 0 {
+		return false
+	}
+	if boolValue(replan["historicalOnly"]) || replan["useAsCurrentProgress"] == false {
+		return false
+	}
+	if containerHasRejectedResultContinuation(container) {
+		return false
+	}
+	return true
+}
+
+func containerHasRejectedResultContinuation(container map[string]any) bool {
+	if len(container) == 0 {
+		return false
+	}
+	if len(mapFromValue(container["rejectedResultContinuation"])) > 0 {
+		return true
+	}
+	return len(mapFromValue(mapFromValue(container["executionContext"])["rejectedResultContinuation"])) > 0
 }
 
 func repairProgressDigestIsInformative(source map[string]any) bool {

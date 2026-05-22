@@ -2411,6 +2411,12 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	input["failedStepState"] = string(failedStep.State)
 	input["failedStepInput"] = compactStepInputForLLMContext(failedStep.Input)
 	input["failedStepOutput"] = compactStepOutputForLLMContext(failedStep.Output)
+	if runtimeRepairShouldReturnToRejectedResultContinuation(run, failedStep) {
+		input = resetRuntimeRepairInputToRejectedResultContinuation(input, run, failedStep)
+		contract := BuildConvergenceContract(run, nil, failedStep, map[string]any{"input": input}, nil)
+		input = ApplyConvergenceContract(input, contract)
+		return input
+	}
 	if diagnostics := runtimeRepairLastFailureDiagnostics(failedStep); len(diagnostics) > 0 {
 		input["lastFailureDiagnostics"] = diagnostics
 	}
@@ -2668,7 +2674,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if rootCauseCandidates := o.runtimeRepairRootCauseCandidateContext(ctx, run, failedStep); len(rootCauseCandidates) > 0 {
 		input["rootCauseCandidateContext"] = rootCauseCandidates
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"When a repeated failed surface appears, use rootCauseCandidateContext to evaluate adjacent or referenced resources before patching the same surface again.",
+			"Use rootCauseCandidateContext to evaluate grounded adjacent or referenced resources when the failed surface may be unblocked by changing a related current workspace resource.",
 			"Do not assume the failed surface itself is the root cause when current workspace resources show adjacent or referenced resources that the failed surface depends on.",
 			"If choosing a rootCauseTarget that differs from the failed surface, patch that resource directly and declare relatedFailureTargets for the failed surface being unblocked.",
 		)
@@ -2769,6 +2775,96 @@ func runtimeRepairLastFailureDiagnostics(failedStep *runModel.Step) map[string]a
 		return nil
 	}
 	return compactLLMContextMap(ret, 1)
+}
+
+func runtimeRepairShouldReturnToRejectedResultContinuation(run *runModel.Run, failedStep *runModel.Step) bool {
+	if run == nil || failedStep == nil || failedStep.Input == nil {
+		return false
+	}
+	if len(mapFromValue(run.ExecutionContext["rejectedResultContinuation"])) == 0 {
+		return false
+	}
+	failedInputContext := mapFromValue(failedStep.Input["executionContext"])
+	if len(mapFromValue(failedInputContext["rejectedResultContinuation"])) == 0 {
+		return false
+	}
+	replan := mapFromValue(failedInputContext["replanContinuation"])
+	if len(replan) == 0 || !boolValue(replan["historicalOnly"]) {
+		return false
+	}
+	if boolValue(failedStep.Input["replanStateChangingContinuation"]) {
+		return true
+	}
+	replanTargets := repairPatchTargetRefsFromScopeText(firstNonEmptyString(
+		stringFromMap(mapFromValue(replan["failureContext"]), "failureTargetScope"),
+		stringFromMap(mapFromValue(replan["ticketContext"]), "failureTargetScope"),
+		stringFromMap(mapFromValue(replan["failureContext"]), failureOutputKeySignature),
+		stringFromMap(mapFromValue(replan["ticketContext"]), failureOutputKeySignature),
+	))
+	if len(replanTargets) == 0 {
+		return false
+	}
+	failedTargets := compactUniqueStrings(append(failureTargetRepairRefs(failedStep), repairPatchTargetRefsFromScopeText(stringFromMap(failedStep.Output, "error"))...))
+	if len(failedTargets) == 0 {
+		return false
+	}
+	targetSet := map[string]bool{}
+	for _, target := range replanTargets {
+		target = normalizeRepairPatchTargetRef(target)
+		if target != "" {
+			targetSet[target] = true
+		}
+	}
+	for _, target := range failedTargets {
+		if targetSet[normalizeRepairPatchTargetRef(target)] {
+			return true
+		}
+	}
+	return false
+}
+
+func resetRuntimeRepairInputToRejectedResultContinuation(input map[string]any, run *runModel.Run, failedStep *runModel.Step) map[string]any {
+	if input == nil {
+		input = map[string]any{}
+	}
+	continuation := mapFromValue(run.ExecutionContext["rejectedResultContinuation"])
+	timeline := processEvidenceTimelineFromRejectedResultContinuation(continuation)
+	digest := currentProgressDigestFromRejectedResultContinuation(continuation, timeline)
+	input[stepInputKeyProcessEvidenceTimeline] = compactProcessEvidenceTimelineForRuntimeContext(timeline)
+	input[stepInputKeyCurrentProgressDigest] = digest
+	input["currentExecutionProgress"] = compactLLMContextMap(digest, 0)
+	if currentFailure := currentFailureFromProgressDigest(digest); len(currentFailure) > 0 {
+		input["currentFailure"] = currentFailure
+	}
+	delete(input, "replanStateChangingContinuation")
+	delete(input, "stateChangingOutputRequired")
+	delete(input, "patchRepairContext")
+	delete(input, "failureTargetRepairContext")
+	delete(input, "targetRepairAttempts")
+	delete(input, "strategyReassessment")
+	input["repairObjective"] = repairObjectiveAcquireFailureEvidence
+	input["concreteFailureEvidenceRequired"] = true
+	input["historicalRepairAttempt"] = map[string]any{
+		"stepId":       string(failedStep.ID),
+		"kind":         failedStep.Kind,
+		"state":        string(failedStep.State),
+		"reason":       firstNonEmptyString(stringFromMap(failedStep.Output, "reason"), stringFromMap(failedStep.Output, "error")),
+		"supersededBy": "rejectedResultContinuation",
+	}
+	pkg := map[string]any{
+		"requiredOutput":              evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput()),
+		"evidenceAcquisitionRequired": true,
+		"currentExecutionProgress":    compactLLMContextMap(digest, 0),
+	}
+	if currentFailure := currentFailureFromProgressDigest(digest); len(currentFailure) > 0 {
+		pkg["currentFailure"] = currentFailure
+	}
+	input["repairActionPackage"] = pkg
+	input["repairGuidance"] = appendRepairGuidance(concreteFailureEvidenceAcquisitionGuidance(),
+		"Rejected result continuation supersedes the historical replan failure; treat the historical repair attempt as lineage only.",
+		"Acquire or produce the current evidence required by rejectedResultContinuation before choosing a new state-changing target.",
+	)
+	return input
 }
 
 func inheritPriorRepairContext(input map[string]any, failedStep *runModel.Step) {
@@ -3168,7 +3264,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	}
 	if candidates := mapSliceFromValue(input["rootCauseCandidateContext"]); len(candidates) > 0 {
 		pkg["rootCauseCandidateContext"] = compactLLMContextValue(candidates, 1)
-		requiredOutput["rootCauseCandidateRule"] = "repeated failed-surface repair may patch a rootCauseCandidateContext target when strategyReassessment declares that target as rootCauseTarget"
+		requiredOutput["rootCauseCandidateRule"] = "a grounded rootCauseCandidateContext target may be patched when the patch declares relatedFailureTargets for the failed surface or the candidate is included in repairTargetSet"
 	}
 	if targetSet := repairActionTargetSet(input, pkg, rawFailedOutput...); len(targetSet) > 0 {
 		pkg["repairTargetSet"] = targetSet
@@ -3669,10 +3765,18 @@ func repairActionTargetSet(input map[string]any, pkg map[string]any, rawFailedOu
 			add(stringFromMap(item, "targetRef"))
 		}
 	}
+	for _, key := range []string{"rootCauseCandidateContext"} {
+		for _, item := range mapSliceFromValue(input[key]) {
+			add(stringFromMap(item, "targetRef"))
+		}
+	}
 	for _, item := range mapSliceFromValue(pkg["targetSnapshots"]) {
 		add(stringFromMap(item, "targetRef"))
 	}
 	for _, item := range mapSliceFromValue(pkg["currentTargetSnapshots"]) {
+		add(stringFromMap(item, "targetRef"))
+	}
+	for _, item := range mapSliceFromValue(pkg["rootCauseCandidateContext"]) {
 		add(stringFromMap(item, "targetRef"))
 	}
 	if signals := mapFromValue(input["structuredFailureSignals"]); len(signals) > 0 {
@@ -5286,7 +5390,13 @@ func (o *RuntimeOrchestrator) runtimeRepairRootCauseCandidateContext(ctx context
 		failureOutputKeySignature:        strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeySignature)),
 		"failedStepKind":                 failedStep.Kind,
 	})
-	if len(reassessment) == 0 || !strategyReassessmentRequiresRootCauseTargetShift(reassessment) {
+	if !strategyReassessmentRequiresRootCauseTargetShift(reassessment) {
+		if inherited := mapFromValue(failedStep.Input["strategyReassessment"]); strategyReassessmentRequiresRootCauseTargetShift(inherited) {
+			reassessment = inherited
+		}
+	}
+	includeSurfaceCandidates := runtimeRepairShouldIncludeRootCauseCandidates(failedStep)
+	if (len(reassessment) == 0 || !strategyReassessmentRequiresRootCauseTargetShift(reassessment)) && !includeSurfaceCandidates {
 		return nil
 	}
 	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
@@ -5297,18 +5407,34 @@ func (o *RuntimeOrchestrator) runtimeRepairRootCauseCandidateContext(ctx context
 	if err != nil || len(files) == 0 {
 		return nil
 	}
-	failedTargets := failureTargetRepairRefs(failedStep)
+	failedTargets := resolveWorkspaceTargetRefs(workspace.DeliverableDirectory, failureTargetRepairRefs(failedStep))
+	if len(failedTargets) == 0 {
+		failedTargets = resolveWorkspaceTargetRefs(workspace.DeliverableDirectory, failureTargetRepairRefsFromStrategyReassessment(reassessment))
+	}
 	if len(failedTargets) == 0 {
 		return nil
 	}
 	failedSet := map[string]bool{}
+	failedDirs := map[string]bool{}
+	failedStems := map[string]bool{}
 	for _, target := range failedTargets {
-		failedSet[normalizeRepairPatchTargetRef(target)] = true
+		target = normalizeRepairPatchTargetRef(target)
+		if target == "" {
+			continue
+		}
+		failedSet[target] = true
+		failedDirs[filepath.Dir(target)] = true
+		if stem := normalizedPathStem(target); stem != "" {
+			failedStems[stem] = true
+		}
+	}
+	if len(failedSet) == 0 {
+		return nil
 	}
 	var ret []map[string]any
 	addCandidate := func(path string, source string) {
 		path = normalizeRepairPatchTargetRef(path)
-		if path == "" || failedSet[path] {
+		if path == "" || failedSet[path] || !runtimeRepairTargetRefAdmissible(path) {
 			return
 		}
 		for _, existing := range ret {
@@ -5317,11 +5443,11 @@ func (o *RuntimeOrchestrator) runtimeRepairRootCauseCandidateContext(ctx context
 			}
 		}
 		item := patchRepairTargetSnapshot(workspace.DeliverableDirectory, path)
-		if len(item) == 0 || !boolValue(item["exists"]) {
+		if len(item) == 0 || !boolValue(item["exists"]) || boolValue(item["isBinary"]) {
 			return
 		}
 		item["source"] = source
-		item["guidance"] = "Use this as a root-cause candidate resource when repeated repair on the failed surface has not converged."
+		item["guidance"] = "Use this as a grounded root-cause candidate resource when repairing the failed surface requires changing an adjacent or referenced current workspace resource."
 		ret = append(ret, item)
 	}
 	signals := structuredFailureSignalsFromFailureOutput(failedStep.Output, nil, strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass)), strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeySignature)))
@@ -5331,28 +5457,62 @@ func (o *RuntimeOrchestrator) runtimeRepairRootCauseCandidateContext(ctx context
 	for _, item := range runtimeRepairContextItemsFromStep(failedStep) {
 		addCandidate(stringFromMap(item, "targetRef"), "patch_repair_context")
 	}
+	sameDirectoryCandidates := make([]workspaceDeliverableFile, 0)
 	for _, file := range files {
 		path := normalizeRepairPatchTargetRef(file.Path)
 		if path == "" || failedSet[path] {
 			continue
 		}
-		for failed := range failedSet {
-			if failed == "" {
-				continue
-			}
-			if filepath.Dir(failed) == filepath.Dir(path) {
-				addCandidate(path, "same_directory_resource")
-				break
-			}
+		if failedDirs[filepath.Dir(path)] {
+			sameDirectoryCandidates = append(sameDirectoryCandidates, file)
 		}
-		if len(ret) >= 3 {
+	}
+	sort.SliceStable(sameDirectoryCandidates, func(i, j int) bool {
+		leftScore := resourceShapeAlignmentCandidateScore(sameDirectoryCandidates[i].Path, failedStems)
+		rightScore := resourceShapeAlignmentCandidateScore(sameDirectoryCandidates[j].Path, failedStems)
+		if leftScore != rightScore {
+			return leftScore > rightScore
+		}
+		if sameDirectoryCandidates[i].Size != sameDirectoryCandidates[j].Size {
+			return sameDirectoryCandidates[i].Size < sameDirectoryCandidates[j].Size
+		}
+		return sameDirectoryCandidates[i].Path < sameDirectoryCandidates[j].Path
+	})
+	for _, file := range sameDirectoryCandidates {
+		addCandidate(file.Path, "same_directory_resource")
+		if len(ret) >= 6 {
 			break
 		}
 	}
-	if len(ret) > 3 {
-		return ret[:3]
+	if len(ret) > 6 {
+		return ret[:6]
 	}
 	return ret
+}
+
+func runtimeRepairShouldIncludeRootCauseCandidates(failedStep *runModel.Step) bool {
+	if failedStep == nil {
+		return false
+	}
+	if strings.TrimSpace(string(failedStep.Kind)) != "shell/command" {
+		return false
+	}
+	class := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass))
+	if class != "" && class != failureClassShellCommand {
+		return false
+	}
+	return len(failureTargetRepairRefs(failedStep)) > 0
+}
+
+func failureTargetRepairRefsFromStrategyReassessment(reassessment map[string]any) []string {
+	if len(reassessment) == 0 {
+		return nil
+	}
+	var ret []string
+	for _, key := range []string{"failureTargetScope", "failedSurface"} {
+		ret = append(ret, repairPatchTargetRefsFromScopeText(stringFromMap(reassessment, key))...)
+	}
+	return compactUniqueStrings(ret)
 }
 
 func runtimeRepairContextItemsFromStep(step *runModel.Step) []map[string]any {
@@ -5488,6 +5648,17 @@ func failureTargetRepairRefs(step *runModel.Step) []string {
 	}
 	for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Output, failureOutputKeySignature)) {
 		add(target)
+	}
+	for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Input, stepInputKeyRepairOfFailureSig)) {
+		add(target)
+	}
+	for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Input, failureOutputKeySignature)) {
+		add(target)
+	}
+	if reassessment := mapFromValue(step.Input["strategyReassessment"]); len(reassessment) > 0 {
+		for _, target := range failureTargetRepairRefsFromStrategyReassessment(reassessment) {
+			add(target)
+		}
 	}
 	failedOutput := mapFromValue(step.Output["failedStepOutput"])
 	for _, target := range failureTargetsForSignature(failedOutput) {

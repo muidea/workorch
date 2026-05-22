@@ -54,6 +54,10 @@ func BuildConvergenceContract(
 		if len(source) == 0 {
 			continue
 		}
+		if sourceKey == "replanContinuation" &&
+			(!replanContinuationCanDriveCurrentProgress(input, source) || convergenceRunHasRejectedContinuation(run)) {
+			continue
+		}
 		if len(mapFromValue(input["repairActionPackage"])) == 0 {
 			if pkg := mapFromValue(source["repairActionPackage"]); len(pkg) > 0 {
 				input["repairActionPackage"] = pkg
@@ -254,11 +258,14 @@ func convergenceNeedsEvidence(input map[string]any, failedStep *runModel.Step) b
 }
 
 func convergenceNeedsEvidenceFromRejectedContinuation(run *runModel.Run) bool {
+	return convergenceRunHasRejectedContinuation(run)
+}
+
+func convergenceRunHasRejectedContinuation(run *runModel.Run) bool {
 	if run == nil {
 		return false
 	}
-	continuation := mapFromValue(run.ExecutionContext["rejectedResultContinuation"])
-	return len(continuation) > 0
+	return len(mapFromValue(run.ExecutionContext["rejectedResultContinuation"])) > 0
 }
 
 func convergenceNeedsStateChange(input map[string]any, failedStep *runModel.Step) bool {

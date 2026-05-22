@@ -3410,6 +3410,79 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshot(t *
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputIncludesRootCauseCandidatesForResolvedFailureSurface(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	deliverableDirectory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(deliverableDirectory, "gateway"), 0o755); err != nil {
+		t.Fatalf("seed gateway dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "gateway", "main.go"), []byte("package main\n\nfunc proxyPath() string { return \"/chat/completions\" }\n"), 0o644); err != nil {
+		t.Fatalf("seed implementation file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "gateway", "main_test.go"), []byte("package main\n\nfunc TestProxyPath(t *testing.T) {}\n"), 0o644); err != nil {
+		t.Fatalf("seed failure surface file: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-root-cause-candidate")
+	runID := common.RunID("run-root-cause-candidate")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/006-test"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageExecution,
+			"stateChangingOutputRequired": true,
+		},
+		Output: map[string]any{
+			"status": "failed",
+			"error":  "exit status 1",
+			"stdout": strings.Join([]string{
+				"=== RUN   TestProxyHandlerBasic",
+				"    main_test.go:28:",
+				"        expected: \"/v1/chat/completions\"",
+				"        actual  : \"/chat/completions\"",
+			}, "\n"),
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=main_test.go|exitCode=1|error=exit status 1",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 1, errors.New("exit status 1"))
+
+	targetContext := mapSliceFromValue(input["failureTargetRepairContext"])
+	if len(targetContext) != 1 || targetContext[0]["targetRef"] != "gateway/main_test.go" {
+		t.Fatalf("failureTargetRepairContext = %#v, want resolved gateway/main_test.go surface", input["failureTargetRepairContext"])
+	}
+	candidates := mapSliceFromValue(input["rootCauseCandidateContext"])
+	if len(candidates) == 0 {
+		t.Fatalf("rootCauseCandidateContext = %#v, want adjacent implementation candidates", input["rootCauseCandidateContext"])
+	}
+	foundMain := false
+	for _, candidate := range candidates {
+		if candidate["targetRef"] == "gateway/main.go" && strings.Contains(stringFromMap(candidate, "content"), "proxyPath") {
+			foundMain = true
+			break
+		}
+	}
+	if !foundMain {
+		t.Fatalf("rootCauseCandidateContext = %#v, want gateway/main.go current content", input["rootCauseCandidateContext"])
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	targetSet := stringSliceFromValue(actionPackage["repairTargetSet"])
+	if !stringSliceContains(targetSet, "gateway/main.go") || !stringSliceContains(targetSet, "gateway/main_test.go") {
+		t.Fatalf("repairActionPackage = %#v, repairTargetSet = %#v, want failed surface and root-cause candidate", actionPackage, targetSet)
+	}
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if !strings.Contains(stringFromMap(required, "rootCauseCandidateRule"), "rootCauseCandidateContext") {
+		t.Fatalf("requiredOutput = %#v, want root-cause candidate rule", required)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshotFromStructuredStdout(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -3805,6 +3878,118 @@ func TestRuntimeOrchestrator_InitialReplanStateChangingInputIncludesRepairAction
 	}
 }
 
+func TestRuntimeOrchestrator_InitialRejectedResultContinuationSupersedesReplanStateChangingInput(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-rejected-supersedes-replan-input",
+		WorkspaceID:     "ws-rejected-supersedes-replan-input",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+			"rejectedResultContinuation": map[string]any{
+				"predecessorRunId": "run-latest",
+				"summary":          "latest rejected result requires current evidence",
+				"requiredEvidence": []string{"replan missing work", "run concrete verification"},
+			},
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-older",
+				"reason":           "runtime_repair_exhausted_requires_strategy",
+				"failureContext": map[string]any{
+					failureOutputKeyClass:     failureClassPatchApply,
+					failureOutputKeySignature: "class=patch_apply_failed|kind=patch/apply|targetRef=old_test.go|error=context mismatch",
+					"failureTargetScope":      "targetRef=old_test.go",
+					"failedStepId":            "run-older/graph-005/001-patch-target",
+					"failedStepKind":          "patch/apply",
+				},
+			},
+		},
+	}
+
+	input := initialStepInput(run)
+
+	if input["replanStateChangingContinuation"] != nil ||
+		input["stateChangingOutputRequired"] != nil ||
+		input["repairObjective"] != repairObjectiveAcquireFailureEvidence ||
+		input["concreteFailureEvidenceRequired"] != true {
+		t.Fatalf("input = %+v, want rejected result evidence continuation instead of replan state-changing repair", input)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(pkg["evidenceAcquisitionRequired"]) || !boolValue(required["mustProduceConcreteFailureEvidence"]) {
+		t.Fatalf("repairActionPackage = %+v, want evidence acquisition package from rejected result continuation", pkg)
+	}
+	replan := mapFromValue(mapFromValue(input["executionContext"])["replanContinuation"])
+	if replan["historicalOnly"] != true || replan["useAsCurrentProgress"] != false {
+		t.Fatalf("executionContext.replanContinuation = %+v, want historical-only replan", replan)
+	}
+	if strings.Contains(stringFromMap(pkg, "failureSignature"), "old_test.go") {
+		t.Fatalf("repairActionPackage = %+v, want old replan failure suppressed", pkg)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairReturnsToRejectedContinuationAfterHistoricalReplanFailure(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-repair-rejected-supersedes-replan",
+		WorkspaceID:     "ws-repair-rejected-supersedes-replan",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"rejectedResultContinuation": map[string]any{
+				"predecessorRunId": "run-latest",
+				"summary":          "latest rejected result requires current evidence",
+				"requiredEvidence": []string{"replan missing work", "run concrete verification"},
+			},
+			"replanContinuation": map[string]any{
+				"failureContext": map[string]any{
+					"failureTargetScope": "targetRef=old_test.go",
+				},
+			},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-repair-rejected-supersedes-replan/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"replanStateChangingContinuation": true,
+			"executionContext": map[string]any{
+				"rejectedResultContinuation": run.ExecutionContext["rejectedResultContinuation"],
+				"replanContinuation": map[string]any{
+					"historicalOnly": true,
+					"failureContext": map[string]any{
+						"failureTargetScope": "targetRef=old_test.go",
+					},
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"repairTargetSet": []string{"old_test.go"},
+			},
+		},
+		Output: map[string]any{
+			"error":                   "invalid argument: runtime repair patch/apply unified_diff for target \"old_test.go\" is non-substantive",
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|targetRef=old_test.go",
+		},
+	}
+
+	input := (&RuntimeOrchestrator{}).runtimeRepairFollowUpStepInput(context.Background(), run, failed, 2, common.ErrInvalidArgument)
+
+	if input["stateChangingOutputRequired"] != nil || input["repairObjective"] != repairObjectiveAcquireFailureEvidence {
+		t.Fatalf("repair input = %+v, want rejected-result evidence acquisition", input)
+	}
+	currentFailure := mapFromValue(input["currentFailure"])
+	if currentFailure["source"] != "rejectedResultContinuation" || currentFailure["evidenceValidity"] != "actionable_gap" {
+		t.Fatalf("currentFailure = %+v, want rejected-result actionable gap", currentFailure)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if targets := stringSliceFromValue(pkg["repairTargetSet"]); len(targets) > 0 {
+		t.Fatalf("repairActionPackage = %+v, want historical replan target suppressed", pkg)
+	}
+	historical := mapFromValue(input["historicalRepairAttempt"])
+	if historical["supersededBy"] != "rejectedResultContinuation" {
+		t.Fatalf("historicalRepairAttempt = %+v, want superseded marker", historical)
+	}
+}
+
 func TestRuntimeOrchestrator_InitialReplanStateChangingInputPromotesPatchFailureIntoStrategyReassessment(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-replan-patch-failure-reassessment",
@@ -4073,6 +4258,92 @@ func TestRuntimeOrchestrator_RuntimeRepairInputInheritsStrategyReassessmentAfter
 	if !strings.Contains(guidance, "runtime contract failure on the repair wrapper does not clear") ||
 		!strings.Contains(guidance, "surfaceContractCorrection") {
 		t.Fatalf("repairGuidance = %q, want inherited reassessment guidance", guidance)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairInputHydratesRootCauseCandidatesFromInheritedReassessment(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	deliverableDirectory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(deliverableDirectory, "scope"), 0o755); err != nil {
+		t.Fatalf("mkdir scope: %v", err)
+	}
+	files := map[string][]byte{
+		"scope/resource_check.txt": []byte("observes resource shape and required attribute\n"),
+		"scope/resource.txt":       []byte("current resource shape\n"),
+		"scope/config.txt":         []byte("configuration\n"),
+		"scope/manifest.txt":       []byte("manifest\n"),
+		"scope/checksum.txt":       []byte("checksum\n"),
+		"scope/runtime.bin":        []byte{0, 1, 2, 3},
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(deliverableDirectory, filepath.FromSlash(name)), content, 0o644); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	workspaceID := common.WorkspaceID("ws-root-cause-candidate-hydration")
+	runID := common.RunID("run-root-cause-candidate-hydration")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001-of-planning-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"failureTargetScope":          "targetRef=scope/resource_check.txt",
+			"targetRepairAttempts":        int64(2),
+			"strategyReassessment": map[string]any{
+				"required":             true,
+				"reason":               "same_target_scope_repeated_failure",
+				"failedSurface":        "targetRef=scope/resource_check.txt",
+				"failureTargetScope":   "targetRef=scope/resource_check.txt",
+				"targetRepairAttempts": int64(2),
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"repairMode",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+		},
+		Output: map[string]any{
+			"error":                   "invalid argument: strategyReassessment.required=true requires patch/apply decision fields",
+			"stage":                   "llm_execution_graph_plan",
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 2, common.ErrInvalidArgument)
+
+	candidates := mapSliceFromValue(input["rootCauseCandidateContext"])
+	if len(candidates) == 0 {
+		t.Fatalf("rootCauseCandidateContext = %#v, want hydrated candidates", input["rootCauseCandidateContext"])
+	}
+	var foundCandidate bool
+	for _, candidate := range candidates {
+		if boolValue(candidate["isBinary"]) {
+			t.Fatalf("rootCauseCandidateContext = %#v, want binary candidates excluded", input["rootCauseCandidateContext"])
+		}
+		if stringFromMap(candidate, "targetRef") == "scope/resource.txt" {
+			foundCandidate = true
+		}
+	}
+	if !foundCandidate {
+		t.Fatalf("rootCauseCandidateContext = %#v, want same-directory non-binary candidate scope/resource.txt", input["rootCauseCandidateContext"])
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	pkgCandidates := mapSliceFromValue(actionPackage["rootCauseCandidateContext"])
+	if len(pkgCandidates) == 0 {
+		t.Fatalf("repairActionPackage.rootCauseCandidateContext = %#v, want hydrated candidates", actionPackage["rootCauseCandidateContext"])
 	}
 }
 

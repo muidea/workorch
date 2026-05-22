@@ -80,6 +80,9 @@ func replanRunRequiresStateChangingOutput(run *runModel.Run) bool {
 	if run == nil || !runExecutionContractRequiresStateChange(run) {
 		return false
 	}
+	if len(mapFromValue(run.ExecutionContext["rejectedResultContinuation"])) > 0 {
+		return false
+	}
 	return len(mapFromValue(run.ExecutionContext["replanContinuation"])) > 0
 }
 
@@ -430,11 +433,15 @@ func slimExecutionContextForStepInput(executionContext map[string]any) map[strin
 			ret[key] = compactLLMContextValue(value, 1)
 		}
 	}
-	if value := mapFromValue(executionContext["replanContinuation"]); len(value) > 0 {
-		ret["replanContinuation"] = compactReplanContinuationForRuntimeContext(value)
-	}
 	if value := mapFromValue(executionContext["rejectedResultContinuation"]); len(value) > 0 {
 		ret["rejectedResultContinuation"] = compactRejectedResultContinuationForRuntimeContext(value)
+	}
+	if value := mapFromValue(executionContext["replanContinuation"]); len(value) > 0 {
+		if len(mapFromValue(executionContext["rejectedResultContinuation"])) > 0 {
+			ret["replanContinuation"] = compactHistoricalReplanContinuationForRuntimeContext(value)
+		} else {
+			ret["replanContinuation"] = compactReplanContinuationForRuntimeContext(value)
+		}
 	}
 	if value := mapSliceFromValue(executionContext["governanceHistory"]); len(value) > 0 {
 		ret["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(value, 6)

@@ -182,3 +182,77 @@ func TestEvidenceAcquisitionFollowUpKeepsCurrentFailure(t *testing.T) {
 		t.Fatalf("follow-up contract = %+v, want state-changing repair", out)
 	}
 }
+
+func TestEvidenceAcquisitionFollowUpPrefersRejectedResultGapOverHistoricalReplan(t *testing.T) {
+	runID := common.RunID("run-evidence-follow-up-rejected-result")
+	source := &runModel.Step{
+		ID:    common.StepID(runID + "/step-1"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"concreteFailureEvidenceRequired": true,
+			"failedStepId":                    string(runID) + "/repair-001",
+			"failedStepKind":                  llmWorkspaceExecutionStepKind,
+			failureOutputKeyClass:             "rejected_result_continuation",
+			"currentProgressDigest": map[string]any{
+				"currentGap":         "read current resource\npatch current resource\nrun bounded verification",
+				"nextRequiredAction": "address_rejected_result_required_evidence",
+				"lastObservedFailure": map[string]any{
+					"kind":             "result/rejected",
+					"failureClass":     "rejected_result_continuation",
+					"failureReason":    "read current resource\npatch current resource\nrun bounded verification",
+					"source":           "rejectedResultContinuation",
+					"evidenceValidity": "actionable_gap",
+				},
+			},
+			"executionContext": map[string]any{
+				"rejectedResultContinuation": map[string]any{
+					"requiredEvidence": []string{"read current resource", "patch current resource", "run bounded verification"},
+				},
+				"replanContinuation": map[string]any{
+					"currentProgressDigest": map[string]any{
+						"currentGap": "older patch mismatch",
+					},
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"requiresCurrentTargetSnapshotForStateChange": true,
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		"workspaceId": string(common.WorkspaceID("ws-evidence-follow-up-rejected-result")),
+	}
+	evidence := []map[string]any{
+		{
+			"kind":   "file/read",
+			"stepId": string(runID) + "/graph-001/001-read-target",
+			"output": map[string]any{
+				"stage":       "file_read",
+				"status":      "completed",
+				"path":        "target.txt",
+				"exists":      true,
+				"content":     "current content",
+				"contentHash": "hash-current",
+				"size":        15,
+				"truncated":   false,
+			},
+		},
+	}
+
+	out := restoreRepairContractAfterConcreteEvidenceAcquisition(input, source, evidence)
+	pkg := mapFromValue(out["repairActionPackage"])
+	progress := mapFromValue(pkg["currentExecutionProgress"])
+	if strings.Contains(stringFromMap(progress, "currentGap"), "older patch mismatch") ||
+		!strings.Contains(stringFromMap(progress, "currentGap"), "patch current resource") {
+		t.Fatalf("currentExecutionProgress = %+v, want rejected-result gap instead of historical replan", progress)
+	}
+	currentFailure := mapFromValue(pkg["currentFailure"])
+	if currentFailure["evidenceValidity"] != "actionable_gap" || currentFailure["source"] != "rejectedResultContinuation" {
+		t.Fatalf("currentFailure = %+v, want rejected-result actionable gap", currentFailure)
+	}
+}

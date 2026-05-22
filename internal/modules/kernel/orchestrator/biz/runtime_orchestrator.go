@@ -4562,10 +4562,12 @@ func currentFailureFromContextGateTicket(ticketContext map[string]any) map[strin
 
 func currentExecutionProgressFromContextGateTicket(step *runModel.Step, ticketContext map[string]any) map[string]any {
 	failedStepInput := mapFromValue(ticketContext["failedStepInput"])
+	failedStepInputPkg := mapFromValue(failedStepInput["executionContextPackage"])
+	failedStepInputContext := mapFromValue(failedStepInput["executionContext"])
 	for _, source := range []map[string]any{
 		mapFromValue(failedStepInput["currentProgressDigest"]),
-		mapFromValue(mapFromValue(mapFromValue(failedStepInput["executionContextPackage"])["replanContinuation"])["currentProgressDigest"]),
-		mapFromValue(mapFromValue(mapFromValue(failedStepInput["executionContext"])["replanContinuation"])["currentProgressDigest"]),
+		replanContinuationCurrentProgressDigest(failedStepInputPkg),
+		replanContinuationCurrentProgressDigest(failedStepInputContext),
 	} {
 		if repairProgressDigestIsInformative(source) {
 			return compactLLMContextMap(source, 0)

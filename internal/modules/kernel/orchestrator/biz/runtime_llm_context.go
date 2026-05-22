@@ -126,6 +126,39 @@ func compactReplanContinuationForRuntimeContext(input map[string]any) map[string
 	return stripRuntimeLLMBinding(ret)
 }
 
+func compactHistoricalReplanContinuationForRuntimeContext(input map[string]any) map[string]any {
+	ret := compactReplanContinuationForRuntimeContext(input)
+	if len(ret) == 0 {
+		return nil
+	}
+	ret["historicalOnly"] = true
+	ret["supersededBy"] = "rejectedResultContinuation"
+	ret["useAsCurrentProgress"] = false
+	delete(ret, stepInputKeyProcessEvidenceTimeline)
+	delete(ret, stepInputKeyCurrentProgressDigest)
+	return ret
+}
+
+func inheritedContinuationProcessEvidence(executionContext map[string]any) ([]map[string]any, map[string]any) {
+	if timeline, digest := inheritedRejectedResultProcessEvidence(executionContext); len(timeline) > 0 {
+		return timeline, digest
+	}
+	return inheritedReplanProcessEvidence(executionContext)
+}
+
+func inheritedRejectedResultProcessEvidence(executionContext map[string]any) ([]map[string]any, map[string]any) {
+	continuation := mapFromValue(executionContext["rejectedResultContinuation"])
+	if len(continuation) == 0 {
+		return nil, nil
+	}
+	timeline := processEvidenceTimelineFromRejectedResultContinuation(continuation)
+	if len(timeline) == 0 {
+		return nil, nil
+	}
+	digest := currentProgressDigestFromRejectedResultContinuation(continuation, timeline)
+	return compactProcessEvidenceTimelineForRuntimeContext(timeline), digest
+}
+
 func inheritedReplanProcessEvidence(executionContext map[string]any) ([]map[string]any, map[string]any) {
 	replan := mapFromValue(executionContext["replanContinuation"])
 	if len(replan) == 0 {
@@ -143,6 +176,64 @@ func inheritedReplanProcessEvidence(executionContext map[string]any) ([]map[stri
 		digest = currentProgressDigestFromProcessEvidenceTimeline(timeline)
 	}
 	return compactProcessEvidenceTimelineForRuntimeContext(timeline), digest
+}
+
+func processEvidenceTimelineFromRejectedResultContinuation(continuation map[string]any) []map[string]any {
+	if len(continuation) == 0 {
+		return nil
+	}
+	sourceRef := firstNonEmptyString(stringFromMap(continuation, "sourceRef"), stringFromMap(continuation, "resultId"))
+	item := map[string]any{
+		"order":      1,
+		"sourceRef":  firstNonEmptyString(sourceRef, "rejectedResultContinuation"),
+		"kind":       "result/rejected",
+		"actionKind": "result_assessment",
+		"state":      string(common.ResultStateRejected),
+	}
+	if summary := strings.TrimSpace(stringFromMap(continuation, "summary")); summary != "" {
+		item["summary"] = summary
+		item["failureReason"] = summary
+	}
+	if evidence := stringSliceFromValue(continuation["requiredEvidence"]); len(evidence) > 0 {
+		item["requiredEvidence"] = limitedStrings(evidence, 8)
+	}
+	if refs := stringSliceFromValue(continuation["resultEvidenceRefs"]); len(refs) > 0 {
+		item["evidenceRefs"] = limitedStrings(refs, 8)
+	}
+	return []map[string]any{item}
+}
+
+func currentProgressDigestFromRejectedResultContinuation(continuation map[string]any, timeline []map[string]any) map[string]any {
+	if len(continuation) == 0 {
+		return nil
+	}
+	required := stringSliceFromValue(continuation["requiredEvidence"])
+	currentGap := firstNonEmptyString(strings.Join(required, "\n"), stringFromMap(continuation, "summary"), stringFromMap(continuation, "goalOutcome"))
+	if strings.TrimSpace(currentGap) == "" {
+		return nil
+	}
+	lastFailure := map[string]any{
+		"kind":             "result/rejected",
+		"state":            string(common.ResultStateRejected),
+		"failureClass":     "rejected_result_continuation",
+		"failureReason":    truncateLLMContextString(currentGap),
+		"source":           "rejectedResultContinuation",
+		"evidenceValidity": "actionable_gap",
+	}
+	if sourceRef := firstNonEmptyString(stringFromMap(continuation, "sourceRef"), stringFromMap(continuation, "resultId")); sourceRef != "" {
+		lastFailure["sourceRef"] = sourceRef
+	}
+	if len(timeline) > 0 {
+		if stepID := strings.TrimSpace(stringFromMap(timeline[0], "stepId")); stepID != "" {
+			lastFailure["stepId"] = stepID
+		}
+	}
+	return map[string]any{
+		"currentGap":          truncateLLMContextString(currentGap),
+		"lastObservedFailure": lastFailure,
+		"nextRequiredAction":  "address_rejected_result_required_evidence",
+		"source":              "rejectedResultContinuation",
+	}
 }
 
 func processEvidenceTimelineFromReplanContinuation(replan map[string]any) []map[string]any {
@@ -235,6 +326,7 @@ func compactProcessEvidenceTimelineForRuntimeContext(input []map[string]any) []m
 			"failureClass",
 			"failureSignature",
 			"failureReason",
+			"requiredEvidence",
 			"outputRef",
 			"payloadRef",
 		} {

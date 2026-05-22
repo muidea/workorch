@@ -193,6 +193,11 @@ func TestRunExecutionContextPackageIncludesProcessEvidenceTimeline(t *testing.T)
 		Kind:  llmWorkspaceExecutionStepKind,
 		Input: map[string]any{
 			stepInputKeyRuntimeStage: "repair",
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustReturnValidJSON": true,
+				},
+			},
 		},
 	}
 
@@ -479,6 +484,11 @@ func TestRunExecutionContextPackageInheritsReplanProcessEvidence(t *testing.T) {
 		Kind:  llmWorkspaceExecutionStepKind,
 		Input: map[string]any{
 			stepInputKeyRuntimeStage: "repair",
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustReturnValidJSON": true,
+				},
+			},
 		},
 	}
 
@@ -492,6 +502,76 @@ func TestRunExecutionContextPackageInheritsReplanProcessEvidence(t *testing.T) {
 	}
 	if digest := mapFromValue(current.Input[stepInputKeyCurrentProgressDigest]); digest["currentGap"] != "patch failed" {
 		t.Fatalf("currentProgressDigest = %+v, want inherited predecessor digest", digest)
+	}
+}
+
+func TestRunExecutionContextPackageRejectedResultContinuationSupersedesReplanProgress(t *testing.T) {
+	ctx := context.Background()
+	run := &runmodel.Run{
+		ID:          "run-process-context-rejected-result",
+		WorkspaceID: "ws-process-context-rejected-result",
+		ExecutionContext: map[string]any{
+			"rejectedResultContinuation": map[string]any{
+				"predecessorRunId": "run-latest",
+				"resultId":         "run-latest/result/dod-assessment",
+				"sourceRef":        "run-latest/repair-001",
+				"summary":          "latest rejected result requires current resource evidence",
+				"requiredEvidence": []string{
+					"read current implementation resource",
+					"patch implementation resource",
+					"run bounded verification",
+				},
+			},
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-older",
+				"failureContext": map[string]any{
+					"failedStepId":   "run-older/graph-001/001-patch",
+					"failedStepKind": "patch/apply",
+					"failureClass":   failureClassPatchApply,
+					"failedStepOutput": map[string]any{
+						"reason": "older patch hunk mismatch",
+					},
+				},
+			},
+		},
+	}
+	current := &runmodel.Step{
+		ID:    "run-process-context-rejected-result/step-1",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: "repair",
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustReturnValidJSON": true,
+				},
+			},
+		},
+	}
+
+	orch := &RuntimeOrchestrator{steps: memrepo.NewStepRepository()}
+	orch.enrichLLMStepInputContext(ctx, run, current, nil)
+
+	digest := mapFromValue(current.Input[stepInputKeyCurrentProgressDigest])
+	if !strings.Contains(stringFromMap(digest, "currentGap"), "read current implementation resource") {
+		t.Fatalf("currentProgressDigest = %+v, want rejected result required evidence as current gap", digest)
+	}
+	if strings.Contains(stringFromMap(digest, "currentGap"), "older patch hunk mismatch") {
+		t.Fatalf("currentProgressDigest = %+v, want older replan failure suppressed", digest)
+	}
+	pkg := mapFromValue(current.Input[stepInputKeyExecutionContextPackage])
+	replan := mapFromValue(pkg["replanContinuation"])
+	if replan["historicalOnly"] != true || replan["useAsCurrentProgress"] != false {
+		t.Fatalf("replanContinuation = %+v, want historical-only marker when rejected result exists", replan)
+	}
+	timeline := mapSliceFromValue(pkg[stepInputKeyProcessEvidenceTimeline])
+	if len(timeline) != 1 || timeline[0]["kind"] != "result/rejected" {
+		t.Fatalf("processEvidenceTimeline = %+v, want rejected result synthetic evidence", timeline)
+	}
+	repairActionPackage := mapFromValue(current.Input["repairActionPackage"])
+	currentFailure := mapFromValue(repairActionPackage["currentFailure"])
+	if currentFailure["evidenceValidity"] != "actionable_gap" || !strings.Contains(stringFromMap(currentFailure, "reason"), "patch implementation resource") {
+		t.Fatalf("repairActionPackage.currentFailure = %+v, want promoted rejected-result actionable gap", currentFailure)
 	}
 }
 
