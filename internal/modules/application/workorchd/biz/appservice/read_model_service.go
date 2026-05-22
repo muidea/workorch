@@ -16,6 +16,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -812,6 +813,7 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		Steps:              stepViews,
 		ToolCalls:          mapToolCalls(toolCalls),
 		Patches:            mapPatches(patches),
+		GitOperations:      mapGitOperationTraces(stepViews),
 		WebSources:         mapWebSourceTraces(stepViews),
 		LLMContextBudgets:  mapLLMContextBudgetTraces(stepViews),
 		LLMUsageTraces:     mapLLMUsageTracesFromEventRecords(mapEventRecords(llmUsageEventRecords), string(item.ID)),
@@ -1842,6 +1844,73 @@ func mapWebSourceTraces(steps []presenter.StepView) []WebSourceTrace {
 				ret = append(ret, trace)
 			}
 		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func mapGitOperationTraces(steps []presenter.StepView) []GitOperationTrace {
+	if len(steps) == 0 {
+		return nil
+	}
+	ret := make([]GitOperationTrace, 0)
+	for _, step := range steps {
+		if step.Kind != gitcommon.StepKindRead && step.Kind != gitcommon.StepKindWrite {
+			continue
+		}
+		if len(step.Output) == 0 {
+			continue
+		}
+		commit := readModelMapValue(step.Output["commit"])
+		ret = append(ret, GitOperationTrace{
+			StepID:           step.ID,
+			Kind:             step.Kind,
+			Operation:        readModelStringValue(step.Output["operation"]),
+			Status:           readModelStringValue(step.Output["status"]),
+			RepoRoot:         readModelStringValue(step.Output["repoRoot"]),
+			WorkingDir:       readModelStringValue(step.Output["workingDir"]),
+			Branch:           readModelStringValue(step.Output["branch"]),
+			HeadCommit:       readModelStringValue(step.Output["headCommit"]),
+			HeadCommitBefore: readModelStringValue(step.Output["headCommitBefore"]),
+			HeadCommitAfter:  readModelStringValue(step.Output["headCommitAfter"]),
+			CommitHash:       readModelStringValue(commit["hash"]),
+			CommitSubject:    readModelStringValue(commit["subject"]),
+			ChangedFiles:     mapGitChangedFiles(step.Output["changedFiles"]),
+			StagedFiles:      mapGitChangedFiles(step.Output["stagedFiles"]),
+			Truncated:        readModelBoolValue(step.Output["truncated"]),
+			ZeroWork:         readModelBoolValue(step.Output["zeroWork"]),
+			ErrorCode:        readModelStringValue(step.Output["errorCode"]),
+			Summary:          readModelStringValue(step.Output["summary"]),
+			EvidenceRefs:     []string{step.ID},
+		})
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func mapGitChangedFiles(value any) []GitChangedFile {
+	items := readModelMapSliceValue(value)
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]GitChangedFile, 0, len(items))
+	for _, item := range items {
+		path := readModelStringValue(item["path"])
+		if path == "" {
+			continue
+		}
+		ret = append(ret, GitChangedFile{
+			Path:      path,
+			OldPath:   readModelStringValue(item["oldPath"]),
+			Status:    readModelStringValue(item["status"]),
+			Staged:    readModelBoolValue(item["staged"]),
+			Unstaged:  readModelBoolValue(item["unstaged"]),
+			Untracked: readModelBoolValue(item["untracked"]),
+		})
 	}
 	if len(ret) == 0 {
 		return nil
@@ -4359,6 +4428,7 @@ func mapRunObservability(snapshot RunSnapshot) RunObservability {
 		LLMUsageTraces:       snapshot.LLMUsageTraces,
 		LLMUsageSummary:      snapshot.LLMUsageSummary,
 		MemoryRecallTraces:   snapshot.MemoryRecallTraces,
+		GitOperations:        snapshot.GitOperations,
 		WebSources:           snapshot.WebSources,
 		ClosureTraces:        snapshot.ClosureTraces,
 		DoDEvidence:          snapshot.DoDEvidence,

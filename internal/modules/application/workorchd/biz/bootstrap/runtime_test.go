@@ -11,6 +11,7 @@ import (
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
+	gitmodule "github.com/muidea/workorch/internal/modules/blocks/git"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
@@ -100,6 +101,7 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 		echoRuntimeAdapter{},
 		echoRuntimeAdapter{},
 		echoRuntimeAdapter{},
+		echoRuntimeAdapter{},
 	)
 	if err != nil {
 		t.Fatalf("build registry: %v", err)
@@ -109,6 +111,8 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 		filemodule.StepKindList,
 		filemodule.StepKindRead,
 		filemodule.StepKindEdit,
+		gitmodule.StepKindRead,
+		gitmodule.StepKindWrite,
 		shellmodule.StepKindCommand,
 		sshmodule.StepKindCommand,
 		webmodule.StepKindSearch,

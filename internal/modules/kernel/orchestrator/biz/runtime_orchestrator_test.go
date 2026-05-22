@@ -18,6 +18,7 @@ import (
 	"time"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpblockbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
 	mcpblockcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
@@ -21411,6 +21412,116 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludeWebSourceIndex(t *testing.T) 
 	}
 	if strings.Contains(memories[0].Content, "Download Go") {
 		t.Fatalf("memory content = %q, must not store raw search snippet/page body", memories[0].Content)
+	}
+}
+
+func TestRuntimeOrchestrator_ResultArtifactsIncludeGitOperationIndex(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-git-result-artifact")
+	runID := common.RunID("run-git-result-artifact")
+	stepID := common.StepID("step-dod-git")
+	gitStepID := common.StepID("step-git-commit")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-git-result-artifact",
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}
+	step := &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+	}
+	stepRepo := memory.NewStepRepository()
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    gitStepID,
+		RunID: runID,
+		Kind:  gitcommon.StepKindWrite,
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"operation":        "commit",
+			"status":           "completed",
+			"branch":           "feature/builtin-git-tool",
+			"headCommitBefore": "1111111111111111111111111111111111111111",
+			"headCommitAfter":  "2222222222222222222222222222222222222222",
+			"summary":          "created commit 222222222222",
+			"commit": map[string]any{
+				"hash":    "2222222222222222222222222222222222222222",
+				"subject": "Add builtin git tool",
+			},
+			"changedFiles": []map[string]any{{
+				"path":   "docs/workspace-builtin-git-tool-capability-plan.md",
+				"status": "modified",
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("seed git step: %v", err)
+	}
+	assessment := map[string]any{
+		"satisfied": true,
+		"items": []map[string]any{{
+			"item":         "git commit is recorded",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(gitStepID)},
+		}},
+		"summary":               "DoD satisfied with git evidence",
+		"implementationSummary": "Committed the implementation.",
+		"verificationSummary":   "Git evidence was indexed.",
+	}
+	artifactRepo := memory.NewArtifactRepository()
+	resultRepo := memory.NewResultRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			Results:   resultRepo,
+			Artifacts: artifactRepo,
+		},
+	}
+
+	if err := orch.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied with git evidence", nil); err != nil {
+		t.Fatalf("record result from validated assessment: %v", err)
+	}
+	results, err := resultRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list results: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %+v, want one accepted result", results)
+	}
+	if !reflect.DeepEqual(results[0].ArtifactRefs, []common.ArtifactID{
+		common.ArtifactID(string(runID) + "/artifact/result-summary"),
+		common.ArtifactID(string(runID) + "/artifact/deliverable-manifest"),
+		common.ArtifactID(string(runID) + "/artifact/git-operation-index"),
+	}) {
+		t.Fatalf("result artifact refs = %+v, want summary, manifest and git operation index", results[0].ArtifactRefs)
+	}
+	artifacts, err := artifactRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	}
+	var gitArtifact *resultmodel.Artifact
+	var summaryArtifact *resultmodel.Artifact
+	for _, artifact := range artifacts {
+		switch artifact.ID {
+		case common.ArtifactID(string(runID) + "/artifact/git-operation-index"):
+			gitArtifact = artifact
+		case common.ArtifactID(string(runID) + "/artifact/result-summary"):
+			summaryArtifact = artifact
+		}
+	}
+	if gitArtifact == nil ||
+		gitArtifact.Category != resultcommon.ArtifactCategoryRuntimeEvidence ||
+		gitArtifact.ArtifactType != resultcommon.ArtifactTypeReport ||
+		!reflect.DeepEqual(gitArtifact.EvidenceRefs, []string{string(gitStepID)}) {
+		t.Fatalf("git artifact = %+v, want git operation report linked to git evidence", gitArtifact)
+	}
+	for _, want := range []string{"Git Operation Index", "git/write", "commit", "feature/builtin-git-tool", "222222222222", "docs/workspace-builtin-git-tool-capability-plan.md"} {
+		if !strings.Contains(gitArtifact.Summary, want) {
+			t.Fatalf("git artifact missing %q:\n%s", want, gitArtifact.Summary)
+		}
+	}
+	if summaryArtifact == nil || !strings.Contains(summaryArtifact.Summary, string(gitArtifact.ID)) {
+		t.Fatalf("summary artifact = %+v, want git operation artifact ref", summaryArtifact)
 	}
 }
 

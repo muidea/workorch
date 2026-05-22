@@ -52,6 +52,8 @@ type Helper interface {
 	SetFileRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
 	ShellRuntimeAdapter() orchestratorbiz.RuntimeAdapter
 	SetShellRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
+	GitRuntimeAdapter() orchestratorbiz.RuntimeAdapter
+	SetGitRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
 	SSHRuntimeAdapter() orchestratorbiz.RuntimeAdapter
 	SetSSHRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
 	WebRuntimeAdapter() orchestratorbiz.RuntimeAdapter

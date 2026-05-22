@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
+	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
@@ -240,6 +241,40 @@ var _ repository.DecisionResolutionRepository = (*blockingDecisionResolutionRepo
 func TestReadRunSnapshotWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing.T) {
 	if _, err := ReadRunSnapshotWithSession(context.Background(), nil, "run-1"); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid argument", err)
+	}
+}
+
+func TestMapGitOperationTracesProjectsStructuredOutput(t *testing.T) {
+	traces := mapGitOperationTraces([]presenter.StepView{
+		{
+			ID:   "step-git-commit",
+			Kind: gitcommon.StepKindWrite,
+			Output: map[string]any{
+				"status":           "completed",
+				"operation":        "commit",
+				"branch":           "main",
+				"headCommitBefore": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"headCommitAfter":  "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				"commit": map[string]any{
+					"hash":    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+					"subject": "docs: update",
+				},
+				"changedFiles": []any{
+					map[string]any{"path": "docs/design.md", "status": "modified", "staged": true},
+				},
+				"summary": "git commit completed",
+			},
+		},
+	})
+	if len(traces) != 1 {
+		t.Fatalf("git traces = %+v, want one trace", traces)
+	}
+	trace := traces[0]
+	if trace.Operation != "commit" || trace.CommitHash == "" || trace.ChangedFiles[0].Path != "docs/design.md" {
+		t.Fatalf("git trace = %+v, want commit projection with changed file", trace)
+	}
+	if len(trace.EvidenceRefs) != 1 || trace.EvidenceRefs[0] != "step-git-commit" {
+		t.Fatalf("evidence refs = %+v, want step ref", trace.EvidenceRefs)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
+	gitmodule "github.com/muidea/workorch/internal/modules/blocks/git"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
@@ -70,6 +71,8 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 	}
 	fileModule := filemodule.New()
 	mustSetup("file", fileModule.Setup())
+	gitModule := gitmodule.New()
+	mustSetup("git", gitModule.Setup())
 	shellModule := shellmodule.New()
 	mustSetup("shell", shellModule.Setup())
 	sshModule := sshmodule.New()
@@ -136,6 +139,7 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 	orchestratorModule := orchestratormodule.New()
 	runtimeRegistry, err := buildRuntimeAdapterRegistry(
 		fileModule.RuntimeAdapter(),
+		gitModule.RuntimeAdapter(),
 		shellModule.RuntimeAdapter(),
 		sshModule.RuntimeAdapter(),
 		webModule.RuntimeAdapter(),
@@ -204,6 +208,7 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 
 	modules := []lifecycle{
 		fileModule,
+		gitModule,
 		shellModule,
 		sshModule,
 		webModule,
@@ -280,6 +285,7 @@ func mustSetup(name string, err error) {
 
 func buildRuntimeAdapterRegistry(
 	fileAdapter orchestratorbiz.RuntimeAdapter,
+	gitAdapter orchestratorbiz.RuntimeAdapter,
 	shellAdapter orchestratorbiz.RuntimeAdapter,
 	sshAdapter orchestratorbiz.RuntimeAdapter,
 	webAdapter orchestratorbiz.RuntimeAdapter,
@@ -294,6 +300,16 @@ func buildRuntimeAdapterRegistry(
 	} {
 		if err := runtimeRegistry.Register(stepKind, fileAdapter); err != nil {
 			return nil, err
+		}
+	}
+	if gitAdapter != nil {
+		for _, stepKind := range []string{
+			gitmodule.StepKindRead,
+			gitmodule.StepKindWrite,
+		} {
+			if err := runtimeRegistry.Register(stepKind, gitAdapter); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := runtimeRegistry.Register(shellmodule.StepKindCommand, shellAdapter); err != nil {

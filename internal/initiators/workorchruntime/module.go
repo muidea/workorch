@@ -38,6 +38,7 @@ type Runtime struct {
 	eventHub            workorchevents.Hub
 	fileRuntimeAdapter  orchestratorbiz.RuntimeAdapter
 	shellRuntimeAdapter orchestratorbiz.RuntimeAdapter
+	gitRuntimeAdapter   orchestratorbiz.RuntimeAdapter
 	sshRuntimeAdapter   orchestratorbiz.RuntimeAdapter
 	webRuntimeAdapter   orchestratorbiz.RuntimeAdapter
 	mcpRuntimeAdapter   orchestratorbiz.RuntimeAdapter
@@ -92,6 +93,7 @@ func (r *Runtime) Teardown(_ context.Context) {
 	r.eventHub = nil
 	r.fileRuntimeAdapter = nil
 	r.shellRuntimeAdapter = nil
+	r.gitRuntimeAdapter = nil
 	r.sshRuntimeAdapter = nil
 	r.webRuntimeAdapter = nil
 	r.mcpRuntimeAdapter = nil
@@ -144,6 +146,19 @@ func (r *Runtime) ShellRuntimeAdapter() orchestratorbiz.RuntimeAdapter {
 func (r *Runtime) SetShellRuntimeAdapter(adapter orchestratorbiz.RuntimeAdapter) {
 	if r != nil {
 		r.shellRuntimeAdapter = adapter
+	}
+}
+
+func (r *Runtime) GitRuntimeAdapter() orchestratorbiz.RuntimeAdapter {
+	if r == nil {
+		return nil
+	}
+	return r.gitRuntimeAdapter
+}
+
+func (r *Runtime) SetGitRuntimeAdapter(adapter orchestratorbiz.RuntimeAdapter) {
+	if r != nil {
+		r.gitRuntimeAdapter = adapter
 	}
 }
 
