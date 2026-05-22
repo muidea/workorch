@@ -18613,6 +18613,137 @@ func TestValidateLLMExecutionOutputContractAllowsPatchScopedVerificationForScope
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsCurrentFailureDiagnosticsForStateChangingRepair(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-current-failure-diagnostics",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-current-failure-diagnostics/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failedStepId":                    "run-current-failure-diagnostics/graph-001/002-verify",
+			"failureTargetScope":              "failureTargets=main.go",
+			"currentFailure": map[string]any{
+				"failedStepId":     "run-current-failure-diagnostics/graph-001/002-verify",
+				"failedStepKind":   "shell/command",
+				"failureClass":     failureClassShellCommand,
+				"failureSignature": "class=shell_command_failed|kind=shell/command|node=verify|failureTargets=main.go",
+				"reason":           "test output contains failure markers",
+			},
+			"repairActionPackage": map[string]any{
+				"currentFailure": map[string]any{
+					"failureClass":     failureClassShellCommand,
+					"failureSignature": "class=shell_command_failed|kind=shell/command|node=verify|failureTargets=main.go",
+					"reason":           "test output contains failure markers",
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-main",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef": "main.go",
+						"patchType": "file_write",
+						"baseHash":  "hash",
+						"content":   "package main\n",
+					},
+				},
+				{
+					"id":        "verify-main",
+					"kind":      "shell/command",
+					"dependsOn": []string{"patch-main"},
+					"input": map[string]any{
+						"command":               "go",
+						"args":                  []string{"test", "./..."},
+						"relatedFailureTargets": []string{"main.go"},
+						"verificationScope":     "main.go",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want currentFailure diagnostics accepted", err)
+	}
+}
+
+func TestCompactReplanContinuationOmitsRawOutputContent(t *testing.T) {
+	rawContent := strings.Repeat("package main\n", 1000)
+	compacted := compactReplanContinuationForRuntimeContext(map[string]any{
+		"failureContext": map[string]any{
+			"failedStepId":     "run-replan/graph-001/001-patch",
+			"failedStepKind":   "patch/apply",
+			"failureClass":     failureClassPatchApply,
+			"failureSignature": "class=patch_apply_failed|targetRef=main.go",
+			"failedStepOutput": map[string]any{
+				"status":  "completed",
+				"error":   "patch failed",
+				"content": rawContent,
+				stepOutputKeyExecutionGraph: map[string]any{
+					"nodes": []map[string]any{
+						{
+							"id":   "rewrite-main",
+							"kind": "patch/apply",
+							"input": map[string]any{
+								"targetRef": "main.go",
+								"content":   rawContent,
+							},
+						},
+					},
+				},
+				"patches": []map[string]any{
+					{
+						"targetRef": "main.go",
+						"patchType": "file_write",
+						"content":   rawContent,
+						"diff":      rawContent,
+						"summary":   "rewrite main",
+					},
+				},
+			},
+		},
+		stepInputKeyProcessEvidenceTimeline: []map[string]any{
+			{
+				"sourceRef": "step://run-replan/graph-001/001-patch",
+				"kind":      "patch/apply",
+				"state":     string(common.StepStateFailed),
+				"output": map[string]any{
+					"content": rawContent,
+					"patches": []map[string]any{
+						{"targetRef": "main.go", "content": rawContent, "diff": rawContent},
+					},
+				},
+			},
+		},
+	})
+
+	encoded, err := json.Marshal(compacted)
+	if err != nil {
+		t.Fatalf("marshal compacted replan continuation: %v", err)
+	}
+	text := string(encoded)
+	for _, forbidden := range []string{"content", "executionGraph", rawContent[:64]} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("compacted replan continuation retained %q: %s", forbidden, text)
+		}
+	}
+	if !strings.Contains(text, "targetRef") {
+		t.Fatalf("compacted replan continuation lost patch metadata: %s", text)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsUnboundedVerificationForScopedStateChangingRepairWithoutScopeLink(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-unbounded-verification-without-scope-link",

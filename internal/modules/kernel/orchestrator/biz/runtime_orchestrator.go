@@ -1700,26 +1700,7 @@ func validateRuntimeRepairFailureDiagnosticsContract(step *runModel.Step) error 
 		strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRepairOfStepID)) == "" {
 		return nil
 	}
-	diagnostics := mapFromValue(step.Input["lastFailureDiagnostics"])
-	if len(diagnostics) == 0 {
-		failedOutput := mapFromValue(step.Input["failedStepOutput"])
-		if len(failedOutput) > 0 {
-			diagnostics = map[string]any{
-				"failureSignature": firstNonEmptyString(
-					stringFromMap(step.Input, failureOutputKeySignature),
-					stringFromMap(failedOutput, failureOutputKeySignature),
-				),
-				"failureClass": firstNonEmptyString(
-					stringFromMap(step.Input, failureOutputKeyClass),
-					stringFromMap(failedOutput, failureOutputKeyClass),
-				),
-				"error": firstNonEmptyString(
-					stringFromMap(failedOutput, "error"),
-					stringFromMap(failedOutput, "reason"),
-				),
-			}
-		}
-	}
+	diagnostics := runtimeRepairFailureDiagnosticsFromInput(step.Input)
 	if strings.TrimSpace(firstNonEmptyString(
 		stringFromMap(diagnostics, "failureSignature"),
 		stringFromMap(diagnostics, "failureClass"),
@@ -1728,6 +1709,54 @@ func validateRuntimeRepairFailureDiagnosticsContract(step *runModel.Step) error 
 		return fmt.Errorf("%w: state-changing runtime repair requires lastFailureDiagnostics or equivalent failedStepOutput diagnostics", common.ErrInvalidArgument)
 	}
 	return nil
+}
+
+func runtimeRepairFailureDiagnosticsFromInput(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	for _, candidate := range []map[string]any{
+		mapFromValue(input["lastFailureDiagnostics"]),
+		mapFromValue(input["failedStepOutput"]),
+		mapFromValue(input["currentFailure"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])["currentFailure"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])["lastFailureDiagnostics"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])["lastObservedFailure"]),
+		mapFromValue(mapFromValue(input["currentProgressDigest"])["lastObservedFailure"]),
+	} {
+		if runtimeRepairDiagnosticsHasSignal(candidate) {
+			return map[string]any{
+				"failureSignature": firstNonEmptyString(
+					stringFromMap(candidate, failureOutputKeySignature),
+					stringFromMap(input, failureOutputKeySignature),
+				),
+				"failureClass": firstNonEmptyString(
+					stringFromMap(candidate, failureOutputKeyClass),
+					stringFromMap(input, failureOutputKeyClass),
+				),
+				"error": firstNonEmptyString(
+					stringFromMap(candidate, "error"),
+					stringFromMap(candidate, "reason"),
+					stringFromMap(candidate, "failureReason"),
+					stringFromMap(input, "failureReason"),
+				),
+			}
+		}
+	}
+	return nil
+}
+
+func runtimeRepairDiagnosticsHasSignal(diagnostics map[string]any) bool {
+	if len(diagnostics) == 0 {
+		return false
+	}
+	return strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(diagnostics, failureOutputKeySignature),
+		stringFromMap(diagnostics, failureOutputKeyClass),
+		stringFromMap(diagnostics, "error"),
+		stringFromMap(diagnostics, "reason"),
+		stringFromMap(diagnostics, "failureReason"),
+	)) != ""
 }
 
 func validateLLMSoulGraphCapabilityContract(run *runModel.Run, step *runModel.Step, output map[string]any) error {

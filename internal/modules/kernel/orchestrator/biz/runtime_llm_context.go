@@ -192,7 +192,7 @@ func processEvidenceTimelineFromReplanContinuation(replan map[string]any) []map[
 		}
 	}
 	if output := mapFromValue(failureContext["failedStepOutput"]); len(output) > 0 {
-		item["output"] = compactStepOutputForLLMContext(output)
+		item["output"] = compactFailureStepOutputForRuntimeContext(output)
 		if summary := processEvidenceOutputSummary(output); summary != "" {
 			item["summary"] = summary
 			item["outputSummary"] = summary
@@ -246,7 +246,7 @@ func compactProcessEvidenceTimelineForRuntimeContext(input []map[string]any) []m
 			next["evidenceRefs"] = refs
 		}
 		if output := mapFromValue(item["output"]); len(output) > 0 {
-			next["output"] = compactStepOutputForLLMContext(output)
+			next["output"] = compactFailureStepOutputForRuntimeContext(output)
 		}
 		if len(next) > 0 {
 			ret = append(ret, next)
@@ -397,12 +397,117 @@ func compactFailureContextForRuntimeContext(input map[string]any) map[string]any
 		}
 	}
 	if failedOutput := mapFromValue(input["failedStepOutput"]); len(failedOutput) > 0 {
-		ret["failedStepOutput"] = compactStepOutputForLLMContext(failedOutput)
+		ret["failedStepOutput"] = compactFailureStepOutputForRuntimeContext(failedOutput)
 	}
 	if targets := compactRepairTargetSnapshotsForLineage(input); len(targets) > 0 {
 		ret["targetSnapshots"] = targets
 	}
 	return stripRuntimeLLMBinding(ret)
+}
+
+func compactFailureStepOutputForRuntimeContext(output map[string]any) map[string]any {
+	if len(output) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"status",
+		"stage",
+		"error",
+		"reason",
+		"summary",
+		failureOutputKeyClass,
+		failureOutputKeySignature,
+		"failureCategory",
+		"failureTargetScope",
+		"exitCode",
+		"command",
+		"timeoutMillis",
+		"workingDir",
+	} {
+		if value, ok := output[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	for _, key := range []string{"stdout", "stderr", "stdoutPreview", "stderrPreview"} {
+		if value := strings.TrimSpace(stringFromMap(output, key)); value != "" {
+			targetKey := key
+			if !strings.HasSuffix(key, "Preview") {
+				targetKey = key + "Preview"
+			}
+			ret[targetKey] = truncateLLMEvidenceText(value)
+		}
+	}
+	if args := stringSliceFromValue(output["args"]); len(args) > 0 {
+		ret["args"] = args
+	}
+	if diagnostics := mapFromValue(output["lastFailureDiagnostics"]); len(diagnostics) > 0 {
+		ret["lastFailureDiagnostics"] = compactFailureStepOutputForRuntimeContext(diagnostics)
+	}
+	if patches := mapSliceFromValue(output["patches"]); len(patches) > 0 {
+		ret["patches"] = compactPatchMetadataForRuntimeContext(patches)
+	}
+	if stream := mapFromValue(output["streamDiagnostics"]); len(stream) > 0 {
+		ret["streamDiagnostics"] = compactRuntimeStreamDiagnostics(stream)
+	}
+	if _, ok := output["rawContentPreview"]; ok {
+		ret["rawContentPreviewOmitted"] = true
+	}
+	if _, ok := output["streamEvents"]; ok {
+		ret["streamEventsOmitted"] = true
+	}
+	return stripRuntimeLLMBinding(ret)
+}
+
+func compactPatchMetadataForRuntimeContext(patches []map[string]any) []map[string]any {
+	if len(patches) == 0 {
+		return nil
+	}
+	limit := min(len(patches), maxLLMContextSliceItems)
+	ret := make([]map[string]any, 0, limit)
+	for idx := 0; idx < limit; idx++ {
+		patch := patches[idx]
+		next := map[string]any{}
+		for _, key := range []string{
+			"targetRef",
+			"patchType",
+			"summary",
+			"baseHash",
+			"state",
+			"approvalId",
+			"addedLines",
+			"deletedLines",
+			"diffHash",
+		} {
+			if value, ok := patch[key]; ok && value != nil {
+				next[key] = compactLLMContextValue(value, 1)
+			}
+		}
+		if len(next) > 0 {
+			ret = append(ret, next)
+		}
+	}
+	return ret
+}
+
+func compactRuntimeStreamDiagnostics(stream map[string]any) map[string]any {
+	if len(stream) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"streaming",
+		"streamIncomplete",
+		"doneReceived",
+		"receivedBytes",
+		"receivedDeltaCount",
+		"receivedEventCount",
+	} {
+		if value, ok := stream[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	return ret
 }
 
 func compactRepairTargetSnapshotsForLineage(input map[string]any) []map[string]any {
@@ -699,6 +804,14 @@ func truncateLLMContextString(value string) string {
 		return value
 	}
 	return value[:maxLLMContextStringBytes] + "..."
+}
+
+func truncateLLMEvidenceText(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= maxLLMContextEvidenceTextBytes {
+		return value
+	}
+	return value[:maxLLMContextEvidenceTextBytes] + "..."
 }
 
 func isLargeEvidenceTextKey(key string) bool {

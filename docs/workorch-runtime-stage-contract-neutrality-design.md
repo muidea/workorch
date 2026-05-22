@@ -238,7 +238,7 @@ Runtime repair / duplicate / replan 治理必须同时识别两类中立 scope�
 - predecessor run ID。
 - 触发 replan 的 ticket / resolution 引用。
 - ticket reason 与 resolution payload。
-- 触发 replan 的 failure context，包括 failure class、failure signature、failure target scope、failed step id/kind、failed step output、最近 repair attempts 或可用摘要。
+- 触发 replan 的 failure context，包括 failure class、failure signature、failure target scope、failed step id/kind、failed step output summary、最近 repair attempts 或可用摘要。
 - predecessor run 的中立过程证据摘要，包括 `processEvidenceTimeline` 与 `currentProgressDigest`。该摘要必须保留最近有效动作、最近失败、当前缺口和下一步要求，且每条 evidence 必须带 `sourceRef` / step ref。
 
 已 resolved 的 `replan` 决策是 run 级恢复信号。若 run 仍处于 `running` 且没有 active blocker，runtime resume 不得只检查当前 terminal step 是否直接绑定该 ticket；当 resolved replan ticket 绑定的 step 仍是当前 run 内的 failed step 时，即使后续存在同 lineage 的并行失败分支、provider retry 分支或辅助失败步骤，也必须创建 successor run 或显式终态化，不得保持 `running` 空转。
@@ -247,7 +247,7 @@ Successor 的首个 LLM step 不应只知道“需要重规划”。它必须获
 
 若 successor run 刚创建、当前 run 尚无 completed / failed step，`executionContextPackage` 必须从 `replanContinuation` 继承 predecessor 的 `processEvidenceTimeline` / `currentProgressDigest`。不得因为 successor run 本地历史为空，就把首个 repair LLM step 降级为无过程证据的普通重新规划。
 
-`governanceHistory`、`replanContinuation.failureContext`、`replanContinuation.ticketContext`、`replanContinuation.processEvidenceTimeline` 必须是 summary/ref-only lineage。允许保留 failure class、signature、target scope、failed step id/kind、attempts、recovery policy、failed step output summary、target snapshot metadata、ticket/resolution refs、人工决议摘要与过程证据摘要；禁止携带 `failedStepInput`、完整 `executionContext`、完整 `executionGraph.nodes[].input.diff/content`、raw LLM stream、raw preview、provider/model 动态绑定、target snapshot `content`。若需要完整证据，必须通过 step/tool/LLM raw ref 按需读取。该规则是核心中立约束：它只约束运行态数据形态，不得引入具体应用领域判断。
+`governanceHistory`、`replanContinuation.failureContext`、`replanContinuation.ticketContext`、`replanContinuation.processEvidenceTimeline` 必须是 summary/ref-only lineage。允许保留 failure class、signature、target scope、failed step id/kind、attempts、recovery policy、failed step output summary、target snapshot metadata、ticket/resolution refs、人工决议摘要与过程证据摘要；禁止携带 `failedStepInput`、完整 `executionContext`、完整 `executionGraph.nodes[].input.diff/content`、raw LLM stream、raw preview、provider/model 动态绑定、target snapshot `content`、历史 step output 的 `content` / `patches[].content` / `patches[].diff`。若需要完整证据，必须通过 step/tool/LLM raw ref 按需读取。该规则是核心中立约束：它只约束运行态数据形态，不得引入具体应用领域判断。
 
 ### Rejected Result Continuation
 
@@ -989,6 +989,8 @@ Runtime 在 provider request 前必须执行 context gate，并得到唯一处�
 
 `runtime_repair_current_failure_missing` 只能在顶层输入和 `repairActionPackage.currentFailure`、`failedStepOutput`、`lastFailureDiagnostics`、replan/ticket context 中都无法找到当前失败时触发。若当前失败已存在于 package、process evidence 或 resolved context gate ticket 中，runtime 必须先 hydrate canonical repair context，而不是创建新的人工 decision ticket。
 
+State-changing repair 的失败诊断合同必须接受等价的 canonical failure 来源：`lastFailureDiagnostics`、`failedStepOutput`、顶层 `currentFailure`、`repairActionPackage.currentFailure`、`repairActionPackage.lastFailureDiagnostics`、`repairActionPackage.lastObservedFailure` 或 `currentProgressDigest.lastObservedFailure`。这些来源只要包含 failure class / signature / reason / error 中任一有效信号，就不得被误判为缺失 `lastFailureDiagnostics`；否则会把可行动验证失败错误转成 runtime 合同失败，并触发无意义的大上下文 repair 循环。
+
 若 `coverageRepairRequired` 已由 missingDoDItems / missingGoalCoverage / missingDeliverableCoverage 触发，但 `coverageTargetSet` 因预算整形或输入整理暂时缺失，runtime 应先自动从现有缺口事实补齐中立 `coverageTargetSet` 再重试；只有当前输入里确实没有任何可辨认的 coverage 缺口事实时，才允许 `coverage_repair_required_without_coverage_target_set` 进入 fail-fast 或 blocker 流程。
 
 Repair / replan continuation 的过程证据缺失也属于 P0-P4 必要字段缺失。若 provider input 显示当前是 `runtimeRepairFollowUp`、`stateChangingOutputRequired`、`runtimeStage=repair` 或带有 `replanContinuation`，但 `processEvidenceTimeline` / `currentProgressDigest` 不存在，context gate 必须输出 `runtime_repair_process_evidence_missing` 并 fail-fast；该失败不能交给普通 state-changing repair 处理。
@@ -1335,6 +1337,7 @@ raw ref 是稳定的逻辑定位，不是本地绝对路径。API 实现必须�
 - blocked run 在 ticket 提交后若短暂恢复又再次阻塞，必须通过 checkpoint / step output / latest ticket 定位新的失败原因，不得只依据“已提交”推断恢复成功。
 - replan continuation 若没有显式 `processEvidenceTimeline/currentProgressDigest`，runtime 必须从 `failureContext/ticketContext` 合成最小过程证据，确保 repair / strict convergence 阶段能够通过上下文门禁并看到当前失败面、失败步骤和下一步缺口。
 - Provider context gate 仍保持中立：repair / state-changing / replan continuation 必须带过程证据；证据可以来自真实 step timeline，也可以来自结构化 replan failure context 的中立投影。
+- replan continuation 的 step output 只能作为诊断摘要继承，保留 status / stage / error / reason / failure class / failure signature / stdout/stderr preview / patch metadata / stream diagnostics summary；禁止继承 raw `content`、完整 `executionGraph`、`llmDecision`、`patches[].content`、`patches[].diff`。否则 successor run 会把历史执行产物重复嵌入 prompt，造成 request JSON 膨胀、CPU/内存尖峰和上下文噪点。
 
 ## LLM Context Admission Contract
 
