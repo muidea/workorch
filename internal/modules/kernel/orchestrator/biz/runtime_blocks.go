@@ -130,7 +130,9 @@ func continuableDecisionShouldRepair(step *runModel.Step, spec runtimeDecisionBl
 		strings.TrimSpace(spec.DecisionKind) != decisioncommon.ResolutionTypeProvideMissingInfo {
 		return false
 	}
-	return continuableCandidateContext(spec.Context) || knownReadableWorkspaceResourceDecisionSpec(spec)
+	return continuableCandidateContext(spec.Context) ||
+		knownReadableWorkspaceResourceDecisionSpec(spec) ||
+		mechanicallyRepairableDecisionShouldRepair(step, spec)
 }
 
 func continuableCandidateContext(context map[string]any) bool {
@@ -140,6 +142,39 @@ func continuableCandidateContext(context map[string]any) bool {
 		}
 	}
 	return false
+}
+
+func mechanicallyRepairableDecisionShouldRepair(step *runModel.Step, spec runtimeDecisionBlockSpec) bool {
+	if !stateChangingRepairContractActive(step) {
+		return false
+	}
+	actionPackage := mapFromValue(step.Input["repairActionPackage"])
+	if !repairActionPackageRequiresStateChangingOutput(actionPackage) {
+		return false
+	}
+	if !stateChangingRepairHasConcreteTargetEvidence(step.Input, actionPackage) {
+		return false
+	}
+	if decisionBlockDeclaresExternalOrRuntimeDependency(spec.Context) {
+		return false
+	}
+	return true
+}
+
+func decisionBlockDeclaresExternalOrRuntimeDependency(context map[string]any) bool {
+	switch strings.TrimSpace(stringFromMap(context, decisionContextKeyScope)) {
+	case decisionContextScopeExternalDependency, decisionContextScopeWorkorchRuntime:
+		return true
+	}
+	switch strings.TrimSpace(stringFromMap(context, decisionContextKeyDependency)) {
+	case decisionContextDependencyLLMProvider, decisionContextDependencyContextGate:
+		return true
+	}
+	switch strings.TrimSpace(stringFromMap(context, decisionContextKeyRecoveryPolicy)) {
+	case decisionContextRecoveryPolicyConfigOnly, decisionContextRecoveryPolicyContext, decisionContextRecoveryPolicyRepairPlan:
+		return true
+	}
+	return decisionBlockRequiresRejectedResult(runtimeDecisionBlockSpec{Context: context})
 }
 
 func knownReadableWorkspaceResourceDecisionContext(context map[string]any) bool {

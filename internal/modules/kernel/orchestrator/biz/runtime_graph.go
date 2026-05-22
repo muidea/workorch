@@ -1015,6 +1015,7 @@ func (o *RuntimeOrchestrator) graphFollowUpStepInputFromSteps(run *runModel.Run,
 	input := graphFollowUpStepInput(run, step)
 	evidence := o.completedGraphEvidenceFromSteps(run, step, steps)
 	input = enrichGraphFollowUpInputWithEvidence(input, evidence)
+	input = restoreRepairContractAfterConcreteEvidenceAcquisition(input, step, evidence)
 	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
 }
 
@@ -1035,6 +1036,168 @@ func enrichGraphFollowUpInputWithEvidence(input map[string]any, evidence []map[s
 		input[stepInputKeyGraphCompletedNodes] = completed
 	}
 	return input
+}
+
+func restoreRepairContractAfterConcreteEvidenceAcquisition(input map[string]any, source *runModel.Step, evidence []map[string]any) map[string]any {
+	if len(input) == 0 || source == nil || source.Input == nil || !stepRequiresConcreteFailureEvidenceAcquisition(source) {
+		return input
+	}
+	snapshots := targetSnapshotsFromConcreteFailureEvidence(evidence)
+	sourcePackage := mapFromValue(source.Input["repairActionPackage"])
+	probe := cloneStepPayload(source.Input)
+	if probe == nil {
+		probe = map[string]any{}
+	}
+	if len(snapshots) > 0 {
+		probe["failureTargetRepairContext"] = snapshots
+	}
+	actionPackage := repairActionPackageForEvidenceAcquisitionFollowUp(probe, sourcePackage, snapshots)
+	if !stateChangingRepairHasConcreteTargetEvidence(probe, actionPackage) {
+		return input
+	}
+	input[stepInputKeySoulStage] = soulStageExecution
+	setRuntimeStage(input, runtimeStageRepair)
+	input[stepInputKeyRuntimeRepairFollowUp] = true
+	input["evidenceAcquisitionFollowUp"] = true
+	input["stateChangingOutputRequired"] = true
+	input["repairObjective"] = repairObjectiveStateChangingOutput
+	delete(input, "concreteFailureEvidenceRequired")
+	input["repairGuidance"] = appendRepairGuidance(stateChangingRepairGuidance(),
+		"Concrete failure evidence has been acquired; continue with a target-scoped state-changing repair or return a failed assessment/blocker if the evidence proves the target is not repairable.",
+		"Use concreteFailureEvidence and any targetSnapshots as current evidence; do not ask for an operator decision when the target, diagnostic, and output contract are already available.",
+	)
+	if len(evidence) > 0 {
+		input["concreteFailureEvidence"] = compactLLMContextValue(evidence, 1)
+	}
+	if len(snapshots) > 0 {
+		input["failureTargetRepairContext"] = snapshots
+	}
+	if value, ok := source.Input[failureOutputKeyClass]; ok && input[failureOutputKeyClass] == nil {
+		input[failureOutputKeyClass] = compactLLMContextValue(value, 1)
+	}
+	if value, ok := source.Input[failureOutputKeySignature]; ok && input[failureOutputKeySignature] == nil {
+		input[failureOutputKeySignature] = compactLLMContextValue(value, 1)
+	}
+	if value, ok := source.Input["failureTargetScope"]; ok && input["failureTargetScope"] == nil {
+		input["failureTargetScope"] = compactLLMContextValue(value, 1)
+	}
+	if signals := mapFromValue(sourcePackage["structuredFailureSignals"]); len(signals) > 0 && len(mapFromValue(input["structuredFailureSignals"])) == 0 {
+		input["structuredFailureSignals"] = compactLLMContextMap(signals, 1)
+	}
+	input["repairActionPackage"] = actionPackage
+	return input
+}
+
+func stepRequiresConcreteFailureEvidenceAcquisition(step *runModel.Step) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	if boolValue(step.Input["concreteFailureEvidenceRequired"]) {
+		return true
+	}
+	if strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) == repairObjectiveAcquireFailureEvidence {
+		return true
+	}
+	return repairActionPackageRequiresEvidenceAcquisition(mapFromValue(step.Input["repairActionPackage"]))
+}
+
+func targetSnapshotsFromConcreteFailureEvidence(evidence []map[string]any) []map[string]any {
+	seen := map[string]bool{}
+	var ret []map[string]any
+	for _, item := range evidence {
+		output := mapFromValue(item["output"])
+		if len(output) == 0 || strings.TrimSpace(stringFromMap(output, "stage")) != "file_read" || !boolValue(output["exists"]) {
+			continue
+		}
+		targetRef := strings.TrimSpace(stringFromMap(output, "path"))
+		if targetRef == "" || seen[targetRef] || boolValue(output["isBinary"]) {
+			continue
+		}
+		seen[targetRef] = true
+		snapshot := map[string]any{
+			"targetRef":        targetRef,
+			"exists":           true,
+			"contentHash":      stringFromMap(output, "contentHash"),
+			"content":          stringFromMap(output, "content"),
+			"size":             output["size"],
+			"source":           "concrete_failure_evidence",
+			"contentComplete":  !boolValue(output["truncated"]),
+			"safeForFileWrite": !boolValue(output["truncated"]) && !containsRuntimeRedactionMarker(stringFromMap(output, "content")),
+		}
+		if value, ok := output["truncated"]; ok {
+			snapshot["truncated"] = value
+		}
+		if value, ok := output["isBinary"]; ok {
+			snapshot["isBinary"] = value
+		}
+		ret = append(ret, repairActionTargetSnapshot(snapshot))
+		if len(ret) >= maxLLMContextSliceItems {
+			break
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func repairActionPackageForEvidenceAcquisitionFollowUp(input map[string]any, sourcePackage map[string]any, snapshots []map[string]any) map[string]any {
+	pkg := cloneStepPayload(sourcePackage)
+	if pkg == nil {
+		pkg = map[string]any{}
+	}
+	delete(pkg, "evidenceAcquisitionRequired")
+	delete(pkg, "evidenceAcquisitionReason")
+	required := stateChangingRepairRequiredOutput()
+	for key, value := range mapFromValue(pkg["requiredOutput"]) {
+		switch key {
+		case "mustReturnValidJSON", "mustNotReuseRejectedJSON", "forbiddenStalePatchReuse", "mustDeclareStrategyReassessmentFields", "strategyReassessmentRequiredFields", "strategyReassessmentMatchRule", "mustReassessRepeatedFailedSurface":
+			required[key] = value
+		}
+	}
+	if len(snapshots) > 0 {
+		existing := mapSliceFromValue(pkg["targetSnapshots"])
+		pkg["targetSnapshots"] = mergeRepairTargetSnapshots(existing, snapshots)
+		pkg["currentTargetSnapshots"] = repairActionTargetSnapshotMetadata(mapSliceFromValue(pkg["targetSnapshots"]))
+		required["mustTargetFailureScope"] = true
+		required["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
+		required["mustUseCurrentTargetSnapshot"] = true
+	}
+	pkg["requiredOutput"] = required
+	if targetSet := repairActionTargetSet(input, pkg); len(targetSet) > 0 {
+		pkg["repairTargetSet"] = targetSet
+		required["mustTargetRepairTargetSet"] = true
+	}
+	pkg["evidenceAcquisitionCompleted"] = true
+	pkg["exitCriteria"] = []string{
+		"state_changing_artifact_applied_then_verify",
+		"failed_assessment_or_blocker_when_not_repairable",
+	}
+	return pkg
+}
+
+func mergeRepairTargetSnapshots(first []map[string]any, second []map[string]any) []map[string]any {
+	seen := map[string]bool{}
+	ret := make([]map[string]any, 0, len(first)+len(second))
+	add := func(items []map[string]any) {
+		for _, item := range items {
+			targetRef := strings.TrimSpace(stringFromMap(item, "targetRef"))
+			if targetRef == "" || seen[targetRef] {
+				continue
+			}
+			seen[targetRef] = true
+			ret = append(ret, repairActionTargetSnapshot(item))
+			if len(ret) >= maxLLMContextSliceItems {
+				return
+			}
+		}
+	}
+	add(first)
+	add(second)
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func graphFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]any {

@@ -12539,6 +12539,65 @@ func TestRuntimeOrchestrator_ConvertsQuestionOnlyReadableResourceDecisionToRepai
 	}
 }
 
+func TestContinuableDecisionShouldRepairRejectsMechanicalTargetChoiceBlock(t *testing.T) {
+	step := &runmodel.Step{
+		ID:   "run-mechanical-decision/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			stepInputKeyRuntimeStageMode:  "strict_convergence",
+			stepInputKeySoulStage:         soulStageExecution,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": stateChangingRepairRequiredOutput(),
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "main.go",
+					"exists":           true,
+					"contentHash":      "hash-main",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+			},
+		},
+	}
+	spec := runtimeDecisionBlockSpec{
+		Reason:       "need implementation direction",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Should the repair patch this target or rewrite the adjacent target?",
+	}
+
+	if !continuableDecisionShouldRepair(step, spec) {
+		t.Fatalf("expected mechanically repairable target-choice decision to be converted to repair")
+	}
+}
+
+func TestContinuableDecisionShouldRepairKeepsUngroundedDecisionBlocked(t *testing.T) {
+	step := &runmodel.Step{
+		ID:   "run-ungrounded-decision/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			stepInputKeyRuntimeStageMode:  "strict_convergence",
+			stepInputKeySoulStage:         soulStageExecution,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": stateChangingRepairRequiredOutput(),
+			},
+		},
+	}
+	spec := runtimeDecisionBlockSpec{
+		Reason:       "missing implementation target",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Please provide the implementation target.",
+	}
+
+	if continuableDecisionShouldRepair(step, spec) {
+		t.Fatalf("expected ungrounded decision without concrete target evidence to remain blocked")
+	}
+}
+
 func TestRuntimeOrchestrator_ResumeRunAutoRepairsOpenKnownReadableResourceDecision(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -13710,6 +13769,81 @@ func TestRuntimeOrchestrator_GraphFollowUpReusesLoadedStepsForEvidence(t *testin
 	}
 	if !foundCPUEvidence {
 		t.Fatalf("runEvidenceSummary = %+v, want graph node evidence", runEvidence)
+	}
+}
+
+func TestRuntimeOrchestrator_GraphFollowUpRestoresRepairContractAfterConcreteEvidenceAcquisition(t *testing.T) {
+	runID := common.RunID("run-evidence-acquisition-restores-repair")
+	orch := &RuntimeOrchestrator{}
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-evidence-acquisition-restores-repair", InitialStepKind: llmWorkspaceExecutionStepKind}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "read-shape", Kind: "file/read"},
+	}}
+	anchor := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/step-1"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"concreteFailureEvidenceRequired": true,
+			failureOutputKeyClass:             failureClassShellCommand,
+			failureOutputKeySignature:         "class=shell_command_failed|kind=shell/command|failureTargets=main_test.go|exitCode=1",
+			"repairActionPackage": map[string]any{
+				"requiredOutput":          evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput()),
+				failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=main_test.go|exitCode=1",
+				"structuredFailureSignals": map[string]any{
+					"targetRefs": []string{"main_test.go"},
+				},
+			},
+		},
+		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
+	}
+	readStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/001-read-shape"),
+		RunID: runID,
+		Kind:  "file/read",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID:     "read-shape",
+			stepInputKeyGraphRootStepID: string(anchor.ID),
+		},
+		Output: map[string]any{
+			"status":      "completed",
+			"stage":       "file_read",
+			"path":        "main.go",
+			"exists":      true,
+			"content":     "package main\n\ntype Provider struct { BaseURL string }\n",
+			"contentHash": "hash-main",
+			"truncated":   false,
+			"isBinary":    false,
+		},
+	}
+
+	input := orch.graphFollowUpStepInputFromSteps(run, anchor, []*runmodel.Step{anchor, readStep})
+
+	if input[stepInputKeyRuntimeStage] != runtimeStageRepair ||
+		input[stepInputKeyRuntimeStageMode] != "strict_convergence" ||
+		input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true ||
+		input["concreteFailureEvidenceRequired"] != nil {
+		t.Fatalf("follow-up input = %+v, want restored state-changing repair contract", input)
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v, want patch/apply contract", required)
+	}
+	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
+	if len(targets) != 1 || targets[0]["targetRef"] != "main.go" || targets[0]["contentHash"] != "hash-main" {
+		t.Fatalf("targetSnapshots = %+v, want acquired current target snapshot", targets)
+	}
+	if !stringSliceContains(stringSliceFromValue(actionPackage["repairTargetSet"]), "main_test.go") ||
+		!stringSliceContains(stringSliceFromValue(actionPackage["repairTargetSet"]), "main.go") {
+		t.Fatalf("repairTargetSet = %+v, want original failure and acquired evidence targets", actionPackage["repairTargetSet"])
 	}
 }
 
