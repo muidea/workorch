@@ -1445,7 +1445,11 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return nil
 	}
 	if nextStepID != "" {
-		return o.dispatchStepWithWorkspace(ctx, run, nextStepID, nextKind, nextStepInputFromOutput(run, step), workspace)
+		uniqueStepID, err := o.uniqueDispatchStepID(ctx, run.ID, nextStepID)
+		if err != nil {
+			return err
+		}
+		return o.dispatchStepWithWorkspace(ctx, run, uniqueStepID, nextKind, nextStepInputFromOutput(run, step), workspace)
 	}
 	if handled, err := o.validateGraphExpansionBoundary(ctx, run, step, toolCall, output, workspace); handled || err != nil {
 		return err
@@ -4220,6 +4224,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 	}
 	if len(steps) == 0 {
 		input := initialStepInput(run)
+		input = o.hydrateInitialRepairTargetSnapshots(ctx, run, input)
 		if providerID := common.RuntimeLLMProviderIDFromContext(ctx); providerID != "" {
 			input["llmProviderId"] = providerID
 		}
@@ -4235,6 +4240,93 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 		return nil, common.ErrConflict
 	}
 	return o.nextDispatchSpecsFromStep(ctx, run, last)
+}
+
+func (o *RuntimeOrchestrator) hydrateInitialRepairTargetSnapshots(ctx context.Context, run *runModel.Run, input map[string]any) map[string]any {
+	if o == nil || o.workspaces == nil || run == nil || len(input) == 0 {
+		return input
+	}
+	if !boolValue(input["replanStateChangingContinuation"]) && runtimeStageFromStepInput(input) != runtimeStageRepair {
+		return input
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	targetRefs := initialRepairTargetRefs(input, pkg)
+	if len(targetRefs) == 0 {
+		return ApplyConvergenceContract(input, BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil))
+	}
+	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
+	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
+		return ApplyConvergenceContract(input, BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil))
+	}
+	var snapshots []map[string]any
+	for _, targetRef := range targetRefs {
+		if len(snapshots) >= 3 {
+			break
+		}
+		item := patchRepairTargetSnapshot(workspace.DeliverableDirectory, targetRef)
+		if len(item) == 0 || !boolValue(item["exists"]) || boolValue(item["isBinary"]) {
+			continue
+		}
+		snapshots = append(snapshots, item)
+	}
+	if len(snapshots) == 0 {
+		return ApplyConvergenceContract(input, BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil))
+	}
+	input["patchRepairContext"] = mergeRepairTargetSnapshots(mapSliceFromValue(input["patchRepairContext"]), snapshots)
+	pkg = repairActionPackageForEvidenceAcquisitionFollowUp(input, pkg, snapshots)
+	input["repairActionPackage"] = pkg
+	input["repairObjective"] = repairObjectiveStateChangingOutput
+	input["stateChangingOutputRequired"] = true
+	delete(input, "concreteFailureEvidenceRequired")
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Runtime loaded current target snapshots from repairTargetSet before this replan repair. Use patchRepairContext and repairActionPackage.targetSnapshots as the current patch baseline.",
+		"Do not generate stale hunks from historical summaries when current target snapshots are available.",
+	)
+	return ApplyConvergenceContract(input, BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil))
+}
+
+func initialRepairTargetRefs(input map[string]any, pkg map[string]any) []string {
+	seen := map[string]bool{}
+	var ret []string
+	add := func(value string) {
+		value = normalizeRepairPatchTargetRef(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	for _, value := range stringSliceFromValue(input["repairTargetSet"]) {
+		add(value)
+	}
+	for _, value := range stringSliceFromValue(pkg["repairTargetSet"]) {
+		add(value)
+	}
+	for _, item := range mapSliceFromValue(input["repairTargetSet"]) {
+		add(stringFromMap(item, "targetRef"))
+	}
+	for _, item := range mapSliceFromValue(pkg["repairTargetSet"]) {
+		add(stringFromMap(item, "targetRef"))
+	}
+	for _, item := range mapSliceFromValue(input["targetSnapshots"]) {
+		add(stringFromMap(item, "targetRef"))
+	}
+	for _, item := range mapSliceFromValue(pkg["targetSnapshots"]) {
+		add(stringFromMap(item, "targetRef"))
+	}
+	for _, key := range []string{
+		"failureTargetScope",
+		failureOutputKeySignature,
+		stepInputKeyRepairOfFailureSig,
+	} {
+		for _, value := range repairPatchTargetRefsFromScopeText(stringFromMap(input, key)) {
+			add(value)
+		}
+		for _, value := range repairPatchTargetRefsFromScopeText(stringFromMap(pkg, key)) {
+			add(value)
+		}
+	}
+	return ret
 }
 
 func (o *RuntimeOrchestrator) nextDispatchSpecsAfterStep(
@@ -4276,7 +4368,21 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsAfterResolvedDecision(
 			return specs, err
 		}
 	}
+	if contextGateDecisionResumeInput(resumeInput) {
+		if specs, ok, err := o.contextIntegritySpecsAfterResolvedDecision(ctx, run, stepID, resumeInput); ok || err != nil {
+			return specs, err
+		}
+	}
 	return o.nextDispatchSpecsAfterStep(ctx, run, stepID)
+}
+
+func contextGateDecisionResumeInput(resumeInput map[string]any) bool {
+	context := mapFromValue(resumeInput["ticketContext"])
+	if len(context) == 0 {
+		return false
+	}
+	return strings.TrimSpace(stringFromMap(context, decisionContextKeyRecoveryPolicy)) == decisionContextRecoveryPolicyContext ||
+		strings.TrimSpace(stringFromMap(context, decisionContextKeyDependency)) == decisionContextDependencyContextGate
 }
 
 func (o *RuntimeOrchestrator) providerRetrySpecsAfterResolvedDecision(
@@ -4307,6 +4413,160 @@ func (o *RuntimeOrchestrator) providerRetrySpecsAfterResolvedDecision(
 		Kind:  step.Kind,
 		Input: input,
 	}}, true, nil
+}
+
+func (o *RuntimeOrchestrator) contextIntegritySpecsAfterResolvedDecision(
+	ctx context.Context,
+	run *runModel.Run,
+	stepID common.StepID,
+	resumeInput map[string]any,
+) ([]stepDispatchSpec, bool, error) {
+	if o == nil || run == nil || stepID == "" {
+		return nil, false, nil
+	}
+	step, err := o.steps.Get(ctx, stepID)
+	if err != nil {
+		return nil, false, err
+	}
+	if step == nil || step.State != common.StepStateFailed || !runtimeContextIntegrityGateFailure(step) {
+		return nil, false, nil
+	}
+	input := contextIntegrityRetryInput(step, resumeInput)
+	if contextIntegrityRetryStillMissingRequiredRepairContext(input) {
+		return nil, true, common.ErrConflict
+	}
+	baseID := common.StepID(fmt.Sprintf("%s/context-gate-retry", step.ID))
+	nextStepID, err := o.uniqueDispatchStepID(ctx, run.ID, baseID)
+	if err != nil {
+		return nil, true, err
+	}
+	return []stepDispatchSpec{{
+		ID:    nextStepID,
+		Kind:  step.Kind,
+		Input: input,
+	}}, true, nil
+}
+
+func contextIntegrityRetryInput(step *runModel.Step, resumeInput map[string]any) map[string]any {
+	input := cloneStepPayload(step.Input)
+	if input == nil {
+		input = map[string]any{}
+	}
+	ticketContext := cloneStepPayload(mapFromValue(resumeInput["ticketContext"]))
+	if len(ticketContext) > 0 {
+		input["ticketContext"] = ticketContext
+	}
+	if decisionResolution := cloneStepPayload(mapFromValue(resumeInput["decisionResolution"])); len(decisionResolution) > 0 {
+		input["decisionResolution"] = decisionResolution
+	}
+	input["contextGateRecovery"] = map[string]any{
+		"sourceStepId": string(step.ID),
+		"resolved":     true,
+		"recovery":     "regenerate_llm_context",
+	}
+	if reason := strings.TrimSpace(stringFromMap(mapFromValue(step.Output["contextBudget"]), "contextGateReason")); reason != "" {
+		mapFromValue(input["contextGateRecovery"])["contextGateReason"] = reason
+	}
+	hydrateContextIntegrityRetryRepairPackage(input, step, ticketContext)
+	return input
+}
+
+func hydrateContextIntegrityRetryRepairPackage(input map[string]any, step *runModel.Step, ticketContext map[string]any) {
+	if input == nil {
+		return
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if pkg == nil {
+		pkg = map[string]any{}
+	}
+	failedStepInput := mapFromValue(ticketContext["failedStepInput"])
+	failedStepInputPkg := mapFromValue(failedStepInput["repairActionPackage"])
+	if len(pkg) == 0 && len(failedStepInputPkg) > 0 {
+		pkg = cloneStepPayload(failedStepInputPkg)
+	}
+	if len(mapFromValue(pkg["currentFailure"])) == 0 {
+		if currentFailure := currentFailureForEvidenceAcquisitionFollowUp(input, pkg); len(currentFailure) > 0 {
+			pkg["currentFailure"] = currentFailure
+		} else if currentFailure := currentFailureForEvidenceAcquisitionFollowUp(failedStepInput, failedStepInputPkg); len(currentFailure) > 0 {
+			pkg["currentFailure"] = currentFailure
+		} else if currentFailure := currentFailureFromContextGateTicket(ticketContext); len(currentFailure) > 0 {
+			pkg["currentFailure"] = currentFailure
+		}
+	}
+	if len(mapFromValue(pkg["currentExecutionProgress"])) == 0 {
+		if progress := currentExecutionProgressForEvidenceAcquisitionFollowUp(input, pkg); len(progress) > 0 {
+			pkg["currentExecutionProgress"] = progress
+		} else if progress := currentExecutionProgressForEvidenceAcquisitionFollowUp(failedStepInput, failedStepInputPkg); len(progress) > 0 {
+			pkg["currentExecutionProgress"] = progress
+		} else if progress := currentExecutionProgressFromContextGateTicket(step, ticketContext); len(progress) > 0 {
+			pkg["currentExecutionProgress"] = progress
+		}
+	}
+	input["repairActionPackage"] = pkg
+}
+
+func currentFailureFromContextGateTicket(ticketContext map[string]any) map[string]any {
+	if len(ticketContext) == 0 {
+		return nil
+	}
+	output := mapFromValue(ticketContext["failedStepOutput"])
+	ret := map[string]any{}
+	add := func(key string, value string) {
+		if value = strings.TrimSpace(value); value != "" {
+			ret[key] = value
+		}
+	}
+	add("failedStepId", stringFromMap(ticketContext, "failedStepId"))
+	add("failedStepKind", stringFromMap(ticketContext, "failedStepKind"))
+	add("failureClass", firstNonEmptyString(stringFromMap(ticketContext, failureOutputKeyClass), stringFromMap(output, failureOutputKeyClass)))
+	add("failureSignature", firstNonEmptyString(stringFromMap(ticketContext, failureOutputKeySignature), stringFromMap(output, failureOutputKeySignature)))
+	add("targetScope", stringFromMap(ticketContext, "failureTargetScope"))
+	add("targetRef", repairActionTargetRefFromScope(stringFromMap(ticketContext, "failureTargetScope")))
+	add("reason", firstNonEmptyString(stringFromMap(output, "reason"), stringFromMap(ticketContext, "reason")))
+	add("error", firstNonEmptyString(stringFromMap(output, "error"), stringFromMap(ticketContext, "error")))
+	add("stage", stringFromMap(output, "stage"))
+	if len(ret) == 0 {
+		return nil
+	}
+	return compactLLMContextMap(ret, 1)
+}
+
+func currentExecutionProgressFromContextGateTicket(step *runModel.Step, ticketContext map[string]any) map[string]any {
+	failedStepInput := mapFromValue(ticketContext["failedStepInput"])
+	for _, source := range []map[string]any{
+		mapFromValue(failedStepInput["currentProgressDigest"]),
+		mapFromValue(mapFromValue(mapFromValue(failedStepInput["executionContextPackage"])["replanContinuation"])["currentProgressDigest"]),
+		mapFromValue(mapFromValue(mapFromValue(failedStepInput["executionContext"])["replanContinuation"])["currentProgressDigest"]),
+	} {
+		if repairProgressDigestIsInformative(source) {
+			return compactLLMContextMap(source, 0)
+		}
+	}
+	reason := firstNonEmptyString(
+		stringFromMap(mapFromValue(step.Output["contextBudget"]), "contextGateReason"),
+		stringFromMap(step.Output, "reason"),
+		stringFromMap(step.Output, "error"),
+	)
+	if strings.TrimSpace(reason) == "" {
+		return nil
+	}
+	return map[string]any{
+		"currentGap":         reason,
+		"nextRequiredAction": "regenerate_llm_context_after_resolved_context_gate",
+	}
+}
+
+func contextIntegrityRetryStillMissingRequiredRepairContext(input map[string]any) bool {
+	pkg := mapFromValue(input["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(input["stateChangingOutputRequired"]) &&
+		!repairObjectiveRequiresStateChange(stringFromMap(input, "repairObjective")) &&
+		!repairActionPackageRequiresStateChangingOutput(pkg) &&
+		!boolValue(required["mustIncludeStateChangingNode"]) {
+		return false
+	}
+	return len(mapFromValue(pkg["currentFailure"])) == 0 ||
+		len(mapFromValue(pkg["currentExecutionProgress"])) == 0
 }
 
 func (o *RuntimeOrchestrator) knownReadableDecisionRepairSpecs(

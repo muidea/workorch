@@ -1329,12 +1329,95 @@ func repairActionPackageForEvidenceAcquisitionFollowUp(input map[string]any, sou
 		pkg["repairTargetSet"] = targetSet
 		required["mustTargetRepairTargetSet"] = true
 	}
+	if len(mapFromValue(pkg["currentFailure"])) == 0 {
+		if currentFailure := currentFailureForEvidenceAcquisitionFollowUp(input, pkg); len(currentFailure) > 0 {
+			pkg["currentFailure"] = currentFailure
+		}
+	}
+	if len(mapFromValue(pkg["currentExecutionProgress"])) == 0 {
+		if progress := currentExecutionProgressForEvidenceAcquisitionFollowUp(input, pkg); len(progress) > 0 {
+			pkg["currentExecutionProgress"] = progress
+		}
+	}
 	pkg["evidenceAcquisitionCompleted"] = true
 	pkg["exitCriteria"] = []string{
 		"state_changing_artifact_applied_then_verify",
 		"failed_assessment_or_blocker_when_not_repairable",
 	}
 	return pkg
+}
+
+func currentFailureForEvidenceAcquisitionFollowUp(input map[string]any, pkg map[string]any) map[string]any {
+	if currentFailure := repairActionCurrentFailure(input); len(currentFailure) > 0 {
+		return currentFailure
+	}
+	for _, source := range []map[string]any{
+		pkg,
+		mapFromValue(mapFromValue(mapFromValue(input["executionContextPackage"])["replanContinuation"])["failureContext"]),
+		mapFromValue(mapFromValue(mapFromValue(input["executionContextPackage"])["replanContinuation"])["ticketContext"]),
+		mapFromValue(mapFromValue(input["executionContextPackage"])["replanContinuation"]),
+		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["replanContinuation"])["failureContext"]),
+		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["replanContinuation"])["ticketContext"]),
+		mapFromValue(mapFromValue(input["executionContext"])["replanContinuation"]),
+	} {
+		if len(source) == 0 {
+			continue
+		}
+		ret := map[string]any{}
+		add := func(key string, value string) {
+			if value = strings.TrimSpace(value); value != "" {
+				ret[key] = value
+			}
+		}
+		add("failedStepId", stringFromMap(source, "failedStepId"))
+		add("failedStepKind", stringFromMap(source, "failedStepKind"))
+		add("failureClass", stringFromMap(source, failureOutputKeyClass))
+		add("failureSignature", stringFromMap(source, failureOutputKeySignature))
+		add("targetScope", stringFromMap(source, "failureTargetScope"))
+		add("targetRef", repairActionTargetRefFromScope(stringFromMap(source, "failureTargetScope")))
+		add("reason", firstNonEmptyString(stringFromMap(source, "failureReason"), stringFromMap(source, "reason")))
+		add("error", stringFromMap(source, "error"))
+		if output := mapFromValue(source["failedStepOutput"]); len(output) > 0 {
+			add("stage", stringFromMap(output, "stage"))
+			add("failureClass", firstNonEmptyString(stringFromMap(source, failureOutputKeyClass), stringFromMap(output, failureOutputKeyClass)))
+			add("failureSignature", firstNonEmptyString(stringFromMap(source, failureOutputKeySignature), stringFromMap(output, failureOutputKeySignature)))
+			add("reason", firstNonEmptyString(stringFromMap(output, "reason"), stringFromMap(source, "failureReason"), stringFromMap(source, "reason")))
+			add("error", firstNonEmptyString(stringFromMap(output, "error"), stringFromMap(source, "error")))
+		}
+		if len(ret) > 0 {
+			return compactLLMContextMap(ret, 1)
+		}
+	}
+	return nil
+}
+
+func currentExecutionProgressForEvidenceAcquisitionFollowUp(input map[string]any, pkg map[string]any) map[string]any {
+	for _, source := range []map[string]any{
+		mapFromValue(input["currentExecutionProgress"]),
+		mapFromValue(pkg["currentExecutionProgress"]),
+		mapFromValue(mapFromValue(mapFromValue(input["executionContextPackage"])["replanContinuation"])["currentProgressDigest"]),
+		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["replanContinuation"])["currentProgressDigest"]),
+		mapFromValue(input["currentProgressDigest"]),
+	} {
+		if repairProgressDigestIsInformative(source) {
+			return compactLLMContextMap(source, 0)
+		}
+	}
+	return nil
+}
+
+func repairProgressDigestIsInformative(source map[string]any) bool {
+	if len(source) == 0 {
+		return false
+	}
+	currentGap := strings.TrimSpace(stringFromMap(source, "currentGap"))
+	if currentGap == "" || currentGap == "none_observed_in_recent_process_evidence" {
+		if len(mapFromValue(source["lastObservedFailure"])) == 0 &&
+			len(mapFromValue(source["lastAttempt"])) == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func mergeRepairTargetSnapshots(first []map[string]any, second []map[string]any) []map[string]any {
@@ -1560,9 +1643,24 @@ func processEvidenceTimelineItem(run *runModel.Run, step *runModel.Step, order i
 		item["payloadRef"] = outputRef
 		item["outputRef"] = outputRef
 	}
-	if summary := processEvidenceOutputSummary(step.Output); summary != "" {
+	if step.State == common.StepStateCompleted && completedShellCommandOutputHasFailureSignal(step) {
+		item["state"] = string(common.StepStateFailed)
+		item["failureClass"] = failureClassShellCommand
+		if signature := runtimeFailureSignature(failureClassShellCommand, step, step.Output, nil); signature != "" {
+			item["failureSignature"] = compactLLMContextString(signature)
+		}
+		if reason := processEvidenceShellFailureReason(step.Output); reason != "" {
+			item["failureReason"] = reason
+			item["summary"] = reason
+			item["outputSummary"] = reason
+		}
+		item["evidenceValidity"] = "actionable_failure"
+	} else if summary := processEvidenceOutputSummaryForStep(step); summary != "" {
 		item["summary"] = summary
 		item["outputSummary"] = summary
+	} else if rejectedLLMDecisionOutputForProgress(step) {
+		item["rejectedOutputSummaryOmitted"] = true
+		item["omittedContentReason"] = "rejected LLM decision summary is not reusable progress evidence; use failureReason, current evidence, and target snapshots"
 	}
 	if inputSummary := processEvidenceInputSummary(step.Input); inputSummary != "" {
 		item["inputSummary"] = inputSummary
@@ -1590,12 +1688,72 @@ func processEvidenceTimelineItem(run *runModel.Run, step *runModel.Step, order i
 	return item
 }
 
+func completedShellCommandOutputHasFailureSignal(step *runModel.Step) bool {
+	if step == nil || step.Kind != "shell/command" || step.State != common.StepStateCompleted || len(step.Output) == 0 {
+		return false
+	}
+	text := shellCommandFailureSignalText(step.Output)
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"\n--- fail:",
+		"\nfail\t",
+		"\nfail\n",
+		"\nfailed\n",
+		"assertionerror",
+		"error trace:",
+		"\tnot equal:",
+		"\texpected:",
+		"\tactual  :",
+		"test failed",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func shellCommandFailureSignalText(output map[string]any) string {
+	if len(output) == 0 {
+		return ""
+	}
+	parts := []string{
+		stringFromMap(output, "stderr"),
+		stringFromMap(output, "stdout"),
+		stringFromMap(output, "stderrPreview"),
+		stringFromMap(output, "stdoutPreview"),
+		stringFromMap(output, "error"),
+		stringFromMap(output, "reason"),
+	}
+	return "\n" + strings.ToLower(strings.Join(parts, "\n")) + "\n"
+}
+
+func processEvidenceShellFailureReason(output map[string]any) string {
+	if len(output) == 0 {
+		return ""
+	}
+	return truncateLLMContextString(firstNonEmptyString(
+		stringFromMap(output, "stderr"),
+		stringFromMap(output, "stdout"),
+		stringFromMap(output, "stderrPreview"),
+		stringFromMap(output, "stdoutPreview"),
+		stringFromMap(output, "error"),
+		stringFromMap(output, "reason"),
+		"shell command output contains failure markers despite zero exit status",
+	))
+}
+
 func processEvidenceValidity(step *runModel.Step) string {
 	if step == nil {
 		return ""
 	}
 	class := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass))
 	stage := strings.TrimSpace(stringFromMap(step.Output, "stage"))
+	if rejectedLLMDecisionOutputForProgress(step) {
+		return "stale_or_rejected"
+	}
 	switch class {
 	case failureClassProviderTimeout, failureClassProviderUnavailable, failureClassRateLimited, failureClassProviderStreamIncomplete:
 		return "diagnostic_only"
@@ -1609,6 +1767,31 @@ func processEvidenceValidity(step *runModel.Step) string {
 		return "actionable_failure"
 	}
 	return "diagnostic_only"
+}
+
+func rejectedLLMDecisionOutputForProgress(step *runModel.Step) bool {
+	if step == nil || strings.TrimSpace(step.Kind) != llmWorkspaceExecutionStepKind {
+		return false
+	}
+	if step.State != common.StepStateFailed {
+		return false
+	}
+	if llmDecisionInvalidOutput(step.Output) {
+		return true
+	}
+	stage := strings.ToLower(strings.TrimSpace(stringFromMap(step.Output, "stage")))
+	if stage != "llm_execution_graph_plan" && stage != "llm_decision_invalid" && stage != "llm_schema_invalid" {
+		return false
+	}
+	class := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass))
+	if class != failureClassRuntime && class != failureClassLLMDecisionInvalid {
+		return false
+	}
+	return strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(step.Output, "error"),
+		stringFromMap(step.Output, "reason"),
+		stringFromMap(step.Output, failureOutputKeySignature),
+	)) != ""
 }
 
 func processEvidenceActionKind(kind string) string {
@@ -1679,6 +1862,13 @@ func processEvidenceOutputSummary(output map[string]any) string {
 		stringFromMap(output, "stdout"),
 		stringFromMap(output, failureOutputKeySignature),
 	))
+}
+
+func processEvidenceOutputSummaryForStep(step *runModel.Step) string {
+	if step == nil || rejectedLLMDecisionOutputForProgress(step) {
+		return ""
+	}
+	return processEvidenceOutputSummary(step.Output)
 }
 
 func processEvidenceFailureReason(output map[string]any) string {
@@ -1802,9 +1992,14 @@ func processEvidenceDigestStep(item map[string]any) map[string]any {
 		return nil
 	}
 	ret := map[string]any{}
-	for _, key := range []string{"order", "sourceRef", "stepId", "kind", "actionKind", "state", "stage", "summary", "failureClass", "failureReason"} {
+	for _, key := range []string{"order", "sourceRef", "stepId", "kind", "actionKind", "state", "stage", "failureClass", "failureSignature", "failureReason", "evidenceValidity", "rejectedOutputSummaryOmitted", "omittedContentReason"} {
 		if value, ok := item[key]; ok && value != nil {
 			ret[key] = value
+		}
+	}
+	if strings.TrimSpace(stringFromMap(item, "evidenceValidity")) != "stale_or_rejected" {
+		if value, ok := item["summary"]; ok && value != nil {
+			ret["summary"] = value
 		}
 	}
 	return ret

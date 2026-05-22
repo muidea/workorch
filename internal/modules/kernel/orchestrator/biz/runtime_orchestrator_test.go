@@ -3854,8 +3854,86 @@ func TestRuntimeOrchestrator_InitialReplanStateChangingInputPromotesPatchFailure
 		t.Fatalf("repairActionPackage.strategyReassessment = %#v, want same failed surface contract", actionPackage["strategyReassessment"])
 	}
 	required := mapFromValue(actionPackage["requiredOutput"])
-	if !boolValue(required["mustUseCurrentTargetSnapshot"]) || !boolValue(required["mustRebuildFromCurrentEvidence"]) {
-		t.Fatalf("repairActionPackage.requiredOutput = %#v, want current-evidence rebuild constraints", actionPackage["requiredOutput"])
+	if boolValue(required["mustIncludeStateChangingNode"]) || !boolValue(required["mustProduceConcreteFailureEvidence"]) {
+		t.Fatalf("repairActionPackage.requiredOutput = %#v, want evidence acquisition until current target snapshot is loaded", actionPackage["requiredOutput"])
+	}
+}
+
+func TestRuntimeOrchestrator_NextDispatchHydratesReplanRepairTargetSnapshot(t *testing.T) {
+	ctx := context.Background()
+	deliverableDirectory := t.TempDir()
+	targetRef := "e2e_gateway_contract_test.go"
+	targetContent := "package main\n\nfunc TestGateway(t *testing.T) {}\n"
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, targetRef), []byte(targetContent), 0o644); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	workspaceRepo := memory.NewWorkspaceRepository()
+	workspaceID := common.WorkspaceID("ws-replan-hydrate-target")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "ws",
+		DeliverableDirectory: deliverableDirectory,
+		State:                common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              "run-replan-hydrate-target",
+		WorkspaceID:     workspaceID,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-before-replan-hydrate",
+				"reason":           "runtime_repair_exhausted_requires_strategy",
+				"failureContext": map[string]any{
+					failureOutputKeyClass:     failureClassPatchApply,
+					failureOutputKeySignature: "class=patch_apply_failed|kind=patch/apply|targetRef=" + targetRef + "|error=context mismatch",
+					"failureTargetScope":      "targetRef=" + targetRef,
+					"failedStepId":            "run-before-replan-hydrate/graph-005/001-patch-target",
+					"failedStepKind":          "patch/apply",
+					"attempts":                3,
+					"failedStepOutput": map[string]any{
+						"error":  "invalid argument: unified diff hunk context mismatch",
+						"reason": "invalid argument: unified diff hunk context mismatch",
+						"stage":  "patch_apply",
+						"status": "completed",
+					},
+				},
+			},
+		},
+	}
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: workspaceRepo,
+	}
+
+	specs, err := orch.nextDispatchSpecs(ctx, run)
+	if err != nil {
+		t.Fatalf("nextDispatchSpecs: %v", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("specs = %d, want 1", len(specs))
+	}
+	input := specs[0].Input
+	if input["repairObjective"] != repairObjectiveStateChangingOutput || input["stateChangingOutputRequired"] != true {
+		t.Fatalf("input = %+v, want state-changing repair after target snapshot hydration", input)
+	}
+	if snapshots := mapSliceFromValue(input["patchRepairContext"]); len(snapshots) != 1 || snapshots[0]["targetRef"] != targetRef || !strings.Contains(stringFromMap(snapshots[0], "content"), "TestGateway") {
+		t.Fatalf("patchRepairContext = %#v, want hydrated current target snapshot", input["patchRepairContext"])
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
+	if len(targets) != 1 || targets[0]["targetRef"] != targetRef || !strings.Contains(stringFromMap(targets[0], "content"), "TestGateway") {
+		t.Fatalf("repairActionPackage.targetSnapshots = %#v, want hydrated target snapshot", actionPackage["targetSnapshots"])
+	}
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true || !boolValue(required["mustUseCurrentTargetSnapshot"]) {
+		t.Fatalf("requiredOutput = %#v, want state-changing current-snapshot contract", required)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
 	}
 }
 
@@ -13103,6 +13181,84 @@ func TestRuntimeOrchestrator_DispatchStepDoesNotOverwriteTerminalStep(t *testing
 	}
 	if step.State != common.StepStateCompleted || step.Input["original"] != true || step.Input["replacement"] == true {
 		t.Fatalf("step = %+v, want original completed step preserved", step)
+	}
+}
+
+func TestRuntimeOrchestrator_DirectNextStepUsesUniqueIDWhenTerminalStepExists(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	workspaceID := common.WorkspaceID("ws-next-step-unique")
+	runID := common.RunID("run-next-step-unique")
+	var dispatchedShell bool
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		switch {
+		case request.StepID == common.StepID(runID+"/step-1"):
+			return map[string]any{
+				"status":   "completed",
+				"nextStep": string(runID) + "/shell-1",
+				"nextKind": shellcommon.StepKindCommand,
+				"nextInput": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", "echo ok"},
+				},
+			}, nil
+		case request.StepID == common.StepID(runID+"/shell-1-2"):
+			dispatchedShell = true
+			return map[string]any{
+				"status": "completed",
+				"stdout": "ok\n",
+			}, nil
+		case boolValue(request.Input["completionFollowUp"]):
+			return map[string]any{
+				"status": "completed",
+				stepOutputKeyDoDAssessment: map[string]any{
+					"satisfied": true,
+					"items": []map[string]any{
+						{"item": "verified", "state": "satisfied", "evidenceRefs": []string{string(request.StepID)}},
+					},
+				},
+			}, nil
+		default:
+			return map[string]any{
+				"status": "completed",
+				stepOutputKeyDoDAssessment: map[string]any{
+					"satisfied": true,
+					"items": []map[string]any{
+						{"item": "verified", "state": "satisfied", "evidenceRefs": []string{string(request.StepID)}},
+					},
+				},
+			}, nil
+		}
+	}}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, memory.NewDecisionTicketRepository(), memory.NewApprovalRepository(), events.NewMemoryHub())
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod-next-step-unique", State: common.RunStateCreated, InitialStepKind: llmWorkspaceExecutionStepKind}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     common.StepID(runID + "/shell-1"),
+		RunID:  runID,
+		Kind:   shellcommon.StepKindCommand,
+		State:  common.StepStateFailed,
+		Input:  map[string]any{"command": "go"},
+		Output: map[string]any{"status": "failed"},
+	}); err != nil {
+		t.Fatalf("seed terminal shell step: %v", err)
+	}
+
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod-next-step-unique", State: common.RunStateRunning, InitialStepKind: llmWorkspaceExecutionStepKind}
+	if err := orch.dispatchStepWithWorkspace(ctx, run, common.StepID(runID+"/step-1"), llmWorkspaceExecutionStepKind, map[string]any{}, nil); err != nil {
+		t.Fatalf("dispatch step: %v; calls=%+v", err, runtime.calls)
+	}
+	if !dispatchedShell {
+		t.Fatalf("expected unique follow-up shell step to be dispatched; calls=%+v", runtime.calls)
+	}
+	if _, err := stepRepo.Get(ctx, common.StepID(runID+"/shell-1-2")); err != nil {
+		t.Fatalf("get unique shell step: %v", err)
 	}
 }
 
@@ -24171,6 +24327,159 @@ func TestRuntimeOrchestrator_ResumeProviderConfigRecoveryContinueDispatchesExpli
 	}
 	if retry.Input["repairObjective"] != repairObjectiveStateChangingOutput || retry.Input["stateChangingOutputRequired"] != true {
 		t.Fatalf("retry repair input = %+v, want state-changing repair contract preserved", retry.Input)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeContextGateResolutionRegeneratesRepairContext(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{
+		"status":          "completed",
+		"completionState": "completed",
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "context gate retry completed",
+			"items": []map[string]any{{
+				"item":         "context gate retry",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-context-gate-resume/follow-up-read-config-context-gate-retry"},
+			}},
+		},
+	}}
+	orch := NewRuntimeOrchestratorWithResolutions(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		resolutionRepo,
+		approvalRepo,
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-context-gate-resume")
+	runID := common.RunID("run-context-gate-resume")
+	failedStepID := common.StepID(string(runID) + "/follow-up-read-config")
+	ticketID := common.TicketID(string(failedStepID) + "-context-integrity-decision")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		GoalID:           "goal-context-gate-resume",
+		DoDID:            "dod-context-gate-resume",
+		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	failedInput := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		stepInputKeyRuntimeStageMode:  "strict_convergence",
+		stepInputKeySoulStage:         soulStageExecution,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		"currentProgressDigest": map[string]any{
+			"currentGap": "none_observed_in_recent_process_evidence",
+		},
+		"repairActionPackage": map[string]any{
+			"failedStepId":            string(runID) + "/repair-001",
+			"failedStepKind":          llmWorkspaceExecutionStepKind,
+			failureOutputKeyClass:     failureClassLLMDecisionInvalid,
+			failureOutputKeySignature: "class=llm_decision_invalid|kind=llm/workspace_execution|stage=llm_schema_invalid",
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode": true,
+			},
+		},
+		stepInputKeyExecutionContextPackage: map[string]any{
+			"replanContinuation": map[string]any{
+				"currentProgressDigest": map[string]any{
+					"currentGap":         "invalid llm decision json",
+					"nextRequiredAction": "address_last_failure_under_current_stage_contract",
+				},
+			},
+		},
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    failedStepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: failedInput,
+		Output: map[string]any{
+			"status":                  "failed",
+			"stage":                   "llm_context_integrity_failed",
+			"error":                   "invalid argument: llm context gate fail_fast: runtime_repair_current_failure_missing",
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_context_integrity_failed",
+			"contextBudget": map[string]any{
+				"contextGateAction": "fail_fast",
+				"contextGateReason": "runtime_repair_current_failure_missing",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed failed context gate step: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      failedStepID,
+		State:       common.DecisionTicketStateResolved,
+		Context: map[string]any{
+			decisionContextKeyDependency:     decisionContextDependencyContextGate,
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyContext,
+			"failedStepId":                   string(failedStepID),
+			"failedStepKind":                 llmWorkspaceExecutionStepKind,
+			"failedStepInput":                failedInput,
+			"failedStepOutput": map[string]any{
+				"stage":                   "llm_context_integrity_failed",
+				"error":                   "invalid argument: llm context gate fail_fast: runtime_repair_current_failure_missing",
+				failureOutputKeyClass:     failureClassRuntime,
+				failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_context_integrity_failed",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       "resolution-context-gate-resume",
+		TicketID: ticketID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:  map[string]any{"answer": "继续处理", "recoveryAction": "retry_same_step"},
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume context gate resolution: %v", err)
+	}
+	if len(runtime.calls) == 0 || !strings.Contains(string(runtime.calls[0]), "context-gate-retry") {
+		t.Fatalf("runtime calls = %#v, want regenerated context-gate retry step", runtime.calls)
+	}
+	retry, err := stepRepo.Get(ctx, runtime.calls[0])
+	if err != nil {
+		t.Fatalf("get retry step: %v", err)
+	}
+	pkg := mapFromValue(retry.Input["repairActionPackage"])
+	currentFailure := mapFromValue(pkg["currentFailure"])
+	if currentFailure["failedStepId"] != string(runID)+"/repair-001" ||
+		currentFailure["failureClass"] != failureClassLLMDecisionInvalid {
+		t.Fatalf("currentFailure = %+v, want original repair failure", currentFailure)
+	}
+	progress := mapFromValue(pkg["currentExecutionProgress"])
+	if progress["currentGap"] != "invalid llm decision json" {
+		t.Fatalf("currentExecutionProgress = %+v, want original progress gap", progress)
+	}
+	if retry.Input["contextGateRecovery"] == nil {
+		t.Fatalf("retry input = %+v, want contextGateRecovery marker", retry.Input)
 	}
 }
 

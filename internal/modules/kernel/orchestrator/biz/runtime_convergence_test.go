@@ -7,6 +7,7 @@ import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -165,6 +166,73 @@ func TestBuildConvergenceContractNeedGovernanceForRuntimeDependencyDecision(t *t
 	}
 	if contract.RuntimeStage != runtimeStageDecision {
 		t.Fatalf("runtimeStage = %q, want %q", contract.RuntimeStage, runtimeStageDecision)
+	}
+}
+
+func TestBuildConvergenceContractUsesLatestActionEvidenceAsConcreteTarget(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		"currentExecutionProgress": map[string]any{
+			"failedStepId":     "run-convergence/follow-up-verify",
+			"failureClass":     failureClassRuntime,
+			"failureReason":    "validation follow-up llm step returned read-only executionGraph without patch output",
+			"failureStage":     "llm_execution_graph_plan",
+			"coverageGapCount": 0,
+			"latestActionEvidence": []map[string]any{{
+				"stepId": "run-convergence/graph-003/002-verify",
+				"kind":   "shell/command",
+				"state":  string(common.StepStateCompleted),
+				"outputSummary": map[string]any{
+					"status":        "completed",
+					"command":       "sh",
+					"exitCode":      0,
+					"stdoutPreview": "# target [target.test]\n./main.go:5:2: \"bytes\" imported and not used\nFAIL",
+				},
+			}},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+			"currentExecutionProgress": map[string]any{
+				"latestActionEvidence": []map[string]any{{
+					"kind": "shell/command",
+					"outputSummary": map[string]any{
+						"stdoutPreview": "./main.go:5:2: \"bytes\" imported and not used",
+					},
+				}},
+			},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-convergence/follow-up-verify",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: input,
+		Output: map[string]any{
+			"stage":                   "llm_execution_graph_plan",
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan",
+			"error":                   "validation follow-up llm step returned read-only executionGraph without patch output",
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, failed, map[string]any{"input": input}, nil)
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q", contract.State, convergenceStateNeedStateChange)
+	}
+	if len(contract.TargetEvidence) == 0 {
+		t.Fatalf("targetEvidence missing from contract: %+v", contract)
+	}
+	signals := mapFromValue(contract.TargetEvidence["structuredFailureSignals"])
+	if !stringSliceContains(stringSliceFromValue(signals["targetRefs"]), "main.go") {
+		t.Fatalf("targetEvidence.structuredFailureSignals = %+v, want latest action target main.go", signals)
+	}
+
+	applied := ApplyConvergenceContract(map[string]any{}, contract)
+	required := mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want patch/apply state-changing contract", required)
 	}
 }
 

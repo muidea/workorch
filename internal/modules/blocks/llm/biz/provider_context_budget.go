@@ -781,6 +781,9 @@ func providerInputHasCurrentFailure(input map[string]any) bool {
 	if len(input) == 0 {
 		return false
 	}
+	if len(recordFromAny(recordFromAny(input["repairActionPackage"])["currentFailure"])) > 0 {
+		return true
+	}
 	for _, key := range []string{"failedStepId", "failureClass", "failureSignature", "failureReason"} {
 		if strings.TrimSpace(stringValue(input[key])) != "" {
 			return true

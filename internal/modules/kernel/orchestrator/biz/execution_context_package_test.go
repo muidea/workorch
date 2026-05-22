@@ -331,6 +331,120 @@ func TestCompactProcessEvidenceTimelineForStateChangingRepairKeepsActionableFail
 	}
 }
 
+func TestCurrentProgressDigestPrefersLatestActionableFailureOverOlderActionableFailure(t *testing.T) {
+	timeline := []map[string]any{
+		{
+			"order":            1,
+			"stepId":           "run-process-context/graph-001/002-test",
+			"kind":             "shell/command",
+			"state":            string(common.StepStateFailed),
+			"failureClass":     failureClassShellCommand,
+			"failureReason":    "old compile failure",
+			"evidenceValidity": "actionable_failure",
+		},
+		{
+			"order":      2,
+			"stepId":     "run-process-context/graph-002/001-fix",
+			"kind":       "patch/apply",
+			"state":      string(common.StepStateCompleted),
+			"summary":    "old compile failure fixed",
+			"actionKind": "artifact_write",
+		},
+		{
+			"order":            3,
+			"stepId":           "run-process-context/graph-003/002-verify",
+			"kind":             "shell/command",
+			"state":            string(common.StepStateFailed),
+			"failureClass":     failureClassShellCommand,
+			"failureReason":    "latest verification failure",
+			"evidenceValidity": "actionable_failure",
+		},
+		{
+			"order":            4,
+			"stepId":           "run-process-context/follow-up-graph-verify",
+			"kind":             llmWorkspaceExecutionStepKind,
+			"state":            string(common.StepStateFailed),
+			"failureClass":     failureClassRuntime,
+			"failureReason":    "validation follow-up llm step returned read-only executionGraph without patch output",
+			"evidenceValidity": "stale_or_rejected",
+		},
+	}
+
+	digest := currentProgressDigestFromProcessEvidenceTimeline(timeline)
+
+	failure := mapFromValue(digest["lastObservedFailure"])
+	if failure["stepId"] != "run-process-context/graph-003/002-verify" {
+		t.Fatalf("lastObservedFailure = %+v, want latest actionable shell failure", failure)
+	}
+	if digest["currentGap"] != "latest verification failure" {
+		t.Fatalf("currentGap = %v, want latest actionable failure", digest["currentGap"])
+	}
+
+	overlaid := currentProgressDigestFromCurrentExecutionProgress(map[string]any{
+		"currentExecutionProgress": map[string]any{
+			"latestActionEvidence": []map[string]any{{
+				"stepId": "run-process-context/graph-004/002-verify",
+				"kind":   "shell/command",
+				"state":  string(common.StepStateCompleted),
+				"outputSummary": map[string]any{
+					"stdoutPreview": "./main.go:5:2: \"bytes\" imported and not used\nFAIL",
+				},
+			}},
+		},
+	}, digest)
+	overlaidFailure := mapFromValue(overlaid["lastObservedFailure"])
+	if overlaidFailure["stepId"] != "run-process-context/graph-004/002-verify" {
+		t.Fatalf("overlaid lastObservedFailure = %+v, want latest concrete action evidence", overlaidFailure)
+	}
+	if !strings.Contains(stringFromMap(overlaid, "currentGap"), "main.go:5:2") {
+		t.Fatalf("overlaid currentGap = %v, want concrete latest failure text", overlaid["currentGap"])
+	}
+}
+
+func TestPromoteRepairActionPackageContextPrefersLatestActionableProgressDigest(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyCurrentProgressDigest: map[string]any{
+			"currentGap": "main_test.go:28 expected /v1/chat/completions actual /chat/completions",
+			"lastObservedFailure": map[string]any{
+				"stepId":           "run-progress/graph-001/002-run-tests",
+				"kind":             "shell/command",
+				"state":            string(common.StepStateFailed),
+				"failureClass":     failureClassShellCommand,
+				"failureSignature": "class=shell_command_failed|kind=shell/command|failureTargets=main_test.go|exitCode=0",
+				"failureReason":    "main_test.go:28 expected /v1/chat/completions actual /chat/completions",
+				"evidenceValidity": "actionable_failure",
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"currentFailure": map[string]any{
+				"failedStepId": "run-progress/old-repair",
+				"failureClass": failureClassLLMDecisionInvalid,
+				"reason":       "old invalid llm decision",
+			},
+			"currentExecutionProgress": map[string]any{
+				"currentGap": "old patch baseHash mismatch",
+			},
+		},
+	}
+
+	promoteRepairActionPackageContext(input)
+
+	currentFailure := mapFromValue(input["currentFailure"])
+	if currentFailure["failedStepId"] != "run-progress/graph-001/002-run-tests" ||
+		currentFailure["failureClass"] != failureClassShellCommand {
+		t.Fatalf("currentFailure = %+v, want latest actionable shell failure", currentFailure)
+	}
+	progress := mapFromValue(input["currentExecutionProgress"])
+	if !strings.Contains(stringFromMap(progress, "currentGap"), "main_test.go:28") {
+		t.Fatalf("currentExecutionProgress = %+v, want latest actionable gap", progress)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	pkgFailure := mapFromValue(pkg["currentFailure"])
+	if pkgFailure["failedStepId"] != "run-progress/graph-001/002-run-tests" {
+		t.Fatalf("repairActionPackage.currentFailure = %+v, want latest failure", pkgFailure)
+	}
+}
+
 func TestRunExecutionContextPackageInheritsReplanProcessEvidence(t *testing.T) {
 	ctx := context.Background()
 	run := &runmodel.Run{

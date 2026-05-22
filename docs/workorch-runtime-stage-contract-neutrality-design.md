@@ -173,6 +173,9 @@ ShouldCreateDecisionTicket(input, llmOutput, contract) -> bool
 - 若合同状态是 `need_evidence`，输入必须移除顶层 `stateChangingOutputRequired`，并把 `repairActionPackage.requiredOutput.acceptedKinds` 限定为 evidence acquisition 能力。
 - 若合同状态是 `need_validation`，输入必须说明最近 state-changing artifact、目标 scope、bounded verification 条件和禁止的 read-only/self-inspection-only 输出。
 - `currentProgressDigest`、`processEvidenceTimeline`、`repairActionPackage`、`structuredFailureSignals`、`latestClosureEvidence` 的当前事实必须一致；历史 wrapper/schema/provider 失败只能作为历史诊断摘要。
+- 当最新 concrete failure 被包裹在 follow-up / wrapper LLM failure 后面时，runtime 必须从 `currentExecutionProgress.latestActionEvidence` / `completedGraphEvidence` 的 stdout、stderr、error、targetRef、line refs 或 failure signature 中提取中立 target evidence。若可机械提取出 target refs / line refs / failure target scope，则该 evidence 必须提升为当前 `currentGap` 与 `repairActionPackage.structuredFailureSignals`，并恢复 `need_state_change`；不得因为 wrapper failure 本身是 read-only graph、schema invalid 或 dodAssessment failed，就退回 `need_evidence`。
+- `repairActionPackage.currentFailure` 与 `repairActionPackage.currentExecutionProgress` 是 canonical repair context 的组成部分。若顶层 `currentFailure` / `currentExecutionProgress` 缺失但 package 内存在有效字段，runtime 在 provider context gate 前必须提升或等价识别这些字段；不得误报 `runtime_repair_current_failure_missing`。
+- `shell/command` 的可行动失败不能只依赖进程退出码。若命令因管道、截断、wrapper 或 shell 组合返回 `exitCode=0`，但 stdout / stderr 中存在明确失败标记、断言失败、文件行号或测试失败摘要，`processEvidenceTimeline` 与 `currentProgressDigest` 必须把它记录为 actionable validation failure，并作为下一轮 repair 的当前 gap。
 - `repairActionPackage` 是唯一 primary actionable contract；不得让 `governanceHistory`、memory、旧 `executionGraph`、旧 rejected patch 或旧 decision question 与其竞争。
 
 `ShouldCreateDecisionTicket` 必须作为所有 decision ticket 写入前的统一门禁。若当前合同状态是 `need_state_change`，并且已经具备 concrete target evidence、required output 允许 state-changing artifact、缺口不涉及外部权限/凭证/部署/审批/破坏性变更/无法读取的业务信息，则 LLM 返回的 `blocked_on_decision` 必须被转换为 continuable repair contract violation，而不是直接创建人工 ticket。Runtime 应记录 converted decision 摘要，并继续派发 repair 或 bounded validation。只有合同状态为 `need_governance`，或证据门禁明确缺少 runtime 无法自行获得的信息时，才允许创建 ticket。
@@ -268,6 +271,8 @@ Runtime 在以下边界必须执行 active-run 一致性核对：
 - runtime 验证脚本核对 workspace/run 执行过程时。
 
 若发现 workspace 指向终态 run，runtime 必须清空 `ActiveRunID`，并按终态 run 状态收敛 workspace 状态：`completed` 映射为 workspace `completed`，`failed` / `cancelled` / `superseded` 映射为 workspace `failed`。若该 run 存在已解决 replan 决策，服务层恢复扫描可以在 workspace 回到无 active run 的终态后继续调度 successor，但 core runtime 不得通过业务领域逻辑推断 successor 内容。
+
+Workspace detail、workspace list、snapshot、taskProgress 等 read model 投影必须从当前 active run 派生 blocker refs。若 active run 为 `blocked_on_decision` 或 `blocked_on_approval`，workspace 级响应必须暴露对应 `blockingTicketId` / `blockingApprovalId`，并与 active run 的 blocker 保持一致。终态 run 不得继续污染 workspace blocker 投影。
 
 Workspace outcome 与 taskProgress 投影必须优先反映最新终态证据：当最新终态 result 的时间不早于最新 run 事件时，outcome / taskProgress 应共同指向该 result 对应 run；当存在更新的终态 run 事件但该 run 尚无 result 时，outcome / taskProgress 应指向该最新 run 及其失败/终态原因。历史 accepted / rejected result 必须继续保留在 results 列表中，但不得覆盖更新 run 的终态状态。若 snapshot / read model 中的 event records 因分页、保留窗口或恢复重放而滞后，更新的 terminal result 必须可以覆盖旧 run event，避免 workspace 已由最新 run 失败/完成但 outcome 或 taskProgress 仍投影到历史 run。
 
@@ -982,6 +987,8 @@ Runtime 在 provider request 前必须执行 context gate，并得到唯一处�
 
 `contextBudget.integrityWarnings` 不能只是观测日志。若 warning 涉及 P0-P4 必要字段，例如 `protected_repair_action_target_snapshot_missing_after_context_budget`、Goal / DoD 压缩、requiredOutput 缺失、current failure 缺失、coverageTargetSet 缺失，context gate 必须选择 `read_required`、`fail_fast`、`blocker_required` 或 `replan_required` 之一。
 
+`runtime_repair_current_failure_missing` 只能在顶层输入和 `repairActionPackage.currentFailure`、`failedStepOutput`、`lastFailureDiagnostics`、replan/ticket context 中都无法找到当前失败时触发。若当前失败已存在于 package、process evidence 或 resolved context gate ticket 中，runtime 必须先 hydrate canonical repair context，而不是创建新的人工 decision ticket。
+
 若 `coverageRepairRequired` 已由 missingDoDItems / missingGoalCoverage / missingDeliverableCoverage 触发，但 `coverageTargetSet` 因预算整形或输入整理暂时缺失，runtime 应先自动从现有缺口事实补齐中立 `coverageTargetSet` 再重试；只有当前输入里确实没有任何可辨认的 coverage 缺口事实时，才允许 `coverage_repair_required_without_coverage_target_set` 进入 fail-fast 或 blocker 流程。
 
 Repair / replan continuation 的过程证据缺失也属于 P0-P4 必要字段缺失。若 provider input 显示当前是 `runtimeRepairFollowUp`、`stateChangingOutputRequired`、`runtimeStage=repair` 或带有 `replanContinuation`，但 `processEvidenceTimeline` / `currentProgressDigest` 不存在，context gate 必须输出 `runtime_repair_process_evidence_missing` 并 fail-fast；该失败不能交给普通 state-changing repair 处理。
@@ -997,6 +1004,8 @@ Context gate 的恢复必须由 runtime 结构化分流，而不是由普通 rep
 - `fail_fast`：不提交 provider，不进入 state-changing repair；创建 runtime context blocker 或直接终止当前 successor，错误中必须包含 `contextGateAction`、`contextGateReason` 和受影响 protected field。
 - `blocker_required`：创建 `blocked_on_decision`，上下文必须说明 missing field、source refs、为什么 runtime 无法自动获取。
 - `replan_required`：创建 successor lineage，携带 predecessor failure context 和仍有效的 Goal/DoD 合同。
+
+`runtime_context_required` 决策被 resolved 后，恢复动作只表示 runtime 获得继续构造上下文的授权或补充信息，禁止直接重放已失败的 `llm_context_integrity_failed` step。Orchestrator 必须创建新的 context retry step，并从 ticket context、failed step input、replan continuation、repairActionPackage、current snapshots 和 process evidence 中重新 hydrate `currentFailure`、`currentExecutionProgress`、requiredOutput 与 target evidence。若这些 P0/P1 字段仍无法恢复，runtime 必须进入明确的 replan / terminal / blocker 处置，不得生成同一原因的重复 context ticket。
 
 跨模块不变量：
 

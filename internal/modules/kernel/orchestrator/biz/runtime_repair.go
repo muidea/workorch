@@ -2153,7 +2153,7 @@ func runtimeRepairAttemptProgressSummaries(items []map[string]any) []map[string]
 	for idx := 0; idx < limit; idx++ {
 		item := items[idx]
 		next := map[string]any{}
-		for _, key := range []string{"stepId", "state", "attempt", "failureClass", "failureStage", "failureSummary"} {
+		for _, key := range []string{"stepId", "state", "attempt", "failureClass", "failureStage", "failureSummary", "rejectedOutputSummaryOmitted"} {
 			if value, ok := item[key]; ok && value != nil {
 				next[key] = compactLLMContextValue(value, 1)
 			}
@@ -3103,6 +3103,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	if len(input) == 0 {
 		return nil
 	}
+	enrichRepairInputWithProgressFailureSignals(input)
 	priorPackage := mapFromValue(input["repairActionPackage"])
 	requiredOutput := stateChangingRepairRequiredOutput()
 	pkg := map[string]any{
@@ -3357,33 +3358,117 @@ func applyConcreteRepairEvidenceOutputContract(input map[string]any, pkg map[str
 }
 
 func stateChangingRepairHasConcreteTargetEvidence(input map[string]any, pkg map[string]any) bool {
+	requireCurrentSnapshot := boolValue(input["requiresCurrentTargetSnapshotForStateChange"]) ||
+		boolValue(pkg["requiresCurrentTargetSnapshotForStateChange"])
 	if len(input) > 0 {
 		for _, key := range []string{"failureTargetRepairContext", "patchRepairContext", "rootCauseCandidateContext"} {
 			if len(mapSliceFromValue(input[key])) > 0 {
 				return true
 			}
 		}
-		if len(repairActionTargetSnapshots(input)) > 0 || len(coverageTargetSetFromRepairInput(input)) > 0 {
+		if len(repairActionTargetSnapshots(input)) > 0 {
 			return true
 		}
-		if signals := mapFromValue(input["structuredFailureSignals"]); len(signals) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
-			return true
+		if !requireCurrentSnapshot {
+			if len(coverageTargetSetFromRepairInput(input)) > 0 {
+				return true
+			}
+			if signals := mapFromValue(input["structuredFailureSignals"]); len(signals) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
+				return true
+			}
+			if progress := mapFromValue(input["currentExecutionProgress"]); progressHasConcreteTargetEvidence(progress) {
+				return true
+			}
 		}
 	}
 	if len(pkg) > 0 {
-		if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 ||
-			len(mapSliceFromValue(pkg["coverageTargetSet"])) > 0 ||
-			len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
+		if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 {
 			return true
 		}
-		if primary := mapFromValue(pkg["primaryDiagnosticRepair"]); len(primary) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(primary) {
-			return true
-		}
-		if signals := mapFromValue(pkg["structuredFailureSignals"]); len(signals) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
-			return true
+		if !requireCurrentSnapshot {
+			if len(mapSliceFromValue(pkg["coverageTargetSet"])) > 0 ||
+				len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
+				return true
+			}
+			if primary := mapFromValue(pkg["primaryDiagnosticRepair"]); len(primary) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(primary) {
+				return true
+			}
+			if signals := mapFromValue(pkg["structuredFailureSignals"]); len(signals) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
+				return true
+			}
+			if progress := mapFromValue(pkg["currentExecutionProgress"]); progressHasConcreteTargetEvidence(progress) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+func enrichRepairInputWithProgressFailureSignals(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	progress := mapFromValue(input["currentExecutionProgress"])
+	if len(progress) == 0 {
+		if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
+			progress = mapFromValue(pkg["currentExecutionProgress"])
+		}
+	}
+	signals := structuredFailureSignalsFromProgressEvidence(progress)
+	if len(signals) == 0 {
+		return
+	}
+	input["structuredFailureSignals"] = mergeStructuredFailureSignals(mapFromValue(input["structuredFailureSignals"]), signals)
+	if targetSet := filterAdmissibleRuntimeRepairTargetRefs(stringSliceFromValue(signals["targetRefs"])); len(targetSet) > 0 {
+		if existing := stringSliceFromValue(input["repairTargetSet"]); len(existing) > 0 {
+			targetSet = append(existing, targetSet...)
+		}
+		input["repairTargetSet"] = limitedStrings(compactUniqueStrings(targetSet), maxLLMContextSliceItems)
+	}
+	if strings.TrimSpace(stringFromMap(input, "failureTargetScope")) == "" {
+		if targetRefs := stringSliceFromValue(signals["targetRefs"]); len(targetRefs) > 0 {
+			input["failureTargetScope"] = "failureTargets=" + strings.Join(limitedStrings(targetRefs, maxLLMContextSliceItems), ",")
+		}
+	}
+}
+
+func progressHasConcreteTargetEvidence(progress map[string]any) bool {
+	return len(progress) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(structuredFailureSignalsFromProgressEvidence(progress))
+}
+
+func structuredFailureSignalsFromProgressEvidence(progress map[string]any) map[string]any {
+	if len(progress) == 0 {
+		return nil
+	}
+	merged := map[string]any{}
+	add := func(output map[string]any) {
+		if len(output) == 0 {
+			return
+		}
+		signals := structuredFailureSignalsFromFailureOutput(output, nil, "", "")
+		if len(signals) == 0 {
+			return
+		}
+		merged = mergeStructuredFailureSignals(merged, signals)
+	}
+	for _, key := range []string{"latestActionEvidence", "completedGraphEvidence"} {
+		for _, item := range mapSliceFromValue(progress[key]) {
+			output := mapFromValue(item["outputSummary"])
+			if len(output) == 0 {
+				output = mapFromValue(item["output"])
+			}
+			add(output)
+		}
+	}
+	add(map[string]any{
+		"error":                   stringFromMap(progress, "failureReason"),
+		failureOutputKeyClass:     stringFromMap(progress, "failureClass"),
+		failureOutputKeySignature: stringFromMap(progress, failureOutputKeySignature),
+	})
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
 }
 
 func structuredFailureSignalsHaveConcreteTargetEvidence(signals map[string]any) bool {
@@ -3982,7 +4067,7 @@ func repairFailureSignalTexts(output map[string]any, execErr error, failureClass
 		}
 		ret[source] = value
 	}
-	for _, key := range []string{"stderr", "stdout", "error", "reason", failureOutputKeySignature, "failureCategory"} {
+	for _, key := range []string{"stderr", "stdout", "stderrPreview", "stdoutPreview", "error", "reason", failureOutputKeySignature, "failureCategory"} {
 		add(key, stringFromMap(output, key))
 	}
 	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
@@ -6096,12 +6181,17 @@ func (o *RuntimeOrchestrator) recentRuntimeRepairAttemptSummaries(ctx context.Co
 			continue
 		}
 		item := map[string]any{
-			"stepId":         string(step.ID),
-			"state":          string(step.State),
-			"attempt":        runtimeRepairAttemptValue(step),
-			"failureClass":   stringFromMap(step.Output, failureOutputKeyClass),
-			"failureStage":   stringFromMap(step.Output, "stage"),
-			"failureSummary": firstNonEmptyString(stringFromMap(step.Output, "summary"), stringFromMap(step.Output, "error"), stringFromMap(step.Output, "reason")),
+			"stepId":       string(step.ID),
+			"state":        string(step.State),
+			"attempt":      runtimeRepairAttemptValue(step),
+			"failureClass": stringFromMap(step.Output, failureOutputKeyClass),
+			"failureStage": stringFromMap(step.Output, "stage"),
+		}
+		if summary := runtimeRepairAttemptFailureSummary(step); summary != "" {
+			item["failureSummary"] = summary
+		}
+		if rejectedLLMDecisionOutputForProgress(step) {
+			item["rejectedOutputSummaryOmitted"] = true
 		}
 		if missing := missingDoDItemsFromFailureOutput(step.Output); len(missing) > 0 {
 			item["missingDoDItems"] = missing
@@ -6115,6 +6205,16 @@ func (o *RuntimeOrchestrator) recentRuntimeRepairAttemptSummaries(ctx context.Co
 		ret = ret[len(ret)-limit:]
 	}
 	return ret
+}
+
+func runtimeRepairAttemptFailureSummary(step *runModel.Step) string {
+	if step == nil {
+		return ""
+	}
+	if rejectedLLMDecisionOutputForProgress(step) {
+		return firstNonEmptyString(stringFromMap(step.Output, "error"), stringFromMap(step.Output, "reason"), stringFromMap(step.Output, failureOutputKeySignature))
+	}
+	return firstNonEmptyString(stringFromMap(step.Output, "summary"), stringFromMap(step.Output, "error"), stringFromMap(step.Output, "reason"))
 }
 
 func runtimeRepairAttemptValue(step *runModel.Step) int {

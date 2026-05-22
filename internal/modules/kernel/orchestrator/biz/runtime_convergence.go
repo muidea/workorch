@@ -77,6 +77,7 @@ func BuildConvergenceContract(
 			}
 		}
 	}
+	enrichRepairInputWithProgressFailureSignals(input)
 	contract := ConvergenceContract{
 		State:            convergenceStateBlocked,
 		RuntimeStage:     runtimeStageRepair,

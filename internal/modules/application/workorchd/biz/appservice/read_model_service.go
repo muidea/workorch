@@ -1417,8 +1417,12 @@ func mapWorkspaceWithRunProjection(workspace *workspacemodel.Workspace, run *run
 	ret.State = string(workspaceProjectionState(run.State))
 	if isTerminalProjectionRunState(run.State) {
 		ret.ActiveRunID = ""
+		ret.BlockingTicketID = ""
+		ret.BlockingApprovalID = ""
 	} else {
 		ret.ActiveRunID = string(run.ID)
+		ret.BlockingTicketID = string(run.BlockingTicketID)
+		ret.BlockingApprovalID = string(run.BlockingApprovalID)
 	}
 	return ret
 }

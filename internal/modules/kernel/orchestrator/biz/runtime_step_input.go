@@ -45,7 +45,7 @@ func initialStepInput(run *runModel.Run) map[string]any {
 				input["concreteFailureEvidenceRequired"] = true
 				input["repairGuidance"] = concreteFailureEvidenceAcquisitionGuidance()
 			}
-			if reassessment := strategyReassessmentFromReplanContinuation(run); repairActionPackageRequiresStateChangingOutput(actionPackage) && len(reassessment) > 0 {
+			if reassessment := strategyReassessmentFromReplanContinuation(run); len(reassessment) > 0 {
 				input["strategyReassessment"] = reassessment
 				input["targetRepairAttempts"] = int64FromValue(reassessment["targetRepairAttempts"])
 				input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
@@ -105,6 +105,7 @@ func repairActionPackageFromReplanContinuation(run *runModel.Run) map[string]any
 		},
 		"predecessorRunId": stringFromMap(continuation, "predecessorRunId"),
 		"reason":           stringFromMap(continuation, "reason"),
+		"requiresCurrentTargetSnapshotForStateChange": true,
 	}
 	if continuationPkg := mapFromValue(continuation["repairActionPackage"]); len(continuationPkg) > 0 {
 		for key, value := range continuationPkg {

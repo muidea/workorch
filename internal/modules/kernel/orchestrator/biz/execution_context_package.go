@@ -42,7 +42,84 @@ func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run
 	if digest := mapFromValue(pkg[stepInputKeyCurrentProgressDigest]); len(digest) > 0 {
 		step.Input[stepInputKeyCurrentProgressDigest] = digest
 	}
+	promoteRepairActionPackageContext(step.Input)
 	_ = o.recordLLMStepInputMemoryRecallTrace(ctx, run, step, pkg)
+}
+
+func promoteRepairActionPackageContext(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		return
+	}
+	if digest := mapFromValue(input[stepInputKeyCurrentProgressDigest]); currentProgressDigestIsActionableFailure(digest) {
+		progress := compactLLMContextMap(digest, 0)
+		input["currentExecutionProgress"] = progress
+		pkg["currentExecutionProgress"] = progress
+		if currentFailure := currentFailureFromProgressDigest(digest); len(currentFailure) > 0 {
+			input["currentFailure"] = currentFailure
+			pkg["currentFailure"] = currentFailure
+		}
+		input["repairActionPackage"] = pkg
+		return
+	}
+	if len(mapFromValue(input["currentFailure"])) == 0 {
+		if currentFailure := mapFromValue(pkg["currentFailure"]); len(currentFailure) > 0 {
+			input["currentFailure"] = compactLLMContextMap(currentFailure, 1)
+		}
+	}
+	if len(mapFromValue(input["currentExecutionProgress"])) == 0 {
+		if progress := mapFromValue(pkg["currentExecutionProgress"]); len(progress) > 0 {
+			input["currentExecutionProgress"] = compactLLMContextMap(progress, 0)
+		}
+	}
+}
+
+func currentProgressDigestIsActionableFailure(digest map[string]any) bool {
+	if len(digest) == 0 {
+		return false
+	}
+	failure := mapFromValue(digest["lastObservedFailure"])
+	if len(failure) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(failure, "evidenceValidity")) == "actionable_failure" &&
+		(strings.TrimSpace(stringFromMap(failure, "kind")) == "shell/command" ||
+			strings.TrimSpace(stringFromMap(failure, "kind")) == "patch/apply") {
+		return true
+	}
+	switch strings.TrimSpace(stringFromMap(failure, "failureClass")) {
+	case failureClassShellCommand, failureClassPatchApply:
+		return true
+	default:
+		return false
+	}
+}
+
+func currentFailureFromProgressDigest(digest map[string]any) map[string]any {
+	failure := mapFromValue(digest["lastObservedFailure"])
+	if len(failure) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	add := func(key string, value string) {
+		if value = strings.TrimSpace(value); value != "" {
+			ret[key] = value
+		}
+	}
+	add("failedStepId", stringFromMap(failure, "stepId"))
+	add("failedStepKind", stringFromMap(failure, "kind"))
+	add("failureClass", stringFromMap(failure, "failureClass"))
+	add("failureSignature", stringFromMap(failure, "failureSignature"))
+	add("reason", firstNonEmptyString(stringFromMap(failure, "failureReason"), stringFromMap(digest, "currentGap")))
+	add("targetRef", stringFromMap(failure, "targetRef"))
+	add("targetScope", stringFromMap(failure, "targetScope"))
+	if len(ret) == 0 {
+		return nil
+	}
+	return compactLLMContextMap(ret, 1)
 }
 
 func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, run *runModel.Run, step *runModel.Step, workspace *workspaceModel.Workspace) map[string]any {
@@ -143,6 +220,9 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		if shouldCompactProcessEvidenceForStateChangingRepair(step) {
 			processTimeline = compactProcessEvidenceTimelineForStateChangingRepair(processTimeline, step)
 			progressDigest = currentProgressDigestFromProcessEvidenceTimeline(processTimeline)
+			if currentProgressDigest := currentProgressDigestFromCurrentExecutionProgress(step.Input, progressDigest); len(currentProgressDigest) > 0 {
+				progressDigest = currentProgressDigest
+			}
 		}
 		ret[stepInputKeyProcessEvidenceTimeline] = processTimeline
 	}
@@ -183,6 +263,69 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		ret["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(governanceHistory, 6)
 	}
 	return ret
+}
+
+func currentProgressDigestFromCurrentExecutionProgress(input map[string]any, previous map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	progress := mapFromValue(input["currentExecutionProgress"])
+	if len(progress) == 0 {
+		progress = mapFromValue(mapFromValue(input["repairActionPackage"])["currentExecutionProgress"])
+	}
+	if len(progress) == 0 {
+		return nil
+	}
+	for _, key := range []string{"latestActionEvidence", "completedGraphEvidence"} {
+		for _, item := range mapSliceFromValue(progress[key]) {
+			output := mapFromValue(item["outputSummary"])
+			if len(output) == 0 {
+				output = mapFromValue(item["output"])
+			}
+			if len(output) == 0 || !structuredFailureSignalsHaveConcreteTargetEvidence(structuredFailureSignalsFromFailureOutput(output, nil, "", "")) {
+				continue
+			}
+			reason := truncateLLMContextString(firstNonEmptyString(
+				stringFromMap(output, "stderrPreview"),
+				stringFromMap(output, "stdoutPreview"),
+				stringFromMap(output, "stderr"),
+				stringFromMap(output, "stdout"),
+				stringFromMap(output, "error"),
+				stringFromMap(output, "reason"),
+				stringFromMap(output, "summary"),
+			))
+			if strings.TrimSpace(reason) == "" {
+				continue
+			}
+			ret := cloneStepPayload(previous)
+			if ret == nil {
+				ret = map[string]any{}
+			}
+			failure := map[string]any{
+				"stepId":           stringFromMap(item, "stepId"),
+				"kind":             stringFromMap(item, "kind"),
+				"state":            stringFromMap(item, "state"),
+				"failureReason":    reason,
+				"evidenceValidity": "actionable_failure",
+			}
+			if failure["kind"] == "shell/command" {
+				failure["failureClass"] = failureClassShellCommand
+			} else if class := strings.TrimSpace(stringFromMap(progress, "failureClass")); class != "" {
+				failure["failureClass"] = class
+			}
+			if source := strings.TrimSpace(stringFromMap(item, "source")); source != "" {
+				failure["source"] = source
+			}
+			if nodeID := strings.TrimSpace(stringFromMap(item, "graphNodeId")); nodeID != "" {
+				failure["graphNodeId"] = nodeID
+			}
+			ret["lastObservedFailure"] = failure
+			ret["currentGap"] = reason
+			ret["nextRequiredAction"] = "address_last_failure_under_current_stage_contract"
+			return ret
+		}
+	}
+	return nil
 }
 
 func removeExcludedSelectedContextMemories(selected map[string]any, retrieval map[string]any) map[string]any {
