@@ -655,6 +655,64 @@ func TestActivationObservableRunState(t *testing.T) {
 	}
 }
 
+func TestActivateWorkspaceExecutionWithBackendUsesNumericRunSequence(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-run-sequence", "activation run sequence workspace", "", "workspaces/activation-run-sequence")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "activation run sequence goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"activation run sequence dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	for _, runID := range []string{"run-001", "run-007", "run-legacyabcdef12345678"} {
+		if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, workspace.ID, runID, goal.ID, dod.ID); err != nil {
+			t.Fatalf("CreateRunWithBackend %s: %v", runID, err)
+		}
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	if item.Run.ID != "run-008" {
+		t.Fatalf("activation run id = %q, want run-008", item.Run.ID)
+	}
+}
+
+func TestActivateWorkspaceExecutionWithBackendContinuesRunSequenceAfterRestart(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-run-restart-sequence", "activation run restart sequence workspace", "", "workspaces/activation-run-restart-sequence")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "activation run restart sequence goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"activation run restart sequence dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, workspace.ID, "run-099", goal.ID, dod.ID); err != nil {
+		t.Fatalf("CreateRunWithBackend seed: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	if item.Run.ID != "run-100" {
+		t.Fatalf("activation run id = %q, want run-100", item.Run.ID)
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendRequiresGoalAndDoD(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()

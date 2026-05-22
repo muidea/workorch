@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -2265,7 +2266,10 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 		return "", err
 	}
 	for attempt := 0; attempt < 8; attempt++ {
-		runID := common.RunID(generateBusinessID("run"))
+		runID, err := nextWorkspaceExecutionRunID(ctx, exports.Repositories.Runs)
+		if err != nil {
+			return "", err
+		}
 		createExecutionContext := executionContextForCreatedWorkspaceRun(runID, workspaceID, goalID, dodID, executionContext, priority)
 		if err := exports.Services.RunService.CreateRun(ctx, runmodule.CreateRunCommand{
 			RunID:            runID,
@@ -2300,6 +2304,49 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 		return runID, nil
 	}
 	return "", common.ErrConflict
+}
+
+func nextWorkspaceExecutionRunID(ctx context.Context, runs repository.RunRepository) (common.RunID, error) {
+	if runs == nil {
+		return "", common.ErrInvalidArgument
+	}
+	items, err := runs.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	maxSeq := 0
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if seq, ok := parseNumericRunID(item.ID); ok && seq > maxSeq {
+			maxSeq = seq
+		}
+	}
+	return common.RunID(formatNumericRunID(maxSeq + 1)), nil
+}
+
+func parseNumericRunID(runID common.RunID) (int, bool) {
+	raw := strings.TrimSpace(string(runID))
+	if !strings.HasPrefix(raw, "run-") {
+		return 0, false
+	}
+	suffix := strings.TrimPrefix(raw, "run-")
+	if suffix == "" {
+		return 0, false
+	}
+	seq, err := strconv.Atoi(suffix)
+	if err != nil || seq <= 0 {
+		return 0, false
+	}
+	return seq, true
+}
+
+func formatNumericRunID(seq int) string {
+	if seq < 1 {
+		seq = 1
+	}
+	return fmt.Sprintf("run-%03d", seq)
 }
 
 func isActivationObservableRunState(state common.RunState) bool {

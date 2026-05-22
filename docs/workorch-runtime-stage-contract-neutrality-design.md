@@ -1326,6 +1326,25 @@ graph-002-007-run-go-test--h-abc123
 
 不得使用纯 base64 或纯 hash 作为主路径。
 
+### Run ID Sequence Contract
+
+Run ID 是 runtime 执行状态的主定位符，必须优先使用可读、递增、稳定的形式。自动创建的 workspace execution run 不得再使用随机 hex/hash 字符串，应使用全局数字自增格式：
+
+```text
+run-001
+run-002
+run-003
+```
+
+规则：
+
+- 自动 activation 创建 Run 时，runtime 必须扫描当前 Run 仓库中已有的 `run-<positive-int>`，取最大值后加一。该扫描必须基于持久化 Run 仓库，服务重启后继续复用已存在最大值，不得从 1 重新开始。
+- 自动 Run ID 至少 3 位数字宽度，1 到 999 使用零填充，1000 以后自然扩展为更多位，保证常规文件名和列表按字典序排序时仍符合执行顺序。
+- 历史随机 Run ID、人工指定的非数字 Run ID、测试固定 Run ID 不参与序列计算。
+- 若并发创建发生冲突，必须重新读取现有 Run 列表并再次分配下一个数字序列，不得回退到随机 ID。
+- Run ID 序列只表达执行顺序，不表达业务领域、任务类型、Goal/DoD 语义或模板语义，保持核心框架中立。
+- Step、ToolCall、Patch、Result、Artifact 等 run-scoped ID 可以继续以 Run ID 为可读前缀派生，但不得把随机 hash/base64 作为主路径。
+
 ### Raw Payload Ref
 
 `workorch://` raw payload ref 必须使用同一可读层级规则：

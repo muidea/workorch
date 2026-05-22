@@ -27,6 +27,11 @@ maxRuntimeRepairAttempts = 10
 maxProviderRetryAttempts = 10
 shellCommandTimeout = "60s"
 
+[runtime.git]
+enabled = true
+writeEnabled = true
+defaultTimeout = "30s"
+
 [llm]
 defaultProvider = "local"
 defaultEmbeddingProvider = ""

@@ -947,6 +947,8 @@ Git 仓库。
 | GT13 | patch 关系 | 文件内容修改仍由 `patch/apply` 承担 |
 | GT14 | 并发漂移 | 用 `expectedHead` 与前后状态证据收口 |
 | GT15 | 证据输出 | ToolCall 输出结构化 Git 字段 |
+| GT16 | 配置样例 | `config/file`、`config/container-file` 和本机默认配置显式声明 `[runtime.git]` |
+| GT17 | LLM 能力注入 | runtimeCapabilities 按 `runtime.git.enabled/writeEnabled` 注入 `git/read`、`git/write` |
 
 ## 验收标准
 
