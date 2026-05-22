@@ -429,6 +429,9 @@ func (o *RuntimeOrchestrator) shouldBlockOnDuplicateRuntimeFailure(ctx context.C
 	if signature == "" || !runtimeFailureEligibleForDuplicateEscalation(failedStep, class) || attempts == 0 {
 		return false
 	}
+	if runtimeFailureCanContinueMechanicallyBeforeDuplicateEscalation(class, targetScope, attempts, o.maxRuntimeRepairAttempts()) {
+		return false
+	}
 	if requiresDoDAssessmentCompletionGate(run) && attempts < o.maxRuntimeRepairAttempts() &&
 		!runtimeFailureTargetUsesRunBudget(class, targetScope) &&
 		class != failureClassLLMDecisionInvalid &&
@@ -463,6 +466,21 @@ func (o *RuntimeOrchestrator) shouldBlockOnDuplicateRuntimeFailure(ctx context.C
 		return false
 	}
 	return true
+}
+
+func runtimeFailureCanContinueMechanicallyBeforeDuplicateEscalation(class string, targetScope string, attempts int, maxAttempts int) bool {
+	if attempts <= 0 || maxAttempts <= 0 || attempts >= maxAttempts {
+		return false
+	}
+	if strings.TrimSpace(targetScope) == "" {
+		return false
+	}
+	switch strings.TrimSpace(class) {
+	case failureClassPatchApply:
+		return true
+	default:
+		return false
+	}
 }
 
 func duplicateRepairDecisionFailureClass(class string) bool {

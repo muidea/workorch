@@ -3004,6 +3004,76 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *te
 	}
 }
 
+func TestRuntimeOrchestrator_PatchApplyDuplicateFailureContinuesMechanicalRepair(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	runID := common.RunID("run-patch-duplicate-repair")
+	signature := "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|targetRef=source.txt|error=context mismatch"
+	current := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-002/001-apply"),
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"targetRef": "source.txt",
+			"patchType": "unified_diff",
+		},
+		Output: map[string]any{
+			"stage":                   "patch_apply",
+			"error":                   "invalid argument: unified diff hunk context mismatch",
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: signature,
+		},
+	}
+	prior := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/001-apply"),
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{"targetRef": "source.txt"},
+		Output: map[string]any{
+			"stage":                   "patch_apply",
+			"error":                   "invalid argument: unified diff hunk context mismatch",
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: signature,
+		},
+	}
+	repairAttempt := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001-of-graph-001-001-apply"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRepairOfFailureClass:  failureClassPatchApply,
+			stepInputKeyRepairOfFailureSig:    signature,
+			"failureTargetScope":              "targetRef=source.txt",
+		},
+		Output: map[string]any{"status": "completed"},
+	}
+	for _, step := range []*runmodel.Step{prior, repairAttempt, current} {
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+	}
+	orch := &RuntimeOrchestrator{
+		steps:   stepRepo,
+		tickets: ticketRepo,
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: common.WorkspaceID("ws-patch-duplicate-repair"),
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+
+	if orch.shouldBlockOnDuplicateRuntimeFailure(ctx, run, current) {
+		t.Fatalf("shouldBlockOnDuplicateRuntimeFailure = true, want false for budgeted patch/apply target repair")
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchRepairSuggestions(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
