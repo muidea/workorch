@@ -1114,6 +1114,8 @@ func restoreRepairContractAfterConcreteEvidenceAcquisition(input map[string]any,
 		input["structuredFailureSignals"] = compactLLMContextMap(signals, 1)
 	}
 	input["repairActionPackage"] = actionPackage
+	contract := BuildConvergenceContract(nil, nil, source, map[string]any{"input": input}, map[string]any{"sourceRef": string(source.ID)})
+	input = ApplyConvergenceContract(input, contract)
 	return input
 }
 

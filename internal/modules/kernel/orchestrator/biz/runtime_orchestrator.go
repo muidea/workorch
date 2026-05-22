@@ -897,6 +897,9 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 		replanContext["resolutionPayload"] = compactDecisionPayloadForRuntimeContext(resolution.Payload)
 	}
 	successorContext["replanContinuation"] = compactReplanContinuationForRuntimeContext(replanContext)
+	if contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": successorContext}, nil); contract.State != "" {
+		successorContext["convergenceContract"] = compactConvergenceContract(contract)
+	}
 	successor := &runModel.Run{
 		ID:               successorID,
 		WorkspaceID:      run.WorkspaceID,
@@ -1383,12 +1386,16 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	nextStepID, nextKind := nextStepSpec(output)
 	if decisionSpec := decisionBlockSpec(output); decisionSpec.Reason != "" {
 		decisionSpec.Context = o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, workspace, decisionSpec.Context, decisionSpec.Question, decisionSpec.Reason)
-		if assessmentOnlyDecisionShouldRepair(step, decisionSpec) || continuableDecisionShouldRepair(step, decisionSpec) {
+		decisionOutput := decisionOutputFromSpec(decisionSpec)
+		convergenceContract := BuildConvergenceContract(run, step, step, map[string]any{"input": step.Input}, map[string]any{"llmOutput": decisionOutput})
+		if assessmentOnlyDecisionShouldRepair(step, decisionSpec) || continuableDecisionShouldRepair(step, decisionSpec) || !ShouldCreateDecisionTicket(step.Input, decisionOutput, convergenceContract) {
 			if assessmentOnlyDecisionShouldRepair(step, decisionSpec) {
 				output["assessmentOnlyDecisionConvertedToRepair"] = true
 			} else {
 				output["continuableDecisionConvertedToRepair"] = true
 			}
+			output["convertedDecisionGate"] = "convergence_contract"
+			output["convergenceContract"] = compactConvergenceContract(convergenceContract)
 			output["convertedDecision"] = convertedDecisionPayload(decisionSpec)
 			output[stepOutputKeyDoDAssessment] = assessmentOnlyDecisionRepairAssessment(run, step, decisionSpec)
 			delete(output, stepOutputKeyBlockDecisionReason)
@@ -3941,6 +3948,8 @@ func assessmentOnlyContractCorrectionStepInput(step *runModel.Step, output map[s
 		sanitized["assessmentOnlyContractViolation"] = true
 		input["previousInvalidAssessmentOutput"] = compactStepOutputForLLMContext(sanitized)
 	}
+	contract := BuildConvergenceContract(nil, step, step, map[string]any{"input": input}, nil)
+	input = ApplyConvergenceContract(input, contract)
 	return input
 }
 

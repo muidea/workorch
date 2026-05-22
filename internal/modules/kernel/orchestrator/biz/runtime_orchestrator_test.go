@@ -2915,6 +2915,10 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *te
 	if len(patchContext) != 1 {
 		t.Fatalf("patchRepairContext = %#v, want one snapshot", input["patchRepairContext"])
 	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want need_state_change for patch hunk mismatch", contract)
+	}
 	item := patchContext[0]
 	if item["targetRef"] != "source.txt" || item["exists"] != true || item["source"] != "current_workspace_file" {
 		t.Fatalf("patchRepairContext item = %#v, want current source.txt snapshot", item)
@@ -2959,6 +2963,10 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *te
 	if len(previewPatchContext) != 1 {
 		t.Fatalf("patchRepairContext for preview = %#v, want one snapshot", previewInput["patchRepairContext"])
 	}
+	previewContract := mapFromValue(previewInput["convergenceContract"])
+	if stringFromMap(previewContract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract for preview = %+v, want need_state_change", previewContract)
+	}
 	if previewPatchContext[0]["targetRef"] != "source.txt" {
 		t.Fatalf("patchRepairContext for preview = %#v, want source.txt target", previewPatchContext[0])
 	}
@@ -2985,6 +2993,10 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *te
 	editPatchContext := mapSliceFromValue(editInput["patchRepairContext"])
 	if len(editPatchContext) != 1 || editPatchContext[0]["targetRef"] != "source.txt" {
 		t.Fatalf("patchRepairContext for file/edit conflict = %#v, want source.txt snapshot", editInput["patchRepairContext"])
+	}
+	editContract := mapFromValue(editInput["convergenceContract"])
+	if stringFromMap(editContract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract for file/edit conflict = %+v, want need_state_change", editContract)
 	}
 	editGuidance := strings.Join(stringSliceFromValue(editInput["repairGuidance"]), "\n")
 	if !strings.Contains(editGuidance, "file/edit oldText conflict") || !strings.Contains(editGuidance, "current target snapshot") {
@@ -3091,6 +3103,10 @@ func TestRuntimeOrchestrator_RuntimeRepairInputDetectsAlreadySatisfiedFailedPatc
 	}
 	if input["stateChangeAlreadySatisfiedByCurrentTarget"] != true {
 		t.Fatalf("stateChangeAlreadySatisfiedByCurrentTarget = %#v, want true", input["stateChangeAlreadySatisfiedByCurrentTarget"])
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want need_validation for already-satisfied failed patch", contract)
 	}
 	actionPackage := mapFromValue(input["repairActionPackage"])
 	required := mapFromValue(actionPackage["requiredOutput"])
@@ -20622,6 +20638,10 @@ func TestRuntimeRepairInputUsesEvidenceAcquisitionForExecutionShellFailureWithou
 		input["concreteFailureEvidenceRequired"] != true {
 		t.Fatalf("repair input = %+v, want evidence acquisition without concrete failure target", input)
 	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedEvidence {
+		t.Fatalf("convergenceContract = %+v, want need_evidence for shell failure without concrete target", contract)
+	}
 	if input[stepInputKeyRepairOfStepID] != string(failedStep.ID) ||
 		input["failedGraphNodeId"] != "run_go_test" {
 		t.Fatalf("repair input = %+v, want failed graph node lineage", input)
@@ -20672,6 +20692,10 @@ func TestRuntimeRepairInputRequiresStateChangingForExecutionShellFailureWithConc
 	if input["stateChangingOutputRequired"] != true ||
 		input["repairObjective"] != repairObjectiveStateChangingOutput {
 		t.Fatalf("repair input = %+v, want concrete target shell failure to require state-changing repair", input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want need_state_change for concrete target shell failure", contract)
 	}
 	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
 	if required["mustIncludeStateChangingNode"] != true ||

@@ -299,6 +299,16 @@ func convertedDecisionPayload(spec runtimeDecisionBlockSpec) map[string]any {
 	return payload
 }
 
+func decisionOutputFromSpec(spec runtimeDecisionBlockSpec) map[string]any {
+	return map[string]any{
+		stepOutputKeyBlockDecisionReason:   spec.Reason,
+		stepOutputKeyBlockDecisionTicketID: string(spec.TicketID),
+		stepOutputKeyBlockDecisionKind:     spec.DecisionKind,
+		stepOutputKeyBlockDecisionQuestion: spec.Question,
+		stepOutputKeyBlockDecisionContext:  cloneStepPayload(spec.Context),
+	}
+}
+
 func normalizedDecisionRepairText(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	replacer := strings.NewReplacer(" ", "", "\t", "", "\n", "", "\r", "", "-", "", "_", "", "/", "", "\\", "", ".", "")
@@ -411,6 +421,11 @@ func (o *RuntimeOrchestrator) createDecisionTicket(
 	if o.tickets == nil {
 		return common.ErrInvalidArgument
 	}
+	output := decisionOutputFromSpec(spec)
+	contract := BuildConvergenceContract(run, step, step, map[string]any{"input": step.Input}, map[string]any{"llmOutput": output})
+	if !ShouldCreateDecisionTicket(step.Input, output, contract) {
+		return common.ErrInvalidArgument
+	}
 
 	ticket := &decisionmodel.Ticket{
 		ID:           spec.TicketID,
@@ -504,6 +519,7 @@ func decisionResolutionInput(ticket *decisionmodel.Ticket, resolution *decisionm
 			"resolutionType":    resolution.Type,
 			"resolutionPayload": cloneStepPayload(resolution.Payload),
 		},
+		"ticketContext": cloneStepPayload(ticket.Context),
 	}
 	if action := strings.TrimSpace(stringFromMap(resolution.Payload, "recoveryAction")); action != "" {
 		ret["decisionRecoveryAction"] = action
@@ -511,6 +527,8 @@ func decisionResolutionInput(ticket *decisionmodel.Ticket, resolution *decisionm
 			ret["providerRetryDecisionRetry"] = true
 		}
 	}
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": ret}, map[string]any{"ticketContext": ticket.Context, "resolution": resolution.Payload})
+	ret = ApplyConvergenceContract(ret, contract)
 	return ret
 }
 

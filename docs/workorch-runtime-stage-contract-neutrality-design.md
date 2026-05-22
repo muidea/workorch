@@ -1118,6 +1118,7 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
 | STG-07 | P1 | 更新验证脚本为 core + profile 两层 | core verifier 保持中立，profile verifier 检查软件开发映射 |
 | STG-08 | P2 | 清理旧的字符串匹配与领域化提示 | contract violation 使用结构化字段表达 |
 | STG-09 | P1 | 引入 Codex 启发的中立过程证据 timeline | LLM request 能看到按序排列的已有输出、最近动作、失败证据、当前缺口和下一步要求，且全部带 source refs |
+| CVC-01 | P0 | 引入统一 `ConvergenceContract` 与 decision ticket 门禁 | repair / validation / assessment / evidence acquisition / decision 写入路径先得到唯一 `need_*` 合同状态，再应用到 LLM input 或 ticket gate |
 
 ## 附录：当前落地记录
 
@@ -1214,6 +1215,39 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
   - 重复 failed surface 的 root-cause target shift 已支持中立 `rootCauseCandidateContext`：只有来自 manifest / same-scope resource / structured failure / current snapshot 等机械证据且存在当前快照的候选可作为不同 root cause target；同时 failure target 抽取已过滤裸运行产物标签和 duration / numeric measurement，避免非资源 token 污染 repair scope。
   - 软件开发行为约束继续由 software-dev workspaceTemplate / Soul / skill 承载；core 仅处理 step、stage、state、capability kind、evidence ref、failure class / signature 等中立运行事实。
   - software-dev 默认 Soul 已同步吸纳 Codex 启发的工程行为约束：规划阶段要求参考 `processEvidenceTimeline` / `currentProgressDigest` 做已有输出、最近失败、当前缺口和下一步要求分析；执行阶段要求先基于当前代码/当前快照/当前失败证据再改、沿用本地项目模式、保护 workspace 已有有效内容、避免无关重构和长期只调整测试；验证阶段要求先对齐最新过程证据和 closure evidence，避免旧失败覆盖后续成功证据。
+- 2026-05-22：
+  - 已启动 CVC-01 第一批代码收口。编号避开历史 `STG-10 Prompt / Memory 收口跟踪`，避免进度记录冲突。
+  - 新增 `ConvergenceContract` 中立合同结构与 `BuildConvergenceContract` / `ApplyConvergenceContract` / `ShouldCreateDecisionTicket` 统一入口；合同状态限定为 `need_evidence`、`need_state_change`、`need_validation`、`need_assessment`、`need_governance`、`blocked`。
+  - Runtime repair follow-up 与 concrete evidence acquisition follow-up 已接入 `ApplyConvergenceContract`，避免 `stateChangingOutputRequired`、`concreteFailureEvidenceRequired`、`repairObjective`、`repairActionPackage` 分散拼接后互相污染。
+  - LLM 返回 decision block 时，先通过 `ShouldCreateDecisionTicket` 判断：若当前合同为 `need_state_change` 且已有 concrete target evidence、未声明外部依赖，则转换为 continuable repair contract violation，不创建人工 ticket。
+  - `createDecisionTicket` 写入前也执行同一门禁；provider/config、context gate、repair exhausted 等真实治理阻塞继续通过结构化 context 声明 `scope` / `dependency` / `recoveryPolicy`。
+  - 已修正 assessment-only coverage correction 与 concrete validation evidence repair 的合同优先级：当 assessment-only 失败已转为 evidence repair 时，合同状态为 `need_validation`，并清理 assessment-only 标记，避免评估补正与验证取证互相污染。
+  - 已补回归测试覆盖 `need_state_change`、`need_evidence`、mechanically repairable decision 转 repair、外部治理 decision 保留 ticket；`go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过。
+  - 边界核对：本批新增/修改的 convergence 代码未引入软件开发、语言、测试框架或具体业务特判；全仓边界搜索仍存在历史测试、配置与 MCP/server 中立字段命中，未作为本批新增规则依据。
+- 2026-05-22：
+  - 已完成 CVC-01 第二批恢复入口收口。
+  - `decisionResolutionInput` 已接入 `ConvergenceContract`，resolved decision 只作为治理恢复信号；若 ticket context 仍携带 state-changing repairActionPackage / target evidence，恢复输入会回到 `need_state_change` 而不是停留在普通 `decision`。
+  - Replan successor 的初始 step input 已通过统一合同应用；当 `replanContinuation` 明确携带 predecessor repairActionPackage / target snapshots 且 run contract 要求 state change 时，首个 LLM step 进入 `runtimeStage=repair` 与 `need_state_change`。
+  - `replanContinuation.repairActionPackage` 已纳入 successor 首步合同来源；successor execution context 也记录 compact `convergenceContract`，用于后续审计当前唯一 `need_*` 状态。
+  - schema invalid / LLM decision invalid repair-of-repair 已继承上一轮 `repairActionPackage`、target snapshots、repairTargetSet、coverageTargetSet、structuredFailureSignals 等中立 evidence，避免丢失 concrete target evidence 后误降级为 `need_evidence`。
+  - 已补回归测试覆盖 decision resolved 后恢复 `need_state_change`、replan successor 首步继承 `need_state_change`、failed patch 已由当前 target 满足时进入 `need_validation`、schema invalid repair-of-repair 保持 state-changing contract。
+- 2026-05-22：
+  - 已完成 CVC-01 第三批收口。
+  - validation shell failure 入口已通过统一合同显式区分 `need_evidence` 与 `need_state_change`：无 concrete target 的 shell/tool 失败保持 bounded evidence acquisition；带 `failureTargets` / line refs / target snapshots 的失败继续进入 state-changing repair。
+  - provider-normalized invalid 输出已补显式合同回归：当上一轮 repair 已携带 target snapshots 与 state-changing contract 时，`llm_decision_invalid` / provider-normalized invalid 不再误降级为 provider retry 或普通 evidence acquisition，而是保持 `need_state_change`。
+  - patch/apply hunk mismatch、patch preview stale diff、`file/edit oldText` conflict 与 failed patch already satisfied 的端到端 repair follow-up 用例已补 `convergenceContract` 状态断言，确认 repair-of-repair 路径分别稳定落在 `need_state_change` 或 `need_validation`。
+  - 本批未新增需要人工决策的冲突；继续沿用 CVC-01 编号是为避免与既有 `STG-10` 记录冲突，该冲突已在第一批中记录并处理。
+- 2026-05-22：
+  - 已完成 CVC-01 第四批收口。
+  - assessment-only contract correction 已统一接入 `ConvergenceContract`，避免评估补正只靠局部标记而不写入统一合同。
+  - `rejectedResultContinuation` 已允许从 execution context 进入统一合同构造，并在缺少当前 concrete target evidence 时继续收口到 `need_evidence`，确保 predecessor rejected result 的结构化事实可被继承但不虚增状态变更。
+  - 新增回归测试覆盖 assessment-only correction 进入 `need_assessment`，以及 rejected result continuation 参与 `need_evidence` 合同构造。
+  - 本批未出现新的人工决策冲突，继续沿用 CVC-01 编号。
+- 2026-05-22：
+  - 已完成 CVC-01 第五批收口。
+  - `ConvergenceContract` 状态集已补默认 `blocked` 与 `need_governance` 回归，确保统一合同枚举闭环，`need_governance` 只在 runtime 依赖缺失时打开 ticket 门禁。
+  - 新增回归测试覆盖默认 blocked 合同、runtime dependency governance 合同，以及 decision ticket 门禁仍按外部依赖信号放行。
+  - 本批未出现新的人工决策冲突，继续沿用 CVC-01 编号。
 
 ## 非兼容性说明
 

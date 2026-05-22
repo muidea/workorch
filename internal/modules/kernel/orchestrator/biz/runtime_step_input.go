@@ -71,6 +71,8 @@ func initialStepInput(run *runModel.Run) map[string]any {
 			input["repairActionPackage"] = actionPackage
 		}
 	}
+	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
+	input = ApplyConvergenceContract(input, contract)
 	return input
 }
 
@@ -103,6 +105,13 @@ func repairActionPackageFromReplanContinuation(run *runModel.Run) map[string]any
 		},
 		"predecessorRunId": stringFromMap(continuation, "predecessorRunId"),
 		"reason":           stringFromMap(continuation, "reason"),
+	}
+	if continuationPkg := mapFromValue(continuation["repairActionPackage"]); len(continuationPkg) > 0 {
+		for key, value := range continuationPkg {
+			if value != nil {
+				pkg[key] = value
+			}
+		}
 	}
 	for _, key := range []string{
 		failureOutputKeyClass,

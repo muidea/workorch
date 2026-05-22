@@ -2619,6 +2619,13 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			input["currentTargetAlreadySatisfiesFailedPatch"] = satisfied
 			input["stateChangeAlreadySatisfiedByCurrentTarget"] = true
 		}
+		if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) == 0 &&
+			!boolValue(input["concreteFailureEvidenceRequired"]) &&
+			stringFromMap(input, "repairObjective") != repairObjectiveConcreteValidationEvidence &&
+			stringFromMap(input, "repairObjective") != repairObjectiveTransientExecutionRetry {
+			input["repairObjective"] = repairObjectiveStateChangingOutput
+			input["stateChangingOutputRequired"] = true
+		}
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Use patchRepairContext as the current target snapshot for patch repair; treat the failed patch text as stale or untrusted.",
 			"When the failure is a diff context mismatch or file/edit oldText conflict, do not retry the same stale hunk or oldText; rebuild the smallest patch from patchRepairContext.content/contentHash.",
@@ -2715,6 +2722,8 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"Use readableResourceRepairContext as current evidence; do not ask the operator to paste the same resource content.",
 		)
 	}
+	contract := BuildConvergenceContract(run, nil, failedStep, map[string]any{"input": input}, nil)
+	input = ApplyConvergenceContract(input, contract)
 	return input
 }
 
@@ -2786,6 +2795,11 @@ func inheritPriorRepairContext(input map[string]any, failedStep *runModel.Step) 
 		if reassessment := mapFromValue(failedStep.Input["strategyReassessment"]); len(reassessment) > 0 {
 			input["strategyReassessment"] = reassessment
 			inheritedStrategy = true
+		}
+	}
+	if len(mapFromValue(input["repairActionPackage"])) == 0 {
+		if pkg := mapFromValue(failedStep.Input["repairActionPackage"]); len(pkg) > 0 {
+			input["repairActionPackage"] = cloneStepPayload(pkg)
 		}
 	}
 	inheritedRootCauseCandidates := inherit("rootCauseCandidateContext")
@@ -3089,10 +3103,12 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	if len(input) == 0 {
 		return nil
 	}
+	priorPackage := mapFromValue(input["repairActionPackage"])
 	requiredOutput := stateChangingRepairRequiredOutput()
 	pkg := map[string]any{
 		"requiredOutput": requiredOutput,
 	}
+	mergePriorRepairActionPackageEvidence(pkg, requiredOutput, priorPackage)
 	if currentFailure := repairActionCurrentFailure(input, rawFailedOutput...); len(currentFailure) > 0 {
 		pkg["currentFailure"] = currentFailure
 	}
@@ -3240,6 +3256,40 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		return nil
 	}
 	return pkg
+}
+
+func mergePriorRepairActionPackageEvidence(pkg map[string]any, requiredOutput map[string]any, prior map[string]any) {
+	if len(pkg) == 0 || len(prior) == 0 {
+		return
+	}
+	for _, key := range []string{
+		"targetSnapshots",
+		"currentTargetSnapshots",
+		"repairTargetSet",
+		"coverageTargetSet",
+		"structuredFailureSignals",
+		"primaryDiagnosticRepair",
+		"failureTargetRepairContext",
+		"patchRepairContext",
+		"currentTargetAlreadySatisfiesFailedPatch",
+		"stateChangeAlreadySatisfiedByCurrentTarget",
+	} {
+		if _, ok := pkg[key]; ok || prior[key] == nil {
+			continue
+		}
+		pkg[key] = compactLLMContextValue(prior[key], 1)
+	}
+	if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 {
+		requiredOutput["mustTargetFailureScope"] = true
+		requiredOutput["mustUseCurrentTargetSnapshot"] = true
+		requiredOutput["forbiddenStalePatchReuse"] = true
+	}
+	if len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
+		requiredOutput["mustTargetRepairTargetSet"] = true
+	}
+	if len(mapSliceFromValue(pkg["coverageTargetSet"])) > 0 {
+		requiredOutput["mustDeclareCoverageTargets"] = true
+	}
 }
 
 func stateChangingRepairRequiredOutput() map[string]any {
