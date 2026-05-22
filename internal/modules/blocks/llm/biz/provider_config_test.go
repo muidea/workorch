@@ -228,7 +228,7 @@ func TestLoadProviderConfigAutoUsesConfiguredModelRegistryCapability(t *testing.
 	}
 }
 
-func TestLoadProviderConfigAutoKeepsExplicitBudgetOverrides(t *testing.T) {
+func TestLoadProviderConfigAutoIgnoresExplicitBudgetOverrides(t *testing.T) {
 	cfg, err := LoadProviderConfig("deepseek", map[string]string{
 		llmcommon.EnvProvider:                llmcommon.ProviderCompatible,
 		llmcommon.EnvBaseURL:                 "https://api.deepseek.com",
@@ -244,9 +244,34 @@ func TestLoadProviderConfigAutoKeepsExplicitBudgetOverrides(t *testing.T) {
 		t.Fatalf("load provider config: %v", err)
 	}
 	if cfg.ContextProfile.ContextWindowTokens != 1_000_000 ||
-		cfg.ContextProfile.MaxInputTokens != 12345 ||
-		cfg.ContextProfile.BytesHardLimit != 222222 {
-		t.Fatalf("context profile = %+v, want explicit max input/bytes preserved", cfg.ContextProfile)
+		cfg.ContextProfile.ReservedOutputTokens != 62_500 ||
+		cfg.ContextProfile.MaxInputTokens != 703_125 ||
+		cfg.ContextProfile.BytesHardLimit != 2_812_500 {
+		t.Fatalf("context profile = %+v, want auto budget derived from context window", cfg.ContextProfile)
+	}
+}
+
+func TestLoadProviderConfigAutoDerivesLargeBudgetFromConfiguredContextWindow(t *testing.T) {
+	cfg, err := LoadProviderConfig("minimax", map[string]string{
+		llmcommon.EnvProvider:           llmcommon.ProviderOpenAI,
+		llmcommon.EnvAPIKey:             "minimax-secret",
+		llmcommon.EnvModel:              "MiniMax-M2.7-highspeed",
+		llmcommon.EnvContextProfileMode: contextProfileModeAuto,
+		llmcommon.EnvContextWindow:      "204800",
+		llmcommon.EnvMaxInputTokens:     "159040",
+		llmcommon.EnvReservedOutput:     "4096",
+		llmcommon.EnvBytesHardLimit:     "98304",
+		llmcommon.EnvMaxRequestBytes:    "4194304",
+		llmcommon.EnvTokensPerByte:      "0.25",
+	})
+	if err != nil {
+		t.Fatalf("load provider config: %v", err)
+	}
+	if cfg.ContextProfile.ContextWindowTokens != 204800 ||
+		cfg.ContextProfile.ReservedOutputTokens != 12800 ||
+		cfg.ContextProfile.MaxInputTokens != 144000 ||
+		cfg.ContextProfile.BytesHardLimit != 576000 {
+		t.Fatalf("context profile = %+v, want auto MiniMax budget derived from 200k window", cfg.ContextProfile)
 	}
 }
 

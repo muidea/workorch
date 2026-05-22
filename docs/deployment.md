@@ -225,11 +225,27 @@ baseURL = "https://api.openai.com/v1"
 apiKey = "..."
 model = "..."
 timeout = "60s"
-disabled = false
+contextWindowTokens = 128000
 ```
 
 DeepSeek, MiniMax, and other services confirmed to work with the OpenAI SDK
 should also use `provider = "openai"` with their own `baseURL`.
+
+MiniMax example:
+
+```toml
+[llm]
+defaultProvider = "aiAPI-MiniMax"
+
+[llm.providers.aiAPI-MiniMax]
+provider = "openai"
+baseURL = "https://aiapi.example/v1"
+apiKey = "..."
+model = "MiniMax-M2.7-highspeed"
+timeout = "10m0s"
+streaming = true
+contextWindowTokens = 204800
+```
 
 Custom OpenAI-compatible endpoint:
 
@@ -243,7 +259,7 @@ baseURL = "http://127.0.0.1:11434/v1"
 apiKey = "local-key"
 model = "local-model"
 timeout = "60s"
-disabled = false
+contextWindowTokens = 32768
 ```
 
 Supported LLM fields:
@@ -254,7 +270,49 @@ Supported LLM fields:
 - `providers.<id>.apiKey`: bearer token used only inside `blocks/llm`
 - `providers.<id>.model`: model name sent to `/chat/completions`
 - `providers.<id>.timeout`: request timeout, default `60s`
+- `providers.<id>.streaming`: enable streaming transport when the provider supports it
+- `providers.<id>.contextWindowTokens`: model context window; in auto mode this is the only required context-capability input
 - `providers.<id>.disabled`: set to `true` to force explicit provider-unavailable failure
+
+By default, LLM context profile mode is auto. Auto mode derives runtime budgets
+from `contextWindowTokens` and the model capability table, and ordinary
+configuration should not include `maxInputTokens`, `reservedOutputTokens`,
+`bytesHardLimit`, `maxRequestBytes`, or `estimatedTokensPerByte`. Those fields
+are honored only when `contextProfileMode = "manual"` is set for advanced
+provider-specific compatibility or troubleshooting.
+
+Auto mode currently uses:
+
+```text
+reservedOutputTokens = min(max(contextWindowTokens / 16, 4096), 65536)
+maxInputTokens = floor((contextWindowTokens - reservedOutputTokens) * 0.75)
+bytesHardLimit = min(maxInputTokens / 0.25, 4 MiB)
+```
+
+Stage-aware runtime budgeting then applies a per-request ratio:
+
+| Stage | Ratio |
+| --- | ---: |
+| planning | 1.00 |
+| execution | 0.80 |
+| runtime repair | 1.00 |
+| validation / verification | 0.55 |
+| artifact / final / result | 0.50 |
+| decision / approval | 0.60 |
+| provider retry | 0.50 |
+
+For a 204800-token MiniMax profile, the base auto budget is:
+
+```text
+reservedOutputTokens = 12800
+maxInputTokens = 144000
+bytesHardLimit = 576000 bytes
+```
+
+That is `70.31%` of the full context window for input and `76.56%` for input
+plus reserved output. This is intentionally conservative and leaves room for
+output, tokenizer estimation error, provider gateway differences, and request
+envelope overhead.
 
 Current provider boundary:
 

@@ -345,6 +345,7 @@ func TestLLMProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 					MaxOutputTokens:        65536,
 					ReasoningEffort:        "high",
 					ThinkingBudgetTokens:   32768,
+					ContextProfileMode:     "manual",
 					ContextWindowTokens:    32768,
 					MaxInputTokens:         8192,
 					ReservedOutputTokens:   2048,
@@ -368,6 +369,7 @@ func TestLLMProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 		values["maxOutputTokens"] != "65536" ||
 		values["reasoningEffort"] != "high" ||
 		values["thinkingBudgetTokens"] != "32768" ||
+		values["contextProfileMode"] != "manual" ||
 		values["contextWindowTokens"] != "32768" ||
 		values["maxInputTokens"] != "8192" ||
 		values["reservedOutputTokens"] != "2048" ||
@@ -410,6 +412,40 @@ func TestLLMProviderValueSetsResolveConfiguredModelCapabilities(t *testing.T) {
 	if values["contextWindowTokens"] != "1000000" ||
 		values["contextCapabilitySource"] != "model_registry" {
 		t.Fatalf("provider values = %+v, want model registry capability projected", values)
+	}
+}
+
+func TestLLMProviderValuesOmitsAdvancedContextFieldsInAutoMode(t *testing.T) {
+	cfg := Config{
+		LLM: LLMConfig{
+			DefaultProvider: "reasoning",
+			Providers: map[string]LLMProviderConfig{
+				"reasoning": {
+					Provider:                "openai",
+					Model:                   "model",
+					ContextProfileMode:      "auto",
+					ContextWindowTokens:     204800,
+					MaxInputTokens:          159040,
+					ReservedOutputTokens:    4096,
+					SafetyRatio:             0.8,
+					ContextUtilizationRatio: 0.75,
+					BytesHardLimit:          98304,
+					MaxRequestBytes:         4194304,
+					EstimatedTokensPerByte:  0.25,
+				},
+			},
+		},
+	}
+
+	values := cfg.LLMProviderValues()
+	if values["contextProfileMode"] != "auto" ||
+		values["contextWindowTokens"] != "204800" {
+		t.Fatalf("provider values = %+v, want auto mode with context window", values)
+	}
+	for _, key := range []string{"maxInputTokens", "reservedOutputTokens", "safetyRatio", "contextUtilizationRatio", "bytesHardLimit", "maxRequestBytes", "estimatedTokensPerByte"} {
+		if _, exists := values[key]; exists {
+			t.Fatalf("provider values = %+v, want %s omitted in auto mode", values, key)
+		}
 	}
 }
 

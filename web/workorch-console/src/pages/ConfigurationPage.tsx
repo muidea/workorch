@@ -774,35 +774,41 @@ export function ConfigurationPage() {
                 <Form.Item name={['contextProfile', 'contextWindowTokens']} label="上下文窗口 Tokens">
                   <InputNumber min={0} style={{ width: '100%' }} />
                 </Form.Item>
-                <Form.Item name={['contextProfile', 'maxInputTokens']} label="最大输入 Tokens">
-                  <InputNumber min={0} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item name={['contextProfile', 'reservedOutputTokens']} label="保留输出 Tokens">
-                  <InputNumber min={0} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item name={['contextProfile', 'safetyRatio']} label="安全比例">
-                  <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item name={['contextProfile', 'contextUtilizationRatio']} label="上下文利用比例">
-                  <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item name={['contextProfile', 'bytesHardLimit']} label="请求字节硬限制">
-                  <InputNumber min={0} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item name={['contextProfile', 'maxRequestBytes']} label="最大请求字节数">
-                  <InputNumber min={0} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item name={['contextProfile', 'estimatedTokensPerByte']} label="Token/Byte 估算">
-                  <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item name={['contextProfile', 'inputTokenPrice']} label="输入 Token 单价">
-                  <InputNumber min={0} step={0.000001} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item name={['contextProfile', 'outputTokenPrice']} label="输出 Token 单价">
-                  <InputNumber min={0} step={0.000001} style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item name={['contextProfile', 'currency']} label="计费币种">
-                  <Input placeholder="USD" />
+                <Form.Item noStyle shouldUpdate={(previous, current) => previous.contextProfile?.profileMode !== current.contextProfile?.profileMode}>
+                  {({ getFieldValue }) => getFieldValue(['contextProfile', 'profileMode']) === 'manual' ? (
+                    <>
+                      <Form.Item name={['contextProfile', 'maxInputTokens']} label="最大输入 Tokens">
+                        <InputNumber min={0} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name={['contextProfile', 'reservedOutputTokens']} label="保留输出 Tokens">
+                        <InputNumber min={0} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name={['contextProfile', 'safetyRatio']} label="安全比例">
+                        <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name={['contextProfile', 'contextUtilizationRatio']} label="上下文利用比例">
+                        <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name={['contextProfile', 'bytesHardLimit']} label="请求字节硬限制">
+                        <InputNumber min={0} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name={['contextProfile', 'maxRequestBytes']} label="最大请求字节数">
+                        <InputNumber min={0} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name={['contextProfile', 'estimatedTokensPerByte']} label="Token/Byte 估算">
+                        <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name={['contextProfile', 'inputTokenPrice']} label="输入 Token 单价">
+                        <InputNumber min={0} step={0.000001} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name={['contextProfile', 'outputTokenPrice']} label="输出 Token 单价">
+                        <InputNumber min={0} step={0.000001} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name={['contextProfile', 'currency']} label="计费币种">
+                        <Input placeholder="USD" />
+                      </Form.Item>
+                    </>
+                  ) : null}
                 </Form.Item>
                 <Form.Item name="apiKey" label="API 密钥">
                   <Input.Password placeholder="留空表示保留已有 API 密钥" autoComplete="new-password" />

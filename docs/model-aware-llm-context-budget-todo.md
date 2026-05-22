@@ -2,11 +2,19 @@
 
 对应设计：
 
-- [model-aware-llm-context-budget-design.md](/home/rangh/aispace/workorch/docs/model-aware-llm-context-budget-design.md)
+- [model-aware-llm-context-budget-design.md](model-aware-llm-context-budget-design.md)
+- [workorch-llm-auto-context-profile-design.md](workorch-llm-auto-context-profile-design.md)
 
 ## 背景
 
-当前 WorkOrch 已具备基础的 LLM provider request context budget 保护，会在最终提交给 LLM 前按固定字节上限压缩上下文。下一轮需要进一步升级为模型感知的 token budget，以适配不同 LLM provider/model 的 context window 差异。
+当前 WorkOrch 已具备模型感知的 LLM provider request context budget 保护。运行时会根据 `contextWindowTokens` 或 `llm.modelCapabilities` 自动推导 token/byte 预算，在最终提交给 LLM 前执行分层压缩、阶段预算匹配和 context gate。
+
+配置原则已经收敛为：
+
+- 普通用户只配置 `provider` / `baseURL` / `apiKey` / `model` / `contextWindowTokens` 等必需字段。
+- `auto` 模式自动推导 `reservedOutputTokens`、`maxInputTokens`、`bytesHardLimit` 等预算字段。
+- `auto` 模式忽略旧配置中残留的高级预算字段，避免 stale `bytesHardLimit` 等字段压低大上下文模型能力。
+- `manual` 模式保留高级预算字段，作为 provider 网关限制、兼容性排障和临时控制的逃生口。
 
 ## 目标
 
@@ -22,7 +30,9 @@
 
 ### 已完成基础收口
 
-- 固定 bytes 级别的 provider request context budget 已接入最终 LLM 请求构造链路。
+- 模型感知的 provider request context budget 已接入最终 LLM 请求构造链路。
+- `auto` 模式按 `contextWindowTokens` 自动推导预算，默认 `contextUtilizationRatio=0.75`。
+- 对 204800 token 的 MiniMax profile，基础预算为 `reservedOutputTokens=12800`、`maxInputTokens=144000`、`bytesHardLimit=576000`。
 - 大 context 会在提交 provider 前进行分层压缩，并写入 `contextBudget` 元数据。
 - retryable provider timeout 不再直接导致 run 终态失败，会按 provider retry 规则自动重试。
 - provider timeout retry 耗尽后进入 decision 阻塞，避免静默失败，并允许用户补充处理策略。
@@ -36,7 +46,8 @@
   - `llm.ProviderConfig`
   - `RedactedProviderConfig`
 - `CTX-02 Token Budget Estimation` 已接入预算链路：
-  - 使用 `contextWindowTokens`、`reservedOutputTokens`、`maxInputTokens`、`safetyRatio`、`bytesHardLimit`
+  - auto 模式使用 `contextWindowTokens` 推导 `reservedOutputTokens`、`maxInputTokens`、`bytesHardLimit`
+  - manual 模式允许显式 `reservedOutputTokens`、`maxInputTokens`、`bytesHardLimit`
   - 使用 `estimatedTokensPerByte` 做保守 token 估算
   - token 超预算时触发同一套分层收缩
 - `CTX-03 Priority-Based Context Compaction` 已收口基础版：
@@ -109,13 +120,14 @@
 ### CTX-01 Provider/Model Context Profile
 
 - 为 LLM provider/model 增加 context profile 配置。
-- 建议字段：
+- 普通配置入口：
   - `contextWindowTokens`
+- manual 高级字段：
   - `maxInputTokens`
   - `reservedOutputTokens`
   - `safetyRatio`
   - `bytesHardLimit`
-- 支持 provider 默认值和 model 覆盖值。
+- 支持 provider 显式 `contextWindowTokens` 和 model capability table 覆盖值。
 - 未配置时使用保守默认值。
 
 ### CTX-02 Token Budget Estimation

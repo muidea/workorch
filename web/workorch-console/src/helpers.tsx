@@ -2070,19 +2070,24 @@ export function cleanedContextProfile(item: UpdateLLMProviderConfiguration) {
   if (!profile) {
     return undefined;
   }
+  const profileMode = profile.profileMode?.trim();
   const cleaned = {
-    profileMode: profile.profileMode?.trim(),
+    profileMode,
     contextWindowTokens: profile.contextWindowTokens,
-    maxInputTokens: profile.maxInputTokens,
-    reservedOutputTokens: profile.reservedOutputTokens,
-    safetyRatio: profile.safetyRatio,
-    contextUtilizationRatio: profile.contextUtilizationRatio,
-    bytesHardLimit: profile.bytesHardLimit,
-    maxRequestBytes: profile.maxRequestBytes,
-    estimatedTokensPerByte: profile.estimatedTokensPerByte,
-    inputTokenPrice: profile.inputTokenPrice,
-    outputTokenPrice: profile.outputTokenPrice,
-    currency: profile.currency?.trim()
+    ...(profileMode === 'manual'
+      ? {
+          maxInputTokens: profile.maxInputTokens,
+          reservedOutputTokens: profile.reservedOutputTokens,
+          safetyRatio: profile.safetyRatio,
+          contextUtilizationRatio: profile.contextUtilizationRatio,
+          bytesHardLimit: profile.bytesHardLimit,
+          maxRequestBytes: profile.maxRequestBytes,
+          estimatedTokensPerByte: profile.estimatedTokensPerByte,
+          inputTokenPrice: profile.inputTokenPrice,
+          outputTokenPrice: profile.outputTokenPrice,
+          currency: profile.currency?.trim()
+        }
+      : {})
   };
   return hasDefinedValue(cleaned) ? cleaned : undefined;
 }
@@ -2515,6 +2520,5 @@ export function workspaceBoardActivationHint(item: WorkspaceBoardItem) {
   }
   return '当前工作空间无法确定启动上下文，请进入工作空间核对后再启动执行';
 }
-
 
 
