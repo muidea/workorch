@@ -228,7 +228,7 @@ disabled = false
 	if current.LLM.Providers["local"].InputTokenPrice != 0.000001 ||
 		current.LLM.Providers["local"].OutputTokenPrice != 0.000002 ||
 		current.LLM.Providers["local"].Currency != "USD" ||
-		current.LLM.Providers["local"].EstimatedTokensPerByte != 0.25 {
+		current.LLM.Providers["local"].EstimatedTokensPerByte != 0 {
 		t.Fatalf("current llm context profile = %+v, want persisted profile pricing", current.LLM.Providers["local"])
 	}
 }
@@ -457,11 +457,11 @@ currency = "USD"
 	provider := cfg.LLM.Providers[0]
 	if provider.ContextProfile.ProfileMode != "auto" ||
 		provider.ContextProfile.ContextWindowTokens != 65536 ||
-		provider.ContextProfile.MaxInputTokens != 28672 ||
+		provider.ContextProfile.MaxInputTokens != 46080 ||
 		provider.ContextProfile.ReservedOutputTokens != 4096 ||
-		provider.ContextProfile.BytesHardLimit != 98304 ||
+		provider.ContextProfile.BytesHardLimit != 184320 ||
 		provider.ContextProfile.Currency != "USD" {
-		t.Fatalf("provider context profile = %+v, want partial update with preserved values", provider.ContextProfile)
+		t.Fatalf("provider context profile = %+v, want auto budget with preserved pricing", provider.ContextProfile)
 	}
 }
 

@@ -321,6 +321,9 @@ func resolveProviderContextProfile(profile llmmodels.ProviderContextProfile, exp
 	registryResolved := profile.ProfileMode == contextProfileModeAuto &&
 		strings.TrimSpace(profile.CapabilitySource) == contextCapabilitySourceModelRegistry &&
 		explicit.ContextWindowTokens
+	if profile.ProfileMode == contextProfileModeAuto {
+		resetAutoContextBudgetOverrides(&profile)
+	}
 	if profile.ContextUtilizationRatio <= 0 || profile.ContextUtilizationRatio > 1 {
 		profile.ContextUtilizationRatio = defaultContextUtilizationRatio
 	}
@@ -334,45 +337,43 @@ func resolveProviderContextProfile(profile llmmodels.ProviderContextProfile, exp
 	switch {
 	case registryResolved:
 		profile.CapabilitySource = contextCapabilitySourceModelRegistry
-	case anyExplicitContextProfileField(explicit):
+	case explicit.ContextWindowTokens || (profile.ProfileMode == contextProfileModeManual && anyExplicitContextProfileField(explicit)):
 		profile.CapabilitySource = contextCapabilitySourceExplicit
 	default:
 		profile.CapabilitySource = contextCapabilitySourceConservativeDefault
 	}
-	if profile.ProfileMode != contextProfileModeAuto && anyExplicitContextProfileField(explicit) {
-		profile.CapabilitySource = contextCapabilitySourceExplicit
-	}
 
 	profile = normalizedProviderContextProfile(profile)
-	if registryResolved {
+	if profile.ProfileMode == contextProfileModeAuto && shouldAutoDeriveContextBudget(explicit, registryResolved) {
+		profile.ReservedOutputTokens = autoReservedOutputTokens(profile.ContextWindowTokens)
 		inputWindow := profile.ContextWindowTokens - profile.ReservedOutputTokens
 		if inputWindow <= 0 {
 			inputWindow = profile.ContextWindowTokens
 		}
-		if !explicit.MaxInputTokens {
-			profile.MaxInputTokens = int(float64(inputWindow) * profile.ContextUtilizationRatio)
-			if profile.MaxInputTokens <= 0 {
-				profile.MaxInputTokens = inputWindow
-			}
+		profile.MaxInputTokens = int(float64(inputWindow) * profile.ContextUtilizationRatio)
+		if profile.MaxInputTokens <= 0 {
+			profile.MaxInputTokens = inputWindow
 		}
 		if profile.MaxInputTokens > inputWindow {
 			profile.MaxInputTokens = inputWindow
 		}
-		if !explicit.BytesHardLimit {
-			profile.BytesHardLimit = autoBytesHardLimit(profile.MaxInputTokens, profile.EstimatedTokensPerByte, profile.MaxRequestBytes)
-		}
-	}
-	if registryResolved && !explicit.ReservedOutputTokens {
-		profile.ReservedOutputTokens = autoReservedOutputTokens(profile.ContextWindowTokens)
-		inputWindow := profile.ContextWindowTokens - profile.ReservedOutputTokens
-		if inputWindow > 0 && !explicit.MaxInputTokens {
-			profile.MaxInputTokens = int(float64(inputWindow) * profile.ContextUtilizationRatio)
-		}
-		if !explicit.BytesHardLimit {
-			profile.BytesHardLimit = autoBytesHardLimit(profile.MaxInputTokens, profile.EstimatedTokensPerByte, profile.MaxRequestBytes)
-		}
+		profile.BytesHardLimit = autoBytesHardLimit(profile.MaxInputTokens, profile.EstimatedTokensPerByte, profile.MaxRequestBytes)
 	}
 	return normalizedProviderContextProfile(profile)
+}
+
+func resetAutoContextBudgetOverrides(profile *llmmodels.ProviderContextProfile) {
+	profile.MaxInputTokens = 0
+	profile.ReservedOutputTokens = 0
+	profile.SafetyRatio = 0
+	profile.ContextUtilizationRatio = 0
+	profile.BytesHardLimit = 0
+	profile.MaxRequestBytes = 0
+	profile.EstimatedTokensPerByte = 0
+}
+
+func shouldAutoDeriveContextBudget(explicit providerContextExplicitFields, registryResolved bool) bool {
+	return registryResolved || explicit.ContextWindowTokens
 }
 
 func normalizedProviderContextProfile(profile llmmodels.ProviderContextProfile) llmmodels.ProviderContextProfile {

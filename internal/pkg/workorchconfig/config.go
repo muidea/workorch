@@ -67,29 +67,29 @@ type LLMProviderConfig struct {
 	BaseURL                 string   `json:"baseURL" toml:"baseURL"`
 	APIKey                  string   `json:"apiKey" toml:"apiKey"`
 	Model                   string   `json:"model" toml:"model"`
-	Timeout                 string   `json:"timeout" toml:"timeout"`
-	Disabled                *bool    `json:"disabled" toml:"disabled"`
-	ChatCompletions         *bool    `json:"chatCompletions" toml:"chatCompletions"`
-	Streaming               *bool    `json:"streaming" toml:"streaming"`
-	NonChatOperations       []string `json:"nonChatOperations" toml:"nonChatOperations"`
-	Temperature             *float64 `json:"temperature" toml:"temperature"`
-	MaxOutputTokens         int      `json:"maxOutputTokens" toml:"maxOutputTokens"`
-	ReasoningEffort         string   `json:"reasoningEffort" toml:"reasoningEffort"`
-	ThinkingBudgetTokens    int      `json:"thinkingBudgetTokens" toml:"thinkingBudgetTokens"`
-	FailoverEnabled         *bool    `json:"failoverEnabled" toml:"failoverEnabled"`
-	FailoverProviders       []string `json:"failoverProviders" toml:"failoverProviders"`
-	ContextProfileMode      string   `json:"contextProfileMode" toml:"contextProfileMode"`
-	ContextWindowTokens     int      `json:"contextWindowTokens" toml:"contextWindowTokens"`
-	MaxInputTokens          int      `json:"maxInputTokens" toml:"maxInputTokens"`
-	ReservedOutputTokens    int      `json:"reservedOutputTokens" toml:"reservedOutputTokens"`
-	SafetyRatio             float64  `json:"safetyRatio" toml:"safetyRatio"`
-	ContextUtilizationRatio float64  `json:"contextUtilizationRatio" toml:"contextUtilizationRatio"`
-	BytesHardLimit          int      `json:"bytesHardLimit" toml:"bytesHardLimit"`
-	MaxRequestBytes         int      `json:"maxRequestBytes" toml:"maxRequestBytes"`
-	EstimatedTokensPerByte  float64  `json:"estimatedTokensPerByte" toml:"estimatedTokensPerByte"`
-	InputTokenPrice         float64  `json:"inputTokenPrice" toml:"inputTokenPrice"`
-	OutputTokenPrice        float64  `json:"outputTokenPrice" toml:"outputTokenPrice"`
-	Currency                string   `json:"currency" toml:"currency"`
+	Timeout                 string   `json:"timeout" toml:"timeout,omitempty"`
+	Disabled                *bool    `json:"disabled" toml:"disabled,omitempty"`
+	ChatCompletions         *bool    `json:"chatCompletions" toml:"chatCompletions,omitempty"`
+	Streaming               *bool    `json:"streaming" toml:"streaming,omitempty"`
+	NonChatOperations       []string `json:"nonChatOperations" toml:"nonChatOperations,omitempty"`
+	Temperature             *float64 `json:"temperature" toml:"temperature,omitempty"`
+	MaxOutputTokens         int      `json:"maxOutputTokens" toml:"maxOutputTokens,omitempty"`
+	ReasoningEffort         string   `json:"reasoningEffort" toml:"reasoningEffort,omitempty"`
+	ThinkingBudgetTokens    int      `json:"thinkingBudgetTokens" toml:"thinkingBudgetTokens,omitempty"`
+	FailoverEnabled         *bool    `json:"failoverEnabled" toml:"failoverEnabled,omitempty"`
+	FailoverProviders       []string `json:"failoverProviders" toml:"failoverProviders,omitempty"`
+	ContextProfileMode      string   `json:"contextProfileMode" toml:"contextProfileMode,omitempty"`
+	ContextWindowTokens     int      `json:"contextWindowTokens" toml:"contextWindowTokens,omitempty"`
+	MaxInputTokens          int      `json:"maxInputTokens" toml:"maxInputTokens,omitempty"`
+	ReservedOutputTokens    int      `json:"reservedOutputTokens" toml:"reservedOutputTokens,omitempty"`
+	SafetyRatio             float64  `json:"safetyRatio" toml:"safetyRatio,omitempty"`
+	ContextUtilizationRatio float64  `json:"contextUtilizationRatio" toml:"contextUtilizationRatio,omitempty"`
+	BytesHardLimit          int      `json:"bytesHardLimit" toml:"bytesHardLimit,omitempty"`
+	MaxRequestBytes         int      `json:"maxRequestBytes" toml:"maxRequestBytes,omitempty"`
+	EstimatedTokensPerByte  float64  `json:"estimatedTokensPerByte" toml:"estimatedTokensPerByte,omitempty"`
+	InputTokenPrice         float64  `json:"inputTokenPrice" toml:"inputTokenPrice,omitempty"`
+	OutputTokenPrice        float64  `json:"outputTokenPrice" toml:"outputTokenPrice,omitempty"`
+	Currency                string   `json:"currency" toml:"currency,omitempty"`
 }
 
 type WebSearchConfig struct {
@@ -338,26 +338,28 @@ func llmProviderValues(provider LLMProviderConfig) map[string]string {
 	if provider.ContextWindowTokens > 0 {
 		values["contextWindowTokens"] = intString(provider.ContextWindowTokens)
 	}
-	if provider.MaxInputTokens > 0 {
-		values["maxInputTokens"] = intString(provider.MaxInputTokens)
-	}
-	if provider.ReservedOutputTokens > 0 {
-		values["reservedOutputTokens"] = intString(provider.ReservedOutputTokens)
-	}
-	if provider.SafetyRatio > 0 {
-		values["safetyRatio"] = formatFloat(provider.SafetyRatio)
-	}
-	if provider.ContextUtilizationRatio > 0 {
-		values["contextUtilizationRatio"] = formatFloat(provider.ContextUtilizationRatio)
-	}
-	if provider.BytesHardLimit > 0 {
-		values["bytesHardLimit"] = intString(provider.BytesHardLimit)
-	}
-	if provider.MaxRequestBytes > 0 {
-		values["maxRequestBytes"] = intString(provider.MaxRequestBytes)
-	}
-	if provider.EstimatedTokensPerByte > 0 {
-		values["estimatedTokensPerByte"] = formatFloat(provider.EstimatedTokensPerByte)
+	if isManualContextProfile(provider.ContextProfileMode) {
+		if provider.MaxInputTokens > 0 {
+			values["maxInputTokens"] = intString(provider.MaxInputTokens)
+		}
+		if provider.ReservedOutputTokens > 0 {
+			values["reservedOutputTokens"] = intString(provider.ReservedOutputTokens)
+		}
+		if provider.SafetyRatio > 0 {
+			values["safetyRatio"] = formatFloat(provider.SafetyRatio)
+		}
+		if provider.ContextUtilizationRatio > 0 {
+			values["contextUtilizationRatio"] = formatFloat(provider.ContextUtilizationRatio)
+		}
+		if provider.BytesHardLimit > 0 {
+			values["bytesHardLimit"] = intString(provider.BytesHardLimit)
+		}
+		if provider.MaxRequestBytes > 0 {
+			values["maxRequestBytes"] = intString(provider.MaxRequestBytes)
+		}
+		if provider.EstimatedTokensPerByte > 0 {
+			values["estimatedTokensPerByte"] = formatFloat(provider.EstimatedTokensPerByte)
+		}
 	}
 	if provider.InputTokenPrice > 0 {
 		values["inputTokenPrice"] = formatFloat(provider.InputTokenPrice)
@@ -399,6 +401,10 @@ func llmProviderValues(provider LLMProviderConfig) map[string]string {
 		values["failoverProviders"] = strings.Join(provider.FailoverProviders, ",")
 	}
 	return values
+}
+
+func isManualContextProfile(value string) bool {
+	return strings.EqualFold(strings.TrimSpace(value), "manual")
 }
 
 func webSearchProviderValues(provider WebSearchProviderConfig) map[string]string {

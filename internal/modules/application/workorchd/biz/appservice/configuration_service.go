@@ -646,6 +646,7 @@ func updatedLLMProviders(existing map[string]workorchconfig.LLMProviderConfig, u
 		if update.ContextProfile != nil {
 			applyLLMProviderContextProfileUpdate(&next, update.ContextProfile)
 		}
+		simplifyAutoLLMProviderContextProfile(&next)
 		ret[id] = next
 	}
 	return ret, nil
@@ -709,6 +710,22 @@ func applyLLMProviderContextProfileUpdate(next *workorchconfig.LLMProviderConfig
 	if update.Currency != nil {
 		next.Currency = strings.TrimSpace(*update.Currency)
 	}
+}
+
+func simplifyAutoLLMProviderContextProfile(next *workorchconfig.LLMProviderConfig) {
+	if next == nil || strings.EqualFold(strings.TrimSpace(next.ContextProfileMode), "manual") {
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(next.ContextProfileMode), "auto") {
+		next.ContextProfileMode = ""
+	}
+	next.MaxInputTokens = 0
+	next.ReservedOutputTokens = 0
+	next.SafetyRatio = 0
+	next.ContextUtilizationRatio = 0
+	next.BytesHardLimit = 0
+	next.MaxRequestBytes = 0
+	next.EstimatedTokensPerByte = 0
 }
 
 func normalizedProviderOperations(values []string) []string {

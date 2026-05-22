@@ -2,7 +2,7 @@
 
 ## 背景
 
-WorkOrch 已有基础的 LLM provider request 上下文保护和 provider timeout 重试能力，但当前仍以固定字节上限作为兜底，尚不能按不同 provider / model 的 context window 精确控制输入预算。
+WorkOrch 已有 LLM provider request 上下文保护、provider timeout 重试和模型感知预算能力。当前设计目标是把预算规则固定为可解释的运行时合同：普通配置只声明模型能力，运行时自动推导 token/byte 预算，并按阶段压缩最终提交给 LLM 的上下文。
 
 本设计用于补齐下一轮能力边界，覆盖：
 
@@ -26,6 +26,7 @@ WorkOrch 已有基础的 LLM provider request 上下文保护和 provider timeou
 
 - 不使用单一全局 context 上限。
 - 根据 provider / model 的能力动态计算输入预算。
+- auto 模式默认只要求用户提供模型能力入口字段，预算字段由运行时推导，避免配置复杂度和 stale budget。
 - 控制最终提交给 LLM 的 context 大小，避免 timeout 和 overflow。
 - 保持 WorkOrch 基础能力中立，不在基础层硬编码具体业务场景。
 - 保持所有裁剪内容可追溯。
@@ -55,15 +56,16 @@ WorkOrch 已有基础的 LLM provider request 上下文保护和 provider timeou
 
 为每个 provider/model 建立 context profile，作为预算计算输入。
 
-建议字段：
+运行时 profile 字段：
 
 - `contextWindowTokens`
 - `maxInputTokens`
 - `reservedOutputTokens`
 - `safetyRatio`
+- `contextUtilizationRatio`
 - `bytesHardLimit`
-- `estimatedInputTokensPerByte`
-- `estimatedOutputTokensPerByte`
+- `maxRequestBytes`
+- `estimatedTokensPerByte`
 - `inputTokenPrice`
 - `outputTokenPrice`
 - `currency`
@@ -72,7 +74,19 @@ profile 分层：
 
 - provider default
 - model override
-- workspace override（可选）
+- manual provider override
+
+普通配置入口应保持最小化：
+
+- `provider`
+- `baseURL`
+- `apiKey`
+- `model`
+- `timeout`
+- `streaming`
+- `contextWindowTokens`
+
+`auto` 模式下，`maxInputTokens`、`reservedOutputTokens`、`bytesHardLimit`、`maxRequestBytes`、`estimatedTokensPerByte` 等高级预算字段不作为用户配置入口；即使旧配置中残留这些字段，也应由运行时忽略并重新推导。`manual` 模式才允许这些字段生效。
 
 ### 2. Context Budget Pipeline
 
@@ -97,18 +111,49 @@ streaming provider 产生的 chunk 不直接改变业务结果，只投影为运
 
 ### 预算计算
 
-预算优先级如下：
+能力来源优先级如下：
 
-1. provider/model 明确 token window。
-2. reserved output tokens。
-3. safety ratio。
-4. bytes hard limit 兜底。
+1. provider 显式 `contextWindowTokens`。
+2. `llm.modelCapabilities` 按 provider/model pattern 命中的 `contextWindowTokens`。
+3. provider 动态 metadata 能力发现，后续扩展。
+4. 保守默认。
 
-推荐公式：
+auto 模式公式：
 
-- `inputBudgetTokens = min(contextWindowTokens - reservedOutputTokens, maxInputTokens)`
-- `effectiveBudgetTokens = floor(inputBudgetTokens * safetyRatio)`
-- 若缺少 tokenizer，则使用保守 token 估算换算 bytes。
+```text
+reservedOutputTokens = min(max(contextWindowTokens / 16, 4096), 65536)
+inputWindow = contextWindowTokens - reservedOutputTokens
+maxInputTokens = floor(inputWindow * contextUtilizationRatio)
+bytesHardLimit = min(maxInputTokens / estimatedTokensPerByte, maxRequestBytes)
+```
+
+默认值：
+
+```text
+contextUtilizationRatio = 0.75
+estimatedTokensPerByte = 0.25
+maxRequestBytes = 4 MiB
+```
+
+该策略会尽量合理使用模型能力，但不会压满 provider 上限。它给输出、token 估算误差、provider 网关差异和请求 envelope 留出缓冲。
+
+以 `contextWindowTokens=204800` 为例：
+
+```text
+reservedOutputTokens = 12800
+inputWindow = 192000
+maxInputTokens = 144000
+bytesHardLimit = 576000 bytes
+```
+
+使用率：
+
+```text
+最大输入预算占总上下文 = 70.31%
+输入预算 + 保留输出占总上下文 = 76.56%
+```
+
+如果需要突破默认使用率，应进入 `manual` 模式，或在后续版本引入单一 auto 调节项；不应重新要求普通用户配置多个高级预算字段。
 
 ### 优先级压缩
 
@@ -145,12 +190,17 @@ streaming provider 产生的 chunk 不直接改变业务结果，只投影为运
 
 不同 stage 使用不同上下文配比：
 
-- planning：Goal / DoD / soul / manifest。
-- execution：当前任务、patch、文件上下文。
-- decision：最近治理记录、候选补充信息。
-- approval：风险、影响范围、替代方案。
-- validation：DoD、测试输出、evidence refs。
-- final/result：结果、artifact、残余风险。
+| Stage | Ratio | 主要上下文 |
+| --- | ---: | --- |
+| planning | 1.00 | Goal / DoD / soul / manifest / 约束 |
+| execution | 0.80 | 当前任务、patch、文件上下文、必要 evidence |
+| runtime repair | 1.00 | failure、coverage、progress、target snapshot |
+| validation / verification | 0.55 | DoD、测试输出、evidence refs |
+| artifact / final / result | 0.50 | 结果、artifact、残余风险 |
+| decision / approval | 0.60 | 治理上下文、候选补充信息、影响范围 |
+| provider retry | 0.50 | provider failure recovery 所需的紧凑上下文 |
+
+stage ratio 只影响本次 provider request 的 `maxInputTokens` 和 `bytesHardLimit`，不修改 provider 基础 profile。
 
 ## Adaptive Shrink Policy
 

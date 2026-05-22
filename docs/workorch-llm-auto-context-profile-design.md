@@ -20,8 +20,10 @@ bytesHardLimit = 98304
 ## 目标
 
 - 根据 provider/model 能力自动解析上下文窗口，而不是统一固定 32K。
-- 支持用户显式配置覆盖，显式配置永远优先。
-- 按 runtime stage 自动调整可使用上下文比例，避免所有阶段都吃满模型窗口。
+- 默认只要求用户配置 `provider` / `baseURL` / `apiKey` / `model` / `contextWindowTokens` 等必需字段，避免暴露 `maxInputTokens`、`bytesHardLimit` 等高级预算项。
+- `auto` 模式按 LLM 能力自动计算可提交上下文大小；高级预算字段视为 legacy/manual 配置，不参与 auto 预算。
+- `manual` 模式保留显式高级预算覆盖能力，作为高级排障和特殊 provider 兼容逃生口。
+- 按 runtime stage 自动调整可使用上下文比例，避免所有阶段都吃满模型窗口，同时尽量在当前阶段预算内保留有效上下文。
 - `bytesHardLimit` 随 token budget 自动扩展，但受全局安全上限约束，避免单 JSON 无限制膨胀。
 - 保持 WorkOrch core runtime 中立：runtime 只消费抽象能力字段，不写入具体业务、语言、框架或 workspaceTemplate 规则。
 - 保留 LCI 上下文完整性约束：P0-P2 优先、P3-P5 摘要+引用、P6-P7 ref-only。
@@ -41,10 +43,17 @@ LLM provider 配置解析阶段生成标准化 `ProviderContextProfile`。
 
 能力解析优先级：
 
-1. 用户显式配置的 `contextWindowTokens` / `maxInputTokens` / `bytesHardLimit` 等字段。
-2. `contextProfileMode = "auto"` 时，根据配置化 provider/model 能力表解析。
+1. provider 显式配置的 `contextWindowTokens`。
+2. `contextProfileMode = "auto"` 或未配置 profile mode 时，根据配置化 provider/model 能力表解析 `contextWindowTokens`。
 3. provider 动态 metadata 能力发现，后续扩展。
 4. 无法识别时使用保守默认。
+
+预算字段优先级：
+
+- `auto` 模式只接受 `contextWindowTokens` 作为能力输入，并自动推导 `reservedOutputTokens`、`maxInputTokens`、`bytesHardLimit` 等预算字段。
+- `auto` 模式会忽略配置中残留的 `maxInputTokens`、`reservedOutputTokens`、`contextUtilizationRatio`、`bytesHardLimit`、`maxRequestBytes`、`estimatedTokensPerByte` 等高级预算字段，避免历史配置继续压低大上下文模型能力。
+- `manual` 模式才会保留上述高级预算字段，适用于特殊 provider 限制、网关限制或临时排障。
+- pricing 字段 `inputTokenPrice` / `outputTokenPrice` / `currency` 不属于上下文预算，auto/manual 都可以保留用于 usage/cost 估算。
 
 输出的抽象字段：
 
@@ -105,17 +114,16 @@ capabilitySource = conservative_default
 
 ### 3. 自动预算计算
 
-自动模式不直接吃满最大窗口。
+自动模式不直接吃满最大窗口，而是按模型能力计算保守可用量。默认策略是“尽可能合理使用”，不是“压满 provider 上限”。
 
 基础公式：
 
 ```text
-reservedOutputTokens = explicitReservedOutputTokens
-  or min(max(contextWindowTokens / 16, 4096), 65536)
+reservedOutputTokens = min(max(contextWindowTokens / 16, 4096), 65536)
 
 inputWindow = contextWindowTokens - reservedOutputTokens
 baseInputTokens = floor(inputWindow * contextUtilizationRatio)
-maxInputTokens = min(explicitMaxInputTokens or baseInputTokens, inputWindow)
+maxInputTokens = min(baseInputTokens, inputWindow)
 ```
 
 默认 `contextUtilizationRatio = 0.75`。
@@ -128,6 +136,28 @@ bytesHardLimit = min(estimatedBytes, maxRequestBytes)
 ```
 
 默认 `maxRequestBytes = 4 MiB`，避免 1M 模型导致单 request JSON 无限制膨胀。
+
+MiniMax 200K 示例：
+
+```text
+contextWindowTokens = 204800
+reservedOutputTokens = 12800
+inputWindow = 204800 - 12800 = 192000
+contextUtilizationRatio = 0.75
+maxInputTokens = 192000 * 0.75 = 144000
+estimatedTokensPerByte = 0.25
+bytesHardLimit = 144000 / 0.25 = 576000 bytes
+```
+
+对应使用率：
+
+```text
+最大输入预算占总上下文 = 144000 / 204800 = 70.31%
+保留输出占总上下文 = 12800 / 204800 = 6.25%
+输入预算 + 保留输出 = 156800 / 204800 = 76.56%
+```
+
+当前实现允许通过 `manual` 模式调整这些值；`auto` 模式不对普通配置暴露 `contextUtilizationRatio` 旋钮。若后续需要在保持简单的前提下提高利用率，应优先新增单一 auto 调节项，例如 `contextUtilizationRatio`，而不是重新暴露 `maxInputTokens` / `bytesHardLimit`。
 
 ### 4. Stage-aware Budget
 
@@ -143,7 +173,7 @@ provider request budget 在执行阶段再应用 stage ratio，只影响本次 r
 | validation | 0.55 | 聚焦 Goal/DoD、证据和验证输出 |
 | artifact | 0.50 | 聚焦结果、artifact、残余风险 |
 | decision / approval | 0.60 | 聚焦治理上下文和候选影响 |
-| provider retry timeout | 最多 0.50 | 自动降档缩容 |
+| provider retry timeout | 0.50 | 自动降档缩容 |
 
 runtime stage 来源保持中立：
 
@@ -195,14 +225,26 @@ contextWindowTokens = 1000000
 [llm.providers.local]
 provider = "compatible"
 model = "gpt-5.3-codex"
-contextProfileMode = "auto"
-contextUtilizationRatio = 0.75
-maxRequestBytes = 4194304
 temperature = 0.0
 maxOutputTokens = 65536
 reasoningEffort = "high"
 thinkingBudgetTokens = 0
 ```
+
+MiniMax 示例：
+
+```toml
+[llm.providers.aiAPI-MiniMax]
+provider = "openai"
+baseURL = "https://aiapi.example/v1"
+apiKey = "..."
+model = "MiniMax-M2.7-highspeed"
+timeout = "10m0s"
+streaming = true
+contextWindowTokens = 204800
+```
+
+在该配置下，运行时自动推导预算；不要在 auto 配置中追加 `maxInputTokens` / `bytesHardLimit` 等字段。
 
 显式覆盖示例：
 
@@ -217,7 +259,7 @@ reservedOutputTokens = 8192
 bytesHardLimit = 262144
 ```
 
-显式字段优先；如果配置了 `maxInputTokens` 或 `bytesHardLimit`，自动解析不得覆盖这些字段。
+只有 `contextProfileMode = "manual"` 时，`maxInputTokens` / `reservedOutputTokens` / `bytesHardLimit` / `maxRequestBytes` / `estimatedTokensPerByte` 等高级预算字段才会生效。`auto` 模式会忽略这些字段并重新推导预算。
 
 推理强度配置：
 
@@ -233,12 +275,12 @@ bytesHardLimit = 262144
 | ID | 优先级 | 状态 | 内容 | 验收 |
 | --- | --- | --- | --- | --- |
 | ACP-01 | P0 | Done | 输出自动上下文 profile 设计文档 | 本文档已落地并链接到 model-aware/context integrity 文档 |
-| ACP-02 | P0 | Done | 扩展配置字段 `contextProfileMode`、`contextUtilizationRatio`、`maxRequestBytes` | TOML/API/Redacted profile 可读写，CLI client DTO 已同步 |
+| ACP-02 | P0 | Done | 扩展配置字段 `contextProfileMode`、`contextUtilizationRatio`、`maxRequestBytes` | TOML/API/Redacted profile 可读写；auto 模式下高级预算字段默认不作为普通配置入口 |
 | ACP-03 | P0 | Done | 实现模型能力解析器 | 已知 128K/256K/1M 模型自动解析；未知模型回退保守默认 |
 | ACP-04 | P0 | Done | 自动计算 `maxInputTokens` 与 `bytesHardLimit` | 1M 模型默认不再被 96KiB 限死，同时受 `maxRequestBytes` 限制 |
 | ACP-05 | P1 | Done | stage-aware request budget | 不同 stage 投影 `stageBudgetRatio`，validation/decision 自动缩小 |
 | ACP-06 | P1 | Done | contextBudget 审计投影 | 输出 profile mode、capability source、context utilization、maxRequestBytes、stage ratio/source |
-| ACP-07 | P1 | Done | 测试与文档同步 | 单测覆盖自动、手动覆盖、显式预算覆盖、stage ratio |
+| ACP-07 | P1 | Done | 测试与文档同步 | 单测覆盖自动预算推导、manual 覆盖、auto 忽略 stale 高级预算字段、stage ratio |
 | ACP-08 | P0 | Done | 模型能力表配置化 | 具体模型上下文能力进入 `llm.modelCapabilities`，代码只保留通用匹配 |
 | ACP-09 | P0 | Done | 推理强度配置化 | provider 支持 `temperature`、`maxOutputTokens`、`reasoningEffort`、`thinkingBudgetTokens` |
 
@@ -251,7 +293,8 @@ bytesHardLimit = 262144
 - `claude-opus-4.7` / `claude-sonnet-4.6` 自动解析为 1M context。
 - `claude-4.5` 自动解析为 200K context。
 - 未知模型保持保守默认，并记录 `capabilitySource=conservative_default`。
-- 显式 `maxInputTokens` / `bytesHardLimit` 不被自动模式覆盖。
+- `auto` 模式下 stale `maxInputTokens` / `bytesHardLimit` 不会压低模型能力。
+- `manual` 模式下显式 `maxInputTokens` / `bytesHardLimit` 生效。
 - validation stage 使用更小 request budget，但 P0-P2 完整性约束仍有效。
 - 所有修改不进入 workspace 输出物，不绑定具体业务 goal/DoD。
 
